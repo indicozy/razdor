@@ -790,7 +790,7 @@ text = "The Crown's guard lies before the camp. The companies raise their mugs t
 
 [gates.map]
 title = "The Gates"
-description = "Four standing stones in the March. Two of them still wait for a rite."
+description = "Four standing stones in the March. Each has its guard or its rite: the diary says which gates are open."
 won = "The last gate is shut or taken. The barrows have come closer."
 
 [gates.building.gate_n]
@@ -844,7 +844,7 @@ text = "Tess waits at the edge of the bog with two hunters. \"You will cross the
 
 [gates.gt_arrive_companies]
 title = "The Company's Contract"
-text = "Kord meets you by the wagons. \"A hundred coins a week, officer, or my men leave. Gold first, words after.\""
+text = "Kord meets you by the wagons. \"Thirty coins a week, officer, or my men leave. Gold first, words after.\""
 
 [gates.gt_closed_e]
 title = "The Dawn Gate"
@@ -868,7 +868,7 @@ walk = "Step back"
 
 [gates.gt_stone_n]
 title = "The Raven's Gate"
-text = "The stones of Raven burn blue. From here you can step to any open gate. Every step lays cold on your shoulders."
+text = "The stones of Raven burn blue. From here you can step to any open gate. Every crossing lays cold on your shoulders: taint +1."
 to_e = "Step to the Dawn Gate"
 to_s = "Step to the Reed Gate"
 to_w = "Step to the Ash Gate"
@@ -1082,7 +1082,7 @@ name = "The dead"
 
 [marka.arrival]
 title = "The Crown's surgeon"
-text = "A surgeon of the garrison meets you at the gate. “You rode in from the ford with your sword still in your hand and your blood on your boots. Drink this before you go any further.”"
+text = "You ride into Ashford with a sword in your hand and blood on your boots. The Crown's surgeon patches you at the gate and speaks plainly: \"Three powers want the March here. The Crown sits in this town, but has few men. The Order holds the abbey and its shrines. The Free Companies camp to the south-east and sell themselves for gold. The marsh folk want one thing: to be left alive. You need an ally. The council will meet when you have helped at least two.\""
 take = "Drink the draught"
 
 [marka.item.crown_draught]
@@ -1101,15 +1101,50 @@ description = "Bitter herbs of the marsh folk, dried over a smoky fire. They sto
 name = "Company draught"
 description = "A strong draught from the Companies' camp, drunk from a tin cup. It mends a wound."
 
+# --- gates: the diary (chapter 4) ---
+[quest.gates]
+title = "The gates"
+start = "Four stones stand in the March, and the dead walk through them. Open the gates: each guard or rite opens one. Open stones carry you from stone to stone, but every crossing leaves cold on your shoulders: Fear and taint +1."
 
+[quest.gate_n]
+title = "Raven's Gate (north)"
+text = "The guard at the stone: the dead and the ghosts. Beat them and the gate opens."
 
+[quest.gate_e]
+title = "Dawn Gate (east)"
+text = "The stone stands in ash. Brother Ilm knows the rite, or beat the guard."
 
+[quest.gate_s]
+title = "Reed Gate (south)"
+text = "The warden takes a hundred coins, or Varga holds the leaf with her halberd, or beat the guard."
 
+[quest.gate_w]
+title = "Ash Gate (west)"
+text = "A bog charm or Tess's path. Or beat the guard."
 
+# --- barrows: the diary (chapter 5) ---
+[quest.barrows]
+title = "The barrows"
+start = "The whole March marches on the barrows. The Crown and the Order behind you: the Iron Peace. The Companies or the marsh folk behind you: the Free March. Brother Ilm heard the dead's messenger: the Grey Bargain on the throne. With none of these, the March falls."
+warn = "Fear: 3 of 5. The barrows stir, and the first host of the dead is on its way."
 
+# --- marka: the diary (chapter 2) ---
+[quest.find_ally]
+title = "Find an ally"
+start = "The March cannot be held by one hand. Help two of the three powers and the council will meet. The Crown and the Order sit at Ashford and the abbey, the companies at their camp, the marsh folk at Grey Willows. Choose whom to trust."
 
+[quest.power_crown]
+title = "The Crown"
+text = "The garrison's captain at Ashford. Serve the Crown or go your own way."
 
+[quest.power_order]
+title = "The Order of Ash"
+text = "The monk at the shrine asks you to cleanse the altar, and to take its guards."
 
+[quest.power_marsh]
+title = "The marsh folk"
+text = "Tess asks you to find the ghosts' lair in the bog and burn it out."
 
-
-
+[quest.power_companies]
+title = "The Free Companies"
+text = "Kord sells his company by the camp for gold. The price: forty coins."

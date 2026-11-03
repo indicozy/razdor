@@ -131,6 +131,7 @@ then = [
     { remove_army = "bw_king_6" },
     { remove_army = "bw_king_7" },
     { ending = "end_grey" },
+    { complete_quest = "barrows" },
 ]
 
 [[dialog.choice]]
@@ -189,7 +190,9 @@ id = "next_council"
 text = "barrows.bw_sum_fire.next"
 then = [ { dialog = "bw_council" } ]
 
-# The council: the endings the standings allow. With neither standing, the grim fallback.
+# The council: the endings the standings allow, read when the council opens (not at the map's start). The
+# Iron Peace: the Crown at 1 or more and the Order at 2 or more. The Free March: bw_free_ok (live). With
+# neither standing, the grim fallback (the Crown's or the Order's lack, both written out).
 [[dialog]]
 id = "bw_council"
 title = "barrows.bw_council.title"
@@ -198,20 +201,26 @@ text = "barrows.bw_council.text"
 [[dialog.choice]]
 id = "iron"
 text = "barrows.bw_council.iron"
-if = [ { var = "bw_iron_ok", value = true } ]
-then = [ { ending = "end_iron" } ]
+if = [ { var = "crown", op = ">=", value = 1 }, { var = "order", op = ">=", value = 2 } ]
+then = [ { ending = "end_iron" }, { complete_quest = "barrows" } ]
 
 [[dialog.choice]]
 id = "free"
 text = "barrows.bw_council.free"
 if = [ { var = "bw_free_ok", value = true } ]
-then = [ { ending = "end_free" } ]
+then = [ { ending = "end_free" }, { complete_quest = "barrows" } ]
 
 [[dialog.choice]]
 id = "fall"
 text = "barrows.bw_council.fall"
-if = [ { var = "bw_iron_ok", value = false }, { var = "bw_free_ok", value = false } ]
-then = [ { ending = "end_fall" } ]
+if = [ { var = "bw_free_ok", value = false }, { var = "crown", op = "<", value = 1 } ]
+then = [ { ending = "end_fall" }, { complete_quest = "barrows" } ]
+
+[[dialog.choice]]
+id = "fall_order"
+text = "barrows.bw_council.fall"
+if = [ { var = "bw_free_ok", value = false }, { var = "crown", op = ">=", value = 1 }, { var = "order", op = "<", value = 2 } ]
+then = [ { ending = "end_fall" }, { complete_quest = "barrows" } ]
 
 # The endings: each is the campaign's last dialog (its title and text are campaign.<id>.*).
 [[dialog]]

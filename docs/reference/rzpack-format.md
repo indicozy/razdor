@@ -266,6 +266,7 @@ then = [ { give_gold = -20 } ]                      # optional actions
 | `ending` | `= "<dialog-id>"` | the dialog shows, then the campaign ends with it («Campaigns») |
 | `quest` | `= "<quest-id>"`, `title = "<text key>"`, `text = "<text key>"` | an active diary entry («Активные»): added, or its texts updated when the id is already active (its date stays, no duplicate); the texts are shown in the game's language (`story_text`) |
 | `complete_quest` | `= "<quest-id>"` | that quest's entry moves to «Выполненные», dated now; a quest not active (or unknown) does nothing |
+| `restore_squad` | `= true` | the hero's squad is healed to full and its dead raised, at no cost (a night's rest at the hub's healers; the town's raise without its price) |
 | `start_battle` | the army is the value, `rules = "dt"` or `"lua:<script>"` | the army meets the hero now, in that battle (a field battle for a script; «Field battles») |
 
 Units and items are `dt:<alias>` or the package's own ids; spells are `dt:spell/<alias>`. A

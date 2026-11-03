@@ -24,17 +24,17 @@ speaker = "dt:halberdier"
 [[dialog.choice]]
 id = "serve"
 text = "marka.captain.serve"
-then = [ { add = "crown", value = 1, min = -5, max = 5 } ]
+then = [ { add = "crown", value = 1, min = -5, max = 5 }, { complete_quest = "power_crown" } ]
 
 [[dialog.choice]]
 id = "alone"
 text = "marka.captain.alone"
-then = [ { add = "crown", value = -1, min = -5, max = 5 } ]
+then = [ { add = "crown", value = -1, min = -5, max = 5 }, { complete_quest = "power_crown" } ]
 
 [[dialog.choice]]
 id = "gold"
 text = "marka.captain.gold"
-then = [ { give_gold = 20 }, { add = "crown", value = -1, min = -5, max = 5 } ]
+then = [ { give_gold = 20 }, { add = "crown", value = -1, min = -5, max = 5 }, { complete_quest = "power_crown" } ]
 
 # The Order's monk at the shrine's gate: the first envoy's offer.
 [[dialog]]

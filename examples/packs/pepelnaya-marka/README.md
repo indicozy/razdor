@@ -49,7 +49,7 @@ marka (revisit): <id>_done → gates (4, 100×100) → barrows (5, 200×200, ф�
   Герой становится рыцарем смерти (`hero_figure`), мёртвые отступают.
 - **Падение Марки** (запасная): ни одно из условий не выполнено; герой гибнет у брода.
 
-Условия Железного мира и Вольной Марки считаются при старте главы 5 (`bw_iron_ok`, `bw_free_ok`).
+Условия концовок считаются, когда открывается совет (Железный мир читает `crown` и `order` в выборе совета; Вольная Марка держит флаг `bw_free_ok` живым, пока роты и болото меняются).
 Совет предлагает только те концовки, которые выполнены.
 
 Итоговые диалоги сводят выборы через переменные: сводка про пустые дороги (`caravans_lost` ≥ 3),
@@ -60,7 +60,7 @@ marka (revisit): <id>_done → gates (4, 100×100) → barrows (5, 200×200, ф�
 Общие (`triggers/_campaign.toml`): `ally`, `crown`, `order`, `companies`, `kord`, `ilm`,
 `tess_joined`, `varga_alive`, `gates_open`, `caravans_lost`, `villages_burned`, `taint`.
 Главы 4 и 5 добавляют свои: `gt_north`, `gt_east`, `gt_south`, `gt_west`, `grey_bargain_offered`
-(`triggers/gates.toml`); `bw_iron_ok`, `bw_free_ok` (`triggers/barrows.toml`). Переменные главы 1
+(`triggers/gates.toml`); `bw_free_ok` (`triggers/barrows.toml`). Переменные главы 1
 (`dread`, `marsh_trust`, `varga_joined`, …) живут в `triggers/brod.toml` и переходят дальше.
 
 ## Проверено игрой

@@ -108,12 +108,16 @@ mod tests {
     }
 
     /// The hub opens with the Crown's surgeon's draught, and the knight drinks it (he rode in from the ford
-    /// with the chapter 1 wounds, 1 HP).
+    /// with the chapter 1 wounds; the start heals him, the draught is tested from 1 HP).
     #[test]
     fn marka_opens_with_the_surgeons_draught() {
         let Some(install) = install() else { return };
         let mut run = into_marka(&install, 1, &[]).unwrap_or_else(|e| panic!("{e}"));
         assert!(run.log.iter().any(|l| l.contains("dialog marka_arrival")), "{:?}", run.log);
+        // The hub's start restores the squad (triggers/marka.toml m_restore), so the knight is whole when he drinks:
+        // the draught's own heal is tested on a wounded knight.
+        assert_eq!(run.g.squad[0].hp, run.g.squad[0].max_hp(&run.g.content), "the start restores the knight");
+        run.g.squad[0].hp = 1;
         let before = run.g.squad[0].hp;
         drink_for_wounded(&mut run);
         assert!(run.g.squad[0].hp > before, "the draught heals the knight: {before} -> {}", run.g.squad[0].hp);

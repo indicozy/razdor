@@ -21,12 +21,92 @@ camp_done = false       # set by chapter 3в (the Free Companies' camp)
 
 # ---- the start and the weeks ------------------------------------------------------------------
 
+# The diary: the main thread «Найти союзника», with a sub-entry for each power as the hero first meets it. The
+# sub-entry is completed when the power's favour is done; the main thread at the council's choice.
+[[trigger]]
+id = "m_diary_start"
+map = "marka"
+when = { event = "game_start" }
+then = [ { quest = "find_ally", title = "quest.find_ally.title", text = "quest.find_ally.start" } ]
+
+[[trigger]]
+id = "m_diary_crown"
+map = "marka"
+when = { event = "hero_enters_building", building = "ashford" }
+then = [ { quest = "power_crown", title = "quest.power_crown.title", text = "quest.power_crown.text" } ]
+
+[[trigger]]
+id = "m_diary_order"
+map = "marka"
+when = { event = "dialog_choice", dialog = "shrine_offer", choice = "accept" }
+then = [ { quest = "power_order", title = "quest.power_order.title", text = "quest.power_order.text" } ]
+
+[[trigger]]
+id = "m_diary_order_done"
+map = "marka"
+when = { event = "building_captured", building = "shrine" }
+if = [ { var = "order_quest", value = 1 } ]
+then = [ { complete_quest = "power_order" } ]
+
+[[trigger]]
+id = "m_diary_marsh"
+map = "marka"
+when = { event = "dialog_choice", dialog = "marsh_offer", choice = "accept" }
+then = [ { quest = "power_marsh", title = "quest.power_marsh.title", text = "quest.power_marsh.text" } ]
+
+[[trigger]]
+id = "m_diary_marsh_done"
+map = "marka"
+when = { event = "army_defeated", army = "wraiths" }
+if = [ { var = "marsh_quest", value = 1 } ]
+then = [ { complete_quest = "power_marsh" } ]
+
+[[trigger]]
+id = "m_diary_companies"
+map = "marka"
+when = { event = "hero_enters", at = [78, 72, 12, 8] }
+then = [ { quest = "power_companies", title = "quest.power_companies.title", text = "quest.power_companies.text" } ]
+
+[[trigger]]
+id = "m_diary_companies_done"
+map = "marka"
+when = { event = "dialog_choice", dialog = "kord_offer", choice = "hire" }
+then = [ { complete_quest = "power_companies" } ]
+
+# The rest of the council's choice completes the main thread (its own actions end the chapter).
+[[trigger]]
+id = "m_diary_done"
+map = "marka"
+when = { event = "dialog_choice", dialog = "council", choice = "order" }
+then = [ { complete_quest = "find_ally" } ]
+
+[[trigger]]
+id = "m_diary_done_marsh"
+map = "marka"
+when = { event = "dialog_choice", dialog = "council", choice = "marsh" }
+then = [ { complete_quest = "find_ally" } ]
+
+[[trigger]]
+id = "m_diary_done_companies"
+map = "marka"
+when = { event = "dialog_choice", dialog = "council", choice = "companies" }
+then = [ { complete_quest = "find_ally" } ]
+
 # The hero rides in from the ford with the chapter 1 wounds: the Crown's surgeon sends a healing draught.
 [[trigger]]
 id = "m_arrival"
 map = "marka"
 when = { event = "game_start" }
 then = [ { dialog = "marka_arrival" } ]
+
+# The hero's squad is tended at the hub (the Crown's surgeon and the town's healers): every wounded unit is
+# healed and every fallen one raised, free, as a night's rest does. The chapter's start (each map's start
+# carries the squad the earlier chapters left, with its dead; the raises the towns charge are not enough).
+[[trigger]]
+id = "m_restore"
+map = "marka"
+when = { event = "game_start" }
+then = [ { restore_squad = true } ]
 
 # The caravan and the patrols take the roads at the start of the story; the raiders, the wraiths and Kord's
 # band wait where they stand (their goals keep them still). A roaming bandit band would hunt the wraiths

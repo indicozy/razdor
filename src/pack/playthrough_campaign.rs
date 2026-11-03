@@ -160,7 +160,7 @@ fn leg(map: &str, run: &Run) -> Leg {
         income: run.ledger.last().map_or(0, |s| s.income),
         squad: names,
         ledger: run.ledger.iter().map(|s| format!("d{:.0}:{}g/{}s/i{}", s.day, s.gold, s.squad, s.income)).collect::<Vec<_>>().join(" "),
-        vars: ["ally", "ilm", "crown", "order", "companies", "marsh_trust", "varga_alive", "grey_bargain_offered", "bw_iron_ok", "bw_free_ok", "dread"]
+        vars: ["ally", "ilm", "crown", "order", "companies", "marsh_trust", "varga_alive", "grey_bargain_offered", "bw_free_ok", "dread"]
             .iter()
             .map(|v| format!("{v}={}", run.var(v).map_or("-".to_string(), |x| format!("{x:?}"))))
             .collect::<Vec<_>>()

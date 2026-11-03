@@ -9,7 +9,8 @@
 # or, with neither standing, the fall. The endings are dialogs (`ending = "<dialog-id>"`).
 
 [vars]
-bw_iron_ok = false   # the Iron Peace may be chosen: the Crown at 1 or more and the Order at 2 or more
+# The Free March's standing is kept live: it follows the Companies and the marsh folk as they change (the
+# Iron Peace needs no flag: the council's choice reads the Crown and the Order when it opens).
 bw_free_ok = false   # the Free March may be chosen: the Companies at 2 or more, or the marsh folk at 3 or more
 
 # The King stands on his step below the palace until the story sends him anything (an AI army would
@@ -20,34 +21,93 @@ map = "barrows"
 when = { event = "game_start" }
 then = [ { army_goal = "barrow_king", go_to = [166, 36] } ]
 
-# --- The start: the standings decide which endings the council may offer. ---
-
+# The arrival: the whole March marches on the barrows (the diary says the conditions in words).
 [[trigger]]
 id = "bw_arrive"
 map = "barrows"
 when = { event = "game_start" }
 then = [ { dialog = "bw_arrive" } ]
 
+# The field hospital of the Crown's and the Order's camps: the squad is healed and the fallen raised before the
+# King's road (the finale starts with the hero's men whole; the gold of the raise is not asked for here).
 [[trigger]]
-id = "bw_flag_iron"
+id = "bw_restore"
 map = "barrows"
 when = { event = "game_start" }
-if = [ { var = "crown", op = ">=", value = 1 }, { var = "order", op = ">=", value = 2 } ]
-then = [ { set = "bw_iron_ok", value = true } ]
+then = [
+    { restore_squad = true },
+    # The camps send their men with the hero (the Crown's and the Order's levies, the marsh folk's hunters):
+    # three more troops, so the squad that came through the gates is not the one that meets the King.
+    { give_unit = "dt:swordsman" },
+    { give_unit = "dt:swordsman" },
+    { give_unit = "dt:hunter" },
+]
+
+# --- The diary: the main thread «Курганы» names the three endings' conditions in words (the council reads them
+# at the end, not here), and the Dread's warning is written there when it reaches 3. ---
 
 [[trigger]]
-id = "bw_flag_free_companies"
+id = "bw_diary_start"
+map = "barrows"
+when = { event = "game_start" }
+then = [ { quest = "barrows", title = "quest.barrows.title", text = "quest.barrows.start" } ]
+
+[[trigger]]
+id = "bw_diary_warn"
+map = "barrows"
+when = { event = "var_changed", var = "dread" }
+if = [ { var = "dread", op = ">=", value = 3 }, { var = "dread", op = "<", value = 4 } ]
+once = false
+then = [ { quest = "barrows", title = "quest.barrows.title", text = "quest.barrows.warn" } ]
+
+# --- The standings, read when the start is played and kept live after it (the council reads them at its
+# opening, so a standing that moves on the road moves the endings too). ---
+
+[[trigger]]
+id = "bw_free_start_companies"
 map = "barrows"
 when = { event = "game_start" }
 if = [ { var = "companies", op = ">=", value = 2 } ]
 then = [ { set = "bw_free_ok", value = true } ]
 
 [[trigger]]
-id = "bw_flag_free_marsh"
+id = "bw_free_start_marsh"
 map = "barrows"
 when = { event = "game_start" }
 if = [ { var = "marsh_trust", op = ">=", value = 3 } ]
 then = [ { set = "bw_free_ok", value = true } ]
+
+[[trigger]]
+id = "bw_free_on_companies"
+map = "barrows"
+when = { event = "var_changed", var = "companies" }
+once = false
+if = [ { var = "companies", op = ">=", value = 2 } ]
+then = [ { set = "bw_free_ok", value = true } ]
+
+[[trigger]]
+id = "bw_free_on_marsh"
+map = "barrows"
+when = { event = "var_changed", var = "marsh_trust" }
+once = false
+if = [ { var = "marsh_trust", op = ">=", value = 3 } ]
+then = [ { set = "bw_free_ok", value = true } ]
+
+[[trigger]]
+id = "bw_free_off_companies"
+map = "barrows"
+when = { event = "var_changed", var = "companies" }
+once = false
+if = [ { var = "companies", op = "<", value = 2 }, { var = "marsh_trust", op = "<", value = 3 } ]
+then = [ { set = "bw_free_ok", value = false } ]
+
+[[trigger]]
+id = "bw_free_off_marsh"
+map = "barrows"
+when = { event = "var_changed", var = "marsh_trust" }
+once = false
+if = [ { var = "companies", op = "<", value = 2 }, { var = "marsh_trust", op = "<", value = 3 } ]
+then = [ { set = "bw_free_ok", value = false } ]
 
 # --- The Dread: one a week, and the taint of the dead's country from dread 8 on. ---
 
@@ -257,20 +317,21 @@ map = "barrows"
 when = { event = "army_arrives", army = "bw_companies", at = [160, 44] }
 then = [ { add = "dread", value = -2 } ]
 
-# Kord's company, when it marches with the Companies, is paid each week or turns on the hero.
+# Kord's company, when it marches with the Companies, is paid each week or turns on the hero (30 a week, as at
+# the gates: triggers/gates.toml).
 [[trigger]]
 id = "bw_companies_fee"
 map = "barrows"
 when = { event = "week_start" }
-if = [ { var = "ally", value = 3 }, { var = "kord", value = 1 }, { var = "dread", op = ">=", value = 3 }, { gold = 40, op = ">=" } ]
+if = [ { var = "ally", value = 3 }, { var = "kord", value = 1 }, { var = "dread", op = ">=", value = 3 }, { gold = 30, op = ">=" } ]
 once = false
-then = [ { give_gold = -40 } ]
+then = [ { give_gold = -30 } ]
 
 [[trigger]]
 id = "bw_companies_turn"
 map = "barrows"
 when = { event = "week_start" }
-if = [ { var = "ally", value = 3 }, { var = "kord", value = 1 }, { var = "dread", op = ">=", value = 3 }, { gold = 40, op = "<" } ]
+if = [ { var = "ally", value = 3 }, { var = "kord", value = 1 }, { var = "dread", op = ">=", value = 3 }, { gold = 30, op = "<" } ]
 once = false
 then = [
     { set = "kord", value = 2 },

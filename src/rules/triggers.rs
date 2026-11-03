@@ -190,6 +190,8 @@ pub enum Act {
     /// A unit of the hero's army (`named` 0: an ordinary one; else a named character's id).
     GiveUnit(UnitId, u8),
     GiveXp(i64, Who),
+    /// The hero's squad healed to full and its dead raised (`restore_squad = true`), at no cost.
+    RestoreSquad,
     Spawn { army: ArmyId, at: Tile, faction: u8, model: u8, troops: Vec<UnitId> },
     RemoveArmy(ArmyId),
     /// The army meets the hero now; `rules` is `dt` or `lua:<script>` (a field battle).
@@ -777,6 +779,7 @@ impl Builder<'_> {
             pt::Action::RemoveSpells(h) => Act::RemoveSpells(self.who(h)?),
             pt::Action::ForgetSpell(s) => Act::ForgetSpell(self.spell(s)?),
             pt::Action::Victory => Act::End(Ending::Victory),
+            pt::Action::RestoreSquad => Act::RestoreSquad,
             pt::Action::Defeat => Act::End(Ending::Defeat),
             pt::Action::ArmyGoal { army, goal } => {
                 let army = self.army(army)?;
@@ -1203,6 +1206,7 @@ impl Game {
             Act::GiveItem(item, who) => self.give_package_item(*item, *who),
             Act::GiveUnit(unit, named) => self.add_unit(unit.0 as u8, *named, None),
             Act::GiveXp(n, who) => self.give_package_xp(*n, *who),
+            Act::RestoreSquad => self.restore_package_squad(),
             Act::Spawn { army, at, faction, model, troops } => self.spawn_package_army(*army, *at, *faction, *model, troops),
             Act::RemoveArmy(id) => self.deactivate_army(*id),
             Act::StartBattle(id, rules) => self.start_field_battle(*id, rules),
@@ -1379,6 +1383,19 @@ impl Game {
             Who::Player | Who::Pack => {
                 self.pack.add(item);
             }
+        }
+    }
+
+    /// Heals every squad member to full and raises the dead (`Game::resurrect` without its price: the
+    /// raised unit is marked paid, its last pay unchanged, as the town's service leaves it).
+    fn restore_package_squad(&mut self) {
+        let content = self.content.clone();
+        for u in self.squad.iter_mut() {
+            if !u.alive() {
+                u.died_at = None;
+                u.unpaid = false;
+            }
+            u.heal_full(&content);
         }
     }
 
@@ -2222,6 +2239,28 @@ mod wish_tests {
         assert_eq!(g.var_int("crown"), -5, "clamped at the bottom");
         g.act(&Act::Add { name: "crown".into(), value: 2, min: None, max: None }, &s, &mut q);
         assert_eq!(g.var_int("crown"), -3, "no bounds: plain");
+    }
+
+    #[test]
+    fn restore_squad_heals_the_squad_and_raises_its_dead() {
+        let mut g = game();
+        g.attach_story(story());
+        let s = g.story.clone().unwrap();
+        let mut q = VecDeque::new();
+        while g.squad.len() < 2 {
+            g.act(&Act::GiveUnit(unit("knight"), 0), &s, &mut q);
+        }
+        g.squad[0].hp = 1;
+        g.squad[1].hp = 0;
+        g.squad[1].died_at = Some(5);
+        g.squad[1].unpaid = true;
+        g.act(&Act::RestoreSquad, &s, &mut q);
+        let max0 = g.squad[0].max_hp(&g.content);
+        assert_eq!(g.squad[0].hp, max0, "a wounded member is healed to full");
+        assert!(g.squad[1].alive(), "a dead member is raised");
+        assert_eq!(g.squad[1].hp, g.squad[1].max_hp(&g.content), "the raised member comes back at full HP");
+        assert_eq!(g.squad[1].died_at, None, "the raise clears the death");
+        assert!(!g.squad[1].unpaid, "a raised member is marked paid, as the town's service leaves it");
     }
 
     #[test]

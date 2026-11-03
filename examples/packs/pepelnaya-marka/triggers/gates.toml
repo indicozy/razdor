@@ -31,6 +31,28 @@ then = [
     { army_goal = "wraith_messenger", go_to = [60, 46] },
 ]
 
+# The squad of the branch is restored before the dead's road: the hero's men are healed and raised at the
+# march's first camp (the same rule as the hub's start: the dead of the branch do not walk to the gates).
+[[trigger]]
+id = "gt_restore"
+map = "gates"
+when = { event = "game_start" }
+then = [ { restore_squad = true } ]
+
+# --- The diary: the main thread «Врата» and one sub-entry per stone, each completed when its gate opens. ---
+
+[[trigger]]
+id = "gt_diary_start"
+map = "gates"
+when = { event = "game_start" }
+then = [
+    { quest = "gates", title = "quest.gates.title", text = "quest.gates.start" },
+    { quest = "gate_n", title = "quest.gate_n.title", text = "quest.gate_n.text" },
+    { quest = "gate_e", title = "quest.gate_e.title", text = "quest.gate_e.text" },
+    { quest = "gate_s", title = "quest.gate_s.title", text = "quest.gate_s.text" },
+    { quest = "gate_w", title = "quest.gate_w.title", text = "quest.gate_w.text" },
+]
+
 # --- The start: the branch's company walks with the hero. ---
 
 [[trigger]]
@@ -166,28 +188,28 @@ id = "gt_open_n"
 map = "gates"
 when = { event = "var_changed", var = "gt_north" }
 if = [ { var = "gt_north", value = true } ]
-then = [ { set = "last_gate", value = 1 }, { add = "gates_open", value = 1 }, { dialog = "gt_opened" } ]
+then = [ { set = "last_gate", value = 1 }, { add = "gates_open", value = 1 }, { dialog = "gt_opened" }, { complete_quest = "gate_n" } ]
 
 [[trigger]]
 id = "gt_open_e"
 map = "gates"
 when = { event = "var_changed", var = "gt_east" }
 if = [ { var = "gt_east", value = true } ]
-then = [ { set = "last_gate", value = 2 }, { add = "gates_open", value = 1 }, { dialog = "gt_opened" } ]
+then = [ { set = "last_gate", value = 2 }, { add = "gates_open", value = 1 }, { dialog = "gt_opened" }, { complete_quest = "gate_e" } ]
 
 [[trigger]]
 id = "gt_open_s"
 map = "gates"
 when = { event = "var_changed", var = "gt_south" }
 if = [ { var = "gt_south", value = true } ]
-then = [ { set = "last_gate", value = 3 }, { add = "gates_open", value = 1 }, { dialog = "gt_opened" } ]
+then = [ { set = "last_gate", value = 3 }, { add = "gates_open", value = 1 }, { dialog = "gt_opened" }, { complete_quest = "gate_s" } ]
 
 [[trigger]]
 id = "gt_open_w"
 map = "gates"
 when = { event = "var_changed", var = "gt_west" }
 if = [ { var = "gt_west", value = true } ]
-then = [ { set = "last_gate", value = 4 }, { add = "gates_open", value = 1 }, { dialog = "gt_opened" } ]
+then = [ { set = "last_gate", value = 4 }, { add = "gates_open", value = 1 }, { dialog = "gt_opened" }, { complete_quest = "gate_w" } ]
 
 [[trigger]]
 id = "gt_last"
@@ -195,6 +217,19 @@ map = "gates"
 when = { event = "var_changed", var = "gates_open" }
 if = [ { var = "gates_open", value = 4 } ]
 then = [ { dialog = "gt_last" } ]
+
+# The main thread is done with the chapter's last choice (the choice's own actions end the chapter).
+[[trigger]]
+id = "gt_done_close"
+map = "gates"
+when = { event = "dialog_choice", dialog = "gt_last", choice = "close" }
+then = [ { complete_quest = "gates" } ]
+
+[[trigger]]
+id = "gt_done_claim"
+map = "gates"
+when = { event = "dialog_choice", dialog = "gt_last", choice = "claim" }
+then = [ { complete_quest = "gates" } ]
 
 # The claim (gt_last) takes the gate opened last, and no other: one trigger per gate.
 [[trigger]]

@@ -36,7 +36,7 @@ pub const EVENTS: [&str; 13] = [
 /// The conditions (`if`). Each is a table with one of these keys (its kind).
 pub const CONDITIONS: [&str; 10] = ["var", "random", "hero_at", "army_at", "has_named_unit", "has_item", "gold", "army_alive", "building_owner", "has_spell"];
 /// The actions (`then`), each a table with one of these keys.
-pub const ACTIONS: [&str; 30] = [
+pub const ACTIONS: [&str; 31] = [
     "set",
     "add",
     "random_var",
@@ -67,6 +67,7 @@ pub const ACTIONS: [&str; 30] = [
     "ending",
     "quest",
     "complete_quest",
+    "restore_squad",
 ];
 /// The keys that are arguments, not kinds. A kind key is one of the lists above; a key here
 /// never is.
@@ -442,6 +443,9 @@ pub enum Action {
     RemoveSpells(Holder),
     ForgetSpell(Ref),
     Victory,
+    /// `restore_squad = true`: the hero's squad is healed and its dead raised, at no cost (a night's rest
+    /// at the hub's healers; the raise of a town's service without its price).
+    RestoreSquad,
     Defeat,
     ArmyGoal { army: String, goal: GoalSpec },
     ArmySpeed { army: String, percent: u32 },
@@ -982,6 +986,13 @@ pub fn parse_action(t: &Table) -> Res<Action> {
                 },
                 Some(true) => Ok(Action::Defeat),
                 _ => bad(format!("`{kind}` is written `{kind} = true`"), "the scenario ends with it"),
+            }
+        }
+        "restore_squad" => {
+            check_args(t, kind, &[])?;
+            match v.as_bool() {
+                Some(true) => Ok(Action::RestoreSquad),
+                _ => bad("`restore_squad` is written `restore_squad = true`", "the squad is healed and raised at once"),
             }
         }
         "travel" => {
@@ -1686,6 +1697,8 @@ mod tests {
         assert_eq!(parse_action(&table("set = \"ford_held\"\nvalue = true")), Ok(Action::Set { name: "ford_held".into(), value: VarValue::Bool(true) }));
         assert_eq!(parse_action(&table("give_gold = 50")), Ok(Action::GiveGold(50)));
         assert_eq!(parse_action(&table("victory = true")), Ok(Action::Victory));
+        assert_eq!(parse_action(&table("restore_squad = true")), Ok(Action::RestoreSquad));
+        assert!(parse_action(&table("restore_squad = false")).is_err());
         assert!(parse_action(&table("victory = false")).is_err());
         assert!(parse_action(&table("random_var = \"d\"\nmin = 5\nmax = 1")).unwrap_err().message.contains("above"));
         assert!(parse_action(&table("set_relation = \"rebels\"\ntowards = \"enemy\"\nvalue = 9")).unwrap_err().message.contains("-3 to 3"));
