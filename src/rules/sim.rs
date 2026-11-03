@@ -90,7 +90,7 @@ pub struct StoryPlay<'a> {
 
 /// Auto-plays the player's pending battle, the AI on both sides. A field battle is played on
 /// the AI too, and what it did is kept in `fields`.
-fn fight_it_out(g: &mut Game, fields: &mut Vec<FieldFight>) -> Outcome {
+pub(crate) fn fight_it_out(g: &mut Game, fields: &mut Vec<FieldFight>) -> Outcome {
     let mut b = g.start_battle();
     if g.field_active() {
         let (start_hp, max, start_gates) = g.field_snapshot().map(|s| field_hp(&s)).unwrap_or_default();

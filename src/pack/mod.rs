@@ -15,6 +15,8 @@ pub mod map;
 pub mod reach;
 pub mod map_check;
 pub mod open;
+#[cfg(test)]
+pub mod playthrough;
 pub mod refs;
 pub mod sim;
 pub mod terrain;

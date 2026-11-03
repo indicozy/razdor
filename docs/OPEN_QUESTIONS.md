@@ -8,6 +8,14 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **The barrow host stalls: chapter 1 cannot be finished by play** (2026-11-03, the playthrough harness in `src/pack/playthrough.rs`). `host_rises` spawns the host at (28, 25) and sets `army_goal host attack hero`. The host walks north to (28, 17.19), then stands still for weeks with an empty path and its attack goal still set, whatever the hero does (he stands at (6, 43) or on dry land at (35, 24)). The AI never runs its goal walk for it again, so the host never reaches the hero and the chapter's victory never fires. Not yet traced in the engine (`rules::ai`: the host is hardly queued in `ai_start` after the first walk). The `chapter_one_is_won_on_the_prepared_path` test is ignored until this is fixed.
+
+- **Ghosts take one damage from blows** (2026-11-03, chapter 1's wraiths). In the battle engine a ghost takes 1 damage from every blow (a halberdier, a knight or a militiaman), so the militia cannot kill it, and its curses (initiative and actions) with magic hits kill the knight, which ends the battle. Three ghosts and a ghoul beat a six-unit squad with a halberdier in it; even one ghost with one ghoul does. Chapter 1's wraiths are therefore three ghouls for now (balance, `maps/brod/map.toml`), which keeps the prepared path winnable with the recruits the tower offers. Owner's call: keep ghosts as the wraiths and add a ranged or magic answer to the recruits, or keep ghouls.
+
+- **Walking into a neutral village takes it** (2026-11-03, Reedmere in chapter 1). `rules::game` gives a village to the hero the first time he steps into it (`StepContact::Captured` for `K::Village`); the chapter's marsh village changes hands on the road to the wraiths. This follows the original's village rule as the code has it, not yet checked under Wine. Whether a package's neutral village should be taken by walking in is the owner's call.
+
+- **Battles have no randomness, so a seed varies only the walk and the story's rolls** (2026-11-03, the 30-seed sweep). The battle engine has no random draws (`rules::battle/max_ai.rs` says so). The chapter's seeds (`rules::rng`, `seed_events`, the story's own seed) change the timing of the walk and the omens, not a battle's outcome. A rate over seeds is therefore 0 or 100 per route unless the walk changes. Whether the original's battles have their own random draws is not checked here.
+
 - **Siege balance: the dead cannot reach the breach** (2026-11-02, the abbey siege, `scripts/siege.lua`). With
   the spec's rules (rubble costs 2 manevres, the dead have 1, the breach is one cell), the defenders win every
   sim seed at the turn limit (seeds 1 to 5: 5 of 5). Gate HP 20 and 120, a collapse to open ground and a

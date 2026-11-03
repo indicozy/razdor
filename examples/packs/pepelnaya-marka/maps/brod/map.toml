@@ -3307,6 +3307,10 @@ description = "building.tower.description"
 cell = [44, 14]
 faction = "enemy"
 garrison = [{ unit = "dt:militiaman", level = 1, count = 2 }]
+recruit = [
+    { unit = "dt:militiaman", start = 4, max = 6 },
+    { unit = "dt:crossbowman", start = 2, max = 4 },
+]
 
 [[building]]
 id = "reedmere"
@@ -3404,8 +3408,7 @@ cell = [6, 44]
 faction = "enemy"
 model = "ghosts"
 troops = [
-    { unit = "dt:ghost", level = 1, count = 3 },
-    { unit = "dt:ghoul", level = 1, count = 1 },
+    { unit = "dt:ghoul", level = 1, count = 3 },
 ]
 
 # The barrow host's place: it stays inactive; the story raises the host at the ford instead.

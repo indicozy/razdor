@@ -50,7 +50,7 @@ name = "Barrow host"
 
 [arrival]
 title = "A new posting"
-text = "They sent you to hold the March with a handful of men and an empty purse. Nobody asked whether you wanted it. Across the river, the barrows have stopped being quiet."
+text = "They sent you to hold the March with a handful of men and an empty purse. Nobody asked whether you wanted it. Across the river, the barrows have stopped being quiet. Start with the watchtower on the hill to the north: its garrison is small, and you can raise men there."
 
 [varga_meet]
 title = "The halberdier"

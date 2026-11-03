@@ -55,7 +55,7 @@ then = [ { set = "varga_refused", value = true } ]
 [[trigger]]
 id = "toll_ford"
 map = "brod"
-when = { event = "hero_enters", at = [25, 19, 9, 9] }
+when = { event = "hero_enters", at = [25, 20, 9, 8] }
 if = [ { var = "toll_settled", value = false }, { army_at = "toll", at = [29, 23] } ]
 then = [ { dialog = "toll" } ]
 
@@ -130,6 +130,8 @@ when = { event = "army_defeated", army = "wraiths" }
 if = [ { has_named_unit = "varga", unit = "dt:halberdier" } ]
 then = [
     { give_item = "marsh_charm", to = "named:varga" },
+    { give_unit = "dt:hunter" },
+    { give_unit = "dt:hunter" },
     { add = "marsh_trust", value = 2, min = -5, max = 5 },
     { dialog = "marsh_thanks" },
 ]
@@ -141,6 +143,8 @@ when = { event = "army_defeated", army = "wraiths" }
 if = [ { var = "varga_joined", value = false } ]
 then = [
     { give_item = "marsh_charm" },
+    { give_unit = "dt:hunter" },
+    { give_unit = "dt:hunter" },
     { add = "marsh_trust", value = 2, min = -5, max = 5 },
     { dialog = "marsh_thanks" },
 ]
