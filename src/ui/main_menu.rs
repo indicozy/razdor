@@ -1318,8 +1318,8 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
         if crate::ui::widgets::mouse_in(view.x, view.y, view.w, view.h) {
             scroll = (scroll - wheel() * 40.0 * k).clamp(0.0, most);
         }
-        // The original's bar as the new-game list's: 12 × k wide, 16 × k in from the window's right.
-        let bar = Rect::new(inner.x + inner.w - 16.0 * list_k, inner.y, 12.0 * list_k, view_h);
+        // The original's bar at twice the new-game list's width: 24 × k wide, 4 × k from the window's right.
+        let bar = Rect::new(inner.x + inner.w - 28.0 * list_k, inner.y, 24.0 * list_k, view_h);
         super::widgets::scrollbar_px(bar, &mut scroll, most, view_h, 40.0 * k);
     }
     if on_phone {
@@ -1429,8 +1429,8 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     content_bottom = content_bottom.max(y + 56.0 * k + army_lines.len() as f32 * 17.0 * k);
     // The right column: how Razdor shows the game.
     let rx = inner.x + 580.0 * k;
-    // A phone keeps its right margin for the scroll bar (its 16 × k place, and 4 × k to its left).
-    let margin = if on_phone { 20.0 * list_k } else { 24.0 * k };
+    // A phone keeps its right margin for the scroll bar (24 × k wide, 4 × k to its right and 4 × k to its left).
+    let margin = if on_phone { 32.0 * list_k } else { 24.0 * k };
     let rw = inner.x + inner.w - margin - rx;
     let bw = 150.0 * k;
     let ok_h = row_h;
@@ -1946,9 +1946,9 @@ fn phone_options(audio: &mut super::audio::Settings, install_wide: bool, over_ma
         let (inner, closed) = chrome::window(rect, &title, chrome::Skin::Marble, true);
         let pad = 12.0 * u;
         let x0 = inner.x + pad;
-        // The scroll bar as the new-game list's (`new_game::list_track`): 12 × k wide, 16 × k in from
-        // the right; the rows stop 4 × k before it.
-        let bar_x = inner.x + inner.w - 16.0 * list_k;
+        // The scroll bar: twice the new-game list's (`new_game::list_track`, 12 × k), 24 × k wide, 4 × k
+        // from the window's right edge; the rows stop 4 × k before it.
+        let bar_x = inner.x + inner.w - 28.0 * list_k;
         let cw = bar_x - 4.0 * list_k - x0;
         // The list between the window's top and the buttons row (44 units high, 10 above its bottom).
         let list = Rect::new(inner.x, inner.y + 6.0 * u, inner.w, inner.h - 6.0 * u - 66.0 * u);
@@ -2016,8 +2016,8 @@ fn phone_options(audio: &mut super::audio::Settings, install_wide: bool, over_ma
             if crate::ui::widgets::mouse_in(list.x, list.y, list.w, list.h) {
                 scroll = (scroll - wheel() * 24.0 * u).clamp(0.0, most);
             }
-            // The original's bar (its arrows, track and knob), as the new-game list's.
-            let bar = Rect::new(bar_x, list.y, 12.0 * list_k, view);
+            // The original's bar (its arrows, track and knob), twice the new-game list's width.
+            let bar = Rect::new(bar_x, list.y, 24.0 * list_k, view);
             super::widgets::scrollbar_px(bar, &mut scroll, most, view, 24.0 * u);
         }
         PHONE_SCROLL.with(|c| c.set(scroll));
