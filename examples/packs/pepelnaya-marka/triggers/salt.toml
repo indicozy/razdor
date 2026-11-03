@@ -2,9 +2,11 @@
 # Every trigger names its map. Triggers that share a moment run in file order, and each condition
 # reads the state the earlier ones left.
 #
-# Disguise: the hero rides as a bandit (`hero_figure`). While he is disguised the Crown's patrols
-# walk their loops (`army_goal ... patrol`) and do not seek him; at the Salt Gate, or when he is
-# found out, they turn on him (`attack`), and the bounty men follow him (`follow`).
+# Disguise: the hero rides as a bandit (`hero_figure`, only the figure drawn on the map). What the
+# disguise changes is the Crown's attitude to him: the patrol and the bounty men are friendly
+# (`set_relation` towards the player: 0, the attitude is 1) while he is disguised, so they walk their loops,
+# do not seek him, and let him pass. At the Salt Gate, or when he is found out, they are hostile again
+# (-3): the patrol attacks and the bounty men follow him.
 #
 # Salt roads: the smugglers' wagon walks the marsh slowly and the causeway fast (`army_speed` at each
 # stop); it is hunted or it delivers its salt to the Salt Gate.
@@ -19,7 +21,9 @@ salt_hunting = false       # the bounty men follow the hero
 salt_hunt_days = 0         # days they have followed him
 
 # The start: the wagon sets out from the marsh, slow in the bog. (80 percent: at 70 or less the
-# engine's step clock never gets the wagon off the marsh.)
+# engine's step clock never gets the wagon off the marsh.) The Crown's patrol and bounty men walk
+# their loops from the start, hostile to the hero (-3) until he rides in disguise. The ghosts of the
+# bog stand still and are friendly (3): they curse the bog's walkers, they do not fight them.
 [[trigger]]
 id = "salt_arrival"
 map = "salt"
@@ -28,6 +32,12 @@ then = [
     { dialog = "salt_arrival" },
     { army_speed = "smugglers", percent = 80 },
     { army_goal = "smugglers", go_to = [34, 88] },
+    { army_goal = "patrol_north", patrol = [[48, 24], [60, 20]] },
+    { army_goal = "bounty", patrol = [[70, 50], [76, 52]] },
+    { army_goal = "bog_ghosts", go_to = [12, 90] },
+    { set_relation = "patrol_north", towards = "player", value = -3 },
+    { set_relation = "bounty", towards = "player", value = -3 },
+    { set_relation = "bog_ghosts", towards = "player", value = 3 },
 ]
 
 # The causeway's south end: the wagon reaches the road and goes fast up it.
@@ -65,7 +75,7 @@ map = "salt"
 when = { event = "hero_enters", at = [14, 52, 18, 16] }
 then = [ { dialog = "salt_reedmere" } ]
 
-# Disguised: the hero rides as a bandit, and the Crown's patrols walk their loops.
+# Disguised: the hero rides as a bandit, and the Crown's patrol and bounty men are friendly to him.
 [[trigger]]
 id = "salt_disguise_on"
 map = "salt"
@@ -73,19 +83,32 @@ when = { event = "dialog_choice", dialog = "salt_reedmere", choice = "disguise" 
 then = [
     { set = "salt_disguise", value = true },
     { hero_figure = { model = "bandits" } },
-    { army_goal = "patrol_north", patrol = [[48, 24], [60, 20]] },
-    { army_goal = "bounty", patrol = [[62, 44], [66, 46]] },
+    { set_relation = "patrol_north", towards = "player", value = 0 },
+    { set_relation = "bounty", towards = "player", value = 0 },
 ]
 
-# The Salt Gate while disguised: the guards know him, the dialog, then the fight.
+# The Salt Gate's approach (west of the castle, which the garrison fights at its first cell) while disguised:
+# the guards know him, the dialog, then the fight.
 [[trigger]]
 id = "salt_gate_caught"
 map = "salt"
-when = { event = "hero_enters", at = [66, 36, 8, 8] }
+when = { event = "hero_enters", at = [62, 34, 4, 8] }
 if = [ { var = "salt_disguise", value = true } ]
 then = [ { dialog = "salt_caught" } ]
 
-# Found out: the figure is the hero's again, the patrols attack, the bounty men follow him.
+# Openly (the Reedmere dialog's other choice): the Crown knows him on the road. The patrol hunts him, and
+# the bounty men follow him ("then we'll see", texts/ru.toml).
+[[trigger]]
+id = "salt_openly"
+map = "salt"
+when = { event = "dialog_choice", dialog = "salt_reedmere", choice = "openly" }
+then = [
+    { army_goal = "patrol_north", attack = "hero" },
+    { army_goal = "bounty", follow = "hero" },
+]
+
+# Found out: the figure is the hero's again, the Crown's men are hostile again, the patrol attacks and
+# the bounty men follow him.
 [[trigger]]
 id = "salt_caught_reveal"
 map = "salt"
@@ -94,6 +117,8 @@ then = [
     { set = "salt_disguise", value = false },
     { set = "salt_hunting", value = true },
     { hero_figure = "default" },
+    { set_relation = "patrol_north", towards = "player", value = -3 },
+    { set_relation = "bounty", towards = "player", value = -3 },
     { army_goal = "patrol_north", attack = "hero" },
     { army_goal = "bounty", follow = "hero" },
 ]
