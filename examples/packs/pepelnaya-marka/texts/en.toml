@@ -737,9 +737,6 @@ description = "Here the companies drink, play dice and decide whom to serve."
 name = "Oakford"
 description = "A market town on the road. The Crown's garrison holds the gates, but the walls are low."
 
-[camp.army.kord_band]
-name = "Kord's company"
-
 [camp.army.red_company]
 name = "The Red Cloaks"
 
@@ -758,16 +755,6 @@ name = "Captain of the Crown's guard"
 [item.camp_axe]
 name = "The captain's axe"
 description = "A heavy axe of the Crown's guard. Varga said she would take it if she won."
-
-[camp.arrival]
-title = "The companies"
-text = "The free companies camp in the lowland, between the Crown and the barrows. They are not waiting for you, and they do not love the Crown. They say everyone here has a price, and whoever has none is already dead. A Crown supply column is on the road."
-
-[camp.kord]
-title = "Kord"
-text = "The company's captain in a leather cloak raises his mug. 'I am Kord. My men follow whoever pays, and they keep their word as long as the pay keeps coming. Sixty gold, and we are with you. Or walk on.'"
-hire = "Hire the company (60 gold)"
-turn = "Refuse"
 
 [camp.red]
 title = "The Red Cloaks"
@@ -788,24 +775,6 @@ text = "The captain lies in the arena. Varga stands over him with her halberd lo
 [camp.duel_lost]
 title = "Varga"
 text = "The arena is empty. Varga is not in the ranks: they carried her away, or she fell and did not rise. The companies are silent, and no one says her name."
-
-[camp.raid]
-title = "The Crown's column"
-text = "The Crown's supply column comes down the road with sacks of grain and barrels of salt. The guard is covered in dust and does not expect an ambush. You can strike from behind the stones, or let it pass."
-hit = "Send the companies out of the camp"
-pass = "Let the column pass"
-
-[camp.loot]
-title = "The spoils"
-text = "Kord divides the loot. 'My men are owed their share,' he says. 'Split it fairly and we are brothers. Keep it all, and I will remember.'"
-split = "Split it evenly"
-keep = "Keep the spoils"
-
-[camp.gate]
-title = "The standing stone"
-text = "An old sentry by the stone points at the marks. 'At night it glows if you light fires on all four sides. So they say. Try it?'"
-light = "Light the fires"
-leave = "Leave the stone in the dark"
 
 [camp.relief]
 title = "The Crown's relief"
@@ -830,6 +799,138 @@ text = "The Crown's guard lies before the camp, but Kord's company has ridden of
 [camp.end_alone]
 title = "The companies' camp"
 text = "The Crown's guard lies before the camp. The companies raise their mugs to those who came. Without Kord and without Varga you are alone with them, and no one knows who you will ride with next."
+[camp.arrival]
+title = "The companies"
+text = "The free companies camp in the lowland, between the Crown and the barrows. Kord, whom you hired at Ashford, lifts his mug to the fire. 'The guard is coming, that's certain. The question is when. If we touch nothing, we have three weeks. If we strike the Crown's column and buy the red company, it comes sooner. The Crown doesn't like to be hurried.' He laughs and bangs the mug on the table."
+
+[camp.loot]
+title = "The spoils"
+text = "Kord divides the loot. 'My men are owed their share,' he says. 'Split it fairly and we are brothers. Keep it all, and I will remember.'"
+split = "Split it evenly: Kord becomes a friend"
+keep = "Keep it: Kord leaves and strikes"
+
+[camp.raid]
+title = "The Crown's column"
+text = "The Crown's supply column comes down the road with sacks of grain and barrels of salt. The guard is covered in dust and does not expect an ambush. You can strike from behind the stones, or let it pass."
+hit = "Strike from behind the stones (battle)"
+pass = "Let the column pass: Crown +1"
+
+[camp.gate]
+title = "The standing stone"
+text = "An old sentry by the stone points at the marks. 'At night it glows if you light fires on all four sides. So they say. Try it? What it opens, you'll learn later.'"
+light = "Light the fires: the gate opens"
+leave = "Leave the stone in the dark"
+
+[camp.quest.hold]
+title = "Hold the camp"
+text = "The Crown will send its guard to the hall, but not before three weeks. Sooner if you strike the Crown's column and buy the red company. A warning comes a day ahead."
+warned = "The Crown's guard has marched from the north-east. It will be at the hall tomorrow. Meet it there."
+here = "The Crown's guard stands at the hall. Break it, and the camp holds."
+
+[camp.quest.supply]
+title = "The Crown's column"
+text = "The column comes down the road to the bend by the south ditch. Strike from the stones, or let it pass?"
+
+[camp.quest.red]
+title = "The red company"
+text = "The second company, at the camp's edge. Buy it for a hundred gold, or leave it alone?"
+
+[camp.quest.duel]
+title = "The duel"
+text = "The captain of the Crown's guard calls Varga into the arena. Will she go?"
+
+[camp.quest.gate]
+title = "The standing stone"
+text = "The stone by the fire. Light it? What it opens, chapter four will tell."
+
+[camp.relief_warn]
+title = "The guard marches"
+text = "The sentry on the signal tower shouts from the hill: blue cloaks are coming from the north-east, along the road to the camp. They will be at the hall by morning. Kord grins. 'Now it gets interesting.' The companies check their weapons."
+
+[camp.ledger]
+title = "The tally board"
+text = "A board by the road, written in chalk. The companies have noted the tolls: 'Crown column, forty a man. Marka caravan, ten. No prisoners from the refugees.' Below, in another hand: 'The Crown pays us double if we keep out of its business. We keep out.'"
+
+[camp.gibbet]
+title = "The gibbet"
+text = "A man in a clerk's coat hangs at the crossroads. A board on his chest reads: 'Counted the taxes of the dead.' A crow has taken his eyes. The companies do not joke here."
+
+[camp.sign]
+title = "The fork"
+text = "The post points north, to the hills and the Crown's signal towers, and south, to the camp. Someone has burned into it: 'The guard comes in the third week. Or sooner, if you provoke it.'"
+
+[camp.herd]
+title = "The company's herd"
+text = "Cows and mules graze by the road with nobody watching. A herd boy of about ten looks at you sideways: 'The Crown took our cows. The companies took them back. Now it's all fair.' He does not ask for a coin."
+
+[camp.carts]
+title = "The Crown's carts"
+text = "Empty Crown carts stand in a row. Wheels off, barrels split. The companies have shared out everything but the wheels, and nobody wants wheels."
+
+[camp.hall]
+title = "The empty mug"
+text = "The tavern is loud. Kord sits by the window playing dice with two bandits. 'You have paid off your debts,' he says without looking up. 'Now pay yourself.' The dice fall: six."
+
+[camp.fence]
+title = "The camp gate"
+text = "The gate is shut. The guard calls a password you do not know and opens anyway: 'Kord says you're one of ours.' Kord's word is worth more than coin here."
+
+[camp.west_road]
+title = "The Crown's road"
+text = "A stone road of the Crown runs west. Half of the milestone has sunk into the ground, and it reads: 'Oakford, thirty miles.'"
+
+[camp.guardsman]
+title = "A dead guardsman"
+text = "A guardsman lies face down in the grass. His purse is empty and the treasury seal has been torn off. No tracks but the companies' tracks. The companies seem to have kept only his face as a memento."
+
+[camp.kord_fire]
+title = "The old fire"
+text = "A cold fire, and on a stone the mark Kord carved: a mug with a sword. His company camped here until it was called to Ashford. Kord says nothing about why he left."
+
+[camp.farm]
+title = "The farm by Oakford"
+text = "A farm by the road. The door is broken, and there is something in the well you would rather not think about. Oakford turns refugees away: its gate is shut and the Crown's guard is on the walls."
+
+[camp.crows]
+title = "Crows over the road"
+text = "Crows circle over the road. In the ditch lies a cart with no driver, and chalked on its side: 'Do not go to Oakford.' Someone did not listen."
+
+[camp.oakford_walls]
+title = "The walls of Oakford"
+text = "Low walls. The guards on the tower count the companies and shout: 'Free men, go away, or we shoot.' No arrows yet. Kord: 'They only shoot when they are told to.'"
+
+[camp.arena]
+title = "The arena"
+text = "A ring trampled into the mud, with stakes and shields. The Crown's guard drills here every day. The captain watches you over the fence, and he looks bored."
+
+[camp.stakes]
+title = "The stakes"
+text = "Stakes by the road, sharpened and charred. The companies set them so that horse could not pass. One horse is still tied to a stake, and nobody has come to take it."
+
+[camp.ditch]
+title = "The ditch"
+text = "A ditch of dead horses. The companies have stuck a stake in it: 'Do not go there, the cold is in it.' A heavy smell hangs over the road, and your hands go numb for no reason."
+
+[camp.track]
+title = "The convoy's track"
+text = "A path along the ditch comes out onto the road. Wheel marks in the mud: the column passed here yesterday and will pass again. It will not be long."
+
+[camp.watchtower]
+title = "The watchtower"
+text = "The Crown's tower is empty, but from it you can see the road to the north-east. Dust rises along it: someone is already moving toward the camp. Still far off."
+
+[camp.stones]
+title = "The stones on the hills"
+text = "The stones stand in an old order, and the wind sings low through them like horns. The companies say it is the guard. The herders say it is the barrows. For now there is only the wind."
+
+[camp.hill]
+title = "Markers on the hill"
+text = "The road climbs between the stones. Markers with ribbons stand along the verge: the companies mark where a man can pass, and where the guard has already passed. There are many ribbons, and the newest have not faded."
+
+[camp.banner]
+title = "The banner"
+text = "A Crown banner is planted on the hilltop. Someone has cut the arms from it. Down on the road, small figures in blue are marching: the guard, and a lot of them."
+
 # --- gates ---
 
 [gates.map]

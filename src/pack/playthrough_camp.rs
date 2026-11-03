@@ -7,7 +7,8 @@
 use std::sync::Arc;
 
 use super::open::Opened;
-use super::playthrough::{install, meet_host, open_map, prepared_to_wraiths, Carried, Run, Stuck, PREPARED};
+use super::playthrough::{install, open_map, Carried, Run, Stuck};
+use super::playthrough_campaign::{ashford, chapter_one};
 use super::triggers::VarValue;
 use crate::dt::install::DtInstall;
 use crate::rules::battle::Outcome;
@@ -19,17 +20,13 @@ use crate::rules::map::Tile;
 /// company is left, the waygate's stone is lit, the spoils are split.
 pub(crate) const CAMP: &[(&str, &str)] = &[("camp_raid", "pass"), ("camp_loot", "split"), ("camp_red", "leave"), ("camp_gate", "light")];
 
-/// Chapter 1 won on the prepared route, handed over to `marka` (the hub's first visit).
+/// Chapter 1 won on the campaign's own route (the side quests, the recruits and the host: `chapter_one`), handed
+/// over to `marka` (the hub's first visit).
 fn into_marka(install: &DtInstall, seed: u32, choices: &[(&str, &str)]) -> Result<Run, Stuck> {
-    let (brod, brod_content) = open_map(install, "brod");
-    let mut run = Run::new(&brod, brod_content, seed, PREPARED)?;
-    prepared_to_wraiths(&mut run)?;
-    meet_host(&mut run, 30)?;
-    if !run.victory() {
-        return Err(Stuck::Broken("chapter one was not won".into()));
-    }
-    let to = after_victory(&mut run.g, &brod.routes).ok_or_else(|| Stuck::Broken("chapter one has no next map".into()))?;
-    hand_over(install, &brod, &mut run, &to, choices)
+    let mut brod_run = chapter_one(install, seed)?;
+    let (brod, _) = open_map(install, "brod");
+    let to = after_victory(&mut brod_run.g, &brod.routes).ok_or_else(|| Stuck::Broken("chapter one has no next map".into()))?;
+    hand_over(install, &brod, &mut brod_run, &to, choices)
 }
 
 /// The game of `to`, entered from `from` (the run's game) by the campaign's hand-over.
@@ -67,6 +64,8 @@ fn hub_companies(install: &DtInstall, seed: u32) -> Result<Run, Stuck> {
     // The option «Обход армий на пути»: the walk goes round the armies (an army stepped onto stops it).
     run.g.avoid_armies = true;
     drink_for_wounded(&mut run);
+    // The town's service and its recruits, as the campaign's hub visit plays them (Ashford first).
+    ashford(&mut run)?;
     run.walk_to((15, 69), 10)?;
     run.walk_to((30, 84), 12)?;
     run.walk_to((28, 36), 10)?;
@@ -136,8 +135,8 @@ pub(crate) fn camp_route(run: &mut Run) -> Result<Option<Outcome>, Stuck> {
 /// Walks into the army `name` as it moves, a day at a time, until its battle comes (or `days` pass). Its
 /// outcome, None when no battle with it came.
 fn fight_army(run: &mut Run, name: &str, days: u64) -> Result<Option<Outcome>, Stuck> {
+    let before = run.battles.len();
     for _ in 0..days {
-        let before = run.battles.len();
         if let Some(cell) = army_tile(run, name) {
             let _ = run.walk_to(cell, 1);
         }
@@ -145,6 +144,9 @@ fn fight_army(run: &mut Run, name: &str, days: u64) -> Result<Option<Outcome>, S
             return Ok(Some(b.outcome));
         }
         run.wait_days(1)?;
+        if let Some(b) = run.battles[before..].iter().find(|b| b.enemy == name) {
+            return Ok(Some(b.outcome));
+        }
         if run.done() {
             break;
         }
@@ -181,7 +183,14 @@ fn the_council_picks_the_companies_once_kord_is_hired() {
 #[test]
 fn the_council_comes_back_after_later() {
     let Some(install) = install() else { return };
-    let mut run = into_marka(&install, 1, &[("council", "later"), ("kord_offer", "walk"), ("captain", "serve")]).unwrap_or_else(|e| panic!("{e}"));
+    let mut run = into_marka(
+        &install,
+        1,
+        &[("council", "later"), ("kord_offer", "walk"), ("captain", "serve"), ("marsh_offer", "accept"), ("shrine_offer", "accept"), ("shrine_inside", "cleanse")],
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    // Two envoy quests done (the council opens at two; this walk meets neither envoy's fight, so the count is carried in).
+    run.g.triggers.vars.insert("quests_done".into(), VarValue::Int(2));
     run.g.avoid_armies = true;
     drink_for_wounded(&mut run);
     run.walk_to((15, 69), 10).unwrap_or_else(|e| panic!("{e}"));
@@ -237,8 +246,8 @@ fn the_camp_offers_fire_by_walking() {
     assert!(!run.log.iter().any(|l| l.contains("dialog camp_kord")), "Kord is hired: {}", run.log.join("\n"));
 }
 
-/// The camp's duel: Varga, halberdier of the hero's army, fights the captain of the Crown's guard. She falls
-/// in chapter 1's host on this route, so the test carries her in (as chapter 4's tests do). Over 15 seeds.
+/// The camp's duel: Varga, halberdier of the hero's army, fights the captain of the Crown's guard. Over 15 seeds
+/// (she is carried in when chapter one has lost her).
 #[test]
 fn the_camp_duel_is_won_over_fifteen_seeds() {
     let Some(install) = install() else { return };
@@ -253,7 +262,10 @@ fn the_camp_duel_is_won_over_fifteen_seeds() {
                 continue;
             }
         };
-        Carried { named: vec![("varga", "halberdier", 1)], ..Carried::default() }.apply(&mut run.g, &camp);
+        // Varga walks in the squad from chapter one (the real route keeps her); carried in only when she is not.
+        if !run.g.squad.iter().any(|u| u.named != 0 && u.alive()) {
+            Carried { named: vec![("varga", "halberdier", 1)], ..Carried::default() }.apply(&mut run.g, &camp);
+        }
         if let Err(e) = run.walk_to((80, 80), 10) {
             problems.push(format!("seed {seed}: {e}"));
             continue;
@@ -344,4 +356,121 @@ fn the_hit_on_the_column_is_won_by_the_camp_squad_over_fifteen_seeds() {
         }
     }
     assert!(wins * 100 >= 50 * 15, "the camp's squad beat the column {wins}/15: {problems:?}");
+}
+
+/// The camp starts with the army whole: the squad the hub hands over is wounded (the hero at 1 HP, one unit dead)
+/// and the camp's first moment heals it and raises the dead (`heal_army`), before the story's dialog.
+#[test]
+fn the_camp_starts_with_the_carried_squad_whole() {
+    let Some(install) = install() else { return };
+    let mut hub = into_marka(&install, 1, &[]).unwrap_or_else(|e| panic!("{e}"));
+    for (i, u) in hub.g.squad.iter_mut().enumerate() {
+        match i {
+            0 => u.hp = 1,
+            1 => {
+                u.hp = 0;
+                u.died_at = Some(0);
+            }
+            _ => u.hp /= 2,
+        }
+    }
+    let (marka, _) = open_map(&install, "marka");
+    let (camp, content) = open_map(&install, "camp");
+    let g = enter(&hub.g, &marka, &camp, None, content).unwrap_or_else(|e| panic!("{e}"));
+    let run = Run::resume(g, CAMP).unwrap_or_else(|e| panic!("{e}"));
+    let c = run.g.content.clone();
+    let wounded: Vec<String> = run.g.squad.iter().filter(|u| !u.alive() || u.hp < u.max_hp(&c)).map(|u| c.unit(u.def).name.clone()).collect();
+    assert!(wounded.is_empty(), "the camp starts with the army whole, but {wounded:?} are not: {}", run.log.join("\n"));
+}
+
+/// The Crown's guard is sighted by the two acts, the column struck and the red company bought, and it marches the
+/// day after the warning. Without them the third week is the backstop (the other tests play that).
+#[test]
+fn the_relief_is_sighted_by_the_two_acts_and_marches_the_day_after() {
+    let Some(install) = install() else { return };
+    let mut run = into_camp(&install, 1, &[("camp_raid", "hit"), ("camp_red", "buy"), ("camp_loot", "split"), ("camp_gate", "leave")]).unwrap_or_else(|e| panic!("{e}"));
+    run.g.gold = 200;
+    run.walk_to((74, 44), 6).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+    assert_eq!(run.var("relief"), Some(VarValue::Int(0)), "the red company alone is no sighting");
+    let out = fight_army(&mut run, "supply", 8).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+    assert_eq!(out, Some(Outcome::Victory), "the column is beaten: {}", run.log.join("\n"));
+    let (mut sighted, mut marched) = (None, None);
+    for _ in 0..8 {
+        run.wait_days(1).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+        if sighted.is_none() && run.var("relief") == Some(VarValue::Int(1)) {
+            sighted = Some(run.day());
+        }
+        if marched.is_none() && run.var("relief") == Some(VarValue::Int(2)) {
+            marched = Some(run.day());
+        }
+        if marched.is_some() {
+            break;
+        }
+    }
+    let (s, m) = (sighted.unwrap_or(f64::NAN), marched.unwrap_or(f64::NAN));
+    eprintln!("the relief: sighted on day {s:.2}, marching on day {m:.2}");
+    assert!(s <= 3.0, "the two acts sight the relief at once: day {s:.2}");
+    assert!(m >= s + 1.0 && m < s + 2.0, "the guard marches the day after the warning: sighted {s:.2}, marching {m:.2}");
+    assert!(run.log.iter().any(|l| l.contains("dialog camp_relief_warn")), "{}", run.log.join("\n"));
+}
+
+/// Kord's price is reachable on the route: the column struck, his share asked (his company hired), and «keep»
+/// turns him: his men come out of the camp against the hero, and the chapter ends with the betrayed ending. Over
+/// fifteen seeds.
+#[test]
+fn keeping_the_loot_turns_kord_and_his_men_attack_over_fifteen_seeds() {
+    let Some(install) = install() else { return };
+    let mut won = 0;
+    let mut problems = Vec::new();
+    for seed in 1..=15u32 {
+        let mut run = match into_camp(&install, seed, &[("camp_raid", "hit"), ("camp_loot", "keep"), ("camp_red", "leave"), ("camp_gate", "leave")]) {
+            Ok(r) => r,
+            Err(e) => {
+                problems.push(format!("seed {seed}: {e}"));
+                continue;
+            }
+        };
+        match camp_route(&mut run) {
+            Ok(Some(Outcome::Victory)) if run.log.iter().any(|l| l.contains("dialog camp_loot -> keep")) && run.log.iter().any(|l| l.contains("dialog camp_end_betrayed")) && run.var("kord") == Some(VarValue::Int(2)) => won += 1,
+            other => problems.push(format!("seed {seed}: {other:?}; {}", run.log.join(" | "))),
+        }
+    }
+    eprintln!("keeping the loot over 15 seeds: {won}/15 {problems:?}");
+    assert!(won * 100 >= 70 * 15, "won {won}/15: {problems:?}");
+}
+
+/// The camp's roads have a scene at most ten cells apart: the walk from the post to the tally board, the red company,
+/// the hall, the gate and the column's road west; the south ditch; the north road to the banner. Each walk is
+/// measured from the post, the scenes by their cell in the walk.
+#[test]
+fn the_camp_has_a_scene_every_ten_cells_on_its_roads() {
+    let Some(install) = install() else { return };
+    let roads: [(&str, &[(i32, i32)]); 3] = [
+        ("west", &[(88, 64), (82, 56), (76, 50), (74, 44), (64, 46), (56, 50), (54, 54), (48, 60), (55, 66), (50, 72), (40, 70), (31, 67), (24, 60), (23, 51)]),
+        ("south", &[(90, 80), (72, 78), (66, 74), (60, 70)]),
+        ("north", &[(88, 64), (82, 56), (76, 50), (74, 44), (82, 38), (78, 28), (70, 20)]),
+    ];
+    let mut report = Vec::new();
+    let mut failed = Vec::new();
+    for (name, walk) in roads {
+        let mut run = into_camp(&install, 1, CAMP).unwrap_or_else(|e| panic!("{e}"));
+        run.g.gold = 200;
+        for &(x, y) in walk {
+            run.walk_to((x, y), 6).unwrap_or_else(|e| panic!("{name}: {e}\n{}", run.log.join("\n")));
+        }
+        let mut marks = vec![0usize];
+        marks.extend(run.beats.iter().copied());
+        marks.push(run.path.len() - 1);
+        marks.sort_unstable();
+        marks.dedup();
+        let mut gaps: Vec<(usize, usize, usize)> = marks.windows(2).map(|w| (w[1] - w[0], w[0], w[1])).collect();
+        gaps.sort_unstable_by(|a, b| b.cmp(a));
+        let worst = gaps[0];
+        report.push(format!("{name}: {} cells, {} scenes, the longest gap {} cells", run.path.len() - 1, run.beats.len(), worst.0));
+        if worst.0 > 10 {
+            failed.push(format!("{name}: the longest walk between scenes is {} cells (path {}..{}): {:?}", worst.0, worst.1, worst.2, &run.path[worst.1..=worst.2]));
+        }
+    }
+    eprintln!("the camp's roads: {}", report.join("; "));
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
 }

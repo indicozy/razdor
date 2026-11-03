@@ -13580,6 +13580,7 @@ cell = [88, 71]
 size = [4, 4]
 faction = "player"
 income = 30
+recruit = [{ unit = "dt:swordsman", start = 4, max = 6 }]     # the companies sell swords
 garrison = [{ unit = "dt:bandit", level = 1, count = 2 }]
 
 [[building]]
@@ -13593,19 +13594,6 @@ income = 30
 garrison = [
     { unit = "dt:guardsman", level = 1, count = 2 },
     { unit = "dt:archer", level = 1, count = 1 },
-]
-
-# Kord's company, roaming the lowland's west edge until the hero comes to it or it turns.
-[[army]]
-id = "kord_band"
-name = "camp.army.kord_band.name"
-cell = [30, 52]
-faction = "neighbour"
-model = "bandits"
-gold = 50
-troops = [
-    { unit = "dt:bandit", level = 1, count = 3 },
-    { unit = "dt:robber", level = 1, count = 2 },
 ]
 
 # The red company, camped east of the lowland: it can be bought.
@@ -13633,7 +13621,7 @@ faction = "enemy"
 model = "feudal"
 gold = 120
 troops = [
-    { unit = "dt:guardsman", level = 1, count = 2 },
+    { unit = "dt:guardsman", level = 1, count = 1 },
     { unit = "dt:archer", level = 1, count = 2 },
 ]
 

@@ -8,22 +8,6 @@ text = "camp.arrival.text"
 speaker = "dt:viking"
 
 [[dialog]]
-id = "camp_kord"
-title = "camp.kord.title"
-text = "camp.kord.text"
-speaker = "dt:viking"
-
-[[dialog.choice]]
-id = "hire"
-text = "camp.kord.hire"
-if = [ { gold = 60, op = ">=" } ]
-then = [ { give_gold = -60 }, { give_unit = "dt:viking", named = "kord" } ]
-
-[[dialog.choice]]
-id = "turn"
-text = "camp.kord.turn"
-
-[[dialog]]
 id = "camp_red"
 title = "camp.red.title"
 text = "camp.red.text"
@@ -92,7 +76,6 @@ text = "camp.loot.split"
 [[dialog.choice]]
 id = "keep"
 text = "camp.loot.keep"
-if = [ { army_alive = "kord_band", value = true } ]
 
 [[dialog]]
 id = "camp_gate"
@@ -112,6 +95,119 @@ id = "camp_relief"
 title = "camp.relief.title"
 text = "camp.relief.text"
 speaker = "dt:halberdier"
+
+[[dialog]]
+id = "camp_relief_warn"
+title = "camp.relief_warn.title"
+text = "camp.relief_warn.text"
+speaker = "dt:halberdier"
+
+# The road's scenes: a paragraph each, no choice (the walk pays them).
+
+[[dialog]]
+id = "camp_ledger"
+title = "camp.ledger.title"
+text = "camp.ledger.text"
+
+[[dialog]]
+id = "camp_gibbet"
+title = "camp.gibbet.title"
+text = "camp.gibbet.text"
+
+[[dialog]]
+id = "camp_sign"
+title = "camp.sign.title"
+text = "camp.sign.text"
+
+[[dialog]]
+id = "camp_herd"
+title = "camp.herd.title"
+text = "camp.herd.text"
+
+[[dialog]]
+id = "camp_carts"
+title = "camp.carts.title"
+text = "camp.carts.text"
+
+[[dialog]]
+id = "camp_hall"
+title = "camp.hall.title"
+text = "camp.hall.text"
+
+[[dialog]]
+id = "camp_fence"
+title = "camp.fence.title"
+text = "camp.fence.text"
+
+[[dialog]]
+id = "camp_west_road"
+title = "camp.west_road.title"
+text = "camp.west_road.text"
+
+[[dialog]]
+id = "camp_guardsman"
+title = "camp.guardsman.title"
+text = "camp.guardsman.text"
+
+[[dialog]]
+id = "camp_kord_fire"
+title = "camp.kord_fire.title"
+text = "camp.kord_fire.text"
+
+[[dialog]]
+id = "camp_farm"
+title = "camp.farm.title"
+text = "camp.farm.text"
+
+[[dialog]]
+id = "camp_crows"
+title = "camp.crows.title"
+text = "camp.crows.text"
+
+[[dialog]]
+id = "camp_oakford_walls"
+title = "camp.oakford_walls.title"
+text = "camp.oakford_walls.text"
+
+[[dialog]]
+id = "camp_arena"
+title = "camp.arena.title"
+text = "camp.arena.text"
+
+[[dialog]]
+id = "camp_stakes"
+title = "camp.stakes.title"
+text = "camp.stakes.text"
+
+[[dialog]]
+id = "camp_ditch"
+title = "camp.ditch.title"
+text = "camp.ditch.text"
+
+[[dialog]]
+id = "camp_track"
+title = "camp.track.title"
+text = "camp.track.text"
+
+[[dialog]]
+id = "camp_watchtower"
+title = "camp.watchtower.title"
+text = "camp.watchtower.text"
+
+[[dialog]]
+id = "camp_stones"
+title = "camp.stones.title"
+text = "camp.stones.text"
+
+[[dialog]]
+id = "camp_hill"
+title = "camp.hill.title"
+text = "camp.hill.text"
+
+[[dialog]]
+id = "camp_banner"
+title = "camp.banner.title"
+text = "camp.banner.text"
 
 [[dialog]]
 id = "camp_trust"

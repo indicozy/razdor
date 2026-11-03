@@ -203,6 +203,8 @@ pub enum Act {
     AddUnits(Entity, Vec<UnitId>),
     Cast { spell: u32, who: Who, until: Until },
     RemoveSpells(Who),
+    /// The hero's army healed in full and its dead raised.
+    HealArmy,
     ForgetSpell(u32),
     End(Ending),
     /// An army's goal (`None`: clear it).
@@ -779,6 +781,7 @@ impl Builder<'_> {
             pt::Action::AddUnits { of, troops } => Act::AddUnits(self.entity(of)?, self.units(troops)?),
             pt::Action::Cast { spell, holder, until } => Act::Cast { spell: self.spell(spell)?, who: self.who(holder)?, until: *until },
             pt::Action::RemoveSpells(h) => Act::RemoveSpells(self.who(h)?),
+            pt::Action::HealArmy => Act::HealArmy,
             pt::Action::ForgetSpell(s) => Act::ForgetSpell(self.spell(s)?),
             pt::Action::Victory => Act::End(Ending::Victory),
             pt::Action::RestoreSquad => Act::RestoreSquad,
@@ -1237,6 +1240,7 @@ impl Game {
                 }
                 self.recount_if_hero(*who);
             }
+            Act::HealArmy => self.heal_package_army(),
             Act::ForgetSpell(s) => self.forget_spell(*s as u8),
             Act::ArmyGoal { army, goal } => {
                 if self.set_army_goal(*army, goal.clone()) {
@@ -1337,6 +1341,17 @@ impl Game {
                 None => Vec::new(),
             },
         }
+    }
+
+    /// `heal_army`: every unit of the hero's army healed in full and the dead raised (the cheat «Heal»'s rule,
+    /// Razdor's own action for a chapter's start: a carried army comes back whole).
+    fn heal_package_army(&mut self) {
+        let content = self.content.clone();
+        for u in self.squad.iter_mut() {
+            u.died_at = None;
+            u.heal_full(&content);
+        }
+        self.recount_if_hero(Who::Player);
     }
 
     fn recount_if_hero(&mut self, who: Who) {
@@ -1861,6 +1876,25 @@ mod tests {
         assert!(g.holds(&Cond::HasSpell { spell, who: Who::Player, all: false }));
         g.act(&Act::ForgetSpell(spell), &s, &mut q);
         assert!(!g.spells.contains(&(spell as u8)));
+    }
+
+    #[test]
+    fn heal_army_raises_the_dead_and_heals_the_wounded() {
+        let mut g = game();
+        g.attach_story(story(&[], vec![], vec![dialog("d", vec![])]));
+        let s = g.story.clone().unwrap();
+        let mut q = VecDeque::new();
+        let content = g.content.clone();
+        for alias in ["knight", "knight"] {
+            let mut u = crate::rules::units::Unit::new(&content, unit(alias), Slot::new(Row::Front, 1));
+            u.hp = 0;
+            u.died_at = Some(5);
+            g.squad.push(u);
+        }
+        g.squad[0].hp = 1;
+        g.act(&Act::HealArmy, &s, &mut q);
+        assert!(g.squad.iter().all(|u| u.alive() && u.hp == u.max_hp(&content)), "every unit alive and whole");
+        assert!(g.squad.iter().all(|u| u.died_at.is_none()), "the dead are raised");
     }
 
     #[test]

@@ -55,6 +55,7 @@ pub const ACTIONS: [&str; 32] = [
     "add_units",
     "cast_on_army",
     "remove_spells",
+    "heal_army",
     "remove_spell_from_book",
     "victory",
     "defeat",
@@ -442,6 +443,8 @@ pub enum Action {
     AddUnits { of: Entity, troops: Vec<Ref> },
     Cast { spell: Ref, holder: Holder, until: Until },
     RemoveSpells(Holder),
+    /// The hero's army healed in full, the dead raised (`heal_army = "player"`).
+    HealArmy,
     ForgetSpell(Ref),
     Victory,
     /// `restore_squad = true`: the hero's squad is healed and its dead raised, at no cost (a night's rest
@@ -923,6 +926,13 @@ pub fn parse_action(t: &Table) -> Res<Action> {
         "remove_spells" => {
             check_args(t, kind, &["garrison"])?;
             Ok(Action::RemoveSpells(positional_holder(t, kind, v)?))
+        }
+        "heal_army" => {
+            check_args(t, kind, &[])?;
+            if v.as_str() != Some("player") {
+                return bad("`heal_army` heals the player's army: `heal_army = \"player\"`", "the value is `\"player\"`");
+            }
+            Ok(Action::HealArmy)
         }
         "remove_spell_from_book" => {
             check_args(t, kind, &[])?;
@@ -1848,6 +1858,8 @@ mod wish_reader_tests {
             Ok(Action::AddUnits { of: Entity::Building("tower".into()), troops: vec![Ref::parse("dt:swordsman").unwrap()] })
         );
         assert_eq!(parse_action(&table("remove_spells = \"garrison\"\ngarrison = \"tower\"")), Ok(Action::RemoveSpells(Holder::Garrison("tower".into()))));
+        assert_eq!(parse_action(&table("heal_army = \"player\"")), Ok(Action::HealArmy));
+        assert!(parse_action(&table("heal_army = \"pack\"")).unwrap_err().message.contains("heals the player's army"));
         assert_eq!(
             parse_cond(&table("has_named_unit = \"ivo\"\nunit = \"dt:knight\"\ngarrison = \"tower\"")),
             Ok(Cond::HasNamed { named: "ivo".into(), unit: Ref::parse("dt:knight").unwrap(), holder: Holder::Garrison("tower".into()), present: true })

@@ -105,7 +105,7 @@ pub(crate) fn raise_within_means(run: &mut Run) -> usize {
 }
 
 /// The hub's town: the walk to Ashford (its recruits and its service), the healing, then the hiring.
-fn ashford(run: &mut Run) -> Result<(), Stuck> {
+pub(crate) fn ashford(run: &mut Run) -> Result<(), Stuck> {
     run.walk_to((58, 44), 2)?;
     heal_within_means(run);
     raise_within_means(run);

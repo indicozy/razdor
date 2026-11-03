@@ -2,8 +2,13 @@
 # `camp`. Every trigger names its map. Triggers that share a moment run in file order, and each
 # condition reads the state the earlier ones left.
 #
-# Kord: kord = 0 unmet, 1 hired (his company joins the hero), 2 betrayed (his company hunts the hero),
-# 3 friend. Buying the red company changes its side on the map, and Oakford with it.
+# The hub sends the hero here only once Kord is hired (kord 1 or 3): his men walk in the hero's squad from the
+# hub on, so the camp has no Kord offer of its own. Kord's price is the loot of the Crown's column (`camp_loot_*`):
+# split it and he is a friend (kord 3), keep it and he turns (kord 2) with his men against the hero.
+#
+# The relief: the Crown's guard is sighted when the hero has settled both big matters (the red company and the
+# Crown's column: `camp_deeds` 2), or three weeks pass (the backstop). The sighting is a warning: the guard
+# marches the day after, to the hall's yard. The diary says so at each step.
 #
 # The duel: Varga fights the captain of the Crown's guard. The engine has no test for "the named
 # unit is gone", so the duel is read in two steps: the win (Varga is still with the hero) comes first
@@ -12,13 +17,19 @@
 [vars]
 camp_week = 0              # weeks since the chapter began
 camp_duel = false          # Varga has accepted the duel with the captain
+camp_deeds = 0             # the two acts: the Crown's column struck, the red company bought (2 sights the relief)
+relief = 0                 # the Crown's relief: 0 not yet, 1 sighted (marches tomorrow), 2 marching or here
 
-# The start: the companies patrol the lowland, the Crown's supply column comes to the ambush point.
+# The start: the companies patrol the lowland, the Crown's supply column comes to the ambush point. The hero
+# is healed and the army's dead are raised: the camp starts with the squad he carries, whole.
 [[trigger]]
 id = "camp_arrival"
 map = "camp"
 when = { event = "game_start" }
 then = [
+    { heal_army = "player" },
+    { quest = "camp_hold", title = "camp.quest.hold.title", text = "camp.quest.hold.text" },
+    { quest = "supply", title = "camp.quest.supply.title", text = "camp.quest.supply.text" },
     { dialog = "camp_arrival" },
     { army_goal = "supply", go_to = [60, 71] },
 ]
@@ -31,22 +42,6 @@ id = "camp_post_garrison"
 map = "camp"
 when = { event = "game_start" }
 then = [ { add_units = "post", troops = ["dt:swordsman", "dt:crossbowman"], of = "building" } ]
-
-# Kord's band patrols the lowland while he is unmet. Hired in the hub (kord 1 or 3), his men already walk in
-# the hero's squad, so the band is not on this map (`camp_kord_gone`).
-[[trigger]]
-id = "camp_kord_patrol"
-map = "camp"
-when = { event = "game_start" }
-if = [ { var = "kord", value = 0 } ]
-then = [ { army_goal = "kord_band", patrol = [[30, 52], [36, 62], [30, 62]] } ]
-
-[[trigger]]
-id = "camp_kord_gone"
-map = "camp"
-when = { event = "game_start" }
-if = [ { var = "kord", op = "!=", value = 0 } ]
-then = [ { remove_army = "kord_band" } ]
 
 [[trigger]]
 id = "camp_week"
@@ -64,14 +59,19 @@ once = false
 if = [ { var = "kord", op = ">=", value = 1 }, { var = "kord", op = "!=", value = 2 } ]
 then = [ { give_gold = -10 } ]
 
-# The Crown's relief: from the third week it marches on the camp's hall.
+# ---- the relief: sighted by the two acts (or the third week), marching the day after ----------------
+
+# The day after the sighting: the guard comes to the hall's yard. Before the sighting trigger in file order, so
+# the warning and the march never fall on the same day.
 [[trigger]]
-id = "camp_relief"
+id = "camp_relief_march"
 map = "camp"
-when = { event = "week_start" }
-if = [ { var = "camp_week", op = ">=", value = 3 } ]
+when = { event = "day_start" }
+once = false
+if = [ { var = "relief", value = 1 } ]
 then = [
-    { dialog = "camp_relief" },
+    { set = "relief", value = 2 },
+    { quest = "camp_hold", title = "camp.quest.hold.title", text = "camp.quest.hold.here" },
     {
         spawn_army = "camp_relief",
         at = [94, 8],
@@ -82,6 +82,34 @@ then = [
     # Up to the hall's yard, not into the tavern: an army sheltered in a tavern cannot be engaged, and the
     # chapter would never end (the relief waits in the open, beside the hall).
     { army_goal = "camp_relief", go_to = [60, 58] },
+    { dialog = "camp_relief" },
+]
+
+# The sighting by the deeds: the column struck and the red company bought (`camp_deeds` 2). Letting the column
+# pass or leaving the red company is no act.
+[[trigger]]
+id = "camp_relief_sighted"
+map = "camp"
+when = { event = "day_start" }
+once = false
+if = [ { var = "relief", value = 0 }, { var = "camp_deeds", op = ">=", value = 2 } ]
+then = [
+    { set = "relief", value = 1 },
+    { quest = "camp_hold", title = "camp.quest.hold.title", text = "camp.quest.hold.warned" },
+    { dialog = "camp_relief_warn" },
+]
+
+# The sighting by the clock: the third week, if the hero has not settled the matters.
+[[trigger]]
+id = "camp_relief_clock"
+map = "camp"
+when = { event = "week_start" }
+once = false
+if = [ { var = "relief", value = 0 }, { var = "camp_week", op = ">=", value = 3 } ]
+then = [
+    { set = "relief", value = 1 },
+    { quest = "camp_hold", title = "camp.quest.hold.title", text = "camp.quest.hold.warned" },
+    { dialog = "camp_relief_warn" },
 ]
 
 # The Crown in bad standing sends a bounty company to the stony hills.
@@ -100,30 +128,14 @@ then = [
     },
 ]
 
-# Kord: met on the lowland, the offer of his company; the hire.
-[[trigger]]
-id = "camp_kord_offer"
-map = "camp"
-when = { event = "hero_enters", at = [42, 54, 14, 12] }
-if = [ { var = "kord", value = 0 } ]
-then = [ { dialog = "camp_kord" } ]
+# ---- the red company: bought (100 gold) or left, it is one of the two big matters -------------------
 
-[[trigger]]
-id = "camp_kord_hire"
-map = "camp"
-when = { event = "dialog_choice", dialog = "camp_kord", choice = "hire" }
-then = [
-    { set = "kord", value = 1 },
-    { add = "companies", value = 1, min = -5, max = 5 },
-    { set_faction = "kord_band", faction = "player" },
-]
-
-# The red company: bought for gold, it changes sides on the map and Oakford with it.
+# The red company's offer, at its camp by the east road.
 [[trigger]]
 id = "camp_red_offer"
 map = "camp"
 when = { event = "hero_enters", at = [72, 42, 8, 8] }
-then = [ { dialog = "camp_red" } ]
+then = [ { quest = "red", title = "camp.quest.red.title", text = "camp.quest.red.text" }, { dialog = "camp_red" } ]
 
 [[trigger]]
 id = "camp_red_buy"
@@ -133,7 +145,15 @@ then = [
     { set_faction = "red_company", faction = "player" },
     { set_relation = "red_company", towards = "enemy", value = 3 },
     { add = "companies", value = 1, min = -5, max = 5 },
+    { add = "camp_deeds", value = 1 },
+    { complete_quest = "red" },
 ]
+
+[[trigger]]
+id = "camp_red_leave"
+map = "camp"
+when = { event = "dialog_choice", dialog = "camp_red", choice = "leave" }
+then = [ { complete_quest = "red" } ]
 
 [[trigger]]
 id = "camp_oakford_flip"
@@ -144,7 +164,8 @@ then = [
     { set_relation = "oakford", towards = "enemy", value = 3, of = "building" },
 ]
 
-# The duel: Varga, halberdier of the hero's army, against the captain in the arena.
+# ---- the duel: Varga, halberdier of the hero's army, against the captain in the arena ---------------
+
 [[trigger]]
 id = "camp_duel_offer"
 map = "camp"
@@ -154,13 +175,19 @@ if = [
     { var = "varga_alive", value = true },
     { has_named_unit = "varga", unit = "dt:halberdier" },
 ]
-then = [ { dialog = "camp_duel" } ]
+then = [ { quest = "duel", title = "camp.quest.duel.title", text = "camp.quest.duel.text" }, { dialog = "camp_duel" } ]
 
 [[trigger]]
 id = "camp_duel_accept"
 map = "camp"
 when = { event = "dialog_choice", dialog = "camp_duel", choice = "accept" }
 then = [ { set = "camp_duel", value = true }, { army_goal = "duel_captain", attack = "hero" } ]
+
+[[trigger]]
+id = "camp_duel_refuse"
+map = "camp"
+when = { event = "dialog_choice", dialog = "camp_duel", choice = "refuse" }
+then = [ { complete_quest = "duel" } ]
 
 # The win: Varga is still in the army. Her axe is the captain's, and the Companies talk of her.
 [[trigger]]
@@ -172,6 +199,7 @@ then = [
     { set = "camp_duel", value = false },
     { give_item = "camp_axe", to = "named:varga" },
     { add = "companies", value = 1, min = -5, max = 5 },
+    { complete_quest = "duel" },
     { dialog = "camp_duel_won" },
 ]
 
@@ -184,8 +212,11 @@ if = [ { var = "camp_duel", value = true }, { has_named_unit = "varga", unit = "
 then = [
     { set = "camp_duel", value = false },
     { set = "varga_alive", value = false },
+    { complete_quest = "duel" },
     { dialog = "camp_duel_lost" },
 ]
+
+# ---- the Crown's column: the hit or the pass is the second big matter -------------------------------
 
 # The Crown's supply column reaches the ambush point: the hit, or the column goes on.
 [[trigger]]
@@ -195,20 +226,23 @@ when = { event = "army_arrives", army = "supply", at = [60, 71] }
 then = [ { dialog = "camp_raid" } ]
 
 # The hit: the companies come out of the camp's waygate and fall on the column. Kord's men are in the hero's
-# squad (camp_kord_gone), so the hit is the hero's fight: the column is sent at him, and it is beaten by the
-# squad or the hero loses as in any battle. (It was an AI battle of a band that is not on the map: the hit
-# did nothing and the column was never beaten.)
+# squad, so the hit is the hero's fight: the column is sent at him, and it is beaten by the squad or the hero
+# loses as in any battle.
 [[trigger]]
 id = "camp_raid_hit"
 map = "camp"
 when = { event = "dialog_choice", dialog = "camp_raid", choice = "hit" }
-then = [ { army_goal = "supply", attack = "hero" } ]
+then = [ { army_goal = "supply", attack = "hero" }, { add = "camp_deeds", value = 1 }, { complete_quest = "supply" } ]
 
 [[trigger]]
 id = "camp_raid_pass"
 map = "camp"
 when = { event = "dialog_choice", dialog = "camp_raid", choice = "pass" }
-then = [ { add = "crown", value = 1, min = -5, max = 5 }, { army_goal = "supply", clear = true } ]
+then = [
+    { add = "crown", value = 1, min = -5, max = 5 },
+    { army_goal = "supply", clear = true },
+    { complete_quest = "supply" },
+]
 
 # The column beaten: a caravan lost to the Crown, the companies gain, the Crown loses.
 [[trigger]]
@@ -222,7 +256,8 @@ then = [
     { give_gold = 40 },
 ]
 
-# The loot: with Kord's company hired, he asks his share. Split it, or keep it and he turns.
+# Kord's price: with his company hired, he asks his share of the column's loot. Split it (friend), or keep
+# it and he turns on the hero with his men.
 [[trigger]]
 id = "camp_loot_offer"
 map = "camp"
@@ -242,23 +277,161 @@ map = "camp"
 when = { event = "dialog_choice", dialog = "camp_loot", choice = "keep" }
 then = [
     { set = "kord", value = 2 },
-    { set_faction = "kord_band", faction = "enemy" },
+    { spawn_army = "kord_band", at = [60, 73], faction = "enemy", model = 5, troops = ["dt:bandit", "dt:bandit", "dt:robber"] },
     { army_goal = "kord_band", attack = "hero" },
     { add = "companies", value = -2, min = -5, max = 5 },
 ]
+
+# ---- the waygate: lighting it says what it does in chapter 4 ----------------------------------------
 
 # The companies' waygate: the stones can be lit, which opens a gate for chapter 4.
 [[trigger]]
 id = "camp_gate_offer"
 map = "camp"
 when = { event = "hero_enters", at = [46, 58, 5, 5] }
-then = [ { dialog = "camp_gate" } ]
+then = [ { quest = "gate", title = "camp.quest.gate.title", text = "camp.quest.gate.text" }, { dialog = "camp_gate" } ]
 
 [[trigger]]
 id = "camp_gate_light"
 map = "camp"
 when = { event = "dialog_choice", dialog = "camp_gate", choice = "light" }
-then = [ { add = "gates_open", value = 1 }, { add = "companies", value = 1, min = -5, max = 5 } ]
+then = [ { add = "gates_open", value = 1 }, { add = "companies", value = 1, min = -5, max = 5 }, { complete_quest = "gate" } ]
+
+[[trigger]]
+id = "camp_gate_leave"
+map = "camp"
+when = { event = "dialog_choice", dialog = "camp_gate", choice = "leave" }
+then = [ { complete_quest = "gate" } ]
+
+# ---- the road's scenes: one a few cells apart, so the walk pays every 6 to 10 cells --------------------
+
+[[trigger]]
+id = "camp_beat_ledger"
+map = "camp"
+when = { event = "hero_enters", at = [85, 61, 6, 6] }
+then = [ { dialog = "camp_ledger" } ]
+
+[[trigger]]
+id = "camp_beat_gibbet"
+map = "camp"
+when = { event = "hero_enters", at = [79, 53, 6, 6] }
+then = [ { dialog = "camp_gibbet" } ]
+
+[[trigger]]
+id = "camp_beat_sign"
+map = "camp"
+when = { event = "hero_enters", at = [73, 47, 6, 6] }
+then = [ { dialog = "camp_sign" } ]
+
+[[trigger]]
+id = "camp_beat_herd"
+map = "camp"
+when = { event = "hero_enters", at = [66, 44, 5, 5] }
+then = [ { dialog = "camp_herd" } ]
+
+[[trigger]]
+id = "camp_beat_carts"
+map = "camp"
+when = { event = "hero_enters", at = [57, 47, 5, 5] }
+then = [ { dialog = "camp_carts" } ]
+
+[[trigger]]
+id = "camp_beat_hall"
+map = "camp"
+when = { event = "hero_enters", at = [52, 52, 6, 6] }
+then = [ { dialog = "camp_hall" } ]
+
+[[trigger]]
+id = "camp_beat_fence"
+map = "camp"
+when = { event = "hero_enters", at = [53, 63, 6, 6] }
+then = [ { dialog = "camp_fence" } ]
+
+[[trigger]]
+id = "camp_beat_west1"
+map = "camp"
+when = { event = "hero_enters", at = [55, 69, 4, 5] }
+then = [ { dialog = "camp_west_road" } ]
+
+[[trigger]]
+id = "camp_beat_west2"
+map = "camp"
+when = { event = "hero_enters", at = [47, 68, 4, 5] }
+then = [ { dialog = "camp_guardsman" } ]
+
+[[trigger]]
+id = "camp_beat_west3"
+map = "camp"
+when = { event = "hero_enters", at = [39, 66, 4, 5] }
+then = [ { dialog = "camp_kord_fire" } ]
+
+[[trigger]]
+id = "camp_beat_west4"
+map = "camp"
+when = { event = "hero_enters", at = [33, 66, 3, 4] }
+then = [ { dialog = "camp_farm" } ]
+
+[[trigger]]
+id = "camp_beat_west5"
+map = "camp"
+when = { event = "hero_enters", at = [25, 58, 4, 4] }
+then = [ { dialog = "camp_crows" } ]
+
+[[trigger]]
+id = "camp_beat_walls"
+map = "camp"
+when = { event = "hero_enters", at = [22, 51, 3, 4] }
+then = [ { dialog = "camp_oakford_walls" } ]
+
+[[trigger]]
+id = "camp_beat_south1"
+map = "camp"
+when = { event = "hero_enters", at = [87, 77, 6, 6] }
+then = [ { dialog = "camp_arena" } ]
+
+[[trigger]]
+id = "camp_beat_stakes"
+map = "camp"
+when = { event = "hero_enters", at = [81, 76, 3, 4] }
+then = [ { dialog = "camp_stakes" } ]
+
+[[trigger]]
+id = "camp_beat_south2"
+map = "camp"
+when = { event = "hero_enters", at = [73, 75, 4, 5] }
+then = [ { dialog = "camp_ditch" } ]
+
+[[trigger]]
+id = "camp_beat_south3"
+map = "camp"
+when = { event = "hero_enters", at = [63, 71, 4, 4] }
+then = [ { dialog = "camp_track" } ]
+
+[[trigger]]
+id = "camp_beat_hill"
+map = "camp"
+when = { event = "hero_enters", at = [77, 39, 3, 3] }
+then = [ { dialog = "camp_hill" } ]
+
+[[trigger]]
+id = "camp_beat_north1"
+map = "camp"
+when = { event = "hero_enters", at = [81, 33, 6, 6] }
+then = [ { dialog = "camp_watchtower" } ]
+
+[[trigger]]
+id = "camp_beat_north2"
+map = "camp"
+when = { event = "hero_enters", at = [77, 25, 6, 6] }
+then = [ { dialog = "camp_stones" } ]
+
+[[trigger]]
+id = "camp_beat_north3"
+map = "camp"
+when = { event = "hero_enters", at = [69, 19, 6, 6] }
+then = [ { dialog = "camp_banner" } ]
+
+# ---- trust and the camp's end ------------------------------------------------------------------------
 
 # The companies name the hero their captain once they trust him: gold, once.
 [[trigger]]
@@ -274,28 +447,29 @@ id = "camp_end_friend"
 map = "camp"
 when = { event = "army_defeated", army = "camp_relief" }
 if = [ { var = "kord", value = 3 } ]
-then = [ { set = "camp_done", value = true }, { dialog = "camp_end_friend" }, { victory = true } ]
+then = [ { set = "camp_done", value = true }, { complete_quest = "camp_hold" }, { dialog = "camp_end_friend" }, { victory = true } ]
 
 [[trigger]]
 id = "camp_end_hired"
 map = "camp"
 when = { event = "army_defeated", army = "camp_relief" }
 if = [ { var = "kord", value = 1 } ]
-then = [ { set = "camp_done", value = true }, { dialog = "camp_end_hired" }, { victory = true } ]
+then = [ { set = "camp_done", value = true }, { complete_quest = "camp_hold" }, { dialog = "camp_end_hired" }, { victory = true } ]
 
 [[trigger]]
 id = "camp_end_betrayed"
 map = "camp"
 when = { event = "army_defeated", army = "camp_relief" }
 if = [ { var = "kord", value = 2 } ]
-then = [ { set = "camp_done", value = true }, { dialog = "camp_end_betrayed" }, { victory = true } ]
+then = [ { set = "camp_done", value = true }, { complete_quest = "camp_hold" }, { dialog = "camp_end_betrayed" }, { victory = true } ]
 
+# Kept as the fallback: no route enters the camp with Kord unmet (the hub's Companies need him hired).
 [[trigger]]
 id = "camp_end_alone"
 map = "camp"
 when = { event = "army_defeated", army = "camp_relief" }
 if = [ { var = "kord", value = 0 } ]
-then = [ { set = "camp_done", value = true }, { dialog = "camp_end_alone" }, { victory = true } ]
+then = [ { set = "camp_done", value = true }, { complete_quest = "camp_hold" }, { dialog = "camp_end_alone" }, { victory = true } ]
 
 # Kord as a friend: his company shares its purse with the hero, once.
 [[trigger]]
