@@ -58,6 +58,12 @@ fn conf() -> Conf {
     if let Some(code) = razdor::hub::export_cli(&args) {
         std::process::exit(code);
     }
+    // `--studio-mcp`: the stdio bridge of Razdor Studio's MCP server (`razdor::studio::mcp::bridge`),
+    // for the agent in the studio's Claude dock. No window, no log: it relays to the running studio.
+    #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+    if let Some(code) = razdor::studio::mcp::bridge::cli(&args) {
+        std::process::exit(code);
+    }
     // The log of this start (`razdor.log`, see `razdor::diag`), before anything can fail.
     razdor::diag::init();
     // `RAZDOR_DT_DIR` and the other settings may come from a `.env` file.
@@ -205,10 +211,6 @@ async fn main() {
     ui::session::install_exit_hooks();
     #[cfg(target_os = "ios")]
     ui::ios::observe_app_state();
-    // `--editor`: start in the map editor.
-    if std::env::args().skip(1).any(|a| a == "--editor") {
-        app.open_editor();
-    }
     // A `.rzpack` named on the command line is imported into the Hub (checked, not from the list).
     let args: Vec<String> = std::env::args().skip(1).collect();
     for notice in ui::hub_pack::import_args(&args) {
@@ -217,6 +219,14 @@ async fn main() {
     // `--pack <folder-or-.rzpack> [--map <id>]` (or RAZDOR_PACK): the package's map as a new game.
     if let Some((path, map)) = ui::pack_play::requested() {
         if let Err(e) = app.open_pack(&path, map.as_deref()) {
+            eprintln!("razdor: {e}");
+            exit_now(&mut app);
+        }
+    }
+    // `--studio [<package folder>]`: Razdor Studio on a package folder (the example package by default).
+    #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+    if let Some(folder) = ui::studio::requested() {
+        if let Err(e) = folder.and_then(|f| app.open_studio(&f)) {
             eprintln!("razdor: {e}");
             exit_now(&mut app);
         }

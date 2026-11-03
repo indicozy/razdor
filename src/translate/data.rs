@@ -188,7 +188,7 @@ pub fn write(job: &Job, data: &DataTexts, install: &Path) -> Result<Vec<PathBuf>
     let mut written = Vec::new();
     for (i, bytes) in data_files(job, data) {
         let target = data_path(install, &prefix, FILES[i].rus).ok_or_else(|| format!("{}: not found", FILES[i].rus))?;
-        crate::editor::files::write_atomically(&target, &bytes).map_err(|e| format!("{}: {e}", target.display()))?;
+        crate::fsutil::write_atomically(&target, &bytes).map_err(|e| format!("{}: {e}", target.display()))?;
         written.push(target);
     }
     Ok(written)

@@ -495,7 +495,7 @@ impl Job {
             std::fs::create_dir_all(d)?;
         }
         let json = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
-        crate::editor::files::write_atomically(path, json.as_bytes())
+        crate::fsutil::write_atomically(path, json.as_bytes())
     }
 }
 
@@ -513,7 +513,7 @@ pub fn file_bytes(s: &Scenario, like: &[u8]) -> Result<Vec<u8>, DtError> {
 mod tests {
     use super::*;
     use crate::dt::dtm::{Army, Event};
-    use crate::editor::defaults::new_building;
+    use crate::dt::blank::new_building;
 
     fn scenario(title: &str, next: &str) -> Scenario {
         let mut s = Scenario { title: title.into(), next_map: next.into(), ..Scenario::default() };

@@ -185,3 +185,7 @@ The package does not pass the check (errors: {n}), so it is not imported. = Па
 Razdor packages = Пакеты Razdor
 Import… = Импорт…
 Diary = Дневник
+
+# Moved from the map editor (used by the game and the studio too).
+event point = точка события
+New scenario = Новый сценарий

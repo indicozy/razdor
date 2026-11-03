@@ -206,8 +206,16 @@ fn whole(message: String, hint: &str) -> TerrainProblem {
     TerrainProblem { at: None, message, hint: hint.to_string() }
 }
 
-/// A picture of the given size, all cells `fill`, for tests and the example's generator.
-#[cfg(test)]
+/// The picture of a terrain: one RGB pixel per cell, in the palette's colours. The studio writes a
+/// painted terrain with it; the bytes decode back to the same codes with the same palette.
+pub fn encode(t: &Terrain, palette: &Palette) -> Vec<u8> {
+    encode_rgb(t.width, t.height, |x, y| {
+        let code = t.cells[(y * t.width + x) as usize];
+        Surface::from_code(code).map_or([0, 0, 0], |s| palette.colour_of(s))
+    })
+}
+
+/// A picture of the given size, the colour of each pixel from `colour_of` (RGB, 8 bits a channel).
 pub fn encode_rgb(w: u32, h: u32, colour_of: impl Fn(u32, u32) -> [u8; 3]) -> Vec<u8> {
     let mut out = Vec::new();
     {

@@ -17,4 +17,5 @@ pub mod hub;
 pub mod translate;
 pub mod update;
 pub mod dt;
-pub mod editor;
+pub mod fsutil;
+pub mod studio;

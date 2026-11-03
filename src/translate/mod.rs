@@ -204,7 +204,7 @@ pub fn write_maps(job: &Job, maps_dir: &Path, overwrite: bool) -> Result<Vec<Pat
         let bytes = std::fs::read(&src).map_err(|e| format!("{}: {e}", src.display()))?;
         let s = Scenario::from_file_bytes(&bytes).map_err(|e| format!("{}: {e}", src.display()))?;
         let out = job::file_bytes(&job.english(&s), &bytes).map_err(|e| format!("{}: {e}", src.display()))?;
-        crate::editor::files::write_atomically(&target, &out).map_err(|e| format!("{}: {e}", target.display()))?;
+        crate::fsutil::write_atomically(&target, &out).map_err(|e| format!("{}: {e}", target.display()))?;
         written.push(target);
     }
     Ok(written)

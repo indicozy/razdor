@@ -1,63 +1,99 @@
 ---
-title: Map Editor
-description: A guide on using the Razdor scenario editor to create and edit .DTm format maps.
+title: Razdor Studio
+description: The Razdor package editor: opening or making a package, the map, the inspector, the script, checks, undo and saving.
 sidebar:
   order: 1
 ---
 
-Razdor includes a built-in scenario editor that allows you to create `.DTm` format maps. These maps are compatible with both the original game and the Razdor engine.
+Razdor Studio edits `.rzpack` packages: folders with a map, texts and a script. The studio is in
+the Windows, Linux and macOS builds; there is none on phones. Everything you change is written to
+the files of the package folder.
 
-![The map editor](../../../../assets/shots/editor.webp)
+## Opening a package
 
-## Launching the Editor
+In the main menu, press **Editor**. The studio opens the package you worked on last. If there is
+none, a start page appears:
 
-There are two ways to launch the editor:
-The game's menu has no editor button yet: the editor is not ready. Start it by launching the game with the `--editor` flag (for example `Razdor.exe --editor` on Windows or `./razdor --editor` on Linux).
+* **Open package folder…** — pick a folder that has a `package.toml` in it.
+* **New package** — type a folder name, choose where to make it, and press **Create package**. The
+  package gets one 50 by 50 map: a meadow, the hero in its middle, and a victory when all the enemy
+  armies are beaten.
 
-:::tip
-If the `RAZDOR_DT_DIR` environment variable is set on your system, the editor will use original graphics, load object and building images, and use the names of warriors, artifacts, and spells from your installed game. If the variable is not set, placeholders will be displayed instead.
-:::
+**Back to the menu** returns to the main menu.
 
-## Basic Tools
+## Windows
 
-Editing tools are located in the right column. For convenience, you can use hotkeys:
+* **File system** — the files of the package. A click opens a file in the Script.
+* **Scene** — the objects of the open map.
+* **Map** — the map itself, drawn as the game draws it.
+* **Script** — the text of the open file. The selection is linked to the map: the selected object
+  is highlighted in the text, and the other way round.
+* **Inspector** — the fields of the selected object.
+* **Problems** — the result of the checks. A click goes to the place of the error.
+* **Output** — the log of the actions.
 
-* **"Select and Move"** (`V`): standard operation mode.
-* **"Terrain"** (`T`): allows you to work with 16 types of surfaces. Brush modes (size 1/3/5/9), fill, and rectangle drawing are available.
-* **"Objects"** (`O`): placement of hills, mountains, rocks, and trees. Multiple objects can be placed on a single tile.
-* **"Eraser"** (`E`): removing objects.
-* **"Building"** (`B`): placing buildings. The tile you click will become the bottom-right corner of the building. If the building does not fit, the preview will be red.
-* **"Army"** (`A`): creating armies.
-* **"Point"** (`P`): placing lanterns or event points.
+Windows can be dragged, split and opened as tabs.
 
-## Toolbar and Controls
+## The map
 
-The top panel contains the main commands for file management and settings:
+The tools are **Select**, **Building**, **Army**, **Point**, **Object** and **Terrain** (a brush of
+1 to 6 or 9 cells), with the pages described below. A tool places its object where you click; a
+selected object can be dragged.
 
-* **"New"**: create a new map (you can choose a size: 50/100/200 or set your own).
-* **"Open"**: load game maps, your own maps, or specify a file path.
-* **"Save"** (`Ctrl+S`) and **"Save As"** (`Ctrl+Shift+S`).
-* **"Settings"**: here you can set the name, description, starting date, victory/defeat conditions, the hero's three beginnings, faction relations, campaign parameters, and named characters.
-* **"Check"**: error list. If there are errors in the list, you will not be able to save the map. Clicking on an error line will take you to the problematic area.
-* **"Playtest"**: launch the map in game mode. To return to the editor, press `Esc` and select "Main menu".
+The check boxes are **Grid**, **Footprints** (the cells the buildings take) and **Reach** (the cells
+the hero cannot walk to on the map's story). Placement errors, such as an object on water or
+buildings on top of each other, show on the map at once; the details are in **Problems**.
 
-:::note
-When editing buildings, armies, or points, you can change their properties (names, descriptions, garrisons, goods, spells, AI settings, etc.) via the panels that open. The `Delete` key removes the selected element, after which the numbers and references in the scenario are automatically recalculated.
-:::
+### Map tools
 
-## Map Search
+The tool bar's pages follow DTMapEdit's: **Terrain** (a brush of 1, 2, 3, 4, 5, 6 or 9 cells),
+**Hills** (one hill per brush centre, sized by the brush; **Erase** takes the hills the brush
+covers), **Forests** (one tree per cell of a chosen family, or a thicket; **Replace trees** re-rolls
+only what the family replaces), **Buildings** (**Erase** removes the building that covers the
+cell), **Items** (not yet: the package format has no items on the ground), **Rectangle** and
+**Fill** (a rectangle, or the connected cells of one kind, takes the palette's kind).
 
-The search function (`Ctrl+F`) opens a window in the top right corner. It allows you to find:
-* **Buildings** (by name, number, type, owner, garrison, etc.);
-* **Armies** (by name, number, leader, troops, or items);
-* **Points and Events** (by number, name, or message text);
-* **Objects and Hero Beginnings** (by class).
+**Copy** takes a rectangle: **Ctrl+C** copies it, **Ctrl+V** arms a paste that follows the pointer
+and **Esc** stops. **Save stamp** keeps the copy in the package under a name; the **Stamps** tab
+lists them, and a click arms one for pasting.
 
-To search for a specific number, use the `#` prefix (e.g., `#10`). Press `F3` to jump to the next result.
+**Move** is a mode for every tool: the first click picks an object up (an army, a building, a point
+or a terrain object), the next click drops it. **Burn everything** asks first; it turns live trees
+into dead ones and scorches the ground above water, as one undo step.
 
-## Saving Maps
+The **Minimap** tab shows the whole map with the view frame; a click or a drag moves the view.
 
-The editor automatically determines where to write the file. By default, maps are saved to your user map folder, to `RAZDOR_MAPS_DIR`, or to `~/.local/share/razdor/maps`.
+Overlays: **Passable** (the walk grid: hard, impassable, building, water), **Patrols** (the army
+routes of the story) and **Fog** (what the hero and the lit lanterns see at the start), besides
+**Grid**, **Footprints** and **Reach**.
 
-* Maps opened from the game folder (`Maps_Rus`) **will never overwrite** the original game files when saved.
-* The **"Save to game folder"** button allows you to write changes directly to `Maps_Rus`, but only after your confirmation. If you attempt to replace an existing shipped map, the editor will ask for confirmation a second time.
+## Editing, undo and saving
+
+* Changes stay in memory until you press **Ctrl+S** (save the open file) or **Save all**.
+* **Ctrl+Z** undoes and **Ctrl+Y** or **Ctrl+Shift+Z** redoes. There is one undo for the whole
+  package: changes on the map, in the script and changes to files from the disk.
+* **Delete** removes the selected object from its file.
+* When a file is changed in another program, a clean tab reloads by itself. A tab with unsaved
+  changes asks: reload, keep yours, or show the difference.
+* When the text of a file is broken, the map shows the last correct state and the line of the
+  error. The other files stay editable.
+
+## Scenario: package, map, campaign, characters, texts
+
+- **Package settings** («Package» → «Package settings», or `package.toml` in the file tree): version, title, description, author, licence, base. The id is read only.
+- **Map settings** («Package» → «Map settings», or the map's name in the scene): title, description, start date, the relations between the sides (−3 to 3), terrain colours and the victory (its kind and its argument).
+- **Campaign** (the «Campaign» main screen): maps as nodes, next-maps as arrows with numbers (1 is tried first). Drag a node to move it; drag from its right edge to another node to add a next-map. Select an arrow to change its order, delete it or set its conditions. Dashed arrows are set by triggers (travel, victory with a next map, ending); they are read only here and are edited in Script.
+- **Characters** (the «Characters» tab at the bottom): where each character is given, required and removed. A warning when a character is needed before any map gives it. Renaming changes it in every file in one undo step.
+- **Texts** (the «Texts» main screen): one row per key, one column per language. Red: used but defined in no language; grey: defined but never used; amber: a language lacks it. «Add language» creates `texts/<language>.toml` with every key empty.
+
+Each change is one undo step (Ctrl+Z).
+
+## Not yet
+
+The studio does not have a story editor (triggers and dialogues), a campaign graph, a table of
+texts or route checks yet. These come in later versions.
+
+## .DTm maps
+
+The studio works with packages, not with the old `.DTm` maps. `.DTm` maps are still edited in
+Razdor 1.x and in the original DTMapEdit.

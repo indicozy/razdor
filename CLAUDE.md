@@ -43,7 +43,7 @@ smoke test and `max_bench` green. Design: `docs/superpowers/specs/2026-11-02-v2-
 - `src/dt/`: reading the original's files (ini, `.DTm` maps, LIT/UGS pictures, sounds). No macroquad.
 - `src/rules/`: game rules, no macroquad, unit-tested (battle, AI, world, events, economy, saves).
 - `src/ui/`: macroquad screens and windows; `snapshot.rs` holds the off-screen scenes.
-- `src/editor/`: the map editor's model.
+- `src/studio/`: Razdor Studio's model (the package workspace, edits, history, the map model, geometry).
 - `src/difftest.rs`, `src/difftest/`, `tools/difftest/`: script mode and replays compared with
   the original step by step.
 - `docs/reference/original-mechanics/*.md`: clean-room specs of the original, each ending with a

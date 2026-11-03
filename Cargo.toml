@@ -20,6 +20,12 @@ serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
 sha2 = "0.10.9"
 # The `.rzpack` package format (`pack`): its manifest, texts and content files.
 toml = { version = "0.9", features = ["serde"] }
+# Format-preserving TOML for the studio's writes (`studio::edit`): comments, order and layout survive.
+toml_edit = "0.25"
+# Line diffs of a file changed on disk (`studio::reconcile`).
+similar = "3.2"
+# The Razdor Studio MCP server's token: 128 random bits (`studio::mcp::server`).
+getrandom = "0.2"
 # The terrain picture of a package map (`maps/<id>/terrain.png`): indexed or RGB, 8-bit after decoding.
 png = "0.17"
 # Unpacking the game archive on the phones (`dt::unpack`): pure Rust, no deflate C code.
@@ -27,6 +33,12 @@ sevenz-rust2 = { version = "0.20.2", default-features = false, features = ["ppmd
 zip = { version = "9.1.0", default-features = false, features = ["deflate-flate2"] }
 unicode-bidi = "0.3"
 mlua = { version = "0.12", features = ["lua54", "vendored"], optional = true }
+# Razdor Studio's UI (step 1): egui 0.31 inside macroquad's window (`ui::studio`) and its docks.
+# Desktop only: the studio feature is compiled out of Android and iOS (see below).
+egui-macroquad = { version = "0.17.3", optional = true }
+egui_dock = { version = "0.16", optional = true }
+# Watches the open package folder for outside changes (`ui::studio::watch`).
+notify = { version = "8.2.1", optional = true }
 
 [dev-dependencies]
 # The tests of `dt::unpack` write a 7z archive; the game itself only reads them.
@@ -36,9 +48,13 @@ sevenz-rust2 = { version = "0.20.2", default-features = false, features = ["comp
 # (no GTK, no system libraries); Windows and macOS: their own dialogs.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
+# The Claude dock's pseudo-terminal (`studio::terminal`): Linux and macOS ptys, Windows ConPTY; and
+# its VT100 screen model (scrollback, colours, cursor). Desktop only, with the studio.
+portable-pty = { version = "0.9", optional = true }
+vt100 = { version = "0.18", optional = true }
 
 [features]
-default = ["audio", "gamepad", "lua"]
+default = ["audio", "gamepad", "lua", "studio"]
 # Sound and music (macroquad's quad-snd; on Linux it links ALSA's libasound).
 # Build with `--no-default-features` for a silent game without it.
 audio = ["macroquad/audio"]
@@ -49,6 +65,9 @@ gamepad = ["dep:gilrs"]
 # the `scripts/` folder. Vendored (compiled from source by the `lua-src` crate); a build without it
 # drops the runtime and the Lua-driven battles.
 lua = ["dep:mlua"]
+# Razdor Studio: the editor for `.rzpack` packages (`razdor --studio`), egui over the game's window.
+# Compiled out of Android and iOS (the gated code is `cfg(all(feature = "studio", not(any(android, ios))))`).
+studio = ["dep:egui-macroquad", "dep:egui_dock", "dep:notify", "dep:portable-pty", "dep:vt100"]
 
 # Line tables only: backtraces keep file and line, and the debug build stays several times
 # smaller on disk (full debug info made target/debug grow past 30 GB).

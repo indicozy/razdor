@@ -21,6 +21,16 @@ pub const MAX_FILE_BYTES: u64 = 32 << 20;
 /// How deep a folder package may nest.
 const MAX_DEPTH: usize = 32;
 
+/// The top-level folders that are never read or packed: the studio's own data (`.editor/`: layout,
+/// stamps), a repository (`.git/`) and the author's agent settings (`.claude/`). Only at the
+/// package's top level; a folder of the same name deeper in the package is a folder like any other.
+pub const SKIPPED_TOP_FOLDERS: [&str; 3] = [".editor", ".git", ".claude"];
+
+/// Whether a package-relative path lies in one of [`SKIPPED_TOP_FOLDERS`] (at the top level).
+pub fn is_skipped_top(path: &str) -> bool {
+    path.split_once('/').is_some_and(|(top, _)| SKIPPED_TOP_FOLDERS.contains(&top))
+}
+
 /// Package-relative path (`/` separators) to the file's bytes.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Files {
@@ -43,6 +53,30 @@ impl Files {
     /// The file as text; `None` when it is missing or not UTF-8.
     pub fn text(&self, path: &str) -> Option<&str> {
         self.get(path).and_then(|b| std::str::from_utf8(b).ok())
+    }
+
+    /// Puts `bytes` at `path` in memory, replacing what was there: the studio's unsaved text.
+    /// The path must be a package path in its canonical form (no `..`, no absolute path, no
+    /// backslashes), the file within [`MAX_FILE_BYTES`], the file count within [`MAX_FILES`] and
+    /// the package's size within [`MAX_PACKAGE_BYTES`]. Nothing changes when it is refused.
+    pub fn overlay(&mut self, path: &str, bytes: impl Into<Vec<u8>>) -> Result<(), String> {
+        if safe_path(path).as_deref() != Some(path) {
+            return Err(format!("not a package path: {path:?}"));
+        }
+        let bytes = bytes.into();
+        if bytes.len() as u64 > MAX_FILE_BYTES {
+            return Err(format!("{path} is larger than {} MiB", MAX_FILE_BYTES >> 20));
+        }
+        let old = self.entries.get(path).map_or(0, Vec::len) as u64;
+        if old == 0 && !self.entries.contains_key(path) && self.entries.len() >= MAX_FILES {
+            return Err(format!("the package has more than {MAX_FILES} files (at {path})"));
+        }
+        let held: u64 = self.entries.values().map(|b| b.len() as u64).sum();
+        if held - old + bytes.len() as u64 > MAX_PACKAGE_BYTES {
+            return Err(format!("the package is larger than {} MiB (at {path})", MAX_PACKAGE_BYTES >> 20));
+        }
+        self.entries.insert(path.to_string(), bytes);
+        Ok(())
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&str, &[u8])> {
@@ -80,7 +114,8 @@ impl Files {
         let mut declared = Budget::default();
         for i in 0..archive.len() {
             let entry = archive.by_index_raw(i).map_err(|e| format!("cannot read entry {i}: {e}"))?;
-            if !entry.is_dir() {
+            let skipped = safe_path(&String::from_utf8_lossy(entry.name_raw())).is_some_and(|p| is_skipped_top(&p));
+            if !entry.is_dir() && !skipped {
                 declared.admit(&String::from_utf8_lossy(entry.name_raw()), entry.size())?;
             }
         }
@@ -105,6 +140,9 @@ impl Files {
                 });
                 continue;
             };
+            if is_skipped_top(&path) {
+                continue;
+            }
             let size = entry.size();
             budget.admit(&name, size)?;
             let data = budget.finish(&name, size, &mut entry)?;
@@ -221,6 +259,9 @@ fn collect(root: &Path, dir: &Path, prefix: &str, depth: usize, files: &mut File
     entries.sort_by_key(|e| e.file_name());
     for entry in entries {
         let name = entry.file_name();
+        if prefix.is_empty() && name.to_str().is_some_and(|n| SKIPPED_TOP_FOLDERS.contains(&n)) && entry.path().is_dir() {
+            continue;
+        }
         let Some(name) = name.to_str() else {
             files.problems.push(Diagnostic {
                 severity: Severity::Error,
@@ -351,6 +392,32 @@ mod tests {
         assert_eq!(f.text("package.toml"), Some("id = \"x\""));
         assert_eq!(f.text("bin.dat"), None);
         assert_eq!(f.under("package").count(), 1);
+    }
+
+    #[test]
+    fn overlay_replaces_a_file_and_keeps_the_limits() {
+        let mut f = Files::default();
+        f.insert("units/a.toml", "old");
+        f.overlay("units/a.toml", "new").unwrap();
+        assert_eq!(f.text("units/a.toml"), Some("new"));
+        f.overlay("units/b.toml", "added").unwrap();
+        assert_eq!(f.paths().count(), 2);
+        // Paths in canonical form only.
+        for bad in ["../x.toml", "/x.toml", "units\\x.toml", "units//x.toml", "units/./x.toml", "", "C:/x.toml"] {
+            assert!(f.overlay(bad, "x").is_err(), "{bad:?} is refused");
+        }
+        assert_eq!(f.paths().count(), 2, "a refused overlay changes nothing");
+        // A file over the limit is refused, and the total over the package limit.
+        let big = vec![0u8; MAX_FILE_BYTES as usize + 1];
+        assert!(f.overlay("maps/x/map.toml", big).is_err());
+        let part = vec![0u8; 22 << 20];
+        f.overlay("a.bin", part.clone()).unwrap();
+        f.overlay("b.bin", part.clone()).unwrap();
+        let err = f.overlay("c.bin", part).unwrap_err();
+        assert!(err.contains("larger than 64 MiB"), "{err}");
+        // Replacing a file does not count its old size twice.
+        f.overlay("b.bin", vec![0u8; 1]).unwrap();
+        assert_eq!(f.get("b.bin").map(<[u8]>::len), Some(1));
     }
 
     #[test]

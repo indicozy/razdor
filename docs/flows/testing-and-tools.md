@@ -195,12 +195,54 @@ Other diagnostics: `razdor.log` in the data folder (`razdor::diag`, `RAZDOR_LOG=
   These paths are checked by `cargo check --target aarch64-linux-android` and
   `aarch64-apple-ios` only; the install itself was not run on a device.
 
-## The map editor (briefly)
+## Razdor Studio (briefly)
 
-`src/editor/` is the model (pure, tested): `doc` (the scenario document), `command`
-(undoable edits), `validate`, `files` (writes `.DTm` byte-identical for an unchanged map).
-The window is `src/ui/editor/`. Started with `--editor` (the menus have no button for it). Its
-parity work with the original DTMapEdit is paused.
+The editor for `.rzpack` packages (`razdor --studio [<folder>]`; the main menu's «Редактор»
+opens the package played last, or the start page: open a folder, or make a new one). Desktop
+builds only (the `studio` feature). The old `.DTm` editor is gone (1.x and DTMapEdit still edit
+`.DTm`). Modules: `src/studio/` is the model without macroquad (`Workspace` and `open`/`check`,
+`edit` for the format-preserving TOML writes (the toml_edit crate), `history` for undo, `map` for the Map tab's
+compiled map and its `serial`, `geometry` for the canvas's cell rectangle and footprint outline,
+`newpkg` for the new package's template, `build` and `worker` for the rebuild on a thread,
+`reconcile` for outside changes). `src/ui/studio/` is the window: `mod.rs` (docks, screen),
+`map_tab.rs` (the Map tab's input and overlays), `canvas.rs` (camera and the game's map renderer),
+`forms.rs` and `inspector.rs`, `scene.rs`, `watch.rs` (`notify`), `start.rs` (the start page).
+Files are the truth: each open file is a document, a visual edit patches its TOML text, the
+model is parsed again from that text, and one undo stack covers every change. Snapshots:
+`studio:<folder>[:<map>[:<army>[:<option>…]]]` and `studio-start` (`ui::snapshot`, the
+offscreen-snapshot skill).
+
+Map tools (phase 2, milestone 1): `studio/brush.rs` plans the tools as `Edit`s of the map file and
+terrain cells (hills, forests and their erase, burning, the flood fill, the rectangle, the mountains
+check); `studio/overlay.rs` derives the walk grid and its impassable cells (DT's marks), the start's
+fog and the trigger patrols; `studio/region.rs` copies and pastes a rectangle (new ids for pasted
+buildings and armies, a pasted army's leader loses its name) and keeps the stamps in
+`.editor/stamps/` (`<name>.toml` with the tables, `<name>.png` with the terrain; the check skips
+`.editor/`). Every operation runs as one undo step: `Workspace::begin_group` and `end_group`
+collect the changes into a `Change::Group`, `cancel_group` undoes a failed one. The Map tab
+(`ui/studio/map_tab.rs`) decides the input and runs the operations after its canvas pass; the
+Minimap and Stamps docks are `Tab::Minimap` and `Tab::Stamps`. Snapshot options: `replace`,
+`erase`, `move`, `warn-mountains`, `passable`, `patrols`, `fog`, `minimap`, `stamps`, `burn`, `copy`,
+`paste`, `brush=<n>`, `forest=<family|thicket>`, `region=x0,y0,x1,y1`, `stamp=<name>`. The format
+gaps (items on the ground, the patrol radius, the variant counts) are in `docs/OPEN_QUESTIONS.md`.
+
+Scenario forms (phase 2, milestone 2): `studio/doc.rs` is the format-preserving edit of any package TOML
+file (a `DocEdit` addresses a table by its keys, or an array entry by index or `id`; comments survive).
+`studio/scenario.rs` holds the package fields, the map header (dates, relations, palette, victory) and
+the campaign graph's edits (nodes, ordered `next` edges, `if`, `[carry]`, start, revisit).
+`studio/campaign_graph.rs` reads the graph (hidden edges from `travel`, `victory … next` and `ending`
+in the triggers and dialogs), orders the nodes breadth first from the start and lays them out; positions
+are in `.editor/layout.json`. `studio/characters.rs` finds the `named` characters (given, required,
+removed), warns when one is required before every map that gives it, and renames it across the
+triggers, dialogs and the `named.<id>` text keys (one undo step: `Workspace::set_texts`).
+`studio/texts.rs` is the key-by-language table (`pack::check::used_keys`); a new key goes at the end of
+its group's table, a new group as a new `[group]` at the end of the file. `studio/guarded.rs` is the only
+way to read or write `.editor/` (stamps and layout): a link on the way, or a target that is a link or
+not a regular file, is refused (`#[cfg(unix)]` tests). UI: `ui/studio/scenarios.rs` (the Inspector's
+Package and Map settings focus, the Campaign screen with its inspector, the Characters dock, the Texts
+screen). Snapshot options: `package`, `header`, `campaign`, `characters`, `texts`. The live run is
+`the_scenario_forms_edit_save_and_undo_on_a_copy_of_pepelnaya_marka` (a copy of the example, through the
+workspace, not XTest).
 
 ## The map translator (`razdor-translate`)
 

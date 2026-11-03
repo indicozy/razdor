@@ -43,12 +43,12 @@ scenario end:
   ui/mod.rs      ScriptEnd::Victory: language::mark_completed(active mod, map file) for the list's tick
                  (kept per mod in settings.json `completed_by_mod`, «none» for no mod; the old
                  `completed_scenarios` is read as «none»)
-                   (not in the editor's test play), then screens::hand_over() → Game::next_map() → NextMap
+                   then screens::hand_over() → Game::next_map() → NextMap
                    campaign_game() → Game::from_campaign(content, scenario, &prev)
                                        → apply_carry_over(&prev); journal.next_chapter()
                  no next map (not a campaign map, or not in the install) → the main menu,
-                   as the original (0x4aba30 → 0x4bfb34); ui/screens.rs victory() only for
-                   the editor's test play
+                   as the original (0x4aba30 → 0x4bfb34); ui/screens.rs victory() is the
+                   victory screen of battles and campaign packages (ui/pack_play.rs)
                  ScriptEnd::Defeat: its window was the last thing shown → the main menu (ui/mod.rs)
 battle defeat:  ui/battle_view.rs close_lost(): the screen closes at once → Dialog::defeat()
                   250 ms later on the map; its exit button drops the game → the main menu

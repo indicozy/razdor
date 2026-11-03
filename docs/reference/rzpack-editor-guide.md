@@ -167,8 +167,8 @@ opaque runs of objects, or own the whole object list and drop the markers.
 - **Overlays the canvas should offer:** `hero_enters` areas (`at = [x, y, w, h]`) as rectangles
   named after their trigger, with overlaps highlighted (two areas on one cell fire two dialogs at
   once). Army goals and patrols as arrows. Spawn points of `spawn_army`. Lantern radii.
-- The engine's own map editor model (`src/editor/`, for `.DTm`: palette, objects, geometry,
-  undo commands) can be reused for the canvas logic.
+- The canvas draws the compiled scenario with the game's renderer (`src/ui/studio/canvas.rs`);
+  the old `.DTm` editor's model is gone.
 
 ## 5. The story editor
 

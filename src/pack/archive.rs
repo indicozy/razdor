@@ -104,4 +104,46 @@ mod tests {
         let text = refused.expect_err("a broken manifest is refused");
         assert!(text.contains("error"), "{text}");
     }
+
+    #[test]
+    fn the_studio_folders_are_neither_read_nor_packed() {
+        // `.editor/` (the studio's layout and stamps), `.git/` and `.claude/` are not package files:
+        // a copy of the example with them in it reads and packs as the example alone.
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("razdor-pack-skip-{}-{nanos}", std::process::id()));
+        let plain = Files::from_dir(&example()).unwrap();
+        for (rel, bytes) in plain.iter() {
+            let path = dir.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, bytes).unwrap();
+        }
+        for (rel, text) in [(".editor/stamps/x.toml", "x = 1\n"), (".git/HEAD", "ref: refs/heads/main\n"), (".claude/settings.json", "{}\n")] {
+            let path = dir.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        }
+        let read = Files::from_dir(&dir);
+        let packed = pack(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        let read = read.unwrap();
+        for skipped in [".editor/stamps/x.toml", ".git/HEAD", ".claude/settings.json"] {
+            assert!(read.get(skipped).is_none(), "{skipped} is not read");
+        }
+        assert!(read.problems.is_empty(), "a skipped folder gives no problem: {:?}", read.problems);
+        assert_eq!(read.paths().collect::<Vec<_>>(), plain.paths().collect::<Vec<_>>());
+        let packed = packed.expect("the package with the studio folders packs");
+        assert_eq!(packed, pack(&example()).unwrap(), "the same bytes as the example alone");
+    }
+
+    #[test]
+    fn an_archive_with_the_studio_folders_reads_without_them() {
+        // A `.rzpack` that carries them (packed by hand) is read without them too.
+        let mut files = Files::from_dir(&example()).unwrap();
+        files.insert(".git/HEAD", "ref: refs/heads/main\n");
+        files.insert(".editor/layout.json", "{}");
+        files.insert(".claude/settings.json", "{}");
+        let back = Files::from_zip(&zip(&files).unwrap()).unwrap();
+        assert!(back.paths().all(|p| !super::super::files::is_skipped_top(p)), "{:?}", back.paths().collect::<Vec<_>>());
+        assert_eq!(back.paths().count(), Files::from_dir(&example()).unwrap().paths().count());
+    }
 }

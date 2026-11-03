@@ -81,7 +81,7 @@ fn strip_frame(ms: u64, frame_ms: u64) -> usize {
 local! {
     /// The shape the screens asked for this frame.
     static WANT: Cell<Shape> = const { Cell::new(Shape::Arrow) };
-    /// A system pointer asked for this frame (Razdor's own drags, the editor).
+    /// A system pointer asked for this frame (Razdor's own drags, the studio's canvas).
     static SYSTEM: Cell<Option<CursorIcon>> = const { Cell::new(None) };
     /// What the window shows now: the system pointer (with its icon) or none.
     static SHOWN: Cell<Option<Option<CursorIcon>>> = const { Cell::new(None) };
@@ -101,7 +101,7 @@ pub fn set(s: Shape) {
 }
 
 /// This frame's pointer is the system's `icon` (Razdor's minimap resize and map drag, which
-/// the original does not have, and the map editor); it wins over [`set`].
+/// the original does not have, and the studio's canvas); it wins over [`set`].
 pub fn system(icon: CursorIcon) {
     SYSTEM.with(|s| s.set(Some(icon)));
 }

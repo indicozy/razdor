@@ -563,6 +563,29 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 - **Pepelnaya Marka: the hub's revisit is a day-0 scene.** The revisit's victory fires at the first day start, so a
   return from a branch gives about 0.4 days in the hub (enough to walk to Ashford, not for more).
 
+## Package format gaps (studio)
+
+Map tools the studio (Razdor Studio, phase 2) cannot express in the package format yet. Each is
+left out, never faked; a format decision would settle it (`docs/reference/rzpack-format.md`).
+
+- **Items lying on the ground.** DTMapEdit's Items page places artefacts on the map. The package
+  has no table for them (`[[item]]` is the item list, not map placements): the studio's Items page
+  is shown disabled. The page's other kinds are already tables: hero starts (`[hero]`), armies
+  (`[[army]]`), lanterns and event points (`[[point]]`, with an `id` for a travel point).
+- **Patrol radius.** DTMapEdit's army has a patrol radius; a package army has none. The studio's
+  Patrols overlay draws the cells of the triggers' `army_goal … patrol` loops instead.
+- **Variant counts of hills, mountains and forests.** The original picks a random variant among the
+  sprites it has loaded (`sprite = 10 × size + variant`, `12 × family + variant`). The studio writes
+  the base variants (0 for hills, twelve for forests) without reading the install's art, so a
+  package's hills and trees are the base look. Also no "+120" alternates.
+- **Marks.** The original keeps a mark byte per cell (the grid and the building check read it); a
+  package has none. The studio rebuilds the walk grid from the objects and buildings each compile.
+- **Burn of hills and thickets.** The original scorches green and steppe hills and re-rolls
+  thickets (`main-window.md` §15). A package has no hill kinds per terrain and no thicket variants,
+  so Burn turns live trees into dead ones and the ground above water into scorched land only.
+- **Ruin pictures on burn.** The original gives burnt buildings ruin pictures and renames their
+  nouns; a package's building keeps its type and name (a `ruins` type would change play).
+
 ## Settled
 
 - **Pepelnaya Marka: the allies never reach the palace** (2026-11-03, settled 04221dc0). The goal planner

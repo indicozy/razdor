@@ -46,7 +46,7 @@ Give gemma only the sources for that page (small inputs, fewer invented facts).
 | `tutorials` Уроки | first campaign, the map screen, battle controls, towns, saving, quick and custom battle, gear selection, keys and gamepad | `README.md` (Клавиши, Геймпад, Интерфейс, Быстрый бой, Свой бой, Отбор снаряжения, Сохранения, Дневник героя), `data/lang/ru/*.txt` for exact button names |
 | `differences` Отличия от оригинала | what Razdor adds or changes, experimental rules, AI armies, interface extras, known differences | `changelog/*.md`, `docs/flows/experimental-rules.md`, `docs/OPEN_QUESTIONS.md` (known differences), `README.md` (Армии ИИ, Опыт и уровни, Заклинания, Звуки и музыка) |
 | `mods` Моды | installing a mod (update from an archive), Community Update, custom sprites | `README.md` («Обновить игру из архива», Свои спрайты), `docs/flows/assets-and-drawing.md` |
-| `tools` Инструменты | map editor, map translator, cheats console | `README.md` (Редактор карт, Переводчик карт, Консоль читов) |
+| `tools` Инструменты | Razdor Studio, map translator, cheats console | `README.md` (Razdor Studio, Переводчик карт, Консоль читов) |
 | `phones` Телефоны | Android, iOS, gestures | `README.md` (Android, iOS) |
 | `faq` Вопросы | common questions | `docs/PLAYTEST_NOTES.md`, the reports backlog's `as-original` verdicts |
 | `links` Ссылки | other wikis and sites about the game (the place for the game's own content: units, items, maps) | hand-written; add a site only after opening it, never one about another game |

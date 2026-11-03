@@ -80,7 +80,7 @@ fn write_active(local: &Path, id: Option<&str>) -> Result<(), String> {
         },
         Some(id) => {
             let json = serde_json::to_vec_pretty(&Active { id: id.into() }).map_err(|e| e.to_string())?;
-            crate::editor::files::write_atomically(&local.join(ACTIVE), &json).map_err(|e| format!("{ACTIVE}: {e}"))
+            crate::fsutil::write_atomically(&local.join(ACTIVE), &json).map_err(|e| format!("{ACTIVE}: {e}"))
         }
     }
 }

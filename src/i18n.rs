@@ -77,9 +77,9 @@ pub const RU_FILES: &[(&str, &str)] = &[
     ("game.txt", include_str!("../data/lang/ru/game.txt")),
     ("world.txt", include_str!("../data/lang/ru/world.txt")),
     ("battle.txt", include_str!("../data/lang/ru/battle.txt")),
-    ("editor.txt", include_str!("../data/lang/ru/editor.txt")),
     ("events.txt", include_str!("../data/lang/ru/events.txt")),
     ("translate.txt", include_str!("../data/lang/ru/translate.txt")),
+    ("studio.txt", include_str!("../data/lang/ru/studio.txt")),
 ];
 
 /// One catalog line: its file and line number, the English key and the translation.
@@ -439,7 +439,7 @@ mod tests {
                     while let Some(i) = line[from..].find(d) {
                         let at = from + i;
                         from = at + d.len();
-                        // Methods (`f.text(key, label, …)` of the editor's forms) are not the helpers.
+                        // Methods (`f.text(key, label, …)` of the form fields) are not the helpers.
                         if line[..at].chars().next_back().is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '.') {
                             continue;
                         }

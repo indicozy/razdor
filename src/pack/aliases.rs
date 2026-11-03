@@ -40,6 +40,11 @@ pub fn resolve(kind: DtKind, alias: &str) -> Option<u32> {
     section(kind).get(alias).copied()
 }
 
+/// Every alias of `kind`, sorted (the names a studio's combo box offers).
+pub fn names(kind: DtKind) -> impl Iterator<Item = &'static str> {
+    section(kind).keys().map(String::as_str)
+}
+
 /// Up to three aliases of `kind` closest to `alias` (edit distance at most 3), as references.
 pub fn suggest(kind: DtKind, alias: &str) -> Vec<String> {
     let mut near: Vec<(usize, &str)> = section(kind)

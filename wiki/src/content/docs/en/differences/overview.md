@@ -44,7 +44,7 @@ Razdor plays the original game's scenarios using its original rules. Below is wh
 
 ## Tools and Mods
 
-* **Map Editor** with map search (`Ctrl+F`) and an event panel.
+* **Razdor Studio**, a package editor: map, inspector, script and checks.
 * **Map Translator** `razdor-translate` translates maps and game data using a language model.
 * **Cheat Console** (key `~`).
 * **Debug Layer** (`F3` on the map) shows events, lights, and tile passability.

@@ -33,6 +33,9 @@ pub enum Pick {
     Custom,
     /// Razdor's "Maps and mods" (`ui::hub_view`).
     Hub,
+    /// Razdor Studio, the package editor (`ui::studio`); desktop builds only.
+    #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+    Studio,
 }
 
 /// The five buttons, top to bottom, with the row of `SMText_RUS` holding their word.
@@ -575,8 +578,8 @@ pub fn frame(no_install: bool, mods: &[(String, razdor::hub::Text)], active: Opt
 }
 
 /// The links in the landscape corners, over the original's version and copyright lines: the custom
-/// battle, the maps and mods, the Discord and the language. (The map editor's link is gone: the
-/// editor is not ready; its code and `--editor` stay.) Returns what was picked.
+/// battle, the maps and mods, Razdor Studio (desktop builds), the Discord and the language.
+/// Returns what was picked.
 fn corner_links(k: f32, mods: &[(String, razdor::hub::Text)], mod_choice: Option<&super::new_game::ModChoice>) -> Option<Pick> {
     let mut pick = None;
     let y = screen_height() - 22.0 * k;
@@ -599,6 +602,14 @@ fn corner_links(k: f32, mods: &[(String, razdor::hub::Text)], mod_choice: Option
         let pressed = link(label, x, y, false, size);
         mod_link_action(Rect::new(x, y - size, w, size * 1.3), pressed, mods, mc, k);
         x += w + 28.0 * k;
+    }
+    // Razdor Studio, the package editor: desktop builds only (the studio is compiled out of phones).
+    #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+    {
+        if link(tr("Editor"), x, y, false, size) {
+            pick = Some(Pick::Studio);
+        }
+        x += measure(tr("Editor"), size).width + 28.0 * k;
     }
     // The players' Discord (the owner's wish): the invite of the site, in the browser; on phones
     // too (`open_link` hands it to the system's browser there).

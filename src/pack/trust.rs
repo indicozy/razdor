@@ -78,7 +78,7 @@ pub fn remember(dir: &Path, entry: Entry) -> Result<(), String> {
     packages.insert(0, entry);
     packages.truncate(MAX_LISTED);
     let json = serde_json::to_vec_pretty(&List { packages }).map_err(|e| format!("{LIST_FILE}: {e}"))?;
-    crate::editor::files::write_atomically(&dir.join(LIST_FILE), &json).map_err(|e| format!("{LIST_FILE}: {e}"))
+    crate::fsutil::write_atomically(&dir.join(LIST_FILE), &json).map_err(|e| format!("{LIST_FILE}: {e}"))
 }
 
 /// The packages in the Hub's folder `local/packages/` (folders and `.rzpack` files), as local

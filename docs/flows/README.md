@@ -19,7 +19,7 @@ Razdor implements them.
 | Startup, the main loop, screens, a new window or setting, input, hotkeys, texts and translations | [app-and-ui.md](app-and-ui.md) |
 | Reading the install's files, a picture that looks wrong, textures, map drawing, sound and music, fonts | [assets-and-drawing.md](assets-and-drawing.md) |
 | Saving and loading, the load window, adding state that must survive a save | [saves.md](saves.md) |
-| Tests, real-data tests and difftests, offscreen screenshots, profiling a hitch, releases, updates, the editor | [testing-and-tools.md](testing-and-tools.md) |
+| Tests, real-data tests and difftests, offscreen screenshots, profiling a hitch, releases, updates, Razdor Studio (the package editor) | [testing-and-tools.md](testing-and-tools.md) |
 | Experimental scenario rules (the `...` button on the scenario screen), noncombatants, the Shift shortcuts, the route option «Обход армий на пути» | [experimental-rules.md](experimental-rules.md) |
 | A field battle (a package's own battle run by Lua: the board, its hooks, the siege), the battle screen's field methods | [field-battle.md](field-battle.md), then [battle.md](battle.md) |
 | A player's report | the `player-report` skill, then the flow of the area |

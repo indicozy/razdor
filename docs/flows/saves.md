@@ -98,7 +98,7 @@ decision, 2026-10-29; `ui::session`, `save::SESSION`):
   packs and writes it (`.tmp` + rename) and then makes the marker `session.live` in the
   save folder (`save::session_marker`).
 - The marker says a session is under way. It is removed when the game is left (the game
-  is gone: the main menu, the editor, a custom battle), when the app closes (`App::shutdown`,
+  is gone: the main menu, the studio, a custom battle), when the app closes (`App::shutdown`,
   after the pending writes), and at the launch.
 - When it is written: the newest state is kept in `ui::session` (`LATEST`). It is looked at on a rest
   frame only (the hero stands and no step's window is playing), at most every 2 s of play, so a walk

@@ -11,6 +11,9 @@ Anything not listed here is not read yet. The code is `src/pack/`; the tool is `
   package-relative paths (`/` separators), with no parent-folder entry.
 - An entry with an absolute path, a `..` component, a backslash or a `:` in a path component
   (such as a drive letter) is an error, and the entry is not read.
+- The top-level folders `.editor/` (the studio's own data: layout, stamps), `.git/` and `.claude/` are
+  never read or packed, and give no diagnostic (`pack::files::SKIPPED_TOP_FOLDERS`; a `.rzpack` that carries
+  them reads without them).
 - Text files are UTF-8; configuration is TOML.
 - Top level: the files `package.toml`, `README.md`, `LICENSE`, and the folders `texts/`,
   `units/`, `items/`, `maps/`, `dialogs/`, `triggers/`, `art/`, `scripts/`. Any other top-level

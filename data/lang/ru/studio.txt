@@ -1,0 +1,267 @@
+# Razdor Studio's interface in Russian: our own translation. "English = Russian", one per line;
+# {name} a value filled in by the studio. See src/i18n.rs. Save, Save all, Check, Exit, Map,
+# Hero, Building, Army and Objects are in the other catalogs (game.txt, world.txt, common.txt).
+
+# Docks (tab titles)
+File system = Файлы
+Scene = Сцена
+Script = Скрипт
+Inspector = Инспектор
+Problems = Проблемы
+Output = Вывод
+
+# Toolbar and file tree
+Save all = Сохранить всё
+Package folder = Папка пакета
+No file open: pick a text file in the file system. = Файл не открыт: выберите текстовый файл в дереве слева.
+
+# Problems and output
+No problems. Press Check to look again. = Проблем нет. Нажмите «Проверка», чтобы проверить снова.
+Error = Ошибка
+Warning = Предупреждение
+Hint: {hint} = Подсказка: {hint}
+Nothing yet. = Пока пусто.
+Saved {path} = Сохранено: {path}
+All files saved. = Все файлы сохранены.
+Check: {errors} errors, {warnings} warnings = Проверка: ошибок — {errors}, предупреждений — {warnings}
+
+# Map tab
+Install not found: set the game folder in the game's settings = Установка не найдена: укажите папку игры в настройках игры
+The package could not be read: see Output. = Пакет не удалось прочитать: см. «Вывод».
+The map does not compile: see Problems. = Карта не собирается: см. «Проблемы».
+No map in the package. = В пакете нет карт.
+Compiling the map... = Сборка карты...
+Point = Точка
+Nothing selected: pick an object on the map or in the scene. = Ничего не выбрано: выберите объект на карте или в сцене.
+No map to show. = Нет карты для показа.
+This map does not parse: see Problems. = Карта не читается: см. «Проблемы».
+The map file could not be read. = Файл карты не удалось прочитать.
+
+# Scene dock
+Buildings ({count}) = Здания ({count})
+Armies ({count}) = Армии ({count})
+Points ({count}) = Точки ({count})
+Objects ({count}) = Объекты ({count})
+Triggers here ({count}) = Триггеры здесь ({count})
+
+# Step 3: menus, undo, outside changes, the drag on the map
+Edit = Правка
+Undo: {label} = Отменить: {label}
+Redo: {label} = Вернуть: {label}
+Undone: {label} = Отменено: {label}
+Redone: {label} = Возвращено: {label}
+{path} changed on disk: reloaded (Ctrl+Z takes the old text back) = {path} изменён на диске: перечитан (Ctrl+Z вернёт прежний текст)
+{path} reloaded from disk (Ctrl+Z takes the old text back) = {path} перечитан с диска (Ctrl+Z вернёт прежний текст)
+{path} kept: the disk text is the saved one now = {path} оставлен: текст на диске теперь считается сохранённым
+{path} changed on disk = {path} изменён на диске
+The file changed on disk, and it has unsaved changes here. = Файл изменился на диске, а здесь есть несохранённые правки.
+Reload = Перечитать с диска
+Keep mine = Оставить мои
+Show diff = Показать отличия
+Hide diff = Скрыть отличия
+Unsaved changes = Несохранённые изменения
+Save the changed files before leaving? = Сохранить изменённые файлы перед выходом?
+Discard = Не сохранять
+Outside the map: the move is not made = За пределами карты: перенос не сделан
+This object has no table in the file = У этого объекта нет таблицы в файле
+Outside changes are not seen: {reason} = Изменения извне не видны: {reason}
+Object = Объект
+
+# Step 4: the inspector's forms, the placing tools, the terrain brush, the overlays
+Active = Горит
+Add = Добавить
+by the kind: = по виду:
+by the type = по типу
+Added {what} at ({x}, {y}) = Добавлено: {what}, клетка ({x}, {y})
+Cannot be reached on foot: {what} = Не дойти пешком: {what}
+Cell = Клетка
+Cells the hero cannot walk to, on the map's story = Клетки, куда герой не может дойти пешком по сюжету карты
+Classes = Классы
+Click a use to open it in Script. = Нажмите место, чтобы открыть его в скрипте.
+Deleted {name} = Удалено: {name}
+Delete key: removes the table; the comment above it stays = Клавиша Delete: убирает таблицу; комментарий над ней остаётся
+Each change is one undo step (Ctrl+Z). = Каждое изменение — один шаг отмены (Ctrl+Z).
+Footprints = Площади построек
+four days' income = четыре дня дохода
+Gold max = Запас золота
+Grid = Сетка
+Id = Код
+Kind = Вид
+lit from the start = светит с начала
+Max = Максимум
+{name} is named by {count} places (deleted anyway): {first} = {name}: на него ссылаются мест — {count} (удалено всё равно): {first}
+none: a lantern = нет: фонарь
+No text for this key in the language: = Нет текста для этого ключа на языке:
+Nothing names this table. = На эту таблицу никто не ссылается.
+{path} changed on disk: reloaded (Ctrl+Z takes the old picture back) = {path} изменён на диске: перечитан (Ctrl+Z вернёт прежнюю картинку)
+Radius = Радиус
+Reach = Досягаемость
+Recruit = Найм
+rename comes later = переименование будет позже
+Select = Выбор
+Sprite = Спрайт
+The hero cannot be removed: every map has one = Героя нельзя убрать: он есть на каждой карте
+Used by = Где используется
+
+# Razdor Studio: the editor's common words, the start page, the package's form captions.
+Editor = Редактор
+Open package folder… = Открыть папку пакета…
+New package = Новый пакет
+Folder name = Имя папки
+Where = Где
+Choose folder… = Выбрать папку…
+Create package = Создать пакет
+Back to the menu = В меню
+Open a package folder, or make a new package. = Откройте папку пакета или создайте новый пакет.
+The package needs a folder name. = Нужно имя папки пакета.
+Unit = Отряд
+Remove = Удалить
+Undo = Отменить
+Redo = Вернуть
+Check = Проверка
+Size = Размер
+Brush = Кисть
+Description = Описание
+Troops = Войско
+Level = Уровень
+Count = Число
+Smithy / house = Кузница / дом
+Unknown building = Неизвестное здание
+Terrain = Местность
+Text keys = Ключи
+not a package folder = не папка пакета
+The file picker cannot be opened. = Не открывается окно выбора папки.
+
+# Claude dock and the MCP server
+Claude runs in = Claude работает в
+Claude has ended = Claude завершил работу
+Stop Claude = Остановить
+Start Claude = Запустить Claude
+Claude runs here, in the package folder, with the studio's tools attached (razdor-studio). = Claude работает в папке пакета, инструменты студии (razdor-studio) подключены.
+Claude Code is not installed: no `claude` program on PATH. = Claude Code не установлен: программа `claude` не найдена в PATH.
+Install Claude Code = Установить Claude Code
+scrollback = прокрутка
+Open the last package = Последний пакет
+The MCP server is not started: {reason} = MCP-сервер не запущен: {reason}
+The MCP server is not started: no folder for its runtime file = MCP-сервер не запущен: нет папки для его файла
+
+# Map tools (phase 2): the tool pages, the modes, the overlays, the minimap and the stamps
+Minimap = Миникарта
+Stamps = Штампы
+Buildings = Постройки
+Hills = Холмы
+Forests = Леса
+Items = Предметы
+not in the package format yet = пока не входит в формат пакета
+Rectangle = Прямоугольник
+Fill = Заливка
+Copy = Копия
+Move = Перенос
+Erase = Стереть
+Delete: the hills or plants the brush covers = Стереть: холмы или растения под кистью
+Replace trees = Заменять деревья
+Only the trees and thickets the chosen family replaces are re-rolled = Пересоздаются только деревья и заросли, которые заменяет выбранное семейство
+Ignore mountains = Не замечать горы
+Off: a building over a mountain is warned about = Выключено: постройка на горе получает предупреждение
+A click picks a table up, the next click drops it = Первый щелчок берёт объект, второй ставит его
+Burn everything = Выжечь всё
+Burn everything? = Выжечь всё?
+Burn = Выжечь
+Forests become dead trees and the ground above water becomes scorched land. One undo step. = Живые деревья станут мёртвыми, земля над водой станет выжженной. Отменяется одним шагом.
+Passable = Проходимость
+The walk grid: normal, hard, harder, impassable, building, water = Сетка прохода: обычно, трудно, очень трудно, непроходимо, постройка, вода
+Patrols = Патрули
+The patrol loops of the army goals in the triggers = Маршруты патрулей из целей армий в триггерах
+Fog = Туман
+What the hero and the lit lanterns see at the start = Что видят герой и зажжённые фонари в начале
+Fills the rectangle with the palette's kind below = Заливает прямоугольник видом местности ниже
+Fills the connected cells of the clicked kind with the palette's kind below = Заливает связанные клетки того же вида видом местности ниже
+Paste = Вставить
+Ctrl+V: the clip follows the pointer; Esc stops = Ctrl+V: копия идёт за указателем; Esc останавливает
+Stamp name = Имя штампа
+Save stamp = Сохранить штамп
+Clear = Снять
+Family = Семейство
+Thicket = Заросли
+Brush = Кисть
+Cancel = Отмена
+Copy a rectangle, name it and save it: the stamps of this package = Выделите прямоугольник, назовите и сохраните его: штампы этого пакета
+No stamps yet. = Штампов пока нет.
+Nothing to show: the map does not compile. = Показывать нечего: карта не собирается.
+Drag a rectangle with the Copy tool first = Сначала выделите прямоугольник инструментом «Копия»
+Nothing copied yet: Ctrl+C copies the Copy tool's rectangle = Пока ничего не скопировано: Ctrl+C копирует прямоугольник инструмента «Копия»
+The brush square reaches outside the map = Квадрат кисти выходит за карту
+No building covers that cell = На этой клетке нет постройки
+Warning: the building covers a mountain (placed anyway) = Предупреждение: постройка накрывает гору (поставлена всё равно)
+Pasted {n} objects = Вставлено объектов: {n}
+Copied {w}×{h} cells = Скопировано клеток: {w}×{h}
+Saved the stamp {name} = Штамп {name} сохранён
+A click removes the building that covers the cell = Щелчок убирает постройку, которая накрывает клетку
+A hill stands on land: the centre is on water = Холм стоит на земле: центр на воде
+{n} cells on water kept free: trees stand on land = Клеток на воде пропущено: {n}, деревья стоят на земле
+Ctrl+C copies the rectangle = Ctrl+C копирует прямоугольник
+
+# Razdor Studio: the scenario forms (phase 2, milestone 2): the package and map settings, the campaign
+# graph, the named characters and the texts table
+Add language = Добавить язык
+Add map {map} = Добавить карту {map}
+Ally = Союзник
+Apply conditions = Применить условия
+Author = Автор
+Auto layout = Расставить автоматически
+Base = Основа
+Carry: what moves from map to map on a victory or a travel. = Перенос: что переходит с карты на карту при победе или путешествии.
+Characters = Персонажи
+Conditions (all must hold), one inline table per line (see the wiki). Empty: always taken. = Условия (все должны выполняться), по одной встроенной таблице в строке (см. вики). Пусто: переход всегда.
+Create campaign.toml = Создать campaign.toml
+Defined, never used = Задан, но не используется
+Down = Вниз
+Drag a node to move it. Drag from its right edge to another node to add a next edge. = Перетащите узел, чтобы передвинуть. Потяните от правого края к другому узлу, чтобы добавить переход.
+Enemy = Враг
+Filter = Фильтр
+Given = Выданы
+Has a description = Есть описание
+Key = Ключ
+Licence = Лицензия
+Make the start = Сделать стартом
+Map settings = Настройки карты
+Message = Сообщение
+Missing in {langs} = Нет в: {langs}
+Neighbour = Сосед
+New language = Новый язык
+Next, in priority order: = Дальше, по порядку приоритета:
+No campaign.toml: create it on the Campaign screen. = Нет campaign.toml: создайте его на экране «Кампания».
+No named characters: a give_unit with a named id makes one. = Нет именованных персонажей: персонаж появляется, когда give_unit выдаёт именованного.
+Package settings = Настройки пакета
+Player = Игрок
+Priority {n} = Приоритет {n}
+Relations = Отношения
+Removed = Уходят
+Rename = Переименовать
+Rename to = Новое имя
+Required = Нужны
+Requires: {list} = Требует: {list}
+Revisit: keeps the map's state when the hero leaves = Возврат: карта сохраняет состояние, когда герой уходит
+Rows are the side, columns the side it is towards: player, ally, neighbour, enemy (−3 to 3). = Строки — сторона, столбцы — к кому она: игрок, союзник, сосед, враг (от −3 до 3).
+Start date = Дата начала
+Start: {start} = Старт: {start}
+Terrain palette = Цвета местности
+Texts = Тексты
+The colours that differ from the default palette. = Цвета, отличные от палитры по умолчанию.
+The id is read only: it names the package in saves. = Идентификатор только для чтения: по нему пакет находят в сохранениях.
+The map's header and victory: each change is one undo step (Ctrl+Z). = Заголовок и победа карты: каждое изменение — один шаг отмены (Ctrl+Z).
+The package could not be read: see Problems. = Пакет не читается: см. «Проблемы».
+The package has no campaign.toml: it plays as one map. = В пакете нет campaign.toml: он играется как одна карта.
+The package has no map to start a campaign on. = В пакете нет карты, с которой можно начать кампанию.
+Title = Название
+Up = Вверх
+Used by the package, defined in no language = Используется пакетом, но не задан ни на одном языке
+package.toml does not parse: see Problems. = package.toml не читается: см. «Проблемы».
+package.toml: each change is one undo step (Ctrl+Z). = package.toml: каждое изменение — один шаг отмены (Ctrl+Z).
+revisit = возврат
+set by {by} ({file}:{line}) = задано: {by} ({file}:{line})
+start = старт
+Edge: {from} → {to} = Переход: {from} → {to}
+{lang} is not a language code: lowercase letters, digits and - = {lang} — не код языка: строчные буквы, цифры и «-»
+Next {n}: {to} = Переход {n}: {to}
+{to} (dashed, {by}) = {to} (пунктир, {by})

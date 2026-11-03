@@ -113,7 +113,7 @@ impl Hub {
 
     fn save_package_states(&self, states: &PackageStates) -> Result<(), String> {
         let json = serde_json::to_vec_pretty(states).map_err(|e| format!("{STATE_FILE}: {e}"))?;
-        crate::editor::files::write_atomically(&self.local.join(STATE_FILE), &json).map_err(|e| format!("{STATE_FILE}: {e}"))
+        crate::fsutil::write_atomically(&self.local.join(STATE_FILE), &json).map_err(|e| format!("{STATE_FILE}: {e}"))
     }
 
     /// The installed versions of package `id`, newest first; empty when it is not an installed package.

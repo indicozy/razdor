@@ -1419,7 +1419,7 @@ pub fn level_label(level: i32, xp: i32, need: i32) -> String {
 }
 
 // ------------------------------------------------------------------------------------------
-// Form fields: text, numbers, check boxes, drop-down lists and tabs (the map editor's panels).
+// Form fields: text, numbers, check boxes, drop-down lists and tabs (the translator's windows).
 //
 // Immediate mode with a little state kept here: the focused field (typing goes to it) and
 // the open drop-down list, which is drawn last, over everything, by [`draw_popup`]. A
@@ -1486,11 +1486,15 @@ pub fn field_id(key: &str) -> u64 {
     h.finish()
 }
 
+// The window of `razdor-translate` (src/bin/razdor-translate/view.rs) uses it; the game does not.
+#[allow(dead_code)]
 pub fn fields_begin_frame() {
     CLAIMED.with(|c| c.set(false));
 }
 
 /// A click nobody claimed takes the keyboard away from the focused field.
+// The window of `razdor-translate` (src/bin/razdor-translate/view.rs) uses it; the game does not.
+#[allow(dead_code)]
 pub fn fields_end_frame() {
     if is_mouse_button_pressed(MouseButton::Left) && !CLAIMED.with(|c| c.get()) && !popup_open() {
         FOCUS.with(|f| *f.borrow_mut() = None);
@@ -1748,6 +1752,8 @@ pub fn set_focus_edit(key: &str, edit: TextEdit) {
 }
 
 /// Parses a typed number, clamped to `min..=max`. Empty or `-` alone gives `None`.
+// The window of `razdor-translate` (src/bin/razdor-translate/view.rs) uses it; the game does not.
+#[allow(dead_code)]
 pub fn parse_number(text: &str, min: i64, max: i64) -> Option<i64> {
     text.trim().parse::<i64>().ok().map(|v| v.clamp(min, max))
 }
@@ -2060,6 +2066,8 @@ pub fn text_field_sized(key: &str, x: f32, y: f32, w: f32, h: f32, value: &mut S
 /// it too, and a click on the number lets you type one (Enter or a click elsewhere takes
 /// it). Returns the new value when it changed.
 #[track_caller]
+// The window of `razdor-translate` (src/bin/razdor-translate/view.rs) uses it; the game does not.
+#[allow(dead_code)]
 pub fn number_field(key: &str, x: f32, y: f32, w: f32, value: i64, min: i64, max: i64) -> Option<i64> {
     let id = field_id(key);
     let h = 24.0;
@@ -2184,6 +2192,8 @@ pub fn toggle_button(x: f32, y: f32, w: f32, h: f32, label: &str, on: bool) -> b
 
 /// A check box with its label, at most `max_w` wide (a long label shrinks, then is
 /// shortened); returns the new state when clicked.
+// The window of `razdor-translate` (src/bin/razdor-translate/view.rs) uses it; the game does not.
+#[allow(dead_code)]
 pub fn checkbox(x: f32, y: f32, max_w: f32, label: &str, value: bool) -> Option<bool> {
     let size = fit_size(label, max_w - 28.0, 17.0);
     let label = &ellipsize(label, max_w - 28.0, size);
@@ -2236,6 +2246,8 @@ pub fn checkbox_row(r: Rect, size: f32, label: &str, value: bool) -> Option<bool
 
 /// A drop-down list: shows the option with value `current` (or its number) and opens a list
 /// to pick from (type to filter, wheel to scroll). Returns the value picked.
+// The window of `razdor-translate` (src/bin/razdor-translate/view.rs) uses it; the game does not.
+#[allow(dead_code)]
 pub fn dropdown(key: &str, x: f32, y: f32, w: f32, current: i64, options: &[(i64, String)]) -> Option<i64> {
     let picked = take_pick(key);
     let h = 24.0;
@@ -2463,6 +2475,8 @@ pub fn draw_popup() {
 
 /// A row of tabs; the clicked one becomes `selected`. Returns the height used.
 #[track_caller]
+// The window of `razdor-translate` (src/bin/razdor-translate/view.rs) uses it; the game does not.
+#[allow(dead_code)]
 pub fn tabs(x: f32, y: f32, w: f32, labels: &[&str], selected: &mut usize) -> f32 {
     let n = labels.len().max(1) as f32;
     let tw = w / n;

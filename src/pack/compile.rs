@@ -84,6 +84,30 @@ pub fn compile_with(pkg: &Package, base: &Base, lang: &str, map_id: &str) -> Res
     if report.has_errors() {
         return Err(report);
     }
+    compile_map(pkg, base, lang, map_id)
+}
+
+/// The map drawn as the engine would play it, whatever the package's checks say. The studio's
+/// canvas shows a map that has placement errors (overlapping footprints, an army in a wall) and
+/// marks them itself, so the caller runs [`check`] and this does not. What is still refused: a
+/// footprint side outside 1 to 9 (the scenario could not lay the building out) and the compile's
+/// own errors (a unit or text that does not resolve).
+pub fn compile_drawn(pkg: &Package, install: &DtInstall, lang: &str, map_id: &str) -> Result<Compiled, Report> {
+    let base = Base { units: &install.units, items: &install.artefacts, picture: &|id| install.unit_picture_frame(id) };
+    if let Some(spec) = pkg.maps.get(map_id).and_then(|m| m.spec.as_ref()) {
+        for b in &spec.building {
+            let b = b.get_ref();
+            let (w, h) = footprint_of(b);
+            if !(1..=super::map_check::MAX_FOOTPRINT).contains(&w) || !(1..=super::map_check::MAX_FOOTPRINT).contains(&h) {
+                return Err(one_error(format!("building `{}`: its footprint {w}×{h} cannot be laid out", b.id)));
+            }
+        }
+    }
+    compile_map(pkg, &base, lang, map_id)
+}
+
+/// The compile of one map, after the checks (see [`compile_with`] and [`compile_drawn`]).
+fn compile_map(pkg: &Package, base: &Base, lang: &str, map_id: &str) -> Result<Compiled, Report> {
     let mut r = Report::default();
     let texts = Texts { pkg, lang };
     let units = unit_ids(pkg);
@@ -301,9 +325,13 @@ pub fn unit_of(text: &str, ids: &BTreeMap<&str, u32>) -> Result<u32, String> {
 /// The three hero classes, by their name in `map.toml`, in the header's order.
 pub const CLASSES: [&str; 3] = ["knight", "archmage", "ranger"];
 
+/// The factions by their name, in the engine's order: the code of each is its position plus 1
+/// (`player` is 1).
+pub const FACTIONS: [&str; 4] = ["player", "ally", "neighbour", "enemy"];
+
 /// The factions by their name, with their codes (`player` is 1).
 pub fn faction_code(name: &str) -> Option<u8> {
-    ["player", "ally", "neighbour", "enemy"].iter().position(|f| *f == name).map(|i| i as u8 + 1)
+    FACTIONS.iter().position(|f| *f == name).map(|i| i as u8 + 1)
 }
 
 /// The building types by name, in the engine's order.
@@ -394,9 +422,12 @@ pub const ARMY_MODELS: [(&str, u8, u8); 7] = [
     ("zombies", 12, 0),
 ];
 
+/// Ships by name, in the code order of army byte 72 (`none` is the default).
+pub const SHIPS: [&str; 4] = ["none", "hero", "pirate", "merchant"];
+
 /// Ships by name: the code of army byte 72.
 pub fn ship_code(name: &str) -> Option<u8> {
-    ["none", "hero", "pirate", "merchant"].iter().position(|s| *s == name).map(|i| i as u8)
+    SHIPS.iter().position(|s| *s == name).map(|i| i as u8)
 }
 
 /// Converts a troop list to its six slots. A count of 0 leaves the slot empty.

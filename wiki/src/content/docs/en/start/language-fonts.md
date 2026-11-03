@@ -18,7 +18,7 @@ The following are available in the list:
 * Any other translations you have added to the game folder (files in the format `LanguageName_Units.ini`, etc.).
 
 :::note
-The native Razdor interface (buttons, windows, tooltips, battle log, map editor, and demo) works only in Russian and English. If "Russian" is selected, the interface will be in Russian; if any other language is selected, it will be in English.
+The native Razdor interface (buttons, windows, tooltips, battle log, Razdor Studio, and demo) works only in Russian and English. If "Russian" is selected, the interface will be in Russian; if any other language is selected, it will be in English.
 :::
 
 The names and descriptions of warriors, items, and spells are pulled from the files of the selected language. If the selected translation lacks a specific string, the engine will display the text in English. Scenario texts depend on the maps selected in New Game mode.
@@ -39,7 +39,7 @@ In the Sound, Graphics, and Gameplay settings window, there is a "Font" item. It
 
 ### Text size
 
-The "Text size" item in the same settings: Normal, Large and Largest. At Normal everything is as in the original. At Large and Largest the buttons grow with the text throughout the game: in the menus and settings, the scenario list and saves, the army, hero and battle windows, the buildings ("Hire" and "Heal" with their prices), event windows and the map editor. Phones start at Large. Only the bottom bar's readouts and the market buttons stay as they are: the original's frame bounds them.
+The "Text size" item in the same settings: Normal, Large and Largest. At Normal everything is as in the original. At Large and Largest the buttons grow with the text throughout the game: in the menus and settings, the scenario list and saves, the army, hero and battle windows, the buildings ("Hire" and "Heal" with their prices), event windows. Phones start at Large. Only the bottom bar's readouts and the market buttons stay as they are: the original's frame bounds them.
 
 ### Character Support
 

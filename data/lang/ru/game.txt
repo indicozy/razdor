@@ -6,7 +6,6 @@ Choose a scenario = Выберите сценарий
 Built-in demo: the bandit kingdom = Встроенное демо: разбойничье королевство
 Our own small map and units. Clear both bandit camps. = Небольшая карта и воины Раздора. Разгоните оба разбойничьих лагеря.
 Load a game = Загрузить игру
-Map editor = Редактор карт
 This folder has no {missing}: {dir} = В этой папке нет {missing}: {dir}
 Discord Times not found: put Razdor into the game folder, next to DiscordTimes.exe. = «Времена раздора» не найдены: положите Razdor в папку игры, рядом с DiscordTimes.exe.
 # Android (the not-found screen; see ui/screens.rs)
@@ -61,7 +60,6 @@ The campaign is over, after {days} days. = Кампания окончена. П
 Next map: {title} = Следующая карта: {title}
 
 # Quick save, loading and test play
-Test play: Esc > Main menu returns to the editor. = Пробная игра: Esc > «Главное меню» вернёт в редактор.
 Cannot load: {e}. = Загрузить не удалось: {e}.
 No data folder for saves: set RAZDOR_SAVE_DIR. = Нет папки для сохранений: задайте RAZDOR_SAVE_DIR.
 Quick save written (F9 loads it). = Быстрое сохранение записано (F9 — загрузить).
@@ -82,7 +80,6 @@ Continue the game? = Продолжить игру?
 Battle - {foe} = Битва - {foe}
 Battle = Бой
 Name = Название
-Scenario = Сценарий
 Hero = Герой
 Save the game = Сохранить игру
 Save = Сохранить
