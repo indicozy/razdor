@@ -22,8 +22,13 @@ use crate::rules::game::{Game, HeroCells};
 use crate::rules::map::Tile;
 use crate::rules::triggers::{When, Trace};
 
-/// Routes the goal planner may search (as the AI's own routes, `game::AI_PATH_NODES`).
-const GOAL_NODES: usize = 4000;
+/// Routes the goal planner may search. Not the AI's own cap (`game::AI_PATH_NODES`, 4000): a package's
+/// goal can cross a 200×200 map (the barrows' columns, spawn to palace, 166–183 cells), and at 4000
+/// nodes that search finds nothing and the goal drops. Measured on the barrows map: a plan takes about
+/// 1.3 ms at 10 000 to 200 000 nodes and about 5 ms at most (a route the whole map is searched for),
+/// so 60 000 (more than a 200×200 map's 40 000 cells) costs nothing that matters. Only package armies
+/// have goals (DT maps never set them), so community maps' routes do not change.
+const GOAL_NODES: usize = 60_000;
 
 /// What an attack or a follow is aimed at.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -166,7 +171,7 @@ impl Game {
 
     /// The route of army `i` from `from` to `to` (empty: none). Ships sail the sea; others take
     /// the AI's land routes.
-    fn goal_route(&self, i: usize, from: Tile, to: Tile) -> Vec<Tile> {
+    pub(crate) fn goal_route(&self, i: usize, from: Tile, to: Tile) -> Vec<Tile> {
         let a = &self.world.armies[i];
         if a.sails() {
             let w = &self.world;

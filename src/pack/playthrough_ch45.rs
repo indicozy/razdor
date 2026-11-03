@@ -339,3 +339,43 @@ fn the_dread_hosts_one_to_four_are_beaten_by_a_waiting_hero() {
         assert!(outcomes.iter().all(|&o| o == Outcome::Victory), "seed {seed}: {:?}", run.battles);
     }
 }
+
+/// The allies' columns march from their spawn cells to the palace over routes of 166 to 183 cells. The
+/// goal planner once gave up at 4000 nodes and found none, so the goal dropped and the column wandered.
+#[test]
+fn the_allies_routes_to_the_palace_are_planned() {
+    let Some(install) = install() else { return };
+    let run = barrows_run(&install, &order_branch(1, 2000), 1, &[]);
+    let g = &run.g;
+    let i = g.world.armies.iter().position(|a| !a.sails()).expect("a land army");
+    for from in [(44, 186), (22, 186), (176, 176)] {
+        let route = g.goal_route(i, from, (160, 44));
+        assert!(route.len() >= 160, "from {from:?} the planner finds {} cells", route.len());
+        assert_eq!(route.last(), Some(&(160, 44)), "the route ends at the palace");
+    }
+}
+
+/// The Order's column walks from its spawn to the palace, and its arrival takes two points of dread.
+#[test]
+fn the_allies_column_reaches_the_palace_and_the_dread_falls() {
+    let Some(install) = install() else { return };
+    let mut run = barrows_run(&install, &order_branch(1, 2000), 1, &[]);
+    let mut dread_before = None;
+    let mut arrived = None;
+    for _ in 0..40 {
+        if run.wait_days(1).is_err() || run.done() {
+            break;
+        }
+        if army_tile(&run, "bw_order") == Some((160, 44)) {
+            arrived = run.var("dread");
+            break;
+        }
+        if army_tile(&run, "bw_order").is_some() {
+            dread_before = run.var("dread");
+        }
+    }
+    let (Some(VarValue::Int(before)), Some(VarValue::Int(after))) = (dread_before, arrived) else {
+        panic!("the column never reached the palace: {}", run.log.join("\n"));
+    };
+    assert!(after <= before - 2, "the arrival drops the dread by 2: {before} -> {after}\n{}", run.log.join("\n"));
+}
