@@ -20,6 +20,8 @@ pub mod playthrough;
 #[cfg(test)]
 pub mod playthrough_ch23;
 #[cfg(test)]
+pub mod playthrough_camp;
+#[cfg(test)]
 pub mod playthrough_ch45;
 #[cfg(test)]
 pub mod playthrough_abbey;

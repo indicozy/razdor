@@ -376,8 +376,11 @@ then = [ { add = "marsh_trust", value = 1, min = -5, max = 5 } ]
 [[trigger]]
 id = "m_kord_meet"
 map = "marka"
+# Offered while Kord is unmet and the purse holds the hire (40): a short purse at the first visit must not
+# lose him (the wages take a few gold a day; the gold comes later). Repeats on each visit until he is decided.
 when = { event = "hero_enters", at = [78, 72, 12, 8] }
-if = [ { var = "kord", value = 0 } ]
+once = false
+if = [ { var = "kord", value = 0 }, { gold = 40, op = ">=" } ]
 then = [ { dialog = "kord_offer" } ]
 
 [[trigger]]
@@ -424,6 +427,16 @@ id = "m_council"
 map = "marka"
 when = { event = "day_start" }
 if = [ { var = "quests_done", op = ">=", value = 2 } ]
+then = [ { dialog = "council" } ]
+
+# «Not yet» closes the council, and the midnight check above fires once: the council comes back each week
+# until an ally is chosen (without it the hub never ends: a softlock).
+[[trigger]]
+id = "m_council_again"
+map = "marka"
+when = { event = "week_start" }
+once = false
+if = [ { var = "quests_done", op = ">=", value = 2 }, { var = "ally", value = 0 } ]
 then = [ { dialog = "council" } ]
 
 [[trigger]]

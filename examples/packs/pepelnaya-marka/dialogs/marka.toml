@@ -159,10 +159,11 @@ id = "marsh"
 text = "marka.council.marsh"
 if = [ { var = "marsh_trust", op = ">=", value = 1 } ]
 
+# The Companies need Kord hired (kord 1, or 3 as a friend): his company is the hero's men.
 [[dialog.choice]]
 id = "companies"
 text = "marka.council.companies"
-if = [ { var = "companies", op = ">=", value = 1 } ]
+if = [ { var = "companies", op = ">=", value = 1 }, { var = "kord", op = ">=", value = 1 }, { var = "kord", op = "!=", value = 2 } ]
 
 [[dialog.choice]]
 id = "later"

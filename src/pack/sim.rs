@@ -767,7 +767,8 @@ mod tests {
         let routes: [(Preset, &str, &str); 4] = [
             (&[("quests_done", VarValue::Int(2)), ("order", VarValue::Int(2)), ("crown", VarValue::Int(1))], "council=order,bw_council=iron", "end_iron"),
             (&[("quests_done", VarValue::Int(2)), ("marsh_trust", VarValue::Int(3))], "council=marsh,bw_council=free", "end_free"),
-            (&[("quests_done", VarValue::Int(2)), ("companies", VarValue::Int(2))], "council=companies,bw_council=free", "end_free"),
+            // The Companies need Kord hired (kord 1): his company is the hero's men.
+            (&[("quests_done", VarValue::Int(2)), ("companies", VarValue::Int(2)), ("kord", VarValue::Int(1))], "council=companies,bw_council=free", "end_free"),
             (
                 &[("quests_done", VarValue::Int(2)), ("order", VarValue::Int(1)), ("ilm", VarValue::Int(2)), ("grey_bargain_offered", VarValue::Bool(true))],
                 "council=order",
