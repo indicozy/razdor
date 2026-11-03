@@ -17,6 +17,8 @@ pub mod map_check;
 pub mod open;
 #[cfg(test)]
 pub mod playthrough;
+#[cfg(test)]
+pub mod playthrough_ch45;
 pub mod refs;
 pub mod sim;
 pub mod terrain;

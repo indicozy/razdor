@@ -78,12 +78,20 @@ impl Run {
     /// revealed (the planner needs explored cells; no route waits for the fog), its opening moment
     /// answered. Campaign-free: the package's first map.
     pub fn new(opened: &Opened, content: Arc<Content>, seed: u32, choices: &[(&str, &str)]) -> Result<Run, Stuck> {
+        Run::carried(opened, content, seed, choices, &Carried::default())
+    }
+
+    /// [`Run::new`] with what the earlier chapters carry in (`carry`): the gold, the squad and the
+    /// story's variables, set before the map's moments fire (as `Carried::apply` says).
+    pub(crate) fn carried(opened: &Opened, content: Arc<Content>, seed: u32, choices: &[(&str, &str)], carry: &Carried) -> Result<Run, Stuck> {
         let mut o = opened.clone();
         o.story.seed = seed | 1;
         let mut g = Game::from_scenario(content, &o.scenario, HeroClass::Knight);
         g.rng = Rng::new(seed);
         g.seed_events(seed);
         cheats::run(&Cheat::Reveal, Some(&mut g), None).expect("reveal the map");
+        carry.apply(&mut g, &o);
+        g.avoid_armies = carry.avoid_armies;
         g.triggers.trace = Some(Vec::new());
         o.start(&mut g);
         let start = g.clock.total_minutes();
@@ -99,7 +107,12 @@ impl Run {
 
     /// The chapter is over (a victory, a defeat or an ending).
     pub fn done(&self) -> bool {
-        self.g.story_end().is_some() || self.g.script_end().is_some()
+        self.g.story_end().is_some() || self.g.script_end().is_some() || self.ending().is_some()
+    }
+
+    /// The campaign's ending dialog, once a story's `ending` action ran (`campaign.toml`'s last map).
+    pub fn ending(&self) -> Option<String> {
+        self.g.triggers.ending.clone()
     }
 
     /// The story's victory was reached.
@@ -215,8 +228,21 @@ impl Run {
     pub fn walk_to(&mut self, to: Tile, max_days: u64) -> Result<(), Stuck> {
         let deadline = self.g.clock.total_minutes() + (max_days * MINUTES_PER_DAY) as f64;
         let before = self.battles.len();
+        let mut stalled = 0;
+        let mut clock = self.g.clock.total_minutes();
         for _ in 0..2_000_000 {
+            let stood = self.g.tile();
             self.service()?;
+            // No time passing for a long while: the walk is blocked (the route stops, nothing moves).
+            if self.g.clock.total_minutes() == clock {
+                stalled += 1;
+                if stalled > 5_000 {
+                    return Err(Stuck::Broken(format!("the walk to {to:?} is blocked at {:?} on day {:.2}", self.g.tile(), self.day())));
+                }
+            } else {
+                stalled = 0;
+                clock = self.g.clock.total_minutes();
+            }
             if self.done() {
                 return Ok(());
             }
@@ -234,6 +260,11 @@ impl Run {
             }
             let ev = self.g.tick(STEP_SECONDS);
             self.settle(ev)?;
+            // A teleport (a stone's choice, a story's move) ends the walk where he lands.
+            let now = self.g.tile();
+            if (now.0 - stood.0).abs() > 1 || (now.1 - stood.1).abs() > 1 {
+                return Ok(());
+            }
         }
         Err(Stuck::Broken(format!("the walk to {to:?} did not end")))
     }
@@ -291,13 +322,78 @@ impl Run {
     }
 }
 
+/// A chapter of the reference package, opened on `install` (`id`: its map): its opened map and its
+/// content, shared by every playthrough.
+pub(crate) fn open_map(install: &DtInstall, id: &str) -> (Opened, Arc<Content>) {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/packs/pepelnaya-marka");
+    let opened = open(&root, Some(id), "en", install).unwrap_or_else(|e| panic!("{e}"));
+    let content = Arc::new(Content::from_dt(install).with_package(opened.units.clone(), opened.items.clone()));
+    (opened, content)
+}
+
 /// The chapter «Брод» of the reference package, opened on `install` (skipped without
 /// `RAZDOR_DT_DIR`): its content and its opened map, shared by every playthrough.
 pub(crate) fn brod(install: &DtInstall) -> (Opened, Arc<Content>) {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/packs/pepelnaya-marka");
-    let opened = open(&root, Some("brod"), "en", install).unwrap_or_else(|e| panic!("{e}"));
-    let content = Arc::new(Content::from_dt(install).with_package(opened.units.clone(), opened.items.clone()));
-    (opened, content)
+    open_map(install, "brod")
+}
+
+/// What the earlier chapters carry into a chapter (`[carry]`): the gold, the story's variables
+/// (forced before the story starts, as the sim's `--set`), and the squad: ordinary members as
+/// (unit alias, level, count) and named characters as (name, unit alias, level), placed in the
+/// formation after the hero's own troops.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Carried {
+    pub gold: Option<i32>,
+    pub vars: Vec<(String, VarValue)>,
+    pub squad: Vec<(&'static str, i32, usize)>,
+    pub named: Vec<(&'static str, &'static str, i32)>,
+    /// The player's «Обход армий на пути» option (`avoid_armies`): the route goes round the armies
+    /// (an escort walking beside the hero blocks the route otherwise: a friend stepped onto stops
+    /// the walk, and the planner crosses moving armies). Off by default, as the original.
+    pub avoid_armies: bool,
+}
+
+impl Carried {
+    /// Puts the carried state into `g` (the story is not attached yet): the gold, the variables
+    /// and the squad. A named character's id is its place in the story's list of names.
+    pub(crate) fn apply(&self, g: &mut Game, opened: &Opened) {
+        if let Some(gold) = self.gold {
+            g.gold = gold;
+        }
+        for (name, value) in &self.vars {
+            g.triggers.vars.insert(name.clone(), value.clone());
+        }
+        for &(alias, level, count) in &self.squad {
+            for _ in 0..count {
+                place(g, alias, level, 0);
+            }
+        }
+        for &(name, alias, level) in &self.named {
+            let text = crate::rules::triggers::named_text(&opened.story.texts, name, &opened.map);
+            let k = opened.story.named.iter().position(|n| *n == text).unwrap_or_else(|| panic!("no named character {name}"));
+            place(g, alias, level, crate::rules::triggers::PACKAGE_BASE + k as u8);
+        }
+        // Paid up at the chapter's start, as a save's load does (save.rs): a unit never paid
+        // (`last_paid` 0) would leave at the first short noon. A carry that places units only.
+        if !self.squad.is_empty() || !self.named.is_empty() {
+            let now = g.clock.total_minutes() as u64;
+            for u in g.squad.iter_mut() {
+                u.last_paid = now;
+            }
+        }
+    }
+}
+
+/// Adds one unit of `alias` to the squad, in the first free slot of the formation.
+fn place(g: &mut Game, alias: &str, level: i32, named: u8) {
+    let id = crate::pack::aliases::resolve(crate::pack::refs::DtKind::Unit, alias).unwrap_or_else(|| panic!("no unit {alias}"));
+    let taken: Vec<_> = g.squad.iter().map(|u| u.slot).collect();
+    let slot = g.content.formation.new_unit_slot(&taken).expect("the formation has room for the carried squad");
+    let mut u = crate::rules::units::Unit::new(&g.content, crate::rules::content::UnitId(id), slot);
+    u.level = level;
+    u.named = named;
+    u.heal_full(&g.content);
+    g.squad.push(u);
 }
 
 /// The install of the tests, or `None` (the test is skipped) without `RAZDOR_DT_DIR`.

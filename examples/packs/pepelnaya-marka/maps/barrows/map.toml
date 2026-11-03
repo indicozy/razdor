@@ -58614,8 +58614,9 @@ cell = [166, 36]
 faction = "enemy"
 model = "necromancer"
 troops = [
-    { unit = "dt:lich", level = 1, count = 1 },
-    { unit = "dt:death_knight", level = 2, count = 3 },
+    { unit = "dt:dead_warrior", level = 1, count = 1 },
+    { unit = "dt:deadman", level = 1, count = 4 },
+    { unit = "dt:ghoul", level = 1, count = 2 },
 ]
 
 # The victory's placeholder: it lies in the far corner and is never beaten.

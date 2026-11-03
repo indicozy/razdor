@@ -12673,9 +12673,9 @@ id = "guard_n"
 name = "gates.army.guard_n.name"
 cell = [46, 16]
 faction = "enemy"
-model = "ghosts"
+model = "necromancer"
 troops = [
-    { unit = "dt:ghost", level = 1, count = 3 },
+    { unit = "dt:deadman", level = 1, count = 3 },
     { unit = "dt:ghoul", level = 1, count = 1 },
 ]
 [[army]]
