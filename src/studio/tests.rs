@@ -728,9 +728,9 @@ fn the_scenario_forms_edit_save_and_undo_on_a_copy_of_pepelnaya_marka() {
     let plan = crate::studio::characters::rename_plan(&pkg, "ilm", "brother_ilm", &texts).unwrap();
     assert!(plan.len() >= 2, "triggers, dialogs and texts name ilm: {}", plan.len());
     ws.set_texts("rename ilm to brother_ilm", plan).unwrap();
-    assert!(ws.text_of("dialogs/abbey.toml").unwrap().contains("named = \"brother_ilm\""));
+    assert!(ws.text_of("dialogs/marka.toml").unwrap().contains("named = \"brother_ilm\""));
     ws.undo().unwrap();
-    assert!(ws.text_of("dialogs/abbey.toml").unwrap().contains("named = \"ilm\""), "one undo puts all files back");
+    assert!(ws.text_of("dialogs/marka.toml").unwrap().contains("named = \"ilm\""), "one undo puts all files back");
 
     // A translation: a key in en, then save, then undo.
     let (file, edit) = crate::studio::texts::set_cell("ru", "story.title", "Тестовый перевод");
