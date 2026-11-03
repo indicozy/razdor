@@ -229,6 +229,13 @@ fn check_text_keys(pkg: &Package, r: &mut Report) {
             used.push((c.text.as_str(), file, Some(*line)));
         }
     }
+    // The diary's quests (`quest` actions) show their title and text in the game's language.
+    for (file, line, a) in super::triggers::actions(pkg) {
+        if let super::triggers::Action::Quest { title, text, .. } = a {
+            used.push((title.as_str(), file, Some(line)));
+            used.push((text.as_str(), file, Some(line)));
+        }
+    }
     let map_keys = map_check::text_keys(pkg);
     for (key, file, line) in &map_keys {
         used.push((key.as_str(), file.as_str(), *line));
