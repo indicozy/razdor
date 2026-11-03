@@ -85,10 +85,30 @@ pub(crate) fn heal_within_means(run: &mut Run) -> usize {
     healed
 }
 
+/// The player's raising of the dead at a town's service (a town or a church): each fallen unit is raised while
+/// the purse still holds `RUNWAY` days of the wage bill after the payment. Returns the number of units raised.
+pub(crate) fn raise_within_means(run: &mut Run) -> usize {
+    let mut raised = 0;
+    for i in 0..run.g.squad.len() {
+        let Some(price) = run.g.resurrect_price(i) else { continue };
+        if run.g.gold - price.amount < RUNWAY * run.g.daily_wages() {
+            continue;
+        }
+        if run.g.resurrect(i).is_ok() {
+            raised += 1;
+        }
+    }
+    if raised > 0 {
+        run.note(format!("raised {raised} unit(s) at the service"));
+    }
+    raised
+}
+
 /// The hub's town: the walk to Ashford (its recruits and its service), the healing, then the hiring.
 fn ashford(run: &mut Run) -> Result<(), Stuck> {
     run.walk_to((58, 44), 2)?;
     heal_within_means(run);
+    raise_within_means(run);
     hire_within_means(run);
     Ok(())
 }
@@ -493,3 +513,4 @@ fn varga_survives_chapter_one_over_fifteen_seeds() {
     }
     assert!(alive * 100 >= 70 * 15, "Varga lives in {alive}/15 seeds");
 }
+

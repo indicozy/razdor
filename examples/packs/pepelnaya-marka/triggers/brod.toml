@@ -2,14 +2,15 @@
 # (`map`), so the package's later maps can share this file. The moments are the game's: the start,
 # the hero's steps, the buildings and armies, each day, each week and each new moon, and the dialogs' answers.
 #
-# Dread (Страх) grows from the hero's deeds: each main deed adds one (the watchtower, the toll settled,
-# Varga's meeting, the wraiths beaten); burning the mill adds two. The week's +1 is only a slow backstop;
-# the new moon's omens do not touch it (Dread is not the calendar).
-# At 3 the host rises the next day at the middle ford. Until it does, the undead raid the hero's land
-# every few days (`raid_day`): they walk on the watchtower if he holds it, else on Reedmere.
+# The thread is «Удержать брод» (the diary's main quest). Dread (Страх) grows from the hero's deeds: each
+# deed adds one (the watchtower, the toll settled, Varga's meeting, the wraiths beaten, a raid beaten); burning
+# the mill adds two. The week's +1 is only a slow backstop. The raids come with the Dread: the first when it
+# reaches 2, the second at 4 (at most two). At 5 the barrows light their fires: the warning comes that day, and
+# the host walks on the middle ford at the next midnight (`day_start` fires before `week_start`, so a warning
+# given on a week's midnight still has a full day).
 
 [vars]
-dread = 0              # Страх: the deeds' +1 each (the mill +2), the week's +1 as a backstop; at 3 the host rises
+dread = 0              # Страх: the deeds' +1 each (the mill +2), the week's +1 as a backstop; at 5 the host is warned
 omen = 0               # the new moon's roll: 1 is a bad sign (a line only: Dread is the deeds'), 3 a gift (+15 gold)
 toll_settled = false   # the ford toll is paid, fought or talked away
 toll_talked = false    # the bandits agreed to leave for a price later (chapter 3в)
@@ -19,51 +20,111 @@ varga_refused = false  # Varga was sent on her way
 marsh_trust = 0        # the marsh folk's trust: helping them +2, riding past -1, a family taken home +1
 marsh_hunt = false     # the hero took the marsh folk's quarrel on
 tower_taken = false    # the watchtower is the hero's (false again when the undead take it)
-host_up = false        # the barrow host has risen (its day is the last of the raids)
-raid_day = 0           # the days since the start while the host sleeps: the raids come on days 4, 8 and 12
+host_warned = false    # the warning is given at Dread 5: the host rises at the next midnight
+host_up = false        # the barrow host has risen
+raids = 0              # the raids sent so far: 1 at Dread 2, 2 at Dread 4 (never more)
 barrow_broken = false  # the barrow mound was broken: the host rises one unit weaker; chapter 5 sends one host fewer
 barrow_sealed = false  # the barrow mound was sealed with a rite: chapter 5 sends one host fewer
 refugees = false       # a family asked to be taken to Reedmere, and the hero said yes
 refugees_done = false  # ... and was taken there
 deserters = 0          # the Crown's deserters: 0 unmet, 1 served the hero, 2 handed to the Crown, 3 let go
 
-# The arrival: the game starts with the officer's orders.
+# The arrival: the game starts with the courier's writ. The main quest and the tower's sub-quest begin.
 [[trigger]]
 id = "arrival"
 map = "brod"
 when = { event = "game_start" }
 then = [
     { dialog = "arrival" },
+    { quest = "hold_ford", title = "quest.hold_ford.title", text = "quest.hold_ford.start" },
+    { quest = "tower", title = "quest.tower.title", text = "quest.tower.text" },
     { army_goal = "toll", go_to = [29, 23] },
     { army_goal = "wraiths", go_to = [6, 44] },
 ]
 
-# The ruins by the road: Varga waits among the burned walls.
+# The burned farmstead on the road north: a little gold in the oven, and the family's trail to the marsh.
+[[trigger]]
+id = "farm"
+map = "brod"
+when = { event = "hero_enters", at = [41, 21, 2, 2] }
+then = [ { dialog = "farm" }, { give_gold = 8 } ]
+
+# The tower taken: its garrison's log, the stones, and the deed (the barrows stir). The tower's sub-quest is
+# done and the barrows' question opens.
+[[trigger]]
+id = "tower_deed"
+map = "brod"
+when = { event = "building_captured", building = "tower" }
+then = [
+    { complete_quest = "tower" },
+    { quest = "barrow", title = "quest.barrow.title", text = "quest.barrow.text" },
+    { add = "dread", value = 1 },
+    { dialog = "tower_log" },
+    { dialog = "stones" },
+]
+
+# The watchtower taken, each time the hero takes it (the flag the raids read; a retaken tower is his again).
+[[trigger]]
+id = "tower_taken"
+map = "brod"
+when = { event = "building_captured", building = "tower" }
+once = false
+then = [ { set = "tower_taken", value = true } ]
+
+# A raid that takes the tower or burns Reedmere clears the tower flag (the loss is noticed below).
+[[trigger]]
+id = "tower_lost"
+map = "brod"
+when = { event = "building_lost", building = "tower" }
+then = [ { set = "tower_taken", value = false } ]
+
+# The ruins by the road: Varga waits among the fresh graves.
 [[trigger]]
 id = "varga_meet"
 map = "brod"
 when = { event = "hero_enters", at = [30, 15, 6, 5] }
 if = [ { var = "varga_joined", value = false }, { var = "varga_refused", value = false } ]
-then = [ { dialog = "varga_meet" } ]
+then = [ { quest = "varga", title = "quest.varga.title", text = "quest.varga.text" }, { dialog = "varga_meet" } ]
 
 # A deed: Varga's meeting resolved (joined or sent away; the burning of the ruins is the mill's own +2).
 [[trigger]]
 id = "varga_join"
 map = "brod"
 when = { event = "dialog_choice", dialog = "varga_meet", choice = "join" }
-then = [ { set = "varga_joined", value = true }, { add = "dread", value = 1 } ]
+then = [ { set = "varga_joined", value = true }, { add = "dread", value = 1 }, { complete_quest = "varga" } ]
 
 [[trigger]]
 id = "varga_refuse"
 map = "brod"
 when = { event = "dialog_choice", dialog = "varga_meet", choice = "refuse" }
-then = [ { set = "varga_refused", value = true }, { add = "dread", value = 1 } ]
+then = [ { set = "varga_refused", value = true }, { add = "dread", value = 1 }, { complete_quest = "varga" } ]
 
 [[trigger]]
 id = "varga_burn"
 map = "brod"
 when = { event = "dialog_choice", dialog = "varga_meet", choice = "burn" }
-then = [ { set = "varga_refused", value = true } ]
+then = [ { set = "varga_refused", value = true }, { complete_quest = "varga" } ]
+
+# The scout's letter by the road to the barrows: the Barrow King is named, and the barrows' quest turns to the
+# barrow itself.
+[[trigger]]
+id = "scout_letter"
+map = "brod"
+when = { event = "hero_enters", at = [36, 11, 3, 3] }
+then = [
+    { quest = "barrow", title = "quest.barrow.scout_title", text = "quest.barrow.scout_text" },
+    { dialog = "scout" },
+]
+
+# The hanged man at the crossroads: his note seeds the deserters.
+[[trigger]]
+id = "deserter_note"
+map = "brod"
+when = { event = "hero_enters", at = [36, 22, 4, 3] }
+then = [
+    { quest = "deserters", title = "quest.deserters.title", text = "quest.deserters.text" },
+    { dialog = "deserter_note" },
+]
 
 # The ford toll: a bandit band on the road, once the hero comes near it and it still holds the road.
 [[trigger]]
@@ -71,7 +132,7 @@ id = "toll_ford"
 map = "brod"
 when = { event = "hero_enters", at = [25, 20, 9, 8] }
 if = [ { var = "toll_settled", value = false }, { army_at = "toll", at = [29, 23] } ]
-then = [ { dialog = "toll" } ]
+then = [ { quest = "toll", title = "quest.toll.title", text = "quest.toll.text" }, { dialog = "toll" } ]
 
 [[trigger]]
 id = "toll_pay"
@@ -97,15 +158,15 @@ map = "brod"
 when = { event = "army_defeated", army = "toll" }
 then = [ { give_gold = 25 }, { set = "toll_settled", value = true } ]
 
-# A deed, however the toll was settled: once the flag turns, one Dread.
+# A deed, however the toll was settled: once the flag turns, one Dread and the quest is done.
 [[trigger]]
 id = "toll_deed"
 map = "brod"
 when = { event = "var_changed", var = "toll_settled" }
 if = [ { var = "toll_settled", value = true } ]
-then = [ { add = "dread", value = 1 } ]
+then = [ { add = "dread", value = 1 }, { complete_quest = "toll" } ]
 
-# The Dread's lines: one for each of the first two steps (the host's own dialog comes at three).
+# The Dread's first line, and the main quest's line at each step of the Dread (the diary says what is coming).
 [[trigger]]
 id = "dread_line_1"
 map = "brod"
@@ -114,11 +175,36 @@ if = [ { var = "dread", value = 1 } ]
 then = [ { dialog = "dread_1" } ]
 
 [[trigger]]
-id = "dread_line_2"
+id = "dread_diary_1"
 map = "brod"
 when = { event = "var_changed", var = "dread" }
+once = false
+if = [ { var = "dread", value = 1 } ]
+then = [ { quest = "hold_ford", title = "quest.hold_ford.title", text = "quest.hold_ford.dread_1" } ]
+
+[[trigger]]
+id = "dread_diary_2"
+map = "brod"
+when = { event = "var_changed", var = "dread" }
+once = false
 if = [ { var = "dread", value = 2 } ]
-then = [ { dialog = "dread_2" } ]
+then = [ { quest = "hold_ford", title = "quest.hold_ford.title", text = "quest.hold_ford.dread_2" } ]
+
+[[trigger]]
+id = "dread_diary_3"
+map = "brod"
+when = { event = "var_changed", var = "dread" }
+once = false
+if = [ { var = "dread", value = 3 } ]
+then = [ { quest = "hold_ford", title = "quest.hold_ford.title", text = "quest.hold_ford.dread_3" } ]
+
+[[trigger]]
+id = "dread_diary_4"
+map = "brod"
+when = { event = "var_changed", var = "dread" }
+once = false
+if = [ { var = "dread", value = 4 } ]
+then = [ { quest = "hold_ford", title = "quest.hold_ford.title", text = "quest.hold_ford.dread_4" } ]
 
 # The backstop: a week's +1 for a hero who dawdles. It is the only Dread that is not a deed.
 [[trigger]]
@@ -128,12 +214,118 @@ when = { event = "week_start" }
 once = false
 then = [ { add = "dread", value = 1 } ]
 
-# The host rises the day after Dread reaches 3, at the middle ford: once, and weaker if the mound was broken.
+# The raids. The first comes when Dread reaches 2 and the second at 4, at most two. Each one walks from the
+# north-east barrows (42, 2) on the watchtower if the hero holds it, else on Reedmere. Its quest names the
+# target, and the dialog says where it goes.
+[[trigger]]
+id = "raid_1_tower"
+map = "brod"
+when = { event = "var_changed", var = "dread" }
+if = [ { var = "dread", op = ">=", value = 2 }, { var = "raids", value = 0 }, { var = "tower_taken", value = true } ]
+then = [
+    { set = "raids", value = 1 },
+    { spawn_army = "raid_1", at = [42, 2], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:deadman"] },
+    { army_goal = "raid_1", go_to_building = "tower" },
+    { quest = "raid_1", title = "quest.raid_tower.title", text = "quest.raid_tower.text" },
+    { dialog = "raid_sent_tower" },
+]
+
+[[trigger]]
+id = "raid_1_village"
+map = "brod"
+when = { event = "var_changed", var = "dread" }
+if = [ { var = "dread", op = ">=", value = 2 }, { var = "raids", value = 0 }, { var = "tower_taken", value = false } ]
+then = [
+    { set = "raids", value = 1 },
+    { spawn_army = "raid_1", at = [42, 2], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:deadman"] },
+    { army_goal = "raid_1", go_to_building = "reedmere" },
+    { quest = "raid_1", title = "quest.raid_village.title", text = "quest.raid_village.text" },
+    { dialog = "raid_sent_village" },
+]
+
+[[trigger]]
+id = "raid_2_tower"
+map = "brod"
+when = { event = "var_changed", var = "dread" }
+if = [ { var = "dread", op = ">=", value = 4 }, { var = "raids", value = 1 }, { var = "tower_taken", value = true } ]
+then = [
+    { set = "raids", value = 2 },
+    { spawn_army = "raid_2", at = [42, 2], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:deadman"] },
+    { army_goal = "raid_2", go_to_building = "tower" },
+    { quest = "raid_2", title = "quest.raid_tower.title", text = "quest.raid_tower.text" },
+    { dialog = "raid_sent_tower" },
+]
+
+[[trigger]]
+id = "raid_2_village"
+map = "brod"
+when = { event = "var_changed", var = "dread" }
+if = [ { var = "dread", op = ">=", value = 4 }, { var = "raids", value = 1 }, { var = "tower_taken", value = false } ]
+then = [
+    { set = "raids", value = 2 },
+    { spawn_army = "raid_2", at = [42, 2], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:deadman"] },
+    { army_goal = "raid_2", go_to_building = "reedmere" },
+    { quest = "raid_2", title = "quest.raid_village.title", text = "quest.raid_village.text" },
+    { dialog = "raid_sent_village" },
+]
+
+# A raid that arrives at the watchtower takes it (the AI's own building rules); the loss is noticed below.
+[[trigger]]
+id = "raid_1_takes_tower"
+map = "brod"
+when = { event = "army_arrives", army = "raid_1", building = "tower" }
+then = [ { quest = "raid_1", title = "quest.raid_tower.title", text = "quest.raid_tower.lost" }, { complete_quest = "raid_1" }, { dialog = "raid_tower" } ]
+
+[[trigger]]
+id = "raid_2_takes_tower"
+map = "brod"
+when = { event = "army_arrives", army = "raid_2", building = "tower" }
+then = [ { quest = "raid_2", title = "quest.raid_tower.title", text = "quest.raid_tower.lost" }, { complete_quest = "raid_2" }, { dialog = "raid_tower" } ]
+
+# A raid that reaches Reedmere burns it: the village's ash counts, and the marsh folk trust the hero less.
+[[trigger]]
+id = "raid_1_burns"
+map = "brod"
+when = { event = "army_arrives", army = "raid_1", building = "reedmere" }
+then = [ { remove_army = "raid_1" }, { quest = "raid_1", title = "quest.raid_village.title", text = "quest.raid_village.lost" }, { complete_quest = "raid_1" }, { add = "villages_burned", value = 1 }, { add = "marsh_trust", value = -1, min = -5, max = 5 }, { dialog = "raid_village" } ]
+
+[[trigger]]
+id = "raid_2_burns"
+map = "brod"
+when = { event = "army_arrives", army = "raid_2", building = "reedmere" }
+then = [ { remove_army = "raid_2" }, { quest = "raid_2", title = "quest.raid_village.title", text = "quest.raid_village.lost" }, { complete_quest = "raid_2" }, { add = "villages_burned", value = 1 }, { add = "marsh_trust", value = -1, min = -5, max = 5 }, { dialog = "raid_village" } ]
+
+# A raid the hero meets and beats: fifteen gold, a word of thanks, and the blood wakes the barrows: Dread +1.
+[[trigger]]
+id = "raid_1_beaten"
+map = "brod"
+when = { event = "army_defeated", army = "raid_1" }
+then = [ { give_gold = 15 }, { add = "dread", value = 1 }, { complete_quest = "raid_1" }, { dialog = "raid_beaten" } ]
+
+[[trigger]]
+id = "raid_2_beaten"
+map = "brod"
+when = { event = "army_defeated", army = "raid_2" }
+then = [ { give_gold = 15 }, { add = "dread", value = 1 }, { complete_quest = "raid_2" }, { dialog = "raid_beaten" } ]
+
+# The warning: at Dread 5 the barrows light their fires. The host walks on the middle ford at the next midnight.
+[[trigger]]
+id = "host_warning"
+map = "brod"
+when = { event = "var_changed", var = "dread" }
+if = [ { var = "dread", op = ">=", value = 5 }, { var = "host_warned", value = false }, { var = "host_up", value = false } ]
+then = [
+    { set = "host_warned", value = true },
+    { quest = "hold_ford", title = "quest.hold_ford.title", text = "quest.hold_ford.warned" },
+    { dialog = "host_warning" },
+]
+
+# The host rises at the midnight after the warning, at the middle ford: once, and weaker if the mound was broken.
 [[trigger]]
 id = "host_rises"
 map = "brod"
 when = { event = "day_start" }
-if = [ { var = "dread", op = ">=", value = 3 }, { var = "barrow_broken", value = false }, { var = "host_up", value = false } ]
+if = [ { var = "host_warned", value = true }, { var = "barrow_broken", value = false }, { var = "host_up", value = false } ]
 then = [
     { set = "host_up", value = true },
     { spawn_army = "host", at = [28, 25], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:dead_warrior"] },
@@ -145,7 +337,7 @@ then = [
 id = "host_rises_weak"
 map = "brod"
 when = { event = "day_start" }
-if = [ { var = "dread", op = ">=", value = 3 }, { var = "barrow_broken", value = true }, { var = "host_up", value = false } ]
+if = [ { var = "host_warned", value = true }, { var = "barrow_broken", value = true }, { var = "host_up", value = false } ]
 then = [
     { set = "host_up", value = true },
     { spawn_army = "host", at = [28, 25], faction = "enemy", model = 10, troops = ["dt:ghoul"] },
@@ -153,161 +345,65 @@ then = [
     { dialog = "host_rises" },
 ]
 
-# The raids while the host sleeps: a day clock, and on days 4, 8 and 12 a small band of the dead comes
-# out of the north-east barrows. It walks on the watchtower if the hero holds it, else on Reedmere.
+# Points on the bare roads, so the walking between beats stays short: a milestone on the north road, the north
+# bridge, the mill wheel between the ford and the tower, a grave marker on the west bank and a sunken ferry by the mill ford.
 [[trigger]]
-id = "raid_clock"
+id = "north_bridge"
 map = "brod"
-when = { event = "day_start" }
-if = [ { var = "host_up", value = false } ]
-once = false
-then = [ { add = "raid_day", value = 1 } ]
+when = { event = "hero_enters", at = [27, 7, 2, 3] }
+then = [ { dialog = "north_bridge" } ]
 
 [[trigger]]
-id = "raid_1_tower"
+id = "mill_wheel"
 map = "brod"
-when = { event = "var_changed", var = "raid_day" }
-if = [ { var = "raid_day", value = 4 }, { var = "host_up", value = false }, { var = "tower_taken", value = true } ]
-then = [
-    { spawn_army = "raid_1", at = [42, 2], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:deadman"] },
-    { army_goal = "raid_1", go_to_building = "tower" },
-]
+when = { event = "hero_enters", at = [36, 18, 3, 3] }
+then = [ { dialog = "mill_wheel" } ]
 
 [[trigger]]
-id = "raid_1_village"
+id = "milestone"
 map = "brod"
-when = { event = "var_changed", var = "raid_day" }
-if = [ { var = "raid_day", value = 4 }, { var = "host_up", value = false }, { var = "tower_taken", value = false } ]
-then = [
-    { spawn_army = "raid_1", at = [42, 2], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:deadman"] },
-    { army_goal = "raid_1", go_to_building = "reedmere" },
-]
+when = { event = "hero_enters", at = [33, 7, 3, 3] }
+then = [ { dialog = "milestone" } ]
 
 [[trigger]]
-id = "raid_2_tower"
+id = "grave_marker"
 map = "brod"
-when = { event = "var_changed", var = "raid_day" }
-if = [ { var = "raid_day", value = 8 }, { var = "host_up", value = false }, { var = "tower_taken", value = true } ]
-then = [
-    { spawn_army = "raid_2", at = [42, 2], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:deadman"] },
-    { army_goal = "raid_2", go_to_building = "tower" },
-]
+when = { event = "hero_enters", at = [13, 9, 3, 3] }
+then = [ { dialog = "grave_marker" } ]
 
 [[trigger]]
-id = "raid_2_village"
+id = "cairn"
 map = "brod"
-when = { event = "var_changed", var = "raid_day" }
-if = [ { var = "raid_day", value = 8 }, { var = "host_up", value = false }, { var = "tower_taken", value = false } ]
-then = [
-    { spawn_army = "raid_2", at = [42, 2], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:deadman"] },
-    { army_goal = "raid_2", go_to_building = "reedmere" },
-]
+when = { event = "hero_enters", at = [11, 15, 3, 3] }
+then = [ { dialog = "cairn" } ]
 
 [[trigger]]
-id = "raid_3_tower"
+id = "ferry"
 map = "brod"
-when = { event = "var_changed", var = "raid_day" }
-if = [ { var = "raid_day", value = 12 }, { var = "host_up", value = false }, { var = "tower_taken", value = true } ]
-then = [
-    { spawn_army = "raid_3", at = [42, 2], faction = "enemy", model = 10, troops = ["dt:deadman", "dt:deadman"] },
-    { army_goal = "raid_3", go_to_building = "tower" },
-]
+when = { event = "hero_enters", at = [20, 22, 3, 2] }
+then = [ { dialog = "ferry" } ]
 
+# A one-cell beat in the road's ruts east of the toll, so the walk from the ford to the mill wheel has one.
 [[trigger]]
-id = "raid_3_village"
+id = "ruts"
 map = "brod"
-when = { event = "var_changed", var = "raid_day" }
-if = [ { var = "raid_day", value = 12 }, { var = "host_up", value = false }, { var = "tower_taken", value = false } ]
-then = [
-    { spawn_army = "raid_3", at = [42, 2], faction = "enemy", model = 10, troops = ["dt:deadman", "dt:deadman"] },
-    { army_goal = "raid_3", go_to_building = "reedmere" },
-]
+when = { event = "hero_enters", at = [34, 23, 1, 1] }
+then = [ { dialog = "ruts" } ]
 
-# A raid that arrives at the watchtower takes it (the AI's own building rules); the loss is noticed below.
+# The herbalist on the way to the marsh: her salve (bought in her dialog) and the hint about the ghosts.
 [[trigger]]
-id = "raid_1_takes_tower"
+id = "herbalist"
 map = "brod"
-when = { event = "army_arrives", army = "raid_1", building = "tower" }
-then = [ { dialog = "raid_tower" } ]
-
-[[trigger]]
-id = "raid_2_takes_tower"
-map = "brod"
-when = { event = "army_arrives", army = "raid_2", building = "tower" }
-then = [ { dialog = "raid_tower" } ]
-
-[[trigger]]
-id = "raid_3_takes_tower"
-map = "brod"
-when = { event = "army_arrives", army = "raid_3", building = "tower" }
-then = [ { dialog = "raid_tower" } ]
-
-[[trigger]]
-id = "tower_lost"
-map = "brod"
-when = { event = "building_lost", building = "tower" }
-then = [ { set = "tower_taken", value = false } ]
-
-# A raid that reaches Reedmere burns it: the village's ash counts, and the marsh folk trust the hero less.
-[[trigger]]
-id = "raid_1_burns"
-map = "brod"
-when = { event = "army_arrives", army = "raid_1", building = "reedmere" }
-then = [ { remove_army = "raid_1" }, { add = "villages_burned", value = 1 }, { add = "marsh_trust", value = -1, min = -5, max = 5 }, { dialog = "raid_village" } ]
-
-[[trigger]]
-id = "raid_2_burns"
-map = "brod"
-when = { event = "army_arrives", army = "raid_2", building = "reedmere" }
-then = [ { remove_army = "raid_2" }, { add = "villages_burned", value = 1 }, { add = "marsh_trust", value = -1, min = -5, max = 5 }, { dialog = "raid_village" } ]
-
-[[trigger]]
-id = "raid_3_burns"
-map = "brod"
-when = { event = "army_arrives", army = "raid_3", building = "reedmere" }
-then = [ { remove_army = "raid_3" }, { add = "villages_burned", value = 1 }, { add = "marsh_trust", value = -1, min = -5, max = 5 }, { dialog = "raid_village" } ]
-
-# A raid the hero meets and beats: a little gold and a word of thanks.
-[[trigger]]
-id = "raid_1_beaten"
-map = "brod"
-when = { event = "army_defeated", army = "raid_1" }
-then = [ { give_gold = 15 }, { dialog = "raid_beaten" } ]
-
-[[trigger]]
-id = "raid_2_beaten"
-map = "brod"
-when = { event = "army_defeated", army = "raid_2" }
-then = [ { give_gold = 15 }, { dialog = "raid_beaten" } ]
-
-[[trigger]]
-id = "raid_3_beaten"
-map = "brod"
-when = { event = "army_defeated", army = "raid_3" }
-then = [ { give_gold = 15 }, { dialog = "raid_beaten" } ]
-
-# The watchtower taken, each time the hero takes it (the flag the raids read; a retaken tower is his again).
-[[trigger]]
-id = "tower_taken"
-map = "brod"
-when = { event = "building_captured", building = "tower" }
-once = false
-then = [ { set = "tower_taken", value = true } ]
-
-# The watchtower's deed, once: the standing stones show on the hill (a tease for chapter 4's waygates).
-[[trigger]]
-id = "tower_deed"
-map = "brod"
-when = { event = "building_captured", building = "tower" }
-then = [ { add = "dread", value = 1 }, { dialog = "stones" } ]
+when = { event = "hero_enters", at = [13, 31, 3, 3] }
+then = [ { dialog = "herb" } ]
 
 # The marsh folk's village: the wraiths trouble it, and its people ask for help.
 [[trigger]]
 id = "marsh_plea"
 map = "brod"
-when = { event = "hero_enters", at = [4, 34, 12, 12] }
+when = { event = "hero_enters", at = [4, 34, 8, 7] }
 if = [ { var = "marsh_hunt", value = false } ]
-then = [ { dialog = "marsh_plea" } ]
+then = [ { quest = "marsh", title = "quest.marsh.title", text = "quest.marsh.text" }, { dialog = "marsh_plea" } ]
 
 [[trigger]]
 id = "marsh_help"
@@ -319,7 +415,15 @@ then = [ { set = "marsh_hunt", value = true } ]
 id = "marsh_ride_on"
 map = "brod"
 when = { event = "dialog_choice", dialog = "marsh_plea", choice = "ride_on" }
-then = [ { add = "marsh_trust", value = -1, min = -5, max = 5 } ]
+then = [ { add = "marsh_trust", value = -1, min = -5, max = 5 }, { complete_quest = "marsh" } ]
+
+# The bog's edge south of the village: the wraiths' bones in the reeds, and a pale face in the fog. The wraiths'
+# fight comes on the next step.
+[[trigger]]
+id = "bog_edge"
+map = "brod"
+when = { event = "hero_enters", at = [4, 41, 6, 5] }
+then = [ { dialog = "bog_edge" } ]
 
 # The wraiths beaten: the charm goes to Varga when she fought beside him, else to his pack. A deed: one Dread.
 [[trigger]]
@@ -333,6 +437,7 @@ then = [
     { give_unit = "dt:hunter" },
     { add = "marsh_trust", value = 2, min = -5, max = 5 },
     { add = "dread", value = 1 },
+    { complete_quest = "marsh" },
     { dialog = "marsh_thanks" },
 ]
 
@@ -340,13 +445,15 @@ then = [
 id = "wraiths_helped_alone"
 map = "brod"
 when = { event = "army_defeated", army = "wraiths" }
-if = [ { var = "varga_joined", value = false } ]
+# Not beside him: Varga never joined, or she fell before the wraiths (a named character who died is not in the squad).
+if = [ { has_named_unit = "varga", unit = "dt:halberdier", value = false } ]
 then = [
     { give_item = "marsh_charm" },
     { give_unit = "dt:hunter" },
     { give_unit = "dt:hunter" },
     { add = "marsh_trust", value = 2, min = -5, max = 5 },
     { add = "dread", value = 1 },
+    { complete_quest = "marsh" },
     { dialog = "marsh_thanks" },
 ]
 
@@ -357,19 +464,25 @@ when = { event = "var_changed", var = "marsh_trust" }
 if = [ { var = "marsh_trust", op = ">=", value = 2 } ]
 then = [ { give_gold = 20 } ]
 
-# The refugees: a family on the road asks to be taken to Reedmere. Taken there, they thank the hero.
+# The refugees: a family in an overturned cart asks to be taken to Reedmere. Taken there, they thank the hero.
 [[trigger]]
 id = "refugees_plea"
 map = "brod"
 when = { event = "hero_enters", at = [10, 24, 3, 3] }
 if = [ { var = "refugees", value = false }, { var = "refugees_done", value = false } ]
-then = [ { dialog = "refugees" } ]
+then = [ { quest = "refugees", title = "quest.refugees.title", text = "quest.refugees.text" }, { dialog = "refugees" } ]
 
 [[trigger]]
 id = "refugees_take"
 map = "brod"
 when = { event = "dialog_choice", dialog = "refugees", choice = "take" }
-then = [ { set = "refugees", value = true } ]
+then = [ { set = "refugees", value = true }, { quest = "refugees", title = "quest.refugees.title", text = "quest.refugees.taken" } ]
+
+[[trigger]]
+id = "refugees_leave"
+map = "brod"
+when = { event = "dialog_choice", dialog = "refugees", choice = "leave" }
+then = [ { complete_quest = "refugees" } ]
 
 [[trigger]]
 id = "refugees_arrive"
@@ -380,6 +493,7 @@ then = [
     { set = "refugees_done", value = true },
     { add = "marsh_trust", value = 1, min = -5, max = 5 },
     { give_gold = 15 },
+    { complete_quest = "refugees" },
     { dialog = "refugees_thanks" },
 ]
 
@@ -402,7 +516,7 @@ then = [ { start_battle = "barrow_mound", rules = "dt" } ]
 id = "barrow_beaten"
 map = "brod"
 when = { event = "army_defeated", army = "barrow_mound" }
-then = [ { set = "barrow_broken", value = true }, { dialog = "barrow_broken" } ]
+then = [ { set = "barrow_broken", value = true }, { complete_quest = "barrow" }, { dialog = "barrow_broken" } ]
 
 # Seal the mound with a rite: forty gold, and Dread falls by one now; chapter 5 sends one host fewer.
 [[trigger]]
@@ -413,14 +527,21 @@ then = [
     { give_gold = -40 },
     { set = "barrow_sealed", value = true },
     { add = "dread", value = -1, min = 0 },
+    { complete_quest = "barrow" },
     { dialog = "barrow_sealed" },
 ]
 
-# The deserters: a band of the Crown's men on the road. They serve for thirty gold, or the hero hands them to the Crown.
+[[trigger]]
+id = "barrow_leave"
+map = "brod"
+when = { event = "dialog_choice", dialog = "barrow", choice = "leave" }
+then = [ { complete_quest = "barrow" } ]
+
+# The deserters in the north woods: a band of the Crown's men. They serve for thirty gold, or the hero hands them to the Crown.
 [[trigger]]
 id = "deserters_offer"
 map = "brod"
-when = { event = "hero_enters", at = [36, 22, 4, 3] }
+when = { event = "hero_enters", at = [18, 4, 4, 3] }
 if = [ { var = "deserters", value = 0 } ]
 then = [ { dialog = "deserters" } ]
 
@@ -428,19 +549,19 @@ then = [ { dialog = "deserters" } ]
 id = "deserters_serve"
 map = "brod"
 when = { event = "dialog_choice", dialog = "deserters", choice = "serve" }
-then = [ { set = "deserters", value = 1 }, { give_gold = -30 }, { give_unit = "dt:swordsman" }, { give_unit = "dt:swordsman" }, { dialog = "deserters_served" } ]
+then = [ { set = "deserters", value = 1 }, { give_gold = -30 }, { give_unit = "dt:swordsman" }, { give_unit = "dt:swordsman" }, { complete_quest = "deserters" }, { dialog = "deserters_served" } ]
 
 [[trigger]]
 id = "deserters_hand"
 map = "brod"
 when = { event = "dialog_choice", dialog = "deserters", choice = "hand" }
-then = [ { set = "deserters", value = 2 }, { add = "crown", value = 1, min = -5, max = 5 }, { dialog = "deserters_handed" } ]
+then = [ { set = "deserters", value = 2 }, { add = "crown", value = 1, min = -5, max = 5 }, { complete_quest = "deserters" }, { dialog = "deserters_handed" } ]
 
 [[trigger]]
 id = "deserters_pass"
 map = "brod"
 when = { event = "dialog_choice", dialog = "deserters", choice = "pass" }
-then = [ { set = "deserters", value = 3 } ]
+then = [ { set = "deserters", value = 3 }, { complete_quest = "deserters" } ]
 
 # The new moon: a roll that may bring a bad sign or a gift. Its moments repeat.
 [[trigger]]
@@ -467,17 +588,18 @@ if = [ { var = "omen", value = 3 } ]
 once = false
 then = [ { give_gold = 15 }, { dialog = "omen" } ]
 
-# The host defeated at the ford ends the chapter: the victory's look follows what he did with the mill.
+# The host defeated at the ford ends the chapter: the victory's look follows what he did with the mill. The
+# main quest is done, and a rider from Ashford hands the March over to chapter 2.
 [[trigger]]
 id = "won_fire"
 map = "brod"
 when = { event = "army_defeated", army = "host" }
 if = [ { var = "mill_burned", value = true } ]
-then = [ { dialog = "end_fire" }, { victory = true } ]
+then = [ { complete_quest = "hold_ford" }, { dialog = "end_fire" }, { dialog = "rider" }, { victory = true } ]
 
 [[trigger]]
 id = "won_mercy"
 map = "brod"
 when = { event = "army_defeated", army = "host" }
 if = [ { var = "mill_burned", value = false } ]
-then = [ { dialog = "end_mercy" }, { victory = true } ]
+then = [ { complete_quest = "hold_ford" }, { dialog = "end_mercy" }, { dialog = "rider" }, { victory = true } ]

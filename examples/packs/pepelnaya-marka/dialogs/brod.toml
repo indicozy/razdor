@@ -9,6 +9,21 @@ text = "arrival.text"
 speaker = "dt:swordsman"
 
 [[dialog]]
+id = "farm"
+title = "farm.title"
+text = "farm.text"
+
+[[dialog]]
+id = "tower_log"
+title = "tower_log.title"
+text = "tower_log.text"
+
+[[dialog]]
+id = "stones"
+title = "stones.title"
+text = "stones.text"
+
+[[dialog]]
 id = "varga_meet"
 title = "varga_meet.title"
 text = "varga_meet.text"
@@ -27,6 +42,11 @@ text = "varga_meet.refuse"
 id = "burn"
 text = "varga_meet.burn"
 then = [ { add = "dread", value = 2 }, { give_gold = 40 }, { set = "mill_burned", value = true } ]
+
+[[dialog]]
+id = "scout"
+title = "scout.title"
+text = "scout.text"
 
 [[dialog]]
 id = "toll"
@@ -50,6 +70,79 @@ text = "toll.talk"
 then = [ { remove_army = "toll" } ]
 
 [[dialog]]
+id = "deserter_note"
+title = "deserter_note.title"
+text = "deserter_note.text"
+
+[[dialog]]
+id = "refugees"
+title = "refugees.title"
+text = "refugees.text"
+
+[[dialog.choice]]
+id = "take"
+text = "refugees.take"
+
+[[dialog.choice]]
+id = "leave"
+text = "refugees.leave"
+
+[[dialog]]
+id = "north_bridge"
+title = "north_bridge.title"
+text = "north_bridge.text"
+
+[[dialog]]
+id = "mill_wheel"
+title = "mill_wheel.title"
+text = "mill_wheel.text"
+
+[[dialog]]
+id = "cairn"
+title = "cairn.title"
+text = "cairn.text"
+
+[[dialog]]
+id = "bog_edge"
+title = "bog_edge.title"
+text = "bog_edge.text"
+
+[[dialog]]
+id = "ruts"
+title = "ruts.title"
+text = "ruts.text"
+
+[[dialog]]
+id = "milestone"
+title = "milestone.title"
+text = "milestone.text"
+
+[[dialog]]
+id = "grave_marker"
+title = "grave_marker.title"
+text = "grave_marker.text"
+
+[[dialog]]
+id = "ferry"
+title = "ferry.title"
+text = "ferry.text"
+
+[[dialog]]
+id = "herb"
+title = "herb.title"
+text = "herb.text"
+
+[[dialog.choice]]
+id = "buy"
+text = "herb.buy"
+if = [ { gold = 15, op = ">=" } ]
+then = [ { give_gold = -15 }, { give_item = "dt:item/healing_potion" } ]
+
+[[dialog.choice]]
+id = "leave"
+text = "herb.leave"
+
+[[dialog]]
 id = "marsh_plea"
 title = "marsh_plea.title"
 text = "marsh_plea.text"
@@ -68,20 +161,19 @@ title = "marsh_thanks.title"
 text = "marsh_thanks.text"
 
 [[dialog]]
-id = "host_rises"
-title = "host_rises.title"
-text = "host_rises.text"
-speaker = "dt:death_knight"
-
-[[dialog]]
 id = "dread_1"
 title = "dread_1.title"
 text = "dread_1.text"
 
 [[dialog]]
-id = "dread_2"
-title = "dread_2.title"
-text = "dread_2.text"
+id = "raid_sent_tower"
+title = "raid_sent_tower.title"
+text = "raid_sent_tower.text"
+
+[[dialog]]
+id = "raid_sent_village"
+title = "raid_sent_village.title"
+text = "raid_sent_village.text"
 
 [[dialog]]
 id = "raid_tower"
@@ -97,6 +189,17 @@ text = "raid_village.text"
 id = "raid_beaten"
 title = "raid_beaten.title"
 text = "raid_beaten.text"
+
+[[dialog]]
+id = "host_warning"
+title = "host_warning.title"
+text = "host_warning.text"
+
+[[dialog]]
+id = "host_rises"
+title = "host_rises.title"
+text = "host_rises.text"
+speaker = "dt:death_knight"
 
 [[dialog]]
 id = "barrow"
@@ -125,19 +228,6 @@ text = "barrow_broken.text"
 id = "barrow_sealed"
 title = "barrow_sealed.title"
 text = "barrow_sealed.text"
-
-[[dialog]]
-id = "refugees"
-title = "refugees.title"
-text = "refugees.text"
-
-[[dialog.choice]]
-id = "take"
-text = "refugees.take"
-
-[[dialog.choice]]
-id = "leave"
-text = "refugees.leave"
 
 [[dialog]]
 id = "refugees_thanks"
@@ -173,11 +263,6 @@ title = "deserters_handed.title"
 text = "deserters_handed.text"
 
 [[dialog]]
-id = "stones"
-title = "stones.title"
-text = "stones.text"
-
-[[dialog]]
 id = "omen"
 title = "omen.title"
 text = "omen.text"
@@ -191,3 +276,8 @@ text = "end_fire.text"
 id = "end_mercy"
 title = "end_mercy.title"
 text = "end_mercy.text"
+
+[[dialog]]
+id = "rider"
+title = "rider.title"
+text = "rider.text"

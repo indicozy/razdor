@@ -20,9 +20,6 @@ varga = "Varga"
 name = "The burnt mill"
 description = "The wheel stands in the stream. They say there is gold under the mill."
 
-[building.tower]
-name = "The watchtower"
-description = "A stone tower over the ford. The Crown's men left it when the dead came."
 
 [building.reedmere]
 name = "Reedmere"
@@ -51,41 +48,178 @@ name = "The barrow"
 [army.ward]
 name = "The far watch"
 
+
+
+
+
+
+
+
+
+
+
+[building.tower]
+name = "The watchtower"
+description = "A stone tower above the ford. The Crown's garrison ran when the dead came. Men can be raised here, and the wounded healed for a fee."
+
+# --- chapter 1: the frame, the beats, the diary (docs/ideas/pepelnaya-marka-narrative.md §5) ---
 [arrival]
-title = "A new posting"
-text = "They sent you to hold the March with a handful of men and an empty purse. Nobody asked whether you wanted it. Across the river, the barrows have stopped being quiet. Start with the watchtower on the hill to the north: its garrison is small, and you can raise men there."
+title = "The writ"
+text = "The courier does not get off his horse. He throws down a sealed writ and says, not looking at you: 'Keeper of the March. The Crown grants you a province and not one soldier. The tower's garrison ran a week ago. The barrows in the north-east have been humming at night. If the dead cross the Pepelka, nobody will hold the March.' He rides off without waiting for an answer."
+
+[farm]
+title = "The burnt farmstead"
+text = "The farm burned to the ground. A rag doll with one eye lies in the ashes. A few coins were left in the oven, where nobody thought to look. The tracks lead south-west, to the bog: the family got away."
+
+[north_bridge]
+title = "The north bridge"
+text = "The road runs down to the north ford. Three logs lie across the river, and the planks on them are torn out. Someone tried to cross here at night and went back. A cap hangs on the rail, soaked through."
+
+[mill_wheel]
+title = "The mill wheel"
+text = "The mill wheel stands in the stream, charred at the rim. Something glints in the silt under it. For now it is only a glint."
+
+[cairn]
+title = "A sign on the road"
+text = "Stones by the verge are stacked into an arrow pointing to the bog. Someone was in a hurry to get there and did not wait to be understood."
+
+[bog_edge]
+title = "The bog's edge"
+text = "The reeds by the water are strewn with bird bones and small bones. A rag doll sits on a hummock. A pale face shows in the fog for a moment and hides again."
+
+[ruts]
+title = "The ruts"
+text = "The ruts in the road are deep: many carts went this way, loaded with whatever would fit. The tracks lead south, to Ashford. Not one came back."
+
+[milestone]
+title = "The milestone"
+text = "A milestone by the north road bears the Crown's arms, half hacked away. Under them someone has written in charcoal: 'Ashford three days. The road is empty.'"
+
+[grave_marker]
+title = "The marker"
+text = "Three stones by the verge and a ribbon from a child's kerchief. Nobody lies under the stones. Scratched on one of them: 'Ivor did not reach the bog. We went on.'"
+
+[ferry]
+title = "The sunken boat"
+text = "A boat has sunk by the bank, an oar sticking out of the silt. The ferryman is nowhere: the barrows took him, or he walked away. The mill ford is the only crossing left."
+
+[tower_log]
+title = "The guard's log"
+text = "The tower is empty and the hearth is cold ash. On the table lies the guard's log. The last entry, five days old: '...the third night the ground by the barrows is warm. The captain ordered us out.' Below it, in another hand: 'Whoever stayed, chose it for himself.'"
+
+[stones]
+title = "The tower and the stones"
+text = "From the tower you can see the standing stones on the hill above the barrows. Their marks can still be read. People say that once someone walked through them without touching the ground. The barrows hear that there are people in the tower again: fear grows."
 
 [varga_meet]
 title = "The halberdier"
-text = "Among the blackened walls sits a halberdier in a torn cuirass. She is waiting for neither the Order nor the dead. 'The Crown sent you, so you will not last long,' she says. 'Choose.'"
+text = "Behind the blackened walls is a row of fresh graves, with no crosses. Beside them sits a halberdier in a torn cuirass. 'The garrison ran, but someone has to bury the dead,' she says. 'I buried them. The Crown sent you, so you will not last long. Choose.'"
 join = "Walk with me"
 refuse = "Let her go her own way"
-burn = "Burn the ruins: there is gold under them"
+burn = "Burn the ruins: there is gold under them (+40, Fear +2)"
+
+[scout]
+title = "The scout's letter"
+text = "A dead scout in a scout's coat lies face down by the road. In his fist is a scrap of parchment, its line smeared with blood: 'Forty dead and one crowned among them. He looks at the Ford and waits.' There is no signature."
 
 [toll]
 title = "The ford"
-text = "A band with spears stands at the ford. Their leader grins: 'There is one crossing, and it is ours. Pay up, officer, or fight.'"
+text = "A band with spears stands at the ford. Their leader grins, but his eyes dart about. 'There is one crossing, and it is ours. The dead will come through this ford, and we are going south. And you? You stay and stand here? Then pay, or fight.'"
 pay = "Pay twenty gold"
 fight = "Fight"
-talk = "Talk: they leave for a promise"
+talk = "Let them go: a promise for passage"
+
+[deserter_note]
+title = "The hanged man"
+text = "A man in a soldier's jacket hangs at the crossroads. A note is pinned to his chest, written in charcoal: 'There were six of us. We did not want to fight the dead. Five are left, hiding in the wood by the north ford.' There is no blood. Nobody beat him. He could not bear it."
+
+[refugees]
+title = "The overturned cart"
+text = "The cart lies on its side, a wheel broken, sacks of flour in the mud. A woman holds a child and looks at you without fear. 'We are from the farm by the road. Take us to Reedmere, to the marsh folk. They will take us in if we give our names.'"
+take = "Take them to the bog"
+leave = "Not my road"
+
+[herb]
+title = "The herb-wife"
+text = "An old woman dries herbs on poles by the bog path. 'You cannot kill ghosts with iron,' she says. 'It is fire and faith that drive them off. Smear your wounds with this, before they fester.'"
+buy = "Buy the salve: fifteen gold (a healing potion)"
+leave = "Go on"
 
 [marsh_plea]
 title = "The marsh folk"
-text = "An old woman with a soaked hem holds your stirrup. Wraiths come out of the bog every night, and her son did not come back from the last. 'Help us, or ride past. But remember who rode past.'"
+text = "An old woman with a soaked hem holds your stirrup. Wraiths come out of the bog every night, and every night they take one. Her son did not come back from the last. 'Help us, or ride past. But remember who rode past.'"
 help = "Help her"
-ride_on = "Ride past"
+ride_on = "Ride past (Trust −1)"
 
 [marsh_thanks]
 title = "The bog's thanks"
 text = "The marsh folk bow and give a name: Tess, the witch's daughter from the far side of the bog. 'She knows the paths through the swamp,' the old woman says. 'She will come when the bog calls her.'"
 
+[dread_1]
+title = "The barrows"
+text = "The ground hums under your feet, as if someone is counting your steps. This is Fear: it grows from fire, blood and noise. When it reaches five, the dead stand up at the ford. Watch it in your diary."
+
+[raid_sent_tower]
+title = "A raid"
+text = "The barrows stir harder. From under the ground in the north-east a band of the dead has come out and is marching on the watchtower. If the tower falls, there will be nobody here to raise men."
+
+[raid_sent_village]
+title = "A raid"
+text = "The barrows stir harder. From under the ground in the north-east a band of the dead has come out and is marching on Reedmere. The village has no walls: if they reach it, the marsh folk will leave or burn."
+
+[raid_tower]
+title = "The tower falls"
+text = "In the night a band of the dead came out of the barrows. The tower gate did not hold, and the garrison ran into the dark. The tower is theirs now."
+
+[raid_village]
+title = "Reedmere burns"
+text = "A band of the dead came through the bog and set the village on fire. The marsh folk stand among the ashes and look at you: you did not protect them."
+
+[raid_beaten]
+title = "The dead lie down"
+text = "The band that marched on the tower or the village fell apart on the road. You searched the bodies: fifteen coins in a bone clasp. Blood wakes the barrows: Fear grows."
+
+[host_warning]
+title = "Fires in the barrows"
+text = "In the night fires lit up in the barrows. By morning they will be at the ford. Gather whoever can still hold a spear, and go to the middle ford."
+
 [host_rises]
 title = "The barrows"
-text = "The earth by the middle ford, west of your camp, hums. From under the burnt fields the dead rise: knights in rusted mail and things that crawl on four legs. They are coming for you."
+text = "The earth by the middle ford hums. From under the burnt fields the dead rise: knights in rusted mail and things that crawl on four legs. They are coming for you."
 
-[stones]
-title = "The tower and the stones"
-text = "From the tower you can see the standing stones on the hill above the barrows. Their marks can still be read. People say that once someone walked through them without touching the ground. For now, it is only talk."
+[barrow]
+title = "The barrow"
+text = "A barrow in the north-east: stones set in a ring, and a dark stair showing in the breach. The inscription says not to wake whoever sleeps inside. The barrow can be broken open before the dead get out, or sealed with a rite."
+break = "Break it open: a hard fight"
+seal = "Seal it with a rite: forty gold, Fear −1"
+leave = "Leave it alone"
+
+[barrow_broken]
+title = "The barrow broken"
+text = "The stair collapsed, and the bones under the stones crumbled to dust. A rasp comes from the depths. The host that stands at the ford will be weaker: one of the dead is already gone."
+
+[barrow_sealed]
+title = "The barrow sealed"
+text = "The rite lasts until night. The ring flares with a grey light and goes out. The barrow sleeps, and Fear draws back at least one step."
+
+[refugees_thanks]
+title = "Kin"
+text = "In Reedmere they are met at the door. The old woman nods to you in silence and gives you the fifteen coins found at the bottom of the sack. The marsh folk remember who brings their own home."
+
+[deserters]
+title = "The Crown's deserters"
+text = "In the wood by the north ford, five men in torn uniforms. Their leader comes out with a spear: 'We ran from the Crown. It does not pay us. Hire us for thirty gold, or hand us over to the Crown for a reward.'"
+serve = "Hire them for thirty gold (two join the band)"
+hand = "Hand them to the Crown: Crown +1"
+pass = "Let them go where they like"
+
+[deserters_served]
+title = "Deserters in the band"
+text = "Two deserters throw off their coats and fall into line. The rest slip away into the reeds. They take their pay in advance and count what is left."
+
+[deserters_handed]
+title = "The Crown's reward"
+text = "The deserters are led to the captain. The Crown thanks you in a letter with no signature, and the garrison of the March looks at you with new respect."
 
 [omen]
 title = "The new moon"
@@ -98,6 +232,60 @@ text = "The dead lie down at the ford. Smoke still rises from the burnt mill, an
 [end_mercy]
 title = "The ford holds"
 text = "The dead lie down at the ford. The mill still stands, and the field behind it is green with the first grass. The March will not forget who held it, and will not forgive him if he leaves."
+
+[rider]
+title = "A rider from Ashford"
+text = "A rider in a dusty cloak reins in at the ford. He looks at the river, then at you. 'The March saw you hold the ford. The council in Ashford wants you. Not all of them will bring bread, but all of them will want to know what you did.'"
+
+[quest.hold_ford]
+title = "Hold the ford"
+start = "The dead will come to the middle ford. Gather men while there is time."
+dread_1 = "The barrows hear you. Fear: 1 of 5."
+dread_2 = "The barrows are stirring. Fear: 2 of 5. Raids will come to the tower or the bog."
+dread_3 = "Fear: 3 of 5. The dead gather at the barrows."
+dread_4 = "Fear: 4 of 5. Not long now, and they will stand at the ford."
+warned = "In the night fires lit up in the barrows. By morning they will be at the middle ford. Meet them there."
+
+[quest.tower]
+title = "Take the watchtower"
+text = "The tower on the hill to the north. Its garrison has gone. Take it: men can be raised there, and wounds healed."
+
+[quest.barrow]
+title = "Find out what is stirring in the barrows"
+text = "The barrows are in the north-east. What is there?"
+scout_title = "The barrow"
+scout_text = "A dead man by the road held a letter: 'Forty dead and one crowned.' The barrow on the hill waits."
+
+[quest.varga]
+title = "Varga"
+text = "The halberdier among the ruins. Walk with her?"
+
+[quest.toll]
+title = "The ford"
+text = "A band at the ford wants a toll or a fight."
+
+[quest.deserters]
+title = "Deserters"
+text = "Five runaways in the wood by the north ford. Hire them, or hand them to the Crown."
+
+[quest.refugees]
+title = "Refugees"
+text = "A family from the overturned cart. Take them to Reedmere?"
+taken = "Take the family to Reedmere."
+
+[quest.marsh]
+title = "Ghosts of the bog"
+text = "The old woman from Reedmere asks for help: the ghosts take one each night."
+
+[quest.raid_tower]
+title = "A raid on the tower"
+text = "A band of the dead marches on the watchtower. Meet it there."
+lost = "The tower fell. The band stayed in it."
+
+[quest.raid_village]
+title = "A raid on Reedmere"
+text = "A band of the dead marches on the village in the bog. Drive it back."
+lost = "The village burned."
 
 # --- marka ---
 [marka.map]
@@ -913,62 +1101,15 @@ description = "Bitter herbs of the marsh folk, dried over a smoky fire. They sto
 name = "Company draught"
 description = "A strong draught from the Companies' camp, drunk from a tin cup. It mends a wound."
 
-[dread_1]
-title = "The barrows"
-text = "The ground hums under your feet as if someone counts your steps. The barrows hear what you do."
 
-[dread_2]
-title = "Cold from under the earth"
-text = "Cold seeps up through the frozen ground, and the dead lift their heads. They will come for you soon."
 
-[raid_tower]
-title = "The tower falls"
-text = "In the night a band of the dead came out of the barrows. The tower gate did not hold, and the garrison ran into the dark. The tower is theirs now."
 
-[raid_village]
-title = "Reedmere burns"
-text = "A band of the dead crossed the bog and set the village alight. The marsh folk stand among the ashes and look at you: you did not protect them."
 
-[raid_beaten]
-title = "The dead lie down"
-text = "The band that marched on the tower and the village broke apart on the road. You searched the bodies: fifteen coins in a bone clasp."
 
-[barrow]
-title = "The barrow"
-text = "A barrow on the north-east hill: stones set in a ring, and a dark stair in a breach. The inscription bids no one wake what sleeps below. The barrow can be broken before the dead get out, or sealed with a rite."
-break = "Break the barrow (a hard fight)"
-seal = "Seal it with a rite (forty gold)"
-leave = "Leave it alone"
 
-[barrow_broken]
-title = "The barrow broken"
-text = "The stair caved in and the bones under the stones crumbled to dust. A rasp comes from the depths. The host that rises at the ford will be weaker: one of the dead is already gone."
 
-[barrow_sealed]
-title = "The barrow sealed"
-text = "The rite lasts until night. The ring flares grey and goes out. The barrow sleeps, and the Dread falls back at least a step."
 
-[refugees]
-title = "A family by the road"
-text = "A woman with two children sits at the roadside. 'They drove us out of the village by the bog,' she says. 'Take us to Reedmere, there are kin there.'"
-take = "Take them to the reeds"
-leave = "Not my road"
 
-[refugees_thanks]
-title = "Kin"
-text = "At Reedmere they are met at the threshold. The old woman nods to you without a word and gives you fifteen coins found at the bottom of the sack. The marsh folk remember who brings their own home."
 
-[deserters]
-title = "The Crown's deserters"
-text = "Five men in torn uniforms stand in a rut. Their leader grips a spear: 'We ran from the Crown, it does not pay. Take us for thirty gold, or hand us over and the Crown pays for us.'"
-serve = "Hire them for thirty gold (two join the squad)"
-hand = "Hand them over to the Crown"
-pass = "Let them go where they like"
 
-[deserters_served]
-title = "Deserters in the squad"
-text = "Two of the deserters throw off their coats and fall into line. The rest slip away into the reeds. They take their wages in advance and count what is left."
 
-[deserters_handed]
-title = "The Crown's reward"
-text = "The deserters are taken to the captain. The Crown thanks you in a letter without a signature, and the March's garrison looks at you with more respect."

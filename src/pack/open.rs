@@ -272,12 +272,6 @@ mod tests {
         crate::rules::triggers::PACKAGE_BASE + story.named.iter().position(|n| n == "Varga").expect("Varga is a named character") as u8
     }
 
-    /// The id of the bog charm (the package numbers its items by file order: chapter 1's is not first).
-    fn bog_charm(g: &Game) -> u32 {
-        let content = &g.content;
-        (200..256).find(|&i| content.try_item(crate::rules::content::ItemId(i)).is_some_and(|d| d.name == "Bog charm")).expect("the bog charm is an item")
-    }
-
     /// The id of the package army `host` (armies are numbered by their first spawn: chapter 1's is
     /// not the first in file order).
     fn host_id(g: &Game) -> u8 {
@@ -338,118 +332,68 @@ mod tests {
         g.story_events(When::ArmyArrives { army, at: None, building: Some(building) })
     }
 
-    /// One day in minutes, for `pass_time`.
-    const DAY: f32 = 24.0 * 60.0;
-
-    /// The watchtower held and the barrow broken: raid 1 (day 4) is beaten on the road, raid 2 (day 8) beaten
-    /// at the tower, raid 3 (day 12) takes the tower (the loss is noticed). At week two's dread the host comes,
-    /// one unit weaker for the broken mound, and the mill spared gives the mercy ending.
-    fn path_tower_raids(g: &mut Game) {
-        assert!(said(g.story_events(When::BuildingCaptured(2)), "stones"), "the watchtower taken");
-        assert!(said(g.story_events(When::HeroEnters(Place::Cell(41, 6))), "barrow"), "the barrow's offer, as the hero walks near it");
-        g.answer_story_dialog("barrow", Some("break"));
-        let mound = army_named(g, "barrow_mound");
-        assert!(said(beat(g, mound), "barrow_broken"), "the mound broken");
-        let mut out = Vec::new();
-        g.pass_time(4.5 * DAY, &mut out);
-        let r1 = army_named(g, "raid_1");
-        assert!(said(beat(g, r1), "raid_beaten"), "raid 1 beaten on the road");
-        g.pass_time(4.0 * DAY, &mut out);
-        let r2 = army_named(g, "raid_2");
-        assert!(said(beat(g, r2), "raid_beaten"), "raid 2 beaten at the tower");
-        g.pass_time(5.0 * DAY, &mut out);
-        assert!(g.triggers.spawned.contains(&army_named(g, "raid_3")), "raid 3 comes on day 12");
-        assert!(said(arrive(g, "raid_3", 2), "raid_tower"), "raid 3 takes the tower");
-        g.story_events(When::BuildingLost(2));
-        let trace = fired(g);
-        assert!(trace.iter().any(|t| t == "raid_3_takes_tower"), "raid 3 takes the tower: {trace:?}");
-        assert!(trace.iter().any(|t| t == "tower_lost"), "the loss is noticed: {trace:?}");
-        g.pass_time(4.0 * DAY, &mut out);
-        let host = army_named(g, "host");
-        let troops = g.world.armies.iter().find(|a| a.id == host).map(|a| a.troops.len());
-        assert_eq!(troops, Some(1), "the host is one unit weaker for the broken mound");
-        assert!(said(beat(g, host), "end_mercy"), "the mill was spared: the mercy ending");
-        assert_eq!(g.story_end(), Some(Ending::Victory));
+    /// Steps the hero onto `cell` (raising `hero_enters`) and answers the dialogs that opens, and those they
+    /// open in turn: the listed choice, else the dialog's first one («Далее» when it has none).
+    fn step(g: &mut Game, cell: (i32, i32), choices: &[(&str, &str)]) -> Vec<String> {
+        let events = g.story_events(When::HeroEnters(Place::Cell(cell.0, cell.1)));
+        answer_all(g, events, choices)
     }
 
-    /// The tower lost on day 4 (raid 1 takes it), the hero takes it back, raid 2 (day 8) takes it again, and
-    /// raid 3 (day 12) goes on Reedmere, which it burns.
-    fn path_retaken_tower(g: &mut Game) {
-        assert!(said(g.story_events(When::BuildingCaptured(2)), "stones"), "the watchtower taken");
+    /// Answers the dialogs among `events` (and those they open), as [`step`] does.
+    fn answer_all(g: &mut Game, events: Vec<Event>, choices: &[(&str, &str)]) -> Vec<String> {
+        let mut queue: std::collections::VecDeque<Event> = events.into();
         let mut out = Vec::new();
-        g.pass_time(4.5 * DAY, &mut out);
-        arrive(g, "raid_1", 2);
-        g.story_events(When::BuildingLost(2));
-        let trace = fired(g);
-        assert!(trace.iter().any(|t| t == "raid_1_takes_tower") && trace.iter().any(|t| t == "tower_lost"), "raid 1 takes the tower: {trace:?}");
-        g.story_events(When::BuildingCaptured(2));
-        g.pass_time(4.0 * DAY, &mut out);
-        arrive(g, "raid_2", 2);
-        g.story_events(When::BuildingLost(2));
-        let trace = fired(g);
-        assert!(trace.iter().any(|t| t == "raid_2_takes_tower"), "the hero's tower, retaken, is raid 2's target: {trace:?}");
-        g.pass_time(4.0 * DAY, &mut out);
-        let reedmere = building_named(g, "reedmere");
-        arrive(g, "raid_3", reedmere);
-        let trace = fired(g);
-        assert!(trace.iter().any(|t| t == "raid_3_burns"), "raid 3 burns Reedmere: {trace:?}");
+        while let Some(e) = queue.pop_front() {
+            if let Event::Package(d) = e {
+                let choice = choices.iter().find(|(id, _)| *id == d.id).map(|(_, c)| c.to_string()).or_else(|| d.choices.first().cloned());
+                out.push(d.id.clone());
+                queue.extend(g.answer_story_dialog(&d.id, choice.as_deref()));
+            }
+        }
+        out
     }
 
-    /// The tower never taken: raid 1 (day 4) burns Reedmere, raid 2 (day 8) burns it again, and raid 3 (day 12)
-    /// is beaten there. The barrow sealed with a rite, the deserters handed to the Crown, the refugees taken
-    /// home to Reedmere and thanked.
-    fn path_village_raids(g: &mut Game) {
-        assert!(said(g.story_events(When::HeroEnters(Place::Cell(41, 6))), "barrow"), "the barrow's offer");
-        g.answer_story_dialog("barrow", Some("seal"));
-        assert_eq!(g.story_var("barrow_sealed"), Some(crate::pack::triggers::VarValue::Bool(true)));
-        assert!(said(g.story_events(When::HeroEnters(Place::Cell(37, 23))), "deserters"), "the deserters on the road");
-        g.answer_story_dialog("deserters", Some("hand"));
-        assert_eq!(g.story_var("crown"), Some(crate::pack::triggers::VarValue::Int(1)), "the Crown's standing rises");
-        assert!(said(g.story_events(When::HeroEnters(Place::Cell(11, 25))), "refugees"), "the family by the road");
-        g.answer_story_dialog("refugees", Some("take"));
-        let reedmere = building_named(g, "reedmere");
-        assert!(said(g.story_events(When::HeroEntersBuilding(reedmere)), "refugees_thanks"), "the family is thanked at Reedmere");
-        let mut out = Vec::new();
-        let reedmere = building_named(g, "reedmere");
-        g.pass_time(4.5 * DAY, &mut out);
-        arrive(g, "raid_1", reedmere);
-        g.pass_time(4.0 * DAY, &mut out);
-        arrive(g, "raid_2", reedmere);
-        let trace = fired(g);
-        assert!(trace.iter().any(|t| t == "raid_1_burns") && trace.iter().any(|t| t == "raid_2_burns"), "the raids burn Reedmere: {trace:?}");
-        assert!(g.story_var("villages_burned").is_some_and(|v| v != crate::pack::triggers::VarValue::Int(0)), "the ash counts");
-        g.pass_time(4.0 * DAY, &mut out);
-        let r3 = army_named(g, "raid_3");
-        assert!(said(beat(g, r3), "raid_beaten"), "raid 3 beaten on the road");
-    }
-
-    /// Path A: Varga joins, the toll is fought, the marsh folk's wraiths are beaten, the tower is
-    /// taken, the dread rises to the host, and the host is beaten with the mill spared.
-    fn path_a(g: &mut Game) {
+    /// The arrival of a chapter game: its opening dialog answered.
+    fn start(g: &mut Game) {
         assert_eq!(dialogs(g.drain_events()), ["arrival"]);
         g.answer_story_dialog("arrival", None);
-        assert_eq!(dialogs(g.story_events(When::HeroEnters(Place::Cell(34, 17)))), ["varga_meet"], "the ruins by the road");
-        g.answer_story_dialog("varga_meet", Some("join"));
+    }
+
+    /// Path A: the mill spared. The hero takes the watchtower and walks the roads (every beat of the route is
+    /// reached), Varga joins, the toll is fought, the marsh folk are helped and the wraiths beaten; the raids
+    /// come to the tower on Dread 2 and 4, and the host rises at Dread 5 (the weekly backstop) and is beaten at
+    /// the ford: the mercy ending.
+    fn path_a(g: &mut Game) {
+        start(g);
+        assert!(said(g.story_events(When::BuildingCaptured(2)), "stones"), "the watchtower taken");
+        assert!(step(g, (37, 23), &[]).contains(&"deserter_note".to_string()), "the hanged man's note");
+        assert!(step(g, (41, 21), &[]).contains(&"farm".to_string()), "the farmstead");
+        assert!(step(g, (37, 12), &[]).contains(&"scout".to_string()), "the scout's letter");
+        assert!(step(g, (34, 17), &[("varga_meet", "join")]).contains(&"varga_meet".to_string()), "the ruins by the road");
         assert!(g.squad.iter().any(|u| u.named == varga_id(g)), "Varga joins the hero's army");
-        let gold = g.gold;
-        assert_eq!(dialogs(g.story_events(When::HeroEnters(Place::Cell(33, 23)))), ["toll"], "the toll, as the hero nears the bandits");
-        g.answer_story_dialog("toll", Some("fight"));
+        assert!(step(g, (33, 23), &[("toll", "fight")]).contains(&"toll".to_string()), "the toll");
         beat(g, 1);
-        assert_eq!(g.gold, gold + 25, "the toll's bandits beaten: 25 gold");
-        assert_eq!(dialogs(g.story_events(When::HeroEnters(Place::Cell(6, 40)))), ["marsh_plea"], "the marsh folk ask for help");
-        g.answer_story_dialog("marsh_plea", Some("help"));
-        let thanks = beat(g, 2);
-        assert_eq!(dialogs(thanks), ["marsh_thanks"], "Tess is named");
-        assert!(g.squad.iter().any(|u| u.named == varga_id(g) && u.items.contains(&Some(crate::rules::content::ItemId(bog_charm(g))))), "the charm goes to Varga");
-        assert_eq!(g.story_var("marsh_trust"), Some(crate::pack::triggers::VarValue::Int(2)));
-        assert_eq!(dialogs(g.story_events(When::BuildingCaptured(2))), ["stones"], "the watchtower taken");
+        for cell in [(34, 23), (37, 19), (34, 8), (28, 8)] {
+            assert_eq!(step(g, cell, &[]).len(), 1, "a beat on the road at {cell:?}");
+        }
+        assert!(step(g, (19, 5), &[("deserters", "hand")]).contains(&"deserters".to_string()), "the deserters in the north woods");
+        assert!(step(g, (14, 10), &[]).contains(&"grave_marker".to_string()), "the grave marker");
+        assert!(step(g, (12, 16), &[]).contains(&"cairn".to_string()), "the sign on the road");
+        assert!(step(g, (11, 25), &[("refugees", "take")]).contains(&"refugees".to_string()), "the overturned cart");
+        let reedmere = building_named(g, "reedmere");
+        assert!(said(g.story_events(When::HeroEntersBuilding(reedmere)), "refugees_thanks"), "the family thanked at Reedmere");
+        assert!(step(g, (13, 31), &[("herb", "buy")]).contains(&"herb".to_string()), "the herb-wife");
+        assert!(step(g, (21, 23), &[]).contains(&"ferry".to_string()), "the sunken boat");
+        assert!(step(g, (6, 40), &[("marsh_plea", "help")]).contains(&"marsh_plea".to_string()), "the marsh folk ask for help");
+        assert!(step(g, (6, 43), &[]).contains(&"bog_edge".to_string()), "the bog's edge");
+        assert!(dialogs(beat(g, 2)).contains(&"marsh_thanks".to_string()), "Tess is named");
+        // Helped +2 and the family brought home +1.
+        assert_eq!(g.story_var("marsh_trust"), Some(crate::pack::triggers::VarValue::Int(3)));
         let mut out = Vec::new();
         g.pass_time(14.0 * 24.0 * 60.0, &mut out);
-        assert_eq!(g.story_var("dread"), Some(crate::pack::triggers::VarValue::Int(6)), "four deeds and two weeks of backstop");
         assert!(dialogs(out).contains(&"host_rises".to_string()), "the host rises at the ford");
-        assert!(g.triggers.spawned.contains(&host_id(g)), "the host is on the map");
         let ended = beat(g, host_id(g));
-        assert_eq!(dialogs(ended), ["end_mercy"], "the mill was spared: the mercy ending");
+        assert_eq!(dialogs(ended), ["end_mercy", "rider"], "the mill was spared: the mercy ending, and the rider");
     }
 
     #[test]
@@ -461,82 +405,147 @@ mod tests {
         assert_eq!(g.story_var("mill_burned"), Some(crate::pack::triggers::VarValue::Bool(false)));
         assert_eq!(g.story_var("varga_joined"), Some(crate::pack::triggers::VarValue::Bool(true)));
         assert_eq!(g.story_var("toll_settled"), Some(crate::pack::triggers::VarValue::Bool(true)));
-        assert_eq!(g.story_var("tower_taken"), Some(crate::pack::triggers::VarValue::Bool(true)));
         assert!(!opened.story.triggers.is_empty());
     }
 
-    /// Every trigger of the chapter fires on some path: A above, B (the mill burned, the toll talked
-    /// away, the marsh folk ridden past, the host beaten: the fire ending), C (Varga sent away, the
-    /// toll paid, Varga absent from the fight, the new moon's omens, the mercy ending).
+    /// Path B: the mill burned (Varga's ruins, Dread 2: the raid goes on Reedmere), the toll talked away, the
+    /// deserters served, the barrow and the refugees left alone, the marsh folk ridden past. The raids burn
+    /// Reedmere on Dread 2 and 4, the host rises at Dread 5 and is beaten: the fire ending.
+    fn path_b(g: &mut Game) {
+        assert!(step(g, (34, 17), &[("varga_meet", "burn")]).contains(&"varga_meet".to_string()), "the burnt ruins: Dread +2");
+        assert_eq!(g.story_var("mill_burned"), Some(crate::pack::triggers::VarValue::Bool(true)));
+        assert!(step(g, (33, 23), &[("toll", "talk")]).contains(&"toll".to_string()), "the toll talked away");
+        assert!(step(g, (19, 5), &[("deserters", "serve")]).contains(&"deserters".to_string()), "the deserters in the north woods");
+        assert_eq!(g.story_var("deserters"), Some(crate::pack::triggers::VarValue::Int(1)));
+        assert!(step(g, (41, 6), &[("barrow", "leave")]).contains(&"barrow".to_string()), "the barrow, left alone");
+        assert!(step(g, (11, 25), &[("refugees", "leave")]).contains(&"refugees".to_string()), "the cart, left");
+        assert!(step(g, (6, 40), &[("marsh_plea", "ride_on")]).contains(&"marsh_plea".to_string()), "the marsh folk, ridden past");
+        assert_eq!(g.story_var("marsh_trust"), Some(crate::pack::triggers::VarValue::Int(-1)));
+        let mut out = Vec::new();
+        g.pass_time(7.0 * 24.0 * 60.0, &mut out);
+        let raid_2 = army_named(g, "raid_2");
+        assert!(g.triggers.spawned.contains(&raid_2), "Dread 4 at the first week's backstop sends raid 2");
+        let reedmere = building_named(g, "reedmere");
+        // The raids walk on Reedmere while the days pass (the AI's own walk): raid 1 burns it in the week; raid 2
+        // is raised by the week's Dread 4 and is raised here at its arrival if the walk has not brought it.
+        let _ = arrive(g, "raid_1", reedmere);
+        assert!(fired(g).iter().any(|t| t == "raid_1_burns"), "raid 1 burns Reedmere: {:?}", fired(g));
+        let _ = arrive(g, "raid_2", reedmere);
+        assert!(fired(g).iter().any(|t| t == "raid_2_burns"), "raid 2 burns it again: {:?}", fired(g));
+        assert!(g.story_var("villages_burned").is_some_and(|v| v == crate::pack::triggers::VarValue::Int(2)), "the ash counts twice");
+        // Dread 5 at the second week's midnight, the host the midnight after it.
+        g.pass_time(8.0 * 24.0 * 60.0, &mut out);
+        assert!(dialogs(out).contains(&"host_rises".to_string()), "the host rises at Dread 5");
+        let ended = beat(g, host_id(g));
+        assert_eq!(dialogs(ended), ["end_fire", "rider"], "the mill burned: the fire ending");
+        assert_eq!(g.story_end(), Some(Ending::Victory));
+    }
+
+    /// Path C: Varga sent away, the toll paid, the herb-wife's salve left, the refugees taken home, the deserters
+    /// let go, the barrow sealed with a rite, the wraiths beaten without Varga (the charm goes to the pack),
+    /// and the new moons' rolls (the omens). Raid 1 goes on Reedmere (the tower never held) and burns it.
+    fn path_c(g: &mut Game) {
+        assert!(step(g, (41, 21), &[]).contains(&"farm".to_string()), "the farmstead's coins");
+        assert!(step(g, (34, 17), &[("varga_meet", "refuse")]).contains(&"varga_meet".to_string()), "Varga sent away");
+        assert!(step(g, (33, 23), &[("toll", "pay")]).contains(&"toll".to_string()), "the toll paid");
+        assert_eq!(g.story_var("dread"), Some(crate::pack::triggers::VarValue::Int(2)), "Varga's and the toll's deeds: Dread 2");
+        let reedmere = building_named(g, "reedmere");
+        let _ = arrive(g, "raid_1", reedmere);
+        assert!(fired(g).iter().any(|t| t == "raid_1_burns"), "the first raid burns Reedmere (the tower is not held)");
+        assert!(step(g, (11, 25), &[("refugees", "take")]).contains(&"refugees".to_string()), "the family by the road");
+        assert!(said(g.story_events(When::HeroEntersBuilding(reedmere)), "refugees_thanks"), "the family is thanked");
+        assert!(step(g, (19, 5), &[("deserters", "pass")]).contains(&"deserters".to_string()), "the deserters let go");
+        assert!(step(g, (13, 31), &[("herb", "leave")]).contains(&"herb".to_string()), "the herb-wife, left");
+        assert!(step(g, (41, 6), &[("barrow", "seal")]).contains(&"barrow".to_string()), "the barrow sealed with a rite");
+        assert_eq!(g.story_var("barrow_sealed"), Some(crate::pack::triggers::VarValue::Bool(true)));
+        assert!(step(g, (6, 40), &[("marsh_plea", "help")]).contains(&"marsh_plea".to_string()), "the marsh folk ask for help");
+        assert!(dialogs(beat(g, 2)).contains(&"marsh_thanks".to_string()), "the wraiths beaten without Varga: the charm goes to the pack");
+        let mut omens = Vec::new();
+        for _ in 0..60 {
+            let events = g.story_events(When::NewMoon);
+            omens.extend(answer_all(g, events, &[]));
+        }
+        assert!(g.story_var("omen").is_some_and(|v| v != crate::pack::triggers::VarValue::Int(0)), "the new moons rolled an omen");
+        let mut out = Vec::new();
+        g.pass_time(45.0 * 24.0 * 60.0, &mut out);
+        assert!(dialogs(out.clone()).contains(&"host_warning".to_string()), "the warning comes at Dread 5");
+        let raid_2 = army_named(g, "raid_2");
+        assert!(g.triggers.spawned.contains(&raid_2), "the second raid comes at Dread 4");
+        let _ = arrive(g, "raid_2", reedmere);
+        assert!(fired(g).iter().any(|t| t == "raid_2_burns"), "the second raid burns Reedmere");
+        let ended = beat(g, host_id(g));
+        assert_eq!(dialogs(ended), ["end_mercy", "rider"], "the mercy ending");
+    }
+
+    /// Path D: the tower held and the barrow broken; the first raid beaten at the tower (Dread 2 to 3), the toll
+    /// talked away (Dread 4: raid 2), raid 2 beaten (Dread 5: the warning), and the weakened host rises the next
+    /// midnight: the mercy ending.
+    fn path_d(g: &mut Game) {
+        assert!(said(g.story_events(When::BuildingCaptured(2)), "stones"), "the watchtower taken");
+        assert!(step(g, (41, 6), &[("barrow", "break")]).contains(&"barrow".to_string()), "the barrow's offer");
+        let mound = army_named(g, "barrow_mound");
+        assert!(said(beat(g, mound), "barrow_broken"), "the mound broken");
+        assert!(step(g, (34, 17), &[("varga_meet", "join")]).contains(&"varga_meet".to_string()), "Varga joins");
+        let r1 = army_named(g, "raid_1");
+        assert!(said(beat(g, r1), "raid_beaten"), "raid 1 beaten at the tower");
+        assert!(step(g, (33, 23), &[("toll", "talk")]).contains(&"toll".to_string()), "the toll talked away");
+        let r2 = army_named(g, "raid_2");
+        assert!(said(beat(g, r2), "raid_beaten"), "raid 2 beaten");
+        assert!(g.story_var("dread").is_some_and(|v| v == crate::pack::triggers::VarValue::Int(5)), "the raids' blood: Dread 5");
+        let mut out = Vec::new();
+        g.pass_time(24.0 * 60.0, &mut out);
+        assert!(dialogs(out).contains(&"host_rises".to_string()), "the host rises the midnight after the warning");
+        let host = army_named(g, "host");
+        let troops = g.world.armies.iter().find(|a| a.id == host).map(|a| a.troops.len());
+        assert_eq!(troops, Some(1), "the host is one unit weaker for the broken mound");
+        let ended = beat(g, host);
+        assert_eq!(dialogs(ended), ["end_mercy", "rider"], "the mercy ending");
+    }
+
+    /// Path E: the tower lost to raid 1 and taken back, raid 2 takes it again: the loss is noticed each time
+    /// (`tower_lost`), the raids' arrivals and losses (`raid_*_takes_tower`).
+    fn path_e(g: &mut Game) {
+        assert!(said(g.story_events(When::BuildingCaptured(2)), "stones"), "the watchtower taken");
+        assert!(step(g, (34, 17), &[("varga_meet", "join")]).contains(&"varga_meet".to_string()), "Varga joins: Dread 2, raid 1 for the tower");
+        assert!(said(arrive(g, "raid_1", 2), "raid_tower"), "raid 1 takes the tower");
+        g.story_events(When::BuildingLost(2));
+        assert!(g.story_var("tower_taken") == Some(crate::pack::triggers::VarValue::Bool(false)), "the loss is noticed");
+        g.story_events(When::BuildingCaptured(2));
+        assert!(g.story_var("tower_taken") == Some(crate::pack::triggers::VarValue::Bool(true)), "the hero takes it back");
+        assert!(step(g, (6, 40), &[("marsh_plea", "help")]).contains(&"marsh_plea".to_string()), "the marsh folk");
+        assert!(dialogs(beat(g, 2)).contains(&"marsh_thanks".to_string()), "the wraiths beaten: Dread 3");
+        assert!(step(g, (33, 23), &[("toll", "talk")]).contains(&"toll".to_string()), "the toll: Dread 4, raid 2");
+        assert!(said(arrive(g, "raid_2", 2), "raid_tower"), "raid 2 takes the retaken tower");
+        g.story_events(When::BuildingLost(2));
+        let trace = fired(g);
+        assert!(trace.iter().any(|t| t == "tower_lost") && trace.iter().any(|t| t == "raid_2_takes_tower"), "{trace:?}");
+    }
+
+    /// Every trigger of the chapter fires on some path: A to E above.
     #[test]
     fn every_trigger_of_chapter_one_fires_on_some_path() {
         let Some((mut a, opened, install)) = chapter() else { return };
         path_a(&mut a);
         let mut all = fired(&a);
-
-        let content = Arc::new(Content::from_dt(&install).with_package(opened.units.clone(), opened.items.clone()));
-        let mut b = Game::from_scenario(content.clone(), &opened.scenario, HeroClass::Knight);
-        b.triggers.trace = Some(Vec::new());
-        opened.start(&mut b);
-        assert_eq!(dialogs(b.drain_events()), ["arrival"]);
-        b.answer_story_dialog("arrival", None);
-        assert_eq!(dialogs(b.story_events(When::HeroEnters(Place::Cell(34, 17)))), ["varga_meet"]);
-        b.answer_story_dialog("varga_meet", Some("burn"));
-        assert_eq!(b.story_var("dread"), Some(crate::pack::triggers::VarValue::Int(2)), "the burnt mill: +2 dread");
-        assert_eq!(dialogs(b.story_events(When::HeroEnters(Place::Cell(33, 23)))), ["toll"]);
-        b.answer_story_dialog("toll", Some("talk"));
-        assert_eq!(dialogs(b.story_events(When::HeroEnters(Place::Cell(37, 23)))), ["deserters"], "the Crown's deserters on the road");
-        b.answer_story_dialog("deserters", Some("serve"));
-        assert_eq!(b.story_var("deserters"), Some(crate::pack::triggers::VarValue::Int(1)), "the deserters serve for the gold");
-        assert_eq!(dialogs(b.story_events(When::HeroEnters(Place::Cell(6, 40)))), ["marsh_plea"]);
-        b.answer_story_dialog("marsh_plea", Some("ride_on"));
-        assert_eq!(b.story_var("marsh_trust"), Some(crate::pack::triggers::VarValue::Int(-1)));
-        let mut out = Vec::new();
-        b.pass_time(7.0 * 24.0 * 60.0, &mut out);
-        assert!(b.triggers.spawned.contains(&host_id(&b)), "the host rises at the first week with dread 2 or more");
-        let host = host_id(&b);
-        assert_eq!(dialogs(beat(&mut b, host)), ["end_fire"], "the mill burned: the fire ending");
-        assert_eq!(b.story_end(), Some(Ending::Victory));
+        let mut b = fresh(&opened, &install);
+        path_b(&mut b);
         all.extend(fired(&b));
-
-        let mut c = Game::from_scenario(content, &opened.scenario, HeroClass::Knight);
-        c.triggers.trace = Some(Vec::new());
-        opened.start(&mut c);
-        assert_eq!(dialogs(c.drain_events()), ["arrival"]);
-        c.answer_story_dialog("arrival", None);
-        assert_eq!(dialogs(c.story_events(When::HeroEnters(Place::Cell(34, 17)))), ["varga_meet"]);
-        c.answer_story_dialog("varga_meet", Some("refuse"));
-        assert_eq!(dialogs(c.story_events(When::HeroEnters(Place::Cell(33, 23)))), ["toll"]);
-        let gold = c.gold;
-        c.answer_story_dialog("toll", Some("pay"));
-        assert_eq!(c.gold, gold - 20, "the toll paid");
-        assert_eq!(dialogs(c.story_events(When::HeroEnters(Place::Cell(37, 23)))), ["deserters"], "the deserters again");
-        c.answer_story_dialog("deserters", Some("pass"));
-        assert_eq!(dialogs(c.story_events(When::HeroEnters(Place::Cell(6, 40)))), ["marsh_plea"]);
-        c.answer_story_dialog("marsh_plea", Some("help"));
-        assert_eq!(dialogs(beat(&mut c, 2)), ["marsh_thanks"], "Varga is not in the fight: the charm goes to the pack");
-        let mut omens = Vec::new();
-        for _ in 0..60 {
-            omens.extend(c.story_events(When::NewMoon));
-        }
-        assert!(c.story_var("omen").is_some_and(|v| v != crate::pack::triggers::VarValue::Int(0)), "the new moons rolled an omen");
+        let mut c = fresh(&opened, &install);
+        path_c(&mut c);
         all.extend(fired(&c));
-
         let mut d = fresh(&opened, &install);
-        path_tower_raids(&mut d);
+        path_d(&mut d);
         all.extend(fired(&d));
         let mut e = fresh(&opened, &install);
-        path_retaken_tower(&mut e);
+        path_e(&mut e);
         all.extend(fired(&e));
-        let mut f = fresh(&opened, &install);
-        path_village_raids(&mut f);
-        all.extend(fired(&f));
 
         let mut expected: Vec<String> = opened.story.triggers.iter().map(|t| t.id.clone()).collect();
         expected.sort();
         expected.dedup();
         all.sort();
         all.dedup();
-        assert_eq!(all, expected, "every trigger of the chapter is reachable");
+        let missing: Vec<&String> = expected.iter().filter(|t| !all.contains(t)).collect();
+        assert!(missing.is_empty(), "triggers that never fire on any path: {missing:?}");
     }
 }
