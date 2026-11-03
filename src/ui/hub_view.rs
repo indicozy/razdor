@@ -545,14 +545,16 @@ pub fn card_controls(versions: &[String], update: bool, catalog: Option<&str>) -
 /// index of the version picked since the last frame.
 fn version_picker(field: Rect, size: f32, k: f32, versions: &[String], current: usize, enabled: bool) -> Option<usize> {
     let picked = take_pick(VERSION_KEY).and_then(|v| usize::try_from(v).ok());
-    let hover = enabled && mouse_in(field.x, field.y, field.w, field.h);
+    // The list opens on the release of a click (`button_state`), as every drop-down does: opened on
+    // the press, `draw_popup` would close it at once, the press being outside the list it opens.
+    let (hover, _, pressed) = button_state(field, enabled);
     draw_rectangle(field.x, field.y, field.w, field.h, FIELD_BG);
     draw_rectangle_lines(field.x, field.y, field.w, field.h, 2.0, if hover { INK } else { DIM });
     let label = versions.get(current).map_or("", String::as_str);
     text_fit(label, field.x + 8.0 * k, field.y + field.h / 2.0 + size * 0.35, field.w - 34.0 * k, size, INK);
     let (cx, cy) = (field.x + field.w - 14.0 * k, field.y + field.h / 2.0);
     draw_triangle(vec2(cx - 5.0 * k, cy - 3.0 * k), vec2(cx + 5.0 * k, cy - 3.0 * k), vec2(cx, cy + 3.0 * k), DIM);
-    if hover && clicked() {
+    if pressed {
         let options: Vec<(i64, String)> = versions.iter().enumerate().map(|(i, v)| (i as i64, v.clone())).collect();
         open_list(VERSION_KEY, field, current as i64, &options, k);
     }
