@@ -907,6 +907,11 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                     "Староста Тилион просит защитить деревню от разбойничьего отряда, который каждую ночь нападает на рыбаков. Разбойники укрылись в старом форте на севере; до их прихода осталось немного времени.",
                 );
             }
+            // `RAZDOR_SCENE_PACK_DIARY=1`: a package's entries (its quests and the dialog it shows, with
+            // the story's texts), for the diary with package entries.
+            if std::env::var_os("RAZDOR_SCENE_PACK_DIARY").is_some() {
+                pack_diary(&mut game);
+            }
             let tab = arg.and_then(|t| t.parse::<usize>().ok()).and_then(|i| razdor::rules::journal::Tab::ALL.get(i).copied());
             // `RAZDOR_SCENE_READER=1`: a phone's diary reader open on the picked entry (`RAZDOR_DP`).
             let reader = std::env::var_os("RAZDOR_SCENE_READER").is_some();
@@ -1119,4 +1124,29 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
     app.assets.set_content(game.content.clone());
     app.game = Some(game);
     Ok(())
+}
+
+/// The diary of a package (`RAZDOR_SCENE_PACK_DIARY`): a quest under way, one completed a day
+/// later, and the dialog read (its title and text are the story's), made the way the story's
+/// actions make them.
+fn pack_diary(game: &mut razdor::rules::game::Game) {
+    use razdor::rules::triggers::{DialogDef, Story};
+    let mut story = Story { seed: 7, ..Story::default() };
+    story.dialogs.push(DialogDef { id: "gate".into(), title: "gate.title".into(), text: "gate.text".into(), speaker: None, choices: Vec::new() });
+    for (key, text) in [
+        ("ford.title", "Удержать брод"),
+        ("ford.text", "Мёртвые придут к среднему броду. Соберите людей, пока есть время."),
+        ("deserters.title", "Дезертиры"),
+        ("deserters.text", "Пятеро дезертиров прячутся в лесу у северного брода. Найдите их и решите, как с ними быть."),
+        ("gate.title", "Ворота башни"),
+        ("gate.text", "Кто идёт? Назовись, Хранитель Марки, или уходи."),
+    ] {
+        story.texts.insert(key.into(), text.into());
+    }
+    game.attach_story(story);
+    let now = game.clock.total_minutes() as u64;
+    game.journal.story_message("gate", now, "gate.title", "gate.text");
+    game.journal.story_quest("ford", now, "ford.title", "ford.text");
+    game.journal.story_quest("deserters", now + 60, "deserters.title", "deserters.text");
+    game.journal.story_quest_done("deserters", now + 1440);
 }

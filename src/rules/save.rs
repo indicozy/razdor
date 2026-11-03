@@ -1604,8 +1604,12 @@ pub(crate) mod tests {
         g.journal.record(EntryKind::Quest, 2, 100, "A quest", "Its text");
         g.journal.record(EntryKind::Rumour, 5, 160, "A rumour", "Whispers");
         g.journal.next_chapter();
+        // The package's quests and dialogs are kept too (their keys, their ids).
+        g.journal.story_quest("ford", 300, "ford.title", "ford.text");
+        g.journal.story_message("gate", 310, "gate.title", "gate.text");
         let loaded = roundtrip(&g, c.clone(), None);
         assert_eq!(loaded.journal, g.journal);
+        assert_eq!(loaded.journal.newest(EntryKind::Quest).next().and_then(|e| e.story.as_deref()), Some("ford"));
         // A save written before the history existed.
         let meta = meta_of(&g, SaveKind::Manual, "old").unwrap();
         let mut value = serde_json::to_value(&g).unwrap();

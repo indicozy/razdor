@@ -68,7 +68,7 @@ campaign chapter names use orange (`235, 165, 75` in SanSerif).
 | `Game`, `World`, `HeroStart` | `src/rules/game.rs`, `src/rules/world.rs` | the running game built from a scenario |
 | `EventEngine`, `EventOutcome` | `src/rules/events.rs` | the scenario's scripts; `Victory`/`Defeat` end it |
 | `ScriptEnd`, `NextMap` | `src/rules/script.rs` | how the scenario ended; what the next map receives |
-| `History`, `Entry`, `Tab`, `Row` | `src/rules/journal.rs` | quests, rumours and messages by chapter (one chapter per campaign map) |
+| `History`, `Entry`, `Tab`, `Row` | `src/rules/journal.rs` | quests, rumours and messages by chapter (one chapter per campaign map); a package's quests and dialogs (`Entry::story`) |
 
 ## The rules that matter
 
@@ -118,7 +118,10 @@ dropped); flags always carry over. Named characters travel with the army (`set_n
 
 **Journal** (events.md §10). One chapter per campaign map (`History::next_chapter`,
 `name_chapter`), newest first; Razdor keeps the history across maps (an addition; the original's
-journal is per map).
+journal is per map). A package's `quest` and `complete_quest` actions write its own entries
+(`History::story_quest`, `story_quest_done`; `Entry::story`), and every dialog shown is a message
+(`History::story_message`, from `Game::open_dialog`); `Game::journal_rows` lists them with the
+engine's. An active package quest carries over to the next map (updated there, it moves to that map).
 
 ## Campaigns of a package (`campaign.toml`)
 

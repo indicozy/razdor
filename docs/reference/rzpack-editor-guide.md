@@ -69,6 +69,7 @@ source.
 | trigger | `id` | package; `map = "<id>"` limits it to one map, none means every map |
 | dialog | `id` | package |
 | dialog choice | `id` | its dialog |
+| quest | `quest = "<id>"` in a `quest` action | package (the diary's entry; it is not a trigger or a dialog) |
 | building, army, point | `id` | its map; triggers name them per map |
 | named character | `named = "<id>"` in give_unit / leader | package, numbered by first mention (≤ 32) |
 | text key | dotted string | per language file; every language should have every key |
@@ -86,6 +87,7 @@ An editor needs this for autocomplete, safe rename, safe delete ("used by 3 trig
 | cast_on_army, has_spell, remove_spell_from_book | spell | `dt:spell/<alias>` |
 | set, add, random_var, var cond, var_changed, campaign `if` | var | `[vars]` name |
 | dialog action, `ending`, dialog_choice event | dialog (+ choice) | dialog id / choice id |
+| quest, complete_quest | quest | a quest id: `quest` actions of the package add it (any trigger or dialog choice); `complete_quest` only names one that some `quest` adds |
 | army_defeated, army_arrives, army_at, army_alive, army_goal, army_speed, army_figure, remove_army, teleport_army, start_battle, set_faction/set_relation `of` army, holders `in = "<army>"` | army | army id of the trigger's map, or an id a `spawn_army` creates |
 | hero_enters_building, building_captured/lost, building_owner, go_to_building, teleport_army `to`, `garrison = "<b>"` | building | building id of the trigger's map |
 | victory `defeat_army` / `capture` | army / building | its map |

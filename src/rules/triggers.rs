@@ -217,6 +217,10 @@ pub enum Act {
     Travel { map: String, at: Option<String> },
     /// The dialog shows, then the campaign ends (the dialog's id).
     EndCampaign(String),
+    /// A diary entry of the package's quest `id` (its texts are keys), added or updated.
+    Quest { id: String, title: String, text: String },
+    /// The diary entry of the package's quest `id` is completed.
+    CompleteQuest(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -795,6 +799,8 @@ impl Builder<'_> {
             pt::Action::RemoveUnit { named, holder } => Act::RemoveUnit { named: self.named(named)?, who: self.who(holder)? },
             pt::Action::VictoryTo(map) => Act::VictoryTo(map.clone()),
             pt::Action::Travel { map, at } => Act::Travel { map: map.clone(), at: at.clone() },
+            pt::Action::Quest { id, title, text } => Act::Quest { id: id.clone(), title: title.clone(), text: text.clone() },
+            pt::Action::CompleteQuest(id) => Act::CompleteQuest(id.clone()),
             pt::Action::Ending(dialog) => {
                 if !self.pkg.dialogs.iter().any(|x| &x.value.id == dialog) {
                     return self.fail(format!("no dialog `{dialog}`"));
@@ -1258,6 +1264,14 @@ impl Game {
                 self.note(Trace::Travel(map.clone()));
                 self.triggers.travel = Some(Travel { map: map.clone(), at: at.clone() });
             }
+            Act::Quest { id, title, text } => {
+                let minutes = self.clock.total_minutes() as u64;
+                self.journal.story_quest(id, minutes, title, text);
+            }
+            Act::CompleteQuest(id) => {
+                let minutes = self.clock.total_minutes() as u64;
+                self.journal.story_quest_done(id, minutes);
+            }
             Act::EndCampaign(dialog) => {
                 self.open_dialog(dialog, story);
                 self.note(Trace::Ending(dialog.clone()));
@@ -1271,6 +1285,9 @@ impl Game {
         let Some(d) = story.dialogs.iter().find(|d| d.id == id) else { return };
         let choices: Vec<String> = d.choices.iter().filter(|c| c.cond.iter().all(|x| self.holds(x))).map(|c| c.id.clone()).collect();
         self.note(Trace::Dialog { id: d.id.clone(), choices: choices.clone() });
+        // The diary keeps every dialog shown, so a closed one can be reread («Сообщения»).
+        let minutes = self.clock.total_minutes() as u64;
+        self.journal.story_message(&d.id, minutes, &d.title, &d.text);
         self.triggers.dialogs.push(PendingDialog { id: d.id.clone(), choices });
     }
 
@@ -1480,6 +1497,8 @@ mod tests {
     use crate::pack::check as pack_check;
     use crate::pack::files::Files;
     use crate::rules::content::{Content, HeroClass};
+    use crate::rules::clock::Clock;
+    use crate::rules::journal::Tab;
     use crate::rules::script::ScriptEnd;
 
     fn content() -> Arc<Content> {
@@ -1940,6 +1959,96 @@ mod tests {
         plain.answer_story_dialog("intro", Some("take"));
         assert!(plain.triggers.trace.is_none(), "nothing is kept unless a trace is asked for");
     }
+
+    /// A story with the diary's texts: a dialog `gate` (its title and text are keys) and the keys
+    /// of a quest `ford`, in the game's language (here Russian).
+    fn diary_story() -> Story {
+        let mut s = story(&[], vec![], vec![dialog("gate", vec![])]);
+        s.dialogs[0].title = "gate.title".into();
+        s.dialogs[0].text = "gate.text".into();
+        for (k, v) in [("gate.title", "Ворота"), ("gate.text", "Кто идёт?"), ("ford.title", "Удержать брод"), ("ford.text", "Соберите людей."), ("ford.new", "Мёртвые у брода.")] {
+            s.texts.insert(k.into(), v.into());
+        }
+        s
+    }
+
+    fn quest(id: &str, text: &str) -> Act {
+        Act::Quest { id: id.into(), title: "ford.title".into(), text: text.into() }
+    }
+
+    /// Runs `acts` at game minute `minutes`, as a story's actions do.
+    fn run_at(g: &mut Game, minutes: f64, s: &Story, acts: &[Act]) {
+        g.clock.set_total_minutes(minutes);
+        let mut q = VecDeque::new();
+        for a in acts {
+            g.act(a, s, &mut q);
+        }
+    }
+
+    #[test]
+    fn a_quest_is_added_updated_and_completed_with_its_dates() {
+        let mut g = game();
+        let s = diary_story();
+        g.attach_story(s.clone());
+        run_at(&mut g, 100.0, &s, &[quest("ford", "ford.text")]);
+        run_at(&mut g, 200.0, &s, &[quest("ford", "ford.new")]);
+        let active = g.journal_rows(Tab::Active);
+        assert_eq!(active.len(), 1, "an active id is updated, not added again");
+        assert_eq!(active[0].title, "Удержать брод", "the texts are the story's, in the game's language");
+        assert_eq!(active[0].text, "Мёртвые у брода.");
+        assert_eq!(active[0].date, Some(Clock::at_minutes(100)), "the date is when it was added");
+        assert_eq!(active[0].elapsed, Some(100), "the time since it was received");
+        run_at(&mut g, 300.0, &s, &[Act::CompleteQuest("ford".into()), Act::CompleteQuest("nope".into())]);
+        assert!(g.journal_rows(Tab::Active).is_empty(), "completed: out of the active tab");
+        let done = g.journal_rows(Tab::Completed);
+        assert_eq!(done.len(), 1);
+        assert_eq!(done[0].date, Some(Clock::at_minutes(300)), "dated when it was completed");
+        assert_eq!(done[0].text, "Мёртвые у брода.");
+        run_at(&mut g, 310.0, &s, &[Act::CompleteQuest("ford".into())]);
+        assert_eq!(g.journal_rows(Tab::Completed).len(), 1, "completing it again, or an unknown id, changes nothing");
+        run_at(&mut g, 400.0, &s, &[quest("ford", "ford.text")]);
+        run_at(&mut g, 500.0, &s, &[Act::CompleteQuest("ford".into())]);
+        let done = g.journal_rows(Tab::Completed);
+        assert_eq!(done.iter().map(|r| r.date).collect::<Vec<_>>(), vec![Some(Clock::at_minutes(500)), Some(Clock::at_minutes(300))], "a quest added again is a new entry, newest first");
+    }
+
+    #[test]
+    fn a_dialog_shown_is_a_message_once_a_minute_and_reread_later() {
+        let mut g = game();
+        let s = diary_story();
+        g.attach_story(s.clone());
+        g.clock.set_total_minutes(50.0);
+        g.open_dialog("gate", &s);
+        g.open_dialog("gate", &s);
+        let msgs = g.journal_rows(Tab::Messages);
+        assert_eq!(msgs.len(), 1, "the same dialog in the same minute is kept once");
+        assert_eq!((msgs[0].title.as_str(), msgs[0].text.as_str()), ("Ворота", "Кто идёт?"));
+        g.clock.set_total_minutes(60.0);
+        g.open_dialog("gate", &s);
+        assert_eq!(g.journal_rows(Tab::Messages).len(), 2, "shown again later: a new message");
+    }
+
+    #[test]
+    fn a_dialog_choice_adds_a_quest_and_a_campaign_keeps_it_until_updated() {
+        let mut g = game();
+        let mut d = dialog("gate", vec![choice("take", vec![], vec![quest("ford", "ford.text")])]);
+        d.title = "gate.title".into();
+        d.text = "gate.text".into();
+        let mut s = diary_story();
+        s.dialogs = vec![d];
+        g.attach_story(s.clone());
+        g.clock.set_total_minutes(10.0);
+        g.answer_story_dialog("gate", Some("take"));
+        assert_eq!(g.journal_rows(Tab::Active).len(), 1, "a choice's quest is added");
+        g.journal.next_chapter();
+        let active = g.journal_rows(Tab::Active);
+        assert_eq!(active.len(), 1, "an active quest stays active on the next map");
+        assert_eq!(active[0].chapter, 0, "it still belongs to the map it came from");
+        run_at(&mut g, 20.0, &s, &[quest("ford", "ford.new")]);
+        let active = g.journal_rows(Tab::Active);
+        assert_eq!((active.len(), active[0].chapter), (1, 1), "updated on the next map, it is listed there");
+    }
+
 }
 
 #[cfg(test)]
