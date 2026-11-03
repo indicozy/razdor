@@ -15,7 +15,9 @@
 //! Desktop only: the whole module is compiled out of Android and iOS (see `ui/mod.rs`).
 
 mod canvas;
+mod claude;
 mod forms;
+mod mcp;
 mod inspector;
 mod map_tab;
 mod scene;
@@ -25,6 +27,7 @@ mod watch;
 use std::collections::BTreeMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -38,6 +41,8 @@ use razdor::pack::diag::{Diagnostic, Severity};
 use razdor::pack::load::{line_of, Package};
 use razdor::pack::open::lang;
 use razdor::studio::build::Job;
+use razdor::studio::mcp::server::{runtime_file, Server};
+use razdor::studio::mcp::{Frame, SnapTarget};
 use razdor::studio::map::{choose_map, map_of_file, marks, selection_of, targets, MapView, Selection};
 use razdor::studio::worker::Worker;
 use razdor::studio::{is_text, unified, Edit, Installed, Kind, Locator, Reconcile, Workspace};
@@ -45,6 +50,7 @@ use razdor::trf;
 
 use crate::ui::dt_art::DtArt;
 use map_tab::{draw as draw_map_tab, switch_map, Canvas, Tool};
+use mcp::{Request, UiHost};
 
 /// The example package `--studio` opens when no folder is named.
 pub const DEFAULT_PACKAGE: &str = "examples/packs/hello-story";
@@ -77,6 +83,8 @@ pub enum Tab {
     Inspector,
     Problems,
     Output,
+    /// The Claude dock: the author's own `claude` in a terminal (`ui::studio::claude`).
+    Claude,
 }
 
 impl Tab {
@@ -89,6 +97,7 @@ impl Tab {
             Tab::Inspector => tr("Inspector"),
             Tab::Problems => tr("Problems"),
             Tab::Output => tr("Output"),
+            Tab::Claude => "Claude",
         }
     }
 }
@@ -160,6 +169,14 @@ pub struct StudioScreen {
     conflict: Option<Conflict>,
     /// Leaving with unsaved changes: the prompt is shown.
     exit_prompt: bool,
+    /// The Claude dock (its program runs only when the author starts it).
+    claude: claude::ClaudeDock,
+    /// The MCP server (`None` when it did not start: the reason is in the log), kept for its drop (it
+    /// stops and removes its runtime file), its requests, and the pictures asked for, answered after
+    /// the frame is drawn.
+    _mcp: Option<Server>,
+    mcp_rx: Receiver<Request>,
+    mcp_snaps: Vec<(SnapTarget, Sender<Result<Frame, String>>)>,
 }
 
 impl StudioScreen {
@@ -169,6 +186,20 @@ impl StudioScreen {
         let ws = Workspace::open(path)?;
         let name = ws.root.file_name().map_or_else(|| ws.root.display().to_string(), |n| n.to_string_lossy().into_owned());
         let mut log = Vec::new();
+        let (host, mcp_rx) = UiHost::new();
+        let mcp = match runtime_file() {
+            Some(file) => match Server::start(Arc::new(host), file) {
+                Ok(server) => Some(server),
+                Err(e) => {
+                    log.push(trf!("The MCP server is not started: {reason}", reason = e));
+                    None
+                }
+            },
+            None => {
+                log.push(tr("The MCP server is not started: no folder for its runtime file").to_string());
+                None
+            }
+        };
         let watch = match watch::Watch::start(&ws.root) {
             Ok(w) => Some(w),
             Err(e) => {
@@ -204,6 +235,10 @@ impl StudioScreen {
             disk_pending: BTreeMap::new(),
             conflict: None,
             exit_prompt: false,
+            claude: claude::ClaudeDock::new(),
+            _mcp: mcp,
+            mcp_rx,
+            mcp_snaps: Vec::new(),
         })
     }
 
@@ -239,6 +274,12 @@ impl StudioScreen {
                 "reach" => self.canvas.reach = true,
                 "grid" => self.canvas.grid = true,
                 "footprints" => self.canvas.footprints = true,
+                "claude" => {
+                    if let Some(at) = self.dock.find_tab(&Tab::Claude) {
+                        self.dock.set_active_tab(at);
+                    }
+                }
+                "claude-start" => self.claude.start(&self.ws.root.clone()),
                 "map" => {
                     if let Some(at) = self.dock.find_tab(&Tab::Map) {
                         self.dock.set_active_tab(at);
@@ -325,10 +366,14 @@ impl StudioScreen {
             self.wait_for_build();
         }
         self.refresh_marks();
+        self.claude.pump();
+        self.serve_mcp();
+        self.canvas.shown = false;
         egui_macroquad::ui(|ctx| action = self.show(ctx));
         let pkg = self.ws.package();
         draw_map_tab(&mut self.canvas, &self.maps, pkg.as_deref(), self.selection.as_ref(), art);
         egui_macroquad::draw();
+        self.answer_snapshots();
         action
     }
 
@@ -531,6 +576,9 @@ impl StudioScreen {
     fn show(&mut self, ctx: &egui::Context) -> Action {
         theme(ctx);
         let mut action = Action::None;
+        // The terminal of the Claude dock takes the keys first while it has the keyboard.
+        self.claude.begin_frame();
+        self.claude.take_input(ctx);
         self.shortcuts(ctx);
         let pkg = self.ws.package();
         egui::TopBottomPanel::top("studio_top").show(ctx, |ui| {
@@ -586,6 +634,7 @@ impl StudioScreen {
             has_install: self.installed,
             jump: &mut self.jump,
             cursor_seen: &mut self.cursor_seen,
+            claude: &mut self.claude,
             open: None,
             focus_map: false,
             changed: false,
@@ -829,7 +878,7 @@ fn layout(side: bool) -> DockState<Tab> {
     let [centre, _inspector] = tree.split_right(NodeIndex::root(), 0.74, vec![Tab::Inspector]);
     let [centre, files] = tree.split_left(centre, 0.25, vec![Tab::FileSystem]);
     let [_files, _scene] = tree.split_below(files, 0.5, vec![Tab::Scene]);
-    let [centre, _bottom] = tree.split_below(centre, 0.75, vec![Tab::Problems, Tab::Output]);
+    let [centre, _bottom] = tree.split_below(centre, 0.75, vec![Tab::Problems, Tab::Output, Tab::Claude]);
     if side {
         tree.split_right(centre, 0.5, vec![Tab::Script]);
     }
@@ -882,6 +931,7 @@ struct Viewer<'a> {
     /// The Script's next jump (taken by the Script tab when it is drawn).
     jump: &'a mut Option<Jump>,
     cursor_seen: &'a mut Option<(String, usize)>,
+    claude: &'a mut claude::ClaudeDock,
     /// Requests for after the dock is drawn: a file to open, the Map tab to show.
     open: Option<String>,
     focus_map: bool,
@@ -905,6 +955,7 @@ impl TabViewer for Viewer<'_> {
             Tab::Inspector => self.inspector(ui),
             Tab::Problems => self.problems(ui),
             Tab::Output => self.output(ui),
+            Tab::Claude => self.claude.show(ui, &self.ws.root),
         }
     }
 

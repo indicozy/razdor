@@ -110,6 +110,8 @@ pub struct Canvas {
     pub grid: bool,
     pub footprints: bool,
     pub reach: bool,
+    /// Whether the tab was drawn in this frame (the snapshot's canvas is taken only then).
+    pub shown: bool,
     /// The live diagnostics on the map's tables (`studio::map::marks`).
     pub marks: Vec<Mark>,
     /// The story cells the hero cannot reach on foot (`pack::reach`), of the map shown.
@@ -137,9 +139,20 @@ impl Default for Canvas {
             grid: false,
             footprints: false,
             reach: false,
+            shown: false,
             marks: Vec::new(),
             unreached: Vec::new(),
         }
+    }
+}
+
+impl Canvas {
+    /// The canvas's rectangle in pixels, when the tab is on screen this frame (a picture of it).
+    pub fn shown_view(&self) -> Option<mq::Rect> {
+        if !self.shown {
+            return None;
+        }
+        self.cam.as_ref().map(|c| c.view)
     }
 }
 
@@ -206,6 +219,7 @@ impl Viewer<'_> {
         let tool = self.canvas.tool;
         let canvas = &mut *self.canvas;
         canvas.rect = Some(rect);
+        canvas.shown = true;
         canvas.ppp = ppp;
         // A click on the map picks what it hits, a placing click places, a painted cell is applied
         // to the shown compile after the match: all decided here, applied after it.
@@ -581,6 +595,9 @@ pub fn draw(canvas: &mut Canvas, maps: &MapView, pkg: Option<&Package>, selectio
     if canvas.grid && cam.zoom >= 0.6 {
         grid(cam, good.compiled.scenario.width(), good.compiled.scenario.height());
     }
+    if let Some(spec) = spec {
+        hero_marker(cam, spec.hero.cell);
+    }
     if canvas.reach {
         for site in &canvas.unreached {
             hatch_site(cam, site);
@@ -609,6 +626,19 @@ pub fn draw(canvas: &mut Canvas, maps: &MapView, pkg: Option<&Package>, selectio
         outline(cam, CellRect::brush(x, y, 1), 1.0, mq::Color::new(1.0, 1.0, 1.0, 0.4));
     }
     scissor(None);
+}
+
+/// The hero's start: a gold disc with an H on his cell. The world view draws his figure, which needs
+/// a running game; the studio marks the cell instead (the Select tool moves it like an army).
+fn hero_marker(cam: &Cam, cell: [u32; 2]) {
+    let r = cam.rect(CellRect::brush(cell[0] as i32, cell[1] as i32, 1));
+    let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
+    let radius = (r.w.min(r.h) * 0.42).max(3.0);
+    mq::draw_circle(cx, cy, radius, mq::Color::from_rgba(0xe8, 0xc0, 0x4f, 255));
+    mq::draw_circle_lines(cx, cy, radius, 1.5, mq::Color::from_rgba(0x20, 0x18, 0x08, 255));
+    let size = (radius * 1.4).round().max(8.0) as u16;
+    let dims = mq::measure_text("H", None, size, 1.0);
+    mq::draw_text("H", cx - dims.width / 2.0, cy + dims.height / 2.0, f32::from(size), mq::Color::from_rgba(0x20, 0x18, 0x08, 255));
 }
 
 /// The reach hatching of one unreached site: each of its cells crossed by two diagonals, red (an

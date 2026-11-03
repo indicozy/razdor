@@ -27,15 +27,21 @@ use crate::pack::reach::Site;
 use crate::pack::terrain::Palette;
 
 pub mod build;
+pub mod claude;
 pub mod edit;
 pub mod history;
 pub mod map;
+pub mod mcp;
 pub mod paint;
 pub mod place;
 pub mod reconcile;
 pub mod geometry;
 pub mod newpkg;
+pub mod vars;
 pub mod worker;
+/// The Claude dock's pseudo-terminal (desktop, with the studio's feature).
+#[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+pub mod terminal;
 
 #[cfg(test)]
 mod tests;

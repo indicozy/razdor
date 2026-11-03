@@ -58,6 +58,12 @@ fn conf() -> Conf {
     if let Some(code) = razdor::hub::export_cli(&args) {
         std::process::exit(code);
     }
+    // `--studio-mcp`: the stdio bridge of Razdor Studio's MCP server (`razdor::studio::mcp::bridge`),
+    // for the agent in the studio's Claude dock. No window, no log: it relays to the running studio.
+    #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+    if let Some(code) = razdor::studio::mcp::bridge::cli(&args) {
+        std::process::exit(code);
+    }
     // The log of this start (`razdor.log`, see `razdor::diag`), before anything can fail.
     razdor::diag::init();
     // `RAZDOR_DT_DIR` and the other settings may come from a `.env` file.

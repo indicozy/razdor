@@ -624,7 +624,11 @@ impl App {
     #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
     pub fn open_studio_start(&mut self) {
         self.studio = None;
-        self.studio_start.get_or_insert_with(Default::default);
+        if self.studio_start.is_none() {
+            // The package opened last is the start page's third action (when it is still a package).
+            let recent = self.audio.settings.studio_package.clone().map(PathBuf::from);
+            self.studio_start = Some(Box::new(studio::start::StartPage::with_recent(recent)));
+        }
         self.screen = Screen::Studio;
     }
 
@@ -860,6 +864,12 @@ impl App {
     /// Before the process ends: the music stops and the settings are written.
     pub fn shutdown(&mut self) {
         let t0 = std::time::Instant::now();
+        // The exit skips the destructors (`_exit`): the studio goes here, so its Claude program is
+        // killed and its MCP runtime file removed.
+        #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+        {
+            self.studio = None;
+        }
         self.session.end();
         let t1 = std::time::Instant::now();
         self.audio.shutdown();

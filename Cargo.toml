@@ -24,6 +24,8 @@ toml = { version = "0.9", features = ["serde"] }
 toml_edit = "0.25"
 # Line diffs of a file changed on disk (`studio::reconcile`).
 similar = "3.2"
+# The Razdor Studio MCP server's token: 128 random bits (`studio::mcp::server`).
+getrandom = "0.2"
 # The terrain picture of a package map (`maps/<id>/terrain.png`): indexed or RGB, 8-bit after decoding.
 png = "0.17"
 # Unpacking the game archive on the phones (`dt::unpack`): pure Rust, no deflate C code.
@@ -46,6 +48,10 @@ sevenz-rust2 = { version = "0.20.2", default-features = false, features = ["comp
 # (no GTK, no system libraries); Windows and macOS: their own dialogs.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
+# The Claude dock's pseudo-terminal (`studio::terminal`): Linux and macOS ptys, Windows ConPTY; and
+# its VT100 screen model (scrollback, colours, cursor). Desktop only, with the studio.
+portable-pty = { version = "0.9", optional = true }
+vt100 = { version = "0.18", optional = true }
 
 [features]
 default = ["audio", "gamepad", "lua", "studio"]
@@ -61,7 +67,7 @@ gamepad = ["dep:gilrs"]
 lua = ["dep:mlua"]
 # Razdor Studio: the editor for `.rzpack` packages (`razdor --studio`), egui over the game's window.
 # Compiled out of Android and iOS (the gated code is `cfg(all(feature = "studio", not(any(android, ios))))`).
-studio = ["dep:egui-macroquad", "dep:egui_dock", "dep:notify"]
+studio = ["dep:egui-macroquad", "dep:egui_dock", "dep:notify", "dep:portable-pty", "dep:vt100"]
 
 # Line tables only: backtraces keep file and line, and the debug build stays several times
 # smaller on disk (full debug info made target/debug grow past 30 GB).

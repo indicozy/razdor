@@ -1,5 +1,6 @@
 //! Razdor Studio's start page: what the studio shows when it opens with no package folder (the
-//! main menu's «Редактор» with no package played before). A package folder to open, or a new
+//! main menu's «Редактор» with no package played before). A card in the middle of the window with
+//! three actions: open a package folder, the package opened last (when it is still there), and a new
 //! package made in a folder the player names. The pickers are the desktop's own folder dialogs
 //! (`rfd`), run on a thread like the map import's (on macOS on the main thread).
 
@@ -7,9 +8,12 @@ use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, TryRecvError};
 
 use egui_macroquad::egui;
-use egui::{Button, Color32, RichText, TextEdit};
+use egui::{Align2, Button, Color32, Id, RichText, TextEdit};
 use razdor::i18n::tr;
 use razdor::studio::newpkg;
+
+/// The card's width, in points.
+const CARD_WIDTH: f32 = 420.0;
 
 /// What the start page asks of the game after a frame.
 pub enum Action {
@@ -30,17 +34,18 @@ enum For {
 }
 
 /// The start page's state: the new package's name and folder, the picker's answer when it comes,
-/// and the last error.
+/// the last error, and the package opened last.
 pub struct StartPage {
     picker: Option<(For, Receiver<Option<PathBuf>>)>,
     new_name: String,
     new_parent: Option<PathBuf>,
     error: Option<String>,
+    recent: Option<PathBuf>,
 }
 
 impl Default for StartPage {
     fn default() -> StartPage {
-        StartPage { picker: None, new_name: "my-package".into(), new_parent: dirs::home_dir(), error: None }
+        StartPage { picker: None, new_name: "my-package".into(), new_parent: dirs::home_dir(), error: None, recent: None }
     }
 }
 
@@ -75,6 +80,12 @@ pub fn frame(page: &mut StartPage) -> Action {
 }
 
 impl StartPage {
+    /// The start page with the package opened last offered as its third action (`None`: none). A
+    /// folder that is no longer a package is not offered.
+    pub fn with_recent(recent: Option<PathBuf>) -> StartPage {
+        StartPage { recent: recent.filter(|p| p.join("package.toml").is_file()), ..StartPage::default() }
+    }
+
     /// The picker's answer, if it has come.
     fn poll(&mut self) -> Option<(For, Option<PathBuf>)> {
         let (purpose, rx) = self.picker.as_ref()?;
@@ -103,52 +114,73 @@ impl StartPage {
                 _ => {}
             }
         }
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.add_space(16.0);
-            ui.heading("Razdor Studio");
-            ui.weak(tr("Open a package folder, or make a new package."));
-            ui.add_space(12.0);
-            if ui.add(Button::new(tr("Open package folder…")).min_size(egui::vec2(220.0, 28.0))).clicked() {
-                self.start_pick(For::Open, tr("Open package folder…"));
-            }
-            ui.add_space(20.0);
-            ui.separator();
-            ui.add_space(8.0);
-            ui.strong(tr("New package"));
-            ui.add_space(4.0);
-            egui::Grid::new("studio-new-package").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-                ui.label(tr("Folder name"));
-                ui.add(TextEdit::singleline(&mut self.new_name).desired_width(240.0));
-                ui.end_row();
-                ui.label(tr("Where"));
-                ui.horizontal(|ui| {
-                    let shown = self.new_parent.as_ref().map_or_else(|| "—".to_string(), |p| p.display().to_string());
-                    ui.label(RichText::new(shown).weak());
-                    if ui.button(tr("Choose folder…")).clicked() {
-                        self.start_pick(For::Parent, tr("Choose folder…"));
-                    }
-                });
-                ui.end_row();
+        egui::CentralPanel::default().show(ctx, |_| {});
+        egui::Area::new(Id::new("studio-start-card")).anchor(Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
+            egui::Frame::window(ui.style()).inner_margin(egui::Margin::same(20)).show(ui, |ui| {
+                ui.set_width(CARD_WIDTH);
+                let card = self.card(ui);
+                if let Some(next) = card {
+                    action = next;
+                }
             });
-            ui.add_space(8.0);
-            let ready = !self.new_name.trim().is_empty() && self.new_parent.is_some();
-            if ui.add_enabled(ready, Button::new(tr("Create package")).min_size(egui::vec2(220.0, 28.0))).clicked() {
-                if let Some(parent) = self.new_parent.clone() {
-                    match newpkg::create(&parent, &self.new_name) {
-                        Ok(dir) => action = Action::Open(dir),
-                        Err(e) => self.error = Some(e),
-                    }
+        });
+        action
+    }
+
+    /// The card: the title, the three actions, the new package's form, the error and the way back.
+    fn card(&mut self, ui: &mut egui::Ui) -> Option<Action> {
+        let mut action = None;
+        ui.heading("Razdor Studio");
+        ui.weak(tr("Open a package folder, or make a new package."));
+        ui.add_space(12.0);
+        let wide = egui::vec2(CARD_WIDTH - 40.0, 30.0);
+        if ui.add(Button::new(tr("Open package folder…")).min_size(wide)).clicked() {
+            self.start_pick(For::Open, tr("Open package folder…"));
+        }
+        if let Some(recent) = self.recent.clone() {
+            let name = recent.file_name().map_or_else(|| recent.display().to_string(), |n| n.to_string_lossy().into_owned());
+            let label = format!("{}: {name}", tr("Open the last package"));
+            if ui.add(Button::new(label).min_size(wide)).on_hover_text(recent.display().to_string()).clicked() {
+                action = Some(Action::Open(recent));
+            }
+        }
+        ui.add_space(16.0);
+        ui.separator();
+        ui.add_space(8.0);
+        ui.strong(tr("New package"));
+        ui.add_space(4.0);
+        egui::Grid::new("studio-new-package").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+            ui.label(tr("Folder name"));
+            ui.add(TextEdit::singleline(&mut self.new_name).desired_width(240.0));
+            ui.end_row();
+            ui.label(tr("Where"));
+            ui.horizontal(|ui| {
+                let shown = self.new_parent.as_ref().map_or_else(|| "—".to_string(), |p| p.display().to_string());
+                ui.label(RichText::new(shown).weak());
+                if ui.button(tr("Choose folder…")).clicked() {
+                    self.start_pick(For::Parent, tr("Choose folder…"));
+                }
+            });
+            ui.end_row();
+        });
+        ui.add_space(8.0);
+        let ready = !self.new_name.trim().is_empty() && self.new_parent.is_some();
+        if ui.add_enabled(ready, Button::new(tr("Create package")).min_size(wide)).clicked() {
+            if let Some(parent) = self.new_parent.clone() {
+                match newpkg::create(&parent, &self.new_name) {
+                    Ok(dir) => action = Some(Action::Open(dir)),
+                    Err(e) => self.error = Some(e),
                 }
             }
-            if let Some(e) = &self.error {
-                ui.add_space(8.0);
-                ui.colored_label(Color32::from_rgb(0xe0, 0x5a, 0x5a), e);
-            }
-            ui.add_space(24.0);
-            if ui.button(tr("Back to the menu")).clicked() {
-                action = Action::Back;
-            }
-        });
+        }
+        if let Some(e) = &self.error {
+            ui.add_space(8.0);
+            ui.colored_label(Color32::from_rgb(0xe0, 0x5a, 0x5a), e);
+        }
+        ui.add_space(16.0);
+        if ui.button(tr("Back to the menu")).clicked() {
+            action = Some(Action::Back);
+        }
         action
     }
 

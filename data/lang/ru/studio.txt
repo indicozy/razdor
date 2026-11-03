@@ -131,3 +131,16 @@ Terrain = Местность
 Text keys = Ключи
 not a package folder = не папка пакета
 The file picker cannot be opened. = Не открывается окно выбора папки.
+
+# Claude dock and the MCP server
+Claude runs in = Claude работает в
+Claude has ended = Claude завершил работу
+Stop Claude = Остановить
+Start Claude = Запустить Claude
+Claude runs here, in the package folder, with the studio's tools attached (razdor-studio). = Claude работает в папке пакета, инструменты студии (razdor-studio) подключены.
+Claude Code is not installed: no `claude` program on PATH. = Claude Code не установлен: программа `claude` не найдена в PATH.
+Install Claude Code = Установить Claude Code
+scrollback = прокрутка
+Open the last package = Последний пакет
+The MCP server is not started: {reason} = MCP-сервер не запущен: {reason}
+The MCP server is not started: no folder for its runtime file = MCP-сервер не запущен: нет папки для его файла
