@@ -1,16 +1,20 @@
 //! Razdor Studio's screen: the docks of a package folder. The file tree, the script view, the
 //! problems and the output (step 1); the Map tab with the game's own map renderer, the Scene and
-//! the Inspector (step 2); the linked selection between the Map, the Scene, the Inspector and the
-//! Script, the undo and redo, the stale banner, the outside changes, the drag to move and the
-//! save (step 3). egui over the game's own window (`egui-macroquad`), docked with `egui_dock`. The
-//! model is `razdor::studio`.
+//! the Inspector (step 2); the linked selection, the undo and redo, the stale banner, the outside
+//! changes, the drag to move and the save (step 3); and in step 4 the Inspector forms, the placing
+//! tools, the terrain brush, the live problems on the canvas, the reach overlay and the grid and
+//! footprints switches. egui over the game's own window (`egui-macroquad`), docked with
+//! `egui_dock`. The model is `razdor::studio`.
 //!
-//! Timing. A change asks for a rebuild of the package (`Workspace::rebuild`) after 300 ms without
-//! another change (the debounce); a run of typing in the Script is one undo step after the same
-//! pause. Outside changes settle for 250 ms before they are read.
+//! Timing. A change asks for a rebuild of the package after 300 ms without another change (the
+//! debounce); a run of typing in the Script is one undo step after the same pause. The rebuild
+//! runs on the studio's build thread (`razdor::studio::worker`): the window keeps its last good
+//! state until the result comes, and a result older than the one applied is dropped. Outside
+//! changes settle for 250 ms before they are read.
 //!
 //! Desktop only: the whole module is compiled out of Android and iOS (see `ui/mod.rs`).
 
+mod forms;
 mod inspector;
 mod map_tab;
 mod scene;
@@ -19,23 +23,26 @@ mod watch;
 use std::collections::BTreeMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use egui::text::{CCursor, CCursorRange};
 use egui_macroquad::egui;
 use egui::{Align2, Button, Color32, CornerRadius, Key, KeyboardShortcut, Modifiers, ScrollArea, Sense, TextEdit, Ui, WidgetText};
 use egui_dock::{DockArea, DockState, NodeIndex, Style, TabViewer};
+use razdor::dt::install::DtInstall;
 use razdor::i18n::tr;
 use razdor::pack::diag::{Diagnostic, Severity};
 use razdor::pack::load::{line_of, Package};
 use razdor::pack::open::lang;
-use razdor::studio::map::{choose_map, map_of_file, selection_of, MapView, Selection};
-use razdor::studio::{is_text, unified, Edit, Kind, Locator, Reconcile, Workspace};
+use razdor::studio::build::Job;
+use razdor::studio::map::{choose_map, map_of_file, marks, selection_of, targets, MapView, Selection};
+use razdor::studio::worker::Worker;
+use razdor::studio::{is_text, unified, Edit, Installed, Kind, Locator, Reconcile, Workspace};
 use razdor::trf;
 
 use crate::ui::dt_art::DtArt;
-use map_tab::{draw as draw_map_tab, switch_map, Canvas};
+use map_tab::{draw as draw_map_tab, switch_map, Canvas, Tool};
 
 /// The example package `--studio` opens when no folder is named.
 pub const DEFAULT_PACKAGE: &str = "examples/packs/hello-story";
@@ -48,6 +55,8 @@ const WARNING_AMBER: Color32 = Color32::from_rgb(0xe8, 0xb0, 0x4f);
 const DEBOUNCE: Duration = Duration::from_millis(300);
 /// Quiet time after an outside change before the file is read.
 const SETTLE: Duration = Duration::from_millis(250);
+/// The longest a snapshot waits for its build (a build is a fraction of a second).
+const SNAPSHOT_WAIT: Duration = Duration::from_secs(60);
 
 /// What the studio asks of the game after a frame.
 pub enum Action {
@@ -113,11 +122,25 @@ pub struct StudioScreen {
     map_problems: Vec<Diagnostic>,
     /// Whether the game's install is there (the map is drawn only then), as of the last frame.
     installed: bool,
+    /// The game's install, shared with the build thread (made at the first frame that has one).
+    install: Option<Arc<DtInstall>>,
+    /// The build thread, and the generations: the last asked, the last applied.
+    worker: Option<Worker>,
+    gen: u64,
+    applied: u64,
+    /// A rebuild is due (a change settled, a map was shown, a file was saved).
+    want_build: bool,
+    /// The snapshot's build waits for its result before the first frame is drawn.
+    wait_build: bool,
+    /// The Check button was pressed: its counts are logged when the build comes back.
+    check_asked: bool,
+    /// The canvas's marks are to be made again (the text or the diagnostics changed).
+    marks_dirty: bool,
     /// The file last opened: it picks the map when it is a map's file.
     opened: Option<String>,
     /// What the Map, Scene and Inspector docks have selected.
     selection: Option<Selection>,
-    /// The Map tab's view.
+    /// The Map tab's view: the camera, the tools, the overlays.
     canvas: Canvas,
     /// The Script's next jump (set by the Scene, the Inspector and a problem; taken when drawn).
     jump: Option<Jump>,
@@ -138,7 +161,8 @@ pub struct StudioScreen {
 }
 
 impl StudioScreen {
-    /// Opens a package folder and runs the checks once, so the Problems tab has its list.
+    /// Opens a package folder. Its first rebuild is due at the first frame, so the Problems tab
+    /// fills in a moment.
     pub fn open(path: &Path) -> Result<StudioScreen, String> {
         let ws = Workspace::open(path)?;
         let name = ws.root.file_name().map_or_else(|| ws.root.display().to_string(), |n| n.to_string_lossy().into_owned());
@@ -150,7 +174,7 @@ impl StudioScreen {
                 None
             }
         };
-        let mut screen = StudioScreen {
+        Ok(StudioScreen {
             ws,
             dock: layout(false),
             selected: None,
@@ -159,6 +183,14 @@ impl StudioScreen {
             maps: MapView::default(),
             map_problems: Vec::new(),
             installed: false,
+            install: None,
+            worker: Some(Worker::start()),
+            gen: 0,
+            applied: 0,
+            want_build: true,
+            wait_build: false,
+            check_asked: false,
+            marks_dirty: true,
             opened: None,
             selection: None,
             canvas: Canvas::default(),
@@ -170,16 +202,17 @@ impl StudioScreen {
             disk_pending: BTreeMap::new(),
             conflict: None,
             exit_prompt: false,
-        };
-        screen.check();
-        Ok(screen)
+        })
     }
 
     /// Shows map `map` and selects `army` on it, for the snapshot's `studio:<folder>:<map>:<army>`.
-    /// `opts` are the snapshot's options (see `snapshot_options`); none keeps the Script as it is.
+    /// `opts` are the snapshot's options (listed in `ui::snapshot`): `side`, `stale`, `conflict`,
+    /// `overlap`, `reach`, `grid`, `footprints`, `tool=<name>`, `building=<id>`. None keeps the
+    /// Script as it is.
     pub fn preselect(&mut self, map: Option<&str>, army: Option<&str>, opts: &[&str]) -> Result<(), String> {
         if let Some(id) = map {
-            if !self.ws.package().is_some_and(|p| p.maps.contains_key(id)) {
+            // The package is built in the background, so the map is looked for in the folder.
+            if !self.ws.root.join("maps").join(id).join("map.toml").is_file() {
                 return Err(format!("no map {id} in the package"));
             }
             switch_map(&mut self.maps, &mut self.canvas, &mut self.selection, id);
@@ -187,6 +220,8 @@ impl StudioScreen {
         if let Some(id) = army {
             self.selection = Some(Selection::Army(id.to_string()));
         }
+        // The first frames wait for the build of what is shown (the snapshot's picture is of it).
+        self.wait_build = true;
         if opts.is_empty() {
             return Ok(());
         }
@@ -198,7 +233,24 @@ impl StudioScreen {
                 "side" => self.dock = layout(true),
                 "stale" => self.snapshot_stale()?,
                 "conflict" => self.snapshot_conflict(&path)?,
-                other => return Err(format!("no studio option {other:?}")),
+                "overlap" => self.snapshot_overlap(&id)?,
+                "reach" => self.canvas.reach = true,
+                "grid" => self.canvas.grid = true,
+                "footprints" => self.canvas.footprints = true,
+                "map" => {
+                    if let Some(at) = self.dock.find_tab(&Tab::Map) {
+                        self.dock.set_active_tab(at);
+                    }
+                }
+                other => {
+                    if let Some(name) = other.strip_prefix("tool=") {
+                        self.canvas.tool = Tool::named(name).ok_or_else(|| format!("no tool {name:?}"))?;
+                    } else if let Some(id) = other.strip_prefix("building=") {
+                        self.selection = Some(Selection::Building(id.to_string()));
+                    } else {
+                        return Err(format!("no studio option {other:?}"));
+                    }
+                }
             }
         }
         if let Some(sel) = self.selection.clone() {
@@ -213,7 +265,8 @@ impl StudioScreen {
         let i = self.selected.ok_or("no file open")?;
         let text = format!("{}\n[[army\n", self.ws.docs[i].text);
         self.ws.docs[i].text = text;
-        self.ws.rebuild()
+        self.touch();
+        Ok(())
     }
 
     /// The snapshot's `conflict` option: the shown file has a visual edit in memory (the hero's
@@ -232,30 +285,53 @@ impl StudioScreen {
         }
     }
 
+    /// The snapshot's `overlap` option: the second building of the map is moved, in memory, onto
+    /// the first one's cell, so the two footprints overlap (the checks say so, the canvas marks both).
+    fn snapshot_overlap(&mut self, map: &str) -> Result<(), String> {
+        let file = format!("maps/{map}/map.toml");
+        let spec = inspector::spec_now(&self.ws, self.ws.package().as_deref(), map).ok_or("the map does not read")?;
+        let (first, second) = match (spec.building.first(), spec.building.get(1)) {
+            (Some(a), Some(b)) => (a.get_ref().clone(), b.get_ref().clone()),
+            _ => return Err("the map has two buildings to overlap".into()),
+        };
+        let at = Locator { file, kind: Kind::Building, id: Some(second.id.clone()), index: 0 };
+        self.ws.apply(Edit::SetCell { at, cell: (first.cell[0] as i32, first.cell[1] as i32) })?;
+        self.touch();
+        Ok(())
+    }
+
     /// The text of the open document `path` (empty when it is not open).
     fn mine(&self, path: &str) -> String {
         self.ws.docs.iter().find(|d| d.path == path).map(|d| d.text.clone()).unwrap_or_default()
     }
 
-    /// One frame: the outside changes and the debounced rebuild, the egui interface, then the map
-    /// drawn into the Map tab's rectangle, then the egui meshes over the game's frame. `art` is the
-    /// game's art and install (`None` when the install is not there).
+    /// One frame: the timers and the outside changes, the finished rebuilds (or, for a snapshot, the
+    /// one it waits for), the egui interface, then the map drawn into the Map tab's rectangle, then
+    /// the egui meshes over the game's frame. `art` is the game's art and install (`None` when the
+    /// install is not there).
     pub fn frame(&mut self, art: Option<&DtArt>) -> Action {
         let mut action = Action::None;
         macroquad::prelude::clear_background(macroquad::prelude::Color::new(0.125, 0.145, 0.19, 1.0));
+        self.installed = art.is_some();
+        if self.install.is_none() {
+            self.install = art.map(|a| Arc::new(a.install.clone()));
+        }
         self.settle();
-        self.prepare(art);
+        self.poll_build();
+        if self.wait_build {
+            self.wait_build = false;
+            self.wait_for_build();
+        }
+        self.refresh_marks();
         egui_macroquad::ui(|ctx| action = self.show(ctx));
-        // A map switched in this frame is compiled before it is drawn.
-        self.prepare(art);
         let pkg = self.ws.package();
         draw_map_tab(&mut self.canvas, &self.maps, pkg.as_deref(), self.selection.as_ref(), art);
         egui_macroquad::draw();
         action
     }
 
-    /// The timers: a text burst ends after its pause, outside changes that settled are read, and
-    /// a change that settled rebuilds the package.
+    /// The timers: a text burst ends after its pause, outside changes that settled are read, and a
+    /// change that settled asks for a rebuild.
     fn settle(&mut self) {
         let now = Instant::now();
         if self.burst.is_some_and(|t| now.duration_since(t) >= DEBOUNCE) {
@@ -265,25 +341,148 @@ impl StudioScreen {
         self.poll_disk(now);
         if self.debounce.is_some_and(|t| now.duration_since(t) >= DEBOUNCE) {
             self.debounce = None;
-            self.reload();
+        }
+        if self.want_build && self.debounce.is_none() {
+            self.request_build();
         }
     }
 
-    /// A change happened: the package is rebuilt once things settle.
+    /// A change happened: the package is rebuilt once things settle, and the canvas's marks made again.
     fn touch(&mut self) {
         let now = Instant::now();
         self.debounce = Some(now);
         self.burst = Some(now);
+        self.want_build = true;
+        self.marks_dirty = true;
+    }
+
+    /// Asks for a rebuild now (the save, the map switch, the check).
+    fn reload(&mut self) {
+        self.debounce = None;
+        self.want_build = true;
+        self.marks_dirty = true;
+    }
+
+    /// Sends the rebuild of the package to the build thread: the open texts and the painted terrains
+    /// over the disk, the shown map compiled and walked.
+    fn request_build(&mut self) {
+        self.want_build = false;
+        let Some(worker) = &self.worker else { return };
+        self.gen += 1;
+        let lang = lang();
+        let job: Job = self.ws.job(self.maps.map.clone(), lang, self.install.clone());
+        worker.send(self.gen, job);
+    }
+
+    /// Takes the finished rebuilds that are ready.
+    fn poll_build(&mut self) {
+        while let Some((gen, result)) = self.worker.as_ref().and_then(Worker::try_recv) {
+            self.apply_build(gen, result);
+        }
+    }
+
+    /// Waits for the build asked last (a snapshot draws the state of the build, not the one before).
+    fn wait_for_build(&mut self) {
+        self.debounce = None;
+        self.request_build();
+        loop {
+            let Some((gen, result)) = self.worker.as_ref().and_then(|w| w.recv_timeout(SNAPSHOT_WAIT)) else { break };
+            let reached = gen >= self.gen;
+            self.apply_build(gen, result);
+            if reached {
+                break;
+            }
+        }
+    }
+
+    /// Applies one finished rebuild, if it is newer than the last one applied.
+    fn apply_build(&mut self, gen: u64, result: Result<razdor::studio::build::Built, String>) {
+        match result {
+            Ok(built) if gen > self.applied => {
+                self.applied = gen;
+                let done = self.ws.install(built);
+                self.apply_installed(done);
+                self.keep_a_map();
+            }
+            Ok(_) => {}
+            Err(e) => self.log.push(e),
+        }
+        if self.check_asked {
+            self.check_asked = false;
+            let errors = self.ws.problems.iter().filter(|d| d.severity == Severity::Error).count();
+            let warnings = self.ws.problems.len() - errors;
+            self.log.push(trf!("Check: {errors} errors, {warnings} warnings", errors, warnings));
+        }
+        self.marks_dirty = true;
+    }
+
+    /// The map's compile and walk of an installed rebuild (for the shown map only).
+    fn apply_installed(&mut self, done: Installed) {
+        let Some(map) = done.map else { return };
+        if let Some(compiled) = done.compiled {
+            self.map_problems = self.maps.install(&map, compiled);
+            self.canvas.moving = None;
+        }
+        if self.maps.map.as_deref() == Some(map.as_str()) {
+            if let Some(unreached) = done.unreached {
+                self.canvas.unreached = unreached;
+            }
+        }
+    }
+
+    /// Shows a map of the package when the one shown is not in it (the first build, a deleted map):
+    /// the rule of `choose_map`, then a rebuild for it.
+    fn keep_a_map(&mut self) {
+        let Some(pkg) = self.ws.package() else { return };
+        let kept = self.maps.map.as_ref().is_some_and(|m| pkg.maps.contains_key(m));
+        if kept {
+            return;
+        }
+        if let Some(id) = choose_map(&pkg, self.opened.as_deref()) {
+            switch_map(&mut self.maps, &mut self.canvas, &mut self.selection, &id);
+            self.reload();
+        }
+    }
+
+    /// The problems the Problems tab lists: the checks', then the failed compile's (those the checks
+    /// already listed are not repeated).
+    fn all_problems(&self) -> Vec<Diagnostic> {
+        self.ws
+            .problems
+            .iter()
+            .chain(self.map_problems.iter().filter(|d| !self.ws.problems.contains(d)))
+            .cloned()
+            .collect()
+    }
+
+    /// Makes the canvas's marks again when they are due: the shown map's tables, each with the
+    /// diagnostics of its lines (`studio::map::marks`).
+    fn refresh_marks(&mut self) {
+        if !self.marks_dirty {
+            return;
+        }
+        self.marks_dirty = false;
+        let Some(map) = self.maps.map.clone() else {
+            self.canvas.marks.clear();
+            return;
+        };
+        let file = format!("maps/{map}/map.toml");
+        let text = self.ws.text_of(&file).unwrap_or_default();
+        let spans = self.ws.spans(&file).unwrap_or_default();
+        self.canvas.marks = marks(&file, &text, &spans, &self.all_problems());
     }
 
     /// Reads the outside changes the watcher reported, once they settle, and asks the model what
-    /// each one means for an open file.
+    /// each one means for an open file (or a painted terrain).
     fn poll_disk(&mut self, now: Instant) {
         if let Some(w) = &self.watch {
             for path in w.changed() {
                 if path == watch::ALL {
                     for doc in &self.ws.docs {
                         self.disk_pending.insert(doc.path.clone(), now);
+                    }
+                    for t in &self.ws.terrains {
+                        self.disk_pending.insert(t.path.clone(), now);
                     }
                 } else {
                     self.disk_pending.insert(path, now);
@@ -301,6 +500,17 @@ impl StudioScreen {
             self.log.push(e);
         }
         for path in due {
+            if self.ws.terrains.iter().any(|t| t.path == path) {
+                match self.ws.read_bytes(&path).and_then(|disk| self.ws.on_disk_terrain(&path, &disk)) {
+                    Ok(true) => {
+                        self.log.push(trf!("{path} changed on disk: reloaded (Ctrl+Z takes the old picture back)", path));
+                        self.touch();
+                    }
+                    Ok(false) => {}
+                    Err(e) => self.log.push(e),
+                }
+                continue;
+            }
             if !self.ws.docs.iter().any(|d| d.path == path) {
                 continue;
             }
@@ -314,23 +524,6 @@ impl StudioScreen {
                 Reconcile::Asks { path, disk } => self.conflict = Some(Conflict { path, disk, diff: None }),
             }
         }
-    }
-
-    /// Compiles the shown map when it is stale: on the game's install (`art`), or not at all
-    /// when there is none. A compile after a visual edit ends its ghost.
-    fn prepare(&mut self, art: Option<&DtArt>) {
-        self.installed = art.is_some();
-        if !self.maps.stale {
-            return;
-        }
-        self.maps.stale = false;
-        self.canvas.moving = None;
-        let (Some(pkg), Some(art)) = (self.ws.package(), art) else {
-            self.maps.good = None;
-            self.map_problems.clear();
-            return;
-        };
-        self.map_problems = self.maps.compile(&pkg, &art.install, lang());
     }
 
     fn show(&mut self, ctx: &egui::Context) -> Action {
@@ -378,12 +571,13 @@ impl StudioScreen {
             });
         });
         let style = Style::from_egui(ctx.style().as_ref());
+        let problems = self.all_problems();
         let mut viewer = Viewer {
             ws: &mut self.ws,
             pkg: pkg.clone(),
             selected: &mut self.selected,
             log: &mut self.log,
-            map_problems: &self.map_problems,
+            map_problems: &problems,
             maps: &mut self.maps,
             canvas: &mut self.canvas,
             selection: &mut self.selection,
@@ -421,8 +615,9 @@ impl StudioScreen {
         action
     }
 
-    /// Ctrl+Shift+Z and Ctrl+Y redo, Ctrl+Z undoes, Ctrl+S saves the shown file. They are taken
-    /// before the docks draw, so the Script's own undo does not run: there is one history.
+    /// Ctrl+Shift+Z and Ctrl+Y redo, Ctrl+Z undoes, Ctrl+S saves the shown file, Delete removes the
+    /// selected table. They are taken before the docks draw, so the Script's own undo does not run:
+    /// there is one history.
     fn shortcuts(&mut self, ctx: &egui::Context) {
         let redo = ctx.input_mut(|i| {
             i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z))
@@ -436,6 +631,16 @@ impl StudioScreen {
             self.redo();
         } else if undo {
             self.undo();
+        }
+        let delete = !ctx.wants_keyboard_input() && ctx.input(|i| i.key_pressed(Key::Delete));
+        if delete {
+            if let (Some(sel), Some(map)) = (self.selection.clone(), self.maps.map.clone()) {
+                let pkg = self.ws.package();
+                if inspector::delete_selected(&mut self.ws, &mut self.log, pkg.as_deref(), &map, &sel) {
+                    self.selection = None;
+                    self.touch();
+                }
+            }
         }
     }
 
@@ -471,6 +676,7 @@ impl StudioScreen {
                 if let (Some(pkg), Some(id)) = (self.ws.package(), map_of_file(path)) {
                     if pkg.maps.contains_key(id) {
                         switch_map(&mut self.maps, &mut self.canvas, &mut self.selection, id);
+                        self.reload();
                     }
                 }
                 if let Some(at) = self.dock.find_tab(&Tab::Script) {
@@ -501,30 +707,10 @@ impl StudioScreen {
         self.reload();
     }
 
+    /// The Check button: the rebuild now, and its counts logged when it comes back.
     fn check(&mut self) {
-        match self.ws.check() {
-            Ok((errors, warnings)) => self.log.push(trf!("Check: {errors} errors, {warnings} warnings", errors, warnings)),
-            Err(e) => self.log.push(e),
-        }
+        self.check_asked = true;
         self.reload();
-    }
-
-    /// Rebuilds the package from the disk and the open text, and makes the map to compile next.
-    /// The shown map stays when the package still has it; otherwise the rule of `choose_map`
-    /// picks one.
-    fn reload(&mut self) {
-        if let Err(e) = self.ws.rebuild() {
-            self.log.push(e);
-        }
-        if let Some(pkg) = self.ws.package() {
-            let kept = self.maps.map.as_ref().is_some_and(|m| pkg.maps.contains_key(m));
-            if !kept {
-                if let Some(id) = choose_map(&pkg, self.opened.as_deref()) {
-                    switch_map(&mut self.maps, &mut self.canvas, &mut self.selection, &id);
-                }
-            }
-        }
-        self.maps.stale = true;
     }
 
     /// The question about a file changed on disk: Reload, Keep mine, or the diff first.
@@ -637,8 +823,8 @@ fn layout(side: bool) -> DockState<Tab> {
     let mut dock = DockState::new(if side { vec![Tab::Map] } else { vec![Tab::Map, Tab::Script] });
     let tree = dock.main_surface_mut();
     // egui_dock's fraction is the share of the node that comes first (the new left or upper
-    // node): the left column is a quarter of the 80% centre-and-files area, so 20% of the width.
-    let [centre, _inspector] = tree.split_right(NodeIndex::root(), 0.8, vec![Tab::Inspector]);
+    // node): the Inspector is the last quarter of the width (26%: its forms need the room).
+    let [centre, _inspector] = tree.split_right(NodeIndex::root(), 0.74, vec![Tab::Inspector]);
     let [centre, files] = tree.split_left(centre, 0.25, vec![Tab::FileSystem]);
     let [_files, _scene] = tree.split_below(files, 0.5, vec![Tab::Scene]);
     let [centre, _bottom] = tree.split_below(centre, 0.75, vec![Tab::Problems, Tab::Output]);
@@ -682,9 +868,10 @@ fn theme(ctx: &egui::Context) {
 struct Viewer<'a> {
     ws: &'a mut Workspace,
     /// The package as last rebuilt (the screens read it; the model keeps the last good one).
-    pkg: Option<Rc<Package>>,
+    pkg: Option<Arc<Package>>,
     selected: &'a mut Option<usize>,
     log: &'a mut Vec<String>,
+    /// The diagnostics of the failed compile (the Problems tab lists them after the checks').
     map_problems: &'a [Diagnostic],
     maps: &'a mut MapView,
     canvas: &'a mut Canvas,
@@ -824,17 +1011,33 @@ impl Viewer<'_> {
             ui.weak(tr("No problems. Press Check to look again."));
             return;
         }
-        let mut clicked: Option<(String, Option<u32>)> = None;
+        let mut clicked: Option<Diagnostic> = None;
         ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             for (i, d) in all.iter().enumerate() {
                 if problem_row(ui, i, d) && !d.file.is_empty() {
-                    clicked = Some((d.file.clone(), d.line));
+                    clicked = Some((*d).clone());
                 }
             }
         });
-        if let Some((file, line)) = clicked {
-            self.open = Some(file);
-            *self.jump = line.map(|line| Jump { line, range: None });
+        if let Some(d) = clicked {
+            // A problem on a table of the shown map selects that table and centres the canvas on it;
+            // the Script goes to the line either way.
+            if let Some(map) = self.maps.map.clone() {
+                let file = format!("maps/{map}/map.toml");
+                if d.file == file {
+                    let text = self.ws.text_of(&file).unwrap_or_default();
+                    let spans = self.ws.spans(&file).unwrap_or_default();
+                    if let Some(sel) = targets(&d, &file, &text, &spans).into_iter().next() {
+                        let spec = self.pkg.as_deref().and_then(|p| p.maps.get(&map)).and_then(|m| m.spec.as_ref());
+                        if let Some(c) = spec.and_then(|s| razdor::studio::map::centre_of(s, &sel)) {
+                            self.canvas.centre = Some(c);
+                        }
+                        *self.selection = Some(sel);
+                    }
+                }
+            }
+            self.open = Some(d.file.clone());
+            *self.jump = d.line.map(|line| Jump { line, range: None });
         }
     }
 

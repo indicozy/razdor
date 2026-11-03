@@ -1,17 +1,47 @@
-//! The package's undo and redo stacks. One step is one file's text before and after a change, with
-//! the label the menu shows (`Undo: move army toll`). A new step clears the redo stack; the undo
-//! stack keeps at most [`LIMIT`] steps.
+//! The package's undo and redo stacks. One step is one change with the label the menu shows
+//! (`Undo: move army toll`): a text file's text before and after, or a rectangle of a terrain's
+//! cells before and after a paint stroke. A new step clears the redo stack; the undo stack keeps
+//! at most [`LIMIT`] steps.
 
 /// The most steps the undo stack keeps.
 pub const LIMIT: usize = 200;
 
-/// One change of one file: its text before and after, and the label of the change.
+/// What a step changed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Change {
+    /// A text file's text before and after (a visual edit, a burst of typing, an outside change).
+    Text { path: String, before: String, after: String },
+    /// A terrain's cells in a rectangle (`x`, `y`, `w`, `h`, row-major), before and after a stroke.
+    Cells { path: String, x: u32, y: u32, w: u32, h: u32, before: Vec<u8>, after: Vec<u8> },
+}
+
+/// One change and the label of the change.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Step {
-    pub path: String,
-    pub before: String,
-    pub after: String,
     pub label: String,
+    pub change: Change,
+}
+
+impl Step {
+    /// A text change of `path`.
+    pub fn text(path: impl Into<String>, before: impl Into<String>, after: impl Into<String>, label: impl Into<String>) -> Step {
+        Step { label: label.into(), change: Change::Text { path: path.into(), before: before.into(), after: after.into() } }
+    }
+
+    /// The file the change is of.
+    pub fn path(&self) -> &str {
+        match &self.change {
+            Change::Text { path, .. } | Change::Cells { path, .. } => path,
+        }
+    }
+
+    /// Whether the change leaves the file as it was.
+    fn is_noop(&self) -> bool {
+        match &self.change {
+            Change::Text { before, after, .. } => before == after,
+            Change::Cells { before, after, .. } => before == after,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -24,7 +54,7 @@ impl History {
     /// Records a new change: it goes on the undo stack and the redo stack is cleared. A step that
     /// changes nothing is not recorded.
     pub fn record(&mut self, step: Step) {
-        if step.before == step.after {
+        if step.is_noop() {
             return;
         }
         self.undo.push(step);

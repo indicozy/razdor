@@ -1,10 +1,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use super::*;
+use super::build;
 use crate::pack::diag::Severity as Sev;
 use crate::studio::edit::{self as ed, Edit, Kind, Locator};
+use crate::studio::map;
 use crate::studio::history::{History, Step};
 use toml_edit::Value;
 
@@ -403,12 +405,12 @@ fn undo_and_redo_restore_the_exact_texts_and_a_burst_is_one_step() {
 fn the_undo_stack_keeps_its_last_200_steps() {
     let mut h = History::default();
     for n in 0..210 {
-        h.record(Step { path: "a.toml".into(), before: n.to_string(), after: (n + 1).to_string(), label: format!("step {n}") });
+        h.record(Step::text("a.toml", n.to_string(), (n + 1).to_string(), format!("step {n}")));
     }
     assert_eq!(h.undo_len(), history::LIMIT);
     assert_eq!(h.undo_label(), Some("step 209"));
     // A step that changes nothing is not recorded.
-    h.record(Step { path: "a.toml".into(), before: "x".into(), after: "x".into(), label: "nothing".into() });
+    h.record(Step::text("a.toml", "x", "x", "nothing"));
     assert_eq!(h.undo_len(), history::LIMIT);
 }
 
@@ -492,7 +494,7 @@ fn a_broken_toml_keeps_the_last_good_package_and_refuses_visual_edits() {
     ws.docs[idx].text.push_str("\n[[army\n");
     ws.rebuild().unwrap();
 
-    assert!(Rc::ptr_eq(&good, &ws.package().unwrap()), "the last good package is kept");
+    assert!(Arc::ptr_eq(&good, &ws.package().unwrap()), "the last good package is kept");
     assert_eq!(ws.stale.len(), 1);
     assert_eq!(ws.stale[0].path, BROD);
     assert!(ws.stale[0].line > 1, "{:?}", ws.stale);
@@ -511,7 +513,7 @@ fn a_broken_toml_keeps_the_last_good_package_and_refuses_visual_edits() {
     ws.docs[idx].text = original;
     ws.rebuild().unwrap();
     assert!(ws.stale.is_empty());
-    assert!(!Rc::ptr_eq(&good, &ws.package().unwrap()));
+    assert!(!Arc::ptr_eq(&good, &ws.package().unwrap()));
 }
 
 #[test]
@@ -532,4 +534,31 @@ fn a_selection_has_its_locator_and_back() {
         assert_eq!(map::selection_of(&loc), Some(sel.clone()));
         assert!(map::cell_of(spec, &sel).is_some());
     }
+}
+
+#[test]
+#[ignore = "timing only: cargo test --release --lib studio::tests::perf_ -- --ignored --nocapture"]
+fn perf_rebuild_and_compile_marka() {
+    let install = std::sync::Arc::new(crate::dt::install::DtInstall::from_env().unwrap());
+    let mut ws = Workspace::open(example("pepelnaya-marka")).unwrap();
+    let n = 10;
+    for map in ["brod", "marka", "gates", "salt"] {
+        let job = ws.job(Some(map.to_string()), "en", Some(install.clone()));
+        build::run(job).unwrap();
+        let t = std::time::Instant::now();
+        for _ in 0..n {
+            let job = ws.job(Some(map.to_string()), "en", Some(install.clone()));
+            let built = build::run(job).unwrap();
+            assert!(matches!(built.compiled, Some(Ok(_))), "{map} compiles");
+        }
+        println!("PERF job (read + parse + check + drawn compile + reach) {map}, avg of {n}: {:?}", t.elapsed() / n);
+    }
+    let job = ws.job(None, "en", None);
+    let t = std::time::Instant::now();
+    for _ in 0..n {
+        build::run(ws.job(None, "en", None)).unwrap();
+    }
+    println!("PERF job without a map (read + parse + check), avg of {n}: {:?}", t.elapsed() / n);
+    let _ = job;
+    ws.rebuild().unwrap();
 }

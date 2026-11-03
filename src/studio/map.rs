@@ -7,15 +7,17 @@
 //! every lookup here goes through it.
 
 use std::collections::BTreeMap;
+use std::ops::Range;
 
 use crate::dt::dtm::Scenario;
 use crate::dt::install::DtInstall;
 use crate::editor::doc::EditorDoc;
-use crate::editor::geometry::{CellRect, Footprint};
+use crate::editor::geometry::CellRect;
 use crate::pack::compile::{self, Compiled, MapNames};
-use crate::pack::diag::Diagnostic;
-use crate::pack::load::Package;
+use crate::pack::diag::{Diagnostic, Report, Severity};
+use crate::pack::load::{line_of, Package};
 use crate::pack::map::MapFile;
+use crate::rules::world::footprint_cells;
 use crate::studio::edit::{Kind, Locator};
 
 /// The ids of the package's maps (`maps/<id>/`), sorted.
@@ -99,6 +101,39 @@ impl MapView {
         }
     }
 
+    /// Takes a compile made elsewhere (the build thread's) of map `map`. Only the map shown is taken;
+    /// a failed compile keeps the last good one and returns its diagnostics.
+    pub fn install(&mut self, map: &str, compiled: Result<Compiled, Report>) -> Vec<Diagnostic> {
+        self.stale = false;
+        if self.map.as_deref() != Some(map) {
+            return Vec::new();
+        }
+        match compiled {
+            Ok(compiled) => {
+                self.serial += 1;
+                let doc = EditorDoc::from_scenario(compiled.scenario.clone());
+                self.good = Some(Good { map: map.to_string(), compiled, doc, serial: self.serial });
+                Vec::new()
+            }
+            Err(report) => report.diagnostics,
+        }
+    }
+
+    /// Shows the codes of painted cells on the last good compile at once (before the rebuild). `cells`
+    /// are `(x, y, code)`; the drawn document is made again.
+    pub fn repaint(&mut self, cells: &[(u32, u32, u8)]) {
+        let Some(good) = self.good.as_mut() else { return };
+        let w = good.compiled.scenario.width();
+        for &(x, y, code) in cells {
+            if let Some(c) = good.compiled.scenario.terrain.get_mut((y * w + x) as usize) {
+                *c = code;
+            }
+        }
+        self.serial += 1;
+        good.serial = self.serial;
+        good.doc = EditorDoc::from_scenario(good.compiled.scenario.clone());
+    }
+
     /// The last good compile, when it is of the map shown.
     pub fn current(&self) -> Option<&Good> {
         self.good.as_ref().filter(|g| self.map.as_deref() == Some(g.map.as_str()))
@@ -116,7 +151,7 @@ pub fn hit(compiled: &Compiled, spec: &MapFile, (x, y): (i32, i32)) -> Option<Se
     if let Some(i) = s.armies.iter().position(|a| a.x as i32 == x && a.y as i32 == y) {
         return name_of(&compiled.names.armies, (i + 1) as u8).map(|id| Selection::Army(id.to_string()));
     }
-    if let Some(i) = s.buildings.iter().position(|b| Footprint::of(b.x as i32, b.y as i32, b.size_x, b.size_y).contains(x, y)) {
+    if let Some(i) = s.buildings.iter().position(|b| footprint_cells((b.x as i32, b.y as i32), (b.size_x.max(1) as i32, b.size_y.max(1) as i32)).any(|c| c == (x, y))) {
         return name_of(&compiled.names.buildings, (i + 1) as u16).map(|id| Selection::Building(id.to_string()));
     }
     (spec.hero.cell[0] as i32 == x && spec.hero.cell[1] as i32 == y).then_some(Selection::Hero)
@@ -136,10 +171,7 @@ pub fn outline_of(compiled: &Compiled, spec: &MapFile, sel: &Selection) -> Vec<C
             .buildings
             .get(id)
             .and_then(|n| s.buildings.get(*n as usize - 1))
-            .map(|b| {
-                let f = Footprint::of(b.x as i32, b.y as i32, b.size_x, b.size_y);
-                std::iter::once(f.main).chain(f.extra_row).collect()
-            })
+            .map(|b| footprint_rects((b.x as i32, b.y as i32), (b.size_x.max(1) as i32, b.size_y.max(1) as i32)))
             .unwrap_or_default(),
         Selection::Army(id) => names
             .armies
@@ -150,6 +182,85 @@ pub fn outline_of(compiled: &Compiled, spec: &MapFile, sel: &Selection) -> Vec<C
         Selection::Point(i) => spec.point.get(*i).map(|p| p.get_ref().cell).map(|c| vec![CellRect::brush(c[0] as i32, c[1] as i32, 1)]).unwrap_or_default(),
         Selection::Object(i) => spec.object.get(*i).map(|o| o.get_ref().cell).map(|c| vec![CellRect::brush(c[0] as i32, c[1] as i32, 1)]).unwrap_or_default(),
     }
+}
+
+/// A building's footprint as one rectangle per row of cells (the engine's footprint, `rules::world`).
+pub fn footprint_rects(anchor: (i32, i32), size: (i32, i32)) -> Vec<CellRect> {
+    let mut rows: BTreeMap<i32, (i32, i32)> = BTreeMap::new();
+    for (x, y) in footprint_cells(anchor, size) {
+        let e = rows.entry(y).or_insert((x, x));
+        e.0 = e.0.min(x);
+        e.1 = e.1.max(x);
+    }
+    rows.into_iter().map(|(y, (x0, x1))| CellRect { x0, y0: y, x1, y1: y }).collect()
+}
+
+/// The footprint cells of every building of the compiled map (for the Footprints overlay).
+pub fn footprint_cells_of(compiled: &Compiled) -> Vec<(i32, i32)> {
+    compiled
+        .scenario
+        .buildings
+        .iter()
+        .flat_map(|b| footprint_cells((b.x as i32, b.y as i32), (b.size_x.max(1) as i32, b.size_y.max(1) as i32)).collect::<Vec<_>>())
+        .collect()
+}
+
+/// A canvas mark: a table of the shown map that a diagnostic points at, with the diagnostic's
+/// severity and message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Mark {
+    pub sel: Selection,
+    pub severity: Severity,
+    pub message: String,
+}
+
+/// The tables a diagnostic is about: the table whose lines hold the diagnostic's line (in `file`, the
+/// map's `map.toml`, whose text is `text`); for an overlap, the building it overlaps as well; with no
+/// line, the building or army its message names. Empty when nothing maps (the Problems list keeps it).
+pub fn targets(d: &Diagnostic, file: &str, text: &str, spans: &[(Locator, Range<usize>)]) -> Vec<Selection> {
+    let mut out = Vec::new();
+    if d.file == file {
+        if let Some(line) = d.line {
+            for (loc, r) in spans {
+                let first = line_of(text, r.start);
+                let last = line_of(text, r.end.saturating_sub(1).max(r.start));
+                if (first..=last).contains(&line) {
+                    if let Some(sel) = selection_of(loc) {
+                        out.push(sel);
+                    }
+                }
+            }
+        }
+    }
+    if let Some(other) = quoted_after(&d.message, "overlaps building ") {
+        out.push(Selection::Building(other.to_string()));
+    }
+    if d.line.is_none() && d.file == file {
+        if let Some(id) = quoted_after(&d.message, "building ") {
+            out.push(Selection::Building(id.to_string()));
+        } else if let Some(id) = quoted_after(&d.message, "army ") {
+            out.push(Selection::Army(id.to_string()));
+        }
+    }
+    out
+}
+
+/// The text between the back-quotes that follow `key` in `message` (`building `a`` → `a`).
+fn quoted_after<'m>(message: &'m str, key: &str) -> Option<&'m str> {
+    let at = message.find(key)? + key.len();
+    let rest = message[at..].strip_prefix('`')?;
+    rest.split('`').next().filter(|s| !s.is_empty())
+}
+
+/// The marks of a map's file: each diagnostic of the file, with the selections it is about.
+pub fn marks(file: &str, text: &str, spans: &[(Locator, Range<usize>)], diags: &[Diagnostic]) -> Vec<Mark> {
+    let mut out = Vec::new();
+    for d in diags {
+        for sel in targets(d, file, text, spans) {
+            out.push(Mark { sel, severity: d.severity, message: d.message.clone() });
+        }
+    }
+    out
 }
 
 /// The cell a selection's table gives in the map file (a building's is its footprint's

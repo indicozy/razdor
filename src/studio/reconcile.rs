@@ -72,6 +72,6 @@ impl Workspace {
         let before = std::mem::replace(&mut self.docs[i].text, disk.to_string());
         self.docs[i].saved = disk.to_string();
         let path = self.docs[i].path.clone();
-        self.history.record(Step { path: path.clone(), before, after: disk.to_string(), label: format!("outside change: {path}") });
+        self.history.record(Step::text(path.clone(), before, disk.to_string(), format!("outside change: {path}")));
     }
 }

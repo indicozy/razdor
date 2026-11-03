@@ -79,21 +79,35 @@ pub enum Edit {
     SetCell { at: Locator, cell: (i32, i32) },
     /// Sets one key of the table, which the format has (`Kind::keys`).
     SetValue { at: Locator, key: String, value: Value },
+    /// Replaces an array value whole (`troops`, `garrison`, `recruit`, `classes`) with `items`: inline
+    /// tables or strings. The array is written one item to a line when the old one was written so.
+    SetArray { at: Locator, key: String, items: Vec<Value> },
+    /// Removes an optional key of the table (its line).
+    RemoveKey { at: Locator, key: String },
+    /// Appends a new table of `at.kind` after the last table of that kind (at the end of the file
+    /// when there is none). `fragment` is its TOML text, header included; `at.id` names it.
+    Insert { at: Locator, fragment: String },
+    /// Removes a table: its lines go, the comment lines above it stay. A hero cannot be removed.
+    Remove { at: Locator },
 }
 
 impl Edit {
-    /// The table the edit changes.
+    /// The table the edit changes (for an insert, the table it adds).
     pub fn locator(&self) -> &Locator {
         match self {
-            Edit::SetCell { at, .. } | Edit::SetValue { at, .. } => at,
+            Edit::SetCell { at, .. } | Edit::SetValue { at, .. } | Edit::SetArray { at, .. } | Edit::RemoveKey { at, .. } => at,
+            Edit::Insert { at, .. } | Edit::Remove { at } => at,
         }
     }
 
-    /// The undo label: `move army toll`, `set gold of hero`.
+    /// The undo label: `move army toll`, `set gold of hero`, `add building village_2`.
     pub fn label(&self) -> String {
         match self {
             Edit::SetCell { at, .. } => format!("move {}", at.name()),
-            Edit::SetValue { at, key, .. } => format!("set {key} of {}", at.name()),
+            Edit::SetValue { at, key, .. } | Edit::SetArray { at, key, .. } => format!("set {key} of {}", at.name()),
+            Edit::RemoveKey { at, key } => format!("remove {key} from {}", at.name()),
+            Edit::Insert { at, .. } => format!("add {} {}", at.kind.key(), at.id.as_deref().unwrap_or("")),
+            Edit::Remove { at } => format!("delete {}", at.name()),
         }
     }
 }
@@ -163,6 +177,16 @@ fn cell_value(x: i32, y: i32) -> Value {
 /// result is the new text. An edit that names a key the format does not have, a table that is
 /// not there, or a negative cell is an error, and the text is not changed.
 pub fn apply_to_text(text: &str, edit: &Edit) -> Result<String, String> {
+    if let Edit::Insert { at, fragment } = edit {
+        return insert_table(text, at, fragment);
+    }
+    if let Edit::Remove { at } = edit {
+        if at.kind == Kind::Hero {
+            return Err("the hero cannot be removed: every map has one".to_string());
+        }
+        let r = find_span(text, at)?;
+        return Ok(remove_lines(text, r));
+    }
     let mut doc: DocumentMut = text.parse().map_err(|e: TomlError| format!("line {}: {}", error_line(text, &e), e.message()))?;
     match edit {
         Edit::SetCell { at, cell: (x, y) } => {
@@ -179,8 +203,146 @@ pub fn apply_to_text(text: &str, edit: &Edit) -> Result<String, String> {
             let t = table_mut(&mut doc, at)?;
             put(t, key, value.clone());
         }
+        Edit::SetArray { at, key, items } => {
+            if !at.kind.keys().contains(&key.as_str()) {
+                return Err(format!("[[{}]] has no key `{key}`", at.kind.key()));
+            }
+            let t = table_mut(&mut doc, at)?;
+            let multiline = t.get(key).and_then(Item::as_array).is_some_and(|a| a.to_string().contains('\n'));
+            put(t, key, array_value(items.clone(), multiline));
+        }
+        Edit::RemoveKey { at, key } => {
+            if !at.kind.keys().contains(&key.as_str()) {
+                return Err(format!("[[{}]] has no key `{key}`", at.kind.key()));
+            }
+            // Removed as text, not through the document: `toml_edit` would drop the comment lines
+            // above the key with it.
+            return remove_key_lines(text, at, key);
+        }
+        Edit::Insert { .. } | Edit::Remove { .. } => unreachable!("handled above"),
     }
     Ok(doc.to_string())
+}
+
+/// The text without the lines of `key` in the table `at` (the comment lines above it stay).
+fn remove_key_lines(text: &str, at: &Locator, key: &str) -> Result<String, String> {
+    let doc = Document::parse(text).map_err(|e| format!("line {}: {}", error_line(text, &e), e.message()))?;
+    let t = table_ref(&doc, at)?;
+    let (k, item) = t.get_key_value(key).ok_or_else(|| format!("{} has no `{key}`", at.name()))?;
+    let (Some(ks), Some(is)) = (k.span(), item.span()) else {
+        return Err(format!("`{key}` of {} has no place in the file", at.name()));
+    };
+    let start = text[..ks.start].rfind('\n').map_or(0, |i| i + 1);
+    let end = line_end(text, is.end.max(ks.end));
+    Ok(format!("{}{}", &text[..start], &text[end..]))
+}
+
+/// The table `at` of a parsed map file (the read-only twin of `table_mut`).
+fn table_ref<'d, S>(doc: &'d Document<S>, at: &Locator) -> Result<&'d Table, String> {
+    let key = at.kind.key();
+    if at.kind == Kind::Hero {
+        return match doc.get(key) {
+            Some(Item::Table(t)) => Ok(t),
+            _ => Err("the map has no [hero] table".to_string()),
+        };
+    }
+    let Some(Item::ArrayOfTables(entries)) = doc.get(key) else {
+        return Err(format!("the map has no [[{key}]] entries"));
+    };
+    let pos = match &at.id {
+        Some(id) => entries
+            .iter()
+            .position(|t| t.get("id").and_then(Item::as_str) == Some(id.as_str()))
+            .ok_or_else(|| format!("no [[{key}]] with id \"{id}\""))?,
+        None => at.index,
+    };
+    entries.get(pos).ok_or_else(|| format!("no [[{key}]] entry {}", pos + 1))
+}
+
+/// An array of `items`, one item to a line (four spaces in, a trailing comma) when `multiline`.
+pub fn array_value(items: Vec<Value>, multiline: bool) -> Value {
+    let mut a = Array::new();
+    for item in items {
+        a.push(item);
+    }
+    if multiline && !a.is_empty() {
+        for item in a.iter_mut() {
+            item.decor_mut().set_prefix("\n    ");
+        }
+        a.set_trailing_comma(true);
+        a.set_trailing("\n");
+    }
+    Value::Array(a)
+}
+
+/// The byte offset just after the line that holds `pos` (the text's end when it is the last line).
+fn line_end(text: &str, pos: usize) -> usize {
+    text[pos.min(text.len())..].find('\n').map_or(text.len(), |i| pos + i + 1)
+}
+
+/// The byte range of the table `at` in `text`: the span of its header through its last value.
+fn find_span(text: &str, at: &Locator) -> Result<Range<usize>, String> {
+    let all = spans(&at.file, text)?;
+    all.into_iter()
+        .find(|(l, _)| l.kind == at.kind && (at.id.is_some() && l.id == at.id || at.id.is_none() && l.index == at.index))
+        .map(|(_, r)| r)
+        .ok_or_else(|| format!("{} is not in the file", at.name()))
+}
+
+/// The text without the lines of `r`: from the line of its start through the line of its end. A blank
+/// line that stood above the table and one below it are not both kept.
+fn remove_lines(text: &str, r: Range<usize>) -> String {
+    let start = text[..r.start].rfind('\n').map_or(0, |i| i + 1);
+    let mut end = line_end(text, r.end);
+    if text[..start].ends_with("\n\n") && text[end..].starts_with('\n') {
+        end += 1;
+    }
+    format!("{}{}", &text[..start], &text[end..])
+}
+
+/// The text with `fragment` appended after the last table of the kind of `at` (after its line, and
+/// after a `# --- end generated ---` line that follows it). A table of the kind must not be missing
+/// its place: with no table of the kind the fragment goes at the end of the file.
+fn insert_table(text: &str, at: &Locator, fragment: &str) -> Result<String, String> {
+    if at.kind == Kind::Hero {
+        return Err("the hero is not added: every map has one".to_string());
+    }
+    let all = spans(&at.file, text)?;
+    let last = all.iter().filter(|(l, _)| l.kind == at.kind).map(|(_, r)| r.end).max();
+    let mut pos = match last {
+        Some(end) => {
+            let after = line_end(text, end);
+            if text[after..].lines().next().is_some_and(|l| l.trim_start().starts_with("# --- end generated")) {
+                line_end(text, after)
+            } else {
+                after
+            }
+        }
+        None => text.len(),
+    };
+    if pos > text.len() {
+        pos = text.len();
+    }
+    let mut out = String::with_capacity(text.len() + fragment.len() + 4);
+    out.push_str(&text[..pos]);
+    if !out.is_empty() {
+        if !out.ends_with('\n') {
+            out.push('\n');
+        }
+        if !out.ends_with("\n\n") {
+            out.push('\n');
+        }
+    }
+    out.push_str(fragment);
+    if !fragment.ends_with('\n') {
+        out.push('\n');
+    }
+    let rest = &text[pos..];
+    if !rest.is_empty() && !rest.starts_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(rest);
+    Ok(out)
 }
 
 /// The byte range of a table: from its header through the end of its last key or value. The

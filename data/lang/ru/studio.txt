@@ -13,7 +13,6 @@ Output = Вывод
 # Toolbar and file tree
 Save all = Сохранить всё
 Package folder = Папка пакета
-Coming next = В следующем шаге
 No file open: pick a text file in the file system. = Файл не открыт: выберите текстовый файл в дереве слева.
 
 # Problems and output
@@ -37,8 +36,6 @@ Nothing selected: pick an object on the map or in the scene. = Ничего не
 No map to show. = Нет карты для показа.
 This map does not parse: see Problems. = Карта не читается: см. «Проблемы».
 The map file could not be read. = Файл карты не удалось прочитать.
-Show in script = Показать в скрипте
-Read-only for now: editing comes in the next step. = Пока только чтение: правка будет в следующем шаге.
 
 # Scene dock
 Buildings ({count}) = Здания ({count})
@@ -69,4 +66,39 @@ Outside the map: the move is not made = За пределами карты: пе
 This object has no table in the file = У этого объекта нет таблицы в файле
 Outside changes are not seen: {reason} = Изменения извне не видны: {reason}
 Object = Объект
-Read-only for now: the canvas moves objects by dragging them. = Пока только для чтения: объекты на карте двигаются перетаскиванием.
+
+# Step 4: the inspector's forms, the placing tools, the terrain brush, the overlays
+Active = Горит
+Add = Добавить
+by the kind: = по виду:
+by the type = по типу
+Added {what} at ({x}, {y}) = Добавлено: {what}, клетка ({x}, {y})
+Cannot be reached on foot: {what} = Не дойти пешком: {what}
+Cell = Клетка
+Cells the hero cannot walk to, on the map's story = Клетки, куда герой не может дойти пешком по сюжету карты
+Classes = Классы
+Click a use to open it in Script. = Нажмите место, чтобы открыть его в скрипте.
+Deleted {name} = Удалено: {name}
+Delete key: removes the table; the comment above it stays = Клавиша Delete: убирает таблицу; комментарий над ней остаётся
+Each change is one undo step (Ctrl+Z). = Каждое изменение — один шаг отмены (Ctrl+Z).
+Footprints = Площади построек
+four days' income = четыре дня дохода
+Gold max = Запас золота
+Grid = Сетка
+Id = Код
+Kind = Вид
+lit from the start = светит с начала
+Max = Максимум
+{name} is named by {count} places (deleted anyway): {first} = {name}: на него ссылаются мест — {count} (удалено всё равно): {first}
+none: a lantern = нет: фонарь
+No text for this key in the language: = Нет текста для этого ключа на языке:
+Nothing names this table. = На эту таблицу никто не ссылается.
+{path} changed on disk: reloaded (Ctrl+Z takes the old picture back) = {path} изменён на диске: перечитан (Ctrl+Z вернёт прежнюю картинку)
+Radius = Радиус
+Reach = Досягаемость
+Recruit = Найм
+rename comes later = переименование будет позже
+Select = Выбор
+Sprite = Спрайт
+The hero cannot be removed: every map has one = Героя нельзя убрать: он есть на каждой карте
+Used by = Где используется

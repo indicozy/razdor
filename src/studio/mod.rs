@@ -2,35 +2,46 @@
 //! toolkit here; the screens are in `ui::studio`.
 //!
 //! The folder on disk is the truth (the studio's design, decision 6). A `Workspace` lists the
-//! package's files and holds the text documents opened for editing. Edits stay in memory until a
-//! save. The package the screens read is parsed from the folder with every open document's text
-//! put over its file (`rebuild`), so checks and map compiles see unsaved edits. A document that
-//! does not parse as TOML keeps the last good package (`stale`) and refuses visual edits. Visual
-//! edits are format-preserving (`edit`), undo and redo are one stack per package (`history`), and
-//! a file changed on disk is reconciled with the open text (`reconcile`).
+//! package's files and holds the documents opened for editing: the text files (`docs`) and the
+//! maps' terrains (`terrains`, painted in memory). Edits stay in memory until a save. The package
+//! the screens read is built from the disk with every open document over it (`build`, run on a
+//! worker thread by the window: `worker`), so checks and map compiles see unsaved edits. A document
+//! that does not parse as TOML keeps the last good package (`stale`) and refuses visual edits.
+//! Visual edits are format-preserving (`edit`), undo and redo are one stack per package (`history`),
+//! a file changed on disk is reconciled with the open text (`reconcile`), and tables are added and
+//! removed (`place`).
 
 use std::fs;
 use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use toml_edit::DocumentMut;
 
-use crate::pack::check;
+use crate::dt::install::DtInstall;
+use crate::pack::compile::Compiled;
 use crate::pack::diag::{Diagnostic, Report, Severity};
 use crate::pack::files::{refused_path, Files};
 use crate::pack::load::{line_of, Package};
+use crate::pack::reach::Site;
+use crate::pack::terrain::Palette;
 
+pub mod build;
 pub mod edit;
 pub mod history;
 pub mod map;
+pub mod paint;
+pub mod place;
 pub mod reconcile;
+pub mod worker;
 
 #[cfg(test)]
 mod tests;
 
 pub use edit::{Edit, Kind, Locator};
-pub use history::Step;
+pub use history::{Change, Step};
+pub use paint::TerrainDoc;
+pub use place::Place;
 pub use reconcile::{unified, Reconcile};
 
 /// The extensions the studio opens as text.
@@ -45,18 +56,30 @@ pub struct Workspace {
     pub entries: Vec<String>,
     /// The text documents open for editing, in the order they were opened.
     pub docs: Vec<Doc>,
+    /// The maps' terrains open for painting.
+    pub terrains: Vec<TerrainDoc>,
     /// The last check's diagnostics: the parse problems first, then the rules' (`pack::check`).
     /// While a document is stale, its parse error is first.
     pub problems: Vec<Diagnostic>,
     /// The package as last read: the disk with every open document's text over it. Kept while a
     /// document does not parse (see [`Stale`]).
-    package: Option<Rc<Package>>,
-    /// The open TOML documents that do not parse, as of the last [`Workspace::rebuild`].
+    package: Option<Arc<Package>>,
+    /// The open TOML documents that do not parse, as of the last install.
     pub stale: Vec<Stale>,
     /// The undo and redo stacks of the package.
     pub history: history::History,
     /// The text burst being typed: its file and the file's text before the burst.
     burst: Option<(String, String)>,
+    /// The paint stroke in progress: its terrain's path and the cells it touched, each with the
+    /// code it had before the stroke.
+    stroke: Option<Stroke>,
+}
+
+/// A paint stroke: the cells it touched and their codes before the stroke.
+#[derive(Debug)]
+struct Stroke {
+    path: String,
+    touched: std::collections::BTreeMap<(u32, u32), u8>,
 }
 
 /// One text file open for editing: its text in memory and the text last saved (or read).
@@ -100,6 +123,15 @@ impl Stale {
     }
 }
 
+/// What an installed rebuild gave the screens: the map it is of, its compile and its unreached
+/// story cells. Empty when the rebuild was not taken (a stale document).
+#[derive(Default)]
+pub struct Installed {
+    pub map: Option<String>,
+    pub compiled: Option<Result<Compiled, Report>>,
+    pub unreached: Option<Vec<Site>>,
+}
+
 impl Workspace {
     /// Opens a package folder: lists its files. An error when the folder is missing or has no
     /// `package.toml`.
@@ -115,11 +147,13 @@ impl Workspace {
             root,
             entries: Vec::new(),
             docs: Vec::new(),
+            terrains: Vec::new(),
             problems: Vec::new(),
             package: None,
             stale: Vec::new(),
             history: history::History::default(),
             burst: None,
+            stroke: None,
         };
         ws.refresh_entries()?;
         Ok(ws)
@@ -149,43 +183,56 @@ impl Workspace {
 
     /// A text file of the package as it is on disk, with the same checks as [`Workspace::open_doc`].
     pub fn read_text(&self, path: &str) -> Result<String, String> {
-        let rel = safe_rel(path)?;
         if !is_text(path) {
             return Err(format!("{path} is not a text file"));
         }
+        let bytes = self.read_bytes(path)?;
+        String::from_utf8(bytes).map_err(|e| format!("cannot read {path}: {e}"))
+    }
+
+    /// A file of the package as bytes, as it is on disk: the same checks as a text file's (a file of
+    /// the package, its real place inside the folder).
+    pub fn read_bytes(&self, path: &str) -> Result<Vec<u8>, String> {
+        let rel = safe_rel(path)?;
         let root = self.canon_root()?;
         let real = fs::canonicalize(self.root.join(&rel)).map_err(|e| format!("cannot read {path}: {e}"))?;
         if !real.starts_with(&root) || !real.is_file() {
             return Err(format!("{path} is not a file of the package"));
         }
-        fs::read_to_string(&real).map_err(|e| format!("cannot read {path}: {e}"))
+        fs::read(&real).map_err(|e| format!("cannot read {path}: {e}"))
     }
 
-    /// Writes an open document to its file; it is clean afterwards. A file that is a symbolic
-    /// link is never written through, and nothing is written outside the package.
+    /// Writes an open document to its file; it is clean afterwards.
     pub fn save(&mut self, idx: usize) -> Result<(), String> {
         let doc = self.docs.get(idx).ok_or_else(|| format!("no open document {idx}"))?;
-        let rel = safe_rel(&doc.path)?;
-        let path = self.root.join(&rel);
-        let not_saved = |why: &str| format!("cannot save {}: {why}", doc.path);
-        let meta = fs::symlink_metadata(&path).map_err(|e| not_saved(&e.to_string()))?;
-        if meta.file_type().is_symlink() || !meta.is_file() {
-            return Err(not_saved("not a regular file of the package"));
-        }
-        let root = self.canon_root()?;
-        let parent = path.parent().ok_or_else(|| not_saved("no folder"))?;
-        let parent = fs::canonicalize(parent).map_err(|e| not_saved(&e.to_string()))?;
-        if !parent.starts_with(&root) {
-            return Err(not_saved("outside the package folder"));
-        }
-        fs::write(&path, &doc.text).map_err(|e| not_saved(&e.to_string()))?;
+        let (path, text) = (doc.path.clone(), doc.text.clone());
+        self.write_package_file(&path, text.as_bytes())?;
         let doc = &mut self.docs[idx];
         doc.saved = doc.text.clone();
         Ok(())
     }
 
-    /// Saves every dirty document. The ones that fail are named in the error; the others are
-    /// saved anyway.
+    /// Writes a file of the package. A file that is a symbolic link is never written through, and
+    /// nothing is written outside the package.
+    fn write_package_file(&self, path: &str, bytes: &[u8]) -> Result<(), String> {
+        let rel = safe_rel(path)?;
+        let full = self.root.join(&rel);
+        let not_saved = |why: &str| format!("cannot save {path}: {why}");
+        let meta = fs::symlink_metadata(&full).map_err(|e| not_saved(&e.to_string()))?;
+        if meta.file_type().is_symlink() || !meta.is_file() {
+            return Err(not_saved("not a regular file of the package"));
+        }
+        let root = self.canon_root()?;
+        let parent = full.parent().ok_or_else(|| not_saved("no folder"))?;
+        let parent = fs::canonicalize(parent).map_err(|e| not_saved(&e.to_string()))?;
+        if !parent.starts_with(&root) {
+            return Err(not_saved("outside the package folder"));
+        }
+        fs::write(&full, bytes).map_err(|e| not_saved(&e.to_string()))
+    }
+
+    /// Saves every dirty document (texts and terrains). The ones that fail are named in the error;
+    /// the others are saved anyway.
     pub fn save_all(&mut self) -> Result<(), String> {
         let mut errors = Vec::new();
         for i in 0..self.docs.len() {
@@ -195,6 +242,11 @@ impl Workspace {
                 }
             }
         }
+        for i in 0..self.terrains.len() {
+            if let Err(e) = self.save_terrain(i) {
+                errors.push(e);
+            }
+        }
         if errors.is_empty() {
             Ok(())
         } else {
@@ -202,8 +254,20 @@ impl Workspace {
         }
     }
 
+    /// Writes a painted terrain to its picture; a clean one is left alone.
+    pub fn save_terrain(&mut self, idx: usize) -> Result<(), String> {
+        let t = self.terrains.get(idx).ok_or_else(|| format!("no open terrain {idx}"))?;
+        if !t.is_dirty() {
+            return Ok(());
+        }
+        let (path, bytes) = (t.path.clone(), t.bytes());
+        self.write_package_file(&path, &bytes)?;
+        self.terrains[idx].mark_saved(bytes);
+        Ok(())
+    }
+
     pub fn any_dirty(&self) -> bool {
-        self.docs.iter().any(Doc::is_dirty)
+        self.docs.iter().any(Doc::is_dirty) || self.terrains.iter().any(TerrainDoc::is_dirty)
     }
 
     /// The package as it is on disk now (what a save wrote): read and parsed, not checked.
@@ -213,30 +277,38 @@ impl Workspace {
     }
 
     /// The last good package: the disk with every open document's text over it.
-    pub fn package(&self) -> Option<Rc<Package>> {
+    pub fn package(&self) -> Option<Arc<Package>> {
         self.package.clone()
     }
 
-    /// Re-reads the package from the disk with the open documents' text over their files, and
-    /// runs the checks. A document that does not parse as TOML keeps the last good package (and
-    /// is listed in [`Workspace::stale`]); the other files are read as usual. An error when the
-    /// folder cannot be read at all.
-    pub fn rebuild(&mut self) -> Result<(), String> {
-        let mut files = Files::load(&self.root)?;
-        for doc in &self.docs {
-            files.overlay(&doc.path, doc.text.as_bytes())?;
-        }
+    /// The rebuild's input: the open texts and the painted terrains, over the disk.
+    pub fn job(&self, map: Option<String>, lang: &str, install: Option<Arc<DtInstall>>) -> build::Job {
+        let mut overlays: Vec<(String, Vec<u8>)> = self.docs.iter().map(|d| (d.path.clone(), d.text.clone().into_bytes())).collect();
+        overlays.extend(self.terrains.iter().filter(|t| t.is_dirty()).map(|t| (t.path.clone(), t.bytes())));
+        build::Job { root: self.root.clone(), overlays, map, lang: lang.to_string(), install }
+    }
+
+    /// Takes a finished rebuild. A document that does not parse keeps the last good package (and is
+    /// listed in [`Workspace::stale`]): then the rebuild's own results are not taken either. The
+    /// checks' problems replace the last ones.
+    pub fn install(&mut self, built: build::Built) -> Installed {
         self.stale = stale_docs(&self.docs);
         if !self.stale.is_empty() && self.package.is_some() {
             let mut problems: Vec<Diagnostic> = self.stale.iter().map(Stale::diagnostic).collect();
             problems.extend(self.problems.iter().filter(|d| !self.stale.iter().any(|s| s.path == d.file)).cloned());
             self.problems = problems;
-            return Ok(());
+            return Installed::default();
         }
-        let (package, _) = Package::parse(files);
-        let report = check::check(&package);
-        self.problems = report.diagnostics;
-        self.package = Some(Rc::new(package));
+        self.problems = built.report.diagnostics;
+        self.package = Some(Arc::new(built.package));
+        Installed { map: built.map, compiled: built.compiled, unreached: built.unreached }
+    }
+
+    /// Re-reads the package from the disk with the open documents' text over their files, runs the
+    /// checks, and takes the result here (without a worker: the tests and the command line use it).
+    pub fn rebuild(&mut self) -> Result<(), String> {
+        let built = build::run(self.job(None, "en", None))?;
+        self.install(built);
         Ok(())
     }
 
@@ -265,7 +337,7 @@ impl Workspace {
         let Some(doc) = self.docs.iter().find(|d| d.path == path) else { return };
         let after = doc.text.clone();
         let label = format!("edit {path}");
-        self.history.record(Step { path, before, after, label });
+        self.history.record(Step::text(path, before, after, label));
     }
 
     /// The file of the open text burst, if any.
@@ -287,15 +359,89 @@ impl Workspace {
         let after = edit::apply_to_text(&before, &edit)?;
         let label = edit.label();
         self.docs[idx].text = after.clone();
-        self.history.record(Step { path: file, before, after, label });
+        self.history.record(Step::text(file, before, after, label));
         Ok(())
+    }
+
+    /// Opens a map's terrain for painting: its picture is read and decoded with the map's palette.
+    /// Returns its index in `terrains`; an open one is not read again.
+    pub fn open_terrain(&mut self, map: &str) -> Result<usize, String> {
+        let path = format!("maps/{map}/terrain.png");
+        if let Some(i) = self.terrains.iter().position(|t| t.path == path) {
+            return Ok(i);
+        }
+        let palette = self.palette_of(map)?;
+        let bytes = self.read_bytes(&path)?;
+        self.terrains.push(TerrainDoc::open(map, bytes, palette)?);
+        Ok(self.terrains.len() - 1)
+    }
+
+    /// The terrain palette of a map: its `[terrain_palette]` over the default colours.
+    fn palette_of(&self, map: &str) -> Result<Palette, String> {
+        let text = self.text_of(&format!("maps/{map}/map.toml"))?;
+        let table: toml::Table = text.parse().map_err(|e: toml::de::Error| e.to_string())?;
+        let overrides: std::collections::BTreeMap<String, String> = table
+            .get("terrain_palette")
+            .and_then(toml::Value::as_table)
+            .map(|t| t.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect())
+            .unwrap_or_default();
+        Palette::with_overrides(&overrides)
+    }
+
+    /// Paints `cells` of map `map` with terrain `code`, as part of the stroke in progress (a stroke
+    /// starts with the first call after [`Workspace::paint_end`]). Cells off the map are skipped.
+    pub fn paint(&mut self, map: &str, cells: &[(i64, i64)], code: u8) -> Result<(), String> {
+        let path = format!("maps/{map}/terrain.png");
+        let i = self.open_terrain(map)?;
+        if self.stroke.as_ref().is_some_and(|s| s.path != path) {
+            self.paint_end();
+        }
+        let stroke = self.stroke.get_or_insert_with(|| Stroke { path, touched: Default::default() });
+        let doc = &mut self.terrains[i];
+        for &(x, y) in cells {
+            if x < 0 || y < 0 || x >= i64::from(doc.terrain.width) || y >= i64::from(doc.terrain.height) {
+                continue;
+            }
+            let (x, y) = (x as u32, y as u32);
+            let before = doc.set(x, y, code);
+            stroke.touched.entry((x, y)).or_insert(before);
+        }
+        Ok(())
+    }
+
+    /// Ends the paint stroke: one undo step with the rectangle of cells it changed, before and after.
+    pub fn paint_end(&mut self) {
+        let Some(stroke) = self.stroke.take() else { return };
+        if stroke.touched.is_empty() {
+            return;
+        }
+        let Some(i) = self.terrains.iter().position(|t| t.path == stroke.path) else { return };
+        let x0 = stroke.touched.keys().map(|c| c.0).min().unwrap_or(0);
+        let x1 = stroke.touched.keys().map(|c| c.0).max().unwrap_or(0);
+        let y0 = stroke.touched.keys().map(|c| c.1).min().unwrap_or(0);
+        let y1 = stroke.touched.keys().map(|c| c.1).max().unwrap_or(0);
+        let (w, h) = (x1 - x0 + 1, y1 - y0 + 1);
+        let doc = &self.terrains[i];
+        let after = doc.rect(x0, y0, w, h);
+        let mut before = after.clone();
+        for (&(x, y), &code) in &stroke.touched {
+            before[((y - y0) * w + (x - x0)) as usize] = code;
+        }
+        let label = format!("paint {} terrain", doc.map);
+        self.history.record(Step { label, change: Change::Cells { path: stroke.path, x: x0, y: y0, w, h, before, after } });
+    }
+
+    /// Whether a paint stroke is in progress.
+    pub fn painting(&self) -> bool {
+        self.stroke.is_some()
     }
 
     /// Undoes the last step; returns its label, or `None` when there is nothing to undo.
     pub fn undo(&mut self) -> Result<Option<String>, String> {
         self.end_text_edit();
+        self.paint_end();
         let Some(step) = self.history.pop_undo() else { return Ok(None) };
-        if let Err(e) = self.set_text(&step.path, &step.before) {
+        if let Err(e) = self.apply_step(&step, true) {
             self.history.push_undo(step);
             return Err(e);
         }
@@ -307,8 +453,9 @@ impl Workspace {
     /// Redoes the last undone step; returns its label, or `None` when there is nothing to redo.
     pub fn redo(&mut self) -> Result<Option<String>, String> {
         self.end_text_edit();
+        self.paint_end();
         let Some(step) = self.history.pop_redo() else { return Ok(None) };
-        if let Err(e) = self.set_text(&step.path, &step.after) {
+        if let Err(e) = self.apply_step(&step, false) {
             self.history.push_redo(step);
             return Err(e);
         }
@@ -317,10 +464,22 @@ impl Workspace {
         Ok(Some(label))
     }
 
-    fn set_text(&mut self, path: &str, text: &str) -> Result<(), String> {
-        let i = self.open_doc(path)?;
-        self.docs[i].text = text.to_string();
-        Ok(())
+    /// Puts a step's before (undo) or after (redo) state back into its document.
+    fn apply_step(&mut self, step: &Step, undo: bool) -> Result<(), String> {
+        match &step.change {
+            Change::Text { path, before, after } => {
+                let text = if undo { before } else { after };
+                let i = self.open_doc(path)?;
+                self.docs[i].text = text.clone();
+                Ok(())
+            }
+            Change::Cells { path, x, y, w, h, before, after } => {
+                let codes = if undo { before } else { after };
+                let i = self.terrains.iter().position(|t| &t.path == path).ok_or_else(|| format!("{path} is not open for painting"))?;
+                self.terrains[i].set_rect(*x, *y, *w, *h, codes);
+                Ok(())
+            }
+        }
     }
 
     /// The text of a package file: the open document's, else the file's on disk.
@@ -339,6 +498,35 @@ impl Workspace {
     /// The map table that holds byte `offset` of the file, if any.
     pub fn locator_at(&self, path: &str, offset: usize) -> Option<Locator> {
         self.spans(path).ok()?.into_iter().find(|(_, r)| r.contains(&offset)).map(|(l, _)| l)
+    }
+
+    /// Removes the table `at` (one undo step). The hero cannot be removed.
+    pub fn remove(&mut self, at: Locator) -> Result<(), String> {
+        self.apply(Edit::Remove { at })
+    }
+
+    /// Appends a new table to a map (see [`place::place`]); returns its id when it has one.
+    pub fn place(&mut self, map: &str, what: Place) -> Result<Option<String>, String> {
+        place::place(self, map, what)
+    }
+
+    /// A terrain's picture changed on disk while it is open. A clean one takes the disk's cells, as
+    /// one undo step; a painted one keeps its own (saving writes it over the disk). Returns whether
+    /// the cells changed.
+    pub fn on_disk_terrain(&mut self, path: &str, disk: &[u8]) -> Result<bool, String> {
+        let Some(i) = self.terrains.iter().position(|t| t.path == path) else { return Ok(false) };
+        if self.terrains[i].bytes() == disk || self.terrains[i].is_dirty() {
+            return Ok(false);
+        }
+        let map = self.terrains[i].map.clone();
+        let palette = self.palette_of(&map)?;
+        let fresh = TerrainDoc::open(&map, disk.to_vec(), palette)?;
+        let (w, h) = (fresh.terrain.width, fresh.terrain.height);
+        let before = self.terrains[i].rect(0, 0, w, h);
+        let after = fresh.rect(0, 0, w, h);
+        self.terrains[i] = fresh;
+        self.history.record(Step { label: format!("outside change: {path}"), change: Change::Cells { path: path.to_string(), x: 0, y: 0, w, h, before, after } });
+        Ok(true)
     }
 
     /// The package folder with its symbolic links resolved: what every path is checked against.
