@@ -14,6 +14,21 @@
 
 ## 1.3.2 — 2026-11-03
 
+Коммит `b3f63bc4` (тег `v1.3.2`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+a564811869d1b507a2d0f34b980db5e54308ca9e574c2ffc193340e11bb6aa91  razdor
+0ee3fa5d8fe69516a853e5763fa3717b423bb5ee56c53054f8c50168463edb31  Razdor.exe
+7b4494906c8e5ed891345026bca0c7fcdcdabe21a31453b9fb8becb51f8f4fe3  razdor-macos
+ac01e9f3d3248737569baf0bd48318fe8105dbcd02fbacda3fc68ae4a5fb7575  razdor-translate
+22560fb4faac9529277606b78a1e2e1efb130e6d34cb6cfbe690179da11336e7  Razdor-translate.exe
+ef29fddb273791b0edd65b34754b15582428fb552978da45a6036fc8230e0368  razdor-translate-macos
+b4922796350b7aab439b877d26599af33062cd0e3bb1dec49d6917e07b02f97a  razdor.apk
+44760d25b8b2899497a2d30fed3d4459c4b522f0362c0782bd44b64e5896c909  razdor.ipa
+```
+
 ### Исправлено
 
 - Телефон: дневник и окна настроек снова такие, как в 1.3.0: вкладки-лента и новые раскладки настроек убраны.
