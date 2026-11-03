@@ -194,17 +194,15 @@ map = "camp"
 when = { event = "army_arrives", army = "supply", at = [60, 71] }
 then = [ { dialog = "camp_raid" } ]
 
-# The hit: the companies come out of the camp's waygate and fall on the column (Kord's band, when it is on
-# the map: a company met on this map). Their attack is an AI battle that the band loses to the column (the
-# column is the stronger side): a balance question left open for the owner.
+# The hit: the companies come out of the camp's waygate and fall on the column. Kord's men are in the hero's
+# squad (camp_kord_gone), so the hit is the hero's fight: the column is sent at him, and it is beaten by the
+# squad or the hero loses as in any battle. (It was an AI battle of a band that is not on the map: the hit
+# did nothing and the column was never beaten.)
 [[trigger]]
 id = "camp_raid_hit"
 map = "camp"
 when = { event = "dialog_choice", dialog = "camp_raid", choice = "hit" }
-then = [
-    { teleport_army = "kord_band", to = "waygate" },
-    { army_goal = "kord_band", attack = "supply" },
-]
+then = [ { army_goal = "supply", attack = "hero" } ]
 
 [[trigger]]
 id = "camp_raid_pass"

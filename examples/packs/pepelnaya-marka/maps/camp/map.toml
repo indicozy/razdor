@@ -13621,7 +13621,10 @@ troops = [
     { unit = "dt:brigand", level = 1, count = 2 },
 ]
 
-# The Crown's supply column on the road: the story sends it to the ambush point.
+# The Crown's supply column on the road: the story sends it to the ambush point. Written as two guardsmen
+# and two archers; the battle fields one guardsman more (an army without a named leader takes its first
+# unit as its leader, placed as one more unit: docs/OPEN_QUESTIONS.md). Two, not three, so the camp's squad
+# wins the hit (the camp triggers' «hit»).
 [[army]]
 id = "supply"
 name = "camp.army.supply.name"
@@ -13630,7 +13633,7 @@ faction = "enemy"
 model = "feudal"
 gold = 120
 troops = [
-    { unit = "dt:guardsman", level = 1, count = 3 },
+    { unit = "dt:guardsman", level = 1, count = 2 },
     { unit = "dt:archer", level = 1, count = 2 },
 ]
 
