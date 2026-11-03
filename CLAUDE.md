@@ -54,8 +54,14 @@ mobile support; there is no roadmap and nothing else is started unless the owner
   stays wherever community maps and mods depend on it, or where it is simply fun. Comment each
   kept original bug as original behaviour.
 - Who decides a change (the owner's decision, 2026-10-28):
-  - crashes, softlocks, broken UI, wrong text: fix without asking, as long as the community map
-    smoke test stays green;
+  - crashes, softlocks, wrong text: fix without asking, as long as the community map smoke test
+    stays green;
+  - any UI change (the owner's decision, 2026-11-03), a broken-UI fix included: a new or changed
+    layout, look, window, button or text placement on any screen or platform needs the owner's
+    approval before it is pushed to `main`. Show the off-screen screenshots of every changed
+    screen (desktop and the phones it touches) and wait for the owner's yes; a player's or a
+    reviewer's agreement in Discord is not enough. The approval is for the screens shown: a
+    later change to the look needs a new one;
   - UI and QoL that leave the rules alone: the owner decides;
   - gameplay and balance (rules, numbers, AI, fixing an original bug that changes play): the
     experimental track: ship behind a toggle that is off by default, a Discord 👍/👎 poll for at
@@ -129,6 +135,7 @@ mobile support; there is no roadmap and nothing else is started unless the owner
 | A player-visible change has a line in `changelog/unreleased.md` | review |
 | A player report has its `PLAYTEST_NOTES.md` entry and its backlog entry's status is current | review |
 | A change that alters a flow updates its `docs/flows/` file | review |
+| A UI change: the owner approved its screenshots before the push | the owner |
 | A UI change: the UI regression check run, its diffs reviewed, the changed references accepted | review |
 | A player-visible feature or change has its wiki page added or updated (ru and en) | review (`wiki` skill) |
 | A phone UI change: the mobile UI check run, no new text under 12 sp, no new touch target under 40 dp | review (`mobile-ui` skill) |
