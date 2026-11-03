@@ -63,7 +63,9 @@ ui/world_view.rs  click on the map
 (`TileMap::flood_route`) over the hero's planner map. Closed cells: unexplored cells, castles and
 forts with attitude ≤ 0 and ruins not his (unless clicked or stood in), at sea every bridge when he
 clicked land or stands on a bridge, stationary guards, and armies with a meeting waiting next to him
-(except the clicked army). Moving armies and other buildings are crossed. `Game::can_target` decides
+(except the clicked army). Moving armies and other buildings are crossed. A building covers its whole
+footprint (`rules::world::footprint_cells`: `size` cells, bottom-right anchor; a package's `size` in
+`docs/reference/rzpack-format.md`), and a click on any of its cells is a click on it. `Game::can_target` decides
 whether a click is a target at all (a hero on foot never targets water).
 Razdor's advanced option `avoid_armies` («Обход армий на пути», off by default) changes this: every
 army's cell closes instead (`plan_avoiding`, `ArmyBlock::Every`), the route is replanned around armies

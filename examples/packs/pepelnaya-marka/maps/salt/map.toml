@@ -4939,7 +4939,7 @@ sprite = 6
 
 [[object]]
 kind = "dead_trees"
-cell = [66, 32]
+cell = [65, 31]
 sprite = 109
 
 [[object]]
@@ -5069,7 +5069,7 @@ sprite = 6
 
 [[object]]
 kind = "trees"
-cell = [64, 33]
+cell = [62, 31]
 sprite = 6
 
 [[object]]
@@ -5194,7 +5194,7 @@ sprite = 25
 
 [[object]]
 kind = "trees"
-cell = [68, 34]
+cell = [66, 31]
 sprite = 62
 
 [[object]]
@@ -5334,17 +5334,17 @@ sprite = 2
 
 [[object]]
 kind = "trees"
-cell = [64, 35]
+cell = [61, 32]
 sprite = 1
 
 [[object]]
 kind = "trees"
-cell = [67, 35]
+cell = [63, 31]
 sprite = 6
 
 [[object]]
 kind = "dead_trees"
-cell = [68, 35]
+cell = [71, 32]
 sprite = 115
 
 [[object]]
@@ -5664,7 +5664,7 @@ sprite = 6
 
 [[object]]
 kind = "trees"
-cell = [9, 38]
+cell = [8, 37]
 sprite = 48
 
 [[object]]
@@ -5904,7 +5904,7 @@ sprite = 50
 
 [[object]]
 kind = "dead_trees"
-cell = [8, 40]
+cell = [7, 40]
 sprite = 113
 
 [[object]]
@@ -6004,7 +6004,7 @@ sprite = 29
 
 [[object]]
 kind = "trees"
-cell = [65, 40]
+cell = [64, 41]
 sprite = 2
 
 [[object]]

@@ -49974,7 +49974,7 @@ sprite = 116
 
 [[object]]
 kind = "trees"
-cell = [14, 173]
+cell = [13, 172]
 sprite = 2
 
 [[object]]
@@ -50284,7 +50284,7 @@ sprite = 116
 
 [[object]]
 kind = "dead_trees"
-cell = [16, 174]
+cell = [17, 174]
 sprite = 116
 
 [[object]]

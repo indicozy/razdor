@@ -17,7 +17,7 @@ touched. The densities are the original's: objects per 100 cells of each terrain
 maps (`ORIGINAL_DENSITY`, measured on the install), scaled per map by a mood factor. Clustering comes
 from value noise: copses with clearings, not an even sprinkle.
 
-Never placed: on roads, water, the impassable terrains, a building's cell or its ring, an army's
+Never placed: on roads, water, the impassable terrains, a building's footprint or its ring, an army's
 cell or its ring, the hero's start and its ring, a `[[point]]` and its ring, a cell a trigger names
 (and its ring), an area a trigger names (its rectangle), a ford and the ring around a ford. Blocking
 objects (thickets, mountains, stones) also keep one cell clear of roads and fords, so a road is
@@ -132,6 +132,15 @@ MAPS = {
                  "stony_soil": 0.6, "clay_soil": 0.9, "sand_dunes": 0.6},
         "border_bush": 0.10, "hand_hills": {"radius": 6, "count": 3},
     },
+}
+
+# A building's footprint in cells (width, height): its `size`, else the type's default, the original
+# maps' most common size (`DEFAULT_FOOTPRINTS` in src/pack/compile.rs). A footprint is `size` cells up
+# and left of the bottom-right cell, plus one more row above when wider than tall (`footprint_cells`).
+FOOTPRINTS = {
+    "palace": (1, 1), "town": (9, 9), "village": (4, 4), "castle": (4, 4), "fort": (2, 2), "tavern": (2, 2),
+    "market": (2, 2), "church": (2, 2), "smithy": (1, 1), "shipyard": (3, 4), "altar": (3, 3),
+    "dungeon_entrance": (2, 2), "ruins": (2, 2), "stone_bridge": (1, 1), "wooden_bridge": (1, 1), "obelisk": (1, 1),
 }
 
 SALT_CHOICE, SALT_CLASS, SALT_SPRITE, SALT_BUSH, SALT_MASSIF = 11, 37, 41, 53, 67
@@ -361,9 +370,16 @@ def main():
                 if inside(xx, yy):
                     keep[idx(xx, yy)] = True
 
-    # The hero, the buildings, the armies and the points: the cell and its ring.
+    # The hero, the buildings, the armies and the points: the cell and its ring. A building's ring
+    # goes round its whole footprint.
     ring(*spec["hero"]["cell"], 1)
-    for table in ("building", "army", "point"):
+    for b in spec.get("building", []):
+        sx, sy = b.get("size", FOOTPRINTS[b["type"]])
+        ax, ay = b["cell"]
+        for j in range(sy + (1 if sx > sy else 0)):
+            for i in range(sx):
+                ring(ax - i, ay - j, 1)
+    for table in ("army", "point"):
         for item in spec.get(table, []):
             ring(*item["cell"], 1)
     for kind, named in named_cells(pack, map_id):

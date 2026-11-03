@@ -94,7 +94,13 @@ pub struct BuildingSpec {
     /// A text key.
     #[serde(default)]
     pub description: Option<String>,
+    /// The bottom-right cell of the footprint.
     pub cell: [u32; 2],
+    /// The footprint in cells, `[width, height]`, 1 to 8 each: the cells up and left of `cell`
+    /// (one more row above when wider than tall, as the original's). Optional: the most common
+    /// size of the type in the original maps (`compile::default_footprint`).
+    #[serde(default)]
+    pub size: Option<[u32; 2]>,
     /// `player`, `ally`, `neighbour` or `enemy`.
     pub faction: String,
     /// Gold a day (the building's income).

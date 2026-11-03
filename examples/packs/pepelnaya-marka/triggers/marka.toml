@@ -29,7 +29,7 @@ when = { event = "game_start" }
 then = [
     { army_goal = "caravan", patrol = [[58, 50], [82, 79]] },
     { army_goal = "patrol_w", patrol = [[52, 47], [17, 47], [17, 64]] },
-    { army_goal = "patrol_n", patrol = [[58, 42], [68, 31]] },
+    { army_goal = "patrol_n", patrol = [[60, 45], [68, 31]] },
 ]
 
 # Each week: one more week counted, and the Dread grows by one (the chapter 1 Dread, carried over).

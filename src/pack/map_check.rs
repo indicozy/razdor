@@ -16,6 +16,7 @@ use super::map::{parse_date, ArmySpec, BuildingSpec, MapEntry, ObjectSpec, Troop
 use super::terrain::{self, Palette, Terrain, MAP_SIZES};
 use crate::dt::dtm::Surface;
 use crate::rules::map::{is_water, surface_minutes};
+use crate::rules::world::footprint_cells;
 
 /// Files a map folder holds.
 const MAP_FILES: [&str; 2] = ["map.toml", "terrain.png"];
@@ -167,7 +168,9 @@ fn check_map(pkg: &Package, entry: &MapEntry, r: &mut Report) {
 
     // Buildings.
     let mut building_ids: BTreeMap<&str, usize> = BTreeMap::new();
-    let mut footprints: BTreeMap<[u32; 2], &str> = BTreeMap::new();
+    // Every footprint cell and the building that covers it (`rules::world`: a building covers
+    // `size` cells up and left of its cell, one more row above when wider than tall).
+    let mut covered: BTreeMap<(i32, i32), &str> = BTreeMap::new();
     for (i, b) in m.building.iter().enumerate() {
         let span = b.span().start;
         let b: &BuildingSpec = b.get_ref();
@@ -183,8 +186,29 @@ fn check_map(pkg: &Package, entry: &MapEntry, r: &mut Report) {
         if bad_cell(r, &format!("building `{}`", b.id), &b.cell, span) {
             continue;
         }
-        if footprints.insert(b.cell, &b.id).is_some() {
-            r.error_hint(file, at(span), format!("building `{}` stands on another building's cell", b.id), "one building per cell");
+        let (fw, fh) = compile::footprint_of(b);
+        if !(1..=MAX_FOOTPRINT).contains(&fw) || !(1..=MAX_FOOTPRINT).contains(&fh) {
+            r.error_hint(file, at(span), format!("building `{}`: size {fw}×{fh} is outside 1 to {MAX_FOOTPRINT}", b.id), format!("a footprint is 1 to {MAX_FOOTPRINT} cells a side: size = [width, height]"));
+        } else {
+            let anchor = (b.cell[0] as i32, b.cell[1] as i32);
+            for t in footprint_cells(anchor, (fw as i32, fh as i32)) {
+                if t.0 < 0 || t.1 < 0 {
+                    r.error_hint(file, at(span), format!("building `{}`: its footprint goes past the top or left edge", b.id), "move the building's cell down or right, or make it smaller");
+                    break;
+                }
+                // The engine paves every footprint cell (`rules::world`): a cell of water or of
+                // blocked ground under a footprint would become a road.
+                // (The cells are at or up and left of the anchor, which is on the map.)
+                let on_bad_ground = at_cell(&[t.0 as u32, t.1 as u32]).map(ground).is_some_and(|g| matches!(g, Ground::Water | Ground::Blocked));
+                if on_bad_ground && !matches!(b.kind.as_str(), "stone_bridge" | "wooden_bridge") {
+                    r.warning_hint(file, at(span), format!("building `{}`: its footprint covers water or blocked ground at ({}, {})", b.id, t.0, t.1), "the cell would be paved into a road: make the footprint smaller or move the building");
+                }
+                if let Some(other) = covered.insert(t, &b.id) {
+                    if other != b.id {
+                        r.error_hint(file, at(span), format!("building `{}` overlaps building `{other}` at ({}, {})", b.id, t.0, t.1), "one building per cell: move one of them or make it smaller");
+                    }
+                }
+            }
         }
         let bridge = matches!(b.kind.as_str(), "stone_bridge" | "wooden_bridge");
         match at_cell(&b.cell).map(ground) {
@@ -208,6 +232,20 @@ fn check_map(pkg: &Package, entry: &MapEntry, r: &mut Report) {
             if rec.start > rec.max {
                 r.error_hint(file, at(span), format!("building `{}`: recruit `{}` starts with {} and holds {} at most", b.id, rec.unit, rec.start, rec.max), "the stock at the start is at most the maximum");
             }
+        }
+    }
+
+    // The footprints: the hero's start and the objects stay off them (an object inside a footprint
+    // is drawn over the building; the armies and the lanterns are checked with their own).
+    let covering = |c: &[u32; 2]| covered.get(&(c[0] as i32, c[1] as i32)).copied();
+    if let Some(b) = covering(&m.hero.cell) {
+        r.error_hint(file, table_line(text, "hero"), format!("the hero starts inside building `{b}`'s footprint"), "start him on a cell no building covers");
+    }
+    for o in &m.object {
+        let span = o.span().start;
+        let o: &ObjectSpec = o.get_ref();
+        if let Some(b) = covering(&o.cell) {
+            r.warning_hint(file, at(span), format!("an object at ({}, {}) is inside building `{b}`'s footprint", o.cell[0], o.cell[1]), "it is drawn over the building: move it off the footprint");
         }
     }
 
@@ -253,6 +291,9 @@ fn check_map(pkg: &Package, entry: &MapEntry, r: &mut Report) {
         if bad_cell(r, &format!("army `{}`", a.id), &a.cell, span) {
             continue;
         }
+        if let Some(b) = covering(&a.cell) {
+            r.error_hint(file, at(span), format!("army `{}` stands inside building `{b}`'s footprint", a.id), "move it onto a cell no building covers");
+        }
         let ships = ship != "none";
         match at_cell(&a.cell).map(ground) {
             Some(Ground::Water) if !ships => r.error_hint(
@@ -277,7 +318,12 @@ fn check_map(pkg: &Package, entry: &MapEntry, r: &mut Report) {
         if p.radius > MAX_RADIUS {
             r.error_hint(file, at(span), format!("a lantern's radius is {} cells: 24 at most", p.radius), "use a radius from 0 to 24");
         }
-        bad_cell(r, "a lantern", &p.cell, span);
+        if bad_cell(r, "a lantern", &p.cell, span) {
+            continue;
+        }
+        if let Some(b) = covering(&p.cell) {
+            r.error_hint(file, at(span), format!("a lantern stands inside building `{b}`'s footprint"), "move it onto a cell no building covers");
+        }
     }
 
     // The victory.
@@ -328,6 +374,10 @@ fn check_map(pkg: &Package, entry: &MapEntry, r: &mut Report) {
         super::reach::check_map(&pkg.files, &entry.id, t, r);
     }
 }
+
+/// The widest or tallest footprint a building may have: the original towns' 9×9 (the most common
+/// town size in the install's maps) is the largest default.
+pub const MAX_FOOTPRINT: u32 = 9;
 
 /// Troop slots: at most six, each with a unit reference and a count; a hero class cannot be a
 /// troop (the engine skips unit ids 1–3 in troop slots).
@@ -442,6 +492,38 @@ mod tests {
         let mut r = Report::default();
         check_maps(&p, &mut r);
         assert!(errors(&r).iter().any(|m| m.contains("outside the map")), "{}", r.to_text());
+    }
+
+    #[test]
+    fn a_footprint_is_one_to_nine_cells_and_stays_apart() {
+        let extra = "[[building]]\nid = \"a\"\ntype = \"village\"\nname = \"town.name\"\ncell = [20, 20]\nfaction = \"neighbour\"\nsize = [10, 2]\n\n\
+            [[building]]\nid = \"b\"\ntype = \"fort\"\nname = \"town.name\"\ncell = [3, 3]\nfaction = \"neighbour\"\n\n\
+            [[building]]\nid = \"c\"\ntype = \"tavern\"\nname = \"town.name\"\ncell = [4, 4]\nfaction = \"neighbour\"\n\n\
+            [[building]]\nid = \"d\"\ntype = \"village\"\nname = \"town.name\"\ncell = [1, 1]\nfaction = \"neighbour\"\n\n\
+            [victory]\nkind = \"reach\"\ncell = [45, 45]\n";
+        let p = pkg(&map_toml(extra), grass_png(50, 50));
+        let mut r = Report::default();
+        check_maps(&p, &mut r);
+        let errs = errors(&r);
+        assert!(errs.iter().any(|m| m.contains("size 10×2 is outside 1 to 9")), "{}", r.to_text());
+        assert!(errs.iter().any(|m| m.contains("building `c` overlaps building `b` at (3, 3)")), "{}", r.to_text());
+        assert!(errs.iter().any(|m| m.contains("building `d`: its footprint goes past the top or left edge")), "{}", r.to_text());
+    }
+
+    #[test]
+    fn the_hero_and_the_armies_stay_off_the_footprints() {
+        let extra = "[[building]]\nid = \"v\"\ntype = \"village\"\nname = \"town.name\"\ncell = [9, 9]\nfaction = \"neighbour\"\n\n\
+            [[army]]\nid = \"e\"\nname = \"army.name\"\ncell = [7, 7]\nfaction = \"enemy\"\nmodel = \"bandits\"\ntroops = [{ unit = \"dt:bandit\", count = 2 }]\n\n\
+            [[point]]\ncell = [8, 8]\nradius = 1\n\n\
+            [[object]]\nkind = \"trees\"\ncell = [6, 6]\n\n[victory]\nkind = \"defeat_all\"\n";
+        let p = pkg(&map_toml(extra).replace("cell = [5, 5]", "cell = [7, 8]"), grass_png(50, 50));
+        let mut r = Report::default();
+        check_maps(&p, &mut r);
+        let errs = errors(&r);
+        assert!(errs.iter().any(|m| m.contains("the hero starts inside building `v`")), "{}", r.to_text());
+        assert!(errs.iter().any(|m| m.contains("army `e` stands inside building `v`")), "{}", r.to_text());
+        assert!(errs.iter().any(|m| m.contains("a lantern stands inside building `v`")), "{}", r.to_text());
+        assert!(r.diagnostics.iter().any(|d| d.message.contains("object at (6, 6)") && d.message.contains("footprint")), "{}", r.to_text());
     }
 
     #[test]

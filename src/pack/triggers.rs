@@ -1943,7 +1943,7 @@ mod map_refs_tests {
 
     /// The map `m`: a 50×50 meadow, a knight hero, an enemy army `e` at (30, 30) and an enemy
     /// building `t` at (7, 7).
-    const MAP: &str = "title = \"t.x\"\nstart_date = \"1300-04-01\"\nrelations = [[3,3,0,-3],[3,3,0,-3],[0,0,3,-3],[-3,-3,-3,3]]\n\n[hero]\ncell = [5, 5]\nclasses = [\"knight\"]\ngold = 100\ntroops = [{ unit = \"dt:militiaman\", level = 1, count = 3 }]\n\n[[army]]\nid = \"e\"\nname = \"t.x\"\ncell = [30, 30]\nfaction = \"enemy\"\nmodel = \"bandits\"\ntroops = [{ unit = \"dt:bandit\", level = 1, count = 2 }]\n\n[[building]]\nid = \"t\"\ntype = \"town\"\nname = \"t.x\"\ncell = [7, 7]\nfaction = \"enemy\"\n\n[victory]\nkind = \"reach\"\ncell = [45, 45]\nmessage = \"t.x\"\n";
+    const MAP: &str = "title = \"t.x\"\nstart_date = \"1300-04-01\"\nrelations = [[3,3,0,-3],[3,3,0,-3],[0,0,3,-3],[-3,-3,-3,3]]\n\n[hero]\ncell = [5, 5]\nclasses = [\"knight\"]\ngold = 100\ntroops = [{ unit = \"dt:militiaman\", level = 1, count = 3 }]\n\n[[army]]\nid = \"e\"\nname = \"t.x\"\ncell = [30, 30]\nfaction = \"enemy\"\nmodel = \"bandits\"\ntroops = [{ unit = \"dt:bandit\", level = 1, count = 2 }]\n\n[[building]]\nid = \"t\"\ntype = \"town\"\nname = \"t.x\"\ncell = [18, 18]\nfaction = \"enemy\"\n\n[victory]\nkind = \"reach\"\ncell = [45, 45]\nmessage = \"t.x\"\n";
 
     /// A package with the map `m` and the story (`triggers/main.toml`'s text after its `[vars]`).
     fn package(story: &str, dialogs: &str) -> Package {

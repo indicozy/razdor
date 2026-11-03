@@ -173,7 +173,7 @@ id = "salt_trail"
 map = "salt"
 when = { event = "hero_enters", at = [44, 52, 4, 4] }
 if = [ { has_named_unit = "tess", unit = "dt:hunter" } ]
-then = [ { dialog = "salt_trail" }, { teleport_hero = [62, 38] } ]
+then = [ { dialog = "salt_trail" }, { teleport_hero = [61, 38] } ]
 
 # The marsh folk's trust is a gold reward when it runs high. Once.
 [[trigger]]

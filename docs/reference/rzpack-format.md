@@ -377,7 +377,8 @@ id = "dawnwatch"
 type = "town"
 name = "town.dawnwatch.name"        # text keys
 description = "town.dawnwatch.description"   # optional
-cell = [10, 24]
+cell = [10, 24]                     # the bottom-right cell of the footprint
+size = [9, 9]                       # optional: width and height in cells, 1 to 9 (Footprints below)
 faction = "player"                  # player, ally, neighbour, enemy
 income = 40                         # gold a day
 garrison = [{ unit = "dawn_knight", level = 1, count = 4 }]     # up to six
@@ -450,6 +451,18 @@ buildings share one. A cell of the story the hero's start cannot reach on foot i
 building's entrance, a `hero_enters` or other trigger cell, a teleport, a patrol or goal cell (from its army's
 cell), a travel point (a `[[point]]` with an `id`). A lantern without an `id` is not walked to.
 
+**Footprints.** A building covers a footprint of `size = [width, height]` cells (1 to 9 each): its
+`cell` is the bottom-right cell, the footprint runs `width` cells left and `height` up from it, plus
+one more row above when it is wider than tall (the original's rule, `rules::world::footprint_cells`).
+A walker enters the building from any of its cells, and every footprint cell is walkable at road speed.
+Without `size` a building takes its type's default, the most common size of that type in the original
+maps: castle 4×4, village 4×4, town 9×9, fort, tavern, market, church, ruins and dungeon_entrance 2×2,
+shipyard 3×4, altar 3×3, smithy and the bridges 1×1 (`compile::DEFAULT_FOOTPRINTS`; palace and obelisk
+keep 1×1, no original map has one). Checks: no two footprints share a cell, a footprint stays on the
+map, the hero's start and every army and lantern are off every footprint (errors); an object inside one
+is drawn over the building, and a footprint over water or blocked ground would be paved into a road
+(warnings).
+
 **Ids and units of a package.** A package's units are numbered from 200 in `units/` order, its items
 from 200 in `items/` order (`src/pack/compile.rs`). The base game's units end at 102 and its items at
 167. A troop slot holds a unit in one byte, so a package has at most **55 units** (200 to 254; 255 and
@@ -457,7 +470,8 @@ from 200 in `items/` order (`src/pack/compile.rs`). The base game's units end at
 **56 items** (200 to 255). A package unit draws the picture of its root base unit.
 
 **Building types:** palace, town, village, castle, fort, tavern, market, church, smithy, shipyard,
-altar, dungeon_entrance, ruins, stone_bridge, wooden_bridge, obelisk.
+altar, dungeon_entrance, ruins, stone_bridge, wooden_bridge, obelisk. Each has a default footprint
+(see Footprints); `size` in a `[[building]]` overrides it.
 **Object kinds:** hills (class 1, sprite 10), mountains (5, 10), stones (8, 10), trees (9, 0),
 dead_trees (10, 108), thicket (11, 0, impassable); `sprite` overrides the sprite.
 

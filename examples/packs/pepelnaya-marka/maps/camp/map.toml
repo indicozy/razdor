@@ -5627,17 +5627,17 @@ sprite = 17
 
 [[object]]
 kind = "dead_trees"
-cell = [16, 32]
+cell = [15, 31]
 sprite = 114
 
 [[object]]
 kind = "dead_trees"
-cell = [17, 32]
+cell = [16, 31]
 sprite = 114
 
 [[object]]
 kind = "trees"
-cell = [19, 32]
+cell = [18, 31]
 sprite = 2
 
 [[object]]
@@ -5757,7 +5757,7 @@ sprite = 1
 
 [[object]]
 kind = "dead_trees"
-cell = [16, 33]
+cell = [14, 31]
 sprite = 115
 
 [[object]]
@@ -6017,7 +6017,7 @@ sprite = 40
 
 [[object]]
 kind = "dead_trees"
-cell = [19, 36]
+cell = [21, 34]
 sprite = 114
 
 [[object]]
@@ -6122,12 +6122,12 @@ sprite = 62
 
 [[object]]
 kind = "dead_trees"
-cell = [19, 37]
+cell = [21, 35]
 sprite = 113
 
 [[object]]
 kind = "dead_trees"
-cell = [20, 37]
+cell = [21, 36]
 sprite = 115
 
 [[object]]
@@ -6207,12 +6207,12 @@ sprite = 1
 
 [[object]]
 kind = "trees"
-cell = [14, 38]
+cell = [11, 35]
 sprite = 2
 
 [[object]]
 kind = "stones"
-cell = [17, 38]
+cell = [14, 41]
 sprite = 17
 
 [[object]]
@@ -6342,7 +6342,7 @@ sprite = 112
 
 [[object]]
 kind = "trees"
-cell = [15, 39]
+cell = [13, 41]
 sprite = 2
 
 [[object]]
@@ -6467,7 +6467,7 @@ sprite = 114
 
 [[object]]
 kind = "dead_trees"
-cell = [13, 40]
+cell = [12, 41]
 sprite = 115
 
 [[object]]

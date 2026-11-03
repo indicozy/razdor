@@ -480,6 +480,15 @@ pub struct Location {
     pub cleared: bool,
 }
 
+/// The cells of a building's footprint (world.md §7.1, 0x4b2f57): `size` cells up and to the left
+/// of the bottom-right `anchor`, plus one extra row above when the building is wider than tall.
+/// The package compiler and its reachability check use the same cells.
+pub fn footprint_cells(anchor: Tile, size: (i32, i32)) -> impl Iterator<Item = Tile> {
+    let (ax, ay) = anchor;
+    let rows = size.1 + i32::from(size.0 > size.1);
+    (0..rows).flat_map(move |j| (0..size.0).map(move |i| (ax - i, ay - j)))
+}
+
 impl Location {
     /// The name the player sees in the tooltip (0x4973a0, as an army's): the scenario's name
     /// up to its first `#` (the editor's numbering, `Дорожные врата #C`), trailing spaces dropped.
@@ -527,12 +536,9 @@ impl Location {
         }
     }
 
-    /// Footprint cells (world.md §7): `size` cells up and to the left of the anchor, plus
-    /// one extra row above when the building is wider than tall.
+    /// Footprint cells (world.md §7): see [`footprint_cells`].
     pub fn cells(&self) -> impl Iterator<Item = Tile> + '_ {
-        let (ax, ay) = self.anchor;
-        let rows = self.size.1 + i32::from(self.size.0 > self.size.1);
-        (0..rows).flat_map(move |j| (0..self.size.0).map(move |i| (ax - i, ay - j)))
+        footprint_cells(self.anchor, self.size)
     }
 
     /// Centre of the footprint `(x0 + sx/2, y0 + sy/2)` (world.md §7).

@@ -4453,7 +4453,7 @@ sprite = 27
 
 [[object]]
 kind = "trees"
-cell = [68, 27]
+cell = [68, 26]
 sprite = 3
 
 [[object]]
@@ -4578,22 +4578,22 @@ sprite = 6
 
 [[object]]
 kind = "trees"
-cell = [67, 28]
+cell = [64, 25]
 sprite = 0
 
 [[object]]
 kind = "trees"
-cell = [68, 28]
+cell = [65, 25]
 sprite = 16
 
 [[object]]
 kind = "trees"
-cell = [69, 28]
+cell = [72, 27]
 sprite = 4
 
 [[object]]
 kind = "trees"
-cell = [70, 28]
+cell = [72, 28]
 sprite = 49
 
 [[object]]
@@ -4708,7 +4708,7 @@ sprite = 12
 
 [[object]]
 kind = "trees"
-cell = [67, 29]
+cell = [64, 26]
 sprite = 63
 
 [[object]]
@@ -5323,22 +5323,22 @@ sprite = 116
 
 [[object]]
 kind = "trees"
-cell = [50, 36]
+cell = [50, 35]
 sprite = 2
 
 [[object]]
 kind = "dead_trees"
-cell = [52, 36]
+cell = [51, 35]
 sprite = 112
 
 [[object]]
 kind = "dead_trees"
-cell = [53, 36]
+cell = [52, 35]
 sprite = 108
 
 [[object]]
 kind = "stones"
-cell = [54, 36]
+cell = [54, 35]
 sprite = 15
 
 [[object]]
@@ -5553,17 +5553,17 @@ sprite = 115
 
 [[object]]
 kind = "trees"
-cell = [51, 38]
+cell = [50, 34]
 sprite = 2
 
 [[object]]
 kind = "trees"
-cell = [56, 38]
+cell = [55, 35]
 sprite = 6
 
 [[object]]
 kind = "trees"
-cell = [57, 38]
+cell = [56, 35]
 sprite = 1
 
 [[object]]
@@ -5693,7 +5693,7 @@ sprite = 115
 
 [[object]]
 kind = "trees"
-cell = [50, 39]
+cell = [46, 35]
 sprite = 28
 
 [[object]]
@@ -5828,17 +5828,17 @@ sprite = 115
 
 [[object]]
 kind = "dead_trees"
-cell = [50, 40]
+cell = [46, 36]
 sprite = 114
 
 [[object]]
 kind = "dead_trees"
-cell = [51, 40]
+cell = [46, 37]
 sprite = 108
 
 [[object]]
 kind = "trees"
-cell = [52, 40]
+cell = [50, 45]
 sprite = 25
 
 [[object]]
@@ -5958,22 +5958,22 @@ sprite = 37
 
 [[object]]
 kind = "trees"
-cell = [50, 41]
+cell = [46, 38]
 sprite = 18
 
 [[object]]
 kind = "trees"
-cell = [52, 41]
+cell = [51, 45]
 sprite = 64
 
 [[object]]
 kind = "trees"
-cell = [53, 41]
+cell = [52, 45]
 sprite = 15
 
 [[object]]
 kind = "dead_trees"
-cell = [54, 41]
+cell = [53, 45]
 sprite = 112
 
 [[object]]
@@ -6108,27 +6108,27 @@ sprite = 112
 
 [[object]]
 kind = "trees"
-cell = [52, 42]
+cell = [55, 45]
 sprite = 2
 
 [[object]]
 kind = "trees"
-cell = [53, 42]
+cell = [57, 45]
 sprite = 48
 
 [[object]]
 kind = "trees"
-cell = [54, 42]
+cell = [58, 45]
 sprite = 27
 
 [[object]]
 kind = "trees"
-cell = [55, 42]
+cell = [59, 45]
 sprite = 0
 
 [[object]]
 kind = "trees"
-cell = [56, 42]
+cell = [60, 46]
 sprite = 0
 
 [[object]]
@@ -6238,27 +6238,27 @@ sprite = 36
 
 [[object]]
 kind = "trees"
-cell = [52, 43]
+cell = [45, 36]
 sprite = 12
 
 [[object]]
 kind = "trees"
-cell = [53, 43]
+cell = [59, 47]
 sprite = 41
 
 [[object]]
 kind = "trees"
-cell = [54, 43]
+cell = [60, 47]
 sprite = 0
 
 [[object]]
 kind = "trees"
-cell = [55, 43]
+cell = [61, 37]
 sprite = 17
 
 [[object]]
 kind = "trees"
-cell = [56, 43]
+cell = [61, 38]
 sprite = 3
 
 [[object]]
@@ -6408,22 +6408,22 @@ sprite = 2
 
 [[object]]
 kind = "trees"
-cell = [50, 44]
+cell = [45, 45]
 sprite = 25
 
 [[object]]
 kind = "trees"
-cell = [52, 44]
+cell = [50, 50]
 sprite = 29
 
 [[object]]
 kind = "trees"
-cell = [53, 44]
+cell = [56, 50]
 sprite = 2
 
 [[object]]
 kind = "trees"
-cell = [56, 44]
+cell = [61, 39]
 sprite = 65
 
 [[object]]
@@ -13621,7 +13621,7 @@ troops = [{ unit = "dt:halberdier", level = 1, count = 2 }, { unit = "dt:militia
 [[army]]
 id = "patrol_n"
 name = "marka.army.patrol_n.name"
-cell = [58, 42]
+cell = [60, 45]
 faction = "ally"
 model = "feudal"
 troops = [{ unit = "dt:militiaman", level = 1, count = 3 }]

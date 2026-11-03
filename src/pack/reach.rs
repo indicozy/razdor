@@ -10,11 +10,12 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
-use super::compile::OBJECT_KINDS;
+use super::compile::{self, OBJECT_KINDS};
 use super::diag::Report;
 use super::files::Files;
 use super::terrain::Terrain;
 use crate::rules::map::{Decoration, Grid, TileMap};
+use crate::rules::world::footprint_cells;
 
 /// A cell `(x, y)`.
 pub type Cell = (i32, i32);
@@ -130,9 +131,19 @@ pub fn foot_map(files: &Files, map: &str, w: i32, h: i32, codes: &[u8]) -> Resul
         objects.push(Decoration { tile, class, sprite });
     }
     let mut foot = TileMap::from_codes(Grid::Square8, w, h, codes, objects);
+    // Every footprint cell is paved, as `rules::world` lays it (the anchor and the rest).
     for b in tables(spec.get("building")) {
         if let Some(c) = b.get("cell").and_then(pair) {
-            foot.pave(c);
+            let kind = text(b, "type");
+            let size = b.get("size").and_then(pair).unwrap_or_else(|| {
+                let (w, h) = compile::default_footprint(&kind).unwrap_or((1, 1));
+                (w as i32, h as i32)
+            });
+            for t in footprint_cells(c, size) {
+                if foot.in_bounds(t) {
+                    foot.pave(t);
+                }
+            }
         }
     }
     Ok(foot)
@@ -318,7 +329,7 @@ mod tests {
         for y in 0..3 {
             codes[y * 6 + 2] = Surface::CoastalWater as u8;
         }
-        let mut map = String::from("[hero]\ncell = [0, 1]\n\n[[building]]\nid = \"far\"\ntype = \"village\"\nname = \"x\"\nfaction = \"neighbour\"\ncell = [4, 1]\n");
+        let mut map = String::from("[hero]\ncell = [0, 1]\n\n[[building]]\nid = \"far\"\ntype = \"village\"\nname = \"x\"\nfaction = \"neighbour\"\ncell = [4, 1]\nsize = [1, 1]\n");
         if bridge {
             map += "\n[[building]]\nid = \"bridge\"\ntype = \"wooden_bridge\"\nname = \"x\"\nfaction = \"neighbour\"\ncell = [2, 1]\n";
         }

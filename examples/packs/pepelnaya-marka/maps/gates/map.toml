@@ -9770,12 +9770,12 @@ sprite = 115
 
 [[object]]
 kind = "trees"
-cell = [18, 81]
+cell = [17, 80]
 sprite = 39
 
 [[object]]
 kind = "trees"
-cell = [19, 81]
+cell = [19, 80]
 sprite = 6
 
 [[object]]
@@ -9920,12 +9920,12 @@ sprite = 111
 
 [[object]]
 kind = "trees"
-cell = [16, 83]
+cell = [15, 82]
 sprite = 2
 
 [[object]]
 kind = "trees"
-cell = [17, 83]
+cell = [15, 81]
 sprite = 2
 
 [[object]]

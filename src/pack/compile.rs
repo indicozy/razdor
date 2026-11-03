@@ -331,6 +331,48 @@ pub fn building_code(name: &str) -> Option<u8> {
     BUILDING_NAMES.iter().position(|b| *b == name).map(|i| i as u8)
 }
 
+/// The default footprint of each building type, in [`BUILDING_NAMES`] order: the original maps'
+/// most common footprint per type (`size_x` × `size_y` of the install's 24 `.DTm` maps, the 1×1
+/// bridges included). Smithy has one sample; palace and obelisk none, so they keep 1×1. A map's
+/// `size` overrides it.
+///
+/// Counts: castle 4×4 (244 of 245), village 4×4 (171 of 411), town 9×9 (8 of 25; 7×6, 7×7 and
+/// 8×7 are the others), fort 2×2 (115 of 138), tavern 2×2 (77), market 2×2 (39), church 2×2 (49
+/// of 57), smithy 1×1 (1), shipyard 3×4 (23; 4×3 has 20), altar 3×3 (21 of 41), dungeon
+/// entrance 2×2 (6), ruins 2×2 (139 of 304), stone bridge 1×1 (374), wooden bridge 1×1 (126).
+pub const DEFAULT_FOOTPRINTS: [(u32, u32); 16] = [
+    (1, 1), // palace: none in the original maps
+    (9, 9), // town
+    (4, 4), // village
+    (4, 4), // castle
+    (2, 2), // fort
+    (2, 2), // tavern
+    (2, 2), // market
+    (2, 2), // church
+    (1, 1), // smithy
+    (3, 4), // shipyard
+    (3, 3), // altar
+    (2, 2), // dungeon_entrance
+    (2, 2), // ruins
+    (1, 1), // stone_bridge
+    (1, 1), // wooden_bridge
+    (1, 1), // obelisk: none in the original maps
+];
+
+/// The footprint of a building type's default, by its name (`None` for an unknown name).
+pub fn default_footprint(kind: &str) -> Option<(u32, u32)> {
+    building_code(kind).map(|c| DEFAULT_FOOTPRINTS[c as usize])
+}
+
+/// The footprint of a map's building: its `size`, else the type's default. Unvalidated: the
+/// package check keeps every side 1 to 8.
+pub fn footprint_of(b: &BuildingSpec) -> (u32, u32) {
+    match b.size {
+        Some([w, h]) => (w, h),
+        None => default_footprint(&b.kind).unwrap_or((1, 1)),
+    }
+}
+
 /// Object kinds: their class and default sprite (`dtm-format.md` §5).
 pub const OBJECT_KINDS: [(&str, u8, u8); 6] = [("hills", 1, 10), ("mountains", 5, 10), ("stones", 8, 10), ("trees", 9, 0), ("dead_trees", 10, 108), ("thicket", 11, 0)];
 
@@ -410,6 +452,7 @@ fn scenario_of(pkg: &Package, ids: &BTreeMap<&str, u32>, texts: &Texts, file: &s
         let faction = faction_code(&b.faction).ok_or_else(|| one_error(format!("{file}: building `{}`: faction `{}`", b.id, b.faction)))?;
         let kind = building_code(&b.kind).ok_or_else(|| one_error(format!("{file}: building `{}`: type `{}`", b.id, b.kind)))?;
         let garrison = troop_slots(&b.garrison, ids).map_err(|e| one_error(format!("{file}: building `{}`: {e}", b.id)))?;
+        let (width, height) = footprint_of(b);
         let mut barracks = [RecruitSlot::default(); TROOP_SLOTS];
         for (slot, rec) in barracks.iter_mut().zip(&b.recruit) {
             let unit = unit_of(&rec.unit, ids).map_err(|e| one_error(format!("{file}: building `{}`: {e}", b.id)))?;
@@ -420,8 +463,8 @@ fn scenario_of(pkg: &Package, ids: &BTreeMap<&str, u32>, texts: &Texts, file: &s
             y: b.cell[1] as u16,
             kind,
             picture_type: kind,
-            size_x: 1,
-            size_y: 1,
+            size_x: width as u8,
+            size_y: height as u8,
             faction,
             relations: header.relations[faction as usize - 1],
             gold_per_day: b.income,
@@ -706,8 +749,38 @@ mod tests {
     }
 
     #[test]
+    fn a_village_takes_the_original_footprint_and_a_size_overrides_it() {
+        let village = |size: &str| format!("[[building]]\nid = \"v\"\ntype = \"village\"\nname = \"town.name\"\ncell = [18, 18]\n{size}faction = \"neighbour\"\n\n");
+        let rest = |size: &str| format!("{}{}[victory]\nkind = \"defeat_all\"\n", village(size), enemy_army());
+        let c = compile_demo(&package(&[], &map_toml("", &rest("")))).unwrap_or_else(|r| panic!("{}", r.to_text()));
+        let b = &c.scenario.buildings[0];
+        assert_eq!((b.x, b.y), (18, 18), "the stored cell is the bottom-right one");
+        assert_eq!((b.size_x, b.size_y), (4, 4), "a village's default: the original maps' most common 4×4");
+        let c = compile_demo(&package(&[], &map_toml("", &rest("size = [2, 3]\n")))).unwrap_or_else(|r| panic!("{}", r.to_text()));
+        assert_eq!((c.scenario.buildings[0].size_x, c.scenario.buildings[0].size_y), (2, 3), "a size overrides the default");
+    }
+
+    /// On the install: each cell of Brod's reedmere (a 4×4 village, bottom-right cell 9, 38) is
+    /// the village, not only its anchor (skipped without `RAZDOR_DT_DIR`).
+    #[test]
+    fn a_non_anchor_cell_of_a_package_village_is_the_village() {
+        let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+        let install = crate::dt::install::DtInstall::load(std::path::Path::new(&dir)).unwrap();
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/packs/pepelnaya-marka");
+        let pkg = Package::parse(crate::pack::Files::from_dir(&root).unwrap()).0;
+        let c = compile(&pkg, &install, "en", "brod").unwrap_or_else(|r| panic!("{}", r.to_text()));
+        let world = crate::rules::world::World::from_scenario(&c.scenario, &crate::rules::content::Content::from_dt(&install));
+        let village = world.location_covering((9, 38)).expect("the anchor is a building");
+        assert_eq!(world.locations[village].kind, crate::rules::world::LocationKind::Village);
+        for cell in crate::rules::world::footprint_cells((9, 38), (4, 4)) {
+            assert_eq!(world.location_covering(cell), Some(village), "the village covers {cell:?}");
+        }
+        assert_eq!(world.location_covering((5, 35)), None, "the cell beyond its footprint is no building");
+    }
+
+    #[test]
     fn capture_wants_the_building_to_be_the_players() {
-        let building = "[[building]]\nid = \"t\"\ntype = \"town\"\nname = \"town.name\"\ncell = [7, 7]\nfaction = \"enemy\"\n\n";
+        let building = "[[building]]\nid = \"t\"\ntype = \"town\"\nname = \"town.name\"\ncell = [18, 18]\nfaction = \"enemy\"\n\n";
         let rest = format!("{building}[victory]\nkind = \"capture\"\nbuilding = \"t\"\n");
         let c = compile_demo(&package(&[], &map_toml("", &rest))).unwrap_or_else(|r| panic!("{}", r.to_text()));
         let e = victory_of(&c);
@@ -736,7 +809,7 @@ mod tests {
     fn the_compiled_scenario_survives_the_payload() {
         let leader = "[[army]]\nid = \"l\"\nname = \"army.name\"\ncell = [31, 31]\nfaction = \"enemy\"\nmodel = \"feudal\"\ntroops = [{ unit = \"a\", count = 1 }]\nleader = { unit = \"dt:swordsman\", level = 3, name = \"leader.name\" }\n\n";
         let rest = format!(
-            "{leader}{}[[building]]\nid = \"t\"\ntype = \"town\"\nname = \"town.name\"\ncell = [7, 7]\nfaction = \"player\"\ngarrison = [{{ unit = \"a\", count = 2 }}]\nrecruit = [{{ unit = \"a\", start = 1, max = 3 }}]\n\n[[object]]\nkind = \"trees\"\ncell = [3, 4]\n\n[[point]]\ncell = [9, 9]\nradius = 3\nactive = true\n\n[victory]\nkind = \"defeat_all\"\n",
+            "{leader}{}[[building]]\nid = \"t\"\ntype = \"town\"\nname = \"town.name\"\ncell = [18, 18]\nfaction = \"player\"\ngarrison = [{{ unit = \"a\", count = 2 }}]\nrecruit = [{{ unit = \"a\", start = 1, max = 3 }}]\n\n[[object]]\nkind = \"trees\"\ncell = [3, 4]\n\n[[point]]\ncell = [9, 9]\nradius = 3\nactive = true\n\n[victory]\nkind = \"defeat_all\"\n",
             enemy_army()
         );
         let pkg = package(&[("a", "dt:knight")], &map_toml("{ unit = \"a\", level = 2, count = 3 }", &rest));
