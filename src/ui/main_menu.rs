@@ -338,14 +338,94 @@ pub fn backdrop() {
 /// copyright (`CopyrightsMessage`) after it, small and white, on the bottom row.
 fn foot_lines() {
     let k = chrome::k();
-    let size = 11.0 * k;
     let y = upright_menu().map_or(screen_height() - 4.0 * k, |m| m.foot_y);
     let ink = Color::new(0.92, 0.92, 0.92, 1.0);
-    if let Some(v) = chrome::ui_text("SpecialTexts", "VerInfo") {
-        chrome::shadow_text(&v, 5.0 * k, y, size, ink);
+    let Some(dp) = super::display::dp_px() else {
+        // The desktop's: 11 × k, the copyright at 264 × k.
+        if let Some(v) = chrome::ui_text("SpecialTexts", "VerInfo") {
+            chrome::shadow_text(&v, 5.0 * k, y, 11.0 * k, ink);
+        }
+        if let Some(c) = chrome::ui_text("SpecialTexts", "CopyrightsMessage") {
+            chrome::shadow_text(&c, 264.0 * k, y, 11.0 * k, ink);
+        }
+        return;
+    };
+    // On a phone the lines are the version label's size (13 dp, a player's report: 11 × k was
+    // unreadable). The version is the top line and the copyright follows it, or, when the two are
+    // wider than the screen, the copyright's lines come under the version.
+    let f = foot(k, dp, screen_width());
+    let pitch = f.pitch();
+    let n = if f.stacked { f.copyright.len() as f32 } else { 0.0 };
+    super::dt_font::legacy_metrics_if(true, || {
+        if let Some(v) = &f.version {
+            chrome::shadow_text(v, 5.0 * k, y - n * pitch, f.size, ink);
+        }
+        let last = f.copyright.len() as f32 - 1.0;
+        for (i, line) in f.copyright.iter().enumerate() {
+            let base = y - (last - i as f32) * pitch;
+            chrome::shadow_text(line, f.copy_x, base, f.size, ink);
+        }
+    });
+}
+
+/// The phone's foot text: the version (`VerInfo`) and the copyright (`CopyrightsMessage`).
+struct Foot {
+    size: f32,
+    version: Option<String>,
+    /// The copyright's lines: one, after the version, or wrapped under it when stacked.
+    copyright: Vec<String>,
+    /// Where the one-row copyright starts (after the version and a 24 × k gap); 5 × k when stacked.
+    copy_x: f32,
+    stacked: bool,
+}
+
+impl Foot {
+    /// The baseline distance of the foot's lines.
+    fn pitch(&self) -> f32 {
+        self.size * 1.2
     }
-    if let Some(c) = chrome::ui_text("SpecialTexts", "CopyrightsMessage") {
-        chrome::shadow_text(&c, 264.0 * k, y, size, ink);
+
+    /// The height the lines take above the bottom row (0 when the copyright stays on it).
+    fn above(&self) -> f32 {
+        if self.stacked { self.copyright.len() as f32 * self.pitch() } else { 0.0 }
+    }
+}
+
+/// The phone's foot text for a `sw`-wide screen at `k` and `dp`: one row when the version, a gap
+/// and the copyright fit between the screen's sides (10 × k of margin), else the copyright wrapped
+/// under the version.
+fn foot(k: f32, dp: f32, sw: f32) -> Foot {
+    let size = VERSION_PHONE_DP * dp;
+    super::dt_font::legacy_metrics_if(true, || {
+        let version = chrome::ui_text("SpecialTexts", "VerInfo");
+        let copy = chrome::ui_text("SpecialTexts", "CopyrightsMessage");
+        let vw = version.as_ref().map_or(0.0, |v| measure(v, size).width);
+        let gap = if version.is_some() { 24.0 * k } else { 0.0 };
+        let (copyright, stacked) = match &copy {
+            None => (Vec::new(), false),
+            Some(c) => {
+                let cw = measure(c, size).width;
+                if 5.0 * k + vw + gap + cw <= sw - 10.0 * k {
+                    (vec![c.clone()], false)
+                } else {
+                    (wrap_label(c, sw - 15.0 * k, size), true)
+                }
+            }
+        };
+        let copy_x = if stacked { 5.0 * k } else { 5.0 * k + vw + gap };
+        Foot { size, version, copyright, copy_x, stacked }
+    })
+}
+
+/// How much taller the phone's foot text is than the desktop's 11 × k, held sideways (0 elsewhere):
+/// the corner links and the version line above them lift by it, so the text stays clear of them.
+fn sideways_foot_extra(k: f32) -> f32 {
+    match super::display::dp_px() {
+        Some(dp) if !super::window_layout::portrait() => {
+            let f = foot(k, dp, screen_width());
+            (f.size - 11.0 * k).max(0.0) + f.above()
+        }
+        _ => 0.0,
     }
 }
 
@@ -396,8 +476,11 @@ struct PortraitMenu {
     /// The chips' row: its top and height (a touch target of at least [`TOUCH_DP`]).
     chip_top: f32,
     chip_h: f32,
-    /// The baseline of the foot lines (the version and copyright), just above the chips.
+    /// The baseline of the foot lines' bottom row (the version and copyright), just above the chips.
     foot_y: f32,
+    /// The height the foot's lines take above `foot_y` (a copyright too wide for the screen goes on
+    /// lines of its own above the bottom row); the version and notice lines sit above them.
+    foot_above: f32,
     /// The top of the logo: the space above it is free for the not-found block.
     logo_top: f32,
     /// The chosen mod's full-width tile, above the four tiles, when a mod is installed (its height
@@ -408,12 +491,12 @@ struct PortraitMenu {
 impl PortraitMenu {
     /// The baseline of the version line (above the foot lines).
     fn version_y(&self, k: f32) -> f32 {
-        self.foot_y - 24.0 * k
+        self.foot_y - 24.0 * k - self.foot_above
     }
 
     /// The baseline of an installed update's notice (above the version line).
     fn notice_y(&self, k: f32) -> f32 {
-        self.foot_y - 48.0 * k
+        self.foot_y - 48.0 * k - self.foot_above
     }
 
     /// The bottom of the not-found block: above the logo, where the screen is empty (the column
@@ -456,7 +539,8 @@ fn portrait_menu(sw: f32, sh: f32, k: f32, dp: f32, safe_top: f32, mod_row: bool
     let logo_top = first - 24.0 * k - logo_h;
     let x = sw / 2.0 - size.x / 2.0;
     let buttons = std::array::from_fn(|i| Rect::new(x, first + i as f32 * (size.y + gap), size.x, size.y));
-    PortraitMenu { buttons, chip_top, chip_h, foot_y, logo_top, mod_row: row }
+    let foot_above = foot(k, dp, sw).above();
+    PortraitMenu { buttons, chip_top, chip_h, foot_y, foot_above, logo_top, mod_row: row }
 }
 
 local! {
@@ -547,7 +631,7 @@ pub fn frame(no_install: bool, mods: &[(String, razdor::hub::Text)], active: Opt
             if let Some(p) = corner_links(k, mods, mod_choice.as_ref()) {
                 pick = Some(p);
             }
-            screen_height() - 22.0 * k - 26.0 * k
+            screen_height() - 22.0 * k - 26.0 * k - sideways_foot_extra(k)
         }
     };
     // This program's version, small in the corner above the links.
@@ -579,7 +663,7 @@ pub fn frame(no_install: bool, mods: &[(String, razdor::hub::Text)], active: Opt
 /// editor is not ready; its code and `--editor` stay.) Returns what was picked.
 fn corner_links(k: f32, mods: &[(String, razdor::hub::Text)], mod_choice: Option<&super::new_game::ModChoice>) -> Option<Pick> {
     let mut pick = None;
-    let y = screen_height() - 22.0 * k;
+    let y = screen_height() - 22.0 * k - sideways_foot_extra(k);
     // The links grow with the text size (`button_grow`, the owner's decision of 2026-10-31).
     let size = 18.0 * k * super::display::button_grow();
     let custom = tr("Custom battle");
@@ -901,9 +985,9 @@ fn window(title: &str, w: f32, h: f32) -> (Rect, bool) {
 /// windows are (over its 1024×682 view), its foot never on the bar. On a phone held upright it
 /// is centred between the top inset and the bar at its own scale (`window_layout::over_map_rect`,
 /// the caller's `window_layout::window_scale` guard).
-fn map_window(title: &str, w: f32, h: f32) -> (Rect, bool) {
+fn map_window(title: &str, w: f32, h: f32, shrink: f32) -> (Rect, bool) {
     let k = chrome::k();
-    let r = window_layout::over_map_rect((w, h)).unwrap_or_else(|| {
+    let r = window_layout::over_map_rect((w, h)).map(|r| shrink_about_centre(r, shrink)).unwrap_or_else(|| {
         let (w, h) = (w * k, h * k);
         let view = screen_height() - chrome::bar_height();
         Rect::new((screen_width() - w) / 2.0, ((view - h) / 2.0).max(0.0), w, h)
@@ -1291,18 +1375,61 @@ fn scroll_most(bottom: f32, view: f32) -> f32 {
     (bottom - view).max(0.0)
 }
 
+/// The advanced window's scale and frame on a phone, as a share of the fit (the owner's request,
+/// 2026-11-03: the window was too big, touching the screen's edges).
+const PHONE_WINDOW_SHRINK: f32 = 0.88;
+
+/// `r` scaled by `s` about its centre (the same centre, so the window stays centred in its room).
+fn shrink_about_centre(r: Rect, s: f32) -> Rect {
+    let (w, h) = (r.w * s, r.h * s);
+    let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
+    Rect::new(cx - w / 2.0, cy - h / 2.0, w, h)
+}
+
+/// The advanced window's width in original px (900 on the desktop and upright), for a window
+/// `wh` high: on a phone held sideways (a player's report: the right column's labels ran under
+/// their buttons) as wide as 1120 allows at the scale the height gets. The pop-up scale is the
+/// smaller of the width's and the height's fit (`display::popup_scale`), so the width is kept
+/// to the one that leaves that scale as it was.
+fn advanced_width(over_map: bool, wh: f32) -> f32 {
+    const WIDE: f32 = 900.0;
+    let Some(dp) = super::display::dp_px() else { return WIDE };
+    if window_layout::portrait() {
+        return WIDE;
+    }
+    let (sw, sh) = (screen_width(), screen_height());
+    let safe = super::display::safe_area();
+    let (base, bar, large) = (chrome::k(), chrome::bar_height(), super::display::large_windows());
+    let video = (WIDE, wh);
+    let fit = if over_map {
+        window_layout::sideways_game_window(base, Some(dp), large, (sw, sh), bar, safe, video)
+    } else {
+        window_layout::sideways_window(base, Some(dp), large, (sw, sh), bar, safe, video)
+    };
+    let Some((k, _)) = fit else { return WIDE };
+    let avail = sw - safe.left - safe.right;
+    ((avail - 12.0) / k).floor().clamp(WIDE, 1120.0)
+}
+
 /// Razdor's advanced settings (the settings window's "Ещё…"): rules where Razdor can differ
 /// from the original on the left, the screen, the interface scale, the font and the
 /// language on the right. Returns true when closed.
 fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     // 650 high since «Расстановка армии» joined the left column (it still fits the 682 px
     // view above the bar).
-    let (ww, wh) = (900.0, 650.0);
+    let wh = 650.0;
+    let ww = advanced_width(over_map, wh);
     // Its own scale on a title screen or in game on a phone held upright (its own window, not the
     // settings window's).
     // The scale the window came in with: the new-game list's scroll bar takes it (`new_game::list_track`).
     let list_k = chrome::k();
     let _scale = window_layout::window_scale(over_map, (ww, wh));
+    // On a phone the window keeps clear margins (the owner's request, 2026-11-03): its scale and its
+    // frame are PHONE_WINDOW_SHRINK of the fit, so it spans at most 88% of the screen's width held
+    // upright and of its height held sideways. The desktop's is the fit, as before.
+    let on_phone = super::display::dp_px().is_some();
+    let shrink = if on_phone { PHONE_WINDOW_SHRINK } else { 1.0 };
+    let _shrink = on_phone.then(|| super::display::enter_window_scale(Some(chrome::k() * shrink)));
     // Razdor's own window, wider than the original's: centred (over the map, above the bar),
     // not hung from the menu's 190, where its foot reached the screen's bottom edge.
     let k = chrome::k();
@@ -1310,16 +1437,15 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     // decision of 2026-10-31); the Ok button keeps its bottom edge.
     let row_h = 28.0 * k * super::display::button_grow();
     let (inner, closed) = if over_map {
-        map_window(tr("Advanced settings"), ww, wh)
+        map_window(tr("Advanced settings"), ww, wh, shrink)
     } else {
         let (w, h) = (ww * k, wh * k);
-        let r = window_layout::title_rect((ww, wh)).unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, ((screen_height() - h) / 2.0).max(0.0), w, h));
+        let r = window_layout::title_rect((ww, wh)).map(|r| shrink_about_centre(r, shrink)).unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, ((screen_height() - h) / 2.0).max(0.0), w, h));
         chrome::window(r, tr("Advanced settings"), chrome::Skin::Marble, true)
     };
     // On a phone (in either orientation) both columns scroll together above the Ok button: the
     // content's top moves up by `scroll`, drawn and clicked in `view` only, with a finger's slide
     // or the wheel and a bar at the right. The desktop draws every row, as before.
-    let on_phone = super::display::dp_px().is_some();
     let view_h = inner.h - 16.0 * k - row_h - 4.0 * k;
     let view = Rect::new(inner.x, inner.y, inner.w, view_h);
     let most = if on_phone { scroll_most(ADV_BOTTOM.with(|b| b.get()), view_h) } else { 0.0 };
@@ -1460,9 +1586,25 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     }
     let mut y = top + 30.0 * k;
     let row = |label: &str, value: &str, y: &mut f32| -> bool {
-        chrome::shadow_text(label, rx, *y + 18.0 * k, 14.0 * k, chrome::CREAM);
+        // A phone's label too long for its room beside the button wraps, its lines (15 × k apart)
+        // centred on the button; the desktop's label stays one line.
+        let room = rw - bw - 8.0 * k;
+        // The extra height a wrapped label takes: the next row moves down by it (the content
+        // scrolls on a phone, so the scroll range grows with it).
+        let mut extra = 0.0;
+        if on_phone && measure(label, 14.0 * k).width > room {
+            let lines = wrap_label(label, room, 14.0 * k);
+            let centre = *y + row_h / 2.0;
+            for (i, line) in lines.iter().enumerate() {
+                let base = centre - (lines.len() as f32 - 1.0) * 7.5 * k + i as f32 * 15.0 * k + 4.0 * k;
+                chrome::shadow_text(line, rx, base, 14.0 * k, chrome::CREAM);
+            }
+            extra = (lines.len() as f32 - 1.0) * 15.0 * k;
+        } else {
+            chrome::shadow_text(label, rx, *y + 18.0 * k, 14.0 * k, chrome::CREAM);
+        }
         let r = Rect::new(rx + rw - bw, *y, bw, row_h);
-        *y += pitch;
+        *y += pitch + extra;
         row_button(r, value)
     };
     // Windowed, borderless or full screen, set at once (`display::follow_settings`). A phone
@@ -1494,16 +1636,19 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
         AiStrength::Improved => tr("Improved"),
         AiStrength::Max => tr("Maximum (Razdor)"),
     };
+    let ai_row_top = y;
     if row(tr("Battle AI strength"), strength_label, &mut y) {
         set_ai_strength(audio, strength.next());
     }
     // The hint sits 8 px under the fourth row's button and the next row 8 px under the hint (the
-    // original's 44 px pitch: the hint's top at 4 × 44 - 8 px).
-    let hint_top = y - pitch + 36.0 * k;
+    // original's 44 px pitch: the hint's top at 4 × 44 - 8 px). A wrapped row above it keeps its
+    // extra height (`max`): the desktop's rows never wrap, so its layout is the same.
+    // (At a grown text size the row's button is taller than 28 × k: the hint starts under it.)
+    let hint_top = ai_row_top + (row_h + 8.0 * k).max(36.0 * k);
     for (i, line) in ai_hint.iter().enumerate() {
         chrome::shadow_text(line, rx, hint_top + i as f32 * 17.0 * k, 12.0 * k, WHITE);
     }
-    y = hint_top + ai_hint.len() as f32 * 17.0 * k + 8.0 * k;
+    y = (hint_top + ai_hint.len() as f32 * 17.0 * k + 8.0 * k).max(y);
     if row(tr("Unit battle participation"), if audio.allow_unit_benching { tr("On") } else { tr("Off") }, &mut y) {
         audio.allow_unit_benching = !audio.allow_unit_benching;
     }
@@ -2188,7 +2333,7 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
         let need = (h + 30.0) * chrome::k();
         (need > room).then(|| super::display::enter_window_scale(Some(chrome::k() * room / need)))
     });
-    let (inner, closed) = if over_map { map_window(&title, 594.0, h) } else { window(&title, 594.0, h) };
+    let (inner, closed) = if over_map { map_window(&title, 594.0, h, 1.0) } else { window(&title, 594.0, h) };
     let k = chrome::k();
     let outer = Rect::new(inner.x - 2.0 * k, inner.y - (26.0 * k).round() - 1.0, 594.0 * k, h * k);
     // A window with 0x48d710's inner frames (the options window is c2953a, 634×556, 4d2f48).
