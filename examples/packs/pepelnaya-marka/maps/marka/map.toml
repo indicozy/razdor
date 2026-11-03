@@ -13468,6 +13468,7 @@ cell = [58, 44]
 faction = "ally"
 income = 40
 garrison = [{ unit = "dt:militiaman", level = 1, count = 4 }, { unit = "dt:halberdier", level = 1, count = 2 }]
+recruit = [{ unit = "dt:militiaman", start = 4, max = 6 }, { unit = "dt:crossbowman", start = 2, max = 4 }]
 
 # The mill village north-east of the town: the first village the dead march on.
 [[building]]
@@ -13502,15 +13503,16 @@ faction = "neighbour"
 income = 20
 garrison = [{ unit = "dt:monk", level = 1, count = 3 }]
 
-# The tainted shrine by the old road: the Order's quest. Its guards carry the curse.
+# The tainted shrine by the old road: the Order's quest. Its guards carry the curse, and the dead hold it
+# (a ruin of the dead: its garrison fights the hero, and the walk into it takes it; an altar cannot be taken).
 [[building]]
 id = "shrine"
-type = "altar"
+type = "ruins"
 name = "marka.building.shrine.name"
 description = "marka.building.shrine.description"
 cell = [28, 36]
-faction = "neighbour"
-garrison = [{ unit = "dt:ghost", level = 1, count = 2 }, { unit = "dt:ghoul", level = 1, count = 1 }]
+faction = "enemy"
+garrison = [{ unit = "dt:ghoul", level = 1, count = 1 }]
 
 # The barrow mound in the north-east: where the dead rise.
 [[building]]
@@ -13626,7 +13628,8 @@ faction = "ally"
 model = "feudal"
 troops = [{ unit = "dt:militiaman", level = 1, count = 3 }]
 
-# The bandits on the caravan road; they go after the caravan when the second week begins.
+# The bandits on the caravan road; they wait there (a goal, set at the start) and go after the caravan
+# when the second week begins. Without a goal a bandit army hunts on its own from the first day.
 [[army]]
 id = "raiders"
 name = "marka.army.raiders.name"
@@ -13645,15 +13648,16 @@ faction = "neighbour"
 model = "bandits"
 troops = [{ unit = "dt:bandit", level = 1, count = 3 }, { unit = "dt:archer", level = 1, count = 1 }]
 
-# The wraiths hold their lair in the marsh far from Greyreed (model inactive: they do not roam and
-# take the village); Tess's quest sends the hero to them.
+# The wraiths hold their lair in the marsh far from Greyreed; they stand there (a goal, set at the start).
+# An army of model "inactive" waits off the map, where no hero could meet it; Tess's quest sends the hero
+# to them.
 [[army]]
 id = "wraiths"
 name = "marka.army.wraiths.name"
 cell = [30, 84]
 faction = "enemy"
-model = "inactive"
-troops = [{ unit = "dt:ghost", level = 1, count = 3 }, { unit = "dt:ghoul", level = 1, count = 1 }]
+model = "ghosts"
+troops = [{ unit = "dt:ghoul", level = 1, count = 1 }]
 
 # The placeholder victory: a reach cell in the snowdrifts (no hero can step there).
 [victory]

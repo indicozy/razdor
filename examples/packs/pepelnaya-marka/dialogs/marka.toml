@@ -2,6 +2,18 @@
 # actions of its own is followed by its `dialog_choice` trigger in triggers/marka.toml, which does the
 # rest (set the quest, end the chapter, travel). Texts: the `marka.*` keys in texts/<lang>.toml.
 
+# The hero rides in from the ford, wounded: the Crown's surgeon in Ashford sends a healing draught.
+[[dialog]]
+id = "marka_arrival"
+title = "marka.arrival.title"
+text = "marka.arrival.text"
+speaker = "dt:monk"
+
+[[dialog.choice]]
+id = "take"
+text = "marka.arrival.take"
+then = [ { give_item = "crown_draught", to = "pack" } ]
+
 # The captain of the Crown's garrison, when the hero first rides into the town.
 [[dialog]]
 id = "captain"
