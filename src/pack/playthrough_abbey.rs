@@ -163,7 +163,7 @@ fn the_abbey_hands_back_to_marka_and_marka_ends_the_chapter_for_gates() {
 fn the_heretic_route_spares_the_village_and_wins_the_siege() {
     let Some(install) = install() else { return };
     let (opened, content) = open_map(&install, "abbey");
-    let carry = Carried { gold: Some(80), vars: vec![("ally".into(), VarValue::Int(1))], squad: vec![("hunter", 1, 3)], named: vec![], avoid_armies: true };
+    let carry = Carried { gold: Some(80), vars: vec![("ally".into(), VarValue::Int(1))], squad: vec![("hunter", 1, 3)], named: vec![("ilm", "pilgrim", 1)], avoid_armies: true };
     let choices = [("abbey_trial", "spare"), ("abbey_heresy", "accept")];
     let mut run = Run::carried(&opened, content, 1, &choices, &carry).unwrap_or_else(|e| panic!("{e}"));
     run.walk_to(GATE_SOUTH, 6).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));

@@ -277,8 +277,8 @@ map = "camp"
 when = { event = "dialog_choice", dialog = "camp_loot", choice = "keep" }
 then = [
     { set = "kord", value = 2 },
-    { spawn_army = "kord_band", at = [60, 73], faction = "enemy", model = 5, troops = ["dt:bandit", "dt:bandit", "dt:robber"] },
-    { army_goal = "kord_band", attack = "hero" },
+    { spawn_army = "kord_holdout", at = [60, 73], faction = "enemy", model = 5, troops = ["dt:bandit", "dt:bandit", "dt:robber"] },
+    { army_goal = "kord_holdout", attack = "hero" },
     { add = "companies", value = -2, min = -5, max = 5 },
 ]
 

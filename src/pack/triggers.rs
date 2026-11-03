@@ -1264,6 +1264,16 @@ pub fn check_map_refs(pkg: &Package, map: &str, size: (u32, u32), armies: &BTree
         .chain(pkg.dialogs.iter().flat_map(|d| d.value.choices.iter()).flat_map(|c| c.then.iter()))
         .filter_map(|a| if let Action::SpawnArmy { army, .. } = a { Some(army.clone()) } else { None })
         .collect();
+    // Spawned names are package-wide (the compiler resolves a name to the spawn before the map's own
+    // army), so a map's army that a trigger of any map spawns would be read as the spawn: an error.
+    for name in armies.intersection(&spawned) {
+        r.error_hint(
+            &format!("maps/{map}/map.toml"),
+            None,
+            format!("army `{name}` is declared on map `{map}` and also spawned by a trigger (spawn_army)"),
+            "spawned names are package-wide: rename the spawn, or the map's army, so that each name is one army",
+        );
+    }
     let mut scope = Scope { map, size, armies, buildings, spawned: &spawned, opened: Vec::new(), r };
     for t in pkg.triggers.iter().filter(|t| t.value.map.as_deref().is_none_or(|m| m == map)) {
         scope.trigger(&t.file, t.line, &t.value);
@@ -2026,6 +2036,15 @@ mod map_refs_tests {
         let story = "[[trigger]]\nid = \"a\"\nwhen = { event = \"hero_enters\", at = [10, 10, 5, 5] }\nif = [ { army_at = \"e\", at = [30, 30] } ]\nthen = [ { spawn_army = \"host\", at = [20, 20], faction = \"enemy\", troops = [\"dt:knight\"] }, { dialog = \"d\" } ]\n\n[[trigger]]\nid = \"b\"\nwhen = { event = \"army_defeated\", army = \"host\" }\nthen = [ { victory = true } ]\n";
         let dialogs = "[[dialog]]\nid = \"d\"\ntitle = \"t.x\"\ntext = \"t.x\"\n\n[[dialog.choice]]\nid = \"c\"\ntext = \"t.x\"\nthen = [ { teleport_army = \"e\", to = \"t\" } ]\n";
         assert_eq!(errors(story, dialogs), "", "a story whose names are on the map");
+    }
+
+    #[test]
+    fn a_spawn_named_like_a_map_army_is_an_error() {
+        // The compiler resolves a name to the package's spawn before the map's own army: the map's `e`
+        // and a spawn of `e` would be the same name for two armies.
+        let story = "[[trigger]]\nid = \"a\"\nwhen = { event = \"day_start\" }\nthen = [ { spawn_army = \"e\", at = [20, 20], faction = \"enemy\", model = 5, troops = [\"dt:bandit\"] } ]\n";
+        let e = errors(story, "");
+        assert!(e.contains("army `e` is declared on map `m` and also spawned"), "{e}");
     }
 
     #[test]
