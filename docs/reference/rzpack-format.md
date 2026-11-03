@@ -254,7 +254,6 @@ then = [ { give_gold = -20 } ]                      # optional actions
 | `add_units` | `troops`, and the target: the army's name, `of = "building"` with the building's name, or `"garrison"` with `garrison = "<building>"` | units join an army or a garrison |
 | `cast_on_army` | `in` (`player` or an army id) or `garrison` (a building id), `minutes = n` or `permanent = true` | the spell in each unit's slot (a slot that is free, or the same spell's) |
 | `remove_spells` | the holder (`player` or an army id); or `"garrison"` with `garrison = "<building>"` | every spell of its units goes |
-| `heal_army` | `"player"` (the hero's army only) | every unit of the army healed in full, and the dead raised (the cheat «Heal»'s rule): a carried army comes back whole at a chapter's start |
 | `remove_spell_from_book` | the spell | the hero's spell book drops it |
 | `army_goal` | the army is the value; exactly one of: `go_to = [x, y]`, `go_to_building = "<building>"`, `follow = "hero"` or an army id, `patrol = [[x, y], …]` (at least two cells), `attack = "hero"` or an army id, `clear = true` | the army walks to the goal instead of the AI's own choice (see below) |
 | `army_speed` | the army is the value, `percent = n` (10 to 1000, 100 normal) | the army's map steps take 100/n of their time (saved) |
@@ -267,8 +266,7 @@ then = [ { give_gold = -20 } ]                      # optional actions
 | `ending` | `= "<dialog-id>"` | the dialog shows, then the campaign ends with it («Campaigns») |
 | `quest` | `= "<quest-id>"`, `title = "<text key>"`, `text = "<text key>"` | an active diary entry («Активные»): added, or its texts updated when the id is already active (its date stays, no duplicate); the texts are shown in the game's language (`story_text`) |
 | `complete_quest` | `= "<quest-id>"` | that quest's entry moves to «Выполненные», dated now; a quest not active (or unknown) does nothing |
-| `restore_squad` | `= true` | the hero's squad is healed to full and its dead raised, at no cost (a night's rest at the hub's healers; the town's raise without its price) |
-| `restore_army` | `= "player"` | the hero's squad is healed to full and its fallen members stand up again, for nothing (the chapter's restoration at its start; a carried army has no dead at a hand-over, so the heal is what it does there) |
+| `restore_army` | `= "player"` | the hero's squad is healed to full and its fallen members stand up again, for nothing (a night's rest at the hub's healers, the town's raise without its price; a carried army has no dead at a hand-over, so at a chapter's start the heal is what it does there) |
 | `start_battle` | the army is the value, `rules = "dt"` or `"lua:<script>"` | the army meets the hero now, in that battle (a field battle for a script; «Field battles») |
 
 Units and items are `dt:<alias>` or the package's own ids; spells are `dt:spell/<alias>`. A

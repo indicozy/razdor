@@ -27,7 +27,7 @@ id = "camp_arrival"
 map = "camp"
 when = { event = "game_start" }
 then = [
-    { heal_army = "player" },
+    { restore_army = "player" },
     { quest = "camp_hold", title = "camp.quest.hold.title", text = "camp.quest.hold.text" },
     { quest = "supply", title = "camp.quest.supply.title", text = "camp.quest.supply.text" },
     { dialog = "camp_arrival" },

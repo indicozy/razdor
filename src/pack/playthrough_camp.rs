@@ -359,7 +359,7 @@ fn the_hit_on_the_column_is_won_by_the_camp_squad_over_fifteen_seeds() {
 }
 
 /// The camp starts with the army whole: the squad the hub hands over is wounded (the hero at 1 HP, one unit dead)
-/// and the camp's first moment heals it and raises the dead (`heal_army`), before the story's dialog.
+/// and the camp's first moment heals it and raises the dead (`restore_army = "player"`), before the story's dialog.
 #[test]
 fn the_camp_starts_with_the_carried_squad_whole() {
     let Some(install) = install() else { return };

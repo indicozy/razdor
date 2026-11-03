@@ -36,7 +36,7 @@ pub const EVENTS: [&str; 13] = [
 /// The conditions (`if`). Each is a table with one of these keys (its kind).
 pub const CONDITIONS: [&str; 10] = ["var", "random", "hero_at", "army_at", "has_named_unit", "has_item", "gold", "army_alive", "building_owner", "has_spell"];
 /// The actions (`then`), each a table with one of these keys.
-pub const ACTIONS: [&str; 32] = [
+pub const ACTIONS: [&str; 31] = [
     "set",
     "add",
     "random_var",
@@ -55,7 +55,6 @@ pub const ACTIONS: [&str; 32] = [
     "add_units",
     "cast_on_army",
     "remove_spells",
-    "heal_army",
     "remove_spell_from_book",
     "victory",
     "defeat",
@@ -68,7 +67,6 @@ pub const ACTIONS: [&str; 32] = [
     "ending",
     "quest",
     "complete_quest",
-    "restore_squad",
     "restore_army",
 ];
 /// The keys that are arguments, not kinds. A kind key is one of the lists above; a key here
@@ -443,13 +441,8 @@ pub enum Action {
     AddUnits { of: Entity, troops: Vec<Ref> },
     Cast { spell: Ref, holder: Holder, until: Until },
     RemoveSpells(Holder),
-    /// The hero's army healed in full, the dead raised (`heal_army = "player"`).
-    HealArmy,
     ForgetSpell(Ref),
     Victory,
-    /// `restore_squad = true`: the hero's squad is healed and its dead raised, at no cost (a night's rest
-    /// at the hub's healers; the raise of a town's service without its price).
-    RestoreSquad,
     Defeat,
     ArmyGoal { army: String, goal: GoalSpec },
     ArmySpeed { army: String, percent: u32 },
@@ -471,7 +464,9 @@ pub enum Action {
     Quest { id: String, title: String, text: String },
     /// `complete_quest = "<id>"`: the active diary entry of that id is completed (a no-op otherwise).
     CompleteQuest(String),
-    /// `restore_army = "player"`: the hero's squad is healed to full, and its fallen members stand up again.
+    /// `restore_army = "player"`: the hero's squad is healed to full, and its fallen members stand up again,
+    /// for nothing (a night's rest at the hub's healers; the raise of a town's service without its price; a
+    /// carried army has no dead at a hand-over, so at a chapter's start the heal is what it does there).
     RestoreArmy,
 }
 
@@ -927,13 +922,6 @@ pub fn parse_action(t: &Table) -> Res<Action> {
             check_args(t, kind, &["garrison"])?;
             Ok(Action::RemoveSpells(positional_holder(t, kind, v)?))
         }
-        "heal_army" => {
-            check_args(t, kind, &[])?;
-            if v.as_str() != Some("player") {
-                return bad("`heal_army` heals the player's army: `heal_army = \"player\"`", "the value is `\"player\"`");
-            }
-            Ok(Action::HealArmy)
-        }
         "remove_spell_from_book" => {
             check_args(t, kind, &[])?;
             Ok(Action::ForgetSpell(spell_ref(v)?))
@@ -999,13 +987,6 @@ pub fn parse_action(t: &Table) -> Res<Action> {
                 },
                 Some(true) => Ok(Action::Defeat),
                 _ => bad(format!("`{kind}` is written `{kind} = true`"), "the scenario ends with it"),
-            }
-        }
-        "restore_squad" => {
-            check_args(t, kind, &[])?;
-            match v.as_bool() {
-                Some(true) => Ok(Action::RestoreSquad),
-                _ => bad("`restore_squad` is written `restore_squad = true`", "the squad is healed and raised at once"),
             }
         }
         "travel" => {
@@ -1717,8 +1698,6 @@ mod tests {
         assert_eq!(parse_action(&table("set = \"ford_held\"\nvalue = true")), Ok(Action::Set { name: "ford_held".into(), value: VarValue::Bool(true) }));
         assert_eq!(parse_action(&table("give_gold = 50")), Ok(Action::GiveGold(50)));
         assert_eq!(parse_action(&table("victory = true")), Ok(Action::Victory));
-        assert_eq!(parse_action(&table("restore_squad = true")), Ok(Action::RestoreSquad));
-        assert!(parse_action(&table("restore_squad = false")).is_err());
         assert!(parse_action(&table("victory = false")).is_err());
         assert!(parse_action(&table("random_var = \"d\"\nmin = 5\nmax = 1")).unwrap_err().message.contains("above"));
         assert!(parse_action(&table("set_relation = \"rebels\"\ntowards = \"enemy\"\nvalue = 9")).unwrap_err().message.contains("-3 to 3"));
@@ -1858,8 +1837,6 @@ mod wish_reader_tests {
             Ok(Action::AddUnits { of: Entity::Building("tower".into()), troops: vec![Ref::parse("dt:swordsman").unwrap()] })
         );
         assert_eq!(parse_action(&table("remove_spells = \"garrison\"\ngarrison = \"tower\"")), Ok(Action::RemoveSpells(Holder::Garrison("tower".into()))));
-        assert_eq!(parse_action(&table("heal_army = \"player\"")), Ok(Action::HealArmy));
-        assert!(parse_action(&table("heal_army = \"pack\"")).unwrap_err().message.contains("heals the player's army"));
         assert_eq!(
             parse_cond(&table("has_named_unit = \"ivo\"\nunit = \"dt:knight\"\ngarrison = \"tower\"")),
             Ok(Cond::HasNamed { named: "ivo".into(), unit: Ref::parse("dt:knight").unwrap(), holder: Holder::Garrison("tower".into()), present: true })

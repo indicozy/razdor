@@ -144,7 +144,7 @@ then = [ { dialog = "marka_arrival" } ]
 id = "m_restore"
 map = "marka"
 when = { event = "game_start" }
-then = [ { restore_squad = true } ]
+then = [ { restore_army = "player" } ]
 
 # The caravan and the patrols take the roads at the start of the story; the raiders, the wraiths and Kord's
 # band wait where they stand (their goals keep them still). A roaming bandit band would hunt the wraiths

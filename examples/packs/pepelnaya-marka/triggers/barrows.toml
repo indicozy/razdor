@@ -36,7 +36,7 @@ id = "bw_restore"
 map = "barrows"
 when = { event = "game_start" }
 then = [
-    { restore_squad = true },
+    { restore_army = "player" },
     # The camps send their men with the hero (the Crown's and the Order's levies, the marsh folk's hunters):
     # three more troops, so the squad that came through the gates is not the one that meets the King.
     { give_unit = "dt:swordsman" },

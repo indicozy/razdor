@@ -37,7 +37,7 @@ then = [
 id = "gt_restore"
 map = "gates"
 when = { event = "game_start" }
-then = [ { restore_squad = true } ]
+then = [ { restore_army = "player" } ]
 
 # --- The diary: the main thread «Врата» and one sub-entry per stone, each completed when its gate opens. ---
 
