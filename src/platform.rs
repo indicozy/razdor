@@ -63,7 +63,7 @@ fn ios_documents() -> Option<PathBuf> {
     std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Documents"))
 }
 
-/// Razdor's own folder: saves, the log, the editor's maps, the translation
+/// Razdor's own folder: saves, the log, the hub's maps, the translation
 /// jobs. Desktop: `razdor` in the platform's data folder. Android: [`ANDROID_ROOT`]. iOS:
 /// `Documents/Razdor`.
 pub fn app_dir() -> Option<PathBuf> {

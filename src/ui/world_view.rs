@@ -906,17 +906,6 @@ pub(super) fn surface_color(code: u8) -> Color {
     }
 }
 
-/// Faction colour (player green, ally blue, neighbour yellow, enemy red, as the editor).
-pub(super) fn faction_color(faction: u8) -> Color {
-    match faction {
-        1 => rgb(70, 200, 90),
-        2 => rgb(70, 130, 230),
-        3 => rgb(230, 200, 60),
-        4 => rgb(220, 60, 50),
-        _ => rgb(200, 200, 200),
-    }
-}
-
 /// The 2.5D view (`view25`): the setting (`audio::Settings::map_tilt`, pushed by
 /// [`set_tilt_view`]) and the tilt in degrees (PageUp and PageDown change it).
 static TILT_VIEW: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);

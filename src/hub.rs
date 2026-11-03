@@ -617,6 +617,19 @@ pub fn maps_dir(local: &Path) -> PathBuf {
     local.join("maps")
 }
 
+/// The `.DTm` files of a folder, sorted by name (empty if the folder does not exist): the hub's
+/// maps and the new-game list's.
+pub fn list_maps_dir(dir: &Path) -> Vec<crate::dt::install::MapEntry> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut maps: Vec<crate::dt::install::MapEntry> = entries
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.is_file() && p.extension().is_some_and(|e| e.to_string_lossy().eq_ignore_ascii_case(crate::dt::install::MAP_EXTENSION)))
+        .map(|path| crate::dt::install::MapEntry { name: path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(), path })
+        .collect();
+    maps.sort_by(|a, b| a.name.cmp(&b.name));
+    maps
+}
+
 /// The folder of the catalog cache.
 pub const CACHE_DIR: &str = "cache";
 
@@ -636,7 +649,7 @@ struct CacheWrite<'a> {
 /// Writes `c`, fetched from `source`, to the cache (atomically: a temp file, then a rename).
 pub fn write_cache(local: &Path, source: &str, c: &Catalog) -> Result<(), String> {
     let json = serde_json::to_vec(&CacheWrite { source, catalog: c }).map_err(|e| e.to_string())?;
-    crate::editor::files::write_atomically(&local.join(CACHE_DIR).join(INDEX), &json).map_err(|e| format!("cache: {e}"))
+    crate::fsutil::write_atomically(&local.join(CACHE_DIR).join(INDEX), &json).map_err(|e| format!("cache: {e}"))
 }
 
 /// The cached catalog, when it was fetched from `source` and reads back whole. A missing,
@@ -754,7 +767,7 @@ impl Hub {
 
     fn save_installed(&self, i: &Installed) -> Result<(), String> {
         let json = serde_json::to_vec_pretty(i).map_err(|e| e.to_string())?;
-        crate::editor::files::write_atomically(&self.local.join("installed.json"), &json).map_err(|e| format!("installed.json: {e}"))
+        crate::fsutil::write_atomically(&self.local.join("installed.json"), &json).map_err(|e| format!("installed.json: {e}"))
     }
 
     /// Installs `id` and the mods it needs (see [`plan_install`]); returns the ids installed.
@@ -810,7 +823,7 @@ impl Hub {
                     for (f, g) in got {
                         let Got::Bytes(bytes) = g else { return Err(format!("{}: only a mod may be an archive", f.path)) };
                         let rel = format!("maps/{}", f.name);
-                        crate::editor::files::write_atomically(&self.local.join(&rel), &bytes).map_err(|err| format!("{rel}: {err}"))?;
+                        crate::fsutil::write_atomically(&self.local.join(&rel), &bytes).map_err(|err| format!("{rel}: {err}"))?;
                         written.push(rel);
                     }
                     written
@@ -856,7 +869,7 @@ impl Hub {
         for (f, g) in got {
             match g {
                 Got::Bytes(bytes) => {
-                    crate::editor::files::write_atomically(&tmp.join(&f.name), bytes).map_err(|e| format!("{}: {e}", f.name))?;
+                    crate::fsutil::write_atomically(&tmp.join(&f.name), bytes).map_err(|e| format!("{}: {e}", f.name))?;
                     names.push(f.name.clone());
                 }
                 Got::Zip(path) => names.extend(unpack_zip(path, tmp)?),
@@ -910,7 +923,7 @@ enum Got {
 pub mod mock {
     use super::*;
     use crate::dt::container;
-    use crate::editor::defaults::{new_scenario, NewMap};
+    use crate::dt::blank::{new_scenario, NewMap};
 
     struct MapSpec {
         file: &'static str,
@@ -968,7 +981,7 @@ pub mod mock {
 
     impl Out<'_> {
         fn file(&self, path: String, name: &str, lang: Option<&str>, bytes: &[u8]) -> std::io::Result<FileRef> {
-            crate::editor::files::write_atomically(&self.dir.join(&path), bytes)?;
+            crate::fsutil::write_atomically(&self.dir.join(&path), bytes)?;
             Ok(FileRef { path, name: name.into(), lang: lang.map(Into::into), size: bytes.len() as u64, sha256: crate::update::sha256_hex(bytes), archive: false })
         }
 
@@ -1202,7 +1215,7 @@ pub mod mock {
         }
         let catalog = Catalog { format: 1, entries: o.entries };
         let json = serde_json::to_vec_pretty(&catalog).expect("json");
-        crate::editor::files::write_atomically(&dir.join(INDEX), &json)
+        crate::fsutil::write_atomically(&dir.join(INDEX), &json)
     }
 }
 

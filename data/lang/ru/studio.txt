@@ -1,6 +1,6 @@
 # Razdor Studio's interface in Russian: our own translation. "English = Russian", one per line;
 # {name} a value filled in by the studio. See src/i18n.rs. Save, Save all, Check, Exit, Map,
-# Hero, Building, Army and Objects are in the other catalogs (editor.txt, game.txt).
+# Hero, Building, Army and Objects are in the other catalogs (game.txt, world.txt, common.txt).
 
 # Docks (tab titles)
 File system = Файлы
@@ -102,3 +102,32 @@ Select = Выбор
 Sprite = Спрайт
 The hero cannot be removed: every map has one = Героя нельзя убрать: он есть на каждой карте
 Used by = Где используется
+
+# Razdor Studio: the editor's common words, the start page, the package's form captions.
+Editor = Редактор
+Open package folder… = Открыть папку пакета…
+New package = Новый пакет
+Folder name = Имя папки
+Where = Где
+Choose folder… = Выбрать папку…
+Create package = Создать пакет
+Back to the menu = В меню
+Open a package folder, or make a new package. = Откройте папку пакета или создайте новый пакет.
+The package needs a folder name. = Нужно имя папки пакета.
+Unit = Отряд
+Remove = Удалить
+Undo = Отменить
+Redo = Вернуть
+Check = Проверка
+Size = Размер
+Brush = Кисть
+Description = Описание
+Troops = Войско
+Level = Уровень
+Count = Число
+Smithy / house = Кузница / дом
+Unknown building = Неизвестное здание
+Terrain = Местность
+Text keys = Ключи
+not a package folder = не папка пакета
+The file picker cannot be opened. = Не открывается окно выбора папки.

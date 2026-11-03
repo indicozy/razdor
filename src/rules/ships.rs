@@ -18,7 +18,7 @@
 //! The scenario's own ships are the armies placed on water (ai.md §13): the same AI as on
 //! land, on the SHIP map (water and building footprints); army byte 72 (hero, pirate and
 //! merchant ships) only picks the picture. [`World::mooring`] (the water nearest a shipyard
-//! on foot) serves only the reachability check of the editor's tools.
+//! on foot) serves the reachability check (`reachable_with_ships`).
 
 use serde::{Deserialize, Serialize};
 

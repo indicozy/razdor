@@ -68,7 +68,7 @@ pub enum Cheat {
     Unit(String, Option<i32>),
     Time(u32),
     /// `event N`: fires map event N now, its conditions ignored (`EventEngine::force`); N is
-    /// the event's number as the map editor shows it (1-based, `EventId`).
+    /// the event's number as DTMapEdit shows it (1-based, `EventId`).
     Event(u32),
     Win,
     Lose,

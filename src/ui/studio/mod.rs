@@ -14,10 +14,12 @@
 //!
 //! Desktop only: the whole module is compiled out of Android and iOS (see `ui/mod.rs`).
 
+mod canvas;
 mod forms;
 mod inspector;
 mod map_tab;
 mod scene;
+pub mod start;
 mod watch;
 
 use std::collections::BTreeMap;
@@ -838,7 +840,7 @@ fn layout(side: bool) -> DockState<Tab> {
 }
 
 /// The Godot 4-like dark theme: flat grey panels, one blue accent, small rounding.
-fn theme(ctx: &egui::Context) {
+pub(super) fn theme(ctx: &egui::Context) {
     let c = Color32::from_rgb;
     let mut v = egui::Visuals::dark();
     v.panel_fill = c(0x20, 0x25, 0x31);

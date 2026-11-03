@@ -1,18 +1,17 @@
-//! The editor's map view: the scenario drawn as the world map draws it (the original art via
-//! [`DtArt`] when the install is there, placeholder colours and shapes otherwise), with the
-//! editor's overlays: grid, footprints, brush and placement previews, hero starts, lantern
-//! radii and patrol areas. And the minimap.
+//! The studio's map canvas: the package's map (its compiled `.DTm` scenario) drawn as the world map
+//! draws it (the original art via [`DtArt`] when the install is there, placeholder colours and
+//! shapes otherwise), and the camera that looks at it. The Map tab draws the editing overlays
+//! (the marks, the tools' previews, the selection) over it (`map_tab`).
 
-use crate::ui::input::{is_mouse_button_down};
 use macroquad::prelude::*;
 
-use razdor::dt::dtm::Scenario;
-use razdor::editor::geometry::{object_cover, CellRect, Footprint};
-use razdor::editor::{EditorDoc, Palette, TerrainShape, Tool, ToolState, Target};
+use razdor::dt::dtm::{BuildingType, Scenario};
+use razdor::i18n::{n_, tr};
+use razdor::studio::geometry::{CellRect, Footprint};
 
 use crate::ui::dt_art::DtArt;
 use crate::ui::widgets::*;
-use crate::ui::world_view::{bridge_offset, draw_wrapped, faction_color, figure_stem, surface_color};
+use crate::ui::world_view::{bridge_offset, draw_wrapped, figure_stem, surface_color};
 
 /// A cell's size on screen at zoom 1: the original's 32×22 px.
 pub const CW: f32 = 32.0;
@@ -100,14 +99,13 @@ impl Cam {
 /// when zoomed far out, without art, and for the minimap.
 #[derive(Default)]
 pub struct Overview {
-    key: Option<(u64, usize)>,
+    key: Option<u64>,
     tex: Option<Texture2D>,
 }
 
 impl Overview {
-    pub fn texture(&mut self, doc: &EditorDoc) -> Option<Texture2D> {
-        let s = &doc.scenario;
-        let key = (doc.revision, s.terrain.len());
+    /// The texture of `s`, made again when `key` (the map's serial) changes.
+    pub fn texture(&mut self, s: &Scenario, key: u64) -> Option<Texture2D> {
         if self.key != Some(key) || self.tex.is_none() {
             let (w, h) = (s.width().min(u16::MAX as u32) as u16, s.height().min(u16::MAX as u32) as u16);
             if w == 0 || h == 0 || s.terrain.len() != w as usize * h as usize {
@@ -127,13 +125,39 @@ impl Overview {
     }
 }
 
-/// What the view shows besides the map itself.
-pub struct Overlays {
-    pub grid: bool,
-    /// Squares covered by hills and mountains.
-    pub cover: bool,
-    /// Patrol radii of every army (the selected one's is always shown).
-    pub patrols: bool,
+/// A faction's colour on the canvas: player green, ally blue, neighbour yellow, enemy red.
+fn faction_color(faction: u8) -> Color {
+    let c = |r, g, b| Color::from_rgba(r, g, b, 255);
+    match faction {
+        1 => c(70, 200, 90),
+        2 => c(70, 130, 230),
+        3 => c(230, 200, 60),
+        4 => c(220, 60, 50),
+        _ => c(200, 200, 200),
+    }
+}
+
+/// The label of a building type (the first letter of it is drawn on a building without art).
+fn building_type_label(kind: u8) -> &'static str {
+    tr(match BuildingType::from_code(kind) {
+        Some(BuildingType::Palace) => n_("Palace"),
+        Some(BuildingType::Town) => n_("Town"),
+        Some(BuildingType::Village) => n_("Village"),
+        Some(BuildingType::Castle) => n_("Castle"),
+        Some(BuildingType::Fort) => n_("Fort"),
+        Some(BuildingType::Tavern) => n_("Tavern"),
+        Some(BuildingType::Market) => n_("Market"),
+        Some(BuildingType::Church) => n_("Church"),
+        Some(BuildingType::Smithy) => n_("Smithy / house"),
+        Some(BuildingType::Shipyard) => n_("Shipyard"),
+        Some(BuildingType::Altar) => n_("Altar"),
+        Some(BuildingType::DungeonEntrance) => n_("Dungeon entrance"),
+        Some(BuildingType::Ruins) => n_("Ruins"),
+        Some(BuildingType::StoneBridge) => n_("Stone bridge"),
+        Some(BuildingType::WoodenBridge) => n_("Wooden bridge"),
+        Some(BuildingType::Obelisk) => n_("Obelisk"),
+        None => n_("Unknown building"),
+    })
 }
 
 fn draw_terrain(s: &Scenario, art: Option<&DtArt>, cam: &Cam, vis: CellRect, overview: Option<&Texture2D>) {
@@ -247,8 +271,7 @@ fn draw_army_figure(art: Option<&DtArt>, cam: &Cam, x: u16, y: u16, model: u8, f
 }
 
 /// The map: terrain, then objects, buildings and armies in painter's order.
-pub fn draw_map(doc: &EditorDoc, art: Option<&DtArt>, cam: &Cam, overview: Option<&Texture2D>) {
-    let s = &doc.scenario;
+pub fn draw_map(s: &Scenario, art: Option<&DtArt>, cam: &Cam, overview: Option<&Texture2D>) {
     let Some(vis) = cam.visible(s.width(), s.height()) else { return };
     draw_terrain(s, art, cam, vis, overview);
     // Sprites stand on their cell and reach up to ~10 cells above it.
@@ -293,7 +316,7 @@ pub fn draw_map(doc: &EditorDoc, art: Option<&DtArt>, cam: &Cam, overview: Optio
             }
             Item::Building(i) => {
                 let b = &s.buildings[*i];
-                let label = razdor::editor::palette::building_type_label(b.kind).chars().next().map(String::from).unwrap_or_default();
+                let label = building_type_label(b.kind).chars().next().map(String::from).unwrap_or_default();
                 draw_building_sprite(art, cam, b.x, b.y, (b.size_x, b.size_y), (b.picture_type, b.picture_variant), &label, 1.0);
             }
             Item::Army(i) => {
@@ -306,186 +329,6 @@ pub fn draw_map(doc: &EditorDoc, art: Option<&DtArt>, cam: &Cam, overview: Optio
             }
         }
     }
-}
-
-fn outline(cam: &Cam, r: CellRect, thick: f32, color: Color) {
-    let s = cam.rect(r);
-    draw_rectangle_lines(s.x, s.y, s.w, s.h, thick, color);
-}
-
-fn circle_cells(cam: &Cam, x: u16, y: u16, radius: f32, color: Color) {
-    let c = cam.to_screen(vec2(x as f32 + 0.5, y as f32 + 0.5));
-    let cs = cam.cell_size();
-    // Radius in cells; cells are wider than tall, so the circle is an ellipse on screen.
-    let (rx, ry) = (radius * cs.x, radius * cs.y);
-    let n = 48;
-    for k in 0..n {
-        let (a0, a1) = (k as f32 / n as f32 * std::f32::consts::TAU, (k + 1) as f32 / n as f32 * std::f32::consts::TAU);
-        draw_line(c.x + rx * a0.cos(), c.y + ry * a0.sin(), c.x + rx * a1.cos(), c.y + ry * a1.sin(), 1.5, color);
-    }
-}
-
-/// Grid, points, hero starts, selection, patrols and the tool's preview under the mouse.
-pub fn draw_overlays(doc: &EditorDoc, tools: &ToolState, palette: &Palette, art: Option<&DtArt>, cam: &Cam, hover: Option<(i32, i32)>, o: &Overlays) {
-    let s = &doc.scenario;
-    let Some(vis) = cam.visible(s.width(), s.height()) else { return };
-    let cs = cam.cell_size();
-    if o.grid && cs.x >= 8.0 {
-        let line = Color::new(0.0, 0.0, 0.0, 0.25);
-        for x in vis.x0..=vis.x1 + 1 {
-            let a = cam.to_screen(vec2(x as f32, vis.y0 as f32));
-            let b = cam.to_screen(vec2(x as f32, vis.y1 as f32 + 1.0));
-            draw_line(a.x, a.y, b.x, b.y, 1.0, line);
-        }
-        for y in vis.y0..=vis.y1 + 1 {
-            let a = cam.to_screen(vec2(vis.x0 as f32, y as f32));
-            let b = cam.to_screen(vec2(vis.x1 as f32 + 1.0, y as f32));
-            draw_line(a.x, a.y, b.x, b.y, 1.0, line);
-        }
-    }
-    if o.cover {
-        for ob in s.objects.iter().filter(|ob| razdor::editor::geometry::is_massif(ob.class)) {
-            let r = object_cover(ob);
-            if r.overlaps(&vis) {
-                let sr = cam.rect(r);
-                draw_rectangle(sr.x, sr.y, sr.w, sr.h, Color::new(0.8, 0.2, 0.1, 0.18));
-            }
-        }
-    }
-    // Points: lanterns yellow with their radius, event points blue.
-    for (i, p) in s.points.iter().enumerate() {
-        if !vis.contains(p.x as i32, p.y as i32) {
-            continue;
-        }
-        let c = cam.to_screen(vec2(p.x as f32 + 0.5, p.y as f32 + 0.5));
-        let r = (6.0 * cam.zoom).max(3.0);
-        if p.model == 8 {
-            draw_circle(c.x, c.y, r, Color::new(1.0, 0.85, 0.2, if p.active != 0 { 1.0 } else { 0.5 }));
-            if p.radius > 0 {
-                circle_cells(cam, p.x, p.y, p.radius as f32, Color::new(1.0, 0.85, 0.2, 0.5));
-            }
-        } else {
-            draw_poly(c.x, c.y, 4, r * 1.2, 45.0, Color::new(0.35, 0.6, 1.0, 1.0));
-        }
-        if cam.zoom >= 0.6 {
-            text(&format!("{}", i + 1), c.x + r + 2.0, c.y - r, 14.0, WHITE);
-        }
-    }
-    // Hero starts: the initials of the classes (K, A, R).
-    for (k, h) in s.header.heroes.iter().enumerate() {
-        let c = cam.to_screen(vec2(h.x as f32 + 0.5, h.y as f32 + 0.5));
-        let r = (9.0 * cam.zoom).max(5.0);
-        draw_circle(c.x, c.y, r, Color::new(0.2, 0.8, 0.3, 0.85));
-        draw_circle_lines(c.x, c.y, r, 1.5, BLACK);
-        let initial: String = razdor::editor::palette::HERO_CLASSES.get(k).map(|n| razdor::i18n::tr(n)).and_then(|n| n.chars().next()).map(String::from).unwrap_or_default();
-        text_centered(&initial, c.x, c.y + r * 0.45, r * 1.3, BLACK);
-    }
-    for a in s.armies.iter() {
-        if o.patrols && a.patrols != 0 && a.patrol_radius > 0 {
-            circle_cells(cam, a.x, a.y, a.patrol_radius as f32, Color::new(1.0, 0.4, 0.3, 0.35));
-        }
-    }
-    match tools.selected {
-        Some(Target::Building(id)) => {
-            if let Some(b) = s.building(id) {
-                let f = Footprint::of(b.x as i32, b.y as i32, b.size_x, b.size_y);
-                outline(cam, f.main, 2.5, ACCENT);
-                if let Some(e) = f.extra_row {
-                    outline(cam, e, 1.5, Color::new(0.95, 0.78, 0.3, 0.6));
-                }
-            }
-        }
-        Some(Target::Army(id)) => {
-            if let Some(a) = s.army(id) {
-                outline(cam, CellRect::brush(a.x as i32, a.y as i32, 1), 2.5, ACCENT);
-                if a.patrol_radius > 0 {
-                    circle_cells(cam, a.x, a.y, a.patrol_radius as f32, Color::new(1.0, 0.5, 0.3, 0.8));
-                }
-            }
-        }
-        Some(Target::Point(id)) => {
-            if let Some(p) = s.points.get(id as usize - 1) {
-                outline(cam, CellRect::brush(p.x as i32, p.y as i32, 1), 2.5, ACCENT);
-            }
-        }
-        None => {}
-    }
-    let Some((hx, hy)) = hover else { return };
-    let inside = hx >= 0 && hy >= 0 && (hx as u32) < s.width() && (hy as u32) < s.height();
-    let white = Color::new(1.0, 1.0, 1.0, 0.8);
-    match tools.tool {
-        Tool::Terrain { shape: TerrainShape::Brush(size), .. } | Tool::Objects { size, .. } | Tool::Erase { size, .. } => {
-            outline(cam, CellRect::brush(hx, hy, size), 1.5, white);
-        }
-        Tool::Terrain { shape: TerrainShape::Rect, .. } => {
-            let from = tools.rect_start().unwrap_or((hx, hy));
-            outline(cam, CellRect::spanning(from, (hx, hy)), 2.0, white);
-        }
-        Tool::Terrain { shape: TerrainShape::Fill, .. } | Tool::Army | Tool::Point { .. } | Tool::HeroStart(_) => {
-            outline(cam, CellRect::brush(hx, hy, 1), 1.5, white);
-        }
-        Tool::Building { kind, picture_type, variant } if inside => {
-            let size = palette.footprint(picture_type, variant);
-            let f = Footprint::of(hx, hy, size.0, size.1);
-            let ok = f.inside(s.width(), s.height());
-            draw_building_sprite(art, cam, hx as u16, hy as u16, size, (picture_type, variant), razdor::editor::palette::building_type_label(kind), 0.55);
-            let col = if ok { Color::new(0.3, 1.0, 0.4, 0.9) } else { Color::new(1.0, 0.25, 0.2, 0.9) };
-            outline(cam, f.main, 2.0, col);
-            if let Some(e) = f.extra_row {
-                outline(cam, e, 1.0, col);
-            }
-        }
-        Tool::Select => {
-            if let Some(t) = doc.hit(hx, hy) {
-                let r = match t {
-                    Target::Building(id) => s.building(id).map(|b| Footprint::of(b.x as i32, b.y as i32, b.size_x, b.size_y).bounds()),
-                    Target::Army(id) => s.army(id).map(|a| CellRect::brush(a.x as i32, a.y as i32, 1)),
-                    Target::Point(id) => s.points.get(id as usize - 1).map(|p| CellRect::brush(p.x as i32, p.y as i32, 1)),
-                };
-                if let Some(r) = r {
-                    outline(cam, r, 1.5, white);
-                }
-            } else {
-                outline(cam, CellRect::brush(hx, hy, 1), 1.0, Color::new(1.0, 1.0, 1.0, 0.4));
-            }
-        }
-        _ => {}
-    }
-}
-
-/// The minimap in `area`: the whole map and the view's rectangle. Returns the cell-unit point
-/// clicked or dragged to, to centre the view there.
-pub fn minimap(doc: &EditorDoc, overview: Option<&Texture2D>, cam: &Cam, area: Rect) -> Option<Vec2> {
-    let s = &doc.scenario;
-    let (w, h) = (s.width().max(1) as f32, s.height().max(1) as f32);
-    // Keep the map's proportions (cells are 32×22).
-    let aspect = (w * CW) / (h * CH);
-    let (mw, mh) = if area.w / area.h > aspect { (area.h * aspect, area.h) } else { (area.w, area.w / aspect) };
-    let r = Rect::new(area.x + (area.w - mw) / 2.0, area.y + (area.h - mh) / 2.0, mw, mh);
-    draw_rectangle(area.x, area.y, area.w, area.h, Color::new(0.05, 0.05, 0.05, 1.0));
-    if let Some(tex) = overview {
-        draw_texture_ex(tex, r.x, r.y, WHITE, DrawTextureParams { dest_size: Some(vec2(r.w, r.h)), ..Default::default() });
-    }
-    let k = vec2(r.w / w, r.h / h);
-    for b in &s.buildings {
-        let c = vec2(r.x + (b.x as f32 + 0.5) * k.x, r.y + (b.y as f32 + 0.5) * k.y);
-        draw_rectangle(c.x - 1.5, c.y - 1.5, 3.0, 3.0, faction_color(b.faction));
-    }
-    for a in &s.armies {
-        let c = vec2(r.x + (a.x as f32 + 0.5) * k.x, r.y + (a.y as f32 + 0.5) * k.y);
-        draw_circle(c.x, c.y, 1.8, WHITE);
-    }
-    let a = cam.to_cells(vec2(cam.view.x, cam.view.y));
-    let b = cam.to_cells(vec2(cam.view.right(), cam.view.bottom()));
-    let (vx0, vy0) = (r.x + a.x.max(0.0) * k.x, r.y + a.y.max(0.0) * k.y);
-    let (vx1, vy1) = (r.x + b.x.min(w) * k.x, r.y + b.y.min(h) * k.y);
-    draw_rectangle_lines(vx0, vy0, (vx1 - vx0).max(2.0), (vy1 - vy0).max(2.0), 1.5, WHITE);
-    draw_rectangle_lines(area.x, area.y, area.w, area.h, 1.0, DIM);
-    let m = Vec2::from(crate::ui::widgets::pointer());
-    if r.contains(m) && !input_blocked() && is_mouse_button_down(MouseButton::Left) {
-        return Some(vec2((m.x - r.x) / k.x, (m.y - r.y) / k.y));
-    }
-    None
 }
 
 #[cfg(test)]

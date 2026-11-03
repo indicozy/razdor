@@ -13,7 +13,6 @@ pub mod display;
 pub mod dt_art;
 pub mod dt_font;
 pub mod field_view;
-pub mod editor;
 #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
 pub mod studio;
 pub mod game_bar;
@@ -129,8 +128,6 @@ pub enum Screen {
     Save(saves::SaveView),
     Load(saves::LoadView),
     Victory,
-    /// The map editor (`ui::editor`).
-    Editor,
     /// Razdor Studio, the package editor (`ui::studio`).
     #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
     Studio,
@@ -160,7 +157,7 @@ fn hub_entries(install: Option<&razdor::dt::install::DtInstall>) -> Vec<Scenario
     let gate = razdor::hub::MapGate::read(&dir);
     let install_maps: Vec<PathBuf> = install.iter().flat_map(|d| d.maps.iter()).map(|m| m.path.clone()).collect();
     let install = razdor::hub::InstallMaps::new(&install_maps);
-    razdor::editor::files::list_dir(&razdor::hub::maps_dir(&dir))
+    razdor::hub::list_maps_dir(&razdor::hub::maps_dir(&dir))
         .iter()
         .filter_map(|m| {
             let group = gate.group(&m.name, install.has_same(&m.path));
@@ -379,13 +376,12 @@ pub struct App {
     tap_press: Option<(f32, f32)>,
     /// The play log's last screen and message, to write each change once.
     play_last: (&'static str, Option<String>),
-    /// The map editor, kept while a test play runs.
-    editor: Option<Box<editor::EditorScreen>>,
     /// Razdor Studio on a package folder (`ui::studio`), while its screen is open.
     #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
     studio: Option<Box<studio::StudioScreen>>,
-    /// The game is a test play of the editor's map: leaving it returns to the editor.
-    test_play: bool,
+    /// Razdor Studio's start page, shown while no package folder is open.
+    #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+    studio_start: Option<Box<studio::start::StartPage>>,
     /// The F1 key list is open over the screen.
     help: bool,
     /// The key list was opened this frame by a button (`ExitChoice::Keys`): the press that
@@ -487,10 +483,10 @@ impl App {
             minimap_prebuilt: false,
             tap_press: None,
             play_last: ("", None),
-            editor: None,
             #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
             studio: None,
-            test_play: false,
+            #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+            studio_start: None,
             help: false,
             help_fresh: false,
             custom: None,
@@ -596,7 +592,11 @@ impl App {
     /// Opens Razdor Studio on a package folder (`--studio`, the snapshot's `studio`).
     pub fn open_studio(&mut self, folder: &std::path::Path) -> Result<(), String> {
         self.studio = Some(Box::new(studio::StudioScreen::open(folder)?));
+        self.studio_start = None;
         self.screen = Screen::Studio;
+        // The package played last is the one the main menu's «Редактор» opens.
+        self.audio.settings.studio_package = Some(folder.display().to_string());
+        self.audio.save_now();
         Ok(())
     }
 
@@ -609,25 +609,55 @@ impl App {
         }
     }
 
-    /// A frame of the studio; leaving it goes back to the main menu.
+    /// The studio's entry from the main menu: the package played last, else the start page. The
+    /// studio's screen is set here.
+    #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+    pub fn open_studio_entry(&mut self) {
+        let recent = self.audio.settings.studio_package.clone().map(PathBuf::from);
+        match recent.filter(|p| p.join("package.toml").is_file()) {
+            Some(folder) if self.open_studio(&folder).is_ok() => {}
+            _ => self.open_studio_start(),
+        }
+    }
+
+    /// Shows Razdor Studio's start page (no package open).
+    #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+    pub fn open_studio_start(&mut self) {
+        self.studio = None;
+        self.studio_start.get_or_insert_with(Default::default);
+        self.screen = Screen::Studio;
+    }
+
+    /// A frame of the studio: the start page while no package folder is open, else the studio.
+    /// Leaving it goes back to the main menu.
     #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
     fn studio_frame(&mut self) {
-        let Some(studio) = self.studio.as_mut() else {
-            self.screen = Screen::MainMenu;
+        if self.studio.is_none() {
+            let action = match self.studio_start.as_mut() {
+                Some(page) => studio::start::frame(page),
+                None => studio::start::Action::Back,
+            };
+            match action {
+                studio::start::Action::None => {}
+                studio::start::Action::Back => {
+                    self.studio_start = None;
+                    self.screen = Screen::MainMenu;
+                }
+                studio::start::Action::Open(folder) => {
+                    if let Err(e) = self.open_studio(&folder) {
+                        if let Some(page) = self.studio_start.as_mut() {
+                            page.set_error(e);
+                        }
+                    }
+                }
+            }
             return;
-        };
+        }
+        let Some(studio) = self.studio.as_mut() else { return };
         if let studio::Action::Exit = studio.frame(self.assets.dt.as_ref()) {
             self.studio = None;
             self.screen = Screen::MainMenu;
         }
-    }
-
-    /// Opens the map editor (the title screen's button and `--editor`).
-    pub fn open_editor(&mut self) {
-        if self.editor.is_none() {
-            self.editor = Some(Box::new(editor::EditorScreen::new(&self.assets, self.dt_content.clone(), self.demo.clone())));
-        }
-        self.screen = Screen::Editor;
     }
 
     /// The content custom battles are fought with: the install's, else the demo's.
@@ -715,39 +745,6 @@ impl App {
         }
     }
 
-    /// A frame of the editor; test play starts a game on the edited map.
-    fn editor_frame(&mut self) {
-        if hotkeys::allowed(hotkeys::Place::Editor, hotkeys::Global::Language, self.guard())
-            && !widgets::popup_open()
-            && is_key_pressed(keymap::key(Action::Language))
-        {
-            language::cycle();
-        }
-        let Some(ed) = self.editor.as_mut() else {
-            self.open_editor();
-            return;
-        };
-        match ed.frame(&self.assets) {
-            editor::EditorAction::None => {}
-            editor::EditorAction::Exit => {
-                self.editor = None;
-                self.screen = Screen::MainMenu;
-            }
-            editor::EditorAction::TestPlay { scenario, content, class } => {
-                let mut game = Game::from_scenario(content, &scenario, class);
-                game.set_hero_name("");
-                self.dialogs.clear();
-                self.message = Some(tr("Test play: Esc > Main menu returns to the editor.").to_string());
-                self.map_view.reset();
-                self.map_view.open_around_hero(&game);
-                razdor::diag::play(&game.clock.label(), &play_game_line(&game, "editor test play"));
-                self.game = Some(game);
-                self.test_play = true;
-                self.screen = Screen::WorldMap;
-            }
-        }
-    }
-
     /// Loads save file `path`: the demo from the built-in data, a map from the install (the
     /// same map file only). A pending battle starts again; a pending question is asked again.
     /// The battle under way played again from the game as it began (`BattleView::restart_state`).
@@ -763,7 +760,7 @@ impl App {
                 main_menu::follow_settings(&self.audio.settings, &mut game);
                 self.dialogs.clear();
                 self.message = None;
-                self.screen = saves::battle(&mut game, (!self.test_play).then_some(&mut self.session));
+                self.screen = saves::battle(&mut game, Some(&mut self.session));
                 self.game = Some(game);
             }
             Err(e) => self.message = Some(razdor::trf!("Cannot load: {e}.", e)),
@@ -891,7 +888,7 @@ impl App {
     fn mood(&self) -> Mood {
         match &self.screen {
             Screen::Authors(_) => Mood::Credits,
-            Screen::MainMenu | Screen::Options | Screen::ScenarioSelect | Screen::TutorialOffer | Screen::ClassSelect { .. } | Screen::Editor | Screen::CustomSetup | Screen::Hub(_) => Mood::Menu,
+            Screen::MainMenu | Screen::Options | Screen::ScenarioSelect | Screen::TutorialOffer | Screen::ClassSelect { .. } | Screen::CustomSetup | Screen::Hub(_) => Mood::Menu,
             Screen::CustomBattle(_) => Mood::Battle { garrison: false },
             Screen::Load(v) if v.back == saves::Back::Title || self.game.is_none() => Mood::Menu,
             Screen::Battle(_) => Mood::Battle { garrison: matches!(self.game.as_ref().and_then(|g| g.foe.as_ref()), Some(Foe::Garrison(_))) },
@@ -1034,9 +1031,8 @@ impl App {
             Screen::Save(_) => Place::Save,
             Screen::Load(_) => Place::Load,
             Screen::Victory => Place::End,
-            Screen::Editor => Place::Editor,
             #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
-            Screen::Studio => Place::Editor,
+            Screen::Studio => Place::Studio,
         }
     }
 
@@ -1192,7 +1188,6 @@ impl App {
             Screen::Save(_) => "save",
             Screen::Load(_) => "load",
             Screen::Victory => "victory",
-            Screen::Editor => "editor",
             #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
             Screen::Studio => "studio",
             Screen::CustomSetup => "custom battle setup",
@@ -1295,11 +1290,7 @@ impl App {
             self.studio_frame();
             return;
         }
-        if matches!(self.screen, Screen::Editor) {
-            self.frame_content();
-        } else {
-            dt_font::with_native_metrics(|| self.frame_content());
-        }
+        dt_font::with_native_metrics(|| self.frame_content());
     }
 
     /// The bar's windows an outside tap closes (`widgets::outside_tap`): the ones opened from the
@@ -1339,10 +1330,9 @@ impl App {
         }
         // The key bindings the player changed (saved with the settings, as the minimap's).
         self.audio.settings.keys = keymap::overrides();
-        // The pan first: the pointer below is read on the canvas (`ui::pan`). The editor and the
-        // map alone are not panned; a dialog over the map is. The finger's pan is last frame's.
+        // The pan first: the pointer below is read on the canvas (`ui::pan`). The map alone is not
+        // panned; a dialog over the map is. The finger's pan is last frame's.
         let pannable = match &self.screen {
-            Screen::Editor => false,
             Screen::WorldMap => !self.dialogs.is_empty(),
             _ => true,
         };
@@ -1408,12 +1398,6 @@ impl App {
         self.follow_row_setting();
         // Updates: the check at start, and "Always" putting a new release in place.
         update_view::tick(self.audio.settings.updates);
-        if matches!(self.screen, Screen::Editor) {
-            // The map editor is DTMapEdit's: a Windows program with the system's pointers.
-            cursor::system(macroquad::miniquad::CursorIcon::Default);
-            self.editor_frame();
-            return;
-        }
         // The cheat console on the map and in battle: while it is open the screen takes no keys.
         let place = self.place();
         let console_here = matches!(place, hotkeys::Place::WorldMap | hotkeys::Place::Battle) && (self.game.is_some() || self.in_custom());
@@ -1495,6 +1479,11 @@ impl App {
                     Some(Screen::CustomSetup)
                 }
                 Some(main_menu::Pick::Hub) => Some(Screen::Hub(Box::default())),
+                #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+                Some(main_menu::Pick::Studio) => {
+                    self.open_studio_entry();
+                    None
+                }
                 Some(main_menu::Pick::Exit) => {
                     self.quit = true;
                     None
@@ -1533,7 +1522,7 @@ impl App {
             }
             // The map itself stays where it is; a dialog over it is panned (`ui::pan`).
             (Screen::WorldMap, Some(game)) => pan::unpanned(|| {
-                world_view::frame(game, &self.assets, &mut self.map_view, &mut self.message, &mut self.dialogs, (!self.test_play).then_some(&mut self.session))
+                world_view::frame(game, &self.assets, &mut self.map_view, &mut self.message, &mut self.dialogs, Some(&mut self.session))
             }),
             (Screen::Building(view), Some(game)) => window_layout::scaled(building_view::stack_at(game, view), || {
                 building_view::frame(game, &self.assets, view, &mut self.message, &mut self.dialogs)
@@ -1593,7 +1582,6 @@ impl App {
             (Screen::Save(view), Some(game)) => saves::save_screen(game, &self.assets, view, quick_save_ok, &mut self.message),
             (Screen::Load(view), game) => saves::load_screen(game.as_ref(), &self.assets, view, &mut self.pending_load, &mut self.load_error),
             (Screen::Victory, game) => screens::victory(game, &self.scenarios, self.dt_content.clone()),
-            (Screen::Editor, _) => None,
             #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
             (Screen::Studio, _) => None,
             (Screen::CustomSetup, _) => {
@@ -1826,7 +1814,7 @@ impl App {
         // on the map once the step that brought it has played: the attacker is seen arriving.
         if next.is_none() && self.dialogs.is_empty() && matches!(self.screen, Screen::WorldMap | Screen::Building(_)) {
             if let Some(game) = self.game.as_mut().filter(|g| g.foe.is_some() && !(matches!(self.screen, Screen::WorldMap) && g.step_playing())) {
-                next = Some(saves::battle(game, (!self.test_play).then_some(&mut self.session)));
+                next = Some(saves::battle(game, Some(&mut self.session)));
             }
         }
         // A victory or defeat event ends the game once its window is read (not while a custom
@@ -1844,17 +1832,17 @@ impl App {
                 // A campaign map: the next map starts at once (0x4b5b64), as in the original.
                 // With no next map (not a campaign map, or its next map not in the install)
                 // the original goes to the main menu once the window is read (0x4aba30 →
-                // 0x4bfb34); Razdor's victory screen stays for the editor's test play.
+                // 0x4bfb34).
                 // A campaign package: the graph names the next map (`pack_play::campaign_victory`).
                 Some(ScriptEnd::Victory(_) | ScriptEnd::Package(razdor::rules::triggers::Ending::Victory)) if !matches!(self.screen, Screen::Victory) && self.campaign_playing() => {
                     next = self.campaign_victory();
                 }
                 Some(ScriptEnd::Victory(_) | ScriptEnd::Package(razdor::rules::triggers::Ending::Victory)) if !matches!(self.screen, Screen::Victory) => {
                     // The scenario list marks the map as won under the mod played (Razdor's, kept in the settings).
-                    if let Some(razdor::rules::save::ScenarioRef::Map { file, .. }) = self.game.as_ref().and_then(|g| g.origin.as_ref()).filter(|_| !self.test_play) {
+                    if let Some(razdor::rules::save::ScenarioRef::Map { file, .. }) = self.game.as_ref().and_then(|g| g.origin.as_ref()) {
                         language::mark_completed(self.active_mod.as_deref(), file);
                     }
-                    let handed = (!self.test_play).then(|| screens::hand_over(&self.game, &self.scenarios, self.dt_content.clone())).flatten();
+                    let handed = screens::hand_over(&self.game, &self.scenarios, self.dt_content.clone());
                     match handed {
                         Some(g) => {
                             self.map_view.reset();
@@ -1864,7 +1852,6 @@ impl App {
                             self.game = Some(g);
                             next = Some(Screen::WorldMap);
                         }
-                        None if self.test_play => next = Some(Screen::Victory),
                         None => {
                             self.game = None;
                             next = Some(Screen::MainMenu);
@@ -1893,8 +1880,8 @@ impl App {
             }
         }
         // The session slot (`session`): kept fresh while the game is played; no game on screen
-        // (the main menu, the editor) ends the session.
-        let session_ok = quick_save_ok && !self.test_play && !matches!(self.screen, Screen::Battle(_) | Screen::CustomBattle(_) | Screen::Field(_) | Screen::Editor);
+        // (the main menu) ends the session.
+        let session_ok = quick_save_ok && !matches!(self.screen, Screen::Battle(_) | Screen::CustomBattle(_) | Screen::Field(_));
         razdor::frame_probe::time(razdor::frame_probe::Stage::Session, || self.session.tick(self.game.as_ref(), session_ok, crate::ui::clock::now()));
         if let Some(path) = self.pending_load.take() {
             self.load(&path);
@@ -1907,15 +1894,6 @@ impl App {
                 self.message = Some(e);
                 self.screen = Screen::MainMenu;
             }
-            return;
-        }
-        // Leaving a test play (main menu, or "new game" on an end screen) returns to the editor.
-        if self.test_play && matches!(next, Some(Screen::MainMenu | Screen::ScenarioSelect)) {
-            self.test_play = false;
-            self.game = None;
-            self.dialogs.clear();
-            self.message = None;
-            self.screen = Screen::Editor;
             return;
         }
         if let Some(next) = next {

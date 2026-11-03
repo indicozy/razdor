@@ -165,6 +165,3 @@ hub-package-800 | hub:0:hello-story | 800x600 | RAZDOR_HUB_DIR=/mnt/ai_models/ra
 hub-installed-1280 | hub-installed | 1280x800 | RAZDOR_HUB_DIR=/mnt/ai_models/razdor-scratch/v2-hubpack/snap-hub-installed-1280
 hub-report-1280 | hub-report | 1280x800 | RAZDOR_HUB_DIR=/mnt/ai_models/razdor-scratch/v2-hubpack/snap-hub-report-1280
 hub-refused-1280 | hub-refused | 1280x800 | RAZDOR_HUB_DIR=/mnt/ai_models/razdor-scratch/v2-hubpack/snap-hub-refused-1280
-# The map editor (desktop only): the map open, and its find window over the properties of a building.
-editor-1280 | editor:РК1-Начало пути | 1280x800 |
-editor-find-props-1280 | editor:РК1-Начало пути:Казарм | 1280x800 |

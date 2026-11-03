@@ -33,6 +33,8 @@ pub mod map;
 pub mod paint;
 pub mod place;
 pub mod reconcile;
+pub mod geometry;
+pub mod newpkg;
 pub mod worker;
 
 #[cfg(test)]

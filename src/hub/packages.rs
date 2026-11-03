@@ -166,7 +166,7 @@ impl Hub {
                 return Err(format!("{id} {version}: this version is installed from other bytes; raise the version (the saves made on it keep their file)"));
             }
         } else {
-            crate::editor::files::write_atomically(&path, bytes).map_err(|e| format!("{rel}: {e}"))?;
+            crate::fsutil::write_atomically(&path, bytes).map_err(|e| format!("{rel}: {e}"))?;
         }
         if let Some(dir) = &self.trust_dir {
             let entry = trust::Entry { path: path.display().to_string(), id: id.to_string(), version: version.to_string(), hash: pack::open::package_hash(files) };

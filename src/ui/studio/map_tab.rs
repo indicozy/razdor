@@ -1,5 +1,5 @@
 //! The Map tab: the map of the open package, drawn by the game's own map renderer
-//! (`ui::editor::canvas`) into the tab's rectangle. egui allocates the rectangle and takes the
+//! (`ui::studio::canvas`) into the tab's rectangle. egui allocates the rectangle and takes the
 //! input (pan, zoom, click, drag, hover); the map is drawn with macroquad after the egui pass and
 //! before egui's meshes, clipped to the rectangle, so nothing of it shows over another dock.
 //!
@@ -17,7 +17,7 @@
 use egui::{Align2, Color32, ComboBox, CornerRadius, FontId, PointerButton, Sense, TextStyle, Ui};
 use egui_macroquad::egui;
 use macroquad::prelude as mq;
-use razdor::editor::geometry::CellRect;
+use razdor::studio::geometry::CellRect;
 use razdor::i18n::tr;
 use razdor::pack::compile::{ARMY_MODELS, BUILDING_NAMES, OBJECT_KINDS};
 use razdor::pack::diag::Severity;
@@ -30,7 +30,7 @@ use razdor::trf;
 
 use super::{Viewer, WARNING_AMBER};
 use crate::ui::dt_art::DtArt;
-use crate::ui::editor::canvas::{draw_map, Cam, Overview};
+use super::canvas::{draw_map, Cam, Overview};
 
 /// The tools of the Map tab's bar.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -181,7 +181,7 @@ fn banner(ui: &mut Ui, text: &str) {
     });
 }
 
-/// The cells of a brush of `size` centred on `(x, y)` (the editor's brush: the extra cell goes
+/// The cells of a brush of `size` centred on `(x, y)` (the brush: the extra cell goes
 /// down and right on an even size, which the odd sizes do not have).
 fn brush_cells(x: i32, y: i32, size: u32) -> Vec<(i64, i64)> {
     let r = CellRect::brush(x, y, size);
@@ -569,9 +569,9 @@ pub fn draw(canvas: &mut Canvas, maps: &MapView, pkg: Option<&Package>, selectio
         canvas.overview = Overview::default();
         canvas.overview_serial = good.serial;
     }
-    let tex = canvas.overview.texture(&good.doc);
+    let tex = canvas.overview.texture(&good.compiled.scenario, good.serial);
     scissor(Some(cam.view));
-    draw_map(&good.doc, art, cam, tex.as_ref());
+    draw_map(&good.compiled.scenario, art, cam, tex.as_ref());
     let spec = pkg.and_then(|p| p.maps.get(&good.map)).and_then(|m| m.spec.as_ref());
     if canvas.footprints {
         for (x, y) in footprint_cells_of(&good.compiled) {

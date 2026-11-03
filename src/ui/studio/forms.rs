@@ -89,32 +89,40 @@ fn text_field(ui: &mut Ui, salt: &str, current: &str, width: f32) -> Option<Stri
 /// A text key: a free field, a list of the keys that name the table, and the text it resolves to.
 fn text_key(ui: &mut Ui, salt: &str, current: &str, suggestions: &[String], texts: &BTreeMap<String, String>) -> Option<String> {
     let mut out = None;
-    ui.horizontal(|ui| {
-        // The picker first: at the inspector's edge the field is what gets cut, not the picker.
-        let mut picked = None;
-        ComboBox::from_id_salt(field_id(ui, &format!("{salt}-keys"))).selected_text("▾").width(24.0).show_ui(ui, |ui| {
-            for key in suggestions {
-                if ui.selectable_label(key == current, key.as_str()).clicked() && key != current {
-                    picked = Some(key.clone());
+    // A grid cell lays its contents out left to right: the field and the resolved text are stacked
+    // in a column, so the text gets its own line under the field.
+    ui.vertical(|ui| {
+        ui.horizontal(|ui| {
+            // The picker first: at the inspector's edge the field is what gets cut, not the picker.
+            let mut picked = None;
+            ComboBox::from_id_salt(field_id(ui, &format!("{salt}-keys"))).selected_text(tr("Text keys")).width(64.0).show_ui(ui, |ui| {
+                for key in suggestions {
+                    if ui.selectable_label(key == current, key.as_str()).clicked() && key != current {
+                        picked = Some(key.clone());
+                    }
                 }
+            });
+            if picked.is_some() {
+                out = picked;
+            }
+            if let Some(v) = text_field(ui, salt, current, 96.0) {
+                out = Some(v);
             }
         });
-        if picked.is_some() {
-            out = picked;
-        }
-        if let Some(v) = text_field(ui, salt, current, 96.0) {
-            out = Some(v);
+        // The resolved text wraps in the inspector's width, from the field's column to the panel's
+        // edge (the column is as wide as its widest row, which is what pushed the text past it).
+        let resolved = match texts.get(current) {
+            Some(text) => text.clone(),
+            None if !current.is_empty() => format!("{} {current}", tr("No text for this key in the language:")),
+            None => String::new(),
+        };
+        if !resolved.is_empty() {
+            let width = (ui.clip_rect().right() - ui.cursor().left() - 4.0).max(120.0);
+            ui.allocate_ui(egui::vec2(width, 0.0), |ui| {
+                ui.add(egui::Label::new(egui::RichText::new(resolved).weak()).wrap());
+            });
         }
     });
-    // The resolved text wraps in the field's column (the inspector is narrow).
-    let resolved = match texts.get(current) {
-        Some(text) => text.clone(),
-        None if !current.is_empty() => format!("{} {current}", tr("No text for this key in the language:")),
-        None => String::new(),
-    };
-    if !resolved.is_empty() {
-        ui.add(egui::Label::new(egui::RichText::new(resolved).weak()).wrap());
-    }
     out
 }
 
@@ -128,7 +136,8 @@ pub fn suggestions(texts: &BTreeMap<String, String>, names: &[&str]) -> Vec<Stri
 }
 
 /// A row list (troops, garrison, recruit): unit, and two numbers, with a remove button per row and
-/// an add button under them up to `max`. Returns the new rows when one of them changed.
+/// an add button under them up to `max`. The rows are a grid under captions (unit, the two
+/// labels), so each caption sits over its field. Returns the new rows when one of them changed.
 fn rows_field(
     ui: &mut Ui,
     salt: &str,
@@ -139,11 +148,15 @@ fn rows_field(
     (b_label, b_range): (&str, (i64, i64)),
 ) -> Option<Vec<(String, i64, i64)>> {
     let mut out: Option<Vec<(String, i64, i64)>> = None;
-    if !rows.is_empty() {
-        ui.weak(format!("{a_label} · {b_label}"));
-    }
-    for (i, (unit, a, b)) in rows.iter().enumerate() {
-        ui.horizontal(|ui| {
+    egui::Grid::new(field_id(ui, &format!("{salt}-rows"))).num_columns(4).spacing([8.0, 4.0]).show(ui, |ui| {
+        if !rows.is_empty() {
+            ui.weak(tr("Unit"));
+            ui.weak(a_label);
+            ui.weak(b_label);
+            ui.label("");
+            ui.end_row();
+        }
+        for (i, (unit, a, b)) in rows.iter().enumerate() {
             let mut next = unit.clone();
             if let Some(v) = choice(ui, &format!("{salt}-unit-{i}"), unit, &units.iter().map(String::as_str).collect::<Vec<_>>()) {
                 next = v;
@@ -158,7 +171,7 @@ fn rows_field(
                 r[i] = (unit.clone(), *a, v);
                 out = Some(r);
             }
-            if ui.small_button("✕").on_hover_text(tr("Remove")).clicked() {
+            if ui.small_button(tr("Remove")).clicked() {
                 let mut r = rows.to_vec();
                 r.remove(i);
                 out = Some(r);
@@ -168,8 +181,9 @@ fn rows_field(
                 r[i] = (next, *a, *b);
                 out = Some(r);
             }
-        });
-    }
+            ui.end_row();
+        }
+    });
     if rows.len() < max && ui.small_button(tr("Add")).clicked() {
         let mut r = rows.to_vec();
         r.push((units.first().cloned().unwrap_or_default(), a_range.0.max(1), b_range.0.max(1)));

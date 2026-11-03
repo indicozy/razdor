@@ -11,13 +11,12 @@ use std::ops::Range;
 
 use crate::dt::dtm::Scenario;
 use crate::dt::install::DtInstall;
-use crate::editor::doc::EditorDoc;
-use crate::editor::geometry::CellRect;
 use crate::pack::compile::{self, Compiled, MapNames};
 use crate::pack::diag::{Diagnostic, Report, Severity};
 use crate::pack::load::{line_of, Package};
 use crate::pack::map::MapFile;
 use crate::rules::world::footprint_cells;
+use crate::studio::geometry::CellRect;
 use crate::studio::edit::{Kind, Locator};
 
 /// The ids of the package's maps (`maps/<id>/`), sorted.
@@ -57,12 +56,11 @@ pub enum Selection {
     Object(usize),
 }
 
-/// A compile that worked: the map it is of, the compiled map, and the editor document the canvas
-/// draws (built from the same scenario). `serial` changes with every compile.
+/// A compile that worked: the map it is of and the compiled map (the canvas draws its scenario).
+/// `serial` changes with every compile and with every repaint.
 pub struct Good {
     pub map: String,
     pub compiled: Compiled,
-    pub doc: EditorDoc,
     pub serial: u64,
 }
 
@@ -93,8 +91,7 @@ impl MapView {
         match compile::compile(pkg, install, lang, &map) {
             Ok(compiled) => {
                 self.serial += 1;
-                let doc = EditorDoc::from_scenario(compiled.scenario.clone());
-                self.good = Some(Good { map, compiled, doc, serial: self.serial });
+                self.good = Some(Good { map, compiled, serial: self.serial });
                 Vec::new()
             }
             Err(report) => report.diagnostics,
@@ -111,8 +108,7 @@ impl MapView {
         match compiled {
             Ok(compiled) => {
                 self.serial += 1;
-                let doc = EditorDoc::from_scenario(compiled.scenario.clone());
-                self.good = Some(Good { map: map.to_string(), compiled, doc, serial: self.serial });
+                self.good = Some(Good { map: map.to_string(), compiled, serial: self.serial });
                 Vec::new()
             }
             Err(report) => report.diagnostics,
@@ -120,7 +116,7 @@ impl MapView {
     }
 
     /// Shows the codes of painted cells on the last good compile at once (before the rebuild). `cells`
-    /// are `(x, y, code)`; the drawn document is made again.
+    /// are `(x, y, code)`; the canvas redraws from the changed scenario (a new serial).
     pub fn repaint(&mut self, cells: &[(u32, u32, u8)]) {
         let Some(good) = self.good.as_mut() else { return };
         let w = good.compiled.scenario.width();
@@ -131,7 +127,6 @@ impl MapView {
         }
         self.serial += 1;
         good.serial = self.serial;
-        good.doc = EditorDoc::from_scenario(good.compiled.scenario.clone());
     }
 
     /// The last good compile, when it is of the map shown.

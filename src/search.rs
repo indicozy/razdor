@@ -1,5 +1,4 @@
-//! Text matching for Razdor's search boxes (the inventory filter, the map editor's Ctrl+F,
-//! the cheat console's item and unit names): case-insensitive in any script, with Ё read as
+//! Text matching for Razdor's search boxes (the inventory filter, the cheat console's search and its item and unit names): case-insensitive in any script, with Ё read as
 //! Е, so "ежевика" finds "Ёжевика" and "МЕЧ" finds "Меч".
 
 /// One character as the matcher compares it: lower case, `ё` as `е`.

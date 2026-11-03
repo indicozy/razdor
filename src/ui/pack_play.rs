@@ -240,9 +240,9 @@ impl App {
         self.scenarios.push(package_entry(opened, hub_pack));
     }
 
-    /// Whether a campaign package's game is on screen (not the editor's test play).
+    /// Whether a campaign package's game is on screen.
     pub(super) fn campaign_playing(&self) -> bool {
-        !self.test_play && self.game.is_some() && self.pack.as_ref().is_some_and(|p| p.opened.campaign.is_some())
+        self.game.is_some() && self.pack.as_ref().is_some_and(|p| p.opened.campaign.is_some())
     }
 
     /// The campaign's victory on the map on screen: the next map the graph names, entered with what

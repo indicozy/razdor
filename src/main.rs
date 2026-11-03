@@ -205,10 +205,6 @@ async fn main() {
     ui::session::install_exit_hooks();
     #[cfg(target_os = "ios")]
     ui::ios::observe_app_state();
-    // `--editor`: start in the map editor.
-    if std::env::args().skip(1).any(|a| a == "--editor") {
-        app.open_editor();
-    }
     // A `.rzpack` named on the command line is imported into the Hub (checked, not from the list).
     let args: Vec<String> = std::env::args().skip(1).collect();
     for notice in ui::hub_pack::import_args(&args) {

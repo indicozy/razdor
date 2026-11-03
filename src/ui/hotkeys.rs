@@ -32,7 +32,8 @@ pub enum Place {
     Load,
     /// Victory or defeat.
     End,
-    Editor,
+    /// Razdor Studio (`ui::studio`): its own keys.
+    Studio,
     /// The custom battle setup.
     Custom,
 }
@@ -99,9 +100,9 @@ pub fn shortcuts_allowed(g: Guard) -> bool {
     !g.typing && !g.dialog
 }
 
-/// Whether `key` may fire at `place`. The editor has its own keys (and F2).
+/// Whether `key` may fire at `place`. The studio has its own keys (and F2).
 pub fn allowed(place: Place, key: Global, g: Guard) -> bool {
-    if !shortcuts_allowed(g) || (place == Place::Editor && key != Global::Language) {
+    if !shortcuts_allowed(g) || (place == Place::Studio && key != Global::Language) {
         return false;
     }
     match key {
@@ -181,7 +182,7 @@ pub fn screen_keys(place: Place) -> Vec<(&'static str, &'static str)> {
         Place::Save => vec![(n_("Type"), n_("the save's name")), ("Ctrl+A / C / X / V", n_("select all, copy, cut, paste")), ("Enter", n_("save")), ("Esc", n_("cancel"))],
         Place::Load => vec![(n_("Click"), n_("pick a save")), ("Enter", n_("load it")), ("Esc", n_("cancel"))],
         Place::End => vec![(n_("Click"), n_("the buttons")), ("{QuickLoad}", n_("load the quick save")), ("{LatestAutosave}", n_("load the latest autosave"))],
-        Place::Editor => vec![],
+        Place::Studio => vec![],
         Place::Custom => vec![
             (n_("Click a unit type"), n_("add it to the army picked")),
             (n_("Click an army's name"), n_("pick that army")),
@@ -233,7 +234,7 @@ fn place_name(place: Place) -> &'static str {
         Place::Save => tr("Save"),
         Place::Load => tr("Load"),
         Place::End => tr("End of the game"),
-        Place::Editor => tr("Map editor"),
+        Place::Studio => "Razdor Studio",
         Place::Custom => tr("Custom battle"),
     }
 }
@@ -627,7 +628,7 @@ mod tests {
         Place::Save,
         Place::Load,
         Place::End,
-        Place::Editor,
+        Place::Studio,
         Place::Custom,
     ];
 
@@ -670,14 +671,14 @@ mod tests {
     }
 
     #[test]
-    fn quick_load_and_help_work_everywhere_but_the_editor() {
-        for place in ALL_PLACES.into_iter().filter(|p| *p != Place::Editor && !always_typing(*p)) {
+    fn quick_load_and_help_work_everywhere_but_the_studio() {
+        for place in ALL_PLACES.into_iter().filter(|p| *p != Place::Studio && !always_typing(*p)) {
             assert!(allowed(place, Global::QuickLoad, in_game()), "{place:?}");
             assert!(allowed(place, Global::Help, in_game()), "{place:?}");
         }
-        assert!(!allowed(Place::Editor, Global::Help, in_game()));
-        assert!(allowed(Place::Editor, Global::Language, in_game()), "F2 works in the editor too");
-        assert!(!allowed(Place::Editor, Global::Language, Guard { typing: true, ..in_game() }));
+        assert!(!allowed(Place::Studio, Global::Help, in_game()));
+        assert!(allowed(Place::Studio, Global::Language, in_game()), "F2 works in the studio too");
+        assert!(!allowed(Place::Studio, Global::Language, Guard { typing: true, ..in_game() }));
     }
 
     #[test]
@@ -707,7 +708,7 @@ mod tests {
 
     #[test]
     fn every_screen_lists_its_keys() {
-        for place in ALL_PLACES.into_iter().filter(|p| *p != Place::Editor) {
+        for place in ALL_PLACES.into_iter().filter(|p| *p != Place::Studio) {
             assert!(!screen_keys(place).is_empty(), "{place:?}");
         }
         let map: Vec<String> = screen_keys(Place::WorldMap).iter().map(|(k, _)| fill_keys(k)).collect();

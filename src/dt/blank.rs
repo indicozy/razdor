@@ -1,12 +1,10 @@
-//! What new maps and new records start with. The values are Razdor's own choices, picked so
-//! a new record behaves like the common case in the shipped maps (neutral buildings belong
-//! to the "neighbour" faction and take its row of the relation matrix, castles have
-//! barracks, armies give normal experience, and so on).
+//! A blank `.DTm` scenario and a new building, as Razdor makes them. Used by the mock hub's
+//! fixture maps (`hub::mock`) and by the translator's tests; nothing edits `.DTm` maps any more.
+//! The values are Razdor's own choices, picked so a new record behaves like the common case in
+//! the shipped maps (neutral buildings belong to the "neighbour" faction and take its row of the
+//! relation matrix, castles have barracks, and so on).
 
-use crate::dt::dtm::{Army, Building, GameDate, Header, HeroPreset, Point, Scenario};
-
-/// Map sizes the "new map" dialog offers (the shipped maps use these).
-pub const MAP_SIZES: [u32; 3] = [50, 100, 200];
+use crate::dt::dtm::{Building, GameDate, Header, HeroPreset, Scenario};
 
 /// The relation matrix of a new map (rows and columns: player, ally, neighbour, enemy).
 pub const DEFAULT_RELATIONS: [[i8; 4]; 4] = [[3, 2, 1, -2], [2, 3, 1, -2], [1, 1, 3, 1], [-2, -2, 1, 3]];
@@ -73,38 +71,6 @@ pub fn new_building(header: &Header, x: u16, y: u16, kind: u8, picture_type: u8,
     }
 }
 
-/// A new AI army: a feudal lord of the enemy faction standing guard (patrol radius 0).
-pub fn new_army(header: &Header, id: u8, x: u16, y: u16) -> Army {
-    let faction = 4;
-    Army {
-        x,
-        y,
-        id,
-        model: 4,
-        behaviour: 0,
-        faction,
-        relations: header.relations[faction as usize - 1],
-        patrols: 1,
-        exp_correction: 100,
-        garrison_strength: 50,
-        ..Army::default()
-    }
-}
-
-/// A new lantern (lit at the start, radius 5) or event point.
-pub fn new_point(id: u8, serial: u16, x: u16, y: u16, lantern: bool) -> Point {
-    Point {
-        x,
-        y,
-        id,
-        model: if lantern { 8 } else { 9 },
-        serial,
-        radius: if lantern { 5 } else { 0 },
-        active: lantern as u8,
-        ..Point::default()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,11 +93,5 @@ mod tests {
         assert_eq!((b.owner(), b.faction, b.relations, b.has_barracks, b.garrison_ai_only), (None, 3, [1, 1, 3, 1], 1, 0));
         assert_eq!((b.picture_type, b.picture_variant, b.size_x, b.size_y), (3, 2, 4, 4));
         assert_eq!(new_building(&h, 1, 1, 12, 12, 0, (0, 0)).size_x, 1);
-        let a = new_army(&h, 3, 5, 6);
-        assert_eq!((a.id, a.model, a.faction, a.relations, a.exp_correction, a.garrison_strength), (3, 4, 4, [-2, -2, 1, 3], 100, 50));
-        assert!(a.is_active());
-        let l = new_point(2, 7, 1, 1, true);
-        assert_eq!((l.model, l.radius, l.active, l.serial), (8, 5, 1, 7));
-        assert_eq!(new_point(1, 1, 0, 0, false).model, 9);
     }
 }

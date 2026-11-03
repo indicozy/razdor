@@ -1,7 +1,7 @@
 //! The keys the player can change (Razdor's, the owner's request after a player found F5 twice
 //! in the F1 list): each [`Action`] has a default key, the player's overrides are kept in the
 //! settings (`Settings::keys`) and read through [`key`]. Keys inside the dialogs, the arrows,
-//! the zoom keys, Space and the editor's keys stay fixed.
+//! the zoom keys and Space stay fixed.
 
 use razdor::local;
 use std::cell::RefCell;
