@@ -1,5 +1,6 @@
 //! The Scene dock: the shown map's objects by kind, and the triggers bound to the map. Clicking a
-//! hero, a building, an army or a point selects it and centres the Map tab on it.
+//! hero, a building, an army, a point or an object selects it, centres the Map tab on it and,
+//! when the Script shows the map's file, takes the Script to its table.
 
 use egui::{CollapsingHeader, ScrollArea, Ui};
 use egui_macroquad::egui;
@@ -11,7 +12,7 @@ use super::Viewer;
 
 impl Viewer<'_> {
     pub(super) fn scene(&mut self, ui: &mut Ui) {
-        let (Some(pkg), Some(id)) = (self.pkg, self.maps.map.clone()) else {
+        let (Some(pkg), Some(id)) = (self.pkg.clone(), self.maps.map.clone()) else {
             ui.weak(tr("No map to show."));
             return;
         };
@@ -46,10 +47,10 @@ impl Viewer<'_> {
                     row(ui, text, Selection::Point(i));
                 }
             });
-            // Objects can be hundreds: collapsed by default, plain rows (no selection).
+            // Objects can be hundreds: collapsed by default.
             CollapsingHeader::new(trf!("Objects ({count})", count = spec.object.len())).default_open(false).show(ui, |ui| {
-                for o in spec.object.iter().map(|o| o.get_ref()) {
-                    ui.weak(format!("{} ({}, {})", o.kind, o.cell[0], o.cell[1]));
+                for (i, o) in spec.object.iter().map(|o| o.get_ref()).enumerate() {
+                    row(ui, format!("{} ({}, {})", o.kind, o.cell[0], o.cell[1]), Selection::Object(i));
                 }
             });
             let here: Vec<&str> = pkg.triggers.iter().filter(|t| t.value.map.as_deref() == Some(id.as_str())).map(|t| t.value.id.as_str()).collect();
@@ -61,7 +62,7 @@ impl Viewer<'_> {
         });
         if let Some(sel) = pick {
             self.canvas.centre = centre_of(spec, &sel);
-            *self.selection = Some(sel);
+            self.select(sel);
             self.focus_map = true;
         }
     }

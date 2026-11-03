@@ -45,6 +45,30 @@ impl Files {
         self.get(path).and_then(|b| std::str::from_utf8(b).ok())
     }
 
+    /// Puts `bytes` at `path` in memory, replacing what was there: the studio's unsaved text.
+    /// The path must be a package path in its canonical form (no `..`, no absolute path, no
+    /// backslashes), the file within [`MAX_FILE_BYTES`], the file count within [`MAX_FILES`] and
+    /// the package's size within [`MAX_PACKAGE_BYTES`]. Nothing changes when it is refused.
+    pub fn overlay(&mut self, path: &str, bytes: impl Into<Vec<u8>>) -> Result<(), String> {
+        if safe_path(path).as_deref() != Some(path) {
+            return Err(format!("not a package path: {path:?}"));
+        }
+        let bytes = bytes.into();
+        if bytes.len() as u64 > MAX_FILE_BYTES {
+            return Err(format!("{path} is larger than {} MiB", MAX_FILE_BYTES >> 20));
+        }
+        let old = self.entries.get(path).map_or(0, Vec::len) as u64;
+        if old == 0 && !self.entries.contains_key(path) && self.entries.len() >= MAX_FILES {
+            return Err(format!("the package has more than {MAX_FILES} files (at {path})"));
+        }
+        let held: u64 = self.entries.values().map(|b| b.len() as u64).sum();
+        if held - old + bytes.len() as u64 > MAX_PACKAGE_BYTES {
+            return Err(format!("the package is larger than {} MiB (at {path})", MAX_PACKAGE_BYTES >> 20));
+        }
+        self.entries.insert(path.to_string(), bytes);
+        Ok(())
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&str, &[u8])> {
         self.entries.iter().map(|(p, b)| (p.as_str(), b.as_slice()))
     }
@@ -351,6 +375,32 @@ mod tests {
         assert_eq!(f.text("package.toml"), Some("id = \"x\""));
         assert_eq!(f.text("bin.dat"), None);
         assert_eq!(f.under("package").count(), 1);
+    }
+
+    #[test]
+    fn overlay_replaces_a_file_and_keeps_the_limits() {
+        let mut f = Files::default();
+        f.insert("units/a.toml", "old");
+        f.overlay("units/a.toml", "new").unwrap();
+        assert_eq!(f.text("units/a.toml"), Some("new"));
+        f.overlay("units/b.toml", "added").unwrap();
+        assert_eq!(f.paths().count(), 2);
+        // Paths in canonical form only.
+        for bad in ["../x.toml", "/x.toml", "units\\x.toml", "units//x.toml", "units/./x.toml", "", "C:/x.toml"] {
+            assert!(f.overlay(bad, "x").is_err(), "{bad:?} is refused");
+        }
+        assert_eq!(f.paths().count(), 2, "a refused overlay changes nothing");
+        // A file over the limit is refused, and the total over the package limit.
+        let big = vec![0u8; MAX_FILE_BYTES as usize + 1];
+        assert!(f.overlay("maps/x/map.toml", big).is_err());
+        let part = vec![0u8; 22 << 20];
+        f.overlay("a.bin", part.clone()).unwrap();
+        f.overlay("b.bin", part.clone()).unwrap();
+        let err = f.overlay("c.bin", part).unwrap_err();
+        assert!(err.contains("larger than 64 MiB"), "{err}");
+        // Replacing a file does not count its old size twice.
+        f.overlay("b.bin", vec![0u8; 1]).unwrap();
+        assert_eq!(f.get("b.bin").map(<[u8]>::len), Some(1));
     }
 
     #[test]

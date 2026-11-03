@@ -1,7 +1,20 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use super::*;
+use crate::pack::diag::Severity as Sev;
+use crate::studio::edit::{self as ed, Edit, Kind, Locator};
+use crate::studio::history::{History, Step};
+use toml_edit::Value;
+
+/// The brod map of the Pepelnaya Marka example (package-relative).
+const BROD: &str = "maps/brod/map.toml";
+
+/// The `toll` army of brod.
+fn toll() -> Locator {
+    Locator { file: BROD.into(), kind: Kind::Army, id: Some("toll".into()), index: 0 }
+}
 
 fn example(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/packs").join(name)
@@ -255,5 +268,268 @@ mod links {
         symlink(out.file(), copy.0.join("package.toml")).unwrap();
         assert!(ws.save(idx).is_err());
         assert_eq!(fs::read_to_string(out.file()).unwrap(), "secret = true\n");
+    }
+}
+
+fn walk_toml(dir: &Path, out: &mut Vec<PathBuf>) {
+    for e in fs::read_dir(dir).unwrap().flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            walk_toml(&p, out);
+        } else if p.extension().is_some_and(|x| x == "toml") {
+            out.push(p);
+        }
+    }
+}
+
+#[test]
+fn every_toml_of_the_examples_prints_back_byte_for_byte() {
+    let mut files = Vec::new();
+    for name in ["hello-story", "pepelnaya-marka"] {
+        walk_toml(&example(name), &mut files);
+    }
+    assert!(files.len() > 10, "{} files", files.len());
+    for f in files {
+        let text = fs::read_to_string(&f).unwrap();
+        let doc: toml_edit::DocumentMut = text.parse().unwrap();
+        assert_eq!(doc.to_string(), text, "{}", f.display());
+    }
+}
+
+#[test]
+fn moving_the_toll_army_changes_one_line_and_keeps_every_comment() {
+    let copy = Copy::of("pepelnaya-marka");
+    let mut ws = Workspace::open(&copy.0).unwrap();
+    let before = fs::read_to_string(copy.0.join(BROD)).unwrap();
+    ws.apply(Edit::SetCell { at: toll(), cell: (12, 13) }).unwrap();
+    let idx = ws.docs.iter().position(|d| d.path == BROD).unwrap();
+    let after = ws.docs[idx].text.clone();
+    let (b, a): (Vec<&str>, Vec<&str>) = (before.lines().collect(), after.lines().collect());
+    assert_eq!(a.len(), b.len(), "no line added or removed");
+    let changed: Vec<usize> = (0..b.len()).filter(|&i| b[i] != a[i]).collect();
+    assert_eq!(changed.len(), 1, "{changed:?}");
+    assert_eq!(a[changed[0]], "cell = [12, 13]");
+    assert_eq!(b[changed[0]], "cell = [29, 23]");
+    assert_eq!(changed[0], b.iter().position(|l| *l == "id = \"toll\"").unwrap() + 2, "the toll's own cell");
+    let comments = |t: &str| t.lines().filter(|l| l.trim_start().starts_with('#')).count();
+    assert_eq!(comments(&before), comments(&after));
+    assert!(ws.docs[idx].is_dirty());
+    assert_eq!(fs::read_to_string(copy.0.join(BROD)).unwrap(), before, "nothing written to disk");
+    assert_eq!(ws.history.undo_label(), Some("move army toll"));
+}
+
+#[test]
+fn a_key_the_format_does_not_have_is_an_error() {
+    let copy = Copy::of("pepelnaya-marka");
+    let mut ws = Workspace::open(&copy.0).unwrap();
+    let edit = Edit::SetValue { at: toll(), key: "colour".into(), value: Value::from("red") };
+    let err = ws.apply(edit).unwrap_err();
+    assert!(err.contains("colour"), "{err}");
+    assert!(ws.history.undo_label().is_none());
+    let text = ed::apply_to_text(&fs::read_to_string(copy.0.join(BROD)).unwrap(), &Edit::SetValue { at: toll(), key: "colour".into(), value: Value::from("red") });
+    assert!(text.is_err());
+}
+
+#[test]
+fn the_locator_at_the_toll_id_is_that_army_and_the_building_spans_are_disjoint() {
+    let ws = Workspace::open(example("pepelnaya-marka")).unwrap();
+    let text = fs::read_to_string(example("pepelnaya-marka").join(BROD)).unwrap();
+    let at = text.find("id = \"toll\"").unwrap();
+    let found = ws.locator_at(BROD, at).expect("a table at the id");
+    assert_eq!((found.kind, found.id.as_deref()), (Kind::Army, Some("toll")));
+
+    let spans = ws.spans(BROD).unwrap();
+    let buildings: Vec<_> = spans.iter().filter(|(l, _)| l.kind == Kind::Building).collect();
+    assert_eq!(buildings.len(), 12);
+    for w in spans.windows(2) {
+        assert!(w[0].1.end <= w[1].1.start, "{:?} and {:?} overlap", w[0].0, w[1].0);
+    }
+    assert!(spans.iter().all(|(_, r)| r.end <= text.len()));
+    for (l, r) in &spans {
+        let head = match l.kind {
+            Kind::Hero => "[hero]",
+            Kind::Building => "[[building]]",
+            Kind::Army => "[[army]]",
+            Kind::Point => "[[point]]",
+            Kind::Object => "[[object]]",
+        };
+        assert!(text[r.start..].starts_with(head), "{:?} starts at its header", l);
+    }
+    // A comment above a table is not in its span.
+    let comment = text.find("# The ford toll").unwrap();
+    assert_eq!(ws.locator_at(BROD, comment), None);
+}
+
+#[test]
+fn undo_and_redo_restore_the_exact_texts_and_a_burst_is_one_step() {
+    let copy = Copy::of("pepelnaya-marka");
+    let mut ws = Workspace::open(&copy.0).unwrap();
+    let idx = ws.open_doc("package.toml").unwrap();
+    let original = ws.docs[idx].text.clone();
+
+    // A burst of typing: three frames, one undo step with the text before and after.
+    let mut prev = original.clone();
+    for c in ["x", "y", "z"] {
+        ws.begin_text_edit("package.toml", &prev);
+        ws.docs[idx].text.push_str(c);
+        prev = ws.docs[idx].text.clone();
+    }
+    ws.end_text_edit();
+    assert_eq!(ws.history.undo_len(), 1);
+    assert_eq!(ws.history.undo_label(), Some("edit package.toml"));
+    assert_eq!(ws.undo().unwrap().as_deref(), Some("edit package.toml"));
+    assert_eq!(ws.docs[idx].text, original);
+    assert_eq!(ws.redo().unwrap().as_deref(), Some("edit package.toml"));
+    assert_eq!(ws.docs[idx].text, format!("{original}xyz"));
+    assert!(ws.undo().unwrap().is_some());
+
+    // A visual edit is one step with the army's label; a new step clears the redo stack.
+    let brod_before = ws.open_doc(BROD).map(|i| ws.docs[i].text.clone()).unwrap();
+    ws.apply(Edit::SetCell { at: toll(), cell: (12, 13) }).unwrap();
+    assert_eq!(ws.history.undo_label(), Some("move army toll"));
+    assert!(ws.undo().unwrap().is_some());
+    let i = ws.docs.iter().position(|d| d.path == BROD).unwrap();
+    assert_eq!(ws.docs[i].text, brod_before, "undo restores the exact text");
+    assert_eq!(ws.history.redo_label(), Some("move army toll"));
+    ws.apply(Edit::SetCell { at: toll(), cell: (14, 14) }).unwrap();
+    assert!(ws.history.redo_label().is_none(), "a new step clears redo");
+    // Nothing to undo once the stack is empty.
+    while ws.undo().unwrap().is_some() {}
+    assert_eq!(ws.docs[i].text, brod_before);
+    assert_eq!(ws.undo().unwrap(), None);
+}
+
+#[test]
+fn the_undo_stack_keeps_its_last_200_steps() {
+    let mut h = History::default();
+    for n in 0..210 {
+        h.record(Step { path: "a.toml".into(), before: n.to_string(), after: (n + 1).to_string(), label: format!("step {n}") });
+    }
+    assert_eq!(h.undo_len(), history::LIMIT);
+    assert_eq!(h.undo_label(), Some("step 209"));
+    // A step that changes nothing is not recorded.
+    h.record(Step { path: "a.toml".into(), before: "x".into(), after: "x".into(), label: "nothing".into() });
+    assert_eq!(h.undo_len(), history::LIMIT);
+}
+
+#[test]
+fn an_unsaved_edit_that_breaks_a_reference_shows_in_the_checks_without_a_save() {
+    let copy = Copy::of("hello-story");
+    let mut ws = Workspace::open(&copy.0).unwrap();
+    assert_eq!(ws.check().unwrap().0, 0);
+    let path = "maps/first-light/map.toml";
+    let idx = ws.open_doc(path).unwrap();
+    let broken = ws.docs[idx].text.replacen("faction = \"player\"", "faction = \"nobody\"", 1);
+    assert_ne!(broken, ws.docs[idx].text);
+    ws.docs[idx].text = broken;
+    let (errors, _) = ws.check().unwrap();
+    assert!(errors > 0);
+    assert!(ws.problems.iter().any(|d| d.file == path && d.message.contains("nobody")), "{:?}", ws.problems);
+    assert!(!fs::read_to_string(copy.0.join(path)).unwrap().contains("nobody"), "still not on disk");
+}
+
+#[test]
+fn a_file_changed_outside_is_ignored_when_it_is_our_save_reloaded_when_clean_and_asked_when_dirty() {
+    let copy = Copy::of("hello-story");
+    let mut ws = Workspace::open(&copy.0).unwrap();
+    let idx = ws.open_doc("package.toml").unwrap();
+    let original = ws.docs[idx].text.clone();
+
+    // Our own save, seen again by the watcher: nothing.
+    ws.docs[idx].text.push_str("# mine\n");
+    ws.save(idx).unwrap();
+    let saved = ws.docs[idx].text.clone();
+    assert_eq!(ws.on_disk_change("package.toml", &saved), Reconcile::Ignored);
+    assert!(!ws.docs[idx].is_dirty());
+    assert_eq!(ws.history.undo_len(), 0);
+
+    // A clean document takes the disk text, as one undo step.
+    let outside = format!("{original}# outside\n");
+    assert_eq!(ws.on_disk_change("package.toml", &outside), Reconcile::Reloaded);
+    assert_eq!(ws.docs[idx].text, outside);
+    assert!(!ws.docs[idx].is_dirty());
+    assert_eq!(ws.history.undo_label(), Some("outside change: package.toml"));
+    assert!(ws.undo().unwrap().is_some());
+    assert_eq!(ws.docs[idx].text, saved, "the step restores the text before it");
+
+    // A dirty document keeps its text and asks.
+    ws.docs[idx].text.push_str("# typed\n");
+    let mine = ws.docs[idx].text.clone();
+    let disk = format!("{saved}# disk\n");
+    assert_eq!(ws.on_disk_change("package.toml", &disk), Reconcile::Asks { path: "package.toml".into(), disk: disk.clone() });
+    assert_eq!(ws.docs[idx].text, mine, "nothing replaced before the user answers");
+    let changed = unified(&mine, &disk).lines().filter(|l| l.starts_with('+') && !l.starts_with("+++")).count();
+    assert_eq!(changed, 1, "one line added on disk");
+
+    // Keep mine: the text stays, dirty, and the disk text is the baseline.
+    ws.keep_mine("package.toml", &disk).unwrap();
+    assert!(ws.docs[idx].is_dirty());
+    assert_eq!(ws.on_disk_change("package.toml", &disk), Reconcile::Ignored, "the disk is the baseline now");
+    // Reload: the disk text, as one undo step that restores mine.
+    ws.take_disk("package.toml", &disk).unwrap();
+    assert_eq!(ws.docs[idx].text, disk);
+    assert!(!ws.docs[idx].is_dirty());
+    ws.undo().unwrap();
+    assert_eq!(ws.docs[idx].text, mine);
+}
+
+#[test]
+fn a_file_not_open_is_ignored_by_the_reconcile() {
+    let copy = Copy::of("hello-story");
+    let mut ws = Workspace::open(&copy.0).unwrap();
+    assert_eq!(ws.on_disk_change("package.toml", "anything"), Reconcile::Ignored);
+    assert!(ws.docs.is_empty());
+}
+
+#[test]
+fn a_broken_toml_keeps_the_last_good_package_and_refuses_visual_edits() {
+    let copy = Copy::of("pepelnaya-marka");
+    let mut ws = Workspace::open(&copy.0).unwrap();
+    ws.check().unwrap();
+    let good = ws.package().unwrap();
+    let idx = ws.open_doc(BROD).unwrap();
+    let original = ws.docs[idx].text.clone();
+    ws.docs[idx].text.push_str("\n[[army\n");
+    ws.rebuild().unwrap();
+
+    assert!(Rc::ptr_eq(&good, &ws.package().unwrap()), "the last good package is kept");
+    assert_eq!(ws.stale.len(), 1);
+    assert_eq!(ws.stale[0].path, BROD);
+    assert!(ws.stale[0].line > 1, "{:?}", ws.stale);
+    assert!(ws.stale[0].banner().starts_with("stale: maps/brod/map.toml line "));
+    assert!(ws.problems.iter().any(|d| d.file == BROD && d.severity == Sev::Error));
+
+    let before = ws.docs[idx].text.clone();
+    let err = ws.apply(Edit::SetCell { at: toll(), cell: (12, 13) }).unwrap_err();
+    assert!(err.starts_with("stale: maps/brod/map.toml line "), "{err}");
+    assert_eq!(ws.docs[idx].text, before, "the text is not changed");
+
+    // Other files stay editable.
+    assert!(ws.open_doc("triggers/brod.toml").is_ok());
+
+    // Fixed again: the package is read again.
+    ws.docs[idx].text = original;
+    ws.rebuild().unwrap();
+    assert!(ws.stale.is_empty());
+    assert!(!Rc::ptr_eq(&good, &ws.package().unwrap()));
+}
+
+#[test]
+fn the_diff_of_a_file_shows_the_changed_lines() {
+    let d = unified("a\nb\nc\n", "a\nB\nc\n");
+    assert!(d.contains("-b\n"), "{d}");
+    assert!(d.contains("+B\n"), "{d}");
+    assert_eq!(unified("same\n", "same\n").lines().filter(|l| l.starts_with('+') || l.starts_with('-')).count(), 0);
+}
+
+#[test]
+fn a_selection_has_its_locator_and_back() {
+    let ws = Workspace::open(example("pepelnaya-marka")).unwrap();
+    let (pkg, _) = ws.read_package().unwrap();
+    let spec = pkg.maps["brod"].spec.as_ref().unwrap();
+    for sel in [map::Selection::Hero, map::Selection::Army("toll".into()), map::Selection::Point(0), map::Selection::Object(3)] {
+        let loc = map::locator_of(BROD, spec, &sel).unwrap();
+        assert_eq!(map::selection_of(&loc), Some(sel.clone()));
+        assert!(map::cell_of(spec, &sel).is_some());
     }
 }

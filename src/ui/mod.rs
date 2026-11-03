@@ -600,11 +600,11 @@ impl App {
         Ok(())
     }
 
-    /// Shows map `map` and selects `army` in the open studio (the snapshot's `studio:<folder>:<map>:<army>`).
+    /// Shows map `map` and selects `army` in the open studio (the snapshot's `studio:<folder>:<map>:<army>[:<option>…]`).
     #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
-    pub fn studio_preselect(&mut self, map: Option<&str>, army: Option<&str>) -> Result<(), String> {
+    pub fn studio_preselect(&mut self, map: Option<&str>, army: Option<&str>, opts: &[&str]) -> Result<(), String> {
         match self.studio.as_mut() {
-            Some(studio) => studio.preselect(map, army),
+            Some(studio) => studio.preselect(map, army, opts),
             None => Err("the studio is not open".into()),
         }
     }

@@ -20,6 +20,10 @@ serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
 sha2 = "0.10.9"
 # The `.rzpack` package format (`pack`): its manifest, texts and content files.
 toml = { version = "0.9", features = ["serde"] }
+# Format-preserving TOML for the studio's writes (`studio::edit`): comments, order and layout survive.
+toml_edit = "0.25"
+# Line diffs of a file changed on disk (`studio::reconcile`).
+similar = "3.2"
 # The terrain picture of a package map (`maps/<id>/terrain.png`): indexed or RGB, 8-bit after decoding.
 png = "0.17"
 # Unpacking the game archive on the phones (`dt::unpack`): pure Rust, no deflate C code.
@@ -31,6 +35,8 @@ mlua = { version = "0.12", features = ["lua54", "vendored"], optional = true }
 # Desktop only: the studio feature is compiled out of Android and iOS (see below).
 egui-macroquad = { version = "0.17.3", optional = true }
 egui_dock = { version = "0.16", optional = true }
+# Watches the open package folder for outside changes (`ui::studio::watch`).
+notify = { version = "8.2.1", optional = true }
 
 [dev-dependencies]
 # The tests of `dt::unpack` write a 7z archive; the game itself only reads them.
@@ -55,7 +61,7 @@ gamepad = ["dep:gilrs"]
 lua = ["dep:mlua"]
 # Razdor Studio: the editor for `.rzpack` packages (`razdor --studio`), egui over the game's window.
 # Compiled out of Android and iOS (the gated code is `cfg(all(feature = "studio", not(any(android, ios))))`).
-studio = ["dep:egui-macroquad", "dep:egui_dock"]
+studio = ["dep:egui-macroquad", "dep:egui_dock", "dep:notify"]
 
 # Line tables only: backtraces keep file and line, and the debug build stays several times
 # smaller on disk (full debug info made target/debug grow past 30 GB).

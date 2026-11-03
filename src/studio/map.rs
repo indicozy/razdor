@@ -16,6 +16,7 @@ use crate::pack::compile::{self, Compiled, MapNames};
 use crate::pack::diag::Diagnostic;
 use crate::pack::load::Package;
 use crate::pack::map::MapFile;
+use crate::studio::edit::{Kind, Locator};
 
 /// The ids of the package's maps (`maps/<id>/`), sorted.
 pub fn map_ids(pkg: &Package) -> Vec<String> {
@@ -49,6 +50,9 @@ pub enum Selection {
     Army(String),
     /// A point, by its index in the map file's `[[point]]` list.
     Point(usize),
+    /// A terrain object, by its index in the map file's `[[object]]` list (the Scene's rows; the
+    /// canvas does not pick objects).
+    Object(usize),
 }
 
 /// A compile that worked: the map it is of, the compiled map, and the editor document the canvas
@@ -144,18 +148,51 @@ pub fn outline_of(compiled: &Compiled, spec: &MapFile, sel: &Selection) -> Vec<C
             .map(|a| vec![CellRect::brush(a.x as i32, a.y as i32, 1)])
             .unwrap_or_default(),
         Selection::Point(i) => spec.point.get(*i).map(|p| p.get_ref().cell).map(|c| vec![CellRect::brush(c[0] as i32, c[1] as i32, 1)]).unwrap_or_default(),
+        Selection::Object(i) => spec.object.get(*i).map(|o| o.get_ref().cell).map(|c| vec![CellRect::brush(c[0] as i32, c[1] as i32, 1)]).unwrap_or_default(),
     }
 }
 
-/// The point a selection sits on, in cell units (the middle of its cell), from the map file.
-pub fn centre_of(spec: &MapFile, sel: &Selection) -> Option<(f32, f32)> {
-    let cell = match sel {
+/// The cell a selection's table gives in the map file (a building's is its footprint's
+/// bottom-right cell), from the file's text model.
+pub fn cell_of(spec: &MapFile, sel: &Selection) -> Option<[u32; 2]> {
+    Some(match sel {
         Selection::Hero => spec.hero.cell,
         Selection::Building(id) => spec.building.iter().find(|b| b.get_ref().id == *id)?.get_ref().cell,
         Selection::Army(id) => spec.army.iter().find(|a| a.get_ref().id == *id)?.get_ref().cell,
         Selection::Point(i) => spec.point.get(*i)?.get_ref().cell,
-    };
-    Some((cell[0] as f32 + 0.5, cell[1] as f32 + 0.5))
+        Selection::Object(i) => spec.object.get(*i)?.get_ref().cell,
+    })
+}
+
+/// The map file's table of a selection, as the studio's edits and its linked selection name it.
+/// `file` is the map's file (`maps/<id>/map.toml`).
+pub fn locator_of(file: &str, spec: &MapFile, sel: &Selection) -> Option<Locator> {
+    let at = |kind, id: Option<String>, index| Some(Locator { file: file.to_string(), kind, id, index });
+    match sel {
+        Selection::Hero => at(Kind::Hero, None, 0),
+        Selection::Building(id) => at(Kind::Building, Some(id.clone()), 0),
+        Selection::Army(id) => at(Kind::Army, Some(id.clone()), 0),
+        Selection::Point(i) => at(Kind::Point, spec.point.get(*i)?.get_ref().id.clone(), *i),
+        Selection::Object(i) => at(Kind::Object, None, *i),
+    }
+}
+
+/// The selection of a map table, the inverse of [`locator_of`]: a `[[building]]` or `[[army]]`
+/// by its id, the others by their index.
+pub fn selection_of(loc: &Locator) -> Option<Selection> {
+    Some(match loc.kind {
+        Kind::Hero => Selection::Hero,
+        Kind::Building => Selection::Building(loc.id.clone()?),
+        Kind::Army => Selection::Army(loc.id.clone()?),
+        Kind::Point => Selection::Point(loc.index),
+        Kind::Object => Selection::Object(loc.index),
+    })
+}
+
+/// The point a selection sits on, in cell units (the middle of its cell), from the map file.
+pub fn centre_of(spec: &MapFile, sel: &Selection) -> Option<(f32, f32)> {
+    let [x, y] = cell_of(spec, sel)?;
+    Some((x as f32 + 0.5, y as f32 + 0.5))
 }
 
 /// The TOML table of a selection, from the map file's text.
@@ -186,6 +223,10 @@ pub fn inspect(text: &str, sel: &Selection) -> Result<Inspect, String> {
         Selection::Point(i) => {
             let (n, t) = element(&table, "point", None, *i)?;
             ("[[point]]", n, t)
+        }
+        Selection::Object(i) => {
+            let (n, t) = element(&table, "object", None, *i)?;
+            ("[[object]]", n, t)
         }
     };
     let line = header_line(text, header, nth).ok_or_else(|| format!("{header} not found in the file"))?;

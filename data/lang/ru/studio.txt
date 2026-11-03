@@ -46,3 +46,27 @@ Armies ({count}) = Армии ({count})
 Points ({count}) = Точки ({count})
 Objects ({count}) = Объекты ({count})
 Triggers here ({count}) = Триггеры здесь ({count})
+
+# Step 3: menus, undo, outside changes, the drag on the map
+Edit = Правка
+Undo: {label} = Отменить: {label}
+Redo: {label} = Вернуть: {label}
+Undone: {label} = Отменено: {label}
+Redone: {label} = Возвращено: {label}
+{path} changed on disk: reloaded (Ctrl+Z takes the old text back) = {path} изменён на диске: перечитан (Ctrl+Z вернёт прежний текст)
+{path} reloaded from disk (Ctrl+Z takes the old text back) = {path} перечитан с диска (Ctrl+Z вернёт прежний текст)
+{path} kept: the disk text is the saved one now = {path} оставлен: текст на диске теперь считается сохранённым
+{path} changed on disk = {path} изменён на диске
+The file changed on disk, and it has unsaved changes here. = Файл изменился на диске, а здесь есть несохранённые правки.
+Reload = Перечитать с диска
+Keep mine = Оставить мои
+Show diff = Показать отличия
+Hide diff = Скрыть отличия
+Unsaved changes = Несохранённые изменения
+Save the changed files before leaving? = Сохранить изменённые файлы перед выходом?
+Discard = Не сохранять
+Outside the map: the move is not made = За пределами карты: перенос не сделан
+This object has no table in the file = У этого объекта нет таблицы в файле
+Outside changes are not seen: {reason} = Изменения извне не видны: {reason}
+Object = Объект
+Read-only for now: the canvas moves objects by dragging them. = Пока только для чтения: объекты на карте двигаются перетаскиванием.

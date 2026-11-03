@@ -955,6 +955,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "kqueue"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d763e5b24120b4ddf50de6c92308156765aabfbbccebf401da7cff2d70a41ea"
+dependencies = [
+ "kqueue-sys",
+ "libc",
+]
+
+[[package]]
+name = "kqueue-sys"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "07293a4e297ac234359b510362495713f75ea345d5307140414f20c69ffeb087"
+dependencies = [
+ "bitflags 2.13.2",
+ "libc",
+]
+
+[[package]]
 name = "lewton"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1148,6 +1168,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mio"
+version = "1.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1788edb87fdc09c7e26304471e2f5be8cdefb1b6930d6e3985fc02ff53bf86ee"
+dependencies = [
+ "libc",
+ "log",
+ "wasi",
+ "windows-sys",
+]
+
+[[package]]
 name = "mlua"
 version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1211,6 +1243,34 @@ name = "nohash-hasher"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451"
+
+[[package]]
+name = "notify"
+version = "8.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82f812702fbc75d35416d3f884e04925be7e9498f4eceea2e24ba34559284674"
+dependencies = [
+ "bitflags 2.13.2",
+ "inotify",
+ "kqueue",
+ "libc",
+ "log",
+ "mio",
+ "notify-types",
+ "objc2-core-foundation",
+ "objc2-core-services",
+ "walkdir",
+ "windows-sys",
+]
+
+[[package]]
+name = "notify-types"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0a437a9308232ce794b1e7fdf540d38ea37efc3c73492640c13b4c8568b8f108"
+dependencies = [
+ "bitflags 2.13.2",
+]
 
 [[package]]
 name = "num-traits"
@@ -1316,6 +1376,16 @@ dependencies = [
  "objc2 0.5.3",
  "objc2-foundation 0.2.2",
  "objc2-metal",
+]
+
+[[package]]
+name = "objc2-core-services"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "583300ad934cba24ff5292aee751ecc070f7ca6b39a574cc21b7b5e588e06a0b"
+dependencies = [
+ "libc",
+ "objc2-core-foundation",
 ]
 
 [[package]]
@@ -1618,6 +1688,7 @@ dependencies = [
  "libc",
  "macroquad",
  "mlua",
+ "notify",
  "png",
  "rfd",
  "rustybuzz",
@@ -1625,7 +1696,9 @@ dependencies = [
  "serde_json",
  "sevenz-rust2",
  "sha2",
+ "similar",
  "toml",
+ "toml_edit",
  "unicode-bidi",
  "zip",
 ]
@@ -1863,6 +1936,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
+name = "similar"
+version = "3.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2f8bec09ae8fae0f4f265a4559a9334be3929d8504e9b536df0a41302bd1733"
+dependencies = [
+ "bstr",
+]
+
+[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2008,7 +2090,7 @@ dependencies = [
  "indexmap",
  "serde_core",
  "serde_spanned",
- "toml_datetime",
+ "toml_datetime 0.7.5+spec-1.1.0",
  "toml_parser",
  "toml_writer",
  "winnow 0.7.15",
@@ -2021,6 +2103,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92e1cfed4a3038bc5a127e35a2d360f145e1f4b971b551a2ba5fd7aedf7e1347"
 dependencies = [
  "serde_core",
+]
+
+[[package]]
+name = "toml_datetime"
+version = "1.1.2+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b86d767906c6c42421dcba507eb9d203e779497710a47782a224bb871653053"
+dependencies = [
+ "serde_core",
+]
+
+[[package]]
+name = "toml_edit"
+version = "0.25.17+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3641d5bbb5349a79e1020a242d251efbc546ad8048d133958323ce9c40a9c9c"
+dependencies = [
+ "indexmap",
+ "toml_datetime 1.1.2+spec-1.1.0",
+ "toml_parser",
+ "toml_writer",
+ "winnow 1.0.4",
 ]
 
 [[package]]
@@ -2551,6 +2655,9 @@ name = "winnow"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "writeable"

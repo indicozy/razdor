@@ -1,6 +1,6 @@
-//! The Inspector dock: the selected object's fields as the map file has them. Read-only in this
-//! step; the fields are in file order, from the map file's text (the open document's when it is
-//! open, else the file on disk).
+//! The Inspector dock: the selected object's fields as the map file has them, in file order, from
+//! the map file's text (the open document's when it is open, else the file on disk). Read-only;
+//! «Show in script» takes the Script to the object's table.
 
 use std::fs;
 
@@ -9,7 +9,7 @@ use egui_macroquad::egui;
 use razdor::i18n::tr;
 use razdor::studio::map::{inspect, Selection};
 
-use super::{Viewer, ERROR_RED};
+use super::{jump_for, Jump, Viewer, ERROR_RED};
 
 impl Viewer<'_> {
     pub(super) fn inspector(&mut self, ui: &mut Ui) {
@@ -26,6 +26,7 @@ impl Viewer<'_> {
             Selection::Building(i) => (tr("Building"), i.clone()),
             Selection::Army(i) => (tr("Army"), i.clone()),
             Selection::Point(i) => (tr("Point"), (i + 1).to_string()),
+            Selection::Object(i) => (tr("Object"), (i + 1).to_string()),
         };
         ui.strong(if ident.is_empty() { kind.to_string() } else { format!("{kind}: {ident}") });
         let path = format!("maps/{id}/map.toml");
@@ -48,12 +49,12 @@ impl Viewer<'_> {
                 });
                 ui.add_space(6.0);
                 if ui.button(tr("Show in script")).clicked() {
+                    *self.jump = Some(jump_for(&*self.ws, self.pkg.as_deref(), &path, &sel).unwrap_or(Jump { line: found.line, range: None }));
                     self.open = Some(path.clone());
-                    *self.jump = Some(found.line);
                 }
             }
         }
         ui.add_space(6.0);
-        ui.weak(tr("Read-only for now: editing comes in the next step."));
+        ui.weak(tr("Read-only for now: the canvas moves objects by dragging them."));
     }
 }

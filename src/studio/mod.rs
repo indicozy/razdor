@@ -2,22 +2,36 @@
 //! toolkit here; the screens are in `ui::studio`.
 //!
 //! The folder on disk is the truth (the studio's design, decision 6). A `Workspace` lists the
-//! package's files, holds the text documents opened for editing and the last check's
-//! diagnostics. Edits stay in memory until a save; `check` re-reads the folder from disk, so it
-//! sees what was saved and what other tools changed.
+//! package's files and holds the text documents opened for editing. Edits stay in memory until a
+//! save. The package the screens read is parsed from the folder with every open document's text
+//! put over its file (`rebuild`), so checks and map compiles see unsaved edits. A document that
+//! does not parse as TOML keeps the last good package (`stale`) and refuses visual edits. Visual
+//! edits are format-preserving (`edit`), undo and redo are one stack per package (`history`), and
+//! a file changed on disk is reconciled with the open text (`reconcile`).
 
 use std::fs;
+use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
+use std::rc::Rc;
+
+use toml_edit::DocumentMut;
 
 use crate::pack::check;
-use crate::pack::diag::{Diagnostic, Report};
+use crate::pack::diag::{Diagnostic, Report, Severity};
 use crate::pack::files::{refused_path, Files};
-use crate::pack::load::Package;
+use crate::pack::load::{line_of, Package};
 
+pub mod edit;
+pub mod history;
 pub mod map;
+pub mod reconcile;
 
 #[cfg(test)]
 mod tests;
+
+pub use edit::{Edit, Kind, Locator};
+pub use history::Step;
+pub use reconcile::{unified, Reconcile};
 
 /// The extensions the studio opens as text.
 const TEXT_EXTENSIONS: [&str; 4] = ["toml", "lua", "md", "txt"];
@@ -32,7 +46,17 @@ pub struct Workspace {
     /// The text documents open for editing, in the order they were opened.
     pub docs: Vec<Doc>,
     /// The last check's diagnostics: the parse problems first, then the rules' (`pack::check`).
+    /// While a document is stale, its parse error is first.
     pub problems: Vec<Diagnostic>,
+    /// The package as last read: the disk with every open document's text over it. Kept while a
+    /// document does not parse (see [`Stale`]).
+    package: Option<Rc<Package>>,
+    /// The open TOML documents that do not parse, as of the last [`Workspace::rebuild`].
+    pub stale: Vec<Stale>,
+    /// The undo and redo stacks of the package.
+    pub history: history::History,
+    /// The text burst being typed: its file and the file's text before the burst.
+    burst: Option<(String, String)>,
 }
 
 /// One text file open for editing: its text in memory and the text last saved (or read).
@@ -50,6 +74,32 @@ impl Doc {
     }
 }
 
+/// An open TOML document that does not parse: the banner's line and message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Stale {
+    pub path: String,
+    pub line: u32,
+    pub message: String,
+}
+
+impl Stale {
+    /// The banner text: `stale: maps/brod/map.toml line 12: expected …`.
+    pub fn banner(&self) -> String {
+        format!("stale: {} line {}: {}", self.path, self.line, self.message)
+    }
+
+    /// The same as a diagnostic, for the Problems list.
+    pub fn diagnostic(&self) -> Diagnostic {
+        Diagnostic {
+            severity: Severity::Error,
+            file: self.path.clone(),
+            line: Some(self.line),
+            message: self.message.clone(),
+            hint: Some("the file does not parse: the screens show its last good state until it does".into()),
+        }
+    }
+}
+
 impl Workspace {
     /// Opens a package folder: lists its files. An error when the folder is missing or has no
     /// `package.toml`.
@@ -61,11 +111,28 @@ impl Workspace {
         if !root.join("package.toml").is_file() {
             return Err(format!("{} has no package.toml: not a package folder", root.display()));
         }
+        let mut ws = Workspace {
+            root,
+            entries: Vec::new(),
+            docs: Vec::new(),
+            problems: Vec::new(),
+            package: None,
+            stale: Vec::new(),
+            history: history::History::default(),
+            burst: None,
+        };
+        ws.refresh_entries()?;
+        Ok(ws)
+    }
+
+    /// Lists the package's files again (after a file was added, removed or renamed outside).
+    pub fn refresh_entries(&mut self) -> Result<(), String> {
         let mut entries = Vec::new();
-        let canon = fs::canonicalize(&root).map_err(|e| format!("cannot read {}: {e}", root.display()))?;
+        let canon = fs::canonicalize(&self.root).map_err(|e| format!("cannot read {}: {e}", self.root.display()))?;
         list(&canon, &canon, "", 0, &mut entries)?;
         entries.sort();
-        Ok(Workspace { root, entries, docs: Vec::new(), problems: Vec::new() })
+        self.entries = entries;
+        Ok(())
     }
 
     /// Opens a text file of the package for editing and returns its index in `docs`. A file
@@ -75,6 +142,13 @@ impl Workspace {
         if let Some(i) = self.docs.iter().position(|d| d.path == path) {
             return Ok(i);
         }
+        let text = self.read_text(path)?;
+        self.docs.push(Doc { path: path.to_string(), saved: text.clone(), text });
+        Ok(self.docs.len() - 1)
+    }
+
+    /// A text file of the package as it is on disk, with the same checks as [`Workspace::open_doc`].
+    pub fn read_text(&self, path: &str) -> Result<String, String> {
         let rel = safe_rel(path)?;
         if !is_text(path) {
             return Err(format!("{path} is not a text file"));
@@ -84,9 +158,7 @@ impl Workspace {
         if !real.starts_with(&root) || !real.is_file() {
             return Err(format!("{path} is not a file of the package"));
         }
-        let text = fs::read_to_string(&real).map_err(|e| format!("cannot read {path}: {e}"))?;
-        self.docs.push(Doc { path: path.to_string(), saved: text.clone(), text });
-        Ok(self.docs.len() - 1)
+        fs::read_to_string(&real).map_err(|e| format!("cannot read {path}: {e}"))
     }
 
     /// Writes an open document to its file; it is clean afterwards. A file that is a symbolic
@@ -140,29 +212,157 @@ impl Workspace {
         Ok(Package::parse(files))
     }
 
-    /// Re-reads the package from disk and runs the checks, as `razdor-pack check` does. Stores
-    /// the diagnostics and returns the counts (errors, warnings). An error when the folder
-    /// cannot be read at all.
-    pub fn check(&mut self) -> Result<(usize, usize), String> {
-        let (package, _) = self.read_package()?;
-        let report = check::check(&package);
-        let counts = (report.errors(), report.warnings());
-        self.problems = report.diagnostics;
-        Ok(counts)
+    /// The last good package: the disk with every open document's text over it.
+    pub fn package(&self) -> Option<Rc<Package>> {
+        self.package.clone()
     }
+
+    /// Re-reads the package from the disk with the open documents' text over their files, and
+    /// runs the checks. A document that does not parse as TOML keeps the last good package (and
+    /// is listed in [`Workspace::stale`]); the other files are read as usual. An error when the
+    /// folder cannot be read at all.
+    pub fn rebuild(&mut self) -> Result<(), String> {
+        let mut files = Files::load(&self.root)?;
+        for doc in &self.docs {
+            files.overlay(&doc.path, doc.text.as_bytes())?;
+        }
+        self.stale = stale_docs(&self.docs);
+        if !self.stale.is_empty() && self.package.is_some() {
+            let mut problems: Vec<Diagnostic> = self.stale.iter().map(Stale::diagnostic).collect();
+            problems.extend(self.problems.iter().filter(|d| !self.stale.iter().any(|s| s.path == d.file)).cloned());
+            self.problems = problems;
+            return Ok(());
+        }
+        let (package, _) = Package::parse(files);
+        let report = check::check(&package);
+        self.problems = report.diagnostics;
+        self.package = Some(Rc::new(package));
+        Ok(())
+    }
+
+    /// [`Workspace::rebuild`], and the counts of the problems (errors, warnings).
+    pub fn check(&mut self) -> Result<(usize, usize), String> {
+        self.rebuild()?;
+        let errors = self.problems.iter().filter(|d| d.severity == Severity::Error).count();
+        Ok((errors, self.problems.len() - errors))
+    }
+
+    /// Starts a text burst of `path` (typing in the Script tab): `before` is the text before the
+    /// first change of the burst. A burst already open for the same file goes on; one for another
+    /// file is ended first.
+    pub fn begin_text_edit(&mut self, path: &str, before: &str) {
+        match &self.burst {
+            Some((open, _)) if open == path => return,
+            Some(_) => self.end_text_edit(),
+            None => {}
+        }
+        self.burst = Some((path.to_string(), before.to_string()));
+    }
+
+    /// Ends the text burst: one undo step from its `before` to the file's text now.
+    pub fn end_text_edit(&mut self) {
+        let Some((path, before)) = self.burst.take() else { return };
+        let Some(doc) = self.docs.iter().find(|d| d.path == path) else { return };
+        let after = doc.text.clone();
+        let label = format!("edit {path}");
+        self.history.record(Step { path, before, after, label });
+    }
+
+    /// The file of the open text burst, if any.
+    fn burst_path(&self) -> Option<&str> {
+        self.burst.as_ref().map(|(p, _)| p.as_str())
+    }
+
+    /// Makes one visual edit: the table's text changes in the document of its file (opened if it
+    /// is not), as one undo step. Refused with the reason when the file does not parse (the
+    /// banner's text), when the table is not there, or when the edit names no key of the format.
+    pub fn apply(&mut self, edit: Edit) -> Result<(), String> {
+        self.end_text_edit();
+        let file = edit.locator().file.clone();
+        let idx = self.open_doc(&file)?;
+        let before = self.docs[idx].text.clone();
+        if let Some((line, message)) = edit::parse_error(&before) {
+            return Err(format!("stale: {file} line {line}: {message}"));
+        }
+        let after = edit::apply_to_text(&before, &edit)?;
+        let label = edit.label();
+        self.docs[idx].text = after.clone();
+        self.history.record(Step { path: file, before, after, label });
+        Ok(())
+    }
+
+    /// Undoes the last step; returns its label, or `None` when there is nothing to undo.
+    pub fn undo(&mut self) -> Result<Option<String>, String> {
+        self.end_text_edit();
+        let Some(step) = self.history.pop_undo() else { return Ok(None) };
+        if let Err(e) = self.set_text(&step.path, &step.before) {
+            self.history.push_undo(step);
+            return Err(e);
+        }
+        let label = step.label.clone();
+        self.history.push_redo(step);
+        Ok(Some(label))
+    }
+
+    /// Redoes the last undone step; returns its label, or `None` when there is nothing to redo.
+    pub fn redo(&mut self) -> Result<Option<String>, String> {
+        self.end_text_edit();
+        let Some(step) = self.history.pop_redo() else { return Ok(None) };
+        if let Err(e) = self.set_text(&step.path, &step.after) {
+            self.history.push_redo(step);
+            return Err(e);
+        }
+        let label = step.label.clone();
+        self.history.push_undo(step);
+        Ok(Some(label))
+    }
+
+    fn set_text(&mut self, path: &str, text: &str) -> Result<(), String> {
+        let i = self.open_doc(path)?;
+        self.docs[i].text = text.to_string();
+        Ok(())
+    }
+
+    /// The text of a package file: the open document's, else the file's on disk.
+    pub fn text_of(&self, path: &str) -> Result<String, String> {
+        match self.docs.iter().find(|d| d.path == path) {
+            Some(doc) => Ok(doc.text.clone()),
+            None => self.read_text(path),
+        }
+    }
+
+    /// The byte ranges of the map tables of a TOML file (see `studio::edit::spans`).
+    pub fn spans(&self, path: &str) -> Result<Vec<(Locator, Range<usize>)>, String> {
+        edit::spans(path, &self.text_of(path)?)
+    }
+
+    /// The map table that holds byte `offset` of the file, if any.
+    pub fn locator_at(&self, path: &str, offset: usize) -> Option<Locator> {
+        self.spans(path).ok()?.into_iter().find(|(_, r)| r.contains(&offset)).map(|(l, _)| l)
+    }
+
+    /// The package folder with its symbolic links resolved: what every path is checked against.
+    fn canon_root(&self) -> Result<PathBuf, String> {
+        fs::canonicalize(&self.root).map_err(|e| format!("cannot read {}: {e}", self.root.display()))
+    }
+}
+
+/// The open TOML documents whose text does not parse, with the parser's line and message.
+fn stale_docs(docs: &[Doc]) -> Vec<Stale> {
+    docs.iter()
+        .filter(|d| d.path.ends_with(".toml"))
+        .filter_map(|d| {
+            let err = d.text.parse::<DocumentMut>().err()?;
+            let line = err.span().map_or(1, |s| line_of(&d.text, s.start));
+            Some(Stale { path: d.path.clone(), line, message: err.message().to_string() })
+        })
+        .collect()
 }
 
 /// Whether `path` is a text file the studio opens (by its extension, any case).
 pub fn is_text(path: &str) -> bool {
     path.rsplit_once('.')
         .is_some_and(|(stem, ext)| !stem.is_empty() && TEXT_EXTENSIONS.iter().any(|t| t.eq_ignore_ascii_case(ext)))
-}
-
-impl Workspace {
-    /// The package folder with its symbolic links resolved: what every path is checked against.
-    fn canon_root(&self) -> Result<PathBuf, String> {
-        fs::canonicalize(&self.root).map_err(|e| format!("cannot read {}: {e}", self.root.display()))
-    }
 }
 
 /// A package-relative path as a filesystem path: no absolute paths, no `..`, no backslashes, no
