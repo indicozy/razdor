@@ -516,11 +516,11 @@ description = "Water from the well under the abbey. It helps against the dead, u
 
 [abbey.arrival]
 title = "The Order's summons"
-text = "The abbey of Saint Ansel is under siege. The Order asks for help, and the Crown orders you to stay out. You are to choose a side, and the choice cannot be undone. The inquisitors have set out from the north."
+text = "You gave the Order your word at the council in Marka, and the abbey of Saint Ansel is yours now: its walls, its monks and its duty. The Crown forbids you to interfere. The inquisitors have set out from the north. From the east, out of the cold, the barrows come. Hold the abbey until the inquisitors ride through its gate."
 
 [abbey.inquisitors]
 title = "The inquisitors"
-text = "The inquisitors ride through the gate with their visors up. Their eldest says the Order will remember everyone who stood by the walls, and everyone who stood aside."
+text = "The inquisitors ride through the gate with their visors up. Their eldest names the price: Alder, the village by the bog, where a family touched by the dead is hiding. 'The Order commands that the village be burned with its houses. That is how the land is cleansed. The Order will remember everyone who stood by the walls, and everyone who stood aside.'"
 
 [abbey.ilm_meet]
 title = "The novice"
@@ -530,7 +530,7 @@ leave = "Send him back to the abbey"
 
 [abbey.blight]
 title = "Cold"
-text = "The grass here is grey and cracks under the hooves. The soldiers are cold even in their armour. To go on is to ride under a curse."
+text = "The grass here is grey and cracks under the hooves. The cold gets into the bones: every step under the barrow wind curses the company. Only the abbey's rite lifts the curse (30 gold). To go on is to ride under a curse."
 
 [abbey.walls]
 title = "A curse on the walls"
@@ -545,10 +545,10 @@ courtyard_warning = "The dead stand in the courtyard. Hold them, or the abbey fa
 
 [abbey.trial]
 title = "Alder"
-text = "Everyone in the village is well, and everyone whispers. Ilm looks at the houses: 'This is corruption. The Order says burn it. Or spare them, if you are sure.'"
-burn = "Burn the village: the Order commands it"
-spare = "Spare the people: let them go"
-ride = "Ride past without interfering"
+text = "Alder lies by the bog. Everyone is well, and everyone whispers. Ilm looks at the roofs: 'A family the dead touched, and a boy who does not sleep at night. To burn is to burn the houses with the people in them: twenty souls, the children among them. To spare is to take their sin on yourself. Decide.'"
+burn = "Burn the village with its people (Order +2, Crown −1)"
+spare = "Spare them: let them go into the bog (Order −2, Ilm turns heretic)"
+ride = "Ride past: no judgement, no mercy"
 
 [abbey.heresy]
 title = "Ilm's whisper"
@@ -577,6 +577,26 @@ text = "The dead lie at the walls, but Ilm is not looking at them. He is looking
 [abbey.end_plain]
 title = "The abbey held"
 text = "The barrow host lies at the walls. The monks sing over the dead, and you ride out of the gate without a companion and without promises. The March knows now that you came."
+
+[abbey.pilgrims]
+title = "Pilgrims"
+text = "A column of pilgrims waits at the fork. The Crown will not let them near the abbey: 'Orders are to turn them back.' A woman holds her child close and asks whether the monks still feed everyone at the gate. You can answer her only with the road."
+
+[abbey.cross]
+title = "The roadside cross"
+text = "A cross stands by the road, and the Order's edict is nailed to it: 'Whoever stands aside has chosen the Crown.' The Crown's watch tower is visible to the east, and its garrison keeps an eye on the road."
+
+[abbey.tithe]
+title = "The tithe barn"
+text = "The barn where the Order gathered its tithe has burned to the ground. On the gate someone has chalked 'Alder' and drawn a house with a black roof. Someone is showing the way."
+
+[abbey.messenger]
+title = "A messenger"
+text = "A monk runs to meet you, his feet in the mud. 'The cold is east, over the ridge! The dead gather there every night. If you go, take men and keep your mail on.' He thrusts a torn map at you, the cold marked on it."
+
+[abbey.ilm_home]
+title = "Ilm comes home"
+text = "The monks at the gate know Ilm. One crosses himself, another turns away. 'You came back with the one who walks with the dead?' Ilm is silent, then says quietly: 'I came back because this is my place. I only do not know which place it is.'"
 
 # --- salt ---
 [salt.map]
@@ -629,17 +649,17 @@ description = "A thick salve of the marsh folk's herbs. It smells of smoke and h
 
 [salt.arrival]
 title = "The salt marsh"
-text = "A causeway through the bog leads to the Salt Gate. The Crown pays for salt, and the March pays for the Crown. The wagon has already left the marsh. If it reaches the gate, the Crown will be fed and the March will go hungry."
+text = "Tess brings the witch's word: the Salt Gate in the east hangs marsh folk for smuggling salt. Salt is the marsh's only coin. Take the gate and the marsh will trust you. The Crown's tax wagon has already left the bog, carrying salt for the garrison. You may stop it, but the Crown will remember."
 
 [salt.reedmere]
 title = "Reedmere"
-text = "The marsh folk meet you with spears, but they do not shoot. Tess, the witch's daughter, stands in front. 'The Crown is looking for you on the roads,' she says. 'Ride as a bandit and no one will touch you. Or ride as an officer, and we will see.'"
-disguise = "Dress as a bandit"
-openly = "Ride openly"
+text = "The marsh folk meet you with spears and do not shoot. Tess, the witch's daughter, stands at the front. 'The Crown looks for you on the roads. Ride as a bandit, and in our cloaks the gate will take you for a smuggler. Or ride openly, and then we shall see.' The bog gives you its secret salt store: two hundred coins."
+disguise = "Dress as a bandit (to the gate)"
+openly = "Ride openly (the Crown will hunt you)"
 
 [salt.caught]
 title = "The gate"
-text = "They know you at the gate. A guard lowers his spear: 'A bandit with an officer's bearing. Wait here until the men come.'"
+text = "At the gate they know you. The smuggler's cloak opened the door but did not hide your bearing. 'A bandit with an officer's bearing. Wait while the men come.'"
 draw = "Draw your blade"
 
 [salt.witch]
@@ -651,11 +671,11 @@ page = "Burn the page from the book"
 
 [salt.bog]
 title = "The bog"
-text = "Mist lies on the water. The ghosts look at you with empty eyes, and a cold stays on your skin. This is only the start."
+text = "Mist lies on the water. The ghosts stare with empty eyes, and a cold stays on the skin. The witch at the bog's edge will lift it, if you ask."
 
 [salt.tess]
 title = "Tess"
-text = "Tess lowers her eyes. 'Mother says I know the paths, but not the road back. If I go with you, be honest with the bog.' She holds out her hand."
+text = "Tess lowers her eyes. 'Mother says I know the paths but not the way back. I know a path through the bog that is not on any map. If I ride with you, be honest with the marsh.' She holds out her hand."
 take = "Take Tess into the company"
 leave = "Not yet"
 
@@ -670,6 +690,30 @@ text = "The gate is open. Tess is the first into the salt store, and the marsh f
 [salt.end_alone]
 title = "The Salt Gate"
 text = "The gate is taken, and the garrison rides south. The marsh folk watch from afar and do not dare come closer. You are alone in the town that held the Crown. Will you hold it?"
+
+[salt.flats]
+title = "The salt crust"
+text = "The salt crust cracks under your boots. A smuggler hangs from a white stone, a board on his chest: 'Sold salt past the Crown.' The bog pays for salt with lives, and the Crown pays for every handful."
+
+[salt.chapel]
+title = "The flooded chapel"
+text = "Water stands up to the windows of the chapel. The bell lies at the bottom, and on the altar salt lumps burn in place of candles. Someone prayed here until the water came."
+
+[salt.cart]
+title = "The salt cart"
+text = "A cart sinks in the bog up to its hubs. The sacks are soaked, and each carries the Crown's seal. The marsh folk carry salt in secret, the Crown takes its tithe and wants more."
+
+[salt.lights]
+title = "Marsh lights"
+text = "Lights burn over the path: green, steady, like lanterns. Tess does not look at them. 'They call. Whoever follows the call stays in the bog.' The witch says the same, more quietly."
+
+[salt.den_scene]
+title = "The den"
+text = "An old den on piles: a fire burns, the pot is empty, two men sleep by the flames. One opens an eye. 'Salt? We never saw any. Go straight on, and do not look back at the fire.'"
+
+[salt.bones]
+title = "Bones on poles"
+text = "Bones hang on poles by the path, bound in rags. Tess says this is how the bog pays its debts. Beyond, the path leads to Reedmere on its island."
 
 # --- camp ---
 [camp.map]
@@ -1236,7 +1280,16 @@ ride = "Ride your own road"
 [marka.poi_toll]
 title = "The abandoned toll post"
 text = "The old barrier is broken. The post carries Kord's mark, a mug and a sword, burned in. Under it someone added: \"Kord takes forty and keeps his word, while he is paid.\""
+[quest.abbey_hold]
+title = "Hold the abbey"
+start = "The inquisitors come from the north, the barrows from the east. Hold the abbey until help comes."
+gather = "The barrow host gathers on the ridge to the east. Soon it will march on the abbey."
+warn = "The dead march on the abbey. Be inside its walls when they come."
+siege = "The barrow host stands at the south gate. Hold the walls."
 
+[quest.abbey_inquisitors]
+title = "Meet the inquisitors"
+text = "The inquisitors ride from the north. Their eldest demands judgement on Alder."
 
 # --- gates: the framing and the roads' beats (chapter 4) ---
 [gates.gt_frame]
@@ -1341,3 +1394,23 @@ text = "The reeds are trodden in a line, as if a file of men had walked through 
 [marka.poi_bridge]
 title = "Whispers on the bridge"
 text = "The traders on the Ashford bridge whisper: the barrows roar at night, salt has tripled in price, and the companies at the camp wait for their pay. No one says aloud which of the three powers he would pick."
+[quest.abbey_alder]
+title = "Alder"
+text = "The inquisitors want the village by the bog burned. Ride there and decide for yourself."
+
+[quest.abbey_cold]
+title = "Scout the cold"
+text = "The dead gather in the cold east of the abbey. Look there, if you dare."
+
+[quest.salt_gate]
+title = "Take the Salt Gate"
+start = "The Crown's garrison guards the salt at the eastern gate. The bog will trust whoever takes it."
+delivered = "The wagon reached the gate. The garrison has its salt and is stronger for it."
+
+[quest.salt_wagon]
+title = "Stop the wagon"
+text = "The Crown's tax wagon crosses the causeway. Stop it: Crown −1, +30 gold. Let it pass: the salt goes to the gate."
+
+[quest.salt_reedmere]
+title = "Reedmere"
+text = "The witch sent word through Tess. Find the marsh folk on their dry island."

@@ -86,3 +86,35 @@ text = "salt.end_marsh.text"
 id = "salt_end_alone"
 title = "salt.end_alone.title"
 text = "salt.end_alone.text"
+
+# The marsh road: the beats between the start and Reedmere (triggers/salt.toml).
+[[dialog]]
+id = "salt_flats"
+title = "salt.flats.title"
+text = "salt.flats.text"
+
+[[dialog]]
+id = "salt_chapel"
+title = "salt.chapel.title"
+text = "salt.chapel.text"
+
+[[dialog]]
+id = "salt_cart"
+title = "salt.cart.title"
+text = "salt.cart.text"
+
+[[dialog]]
+id = "salt_lights"
+title = "salt.lights.title"
+text = "salt.lights.text"
+
+[[dialog]]
+id = "salt_den_scene"
+title = "salt.den_scene.title"
+text = "salt.den_scene.text"
+speaker = "dt:bandit"
+
+[[dialog]]
+id = "salt_bones"
+title = "salt.bones.title"
+text = "salt.bones.text"

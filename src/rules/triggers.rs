@@ -223,6 +223,8 @@ pub enum Act {
     Quest { id: String, title: String, text: String },
     /// The diary entry of the package's quest `id` is completed.
     CompleteQuest(String),
+    /// The hero's squad healed to full, and its fallen members raised (`restore_army`).
+    RestoreArmy,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -804,6 +806,7 @@ impl Builder<'_> {
             pt::Action::Travel { map, at } => Act::Travel { map: map.clone(), at: at.clone() },
             pt::Action::Quest { id, title, text } => Act::Quest { id: id.clone(), title: title.clone(), text: text.clone() },
             pt::Action::CompleteQuest(id) => Act::CompleteQuest(id.clone()),
+            pt::Action::RestoreArmy => Act::RestoreArmy,
             pt::Action::Ending(dialog) => {
                 if !self.pkg.dialogs.iter().any(|x| &x.value.id == dialog) {
                     return self.fail(format!("no dialog `{dialog}`"));
@@ -1272,6 +1275,7 @@ impl Game {
                 let minutes = self.clock.total_minutes() as u64;
                 self.journal.story_quest(id, minutes, title, text);
             }
+            Act::RestoreArmy => self.restore_squad(),
             Act::CompleteQuest(id) => {
                 let minutes = self.clock.total_minutes() as u64;
                 self.journal.story_quest_done(id, minutes);
@@ -1452,6 +1456,19 @@ impl Game {
             a.post = tile;
             a.box_centre = None;
             a.path.clear();
+        }
+    }
+
+    /// `restore_army`: every unit of the hero's squad is healed to full, and a fallen one stands up
+    /// (the town's resurrection, with no price and no wage owed: the package's own restoration).
+    fn restore_squad(&mut self) {
+        let c = self.content.clone();
+        for u in self.squad.iter_mut() {
+            if !u.alive() {
+                u.died_at = None;
+                u.unpaid = false;
+            }
+            u.heal_full(&c);
         }
     }
 
@@ -1806,6 +1823,25 @@ mod tests {
         let xp = g.hero().xp;
         g.act(&Act::GiveXp(100, Who::Player), &s, &mut q);
         assert!(g.hero().xp > xp || g.hero().level > 1, "the hero gains experience");
+    }
+
+    #[test]
+    fn restore_army_heals_the_squad_and_raises_the_fallen() {
+        let mut g = game();
+        g.attach_story(story(&[], vec![], vec![dialog("d", vec![])]));
+        let s = g.story.clone().unwrap();
+        let mut q = VecDeque::new();
+        let c = g.content.clone();
+        g.act(&Act::GiveUnit(unit("knight"), 0), &s, &mut q);
+        assert!(g.squad.len() >= 2, "the test squad has a second unit");
+        g.squad[0].hp = 1;
+        g.squad[1].hp = 0;
+        g.squad[1].died_at = Some(7);
+        g.squad[1].unpaid = true;
+        g.act(&Act::RestoreArmy, &s, &mut q);
+        assert!(g.squad.iter().all(|u| u.alive() && u.hp == u.max_hp(&c)), "every unit is whole again");
+        assert_eq!(g.squad[1].died_at, None);
+        assert!(!g.squad[1].unpaid, "a raised unit owes no wage");
     }
 
     #[test]

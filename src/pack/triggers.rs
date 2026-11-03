@@ -36,7 +36,7 @@ pub const EVENTS: [&str; 13] = [
 /// The conditions (`if`). Each is a table with one of these keys (its kind).
 pub const CONDITIONS: [&str; 10] = ["var", "random", "hero_at", "army_at", "has_named_unit", "has_item", "gold", "army_alive", "building_owner", "has_spell"];
 /// The actions (`then`), each a table with one of these keys.
-pub const ACTIONS: [&str; 31] = [
+pub const ACTIONS: [&str; 32] = [
     "set",
     "add",
     "random_var",
@@ -68,6 +68,7 @@ pub const ACTIONS: [&str; 31] = [
     "quest",
     "complete_quest",
     "restore_squad",
+    "restore_army",
 ];
 /// The keys that are arguments, not kinds. A kind key is one of the lists above; a key here
 /// never is.
@@ -467,6 +468,8 @@ pub enum Action {
     Quest { id: String, title: String, text: String },
     /// `complete_quest = "<id>"`: the active diary entry of that id is completed (a no-op otherwise).
     CompleteQuest(String),
+    /// `restore_army = "player"`: the hero's squad is healed to full, and its fallen members stand up again.
+    RestoreArmy,
 }
 
 /// A map figure: a unit's (its kind's picture, `dt:<alias>`) or an army model's (`model = "bandits"`).
@@ -1018,6 +1021,13 @@ pub fn parse_action(t: &Table) -> Res<Action> {
         "complete_quest" => {
             check_args(t, kind, &[])?;
             Ok(Action::CompleteQuest(name_of(v, "quest")?))
+        }
+        "restore_army" => {
+            check_args(t, kind, &[])?;
+            match holder_of(v, "`restore_army`")? {
+                Holder::Player => Ok(Action::RestoreArmy),
+                _ => bad("`restore_army` takes the hero's army only", "use `restore_army = \"player\"`"),
+            }
         }
         _ => unreachable!("kind_of returns an action"),
     }
@@ -2119,6 +2129,8 @@ mod map_refs_tests {
             Ok(Action::Quest { id: "ford".into(), title: "t.a".into(), text: "t.b".into() })
         );
         assert_eq!(parse_action(&diary_table("complete_quest = \"ford\"")), Ok(Action::CompleteQuest("ford".into())));
+        assert_eq!(parse_action(&diary_table("restore_army = \"player\"")), Ok(Action::RestoreArmy));
+        assert!(parse_action(&diary_table("restore_army = \"pack\"")).is_err(), "only the hero's army is restored");
     }
 
     #[test]

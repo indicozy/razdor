@@ -17,6 +17,8 @@ abbey_ilm_met = false       # Brother Ilm's offer has been answered
 abbey_blight_seen = false   # the hero has been warned of the blight
 abbey_siege = false         # the dead have been sent at the abbey
 abbey_siege_fight = false   # the siege battle has begun (once)
+abbey_alder = 0             # Ольховка: 0 not judged, 1 burned, 2 spared, 3 ridden past
+abbey_siege_due = false     # the trial is judged: the dead march on the abbey the next midnight
 
 # The story starts: the Order's letter, the inquisitors ride to the abbey, the dead walk their patrol.
 [[trigger]]
@@ -24,7 +26,10 @@ id = "abbey_arrival"
 map = "abbey"
 when = { event = "game_start" }
 then = [
+    { restore_army = "player" },
     { dialog = "abbey_arrival" },
+    { quest = "abbey_hold", title = "quest.abbey_hold.title", text = "quest.abbey_hold.start" },
+    { quest = "abbey_inquisitors", title = "quest.abbey_inquisitors.title", text = "quest.abbey_inquisitors.text" },
     { army_goal = "inquisitors", go_to_building = "abbey" },
     { army_goal = "dead_wave", patrol = [[84, 44], [90, 30], [78, 30]] },
 ]
@@ -41,7 +46,40 @@ then = [ { add = "abbey_week", value = 1 } ]
 id = "abbey_inquisitors_arrive"
 map = "abbey"
 when = { event = "army_arrives", army = "inquisitors", building = "abbey" }
-then = [ { dialog = "abbey_inquisitors" } ]
+then = [
+    { dialog = "abbey_inquisitors" },
+    { complete_quest = "abbey_inquisitors" },
+    { quest = "abbey_alder", title = "quest.abbey_alder.title", text = "quest.abbey_alder.text" },
+]
+
+# The beats of the road north from the start (the main road, a beat every 8 cells): the pilgrims turned back,
+# the wayside cross and the Order's edict, the tithe barn with its sign, the monk's warning and the cold.
+[[trigger]]
+id = "abbey_pilgrims"
+map = "abbey"
+when = { event = "hero_enters", at = [46, 82, 8, 4] }
+then = [ { dialog = "abbey_pilgrims" } ]
+
+[[trigger]]
+id = "abbey_cross"
+map = "abbey"
+when = { event = "hero_enters", at = [46, 74, 8, 4] }
+then = [ { dialog = "abbey_cross" } ]
+
+[[trigger]]
+id = "abbey_tithe"
+map = "abbey"
+when = { event = "hero_enters", at = [46, 66, 8, 4] }
+then = [ { dialog = "abbey_tithe" } ]
+
+[[trigger]]
+id = "abbey_messenger"
+map = "abbey"
+when = { event = "hero_enters", at = [46, 57, 8, 4] }
+then = [
+    { dialog = "abbey_messenger" },
+    { quest = "abbey_cold", title = "quest.abbey_cold.title", text = "quest.abbey_cold.text" },
+]
 
 # Brother Ilm at the south gate: a novice with a borrowed sword and a gift in his hands. He comes only
 # to a hero who has no Ilm yet: the Order's shrine in Marka (`ilm` 1 or 2) gives him already, as a
@@ -52,6 +90,14 @@ map = "abbey"
 when = { event = "hero_enters", at = [46, 49, 8, 3] }
 if = [ { var = "abbey_ilm_met", value = false }, { var = "ilm", value = 0 } ]
 then = [ { dialog = "abbey_ilm_meet" } ]
+
+# Brother Ilm walks home with the hero: the monks at the gate know him. Once.
+[[trigger]]
+id = "abbey_ilm_home"
+map = "abbey"
+when = { event = "hero_enters", at = [46, 49, 8, 3] }
+if = [ { var = "ilm", op = ">=", value = 1 }, { has_named_unit = "ilm", unit = "dt:pilgrim" } ]
+then = [ { dialog = "abbey_ilm_home" } ]
 
 [[trigger]]
 id = "abbey_ilm_take"
@@ -71,7 +117,7 @@ id = "abbey_blight_warn"
 map = "abbey"
 when = { event = "hero_enters", at = [56, 28, 14, 14] }
 if = [ { var = "abbey_blight_seen", value = false } ]
-then = [ { set = "abbey_blight_seen", value = true }, { dialog = "abbey_blight" } ]
+then = [ { set = "abbey_blight_seen", value = true }, { complete_quest = "abbey_cold" }, { dialog = "abbey_blight" } ]
 
 [[trigger]]
 id = "abbey_blight_curse"
@@ -107,8 +153,34 @@ then = [
 # (scripts/siege.lua). An AI army attacks only on the hero's step, so the battle is started by the
 # story instead: when the dead stand at the gate and the hero is inside the abbey (the garrison
 # joins him there, `hero_at` the abbey's footprint). The two triggers below cover either order.
+# The first week's warning: the dead gather on the hill, and the diary says so.
+[[trigger]]
+id = "abbey_siege_warn"
+map = "abbey"
+when = { event = "week_start" }
+if = [ { var = "abbey_week", op = ">=", value = 1 }, { var = "abbey_siege", value = false }, { army_alive = "dead_wave" } ]
+then = [ { quest = "abbey_hold", title = "quest.abbey_hold.title", text = "quest.abbey_hold.gather" } ]
+
+# The siege starts the midnight after the trial is judged (the player's act, not the calendar), or in the
+# second week if Ольховка was never reached. Both say the same: the dead march on the gate.
 [[trigger]]
 id = "abbey_siege_start"
+map = "abbey"
+when = { event = "day_start" }
+if = [
+    { var = "abbey_siege_due", value = true },
+    { var = "abbey_siege", value = false },
+    { army_alive = "dead_wave" },
+]
+then = [
+    { set = "abbey_siege", value = true },
+    { dialog = "abbey_siege" },
+    { quest = "abbey_hold", title = "quest.abbey_hold.title", text = "quest.abbey_hold.siege" },
+    { army_goal = "dead_wave", go_to = [52, 44] },
+]
+
+[[trigger]]
+id = "abbey_siege_week"
 map = "abbey"
 when = { event = "week_start" }
 if = [
@@ -119,6 +191,7 @@ if = [
 then = [
     { set = "abbey_siege", value = true },
     { dialog = "abbey_siege" },
+    { quest = "abbey_hold", title = "quest.abbey_hold.title", text = "quest.abbey_hold.siege" },
     { army_goal = "dead_wave", go_to = [52, 44] },
 ]
 
@@ -159,22 +232,22 @@ then = [ { add = "order", value = 2, min = -5, max = 5 } ]
 id = "abbey_end_inquisitor"
 map = "abbey"
 when = { event = "army_defeated", army = "dead_wave" }
-if = [ { var = "ilm", value = 1 } ]
-then = [ { set = "abbey_done", value = true }, { dialog = "abbey_end_inquisitor" }, { victory = true } ]
+if = [ { var = "ilm", value = 1 }, { var = "abbey_alder", value = 1 } ]
+then = [ { set = "abbey_done", value = true }, { complete_quest = "abbey_hold" }, { dialog = "abbey_end_inquisitor" }, { victory = true } ]
 
 [[trigger]]
 id = "abbey_end_heretic"
 map = "abbey"
 when = { event = "army_defeated", army = "dead_wave" }
 if = [ { var = "ilm", value = 2 } ]
-then = [ { set = "abbey_done", value = true }, { dialog = "abbey_end_heretic" }, { victory = true } ]
+then = [ { set = "abbey_done", value = true }, { complete_quest = "abbey_hold" }, { dialog = "abbey_end_heretic" }, { victory = true } ]
 
 [[trigger]]
 id = "abbey_end_plain"
 map = "abbey"
 when = { event = "army_defeated", army = "dead_wave" }
-if = [ { var = "ilm", value = 0 } ]
-then = [ { set = "abbey_done", value = true }, { dialog = "abbey_end_plain" }, { victory = true } ]
+if = [ { var = "ilm", op = "!=", value = 2 }, { var = "abbey_alder", op = "!=", value = 1 } ]
+then = [ { set = "abbey_done", value = true }, { complete_quest = "abbey_hold" }, { dialog = "abbey_end_plain" }, { victory = true } ]
 
 # The Crown's watch taken: the Crown's standing falls.
 [[trigger]]
@@ -200,15 +273,38 @@ when = { event = "dialog_choice", dialog = "abbey_trial", choice = "burn" }
 then = [
     { add = "villages_burned", value = 1 },
     { set = "ilm", value = 1 },
+    { set = "abbey_alder", value = 1 },
+    { set = "abbey_siege_due", value = true },
     { add = "order", value = 2, min = -5, max = 5 },
     { add = "crown", value = -1, min = -5, max = 5 },
+    { complete_quest = "abbey_alder" },
+    { quest = "abbey_hold", title = "quest.abbey_hold.title", text = "quest.abbey_hold.warn" },
 ]
 
 [[trigger]]
 id = "abbey_trial_spare"
 map = "abbey"
 when = { event = "dialog_choice", dialog = "abbey_trial", choice = "spare" }
-then = [ { set = "ilm", value = 2 }, { add = "order", value = -2, min = -5, max = 5 } ]
+then = [
+    { set = "ilm", value = 2 },
+    { set = "abbey_alder", value = 2 },
+    { set = "abbey_siege_due", value = true },
+    { add = "order", value = -2, min = -5, max = 5 },
+    { complete_quest = "abbey_alder" },
+    { quest = "abbey_hold", title = "quest.abbey_hold.title", text = "quest.abbey_hold.warn" },
+]
+
+# Ride past: no judgement, no mercy. The dead still come, and the chapter's plain ending is this one.
+[[trigger]]
+id = "abbey_trial_ride"
+map = "abbey"
+when = { event = "dialog_choice", dialog = "abbey_trial", choice = "ride" }
+then = [
+    { set = "abbey_alder", value = 3 },
+    { set = "abbey_siege_due", value = true },
+    { complete_quest = "abbey_alder" },
+    { quest = "abbey_hold", title = "quest.abbey_hold.title", text = "quest.abbey_hold.warn" },
+]
 
 # The heresy's secret dialog: a midnight after the mercy, with Ilm still in the army. Once.
 [[trigger]]

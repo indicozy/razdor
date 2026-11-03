@@ -98,7 +98,8 @@ fn the_order_route_wins_the_siege_and_hands_back_to_marka() {
     assert!(run.victory(), "{}", run.log.join("\n"));
     assert_eq!(run.var("abbey_done"), Some(VarValue::Bool(true)), "{}", run.log.join("\n"));
     assert_eq!(siege_fight(&run).map(|f| f.1), Some(Some(crate::rules::field::Side::Defenders)), "{:?}", run.fields);
-    assert!(run.log.iter().any(|l| l.contains("dialog abbey_end_inquisitor")), "{}", run.log.join("\n"));
+    // The route never walks to Ольховка: the abbey holds (the plain ending), and no judgement is passed.
+    assert!(run.log.iter().any(|l| l.contains("dialog abbey_end_plain")), "{}", run.log.join("\n"));
 }
 
 #[test]
@@ -288,4 +289,41 @@ fn the_blight_curses_by_walking_and_the_rite_takes_it_off() {
     assert!(run.log.iter().any(|l| l.contains("dialog abbey_rite")), "the tainted hero is offered the rite: {}", run.log.join("\n"));
     assert_eq!(run.var("taint"), Some(VarValue::Int(0)), "the rite takes the curse off: {}", run.log.join("\n"));
     assert!(run.log.iter().any(|l| l.contains("dialog abbey_rite -> rite")), "{}", run.log.join("\n"));
+}
+
+/// The road north (the main route from the start to the abbey's south gate): a beat (a dialog, a capture or an
+/// encounter) at most ten cells apart, the start included. The walk's cells are `Run::path`.
+#[test]
+fn the_road_north_has_a_beat_every_ten_cells() {
+    let Some(install) = install() else { return };
+    let mut run = into_branch(&install, 1, "order", "cleanse", "abbey", &[]).unwrap_or_else(|e| panic!("{e}"));
+    run.walk_to(GATE_SOUTH, 6).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+    let mut marks = vec![0usize];
+    marks.extend(run.beats.iter().copied());
+    marks.push(run.path.len() - 1);
+    marks.sort_unstable();
+    let mut gaps: Vec<(usize, usize, usize)> = marks.windows(2).map(|w| (w[1] - w[0], w[0], w[1])).collect();
+    gaps.sort_unstable_by(|a, b| b.cmp(a));
+    let worst = gaps[0];
+    eprintln!("the road north: {} cells, {} beats, the longest gap {} cells (path {}..{})", run.path.len() - 1, run.beats.len(), worst.0, worst.1, worst.2);
+    assert!(worst.0 <= 10, "the longest walk between beats is {} cells: {:?}", worst.0, &run.path[worst.1..=worst.2]);
+}
+
+/// Ilm walks home with the hero (his crossroads is the Order's route: he joined at the shrine), and the monks at the
+/// gate know him. Ольховка ridden past is the chapter's plain ending: no judgement, no mercy, Ilm no heretic.
+#[test]
+fn ilm_comes_home_and_riding_past_alder_is_the_plain_ending() {
+    let Some(install) = install() else { return };
+    let mut run = into_branch(&install, 1, "order", "cleanse", "abbey", &[("abbey_trial", "ride")]).unwrap_or_else(|e| panic!("{e}"));
+    run.walk_to(GATE_SOUTH, 6).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+    assert!(run.log.iter().any(|l| l.contains("dialog abbey_ilm_home")), "Ilm is greeted at the gate: {}", run.log.join("\n"));
+    run.walk_to(ALDER, 10).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+    assert!(run.log.iter().any(|l| l.contains("dialog abbey_trial -> ride")), "{}", run.log.join("\n"));
+    assert_eq!(run.var("abbey_alder"), Some(VarValue::Int(3)));
+    run.walk_to(ABBEY, 12).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+    run.wait_until_done(40).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+    assert!(run.victory(), "{}", run.log.join("\n"));
+    assert!(run.log.iter().any(|l| l.contains("dialog abbey_siege")), "the dead march the midnight after the judgement: {}", run.log.join("\n"));
+    assert!(run.log.iter().any(|l| l.contains("dialog abbey_end_plain")), "the abbey held: {}", run.log.join("\n"));
+    assert_eq!(run.var("abbey_done"), Some(VarValue::Bool(true)));
 }

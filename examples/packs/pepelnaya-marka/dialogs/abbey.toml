@@ -113,3 +113,33 @@ text = "abbey.end_heretic.text"
 id = "abbey_end_plain"
 title = "abbey.end_plain.title"
 text = "abbey.end_plain.text"
+
+# The road north: the beats between the start and the gate (triggers/abbey.toml, a beat every 8 cells).
+[[dialog]]
+id = "abbey_pilgrims"
+title = "abbey.pilgrims.title"
+text = "abbey.pilgrims.text"
+speaker = "dt:pilgrim"
+
+[[dialog]]
+id = "abbey_cross"
+title = "abbey.cross.title"
+text = "abbey.cross.text"
+
+[[dialog]]
+id = "abbey_tithe"
+title = "abbey.tithe.title"
+text = "abbey.tithe.text"
+
+[[dialog]]
+id = "abbey_messenger"
+title = "abbey.messenger.title"
+text = "abbey.messenger.text"
+speaker = "dt:monk"
+
+# Ilm walks home with the hero (the Order's route): the monks at the gate know him.
+[[dialog]]
+id = "abbey_ilm_home"
+title = "abbey.ilm_home.title"
+text = "abbey.ilm_home.text"
+speaker = "dt:pilgrim"
