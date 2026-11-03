@@ -29,7 +29,11 @@ id = "salt_arrival"
 map = "salt"
 when = { event = "game_start" }
 then = [
+    { restore_army = "player" },
     { dialog = "salt_arrival" },
+    { quest = "salt_gate", title = "quest.salt_gate.title", text = "quest.salt_gate.start" },
+    { quest = "salt_wagon", title = "quest.salt_wagon.title", text = "quest.salt_wagon.text" },
+    { quest = "salt_reedmere", title = "quest.salt_reedmere.title", text = "quest.salt_reedmere.text" },
     { army_speed = "smugglers", percent = 80 },
     { army_goal = "smugglers", go_to = [34, 88] },
     { army_goal = "patrol_north", patrol = [[48, 24], [60, 20]] },
@@ -59,21 +63,64 @@ then = [ { army_speed = "smugglers", percent = 100 }, { army_goal = "smugglers",
 id = "salt_smug_delivered"
 map = "salt"
 when = { event = "army_arrives", army = "smugglers", building = "saltgate" }
-then = [ { remove_army = "smugglers" }, { add = "crown", value = 1, min = -5, max = 5 } ]
+then = [
+    { remove_army = "smugglers" },
+    { add = "crown", value = 1, min = -5, max = 5 },
+    { complete_quest = "salt_wagon" },
+    { quest = "salt_gate", title = "quest.salt_gate.title", text = "quest.salt_gate.delivered" },
+]
 
 # The wagon taken on the road: a caravan lost, and its gold is the hero's.
 [[trigger]]
 id = "salt_smug_hit"
 map = "salt"
 when = { event = "army_defeated", army = "smugglers" }
-then = [ { add = "caravans_lost", value = 1 }, { give_gold = 30 } ]
+then = [ { add = "caravans_lost", value = 1 }, { give_gold = 30 }, { add = "crown", value = -1, min = -5, max = 5 }, { complete_quest = "salt_wagon" } ]
+
+# The marsh road from the start to Reedmere (a beat every 8 cells, measured by playthrough_salt): the salt flats, the
+# flooded chapel, the salt cart, the marsh lights, the smugglers' den and the bones before the village.
+[[trigger]]
+id = "salt_flats"
+map = "salt"
+when = { event = "hero_enters", at = [78, 74, 4, 4] }
+then = [ { dialog = "salt_flats" } ]
+
+[[trigger]]
+id = "salt_chapel"
+map = "salt"
+when = { event = "hero_enters", at = [70, 66, 4, 4] }
+then = [ { dialog = "salt_chapel" } ]
+
+[[trigger]]
+id = "salt_cart"
+map = "salt"
+when = { event = "hero_enters", at = [62, 59, 4, 4] }
+then = [ { dialog = "salt_cart" } ]
+
+[[trigger]]
+id = "salt_lights"
+map = "salt"
+when = { event = "hero_enters", at = [55, 58, 4, 4] }
+then = [ { dialog = "salt_lights" } ]
+
+[[trigger]]
+id = "salt_den_scene"
+map = "salt"
+when = { event = "hero_enters", at = [46, 58, 4, 4] }
+then = [ { dialog = "salt_den_scene" } ]
+
+[[trigger]]
+id = "salt_bones"
+map = "salt"
+when = { event = "hero_enters", at = [38, 58, 4, 4] }
+then = [ { dialog = "salt_bones" } ]
 
 # Reedmere: the marsh folk's first word. Once.
 [[trigger]]
 id = "salt_reedmere"
 map = "salt"
 when = { event = "hero_enters", at = [14, 52, 18, 16] }
-then = [ { dialog = "salt_reedmere" } ]
+then = [ { give_gold = 200 }, { complete_quest = "salt_reedmere" }, { dialog = "salt_reedmere" } ]
 
 # Disguised: the hero rides as a bandit, and the Crown's patrol and bounty men are friendly to him.
 [[trigger]]
@@ -239,7 +286,7 @@ id = "salt_gate_taken_marsh"
 map = "salt"
 when = { event = "building_captured", building = "saltgate" }
 if = [ { var = "tess_joined", value = true } ]
-then = [ { set = "salt_done", value = true }, { dialog = "salt_end_marsh" }, { victory = true } ]
+then = [ { set = "salt_done", value = true }, { complete_quest = "salt_gate" }, { dialog = "salt_end_marsh" }, { victory = true } ]
 
 # The Salt Gate taken alone: the same gate, without the marsh folk's word.
 [[trigger]]
@@ -247,7 +294,7 @@ id = "salt_gate_taken_alone"
 map = "salt"
 when = { event = "building_captured", building = "saltgate" }
 if = [ { var = "tess_joined", value = false } ]
-then = [ { set = "salt_done", value = true }, { dialog = "salt_end_alone" }, { victory = true } ]
+then = [ { set = "salt_done", value = true }, { complete_quest = "salt_gate" }, { dialog = "salt_end_alone" }, { victory = true } ]
 
 # The Crown's watch taken: its standing falls.
 [[trigger]]

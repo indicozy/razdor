@@ -14638,11 +14638,11 @@ sprite = 112
 # The abbey on its hill, the Crown's watch on the south hill, and the alder village in the west.
 [[building]]
 id = "abbey"
-type = "ruins"
+type = "fort"
 name = "abbey.building.abbey.name"
 description = "abbey.building.abbey.description"
 cell = [50, 40]
-faction = "ally"
+faction = "player"
 income = 20
 garrison = [
     { unit = "dt:monk", level = 1, count = 3 },

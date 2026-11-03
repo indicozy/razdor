@@ -252,11 +252,15 @@ fn the_route_is_won_with_the_default_options() {
 #[test]
 fn the_route_squad_wins_the_watch_and_the_openly_patrol_over_fifteen_seeds() {
     let Some(install) = install() else { return };
+    use super::playthrough_campaign::hire_within_means;
     let (mut watch_wins, mut patrol_wins) = (0, 0);
     let mut problems = Vec::new();
     for seed in 1..=15u32 {
         match branch_by(&install, seed, "salt", &[("salt_reedmere", "disguise")], true) {
             Ok(mut run) => {
+                // Reedmere is the hero's fort from the start: he hires there (its recruit stock), then rides on.
+                let _ = run.walk_to(REEDMERE, 20);
+                hire_within_means(&mut run);
                 let _ = run.walk_to((56, 18), 6);
                 if run.battles.iter().any(|b| b.enemy == "The watch post" && b.outcome == Outcome::Victory) {
                     watch_wins += 1;
@@ -268,6 +272,8 @@ fn the_route_squad_wins_the_watch_and_the_openly_patrol_over_fifteen_seeds() {
         }
         match branch_by(&install, seed, "salt", &[("salt_reedmere", "openly")], true) {
             Ok(mut run) => {
+                let _ = run.walk_to(REEDMERE, 20);
+                hire_within_means(&mut run);
                 let _ = run.walk_to((46, 26), 15);
                 for _ in 0..12 {
                     if run.battles.iter().any(|b| b.enemy == "patrol_north") || run.done() {
@@ -292,4 +298,22 @@ fn the_route_squad_wins_the_watch_and_the_openly_patrol_over_fifteen_seeds() {
     }
     assert!(watch_wins * 100 >= 50 * 15, "the watch won {watch_wins}/15: {problems:?}");
     assert!(patrol_wins * 100 >= 50 * 15, "the openly patrol won {patrol_wins}/15: {problems:?}");
+}
+
+/// The marsh road (the start to Reedmere): a beat at most ten cells apart, the start included. Prints the route's
+/// cells, every eighth, for placing the beats.
+#[test]
+fn the_marsh_road_has_a_beat_every_ten_cells() {
+    let Some(install) = install() else { return };
+    let mut run = branch(&install, 1, "salt", &[]).unwrap_or_else(|e| panic!("{e}"));
+    run.walk_to(REEDMERE, 20).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+    let sampled: Vec<(usize, Tile)> = run.path.iter().copied().enumerate().step_by(8).collect();
+    eprintln!("MARSH PATH {} cells, beats at {:?}\nsampled {sampled:?}", run.path.len() - 1, run.beats);
+    let mut marks = vec![0usize];
+    marks.extend(run.beats.iter().copied());
+    marks.push(run.path.len() - 1);
+    marks.sort_unstable();
+    let worst = marks.windows(2).map(|w| (w[1] - w[0], w[0], w[1])).max().unwrap_or((0, 0, 0));
+    eprintln!("the marsh road: the longest gap {} cells (path {}..{})", worst.0, worst.1, worst.2);
+    assert!(worst.0 <= 10, "the longest walk between beats is {} cells: {:?}", worst.0, &run.path[worst.1..=worst.2]);
 }

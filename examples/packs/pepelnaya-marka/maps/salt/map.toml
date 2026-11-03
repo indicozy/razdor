@@ -12725,12 +12725,13 @@ sprite = 6
 # camps are taken or fought on a step, game.rs step_contact), and the story takes the gate.
 [[building]]
 id = "reedmere"
-type = "village"
+type = "fort"
 name = "salt.building.reedmere.name"
 description = "salt.building.reedmere.description"
 cell = [22, 60]
-faction = "ally"
+faction = "player"
 income = 15
+recruit = [{ unit = "dt:militiaman", start = 4, max = 8 }, { unit = "dt:archer", start = 2, max = 4 }]
 
 [[building]]
 id = "witch"
