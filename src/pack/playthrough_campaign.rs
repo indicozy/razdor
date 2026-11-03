@@ -25,7 +25,8 @@ use crate::rules::content::{Content, WageKind};
 pub(crate) enum Plan {
     /// The Order: Ilm the novice's pilgrim burns the village (the inquisitor's path).
     Order,
-    /// The Order's novice spares the village: the heresy, the grey bargain at the gates.
+    /// The Order's cleansed inquisitor (the shrine's cleanse, the council's Order) spares the village at the
+    /// abbey's trial: the heresy, the grey bargain at the gates.
     Heretic,
     /// The marsh folk: Tess and the disguise, the Salt Gate.
     Marsh,
@@ -445,7 +446,6 @@ fn the_campaign_plays_the_order_to_its_ending() {
 }
 
 #[test]
-#[ignore = "open: the heretic's trial never fires (ilm stays 1), so no grey bargain; see docs/OPEN_QUESTIONS.md"]
 fn the_campaign_plays_the_heretic_to_the_grey_bargain() {
     let Some(install) = install() else { return };
     let (legs, ending) = campaign(&install, 1, Plan::Heretic);
