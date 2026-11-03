@@ -21,7 +21,8 @@ use razdor::rules::campaign::{after_victory, enter};
 use razdor::rules::save::{ScenarioRef, SaveError};
 use razdor::{hub, platform};
 
-use super::{items_view, App, Screen, ScenarioEntry};
+use super::{hub_here, hub_package_entries, items_view, keeps_listed, package_entry, App, HubPack, Screen, ScenarioEntry};
+use super::new_game;
 
 /// The hero class of a snapshot run of a package's map (`RAZDOR_PACK_CLASS`), if any.
 pub fn snapshot_class() -> Option<razdor::rules::content::HeroClass> {
@@ -68,20 +69,7 @@ impl App {
     /// hero window comes up. An error names what is wrong; nothing changes then. The package
     /// is then remembered (`trust`): a save of it finds it again by its hash, from this path.
     pub fn open_pack(&mut self, path: &Path, map: Option<&str>) -> Result<(), String> {
-        let path = trust::canonical_local(path)?;
-        let opened = {
-            let install = self.assets.dt.as_ref().map(|d| &d.install).ok_or("no Discord Times install (set RAZDOR_DT_DIR)")?;
-            pack::open::open(&path, map, pack::open::lang(), install)?
-        };
-        if let Some(dir) = platform::app_dir() {
-            // Without the record a save of this package cannot find it again: the game still
-            // plays, and such a save names the package as missing.
-            if let Err(e) = trust::remember(&dir, trust::Entry::from_opened(&opened)) {
-                razdor::diag!("packages: {e}");
-            }
-        }
-        self.adopt_pack(opened);
-        let index = self.scenarios.iter().position(|e| e.pack.is_some()).ok_or("the package's map is not in the list")?;
+        let index = self.adopt_package(path, map)?;
         // A snapshot run (`RAZDOR_PACK_CLASS=knight|archmage|ranger`): the map starts with that
         // hero, past the hero window, as its «Start» does (the off-screen shots of a package's maps).
         if let Some(hero) = snapshot_class() {
@@ -127,6 +115,73 @@ impl App {
         }
         self.screen = Screen::ClassSelect { scenario: Some(index) };
         Ok(())
+    }
+
+    /// Opens the package at `path` (its `map`, else its first) and makes it the package the game plays
+    /// (`adopt_pack`), remembered (`trust`). Returns the index of its map's entry in the list.
+    fn adopt_package(&mut self, path: &Path, map: Option<&str>) -> Result<usize, String> {
+        let path = trust::canonical_local(path)?;
+        let opened = {
+            let install = self.assets.dt.as_ref().map(|d| &d.install).ok_or("no Discord Times install (set RAZDOR_DT_DIR)")?;
+            pack::open::open(&path, map, pack::open::lang(), install)?
+        };
+        if let Some(dir) = platform::app_dir() {
+            // Without the record a save of this package cannot find it again: the game still
+            // plays, and such a save names the package as missing.
+            if let Err(e) = trust::remember(&dir, trust::Entry::from_opened(&opened)) {
+                razdor::diag!("packages: {e}");
+            }
+        }
+        let id = opened.id.clone();
+        self.adopt_pack(opened);
+        self.scenarios.iter().position(|e| e.pack.as_ref().is_some_and(|p| p.id == id)).ok_or_else(|| "the package's map is not in the list".to_string())
+    }
+
+    /// The new-game list reads the Hub's installed packages again (it opens with the list, so a package
+    /// installed, updated or played since shows as it is now). The open package keeps its entry.
+    pub(super) fn relist_packages(&mut self) {
+        let fresh = hub_package_entries(self.assets.dt.as_ref().map(|d| &d.install));
+        self.scenarios.retain(|e| e.pack.is_none());
+        self.scenarios.extend(fresh);
+        self.keep_pack_map();
+    }
+
+    /// The version picked on a package's page in the new-game list: remembered (`set_picked`) and the
+    /// package opened on it, so its units are the game's; the list stays and picks the package. A
+    /// package that does not open is named in a notice, and the list keeps the version it had.
+    pub(super) fn choose_version(&mut self, id: &str, version: &str) {
+        let Some(hub) = hub_here() else { return };
+        if let Err(e) = hub.set_picked(id, version) {
+            razdor::diag!("packages: {e}");
+        }
+        let opened = hub.play_path_of(id, version).ok_or_else(|| format!("{id} {version}: not installed")).and_then(|path| self.adopt_package(&path, None));
+        match opened {
+            Ok(_) => new_game::pick_pack(id),
+            Err(e) => {
+                razdor::diag!("packages: {e}");
+                super::map_import::notice(razdor::i18n::tr("The package cannot be played"), vec![e]);
+            }
+        }
+    }
+
+    /// The list's «Next» (or Enter) on a package's entry: the package is opened on the version the entry
+    /// shows (`adopt_package`), so its units and pictures are the game's, and the hero window comes up
+    /// on its map. Any other choice passes on as it is. A package that does not open stays on the list.
+    pub(super) fn open_listed(&mut self, next: Option<Screen>) -> Option<Screen> {
+        let Some(Screen::ClassSelect { scenario: Some(i) }) = next else { return next };
+        let Some(hp) = self.scenarios.get(i).and_then(|e| e.hub_pack.clone()) else { return next };
+        let opened = hub_here()
+            .and_then(|hub| hub.play_path_of(&hp.id, &hp.version))
+            .ok_or_else(|| format!("{} {}: not installed", hp.id, hp.version))
+            .and_then(|path| self.adopt_package(&path, None));
+        match opened {
+            Ok(index) => Some(Screen::ClassSelect { scenario: Some(index) }),
+            Err(e) => {
+                razdor::diag!("packages: {e}");
+                super::map_import::notice(razdor::i18n::tr("The package cannot be played"), vec![e]);
+                None
+            }
+        }
     }
 
     /// Makes `opened` the package the game plays: its pictures join the install's, its units and
@@ -178,19 +233,11 @@ impl App {
     /// reload, which drops it); a package opened before is replaced. A campaign's maps show the
     /// campaign's name.
     pub(super) fn keep_pack_map(&mut self) {
-        let Some(p) = &self.pack else { return };
-        self.scenarios.retain(|e| e.pack.is_none());
-        let mut scenario = p.opened.scenario.clone();
-        if let Some(title) = &p.opened.campaign_title {
-            scenario.title.clone_from(title);
-        }
-        self.scenarios.push(ScenarioEntry {
-            file: p.opened.map.clone(),
-            path: PathBuf::new(),
-            scenario,
-            base_game: false,
-            pack: Some(p.opened.clone()),
-        });
+        let Some(opened) = self.pack.as_ref().map(|p| p.opened.clone()) else { return };
+        let hub_pack = hub_here().and_then(|hub| HubPack::of(&hub, &opened.id, &opened.version));
+        // The package's own entry (the Hub's, on the version it plays) is replaced, not listed twice.
+        self.scenarios.retain(|e| keeps_listed(e.pack.as_ref().map(|p| p.id.as_str()), e.hub_pack.is_some(), &opened.id));
+        self.scenarios.push(package_entry(opened, hub_pack));
     }
 
     /// Whether a campaign package's game is on screen (not the editor's test play).
@@ -251,5 +298,15 @@ impl App {
         self.message = None;
         self.game = Some(game);
         Ok(())
+    }
+}
+
+/// The hero window's Start began a game of a package's entry: the Hub remembers the version played
+/// (`mark_played`), so the «New version» mark goes once the newest is played. A failure is logged;
+/// the game starts all the same.
+pub(super) fn note_played(e: &ScenarioEntry) {
+    let Some(hp) = &e.hub_pack else { return };
+    if let Some(Err(err)) = hub_here().map(|hub| hub.mark_played(&hp.id, &hp.version)) {
+        razdor::diag!("packages: {err}");
     }
 }

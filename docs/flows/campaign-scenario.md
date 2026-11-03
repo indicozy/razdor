@@ -160,6 +160,17 @@ reopens the package from its path on a load (the hash must match, else the load 
 is missing or changed). `razdor-pack sim` plays the same story headless (`pack::sim`,
 `rules::sim::play_days_with`, with the trace), the community smoke test's loop.
 
+**Every installed package in the new-game list** (`ui/mod.rs` `hub_package_entries`, `scenarios_of`, `HubPack`;
+`ui/pack_play.rs` `relist_packages`, `keep_pack_map`, `choose_version`, `note_played`). The list is built with one entry
+per package the Hub has installed (`Kind::Package`), opened on `Hub::default_version`; `relist_packages` reads them
+again when the list opens, so a package installed, updated or played since shows as it is now. A package that does not
+open is left out, with the reason logged. Its `ScenarioEntry::hub_pack` (`HubPack`: the installed versions, the one
+played, the mark) drives the page's version strip and the «New version» mark (`ui/new_game.rs`, the map page and the
+list line). Picking a version there calls
+`choose_version`: it writes `picked` (the same value as the Hub card's), opens that version and keeps the list. A package
+opened from a file (`razdor --pack`) is listed by `keep_pack_map` the same way, and replaces its own entry, not a second one;
+Hub «Play» lands on that package's entry with the version the card chose.
+
 ## Adding a map («Добавить карту…»)
 
 The new-game window's button (`ui/new_game.rs`, `add_map_button`, under the list) opens the

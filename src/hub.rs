@@ -27,9 +27,11 @@
 
 mod mods;
 mod packages;
+mod versions;
 
 pub use mods::*;
 pub use packages::*;
+pub use versions::*;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -494,6 +496,9 @@ pub struct InstalledEntry {
     /// An imported package's own entry for the list (the catalog has none of it).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entry: Option<Entry>,
+    /// A package's older installed versions, newest first (the fields above are the newest one's).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub older: Vec<PackageVersion>,
 }
 
 impl Installed {
@@ -811,17 +816,14 @@ impl Hub {
                     written
                 }
             };
-            // A package's older version goes once the new one is written (a reinstall of a new version).
-            if e.kind == Kind::Package {
-                if let Some(old) = installed.entries.get(&e.id) {
-                    for rel in old.files.iter().filter(|r| !written.contains(r) && safe_path(r)) {
-                        let _ = std::fs::remove_file(self.local.join(rel));
-                    }
-                }
-            }
             let lang = files.iter().find_map(|f| f.lang.clone()).unwrap_or_default();
-            let record = InstalledEntry { version: e.version.clone(), kind: e.kind, lang, title: e.title.clone(), requires: e.requires.clone(), files: written, unchecked: false, entry: None };
-            installed.entries.insert(e.id.clone(), record);
+            let record = InstalledEntry { version: e.version.clone(), kind: e.kind, lang, title: e.title.clone(), requires: e.requires.clone(), files: written, unchecked: false, entry: None, older: Vec::new() };
+            // A package keeps its older versions' files: the new one is added beside them.
+            if e.kind == Kind::Package {
+                self.add_package_version(&mut installed, &e.id, record)?;
+            } else {
+                installed.entries.insert(e.id.clone(), record);
+            }
             self.save_installed(&installed)?;
         }
         Ok(())
@@ -875,13 +877,18 @@ impl Hub {
             // The mod's folder: its files and its merged game folder.
             let _ = std::fs::remove_dir_all(mod_dir(&self.local, id));
         } else {
-            for rel in &e.files {
+            // Every installed version of a package goes, its files and its state with it.
+            for rel in e.versions().iter().flat_map(|v| &v.files) {
                 if safe_path(rel) {
                     let _ = std::fs::remove_file(self.local.join(rel));
                 }
             }
         }
-        self.save_installed(&installed)
+        self.save_installed(&installed)?;
+        if e.kind == Kind::Package {
+            self.forget_package_state(id)?;
+        }
+        Ok(())
     }
 }
 
@@ -924,6 +931,34 @@ pub mod mock {
         sc.next_map = next.into();
         sc.header.scenario_kind = kind;
         container::encode(19, &sc.to_payload())
+    }
+
+    /// The version the mock catalog offers for the example package. The snapshot `hub-versions`
+    /// imports the versions before it (`package_zip`), so the catalog has one to offer.
+    pub const CATALOG_VERSION: &str = "0.3.0";
+
+    /// The example package as a `.rzpack` at `version`: its files as they are, the manifest's
+    /// version set to it (the example's own is 0.1.0). Each version is other bytes.
+    pub fn package_zip(version: &str) -> std::io::Result<Vec<u8>> {
+        const FILES: [(&str, &[u8]); 7] = [
+            ("package.toml", include_bytes!("../examples/packs/hello-story/package.toml")),
+            ("texts/en.toml", include_bytes!("../examples/packs/hello-story/texts/en.toml")),
+            ("texts/ru.toml", include_bytes!("../examples/packs/hello-story/texts/ru.toml")),
+            ("units/heroes.toml", include_bytes!("../examples/packs/hello-story/units/heroes.toml")),
+            ("items/relics.toml", include_bytes!("../examples/packs/hello-story/items/relics.toml")),
+            ("maps/first-light/map.toml", include_bytes!("../examples/packs/hello-story/maps/first-light/map.toml")),
+            ("maps/first-light/terrain.png", include_bytes!("../examples/packs/hello-story/maps/first-light/terrain.png")),
+        ];
+        let mut files = crate::pack::Files::default();
+        for (path, bytes) in FILES {
+            if path == "package.toml" {
+                let text = String::from_utf8_lossy(bytes).replace("version = \"0.1.0\"", &format!("version = \"{version}\""));
+                files.insert(path, text.into_bytes());
+            } else {
+                files.insert(path, bytes);
+            }
+        }
+        crate::pack::archive::zip(&files).map_err(std::io::Error::other)
     }
 
     struct Out<'a> {
@@ -983,30 +1018,17 @@ pub mod mock {
         }
 
         /// The example package (`examples/packs/hello-story`, Razdor's own MIT content), packed as a
-        /// `.rzpack`: the card, its install and its play are shown with it.
+        /// `.rzpack` at [`CATALOG_VERSION`]: the card, its install and its play are shown with it.
         fn a_package(&mut self) -> std::io::Result<()> {
-            const FILES: [(&str, &[u8]); 7] = [
-                ("package.toml", include_bytes!("../examples/packs/hello-story/package.toml")),
-                ("texts/en.toml", include_bytes!("../examples/packs/hello-story/texts/en.toml")),
-                ("texts/ru.toml", include_bytes!("../examples/packs/hello-story/texts/ru.toml")),
-                ("units/heroes.toml", include_bytes!("../examples/packs/hello-story/units/heroes.toml")),
-                ("items/relics.toml", include_bytes!("../examples/packs/hello-story/items/relics.toml")),
-                ("maps/first-light/map.toml", include_bytes!("../examples/packs/hello-story/maps/first-light/map.toml")),
-                ("maps/first-light/terrain.png", include_bytes!("../examples/packs/hello-story/maps/first-light/terrain.png")),
-            ];
-            let mut files = crate::pack::Files::default();
-            for (path, bytes) in FILES {
-                files.insert(path, bytes);
-            }
-            let zipped = crate::pack::archive::zip(&files).map_err(std::io::Error::other)?;
-            let name = package_file("hello-story", "0.1.0");
+            let zipped = package_zip(CATALOG_VERSION)?;
+            let name = package_file("hello-story", CATALOG_VERSION);
             let f = self.file(format!("packages/{name}"), &name, None, &zipped)?;
             self.entries.push(Entry {
                 id: "hello-story".into(),
                 kind: Kind::Package,
                 title: Text { ru: "Привет, история".into(), en: "Hello, story".into() },
                 author: "Razdor".into(),
-                version: "0.1.0".into(),
+                version: CATALOG_VERSION.into(),
                 description: Text { ru: "Пример пакета: одна карта, герой и диалоги.".into(), en: "An example package: one map, a hero and dialogs.".into() },
                 about: Text::default(),
                 languages: vec!["ru".into(), "en".into()],
@@ -1236,7 +1258,7 @@ mod tests {
         assert_eq!(plan_install(&c, &none, "ford-outpost").unwrap(), ["ford-outpost"]);
         assert_eq!(plan_install(&c, &none, "lost-update"), Err(PlanError::Missing("community-update".into())));
         let mut some = Installed::default();
-        some.entries.insert("evolution-mock".into(), InstalledEntry { version: "9.0".into(), kind: Kind::Mod, lang: String::new(), title: Text::default(), requires: vec![], files: vec![], unchecked: false, entry: None });
+        some.entries.insert("evolution-mock".into(), InstalledEntry { version: "9.0".into(), kind: Kind::Mod, lang: String::new(), title: Text::default(), requires: vec![], files: vec![], unchecked: false, entry: None, older: vec![] });
         assert_eq!(plan_install(&c, &some, "merc-road").unwrap(), ["evolution-mercs", "merc-road"]);
     }
 

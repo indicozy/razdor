@@ -833,6 +833,25 @@ opens a report window: the text goes to the clipboard, `hub::REPORTS_LINK` (the 
 thread's own link is not in the repository) opens in the browser. `Status::Unlisted` (`status = "unlisted"`)
 hides an entry from the list (`hub::listed`) unless the player has it installed. While a notice or the report
 window is open, the hub's own buttons and list picks take no click (`modal` in `hub_view::frame`).
+
+**Versions of a package** (`hub/versions.rs`; the card and the new-game page in `ui/hub_view.rs` and `ui/pack_play.rs`).
+Every installed version keeps its own `.rzpack`: an install or an import adds the new version beside the others
+(`add_package_version`), and an older one is never removed by a newer one. The record's own fields hold the newest
+installed version; `InstalledEntry::older` holds the rest, newest first (`package_versions`). An old `installed.json`
+with one `version` and `files` loads as a one-version list (serde defaults). The same id and version with other bytes
+is refused (`ImportError::Failed`, «raise the version»; the same bytes is a no-op). Removing a package removes all its
+versions (`remove`, `forget_package_state`).
+`<hub>/package_state.json` (`STATE_FILE`, written atomically) keeps per package the `picked` version (the card's and
+the new-game page's dropdown, the version last started) and the `played` versions. `Hub::default_version`: the picked
+version if it is still installed, else the newest. `Hub::set_picked` is the dropdown's write; `Hub::mark_played` is
+written by `ui/pack_play.rs` `note_played` when the hero window's Start begins a game of that package's entry (a save's
+load does not count). `Hub::has_update` is the «New version» mark: the newest installed version is unplayed and an older
+one is installed (a first install, or several versions all played, is not marked). Starting an older version does not
+clear it. The card's dropdown is shown only with more than one installed version; «Install X.Y.Z» is shown on an
+installed package's card when `Hub::catalog_update` names a catalog version the player does not have.
+`Hub::play_path(id)` gives the file of the default version; `Hub::play_path_of(id, version)` gives the file of the version
+chosen (the card's «Играть» uses it). A save's load still finds its file by hash among the installed folder's files
+(saves.md), so an older version's file must stay.
 Off-screen: `hub-installed`, `hub-report`, `hub-refused` and `hub:0:hello-story` (the mock hub's example package,
 `mock::build`'s `a_package`); each needs its own `RAZDOR_HUB_DIR` (two cases building the mock at once race).
 
