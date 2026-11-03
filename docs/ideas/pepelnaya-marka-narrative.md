@@ -127,16 +127,131 @@ The chapter takes about 15–20 beats and ~12 minutes. The longest stretch of wa
 is ~6 cells (~1 s). The waiting is gone: the Dread is driven by beats 4, 5, 7, 11 and 13, and the
 weekly backstop only catches a player who stops playing.
 
-## 6. The later chapters (to do after chapter 1 is approved)
+## 6. The later chapters
 
-The same treatment for each map:
-- a frame (whose land, what's at stake);
-- a diary thread;
-- points of interest every 4–8 cells on the main roads;
-- a warning before every big fight;
-- a hand-over line at the end.
+The rules for every map:
+- an **arrival** that says whose land this is, what's at stake and the first objective;
+- a **diary thread** with one main objective at a time;
+- a **point of interest every 6–10 cells** on the main roads of a 100×100 map, and every 10–15 on
+  a 200×200 one (lore, loot, a choice, a fight);
+- a **warning a day before every big fight**, with its place lit;
+- **no wait the player can't see**: a time-gated beat gets a diary line saying it is coming;
+- a **hand-over line** to the next map;
+- every **hidden counter that decides something gets words**:
+  - Dread: the diary's «Курганы» entry, updated at each step («спят» / «шевелятся» / «проснулись»
+    / «идут»);
+  - taint: the curse is named when it lands, and the cure's place is named;
+  - standing: the council says who backs the hero and why.
 
-The map sizes make it more urgent there: 100×100 and 200×200 maps have walks of 30–60 s.
+The style for every text:
+- short sentences, concrete things (mud, rust, smoke), no modern words;
+- each character keeps the voice set in §3;
+- choice buttons say what they cost («Заплатить 50», «Сжечь деревню»).
+
+### 2. Марка (hub, 100×100). Question: whom do you trust?
+
+- **Arrival (rewrite).** The hero rides into Ашфорд (Пепельный Брод). The Crown's surgeon patches
+  him up and explains the hub: three powers want the March (the Crown in Ашфорд, the Order at the
+  abbey, the Free Companies in the south-east camp), and the marsh folk want only to be left alive.
+  «Чтобы удержать Марку, тебе нужен союзник. Совет соберётся, когда ты поможешь хотя бы двоим.»
+  The main diary entry is «Найти союзника» (2 favours, then the council), with sub-entries per
+  power that appear as each is met.
+- **Make the council's rule visible.** The diary counts favours (`quests_done`), and each favour
+  line names the power it pleases. The council lists only the powers that back the hero, and says
+  why the others don't («Орден не забыл, что ты взял силу алтаря»).
+- **Fill the long legs**, each > 25 cells today:
+  - Ашфорд→святилище: a burned tithe barn (the Order's tithe, the hint of the shrine) and a
+    pilgrim's corpse with a prayer book.
+  - Святилище→Серые Ивы: the salt road's milestone (a rumour about the wraith lair, which puts it
+    on the map) and a dying horse.
+  - Серые Ивы→логово→лагерь: an abandoned toll post with Kord's mark («Корд берёт 40 золотых и
+    держит слово — пока ему платят»). This tells the player the price before they arrive.
+  - Ашфорд→лагерь: the caravan's road. The caravan master asks for an escort (a new optional
+    quest; it explains the raid).
+- **Dread hosts:** warn a day ahead with the target village named and lit.
+- **The ritual stone:** the shrine's cleanse gives a diary entry naming the stone and what it
+  needs. Fix the text so it matches where the gate actually sends the host.
+- **Revisit:** a short scene. The March reacts to the branch's outcome (the abbey stood, the salt
+  gate fell, the camp held). Then «Врата» opens as the next objective with one line of why: the
+  standing stones are the dead's road, and whoever holds them holds the March.
+
+### 3а. Аббатство (Order, 100×100). Question: what is the Order's price?
+
+- **Arrival (fix the contradiction):** the side is already chosen. Prior Агнесса receives him:
+  the abbey must hold until the inquisitors come, and the dead gather in the cold to the east.
+  Diary: «Удержать аббатство» with sub-entries «Встретить инквизиторов» and «Разведать холод».
+- **Fix the unreachable beats.** On this route Ilm is always already with the hero (ilm 1), so the
+  gate meeting becomes Ilm's return home: the monks know him, and his doubts start here. The
+  «Аббатство устояло» ending needs a reachable condition (the Ольховка «ride on»).
+- **Ольховка is the chapter's heart.** The inquisitors demand it burned for hiding a «tainted»
+  family. The scene must state this before the choice: who, why, what burning means. Ilm pleads.
+  Burn, spare or ride on: each line names its cost.
+- **The cold (blight):** name the taint when it lands («холод въедается в кости: −…») and say
+  where the cure is (the abbey's rite, 30 gold).
+- **Siege timing visible:** the dead's patrol is seen marching on the abbey a day before; the
+  diary says «Мёртвые идут к аббатству. Будь внутри стен». The weekly wait gives way to a trigger on
+  the Ольховка outcome plus a day (the player's act, not the calendar).
+- **Points of interest on the start→abbey road (41 cells):** a pilgrim column turned back, a
+  wayside cross with the Order's edict, the watch fort's garrison (it already exists: give it a
+  scene).
+
+### 3б. Солончаки (marsh folk, 100×100). Question: what is the marsh's price?
+
+- **Arrival:** the witch's message through Tess. The Salt Gate's castellan hangs marsh folk for
+  smuggling salt, and the salt is the marsh's only coin. Take the gate and the marsh trusts the
+  hero for good. Diary: «Взять Соляные Ворота». The wagon in the arrival is explained as a Crown
+  salt tax wagon, and stopping it is an explicit option (a sub-entry with its cost: crown −1).
+- **The disguise is an honest plan.** Reedmere proposes it: «В наших плащах тебя примут за
+  контрабандиста — до ворот». The gate scene keeps that promise: the disguise gets him in, then the
+  castellan recognises him. Say this in the text so the forced draw reads as story, not a trick.
+- **The trail and the witch** get hints: Tess mentions the trail when she joins, and Reedmere
+  mentions the witch's cure when the bog curses him.
+- **Fill start→Reedmere (57 cells):** the smugglers' den (it exists: a scene, and the salt economy
+  explained), a hanged smuggler on a salt cairn, a flooded chapel.
+
+### 3в. Лагерь рот (Companies, 100×100). Question: what is Kord's price?
+
+- **Arrival:** Kord's camp. He explains the deal: the Crown will send a relief column to retake
+  the camp in about three weeks, and until then the hero holds it with the companies. Diary: «Удержать
+  лагерь до подхода Короны» with the time **stated**. Replace the pure weekly gate with «the relief
+  is sighted» after the hero's two big acts (the red company and the supply column) or the third
+  week, whichever comes first, and warn a day ahead.
+- **Kord is with him** (kord ≥ 1 here): rewrite Kord's camp lines for a hired Kord, and drop the
+  unreachable offer and the «keep» choice text or make them reachable.
+- **The supply column** is the chapter's moral beat: robbing the Crown's convoy (gold, the
+  companies' respect, the Crown's enmity) versus letting it pass. State it.
+- **The waygate:** lighting it says what it does in chapter 4.
+
+### 4. Врата (100×100). Question: will you open the old ways?
+
+- **Arrival:** the four standing stones are the Barrow King's old road. Open them and the hero
+  moves fast but so do the dead; seal or claim the last and the March is shut to them. Diary: «Врата»
+  with **four sub-entries, one per stone, each naming its guard and its other way** (rite, toll,
+  charm, fight). Fix the fixed «Два из них» text to read the actual `gates_open`.
+- **Teleport cost** stated at the first stone: «каждый проход оставляет холод: скверна +1».
+- **Kord's pay:** make the text and the trigger agree.
+- **The legs are 22–36 cells and empty:** add the dead's road markers (bone cairns that grow as
+  Dread grows), a Crown courier, Ilm's or Tess's or Kord's companion scene halfway between stones
+  (one per ally), and the wraith messenger heard before he's seen.
+- **The last gate:** close (Dread −2) or claim (power, taint +1), with both consequences said.
+
+### 5. Курганы (finale, 200×200). Question: what will you give to end it?
+
+- **Arrival:** the whole March marches. The diary shows the three endings' **conditions in words**
+  («Корона и Орден за тебя», «Роты или болото за тебя», «Ильм слышал посланника»), so the council
+  isn't a surprise. The conditions are read at the end, not frozen at the start (fix it), so the
+  finale's choices can still change them.
+- **Start→ford fort is 64 empty cells,** the worst walk in the campaign: add the allies' camp, a
+  field hospital (a heal), refugees on the road, the first Dread host warned and lit.
+- **The companion fates are the emotional core:** each scene states what it costs and gives a
+  choice with weight. Tess and Ilm get real choices, not «no effect».
+- **Varga→Ilm is 48 empty cells:** add the barrow fields (graves opening as the Dread rises), the
+  King's herald (he offers terms, which sets up the grey bargain for everyone, not only Ilm's
+  heresy: a refusal everyone can make).
+- **The King:** a one-line monologue before the fight that answers the campaign's question
+  («Ты не сжёг деревню под Варном. Посмотрим, что ты сожжёшь сейчас.»).
+- **Endings:** each closes the question, plus one line per companion's fate and the March's state
+  (the roads, the villages).
 
 ## 7. Decisions for the owner
 
