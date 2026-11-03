@@ -47,6 +47,17 @@ On a phone held upright the details open in place of the list as a card: the pic
 
 The window opens at once: the list is the copy saved on the last opening, and a newer list loads in the background; without a connection you see the saved list and the line "No connection: showing the saved list".
 
+## Package versions
+
+A package can be installed in several versions. Each installed version stays on your computer: a newer version does not remove an older one.
+
+* Pick the version on the package's card in "Maps and mods", or on the package's page in the new game window. The version list shows when more than one version is installed.
+* The default is the version you played last. If you have not started the package yet, it is the newest.
+* An installed newer version you have not played yet is marked "New version" next to the package. The mark goes when you start a game on the newest version.
+* When the catalog has a version you do not have, the card shows an "Install X.Y.Z" button. It installs that version beside the older ones.
+* A save opens on the version it was started on; the choice of version only affects new games.
+* **"Remove"** removes all installed versions of the package.
+
 ## Where the maps come from
 
 The catalog comes from the forums of the community Discord server: the sections «сокровищница-модов» and «библиотека-карт». The entries are republished with the server admins' permission, and each one is credited to its author with a link to the author's thread.

@@ -44,7 +44,9 @@ read from (`ScenarioRef::Pack`). The path is a hint. A load opens a package only
   version and hash, the newest first, at most 512 entries;
 - the Hub's `packages/` folder (`<hub>/packages/`): its folders and `.rzpack` files. The Hub installs a
   catalog package there (`<id>-<version>.rzpack`) or imports a file the player picks, and records it in the
-  trusted list too.
+  trusted list too. A newer version is added beside the older ones: no installed version's file is removed
+  by an install or an import, so a save of an older version still finds its file. The same id and version
+  with other bytes is refused (raise the version instead).
 
 A candidate is opened and must match the save's id, version, hash and map (`Opened::same_package`;
 the path is not compared). The save's path is opened only when it canonicalises to a listed path of
