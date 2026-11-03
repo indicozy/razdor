@@ -97,7 +97,7 @@ map = "brod"
 when = { event = "week_start" }
 if = [ { var = "dread", op = ">=", value = 2 } ]
 then = [
-    { spawn_army = "host", at = [28, 25], faction = "enemy", model = 10, troops = ["dt:death_knight", "dt:ghoul", "dt:ghost"] },
+    { spawn_army = "host", at = [28, 25], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:dead_warrior"] },
     { army_goal = "host", attack = "hero" },
     { dialog = "host_rises" },
 ]

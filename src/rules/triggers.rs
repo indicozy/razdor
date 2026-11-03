@@ -1390,6 +1390,9 @@ impl Game {
         arrange_troops(&content, &mut list, 0);
         let speed = Army::speed_for(0, troops[0].0);
         self.world.spawn_army(id, at, faction, model, list, speed);
+        // An AI army from its first step on: its record is set up as a fresh one (`fresh_mind`).
+        let last = self.world.armies.len() - 1;
+        self.fresh_mind(last);
         self.triggers.spawned.insert(id);
         let name = self.story().and_then(|s| s.army_names.get(&id)).cloned().unwrap_or_else(|| id.to_string());
         self.note(Trace::Spawn { army: name });

@@ -243,7 +243,7 @@ then = [ { give_gold = -20 } ]                      # optional actions
 | `give_item` | `to` (`pack` default, `player`, an army id: its loot, `named:<id>`: a free worn slot, else the pack), or `garrison` (a building id: its troops, else its pack) | an item |
 | `give_unit` | `named` (optional character id) | a unit joins the hero's army (a full army drops its weakest unit, as DT) |
 | `give_xp` | `to` (`player` default, an army id, `named:<id>`), or `garrison` (a building id) | experience |
-| `spawn_army` | `at = [x, y]`, `faction`, `model` (0 to 12, default 5), `troops` (list of units) | a new army on the map, with its id (its name); an id in use spawns nothing |
+| `spawn_army` | `at = [x, y]`, `faction`, `model` (0 to 12, default 5), `troops` (list of units) | a new AI army on the map, steered like a scenario army (its goal comes from `army_goal`), with its id (its name); an id in use spawns nothing |
 | `remove_army` | | the army leaves the map (it can come back by an event, as DT's) |
 | `teleport_hero` | cell `[x, y]` | the hero's army moves there |
 | `teleport_army` | `at = [x, y]` or `to = "<building>"` | an army moves to a cell or a building |

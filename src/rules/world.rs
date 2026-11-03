@@ -1593,7 +1593,8 @@ impl World {
     }
 
     /// A package army (`rules::triggers`): on the map at `at`, with its own id and a fresh uid.
-    /// Hostile unless it is the player's (attitude −3, or 3 for the player's faction).
+    /// Hostile unless it is the player's (attitude −3, or 3 for the player's faction). It is an AI
+    /// army: steered by the AI and its goals; its record is set up by `Game::fresh_mind`.
     pub(crate) fn spawn_army(&mut self, id: u8, at: Tile, faction: u8, model: u8, troops: Vec<Troop>, speed: u32) {
         self.next_uid = self.next_uid.max(FIRST_GANG_UID) + 1;
         self.armies.push(Army {
@@ -1629,7 +1630,7 @@ impl World {
             named: 0,
             old_effects: Vec::new(),
             ship: 0,
-            ai: AiProfile::default(),
+            ai: AiProfile::package_army(model, (faction as usize).checked_sub(1).and_then(|f| self.relations.get(f)).copied().unwrap_or([0; 4])),
             mind: AiMind::default(),
         });
     }

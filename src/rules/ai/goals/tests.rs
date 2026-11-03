@@ -7,8 +7,9 @@ use super::*;
 use crate::dt::dtm::{Army as DtArmy, BuildingType, Scenario};
 use crate::pack::triggers::{VarKind, VarValue};
 use crate::rules::content::testkit as ck;
-use crate::rules::content::{Content, HeroClass};
-use crate::rules::game::Event;
+use crate::rules::ai::{AiProfile, Style};
+use crate::rules::content::{Content, HeroClass, UnitId};
+use crate::rules::game::{Event, STEP_SECONDS};
 use crate::rules::triggers::{Act, Story, Trace, Trigger, When};
 use crate::rules::map::Surface;
 use crate::rules::world::testkit::{self as tk, building, hero, scenario, troop};
@@ -243,5 +244,78 @@ fn marsh_hours(pace: u32) -> Option<u32> {
 fn any_pace_from_10_to_500_crosses_marsh() {
     for pace in [10, 30, 50, 60, 70, 80, 100, 250, 500] {
         assert!(marsh_hours(pace).is_some(), "a {pace} percent army never leaves the marsh");
+    }
+}
+
+/// A story whose game-start trigger runs `acts` once: a package army spawned and given its goal the
+/// way a chapter's trigger does it (`spawn_army` faction 4, model 5, one warrior).
+fn spawn_story(goal: Option<Goal>) -> Story {
+    let mut acts = vec![Act::Spawn { army: 201, at: (30, 10), faction: 4, model: 5, troops: vec![UnitId(4)] }];
+    acts.push(Act::ArmyGoal { army: 201, goal });
+    Story {
+        triggers: vec![Trigger { id: "spawn".into(), when: When::GameStart, cond: vec![], then: acts, once: true, chance: 100 }],
+        seed: 7,
+        ..Story::default()
+    }
+}
+
+/// A game where a package army (id 201) is spawned at (30, 10) with `goal`, hostile to the player
+/// (the scenario's matrix, row 0, column 3: faction 4 at −3).
+fn game_with_spawned_army(goal: Option<Goal>) -> Game {
+    let mut g = start(&map());
+    g.world.relations[0][3] = -3;
+    g.attach_story(spawn_story(goal));
+    g.start_story();
+    assert!(g.world.armies.iter().any(|a| a.id == 201), "the trigger spawned the army");
+    g
+}
+
+#[test]
+fn a_spawned_army_with_an_attack_goal_reaches_the_hero_and_fights() {
+    let mut g = game_with_spawned_army(Some(Goal::Attack(GoalTarget::Hero)));
+    assert!(g.world.armies[idx(&g, 201)].ai.enabled, "a spawned army is steered by the AI");
+    g.wait(24 * 14);
+    let t = tile_of(&g, 201);
+    assert!((t.0 - g.tile().0).abs() <= 1 && (t.1 - g.tile().1).abs() <= 1, "it walked to the hero (30 cells away, he stood still): {t:?}");
+    // An attack comes when his step ends next to it (world.md §4.3: none while he waits).
+    let to = (g.tile().0, g.tile().1 + 1);
+    assert!(g.set_destination(to));
+    for _ in 0..4000 {
+        if g.foe.is_some() {
+            break;
+        }
+        g.tick(STEP_SECONDS);
+    }
+    assert!(g.foe.is_some(), "the battle started on his step");
+}
+
+#[test]
+fn a_spawned_army_with_a_go_to_goal_walks_there() {
+    let mut g = game_with_spawned_army(Some(Goal::GoTo((39, 10))));
+    g.wait(48);
+    assert_eq!(tile_of(&g, 201), (39, 10), "it walked to its cell");
+}
+
+#[test]
+fn a_spawned_army_keeps_its_ai_and_its_goal_through_a_save() {
+    let g = game_with_spawned_army(Some(Goal::GoTo((39, 10))));
+    let json = serde_json::to_string(&g).unwrap();
+    let back: Game = serde_json::from_str(&json).unwrap();
+    let i = idx(&back, 201);
+    assert!(back.world.armies[i].ai.enabled, "the AI flag survives the save");
+    assert_eq!(back.world.armies[i].ai.style, g.world.armies[idx(&g, 201)].ai.style, "the style");
+    assert_eq!(back.world.armies[i].mind.goal, g.world.armies[idx(&g, 201)].mind.goal, "the goal");
+    assert_eq!(serde_json::to_string(&back).unwrap(), json, "the same save");
+}
+
+#[test]
+fn a_package_army_is_steered_as_its_scenario_army_of_the_same_model() {
+    use crate::pack::compile::ARMY_MODELS;
+    let relations = [1, 0, 0, -2];
+    for (name, model, behaviour) in ARMY_MODELS {
+        let ai = AiProfile::package_army(model, relations);
+        assert!(ai.enabled, "{name}");
+        assert_eq!(ai.style, Style::of(behaviour, model), "{name}: its behaviour");
+        assert_eq!((ai.garrison_level, ai.exp_correction, ai.relations), (50, 100, relations), "{name}: the compiler's values");
     }
 }

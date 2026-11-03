@@ -333,6 +333,50 @@ mod tests {
         run.walk_to((6, 44), 10)
     }
 
+    /// Whether the barrow host (the package's army `host`) stands within three cells of the hero.
+    fn host_near(run: &Run) -> bool {
+        let here = run.g.tile();
+        run.g.world.armies.iter().enumerate().any(|(i, a)| {
+            let t = a.tile(&run.g.world.map);
+            run.army_name(i) == "host" && (t.0 - here.0).abs() <= 3 && (t.1 - here.1).abs() <= 3
+        })
+    }
+
+    /// The hero takes one step to a free cell beside him and back. An AI army attacks only when
+    /// his step ends beside it, never while he stands (world.md §4.3), so this is how a waiting
+    /// hero meets an army that came to him.
+    fn step_out_and_back(run: &mut Run) -> Result<(), Stuck> {
+        let here = run.g.tile();
+        let cells: Vec<Tile> = (-1..=1).flat_map(|dy| (-1..=1).map(move |dx| (here.0 + dx, here.1 + dy))).filter(|&n| n != here && run.g.world.map.in_bounds(n)).collect();
+        for n in cells {
+            match run.walk_to(n, 1) {
+                Ok(()) => return run.walk_to(here, 1),
+                Err(Stuck::NoRoute { .. }) => continue,
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
+    }
+
+    /// Waits up to `days` days for the barrow host to come. When it is near, the hero steps out
+    /// and back (`step_out_and_back`), so the host's attack comes on his step. Stops when the
+    /// chapter is over.
+    fn meet_host(run: &mut Run, days: u64) -> Result<(), Stuck> {
+        for _ in 0..days {
+            run.wait_days(1)?;
+            if run.done() {
+                return Ok(());
+            }
+            if host_near(run) {
+                step_out_and_back(run)?;
+                if run.done() {
+                    return Ok(());
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn fight_against(run: &Run, enemy: &str) -> Option<Fight> {
         run.battles.iter().find(|b| b.enemy == enemy).cloned()
     }
@@ -384,17 +428,15 @@ mod tests {
         assert!(run.battles.iter().all(|b| b.day >= 14.0), "{:?}", run.battles);
     }
 
-    /// Chapter 1 won on the prepared path. Ignored: the barrow host, raised at the ford on day 14
-    /// with an attack on the hero, stands still at (28, 17) and never reaches him (see
-    /// docs/OPEN_QUESTIONS.md), so the chapter cannot be finished by play yet.
+    /// Chapter 1 won on the prepared path: the host rises at the ford, comes for the hero and is
+    /// beaten, and the chapter's victory fires.
     #[test]
-    #[ignore = "the barrow host stalls at (28, 17) and never attacks; see docs/OPEN_QUESTIONS.md"]
     fn chapter_one_is_won_on_the_prepared_path() {
         let Some(install) = install() else { return };
         let (opened, content) = brod(&install);
         let mut run = Run::new(&opened, content, 1, PREPARED).unwrap_or_else(|e| panic!("{e}"));
         prepared_to_wraiths(&mut run).unwrap_or_else(|e| panic!("{e}"));
-        run.wait_until_done(30).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+        meet_host(&mut run, 30).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
         assert!(run.victory(), "{:?}", run.log);
     }
 
@@ -419,6 +461,29 @@ mod tests {
         }
         eprintln!("wraiths over 30 seeds: prepared won {won_prepared}/30, start army lost {lost_unprepared}/30, in {:.2}s", started.elapsed().as_secs_f64());
         assert!(won_prepared * 100 >= 75 * 30, "prepared won {won_prepared}/30");
+        assert!(lost_unprepared * 100 >= 60 * 30, "start army lost {lost_unprepared}/30");
+    }
+
+    /// The host over 30 seeds: the prepared route (the wraiths beaten, then the host met) wins the
+    /// chapter, and the start army, waiting at its start (40, 28) for the host, loses to it.
+    #[test]
+    fn the_host_over_thirty_seeds() {
+        let Some(install) = install() else { return };
+        let (opened, content) = brod(&install);
+        let started = std::time::Instant::now();
+        let (mut won_prepared, mut lost_unprepared) = (0, 0);
+        for seed in 1..=30u32 {
+            let mut run = Run::new(&opened, content.clone(), seed, PREPARED).unwrap_or_else(|e| panic!("{e}"));
+            if prepared_to_wraiths(&mut run).is_ok() && meet_host(&mut run, 30).is_ok() && run.victory() {
+                won_prepared += 1;
+            }
+            let mut run = Run::new(&opened, content.clone(), seed, PREPARED).unwrap_or_else(|e| panic!("{e}"));
+            if meet_host(&mut run, 30).is_err() && fight_against(&run, "host").is_some_and(|b| b.outcome == Outcome::Defeat) {
+                lost_unprepared += 1;
+            }
+        }
+        eprintln!("host over 30 seeds: prepared won {won_prepared}/30, start army lost {lost_unprepared}/30, in {:.2}s", started.elapsed().as_secs_f64());
+        assert!(won_prepared * 100 >= 70 * 30, "prepared won {won_prepared}/30");
         assert!(lost_unprepared * 100 >= 60 * 30, "start army lost {lost_unprepared}/30");
     }
 

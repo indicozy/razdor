@@ -207,6 +207,15 @@ impl AiProfile {
             no_buildings: a.no_building_interest != 0,
         }
     }
+
+    /// The profile of a package's army spawned by `spawn_army`: the one the package compiler
+    /// writes for a scenario army of the same model (`pack::compile`), with its behaviour
+    /// (`ARMY_MODELS`), its faction's attitudes (`relations`, the faction's row of the scenario's
+    /// matrix), garrison strength 50 and experience correction 100, and every other byte at 0.
+    pub fn package_army(model: u8, relations: [i8; 4]) -> AiProfile {
+        let behaviour = crate::pack::compile::ARMY_MODELS.iter().find(|m| m.1 == model).map_or(0, |m| m.2);
+        AiProfile::from_dt(&DtArmy { model, behaviour, relations, garrison_strength: 50, exp_correction: 100, ..DtArmy::default() })
+    }
 }
 
 /// What the AI keeps of an army between its arrivals (ai.md §1's record fields).
@@ -1520,6 +1529,61 @@ impl Game {
     // Map load
     // ------------------------------------------------------------------------------------
 
+    /// Army `i`'s record as a fresh one (0x4a1ff0 for a map load, and a package's `spawn_army`):
+    /// it stands in the building under it, and scores every building before it has any income
+    /// or village average. Then its building defence, its first noon (today's 12:00, or
+    /// tomorrow's when that has passed), its income and a village average of 50, no path, and
+    /// its facing: a stationary guard faces no direction, the others the map load's south.
+    pub(crate) fn fresh_mind(&mut self, i: usize) {
+        let now = self.clock.total_minutes();
+        let day = MINUTES_PER_DAY as f64;
+        let cell = self.world.armies[i].tile(&self.world.map);
+        let standing = self.world.location_covering(cell);
+        let bill = army_wages(&self.content, &self.world.armies[i].troops);
+        {
+            let m = &mut self.world.armies[i].mind;
+            m.standing = standing;
+            m.clean.clear();
+            // The recount comes before the defence is written (0x4a1ff0): a fresh record
+            // counts none.
+            m.strength_bd = 0;
+            m.wage_bill = bill;
+            m.income = 0;
+            m.village_avg = 0;
+        }
+        self.rescore_buildings(i);
+        // Everyone counts as paid at the start: a troop never paid would desert at the first noon
+        // (`ai_noon`, `max_time_not_upkeep`).
+        let stamp = now as u64;
+        for t in self.world.armies[i].troops.iter_mut().filter(|t| t.last_paid == 0) {
+            t.last_paid = stamp;
+        }
+        let defence = standing.map_or(0, |l| self.world.locations[l].garrison_defence);
+        let a = &mut self.world.armies[i];
+        let m = &mut a.mind;
+        m.defence = defence;
+        m.idle = 0;
+        // A fresh record has no path.
+        m.walked = 0;
+        m.no_path = true;
+        a.budget = 0.0;
+        let mut noon = (now / day).floor() * day + day / 2.0;
+        if noon < now {
+            noon += day;
+        }
+        m.next_noon = noon;
+        m.income = a.ai.extra_income;
+        m.village_avg = 50;
+        m.village_today = 50;
+        // A stationary guard faces no direction (0x4a1ff0); the others face the map load's
+        // direction 5, south.
+        if stationary(a) {
+            a.mind.facing_none = true;
+        } else {
+            a.mind.stand_facing = Some(LOAD_FACING);
+        }
+    }
+
     /// The AI's setup at map load and at every save load (0x4a1ff0, ai.md §7.1): every
     /// army stands in the building under it, all its pairs are dirty and it scores every
     /// building; at map load also its building defence, its first noon (today's 12:00, or
@@ -1539,6 +1603,10 @@ impl Game {
         }
         let ids: Vec<usize> = (0..self.world.armies.len()).filter(|&i| managed(&self.world.armies[i])).collect();
         for &i in &ids {
+            if !from_save {
+                self.fresh_mind(i);
+                continue;
+            }
             let cell = self.world.armies[i].tile(&self.world.map);
             let standing = self.world.location_covering(cell);
             let bill = army_wages(&self.content, &self.world.armies[i].troops);
@@ -1546,45 +1614,14 @@ impl Game {
                 let m = &mut self.world.armies[i].mind;
                 m.standing = standing;
                 m.clean.clear();
-                // The recount comes before the defence is written (0x4a1ff0): a fresh record
-                // counts none; a save's its loaded one.
-                m.strength_bd = if from_save { m.defence } else { 0 };
+                // A save's recount is its loaded defence (0x4a1ff0).
+                m.strength_bd = m.defence;
                 // A save keeps its bill; one from before Razdor kept it counts it afresh.
-                if !from_save || m.wage_bill == 0 {
+                if m.wage_bill == 0 {
                     m.wage_bill = bill;
-                }
-                if !from_save {
-                    m.income = 0;
-                    m.village_avg = 0;
                 }
             }
             self.rescore_buildings(i);
-            if !from_save {
-                let defence = standing.map_or(0, |l| self.world.locations[l].garrison_defence);
-                let a = &mut self.world.armies[i];
-                let m = &mut a.mind;
-                m.defence = defence;
-                m.idle = 0;
-                // A fresh record has no path.
-                m.walked = 0;
-                m.no_path = true;
-                a.budget = 0.0;
-                let mut noon = (now / day).floor() * day + day / 2.0;
-                if noon < now {
-                    noon += day;
-                }
-                m.next_noon = noon;
-                m.income = a.ai.extra_income;
-                m.village_avg = 50;
-                m.village_today = 50;
-                // A stationary guard faces no direction (0x4a1ff0); the others face the map
-                // load's direction 5, south.
-                if stationary(a) {
-                    a.mind.facing_none = true;
-                } else {
-                    a.mind.stand_facing = Some(LOAD_FACING);
-                }
-            }
         }
         // The armies waiting off the map get their records set up too (a building score is 0
         // for an army off the map).
@@ -1617,10 +1654,10 @@ impl Game {
             a.mind.talk.clear();
         }
         if !from_save {
-            // Everyone counts as paid at the start (a save from before the pay records too).
+            // Everyone counts as paid at the start (a save from before the pay records too); the
+            // armies on the map did it in `fresh_mind`.
             let stamp = now as u64;
-            let troops = self.world.armies.iter_mut().chain(self.world.inactive.iter_mut()).filter(|a| managed(a)).flat_map(|a| a.troops.iter_mut());
-            for t in troops.filter(|t| t.last_paid == 0) {
+            for t in self.world.inactive.iter_mut().filter(|a| managed(a)).flat_map(|a| a.troops.iter_mut()).filter(|t| t.last_paid == 0) {
                 t.last_paid = stamp;
             }
         }
