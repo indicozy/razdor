@@ -12720,7 +12720,9 @@ sprite = 6
 
 
 # The marsh folk's Reedmere on its island, the witch's hut on the next, the Crown's Salt Gate on
-# the flats (a garrison town), the watch at the causeway's north end, and the bandits' ruined den.
+# the flats, the watch at the causeway's north end, and the bandits' ruined den. The Salt Gate is a
+# castle, not a town: a town never falls to the hero's step (only villages, castles, forts, ruins and
+# camps are taken or fought on a step, game.rs step_contact), and the story takes the gate.
 [[building]]
 id = "reedmere"
 type = "village"
@@ -12738,18 +12740,20 @@ description = "salt.building.witch.description"
 cell = [10, 40]
 faction = "ally"
 
+# The Crown's levy at the gate (balance, the owner's call): a guardsman and two militiamen. The former
+# garrison of eight (four guardsmen, two halberdiers, two archers) beat the hub's squad of five and a squad
+# of nine militia on every seed (triggers/salt.toml; pack::playthrough_salt).
 [[building]]
 id = "saltgate"
-type = "town"
+type = "castle"
 name = "salt.building.saltgate.name"
 description = "salt.building.saltgate.description"
 cell = [70, 40]
 faction = "enemy"
 income = 60
 garrison = [
-    { unit = "dt:guardsman", level = 1, count = 4 },
-    { unit = "dt:halberdier", level = 1, count = 2 },
-    { unit = "dt:archer", level = 1, count = 2 },
+    { unit = "dt:guardsman", level = 1, count = 1 },
+    { unit = "dt:militiaman", level = 1, count = 2 },
 ]
 
 [[building]]
@@ -12786,37 +12790,44 @@ troops = [
     { unit = "dt:robber", level = 1, count = 2 },
 ]
 
-# The Crown's patrol on the north road: it walks its loop while the hero is in disguise.
+# The Crown's patrol on the north road: it walks its loop from the start and is hostile to the hero until
+# he rides in disguise (triggers/salt.toml sets its attitude). Faction ally, not enemy: the attitude is the
+# faction's base (the player's row of the relations matrix) combined with the story's value, and an enemy
+# base is negative for good (world::relation keeps a negative faction attitude). A friendly attitude (above
+# 0) is met on a step without a fight; a neutral (0) army is still engaged on a step (game.rs: attitude <= 0).
 [[army]]
 id = "patrol_north"
 name = "salt.army.patrol_north.name"
 cell = [48, 24]
-faction = "enemy"
+faction = "ally"
 model = "feudal"
 troops = [
     { unit = "dt:guardsman", level = 1, count = 2 },
     { unit = "dt:archer", level = 1, count = 2 },
 ]
 
-# The bounty men at the Salt Gate: they walk near it while the hero is in disguise, and follow him
-# when he is found out.
+# The bounty men south of the Salt Gate (off the road from Reedmere): they walk near it from the start,
+# friendly to a disguised hero and hostile when he is found out (triggers/salt.toml). Faction ally, as the
+# patrol. Off the road, because a step onto a friendly army is a fight unless the «Let pass» option is on.
 [[army]]
 id = "bounty"
 name = "salt.army.bounty.name"
-cell = [64, 44]
-faction = "enemy"
+cell = [72, 50]
+faction = "ally"
 model = "feudal"
 troops = [
     { unit = "dt:guardsman", level = 1, count = 3 },
     { unit = "dt:halberdier", level = 1, count = 2 },
 ]
 
-# The ghosts of the bog: their fog curses whoever walks through it (the story's bog curse).
+# The ghosts of the bog: their fog curses whoever walks through it (the story's bog curse). They do not
+# fight: friendly and standing still, south of the fog's zone (triggers/salt.toml), off the road. Near-immune
+# to blows, they could not be beaten.
 [[army]]
 id = "bog_ghosts"
 name = "salt.army.bog_ghosts.name"
-cell = [12, 82]
-faction = "enemy"
+cell = [12, 90]
+faction = "ally"
 model = "ghosts"
 troops = [
     { unit = "dt:ghost", level = 1, count = 3 },
