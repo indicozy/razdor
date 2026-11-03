@@ -240,3 +240,103 @@ then = [ { add = "dread", value = -2 }, { victory = true } ]
 id = "claim"
 text = "gates.gt_last.claim"
 then = [ { add = "taint", value = 1 }, { victory = true } ]
+
+# ---- the framing (game start) and the roads' beats (triggers/gates.toml) ----
+
+[[dialog]]
+id = "gt_frame"
+title = "gates.gt_frame.title"
+text = "gates.gt_frame.text"
+
+[[dialog.choice]]
+id = "go"
+text = "gates.gt_frame.go"
+
+[[dialog]]
+id = "gt_road1"
+title = "gates.gt_road1.title"
+text = "gates.gt_road1.text"
+
+[[dialog]]
+id = "gt_cairn"
+title = "gates.gt_cairn.title"
+text = "gates.gt_cairn.text"
+
+[[dialog]]
+id = "gt_courier"
+title = "gates.gt_courier.title"
+text = "gates.gt_courier.text"
+
+[[dialog.choice]]
+id = "promise"
+text = "gates.gt_courier.promise"
+then = [ { add = "crown", value = 1, min = -5, max = 5 } ]
+
+[[dialog.choice]]
+id = "ride"
+text = "gates.gt_courier.ride"
+
+[[dialog]]
+id = "gt_road2"
+title = "gates.gt_road2.title"
+text = "gates.gt_road2.text"
+
+[[dialog]]
+id = "gt_sign"
+title = "gates.gt_sign.title"
+text = "gates.gt_sign.text"
+
+[[dialog]]
+id = "gt_voice"
+title = "gates.gt_voice.title"
+text = "gates.gt_voice.text"
+
+[[dialog]]
+id = "gt_wind"
+title = "gates.gt_wind.title"
+text = "gates.gt_wind.text"
+
+[[dialog]]
+id = "gt_road3"
+title = "gates.gt_road3.title"
+text = "gates.gt_road3.text"
+
+[[dialog]]
+id = "gt_road4"
+title = "gates.gt_road4.title"
+text = "gates.gt_road4.text"
+
+[[dialog]]
+id = "gt_cairn2"
+title = "gates.gt_cairn2.title"
+text = "gates.gt_cairn2.text"
+
+[[dialog]]
+id = "gt_road5"
+title = "gates.gt_road5.title"
+text = "gates.gt_road5.text"
+
+[[dialog]]
+id = "gt_road6"
+title = "gates.gt_road6.title"
+text = "gates.gt_road6.text"
+
+[[dialog]]
+id = "gt_road7"
+title = "gates.gt_road7.title"
+text = "gates.gt_road7.text"
+
+[[dialog]]
+id = "gt_road8"
+title = "gates.gt_road8.title"
+text = "gates.gt_road8.text"
+
+[[dialog]]
+id = "gt_road9"
+title = "gates.gt_road9.title"
+text = "gates.gt_road9.text"
+
+[[dialog]]
+id = "gt_stakes"
+title = "gates.gt_stakes.title"
+text = "gates.gt_stakes.text"

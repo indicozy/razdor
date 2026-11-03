@@ -92,6 +92,44 @@ map = "marka"
 when = { event = "dialog_choice", dialog = "council", choice = "companies" }
 then = [ { complete_quest = "find_ally" } ]
 
+# ---- the roads between the hub's places (docs/ideas/pepelnaya-marka-narrative.md §6): a beat every 6-10 cells ----
+
+[[trigger]]
+id = "m_poi_barn"
+map = "marka"
+when = { event = "hero_enters", at = [42, 38, 4, 4] }
+then = [ { dialog = "poi_barn" } ]
+
+[[trigger]]
+id = "m_poi_pilgrim"
+map = "marka"
+when = { event = "hero_enters", at = [34, 32, 4, 4] }
+then = [ { dialog = "poi_pilgrim" } ]
+
+[[trigger]]
+id = "m_poi_milestone"
+map = "marka"
+when = { event = "hero_enters", at = [18, 48, 4, 4] }
+then = [ { dialog = "poi_milestone" } ]
+
+[[trigger]]
+id = "m_poi_horse"
+map = "marka"
+when = { event = "hero_enters", at = [16, 54, 4, 4] }
+then = [ { dialog = "poi_horse" } ]
+
+[[trigger]]
+id = "m_poi_caravan"
+map = "marka"
+when = { event = "hero_enters", at = [64, 54, 4, 4] }
+then = [ { dialog = "poi_caravan" } ]
+
+[[trigger]]
+id = "m_poi_toll"
+map = "marka"
+when = { event = "hero_enters", at = [68, 72, 4, 4] }
+then = [ { dialog = "poi_toll" } ]
+
 # The hero rides in from the ford with the chapter 1 wounds: the Crown's surgeon sends a healing draught.
 [[trigger]]
 id = "m_arrival"
@@ -650,3 +688,33 @@ map = "marka"
 when = { event = "var_changed", var = "taint" }
 if = [ { var = "taint", op = ">=", value = 3 } ]
 then = [ { add = "dread", value = 1 } ]
+
+[[trigger]]
+id = "m_poi_bog"
+map = "marka"
+when = { event = "hero_enters", at = [20, 74, 4, 4] }
+then = [ { dialog = "poi_bog" } ]
+
+[[trigger]]
+id = "poi_ford"
+map = "marka"
+when = { event = "hero_enters", at = [48, 45, 4, 4] }
+then = [ { dialog = "poi_ford" } ]
+
+[[trigger]]
+id = "poi_wagon"
+map = "marka"
+when = { event = "hero_enters", at = [26, 42, 4, 4] }
+then = [ { dialog = "poi_wagon" } ]
+
+[[trigger]]
+id = "poi_reeds"
+map = "marka"
+when = { event = "hero_enters", at = [28, 78, 4, 4] }
+then = [ { dialog = "poi_reeds" } ]
+
+[[trigger]]
+id = "poi_bridge"
+map = "marka"
+when = { event = "hero_enters", at = [55, 43, 4, 4] }
+then = [ { dialog = "poi_bridge" } ]

@@ -9,6 +9,7 @@
 # or, with neither standing, the fall. The endings are dialogs (`ending = "<dialog-id>"`).
 
 [vars]
+bw_king_spoke = false # the King spoke his words to the hero (once)
 # The Free March's standing is kept live: it follows the Companies and the marsh folk as they change (the
 # Iron Peace needs no flag: the council's choice reads the Crown and the Order when it opens).
 bw_free_ok = false   # the Free March may be chosen: the Companies at 2 or more, or the marsh folk at 3 or more
@@ -515,3 +516,92 @@ map = "barrows"
 when = { event = "sim_victory" }
 if = [ { var = "grey_bargain_offered", value = false } ]
 then = [ { dialog = "bw_council" } ]
+
+# ---- the roads of the finale (docs/ideas/pepelnaya-marka-narrative.md §6): a beat every 10-15 cells on the
+# road to the gap in the wall, and from the gap to the palace. The King's words come before his fight. ----
+
+[[trigger]]
+id = "bw_road_1"
+map = "barrows"
+when = { event = "hero_enters", at = [98, 178, 4, 4] }
+then = [ { dialog = "bw_road_1" } ]
+
+[[trigger]]
+id = "bw_road_2"
+map = "barrows"
+when = { event = "hero_enters", at = [98, 164, 4, 4] }
+then = [ { dialog = "bw_road_2" } ]
+
+[[trigger]]
+id = "bw_road_3"
+map = "barrows"
+when = { event = "hero_enters", at = [98, 150, 4, 4] }
+then = [ { dialog = "bw_road_3" } ]
+
+[[trigger]]
+id = "bw_road_4"
+map = "barrows"
+when = { event = "hero_enters", at = [98, 134, 4, 4] }
+then = [ { dialog = "bw_road_4" } ]
+
+[[trigger]]
+id = "bw_road_5"
+map = "barrows"
+when = { event = "hero_enters", at = [108, 98, 4, 4] }
+then = [ { dialog = "bw_road_5" } ]
+
+[[trigger]]
+id = "bw_herald"
+map = "barrows"
+when = { event = "hero_enters", at = [118, 86, 4, 4] }
+then = [ { dialog = "bw_herald" } ]
+
+[[trigger]]
+id = "bw_road_6"
+map = "barrows"
+when = { event = "hero_enters", at = [128, 74, 4, 4] }
+then = [ { dialog = "bw_road_6" } ]
+
+[[trigger]]
+id = "bw_road_7"
+map = "barrows"
+when = { event = "hero_enters", at = [138, 62, 4, 4] }
+then = [ { dialog = "bw_road_7" } ]
+
+[[trigger]]
+id = "bw_road_8"
+map = "barrows"
+when = { event = "hero_enters", at = [150, 52, 4, 4] }
+then = [ { dialog = "bw_road_8" } ]
+
+[[trigger]]
+id = "bw_road_9"
+map = "barrows"
+when = { event = "hero_enters", at = [156, 40, 4, 4] }
+then = [ { dialog = "bw_road_9" } ]
+
+# The King's words, on the step below the palace, before his host is met.
+[[trigger]]
+id = "bw_king_words"
+map = "barrows"
+when = { event = "hero_enters", at = [160, 44, 6, 6] }
+if = [ { var = "bw_king_spoke", value = false } ]
+then = [ { set = "bw_king_spoke", value = true }, { dialog = "bw_king_words" } ]
+
+[[trigger]]
+id = "bw_road_10"
+map = "barrows"
+when = { event = "hero_enters", at = [98, 128, 4, 4] }
+then = [ { dialog = "bw_road_10" } ]
+
+[[trigger]]
+id = "bw_road_11"
+map = "barrows"
+when = { event = "hero_enters", at = [98, 100, 4, 4] }
+then = [ { dialog = "bw_road_11" } ]
+
+[[trigger]]
+id = "bw_road_12"
+map = "barrows"
+when = { event = "hero_enters", at = [98, 116, 4, 4] }
+then = [ { dialog = "bw_road_12" } ]

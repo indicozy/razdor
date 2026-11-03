@@ -966,7 +966,7 @@ name = "The Sleeping Host"
 
 [barrows.bw_arrive]
 title = "The barrows call"
-text = "The barrows are silent no longer. Mist rises from under the hills, and the wind carries the voices of those buried here. The King waits in the north, in his palace. He wants you to come yourself."
+text = "The whole March marches on the barrows. The Crown and the Order behind you? Then the Iron Peace. The Companies or the marsh folk behind you? Then the Free March. Brother Ilm heard the dead's messenger? Then the Grey Bargain on the throne. Without one of these three, the March falls. The King waits in the north, on the step below his palace. He wants you to come yourself, and he knows what it cost you to come."
 
 [barrows.bw_rises]
 title = "The Barrow King"
@@ -997,14 +997,20 @@ leave = "Leave her to hold the gate"
 [barrows.bw_fate_tess]
 title = "Tess"
 text = "Tess sits on a stone in the mire. \"I know the path through the barrows,\" she says. \"No dead there, only water. But I will not go back.\""
+stay = "Keep her with the company: +40 experience for Tess"
+go = "Let Tess go back to the bog: she leaves, the marsh folk +1"
 
 [barrows.bw_fate_ilm_inq]
 title = "Brother Ilm"
 text = "Ilm unrolls a scroll. \"The Order will not forgive your mistake, but it will not forgive the dead either. I give you my word, not your fate.\""
+rebuke = "Rebuke him: let him remember who he is"
+pray = "Pray together: +40 experience for Ilm"
 
 [barrows.bw_fate_ilm_heresy]
 title = "Brother Ilm"
 text = "Ilm looks at you without fear. \"The grey man waits by the palace. You know what he offers. Decide for yourself, and I will be the witness.\""
+hear = "Hear him out in silence"
+send = "Send him away: taint -1"
 
 [barrows.bw_fate_kord]
 title = "Kord"
@@ -1148,3 +1154,190 @@ text = "Tess asks you to find the ghosts' lair in the bog and burn it out."
 [quest.power_companies]
 title = "The Free Companies"
 text = "Kord sells his company by the camp for gold. The price: forty coins."
+
+# --- barrows: the finale's roads, the herald and the King's words (chapter 5) ---
+[barrows.bw_road_1]
+title = "The refugees' cart"
+text = "A supply cart lies on its side by the road. Its sacks of biscuit are whole, and its people went off toward the hills, leaving a child's shoes at the edge of the rut."
+take = "Take the biscuit: +15 gold"
+leave = "Leave it"
+
+[barrows.bw_road_2]
+title = "The field hospital"
+text = "The tents of the Crown's and the Order's hospital stand side by side. The wounded lie on straw and the monks hold candles. You can catch your breath here, but there is not enough salve or linen. Each night the dead come closer to the tents."
+
+[barrows.bw_road_3]
+title = "A child by the rut"
+text = "A girl sits on a stone counting the stones of the road. She is not afraid of you. 'The man from the barrows said he would count us all,' she says. 'I count faster.'"
+
+[barrows.bw_road_4]
+title = "The breach in the wall"
+text = "The stone wall is broken here: an army once passed through, and now the gap is blocked with bones. The place where you enter the barrows' land."
+
+[barrows.bw_road_5]
+title = "The field of graves"
+text = "Graves come up out of the grass one after another. A cross on each is drawn in blood, and the last grave is still damp."
+
+[barrows.bw_herald]
+title = "The King's herald"
+text = "A withered herald in a rusted cloak stands by the road with a parchment. 'The King offers you peace,' he reads. 'You, and no one else: give him your sword, and the dead will withdraw from your lands. Your answer, living man.'"
+refuse = "Refuse and ride on"
+listen = "Hear the terms: Fear +1, taint +1"
+
+[barrows.bw_road_6]
+title = "A barrow by the road"
+text = "A low mound has been opened by someone. Inside it is empty, except for silk ribbons that were worn at a wedding many centuries ago."
+
+[barrows.bw_road_7]
+title = "A fire of staves"
+text = "A fire of staves and broken shields burns without smoke. An old man sits by it and watches you. 'Whoever goes to the King does not come back the same,' he says. 'Or does not come back at all.'"
+
+[barrows.bw_road_8]
+title = "The watch tower"
+text = "The old tower of the Crown stands on a hill. Its flag is gone, its door is nailed shut, and someone has written on the wall: 'We held this gate. Now the gate holds us.'"
+
+[barrows.bw_road_9]
+title = "The path to the step"
+text = "The path climbs steeply to the palace. Along the verge stand guards in armour that still remembers its service. They do not raise their swords, and they do not leave."
+
+[barrows.bw_king_words]
+title = "The King's words"
+text = "The King rises from the step: tall, in a rusted crown, with a voice that comes up from under the earth. 'You did not burn the village at Varn. You refused, and you lost your banner for it. Let us see what you burn now.'"
+
+# --- marka: the roads' beats (chapter 2) ---
+[marka.poi_barn]
+title = "The burnt barn"
+text = "The Order's barn burned to the beams. Ash, scorched ears of grain, and a tithe-roll nailed to the door: the monks counted the March's grain, and burned it when the count fell short."
+take = "Take the grain that survived: +10 gold, the Order is displeased"
+leave = "Leave it"
+
+[marka.poi_pilgrim]
+title = "The dead pilgrim"
+text = "A pilgrim lies face down in the mud, a prayer book open in his hand at a psalm for the dead. No wounds, no tracks. He stood up and walked to the shrine to die."
+pray = "Read the psalm over him: +20 experience"
+bury = "Leave him as he is"
+
+[marka.poi_milestone]
+title = "The roadside milestone"
+text = "Someone scratched on the salt road's milestone: \"Grey Willows, three days. In the bog beyond the Willows, the ghosts' lair. Whoever goes to the water at night does not come back.\" The stone is old and the words are fresh."
+
+[marka.poi_horse]
+title = "The dying horse"
+text = "A horse lies in a ditch and breathes hard. No harness, no rider. Someone left it when they went off toward the bog."
+end = "End its suffering"
+ride = "Ride on"
+
+[marka.poi_caravan]
+title = "The caravan master"
+text = "The caravan master climbs down from his wagon. \"Raiders on this road since spring. Escort us to the camp and the Crown pays for the guard. Or at least say you ride with us.\""
+promise = "Promise to ride with them: the Crown remembers"
+ride = "Ride your own road"
+
+[marka.poi_toll]
+title = "The abandoned toll post"
+text = "The old barrier is broken. The post carries Kord's mark, a mug and a sword, burned in. Under it someone added: \"Kord takes forty and keeps his word, while he is paid.\""
+
+
+# --- gates: the framing and the roads' beats (chapter 4) ---
+[gates.gt_frame]
+title = "Four stones"
+text = "Four standing stones stand where the dead walked in the old days, and now they walk there again. The old road of the stones is said to lead to the barrows. The Crown sent you four questions instead of an order: these gates must be opened, sealed or taken before the Fear rises higher. Your allies walk with you if you have them. The diary remembers which stone waits for which guard."
+go = "Go to the stones"
+
+[gates.gt_road1]
+title = "Old tracks"
+text = "The tracks of the dead lead north-east, even as a marching column. Not one boot print between them."
+
+[gates.gt_cairn]
+title = "A heap of bones"
+text = "A heap of bones stacked by the road, fresh. Every week one more is added beside it. Someone is counting how many dead are on the road."
+
+[gates.gt_courier]
+title = "The Crown's courier"
+text = "The courier lies by his horse: he was driven to the gates without rest. A letter in his bag: \"The Crown will not give men to the stones. Hold them, and the Crown will remember.\""
+promise = "Promise to hold the stones: the Crown remembers"
+ride = "Ride on"
+
+[gates.gt_road2]
+title = "A fork by the stones"
+text = "The road forks. One branch is grown over with willow and goes to the water, the other follows the ridge. There are no people on either."
+
+[gates.gt_sign]
+title = "A sign on the stone"
+text = "A reed arrow is burned into a boulder, the bog mark. A path behind it runs into the willows."
+
+[gates.gt_voice]
+title = "A voice in the mist"
+text = "A voice comes out of the mist, quiet and familiar. It calls Brother Ilm by name and promises that his words will reach the barrows."
+
+[gates.gt_wind]
+title = "Wind in the stones"
+text = "The wind hums in the standing stones as if someone were counting them aloud. The silence after it is heavy."
+
+[gates.gt_road3]
+title = "The bog path"
+text = "The path under the water holds if you walk on its white stones. Someone laid these stones here on purpose."
+
+[gates.gt_road4]
+title = "Ash on the path"
+text = "Ash lies in a strip across the road, with footprints in it that lead nowhere."
+
+[gates.gt_cairn2]
+title = "Willow crosses"
+text = "Willow crosses stand by the road. They were set up by those who fled the stones and did not come back."
+
+[gates.gt_road5]
+title = "Wormwood by the road"
+text = "The wormwood grows thick, and the rain on its tops has not dried. A party passed here in the night."
+
+[gates.gt_road6]
+title = "An old camp"
+text = "The embers of a fire are still warm under the ash. Someone waited here until the dead had passed by."
+
+[gates.gt_road7]
+title = "A dry ditch"
+text = "A ditch by the road is dug and filled with willow crosses. The earth in it has not settled, and fresh wreaths of bog grass lie on top."
+
+[marka.poi_bog]
+title = "The sunken boat"
+text = "A boat sunk at the edge of the bog, its net still wet. The water pulls at it, and it seems that someone under the water is counting steps."
+
+[gates.gt_road8]
+title = "A ruined chapel"
+text = "The chapel by the road is ruined, but its bell hangs on a rope. The wind swings it, and it rings by itself."
+
+[gates.gt_road9]
+title = "A deserted wagon"
+text = "A wagon is left across the road: its wheels taken off, its sacks torn open. Someone carried off only the salt."
+
+[barrows.bw_road_10]
+title = "The King's sign"
+text = "A stone at the pass is cut with the King's sign: a crown above a mound. Broken swords lie around it, points to the north."
+
+[barrows.bw_road_11]
+title = "The field path"
+text = "The path runs through a wet field, and on both sides hands stick out of the earth. They move as you pass."
+
+[marka.poi_ford]
+title = "A notice at the ford"
+text = "At the Ashford bridge a Crown notice is nailed up: a tenth of everything that crosses the ford. The signature is washed away by rain."
+
+[barrows.bw_road_12]
+title = "Bones at the pass"
+text = "At the pass in the wall, bones of warriors are stacked four to a row. Among them lies a helm with the March's crest, and no one has touched it."
+
+[gates.gt_stakes]
+title = "Stakes with crows"
+text = "Stakes are driven into the ground by the road, a crow on each. They do not fly off as you come near, and they look toward the stones."
+
+[marka.poi_wagon]
+title = "An abandoned cart"
+text = "A cart stands without a horse, a wheel broken, and in its bed lies an empty sack with the Crown's seal. Someone left it in haste."
+
+[marka.poi_reeds]
+title = "Reeds by the path"
+text = "The reeds are trodden in a line, as if a file of men had walked through them. A bog flag with a burned arrow sticks out of the water, the same mark as on the gates' stones."
+
+[marka.poi_bridge]
+title = "Whispers on the bridge"
+text = "The traders on the Ashford bridge whisper: the barrows roar at night, salt has tripled in price, and the companies at the camp wait for their pay. No one says aloud which of the three powers he would pick."

@@ -272,3 +272,95 @@ speaker = "dt:swordsman"
 id = "stones_note"
 title = "marka.stones_note.title"
 text = "marka.stones_note.text"
+
+# ---- the roads' beats (triggers/marka.toml m_poi_*): lore, and a small choice where one is due ----
+
+[[dialog]]
+id = "poi_barn"
+title = "marka.poi_barn.title"
+text = "marka.poi_barn.text"
+
+[[dialog.choice]]
+id = "take"
+text = "marka.poi_barn.take"
+then = [ { give_gold = 10 }, { add = "order", value = -1, min = -5, max = 5 } ]
+
+[[dialog.choice]]
+id = "leave"
+text = "marka.poi_barn.leave"
+
+[[dialog]]
+id = "poi_pilgrim"
+title = "marka.poi_pilgrim.title"
+text = "marka.poi_pilgrim.text"
+
+[[dialog.choice]]
+id = "pray"
+text = "marka.poi_pilgrim.pray"
+then = [ { give_xp = 20, to = "player" } ]
+
+[[dialog.choice]]
+id = "bury"
+text = "marka.poi_pilgrim.bury"
+
+[[dialog]]
+id = "poi_milestone"
+title = "marka.poi_milestone.title"
+text = "marka.poi_milestone.text"
+
+[[dialog]]
+id = "poi_horse"
+title = "marka.poi_horse.title"
+text = "marka.poi_horse.text"
+
+[[dialog.choice]]
+id = "end"
+text = "marka.poi_horse.end"
+
+[[dialog.choice]]
+id = "ride"
+text = "marka.poi_horse.ride"
+
+[[dialog]]
+id = "poi_caravan"
+title = "marka.poi_caravan.title"
+text = "marka.poi_caravan.text"
+
+[[dialog.choice]]
+id = "promise"
+text = "marka.poi_caravan.promise"
+then = [ { add = "crown", value = 1, min = -5, max = 5 } ]
+
+[[dialog.choice]]
+id = "ride"
+text = "marka.poi_caravan.ride"
+
+[[dialog]]
+id = "poi_toll"
+title = "marka.poi_toll.title"
+text = "marka.poi_toll.text"
+
+[[dialog]]
+id = "poi_bog"
+title = "marka.poi_bog.title"
+text = "marka.poi_bog.text"
+
+[[dialog]]
+id = "poi_ford"
+title = "marka.poi_ford.title"
+text = "marka.poi_ford.text"
+
+[[dialog]]
+id = "poi_wagon"
+title = "marka.poi_wagon.title"
+text = "marka.poi_wagon.text"
+
+[[dialog]]
+id = "poi_reeds"
+title = "marka.poi_reeds.title"
+text = "marka.poi_reeds.text"
+
+[[dialog]]
+id = "poi_bridge"
+title = "marka.poi_bridge.title"
+text = "marka.poi_bridge.text"

@@ -409,3 +409,109 @@ map = "gates"
 when = { event = "hero_enters", at = [56, 42, 8, 8] }
 if = [ { var = "ilm", value = 2 }, { var = "grey_bargain_offered", value = false } ]
 then = [ { dialog = "gt_messenger" } ]
+
+# ---- the gates' framing and the roads between the stones (docs/ideas/pepelnaya-marka-narrative.md §6) ----
+
+[[trigger]]
+id = "gt_frame"
+map = "gates"
+when = { event = "game_start" }
+then = [ { dialog = "gt_frame" } ]
+
+[[trigger]]
+id = "gt_road1"
+map = "gates"
+when = { event = "hero_enters", at = [54, 86, 4, 4] }
+then = [ { dialog = "gt_road1" } ]
+
+[[trigger]]
+id = "gt_cairn"
+map = "gates"
+when = { event = "hero_enters", at = [62, 78, 4, 4] }
+then = [ { dialog = "gt_cairn" } ]
+
+[[trigger]]
+id = "gt_courier"
+map = "gates"
+when = { event = "hero_enters", at = [66, 48, 4, 4] }
+then = [ { dialog = "gt_courier" } ]
+
+[[trigger]]
+id = "gt_road2"
+map = "gates"
+when = { event = "hero_enters", at = [46, 56, 4, 4] }
+then = [ { dialog = "gt_road2" } ]
+
+[[trigger]]
+id = "gt_sign"
+map = "gates"
+when = { event = "hero_enters", at = [38, 58, 4, 4] }
+then = [ { dialog = "gt_sign" } ]
+
+[[trigger]]
+id = "gt_voice"
+map = "gates"
+when = { event = "hero_enters", at = [58, 56, 4, 4] }
+if = [ { var = "ilm", value = 2 } ]
+then = [ { dialog = "gt_voice" } ]
+
+[[trigger]]
+id = "gt_wind"
+map = "gates"
+when = { event = "hero_enters", at = [58, 56, 4, 4] }
+if = [ { var = "ilm", op = "<", value = 2 } ]
+then = [ { dialog = "gt_wind" } ]
+
+[[trigger]]
+id = "gt_road3"
+map = "gates"
+when = { event = "hero_enters", at = [22, 54, 4, 4] }
+then = [ { dialog = "gt_road3" } ]
+
+[[trigger]]
+id = "gt_road4"
+map = "gates"
+when = { event = "hero_enters", at = [16, 46, 4, 4] }
+then = [ { dialog = "gt_road4" } ]
+
+[[trigger]]
+id = "gt_cairn2"
+map = "gates"
+when = { event = "hero_enters", at = [20, 34, 4, 4] }
+then = [ { dialog = "gt_cairn2" } ]
+
+[[trigger]]
+id = "gt_road5"
+map = "gates"
+when = { event = "hero_enters", at = [30, 26, 4, 4] }
+then = [ { dialog = "gt_road5" } ]
+
+[[trigger]]
+id = "gt_road6"
+map = "gates"
+when = { event = "hero_enters", at = [40, 20, 4, 4] }
+then = [ { dialog = "gt_road6" } ]
+
+[[trigger]]
+id = "gt_road7"
+map = "gates"
+when = { event = "hero_enters", at = [48, 60, 4, 4] }
+then = [ { dialog = "gt_road7" } ]
+
+[[trigger]]
+id = "gt_road8"
+map = "gates"
+when = { event = "hero_enters", at = [34, 62, 4, 4] }
+then = [ { dialog = "gt_road8" } ]
+
+[[trigger]]
+id = "gt_road9"
+map = "gates"
+when = { event = "hero_enters", at = [64, 66, 4, 4] }
+then = [ { dialog = "gt_road9" } ]
+
+[[trigger]]
+id = "gt_stakes"
+map = "gates"
+when = { event = "hero_enters", at = [66, 56, 4, 4] }
+then = [ { dialog = "gt_stakes" } ]

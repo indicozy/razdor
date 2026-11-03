@@ -404,3 +404,64 @@ fn the_last_host_is_one_fewer_after_the_barrow() {
         assert_eq!(spawned(&run, "bw_king_6"), sixth, "{what}: the last host: {}", run.log.join("\n"));
     }
 }
+
+/// The beat gaps of a walk along the chapter's beat areas (the `hero_enters` areas of its roads): a beat is a
+/// step of the walk inside one of `areas`. Returns the worst gap in cells between two beats (or the walk's start
+/// and end), and the path indices of it. The areas are the unconditional ones, so every route that plays the
+/// chapter meets them.
+pub(crate) fn beat_gap(run: &Run, areas: &[(i32, i32, i32, i32)]) -> (usize, usize, usize) {
+    let inside = |t: &Tile| areas.iter().any(|&(x, y, w, h)| t.0 >= x && t.0 < x + w && t.1 >= y && t.1 < y + h);
+    let mut marks = vec![0usize];
+    marks.extend(run.path.iter().enumerate().filter(|(_, t)| inside(t)).map(|(i, _)| i));
+    marks.push(run.path.len() - 1);
+    marks.sort_unstable();
+    marks.dedup();
+    marks.windows(2).map(|w| (w[1] - w[0], w[0], w[1])).max().unwrap_or((0, 0, 0))
+}
+
+/// The gates' beat areas: the roads' points and the stones' messages (`triggers/gates.toml`).
+pub(crate) const GATES_AREAS: [(i32, i32, i32, i32); 16] = [
+    (54, 86, 4, 4), (62, 78, 4, 4), (64, 66, 4, 4), (66, 56, 4, 4), (66, 48, 4, 4), (58, 56, 4, 4), (46, 56, 4, 4), (38, 58, 4, 4),
+    (48, 60, 4, 4), (34, 62, 4, 4), (22, 54, 4, 4), (16, 46, 4, 4), (20, 34, 4, 4), (30, 26, 4, 4), (40, 20, 4, 4), (48, 14, 4, 4),
+];
+
+/// The barrows' beat areas: the road to the wall's gap, the road beyond it, the herald, the King's words
+/// (`triggers/barrows.toml`), and Varga's fate on the road (her beat while she lives in the squad).
+pub(crate) const BARROWS_AREAS: [(i32, i32, i32, i32); 15] = [
+    (98, 178, 4, 4), (98, 164, 4, 4), (98, 150, 4, 4), (98, 134, 4, 4), (98, 128, 4, 4), (98, 116, 4, 4), (96, 88, 10, 8), (98, 100, 4, 4),
+    (108, 98, 4, 4), (118, 86, 4, 4), (128, 74, 4, 4), (138, 62, 4, 4), (150, 52, 4, 4), (156, 40, 4, 4), (160, 44, 6, 6),
+];
+
+/// The main route of the gates, from the start to the north guard, by the points of the roads (each one a beat).
+const GATES_ROAD: [Tile; 15] = [(56, 88), (64, 80), (64, 68), (68, 50), (60, 58), (50, 62), (46, 58), (40, 60), (36, 62), (24, 56), (18, 48), (22, 36), (32, 28), (42, 22), (46, 16)];
+
+/// The gates' route of the points on the roads: the gap is measured on it, and it must stay at or under 10.
+#[test]
+fn the_gates_roads_have_a_beat_every_ten_cells() {
+    let Some(install) = install() else { return };
+    let mut run = gates_run(&install, &order_branch(1, 1500), 1, &[]);
+    for cell in GATES_ROAD {
+        to(&mut run, cell, 6).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+    }
+    let (gap, from, to_i) = beat_gap(&run, &GATES_AREAS);
+    eprintln!("the gates' road: {} cells, {} beats, the longest gap {gap} cells (path {from}..{to_i})", run.path.len() - 1, run.beats.len());
+
+    assert!(gap <= 10, "the longest walk between beats on the gates' road is {gap} cells: {:?}", &run.path[from..=to_i]);
+}
+
+/// The barrows' route: the road to the gap in the wall, the road beyond it to the King's step (the beats of the
+/// road and the companions), and the King's fight. The gap must stay at or under 15.
+const BARROWS_ROAD: [Tile; 15] = [(100, 180), (100, 166), (100, 152), (100, 136), (100, 128), (100, 116), (100, 113), (100, 100), (100, 92), (110, 100), (120, 88), (130, 76), (140, 64), (152, 54), (160, 44)];
+
+#[test]
+fn the_barrows_roads_have_a_beat_every_fifteen_cells() {
+    let Some(install) = install() else { return };
+    let mut run = barrows_run(&install, &order_branch(1, 1500), 1, &[]);
+    for cell in BARROWS_ROAD {
+        to(&mut run, cell, 8).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+    }
+    let (gap, from, to_i) = beat_gap(&run, &BARROWS_AREAS);
+    eprintln!("the barrows' road: {} cells, {} beats, the longest gap {gap} cells (path {from}..{to_i})", run.path.len() - 1, run.beats.len());
+
+    assert!(gap <= 15, "the longest walk between beats on the barrows' road is {gap} cells: {:?}", &run.path[from..=to_i]);
+}

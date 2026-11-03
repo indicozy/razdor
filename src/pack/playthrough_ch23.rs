@@ -153,4 +153,26 @@ mod tests {
         let salt = into_branch(&install, 1, "marsh", "salt", &[]).unwrap_or_else(|e| panic!("{e}"));
         assert!(salt.log.iter().any(|l| l.contains("dialog salt_arrival")), "{:?}", salt.log);
     }
+
+    /// The hub's beat areas: the roads' points (`triggers/marka.toml`, the `m_poi_*` and the hub's own areas).
+    const MARKA_AREAS: [(i32, i32, i32, i32); 16] = [
+        (55, 43, 4, 4),
+        (48, 45, 4, 4), (42, 38, 4, 4), (34, 32, 4, 4), (24, 32, 8, 8), (26, 42, 4, 4), (18, 48, 4, 4), (16, 54, 4, 4), (10, 62, 14, 14),
+        (20, 74, 4, 4), (28, 78, 4, 4), (64, 54, 4, 4), (68, 72, 4, 4), (78, 72, 12, 8), (92, 84, 4, 4), (82, 10, 4, 4),
+    ];
+
+    /// The hub's road: the beats along the roads from the ford to the shrine, the marsh and the Companies' road.
+    /// The longest walk between two beats must stay at or under 10 cells.
+    #[test]
+    fn the_marka_roads_have_a_beat_every_ten_cells() {
+        let Some(install) = install() else { return };
+        let mut run = into_marka(&install, 1, &[]).unwrap_or_else(|e| panic!("{e}"));
+        run.g.avoid_armies = true;
+        for cell in [(52, 44), (44, 40), (36, 34), (28, 36), (20, 50), (18, 56), (12, 66), (22, 76), (30, 84), (66, 56), (70, 74), (80, 76)] {
+            run.walk_to(cell, 8).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+        }
+        let (gap, from, to) = crate::pack::playthrough_ch45::beat_gap(&run, &MARKA_AREAS);
+        eprintln!("the marka roads: {} cells, {} beats, the longest gap {gap} cells (path {from}..{to})", run.path.len() - 1, run.beats.len());
+        assert!(gap <= 10, "the longest walk between beats on marka is {gap} cells: {:?}", &run.path[from..=to]);
+    }
 }

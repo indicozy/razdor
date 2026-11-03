@@ -75,17 +75,45 @@ title = "barrows.bw_fate_tess.title"
 text = "barrows.bw_fate_tess.text"
 speaker = "dt:hunter"
 
+[[dialog.choice]]
+id = "stay"
+text = "barrows.bw_fate_tess.stay"
+then = [ { give_xp = 40, to = "named:tess" } ]
+
+[[dialog.choice]]
+id = "go"
+text = "barrows.bw_fate_tess.go"
+then = [ { remove_unit = "tess" }, { add = "marsh_trust", value = 1, min = -5, max = 5 } ]
+
 [[dialog]]
 id = "bw_fate_ilm_inq"
 title = "barrows.bw_fate_ilm_inq.title"
 text = "barrows.bw_fate_ilm_inq.text"
 speaker = "dt:inquisitor"
 
+[[dialog.choice]]
+id = "rebuke"
+text = "barrows.bw_fate_ilm_inq.rebuke"
+
+[[dialog.choice]]
+id = "pray"
+text = "barrows.bw_fate_ilm_inq.pray"
+then = [ { give_xp = 40, to = "named:ilm" } ]
+
 [[dialog]]
 id = "bw_fate_ilm_heresy"
 title = "barrows.bw_fate_ilm_heresy.title"
 text = "barrows.bw_fate_ilm_heresy.text"
 speaker = "dt:heretic"
+
+[[dialog.choice]]
+id = "hear"
+text = "barrows.bw_fate_ilm_heresy.hear"
+
+[[dialog.choice]]
+id = "send"
+text = "barrows.bw_fate_ilm_heresy.send"
+then = [ { add = "taint", value = -1, min = 0 } ]
 
 [[dialog]]
 id = "bw_fate_kord"
@@ -242,3 +270,95 @@ text = "campaign.end_grey.text"
 id = "end_fall"
 title = "campaign.end_fall.title"
 text = "campaign.end_fall.text"
+
+# ---- the finale's roads, the herald and the King's words (triggers/barrows.toml) ----
+
+[[dialog]]
+id = "bw_road_1"
+title = "barrows.bw_road_1.title"
+text = "barrows.bw_road_1.text"
+
+[[dialog.choice]]
+id = "take"
+text = "barrows.bw_road_1.take"
+then = [ { give_gold = 15 } ]
+
+[[dialog.choice]]
+id = "leave"
+text = "barrows.bw_road_1.leave"
+
+[[dialog]]
+id = "bw_road_2"
+title = "barrows.bw_road_2.title"
+text = "barrows.bw_road_2.text"
+
+[[dialog]]
+id = "bw_road_3"
+title = "barrows.bw_road_3.title"
+text = "barrows.bw_road_3.text"
+
+[[dialog]]
+id = "bw_road_4"
+title = "barrows.bw_road_4.title"
+text = "barrows.bw_road_4.text"
+
+[[dialog]]
+id = "bw_road_5"
+title = "barrows.bw_road_5.title"
+text = "barrows.bw_road_5.text"
+
+[[dialog]]
+id = "bw_herald"
+title = "barrows.bw_herald.title"
+text = "barrows.bw_herald.text"
+speaker = "dt:lich"
+
+[[dialog.choice]]
+id = "refuse"
+text = "barrows.bw_herald.refuse"
+
+[[dialog.choice]]
+id = "listen"
+text = "barrows.bw_herald.listen"
+then = [ { add = "taint", value = 1 }, { add = "dread", value = 1 } ]
+
+[[dialog]]
+id = "bw_road_6"
+title = "barrows.bw_road_6.title"
+text = "barrows.bw_road_6.text"
+
+[[dialog]]
+id = "bw_road_7"
+title = "barrows.bw_road_7.title"
+text = "barrows.bw_road_7.text"
+
+[[dialog]]
+id = "bw_road_8"
+title = "barrows.bw_road_8.title"
+text = "barrows.bw_road_8.text"
+
+[[dialog]]
+id = "bw_road_9"
+title = "barrows.bw_road_9.title"
+text = "barrows.bw_road_9.text"
+
+[[dialog]]
+id = "bw_king_words"
+title = "barrows.bw_king_words.title"
+text = "barrows.bw_king_words.text"
+speaker = "dt:lich"
+
+[[dialog]]
+id = "bw_road_10"
+title = "barrows.bw_road_10.title"
+text = "barrows.bw_road_10.text"
+
+[[dialog]]
+id = "bw_road_11"
+title = "barrows.bw_road_11.title"
+text = "barrows.bw_road_11.text"
+
+[[dialog]]
+id = "bw_road_12"
+title = "barrows.bw_road_12.title"
+text = "barrows.bw_road_12.text"
