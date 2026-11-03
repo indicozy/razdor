@@ -82,6 +82,9 @@ SCREENS = [
     ("scenarios", "scenarios:РК1-Начало пути", {}),
     # The experimental scenario rules window over the scenario list (a player's report 1461).
     ("rules", "scenarios:РК1-Начало пути", {"RAZDOR_SCENE_RULES": "1"}),
+    # The new-game list with an installed package at two versions (its row's «New version» line, the page's
+    # version strip); the Hub folder is the scene's own.
+    ("newgame-versions", "scenarios-versions", {"RAZDOR_HUB_DIR": "/mnt/ai_models/razdor-scratch/package-versions/snap-mobile-newgame-versions"}),
     ("map","map:РК1-Начало пути", {}),
     ("minimap", "minimap:РК1-Начало пути", {}),
     ("settings", "settings:РК1-Начало пути", {}),

@@ -139,7 +139,7 @@ pub enum Screen {
 
 fn load_entry(m: &razdor::dt::install::MapEntry) -> Option<ScenarioEntry> {
     match m.load() {
-        Ok(scenario) => Some(ScenarioEntry { file: m.name.clone(), path: m.path.clone(), scenario, base_game: false, pack: None }),
+        Ok(scenario) => Some(ScenarioEntry { file: m.name.clone(), path: m.path.clone(), scenario, base_game: false, pack: None, hub_pack: None }),
         Err(e) => {
             razdor::diag!("{}: {e}", m.name);
             None
@@ -251,6 +251,85 @@ pub struct ScenarioEntry {
     /// The content package's map this entry is (`pack_play`), opened: its story starts with the game.
     /// None for every map of the install.
     pub pack: Option<Arc<razdor::pack::Opened>>,
+    /// The Hub's record of the package this entry is (its version picker and «New version» mark).
+    /// None for a map, and for a package the Hub does not hold (opened from a file).
+    pub hub_pack: Option<HubPack>,
+}
+
+/// An installed Hub package in the new-game list: its installed versions (newest first), the one the
+/// entry plays (`version`) and the «New version» mark (`Hub::has_update`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HubPack {
+    pub id: String,
+    pub versions: Vec<String>,
+    pub version: String,
+    pub update: bool,
+}
+
+impl HubPack {
+    /// The record of package `id` as it plays `version`, when the Hub holds that version.
+    pub fn of(hub: &razdor::hub::Hub, id: &str, version: &str) -> Option<HubPack> {
+        let versions = hub.package_versions(id);
+        if !versions.iter().any(|v| v == version) {
+            return None;
+        }
+        Some(HubPack { id: id.to_string(), update: hub.has_update(id), versions, version: version.to_string() })
+    }
+
+    /// The record of package `id` on the version a new game starts on (`Hub::default_version`).
+    pub fn listed(hub: &razdor::hub::Hub, id: &str) -> Option<HubPack> {
+        let version = hub.default_version(id)?;
+        HubPack::of(hub, id, &version)
+    }
+}
+
+/// The Hub of this run (`hub::local_dir`), for the packages' versions, marks and plays.
+fn hub_here() -> Option<razdor::hub::Hub> {
+    let local = razdor::hub::local_dir()?;
+    Some(razdor::hub::Hub { source: razdor::hub::Source::from_env(), local, trust_dir: razdor::platform::app_dir() })
+}
+
+/// The list's entry of an opened package: its map, named as the campaign when it is one (a campaign's
+/// maps show the campaign's name), with the Hub's record of it when the Hub holds it.
+pub(super) fn package_entry(opened: Arc<razdor::pack::Opened>, hub_pack: Option<HubPack>) -> ScenarioEntry {
+    let mut scenario = opened.scenario.clone();
+    if let Some(title) = &opened.campaign_title {
+        scenario.title.clone_from(title);
+    }
+    ScenarioEntry { file: opened.map.clone(), path: PathBuf::new(), scenario, base_game: false, pack: Some(opened), hub_pack }
+}
+
+/// One entry per package the Hub has installed, opened on its default version (the picked one, else
+/// the newest). A package that does not open is left out, with the reason logged.
+pub(super) fn hub_package_entries(install: Option<&razdor::dt::install::DtInstall>) -> Vec<ScenarioEntry> {
+    let (Some(install), Some(hub)) = (install, hub_here()) else { return Vec::new() };
+    let installed = hub.installed();
+    installed
+        .entries
+        .iter()
+        .filter(|(_, rec)| rec.kind == razdor::hub::Kind::Package)
+        .filter_map(|(id, _)| {
+            let version = hub.default_version(id)?;
+            let path = hub.play_path_of(id, &version)?;
+            match razdor::pack::open::open(&path, None, razdor::pack::open::lang(), install) {
+                Ok(opened) => Some(package_entry(Arc::new(opened), HubPack::listed(&hub, id))),
+                Err(e) => {
+                    razdor::diag!("packages: {id} {version} is not listed: {e}");
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
+/// Whether a list entry stays when package `opened` is opened (`App::keep_pack_map`): an entry of that
+/// same package goes (the opened one replaces it), and so does a package the Hub does not hold (one
+/// opened from a file, before). Maps and other packages stay. `pack_id` is the entry's package, if any.
+pub(super) fn keeps_listed(pack_id: Option<&str>, from_hub: bool, opened: &str) -> bool {
+    match pack_id {
+        None => true,
+        Some(id) => id != opened && from_hub,
+    }
 }
 
 /// The map music's rotation as the original runs it (interface.md §13): the last pick, when
@@ -346,9 +425,9 @@ fn dt_content_of(assets: &Assets, impossible: Option<bool>) -> Option<Arc<Conten
 }
 
 /// The install's maps, each read once (a map that fails to load is logged and left out), then the
-/// hub's maps.
+/// hub's maps and the Hub's installed packages (`hub_package_entries`).
 fn scenarios_of(install: Option<&razdor::dt::install::DtInstall>) -> Vec<ScenarioEntry> {
-    install_entries(install).into_iter().chain(hub_entries(install)).collect()
+    install_entries(install).into_iter().chain(hub_entries(install)).chain(hub_package_entries(install)).collect()
 }
 
 /// The install's maps for the list (1445c). The folder read is the played one, a mod's merged
@@ -1352,10 +1431,12 @@ impl App {
         let mut next = match (&mut self.screen, &mut self.game) {
             (Screen::MainMenu, _) => match main_menu::frame(self.dt_content.is_none()) {
                 Some(main_menu::Pick::NewGame) if new_game::tutorial_map(&self.scenarios).is_some() => {
+                    self.relist_packages();
                     new_game::open_list();
                     Some(Screen::TutorialOffer)
                 }
                 Some(main_menu::Pick::NewGame) => {
+                    self.relist_packages();
                     new_game::open_list();
                     Some(Screen::ScenarioSelect)
                 }
@@ -1382,13 +1463,18 @@ impl App {
             (Screen::Options, _) => main_menu::options(&mut self.audio.settings, install_wide).then_some(Screen::MainMenu),
             (Screen::ScenarioSelect, _) => {
                 let next = new_game::scenario_select(&self.scenarios, self.dt_content.is_some(), &self.mods, self.active_mod.as_deref(), self.mod_switch.is_some());
-                match new_game::take_mod_request() {
+                match (new_game::take_mod_request(), new_game::take_version_request()) {
                     // A mod picked: it is played from the next frame, on the list it brings.
-                    Some(id) => {
+                    (Some(id), _) => {
                         self.choose_mod(id);
                         None
                     }
-                    None => next,
+                    // A package's version picked: opened on it, the list stays.
+                    (None, Some((id, version))) => {
+                        self.choose_version(&id, &version);
+                        None
+                    }
+                    (None, None) => self.open_listed(next),
                 }
             }
             (Screen::TutorialOffer, _) => new_game::tutorial_offer(&self.scenarios),
@@ -1910,5 +1996,68 @@ mod mod_switch_tests {
         assert!(built.built.is_err(), "a mod id that is no file name is refused");
         assert!(built.install.is_none() && built.scenarios.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod package_list_tests {
+    use super::*;
+
+    /// A Hub folder of its own, with the example package imported at each of `versions` (other bytes each).
+    fn hub_with(tag: &str, versions: &[&str]) -> razdor::hub::Hub {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let local = std::env::temp_dir().join(format!("razdor-newgame-{tag}-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&local).unwrap();
+        let hub = razdor::hub::Hub { source: razdor::hub::Source::Mock, local, trust_dir: None };
+        for version in versions {
+            let file = std::env::temp_dir().join(format!("razdor-newgame-{tag}-{nanos}-{version}.rzpack"));
+            std::fs::write(&file, razdor::hub::mock::package_zip(version).unwrap()).unwrap();
+            hub.import_package(&file).unwrap();
+            let _ = std::fs::remove_file(&file);
+        }
+        hub
+    }
+
+    fn done(hub: &razdor::hub::Hub) {
+        let _ = std::fs::remove_dir_all(&hub.local);
+    }
+
+    /// One version: no mark. A newer version nobody played: the mark, and the entry plays the default
+    /// (the newest). Starting it clears the mark; the picked older version keeps it.
+    #[test]
+    fn a_listed_package_plays_its_default_version_and_shows_the_mark() {
+        let hub = hub_with("listed", &["0.1.0"]);
+        assert_eq!(HubPack::listed(&hub, "hello-story"), Some(HubPack { id: "hello-story".into(), versions: vec!["0.1.0".into()], version: "0.1.0".into(), update: false }));
+        done(&hub);
+
+        let hub = hub_with("listed-two", &["0.1.0", "0.2.0"]);
+        let listed = HubPack::listed(&hub, "hello-story").expect("installed");
+        assert_eq!(hub.default_version("hello-story").as_deref(), Some(listed.version.as_str()));
+        assert_eq!(listed.version, "0.2.0");
+        assert_eq!(listed.versions, ["0.2.0", "0.1.0"]);
+        assert!(listed.update, "a newer version nobody played");
+        hub.set_picked("hello-story", "0.1.0").unwrap();
+        let picked = HubPack::listed(&hub, "hello-story").expect("installed");
+        assert_eq!(picked.version, "0.1.0", "the picked version is the one listed");
+        assert!(picked.update, "picking an older version does not clear the mark");
+        hub.mark_played("hello-story", "0.2.0").unwrap();
+        assert!(!HubPack::listed(&hub, "hello-story").expect("installed").update, "the newest played: no mark");
+        assert_eq!(HubPack::of(&hub, "hello-story", "9.9.9"), None, "a version not installed is no record");
+        done(&hub);
+    }
+
+    /// The list's rule when package `opened` is opened: its own entry goes, a package the Hub does not
+    /// hold goes, maps and other packages stay. So the opened package is listed once.
+    #[test]
+    fn an_opened_package_is_listed_once() {
+        assert!(keeps_listed(None, false, "hello-story"), "a map of the install");
+        assert!(!keeps_listed(Some("hello-story"), true, "hello-story"), "the Hub entry the opened one replaces");
+        assert!(keeps_listed(Some("other"), true, "hello-story"), "another Hub package");
+        assert!(!keeps_listed(Some("other"), false, "hello-story"), "a package opened from a file, before");
+        let entries = [(None, false), (Some("hello-story"), true), (Some("other"), true)];
+        let mut listed: Vec<Option<&str>> = entries.iter().filter(|(id, hub)| keeps_listed(*id, *hub, "hello-story")).map(|(id, _)| *id).collect();
+        listed.push(Some("hello-story"));
+        assert_eq!(listed.iter().filter(|id| **id == Some("hello-story")).count(), 1);
+        assert_eq!(listed.len(), 3);
     }
 }

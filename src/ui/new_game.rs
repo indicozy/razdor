@@ -24,7 +24,7 @@ use super::dt_font::{with_face, Face};
 use super::language;
 use super::map_import;
 use super::widgets::*;
-use super::{screens, ScenarioEntry, Screen};
+use super::{screens, HubPack, ScenarioEntry, Screen};
 
 local! {
     static EXPERIMENTAL: Cell<ExperimentalRules> = const { Cell::new(ExperimentalRules {
@@ -47,6 +47,13 @@ local! {
     /// The «Мод» choice made this frame (`Some(None)`: the base game), for the app to play
     /// (`take_mod_request`).
     static MOD_REQUEST: RefCell<Option<Option<String>>> = const { RefCell::new(None) };
+    /// The version picked on a package's page this frame (the package's id, the version), for the app
+    /// to open (`take_version_request`).
+    static VERSION_REQUEST: RefCell<Option<(String, String)>> = const { RefCell::new(None) };
+    /// The package whose entry the list picks when it next shows (`pick_pack`).
+    static PICK_PACK: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The list scrolls so that its picked row is in view this frame (a package's entry was picked).
+    static SCROLL_TO_PICK: Cell<bool> = const { Cell::new(false) };
     /// Whether the hero window is open (its class was set on opening).
     static HERO_OPEN: Cell<bool> = const { Cell::new(false) };
     /// The map preview of the scenario shown: (index into `scenarios`, texture).
@@ -684,6 +691,18 @@ pub fn take_mod_request() -> Option<Option<String>> {
     MOD_REQUEST.with_borrow_mut(Option::take)
 }
 
+/// The version picked on a package's page since the last call: the package's id and the version. The
+/// app opens the package on it (`App::choose_version`).
+pub fn take_version_request() -> Option<(String, String)> {
+    VERSION_REQUEST.with_borrow_mut(Option::take)
+}
+
+/// Picks the entry of the Hub package `id` when the list next shows (after its version changed, or a
+/// snapshot's pick).
+pub fn pick_pack(id: &str) {
+    PICK_PACK.with(|p| *p.borrow_mut() = Some(id.to_string()));
+}
+
 /// The new-game window (`scenarios` its list, `mods` the installed mods with their titles,
 /// `active` the one played).
 /// Whether the new game can be started (Next, Enter) with the list `can` and a mod being built
@@ -736,6 +755,13 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
             PICKED_MAP.with(|p| p.set(None));
         }
     }
+    if let Some(id) = PICK_PACK.with(|p| p.borrow_mut().take()) {
+        if let Some(i) = list.iter().position(|g| scenarios[g.first].hub_pack.as_ref().is_some_and(|h| h.id == id)) {
+            PICKED.with(|p| p.set(i));
+            PICKED_MAP.with(|p| p.set(None));
+            SCROLL_TO_PICK.with(|s| s.set(true));
+        }
+    }
     let mut picked = PICKED.with(|p| p.get()).min(list.len().saturating_sub(1));
     // The list: per group a round icon and the name, and a campaign's chapters under it in
     // small type; the picked group's block is lit. The wheel and the scrollbar scroll it.
@@ -756,10 +782,19 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
         Some(dp) => head_h.max(FINGER_DP * dp + 2.0 * k),
         None => head_h,
     };
-    let block_h = |g: &Group| head_h + listed_chapters(scenarios, g).len() as f32 * chapter_h + if listed_chapters(scenarios, g).is_empty() { 0.0 } else { 4.0 * k };
+    // A package with a newer version to play (`HubPack::update`) has its «New version» line under its name,
+    // as tall as a touch target on a phone (the row is one).
+    let marked = |g: &Group| scenarios[g.first].hub_pack.as_ref().is_some_and(|h| h.update);
+    let mark_h = mark_line_h(k, head_h, chapter_h);
+    let block_h = |g: &Group| {
+        head_h + listed_chapters(scenarios, g).len() as f32 * chapter_h + if listed_chapters(scenarios, g).is_empty() { 0.0 } else { 4.0 * k } + if marked(g) { mark_h } else { 0.0 }
+    };
     let content_h: f32 = list.iter().map(block_h).sum::<f32>() + if base_count > 0 { section_h } else { 0.0 } + 12.0 * k;
     let max_scroll = (content_h - view.h).max(0.0) / k;
     let mut scroll = SCROLL.with(|s| s.get());
+    if SCROLL_TO_PICK.with(|s| s.replace(false)) {
+        scroll = list[..picked].iter().map(block_h).sum::<f32>() / k;
+    }
     swipe_rows(view, 30.0 * k);
     let over_list = !input_blocked() && view.contains(crate::ui::widgets::pointer().into());
     if over_list {
@@ -880,6 +915,14 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
                 tick(head.x + head.w - 40.0 * k, cy - small * 0.36 - 5.0 * k, 10.0 * k, TICK_GREEN);
             }
         });
+        if marked(g) {
+            let label = tr("New version");
+            let room = r.w - 60.0 * k;
+            let small = phone_text(row_text_size(label, small_normal, grow, room));
+            let cy = r.y + head_h + chapters.len() as f32 * chapter_h + mark_h * 0.5 + small * 0.36;
+            // The Hub card's mark (`hub_view`): plain gold text, at Razdor's sizes (not the original font's).
+            super::dt_font::legacy_metrics_if(true, || text_fit(label, r.x + 32.0 * k, cy, room, small, chrome::GOLD));
+        }
         // A campaign heading or individual chapter is selected only on click.
         if head_pressed {
             if row == picked && PICKED_MAP.with(|p| p.get()).is_none() {
@@ -949,11 +992,23 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
             }
             (None, None) => {}
         }
+        // A package with more than one installed version (Razdor's own, the owner's decision of 2026-11-03):
+        // its version strip (the picker, the «New version» mark) under the map, above the description.
+        let mut top = frame.y + frame.h + 8.0 * k;
+        let update = e.hub_pack.as_ref().is_some_and(|h| h.update);
+        if let Some(hp) = e.hub_pack.as_ref().filter(|h| h.versions.len() > 1) {
+            let strip = Rect::new(frame.x, top, frame.w, version_strip_h(k, grow));
+            // Razdor's own text: its sizes, as `phone_text` sets them (the original font's would be smaller).
+            if let Some(i) = super::dt_font::legacy_metrics_if(true, || version_strip(strip, k, grow, hp, !busy)) {
+                VERSION_REQUEST.with_borrow_mut(|r| *r = Some((hp.id.clone(), hp.versions[i].clone())));
+            }
+            top = strip.y + strip.h + 6.0 * k;
+        }
         // Under it the description box (0x4d2a30, 65ae00): the name centred in white (ae2498,
         // 0x4c1b4b), the description in the bold SanSerif's orange (ae24f4 over ae2510,
         // 0x4c1bb4), from the box's top.
         let bottom = win.rect(0.0, win.content_bottom(), 0.0, 0.0).y;
-        let desc = Rect::new(frame.x, frame.y + frame.h + 8.0 * k, frame.w, (bottom - frame.y - frame.h - 8.0 * k).max(0.0));
+        let desc = Rect::new(frame.x, top, frame.w, (bottom - top).max(0.0));
         chrome::text_box(desc);
         let size = 12.0 * k;
         let room = desc.w - 34.0 * k;
@@ -964,10 +1019,12 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
         // no indent, justified, in ae24f4 over the shadow font ae2510.
         rows.extend(plain_rows_face(&e.scenario.description, room, size, Face::Bold));
         let line_h = 14.0 * k;
+        // A package with a newer version to play (Razdor's own): its «New version» line under the title, in gold.
+        let mark_room = if update { 18.0 * k } else { 0.0 };
         let steps = desc_steps(title_rows, rows.len(), k);
         // The box is a text list (0x65ae00): the wheel over it scrolls it a line a frame
         // (0x47ede0), down to its last line; a new map starts it at the top (0x47cc90).
-        let max_scroll = desc_max_scroll(&steps, desc.h - 20.0 * k);
+        let max_scroll = desc_max_scroll(&steps, desc.h - 20.0 * k - mark_room);
         let (for_group, mut first) = DESC_SCROLL.with(|d| d.get());
         if for_group != picked {
             first = 0;
@@ -1000,6 +1057,12 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
                 let orange = with_face(Face::Bold, || super::typography::Ink::Orange.color());
                 with_face(Face::Bold, || draw_markup_row_shadowed(row, desc.x + 17.0 * k, y, room, size, Face::Bold, orange));
                 y += line_h;
+            }
+            if n + 1 == title_rows && update {
+                let label = tr("New version");
+                let gold_size = phone_text(12.0 * k);
+                super::dt_font::legacy_metrics_if(true, || text_fit(label, desc.x + 17.0 * k, y, room, gold_size, chrome::GOLD));
+                y += mark_room;
             }
         }
         drop(clip);
@@ -1213,6 +1276,62 @@ fn view_choice_at(win: &Win, r: Rect, key: &str, current: i64, labels: &[&str]) 
         super::widgets::open_list(key, r, current, &options, win.k);
     }
     picked.filter(|&v| v != current)
+}
+
+/// The version strip's key (its drop-down list).
+const VERSION_KEY: &str = "razdor:scenario-version";
+
+/// A text of this screen on a phone is at least 13.2 dp (12 sp by the mobile-ui check's measure, 0.7 of
+/// the size per sp, with a margin), as the base game's header is; the desktop keeps `size`.
+fn phone_text(size: f32) -> f32 {
+    match super::display::dp_px() {
+        Some(dp) => size.max(13.2 * dp),
+        None => size,
+    }
+}
+
+/// The height of a package row's «New version» line in screen pixels: a chapter's line, and on a phone
+/// as tall as a touch target (`TOUCH_DP`), so the row is one (the row's head comes first).
+fn mark_line_h(k: f32, head_h: f32, chapter_h: f32) -> f32 {
+    match super::display::dp_px() {
+        Some(dp) => chapter_h.max(TOUCH_DP * dp + 2.0 * k - head_h),
+        None => chapter_h,
+    }
+}
+
+/// The version strip's height in screen pixels: a row of the Hub card's field (as tall as a button), at
+/// least a finger's size on a phone (`FINGER_DP`), grown with the text size.
+fn version_strip_h(k: f32, grow: f32) -> f32 {
+    let row = 22.0 * k * grow;
+    match super::display::dp_px() {
+        Some(dp) => row.max(FINGER_DP * dp),
+        None => row,
+    }
+}
+
+/// The version strip under a package's map, in `r` (screen pixels): the label «Версия» and the version
+/// picker (its list opens over the page, `open_list`). Drawn as the Hub card's picker is. Returns the
+/// index of the version picked since the last frame.
+fn version_strip(r: Rect, k: f32, grow: f32, hp: &HubPack, enabled: bool) -> Option<usize> {
+    let size = phone_text(12.0 * k * grow);
+    let label = tr("Version");
+    let label_w = measure(label, size).width + 8.0 * k;
+    let picked = take_pick(VERSION_KEY).and_then(|v| usize::try_from(v).ok());
+    text_fit(label, r.x, r.y + r.h / 2.0 + size * 0.35, label_w, size, chrome::CREAM);
+    let field = Rect::new(r.x + label_w, r.y, (r.w - label_w).min(170.0 * k * grow), r.h);
+    let current = hp.versions.iter().position(|v| *v == hp.version).unwrap_or(0);
+    let (hover, _, pressed) = button_state(field, enabled);
+    draw_rectangle(field.x, field.y, field.w, field.h, FIELD_BG);
+    draw_rectangle_lines(field.x, field.y, field.w, field.h, 2.0, if hover { INK } else { DIM });
+    let shown = hp.versions.get(current).map_or("", String::as_str);
+    text_fit(shown, field.x + 8.0 * k, field.y + field.h / 2.0 + size * 0.35, field.w - 34.0 * k, size, INK);
+    let (cx, cy) = (field.x + field.w - 14.0 * k, field.y + field.h / 2.0);
+    draw_triangle(vec2(cx - 5.0 * k, cy - 3.0 * k), vec2(cx + 5.0 * k, cy - 3.0 * k), vec2(cx, cy + 3.0 * k), DIM);
+    if pressed {
+        let options: Vec<(i64, String)> = hp.versions.iter().enumerate().map(|(i, v)| (i as i64, v.clone())).collect();
+        super::widgets::open_list(VERSION_KEY, field, current as i64, &options, k);
+    }
+    picked.filter(|&i| i != current && i < hp.versions.len())
 }
 
 /// The tutorial map to offer before a new game, as an index into `scenarios`: the install's
@@ -1446,6 +1565,7 @@ pub fn class_select(game: &mut Option<Game>, demo: &Arc<Content>, scenario: Opti
     if hero_button(start_x, start_w, &own("NewHero", "Start", n_("Start"))) || enter {
         cue(Cue::Button);
         super::items_view::reset_pack_view();
+        super::pack_play::note_played(e);
         *game = Some(screens::start_game(demo, Some((e, &content)), hero, &name));
         return leave_hero_window(Screen::WorldMap);
     }
@@ -1806,7 +1926,7 @@ mod tests {
         let Some(dir) = std::env::var_os(razdor::dt::install::ENV_VAR) else { return };
         let dt = razdor::dt::install::DtInstall::load(std::path::Path::new(&dir)).unwrap();
         let sc: Vec<ScenarioEntry> =
-            dt.maps.iter().filter(|m| !razdor::translate::job::is_translated_file(&m.name)).map(|m| ScenarioEntry { file: m.name.clone(), path: m.path.clone(), scenario: m.load().unwrap(), base_game: false, pack: None }).collect();
+            dt.maps.iter().filter(|m| !razdor::translate::job::is_translated_file(&m.name)).map(|m| ScenarioEntry { file: m.name.clone(), path: m.path.clone(), scenario: m.load().unwrap(), base_game: false, pack: None, hub_pack: None }).collect();
         let maps: Vec<(&str, u8, &str)> = sc.iter().map(|e| (e.file.as_str(), e.scenario.header.scenario_kind, e.scenario.next_map.as_str())).collect();
         let list = groups(&maps);
         let rk: Vec<&Group> = list.iter().filter(|g| g.chapters.iter().any(|&c| sc[c].file.starts_with("РК6"))).collect();

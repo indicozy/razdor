@@ -4,7 +4,7 @@
 //! e.g. `xvfb-run -s "-screen 0 1024x768x24" razdor` with `RAZDOR_SIZE=1024x768`.
 //!
 //! Scenes (`<map>` is a map file name of the install without `.DTm`, e.g. `РК3-Столица`):
-//! `title`, `fonts` (sample lines in many scripts), `update` (a made-up release on offer), `authors[:<seconds>]`, `options[:advanced]`, `scenarios[:<map>]`, `import-notice` (the scenario list with «Добавить карту…»'s notice), `tutorial`, `load[:manual|auto[:<row>]]`, `editor[:<map>[:<text to find>]]`, `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `clash:<map>` (the first two armies fight on the explored map), `walk:<map>:dx,dy` (the
+//! `title`, `fonts` (sample lines in many scripts), `update` (a made-up release on offer), `authors[:<seconds>]`, `options[:advanced]`, `scenarios[:<map>]`, `scenarios-versions` (the list with an installed package at two versions, its page's mark and version picker), `import-notice` (the scenario list with «Добавить карту…»'s notice), `tutorial`, `load[:manual|auto[:<row>]]`, `editor[:<map>[:<text to find>]]`, `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `clash:<map>` (the first two armies fight on the explored map), `walk:<map>:dx,dy` (the
 //! hero sets off that many cells away), `building:<map>:<n>`
 //! (the hero in the n-th building; `:barracks`, `:garrison`, `:market`, `:sanctuary` open that tab; `:store` makes it his with loot and opens its store; `:market-pack` the market's pack list), `army:<map>[:<n>[:<unit id>[:<level>]]]` (squad member n selected, made that unit at that level), `journal:<map>` / `hero:<map>[:<tab>]`, `spells:<map>` (`spells-pages:<map>`: 20 spells, page 2 open),
 //! `menu:<map>`, `defeat:<map>` (the lost battle's report), `event:<map>:<n>` (the map's event n's window; `RAZDOR_SCENE_LOST=<id>,…` adds its lost-items row; `RAZDOR_SCENE_JOINED=<id>,…` and `RAZDOR_SCENE_LEFT=<id>,…` its units rows),`learnt:<map>[:<id>,…]` (the event window with new spells, the hero with no mana), `report:<map>[:<gold>]` (the noon report), `settings:<map>[:advanced|keys]` (`keys`: Razdor's keys window over the advanced settings), `battle:<map>:<n>` (against the n-th army), `hub[:<tab>[:<id>]]` ("Maps and mods"), `custom` (the custom battle
@@ -464,6 +464,16 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                 std::mem::forget(tx);
                 app.mod_switch = Some(super::ModSwitch { id: None, job });
             }
+            app.screen = Screen::ScenarioSelect;
+            return Ok(());
+        }
+        // `scenarios-versions`: the new-game list with the example package installed at two versions (0.1.0
+        // played, 0.2.0 not yet: the «New version» mark) and its entry picked, so its page shows the mark and
+        // the version picker (`hub_view::versions_for_snapshot`).
+        "scenarios-versions" => {
+            super::hub_view::versions_for_snapshot();
+            app.relist_packages();
+            super::new_game::pick_pack("hello-story");
             app.screen = Screen::ScenarioSelect;
             return Ok(());
         }
