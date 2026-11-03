@@ -522,12 +522,6 @@ text = "You gave the Order your word at the council in Marka, and the abbey of S
 title = "The inquisitors"
 text = "The inquisitors ride through the gate with their visors up. Their eldest names the price: Alder, the village by the bog, where a family touched by the dead is hiding. 'The Order commands that the village be burned with its houses. That is how the land is cleansed. The Order will remember everyone who stood by the walls, and everyone who stood aside.'"
 
-[abbey.ilm_meet]
-title = "The novice"
-text = "A novice sits by the gate with a borrowed sword across his knees. His name is Ilm. He says he can read graves: 'Take me, and I will show you which of them are still people.'"
-take = "Take him into the company"
-leave = "Send him back to the abbey"
-
 [abbey.blight]
 title = "Cold"
 text = "The grass here is grey and cracks under the hooves. The cold gets into the bones: every step under the barrow wind curses the company. Only the abbey's rite lifts the curse (30 gold). To go on is to ride under a curse."

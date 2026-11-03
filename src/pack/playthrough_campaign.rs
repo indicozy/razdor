@@ -232,7 +232,7 @@ fn hub_first_visit(run: &mut Run, plan: Plan) -> Result<(), Stuck> {
 /// The branch's answers on its arrival.
 fn branch_choices(plan: Plan) -> Vec<(&'static str, &'static str)> {
     match plan {
-        Plan::Heretic => vec![("abbey_ilm_meet", "take"), ("abbey_trial", "spare"), ("abbey_heresy", "accept")],
+        Plan::Heretic => vec![("abbey_trial", "spare"), ("abbey_heresy", "accept")],
         Plan::Companies => CAMP.to_vec(),
         _ => Vec::new(),
     }

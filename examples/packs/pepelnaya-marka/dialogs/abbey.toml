@@ -14,21 +14,6 @@ text = "abbey.inquisitors.text"
 speaker = "dt:inquisitor"
 
 [[dialog]]
-id = "abbey_ilm_meet"
-title = "abbey.ilm_meet.title"
-text = "abbey.ilm_meet.text"
-speaker = "dt:monk"
-
-[[dialog.choice]]
-id = "take"
-text = "abbey.ilm_meet.take"
-then = [ { give_unit = "dt:pilgrim", named = "ilm" } ]
-
-[[dialog.choice]]
-id = "leave"
-text = "abbey.ilm_meet.leave"
-
-[[dialog]]
 id = "abbey_blight"
 title = "abbey.blight.title"
 text = "abbey.blight.text"

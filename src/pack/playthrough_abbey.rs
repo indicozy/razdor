@@ -140,24 +140,6 @@ fn the_siege_starts_when_the_hero_walks_into_the_abbey_after_the_dead_came() {
 }
 
 #[test]
-fn the_novice_route_meets_ilm_and_the_trial_fires_at_the_village() {
-    let Some(install) = install() else { return };
-    let (opened, content) = open_map(&install, "abbey");
-    let carry = Carried { gold: Some(80), vars: vec![("ally".into(), VarValue::Int(1))], squad: vec![("hunter", 1, 3)], named: vec![], avoid_armies: true };
-    let mut run = Run::carried(&opened, content, 1, &[("abbey_ilm_meet", "take"), ("abbey_trial", "burn")], &carry).unwrap_or_else(|e| panic!("{e}"));
-    run.walk_to(GATE_SOUTH, 6).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
-    assert!(run.log.iter().any(|l| l.contains("dialog abbey_ilm_meet -> take")), "{}", run.log.join("\n"));
-    assert_eq!(run.var("ilm"), Some(VarValue::Int(0)));
-    run.walk_to(ALDER, 10).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
-    assert!(run.log.iter().any(|l| l.contains("dialog abbey_trial -> burn")), "{}", run.log.join("\n"));
-    assert_eq!(run.var("ilm"), Some(VarValue::Int(1)), "the trial's burn is the inquisitor's path");
-    run.walk_to(ABBEY, 12).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
-    run.wait_until_done(40).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
-    assert!(run.victory(), "{}", run.log.join("\n"));
-    assert!(run.log.iter().any(|l| l.contains("dialog abbey_end_inquisitor")), "{}", run.log.join("\n"));
-}
-
-#[test]
 fn the_abbey_hands_back_to_marka_and_marka_ends_the_chapter_for_gates() {
     let Some(install) = install() else { return };
     let mut run = into_branch(&install, 1, "order", "cleanse", "abbey", &[]).unwrap_or_else(|e| panic!("{e}"));
@@ -175,14 +157,14 @@ fn the_abbey_hands_back_to_marka_and_marka_ends_the_chapter_for_gates() {
     assert_eq!(next, "gates", "the hub goes on to the gates once the Order's chapter is done");
 }
 
-/// The heretic's path: the novice Ilm, the trial's mercy (`spare`, ilm 2), the midnight's offer accepted,
+/// The heretic's path: Ilm the novice (joined at the shrine's cleanse), the trial's mercy (`spare`, ilm 2), the midnight's offer accepted,
 /// then the siege. (The shrine's «take» does not reach it: it leaves the Order's council no Order choice.)
 #[test]
 fn the_heretic_route_spares_the_village_and_wins_the_siege() {
     let Some(install) = install() else { return };
     let (opened, content) = open_map(&install, "abbey");
     let carry = Carried { gold: Some(80), vars: vec![("ally".into(), VarValue::Int(1))], squad: vec![("hunter", 1, 3)], named: vec![], avoid_armies: true };
-    let choices = [("abbey_ilm_meet", "take"), ("abbey_trial", "spare"), ("abbey_heresy", "accept")];
+    let choices = [("abbey_trial", "spare"), ("abbey_heresy", "accept")];
     let mut run = Run::carried(&opened, content, 1, &choices, &carry).unwrap_or_else(|e| panic!("{e}"));
     run.walk_to(GATE_SOUTH, 6).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
     run.walk_to(ALDER, 10).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
@@ -221,9 +203,8 @@ fn the_order_route_gold_curve() {
     assert!(run.victory(), "{}", run.log.join("\n"));
 }
 
-/// The three ways through the abbey over 15 seeds each: the Order's route from the hub (Ilm the novice's
-/// pilgrim, the shrine's cleanse), the novice who burns Ольховка, and the novice who spares it (the heresy).
-/// The routes' fights are the siege; the rate is the route's, the target 70%.
+/// The Order's route over 15 seeds from the hub (Ilm the novice's pilgrim, the shrine's cleanse). The
+/// route's fights are the siege; the rate is the route's, the target 70%.
 #[test]
 fn the_abbey_routes_win_over_fifteen_seeds() {
     let Some(install) = install() else { return };
@@ -250,25 +231,8 @@ fn the_abbey_routes_win_over_fifteen_seeds() {
         the_order_route(&mut run).map_err(|e| e.to_string())?;
         Ok(run)
     });
-    let (opened, content) = open_map(&install, "abbey");
-    let carry = Carried { gold: Some(80), vars: vec![("ally".into(), VarValue::Int(1))], squad: vec![("hunter", 1, 3)], named: vec![], avoid_armies: true };
-    let novice = |choices: &'static [(&'static str, &'static str)]| {
-        let (opened, content, carry) = (opened.clone(), content.clone(), carry.clone());
-        move |seed: u32| -> Result<Run, String> {
-            let mut run = Run::carried(&opened, content.clone(), seed, choices, &carry).map_err(|e| e.to_string())?;
-            run.walk_to(GATE_SOUTH, 6).map_err(|e| e.to_string())?;
-            run.walk_to(ALDER, 10).map_err(|e| e.to_string())?;
-            run.walk_to(ABBEY, 12).map_err(|e| e.to_string())?;
-            run.wait_until_done(40).map_err(|e| e.to_string())?;
-            Ok(run)
-        }
-    };
-    let burn = rate("the novice (burn)", &novice(&[("abbey_ilm_meet", "take"), ("abbey_trial", "burn")]));
-    let spare = rate("the novice (spare, heresy)", &novice(&[("abbey_ilm_meet", "take"), ("abbey_trial", "spare"), ("abbey_heresy", "accept")]));
     eprintln!("abbey routes over 15 seeds in {:.2}s; siege rounds {rounds:?}\n  {}", started.elapsed().as_secs_f64(), report.join("\n  "));
-    for (name, won) in [("the Order", order), ("the novice (burn)", burn), ("the novice (spare)", spare)] {
-        assert!(won * 100 >= 70 * 15, "{name}: won {won}/15");
-    }
+    assert!(order * 100 >= 70 * 15, "the Order: won {order}/15");
 }
 
 /// The blight east of the abbey (its warning and curse by walking in), and the Order's rite back at the
@@ -279,7 +243,7 @@ fn the_blight_curses_by_walking_and_the_rite_takes_it_off() {
     let Some(install) = install() else { return };
     let (opened, content) = open_map(&install, "abbey");
     let carry = Carried { gold: Some(80), vars: vec![("ally".into(), VarValue::Int(1))], squad: vec![("hunter", 1, 3)], named: vec![], avoid_armies: true };
-    let mut run = Run::carried(&opened, content, 1, &[("abbey_ilm_meet", "take"), ("abbey_blight", "")], &carry).unwrap_or_else(|e| panic!("{e}"));
+    let mut run = Run::carried(&opened, content, 1, &[("abbey_blight", "")], &carry).unwrap_or_else(|e| panic!("{e}"));
     run.walk_to(GATE_SOUTH, 6).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
     run.walk_to((58, 32), 10).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
     assert!(run.log.iter().any(|l| l.contains("dialog abbey_blight")), "{}", run.log.join("\n"));

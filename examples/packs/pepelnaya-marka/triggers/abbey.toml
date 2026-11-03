@@ -13,7 +13,6 @@
 
 [vars]
 abbey_week = 0              # weeks since the chapter began
-abbey_ilm_met = false       # Brother Ilm's offer has been answered
 abbey_blight_seen = false   # the hero has been warned of the blight
 abbey_siege = false         # the dead have been sent at the abbey
 abbey_siege_fight = false   # the siege battle has begun (once)
@@ -81,16 +80,6 @@ then = [
     { quest = "abbey_cold", title = "quest.abbey_cold.title", text = "quest.abbey_cold.text" },
 ]
 
-# Brother Ilm at the south gate: a novice with a borrowed sword and a gift in his hands. He comes only
-# to a hero who has no Ilm yet: the Order's shrine in Marka (`ilm` 1 or 2) gives him already, as a
-# pilgrim, and then the crossroads below is decided.
-[[trigger]]
-id = "abbey_ilm_meet"
-map = "abbey"
-when = { event = "hero_enters", at = [46, 49, 8, 3] }
-if = [ { var = "abbey_ilm_met", value = false }, { var = "ilm", value = 0 } ]
-then = [ { dialog = "abbey_ilm_meet" } ]
-
 # Brother Ilm walks home with the hero: the monks at the gate know him. Once.
 [[trigger]]
 id = "abbey_ilm_home"
@@ -98,18 +87,6 @@ map = "abbey"
 when = { event = "hero_enters", at = [46, 49, 8, 3] }
 if = [ { var = "ilm", op = ">=", value = 1 }, { has_named_unit = "ilm", unit = "dt:pilgrim" } ]
 then = [ { dialog = "abbey_ilm_home" } ]
-
-[[trigger]]
-id = "abbey_ilm_take"
-map = "abbey"
-when = { event = "dialog_choice", dialog = "abbey_ilm_meet", choice = "take" }
-then = [ { set = "abbey_ilm_met", value = true }, { give_item = "abbey_scripture", to = "named:ilm" } ]
-
-[[trigger]]
-id = "abbey_ilm_leave"
-map = "abbey"
-when = { event = "dialog_choice", dialog = "abbey_ilm_meet", choice = "leave" }
-then = [ { set = "abbey_ilm_met", value = true }, { add = "order", value = 1, min = -5, max = 5 } ]
 
 # The blight east of the abbey: the first step warns, every step curses the army (at most six taints).
 [[trigger]]
