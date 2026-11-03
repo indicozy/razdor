@@ -23,7 +23,7 @@ use razdor::rules::units::Unit;
 use razdor::rules::world::LocationKind;
 
 use super::assets::Assets;
-use super::chrome::{self, PARCHMENT_INK, TAB_RED};
+use super::chrome;
 use super::dt_font;
 use super::hall_ink;
 use super::audio::{cue, cued, Cue};
@@ -38,8 +38,10 @@ use super::window_layout;
 use super::world_view;
 use super::Screen;
 
+const PARCHMENT_INK: Color = Color::new(0.45, 0.28, 0.14, 1.0);
 const BOX_INK: Color = Color::new(1.0, 0.86, 0.58, 1.0);
 const SILVER: Color = Color::new(0.78, 0.78, 0.82, 1.0);
+const TAB_RED: Color = Color::new(0.75, 0.18, 0.12, 1.0);
 const MARKET_HEADING: Color = Color::new(156.0 / 255.0, 1.0, 156.0 / 255.0, 1.0);
 const BUILDING_AND_ITEM_NAME: Color = Color::new(211.0 / 255.0, 228.0 / 255.0, 161.0 / 255.0, 1.0);
 const QUEST_HEADING: Color = Color::new(189.0 / 255.0, 190.0 / 255.0, 90.0 / 255.0, 1.0);

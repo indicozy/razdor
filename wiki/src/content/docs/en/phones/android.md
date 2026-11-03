@@ -59,12 +59,10 @@ In Portrait orientation: the "Barracks" and "Garrison" windows are taller. A pic
 When the phone is held vertically, windows span the width of the screen, and text and buttons are larger:
 
 * **Scenario Selection** — A list of maps covering the full screen. Tap a map to open its card with a picture, name, and description; **"Back"** and **"Next"** are at the bottom.
-* **Journal** — A separate window with tabs in a single ribbon format (similar to the PC journal: parchment style, with the selected tab in red and underlined), including **"Quests"**, **"Completed"**, **"Rumors"**, and **"Messages"**, featuring a list of entries and the text of the selected entry. Hero stats and the backpack are in the army window; money is on the bottom panel.
+* **Diary** — a window of its own with the **"Quests"**, **"Completed"**, **"Rumours"** and **"Messages"** tabs, the list of entries and the picked entry's text. The hero's stats and backpack are in the army window, the money on the bottom bar.
 * **Market** — Item description at the top, followed by section icons and a list of goods below.
 * **Save** — Three buttons in a single row at the bottom.
 * **Main Menu** — If a mod is installed, a wide bar saying **"Mod: <name>"** is displayed above the four tiles; tapping it allows you to select a different mod.
-* **Sound, graphics and gameplay settings** — A window with two tabs: **"Sound and speed"** (with sliders) and **"Game"** (with checkboxes and lines such as touchpad mode, screen orientation, text size, large windows, and update game from archive). **"Apply"** and **"Cancel"** buttons are at the bottom. Tapping **"Advanced…"** opens additional settings; you return to the previous tab from there.
-* **Additional Settings** — A window (opened via the **"Advanced…"** button) with a single column of lines. Each line contains a name on the left and a button on the right with a description underneath. The list is scrollable; the **"OK"** button is always at the bottom.
 * **Spellbook** — A **"Close"** button and an enlarged filter button are located at the bottom.
 * **City** — Section buttons remain in place when switching between them.
 * **Events and Dialogues** — The image is at the top, and the text occupies the full width of the screen.
