@@ -476,8 +476,15 @@ pub(crate) fn brod(install: &DtInstall) -> (Opened, Arc<Content>) {
 }
 
 /// The choices the prepared hero makes: Varga joins, the toll is talked away, the marsh folk
-/// are helped.
-pub(crate) const PREPARED: &[(&str, &str)] = &[("varga_meet", "join"), ("toll", "talk"), ("marsh_plea", "help")];
+/// are helped; the side quests (the barrow, the refugees, the deserters) are left alone.
+pub(crate) const PREPARED: &[(&str, &str)] = &[
+    ("varga_meet", "join"),
+    ("toll", "talk"),
+    ("marsh_plea", "help"),
+    ("barrow", "leave"),
+    ("refugees", "leave"),
+    ("deserters", "pass"),
+];
 
 /// The prepared route up to the wraiths: the tower taken and garrisoned from its recruits,
 /// Varga met, the toll talked away, the marsh folk helped, then the wraiths fought.
@@ -540,6 +547,94 @@ pub(crate) fn meet_host(run: &mut Run, days: u64) -> Result<(), Stuck> {
     Ok(())
 }
 
+/// Walks to `to` in as many calls as it takes (a battle or a dialog ends one call), while the clock runs
+/// less than `days`. An error is a lost battle, no route, or the deadline.
+pub(crate) fn go(run: &mut Run, to: Tile, days: u64) -> Result<(), Stuck> {
+    let deadline = run.g.clock.total_minutes() + (days * MINUTES_PER_DAY) as f64;
+    while run.g.tile() != to && !run.done() {
+        if run.g.clock.total_minutes() >= deadline {
+            return Err(Stuck::Late { to, day: run.day() });
+        }
+        run.walk_to(to, days)?;
+    }
+    Ok(())
+}
+
+/// The nearest raid (an army named `raid_*`) within `reach` cells of the hero, if any.
+fn raid_near(run: &Run, reach: i32) -> Option<Tile> {
+    let here = run.g.tile();
+    run.g
+        .world
+        .armies
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| run.army_name(*i).starts_with("raid_"))
+        .map(|(_, a)| a.tile(&run.g.world.map))
+        .find(|t| (t.0 - here.0).abs() <= reach && (t.1 - here.1).abs() <= reach)
+}
+
+/// Walks into the raids within `reach` cells of the hero, one after another, until none is near: a
+/// walk into an army is a battle on contact (the way an AI army meets a walker). A raid the hero cannot
+/// reach is left to the map.
+pub(crate) fn intercept_raids(run: &mut Run, reach: i32) -> Result<(), Stuck> {
+    for _ in 0..50 {
+        let Some(t) = raid_near(run, reach) else { return Ok(()) };
+        let (before, here, clock) = (run.battles.len(), run.g.tile(), run.g.clock.total_minutes());
+        match run.walk_to(t, 1) {
+            Ok(()) => {}
+            Err(Stuck::NoRoute { .. }) => return Ok(()),
+            Err(e) => return Err(e),
+        }
+        if run.battles.len() == before && run.g.tile() == here && run.g.clock.total_minutes() == clock {
+            return Ok(());
+        }
+    }
+    Ok(())
+}
+
+/// The side-quest route of chapter one: the tower and its recruits, the barrow answered by `barrow`
+/// (`break`, `seal` or `leave`), the deserters handed to the Crown and the refugees taken to Reedmere on
+/// the first days; the hero then holds the watchtower's ground, meets the raids (days 4, 8 and 12), and does
+/// the deeds that raise the host (Varga, the toll talked away, the wraiths), then meets the host. Each dialog is answered as the
+/// route needs (`Run::choices`), so the route is the script.
+pub(crate) fn side_quests_route(run: &mut Run, barrow: &str, hire: fn(&mut Run, i32)) -> Result<(), Stuck> {
+    run.choices.insert("barrow".into(), barrow.into());
+    run.choices.insert("deserters".into(), "hand".into());
+    run.choices.insert("refugees".into(), "take".into());
+    go(run, (44, 14), 10)?;
+    // The rite costs forty gold: the hiring keeps it when the barrow is to be sealed.
+    hire(run, if barrow == "seal" { 40 } else { 0 });
+    go(run, (41, 6), 3)?;
+    // West by the north ford (the mill ford lies in the toll's area), the refugees to Reedmere, then east
+    // by the south ford to the deserters, and back to the tower: none of these walks enters the toll's or
+    // Varga's area before the deeds are wanted.
+    go(run, (22, 8), 6)?;
+    go(run, (11, 25), 6)?;
+    go(run, (9, 38), 6)?;
+    go(run, (26, 38), 6)?;
+    go(run, (37, 23), 6)?;
+    go(run, (44, 14), 10)?;
+    // The hero stands at the tower and meets the raids as they come.
+    while run.day() < 12.5 && !run.done() {
+        run.wait_days(1)?;
+        if run.done() {
+            break;
+        }
+        intercept_raids(run, 8)?;
+    }
+    go(run, (34, 17), 6)?;
+    go(run, (33, 23), 6)?;
+    go(run, (6, 38), 10)?;
+    go(run, (6, 44), 10)?;
+    meet_host(run, 30)
+}
+
+/// The test player's hiring for [`side_quests_route`]: every unit the gold buys, keeping `keep` gold.
+fn hire_all_keeping(run: &mut Run, keep: i32) {
+    let budget = run.g.gold - keep;
+    run.hire_all(budget);
+}
+
 /// The install of the tests, or `None` (the test is skipped) without `RAZDOR_DT_DIR`.
 pub(crate) fn install() -> Option<DtInstall> {
     let dir = std::env::var_os(crate::dt::install::ENV_VAR)?;
@@ -594,13 +689,148 @@ mod tests {
         assert!(run.log.iter().any(|l| l.contains("dialog toll -> fight")), "{:?}", run.log);
     }
 
+    /// The day of a log line (`day  4.23: …`).
+    fn day_of(line: &str) -> f64 {
+        line.trim_start_matches("day").trim().split(':').next().and_then(|d| d.trim().parse().ok()).unwrap_or(f64::NAN)
+    }
+
+    /// The first log line that says `what`, with its day.
+    fn logged(run: &Run, what: &str) -> Option<f64> {
+        run.log.iter().find(|l| l.contains(what)).map(|l| day_of(l))
+    }
+
+    /// The Dread deeds raise the host the day after Dread reaches three: on the prepared route (the tower,
+    /// the toll, Varga) that is on the first day, well before the second week (report: host day).
     #[test]
-    fn nothing_attacks_the_hero_before_the_second_week() {
+    fn the_host_rises_the_day_after_the_deeds_raise_dread_to_three() {
         let Some(install) = install() else { return };
         let (opened, content) = brod(&install);
         let mut run = Run::new(&opened, content, 1, PREPARED).unwrap_or_else(|e| panic!("{e}"));
-        run.wait_days(20).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
-        assert!(run.battles.iter().all(|b| b.day >= 14.0), "{:?}", run.battles);
+        prepared_to_wraiths(&mut run).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+        let day = logged(&run, "dialog host_rises").expect("the host rises");
+        eprintln!("host rises on day {day:.2} on the prepared route");
+        assert!(day < 2.0, "the host rises on day {day:.2}: {:?}", run.log);
+        assert!(day > 0.0, "{:?}", run.log);
+    }
+
+    /// The side-quest route wins chapter one in at least 70% of fifteen seeds, with the barrow sealed or left
+    /// alone. (The break is not in the sweep: its fight leaves the squad too hurt for the raids after it.)
+    #[test]
+    fn the_side_quests_route_wins_chapter_one_over_fifteen_seeds() {
+        let Some(install) = install() else { return };
+        let (opened, content) = brod(&install);
+        for barrow in ["seal", "leave"] {
+            let mut won = 0;
+            let mut fails = Vec::new();
+            for seed in 1..=15u32 {
+                let mut run = Run::new(&opened, content.clone(), seed, PREPARED).unwrap_or_else(|e| panic!("{e}"));
+                match side_quests_route(&mut run, barrow, hire_all_keeping) {
+                    Ok(()) if run.victory() => won += 1,
+                    Ok(()) => fails.push(format!("{seed}: not won")),
+                    Err(e) => fails.push(format!("{seed}: {e}")),
+                }
+            }
+            eprintln!("side quests ({barrow}) won {won}/15: {fails:?}");
+            assert!(won * 100 >= 70 * 15, "{barrow}: won {won}/15: {fails:?}");
+        }
+    }
+
+    /// A raid nobody meets takes the watchtower the hero holds: the loss clears its flag, the raid stands in
+    /// the tower, and the dialog says so.
+    #[test]
+    fn a_raid_nobody_meets_takes_the_watchtower() {
+        let Some(install) = install() else { return };
+        let (opened, content) = brod(&install);
+        let mut run = Run::new(&opened, content, 1, PREPARED).unwrap_or_else(|e| panic!("{e}"));
+        run.walk_to((44, 14), 10).unwrap_or_else(|e| panic!("{e}"));
+        run.walk_to((44, 14), 3).unwrap_or_else(|e| panic!("{e}"));
+        run.walk_to((40, 28), 3).unwrap_or_else(|e| panic!("{e}"));
+        run.wait_days(6).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+        assert_eq!(run.var("tower_taken"), Some(VarValue::Bool(false)), "{:?}", run.log);
+        assert!(logged(&run, "dialog raid_tower").is_some_and(|d| (4.0..6.0).contains(&d)), "{:?}", run.log);
+    }
+
+    /// A raid nobody meets burns Reedmere when the hero holds no tower: the village's ash counts and the marsh
+    /// folk trust the hero less.
+    #[test]
+    fn a_raid_nobody_meets_burns_reedmere() {
+        let Some(install) = install() else { return };
+        let (opened, content) = brod(&install);
+        let mut run = Run::new(&opened, content, 1, PREPARED).unwrap_or_else(|e| panic!("{e}"));
+        run.wait_days(8).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+        assert_eq!(run.var("villages_burned"), Some(VarValue::Int(1)), "{:?}", run.log);
+        assert_eq!(run.var("marsh_trust"), Some(VarValue::Int(-1)), "{:?}", run.log);
+        assert!(logged(&run, "dialog raid_village").is_some(), "{:?}", run.log);
+    }
+
+    /// Breaking the barrow mound leaves the host one unit weaker: its last unit is a ghoul.
+    #[test]
+    fn breaking_the_barrow_mound_leaves_the_host_one_unit() {
+        let Some(install) = install() else { return };
+        let (opened, content) = brod(&install);
+        let mut run = Run::new(&opened, content, 1, &[("barrow", "break")]).unwrap_or_else(|e| panic!("{e}"));
+        run.walk_to((44, 14), 10).unwrap_or_else(|e| panic!("{e}"));
+        run.walk_to((44, 14), 3).unwrap_or_else(|e| panic!("{e}"));
+        hire_all_keeping(&mut run, 0);
+        run.walk_to((41, 6), 3).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+        assert_eq!(run.var("barrow_broken"), Some(VarValue::Bool(true)), "{:?}", run.log);
+        assert!(run.battles.iter().any(|b| b.enemy == "barrow_mound" && b.outcome == Outcome::Victory), "{:?}", run.log);
+        run.wait_days(16).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+        let host = run.g.world.armies.iter().enumerate().find(|(i, _)| run.army_name(*i) == "host");
+        if let Some((_, a)) = host {
+            assert_eq!(a.troops.len(), 1, "the host has one unit fewer: {:?}", run.log);
+        } else {
+            assert!(logged(&run, "dialog host_rises").is_some(), "the host rose and was fought: {:?}", run.log);
+        }
+    }
+
+    /// Sealing the barrow costs forty gold and one Dread (at least none): the rite is a deed the other way.
+    #[test]
+    fn sealing_the_barrow_costs_forty_gold_and_a_dread() {
+        let Some(install) = install() else { return };
+        let (opened, content) = brod(&install);
+        let mut run = Run::new(&opened, content, 1, &[("barrow", "seal")]).unwrap_or_else(|e| panic!("{e}"));
+        run.walk_to((44, 14), 10).unwrap_or_else(|e| panic!("{e}"));
+        run.walk_to((44, 14), 3).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(run.var("dread"), Some(VarValue::Int(1)), "the watchtower: one Dread");
+        let gold = run.g.gold;
+        run.walk_to((41, 6), 3).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+        assert_eq!(run.var("barrow_sealed"), Some(VarValue::Bool(true)), "{:?}", run.log);
+        assert_eq!(run.g.gold, gold - 40, "the rite costs forty gold");
+        assert_eq!(run.var("dread"), Some(VarValue::Int(0)), "the rite lowers Dread by one");
+    }
+
+    /// The deserters serve for thirty gold (two swordsmen join) or the Crown has them (its standing rises).
+    #[test]
+    fn the_deserters_serve_for_gold_or_go_to_the_crown() {
+        let Some(install) = install() else { return };
+        let (opened, content) = brod(&install);
+        let mut run = Run::new(&opened, content.clone(), 1, &[("deserters", "serve")]).unwrap_or_else(|e| panic!("{e}"));
+        let (gold, squad) = (run.g.gold, run.g.squad.len());
+        run.walk_to((37, 23), 5).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+        assert_eq!(run.g.gold, gold - 30, "thirty gold");
+        assert_eq!(run.g.squad.len(), squad + 2, "two join the squad");
+        assert_eq!(run.var("deserters"), Some(VarValue::Int(1)));
+
+        let mut run = Run::new(&opened, content, 1, &[("deserters", "hand")]).unwrap_or_else(|e| panic!("{e}"));
+        run.walk_to((37, 23), 5).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+        assert_eq!(run.var("crown"), Some(VarValue::Int(1)), "the Crown's standing rises");
+        assert_eq!(run.var("deserters"), Some(VarValue::Int(2)));
+    }
+
+    /// The refugees taken to Reedmere are thanked there: the marsh folk trust the hero more and he gets gold.
+    #[test]
+    fn the_refugees_taken_home_are_thanked_at_reedmere() {
+        let Some(install) = install() else { return };
+        let (opened, content) = brod(&install);
+        let mut run = Run::new(&opened, content, 1, &[("refugees", "take"), ("marsh_plea", "ride_on")]).unwrap_or_else(|e| panic!("{e}"));
+        run.walk_to((11, 25), 6).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+        assert_eq!(run.var("refugees"), Some(VarValue::Bool(true)), "{:?}", run.log);
+        let gold = run.g.gold;
+        run.walk_to((9, 38), 6).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+        assert!(logged(&run, "dialog refugees_thanks").is_some(), "{:?}", run.log);
+        assert_eq!(run.var("refugees_done"), Some(VarValue::Bool(true)));
+        assert_eq!(run.g.gold, gold + 15, "fifteen coins from the sack");
     }
 
     /// Chapter 1 won on the prepared path: the host rises at the ford, comes for the hero and is
@@ -671,3 +901,6 @@ mod tests {
         assert!(!run.done());
     }
 }
+
+
+

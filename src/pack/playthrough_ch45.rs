@@ -379,3 +379,28 @@ fn the_allies_column_reaches_the_palace_and_the_dread_falls() {
     };
     assert!(after <= before - 2, "the arrival drops the dread by 2: {before} -> {after}\n{}", run.log.join("\n"));
 }
+
+/// Whether the army the story calls `name` was raised on the map (spawned, beaten or not).
+fn spawned(run: &Run, name: &str) -> bool {
+    let Some(story) = run.g.story() else { return false };
+    story.army_names.iter().find(|(_, n)| n.as_str() == name).is_some_and(|(id, _)| run.g.triggers.spawned.contains(id))
+}
+
+/// Chapter 5's last host (dread 16) is one fewer when chapter one broke the barrow mound or sealed it: the
+/// King sends one host fewer. Each case starts at dread 16, so the first week raises every host due.
+#[test]
+fn the_last_host_is_one_fewer_after_the_barrow() {
+    let Some(install) = install() else { return };
+    type Vars = Vec<(String, VarValue)>;
+    let cases: [(&str, Vars, bool); 3] = [("neither", vec![], true), ("broken", vec![flag("barrow_broken", true)], false), ("sealed", vec![flag("barrow_sealed", true)], false)];
+    for (what, extra, sixth) in cases {
+        let mut vars = vec![int("ally", 0), int("dread", 16)];
+        vars.extend(extra);
+        let carry = Carried { gold: Some(100_000), vars, squad: vec![("crossbowman", 1, 3), ("hunter", 1, 2), ("militiaman", 1, 1)], named: vec![("varga", "halberdier", 1)], avoid_armies: true };
+        let mut run = barrows_run(&install, &carry, 1, &[]);
+        // The hosts may beat the hero within the week: what matters is which hosts were raised.
+        let _ = run.wait_days(8);
+        assert!(spawned(&run, "bw_king_1"), "{what}: the first host is raised");
+        assert_eq!(spawned(&run, "bw_king_6"), sixth, "{what}: the last host: {}", run.log.join("\n"));
+    }
+}

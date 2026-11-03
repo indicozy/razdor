@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use super::open::Opened;
-use super::playthrough::{install, meet_host, open_map, prepared_to_wraiths, Run, Stuck, PREPARED};
+use super::playthrough::{install, open_map, Run, Stuck};
 use super::playthrough_ch23::drink_for_wounded;
 use super::triggers::VarValue;
 use crate::dt::install::DtInstall;
@@ -35,13 +35,10 @@ fn branch(install: &DtInstall, seed: u32, to: &str, choices: &[(&str, &str)]) ->
 /// the salt (ten units, not the four of the hub without the hire).
 fn branch_by(install: &DtInstall, seed: u32, to: &str, choices: &[(&str, &str)], as_played: bool) -> Result<Run, Stuck> {
     use super::playthrough_campaign::{heal_within_means, hire_within_means};
-    let (brod, brod_content) = open_map(install, "brod");
-    let mut brod_run = Run::new(&brod, brod_content, seed, PREPARED)?;
-    prepared_to_wraiths(&mut brod_run)?;
-    meet_host(&mut brod_run, 30)?;
-    if !brod_run.victory() {
-        return Err(Stuck::Broken("chapter one was not won".into()));
-    }
+    // Chapter one as the campaign plays it (its side quests, the raids, the hiring at the tower): the
+    // gold it carries is the tower's income over its days.
+    let (brod, _) = open_map(install, "brod");
+    let mut brod_run = super::playthrough_campaign::chapter_one(install, seed)?;
     let first = after_victory(&mut brod_run.g, &brod.routes).ok_or_else(|| Stuck::Broken("chapter one has no next map".into()))?;
     let (marka, marka_content) = open_map(install, &first);
     let g = enter(&brod_run.g, &brod, &marka, None, marka_content).map_err(Stuck::Broken)?;

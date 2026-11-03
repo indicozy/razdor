@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use super::open::Opened;
-use super::playthrough::{install, meet_host, open_map, Carried, Run, Stuck, PREPARED};
+use super::playthrough::{install, open_map, side_quests_route, Carried, Run, Stuck, PREPARED};
 use super::playthrough_camp::CAMP;
 use super::playthrough_ch23::drink_for_wounded;
 use super::playthrough_camp::camp_route;
@@ -39,6 +39,11 @@ pub(crate) enum Plan {
 pub(crate) const RUNWAY: i32 = 3;
 
 pub(crate) fn hire_within_means(run: &mut Run) -> Vec<String> {
+    hire_within_means_keeping(run, 0)
+}
+
+/// [`hire_within_means`] with `keep` gold kept back (a rite's price, for one).
+pub(crate) fn hire_within_means_keeping(run: &mut Run, keep: i32) -> Vec<String> {
     let mut hired = Vec::new();
     loop {
         let bill = run.g.daily_wages();
@@ -47,7 +52,7 @@ pub(crate) fn hire_within_means(run: &mut Run) -> Vec<String> {
         let pick = offers.into_iter().find(|&k| {
             let price = run.g.hire_price(k).amount;
             let wage = run.g.content.wage_for(k, WageKind::Recruit);
-            run.g.gold - price >= RUNWAY * (bill + wage)
+            run.g.gold - price - keep >= RUNWAY * (bill + wage)
         });
         let Some(kind) = pick else { break };
         let price = run.g.hire_price(kind).amount;
@@ -144,19 +149,19 @@ fn leg(map: &str, run: &Run) -> Leg {
     }
 }
 
-/// Chapter 1 «Брод» on the prepared route, with the player's hiring at the tower: the tower taken, the
-/// recruits hired, the toll talked away, the wraiths beaten, then the host.
-fn chapter_one(install: &DtInstall, seed: u32) -> Result<Run, Stuck> {
+/// The player's hiring for chapter one's route: [`hire_within_means_keeping`], the gold kept for a rite.
+fn hire_for_chapter_one(run: &mut Run, keep: i32) {
+    hire_within_means_keeping(run, keep);
+}
+
+/// Chapter 1 «Брод» on the side-quest route (`side_quests_route`): the tower and its recruits, the barrow
+/// sealed with a rite (the break is a fight that leaves the squad too hurt for the raids), the deserters
+/// handed to the Crown, the refugees taken to Reedmere, the raids met on days 4, 8 and 12, the deeds that
+/// raise the host, the host beaten.
+pub(crate) fn chapter_one(install: &DtInstall, seed: u32) -> Result<Run, Stuck> {
     let (brod, content) = open_map(install, "brod");
     let mut run = Run::new(&brod, content, seed, PREPARED)?;
-    run.walk_to((44, 14), 10)?;
-    run.walk_to((44, 14), 3)?;
-    hire_within_means(&mut run);
-    run.walk_to((34, 17), 5)?;
-    run.walk_to((33, 23), 5)?;
-    run.walk_to((6, 38), 10)?;
-    run.walk_to((6, 44), 10)?;
-    meet_host(&mut run, 30)?;
+    side_quests_route(&mut run, "leave", hire_for_chapter_one)?;
     if !run.victory() {
         return Err(Stuck::Broken("chapter one was not won".into()));
     }

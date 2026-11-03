@@ -45,8 +45,11 @@ name = "Bandits at the ford"
 [army.wraiths]
 name = "Wraiths of the bog"
 
-[army.barrow_host]
-name = "Barrow host"
+[army.barrow_mound]
+name = "The barrow"
+
+[army.ward]
+name = "The far watch"
 
 [arrival]
 title = "A new posting"
@@ -909,3 +912,63 @@ description = "Bitter herbs of the marsh folk, dried over a smoky fire. They sto
 [marka.item.company_draught]
 name = "Company draught"
 description = "A strong draught from the Companies' camp, drunk from a tin cup. It mends a wound."
+
+[dread_1]
+title = "The barrows"
+text = "The ground hums under your feet as if someone counts your steps. The barrows hear what you do."
+
+[dread_2]
+title = "Cold from under the earth"
+text = "Cold seeps up through the frozen ground, and the dead lift their heads. They will come for you soon."
+
+[raid_tower]
+title = "The tower falls"
+text = "In the night a band of the dead came out of the barrows. The tower gate did not hold, and the garrison ran into the dark. The tower is theirs now."
+
+[raid_village]
+title = "Reedmere burns"
+text = "A band of the dead crossed the bog and set the village alight. The marsh folk stand among the ashes and look at you: you did not protect them."
+
+[raid_beaten]
+title = "The dead lie down"
+text = "The band that marched on the tower and the village broke apart on the road. You searched the bodies: fifteen coins in a bone clasp."
+
+[barrow]
+title = "The barrow"
+text = "A barrow on the north-east hill: stones set in a ring, and a dark stair in a breach. The inscription bids no one wake what sleeps below. The barrow can be broken before the dead get out, or sealed with a rite."
+break = "Break the barrow (a hard fight)"
+seal = "Seal it with a rite (forty gold)"
+leave = "Leave it alone"
+
+[barrow_broken]
+title = "The barrow broken"
+text = "The stair caved in and the bones under the stones crumbled to dust. A rasp comes from the depths. The host that rises at the ford will be weaker: one of the dead is already gone."
+
+[barrow_sealed]
+title = "The barrow sealed"
+text = "The rite lasts until night. The ring flares grey and goes out. The barrow sleeps, and the Dread falls back at least a step."
+
+[refugees]
+title = "A family by the road"
+text = "A woman with two children sits at the roadside. 'They drove us out of the village by the bog,' she says. 'Take us to Reedmere, there are kin there.'"
+take = "Take them to the reeds"
+leave = "Not my road"
+
+[refugees_thanks]
+title = "Kin"
+text = "At Reedmere they are met at the threshold. The old woman nods to you without a word and gives you fifteen coins found at the bottom of the sack. The marsh folk remember who brings their own home."
+
+[deserters]
+title = "The Crown's deserters"
+text = "Five men in torn uniforms stand in a rut. Their leader grips a spear: 'We ran from the Crown, it does not pay. Take us for thirty gold, or hand us over and the Crown pays for us.'"
+serve = "Hire them for thirty gold (two join the squad)"
+hand = "Hand them over to the Crown"
+pass = "Let them go where they like"
+
+[deserters_served]
+title = "Deserters in the squad"
+text = "Two of the deserters throw off their coats and fall into line. The rest slip away into the reeds. They take their wages in advance and count what is left."
+
+[deserters_handed]
+title = "The Crown's reward"
+text = "The deserters are taken to the captain. The Crown thanks you in a letter without a signature, and the March's garrison looks at you with more respect."

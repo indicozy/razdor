@@ -138,11 +138,12 @@ then = [
     { add = "taint", value = 1 },
 ]
 
+# The last host is one fewer when chapter 1 broke the barrow mound or sealed it with a rite (triggers/brod.toml).
 [[trigger]]
 id = "bw_host_6"
 map = "barrows"
 when = { event = "week_start" }
-if = [ { var = "dread", op = ">=", value = 16 } ]
+if = [ { var = "dread", op = ">=", value = 16 }, { var = "barrow_broken", value = false }, { var = "barrow_sealed", value = false } ]
 then = [
     { spawn_army = "bw_king_6", at = [150, 117], faction = "enemy", model = 10, troops = ["dt:archlich", "dt:lich", "dt:death_knight", "dt:death_knight", "dt:ghoul"] },
     { army_goal = "bw_king_6", attack = "hero" },

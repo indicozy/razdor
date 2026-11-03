@@ -2,7 +2,8 @@
 # fords, the ruined mill on the east bank, the watchtower on the rise, the barrows in the north-east
 # and the marsh folk's village in the south-west. terrain.png is painted by
 # tools/pepelnaya-marka-terrain.py. The map's own victory is a placeholder that never fires: the
-# barrow host is an inactive army, so the chapter ends by the story's `victory` (see triggers/brod.toml).
+# barrow mound is an inactive site and the victory's placeholder is a far army, so the chapter ends by the story's
+# `victory` (see triggers/brod.toml).
 title = "map.title"
 description = "map.description"
 start_date = "1300-04-01"
@@ -3412,14 +3413,26 @@ troops = [
     { unit = "dt:ghoul", level = 1, count = 3 },
 ]
 
-# The barrow host's place: it stays inactive; the story raises the host at the ford instead.
+# The barrow mound: a site the hero can break (triggers/brod.toml, `barrow`). It stays inactive
+# (no AI); a fight with it is the story's start_battle, so it is never a map's victory. Two units: a
+# death knight pair breaks the squad (no route wins); a dead warrior and a ghoul is a hard, winnable fight.
 [[army]]
-id = "barrow_host"
-name = "army.barrow_host.name"
+id = "barrow_mound"
+name = "army.barrow_mound.name"
 cell = [43, 7]
 faction = "enemy"
 model = "inactive"
-troops = [{ unit = "dt:death_knight", level = 1, count = 2 }]
+troops = [{ unit = "dt:dead_warrior", level = 1, count = 1 }, { unit = "dt:ghoul", level = 1, count = 1 }]
+
+# The map's victory names this army, a placeholder that never moves and is never fought: the chapter
+# ends by the story's own victory (the host beaten at the ford). It stands in a far corner.
+[[army]]
+id = "ward"
+name = "army.ward.name"
+cell = [48, 48]
+faction = "enemy"
+model = "inactive"
+troops = [{ unit = "dt:ghoul", level = 1, count = 1 }]
 
 # A lantern at the middle ford, lit from the start: the barrow host rises here.
 [[point]]
@@ -3429,5 +3442,5 @@ active = true
 
 [victory]
 kind = "defeat_army"
-army = "barrow_host"
+army = "ward"
 message = "map.won"

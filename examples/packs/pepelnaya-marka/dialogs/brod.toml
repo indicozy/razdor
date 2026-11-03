@@ -74,6 +74,105 @@ text = "host_rises.text"
 speaker = "dt:death_knight"
 
 [[dialog]]
+id = "dread_1"
+title = "dread_1.title"
+text = "dread_1.text"
+
+[[dialog]]
+id = "dread_2"
+title = "dread_2.title"
+text = "dread_2.text"
+
+[[dialog]]
+id = "raid_tower"
+title = "raid_tower.title"
+text = "raid_tower.text"
+
+[[dialog]]
+id = "raid_village"
+title = "raid_village.title"
+text = "raid_village.text"
+
+[[dialog]]
+id = "raid_beaten"
+title = "raid_beaten.title"
+text = "raid_beaten.text"
+
+[[dialog]]
+id = "barrow"
+title = "barrow.title"
+text = "barrow.text"
+
+[[dialog.choice]]
+id = "break"
+text = "barrow.break"
+
+[[dialog.choice]]
+id = "seal"
+text = "barrow.seal"
+if = [ { gold = 40, op = ">=" } ]
+
+[[dialog.choice]]
+id = "leave"
+text = "barrow.leave"
+
+[[dialog]]
+id = "barrow_broken"
+title = "barrow_broken.title"
+text = "barrow_broken.text"
+
+[[dialog]]
+id = "barrow_sealed"
+title = "barrow_sealed.title"
+text = "barrow_sealed.text"
+
+[[dialog]]
+id = "refugees"
+title = "refugees.title"
+text = "refugees.text"
+
+[[dialog.choice]]
+id = "take"
+text = "refugees.take"
+
+[[dialog.choice]]
+id = "leave"
+text = "refugees.leave"
+
+[[dialog]]
+id = "refugees_thanks"
+title = "refugees_thanks.title"
+text = "refugees_thanks.text"
+
+[[dialog]]
+id = "deserters"
+title = "deserters.title"
+text = "deserters.text"
+
+[[dialog.choice]]
+id = "serve"
+text = "deserters.serve"
+if = [ { gold = 30, op = ">=" } ]
+
+[[dialog.choice]]
+id = "hand"
+text = "deserters.hand"
+
+[[dialog.choice]]
+id = "pass"
+text = "deserters.pass"
+
+[[dialog]]
+id = "deserters_served"
+title = "deserters_served.title"
+text = "deserters_served.text"
+
+[[dialog]]
+id = "deserters_handed"
+title = "deserters_handed.title"
+text = "deserters_handed.text"
+
+[[dialog]]
 id = "stones"
 title = "stones.title"
 text = "stones.text"
