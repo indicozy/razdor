@@ -90,6 +90,11 @@ Cancel = Отмена
 Autosaves = Автосохранения
 No saves here yet. = Сохранений пока нет.
 Clear all = Очистить всё
+Folder = Папка
+Could not open the folder. = Не удалось открыть папку.
+Could not open the folder. It is here: {path} = Не удалось открыть папку. Она здесь: {path}
+Internal storage > Razdor = Внутренняя память > Razdor
+On iPhone > Razdor = На iPhone > Razdor
 Delete every save of the "{tab}" tab? The pinned ones stay. = Удалить все сохранения на вкладке «{tab}»? Закреплённые останутся.
 Load = Загрузить
 

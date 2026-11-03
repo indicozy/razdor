@@ -256,9 +256,53 @@ pub fn downloads_dir() -> Option<PathBuf> {
     dirs::download_dir().or_else(|| dirs::home_dir().map(|home| home.join("Downloads")))
 }
 
+/// Android: the document URI of a folder under the shared storage, the one the Files app opens
+/// (`content://com.android.externalstorage.documents/document/primary%3A<path>`). `dir` must be
+/// inside `/storage/emulated/0`; `None` otherwise. Razdor's own (a player's request), not the original's.
+pub fn android_document_uri(dir: &str) -> Option<String> {
+    let rel = dir.strip_prefix("/storage/emulated/0/")?.trim_matches('/');
+    let doc = format!("primary:{rel}").replace(':', "%3A").replace('/', "%2F");
+    Some(format!("content://com.android.externalstorage.documents/document/{doc}"))
+}
+
+/// iOS: the `shareddocuments://` link that opens the Files app at the absolute path `dir`
+/// (percent-encoded). Razdor's own (a player's request), not the original's.
+pub fn ios_files_url(dir: &str) -> String {
+    let mut out = String::from("shareddocuments://");
+    for b in dir.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => out.push(b as char),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn android_folder_becomes_its_document_uri() {
+        assert_eq!(
+            android_document_uri("/storage/emulated/0/Razdor").as_deref(),
+            Some("content://com.android.externalstorage.documents/document/primary%3ARazdor")
+        );
+        assert_eq!(
+            android_document_uri("/storage/emulated/0/Razdor/hub/maps").as_deref(),
+            Some("content://com.android.externalstorage.documents/document/primary%3ARazdor%2Fhub%2Fmaps")
+        );
+        assert_eq!(android_document_uri("/data/data/razdor"), None);
+    }
+
+    #[test]
+    fn ios_folder_is_a_percent_encoded_files_link() {
+        assert_eq!(
+            ios_files_url("/var/mobile/Containers/Documents/Razdor"),
+            "shareddocuments:///var/mobile/Containers/Documents/Razdor"
+        );
+        assert_eq!(ios_files_url("/a b/ю"), "shareddocuments:///a%20b/%D1%8E");
+    }
 
     #[test]
     fn safe_margins_keep_the_corner_allowance_on_every_side() {

@@ -135,6 +135,65 @@ unsafe fn view_url(env: *mut sys::JNIEnv, url: &str) -> bool {
     !cleared(env)
 }
 
+/// Razdor's own (a player's request): opens the folder `dir` (Razdor's app folder on the shared
+/// storage) in the Files app. The document's own URI with the directory type first; if the system
+/// refuses it, the storage root. True when one of them started.
+pub fn open_folder(dir: &str) -> bool {
+    /// `FLAG_GRANT_READ_URI_PERMISSION` | `FLAG_ACTIVITY_NEW_TASK`.
+    const FLAGS: i32 = 0x1 | 0x1000_0000;
+    let Some(doc) = razdor::platform::android_document_uri(dir) else { return false };
+    // SAFETY: as in `open_url`: the activity exists while the menu runs; the locals are freed by `Local`.
+    unsafe {
+        let env = attach_jni_env();
+        if view_document(env, &doc, Some("vnd.android.document/directory"), FLAGS) {
+            return true;
+        }
+        let root = "content://com.android.externalstorage.documents/root/primary";
+        view_document(env, root, None, FLAGS)
+    }
+}
+
+/// An `ACTION_VIEW` intent over the content URI `uri` (with its MIME type when given), with `flags`
+/// added, started from the activity. False when a call failed (the Java exception is cleared).
+unsafe fn view_document(env: *mut sys::JNIEnv, uri: &str, mime: Option<&str>, flags: i32) -> bool {
+    let uri_cls = class(env, "android/net/Uri");
+    let parse = method(env, uri_cls.obj, "parse", "(Ljava/lang/String;)Landroid/net/Uri;", true);
+    if parse.is_null() || cleared(env) {
+        return false;
+    }
+    let text = string(env, uri);
+    let uri = Local::new(env, ((**env).CallStaticObjectMethod.unwrap())(env, uri_cls.obj, parse, text.obj));
+    if uri.obj.is_null() || cleared(env) {
+        return false;
+    }
+    let intent_cls = class(env, "android/content/Intent");
+    let action = string(env, "android.intent.action.VIEW");
+    let ctor = method(env, intent_cls.obj, "<init>", "(Ljava/lang/String;Landroid/net/Uri;)V", false);
+    if ctor.is_null() || cleared(env) {
+        return false;
+    }
+    let mut intent = Local::new(env, ((**env).NewObject.unwrap())(env, intent_cls.obj, ctor, action.obj, uri.obj));
+    if intent.obj.is_null() || cleared(env) {
+        return false;
+    }
+    if let Some(mime) = mime {
+        let mime = string(env, mime);
+        let set = method(env, intent_cls.obj, "setDataAndType", "(Landroid/net/Uri;Ljava/lang/String;)Landroid/content/Intent;", false);
+        intent = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, intent.obj, set, uri.obj, mime.obj));
+        if intent.obj.is_null() || cleared(env) {
+            return false;
+        }
+    }
+    let add = method(env, intent_cls.obj, "addFlags", "(I)Landroid/content/Intent;", false);
+    intent = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, intent.obj, add, flags));
+    if intent.obj.is_null() || cleared(env) {
+        return false;
+    }
+    let start = method(env, activity_class(env).obj, "startActivity", "(Landroid/content/Intent;)V", false);
+    ((**env).CallVoidMethod.unwrap())(env, ACTIVITY, start, intent.obj);
+    !cleared(env)
+}
+
 /// The app's private cache folder: `Context.getCacheDir()` (the picture cache lives there, out
 /// of the shared storage the Files app indexes). `None` when the call fails. Called from any
 /// thread (the JNI attaches it); `platform::cache_dir` keeps the answer.

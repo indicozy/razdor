@@ -27,6 +27,7 @@ Razdor plays the original game's scenarios using its original rules. Below is wh
 * **Hero Speed:** the "Hero Movement Speed" slider goes up to 2× faster than the fastest speed in the original (the middle of the slider is the original maximum).
 * **Hero Log:** four tabs — "Quests", "Completed", "Rumors", "Messages", with entries marked by in-game date.
 * **Saves:** up to 50 manual saves and 30 autosaves instead of 12; pin important saves with a thumbtack; quick save `F5` and quick load `F9`.
+* **Folder:** the «Folder» button in the load window opens the folder with your saves and maps, on desktop, Android and iOS (Razdor's own, not the original's).
 * **Resuming a game:** if your phone clears the game from memory or the game crashes, upon the next launch, it will offer to resume from where you left off ([more details](/razdor/wiki/en/tutorials/saves/)).
 * **Victory window:** without the "you won gold" and "trophies" lines, so the gold, mana and loot show at once, without scrolling.
 * **Defeat screen:** the "Load last save" button loads the most recent save of any type (manual, quick, or autosave); "Exit to main menu" replaces the old "OK" button.

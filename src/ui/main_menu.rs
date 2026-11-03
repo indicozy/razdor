@@ -310,6 +310,18 @@ pub fn open_link(url: &str) {
     razdor::update::open_in_browser(url);
 }
 
+/// Opens the folder `dir` in the system's file manager (Razdor's own, a player's request: the
+/// Files app on Android and iOS). True when it was handed to the system.
+pub fn open_folder(dir: &std::path::Path) -> bool {
+    let text = dir.to_string_lossy();
+    #[cfg(target_os = "android")]
+    return super::android::open_folder(&text);
+    #[cfg(target_os = "ios")]
+    return super::mobile::open_folder(&text);
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    razdor::update::open_in_browser(&text)
+}
+
 /// A small text link (the Razdor extras) of text `size`. Returns true when clicked.
 fn link(label: &str, x: f32, y: f32, right: bool, size: f32) -> bool {
     let w = measure(label, size).width;

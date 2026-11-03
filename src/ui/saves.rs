@@ -85,6 +85,9 @@ pub struct LoadView {
     pub selected: usize,
     pub scroll: usize,
     pub back: Back,
+    /// The message box of a folder that could not be opened (Razdor's own: «Папка»), with
+    /// the folder's path in it.
+    folder_error: Option<String>,
 }
 
 local! {
@@ -104,7 +107,7 @@ impl LoadView {
     pub fn new(back: Back) -> LoadView {
         let first = LAST_TAB.with(|t| t.get());
         let other = if first == SaveKind::Auto { SaveKind::Manual } else { SaveKind::Auto };
-        let mut v = LoadView { confirm_clear: false, confirm_delete: None, tab: first, entries: Vec::new(), asked: None, settled: false, selected: 0, scroll: 0, back };
+        let mut v = LoadView { confirm_clear: false, confirm_delete: None, tab: first, entries: Vec::new(), asked: None, settled: false, selected: 0, scroll: 0, back, folder_error: None };
         v.refresh();
         if v.entries.is_empty() {
             v.tab = other;
@@ -952,6 +955,53 @@ fn phone_row(weights: &[f32], gap: f32) -> Vec<(f32, f32)> {
         .collect()
 }
 
+/// Razdor's own «Папка» (a player's request, not the original's): its place on the desktop's
+/// bottom row as (x, width), between «Очистить всё» (`clear`) and «Загрузить» (at `load_x`), 7 units
+/// from each. 95 units grown with the text (as «Отмена», the same font), shrunk to the room left and centred in it.
+fn folder_slot(clear: (f32, f32), load_x: f32, grow: f32) -> (f32, f32) {
+    let left = clear.0 + clear.1 + 7.0;
+    let right = load_x - 7.0;
+    let w = (95.0 * grow).min(right - left).max(0.0);
+    (left + (right - left - w) / 2.0, w)
+}
+
+/// What «Папка» shows when the folder cannot be opened: the box's message, with the folder's
+/// path so the player can find it by hand. None when the system took the folder (or it was made
+/// ready). The folder is made first, so it exists.
+fn open_folder_notice() -> Option<String> {
+    let Some(dir) = razdor::platform::app_dir() else {
+        return Some(tr("Could not open the folder.").to_string());
+    };
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        razdor::diag!("{}: {e}", dir.display());
+    }
+    if super::main_menu::open_folder(&dir) {
+        None
+    } else {
+        let path = folder_where(&dir);
+        Some(razdor::trf!("Could not open the folder. It is here: {path}", path = path))
+    }
+}
+
+/// The folder's place as the player finds it: the Files app's way on a phone («Internal storage >
+/// Razdor», «On iPhone > Razdor», as the catalog writes them), the path on the desktop.
+fn folder_where(dir: &std::path::Path) -> String {
+    #[cfg(target_os = "android")]
+    {
+        let _ = dir;
+        tr("Internal storage > Razdor").to_string()
+    }
+    #[cfg(target_os = "ios")]
+    {
+        let _ = dir;
+        tr("On iPhone > Razdor").to_string()
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        dir.display().to_string()
+    }
+}
+
 /// The save window's bottom row as (x, y, width) of «Быстрое сохранение», «Сохранить» and «Отмена»:
 /// on a phone held upright all three in one row (`phone_row`), else [`save_button_row`].
 fn save_row(book: &Book) -> [(f32, f32, f32); 3] {
@@ -1073,7 +1123,7 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     let asking_delete = view.confirm_delete.is_some();
     // A failed load is told in its own message box, which takes the window until its OK.
     let failed = error.is_some();
-    let asking = view.confirm_clear || asking_delete || failed;
+    let asking = view.confirm_clear || asking_delete || failed || view.folder_error.is_some();
     let previously_blocked = input_blocked();
     if asking { set_input_blocked(true); }
     let over_map = game.is_some() && view.back != Back::Title;
@@ -1141,17 +1191,19 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     let clearable = view.entries.iter().any(|e| !e.pinned);
     // Razdor's own: the buttons grow with the text (`button_grow`): «Очистить всё» keeps its left end,
     // «Загрузить» and «Отмена» their right ends (587 and 7 units apart, as at Normal). A phone's row
-    // is one row across the page (`phone_row`).
-    let (clear, load, cancel) = match book.upright {
+    // is one row across the page (`phone_row`). «Папка» (Razdor's own, a player's request)
+    // takes the room between «Очистить всё» and «Загрузить».
+    let (clear, folder, load, cancel) = match book.upright {
         Some(u) => {
-            let row = phone_row(&[0.36, 0.32, 0.32], u.units(6.0));
-            (row[0], row[1], row[2])
+            let row = phone_row(&[0.34, 0.2, 0.26, 0.2], u.units(6.0));
+            (row[0], row[1], row[2], row[3])
         }
         None => {
             let (cancel_w, load_w) = (95.0 * grow, 116.0 * grow);
             let cancel_x = 587.0 - cancel_w;
             let load_x = cancel_x - 7.0 - load_w;
-            ((17.0, 140.0 * grow), (load_x, load_w), (cancel_x, cancel_w))
+            let clear = (17.0, 140.0 * grow);
+            (clear, folder_slot(clear, load_x, grow), (load_x, load_w), (cancel_x, cancel_w))
         }
     };
     let (load_x, load_w) = load;
@@ -1159,6 +1211,9 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     if book.button(clear.0, clear.1, tr("Clear all"), clearable) && !asking {
         view.confirm_clear = true;
         return None;
+    }
+    if book.button(folder.0, folder.1, tr("Folder"), true) && !asking {
+        view.folder_error = open_folder_notice();
     }
     let chosen = view.entries.get(view.selected);
     if (book.button(load_x, load_w, &own("LoadGame", "Load", n_("Load")), chosen.is_some()) || key(KeyCode::Enter)) && !asking && chosen.is_some() {
@@ -1170,7 +1225,11 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     set_input_blocked(previously_blocked);
     if asking { super::chrome::grey_out(book.win); }
     if let Some(message) = error.as_deref() {
-        if load_failed_box(message) { *error = None; }
+        if load_failed_box(&own("LoadGame", "Title", n_("Load a saved game")), message) { *error = None; }
+        return None;
+    }
+    if let Some(message) = view.folder_error.clone() {
+        if load_failed_box(tr("Folder"), &message) { view.folder_error = None; }
         return None;
     }
     if asking_delete {
@@ -1223,9 +1282,8 @@ const VERSION_INK: Color = Color::new(0.22, 0.7, 1.0, 1.0);
 const WARNING_INK: Color = Color::new(1.0, 1.0, 0.61, 1.0);
 /// Razdor's message box for a failed load: the message wrapped over as many lines as it takes,
 /// and one OK (or Enter, Escape). True once it is answered.
-fn load_failed_box(message: &str) -> bool {
+fn load_failed_box(title: &str, message: &str) -> bool {
     let k = super::chrome::k();
-    let title = own("LoadGame", "Title", n_("Load a saved game"));
     let size = 13.0 * k;
     let step = 17.0 * k;
     let lines = wrap(message, 330.0 * k, size);
@@ -1235,7 +1293,7 @@ fn load_failed_box(message: &str) -> bool {
     let g = super::display::button_grow();
     let h = h + 28.0 * k * (g - 1.0);
     let r = Rect::new((screen_width() - w) / 2.0, (screen_height() - h) / 2.0, w, h);
-    let (inner, _) = super::chrome::window(r, &title, super::chrome::Skin::Marble, false);
+    let (inner, _) = super::chrome::window(r, title, super::chrome::Skin::Marble, false);
     for (i, line) in lines.iter().enumerate() {
         super::chrome::shadow_centered(line, inner.center().x, inner.y + 24.0 * k + i as f32 * step, size, super::chrome::CREAM);
     }
@@ -1860,6 +1918,22 @@ mod tests {
         assert_eq!((save.0, save.1, cancel.0, cancel.1), (369.0, 116.0, 492.0, 95.0), "the original's two buttons keep their places");
         // The quick save's label is 18 characters in the button face: at least 150 px wide at this height.
         assert!(quick.1 >= 170.0, "the label «Быстрое сохранение» fits its button");
+    }
+
+    /// «Папка» on the load window's bottom row (Razdor's own) keeps 7 units from «Очистить всё»
+    /// and from «Загрузить» at every text size, and is never wider than its 95 units grown.
+    #[test]
+    fn the_folder_button_fits_between_clear_and_load_at_every_text_size() {
+        for grow in [1.0, 1.25, 1.5] {
+            let (cancel_w, load_w) = (95.0 * grow, 116.0 * grow);
+            let cancel_x = 587.0 - cancel_w;
+            let load_x = cancel_x - 7.0 - load_w;
+            let clear = (17.0, 140.0 * grow);
+            let (x, w) = folder_slot(clear, load_x, grow);
+            assert!(w > 0.0 && w <= 95.0 * grow + 0.001, "the folder button's width at {grow}: {w}");
+            assert!(x >= clear.0 + clear.1 + 7.0 - 0.001, "«Папка» keeps 7 units from «Очистить всё» at {grow}");
+            assert!(x + w <= load_x - 7.0 + 0.001, "«Папка» keeps 7 units from «Загрузить» at {grow}");
+        }
     }
 
     /// A phone's button of the save window is finger-sized (44 dp tall at least, centred on the drawn

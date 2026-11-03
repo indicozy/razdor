@@ -270,6 +270,29 @@ pub fn snapshot_archives(names: &str, pct: Option<u64>) {
     }
 }
 
+/// iOS (Razdor's own, a player's request): opens the Files app at the folder `dir` through a
+/// `shareddocuments://` link (`scripts/dist-ios.sh` shares the Documents folder). True when the
+/// link parsed and was handed to `UIApplication`.
+#[cfg(target_os = "ios")]
+pub fn open_folder(dir: &str) -> bool {
+    use macroquad::miniquad::native::apple::frameworks::{class, msg_send, nil, sel, sel_impl, ObjcId};
+    let url = razdor::platform::ios_files_url(dir);
+    let Ok(text) = std::ffi::CString::new(url.as_str()) else { return false };
+    // SAFETY: as in `open_url`: the classes are the app's own, the objects autoreleased by their factories.
+    unsafe {
+        let ns_string: ObjcId = msg_send![class!(NSString), stringWithUTF8String: text.as_ptr()];
+        let ns_url: ObjcId = msg_send![class!(NSURL), URLWithString: ns_string];
+        if ns_url == nil {
+            razdor::diag!("could not open {url}");
+            return false;
+        }
+        let options: ObjcId = msg_send![class!(NSDictionary), dictionary];
+        let app: ObjcId = msg_send![class!(UIApplication), sharedApplication];
+        let () = msg_send![app, openURL: ns_url options: options completionHandler: nil];
+    }
+    true
+}
+
 /// iOS: opens `url` in the browser through `UIApplication`'s `openURL:options:completionHandler:`
 /// (no completion handler, no options). A link that does not parse is logged, not sent.
 #[cfg(target_os = "ios")]

@@ -730,8 +730,8 @@ pub fn restart() {
     }
 }
 
-/// Opens `url` in the player's browser.
-pub fn open_in_browser(url: &str) {
+/// Opens `url` in the player's browser (or a folder in the file manager). True when the opener started.
+pub fn open_in_browser(url: &str) -> bool {
     let mut c = if cfg!(windows) {
         Command::new("explorer")
     } else if cfg!(target_os = "macos") {
@@ -739,8 +739,12 @@ pub fn open_in_browser(url: &str) {
     } else {
         Command::new("xdg-open")
     };
-    if let Err(e) = c.arg(url).spawn() {
-        crate::diag!("{url}: {e}");
+    match c.arg(url).spawn() {
+        Ok(_) => true,
+        Err(e) => {
+            crate::diag!("{url}: {e}");
+            false
+        }
     }
 }
 
