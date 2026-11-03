@@ -148,6 +148,26 @@ MCP). The studio never calls a model itself.
 - A `razdor-studio` Claude Code skill ships with the studio: how to use the MCP tools, the
   editor guide's traps, and "check, snapshot, look, fix" as the working loop.
 
+## Phase 2: the complete tool (agreed 2026-11-03, second grilling)
+
+Slice 1 (map, script, problems, the MCP and the Claude dock) is done. The owner's goal now: a
+complete tool, at least everything DTMapEdit does, as GUI. The specs of the original editor are on
+the paused `dt-editor` branch, `docs/reference/editor/*.md` (main window and tools, record windows,
+new-map and world generators, map check and playability score, testers); its Rust rebuild of the
+generators is in that branch's `src/editor/`.
+
+| # | Decision |
+|---|---|
+| P1 | The studio keeps its Godot look. Every DTMapEdit feature becomes a form or a tool; nothing stays text-only (the Script view remains for whoever wants it). |
+| P2 | **Map tools:** all of DTMapEdit's tool pages (terrain, hills, forests, buildings, items on the ground) and modes (move, tree replacement, ignore mountains, burn everything), brushes 1-6 and 9, a minimap dock, the passability grid, patrol-zone and fog overlays. Extras: rectangle and fill, copy/paste of a region with its objects, a stamp library of saved regions (`.editor/stamps/`, or the user's settings for stamps shared between packages). Hills and forests paint and erase many `[[object]]` entries with DT's variant rules. What the format cannot hold is listed as a format gap, never faked. |
+| P3 | **Scenario forms:** the map header (title, description, start date, relations, terrain palette, victory), the campaign graph (nodes, ordered `next` edges, hidden edges from travel/victory/ending) and `[carry]`, named characters (where each `named` is given and required), and the texts table (key × language, missing keys marked). |
+| P4 | **Story editor:** trigger and dialog forms generated from the vocabulary (`pack::triggers`), plus an editable flow graph over the same files: dialogs and triggers are nodes, choices are output ports, "sets var X" / "if var X" are labelled edges; dragging a choice onto a dialog creates the wiring trigger. Node positions live in `.editor/layout.json`. A variables view with find usages. |
+| P5 | **Units and items:** forms for the fields the format has (base + overrides), with DT's cost formula (the game's strength evaluator → tactical cost → gold in bands; `records.md` §5.2, artefact auto-price §6.3) as a live suggested price with a "use" button, and the level 1-5 table. Format gaps (per-level gains, nature, magic school, upgrades) go to a format decision, not the editor. |
+| P6 | **Generators:** `dt-editor`'s new-map generator (relief fractal, rivers, coasts, terrain classes, mountains, hills, forests) and world generator (buildings by sector, roads, bridges, economy, armies) ported to write a package map (`terrain.png` + `map.toml`), with the original's dialogs (size, map type, ratios, seed). Later extensions: more map types, regenerate a region, keep story objects; the long-term aim is a rogue-like, D&D-like RPG. |
+| P7 | **Testers on the real engine, not the original editor's diverging copies:** the battle tester (two armies from the map, the hero's squad or built from units; N battles over seeds with Razdor's battle engine; win rate, average losses; one battle replayed in the game's battle view) and the AI viewer (the map's AI run N days on the canvas with a timeline slider, army trails, story triggers marked as they fire; reuses the sim). |
+| P8 | **Two scores, live, each with a breakdown whose items select their objects or cells:** **Richness**, DT's playability formula (`mapcheck-files.md` §6: content points, events → triggers and dialogs, near duplicates and text length, terrain variety rings, building spacing, the curve) adapted to packages; **Health**, from play tests: every story place reachable, each scripted fight winnable by the expected squad (the battle tester's runs), the per-map gold budget against wages, dead ends (a missable once-only offer, a «later» that never returns, a required named character who can die), and the design traps of the editor guide §8. Health warns, it never blocks. |
+| P9 | Order, each a milestone: map tools → scenario forms → story editor → units and items → generators → testers → scores. Each milestone is pushed to `v2-packages` after review; the owner reviews the screenshots of all of them at the end (owner, 2026-11-03), which gates the v2 → `main` merge. |
+
 ## Engine changes the studio needs
 
 - `Located` with a byte span per table (linked selection, jump to line); line numbers on every
