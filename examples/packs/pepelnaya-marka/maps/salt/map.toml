@@ -12791,7 +12791,9 @@ troops = [
 ]
 
 # The Crown's patrol on the north road: it walks its loop from the start and is hostile to the hero until
-# he rides in disguise (triggers/salt.toml sets its attitude). Faction ally, not enemy: the attitude is the
+# he rides in disguise (triggers/salt.toml sets its attitude). Written with one guardsman: the battle fields
+# one more (the army's leader is its first unit, docs/OPEN_QUESTIONS.md), so the route's squad beats it
+# when he rides openly (two guardsmen and two archers: it beat the squad of ten). Faction ally, not enemy: the attitude is the
 # faction's base (the player's row of the relations matrix) combined with the story's value, and an enemy
 # base is negative for good (world::relation keeps a negative faction attitude). A friendly attitude (above
 # 0) is met on a step without a fight; a neutral (0) army is still engaged on a step (game.rs: attitude <= 0).
@@ -12802,7 +12804,7 @@ cell = [48, 24]
 faction = "ally"
 model = "feudal"
 troops = [
-    { unit = "dt:guardsman", level = 1, count = 2 },
+    { unit = "dt:guardsman", level = 1, count = 1 },
     { unit = "dt:archer", level = 1, count = 2 },
 ]
 

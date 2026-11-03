@@ -27,6 +27,14 @@ const SALT_GATE: Tile = (70, 40);
 /// branch). Mirrors `playthrough_ch23`'s helpers, which are private to its test module; the hub
 /// visits what the chapter 2 playthrough visits (the marsh quest, the wraiths, the shrine).
 fn branch(install: &DtInstall, seed: u32, to: &str, choices: &[(&str, &str)]) -> Result<Run, Stuck> {
+    branch_by(install, seed, to, choices, false)
+}
+
+/// [`branch`], or with `as_played`: the hub as the campaign plays it (the walk round the armies, the
+/// walk to Ashford, the healing and the hiring within means), so the squad is the one the route has at
+/// the salt (ten units, not the four of the hub without the hire).
+fn branch_by(install: &DtInstall, seed: u32, to: &str, choices: &[(&str, &str)], as_played: bool) -> Result<Run, Stuck> {
+    use super::playthrough_campaign::{heal_within_means, hire_within_means};
     let (brod, brod_content) = open_map(install, "brod");
     let mut brod_run = Run::new(&brod, brod_content, seed, PREPARED)?;
     prepared_to_wraiths(&mut brod_run)?;
@@ -39,7 +47,15 @@ fn branch(install: &DtInstall, seed: u32, to: &str, choices: &[(&str, &str)]) ->
     let g = enter(&brod_run.g, &brod, &marka, None, marka_content).map_err(Stuck::Broken)?;
     let council = [("council", "marsh"), ("shrine_inside", "cleanse"), ("shrine_offer", "accept"), ("marsh_offer", "accept"), ("marka_arrival", "take")];
     let mut hub = Run::resume(g, &council)?;
+    if as_played {
+        hub.g.avoid_armies = true;
+    }
     drink_for_wounded(&mut hub);
+    if as_played {
+        hub.walk_to((58, 44), 2)?;
+        heal_within_means(&mut hub);
+        hire_within_means(&mut hub);
+    }
     hub.walk_to((15, 69), 10)?;
     hub.walk_to((30, 84), 12)?;
     hub.walk_to((28, 36), 10)?;
@@ -230,4 +246,53 @@ fn the_route_is_won_with_the_default_options() {
         }
     }
     assert!(wins * 100 >= 70 * 10, "won {wins}/10: {lost:?}");
+}
+
+
+/// The two optional fights of the salt, with the squad the route has there (ten units, as played): the
+/// Crown's watch post is taken by a walk into it, and the patrol that hunts him when he rides openly is
+/// met on the road. Each is won in most of fifteen seeds (the battles have no randomness; the walk does).
+#[test]
+fn the_route_squad_wins_the_watch_and_the_openly_patrol_over_fifteen_seeds() {
+    let Some(install) = install() else { return };
+    let (mut watch_wins, mut patrol_wins) = (0, 0);
+    let mut problems = Vec::new();
+    for seed in 1..=15u32 {
+        match branch_by(&install, seed, "salt", &[("salt_reedmere", "disguise")], true) {
+            Ok(mut run) => {
+                let _ = run.walk_to((56, 18), 6);
+                if run.battles.iter().any(|b| b.enemy == "The watch post" && b.outcome == Outcome::Victory) {
+                    watch_wins += 1;
+                } else {
+                    problems.push(format!("watch, seed {seed}: {}", run.log.join(" | ")));
+                }
+            }
+            Err(e) => problems.push(format!("watch, seed {seed}: {e}")),
+        }
+        match branch_by(&install, seed, "salt", &[("salt_reedmere", "openly")], true) {
+            Ok(mut run) => {
+                let _ = run.walk_to((46, 26), 15);
+                for _ in 0..12 {
+                    if run.battles.iter().any(|b| b.enemy == "patrol_north") || run.done() {
+                        break;
+                    }
+                    if let Some(t) = army_named(&run, "patrol_north").map(|a| a.tile(&run.g.world.map)) {
+                        let _ = run.walk_to(t, 1);
+                    }
+                    if run.battles.iter().any(|b| b.enemy == "patrol_north") {
+                        break;
+                    }
+                    let _ = run.wait_days(1);
+                }
+                if run.battles.iter().any(|b| b.enemy == "patrol_north" && b.outcome == Outcome::Victory) {
+                    patrol_wins += 1;
+                } else {
+                    problems.push(format!("openly, seed {seed}: {}", run.log.join(" | ")));
+                }
+            }
+            Err(e) => problems.push(format!("openly, seed {seed}: {e}")),
+        }
+    }
+    assert!(watch_wins * 100 >= 50 * 15, "the watch won {watch_wins}/15: {problems:?}");
+    assert!(patrol_wins * 100 >= 50 * 15, "the openly patrol won {patrol_wins}/15: {problems:?}");
 }
