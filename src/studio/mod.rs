@@ -26,6 +26,7 @@ use crate::pack::load::{line_of, Package};
 use crate::pack::reach::Site;
 use crate::pack::terrain::Palette;
 
+pub mod brush;
 pub mod build;
 pub mod claude;
 pub mod edit;
@@ -37,6 +38,8 @@ pub mod place;
 pub mod reconcile;
 pub mod geometry;
 pub mod newpkg;
+pub mod overlay;
+pub mod region;
 pub mod vars;
 pub mod worker;
 /// The Claude dock's pseudo-terminal (desktop, with the studio's feature).
@@ -81,6 +84,8 @@ pub struct Workspace {
     /// The paint stroke in progress: its terrain's path and the cells it touched, each with the
     /// code it had before the stroke.
     stroke: Option<Stroke>,
+    /// The changes of the operation in progress (`begin_group`): they become one undo step.
+    group: Option<Vec<history::Change>>,
 }
 
 /// A paint stroke: the cells it touched and their codes before the stroke.
@@ -162,6 +167,7 @@ impl Workspace {
             history: history::History::default(),
             burst: None,
             stroke: None,
+            group: None,
         };
         ws.refresh_entries()?;
         Ok(ws)
@@ -345,7 +351,7 @@ impl Workspace {
         let Some(doc) = self.docs.iter().find(|d| d.path == path) else { return };
         let after = doc.text.clone();
         let label = format!("edit {path}");
-        self.history.record(Step::text(path, before, after, label));
+        self.record(Step::text(path, before, after, label));
     }
 
     /// The file of the open text burst, if any.
@@ -367,7 +373,7 @@ impl Workspace {
         let after = edit::apply_to_text(&before, &edit)?;
         let label = edit.label();
         self.docs[idx].text = after.clone();
-        self.history.record(Step::text(file, before, after, label));
+        self.record(Step::text(file, before, after, label));
         Ok(())
     }
 
@@ -399,6 +405,11 @@ impl Workspace {
     /// Paints `cells` of map `map` with terrain `code`, as part of the stroke in progress (a stroke
     /// starts with the first call after [`Workspace::paint_end`]). Cells off the map are skipped.
     pub fn paint(&mut self, map: &str, cells: &[(i64, i64)], code: u8) -> Result<(), String> {
+        self.paint_codes(map, cells.iter().map(|&(x, y)| (x, y, code)))
+    }
+
+    /// [`Workspace::paint`] with a code per cell (a paste, a burn): the same stroke.
+    pub fn paint_codes(&mut self, map: &str, cells: impl IntoIterator<Item = (i64, i64, u8)>, ) -> Result<(), String> {
         let path = format!("maps/{map}/terrain.png");
         let i = self.open_terrain(map)?;
         if self.stroke.as_ref().is_some_and(|s| s.path != path) {
@@ -406,7 +417,7 @@ impl Workspace {
         }
         let stroke = self.stroke.get_or_insert_with(|| Stroke { path, touched: Default::default() });
         let doc = &mut self.terrains[i];
-        for &(x, y) in cells {
+        for (x, y, code) in cells {
             if x < 0 || y < 0 || x >= i64::from(doc.terrain.width) || y >= i64::from(doc.terrain.height) {
                 continue;
             }
@@ -436,7 +447,7 @@ impl Workspace {
             before[((y - y0) * w + (x - x0)) as usize] = code;
         }
         let label = format!("paint {} terrain", doc.map);
-        self.history.record(Step { label, change: Change::Cells { path: stroke.path, x: x0, y: y0, w, h, before, after } });
+        self.record(Step { label, change: Change::Cells { path: stroke.path, x: x0, y: y0, w, h, before, after } });
     }
 
     /// Whether a paint stroke is in progress.
@@ -474,7 +485,11 @@ impl Workspace {
 
     /// Puts a step's before (undo) or after (redo) state back into its document.
     fn apply_step(&mut self, step: &Step, undo: bool) -> Result<(), String> {
-        match &step.change {
+        self.apply_change(&step.change, undo)
+    }
+
+    fn apply_change(&mut self, change: &Change, undo: bool) -> Result<(), String> {
+        match change {
             Change::Text { path, before, after } => {
                 let text = if undo { before } else { after };
                 let i = self.open_doc(path)?;
@@ -486,6 +501,53 @@ impl Workspace {
                 let i = self.terrains.iter().position(|t| &t.path == path).ok_or_else(|| format!("{path} is not open for painting"))?;
                 self.terrains[i].set_rect(*x, *y, *w, *h, codes);
                 Ok(())
+            }
+            Change::Group(members) => {
+                if undo {
+                    members.iter().rev().try_for_each(|c| self.apply_change(c, true))
+                } else {
+                    members.iter().try_for_each(|c| self.apply_change(c, false))
+                }
+            }
+        }
+    }
+
+    /// Records a change: one undo step, or a member of the group in progress.
+    fn record(&mut self, step: Step) {
+        match &mut self.group {
+            Some(members) => {
+                if !step.change.is_noop() {
+                    members.push(step.change);
+                }
+            }
+            None => self.history.record(step),
+        }
+    }
+
+    /// Starts an operation whose changes become one undo step (see [`Workspace::end_group`]).
+    pub fn begin_group(&mut self) {
+        self.end_text_edit();
+        self.paint_end();
+        self.group = Some(Vec::new());
+    }
+
+    /// Ends the operation: its changes are one undo step named `label` (nothing when it changed
+    /// nothing).
+    pub fn end_group(&mut self, label: &str) {
+        self.paint_end();
+        if let Some(members) = self.group.take() {
+            if !members.is_empty() {
+                self.history.record(Step { label: label.to_string(), change: Change::Group(members) });
+            }
+        }
+    }
+
+    /// Ends the operation after a failure: the changes it made so far are put back.
+    pub fn cancel_group(&mut self) {
+        self.paint_end();
+        if let Some(members) = self.group.take() {
+            for c in members.iter().rev() {
+                let _ = self.apply_change(c, true);
             }
         }
     }
@@ -533,7 +595,7 @@ impl Workspace {
         let before = self.terrains[i].rect(0, 0, w, h);
         let after = fresh.rect(0, 0, w, h);
         self.terrains[i] = fresh;
-        self.history.record(Step { label: format!("outside change: {path}"), change: Change::Cells { path: path.to_string(), x: 0, y: 0, w, h, before, after } });
+        self.record(Step { label: format!("outside change: {path}"), change: Change::Cells { path: path.to_string(), x: 0, y: 0, w, h, before, after } });
         Ok(true)
     }
 

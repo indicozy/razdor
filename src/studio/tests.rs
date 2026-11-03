@@ -562,3 +562,133 @@ fn perf_rebuild_and_compile_marka() {
     let _ = job;
     ws.rebuild().unwrap();
 }
+
+// Razdor Studio's map tools (phase 2, milestone 1): each operation is one undo step, and undoing it
+// gives back the text and the terrain it changed.
+
+mod map_tools {
+    use super::*;
+    use crate::studio::brush::{self, Forest};
+    use crate::studio::geometry::CellRect;
+    use crate::studio::region;
+
+    const BROD_MAP: &str = "brod";
+
+    fn brod() -> String {
+        format!("maps/{BROD_MAP}/map.toml")
+    }
+
+    /// The terrain codes of the brod map, as the workspace has them.
+    fn codes(ws: &mut Workspace) -> Vec<u8> {
+        let i = ws.open_terrain(BROD_MAP).unwrap();
+        ws.terrains[i].terrain.cells.clone()
+    }
+
+    #[test]
+    fn a_forest_stroke_is_one_undo_step_and_undoes_to_the_original_text() {
+        let copy = Copy::of("pepelnaya-marka");
+        let mut ws = Workspace::open(&copy.0).unwrap();
+        let file = brod();
+        let before = ws.text_of(&file).unwrap();
+        let cells = brush::square(20, 20, 3);
+        let text = ws.text_of(&file).unwrap();
+        let edits = brush::forest_edits(&file, &text, &cells, Forest::Family(3), false, 3);
+        brush::commit(&mut ws, "forests", BROD_MAP, edits, Vec::new()).unwrap();
+        let after = ws.text_of(&file).unwrap();
+        let planted = brush::object_rows(&after).iter().filter(|r| cells.contains(&r.cell) && r.kind == "trees").count();
+        assert_eq!(planted, 9, "one tree per cell of the 3x3 brush");
+        assert!(brush::object_rows(&after).iter().filter(|r| r.kind == "trees" && cells.contains(&r.cell)).all(|r| (36..48).contains(&r.sprite.unwrap())), "family 3 sprites");
+        assert_eq!(ws.history.undo_label(), Some("forests"));
+        ws.undo().unwrap();
+        assert_eq!(ws.text_of(&file).unwrap(), before, "one undo puts the whole stroke back");
+    }
+
+    #[test]
+    fn a_hill_and_its_erase_are_undo_steps_and_the_comments_stay() {
+        let copy = Copy::of("pepelnaya-marka");
+        let mut ws = Workspace::open(&copy.0).unwrap();
+        let file = brod();
+        let before = ws.text_of(&file).unwrap();
+        let comments = before.lines().filter(|l| l.starts_with('#')).count();
+        let text = ws.text_of(&file).unwrap();
+        brush::commit(&mut ws, "hills", BROD_MAP, brush::hill_edits(&file, &text, brush::hill_centre(30, 30, 2), 2), Vec::new()).unwrap();
+        let placed = ws.text_of(&file).unwrap();
+        assert!(brush::object_rows(&placed).iter().any(|r| r.kind == "hills" && r.cell == (31, 31) && r.sprite == Some(20)), "a 2x2 hill ends at (31, 31)");
+        let text = ws.text_of(&file).unwrap();
+        brush::commit(&mut ws, "erase", BROD_MAP, brush::hill_erase_edits(&file, &text, (30, 30)), Vec::new()).unwrap();
+        let erased = ws.text_of(&file).unwrap();
+        assert!(!brush::object_rows(&erased).iter().any(|r| r.kind == "hills" && r.cell == (31, 31)), "the hill covering (30, 30) is gone");
+        assert_eq!(erased.lines().filter(|l| l.starts_with('#')).count(), comments, "the comment lines are kept");
+        ws.undo().unwrap();
+        assert!(brush::object_rows(&ws.text_of(&file).unwrap()).iter().any(|r| r.kind == "hills" && r.cell == (31, 31)), "undo brings it back");
+        ws.undo().unwrap();
+        assert_eq!(ws.text_of(&file).unwrap(), before);
+    }
+
+    #[test]
+    fn burning_is_one_undo_step_for_the_trees_and_the_ground() {
+        let copy = Copy::of("pepelnaya-marka");
+        let mut ws = Workspace::open(&copy.0).unwrap();
+        let file = brod();
+        let before_text = ws.text_of(&file).unwrap();
+        let before_codes = codes(&mut ws);
+        let w = 50;
+        let edits = brush::burn_tree_edits(&file, &before_text);
+        let cells = brush::burn_cells(&before_codes, w);
+        assert!(!cells.is_empty(), "the brod map has ground above water");
+        brush::commit(&mut ws, "burn everything", BROD_MAP, edits, cells).unwrap();
+        let after = codes(&mut ws);
+        assert!(after.iter().zip(&before_codes).all(|(a, b)| if (4..=15).contains(b) && *b != 13 { *a == 13 } else { a == b }), "ground above water is scorched, water and lava stay");
+        let burnt = ws.text_of(&file).unwrap();
+        assert!(brush::object_rows(&burnt).iter().all(|r| r.kind != "trees"), "every live tree is dead now");
+        assert_eq!(ws.history.undo_label(), Some("burn everything"));
+        ws.undo().unwrap();
+        assert_eq!(codes(&mut ws), before_codes, "the ground comes back");
+        assert_eq!(ws.text_of(&file).unwrap(), before_text, "and the trees");
+    }
+
+    #[test]
+    fn a_pasted_region_with_a_building_gets_new_ids_and_is_one_undo_step() {
+        let copy = Copy::of("pepelnaya-marka");
+        let mut ws = Workspace::open(&copy.0).unwrap();
+        let file = brod();
+        let before = ws.text_of(&file).unwrap();
+        let spans = ed::spans(&file, &before).unwrap();
+        let (_, range) = spans.iter().find(|(l, _)| l.kind == Kind::Building && l.id.as_deref() == Some("tower")).expect("the tower").clone();
+        let (cx, cy) = brush::cell_of_fragment(&before[range]).unwrap();
+        let rect = CellRect::spanning(((cx - 2) as i32, (cy - 2) as i32), ((cx + 2) as i32, (cy + 2) as i32));
+        let clip = region::copy(&mut ws, BROD_MAP, rect).unwrap();
+        assert!(clip.tables.iter().any(|t| t.kind == Kind::Building), "the tower is copied");
+        let target = (1i64, 1i64);
+        let added = region::paste(&mut ws, BROD_MAP, &clip, target).unwrap();
+        assert!(added >= 1);
+        let after = ws.text_of(&file).unwrap();
+        let ids: Vec<String> = ed::spans(&file, &after).unwrap().into_iter().filter(|(l, _)| l.kind == Kind::Building).filter_map(|(l, _)| l.id).collect();
+        assert!(ids.iter().any(|id| id == "tower") && ids.iter().any(|id| id == "fort_1"), "the copy is fort_1: {ids:?}");
+        assert_eq!(after.lines().filter(|l| l.starts_with('#')).count(), before.lines().filter(|l| l.starts_with('#')).count(), "comments elsewhere survive");
+        assert_eq!(ws.history.undo_label(), Some("paste"));
+        let i = ws.open_terrain(BROD_MAP).unwrap();
+        let w = ws.terrains[i].terrain.width;
+        assert_eq!(ws.terrains[i].code_at(1, 1), Some(clip.codes[0]), "the top left cell is pasted at the target");
+        assert!(w >= 50);
+        ws.undo().unwrap();
+        assert_eq!(ws.text_of(&file).unwrap(), before, "one undo takes the paste back");
+    }
+
+    #[test]
+    fn a_stamp_saves_and_reads_back_with_its_terrain_and_tables() {
+        let copy = Copy::of("pepelnaya-marka");
+        let mut ws = Workspace::open(&copy.0).unwrap();
+        let rect = CellRect::spanning((10, 10), (16, 14));
+        let clip = region::copy(&mut ws, BROD_MAP, rect).unwrap();
+        region::save_stamp(&copy.0, "Ford corner", &clip).unwrap();
+        let listed = region::list_stamps(&copy.0);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].name, "Ford corner");
+        assert_eq!(listed[0].clip, clip, "the stamp reads back as it was copied");
+        assert!(region::save_stamp(&copy.0, "../escape", &clip).is_err(), "a stamp name is a plain name");
+        // The studio's own folder is not a package entry: the check does not warn about it.
+        ws.check().unwrap();
+        assert!(ws.problems.iter().all(|d| !d.file.starts_with(".editor")), "{:?}", ws.problems);
+    }
+}

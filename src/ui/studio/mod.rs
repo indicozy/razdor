@@ -85,6 +85,10 @@ pub enum Tab {
     Output,
     /// The Claude dock: the author's own `claude` in a terminal (`ui::studio::claude`).
     Claude,
+    /// The whole map small, with the view frame (`map_tab::Viewer::minimap`).
+    Minimap,
+    /// The package's saved regions (`map_tab::Viewer::stamps_dock`).
+    Stamps,
 }
 
 impl Tab {
@@ -98,6 +102,8 @@ impl Tab {
             Tab::Problems => tr("Problems"),
             Tab::Output => tr("Output"),
             Tab::Claude => "Claude",
+            Tab::Minimap => tr("Minimap"),
+            Tab::Stamps => tr("Stamps"),
         }
     }
 }
@@ -274,6 +280,60 @@ impl StudioScreen {
                 "reach" => self.canvas.reach = true,
                 "grid" => self.canvas.grid = true,
                 "footprints" => self.canvas.footprints = true,
+                "replace" => self.canvas.replace_trees = true,
+                "erase" => self.canvas.erase = true,
+                "move" => self.canvas.move_mode = true,
+                "warn-mountains" => self.canvas.ignore_mountains = false,
+                "passable" => self.canvas.passable = true,
+                "patrols" => self.canvas.patrols = true,
+                "fog" => self.canvas.fog = true,
+                "minimap" => {
+                    if let Some(at) = self.dock.find_tab(&Tab::Minimap) {
+                        self.dock.set_active_tab(at);
+                    }
+                }
+                "stamps" => {
+                    if let Some(at) = self.dock.find_tab(&Tab::Stamps) {
+                        self.dock.set_active_tab(at);
+                    }
+                }
+                "burn" => {
+                    let map = self.maps.map.clone().ok_or("no map shown")?;
+                    let file = format!("maps/{map}/map.toml");
+                    let text = self.ws.text_of(&file)?;
+                    let edits = razdor::studio::brush::burn_tree_edits(&file, &text);
+                    let i = self.ws.open_terrain(&map)?;
+                    let w = self.ws.terrains[i].terrain.width;
+                    let cells = razdor::studio::brush::burn_cells(&self.ws.terrains[i].terrain.cells, w);
+                    razdor::studio::brush::commit(&mut self.ws, "burn everything", &map, edits, cells)?;
+                    self.reload();
+                }
+                "copy" => map_tab::copy_region(&mut self.ws, &self.maps, &mut self.canvas, &mut self.log),
+                // `plant=<x>,<y>` and `hill=<x>,<y>`: the forests and hills tools' stroke at that brush centre
+                // (the brush size, the family and `replace` as set), in memory.
+                other if other.starts_with("plant=") || other.starts_with("hill=") => {
+                    let (kind, at) = other.split_once('=').ok_or("bad option")?;
+                    let (x, y) = at.split_once(',').ok_or_else(|| format!("{other}: x,y"))?;
+                    let (x, y): (i64, i64) = (x.parse().map_err(|_| format!("{other}: x"))?, y.parse().map_err(|_| format!("{other}: y"))?);
+                    let map = self.maps.map.clone().ok_or("no map shown")?;
+                    let file = format!("maps/{map}/map.toml");
+                    let text = self.ws.text_of(&file)?;
+                    let size = self.canvas.brush;
+                    // As the Map tab does: no object on water (the package's rule), read from the terrain picture
+                    // (the map may not be compiled yet when the snapshot's options run).
+                    let i = self.ws.open_terrain(&map)?;
+                    let t = &self.ws.terrains[i];
+                    let water = |c: (i64, i64)| c.0 >= 0 && c.1 >= 0 && t.code_at(c.0 as u32, c.1 as u32).is_some_and(|k| k <= 2);
+                    let cells: Vec<(i64, i64)> = razdor::studio::brush::square(x, y, size).into_iter().filter(|&c| !water(c)).collect();
+                    let edits = if kind == "hill" {
+                        razdor::studio::brush::hill_edits(&file, &text, razdor::studio::brush::hill_centre(x, y, size), size)
+                    } else {
+                        razdor::studio::brush::forest_edits(&file, &text, &cells, self.canvas.forest, self.canvas.replace_trees, size)
+                    };
+                    razdor::studio::brush::commit(&mut self.ws, "snapshot stroke", &map, edits, Vec::new())?;
+                    self.reload();
+                }
+                "paste" => map_tab::arm_paste(&mut self.canvas, &mut self.log),
                 "claude" => {
                     if let Some(at) = self.dock.find_tab(&Tab::Claude) {
                         self.dock.set_active_tab(at);
@@ -290,6 +350,27 @@ impl StudioScreen {
                         self.canvas.tool = Tool::named(name).ok_or_else(|| format!("no tool {name:?}"))?;
                     } else if let Some(id) = other.strip_prefix("building=") {
                         self.selection = Some(Selection::Building(id.to_string()));
+                    } else if let Some(n) = other.strip_prefix("brush=") {
+                        let n: u32 = n.parse().map_err(|_| format!("brush {n:?} is not a number"))?;
+                        if !razdor::studio::brush::BRUSH_SIZES.contains(&n) {
+                            return Err(format!("brush {n} is not one of 1-6 or 9"));
+                        }
+                        self.canvas.brush = n;
+                    } else if let Some(f) = other.strip_prefix("forest=") {
+                        self.canvas.forest = if f == "thicket" {
+                            razdor::studio::brush::Forest::Thicket
+                        } else {
+                            razdor::studio::brush::Forest::Family(f.parse().map_err(|_| format!("forest {f:?}: a family 0-9 or thicket"))?)
+                        };
+                    } else if let Some(r) = other.strip_prefix("region=") {
+                        let v: Vec<i32> = r.split(',').map(|n| n.parse().map_err(|_| format!("region {r:?}"))).collect::<Result<_, _>>()?;
+                        let [x0, y0, x1, y1] = v[..] else { return Err(format!("region {r:?}: x0,y0,x1,y1")) };
+                        self.canvas.region = Some(razdor::studio::geometry::CellRect::spanning((x0, y0), (x1, y1)));
+                    } else if let Some(name) = other.strip_prefix("stamp=") {
+                        let list = razdor::studio::region::list_stamps(&self.ws.root);
+                        let stamp = list.into_iter().find(|s| s.name == name).ok_or_else(|| format!("no stamp {name:?}"))?;
+                        self.canvas.clip = Some(stamp.clip);
+                        self.canvas.paste = true;
                     } else {
                         return Err(format!("no studio option {other:?}"));
                     }
@@ -369,6 +450,7 @@ impl StudioScreen {
         self.claude.pump();
         self.serve_mcp();
         self.canvas.shown = false;
+        self.canvas.mini = None;
         egui_macroquad::ui(|ctx| action = self.show(ctx));
         let pkg = self.ws.package();
         draw_map_tab(&mut self.canvas, &self.maps, pkg.as_deref(), self.selection.as_ref(), art);
@@ -683,6 +765,18 @@ impl StudioScreen {
         } else if undo {
             self.undo();
         }
+        if !ctx.wants_keyboard_input() {
+            if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::C))) {
+                map_tab::copy_region(&mut self.ws, &self.maps, &mut self.canvas, &mut self.log);
+            }
+            if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::V))) {
+                map_tab::arm_paste(&mut self.canvas, &mut self.log);
+            }
+            if ctx.input(|i| i.key_pressed(Key::Escape)) {
+                self.canvas.paste = false;
+                self.canvas.region = None;
+            }
+        }
         let delete = !ctx.wants_keyboard_input() && ctx.input(|i| i.key_pressed(Key::Delete));
         if delete {
             if let (Some(sel), Some(map)) = (self.selection.clone(), self.maps.map.clone()) {
@@ -875,7 +969,9 @@ fn layout(side: bool) -> DockState<Tab> {
     let tree = dock.main_surface_mut();
     // egui_dock's fraction is the share of the node that comes first (the new left or upper
     // node): the Inspector is the last quarter of the width (26%: its forms need the room).
-    let [centre, _inspector] = tree.split_right(NodeIndex::root(), 0.74, vec![Tab::Inspector]);
+    let [centre, inspector] = tree.split_right(NodeIndex::root(), 0.74, vec![Tab::Inspector]);
+    // The minimap and the stamps sit under the Inspector (the Godot-style right column).
+    let [_inspector, _side] = tree.split_below(inspector, 0.55, vec![Tab::Minimap, Tab::Stamps]);
     let [centre, files] = tree.split_left(centre, 0.25, vec![Tab::FileSystem]);
     let [_files, _scene] = tree.split_below(files, 0.5, vec![Tab::Scene]);
     let [centre, _bottom] = tree.split_below(centre, 0.75, vec![Tab::Problems, Tab::Output, Tab::Claude]);
@@ -956,12 +1052,15 @@ impl TabViewer for Viewer<'_> {
             Tab::Problems => self.problems(ui),
             Tab::Output => self.output(ui),
             Tab::Claude => self.claude.show(ui, &self.ws.root),
+            Tab::Minimap => self.minimap(ui),
+            Tab::Stamps => self.stamps_dock(ui),
         }
     }
 
     /// The map is drawn over the Map tab's body by the macroquad pass, so egui paints nothing there.
     fn clear_background(&self, tab: &Tab) -> bool {
-        !matches!(tab, Tab::Map)
+        // The map and the minimap are drawn by macroquad after egui: egui must not paint over them.
+        !matches!(tab, Tab::Map | Tab::Minimap)
     }
 }
 

@@ -13,6 +13,28 @@ pub enum Change {
     Text { path: String, before: String, after: String },
     /// A terrain's cells in a rectangle (`x`, `y`, `w`, `h`, row-major), before and after a stroke.
     Cells { path: String, x: u32, y: u32, w: u32, h: u32, before: Vec<u8>, after: Vec<u8> },
+    /// Several changes made by one operation (a burn, a paste, a forest stroke): one undo step.
+    /// Undo puts the members back in reverse order, redo applies them in order.
+    Group(Vec<Change>),
+}
+
+impl Change {
+    /// The file the change is of (a group's first member's; empty for an empty group).
+    pub fn path(&self) -> &str {
+        match self {
+            Change::Text { path, .. } | Change::Cells { path, .. } => path,
+            Change::Group(v) => v.first().map_or("", Change::path),
+        }
+    }
+
+    /// Whether the change leaves its files as they were.
+    pub fn is_noop(&self) -> bool {
+        match self {
+            Change::Text { before, after, .. } => before == after,
+            Change::Cells { before, after, .. } => before == after,
+            Change::Group(v) => v.iter().all(Change::is_noop),
+        }
+    }
 }
 
 /// One change and the label of the change.
@@ -30,17 +52,7 @@ impl Step {
 
     /// The file the change is of.
     pub fn path(&self) -> &str {
-        match &self.change {
-            Change::Text { path, .. } | Change::Cells { path, .. } => path,
-        }
-    }
-
-    /// Whether the change leaves the file as it was.
-    fn is_noop(&self) -> bool {
-        match &self.change {
-            Change::Text { before, after, .. } => before == after,
-            Change::Cells { before, after, .. } => before == after,
-        }
+        self.change.path()
     }
 }
 
@@ -54,7 +66,7 @@ impl History {
     /// Records a new change: it goes on the undo stack and the redo stack is cleared. A step that
     /// changes nothing is not recorded.
     pub fn record(&mut self, step: Step) {
-        if step.is_noop() {
+        if step.change.is_noop() {
             return;
         }
         self.undo.push(step);

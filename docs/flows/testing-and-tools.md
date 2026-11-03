@@ -212,6 +212,20 @@ model is parsed again from that text, and one undo stack covers every change. Sn
 `studio:<folder>[:<map>[:<army>[:<option>…]]]` and `studio-start` (`ui::snapshot`, the
 offscreen-snapshot skill).
 
+Map tools (phase 2, milestone 1): `studio/brush.rs` plans the tools as `Edit`s of the map file and
+terrain cells (hills, forests and their erase, burning, the flood fill, the rectangle, the mountains
+check); `studio/overlay.rs` derives the walk grid and its impassable cells (DT's marks), the start's
+fog and the trigger patrols; `studio/region.rs` copies and pastes a rectangle (new ids for pasted
+buildings and armies, a pasted army's leader loses its name) and keeps the stamps in
+`.editor/stamps/` (`<name>.toml` with the tables, `<name>.png` with the terrain; the check skips
+`.editor/`). Every operation runs as one undo step: `Workspace::begin_group` and `end_group`
+collect the changes into a `Change::Group`, `cancel_group` undoes a failed one. The Map tab
+(`ui/studio/map_tab.rs`) decides the input and runs the operations after its canvas pass; the
+Minimap and Stamps docks are `Tab::Minimap` and `Tab::Stamps`. Snapshot options: `replace`,
+`erase`, `move`, `warn-mountains`, `passable`, `patrols`, `fog`, `minimap`, `stamps`, `burn`, `copy`,
+`paste`, `brush=<n>`, `forest=<family|thicket>`, `region=x0,y0,x1,y1`, `stamp=<name>`. The format
+gaps (items on the ground, the patrol radius, the variant counts) are in `docs/OPEN_QUESTIONS.md`.
+
 ## The map translator (`razdor-translate`)
 
 Not part of the original game (asked for by the owner): a second program that writes English

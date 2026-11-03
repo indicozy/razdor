@@ -140,6 +140,10 @@ fn check_entries(pkg: &Package, r: &mut Report) {
             Some((top, _)) => (top, true),
             None => (path, false),
         };
+        // `.editor/` holds the studio's own data (layout, stamps): the engine ignores it.
+        if top.starts_with('.') {
+            continue;
+        }
         let known = if nested { TOP_DIRS.contains(&top) } else { TOP_FILES.contains(&top) };
         if !known && warned.insert(top) {
             r.warning_hint(

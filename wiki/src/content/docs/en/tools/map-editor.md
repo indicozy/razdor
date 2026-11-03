@@ -37,11 +37,35 @@ Windows can be dragged, split and opened as tabs.
 ## The map
 
 The tools are **Select**, **Building**, **Army**, **Point**, **Object** and **Terrain** (a brush of
-1, 3, 5 or 9 cells). A tool places its object where you click; a selected object can be dragged.
+1 to 6 or 9 cells), with the pages described below. A tool places its object where you click; a
+selected object can be dragged.
 
 The check boxes are **Grid**, **Footprints** (the cells the buildings take) and **Reach** (the cells
 the hero cannot walk to on the map's story). Placement errors, such as an object on water or
 buildings on top of each other, show on the map at once; the details are in **Problems**.
+
+### Map tools
+
+The tool bar's pages follow DTMapEdit's: **Terrain** (a brush of 1, 2, 3, 4, 5, 6 or 9 cells),
+**Hills** (one hill per brush centre, sized by the brush; **Erase** takes the hills the brush
+covers), **Forests** (one tree per cell of a chosen family, or a thicket; **Replace trees** re-rolls
+only what the family replaces), **Buildings** (**Erase** removes the building that covers the
+cell), **Items** (not yet: the package format has no items on the ground), **Rectangle** and
+**Fill** (a rectangle, or the connected cells of one kind, takes the palette's kind).
+
+**Copy** takes a rectangle: **Ctrl+C** copies it, **Ctrl+V** arms a paste that follows the pointer
+and **Esc** stops. **Save stamp** keeps the copy in the package under a name; the **Stamps** tab
+lists them, and a click arms one for pasting.
+
+**Move** is a mode for every tool: the first click picks an object up (an army, a building, a point
+or a terrain object), the next click drops it. **Burn everything** asks first; it turns live trees
+into dead ones and scorches the ground above water, as one undo step.
+
+The **Minimap** tab shows the whole map with the view frame; a click or a drag moves the view.
+
+Overlays: **Passable** (the walk grid: hard, impassable, building, water), **Patrols** (the army
+routes of the story) and **Fog** (what the hero and the lit lanterns see at the start), besides
+**Grid**, **Footprints** and **Reach**.
 
 ## Editing, undo and saving
 
