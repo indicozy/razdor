@@ -3417,9 +3417,9 @@ faction = "enemy"
 model = "inactive"
 troops = [{ unit = "dt:death_knight", level = 1, count = 2 }]
 
-# A lantern on the burned road, lit from the start.
+# A lantern at the middle ford, lit from the start: the barrow host rises here.
 [[point]]
-cell = [27, 21]
+cell = [28, 25]
 radius = 3
 active = true
 

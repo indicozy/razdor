@@ -308,11 +308,11 @@ mod tests {
     fn path_a(g: &mut Game) {
         assert_eq!(dialogs(g.drain_events()), ["arrival"]);
         g.answer_story_dialog("arrival", None);
-        assert_eq!(dialogs(g.story_events(When::HeroEnters(Place::Cell(33, 19)))), ["varga_meet"], "the ruins by the road");
+        assert_eq!(dialogs(g.story_events(When::HeroEnters(Place::Cell(34, 17)))), ["varga_meet"], "the ruins by the road");
         g.answer_story_dialog("varga_meet", Some("join"));
         assert!(g.squad.iter().any(|u| u.named == varga_id(g)), "Varga joins the hero's army");
         let gold = g.gold;
-        assert_eq!(dialogs(g.story_events(When::HeroEnters(Place::Cell(35, 23)))), ["toll"], "the toll, as the hero nears the bandits");
+        assert_eq!(dialogs(g.story_events(When::HeroEnters(Place::Cell(33, 23)))), ["toll"], "the toll, as the hero nears the bandits");
         g.answer_story_dialog("toll", Some("fight"));
         beat(g, 1);
         assert_eq!(g.gold, gold + 25, "the toll's bandits beaten: 25 gold");
@@ -360,10 +360,10 @@ mod tests {
         opened.start(&mut b);
         assert_eq!(dialogs(b.drain_events()), ["arrival"]);
         b.answer_story_dialog("arrival", None);
-        assert_eq!(dialogs(b.story_events(When::HeroEnters(Place::Cell(33, 19)))), ["varga_meet"]);
+        assert_eq!(dialogs(b.story_events(When::HeroEnters(Place::Cell(34, 17)))), ["varga_meet"]);
         b.answer_story_dialog("varga_meet", Some("burn"));
         assert_eq!(b.story_var("dread"), Some(crate::pack::triggers::VarValue::Int(2)), "the burnt mill: +2 dread");
-        assert_eq!(dialogs(b.story_events(When::HeroEnters(Place::Cell(35, 23)))), ["toll"]);
+        assert_eq!(dialogs(b.story_events(When::HeroEnters(Place::Cell(33, 23)))), ["toll"]);
         b.answer_story_dialog("toll", Some("talk"));
         assert_eq!(dialogs(b.story_events(When::HeroEnters(Place::Cell(6, 40)))), ["marsh_plea"]);
         b.answer_story_dialog("marsh_plea", Some("ride_on"));
@@ -381,9 +381,9 @@ mod tests {
         opened.start(&mut c);
         assert_eq!(dialogs(c.drain_events()), ["arrival"]);
         c.answer_story_dialog("arrival", None);
-        assert_eq!(dialogs(c.story_events(When::HeroEnters(Place::Cell(33, 19)))), ["varga_meet"]);
+        assert_eq!(dialogs(c.story_events(When::HeroEnters(Place::Cell(34, 17)))), ["varga_meet"]);
         c.answer_story_dialog("varga_meet", Some("refuse"));
-        assert_eq!(dialogs(c.story_events(When::HeroEnters(Place::Cell(35, 23)))), ["toll"]);
+        assert_eq!(dialogs(c.story_events(When::HeroEnters(Place::Cell(33, 23)))), ["toll"]);
         let gold = c.gold;
         c.answer_story_dialog("toll", Some("pay"));
         assert_eq!(c.gold, gold - 20, "the toll paid");
