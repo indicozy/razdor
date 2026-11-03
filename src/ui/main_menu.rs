@@ -65,6 +65,8 @@ const TILE_DP: f32 = 68.0;
 /// The bottom bar's margin at the screen's sides and the gap between its tiles, in dp.
 const CHIP_MARGIN_DP: f32 = 12.0;
 const CHIP_GAP_DP: f32 = 8.0;
+/// The version label's text on a phone, in dp (its sp; the menu's other small texts are 12 sp and up).
+const VERSION_PHONE_DP: f32 = 13.0;
 /// The chosen mod's list (the title's link or its tile), its key in the popup lists.
 const MOD_LIST: &str = "razdor:menu-mod";
 
@@ -550,8 +552,17 @@ pub fn frame(no_install: bool, mods: &[(String, razdor::hub::Text)], active: Opt
     };
     // This program's version, small in the corner above the links.
     let version = format!("v{}", super::update_view::shown_version(env!("CARGO_PKG_VERSION"), super::clock::is_snapshot()));
-    let vw = measure(&version, 12.0 * k).width;
-    chrome::shadow_text(&version, screen_width() - 16.0 * k - vw, version_y, 12.0 * k, Color::new(0.95, 0.88, 0.72, 0.6));
+    // On a phone the version is 13 dp (a player's report of 1503: 12 px grey over the picture was
+    // hard to read) and brighter; the desktop's is as it was.
+    let phone = super::display::dp_px();
+    let (vsize, vcolour) = match phone {
+        Some(dp) => (VERSION_PHONE_DP * dp, Color::new(0.95, 0.88, 0.72, 0.9)),
+        None => (12.0 * k, Color::new(0.95, 0.88, 0.72, 0.6)),
+    };
+    super::dt_font::legacy_metrics_if(phone.is_some(), || {
+        let vw = measure(&version, vsize).width;
+        chrome::shadow_text(&version, screen_width() - 16.0 * k - vw, version_y, vsize, vcolour);
+    });
     // An update put in place says so (an "Always" update has no window of its own).
     super::update_view::title_line();
     // Esc quits the game at once, without a question, as in the original (0x4c8059); a

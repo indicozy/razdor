@@ -1395,6 +1395,13 @@ struct Popup {
     /// The filter has the on-screen keyboard (a phone: only after a tap in the filter row,
     /// [`popup_keyboard`]).
     typing: bool,
+    /// The rows shown at once (a phone's list may show fewer, to fit the screen: [`popup_size`]).
+    rows: usize,
+    /// A row's and the filter row's height, in px.
+    row_h: f32,
+    head_h: f32,
+    /// The phone's density when the list is a phone's (its rows and text in dp), else None.
+    phone: Option<f32>,
 }
 
 local! {
@@ -1413,6 +1420,11 @@ local! {
 pub const FIELD_BG: Color = Color::new(0.07, 0.07, 0.065, 1.0);
 const POPUP_ROWS: usize = 12;
 const POPUP_ROW_H: f32 = 22.0;
+/// A phone's drop-down rows are finger-sized (48 dp, Android's minimum) with 15 dp text: the
+/// player's report of a «Мод» list whose 8-px rows were picked by mistake (1500).
+const PHONE_POPUP_ROW_DP: f32 = 48.0;
+const PHONE_POPUP_TEXT_DP: f32 = 15.0;
+const PHONE_POPUP_MIN_W_DP: f32 = 180.0;
 
 /// A stable id for a field from its key (unique per record and field, e.g. `"b12:name"`).
 pub fn field_id(key: &str) -> u64 {
@@ -2191,15 +2203,76 @@ pub fn dropdown(key: &str, x: f32, y: f32, w: f32, current: i64, options: &[(i64
 pub fn open_list(key: &str, anchor: Rect, current: i64, options: &[(i64, String)], scale: f32) {
     claim();
     clear_focus();
-    let rows = options.len().min(POPUP_ROWS) as f32;
-    let ph = (rows * POPUP_ROW_H + 30.0) * scale;
-    let (y, h) = (anchor.y, anchor.h);
-    let py = if y + h + ph > screen_height() { (y - ph).max(0.0) } else { y + h };
-    let pw = anchor.w.max(220.0 * scale);
+    let phone = super::display::dp_px();
+    let size = popup_size(options.len(), anchor.y, anchor.h, screen_height(), scale, phone);
+    // A phone's list is at least 180 dp wide, so its hint and labels fit beside a narrow anchor (the
+    // language tile at the screen's edge).
+    let pw = match phone {
+        Some(dp) => anchor.w.max(PHONE_POPUP_MIN_W_DP * dp),
+        None => anchor.w.max(220.0 * scale),
+    };
     let px = anchor.x.min(screen_width() - pw).max(0.0);
     let at = options.iter().position(|o| o.0 == current).unwrap_or(0);
-    let popup = Popup { id: field_id(key), rect: Rect::new(px, py, pw, ph), options: options.to_vec(), scroll: at.saturating_sub(POPUP_ROWS / 2), filter: String::new(), edit: TextEdit::at_end(), scale, typing: false };
+    let popup = Popup {
+        id: field_id(key),
+        rect: Rect::new(px, size.y, pw, size.h),
+        options: options.to_vec(),
+        scroll: at.saturating_sub(size.rows / 2),
+        filter: String::new(),
+        edit: TextEdit::at_end(),
+        scale,
+        typing: false,
+        rows: size.rows,
+        row_h: size.row_h,
+        head_h: size.head_h,
+        phone,
+    };
     POPUP.with(|p| *p.borrow_mut() = Some(popup));
+}
+
+/// A drop-down list's box: its top `y`, height `h`, the row and filter row heights, and the rows
+/// shown at once.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PopupSize {
+    y: f32,
+    h: f32,
+    row_h: f32,
+    head_h: f32,
+    rows: usize,
+}
+
+/// The box of a drop-down list of `n` options under an anchor at `anchor_y` (height `anchor_h`)
+/// on a `screen_h`-high screen, at `scale`. The desktop's list is as it was: 12 rows of 22 px,
+/// over the anchor when there is no room below. A phone's (`phone`: its density) has 48-dp rows,
+/// a 48-dp filter row and 4 dp under; it opens on the side with more room and shows only the
+/// rows that fit there (at least one), so it never runs off the screen.
+fn popup_size(n: usize, anchor_y: f32, anchor_h: f32, screen_h: f32, scale: f32, phone: Option<f32>) -> PopupSize {
+    let (y, h) = (anchor_y, anchor_h);
+    match phone {
+        None => {
+            let rows = n.min(POPUP_ROWS);
+            let ph = (rows as f32 * POPUP_ROW_H + 30.0) * scale;
+            let py = if y + h + ph > screen_h { (y - ph).max(0.0) } else { y + h };
+            PopupSize { y: py, h: ph, row_h: POPUP_ROW_H * scale, head_h: 26.0 * scale, rows }
+        }
+        Some(dp) => {
+            let row_h = PHONE_POPUP_ROW_DP * dp;
+            let head_h = PHONE_POPUP_ROW_DP * dp;
+            let pad = 4.0 * dp;
+            let want = n.min(POPUP_ROWS);
+            let below = (screen_h - (y + h)).max(0.0);
+            let above = y.max(0.0);
+            let full = want as f32 * row_h + head_h + pad;
+            // Below when the whole list fits there, else above when it does, else the side with more room.
+            let open_below = full <= below || (full > above && below >= above);
+            let room = if open_below { below } else { above };
+            let fit = ((room - head_h - pad) / row_h).floor().max(0.0) as usize;
+            let rows = want.min(fit).max(want.min(1));
+            let ph = rows as f32 * row_h + head_h + pad;
+            let py = if open_below { y + h } else { (y - ph).max(0.0) };
+            PopupSize { y: py, h: ph, row_h, head_h, rows }
+        }
+    }
 }
 
 /// The value picked in the drop-down list of `key` since the last call, if any.
@@ -2257,12 +2330,16 @@ pub fn draw_popup() {
         // The filter asks for the keyboard as a name field does (`popup_keyboard`): on a phone only
         // after a tap in the filter row, so opening the list does not cover it with the keyboard.
         let s = pop.scale;
-        let filter_row = Rect::new(r.x, r.y, r.w, 26.0 * s);
+        // A phone's list is drawn in dp (its rows and text, `popup_size`); the desktop's as it was.
+        let unit = pop.phone.unwrap_or(s);
+        let legacy = pop.phone.is_some();
+        let (row_h, head_h) = (pop.row_h, pop.head_h);
+        let filter_row = Rect::new(r.x, r.y, r.w, head_h);
         let tapped = is_mouse_button_pressed(MouseButton::Left) && pointer_in_rect(tap_rect(filter_row, false));
         pop.typing = popup_keyboard(super::display::dp_px().is_some(), pop.typing, tapped, super::display::keyboard_closed_by_system());
         let needle = pop.filter.to_lowercase();
         let shown: Vec<&(i64, String)> = pop.options.iter().filter(|o| needle.is_empty() || o.1.to_lowercase().contains(&needle) || o.0.to_string() == needle).collect();
-        let max_scroll = shown.len().saturating_sub(POPUP_ROWS);
+        let max_scroll = shown.len().saturating_sub(pop.rows);
         if r.contains(Vec2::from(pointer())) {
             let wh = mouse_wheel().1;
             if wh > 0.0 {
@@ -2275,29 +2352,40 @@ pub fn draw_popup() {
         draw_rectangle(r.x + 4.0, r.y + 4.0, r.w, r.h, Color::new(0.0, 0.0, 0.0, 0.4));
         draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.1, 0.09, 0.08, 0.98));
         draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, ACCENT);
-        let row_h = POPUP_ROW_H * s;
-        let hint = if pop.filter.is_empty() { razdor::i18n::tr("type to filter").to_string() } else { razdor::trf!("filter: {filter}", filter = pop.filter) };
-        text(&hint, r.x + 8.0 * s, r.y + 19.0 * s, 15.0 * s, DIM);
-        for (i, (v, label)) in shown.iter().skip(pop.scroll).take(POPUP_ROWS).enumerate() {
-            let ry = r.y + 26.0 * s + i as f32 * row_h;
+        // The text sizes: the desktop's 15 and 16 px at the scale; a phone's 15 dp for both.
+        let (hint_size, label_size) = match pop.phone {
+            Some(dp) => (PHONE_POPUP_TEXT_DP * dp, PHONE_POPUP_TEXT_DP * dp),
+            None => (15.0 * s, 16.0 * s),
+        };
+        // Phone text sits centred in its row (the desktop's baselines are as they were).
+        let centred = |top: f32, height: f32, size: f32| if legacy { top + height / 2.0 + size * 0.35 } else { top };
+        let mut hint = if pop.filter.is_empty() { razdor::i18n::tr("type to filter").to_string() } else { razdor::trf!("filter: {filter}", filter = pop.filter) };
+        while super::dt_font::legacy_metrics_if(legacy, || measure(&hint, hint_size).width) > r.w - 16.0 * unit && !hint.is_empty() {
+            hint.pop();
+        }
+        let hint_y = if legacy { centred(r.y, head_h, hint_size) } else { r.y + 19.0 * s };
+        super::dt_font::legacy_metrics_if(legacy, || text(&hint, r.x + 8.0 * unit, hint_y, hint_size, DIM));
+        for (i, (v, label)) in shown.iter().skip(pop.scroll).take(pop.rows).enumerate() {
+            let ry = r.y + head_h + i as f32 * row_h;
             let hover = Rect::new(r.x, ry, r.w, row_h).contains(Vec2::from(pointer()));
             if hover {
                 draw_rectangle(r.x + 2.0, ry, r.w - 4.0, row_h, Color::new(0.4, 0.3, 0.15, 1.0));
             }
             let mut l = label.clone();
-            while measure(&l, 16.0 * s).width > r.w - 16.0 * s && !l.is_empty() {
+            while super::dt_font::legacy_metrics_if(legacy, || measure(&l, label_size).width) > r.w - 16.0 * unit && !l.is_empty() {
                 l.pop();
             }
-            text(&l, r.x + 8.0 * s, ry + 16.0 * s, 16.0 * s, INK);
+            let label_y = if legacy { centred(ry, row_h, label_size) } else { ry + 16.0 * s };
+            super::dt_font::legacy_metrics_if(legacy, || text(&l, r.x + 8.0 * unit, label_y, label_size, INK));
             if hover && is_mouse_button_pressed(MouseButton::Left) {
                 PICKED.with(|k| k.set(Some((pop.id, *v))));
                 close = true;
             }
         }
-        if shown.len() > POPUP_ROWS {
+        if shown.len() > pop.rows {
             let frac = pop.scroll as f32 / max_scroll.max(1) as f32;
-            let track = r.h - 30.0 * s;
-            draw_rectangle(r.x + r.w - 5.0, r.y + 26.0 * s + frac * (track - 20.0 * s), 3.0, 20.0 * s, DIM);
+            let track = r.h - (head_h + 4.0 * unit);
+            draw_rectangle(r.x + r.w - 5.0, r.y + head_h + frac * (track - 20.0 * unit), 3.0, 20.0 * unit, DIM);
         }
         let outside = is_mouse_button_pressed(MouseButton::Left) && !r.contains(Vec2::from(pointer()));
         if outside || esc_pressed() {
@@ -2984,5 +3072,37 @@ mod finger_tests {
         assert_eq!((t.x, t.y, t.w), (row.x, row.y, row.w));
         assert_eq!(t.h, 96.0);
         assert_eq!(tap_rect_at(row, false, None), row, "desktop: the row itself");
+    }
+
+    /// A phone's drop-down rows are 48 dp (a finger's target) with 15 dp text is the phone's list;
+    /// the desktop's is as it was (22 px rows, 12 at most). The list opens on the side with room and
+    /// shows only the rows that fit there, so it stays on the screen (report 1500).
+    #[test]
+    fn a_phone_dropdown_row_is_48_dp_and_the_list_fits_the_screen() {
+        // A mod row above the bottom bar of a 2400-px phone at 2.75 px per dp (the small profile).
+        let dp = 2.75;
+        let (anchor_y, anchor_h, sh) = (1900.0, 160.0, 2400.0);
+        let phone = popup_size(4, anchor_y, anchor_h, sh, 1.0, Some(dp));
+        assert_eq!(phone.row_h, 48.0 * dp, "a finger-sized row");
+        assert_eq!(phone.head_h, 48.0 * dp);
+        assert_eq!(phone.rows, 4, "all four rows fit above the anchor");
+        assert!(phone.y >= 0.0 && phone.y + phone.h <= anchor_y, "over the anchor, on screen: {phone:?}");
+        // Many options near the bottom: 12 rows fit above the anchor here.
+        let long = popup_size(40, anchor_y, anchor_h, sh, 1.0, Some(dp));
+        assert_eq!(long.rows, 12);
+        assert!(long.y >= 0.0 && long.y + long.h <= anchor_y + 1e-3, "on screen: {long:?}");
+        // Anchor higher up: below has the room, so it opens below with the rows that fit there.
+        let mid = popup_size(40, 600.0, 160.0, sh, 1.0, Some(dp));
+        assert_eq!((mid.y, mid.rows), (760.0, 11), "below, 11 of the 12 rows");
+        assert!(mid.y + mid.h <= sh, "on screen: {mid:?}");
+        // A short screen with the anchor at its top: below, and no more rows than fit.
+        let top = popup_size(40, 100.0, 160.0, sh, 1.0, Some(dp));
+        assert_eq!(top.y, 260.0, "below the anchor");
+        assert!(top.y + top.h <= sh, "on screen: {top:?}");
+        // The desktop: 12 rows of 22 px at the scale, as before.
+        let desk = popup_size(40, 100.0, 24.0, 768.0, 1.0, None);
+        assert_eq!((desk.row_h, desk.head_h, desk.rows), (22.0, 26.0, 12));
+        assert_eq!(desk.h, 12.0 * 22.0 + 30.0);
+        assert_eq!(desk.y, 124.0);
     }
 }
