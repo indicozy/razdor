@@ -1,74 +1,85 @@
 ---
-title: Maps and mods
-description: How to install community maps, campaigns and mods directly from Razdor, and how to play a mod.
+title: Maps and Mods
+description: How to install community maps, campaigns, and mods directly from Razdor and how to play a mod.
 sidebar:
   order: 3
 ---
 
-In the main menu, open the "Maps and mods" window. It holds community maps, campaigns and mods from the Discord server: 289 maps, 56 campaigns and 25 mods. Everything is installed straight from the game.
+In the main menu, open the "Maps and Mods" window. It contains community maps, campaigns, and mods from the Discord server: 289 maps, 56 campaigns, and 25 mods. All of these can be installed directly from the game.
 
-![The "Maps and mods" window on the Campaigns tab](../../../../assets/shots/maps-and-mods.webp)
+![“Maps and Mods” window on the “Campaigns” tab](../../../../assets/shots/maps-and-mods.webp)
 
 ## Tabs
 
-Entries are split into tabs:
+Entries are divided into tabs:
 
 * **All**
 * **Maps**
 * **Campaigns**
 * **Mods**
 
-Each entry in the list shows its kind (map, campaign or mod), its author, its rating on Discord (👍 and 👎) and its state. Entries are sorted by rating, best first. Entries without a Discord post come last, sorted by name.
+In the list, each entry shows its type (map, campaign, or mod), the author, the Discord rating (👍 and 👎), and its status. Entries are sorted by rating: the best are at the top. Entries without a Discord post are placed at the end, sorted by name.
 
 ## Search
 
-A field above the list narrows it as you type: part of a title (Russian or English) or the author's name; the cross at its right or Esc empties the field.
+Above the list, there is a "type to filter" field: enter part of a name (Russian or English) or an author's name, and the list will narrow down; the cross on the right or the Esc key will clear the field.
 
-## Opening an entry
+## Open Entry
 
-Select an entry, and its details open on the right:
+Select an entry, and its description will open on the right:
 
-* its picture;
-* author, version and date;
-* its rating on Discord;
-* how well it works: "Works fully", or "Works partly" with a note;
+* an image;
+* author, version, and date;
+* Discord rating;
+* how it works: "Works fully" or "Works partially" with an explanation;
 * languages;
-* the description from the author's Discord post.
+* description from the author's post on Discord.
 
-When a map has its own picture and story (the intro from the map itself), those are shown, and the author's post comes after them under "From the author's post".
+If a map has its own image and its own story (an intro from the map itself), these are displayed, and the author's post text is shown below under the heading "From the author's post."
 
-On a phone held upright the details open in place of the list as a card: the picture spans the full width with the title over it, then the author and framed tags, then the story and the author's post; "To the list" goes back.
+On a phone held vertically, the description opens as a card instead of the list: a full-width image with the title overlaid, followed by the author and details in frames, then the story and the author's post; "Back to list" returns you to the list.
 
-## Installing and removing
+## Installation and Removal
 
-* **"Install"** downloads the entry together with the mods it needs.
-* **"Remove"** removes the entry. A mod is not removed while an installed entry still needs it.
-* **"Refresh"** reads the catalog again.
+* **"Install"** downloads the entry along with any mods it requires.
+* **"Remove"** removes the entry. A mod will not be removed as long as an installed entry requires it.
+* **"Refresh"** re-reads the catalog.
 
-The window opens at once: the list is the copy saved on the last opening, and a newer list loads in the background; without a connection you see the saved list and the line "No connection: showing the saved list".
+## Where maps come from
 
-## Where the maps come from
+The catalog is taken from the community Discord server forums: the "mod-treasury" and "map-library" sections. Materials are published with permission from the server administrators, and each entry specifies the author with a link to their thread.
 
-The catalog comes from the forums of the community Discord server: the sections «сокровищница-модов» and «библиотека-карт». The entries are republished with the server admins' permission, and each one is credited to its author with a link to the author's thread.
+The catalog itself is located in the releases of [razdor-community](https://github.com/indicozy/razdor-community). Mods there are stored only as differences from the Community Update. Your game copy remains unchanged and is still required. Music in mods is re-encoded to Ogg Vorbis to keep download sizes small.
 
-The catalog itself is in the releases of [razdor-community](https://github.com/indicozy/razdor-community). Mods there are stored only as their difference from Community Update. Your copy of the game is never changed, and it is still needed. Music in mods is re-encoded to Ogg Vorbis to make downloads smaller.
+The window opens immediately: the list is taken from a copy saved during the last opening, while a new list is loaded in the background; without a connection, you will see the saved list and a "No connection: showing saved list" message.
 
 ## Playing a mod
 
-In the new game window, pick the mod in the "Mod" list, at the bottom of the window next to "Add a map…". The game then runs on that mod's data over the normal game. Maps that need a mod are listed only when that mod is chosen. With a mod chosen, the maps for the base game come last in the list, in a "Base game maps" group: it is collapsed, tap its heading to open it. Saves are kept separately for each mod. The green ticks of finished maps are kept for each mod too: a map finished under one mod is ticked only under that mod, and with no mod chosen the ticks of the base game show.
+In the New Game window, select a mod from the "Mod" list; it is located at the bottom of the window next to "Add map...". You can also select a mod in the main menu, see below. The game will run using the mod's data on top of the base game. Maps that require a mod are only visible when the mod is selected. Base game maps are shown at the end of the list in the "Base game maps" group: it is collapsed; click its header to expand it. Saves for each mod are stored separately. Green checkmarks for completed maps are also stored per mod: a map completed under one mod is only marked as such under that mod, while without a mod, the base game checkmarks are shown.
+
+## Mod in the main menu
+
+When a mod is installed, the main menu displays the line "Mod: <name>".
+* On a computer, this is a link between "Maps and Mods" and Discord.
+* On a phone (in vertical position), this is a wide bar above the four tiles.
+
+Clicking the line opens the same "Mod" list as in the New Game window. Selecting a mod in the list applies immediately.
+* The list starts with the base game, followed by installed mods.
+* If a mod is currently being built, it will say "Preparing the mod…" instead of the name, and it cannot be opened.
+* If no mods are installed, the line is not displayed.
 
 ## Partial entries
 
-Some mods are marked "partly". They ship their own changed game program (`DiscordTimes.exe` or `ddraw.dll`), which Razdor cannot use, or they are incomplete. Such mods play, but not everything the author made may work.
+Some mods are marked as "partial." They provide their own modified game files (`DiscordTimes.exe` or `ddraw.dll`) that Razdor cannot use, or they are incomplete. Such mods can be played, but not everything the author created may work.
 
-Some campaigns are marked "partly" too: some of their chapters are missing from every source.
+Some campaigns are also marked as "partial": they contain chapters that are not found in any other source.
 
-## Removing or fixing an entry
+## Removing or correcting an entry
 
-Authors who want an entry removed or fixed can write on Discord or open an issue in the [razdor-community](https://github.com/indicozy/razdor-community) repository.
+Authors requesting to remove or correct an entry can do so by writing on Discord or by opening an issue in the [razdor-community](https://github.com/indicozy/razdor-community) repository.
 
 :::note
-The maps and mods are made by community authors; Razdor only gathers them into the catalog and checks that they load and play.
+Maps and mods are created by community authors; Razdor only collects them into a catalog and verifies that they open and are playable.
 :::
 
 :::tip

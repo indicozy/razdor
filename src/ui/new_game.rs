@@ -22,6 +22,7 @@ use super::audio::{cue, Cue};
 use super::chrome;
 use super::dt_font::{with_face, Face};
 use super::language;
+use super::hub_view::{hero, pane_scroll, Drag};
 use super::map_import;
 use super::widgets::*;
 use super::{screens, ScenarioEntry, Screen};
@@ -42,6 +43,12 @@ local! {
     /// The description's first shown line, and the group it was scrolled for.
     static DESC_SCROLL: Cell<(usize, usize)> = const { Cell::new((usize::MAX, 0)) };
     static HERO: Cell<usize> = const { Cell::new(0) };
+    /// On a phone held upright a tap on a startable entry opens its card (`card_view`): whether it is
+    /// open, its scroll, the content's height as the last frame drew it, and the drag of its scroll.
+    static CARD: Cell<bool> = const { Cell::new(false) };
+    static CARD_SCROLL: Cell<f32> = const { Cell::new(0.0) };
+    static CARD_H: Cell<f32> = const { Cell::new(0.0) };
+    static CARD_DRAG: Cell<Option<Drag>> = const { Cell::new(None) };
     /// A map to pick when the list opens (the `scenarios:<map>` snapshot scene).
     static PICK: RefCell<Option<String>> = const { RefCell::new(None) };
     /// The «Мод» choice made this frame (`Some(None)`: the base game), for the app to play
@@ -129,8 +136,11 @@ impl Win {
         let r = super::window_layout::title_rect((594.0, video_h)).unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, (super::chrome::canvas_top() + 190.0 * k).min(screen_height() - h), w, h));
         let (_, closed) = chrome::window(r, title, chrome::Skin::Marble, true);
         // The 634×516 window with its inner frames (ae2520, read by 4d2a30; 0x48d710); the footer's
-        // growth is the window's, and the frames keep their place above it.
-        chrome::window_inner_frames_footed(r, chrome::opx(), 0.0, footer_extra(g, extras) * k);
+        // growth is the window's, and the frames keep their place above it. The upright phone's
+        // list window takes its own boxes (`Portrait`), so the desktop frames would cut through them.
+        if !(fill && upright_dp().is_some()) {
+            chrome::window_inner_frames_footed(r, chrome::opx(), 0.0, footer_extra(g, extras) * k);
+        }
         (Win { r, k, foot_y: video_h - foot_block(g, extras) }, closed)
     }
 
@@ -150,10 +160,97 @@ impl Win {
     }
 
     fn button_at(&self, x: f32, y: f32, w: f32, h: f32, label: &str, enabled: bool) -> bool {
-        let r = self.rect(x, y, w, h);
-        let (_, down, pressed) = button_state(r, enabled);
-        chrome::marble_button(r, label, enabled, down);
-        pressed
+        button_rect(self.rect(x, y, w, h), label, enabled)
+    }
+}
+
+/// A marble button in the screen rectangle `r`: whether it was pressed.
+fn button_rect(r: Rect, label: &str, enabled: bool) -> bool {
+    let (_, down, pressed) = button_state(r, enabled);
+    chrome::marble_button(r, label, enabled, down);
+    pressed
+}
+
+/// The dp of a phone held upright (`None` elsewhere): the scenario window's own layout there (the
+/// owner's order of 2026-11-02, see [`Portrait`]).
+fn upright_dp() -> Option<f32> {
+    let dp = super::display::dp_px()?;
+    (screen_width() < screen_height()).then_some(dp)
+}
+
+/// The scenario window on a phone held upright, in screen pixels (the owner's order of 2026-11-02). Its
+/// list view: the top row «Все сценарии», «Как в игре», «Добавить карту…» (and a «Мод» row under it when
+/// mods are installed), the list full width under them, and the bottom row «...» and «Отмена». Its card
+/// view (a tap on a startable entry opens it, `card_view`): the map's picture as the hero with its title
+/// over it, the description under it, and the bottom row «Назад» and «Далее». Sizes in dp: the texts at
+/// 14 to 16 dp (14 sp and up by the mobile check), the rows 36 and 30 dp tall, the buttons 42 dp.
+struct Portrait {
+    /// The scale: one dp in screen pixels.
+    dp: f32,
+    filter: Rect,
+    order: Rect,
+    add: Rect,
+    mod_row: Option<Rect>,
+    /// The list, under the top rows down to the bottom row.
+    rows: Rect,
+    dots: Rect,
+    cancel: Rect,
+    /// The card: from the top row's place down to the bottom row, the hero and the description in it.
+    card: Rect,
+    back: Rect,
+    next: Rect,
+    head_h: f32,
+    chapter_h: f32,
+    name_px: f32,
+    chapter_px: f32,
+    /// The card's description: its text, and how far each line moves the next one down.
+    card_px: f32,
+    card_step: f32,
+}
+
+impl Portrait {
+    fn new(win: &Win, dp: f32, grow: f32, mods: bool) -> Portrait {
+        let r = win.r;
+        let (m, btn_h, gap) = (8.0 * dp, 42.0 * dp, 6.0 * dp);
+        let x0 = r.x + 10.0 * dp;
+        let w = r.w - 20.0 * dp;
+        let top = r.y + 31.0 * win.k + 2.0 * dp;
+        let bw = (w - 2.0 * gap) / 3.0;
+        let (filter, order, add) = (Rect::new(x0, top, bw, btn_h), Rect::new(x0 + bw + gap, top, bw, btn_h), Rect::new(x0 + 2.0 * (bw + gap), top, bw, btn_h));
+        let mut y = top + btn_h + m;
+        let mod_row = mods.then(|| {
+            let rr = Rect::new(x0, y, w, btn_h);
+            y += btn_h + m;
+            rr
+        });
+        let foot_y = r.bottom() - 12.0 * dp - btn_h;
+        let rows = Rect::new(x0, y, w, (foot_y - m - y).max(0.0));
+        let dots_w = 56.0 * dp;
+        let dots = Rect::new(x0, foot_y, dots_w, btn_h);
+        let cancel = Rect::new(x0 + dots_w + m, foot_y, w - dots_w - m, btn_h);
+        let card = Rect::new(x0, top, w, (foot_y - m - top).max(0.0));
+        let half = (w - m) / 2.0;
+        let back = Rect::new(x0, foot_y, half, btn_h);
+        let next = Rect::new(x0 + half + m, foot_y, half, btn_h);
+        Portrait {
+            dp,
+            filter,
+            order,
+            add,
+            mod_row,
+            rows,
+            dots,
+            cancel,
+            card,
+            back,
+            next,
+            head_h: 36.0 * dp * grow,
+            chapter_h: 30.0 * dp * grow,
+            name_px: 15.0 * dp,
+            chapter_px: 14.0 * dp,
+            card_px: 16.0 * dp,
+            card_step: 22.0 * dp,
+        }
     }
 }
 
@@ -470,6 +567,58 @@ fn keep_marks(m: Marks) {
     MARKS.with(|c| *c.borrow_mut() = Some(m));
 }
 
+/// The experimental rules the player last set in the rules window, kept in `settings.json`
+/// (`language::Settings::experimental_rules`; all off on a file without them). `for_new_game()`
+/// is all off and carries nothing per game, so the whole set is remembered.
+fn remembered_rules() -> ExperimentalRules {
+    super::language::Settings::load().experimental_rules
+}
+
+/// Keeps `rules` as the remembered choice (the rules window closes; a game starts).
+fn keep_rules(rules: ExperimentalRules) {
+    let s = super::language::Settings::load();
+    if s.experimental_rules != rules {
+        super::language::Settings { experimental_rules: rules, ..s }.save();
+    }
+}
+
+/// The «Мод» choice as the new-game row and the title's link show it: the labels (the base game
+/// first, then each mod as «Мод: <title>»), the index of the mod played and whether its folder is
+/// being built (`busy`, 1441: the row and the link say so and take no choice).
+pub(super) struct ModChoice {
+    pub labels: Vec<String>,
+    pub current: i64,
+    pub busy: bool,
+}
+
+impl ModChoice {
+    /// The text shown: the mod played, or the build's notice while it is being built.
+    pub(super) fn shown(&self) -> &str {
+        if self.busy { tr("Preparing the mod…") } else { &self.labels[self.current as usize] }
+    }
+}
+
+pub(super) fn mod_choice(mods: &[(String, razdor::hub::Text)], active: Option<&str>, busy: bool) -> ModChoice {
+    let mut labels = vec![format!("{}: {}", tr("Mod"), tr("No mod"))];
+    labels.extend(mods.iter().map(|(_, title)| format!("{}: {}", tr("Mod"), title.get(i18n::lang()))));
+    let current = active.and_then(|a| mods.iter().position(|(id, _)| id == a)).map_or(0, |i| i + 1) as i64;
+    ModChoice { labels, current, busy }
+}
+
+/// The mod id of a choice's index (`None`: the base game, index 0).
+pub(super) fn mod_id_at(mods: &[(String, razdor::hub::Text)], index: i64) -> Option<String> {
+    (index > 0).then(|| mods.get(index as usize - 1).map(|(id, _)| id.clone())).flatten()
+}
+
+/// Asks the app to play `id` (`take_mod_request`; `None`: the base game) and starts the list
+/// over, as any new choice does.
+pub(super) fn request_mod(id: Option<String>) {
+    MOD_REQUEST.with_borrow_mut(|r| *r = Some(id));
+    PICKED.with(|p| p.set(0));
+    PICKED_MAP.with(|p| p.set(None));
+    SCROLL.with(|s| s.set(0.0));
+}
+
 fn listed(names: &[String], file: &str) -> bool {
     names.iter().any(|n| n.to_lowercase() == file.to_lowercase())
 }
@@ -491,13 +640,22 @@ fn facts_of(scenarios: &[ScenarioEntry], g: &Group, m: &Marks, active: Option<&s
 /// The scenario list opens on its first row, scrolled to the top (the original's list
 /// starts on row 0 each time). The player's marks are read again (a map won since).
 pub fn open_list() {
-    EXPERIMENTAL.with(|p| p.set(ExperimentalRules::for_new_game()));
+    EXPERIMENTAL.with(|p| p.set(remembered_rules()));
     RULES_OPEN.with(|p| p.set(false));
     PICKED.with(|p| p.set(0));
     PICKED_MAP.with(|p| p.set(None));
     SCROLL.with(|s| s.set(0.0));
     BASE_OPEN.with(|b| b.set(false));
     MARKS.with(|m| *m.borrow_mut() = None);
+    open_card(false);
+}
+
+/// Opens (or shuts) the card of the picked entry on the upright phone, its scroll at the top.
+fn open_card(on: bool) {
+    CARD.with(|c| c.set(on));
+    CARD_SCROLL.with(|s| s.set(0.0));
+    CARD_H.with(|h| h.set(0.0));
+    CARD_DRAG.with(|d| d.set(None));
 }
 
 /// A five-pointed star centred on `c` (the favourite mark): filled, or its outline.
@@ -694,6 +852,12 @@ pub fn start_allowed(can: bool, busy: bool) -> bool {
 
 /// The scenario list window. `busy`: a mod is being built on a worker (`App::choose_mod`).
 pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(String, razdor::hub::Text)], active: Option<&str>, busy: bool) -> Option<Screen> {
+    // On the upright phone the screen's texts keep their sizes (the legacy metrics, as the update window's):
+    // its rows and description are in dp, not snapped to the font's native sizes.
+    super::dt_font::legacy_metrics_if(upright_dp().is_some(), || scenario_select_screen(scenarios, has_install, mods, active, busy))
+}
+
+fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(String, razdor::hub::Text)], active: Option<&str>, busy: bool) -> Option<Screen> {
     if RULES_OPEN.with(Cell::get) {
         super::main_menu::backdrop();
         experimental_menu();
@@ -710,6 +874,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
     let _scale = super::window_layout::title_scale((594.0, window_video_h(grow, extras, true)));
     let (win, closed) = Win::open(&own("NewGame", "Title", n_("Scenario for a new game")), extras, true);
     let k = win.k;
+    let pl = upright_dp().map(|dp| Portrait::new(&win, dp, grow, !mods.is_empty()));
     let mut m = marks();
     let (show, order) = (Show::of(m.show), Order::of(m.order));
     // The maps made for the base game under a played mod (1445b) are a group of their own, after
@@ -734,22 +899,30 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
         if let Some(i) = list.iter().position(|g| std::iter::once(&g.first).chain(&g.chapters).any(|&m| scenarios[m].file.starts_with(&name))) {
             PICKED.with(|p| p.set(i));
             PICKED_MAP.with(|p| p.set(None));
+            if super::snapshot::card_scene() {
+                open_card(true);
+            }
         }
     }
     let mut picked = PICKED.with(|p| p.get()).min(list.len().saturating_sub(1));
+    // A phone held upright with a card open: the card is the whole window's view (`card_view`).
+    if let Some(p) = pl.as_ref().filter(|_| CARD.with(Cell::get) && !list.is_empty()) {
+        PICKED.with(|q| q.set(picked));
+        return card_view(p, scenarios, &list, picked, start_allowed(true, busy), closed);
+    }
     // The list: per group a round icon and the name, and a campaign's chapters under it in
     // small type; the picked group's block is lit. The wheel and the scrollbar scroll it.
     // The box's top left is the window's inner pane frame's corner (4, 31), so its silver edge
     // and the pane's line up (`window_inner_frames`, 0x48d710). Its bottom is the description
     // box's (`Win::content_bottom`): the room under the list is Razdor's extras row's, moved down
     // below the buttons, so the list takes it (the owner's request, backlog 1458).
-    let rows = win.rect(4.0, 31.0, 278.0, win.content_bottom() - 31.0);
+    let rows = pl.as_ref().map_or_else(|| win.rect(4.0, 31.0, 278.0, win.content_bottom() - 31.0), |p| p.rows);
     chrome::text_box_base(rows);
     // The rows, their bar, the scrollbar and the empty-list line live in `view`: the box's
     // corner ornaments take the columns beside it, so nothing under them.
     let view = list_view(rows, k);
     // Razdor's own: the rows grow with the text size (`button_grow`), so does their text.
-    let (head_h, chapter_h) = (30.0 * k * grow, 18.0 * k * grow);
+    let (head_h, chapter_h) = pl.as_ref().map_or((30.0 * k * grow, 18.0 * k * grow), |p| (p.head_h, p.chapter_h));
     // The base game's header row (1445b) is as tall as a group's head; on a phone at least a finger's
     // size, as a touch target.
     let section_h = match super::display::dp_px() {
@@ -793,6 +966,8 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
         }
     }
     let mut next = None;
+    let upright = pl.is_some();
+    let mut open_card_now = false;
     let mut y = view.y + FIRST_ROW_PX * k - scroll * k;
     for (row, g) in list.iter().enumerate() {
         if base_open && row == main_len {
@@ -857,8 +1032,14 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
         with_face(Face::Subtitle, || {
             // Shrunk to fit the name's room (`fit_size`, 15 px at most), as before the insets; grown
             // with its row (`row_text_size`), cut by its room when the grown name is longer.
-            let normal = fit_size(name, name_w, 15.0 * k);
-            let grown = row_text_size(name, normal, grow, name_w);
+            // On the upright phone the name is 15 dp, cut by its room (`ellipsize`), never shrunk.
+            let (normal, grown) = match &pl {
+                Some(p) => (p.name_px, p.name_px),
+                None => {
+                    let normal = fit_size(name, name_w, 15.0 * k);
+                    (normal, row_text_size(name, normal, grow, name_w))
+                }
+            };
             let is_grown = grown > normal;
             super::dt_font::legacy_metrics_if(is_grown, || {
                 let size = if is_grown { grown } else { normal };
@@ -866,13 +1047,13 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
             });
         });
         // The chapters' size: the Normal 12 px, grown with the row (`row_text_size`).
-        let small_normal = 12.0 * k;
+        let small_normal = pl.as_ref().map_or(12.0 * k, |p| p.chapter_px);
         with_face(Face::Body, || for (n, &c) in chapters.iter().enumerate() {
             let ink = if lit { super::typography::Ink::Plain } else { super::typography::Ink::Orange };
             // Each map of a campaign won has its tick too.
             let won = listed(language::won_under(&m.completed, active), &scenarios[c].file);
             let room = r.w - (if won { 84.0 } else { 60.0 }) * k;
-            let small = row_text_size(title(&scenarios[c]), small_normal, grow, room);
+            let small = if pl.is_some() { small_normal } else { row_text_size(title(&scenarios[c]), small_normal, grow, room) };
             let is_grown = small > small_normal;
             let cy = r.y + head_h + n as f32 * chapter_h + chapter_h * 0.5 + small * 0.36;
             super::dt_font::legacy_metrics_if(is_grown, || chrome::shadow_text(&ellipsize(title(&scenarios[c]), room, small), r.x + 52.0 * k, cy, small, ink.color()));
@@ -882,8 +1063,10 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
         });
         // A campaign heading or individual chapter is selected only on click.
         if head_pressed {
-            if row == picked && PICKED_MAP.with(|p| p.get()).is_none() {
-                next = Some(Screen::ClassSelect { scenario: Some(g.first) });
+            match pick_tap(upright, row == picked && PICKED_MAP.with(|p| p.get()).is_none()) {
+                PickTap::Start => next = Some(Screen::ClassSelect { scenario: Some(g.first) }),
+                PickTap::Card => open_card_now = true,
+                PickTap::Pick => {}
             }
             picked = row;
             PICKED_MAP.with(|p| p.set(None));
@@ -891,8 +1074,10 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
             for (n, &chapter_index) in chapters.iter().enumerate() {
                 let chapter = Rect::new(r.x + 28.0 * k, r.y + head_h + n as f32 * chapter_h, r.w - 28.0 * k, chapter_h);
                 if over_list && chapter.contains(crate::ui::widgets::pointer().into()) && clicked() {
-                    if PICKED_MAP.with(|p| p.get()) == Some(chapter_index) {
-                        next = Some(Screen::ClassSelect { scenario: Some(g.first) });
+                    match pick_tap(upright, PICKED_MAP.with(|p| p.get()) == Some(chapter_index)) {
+                        PickTap::Start => next = Some(Screen::ClassSelect { scenario: Some(g.first) }),
+                        PickTap::Card => open_card_now = true,
+                        PickTap::Pick => {}
                     }
                     picked = row;
                     PICKED_MAP.with(|p| p.set(Some(chapter_index)));
@@ -900,6 +1085,9 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
                 }
             }
         }
+    }
+    if open_card_now {
+        open_card(true);
     }
     if base_count > 0 {
         let visible = header.y < inside.y + inside.h && header.y + header.h > inside.y;
@@ -927,7 +1115,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
     }
     PICKED.with(|p| p.set(picked));
     // The map and what it is.
-    if let Some(g) = list.get(picked) {
+    if let (None, Some(g)) = (&pl, list.get(picked)) {
         let (i, e) = (g.first, &scenarios[g.first]);
         // (Razdor's scenario window draws the frame at the interface scale, 295 × 162 of its
         // own pixels, the picture at the same scale so the two stay in register.)
@@ -952,19 +1140,20 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
         // Under it the description box (0x4d2a30, 65ae00): the name centred in white (ae2498,
         // 0x4c1b4b), the description in the bold SanSerif's orange (ae24f4 over ae2510,
         // 0x4c1bb4), from the box's top.
+        // The description's sizes: its scale `kk` (the window's k, or the phone's dp).
         let bottom = win.rect(0.0, win.content_bottom(), 0.0, 0.0).y;
-        let desc = Rect::new(frame.x, frame.y + frame.h + 8.0 * k, frame.w, (bottom - frame.y - frame.h - 8.0 * k).max(0.0));
+        let (desc, kk) = (Rect::new(frame.x, frame.y + frame.h + 8.0 * k, frame.w, (bottom - frame.y - frame.h - 8.0 * k).max(0.0)), k);
         chrome::text_box(desc);
-        let size = 12.0 * k;
+        let size = 12.0 * kk;
         let room = desc.w - 34.0 * k;
         let title_text = format!("^*{}", group_name(scenarios, g).replace(['^', '*', '|', '@'], ""));
-        let mut rows = markup_rows(&title_text, room, 16.0 * k);
+        let mut rows = markup_rows(&title_text, room, 16.0 * kk);
         let title_rows = rows.len();
         // The description is added as plain lines (0x4c1bb4 → 0x47ea80): marks stay as typed,
         // no indent, justified, in ae24f4 over the shadow font ae2510.
         rows.extend(plain_rows_face(&e.scenario.description, room, size, Face::Bold));
-        let line_h = 14.0 * k;
-        let steps = desc_steps(title_rows, rows.len(), k);
+        let line_h = 14.0 * kk;
+        let steps = desc_steps(title_rows, rows.len(), kk);
         // The box is a text list (0x65ae00): the wheel over it scrolls it a line a frame
         // (0x47ede0), down to its last line; a new map starts it at the top (0x47cc90).
         let max_scroll = desc_max_scroll(&steps, desc.h - 20.0 * k);
@@ -991,10 +1180,10 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
             }
             if n < title_rows {
                 // The name in ae2498 over its shadow font ae24b0 (0x4c1b33).
-                draw_markup_row_shadowed(row, desc.x + 17.0 * k, y, room, 16.0 * k, Face::Subtitle, super::typography::Ink::Plain.color());
-                y += 20.0 * k;
+                draw_markup_row_shadowed(row, desc.x + 17.0 * k, y, room, 16.0 * kk, Face::Subtitle, super::typography::Ink::Plain.color());
+                y += 20.0 * kk;
                 if n + 1 == title_rows {
-                    y += 12.0 * k;
+                    y += 12.0 * kk;
                 }
             } else {
                 let orange = with_face(Face::Bold, || super::typography::Ink::Orange.color());
@@ -1010,7 +1199,12 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
     let (x_mod, w_mod) = if both { (306.0, 276.0) } else { (12.0, 570.0) };
     let extras_y = extra_top(win.foot_y, grow);
     let extras_h = EXTRA_ROW_H * grow;
-    add_map_button(&win, has_install && !busy, if both { (12.0, extras_y, 276.0, extras_h) } else { (12.0, extras_y, 570.0, extras_h) });
+    let add_r = match &pl {
+        Some(p) => p.add,
+        None if both => win.rect(12.0, extras_y, 276.0, extras_h),
+        None => win.rect(12.0, extras_y, 570.0, extras_h),
+    };
+    add_map_button(has_install && !busy, add_r);
     // Razdor's filter and order (a players' wish), under the list where the original's window
     // has nothing: each opens a drop-down list; the choice is kept in the settings.
     // The footer (Razdor's own, see `foot_block`): at Normal the original's row, unchanged; at
@@ -1018,8 +1212,12 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
     let two_rows = grow > 1.0;
     let b = FOOT_H * grow;
     let (choice_y, choice_h, choice_w) = if two_rows { (win.foot_y + b + 6.0, b, 140.0 * grow) } else { (win.foot_y - 1.0, FOOT_H, 140.0) };
-    let pick_show = view_choice(&win, (12.0, choice_y, choice_w, choice_h), "razdor:scenario-show", show as i64, &Show::ALL.map(|s| s.label()));
-    let pick_order = view_choice(&win, (12.0 + choice_w + 6.0, choice_y, choice_w, choice_h), "razdor:scenario-order", order as i64, &Order::ALL.map(|o| o.label()));
+    let (show_r, order_r) = match &pl {
+        Some(p) => (p.filter, p.order),
+        None => (win.rect(12.0, choice_y, choice_w, choice_h), win.rect(12.0 + choice_w + 6.0, choice_y, choice_w, choice_h)),
+    };
+    let pick_show = view_choice_at(&win, show_r, "razdor:scenario-show", show as i64, &Show::ALL.map(|s| s.label()));
+    let pick_order = view_choice_at(&win, order_r, "razdor:scenario-order", order as i64, &Order::ALL.map(|o| o.label()));
     if pick_show.is_some() || pick_order.is_some() {
         m.show = pick_show.unwrap_or(m.show);
         m.order = pick_order.unwrap_or(m.order);
@@ -1031,33 +1229,30 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
     // Razdor's «Мод» (a players' wish): the base game or an installed mod, which the app plays and
     // whose maps the list then shows. Only once a mod is installed.
     if !mods.is_empty() {
-        let mut labels = vec![format!("{}: {}", tr("Mod"), tr("No mod"))];
-        labels.extend(mods.iter().map(|(_, title)| format!("{}: {}", tr("Mod"), title.get(i18n::lang()))));
-        let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
-        let current = active.and_then(|a| mods.iter().position(|(id, _)| id == a)).map_or(0, |i| i + 1);
-        let row = win.rect(x_mod, extras_y, w_mod, extras_h);
+        let choice = mod_choice(mods, active, busy);
+        let refs: Vec<&str> = choice.labels.iter().map(String::as_str).collect();
+        let row = match &pl {
+            Some(p) => p.mod_row.unwrap_or(Rect::new(0.0, 0.0, 0.0, 0.0)),
+            None => win.rect(x_mod, extras_y, w_mod, extras_h),
+        };
         // While the folder is built the row says so and takes no choice (1441).
-        let picked = if busy {
-            chrome::marble_button(row, tr("Preparing the mod…"), false, false);
+        let picked = if choice.busy {
+            chrome::marble_button(row, choice.shown(), false, false);
             None
         } else {
-            view_choice_at(&win, row, "razdor:scenario-mod", current as i64, &refs)
+            view_choice_at(&win, row, "razdor:scenario-mod", choice.current, &refs)
         };
-        if !busy && super::snapshot::open_mod_list() {
-            let options: Vec<(i64, String)> = labels.iter().enumerate().map(|(i, l)| (i as i64, l.clone())).collect();
-            super::widgets::open_list("razdor:scenario-mod", row, current as i64, &options, win.k);
+        if !choice.busy && super::snapshot::open_mod_list() {
+            let options: Vec<(i64, String)> = choice.labels.iter().enumerate().map(|(i, l)| (i as i64, l.clone())).collect();
+            super::widgets::open_list("razdor:scenario-mod", row, choice.current, &options, win.k);
         }
         if let Some(v) = picked {
-            let id = (v > 0).then(|| mods[v as usize - 1].0.clone());
-            MOD_REQUEST.with_borrow_mut(|r| *r = Some(id));
-            PICKED.with(|p| p.set(0));
-            PICKED_MAP.with(|p| p.set(None));
-            SCROLL.with(|s| s.set(0.0));
+            request_mod(mod_id_at(mods, v));
         }
     }
     let can = !list.is_empty();
     let start = start_allowed(can, busy);
-    if experimental_rules() != ExperimentalRules::default() {
+    if experimental_rules() != ExperimentalRules::default() && pl.is_none() {
         let label_y = if two_rows { choice_y + b + 2.0 } else { win.foot_y + 27.0 };
         let label = win.rect(12.0, label_y, 306.0, 12.0);
         chrome::shadow_text(tr("Experimental rules enabled"), label.x, label.y + 9.0 * k, 9.0 * k, chrome::ORANGE_TEXT);
@@ -1070,19 +1265,89 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
     let next_x = cancel_x - 7.0 - next_w;
     let dots_w = 34.0 * grow;
     let dots_x = next_x - 7.0 - dots_w;
-    if win.button(dots_x, dots_w, "...", can) {
+    let (dots_r, cancel_r) = match &pl {
+        Some(p) => (p.dots, p.cancel),
+        None => (win.rect(dots_x, win.foot_y, dots_w, FOOT_H * grow), win.rect(cancel_x, win.foot_y, cancel_w, FOOT_H * grow)),
+    };
+    let next_r = win.rect(next_x, win.foot_y, next_w, FOOT_H * grow);
+    if button_rect(dots_r, "...", can) {
         RULES_OPEN.with(|p| p.set(true));
         return None;
     }
     let selected_map = campaign_start(&list, picked);
-    if (win.button(next_x, next_w, &own("Buttons", "Next", n_("Next")), start) || (start && key(KeyCode::Enter))) && next.is_none() {
+    // The upright list starts nothing: its card has «Далее».
+    if pl.is_none() && (button_rect(next_r, &own("Buttons", "Next", n_("Next")), start) || (start && key(KeyCode::Enter))) && next.is_none() {
         cue(Cue::Button);
         next = selected_map.map(|i| Screen::ClassSelect { scenario: Some(i) });
     }
-    if win.button(cancel_x, cancel_w, &own("Buttons", "Cancel", n_("Cancel")), true) || closed || key(KeyCode::Escape) {
+    if button_rect(cancel_r, &own("Buttons", "Cancel", n_("Cancel")), true) || closed || key(KeyCode::Escape) {
         return Some(Screen::MainMenu);
     }
     next
+}
+
+/// What a tap on a list row does: on the desktop and a phone held sideways a first tap picks the entry
+/// and a second one on the picked entry (or its chapter) starts it; on a phone held upright a tap picks
+/// it and opens its card, where «Далее» starts it.
+#[derive(Debug, PartialEq)]
+enum PickTap {
+    Start,
+    Pick,
+    Card,
+}
+
+fn pick_tap(upright: bool, already_picked: bool) -> PickTap {
+    if upright {
+        PickTap::Card
+    } else if already_picked {
+        PickTap::Start
+    } else {
+        PickTap::Pick
+    }
+}
+
+/// The card of the picked entry on a phone held upright (the hub's card, the owner's order of
+/// 2026-11-02): the map's picture as the hero with its title over it, its description under it at
+/// 16 dp, scrolled by a swipe, the wheel or the bar, and the bottom row «Назад» (back to the list) and
+/// «Далее» (starts the campaign or the map, as the list's «Далее» did). The window's close and Esc go
+/// back to the list too.
+fn card_view(p: &Portrait, scenarios: &[ScenarioEntry], list: &[Group], picked: usize, start: bool, closed: bool) -> Option<Screen> {
+    let g = &list[picked];
+    let (i, e) = (g.first, &scenarios[g.first]);
+    let (k, card) = (p.dp, p.card);
+    let most = (CARD_H.with(Cell::get) - card.h).max(0.0);
+    let (mut scroll, mut drag) = (CARD_SCROLL.with(Cell::get), CARD_DRAG.with(Cell::get));
+    let room = pane_scroll(&mut scroll, &mut drag, card, most, k, true);
+    CARD_SCROLL.with(|s| s.set(scroll));
+    CARD_DRAG.with(|d| d.set(drag));
+    let r = Rect::new(card.x, card.y - scroll, card.w - room, card.h);
+    let clip = crate::ui::widgets::Clip::new(card);
+    let content_h = super::dt_font::legacy_metrics_if(true, || {
+        let pic = picture(i, e);
+        let hh = hero(r, pic.as_ref(), card.h * 0.45, &group_name(scenarios, g).replace(['^', '*', '|', '@'], ""), k, k);
+        let mut y = r.y + hh + 16.0 * k;
+        let room = r.w - 12.0 * k;
+        let orange = with_face(Face::Bold, || super::typography::Ink::Orange.color());
+        // Wrapped as the hub's text is, each line centred (the owner's note of 2026-11-02; justified
+        // lines leave wide gaps at this size).
+        let lines = with_face(Face::Bold, || super::hub_view::wrap_long(&e.scenario.description, room, p.card_px));
+        for l in &lines {
+            with_face(Face::Bold, || chrome::shadow_centered(l, r.x + r.w / 2.0, y, p.card_px, orange));
+            y += p.card_step;
+        }
+        y - r.y + 10.0 * k
+    });
+    drop(clip);
+    CARD_H.with(|h| h.set(content_h));
+    if button_rect(p.back, tr("Back"), true) || closed || key(KeyCode::Escape) {
+        open_card(false);
+        return None;
+    }
+    if button_rect(p.next, &own("Buttons", "Next", n_("Next")), start) || (start && key(KeyCode::Enter)) {
+        cue(Cue::Button);
+        return campaign_start(list, picked).map(|i| Screen::ClassSelect { scenario: Some(i) });
+    }
+    None
 }
 
 pub(super) fn experimental_rules() -> ExperimentalRules { EXPERIMENTAL.with(Cell::get) }
@@ -1103,6 +1368,9 @@ fn slots_hint(six_cells: bool) -> &'static str {
 /// The touch target's least side in dp (Razdor's phone rule; the mobile-ui check's limit).
 const TOUCH_DP: f32 = 40.0;
 
+/// The OK button's height in dp on a phone held upright (the owner's note of 2026-11-02).
+const OK_DP: f32 = 44.0;
+
 /// Kept modal so clicks and Enter cannot start a scenario behind the options.
 ///
 /// The window's scale `o` is the pop-ups' (`display::popup_o`), fitted to the screen. Its rows and
@@ -1121,7 +1389,10 @@ fn experimental_menu() {
     let big = o * g;
     let touch = dp.map_or(0.0, |d| TOUCH_DP * d);
     let (row_h, gap) = ((28.0 * big).max(touch), 10.0 * big);
-    let ok_h = (28.0 * big).max(touch);
+    // On the upright phone the OK button is 44 dp tall and wider, its label bigger (the owner's note of
+    // 2026-11-02); the rest of the window stays as it was.
+    let upright = dp.is_some_and(|d| d > 0.0 && sw < sh);
+    let ok_h = (28.0 * big).max(if upright { OK_DP * dp.unwrap_or(0.0) } else { touch });
     let (hint_size, hint_pitch) = (14.0 * tx * g, 21.0 * tx * g);
     let hints = [slots_hint(experimental_rules().six_cells), tr("One weapon per unit always."), tr("Applies to all armies; saved with this playthrough."), tr("The potion limit resets after a battle.")];
     let wrapped = |iw: f32| -> Vec<String> { super::dt_font::legacy_metrics_if(true, || hints.iter().flat_map(|l| wrap_cached(l, iw, hint_size)).collect()) };
@@ -1168,21 +1439,35 @@ fn experimental_menu() {
         // The baseline sits 0.8 of the size below the line's top.
         super::dt_font::legacy_metrics_if(true, || chrome::shadow_text(line, r.x + 20.0 * big, hints_top + i as f32 * hint_pitch + hint_size * 0.8, hint_size, chrome::CREAM));
     }
-    let b = Rect::new(r.center().x - 50.0 * big, r.bottom() - 12.0 * big - ok_h, 100.0 * big, ok_h);
+    let ok_w = match dp {
+        Some(d) if upright => (120.0 * d).max(100.0 * big),
+        _ => 100.0 * big,
+    };
+    let b = Rect::new(r.center().x - ok_w / 2.0, r.bottom() - 12.0 * big - ok_h, ok_w, ok_h);
     let (_, down, pressed) = button_state(b,true);
-    chrome::marble_button(b,tr("OK"),true,down);
-    if close || pressed || key(KeyCode::Escape) || key(KeyCode::Enter) { RULES_OPEN.with(|p| p.set(false)); }
+    chrome::marble_button(b,"",true,down);
+    if upright {
+        // Its label at 17 dp (the marble's own size at 44 dp is held to the window's scale).
+        let size = 17.0 * dp.unwrap_or(1.0);
+        let d = measure(tr("OK"), size);
+        super::dt_font::legacy_metrics_if(true, || chrome::shadow_text(tr("OK"), b.center().x - d.width / 2.0, b.y + (b.h + d.offset_y) / 2.0 - 1.0, size, chrome::CREAM));
+    } else {
+        chrome::marble_button(b,tr("OK"),true,down);
+    }
+    if close || pressed || key(KeyCode::Escape) || key(KeyCode::Enter) {
+        RULES_OPEN.with(|p| p.set(false));
+        keep_rules(rules);
+    }
 }
 
 /// Razdor's «Добавить карту…» on the extras row under the buttons (`at`: window units), with the
 /// hint of what it takes as its tooltip (Razdor's own, the owner's request of 2026-10-31): the
 /// platform's picker copies the map (or the archive's maps) into the install (`ui::map_import`).
-fn add_map_button(win: &Win, has_install: bool, at: (f32, f32, f32, f32)) {
+fn add_map_button(has_install: bool, r: Rect) {
     if !map_import::available() {
         return;
     }
     let enabled = has_install && map_import::can_start();
-    let r = win.rect(at.0, at.1, at.2, at.3);
     let (_, down, pressed) = button_state(r, enabled);
     chrome::marble_button(r, tr("Add a map…"), enabled, down);
     if pressed {
@@ -1192,10 +1477,6 @@ fn add_map_button(win: &Win, has_install: bool, at: (f32, f32, f32, f32)) {
     if mouse_in(r.x, r.y, r.w, r.h) {
         tooltip(&[(tr("A .DTm file or a .zip archive: an archive may hold a campaign or several maps.").to_string(), INK)]);
     }
-}
-
-fn view_choice(win: &Win, (x, y, w, h): (f32, f32, f32, f32), key: &str, current: i64, labels: &[&str]) -> Option<i64> {
-    view_choice_at(win, win.rect(x, y, w, h), key, current, labels)
 }
 
 /// [`view_choice`] in the rectangle `r` (screen pixels).
@@ -1446,6 +1727,7 @@ pub fn class_select(game: &mut Option<Game>, demo: &Arc<Content>, scenario: Opti
     if hero_button(start_x, start_w, &own("NewHero", "Start", n_("Start"))) || enter {
         cue(Cue::Button);
         super::items_view::reset_pack_view();
+        keep_rules(experimental_rules());
         *game = Some(screens::start_game(demo, Some((e, &content)), hero, &name));
         return leave_hero_window(Screen::WorldMap);
     }
@@ -1544,6 +1826,16 @@ mod tests {
     /// description ending at 432, with or without the extras row (1458); the extras row sits under
     /// the buttons and fits the window at Large and Largest too.
     #[test]
+    fn a_tap_on_a_startable_entry_opens_its_card_only_on_the_upright_phone() {
+        // Upright: any pick opens the card, the second tap included (Далее starts it there).
+        assert_eq!(pick_tap(true, false), PickTap::Card);
+        assert_eq!(pick_tap(true, true), PickTap::Card);
+        // Elsewhere, as before: the first tap picks, the second on the picked entry starts it.
+        assert_eq!(pick_tap(false, false), PickTap::Pick);
+        assert_eq!(pick_tap(false, true), PickTap::Start);
+    }
+
+    #[test]
     fn the_footer_keeps_the_original_places_and_the_extras_row_fits() {
         assert_eq!(window_video_h(1.0, false, false), 482.0, "the original's window without the extras");
         let h = window_video_h(1.0, true, false);
@@ -1574,6 +1866,33 @@ mod tests {
         assert!(ticked(Some("evolution"), "Осада"), "Evolution's own tick");
         assert!(!ticked(None, "Осада"), "and not with no mod");
         assert!(!ticked(Some("other"), "Осада"), "another mod shows none");
+    }
+
+    /// The «Мод» choice the row and the title's link share: the base game first, the mod played
+    /// selected, an unknown or no active mod is the base game, and the id of each index.
+    #[test]
+    fn the_mod_choice_lists_the_base_game_then_the_mods_and_selects_the_one_played() {
+        let text = |ru: &str| razdor::hub::Text { ru: ru.into(), en: ru.into() };
+        let mods = vec![("evolution".to_string(), text("Эволюция")), ("siege".to_string(), text("Осада"))];
+        let c = mod_choice(&mods, Some("siege"), false);
+        assert_eq!(c.labels.len(), 3);
+        assert_eq!(c.labels[0], format!("{}: {}", tr("Mod"), tr("No mod")));
+        assert_eq!(c.labels[2], format!("{}: Осада", tr("Mod")));
+        assert_eq!(c.current, 2);
+        assert_eq!(c.shown(), c.labels[2], "the link shows the mod played");
+        assert_eq!(mod_choice(&mods, None, false).current, 0);
+        assert_eq!(mod_choice(&mods, Some("gone"), false).current, 0, "a mod that is gone is the base game");
+        assert_eq!(mod_id_at(&mods, 0), None);
+        assert_eq!(mod_id_at(&mods, 1).as_deref(), Some("evolution"));
+        assert_eq!(mod_id_at(&mods, 5), None, "an index past the list is the base game");
+    }
+
+    #[test]
+    fn a_mod_being_built_shows_the_build_and_no_choice() {
+        let mods = vec![("evolution".to_string(), razdor::hub::Text { ru: "Эволюция".into(), en: String::new() })];
+        let c = mod_choice(&mods, Some("evolution"), true);
+        assert!(c.busy);
+        assert_eq!(c.shown(), tr("Preparing the mod…"));
     }
 
     /// The equipment hint follows the six-cell switch alone, in both languages.

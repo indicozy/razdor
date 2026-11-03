@@ -6,6 +6,8 @@
 //! gold. Razdor's own extras, the custom battle and the interface language,
 //! sit small in the bottom corners. Layout numbers are pixels of the 960×720 video, scaled by [`chrome::k`].
 
+use std::cell::Cell;
+
 use razdor::local;
 use crate::ui::input::{get_keys_pressed, is_mouse_button_down};
 use macroquad::prelude::*;
@@ -58,6 +60,13 @@ fn button_centre(i: usize) -> f32 {
 const PORTRAIT_SCALE: f32 = 1.6;
 /// The smallest touch target of a phone's link, in dp.
 const TOUCH_DP: f32 = 48.0;
+/// A tile of the bottom bar held upright, in dp (the mockup's four tiles, 64–72 dp tall).
+const TILE_DP: f32 = 68.0;
+/// The bottom bar's margin at the screen's sides and the gap between its tiles, in dp.
+const CHIP_MARGIN_DP: f32 = 12.0;
+const CHIP_GAP_DP: f32 = 8.0;
+/// The chosen mod's list (the title's link or its tile), its key in the popup lists.
+const MOD_LIST: &str = "razdor:menu-mod";
 
 // Final title-flame placement from the temporary development tuner.
 const LOGO_FLAME_X: f32 = -16.0;
@@ -389,6 +398,9 @@ struct PortraitMenu {
     foot_y: f32,
     /// The top of the logo: the space above it is free for the not-found block.
     logo_top: f32,
+    /// The chosen mod's full-width tile, above the four tiles, when a mod is installed (its height
+    /// and gap lift the foot lines and the button column; see [`portrait_menu`]).
+    mod_row: Option<Rect>,
 }
 
 impl PortraitMenu {
@@ -410,23 +422,31 @@ impl PortraitMenu {
 }
 
 /// The portrait menu on a `sw` × `sh` screen at interface scale `k`, a phone of `dp` screen px
-/// per dp, its top safe inset `safe_top` (physical px).
-fn portrait_menu(sw: f32, sh: f32, k: f32, dp: f32, safe_top: f32) -> PortraitMenu {
+/// per dp, its top safe inset `safe_top` (physical px). `mod_row`: a mod is installed, so the
+/// chosen mod's tile sits above the four tiles and lifts the foot lines and the buttons by its
+/// height and gap.
+fn portrait_menu(sw: f32, sh: f32, k: f32, dp: f32, safe_top: f32, mod_row: bool) -> PortraitMenu {
     // The logo (`logo`): 840 px wide, 128/896 of that high.
     let logo_h = 840.0 * 128.0 / 896.0 * k;
     // The chips grow with the text size (`button_grow`, the owner's decision of 2026-10-31); the
     // ovals keep their size (see `button_centre`).
     let g = super::display::button_grow();
     let size = OVAL * (PORTRAIT_SCALE * k);
-    let chip_h = (TOUCH_DP * dp).max(24.0 * k) * g;
+    let chip_h = TILE_DP * dp;
     let chip_top = sh - 16.0 * k - chip_h;
-    let foot_y = chip_top - 12.0 * k;
+    // The mod row above the tiles: its top is the stack's top, and the foot lines sit above it.
+    let lift = if mod_row { chip_h + CHIP_GAP_DP * dp } else { 0.0 };
+    let row = mod_row.then(|| Rect::new(CHIP_MARGIN_DP * dp, chip_top - lift, sw - 2.0 * CHIP_MARGIN_DP * dp, chip_h));
+    let foot_y = chip_top - lift - 12.0 * k;
+    // The column keeps the place it had over the old, shorter link row (its foot line at
+    // `column_foot`), so the menu's buttons do not move with the taller tiles.
+    let column_foot = sh - 16.0 * k - (TOUCH_DP * dp).max(24.0 * k) * g - 12.0 * k - lift;
     // The column ends above the lines. Its middle is the middle of the area between the top safe
     // inset and the foot lines; the logo stays 24 px above the column and never above the inset,
     // and the column moves down only when it must. Its gaps are shared out between the five
     // buttons (at least 6 px, at most 20 px).
-    let column_end = foot_y - 70.0 * k;
-    let middle = (safe_top + foot_y) / 2.0;
+    let column_end = column_foot - 70.0 * k;
+    let middle = (safe_top + column_foot) / 2.0;
     let min_first = safe_top + logo_h + 24.0 * k;
     let gap = ((column_end - min_first - 5.0 * size.y) / 4.0).clamp(6.0 * k, 20.0 * k);
     let span = 5.0 * size.y + 4.0 * gap;
@@ -434,20 +454,26 @@ fn portrait_menu(sw: f32, sh: f32, k: f32, dp: f32, safe_top: f32) -> PortraitMe
     let logo_top = first - 24.0 * k - logo_h;
     let x = sw / 2.0 - size.x / 2.0;
     let buttons = std::array::from_fn(|i| Rect::new(x, first + i as f32 * (size.y + gap), size.x, size.y));
-    PortraitMenu { buttons, chip_top, chip_h, foot_y, logo_top }
+    PortraitMenu { buttons, chip_top, chip_h, foot_y, logo_top, mod_row: row }
+}
+
+local! {
+    /// Whether a mod is installed, as the title menu last drew it (`frame`): the chosen mod's row
+    /// is held above the tiles, and the title windows keep above it too (`portrait_foot_top`).
+    static MOD_ROW: Cell<bool> = const { Cell::new(false) };
 }
 
 /// The top of the footer lines (the version and copyright row) of the portrait menu on a `sw` ×
 /// `sh` screen at scale `k`: the title windows keep above it (`window_layout::portrait_title`).
 pub fn portrait_foot_top(sw: f32, sh: f32, k: f32, dp: f32, safe_top: f32) -> f32 {
-    portrait_menu(sw, sh, k, dp, safe_top).foot_y
+    portrait_menu(sw, sh, k, dp, safe_top, MOD_ROW.with(Cell::get)).foot_y
 }
 
 /// The current menu's portrait geometry, when the phone is held upright.
 fn upright_menu() -> Option<PortraitMenu> {
     let dp = upright_dp()?;
     let safe_top = super::display::safe_area().top;
-    Some(portrait_menu(screen_width(), screen_height(), chrome::k(), dp, safe_top))
+    Some(portrait_menu(screen_width(), screen_height(), chrome::k(), dp, safe_top, MOD_ROW.with(Cell::get)))
 }
 
 /// The screen rectangle of oval button `i`.
@@ -492,7 +518,10 @@ pub fn left_edge() -> f32 {
 
 /// Draws the menu; returns what was picked. `no_install`: the install was not found, so the
 /// phones' not-found block is drawn beside the buttons.
-pub fn frame(no_install: bool) -> Option<Pick> {
+pub fn frame(no_install: bool, mods: &[(String, razdor::hub::Text)], active: Option<&str>, busy: bool) -> Option<Pick> {
+    // The mod row is held only with a mod installed, as the menu draws it below.
+    MOD_ROW.with(|m| m.set(!mods.is_empty()));
+    let mod_choice = (!mods.is_empty()).then(|| super::new_game::mod_choice(mods, active, busy));
     backdrop();
     let mut pick = None;
     let hot = if input_blocked() { None } else { hot_button(crate::ui::widgets::pointer().into(), BUTTONS.len()) };
@@ -507,13 +536,13 @@ pub fn frame(no_install: bool) -> Option<Pick> {
     // held upright.
     let version_y = match upright_menu() {
         Some(m) => {
-            if let Some(p) = chip_links(&m, k) {
+            if let Some(p) = chip_links(&m, k, mods, mod_choice.as_ref()) {
                 pick = Some(p);
             }
             m.version_y(k)
         }
         None => {
-            if let Some(p) = corner_links(k) {
+            if let Some(p) = corner_links(k, mods, mod_choice.as_ref()) {
                 pick = Some(p);
             }
             screen_height() - 22.0 * k - 26.0 * k
@@ -537,7 +566,7 @@ pub fn frame(no_install: bool) -> Option<Pick> {
 /// The links in the landscape corners, over the original's version and copyright lines: the custom
 /// battle, the maps and mods, the Discord and the language. (The map editor's link is gone: the
 /// editor is not ready; its code and `--editor` stay.) Returns what was picked.
-fn corner_links(k: f32) -> Option<Pick> {
+fn corner_links(k: f32, mods: &[(String, razdor::hub::Text)], mod_choice: Option<&super::new_game::ModChoice>) -> Option<Pick> {
     let mut pick = None;
     let y = screen_height() - 22.0 * k;
     // The links grow with the text size (`button_grow`, the owner's decision of 2026-10-31).
@@ -546,13 +575,22 @@ fn corner_links(k: f32) -> Option<Pick> {
     if link(custom, 16.0 * k, y, false, size) {
         pick = Some(Pick::Custom);
     }
-    let x = 16.0 * k + measure(custom, size).width + 28.0 * k;
+    let mut x = 16.0 * k + measure(custom, size).width + 28.0 * k;
     if link(tr("Maps and mods"), x, y, false, size) {
         pick = Some(Pick::Hub);
     }
+    x += measure(tr("Maps and mods"), size).width + 28.0 * k;
+    // The chosen mod, between «Maps and mods» and Discord, with a mod installed only (Razdor's, the
+    // owner's request of 2026-11-02: the mod played is seen on the title screen).
+    if let Some(mc) = mod_choice {
+        let label = mc.shown();
+        let w = measure(label, size).width;
+        let pressed = link(label, x, y, false, size);
+        mod_link_action(Rect::new(x, y - size, w, size * 1.3), pressed, mods, mc, k);
+        x += w + 28.0 * k;
+    }
     // The players' Discord (the owner's wish): the invite of the site, in the browser; on phones
     // too (`open_link` hands it to the system's browser there).
-    let x = x + measure(tr("Maps and mods"), size).width + 28.0 * k;
     if link("Discord", x, y, false, size) {
         open_link(DISCORD_INVITE);
     }
@@ -569,47 +607,106 @@ fn corner_links(k: f32) -> Option<Pick> {
     pick
 }
 
-/// The links held upright: a row of chips at the bottom, each a dark rounded plate and a touch
-/// target of at least [`TOUCH_DP`]. The language chip opens the list above the row.
-fn chip_links(m: &PortraitMenu, k: f32) -> Option<Pick> {
+/// The links held upright: a bottom bar of four equal tiles (the mockup's), each a marble frame
+/// with its icon (the game bar's own art, when the install has it) and its label under it. A
+/// tile is a touch target of [`TILE_DP`] high. The language tile opens the list above the bar.
+fn chip_links(m: &PortraitMenu, k: f32, mods: &[(String, razdor::hub::Text)], mod_choice: Option<&super::new_game::ModChoice>) -> Option<Pick> {
     let mut pick = None;
+    let dp = upright_dp().unwrap_or(1.0);
     let lang = super::language::current_label();
     let labels: [&str; 4] = [tr("Custom battle"), tr("Maps and mods"), "Discord", &lang];
-    // The chips grow with the text size (`button_grow`, the owner's decision of 2026-10-31).
-    let g = super::display::button_grow();
-    let size = 22.0 * k * g;
-    let pad = 18.0 * k * g;
-    let gap = 12.0 * k * g;
-    let widths: Vec<f32> = labels.iter().map(|l| measure(l, size).width + 2.0 * pad).collect();
-    let total = widths.iter().sum::<f32>() + gap * (labels.len() - 1) as f32;
-    let mut x = (screen_width() - total) / 2.0;
-    let (mut lang_chip, mut lang_pressed) = (Rect::new(0.0, 0.0, 0.0, 0.0), false);
+    // The game bar's icons (`button-icon-N`): 6 the crossed swords, 8 the map; the Discord and
+    // language tiles have no icon in the install and show their label alone.
+    let icons: [Option<&str>; 4] = [Some("button-icon-6"), Some("button-icon-8"), None, None];
+    let margin = CHIP_MARGIN_DP * dp;
+    let gap = CHIP_GAP_DP * dp;
+    let w = (screen_width() - 2.0 * margin - 3.0 * gap) / 4.0;
+    let marble = chrome::win("Win-marble");
+    // One size for all four labels (grown by `button_grow`): the largest that fits the widest one.
+    let size = super::dt_font::legacy_metrics_if(true, || {
+        let base = 14.0 * dp * super::display::button_grow();
+        labels.iter().fold(base, |size, l| {
+            let tw = measure(l, size).width;
+            if tw > w - 8.0 * dp { size * (w - 8.0 * dp) / tw } else { size }
+        })
+    });
+    // The chosen mod's full-width tile above the four: the same size as their labels, shrunk only
+    // if its text is wider than the row (a mod's title can be long).
+    if let (Some(mc), Some(row)) = (mod_choice, m.mod_row) {
+        let label = mc.shown();
+        let fit = super::dt_font::legacy_metrics_if(true, || {
+            let tw = measure(label, size).width;
+            let room = row.w - 8.0 * dp;
+            if tw > room { size * room / tw } else { size }
+        });
+        let pressed = chip_tile(row, k, dp, label, fit, None, marble.as_ref());
+        mod_link_action(row, pressed, mods, mc, k);
+    }
+    let (mut lang_tile, mut lang_pressed) = (Rect::new(0.0, 0.0, 0.0, 0.0), false);
     for (j, label) in labels.iter().enumerate() {
-        let r = Rect::new(x, m.chip_top, widths[j], m.chip_h);
-        let (hover, down, pressed) = super::widgets::button_state(r, true);
-        plate(r, 14.0 * k, Color::new(0.08, 0.05, 0.03, 1.0));
-        let color = if down || hover { chrome::GOLD } else { Color::new(0.95, 0.88, 0.72, 1.0) };
-        let tw = measure(label, size).width;
-        chrome::shadow_text(label, r.x + (r.w - tw) / 2.0, r.y + r.h / 2.0 + size * 0.35, size, color);
-        if pressed {
-            cue(Cue::Button);
-        }
+        let r = Rect::new(margin + j as f32 * (w + gap), m.chip_top, w, m.chip_h);
+        let pressed = chip_tile(r, k, dp, label, size, icons[j], marble.as_ref());
         match j {
             0 if pressed => pick = Some(Pick::Custom),
             1 if pressed => pick = Some(Pick::Hub),
             2 if pressed => open_link(DISCORD_INVITE),
-            3 => (lang_chip, lang_pressed) = (r, pressed),
+            3 => (lang_tile, lang_pressed) = (r, pressed),
             _ => {}
         }
-        x += widths[j] + gap;
     }
     if lang_pressed || super::snapshot::open_language_list() {
-        super::language::open_list(lang_chip, k);
+        super::language::open_list(lang_tile, k);
     }
-    if super::widgets::mouse_in(lang_chip.x, lang_chip.y, lang_chip.w, lang_chip.h) {
+    if super::widgets::mouse_in(lang_tile.x, lang_tile.y, lang_tile.w, lang_tile.h) {
         super::widgets::tooltip(&[(super::language::hint().to_string(), super::widgets::INK)]);
     }
     pick
+}
+
+/// One marble tile of the bottom bar held upright, at `r`, with its label (and the game bar's icon
+/// `icon`, when the install has it). Returns whether it was pressed this frame.
+fn chip_tile(r: Rect, k: f32, dp: f32, label: &str, size: f32, icon: Option<&str>, marble: Option<&Texture2D>) -> bool {
+    let (hover, down, pressed) = super::widgets::button_state(r, true);
+    // The marble tile, its silver edge and the gold when the pointer is on it.
+    match marble {
+        Some(t) => chrome::tile(t, r, k, Color::new(0.8, 0.8, 0.8, 1.0)),
+        None => plate(r, 10.0 * k, Color::new(0.08, 0.05, 0.03, 1.0)),
+    }
+    let edge = if down || hover { chrome::GOLD } else { chrome::SILVER };
+    draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, edge);
+    let color = if down || hover { chrome::GOLD } else { Color::new(0.95, 0.88, 0.72, 1.0) };
+    // The label is drawn at its own size, not snapped to the original's bitmap sizes (phones).
+    super::dt_font::legacy_metrics_if(true, || {
+        let tw = measure(label, size).width;
+        let text_y = match icon.and_then(|n| chrome::win_fx(n, Fx::Glow)) {
+            Some(t) => {
+                let ih = 28.0 * dp;
+                let iw = t.width() * ih / t.height();
+                chrome::tex(&t, Rect::new(r.x + (r.w - iw) / 2.0, r.y + 7.0 * dp, iw, ih), WHITE);
+                r.y + r.h - 9.0 * dp
+            }
+            // Without an icon the label is centred in the tile.
+            None => r.y + r.h / 2.0 + size * 0.35,
+        };
+        chrome::shadow_text(label, r.x + (r.w - tw) / 2.0, text_y, size, color);
+    });
+    if pressed {
+        cue(Cue::Button);
+    }
+    pressed
+}
+
+/// The chosen mod's link (the landscape corner's or the upright tile, at `r`) for this frame: a
+/// pick made in its list is asked of the app (`new_game::request_mod`: played from the next frame),
+/// and a click opens the list over `r`. A mod being built takes no choice (1441).
+fn mod_link_action(r: Rect, pressed: bool, mods: &[(String, razdor::hub::Text)], mc: &super::new_game::ModChoice, k: f32) {
+    if let Some(v) = take_pick(MOD_LIST).filter(|&v| v != mc.current) {
+        super::new_game::request_mod(super::new_game::mod_id_at(mods, v));
+    }
+    if !mc.busy && (pressed || super::snapshot::open_mod_list()) {
+        let options: Vec<(i64, String)> = mc.labels.iter().enumerate().map(|(i, l)| (i as i64, l.clone())).collect();
+        open_list(MOD_LIST, r, mc.current, &options, k);
+    }
 }
 
 /// A rounded rectangle of radius `rad` (at most half its sides).
@@ -1402,15 +1499,50 @@ fn settings_button(r: Rect, label: &str) -> bool {
     pressed
 }
 
-/// One of the original's slider rows (0x4d01c9: 32 px boxes 40 apart from 45 px under the
-/// window's top, 18 px in from its sides, a dark fill and a frame, the label 8 px in): the
-/// label on the left, ◀ the track ▶ on the right. Returns the new value (0..1) when moved.
-fn option_slider(r: Rect, label: &str, value: f32) -> Option<f32> {
+/// A phone held upright: a slider row with its label on its own line over ◀ the track ▶, which
+/// takes the row's whole width (a long label is never cut by the track).
+fn option_slider_stacked(r: Rect, label: &str, value: f32, size: f32) -> Option<f32> {
     let k = chrome::k();
     draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.0, 0.0, 0.35));
     chrome::silver_frame(r, 1.0);
     super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
-        chrome::shadow_text(label, r.x + 8.0 * k, r.y + r.h * 0.5 + 6.0 * k, 15.0 * k, OPTION_INK);
+        chrome::shadow_text(label, r.x + 8.0 * k, r.y + 6.0 * k + size, size, OPTION_INK);
+    });
+    let a = 22.0 * k;
+    let y = r.y + r.h - 6.0 * k - a;
+    let left = Rect::new(r.x + 8.0 * k, y, a, a);
+    let right = Rect::new(r.x + r.w - 8.0 * k - a, y, a, a);
+    let track = Rect::new(left.x + left.w, y, right.x - left.x - left.w, a);
+    for (art, ar) in [("HArrowLeft", left), ("HArrowRight", right)] {
+        match chrome::win(art) {
+            Some(t) => chrome::tex(&t, ar, WHITE),
+            None => draw_rectangle(ar.x, ar.y, ar.w, ar.h, chrome::SILVER),
+        }
+    }
+    let over = |ar: Rect| ar.contains(crate::ui::widgets::pointer().into()) && !input_blocked();
+    if over(left) && clicked() {
+        return Some((value - 0.05).max(0.0));
+    }
+    if over(right) && clicked() {
+        return Some((value + 0.05).min(1.0));
+    }
+    slider(track, value)
+}
+
+/// One of the original's slider rows (0x4d01c9: 32 px boxes 40 apart from 45 px under the
+/// window's top, 18 px in from its sides, a dark fill and a frame, the label 8 px in): the
+/// label on the left, ◀ the track ▶ on the right. Returns the new value (0..1) when moved.
+fn option_slider(r: Rect, label: &str, value: f32) -> Option<f32> {
+    option_slider_sized(r, label, value, 15.0 * chrome::k())
+}
+
+/// [`option_slider`] with its label at `size` px (the phone's 14 sp).
+fn option_slider_sized(r: Rect, label: &str, value: f32, size: f32) -> Option<f32> {
+    let k = chrome::k();
+    draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.0, 0.0, 0.35));
+    chrome::silver_frame(r, 1.0);
+    super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
+        chrome::shadow_text(label, r.x + 8.0 * k, r.y + r.h * 0.5 + 6.0 * k, size, OPTION_INK);
     });
     let a = 17.0 * k;
     let left = Rect::new(r.x + r.w * 0.505, r.y + (r.h - a) / 2.0, a, a);
@@ -1489,7 +1621,128 @@ fn keys_layout(g: f32) -> (f32, f32, f32) {
     (pitch, row_h, height)
 }
 
+/// The keys window on a phone held upright (the owner's notes, 2026-11-02; Razdor's own, not in the
+/// original): it takes the phone's width and is laid out in dp (`dp` px per dp, so one unit is one
+/// dp and a 14 px label is 14 sp). Two columns of actions, each with its key button (52 × 44 dp),
+/// the hint under the rows, «По умолчанию» and «Ok» (44 dp) at the bottom. A label that takes more
+/// than two lines is set at 13 sp, else 12 sp. The desktop keeps [`keys_window`]'s layout.
+fn keys_window_upright(audio: &mut super::audio::Settings, over_map: bool, dp: f32) -> bool {
+    let _scale = super::display::enter_window_scale(Some(dp));
+    let k = chrome::k();
+    let g = super::display::button_grow();
+    let (sw, sh) = (screen_width(), screen_height());
+    let margin = 8.0 * k;
+    let w = sw - 2.0 * margin;
+    let row_h = 44.0 * g * k;
+    let pitch = row_h + 4.0 * k;
+    let bh = 44.0 * g * k;
+    let hint = tr("Click a key, then press the new one. Esc cancels; a key another action has goes to that action.");
+    let hint_size = 14.0 * k;
+    let hint_lines = super::dt_font::legacy_metrics_if(true, || wrap(hint, w - 4.0 * k - 20.0 * k, hint_size));
+    let rows_h = 9.0 * pitch - 4.0 * k;
+    let hint_h = hint_lines.len().max(1) as f32 * 19.0 * k;
+    let content = 10.0 * k + rows_h + 12.0 * k + hint_h + 12.0 * k + bh + 10.0 * k;
+    let h = content + 44.0 * k;
+    // Between the top inset and the bottom bar (over the map) or the title screen's footer.
+    let safe = super::display::safe_area();
+    let top = safe.top + 8.0 * k;
+    let bottom = if over_map { sh - chrome::bar_height() - 8.0 * k } else { window_layout::title_bottom() - 8.0 * k };
+    let h = h.min(bottom - top);
+    let y = top + ((bottom - top - h) / 2.0).max(0.0);
+    let (inner, closed) = chrome::window(Rect::new(margin, y, w, h), tr("Keys"), chrome::Skin::Marble, true);
+    let waiting = keymap::listening();
+    let was_waiting = waiting.is_some();
+    let col_gap = 12.0 * k;
+    let col_w = (inner.w - 20.0 * k - col_gap) / 2.0;
+    let key_w = 52.0 * k;
+    let mut started = false;
+    super::dt_font::legacy_metrics_if(true, || {
+        for (i, a) in keymap::ALL.into_iter().enumerate() {
+            let x = inner.x + 10.0 * k + (i / 9) as f32 * (col_w + col_gap);
+            let y = inner.y + 10.0 * k + (i % 9) as f32 * pitch;
+            let (size, lines) = upright_label(tr(a.label()), col_w - key_w - 8.0 * k, k);
+            if lines.len() == 1 {
+                text_fit(&lines[0], x, y + row_h / 2.0 + size * 0.35, col_w - key_w - 8.0 * k, size, chrome::CREAM);
+            } else {
+                let top = y + (row_h - lines.len() as f32 * size * 1.15) / 2.0 + size * 0.85;
+                for (n, line) in lines.iter().enumerate() {
+                    chrome::shadow_text(line, x, top + n as f32 * size * 1.15, size, chrome::CREAM);
+                }
+            }
+        }
+    });
+    for (i, a) in keymap::ALL.into_iter().enumerate() {
+        let x = inner.x + 10.0 * k + (i / 9) as f32 * (col_w + col_gap);
+        let y = inner.y + 10.0 * k + (i % 9) as f32 * pitch;
+        let br = Rect::new(x + col_w - key_w, y, key_w, row_h);
+        let shown = if waiting == Some(a) { tr("press a key…").to_string() } else { keymap::display(keymap::key(a)) };
+        if row_button(br, &shown) && waiting != Some(a) {
+            keymap::listen(Some(a));
+            started = true;
+        }
+    }
+    super::dt_font::legacy_metrics_if(true, || {
+        for (n, line) in hint_lines.iter().enumerate() {
+            chrome::shadow_text(line, inner.x + 10.0 * k, inner.y + 10.0 * k + rows_h + 12.0 * k + hint_size * 0.85 + n as f32 * 19.0 * k, hint_size, WHITE);
+        }
+    });
+    take_new_key(audio, waiting, started);
+    let by = inner.bottom() - 10.0 * k - bh;
+    let ok_w = 120.0 * k;
+    let defaults = Rect::new(inner.x + 10.0 * k, by, inner.w - 20.0 * k - ok_w - 10.0 * k, bh);
+    let ok = Rect::new(inner.right() - 10.0 * k - ok_w, by, ok_w, bh);
+    if settings_button(defaults, tr("Defaults")) {
+        reset_keys(audio);
+    }
+    let ok_label = own("Buttons", "Ok", n_("OK"));
+    let ok_pressed = settings_button(ok, &ok_label);
+    closed || ok_pressed || (!was_waiting && key(KeyCode::Escape))
+}
+
+/// A key action's label on a phone's keys window: 14 px (sp at one unit per dp), set at 13 or 12
+/// when 14 would take more than two lines of `width`; one line at 12 when even that does not fit
+/// (the caller ellipsizes it). Returns the size and the lines.
+fn upright_label(s: &str, width: f32, k: f32) -> (f32, Vec<String>) {
+    for n in [14.0, 13.0, 12.0] {
+        let size = n * k;
+        let lines = wrap(s, width, size);
+        if lines.len() <= 2 {
+            return (size, lines);
+        }
+    }
+    (12.0 * k, vec![s.to_string()])
+}
+
+/// The new key for the action waiting for one (`keymap::listen`): the key pressed, unless the
+/// click on a key button just started the wait (`started`) or Esc or a click cancels it. The keys
+/// are swallowed while waiting.
+fn take_new_key(audio: &mut super::audio::Settings, waiting: Option<keymap::Action>, started: bool) {
+    if let Some(a) = waiting {
+        // The key pressed is the new binding: no shortcut fires on it (`hotkeys`, `mod`).
+        if !started {
+            if key(KeyCode::Escape) || clicked() {
+                keymap::listen(None);
+            } else if let Some(pressed) = get_keys_pressed().into_iter().find(|&k| keymap::bindable(k)) {
+                keymap::set(a, pressed);
+                keymap::listen(None);
+                audio.keys = keymap::overrides();
+            }
+        }
+        swallow_input();
+    }
+}
+
+/// «По умолчанию»: every key back to its default, and no wait.
+fn reset_keys(audio: &mut super::audio::Settings) {
+    keymap::reset();
+    keymap::listen(None);
+    audio.keys = keymap::overrides();
+}
+
 fn keys_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
+    if let Some(dp) = super::display::dp_px().filter(|_| window_layout::portrait()) {
+        return keys_window_upright(audio, over_map, dp);
+    }
     // The rows grow with the text size, unless that only makes the window's scale smaller (a phone
     // held sideways fits the window to its height): then they keep their Normal size, and the
     // window's text stays as large as before.
@@ -1522,19 +1775,7 @@ fn keys_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
             started = true;
         }
     }
-    if let Some(a) = waiting {
-        // The key pressed is the new binding: no shortcut fires on it (`hotkeys`, `mod`).
-        if !started {
-            if key(KeyCode::Escape) || clicked() {
-                keymap::listen(None);
-            } else if let Some(pressed) = get_keys_pressed().into_iter().find(|&k| keymap::bindable(k)) {
-                keymap::set(a, pressed);
-                keymap::listen(None);
-                audio.keys = keymap::overrides();
-            }
-            swallow_input();
-        }
-    }
+    take_new_key(audio, waiting, started);
     let hint = tr("Click a key, then press the new one. Esc cancels; a key another action has goes to that action.");
     let hint_y = 16.0 + 8.0 * pitch + row_h + 18.0;
     text_fit(hint, inner.x + 20.0 * k, inner.y + hint_y * k, inner.w - 40.0 * k, 12.0 * k, WHITE);
@@ -1542,13 +1783,263 @@ fn keys_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     let defaults = Rect::new(inner.x + 20.0 * k, inner.y + inner.h - 14.0 * k - bh, 150.0 * k, bh);
     let ok = Rect::new(inner.x + inner.w - 120.0 * k, inner.y + inner.h - 14.0 * k - bh, 96.0 * k, bh);
     if settings_button(defaults, tr("Defaults")) {
-        keymap::reset();
-        keymap::listen(None);
-        audio.keys = keymap::overrides();
+        reset_keys(audio);
     }
     let ok_label = own("Buttons", "Ok", n_("OK"));
     let ok_pressed = settings_button(ok, &ok_label);
     closed || ok_pressed || (!was_waiting && key(KeyCode::Escape))
+}
+
+// The settings window's scroll on a phone held upright, in dp.
+local! {
+    static PHONE_SCROLL: std::cell::Cell<f32> = const { std::cell::Cell::new(0.0) };
+}
+
+/// Cuts the drawing off outside `clip` (screen px), or lifts the cut (`None`).
+fn phone_clip(clip: Option<Rect>) {
+    let dpi = screen_dpi_scale();
+    let gl = unsafe { get_internal_gl() }.quad_gl;
+    gl.scissor(clip.map(|r| ((r.x * dpi) as i32, (r.y * dpi) as i32, (r.w * dpi).ceil() as i32, (r.h * dpi).ceil() as i32)));
+}
+
+/// The words of `label` in lines of at most `max_w` px at `size` (a word never splits).
+fn wrap_label(label: &str, max_w: f32, size: f32) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut cur = String::new();
+    for word in label.split(' ') {
+        let cand = if cur.is_empty() { word.to_string() } else { format!("{cur} {word}") };
+        if !cur.is_empty() && measure(&cand, size).width > max_w {
+            lines.push(std::mem::take(&mut cur));
+            cur = word.to_string();
+        } else {
+            cur = cand;
+        }
+    }
+    if !cur.is_empty() {
+        lines.push(cur);
+    }
+    lines
+}
+
+/// A checkbox row whose label may wrap: the box stays on the first line. True when clicked.
+fn option_check_lines(x: f32, y: f32, width: f32, lines: &[String], on: bool, ink: Color, u: f32) -> bool {
+    let b = Rect::new(x, y, 26.0 * u, 26.0 * u);
+    let (art, mask) = if on { ("CBoxChecked", "CBoxChecked-Alpha") } else { ("CBoxUn", "CBoxUn-Alpha") };
+    match chrome::win_masked(art, mask) {
+        Some(t) => chrome::tex(&t, b, WHITE),
+        None => {
+            draw_rectangle(b.x, b.y, b.w, b.h, Color::new(0.0, 0.0, 0.0, 0.5));
+            chrome::silver_frame(b, 1.0);
+            if on {
+                draw_line(b.x + 3.0 * u, b.y + 9.0 * u, b.x + 8.0 * u, b.y + 15.0 * u, 2.5 * u, GREEN);
+                draw_line(b.x + 8.0 * u, b.y + 15.0 * u, b.x + 16.0 * u, b.y + 2.0 * u, 2.5 * u, GREEN);
+            }
+        }
+    }
+    let tx = x + 34.0 * u;
+    for (i, line) in lines.iter().enumerate() {
+        chrome::shadow_text(line, tx, y + 19.0 * u + i as f32 * 18.0 * u, 14.0 * u, ink);
+    }
+    let h = (10.0 + lines.len() as f32 * 18.0) * u;
+    let hit = Rect::new(x, y, width, h.max(26.0 * u));
+    let clicked_it = hit.contains(crate::ui::widgets::pointer().into()) && !input_blocked() && clicked();
+    if clicked_it {
+        cue(Cue::Button);
+    }
+    clicked_it
+}
+
+/// The options window on a phone held upright, in dp: the window takes the phone's width and
+/// the room from the top inset to the bar (over a map) or to the title's foot; one unit is one
+/// dp, so the labels are 14 units (14 sp) and the rows 40 units. A long checkbox label wraps to a
+/// second line; the rows scroll when they are taller than the window. Desktop and sideways keep
+/// [`options_window`]'s own layout. Returns true when closed.
+fn phone_options(audio: &mut super::audio::Settings, install_wide: bool, over_map: bool, u: f32) -> bool {
+    super::dt_font::legacy_metrics_if(true, || {
+        let (sw, sh) = (screen_width(), screen_height());
+        let top = super::display::safe_area().top + 8.0 * u;
+        let bottom = if over_map { sh - chrome::bar_height() - 8.0 * u } else { window_layout::title_bottom() - 8.0 * u };
+        let _scale = super::display::enter_window_scale(Some(u));
+        let title = own("Options", "Title", n_("Sound, graphics and gameplay settings"));
+        let rect = Rect::new(8.0 * u, top, sw - 16.0 * u, (bottom - top).max(200.0 * u));
+        let (inner, closed) = chrome::window(rect, &title, chrome::Skin::Marble, true);
+        let pad = 12.0 * u;
+        let x0 = inner.x + pad;
+        let cw = inner.w - 2.0 * pad;
+        // The list between the window's top and the buttons row (44 units high, 10 above its bottom).
+        let list = Rect::new(inner.x, inner.y + 6.0 * u, inner.w, inner.h - 6.0 * u - 66.0 * u);
+        let row_h = 40.0 * u;
+        let pitch = 46.0 * u;
+        // A slider row stacks its label over its track, so a long label is never cut by the track.
+        let (slider_h, slider_pitch) = (58.0 * u, 64.0 * u);
+        let mod_rows = chrome::install_option("Option0").is_some() && chrome::install_option("OptionSld0").is_none();
+        let slider_label = |n: usize, ours: &'static str| own("Options", &if mod_rows { format!("Option{n}") } else { format!("OptionSld{n}") }, ours);
+        let anim_label = if mod_rows { tr(n_("Battle animation speed")).to_string() } else { slider_label(4, n_("Battle animation speed")) };
+        let slider_rows: [(String, f32); 5] = [
+            (slider_label(0, n_("Background music volume")), audio.music_volume),
+            (slider_label(1, n_("Sound effects volume")), audio.sfx_volume),
+            (slider_label(2, n_("Map scroll speed")), scroll_speed(audio) / 100.0),
+            (slider_label(3, n_("Hero's walking speed")), walk_speed(audio) / razdor::rules::game::WALK_SPEED_MAX as f32),
+            (anim_label, anim_speed(audio).unwrap_or(0.0) / 99.0),
+        ];
+        let touch_row = super::touchpad::MOBILE;
+        let orientation_row = cfg!(target_os = "android");
+        let checks: Vec<(&'static str, String, bool, Color)> = {
+            let mut c = vec![
+                ("Option4", own("Options", "Option4", n_("Do not load music and sounds (needs a restart)")), no_sound(audio), CHECK_ORANGE),
+                ("Option5", own("Options", "Option5", n_("Show FPS")), audio.show_fps, CHECK_INK),
+                ("Option6", own("Options", "Option6", n_("Turn off hints")), hints_off(audio), CHECK_INK),
+                ("Option7", own("Options", "Option7", n_("Automatically pursue the chosen army")), pursue(audio), CHECK_INK),
+                ("Option8", own("Options", "Option8", n_("Automatically save the current game")), autosave(audio), CHECK_INK),
+                ("Option9", own("Options", "Option9", n_("Improved enemy AI in battle")), expert_ai(audio), CHECK_INK),
+                ("Option10", own("Options", "Option10", n_("Impossible difficulty (needs a restart)")), impossible(audio), CHECK_INK),
+                ("Option11", own("Options", "Option11", n_("Wide front row in battle (for new games)")), wide_row(audio, install_wide), CHECK_INK),
+            ];
+            if touch_row {
+                c.push(("RazdorTouchpad", own("Options", "RazdorTouchpad", n_("Touchpad mode (the screen moves a cursor)")), audio.touchpad.unwrap_or(false), CHECK_INK));
+            }
+            c
+        };
+        // Each checkbox's lines, and the content's height in units from the list's top.
+        let check_lines: Vec<Vec<String>> = checks.iter().map(|c| wrap_label(&c.1, cw - 34.0 * u, 14.0 * u)).collect();
+        let check_h: Vec<f32> = check_lines.iter().map(|l| (10.0 + l.len() as f32 * 18.0).max(38.0) * u).collect();
+        let slider_top = 0.0;
+        let checks_top = slider_top + slider_rows.len() as f32 * slider_pitch + 6.0 * u;
+        let mut check_y = Vec::with_capacity(checks.len());
+        let mut y = checks_top;
+        for h in &check_h {
+            check_y.push(y);
+            y += h;
+        }
+        let mut rest_y = y + 6.0 * u;
+        let orient_y = rest_y;
+        if orientation_row {
+            rest_y += pitch;
+        }
+        let text_y = rest_y;
+        let large_y = text_y + pitch;
+        let import_y = large_y + pitch;
+        let content = import_y + row_h;
+
+        // Scroll: the wheel and the bar at the list's right edge.
+        let view = list.h;
+        let most = (content - view).max(0.0);
+        let mut scroll = PHONE_SCROLL.with(|c| c.get()).clamp(0.0, most);
+        if most > 0.0 {
+            if crate::ui::widgets::mouse_in(list.x, list.y, list.w, list.h) {
+                scroll = (scroll - wheel() * 24.0 * u).clamp(0.0, most);
+            }
+            let bar = Rect::new(list.x + list.w - 9.0 * u, list.y, 6.0 * u, view);
+            super::widgets::scrollbar_px(bar, &mut scroll, most, view, 24.0 * u);
+        }
+        PHONE_SCROLL.with(|c| c.set(scroll));
+        // A row's screen top, and whether it is on the list at all.
+        let on_list = |cy: f32, h: f32| cy + h > 0.0 && cy < view;
+        let at = |cy: f32| list.y + cy - scroll;
+
+        phone_clip(Some(list));
+        for (i, (label, value)) in slider_rows.iter().enumerate() {
+            let cy = slider_top + i as f32 * slider_pitch;
+            if !on_list(cy - scroll, slider_h) {
+                continue;
+            }
+            let r = Rect::new(x0 - pad + 2.0 * u, at(cy), inner.w - 4.0 * u, slider_h);
+            if let Some(v) = option_slider_stacked(r, label, *value, 14.0 * u) {
+                match i {
+                    0 | 1 => {
+                        let steps = ((v - value) / super::audio::VOLUME_STEP).round() as i32;
+                        if i == 0 {
+                            audio.music_muted = false;
+                            audio.step_music(steps);
+                        } else {
+                            audio.sfx_muted = false;
+                            audio.step_sfx(steps);
+                        }
+                    }
+                    2 => audio.scroll_speed = Some((v * 100.0).round()),
+                    3 => audio.walk_speed = Some((v * razdor::rules::game::WALK_SPEED_MAX as f32).round()),
+                    _ => audio.anim_speed = Some((v * 99.0).round()),
+                }
+            }
+        }
+        for (i, (key, _, on, ink)) in checks.iter().enumerate() {
+            let cy = check_y[i];
+            let h = check_h[i];
+            if !on_list(cy - scroll, h) {
+                continue;
+            }
+            if option_check_lines(x0, at(cy), cw, &check_lines[i], *on, *ink, u) {
+                match *key {
+                    "Option4" => audio.no_sound = Some(!on),
+                    "Option5" => audio.show_fps = !on,
+                    "Option6" => audio.hints_off = Some(!on),
+                    "Option7" => audio.pursue = Some(!on),
+                    "Option8" => audio.autosave = Some(!on),
+                    "Option9" => toggle_expert_ai(audio),
+                    "Option10" => audio.impossible = Some(!on),
+                    "Option11" => audio.wide_row = Some(!on),
+                    _ => audio.touchpad = Some(!on),
+                }
+            }
+        }
+        if orientation_row && on_list(orient_y - scroll, row_h) {
+            let y = at(orient_y);
+            chrome::shadow_text(tr("Screen orientation"), x0, y + 26.0 * u, 14.0 * u, chrome::CREAM);
+            let r = Rect::new(inner.x + inner.w - pad - 150.0 * u, y + 4.0 * u, 150.0 * u, 36.0 * u);
+            if row_button(r, orientation_label(audio.orientation)) {
+                audio.orientation = match audio.orientation {
+                    None => Some(super::audio::Orientation::Landscape),
+                    Some(super::audio::Orientation::Landscape) => Some(super::audio::Orientation::Portrait),
+                    Some(super::audio::Orientation::Portrait) => None,
+                };
+            }
+        }
+        if on_list(text_y - scroll, row_h) {
+            let y = at(text_y);
+            chrome::shadow_text(tr("Text size"), x0, y + 26.0 * u, 14.0 * u, chrome::CREAM);
+            let r = Rect::new(inner.x + inner.w - pad - 150.0 * u, y + 4.0 * u, 150.0 * u, 36.0 * u);
+            if row_button(r, super::display::text_size_label(audio.text_size)) {
+                audio.text_size = super::display::next_text_size(audio.text_size);
+            }
+        }
+        if on_list(large_y - scroll, row_h) {
+            let y = at(large_y);
+            chrome::shadow_text(tr("Large message windows"), x0, y + 26.0 * u, 14.0 * u, chrome::CREAM);
+            let r = Rect::new(inner.x + inner.w - pad - 150.0 * u, y + 4.0 * u, 150.0 * u, 36.0 * u);
+            if row_button(r, if audio.large_windows { tr("On") } else { tr("Off") }) {
+                audio.large_windows = !audio.large_windows;
+            }
+        }
+        if on_list(import_y - scroll, row_h) {
+            super::game_import::settings_row(Rect::new(x0, at(import_y), cw, row_h), over_map);
+        }
+        phone_clip(None);
+
+        // The buttons row: «Ещё…» at the left, «Принять» and «Отмена» at the right, 44 units high.
+        let bh = 40.0 * u;
+        let by = inner.y + inner.h - 12.0 * u - bh;
+        let advanced = Rect::new(x0, by, 120.0 * u, bh);
+        let cancel = Rect::new(inner.x + inner.w - pad - 110.0 * u, by, 110.0 * u, bh);
+        let apply = Rect::new(cancel.x - 8.0 * u - 110.0 * u, by, 110.0 * u, bh);
+        if row_button(advanced, tr("Advanced…")) {
+            ADVANCED.with(|a| a.set(true));
+            return false;
+        }
+        let (apply_label, cancel_label) = (own("Buttons", "Apply", n_("Apply")), own("Buttons", "Cancel", n_("Cancel")));
+        let apply_pressed = settings_button(apply, &apply_label);
+        let cancel_pressed = settings_button(cancel, &cancel_label);
+        if apply_pressed || key(KeyCode::Enter) {
+            OPENED_WITH.with(|o| *o.borrow_mut() = None);
+            return true;
+        }
+        if cancel_pressed || closed || key(KeyCode::Escape) {
+            if let Some(before) = OPENED_WITH.with(|o| o.take()) {
+                *audio = before;
+            }
+            return true;
+        }
+        false
+    })
 }
 
 pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, over_map: bool) -> bool {
@@ -1577,6 +2068,10 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     }
     if OPENED_WITH.with(|o| o.borrow().is_none()) {
         OPENED_WITH.with(|o| *o.borrow_mut() = Some(audio.clone()));
+    }
+    // A phone held upright: its own layout (`phone_options`).
+    if let Some(u) = upright_dp() {
+        return phone_options(audio, install_wide, over_map, u);
     }
     let title = own("Options", "Title", n_("Sound, graphics and gameplay settings"));
     let h = options_h();
@@ -1790,7 +2285,7 @@ mod tests {
     #[test]
     fn upright_buttons_are_a_column_of_touch_sized_ovals_above_the_chips() {
         let (sw, sh, k, dp) = PHONE;
-        let m = portrait_menu(sw, sh, k, dp, 0.0);
+        let m = portrait_menu(sw, sh, k, dp, 0.0, false);
         for r in &m.buttons {
             assert!(close(r.h, OVAL.y * PORTRAIT_SCALE * k), "{r:?}");
             assert!(close(r.w, OVAL.x * PORTRAIT_SCALE * k), "{r:?}");
@@ -1812,11 +2307,13 @@ mod tests {
         // 1080×2376 and 1080×1920 (the owner's phone and a shorter one): the column's middle is
         // the middle of the area above the foot lines, within 4 px.
         for (sh, dp) in [(2376.0, 2.75), (1920.0, 2.75)] {
-            let m = portrait_menu(1080.0, sh, 1.125, dp, 0.0);
+            let m = portrait_menu(1080.0, sh, 1.125, dp, 0.0, false);
             let first = m.buttons[0];
             let last = m.buttons[4];
             let centre = (first.y + last.y + last.h) / 2.0;
-            assert!((centre - m.foot_y / 2.0).abs() <= 4.0, "{sh}: column centre {centre}, target {}", m.foot_y / 2.0);
+            // The column keeps the place of the old, shorter link row (`portrait_menu`'s `column_foot`).
+            let column_foot = sh - 16.0 * 1.125 - TOUCH_DP * dp - 12.0 * 1.125;
+            assert!((centre - column_foot / 2.0).abs() <= 4.0, "{sh}: column centre {centre}, target {}", column_foot / 2.0);
             // The logo's bottom is 24 px above the first button and its top is below the inset.
             let logo_bottom = m.logo_top + 840.0 * 128.0 / 896.0 * 1.125;
             assert!(close(logo_bottom + 24.0 * 1.125, first.y), "logo {} over the column", m.logo_top);
@@ -1828,7 +2325,7 @@ mod tests {
     fn upright_logo_never_goes_above_the_safe_inset() {
         // A cutout of 120 px: the logo's top is at the inset, and the column moves down to suit.
         let (sw, sh, k, dp) = PHONE;
-        let m = portrait_menu(sw, sh, k, dp, 120.0);
+        let m = portrait_menu(sw, sh, k, dp, 120.0, false);
         assert!(m.logo_top >= 120.0, "logo at {} is above the inset", m.logo_top);
         assert!(m.buttons[0].y >= m.logo_top + 840.0 * 128.0 / 896.0 * k);
         // And with the logo on the inset the column still ends above the lines.
@@ -1839,7 +2336,7 @@ mod tests {
     #[test]
     fn upright_chips_are_touch_sized_and_on_the_bottom_of_the_screen() {
         let (sw, sh, k, dp) = PHONE;
-        let m = portrait_menu(sw, sh, k, dp, 0.0);
+        let m = portrait_menu(sw, sh, k, dp, 0.0, false);
         assert!(m.chip_h >= TOUCH_DP * dp, "chips are {} px tall", m.chip_h);
         assert!(m.chip_top + m.chip_h <= sh, "chips leave the screen");
         assert!(m.foot_y <= m.chip_top, "the lines run into the chips");
@@ -1847,9 +2344,34 @@ mod tests {
     }
 
     #[test]
+    fn a_mod_row_sits_above_the_four_tiles_and_lifts_the_foot_lines() {
+        let (sw, sh, k, dp) = PHONE;
+        let plain = portrait_menu(sw, sh, k, dp, 0.0, false);
+        let with = portrait_menu(sw, sh, k, dp, 0.0, true);
+        assert_eq!(plain.mod_row, None, "no row without a mod");
+        assert!(close(with.chip_top, plain.chip_top), "the four tiles stay at the bottom");
+        let row = with.mod_row.expect("a row with a mod installed");
+        assert!(row.h >= TOUCH_DP * dp, "the row is {} px tall", row.h);
+        assert!(close(row.y + row.h + CHIP_GAP_DP * dp, with.chip_top), "one gap between the row and the tiles");
+        assert!(close(row.x, CHIP_MARGIN_DP * dp) && close(row.w, sw - 2.0 * CHIP_MARGIN_DP * dp), "the row is full width");
+        assert!(close(with.foot_y, row.y - 12.0 * k), "the foot lines sit above the row");
+        assert!(close(with.foot_y, plain.foot_y - row.h - CHIP_GAP_DP * dp), "the foot lines lift by the row and its gap");
+    }
+
+    #[test]
+    fn the_buttons_end_above_the_foot_lines_with_a_mod_row() {
+        for (sw, sh, k, dp) in [PHONE, (720.0, 1600.0, 0.75, 2.0)] {
+            let m = portrait_menu(sw, sh, k, dp, 0.0, true);
+            let last = m.buttons[4];
+            assert!(last.y + last.h <= m.notice_y(k), "{sh}: the last button runs into the foot lines");
+            assert!(m.logo_top >= 0.0, "{sh}: the logo leaves the screen");
+        }
+    }
+
+    #[test]
     fn upright_geometry_fits_a_small_phone_too() {
         // 720×1600 at 2 px per dp: the fit is 0.75.
-        let m = portrait_menu(720.0, 1600.0, 0.75, 2.0, 0.0);
+        let m = portrait_menu(720.0, 1600.0, 0.75, 2.0, 0.0, false);
         for pair in m.buttons.windows(2) {
             assert!(pair[0].y + pair[0].h <= pair[1].y);
         }

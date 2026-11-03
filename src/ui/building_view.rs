@@ -984,6 +984,7 @@ fn recruit_panel(game: &Game, assets: &Assets, f: &Frame, kind: UnitId) {
 pub fn stack_of_tab(tab: Tab) -> window_layout::Stack {
     match tab {
         Tab::Barracks | Tab::Garrison => window_layout::Stack::Tall,
+        Tab::Market => window_layout::Stack::Market,
         _ => window_layout::Stack::Building,
     }
 }
@@ -1831,8 +1832,11 @@ fn garrison_act(game: &mut Game, view: &mut BuildingView, guards: &[razdor::rule
 /// A list with a selection and a scroll bar. Rows are (icon item, name, price, the price in
 /// red); `marks` light a filter's match in the names. Returns the clicked row.
 #[allow(clippy::too_many_arguments)]
-fn price_list(assets: Option<&Assets>, rows: &[(Option<ItemId>, String, String, bool)], marks: &[Option<std::ops::Range<usize>>], pick: Option<usize>, scroll: &mut usize, x: f32, y: f32, w: f32, visible: usize) -> Option<usize> {
-    super::typography::Role::Name.with(|| price_list_in_face(assets, rows, marks, pick, scroll, x, y, w, visible))
+/// `row_h`: a row's height in design px (the market's `MARKET_ROW_H`, or the phone's); `name_px`: the
+/// names' size in design px (the prices one larger); the desktop's 17 and 18 as before.
+#[allow(clippy::too_many_arguments)]
+fn price_list(assets: Option<&Assets>, rows: &[(Option<ItemId>, String, String, bool)], marks: &[Option<std::ops::Range<usize>>], pick: Option<usize>, scroll: &mut usize, x: f32, y: f32, w: f32, visible: usize, row_h: f32, name_px: f32) -> Option<usize> {
+    super::typography::Role::Name.with(|| price_list_in_face(assets, rows, marks, pick, scroll, x, y, w, visible, row_h, name_px))
 }
 
 /// The market list's columns as the original lays them out (0x4d9df3..0x4d9eaa): the icon
@@ -1904,10 +1908,13 @@ fn blend_color(c: [i32; 3]) -> Color {
 /// 0x4bcfa4); the names left, the prices centred in their column (align 2, 0x4bcd03); the
 /// picked row lighter by (64, 64, 64) over the names and prices, not the icons.
 #[allow(clippy::too_many_arguments)]
-fn price_list_in_face(assets: Option<&Assets>, rows: &[(Option<ItemId>, String, String, bool)], marks: &[Option<std::ops::Range<usize>>], pick: Option<usize>, scroll: &mut usize, x: f32, y: f32, w: f32, visible: usize) -> Option<usize> {
+fn price_list_in_face(assets: Option<&Assets>, rows: &[(Option<ItemId>, String, String, bool)], marks: &[Option<std::ops::Range<usize>>], pick: Option<usize>, scroll: &mut usize, x: f32, y: f32, w: f32, visible: usize, row_h_px: f32, name_px: f32) -> Option<usize> {
     let k = chrome::k();
     // The rows keep the original's height (186 px for seven); the list shows `visible` of them.
-    let row_h = MARKET_ROW_H * k;
+    let row_h = row_h_px * k;
+    // A taller row centres its text: the extra height is shared above and below (0 at the desktop's).
+    // The name's baseline moves down with a larger size, so the text stays centred in its row (0 at 17).
+    let pad = (row_h - MARKET_ROW_H * k) / 2.0 + (name_px - 17.0) * 0.3 * k;
     let frame = Rect::new(x, y, w, visible as f32 * row_h);
     let bar = 18.0 * k;
     let ListColumns { icon: icon_w, name_x, price_cx, .. } = market_columns(w, bar);
@@ -1941,12 +1948,12 @@ fn price_list_in_face(assets: Option<&Assets>, rows: &[(Option<ItemId>, String, 
             let side = (row_h - 4.0 * k).min(icon_w - 2.0 * k);
             assets.draw_item(*item, x + (icon_w - side) / 2.0, ry + 1.0, side);
         }
-        let shown = ellipsize(name, price_cx - name_x - 30.0 * k, 17.0 * k);
+        let shown = ellipsize(name, price_cx - name_x - 30.0 * k, name_px * k);
         let visible_end = shown.strip_suffix('…').unwrap_or(&shown).len();
         let mark = marks.get(n).cloned().flatten().filter(|r| r.end <= visible_end && shown.is_char_boundary(r.start) && shown.is_char_boundary(r.end));
         let ink = market_ink(*red);
-        text_marked(&shown, mark, x + name_x, ry + 20.0 * k, 17.0 * k, ink, ink);
-        text_centered(price, x + price_cx, ry + 21.0 * k, 18.0 * k, ink);
+        text_marked(&shown, mark, x + name_x, ry + 20.0 * k + pad, name_px * k, ink, ink);
+        text_centered(price, x + price_cx, ry + 21.0 * k + pad, (name_px + 1.0) * k, ink);
         if mouse_in(x, ry, w - bar, row_h) && clicked() {
             hit = Some(n);
         }
@@ -2072,6 +2079,12 @@ fn market_list_buttons(selling: bool, goods: usize) -> [ListButton; 2] {
 /// "Инвентарь" (0x4b9be0) shows the pack and "Торговая лавка" (0x4b9be8) the goods: both
 /// always shown, the current list's one locked, "Торговая лавка" also while the shop is empty.
 fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Option<Screen> {
+    if window_layout::market_stacked() {
+        // The phone's market draws its texts at their requested sizes (legacy metrics, as the hub's and
+        // the update window's phone texts), not the font sheet's snapped ones.
+        super::dt_font::legacy_metrics_if(true, || market_phone(game, assets, Rect::new(f.x, f.y, f.w, f.h), view, message));
+        return None;
+    }
     let k = chrome::k();
     let (x, y, w) = (f.cx, f.cy, f.cw);
     let c = game.content.clone();
@@ -2147,7 +2160,7 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
         view.pick = first_pick(rows.len());
     }
     let at_pick = view.pick.and_then(|p| kept.iter().position(|(n, _)| *n == p));
-    if let Some(k) = price_list(Some(assets), &shown, &marks, at_pick, &mut view.scroll, lx, y + 47.0 * k, lw, 6) {
+    if let Some(k) = price_list(Some(assets), &shown, &marks, at_pick, &mut view.scroll, lx, y + 47.0 * k, lw, 6, MARKET_ROW_H, 17.0) {
         view.pick = Some(kept[k].0);
     }
     if reply.pick {
@@ -2198,34 +2211,7 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
     };
     // The trade button plays the gold sound (interface.md §14).
     if button_sounding(x + 308.0 * k, by, 90.0 * k, bh, &label, can, Cue::Gold) {
-        let k = view.pick.unwrap_or(0);
-        let mut done = false;
-        *message = Some(if view.selling {
-            let pack_index = sellable[order[k]];
-            let name = c.item(game.pack[pack_index]).name.clone();
-            match game.sell(pack_index) {
-                Ok(g) => {
-                    done = true;
-                    trf!("Sold {name} for {g} gold.", name, g)
-                }
-                Err(e) => trade_error(e),
-            }
-        } else {
-            match game.buy(order[k]) {
-                Ok(item) => {
-                    done = true;
-                    trf!("Bought {item}. It is in your pack.", item = c.item(item).name)
-                }
-                Err(e) => trade_error(e),
-            }
-        });
-        // For many buys (or sales) in a row the selection stays: on the item that moved up
-        // into the bought one's row, or the one above when it was the last; none when the
-        // list is empty. A refused trade keeps it where it was.
-        if done {
-            let left = if view.selling { game.pack.iter().filter(|&i| game.can_sell(i)).count() } else { game.market_here().map_or(0, |g| g.len()) };
-            view.pick = next_pick(k, left);
-        }
+        market_trade(game, &c, view, message, &order, &sellable);
     }
     if button(x + 416.0 * k, by, 148.0 * k, bh, &shop, shop_button.enabled) {
         view.selling = shop_button.shows_pack;
@@ -2234,6 +2220,151 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
     }
     FILTER_KEYS.with(|f| f.set(reply.keys_taken));
     hall_offers(game, f, view, message, dialogs)
+}
+
+/// The market's trade with the picked row (the sell or the buy), and the message it leaves. `order`
+/// and `sellable` as the market's list was built: `order[row]` is the row's index.
+fn market_trade(game: &mut Game, c: &razdor::rules::content::Content, view: &mut BuildingView, message: &mut Option<String>, order: &[usize], sellable: &[usize]) {
+    let k = view.pick.unwrap_or(0);
+    let mut done = false;
+    *message = Some(if view.selling {
+        let pack_index = sellable[order[k]];
+        let name = c.item(game.pack[pack_index]).name.clone();
+        match game.sell(pack_index) {
+            Ok(g) => {
+                done = true;
+                trf!("Sold {name} for {g} gold.", name, g)
+            }
+            Err(e) => trade_error(e),
+        }
+    } else {
+        match game.buy(order[k]) {
+            Ok(item) => {
+                done = true;
+                trf!("Bought {item}. It is in your pack.", item = c.item(item).name)
+            }
+            Err(e) => trade_error(e),
+        }
+    });
+    // For many buys (or sales) in a row the selection stays: on the item that moved up
+    // into the bought one's row, or the one above when it was the last; none when the
+    // list is empty. A refused trade keeps it where it was.
+    if done {
+        let left = if view.selling { game.pack.iter().filter(|&i| game.can_sell(i)).count() } else { game.market_here().map_or(0, |g| g.len()) };
+        view.pick = next_pick(k, left);
+    }
+}
+
+/// The upright market's sizes in design px (about 14 to 15 sp at the phone's scale): the heading and
+/// the titles, the list's names (the prices one larger).
+const PHONE_TITLE_PX: f32 = 23.0;
+const PHONE_NAME_PX: f32 = 24.0;
+
+/// The market on a phone held upright (`Stack::Market`, the owner's layout, `window_layout::market_panes`):
+/// the item description as a full-width strip on top, the list's titles and the category row, the
+/// list (`PHONE_ROWS` rows), then the money and the buttons in one row. The town's tabs are drawn
+/// by `frame`. The city's description panel is not drawn here (no room for it on a phone held
+/// upright); the quests and rumours show on the main hall's tab.
+fn market_phone(game: &mut Game, assets: &Assets, win: Rect, view: &mut BuildingView, message: &mut Option<String>) {
+    let k = chrome::k();
+    let p = window_layout::market_panes(win);
+    let c = game.content.clone();
+    let heading = own_text("Building", "ItemInfo", n_("Item description"));
+    super::typography::Role::Title.with(|| chrome::shadow_centered(&heading, p.strip.center().x, p.heading_y, PHONE_TITLE_PX * k, MARKET_HEADING));
+    // The same list as the desktop's market: the sell list or the goods, cheapest first, the
+    // titles sort it on a click (`market` has the reasons).
+    let sellable: Vec<usize> = game.pack.entries().filter(|&(_, i)| game.can_sell(i)).map(|(n, _)| n).collect();
+    let goods = game.market_here().unwrap_or_default();
+    let prices: Vec<_> = if view.selling { sellable.iter().map(|&n| game.sell_price(game.pack[n])).collect() } else { goods.iter().map(|&i| game.buy_price(i)).collect() };
+    let names: Vec<&str> = if view.selling { sellable.iter().map(|&n| c.item(game.pack[n]).name.as_str()).collect() } else { goods.iter().map(|&i| c.item(i).name.as_str()).collect() };
+    let own_order = cheapest_first(&prices);
+    let (name_head, price_head) = (own_text("Building", "ItemName", n_("Name")), own_text("Building", "ItemCost", n_("Price")));
+    let cols = market_columns(p.list.w, 18.0 * k);
+    let titles_shown = view.filter.is_empty() && !has_focus(FILTER_KEY);
+    let title_hit = if titles_shown {
+        super::typography::Role::Title.with(|| title_clicked((&name_head, &price_head), (p.list.x + cols.names_cx, p.list.x + cols.price_cx), p.head.y + 15.0 * k, PHONE_TITLE_PX * k))
+    } else {
+        None
+    };
+    if let Some(column) = title_hit {
+        let before = sorted_rows(&own_order, &names, &prices, view.sort);
+        view.sort = view.sort.clicked(column);
+        let after = sorted_rows(&own_order, &names, &prices, view.sort);
+        view.pick = same_pick(&before, &after, view.pick);
+        swallow_input();
+    }
+    let order = sorted_rows(&own_order, &names, &prices, view.sort);
+    let rows: Vec<(Option<ItemId>, String, String, bool)> = if view.selling {
+        order.iter().map(|&n| game.pack[sellable[n]]).map(|i| (Some(i), c.item(i).name.clone(), game.sell_price(i).to_string(), false)).collect()
+    } else {
+        order.iter().map(|&n| goods[n]).map(|i| (Some(i), c.item(i).name.clone(), game.buy_price(i).to_string(), game.buy_price(i) > game.gold)).collect()
+    };
+    let all: Vec<(usize, ItemId)> = rows.iter().enumerate().filter_map(|(n, r)| r.0.map(|i| (n, i))).filter(|&(_, i)| view.group.holds(c.item(i).kind)).collect();
+    let before = item_filter::keep(&c, all.iter().copied(), &view.filter).len();
+    let reply = item_filter::field_with(FILTER_KEY, &mut view.filter, p.head, &[keymap::key(Action::Music)], before, all.len(), false);
+    let shown = item_filter::group_row(&c, assets, &item_filter::row_cells::<8>(p.group), view.group);
+    if shown != view.group {
+        view.group = shown;
+        view.scroll = 0;
+    }
+    if view.filter.is_empty() && !has_focus(FILTER_KEY) {
+        super::typography::Role::Title.with(|| {
+            chrome::shadow_centered(&name_head, p.list.x + cols.names_cx, p.head.y + 15.0 * k, PHONE_TITLE_PX * k, MARKET_HEADING);
+            chrome::shadow_centered(&price_head, p.list.x + cols.price_cx, p.head.y + 15.0 * k, PHONE_TITLE_PX * k, MARKET_HEADING);
+        });
+    }
+    let kept = item_filter::keep(&c, all, &view.filter);
+    let listed: Vec<(Option<ItemId>, String, String, bool)> = kept.iter().map(|(n, _)| rows[*n].clone()).collect();
+    let marks: Vec<Option<std::ops::Range<usize>>> = kept.iter().map(|(_, m)| m.name_range.clone()).collect();
+    if view.pick.is_none() && view.filter.trim().is_empty() && view.group == ItemGroup::All {
+        view.pick = first_pick(rows.len());
+    }
+    let at_pick = view.pick.and_then(|pk| kept.iter().position(|(n, _)| *n == pk));
+    if let Some(n) = price_list(Some(assets), &listed, &marks, at_pick, &mut view.scroll, p.list.x, p.list.y, p.list.w, p.rows, p.row_h, PHONE_NAME_PX) {
+        view.pick = Some(kept[n].0);
+    }
+    if reply.pick {
+        view.pick = kept.first().map(|(n, _)| *n);
+    }
+    if view.pick.is_some_and(|pk| !kept.iter().any(|(n, _)| *n == pk)) {
+        view.pick = None;
+    }
+    if view.pick.is_some_and(|pk| pk >= rows.len()) {
+        view.pick = None;
+    }
+    match view.pick.and_then(|pk| rows.get(pk)).and_then(|r| r.0) {
+        Some(item) => super::item_text::draw(game, assets, item, p.strip, super::item_text::ItemBox::MarketStrip, k),
+        None => {
+            chrome::text_box(p.strip);
+            text_centered(tr("Pick an item from the list."), p.strip.center().x, p.strip.center().y, 18.0 * k, BOX_INK);
+        }
+    }
+    // The money and the buttons in one row: «Инвентарь», the money, «Купить», «Торговая лавка».
+    let [invent_r, money_r, buy_r, shop_r] = p.buttons;
+    let [invent_button, shop_button] = market_list_buttons(view.selling, goods.len());
+    let (invent, shop) = (own_text("Building", "Invent", n_("Inventory")), own_text("Building", "Market", n_("Trading shop")));
+    if button(invent_r.x, invent_r.y, invent_r.w, invent_r.h, &invent, invent_button.enabled) {
+        view.selling = invent_button.shows_pack;
+        view.pick = None;
+        view.scroll = 0;
+    }
+    chrome::silver_frame(money_r, k.max(1.0));
+    gold_group(game, money_r);
+    let label = if view.selling { own_text("Building", "Trade", n_("Sell")) } else { own_text("Building", "Buy", n_("Buy")) };
+    let can = match (view.selling, view.pick) {
+        (true, Some(pk)) => pk < order.len(),
+        (false, Some(pk)) => rows.get(pk).and_then(|r| r.0).is_some_and(|i| game.gold >= game.buy_price(i)),
+        _ => false,
+    };
+    if button_sounding(buy_r.x, buy_r.y, buy_r.w, buy_r.h, &label, can, Cue::Gold) {
+        market_trade(game, &c, view, message, &order, &sellable);
+    }
+    if button(shop_r.x, shop_r.y, shop_r.w, shop_r.h, &shop, shop_button.enabled) {
+        view.selling = shop_button.shows_pack;
+        view.pick = None;
+        view.scroll = 0;
+    }
+    FILTER_KEYS.with(|f| f.set(reply.keys_taken));
 }
 
 /// Sanctuary: spells for sale; a spell bought goes into the hero's book.
@@ -2821,7 +2952,10 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut BuildingView, message:
     let f = window();
     let k = chrome::k();
     let (_, close) = chrome::window_with_title_color(Rect::new(f.x, f.y, f.w, f.h), &title(game), chrome::Skin::Marble, true, BUILDING_AND_ITEM_NAME);
-    window_layout::panel_frame(card_panel_lower(&f));
+    // The market on a phone held upright has no lower pane (its city description is not drawn).
+    if !window_layout::market_stacked() {
+        window_layout::panel_frame(card_panel_lower(&f));
+    }
     if window_layout::tall() {
         picture_pane(game, &f);
     }

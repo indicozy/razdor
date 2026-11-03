@@ -2451,6 +2451,12 @@ pub fn quest_button(r: Rect, label: &str, enabled: bool, hover: bool) {
 }
 
 fn marble_button_tinted(r: Rect, label: &str, enabled: bool, hover: bool, quest_red: bool) {
+    marble_frame(r, enabled, hover, quest_red);
+    button_label(r, label, enabled, hover, quest_red);
+}
+
+/// The marble button's frame alone (its art, or the plain fallback), without its label.
+fn marble_frame(r: Rect, enabled: bool, hover: bool, quest_red: bool) {
     let name = if r.w < 110.0 { "Btn1" } else if r.w < 145.0 { "Btn2" } else { "Btn3" };
     let state = if hover && enabled { "Down" } else { "Up" };
     let fx = if !enabled { Fx::Grey } else if quest_red { Fx::ButtonRed } else { Fx::Plain };
@@ -2468,7 +2474,30 @@ fn marble_button_tinted(r: Rect, label: &str, enabled: bool, hover: bool, quest_
         draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, if enabled { SILVER } else { SILVER_DARK });
         draw_rectangle_lines(r.x + 2.0, r.y + 2.0, r.w - 4.0, r.h - 4.0, 1.0, Color::new(0.0, 0.0, 0.0, 0.5));
     }
-    button_label(r, label, enabled, hover, quest_red);
+}
+
+/// A marble button whose label is drawn at the size `size` (px), not fitted to the button's height
+/// (Razdor's, a phone held upright: the event windows' OK, which must read at a finger's size).
+pub fn marble_button_sized(r: Rect, label: &str, enabled: bool, hover: bool, size: f32) {
+    marble_frame(r, enabled, hover, false);
+    button_label_at(r, label, enabled, size);
+}
+
+/// A button's label centred at the size `size` (px), its shadow as [`button_label`]'s; it is
+/// ellipsized only when it does not fit the width.
+fn button_label_at(r: Rect, label: &str, enabled: bool, size: f32) {
+    let color = if !enabled { Color::new(0.6, 0.6, 0.58, 1.0) } else { Color::new(1.0, 0.98, 0.94, 1.0) };
+    super::typography::Role::Button.with(|| {
+        super::dt_font::legacy_metrics_if(true, || {
+            let label = super::widgets::ellipsize(label, r.w - 10.0, size);
+            let d = measure(&label, size);
+            let x = r.x + (r.w - d.width) / 2.0;
+            let y = r.y + (r.h + d.offset_y) / 2.0 - 1.0;
+            let offset = (size / 22.0).max(1.0);
+            text(&label, x + offset, y + offset, size, Color::new(0.0, 0.0, 0.0, 0.35 * color.a));
+            text(&label, x, y, size, color);
+        })
+    });
 }
 
 /// A button's label, centred, smaller if it must be to fit.

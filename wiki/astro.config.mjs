@@ -37,6 +37,7 @@ export default defineConfig({
 				{ label: 'Телефоны', translations: { en: 'Phones' }, items: [{ autogenerate: { directory: 'phones' } }] },
 				{ label: 'Вопросы', translations: { en: 'FAQ' }, items: [{ autogenerate: { directory: 'faq' } }] },
 				{ label: 'Ссылки', translations: { en: 'Links' }, items: [{ autogenerate: { directory: 'links' } }] },
+				{ label: 'Лицензия', translations: { en: 'License' }, items: [{ autogenerate: { directory: 'license' } }] },
 			],
 		}),
 	],

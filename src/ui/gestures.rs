@@ -51,6 +51,10 @@ pub enum SwipeKind {
     ScrollRows { row_px: f32 },
     /// Not a swipe (the minimap, drawn over the map): a drag there stays the drag it is.
     Off,
+    /// A scrollbar's knob (report 1476): a finger held there is no long press, and a slide is the
+    /// left-button drag that grabs the knob, however long the finger rested first. A long press
+    /// would hold the right button until the lift and the knob would never see the drag.
+    Grab,
     /// An item's cell (`pan::pull_source`): a finger held still there is no long press (the
     /// item's description shows by the finger), and a slide is the held drag, the item pulled
     /// out of its cell (`item_pull`). `row_px`: the scrollable list's row height under it, if any:
@@ -234,10 +238,11 @@ impl GestureMapper {
                     f.left.down = true;
                     f.pointer = Some(g.anchor);
                 } else {
-                    // Not over an item (`SwipeKind::Pull`): a finger held still there shows its
-                    // description and holds no button (the item's pull is the slide).
-                    let on_item = matches!(g.area, Some(SwipeKind::Pull { .. }));
-                    if !g.moved && !self.left_held && !self.right_held && !on_item && self.now - g.since >= LONG_TIME {
+                    // Not over an item (`SwipeKind::Pull`) nor a knob (`Grab`): a finger held still
+                    // there shows its description and holds no button (the item's pull and the
+                    // knob's drag are the slide).
+                    let no_hold = matches!(g.area, Some(SwipeKind::Pull { .. } | SwipeKind::Grab));
+                    if !g.moved && !self.left_held && !self.right_held && !no_hold && self.now - g.since >= LONG_TIME {
                         self.right_held = true;
                         f.right.pressed = true;
                         f.right.down = true;
@@ -783,6 +788,30 @@ mod tests {
         step_in(&mut m, &[touch(1, 100.0, 500.0, Phase::Started)], &areas);
         let start = step_in(&mut m, &[touch(1, 100.0, 520.0, Phase::Moved)], &areas);
         assert_eq!((start.left.pressed, start.pan), (true, (0.0, 0.0)));
+    }
+
+    /// Report 1476: a scrollbar's knob, held still for longer than the long press's delay before
+    /// it is dragged, is still the left-button drag (the knob grabs on the left button only). A
+    /// long press there would hold the right button for the rest of the touch and the drag would
+    /// never reach the knob.
+    #[test]
+    fn a_finger_held_still_on_a_knob_before_it_drags_is_the_left_drag_not_a_long_press() {
+        let mut m = GestureMapper::default();
+        let areas = all(SwipeKind::Grab);
+        step_in(&mut m, &[touch(1, 100.0, 500.0, Phase::Started)], &areas);
+        // Held for 0.67 s (40 frames): past the long press's delay.
+        for _ in 0..40 {
+            let f = step_in(&mut m, &[touch(1, 100.0, 500.0, Phase::Stationary)], &areas);
+            assert_eq!((f.left, f.right), (Edge::default(), Edge::default()), "a knob holds no long press");
+        }
+        assert!(!m.long_pressed());
+        let start = step_in(&mut m, &[touch(1, 100.0, 520.0, Phase::Moved)], &areas);
+        assert_eq!(start.left, Edge { pressed: true, down: true, released: false });
+        assert_eq!((start.right, start.pointer), (Edge::default(), Some((100.0, 500.0))));
+        let follow = step_in(&mut m, &[touch(1, 100.0, 560.0, Phase::Moved)], &areas);
+        assert_eq!((follow.left.down, follow.pointer), (true, Some((100.0, 560.0))), "the pointer follows the finger from its press");
+        let lift = step_in(&mut m, &[touch(1, 100.0, 560.0, Phase::Ended)], &areas);
+        assert_eq!(lift.left, Edge { pressed: false, down: false, released: true });
     }
 
     #[test]

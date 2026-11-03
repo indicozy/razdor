@@ -754,7 +754,7 @@ pub fn squad(
     let win = window_layout::window();
     let title = chrome::ui_text("Army", "Title").filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr("The hero's characteristics and army").to_string());
     let (_, close) = chrome::window(win, &title, chrome::Skin::Marble, true);
-    let close = close_button(win) || close;
+    let close = close_button(win, true) || close;
     window_layout::panel_frame(window_layout::upper(win));
     window_layout::panel_frame(window_layout::lower(win));
     let at = |x: f32, y: f32, w: f32, h: f32| window_layout::at(win, x, y, w, h);
@@ -1241,11 +1241,13 @@ pub(super) fn class_wage(c: &Content, id: UnitId) -> i32 {
 /// or filled, is drawn on the previewed type's card.
 /// The stacked army and hero windows' «Закрыть» under the formation, in thumb reach: the same
 /// close as the title's cross (`true` when pressed). Landscape has none.
-fn close_button(win: Rect) -> bool {
+/// `army`: the army window, whose phone «Закрыть» is the owner's normal 44 dp button (2026-11-02);
+/// the hero window keeps its row as it was.
+fn close_button(win: Rect, army: bool) -> bool {
     if !window_layout::portrait() {
         return false;
     }
-    let Some(r) = bottom_row_rects(win).close else { return false };
+    let Some(r) = bottom_row_rects(win, army).close else { return false };
     super::widgets::button(r.x, r.y, r.w, r.h, tr("Close"), true)
 }
 
@@ -1262,7 +1264,7 @@ struct BottomRow {
 /// (`window_layout::army_close`), on the close's line when held upright and at the window's foot
 /// when sideways. Sideways they stack under the diary's column ([`sideways_row`]), so they never
 /// cover the hero's panel.
-fn bottom_row_rects(win: Rect) -> BottomRow {
+fn bottom_row_rects(win: Rect, army: bool) -> BottomRow {
     let k = chrome::k();
     let base = window_layout::army_close(win);
     // The buttons grow with the text size (`button_grow`, the owner's decision of 2026-10-31): their
@@ -1270,7 +1272,12 @@ fn bottom_row_rects(win: Rect) -> BottomRow {
     let h = base.h * super::display::button_grow();
     let bottom = base.y + base.h;
     if window_layout::portrait() {
-        let (whole, close, expand) = bottom_row(win, bottom - h, h, 12.0 * k, 8.0 * k);
+        // A phone's «Закрыть» is a normal button (44 dp tall, the owner's notes of 2026-11-02), a little
+        // wider than the desktop's share, its label bigger with it; the desktop keeps the grown size.
+        // The widget grows its height with the text size too, so the height is divided by that growth.
+        let phone = super::display::dp_px().filter(|_| army).map(|dp| (44.0 * dp / super::display::button_grow(), 0.44));
+        let (h, share) = phone.unwrap_or((h, 0.36));
+        let (whole, close, expand) = bottom_row(win, bottom - h, h, 12.0 * k, 8.0 * k, share);
         return BottomRow { whole, close: Some(close), expand };
     }
     let (whole, expand) = sideways_row(win, k, win.bottom() - h - 8.0 * k, h);
@@ -1411,10 +1418,10 @@ impl HeroView {
 
 /// The phone's bottom row of the hero window, one line of height `h` at `y` inside `win` (`pad`
 /// from each side, `gap` between): «Весь список» left, «Закрыть» centred (about 36% of the row),
-/// «Развернуть» right. Returns the three rects in that order.
-fn bottom_row(win: Rect, y: f32, h: f32, pad: f32, gap: f32) -> (Rect, Rect, Rect) {
+/// «Развернуть» right; «Закрыть» takes `share` of the row. Returns the three rects in that order.
+fn bottom_row(win: Rect, y: f32, h: f32, pad: f32, gap: f32, share: f32) -> (Rect, Rect, Rect) {
     let row = (win.w - 2.0 * pad).max(0.0);
-    let close_w = row * 0.36;
+    let close_w = row * share;
     let side_w = ((row - close_w) / 2.0 - gap).max(0.0);
     let left = Rect::new(win.x + pad, y, side_w, h);
     let close = Rect::new(left.right() + gap, y, close_w, h);
@@ -1523,11 +1530,13 @@ fn entry_parts(tab: Tab, phone: bool) -> Vec<EntryPart> {
 /// text in SanSerif less 25, 25, 125, a yellow, 0xae24c0; a history entry's date is in the
 /// heading's orange and font.
 fn diary_lines(row: &razdor::rules::journal::Row, tab: Tab, phone: bool, room: f32, title: f32, body: f32) -> Vec<DiaryLine> {
-    diary_lines_of(row, tab, &entry_parts(tab, phone), room, title, body)
+    diary_lines_of(row, tab, &entry_parts(tab, phone), room, title, body, false)
 }
 
 /// [`diary_lines`] for the given `parts` (the phone's entry, or the reader's full one).
-fn diary_lines_of(row: &razdor::rules::journal::Row, tab: Tab, parts: &[EntryPart], room: f32, title: f32, body: f32) -> Vec<DiaryLine> {
+/// `centre`: the phone's window sets every line centred with no first-line indent (the owner's
+/// request, 2026-11-02); the desktop and the reader keep the justified paragraphs.
+fn diary_lines_of(row: &razdor::rules::journal::Row, tab: Tab, parts: &[EntryPart], room: f32, title: f32, body: f32, centre: bool) -> Vec<DiaryLine> {
     use super::dt_font::{with_original_face, Face};
     use razdor::dt::markup::{Align, Ink};
     let own = |key: &str, ours: &'static str| chrome::ui_text("Hero", key).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr(ours).to_string());
@@ -1547,7 +1556,8 @@ fn diary_lines_of(row: &razdor::rules::journal::Row, tab: Tab, parts: &[EntryPar
             EntryPart::Description => out.extend(rows(&own("QuestFullDescript", n_("Description:")), orange, Align::Centre, Face::Bold, body)),
             EntryPart::Text => {
                 for line in row.text.lines().map(str::trim).filter(|l| !l.is_empty()) {
-                    out.extend(rows(&format!("{}{line}", razdor::dt::markup::INDENT), yellow, Align::Justify, Face::Body, body));
+                    let (indent, align) = if centre { ("", Align::Centre) } else { (razdor::dt::markup::INDENT, Align::Justify) };
+                    out.extend(rows(&format!("{indent}{line}"), yellow, align, Face::Body, body));
                 }
             }
             EntryPart::TimeHeading => out.extend(rows(&own("QuestGetTime", n_("Time since the quest was received:")), orange, Align::Centre, Face::Bold, body)),
@@ -1665,7 +1675,7 @@ fn diary_reader(row: &razdor::rules::journal::Row, tab: Tab, title: f32, body: f
     let bar = Rect::new(inner.right() - pad - bar_w, body_y, bar_w, body_h);
     let text = Rect::new(inner.x + pad, body_y, (bar.x - 4.0 * k - (inner.x + pad)).max(0.0), body_h);
     let room = text.w - 16.0 * k;
-    let lines = super::dt_font::legacy_metrics_if(true, || diary_lines_of(row, tab, &reader_parts(tab), room, title, body));
+    let lines = super::dt_font::legacy_metrics_if(true, || diary_lines_of(row, tab, &reader_parts(tab), room, title, body, false));
     let line_h = (body * 1.15).round();
     let shown = ((text.h - 12.0 * k) / line_h).floor().max(1.0) as usize;
     chrome::text_box_base(text);
@@ -1771,6 +1781,267 @@ fn diary_list_reader(game: &Game, rows: &[razdor::rules::journal::Row], lines: &
     (closed || pressed || key(KeyCode::Escape), picked)
 }
 
+/// The phone's text size of the diary window, in dp at the text size 1 (`phone_diary`): the tabs,
+/// the entry list's titles and the entry's text take it, grown with «Размер текста».
+const DIARY_PHONE_TEXT: f32 = 13.5;
+
+/// The parts of the phone's diary window (`phone_diary`) inside its marble frame `inner`, at one unit
+/// one dp (`k`) and the text size `g`: the four tabs in a row on top, «Закрыть» centred at the foot,
+/// and between them the entry list (`list`, its scrollbar `list_bar`) and the picked entry (`head`,
+/// the heading band, and `entry`, its box, scrollbar `entry_bar`). Held upright the list takes 40 %
+/// of the height over the entry; held sideways it takes 40 % of the width left of the entry.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PhoneDiary {
+    tabs: [Rect; 4],
+    list: Rect,
+    list_bar: Rect,
+    head: Rect,
+    entry: Rect,
+    entry_bar: Rect,
+    close: Rect,
+}
+
+fn phone_diary_areas(inner: Rect, k: f32, g: f32, upright: bool) -> PhoneDiary {
+    let pad = 8.0 * k;
+    let gap = 6.0 * k;
+    // A tab and the close button are 44 dp tall (the owner's touch rule), grown with the text size.
+    let th = 44.0 * k * g;
+    let bar = 24.0 * k;
+    let head_h = DIARY_PHONE_TEXT * k * g * 1.6;
+    let w = (inner.w - 2.0 * pad).max(0.0);
+    let top_y = inner.y + pad;
+    // Held upright the four tabs lie two by two, so each keeps its word whole at the text size
+    // (the hub's narrow layout); sideways they are one row.
+    let close_w = (140.0 * k).min(w);
+    // Sideways «Закрыть» ends the tabs' row (the four tabs share the rest of it), and the lists run
+    // down to the window's bottom pad.
+    let (cols, rows, tabs_w) = if upright { (2, 2, w) } else { (4, 1, w - close_w - gap) };
+    let cell = ((tabs_w - (cols as f32 - 1.0) * gap) / cols as f32).max(0.0);
+    let tabs = std::array::from_fn(|i| Rect::new(inner.x + pad + (i % cols) as f32 * (cell + gap), top_y + (i / cols) as f32 * (th + gap), cell, th));
+    let tabs_h = rows as f32 * th + (rows as f32 - 1.0) * gap;
+    let top = top_y + tabs_h + gap;
+    let (close, bottom) = if upright {
+        let close = Rect::new(inner.center().x - close_w / 2.0, inner.bottom() - pad - th, close_w, th);
+        (close, (close.y - gap).max(top))
+    } else {
+        (Rect::new(inner.right() - pad - close_w, top_y, close_w, th), (inner.bottom() - pad).max(top))
+    };
+    let (list, head, entry) = if upright {
+        let list = Rect::new(inner.x + pad, top, w, ((bottom - top) * 0.4).floor());
+        let head = Rect::new(inner.x + pad, list.bottom() + gap, w, head_h);
+        let entry = Rect::new(inner.x + pad, head.bottom(), w, (bottom - head.bottom()).max(0.0));
+        (list, head, entry)
+    } else {
+        let list = Rect::new(inner.x + pad, top, ((w - gap) * 0.4).floor(), bottom - top);
+        let x = list.right() + gap;
+        let ew = (inner.right() - pad - x).max(0.0);
+        // No heading sideways: the entry takes the whole column (`head` is empty).
+        let head = Rect::new(x, top, ew, 0.0);
+        let entry = Rect::new(x, top, ew, (bottom - top).max(0.0));
+        (list, head, entry)
+    };
+    let bar_of = |r: Rect| Rect::new(r.right() - bar, r.y, bar, r.h);
+    PhoneDiary { tabs, list, list_bar: bar_of(list), head, entry, entry_bar: bar_of(entry), close }
+}
+
+/// A list row's title in at most two lines of `room` at `size` (in the font in use): a longer
+/// title keeps its first line and cuts the rest with an ellipsis on the second.
+fn two_lines(title: &str, room: f32, size: f32) -> Vec<String> {
+    let width = |c: char| measure(c.encode_utf8(&mut [0; 4]), size).width;
+    let mut lines: Vec<String> = razdor::dt::markup::wrap(title, room, width).into_iter().map(|r| r.text).collect();
+    if lines.len() > 2 {
+        let rest = lines.split_off(1).join(" ");
+        lines.push(ellipsize(&rest, room, size));
+    }
+    lines
+}
+
+/// The hero window on a phone is the diary only (a player's report, the owner's decision of
+/// 2026-11-02): the bottom bar's diary button and J open it. One window over the screen less the
+/// safe area and the bottom bar, one unit one dp (as the hub's and the update window's). Its
+/// marble frame and title; the four tabs in a row; under them the tab's entries and the picked
+/// entry's full text (`reader_parts`) — held upright the list over the entry, sideways the list
+/// left of it — and «Закрыть» at the foot (held sideways, at the end of the tabs row). The portrait, the stats, the pack, the money
+/// panels and the artifact box are on the bottom bar and in the army window.
+fn phone_diary(game: &mut Game, assets: &Assets, view: &mut HeroView, message: &mut Option<String>, dp: f32) -> Option<Screen> {
+    use razdor::dt::markup::Ink;
+    use super::dt_font::{legacy_metrics_if, with_original_face, Face};
+    let bar = super::world_view::window_backdrop(game, assets, Some(super::game_bar::BarButton::Hero));
+    let _scale = super::display::enter_window_scale(Some(dp));
+    let k = chrome::k();
+    let g = super::display::button_grow();
+    let (sw, sh) = (screen_width(), screen_height());
+    let safe = super::display::safe_area();
+    let m = 6.0 * dp;
+    let win = Rect::new(safe.left + m, safe.top + m, sw - safe.left - safe.right - 2.0 * m, sh - safe.top - chrome::bar_height() - 2.0 * m);
+    let ru = razdor::i18n::lang() == razdor::i18n::Lang::Ru;
+    let (inner, closed) = chrome::window(win, tr(n_("Diary")), chrome::Skin::Marble, true);
+    let text = DIARY_PHONE_TEXT * k * g;
+    let a = phone_diary_areas(inner, k, g, window_layout::portrait());
+
+    // The tabs: a marble button each, the picked one ringed in gold.
+    let mut switch = None;
+    for (i, tab) in Tab::ALL.into_iter().enumerate() {
+        let r = a.tabs[i];
+        let over = !input_blocked() && mouse_in(r.x, r.y, r.w, r.h);
+        // At the entry text's size; the button's label is cut only if a word is wider than its tab.
+        chrome::marble_button_sized(r, tr(diary_tab_label(tab)), true, over, text);
+        if tab == view.tab {
+            draw_rectangle_lines(r.x, r.y, r.w, r.h, 3.0 * k, chrome::GOLD);
+        }
+        if over && clicked() {
+            switch = Some(tab);
+        }
+    }
+    let at = Tab::ALL.iter().position(|&t| t == view.tab).unwrap_or(0);
+    if key(KeyCode::Right) {
+        switch = Some(Tab::ALL[(at + 1) % Tab::ALL.len()]);
+    }
+    if key(KeyCode::Left) {
+        switch = Some(Tab::ALL[(at + Tab::ALL.len() - 1) % Tab::ALL.len()]);
+    }
+    if let Some(tab) = switch.filter(|&t| t != view.tab) {
+        cue(Cue::Button);
+        *view = HeroView { scroll: view.scroll, tab, ..HeroView::default() };
+    }
+
+    let rows = diary_rows(game, view.tab);
+    if view.pick >= rows.len() {
+        view.pick = 0;
+    }
+    if key(KeyCode::Down) && view.pick + 1 < rows.len() {
+        view.pick += 1;
+        view.text_scroll = 0;
+    }
+    if key(KeyCode::Up) && view.pick > 0 {
+        view.pick -= 1;
+        view.text_scroll = 0;
+    }
+
+    // The entry list: the tab's chapters and entries (`journal_lines`), two lines a row at most.
+    let lines = super::story::journal_lines(&rows);
+    let list_bar = a.list_bar;
+    let list = Rect::new(a.list.x, a.list.y, a.list.w - list_bar.w - 4.0 * k, a.list.h);
+    let row_h = (48.0 * k).max(text * 2.5);
+    let fits = ((list.h - 8.0 * k) / row_h).floor().max(1.0) as usize;
+    chrome::text_box_base(list);
+    swipe_rows(list, row_h);
+    if mouse_in(list.x, list.y, list.w, list.h) {
+        let w = wheel();
+        if w < 0.0 && view.list_scroll + fits < lines.len() {
+            view.list_scroll += 1;
+        } else if w > 0.0 {
+            view.list_scroll = view.list_scroll.saturating_sub(1);
+        }
+    }
+    let picked_line = lines.iter().position(|l| *l == super::story::Line::Row(view.pick)).unwrap_or(0);
+    if key(KeyCode::Down) || key(KeyCode::Up) {
+        if picked_line < view.list_scroll {
+            view.list_scroll = picked_line;
+        } else if picked_line >= view.list_scroll + fits {
+            view.list_scroll = picked_line + 1 - fits;
+        }
+    }
+    view.list_scroll = view.list_scroll.min(lines.len().saturating_sub(fits));
+    scrollbar_always(list_bar, &mut view.list_scroll, fits, lines.len());
+    chrome::text_box_sides(list);
+    chrome::silver_frame(list, k.max(1.0));
+    let center = list.x + list.w / 2.0;
+    let room = list.w - 12.0 * k;
+    if rows.is_empty() {
+        legacy_metrics_if(true, || {
+            with_original_face(Face::Body, || {
+                let note = super::story::empty_note(view.tab);
+                let notes = wrap_cached(note, room, text);
+                let mut y = list.center().y - notes.len() as f32 * text * 0.65;
+                for l in &notes {
+                    chrome::shadow_centered(l, center, y, text, DIM);
+                    y += text * 1.3;
+                }
+            })
+        });
+    }
+    legacy_metrics_if(true, || {
+        for (n, line) in lines.iter().enumerate().skip(view.list_scroll).take(fits) {
+            let ry = list.y + 4.0 * k + (n - view.list_scroll) as f32 * row_h;
+            let r = Rect::new(list.x + 2.0 * k, ry, list.w - 4.0 * k, row_h);
+            match *line {
+                super::story::Line::Heading(chapter) => {
+                    let heading = game.journal.chapter_heading(chapter);
+                    with_original_face(Face::Bold, || {
+                        let t = ellipsize(&heading, room, text);
+                        chrome::shadow_centered(&t, center, ry + row_h * 0.7, text, Color::from_rgba(235, 165, 75, 255));
+                    });
+                }
+                super::story::Line::Row(idx) => {
+                    let picked = idx == view.pick;
+                    super::hub_view::row_paint(r, picked);
+                    let titles = with_original_face(Face::Title, || two_lines(&rows[idx].title, room, text));
+                    let step = text * 1.15;
+                    let first = ry + (row_h - titles.len() as f32 * step) / 2.0;
+                    with_original_face(Face::Title, || {
+                        for (i, t) in titles.iter().enumerate() {
+                            chrome::shadow_centered(t, center, first + i as f32 * step + text * 0.9, text, ink_color(Ink::Plain));
+                        }
+                    });
+                    if mouse_in(list.x, ry, list.w, row_h) && clicked() && !picked {
+                        view.pick = idx;
+                        view.text_scroll = 0;
+                    }
+                }
+            }
+        }
+    });
+
+    // The picked entry under its heading (`QuestDescript`): its full text, scrolled by swipe, wheel
+    // and the bar.
+    let head_text = chrome::ui_text("Hero", "QuestDescript").filter(|_| ru).unwrap_or_else(|| tr(n_("Diary entry")).to_string());
+    if a.head.h > 0.0 {
+        with_original_face(Face::Title, || {
+            let t = ellipsize(&head_text, a.head.w, text);
+            chrome::shadow_centered(&t, a.head.center().x, a.head.bottom() - 4.0 * k, text, ACCENT);
+        });
+    }
+    let entry_bar = a.entry_bar;
+    let entry = Rect::new(a.entry.x, a.entry.y, a.entry.w - entry_bar.w - 4.0 * k, a.entry.h);
+    chrome::text_box_base(entry);
+    let line_h = (text * 1.15).round();
+    let body_room = entry.w - 16.0 * k;
+    let shown = ((entry.h - 12.0 * k) / line_h).floor().max(1.0) as usize;
+    swipe_rows(entry, line_h);
+    let entry_lines = legacy_metrics_if(true, || rows.get(view.pick).map_or_else(Vec::new, |row| diary_lines_of(row, view.tab, &reader_parts(view.tab), body_room, text, text, true)));
+    if mouse_in(entry.x, entry.y, entry.w, entry.h) {
+        let w = wheel();
+        if w < 0.0 && view.text_scroll + shown < entry_lines.len() {
+            view.text_scroll += 1;
+        } else if w > 0.0 {
+            view.text_scroll = view.text_scroll.saturating_sub(1);
+        }
+    }
+    view.text_scroll = view.text_scroll.min(entry_lines.len().saturating_sub(shown));
+    scrollbar_always(entry_bar, &mut view.text_scroll, shown, entry_lines.len());
+    chrome::text_box_sides(entry);
+    chrome::silver_frame(entry, k.max(1.0));
+    legacy_metrics_if(true, || {
+        for (n, line) in entry_lines.iter().skip(view.text_scroll).take(shown).enumerate() {
+            let y = entry.y + 6.0 * k + n as f32 * line_h + text * 0.85;
+            draw_markup_row_face(&line.row, entry.x + 8.0 * k, y, body_room, line.size, line.face, Some(line.color));
+        }
+    });
+
+    let pressed = button(a.close.x, a.close.y, a.close.w, a.close.h, tr("Close"), true);
+    // The item held is the pointer; closing the window puts it back in the pack (`App::frame`).
+    draw_held(game, assets);
+    if closed || pressed || key(KeyCode::Escape) || key(keymap::key(Action::Journal)) {
+        *message = None;
+        return Some(Screen::WorldMap);
+    }
+    if bar.is_some() {
+        *message = None;
+    }
+    bar
+}
+
 /// The hero window («Личные характеристики и инвентарь Героя»), the bottom bar's flag (side
 /// window 5; built by 0x4d8638, its fixed parts drawn by 0x4d1814): the hero's panel on the
 /// left as in the army window; the pack's 5×5 squares with its scroll bar; the item
@@ -1785,6 +2056,9 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     // A phone's diary reader (`view.reader`) covers this window: the window below takes no input
     // while it is open (the reader's own input is taken at its end).
     let phone = super::display::dp_px().is_some();
+    if let Some(dp) = super::display::dp_px() {
+        return phone_diary(game, assets, view, message, dp);
+    }
     let below_blocked = input_blocked();
     let reading = phone && view.reading();
     if reading {
@@ -1798,7 +2072,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     let win = window_layout::window();
     let title = own("Title", n_("The hero's characteristics and inventory"));
     let (_, close) = chrome::window(win, &title, chrome::Skin::Marble, true);
-    let close = close_button(win) || close;
+    let close = close_button(win, false) || close;
     // The original's right side, window-relative.
     let s = HERO_S * k;
     // Its origin is the right side's (248, 28) as the window places it (below the left column when stacked).
@@ -1870,7 +2144,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     // Sideways a phone's bottom buttons stack under the diary's right column (no «Закрыть» there):
     // the entry box gives up that strip, so «Весь список» does not cover its text.
     if phone && !window_layout::portrait() {
-        column.entry = entry_above_row(column.entry, &bottom_row_rects(win), k);
+        column.entry = entry_above_row(column.entry, &bottom_row_rects(win, false), k);
     }
     if let Some(desc) = column.desc {
         heading("ItemDescript", n_("Item description"), desc);
@@ -2061,7 +2335,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     // (portrait), «Развернуть» (the picked entry in its reader) right; sideways «Весь список» stands
     // above «Развернуть». Drawn before the readers, which cover them while they are open.
     if phone {
-        let row = bottom_row_rects(win);
+        let row = bottom_row_rects(win, false);
         let (left, right) = (row.whole, row.expand);
         if button(left.x, left.y, left.w, left.h, tr("Whole list"), whole_list_enabled(rows.len())) {
             view.list_reader = true;
@@ -2253,7 +2527,7 @@ mod tests {
         let dp = 2.75;
         let h = 44.0 * dp;
         let win = Rect::new(4.0, 130.0, 1080.0, 1900.0);
-        let (left, close, right) = super::bottom_row(win, 1700.0, h, 12.0, 8.0);
+        let (left, close, right) = super::bottom_row(win, 1700.0, h, 12.0, 8.0, 0.36);
         for r in [left, close, right] {
             assert!(r.x >= win.x && r.right() <= win.right(), "{r:?} inside the window");
             assert!(r.h >= 44.0 * dp, "{r:?} at least 44 dp tall");
@@ -2526,5 +2800,36 @@ mod tests {
         let l = promo_look(ms, ms);
         assert_eq!((l.frame, l.along, l.all_glow), (49, 1.0, 0));
     }
-}
 
+    #[test]
+    fn the_phone_diary_stacks_its_parts_upright_and_splits_them_sideways() {
+        // A phone's window at 2.75 px a dp: about 363 x 620 dp.
+        let inner = Rect::new(10.0, 20.0, 1000.0, 1700.0);
+        let k = 2.75;
+        let up = super::phone_diary_areas(inner, k, 1.0, true);
+        // The four tabs on top (two rows held upright), «Закрыть» 44 dp tall at the foot, all inside the frame.
+        assert!(up.tabs[0].y == up.tabs[1].y && up.tabs[2].y == up.tabs[3].y && up.tabs[2].y > up.tabs[0].y);
+        assert!(up.tabs.iter().all(|t| t.bottom() <= up.list.y));
+        let side_tabs = super::phone_diary_areas(inner, k, 1.0, false).tabs;
+        assert!(side_tabs.iter().all(|t| t.y == side_tabs[0].y));
+        assert_eq!(up.close.h, 44.0 * k);
+        assert!(up.close.bottom() <= inner.bottom() && up.close.y >= up.entry.bottom());
+        // The list over the heading and the entry, the list taking 40 % of the height.
+        assert!(up.list.bottom() <= up.head.y && up.head.bottom() <= up.entry.y);
+        assert!(up.list.h < up.entry.h);
+        let avail = up.close.y - 6.0 * k - up.list.y;
+        assert!((up.list.h - 0.4 * avail).abs() <= 1.0);
+        // Sideways: the list left, 40 % of the width, the entry right, both down to the window's pad.
+        let side = super::phone_diary_areas(inner, k, 1.0, false);
+        assert!(side.list.right() < side.entry.x);
+        assert!((side.list.w - 0.4 * (inner.w - 22.0 * k)).abs() <= 1.0);
+        assert_eq!(side.list.y, side.head.y);
+        assert_eq!(side.close.h, 44.0 * k);
+        assert!(side.close.y < side.list.y && side.close.right() <= inner.right());
+        assert!(side.tabs[3].right() < side.close.x);
+        assert!(side.entry.bottom() <= inner.bottom());
+        // The scrollbars are 24 dp wide, at the right of their area.
+        assert_eq!(up.list_bar.w, 24.0 * k);
+        assert_eq!(up.list_bar.right(), up.list.right());
+    }
+}

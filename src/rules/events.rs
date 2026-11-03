@@ -1247,6 +1247,24 @@ impl EventEngine {
         out
     }
 
+    /// Razdor's cheat `event N` (not in the original): fires event `id` now, its conditions
+    /// ignored, the hall's check left out. Opened as [`EventEngine::take`] opens an entry once
+    /// the check has passed (the confirm-question clearing, then the window, then the events
+    /// run on). Nothing when a question waits, a window holds the scan, the scenario has
+    /// ended, or no event has that number.
+    pub fn force(&mut self, w: &mut dyn EventWorld, id: EventId) -> Vec<EventOutcome> {
+        let mut out = Vec::new();
+        if self.pending.is_none() && self.ended.is_none() && !self.held && self.event(id).is_some() {
+            let e = self.ev(id);
+            if e.conditions.confirm_question != 0 && e.question.is_empty() && e.message.is_empty() {
+                self.set_event_field(id, 76, 0);
+            }
+            self.open(id, w, &mut out, 0);
+            self.run(w, &mut out);
+        }
+        out
+    }
+
     // ---------------------------------------------------------------------------------------
     // The scan
     // ---------------------------------------------------------------------------------------

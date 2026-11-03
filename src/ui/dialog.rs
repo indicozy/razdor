@@ -465,7 +465,6 @@ pub fn resource_icon(r: Resource, cx: f32, cy: f32, s: f32) {
 /// 0x48efd0 / 0x48d830), with no ring or frame. A row grows the window by its icons, 8, the
 /// 16 of its caption and 8 more (0x4a9650: 0x2f + 8 + 0x10 + 8).
 const UNIT_ICON: f32 = 46.0;
-const UNIT_ROW: f32 = 79.0;
 /// The side picture of a unit: its bust (type record +0x14, 92 × 92: 0x48efd0).
 const UNIT_BUST: f32 = 92.0;
 
@@ -475,9 +474,10 @@ const UNIT_BUST: f32 = 92.0;
 /// `win_w` is the window's width in its own design pixels: the original's window is always
 /// 634 wide (`EVENT_W`), and Razdor's phone and large windows are not, so the row follows
 /// the window it is in.
-fn unit_cells(n: usize, win_w: i32) -> Vec<f32> {
+fn unit_cells(n: usize, win_w: i32, rs: f32) -> Vec<f32> {
     let n = n.min(4) as i32;
-    (0..n).map(|i| ((win_w * (i + 1)) / (n + 1) - 23) as f32).collect()
+    let half = (23.0 * rs).round() as i32;
+    (0..n).map(|i| ((win_w * (i + 1)) / (n + 1) - half) as f32).collect()
 }
 
 /// Razdor's scrollbar beside a scrolled event text (not in the original): 12 of the window's
@@ -532,6 +532,8 @@ struct EventFrame {
     box_x: f32,
     box_w: f32,
     box_h: f32,
+    /// The picture stacked above the text box (held upright, [`stacked_top`]); 0 when it is beside it.
+    top: f32,
 }
 
 const EVENT_W: f32 = 634.0;
@@ -547,6 +549,48 @@ const EVENT_MIN_BOX: f32 = 92.0;
 const EVENT_MAX_BOX: f32 = 499.0;
 /// The window's height besides the box and the rows under it (0x4aa929: + 0x77).
 const EVENT_REST: f32 = 119.0;
+
+/// A phone held upright (Razdor's, the owner's notes of 2026-11-02, for the victory, event and
+/// story windows): their OK is a normal centred button of 120 × 44 dp with a 15.2 dp label; a
+/// reward window's text is 1.1 times its size, its picture 1.25 times, its reward icons 1.3 times
+/// (`REWARD_ICON`). The learnt-spell window keeps its OK and its size and only gets
+/// [`LEARNT_PAD_DP`] of padding on every side.
+const OK_W_DP: f32 = 120.0;
+const OK_H_DP: f32 = 44.0;
+const OK_LABEL_DP: f32 = 13.8;
+const BIG_TEXT: f32 = 1.05;
+const BIG_PICTURE: f32 = 1.25;
+const REWARD_ICON: f32 = 1.3;
+const LEARNT_PAD_DP: f32 = 14.0;
+
+/// The learnt-spell window: spells and no text (the game's «Выучены новые заклинания»).
+fn learnt_look(d: &Dialog) -> bool {
+    !d.spells.is_empty() && d.marked.is_none() && d.text.is_empty()
+}
+
+/// The reward look (see [`OK_W_DP`]): a phone held upright, an event or victory window with a
+/// picture or rewards. Not the defeat, the questions, the noon report or the learnt-spell one.
+fn big_look(d: &Dialog, up: bool) -> bool {
+    up && !d.defeat && !d.question && !d.resource_report && !learnt_look(d)
+        && (d.picture.is_some() || !d.resources.is_empty() || !d.items.is_empty() || !d.joined.is_empty() || !d.left.is_empty() || !d.lost.is_empty() || !d.spells.is_empty())
+}
+
+/// Whether the OK is the phone's large one: a phone held upright, not the defeat, a question, the
+/// noon report or the learnt-spell window.
+fn ok_look(d: &Dialog, up: bool) -> bool {
+    up && !d.defeat && !d.question && !d.resource_report && !learnt_look(d)
+}
+
+/// A resource row's pitch in the original's pixels: the report's [`REPORT_ROW`], and for the reward
+/// look (`rs` = 1 is the original's: 34 + 70 = 104) the icon's size as `rs` grows it.
+fn res_pitch(rs: f32, o: f32, report: bool) -> f32 {
+    if report { REPORT_ROW * o } else { (34.0 + 70.0 * rs) * o }
+}
+
+/// A units row's height in the original's pixels (`rs` = 1: 33 + 46 = 79, [`UNIT_ROW`]).
+fn unit_row(rs: f32) -> f32 {
+    33.0 + UNIT_ICON * rs
+}
 
 /// The message the phone's text base is read for (`display::text_base`): the smallest large
 /// window, its box at its minimum and no picture. Tooltips and titles read it too, so that a
@@ -578,11 +622,36 @@ fn phone_fit(text_box: f32, floor: f32, below: f32, avail: f32) -> (f32, f32) {
     (box_h, (avail - box_h).clamp(0.0, below))
 }
 
-fn event_frame(side: Option<(f32, f32)>, text_h: f32, below: f32, max_box: f32, w: f32) -> EventFrame {
-    let side_w = side.map_or(0.0, |(pw, _)| pw + 14.0);
-    let min_box = side.map_or(EVENT_MIN_BOX, |(_, ph)| ph.max(EVENT_MIN_BOX));
+/// The gap between a picture stacked above the text box and the box (original px, the desktop's gap
+/// under a text box).
+const STACK_GAP: f32 = 10.0;
+
+/// The height a stacked picture takes above the text box, in original px: the picture's own height
+/// from one px under the content's top, then [`STACK_GAP`]. 0 when the picture is not stacked (it
+/// sits beside the box, or there is none). Pure.
+fn stacked_top(stacked: bool, side: Option<(f32, f32)>) -> f32 {
+    match (stacked, side) {
+        (true, Some((_, ph))) => 1.0 + ph + STACK_GAP,
+        _ => 0.0,
+    }
+}
+
+/// Where the picture's left edge sits across the window's content `w` wide (original px). Beside the
+/// text it is the desktop's (20 px: the box's 19 and 1); stacked it is centred across the window.
+/// Pure.
+fn picture_x(stacked: bool, w: f32, pw: f32) -> f32 {
+    if stacked { ((w - pw) / 2.0).max(0.0) } else { 20.0 }
+}
+
+/// The event window's frame (original px). Stacked (`stacked`: held upright with a picture, a phone
+/// choice, not in the original), the picture stands on top at full size and the text box takes the
+/// frame's full inner width under it; else the picture is beside the box as the original has it.
+fn event_frame(side: Option<(f32, f32)>, stacked: bool, text_h: f32, below: f32, max_box: f32, w: f32) -> EventFrame {
+    let top = stacked_top(stacked, side);
+    let side_w = if stacked { 0.0 } else { side.map_or(0.0, |(pw, _)| pw + 14.0) };
+    let min_box = if stacked { EVENT_MIN_BOX } else { side.map_or(EVENT_MIN_BOX, |(_, ph)| ph.max(EVENT_MIN_BOX)) };
     let box_h = (text_h + 2.0 * EVENT_PAD).max(min_box).min(max_box.max(min_box));
-    EventFrame { w, h: box_h + below + EVENT_REST, box_x: 19.0 + side_w, box_w: w - 38.0 - side_w, box_h }
+    EventFrame { w, h: top + box_h + below + EVENT_REST, box_x: 19.0 + side_w, box_w: w - 38.0 - side_w, box_h, top }
 }
 
 /// Where the window stands: centred over the map view above the bottom bar (the original's
@@ -599,6 +668,10 @@ struct EventLayout {
     size: f32,
     line: f32,
     side: Option<(f32, f32)>,
+    /// The picture stands above the text box (held upright, see [`event_frame`]).
+    stacked: bool,
+    /// The width the picture takes beside the text box (0 when stacked), with its 14 px gap.
+    side_w: f32,
     room: f32,
     lines: Vec<String>,
     rows: Vec<MarkupRow>,
@@ -611,6 +684,8 @@ struct EventLayout {
     below: f32,
     f: EventFrame,
     shown: usize,
+    /// The reward icons' size factor (`REWARD_ICON` in the reward look, else 1).
+    rs: f32,
 }
 
 /// A text row's height: the defeat report's empty row is the gap font's (0x47e46c), shorter
@@ -717,19 +792,25 @@ fn event_layout(d: &Dialog, o: f32, t: f32, w: f32, fit: bool) -> EventLayout {
     let sh = screen_height();
     let size = super::dt_font::sheet_size(super::dt_font::Face::Subtitle, t);
     let line = EVENT_LINE * t;
+    // The reward look (`big_look`): its picture and reward icons grow (`pk`, `rs`).
+    let up = fit && super::window_layout::portrait();
+    let big = big_look(d, up);
+    let (pk, rs) = if big { (BIG_PICTURE, REWARD_ICON) } else { (1.0, 1.0) };
     // A picture at the side takes its width and 14 more from the text box.
     let side = match &d.picture {
         // A unit's 92 × 92 bust (type record +0x14, 0x4a8ae8; Icons.ugs, 0x48efd0).
-        Some(Picture::Unit(_)) => Some((UNIT_BUST, UNIT_BUST)),
+        Some(Picture::Unit(_)) => Some((UNIT_BUST * pk, UNIT_BUST * pk)),
         Some(Picture::Image(t)) => {
-            let scale = (128.0 / t.height()).min(220.0 / t.width());
+            let scale = (128.0 / t.height()).min(220.0 / t.width()) * pk;
             Some((t.width() * scale, t.height() * scale))
         }
-        Some(Picture::Side(t)) => Some((t.width(), t.height())),
-        Some(Picture::Still(t)) => Some((t.width(), t.height())),
+        Some(Picture::Side(t)) => Some((t.width() * pk, t.height() * pk)),
+        Some(Picture::Still(t)) => Some((t.width() * pk, t.height() * pk)),
         _ => None,
     };
-    let side_w = side.map_or(0.0, |(pw, _)| pw + 14.0);
+    // Held upright with a picture, the picture stands above the text, which takes the full width.
+    let stacked = fit && super::window_layout::portrait() && side.is_some();
+    let side_w = if stacked { 0.0 } else { side.map_or(0.0, |(pw, _)| pw + 14.0) };
     let room = (w - 38.0 - side_w - 40.0) * o;
     let (lines, rows): (Vec<String>, Vec<MarkupRow>) = match &d.marked {
         Some(t) => (Vec::new(), markup_rows(t, room, size)),
@@ -739,23 +820,24 @@ fn event_layout(d: &Dialog, o: f32, t: f32, w: f32, fit: bool) -> EventLayout {
     let total = lines.len() + rows.len();
     let full_h = lines.len() as f32 * line + rows.iter().map(|r| event_row_h(d.defeat, line, t, r)).sum::<f32>();
     // One row of labels per [`report_label_rows`]: the box grows by a row's height for each.
-    let res_h = report_label_rows(d.resource_report, super::window_layout::portrait(), d.resources.len()) as f32 * REPORT_ROW * o;
+    let res_h = report_label_rows(d.resource_report, super::window_layout::portrait(), d.resources.len()) as f32 * res_pitch(rs, o, d.resource_report);
     // An icon row grows the window by its caption and icons (0x4a8e66: 87 for items, 82
-    // for spells).
-    let items_h = if d.items.is_empty() { 0.0 } else { 87.0 * o };
+    // for spells); the reward look's icons grow with `rs` and the rows with them.
+    let items_h = if d.items.is_empty() { 0.0 } else { (32.0 + 55.0 * rs) * o };
     // The lost row is laid out as the gained one (0x4a8fe5: the same 0x37 / 0x18 / 8 steps).
-    let lost_h = if d.lost.is_empty() { 0.0 } else { 87.0 * o };
-    let spells_h = if d.spells.is_empty() { 0.0 } else { 82.0 * o };
+    let lost_h = if d.lost.is_empty() { 0.0 } else { (32.0 + 55.0 * rs) * o };
+    let spells_h = if d.spells.is_empty() { 0.0 } else { (32.0 + 50.0 * rs) * o };
     // The quest line's row (0x4a8dbf: 16 above the line, 8 under it), measured against the
     // original's opening event as 30 of Razdor's layout.
     let notice_h = if d.notice.is_some() { 30.0 * o } else { 0.0 };
     let pic_h = if d.picture.is_some() && side.is_none() { 140.0 * o } else { 0.0 };
-    let units_h = [&d.joined, &d.left].iter().filter(|u| !u.is_empty()).count() as f32 * UNIT_ROW * o;
+    let units_h = [&d.joined, &d.left].iter().filter(|u| !u.is_empty()).count() as f32 * unit_row(rs) * o;
     let below = pic_h + res_h + items_h + lost_h + spells_h + units_h + notice_h;
     // The box stops at 499 (and short of the screen): the text scrolls in it, the buttons
     // stay in sight.
     // The title strip's growth (`chrome::title_grow`) is part of the window's height too.
-    let screen_box = (sh - chrome::bar_height() - 4.0) / o - below / o - EVENT_REST - (chrome::title_grow() + footer_grow(o)) / o;
+    let top_o = stacked_top(stacked, side);
+    let screen_box = (sh - chrome::bar_height() - 4.0) / o - below / o - EVENT_REST - top_o - (chrome::title_grow() + footer_grow(o)) / o;
     let (max_box, below_vis) = if fit {
         // A phone: the text keeps five lines and the rewards scroll (`phone_fit`).
         let avail = screen_box + below / o;
@@ -765,9 +847,9 @@ fn event_layout(d: &Dialog, o: f32, t: f32, w: f32, fit: bool) -> EventLayout {
     } else {
         (EVENT_MAX_BOX.min(screen_box), below / o)
     };
-    let f = event_frame(side, full_h / o, below_vis, max_box, w);
+    let f = event_frame(side, stacked, full_h / o, below_vis, max_box, w);
     let shown = if full_h / o + 2.0 * EVENT_PAD <= f.box_h { total } else { (((f.box_h - 2.0 * EVENT_PAD) * o / line).floor().max(1.0) as usize).min(total) };
-    EventLayout { o, t, size, line, side, room, lines, rows, total, pic_h, res_h, items_h, lost_h, spells_h, below, f, shown }
+    EventLayout { o, t, size, line, side, stacked, side_w, room, lines, rows, total, pic_h, res_h, items_h, lost_h, spells_h, below, f, shown, rs }
 }
 
 /// Draws `d` over the map; returns how it was closed: OK (or Enter, Escape), or for a
@@ -825,6 +907,11 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     let large = super::display::large_windows();
     // The phone layout needs the large windows on: off, a phone takes the original's path.
     let phone = large && super::display::dp_px().is_some();
+    let up = phone && super::window_layout::portrait();
+    let big = big_look(d, up);
+    // The reward look's text is larger (`BIG_TEXT`); the learnt-spell window's padding (`LEARNT_PAD_DP`).
+    let t = if big { t * BIG_TEXT } else { t };
+    let pad = if up && learnt_look(d) { LEARNT_PAD_DP * super::display::dp_px().unwrap_or(0.0) } else { 0.0 };
     let mut o = plain;
     if large {
         let min_w = if phone { EVENT_MIN_W } else { EVENT_W };
@@ -832,9 +919,9 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         // phone the rewards scroll, so the smallest window holds the text's five lines only.
         let first = event_layout(d, plain, t, EVENT_W, phone);
         let frame_h = if phone {
-            event_frame(first.side, TEXT_FLOOR_LINES * first.line / plain, 0.0, EVENT_MAX_BOX, min_w).h
+            event_frame(first.side, first.stacked, TEXT_FLOOR_LINES * first.line / plain, 0.0, EVENT_MAX_BOX, min_w).h
         } else {
-            event_frame(first.side, 0.0, first.below / plain, EVENT_MAX_BOX, min_w).h
+            event_frame(first.side, false, 0.0, first.below / plain, EVENT_MAX_BOX, min_w).h
         };
         let min_h = frame_h + (chrome::title_grow() + footer_grow(plain)) / plain;
         o = super::dt_font::whole_scale(super::display::popup_o(base, min_w, min_h)).min((sw - 12.0) / min_w).max(plain);
@@ -842,8 +929,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     let lay = if large {
         let max_w = event_width(o, sw, phone);
         let probe = event_layout(d, o, t, max_w, phone);
-        let side_w = probe.side.map_or(0.0, |(pw, _)| pw + 14.0);
-        let width = text_fit_width(widest_text(&probe), o, side_w, max_w);
+        let width = text_fit_width(widest_text(&probe), o, probe.side_w, max_w);
         // The captions centred over the window must fit its frame too (never past the cap).
         let size = super::dt_font::sheet_size(super::dt_font::Face::Subtitle, t);
         let width = width.max(caption_fit_width(widest_caption(d, size), o)).min(max_w);
@@ -852,51 +938,85 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         event_layout(d, o, t, EVENT_W, false)
     };
     chrome::under_message();
-    let EventLayout { o, t, size, line, side, room, lines, rows, total, pic_h, res_h, items_h, lost_h, spells_h, below, f, shown, .. } = lay;
+    let EventLayout { o, t, size, line, side, stacked, room, lines, rows, total, pic_h, res_h, items_h, lost_h, spells_h, below, f, shown, rs, .. } = lay;
     let row_h = |r: &MarkupRow| event_row_h(defeat, line, t, r);
     // The title strip's growth: the window is taller by it, and its frame and content move down.
     let grow = chrome::title_grow();
     // A package dialog's choices stack above the footer, a button each, in the window's height.
     let choice_h = if d.choices.is_empty() { 0.0 } else { d.choices.len() as f32 * (choice_button_h(o) + CHOICE_GAP * o) + CHOICE_GAP * o };
     let (w, h) = (f.w * o, f.h * o + grow + footer_grow(o) + choice_h);
-    let (x, y) = event_origin(sw, sh, chrome::bar_height(), w, h);
+    // The learnt-spell window held upright keeps a slot above its content for the spell card (the
+    // owner's note of 2026-11-02, the mockup's card under the title): `pad` clear of the title strip,
+    // the window's sides and the content below it. The card shown there is the tapped spell's, else
+    // the first one learnt.
+    let spell_text = super::display::spell_tip_text_for(chrome::k(), o, TEXT_REF);
+    let card_size = |id: u32| -> Option<(f32, f32)> {
+        let g = game?;
+        let s = g.content.spells.iter().find(|s| s.id == id)?;
+        let (cw, ch) = super::spellbook::spell_tip_size(g, s, o, spell_text);
+        // The card's picture is larger here (`learnt_icon_side`): the card is at least as tall.
+        let ch = ch.max(super::spellbook::learnt_icon_side(o));
+        Some((cw + 2.0 * card_pad(pad), ch + 2.0 * card_pad(pad)))
+    };
+    // The window has no text, so the card takes its empty text box's place: the slot adds only what the
+    // card needs beyond the box (and the box's gap under it).
+    let box_room = (f.box_h + 10.0) * o;
+    let card_h = d.spells.iter().filter_map(|&id| card_size(id)).map(|c| c.1).fold(0.0, f32::max);
+    let slot_h = if pad > 0.0 { (card_h + pad - box_room).max(0.0) } else { 0.0 };
+    let card_slot = pad > 0.0;
+    // The window is the content plus `pad` on every side (the learnt-spell window, phone upright),
+    // and the card's slot above the content.
+    let (x, y) = event_origin(sw, sh, chrome::bar_height(), w + 2.0 * pad, h + 2.0 * pad + slot_h);
+    let (x, y) = (x + pad, y + pad + slot_h);
+    let outer = Rect::new(x - pad, y - pad - slot_h, w + 2.0 * pad, h + 2.0 * pad + slot_h);
     // The defeat look is the red marble (the original's window after a lost battle).
     let skin = if d.defeat { chrome::Skin::Red } else { chrome::Skin::Marble };
     if d.defeat || d.resource_report {
-        chrome::window_with_title_color_grown(Rect::new(x, y, w, h), &d.title, skin, false, Color::from_rgba(255, 255, 255, 255));
+        chrome::window_with_title_color_grown(outer, &d.title, skin, false, Color::from_rgba(255, 255, 255, 255));
     } else {
-        chrome::window_grown(Rect::new(x, y, w, h), &d.title, skin, false);
+        chrome::window_grown(outer, &d.title, skin, false);
     }
     let edge = o.max(1.0);
     // The event window's inner frames (0x4aaa4b, 0x4aaa79), as 0x48d710's.
-    chrome::window_inner_frames_footed(Rect::new(x, y, w, h), o, grow, footer_grow(o));
+    chrome::window_inner_frames_footed(outer, o, grow, footer_grow(o));
     let top = y + EVENT_BOX_TOP * o + grow;
     let mut cy = top;
+    // The picture's left edge: beside the text (20 px in) or, stacked, centred across the window.
+    let pic_x = |pw: f32| x + picture_x(stacked, f.w, pw) * o;
     match &d.picture {
         Some(Picture::Unit(u)) => {
             // Left of the text box, as the original's portrait (the box starts at 19 +
-            // picture + 14).
-            let r = Rect::new(x + 20.0 * o, top + o, UNIT_BUST * o, UNIT_BUST * o);
+            // picture + 14); stacked, centred above it.
+            let (pw, _) = side.unwrap_or((UNIT_BUST, UNIT_BUST));
+            let r = Rect::new(pic_x(pw), top + o, pw * o, pw * o);
             assets.draw_portrait(*u, Team::Player, r);
             chrome::silver_frame(r, 1.5 * o);
         }
         Some(Picture::Image(tex)) => {
             let (tw, th) = side.expect("picture dimensions");
-            let r = Rect::new(x + 20.0 * o, top + o, tw * o, th * o);
+            let r = Rect::new(pic_x(tw), top + o, tw * o, th * o);
             draw_texture_ex(tex, r.x, r.y, WHITE, DrawTextureParams { dest_size: Some(vec2(r.w, r.h)), ..Default::default() });
             draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0 * o, MARBLE_EDGE);
         }
-        Some(Picture::Still(tex)) => chrome::tex(tex, Rect::new(x + 20.0 * o, top + o, tex.width() * o, tex.height() * o), WHITE),
+        Some(Picture::Still(tex)) => {
+            let (pw, ph) = side.unwrap_or((tex.width(), tex.height()));
+            chrome::tex(tex, Rect::new(pic_x(pw), top + o, pw * o, ph * o), WHITE)
+        }
         Some(Picture::Side(tex)) => {
-            let r = Rect::new(x + 20.0 * o, top + o, tex.width() * o, tex.height() * o);
+            let (pw, ph) = side.unwrap_or((tex.width(), tex.height()));
+            let r = Rect::new(pic_x(pw), top + o, pw * o, ph * o);
             chrome::tex(tex, r, WHITE);
             draw_rectangle_lines(r.x - 1.0, r.y - 1.0, r.w + 2.0, r.h + 2.0, 1.0, WHITE);
         }
         None => {}
     }
-    cy += pic_h;
+    // The text box: under the picture when stacked (`f.top`), else where the picture's rows put it.
+    cy += pic_h + f.top * o;
     let tb = Rect::new(x + f.box_x * o, cy, f.box_w * o, f.box_h * o);
-    chrome::text_box(tb);
+    // The learnt-spell window held upright draws its spell card there instead of the empty box.
+    if !card_slot {
+        chrome::text_box(tb);
+    }
     let first = scrolled(d, total, shown, tb, o);
     let shown_h = lines.iter().skip(first).take(shown).map(|_| line).sum::<f32>() + rows.iter().skip(first).take(shown).map(row_h).sum::<f32>();
     let mut ty = tb.y + ((tb.h - shown_h) / 2.0).max(EVENT_PAD * o).floor() + EVENT_BASELINE * t;
@@ -939,13 +1059,14 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     if !d.resources.is_empty() {
         let cols = report_label_cols(d.resource_report, super::window_layout::portrait(), d.resources.len());
         let places = report_label_grid(d.resources.len(), cols, x, w, o, cy);
+        let pitch = res_pitch(rs, o, d.resource_report);
         for (i, ((r, label), &(cx, baseline))) in d.resources.iter().zip(&places).enumerate() {
             // The original's caption face, every label in its green font ae249c (0x4d6114 sets
             // it on all four places), the mana's too.
             let c = if d.resource_report { report_label_ink(*r) } else { CAPTION };
             super::dt_font::with_original_face(super::dt_font::Face::Subtitle, || chrome::shadow_centered(label, cx, baseline, size, c));
             let row = (i / cols) as f32;
-            resource_icon(*r, cx, cy + 62.0 * o + row * REPORT_ROW * o, 70.0 * o);
+            resource_icon(*r, cx, cy + (27.0 + 35.0 * rs) * o + row * pitch, 70.0 * rs * o);
         }
         cy += res_h;
     }
@@ -962,7 +1083,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         caption("NewSpell", razdor::i18n::n_("New spells learnt:"), cy);
         let n = d.spells.len().min(4);
         for (i, &s) in d.spells.iter().enumerate().take(4) {
-            let r = Rect::new(spread(n, i) - 25.0 * o, cy + 26.0 * o, 50.0 * o, 50.0 * o);
+            let r = Rect::new(spread(n, i) - 25.0 * rs * o, cy + 26.0 * o, 50.0 * rs * o, 50.0 * rs * o);
             if let Some(def) = game.and_then(|g| g.content.spells.iter().find(|x| x.id == s)) {
                 chrome::spell_icon(def, r);
                 chrome::silver_frame(r, edge);
@@ -978,10 +1099,10 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
             continue;
         }
         caption(key, ours, cy);
-        for (&u, left) in units.iter().zip(unit_cells(units.len(), (w / o).round() as i32)) {
-            assets.draw_portrait(u, Team::Player, Rect::new(x + left * o, cy + 26.0 * o, UNIT_ICON * o, UNIT_ICON * o));
+        for (&u, left) in units.iter().zip(unit_cells(units.len(), (w / o).round() as i32, rs)) {
+            assets.draw_portrait(u, Team::Player, Rect::new(x + left * o, cy + 26.0 * o, UNIT_ICON * rs * o, UNIT_ICON * rs * o));
         }
-        cy += UNIT_ROW * o;
+        cy += unit_row(rs) * o;
     }
     // The lost row sits above the gained one (the original stacks its rows from the bottom
     // up: 0x4a8fe5 builds the gained row first, then the lost one, the units above them).
@@ -991,7 +1112,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         // (0x4a8fe5, 0x4d5884's 0x37 picture cells).
         let n = d.lost.len().min(4);
         for (i, &item) in d.lost.iter().enumerate().take(4) {
-            let r = Rect::new(spread(n, i) - 27.0 * o, cy + 26.0 * o, 55.0 * o, 55.0 * o);
+            let r = Rect::new(spread(n, i) - 27.0 * rs * o, cy + 26.0 * o, 55.0 * rs * o, 55.0 * rs * o);
             assets.draw_item(item, r.x, r.y, r.w);
             icons.push((false, item.0, r));
         }
@@ -1001,7 +1122,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         caption("AddItem", razdor::i18n::n_("Items received:"), cy);
         let n = d.items.len().min(8);
         for (i, &item) in d.items.iter().enumerate().take(8) {
-            let r = Rect::new(spread(n, i) - 27.0 * o, cy + 26.0 * o, 55.0 * o, 55.0 * o);
+            let r = Rect::new(spread(n, i) - 27.0 * rs * o, cy + 26.0 * o, 55.0 * rs * o, 55.0 * rs * o);
             assets.draw_item(item, r.x, r.y, r.w);
             icons.push((false, item.0, r));
         }
@@ -1019,9 +1140,13 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     // The buttons, 95 × 36, 45 from the window's bottom; Razdor's own: they grow with the text
     // size (`button_grow`), centred in the footer, which grows with them (`footer_grow`).
     let g = super::display::button_grow();
-    let (bw, bh) = (95.0 * o * g, 36.0 * o * g);
+    let dp = super::display::dp_px().unwrap_or(1.0);
+    let up_ok = ok_look(d, up);
+    let (bw, bh) = if up_ok { (OK_W_DP * dp, OK_H_DP * dp) } else { (95.0 * o * g, 36.0 * o * g) };
     let foot = 58.0 * o * g;
-    let by = y + h - foot + (foot - bh) / 2.0;
+    // Centred in the window's own footer (`outer`: with the learnt-spell window's padding the footer is
+    // `pad` lower than the content's foot).
+    let by = outer.y + outer.h - foot + (foot - bh) / 2.0;
     // A left or right press on an icon shows its item or spell centred on the press, kept
     // inside the window, until the button is let go (0x4c1fec / 0x4c2048, the frame handler
     // 0x4cd558); the window's buttons wait meanwhile.
@@ -1052,12 +1177,17 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
             } else {
                 super::item_text::tooltip_size(game, ItemId(id), o)
             };
+            // The learnt-spell window held upright: the card's paper gets `card_pad` around its content.
+            let (pw, ph) = if pad > 0.0 && spell { (pw + 2.0 * card_pad(pad), ph + 2.0 * card_pad(pad)) } else { (pw, ph) };
             let px = (at.x - pw / 2.0).clamp(x + 10.0, (x + w - 10.0 - pw).max(x + 10.0));
             let py = (at.y - ph / 2.0).clamp(y + 10.0, (y + h - 10.0 - ph).max(y + 10.0));
             // On a phone the card goes above the finger, clear of it (`popup::placed`).
             let card = super::popup::placed(Rect::new(px, py, pw, ph), (at.x, at.y), (pw, ph));
+            let card = if pad > 0.0 && spell { learnt_slot(outer, o, grow, pad, (card.w, card.h)) } else { card };
             Some((spell, id, card))
         }
+        // The learnt-spell window held upright: the first spell's card fills the slot until one is tapped.
+        _ if card_slot => d.spells.first().and_then(|&id| card_size(id).map(|c| (true, id, learnt_slot(outer, o, grow, pad, c)))),
         _ => None,
     };
     if d.question {
@@ -1067,7 +1197,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         let (yes_x, no_x) = question_buttons_x(x, w, bw);
         let yes = button(yes_x, by, bw, bh, tr("Yes"), !tip_covers(tip.map(|t| t.2), p, Rect::new(yes_x, by, bw, bh))) || answer == Some(true);
         let no = button(no_x, by, bw, bh, tr("No"), !tip_covers(tip.map(|t| t.2), p, Rect::new(no_x, by, bw, bh))) || answer == Some(false);
-        draw_tip(tip, game, assets, o);
+        draw_tip_padded(tip, game, assets, o, card_pad(pad));
         return if yes {
             Some(Close::Yes)
         } else if no {
@@ -1126,6 +1256,8 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
                 super::audio::cue(super::audio::Cue::Button);
             }
             pressed
+        } else if up_ok {
+            ok_button_large(ok_r, &ok_label, ok_on, dp)
         } else {
             button(ok_r.x, ok_r.y, bw, bh, &ok_label, ok_on)
         };
@@ -1137,23 +1269,51 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     if super::widgets::ok_key_pressed() {
         d.key_down.set(true);
     }
-    draw_tip(tip, game, assets, o);
+    draw_tip_padded(tip, game, assets, o, card_pad(pad));
     if load {
         return Some(Close::LoadLast);
     }
     (ok || (d.key_down.get() && super::widgets::ok_key_released())).then_some(Close::Ok)
 }
 
+/// The phone's large OK (`ok_look`): a marble button whose label is [`OK_LABEL_DP`] dp, drawn at
+/// the window's own position; pressed as [`button`] is.
+fn ok_button_large(r: Rect, label: &str, enabled: bool, dp: f32) -> bool {
+    let (_, down, pressed) = button_state(r, enabled);
+    chrome::marble_button_sized(r, label, enabled, down, OK_LABEL_DP * dp);
+    if pressed {
+        super::audio::cue(super::audio::Cue::Button);
+    }
+    pressed
+}
+
 /// The item or spell card shown over a window (`draw_content`, `draw_village_event`): a spell's
 /// card or an item's tooltip, its rectangle `card` (already placed), drawn with its shadow.
+/// The spell card's place in the learnt-spell window held upright: centred under the title strip,
+/// `pad` below it, no wider than the window less `pad` on each side.
+fn learnt_slot(outer: Rect, o: f32, grow: f32, pad: f32, (w, h): (f32, f32)) -> Rect {
+    let w = w.min(outer.w - 2.0 * (pad + 4.0 * o));
+    Rect::new(outer.x + (outer.w - w) / 2.0, outer.y + 31.0 * o + grow + pad, w, h)
+}
+
+/// The inner padding of the spell card in the learnt-spell window held upright (0 elsewhere).
+fn card_pad(window_pad: f32) -> f32 {
+    window_pad * 0.8
+}
+
 fn draw_tip(tip: Option<(bool, u32, Rect)>, game: Option<&Game>, assets: &Assets, o: f32) {
+    draw_tip_padded(tip, game, assets, o, 0.0)
+}
+
+/// [`draw_tip`] with the spell card's inner padding `pad` (the learnt-spell window held upright).
+fn draw_tip_padded(tip: Option<(bool, u32, Rect)>, game: Option<&Game>, assets: &Assets, o: f32, pad: f32) {
     let (Some((spell, id, card)), Some(game)) = (tip, game) else {
         return;
     };
     draw_rectangle(card.x + 8.0, card.y + 8.0, card.w, card.h, Color::new(0.0, 0.0, 0.0, 0.45));
     if spell {
         if let Some(s) = game.content.spells.iter().find(|s| s.id == id) {
-            super::spellbook::spell_tip_card(game, s, card, o, super::display::spell_tip_text_for(chrome::k(), o, TEXT_REF));
+            super::spellbook::spell_tip_card_padded(game, s, card, o, super::display::spell_tip_text_for(chrome::k(), o, TEXT_REF), pad);
         }
     } else {
         super::item_text::draw(game, assets, ItemId(id), card, super::item_text::ItemBox::Tooltip, o);
@@ -1411,15 +1571,43 @@ mod tests {
     /// lines (4 × 19 + 12 = 88, centred in it).
     #[test]
     fn the_event_window_stands_as_the_original_s() {
-        let f = event_frame(Some((128.0, 128.0)), 88.0, 0.0, EVENT_MAX_BOX, EVENT_W);
-        assert_eq!(f, EventFrame { w: 634.0, h: 247.0, box_x: 161.0, box_w: 454.0, box_h: 128.0 });
+        let f = event_frame(Some((128.0, 128.0)), false, 88.0, 0.0, EVENT_MAX_BOX, EVENT_W);
+        assert_eq!(f, EventFrame { w: 634.0, h: 247.0, box_x: 161.0, box_w: 454.0, box_h: 128.0, top: 0.0 });
         assert_eq!(event_origin(1024.0, 768.0, 86.0, f.w, f.h), (195.0, 217.0));
         // No picture: the box at least 92, else the text and 16 above and below.
-        assert_eq!(event_frame(None, 19.0, 0.0, EVENT_MAX_BOX, EVENT_W).box_h, 92.0);
-        assert_eq!(event_frame(None, 190.0, 0.0, EVENT_MAX_BOX, EVENT_W), EventFrame { w: 634.0, h: 341.0, box_x: 19.0, box_w: 596.0, box_h: 222.0 });
+        assert_eq!(event_frame(None, false, 19.0, 0.0, EVENT_MAX_BOX, EVENT_W).box_h, 92.0);
+        assert_eq!(event_frame(None, false, 190.0, 0.0, EVENT_MAX_BOX, EVENT_W), EventFrame { w: 634.0, h: 341.0, box_x: 19.0, box_w: 596.0, box_h: 222.0, top: 0.0 });
         // A text taller than 499 scrolls in a box of 499 (0x4aa88a), or less on a short screen.
-        assert_eq!(event_frame(None, 900.0, 0.0, EVENT_MAX_BOX, EVENT_W).box_h, 499.0);
-        assert_eq!(event_frame(None, 900.0, 0.0, 300.0, EVENT_W).box_h, 300.0);
+        assert_eq!(event_frame(None, false, 900.0, 0.0, EVENT_MAX_BOX, EVENT_W).box_h, 499.0);
+        assert_eq!(event_frame(None, false, 900.0, 0.0, 300.0, EVENT_W).box_h, 300.0);
+    }
+
+    /// Held upright, a unit's portrait (or any picture) stands centred on top of the event text, and
+    /// the text box takes the window's full inner width under it (a player's request: the portrait
+    /// squeezed the text into a narrow box). Nothing overlaps: the box ends above the rewards, which end
+    /// above the OK's footer. Beside the text (the desktop, sideways) the picture keeps its place.
+    #[test]
+    fn a_picture_held_upright_stands_above_a_full_width_text_box() {
+        let w = EVENT_W;
+        let rewards = 79.0;
+        for side in [(UNIT_BUST * BIG_PICTURE, UNIT_BUST * BIG_PICTURE), (220.0, 128.0)] {
+            let f = event_frame(Some(side), true, 190.0, rewards, EVENT_MAX_BOX, w);
+            let pic = Rect::new(picture_x(true, w, side.0), 1.0, side.0, side.1);
+            assert!((pic.x + pic.w / 2.0 - w / 2.0).abs() < 0.01, "the picture is centred across the window: {pic:?}");
+            assert_eq!(f.top, pic.bottom() + STACK_GAP, "the box starts STACK_GAP under the picture");
+            assert_eq!((f.box_x, f.box_w), (19.0, w - 38.0), "the text box takes the full inner width");
+            assert_eq!(f.h, f.top + f.box_h + rewards + EVENT_REST, "the window is the picture, the box, the rewards and the footer");
+            assert!(f.box_h >= EVENT_MIN_BOX, "the box keeps its minimum height");
+            // A short window: the box shrinks to the room the caller gives it, never over the picture.
+            let g = event_frame(Some(side), true, 900.0, rewards, 300.0, w);
+            assert_eq!(g.box_h, 300.0, "the box gives up its height, not the picture's place");
+            assert_eq!(g.top, f.top, "the picture keeps its place");
+            // Beside the text (the desktop, sideways): no stacked top, the box starts past the picture.
+            let beside = event_frame(Some(side), false, 190.0, rewards, EVENT_MAX_BOX, w);
+            assert_eq!(beside.top, 0.0);
+            assert_eq!(beside.box_x, 19.0 + side.0 + 14.0);
+        }
+        assert_eq!(picture_x(false, w, 92.0), 20.0, "beside the text: the desktop's 20 px in");
     }
 
     /// Razdor's phone table (the owner's request): how large the event text is on phones, in dp
@@ -1543,14 +1731,14 @@ mod tests {
     /// 92 × 92 bust, the text box after it and 14 more.
     #[test]
     fn the_units_rows_stand_as_the_original_s() {
-        assert_eq!(unit_cells(1, 634), vec![294.0]);
-        assert_eq!(unit_cells(2, 634), vec![188.0, 399.0]);
-        assert_eq!(unit_cells(3, 634), vec![135.0, 294.0, 452.0]);
-        assert_eq!(unit_cells(4, 634), vec![103.0, 230.0, 357.0, 484.0]);
-        assert_eq!(unit_cells(6, 634).len(), 4);
-        assert_eq!((UNIT_ICON, UNIT_ROW), (46.0, 79.0));
-        let f = event_frame(Some((UNIT_BUST, UNIT_BUST)), 19.0, UNIT_ROW, EVENT_MAX_BOX, EVENT_W);
-        assert_eq!(f, EventFrame { w: 634.0, h: 92.0 + 79.0 + 119.0, box_x: 125.0, box_w: 490.0, box_h: 92.0 });
+        assert_eq!(unit_cells(1, 634, 1.0), vec![294.0]);
+        assert_eq!(unit_cells(2, 634, 1.0), vec![188.0, 399.0]);
+        assert_eq!(unit_cells(3, 634, 1.0), vec![135.0, 294.0, 452.0]);
+        assert_eq!(unit_cells(4, 634, 1.0), vec![103.0, 230.0, 357.0, 484.0]);
+        assert_eq!(unit_cells(6, 634, 1.0).len(), 4);
+        assert_eq!((UNIT_ICON, unit_row(1.0)), (46.0, 79.0));
+        let f = event_frame(Some((UNIT_BUST, UNIT_BUST)), false, 19.0, unit_row(1.0), EVENT_MAX_BOX, EVENT_W);
+        assert_eq!(f, EventFrame { w: 634.0, h: 92.0 + 79.0 + 119.0, box_x: 125.0, box_w: 490.0, box_h: 92.0, top: 0.0 });
     }
 
     /// The units row follows its window's width, not the original's 634: the middle of the
@@ -1559,7 +1747,7 @@ mod tests {
     fn the_units_row_is_centred_in_a_window_of_any_width() {
         for win_w in [480, 634, 860, 900] {
             for n in 1..=4 {
-                let cells = unit_cells(n, win_w);
+                let cells = unit_cells(n, win_w, 1.0);
                 assert_eq!(cells.len(), n);
                 let first = cells[0] + 23.0;
                 let last = cells[n - 1] + 23.0;
@@ -1567,8 +1755,8 @@ mod tests {
                 assert!((mid - win_w as f32 / 2.0).abs() <= 1.0, "width {win_w}, n {n}: the row's middle at {mid}");
             }
         }
-        assert_eq!(unit_cells(2, 900), vec![277.0, 577.0]);
-        assert_eq!(unit_cells(2, 480), vec![137.0, 297.0]);
+        assert_eq!(unit_cells(2, 900, 1.0), vec![277.0, 577.0]);
+        assert_eq!(unit_cells(2, 480, 1.0), vec![137.0, 297.0]);
     }
 
     #[test]

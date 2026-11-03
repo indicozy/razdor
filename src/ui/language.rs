@@ -47,6 +47,9 @@ pub struct Settings {
     /// The scenario list's filter and order (`ui::new_game`; 0, 0: all, as the original).
     pub scenario_show: i64,
     pub scenario_order: i64,
+    /// The experimental scenario rules last set in the rules window (`ui::new_game`), kept between
+    /// games (Razdor's, a players' wish); all off on a file without them.
+    pub experimental_rules: razdor::rules::content::ExperimentalRules,
 }
 
 /// The maps won, by mod: the mod's id (`hub::active_mod`), or `NO_MOD` for the base game.
@@ -290,6 +293,22 @@ pub fn picker_box(r: Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_remembered_experimental_rules_round_trip_through_the_settings_file() {
+        let rules = razdor::rules::content::ExperimentalRules { multiple_rings: true, six_cells: true, ..Default::default() };
+        let saved = serde_json::to_string(&Settings { experimental_rules: rules, ..Settings::default() }).unwrap();
+        let back: Settings = serde_json::from_str(&saved).unwrap();
+        assert_eq!(back.experimental_rules, rules);
+    }
+
+    #[test]
+    fn a_settings_file_without_the_experimental_rules_reads_all_off() {
+        let old = r#"{"language":"ru","scenario_show":2,"scenario_order":1,"favourite_scenarios":["Tut"]}"#;
+        let s: Settings = serde_json::from_str(old).unwrap();
+        assert_eq!(s.experimental_rules, razdor::rules::content::ExperimentalRules::default());
+        assert_eq!(s.scenario_show, 2);
+    }
 
     fn found() -> Vec<DataLanguage> {
         vec![DataLanguage { prefix: "Hindi-native".into(), name: "Hindi (native letters)".into() }]

@@ -80,6 +80,8 @@ SCREENS = [
     ("title", "title", {}),
     ("options", "options", {}),
     ("scenarios", "scenarios:РК1-Начало пути", {}),
+    # The scenario card (the owner's order of 2026-11-02): the picked map's picture, description and «Далее».
+    ("scenarios-card", "scenarios:РК1-Начало пути", {"RAZDOR_SCENE_CARD": "1"}),
     # The experimental scenario rules window over the scenario list (a player's report 1461).
     ("rules", "scenarios:РК1-Начало пути", {"RAZDOR_SCENE_RULES": "1"}),
     ("map","map:РК1-Начало пути", {}),
@@ -118,6 +120,7 @@ SCREENS = [
     ("hub-report", "hub-report", {"RAZDOR_HUB_DIR": "/mnt/ai_models/razdor-scratch/v2-hubpack/snap-mobile-hub-report"}),
     ("hub-refused", "hub-refused", {"RAZDOR_HUB_DIR": "/mnt/ai_models/razdor-scratch/v2-hubpack/snap-mobile-hub-refused"}),
     ("update", "update", {}),
+    ("diary", "hero:РК1-Начало пути:1", {"RAZDOR_SCENE_QUEST": "1"}),
 ]
 
 

@@ -534,6 +534,10 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   can; the search field hides under 80 units of room (`search_room` in `hub_view::frame`).
 - **Crowded findings under the report window** (2026-11-02). The mobile check lists the hub's buttons under the report
   window as crowded; they are disabled while the window is open, so the finding is a probe artefact.
+- **Scrollbar knob narrower than a finger on phones** (2026-11-02, report 1476). The knob is the
+  drawn 24 dp strip (`widgets::scrollbar`, `bar_px`), under the 40 dp touch rule; a press beside it
+  misses. The hold-then-drag failure was fixed by `SwipeKind::Grab`. Whether the knob's hit area
+  should grow (it needs room the list gives up) is the owner's call, a Razdor choice.
 
 ## Settled
 

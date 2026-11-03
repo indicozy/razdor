@@ -266,6 +266,7 @@ column, never above the safe inset (the column moves down if it must); the links
 in one row at the bottom, touch targets of 48 dp; the version and copyright lines and an installed update's
 notice sit just above the chips; the not-found block (no install) sits above the logo. Landscape and desktop keep
 the original column and the corner links (`main_menu::landscape_buttons`, `corner_links`).
+With a mod installed the title shows the mod played (the owner's request, 2026-11-02): a «Мод: <title>» link between «Карты и моды» and Discord (desktop), or a full-width tile above the four chips (upright, which lifts the foot lines and the column by its height and gap, `portrait_menu`'s `mod_row`). A click opens the same «Мод» list as the new-game window (`new_game::mod_choice`, `request_mod`, key `razdor:menu-mod`); the app plays the pick (`take_mod_request` after `main_menu::frame`). Without a mod nothing changes.
 Title windows held upright (the owner's request, 1080×2376: the scenario list and the new-hero window, the load
 window, the settings window and its «Ещё…» page, the keys window over it, the authors window and the custom battle
 setup): `window_layout::portrait_title` (pure, with unit tests) gives the window's own scale and rectangle: the
@@ -307,7 +308,41 @@ The spellbook in portrait (`spellbook::frame`, `window_layout::upright_book_vide
 (two columns of cards), as tall as the screen takes between the top inset and the bar, so its rows fill the height;
 its rows are as many as keep every card at least the landscape card's 96 px tall (`spellbook::upright_rows`), 20 spells
 a page on a 2400 px phone. Its card text takes the phone's text base (`display::text_for`, `dialog::TEXT_REF`).
-Its bottom row is inside that rectangle. The minimap (`minimap::window`) in
+Its bottom row is inside that rectangle.
+
+Upright phone layouts after the owner's OpenAI-mockup review (2026-11-02; only a phone held upright changes unless said,
+desktop and sideways pixel-identical, texts drawn under `dt_font::legacy_metrics_if` so their sp sizes stick):
+- scenarios (`new_game::Portrait`): a list view (the top filter row, the list taking the rest, «...»/«Отмена») and a card
+  view (`card_view`, opened by `pick_tap` on a startable entry; Esc/close back to the list): the map's picture as the
+  hub's hero (`hub_view::hero`, shared with the hub's card) with the title over it, the description centred, scrolled
+  by `hub_view::pane_scroll`, «Назад»/«Далее». `RAZDOR_SCENE_CARD=1` opens it in a snapshot;
+- the hero window on a phone (both orientations) is the diary-only window «Дневник» (`items_view::phone_diary`,
+  `phone_diary_areas`): four tab buttons, the entry list, the picked entry's text centred; upright the list over the
+  text and «Закрыть» at the foot, sideways the list left and the text right with «Закрыть» in the tabs row. The
+  desktop keeps the original hero window;
+- market (`window_layout::market_panes`, `Stack::Market`): the item description strip on top (`ItemBox::MarketStrip`),
+  the section icons, the list taking the height, one row of «Инвентарь», money, «Купить», «Торговая лавка»;
+- the title's bottom links are four marble tiles (`main_menu`); the options/settings windows take the phone's width
+  and height with wrapped checkbox labels and sliders under their names (`option_slider_stacked`); keys
+  (`keys_window_upright`) and the F1 list in dp; save/load with their buttons in one row; the reward windows'
+  OK 120 × 44 dp and larger text (`dialog::OK_W_DP`, `BIG_TEXT`); the learnt-spell window padded, its spell card in
+  the empty text box's place (`learnt_slot`, `spellbook::spell_tip_card_padded`); the army window's «Закрыть» a
+  normal 44 dp button; custom battle's quick buttons 44 dp.
+- the town windows (the building, the barracks and garrison, the market; `window_layout::town_rect_in`, `town_k_in`, pure,
+  with unit tests): one bottom edge (the market's old one, a few dp above the bottom bar) and one scale (the smallest of
+  their three stacked scales), so the tab row and Выход stay where they are between sections (a player's report);
+  the tab row and Exit are measured from the window's own bottom (`building_tabs`, `building_exit`);
+- the spellbook held upright (`spellbook::phone_foot`, `controls`): «Закрыть» at the foot beside the filter button, both
+  44 dp tall with 14 dp labels; the page arrows and "N / M" on a row above them, always reserved so the rows do not change
+  with the page count; the corner cross stays; desktop and landscape keep the bottom row of arrows (`bottom_row`);
+- the event and talk windows held upright with a picture (`dialog::event_frame` with `stacked`, `stacked_top`,
+  `picture_x`, pure): the picture centred across the top at its own size, the text box under it across the full inner
+  width, the window taller by the picture; the box gives up its height first when the window does not fit (`phone_fit`).
+  Beside the text (desktop, sideways) nothing changes.
+
+The mobile check (`tools/ui-regress/mobile_ui.py`) has the `update`, `diary` and `scenarios-card` screens.
+
+The minimap (`minimap::window`) in
 portrait stands inside the safe area (`in_safe_area`, `inset_view`). It has no close cross on a phone (the owner's request, 2026-10-28,
 not in the original): the bottom bar's map button closes it, as M and Esc do. The F1 keys list (`hotkeys::help_overlay`) takes a cross on a phone and closes by it.
 Close crosses on a phone (a phone choice, not in the original): every title strip is 1.5× the desktop's

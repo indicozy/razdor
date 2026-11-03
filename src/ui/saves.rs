@@ -436,8 +436,71 @@ fn book_top(sh: f32, bar: f32, h: f32, k: f32, over_map: bool) -> f32 {
     }
 }
 
+/// The book window on a phone held upright, in dp (the owner's notes, 2026-11-02: the window fills
+/// the width, the list is taller and its text reads at 14-15 sp, the buttons are finger-sized). A
+/// phone choice, not in the original; the desktop and a phone held sideways keep the book as it is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Upright {
+    /// Physical px per dp.
+    dp: f32,
+    /// The window's px per video unit (its scale).
+    k: f32,
+}
+
+/// The phone book's page height, a list row's pitch and the bottom row's button height, in dp.
+const PAGE_DP: f32 = 360.0;
+const ROW_DP: f32 = 36.0;
+const BUTTON_DP: f32 = 46.0;
+/// The top of the book's page in video units (the same on the desktop).
+const PAGE_TOP: f32 = 60.0;
+
+impl Upright {
+    /// `dp_len` dp in video units.
+    fn units(self, dp_len: f32) -> f32 {
+        dp_len * self.dp / self.k
+    }
+    /// The page's height in video units (350 on the desktop).
+    fn page(self) -> f32 {
+        self.units(PAGE_DP)
+    }
+    /// A list row's pitch in video units.
+    fn pitch(self) -> f32 {
+        self.units(ROW_DP)
+    }
+    /// The steel line over the buttons: a gap under the page.
+    fn line(self) -> f32 {
+        PAGE_TOP + self.page() + self.units(8.0)
+    }
+    /// The bottom row's top, under the line.
+    fn button_y(self) -> f32 {
+        self.line() + self.units(10.0)
+    }
+    fn button_h(self) -> f32 {
+        self.units(BUTTON_DP)
+    }
+    /// The whole window's height in video units.
+    fn video_h(self) -> f32 {
+        self.button_y() + self.button_h() + self.units(12.0)
+    }
+    /// A text of `sp` size in px (1 sp is 1 dp of the phone's text).
+    fn sp(self, sp: f32) -> f32 {
+        sp * self.dp
+    }
+}
+
+/// The phone's book metrics when it is held upright, `None` elsewhere.
+fn upright() -> Option<Upright> {
+    let dp = super::display::dp_px()?;
+    if screen_height() <= screen_width() {
+        return None;
+    }
+    let k = super::window_layout::upright_game_k((Book::W, Book::H))?;
+    Some(Upright { dp, k })
+}
+
 /// Layout of the book window: the video's load window (18:12), 594×482 pixels of the
-/// 960×720 frame, scaled by `chrome::k`.
+/// 960×720 frame, scaled by `chrome::k`. On a phone held upright (`upright`) the page, the
+/// bottom row and the window are taller, in dp (see [`Upright`]).
 struct Book {
     win: Rect,
     k: f32,
@@ -445,6 +508,15 @@ struct Book {
     grow: f32,
     /// The footer's extra height in screen px (the window's growth, see [`book_video_h`]).
     foot: f32,
+    /// The phone's metrics when held upright.
+    upright: Option<Upright>,
+    /// The page's height (350 on the desktop).
+    page: f32,
+    /// The steel line over the bottom row (426 on the desktop).
+    line: f32,
+    /// The bottom row's top and height (443 and 28 grown on the desktop).
+    btn_y: f32,
+    btn_h: f32,
 }
 
 /// The book window's height in its video pixels at the text size `g` (Razdor's own, the owner's
@@ -452,6 +524,9 @@ struct Book {
 /// with it; the save window's «Быстрое сохранение» takes a row of its own under the others at Large
 /// and Largest (`quick_row`), since its wide label needs the room.
 fn book_video_h(g: f32, quick_row: bool) -> f32 {
+    if let Some(u) = upright() {
+        return u.video_h();
+    }
     let b = 28.0 * g;
     if quick_row && g > 1.0 { 443.0 + b + 6.0 + b + 11.0 } else { 443.0 + b + 11.0 }
 }
@@ -460,6 +535,15 @@ impl Book {
     const W: f32 = 594.0;
     const H: f32 = 482.0;
     const ROWS: usize = 12;
+
+    /// The book of window `win` with its scale `k`, growth, footer and phone metrics.
+    fn layout(win: Rect, k: f32, grow: f32, foot: f32, upright: Option<Upright>) -> Book {
+        let (page, line, btn_y, btn_h) = match upright {
+            Some(u) => (u.page(), u.line(), u.button_y(), u.button_h()),
+            None => (350.0, 426.0, 443.0, 28.0 * grow),
+        };
+        Book { win, k, grow, foot, upright, page, line, btn_y, btn_h }
+    }
 
     fn at(title: &str, over_map: bool, quick_row: bool) -> (Book, bool) {
         let k = super::chrome::k();
@@ -477,17 +561,32 @@ impl Book {
         // video's y 190 on the title, the view's centre over the map) are the fallback.
         let win = super::window_layout::window_rect(over_map, (Book::W, video_h)).unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, y, w, h));
         // Above the on-screen keyboard while its name field is typed in (`window_layout::keyboard_lifted`).
-        let win = super::window_layout::keyboard_lifted(win, Book { win, k, grow, foot }.row_rect(0));
+        let phone = upright();
+        let win = super::window_layout::keyboard_lifted(win, Book::layout(win, k, grow, foot, phone).row_rect(0));
         let (_, closed) = super::chrome::window(win, title, super::chrome::Skin::Marble, true);
-        // The 634×516 window with its inner frames (ae2520, 0x48d710 from 4dc10e); the footer's growth
-        // is the window's, and the frames keep their place above the buttons.
-        super::chrome::window_inner_frames_footed(win, super::chrome::opx(), 0.0, foot);
-        (Book { win, k, grow, foot }, closed)
+        let book = Book::layout(win, k, grow, foot, phone);
+        match phone {
+            // A phone's frames: over the page's bottom and the bottom row (the desktop's are the original's).
+            Some(_) => {
+                let px = super::chrome::opx();
+                let line = book.p(0.0, book.line).y;
+                super::chrome::steel_frame(Rect::new(win.x + 2.0 * px, line, win.w - 4.0 * px, 2.0 * px), px, 2);
+                super::chrome::steel_frame(Rect::new(win.x + 4.0 * px, win.y + 31.0 * px, win.w - 8.0 * px, line - win.y - 31.0 * px - 4.0 * px), px, 1);
+            }
+            // The 634×516 window with its inner frames (ae2520, 0x48d710 from 4dc10e); the footer's growth
+            // is the window's, and the frames keep their place above the buttons.
+            None => super::chrome::window_inner_frames_footed(win, super::chrome::opx(), 0.0, foot),
+        }
+        (book, closed)
     }
 
     /// The rows the list shows: 12 at Normal; at Large and Largest the rows are taller, so the page
     /// shows as many as its 350 units take (Razdor's own, see [`book_video_h`]).
     fn shown(&self) -> usize {
+        if let Some(u) = self.upright {
+            // A phone's page: the rows that fit between its top and its bottom, two units kept free.
+            return ((self.page - u.units(6.0)) / u.pitch()).floor().max(0.0) as usize;
+        }
         let fit = ((410.0 - 64.0 - 27.0 * self.grow) / (29.0 * self.grow)).floor().max(0.0) as usize + 1;
         fit.min(Book::ROWS)
     }
@@ -508,10 +607,14 @@ impl Book {
         super::dt_font::with_face(super::dt_font::Face::Title, || {
             let y = self.p(0.0, 53.0).y;
             let heading = Color::new(155.0 / 255.0, 1.0, 155.0 / 255.0, 1.0);
-            super::chrome::shadow_centered(left, self.p(157.0, 0.0).x, y, 16.0 * k, heading);
-            super::chrome::shadow_centered(right, self.p(437.0, 0.0).x, y, 16.0 * k, heading);
+            // A phone's headings read at 14 sp (Razdor's own; the desktop's are the original's 16 px).
+            let size = self.upright.map_or(16.0 * k, |u| u.sp(14.0));
+            super::dt_font::legacy_metrics_if(self.upright.is_some(), || {
+                super::chrome::shadow_centered(left, self.p(157.0, 0.0).x, y, size, heading);
+                super::chrome::shadow_centered(right, self.p(437.0, 0.0).x, y, size, heading);
+            });
         });
-        let r = self.rect(17.0, 60.0, 560.0, 350.0);
+        let r = self.rect(17.0, 60.0, 560.0, self.page);
         match super::chrome::win("S_Save") {
             Some(t) => super::chrome::tex(&t, r, WHITE),
             None => super::chrome::text_box(r),
@@ -520,6 +623,9 @@ impl Book {
     }
 
     fn row_rect(&self, i: usize) -> Rect {
+        if let Some(u) = self.upright {
+            return self.rect(17.0, PAGE_TOP + u.units(4.0) + i as f32 * u.pitch(), 560.0, u.pitch() - u.units(2.0));
+        }
         // Razdor's own: the rows grow with the text size (`button_grow`), their pitch too.
         self.rect(17.0, 64.0 + i as f32 * 29.0 * self.grow, 560.0, 27.0 * self.grow)
     }
@@ -531,8 +637,8 @@ impl Book {
         let shown = self.shown();
         let grow = self.grow;
         // The rows and the scrollbar right of them.
-        let list = self.rect(17.0, 60.0, 574.0, 350.0);
-        swipe_rows(list, 29.0 * k);
+        let list = self.rect(17.0, 60.0, 574.0, self.page);
+        swipe_rows(list, self.row_pitch());
         if list.contains(crate::ui::widgets::pointer().into()) && !input_blocked() {
             let wh = wheel();
             if wh < 0.0 && *scroll + shown < rows.len() {
@@ -542,7 +648,7 @@ impl Book {
             }
         }
         // Razdor's scrollbar right of the page, when the rows do not all fit.
-        scrollbar(self.rect(579.0, 60.0, 12.0, 350.0), scroll, shown, rows.len());
+        scrollbar(self.rect(579.0, 60.0, 12.0, self.page), scroll, shown, rows.len());
         let (mut picked, mut delete, mut pin) = (None, None, None);
         for (i, row) in rows.iter().enumerate().skip(*scroll).take(shown) {
             let r = self.row_rect(i - *scroll);
@@ -604,11 +710,16 @@ impl Book {
             // Razdor's own: the row's text grows with the row (`button_grow`), each kept at its
             // Normal size where the grown one does not fit.
             super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
-                let name_normal = fit_size(&row.name, NAME_ROOM * k, 16.0 * k);
-                let name_grown = super::new_game::row_text_size(&row.name, name_normal, grow, NAME_ROOM * k);
-                let name_is_grown = name_grown > name_normal;
+                let (size, name_is_grown) = match self.upright {
+                    Some(u) => (u.sp(15.0), true),
+                    None => {
+                        let name_normal = fit_size(&row.name, NAME_ROOM * k, 16.0 * k);
+                        let name_grown = super::new_game::row_text_size(&row.name, name_normal, grow, NAME_ROOM * k);
+                        let grown = name_grown > name_normal;
+                        (if grown { name_grown } else { name_normal }, grown)
+                    }
+                };
                 super::dt_font::legacy_metrics_if(name_is_grown, || {
-                let size = if name_is_grown { name_grown } else { name_normal };
                 let shown = match row.caret {
                     Some(at) => caret_window(&row.name, at, NAME_ROOM * k, |t| measure(t, size).width),
                     None => ellipsize(&row.name, NAME_ROOM * k, size),
@@ -627,13 +738,25 @@ impl Book {
             // The scenario's and the time's lines grow with the row too (their own Normal of 11 px).
             super::dt_font::with_face(super::dt_font::Face::Bold, || {
                 let normal = 11.0 * k;
-                let size = super::new_game::row_text_size(&row.scenario, normal, grow, 250.0 * k);
-                super::dt_font::legacy_metrics_if(size > normal, || super::chrome::shadow_centered(&ellipsize(&row.scenario, 250.0 * k, size), cx, r.y + lh * 0.42, size, lit(SCENARIO_INK)));
+                let (size, grown) = match self.upright {
+                    Some(u) => (u.sp(13.0), true),
+                    None => {
+                        let size = super::new_game::row_text_size(&row.scenario, normal, grow, 250.0 * k);
+                        (size, size > normal)
+                    }
+                };
+                super::dt_font::legacy_metrics_if(grown, || super::chrome::shadow_centered(&ellipsize(&row.scenario, 250.0 * k, size), cx, r.y + lh * 0.42, size, lit(SCENARIO_INK)));
             });
             super::dt_font::with_face(super::dt_font::Face::Body, || {
                 let normal = 11.0 * k;
-                let size = super::new_game::row_text_size(&row.time, normal, grow, 250.0 * k);
-                super::dt_font::legacy_metrics_if(size > normal, || super::chrome::shadow_centered(&ellipsize(&row.time, 250.0 * k, size), cx, r.y + lh * 0.9, size, lit(TIME_INK)));
+                let (size, grown) = match self.upright {
+                    Some(u) => (u.sp(13.0), true),
+                    None => {
+                        let size = super::new_game::row_text_size(&row.time, normal, grow, 250.0 * k);
+                        (size, size > normal)
+                    }
+                };
+                super::dt_font::legacy_metrics_if(grown, || super::chrome::shadow_centered(&ellipsize(&row.time, 250.0 * k, size), cx, r.y + lh * 0.9, size, lit(TIME_INK)));
             });
             // Keep the play mark above long save names and the selected row highlight.
             if selected == Some(i) {
@@ -650,6 +773,14 @@ impl Book {
             }
         }
         (picked, delete, pin)
+    }
+
+    /// A list row's pitch in px (the swipe's step).
+    fn row_pitch(&self) -> f32 {
+        match self.upright {
+            Some(u) => u.pitch() * self.k,
+            None => 29.0 * self.k,
+        }
     }
 
     /// A torn-parchment tab hanging under the book (`load-button-1/2.lit`: grey, and orange
@@ -689,15 +820,19 @@ impl Book {
     /// right of the tabs, under the book).
     fn tab_line(&self) {
         // The window's line over the buttons (0x48d710: (2, h − 56) to (w − 2, h − 54)),
-        // drawn again over the hanging tabs; the footer's growth is below it.
+        // drawn again over the hanging tabs; the footer's growth is below it. A phone's line is at its own place.
         let px = super::chrome::opx();
         let w = self.win;
+        if self.upright.is_some() {
+            super::chrome::steel_frame(Rect::new(w.x + 2.0 * px, self.p(0.0, self.line).y, w.w - 4.0 * px, 2.0 * px), px, 2);
+            return;
+        }
         super::chrome::steel_frame(Rect::new(w.x + 2.0 * px, w.bottom() - 56.0 * px - self.foot, w.w - 4.0 * px, 2.0 * px), px, 2);
     }
 
-    /// A button of the bottom row (28 high at Normal, grown with the text size).
+    /// A button of the bottom row (28 high at Normal, grown with the text size; 46 dp on a phone).
     fn button(&self, x: f32, w: f32, label: &str, enabled: bool) -> bool {
-        let r = self.rect(x, 443.0, w, 28.0 * self.grow);
+        let r = self.rect(x, self.btn_y, w, self.btn_h);
         let (_, down, pressed) = super::widgets::button_state(r, enabled);
         super::chrome::marble_button(r, label, enabled, down);
         pressed
@@ -706,7 +841,7 @@ impl Book {
     /// A button of the save window's bottom row: drawn as [`Book::button`], but its click area is
     /// finger-sized on a phone ([`finger_hit`]).
     fn finger_button(&self, x: f32, y: f32, w: f32, label: &str, enabled: bool) -> bool {
-        let r = self.rect(x, y, w, 28.0 * self.grow);
+        let r = self.rect(x, y, w, self.btn_h);
         let (_, down, pressed) = super::widgets::button_state(finger_hit(r, super::display::dp_px()), enabled);
         super::chrome::marble_button(r, label, enabled, down);
         pressed
@@ -806,6 +941,34 @@ fn save_button_row(g: f32) -> [(f32, f32, f32); 3] {
     }
 }
 
+/// The phone's bottom row: `weights.len()` buttons in one row across the page's width (17 to 577
+/// units), `gap` units apart, their widths in the weights' proportion; as (x, width) in order.
+fn phone_row(weights: &[f32], gap: f32) -> Vec<(f32, f32)> {
+    let total: f32 = weights.iter().sum();
+    let room = 560.0 - gap * (weights.len() as f32 - 1.0);
+    let mut x = 17.0;
+    weights
+        .iter()
+        .map(|w| {
+            let cell = (x, room * w / total);
+            x += cell.1 + gap;
+            cell
+        })
+        .collect()
+}
+
+/// The save window's bottom row as (x, y, width) of «Быстрое сохранение», «Сохранить» and «Отмена»:
+/// on a phone held upright all three in one row (`phone_row`), else [`save_button_row`].
+fn save_row(book: &Book) -> [(f32, f32, f32); 3] {
+    match book.upright {
+        Some(u) => {
+            let row = phone_row(&[0.42, 0.29, 0.29], u.units(6.0));
+            [(row[0].0, book.btn_y, row[0].1), (row[1].0, book.btn_y, row[1].1), (row[2].0, book.btn_y, row[2].1)]
+        }
+        None => save_button_row(book.grow),
+    }
+}
+
 /// A button's click area: its drawn rect, on a phone (`dp` screen px per dp) at least 44 dp tall,
 /// grown equally up and down so the row's neighbours keep their clicks at the sides; the desktop's is
 /// the button itself. A phone choice, not in the original (the owner's request: finger-sized buttons).
@@ -874,10 +1037,10 @@ pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, quick: boo
     let dir = save::games_dir();
     let warning = if dir.is_none() { Some(tr("No data folder for saves: set RAZDOR_SAVE_DIR.")) } else { view.error.as_deref() };
     if let Some(w) = warning {
-        let p = book.p(22.0, 435.0);
+        let p = book.p(22.0, book.line + 9.0);
         text(&ellipsize(w, 330.0 * book.k, 13.0 * book.k), p.x, p.y, 13.0 * book.k, RED);
     }
-    let [(quick_x, quick_y, quick_w), (save_x, save_y, save_w), (cancel_x, cancel_y, cancel_w)] = save_button_row(book.grow);
+    let [(quick_x, quick_y, quick_w), (save_x, save_y, save_w), (cancel_x, cancel_y, cancel_w)] = save_row(&book);
     if book.finger_button(quick_x, quick_y, quick_w, tr(n_("Quick save")), quick) {
         *message = Some(quick_save_message(game));
         return Some(Screen::WorldMap);
@@ -928,8 +1091,9 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     fill_metas(&mut view.entries, &mut view.asked, &mut view.settled, view.scroll, Some(&mut view.selected));
     let rows: Vec<Row> = view.entries.iter().map(row_of).collect();
     if rows.is_empty() {
-        let p = book.p(297.0, 230.0);
-        super::chrome::shadow_centered(tr("No saves here yet."), p.x, p.y, 16.0 * book.k, super::chrome::CREAM);
+        let p = book.p(297.0, 230.0 + (book.page - 350.0) / 2.0);
+        let size = book.upright.map_or(16.0 * book.k, |u| u.sp(14.0));
+        super::dt_font::legacy_metrics_if(book.upright.is_some(), || super::chrome::shadow_centered(tr("No saves here yet."), p.x, p.y, size, super::chrome::CREAM));
     }
     let (picked, delete, pin) = book.rows(&rows, Some(view.selected), &mut view.scroll, true);
     // Razdor's pin: the icon, or P for the selected save.
@@ -959,9 +1123,11 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
         view.confirm_delete = Some((e.path.clone(), name));
     }
     book.tab_line();
+    // The tabs hang from the line: a phone's line is lower with its taller page (the desktop's is 426).
+    let tab_drop = book.line - 426.0;
     let tabs = [
-        (MANUAL_TAB_POSITION.0, MANUAL_TAB_POSITION.1, SaveKind::Manual, own("LoadGame", "PrivateSave", n_("Private")), MANUAL_TAB_TEXTURES),
-        (AUTO_TAB_POSITION.0, AUTO_TAB_POSITION.1, SaveKind::Auto, own("LoadGame", "AutoSave", n_("Autosaves")), AUTO_TAB_TEXTURES),
+        (MANUAL_TAB_POSITION.0, MANUAL_TAB_POSITION.1 + tab_drop, SaveKind::Manual, own("LoadGame", "PrivateSave", n_("Private")), MANUAL_TAB_TEXTURES),
+        (AUTO_TAB_POSITION.0, AUTO_TAB_POSITION.1 + tab_drop, SaveKind::Auto, own("LoadGame", "AutoSave", n_("Autosaves")), AUTO_TAB_TEXTURES),
     ];
     // Paint the inactive spine first and the selected spine last, above the window edge.
     let mut switched = None;
@@ -979,11 +1145,23 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     }
     let clearable = view.entries.iter().any(|e| !e.pinned);
     // Razdor's own: the buttons grow with the text (`button_grow`): «Очистить всё» keeps its left end,
-    // «Загрузить» and «Отмена» their right ends (587 and 7 units apart, as at Normal).
-    let (cancel_w, load_w) = (95.0 * grow, 116.0 * grow);
-    let cancel_x = 587.0 - cancel_w;
-    let load_x = cancel_x - 7.0 - load_w;
-    if book.button(17.0, 140.0 * grow, tr("Clear all"), clearable) && !asking {
+    // «Загрузить» and «Отмена» their right ends (587 and 7 units apart, as at Normal). A phone's row
+    // is one row across the page (`phone_row`).
+    let (clear, load, cancel) = match book.upright {
+        Some(u) => {
+            let row = phone_row(&[0.36, 0.32, 0.32], u.units(6.0));
+            (row[0], row[1], row[2])
+        }
+        None => {
+            let (cancel_w, load_w) = (95.0 * grow, 116.0 * grow);
+            let cancel_x = 587.0 - cancel_w;
+            let load_x = cancel_x - 7.0 - load_w;
+            ((17.0, 140.0 * grow), (load_x, load_w), (cancel_x, cancel_w))
+        }
+    };
+    let (load_x, load_w) = load;
+    let (cancel_x, cancel_w) = cancel;
+    if book.button(clear.0, clear.1, tr("Clear all"), clearable) && !asking {
         view.confirm_clear = true;
         return None;
     }
@@ -1498,6 +1676,23 @@ fn question_box(title: &str, text: &str, marked: bool) -> Option<bool> {
 mod tests {
     use super::*;
 
+    /// A phone's bottom row is one row across the page: the buttons are 46 dp tall at 2.75 px per dp
+    /// and their widths share the page's width, `gap` apart; the page's height is 360 dp.
+    #[test]
+    fn a_phone_book_has_one_bottom_row_of_finger_sized_buttons() {
+        let u = Upright { dp: 2.75, k: 1.75 };
+        assert!((u.button_h() * u.k / 2.75 - 46.0).abs() < 1e-3);
+        assert!((u.page() * u.k / 2.75 - 360.0).abs() < 1e-3);
+        let row = phone_row(&[0.42, 0.29, 0.29], u.units(6.0));
+        assert_eq!(row.len(), 3);
+        assert!((row[0].0 - 17.0).abs() < 1e-3);
+        let end = row[2].0 + row[2].1;
+        assert!((end - 577.0).abs() < 1e-2, "the row ends at 577 units, got {end}");
+        for pair in row.windows(2) {
+            assert!(pair[0].0 + pair[0].1 < pair[1].0, "buttons overlap");
+        }
+    }
+
     /// The leave-battle window's art (`Btn3`, `Btn2`, `Btn1` widths) in its own pixels.
     const ART: (f32, f32, f32) = (160.0, 128.0, 96.0);
 
@@ -1679,7 +1874,7 @@ mod tests {
         let (sw, sh, top) = (1080.0, 2376.0, 66.0);
         let bar = (80.0f32 * 1.125).round();
         let (k, win) = crate::ui::window_layout::portrait_game((sw, sh), Some(2.75), top, bar, 1.125, (Book::W, Book::H)).expect("held upright");
-        let book = Book { win, k, grow: 1.0, foot: 0.0 };
+        let book = Book::layout(win, k, 1.0, 0.0, None);
         let [(quick_x, _, quick_w), (save_x, _, save_w), (cancel_x, _, cancel_w)] = save_button_row(1.0);
         for (x, w) in [(quick_x, quick_w), (save_x, save_w), (cancel_x, cancel_w)] {
             let drawn = book.rect(x, 443.0, w, 28.0);
@@ -1700,7 +1895,7 @@ mod tests {
         let (sw, sh, top) = (1080.0, 2376.0, 66.0);
         let bar = (80.0f32 * 1.125).round();
         let (k, win) = crate::ui::window_layout::portrait_game((sw, sh), Some(2.75), top, bar, 1.125, (Book::W, Book::H)).expect("held upright");
-        let book = Book { win, k, grow: 1.0, foot: 0.0 };
+        let book = Book::layout(win, k, 1.0, 0.0, None);
         // «Сохранить» (369, 116) and «Отмена» (492, 95), 28 design px high, as `Book::button` draws them.
         let [(_, _, _), (save_x, _, save_w), (cancel_x, _, cancel_w)] = save_button_row(1.0);
         let save = book.rect(save_x, 443.0, save_w, 28.0);

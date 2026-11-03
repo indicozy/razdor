@@ -2399,6 +2399,8 @@ pub fn scrollbar(r: Rect, first: &mut usize, shown: usize, total: usize) -> bool
     }
     let most = total - shown;
     let before = *first;
+    // A finger on the bar holds no long press, so its slide grabs the knob (report 1476).
+    crate::ui::input::swipe_area(r, crate::ui::gestures::SwipeKind::Grab);
     let w = r.w;
     let up = Rect::new(r.x, r.y, w, w);
     let down = Rect::new(r.x, r.y + r.h - w, w, w);
