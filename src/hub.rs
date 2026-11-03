@@ -27,9 +27,11 @@
 
 mod mods;
 mod packages;
+mod versions;
 
 pub use mods::*;
 pub use packages::*;
+pub use versions::*;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -494,6 +496,9 @@ pub struct InstalledEntry {
     /// An imported package's own entry for the list (the catalog has none of it).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entry: Option<Entry>,
+    /// A package's older installed versions, newest first (the fields above are the newest one's).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub older: Vec<PackageVersion>,
 }
 
 impl Installed {
@@ -811,17 +816,14 @@ impl Hub {
                     written
                 }
             };
-            // A package's older version goes once the new one is written (a reinstall of a new version).
-            if e.kind == Kind::Package {
-                if let Some(old) = installed.entries.get(&e.id) {
-                    for rel in old.files.iter().filter(|r| !written.contains(r) && safe_path(r)) {
-                        let _ = std::fs::remove_file(self.local.join(rel));
-                    }
-                }
-            }
             let lang = files.iter().find_map(|f| f.lang.clone()).unwrap_or_default();
-            let record = InstalledEntry { version: e.version.clone(), kind: e.kind, lang, title: e.title.clone(), requires: e.requires.clone(), files: written, unchecked: false, entry: None };
-            installed.entries.insert(e.id.clone(), record);
+            let record = InstalledEntry { version: e.version.clone(), kind: e.kind, lang, title: e.title.clone(), requires: e.requires.clone(), files: written, unchecked: false, entry: None, older: Vec::new() };
+            // A package keeps its older versions' files: the new one is added beside them.
+            if e.kind == Kind::Package {
+                self.add_package_version(&mut installed, &e.id, record)?;
+            } else {
+                installed.entries.insert(e.id.clone(), record);
+            }
             self.save_installed(&installed)?;
         }
         Ok(())
@@ -875,13 +877,18 @@ impl Hub {
             // The mod's folder: its files and its merged game folder.
             let _ = std::fs::remove_dir_all(mod_dir(&self.local, id));
         } else {
-            for rel in &e.files {
+            // Every installed version of a package goes, its files and its state with it.
+            for rel in e.versions().iter().flat_map(|v| &v.files) {
                 if safe_path(rel) {
                     let _ = std::fs::remove_file(self.local.join(rel));
                 }
             }
         }
-        self.save_installed(&installed)
+        self.save_installed(&installed)?;
+        if e.kind == Kind::Package {
+            self.forget_package_state(id)?;
+        }
+        Ok(())
     }
 }
 
@@ -1236,7 +1243,7 @@ mod tests {
         assert_eq!(plan_install(&c, &none, "ford-outpost").unwrap(), ["ford-outpost"]);
         assert_eq!(plan_install(&c, &none, "lost-update"), Err(PlanError::Missing("community-update".into())));
         let mut some = Installed::default();
-        some.entries.insert("evolution-mock".into(), InstalledEntry { version: "9.0".into(), kind: Kind::Mod, lang: String::new(), title: Text::default(), requires: vec![], files: vec![], unchecked: false, entry: None });
+        some.entries.insert("evolution-mock".into(), InstalledEntry { version: "9.0".into(), kind: Kind::Mod, lang: String::new(), title: Text::default(), requires: vec![], files: vec![], unchecked: false, entry: None, older: vec![] });
         assert_eq!(plan_install(&c, &some, "merc-road").unwrap(), ["evolution-mercs", "merc-road"]);
     }
 
