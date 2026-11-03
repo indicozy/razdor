@@ -141,6 +141,27 @@ fn alive(run: &Run) -> (usize, Vec<String>) {
     (names.len(), names)
 }
 
+/// The squad as a line for a report: each unit with its hp, and the dead and the unpaid marked.
+fn squad_state(run: &Run) -> String {
+    let units: Vec<String> = run
+        .g
+        .squad
+        .iter()
+        .map(|u| {
+            let name = run.g.content.unit(u.def).name.clone();
+            let mut mark = String::new();
+            if !u.alive() {
+                mark.push_str(" dead");
+            }
+            if u.unpaid {
+                mark.push_str(" unpaid");
+            }
+            format!("{name} {}/{}{mark}", u.hp, u.max_hp(&run.g.content))
+        })
+        .collect();
+    format!("gold {}, spells {}, squad [{}]", run.g.gold, run.g.spells.len(), units.join(", "))
+}
+
 fn leg(map: &str, run: &Run) -> Leg {
     let (n, names) = alive(run);
     let entered = run.ledger.first().map_or((run.g.gold, n), |s| (s.gold, s.squad));
@@ -356,7 +377,8 @@ pub(crate) fn play(install: &DtInstall, seed: u32, plan: Plan, legs: &mut Vec<Le
     let mut gates = hand(install, &hub2, &marka, "gates", &gates_choices(plan)).map_err(|e| fail("gates", e))?;
     gates.g.avoid_armies = true;
     drink_for_wounded(&mut gates);
-    gates_play(plan, &mut gates).map_err(|e| fail("gates", e))?;
+    let entered_gates = squad_state(&gates);
+    gates_play(plan, &mut gates).map_err(|e| format!("gates: {e}\n  entered with: {entered_gates}\n  log: {}", gates.log.join(" | ")))?;
     if !gates.victory() {
         return Err(format!("the gates were not won: {}", gates.log.join(" | ")));
     }
