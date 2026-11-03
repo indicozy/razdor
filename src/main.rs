@@ -221,6 +221,14 @@ async fn main() {
             exit_now(&mut app);
         }
     }
+    // `--studio [<package folder>]`: Razdor Studio on a package folder (the example package by default).
+    #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+    if let Some(folder) = ui::studio::requested() {
+        if let Err(e) = folder.and_then(|f| app.open_studio(&f)) {
+            eprintln!("razdor: {e}");
+            exit_now(&mut app);
+        }
+    }
     ui::snapshot::stage(&mut app);
     let snapshot = ui::snapshot::target();
     let quiet = ui::snapshot::quiet();

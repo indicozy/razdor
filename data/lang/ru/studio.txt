@@ -1,0 +1,27 @@
+# Razdor Studio's interface in Russian: our own translation. "English = Russian", one per line;
+# {name} a value filled in by the studio. See src/i18n.rs. Save, Save all, Check, Exit and Map
+# are in the other catalogs (editor.txt, game.txt).
+
+# Docks (tab titles)
+File system = Файлы
+Scene = Сцена
+Script = Скрипт
+Inspector = Инспектор
+Problems = Проблемы
+Output = Вывод
+
+# Toolbar and file tree
+Save all = Сохранить всё
+Package folder = Папка пакета
+Coming next = В следующем шаге
+No file open: pick a text file in the file system. = Файл не открыт: выберите текстовый файл в дереве слева.
+
+# Problems and output
+No problems. Press Check to look again. = Проблем нет. Нажмите «Проверка», чтобы проверить снова.
+Error = Ошибка
+Warning = Предупреждение
+Hint: {hint} = Подсказка: {hint}
+Nothing yet. = Пока пусто.
+Saved {path} = Сохранено: {path}
+All files saved. = Все файлы сохранены.
+Check: {errors} errors, {warnings} warnings = Проверка: ошибок — {errors}, предупреждений — {warnings}

@@ -14,6 +14,8 @@ pub mod dt_art;
 pub mod dt_font;
 pub mod field_view;
 pub mod editor;
+#[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+pub mod studio;
 pub mod game_bar;
 pub mod gamepad;
 pub mod gestures;
@@ -129,6 +131,9 @@ pub enum Screen {
     Victory,
     /// The map editor (`ui::editor`).
     Editor,
+    /// Razdor Studio, the package editor (`ui::studio`).
+    #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+    Studio,
     /// The custom battle setup over the main menu (`ui::custom_battle`).
     CustomSetup,
     /// A round of a custom battle.
@@ -376,6 +381,9 @@ pub struct App {
     play_last: (&'static str, Option<String>),
     /// The map editor, kept while a test play runs.
     editor: Option<Box<editor::EditorScreen>>,
+    /// Razdor Studio on a package folder (`ui::studio`), while its screen is open.
+    #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+    studio: Option<Box<studio::StudioScreen>>,
     /// The game is a test play of the editor's map: leaving it returns to the editor.
     test_play: bool,
     /// The F1 key list is open over the screen.
@@ -480,6 +488,8 @@ impl App {
             tap_press: None,
             play_last: ("", None),
             editor: None,
+            #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+            studio: None,
             test_play: false,
             help: false,
             help_fresh: false,
@@ -579,6 +589,27 @@ impl App {
         }
         if let Some(local) = razdor::hub::local_dir() {
             razdor::hub::keep_only_game_folder(&local, id.as_deref());
+        }
+    }
+
+    #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+    /// Opens Razdor Studio on a package folder (`--studio`, the snapshot's `studio`).
+    pub fn open_studio(&mut self, folder: &std::path::Path) -> Result<(), String> {
+        self.studio = Some(Box::new(studio::StudioScreen::open(folder)?));
+        self.screen = Screen::Studio;
+        Ok(())
+    }
+
+    /// A frame of the studio; leaving it goes back to the main menu.
+    #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+    fn studio_frame(&mut self) {
+        let Some(studio) = self.studio.as_mut() else {
+            self.screen = Screen::MainMenu;
+            return;
+        };
+        if let studio::Action::Exit = studio.frame() {
+            self.studio = None;
+            self.screen = Screen::MainMenu;
         }
     }
 
@@ -995,6 +1026,8 @@ impl App {
             Screen::Load(_) => Place::Load,
             Screen::Victory => Place::End,
             Screen::Editor => Place::Editor,
+            #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+            Screen::Studio => Place::Editor,
         }
     }
 
@@ -1151,6 +1184,8 @@ impl App {
             Screen::Load(_) => "load",
             Screen::Victory => "victory",
             Screen::Editor => "editor",
+            #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+            Screen::Studio => "studio",
             Screen::CustomSetup => "custom battle setup",
             Screen::CustomBattle(_) => "custom battle",
             Screen::Hub(_) => "hub",
@@ -1246,6 +1281,11 @@ impl App {
         // The screen's orientation from the settings (Android; applied at start and on each change).
         #[cfg(target_os = "android")]
         android::follow_orientation(self.audio.settings.orientation);
+        #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+        if matches!(self.screen, Screen::Studio) {
+            self.studio_frame();
+            return;
+        }
         if matches!(self.screen, Screen::Editor) {
             self.frame_content();
         } else {
@@ -1545,6 +1585,8 @@ impl App {
             (Screen::Load(view), game) => saves::load_screen(game.as_ref(), &self.assets, view, &mut self.pending_load, &mut self.load_error),
             (Screen::Victory, game) => screens::victory(game, &self.scenarios, self.dt_content.clone()),
             (Screen::Editor, _) => None,
+            #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+            (Screen::Studio, _) => None,
             (Screen::CustomSetup, _) => {
                 let view = self.custom.get_or_insert_with(|| custom_battle::SetupView::new(&custom_content));
                 match custom_battle::frame(view, &custom_content, &self.assets, &mut self.audio.settings) {
