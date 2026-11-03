@@ -464,7 +464,6 @@ fn the_campaign_plays_the_marsh_to_the_free_march() {
 }
 
 #[test]
-#[ignore = "open: the Companies' post falls on day 2 (no income), the camp runs out of gold; see docs/OPEN_QUESTIONS.md"]
 fn the_campaign_plays_the_companies_to_the_free_march() {
     let Some(install) = install() else { return };
     let (legs, ending) = campaign(&install, 1, Plan::Companies);

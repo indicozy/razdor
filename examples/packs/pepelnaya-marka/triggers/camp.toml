@@ -23,6 +23,15 @@ then = [
     { army_goal = "supply", go_to = [60, 71] },
 ]
 
+# The companies' post: a player's garrison is his troops there (never paid), and an army takes a building
+# with no garrison it can see (the red company walked in on day 2 of the camp). The post gets its men as
+# a garrison the AI sees.
+[[trigger]]
+id = "camp_post_garrison"
+map = "camp"
+when = { event = "game_start" }
+then = [ { add_units = "post", troops = ["dt:swordsman", "dt:crossbowman"], of = "building" } ]
+
 # Kord's band patrols the lowland while he is unmet. Hired in the hub (kord 1 or 3), his men already walk in
 # the hero's squad, so the band is not on this map (`camp_kord_gone`).
 [[trigger]]
