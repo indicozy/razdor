@@ -69,11 +69,11 @@ title = "camp.raid.title"
 text = "camp.raid.text"
 speaker = "dt:guardsman"
 
-# Offered only with the band on the map: a company met here (kord 1 or 3 from the camp's own hire).
+# Offered with Kord's company hired and not turned (his men walk in the hero's squad).
 [[dialog.choice]]
 id = "hit"
 text = "camp.raid.hit"
-if = [ { var = "kord", op = ">=", value = 1 }, { var = "kord", op = "!=", value = 2 }, { army_alive = "kord_band", value = true } ]
+if = [ { var = "kord", op = ">=", value = 1 }, { var = "kord", op = "!=", value = 2 } ]
 
 [[dialog.choice]]
 id = "pass"

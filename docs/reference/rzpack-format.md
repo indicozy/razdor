@@ -274,7 +274,8 @@ key names the building.
 
 **Armies' goals and paces.** `army_goal` gives an AI army a goal: it no longer takes the original
 AI's choice of destination. On each arrival it plans its way to the goal's cell with the AI's own
-routes (land, or the sea for a ship) and walks it on the same step clock, so the speed rules,
+routes (land, or the sea for a ship; its search may take up to 60 000 nodes, where the AI's own takes
+4000, so a route across a 200×200 map is found) and walks it on the same step clock, so the speed rules,
 ships, bridges and fog behave as before. A `go_to` army stands on its cell; a `go_to_building`
 army walks into the building and stands there (its arrival rules, as the AI's, take over inside);
 `patrol` loops through its cells; `follow` keeps next to the hero or an army as it moves;

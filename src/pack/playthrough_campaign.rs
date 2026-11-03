@@ -25,7 +25,8 @@ use crate::rules::content::{Content, WageKind};
 pub(crate) enum Plan {
     /// The Order: Ilm the novice's pilgrim burns the village (the inquisitor's path).
     Order,
-    /// The Order's novice spares the village: the heresy, the grey bargain at the gates.
+    /// The Order's cleansed inquisitor (the shrine's cleanse, the council's Order) spares the village at the
+    /// abbey's trial: the heresy, the grey bargain at the gates.
     Heretic,
     /// The marsh folk: Tess and the disguise, the Salt Gate.
     Marsh,
@@ -445,7 +446,6 @@ fn the_campaign_plays_the_order_to_its_ending() {
 }
 
 #[test]
-#[ignore = "open: the heretic's trial never fires (ilm stays 1), so no grey bargain; see docs/OPEN_QUESTIONS.md"]
 fn the_campaign_plays_the_heretic_to_the_grey_bargain() {
     let Some(install) = install() else { return };
     let (legs, ending) = campaign(&install, 1, Plan::Heretic);
@@ -455,7 +455,6 @@ fn the_campaign_plays_the_heretic_to_the_grey_bargain() {
 }
 
 #[test]
-#[ignore = "open: one unit leaves the squad at the gates with no pay short (the named halberdier?); see docs/OPEN_QUESTIONS.md"]
 fn the_campaign_plays_the_marsh_to_the_free_march() {
     let Some(install) = install() else { return };
     let (legs, ending) = campaign(&install, 1, Plan::Marsh);
@@ -465,11 +464,27 @@ fn the_campaign_plays_the_marsh_to_the_free_march() {
 }
 
 #[test]
-#[ignore = "open: the Companies' post falls on day 2 (no income), the camp runs out of gold; see docs/OPEN_QUESTIONS.md"]
 fn the_campaign_plays_the_companies_to_the_free_march() {
     let Some(install) = install() else { return };
     let (legs, ending) = campaign(&install, 1, Plan::Companies);
     eprintln!("{}", report(Plan::Companies, 1, &legs, &ending));
     assert_eq!(ending.clone().ok().flatten().as_deref(), Some("free"), "{}", report(Plan::Companies, 1, &legs, &ending));
     assert!(problems(&legs).is_empty(), "{:?}", problems(&legs));
+}
+
+/// Varga, the halberdier who joins at the ruins, is alive at the end of chapter one in at least 70% of
+/// fifteen seeds on the campaign's own route (the hired recruits, the host met). Measured at 15 of 15 when
+/// it was written: the host's fight does not reach her (no blow lands on her in the sweep).
+#[test]
+fn varga_survives_chapter_one_over_fifteen_seeds() {
+    let Some(install) = install() else { return };
+    let mut alive = 0;
+    for seed in 1..=15u32 {
+        if let Ok(run) = chapter_one(&install, seed) {
+            if run.g.squad.iter().any(|u| u.alive() && u.named != 0) {
+                alive += 1;
+            }
+        }
+    }
+    assert!(alive * 100 >= 70 * 15, "Varga lives in {alive}/15 seeds");
 }

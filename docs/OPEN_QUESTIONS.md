@@ -539,27 +539,57 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   misses. The hold-then-drag failure was fixed by `SwipeKind::Grab`. Whether the knob's hit area
   should grow (it needs room the list gives up) is the owner's call, a Razdor choice.
 
-- **Pepelnaya Marka: the Companies' post falls on day 2** (2026-11-03). The camp's player-owned post (income 30,
-  garrison 4 guardsmen + 2 archers) is owned at the start (`owner_army` 0) and lost on day 2 with no army seen
-  taking it; the camp's gold then runs out (11 zero-gold days, 3 units leave). `camp` triggers do not touch it. The
-  cause is not found: a building-loss path in the engine. The campaign test `the_campaign_plays_the_companies_to_the_free_march`
-  is `#[ignore]` until it is.
-- **Pepelnaya Marka: the heretic's trial never fires** (2026-11-03). After the hub's «cleanse» (Ilm 1) the abbey's
-  «take» should set Ilm 0 and the trial should then give Ilm 2 (the spare); in the end-to-end run Ilm stays 1 and
-  the grey bargain is never offered. Test `the_campaign_plays_the_heretic_to_the_grey_bargain` is `#[ignore]`.
-- **Pepelnaya Marka: a unit leaves the squad at the gates** (2026-11-03). In the marsh run one unit is gone at the
-  gates with gold above 0 (the named halberdier, I think). Not diagnosed; the desertion check counts it. Test
-  `the_campaign_plays_the_marsh_to_the_free_march` is `#[ignore]` until it is.
-- **Pepelnaya Marka: the allies never reach the palace** (2026-11-03). The AI's army route search has a node cap
-  (`GOAL_NODES` = 4000 in `rules/ai/goals.rs`): from the spawn cells (44,186), (22,186), (176,176) no route to
-  (160,44) is found within 4000 nodes, the goal is dropped and the column wanders. With 40000 nodes the route is
-  found (166–183 cells). The fix is in the content (waypoint legs) or the cap; not done.
-- **Pepelnaya Marka: the Varga and the losing choices are not measured yet** (2026-11-03): Varga's survival over
-  seeds on the prepared route, salt's «openly» (the patrol chase), camp's «hit the column», salt's watch post.
+- **Pepelnaya Marka: an army's leader is one unit more than its troops** (2026-11-03). An army without a named
+  `leader` takes its first troop type as its leader (`pack::compile`), and `rules::world` places the leader as a
+  unit besides its troops. So an unnamed package army fields one more of its first type than it is written with
+  (the camp's supply column: two guardsmen written, three in the battle; the salt patrol the same). The column and
+  the patrol were tuned with this in place (one guardsman fewer each in the map). Unknown: whether the original's
+  army counts its leader among its troops (the army record's leader byte and its six troop slots, 0x4b2504). Settled
+  by that reading; if the leader is not a unit of its own, the compile stops adding it and the package's armies are
+  re-measured (the owner's call on the balance).
+- **Pepelnaya Marka: a player's building keeps its garrison as stationed troops** (2026-11-03). At the game's start
+  the scenario garrison of a building the player owns moves to `stationed` (never paid, `rules::game::with_world`),
+  and an AI army's capture reads `garrison` only: the companies' post, written with two bandits, was taken by a
+  passing bandit army on day 2 of the camp. The package gives the post a garrison with `add_units` (the fix, commit
+  9ed1ca07). Unknown: whether the original's AI attacks a player's building against the garrison that stands in it.
+  Settled by the original's assault path on an owned building (the garrison record, 0x4b5600 area). Changing the
+  rule changes every community map whose start castles have troops, so it is the owner's call after that reading.
+- **`army_alive` is true for a removed army** (2026-11-03). `Cond::ArmyAlive` counts an army in the inactive list
+  (a `remove_army`), so the camp's «hit» was offered with its band gone and did nothing. Fixed in the camp's content
+  (the condition is gone, the hit sends the column at the hero: commit 1c25b247). Open for the package format: whether
+  `army_alive` should mean on the map. A package-format change, the owner's call.
+
 - **Pepelnaya Marka: the hub's revisit is a day-0 scene.** The revisit's victory fires at the first day start, so a
   return from a branch gives about 0.4 days in the hub (enough to walk to Ashford, not for more).
 
 ## Settled
+
+- **Pepelnaya Marka: the allies never reach the palace** (2026-11-03, settled 04221dc0). The goal planner
+  searched at the AI's 4000-node cap, which finds no route from the barrows' spawn cells to the palace (166–183
+  cells), so the goal dropped and the column wandered. A plan takes about 1.3 ms at 10 000 to 200 000 nodes and
+  about 5 ms at most, so the cap is 60 000 for package goals (`rules/ai/goals.rs`; community maps have no goals).
+  The Order's column reaches the palace and the dread falls by two (test `the_allies_column_reaches_the_palace`).
+- **Pepelnaya Marka: a unit leaves the squad at the gates** (2026-11-03, settled 663289c7). It was Varga: the
+  gates' `varga` choice removes her from the hero's army for good (a designed exit at 242 gold). The harness counted
+  any squad drop with no battle as a desertion. It now counts the game's own deserter lists (`NewDay`), which are the
+  unpaid units. The marsh test is un-ignored.
+- **Pepelnaya Marka: the Companies' post falls on day 2** (2026-11-03, settled 9ed1ca07). The red company (a bandit
+  army) walked in and took the post with no fight: its scenario garrison is stationed, which the AI does not see (see
+  the open question above). The post now gets two swordsmen and two crossbowmen by `add_units` at the start. No
+  desertion, gold never at 0 at a day's start, 740 gold at the camp's end. The companies test is un-ignored.
+- **Pepelnaya Marka: the heretic's trial never fires** (2026-11-03, settled 12401fbc). The council's Order choice
+  needs standing 1, which only the shrine's cleanse gives (it makes Ilm the inquisitor, ilm 1); the trial needed
+  ilm 0. The trial now also fires for ilm 1 (the inquisitor's crossroads): sparing turns him into the heretic, and
+  the grey bargain follows at the gates and the throne. The heretic test is un-ignored.
+- **Pepelnaya Marka: Varga's survival in chapter one** (2026-11-03, settled cdba58b2). The loose end said she dies
+  in the host's fight. Measured on the campaign's route and the test's prepared route: she lives in 15 of 15 seeds
+  (no blow lands on her), so the chapter is unchanged and a test pins the guarantee at 70%.
+- **Pepelnaya Marka: the losing choices** (2026-11-03, settled 313303dc and 1c25b247). «Openly»: the patrol beat the
+  route's squad of ten in 15 of 15; with one guardsman fewer in the map it is won in 15 of 15 (the disguised road
+  never fights it). «Hit the column»: the choice did nothing (see the open question on `army_alive`); the hit is now
+  the hero's fight with Kord's men, the column written with two guardsmen, won by the camp's squad of eleven in 15
+  of 15 (three guardsmen: none). The salt's watch post, optional, is won in 15 of 15 by the route's squad (the
+  «unwinnable» note came from the test's smaller hub squad of four).
 
 - **Author names in letters the bundled fonts lack** (2026-10-31, a player's report, 1438). A name
   such as «Ꙇѵαη Ꚍɣkhøηςhʋk» draws its Cyrillic Extended-B letters (U+A646, U+A68C) as boxes on

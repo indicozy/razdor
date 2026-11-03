@@ -320,3 +320,28 @@ fn each_branchs_done_flag_routes_the_hub_to_the_gates() {
         assert_eq!(after_victory(&mut run.g, &marka.routes).as_deref(), Some("gates"), "{flag} routes to the gates");
     }
 }
+
+/// The hit on the Crown's column is the hero's fight with Kord's men in the squad (the column is sent at
+/// him): over fifteen seeds the camp's squad (eleven, as the route has it) beats the column in most. Before,
+/// the hit sent a band that is not on the map (removed at the camp's start), the column was never beaten,
+/// and the choice did nothing.
+#[test]
+fn the_hit_on_the_column_is_won_by_the_camp_squad_over_fifteen_seeds() {
+    let Some(install) = install() else { return };
+    let mut wins = 0;
+    let mut problems = Vec::new();
+    for seed in 1..=15u32 {
+        match into_camp(&install, seed, &[("camp_raid", "hit"), ("camp_red", "leave"), ("camp_gate", "light"), ("camp_loot", "split")]) {
+            Ok(mut run) => {
+                let out = fight_army(&mut run, "supply", 8);
+                if matches!(out, Ok(Some(Outcome::Victory))) {
+                    wins += 1;
+                } else {
+                    problems.push(format!("seed {seed}: {out:?}; {}", run.log.join(" | ")));
+                }
+            }
+            Err(e) => problems.push(format!("seed {seed}: {e}")),
+        }
+    }
+    assert!(wins * 100 >= 50 * 15, "the camp's squad beat the column {wins}/15: {problems:?}");
+}
