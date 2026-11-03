@@ -1317,8 +1317,9 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
         if crate::ui::widgets::mouse_in(view.x, view.y, view.w, view.h) {
             scroll = (scroll - wheel() * 40.0 * k).clamp(0.0, most);
         }
-        let bar = Rect::new(inner.x + inner.w - 12.0 * u, inner.y, 10.0 * u, view_h);
-        super::widgets::scrollbar_touch(bar, &mut scroll, most, view_h, u);
+        // The original's bar at the finger's size: 40 dp wide, at the window's right (`margin` keeps the rows off it).
+        let bar = Rect::new(inner.x + inner.w - 44.0 * u, inner.y, 40.0 * u, view_h);
+        super::widgets::scrollbar_px(bar, &mut scroll, most, view_h, 40.0 * k);
     }
     if on_phone {
         ADV_SCROLL.with(|s| s.set(scroll));
@@ -1427,8 +1428,8 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     content_bottom = content_bottom.max(y + 56.0 * k + army_lines.len() as f32 * 17.0 * k);
     // The right column: how Razdor shows the game.
     let rx = inner.x + 580.0 * k;
-    // A phone keeps its right margin for the scroll bar.
-    let margin = if on_phone { 16.0 * u } else { 24.0 * k };
+    // A phone keeps its right margin for the scroll bar (40 dp, and 4 dp to either side).
+    let margin = if on_phone { 48.0 * u } else { 24.0 * k };
     let rw = inner.x + inner.w - margin - rx;
     let bw = 150.0 * k;
     let ok_h = row_h;
@@ -1941,7 +1942,9 @@ fn phone_options(audio: &mut super::audio::Settings, install_wide: bool, over_ma
         let (inner, closed) = chrome::window(rect, &title, chrome::Skin::Marble, true);
         let pad = 12.0 * u;
         let x0 = inner.x + pad;
-        let cw = inner.w - 2.0 * pad;
+        // The scroll bar takes 40 dp at the right (the original's bar, at a finger's size); the rows stop before it.
+        let bar_x = inner.x + inner.w - 4.0 * u - 40.0 * u;
+        let cw = bar_x - 4.0 * u - x0;
         // The list between the window's top and the buttons row (44 units high, 10 above its bottom).
         let list = Rect::new(inner.x, inner.y + 6.0 * u, inner.w, inner.h - 6.0 * u - 66.0 * u);
         let row_h = 40.0 * u;
@@ -2008,8 +2011,9 @@ fn phone_options(audio: &mut super::audio::Settings, install_wide: bool, over_ma
             if crate::ui::widgets::mouse_in(list.x, list.y, list.w, list.h) {
                 scroll = (scroll - wheel() * 24.0 * u).clamp(0.0, most);
             }
-            let bar = Rect::new(inner.x + inner.w - 12.0 * u, list.y, 10.0 * u, view);
-            super::widgets::scrollbar_touch(bar, &mut scroll, most, view, u);
+            // The original's bar (its arrows, track and knob), at the finger's size: 40 dp wide.
+            let bar = Rect::new(bar_x, list.y, 40.0 * u, view);
+            super::widgets::scrollbar_px(bar, &mut scroll, most, view, 24.0 * u);
         }
         PHONE_SCROLL.with(|c| c.set(scroll));
         // A row's screen top, and whether it is on the list at all.
@@ -2022,8 +2026,8 @@ fn phone_options(audio: &mut super::audio::Settings, install_wide: bool, over_ma
             if !on_list(cy - scroll, slider_h) {
                 continue;
             }
-            // The rows stop 12 dp short of the window's right edge: the scroll bar's place.
-            let r = Rect::new(x0 - pad + 2.0 * u, at(cy), inner.w - 16.0 * u, slider_h);
+            // The rows stop before the scroll bar (`bar_x`).
+            let r = Rect::new(x0 - pad + 2.0 * u, at(cy), bar_x - 4.0 * u - (x0 - pad + 2.0 * u), slider_h);
             if let Some(v) = option_slider_stacked(r, label, *value, 14.0 * u) {
                 match i {
                     0 | 1 => {

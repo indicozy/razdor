@@ -2453,81 +2453,9 @@ pub fn scrollbar_px(r: Rect, scroll: &mut f32, most: f32, view: f32, step: f32) 
     true
 }
 
-local! {
-    /// A phone's scroll bar knob held by a press: the bar's rectangle and the grab point below the knob's top.
-    static TOUCH_GRAB: std::cell::Cell<Option<(Rect, f32)>> = const { std::cell::Cell::new(None) };
-}
-
-/// The knob of a phone's scroll bar (`scrollbar_touch`): a `track_h` track showing `view` of
-/// `view + most` (px), its knob at least `min_h` high (a 40 dp finger target) and its room above
-/// the track's bottom. Returns (knob height, room).
-pub fn touch_knob(track_h: f32, view: f32, most: f32, min_h: f32) -> (f32, f32) {
-    let total = (view + most).max(view).max(1.0);
-    let knob_h = (track_h * view / total).max(min_h).min(track_h);
-    (knob_h, track_h - knob_h)
-}
-
-/// A phone's scroll bar for content scrolled in pixels (`scroll` of `most`, `view` in sight), `u`
-/// px per dp: a wide track with a light knob at least 40 dp high, so a finger can hold it. Its
-/// slide grabs the knob (as `scrollbar`), a press on the track pages it, and the knob drags. Nothing
-/// is drawn when everything fits. Returns true when `scroll` changed. Phones only: the desktop
-/// keeps [`scrollbar_px`].
-pub fn scrollbar_touch(r: Rect, scroll: &mut f32, most: f32, view: f32, u: f32) -> bool {
-    use super::chrome;
-    if most <= 0.0 {
-        return false;
-    }
-    crate::ui::input::swipe_area(r, crate::ui::gestures::SwipeKind::Grab);
-    let before = *scroll;
-    let (knob_h, room) = touch_knob(r.h, view, most, 40.0 * u);
-    let at = |s: f32| r.y + room * (s / most).clamp(0.0, 1.0);
-    let (mx, my) = pointer();
-    let free = !input_blocked() && !input_swallowed();
-    let held = is_mouse_button_down(MouseButton::Left);
-    let grab = TOUCH_GRAB.with(|g| g.get()).filter(|(gr, _)| *gr == r);
-    if let (Some((_, offset)), true) = (grab, held) {
-        let t = if room > 0.0 { ((my - offset - r.y) / room).clamp(0.0, 1.0) } else { 0.0 };
-        *scroll = t * most;
-    } else if grab.is_some() {
-        TOUCH_GRAB.with(|g| g.set(None));
-    }
-    let knob_at = at((*scroll).clamp(0.0, most));
-    let knob = Rect::new(r.x, knob_at, r.w, knob_h);
-    if free && is_mouse_button_pressed(MouseButton::Left) {
-        let p = vec2(mx, my);
-        if knob.contains(p) {
-            TOUCH_GRAB.with(|g| g.set(Some((r, my - knob.y))));
-        } else if r.contains(p) {
-            *scroll = if my < knob.y { *scroll - view } else { *scroll + view };
-        }
-    }
-    *scroll = scroll.clamp(0.0, most);
-    // The track: a dark well with a silver frame; the knob: light silver, darker while held.
-    draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.0, 0.0, 0.55));
-    chrome::silver_frame(r, 1.0);
-    let knob = Rect::new(r.x, at(*scroll), r.w, knob_h);
-    let held_knob = TOUCH_GRAB.with(|g| g.get()).is_some();
-    let fill = if held_knob { chrome::SILVER_DARK } else { chrome::SILVER };
-    draw_rectangle(knob.x + 1.0, knob.y + 1.0, knob.w - 2.0, knob.h - 2.0, fill);
-    chrome::silver_frame(knob, 1.0);
-    *scroll != before
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A phone's scroll knob is at least 40 dp high (`touch_knob`) and its room ends at the track's
-    /// bottom: a long list's knob is short but still a finger target, a barely longer list's knob
-    /// is most of the track.
-    #[test]
-    fn a_phone_scroll_knob_is_a_finger_target_and_ends_at_the_bottom() {
-        let (knob, room) = touch_knob(600.0, 200.0, 2000.0, 110.0);
-        assert_eq!(knob, 110.0);
-        assert!((knob + room - 600.0).abs() < 1e-3);
-        let (knob, _) = touch_knob(600.0, 580.0, 20.0, 110.0);
-        assert!((knob - 580.0).abs() < 1e-3, "knob {knob}");
-    }
 
     /// Runs `capture_step` over (down edge, up edge, held, hover) frames for one button and
     /// returns each frame's `pressed`.
