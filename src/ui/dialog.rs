@@ -360,8 +360,10 @@ pub fn report_resources(gold: i32, mana: i32, income: i32, wages: i32) -> Vec<(R
 /// beaten garrison's line (`VictoryBuilding` / `VictoryRuines` with `#NAME2` its owner, the
 /// `NoName` ones without an owner) or `Victory` with `#NAME1` the army's name
 /// (`NoNameArmy` when it has none), in white (font 0xae2498, `*`); then, each after an empty
-/// row (`#\`), `VictoryEmpty` when nothing was won, else `VictoryGold`, `VictoryItems`
-/// (0xae24a0) and `VictoryMana` (0xae24a8, `|`).
+/// row (`#\`), `VictoryEmpty` when nothing was won, else `VictoryMana` (0xae24a8, `|`). The
+/// original also prints `VictoryGold` and `VictoryItems` (0xae24a0) there; Razdor drops them
+/// (a player's report, the owner's decision of 2026-11-03): the resource row and the loot's
+/// caption already say it.
 pub fn victory_markup(over: &razdor::rules::game::Beat, gold: i32, items: usize, mana: i32, ini: &dyn Fn(&str, &'static str) -> String) -> String {
     use razdor::i18n::n_;
     use razdor::rules::game::Beat;
@@ -382,12 +384,9 @@ pub fn victory_markup(over: &razdor::rules::game::Beat, gold: i32, items: usize,
     if gold <= 0 && items == 0 && mana <= 0 {
         add("", ini("VictoryEmpty", n_("This battle brought you nothing but new battle experience.")));
     }
-    if gold > 0 {
-        add("", ini("VictoryGold", n_("In this battle you won gold from the enemy.")));
-    }
-    if items > 0 {
-        add("", ini("VictoryItems", n_("As trophies you get the items that belonged to your enemy.")));
-    }
+    // The original also prints VictoryGold and VictoryItems here (0x4a9d88, 0xae24a0), after
+    // the empty row. Razdor leaves them out (a player's report, the owner's decision of
+    // 2026-11-03): the resource row («Деньги + N») and the loot's caption already say it.
     if mana > 0 {
         add("|", ini("VictoryMana", n_("Grateful for your mercy, the surrendered troops pray for you.")));
     }
@@ -1498,13 +1497,27 @@ mod tests {
         use razdor::rules::game::Beat;
         let ini = |key: &str, _: &'static str| format!("<{key}{}>", if key == "Victory" { " #NAME1" } else if key.ends_with("Building") || key.ends_with("Ruines") { " #NAME2" } else { "" });
         let army = victory_markup(&Beat::Army("Мостовые братья".into()), 160, 2, 0, &ini);
-        assert_eq!(army, "^*<Victory Мостовые братья>\r\n\r\n^<VictoryGold>\r\n\r\n^<VictoryItems>");
+        assert_eq!(army, "^*<Victory Мостовые братья>");
         let nameless = victory_markup(&Beat::Army(String::new()), 0, 0, 0, &ini);
         assert_eq!(nameless, "^*<Victory <NoNameArmy>>\r\n\r\n^<VictoryEmpty>");
         let ruins = victory_markup(&Beat::Place { ruins: true, owner: "Колдун".into() }, 0, 0, 5, &ini);
         assert_eq!(ruins, "^*<VictoryRuines Колдун>\r\n\r\n^|<VictoryMana>");
         let fort = victory_markup(&Beat::Place { ruins: false, owner: " ".into() }, 50, 0, 0, &ini);
         assert!(fort.starts_with("^*<VictoryNoNameBuilding #NAME2>"), "{fort}");
+    }
+
+    /// Deviation (a player's report, the owner's decision of 2026-11-03): the victory text has
+    /// no gold or loot line; the resource row and the loot's caption say it. The mana line and
+    /// the nothing-won line stay.
+    #[test]
+    fn the_victory_text_has_no_gold_or_loot_line() {
+        use razdor::rules::game::Beat;
+        let ini = |key: &str, _: &'static str| format!("<{key}>");
+        let rich = victory_markup(&Beat::Army("A".into()), 160, 4, 25, &ini);
+        assert_eq!(rich, "^*<Victory>\r\n\r\n^|<VictoryMana>");
+        assert!(!rich.contains("VictoryGold") && !rich.contains("VictoryItems"), "{rich}");
+        let gold_only = victory_markup(&Beat::Army("A".into()), 160, 0, 0, &ini);
+        assert_eq!(gold_only, "^*<Victory>");
     }
 
     /// The lost battle's report (0x4aa76c): the defeat look, no event behind it (so its OK

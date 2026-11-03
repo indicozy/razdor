@@ -829,15 +829,18 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             Screen::Save(super::saves::SaveView::new(&game, Back::Map))
         }
         "victory" => {
-            // `victory:<map>[:<gold>]`: the report after a won battle over the map
-            // (Dialog::victory), the map's first army beaten, `gold` won (default 160).
+            // `victory:<map>[:<gold>[:loot]]`: the report after a won battle over the map
+            // (Dialog::victory), the map's first army beaten, `gold` won (default 160). `:loot`
+            // adds mana 50 (the surrendered troops) and four items of loot (as `:store` does).
             let gold = arg.and_then(|a| a.parse::<i32>().ok()).unwrap_or(160);
+            let loot: Vec<razdor::rules::content::ItemId> = if parts.next() == Some("loot") { game.content.item_ids().take(4).collect() } else { Vec::new() };
+            let mana = if loot.is_empty() { 0 } else { 50 };
             let name = game.world.armies.first().map(|a| a.name.clone()).unwrap_or_default();
             let result = razdor::rules::game::BattleResult::Victory {
                 reward: gold,
-                mana: 0,
+                mana,
                 lost: 0,
-                loot: Vec::new(),
+                loot,
                 left_behind: 0,
                 level_ups: Vec::new(),
                 captured: None,

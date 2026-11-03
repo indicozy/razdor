@@ -206,7 +206,6 @@ Mana today: - {paid} paid to elementals. = Мана за день: - {paid} уп
 {n} unpaid units refuse to fight until they are paid. = Воинов без жалованья: {n}. Они не будут сражаться, пока им не заплатят.
 Left the army unpaid: {names}. = Ушли из армии, не получив жалованья: {names}.
 Victory over the enemy! = Победа над врагом!
-In this battle you won gold from the enemy. = В этом бою вы добыли у врага золото.
 Grateful for your mercy, the surrendered troops pray for you. = Благодарные за милость, сдавшиеся воины молятся за вас.
 Magic + {magic} = Магия + {magic}
 {left_behind} items were left behind: the pack is full. = Брошено предметов: {left_behind}, рюкзак полон.
@@ -493,7 +492,6 @@ Clicks: the first click picks a unit or an item, the second places it. Dragging:
 Click an item to pick it up, then a unit to give it; drag a unit to another cell to move it; Esc returns = Щёлкните предмет, чтобы взять его, затем воина, чтобы отдать; воина перетащите в другую клетку, чтобы переместить; Esc — назад
 The battle is over, and your enemy, #NAME1, is beaten! = Завершилась битва, и Ваш противник - #NAME1 - побежден!
 This battle brought you nothing but new battle experience. = Эта битва не принесла Вам ничего, кроме нового опыта ведения боя.
-As trophies you get the items that belonged to your enemy. = В качестве трофеев Вам достаются артефакты, которые принадлежали Вашему противнику.
 You have taken the fortress that belonged to #NAME2. = Вы захватили крепость, которая принадлежала #NAME2.
 You have taken a fortress that had no owner. Now you will put it in order! = Вы захватили крепость, у которой не было хозяина. Теперь Вы наведёте здесь порядок!
 You have plundered the ruins where #NAME2 ruled. = Вы опустошили руины, в которых хозяйничал #NAME2.
