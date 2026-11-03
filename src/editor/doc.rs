@@ -204,6 +204,12 @@ impl EditorDoc {
         d
     }
 
+    /// A document of a scenario that is not a file (the studio's map canvas shows a compiled
+    /// package map this way). Nothing is saved from it: `saved_path` stays empty.
+    pub fn from_scenario(scenario: Scenario) -> EditorDoc {
+        EditorDoc::with(scenario, Origin::New, CONTAINER_VERSION)
+    }
+
     /// Opens a `.DTm` file. `game_dir` is the install's maps folder: a map from there is
     /// marked as a game map so saving goes to the user's folder.
     pub fn open(path: &Path, game_dir: Option<&Path>) -> Result<EditorDoc, DtError> {

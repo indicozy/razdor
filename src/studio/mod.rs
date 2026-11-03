@@ -10,9 +10,11 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use crate::pack::check;
-use crate::pack::diag::Diagnostic;
-use crate::pack::files::Files;
+use crate::pack::diag::{Diagnostic, Report};
+use crate::pack::files::{refused_path, Files};
 use crate::pack::load::Package;
+
+pub mod map;
 
 #[cfg(test)]
 mod tests;
@@ -60,13 +62,15 @@ impl Workspace {
             return Err(format!("{} has no package.toml: not a package folder", root.display()));
         }
         let mut entries = Vec::new();
-        list(&root, "", 0, &mut entries)?;
+        let canon = fs::canonicalize(&root).map_err(|e| format!("cannot read {}: {e}", root.display()))?;
+        list(&canon, &canon, "", 0, &mut entries)?;
         entries.sort();
         Ok(Workspace { root, entries, docs: Vec::new(), problems: Vec::new() })
     }
 
     /// Opens a text file of the package for editing and returns its index in `docs`. A file
-    /// already open is not read again: its index comes back.
+    /// already open is not read again: its index comes back. A file whose real place (symlinks
+    /// followed) is outside the package is refused.
     pub fn open_doc(&mut self, path: &str) -> Result<usize, String> {
         if let Some(i) = self.docs.iter().position(|d| d.path == path) {
             return Ok(i);
@@ -75,16 +79,34 @@ impl Workspace {
         if !is_text(path) {
             return Err(format!("{path} is not a text file"));
         }
-        let text = fs::read_to_string(self.root.join(&rel)).map_err(|e| format!("cannot read {path}: {e}"))?;
+        let root = self.canon_root()?;
+        let real = fs::canonicalize(self.root.join(&rel)).map_err(|e| format!("cannot read {path}: {e}"))?;
+        if !real.starts_with(&root) || !real.is_file() {
+            return Err(format!("{path} is not a file of the package"));
+        }
+        let text = fs::read_to_string(&real).map_err(|e| format!("cannot read {path}: {e}"))?;
         self.docs.push(Doc { path: path.to_string(), saved: text.clone(), text });
         Ok(self.docs.len() - 1)
     }
 
-    /// Writes an open document to its file; it is clean afterwards.
+    /// Writes an open document to its file; it is clean afterwards. A file that is a symbolic
+    /// link is never written through, and nothing is written outside the package.
     pub fn save(&mut self, idx: usize) -> Result<(), String> {
         let doc = self.docs.get(idx).ok_or_else(|| format!("no open document {idx}"))?;
         let rel = safe_rel(&doc.path)?;
-        fs::write(self.root.join(rel), &doc.text).map_err(|e| format!("cannot save {}: {e}", doc.path))?;
+        let path = self.root.join(&rel);
+        let not_saved = |why: &str| format!("cannot save {}: {why}", doc.path);
+        let meta = fs::symlink_metadata(&path).map_err(|e| not_saved(&e.to_string()))?;
+        if meta.file_type().is_symlink() || !meta.is_file() {
+            return Err(not_saved("not a regular file of the package"));
+        }
+        let root = self.canon_root()?;
+        let parent = path.parent().ok_or_else(|| not_saved("no folder"))?;
+        let parent = fs::canonicalize(parent).map_err(|e| not_saved(&e.to_string()))?;
+        if !parent.starts_with(&root) {
+            return Err(not_saved("outside the package folder"));
+        }
+        fs::write(&path, &doc.text).map_err(|e| not_saved(&e.to_string()))?;
         let doc = &mut self.docs[idx];
         doc.saved = doc.text.clone();
         Ok(())
@@ -112,12 +134,17 @@ impl Workspace {
         self.docs.iter().any(Doc::is_dirty)
     }
 
+    /// The package as it is on disk now (what a save wrote): read and parsed, not checked.
+    pub fn read_package(&self) -> Result<(Package, Report), String> {
+        let files = Files::load(&self.root)?;
+        Ok(Package::parse(files))
+    }
+
     /// Re-reads the package from disk and runs the checks, as `razdor-pack check` does. Stores
     /// the diagnostics and returns the counts (errors, warnings). An error when the folder
     /// cannot be read at all.
     pub fn check(&mut self) -> Result<(usize, usize), String> {
-        let files = Files::load(&self.root)?;
-        let (package, _) = Package::parse(files);
+        let (package, _) = self.read_package()?;
         let report = check::check(&package);
         let counts = (report.errors(), report.warnings());
         self.problems = report.diagnostics;
@@ -131,9 +158,17 @@ pub fn is_text(path: &str) -> bool {
         .is_some_and(|(stem, ext)| !stem.is_empty() && TEXT_EXTENSIONS.iter().any(|t| t.eq_ignore_ascii_case(ext)))
 }
 
-/// A package-relative path as a filesystem path: no absolute paths, no `..`, no backslashes.
+impl Workspace {
+    /// The package folder with its symbolic links resolved: what every path is checked against.
+    fn canon_root(&self) -> Result<PathBuf, String> {
+        fs::canonicalize(&self.root).map_err(|e| format!("cannot read {}: {e}", self.root.display()))
+    }
+}
+
+/// A package-relative path as a filesystem path: no absolute paths, no `..`, no backslashes, no
+/// network share or device path.
 fn safe_rel(path: &str) -> Result<PathBuf, String> {
-    if path.is_empty() || path.contains('\\') {
+    if path.is_empty() || path.contains('\\') || refused_path(path).is_some() {
         return Err(format!("not a package path: {path:?}"));
     }
     let p = Path::new(path);
@@ -143,8 +178,10 @@ fn safe_rel(path: &str) -> Result<PathBuf, String> {
     Ok(p.to_path_buf())
 }
 
-/// Lists the files under `dir` (package-relative `rel`), skipping dotfiles and `.editor/`.
-fn list(dir: &Path, rel: &str, depth: usize, out: &mut Vec<String>) -> Result<(), String> {
+/// Lists the files under `dir` (package-relative `rel`), skipping dotfiles and `.editor/`. Folder
+/// symbolic links are skipped; a file symbolic link is listed only when its real place is a
+/// regular file inside `root` (the canonical package folder).
+fn list(root: &Path, dir: &Path, rel: &str, depth: usize, out: &mut Vec<String>) -> Result<(), String> {
     if depth > 32 {
         return Ok(());
     }
@@ -155,9 +192,15 @@ fn list(dir: &Path, rel: &str, depth: usize, out: &mut Vec<String>) -> Result<()
             continue;
         }
         let path = format!("{rel}{name}");
-        let Ok(meta) = fs::metadata(entry.path()) else { continue };
-        if meta.is_dir() {
-            list(&entry.path(), &format!("{path}/"), depth + 1, out)?;
+        let at = entry.path();
+        let Ok(meta) = fs::symlink_metadata(&at) else { continue };
+        if meta.file_type().is_symlink() {
+            let inside = fs::canonicalize(&at).is_ok_and(|real| real.starts_with(root) && real.is_file());
+            if inside {
+                out.push(path);
+            }
+        } else if meta.is_dir() {
+            list(root, &at, &format!("{path}/"), depth + 1, out)?;
         } else if meta.is_file() {
             out.push(path);
         }

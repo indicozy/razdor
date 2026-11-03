@@ -600,6 +600,15 @@ impl App {
         Ok(())
     }
 
+    /// Shows map `map` and selects `army` in the open studio (the snapshot's `studio:<folder>:<map>:<army>`).
+    #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+    pub fn studio_preselect(&mut self, map: Option<&str>, army: Option<&str>) -> Result<(), String> {
+        match self.studio.as_mut() {
+            Some(studio) => studio.preselect(map, army),
+            None => Err("the studio is not open".into()),
+        }
+    }
+
     /// A frame of the studio; leaving it goes back to the main menu.
     #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
     fn studio_frame(&mut self) {
@@ -607,7 +616,7 @@ impl App {
             self.screen = Screen::MainMenu;
             return;
         };
-        if let studio::Action::Exit = studio.frame() {
+        if let studio::Action::Exit = studio.frame(self.assets.dt.as_ref()) {
             self.studio = None;
             self.screen = Screen::MainMenu;
         }

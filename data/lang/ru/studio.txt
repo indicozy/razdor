@@ -1,6 +1,6 @@
 # Razdor Studio's interface in Russian: our own translation. "English = Russian", one per line;
-# {name} a value filled in by the studio. See src/i18n.rs. Save, Save all, Check, Exit and Map
-# are in the other catalogs (editor.txt, game.txt).
+# {name} a value filled in by the studio. See src/i18n.rs. Save, Save all, Check, Exit, Map,
+# Hero, Building, Army and Objects are in the other catalogs (editor.txt, game.txt).
 
 # Docks (tab titles)
 File system = Файлы
@@ -25,3 +25,24 @@ Nothing yet. = Пока пусто.
 Saved {path} = Сохранено: {path}
 All files saved. = Все файлы сохранены.
 Check: {errors} errors, {warnings} warnings = Проверка: ошибок — {errors}, предупреждений — {warnings}
+
+# Map tab
+Install not found: set the game folder in the game's settings = Установка не найдена: укажите папку игры в настройках игры
+The package could not be read: see Output. = Пакет не удалось прочитать: см. «Вывод».
+The map does not compile: see Problems. = Карта не собирается: см. «Проблемы».
+No map in the package. = В пакете нет карт.
+Compiling the map... = Сборка карты...
+Point = Точка
+Nothing selected: pick an object on the map or in the scene. = Ничего не выбрано: выберите объект на карте или в сцене.
+No map to show. = Нет карты для показа.
+This map does not parse: see Problems. = Карта не читается: см. «Проблемы».
+The map file could not be read. = Файл карты не удалось прочитать.
+Show in script = Показать в скрипте
+Read-only for now: editing comes in the next step. = Пока только чтение: правка будет в следующем шаге.
+
+# Scene dock
+Buildings ({count}) = Здания ({count})
+Armies ({count}) = Армии ({count})
+Points ({count}) = Точки ({count})
+Objects ({count}) = Объекты ({count})
+Triggers here ({count}) = Триггеры здесь ({count})

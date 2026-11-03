@@ -4,7 +4,7 @@
 //! e.g. `xvfb-run -s "-screen 0 1024x768x24" razdor` with `RAZDOR_SIZE=1024x768`.
 //!
 //! Scenes (`<map>` is a map file name of the install without `.DTm`, e.g. `РК3-Столица`):
-//! `title`, `fonts` (sample lines in many scripts), `update` (a made-up release on offer), `authors[:<seconds>]`, `options[:advanced]`, `scenarios[:<map>]`, `scenarios-versions` (the list with an installed package at two versions, its page's mark and version picker), `import-notice` (the scenario list with «Добавить карту…»'s notice), `tutorial`, `load[:manual|auto[:<row>]]`, `editor[:<map>[:<text to find>]]`, `studio[:<folder>]` (Razdor Studio on a package folder, hello-story by default), `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `clash:<map>` (the first two armies fight on the explored map), `walk:<map>:dx,dy` (the
+//! `title`, `fonts` (sample lines in many scripts), `update` (a made-up release on offer), `authors[:<seconds>]`, `options[:advanced]`, `scenarios[:<map>]`, `scenarios-versions` (the list with an installed package at two versions, its page's mark and version picker), `import-notice` (the scenario list with «Добавить карту…»'s notice), `tutorial`, `load[:manual|auto[:<row>]]`, `editor[:<map>[:<text to find>]]`, `studio[:<folder>[:<map>[:<army id>]]]` (Razdor Studio on a package folder, hello-story by default; the map shown and an army selected), `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `clash:<map>` (the first two armies fight on the explored map), `walk:<map>:dx,dy` (the
 //! hero sets off that many cells away), `building:<map>:<n>`
 //! (the hero in the n-th building; `:barracks`, `:garrison`, `:market`, `:sanctuary` open that tab; `:store` makes it his with loot and opens its store; `:market-pack` the market's pack list), `army:<map>[:<n>[:<unit id>[:<level>]]]` (squad member n selected, made that unit at that level), `journal:<map>` / `hero:<map>[:<tab>]`, `spells:<map>` (`spells-pages:<map>`: 20 spells, page 2 open),
 //! `menu:<map>`, `defeat:<map>` (the lost battle's report), `event:<map>:<n>` (the map's event n's window; `RAZDOR_SCENE_LOST=<id>,…` adds its lost-items row; `RAZDOR_SCENE_JOINED=<id>,…` and `RAZDOR_SCENE_LEFT=<id>,…` its units rows),`learnt:<map>[:<id>,…]` (the event window with new spells, the hero with no mana), `report:<map>[:<gold>]` (the noon report), `settings:<map>[:advanced|keys]` (`keys`: Razdor's keys window over the advanced settings), `battle:<map>:<n>` (against the n-th army), `hub[:<tab>[:<id>[:<search>]]]` ("Maps and mods"), `custom` (the custom battle
@@ -519,7 +519,11 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
         #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
         "studio" => {
             let folder = parts.next().map_or_else(|| std::path::PathBuf::from(super::studio::DEFAULT_PACKAGE), std::path::PathBuf::from);
+            // `studio:<folder>:<map>:<army id>`: that map shown, that army selected.
+            let map = parts.next().filter(|m| !m.is_empty());
+            let army = parts.next().filter(|a| !a.is_empty());
             app.open_studio(&folder)?;
+            app.studio_preselect(map, army)?;
             return Ok(());
         }
         "editor" => {

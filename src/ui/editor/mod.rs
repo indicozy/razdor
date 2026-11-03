@@ -5,7 +5,7 @@
 //! Layout: toolbar on top, the tool palette with the minimap on the right, the selected
 //! record's panel over the left of the map, a status line at the bottom.
 
-mod canvas;
+pub(crate) mod canvas;
 mod events;
 mod form;
 mod palette_panel;
