@@ -471,3 +471,20 @@ fn the_campaign_plays_the_companies_to_the_free_march() {
     assert_eq!(ending.clone().ok().flatten().as_deref(), Some("free"), "{}", report(Plan::Companies, 1, &legs, &ending));
     assert!(problems(&legs).is_empty(), "{:?}", problems(&legs));
 }
+
+/// Varga, the halberdier who joins at the ruins, is alive at the end of chapter one in at least 70% of
+/// fifteen seeds on the campaign's own route (the hired recruits, the host met). Measured at 15 of 15 when
+/// it was written: the host's fight does not reach her (no blow lands on her in the sweep).
+#[test]
+fn varga_survives_chapter_one_over_fifteen_seeds() {
+    let Some(install) = install() else { return };
+    let mut alive = 0;
+    for seed in 1..=15u32 {
+        if let Ok(run) = chapter_one(&install, seed) {
+            if run.g.squad.iter().any(|u| u.alive() && u.named != 0) {
+                alive += 1;
+            }
+        }
+    }
+    assert!(alive * 100 >= 70 * 15, "Varga lives in {alive}/15 seeds");
+}
