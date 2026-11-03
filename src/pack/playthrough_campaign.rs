@@ -455,7 +455,6 @@ fn the_campaign_plays_the_heretic_to_the_grey_bargain() {
 }
 
 #[test]
-#[ignore = "open: one unit leaves the squad at the gates with no pay short (the named halberdier?); see docs/OPEN_QUESTIONS.md"]
 fn the_campaign_plays_the_marsh_to_the_free_march() {
     let Some(install) = install() else { return };
     let (legs, ending) = campaign(&install, 1, Plan::Marsh);

@@ -87,12 +87,11 @@ pub struct Run {
     pub fields: Vec<FieldFight>,
     /// One sample a day: the gold, the squad, the bills and the income (see [`Sample`]).
     pub ledger: Vec<Sample>,
-    /// Units that left the squad with no battle between two days' samples (a desertion).
+    /// Units the game deserted for unpaid wages (its noon reports' deserter lists). A unit a story
+    /// takes out of the squad (`remove_unit`, a companion's leave) is not a desertion.
     pub deserted: usize,
     start: f64,
     last_day: i64,
-    last_squad: usize,
-    last_battles: usize,
 }
 
 impl Run {
@@ -123,7 +122,6 @@ impl Run {
     }
 
     fn fresh(g: Game, choices: &[(&str, &str)], start: f64) -> Run {
-        let squad = g.squad.iter().filter(|u| u.alive()).count();
         Run {
             g,
             log: Vec::new(),
@@ -134,8 +132,6 @@ impl Run {
             deserted: 0,
             start,
             last_day: -1,
-            last_squad: squad,
-            last_battles: 0,
         }
     }
 
@@ -210,8 +206,7 @@ impl Run {
         Err(Stuck::Broken("the events did not settle".into()))
     }
 
-    /// Records the day's sample when a new day has begun, and notes a unit that left the squad with
-    /// no battle since the last sample (a desertion: the pay ran short for a week).
+    /// Records the day's sample when a new day has begun.
     fn sample(&mut self) {
         let day = ((self.g.clock.total_minutes() - self.start) / MINUTES_PER_DAY as f64).floor() as i64;
         if day == self.last_day {
@@ -219,12 +214,6 @@ impl Run {
         }
         self.last_day = day;
         let squad = self.g.squad.iter().filter(|u| u.alive()).count();
-        if squad < self.last_squad && self.battles.len() == self.last_battles {
-            self.deserted += self.last_squad - squad;
-            self.note(format!("{} unit(s) left the squad unpaid", self.last_squad - squad));
-        }
-        self.last_squad = squad;
-        self.last_battles = self.battles.len();
         let income = self.g.world.locations.iter().filter(|l| l.owned() && matches!(l.kind, crate::rules::world::LocationKind::Castle | crate::rules::world::LocationKind::Fort)).map(|l| l.gold_income * self.g.difficulty() / 100).sum();
         self.ledger.push(Sample { day: self.day(), gold: self.g.gold, squad, wages: self.g.daily_wages(), income });
     }
@@ -239,6 +228,10 @@ impl Run {
                     let choice = self.choice_for(&d)?;
                     self.note(format!("dialog {} -> {}", d.id, choice.as_deref().unwrap_or("(next)")));
                     queue.extend(self.g.answer_story_dialog(&d.id, choice.as_deref()));
+                }
+                Event::NewDay(r) if !r.deserted.is_empty() => {
+                    self.deserted += r.deserted.len();
+                    self.note(format!("{} unit(s) deserted unpaid", r.deserted.len()));
                 }
                 Event::Captured(l) => {
                     let name = self.g.world.locations[l].name.clone();
