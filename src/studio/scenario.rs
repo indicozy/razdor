@@ -25,7 +25,7 @@ pub fn map_file(map: &str) -> String {
 pub fn package_field(key: &str, value: Option<Value>) -> Result<DocEdit, String> {
     match (key, value) {
         ("id", _) => Err("the id is read only: it names the package in saves".into()),
-        ("version", Some(v)) if v.as_str().is_some_and(|s| valid_version(s)) => Ok(DocEdit::Set { path: vec![], key: key.into(), value: v }),
+        ("version", Some(v)) if v.as_str().is_some_and(valid_version) => Ok(DocEdit::Set { path: vec![], key: key.into(), value: v }),
         ("version", _) => Err("the version is x.y.z with numbers only, e.g. 0.2.0".into()),
         ("license", Some(v)) if v.as_str() == Some(LICENCE) => Ok(DocEdit::Set { path: vec![], key: key.into(), value: v }),
         ("license", _) => Err("the licence must be \"MIT\"".into()),

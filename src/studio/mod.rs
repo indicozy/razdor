@@ -40,6 +40,7 @@ pub mod paint;
 pub mod place;
 pub mod reconcile;
 pub mod geometry;
+pub mod guarded;
 pub mod newpkg;
 pub mod overlay;
 pub mod region;
@@ -455,19 +456,15 @@ impl Workspace {
     }
 
     /// Writes a file under `.editor/` of the package (the studio's own data, never a package file:
-    /// the reader skips the folder). The folder is made when missing. Not an undo step.
+    /// the reader skips the folder). The folders are made when missing. Refused through a link (see
+    /// [`guarded`]). Not an undo step.
     pub fn write_editor_file(&self, rel: &str, bytes: &[u8]) -> Result<(), String> {
-        let path = format!(".editor/{rel}");
-        let full = self.root.join(safe_rel(&path)?);
-        if let Some(parent) = full.parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("cannot make {}: {e}", parent.display()))?;
-        }
-        fs::write(&full, bytes).map_err(|e| format!("cannot write {path}: {e}"))
+        guarded::write(&self.root, rel, bytes)
     }
 
-    /// Reads a file under `.editor/` (`None` when it is not there).
+    /// Reads a file under `.editor/` (`None` when it is not there, or a link is on the way).
     pub fn read_editor_file(&self, rel: &str) -> Option<Vec<u8>> {
-        fs::read(self.root.join(".editor").join(rel)).ok()
+        guarded::read(&self.root, rel)
     }
 
     /// Opens a map's terrain for painting: its picture is read and decoded with the map's palette.

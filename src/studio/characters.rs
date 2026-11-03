@@ -194,7 +194,7 @@ pub fn warnings(chars: &[Character], order: &[String]) -> Vec<Warning> {
         for need in &c.needs {
             let Some(here) = need.map.as_deref().and_then(pos) else { continue };
             match first_give {
-                Some((gp, give)) if here <= gp => out.push(Warning {
+                Some((gp, give)) if here < gp => out.push(Warning {
                     id: c.id.clone(),
                     file: need.file.clone(),
                     line: need.line,

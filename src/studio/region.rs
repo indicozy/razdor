@@ -10,6 +10,7 @@ use std::path::Path;
 use super::brush::{cell_of_fragment, retarget};
 use super::edit::{self, Edit, Kind, Locator};
 use super::geometry::CellRect;
+use super::guarded;
 use super::place::unique_id;
 use super::Workspace;
 use crate::pack::terrain::{self, Palette, DEFAULT_PALETTE};
@@ -148,11 +149,6 @@ pub fn save_stamp(root: &Path, name: &str, clip: &Clip) -> Result<(), String> {
     if clip.codes.len() != (clip.w * clip.h) as usize {
         return Err("the stamp's terrain does not match its size".into());
     }
-    let dir = stamps_dir(root);
-    if root.join(".editor").is_symlink() || dir.is_symlink() {
-        return Err("the package's .editor folder is a link: nothing is written through it".into());
-    }
-    fs::create_dir_all(&dir).map_err(|e| format!("cannot make {}: {e}", dir.display()))?;
     let mut text = format!("# A stamp of Razdor Studio: a copied part of a map. The engine ignores .editor/.\nwidth = {}\nheight = {}\n", clip.w, clip.h);
     for t in &clip.tables {
         text.push('\n');
@@ -161,15 +157,20 @@ pub fn save_stamp(root: &Path, name: &str, clip: &Clip) -> Result<(), String> {
             text.push('\n');
         }
     }
-    // Any size: a stamp is not a map (the map pictures are 50, 100 or 200 cells square).
+    // Any size: a stamp is not a map (the map pictures are 50, 100 or 200 cells square). Written
+    // through `studio::guarded`: a link on the way, or a link as the target, is refused.
     let png = terrain::encode_rgb(clip.w, clip.h, |x, y| DEFAULT_PALETTE[usize::from(clip.codes[(y * clip.w + x) as usize]).min(15)].1);
-    fs::write(dir.join(format!("{name}.png")), png).map_err(|e| format!("cannot write the stamp's picture: {e}"))?;
-    fs::write(dir.join(format!("{name}.toml")), text).map_err(|e| format!("cannot write the stamp: {e}"))?;
+    guarded::write(root, &format!("stamps/{name}.png"), &png).map_err(|e| format!("cannot write the stamp's picture: {e}"))?;
+    guarded::write(root, &format!("stamps/{name}.toml"), text.as_bytes()).map_err(|e| format!("cannot write the stamp: {e}"))?;
     Ok(())
 }
 
 /// The stamps of the package, by name. A stamp whose files do not read is left out.
 pub fn list_stamps(root: &Path) -> Vec<Stamp> {
+    // A stamps folder that is a link (or has one on the way) lists nothing.
+    if !guarded::real_folder(root, "stamps") {
+        return Vec::new();
+    }
     let dir = stamps_dir(root);
     let Ok(read) = fs::read_dir(&dir) else { return Vec::new() };
     let mut names: Vec<String> = read
@@ -180,15 +181,15 @@ pub fn list_stamps(root: &Path) -> Vec<Stamp> {
         })
         .collect();
     names.sort();
-    names.into_iter().filter_map(|name| read_stamp(&dir, &name)).collect()
+    names.into_iter().filter_map(|name| read_stamp(root, &name)).collect()
 }
 
-fn read_stamp(dir: &Path, name: &str) -> Option<Stamp> {
-    let text = fs::read_to_string(dir.join(format!("{name}.toml"))).ok()?;
+fn read_stamp(root: &Path, name: &str) -> Option<Stamp> {
+    let text = String::from_utf8(guarded::read(root, &format!("stamps/{name}.toml"))?).ok()?;
     let table: toml::Table = text.parse().ok()?;
     let w = u32::try_from(table.get("width")?.as_integer()?).ok()?;
     let h = u32::try_from(table.get("height")?.as_integer()?).ok()?;
-    let bytes = fs::read(dir.join(format!("{name}.png"))).ok()?;
+    let bytes = guarded::read(root, &format!("stamps/{name}.png"))?;
     let codes = decode_codes(&bytes, w, h)?;
     let tables = edit::spans(name, &text)
         .ok()?

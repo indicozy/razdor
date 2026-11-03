@@ -47,7 +47,7 @@ fn caption(ui: &mut Ui, label: &str, key: &str) {
 /// A whole number in `lo..=hi`, typed in a text field and committed on Enter or when the field
 /// loses focus (one edit per value). A typed value outside the range is clamped to it. Returns the
 /// value when it is committed and differs from `model`.
-fn int_field(ui: &mut Ui, salt: &str, model: i64, lo: i64, hi: i64) -> Option<i64> {
+pub(super) fn int_field(ui: &mut Ui, salt: &str, model: i64, lo: i64, hi: i64) -> Option<i64> {
     let id = field_id(ui, salt);
     let mut buf: String = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| model.to_string());
     let r = ui.add(egui::TextEdit::singleline(&mut buf).desired_width(56.0));
@@ -61,7 +61,7 @@ fn int_field(ui: &mut Ui, salt: &str, model: i64, lo: i64, hi: i64) -> Option<i6
 }
 
 /// A choice among `options`, applied at once. Returns the picked option when it differs.
-fn choice(ui: &mut Ui, salt: &str, current: &str, options: &[&str]) -> Option<String> {
+pub(super) fn choice(ui: &mut Ui, salt: &str, current: &str, options: &[&str]) -> Option<String> {
     let mut picked = None;
     ComboBox::from_id_salt(field_id(ui, salt)).selected_text(current).show_ui(ui, |ui| {
         for o in options {
@@ -74,7 +74,7 @@ fn choice(ui: &mut Ui, salt: &str, current: &str, options: &[&str]) -> Option<St
 }
 
 /// A text, committed on Enter or when the field loses focus.
-fn text_field(ui: &mut Ui, salt: &str, current: &str, width: f32) -> Option<String> {
+pub(super) fn text_field(ui: &mut Ui, salt: &str, current: &str, width: f32) -> Option<String> {
     let id = field_id(ui, salt);
     let mut buf: String = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| current.to_string());
     let r = ui.add(egui::TextEdit::singleline(&mut buf).desired_width(width));
@@ -87,7 +87,7 @@ fn text_field(ui: &mut Ui, salt: &str, current: &str, width: f32) -> Option<Stri
 }
 
 /// A text key: a free field, a list of the keys that name the table, and the text it resolves to.
-fn text_key(ui: &mut Ui, salt: &str, current: &str, suggestions: &[String], texts: &BTreeMap<String, String>) -> Option<String> {
+pub(super) fn text_key(ui: &mut Ui, salt: &str, current: &str, suggestions: &[String], texts: &BTreeMap<String, String>) -> Option<String> {
     let mut out = None;
     // A grid cell lays its contents out left to right: the field and the resolved text are stacked
     // in a column, so the text gets its own line under the field.
@@ -241,7 +241,7 @@ fn cell_field(ui: &mut Ui, salt: &str, cell: [u32; 2], size: (u32, u32)) -> Opti
 }
 
 /// A checkbox that says whether an optional key is in the table (its state when toggled).
-fn optional(ui: &mut Ui, label: &str, present: bool) -> Option<bool> {
+pub(super) fn optional(ui: &mut Ui, label: &str, present: bool) -> Option<bool> {
     let mut on = present;
     (ui.checkbox(&mut on, label).changed() && on != present).then_some(on)
 }

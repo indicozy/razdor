@@ -226,6 +226,24 @@ Minimap and Stamps docks are `Tab::Minimap` and `Tab::Stamps`. Snapshot options:
 `paste`, `brush=<n>`, `forest=<family|thicket>`, `region=x0,y0,x1,y1`, `stamp=<name>`. The format
 gaps (items on the ground, the patrol radius, the variant counts) are in `docs/OPEN_QUESTIONS.md`.
 
+Scenario forms (phase 2, milestone 2): `studio/doc.rs` is the format-preserving edit of any package TOML
+file (a `DocEdit` addresses a table by its keys, or an array entry by index or `id`; comments survive).
+`studio/scenario.rs` holds the package fields, the map header (dates, relations, palette, victory) and
+the campaign graph's edits (nodes, ordered `next` edges, `if`, `[carry]`, start, revisit).
+`studio/campaign_graph.rs` reads the graph (hidden edges from `travel`, `victory … next` and `ending`
+in the triggers and dialogs), orders the nodes breadth first from the start and lays them out; positions
+are in `.editor/layout.json`. `studio/characters.rs` finds the `named` characters (given, required,
+removed), warns when one is required before every map that gives it, and renames it across the
+triggers, dialogs and the `named.<id>` text keys (one undo step: `Workspace::set_texts`).
+`studio/texts.rs` is the key-by-language table (`pack::check::used_keys`); a new key goes at the end of
+its group's table, a new group as a new `[group]` at the end of the file. `studio/guarded.rs` is the only
+way to read or write `.editor/` (stamps and layout): a link on the way, or a target that is a link or
+not a regular file, is refused (`#[cfg(unix)]` tests). UI: `ui/studio/scenarios.rs` (the Inspector's
+Package and Map settings focus, the Campaign screen with its inspector, the Characters dock, the Texts
+screen). Snapshot options: `package`, `header`, `campaign`, `characters`, `texts`. The live run is
+`the_scenario_forms_edit_save_and_undo_on_a_copy_of_pepelnaya_marka` (a copy of the example, through the
+workspace, not XTest).
+
 ## The map translator (`razdor-translate`)
 
 Not part of the original game (asked for by the owner): a second program that writes English

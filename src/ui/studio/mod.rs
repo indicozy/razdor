@@ -21,6 +21,7 @@ mod mcp;
 mod inspector;
 mod map_tab;
 mod scene;
+pub(crate) mod scenarios;
 pub mod start;
 mod watch;
 
@@ -50,6 +51,7 @@ use razdor::trf;
 
 use crate::ui::dt_art::DtArt;
 use map_tab::{draw as draw_map_tab, switch_map, Canvas, Tool};
+use scenarios::{Focus, ScenarioUi};
 use mcp::{Request, UiHost};
 
 /// The example package `--studio` opens when no folder is named.
@@ -89,6 +91,12 @@ pub enum Tab {
     Minimap,
     /// The package's saved regions (`map_tab::Viewer::stamps_dock`).
     Stamps,
+    /// The campaign graph (the Campaign main screen).
+    Campaign,
+    /// The texts table: key by language (the Texts main screen).
+    Texts,
+    /// The named characters: where each is given, required and removed.
+    Characters,
 }
 
 impl Tab {
@@ -104,6 +112,9 @@ impl Tab {
             Tab::Claude => "Claude",
             Tab::Minimap => tr("Minimap"),
             Tab::Stamps => tr("Stamps"),
+            Tab::Campaign => tr("Campaign"),
+            Tab::Texts => tr("Texts"),
+            Tab::Characters => tr("Characters"),
         }
     }
 }
@@ -183,6 +194,10 @@ pub struct StudioScreen {
     _mcp: Option<Server>,
     mcp_rx: Receiver<Request>,
     mcp_snaps: Vec<(SnapTarget, Sender<Result<Frame, String>>)>,
+    /// The scenario screens' state (the Inspector's focus, the campaign selection, the texts).
+    scen: ScenarioUi,
+    /// A main screen the menu asked for; shown after the dock is drawn.
+    pending_tab: Option<Tab>,
 }
 
 impl StudioScreen {
@@ -245,6 +260,8 @@ impl StudioScreen {
             _mcp: mcp,
             mcp_rx,
             mcp_snaps: Vec::new(),
+            scen: ScenarioUi::default(),
+            pending_tab: None,
         })
     }
 
@@ -334,6 +351,20 @@ impl StudioScreen {
                     self.reload();
                 }
                 "paste" => map_tab::arm_paste(&mut self.canvas, &mut self.log),
+                "package" => self.scen.focus = Focus::Package,
+                "header" => self.scen.focus = Focus::Header,
+                "campaign" => {
+                    self.scen.focus = Focus::Campaign;
+                    if let Some(at) = self.dock.find_tab(&Tab::Campaign) {
+                        self.dock.set_active_tab(at);
+                    }
+                }
+                "texts" | "characters" => {
+                    let tab = if *opt == "texts" { Tab::Texts } else { Tab::Characters };
+                    if let Some(at) = self.dock.find_tab(&tab) {
+                        self.dock.set_active_tab(at);
+                    }
+                }
                 "claude" => {
                     if let Some(at) = self.dock.find_tab(&Tab::Claude) {
                         self.dock.set_active_tab(at);
@@ -683,6 +714,23 @@ impl StudioScreen {
                     }
                 });
                 ui.separator();
+                ui.menu_button(tr("Package"), |ui| {
+                    if ui.button(tr("Package settings")).clicked() {
+                        self.scen.focus = Focus::Package;
+                        ui.close_menu();
+                    }
+                    if ui.button(tr("Map settings")).clicked() {
+                        self.scen.focus = Focus::Header;
+                        ui.close_menu();
+                    }
+                    for (label, tab) in [("Campaign", Tab::Campaign), ("Texts", Tab::Texts), ("Characters", Tab::Characters)] {
+                        if ui.button(tr(label)).clicked() {
+                            self.pending_tab = Some(tab);
+                            ui.close_menu();
+                        }
+                    }
+                });
+                ui.separator();
                 if ui.button(tr("Save")).clicked() {
                     self.save_selected();
                 }
@@ -720,6 +768,7 @@ impl StudioScreen {
             open: None,
             focus_map: false,
             changed: false,
+            scen: &mut self.scen,
         };
         DockArea::new(&mut self.dock)
             .style(style)
@@ -735,6 +784,11 @@ impl StudioScreen {
         }
         if focus_map {
             if let Some(at) = self.dock.find_tab(&Tab::Map) {
+                self.dock.set_active_tab(at);
+            }
+        }
+        if let Some(tab) = self.pending_tab.take() {
+            if let Some(at) = self.dock.find_tab(&tab) {
                 self.dock.set_active_tab(at);
             }
         }
@@ -816,6 +870,9 @@ impl StudioScreen {
     fn open_file(&mut self, path: &str) {
         match self.ws.open_doc(path) {
             Ok(i) => {
+                if path == "package.toml" {
+                    self.scen.focus = Focus::Package;
+                }
                 self.selected = Some(i);
                 self.opened = Some(path.to_string());
                 if let (Some(pkg), Some(id)) = (self.ws.package(), map_of_file(path)) {
@@ -965,7 +1022,12 @@ fn char_index(text: &str, byte: usize) -> usize {
 /// centre (Script shown), Inspector on the right, Problems and Output under the centre. `side`
 /// puts the Script beside the Map instead of in its tabs (the snapshot's `side` option).
 fn layout(side: bool) -> DockState<Tab> {
-    let mut dock = DockState::new(if side { vec![Tab::Map] } else { vec![Tab::Map, Tab::Script] });
+    // The main screens: Map, Campaign and Texts (Script beside the Map when `side` is off).
+    let mut centre_tabs = vec![Tab::Map, Tab::Campaign, Tab::Texts];
+    if !side {
+        centre_tabs.push(Tab::Script);
+    }
+    let mut dock = DockState::new(centre_tabs);
     let tree = dock.main_surface_mut();
     // egui_dock's fraction is the share of the node that comes first (the new left or upper
     // node): the Inspector is the last quarter of the width (26%: its forms need the room).
@@ -974,7 +1036,7 @@ fn layout(side: bool) -> DockState<Tab> {
     let [_inspector, _side] = tree.split_below(inspector, 0.55, vec![Tab::Minimap, Tab::Stamps]);
     let [centre, files] = tree.split_left(centre, 0.25, vec![Tab::FileSystem]);
     let [_files, _scene] = tree.split_below(files, 0.5, vec![Tab::Scene]);
-    let [centre, _bottom] = tree.split_below(centre, 0.75, vec![Tab::Problems, Tab::Output, Tab::Claude]);
+    let [centre, _bottom] = tree.split_below(centre, 0.75, vec![Tab::Problems, Tab::Characters, Tab::Output, Tab::Claude]);
     if side {
         tree.split_right(centre, 0.5, vec![Tab::Script]);
     }
@@ -1033,6 +1095,8 @@ struct Viewer<'a> {
     focus_map: bool,
     /// A document or the package changed in this frame (the rebuild and the burst timers start).
     changed: bool,
+    /// The scenario screens' state.
+    scen: &'a mut ScenarioUi,
 }
 
 impl TabViewer for Viewer<'_> {
@@ -1054,6 +1118,9 @@ impl TabViewer for Viewer<'_> {
             Tab::Claude => self.claude.show(ui, &self.ws.root),
             Tab::Minimap => self.minimap(ui),
             Tab::Stamps => self.stamps_dock(ui),
+            Tab::Campaign => self.campaign_screen(ui),
+            Tab::Texts => self.texts_screen(ui),
+            Tab::Characters => self.characters_dock(ui),
         }
     }
 
@@ -1080,6 +1147,7 @@ impl Viewer<'_> {
             *self.jump = jump_for(&*self.ws, self.pkg.as_deref(), &path, &sel);
         }
         *self.selection = Some(sel);
+        self.scen.focus = Focus::Table;
     }
 
     fn script(&mut self, ui: &mut Ui) {

@@ -19,6 +19,7 @@ use razdor::studio::Workspace;
 use razdor::trf;
 
 use super::forms::{self, Ctx};
+use super::scenarios::Focus;
 use super::{Jump, Viewer, ERROR_RED};
 
 /// The map file's spec as the text says now, else the last good package's.
@@ -99,6 +100,13 @@ fn describe(u: &Use) -> String {
 
 impl Viewer<'_> {
     pub(super) fn inspector(&mut self, ui: &mut Ui) {
+        // The scenario forms take the Inspector while they are in focus (`scenarios`).
+        match self.scen.focus.clone() {
+            Focus::Package => return egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| self.package_form(ui)).inner,
+            Focus::Header => return egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| self.header_form(ui)).inner,
+            Focus::Campaign => return egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| self.campaign_inspector(ui)).inner,
+            Focus::Table => {}
+        }
         let Some(sel) = self.selection.clone() else {
             ui.weak(tr("Nothing selected: pick an object on the map or in the scene."));
             return;

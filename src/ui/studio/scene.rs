@@ -8,6 +8,7 @@ use razdor::i18n::tr;
 use razdor::studio::map::{centre_of, Selection};
 use razdor::trf;
 
+use super::scenarios::Focus;
 use super::Viewer;
 
 impl Viewer<'_> {
@@ -23,7 +24,10 @@ impl Viewer<'_> {
         let current = self.selection.clone();
         let mut pick: Option<Selection> = None;
         ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            ui.strong(id.as_str());
+            // The map's name opens its header form (the Inspector's Map settings).
+            if ui.link(id.as_str()).clicked() {
+                self.scen.focus = Focus::Header;
+            }
             let mut row = |ui: &mut Ui, text: String, sel: Selection| {
                 if ui.selectable_label(current.as_ref() == Some(&sel), text).clicked() {
                     pick = Some(sel);

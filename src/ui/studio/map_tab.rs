@@ -62,6 +62,9 @@ pub enum Tool {
     Region,
 }
 
+/// A list of cells, as the Map tab's tools partition them.
+type Cells = Vec<(i64, i64)>;
+
 impl Tool {
     /// Every tool, in the bar's order.
     pub const ALL: [Tool; 12] = [
@@ -667,7 +670,7 @@ impl Viewer<'_> {
                 self.commit("hills", &map, edits, Vec::new());
             }
             Act::Forests(cells) => {
-                let (land, water): (Vec<(i64, i64)>, Vec<(i64, i64)>) = cells.into_iter().partition(|&c| !self.on_water(c));
+                let (land, water): (Cells, Cells) = cells.into_iter().partition(|&c| !self.on_water(c));
                 if !water.is_empty() {
                     self.log.push(trf!("{n} cells on water kept free: trees stand on land", n = water.len()));
                 }

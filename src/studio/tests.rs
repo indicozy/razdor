@@ -692,3 +692,53 @@ mod map_tools {
         assert!(ws.problems.iter().all(|d| !d.file.starts_with(".editor")), "{:?}", ws.problems);
     }
 }
+
+#[test]
+fn the_scenario_forms_edit_save_and_undo_on_a_copy_of_pepelnaya_marka() {
+    // The live run's operations, through the workspace on a scratch copy: the start date, a campaign
+    // edge added and reordered, a character renamed across files, a translation added, a save, and
+    // undo of each step.
+    use super::campaign_graph as cg;
+    use super::doc::{entry_id, table, DocEdit};
+    use super::scenario;
+    use toml_edit::Value;
+    let copy = Copy::of("pepelnaya-marka");
+    let mut ws = Workspace::open(&copy.0).unwrap();
+    let map = "maps/brod/map.toml";
+    let before_date = ws.text_of(map).unwrap();
+    ws.apply_doc(map, "set start date", &[scenario::start_date("1301-02-03").unwrap()]).unwrap();
+    assert!(ws.text_of(map).unwrap().contains("start_date = \"1301-02-03\""));
+    ws.undo().unwrap();
+    assert_eq!(ws.text_of(map).unwrap(), before_date, "undo restores the date");
+
+    // The campaign: add brod → salt, then move it first.
+    ws.apply_doc(cg::FILE, "add edge", &[scenario::add_edge("brod", "salt")]).unwrap();
+    ws.apply_doc(cg::FILE, "move edge", &[scenario::move_edge("brod", 1, 0)]).unwrap();
+    let campaign = crate::pack::campaign::read(&ws.text_of(cg::FILE).unwrap(), &mut Report::default()).unwrap();
+    let targets: Vec<&str> = campaign.map("brod").unwrap().next.iter().map(|n| n.to.as_str()).collect();
+    assert_eq!(targets, ["salt", "marka"], "the moved edge is first");
+    ws.undo().unwrap();
+    ws.undo().unwrap();
+    let back = crate::pack::campaign::read(&ws.text_of(cg::FILE).unwrap(), &mut Report::default()).unwrap();
+    assert_eq!(back.map("brod").unwrap().next.len(), 1, "both undone");
+
+    // A character renamed across the files that name it, one undo step.
+    let pkg = ws.read_package().unwrap().0;
+    let texts = |f: &str| ws.text_of(f).ok();
+    let plan = crate::studio::characters::rename_plan(&pkg, "ilm", "brother_ilm", &texts).unwrap();
+    assert!(plan.len() >= 2, "triggers, dialogs and texts name ilm: {}", plan.len());
+    ws.set_texts("rename ilm to brother_ilm", plan).unwrap();
+    assert!(ws.text_of("dialogs/abbey.toml").unwrap().contains("named = \"brother_ilm\""));
+    ws.undo().unwrap();
+    assert!(ws.text_of("dialogs/abbey.toml").unwrap().contains("named = \"ilm\""), "one undo puts all files back");
+
+    // A translation: a key in en, then save, then undo.
+    let (file, edit) = crate::studio::texts::set_cell("ru", "story.title", "Тестовый перевод");
+    ws.apply_doc(&file, "set story.title ru", &[edit]).unwrap();
+    ws.save_all().unwrap();
+    let saved = fs::read_to_string(copy.0.join("texts/ru.toml")).unwrap();
+    assert!(saved.contains("Тестовый перевод"), "{saved}");
+    ws.undo().unwrap();
+    assert!(!ws.text_of("texts/ru.toml").unwrap().contains("Тестовый перевод"));
+    let _ = (entry_id("map", "x"), table("x"), DocEdit::Remove { path: vec![], key: "x".into() }, Value::from(1_i64));
+}

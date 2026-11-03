@@ -78,6 +78,16 @@ routes of the story) and **Fog** (what the hero and the lit lanterns see at the 
 * When the text of a file is broken, the map shows the last correct state and the line of the
   error. The other files stay editable.
 
+## Scenario: package, map, campaign, characters, texts
+
+- **Package settings** («Package» → «Package settings», or `package.toml` in the file tree): version, title, description, author, licence, base. The id is read only.
+- **Map settings** («Package» → «Map settings», or the map's name in the scene): title, description, start date, the relations between the sides (−3 to 3), terrain colours and the victory (its kind and its argument).
+- **Campaign** (the «Campaign» main screen): maps as nodes, next-maps as arrows with numbers (1 is tried first). Drag a node to move it; drag from its right edge to another node to add a next-map. Select an arrow to change its order, delete it or set its conditions. Dashed arrows are set by triggers (travel, victory with a next map, ending); they are read only here and are edited in Script.
+- **Characters** (the «Characters» tab at the bottom): where each character is given, required and removed. A warning when a character is needed before any map gives it. Renaming changes it in every file in one undo step.
+- **Texts** (the «Texts» main screen): one row per key, one column per language. Red: used but defined in no language; grey: defined but never used; amber: a language lacks it. «Add language» creates `texts/<language>.toml` with every key empty.
+
+Each change is one undo step (Ctrl+Z).
+
 ## Not yet
 
 The studio does not have a story editor (triggers and dialogues), a campaign graph, a table of
