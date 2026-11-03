@@ -189,7 +189,9 @@ gaps to close:
 - **Saves and versions**: a save records package id, version and hash; a package update
   mid-campaign keeps the old version until the campaign ends; `format` bumps only on
   breaking changes, older formats keep loading.
-- **Visual editor**: creation is agent + text for now; the map editor may open packages later.
+- **Visual editor**: settled 2026-11-03: Razdor Studio, a Godot-style package editor that
+  replaces the `.DTm` map editor ([`2026-11-03-razdor-studio-design.md`](2026-11-03-razdor-studio-design.md));
+  package assets are their own project ([`2026-11-03-package-assets-design.md`](2026-11-03-package-assets-design.md)).
 - **Wiki**: ru/en pages for creators once slice 1 ships.
 - **Trigger wishes left out of slice 1 step 3 (2026-11-02)**: AI army speed (wish 5), an AI army's
   goal (14, the goal half: the army's position is in), the hero's map figure (12), branching
