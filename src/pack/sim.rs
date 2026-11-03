@@ -766,7 +766,11 @@ mod tests {
         type Preset = &'static [(&'static str, VarValue)];
         let routes: [(Preset, &str, &str); 4] = [
             (&[("quests_done", VarValue::Int(2)), ("order", VarValue::Int(2)), ("crown", VarValue::Int(1))], "council=order,bw_council=iron", "end_iron"),
-            (&[("quests_done", VarValue::Int(2)), ("marsh_trust", VarValue::Int(3))], "council=marsh,bw_council=free", "end_free"),
+            // The sim's hero does not walk: Reedmere's raid is not fought, and its burn costs the trust 1 (brod.toml
+            // raid_1_burns), and the sim's Brod earns nothing. The scripted Marsh route (the_campaign_plays_the_marsh_to_the_free_march)
+            // enters Marka with marsh_trust 5 and reaches Barrows with it, so the preset is that value (the Free March
+            // needs 3 there).
+            (&[("quests_done", VarValue::Int(2)), ("marsh_trust", VarValue::Int(5))], "council=marsh,bw_council=free", "end_free"),
             // The Companies need Kord hired (kord 1): his company is the hero's men.
             (&[("quests_done", VarValue::Int(2)), ("companies", VarValue::Int(2)), ("kord", VarValue::Int(1))], "council=companies,bw_council=free", "end_free"),
             (

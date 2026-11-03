@@ -1442,6 +1442,10 @@ text = "The wormwood grows thick, and the rain on its tops has not dried. A part
 title = "An old camp"
 text = "The embers of a fire are still warm under the ash. Someone waited here until the dead had passed by."
 
+[gates.gt_spring]
+title = "The spring by the old road"
+text = "The water runs cold and clear from the stones. You wash and drink, and the weariness leaves your arms. The wounds close, and the company stands up again."
+
 [gates.gt_road7]
 title = "A dry ditch"
 text = "A ditch by the road is dug and filled with willow crosses. The earth in it has not settled, and fresh wreaths of bog grass lie on top."

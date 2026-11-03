@@ -492,6 +492,14 @@ map = "gates"
 when = { event = "hero_enters", at = [40, 20, 4, 4] }
 then = [ { dialog = "gt_road6" } ]
 
+# The spring by the old road, between the west guard and the north guard: the road's water heals the
+# squad once (the same as the town's raise without its price; the Order's route has no healer here).
+[[trigger]]
+id = "gt_spring"
+map = "gates"
+when = { event = "hero_enters", at = [40, 20, 4, 4] }
+then = [ { restore_army = "player" }, { dialog = "gt_spring" } ]
+
 [[trigger]]
 id = "gt_road7"
 map = "gates"

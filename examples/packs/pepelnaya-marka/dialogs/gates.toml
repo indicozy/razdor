@@ -322,6 +322,11 @@ title = "gates.gt_road6.title"
 text = "gates.gt_road6.text"
 
 [[dialog]]
+id = "gt_spring"
+title = "gates.gt_spring.title"
+text = "gates.gt_spring.text"
+
+[[dialog]]
 id = "gt_road7"
 title = "gates.gt_road7.title"
 text = "gates.gt_road7.text"
