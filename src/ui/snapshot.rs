@@ -524,6 +524,15 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             app.screen = Screen::Hub(Box::new(view));
             return Ok(());
         }
+        // `hub-versions`: "Maps and mods" with the example package at two installed versions (0.1.0 played, 0.2.0
+        // not yet: the version picker and the «New version» mark) and the catalog's 0.3.0 to install, picked.
+        "hub-versions" => {
+            super::hub_view::versions_for_snapshot();
+            let mut view = super::hub_view::HubView::new();
+            view.stage(0, Some("hello-story"));
+            app.screen = Screen::Hub(Box::new(view));
+            return Ok(());
+        }
         // `hub-report`: "Maps and mods" with the example package installed and the report window open.
         "hub-report" => {
             super::hub_view::install_for_snapshot("hello-story");
@@ -533,7 +542,7 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             app.screen = Screen::Hub(Box::new(view));
             return Ok(());
         }
-        // `hub[:<tab 0-3>[:<entry id>]]`, `hub-installed` (a package installed and picked: its Play and report), `hub-report` (that package's report window), `hub-refused` (the notice of a refused import): "Maps and mods" on that tab with that entry picked.
+        // `hub[:<tab 0-3>[:<entry id>]]`, `hub-installed` (a package installed and picked: its Play and report), `hub-versions` (two installed versions and a catalog version to install), `hub-report` (that package's report window), `hub-refused` (the notice of a refused import): "Maps and mods" on that tab with that entry picked.
         "hub" => {
             let mut view = super::hub_view::HubView::new();
             let tab = parts.next().and_then(|t| t.parse().ok()).unwrap_or(0);

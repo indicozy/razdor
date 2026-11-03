@@ -81,6 +81,8 @@ pub struct HubView {
     report: Option<ReportForm>,
     /// A package to play: the window closes and the game opens its map (`App::open_pack`).
     pub play: Option<PathBuf>,
+    /// The packages whose update mark is on (`Hub::has_update`), read with `installed`.
+    marks: Vec<String>,
 }
 
 /// The picture of an entry: its texture once it is in the cache, and the download on its way
@@ -184,6 +186,7 @@ impl HubView {
             notice: None,
             report: None,
             play: None,
+            marks: Vec::new(),
         };
         v.reload();
         v
@@ -218,7 +221,7 @@ impl HubView {
             self.catalog = Some(Err(tr("No folder for the hub.").into()));
             return;
         };
-        self.installed = hub.installed();
+        self.read_installed(&hub);
         self.offline = false;
         self.show_cache(&hub);
         let (tx, rx) = channel();
@@ -226,6 +229,13 @@ impl HubView {
             let _ = tx.send(hub.fetch_catalog());
         });
         self.fetching = Some(rx);
+    }
+
+    /// Reads the installed list and which of its packages carry the update mark (`Hub::has_update`),
+    /// so the rows and the card need no file reads of their own.
+    fn read_installed(&mut self, hub: &Hub) {
+        self.installed = hub.installed();
+        self.marks = self.installed.entries.keys().filter(|id| hub.has_update(id)).cloned().collect();
     }
 
     /// Puts the cached catalog on the screen when there is none yet. A corrupt cache, or one of
@@ -292,8 +302,8 @@ impl HubView {
             match done {
                 Ok(id) => {
                     cue(Cue::Button);
-                    if let Some(h) = &self.hub {
-                        self.installed = h.installed();
+                    if let Some(h) = self.hub.clone() {
+                        self.read_installed(&h);
                     }
                     self.changed = true;
                     let names = self.installed.entries.get(&id).map_or_else(|| id.clone(), |r| r.title.get(lang()).to_string());
@@ -307,8 +317,8 @@ impl HubView {
         let Some(done) = self.job.as_ref().and_then(|rx| rx.try_recv().ok()) else { return };
         self.job = None;
         let refresh = |v: &mut HubView| {
-            if let Some(h) = &v.hub {
-                v.installed = h.installed();
+            if let Some(h) = v.hub.clone() {
+                v.read_installed(&h);
             }
             v.changed = true;
         };
@@ -349,6 +359,30 @@ impl HubView {
     fn titles(&self, ids: &[String]) -> String {
         let c = self.catalog.as_ref().and_then(|c| c.as_ref().ok());
         ids.iter().map(|id| c.and_then(|c| c.entry(id)).map_or(id.as_str(), |e| e.title.get(lang()))).collect::<Vec<_>>().join(", ")
+    }
+}
+
+/// A snapshot's setup (`ui::snapshot`, `hub-versions`): the example package imported at 0.1.0 and then
+/// at 0.2.0, the first marked as played, so its card shows the version picker and the «New version»
+/// mark. The mock catalog offers 0.3.0 to install. It runs before the window is made, like
+/// [`install_for_snapshot`].
+pub fn versions_for_snapshot() {
+    let Some(local) = hub::local_dir() else { return };
+    let dir = local.join("snapshot-versions");
+    let hub = Hub { source: Source::Mock, local: local.clone(), trust_dir: None };
+    for (n, version) in ["0.1.0", "0.2.0"].into_iter().enumerate() {
+        let Ok(bytes) = hub::mock::package_zip(version) else { return };
+        let file = dir.join(format!("hello-story-{version}.rzpack"));
+        if std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&file, &bytes)).is_err() {
+            return;
+        }
+        if let Err(e) = hub.import_package(&file) {
+            razdor::diag!("hub: the snapshot's version {version} is not imported: {e:?}");
+            return;
+        }
+        if n == 0 {
+            let _ = hub.mark_played("hello-story", version);
+        }
     }
 }
 
@@ -417,9 +451,13 @@ pub fn matches_text(query: &str, titles: &[&str], author: &str) -> bool {
     titles.iter().any(|t| t.to_lowercase().contains(&q)) || author.to_lowercase().contains(&q)
 }
 
-/// A row's state: its words and ink.
-fn state(c: &Catalog, inst: &Installed, e: &Entry) -> (String, Color) {
+/// A row's state: its words and ink. An installed package with a newer version to play shows the
+/// «New version» mark (`update`) in the accent ink instead of «Installed».
+fn state(c: &Catalog, inst: &Installed, e: &Entry, update: bool) -> (String, Color) {
     if inst.has(&e.id) {
+        if update {
+            return (tr("New version").into(), GOLD);
+        }
         return (tr("Installed").into(), GREEN_TEXT);
     }
     match hub::plan_install(c, inst, &e.id) {
@@ -427,6 +465,53 @@ fn state(c: &Catalog, inst: &Installed, e: &Entry) -> (String, Color) {
         Ok(plan) if plan.len() > 1 => (trf!("Needs {n} mods", n = plan.len() - 1), GOLD),
         Ok(_) => (String::new(), CREAM),
     }
+}
+
+/// The controls a package's card shows, from its installed versions (newest first), its update mark
+/// (`Hub::has_update`) and the catalog's version the player lacks (`Hub::catalog_update`).
+#[derive(Debug, PartialEq, Eq)]
+pub struct CardControls {
+    /// The version picker: more than one version is installed.
+    pub picker: bool,
+    /// The «New version» mark.
+    pub mark: bool,
+    /// The «Install X.Y.Z» button: the version to install.
+    pub install: Option<String>,
+}
+
+/// The card's controls for `versions` (installed, newest first), `update` (the mark) and `catalog`
+/// (the catalog version to install). A mark needs an installed version.
+pub fn card_controls(versions: &[String], update: bool, catalog: Option<&str>) -> CardControls {
+    CardControls { picker: versions.len() > 1, mark: update && !versions.is_empty(), install: catalog.map(str::to_string) }
+}
+
+/// The card's version picker in `field` (a field as tall as a button): it shows `versions[current]`
+/// with its arrow, and a tap opens the list of the versions, newest first (`open_list`). Returns the
+/// index of the version picked since the last frame.
+fn version_picker(field: Rect, size: f32, k: f32, versions: &[String], current: usize, enabled: bool) -> Option<usize> {
+    let picked = take_pick(VERSION_KEY).and_then(|v| usize::try_from(v).ok());
+    let hover = enabled && mouse_in(field.x, field.y, field.w, field.h);
+    draw_rectangle(field.x, field.y, field.w, field.h, FIELD_BG);
+    draw_rectangle_lines(field.x, field.y, field.w, field.h, 2.0, if hover { INK } else { DIM });
+    let label = versions.get(current).map_or("", String::as_str);
+    text_fit(label, field.x + 8.0 * k, field.y + field.h / 2.0 + size * 0.35, field.w - 34.0 * k, size, INK);
+    let (cx, cy) = (field.x + field.w - 14.0 * k, field.y + field.h / 2.0);
+    draw_triangle(vec2(cx - 5.0 * k, cy - 3.0 * k), vec2(cx + 5.0 * k, cy - 3.0 * k), vec2(cx, cy + 3.0 * k), DIM);
+    if hover && clicked() {
+        let options: Vec<(i64, String)> = versions.iter().enumerate().map(|(i, v)| (i as i64, v.clone())).collect();
+        open_list(VERSION_KEY, field, current as i64, &options, k);
+    }
+    picked.filter(|&i| i != current && i < versions.len())
+}
+
+/// The key of the card's version picker (its drop-down list).
+const VERSION_KEY: &str = "hub-version";
+
+/// Starts the install of package `id`'s catalog version (`Hub::install`, which keeps the installed ones).
+fn start_install(view: &mut HubView, id: &str) {
+    let id = id.to_string();
+    let lang_code = lang();
+    view.start(move |hub, c| Done::Installed(hub.install(&c, &id, lang_code)));
 }
 
 /// The entry's state as its author or the hub's checks say it: the words and their ink.
@@ -743,7 +828,7 @@ pub fn frame(view: &mut HubView) -> bool {
                     let rr = Rect::new(lx + 2.0 * k, y + 1.0 * k, lw - 4.0 * k - room, row_h - 2.0 * k);
                     let picked = view.picked.as_deref() == Some(e.id.as_str());
                     row_paint(rr, picked);
-                    let (words, ink) = state(c, &view.installed, e);
+                    let (words, ink) = state(c, &view.installed, e, view.marks.contains(&e.id));
                     let sw = if words.is_empty() { 0.0 } else { measure(&words, small).width + 8.0 * k };
                     text_fit(e.title.get(lang()), rr.x + 6.0 * k, rr.y + 15.0 * g * k, rr.w - sw - 12.0 * k, size, if picked { GOLD } else { CREAM });
                     let mut by_line = format!("{} · {}", kind_label(e.kind), e.author);
@@ -887,7 +972,18 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
     let r = Rect::new(pane.x, pane.y - scroll, pane.w - room, pane.h);
     let installed = view.installed.has(&e.id);
     let unchecked = view.installed.entries.get(&e.id).is_some_and(|rec| rec.unchecked);
-    let play_path = view.hub.as_ref().and_then(|h| h.play_path(&e.id));
+    // A package's installed versions, newest first, and the one its card plays: the picked one (or the
+    // last played), else the newest. The dropdown shows that one; Play starts its file.
+    let versions = view.hub.as_ref().filter(|_| installed && e.kind == Kind::Package).map(|h| h.package_versions(&e.id)).unwrap_or_default();
+    let shown = view.hub.as_ref().filter(|_| !versions.is_empty()).and_then(|h| h.default_version(&e.id));
+    let shown_at = shown.as_ref().and_then(|v| versions.iter().position(|x| x == v)).unwrap_or(0);
+    let play_path = match (&view.hub, &shown) {
+        (Some(h), Some(v)) => h.play_path_of(&e.id, v),
+        _ => None,
+    };
+    let update = view.marks.contains(&e.id);
+    let install_to = view.hub.as_ref().and_then(|h| h.catalog_update(c, &e.id));
+    let controls = card_controls(&versions, update, install_to.as_deref());
     let idle = view.job.is_none() && view.import.is_none() && view.report.is_none() && view.notice.is_none();
     let users = if installed { hub::needed_by(c, &view.installed, &e.id) } else { Vec::new() };
     let plan = (!installed).then(|| hub::plan_install(c, &view.installed, &e.id));
@@ -1001,6 +1097,9 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
                 if unchecked {
                     chips.push((tr("Not checked by the Hub").into(), GOLD));
                 }
+                if controls.mark {
+                    chips.push((tr("New version").into(), GOLD));
+                }
                 if !e.base.trim().is_empty() {
                     chips.insert(1, (trf!("Base: {base}", base = e.base), dim));
                 }
@@ -1093,6 +1192,10 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
                 text_fit(tr("Not checked by the Hub: it came from a file, not from the list."), r.x, y, r.w, info_px, GOLD);
                 y += info_step;
             }
+            if controls.mark {
+                text_fit(tr("New version"), r.x, y, r.w, info_px, GOLD);
+                y += info_step;
+            }
         }
         if !matches!(e.kind, Kind::Mod | Kind::Package) {
             let langs: Vec<&str> = e
@@ -1143,6 +1246,22 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
             y += 10.0 * s;
             let pw = ((r.w - 8.0 * s) / 2.0).min(220.0 * k * lay.g);
             let visible = |y: f32| y >= pane.y && y + bh <= pane.y + pane.h;
+            // The version picker (more than one version installed): a label and the field, on a row of its own.
+            if controls.picker {
+                let label_w = measure(tr("Version"), size).width + 10.0 * k;
+                if visible(y) {
+                    text_fit(tr("Version"), r.x, y + bh / 2.0 + size * 0.35, label_w, size, CREAM);
+                    let field = Rect::new(r.x + label_w, y, (r.w - label_w).min(220.0 * k * lay.g), bh);
+                    if let Some(i) = version_picker(field, size, k, &versions, shown_at, idle) {
+                        if let Some(h) = view.hub.as_ref() {
+                            if let Err(why) = h.set_picked(&e.id, &versions[i]) {
+                                view.note = Some((why, true));
+                            }
+                        }
+                    }
+                }
+                y += bh + 10.0 * s;
+            }
             let mut x = r.x;
             if installed && visible(y) && button(x, y, pw, bh, tr("Play"), idle) {
                 view.play = play_path.clone();
@@ -1154,6 +1273,14 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
                 view.report = Some(ReportForm { id: e.id.clone(), version: e.version.clone(), title: e.title.get(lang()).to_string(), text: String::new() });
             }
             y += bh + 10.0 * s;
+            // Install X.Y.Z: a row under the actions. The bottom row has no room beside Remove (Import and
+            // the search field take it), and a phone held upright has none either.
+            if let Some(v) = controls.install.as_deref() {
+                if visible(y) && button(r.x, y, pw, bh, &trf!("Install {version}", version = v), idle) {
+                    start_install(view, &e.id);
+                }
+                y += bh + 10.0 * s;
+            }
         }
         // The description, whole (scrolled, not cut): its long words wrap at the pane's width.
         // The map's own story (`about`) comes first; the post's text (`description`) follows it under a
@@ -1360,6 +1487,7 @@ mod tests {
             notice: None,
             report: None,
             play: None,
+            marks: Vec::new(),
         }
     }
 
@@ -1439,5 +1567,19 @@ mod tests {
         v.show_cache(&mine);
         assert_eq!(v.catalog, None, "a corrupt cache is ignored");
         let _ = std::fs::remove_dir_all(&mine.local);
+    }
+
+    /// The card's controls: one version shows no picker and no mark; two show the picker; a newer
+    /// version nobody played shows the mark; a catalog version not installed is the Install button.
+    #[test]
+    fn the_card_shows_the_controls_its_versions_call_for() {
+        let one = vec!["0.1.0".to_string()];
+        let two = vec!["0.2.0".to_string(), "0.1.0".to_string()];
+        assert_eq!(card_controls(&one, false, None), CardControls { picker: false, mark: false, install: None });
+        assert_eq!(card_controls(&two, false, None), CardControls { picker: true, mark: false, install: None });
+        assert_eq!(card_controls(&two, true, None), CardControls { picker: true, mark: true, install: None });
+        assert_eq!(card_controls(&one, true, Some("0.2.0")), CardControls { picker: false, mark: true, install: Some("0.2.0".into()) });
+        assert_eq!(card_controls(&two, false, Some("0.3.0")).install.as_deref(), Some("0.3.0"));
+        assert!(!card_controls(&[], true, None).mark, "a mark needs an installed version");
     }
 }

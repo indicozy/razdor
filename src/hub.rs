@@ -933,6 +933,34 @@ pub mod mock {
         container::encode(19, &sc.to_payload())
     }
 
+    /// The version the mock catalog offers for the example package. The snapshot `hub-versions`
+    /// imports the versions before it (`package_zip`), so the catalog has one to offer.
+    pub const CATALOG_VERSION: &str = "0.3.0";
+
+    /// The example package as a `.rzpack` at `version`: its files as they are, the manifest's
+    /// version set to it (the example's own is 0.1.0). Each version is other bytes.
+    pub fn package_zip(version: &str) -> std::io::Result<Vec<u8>> {
+        const FILES: [(&str, &[u8]); 7] = [
+            ("package.toml", include_bytes!("../examples/packs/hello-story/package.toml")),
+            ("texts/en.toml", include_bytes!("../examples/packs/hello-story/texts/en.toml")),
+            ("texts/ru.toml", include_bytes!("../examples/packs/hello-story/texts/ru.toml")),
+            ("units/heroes.toml", include_bytes!("../examples/packs/hello-story/units/heroes.toml")),
+            ("items/relics.toml", include_bytes!("../examples/packs/hello-story/items/relics.toml")),
+            ("maps/first-light/map.toml", include_bytes!("../examples/packs/hello-story/maps/first-light/map.toml")),
+            ("maps/first-light/terrain.png", include_bytes!("../examples/packs/hello-story/maps/first-light/terrain.png")),
+        ];
+        let mut files = crate::pack::Files::default();
+        for (path, bytes) in FILES {
+            if path == "package.toml" {
+                let text = String::from_utf8_lossy(bytes).replace("version = \"0.1.0\"", &format!("version = \"{version}\""));
+                files.insert(path, text.into_bytes());
+            } else {
+                files.insert(path, bytes);
+            }
+        }
+        crate::pack::archive::zip(&files).map_err(std::io::Error::other)
+    }
+
     struct Out<'a> {
         dir: &'a Path,
         entries: Vec<Entry>,
@@ -990,30 +1018,17 @@ pub mod mock {
         }
 
         /// The example package (`examples/packs/hello-story`, Razdor's own MIT content), packed as a
-        /// `.rzpack`: the card, its install and its play are shown with it.
+        /// `.rzpack` at [`CATALOG_VERSION`]: the card, its install and its play are shown with it.
         fn a_package(&mut self) -> std::io::Result<()> {
-            const FILES: [(&str, &[u8]); 7] = [
-                ("package.toml", include_bytes!("../examples/packs/hello-story/package.toml")),
-                ("texts/en.toml", include_bytes!("../examples/packs/hello-story/texts/en.toml")),
-                ("texts/ru.toml", include_bytes!("../examples/packs/hello-story/texts/ru.toml")),
-                ("units/heroes.toml", include_bytes!("../examples/packs/hello-story/units/heroes.toml")),
-                ("items/relics.toml", include_bytes!("../examples/packs/hello-story/items/relics.toml")),
-                ("maps/first-light/map.toml", include_bytes!("../examples/packs/hello-story/maps/first-light/map.toml")),
-                ("maps/first-light/terrain.png", include_bytes!("../examples/packs/hello-story/maps/first-light/terrain.png")),
-            ];
-            let mut files = crate::pack::Files::default();
-            for (path, bytes) in FILES {
-                files.insert(path, bytes);
-            }
-            let zipped = crate::pack::archive::zip(&files).map_err(std::io::Error::other)?;
-            let name = package_file("hello-story", "0.1.0");
+            let zipped = package_zip(CATALOG_VERSION)?;
+            let name = package_file("hello-story", CATALOG_VERSION);
             let f = self.file(format!("packages/{name}"), &name, None, &zipped)?;
             self.entries.push(Entry {
                 id: "hello-story".into(),
                 kind: Kind::Package,
                 title: Text { ru: "Привет, история".into(), en: "Hello, story".into() },
                 author: "Razdor".into(),
-                version: "0.1.0".into(),
+                version: CATALOG_VERSION.into(),
                 description: Text { ru: "Пример пакета: одна карта, герой и диалоги.".into(), en: "An example package: one map, a hero and dialogs.".into() },
                 about: Text::default(),
                 languages: vec!["ru".into(), "en".into()],
