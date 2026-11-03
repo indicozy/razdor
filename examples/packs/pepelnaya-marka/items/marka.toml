@@ -13,3 +13,34 @@ base = "dt:item/copper_ring"
 name = "marka.item.company_token.name"
 description = "marka.item.company_token.description"
 cost = 25
+
+# The Crown's healing draught, sent to the hero who rode in wounded from the ford (triggers/marka.toml).
+[[item]]
+id = "crown_draught"
+base = "dt:item/healing_potion"
+name = "marka.item.crown_draught.name"
+description = "marka.item.crown_draught.description"
+cost = 30
+
+# The ally's healing, given when the hero picks the ally at the council (triggers/marka.toml): the Order's
+# balm, the marsh folk's herbs, the Companies' draught.
+[[item]]
+id = "order_balm"
+base = "dt:item/healing_mixture"
+name = "marka.item.order_balm.name"
+description = "marka.item.order_balm.description"
+cost = 75
+
+[[item]]
+id = "marsh_herbs"
+base = "dt:item/healing_tincture"
+name = "marka.item.marsh_herbs.name"
+description = "marka.item.marsh_herbs.description"
+cost = 25
+
+[[item]]
+id = "company_draught"
+base = "dt:item/healing_potion"
+name = "marka.item.company_draught.name"
+description = "marka.item.company_draught.description"
+cost = 50

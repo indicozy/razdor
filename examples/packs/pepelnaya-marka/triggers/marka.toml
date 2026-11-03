@@ -21,15 +21,27 @@ camp_done = false       # set by chapter 3в (the Free Companies' camp)
 
 # ---- the start and the weeks ------------------------------------------------------------------
 
-# The caravan and the patrols take the roads at the start of the story.
+# The hero rides in from the ford with the chapter 1 wounds: the Crown's surgeon sends a healing draught.
+[[trigger]]
+id = "m_arrival"
+map = "marka"
+when = { event = "game_start" }
+then = [ { dialog = "marka_arrival" } ]
+
+# The caravan and the patrols take the roads at the start of the story; the raiders, the wraiths and Kord's
+# band wait where they stand (their goals keep them still). A roaming bandit band would hunt the wraiths
+# down on its own.
 [[trigger]]
 id = "m_setup"
 map = "marka"
 when = { event = "game_start" }
 then = [
     { army_goal = "caravan", patrol = [[58, 50], [82, 79]] },
-    { army_goal = "patrol_w", patrol = [[52, 47], [17, 47], [17, 64]] },
+    { army_goal = "patrol_w", patrol = [[52, 47], [62, 52]] },
     { army_goal = "patrol_n", patrol = [[60, 45], [68, 31]] },
+    { army_goal = "raiders", go_to = [66, 64] },
+    { army_goal = "wraiths", go_to = [30, 84] },
+    { army_goal = "kord_band", go_to = [81, 82] },
 ]
 
 # Each week: one more week counted, and the Dread grows by one (the chapter 1 Dread, carried over).
@@ -418,19 +430,19 @@ then = [ { dialog = "council" } ]
 id = "m_ally_order"
 map = "marka"
 when = { event = "dialog_choice", dialog = "council", choice = "order" }
-then = [ { set = "ally", value = 1 }, { hero_figure = "default" }, { victory = true } ]
+then = [ { set = "ally", value = 1 }, { hero_figure = "default" }, { give_item = "order_balm", to = "pack" }, { victory = true } ]
 
 [[trigger]]
 id = "m_ally_marsh"
 map = "marka"
 when = { event = "dialog_choice", dialog = "council", choice = "marsh" }
-then = [ { set = "ally", value = 2 }, { hero_figure = "default" }, { victory = true } ]
+then = [ { set = "ally", value = 2 }, { hero_figure = "default" }, { give_item = "marsh_herbs", to = "pack" }, { victory = true } ]
 
 [[trigger]]
 id = "m_ally_companies"
 map = "marka"
 when = { event = "dialog_choice", dialog = "council", choice = "companies" }
-then = [ { set = "ally", value = 3 }, { hero_figure = { model = "bandits" } }, { victory = true } ]
+then = [ { set = "ally", value = 3 }, { hero_figure = { model = "bandits" } }, { give_item = "company_draught", to = "pack" }, { victory = true } ]
 
 # "Not yet" (the council's last choice) only closes the dialog: the hero keeps playing on this map.
 

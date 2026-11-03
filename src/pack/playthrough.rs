@@ -92,6 +92,19 @@ impl Run {
         Ok(run)
     }
 
+    /// A run on a game that already exists: a campaign's hand-over (`rules::campaign::enter`) starts
+    /// the next map's story itself, and the run answers what that raised. The map is revealed, as in
+    /// [`Run::new`], with the option «Let pass» (a step onto a friendly army is no battle). The day count starts now.
+    pub(crate) fn resume(mut g: Game, choices: &[(&str, &str)]) -> Result<Run, Stuck> {
+        cheats::run(&Cheat::Reveal, Some(&mut g), None).expect("reveal the map");
+        // The option «Let pass»: the planner may cross a friendly army, and a step onto it is no battle.
+        g.friends_let_pass = true;
+        let start = g.clock.total_minutes();
+        let mut run = Run { g, log: Vec::new(), choices: choices.iter().map(|(d, c)| (d.to_string(), c.to_string())).collect(), battles: Vec::new(), start };
+        run.service()?;
+        Ok(run)
+    }
+
     /// The day after the start.
     pub fn day(&self) -> f64 {
         (self.g.clock.total_minutes() - self.start) / MINUTES_PER_DAY as f64
@@ -146,7 +159,7 @@ impl Run {
 
     /// Answers the dialogs among `events` (and those the answers open), notes the captures and the
     /// encounters.
-    fn settle(&mut self, events: Vec<Event>) -> Result<(), Stuck> {
+    pub(crate) fn settle(&mut self, events: Vec<Event>) -> Result<(), Stuck> {
         let mut queue: VecDeque<Event> = events.into();
         while let Some(e) = queue.pop_front() {
             match e {
@@ -197,6 +210,8 @@ impl Run {
     fn fight(&mut self) -> Result<(), Stuck> {
         let enemy = self.foe_name();
         let squad = self.g.squad.len();
+        let hp: Vec<i32> = self.g.squad.iter().map(|u| u.hp).collect();
+        self.note(format!("battle with {enemy} starts; squad hp {hp:?}"));
         let outcome = fight_it_out(&mut self.g, &mut Vec::new());
         let day = self.day();
         self.battles.push(Fight { enemy: enemy.clone(), outcome, day, squad });
@@ -215,18 +230,29 @@ impl Run {
     pub fn walk_to(&mut self, to: Tile, max_days: u64) -> Result<(), Stuck> {
         let deadline = self.g.clock.total_minutes() + (max_days * MINUTES_PER_DAY) as f64;
         let before = self.battles.len();
+        // The minute of the last route planned: a second plan in the same minute (a friendly army
+        // in the way stops the walk at once, see `Game::step_contact`) lets a minute pass first,
+        // so the armies move on.
+        let mut planned_at = None;
         for _ in 0..2_000_000 {
             self.service()?;
             if self.done() {
                 return Ok(());
             }
+            if self.g.clock.total_minutes() >= deadline {
+                return Err(Stuck::Late { to, day: self.day() });
+            }
             if self.g.foe.is_none() && !self.g.moving() {
                 if self.g.tile() == to || self.battles.len() > before {
                     return Ok(());
                 }
-                if self.g.clock.total_minutes() >= deadline {
-                    return Err(Stuck::Late { to, day: self.day() });
+                let now = self.g.clock.total_minutes();
+                if planned_at == Some(now) {
+                    let ev = self.g.wait(4);
+                    self.settle(ev)?;
+                    continue;
                 }
+                planned_at = Some(now);
                 if !self.g.set_destination(to) {
                     return Err(Stuck::NoRoute { to, day: self.day() });
                 }
@@ -291,13 +317,84 @@ impl Run {
     }
 }
 
-/// The chapter «Брод» of the reference package, opened on `install` (skipped without
-/// `RAZDOR_DT_DIR`): its content and its opened map, shared by every playthrough.
-pub(crate) fn brod(install: &DtInstall) -> (Opened, Arc<Content>) {
+/// The map `id` of the reference package, opened on `install` (skipped without `RAZDOR_DT_DIR`):
+/// its content (the base game with the package's units) and its opened map.
+pub(crate) fn open_map(install: &DtInstall, id: &str) -> (Opened, Arc<Content>) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/packs/pepelnaya-marka");
-    let opened = open(&root, Some("brod"), "en", install).unwrap_or_else(|e| panic!("{e}"));
+    let opened = open(&root, Some(id), "en", install).unwrap_or_else(|e| panic!("{e}"));
     let content = Arc::new(Content::from_dt(install).with_package(opened.units.clone(), opened.items.clone()));
     (opened, content)
+}
+
+/// The chapter «Брод» of the reference package, opened on `install`: its content and its opened map,
+/// shared by every playthrough.
+pub(crate) fn brod(install: &DtInstall) -> (Opened, Arc<Content>) {
+    open_map(install, "brod")
+}
+
+/// The choices the prepared hero makes: Varga joins, the toll is talked away, the marsh folk
+/// are helped.
+pub(crate) const PREPARED: &[(&str, &str)] = &[("varga_meet", "join"), ("toll", "talk"), ("marsh_plea", "help")];
+
+/// The prepared route up to the wraiths: the tower taken and garrisoned from its recruits,
+/// Varga met, the toll talked away, the marsh folk helped, then the wraiths fought.
+pub(crate) fn prepared_to_wraiths(run: &mut Run) -> Result<(), Stuck> {
+    run.walk_to((44, 14), 10)?;
+    run.walk_to((44, 14), 3)?;
+    run.hire_all(run.g.gold);
+    run.walk_to((34, 17), 5)?;
+    run.walk_to((33, 23), 5)?;
+    run.walk_to((6, 38), 10)?;
+    run.walk_to((6, 44), 10)
+}
+
+/// The start army straight to the wraiths.
+fn unprepared_to_wraiths(run: &mut Run) -> Result<(), Stuck> {
+    run.walk_to((6, 44), 10)
+}
+
+/// Whether the barrow host (the package's army `host`) stands within three cells of the hero.
+fn host_near(run: &Run) -> bool {
+    let here = run.g.tile();
+    run.g.world.armies.iter().enumerate().any(|(i, a)| {
+        let t = a.tile(&run.g.world.map);
+        run.army_name(i) == "host" && (t.0 - here.0).abs() <= 3 && (t.1 - here.1).abs() <= 3
+    })
+}
+
+/// The hero takes one step to a free cell beside him and back. An AI army attacks only when
+/// his step ends beside it, never while he stands (world.md §4.3), so this is how a waiting
+/// hero meets an army that came to him.
+fn step_out_and_back(run: &mut Run) -> Result<(), Stuck> {
+    let here = run.g.tile();
+    let cells: Vec<Tile> = (-1..=1).flat_map(|dy| (-1..=1).map(move |dx| (here.0 + dx, here.1 + dy))).filter(|&n| n != here && run.g.world.map.in_bounds(n)).collect();
+    for n in cells {
+        match run.walk_to(n, 1) {
+            Ok(()) => return run.walk_to(here, 1),
+            Err(Stuck::NoRoute { .. }) => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
+
+/// Waits up to `days` days for the barrow host to come. When it is near, the hero steps out
+/// and back (`step_out_and_back`), so the host's attack comes on his step. Stops when the
+/// chapter is over.
+pub(crate) fn meet_host(run: &mut Run, days: u64) -> Result<(), Stuck> {
+    for _ in 0..days {
+        run.wait_days(1)?;
+        if run.done() {
+            return Ok(());
+        }
+        if host_near(run) {
+            step_out_and_back(run)?;
+            if run.done() {
+                return Ok(());
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The install of the tests, or `None` (the test is skipped) without `RAZDOR_DT_DIR`.
@@ -311,71 +408,6 @@ mod tests {
     use super::*;
     use crate::pack::refs::DtKind;
     use crate::rules::content::UnitId;
-
-    /// The choices the prepared hero makes: Varga joins, the toll is talked away, the marsh folk
-    /// are helped.
-    const PREPARED: &[(&str, &str)] = &[("varga_meet", "join"), ("toll", "talk"), ("marsh_plea", "help")];
-
-    /// The prepared route up to the wraiths: the tower taken and garrisoned from its recruits,
-    /// Varga met, the toll talked away, the marsh folk helped, then the wraiths fought.
-    fn prepared_to_wraiths(run: &mut Run) -> Result<(), Stuck> {
-        run.walk_to((44, 14), 10)?;
-        run.walk_to((44, 14), 3)?;
-        run.hire_all(run.g.gold);
-        run.walk_to((34, 17), 5)?;
-        run.walk_to((33, 23), 5)?;
-        run.walk_to((6, 38), 10)?;
-        run.walk_to((6, 44), 10)
-    }
-
-    /// The start army straight to the wraiths.
-    fn unprepared_to_wraiths(run: &mut Run) -> Result<(), Stuck> {
-        run.walk_to((6, 44), 10)
-    }
-
-    /// Whether the barrow host (the package's army `host`) stands within three cells of the hero.
-    fn host_near(run: &Run) -> bool {
-        let here = run.g.tile();
-        run.g.world.armies.iter().enumerate().any(|(i, a)| {
-            let t = a.tile(&run.g.world.map);
-            run.army_name(i) == "host" && (t.0 - here.0).abs() <= 3 && (t.1 - here.1).abs() <= 3
-        })
-    }
-
-    /// The hero takes one step to a free cell beside him and back. An AI army attacks only when
-    /// his step ends beside it, never while he stands (world.md §4.3), so this is how a waiting
-    /// hero meets an army that came to him.
-    fn step_out_and_back(run: &mut Run) -> Result<(), Stuck> {
-        let here = run.g.tile();
-        let cells: Vec<Tile> = (-1..=1).flat_map(|dy| (-1..=1).map(move |dx| (here.0 + dx, here.1 + dy))).filter(|&n| n != here && run.g.world.map.in_bounds(n)).collect();
-        for n in cells {
-            match run.walk_to(n, 1) {
-                Ok(()) => return run.walk_to(here, 1),
-                Err(Stuck::NoRoute { .. }) => continue,
-                Err(e) => return Err(e),
-            }
-        }
-        Ok(())
-    }
-
-    /// Waits up to `days` days for the barrow host to come. When it is near, the hero steps out
-    /// and back (`step_out_and_back`), so the host's attack comes on his step. Stops when the
-    /// chapter is over.
-    fn meet_host(run: &mut Run, days: u64) -> Result<(), Stuck> {
-        for _ in 0..days {
-            run.wait_days(1)?;
-            if run.done() {
-                return Ok(());
-            }
-            if host_near(run) {
-                step_out_and_back(run)?;
-                if run.done() {
-                    return Ok(());
-                }
-            }
-        }
-        Ok(())
-    }
 
     fn fight_against(run: &Run, enemy: &str) -> Option<Fight> {
         run.battles.iter().find(|b| b.enemy == enemy).cloned()

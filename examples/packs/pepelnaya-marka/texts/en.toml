@@ -884,3 +884,24 @@ won = "The dead are beaten."
 
 [siegetest.army.dead]
 name = "The dead"
+
+[marka.arrival]
+title = "The Crown's surgeon"
+text = "A surgeon of the garrison meets you at the gate. “You rode in from the ford with your sword still in your hand and your blood on your boots. Drink this before you go any further.”"
+take = "Drink the draught"
+
+[marka.item.crown_draught]
+name = "Crown's draught"
+description = "A brown potion of the Crown's surgeon. It closes the worst of a wound."
+
+[marka.item.order_balm]
+name = "Order's balm"
+description = "A green balm of the Order's monks. It closes a wound and gives back strength."
+
+[marka.item.marsh_herbs]
+name = "Marsh herbs"
+description = "Bitter herbs of the marsh folk, dried over a smoky fire. They stop bleeding."
+
+[marka.item.company_draught]
+name = "Company draught"
+description = "A strong draught from the Companies' camp, drunk from a tin cup. It mends a wound."
