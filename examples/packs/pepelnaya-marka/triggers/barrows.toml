@@ -12,6 +12,14 @@
 bw_iron_ok = false   # the Iron Peace may be chosen: the Crown at 1 or more and the Order at 2 or more
 bw_free_ok = false   # the Free March may be chosen: the Companies at 2 or more, or the marsh folk at 3 or more
 
+# The King stands on his step below the palace until the story sends him anything (an AI army would
+# wander off it).
+[[trigger]]
+id = "bw_hold"
+map = "barrows"
+when = { event = "game_start" }
+then = [ { army_goal = "barrow_king", go_to = [166, 36] } ]
+
 # --- The start: the standings decide which endings the council may offer. ---
 
 [[trigger]]
@@ -80,7 +88,7 @@ map = "barrows"
 when = { event = "week_start" }
 if = [ { var = "dread", op = ">=", value = 4 } ]
 then = [
-    { spawn_army = "bw_king_1", at = [150, 70], faction = "enemy", model = 10, troops = ["dt:ghost", "dt:ghoul", "dt:ghoul"] },
+    { spawn_army = "bw_king_1", at = [150, 70], faction = "enemy", model = 10, troops = ["dt:deadman", "dt:ghoul", "dt:ghoul"] },
     { army_goal = "bw_king_1", attack = "hero" },
     { add = "taint", value = 1 },
     { dialog = "bw_rises" },
@@ -103,7 +111,7 @@ map = "barrows"
 when = { event = "week_start" }
 if = [ { var = "dread", op = ">=", value = 8 } ]
 then = [
-    { spawn_army = "bw_king_3", at = [130, 150], faction = "enemy", model = 10, troops = ["dt:death_knight", "dt:death_knight", "dt:ghost"] },
+    { spawn_army = "bw_king_3", at = [130, 150], faction = "enemy", model = 10, troops = ["dt:dead_warrior", "dt:deadman", "dt:ghoul"] },
     { army_goal = "bw_king_3", attack = "hero" },
     { add = "taint", value = 1 },
 ]
@@ -114,7 +122,7 @@ map = "barrows"
 when = { event = "week_start" }
 if = [ { var = "dread", op = ">=", value = 10 } ]
 then = [
-    { spawn_army = "bw_king_4", at = [170, 60], faction = "enemy", model = 10, troops = ["dt:death_knight", "dt:lich", "dt:ghoul"] },
+    { spawn_army = "bw_king_4", at = [170, 60], faction = "enemy", model = 10, troops = ["dt:dead_warrior", "dt:dead_warrior", "dt:ghoul"] },
     { army_goal = "bw_king_4", attack = "hero" },
     { add = "taint", value = 1 },
 ]
@@ -125,7 +133,7 @@ map = "barrows"
 when = { event = "week_start" }
 if = [ { var = "dread", op = ">=", value = 13 } ]
 then = [
-    { spawn_army = "bw_king_5", at = [110, 160], faction = "enemy", model = 10, troops = ["dt:lich", "dt:death_knight", "dt:death_knight", "dt:ghoul"] },
+    { spawn_army = "bw_king_5", at = [110, 160], faction = "enemy", model = 10, troops = ["dt:death_knight", "dt:dead_warrior", "dt:deadman", "dt:ghoul"] },
     { army_goal = "bw_king_5", attack = "hero" },
     { add = "taint", value = 1 },
 ]

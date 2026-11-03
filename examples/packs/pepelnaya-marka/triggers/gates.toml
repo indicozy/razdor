@@ -16,6 +16,21 @@ gt_west = false                # the west gate is open
 grey_bargain_offered = false   # Ilm the heretic heard the wraith out: chapter 5's Grey Bargain is open
 last_gate = 0                   # the gate opened last: 1 north, 2 east, 3 south, 4 west
 
+# --- The garrisons stand where the story put them (an AI army would wander off its gate). ---
+
+[[trigger]]
+id = "gt_hold"
+map = "gates"
+when = { event = "game_start" }
+then = [
+    { army_goal = "guard_n", go_to = [46, 16] },
+    { army_goal = "guard_e", go_to = [82, 46] },
+    { army_goal = "guard_s", go_to = [28, 64] },
+    { army_goal = "guard_w", go_to = [12, 42] },
+    { army_goal = "barrow_reserve", go_to = [84, 24] },
+    { army_goal = "wraith_messenger", go_to = [60, 46] },
+]
+
 # --- The start: the branch's company walks with the hero. ---
 
 [[trigger]]
@@ -217,28 +232,28 @@ id = "gt_pour_n"
 map = "gates"
 when = { event = "week_start" }
 if = [ { var = "gt_north", value = true }, { var = "dread", op = ">=", value = 3 } ]
-then = [ { spawn_army = "gt_pour_n", at = [50, 16], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:ghost"] } ]
+then = [ { spawn_army = "gt_pour_n", at = [50, 16], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:deadman"] } ]
 
 [[trigger]]
 id = "gt_pour_e"
 map = "gates"
 when = { event = "week_start" }
 if = [ { var = "gt_east", value = true }, { var = "dread", op = ">=", value = 3 } ]
-then = [ { spawn_army = "gt_pour_e", at = [86, 44], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:ghost"] } ]
+then = [ { spawn_army = "gt_pour_e", at = [86, 44], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:deadman"] } ]
 
 [[trigger]]
 id = "gt_pour_s"
 map = "gates"
 when = { event = "week_start" }
 if = [ { var = "gt_south", value = true }, { var = "dread", op = ">=", value = 3 } ]
-then = [ { spawn_army = "gt_pour_s", at = [32, 60], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:ghost"] } ]
+then = [ { spawn_army = "gt_pour_s", at = [32, 60], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:deadman"] } ]
 
 [[trigger]]
 id = "gt_pour_w"
 map = "gates"
 when = { event = "week_start" }
 if = [ { var = "gt_west", value = true }, { var = "dread", op = ">=", value = 3 } ]
-then = [ { spawn_army = "gt_pour_w", at = [16, 40], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:ghost"] } ]
+then = [ { spawn_army = "gt_pour_w", at = [16, 40], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:deadman"] } ]
 
 # The barrow reserve comes through the east gate once the dread is high (teleport_army to a building).
 [[trigger]]
@@ -267,7 +282,7 @@ map = "gates"
 when = { event = "week_start" }
 if = [ { var = "dread", op = ">=", value = 5 } ]
 then = [
-    { spawn_army = "gt_host_b", at = [6, 20], faction = "enemy", model = 10, troops = ["dt:death_knight", "dt:ghoul", "dt:ghost"] },
+    { spawn_army = "gt_host_b", at = [6, 20], faction = "enemy", model = 10, troops = ["dt:death_knight", "dt:ghoul", "dt:deadman"] },
     { army_goal = "gt_host_b", go_to = [14, 38] },
     { add = "taint", value = 1 },
 ]
@@ -278,7 +293,7 @@ map = "gates"
 when = { event = "week_start" }
 if = [ { var = "dread", op = ">=", value = 7 } ]
 then = [
-    { spawn_army = "gt_host_c", at = [40, 84], faction = "enemy", model = 10, troops = ["dt:death_knight", "dt:death_knight", "dt:ghoul"] },
+    { spawn_army = "gt_host_c", at = [40, 84], faction = "enemy", model = 10, troops = ["dt:death_knight", "dt:ghoul", "dt:ghoul"] },
     { army_goal = "gt_host_c", go_to = [30, 60] },
     { add = "taint", value = 1 },
 ]
@@ -288,7 +303,7 @@ id = "gt_surge_e"
 map = "gates"
 when = { event = "army_arrives", army = "gt_host_a", at = [84, 46] }
 then = [
-    { spawn_army = "gt_surge_e", at = [86, 46], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:ghost"] },
+    { spawn_army = "gt_surge_e", at = [86, 46], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:deadman"] },
     { dialog = "gt_surge" },
 ]
 
@@ -297,7 +312,7 @@ id = "gt_surge_w"
 map = "gates"
 when = { event = "army_arrives", army = "gt_host_b", at = [14, 38] }
 then = [
-    { spawn_army = "gt_surge_w", at = [16, 38], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:ghost"] },
+    { spawn_army = "gt_surge_w", at = [16, 38], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:deadman"] },
     { dialog = "gt_surge" },
 ]
 
@@ -306,7 +321,7 @@ id = "gt_surge_s"
 map = "gates"
 when = { event = "army_arrives", army = "gt_host_c", at = [30, 60] }
 then = [
-    { spawn_army = "gt_surge_s", at = [32, 58], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:ghost"] },
+    { spawn_army = "gt_surge_s", at = [32, 58], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:deadman"] },
     { dialog = "gt_surge" },
 ]
 
