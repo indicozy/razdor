@@ -28,6 +28,7 @@ Razdor plays the original game's scenarios using its original rules. Below is wh
 * **Hero Log:** four tabs — "Quests", "Completed", "Rumors", "Messages", with entries marked by in-game date.
 * **Saves:** up to 50 manual saves and 30 autosaves instead of 12; pin important saves with a thumbtack; quick save `F5` and quick load `F9`.
 * **Resuming a game:** if your phone clears the game from memory or the game crashes, upon the next launch, it will offer to resume from where you left off ([more details](/razdor/wiki/en/tutorials/saves/)).
+* **Victory window:** without the "you won gold" and "trophies" lines, so the gold, mana and loot show at once, without scrolling.
 * **Defeat screen:** the "Load last save" button loads the most recent save of any type (manual, quick, or autosave); "Exit to main menu" replaces the old "OK" button.
 * **Backpack:** `Shift`+click equips an item or drinks a potion; `Shift`+click on an equipped item unequips it.
 * **Custom Battle:** any two armies outside of a campaign, with levels and items; the battle code can be copied to a string and pasted for another player.
