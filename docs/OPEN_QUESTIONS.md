@@ -542,8 +542,9 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 - **Pepelnaya Marka: an army's leader is one unit more than its troops** (2026-11-03). An army without a named
   `leader` takes its first troop type as its leader (`pack::compile`), and `rules::world` places the leader as a
   unit besides its troops. So an unnamed package army fields one more of its first type than it is written with
-  (the camp's supply column: two guardsmen written, three in the battle; the salt patrol the same). The column and
-  the patrol were tuned with this in place (one guardsman fewer each in the map). Unknown: whether the original's
+  (the camp's supply column: one guardsman written, two in the battle, with two archers; the salt patrol the same).
+  The patrol was tuned with this in place (one guardsman fewer in the map); the column was cut to one guardsman
+  written on 2026-11-03, when its hit cost the squad eight of twelve units (six with the cut). Unknown: whether the original's
   army counts its leader among its troops (the army record's leader byte and its six troop slots, 0x4b2504). Settled
   by that reading; if the leader is not a unit of its own, the compile stops adding it and the package's armies are
   re-measured (the owner's call on the balance).
