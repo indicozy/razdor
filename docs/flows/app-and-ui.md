@@ -323,7 +323,10 @@ desktop and sideways pixel-identical, texts drawn under `dt_font::legacy_metrics
 - market (`window_layout::market_panes`, `Stack::Market`): the item description strip on top (`ItemBox::MarketStrip`),
   the section icons, the list taking the height, one row of «Инвентарь», money, «Купить», «Торговая лавка»;
 - the title's bottom links are four marble tiles (`main_menu`); the options/settings windows take the phone's width
-  and height with wrapped checkbox labels and sliders under their names (`option_slider_stacked`); keys
+  and height with wrapped checkbox labels and sliders under their names (`option_slider_stacked`); the list
+  scrolls by finger, the wheel and its bar (`phone_options`: `scrollbar_px`, 24 × k wide, twice the new-game
+  list's 12 × k, `new_game::list_track`); the advanced settings scroll both columns above «Ок» (`advanced_window`,
+  `ADV_SCROLL`, `ADV_VIEW`: rows drawn and clicked only in the view, the right margin keeps 32 × k for the bar); keys
   (`keys_window_upright`) and the F1 list in dp; save/load with their buttons in one row; the reward windows'
   OK 120 × 44 dp and larger text (`dialog::OK_W_DP`, `BIG_TEXT`); the learnt-spell window padded, its spell card in
   the empty text box's place (`learnt_slot`, `spellbook::spell_tip_card_padded`); the army window's «Закрыть» a

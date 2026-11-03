@@ -35,6 +35,10 @@ By default, your finger acts as a cursor.
 * **Two-finger pinch** — Map zoom: spread fingers to zoom in, pinch to zoom out.
 * **Two fingers together or one finger held while the other drags** — Map scrolling. Lists are scrolled using two fingers up or down, or via a scrollbar.
 
+### Scrolling the Settings
+
+The "Sound, graphics and gameplay settings" window and the "Advanced settings" window scroll with a finger or the mouse wheel. The scrollbar on the right is the game's own, twice as wide as the one in the scenario list; you can drag its knob with a finger. In "Advanced settings" both columns scroll, and the "Ok" button stays at the bottom.
+
 ### Touchpad Mode
 
 Touchpad mode is disabled by default. It is enabled by checking the **"Touchpad mode"** box in the "Sound, graphics and gameplay settings" window (the last item in the list). The screen works like a laptop touchpad, and the game itself draws the cursor:

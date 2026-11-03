@@ -65,6 +65,8 @@ const TILE_DP: f32 = 68.0;
 /// The bottom bar's margin at the screen's sides and the gap between its tiles, in dp.
 const CHIP_MARGIN_DP: f32 = 12.0;
 const CHIP_GAP_DP: f32 = 8.0;
+/// The version label's text on a phone, in dp (its sp; the menu's other small texts are 12 sp and up).
+const VERSION_PHONE_DP: f32 = 13.0;
 /// The chosen mod's list (the title's link or its tile), its key in the popup lists.
 const MOD_LIST: &str = "razdor:menu-mod";
 
@@ -550,8 +552,17 @@ pub fn frame(no_install: bool, mods: &[(String, razdor::hub::Text)], active: Opt
     };
     // This program's version, small in the corner above the links.
     let version = format!("v{}", super::update_view::shown_version(env!("CARGO_PKG_VERSION"), super::clock::is_snapshot()));
-    let vw = measure(&version, 12.0 * k).width;
-    chrome::shadow_text(&version, screen_width() - 16.0 * k - vw, version_y, 12.0 * k, Color::new(0.95, 0.88, 0.72, 0.6));
+    // On a phone the version is 13 dp (a player's report of 1503: 12 px grey over the picture was
+    // hard to read) and brighter; the desktop's is as it was.
+    let phone = super::display::dp_px();
+    let (vsize, vcolour) = match phone {
+        Some(dp) => (VERSION_PHONE_DP * dp, Color::new(0.95, 0.88, 0.72, 0.9)),
+        None => (12.0 * k, Color::new(0.95, 0.88, 0.72, 0.6)),
+    };
+    super::dt_font::legacy_metrics_if(phone.is_some(), || {
+        let vw = measure(&version, vsize).width;
+        chrome::shadow_text(&version, screen_width() - 16.0 * k - vw, version_y, vsize, vcolour);
+    });
     // An update put in place says so (an "Always" update has no window of its own).
     super::update_view::title_line();
     // Esc quits the game at once, without a question, as in the original (0x4c8059); a
@@ -1203,9 +1214,20 @@ local! {
     static KEYS_ASKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
+local! {
+    /// The advanced window's scroll on a phone: px of its content above the top of the window.
+    static ADV_SCROLL: std::cell::Cell<f32> = const { std::cell::Cell::new(0.0) };
+    /// Where the advanced window's content ends on a phone, px below the window's content top (as
+    /// the last frame drew it, unscrolled): the scroll's range is this less the view.
+    static ADV_BOTTOM: std::cell::Cell<f32> = const { std::cell::Cell::new(0.0) };
+    /// The area the advanced window's rows show in on a phone (screen px); None elsewhere.
+    static ADV_VIEW: std::cell::Cell<Option<Rect>> = const { std::cell::Cell::new(None) };
+}
+
 /// Opens the advanced settings over the settings window (a snapshot scene).
 pub fn open_advanced() {
     ADVANCED.with(|a| a.set(true));
+    ADV_SCROLL.with(|s| s.set(0.0));
 }
 
 /// Opens the keys window over the advanced settings (a snapshot scene, and the F1 list's button).
@@ -1236,7 +1258,38 @@ fn orientation_label(orientation: Option<super::audio::Orientation>) -> &'static
 
 /// A button of Razdor's own rows (`label` on the marble), true when clicked.
 fn row_button(r: Rect, label: &str) -> bool {
+    // On a phone the advanced window's rows show only in its scroll area: a row outside it is
+    // neither drawn nor clicked, and one half in it is clicked only where the pointer is in it.
+    if let Some(view) = ADV_VIEW.with(|v| v.get()) {
+        if !overlaps(r, view) {
+            return false;
+        }
+        let pressed = settings_button(r, label);
+        let (mx, my) = crate::ui::widgets::pointer();
+        return pressed && in_rect((mx, my), view);
+    }
     settings_button(r, label)
+}
+
+/// Whether two rectangles share a point.
+fn overlaps(a: Rect, b: Rect) -> bool {
+    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+}
+
+/// Whether the point is inside the rectangle.
+fn in_rect(p: (f32, f32), r: Rect) -> bool {
+    p.0 >= r.x && p.0 < r.x + r.w && p.1 >= r.y && p.1 < r.y + r.h
+}
+
+/// Whether a control at `r` may take input now: on a phone's advanced window, only in its scroll area.
+fn in_adv_view(r: Rect) -> bool {
+    ADV_VIEW.with(|v| v.get()).is_none_or(|view| overlaps(r, view))
+}
+
+/// A scroll range: how far content that ends `bottom` px down goes past a `view` px high window
+/// (0 when it fits).
+fn scroll_most(bottom: f32, view: f32) -> f32 {
+    (bottom - view).max(0.0)
 }
 
 /// Razdor's advanced settings (the settings window's "Ещё…"): rules where Razdor can differ
@@ -1248,6 +1301,8 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     let (ww, wh) = (900.0, 650.0);
     // Its own scale on a title screen or in game on a phone held upright (its own window, not the
     // settings window's).
+    // The scale the window came in with: the new-game list's scroll bar takes it (`new_game::list_track`).
+    let list_k = chrome::k();
     let _scale = window_layout::window_scale(over_map, (ww, wh));
     // Razdor's own window, wider than the original's: centred (over the map, above the bar),
     // not hung from the menu's 190, where its foot reached the screen's bottom edge.
@@ -1262,8 +1317,33 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
         let r = window_layout::title_rect((ww, wh)).unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, ((screen_height() - h) / 2.0).max(0.0), w, h));
         chrome::window(r, tr("Advanced settings"), chrome::Skin::Marble, true)
     };
+    // On a phone (in either orientation) both columns scroll together above the Ok button: the
+    // content's top moves up by `scroll`, drawn and clicked in `view` only, with a finger's slide
+    // or the wheel and a bar at the right. The desktop draws every row, as before.
+    let on_phone = super::display::dp_px().is_some();
+    let view_h = inner.h - 16.0 * k - row_h - 4.0 * k;
+    let view = Rect::new(inner.x, inner.y, inner.w, view_h);
+    let most = if on_phone { scroll_most(ADV_BOTTOM.with(|b| b.get()), view_h) } else { 0.0 };
+    let mut scroll = if on_phone { ADV_SCROLL.with(|s| s.get()).clamp(0.0, most) } else { 0.0 };
+    if most > 0.0 {
+        super::widgets::swipe_rows(view, 40.0 * k);
+        if crate::ui::widgets::mouse_in(view.x, view.y, view.w, view.h) {
+            scroll = (scroll - wheel() * 40.0 * k).clamp(0.0, most);
+        }
+        // The original's bar at twice the new-game list's width: 24 × k wide, 4 × k from the window's right.
+        let bar = Rect::new(inner.x + inner.w - 28.0 * list_k, inner.y, 24.0 * list_k, view_h);
+        super::widgets::scrollbar_px(bar, &mut scroll, most, view_h, 40.0 * k);
+    }
+    if on_phone {
+        ADV_SCROLL.with(|s| s.set(scroll));
+        phone_clip(Some(view));
+        ADV_VIEW.with(|v| v.set(Some(view)));
+    }
+    let top = inner.y - scroll;
+    // The lowest drawn point of the content, in the scrolled coordinates (see `ADV_BOTTOM`).
+    let mut content_bottom = top;
     // The left column: the rules, each with its explanation.
-    let col = Rect::new(inner.x, inner.y, 560.0 * k, inner.h);
+    let col = Rect::new(inner.x, top, 560.0 * k, inner.h);
     let y = col.y + 30.0 * k;
     chrome::shadow_text(tr("Stepping onto a friendly army"), col.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
     let br = Rect::new(col.x + col.w - 24.0 * k - 170.0 * k, y, 170.0 * k, row_h);
@@ -1332,7 +1412,7 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     let value = format!("×{:.2}", audio.map_zoom);
     let track = Rect::new(col.x + 24.0 * k, y + 44.0 * k, col.w - 48.0 * k - 70.0 * k, 18.0 * k);
     chrome::shadow_text(&value, track.x + track.w + 16.0 * k, track.y + 14.0 * k, 14.0 * k, chrome::GOLD);
-    if let Some(v) = slider(track, (audio.map_zoom - lo) / (hi - lo)) {
+    if let Some(v) = slider(track, (audio.map_zoom - lo) / (hi - lo)).filter(|_| in_adv_view(track)) {
         audio.map_zoom = ((lo + v * (hi - lo)) / 0.05).round() * 0.05;
     }
     let hint = tr("The zoom the map plays at. The wheel steps away from it and the 0 key comes back to it; locked, the map always shows it.");
@@ -1353,12 +1433,17 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
         audio.formation_controls = audio.formation_controls.next();
     }
     let hint = tr("Clicks: the first click picks a unit or an item, the second places it. Dragging: a click only selects, and units and items are moved by dragging. Both: clicks and dragging at once.");
-    for (i, line) in wrap(hint, col.w - 48.0 * k, 12.0 * k).iter().enumerate() {
+    let army_lines = wrap(hint, col.w - 48.0 * k, 12.0 * k);
+    for (i, line) in army_lines.iter().enumerate() {
         chrome::shadow_text(line, col.x + 24.0 * k, y + 56.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
     }
+    // The last block of the left column (the blocks go down the column).
+    content_bottom = content_bottom.max(y + 56.0 * k + army_lines.len() as f32 * 17.0 * k);
     // The right column: how Razdor shows the game.
     let rx = inner.x + 580.0 * k;
-    let rw = inner.x + inner.w - 24.0 * k - rx;
+    // A phone keeps its right margin for the scroll bar (24 × k wide, 4 × k to its right and 4 × k to its left).
+    let margin = if on_phone { 32.0 * list_k } else { 24.0 * k };
+    let rw = inner.x + inner.w - margin - rx;
     let bw = 150.0 * k;
     let ok_h = row_h;
     // The column's hints, wrapped first: they set the row pitch, which is the original's 44 px
@@ -1374,7 +1459,7 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     if row_h > 28.0 * k {
         pitch = pitch.max(row_h + 2.0 * k);
     }
-    let mut y = inner.y + 30.0 * k;
+    let mut y = top + 30.0 * k;
     let row = |label: &str, value: &str, y: &mut f32| -> bool {
         chrome::shadow_text(label, rx, *y + 18.0 * k, 14.0 * k, chrome::CREAM);
         let r = Rect::new(rx + rw - bw, *y, bw, row_h);
@@ -1480,9 +1565,20 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     for (i, line) in lang_hint.iter().enumerate() {
         chrome::shadow_text(line, rx, y + 48.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
     }
+    // The language row is the right column's last (its description's lines end the column).
+    content_bottom = content_bottom.max(y + 48.0 * k + lang_hint.len() as f32 * 17.0 * k);
+    if on_phone {
+        phone_clip(None);
+        ADV_VIEW.with(|v| v.set(None));
+        ADV_BOTTOM.with(|b| b.set(content_bottom - top));
+    }
     let ok = Rect::new(inner.x + inner.w - 120.0 * k, inner.y + inner.h - 16.0 * k - ok_h, 96.0 * k, ok_h);
     let ok_label = own("Buttons", "Ok", n_("OK"));
-    closed || key(KeyCode::Escape) || key(KeyCode::Enter) || settings_button(ok, &ok_label)
+    let done = closed || key(KeyCode::Escape) || key(KeyCode::Enter) || settings_button(ok, &ok_label);
+    if done {
+        ADV_SCROLL.with(|s| s.set(0.0));
+    }
+    done
 }
 
 /// The right column's row pitch in the advanced window (px at its scale): `max` (the original's
@@ -1859,13 +1955,19 @@ fn phone_options(audio: &mut super::audio::Settings, install_wide: bool, over_ma
         let (sw, sh) = (screen_width(), screen_height());
         let top = super::display::safe_area().top + 8.0 * u;
         let bottom = if over_map { sh - chrome::bar_height() - 8.0 * u } else { window_layout::title_bottom() - 8.0 * u };
+        // The scale the window came in with (the title's or the map's), which the new-game list's
+        // scroll bar also takes (`new_game::list_track`): the bar's size comes from it, not from `u`.
+        let list_k = chrome::k();
         let _scale = super::display::enter_window_scale(Some(u));
         let title = own("Options", "Title", n_("Sound, graphics and gameplay settings"));
         let rect = Rect::new(8.0 * u, top, sw - 16.0 * u, (bottom - top).max(200.0 * u));
         let (inner, closed) = chrome::window(rect, &title, chrome::Skin::Marble, true);
         let pad = 12.0 * u;
         let x0 = inner.x + pad;
-        let cw = inner.w - 2.0 * pad;
+        // The scroll bar: twice the new-game list's (`new_game::list_track`, 12 × k), 24 × k wide, 4 × k
+        // from the window's right edge; the rows stop 4 × k before it.
+        let bar_x = inner.x + inner.w - 28.0 * list_k;
+        let cw = bar_x - 4.0 * list_k - x0;
         // The list between the window's top and the buttons row (44 units high, 10 above its bottom).
         let list = Rect::new(inner.x, inner.y + 6.0 * u, inner.w, inner.h - 6.0 * u - 66.0 * u);
         let row_h = 40.0 * u;
@@ -1926,10 +2028,14 @@ fn phone_options(audio: &mut super::audio::Settings, install_wide: bool, over_ma
         let most = (content - view).max(0.0);
         let mut scroll = PHONE_SCROLL.with(|c| c.get()).clamp(0.0, most);
         if most > 0.0 {
+            // A finger's slide over the list turns the wheel a row (24 dp), as the wheel does; the
+            // bar at the right (registered after, so it wins over the list) takes its own slide.
+            super::widgets::swipe_rows(list, 24.0 * u);
             if crate::ui::widgets::mouse_in(list.x, list.y, list.w, list.h) {
                 scroll = (scroll - wheel() * 24.0 * u).clamp(0.0, most);
             }
-            let bar = Rect::new(list.x + list.w - 9.0 * u, list.y, 6.0 * u, view);
+            // The original's bar (its arrows, track and knob), twice the new-game list's width.
+            let bar = Rect::new(bar_x, list.y, 24.0 * list_k, view);
             super::widgets::scrollbar_px(bar, &mut scroll, most, view, 24.0 * u);
         }
         PHONE_SCROLL.with(|c| c.set(scroll));
@@ -1943,7 +2049,8 @@ fn phone_options(audio: &mut super::audio::Settings, install_wide: bool, over_ma
             if !on_list(cy - scroll, slider_h) {
                 continue;
             }
-            let r = Rect::new(x0 - pad + 2.0 * u, at(cy), inner.w - 4.0 * u, slider_h);
+            // The rows stop before the scroll bar (`bar_x`).
+            let r = Rect::new(x0 - pad + 2.0 * u, at(cy), bar_x - 4.0 * list_k - (x0 - pad + 2.0 * u), slider_h);
             if let Some(v) = option_slider_stacked(r, label, *value, 14.0 * u) {
                 match i {
                     0 | 1 => {
@@ -2418,5 +2525,14 @@ mod tests {
         assert!((32.0..44.0).contains(&p), "pitch {p}");
         assert!(top + 9.0 * p + hints <= ok_top + 1e-3, "the language description ends above Ok");
         assert_eq!(right_column_pitch(top, inner_h + 200.0, 9.0, hints, 44.0), 44.0);
+    }
+
+    /// On a phone the advanced window scrolls by what its content runs past the view above Ok;
+    /// content that fits does not scroll at all (the desktop's case).
+    #[test]
+    fn the_advanced_window_scrolls_by_what_runs_past_its_view() {
+        assert_eq!(scroll_most(700.0, 573.0), 127.0);
+        assert_eq!(scroll_most(500.0, 573.0), 0.0);
+        assert_eq!(scroll_most(573.0, 573.0), 0.0);
     }
 }

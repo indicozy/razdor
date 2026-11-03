@@ -22,7 +22,9 @@ In the list, each entry shows its type (map, campaign, or mod), the author, the 
 
 ## Search
 
-Above the list, there is a "type to filter" field: enter part of a name (Russian or English) or an author's name, and the list will narrow down; the cross on the right or the Esc key will clear the field.
+Above the list, there is a "type to filter" field: enter part of a name (Russian or English) or an author's name, and the list will narrow down; the cross on the right or the Esc key will clear the field. The search also matches a mod's name: "evolu" lists every map made for Evolution.
+
+A map or campaign that needs a mod names it in the list: "Needs mod: …" while the mod is missing, and "For mod: …" once it is installed.
 
 ## Open Entry
 
