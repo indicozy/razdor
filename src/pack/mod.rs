@@ -27,6 +27,8 @@ pub mod playthrough_ch45;
 pub mod playthrough_abbey;
 #[cfg(test)]
 pub mod playthrough_salt;
+#[cfg(test)]
+pub mod playthrough_campaign;
 pub mod refs;
 pub mod sim;
 pub mod terrain;

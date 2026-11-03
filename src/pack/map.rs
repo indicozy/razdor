@@ -103,9 +103,13 @@ pub struct BuildingSpec {
     pub size: Option<[u32; 2]>,
     /// `player`, `ally`, `neighbour` or `enemy`.
     pub faction: String,
-    /// Gold a day (the building's income).
+    /// Gold a day (the building's income). A castle or a fort pays its stock at each noon, and the
+    /// stock grows back to `gold_max` at the midnight; a village's tribute grows the same way.
     #[serde(default)]
     pub income: u16,
+    /// The most gold the building's stock holds (`compile::gold_max_of`): four days' income when left out.
+    #[serde(default)]
+    pub gold_max: Option<u16>,
     #[serde(default)]
     pub garrison: Vec<TroopSpec>,
     /// Units the building can recruit: the stock at the start and the most it holds.

@@ -490,6 +490,10 @@ won = "The companies' camp holds. The companies remember who came to them first.
 name = "The camp stones"
 description = "A standing stone by the company's fire. Old rune marks can still be read on it."
 
+[camp.building.post]
+name = "The Companies' post"
+description = "A palisade and a dozen hired swords. The companies pay their men from the tolls on the road."
+
 [camp.building.hall]
 name = "The Empty Mug inn"
 description = "Here the companies drink, play dice and decide whom to serve."

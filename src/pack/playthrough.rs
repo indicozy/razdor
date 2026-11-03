@@ -60,6 +60,19 @@ impl fmt::Display for Stuck {
     }
 }
 
+/// The state of the game at one day's start (sampled once a day by the walks and the waits).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Sample {
+    /// The day after the start.
+    pub day: f64,
+    pub gold: i32,
+    /// The squad's size.
+    pub squad: usize,
+    /// The gold wage bill and the income of the owned castles and forts, per day.
+    pub wages: i32,
+    pub income: i32,
+}
+
 /// A playthrough: the game, what it did, and the choices the script makes.
 pub struct Run {
     pub g: Game,
@@ -72,7 +85,14 @@ pub struct Run {
     pub battles: Vec<Fight>,
     /// The field battles among them (a package's `lua:<script>` battle): rounds, winner, the defenders' HP.
     pub fields: Vec<FieldFight>,
+    /// One sample a day: the gold, the squad, the bills and the income (see [`Sample`]).
+    pub ledger: Vec<Sample>,
+    /// Units that left the squad with no battle between two days' samples (a desertion).
+    pub deserted: usize,
     start: f64,
+    last_day: i64,
+    last_squad: usize,
+    last_battles: usize,
 }
 
 impl Run {
@@ -97,9 +117,26 @@ impl Run {
         g.triggers.trace = Some(Vec::new());
         o.start(&mut g);
         let start = g.clock.total_minutes();
-        let mut run = Run { g, log: Vec::new(), choices: choices.iter().map(|(d, c)| (d.to_string(), c.to_string())).collect(), battles: Vec::new(), fields: Vec::new(), start };
+        let mut run = Run::fresh(g, choices, start);
         run.service()?;
         Ok(run)
+    }
+
+    fn fresh(g: Game, choices: &[(&str, &str)], start: f64) -> Run {
+        let squad = g.squad.iter().filter(|u| u.alive()).count();
+        Run {
+            g,
+            log: Vec::new(),
+            choices: choices.iter().map(|(d, c)| (d.to_string(), c.to_string())).collect(),
+            battles: Vec::new(),
+            fields: Vec::new(),
+            ledger: Vec::new(),
+            deserted: 0,
+            start,
+            last_day: -1,
+            last_squad: squad,
+            last_battles: 0,
+        }
     }
 
     /// A run on a game that already exists: a campaign's hand-over (`rules::campaign::enter`) starts
@@ -110,7 +147,7 @@ impl Run {
         // The option «Let pass»: the planner may cross a friendly army, and a step onto it is no battle.
         g.friends_let_pass = true;
         let start = g.clock.total_minutes();
-        let mut run = Run { g, log: Vec::new(), choices: choices.iter().map(|(d, c)| (d.to_string(), c.to_string())).collect(), battles: Vec::new(), fields: Vec::new(), start };
+        let mut run = Run::fresh(g, choices, start);
         run.service()?;
         Ok(run)
     }
@@ -140,13 +177,14 @@ impl Run {
         self.g.story_var(name)
     }
 
-    fn note(&mut self, what: impl AsRef<str>) {
+    pub(crate) fn note(&mut self, what: impl AsRef<str>) {
         self.log.push(format!("day {:>5.2}: {}", self.day(), what.as_ref()));
     }
 
     /// Answers what is waiting: a question (yes), a battle the hero is in, the events the game
     /// has raised (dialogs, captures, encounters). Runs until nothing waits.
     pub fn service(&mut self) -> Result<(), Stuck> {
+        self.sample();
         for _ in 0..10_000 {
             if self.g.pending_question().is_some() {
                 let ev = self.g.answer_question(true);
@@ -170,6 +208,25 @@ impl Run {
             self.settle(ev)?;
         }
         Err(Stuck::Broken("the events did not settle".into()))
+    }
+
+    /// Records the day's sample when a new day has begun, and notes a unit that left the squad with
+    /// no battle since the last sample (a desertion: the pay ran short for a week).
+    fn sample(&mut self) {
+        let day = ((self.g.clock.total_minutes() - self.start) / MINUTES_PER_DAY as f64).floor() as i64;
+        if day == self.last_day {
+            return;
+        }
+        self.last_day = day;
+        let squad = self.g.squad.iter().filter(|u| u.alive()).count();
+        if squad < self.last_squad && self.battles.len() == self.last_battles {
+            self.deserted += self.last_squad - squad;
+            self.note(format!("{} unit(s) left the squad unpaid", self.last_squad - squad));
+        }
+        self.last_squad = squad;
+        self.last_battles = self.battles.len();
+        let income = self.g.world.locations.iter().filter(|l| l.owned() && matches!(l.kind, crate::rules::world::LocationKind::Castle | crate::rules::world::LocationKind::Fort)).map(|l| l.gold_income * self.g.difficulty() / 100).sum();
+        self.ledger.push(Sample { day: self.day(), gold: self.g.gold, squad, wages: self.g.daily_wages(), income });
     }
 
     /// Answers the dialogs among `events` (and those the answers open), notes the captures and the
@@ -226,7 +283,8 @@ impl Run {
         let enemy = self.foe_name();
         let squad = self.g.squad.len();
         let hp: Vec<i32> = self.g.squad.iter().map(|u| u.hp).collect();
-        self.note(format!("battle with {enemy} starts; squad hp {hp:?}"));
+        let at = self.g.tile();
+        self.note(format!("battle with {enemy} starts at {at:?}; squad hp {hp:?}"));
         let outcome = fight_it_out(&mut self.g, &mut self.fields);
         let day = self.day();
         self.battles.push(Fight { enemy: enemy.clone(), outcome, day, squad });

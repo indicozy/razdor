@@ -3306,6 +3306,7 @@ name = "building.tower.name"
 description = "building.tower.description"
 cell = [44, 14]
 faction = "enemy"
+income = 30
 garrison = [{ unit = "dt:militiaman", level = 1, count = 2 }]
 recruit = [
     { unit = "dt:militiaman", start = 4, max = 6 },

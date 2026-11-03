@@ -58531,12 +58531,14 @@ cell = [60, 150]
 faction = "player"
 garrison = [{ unit = "dt:militiaman", level = 1, count = 2 }]
 [[building]]
+# The chapel's rite heals the army (its barracks tab: a recruit line with no stock, so nothing is for hire).
 id = "chapel"
 type = "church"
 name = "barrows.building.chapel.name"
 description = "barrows.building.chapel.description"
 cell = [48, 170]
 faction = "neighbour"
+recruit = [{ unit = "dt:militiaman", start = 0, max = 0 }]
 [[building]]
 id = "marsh_village"
 type = "village"
@@ -58615,7 +58617,7 @@ faction = "enemy"
 model = "necromancer"
 troops = [
     { unit = "dt:dead_warrior", level = 1, count = 1 },
-    { unit = "dt:deadman", level = 1, count = 4 },
+    { unit = "dt:deadman", level = 1, count = 2 },
     { unit = "dt:ghoul", level = 1, count = 2 },
 ]
 

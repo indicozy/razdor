@@ -17,7 +17,7 @@ use crate::rules::map::Tile;
 
 /// The camp's dialog answers: the Crown's column lets pass (its strike is an open balance question), the red
 /// company is left, the waygate's stone is lit, the spoils are split.
-const CAMP: &[(&str, &str)] = &[("camp_raid", "pass"), ("camp_loot", "split"), ("camp_red", "leave"), ("camp_gate", "light")];
+pub(crate) const CAMP: &[(&str, &str)] = &[("camp_raid", "pass"), ("camp_loot", "split"), ("camp_red", "leave"), ("camp_gate", "light")];
 
 /// Chapter 1 won on the prepared route, handed over to `marka` (the hub's first visit).
 fn into_marka(install: &DtInstall, seed: u32, choices: &[(&str, &str)]) -> Result<Run, Stuck> {
@@ -108,7 +108,7 @@ fn army_tile(run: &Run, name: &str) -> Option<Tile> {
 
 /// The camp's route: the Crown's column comes to the ambush point by the first day (its raid dialog, passed),
 /// the red company's offer, the waygate's stone, then the relief fought where it settles in the hall's yard.
-fn camp_route(run: &mut Run) -> Result<Option<Outcome>, Stuck> {
+pub(crate) fn camp_route(run: &mut Run) -> Result<Option<Outcome>, Stuck> {
     run.wait_days(1)?;
     run.walk_to((74, 44), 6)?;
     run.walk_to((48, 60), 6)?;
@@ -193,12 +193,14 @@ fn the_council_comes_back_after_later() {
     assert!(!run.done(), "the hub waits for an ally");
 }
 
-/// Kord's offer is shown only when the purse holds the hire: at the first visit (33 gold) he is not offered.
+/// Kord's offer is shown only when the purse holds the hire: at the first visit he is not offered. Chapter
+/// 1's tower now pays its income, so the purse is set here (20 gold; the caravan's 10 on the way keeps it under 40).
 #[test]
 fn kords_offer_waits_for_the_price() {
     let Some(install) = install() else { return };
     let mut run = into_marka(&install, 1, &[]).unwrap_or_else(|e| panic!("{e}"));
     run.g.avoid_armies = true;
+    run.g.gold = 20;
     drink_for_wounded(&mut run);
     run.walk_to((84, 76), 3).unwrap_or_else(|e| panic!("{e}"));
     assert!(run.g.gold < 40, "the purse at the visit: {}", run.g.gold);

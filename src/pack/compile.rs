@@ -364,6 +364,13 @@ pub fn default_footprint(kind: &str) -> Option<(u32, u32)> {
     building_code(kind).map(|c| DEFAULT_FOOTPRINTS[c as usize])
 }
 
+/// The stock maximum of a building. The original's stocks grow back only up to a maximum (`grow_stock`
+/// does nothing at 0), so a building with `income` and no maximum paid nothing after its first noon: the
+/// pack's `income` is gold a day, and it is paid. Four days' income when the spec leaves it out.
+pub fn gold_max_of(b: &BuildingSpec) -> u16 {
+    b.gold_max.unwrap_or_else(|| b.income.saturating_mul(4))
+}
+
 /// The footprint of a map's building: its `size`, else the type's default. Unvalidated: the
 /// package check keeps every side 1 to 8.
 pub fn footprint_of(b: &BuildingSpec) -> (u32, u32) {
@@ -468,6 +475,10 @@ fn scenario_of(pkg: &Package, ids: &BTreeMap<&str, u32>, texts: &Texts, file: &s
             faction,
             relations: header.relations[faction as usize - 1],
             gold_per_day: b.income,
+            gold_max: gold_max_of(b),
+            // A `player` building is the hero's from the start (owner army 0, the hero's); the others are neutral
+            // until the story or the AI takes them.
+            owner_army: if faction == 1 { 0 } else { 0xFF },
             garrison,
             barracks,
             has_barracks: u8::from(!b.recruit.is_empty()),

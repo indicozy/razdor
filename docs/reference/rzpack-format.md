@@ -382,7 +382,8 @@ description = "town.dawnwatch.description"   # optional
 cell = [10, 24]                     # the bottom-right cell of the footprint
 size = [9, 9]                       # optional: width and height in cells, 1 to 9 (Footprints below)
 faction = "player"                  # player, ally, neighbour, enemy
-income = 40                         # gold a day
+income = 40                         # gold a day: an owned castle or fort pays its stock at each noon (towns pay nothing)
+gold_max = 160                      # optional: the most the stock holds; four days' income when left out
 garrison = [{ unit = "dawn_knight", level = 1, count = 4 }]     # up to six
 recruit = [{ unit = "dt:militiaman", start = 4, max = 8 }]      # up to six
 

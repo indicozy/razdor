@@ -13569,6 +13569,19 @@ description = "camp.building.hall.description"
 cell = [56, 56]
 faction = "neighbour"
 
+# The companies' own post, by the road from the Crown's side: the companies hold it from the first day and pay
+# the hire of their men from its tolls (a fort pays its income at each noon while it is theirs).
+[[building]]
+id = "post"
+type = "fort"
+name = "camp.building.post.name"
+description = "camp.building.post.description"
+cell = [88, 71]
+size = [4, 4]
+faction = "player"
+income = 30
+garrison = [{ unit = "dt:bandit", level = 1, count = 2 }]
+
 [[building]]
 id = "oakford"
 type = "town"

@@ -539,6 +539,26 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   misses. The hold-then-drag failure was fixed by `SwipeKind::Grab`. Whether the knob's hit area
   should grow (it needs room the list gives up) is the owner's call, a Razdor choice.
 
+- **Pepelnaya Marka: the Companies' post falls on day 2** (2026-11-03). The camp's player-owned post (income 30,
+  garrison 4 guardsmen + 2 archers) is owned at the start (`owner_army` 0) and lost on day 2 with no army seen
+  taking it; the camp's gold then runs out (11 zero-gold days, 3 units leave). `camp` triggers do not touch it. The
+  cause is not found: a building-loss path in the engine. The campaign test `the_campaign_plays_the_companies_to_the_free_march`
+  is `#[ignore]` until it is.
+- **Pepelnaya Marka: the heretic's trial never fires** (2026-11-03). After the hub's «cleanse» (Ilm 1) the abbey's
+  «take» should set Ilm 0 and the trial should then give Ilm 2 (the spare); in the end-to-end run Ilm stays 1 and
+  the grey bargain is never offered. Test `the_campaign_plays_the_heretic_to_the_grey_bargain` is `#[ignore]`.
+- **Pepelnaya Marka: a unit leaves the squad at the gates** (2026-11-03). In the marsh run one unit is gone at the
+  gates with gold above 0 (the named halberdier, I think). Not diagnosed; the desertion check counts it. Test
+  `the_campaign_plays_the_marsh_to_the_free_march` is `#[ignore]` until it is.
+- **Pepelnaya Marka: the allies never reach the palace** (2026-11-03). The AI's army route search has a node cap
+  (`GOAL_NODES` = 4000 in `rules/ai/goals.rs`): from the spawn cells (44,186), (22,186), (176,176) no route to
+  (160,44) is found within 4000 nodes, the goal is dropped and the column wanders. With 40000 nodes the route is
+  found (166–183 cells). The fix is in the content (waypoint legs) or the cap; not done.
+- **Pepelnaya Marka: the Varga and the losing choices are not measured yet** (2026-11-03): Varga's survival over
+  seeds on the prepared route, salt's «openly» (the patrol chase), camp's «hit the column», salt's watch post.
+- **Pepelnaya Marka: the hub's revisit is a day-0 scene.** The revisit's victory fires at the first day start, so a
+  return from a branch gives about 0.4 days in the hub (enough to walk to Ashford, not for more).
+
 ## Settled
 
 - **Author names in letters the bundled fonts lack** (2026-10-31, a player's report, 1438). A name

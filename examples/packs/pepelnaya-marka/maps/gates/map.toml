@@ -12675,7 +12675,7 @@ cell = [46, 16]
 faction = "enemy"
 model = "necromancer"
 troops = [
-    { unit = "dt:deadman", level = 1, count = 3 },
+    { unit = "dt:deadman", level = 1, count = 2 },
     { unit = "dt:ghoul", level = 1, count = 1 },
 ]
 [[army]]
@@ -12685,8 +12685,8 @@ cell = [82, 46]
 faction = "enemy"
 model = "necromancer"
 troops = [
-    { unit = "dt:deadman", level = 1, count = 3 },
-    { unit = "dt:dead_warrior", level = 1, count = 2 },
+    { unit = "dt:deadman", level = 1, count = 2 },
+    { unit = "dt:dead_warrior", level = 1, count = 1 },
 ]
 [[army]]
 id = "guard_s"
@@ -12706,7 +12706,7 @@ cell = [12, 42]
 faction = "enemy"
 model = "feudal"
 troops = [
-    { unit = "dt:halberdier", level = 1, count = 2 },
+    { unit = "dt:halberdier", level = 1, count = 1 },
     { unit = "dt:archer", level = 1, count = 2 },
 ]
 

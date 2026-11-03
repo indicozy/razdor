@@ -60,13 +60,13 @@ const GUARD_E: Tile = (82, 46);
 const GUARD_W: Tile = (12, 42);
 
 /// Walks to `cell` (a guard's cell is a fight: the walk ends on it), up to `days`.
-fn to(run: &mut Run, cell: Tile, days: u64) -> Result<(), Stuck> {
+pub(crate) fn to(run: &mut Run, cell: Tile, days: u64) -> Result<(), Stuck> {
     run.walk_to(cell, days)
 }
 
 /// The Order's route: the east gate by Ilm's rite, the south gate by the gatekeeper's gold, the
 /// west and north guards fought; the last gate's «close» ends the chapter.
-fn gates_by_the_order(run: &mut Run) -> Result<(), Stuck> {
+pub(crate) fn gates_by_the_order(run: &mut Run) -> Result<(), Stuck> {
     to(run, STONE_E, 12)?;
     to(run, STONE_S, 12)?;
     to(run, GUARD_W, 12)?;
@@ -76,7 +76,7 @@ fn gates_by_the_order(run: &mut Run) -> Result<(), Stuck> {
 
 /// The marsh folk's route: the west gate by Tess's path, the south gate by Varga's halberd, the
 /// east and north guards fought.
-fn gates_by_the_marsh(run: &mut Run) -> Result<(), Stuck> {
+pub(crate) fn gates_by_the_marsh(run: &mut Run) -> Result<(), Stuck> {
     to(run, STONE_W, 12)?;
     to(run, STONE_S, 12)?;
     to(run, GUARD_E, 12)?;
@@ -85,7 +85,7 @@ fn gates_by_the_marsh(run: &mut Run) -> Result<(), Stuck> {
 }
 
 /// The Companies' route: the south gate by the gold, the other three guards fought.
-fn gates_by_the_companies(run: &mut Run) -> Result<(), Stuck> {
+pub(crate) fn gates_by_the_companies(run: &mut Run) -> Result<(), Stuck> {
     to(run, STONE_S, 12)?;
     to(run, GUARD_E, 12)?;
     to(run, GUARD_W, 12)?;
@@ -152,19 +152,19 @@ fn progression(run: &mut Run, days: u64) {
 
 /// The King's road: the hero walks to the King's step and fights him; the summaries and the council
 /// follow, and the council's choice ends the chapter.
-fn barrows_by_the_king(run: &mut Run) -> Result<(), Stuck> {
+pub(crate) fn barrows_by_the_king(run: &mut Run) -> Result<(), Stuck> {
     to(run, (166, 36), 40)?;
     run.wait_until_done(3)
 }
 
 /// The grey throne: a heretic who heard the wraith kneels at the palace.
-fn barrows_by_the_grey_throne(run: &mut Run) -> Result<(), Stuck> {
+pub(crate) fn barrows_by_the_grey_throne(run: &mut Run) -> Result<(), Stuck> {
     to(run, (166, 26), 40)?;
     run.wait_until_done(3)
 }
 
 /// The ending the story reached, by its dialog's name without `end_` (`iron`, `free`, `grey`, `fall`).
-fn ending_of(run: &Run) -> Option<String> {
+pub(crate) fn ending_of(run: &Run) -> Option<String> {
     run.ending().map(|d| d.trim_start_matches("end_").to_string())
 }
 
