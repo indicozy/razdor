@@ -16,6 +16,12 @@ pub const NOMINAL_W: f32 = 1280.0;
 /// The Сюжет and Данные outline and file columns (points).
 const OUTLINE_W: f32 = 240.0;
 const FILES_W: f32 = 260.0;
+/// Below this window width the Map workspace folds its Слои | Сцена column into the Inspector column's tabs,
+/// with the minimap pinned on top (spec §5.8; the canvas keeps about 650 px at 1280).
+pub const FOLD_W: f32 = 1600.0;
+/// The layout's version for the Map workspace: its saved layout is keyed by it, so a change of the layout
+/// (here UX3's) resets the layouts the earlier version saved.
+const MAP_LAYOUT: &str = "map-ux3";
 
 /// One of the four workspaces.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,7 +44,7 @@ impl WsKind {
     /// The key the layout is saved under (also the dock's id).
     pub fn key(self) -> &'static str {
         match self {
-            WsKind::Map => "map",
+            WsKind::Map => MAP_LAYOUT,
             WsKind::Story => "story",
             WsKind::Data => "data",
             WsKind::Test => "test",
@@ -117,17 +123,29 @@ pub fn default_dock(kind: WsKind, width: f32, side: bool) -> DockState<Tab> {
     let inspector = theme::INSPECTOR_W;
     match kind {
         WsKind::Map => {
-            // Stamps left of the map; the minimap and the Scene column right of it, the Inspector last.
+            // The palette column (Палитра | Штампы) at the left; the canvas; at the right the minimap over Слои |
+            // Сцена, then the Inspector. Narrower than FOLD_W, the Слои and Сцена tabs join the Inspector's column,
+            // and the minimap is pinned above them. The tool strip is a panel of its own (`studio/mod.rs`).
+            let dock_w = (w - theme::TOOL_W).max(1.0);
             let mut dock = DockState::new(vec![Tab::Map]);
             let tree = dock.main_surface_mut();
-            let [centre, _inspector] = tree.split_right(NodeIndex::root(), share(w - inspector, w), vec![Tab::Inspector]);
-            let column_room = w - inspector;
-            let [centre, column] = tree.split_right(centre, share(column_room - theme::RIGHT_W, column_room), vec![Tab::Minimap]);
-            let _ = tree.split_below(column, 0.5, vec![Tab::Scene]);
-            let palette_room = column_room - theme::RIGHT_W;
-            let [centre, _stamps] = tree.split_left(centre, share(theme::PALETTE_W, palette_room), vec![Tab::Stamps]);
-            if side {
-                let _ = tree.split_right(centre, 0.5, vec![Tab::Script]);
+            if width < FOLD_W {
+                let [centre, column] = tree.split_right(NodeIndex::root(), share(dock_w - inspector, dock_w), vec![Tab::Inspector, Tab::Layers, Tab::Scene]);
+                let _ = tree.split_above(column, 0.35, vec![Tab::Minimap]);
+                let [centre, _palette] = tree.split_left(centre, share(theme::PALETTE_W, dock_w - inspector), vec![Tab::Palette, Tab::Stamps]);
+                if side {
+                    let _ = tree.split_right(centre, 0.5, vec![Tab::Script]);
+                }
+            } else {
+                let [centre, _inspector] = tree.split_right(NodeIndex::root(), share(dock_w - inspector, dock_w), vec![Tab::Inspector]);
+                let column_room = dock_w - inspector;
+                let [centre, column] = tree.split_right(centre, share(column_room - theme::RIGHT_W, column_room), vec![Tab::Minimap]);
+                let _ = tree.split_below(column, 0.4, vec![Tab::Layers, Tab::Scene]);
+                let palette_room = column_room - theme::RIGHT_W;
+                let [centre, _palette] = tree.split_left(centre, share(theme::PALETTE_W, palette_room), vec![Tab::Palette, Tab::Stamps]);
+                if side {
+                    let _ = tree.split_right(centre, 0.5, vec![Tab::Script]);
+                }
             }
             dock
         }
@@ -217,6 +235,21 @@ mod tests {
         // The keys are the tabs' fixed keys, not their titles: a change of language cannot break them.
         assert!(json.contains("Units") || json.contains("units"), "{json}");
         assert_eq!(Tab::Units.key(), "units");
+    }
+
+    #[test]
+    fn the_map_layout_has_its_palette_layers_and_minimap_at_both_widths() {
+        for width in [1280.0, 1920.0] {
+            let t = tabs(&default_dock(WsKind::Map, width, false));
+            for tab in [Tab::Palette, Tab::Stamps, Tab::Minimap, Tab::Layers, Tab::Scene, Tab::Inspector, Tab::Map] {
+                assert!(t.contains(&tab), "{tab:?} at {width}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_map_layout_is_keyed_by_its_version() {
+        assert_eq!(WsKind::Map.key(), "map-ux3", "a change of the Map layout bumps the key, so saved layouts reset");
     }
 
     #[test]

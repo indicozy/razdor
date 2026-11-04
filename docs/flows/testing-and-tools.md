@@ -356,6 +356,8 @@ Cut (UX3, UX4), Find and the Inspector search (UX2), the command palette and Ctr
 inside Тест (UX6), Tab to hide the side panels (UX3). Not checked at run time: the pointer shape on the desktop
 and a language switch with a saved layout (the unit tests cover the stable keys).
 
+Map workspace (UX3): `ui/studio/map_tab.rs` draws the tool strip (`tool_strip`, a left panel of `studio/mod.rs` that runs the `tool-*` commands of the registry), the options bar above the canvas (`options_bar`), the palette tab (`palette_dock`: terrain swatches and object thumbnails made once per kind from the install's sprites by `Canvas::prepare_thumbs`, kept in memory) and the layers tab (`layers_dock`). The layer model is `studio/layers.rs`: a definition per layer (id, name, kind) and one instance per map (eye and lock) in `Canvas::layer_sets`; a pick, a paint, an erase and a placement check it (`layer_of`, `Set::first_pickable`, `act_layer`), and the renderer skips a hidden layer (`draw_map_layers`). The brush rules are pure (`studio/brush.rs`: `footprint` round or square, `stroke` gap-free between two samples, `line_cells` for Shift, `scatter` for the density with a seed). The default layout is `workspaces::default_dock`: below `FOLD_W` (1600 px) Слои and Сцена join the Inspector's column with the minimap pinned above; the Map layout's key is versioned (`map-ux3`), so an older saved layout is not used. Snapshot options for the Map: `ws=map`, `tool=<name>` (brush, forest and the others), `brush=`, `density=`, `round`, `hover=x,y` (a stand-in for the pointer), `army-tool`, `layers`, `palette`.
+
 ## The map translator (`razdor-translate`)
 
 Not part of the original game (asked for by the owner): a second program that writes English

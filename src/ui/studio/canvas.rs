@@ -271,29 +271,34 @@ fn draw_army_figure(art: Option<&DtArt>, cam: &Cam, x: u16, y: u16, model: u8, f
 }
 
 /// The map: terrain, then objects, buildings and armies in painter's order.
-pub fn draw_map(s: &Scenario, art: Option<&DtArt>, cam: &Cam, overview: Option<&Texture2D>) {
+/// [`draw_map`] with the layers that show: terrain, objects, buildings and armies (`shown`, in that order;
+/// a hidden layer is not drawn, the studio's eye in the Слои tab).
+pub fn draw_map_layers(s: &Scenario, art: Option<&DtArt>, cam: &Cam, overview: Option<&Texture2D>, shown: [bool; 4]) {
     let Some(vis) = cam.visible(s.width(), s.height()) else { return };
-    draw_terrain(s, art, cam, vis, overview);
+    let [terrain, objects, buildings, armies] = shown;
+    if terrain {
+        draw_terrain(s, art, cam, vis, overview);
+    }
     // Sprites stand on their cell and reach up to ~10 cells above it.
     let (below, side) = (12, 10);
     let reach = CellRect { x0: vis.x0 - side, y0: vis.y0, x1: vis.x1 + side, y1: vis.y1 + below };
     let far = cam.zoom < 0.3;
     let mut items: Vec<(f32, Item)> = Vec::new();
-    if !far || s.objects.len() < 20_000 {
+    if objects && (!far || s.objects.len() < 20_000) {
         for (i, o) in s.objects.iter().enumerate() {
             if reach.contains(o.x as i32, o.y as i32) {
                 items.push((o.y as f32, Item::Object(i)));
             }
         }
     }
-    for (i, b) in s.buildings.iter().enumerate() {
+    for (i, b) in s.buildings.iter().enumerate().filter(|_| buildings) {
         let f = Footprint::of(b.x as i32, b.y as i32, b.size_x, b.size_y).bounds();
         if f.overlaps(&reach) {
             let key = if matches!(b.kind, 13 | 14) { b.y as f32 - 1000.0 } else { b.y as f32 + 0.01 };
             items.push((key, Item::Building(i)));
         }
     }
-    for (i, a) in s.armies.iter().enumerate() {
+    for (i, a) in s.armies.iter().enumerate().filter(|_| armies) {
         if reach.contains(a.x as i32, a.y as i32) {
             items.push((a.y as f32 + 0.02, Item::Army(i)));
         }

@@ -80,26 +80,45 @@ buildings on top of each other, show on the map at once; the details are in **Pr
 
 ### Map tools
 
-The tool bar's pages follow DTMapEdit's: **Terrain** (a brush of 1, 2, 3, 4, 5, 6 or 9 cells),
-**Hills** (one hill per brush centre, sized by the brush; **Erase** takes the hills the brush
-covers), **Forests** (one tree per cell of a chosen family, or a thicket; **Replace trees** re-rolls
-only what the family replaces), **Buildings** (**Erase** removes the building that covers the
-cell), **Items** (not yet: the package format has no items on the ground), **Rectangle** and
-**Fill** (a rectangle, or the connected cells of one kind, takes the palette's kind).
+A strip of tools runs down the left edge: one icon each; the tooltip shows the name and the key.
 
-**Copy** takes a rectangle: **Ctrl+C** copies it, **Ctrl+V** arms a paste that follows the pointer
-and **Esc** stops. **Save stamp** keeps the copy in the package under a name; the **Stamps** tab
-lists them, and a click arms one for pasting.
+* **V** select and move; **B** brush (paints what the palette has picked); **E** eraser;
+  **G** fill; **I** eyedropper (or Alt while painting with the brush); **S** stamp; **A** army;
+  **U** building; **P** point; **H** hand (drag to move the view).
+* **M**, **L** and **W** (selections) and **R** (trigger zone) are not available yet: selections
+  come in a later update.
 
-**Move** is a mode for every tool: the first click picks an object up (an army, a building, a point
-or a terrain object), the next click drops it. **Burn everything** asks first; it turns live trees
-into dead ones and scorches the ground above water, as one undo step.
+Above the map is the options bar of the active tool. For the brush: size (a slider, keys `[` and
+`]`), the presets 1 to 6 and 9, round or square, and density (`Shift+[` and `Shift+]`, in steps
+of 10 %) for forests and objects. Buildings, armies and objects pick their kind in the same row.
 
-The **Minimap** tab shows the whole map with the view frame; a click or a drag moves the view.
+**Palette** (the Palette tab): the terrain kinds with their names, and the objects: hills,
+forests, mountains. With the game installed, the objects are drawn with its sprites; without it,
+with an icon and a name. The search finds by name. **X** swaps the last two picks.
 
-Overlays: **Passable** (the walk grid: hard, impassable, building, water), **Patrols** (the army
-routes of the story) and **Fog** (what the hero and the lit lanterns see at the start), besides
-**Grid**, **Footprints** and **Reach**.
+**Layers** (the Layers tab): Terrain, Objects, Buildings, Armies and Points. The eye shows or
+hides a layer, the lock locks it. Alt+click on an eye leaves only that layer shown. A hidden or
+locked layer is not picked and not changed. The overlays (passability, grid, patrols, fog,
+building footprints, reach) sit below the layers and only show data.
+
+**Brush:** a stroke paints every cell along its path, so a fast drag leaves no gaps. Shift+click
+draws a straight line from the last point. One stroke is one undo step. The cells the brush will
+cover are shown under the pointer. An army, a building or a point shows a ghost until you click;
+Esc or a right click cancels the placement.
+
+**View:** Space with a drag, the middle button or the hand move the map; Ctrl+wheel zooms;
+Ctrl+= and Ctrl+− zoom in and out, Ctrl+0 fits the map, Ctrl+1 gives 100 %. Tab hides the side
+panels so the map takes the full width.
+
+**Status bar:** the cell under the pointer, its terrain, the object on it and the tool's hint.
+
+The **Move** mode: the first click takes an object (an army, a building, a point, an object), the
+second puts it down. **Burn everything** (after a question) turns live trees dead and burns the
+ground above water; it is one step and is undone in one step.
+
+The **Minimap** shows the whole map with a frame for the view: a click or a drag moves the view.
+
+Copying areas and saving stamps are not on the tool strip yet: they come back with selections.
 
 ## Editing, undo and saving
 

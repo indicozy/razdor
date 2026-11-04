@@ -202,6 +202,11 @@ fn arg_row(ui: &mut Ui, salt: &str, a: &ArgSpec, row: &mut Row, section: Section
     Ok(())
 }
 
+/// The width of a value's text field: what the Inspector's row leaves (at least 120 points).
+fn field_w(ui: &Ui) -> f32 {
+    ui.available_width().max(120.0)
+}
+
 /// The widget of one type of value. `Ok(Some)` is the new value when the user changed it.
 #[allow(clippy::too_many_arguments)]
 fn value_widget(ui: &mut Ui, salt: &str, arg: Arg, key: &str, cur: Option<&Value>, row: &Row, section: Section, cx: &Cx) -> Result<Option<Value>, String> {
@@ -209,7 +214,7 @@ fn value_widget(ui: &mut Ui, salt: &str, arg: Arg, key: &str, cur: Option<&Value
     let text = cur.and_then(Value::as_str).unwrap_or("").to_string();
     let pick = |ui: &mut Ui, options: Vec<String>| -> Option<Value> {
         if options.is_empty() {
-            return forms::text_field(ui, salt, &text, 150.0).map(Value::from);
+            return forms::text_field(ui, salt, &text, field_w(ui)).map(Value::from);
         }
         let refs: Vec<&str> = options.iter().map(String::as_str).collect();
         forms::choice(ui, salt, &text, &refs).map(Value::from)
@@ -247,14 +252,14 @@ fn value_widget(ui: &mut Ui, salt: &str, arg: Arg, key: &str, cur: Option<&Value
         }
         Arg::Place => {
             let typed = join_ints(&ints(cur));
-            match forms::text_field(ui, salt, &typed, 150.0) {
+            match forms::text_field(ui, salt, &typed, field_w(ui)) {
                 Some(s) => Some(parse_ints(&s, &[2, 4]).map(|v| st::cell_value(&v))?),
                 None => None,
             }
         }
         Arg::Cells => {
             let typed = cells_text(cur);
-            match forms::text_field(ui, salt, &typed, 180.0) {
+            match forms::text_field(ui, salt, &typed, field_w(ui)) {
                 Some(s) => Some(parse_cells(&s)?),
                 None => None,
             }

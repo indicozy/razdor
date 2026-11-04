@@ -987,3 +987,32 @@ fn the_unit_and_item_forms_edit_rename_and_price_on_a_copy_of_pepelnaya_marka() 
         assert_eq!(&fs::read_to_string(copy.0.join(path)).unwrap(), text, "{path} on disk is the original");
     }
 }
+
+/// A Map brush stroke (several samples of a drag, the Shift line) is one undo step, and undo restores the
+/// exact terrain it changed; the gap-free path paints every column between its samples.
+#[test]
+fn one_brush_stroke_is_one_undo_step_and_undo_restores_the_terrain() {
+    use crate::studio::brush::{stroke, Shape};
+    let copy = Copy::of("hello-story");
+    let mut ws = Workspace::open(&copy.0).unwrap();
+    let map = "first-light";
+    let i = ws.open_terrain(map).unwrap();
+    let before = ws.terrains[i].terrain.cells.clone();
+    let w = 50u32;
+    // Two samples of a fast drag, 20 cells apart, painted as one stroke.
+    let first = stroke((2, 2), (22, 2), 3, Shape::Round);
+    let second = stroke((22, 2), (40, 6), 3, Shape::Square);
+    ws.paint(map, &first, 3).unwrap();
+    ws.paint(map, &second, 3).unwrap();
+    ws.paint_end();
+    let after = ws.terrains[i].terrain.cells.clone();
+    assert_ne!(before, after, "the stroke changed the terrain");
+    for x in 2..=22u32 {
+        assert_eq!(after[(2 * w + x) as usize], 3, "column {x} of the drag is painted: no gap");
+    }
+    assert!(ws.undo().unwrap().is_some(), "one undo step is there");
+    assert_eq!(ws.terrains[i].terrain.cells, before, "undo restores the exact codes");
+    assert_eq!(ws.undo().unwrap(), None, "the whole stroke was one step: nothing else to undo");
+    ws.redo().unwrap();
+    assert_eq!(ws.terrains[i].terrain.cells, after, "redo brings the stroke back");
+}

@@ -35,6 +35,7 @@ pub mod claude;
 pub mod doc;
 pub mod edit;
 pub mod history;
+pub mod layers;
 pub mod map;
 pub mod mcp;
 pub mod paint;

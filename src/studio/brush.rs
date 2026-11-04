@@ -121,6 +121,93 @@ pub fn square(x: i64, y: i64, size: u32) -> Vec<(i64, i64)> {
     r.cells().map(|(x, y)| (i64::from(x), i64::from(y))).collect()
 }
 
+/// The shape of a brush: a square of cells, or a round one (the cells whose centre is within half the
+/// size of the brush's centre, less a quarter cell so that a 3-cell round brush is a plus).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Shape {
+    #[default]
+    Square,
+    Round,
+}
+
+/// The cells a brush of `size` and `shape` covers when placed at `(x, y)` (the same centre rule as
+/// [`square`]). A round brush is a subset of the square one.
+pub fn footprint(x: i64, y: i64, size: u32, shape: Shape) -> Vec<(i64, i64)> {
+    let square = square(x, y, size);
+    if shape == Shape::Square || size <= 1 {
+        return square;
+    }
+    let r = CellRect::brush(x as i32, y as i32, size);
+    // The brush's centre, in cell units (the middle of its square).
+    let cx = f64::from(r.x0 + r.x1 + 1) / 2.0;
+    let cy = f64::from(r.y0 + r.y1 + 1) / 2.0;
+    let radius = f64::from(size) / 2.0 - 0.25;
+    square
+        .into_iter()
+        .filter(|&(gx, gy)| {
+            let (dx, dy) = (gx as f64 + 0.5 - cx, gy as f64 + 0.5 - cy);
+            dx * dx + dy * dy <= radius * radius
+        })
+        .collect()
+}
+
+/// The cells of the straight line from `a` to `b`, both ends included (Bresenham's line, row by
+/// row from `a`). A single cell when `a == b`.
+pub fn line_cells(a: (i64, i64), b: (i64, i64)) -> Vec<(i64, i64)> {
+    let (dx, dy) = ((b.0 - a.0).abs(), -(b.1 - a.1).abs());
+    let (sx, sy) = (if a.0 < b.0 { 1 } else { -1 }, if a.1 < b.1 { 1 } else { -1 });
+    let (mut x, mut y) = a;
+    let mut err = dx + dy;
+    let mut out = vec![(x, y)];
+    while (x, y) != b {
+        let e2 = 2 * err;
+        if e2 >= dy {
+            err += dy;
+            x += sx;
+        }
+        if e2 <= dx {
+            err += dx;
+            y += sy;
+        }
+        out.push((x, y));
+    }
+    out
+}
+
+/// The cells a brush stroke covers from `from` to `to` (the brush centres of two samples): the brush
+/// at every cell of the line between them, so a fast drag never leaves a gap. Each cell once, in the
+/// order the line walks.
+pub fn stroke(from: (i64, i64), to: (i64, i64), size: u32, shape: Shape) -> Vec<(i64, i64)> {
+    let mut seen = BTreeSet::new();
+    let mut out = Vec::new();
+    for c in line_cells(from, to) {
+        for cell in footprint(c.0, c.1, size, shape) {
+            if seen.insert(cell) {
+                out.push(cell);
+            }
+        }
+    }
+    out
+}
+
+/// The cells a density keeps: each cell is kept when a hash of the stroke's `seed` and the cell falls
+/// under `percent` (0 keeps none, 100 all). The same seed and cells always keep the same ones, so a
+/// stroke is reproducible; a new seed gives another scatter.
+pub fn scatter(cells: &[(i64, i64)], percent: u32, seed: u64) -> Vec<(i64, i64)> {
+    let percent = u64::from(percent.min(100));
+    cells
+        .iter()
+        .copied()
+        .filter(|&(x, y)| {
+            let mut h = seed ^ (x as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (y as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
+            h ^= h >> 31;
+            h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            h ^= h >> 29;
+            h % 100 < percent
+        })
+        .collect()
+}
+
 /// The centre a hill of `size` placed with the hovered cell `(x, y)` gets: the square's
 /// bottom-right cell (DT §6.1: an even size reaches one cell further right and down).
 pub fn hill_centre(x: i64, y: i64, size: u32) -> (i64, i64) {
@@ -493,5 +580,71 @@ mod tests {
         assert_eq!(cell_of_fragment(&out), Some((7, 9)));
         let b = retarget("[[building]]\nid = \"a\"\ncell = [3, 3]\n", (1, 2), None).unwrap();
         assert!(b.contains("id = \"a\"") && b.contains("cell = [1, 2]"));
+    }
+}
+
+#[cfg(test)]
+mod shape_tests {
+    use super::*;
+
+    #[test]
+    fn a_round_brush_is_the_square_without_its_corners() {
+        for size in [3u32, 4, 5, 6, 9, 15] {
+            let square = footprint(20, 20, size, Shape::Square);
+            let round = footprint(20, 20, size, Shape::Round);
+            assert!(round.len() < square.len(), "size {size}: fewer cells");
+            assert!(round.iter().all(|c| square.contains(c)), "size {size}: a subset of the square");
+            assert!(round.contains(&(20, 20)), "size {size}: the centre is kept");
+        }
+        assert_eq!(footprint(20, 20, 3, Shape::Round).len(), 5, "a 3-cell round brush is a plus");
+        assert_eq!(footprint(20, 20, 1, Shape::Round), vec![(20, 20)]);
+        assert_eq!(footprint(20, 20, 2, Shape::Round).len(), 4, "a 2-cell brush is square");
+        assert_eq!(footprint(20, 20, 3, Shape::Square).len(), 9);
+    }
+
+    #[test]
+    fn a_straight_line_has_exactly_its_cells() {
+        assert_eq!(line_cells((3, 4), (3, 4)), vec![(3, 4)]);
+        assert_eq!(line_cells((0, 0), (4, 0)), vec![(0, 0), (1, 0), (2, 0), (3, 0), (4, 0)]);
+        assert_eq!(line_cells((2, 5), (2, 1)), vec![(2, 5), (2, 4), (2, 3), (2, 2), (2, 1)]);
+        assert_eq!(line_cells((0, 0), (3, 3)), vec![(0, 0), (1, 1), (2, 2), (3, 3)]);
+        // Backwards and steep: the line still joins its ends with one cell per step.
+        let back = line_cells((6, 1), (1, 4));
+        assert_eq!(back.first(), Some(&(6, 1)));
+        assert_eq!(back.last(), Some(&(1, 4)));
+        assert_eq!(back.len(), 6, "one cell for each column between the ends");
+    }
+
+    #[test]
+    fn a_fast_drag_leaves_no_gap_between_its_samples() {
+        // Two samples 20 cells apart: every column in between is painted, for every brush size.
+        for size in [1u32, 2, 3, 5] {
+            for shape in [Shape::Square, Shape::Round] {
+                let cells = stroke((0, 0), (20, 0), size, shape);
+                for x in 0..=20 {
+                    assert!(cells.contains(&(x, 0)), "size {size} {shape:?}: column {x} is painted");
+                }
+            }
+        }
+        // Each cell once.
+        let cells = stroke((0, 0), (5, 5), 3, Shape::Square);
+        let mut sorted = cells.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), cells.len());
+    }
+
+    #[test]
+    fn a_scatter_is_deterministic_for_a_seed_and_follows_its_density() {
+        let cells: Vec<(i64, i64)> = (0..40).flat_map(|y| (0..40).map(move |x| (x, y))).collect();
+        assert_eq!(scatter(&cells, 0, 7), Vec::new());
+        assert_eq!(scatter(&cells, 100, 7), cells);
+        let a = scatter(&cells, 50, 7);
+        assert_eq!(a, scatter(&cells, 50, 7), "the same seed keeps the same cells");
+        assert_ne!(a, scatter(&cells, 50, 8), "another seed gives another scatter");
+        let share = a.len() as f64 / cells.len() as f64;
+        assert!((0.4..0.6).contains(&share), "about half kept at 50 %: {share}");
+        let thin = scatter(&cells, 10, 7).len() as f64 / cells.len() as f64;
+        assert!((0.05..0.15).contains(&thin), "about a tenth kept at 10 %: {thin}");
     }
 }

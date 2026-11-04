@@ -156,17 +156,19 @@ fn rows_field(
     (a_label, a_range): (&str, (i64, i64)),
     (b_label, b_range): (&str, (i64, i64)),
 ) -> Option<Vec<(String, i64, i64)>> {
-    const UNIT_W: f32 = 150.0;
     // A number field is 56 wide with its frame: the caption column is as wide as the field.
     const NUM_W: f32 = 64.0;
     const INDEX_W: f32 = 24.0;
+    // The unit takes what the row leaves: grip, index, two numbers and their gaps are fixed (the row fits the
+    // Inspector's column at any width, where a fixed unit width overflowed it).
+    let unit_w = (ui.available_width() - (kit::GRIP_W + INDEX_W + NUM_W * 2.0 + 6.0 * 5.0)).clamp(90.0, 260.0);
     let sel = kit::selected(ui, salt, rows.len());
     if !rows.is_empty() {
         // The captions sit in a frame of the rows' size and spacing, so each one is over its column.
         egui::Frame::NONE.stroke(egui::Stroke::new(1.0, egui::Color32::TRANSPARENT)).inner_margin(egui::Margin::symmetric(4, 3)).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.add_space(kit::GRIP_W + INDEX_W + 6.0);
-                kit::caption(ui, UNIT_W, tr("Unit"));
+                kit::caption(ui, unit_w, tr("Unit"));
                 kit::caption(ui, NUM_W, a_label);
                 kit::caption(ui, NUM_W, b_label);
             });
@@ -183,7 +185,7 @@ fn rows_field(
                 picked = Some(i);
             }
             let mut next = (unit.clone(), *a, *b);
-            if let Some(v) = choice_w(ui, &format!("{salt}-unit-{i}"), unit, &unit_refs, Some(UNIT_W)) {
+            if let Some(v) = choice_w(ui, &format!("{salt}-unit-{i}"), unit, &unit_refs, Some(unit_w)) {
                 next.0 = v;
             }
             if let Some(v) = int_field(ui, &format!("{salt}-a-{i}"), *a, a_range.0, a_range.1) {

@@ -115,6 +115,10 @@ pub enum Tab {
     Minimap,
     /// The package's saved regions (`map_tab::Viewer::stamps_dock`).
     Stamps,
+    /// The Map palette: terrain swatches and object thumbnails (`map_tab::Viewer::palette_dock`).
+    Palette,
+    /// The Map layers: eyes, locks and the overlay switches (`map_tab::Viewer::layers_dock`).
+    Layers,
     /// The campaign graph (the Campaign main screen).
     Campaign,
     /// The texts table: key by language (the Texts main screen).
@@ -149,6 +153,8 @@ impl Tab {
             Tab::Claude => "claude",
             Tab::Minimap => "minimap",
             Tab::Stamps => "stamps",
+            Tab::Palette => "palette",
+            Tab::Layers => "layers",
             Tab::Campaign => "campaign",
             Tab::Texts => "texts",
             Tab::Characters => "characters",
@@ -173,6 +179,8 @@ impl Tab {
             Tab::Claude => "Claude",
             Tab::Minimap => tr("Minimap"),
             Tab::Stamps => tr("Stamps"),
+            Tab::Palette => tr("Palette"),
+            Tab::Layers => tr("Layers"),
             Tab::Campaign => tr("Campaign"),
             Tab::Texts => tr("Texts"),
             Tab::Characters => tr("Characters"),
@@ -303,6 +311,11 @@ pub struct StudioScreen {
     snap_find: Option<String>,
     /// The `battlewatch` snapshot: the tester's first battle opens in the battle view.
     snap_watch: bool,
+    /// Tab hides the side panels (the tool strip, the docks but the Map tab): the canvas takes the width.
+    side_hidden: bool,
+    /// The snapshot's `ws=` workspace, kept for every frame of the snapshot (a jump to the Script would
+    /// otherwise move the shown workspace to the Данные one).
+    snap_ws: Option<WsKind>,
 }
 
 impl StudioScreen {
@@ -388,6 +401,8 @@ impl StudioScreen {
             snap_keys: false,
             snap_find: None,
             snap_watch: false,
+            side_hidden: false,
+            snap_ws: None,
         })
     }
 
@@ -578,13 +593,32 @@ impl StudioScreen {
                 "map" => {
                     self.pending_tab = Some(Tab::Map);
                 }
+                // The Слои tab shows one layer hidden (buildings) and one locked (armies) on the shown map.
+                "layers" => {
+                    let map = self.maps.map.clone().unwrap_or_default();
+                    let set = self.canvas.layer_sets.entry(map).or_default();
+                    set.toggle_visible("buildings");
+                    set.toggle_locked("armies");
+                    self.pending_tab = Some(Tab::Layers);
+                }
+                "palette" => {
+                    self.pending_tab = Some(Tab::Palette);
+                }
+                "round" => self.canvas.shape = razdor::studio::brush::Shape::Round,
+                "army-tool" => self.set_tool(Tool::Army),
                 other => {
                     if let Some(key) = other.strip_prefix("ws=") {
                         // The workspace shown is its default view: the file the snapshot opened (the Script) does not take it.
-                        self.ws_kind = [WsKind::Map, WsKind::Story, WsKind::Data, WsKind::Test]
-                            .into_iter()
-                            .find(|k| k.key() == key)
-                            .ok_or_else(|| format!("no workspace {key:?}: map, story, data or test"))?;
+                        // The option names are the workspaces' short names (the layout key of Карта has a version).
+                        let kind = match key {
+                            "map" => WsKind::Map,
+                            "story" => WsKind::Story,
+                            "data" => WsKind::Data,
+                            "test" => WsKind::Test,
+                            _ => return Err(format!("no workspace {key:?}: map, story, data or test")),
+                        };
+                        self.ws_kind = kind;
+                        self.snap_ws = Some(kind);
                         self.pending_tab = None;
                     } else if let Some(pct) = other.strip_prefix("scale=") {
                         let pct: u32 = pct.parse().map_err(|_| format!("scale {pct:?} is not a number"))?;
@@ -593,6 +627,13 @@ impl StudioScreen {
                         self.canvas.tool = Tool::named(name).ok_or_else(|| format!("no tool {name:?}"))?;
                     } else if let Some(id) = other.strip_prefix("building=") {
                         self.selection = Some(Selection::Building(id.to_string()));
+                    } else if let Some(c) = other.strip_prefix("hover=") {
+                        let v: Vec<i32> = c.split(',').map(|n| n.parse().map_err(|_| format!("hover {c:?}: x,y"))).collect::<Result<_, _>>()?;
+                        let [x, y] = v[..] else { return Err(format!("hover {c:?}: x,y")) };
+                        self.canvas.snap_hover = Some((x, y));
+                    } else if let Some(d) = other.strip_prefix("density=") {
+                        let d: u32 = d.parse().map_err(|_| format!("density {d:?} is not a number"))?;
+                        self.canvas.density = d.min(100);
                     } else if let Some(n) = other.strip_prefix("brush=") {
                         let n: u32 = n.parse().map_err(|_| format!("brush {n:?} is not a number"))?;
                         if !razdor::studio::brush::BRUSH_SIZES.contains(&n) {
@@ -704,6 +745,8 @@ impl StudioScreen {
         self.canvas.shown = false;
         self.canvas.mini = None;
         self.canvas.rect = None;
+        // The palette's object thumbnails are read from the install's sprites before egui draws the frame.
+        self.canvas.prepare_thumbs(art);
         // egui may run the frame's UI twice (a relayout pass): a pass's request is kept, a pass
         // without one does not clear it.
         egui_macroquad::ui(|ctx| {
@@ -1062,6 +1105,21 @@ impl StudioScreen {
         let style = Style::from_egui(ctx.style().as_ref());
         let idx = self.ws_kind.index();
         let key = self.ws_kind.key();
+        // The Map workspace's tool strip, a column of its own at the left edge (spec §5.1), unless Tab hid it.
+        let on_map = self.ws_kind == WsKind::Map;
+        let show_side = on_map && !self.side_hidden;
+        let mut strip_cmd: Option<&'static str> = None;
+        if show_side {
+            let active = self.canvas.tool;
+            let keys = &prefs.keys;
+            egui::SidePanel::left("studio_tools")
+                .exact_width(theme::TOOL_W)
+                .resizable(false)
+                .frame(chrome_frame(5, 6))
+                .show(ctx, |ui| {
+                    strip_cmd = map_tab::tool_strip(ui, active, &|id| commands::command(id).map(|c| commands::tip(c, keys)).unwrap_or_default());
+                });
+        }
         let mut viewer = Viewer {
             ws: &mut self.ws,
             pkg: pkg.clone(),
@@ -1094,13 +1152,19 @@ impl StudioScreen {
             .show(ctx, |ui| drawer_panel(ui, &mut viewer, &mut drawer_open, &mut drawer, problems.len()));
         self.drawer_open = drawer_open;
         self.drawer = drawer;
-        DockArea::new(&mut self.docks[idx])
-            .id(Id::new(("studio-workspace", key)))
+        // With the side panels hidden, the Map tab alone fills the window (the layout is kept for later).
+        let mut solo = DockState::new(vec![Tab::Map]);
+        let (dock, dock_id) = if on_map && self.side_hidden { (&mut solo, "studio-workspace-solo") } else { (&mut self.docks[idx], "studio-workspace") };
+        DockArea::new(dock)
+            .id(Id::new((dock_id, key)))
             .style(style)
             .show_close_buttons(false)
             .show_leaf_close_all_buttons(false)
             .show(ctx, &mut viewer);
         let (open, focus_map, changed) = (viewer.open.take(), viewer.focus_map, viewer.changed);
+        if let Some(id) = strip_cmd {
+            self.run_command(id, prefs);
+        }
         if changed {
             self.touch();
         }
@@ -1117,6 +1181,9 @@ impl StudioScreen {
         }
         if let Some(tab) = self.pending_tab.take().or_else(|| self.scen.want_tab.take()) {
             self.show_tab(tab);
+        }
+        if let Some(kind) = self.snap_ws {
+            self.ws_kind = kind;
         }
         self.save_layout(prefs);
         let scale = self.scale(prefs);
@@ -1233,6 +1300,14 @@ impl StudioScreen {
                         ui.label(RichText::new(format!("{}: {x}, {y}", tr("Cell"))).text_style(egui::TextStyle::Small));
                         ui.label(RichText::new("·").color(theme::FAINT));
                     }
+                    // The terrain under the pointer and the top object on its cell (spec §5.9).
+                    if let Some((terrain, object)) = &self.canvas.hover_info {
+                        ui.label(RichText::new(terrain.as_str()).text_style(egui::TextStyle::Small));
+                        if let Some(object) = object {
+                            ui.label(RichText::new(format!("· {object}")).text_style(egui::TextStyle::Small).color(theme::DIM));
+                        }
+                        ui.label(RichText::new("·").color(theme::FAINT));
+                    }
                     ui.label(RichText::new(tr(tool_hint(self.canvas.tool))).text_style(egui::TextStyle::Small).color(theme::DIM));
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -1296,11 +1371,54 @@ impl StudioScreen {
             "cancel" => {
                 self.canvas.paste = false;
                 self.canvas.region = None;
+                // Esc leaves a placement too: the tool goes back to Select.
+                if self.canvas.tool.places() {
+                    self.canvas.tool = Tool::Select;
+                }
             }
             "settings" => self.settings.open = true,
             "delete" => self.delete_selection(),
             "reset-layout" => self.reset_layout(prefs),
             "exit" => return Some(self.leave()),
+            "side-panels" => self.side_hidden = !self.side_hidden,
+            "swap-picks" => {
+                let (now, before) = (self.canvas.pick, self.canvas.pick_prev);
+                self.canvas.pick_prev = now;
+                self.canvas.pick = before;
+                before.apply(&mut self.canvas);
+            }
+            "brush-smaller" => self.canvas.brush = self.canvas.brush.saturating_sub(1).max(1),
+            "brush-larger" => self.canvas.brush = (self.canvas.brush + 1).min(15),
+            "density-less" => self.canvas.density = self.canvas.density.saturating_sub(10),
+            "density-more" => self.canvas.density = (self.canvas.density + 10).min(100),
+            "size-1" => self.canvas.brush = 1,
+            "size-2" => self.canvas.brush = 2,
+            "size-3" => self.canvas.brush = 3,
+            "size-4" => self.canvas.brush = 4,
+            "size-5" => self.canvas.brush = 5,
+            "size-6" => self.canvas.brush = 6,
+            "size-9" => self.canvas.brush = 9,
+            "zoom-in" => self.canvas.zoom_by(1.25),
+            "zoom-out" => self.canvas.zoom_by(0.8),
+            "zoom-100" => {
+                let zoom = self.canvas.zoom();
+                self.canvas.zoom_by(1.0 / zoom);
+            }
+            "zoom-fit" => self.canvas.fit = true,
+            "tool-select" => self.set_tool(Tool::Select),
+            // B takes the palette's last choice: a terrain kind, the hills, a forest or an object.
+            "tool-brush" => {
+                let pick = self.canvas.pick;
+                pick.apply(&mut self.canvas);
+            }
+            "tool-eraser" => self.set_tool(Tool::Eraser),
+            "tool-fill" => self.set_tool(Tool::Fill),
+            "tool-eyedrop" => self.set_tool(Tool::Eyedrop),
+            "tool-stamp" => self.set_tool(Tool::Stamp),
+            "tool-army" => self.set_tool(Tool::Army),
+            "tool-building" => self.set_tool(Tool::Building),
+            "tool-point" => self.set_tool(Tool::Point),
+            "tool-hand" => self.set_tool(Tool::Hand),
             other => {
                 if let Some(kind) = WsKind::of_command(other) {
                     self.ws_kind = kind;
@@ -1308,6 +1426,22 @@ impl StudioScreen {
             }
         }
         None
+    }
+
+    /// Makes a Map tool the current one (the tool strip and its shortcut). The stamp tool needs an armed
+    /// stamp: the Stamps tab arms one.
+    fn set_tool(&mut self, tool: Tool) {
+        self.canvas.tool = tool;
+        self.canvas.paste = false;
+        self.canvas.moving = None;
+        self.canvas.paint_last = None;
+        if tool == Tool::Stamp {
+            if self.canvas.clip.is_some() {
+                self.canvas.paste = true;
+            } else {
+                self.log.push(tr("Pick a stamp in the Stamps tab first").to_string());
+            }
+        }
     }
 
     /// Delete: removes the selected object (the Inspector's delete).
@@ -1595,6 +1729,10 @@ fn tool_hint(tool: Tool) -> &'static str {
         Tool::Rect => n_("Drag takes a rectangle to copy"),
         Tool::Fill => n_("Click fills an area"),
         Tool::Region => n_("Drag takes a rectangle"),
+        Tool::Eraser => n_("Drag erases plants, then hills"),
+        Tool::Eyedrop => n_("Click takes the cell's terrain"),
+        Tool::Stamp => n_("Click places the armed stamp"),
+        Tool::Hand => n_("Drag pans the view"),
     }
 }
 
@@ -1719,6 +1857,8 @@ impl TabViewer for Viewer<'_> {
             Tab::Claude => self.claude.show(ui, &self.ws.root),
             Tab::Minimap => self.minimap(ui),
             Tab::Stamps => self.stamps_dock(ui),
+            Tab::Palette => self.palette_dock(ui),
+            Tab::Layers => self.layers_dock(ui),
             Tab::Campaign => self.campaign_screen(ui),
             Tab::Texts => self.texts_screen(ui),
             Tab::Characters => self.characters_dock(ui),

@@ -71,7 +71,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("ws-data", n_("Data workspace"), ic::TABLE, "Alt+3"),
     cmd("ws-test", n_("Test workspace"), ic::FLASK, "Alt+4"),
     cmd("drawer", n_("Bottom panel"), ic::CARET_UP, "Ctrl+J"),
-    Command { later: n_("Comes in UX3"), ..cmd("side-panels", n_("Hide side panels"), ic::SIDEBAR_SIMPLE, "Tab") },
+    cmd("side-panels", n_("Hide side panels"), ic::SIDEBAR_SIMPLE, "Tab"),
     Command { scope: Scope::Inspector, ..cmd("find", n_("Find a field"), ic::MAGNIFYING_GLASS, "Ctrl+F") },
     Command { later: n_("Comes in UX5"), ..cmd("open-in-file", n_("Open in file"), ic::ARROW_SQUARE_OUT, "Ctrl+Shift+O") },
     cmd("cancel", n_("Cancel"), ic::X, "Esc"),
@@ -79,6 +79,37 @@ pub const COMMANDS: &[Command] = &[
     Command { scope: Scope::Map, fixed: true, ..cmd("copy", n_("Copy region"), ic::COPY, "Ctrl+C") },
     Command { scope: Scope::Map, fixed: true, later: n_("Comes in UX4"), ..cmd("cut", n_("Cut"), ic::SCISSORS, "Ctrl+X") },
     Command { scope: Scope::Map, fixed: true, ..cmd("paste", n_("Paste"), ic::CLIPBOARD, "Ctrl+V") },
+    // The Map tools (spec §9.3): the tool strip's buttons run these too. M, L, W and R wait for their milestones.
+    Command { scope: Scope::Map, ..cmd("tool-select", n_("Select and move"), ic::CURSOR, "V") },
+    Command { scope: Scope::Map, ..cmd("tool-brush", n_("Brush"), ic::PAINT_BRUSH, "B") },
+    Command { scope: Scope::Map, ..cmd("tool-eraser", n_("Eraser"), ic::ERASER, "E") },
+    Command { scope: Scope::Map, ..cmd("tool-fill", n_("Fill"), ic::PAINT_BUCKET, "G") },
+    Command { scope: Scope::Map, ..cmd("tool-eyedrop", n_("Eyedropper"), ic::EYEDROPPER, "I") },
+    Command { scope: Scope::Map, later: n_("Comes in UX4"), ..cmd("tool-marquee", n_("Marquee"), ic::SELECTION, "M") },
+    Command { scope: Scope::Map, later: n_("Comes in UX4"), ..cmd("tool-lasso", n_("Lasso"), ic::LASSO, "L") },
+    Command { scope: Scope::Map, later: n_("Comes in UX4"), ..cmd("tool-wand", n_("Magic wand"), ic::MAGIC_WAND, "W") },
+    Command { scope: Scope::Map, ..cmd("tool-stamp", n_("Stamp"), ic::STAMP, "S") },
+    Command { scope: Scope::Map, ..cmd("tool-army", n_("Army"), ic::SWORD, "A") },
+    Command { scope: Scope::Map, ..cmd("tool-building", n_("Building"), ic::BUILDINGS, "U") },
+    Command { scope: Scope::Map, ..cmd("tool-point", n_("Point"), ic::MAP_PIN, "P") },
+    Command { scope: Scope::Map, later: n_("not in the package format yet"), ..cmd("tool-trigger", n_("Trigger zone"), ic::POLYGON, "R") },
+    Command { scope: Scope::Map, ..cmd("tool-hand", n_("Hand"), ic::HAND, "H") },
+    Command { scope: Scope::Map, ..cmd("brush-smaller", n_("Brush smaller"), ic::MINUS, "[") },
+    Command { scope: Scope::Map, ..cmd("brush-larger", n_("Brush larger"), ic::PLUS, "]") },
+    Command { scope: Scope::Map, ..cmd("density-less", n_("Density less"), ic::MINUS, "Shift+[") },
+    Command { scope: Scope::Map, ..cmd("density-more", n_("Density more"), ic::PLUS, "Shift+]") },
+    Command { scope: Scope::Map, ..cmd("size-1", n_("Brush size 1"), ic::CIRCLE, "1") },
+    Command { scope: Scope::Map, ..cmd("size-2", n_("Brush size 2"), ic::CIRCLE, "2") },
+    Command { scope: Scope::Map, ..cmd("size-3", n_("Brush size 3"), ic::CIRCLE, "3") },
+    Command { scope: Scope::Map, ..cmd("size-4", n_("Brush size 4"), ic::CIRCLE, "4") },
+    Command { scope: Scope::Map, ..cmd("size-5", n_("Brush size 5"), ic::CIRCLE, "5") },
+    Command { scope: Scope::Map, ..cmd("size-6", n_("Brush size 6"), ic::CIRCLE, "6") },
+    Command { scope: Scope::Map, ..cmd("size-9", n_("Brush size 9"), ic::CIRCLE, "9") },
+    Command { scope: Scope::Map, ..cmd("swap-picks", n_("Swap the last two picks"), ic::ARROWS_LEFT_RIGHT, "X") },
+    Command { scope: Scope::Map, ..cmd("zoom-in", n_("Zoom in"), ic::MAGNIFYING_GLASS_PLUS, "Ctrl+=") },
+    Command { scope: Scope::Map, ..cmd("zoom-out", n_("Zoom out"), ic::MAGNIFYING_GLASS_MINUS, "Ctrl+-") },
+    Command { scope: Scope::Map, ..cmd("zoom-fit", n_("Fit the map"), ic::FRAME_CORNERS, "Ctrl+0") },
+    Command { scope: Scope::Map, ..cmd("zoom-100", n_("Zoom 100 %"), ic::CROP, "Ctrl+1") },
     Command { also: "Backspace", ..cmd("delete", n_("Delete"), ic::TRASH, "Delete") },
     cmd("reset-layout", n_("Reset layout"), ic::ARROWS_CLOCKWISE, ""),
     cmd("exit", n_("Exit"), ic::SIGN_OUT, ""),
@@ -451,8 +482,9 @@ mod tests {
 
     #[test]
     fn a_typed_key_is_left_to_a_text_field_and_a_shortcut_is_taken() {
-        // Alt+1 is a shortcut; a plain 1 belongs to a focused field (no command has it by default).
-        let typed = Event::Key { key: Key::Num1, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE };
+        // Alt+1 is a shortcut; a plain 7 belongs to a focused field (no command has it by default; a plain 1 is
+        // the brush size of the Map tools).
+        let typed = Event::Key { key: Key::Num7, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE };
         let alt = Event::Key { key: Key::Num1, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers { alt: true, ..Default::default() } };
         let ctx = ctx_with(vec![alt.clone()], Modifiers { alt: true, ..Default::default() });
         assert_eq!(pressed(&ctx, &defaults(), |_| true, &[]), vec!["ws-map"]);
