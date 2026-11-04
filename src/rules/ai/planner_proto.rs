@@ -101,6 +101,9 @@ pub struct Cfg {
     pub landmarks: usize,
     /// Tally the static-vs-real target choice at every target plan.
     pub diag: bool,
+    /// The distance choice by the plain early-stop Dijkstra (`RAZDOR_PLANNER_CHOICE=dijkstra`)
+    /// instead of the multi-candidate A* ([`nearest_candidate_astar`], the default).
+    pub choice_dijkstra: bool,
 }
 
 /// The prototype's settings, read once from the environment.
@@ -140,7 +143,8 @@ fn from_env() -> Cfg {
     let shadow = env("RAZDOR_PLANNER_SHADOW").map(|s| s.split(',').filter_map(|m| parse_mode(m.trim(), r)).collect()).unwrap_or_default();
     let landmarks = env("RAZDOR_PLANNER_L").and_then(|s| s.parse().ok()).unwrap_or(16);
     let diag = env("RAZDOR_PLANNER_DIAG").is_some_and(|s| s != "0");
-    Cfg { mode, lod, lod_d, lod_k, shadow, landmarks, diag }
+    let choice_dijkstra = env("RAZDOR_PLANNER_CHOICE").is_some_and(|s| s == "dijkstra");
+    Cfg { mode, lod, lod_d, lod_k, shadow, landmarks, diag, choice_dijkstra }
 }
 
 /// Whether any mode in use (active or shadow) reads the landmark tables.
@@ -507,6 +511,71 @@ fn nearest_candidate(map: &TileMap, costs: &[u16], mult: Option<&[u16]>, erased:
     })
 }
 
+/// The same choice as [`nearest_candidate`] (the least value + distance, the same exact stop), by
+/// one A* over all the candidates at once: a cell's heuristic is the least, over the candidates,
+/// of value + a lower bound of the walk from the cell to it (the landmark bound with `lm`, else
+/// the octile one). Each bound is consistent, so the heuristic is too; a cell's f is then a lower
+/// bound of every total through it, and the search ends when the least f reaches the best total.
+fn nearest_candidate_astar(map: &TileMap, costs: &[u16], mult: Option<&[u16]>, erased: &[Tile], from: Tile, cands: &[(usize, u32)], lm: Option<&Landmarks>) -> Option<usize> {
+    let start = idx(map, from)?;
+    let n = costs.len();
+    let grid = map.grid;
+    let h = |x: usize| -> u32 {
+        let xt = tile_of(map, x);
+        let mut least = INF;
+        for &(c, v) in cands {
+            let mut lb = weight_bound(grid, xt, tile_of(map, c));
+            if let Some(lm) = lm {
+                lb = lb.max(alt_bound(lm, x, c));
+            }
+            least = least.min(v.saturating_add(lb));
+        }
+        least
+    };
+    SCRATCH.with(|s| {
+        let s = &mut *s.borrow_mut();
+        s.begin(n);
+        s.set(start, 0, INF);
+        let mut open = BinaryHeap::from([Reverse((h(start), 0u32, start as u32))]);
+        let mut best: Option<(u32, usize)> = None;
+        while let Some(Reverse((f, g, i))) = open.pop() {
+            let i = i as usize;
+            if g > s.get(i) {
+                continue;
+            }
+            if best.is_some_and(|(b, _)| f >= b) {
+                break;
+            }
+            if i != start {
+                if let Some(v) = cand_value(cands, i) {
+                    let total = v.saturating_add(g);
+                    if best.is_none_or(|(b, _)| total < b) {
+                        best = Some((total, i));
+                    }
+                }
+            }
+            let here = tile_of(map, i);
+            for nb in grid.neighbours(here) {
+                let Some(j) = idx(map, nb) else { continue };
+                if erased.contains(&nb) {
+                    continue;
+                }
+                let e = match entering(costs, mult, j) {
+                    0 if cand_value(cands, j).is_some() => 1,
+                    0 => continue,
+                    e => e,
+                };
+                let ng = g.saturating_add(e * grid.weight(here, nb));
+                if ng < s.get(j) {
+                    s.set(j, ng, i as u32);
+                    open.push(Reverse((ng.saturating_add(h(j)), ng, j as u32)));
+                }
+            }
+        }
+        best.map(|(_, j)| j)
+    })
+}
+
 /// A* from `from` to the first cell `goal` accepts, the step costs as [`entering`] (a closed
 /// cell is entered only when `closed_ok`, at cost 1), `h` a lower bound on the rest of the walk.
 /// Empty when none is reached.
@@ -577,8 +646,10 @@ fn choose(choice: Choice, map: &TileMap, costs: &[u16], mult: &[u16], seeds: &[(
             }
             best.map(|(_, j)| j)
         }
-        Choice::Static => nearest_candidate(map, costs, None, erased, here, &cands),
-        Choice::Mult => nearest_candidate(map, costs, Some(mult), erased, here, &cands),
+        Choice::Static if cfg().choice_dijkstra => nearest_candidate(map, costs, None, erased, here, &cands),
+        Choice::Static => nearest_candidate_astar(map, costs, None, erased, here, &cands, lm),
+        Choice::Mult if cfg().choice_dijkstra => nearest_candidate(map, costs, Some(mult), erased, here, &cands),
+        Choice::Mult => nearest_candidate_astar(map, costs, Some(mult), erased, here, &cands, None),
     }
 }
 
@@ -620,7 +691,8 @@ fn run(mode: Mode, map: &TileMap, costs: &[u16], mult: &[u16], seeds: &[(Tile, u
         Some(_) => (choice, heur),
         None => (if choice == Choice::Bound { Choice::Octile } else { choice }, if heur == Heur::Alt { Heur::Octile } else { heur }),
     };
-    let Some(target) = choose(choice, map, costs, mult, seeds, here, erased, lm) else { return (None, None) };
+    let lm_choice = if heur == Heur::Alt { lm } else { None };
+    let Some(target) = choose(choice, map, costs, mult, seeds, here, erased, lm_choice) else { return (None, None) };
     if erased.contains(&here) {
         return (Some(Vec::new()), Some(target));
     }
@@ -790,6 +862,76 @@ mod tests {
                 continue;
             }
             assert!(alt_bound(&lm, a, b) <= real, "bound above the real distance");
+        }
+    }
+
+    /// Full Dijkstra from `from` in the choice's metric (static, or with `mult`), erased cells
+    /// not entered, closed candidates entered at cost 1: the distance to every cell.
+    fn full_dist(map: &TileMap, costs: &[u16], mult: Option<&[u16]>, erased: &[Tile], from: Tile, cands: &[(usize, u32)]) -> Vec<u32> {
+        let n = costs.len();
+        let mut dist = vec![INF; n];
+        let start = idx(map, from).unwrap();
+        dist[start] = 0;
+        let mut heap = BinaryHeap::from([Reverse((0u32, start as u32))]);
+        while let Some(Reverse((d, i))) = heap.pop() {
+            let i = i as usize;
+            if d > dist[i] {
+                continue;
+            }
+            let here = tile_of(map, i);
+            for nb in map.grid.neighbours(here) {
+                let Some(j) = idx(map, nb) else { continue };
+                if erased.contains(&nb) {
+                    continue;
+                }
+                let e = match entering(costs, mult, j) {
+                    0 if cand_value(cands, j).is_some() => 1,
+                    0 => continue,
+                    e => e,
+                };
+                let nd = d + e * map.grid.weight(here, nb);
+                if nd < dist[j] {
+                    dist[j] = nd;
+                    heap.push(Reverse((nd, j as u32)));
+                }
+            }
+        }
+        dist
+    }
+
+    /// The multi-candidate A* picks a candidate with the same total as the early-stop Dijkstra,
+    /// on static and multiplier-aware costs, with and without the landmark bound.
+    #[test]
+    fn astar_choice_matches_dijkstra_choice() {
+        for seed in 0..6u32 {
+            let map = walled(100 + seed);
+            let costs = map.land_costs().to_vec();
+            let mut state = seed.wrapping_mul(7919) + 1;
+            let mut next = |m: u32| {
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                (state >> 8) % m
+            };
+            let mult: Vec<u16> = (0..costs.len()).map(|_| if next(15) == 0 { 0 } else { 1 + next(3) as u16 }).collect();
+            let lm = Landmarks::build(&map, &costs, 8);
+            for case in 0..4 {
+                let here = (next(60) as i32, next(40) as i32);
+                let seeds: Vec<(Tile, u32)> = (0..10).map(|_| ((next(60) as i32, next(40) as i32), next(400))).collect();
+                let erased = [(next(60) as i32, next(40) as i32)];
+                let cands = candidates(&map, &costs, &seeds, here, &erased);
+                if cands.is_empty() {
+                    continue;
+                }
+                for (m, lm_opt) in [(None, None), (None, Some(&lm)), (Some(&mult[..]), None)] {
+                    let dist = full_dist(&map, &costs, m, &erased, here, &cands);
+                    let total = |j: usize| cand_value(&cands, j).unwrap() as u64 + dist[j] as u64;
+                    let by_dijkstra = nearest_candidate(&map, &costs, m, &erased, here, &cands);
+                    let by_astar = nearest_candidate_astar(&map, &costs, m, &erased, here, &cands, lm_opt);
+                    assert_eq!(by_dijkstra.is_some(), by_astar.is_some(), "seed {seed} case {case}: reachability");
+                    if let (Some(a), Some(b)) = (by_dijkstra, by_astar) {
+                        assert_eq!(total(a), total(b), "seed {seed} case {case}: totals differ");
+                    }
+                }
+            }
         }
     }
 
