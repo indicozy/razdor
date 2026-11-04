@@ -1,8 +1,8 @@
-//! The Map tab's AI viewer («Просмотр ИИ»): the shown map's AI run for some days by the same sim
-//! as `razdor-pack sim` (`sim_map_observed`, on a worker thread, with Cancel), then the armies on
-//! the canvas at the day the slider shows, their trails over the last few days, and the story's
-//! moments that have fired by that day (a trigger's cell marked with its id). The log lists the
-//! moments by day; a click on a line moves the slider there.
+//! The Тест workspace's ИИ view («Просмотр ИИ», UX6): the shown map's AI run for some days by the same sim
+//! as `razdor-pack sim` (`sim_map_observed`, on a worker thread, with Cancel), then the armies on the map
+//! at the day the slider shows, their trails over the last few days, and the story's moments that have
+//! fired by that day (a trigger's cell marked with its id). The log under the map lists the moments by
+//! day; a click on a line moves the slider there and jumps to the moment's object (`studio::nav`).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, TryRecvError};
@@ -50,8 +50,6 @@ struct Job {
 
 /// The AI viewer's state: the mode, the day box and slider, the run and its recording.
 pub struct AiView {
-    /// The mode is on (the strip shows its controls, the canvas its layer).
-    pub on: bool,
     /// Days to run.
     pub days: u64,
     /// The day the slider shows.
@@ -77,7 +75,7 @@ pub enum Req {
 
 impl Default for AiView {
     fn default() -> AiView {
-        AiView { on: false, days: DEFAULT_DAYS, day: 0, job: None, progress: 0, result: None, recording: None, error: None, map: None }
+        AiView { days: DEFAULT_DAYS, day: 0, job: None, progress: 0, result: None, recording: None, error: None, map: None }
     }
 }
 
@@ -177,15 +175,11 @@ impl AiView {
         }
     }
 
-    /// The mode's controls (the strip above the map). `ready` is why the run cannot start, if it
-    /// cannot (no install, no map). Returns what the strip asked for.
-    pub fn strip(&mut self, ui: &mut Ui, ready: Result<(), &'static str>) -> Req {
+    /// The AI tab's controls: the days box, Run or Cancel (with the progress), the run's result and its error.
+    /// `ready` is why the run cannot start, if it cannot. Returns what the controls asked for.
+    pub fn controls(&mut self, ui: &mut Ui, ready: Result<(), &'static str>) -> Req {
         let mut req = Req::None;
         ui.horizontal(|ui| {
-            ui.checkbox(&mut self.on, tr("AI viewer"));
-            if !self.on {
-                return;
-            }
             ui.label(tr("Days"));
             ui.add(egui::DragValue::new(&mut self.days).range(1..=MAX_DAYS));
             if self.running() {
@@ -199,52 +193,56 @@ impl AiView {
             if let Err(why) = ready {
                 ui.weak(why);
             }
+            if let Some(result) = &self.result {
+                let mut line = trf!("{battles} AI battles", battles = result.ai_battles);
+                if let Some(day) = result.victory_day {
+                    line.push_str(" · ");
+                    line.push_str(&trf!("victory on day {day}", day = day.floor() as u64));
+                }
+                if let Some(day) = result.defeat_day {
+                    line.push_str(" · ");
+                    line.push_str(&trf!("defeat on day {day}", day = day.floor() as u64));
+                }
+                ui.weak(line);
+            }
         });
-        if !self.on {
-            return req;
-        }
         if let Some(error) = &self.error {
             ui.colored_label(egui::Color32::from_rgb(0xe0, 0x5a, 0x5a), error.lines().next().unwrap_or(""));
         }
-        if let Some(result) = &self.result {
-            let mut line = trf!("{battles} AI battles", battles = result.ai_battles);
-            if let Some(day) = result.victory_day {
-                line.push_str(" · ");
-                line.push_str(&trf!("victory on day {day}", day = day.floor() as u64));
-            }
-            if let Some(day) = result.defeat_day {
-                line.push_str(" · ");
-                line.push_str(&trf!("defeat on day {day}", day = day.floor() as u64));
-            }
-            ui.weak(line);
-        }
-        if self.recording.is_some() {
-            let last = self.last_day();
-            ui.add(egui::Slider::new(&mut self.day, 0..=last).text(tr("Day")));
-            if let Some(rec) = &self.recording {
-                let day = self.day;
-                egui::ScrollArea::vertical().id_salt("aiview-log").max_height(72.0).auto_shrink([false, true]).show(ui, |ui| {
-                    if rec.moments.is_empty() {
-                        ui.weak(tr("No story moments."));
-                    }
-                    for m in &rec.moments {
-                        if ui.selectable_label(m.day == day, format!("{}: {}", m.day, moment_text(&m.what))).clicked() {
-                            self.day = m.day;
-                        }
-                    }
-                });
-            }
-        }
         req
+    }
+
+    /// The day slider and the log of the story's moments, under the map. A click on a line moves the slider
+    /// to its day and returns the moment's index (the caller jumps to it). `None` when nothing was clicked or
+    /// there is no recording.
+    pub fn timeline(&mut self, ui: &mut Ui) -> Option<usize> {
+        self.recording.as_ref()?;
+        let last = self.last_day();
+        ui.add(egui::Slider::new(&mut self.day, 0..=last).text(tr("Day")));
+        let day = self.day;
+        let mut clicked = None;
+        if let Some(rec) = &self.recording {
+            egui::ScrollArea::vertical().id_salt("aiview-log").max_height(120.0).auto_shrink([false, true]).show(ui, |ui| {
+                if rec.moments.is_empty() {
+                    ui.weak(tr("No story moments."));
+                }
+                for (i, m) in rec.moments.iter().enumerate() {
+                    if ui.selectable_label(m.day == day, format!("{}: {}", m.day, moment_text(&m.what))).clicked() {
+                        clicked = Some(i);
+                    }
+                }
+            });
+        }
+        if let Some(i) = clicked {
+            self.day = self.recording.as_ref().map_or(0, |r| r.moments[i].day);
+        }
+        clicked
     }
 }
 
 /// The layer over the map at the slider's day: trails of the last days, the armies, and the
-/// moments fired by then with their cells marked.
+/// moments fired by then with their cells marked. The caller draws it only in the AI tab.
 pub fn draw(cam: &Cam, view: &AiView) {
-    if !view.on {
-        return;
-    }
     let (Some(rec), Some(frame)) = (view.recording.as_ref(), view.frame()) else { return };
     let at = |c: (i32, i32)| cam.to_screen(mq::vec2(c.0 as f32 + 0.5, c.1 as f32 + 0.5));
     // Trails: each army's cells over the last days, joined in day order.

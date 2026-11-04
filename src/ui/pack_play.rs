@@ -54,15 +54,23 @@ pub struct PackPlay {
 /// `RAZDOR_PACK` and `RAZDOR_PACK_MAP`.
 pub fn requested() -> Option<(PathBuf, Option<String>)> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if let Some(i) = args.iter().position(|a| a == "--pack") {
-        let path = PathBuf::from(args.get(i + 1)?);
-        let map = args.iter().position(|a| a == "--map").and_then(|j| args.get(j + 1).cloned());
-        return Some((path, map));
+    if let Some(found) = parse_args(&args) {
+        return Some(found);
     }
     let path = std::env::var_os("RAZDOR_PACK").filter(|p| !p.is_empty())?;
     let map = std::env::var("RAZDOR_PACK_MAP").ok().filter(|m| !m.is_empty());
     Some((PathBuf::from(path), map))
 }
+
+/// The `--pack <path> [--map <id>]` pair of the command line (`args` without the program's name). `None`
+/// when `--pack` is not there or has no path after it; `--map` is optional.
+pub fn parse_args(args: &[String]) -> Option<(PathBuf, Option<String>)> {
+    let i = args.iter().position(|a| a == "--pack")?;
+    let path = PathBuf::from(args.get(i + 1)?);
+    let map = args.iter().position(|a| a == "--map").and_then(|j| args.get(j + 1).cloned());
+    Some((path, map))
+}
+
 
 impl App {
     /// Opens `map` of the package at `path` (the first map when none is named) as a new game: the
@@ -308,5 +316,35 @@ pub(super) fn note_played(e: &ScenarioEntry) {
     let Some(hp) = &e.hub_pack else { return };
     if let Some(Err(err)) = hub_here().map(|hub| hub.mark_played(&hp.id, &hp.version)) {
         razdor::diag!("packages: {err}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn words(text: &str) -> Vec<String> {
+        text.split_whitespace().map(str::to_string).collect()
+    }
+
+    #[test]
+    fn the_pack_flag_names_the_folder_and_the_map() {
+        assert_eq!(parse_args(&words("--pack examples/packs/pepelnaya-marka --map marka")), Some((PathBuf::from("examples/packs/pepelnaya-marka"), Some("marka".to_string()))));
+        assert_eq!(parse_args(&words("--pack /x/pack")), Some((PathBuf::from("/x/pack"), None)), "the map is optional");
+        assert_eq!(parse_args(&words("--map marka")), None, "no --pack, no package");
+        assert_eq!(parse_args(&words("--pack")), None, "--pack needs its path");
+        assert_eq!(parse_args(&words("--studio x --pack p")), Some((PathBuf::from("p"), None)), "other flags do not hide it");
+    }
+
+    /// The child's launch (`studio::play`) opens the map through this path: the package is read and its
+    /// map compiled on the install. Needs the game's files (`RAZDOR_DT_DIR`); skipped without them.
+    #[test]
+    fn the_studio_launch_opens_the_example_map_headlessly() {
+        let Ok(install) = razdor::dt::install::DtInstall::from_env() else { return };
+        let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/packs/pepelnaya-marka");
+        let args: Vec<String> = ["--pack", &folder.display().to_string(), "--map", "marka"].iter().map(|s| s.to_string()).collect();
+        let (path, map) = parse_args(&args).expect("the launch's arguments parse");
+        let opened = razdor::pack::open::open(&path, map.as_deref(), razdor::pack::open::lang(), &install);
+        assert!(opened.is_ok(), "the example map opens: {:?}", opened.err());
     }
 }

@@ -276,28 +276,75 @@ fn levels(story: &Story) -> BTreeMap<String, usize> {
     level
 }
 
-/// Positions for the nodes with none saved: the variables in a column of their own on the left,
-/// then a column per level of triggers and dialogs (the triggers first, then the dialogs they
-/// lead to), the nodes of a column down it. Saved positions win.
+/// The distance between two columns of the graph, in points (a node is 200 wide).
+const COLUMN_W: f32 = 300.0;
+/// The gap between two nodes of a column.
+const ROW_GAP: f32 = 24.0;
+
+/// Positions for the nodes with none saved. Nodes are grouped by kind in three columns: the variables
+/// on the left, the triggers in the middle and the dialogs on the right. Each column is ordered by the
+/// node's level (what leads to it comes first), then by the story's order, and its nodes stack down
+/// the column. Saved positions win.
 pub fn layout(story: &Story, saved: &BTreeMap<String, [f32; 2]>) -> BTreeMap<String, [f32; 2]> {
     let level = levels(story);
-    let mut row_in_column: BTreeMap<usize, f32> = BTreeMap::new();
-    let mut out = BTreeMap::new();
+    let mut columns: [Vec<&Node>; 3] = [Vec::new(), Vec::new(), Vec::new()];
     for n in &story.nodes {
-        if let Some(p) = saved.get(&n.id) {
-            out.insert(n.id.clone(), *p);
-            continue;
-        }
-        // Column 0 is the variables' own; a trigger or a dialog is one column right of its level.
         let column = match n.kind {
             Kind::Var => 0,
-            _ => level.get(&n.id).copied().unwrap_or(0) + 1,
+            Kind::Trigger => 1,
+            Kind::Dialog => 2,
         };
-        let y = row_in_column.entry(column).or_insert(40.0);
-        out.insert(n.id.clone(), [40.0 + column as f32 * 250.0, *y]);
-        *y += size(n)[1] + 24.0;
+        columns[column].push(n);
+    }
+    let mut out = BTreeMap::new();
+    for (column, nodes) in columns.iter_mut().enumerate() {
+        nodes.sort_by_key(|n| level.get(&n.id).copied().unwrap_or(0));
+        let mut y = 40.0_f32;
+        for n in nodes.iter() {
+            if let Some(p) = saved.get(&n.id) {
+                out.insert(n.id.clone(), *p);
+                continue;
+            }
+            out.insert(n.id.clone(), [40.0 + column as f32 * COLUMN_W, y]);
+            y += size(n)[1] + ROW_GAP;
+        }
     }
     out
+}
+
+/// The id of the one node that stands for every variable while they are collapsed.
+pub const VARS_ID: &str = "v:*";
+
+/// The graph with its variables collapsed into one node (`VARS_ID`, its detail the count): every edge to or
+/// from a variable runs to or from that node, and an edge repeated by it is kept once. A graph with no
+/// variable is returned as it is.
+pub fn collapse_vars(story: &Story) -> Story {
+    let count = story.nodes.iter().filter(|n| n.kind == Kind::Var).count();
+    if count == 0 {
+        return story.clone();
+    }
+    let mut out = Story { map: story.map.clone(), ..Story::default() };
+    out.nodes.push(Node { id: VARS_ID.into(), kind: Kind::Var, name: "*".into(), detail: count.to_string(), choices: Vec::new(), file: String::new(), line: 0 });
+    out.nodes.extend(story.nodes.iter().filter(|n| n.kind != Kind::Var).cloned());
+    let fold = |id: &str| if id.starts_with("v:") { VARS_ID.to_string() } else { id.to_string() };
+    for e in &story.edges {
+        let edge = Edge { from: fold(&e.from), port: e.port.clone(), to: fold(&e.to), label: e.label.clone() };
+        if !out.edges.contains(&edge) {
+            out.edges.push(edge);
+        }
+    }
+    out
+}
+
+/// The scroll offset (in screen points) that centres a node at `p` (its top-left, graph points) of `size`
+/// on the canvas drawn at zoom `z`, in a view of `view` points. The offset stays inside the canvas of
+/// `canvas` points (drawn size), so the view never scrolls past its edges.
+pub fn centred_offset(p: [f32; 2], size: [f32; 2], z: f32, view: [f32; 2], canvas: [f32; 2]) -> [f32; 2] {
+    let axis = |at: f32, half: f32, view: f32, canvas: f32| {
+        let max = (canvas - view).max(0.0);
+        ((at + half) * z - view / 2.0).clamp(0.0, max)
+    };
+    [axis(p[0], size[0] / 2.0, view[0], canvas[0]), axis(p[1], size[1] / 2.0, view[1], canvas[1])]
 }
 
 /// The saved positions of a map's story nodes (`layout.json`).
@@ -398,17 +445,47 @@ mod tests {
     }
 
     #[test]
-    fn auto_layout_puts_the_story_left_to_right_and_keeps_saved_positions() {
+    fn auto_layout_groups_the_nodes_by_kind_and_keeps_saved_positions() {
         let s = build(&package(), "brod");
         let mut saved = BTreeMap::new();
         saved.insert("t:go".to_string(), [900.0, 10.0]);
         let pos = layout(&s, &saved);
         assert_eq!(pos["t:go"], [900.0, 10.0], "the saved one wins");
-        assert!(pos["d:ford"][0] > pos["v:ford_held"][0], "a dialog is right of what gates it");
-        assert!(pos["t:pick"][0] > pos["d:ford"][0], "a trigger the choice answers is right of the choice");
-        assert!(pos["v:dread"][0] < pos["t:go"][0], "a variable has a column of its own, left of the triggers");
+        assert!(pos["v:dread"][0] < pos["t:pick"][0], "the variables are the left column");
+        assert!(pos["t:pick"][0] < pos["d:ford"][0], "the triggers are one column left of the dialogs");
+        assert_eq!(pos["d:ford"][0], pos["d:toll"][0], "the dialogs share their column");
         assert_eq!(pos["v:dread"][0], pos["v:ford_held"][0], "the variables share their column");
         assert_ne!(pos["v:dread"][1], pos["v:ford_held"][1], "and stack down it");
+    }
+
+    #[test]
+    fn the_variables_collapse_into_one_node_with_their_edges_folded_onto_it() {
+        let s = build(&package(), "brod");
+        let c = collapse_vars(&s);
+        assert_eq!(c.nodes.iter().filter(|n| n.kind == Kind::Var).count(), 1, "one variables node");
+        assert_eq!(c.node(VARS_ID).expect("the variables node").detail, "2", "it counts the variables it stands for");
+        assert!(c.edges.iter().any(|e| e.from == VARS_ID && e.to == "t:go" && e.label == "if ford_held"), "an edge runs from it");
+        assert!(c.edges.iter().any(|e| e.from == "d:ford" && e.to == VARS_ID && e.label == "sets dread"), "and into it");
+        assert!(c.edges.iter().all(|e| !e.from.starts_with("v:") || e.from == VARS_ID), "no edge still names one variable");
+        assert!(c.edges.iter().all(|e| !e.to.starts_with("v:") || e.to == VARS_ID), "no edge still names one variable");
+        assert_eq!(collapse_vars(&c).edges, c.edges, "collapsing a collapsed graph keeps its edges");
+    }
+
+    #[test]
+    fn a_graph_with_no_variable_is_not_changed_by_collapsing() {
+        let mut s = build(&package(), "brod");
+        s.nodes.retain(|n| n.kind != Kind::Var);
+        s.edges.retain(|e| !e.from.starts_with("v:") && !e.to.starts_with("v:"));
+        assert_eq!(collapse_vars(&s), s);
+    }
+
+    #[test]
+    fn the_view_centres_on_a_node_and_stays_inside_the_canvas() {
+        // A node at (300, 200), 200 by 54, at zoom 1 on a canvas of 1000 by 800, in a view of 400 by 300.
+        let off = centred_offset([300.0, 200.0], [200.0, 54.0], 1.0, [400.0, 300.0], [1000.0, 800.0]);
+        assert_eq!(off, [300.0 + 100.0 - 200.0, 200.0 + 27.0 - 150.0], "the node's centre is the view's centre");
+        assert_eq!(centred_offset([0.0, 0.0], [200.0, 54.0], 1.0, [400.0, 300.0], [1000.0, 800.0]), [0.0, 0.0], "not past the top-left");
+        assert_eq!(centred_offset([990.0, 790.0], [200.0, 54.0], 1.0, [400.0, 300.0], [1000.0, 800.0]), [600.0, 500.0], "not past the far corner");
     }
 
     #[test]

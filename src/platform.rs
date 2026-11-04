@@ -63,10 +63,30 @@ fn ios_documents() -> Option<PathBuf> {
     std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Documents"))
 }
 
+/// The folder inside Razdor's folder that a play-test game (started from the studio's «Играть», see
+/// `studio::play`) keeps all its files in: saves, settings, the log, the lock, the hub's maps. The
+/// player's own saves and settings are never touched by it.
+pub const PLAY_DIR: &str = "studio-play";
+
 /// Razdor's own folder: saves, the log, the hub's maps, the translation
 /// jobs. Desktop: `razdor` in the platform's data folder. Android: [`ANDROID_ROOT`]. iOS:
-/// `Documents/Razdor`.
+/// `Documents/Razdor`. A play-test game gets [`PLAY_DIR`] inside it (see [`app_dir_for`]).
 pub fn app_dir() -> Option<PathBuf> {
+    app_dir_for(root_dir(), is_play_child())
+}
+
+/// Whether this process is a play-test game the studio started (`RAZDOR_STUDIO_PLAY` is set).
+pub fn is_play_child() -> bool {
+    std::env::var_os(crate::studio::play::CHILD_ENV).is_some()
+}
+
+/// The folder a process uses: `root` itself, or for a play-test game [`PLAY_DIR`] inside it.
+pub fn app_dir_for(root: Option<PathBuf>, play: bool) -> Option<PathBuf> {
+    root.map(|r| if play { r.join(PLAY_DIR) } else { r })
+}
+
+/// Razdor's folder before the play-test split ([`app_dir`]).
+fn root_dir() -> Option<PathBuf> {
     #[cfg(target_os = "android")]
     {
         Some(PathBuf::from(ANDROID_ROOT))
@@ -259,6 +279,18 @@ pub fn downloads_dir() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_play_test_game_keeps_its_files_in_its_own_folder_inside_the_app_folder() {
+        let root = PathBuf::from("data").join("razdor");
+        assert_eq!(app_dir_for(Some(root.clone()), false), Some(root.clone()));
+        let play = app_dir_for(Some(root.clone()), true).unwrap();
+        assert_eq!(play, root.join("studio-play"));
+        assert_eq!(PLAY_DIR, "studio-play");
+        assert_ne!(play.join("saves"), root.join("saves"), "its saves are not the player's");
+        assert_ne!(play.join("settings.json"), root.join("saves").join("settings.json"), "its settings are not the player's");
+        assert_eq!(app_dir_for(None, true), None, "no app folder, no play folder");
+    }
 
     #[test]
     fn safe_margins_keep_the_corner_allowance_on_every_side() {

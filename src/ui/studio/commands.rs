@@ -25,6 +25,10 @@ pub enum Scope {
     Map,
     /// The Inspector has the focus (the pointer was in it last frame).
     Inspector,
+    /// The Сюжет workspace's story graph (the keys of a node: frame, find, duplicate).
+    Story,
+    /// The Данные workspace's spreadsheets (find in the sheet).
+    Data,
 }
 
 /// Whether two scopes can take the same key: a global command overlaps every other.
@@ -63,9 +67,9 @@ pub const COMMANDS: &[Command] = &[
     cmd("undo", n_("Undo"), ic::ARROW_COUNTER_CLOCKWISE, "Ctrl+Z"),
     Command { id: "redo", name: n_("Redo"), also: "Ctrl+Y", ..cmd("", "", ic::ARROW_CLOCKWISE, "Ctrl+Shift+Z") },
     cmd("check", n_("Check"), ic::SHIELD_CHECK, "F7"),
-    Command { later: n_("Comes in UX6"), ..cmd("play", n_("Play"), ic::PLAY, "F5") },
-    Command { later: n_("Comes in UX6"), ..cmd("palette", n_("Command palette"), ic::MAGNIFYING_GLASS, "Ctrl+Shift+P") },
-    Command { later: n_("Comes in UX6"), ..cmd("goto", n_("Go to object or file"), ic::CROSSHAIR, "Ctrl+P") },
+    cmd("play", n_("Play"), ic::PLAY, "F5"),
+    cmd("palette", n_("Command palette"), ic::MAGNIFYING_GLASS, "Ctrl+Shift+P"),
+    cmd("goto", n_("Go to object or file"), ic::CROSSHAIR, "Ctrl+P"),
     cmd("ws-map", n_("Map workspace"), ic::MAP_TRIFOLD, "Alt+1"),
     cmd("ws-story", n_("Story workspace"), ic::FLOW_ARROW, "Alt+2"),
     cmd("ws-data", n_("Data workspace"), ic::TABLE, "Alt+3"),
@@ -73,7 +77,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("drawer", n_("Bottom panel"), ic::CARET_UP, "Ctrl+J"),
     cmd("side-panels", n_("Hide side panels"), ic::SIDEBAR_SIMPLE, "Tab"),
     Command { scope: Scope::Inspector, ..cmd("find", n_("Find a field"), ic::MAGNIFYING_GLASS, "Ctrl+F") },
-    Command { later: n_("Comes in UX5"), ..cmd("open-in-file", n_("Open in file"), ic::ARROW_SQUARE_OUT, "Ctrl+Shift+O") },
+    cmd("open-in-file", n_("Open in file"), ic::ARROW_SQUARE_OUT, "Ctrl+Shift+O"),
     cmd("cancel", n_("Cancel"), ic::X, "Esc"),
     cmd("settings", n_("Settings"), ic::GEAR, "Ctrl+,"),
     Command { scope: Scope::Map, fixed: true, ..cmd("copy", n_("Copy"), ic::COPY, "Ctrl+C") },
@@ -118,6 +122,11 @@ pub const COMMANDS: &[Command] = &[
     Command { scope: Scope::Map, ..cmd("zoom-fit", n_("Fit the map"), ic::FRAME_CORNERS, "Ctrl+0") },
     Command { scope: Scope::Map, ..cmd("zoom-100", n_("Zoom 100 %"), ic::CROP, "Ctrl+1") },
     Command { also: "Backspace", ..cmd("delete", n_("Delete"), ic::TRASH, "Delete") },
+    Command { scope: Scope::Story, ..cmd("find-node", n_("Find node"), ic::MAGNIFYING_GLASS, "Ctrl+F") },
+    Command { scope: Scope::Story, ..cmd("frame-node", n_("Frame the selection"), ic::CROSSHAIR, "F") },
+    Command { scope: Scope::Story, ..cmd("fit-nodes", n_("Fit the whole graph"), ic::FRAME_CORNERS, "Home") },
+    Command { scope: Scope::Story, ..cmd("dup-node", n_("Duplicate node"), ic::COPY, "Ctrl+D") },
+    Command { scope: Scope::Data, ..cmd("find-data", n_("Find in the sheet"), ic::MAGNIFYING_GLASS, "Ctrl+F") },
     cmd("reset-layout", n_("Reset layout"), ic::ARROWS_CLOCKWISE, ""),
     cmd("exit", n_("Exit"), ic::SIGN_OUT, ""),
 ];
@@ -521,6 +530,15 @@ mod tests {
             assert!(c.later.is_empty(), "{id} works now");
         }
         assert_eq!(command("paste-in-place").map(|c| c.default), Some("Ctrl+Shift+V"));
+    }
+
+    #[test]
+    fn play_the_palette_and_go_to_work_now_on_their_keys() {
+        for (id, key) in [("play", "F5"), ("palette", "Ctrl+Shift+P"), ("goto", "Ctrl+P")] {
+            let c = command(id).unwrap_or_else(|| panic!("{id} is a command"));
+            assert_eq!(binding_of(c, &defaults()), Binding::parse(key), "{id} is {key}");
+            assert!(c.later.is_empty(), "{id} works now");
+        }
     }
 
     #[test]

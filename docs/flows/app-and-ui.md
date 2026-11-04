@@ -999,6 +999,17 @@ delivers it; `widgets::is_escape`): a new Esc check goes through these, never a 
 `is_key_pressed(KeyCode::Escape)`. Back is never in the key tables (`keymap::bindable` is false for it)
 and, like Alt and F10, never the held key (`widgets::is_system_key`).
 
+## Studio: the palette, jumps and Play (UX6)
+
+The studio's commands are the registry in `src/ui/studio/commands.rs`, and every shortcut, button and
+palette row reads it. The palette (`src/ui/studio/palette.rs`) lists those commands and the Ctrl+P list
+(`razdor::studio::nav::goto_index`), ranked by `razdor::studio::palette::rank`. A row runs its command
+(`StudioScreen::run_command`) or jumps to a `nav::Destination`: `StudioScreen::jump_to` opens the workspace and
+the object. The Тест views produce the same destinations: a score line (`nav::of_target`, `src/ui/studio/scores.rs`)
+and an AI log line (`nav::of_moment`, `Viewer::ai_tab`). Play (`StudioScreen::play_game`) starts
+`razdor --pack <folder> --map <id>` as a child with `studio::play::CHILD_ENV` set: the child skips the
+single-instance lock that the studio holds (`src/main.rs`). `poll_play` reads its exit; the status bar shows it.
+
 ## How to add a window
 
 1. Add a `Screen` variant (or a field on an existing view) in `src/ui/mod.rs`.

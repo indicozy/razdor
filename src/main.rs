@@ -11,7 +11,8 @@ use razdor::rules::content::Content;
 use ui::assets::Assets;
 use ui::App;
 
-/// Only one Razdor at a time: an exclusive lock on `razdor.lock` in the runtime folder, held
+/// Only one Razdor at a time: an exclusive lock on `razdor.lock` in the runtime folder (a play-test game
+/// takes it in its own folder instead, see `single_instance`), held
 /// until the process ends (the OS drops it on exit or crash). A second copy says so and quits
 /// before opening a window. `conf` runs before the window exists, so the check lives there.
 #[cfg(unix)]
@@ -20,8 +21,16 @@ static LOCK: std::sync::OnceLock<std::fs::File> = std::sync::OnceLock::new();
 #[cfg(unix)]
 fn single_instance() {
     use std::os::unix::io::AsRawFd;
-    let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir);
-    let path = dir.join("razdor.lock");
+    // A play-test game (the studio's «Играть») has its own folder (`platform::app_dir`), so its lock is
+    // there: it does not stand in the studio's way, and two play-tests do not write one folder at once.
+    let path = if razdor::platform::is_play_child() {
+        let Some(dir) = razdor::platform::app_dir() else { return };
+        let _ = std::fs::create_dir_all(&dir);
+        dir.join("razdor.lock")
+    } else {
+        let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir);
+        dir.join("razdor.lock")
+    };
     let Ok(file) = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path) else {
         return; // No lock file possible: do not stand in the way.
     };

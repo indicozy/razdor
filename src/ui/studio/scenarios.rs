@@ -110,6 +110,19 @@ pub struct ScenarioUi {
     pub price_kept: Option<String>,
     /// The game's prices of the package, for the package they were made of (`ui::studio::records`).
     pub priced: Option<(std::sync::Arc<razdor::pack::load::Package>, razdor::studio::records::Priced)>,
+    /// The Сюжет workspace's centre view (the story graph or the campaign graph), its outline's tab and search.
+    pub story_view: super::outline::StoryView,
+    pub outline_tab: super::outline::OutlineTab,
+    pub outline_query: String,
+    /// The Данные view the navigation picked, and the spreadsheets' state (`records.rs`).
+    pub data_view: super::data::DataView,
+    pub sheet: super::data::SheetUi,
+    /// A shortcut asked for the search field of the current view (the outline's search, the sheet's filter).
+    pub focus_find: bool,
+    /// The outline asked for another map to be shown (its trigger or dialog is on that map).
+    pub want_map: Option<String>,
+    /// A graph command the story screen runs in its own frame (`story.rs`).
+    pub story_req: Option<super::story::StoryReq>,
 }
 
 impl ScenarioUi {
@@ -153,7 +166,7 @@ impl Viewer<'_> {
         let mut edits: Vec<(&str, Option<Value>, bool)> = Vec::new();
         kit::section(ui, "package", "main", tr("Main"), true, &q, |ui| {
             kit::row(ui, &q, tr("Id"), "package.id", None, |ui| ui.monospace(m.id.as_str()));
-            if let Some(v) = kit::row(ui, &q, tr("Version"), "package.version", None, |ui| forms::text_field(ui, "pkg-version", &m.version, 120.0)).value.flatten() {
+            if let Some(v) = kit::row(ui, &q, tr("Version"), "package.version", None, |ui| forms::text_field(ui, "pkg-version", &m.version, ui.available_width())).value.flatten() {
                 edits.push(("version", Some(Value::from(v)), false));
             }
             if let Some(v) = kit::row(ui, &q, tr("Title"), "package.title", None, |ui| forms::text_key(ui, "pkg-title", &m.title, &keys, &texts)).value.flatten() {
@@ -180,7 +193,7 @@ impl Viewer<'_> {
                     edits.push(("description", Some(Value::from(v)), false));
                 }
             }
-            if let Some(v) = kit::row(ui, &q, tr("Author"), "package.author", None, |ui| forms::text_field(ui, "pkg-author", &m.author, 180.0)).value.flatten() {
+            if let Some(v) = kit::row(ui, &q, tr("Author"), "package.author", None, |ui| forms::text_field(ui, "pkg-author", &m.author, ui.available_width())).value.flatten() {
                 edits.push(("author", Some(Value::from(v)), false));
             }
             ui.add_space(4.0);
@@ -270,7 +283,7 @@ impl Viewer<'_> {
                     }
                 }
             }
-            if let Some(v) = kit::row(ui, &q, tr("Start date"), "map.start_date", None, |ui| forms::text_field(ui, "hdr-date", &spec.start_date, 120.0)).value.flatten() {
+            if let Some(v) = kit::row(ui, &q, tr("Start date"), "map.start_date", None, |ui| forms::text_field(ui, "hdr-date", &spec.start_date, ui.available_width())).value.flatten() {
                 match sc::start_date(&v) {
                     Ok(e) => {
                         out.push(e);
@@ -446,7 +459,7 @@ impl Viewer<'_> {
         if self.scen.saved.is_none() {
             self.scen.saved = Some(cg::read_layout(self.ws.read_editor_file(cg::LAYOUT).as_deref()));
         }
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if !graph.exists {
                 ui.label(tr("The package has no campaign.toml: it plays as one map."));
                 if ui.button(tr("Create campaign.toml")).clicked() {

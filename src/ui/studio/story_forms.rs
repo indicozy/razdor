@@ -291,7 +291,7 @@ fn value_widget(ui: &mut Ui, salt: &str, arg: Arg, key: &str, cur: Option<&Value
         Arg::Unit => pick(ui, opts.units.clone()),
         Arg::Units => {
             let typed = cur.and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")).unwrap_or_default();
-            match forms::text_field(ui, salt, &typed, 180.0) {
+            match forms::text_field(ui, salt, &typed, field_w(ui)) {
                 Some(s) => {
                     let units: Vec<String> = s.split(',').map(str::trim).filter(|u| !u.is_empty()).map(str::to_string).collect();
                     Some(string_array(&units))
@@ -354,7 +354,7 @@ fn value_widget(ui: &mut Ui, salt: &str, arg: Arg, key: &str, cur: Option<&Value
             options.extend(opts.armies.iter().cloned());
             pick(ui, options)
         }
-        Arg::Text | Arg::NewArmy => forms::text_field(ui, salt, &text, 150.0).map(Value::from),
+        Arg::Text | Arg::NewArmy => forms::text_field(ui, salt, &text, field_w(ui)).map(Value::from),
         Arg::TextKey => {
             let suggestions: Vec<String> = cx.texts.keys().cloned().collect();
             forms::text_key(ui, salt, &text, &suggestions, cx.texts).map(Value::from)
@@ -458,8 +458,8 @@ pub(super) fn text_cells(ui: &mut Ui, salt: &str, key: &str, texts: &BTreeMap<St
         let current = table.get(key).cloned().unwrap_or_default();
         ui.horizontal(|ui| {
             ui.weak(lang.as_str());
-            // The field takes the Inspector's width (a fixed one overflows a narrow panel).
-            let width = (ui.available_width() - 56.0).max(100.0);
+            // The field takes the row's remaining width after the language's tag (a fixed one overflows a narrow panel).
+            let width = ui.available_width().max(100.0);
             if let Some(v) = forms::text_field(ui, &format!("{salt}-{lang}"), &current, width) {
                 out = Some((lang.clone(), v));
             }

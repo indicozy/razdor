@@ -1,8 +1,8 @@
-//! The Scores tab («Оценка»): Richness and Health, two big numbers, each with its breakdown. The
-//! scores are computed on the scores thread after each rebuild (`studio::scores`), and the tab shows
-//! the last ones of the shown map while a newer job runs («считается…»). A line of a breakdown
-//! selects its targets: the Scene and the Inspector get an object, army or building; a cell is
-//! highlighted on the canvas; a line of a file opens the Script there.
+//! The Тест workspace's Оценка view («Оценка», UX6): Richness and Health side by side, each at the full
+//! height with its number and its breakdown. The scores are computed on the scores thread after each rebuild
+//! (`studio::scores`), and the view shows the last ones of the shown map while a newer job runs («считается…»).
+//! A line of a breakdown jumps to its targets (`studio::nav::of_target`): an object, army or building in Карта
+//! (the Inspector shows it), a cell highlighted there, or a file's line in Данные › Файлы.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -11,10 +11,10 @@ use egui::{Color32, RichText, ScrollArea, Sense, Ui};
 use egui_macroquad::egui;
 use razdor::i18n::tr;
 use razdor::studio::health::{Health, Severity};
-use razdor::studio::map::Selection;
+use razdor::studio::nav;
 use razdor::studio::scores::{Item, Job, Scores, Target, Worker};
 
-use super::{Jump, Viewer, ERROR_RED, WARNING_AMBER};
+use super::{Viewer, ERROR_RED, WARNING_AMBER};
 
 /// How long a snapshot waits for the scores (a map's fights take a few seconds).
 const WAIT: Duration = Duration::from_secs(120);
@@ -120,7 +120,7 @@ fn row(ui: &mut Ui, id: egui::Id, points: Option<i64>, head: &str, note: &str, n
 }
 
 impl Viewer<'_> {
-    /// The Scores tab: the two numbers and their breakdowns.
+    /// The Оценка view: the two scores side by side, each at the full height.
     pub(super) fn scores_dock(&mut self, ui: &mut Ui) {
         let Some(map) = self.maps.map.clone() else {
             ui.weak(tr("No map to show."));
@@ -146,40 +146,13 @@ impl Viewer<'_> {
                 ui.colored_label(ERROR_RED, e);
             }
             Some(Ok(scores)) => {
-                ui.horizontal(|ui| {
-                    ui.vertical(|ui| {
-                        ui.weak(tr("Richness"));
-                        match &scores.richness {
-                            Ok(r) => {
-                                ui.label(RichText::new(r.curve_value.to_string()).size(40.0).strong());
-                                ui.weak(format!("{} {}", tr("points"), r.total));
-                            }
-                            Err(e) => {
-                                ui.colored_label(WARNING_AMBER, e);
-                            }
-                        }
-                    });
-                    ui.add_space(24.0);
-                    ui.vertical(|ui| {
-                        ui.weak(tr("Health"));
-                        ui.label(RichText::new(scores.health.summary.to_string()).size(40.0).strong().color(health_colour(scores.health.summary)));
-                        ui.weak(tr("Razdor's own measure: 100 less the findings"));
-                    });
-                });
-                ui.separator();
-                // Both breakdowns side by side: the dock is short, and each list scrolls on its own.
+                // The snapshot's `jump=score` clicks the first target of the Richness breakdown, once.
+                if std::mem::take(&mut *self.snap_jump) {
+                    clicked = scores.richness.as_ref().ok().and_then(|r| r.items.iter().find(|i| !i.targets.is_empty())).map(|i| i.targets.clone());
+                }
                 ui.columns(2, |cols| {
-                    ScrollArea::vertical().id_salt("scores-richness-list").auto_shrink([false, false]).show(&mut cols[0], |ui| {
-                        if let Ok(r) = &scores.richness {
-                            ui.strong(tr("Richness breakdown"));
-                            for (i, item) in r.items.iter().enumerate() {
-                                item_row(ui, i, item, &mut clicked);
-                            }
-                        }
-                    });
-                    ScrollArea::vertical().id_salt("scores-health-list").auto_shrink([false, false]).show(&mut cols[1], |ui| {
-                        health_breakdown(ui, &scores.health, &mut clicked);
-                    });
+                    richness_column(&mut cols[0], scores, &mut clicked);
+                    health_column(&mut cols[1], scores, &mut clicked);
                 });
             }
         }
@@ -188,30 +161,61 @@ impl Viewer<'_> {
         }
     }
 
-    /// Selects a breakdown line's targets: an object, army or building in the Scene and the
-    /// Inspector, a cell highlighted on the canvas (and centred on the first), or a file's line.
+    /// A breakdown line's targets: the cells are outlined on the canvas (the first is centred on), and the first
+    /// other target is where the jump goes (`studio::nav::of_target`): its object in Карта, or a file's line.
     fn score_select(&mut self, targets: Vec<Target>) {
-        self.canvas.score_cells.clear();
-        for t in targets {
+        let map = self.maps.map.clone().unwrap_or_default();
+        let mut cells = Vec::new();
+        let mut first: Option<nav::Destination> = None;
+        for t in &targets {
             match t {
-                Target::Hero => self.select(Selection::Hero),
-                Target::Army(id) => self.select(Selection::Army(id)),
-                Target::Building(id) => self.select(Selection::Building(id)),
-                Target::Point(i) => self.select(Selection::Point(i)),
-                Target::Object(i) => self.select(Selection::Object(i)),
-                Target::Cell(x, y) => {
-                    if self.canvas.score_cells.is_empty() {
-                        self.canvas.centre = Some((x as f32 + 0.5, y as f32 + 0.5));
-                    }
-                    self.canvas.score_cells.push((x, y));
-                }
-                Target::Line { file, line } => {
-                    self.open = Some(file);
-                    *self.jump = Some(Jump { line, range: None });
+                Target::Cell(x, y) => cells.push((*x, *y)),
+                other => {
+                    first.get_or_insert_with(|| nav::of_target(&map, other));
                 }
             }
         }
+        if let (Some(&(x, y)), None) = (cells.first(), &first) {
+            first = Some(nav::Destination::Map { map: map.clone(), object: None, cell: Some((x, y)) });
+        }
+        if let Some(&(x, y)) = cells.first() {
+            self.canvas.centre = Some((x as f32 + 0.5, y as f32 + 0.5));
+        }
+        self.canvas.score_cells = cells;
+        self.goto = first;
     }
+}
+
+/// The Richness column: its number and its points, then the breakdown (each item's row jumps to its targets).
+fn richness_column(ui: &mut Ui, scores: &Scores, clicked: &mut Option<Vec<Target>>) {
+    ui.weak(tr("Richness"));
+    match &scores.richness {
+        Ok(r) => {
+            ui.label(RichText::new(r.curve_value.to_string()).size(40.0).strong());
+            ui.weak(format!("{} {}", tr("points"), r.total));
+            ui.separator();
+            ScrollArea::vertical().id_salt("scores-richness-list").auto_shrink([false, false]).show(ui, |ui| {
+                ui.strong(tr("Richness breakdown"));
+                for (i, item) in r.items.iter().enumerate() {
+                    item_row(ui, i, item, clicked);
+                }
+            });
+        }
+        Err(e) => {
+            ui.colored_label(WARNING_AMBER, e);
+        }
+    }
+}
+
+/// The Health column: its number and what it measures, then the findings (each line jumps to its targets).
+fn health_column(ui: &mut Ui, scores: &Scores, clicked: &mut Option<Vec<Target>>) {
+    ui.weak(tr("Health"));
+    ui.label(RichText::new(scores.health.summary.to_string()).size(40.0).strong().color(health_colour(scores.health.summary)));
+    ui.weak(tr("Razdor's own measure: 100 less the findings"));
+    ui.separator();
+    ScrollArea::vertical().id_salt("scores-health-list").auto_shrink([false, false]).show(ui, |ui| {
+        health_breakdown(ui, &scores.health, clicked);
+    });
 }
 
 /// One richness item as a row; clicking it selects its targets.
