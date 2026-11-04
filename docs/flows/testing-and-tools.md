@@ -244,6 +244,20 @@ screen). Snapshot options: `package`, `header`, `campaign`, `characters`, `texts
 `the_scenario_forms_edit_save_and_undo_on_a_copy_of_pepelnaya_marka` (a copy of the example, through the
 workspace, not XTest).
 
+Map generators (phase 2, milestone 5): `src/studio/gen/` ports DTMapEdit's new-map generator
+(`newmap/`: the relief fractal, water, rivers, terrain classes, the coast band, mountains, hills,
+forests) and its world generator (`worldgen/`: buildings and roads, economy, armies and garrisons)
+as pure modules. `model.rs` is the minimal map model they write (the dtm records, a cell layer for
+the marks and the scratch flags, the object grid, the placement of a building or an army).
+`to_package.rs` writes a generated map as `maps/<id>/terrain.png` and `map.toml` and lists what the
+format cannot hold (`PackageMap::gaps`); `apply.rs` adds it to the package as one undo step
+(`Workspace::create_files`, `Change::File`). `InstallData` reads the sprites, building pictures,
+units and spell prices of the install. Pinned to the original: the new-map hash of seed 2026 on 200
+(`the_install_sprites_give_a_pinned_map`) and the world counts of the same map (`the_install_gives_the_pinned_counts`);
+both, and the rest of the install tests, skip without `RAZDOR_DT_DIR`. The stand-in install tests
+(`gen/tests.rs`) check every map type at 50, 100 and 200 cells with `pack::check`. UI:
+`ui/studio/newmap.rs` (Package › New map (generator)…); snapshot options `newmap` and `generated`.
+
 Story editor (phase 2, milestone 3): `studio/story.rs` is the trigger and dialog edits. The kinds come from
 `pack::triggers`; `story::spec` lists each kind's arguments (the test reads every kind back through the
 format's parsers), and a row is valid when the parser reads it. A list (`if`, `then`) is written as one array;

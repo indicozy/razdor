@@ -16,13 +16,16 @@ pub enum Change {
     /// Several changes made by one operation (a burn, a paste, a forest stroke): one undo step.
     /// Undo puts the members back in reverse order, redo applies them in order.
     Group(Vec<Change>),
+    /// A package file made or removed as a whole (a generated map's files): its bytes before and
+    /// after, `None` where the file is not there (undo removes a file that was made).
+    File { path: String, before: Option<Vec<u8>>, after: Option<Vec<u8>> },
 }
 
 impl Change {
     /// The file the change is of (a group's first member's; empty for an empty group).
     pub fn path(&self) -> &str {
         match self {
-            Change::Text { path, .. } | Change::Cells { path, .. } => path,
+            Change::Text { path, .. } | Change::Cells { path, .. } | Change::File { path, .. } => path,
             Change::Group(v) => v.first().map_or("", Change::path),
         }
     }
@@ -32,6 +35,7 @@ impl Change {
         match self {
             Change::Text { before, after, .. } => before == after,
             Change::Cells { before, after, .. } => before == after,
+            Change::File { before, after, .. } => before == after,
             Change::Group(v) => v.iter().all(Change::is_noop),
         }
     }

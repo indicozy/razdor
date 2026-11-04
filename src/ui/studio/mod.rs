@@ -20,6 +20,7 @@ mod forms;
 mod mcp;
 mod inspector;
 mod map_tab;
+mod newmap;
 mod records;
 mod scene;
 mod story;
@@ -202,6 +203,8 @@ pub struct StudioScreen {
     conflict: Option<Conflict>,
     /// Leaving with unsaved changes: the prompt is shown.
     exit_prompt: bool,
+    /// Package › New map (generator): its window and the worker it runs.
+    newmap: newmap::NewMap,
     /// The Claude dock (its program runs only when the author starts it).
     claude: claude::ClaudeDock,
     /// The MCP server (`None` when it did not start: the reason is in the log), kept for its drop (it
@@ -272,6 +275,7 @@ impl StudioScreen {
             disk_pending: BTreeMap::new(),
             conflict: None,
             exit_prompt: false,
+            newmap: newmap::NewMap::new(),
             claude: claude::ClaudeDock::new(),
             _mcp: mcp,
             mcp_rx,
@@ -306,6 +310,8 @@ impl StudioScreen {
         self.open_file(&path);
         for opt in opts {
             match *opt {
+                "newmap" => self.newmap.open = true,
+                "generated" => self.snapshot_generated()?,
                 "side" => self.dock = layout(true),
                 "stale" => self.snapshot_stale()?,
                 "conflict" => self.snapshot_conflict(&path)?,
@@ -563,6 +569,38 @@ impl StudioScreen {
     }
 
     /// A change happened: the package is rebuilt once things settle, and the canvas's marks made again.
+    /// A map the generator added: the package is built again and the map is shown on the Map tab.
+    fn added_map(&mut self, id: &str) {
+        self.touch();
+        // The map's own file is opened: the package shows the map of the file it has open.
+        self.open_file(&format!("maps/{id}/map.toml"));
+        switch_map(&mut self.maps, &mut self.canvas, &mut self.selection, id);
+        if let Some(at) = self.dock.find_tab(&Tab::Map) {
+            self.dock.set_active_tab(at);
+        }
+        self.pending_tab = Some(Tab::Map);
+    }
+
+    /// The snapshot's generated map: the fixed seed on the 100-cell land, all three steps, added
+    /// to the (copied) package and shown.
+    fn snapshot_generated(&mut self) -> Result<(), String> {
+        // The snapshot runs before the first frame, which is where the install is read: read it here.
+        let install = match self.install.clone() {
+            Some(install) => install,
+            None => Arc::new(DtInstall::from_env().map_err(|e| format!("the generator needs the game's files: {e}"))?),
+        };
+        let req = razdor::studio::gen::Request {
+            map: razdor::studio::gen::newmap::Options { size: 100, kind: razdor::studio::gen::newmap::LAND, keep: true, rebuild: true, ..Default::default() },
+            seed: 4242,
+            clock: razdor::studio::gen::clock_of(4242),
+            world: Some(razdor::studio::gen::World { buildings: true, economy: true, armies: true, options: razdor::studio::gen::worldgen::Options::new(100) }),
+        };
+        let map = newmap::NewMap::make(&install, &req, "generated", "Generated map")?;
+        razdor::studio::gen::apply::add_map(&mut self.ws, "generated", &map, false)?;
+        self.added_map("generated");
+        Ok(())
+    }
+
     fn touch(&mut self) {
         let now = Instant::now();
         self.debounce = Some(now);
@@ -774,6 +812,10 @@ impl StudioScreen {
                         self.scen.focus = Focus::Package;
                         ui.close_menu();
                     }
+                    if ui.button(tr("New map (generator)…")).clicked() {
+                        self.newmap.open = true;
+                        ui.close_menu();
+                    }
                     if ui.button(tr("Map settings")).clicked() {
                         self.scen.focus = Focus::Header;
                         ui.close_menu();
@@ -849,6 +891,9 @@ impl StudioScreen {
             }
         }
         self.conflict_ui(ctx);
+        if let Some(id) = self.newmap.show(ctx, &mut self.ws, self.install.as_ref()) {
+            self.added_map(&id);
+        }
         if self.exit_prompt {
             let leave = self.exit_prompt_ui(ctx);
             if leave {
@@ -1108,7 +1153,8 @@ pub(super) fn theme(ctx: &egui::Context) {
     let mut v = egui::Visuals::dark();
     v.panel_fill = c(0x20, 0x25, 0x31);
     v.window_fill = c(0x1a, 0x1d, 0x26);
-    v.extreme_bg_color = c(0x1a, 0x1d, 0x26);
+    // Text fields are drawn in a darker box with a visible frame, so an empty field still shows.
+    v.extreme_bg_color = c(0x12, 0x15, 0x1c);
     v.faint_bg_color = c(0x24, 0x29, 0x36);
     v.override_text_color = Some(c(0xe0, 0xe0, 0xe0));
     v.selection.bg_fill = c(0x4f, 0x8e, 0xdc);
@@ -1125,6 +1171,8 @@ pub(super) fn theme(ctx: &egui::Context) {
         w.weak_bg_fill = fill;
         w.corner_radius = CornerRadius::same(3);
     }
+    v.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, c(0x4a, 0x52, 0x66));
+    v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, c(0x6a, 0x74, 0x8c));
     ctx.set_visuals(v);
 }
 

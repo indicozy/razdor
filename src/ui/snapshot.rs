@@ -539,6 +539,8 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             let map = parts.next().filter(|m| !m.is_empty());
             let army = parts.next().filter(|a| !a.is_empty());
             let opts: Vec<&str> = parts.collect();
+            // `generated`: the snapshot works on a copy, so the package it shows is never written.
+            let folder = if opts.contains(&"generated") { razdor::studio::gen::apply::copy_package(&folder)? } else { folder };
             app.open_studio(&folder)?;
             app.studio_preselect(map, army, &opts)?;
             return Ok(());

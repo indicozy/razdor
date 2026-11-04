@@ -41,6 +41,7 @@ pub mod paint;
 pub mod place;
 pub mod reconcile;
 pub mod records;
+pub mod gen;
 pub mod geometry;
 pub mod guarded;
 pub mod newpkg;
@@ -603,7 +604,54 @@ impl Workspace {
                     members.iter().try_for_each(|c| self.apply_change(c, false))
                 }
             }
+            Change::File { path, before, after } => {
+                let bytes = if undo { before } else { after };
+                match bytes {
+                    Some(bytes) => self.write_package_file(path, bytes)?,
+                    None => self.remove_package_file(path)?,
+                }
+                self.refresh_entries()
+            }
         }
+    }
+
+    /// Removes a file of the package (and its folder when that is left empty). Refused for a
+    /// link, as a write is.
+    fn remove_package_file(&self, path: &str) -> Result<(), String> {
+        let rel = safe_rel(path)?;
+        let full = self.root.join(&rel);
+        match fs::symlink_metadata(&full) {
+            Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => Err(format!("cannot remove {path}: not a regular file of the package")),
+            Ok(_) => {
+                fs::remove_file(&full).map_err(|e| format!("cannot remove {path}: {e}"))?;
+                if let Some(parent) = full.parent() {
+                    let _ = fs::remove_dir(parent);
+                }
+                Ok(())
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!("cannot remove {path}: {e}")),
+        }
+    }
+
+    /// Creates package files that are not there yet (a generated map's), written at once and
+    /// recorded as one undo step named `label` (or with the operation in progress, when one is).
+    /// Refused, with nothing written, when a file exists or a path is not a package path.
+    pub fn create_files(&mut self, files: Vec<(String, Vec<u8>)>, label: &str) -> Result<(), String> {
+        for (path, _) in &files {
+            safe_rel(path)?;
+            if self.root.join(path).exists() || self.docs.iter().any(|d| &d.path == path) {
+                return Err(format!("{path} already exists"));
+            }
+        }
+        let mut members = Vec::new();
+        for (path, bytes) in files {
+            self.write_package_file(&path, &bytes)?;
+            members.push(Change::File { path, before: None, after: Some(bytes) });
+        }
+        self.refresh_entries()?;
+        self.record(Step { label: label.to_string(), change: Change::Group(members) });
+        Ok(())
     }
 
     /// Records a change: one undo step, or a member of the group in progress.

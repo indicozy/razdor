@@ -8,6 +8,15 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **Generator clock (Razdor Studio).** The original's world generator seeds its `Randomize` from the processor's
+  time-stamp counter, which Razdor cannot replay; the studio derives that clock from the map's seed instead
+  (`gen::clock_of`), so the same seed gives the same world but not the original's world for a given clock. The
+  new-map terrain has no clock dependence and matches the original's pinned hash. Owner's call: keep the seed
+  derivation, or let the window take a clock.
+- **Worldgen stage tests not ported (generator).** The original's per-stage unit tests of `src/editor/worldgen`
+  (sectors, roads, bridges, economy, the army builder) are not in `src/studio/gen` yet; the install's pinned
+  counts and the stand-in tests cover the step as a whole.
+
 - **Ghosts take one damage from blows** (2026-11-03, chapter 1's wraiths). In the battle engine a ghost takes 1 damage from every blow (a halberdier, a knight or a militiaman), so the militia cannot kill it, and its curses (initiative and actions) with magic hits kill the knight, which ends the battle. Three ghosts and a ghoul beat a six-unit squad with a halberdier in it; even one ghost with one ghoul does. Chapter 1's wraiths are therefore three ghouls for now (balance, `maps/brod/map.toml`), which keeps the prepared path winnable with the recruits the tower offers. Owner's call: keep ghosts as the wraiths and add a ranged or magic answer to the recruits, or keep ghouls. The barrow host (chapter 1's `host_rises`) has no ghosts either: it is a ghoul and a dead warrior, which the prepared squad beats in 30 of 30 seeds (`the_host_over_thirty_seeds`).
 
 - **Walking into a neutral village takes it** (2026-11-03, Reedmere in chapter 1). `rules::game` gives a village to the hero the first time he steps into it (`StepContact::Captured` for `K::Village`); the chapter's marsh village changes hands on the road to the wraiths. This follows the original's village rule as the code has it, not yet checked under Wine. Whether a package's neutral village should be taken by walking in is the owner's call.
@@ -564,6 +573,23 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   return from a branch gives about 0.4 days in the hub (enough to walk to Ashford, not for more).
 
 ## Package format gaps (studio)
+
+- **Map sizes 400 and 800 (generator).** DTMapEdit's generator makes them (newmap.md §1.2); the package's terrain
+  picture holds 50, 100 and 200 cells only. The studio offers those three sizes; a format decision would add the
+  two bigger ones.
+- **Trade, library and village mana (generator).** The original's towns and markets have goods and prices,
+  churches spells, villages a mana income (worldgen.md §4). The package has no shop and no mana, so a generated
+  map has none of them.
+- **Artefacts for sale and building events (generator).** The original's buildings sell artefacts and carry event
+  slots (worldgen.md §4, §5). The package has no shop and no building events.
+- **Army leaders, patrols and aggression (generator).** A generated army's leader becomes its first troop: a
+  package's named leader needs a text key of its own. Patrol radius, aggression and respawn days have no field.
+- **Armies on footprints (generator).** The original stands an army at its building's centre, inside the footprint.
+  The package keeps armies off every footprint and off water, so a generated army moves to the nearest free cell
+  (listed in the result).
+- **Objects of classes 2, 3, 4, 6 and 12 (generator).** The format has kinds for hills, mountains, stones, trees,
+  dead trees and thickets only. The generator makes classes 1, 5, 9, 10 and 11, so none of these are dropped in
+  practice; a world step that made one would be listed.
 
 Map tools the studio (Razdor Studio, phase 2) cannot express in the package format yet. Each is
 left out, never faked; a format decision would settle it (`docs/reference/rzpack-format.md`).

@@ -99,9 +99,43 @@ Each change is one undo step (Ctrl+Z).
 - **Rename** changes the id in every file (references, the base and the name keys) in one step. **Delete** is refused while the record is named somewhere; the first place is shown.
 - The package format does not hold what DTMapEdit has: gains per level, nature, magic school and direction, bonuses, icons, upgrade units, surrender, starting experience and the price multipliers. These come from the base; an item's stat changes come from its base too.
 
+## New map (generator)
+
+Package → «New map (generator)…» makes a map by the rules of DTMapEdit. The map comes from a
+seed: the same seed and settings give the same map.
+
+- **Size.** 50, 100 or 200 cells: a package holds maps of these sizes only.
+- **Map type and orientation.** Land, lake, river valley, estuary, coast, skerries, island or
+  archipelago; which side the sea or the river mouth faces.
+- **Ratios.** Seven bars of panel widths, as in DTMapEdit: water, land, the coast band, hills and
+  mountains, marsh, forests. Each bar shows its panels; you can type the width of each panel, and the last panel of a bar takes the rest.
+- **Seed.** A number from 1 up. «Random» takes a new number.
+- **World.** Three steps: buildings and roads, economy, armies and garrisons. The chances (how
+  often a town, a castle, a village or a ruin is built, and so on) and the army budgets are in the
+  folded sections.
+- **Map.** An id (lowercase Latin letters, digits and dashes), a title and, if you want, a place in
+  the campaign (at the end of the map list in `campaign.toml`).
+
+«Create» makes the map in the background (a few seconds) and adds it to the package as one undo
+step («Edit» → «Undo»): the map's files, its names and its campaign entry go together. The map
+opens on the Map tab.
+
+What the package does not hold, and what the studio does instead:
+
+- The generator makes 400 and 800 cells; a package does not.
+- Trade, the spell library, village mana, artefacts for sale and building events: a package does
+  not store them, so the map has none.
+- An army stands on the nearest free cell next to its building (a package keeps armies off
+  buildings). There are no named leaders: a leader becomes the army's first unit.
+- The victory is reaching a cell the hero can walk to over land.
+- Patrols, aggression and respawn times of armies are not set in a package.
+
+The Check button warns when a building or an army cannot be reached on foot from the hero's start:
+as in the game's maps, a river is crossed only on a bridge.
+
 ## Not yet
 
-The studio does not have route checks or map generators yet. These come in later versions.
+The studio does not have route checks for every story yet. These come in later versions.
 
 ## .DTm maps
 
