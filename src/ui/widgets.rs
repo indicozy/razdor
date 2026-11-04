@@ -2168,30 +2168,40 @@ pub fn checkbox(x: f32, y: f32, max_w: f32, label: &str, value: bool) -> Option<
     None
 }
 
-/// The tap area of a [`checkbox_row`]: the bottom line of the row `r` (where the box and label
-/// are drawn), grown upward to 48 dp on a phone (`dp`, see [`tap_rect_at`]).
-fn checkbox_row_hit(r: Rect, side: f32, dp: Option<f32>) -> Rect {
-    tap_rect_at(Rect::new(r.x, r.y + r.h - side, r.w, side), true, dp)
+/// The box side of a check box row at label `size` (0.8 of it, at least 18 px).
+pub fn checkbox_side(size: f32) -> f32 {
+    (size * 0.8).max(18.0)
 }
 
-/// A check box beside its label on one line: the box left, the label right at `size` exactly
-/// (not the font's native size, never shrunk). The box is 0.8 of the label size, at
-/// least 18 px (the settings' check box). The whole row is the target: on a phone it grows
-/// upward to 48 dp ([`checkbox_row_hit`]), so `r` is the row's place and its bottom stays.
-/// Returns the new state when clicked.
-pub fn checkbox_row(r: Rect, size: f32, label: &str, value: bool) -> Option<bool> {
-    let side = (size * 0.8).max(18.0);
-    let hit = checkbox_row_hit(r, side, super::display::dp_px());
-    let (hover, _down, pressed) = button_state(hit, true);
-    draw_rectangle(r.x, r.y + r.h - side, side, side, FIELD_BG);
-    draw_rectangle_lines(r.x, r.y + r.h - side, side, side, 1.0, if hover { INK } else { DIM });
+/// The height of a check box row's band at label `size`: its box side, or 48 dp on a phone
+/// (`dp`, see [`tap_rect_at`]).
+pub fn checkbox_tap_height(size: f32, dp: Option<f32>) -> f32 {
+    tap_rect_at(Rect::new(0.0, 0.0, 0.0, checkbox_side(size)), true, dp).h
+}
+
+/// The box of a check box row drawn by [`checkbox_row_centred`] in its band `r` at label `size`:
+/// centred vertically in the band, at the left.
+pub fn checkbox_centred_box(r: Rect, size: f32) -> Rect {
+    let side = checkbox_side(size);
+    Rect::new(r.x, r.y + (r.h - side) / 2.0, side, side)
+}
+
+/// A check box row in its own band `r`, the whole band the target: the box and the label centred
+/// vertically in it (the army window's pair of rows, each a phone's 48 dp band, stacked back to
+/// back, so the boxes are a band apart). Returns the new state when clicked.
+pub fn checkbox_row_centred(r: Rect, size: f32, label: &str, value: bool) -> Option<bool> {
+    let side = checkbox_side(size);
+    let (hover, _down, pressed) = button_state(r, true);
+    let b = checkbox_centred_box(r, size);
+    draw_rectangle(b.x, b.y, b.w, b.h, FIELD_BG);
+    draw_rectangle_lines(b.x, b.y, b.w, b.h, 1.0, if hover { INK } else { DIM });
     if value {
-        let (bx, by, k) = (r.x, r.y + r.h - side, side / 18.0);
-        draw_line(bx + 4.0 * k, by + 11.0 * k, bx + 8.0 * k, by + 16.0 * k, 2.5 * k, ACCENT);
-        draw_line(bx + 8.0 * k, by + 16.0 * k, bx + 15.0 * k, by + 5.0 * k, 2.5 * k, ACCENT);
+        let k = side / 18.0;
+        draw_line(b.x + 4.0 * k, b.y + 11.0 * k, b.x + 8.0 * k, b.y + 16.0 * k, 2.5 * k, ACCENT);
+        draw_line(b.x + 8.0 * k, b.y + 16.0 * k, b.x + 15.0 * k, b.y + 5.0 * k, 2.5 * k, ACCENT);
     }
     let label = ellipsize(label, (r.w - side - 8.0).max(0.0), size);
-    text_exact(&label, r.x + side + 8.0, r.y + r.h - side / 2.0 + size * 0.35, size, INK);
+    text_exact(&label, r.x + side + 8.0, r.y + r.h / 2.0 + size * 0.35, size, INK);
     if pressed {
         claim();
         return Some(!value);
@@ -3060,21 +3070,21 @@ mod finger_tests {
         }
     }
 
-    /// The check row's tap area covers its box (drawn at the row's bottom, not its top), and
-    /// its bottom stays at the row's bottom, on the desktop and on a phone.
+    /// A centred check box row's band is its tap area: the box lies inside the band and is centred
+    /// in it, on the desktop (the band is the box) and on a phone (a 48 dp band).
     #[test]
-    fn the_check_row_s_tap_area_covers_its_box() {
-        let r = Rect::new(574.0, 150.0, 248.0, 76.0);
-        let side = 18.0;
-        let boxed = Rect::new(r.x, r.y + r.h - side, side, side);
-        for dp in [None, Some(2.75)] {
-            let hit = checkbox_row_hit(r, side, dp);
+    fn a_centred_check_row_is_centred_in_its_band() {
+        for (size, dp) in [(16.0, None), (12.5 * 2.75, Some(2.75))] {
+            let band_h = checkbox_tap_height(size, dp);
+            let band = Rect::new(574.0, 150.0, 248.0, band_h);
+            let boxed = checkbox_centred_box(band, size);
             assert!(
-                hit.x <= boxed.x && hit.y <= boxed.y && hit.right() >= boxed.right() && hit.bottom() >= boxed.bottom(),
-                "dp {dp:?}: hit {hit:?} does not cover the box {boxed:?}"
+                boxed.x >= band.x && boxed.y >= band.y && boxed.right() <= band.right() && boxed.bottom() <= band.bottom(),
+                "dp {dp:?}: box {boxed:?} outside the band {band:?}"
             );
-            assert_eq!(hit.bottom(), r.y + r.h, "dp {dp:?}");
+            assert!((boxed.y + boxed.h / 2.0 - (band.y + band.h / 2.0)).abs() < 1e-3, "dp {dp:?}: not centred");
         }
+        assert!((checkbox_tap_height(12.5 * 2.75, Some(2.75)) - 48.0 * 2.75).abs() < 1e-3, "a phone's band is 48 dp");
     }
 
     /// A drop-down list's filter (a player's report, 1440): on a phone the list opens without the

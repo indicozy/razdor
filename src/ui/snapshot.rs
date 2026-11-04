@@ -29,6 +29,7 @@
 //! cells; `RAZDOR_SCENE_HELD=<id>` puts an item on the pointer (hero and army windows); `RAZDOR_SCENE_PREVIEW=1` in `message:` (with `RAZDOR_MOUSE` on an item and `RAZDOR_MOUSE_RIGHT=1`) shows the first item's card at the pointer over the window;
 //! `RAZDOR_SCENE_WEAR=<id>,…` wears those items on the squad member of `army:<map>:<n>:<unit>`.
 //! `RAZDOR_SCENE_SIGN_OFF=1` switches that member's promotion sign off (`army:<map>:<n>:<unit>`).
+//! `RAZDOR_SCENE_BENCHING=1` turns the unit battle participation setting on (the army window's switch).
 //! `RAZDOR_SCENE_SELECT=<n>` selects squad member n in the `building:` window (its card shows).
 //! `RAZDOR_SCENE_PAN=dx,dy` holds the interface's pan at that offset (windows larger than the screen).
 //! `RAZDOR_SCENE_SAVE=<file.rzsave>` takes the game of a map scene (`walk`, `map`, …) from that
@@ -573,6 +574,11 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
     }
     if let Some(index)=std::env::var("RAZDOR_SCENE_BENCHED").ok().and_then(|s| s.parse::<usize>().ok()).filter(|&i| i>0) {
         if let Some(unit)=game.squad.get_mut(index) { unit.battle_disabled=true; }
+    }
+    // `RAZDOR_SCENE_BENCHING=1`: the unit battle participation setting on (its switch shows in the army
+    // window). It is the setting, not the game's flag: the game takes the settings every frame.
+    if std::env::var("RAZDOR_SCENE_BENCHING").is_ok_and(|v| v == "1") {
+        app.audio.settings.allow_unit_benching = true;
     }
     if std::env::var("RAZDOR_SCENE_BONUS_ITEMS").is_ok_and(|v| v == "1") {
         let c=game.content.clone();

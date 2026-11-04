@@ -29,7 +29,7 @@ Rules apply to all armies: your troops, opponents, and garrisons.
 
 In the advanced settings (the "More..." button in the settings window), there is a parameter called **"Disable fighters"**, which is off by default.
 
-When it is enabled, select a living non-hero in the army window and click the **"Does not participate in battle"** button next to the disband button. To return a warrior to battle, click **"Return to battle"**.
+When it is enabled, select a living non-hero in the army window and tick the **"Does not participate in battle"** check box above the "Don't remind" line (top right of the army window). After it is ticked or unticked the warrior is deselected. To return a warrior to battle, untick it.
 
 * The marked warrior remains in the squad, occupies their cell in the formation, and receives wages.
 * They do not participate in battle, do not gain experience, and are not counted among the battle participants.

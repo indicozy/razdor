@@ -925,8 +925,7 @@ pub fn squad(
     let g = super::display::button_grow();
     if let Some(sel) = tree_of {
         let u = game.squad[sel].clone();
-        let bench_control = game.allow_unit_benching && sel > 0 && u.alive();
-        let lift = dismiss_lift(bench_control, g);
+        let lift = dismiss_lift(g);
         let row = at(570.0, 234.0 - lift, 256.0, 62.0 + lift);
         let face_rect = at(570.0, 234.0, 256.0, 62.0);
         draw_rectangle(row.x, row.y, row.w, row.h, Color::new(0.25, 0.04, 0.02, 0.55));
@@ -936,21 +935,11 @@ pub fn squad(
         chrome::wounds(face, u.hp, u.max_hp(&c));
         let label = if u.alive() { own("Dismiss", n_("Dismiss")) } else { own("Bury", n_("Bury")) };
         let label = label.as_str();
-        let b = if bench_control {
-            Rect::new(face.x + face.w + 12.0 * k, row.y + 5.0 * k, row.w - face.w - 24.0 * k, 24.0 * k * g)
-        } else {
-            Rect::new(face.x + face.w + 12.0 * k, row.y + 14.0 * k, row.w - face.w - 24.0 * k, (row.h - 28.0 * k) * g)
-        };
+        // The box is already grown (`row.h` holds the lift), so the button is its height less the margins.
+        let b = Rect::new(face.x + face.w + 12.0 * k, row.y + 14.0 * k, row.w - face.w - 24.0 * k, row.h - 28.0 * k);
         // One confirmation step, as the original's confirm and cancel buttons; all three in its
         // red (0x4dc118 makes them with 0x4dba90: Btn3 for Dismiss, Btn1 for the pair).
         let confirming = CONFIRM.with(|c| c.get()) == Some(sel);
-        if bench_control && !confirming {
-            let toggle = Rect::new(b.x, b.y + b.h + 4.0 * k, b.w, 24.0 * k * g);
-            let label=if u.battle_disabled { tr("Return to battle") } else { tr("Exclude from battles") };
-            if red_button(toggle.x,toggle.y,toggle.w,toggle.h,label,true) {
-                game.set_unit_battle_disabled(sel,!u.battle_disabled);
-            }
-        }
         if !confirming {
             if red_button(b.x, b.y, b.w, b.h, label, true) {
                 CONFIRM.with(|c| c.set(Some(sel)));
@@ -977,21 +966,37 @@ pub fn squad(
     // It hides the «+» of this unit only, until the player switches it on again
     // (`Unit::set_sign_off`). Shown while the unit can be promoted now; the tree keeps
     // offering the promotion.
-    if let Some(t) = tree_of.filter(|&t| game.squad[t].promotion_ready(&c)) {
-        let on = game.squad[t].sign_off();
+    // The block above the Dismiss box, 76 px tall at Normal, its bottom 8 px above the box: two
+    // check box rows of the same size, «Не участвует в боях» (Razdor's, the owner's decision) above
+    // «Не напоминать». It grows upward when both do not fit (`check_rows`).
+    if let Some(t) = tree_of {
+        let promotable = game.squad[t].promotion_ready(&c);
+        let bench = game.allow_unit_benching && t > 0 && game.squad[t].alive();
         // A phone's label is 12.5 px per dp (its capital about 12.5 sp, the check's floor of 12
         // sp; a fixed px size would shrink on a denser phone); the desktop keeps the army
-        // window's own size. The row sits in the empty block above the Dismiss row, 76 px tall,
-        // its bottom at 226.
+        // window's own size.
         let size = match super::display::dp_px() {
             Some(dp) => 12.5 * dp,
             None => 16.0 * k,
         };
-        // Moved up with the Dismiss box's lift (`dismiss_lift`), so the two keep their 8 px gap.
-        let bench = game.allow_unit_benching && t > 0 && game.squad[t].alive();
-        let row = at(574.0, 150.0 - dismiss_lift(bench, super::display::button_grow()), 248.0, 76.0);
-        if let Some(off) = super::widgets::checkbox_row(row, size, tr("Don't remind"), on) {
-            game.squad[t].set_sign_off(off);
+        let base = at(574.0, 150.0 - dismiss_lift(g), 248.0, 76.0);
+        let row_h = super::widgets::checkbox_tap_height(size, super::display::dp_px());
+        // A phone's two rows are back to back (each 48 dp tap area); the desktop's keep a small gap.
+        let gap = if super::display::dp_px().is_some() { 0.0 } else { 4.0 * k };
+        let (bench_row, sign_row) = check_rows(base, bench.then_some(row_h), promotable.then_some(row_h), gap);
+        if let Some(r) = bench_row {
+            if let Some(on) = super::widgets::checkbox_row_centred(r, size, tr("Exclude from battles"), game.squad[t].battle_disabled) {
+                game.set_unit_battle_disabled(t, on);
+                // A player's request: after the box is ticked or unticked the unit's selection goes,
+                // so the next tap selects the next unit (and the box above the Dismiss row goes too).
+                *selected = ArmySel::default();
+            }
+        }
+        if let Some(r) = sign_row {
+            let on = game.squad[t].sign_off();
+            if let Some(off) = super::widgets::checkbox_row_centred(r, size, tr("Don't remind"), on) {
+                game.squad[t].set_sign_off(off);
+            }
         }
     }
 
@@ -1314,11 +1319,27 @@ fn draw_sheet(assets: &Assets, c: &razdor::rules::content::Content, win: Rect, s
 }
 
 /// How far the army window's Dismiss box grows up at the text size `g` (Razdor's own, the owner's
-/// decision of 2026-10-31), in the layout's design pixels (`at` scales them): with the benching
-/// switch its two 24 px buttons and their margins take 48 px more, else the 34 px button 34 px
-/// more. Its bottom edge stays where it is, so the switch above it moves up by the same.
-fn dismiss_lift(bench: bool, g: f32) -> f32 {
-    (if bench { 48.0 } else { 34.0 }) * (g - 1.0)
+/// decision of 2026-10-31), in the layout's design pixels (`at` scales them): its 34 px button
+/// grows 34 px. Its bottom edge stays where it is, so the block above it moves up by the same.
+fn dismiss_lift(g: f32) -> f32 {
+    34.0 * (g - 1.0)
+}
+
+/// The rows above the Dismiss box (Razdor's, the owner's decision): `base` is the block's place
+/// at Normal, and its bottom is where the lower row ends, 8 px above the box. The «Не напоминать»
+/// row (`sign`) sits there, as it always has; the bench row («Не участвует в боях», `bench`)
+/// stands directly above it, `gap` apart. Each row is as tall as its tap area (`bench`/`sign`,
+/// a phone's 48 dp), and the pair grows upward, so the two never overlap. Alone, the bench row
+/// takes the lower place. Returns the places of the two rows.
+fn check_rows(base: Rect, bench: Option<f32>, sign: Option<f32>, gap: f32) -> (Option<Rect>, Option<Rect>) {
+    let mut top = base.y + base.h;
+    let sign_row = sign.map(|s| {
+        let r = Rect::new(base.x, top - s, base.w, s);
+        top = r.y - gap;
+        r
+    });
+    let bench_row = bench.map(|b| Rect::new(base.x, top - b, base.w, b));
+    (bench_row, sign_row)
 }
 
 fn panel_slots(showing_type: bool) -> bool {
@@ -2691,6 +2712,51 @@ mod tests {
         // An empty cell with nothing selected: 0x498d0c(0), the pack.
         assert_eq!(s.press(Controls::Both, None), GridPress::Nothing);
         assert_eq!(s, sel(None, None));
+    }
+
+    #[test]
+    fn the_check_rows_never_overlap() {
+        // Base: the 8 px-above-the-box bottom of the original's block (226 at Normal).
+        let base = Rect::new(574.0, 150.0, 248.0, 76.0);
+        assert_eq!(super::check_rows(base, Some(18.0), None, 4.0), (Some(Rect::new(574.0, 208.0, 248.0, 18.0)), None), "the bench row alone sits at the bottom");
+        assert_eq!(super::check_rows(base, None, Some(18.0), 4.0), (None, Some(Rect::new(574.0, 208.0, 248.0, 18.0))), "the sign row alone sits at the bottom");
+        // Both on the desktop: the sign row at the bottom, the bench row one gap above it, nothing else between.
+        let (bench, sign) = super::check_rows(base, Some(18.0), Some(18.0), 4.0);
+        let (bench, sign) = (bench.unwrap(), sign.unwrap());
+        assert_eq!(sign.y + sign.h, base.y + base.h, "the sign row stays on the bottom");
+        assert_eq!(sign.y - (bench.y + bench.h), 4.0, "the rows are one gap apart");
+        // Both on a phone (48 dp, 132 px each, back to back): the pair grows upward, nothing overlaps.
+        let (bench, sign) = super::check_rows(base, Some(132.0), Some(132.0), 0.0);
+        let (bench, sign) = (bench.unwrap(), sign.unwrap());
+        assert_eq!(sign.y + sign.h, base.y + base.h, "the sign row stays on the bottom");
+        assert!(bench.y < base.y, "grows upward");
+        assert!(bench.y + bench.h <= sign.y + 1e-3, "{} {}", bench.y + bench.h, sign.y);
+    }
+
+    #[test]
+    fn the_phone_boxes_are_one_band_apart() {
+        // A phone's label at 12.5 dp (2.75 px per dp): each row is its 48 dp band, the boxes centred
+        // in them, the bands back to back. The two boxes' centres are one band (48 dp) apart.
+        let dp = 2.75;
+        let size = 12.5 * dp;
+        let band = crate::ui::widgets::checkbox_tap_height(size, Some(dp));
+        assert!((band - 48.0 * dp).abs() < 1e-3, "{band}");
+        let base = Rect::new(574.0, 150.0, 248.0, 76.0);
+        let (bench, sign) = super::check_rows(base, Some(band), Some(band), 0.0);
+        let (bench, sign) = (bench.unwrap(), sign.unwrap());
+        let centre = |r: Rect| crate::ui::widgets::checkbox_centred_box(r, size);
+        let (cb, cs) = (centre(bench), centre(sign));
+        let (yb, ys) = (cb.y + cb.h / 2.0, cs.y + cs.h / 2.0);
+        assert!(((ys - yb) - band).abs() < 1e-3, "{ys} - {yb} should be one band {band}");
+        // Each box lies inside its own band.
+        assert!(cb.y >= bench.y && cb.y + cb.h <= bench.y + bench.h + 1e-3);
+        assert!(cs.y >= sign.y && cs.y + cs.h <= sign.y + sign.h + 1e-3);
+    }
+
+    #[test]
+    fn the_dismiss_box_grows_with_the_text_only() {
+        assert_eq!(super::dismiss_lift(1.0), 0.0);
+        assert!((super::dismiss_lift(1.5) - 17.0).abs() < 1e-4);
     }
 
     #[test]

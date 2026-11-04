@@ -106,7 +106,7 @@ There is no option for it.
 
 Advanced settings (the regular settings window's More button) has **Unit battle
 participation**, off by default. With it enabled, select a living non-hero in the army
-window and use **Exclude from battles** / **Return to battle** beside the dismiss button.
+window and tick the **Exclude from battles** check box (`Не участвует в боях`) above the «Не напоминать» row, both in the block above the dismiss box (it grows upward when both do not fit). After it is ticked or unticked the unit's selection is cleared.
 The card and unit panel identify a marked member. The hero cannot be excluded.
 
 Only the player-side fighter list changes, both when attacking and defending. Marked
