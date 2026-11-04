@@ -17,9 +17,11 @@ use razdor::studio::doc::DocEdit;
 use razdor::studio::scenario::{self as sc, VictoryDraft};
 use razdor::studio::texts::{self as tx, Status};
 use razdor::trf;
+use egui_phosphor::regular as ic;
 use toml_edit::Value;
 
 use super::forms;
+use super::inspector_kit as kit;
 use super::inspector::spec_now;
 use super::{Jump, Viewer, ERROR_RED, WARNING_AMBER};
 
@@ -104,6 +106,8 @@ pub struct ScenarioUi {
     pub record_rename: String,
     /// The price's steps are open (the snapshot option `units` opens them).
     pub price_open: bool,
+    /// The record whose suggested price the author kept (its suggestion is hidden until another record).
+    pub price_kept: Option<String>,
     /// The game's prices of the package, for the package they were made of (`ui::studio::records`).
     pub priced: Option<(std::sync::Arc<razdor::pack::load::Package>, razdor::studio::records::Priced)>,
 }
@@ -134,9 +138,7 @@ impl Viewer<'_> {
 
     /// The package settings form (the Inspector's Package focus).
     pub(super) fn package_form(&mut self, ui: &mut Ui) {
-        ui.strong(tr("Package settings"));
-        ui.weak(tr("package.toml: each change is one undo step (Ctrl+Z)."));
-        ui.separator();
+        let q = super::inspector::head(ui, ic::PACKAGE, tr("Package settings"), "package.toml");
         let Some(pkg) = self.pkg.clone() else {
             ui.colored_label(ERROR_RED, tr("The package could not be read: see Problems."));
             return;
@@ -149,53 +151,50 @@ impl Viewer<'_> {
         let keys: Vec<String> = texts.keys().cloned().collect();
         let file = "package.toml";
         let mut edits: Vec<(&str, Option<Value>, bool)> = Vec::new();
-        egui::Grid::new(ui.id().with("pkg-grid")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-            ui.label(tr("Id"));
-            ui.monospace(m.id.as_str());
-            ui.end_row();
-            ui.label(tr("Version"));
-            if let Some(v) = forms::text_field(ui, "pkg-version", &m.version, 120.0) {
+        kit::section(ui, "package", "main", tr("Main"), true, &q, |ui| {
+            kit::row(ui, &q, tr("Id"), "package.id", None, |ui| ui.monospace(m.id.as_str()));
+            if let Some(v) = kit::row(ui, &q, tr("Version"), "package.version", None, |ui| forms::text_field(ui, "pkg-version", &m.version, 120.0)).value.flatten() {
                 edits.push(("version", Some(Value::from(v)), false));
             }
-            ui.end_row();
-            ui.label(tr("Title"));
-            if let Some(v) = forms::text_key(ui, "pkg-title", &m.title, &keys, &texts) {
+            if let Some(v) = kit::row(ui, &q, tr("Title"), "package.title", None, |ui| forms::text_key(ui, "pkg-title", &m.title, &keys, &texts)).value.flatten() {
                 edits.push(("title", Some(Value::from(v)), false));
             }
-            ui.end_row();
-            ui.label(tr("Description"));
-            ui.vertical(|ui| {
-                let mut on = m.description.is_some();
-                if let Some(on2) = forms::optional(ui, tr("Has a description"), on) {
-                    on = on2;
+            let description = kit::row(ui, &q, tr("Description"), "package.description", None, |ui| {
+                let mut toggle = None;
+                let mut text = None;
+                ui.vertical(|ui| {
+                    toggle = forms::optional(ui, tr("Has a description"), m.description.is_some());
+                    if let Some(d) = &m.description {
+                        text = forms::text_key(ui, "pkg-description", d, &keys, &texts);
+                    }
+                });
+                (toggle, text)
+            })
+            .value;
+            if let Some((toggle, text)) = description {
+                if let Some(on) = toggle {
                     let key = format!("{}.description", m.id.replace('-', "_"));
                     edits.push(("description", if on { Some(Value::from(key)) } else { None }, false));
                 }
-                if let Some(d) = &m.description {
-                    if let Some(v) = forms::text_key(ui, "pkg-description", d, &keys, &texts) {
-                        edits.push(("description", Some(Value::from(v)), false));
-                    }
+                if let Some(v) = text {
+                    edits.push(("description", Some(Value::from(v)), false));
                 }
-            });
-            ui.end_row();
-            ui.label(tr("Author"));
-            if let Some(v) = forms::text_field(ui, "pkg-author", &m.author, 180.0) {
+            }
+            if let Some(v) = kit::row(ui, &q, tr("Author"), "package.author", None, |ui| forms::text_field(ui, "pkg-author", &m.author, 180.0)).value.flatten() {
                 edits.push(("author", Some(Value::from(v)), false));
             }
-            ui.end_row();
-            ui.label(tr("Licence"));
-            if let Some(v) = forms::choice(ui, "pkg-license", &m.license, &[sc::LICENCE]) {
+            ui.add_space(4.0);
+            kit::note(ui, &trf!("Requires: {list}", list = if m.requires.is_empty() { "-".to_string() } else { m.requires.join(", ") }));
+            kit::note(ui, tr("The id is read only: it names the package in saves."));
+        });
+        kit::section(ui, "package", "licence", tr("Licence"), true, &q, |ui| {
+            if let Some(v) = kit::row(ui, &q, tr("Licence"), "package.license", None, |ui| forms::choice(ui, "pkg-license", &m.license, &[sc::LICENCE])).value.flatten() {
                 edits.push(("license", Some(Value::from(v)), false));
             }
-            ui.end_row();
-            ui.label(tr("Base"));
-            if let Some(v) = forms::choice(ui, "pkg-base", &m.base, &razdor::pack::manifest::BASES) {
+            if let Some(v) = kit::row(ui, &q, tr("Base"), "package.base", None, |ui| forms::choice(ui, "pkg-base", &m.base, &razdor::pack::manifest::BASES)).value.flatten() {
                 edits.push(("base", Some(Value::from(v)), false));
             }
-            ui.end_row();
         });
-        ui.weak(trf!("Requires: {list}", list = if m.requires.is_empty() { "-".to_string() } else { m.requires.join(", ") }));
-        ui.weak(tr("The id is read only: it names the package in saves."));
         for (key, value, _) in edits {
             match sc::package_field(key, value) {
                 Ok(edit) => {
@@ -218,13 +217,12 @@ impl Viewer<'_> {
     /// The map header form (the Inspector's Header focus): title, description, start date, the
     /// relations grid, the terrain palette, and the victory.
     pub(super) fn header_form(&mut self, ui: &mut Ui) {
-        ui.strong(tr("Map settings"));
-        ui.weak(tr("The map's header and victory: each change is one undo step (Ctrl+Z)."));
-        ui.separator();
         let Some(map) = self.maps.map.clone() else {
+            super::inspector::head(ui, ic::MAP_TRIFOLD, tr("Map settings"), tr("Map"));
             ui.weak(tr("No map to show."));
             return;
         };
+        let q = super::inspector::head(ui, ic::MAP_TRIFOLD, tr("Map settings"), &map);
         let file = format!("maps/{map}/map.toml");
         let Some(spec) = spec_now(self.ws, self.pkg.as_deref(), &map) else {
             ui.colored_label(ERROR_RED, tr("The map file could not be read."));
@@ -232,167 +230,178 @@ impl Viewer<'_> {
         };
         let texts = texts_of(self.pkg.as_deref());
         let keys: Vec<String> = texts.keys().cloned().collect();
+        let size = map_size(self);
         let mut out: Vec<DocEdit> = Vec::new();
         let mut label = "set map header".to_string();
-        egui::Grid::new(ui.id().with("hdr-grid")).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-            ui.label(tr("Title"));
-            if let Some(v) = forms::text_key(ui, "hdr-title", &spec.title, &keys, &texts) {
-                if let Ok(e) = sc::map_text_key("title", Some(&v)) {
-                    out.push(e);
-                    label = "set title".into();
+        let mut errors: Vec<String> = Vec::new();
+        kit::section(ui, "map", "main", tr("Main"), true, &q, |ui| {
+            if let Some(v) = kit::row(ui, &q, tr("Title"), "map.title", None, |ui| forms::text_key(ui, "hdr-title", &spec.title, &keys, &texts)).value.flatten() {
+                match sc::map_text_key("title", Some(&v)) {
+                    Ok(e) => {
+                        out.push(e);
+                        label = "set title".into();
+                    }
+                    Err(e) => errors.push(e),
                 }
             }
-            ui.end_row();
-            ui.label(tr("Description"));
-            ui.vertical(|ui| {
-                let on = spec.description.is_some();
-                if let Some(on2) = forms::optional(ui, tr("Has a description"), on) {
-                    if on2 {
+            let description = kit::row(ui, &q, tr("Description"), "map.description", None, |ui| {
+                let mut toggle = None;
+                let mut text = None;
+                ui.vertical(|ui| {
+                    toggle = forms::optional(ui, tr("Has a description"), spec.description.is_some());
+                    if let Some(d) = &spec.description {
+                        text = forms::text_key(ui, "hdr-description", d, &keys, &texts);
+                    }
+                });
+                (toggle, text)
+            })
+            .value;
+            if let Some((toggle, text)) = description {
+                if let Some(on) = toggle {
+                    if on {
                         out.push(sc::map_text_key("description", Some(&format!("{map}.description"))).unwrap_or_else(|_| DocEdit::Remove { path: vec![], key: "description".into() }));
                     } else if let Ok(e) = sc::map_text_key("description", None) {
                         out.push(e);
                     }
                 }
-                if let Some(d) = &spec.description {
-                    if let Some(v) = forms::text_key(ui, "hdr-description", d, &keys, &texts) {
-                        if let Ok(e) = sc::map_text_key("description", Some(&v)) {
-                            out.push(e);
-                        }
+                if let Some(v) = text {
+                    if let Ok(e) = sc::map_text_key("description", Some(&v)) {
+                        out.push(e);
                     }
                 }
-            });
-            ui.end_row();
-            ui.label(tr("Start date"));
-            if let Some(v) = forms::text_field(ui, "hdr-date", &spec.start_date, 120.0) {
+            }
+            if let Some(v) = kit::row(ui, &q, tr("Start date"), "map.start_date", None, |ui| forms::text_field(ui, "hdr-date", &spec.start_date, 120.0)).value.flatten() {
                 match sc::start_date(&v) {
                     Ok(e) => {
                         out.push(e);
                         label = "set start date".into();
                     }
-                    Err(e) => self.scen.error = Some(e),
+                    Err(e) => errors.push(e),
                 }
             }
-            ui.end_row();
         });
-        ui.add_space(4.0);
-        ui.strong(tr("Relations"));
-        ui.weak(tr("Rows are the side, columns the side it is towards: player, ally, neighbour, enemy (−3 to 3)."));
-        let names = [tr("Player"), tr("Ally"), tr("Neighbour"), tr("Enemy")];
-        let mut grid = spec.relations;
-        let mut changed = false;
-        egui::Grid::new(ui.id().with("rel-grid")).num_columns(5).spacing([8.0, 4.0]).show(ui, |ui| {
-            ui.label("");
-            for n in names {
-                ui.weak(n);
-            }
-            ui.end_row();
-            for (r, row) in grid.iter_mut().enumerate() {
-                ui.weak(names[r]);
-                for (c, cell) in row.iter_mut().enumerate() {
-                    if let Some(v) = forms::int_field(ui, &format!("rel-{r}-{c}"), i64::from(*cell), -3, 3) {
-                        *cell = v as i8;
-                        changed = true;
+        kit::section(ui, "map", "relations", tr("Relations"), true, &q, |ui| {
+            kit::note(ui, tr("Rows are the side, columns the side it is towards: player, ally, neighbour, enemy (−3 to 3)."));
+            let names = [tr("Player"), tr("Ally"), tr("Neighbour"), tr("Enemy")];
+            let mut grid = spec.relations;
+            let mut changed = false;
+            kit::block(ui, &q, tr("Relations"), "map.relations", |ui| {
+                egui::Grid::new(ui.id().with("rel-grid")).num_columns(5).spacing([8.0, 4.0]).show(ui, |ui| {
+                    ui.label("");
+                    for n in names {
+                        ui.weak(n);
                     }
+                    ui.end_row();
+                    for (r, row) in grid.iter_mut().enumerate() {
+                        ui.weak(names[r]);
+                        for (c, cell) in row.iter_mut().enumerate() {
+                            if let Some(v) = forms::int_field(ui, &format!("rel-{r}-{c}"), i64::from(*cell), -3, 3) {
+                                *cell = v as i8;
+                                changed = true;
+                            }
+                        }
+                        ui.end_row();
+                    }
+                });
+            });
+            if changed {
+                match sc::relations(grid) {
+                    Ok(e) => {
+                        out.push(e);
+                        label = "set relations".into();
+                    }
+                    Err(e) => errors.push(e),
                 }
-                ui.end_row();
             }
         });
-        if changed {
-            match sc::relations(grid) {
-                Ok(e) => {
-                    out.push(e);
-                    label = "set relations".into();
-                }
-                Err(e) => self.scen.error = Some(e),
-            }
-        }
-        ui.add_space(4.0);
-        ui.strong(tr("Terrain palette"));
-        ui.weak(tr("The colours that differ from the default palette."));
         let mut palette_out: Vec<DocEdit> = Vec::new();
-        for (kind, colour) in &spec.terrain_palette {
-            ui.horizontal(|ui| {
-                ui.monospace(kind.as_str());
-                if let Some(v) = forms::text_field(ui, &format!("pal-{kind}"), colour, 80.0) {
-                    match sc::palette(kind, Some(&v)) {
-                        Ok(e) => palette_out.push(e),
-                        Err(e) => self.scen.error = Some(e),
+        kit::section(ui, "map", "palette", tr("Terrain palette"), false, &q, |ui| {
+            kit::note(ui, tr("The colours that differ from the default palette."));
+            for (kind, colour) in &spec.terrain_palette {
+                let edit = kit::row(ui, &q, kind.as_str(), &format!("map.terrain_palette.{kind}"), None, |ui| {
+                    let mut value = None;
+                    let mut remove = false;
+                    if let Some(v) = forms::text_field(ui, &format!("pal-{kind}"), colour, 80.0) {
+                        value = Some(v);
                     }
+                    if ui.small_button(tr("Remove")).clicked() {
+                        remove = true;
+                    }
+                    (value, remove)
+                })
+                .value;
+                match edit {
+                    Some((Some(v), _)) => match sc::palette(kind, Some(&v)) {
+                        Ok(e) => palette_out.push(e),
+                        Err(e) => errors.push(e),
+                    },
+                    Some((None, true)) => {
+                        if let Ok(e) = sc::palette(kind, None) {
+                            palette_out.push(e);
+                        }
+                    }
+                    _ => {}
                 }
-                if ui.small_button(tr("Remove")).clicked() {
-                    if let Ok(e) = sc::palette(kind, None) {
-                        palette_out.push(e);
+            }
+            kit::row(ui, &q, tr("New colour"), "map.terrain_palette", None, |ui| {
+                let kinds: Vec<&str> = razdor::pack::terrain::DEFAULT_PALETTE.iter().map(|(k, _)| *k).filter(|k| !spec.terrain_palette.contains_key(*k)).collect();
+                if self.scen.new_kind.is_empty() {
+                    self.scen.new_kind = kinds.first().map_or(String::new(), |k| (*k).to_string());
+                }
+                if let Some(p) = forms::choice(ui, "pal-new-kind", &self.scen.new_kind, &kinds) {
+                    self.scen.new_kind = p;
+                }
+                let kind = self.scen.new_kind.clone();
+                if let Some(v) = forms::text_field(ui, "pal-new-colour", "", 80.0) {
+                    if !kind.is_empty() {
+                        match sc::palette(&kind, Some(&v)) {
+                            Ok(e) => palette_out.push(e),
+                            Err(e) => errors.push(e),
+                        }
                     }
                 }
             });
-        }
-        ui.horizontal(|ui| {
-            let kinds: Vec<&str> = razdor::pack::terrain::DEFAULT_PALETTE.iter().map(|(k, _)| *k).filter(|k| !spec.terrain_palette.contains_key(*k)).collect();
-            if self.scen.new_kind.is_empty() {
-                self.scen.new_kind = kinds.first().map_or(String::new(), |k| (*k).to_string());
-            }
-            if let Some(p) = forms::choice(ui, "pal-new-kind", &self.scen.new_kind, &kinds) {
-                self.scen.new_kind = p;
-            }
-            let kind = self.scen.new_kind.clone();
-            if let Some(v) = forms::text_field(ui, "pal-new-colour", "", 80.0) {
-                if !kind.is_empty() {
-                    match sc::palette(&kind, Some(&v)) {
-                        Ok(e) => palette_out.push(e),
-                        Err(e) => self.scen.error = Some(e),
-                    }
-                }
-            }
         });
         out.extend(palette_out);
-        ui.add_space(4.0);
-        ui.strong(tr("Victory"));
         let draft_now = victory_draft(spec.victory.get_ref());
         let mut draft = draft_now.clone();
-        ui.horizontal(|ui| {
-            ui.label(tr("Kind"));
-            if let Some(k) = forms::choice(ui, "vic-kind", &draft.kind, &sc::VICTORY_KINDS) {
+        kit::section(ui, "map", "victory", tr("Victory"), true, &q, |ui| {
+            if let Some(k) = kit::row(ui, &q, tr("Kind"), "victory.kind", None, |ui| forms::choice(ui, "vic-kind", &draft.kind, &sc::VICTORY_KINDS)).value.flatten() {
                 draft.kind = k;
             }
-        });
-        match draft.kind.as_str() {
-            "defeat_army" => {
-                let ids: Vec<&str> = spec.army.iter().map(|a| a.get_ref().id.as_str()).collect();
-                let current = draft.army.clone().unwrap_or_default();
-                ui.horizontal(|ui| {
-                    ui.label(tr("Army"));
-                    if let Some(a) = forms::choice(ui, "vic-army", &current, &ids) {
+            match draft.kind.as_str() {
+                "defeat_army" => {
+                    let ids: Vec<&str> = spec.army.iter().map(|a| a.get_ref().id.as_str()).collect();
+                    let current = draft.army.clone().unwrap_or_default();
+                    if let Some(a) = kit::row(ui, &q, tr("Army"), "victory.army", None, |ui| forms::choice(ui, "vic-army", &current, &ids)).value.flatten() {
                         draft.army = Some(a);
                     }
-                });
-            }
-            "capture" => {
-                let ids: Vec<&str> = spec.building.iter().map(|b| b.get_ref().id.as_str()).collect();
-                let current = draft.building.clone().unwrap_or_default();
-                ui.horizontal(|ui| {
-                    ui.label(tr("Building"));
-                    if let Some(b) = forms::choice(ui, "vic-building", &current, &ids) {
+                }
+                "capture" => {
+                    let ids: Vec<&str> = spec.building.iter().map(|b| b.get_ref().id.as_str()).collect();
+                    let current = draft.building.clone().unwrap_or_default();
+                    if let Some(b) = kit::row(ui, &q, tr("Building"), "victory.building", None, |ui| forms::choice(ui, "vic-building", &current, &ids)).value.flatten() {
                         draft.building = Some(b);
                     }
-                });
-            }
-            "reach" => {
-                let [x, y] = draft.cell.unwrap_or([0, 0]);
-                ui.horizontal(|ui| {
-                    ui.label(tr("Cell"));
-                    let nx = forms::int_field(ui, "vic-x", i64::from(x), 0, i64::from(map_size(self).0.saturating_sub(1)));
-                    let ny = forms::int_field(ui, "vic-y", i64::from(y), 0, i64::from(map_size(self).1.saturating_sub(1)));
-                    if nx.is_some() || ny.is_some() {
-                        draft.cell = Some([nx.map_or(x, |v| v as u32), ny.map_or(y, |v| v as u32)]);
+                }
+                "reach" => {
+                    let [x, y] = draft.cell.unwrap_or([0, 0]);
+                    let cell = kit::row(ui, &q, tr("Cell"), "victory.cell", None, |ui| {
+                        let nx = forms::int_field(ui, "vic-x", i64::from(x), 0, i64::from(size.0.saturating_sub(1)));
+                        let ny = forms::int_field(ui, "vic-y", i64::from(y), 0, i64::from(size.1.saturating_sub(1)));
+                        (nx, ny)
+                    })
+                    .value;
+                    if let Some((nx, ny)) = cell {
+                        if nx.is_some() || ny.is_some() {
+                            draft.cell = Some([nx.map_or(x, |v| v as u32), ny.map_or(y, |v| v as u32)]);
+                        }
                     }
-                });
+                }
+                _ => {}
             }
-            _ => {}
-        }
-        let msg = draft.message.clone().unwrap_or_default();
-        ui.horizontal(|ui| {
-            ui.label(tr("Message"));
-            if let Some(v) = forms::text_key(ui, "vic-message", &msg, &keys, &texts) {
+            let msg = draft.message.clone().unwrap_or_default();
+            if let Some(v) = kit::row(ui, &q, tr("Message"), "victory.message", None, |ui| forms::text_key(ui, "vic-message", &msg, &keys, &texts)).value.flatten() {
                 draft.message = Some(v);
             }
         });
@@ -403,8 +412,11 @@ impl Viewer<'_> {
                     out.extend(edits);
                     label = "set victory".into();
                 }
-                Err(e) => self.scen.error = Some(e),
+                Err(e) => errors.push(e),
             }
+        }
+        if let Some(e) = errors.into_iter().next() {
+            self.scen.error = Some(e);
         }
         if !out.is_empty() {
             let mut err = None;
@@ -604,83 +616,130 @@ impl Viewer<'_> {
     /// The Inspector's campaign form: the graph's carry flags and start, a node's revisit and start,
     /// or an edge's order, target and conditions.
     pub(super) fn campaign_inspector(&mut self, ui: &mut Ui) {
-        ui.strong(tr("Campaign"));
-        let Some(pkg) = self.pkg.clone() else { return };
+        let Some(pkg) = self.pkg.clone() else {
+            super::inspector::head(ui, ic::FLOW_ARROW, tr("Campaign"), cg::FILE);
+            return;
+        };
         let text = self.ws.text_of(cg::FILE).ok();
         let graph = cg::build(&pkg, text.as_deref(), razdor::pack::open::lang());
         if !graph.exists {
+            super::inspector::head(ui, ic::FLOW_ARROW, tr("Campaign"), cg::FILE);
             ui.weak(tr("No campaign.toml: create it on the Campaign screen."));
             return;
         }
         match self.scen.camp.clone() {
             CampSel::Graph => {
-                ui.weak(tr("Carry: what moves from map to map on a victory or a travel."));
-                for (key, on) in graph.carry.flags.iter() {
-                    let mut v = *on;
-                    if ui.checkbox(&mut v, *key).changed() {
-                        self.apply_camp(&format!("set carry {key}"), vec![sc::set_carry(key, v)]);
+                let q = super::inspector::head(ui, ic::FLOW_ARROW, tr("Campaign"), cg::FILE);
+                kit::section(ui, "campaign", "carry", tr("Carry"), true, &q, |ui| {
+                    kit::note(ui, tr("Carry: what moves from map to map on a victory or a travel."));
+                    for (key, on) in graph.carry.flags.iter() {
+                        let edit = kit::row(ui, &q, key, &format!("campaign.carry.{key}"), None, |ui| {
+                            let mut v = *on;
+                            (ui.checkbox(&mut v, "").changed()).then_some(v)
+                        })
+                        .value
+                        .flatten();
+                        if let Some(v) = edit {
+                            self.apply_camp(&format!("set carry {key}"), vec![sc::set_carry(key, v)]);
+                        }
                     }
-                }
-                ui.label(trf!("Start: {start}", start = graph.start.clone().unwrap_or_else(|| "-".into())));
+                });
+                kit::section(ui, "campaign", "start", tr("Start"), true, &q, |ui| {
+                    kit::row(ui, &q, tr("Start map"), "campaign.start", None, |ui| ui.label(graph.start.clone().unwrap_or_else(|| "-".into())));
+                });
             }
             CampSel::Node(id) => {
                 let Some(node) = graph.node(&id).cloned() else { return };
-                ui.strong(id.as_str());
-                let mut rv = node.revisit;
-                if ui.checkbox(&mut rv, tr("Revisit: keeps the map's state when the hero leaves")).changed() {
-                    self.apply_camp("set revisit", vec![sc::set_revisit(&id, rv)]);
-                }
-                if graph.start.as_deref() != Some(id.as_str()) && ui.button(tr("Make the start")).clicked() {
-                    self.apply_camp("set start", vec![sc::set_start(&id)]);
-                }
-                ui.weak(tr("Next, in priority order:"));
-                for e in graph.edges_from(&id) {
-                    if ui.link(trf!("Next {n}: {to}", n = e.index + 1, to = e.to.as_str())).clicked() {
-                        self.scen.camp = CampSel::Edge(id.clone(), e.index);
+                let q = super::inspector::head(ui, ic::MAP_PIN, &id, tr("Node"));
+                kit::section(ui, "campaign", "node", tr("Node"), true, &q, |ui| {
+                    let rv = kit::row(ui, &q, tr("Revisit"), "campaign.revisit", None, |ui| {
+                        let mut rv = node.revisit;
+                        (ui.checkbox(&mut rv, tr("Revisit: keeps the map's state when the hero leaves")).changed()).then_some(rv)
+                    })
+                    .value
+                    .flatten();
+                    if let Some(rv) = rv {
+                        self.apply_camp("set revisit", vec![sc::set_revisit(&id, rv)]);
                     }
-                }
-                for h in graph.hidden.iter().filter(|h| h.from.as_deref() == Some(id.as_str())) {
-                    ui.weak(trf!("{to} (dashed, {by})", to = h.to.as_str(), by = h.by.as_str()));
-                }
+                    if graph.start.as_deref() != Some(id.as_str()) && kit::row(ui, &q, tr("Start"), "campaign.start", None, |ui| ui.button(tr("Make the start"))).value.is_some_and(|r| r.clicked()) {
+                        self.apply_camp("set start", vec![sc::set_start(&id)]);
+                    }
+                });
+                kit::section(ui, "campaign", "next", tr("Next"), true, &q, |ui| {
+                    kit::note(ui, tr("Next, in priority order:"));
+                    for e in graph.edges_from(&id) {
+                        let shown = kit::row(ui, &q, &trf!("Next {n}", n = e.index + 1), &format!("campaign.next.{}", e.index + 1), None, |ui| ui.link(e.to.as_str()));
+                        if shown.value.is_some_and(|l| l.clicked()) {
+                            self.scen.camp = CampSel::Edge(id.clone(), e.index);
+                        }
+                    }
+                    for h in graph.hidden.iter().filter(|h| h.from.as_deref() == Some(id.as_str())) {
+                        kit::note(ui, &trf!("{to} (dashed, {by})", to = h.to.as_str(), by = h.by.as_str()));
+                    }
+                });
             }
             CampSel::Edge(from, index) => {
                 let Some(edge) = graph.edges.iter().find(|e| e.from == from && e.index == index).cloned() else {
                     self.scen.camp = CampSel::Graph;
                     return;
                 };
-                ui.strong(trf!("Edge: {from} → {to}", from = from.as_str(), to = edge.to.as_str()));
-                ui.horizontal(|ui| {
-                    ui.label(trf!("Priority {n}", n = index + 1));
-                    if ui.add_enabled(index > 0, egui::Button::new(tr("Up"))).clicked() {
-                        self.apply_camp("move edge up", vec![sc::move_edge(&from, index, index - 1)]);
-                        self.scen.camp = CampSel::Edge(from.clone(), index - 1);
-                    }
-                    let last = graph.edges_from(&from).count().saturating_sub(1);
-                    if ui.add_enabled(index < last, egui::Button::new(tr("Down"))).clicked() {
-                        self.apply_camp("move edge down", vec![sc::move_edge(&from, index, index + 1)]);
-                        self.scen.camp = CampSel::Edge(from.clone(), index + 1);
-                    }
-                    if ui.button(tr("Delete")).clicked() {
-                        self.apply_camp("delete edge", vec![sc::delete_edge(&from, index)]);
-                        self.scen.camp = CampSel::Node(from.clone());
+                let q = super::inspector::head(ui, ic::FLOW_ARROW, &trf!("Edge: {from} – {to}", from = from.as_str(), to = edge.to.as_str()), tr("Campaign"));
+                let last = graph.edges_from(&from).count().saturating_sub(1);
+                kit::section(ui, "campaign", "edge", tr("Edge"), true, &q, |ui| {
+                    let priority = trf!("Priority {n}", n = index + 1);
+                    let tool = kit::row(ui, &q, &priority, &format!("campaign.priority.{from}"), None, |ui| {
+                        let mut tool = None;
+                        ui.horizontal(|ui| {
+                            if ui.add_enabled(index > 0, kit::icon_button(ic::ARROW_UP, 24.0)).on_hover_text(tr("Move up")).clicked() {
+                                tool = Some(0);
+                            }
+                            if ui.add_enabled(index < last, kit::icon_button(ic::ARROW_DOWN, 24.0)).on_hover_text(tr("Move down")).clicked() {
+                                tool = Some(1);
+                            }
+                            if ui.add_enabled(true, kit::icon_button(ic::TRASH, 24.0)).on_hover_text(tr("Delete")).clicked() {
+                                tool = Some(2);
+                            }
+                        });
+                        tool
+                    })
+                    .value
+                    .flatten();
+                    match tool {
+                        Some(0) => {
+                            self.apply_camp("move edge up", vec![sc::move_edge(&from, index, index - 1)]);
+                            self.scen.camp = CampSel::Edge(from.clone(), index - 1);
+                        }
+                        Some(1) => {
+                            self.apply_camp("move edge down", vec![sc::move_edge(&from, index, index + 1)]);
+                            self.scen.camp = CampSel::Edge(from.clone(), index + 1);
+                        }
+                        Some(2) => {
+                            self.apply_camp("delete edge", vec![sc::delete_edge(&from, index)]);
+                            self.scen.camp = CampSel::Node(from.clone());
+                        }
+                        _ => {}
                     }
                 });
-                if self.scen.edge_if_for.as_ref() != Some(&(from.clone(), index)) {
-                    self.scen.edge_if = edge.conds.join("\n");
-                    self.scen.edge_if_for = Some((from.clone(), index));
-                }
-                ui.weak(tr("Conditions (all must hold), one inline table per line (see the wiki). Empty: always taken."));
-                ui.add(egui::TextEdit::multiline(&mut self.scen.edge_if).desired_rows(4).desired_width(f32::INFINITY).code_editor());
-                if ui.button(tr("Apply conditions")).clicked() {
-                    match parse_conds(&self.scen.edge_if) {
-                        Ok(values) => {
-                            self.apply_camp("set conditions", vec![sc::set_edge_if(&from, index, &values)]);
-                            self.scen.error = None;
-                        }
-                        Err(e) => self.scen.error = Some(e),
+                if matches!(self.scen.camp, CampSel::Edge(..)) {
+                    if self.scen.edge_if_for.as_ref() != Some(&(from.clone(), index)) {
+                        self.scen.edge_if = edge.conds.join("\n");
+                        self.scen.edge_if_for = Some((from.clone(), index));
                     }
+                    kit::section(ui, "campaign", "conditions", tr("Conditions"), true, &q, |ui| {
+                        kit::note(ui, tr("Conditions (all must hold), one inline table per line (see the wiki). Empty: always taken."));
+                        ui.add(egui::TextEdit::multiline(&mut self.scen.edge_if).desired_rows(4).desired_width(f32::INFINITY).code_editor());
+                        if ui.button(tr("Apply conditions")).clicked() {
+                            match parse_conds(&self.scen.edge_if) {
+                                Ok(values) => {
+                                    self.apply_camp("set conditions", vec![sc::set_edge_if(&from, index, &values)]);
+                                    self.scen.error = None;
+                                }
+                                Err(e) => self.scen.error = Some(e),
+                            }
+                        }
+                    });
+                    self.show_scen_error(ui);
                 }
-                self.show_scen_error(ui);
             }
         }
     }

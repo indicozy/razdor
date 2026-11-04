@@ -192,6 +192,8 @@ fn interface(ui: &mut Ui, prefs: &mut StudioPrefs, scale: u32, reset_layout: &mu
         });
     });
     ui.add_space(10.0);
+    ui.checkbox(&mut prefs.field_keys, tr("File keys in labels")).on_hover_text(tr("Shows each Inspector field's key in the file under its label (otherwise it is in the tooltip)"));
+    ui.add_space(10.0);
     ui.horizontal(|ui| {
         ui.label(tr("Workspace layout"));
         if ui.button(tr("Reset layout")).clicked() {

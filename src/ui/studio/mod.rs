@@ -19,8 +19,9 @@ mod battletest;
 mod canvas;
 mod claude;
 mod forms;
-mod mcp;
 mod inspector;
+mod inspector_kit;
+mod mcp;
 mod map_tab;
 mod scores;
 mod newmap;
@@ -296,6 +297,10 @@ pub struct StudioScreen {
     battle_req: Option<battletest::Req>,
     /// Snapshot options whose picture needs the install (`battletest`, `aiview`), run once it is there.
     snap_todo: Vec<&'static str>,
+    /// The `inspector=army-keys` snapshot: the Inspector shows the file keys under the labels.
+    snap_keys: bool,
+    /// The `inspector-find=<text>` snapshot: the field search's text, set on the first frame.
+    snap_find: Option<String>,
     /// The `battlewatch` snapshot: the tester's first battle opens in the battle view.
     snap_watch: bool,
 }
@@ -380,6 +385,8 @@ impl StudioScreen {
             battle: battletest::BattleTest::default(),
             battle_req: None,
             snap_todo: Vec::new(),
+            snap_keys: false,
+            snap_find: None,
             snap_watch: false,
         })
     }
@@ -415,8 +422,39 @@ impl StudioScreen {
         let Some(id) = self.maps.map.clone() else { return Ok(()) };
         let path = format!("maps/{id}/map.toml");
         self.open_file(&path);
-        for opt in opts {
+        // `inspector=<what>` picks the Inspector's form: the same options as the forms' own (`package`,
+        // `header`, `campaign`, `trigger`, `dialog`, `units`, `items`), or a selection of its own.
+        let expanded: Vec<&str> = opts.iter().map(|o| o.strip_prefix("inspector=").map_or(*o, |what| match what {
+            "unit" => "units",
+            "item" => "items",
+            other => other,
+        })).collect();
+        for opt in &expanded {
             match *opt {
+                "army" => {}
+                "army-keys" => self.snap_keys = true,
+                other if other.starts_with("inspector-find=") => self.snap_find = Some(other["inspector-find=".len()..].to_string()),
+                "building" | "point" | "object" | "hero" => {
+                    let map = id.clone();
+                    let spec = inspector::spec_now(&self.ws, None, &map).ok_or("the map file could not be read")?;
+                    self.selection = Some(match *opt {
+                        "building" => Selection::Building(spec.building.first().map(|b| b.get_ref().id.clone()).ok_or("no building on the map")?),
+                        "point" => Selection::Point(if spec.point.is_empty() { return Err("no lantern on the map".into()) } else { 0 }),
+                        "object" => Selection::Object(if spec.object.is_empty() { return Err("no object on the map".into()) } else { 0 }),
+                        _ => Selection::Hero,
+                    });
+                }
+                "campaign-edge" => {
+                    self.scen.focus = Focus::Campaign;
+                    self.pending_tab = Some(Tab::Campaign);
+                    let text = self.ws.text_of(razdor::studio::campaign_graph::FILE).ok();
+                    if let Ok((pkg, _)) = self.ws.read_package() {
+                        let graph = razdor::studio::campaign_graph::build(&pkg, text.as_deref(), lang());
+                        if let Some(e) = graph.edges.first() {
+                            self.scen.camp = scenarios::CampSel::Edge(e.from.clone(), e.index);
+                        }
+                    }
+                }
                 "newmap" => self.newmap.open = true,
                 "battletest" | "battlewatch" => {
                     self.snap_watch |= *opt == "battlewatch";
@@ -994,6 +1032,11 @@ impl StudioScreen {
             self.lay_out(ctx, prefs, zoom_before);
         }
         let mut action = Action::None;
+        // The file keys under the labels: the setting, or a snapshot's option.
+        inspector_kit::set_inline_keys(ctx, prefs.field_keys || self.snap_keys);
+        if let Some(text) = self.snap_find.take() {
+            inspector_kit::set_query(ctx, &text);
+        }
         // The terminal of the Claude dock takes the keys first while it has the keyboard.
         self.claude.begin_frame();
         self.claude.take_input(ctx);
@@ -1204,9 +1247,12 @@ impl StudioScreen {
     /// author's bindings) and the function keys. Returns the action a command asked for.
     fn commands_frame(&mut self, ctx: &egui::Context, prefs: &mut StudioPrefs) -> Option<Action> {
         let ws = self.ws_kind;
+        inspector_kit::clear_find(ctx);
+        let inspector_hot = inspector_kit::hot(ctx);
         let active = move |scope: Scope| match scope {
             Scope::Global => true,
             Scope::Map => ws == WsKind::Map,
+            Scope::Inspector => inspector_hot,
         };
         let wants = ctx.wants_keyboard_input();
         // The function keys come from macroquad (egui-miniquad does not deliver them). A relayout pass of the
@@ -1227,6 +1273,9 @@ impl StudioScreen {
             }
         }
         let mut action = None;
+        if ids.contains(&"find") {
+            inspector_kit::request_find(ctx);
+        }
         for id in ids {
             if let Some(asked) = self.run_command(id, prefs) {
                 action = Some(asked);

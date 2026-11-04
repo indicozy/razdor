@@ -55,7 +55,14 @@ The interface scale (80 % to 150 %) is in the same Settings window. No text is d
 * **Map** — the map itself, drawn as the game draws it.
 * **Script** — the text of the open file. The selection is linked to the map: the selected object
   is highlighted in the text, and the other way round.
-* **Inspector** — the fields of the selected object.
+* **Inspector** — the fields of the selected object or file. At the top, the name and the type, and
+  under them a field search: it keeps the rows whose label or file key holds the query (Ctrl+F puts the
+  cursor in the search while the pointer is over the Inspector). The fields are grouped in sections,
+  which open and close and remember their state for each kind of object. A field's file key shows in
+  its tooltip; in Settings → "File keys in labels" it shows under the label. A changed field of a unit
+  or an item has a dot, and the reset icon on its right returns the base value. An army's troops, a dialog's choices
+  and a list of units drag by the grip on the left to reorder; the buttons under a list add, duplicate
+  and remove a row.
 * **Problems** — the result of the checks. A click goes to the place of the error.
 * **Output** — the log of the actions.
 
@@ -219,7 +226,7 @@ last result. Health only warns: it never stops a save or a play. The game's file
 The studio does not have route checks for every story yet. These come in later versions.
 
 The studio is being rebuilt in steps. Not done yet: the new tool strip and the map palette, layers and
-selections (copy, cut and paste of areas), search in the Inspector fields (Ctrl+F), the command palette
+selections (copy, cut and paste of areas), the command palette
 (Ctrl+Shift+P) and go to an object (Ctrl+P), the Play button (F5), Tab to hide the side panels, and the AI
 viewer inside Test (it is still on the map).
 

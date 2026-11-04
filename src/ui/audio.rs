@@ -271,7 +271,8 @@ pub struct Settings {
 /// Razdor Studio's settings, kept with the game's (the owner's machine, not the package): each
 /// workspace's dock layout as its JSON (the key is the workspace's id), the shortcuts the author
 /// changed (the command's id and its binding text), the packages opened most recently first, and
-/// the interface scale in per cent (`0` is the default, 100).
+/// the interface scale in per cent (`0` is the default, 100), and whether the Inspector shows the file keys
+/// under the labels.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct StudioPrefs {
@@ -279,6 +280,8 @@ pub struct StudioPrefs {
     pub keys: BTreeMap<String, String>,
     pub recent: Vec<RecentPackage>,
     pub scale: u32,
+    /// The Inspector shows each field's file key under its label («Ключи файла в подписях»).
+    pub field_keys: bool,
 }
 
 /// A package folder the studio opened: its path and when (seconds since the Unix epoch).

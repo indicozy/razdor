@@ -23,6 +23,8 @@ pub type Prefs = BTreeMap<String, String>;
 pub enum Scope {
     Global,
     Map,
+    /// The Inspector has the focus (the pointer was in it last frame).
+    Inspector,
 }
 
 /// Whether two scopes can take the same key: a global command overlaps every other.
@@ -70,7 +72,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("ws-test", n_("Test workspace"), ic::FLASK, "Alt+4"),
     cmd("drawer", n_("Bottom panel"), ic::CARET_UP, "Ctrl+J"),
     Command { later: n_("Comes in UX3"), ..cmd("side-panels", n_("Hide side panels"), ic::SIDEBAR_SIMPLE, "Tab") },
-    Command { later: n_("Comes in UX2"), ..cmd("find", n_("Find in view"), ic::MAGNIFYING_GLASS, "Ctrl+F") },
+    Command { scope: Scope::Inspector, ..cmd("find", n_("Find a field"), ic::MAGNIFYING_GLASS, "Ctrl+F") },
     Command { later: n_("Comes in UX5"), ..cmd("open-in-file", n_("Open in file"), ic::ARROW_SQUARE_OUT, "Ctrl+Shift+O") },
     cmd("cancel", n_("Cancel"), ic::X, "Esc"),
     cmd("settings", n_("Settings"), ic::GEAR, "Ctrl+,"),
@@ -317,8 +319,9 @@ pub fn mq_presses() -> Vec<Binding> {
         (K::F1, Key::F1), (K::F2, Key::F2), (K::F3, Key::F3), (K::F4, Key::F4), (K::F5, Key::F5), (K::F6, Key::F6),
         (K::F7, Key::F7), (K::F8, Key::F8), (K::F9, Key::F9), (K::F10, Key::F10), (K::F11, Key::F11), (K::F12, Key::F12),
     ];
-    let pressed = macroquad::input::get_keys_pressed();
-    let down = |a: K, b: K| macroquad::input::is_key_down(a) || macroquad::input::is_key_down(b);
+    // Through the UI's input layer (`ui::input`), as every screen reads its keys.
+    let pressed = crate::ui::input::get_keys_pressed();
+    let down = |a: K, b: K| crate::ui::input::is_key_down(a) || crate::ui::input::is_key_down(b);
     let (ctrl, shift, alt) = (down(K::LeftControl, K::RightControl), down(K::LeftShift, K::RightShift), down(K::LeftAlt, K::RightAlt));
     FN.iter()
         .filter(|(mq, _)| pressed.contains(mq))

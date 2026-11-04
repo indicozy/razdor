@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use egui::{CollapsingHeader, ComboBox, Grid, ScrollArea, TextEdit, Ui};
 use egui_macroquad::egui;
+use egui_phosphor::regular as ic;
 use razdor::dt::data::Stat;
 use razdor::i18n::tr;
 use razdor::pack::aliases;
@@ -19,6 +20,7 @@ use razdor::studio::records::{self as rec, ItemFail, Kind, Priced, Refused};
 use razdor::trf;
 
 use super::forms;
+use super::inspector_kit as kit;
 use super::scenarios::Focus;
 use super::{Jump, Viewer, ERROR_RED, WARNING_AMBER};
 
@@ -51,6 +53,7 @@ struct Asks {
     rename: Option<String>,
     delete: bool,
     apply: bool,
+    keep: bool,
     jump: Option<(String, u32)>,
 }
 
@@ -369,125 +372,125 @@ impl Viewer<'_> {
         };
 
         let mut asks = Asks::default();
-        ui.strong(format!("{}: {id}", if kind == Kind::Unit { tr("Unit type") } else { tr("Item") }));
-        ui.weak(tr("Each change is one undo step (Ctrl+Z)."));
-        ui.separator();
-        ui.horizontal_wrapped(|ui| {
-            ui.label(tr("Base"));
-            ui.monospace(row.base.as_str());
-            ui.weak(format!("{}:{}", row.file, row.line));
-        });
-        ui.horizontal_wrapped(|ui| {
-            ui.label(tr("Name"));
-            ui.weak(egui::RichText::new(row.name.as_str()).monospace());
-        });
-        if let Some(text) = pkg.texts.get(razdor::pack::open::lang()).and_then(|t| t.get(&row.name)).or_else(|| pkg.texts.values().find_map(|t| t.get(&row.name))) {
-            ui.label(text.as_str());
-        }
-        ui.separator();
+        let (icon, kind_word) = if kind == Kind::Unit { (ic::SHIELD_STAR, tr("Unit type")) } else { (ic::SCROLL, tr("Item")) };
+        let q = super::inspector::head(ui, icon, &format!("{kind_word}: {id}"), &row.base);
+        let kind_key = kind.key();
 
-        // The price: the formula's number, its «Apply», and its steps in a collapsible.
-        ui.strong(tr("Suggested price"));
-        if !has_install {
-            ui.colored_label(WARNING_AMBER, tr("The price needs the game's install: open the studio with the game installed."));
-        }
-        match (&unit_quote, &item_quote) {
-            (Some(UnitQuote::Price(p)), _) => match (p.tactical >= 1, p.price) {
-                (true, Some(gold)) => {
+        // The price: the formula's number, «Apply» and «Keep» (the suggestion goes away for this record), and
+        // its steps in a collapsible. The card is hidden when the author has kept the price.
+        let price_kept = self.scen.price_kept.as_deref() == Some(id.as_str());
+        kit::section(ui, kind_key, "price", tr("Price"), true, &q, |ui| {
+            if price_kept {
+                kit::note(ui, tr("The suggested price is kept as it is (the price field holds it)."));
+                return;
+            }
+            kit::card(ui, |ui| {
+                ui.strong(tr("Suggested price"));
+                if !has_install {
+                    ui.colored_label(WARNING_AMBER, tr("The price needs the game's install: open the studio with the game installed."));
+                }
+                let priced = match (&unit_quote, &item_quote) {
+                    (Some(UnitQuote::Price(p)), _) if p.tactical >= 1 && p.price.is_some() => Some(p.price.unwrap_or(0)),
+                    (_, Some(ItemQuote::Price(p))) => Some(p.banded),
+                    _ => None,
+                };
+                match (&unit_quote, &item_quote) {
+                    (Some(UnitQuote::Price(p)), _) => {
+                        if p.tactical < 1 || p.price.is_none() {
+                            ui.colored_label(WARNING_AMBER, tr("The formula gives no price here (see the steps)."));
+                        }
+                    }
+                    (Some(UnitQuote::Unresolved(e)), _) => {
+                        ui.colored_label(ERROR_RED, trf!("Cannot price: {e}", e = e));
+                    }
+                    (_, Some(ItemQuote::Skip(razdor::studio::cost::PriceSkip::NotPriced))) => {
+                        ui.weak(tr("Not priced: the price is 1, or the artefact is a potion or an item (the button leaves it alone)."));
+                    }
+                    (_, Some(ItemQuote::Skip(razdor::studio::cost::PriceSkip::NoGain))) => {
+                        ui.colored_label(WARNING_AMBER, tr("No unit type gains from it: the original's price there is not known. Set it by hand."));
+                    }
+                    (_, Some(ItemQuote::Unresolved(e))) => {
+                        ui.colored_label(ERROR_RED, trf!("Cannot price: {e}", e = e));
+                    }
+                    _ => {}
+                }
+                if let Some(gold) = priced {
+                    ui.label(trf!("{gold} gold, by the game's formula", gold = gold));
                     ui.horizontal(|ui| {
-                        ui.label(trf!("{gold} gold, by the game's formula", gold = gold));
-                        if ui.button(tr("Apply")).on_hover_text(tr("Write this price into the price field (one undo step)")).clicked() {
+                        if ui.button(tr("Apply the price")).on_hover_text(tr("Write this price into the price field (one undo step)")).clicked() {
                             asks.apply = true;
+                        }
+                        if ui.button(tr("Keep")).on_hover_text(tr("Leave the price field as it is")).clicked() {
+                            asks.keep = true;
                         }
                     });
                 }
-                _ => {
-                    ui.colored_label(WARNING_AMBER, tr("The formula gives no price here (see the steps)."));
-                }
-            },
-            (Some(UnitQuote::Unresolved(e)), _) => {
-                ui.colored_label(ERROR_RED, trf!("Cannot price: {e}", e = e));
-            }
-            (_, Some(ItemQuote::Price(p))) => {
-                ui.horizontal(|ui| {
-                    ui.label(trf!("{gold} gold, by the game's formula", gold = p.banded));
-                    if ui.button(tr("Apply")).on_hover_text(tr("Write this price into the price field (one undo step)")).clicked() {
-                        asks.apply = true;
+                CollapsingHeader::new(tr("How the price is made")).id_salt(("studio-inspector", kind_key, "price-steps")).default_open(price_open).show(ui, |ui| {
+                    if let Some(UnitQuote::Price(p)) = &unit_quote {
+                        ui.label(trf!("Strength S, the battle core's evaluator on the base stats: {s}", s = p.strength));
+                        ui.label(trf!("Tactical cost T: S times {mult} / 100 gives {t}", mult = p.multiplier, t = p.tactical));
+                        if p.tactical >= 1 {
+                            match p.gold_raw {
+                                Some(g) => ui.label(trf!("Gold: (T / 2.2 + 21) / {div} gives {g}", div = p.gold_div, g = g)),
+                                None => ui.colored_label(ERROR_RED, tr("Gold over 65,535: a range error in the original, no price.")),
+                            };
+                            if let Some(b) = p.banded {
+                                ui.label(trf!("Rounded down in bands: {b}", b = b));
+                            }
+                            if p.hero {
+                                ui.label(trf!("Hero class, doubled: {price}", price = p.price.unwrap_or(0)));
+                            } else {
+                                ui.weak(tr("Not a hero class: no doubling."));
+                            }
+                        }
+                    }
+                    if let Some(ItemQuote::Price(p)) = &item_quote {
+                        ui.label(trf!("Gains summed over the units that gain: {sum} (wearers {n}, gainers {m})", sum = p.sum, n = p.wearers, m = p.gainers));
+                        ui.label(trf!("Mean of the gains, plus 10, at least 20: {mean} plus 10 gives {raw}", mean = p.mean, raw = p.raw));
+                        ui.label(trf!("Rounded down in bands: {b}", b = p.banded));
+                    }
+                    if item_quote.is_none() && unit_quote.is_none() {
+                        ui.weak(tr("No price steps: the game's install is needed."));
                     }
                 });
-            }
-            (_, Some(ItemQuote::Skip(razdor::studio::cost::PriceSkip::NotPriced))) => {
-                ui.weak(tr("Not priced: the price is 1, or the artefact is a potion or an item (the button leaves it alone)."));
-            }
-            (_, Some(ItemQuote::Skip(razdor::studio::cost::PriceSkip::NoGain))) => {
-                ui.colored_label(WARNING_AMBER, tr("No unit type gains from it: the original's price there is not known. Set it by hand."));
-            }
-            (_, Some(ItemQuote::Unresolved(e))) => {
-                ui.colored_label(ERROR_RED, trf!("Cannot price: {e}", e = e));
-            }
-            _ => {}
-        }
-        CollapsingHeader::new(tr("How the price is made")).default_open(price_open).show(ui, |ui| {
-            if let Some(UnitQuote::Price(p)) = &unit_quote {
-                ui.label(trf!("Strength S, the battle core's evaluator on the base stats: {s}", s = p.strength));
-                ui.label(trf!("Tactical cost T: S times {mult} / 100 gives {t}", mult = p.multiplier, t = p.tactical));
-                if p.tactical >= 1 {
-                    match p.gold_raw {
-                        Some(g) => ui.label(trf!("Gold: (T / 2.2 + 21) / {div} gives {g}", div = p.gold_div, g = g)),
-                        None => ui.colored_label(ERROR_RED, tr("Gold over 65,535: a range error in the original, no price.")),
-                    };
-                    if let Some(b) = p.banded {
-                        ui.label(trf!("Rounded down in bands: {b}", b = b));
-                    }
-                    if p.hero {
-                        ui.label(trf!("Hero class, doubled: {price}", price = p.price.unwrap_or(0)));
-                    } else {
-                        ui.weak(tr("Not a hero class: no doubling."));
-                    }
-                }
-            }
-            if let Some(ItemQuote::Price(p)) = &item_quote {
-                ui.label(trf!("Gains summed over the units that gain: {sum} (wearers {n}, gainers {m})", sum = p.sum, n = p.wearers, m = p.gainers));
-                ui.label(trf!("Mean of the gains, plus 10, at least 20: {mean} plus 10 gives {raw}", mean = p.mean, raw = p.raw));
-                ui.label(trf!("Rounded down in bands: {b}", b = p.banded));
-            }
-            if item_quote.is_none() && unit_quote.is_none() {
-                ui.weak(tr("No price steps: the game's install is needed."));
-            }
+            });
         });
-        ui.separator();
 
-        // The fields: the override (or the base's value), the base next to it, a reset per field.
-        ui.strong(tr("Fields"));
-        ui.weak(tr("A field with no override takes the base's value. Reset removes the override."));
-        Grid::new(("record-fields", kind.key())).num_columns(3).spacing([10.0, 4.0]).striped(true).show(ui, |ui| {
+        // The fields: the override (or the base's value), the base next to it, the changed dot and the reset.
+        kit::section(ui, kind_key, "fields", tr("Fields"), true, &q, |ui| {
+            kit::note(ui, tr("A field with no override takes the base's value. Reset removes the override."));
             for (i, key) in fields.iter().enumerate() {
                 let ov = rec::override_of(&pkg, kind, &id, key);
                 let base = bases[i];
                 let (lo, hi) = rec::field_range(key);
                 let model = ov.or(base).unwrap_or(0);
-                ui.label(field_label(key));
-                ui.horizontal(|ui| {
-                    if let Some(v) = forms::int_field(ui, &format!("{id}-{key}"), model, lo, hi) {
-                        asks.sets.push((key.to_string(), Some(v)));
-                    }
-                    match base {
-                        Some(b) => ui.weak(format!("{} {b}", tr("base"))),
-                        None => ui.weak(tr("base: no install")),
-                    };
+                let shown = kit::row(ui, &q, field_label(key), &format!("{kind_key}.{key}"), Some(ov.is_some()), |ui| {
+                    ui.horizontal(|ui| {
+                        let v = forms::int_field(ui, &format!("{id}-{key}"), model, lo, hi);
+                        match base {
+                            Some(b) => ui.weak(format!("{} {b}", tr("base"))),
+                            None => ui.weak(tr("base: no install")),
+                        };
+                        v
+                    })
+                    .inner
                 });
-                ui.horizontal(|ui| {
-                    if ov.is_some() && ui.small_button(tr("Reset")).on_hover_text(tr("Remove the override: the base's value is used again")).clicked() {
-                        asks.sets.push((key.to_string(), None));
-                    }
-                });
-                ui.end_row();
+                if let Some(Some(v)) = shown.value {
+                    asks.sets.push((key.to_string(), Some(v)));
+                }
+                if shown.reset {
+                    asks.sets.push((key.to_string(), None));
+                }
             }
+            kit::note(ui, if kind == Kind::Unit {
+                tr("Not in the package format, so the base's values hold: per-level gains, nature, magic school and direction, bonus, icon, upgrade units, surrender, starting experience, level multiplier, cost multiplier and gold divisor.")
+            } else {
+                tr("Not in the package format, so the base's values hold: the stat changes, type, magic school and bonus. The package holds the price.")
+            });
         });
-        ui.separator();
 
         if kind == Kind::Unit && !levels.is_empty() {
-            CollapsingHeader::new(tr("Levels 1 to 5")).default_open(false).show(ui, |ui| {
+            kit::section(ui, kind_key, "levels", tr("Levels 1 to 5"), false, &q, |ui| {
                 Grid::new("record-levels").num_columns(5).spacing([10.0, 4.0]).striped(true).show(ui, |ui| {
                     ui.strong(tr("Level"));
                     ui.strong(tr("Hits"));
@@ -504,44 +507,49 @@ impl Viewer<'_> {
                         ui.end_row();
                     }
                 });
-                ui.weak(tr("The base's per-level gains: the package has none of its own."));
+                kit::note(ui, tr("The base's per-level gains: the package has none of its own."));
             });
         }
 
-        ui.weak(if kind == Kind::Unit {
-            tr("Not in the package format, so the base's values hold: per-level gains, nature, magic school and direction, bonus, icon, upgrade units, surrender, starting experience, level multiplier, cost multiplier and gold divisor.")
-        } else {
-            tr("Not in the package format, so the base's values hold: the stat changes, type, magic school and bonus. The package holds the price.")
-        });
-        ui.separator();
-
-        ui.horizontal(|ui| {
-            ui.label(tr("Rename to"));
-            ui.add(TextEdit::singleline(&mut self.scen.record_rename).desired_width(120.0));
-            if ui.button(tr("Rename")).on_hover_text(tr("Renames the id in every file that names it, and its name keys (one undo step)")).clicked() {
+        kit::section(ui, kind_key, "record", tr("Record"), true, &q, |ui| {
+            kit::row(ui, &q, tr("Base"), &format!("{kind_key}.base"), None, |ui| {
+                ui.monospace(row.base.as_str());
+                ui.weak(format!("{}:{}", row.file, row.line));
+            });
+            kit::row(ui, &q, tr("Name"), &format!("{kind_key}.name"), None, |ui| {
+                ui.weak(egui::RichText::new(row.name.as_str()).monospace());
+            });
+            if let Some(text) = pkg.texts.get(razdor::pack::open::lang()).and_then(|t| t.get(&row.name)).or_else(|| pkg.texts.values().find_map(|t| t.get(&row.name))) {
+                kit::row(ui, &q, tr("Text"), &format!("{kind_key}.text"), None, |ui| ui.label(text.as_str()));
+            }
+            let rename = kit::row(ui, &q, tr("Rename to"), &format!("{kind_key}.id"), None, |ui| {
+                ui.add(TextEdit::singleline(&mut self.scen.record_rename).desired_width(120.0));
+                ui.button(tr("Rename")).on_hover_text(tr("Renames the id in every file that names it, and its name keys (one undo step)")).clicked()
+            });
+            if rename.value == Some(true) {
                 let new = self.scen.record_rename.trim().to_string();
                 if !new.is_empty() {
                     asks.rename = Some(new);
                 }
             }
         });
-        ui.add_space(6.0);
 
-        ui.strong(tr("Used by"));
-        let refs = rec::uses(&pkg, kind, &id);
-        if refs.is_empty() {
-            ui.weak(tr("Nothing names this record."));
-        } else {
-            ui.weak(tr("Click a use to open it in Script."));
-            for u in &refs {
-                ui.horizontal_wrapped(|ui| {
-                    if ui.link(u.what.as_str()).clicked() {
-                        asks.jump = Some((u.file.clone(), u.line));
-                    }
-                    ui.weak(format!("{}:{}", u.file, u.line));
-                });
+        kit::section(ui, kind_key, "uses", tr("Used by"), true, &q, |ui| {
+            let refs = rec::uses(&pkg, kind, &id);
+            if refs.is_empty() {
+                kit::note(ui, tr("Nothing names this record."));
+            } else {
+                kit::note(ui, tr("Click a use to open it in Script."));
+                for u in &refs {
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.link(u.what.as_str()).clicked() {
+                            asks.jump = Some((u.file.clone(), u.line));
+                        }
+                        ui.weak(format!("{}:{}", u.file, u.line));
+                    });
+                }
             }
-        }
+        });
         ui.add_space(6.0);
         if ui.button(tr("Delete")).on_hover_text(tr("Removes the record from its file; refused while the package names it")).clicked() {
             asks.delete = true;
@@ -551,6 +559,9 @@ impl Viewer<'_> {
         if asks.delete {
             self.record_delete(&pkg, kind, &id);
             return;
+        }
+        if asks.keep {
+            self.scen.price_kept = Some(id.clone());
         }
         for (key, value) in asks.sets {
             self.record_set(&pkg, kind, &id, &key, value);

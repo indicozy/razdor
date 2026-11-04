@@ -42,9 +42,8 @@ pub const MIN_TEXT_PX: f32 = 12.0;
 
 /// Sizes in points at 100 %.
 pub const BTN_H: f32 = 26.0;
-#[allow(dead_code)] // the Inspector and the Map (UX2, UX3)
+#[allow(dead_code)] // the Map's rows (UX3)
 pub const ROW_H: f32 = 24.0;
-#[allow(dead_code)] // the Inspector and the Map (UX2, UX3)
 pub const LABEL_W: f32 = 112.0;
 pub const TOP_H: f32 = 36.0;
 pub const STATUS_H: f32 = 24.0;

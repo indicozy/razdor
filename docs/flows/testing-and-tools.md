@@ -244,6 +244,21 @@ screen). Snapshot options: `package`, `header`, `campaign`, `characters`, `texts
 `the_scenario_forms_edit_save_and_undo_on_a_copy_of_pepelnaya_marka` (a copy of the example, through the
 workspace, not XTest).
 
+Inspector widget set (UX2, `docs/superpowers/specs/2026-11-04-studio-ux-design.md` §6): `ui/studio/inspector_kit.rs`
+draws every form's header (icon, name, type line), field search (`search`; Ctrl+F focuses it while the pointer
+is in the Inspector, the `inspector` scope of `commands`), collapsible sections (`section`, open state keyed by
+the object kind and the section id, so a count change does not close it; a filter opens the matches and hides
+the empty sections), the rows (`row`: a fixed 112 px label column painted on the row's centre line, the changed
+dot and the reset slot where the form has a base, the file key in the tooltip or inline under the label with the
+«Ключи файла в подписях» setting), reorderable lists (`grip` and `reorder`, a drop line; the moved order is one
+`Edit`, `DocEdit::Move` for the dialog's choices), and the price card. The forms in `ui/studio/forms.rs`,
+`scenarios.rs`, `story.rs` and `records.rs` make the same `Edit`s as before; only the layout moved. The
+snapshot options `inspector=army|army-keys|building|point|object|hero|trigger|dialog|unit|item|package|header|campaign|campaign-edge`
+select the form on the scene's package (`mod.rs`, `preselect`: `inspector=<what>` expands to the forms' own
+options, plus `army-keys`, `building`, `point`, `object`, `hero` and `campaign-edge`). The
+workspace tests on a copy of the example (`ui::studio::forms::tests`) reorder an army's troops and a dialog's
+choices and reset a unit field, each as one undo step, and undo restores the bytes.
+
 Map generators (phase 2, milestone 5): `src/studio/gen/` ports DTMapEdit's new-map generator
 (`newmap/`: the relief fractal, water, rivers, terrain classes, the coast band, mountains, hills,
 forests) and its world generator (`worldgen/`: buildings and roads, economy, armies and garrisons)

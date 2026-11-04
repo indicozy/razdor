@@ -19,8 +19,16 @@ use razdor::studio::Workspace;
 use razdor::trf;
 
 use super::forms::{self, Ctx};
+use super::inspector_kit as kit;
 use super::scenarios::Focus;
 use super::{Jump, Viewer, ERROR_RED};
+use egui_phosphor::regular as ic;
+
+/// A form's head: its header (the undo hint is its tooltip) and the field search. Returns the query.
+pub(super) fn head(ui: &mut Ui, icon: &str, name: &str, line: &str) -> String {
+    kit::header(ui, icon, name, line).on_hover_text(tr("Each change is one undo step (Ctrl+Z)."));
+    kit::search(ui)
+}
 
 /// The map file's spec as the text says now, else the last good package's.
 pub fn spec_now(ws: &Workspace, pkg: Option<&Package>, map: &str) -> Option<MapFile> {
@@ -100,6 +108,8 @@ fn describe(u: &Use) -> String {
 
 impl Viewer<'_> {
     pub(super) fn inspector(&mut self, ui: &mut Ui) {
+        // Ctrl+F reads this next frame: the Inspector has the focus while the pointer is in it.
+        kit::set_hot(ui.ctx(), ui.rect_contains_pointer(ui.max_rect()));
         // The scenario forms take the Inspector while they are in focus (`scenarios`).
         match self.scen.focus.clone() {
             Focus::Package => return egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| self.package_form(ui)).inner,
@@ -133,22 +143,20 @@ impl Viewer<'_> {
             ui.colored_label(ERROR_RED, tr("This object has no table in the file"));
             return;
         };
-        let title = match &sel {
-            Selection::Hero => tr("Hero").to_string(),
-            Selection::Building(id) => format!("{}: {id}", tr("Building")),
-            Selection::Army(id) => format!("{}: {id}", tr("Army")),
-            Selection::Point(i) => format!("{}: {}", tr("Point"), i + 1),
-            Selection::Object(i) => format!("{}: {}", tr("Object"), i + 1),
+        let (icon, title, kind) = match &sel {
+            Selection::Hero => (ic::USER_CIRCLE, tr("Hero").to_string(), tr("Hero").to_string()),
+            Selection::Building(id) => (ic::BUILDINGS, format!("{}: {id}", tr("Building")), tr("Building").to_string()),
+            Selection::Army(id) => (ic::SWORD, format!("{}: {id}", tr("Army")), tr("Army").to_string()),
+            Selection::Point(i) => (ic::LIGHTBULB, format!("{}: {}", tr("Point"), i + 1), tr("Point").to_string()),
+            Selection::Object(i) => (ic::CUBE, format!("{}: {}", tr("Object"), i + 1), tr("Object").to_string()),
         };
-        ui.strong(title);
-        ui.weak(tr("Each change is one undo step (Ctrl+Z)."));
-        ui.separator();
+        let query = head(ui, icon, &title, &format!("{kind} · {map}"));
 
         let size = self.maps.current().map_or((200, 200), |g| (g.compiled.scenario.width(), g.compiled.scenario.height()));
         let units = unit_choices(self.pkg.as_deref());
         let empty = BTreeMap::new();
         let texts = texts_of(self.pkg.as_deref(), razdor::pack::open::lang()).unwrap_or(&empty);
-        let cx = Ctx { map: &map, size, texts, units: &units };
+        let cx = Ctx { map: &map, size, texts, units: &units, query: &query };
         let edit = match &sel {
             Selection::Hero => forms::hero(ui, &cx, &at, &spec.hero),
             Selection::Building(id) => spec.building.iter().map(|b| b.get_ref()).find(|b| &b.id == id).and_then(|b| forms::building(ui, &cx, &at, b)),

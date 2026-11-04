@@ -18,9 +18,11 @@ use razdor::studio::story_graph::{self as sg, Kind, Story};
 use razdor::studio::texts as tx;
 use razdor::studio::vars::{self as vars, Holder, Role};
 use razdor::trf;
+use egui_phosphor::regular as ic;
 use toml_edit::Value;
 
 use super::forms;
+use super::inspector_kit as kit;
 use super::scenarios::Focus;
 use super::story_forms::{self as sf, Cx, RowAct};
 use super::{Tab, Viewer, ERROR_RED};
@@ -395,6 +397,7 @@ impl Viewer<'_> {
             }
         };
         let Some(draft) = st::trigger_draft(&text, id) else {
+            super::inspector::head(ui, ic::LIGHTNING, &format!("{}: {id}", tr("Trigger")), &format!("{file}:{line}"));
             ui.colored_label(ERROR_RED, tr("This trigger does not parse: see Problems."));
             return;
         };
@@ -402,14 +405,10 @@ impl Viewer<'_> {
         let opts = Options::of(&pkg, &scope);
         let texts = texts_shown(&pkg);
         let cx = Cx { opts: &opts, texts: &texts };
-        ui.strong(format!("{}: {id}", tr("Trigger")));
-        ui.weak(format!("{file}:{line}"));
-        ui.weak(tr("Each change is one undo step (Ctrl+Z)."));
-        ui.separator();
+        let q = super::inspector::head(ui, ic::LIGHTNING, &format!("{}: {id}", tr("Trigger")), &format!("{file}:{line}"));
         let mut pending: Vec<(&str, Vec<DocEdit>)> = Vec::new();
-        ui.horizontal(|ui| {
-            ui.label(tr("Name"));
-            if let Some(new) = forms::text_field(ui, "st-tid", id, 170.0) {
+        kit::section(ui, "trigger", "main", tr("Main"), true, &q, |ui| {
+            if let Some(new) = kit::row(ui, &q, tr("Name"), "trigger.id", None, |ui| forms::text_field(ui, "st-tid", id, 170.0)).value.flatten() {
                 let taken = pkg.triggers.iter().any(|t| t.value.id == new);
                 if !st::is_name(&new) {
                     self.scen.story.error = Some(trf!("{name} is not a name: lowercase letters, digits and _", name = new.as_str()));
@@ -420,63 +419,81 @@ impl Viewer<'_> {
                     self.scen.story.sel = StorySel::Trigger(new);
                 }
             }
-        });
-        let mut maps: Vec<String> = vec![tr("(every map)").to_string()];
-        let mut ids: Vec<String> = pkg.maps.keys().cloned().collect();
-        ids.sort();
-        maps.extend(ids);
-        let refs: Vec<&str> = maps.iter().map(String::as_str).collect();
-        let current = draft.map.clone().unwrap_or_else(|| tr("(every map)").to_string());
-        ui.horizontal(|ui| {
-            ui.label(tr("Map"));
-            if let Some(v) = forms::choice(ui, "st-tmap", &current, &refs) {
+            let mut maps: Vec<String> = vec![tr("(every map)").to_string()];
+            let mut ids: Vec<String> = pkg.maps.keys().cloned().collect();
+            ids.sort();
+            maps.extend(ids);
+            let refs: Vec<&str> = maps.iter().map(String::as_str).collect();
+            let current = draft.map.clone().unwrap_or_else(|| tr("(every map)").to_string());
+            if let Some(v) = kit::row(ui, &q, tr("Map"), "trigger.map", None, |ui| forms::choice(ui, "st-tmap", &current, &refs)).value.flatten() {
                 let value = if v == tr("(every map)") { None } else { Some(Value::from(v.as_str())) };
                 pending.push(("set map", vec![st::set_trigger_key(id, "map", value)]));
             }
-        });
-        ui.horizontal(|ui| {
-            let mut once = draft.once.unwrap_or(true);
-            if ui.checkbox(&mut once, "once").on_hover_text(tr("once: fires one time, not on every chance")).changed() {
+            let once = kit::row(ui, &q, "once", "trigger.once", None, |ui| {
+                let mut once = draft.once.unwrap_or(true);
+                if ui.checkbox(&mut once, "").on_hover_text(tr("once: fires one time, not on every chance")).changed() {
+                    Some(once)
+                } else {
+                    None
+                }
+            })
+            .value
+            .flatten();
+            if let Some(once) = once {
                 pending.push(("set once", vec![st::set_trigger_key(id, "once", Some(Value::from(once)))]));
             }
-        });
-        ui.horizontal(|ui| {
-            let mut on = draft.chance.is_some();
-            if ui.checkbox(&mut on, "chance").on_hover_text(tr("chance: a percent, rolled after the conditions hold")).changed() {
-                let value = if on { Some(Value::from(50_i64)) } else { None };
+            let chance = kit::row(ui, &q, "chance", "trigger.chance", None, |ui| {
+                let mut on = draft.chance.is_some();
+                let mut value = None;
+                if ui.checkbox(&mut on, "").on_hover_text(tr("chance: a percent, rolled after the conditions hold")).changed() {
+                    value = Some(if on { Some(Value::from(50_i64)) } else { None });
+                }
+                if let Some(c) = draft.chance {
+                    if let Some(n) = forms::int_field(ui, "st-tchance", c, 0, 100) {
+                        value = Some(Some(Value::from(n)));
+                    }
+                }
+                value
+            })
+            .value
+            .flatten();
+            if let Some(value) = chance {
                 pending.push(("set chance", vec![st::set_trigger_key(id, "chance", value)]));
             }
-            if let Some(c) = draft.chance {
-                if let Some(n) = forms::int_field(ui, "st-tchance", c, 0, 100) {
-                    pending.push(("set chance", vec![st::set_trigger_key(id, "chance", Some(Value::from(n)))]));
-                }
-            }
         });
-        ui.separator();
-        ui.strong(tr("When"));
         let mut when_row = None;
-        ui.group(|ui| match sf::row_editor(ui, "st-when", Section::Event, &draft.when, &cx, false, false) {
-            Ok(RowAct::Changed(r)) => when_row = Some(r),
-            Ok(_) => {}
-            Err(e) => self.scen.story.error = Some(e),
+        kit::section(ui, "trigger", "when", tr("When"), true, &q, |ui| {
+            kit::block(ui, &q, tr("When"), "trigger.when", |ui| {
+                ui.group(|ui| match sf::row_editor(ui, "st-when", Section::Event, &draft.when, &cx, false, false) {
+                    Ok(RowAct::Changed(r)) => when_row = Some(r),
+                    Ok(_) => {}
+                    Err(e) => self.scen.story.error = Some(e),
+                });
+            });
         });
         if let Some(r) = when_row {
             pending.push(("set when", vec![st::set_when(id, &r)]));
         }
-        ui.strong(tr("If (all must hold)"));
         let mut conds = None;
-        ui.group(|ui| match sf::list_editor(ui, "st-if", Section::Cond, &draft.cond, &cx) {
-            Ok(rows) => conds = rows,
-            Err(e) => self.scen.story.error = Some(e),
+        kit::section(ui, "trigger", "if", tr("If (all must hold)"), true, &q, |ui| {
+            kit::block(ui, &q, tr("If (all must hold)"), "trigger.if", |ui| {
+                ui.group(|ui| match sf::list_editor(ui, "st-if", Section::Cond, &draft.cond, &cx) {
+                    Ok(rows) => conds = rows,
+                    Err(e) => self.scen.story.error = Some(e),
+                });
+            });
         });
         if let Some(rows) = conds {
             pending.push(("set conditions", st::set_trigger_list(id, "if", &rows, !draft.cond.is_empty())));
         }
-        ui.strong(tr("Then (in order)"));
         let mut actions = None;
-        ui.group(|ui| match sf::list_editor(ui, "st-then", Section::Action, &draft.then, &cx) {
-            Ok(rows) => actions = rows,
-            Err(e) => self.scen.story.error = Some(e),
+        kit::section(ui, "trigger", "then", tr("Then (in order)"), true, &q, |ui| {
+            kit::block(ui, &q, tr("Then (in order)"), "trigger.then", |ui| {
+                ui.group(|ui| match sf::list_editor(ui, "st-then", Section::Action, &draft.then, &cx) {
+                    Ok(rows) => actions = rows,
+                    Err(e) => self.scen.story.error = Some(e),
+                });
+            });
         });
         if let Some(rows) = actions {
             pending.push(("set actions", st::set_trigger_list(id, "then", &rows, !draft.then.is_empty())));
@@ -506,6 +523,7 @@ impl Viewer<'_> {
             }
         };
         let Some(draft) = st::dialog_draft(&text, id) else {
+            super::inspector::head(ui, ic::CHAT_CIRCLE_TEXT, &format!("{}: {id}", tr("Dialog")), &format!("{file}:{line}"));
             ui.colored_label(ERROR_RED, tr("This dialog does not parse: see Problems."));
             return;
         };
@@ -515,90 +533,118 @@ impl Viewer<'_> {
         let by_lang = pkg.texts.clone();
         let suggestions: Vec<String> = shown.keys().cloned().collect();
         let cx = Cx { opts: &opts, texts: &shown };
-        ui.strong(format!("{}: {id}", tr("Dialog")));
-        ui.weak(format!("{file}:{line}"));
-        ui.weak(tr("Each change is one undo step (Ctrl+Z)."));
-        ui.separator();
+        let q = super::inspector::head(ui, ic::CHAT_CIRCLE_TEXT, &format!("{}: {id}", tr("Dialog")), &format!("{file}:{line}"));
         let mut pending: Vec<(&str, String, Vec<DocEdit>)> = Vec::new();
-        // Text keys: the key (picked or typed) and each language's text.
-        ui.label(tr("Title"));
-        if let Some(key) = forms::text_key(ui, "st-dtitle", &draft.title, &suggestions, &shown) {
-            pending.push(("set title key", file.clone(), vec![st::set_dialog_key(id, "title", Some(Value::from(key.as_str())))]));
-        }
-        if let Some((lang, v)) = sf::text_cells(ui, "st-dtitle", &draft.title, &by_lang) {
-            let (f, e) = tx::set_cell(&lang, &draft.title, &v);
-            pending.push(("set title", f, vec![e]));
-        }
-        ui.label(tr("Text"));
-        if let Some(key) = forms::text_key(ui, "st-dtext", &draft.text, &suggestions, &shown) {
-            pending.push(("set text key", file.clone(), vec![st::set_dialog_key(id, "text", Some(Value::from(key.as_str())))]));
-        }
-        if let Some((lang, v)) = sf::text_cells(ui, "st-dtext", &draft.text, &by_lang) {
-            let (f, e) = tx::set_cell(&lang, &draft.text, &v);
-            pending.push(("set text", f, vec![e]));
-        }
-        ui.horizontal(|ui| {
-            ui.label(tr("Speaker"));
-            let mut units: Vec<String> = vec![tr("(none)").to_string()];
-            units.extend(opts.units.iter().cloned());
-            let refs: Vec<&str> = units.iter().map(String::as_str).collect();
-            let current = draft.speaker.clone().unwrap_or_else(|| tr("(none)").to_string());
-            if let Some(v) = forms::choice(ui, "st-dspeaker", &current, &refs) {
+        kit::section(ui, "dialog", "main", tr("Main"), true, &q, |ui| {
+            // Text keys: the key (picked or typed) and each language's text.
+            let title = kit::row(ui, &q, tr("Title"), "dialog.title", None, |ui| {
+                let key = forms::text_key(ui, "st-dtitle", &draft.title, &suggestions, &shown);
+                let cells = sf::text_cells(ui, "st-dtitle", &draft.title, &by_lang);
+                (key, cells)
+            })
+            .value;
+            if let Some((key, cells)) = title {
+                if let Some(key) = key {
+                    pending.push(("set title key", file.clone(), vec![st::set_dialog_key(id, "title", Some(Value::from(key.as_str())))]));
+                }
+                if let Some((lang, v)) = cells {
+                    let (f, e) = tx::set_cell(&lang, &draft.title, &v);
+                    pending.push(("set title", f, vec![e]));
+                }
+            }
+            let text_row = kit::row(ui, &q, tr("Text"), "dialog.text", None, |ui| {
+                let key = forms::text_key(ui, "st-dtext", &draft.text, &suggestions, &shown);
+                let cells = sf::text_cells(ui, "st-dtext", &draft.text, &by_lang);
+                (key, cells)
+            })
+            .value;
+            if let Some((key, cells)) = text_row {
+                if let Some(key) = key {
+                    pending.push(("set text key", file.clone(), vec![st::set_dialog_key(id, "text", Some(Value::from(key.as_str())))]));
+                }
+                if let Some((lang, v)) = cells {
+                    let (f, e) = tx::set_cell(&lang, &draft.text, &v);
+                    pending.push(("set text", f, vec![e]));
+                }
+            }
+            let speaker = kit::row(ui, &q, tr("Speaker"), "dialog.speaker", None, |ui| {
+                let mut units: Vec<String> = vec![tr("(none)").to_string()];
+                units.extend(opts.units.iter().cloned());
+                let refs: Vec<&str> = units.iter().map(String::as_str).collect();
+                let current = draft.speaker.clone().unwrap_or_else(|| tr("(none)").to_string());
+                forms::choice(ui, "st-dspeaker", &current, &refs)
+            })
+            .value
+            .flatten();
+            if let Some(v) = speaker {
                 let value = if v == tr("(none)") { None } else { Some(Value::from(v.as_str())) };
                 pending.push(("set speaker", file.clone(), vec![st::set_dialog_key(id, "speaker", value)]));
             }
         });
-        ui.separator();
-        ui.strong(tr("Choices"));
-        ui.weak(tr("A choice's own actions run when it is picked; a trigger on dialog_choice can do the rest."));
         let count = draft.choices.len();
-        for (i, c) in draft.choices.iter().enumerate() {
-            let salt = format!("st-c{i}");
-            ui.group(|ui| {
-                ui.horizontal(|ui| {
-                    ui.strong(format!("{}. {}", i + 1, c.id));
-                    if i > 0 && ui.small_button(tr("Up")).clicked() {
-                        pending.push(("move choice up", file.clone(), vec![st::move_choice(id, i, i - 1)]));
+        let mut moved: Option<(usize, usize)> = None;
+        let mut removed: Option<String> = None;
+        kit::section(ui, "dialog", "choices", tr("Choices"), true, &q, |ui| {
+            kit::note(ui, tr("A choice's own actions run when it is picked; a trigger on dialog_choice can do the rest."));
+            if let Some(tool) = kit::list_tools(ui, count < pt::MAX_CHOICES, false, false) {
+                let _ = tool;
+                match st::add_choice_steps(&pkg, id) {
+                    Ok((_, steps)) => self.story_group("add a choice", steps),
+                    Err(e) => self.story_refuse(e),
+                }
+            }
+            moved = kit::reorder(ui, "dialog-choices", count, None, |ui, i| {
+                let c = &draft.choices[i];
+                let salt = format!("st-c{i}");
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        kit::grip(ui, "dialog-choices", i);
+                        ui.strong(format!("{}. {}", i + 1, c.id));
+                        if ui.add(kit::icon_button(ic::TRASH, 24.0)).on_hover_text(tr("Delete this choice")).clicked() {
+                            removed = Some(c.id.clone());
+                        }
+                    });
+                    let text = kit::row(ui, &q, tr("Text"), &format!("dialog.choice.{}.text", c.id), None, |ui| {
+                        let key = forms::text_key(ui, &format!("{salt}-t"), &c.text, &suggestions, &shown);
+                        let cells = sf::text_cells(ui, &format!("{salt}-t"), &c.text, &by_lang);
+                        (key, cells)
+                    })
+                    .value;
+                    if let Some((key, cells)) = text {
+                        if let Some(key) = key {
+                            pending.push(("set choice text key", file.clone(), vec![st::set_choice_key(id, &c.id, "text", Value::from(key.as_str()))]));
+                        }
+                        if let Some((lang, v)) = cells {
+                            let (f, e) = tx::set_cell(&lang, &c.text, &v);
+                            pending.push(("set choice text", f, vec![e]));
+                        }
                     }
-                    if i + 1 < count && ui.small_button(tr("Down")).clicked() {
-                        pending.push(("move choice down", file.clone(), vec![st::move_choice(id, i, i + 1)]));
+                    kit::note(ui, tr("If (shown only then)"));
+                    let mut conds = None;
+                    match sf::list_editor(ui, &format!("{salt}-if"), Section::Cond, &c.cond, &cx) {
+                        Ok(rows) => conds = rows,
+                        Err(e) => self.scen.story.error = Some(e),
                     }
-                    if ui.small_button(tr("Remove")).on_hover_text(tr("Delete this choice")).clicked() {
-                        pending.push(("delete choice", file.clone(), vec![st::drop_choice(id, &c.id)]));
+                    if let Some(rows) = conds {
+                        pending.push(("set choice conditions", file.clone(), st::set_choice_list(id, &c.id, "if", &rows, !c.cond.is_empty())));
+                    }
+                    kit::note(ui, tr("Then (in order)"));
+                    let mut actions = None;
+                    match sf::list_editor(ui, &format!("{salt}-then"), Section::Action, &c.then, &cx) {
+                        Ok(rows) => actions = rows,
+                        Err(e) => self.scen.story.error = Some(e),
+                    }
+                    if let Some(rows) = actions {
+                        pending.push(("set choice actions", file.clone(), st::set_choice_list(id, &c.id, "then", &rows, !c.then.is_empty())));
                     }
                 });
-                if let Some(key) = forms::text_key(ui, &format!("{salt}-t"), &c.text, &suggestions, &shown) {
-                    pending.push(("set choice text key", file.clone(), vec![st::set_choice_key(id, &c.id, "text", Value::from(key.as_str()))]));
-                }
-                if let Some((lang, v)) = sf::text_cells(ui, &format!("{salt}-t"), &c.text, &by_lang) {
-                    let (f, e) = tx::set_cell(&lang, &c.text, &v);
-                    pending.push(("set choice text", f, vec![e]));
-                }
-                ui.weak(tr("If (shown only then)"));
-                let mut conds = None;
-                match sf::list_editor(ui, &format!("{salt}-if"), Section::Cond, &c.cond, &cx) {
-                    Ok(rows) => conds = rows,
-                    Err(e) => self.scen.story.error = Some(e),
-                }
-                if let Some(rows) = conds {
-                    pending.push(("set choice conditions", file.clone(), st::set_choice_list(id, &c.id, "if", &rows, !c.cond.is_empty())));
-                }
-                ui.weak(tr("Then (in order)"));
-                let mut actions = None;
-                match sf::list_editor(ui, &format!("{salt}-then"), Section::Action, &c.then, &cx) {
-                    Ok(rows) => actions = rows,
-                    Err(e) => self.scen.story.error = Some(e),
-                }
-                if let Some(rows) = actions {
-                    pending.push(("set choice actions", file.clone(), st::set_choice_list(id, &c.id, "then", &rows, !c.then.is_empty())));
-                }
             });
+        });
+        if let Some((from, to)) = moved {
+            pending.push(("move choice", file.clone(), vec![st::move_choice(id, from, to)]));
         }
-        if count < pt::MAX_CHOICES && ui.button(tr("Add a choice")).clicked() {
-            match st::add_choice_steps(&pkg, id) {
-                Ok((_, steps)) => self.story_group("add a choice", steps),
-                Err(e) => self.story_refuse(e),
-            }
+        if let Some(cid) = removed {
+            pending.push(("delete choice", file.clone(), vec![st::drop_choice(id, &cid)]));
         }
         for (label, f, edits) in pending {
             self.story_apply(label, &f, &edits);
