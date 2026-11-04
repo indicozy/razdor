@@ -32,7 +32,7 @@ const LAKE: u8 = Surface::DeepSea as u8;
 
 /// What a bench map carries: the AI armies, the events, or both.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Variant {
+pub(super) enum Variant {
     Armies,
     Events,
     Both,
@@ -92,7 +92,7 @@ impl Lcg {
 
 /// The first roaming army of the install's maps: a non-patrolling army (`patrols` 0) that is
 /// not a ship, not inactive and has troops. Its record is the template of every bench army.
-fn roaming_template(dt: &DtInstall) -> DtArmy {
+pub(super) fn roaming_template(dt: &DtInstall) -> DtArmy {
     for m in &dt.maps {
         let Ok(s) = m.load() else { continue };
         if let Some(a) = s.armies.iter().find(|a| a.patrols == 0 && a.ship == 0 && a.inactive == 0 && a.troops.iter().any(|t| !t.is_empty())) {
@@ -106,7 +106,7 @@ fn roaming_template(dt: &DtInstall) -> DtArmy {
 /// one blob per 900 cells of each kind, radius 2–6), the hero's start cleared, and the variant's
 /// armies (cloned from `template`, on random passable cells, not patrolling, not hunting only the
 /// player, with random targets) and events (global, once, never holding: hero level 30 000).
-fn bench_scenario(template: &DtArmy, side: u32, variant: Variant) -> Scenario {
+pub(super) fn bench_scenario(template: &DtArmy, side: u32, variant: Variant) -> Scenario {
     let mut s = new_scenario(NewMap { width: side, height: side, fill: GRASS });
     let (w, n) = (side as i32, (side * side) as usize);
     let mut rng = Lcg(0x5eed_0000 ^ side);
@@ -178,6 +178,9 @@ struct BenchRun {
     plans: u32,
     /// Milliseconds of each `Game::tick`, in order.
     ms: Vec<f64>,
+    mode: &'static str,
+    proto: crate::rules::ai::planner_proto::ProtoStats,
+    cache_bytes: usize,
 }
 
 /// Waits [`BENCH_DAYS`] days on the endless wait, a `Game::tick` at a time, timing each tick. A
@@ -209,7 +212,7 @@ fn bench_run(c: &Arc<Content>, s: &Scenario, days: u64) -> BenchRun {
     }
     g.end_endless_wait();
     assert!(g.clock.total_minutes() >= end, "the bench did not reach the end of its days (stalled)");
-    BenchRun { ticks: ms.len(), plans: g.ai_stats.paths - plans0, ms }
+    BenchRun { ticks: ms.len(), plans: g.ai_stats.paths - plans0, ms, mode: g.proto.mode.name(), proto: g.proto.stats.clone(), cache_bytes: g.proto.bytes() }
 }
 
 /// The value at quantile `q` (0..1) of `sorted` (ascending).
@@ -248,6 +251,25 @@ fn bigmap_ai_bench() {
                 quantile(&sorted, 0.95),
                 quantile(&sorted, 1.0),
                 total
+            );
+            let p = &run.proto;
+            println!(
+                "      planner {}: seeds/plan {:.1}, fallbacks {}, fields built {} hits {} evicted {} peak {} ({:.2} MB), build {:.0} ms; hpa {:.0} ms {} nodes {:.2} MB; plan {:.0} ms, exact {:.0} ms; cache now {:.2} MB",
+                run.mode,
+                p.seeds as f64 / p.plans.max(1) as f64,
+                p.fallbacks,
+                p.field_builds,
+                p.field_hits,
+                p.field_evicted,
+                p.field_peak_count,
+                p.field_peak_bytes as f64 / 1048576.0,
+                p.field_build_ms,
+                p.hpa_precompute_ms,
+                p.hpa_nodes,
+                p.hpa_bytes as f64 / 1048576.0,
+                p.plan_ms,
+                p.exact_ms,
+                run.cache_bytes as f64 / 1048576.0
             );
         }
     }

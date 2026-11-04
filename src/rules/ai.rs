@@ -1869,6 +1869,7 @@ impl Game {
         let on_path = next.is_some() || (!moves && !a.mind.no_path && a.mind.walked == 0);
         if moves {
             a.mind.walked += 1;
+            self.proto.stats.steps += 1;
         }
         // For drawing, every step takes its time on the figure's walk: one in place, or one
         // the hero's cell barred, stands for its play time (0x4a399c plays each in turn).
@@ -2140,17 +2141,13 @@ impl Game {
                 }
             }
         }
-        let world = &self.world;
-        let costs = if a.sails() { world.map.water_costs() } else { world.map.land_costs() };
-        let mut field = world.map.flood_maps(costs, &mult, &seeds, here);
         let reach = o.ai_get_path_distance;
-        for &(p, d) in dist {
-            if 0 < d && d <= reach {
-                field.erase(self.cell_of(p, hero));
-                field.erase(self.next_cell(p, hero));
-            }
-        }
-        let path = (field.kept > 0).then(|| world.map.descend(&field, here));
+        // The cells the path must not step on: the parties within reach and the cells they
+        // step to next (the exact flood erases them, 0x4a2d88).
+        let erased: Vec<Tile> = dist.iter().filter(|&&(_, d)| 0 < d && d <= reach).flat_map(|&(p, _)| [self.cell_of(p, hero), self.next_cell(p, hero)]).collect();
+        let water = a.sails();
+        // The flood, or a prototype planner (`planner_proto`; the exact flood by default).
+        let path = planner_proto::plan(&mut self.proto, &self.world.map, water, here, &seeds, &mult, &erased);
 
         let a = &mut self.world.armies[i];
         // A path read puts its index back at its start; with no seed the path is one cell
@@ -3805,4 +3802,8 @@ mod real_maps;
 
 #[cfg(test)]
 mod bigmap_bench;
+/// The prototype planners (`RAZDOR_PLANNER`), see the module.
+pub mod planner_proto;
+#[cfg(test)]
+mod planner_proto_run;
 

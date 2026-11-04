@@ -701,11 +701,11 @@ impl TileMap {
         x >= 0 && y >= 0 && x < self.w && y < self.h
     }
 
-    fn index(&self, t: Tile) -> Option<usize> {
+    pub(crate) fn index(&self, t: Tile) -> Option<usize> {
         self.in_bounds(t).then(|| (t.1 * self.w + t.0) as usize)
     }
 
-    fn tile_of(&self, i: usize) -> Tile {
+    pub(crate) fn tile_of(&self, i: usize) -> Tile {
         (i as i32 % self.w, i as i32 / self.w)
     }
 
@@ -862,7 +862,7 @@ impl TileMap {
 
     /// The neighbours of cell `i` in the order of [`Grid::directions`] (`None` off the map or
     /// past the grid's directions).
-    fn neighbour_indices(&self, i: usize) -> [Option<usize>; 8] {
+    pub(crate) fn neighbour_indices(&self, i: usize) -> [Option<usize>; 8] {
         let w = self.w as usize;
         let (x, y) = ((i % w) as i32, (i / w) as i32);
         let mut out = [None; 8];

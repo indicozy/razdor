@@ -328,6 +328,9 @@ pub struct Game {
     /// What the AI did so far (counts).
     #[serde(default)]
     pub ai_stats: AiStats,
+    /// The planner prototypes' state and counts (`rules::ai::planner_proto`): not saved.
+    #[serde(skip)]
+    pub proto: crate::rules::ai::planner_proto::Proto,
     /// Reports of AI battles the player heard of, newest last.
     #[serde(default)]
     pub ai_log: Vec<AiNews>,
@@ -684,6 +687,7 @@ impl Game {
             beaten_armies: BTreeSet::new(),
             ai_beaten: BTreeSet::new(),
             ai_stats: AiStats::default(),
+            proto: Default::default(),
             ai_log: Vec::new(),
             archetype: 1,
             old_effects: Vec::new(),
