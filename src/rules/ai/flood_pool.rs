@@ -8,10 +8,12 @@
 //! before anything reads or writes that army's path (`Game::settle`). The result is the one the
 //! serial planner computes, whatever the timing: a flood is a function of its input.
 //!
-//! Threads: `RAZDOR_PLAN_THREADS` (0 turns them off), else the cores left after one, at most
-//! [`MAX_WORKERS`]. Off with no threads (wasm), on a small map ([`MIN_CELLS`]), or when a worker
-//! has not taken a job when its result is needed, the caller runs it itself (a job is never
-//! left waiting for a worker that is busy).
+//! Threads: [`threads_for_tick`] picks how many workers take jobs in each AI tick, from the plans
+//! the ticks before made ([`policy`]). `RAZDOR_PLAN_THREADS` overrides the count (0 turns them
+//! off). The pool starts its workers once, at most [`workers`]; a tick that wants fewer lets the
+//! others sleep, so no thread starts or stops per tick. Off with no threads (wasm), on a small map
+//! ([`MIN_CELLS`]), or when a worker has not taken a job when its result is needed, the caller runs
+//! it itself (a job is never left waiting for a worker that is busy).
 
 use std::any::Any;
 use std::collections::VecDeque;
@@ -19,6 +21,8 @@ use std::collections::VecDeque;
 use std::sync::{Condvar, Mutex, OnceLock};
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::{direct, window};
 use crate::rules::map::{Tile, TileMap};
@@ -196,12 +200,12 @@ impl Ticket {
     }
 }
 
-/// Whether a flood of a map of `cells` cells goes to a worker: there are workers and the map is
-/// big enough. Otherwise the caller floods it itself, at once ([`compute_with`]).
+/// Whether a flood of a map of `cells` cells goes to a worker: this tick has workers ([`set_threads`])
+/// and the map is big enough. Otherwise the caller floods it itself, at once ([`compute_with`]).
 pub fn offloads(cells: usize) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        cells >= MIN_CELLS && workers() > 0
+        cells >= MIN_CELLS && ACTIVE.load(Ordering::Relaxed) > 0
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -230,8 +234,89 @@ pub fn max_in_flight() -> usize {
     workers().max(1) * 2 + 2
 }
 
-/// The worker threads the planner runs: `RAZDOR_PLAN_THREADS` if set (0 for none), else the
-/// cores left free after one, at most [`MAX_WORKERS`]. None on wasm.
+/// The unit of the whole-map policy's work (plans × cells): each doubling of the work in these
+/// units adds one thread (see [`policy`]).
+pub const WORK_UNIT: f64 = 100_000.0;
+
+/// The worker count of a tick, a pure function of its inputs (`cores` is the cores the process
+/// may use; the result never changes the AI's choices, only the speed). `plans_per_tick` is a
+/// moving average of the plans the earlier ticks made (0 on the first tick), `cells` the map's
+/// cells, `side` its larger side, `fast_ai` the «Ускоренный ИИ» switch. Zero below [`MIN_CELLS`]
+/// and on one core. At most `min(MAX_WORKERS, cores - 1)`.
+///
+/// Whole-map flood (`fast_ai` off): the flood costs about 8.8 ns per cell per plan, so the work
+/// is `plans × cells` and the count is `round(log2(work / WORK_UNIT))`: the thread-policy bench
+/// (2026-11-04/05, 8 logical CPUs, 96 ticks) found 2 threads best below ~0.15 M of work per tick,
+/// 3–5 up to ~2 M, 7 above ~7 M; the rule is within 2.4% of the best count on maps of 200–800 cells
+/// a side with 10–1000 armies.
+///
+/// Window flood (`fast_ai` on): a plan costs about 0.35 ms whatever the map, but the hand-off to a
+/// worker grows with the map, so the best count falls with the side: 5–7 at 200, 3–5 at 400 and
+/// 2 at 800 (blobs; the same bench). The caps are 6, 4 and 2, and a tick gets at most one thread
+/// per three plans, so a tick with a few plans does not hand them off. Checked again on the islands
+/// map at 800 with 255 armies (2026-11-05): 2 threads take 4.0 s against 5.8 s serial, so the cap
+/// holds there too; the rule does not see the terrain.
+pub fn policy(plans_per_tick: f64, cells: usize, side: u32, fast_ai: bool, cores: usize) -> usize {
+    let max = cores.saturating_sub(1).min(MAX_WORKERS);
+    if cells < MIN_CELLS || max == 0 || plans_per_tick <= 0.0 {
+        return 0;
+    }
+    if fast_ai {
+        let cap = if side <= 200 {
+            6
+        } else if side <= 400 {
+            4
+        } else {
+            2
+        };
+        let by_plans = (plans_per_tick / 3.0).floor() as usize;
+        return cap.min(max).min(by_plans);
+    }
+    let best = (plans_per_tick * cells as f64 / WORK_UNIT).log2().round();
+    (best.max(0.0) as usize).min(max)
+}
+
+/// The worker count of the tick about to run: [`policy`] on this machine, or `RAZDOR_PLAN_THREADS`
+/// when it is set (at most [`MAX_WORKERS`], whatever the policy says). Zero on wasm and below
+/// [`MIN_CELLS`]. Set with [`set_threads`] at the tick's start.
+pub fn threads_for_tick(plans_per_tick: f64, cells: usize, side: u32, fast_ai: bool) -> usize {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (plans_per_tick, cells, side, fast_ai);
+        0
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if cells < MIN_CELLS {
+            return 0;
+        }
+        env_threads().unwrap_or_else(|| policy(plans_per_tick, cells, side, fast_ai, cores()))
+    }
+}
+
+/// Sets how many workers take jobs from now on, at most [`workers`]. The others sleep until a
+/// later tick wants them: a change wakes the sleepers and starts or stops no thread. Floods already
+/// taken by a worker finish; queued ones the caller takes back when it needs them.
+pub fn set_threads(n: usize) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = n;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let n = n.min(workers());
+        if ACTIVE.swap(n, Ordering::Relaxed) != n {
+            // Taking the lock orders the change before a sleeper's next check: no lost wake-up.
+            if let Some(Some(queue)) = POOL.get() {
+                let _held = queue.jobs.lock().unwrap_or_else(|e| e.into_inner());
+                queue.ready.notify_all();
+            }
+        }
+    }
+}
+
+/// The most worker threads the planner runs (the pool's size): `RAZDOR_PLAN_THREADS` if set (0
+/// for none), else the cores left free after one, at most [`MAX_WORKERS`]. Zero on wasm.
 pub fn workers() -> usize {
     #[cfg(target_arch = "wasm32")]
     {
@@ -239,15 +324,31 @@ pub fn workers() -> usize {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        static WORKERS: OnceLock<usize> = OnceLock::new();
-        *WORKERS.get_or_init(|| {
-            if let Some(n) = std::env::var("RAZDOR_PLAN_THREADS").ok().and_then(|v| v.trim().parse::<usize>().ok()) {
-                return n.min(MAX_WORKERS);
-            }
-            std::thread::available_parallelism().map_or(1, |n| n.get()).saturating_sub(1).min(MAX_WORKERS)
-        })
+        env_threads().unwrap_or_else(|| cores().saturating_sub(1).min(MAX_WORKERS))
     }
 }
+
+/// `RAZDOR_PLAN_THREADS`, read once (at most [`MAX_WORKERS`]); None when unset or not a number.
+#[cfg(not(target_arch = "wasm32"))]
+fn env_threads() -> Option<usize> {
+    static ENV: OnceLock<Option<usize>> = OnceLock::new();
+    *ENV.get_or_init(|| std::env::var("RAZDOR_PLAN_THREADS").ok().and_then(|v| v.trim().parse::<usize>().ok()).map(|n| n.min(MAX_WORKERS)))
+}
+
+/// The cores this process may run on, read once (`available_parallelism`; 1 when unknown).
+#[cfg(not(target_arch = "wasm32"))]
+fn cores() -> usize {
+    static CORES: OnceLock<usize> = OnceLock::new();
+    *CORES.get_or_init(|| std::thread::available_parallelism().map_or(1, |n| n.get()))
+}
+
+/// The workers that take jobs now (see [`set_threads`]); 0 until the first tick sets it.
+#[cfg(not(target_arch = "wasm32"))]
+static ACTIVE: AtomicUsize = AtomicUsize::new(0);
+
+/// The worker pool, once it is started (`None` until then, or when no thread could be started).
+#[cfg(not(target_arch = "wasm32"))]
+static POOL: OnceLock<Option<&'static Queue>> = OnceLock::new();
 
 #[cfg(not(target_arch = "wasm32"))]
 enum State {
@@ -321,24 +422,28 @@ struct Queue {
 impl Queue {
     fn push(&self, job: Arc<Job>) {
         self.jobs.lock().unwrap_or_else(|e| e.into_inner()).push_back(job);
-        self.ready.notify_one();
+        // All the sleepers, not one: one that is above the active count would take the wake-up and sleep on.
+        self.ready.notify_all();
     }
 
-    fn next(&self) -> Arc<Job> {
+    /// The next job for worker `k`: only the workers below [`ACTIVE`] take jobs.
+    fn next(&self, k: usize) -> Arc<Job> {
         let mut jobs = self.jobs.lock().unwrap_or_else(|e| e.into_inner());
         loop {
-            if let Some(job) = jobs.pop_front() {
-                return job;
+            if k < ACTIVE.load(Ordering::Relaxed) {
+                if let Some(job) = jobs.pop_front() {
+                    return job;
+                }
             }
             jobs = self.ready.wait(jobs).unwrap_or_else(|e| e.into_inner());
         }
     }
 }
 
-/// The worker pool, started on first use (None when no thread could be started).
+/// The worker pool, started on first use with [`workers`] threads (None when no thread could be
+/// started).
 #[cfg(not(target_arch = "wasm32"))]
 fn pool() -> Option<&'static Queue> {
-    static POOL: OnceLock<Option<&'static Queue>> = OnceLock::new();
     *POOL.get_or_init(|| {
         let n = workers();
         if n == 0 {
@@ -347,11 +452,11 @@ fn pool() -> Option<&'static Queue> {
         // Leaked once: the workers live as long as the process.
         let queue: &'static Queue = Box::leak(Box::new(Queue { jobs: Mutex::new(VecDeque::new()), ready: Condvar::new() }));
         let started = (0..n)
-            .filter(|k| {
+            .filter(|&k| {
                 std::thread::Builder::new()
                     .name(format!("razdor-planner-{k}"))
                     .spawn(move || loop {
-                        queue.next().run();
+                        queue.next(k).run();
                     })
                     .is_ok()
             })
@@ -399,6 +504,8 @@ mod tests {
     /// order they are taken in, and a job that no worker took is run by its caller.
     #[test]
     fn pooled_floods_are_the_inline_ones_in_any_order() {
+        // The tests share the pool's active count: the workers this test wants are on.
+        set_threads(workers().max(1));
         let mut jobs = Vec::new();
         for k in 0..6u32 {
             let from = ((k as i32 * 37) % 240, (k as i32 * 53 + 11) % 240);
@@ -408,6 +515,57 @@ mod tests {
         // Taken last to first: the later ones may be queued or already running on a worker.
         while let Some((ticket, inline)) = jobs.pop() {
             assert!(same(&ticket.wait(), &inline));
+        }
+    }
+
+    /// The whole-map policy is `round(log2(plans × cells / 1e5))`, from 0 (the first tick, or
+    /// the work of a small map) to the cores left after one, at most 7.
+    #[test]
+    fn the_whole_map_policy_is_log2_of_the_work() {
+        let big = 800 * 800;
+        assert_eq!(policy(0.0, big, 800, false, 8), 0, "the first tick plans on the calling thread");
+        assert_eq!(policy(1.0, big, 800, false, 8), 3, "6.4e5 work: log2 6.4 rounds to 3");
+        assert_eq!(policy(10.0, big, 800, false, 8), 6, "6.4e6 work: log2 64");
+        assert_eq!(policy(100.0, big, 800, false, 8), 7, "capped at 7 (8 cores, one left)");
+        assert_eq!(policy(100.0, big, 800, false, 4), 3, "4 cores: 3 workers");
+        assert_eq!(policy(2.0, 200 * 200, 200, false, 8), 0, "8e4 work: log2 0.8 rounds to 0");
+        assert_eq!(policy(5.0, 200 * 200, 200, false, 8), 1, "2e5 work: log2 2");
+    }
+
+    /// The window policy caps the threads by the side (6, 4, 2) and by one per three plans; a
+    /// tick with fewer than three plans, a small map or one core takes none.
+    #[test]
+    fn the_window_policy_caps_by_side_and_plans() {
+        let plans = 30.0;
+        assert_eq!(policy(plans, 200 * 200, 200, true, 8), 6);
+        assert_eq!(policy(plans, 400 * 400, 400, true, 8), 4);
+        assert_eq!(policy(plans, 800 * 800, 800, true, 8), 2);
+        assert_eq!(policy(plans, 200 * 200, 200, true, 4), 3, "4 cores: 3 workers");
+        assert_eq!(policy(2.0, 800 * 800, 800, true, 8), 0, "fewer than three plans");
+        assert_eq!(policy(3.0, 800 * 800, 800, true, 8), 1);
+        assert_eq!(policy(8.0, 400 * 400, 400, true, 8), 2, "8 plans give 2, the cap is 4");
+        assert_eq!(policy(plans, 800 * 800, 800, true, 1), 0, "one core");
+        assert_eq!(policy(plans, MIN_CELLS - 1, 199, true, 8), 0, "a small map");
+    }
+
+    /// Whatever the plans, the cells, the side and the switch, the count is at most the cores
+    /// left after one and at most [`MAX_WORKERS`], and none on a small map or one core.
+    #[test]
+    fn the_policy_never_exceeds_the_cores_or_the_pool() {
+        for cores in 0..=40 {
+            for &cells in &[MIN_CELLS - 1, MIN_CELLS, 640_000, 4_000_000] {
+                for &side in &[100u32, 200, 400, 800, 2000] {
+                    for fast in [false, true] {
+                        for k in 0..=400 {
+                            let n = policy(k as f64 / 2.0, cells, side, fast, cores);
+                            assert!(n <= cores.saturating_sub(1).min(MAX_WORKERS));
+                            if cells < MIN_CELLS || cores < 2 {
+                                assert_eq!(n, 0);
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

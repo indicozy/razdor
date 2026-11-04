@@ -340,6 +340,8 @@ pub(crate) struct AiMove {
     tick: i64,
     start: f64,
     end: f64,
+    /// The planner's plan count when the tick began ([`AiStats::paths`]).
+    plans_before: u32,
 }
 
 /// Game minutes in the original's centi-minutes.
@@ -398,6 +400,9 @@ pub struct Clash {
 #[derive(Default)]
 pub(crate) struct PendingPlans {
     list: VecDeque<(u32, Ticket)>,
+    /// The plans per AI tick, a moving average (each tick counts half, the average half): the
+    /// work the next tick's worker count is set from ([`flood_pool::threads_for_tick`]).
+    load: f64,
 }
 
 /// Counts for the simulation reports and tests.
@@ -1744,6 +1749,10 @@ impl Game {
         let end = self.clock.total_minutes();
         self.ai_respawns(end);
         let tick = cmin(minutes);
+        // The worker count of this tick, from the plans the ticks before made (`flood_pool::policy`).
+        let (w, h) = (self.world.map.w.max(0), self.world.map.h.max(0));
+        let threads = flood_pool::threads_for_tick(self.plans.load, (w * h) as usize, w.max(h) as u32, self.content.experimental.fast_ai);
+        flood_pool::set_threads(threads);
         // The tick's start: every army banks it, the step clock's window opens.
         let mut queue: BTreeSet<(i64, u32, u8, u32)> = BTreeSet::new();
         let mut totals: BTreeMap<u32, i64> = BTreeMap::new();
@@ -1762,7 +1771,7 @@ impl Game {
             }
             queue.insert((0, 0, id, uid));
         }
-        AiMove { queue, totals, pending: BTreeMap::new(), midnights: midnights.to_vec(), tick, start, end }
+        AiMove { queue, totals, pending: BTreeMap::new(), midnights: midnights.to_vec(), tick, start, end, plans_before: self.ai_stats.paths }
     }
 
     /// Plays a tick's AI moves on ([`Game::ai_move_begin`]): its arrivals in the order of their
@@ -1827,6 +1836,8 @@ impl Game {
     /// The end of a tick's AI moves: the clock is set to the tick's end, and the midnights
     /// the arrivals did not pass are returned (they come after the slice's own calls).
     pub(crate) fn ai_move_end(&mut self, job: AiMove) -> Vec<f64> {
+        let made = self.ai_stats.paths.wrapping_sub(job.plans_before) as f64;
+        self.plans.load = (self.plans.load + made) / 2.0;
         self.clock.set_total_minutes(job.end);
         job.midnights
     }

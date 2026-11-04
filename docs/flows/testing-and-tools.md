@@ -49,11 +49,18 @@ Two `#[ignore]`d tests in `src/rules/ai/bigmap_bench.rs` (they pass without the 
   lakes; 100 roaming AI armies and/or 10 000 never-holding global events). It times each
   `Game::tick` over 2 game days of endless wait and prints the median, p95 and max per tick and the
   total. `RAZDOR_BENCH_SIZES` (e.g. `200,400`) and `RAZDOR_BENCH_VARIANT` (`armies|events|both`,
-  default `both`) pick the maps. Time it on one core, pinned away from the desktop's cores:
+  default `both`) pick the maps. `RAZDOR_BENCH_ARMIES` (a count, default 100) sets the roaming
+  armies of the `armies` and `both` variants, and `RAZDOR_BENCH_TERRAIN=islands` (default blobs)
+  a continent of about 60% of the map with island clusters in the water, joined by one-cell land
+  bridges (a test checks they are joined). `RAZDOR_BENCH_RULES=fast` turns «Ускоренный ИИ» on. Time
+  it pinned away from the desktop's cores:
 
   ```sh
-  RAZDOR_DT_DIR=<install> nice -n 19 taskset -c 8 <test binary> bigmap_ai_bench --ignored --nocapture
+  RAZDOR_DT_DIR=<install> nice -n 19 taskset -c 8-15 <test binary> bigmap_ai_bench --ignored --nocapture
   ```
+
+  The worker count of each tick follows the policy in `battle-ai.md` §5b (set
+  `RAZDOR_PLAN_THREADS` to fix it, e.g. `0` for the serial planner, to compare counts).
 
 - `ai_fingerprint`: prints `<map> <hash>` for every install map (30 days, as `real_maps` plays
   them), every map of `RAZDOR_COMMUNITY_DIR` (30 days) and every bench map (2 days). The hash

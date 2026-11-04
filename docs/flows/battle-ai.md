@@ -106,9 +106,23 @@ the timing:
   bench) run on the workers while the arrivals of that moment go on. Their floods take the
   inputs as the serial planner had them at each plan: the wander draws and battles of the
   arrivals before are already in.
-- Threads: `RAZDOR_PLAN_THREADS` (0 turns them off), else the cores left after one, at most 7
-  (`flood_pool::workers`). No threads on wasm, below `MIN_CELLS` (40 000 cells), or with one
-  core. A caller that needs a result no worker has started runs it itself.
+- Threads, per tick (`flood_pool::threads_for_tick`, `flood_pool::policy`): the count is set at
+  the start of each AI tick (`ai_move_begin`, `flood_pool::set_threads`) from the moving average
+  of the plans the earlier ticks made (`PendingPlans::load`: each tick counts half; 0 on the
+  first tick, so the first plans are made on the calling thread).
+  - Whole-map flood (`fast_ai` off): `round(log2(plans × cells / 1e5))`, clamped to
+    `min(7, cores − 1)`. The work is the flood's cost (8.8 ns per cell per plan) in units of 1e5.
+  - Window flood (`fast_ai` on, §5c): at most 6 threads on a side of 200 or less, 4 up to 400, 2
+    above, and at most one per three plans. The caps are where the window's hand-off to a worker
+    stops paying (0.35 ms a plan whatever the map; the bench's thread-policy runs, 2026-11-04/05).
+  - `RAZDOR_PLAN_THREADS` sets the count instead (0 for none; at most 7). No threads on wasm,
+    below `MIN_CELLS` (40 000 cells), or with one core.
+  - The pool starts its workers once (`flood_pool::workers`, at most 7). A tick that wants fewer
+    sets the others asleep (`ACTIVE`), so no thread starts or stops per tick. A caller that needs
+    a result no worker has started runs it itself.
+  - Test: `policy` is a pure function (`the_whole_map_policy_is_log2_of_the_work`,
+    `the_window_policy_caps_by_side_and_plans`, `the_policy_never_exceeds_the_cores_or_the_pool`).
+    The thread count never changes a result: `ai_fingerprint` is the same with any count.
 - The pending plans are at most `max_in_flight()` (2 per worker, plus 2); the oldest is written
   first when more are made.
 - Test: `ai_fingerprint` is identical with the threads on and off (the baseline in
