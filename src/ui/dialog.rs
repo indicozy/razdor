@@ -129,6 +129,9 @@ pub struct Dialog {
     /// Both the village's offer and its result use the same scaled picture/text layout.
     pub village_event: bool,
     pub picture: Option<Picture>,
+    /// A caption under the picture, centred on it: the leader of the army an event was met on
+    /// (`story::leader_caption`, Razdor's option). At most three lines, the picture's width.
+    pub caption: Option<String>,
     /// Units that joined / left the army.
     pub joined: Vec<UnitId>,
     pub left: Vec<UnitId>,
@@ -181,6 +184,7 @@ impl Dialog {
             offer: false,
             village_event: false,
             picture: None,
+            caption: None,
             joined: Vec::new(),
             left: Vec::new(),
             lost: Vec::new(),
@@ -617,6 +621,28 @@ fn phone_fit(text_box: f32, floor: f32, below: f32, avail: f32) -> (f32, f32) {
 /// under a text box).
 const STACK_GAP: f32 = 10.0;
 
+/// The leader's caption under a picture (Razdor's, [`Dialog::caption`]): at most this many lines,
+/// each as wide as the picture, the first [`CAPTION_GAP`] (original px) under the picture. The
+/// caption is the event text's cream, in its face.
+const CAPTION_MAX_LINES: usize = 3;
+const CAPTION_GAP: f32 = 7.0;
+/// A caption too long for its lines is set smaller: each step is this share of the text size, and
+/// there are [`CAPTION_SHRINKS`] of them at most.
+const CAPTION_SHRINK: f32 = 0.1;
+const CAPTION_SHRINKS: usize = 3;
+/// An upright phone's picture floats in the marked text box, as an author's picture in Word: the
+/// lines beside it are narrowed by its column (the picture and [`FLOAT_W_GAP`]); a line whose top
+/// is less than [`FLOAT_GAP`] under the picture's block (caption included) is still beside it.
+const FLOAT_W_GAP: f32 = 14.0;
+const FLOAT_GAP: f32 = 8.0;
+
+/// Whether row `i` (its top `i * line` under the text's top, screen px) is beside a floating
+/// picture whose block is `float_h` original px tall.
+fn float_beside(i: usize, line: f32, float_h: f32, o: f32) -> bool {
+    i as f32 * line < (float_h + FLOAT_GAP) * o
+}
+const CAPTION_INK: Color = Color::new(1.0, 0.9, 0.66, 1.0);
+
 /// The height a stacked picture takes above the text box, in original px: the picture's own height
 /// from one px under the content's top, then [`STACK_GAP`]. 0 when the picture is not stacked (it
 /// sits beside the box, or there is none). Pure.
@@ -637,12 +663,84 @@ fn picture_x(stacked: bool, w: f32, pw: f32) -> f32 {
 /// The event window's frame (original px). Stacked (`stacked`: held upright with a picture, a phone
 /// choice, not in the original), the picture stands on top at full size and the text box takes the
 /// frame's full inner width under it; else the picture is beside the box as the original has it.
+#[cfg(test)]
 fn event_frame(side: Option<(f32, f32)>, stacked: bool, text_h: f32, below: f32, max_box: f32, w: f32) -> EventFrame {
-    let top = stacked_top(stacked, side);
+    event_frame_cap(side, stacked, text_h, below, max_box, w, 0.0)
+}
+
+/// [`event_frame`] with a caption of `cap` original px under the picture (0 for none): stacked, it
+/// takes the room above the box; beside the box, the box is at least as tall as the picture and
+/// the caption under it.
+fn event_frame_cap(side: Option<(f32, f32)>, stacked: bool, text_h: f32, below: f32, max_box: f32, w: f32, cap: f32) -> EventFrame {
+    let top = stacked_top(stacked, side) + if stacked { cap } else { 0.0 };
     let side_w = if stacked { 0.0 } else { side.map_or(0.0, |(pw, _)| pw + 14.0) };
-    let min_box = if stacked { EVENT_MIN_BOX } else { side.map_or(EVENT_MIN_BOX, |(_, ph)| ph.max(EVENT_MIN_BOX)) };
+    let min_box = if stacked {
+        EVENT_MIN_BOX
+    } else {
+        // The picture starts 1 px under the box's top; the caption ends under it.
+        side.map_or(EVENT_MIN_BOX, |(_, ph)| if cap > 0.0 { (1.0 + ph + cap).max(EVENT_MIN_BOX) } else { ph.max(EVENT_MIN_BOX) })
+    };
     let box_h = (text_h + 2.0 * EVENT_PAD).max(min_box).min(max_box.max(min_box));
     EventFrame { w, h: top + box_h + below + EVENT_REST, box_x: 19.0 + side_w, box_w: w - 38.0 - side_w, box_h, top }
+}
+
+/// The caption's lines under a picture `width` screen px wide, in the window's cream face: wrapped,
+/// at most [`CAPTION_MAX_LINES`]. A name that needs more is set smaller, in steps of
+/// [`CAPTION_SHRINK`] down to [`CAPTION_SHRINKS`] of them; at the smallest a longer one still ends
+/// with «…». Returns the lines and their size.
+fn caption_fit(text: &str, width: f32, size: f32) -> (Vec<String>, f32) {
+    super::dt_font::with_original_face(super::dt_font::Face::Subtitle, || {
+        let words: Vec<&str> = text.split_whitespace().collect();
+        let mut last = (Vec::new(), size);
+        for k in 0..=CAPTION_SHRINKS {
+            let s = size * (1.0 - CAPTION_SHRINK * k as f32);
+            let lines = wrap_cached(text, width, s);
+            if lines.len() <= CAPTION_MAX_LINES {
+                return (lines, s);
+            }
+            // Greedy wrapping ran past three lines: the words split into three runs whose widest is
+            // the narrowest (a name's «Барон / Оскар фон / Ньюстон»), when that fits the picture.
+            if let Some(runs) = balanced_runs(&words, width, s) {
+                return (runs, s);
+            }
+            last = (lines, s);
+        }
+        let (mut lines, s) = last;
+        let rest = lines.split_off(CAPTION_MAX_LINES - 1).join(" ");
+        let mut tail = rest;
+        while !tail.is_empty() && measure(&format!("{tail}…"), s).width > width {
+            tail.pop();
+        }
+        lines.push(format!("{}…", tail.trim_end()));
+        (lines, s)
+    })
+}
+
+/// The three runs of `words` (in order) whose widest is the narrowest, if that is no wider than
+/// `width` (screen px, `size`); None when no split fits. Pure but for the measure.
+fn balanced_runs(words: &[&str], width: f32, size: f32) -> Option<Vec<String>> {
+    let n = words.len();
+    let run = |a: usize, b: usize| words[a..b].join(" ");
+    let mut best: Option<(f32, usize, usize)> = None;
+    for i in 1..n {
+        for j in i + 1..n {
+            let widest = [(0, i), (i, j), (j, n)].iter().map(|&(a, b)| measure(&run(a, b), size).width).fold(0.0, f32::max);
+            if best.is_none_or(|(w, _, _)| widest < w) {
+                best = Some((widest, i, j));
+            }
+        }
+    }
+    let (widest, i, j) = best?;
+    (widest <= width).then(|| vec![run(0, i), run(i, j), run(j, n)])
+}
+
+/// The frame of a window whose picture floats in the box (`EventLayout::float`): the box is as tall as
+/// the text or the picture's block, whichever is taller, and takes the frame's full inner width; the
+/// picture stands inside it, so nothing stacks above the box.
+fn float_frame(text_h: f32, float_h: f32, below: f32, max_box: f32, w: f32) -> EventFrame {
+    let min = float_h + 2.0 * EVENT_PAD;
+    let box_h = (text_h + 2.0 * EVENT_PAD).max(min).min(max_box.max(min));
+    EventFrame { w, h: box_h + below + EVENT_REST, box_x: 19.0, box_w: w - 38.0, box_h, top: 0.0 }
 }
 
 /// Where the window stands: centred over the map view above the bottom bar (the original's
@@ -677,6 +775,14 @@ struct EventLayout {
     shown: usize,
     /// The reward icons' size factor (`REWARD_ICON` in the reward look, else 1).
     rs: f32,
+    /// The leader's caption under the picture (empty for none), and its height in original px
+    /// with its gap ([`CAPTION_GAP`]).
+    caption: Vec<String>,
+    caption_size: f32,
+    cap_h: f32,
+    /// The picture floats in the marked text box (an upright phone): (its column's width with its
+    /// gap, its block's height, both original px). The rows beside it take the room less the column.
+    float: Option<(f32, f32)>,
 }
 
 /// A text row's height: the defeat report's empty row is the gap font's (0x47e46c), shorter
@@ -790,8 +896,21 @@ fn event_layout(d: &Dialog, o: f32, t: f32, w: f32, fit: bool) -> EventLayout {
     let stacked = fit && super::window_layout::portrait() && side.is_some();
     let side_w = if stacked { 0.0 } else { side.map_or(0.0, |(pw, _)| pw + 14.0) };
     let room = (w - 38.0 - side_w - 40.0) * o;
+    // The leader's caption under the picture (`Dialog::caption`): as wide as the picture and the
+    // 14 px gap to the text box, centred on the picture, so it takes half that gap on each side.
+    let (caption, caption_size) = match (&d.caption, side) {
+        (Some(c), Some((pw, _))) if d.picture.is_some() => caption_fit(c, (pw + 14.0) * o, size),
+        _ => (Vec::new(), size),
+    };
+    let cap_h = if caption.is_empty() { 0.0 } else { (CAPTION_GAP * o + caption.len() as f32 * line) / o };
+    // An upright phone's picture floats in the marked text (`float`), and the lines beside it take the
+    // room less its column (`float_beside`); the others take the full room.
+    let float = if stacked && d.marked.is_some() { side.map(|(pw, ph)| (pw + FLOAT_W_GAP, 1.0 + ph + cap_h)) } else { None };
     let (lines, rows): (Vec<String>, Vec<MarkupRow>) = match &d.marked {
-        Some(t) => (Vec::new(), markup_rows(t, room, size)),
+        Some(t) => match float {
+            Some((fw, fh)) => (Vec::new(), markup_rows_by(t, &|i| if float_beside(i, line, fh, o) { room - fw * o } else { room }, size)),
+            None => (Vec::new(), markup_rows(t, room, size)),
+        },
         // Laid out three times a frame with a large window (`draw_content`): the wraps are kept.
         None => (d.text.iter().flat_map(|t| wrap_cached(t, room, size)).collect(), Vec::new()),
     };
@@ -814,7 +933,8 @@ fn event_layout(d: &Dialog, o: f32, t: f32, w: f32, fit: bool) -> EventLayout {
     // The box stops at 499 (and short of the screen): the text scrolls in it, the buttons
     // stay in sight.
     // The title strip's growth (`chrome::title_grow`) is part of the window's height too.
-    let top_o = stacked_top(stacked, side);
+    // A floating picture is inside the box: nothing stacks above it.
+    let top_o = if float.is_some() { 0.0 } else { stacked_top(stacked, side) + if stacked { cap_h } else { 0.0 } };
     let screen_box = (sh - chrome::bar_height() - 4.0) / o - below / o - EVENT_REST - top_o - (chrome::title_grow() + footer_grow(o)) / o;
     let (max_box, below_vis) = if fit {
         // A phone: the text keeps five lines and the rewards scroll (`phone_fit`).
@@ -825,9 +945,12 @@ fn event_layout(d: &Dialog, o: f32, t: f32, w: f32, fit: bool) -> EventLayout {
     } else {
         (EVENT_MAX_BOX.min(screen_box), below / o)
     };
-    let f = event_frame(side, stacked, full_h / o, below_vis, max_box, w);
+    let f = match float {
+        Some((_, fh)) => float_frame(full_h / o, fh, below_vis, max_box, w),
+        None => event_frame_cap(side, stacked, full_h / o, below_vis, max_box, w, cap_h),
+    };
     let shown = if full_h / o + 2.0 * EVENT_PAD <= f.box_h { total } else { (((f.box_h - 2.0 * EVENT_PAD) * o / line).floor().max(1.0) as usize).min(total) };
-    EventLayout { o, t, size, line, side, stacked, side_w, room, lines, rows, total, pic_h, res_h, items_h, lost_h, spells_h, below, f, shown, rs }
+    EventLayout { o, t, size, line, side, stacked, side_w, room, lines, rows, total, pic_h, res_h, items_h, lost_h, spells_h, below, f, shown, rs, caption, caption_size, cap_h, float }
 }
 
 /// Draws `d` over the map; returns how it was closed: OK (or Enter, Escape), or for a
@@ -897,9 +1020,9 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         // phone the rewards scroll, so the smallest window holds the text's five lines only.
         let first = event_layout(d, plain, t, EVENT_W, phone);
         let frame_h = if phone {
-            event_frame(first.side, first.stacked, TEXT_FLOOR_LINES * first.line / plain, 0.0, EVENT_MAX_BOX, min_w).h
+            event_frame_cap(first.side, first.stacked, TEXT_FLOOR_LINES * first.line / plain, 0.0, EVENT_MAX_BOX, min_w, first.cap_h).h
         } else {
-            event_frame(first.side, false, 0.0, first.below / plain, EVENT_MAX_BOX, min_w).h
+            event_frame_cap(first.side, false, 0.0, first.below / plain, EVENT_MAX_BOX, min_w, first.cap_h).h
         };
         let min_h = frame_h + (chrome::title_grow() + footer_grow(plain)) / plain;
         o = super::dt_font::whole_scale(super::display::popup_o(base, min_w, min_h)).min((sw - 12.0) / min_w).max(plain);
@@ -907,7 +1030,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     let lay = if large {
         let max_w = event_width(o, sw, phone);
         let probe = event_layout(d, o, t, max_w, phone);
-        let width = text_fit_width(widest_text(&probe), o, probe.side_w, max_w);
+        let width = text_fit_width(widest_text(&probe), o, probe.side_w + probe.float.map_or(0.0, |(fw, _)| fw), max_w);
         // The captions centred over the window must fit its frame too (never past the cap).
         let size = super::dt_font::sheet_size(super::dt_font::Face::Subtitle, t);
         let width = width.max(caption_fit_width(widest_caption(d, size), o)).min(max_w);
@@ -916,7 +1039,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         event_layout(d, o, t, EVENT_W, false)
     };
     chrome::under_message();
-    let EventLayout { o, t, size, line, side, stacked, room, lines, rows, total, pic_h, res_h, items_h, lost_h, spells_h, below, f, shown, rs, .. } = lay;
+    let EventLayout { o, t, size, line, side, stacked, room, lines, rows, total, pic_h, res_h, items_h, lost_h, spells_h, below, f, shown, rs, caption, caption_size, float, .. } = lay;
     let row_h = |r: &MarkupRow| event_row_h(defeat, line, t, r);
     // The title strip's growth: the window is taller by it, and its frame and content move down.
     let grow = chrome::title_grow();
@@ -958,51 +1081,74 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     let top = y + EVENT_BOX_TOP * o + grow;
     let mut cy = top;
     // The picture's left edge: beside the text (20 px in) or, stacked, centred across the window.
-    let pic_x = |pw: f32| x + picture_x(stacked, f.w, pw) * o;
+    // A floating picture is drawn over its box, so the box goes first (its frame is the same as below).
+    if float.is_some() && !card_slot {
+        chrome::text_box(Rect::new(x + f.box_x * o, top, f.box_w * o, f.box_h * o));
+    }
+    // A floating picture sits at the text's left, under the box's top (`float`); else as before.
+    let pic_x = |pw: f32| if float.is_some() { x + (f.box_x + 20.0) * o } else { x + picture_x(stacked, f.w, pw) * o };
+    let pic_y = if float.is_some() { top + EVENT_PAD * o } else { top + o };
     match &d.picture {
         Some(Picture::Unit(u)) => {
             // Left of the text box, as the original's portrait (the box starts at 19 +
             // picture + 14); stacked, centred above it.
             let (pw, _) = side.unwrap_or((UNIT_BUST, UNIT_BUST));
-            let r = Rect::new(pic_x(pw), top + o, pw * o, pw * o);
+            let r = Rect::new(pic_x(pw), pic_y, pw * o, pw * o);
             assets.draw_portrait(*u, Team::Player, r);
             chrome::silver_frame(r, 1.5 * o);
         }
         Some(Picture::Image(tex)) => {
             let (tw, th) = side.expect("picture dimensions");
-            let r = Rect::new(pic_x(tw), top + o, tw * o, th * o);
+            let r = Rect::new(pic_x(tw), pic_y, tw * o, th * o);
             draw_texture_ex(tex, r.x, r.y, WHITE, DrawTextureParams { dest_size: Some(vec2(r.w, r.h)), ..Default::default() });
             draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0 * o, MARBLE_EDGE);
         }
         Some(Picture::Still(tex)) => {
             let (pw, ph) = side.unwrap_or((tex.width(), tex.height()));
-            chrome::tex(tex, Rect::new(pic_x(pw), top + o, pw * o, ph * o), WHITE)
+            chrome::tex(tex, Rect::new(pic_x(pw), pic_y, pw * o, ph * o), WHITE)
         }
         Some(Picture::Side(tex)) => {
             let (pw, ph) = side.unwrap_or((tex.width(), tex.height()));
-            let r = Rect::new(pic_x(pw), top + o, pw * o, ph * o);
+            let r = Rect::new(pic_x(pw), pic_y, pw * o, ph * o);
             chrome::tex(tex, r, WHITE);
             draw_rectangle_lines(r.x - 1.0, r.y - 1.0, r.w + 2.0, r.h + 2.0, 1.0, WHITE);
         }
         None => {}
     }
+    // The leader's caption under the picture, centred on it, in the window's cream (`Dialog::caption`).
+    if let (Some((pw, ph)), false) = (side, caption.is_empty()) {
+        let cx = pic_x(pw) + pw * o / 2.0;
+        let mut by = pic_y + ph * o + CAPTION_GAP * o + EVENT_BASELINE * t;
+        for l in &caption {
+            super::dt_font::with_original_face(super::dt_font::Face::Subtitle, || chrome::shadow_centered(l, cx, by, caption_size, CAPTION_INK));
+            by += line;
+        }
+    }
     // The text box: under the picture when stacked (`f.top`), else where the picture's rows put it.
     cy += pic_h + f.top * o;
     let tb = Rect::new(x + f.box_x * o, cy, f.box_w * o, f.box_h * o);
     // The learnt-spell window held upright draws its spell card there instead of the empty box.
-    if !card_slot {
+    if !card_slot && float.is_none() {
         chrome::text_box(tb);
     }
     let first = scrolled(d, total, shown, tb, o);
     let shown_h = lines.iter().skip(first).take(shown).map(|_| line).sum::<f32>() + rows.iter().skip(first).take(shown).map(row_h).sum::<f32>();
-    let mut ty = tb.y + ((tb.h - shown_h) / 2.0).max(EVENT_PAD * o).floor() + EVENT_BASELINE * t;
+    // A floating picture's text starts at the box's top; else the text is centred in the box.
+    let mut ty = match float {
+        Some(_) => tb.y + EVENT_PAD * o + EVENT_BASELINE * t,
+        None => tb.y + ((tb.h - shown_h) / 2.0).max(EVENT_PAD * o).floor() + EVENT_BASELINE * t,
+    };
     let text_x = tb.x + 20.0 * o;
     for l in lines.iter().skip(first).take(shown) {
         super::dt_font::with_original_face(super::dt_font::Face::Subtitle, || chrome::shadow_centered(l, tb.x + tb.w / 2.0, ty, size, Color::new(1.0, 0.9, 0.66, 1.0)));
         ty += line;
     }
-    for row in rows.iter().skip(first).take(shown) {
-        draw_markup_row(row, text_x, ty, room, size);
+    for (i, row) in rows.iter().enumerate().skip(first).take(shown) {
+        // A row beside the floating picture starts past its column and is narrowed by it.
+        match float {
+            Some((fw, fh)) if float_beside(i, line, fh, o) => draw_markup_row(row, text_x + fw * o, ty, room - fw * o, size),
+            _ => draw_markup_row(row, text_x, ty, room, size),
+        }
         ty += row_h(row);
     }
     cy += tb.h + 10.0 * o;
@@ -1551,6 +1697,34 @@ mod tests {
         // A text taller than 499 scrolls in a box of 499 (0x4aa88a), or less on a short screen.
         assert_eq!(event_frame(None, false, 900.0, 0.0, EVENT_MAX_BOX, EVENT_W).box_h, 499.0);
         assert_eq!(event_frame(None, false, 900.0, 0.0, 300.0, EVENT_W).box_h, 300.0);
+    }
+
+    /// A leader's caption under a picture takes room under it in the side box (the box grows to
+    /// hold it) and above the box when stacked; without one the frame is the picture's.
+    #[test]
+    fn a_leader_caption_under_the_picture_fits_its_box() {
+        let side = Some((UNIT_BUST, UNIT_BUST));
+        let with = event_frame_cap(side, false, 19.0, 0.0, EVENT_MAX_BOX, EVENT_W, 40.0);
+        assert_eq!(with.box_h, 1.0 + UNIT_BUST + 40.0, "the picture, its 1 px and the caption");
+        assert_eq!(with.top, 0.0, "beside the box, nothing stacks above it");
+        assert_eq!(event_frame_cap(side, false, 19.0, 0.0, EVENT_MAX_BOX, EVENT_W, 0.0), event_frame(side, false, 19.0, 0.0, EVENT_MAX_BOX, EVENT_W));
+        let stacked = event_frame_cap(side, true, 19.0, 0.0, EVENT_MAX_BOX, EVENT_W, 40.0);
+        assert_eq!(stacked.top, 1.0 + UNIT_BUST + STACK_GAP + 40.0, "the caption sits above the box, under the picture");
+    }
+
+    /// A floating picture: the box is as tall as the text or the picture's block, whichever is taller,
+    /// and the rows from under the block (its gap included) are the full width again.
+    #[test]
+    fn a_floating_picture_sits_in_the_box_and_narrows_only_the_rows_beside_it() {
+        let short = float_frame(19.0, 133.0, 0.0, EVENT_MAX_BOX, EVENT_W);
+        assert_eq!(short.box_h, 133.0 + 2.0 * EVENT_PAD, "the picture's block is taller than the text");
+        assert_eq!(short.top, 0.0, "the picture is inside the box");
+        assert_eq!(short.box_w, EVENT_W - 38.0, "the box takes the full inner width");
+        let long = float_frame(300.0, 133.0, 0.0, EVENT_MAX_BOX, EVENT_W);
+        assert_eq!(long.box_h, 300.0 + 2.0 * EVENT_PAD, "the text is taller than the picture");
+        assert!(float_beside(0, 19.0, 133.0, 1.0), "the first row is beside the picture");
+        assert!(float_beside(7, 19.0, 133.0, 1.0), "a row whose top is under the block but within the gap is still beside it");
+        assert!(!float_beside(8, 19.0, 133.0, 1.0), "the row under the block and its gap is the full width");
     }
 
     /// Held upright, a unit's portrait (or any picture) stands centred on top of the event text, and

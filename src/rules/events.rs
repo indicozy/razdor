@@ -332,6 +332,11 @@ pub enum EventOutcome {
     /// event's `Fired`, and only when at least one was removed; the window's departed row shows
     /// exactly these.
     UnitsLost { event: EventId, units: Vec<u32> },
+    /// The event fired on meeting army `army` (its meet-army condition is the meeting in force),
+    /// and its window or question is open: the window names the army's leader under its picture
+    /// (`story::show`). Sent right after that window's `Fired` or `Question`, and only for such
+    /// an event; a silent one has no window.
+    MeetingArmy { event: EventId, army: ArmyId },
     /// The event asks its yes/no question; call [`EventEngine::answer`]. Nothing else runs
     /// until then.
     Question(EventId),
@@ -1430,6 +1435,13 @@ impl EventEngine {
     // Opening and finishing
     // ---------------------------------------------------------------------------------------
 
+    /// The meeting's note for event `id`'s window: an event with a meet-army condition, run while
+    /// that army is met (the condition is what made it eligible), names the army on its window.
+    fn met_army_window(&self, id: EventId) -> Option<EventOutcome> {
+        let army = self.ev(id).conditions.meet_army;
+        (army != 0 && self.meeting == Some(army)).then_some(EventOutcome::MeetingArmy { event: id, army })
+    }
+
     /// Open an event (0x4a8ae8): with "ask" set its question waits; else the dialog-time
     /// results are applied and it is finished (the original finishes at OK, or at once for a
     /// silent event; nothing changes in between).
@@ -1437,6 +1449,7 @@ impl EventEngine {
         if self.ev(id).conditions.confirm_question != 0 {
             self.pending = Some(id);
             out.push(EventOutcome::Question(id));
+            out.extend(self.met_army_window(id));
         } else {
             self.show(id, w, out);
             self.finish(id, w, out, depth);
@@ -1450,6 +1463,9 @@ impl EventEngine {
         self.st_mut(id).set_answer_byte(0);
         let e = self.ev(id).clone();
         out.push(EventOutcome::Fired { event: id, message: !e.message.is_empty() });
+        if !e.message.is_empty() {
+            out.extend(self.met_army_window(id));
+        }
         // A message opens the window (0x4ac3b4) and the scan stops there; an event without
         // one is finished at once and the scan goes on.
         if !e.message.is_empty() {
@@ -3034,7 +3050,7 @@ mod tests {
         let mut g = engine(vec![ask, then]);
         let mut w = MockWorld::new();
         w.now = 10;
-        assert_eq!(g.meet(&mut w, 4), vec![EventOutcome::Question(1)]);
+        assert_eq!(g.meet(&mut w, 4), vec![EventOutcome::Question(1), EventOutcome::MeetingArmy { event: 1, army: 4 }]);
         assert_eq!(fired(&g.answer(&mut w, true)), vec![1, 2]);
     }
 
@@ -3049,7 +3065,7 @@ mod tests {
         let mut g = engine(vec![ask, then]);
         let mut w = MockWorld::new();
         w.now = 10;
-        assert_eq!(g.meet(&mut w, 4), vec![EventOutcome::Question(1)]);
+        assert_eq!(g.meet(&mut w, 4), vec![EventOutcome::Question(1), EventOutcome::MeetingArmy { event: 1, army: 4 }]);
         assert_eq!(fired(&g.answer(&mut w, true)), vec![1]);
         assert_eq!(g.meeting(), None);
         // Met again later (event 8 brought it back): now event 2 fires.
@@ -3465,6 +3481,43 @@ mod tests {
         let mut w = MockWorld::new();
         let out = g.tick(&mut w);
         assert!(!out.iter().any(|o| matches!(o, EventOutcome::ItemsLost { .. })), "{out:?}");
+    }
+
+    /// The window of an event met on army 1 names that army (`MeetingArmy`) right after its
+    /// `Fired`; another event's window names none, and a silent meeting event has no window.
+    #[test]
+    fn a_meeting_event_s_window_names_the_army_met() {
+        let mut talk = with_message(many(global()));
+        talk.conditions.meet_army = 1;
+        let plain = with_message(many(global()));
+        let mut g = engine(vec![talk, plain]);
+        let mut w = MockWorld::new();
+        let out = meet_read(&mut g, &mut w, 1);
+        let at = out.iter().position(|o| *o == EventOutcome::Fired { event: 1, message: true }).expect("the meeting event fired");
+        assert_eq!(out.get(at + 1), Some(&EventOutcome::MeetingArmy { event: 1, army: 1 }), "{out:?}");
+        assert_eq!(out.iter().filter(|o| matches!(o, EventOutcome::MeetingArmy { .. })).count(), 1, "{out:?}");
+
+        let mut silent = many(global());
+        silent.conditions.meet_army = 2;
+        let mut g = engine(vec![silent]);
+        let out = meet_read(&mut g, &mut w, 2);
+        assert_eq!(fired(&out), vec![1], "the silent meeting event fired");
+        assert!(!out.iter().any(|o| matches!(o, EventOutcome::MeetingArmy { .. })), "{out:?}");
+    }
+
+    /// With two armies each with its own meeting event, meeting army 2 names army 2 on its window,
+    /// never the other one: the army named is the event's own meet-army condition.
+    #[test]
+    fn the_window_names_the_condition_army_not_another_one() {
+        let mut first = with_message(many(global()));
+        first.conditions.meet_army = 1;
+        let mut second = with_message(many(global()));
+        second.conditions.meet_army = 2;
+        let mut g = engine(vec![first, second]);
+        let mut w = MockWorld::new();
+        let out = meet_read(&mut g, &mut w, 2);
+        assert!(out.contains(&EventOutcome::MeetingArmy { event: 2, army: 2 }), "{out:?}");
+        assert!(!out.iter().any(|o| matches!(o, EventOutcome::MeetingArmy { event: 1, .. })), "{out:?}");
     }
 
     #[test]

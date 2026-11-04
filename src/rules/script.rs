@@ -47,7 +47,7 @@ impl Event {
     pub fn needs_reading(&self) -> bool {
         match self {
             Event::Script(EventOutcome::Fired { message, .. }) => *message,
-            Event::Script(EventOutcome::Declined(_) | EventOutcome::LoopGuard | EventOutcome::ItemsLost { .. }) => false,
+            Event::Script(EventOutcome::Declined(_) | EventOutcome::LoopGuard | EventOutcome::ItemsLost { .. } | EventOutcome::MeetingArmy { .. }) => false,
             // A quest line never stops the walk on its own: the line is on the event's window,
             // and a silent event that closes a quest finishes at once with no window (0x4a7a40,
             // the line written on the window at 0x4a8e12). The window's `Fired { message: true }`

@@ -1196,6 +1196,7 @@ pub fn follow_settings(audio: &super::audio::Settings, g: &mut razdor::rules::ga
     g.pass_on_bridges = audio.pass_on_bridges;
     g.battle_marks = audio.battle_marks;
     g.army_list = audio.army_list;
+    g.leader_caption = audio.leader_caption;
 }
 
 /// The improved AI's checkbox clicked: on gives the improved level, off the original's (and
@@ -1523,9 +1524,11 @@ fn advanced_width(over_map: bool, wh: f32) -> f32 {
 /// from the original on the left, the screen, the interface scale, the font and the
 /// language on the right. Returns true when closed.
 fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
-    // 650 high since «Расстановка армии» joined the left column (it still fits the 682 px
-    // view above the bar).
-    let wh = 650.0;
+    // 650 high since «Расстановка армии» joined the left column (it still fits the 682 px view above
+    // the bar); on the title screens 682, for the row «Имя предводителя» in the right column (over the
+    // map the view above the bar has no room for it, so the rows there are pitched closer).
+    const ADV_BASE_H: f32 = 650.0;
+    let wh = if over_map { ADV_BASE_H } else { 682.0 };
     let ww = advanced_width(over_map, wh);
     // Its own scale on a title screen or in game on a phone held upright (its own window, not the
     // settings window's).
@@ -1549,6 +1552,9 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     } else {
         let (w, h) = (ww * k, wh * k);
         let r = window_layout::title_rect((ww, wh)).map(|r| shrink_about_centre(r, shrink)).unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, ((screen_height() - h) / 2.0).max(0.0), w, h));
+        // The window grew by 32 original px at the bottom (682 for 650): its top stays where the 650
+        // window's was, so the rows above the new ones keep their places.
+        let r = Rect::new(r.x, r.y + (wh - ADV_BASE_H) / 2.0 * k, r.w, r.h);
         chrome::window(r, tr("Advanced settings"), chrome::Skin::Marble, true)
     };
     // On a phone (in either orientation) both columns scroll together above the Ok button: the
@@ -1687,7 +1693,7 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     let lang_hint = wrap(super::language::hint(), rw, 12.0 * k);
     let hints_h = 44.0 * k + ai_hint.len() as f32 * 17.0 * k + 48.0 * k + lang_hint.len() as f32 * 17.0 * k;
     let ok_top = inner.h - 16.0 * k - ok_h - 4.0 * k;
-    let mut pitch = right_column_pitch(30.0 * k, ok_top, 11.0, hints_h, 44.0 * k);
+    let mut pitch = right_column_pitch(30.0 * k, ok_top, 12.0, hints_h, 44.0 * k);
     // At a grown size the rows keep a 2 px gap under their grown buttons (at Normal nothing).
     if row_h > 28.0 * k {
         pitch = pitch.max(row_h + 2.0 * k);
@@ -1781,6 +1787,11 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     }
     if row(tr("Minimap army list"), if audio.army_list { tr("On") } else { tr("Off") }, &mut y) {
         audio.army_list = !audio.army_list;
+    }
+    // Razdor's option (on by default): an event met on an army names its leader under the window's
+    // picture (`Game::leader_caption`, `story::show`).
+    if row(tr("Leader's name"), if audio.leader_caption { tr("On") } else { tr("Off") }, &mut y) {
+        audio.leader_caption = !audio.leader_caption;
     }
     // Razdor's options (a player's report: the minimap dragged where it is hard to move back):
     // its corner, cycled clockwise, and «Сбросить» puts its size and place back to the default.

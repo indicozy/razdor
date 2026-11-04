@@ -571,6 +571,10 @@ pub struct Game {
     pub battle_marks: bool,
     #[serde(skip)]
     pub army_list: bool,
+    /// Razdor's option «Имя предводителя под картинкой события» (`Settings::leader_caption`): an
+    /// event met on an army names its leader under the window's picture. Set by the interface.
+    #[serde(skip)]
+    pub leader_caption: bool,
     /// Reports of AI battles to hand to the interface with the slice's events.
     #[serde(skip)]
     pub(crate) ai_events: Vec<Event>,
@@ -739,6 +743,7 @@ impl Game {
             pass_on_bridges: false,
             battle_marks: true,
             army_list: false,
+            leader_caption: true,
             ai_events: Vec::new(),
             clashes: Vec::new(),
             sims: Default::default(),

@@ -10,7 +10,7 @@ use macroquad::prelude::*;
 use razdor::i18n::{n_, tr};
 use razdor::rules::content::{ItemId, UnitId};
 use razdor::trf;
-use razdor::rules::events::{EventId, EventOutcome, PICTURE_DEFEAT, PICTURE_VICTORY};
+use razdor::rules::events::{ArmyId, EventId, EventOutcome, PICTURE_DEFEAT, PICTURE_VICTORY};
 use razdor::rules::game::Game;
 use razdor::rules::journal::Tab;
 
@@ -91,6 +91,25 @@ pub fn event_dialog(game: &Game, id: EventId, asking: bool) -> Dialog {
     d
 }
 
+/// The caption under the picture of an event met on army `army` (Razdor's option
+/// `Game::leader_caption`): the army's leader, as its tooltip names him. None when the option is
+/// off, the army is gone, or it has no leader.
+pub fn leader_caption(game: &Game, army: ArmyId) -> Option<String> {
+    if !game.leader_caption {
+        return None;
+    }
+    let a = game.world.armies.iter().chain(&game.world.inactive).find(|a| a.id == army)?;
+    leader_text(&a.leader_name)
+}
+
+/// A leader's name as the caption shows it: spaces collapsed and the ends trimmed; None when
+/// nothing is left.
+pub fn leader_text(name: &str) -> Option<String> {
+    let s = razdor::dt::dtm::collapse_spaces(name);
+    let s = s.trim();
+    (!s.is_empty()).then(|| s.to_string())
+}
+
 /// Puts an outcome on screen: a dialog, a question, a quest line on the dialog just queued.
 pub fn show(game: &Game, o: &EventOutcome, dialogs: &mut VecDeque<Dialog>) {
     match *o {
@@ -108,6 +127,12 @@ pub fn show(game: &Game, o: &EventOutcome, dialogs: &mut VecDeque<Dialog>) {
         EventOutcome::UnitsLost { event, ref units } => {
             if let Some(d) = dialogs.back_mut().filter(|d| d.event == Some(event)) {
                 d.left = units.iter().filter(|&&u| game.content.try_unit(UnitId(u)).is_some()).map(|&u| UnitId(u)).collect();
+            }
+        }
+        // The army's leader under the picture (`leader_caption`), on the window of the event met.
+        EventOutcome::MeetingArmy { event, army } => {
+            if let Some(d) = dialogs.back_mut().filter(|d| d.event == Some(event) && d.picture.is_some()) {
+                d.caption = leader_caption(game, army);
             }
         }
         EventOutcome::QuestAdded(id) => notice(&quest_line("AddQuest", QUEST_ADDED), id, dialogs),
@@ -185,6 +210,16 @@ mod tests {
     use super::*;
     use razdor::rules::journal::Row;
 
+    /// The caption is the leader's name as the tooltip writes it: spaces collapsed, the ends
+    /// trimmed; no name, no caption.
+    #[test]
+    fn the_leader_caption_is_trimmed_and_collapsed_and_empty_is_none() {
+        assert_eq!(leader_text("  Бенедикт   фон  Вайтлог "), Some("Бенедикт фон Вайтлог".to_string()));
+        assert_eq!(leader_text("Бенедикт"), Some("Бенедикт".to_string()));
+        assert_eq!(leader_text(" \t "), None);
+        assert_eq!(leader_text(""), None);
+    }
+
     fn row(chapter: u32) -> Row {
         Row { title: String::new(), text: String::new(), date: None, elapsed: None, chapter }
     }
@@ -248,3 +283,4 @@ mod tests {
         );
     }
 }
+

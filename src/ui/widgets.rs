@@ -1259,6 +1259,23 @@ pub fn markup_rows(text: &str, room: f32, size: f32) -> Vec<MarkupRow> {
     super::dt_font::with_original_face(super::dt_font::Face::Subtitle, || markup_rows_in_face(text, room, size))
 }
 
+/// [`markup_rows`] with a width per row: row `i` of the whole text is `max_at(i)` wide (a floating
+/// picture narrows the rows beside it, see `dialog::event_layout`).
+pub fn markup_rows_by(text: &str, max_at: &dyn Fn(usize) -> f32, size: f32) -> Vec<MarkupRow> {
+    super::dt_font::with_original_face(super::dt_font::Face::Subtitle, || {
+        let mut base = 0usize;
+        razdor::dt::markup::parse(text)
+            .into_iter()
+            .flat_map(|line| {
+                let first = base;
+                let rows = razdor::dt::markup::wrap_by(&line.text, &|i| max_at(first + i), |c| glyph_width(c, size));
+                base += rows.len();
+                rows.into_iter().map(move |r| MarkupRow { text: r.text, ink: line.ink, align: line.align, last: r.last })
+            })
+            .collect()
+    })
+}
+
 /// A plain text's pieces, as 0x47ea80 splits it: at CR LF or at `#\`, nothing else read.
 fn plain_pieces(text: &str) -> Vec<&str> {
     let mut pieces = Vec::new();

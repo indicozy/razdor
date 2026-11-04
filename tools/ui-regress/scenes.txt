@@ -159,3 +159,6 @@ hub-800 | hub | 800x600 |
 # The map editor (desktop only): the map open, and its find window over the properties of a building.
 editor-1280 | editor:РК1-Начало пути | 1280x800 |
 editor-find-props-1280 | editor:РК1-Начало пути:Казарм | 1280x800 |
+# An event met on an army: the leader's name under the picture (Razdor's option, on by default)
+event-meet-1280 | event:ДС1-С чего все начиналось:37 | 1280x800 | RAZDOR_SCENE_MEET=6
+event-meet-phone-upright | event:ДС1-С чего все начиналось:37 | 1080x2400 | RAZDOR_DP=2.75;RAZDOR_LARGE_WINDOWS=1;RAZDOR_SCENE_MEET=6

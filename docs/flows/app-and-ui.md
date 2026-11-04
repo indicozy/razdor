@@ -860,7 +860,8 @@ the install's, so they show in the new-game list. Snapshot scene: `hub[:<tab>[:<
 `ui::audio::Settings` (`src/ui/audio.rs`, saved as `audio.json` in the save folder, all
 fields `#[serde(default)]`) holds every setting: volumes, display, scale, battle AI level,
 row width, and Razdor's own options (`friends_let_pass`, `pass_on_bridges`, `updates`,
-map zoom). The windows are `main_menu::options` / `main_menu::options_window` (the
+map zoom, `leader_caption`: the leader's name under the event picture of a meeting, see
+`story::leader_caption` and `EventOutcome::MeetingArmy`). The windows are `main_menu::options` / `main_menu::options_window` (the
 original's: five slider rows, eight checkboxes, «Принять» keeps, «Отмена» restores what the
 window opened with) and `advanced_window` («Ещё…»: Razdor's own options, the screen, scale, the battle AI strength (`main_menu::AiStrength`, kept in sync with the `OptValue9` checkbox),
 font and language). Razdor's map options «Битвы армий на карте» (`battle_marks`, on) and «Список у

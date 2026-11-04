@@ -131,6 +131,12 @@ pub struct Row {
 /// no space of its own ends after the stale place (or after one character on the first row);
 /// and after a run of spaces only the first one is skipped, the others start the next row.
 pub fn wrap(text: &str, max: f32, width: impl Fn(char) -> f32) -> Vec<Row> {
+    wrap_by(text, &|_| max, width)
+}
+
+/// [`wrap`] with a width per row: row `i` (from 0, in this text) is at most `max_at(i)` wide. The
+/// floating picture of an upright phone narrows the rows beside it and not the rows under it.
+pub fn wrap_by(text: &str, max_at: &dyn Fn(usize) -> f32, width: impl Fn(char) -> f32) -> Vec<Row> {
     let chars: Vec<char> = text.chars().collect();
     if chars.is_empty() {
         return vec![Row { text: String::new(), last: true }];
@@ -138,6 +144,7 @@ pub fn wrap(text: &str, max: f32, width: impl Fn(char) -> f32) -> Vec<Row> {
     let mut rows = Vec::new();
     let (mut start, mut space) = (0usize, 0usize);
     loop {
+        let max = max_at(rows.len());
         let (mut w, mut k) = (0.0f32, 0usize);
         let end = loop {
             let c = chars.get(start + k).copied();
@@ -210,6 +217,17 @@ pub fn round_half_up(v: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    /// A row takes the width its index gives: the first two narrow (4 px), the rest 10 px, one px a
+    /// glyph, so "aa aa aa aa aa aa" breaks after each "aa" twice and then after three of them.
+    #[test]
+    fn a_row_takes_the_width_its_index_gives() {
+        let rows = wrap_by("aa aa aa aa aa aa", &|i| if i < 2 { 4.0 } else { 10.0 }, |_| 1.0);
+        let texts: Vec<&str> = rows.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(texts[..3], ["aa", "aa", "aa aa aa"], "{texts:?}");
+        // The same width everywhere is `wrap`.
+        assert_eq!(wrap_by("aa aa aa", &|_| 4.0, |_| 1.0), wrap("aa aa aa", 4.0, |_| 1.0));
+    }
+
     use super::*;
 
     fn l(text: &str, ink: Ink, align: Align) -> Line {

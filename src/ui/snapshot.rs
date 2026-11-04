@@ -925,6 +925,11 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                 d.left = v.split(',').filter_map(|p| p.trim().parse::<u32>().ok()).map(razdor::rules::content::UnitId).collect();
             }
             app.dialogs.push_back(d);
+            // `RAZDOR_SCENE_MEET=<army id>`: the event as met on that army, through the outcome the
+            // engine sends (its window names the army's leader under the picture).
+            if let Some(army) = std::env::var("RAZDOR_SCENE_MEET").ok().and_then(|v| v.trim().parse::<u8>().ok()) {
+                super::story::show(&game, &razdor::rules::events::EventOutcome::MeetingArmy { event: id, army }, &mut app.dialogs);
+            }
             Screen::WorldMap
         }
         "learnt" => {
