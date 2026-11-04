@@ -71,10 +71,11 @@ pub const ACTIONS: [&str; 31] = [
     "restore_army",
 ];
 /// The keys that are arguments, not kinds. A kind key is one of the lists above; a key here
-/// never is.
-const ARGUMENTS: [&str; 33] = [
+/// never is. Each argument of the vocabulary (`vocab::VOCAB`) is here (a test checks it).
+pub const ARGUMENTS: [&str; 37] = [
     "value", "op", "at", "faction", "to", "of", "in", "unit", "named", "class", "spell", "all", "building", "army", "item", "min", "max", "minutes",
     "permanent", "towards", "troops", "model", "choice", "event", "garrison", "percent", "go_to", "go_to_building", "follow", "patrol", "attack", "clear", "next",
+    "var", "title", "text", "rules",
 ];
 
 /// A problem with one table: what is wrong, and what to do about it.
@@ -105,7 +106,8 @@ pub fn closest<'a>(word: &str, options: impl IntoIterator<Item = &'a str>) -> Op
         .map(|(_, o)| o)
 }
 
-fn edit_distance(a: &str, b: &str) -> usize {
+/// The edit distance of two words (insertions, deletions, substitutions).
+pub fn edit_distance(a: &str, b: &str) -> usize {
     let b: Vec<char> = b.chars().collect();
     let mut row: Vec<usize> = (0..=b.len()).collect();
     for (i, ca) in a.chars().enumerate() {
@@ -128,7 +130,8 @@ fn kind_of(t: &Table, kinds: &[&'static str], what: &str) -> Res<&'static str> {
         [] => {
             let stray: Vec<&str> = t.keys().map(String::as_str).filter(|k| !ARGUMENTS.contains(k)).collect();
             let word = stray.first().copied().unwrap_or("");
-            let hint = match closest(word, kinds.iter().copied()) {
+            // The nearest kind, aliases included (`heal_army` is `restore_army`).
+            let hint = match super::vocab::nearest(word, kinds) {
                 Some(near) => format!("did you mean `{near}`?"),
                 None => format!("the {what}s are: {}", kinds.join(", ")),
             };
@@ -692,7 +695,7 @@ pub fn parse_event(t: &Table) -> Res<Event> {
             rest(&["army"])?;
             Ok(Event::HeroMeetsArmy(name_of(need(t, "hero_meets_army", "army")?, "army")?))
         }
-        other => bad(format!("unknown event `{other}`"), closest(other, EVENTS).map_or_else(|| format!("events are: {}", EVENTS.join(", ")), |n| format!("did you mean `{n}`?"))),
+        other => bad(format!("unknown event `{other}`"), super::vocab::nearest(other, &EVENTS).map_or_else(|| format!("events are: {}", EVENTS.join(", ")), |n| format!("did you mean `{n}`?"))),
     }
 }
 
@@ -1211,6 +1214,7 @@ pub fn check(pkg: &Package, r: &mut Report) {
             ctx.action(r, &t.file, t.line, a, &mut opened);
         }
     }
+    lint(pkg, r);
     let mut dialog_ids = BTreeSet::new();
     for d in &pkg.dialogs {
         if !dialog_ids.insert(d.value.id.as_str()) {
@@ -1256,6 +1260,131 @@ pub fn check(pkg: &Package, r: &mut Report) {
                 Some(d.line),
                 format!("dialog `{}` is never opened", d.value.id),
                 "no trigger or choice has `dialog = \"…\"` for it: it can never show",
+            );
+        }
+    }
+}
+
+/// The story's warnings about what its rules do not say, reported with the errors: a `once` greeting
+/// (`hero_meets_army` with `once`, the default), whose second meeting is a battle; and a variable that
+/// a `game_start` trigger sets from a condition and that only later triggers read (`frozen_at_start`).
+fn lint(pkg: &Package, r: &mut Report) {
+    for t in &pkg.triggers {
+        if let (Event::HeroMeetsArmy(army), true) = (&t.value.when, t.value.once) {
+            r.warning_hint(
+                &t.file,
+                Some(t.line),
+                format!("`once` is true on the `hero_meets_army` trigger `{}`: the second meeting with `{army}` becomes a battle", t.value.id),
+                "write `once = false` so that each meeting greets (once is true when it is not written)",
+            );
+        }
+    }
+    frozen_at_start(pkg, r);
+}
+
+/// A variable a `game_start` trigger sets, from a condition of that trigger, that only triggers which do
+/// not start the story read (conditions of later triggers and of dialog choices), and that no later
+/// trigger or dialog sets again: its value is the one of the start, whatever the story does later. (A
+/// variable that a later trigger sets again is kept live, as the example pack's standings are.)
+fn frozen_at_start(pkg: &Package, r: &mut Report) {
+    let mut at_start: BTreeSet<&str> = BTreeSet::new();
+    let mut later: BTreeSet<&str> = BTreeSet::new();
+    let mut later_sets: BTreeSet<&str> = BTreeSet::new();
+    let reads = pkg
+        .triggers
+        .iter()
+        .map(|t| (t.value.when == Event::GameStart, &t.value.cond))
+        .chain(pkg.dialogs.iter().flat_map(|d| d.value.choices.iter().map(|c| (false, &c.cond))));
+    for (starts, conds) in reads {
+        for c in conds {
+            if let Cond::Var { name, .. } = c {
+                if starts {
+                    at_start.insert(name);
+                } else {
+                    later.insert(name);
+                }
+            }
+        }
+    }
+    let later_actions = pkg
+        .triggers
+        .iter()
+        .filter(|t| t.value.when != Event::GameStart)
+        .flat_map(|t| t.value.then.iter())
+        .chain(pkg.dialogs.iter().flat_map(|d| d.value.choices.iter()).flat_map(|c| c.then.iter()));
+    for a in later_actions {
+        if let Action::Set { name, .. } | Action::Add { name, .. } | Action::RandomVar { name, .. } = a {
+            later_sets.insert(name);
+        }
+    }
+    for t in pkg.triggers.iter().filter(|t| t.value.when == Event::GameStart && !t.value.cond.is_empty()) {
+        let mut done = BTreeSet::new();
+        for a in &t.value.then {
+            let name = match a {
+                Action::Set { name, .. } | Action::Add { name, .. } | Action::RandomVar { name, .. } => name.as_str(),
+                _ => continue,
+            };
+            if later.contains(name) && !at_start.contains(name) && !later_sets.contains(name) && done.insert(name) {
+                r.warning_hint(
+                    &t.file,
+                    Some(t.line),
+                    format!("`{name}` is set when the story starts, from a condition, and only later triggers read it: it keeps its value from the start"),
+                    format!("read the condition where `{name}` is needed, or set `{name}` where what it copies changes"),
+                );
+            }
+        }
+    }
+}
+
+/// The actions a list of actions runs, dialogs' choices included, each once.
+fn reached_actions<'a>(pkg: &'a Package, start: Vec<&'a Action>) -> Vec<&'a Action> {
+    let mut out = Vec::new();
+    let mut todo = start;
+    let mut opened: BTreeSet<&str> = BTreeSet::new();
+    while let Some(a) = todo.pop() {
+        out.push(a);
+        if let Action::Dialog(d) | Action::Ending(d) = a {
+            if opened.insert(d.as_str()) {
+                if let Some(dialog) = pkg.dialogs.iter().find(|x| x.value.id == *d) {
+                    todo.extend(dialog.value.choices.iter().flat_map(|c| c.then.iter()));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The greeting armies that may block the way, for `map_check` (each map). `sites` are the map's
+/// armies, each with its line and whether it stands on or next to a building's footprint. An army
+/// of the map that stands so, and that a `hero_meets_army` trigger for this map names, is a warning
+/// when no action of its greetings (the triggers and the dialogs they open) moves it: no `army_goal`,
+/// `remove_army`, `start_battle` or `teleport_army` of that army.
+pub fn check_greeters(pkg: &Package, map: &str, sites: &[(&str, Option<u32>, bool)], map_file: &str, r: &mut Report) {
+    for &(army, line, near_building) in sites {
+        if !near_building {
+            continue;
+        }
+        let greetings: Vec<&Trigger> = pkg
+            .triggers
+            .iter()
+            .filter(|t| t.value.map.as_deref().is_none_or(|m| m == map))
+            .filter(|t| matches!(&t.value.when, Event::HeroMeetsArmy(a) if a == army))
+            .map(|t| &t.value)
+            .collect();
+        if greetings.is_empty() {
+            continue;
+        }
+        let roots: Vec<&Action> = greetings.iter().flat_map(|t| t.then.iter()).collect();
+        let moves = reached_actions(pkg, roots).iter().any(|a| match a {
+            Action::ArmyGoal { army: x, .. } | Action::RemoveArmy(x) | Action::StartBattle { army: x, .. } | Action::TeleportArmy { army: x, .. } => x == army,
+            _ => false,
+        });
+        if !moves {
+            r.warning_hint(
+                map_file,
+                line,
+                format!("army `{army}` stands on or next to a building, and its greeting never moves it: it may block the way"),
+                "let a greeting choice move it (army_goal, remove_army, start_battle or teleport_army), or stand it off the building's approach",
             );
         }
     }
@@ -2016,6 +2145,70 @@ mod check_tests {
         let e2 = errs.iter().find(|d| d.message.contains("unknown action `give_gld`")).unwrap_or_else(|| panic!("{}", r.to_text()));
         assert_eq!((e2.line, e2.hint.as_deref()), (Some(10), Some("did you mean `give_gold`?")));
     }
+
+    fn warnings_of(r: &Report) -> Vec<String> {
+        messages(r, Severity::Warning)
+    }
+
+    #[test]
+    fn a_once_greeting_is_a_warning_and_once_false_is_not() {
+        let dialogs = GATE;
+        let once = format!("{VARS}[[trigger]]\nid = \"meet\"\nwhen = {{ event = \"hero_meets_army\", army = \"guard\" }}\nthen = [ {{ dialog = \"gate\" }} ]\n");
+        let r = report(&once, dialogs);
+        let w = r.diagnostics.iter().find(|d| d.severity == Severity::Warning && d.message.contains("second meeting")).unwrap_or_else(|| panic!("{}", r.to_text()));
+        assert_eq!(w.line, Some(5), "reported at its trigger's table");
+        assert!(w.hint.as_deref().unwrap_or("").contains("once = false"));
+        let every = once.replace("army = \"guard\" }", "army = \"guard\" }\nonce = false");
+        assert!(warnings_of(&report(&every, dialogs)).iter().all(|m| !m.contains("second meeting")));
+    }
+
+    #[test]
+    fn a_var_set_at_the_start_from_a_condition_and_read_only_later_is_a_warning() {
+        let story = format!(
+            "{VARS}[[trigger]]\nid = \"start\"\nwhen = {{ event = \"game_start\" }}\nif = [ {{ var = \"dread\", op = \">\", value = 0 }} ]\nthen = [ {{ set = \"held\", value = true }} ]\n\n[[trigger]]\nid = \"late\"\nwhen = {{ event = \"day_start\" }}\nif = [ {{ var = \"held\", value = true }} ]\nthen = [ {{ give_gold = 5 }} ]\n"
+        );
+        let r = report(&story, GATE);
+        let w = warnings_of(&r);
+        assert!(w.iter().any(|m| m.starts_with("`held` is set when the story starts")), "{}", r.to_text());
+        let d = r.diagnostics.iter().find(|d| d.message.starts_with("`held` is set")).unwrap();
+        assert_eq!(d.line, Some(5), "at the game_start trigger's table");
+    }
+
+    #[test]
+    fn a_start_value_that_a_later_trigger_sets_again_is_no_warning() {
+        let story = format!(
+            "{VARS}[[trigger]]\nid = \"start\"\nwhen = {{ event = \"game_start\" }}\nif = [ {{ var = \"dread\", op = \">\", value = 0 }} ]\nthen = [ {{ set = \"held\", value = true }} ]\n\n[[trigger]]\nid = \"live\"\nwhen = {{ event = \"var_changed\", var = \"dread\" }}\nthen = [ {{ set = \"held\", value = false }} ]\n\n[[trigger]]\nid = \"late\"\nwhen = {{ event = \"day_start\" }}\nif = [ {{ var = \"held\", value = true }} ]\nthen = [ {{ give_gold = 5 }} ]\n"
+        );
+        assert!(warnings_of(&report(&story, GATE)).iter().all(|m| !m.contains("set when the story starts")));
+    }
+
+    #[test]
+    fn a_start_value_read_at_the_start_or_set_unconditionally_is_no_warning() {
+        // The start reads `held` itself: not frozen.
+        let read_at_start = format!(
+            "{VARS}[[trigger]]\nid = \"start\"\nwhen = {{ event = \"game_start\" }}\nif = [ {{ var = \"dread\", op = \">\", value = 0 }} ]\nthen = [ {{ set = \"held\", value = true }} ]\n\n[[trigger]]\nid = \"again\"\nwhen = {{ event = \"game_start\" }}\nif = [ {{ var = \"held\", value = true }} ]\nthen = [ {{ give_gold = 5 }} ]\n\n[[trigger]]\nid = \"late\"\nwhen = {{ event = \"day_start\" }}\nif = [ {{ var = \"held\", value = true }} ]\nthen = [ {{ give_gold = 5 }} ]\n"
+        );
+        assert!(warnings_of(&report(&read_at_start, GATE)).iter().all(|m| !m.contains("set when the story starts")));
+        // No condition on the set: a constant default.
+        let constant = format!("{VARS}[[trigger]]\nid = \"start\"\nwhen = {{ event = \"game_start\" }}\nthen = [ {{ set = \"held\", value = true }} ]\n\n[[trigger]]\nid = \"late\"\nwhen = {{ event = \"day_start\" }}\nif = [ {{ var = \"held\", value = true }} ]\nthen = [ {{ give_gold = 5 }} ]\n");
+        assert!(warnings_of(&report(&constant, GATE)).iter().all(|m| !m.contains("set when the story starts")));
+    }
+
+    #[test]
+    fn an_action_the_reader_does_not_know_is_an_error_with_the_nearest_name() {
+        let story = format!("{VARS}[[trigger]]\nid = \"t\"\nwhen = {{ event = \"game_start\" }}\nthen = [ {{ heal_army = \"player\" }} ]\n");
+        let r = report(&story, GATE);
+        let d = r.diagnostics.iter().find(|d| d.message.contains("unknown action `heal_army`")).unwrap_or_else(|| panic!("{}", r.to_text()));
+        assert_eq!(d.hint.as_deref(), Some("did you mean `restore_army`?"));
+    }
+
+    #[test]
+    fn an_unknown_key_of_the_trigger_table_is_an_error_with_the_nearest_key() {
+        let story = format!("{VARS}[[trigger]]\nid = \"t\"\nwehn = {{ event = \"game_start\" }}\nthen = []\n");
+        let r = report(&story, GATE);
+        let d = r.diagnostics.iter().find(|d| d.severity == Severity::Error && d.message.contains("wehn")).unwrap_or_else(|| panic!("{}", r.to_text()));
+        assert_eq!(d.hint.as_deref(), Some("did you mean `when`?"), "{d:?}");
+    }
 }
 
 #[cfg(test)]
@@ -2191,5 +2384,49 @@ mod map_refs_tests {
         let missing = "[[trigger]]\nid = \"a\"\nwhen = { event = \"hero_meets_army\", army = \"ghost\" }\nthen = [ { dialog = \"d\" } ]\n";
         let e = errors(missing, dialogs);
         assert!(e.contains("no army `ghost` in map `m`"), "{e}");
+    }
+
+    /// The map `m` with its enemy army `e` moved to `cell`.
+    fn package_with_army_at(cell: &str, story: &str, dialogs: &str) -> Package {
+        let mut f = Files::default();
+        f.insert("package.toml", "id = \"demo\"\nversion = \"0.1.0\"\nformat = 1\ntitle = \"t.x\"\nauthor = \"A\"\nlicense = \"MIT\"\n");
+        f.insert("texts/en.toml", "[t]\nx = \"x\"\n");
+        f.insert("maps/m/map.toml", MAP.replace("cell = [30, 30]", &format!("cell = [{cell}]")));
+        f.insert("maps/m/terrain.png", encode_rgb(50, 50, |_, _| DEFAULT_PALETTE[6].1));
+        f.insert("triggers/main.toml", format!("[vars]\nn = 0\n\n{story}"));
+        f.insert("dialogs/d.toml", dialogs);
+        Package::parse(f).0
+    }
+
+    /// A greeting of the army `e` (once = false) that opens the dialog `d`; `d`'s first choice gives gold.
+    fn greeting_story(choice_then: &str) -> (String, String) {
+        let story = "[[trigger]]\nid = \"a\"\nwhen = { event = \"hero_meets_army\", army = \"e\" }\nonce = false\nthen = [ { dialog = \"d\" } ]\n".to_string();
+        let dialogs = format!("[[dialog]]\nid = \"d\"\ntitle = \"t.x\"\ntext = \"t.x\"\n\n[[dialog.choice]]\nid = \"c\"\ntext = \"t.x\"\nthen = [ {choice_then} ]\n");
+        (story, dialogs)
+    }
+
+    fn greeter_warnings(pkg: &Package) -> Vec<String> {
+        let r = check(pkg);
+        assert!(!r.has_errors(), "the story reads: {}", r.to_text());
+        r.diagnostics.iter().filter(|d| d.message.contains("may block the way")).map(|d| format!("{}:{}", d.file, d.line.unwrap_or(0))).collect()
+    }
+
+    #[test]
+    fn a_greeting_army_next_to_a_building_that_no_choice_moves_is_a_warning() {
+        // `t` (a town at (18, 18)) covers its neighbours: an army at (19, 19) stands next to it.
+        let (story, dialogs) = greeting_story("{ give_gold = 5 }");
+        let warned = greeter_warnings(&package_with_army_at("19, 19", &story, &dialogs));
+        assert_eq!(warned, vec!["maps/m/map.toml:11".to_string()], "the army table line in map.toml");
+        let (story, dialogs) = greeting_story("{ army_goal = \"e\", go_to = [40, 40] }");
+        assert!(greeter_warnings(&package_with_army_at("19, 19", &story, &dialogs)).is_empty(), "a choice that moves it");
+        let (story, dialogs) = greeting_story("{ give_gold = 5 }");
+        assert!(greeter_warnings(&package_with_army_at("30, 30", &story, &dialogs)).is_empty(), "far from a building");
+    }
+
+    #[test]
+    fn a_choice_that_moves_the_greeting_army_through_a_dialog_it_opens_counts() {
+        let story = "[[trigger]]\nid = \"a\"\nwhen = { event = \"hero_meets_army\", army = \"e\" }\nonce = false\nthen = [ { dialog = \"d\" } ]\n";
+        let dialogs = "[[dialog]]\nid = \"d\"\ntitle = \"t.x\"\ntext = \"t.x\"\n\n[[dialog.choice]]\nid = \"c\"\ntext = \"t.x\"\nthen = [ { ending = \"e2\" } ]\n\n[[dialog]]\nid = \"e2\"\ntitle = \"t.x\"\ntext = \"t.x\"\n\n[[dialog.choice]]\nid = \"go\"\ntext = \"t.x\"\nthen = [ { remove_army = \"e\" } ]\n";
+        assert!(greeter_warnings(&package_with_army_at("19, 19", story, dialogs)).is_empty());
     }
 }

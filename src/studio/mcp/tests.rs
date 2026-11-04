@@ -104,7 +104,7 @@ fn a_client_with_the_token_talks_json_rpc_to_the_studio() {
 
     let listed = client.call(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
     let names: Vec<&str> = listed["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["get_state", "check", "scores", "sim", "query_refs", "focus", "snapshot"]);
+    assert_eq!(names, ["get_state", "check", "schema", "scores", "sim", "query_refs", "focus", "snapshot"]);
 
     let state = client.call(json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "get_state", "arguments": {} } }));
     assert!(state["result"]["content"][0]["text"].as_str().unwrap().contains("first-light"));
@@ -214,4 +214,25 @@ fn the_scores_json_names_its_targets() {
     assert_eq!(v["health"]["findings"][0]["check"], "fight_lost");
     assert_eq!(v["health"]["findings"][0]["severity"], "warning");
     assert_eq!(v["health"]["findings"][0]["targets"][0], json!({ "kind": "line", "file": "triggers/brod.toml", "line": 9 }));
+}
+
+/// The `schema` tool answers the vocabulary: all of it without a name, one entry with a name, and the
+/// nearest name for a name it does not know (an alias answers with the entry's own name).
+#[test]
+fn schema_lists_the_vocabulary_and_suggests_the_nearest_name() {
+    let (server, file) = start("schema");
+    let runtime = read_runtime(&file).unwrap();
+    let (mut client, _) = Client::open(runtime.port, &runtime.token);
+    let all = client.call(json!({ "jsonrpc": "2.0", "id": 10, "method": "tools/call", "params": { "name": "schema", "arguments": {} } }));
+    assert_eq!(all["result"]["isError"], false, "{all}");
+    let entries: Value = serde_json::from_str(all["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(entries.as_array().unwrap().len(), crate::pack::vocab::VOCAB.len());
+    let one = client.call(json!({ "jsonrpc": "2.0", "id": 11, "method": "tools/call", "params": { "name": "schema", "arguments": { "name": "restore_army" } } }));
+    let found: Value = serde_json::from_str(one["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(found[0]["section"], "action");
+    assert_eq!(found.as_array().unwrap().len(), 1);
+    let near = client.call(json!({ "jsonrpc": "2.0", "id": 12, "method": "tools/call", "params": { "name": "schema", "arguments": { "name": "heal_army" } } }));
+    assert_eq!(near["result"]["isError"], true, "{near}");
+    assert!(near["result"]["content"][0]["text"].as_str().unwrap().contains("did you mean `restore_army`?"));
+    drop(server);
 }

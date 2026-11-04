@@ -43,6 +43,14 @@ const HELP: &str = "razdor-pack: content packages (.rzpack) for Razdor 2.0
                              folder unless -o names the file; prints its size and SHA-256
   razdor-pack info <folder-or-.rzpack>
                              the manifest, the maps, the size and SHA-256 of a package
+  razdor-pack schema [<name>] [--json]
+                             the vocabulary of trigger files: every event (when), condition
+                             (if) and action (then) with its keys, types, defaults, one sentence
+                             and one example (docs/reference/rzpack-format.md's tables); a name
+                             keeps its entry; --json gives it as data
+  razdor-pack schema --json-schema [triggers|dialogs]
+                             the JSON Schema of triggers/*.toml (default) or dialogs/*.toml,
+                             generated from the same vocabulary, for editors
   razdor-pack gen-aliases [--out <path>]
                              write the dt: alias table of the install (RAZDOR_DT_DIR, or
                              the one Razdor finds) with Razdor's English names
@@ -76,6 +84,7 @@ fn run(args: &[String]) -> Result<u8, String> {
         Some("gen-aliases") => gen_aliases(&args[1..]),
         Some("pack") => pack_cmd(&args[1..]),
         Some("info") => info_cmd(&args[1..]),
+        Some("schema") => schema_cmd(&args[1..]),
         Some(other) => Err(format!("unknown command `{other}`")),
     }
 }
@@ -375,6 +384,42 @@ fn info_cmd(args: &[String]) -> Result<u8, String> {
     if path.is_file() {
         let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         println!("sha256: {}", razdor::update::sha256_hex(&bytes));
+    }
+    Ok(0)
+}
+
+/// `schema [<name>] [--json]` and `schema --json-schema [triggers|dialogs]`: the vocabulary of trigger
+/// files (`pack::vocab`) as text, as data, or as a JSON Schema.
+fn schema_cmd(args: &[String]) -> Result<u8, String> {
+    let mut json = false;
+    let mut schema: Option<pack::vocab::SchemaFile> = None;
+    let mut name: Option<&str> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--json" => json = true,
+            "--json-schema" => {
+                let which = match args.get(i + 1) {
+                    Some(w) if !w.starts_with('-') => {
+                        i += 1;
+                        w.as_str()
+                    }
+                    _ => "triggers",
+                };
+                schema = Some(pack::vocab::SchemaFile::named(which).ok_or(format!("--json-schema takes triggers or dialogs, not {which}"))?);
+            }
+            flag if flag.starts_with('-') => return Err(format!("unknown option `{flag}` for schema")),
+            word if name.is_none() => name = Some(word),
+            _ => return Err("schema takes one name".into()),
+        }
+        i += 1;
+    }
+    if let Some(file) = schema {
+        println!("{}", serde_json::to_string_pretty(&pack::vocab::json_schema(file)).map_err(|e| e.to_string())?);
+    } else if json {
+        println!("{}", serde_json::to_string_pretty(&pack::vocab::json(name)?).map_err(|e| e.to_string())?);
+    } else {
+        print!("{}", pack::vocab::text(name)?);
     }
     Ok(0)
 }
