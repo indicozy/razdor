@@ -1,6 +1,10 @@
 # `.rzpack` for AI authors: format changes that make agents faster and safer
 
-Status: proposal (2026-11-04), for the owner's yes. Nothing here is built.
+Status (2026-11-04): the owner said yes to all of it. Built on `v2-packages`: B (content-independent seeds),
+A (`tests/*.toml`, `razdor-pack test`, MCP `run_test`; the whole reference campaign tests in ~2 s),
+D (`razdor-pack schema`, JSON Schema, did-you-mean, MCP `schema`) and G (the three lints). Not started:
+C + E + F (format 2: scoped names, scenery out of map.toml, texts per map, `razdor-pack upgrade`); the
+studio session adapts the studio after it.
 
 Written after «Пепельная Марка» 0.3 (seven maps, ~400 triggers), which was authored almost
 entirely by coding agents working in parallel. Most of the time did not go into writing the
