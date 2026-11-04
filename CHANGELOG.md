@@ -14,6 +14,21 @@
 
 ## 1.3.5 — 2026-11-04
 
+Коммит `e715bc9c` (тег `v1.3.5`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+f708ec2edabee8d24e687d02f4869d99759489a3ad0eb1728cde230ec79d0c25  razdor
+3863fc27cb4bfa2840138a6e3f4a6591f1f9fb8f33a8bd1c082507dd0525ae7d  Razdor.exe
+184f2aa88078ef5bac92d364854279e8d294a23899de83dd0bb8ca3c2dec6316  razdor-macos
+b5e9c0527ac37045b6c38f004a312de4851784a857413b8738fe4c23617fe7d3  razdor-translate
+2a8330a4207368c4279a183225984ce69c542147bdeb8f588fadc9f47174fdbe  Razdor-translate.exe
+ad3d1b07e1683120f20a55f4f742ccf392dbc055f2adcc8bab4ec62dafd270a3  razdor-translate-macos
+f563777dc87d7a485105dffd40465601b56c8e77c46b2f84a51b4e2fca77f115  razdor.apk
+98f479f2654a8820bb2c192ef7f248031277cac3ef62d4b4f119d8b546967458  razdor.ipa
+```
+
 ### Исправлено
 
 - Окно «Изменить клавиши…», открытое из списка клавиш (F1), закрывается обратно в этот список, а не в настройки.
