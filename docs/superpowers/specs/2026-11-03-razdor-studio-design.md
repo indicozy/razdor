@@ -150,6 +150,8 @@ MCP). The studio never calls a model itself.
 
 ## Phase 2: the complete tool (agreed 2026-11-03, second grilling)
 
+UX overhaul: see 2026-11-04-studio-ux-design.md (the workspaces, the Map tools, the Inspector, the shortcuts and the milestones UX1-UX6 that rework this phase's screens).
+
 Slice 1 (map, script, problems, the MCP and the Claude dock) is done. The owner's goal now: a
 complete tool, at least everything DTMapEdit does, as GUI. The specs of the original editor are on
 the paused `dt-editor` branch, `docs/reference/editor/*.md` (main window and tools, record windows,
