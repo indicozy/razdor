@@ -540,7 +540,14 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             let army = parts.next().filter(|a| !a.is_empty());
             let opts: Vec<&str> = parts.collect();
             // `generated`: the snapshot works on a copy, so the package it shows is never written.
-            let folder = if opts.contains(&"generated") { razdor::studio::gen::apply::copy_package(&folder)? } else { folder };
+            let folder = if opts.contains(&"generated") {
+                let copy = razdor::studio::gen::apply::copy_package(&folder)?;
+                let path = copy.path().to_path_buf();
+                STUDIO_COPY.with(|c| *c.borrow_mut() = Some(copy));
+                path
+            } else {
+                folder
+            };
             app.open_studio(&folder)?;
             app.studio_preselect(map, army, &opts)?;
             return Ok(());
@@ -1169,4 +1176,17 @@ fn pack_diary(game: &mut razdor::rules::game::Game) {
     game.journal.story_quest("ford", now, "ford.title", "ford.text");
     game.journal.story_quest("deserters", now + 60, "deserters.title", "deserters.text");
     game.journal.story_quest_done("deserters", now + 1440);
+}
+
+#[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+razdor::local! {
+    /// The `generated` snapshot's copy of its package: removed when the process leaves
+    /// (`release_copies`, from `exit_now`).
+    static STUDIO_COPY: std::cell::RefCell<Option<razdor::studio::gen::apply::TempCopy>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Removes the snapshot's temporary package copy, if it made one (the process is leaving).
+pub fn release_copies() {
+    #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+    STUDIO_COPY.with(|c| drop(c.borrow_mut().take()));
 }

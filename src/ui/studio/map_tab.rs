@@ -188,6 +188,8 @@ pub struct Canvas {
     rect_from: Option<(i32, i32)>,
     /// The derived layers of the compile they were made for (`overlay::Layers`).
     layers: Option<(u64, Layers)>,
+    /// The AI viewer («Просмотр ИИ»): its mode, its run and the day the slider shows.
+    pub ai: super::aiview::AiView,
 }
 
 impl Default for Canvas {
@@ -232,6 +234,7 @@ impl Default for Canvas {
             stroke: None,
             rect_from: None,
             layers: None,
+            ai: super::aiview::AiView::default(),
         }
     }
 }
@@ -317,6 +320,21 @@ impl Viewer<'_> {
     pub(super) fn map_tab(&mut self, ui: &mut Ui) {
         self.map_picker(ui);
         self.tool_bar(ui);
+        // The AI viewer's strip (its controls only while the mode is on); the map takes the rest.
+        let ready = match (&self.pkg, &self.install, &self.maps.map) {
+            (_, None, _) => Err(tr("The AI viewer needs the game's files: set RAZDOR_DT_DIR")),
+            (Some(_), Some(_), Some(_)) => Ok(()),
+            _ => Err(tr("No map to show.")),
+        };
+        match self.canvas.ai.strip(ui, ready) {
+            super::aiview::Req::Start => {
+                if let (Some(pkg), Some(install), Some(map)) = (self.pkg.clone(), self.install.clone(), self.maps.map.clone()) {
+                    self.canvas.ai.start(pkg, install, &map);
+                }
+            }
+            super::aiview::Req::Cancel => self.canvas.ai.cancel(),
+            super::aiview::Req::None => {}
+        }
         let burn = self.burn_question(ui.ctx());
         for stale in &self.ws.stale {
             banner(ui, &stale.banner());
@@ -1288,6 +1306,7 @@ pub fn draw(canvas: &mut Canvas, maps: &MapView, pkg: Option<&Package>, selectio
             }
         }
     }
+    super::aiview::draw(cam, &canvas.ai);
     if let (Some(spec), Some(sel)) = (spec, selection) {
         for r in outline_of(&good.compiled, spec, sel) {
             outline(cam, r, 2.0, accent());

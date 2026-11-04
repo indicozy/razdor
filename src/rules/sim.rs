@@ -117,7 +117,15 @@ pub fn play_days(c: &Arc<Content>, s: &Scenario, hero: HeroClass, days: u64) -> 
 
 /// [`play_days`] with a package's story attached: its `game_start` moment is raised first, and
 /// the dialogs it opens are answered by `story.pick`.
-pub fn play_days_with(c: &Arc<Content>, s: &Scenario, hero: HeroClass, days: u64, mut story: Option<StoryPlay>) -> DaysRun {
+pub fn play_days_with(c: &Arc<Content>, s: &Scenario, hero: HeroClass, days: u64, story: Option<StoryPlay>) -> DaysRun {
+    play_days_observed(c, s, hero, days, story, &mut |_, _| true)
+}
+
+/// [`play_days_with`] with a look at the world: `observe` is called with the game and the day
+/// (days after the start) at the start, at each new day and at the end, and the run stops at
+/// once when it returns false (the AI viewer's Cancel). It only reads: the run's results are
+/// those of [`play_days_with`].
+pub fn play_days_observed(c: &Arc<Content>, s: &Scenario, hero: HeroClass, days: u64, mut story: Option<StoryPlay>, observe: &mut dyn FnMut(&Game, u64) -> bool) -> DaysRun {
     let t0 = Instant::now();
     let mut g = Game::from_scenario(c.clone(), s, hero);
     if let Some(p) = story.as_mut() {
@@ -141,8 +149,19 @@ pub fn play_days_with(c: &Arc<Content>, s: &Scenario, hero: HeroClass, days: u64
     let mut calls = 0;
     let mut field_battles: Vec<FieldFight> = Vec::new();
     let day_now = |g: &Game| (g.clock.total_minutes() - start) / MINUTES_PER_DAY as f64;
+    let mut seen_day = 0u64;
+    if !observe(&g, 0) {
+        return DaysRun { field_battles, ai: g.ai_stats, armies, armies_after: g.world.armies.len(), waiting: g.world.respawns.len(), player_battles, player_lost, stalled: true, victory_day, defeat_day, trace: Vec::new(), secs: t0.elapsed().as_secs_f64() };
+    }
     while g.clock.total_minutes() < end && calls < 200_000 {
         calls += 1;
+        let day = day_now(&g).floor() as u64;
+        if day > seen_day {
+            seen_day = day;
+            if !observe(&g, day) {
+                break;
+            }
+        }
         note_ending(&g, &day_now, &mut victory_day, &mut defeat_day);
         if g.pending_question().is_some() {
             g.answer_question(true);
@@ -166,6 +185,7 @@ pub fn play_days_with(c: &Arc<Content>, s: &Scenario, hero: HeroClass, days: u64
         g.wait(4);
     }
     note_ending(&g, &day_now, &mut victory_day, &mut defeat_day);
+    observe(&g, day_now(&g).floor() as u64);
     // The trace's days count from the start, as the other days of this run do.
     let day0 = start as u64 / MINUTES_PER_DAY;
     let trace = g.triggers.trace.take().unwrap_or_default().into_iter().map(|(at, what)| (at / MINUTES_PER_DAY - day0, what)).collect();

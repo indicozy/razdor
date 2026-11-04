@@ -283,6 +283,23 @@ with the price and its steps first). Snapshot options: `units`, `items`. Tests:
 `the_unit_and_item_forms_edit_rename_and_price_on_a_copy_of_pepelnaya_marka`; the price tests of `studio::cost`
 read the install (`RAZDOR_DT_DIR`) and skip without it.
 
+Battle tester and AI viewer (phase 2, milestone 6): `studio/testers.rs` is the battle tester on the
+game's own engine: a side is a map army, a garrison, the hero's squad or a custom list (`rules::custom`'s
+picks); `build` places both sides (two custom sides are the custom battle's own `Setup::battle`), and
+`run_seeds` fights seeds 1..N with both sides by the AI (`fight`, then `Summary`). The battle draws nothing,
+so every seed fights one battle; the summary says so. `pack::sim::sim_map_observed` is the AI viewer's run:
+the sim with a look at the world at each day (`rules::sim::play_days_observed`, which only reads), giving
+the frames (armies and the hero by cell) and the story's moments with the cell a trigger names. UI:
+`ui/studio/battletest.rs` (the Battle test main screen; «Посмотреть бой» hands one battle to the game's
+battle view in its watch mode, and leaving it returns to the studio, `Action::Watch`) and
+`ui/studio/aiview.rs` (the Map tab's «Просмотр ИИ» strip, the trails and marks on the canvas). Both run on
+worker threads with Cancel. Snapshot options: `battletest` (two of brod's armies, 20 battles) and `aiview`
+(brod, 10 days, the slider at day 7). Tests: `studio::testers` (the same seed twice, the custom sides against
+`Setup::battle`, the runs' summary), `pack::sim` (the observed run equals `sim_map`; the moments carry their
+day). The M5 fixes: `to_package` drops objects under a building's footprint (worldgen.md §3.5), and the
+`generated` snapshot's copy and the generator tests' folders are removed by drop guards (`TempCopy`,
+`TempDir`; the snapshot releases its copy in `exit_now`).
+
 ## The map translator (`razdor-translate`)
 
 Not part of the original game (asked for by the owner): a second program that writes English

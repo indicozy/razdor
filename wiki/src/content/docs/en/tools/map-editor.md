@@ -133,6 +133,41 @@ What the package does not hold, and what the studio does instead:
 The Check button warns when a building or an army cannot be reached on foot from the hero's start:
 as in the game's maps, a river is crossed only on a bridge.
 
+## Battle test
+
+Package → «Battle test». Two sides: A is the player's, below;
+B is the enemy's, above. Each side is a map army or garrison, the hero's squad, or a custom army (unit
+types with their levels, up to 12 units). The map's armies with troops and its garrisons are offered.
+
+- **Battles.** How many battles to fight (100 by default); each battle takes its own seed 1…N. Both
+  armies are played by the AI, as in the game's auto battle. «Improved AI» is the battle AI's improved level,
+  the game's «Battle AI strength» setting.
+- **Results.** The win shares of A and B, draws (the battle did not end before the turn limit), the
+  average number of turns, and each side's losses: units and HP, average and range over all battles.
+  A table per seed.
+- **Watch the battle.** Choose a seed and press «Watch the battle»: the game's own battle screen opens in
+  watch mode (both sides by the AI). Leaving it returns to the studio.
+
+The battle uses no chance: damage is exact and the AI makes no random choice. So every seed fights the
+same battle, and the studio says so under the results. A spread appears only when a seed changes the
+battle itself; this one does not.
+
+## AI viewer
+
+On the Map tab, tick «AI viewer». A strip appears with the number of days (30 by default) and «Run». The
+map runs with the same calculation as `razdor-pack sim`: the armies' AI, the hero where he starts, dialogs
+answered by the first choice.
+
+- **The day slider** shows the armies at their cells on that day. Coloured trails show their last five days;
+  the number on an army is its place in the map's order.
+- **Story.** Triggers that name a cell (the hero enters a cell, an army arrives at one) are marked with a
+  diamond and their id from the day they fired.
+- **Log.** Lines «day: what happened». A click on a line moves the slider to its day.
+- The game's files are needed (`RAZDOR_DT_DIR`); without them the strip says so. «Cancel» stops a run.
+
+Not shown: moments without a cell (a dialog, a variable) are only in the log; buildings and garrisons
+are not marked by day.
+
 ## Not yet
 
 The studio does not have route checks for every story yet. These come in later versions.

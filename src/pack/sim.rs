@@ -300,6 +300,54 @@ fn value_text(v: &VarValue) -> String {
 /// Simulates `map` of `pkg` on `install` as `opts` says. A compile error is returned as the
 /// report (the package is checked first).
 pub fn sim_map(pkg: &Package, install: &DtInstall, map: &str, opts: &SimOptions) -> Result<SimResult, Report> {
+    let never = std::sync::atomic::AtomicBool::new(false);
+    Ok(sim_map_observed(pkg, install, map, opts, &never, &mut |_| {})?.map(|(result, _)| result).expect("not cancelled"))
+}
+
+/// One army as the AI viewer draws it on a day: its index in the world, its name (the
+/// scenario's text, empty when it has none), its cell and its faction.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ArmyAt {
+    pub index: usize,
+    pub name: String,
+    pub cell: (i32, i32),
+    pub faction: u8,
+}
+
+/// The world at the start of a day (or at the end of the run): the hero's cell and every army's.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Frame {
+    pub day: u64,
+    pub hero: (i32, i32),
+    pub armies: Vec<ArmyAt>,
+}
+
+/// A story moment for the AI viewer's log: what happened on `day`, and the cell it happened on
+/// when the moment names one (a trigger's `hero enters` or `army arrives` cell, an arrival).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Moment {
+    pub day: u64,
+    /// The moment in English (`describe`); the studio's log words it in its own language from `what`.
+    pub text: String,
+    /// The moment as the trace has it.
+    pub what: Trace,
+    /// The trigger that fired, for a `Fired` moment.
+    pub trigger: Option<String>,
+    pub cell: Option<(i32, i32)>,
+}
+
+/// What the AI viewer records of a run: a frame per day, and the story's moments by day.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Recording {
+    pub frames: Vec<Frame>,
+    pub moments: Vec<Moment>,
+}
+
+/// [`sim_map`] with the world recorded: `progress` gets each day as the run reaches it, and a
+/// set `cancel` stops the run (`None` is returned). The recording only reads the world, so the
+/// result is the one [`sim_map`] gives for the same options.
+pub fn sim_map_observed(pkg: &Package, install: &DtInstall, map: &str, opts: &SimOptions, cancel: &std::sync::atomic::AtomicBool, progress: &mut dyn FnMut(u64)) -> Result<Option<(SimResult, Recording)>, Report> {
+    use std::sync::atomic::Ordering;
     let compiled = compile::compile(pkg, install, "en", map)?;
     let opened = open::build(pkg, open::package_hash(&pkg.files), Path::new(""), map, compiled, "en").map_err(|e| {
         let mut r = Report::default();
@@ -317,38 +365,86 @@ pub fn sim_map(pkg: &Package, install: &DtInstall, map: &str, opts: &SimOptions)
         story.seed = seed.max(1);
     }
     let play = StoryPlay { story, trace: opts.trace, preset: opts.preset.clone(), pick: &mut pick };
-    let run = std::panic::catch_unwind(AssertUnwindSafe(|| sim::play_days_with(&content, &opened.scenario, class, opts.days, Some(play))));
+    let mut frames: Vec<Frame> = Vec::new();
+    let mut observe = |g: &crate::rules::game::Game, day: u64| -> bool {
+        let frame = Frame {
+            day,
+            hero: g.tile(),
+            armies: g.world.armies.iter().enumerate().map(|(index, a)| ArmyAt { index, name: a.name.clone(), cell: a.tile(&g.world.map), faction: a.faction }).collect(),
+        };
+        match frames.last_mut() {
+            Some(last) if last.day == day => *last = frame,
+            _ => frames.push(frame),
+        }
+        progress(day);
+        !cancel.load(Ordering::Relaxed)
+    };
+    let run = std::panic::catch_unwind(AssertUnwindSafe(|| sim::play_days_observed(&content, &opened.scenario, class, opts.days, Some(play), &mut observe)));
     let seconds = start.elapsed().as_secs_f64();
-    Ok(match run {
-        Ok(run) => SimResult {
-            map: map.to_string(),
-            days: opts.days,
-            panic: None,
-            stalled: run.stalled,
-            victory_day: run.victory_day,
-            defeat_day: run.defeat_day,
-            ai_battles: run.ai.battles,
-            player_battles: run.player_battles,
-            field_battles: run.field_battles,
-            story: story_on,
-            trace: run.trace,
-            seconds,
-        },
-        Err(payload) => SimResult {
-            map: map.to_string(),
-            days: opts.days,
-            panic: Some(panic_text(payload.as_ref())),
-            stalled: false,
-            victory_day: None,
-            defeat_day: None,
-            ai_battles: 0,
-            player_battles: 0,
-            field_battles: Vec::new(),
-            story: story_on,
-            trace: Vec::new(),
-            seconds,
-        },
-    })
+    if cancel.load(Ordering::Relaxed) {
+        return Ok(None);
+    }
+    Ok(Some(match run {
+        Ok(run) => {
+            let moments = moments_of(pkg, map, &run.trace);
+            let result = SimResult {
+                map: map.to_string(),
+                days: opts.days,
+                panic: None,
+                stalled: run.stalled,
+                victory_day: run.victory_day,
+                defeat_day: run.defeat_day,
+                ai_battles: run.ai.battles,
+                player_battles: run.player_battles,
+                field_battles: run.field_battles,
+                story: story_on,
+                trace: run.trace,
+                seconds,
+            };
+            (result, Recording { frames, moments })
+        }
+        Err(payload) => {
+            let result = SimResult {
+                map: map.to_string(),
+                days: opts.days,
+                panic: Some(panic_text(payload.as_ref())),
+                stalled: false,
+                victory_day: None,
+                defeat_day: None,
+                ai_battles: 0,
+                player_battles: 0,
+                field_battles: Vec::new(),
+                story: story_on,
+                trace: Vec::new(),
+                seconds,
+            };
+            (result, Recording { frames, moments: Vec::new() })
+        }
+    }))
+}
+
+/// The story's trace as the AI viewer's log: each moment with the cell it names, if any. A
+/// trigger's cell is its `when`'s (`hero enters` a cell, `army arrives` at one).
+fn moments_of(pkg: &Package, map: &str, trace: &[(u64, Trace)]) -> Vec<Moment> {
+    use crate::pack::triggers::{Event, Place};
+    trace
+        .iter()
+        .map(|(day, what)| {
+            let (trigger, cell) = match what {
+                Trace::Fired { trigger, .. } => {
+                    let cell = pkg.triggers.iter().find(|t| t.value.id == *trigger && t.value.map.as_deref().is_none_or(|m| m == map)).and_then(|t| match &t.value.when {
+                        Event::HeroEnters(Place::Cell(x, y)) => Some((*x, *y)),
+                        Event::ArmyArrives { at: Some((x, y)), .. } => Some((*x, *y)),
+                        _ => None,
+                    });
+                    (Some(trigger.clone()), cell)
+                }
+                Trace::Arrive { cell, .. } => (None, Some(*cell)),
+                _ => (None, None),
+            };
+            Moment { day: *day, text: describe(what), what: what.clone(), trigger, cell }
+        })
+        .collect()
 }
 
 /// The text of a caught panic's payload.
@@ -820,5 +916,66 @@ mod tests {
         }
         failures.sort();
         assert!(failures.is_empty(), "the hero cannot reach these cells on foot:\n{}", failures.join("\n"));
+    }
+
+    fn marka() -> Package {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/packs/pepelnaya-marka");
+        Package::parse(Files::from_dir(&dir).unwrap()).0
+    }
+
+    /// A result without its wall-clock time (the only field two runs differ in).
+    fn timeless(mut r: SimResult) -> SimResult {
+        r.seconds = 0.0;
+        r
+    }
+
+    /// The AI viewer's run is the sim's run: the observed result is the one `sim_map` gives, and the
+    /// recording has a frame per day, in order, the same on a second run (skipped without
+    /// `RAZDOR_DT_DIR`).
+    #[test]
+    fn the_observed_run_is_the_sim_run_and_records_every_day() {
+        let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+        let install = DtInstall::load(std::path::Path::new(&dir)).unwrap();
+        let pkg = marka();
+        let opts = SimOptions { days: 10, choices: Choices::First, trace: true, preset: Vec::new(), seed: None };
+        let plain = sim_map(&pkg, &install, "brod", &opts).unwrap_or_else(|r| panic!("{}", r.to_text()));
+        let never = std::sync::atomic::AtomicBool::new(false);
+        let (observed, rec) = sim_map_observed(&pkg, &install, "brod", &opts, &never, &mut |_| {}).unwrap().expect("not cancelled");
+        assert_eq!(timeless(plain.clone()), timeless(observed.clone()), "the recording changes nothing");
+        assert!(rec.frames.windows(2).all(|w| w[0].day < w[1].day), "one frame per day, in order");
+        assert_eq!(rec.frames.first().map(|f| f.day), Some(0));
+        assert_eq!(rec.frames.last().map(|f| f.day), Some(10), "the last frame is the run's end");
+        assert!(!rec.frames.last().unwrap().armies.is_empty(), "brod has armies");
+        let (_, again) = sim_map_observed(&pkg, &install, "brod", &opts, &never, &mut |_| {}).unwrap().expect("not cancelled");
+        assert_eq!(rec.frames, again.frames, "the same run gives the same positions");
+    }
+
+    /// The story's firings are recorded with their day, in the trace's order, and a trigger that
+    /// names a cell keeps it (`brod`'s story fires at the game's start, on day 0).
+    #[test]
+    fn the_story_moments_are_recorded_with_their_day() {
+        let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+        let install = DtInstall::load(std::path::Path::new(&dir)).unwrap();
+        let pkg = marka();
+        let opts = SimOptions { days: 10, choices: Choices::First, trace: true, preset: Vec::new(), seed: None };
+        let never = std::sync::atomic::AtomicBool::new(false);
+        let (result, rec) = sim_map_observed(&pkg, &install, "brod", &opts, &never, &mut |_| {}).unwrap().expect("not cancelled");
+        assert_eq!(rec.moments.len(), result.trace.len());
+        for (m, (day, _)) in rec.moments.iter().zip(&result.trace) {
+            assert_eq!(m.day, *day);
+        }
+        assert!(rec.moments.iter().any(|m| m.day == 0 && m.trigger.is_some()), "a trigger fires at the start: {:?}", rec.moments);
+        let cell = rec.moments.iter().find(|m| m.trigger.is_some() && m.cell.is_some());
+        assert!(cell.is_some() || rec.moments.iter().all(|m| m.trigger.is_none() || m.cell.is_none()), "a cell is kept when the trigger names one");
+    }
+
+    /// A cancelled run gives no result (the AI viewer's Cancel).
+    #[test]
+    fn a_cancelled_run_gives_nothing() {
+        let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+        let install = DtInstall::load(std::path::Path::new(&dir)).unwrap();
+        let opts = SimOptions { days: 10, choices: Choices::First, trace: false, preset: Vec::new(), seed: None };
+        let stop = std::sync::atomic::AtomicBool::new(true);
+        assert!(sim_map_observed(&marka(), &install, "brod", &opts, &stop, &mut |_| {}).unwrap().is_none());
     }
 }

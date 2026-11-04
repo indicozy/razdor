@@ -389,6 +389,10 @@ pub struct App {
     help_fresh: bool,
     /// The custom battles of this run: their setup and score, kept from round to round.
     custom: Option<custom_battle::SetupView>,
+    /// A battle of the studio's battle tester is shown (its watch): the Community battle globals
+    /// as they were before it, put back when it is left for the studio.
+    #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+    studio_watch: Option<razdor::rules::battle::PatchGlobals>,
     /// The cheat console (`~` on the map and in battle).
     console: console::Console,
     /// The console holds the keys this frame (open, or just closed by them).
@@ -490,6 +494,8 @@ impl App {
             help: false,
             help_fresh: false,
             custom: None,
+            #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+            studio_watch: None,
             console: console::Console::default(),
             console_held: false,
             lang: (razdor::i18n::lang(), language::data_prefix()),
@@ -658,9 +664,17 @@ impl App {
             return;
         }
         let Some(studio) = self.studio.as_mut() else { return };
-        if let studio::Action::Exit = studio.frame(self.assets.dt.as_ref()) {
-            self.studio = None;
-            self.screen = Screen::MainMenu;
+        match studio.frame(self.assets.dt.as_ref()) {
+            studio::Action::None => {}
+            studio::Action::Exit => {
+                self.studio = None;
+                self.screen = Screen::MainMenu;
+            }
+            // The battle tester's watch: the battle view in place of the studio, the studio kept behind it.
+            studio::Action::Watch(view) => {
+                self.studio_watch = Some(razdor::rules::battle::patch_globals());
+                self.screen = Screen::CustomBattle(view);
+            }
         }
     }
 
@@ -1616,6 +1630,20 @@ impl App {
                     Some(Screen::MainMenu)
                 } else {
                     None
+                }
+            }
+            // A battle of the studio's battle tester (watch): leaving it goes back to the studio.
+            #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+            (Screen::CustomBattle(view), _) if self.studio_watch.is_some() => {
+                let mut session = razdor::rules::custom::Session::new(&custom_content);
+                match view.frame_custom(&self.assets, &mut session) {
+                    Some(_) => {
+                        if let Some(globals) = self.studio_watch.take() {
+                            razdor::rules::battle::set_patch_globals(globals);
+                        }
+                        Some(Screen::Studio)
+                    }
+                    None => None,
                 }
             }
             (Screen::CustomBattle(view), _) => {

@@ -56,6 +56,7 @@ pub mod worker;
 /// The Claude dock's pseudo-terminal (desktop, with the studio's feature).
 #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
 pub mod terminal;
+pub mod testers;
 
 #[cfg(test)]
 mod tests;

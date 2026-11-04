@@ -121,6 +121,7 @@ fn opaque_rgba(rgba: &mut [u8]) {
 /// closed synchronously before this, so skipping the handlers loses nothing.
 fn exit_now(app: &mut App) -> ! {
     razdor::diag::step("quitting");
+    ui::snapshot::release_copies();
     // Android: the app leaves the screen first, so the slow writes below happen off the screen
     // (on a phone the window would stay frozen on it until the process is gone). The activity's
     // onPause then flushes the session slot on its UI thread (`ui::android`, `razdorOnPause`),

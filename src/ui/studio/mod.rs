@@ -14,6 +14,8 @@
 //!
 //! Desktop only: the whole module is compiled out of Android and iOS (see `ui/mod.rs`).
 
+mod aiview;
+mod battletest;
 mod canvas;
 mod claude;
 mod forms;
@@ -78,6 +80,9 @@ pub enum Action {
     None,
     /// Back to the main menu.
     Exit,
+    /// The game's battle view of one battle of the tester (watch mode), shown in place of the
+    /// studio; the studio stays open behind it.
+    Watch(Box<crate::ui::battle_view::BattleView>),
 }
 
 /// One dock tab. Godot 4's docks, after the studio's design.
@@ -110,6 +115,8 @@ pub enum Tab {
     Units,
     /// The package's items: the same as the units, with the artefact price (`records.rs`).
     Items,
+    /// The battle tester: two sides, N battles on the game's engine (`battletest.rs`).
+    Battle,
 }
 
 impl Tab {
@@ -132,6 +139,7 @@ impl Tab {
             Tab::Vars => tr("Variables"),
             Tab::Units => tr("Units"),
             Tab::Items => tr("Items"),
+            Tab::Battle => tr("Battle test"),
         }
     }
 }
@@ -217,6 +225,13 @@ pub struct StudioScreen {
     scen: ScenarioUi,
     /// A main screen the menu asked for; shown after the dock is drawn.
     pending_tab: Option<Tab>,
+    /// The battle tester (`battletest.rs`), and the request its screen made this frame.
+    battle: battletest::BattleTest,
+    battle_req: Option<battletest::Req>,
+    /// Snapshot options whose picture needs the install (`battletest`, `aiview`), run once it is there.
+    snap_todo: Vec<&'static str>,
+    /// The `battlewatch` snapshot: the tester's first battle opens in the battle view.
+    snap_watch: bool,
 }
 
 impl StudioScreen {
@@ -282,6 +297,10 @@ impl StudioScreen {
             mcp_snaps: Vec::new(),
             scen: ScenarioUi::default(),
             pending_tab: None,
+            battle: battletest::BattleTest::default(),
+            battle_req: None,
+            snap_todo: Vec::new(),
+            snap_watch: false,
         })
     }
 
@@ -311,6 +330,11 @@ impl StudioScreen {
         for opt in opts {
             match *opt {
                 "newmap" => self.newmap.open = true,
+                "battletest" | "battlewatch" => {
+                    self.snap_watch |= *opt == "battlewatch";
+                    self.snap_todo.push("battletest");
+                }
+                "aiview" => self.snap_todo.push("aiview"),
                 "generated" => self.snapshot_generated()?,
                 "side" => self.dock = layout(true),
                 "stale" => self.snapshot_stale()?,
@@ -539,16 +563,87 @@ impl StudioScreen {
             self.wait_for_build();
         }
         self.refresh_marks();
+        self.canvas.ai.poll();
+        self.battle.poll();
+        self.snapshot_todo();
         self.claude.pump();
         self.serve_mcp();
         self.canvas.shown = false;
         self.canvas.mini = None;
-        egui_macroquad::ui(|ctx| action = self.show(ctx));
+        // egui may run the frame's UI twice (a relayout pass): a pass's request is kept, a pass
+        // without one does not clear it.
+        egui_macroquad::ui(|ctx| {
+            let asked = self.show(ctx);
+            if !matches!(asked, Action::None) {
+                action = asked;
+            }
+        });
         let pkg = self.ws.package();
         draw_map_tab(&mut self.canvas, &self.maps, pkg.as_deref(), self.selection.as_ref(), art);
         egui_macroquad::draw();
         self.answer_snapshots();
         action
+    }
+
+    /// What the battle tester's screen asked for: a run starts or stops, or one battle's view opens
+    /// (the studio's action; the host shows it in place of the studio).
+    fn battle_request(&mut self, req: battletest::Req) -> Option<Action> {
+        let (Some(pkg), Some(install), Some(map)) = (self.ws.package(), self.install.clone(), self.maps.map.clone()) else { return None };
+        match req {
+            battletest::Req::Start => self.battle.start(pkg, install, &map),
+            battletest::Req::Cancel => self.battle.cancel(),
+            battletest::Req::Watch(_) => match self.battle.watch(&pkg, &install, &map) {
+                Ok(view) => return Some(Action::Watch(view)),
+                Err(e) => self.battle.error = Some(e),
+            },
+        }
+        None
+    }
+
+    /// The snapshot options that need the install (`battletest`: two armies fought, the results shown;
+    /// `aiview`: the AI run for ten days, the slider at day 7). Run once the install and the package
+    /// are there; each runs in this frame.
+    fn snapshot_todo(&mut self) {
+        if self.snap_todo.is_empty() {
+            return;
+        }
+        let (Some(pkg), Some(install), Some(map)) = (self.ws.package(), self.install.clone(), self.maps.map.clone()) else { return };
+        for opt in std::mem::take(&mut self.snap_todo) {
+            match opt {
+                "battletest" => {
+                    self.pending_tab = Some(Tab::Battle);
+                    // `battlewatch`: then the first battle's view opens, as «Посмотреть бой» does.
+                    let watch = self.snap_watch;
+                    match razdor::studio::testers::open_map(&pkg, &install, &map) {
+                        Ok(mg) => {
+                            self.battle.load(&mg, &map);
+                            // Two of the map's armies, the first two it offers.
+                            let armies: Vec<usize> = self.battle.options.iter().enumerate().filter(|(_, o)| o.kind == razdor::studio::testers::Kind::Army).map(|(i, _)| i).collect();
+                            if let [a, b, ..] = armies[..] {
+                                self.battle.a.choice = a;
+                                self.battle.b.choice = b;
+                            }
+                            if let Err(e) = self.battle.run_now(&mg, 20) {
+                                self.battle.error = Some(e);
+                            }
+                            if watch {
+                                self.battle_req = Some(battletest::Req::Watch(1));
+                            }
+                        }
+                        Err(r) => self.battle.error = Some(r.to_text().lines().next().unwrap_or_default().to_string()),
+                    }
+                }
+                _ => {
+                    self.pending_tab = Some(Tab::Map);
+                    self.canvas.ai.on = true;
+                    self.canvas.ai.days = 10;
+                    if let Err(e) = self.canvas.ai.run_now(&pkg, &install, &map) {
+                        self.canvas.ai.error = Some(e);
+                    }
+                    self.canvas.ai.day = 7;
+                }
+            }
+        }
     }
 
     /// The timers: a text burst ends after its pause, outside changes that settled are read, and a
@@ -820,7 +915,7 @@ impl StudioScreen {
                         self.scen.focus = Focus::Header;
                         ui.close_menu();
                     }
-                    for (label, tab) in [("Story", Tab::Story), ("Campaign", Tab::Campaign), ("Texts", Tab::Texts), ("Characters", Tab::Characters), ("Variables", Tab::Vars), ("Units", Tab::Units), ("Items", Tab::Items)] {
+                    for (label, tab) in [("Story", Tab::Story), ("Campaign", Tab::Campaign), ("Texts", Tab::Texts), ("Characters", Tab::Characters), ("Variables", Tab::Vars), ("Units", Tab::Units), ("Items", Tab::Items), ("Battle test", Tab::Battle)] {
                         if ui.button(tr(label)).clicked() {
                             self.pending_tab = Some(tab);
                             ui.close_menu();
@@ -867,6 +962,8 @@ impl StudioScreen {
             changed: false,
             scen: &mut self.scen,
             install: self.install.clone(),
+            battle: &mut self.battle,
+            battle_req: &mut self.battle_req,
         };
         DockArea::new(&mut self.dock)
             .style(style)
@@ -879,6 +976,11 @@ impl StudioScreen {
         }
         if let Some(path) = open {
             self.open_file(&path);
+        }
+        if let Some(req) = self.battle_req.take() {
+            if let Some(ask) = self.battle_request(req) {
+                action = ask;
+            }
         }
         if focus_map {
             if let Some(at) = self.dock.find_tab(&Tab::Map) {
@@ -1124,7 +1226,7 @@ fn char_index(text: &str, byte: usize) -> usize {
 /// puts the Script beside the Map instead of in its tabs (the snapshot's `side` option).
 fn layout(side: bool) -> DockState<Tab> {
     // The main screens: Map, Campaign and Texts (Script beside the Map when `side` is off).
-    let mut centre_tabs = vec![Tab::Map, Tab::Story, Tab::Campaign, Tab::Texts, Tab::Units, Tab::Items];
+    let mut centre_tabs = vec![Tab::Map, Tab::Story, Tab::Campaign, Tab::Texts, Tab::Units, Tab::Items, Tab::Battle];
     if !side {
         centre_tabs.push(Tab::Script);
     }
@@ -1203,6 +1305,34 @@ struct Viewer<'a> {
     scen: &'a mut ScenarioUi,
     /// The game's install, for the records' prices (`None` without one).
     install: Option<Arc<DtInstall>>,
+    /// The battle tester's state, and its request for after the dock (start, cancel, watch).
+    battle: &'a mut battletest::BattleTest,
+    battle_req: &'a mut Option<battletest::Req>,
+}
+
+impl Viewer<'_> {
+    /// The battle tester's screen: its options come from the shown map (opened here, once per map).
+    fn battle_tab(&mut self, ui: &mut Ui) {
+        let ready = match (&self.pkg, &self.install, &self.maps.map) {
+            (_, None, _) => Err(tr("The battle tester needs the game's files: set RAZDOR_DT_DIR")),
+            (Some(_), Some(_), Some(_)) => Ok(()),
+            _ => Err(tr("No map to show.")),
+        };
+        if let (Ok(()), Some(pkg), Some(install), Some(map)) = (ready, self.pkg.as_ref(), self.install.as_ref(), self.maps.map.clone()) {
+            if self.battle.map.as_deref() != Some(map.as_str()) {
+                match razdor::studio::testers::open_map(pkg, install, &map) {
+                    Ok(mg) => self.battle.load(&mg, &map),
+                    Err(r) => {
+                        self.battle.map = Some(map.clone());
+                        self.battle.error = Some(r.to_text().lines().next().unwrap_or_default().to_string());
+                    }
+                }
+            }
+        }
+        if let Some(req) = self.battle.show(ui, ready) {
+            *self.battle_req = Some(req);
+        }
+    }
 }
 
 impl TabViewer for Viewer<'_> {
@@ -1231,6 +1361,7 @@ impl TabViewer for Viewer<'_> {
             Tab::Vars => self.vars_dock(ui),
             Tab::Units => self.units_screen(ui),
             Tab::Items => self.items_screen(ui),
+            Tab::Battle => self.battle_tab(ui),
         }
     }
 

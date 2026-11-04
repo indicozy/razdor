@@ -8,9 +8,17 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **Battle seeds (battle tester).** Razdor's battle has no random draws: damage is exact and the AI's choice is
+  deterministic, so the battle tester's seeds 1..N fight one battle (the tester says so). The editor's tester
+  switches the original's battle to a subtractive damage mode with no random spread (testers.md §2.5), so the
+  original's battle is deterministic in that mode too. Owner's call: keep the N runs as they are (win shares of 0 or
+  100 %), or give the seed a job (a placement shuffle would be an invented rule, not allowed without the RE). Field
+  battles (sieges) keep a seed (`field::Field`), outside the tester.
 - **Generator clock (Razdor Studio).** The original's world generator seeds its `Randomize` from the processor's
   time-stamp counter, which Razdor cannot replay; the studio derives that clock from the map's seed instead
-  (`gen::clock_of`), so the same seed gives the same world but not the original's world for a given clock. The
+  (`gen::clock_of`), so the same seed gives the same world but not the original's world for a given clock. Checked in milestone 6: a 100 map of
+  seed 4242 gets 1 building and 1 army with `clock_of` and 8 buildings and 4 armies with clock 4242; the editor's
+  rebuild on the same install gives the same two pairs, so the port agrees and the 1 comes from the clock. The
   new-map terrain has no clock dependence and matches the original's pinned hash. Owner's call: keep the seed
   derivation, or let the window take a clock.
 - **Worldgen stage tests not ported (generator).** The original's per-stage unit tests of `src/editor/worldgen`

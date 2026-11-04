@@ -139,9 +139,18 @@ pub fn to_package(g: &Generated, id: &str, title: &str, aliases: &BTreeMap<u32, 
     let _ = writeln!(toml, "gold = 500");
     let _ = writeln!(toml, "mana = 0");
 
-    // Objects: the first and second slot of each cell, as the package counts them.
+    // Objects: the first and second slot of each cell, as the package counts them. An object under a
+    // building's footprint is dropped: the original's placement clears the footprint's forest layer
+    // (worldgen.md §3.5), so the generator never leaves one there, and the package would draw it over
+    // the building (the checker's warning).
     let mut other_objects = 0;
+    let mut under_buildings = 0;
+    let covered = footprint_grid(s);
     for o in &s.objects {
+        if (o.x as u32) < w && (o.y as u32) < h && covered[(o.y as u32 * w + o.x as u32) as usize] {
+            under_buildings += 1;
+            continue;
+        }
         match object_kind(o.class) {
             Some((kind, default)) => {
                 let sprite = if o.sprite == default { String::new() } else { format!("sprite = {}\n", o.sprite) };
@@ -152,6 +161,9 @@ pub fn to_package(g: &Generated, id: &str, title: &str, aliases: &BTreeMap<u32, 
     }
     if other_objects > 0 {
         gaps.push(format!("{other_objects} objects of a class the format has no kind for (classes 2, 3, 4, 6 and 12 of the install)"));
+    }
+    if under_buildings > 0 {
+        gaps.push(format!("{under_buildings} objects under a building's footprint were dropped (the original clears a footprint, worldgen.md §3.5)"));
     }
 
     // Buildings: the anchor is the bottom-right cell of the footprint, as the package's.
@@ -338,6 +350,16 @@ fn walkable(s: &Scenario, marks: &Marks) -> Vec<bool> {
             out[(y * w + x) as usize] = !blocked;
         }
     }
+    for b in &s.buildings {
+        paint_footprint(b, w, h, &mut out);
+    }
+    out
+}
+
+/// The cells a building's footprint covers (row-major, the map's width).
+fn footprint_grid(s: &Scenario) -> Vec<bool> {
+    let (w, h) = (s.width() as i64, s.height() as i64);
+    let mut out = vec![false; (w * h) as usize];
     for b in &s.buildings {
         paint_footprint(b, w, h, &mut out);
     }

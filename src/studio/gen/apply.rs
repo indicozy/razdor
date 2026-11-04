@@ -72,12 +72,30 @@ fn text_edits(texts: &[(String, String)]) -> Vec<DocEdit> {
         .collect()
 }
 
+/// A temporary copy of a package folder: its folder is removed when the copy is dropped.
+#[derive(Debug)]
+pub struct TempCopy(std::path::PathBuf);
+
+impl TempCopy {
+    /// The copy's folder.
+    pub fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl Drop for TempCopy {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 /// A copy of the package folder `from` in a new folder of the system's temporary directory (the
-/// snapshot's package, so a snapshot never writes to the package it shows).
-pub fn copy_package(from: &std::path::Path) -> Result<std::path::PathBuf, String> {
+/// snapshot's package, so a snapshot never writes to the package it shows). The copy is removed
+/// when the returned guard is dropped.
+pub fn copy_package(from: &std::path::Path) -> Result<TempCopy, String> {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-    let to = std::env::temp_dir().join(format!("razdor-gen-copy-{}-{nanos}", std::process::id()));
-    copy_tree(from, &to).map_err(|e| format!("cannot copy {}: {e}", from.display()))?;
+    let to = TempCopy(std::env::temp_dir().join(format!("razdor-gen-copy-{}-{nanos}", std::process::id())));
+    copy_tree(from, &to.0).map_err(|e| format!("cannot copy {}: {e}", from.display()))?;
     Ok(to)
 }
 

@@ -112,11 +112,27 @@ fn run(req: &Request) -> Result<Generated, Failure> {
     generate(req, &src, &AtomicBool::new(false))
 }
 
+/// A temporary folder removed when it is dropped (a failed assertion leaves nothing behind).
+struct TempDir(PathBuf);
+
+impl std::ops::Deref for TempDir {
+    type Target = Path;
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 /// A package folder holding one generated map (`maps/<id>/`) and its texts: a manifest, the
-/// English and Russian texts (the same words in both).
-fn package_dir(map: &PackageMap, id: &str, tag: &str) -> PathBuf {
+/// English and Russian texts (the same words in both). Removed when the guard drops.
+fn package_dir(map: &PackageMap, id: &str, tag: &str) -> TempDir {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-    let dir = std::env::temp_dir().join(format!("razdor-gen-{tag}-{}-{nanos}", std::process::id()));
+    let dir = TempDir(std::env::temp_dir().join(format!("razdor-gen-{tag}-{}-{nanos}", std::process::id())));
     let manifest = format!(
         "id = \"{id}\"\nversion = \"0.1.0\"\nformat = 1\ntitle = \"package.title\"\ndescription = \"package.description\"\nauthor = \"\"\nlicense = \"MIT\"\nbase = \"community-update\"\nrequires = []\nrules = \"dt\"\n"
     );
@@ -143,7 +159,6 @@ fn check_map(map: &PackageMap, id: &str, tag: &str) -> (usize, String) {
     let r = crate::pack::check::check(&pkg);
     let text = format!("{}{}", parse.to_text(), r.to_text());
     let errors = parse.errors() + r.errors();
-    let _ = std::fs::remove_dir_all(&dir);
     (errors, text)
 }
 
@@ -238,7 +253,6 @@ fn the_install_gives_the_pinned_counts() {
     let dir = package_dir(&map, "pinned", "pinned-compile");
     let (pkg, _) = Package::parse(Files::from_dir(&dir).unwrap());
     let compiled = crate::pack::compile::compile(&pkg, &dt, "en", "pinned");
-    let _ = std::fs::remove_dir_all(&dir);
     assert!(compiled.is_ok(), "{:?}", compiled.err().map(|r| r.to_text()));
 }
 
@@ -302,4 +316,38 @@ fn a_generated_map_is_one_undo_step_on_a_copy_of_pepelnaya_marka() {
     ws.save_all().unwrap();
     assert_eq!(ws.read_text("texts/en.toml").unwrap(), texts_before);
     assert_eq!(ws.read_text("campaign.toml").unwrap(), campaign_before);
+}
+
+/// A generated map has no object under a building's footprint: the package checker's warning
+/// «an object at (x, y) is inside building …» is what the generator must not leave (`to_package`
+/// drops such objects, as the original's placement clears a footprint).
+#[test]
+fn a_generated_map_has_no_object_under_a_footprint() {
+    let aliases = unit_aliases();
+    for (size, seed) in [(100u32, 4242i32), (100, 99), (50, 4243), (200, 7)] {
+        let g = run(&request(size, newmap::LAND, seed, true)).expect("generates");
+        let map = to_package(&g, "gen-map", "Generated", &aliases).expect("a package map");
+        let (_, text) = check_map(&map, "gen-map", &format!("foot{size}s{seed}"));
+        assert!(!text.contains("is inside building"), "{size} seed {seed}:\n{text}");
+    }
+}
+
+/// The same on the install's sprites and pictures (skipped without `RAZDOR_DT_DIR`): the 100 map of
+/// seed 4242 that the install's footprints first showed the warning on.
+#[test]
+fn a_generated_map_on_the_install_has_no_object_under_a_footprint() {
+    let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+    let dt = crate::dt::install::DtInstall::load(Path::new(&dir)).expect("install loads");
+    let data = super::InstallData::from_install(&dt).expect("the install's data");
+    let src = data.sources();
+    let req = Request {
+        map: newmap::Options { size: 100, kind: newmap::LAND, keep: true, rebuild: true, ..newmap::Options::default() },
+        seed: 4242,
+        clock: super::clock_of(4242),
+        world: Some(World { buildings: true, economy: true, armies: true, options: super::worldgen::Options::new(100) }),
+    };
+    let g = generate(&req, &src, &AtomicBool::new(false)).expect("generates");
+    let map = to_package(&g, "gen-map", "Generated", &unit_aliases()).expect("a package map");
+    let (_, text) = check_map(&map, "gen-map", "install-foot");
+    assert!(!text.contains("is inside building"), "{text}");
 }
