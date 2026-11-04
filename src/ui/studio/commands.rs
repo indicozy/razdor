@@ -76,18 +76,25 @@ pub const COMMANDS: &[Command] = &[
     Command { later: n_("Comes in UX5"), ..cmd("open-in-file", n_("Open in file"), ic::ARROW_SQUARE_OUT, "Ctrl+Shift+O") },
     cmd("cancel", n_("Cancel"), ic::X, "Esc"),
     cmd("settings", n_("Settings"), ic::GEAR, "Ctrl+,"),
-    Command { scope: Scope::Map, fixed: true, ..cmd("copy", n_("Copy region"), ic::COPY, "Ctrl+C") },
-    Command { scope: Scope::Map, fixed: true, later: n_("Comes in UX4"), ..cmd("cut", n_("Cut"), ic::SCISSORS, "Ctrl+X") },
+    Command { scope: Scope::Map, fixed: true, ..cmd("copy", n_("Copy"), ic::COPY, "Ctrl+C") },
+    Command { scope: Scope::Map, fixed: true, ..cmd("cut", n_("Cut"), ic::SCISSORS, "Ctrl+X") },
     Command { scope: Scope::Map, fixed: true, ..cmd("paste", n_("Paste"), ic::CLIPBOARD, "Ctrl+V") },
-    // The Map tools (spec §9.3): the tool strip's buttons run these too. M, L, W and R wait for their milestones.
+    Command { scope: Scope::Map, fixed: true, ..cmd("paste-in-place", n_("Paste in place"), ic::CLIPBOARD_TEXT, "Ctrl+Shift+V") },
+    // The selection (spec §5.6, §9.3): Delete is the command below; Enter commits a floating paste.
+    Command { scope: Scope::Map, ..cmd("select-all", n_("Select all"), ic::SELECTION_ALL, "Ctrl+A") },
+    Command { scope: Scope::Map, ..cmd("deselect", n_("Deselect"), ic::SELECTION_BACKGROUND, "Ctrl+D") },
+    Command { scope: Scope::Map, ..cmd("invert", n_("Invert selection"), ic::SELECTION_INVERSE, "Ctrl+Shift+I") },
+    Command { scope: Scope::Map, ..cmd("save-stamp", n_("Save selection as stamp"), ic::STAMP, "Ctrl+Alt+S") },
+    Command { scope: Scope::Map, ..cmd("commit-paste", n_("Commit the paste"), ic::CHECK, "Enter") },
+    // The Map tools (spec §9.3): the tool strip's buttons run these too.
     Command { scope: Scope::Map, ..cmd("tool-select", n_("Select and move"), ic::CURSOR, "V") },
     Command { scope: Scope::Map, ..cmd("tool-brush", n_("Brush"), ic::PAINT_BRUSH, "B") },
     Command { scope: Scope::Map, ..cmd("tool-eraser", n_("Eraser"), ic::ERASER, "E") },
     Command { scope: Scope::Map, ..cmd("tool-fill", n_("Fill"), ic::PAINT_BUCKET, "G") },
     Command { scope: Scope::Map, ..cmd("tool-eyedrop", n_("Eyedropper"), ic::EYEDROPPER, "I") },
-    Command { scope: Scope::Map, later: n_("Comes in UX4"), ..cmd("tool-marquee", n_("Marquee"), ic::SELECTION, "M") },
-    Command { scope: Scope::Map, later: n_("Comes in UX4"), ..cmd("tool-lasso", n_("Lasso"), ic::LASSO, "L") },
-    Command { scope: Scope::Map, later: n_("Comes in UX4"), ..cmd("tool-wand", n_("Magic wand"), ic::MAGIC_WAND, "W") },
+    Command { scope: Scope::Map, ..cmd("tool-marquee", n_("Marquee"), ic::SELECTION, "M") },
+    Command { scope: Scope::Map, ..cmd("tool-lasso", n_("Lasso"), ic::LASSO, "L") },
+    Command { scope: Scope::Map, ..cmd("tool-wand", n_("Magic wand"), ic::MAGIC_WAND, "W") },
     Command { scope: Scope::Map, ..cmd("tool-stamp", n_("Stamp"), ic::STAMP, "S") },
     Command { scope: Scope::Map, ..cmd("tool-army", n_("Army"), ic::SWORD, "A") },
     Command { scope: Scope::Map, ..cmd("tool-building", n_("Building"), ic::BUILDINGS, "U") },
@@ -310,17 +317,20 @@ pub enum Clip {
     Copy,
     Cut,
     Paste,
+    /// Ctrl+Shift+V: the clip goes back where it was copied from.
+    PasteInPlace,
 }
 
 /// The clipboard actions among the frame's events, which are removed from the frame. egui-miniquad
 /// sends Ctrl+C as `Copy`, Ctrl+X as `Cut` and Ctrl+V as the clipboard's text (a `Text` event, with the
 /// command key held: a typed letter never comes with it). While a text field has the keyboard the
 /// events are left to it.
-pub fn clipboard(events: &mut Vec<Event>, command_held: bool, wants_keyboard: bool) -> Vec<Clip> {
+pub fn clipboard(events: &mut Vec<Event>, command_held: bool, shift_held: bool, wants_keyboard: bool) -> Vec<Clip> {
     if wants_keyboard {
         return Vec::new();
     }
     let mut out = Vec::new();
+    let paste = if shift_held { Clip::PasteInPlace } else { Clip::Paste };
     events.retain(|e| match e {
         Event::Copy => {
             out.push(Clip::Copy);
@@ -331,11 +341,11 @@ pub fn clipboard(events: &mut Vec<Event>, command_held: bool, wants_keyboard: bo
             false
         }
         Event::Paste(_) => {
-            out.push(Clip::Paste);
+            out.push(paste);
             false
         }
         Event::Text(_) if command_held => {
-            out.push(Clip::Paste);
+            out.push(paste);
             false
         }
         _ => true,
@@ -493,18 +503,42 @@ mod tests {
     }
 
     #[test]
+    fn the_selection_shortcuts_are_the_spec_s() {
+        let want = [
+            ("tool-marquee", "M"),
+            ("tool-lasso", "L"),
+            ("tool-wand", "W"),
+            ("select-all", "Ctrl+A"),
+            ("deselect", "Ctrl+D"),
+            ("invert", "Ctrl+Shift+I"),
+            ("save-stamp", "Ctrl+Alt+S"),
+            ("commit-paste", "Enter"),
+            ("delete", "Delete"),
+        ];
+        for (id, key) in want {
+            let c = command(id).unwrap_or_else(|| panic!("{id} is a command"));
+            assert_eq!(binding_of(c, &defaults()), Binding::parse(key), "{id} is {key}");
+            assert!(c.later.is_empty(), "{id} works now");
+        }
+        assert_eq!(command("paste-in-place").map(|c| c.default), Some("Ctrl+Shift+V"));
+    }
+
+    #[test]
     fn clipboard_comes_from_the_events_not_from_keys() {
         let mut events = vec![Event::Copy, Event::Cut, Event::Text("клип".into()), Event::Key { key: Key::A, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }];
-        let got = clipboard(&mut events, true, false);
+        let got = clipboard(&mut events, true, false, false);
         assert_eq!(got, vec![Clip::Copy, Clip::Cut, Clip::Paste]);
         assert_eq!(events.len(), 1, "the clipboard events are taken, the key is kept");
+        // Ctrl+Shift+V is a paste in place.
+        let mut events = vec![Event::Paste("x".into())];
+        assert_eq!(clipboard(&mut events, true, true, false), vec![Clip::PasteInPlace]);
         // A text field with the keyboard keeps its own clipboard.
         let mut events = vec![Event::Copy];
-        assert!(clipboard(&mut events, true, true).is_empty());
+        assert!(clipboard(&mut events, true, false, true).is_empty());
         assert_eq!(events.len(), 1);
         // Typed text without the command key is not a paste.
         let mut events = vec![Event::Text("а".into())];
-        assert!(clipboard(&mut events, false, false).is_empty());
+        assert!(clipboard(&mut events, false, false, false).is_empty());
         assert_eq!(events.len(), 1);
     }
 

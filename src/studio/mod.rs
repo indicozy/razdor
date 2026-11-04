@@ -49,6 +49,7 @@ pub mod health;
 pub mod newpkg;
 pub mod overlay;
 pub mod region;
+pub mod select;
 pub mod richness;
 pub mod scenario;
 pub mod scores;

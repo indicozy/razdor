@@ -571,6 +571,7 @@ mod map_tools {
     use crate::studio::brush::{self, Forest};
     use crate::studio::geometry::CellRect;
     use crate::studio::region;
+    use crate::studio::select::Mask;
 
     const BROD_MAP: &str = "brod";
 
@@ -691,6 +692,123 @@ mod map_tools {
         ws.check().unwrap();
         assert!(ws.problems.iter().all(|d| !d.file.starts_with(".editor")), "{:?}", ws.problems);
     }
+
+    /// The cells of the brod map's tables of one kind, as the file has them.
+    fn cells_of_kind(ws: &Workspace, kind: Kind) -> Vec<(i64, i64)> {
+        let file = brod();
+        let text = ws.text_of(&file).unwrap();
+        ed::spans(&file, &text).unwrap().into_iter().filter(|(l, _)| l.kind == kind).filter_map(|(_, r)| brush::cell_of_fragment(&text[r])).collect()
+    }
+
+    /// The cell of the army with this id.
+    fn cell_of_army(ws: &Workspace, id: &str) -> (i64, i64) {
+        let file = brod();
+        let text = ws.text_of(&file).unwrap();
+        let (_, range) = ed::spans(&file, &text).unwrap().into_iter().find(|(l, _)| l.kind == Kind::Army && l.id.as_deref() == Some(id)).expect("the army");
+        brush::cell_of_fragment(&text[range]).unwrap()
+    }
+
+    /// The square of cells of radius `r` around `c`, as a selection of a `w` by `h` map.
+    fn around(c: (i64, i64), r: i64, w: u32, h: u32) -> Mask {
+        Mask::of_rect(w, h, CellRect { x0: (c.0 - r) as i32, y0: (c.1 - r) as i32, x1: (c.0 + r) as i32, y1: (c.1 + r) as i32 })
+    }
+
+    fn map_size(ws: &mut Workspace) -> (u32, u32) {
+        let i = ws.open_terrain(BROD_MAP).unwrap();
+        (ws.terrains[i].terrain.width, ws.terrains[i].terrain.height)
+    }
+
+    #[test]
+    fn cut_then_paste_moves_terrain_and_an_army_as_two_undo_steps() {
+        let copy = Copy::of("pepelnaya-marka");
+        let mut ws = Workspace::open(&copy.0).unwrap();
+        let file = brod();
+        let before = ws.text_of(&file).unwrap();
+        let before_codes = codes(&mut ws);
+        let (w, h) = map_size(&mut ws);
+        let army = cell_of_army(&ws, "toll");
+        let sel = around(army, 2, w, h);
+        let clip = region::cut(&mut ws, BROD_MAP, &sel, &region::Target::all()).unwrap();
+        assert_eq!(ws.history.undo_label(), Some("cut"));
+        assert!(!cells_of_kind(&ws, Kind::Army).contains(&army), "the army is cut out of the map");
+        let cut_codes = codes(&mut ws);
+        assert!(sel.cells().iter().all(|&(x, y)| cut_codes[(y as u32 * w + x as u32) as usize] == region::CLEARED), "the selected terrain is cleared");
+        assert_eq!(clip.tables.iter().filter(|t| t.kind == Kind::Army).count(), 1, "the army is in the clip");
+        // The clip's top left corner goes to (1, 1): the army moves to (1 + 2, 1 + 2).
+        region::paste(&mut ws, BROD_MAP, &clip, (1, 1)).unwrap();
+        assert_eq!(ws.history.undo_label(), Some("paste"));
+        assert!(cells_of_kind(&ws, Kind::Army).contains(&(3, 3)), "the army is pasted at its new place");
+        let i = ws.open_terrain(BROD_MAP).unwrap();
+        assert_eq!(ws.terrains[i].code_at(1, 1), Some(clip.codes[0]), "the terrain is pasted at the new place");
+        ws.undo().unwrap();
+        ws.undo().unwrap();
+        assert_eq!(ws.text_of(&file).unwrap(), before, "two undos restore the map file's bytes");
+        assert_eq!(codes(&mut ws), before_codes, "and the terrain");
+    }
+
+    #[test]
+    fn delete_in_a_selection_removes_only_the_objects_of_visible_unlocked_layers() {
+        let copy = Copy::of("pepelnaya-marka");
+        let mut ws = Workspace::open(&copy.0).unwrap();
+        let file = brod();
+        let (w, h) = map_size(&mut ws);
+        let obj = cells_of_kind(&ws, Kind::Object).into_iter().next().expect("the brod map has an object");
+        let sel = around(obj, 1, w, h);
+        let before = ws.text_of(&file).unwrap();
+        let armies = cells_of_kind(&ws, Kind::Army);
+        // The objects layer is locked (and the terrain is not in the target): nothing changes.
+        let mut locked = region::Target::all();
+        locked.objects = false;
+        locked.terrain = false;
+        assert_eq!(region::clear(&mut ws, BROD_MAP, &sel, &locked, "delete").unwrap(), 0);
+        assert_eq!(ws.text_of(&file).unwrap(), before, "a locked layer keeps its object");
+        assert!(ws.history.undo_label() != Some("delete"), "and nothing is recorded");
+        // Visible and unlocked: the object goes, the selected terrain is cleared, one undo step.
+        let n = region::clear(&mut ws, BROD_MAP, &sel, &region::Target::all(), "delete").unwrap();
+        assert!(n >= 1, "the object is removed");
+        assert_eq!(ws.history.undo_label(), Some("delete"));
+        assert!(cells_of_kind(&ws, Kind::Object).iter().all(|c| !sel.get(c.0, c.1)), "no object is left in the selection");
+        assert_eq!(cells_of_kind(&ws, Kind::Army), armies, "the armies are not touched");
+        ws.undo().unwrap();
+        assert_eq!(ws.text_of(&file).unwrap(), before, "undo brings the object back");
+    }
+
+    #[test]
+    fn a_selection_saved_as_a_stamp_is_written_under_editor_stamps_and_reads_back_with_its_mask() {
+        let copy = Copy::of("pepelnaya-marka");
+        let mut ws = Workspace::open(&copy.0).unwrap();
+        let (w, h) = map_size(&mut ws);
+        let (ax, ay) = cell_of_army(&ws, "toll");
+        // An L of three cells around the army: its copy has a mask with a left-out cell.
+        let sel = Mask::of_cells(w, h, &[(ax, ay), (ax + 1, ay), (ax, ay + 1)]);
+        let clip = region::copy_selection(&mut ws, BROD_MAP, &sel, &region::Target::all()).unwrap();
+        assert_eq!(clip.mask.as_ref().map(|m| m.iter().filter(|&&b| b).count()), Some(3));
+        region::save_stamp(&copy.0, "Army corner", &clip).unwrap();
+        assert!(copy.0.join(".editor/stamps/Army corner.toml").is_file(), "the stamp's tables");
+        assert!(copy.0.join(".editor/stamps/Army corner.png").is_file(), "the stamp's picture");
+        let listed = region::list_stamps(&copy.0);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].clip, clip, "the stamp reads back with its mask and its army");
+        assert!(region::save_stamp(&copy.0, "../escape", &clip).is_err(), "a stamp name is a plain name");
+    }
+
+    #[test]
+    fn a_paste_of_a_selection_leaves_the_cells_outside_it_alone() {
+        let copy = Copy::of("pepelnaya-marka");
+        let mut ws = Workspace::open(&copy.0).unwrap();
+        let (w, h) = map_size(&mut ws);
+        let (ax, ay) = cell_of_army(&ws, "toll");
+        let sel = Mask::of_cells(w, h, &[(ax, ay), (ax + 1, ay), (ax, ay + 1)]);
+        let clip = region::copy_selection(&mut ws, BROD_MAP, &sel, &region::Target::all()).unwrap();
+        assert_eq!((clip.w, clip.h), (2, 2));
+        let before = codes(&mut ws);
+        region::paste(&mut ws, BROD_MAP, &clip, (10, 10)).unwrap();
+        let after = codes(&mut ws);
+        let at = |x: u32, y: u32| (y * w + x) as usize;
+        assert_eq!(after[at(10, 10)], clip.codes[0], "the selected corner is pasted");
+        assert_eq!(after[at(11, 11)], before[at(11, 11)], "the cell the selection left out is not");
+    }
+
 }
 
 #[test]

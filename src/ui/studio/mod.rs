@@ -23,6 +23,7 @@ mod inspector;
 mod inspector_kit;
 mod mcp;
 mod map_tab;
+mod selection;
 mod scores;
 mod newmap;
 mod records;
@@ -517,7 +518,10 @@ impl StudioScreen {
                     razdor::studio::brush::commit(&mut self.ws, "burn everything", &map, edits, cells)?;
                     self.reload();
                 }
-                "copy" => map_tab::copy_region(&mut self.ws, &self.maps, &mut self.canvas, &mut self.log),
+                "copy" => {
+                    let set = selection::set_of(&self.canvas, &self.maps);
+                    selection::copy(&mut self.ws, &self.maps, &mut self.canvas, &set, &mut self.log);
+                }
                 // `plant=<x>,<y>` and `hill=<x>,<y>`: the forests and hills tools' stroke at that brush centre
                 // (the brush size, the family and `replace` as set), in memory.
                 other if other.starts_with("plant=") || other.starts_with("hill=") => {
@@ -542,7 +546,7 @@ impl StudioScreen {
                     razdor::studio::brush::commit(&mut self.ws, "snapshot stroke", &map, edits, Vec::new())?;
                     self.reload();
                 }
-                "paste" => map_tab::arm_paste(&mut self.canvas, &mut self.log),
+                "paste" => selection::arm_paste(&mut self.canvas, &mut self.log),
                 "package" => self.scen.focus = Focus::Package,
                 "header" => self.scen.focus = Focus::Header,
                 "campaign" => {
@@ -646,15 +650,18 @@ impl StudioScreen {
                         } else {
                             razdor::studio::brush::Forest::Family(f.parse().map_err(|_| format!("forest {f:?}: a family 0-9 or thicket"))?)
                         };
-                    } else if let Some(r) = other.strip_prefix("region=") {
-                        let v: Vec<i32> = r.split(',').map(|n| n.parse().map_err(|_| format!("region {r:?}"))).collect::<Result<_, _>>()?;
-                        let [x0, y0, x1, y1] = v[..] else { return Err(format!("region {r:?}: x0,y0,x1,y1")) };
-                        self.canvas.region = Some(razdor::studio::geometry::CellRect::spanning((x0, y0), (x1, y1)));
+                    } else if let Some(kind) = other.strip_prefix("sel=") {
+                        self.canvas.snap_sel = Some(kind.to_string());
+                    } else if let Some(name) = other.strip_prefix("stamp-save=") {
+                        self.canvas.snap_stamp = Some(name.to_string());
+                    } else if other == "stamp-prompt" {
+                        self.canvas.stamp_prompt = true;
                     } else if let Some(name) = other.strip_prefix("stamp=") {
                         let list = razdor::studio::region::list_stamps(&self.ws.root);
                         let stamp = list.into_iter().find(|s| s.name == name).ok_or_else(|| format!("no stamp {name:?}"))?;
                         self.canvas.clip = Some(stamp.clip);
                         self.canvas.paste = true;
+                        self.canvas.float = false;
                     } else {
                         return Err(format!("no studio option {other:?}"));
                     }
@@ -1120,7 +1127,9 @@ impl StudioScreen {
                     strip_cmd = map_tab::tool_strip(ui, active, &|id| commands::command(id).map(|c| commands::tip(c, keys)).unwrap_or_default());
                 });
         }
+        let keys = &prefs.keys;
         let mut viewer = Viewer {
+            keys,
             ws: &mut self.ws,
             pkg: pkg.clone(),
             selected: &mut self.selected,
@@ -1324,26 +1333,37 @@ impl StudioScreen {
         let ws = self.ws_kind;
         inspector_kit::clear_find(ctx);
         let inspector_hot = inspector_kit::hot(ctx);
+        let wants = ctx.wants_keyboard_input();
         let active = move |scope: Scope| match scope {
             Scope::Global => true,
-            Scope::Map => ws == WsKind::Map,
+            // A Map shortcut with Ctrl (Ctrl+A, Ctrl+D) waits while a text field has the keyboard.
+            Scope::Map => ws == WsKind::Map && !wants,
             Scope::Inspector => inspector_hot,
         };
-        let wants = ctx.wants_keyboard_input();
         // The function keys come from macroquad (egui-miniquad does not deliver them). A relayout pass of the
         // same frame may read them again: a command that runs twice (Проверка) only rebuilds twice.
         let ids = commands::pressed(ctx, &prefs.keys, active, &commands::mq_presses());
         let clips = ctx.input_mut(|i| {
             let held = i.modifiers.command;
-            commands::clipboard(&mut i.events, held, wants)
+            let shift = i.modifiers.shift;
+            commands::clipboard(&mut i.events, held, shift, wants)
         });
         if ws == WsKind::Map {
             for clip in clips {
+                let set = selection::set_of(&self.canvas, &self.maps);
                 match clip {
-                    Clip::Copy => map_tab::copy_region(&mut self.ws, &self.maps, &mut self.canvas, &mut self.log),
-                    Clip::Paste => map_tab::arm_paste(&mut self.canvas, &mut self.log),
-                    // Cut needs the selections (UX4): the key is taken, nothing is cut yet.
-                    Clip::Cut => {}
+                    Clip::Copy => selection::copy(&mut self.ws, &self.maps, &mut self.canvas, &set, &mut self.log),
+                    Clip::Cut => {
+                        if selection::cut(&mut self.ws, &mut self.maps, &mut self.canvas, &set, &mut self.log) {
+                            self.touch();
+                        }
+                    }
+                    Clip::Paste => selection::arm_paste(&mut self.canvas, &mut self.log),
+                    Clip::PasteInPlace => {
+                        if selection::paste_in_place(&mut self.ws, &mut self.maps, &mut self.canvas, &set, &mut self.log) {
+                            self.touch();
+                        }
+                    }
                 }
             }
         }
@@ -1370,14 +1390,25 @@ impl StudioScreen {
             "drawer" => self.drawer_open = !self.drawer_open,
             "cancel" => {
                 self.canvas.paste = false;
-                self.canvas.region = None;
+                self.canvas.float = false;
                 // Esc leaves a placement too: the tool goes back to Select.
                 if self.canvas.tool.places() {
                     self.canvas.tool = Tool::Select;
                 }
             }
             "settings" => self.settings.open = true,
-            "delete" => self.delete_selection(),
+            "delete" => {
+                // Delete clears the selection's contents on the visible unlocked layers; without one it
+                // removes the selected object, as before.
+                if self.ws_kind == WsKind::Map && self.canvas.sel.is_some() {
+                    let set = selection::set_of(&self.canvas, &self.maps);
+                    if selection::delete(&mut self.ws, &mut self.maps, &mut self.canvas, &set, &mut self.log) {
+                        self.touch();
+                    }
+                } else {
+                    self.delete_selection();
+                }
+            }
             "reset-layout" => self.reset_layout(prefs),
             "exit" => return Some(self.leave()),
             "side-panels" => self.side_hidden = !self.side_hidden,
@@ -1414,6 +1445,29 @@ impl StudioScreen {
             "tool-eraser" => self.set_tool(Tool::Eraser),
             "tool-fill" => self.set_tool(Tool::Fill),
             "tool-eyedrop" => self.set_tool(Tool::Eyedrop),
+            "tool-marquee" => self.set_tool(Tool::Marquee),
+            "tool-lasso" => self.set_tool(Tool::Lasso),
+            "tool-wand" => self.set_tool(Tool::Wand),
+            "select-all" => selection::select_all(&mut self.canvas, &self.maps),
+            "deselect" => selection::deselect(&mut self.canvas),
+            "invert" => selection::invert(&mut self.canvas, &self.maps),
+            "save-stamp" => {
+                if self.canvas.sel.is_some() {
+                    self.canvas.stamp_prompt = true;
+                } else {
+                    self.log.push(tr("Select cells first: M, L or W").to_string());
+                }
+            }
+            // Enter commits a floating paste at the hovered cell (or where the clip was copied from).
+            "commit-paste" => {
+                if self.canvas.float {
+                    let at = self.canvas.hover.map_or(self.canvas.clip_origin, |(x, y)| (i64::from(x), i64::from(y)));
+                    let set = selection::set_of(&self.canvas, &self.maps);
+                    if selection::commit_float(&mut self.ws, &mut self.maps, &mut self.canvas, &set, at, &mut self.log) {
+                        self.touch();
+                    }
+                }
+            }
             "tool-stamp" => self.set_tool(Tool::Stamp),
             "tool-army" => self.set_tool(Tool::Army),
             "tool-building" => self.set_tool(Tool::Building),
@@ -1433,6 +1487,9 @@ impl StudioScreen {
     fn set_tool(&mut self, tool: Tool) {
         self.canvas.tool = tool;
         self.canvas.paste = false;
+        self.canvas.float = false;
+        self.canvas.sel_shape = None;
+        self.canvas.lasso.clear();
         self.canvas.moving = None;
         self.canvas.paint_last = None;
         if tool == Tool::Stamp {
@@ -1728,7 +1785,9 @@ fn tool_hint(tool: Tool) -> &'static str {
         Tool::Items => n_("Not in the package format yet"),
         Tool::Rect => n_("Drag takes a rectangle to copy"),
         Tool::Fill => n_("Click fills an area"),
-        Tool::Region => n_("Drag takes a rectangle"),
+        Tool::Marquee => n_("Drag takes a rectangle of cells"),
+        Tool::Lasso => n_("Drag draws a lasso round cells"),
+        Tool::Wand => n_("Click selects the cells of its terrain"),
         Tool::Eraser => n_("Drag erases plants, then hills"),
         Tool::Eyedrop => n_("Click takes the cell's terrain"),
         Tool::Stamp => n_("Click places the armed stamp"),
@@ -1777,6 +1836,8 @@ fn drawer_panel(ui: &mut Ui, viewer: &mut Viewer<'_>, open: &mut bool, which: &m
 /// The tabs' contents. Each tab is drawn from the same borrowed state; a file asked for (a click
 /// in the tree or on a problem) is opened after the dock is drawn.
 struct Viewer<'a> {
+    /// The shortcuts the author set (the tooltips of the bar show them).
+    keys: &'a commands::Prefs,
     ws: &'a mut Workspace,
     /// The package as last rebuilt (the screens read it; the model keeps the last good one).
     pkg: Option<Arc<Package>>,

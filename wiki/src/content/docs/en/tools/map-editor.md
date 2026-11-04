@@ -85,8 +85,8 @@ A strip of tools runs down the left edge: one icon each; the tooltip shows the n
 * **V** select and move; **B** brush (paints what the palette has picked); **E** eraser;
   **G** fill; **I** eyedropper (or Alt while painting with the brush); **S** stamp; **A** army;
   **U** building; **P** point; **H** hand (drag to move the view).
-* **M**, **L** and **W** (selections) and **R** (trigger zone) are not available yet: selections
-  come in a later update.
+* **M** marquee, **L** lasso and **W** magic wand (see Selections below); **R** (trigger zone) is
+  not available yet.
 
 Above the map is the options bar of the active tool. For the brush: size (a slider, keys `[` and
 `]`), the presets 1 to 6 and 9, round or square, and density (`Shift+[` and `Shift+]`, in steps
@@ -118,7 +118,35 @@ ground above water; it is one step and is undone in one step.
 
 The **Minimap** shows the whole map with a frame for the view: a click or a drag moves the view.
 
-Copying areas and saving stamps are not on the tool strip yet: they come back with selections.
+### Selections
+
+A selection is a set of map cells. It does not change files and it is not an undo step.
+
+* **M** marquee: drag from one corner to the other. A click without a drag clears the selection.
+* **L** lasso: draw round cells; the cells whose centre is inside are selected.
+* **W** magic wand: a click selects the cells of the clicked terrain. The Contiguous box takes only the
+  connected cells; without it every cell of that terrain on the map is selected.
+
+**Shift** adds to the selection and **Alt** subtracts from it (the Photoshop convention). The buttons on
+the options bar set the default mode: Replace, Add or Subtract. Commands: **Ctrl+A** select all,
+**Ctrl+D** deselect, **Ctrl+Shift+I** invert. Dashed «marching ants» run round the selection.
+
+A selection acts only on visible, unlocked layers: a hidden or locked layer (its eye and lock in Layers)
+is not copied, cut or cleared. Terrain and objects whose cell (for a building, its bottom right corner)
+is in the selection are copied. The hero is never copied or removed.
+
+* **Ctrl+C** copies the selection; **Ctrl+X** cuts it (the copy and the clearing are one undo step);
+  **Delete** or **Backspace** clears its contents. A cleared cell becomes plain grass, and objects are
+  removed.
+* **Ctrl+V** attaches the copy to the pointer: it is semi-transparent and follows the cursor. A click or
+  **Enter** pastes it, **Esc** drops it. **Ctrl+Shift+V** pastes it where it was copied from. A paste is
+  one undo step. Pasted objects get new numbers; an army with a name loses it, because a named
+  character is one per package.
+* **Only in selection** on the options bar: the brush, the eraser, the fill, the forest and hill scatter
+  and the stamp act only on the selected cells. The box is on while a selection exists.
+* **Ctrl+Alt+S** (or the button on the options bar) saves the selection as a stamp: you type a name and
+  the stamp appears in the Stamps tab. Stamps are kept in the package's `.editor/stamps` folder; the game
+  does not read them.
 
 ## Editing, undo and saving
 
@@ -244,8 +272,7 @@ last result. Health only warns: it never stops a save or a play. The game's file
 
 The studio does not have route checks for every story yet. These come in later versions.
 
-The studio is being rebuilt in steps. Not done yet: the new tool strip and the map palette, layers and
-selections (copy, cut and paste of areas), the command palette
+The studio is being rebuilt in steps. Not done yet: the command palette
 (Ctrl+Shift+P) and go to an object (Ctrl+P), the Play button (F5), Tab to hide the side panels, and the AI
 viewer inside Test (it is still on the map).
 

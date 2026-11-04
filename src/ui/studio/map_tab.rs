@@ -39,10 +39,12 @@ use razdor::studio::geometry::CellRect;
 use razdor::studio::map::{self, footprint_cells_of, footprint_rects, hit, map_ids, outline_of, Good, Mark, MapView, Selection};
 use razdor::studio::overlay::{self, Layers};
 use razdor::studio::region::{self, Clip, Stamp};
-use razdor::studio::{Place, Workspace};
+use razdor::studio::select::{self, Edge, Mask, Mode};
+use super::selection::{self, SelShape};
+use razdor::studio::Place;
 use razdor::trf;
 
-use super::{Viewer, WARNING_AMBER};
+use super::{commands, Viewer, WARNING_AMBER};
 use crate::ui::dt_art::DtArt;
 use super::canvas::{draw_map_layers, Cam, Overview};
 
@@ -62,8 +64,12 @@ pub enum Tool {
     Items,
     Rect,
     Fill,
-    /// Copy: a drag takes a rectangle of the map (Ctrl+C copies it, Ctrl+V pastes it).
-    Region,
+    /// Marquee (M): a drag takes a rectangle of cells (Shift adds, Alt subtracts).
+    Marquee,
+    /// Lasso (L): a drag draws a free shape; the cells whose centre is inside are selected.
+    Lasso,
+    /// Magic wand (W): a click selects the cells of the clicked terrain (contiguous or every one).
+    Wand,
     /// The eraser (E): a stroke takes the plants under the brush, the hills when no plant is there.
     Eraser,
     /// The eyedropper (I, or Alt while painting): a click takes the cell's terrain.
@@ -113,7 +119,7 @@ impl Pick {
 
 impl Tool {
     /// Every tool, in the bar's order.
-    pub const ALL: [Tool; 16] = [
+    pub const ALL: [Tool; 18] = [
         Tool::Select,
         Tool::Army,
         Tool::Point,
@@ -125,7 +131,9 @@ impl Tool {
         Tool::Items,
         Tool::Rect,
         Tool::Fill,
-        Tool::Region,
+        Tool::Marquee,
+        Tool::Lasso,
+        Tool::Wand,
         Tool::Eraser,
         Tool::Eyedrop,
         Tool::Stamp,
@@ -151,7 +159,9 @@ impl Tool {
             Tool::Items => tr("Items"),
             Tool::Rect => tr("Rectangle"),
             Tool::Fill => tr("Fill"),
-            Tool::Region => tr("Copy"),
+            Tool::Marquee => tr("Marquee"),
+            Tool::Lasso => tr("Lasso"),
+            Tool::Wand => tr("Magic wand"),
             Tool::Eraser => tr("Eraser"),
             Tool::Eyedrop => tr("Eyedropper"),
             Tool::Stamp => tr("Stamp"),
@@ -240,10 +250,30 @@ pub struct Canvas {
     pub marks: Vec<Mark>,
     /// The story cells the hero cannot reach on foot (`pack::reach`), of the map shown.
     pub unreached: Vec<Site>,
-    /// The Copy tool's rectangle, the copied region, and whether Ctrl+V has armed a paste.
-    pub region: Option<CellRect>,
+    /// The copied region (`clip`) and where it was copied from (Ctrl+Shift+V goes back there); whether
+    /// a clip follows the pointer (`paste`), and whether that is a floating paste (`float`: a click or
+    /// Enter ends it; a stamp of the Stamp tool stays armed).
     pub clip: Option<Clip>,
+    pub clip_origin: (i64, i64),
     pub paste: bool,
+    pub float: bool,
+    /// The selection of the map shown (`None`: nothing selected) and its outline (the ants).
+    pub sel: Option<Mask>,
+    pub sel_edges: Vec<Edge>,
+    /// The mode the selection bar sets (Shift and Alt override it while selecting).
+    pub sel_mode: Mode,
+    /// The magic wand's contiguous switch (off: every cell of the clicked terrain on the map).
+    pub wand_contiguous: bool,
+    /// «Только в выделении»: paint, erase, fill, scatter and stamp act only inside the selection.
+    pub only_sel: bool,
+    /// The gesture in progress: the shape a drag is making (its ants preview) and a lasso's points.
+    pub sel_shape: Option<SelShape>,
+    pub lasso: Vec<(f64, f64)>,
+    /// The stamp prompt is open (Ctrl+Alt+S).
+    pub stamp_prompt: bool,
+    /// The snapshot's selection (`sel=`) and the stamp it saves (`stamp-save=`), applied once the map compiles.
+    pub snap_sel: Option<String>,
+    pub snap_stamp: Option<String>,
     /// The package's stamps (`None` until the Stamps dock lists them again).
     pub stamps: Option<Vec<Stamp>>,
     pub stamp_name: String,
@@ -315,9 +345,20 @@ impl Default for Canvas {
             shown: false,
             marks: Vec::new(),
             unreached: Vec::new(),
-            region: None,
             clip: None,
+            clip_origin: (0, 0),
             paste: false,
+            float: false,
+            sel: None,
+            sel_edges: Vec::new(),
+            sel_mode: Mode::Replace,
+            wand_contiguous: true,
+            only_sel: true,
+            sel_shape: None,
+            lasso: Vec::new(),
+            stamp_prompt: false,
+            snap_sel: None,
+            snap_stamp: None,
             stamps: None,
             stamp_name: String::new(),
             burn_asked: false,
@@ -402,6 +443,11 @@ pub fn switch_map(maps: &mut MapView, canvas: &mut Canvas, selection: &mut Optio
         canvas.moving = None;
         canvas.stroke = None;
         canvas.rect_from = None;
+        selection::set_selection(canvas, None);
+        canvas.sel_shape = None;
+        canvas.lasso.clear();
+        canvas.float = false;
+        canvas.paste = false;
         canvas.marks.clear();
         canvas.unreached.clear();
         *selection = None;
@@ -445,8 +491,10 @@ enum Act {
     /// A rectangle filled with the palette's kind.
     Rect((i32, i32), (i32, i32)),
     Fill((i64, i64)),
-    /// The Copy tool's rectangle (`None`: the rectangle is cleared).
-    Region(Option<CellRect>),
+    /// A selecting gesture's shape, combined with the selection by its mode.
+    Select(SelShape, Mode),
+    /// Deselect (a click of the marquee in the Replace mode).
+    Deselect,
     /// Burn everything (confirmed).
     Burn,
     Paste((i64, i64)),
@@ -488,6 +536,7 @@ impl Viewer<'_> {
         canvas.rect = Some(rect);
         canvas.shown = true;
         canvas.ppp = ppp;
+        selection::stamp_prompt(ui.ctx(), self.ws, self.maps, canvas, &set, self.log);
         // A click on the map picks what it hits, a placing click places, a painted cell is applied
         // to the shown compile after the match: all decided here, applied after it.
         let mut pick: Option<Option<Selection>> = None;
@@ -500,6 +549,8 @@ impl Viewer<'_> {
         let mut eyedrop: Option<u8> = None;
         let mut cancel_placement = false;
 
+        // The snapshot's selection (`sel=`) waits for the compiled map (its size).
+        selection::apply_snapshot(self.ws, self.maps, canvas, &set, self.log);
         match self.maps.current() {
             Some(good) => {
                 let s = &good.compiled.scenario;
@@ -785,17 +836,54 @@ impl Viewer<'_> {
                                 act = hover64.map(Act::Fill);
                             }
                         }
-                        Tool::Region => {
+                        Tool::Marquee => {
+                            let mode = select::mode_of(shift, alt, canvas.sel_mode);
                             if resp.drag_started_by(PointerButton::Primary) {
                                 canvas.rect_from = press;
                             }
+                            if resp.dragged_by(PointerButton::Primary) {
+                                canvas.sel_shape = match (canvas.rect_from, hover) {
+                                    (Some(a), Some(b)) => Some(SelShape::Rect(a, b)),
+                                    _ => None,
+                                };
+                            }
                             if resp.drag_stopped_by(PointerButton::Primary) {
+                                canvas.sel_shape = None;
                                 if let (Some(a), Some(b)) = (canvas.rect_from.take(), hover) {
-                                    act = Some(Act::Region(Some(CellRect::spanning(a, b))));
+                                    act = Some(Act::Select(SelShape::Rect(a, b), mode));
                                 }
                             }
+                            // A click without a drag clears the selection (Replace); with Shift or Alt it changes nothing.
+                            if resp.clicked_by(PointerButton::Primary) && mode == Mode::Replace {
+                                act = Some(Act::Deselect);
+                            }
+                        }
+                        Tool::Lasso => {
+                            let mode = select::mode_of(shift, alt, canvas.sel_mode);
+                            if resp.drag_started_by(PointerButton::Primary) {
+                                if let Some(p) = ui.input(|i| i.pointer.press_origin()) {
+                                    let v = cam.to_cells(to_px(p));
+                                    canvas.lasso = vec![(f64::from(v.x), f64::from(v.y))];
+                                }
+                            } else if resp.dragged_by(PointerButton::Primary) {
+                                if let Some(p) = resp.interact_pointer_pos() {
+                                    let v = cam.to_cells(to_px(p));
+                                    canvas.lasso.push((f64::from(v.x), f64::from(v.y)));
+                                }
+                            }
+                            if resp.drag_stopped_by(PointerButton::Primary) {
+                                let pts = std::mem::take(&mut canvas.lasso);
+                                if pts.len() >= 3 {
+                                    act = Some(Act::Select(SelShape::Lasso(pts), mode));
+                                }
+                            }
+                        }
+                        Tool::Wand => {
+                            let mode = select::mode_of(shift, alt, canvas.sel_mode);
                             if resp.clicked_by(PointerButton::Primary) {
-                                act = Some(Act::Region(None));
+                                if let Some((x, y)) = hover {
+                                    act = Some(Act::Select(SelShape::Wand((x as u32, y as u32), canvas.wand_contiguous), mode));
+                                }
                             }
                         }
                         Tool::Items => {}
@@ -811,6 +899,10 @@ impl Viewer<'_> {
                     paint_cells = None;
                     self.log.push(tr("The layer is hidden or locked: nothing is painted").to_string());
                 }
+                // «Только в выделении»: the cells outside the selection are not painted (the fields are read
+                // directly: the camera borrows the canvas).
+                let within_now = if canvas.only_sel { canvas.sel.as_ref() } else { None };
+                paint_cells = paint_cells.map(|c| select::keep_inside(c, within_now));
                 if let Some(cells) = &paint_cells {
                     let code = canvas.code;
                     let Some(map_id) = self.maps.map.clone() else { return };
@@ -829,6 +921,19 @@ impl Viewer<'_> {
                 if paint_end {
                     self.ws.paint_end();
                 }
+                // The marching ants: the selection's outline, or the outline a drag is making (its mode from
+                // the modifiers); a lasso in progress is a line. Drawn over the map with egui's painter.
+                let painter = ui.painter_at(rect);
+                let time = ui.input(|i| i.time);
+                let map_name = self.maps.map.clone().unwrap_or_default();
+                if let Some(shape) = canvas.sel_shape.clone() {
+                    let mode = select::mode_of(shift, alt, canvas.sel_mode);
+                    let edges = selection::preview_edges(self.ws, &map_name, canvas.sel.as_ref(), w, h, &shape, mode);
+                    selection::draw_ants(&painter, cam, ppp, &edges, time);
+                } else if !canvas.sel_edges.is_empty() {
+                    selection::draw_ants(&painter, cam, ppp, &canvas.sel_edges, time);
+                }
+                selection::draw_lasso(&painter, cam, ppp, &canvas.lasso);
             }
             None => {
                 let msg = if !self.has_install {
@@ -903,6 +1008,10 @@ impl Viewer<'_> {
         match act {
             Act::Hill(c, size) => {
                 let centre = brush::hill_centre(c.0, c.1, size);
+                if selection::within(self.canvas).is_some_and(|m| !m.get(centre.0, centre.1)) {
+                    self.log.push(tr("The hill's centre is outside the selection").to_string());
+                    return;
+                }
                 if self.on_water(centre) {
                     self.log.push(tr("A hill stands on land: the centre is on water").to_string());
                     return;
@@ -912,6 +1021,7 @@ impl Viewer<'_> {
                 self.commit("hills", &map, edits, Vec::new());
             }
             Act::Forests(cells) => {
+                let cells = select::keep_inside(cells, selection::within(self.canvas));
                 let (land, water): (Cells, Cells) = cells.into_iter().partition(|&c| !self.on_water(c));
                 if !water.is_empty() {
                     self.log.push(trf!("{n} cells on water kept free: trees stand on land", n = water.len()));
@@ -926,7 +1036,7 @@ impl Viewer<'_> {
                 self.commit("forests", &map, edits, Vec::new());
             }
             Act::Erase(cells) => {
-                let inside: Vec<(i64, i64)> = cells.into_iter().filter(|&(x, y)| x >= 0 && y >= 0 && x < i64::from(w) && y < i64::from(h)).collect();
+                let inside: Vec<(i64, i64)> = select::keep_inside(cells, selection::within(self.canvas)).into_iter().filter(|&(x, y)| x >= 0 && y >= 0 && x < i64::from(w) && y < i64::from(h)).collect();
                 let text = self.text(&file);
                 let mut edits = brush::plant_erase_edits(&file, &text, &inside);
                 // Hills: the cells' hill covers are taken with the plants (DT's delete on the hills page
@@ -958,7 +1068,11 @@ impl Viewer<'_> {
             Act::Fill(c) => {
                 let Ok(i) = self.ws.open_terrain(&map) else { return };
                 let t = &self.ws.terrains[i].terrain;
-                let region = brush::flood(&t.cells, w, h, (c.0 as u32, c.1 as u32));
+                let start = (c.0 as u32, c.1 as u32);
+                let region = match selection::within(self.canvas) {
+                    Some(m) => select::flood_within(&t.cells, w, h, start, m),
+                    None => brush::flood(&t.cells, w, h, start),
+                };
                 let want = t.cells[(c.1 as u32 * w + c.0 as u32) as usize];
                 if want == code {
                     return;
@@ -966,26 +1080,21 @@ impl Viewer<'_> {
                 let cells: Vec<(i64, i64, u8)> = region.into_iter().map(|(x, y)| (i64::from(x), i64::from(y), code)).collect();
                 self.commit("fill", &map, Vec::new(), cells);
             }
-            Act::Region(rect) => {
-                self.canvas.region = rect;
-                self.canvas.paste = false;
-            }
-            Act::Paste(at) => {
-                let Some(clip) = self.canvas.clip.clone() else { return };
-                match region::paste(self.ws, &map, &clip, at) {
-                    Ok(n) => {
-                        self.log.push(trf!("Pasted {n} objects", n = n));
-                        self.changed = true;
-                        let painted: Vec<(u32, u32, u8)> = (0..clip.h)
-                            .flat_map(|y| (0..clip.w).map(move |x| (x, y)))
-                            .filter_map(|(x, y)| {
-                                let (tx, ty) = (at.0 + i64::from(x), at.1 + i64::from(y));
-                                (tx >= 0 && ty >= 0 && tx < i64::from(w) && ty < i64::from(h)).then(|| (tx as u32, ty as u32, clip.codes[(y * clip.w + x) as usize]))
-                            })
-                            .collect();
-                        self.maps.repaint(&painted);
-                    }
+            Act::Select(shape, mode) => {
+                if matches!(shape, SelShape::Wand(..)) && !self.layer_set().pickable("terrain") {
+                    self.log.push(tr("The layer is hidden or locked: nothing is selected").to_string());
+                    return;
+                }
+                match selection::shape_mask(self.ws, &map, w, h, &shape) {
+                    Ok(mask) => selection::apply_shape(self.canvas, mask, mode),
                     Err(e) => self.log.push(e),
+                }
+            }
+            Act::Deselect => selection::deselect(self.canvas),
+            Act::Paste(at) => {
+                let set = self.layer_set();
+                if selection::commit_float(self.ws, self.maps, self.canvas, &set, at, self.log) {
+                    self.changed = true;
                 }
             }
             Act::Burn => {
@@ -1019,21 +1128,6 @@ impl Viewer<'_> {
                 if !painted.is_empty() {
                     self.maps.repaint(&painted);
                 }
-            }
-            Err(e) => self.log.push(e),
-        }
-    }
-
-    /// Saves the Copy tool's rectangle as a stamp under the name typed in the bar.
-    fn save_stamp(&mut self) {
-        let Some(map) = self.maps.map.clone() else { return };
-        let Some(rect) = self.canvas.region else { return };
-        let name = self.canvas.stamp_name.trim().to_string();
-        let result = region::copy(self.ws, &map, rect).and_then(|clip| region::save_stamp(&self.ws.root, &name, &clip));
-        match result {
-            Ok(()) => {
-                self.log.push(trf!("Saved the stamp {name}", name = name.as_str()));
-                self.canvas.stamps = None;
             }
             Err(e) => self.log.push(e),
         }
@@ -1117,6 +1211,7 @@ impl Viewer<'_> {
     /// (the brush's size, presets, shape and density; the forest family; the army, building and object
     /// kinds; the copy controls) and the modes at the end (Move, Burn everything).
     fn options_bar(&mut self, ui: &mut Ui) {
+        let mut asked: Option<&'static str> = None;
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             self.map_picker(ui);
@@ -1138,10 +1233,7 @@ impl Viewer<'_> {
                     if tool == Tool::Hills || tool == Tool::Forests {
                         ui.checkbox(&mut self.canvas.erase, tr("Erase")).on_hover_text(tr("Delete: the hills or plants the brush covers"));
                     }
-                    if tool == Tool::Terrain {
-                        let mut only = false;
-                        ui.add_enabled(false, egui::Checkbox::new(&mut only, tr("Only in selection"))).on_disabled_hover_text(tr("Comes in UX4"));
-                    }
+                    only_in_selection(ui, self.canvas);
                 }
                 Tool::Army => {
                     ComboBox::from_id_salt("studio-tool-army").selected_text(self.canvas.army_model.clone()).show_ui(ui, |ui| {
@@ -1180,12 +1272,14 @@ impl Viewer<'_> {
                 }
                 Tool::Fill => {
                     ui.weak(tr("Fills the connected cells of the clicked kind with the palette's kind"));
+                    only_in_selection(ui, self.canvas);
                 }
                 Tool::Eyedrop => {
                     ui.weak(tr("Click a cell: its terrain becomes the brush (Alt while painting does the same)"));
                 }
                 Tool::Stamp => {
                     ui.weak(tr("Pick a stamp in the Stamps tab, then click where it goes"));
+                    only_in_selection(ui, self.canvas);
                 }
                 Tool::Hand => {
                     ui.weak(tr("Drag to pan; Space and the middle button pan with any tool"));
@@ -1193,22 +1287,10 @@ impl Viewer<'_> {
                 Tool::Point => {
                     ui.weak(tr("Click places a point"));
                 }
-                Tool::Region => {
-                    let has_region = self.canvas.region.is_some();
-                    if ui.add_enabled(has_region, egui::Button::new(tr("Copy"))).on_hover_text(tr("Ctrl+C copies the rectangle")).clicked() {
-                        copy_region(self.ws, self.maps, self.canvas, self.log);
-                    }
-                    if ui.add_enabled(self.canvas.clip.is_some(), egui::Button::new(tr("Paste"))).on_hover_text(tr("Ctrl+V: the clip follows the pointer; Esc stops")).clicked() {
-                        arm_paste(self.canvas, self.log);
-                    }
-                    ui.add(egui::TextEdit::singleline(&mut self.canvas.stamp_name).hint_text(tr("Stamp name")).desired_width(120.0));
-                    let name_ok = region::valid_name(&self.canvas.stamp_name);
-                    if ui.add_enabled(has_region && name_ok, egui::Button::new(tr("Save stamp"))).clicked() {
-                        self.save_stamp();
-                    }
-                    if ui.add_enabled(has_region, egui::Button::new(tr("Clear"))).clicked() {
-                        self.canvas.region = None;
-                    }
+                Tool::Marquee | Tool::Lasso | Tool::Wand => {
+                    let keys = self.keys;
+                    let tip = |id: &str| commands::command(id).map(|c| commands::tip(c, keys)).unwrap_or_default();
+                    asked = selection::bar(ui, self.canvas, tool == Tool::Wand, &tip);
                 }
                 Tool::Rect => {
                     ui.weak(tr("Fills the rectangle with the palette's kind"));
@@ -1221,6 +1303,39 @@ impl Viewer<'_> {
                 self.canvas.burn_asked = true;
             }
         });
+        if let Some(id) = asked {
+            self.selection_command(id);
+        }
+    }
+
+    /// The selection bar's commands (the Map tab's own: the workspace and the canvas are at hand).
+    fn selection_command(&mut self, id: &str) {
+        let set = self.layer_set();
+        match id {
+            "select-all" => selection::select_all(self.canvas, self.maps),
+            "deselect" => selection::deselect(self.canvas),
+            "invert" => selection::invert(self.canvas, self.maps),
+            "copy" => selection::copy(self.ws, self.maps, self.canvas, &set, self.log),
+            "cut" => {
+                if selection::cut(self.ws, self.maps, self.canvas, &set, self.log) {
+                    self.changed = true;
+                }
+            }
+            "paste" => selection::arm_paste(self.canvas, self.log),
+            "delete" => {
+                if selection::delete(self.ws, self.maps, self.canvas, &set, self.log) {
+                    self.changed = true;
+                }
+            }
+            "save-stamp" => {
+                if self.canvas.sel.is_some() {
+                    self.canvas.stamp_prompt = true;
+                } else {
+                    self.log.push(tr("Select cells first: M, L or W").to_string());
+                }
+            }
+            _ => {}
+        }
     }
 
     /// The palette (spec §5.3, the Палитра tab): the terrain swatches with names, the objects with the
@@ -1398,7 +1513,7 @@ impl Viewer<'_> {
             self.canvas.stamps = Some(region::list_stamps(&self.ws.root));
         }
         let stamps = self.canvas.stamps.clone().unwrap_or_default();
-        ui.weak(tr("Copy a rectangle, name it and save it: the stamps of this package"));
+        ui.weak(tr("Select cells, then Ctrl+Alt+S saves them: the stamps of this package"));
         if stamps.is_empty() {
             ui.weak(tr("No stamps yet."));
             return;
@@ -1411,7 +1526,8 @@ impl Viewer<'_> {
                     ui.vertical(|ui| {
                         ui.strong(stamp.name.as_str());
                         ui.weak(format!("{}×{}", stamp.clip.w, stamp.clip.h));
-                        if ui.button(tr("Paste")).clicked() {
+                        // One line: the column is narrow, and the label must not break inside a word.
+                        if ui.add(egui::Button::new(tr("Paste")).wrap_mode(egui::TextWrapMode::Extend)).clicked() {
                             armed = Some(stamp.clone());
                         }
                     });
@@ -1427,6 +1543,15 @@ impl Viewer<'_> {
         }
     }
 
+}
+
+/// «Только в выделении» (spec §5.2): on by default; it limits the paints to the selection, and it can
+/// be set only while a selection exists.
+fn only_in_selection(ui: &mut Ui, canvas: &mut Canvas) {
+    let has = canvas.sel.is_some();
+    ui.add_enabled(has, egui::Checkbox::new(&mut canvas.only_sel, tr("Only in selection")))
+        .on_hover_text(tr("Paint, erase, fill, scatter and stamp act only on the selected cells"))
+        .on_disabled_hover_text(tr("Select cells first: M, L or W"));
 }
 
 /// The brush's controls on the options bar: the size slider and the DT presets (1 to 6 and 9), the
@@ -1486,7 +1611,7 @@ fn terrain_title(code: u8) -> &'static str {
 }
 
 /// The tool strip (spec §5.1): one button per tool, top to bottom, with its icon and its tooltip
-/// («name · shortcut»). The active tool is highlighted; the selection tools and the trigger zone are
+/// («name · shortcut»). The active tool is highlighted; the trigger zone is
 /// shown disabled. Returns the command of a clicked button; the caller runs it.
 pub(super) fn tool_strip(ui: &mut Ui, active: Tool, tip: &dyn Fn(&str) -> String) -> Option<&'static str> {
     // (command, icon, the tool it selects, why it is disabled ("" when it works))
@@ -1500,9 +1625,9 @@ pub(super) fn tool_strip(ui: &mut Ui, active: Tool, tip: &dyn Fn(&str) -> String
             ("tool-eyedrop", ic::EYEDROPPER, Some(Tool::Eyedrop), ""),
         ],
         &[
-            ("tool-marquee", ic::SELECTION, None, "Comes in UX4"),
-            ("tool-lasso", ic::LASSO, None, "Comes in UX4"),
-            ("tool-wand", ic::MAGIC_WAND, None, "Comes in UX4"),
+            ("tool-marquee", ic::SELECTION, Some(Tool::Marquee), ""),
+            ("tool-lasso", ic::LASSO, Some(Tool::Lasso), ""),
+            ("tool-wand", ic::MAGIC_WAND, Some(Tool::Wand), ""),
         ],
         &[
             ("tool-stamp", ic::STAMP, Some(Tool::Stamp), ""),
@@ -1554,33 +1679,6 @@ fn stamp_picture(ui: &mut Ui, clip: &Clip) {
     }
 }
 
-/// Copies the Copy tool's rectangle into the clip (Ctrl+C), and says so.
-pub(super) fn copy_region(ws: &mut Workspace, maps: &MapView, canvas: &mut Canvas, log: &mut Vec<String>) {
-    let Some(map) = maps.map.clone() else { return };
-    let Some(rect) = canvas.region else {
-        log.push(tr("Drag a rectangle with the Copy tool first").to_string());
-        return;
-    };
-    match region::copy(ws, &map, rect) {
-        Ok(clip) => {
-            log.push(trf!("Copied {w}×{h} cells", w = clip.w, h = clip.h));
-            canvas.clip = Some(clip);
-            canvas.paste = false;
-        }
-        Err(e) => log.push(e),
-    }
-}
-
-/// Arms the paste (Ctrl+V): the clip follows the pointer until Esc or another copy.
-pub(super) fn arm_paste(canvas: &mut Canvas, log: &mut Vec<String>) {
-    if canvas.clip.is_some() {
-        canvas.paste = true;
-        canvas.tool = Tool::Region;
-    } else {
-        log.push(tr("Nothing copied yet: Ctrl+C copies the Copy tool's rectangle").to_string());
-    }
-}
-
 /// The label of a forest choice in the bar: `Family 3` or `Thicket`.
 fn forest_label(f: Forest) -> String {
     match f {
@@ -1615,7 +1713,7 @@ fn act_layer(act: &Act) -> Option<&'static str> {
         Act::Hill(..) | Act::Forests(_) | Act::Erase(_) => Some(layers::id_of(layers::Kind::Objects)),
         Act::BuildingErase(_) => Some(layers::id_of(layers::Kind::Buildings)),
         Act::Rect(..) | Act::Fill(_) => Some(layers::id_of(layers::Kind::Terrain)),
-        Act::Region(_) | Act::Burn | Act::Paste(_) => None,
+        Act::Select(..) | Act::Deselect | Act::Burn | Act::Paste(_) => None,
     }
 }
 
@@ -1791,16 +1889,17 @@ pub fn draw(canvas: &mut Canvas, maps: &MapView, pkg: Option<&Package>, selectio
             outline(cam, CellRect { x0: r.x0 + dx, y0: r.y0 + dy, x1: r.x1 + dx, y1: r.y1 + dy }, 2.0, colour);
         }
     }
-    if let Some(region) = canvas.region {
-        outline(cam, region, 2.0, accent());
-    }
     if let (Some(from), Some(to)) = (canvas.rect_from, canvas.hover) {
         outline(cam, CellRect::spanning(from, to), 2.0, mq::Color::new(1.0, 1.0, 1.0, 0.7));
     }
     if let (true, Some(clip), Some((x, y))) = (canvas.paste, canvas.clip.as_ref(), canvas.hover) {
         for cy in 0..clip.h as i32 {
             for cx in 0..clip.w as i32 {
-                let code = clip.codes[(cy as u32 * clip.w + cx as u32) as usize].min(15) as usize;
+                let idx = (cy as u32 * clip.w + cx as u32) as usize;
+                if clip.mask.as_ref().is_some_and(|m| !m[idx]) {
+                    continue;
+                }
+                let code = clip.codes[idx].min(15) as usize;
                 let rgb = DEFAULT_PALETTE[code].1;
                 let r = cam.rect(CellRect::brush(x + cx, y + cy, 1));
                 mq::draw_rectangle(r.x, r.y, r.w, r.h, mq::Color::from_rgba(rgb[0], rgb[1], rgb[2], 150));
