@@ -8,6 +8,14 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **The original's camera limit: `W×32 − 1056` or `(W+2)×32 − 1056`** (2026-11-04, the dt-fix
+  plan). `interface.md` §8 gives the view's bottom-right limit as `width × 32 − 1056` (and
+  `height × 22 − 704`); `world.md` (camera line) and the raw notes give `(W+2)×32 − 1056`, from
+  the map's stride with its one-cell border, both read from 0x4c8864 with the maximum set at
+  load (0x4b771c / Map_Load). The original clamps only when it draws, so the edge matters for an
+  owner-reported original bug (scrolling to the map's lower-right corner breaks the game; row O1
+  of `indicozy/dt-fix`'s `docs/FIXES.md`). Settled by the values Map_Load stores at
+  0x68ecc8 / 0x68eccc in Ghidra; then fix the spec that is wrong.
 - **The event window's OK label under 12 sp on a small portrait phone** (2026-10-31, backlog 1453's
   check). The mobile UI check measures «Ок» at 11.4 sp on the 1080×2400 phone in portrait, in the
   victory window too (it was there before 1453's fix): the label follows the window's scale `o`
