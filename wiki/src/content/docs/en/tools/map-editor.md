@@ -103,6 +103,9 @@ palette is open the studio's shortcuts wait: the keys go to its search field.
 the package as it does for a normal game with a package (the hero is picked first). The studio stays open, and
 the status bar says «The game is running» while the game's window is open.
 
+The game started from the studio keeps its own saves, settings and log in the `studio-play` folder inside Razdor's
+folder, so a test never changes your saves or your settings.
+
 The game does not start, and the studio says why (in the Output, or in Problems for errors in the package):
 
 * the game's folder is not set (`RAZDOR_DT_DIR`);

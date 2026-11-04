@@ -829,4 +829,5 @@ The game could not start: {reason} = Игру не удалось запусти
 The game does not start: its files are needed (set RAZDOR_DT_DIR) = Игра не запускается: нужны файлы игры (задайте RAZDOR_DT_DIR)
 The game does not start: the package has {errors} errors (see Problems) = Игра не запускается: в пакете ошибок: {errors} (см. «Проблемы»)
 The game does not start: no map is shown = Игра не запускается: карта не открыта
+The game does not start: Razdor's folder is unknown = Игра не запускается: папка Razdor не определена
 Run the AI for the armies and the story on the map. = Запустите ИИ: армии и сюжет появятся на карте.

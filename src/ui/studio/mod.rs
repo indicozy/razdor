@@ -1805,8 +1805,18 @@ impl StudioScreen {
             }
         }
         let (Some(install), Some(map)) = (self.install.clone(), self.maps.map.clone()) else { return };
+        // The game keeps its saves, settings and log in its own folder inside Razdor's (never the player's).
+        let Some(play_dir) = razdor::platform::app_dir().map(|d| d.join(razdor::platform::PLAY_DIR)) else {
+            self.refuse(tr("The game does not start: Razdor's folder is unknown").to_string(), None);
+            return;
+        };
+        if let Err(e) = std::fs::create_dir_all(&play_dir) {
+            let text = trf!("The game could not start: {reason}", reason = e.to_string());
+            self.refuse(text, None);
+            return;
+        }
         let launch = match std::env::current_exe() {
-            Ok(exe) => play::launch(&exe, &self.ws.root, &map, &install.dir),
+            Ok(exe) => play::launch(&exe, &self.ws.root, &map, &install.dir, &play_dir),
             Err(e) => {
                 let text = trf!("The game could not start: {reason}", reason = e.to_string());
                 self.refuse(text, None);
