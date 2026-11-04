@@ -213,7 +213,7 @@ impl Grid {
     }
 
     /// Lower bound of the planner weights between two cells (for A*).
-    fn weight_bound(self, a: Tile, b: Tile) -> u32 {
+    pub(crate) fn weight_bound(self, a: Tile, b: Tile) -> u32 {
         match self {
             Grid::HexOddR => ORTHOGONAL_WEIGHT * hex_distance(a, b) as u32,
             Grid::Square8 => {

@@ -16,7 +16,7 @@
 //! the scenario's messages every frame, to see the screen under them; `RAZDOR_MOUSE=x,y`
 //! puts the pointer there (`RAZDOR_MOUSE_RIGHT=1` also holds the right button there: the map's tooltips); `RAZDOR_SCENE_SPELLS=<id>,…` puts those spells on every unit; `RAZDOR_SCENE_TARGET=<id>` starts the targeting of that enemy spell on the map; `RAZDOR_SCENE_MANA=<n>` sets the hero's mana in the `spells` scene; `RAZDOR_SCENE_PREVIEW=1` shows the first spell's card at the pointer in the `learnt` scene; `RAZDOR_SCENE_POTION=1` gives every unit of the army a
 //! drunk potion. `RAZDOR_SCENE_LANGUAGE=1` opens the language list (`title`, `options:advanced`, `settings:<map>:advanced`). `replay:<step>` with `RAZDOR_REPLAY=<actions.jsonl>`: the diff
-//! `RAZDOR_SCENE_EXPERIMENTAL=bonuses,items,potions,cells,free,auto,undying` enables selected playthrough rules;
+//! `RAZDOR_SCENE_EXPERIMENTAL=bonuses,items,potions,cells,free,auto,undying,fast` enables selected playthrough rules;
 //! `RAZDOR_SCENE_RULES=1` opens their menu over `scenarios`. `RAZDOR_SCENE_CARD=1` opens the picked map's card
 //! in the `scenarios:<map>` scene on a phone held upright (its list view otherwise). `RAZDOR_SCENE_BONUS_ITEMS=1`
 //! equips the hero with available distinct bonus items to exercise the trait scrollbar.
@@ -360,6 +360,7 @@ pub fn stage(app: &mut App) {
         super::new_game::snapshot_experimental(razdor::rules::content::ExperimentalRules {
             simultaneous_bonuses: has("bonuses"), two_potions: has("potions"), six_cells: has("cells"), unlimited_items: has("items"),
             free_units: has("free"), auto_promotion: has("auto"), undying_units: has("undying"),
+            fast_ai: has("fast"),
         });
     }
     if let Err(e) = try_stage(app, &scene) {

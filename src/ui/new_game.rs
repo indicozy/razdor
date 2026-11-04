@@ -30,7 +30,7 @@ use super::{screens, ScenarioEntry, Screen};
 local! {
     static EXPERIMENTAL: Cell<ExperimentalRules> = const { Cell::new(ExperimentalRules {
         simultaneous_bonuses: false, two_potions: false, six_cells: false, unlimited_items: false,
-        free_units: false, auto_promotion: false, undying_units: false,
+        free_units: false, auto_promotion: false, undying_units: false, fast_ai: false,
     }) };
     static RULES_OPEN: Cell<bool> = const { Cell::new(false) };
     /// The rules window's scroll (px) on an upright phone, reset when it closes.
@@ -1388,7 +1388,7 @@ const OK_DP: f32 = 44.0;
 /// the screen (a phone's landscape takes two or three); the window then takes the screen's width.
 fn experimental_menu() {
     /// The switches in the window (one row each).
-    const ROWS: usize = 7;
+    const ROWS: usize = 8;
     let (sw, sh) = (screen_width(), screen_height());
     let k = chrome::k();
     let o = super::display::popup_o(k, 550.0, 410.0).min((sw - 12.0) / 550.0).min((sh - 12.0) / 410.0);
@@ -1418,6 +1418,9 @@ fn experimental_menu() {
     if now.auto_promotion {
         hints.push(tr("Units promote on their own to a random option of their upgrade tree."));
     }
+    if now.fast_ai {
+        hints.push(tr("Armies think faster on big maps. They move a little differently from the original."));
+    }
     hints.push(tr("Applies to all armies; saved with this playthrough."));
     hints.push(tr("The potion limit resets after a battle."));
     let wrapped = |iw: f32| -> Vec<String> { super::dt_font::legacy_metrics_if(true, || hints.iter().flat_map(|l| wrap_cached(l, iw, hint_size)).collect()) };
@@ -1433,6 +1436,7 @@ fn experimental_menu() {
         tr("Free units"),
         tr("Automatic promotion"),
         tr("Units don't die"),
+        tr("Faster AI"),
     ];
     // An upright phone's window takes the screen less the safe area (cutouts) and 12 px each side.
     let safe = super::display::safe_area();
@@ -1518,6 +1522,7 @@ fn experimental_menu() {
     check(4, labels[4], &mut rules.free_units);
     check(5, labels[5], &mut rules.auto_promotion);
     check(6, labels[6], &mut rules.undying_units);
+    check(7, labels[7], &mut rules.fast_ai);
     EXPERIMENTAL.with(|p| p.set(rules));
     let hints_top = content_top + per_col as f32 * row_h + (per_col as f32 - 1.0) * gap + 8.0 * big;
     for (i, line) in lines.iter().enumerate() {
