@@ -350,7 +350,7 @@ pub fn backdrop() {
 /// copyright (`CopyrightsMessage`) after it, small and white, on the bottom row.
 fn foot_lines() {
     let k = chrome::k();
-    let y = upright_menu().map_or(screen_height() - 4.0 * k, |m| m.foot_y);
+    let y = foot_y(k);
     let ink = Color::new(0.92, 0.92, 0.92, 1.0);
     let Some(dp) = super::display::dp_px() else {
         // The desktop's: 11 × k, the copyright at 264 × k.
@@ -364,13 +364,15 @@ fn foot_lines() {
     };
     // On a phone the lines are the version label's size (13 dp, a player's report: 11 × k was
     // unreadable). The version is the top line and the copyright follows it, or, when the two are
-    // wider than the screen, the copyright's lines come under the version.
-    let f = foot(k, dp, screen_width());
+    // wider than the screen, the copyright's lines come under the version. Held sideways the
+    // bottom-left corner's rounding can reach the lines: they start past it (`foot_x0`).
+    let x0 = foot_x0(k, y, VERSION_PHONE_DP * dp, screen_height(), &super::display::safe_area());
+    let f = foot(k, dp, screen_width(), x0);
     let pitch = f.pitch();
     let n = if f.stacked { f.copyright.len() as f32 } else { 0.0 };
     super::dt_font::legacy_metrics_if(true, || {
         if let Some(v) = &f.version {
-            chrome::shadow_text(v, 5.0 * k, y - n * pitch, f.size, ink);
+            chrome::shadow_text(v, x0, y - n * pitch, f.size, ink);
         }
         let last = f.copyright.len() as f32 - 1.0;
         for (i, line) in f.copyright.iter().enumerate() {
@@ -380,13 +382,38 @@ fn foot_lines() {
     });
 }
 
+/// The baseline of the foot's bottom row: just above the chips held upright, else 4 × k above the bottom.
+fn foot_y(k: f32) -> f32 {
+    upright_menu().map_or(screen_height() - 4.0 * k, |m| m.foot_y)
+}
+
+/// The horizontal inset (px) of a circle of `radius` at `depth` px above its bottom edge: how far a
+/// rounded bottom corner cuts into a row of text that high. 0 at `depth` >= `radius`, `radius` at 0.
+fn corner_clearance(radius: f32, depth: f32) -> f32 {
+    let depth = depth.max(0.0);
+    if radius <= 0.0 || depth >= radius {
+        return 0.0;
+    }
+    let d = radius - depth;
+    radius - (radius * radius - d * d).max(0.0).sqrt()
+}
+
+/// Where the phone's foot text starts from the left (px): 5 × k, or, when the bottom-left corner's
+/// rounding reaches the lines, past it (`corner_clearance`) and 4 × k more. `y` is the bottom row's
+/// baseline and `size` its text size on a `sh`-high screen; `safe` is the screen's safe area.
+fn foot_x0(k: f32, y: f32, size: f32, sh: f32, safe: &super::display::SafeArea) -> f32 {
+    // The lowest glyph reaches a quarter of the size below the baseline.
+    let depth = (sh - (y + 0.25 * size)).max(0.0);
+    (5.0 * k).max(safe.left + corner_clearance(safe.corner_bl, depth) + 4.0 * k)
+}
+
 /// The phone's foot text: the version (`VerInfo`) and the copyright (`CopyrightsMessage`).
 struct Foot {
     size: f32,
     version: Option<String>,
     /// The copyright's lines: one, after the version, or wrapped under it when stacked.
     copyright: Vec<String>,
-    /// Where the one-row copyright starts (after the version and a 24 × k gap); 5 × k when stacked.
+    /// Where the one-row copyright starts (after the version and a 24 × k gap); `x0` when stacked.
     copy_x: f32,
     stacked: bool,
 }
@@ -403,10 +430,10 @@ impl Foot {
     }
 }
 
-/// The phone's foot text for a `sw`-wide screen at `k` and `dp`: one row when the version, a gap
-/// and the copyright fit between the screen's sides (10 × k of margin), else the copyright wrapped
-/// under the version.
-fn foot(k: f32, dp: f32, sw: f32) -> Foot {
+/// The phone's foot text for a `sw`-wide screen at `k` and `dp`, its lines starting at `x0` (see
+/// `foot_x0`): one row when the version, a gap and the copyright fit between `x0` and the screen's
+/// right side (10 × k of margin), else the copyright wrapped under the version.
+fn foot(k: f32, dp: f32, sw: f32, x0: f32) -> Foot {
     let size = VERSION_PHONE_DP * dp;
     super::dt_font::legacy_metrics_if(true, || {
         let version = chrome::ui_text("SpecialTexts", "VerInfo");
@@ -417,14 +444,14 @@ fn foot(k: f32, dp: f32, sw: f32) -> Foot {
             None => (Vec::new(), false),
             Some(c) => {
                 let cw = measure(c, size).width;
-                if 5.0 * k + vw + gap + cw <= sw - 10.0 * k {
+                if x0 + vw + gap + cw <= sw - 10.0 * k {
                     (vec![c.clone()], false)
                 } else {
-                    (wrap_label(c, sw - 15.0 * k, size), true)
+                    (wrap_label(c, sw - 10.0 * k - x0, size), true)
                 }
             }
         };
-        let copy_x = if stacked { 5.0 * k } else { 5.0 * k + vw + gap };
+        let copy_x = if stacked { x0 } else { x0 + vw + gap };
         Foot { size, version, copyright, copy_x, stacked }
     })
 }
@@ -434,7 +461,8 @@ fn foot(k: f32, dp: f32, sw: f32) -> Foot {
 fn sideways_foot_extra(k: f32) -> f32 {
     match super::display::dp_px() {
         Some(dp) if !super::window_layout::portrait() => {
-            let f = foot(k, dp, screen_width());
+            let x0 = foot_x0(k, foot_y(k), VERSION_PHONE_DP * dp, screen_height(), &super::display::safe_area());
+            let f = foot(k, dp, screen_width(), x0);
             (f.size - 11.0 * k).max(0.0) + f.above()
         }
         _ => 0.0,
@@ -551,7 +579,9 @@ fn portrait_menu(sw: f32, sh: f32, k: f32, dp: f32, safe_top: f32, mod_row: bool
     let logo_top = first - 24.0 * k - logo_h;
     let x = sw / 2.0 - size.x / 2.0;
     let buttons = std::array::from_fn(|i| Rect::new(x, first + i as f32 * (size.y + gap), size.x, size.y));
-    let foot_above = foot(k, dp, sw).above();
+    let safe = super::display::safe_area();
+    let foot_x = foot_x0(k, foot_y, VERSION_PHONE_DP * dp, sh, &safe);
+    let foot_above = foot(k, dp, sw, foot_x).above();
     PortraitMenu { buttons, chip_top, chip_h, foot_y, foot_above, logo_top, mod_row: row }
 }
 
@@ -1294,6 +1324,34 @@ fn option_row_step(g: f32) -> f32 {
     30.0 + 28.0 * (g - 1.0)
 }
 
+/// The widths of the settings window's bottom row (Advanced, Apply, Cancel) in `avail` px, with
+/// `gap` between the buttons: as given when the three and both gaps fit, else all three scaled
+/// down together so they do (their labels then fit in the narrower buttons, not over each other).
+fn bottom_row_widths(avail: f32, widths: [f32; 3], gap: f32) -> [f32; 3] {
+    let total: f32 = widths.iter().sum();
+    if total + 2.0 * gap <= avail {
+        return widths;
+    }
+    let f = ((avail - 2.0 * gap) / total).max(0.0);
+    widths.map(|w| w * f)
+}
+
+/// A settings row's label left of its right-hand button: one line at `single_y` where it fits in
+/// `room` px, else wrapped to as many lines as it takes, centred on the button's `centre_y` (the
+/// lines 1.2 × `size` apart).
+fn right_row_label(label: &str, x: f32, room: f32, size: f32, single_y: f32, centre_y: f32) {
+    if measure(label, size).width <= room {
+        chrome::shadow_text(label, x, single_y, size, chrome::CREAM);
+        return;
+    }
+    let lines = wrap_label(label, room, size);
+    let pitch = size * 1.2;
+    let first = centre_y - (lines.len() as f32 - 1.0) * pitch / 2.0 + size * 0.35;
+    for (i, line) in lines.iter().enumerate() {
+        chrome::shadow_text(line, x, first + i as f32 * pitch, size, chrome::CREAM);
+    }
+}
+
 local! {
     /// The advanced settings window is open over the settings.
     static ADVANCED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -1307,6 +1365,11 @@ local! {
     static KEYS_OPEN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// The F1 list's «Изменить клавиши…» was pressed (`take_keys_request` takes it).
     static KEYS_ASKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The keys window was opened from the F1 list: closing it closes the settings too, back to the list.
+    static KEYS_FROM_HELP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The settings closed from the keys window opened from the F1 list: the list reopens over the map
+    /// (`take_back_to_help`, read by the map's frame).
+    static BACK_TO_HELP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 local! {
@@ -1319,16 +1382,49 @@ local! {
     static ADV_VIEW: std::cell::Cell<Option<Rect>> = const { std::cell::Cell::new(None) };
 }
 
+/// A snapshot scene's scroll (`RAZDOR_SCENE_SCROLL`): the phone's options list starts `px` down
+/// (clamped to its end when drawn).
+pub fn scene_scroll(px: f32) {
+    PHONE_SCROLL.with(|c| c.set(px));
+}
+
 /// Opens the advanced settings over the settings window (a snapshot scene).
 pub fn open_advanced() {
     ADVANCED.with(|a| a.set(true));
     ADV_SCROLL.with(|s| s.set(0.0));
 }
 
-/// Opens the keys window over the advanced settings (a snapshot scene, and the F1 list's button).
+/// Opens the keys window over the advanced settings (a snapshot scene, and the keys row).
 pub fn open_keys() {
     open_advanced();
     KEYS_OPEN.with(|o| o.set(true));
+    KEYS_FROM_HELP.with(|f| f.set(false));
+}
+
+/// Opens the keys window for the F1 list's «Изменить клавиши…»: as `open_keys`, but closing it
+/// returns to the list over the map (`take_back_to_help`), not to the advanced settings.
+pub fn open_keys_from_help() {
+    open_keys();
+    KEYS_FROM_HELP.with(|f| f.set(true));
+}
+
+/// True once after the keys window opened from the F1 list closed the settings (`open_keys_from_help`).
+pub fn take_back_to_help() -> bool {
+    BACK_TO_HELP.with(|b| b.replace(false))
+}
+
+/// The keys window has closed (its own «Принять», «Отмена» or Esc). From the F1 list the whole
+/// settings close with the changes kept, back to the list; otherwise the advanced settings stay.
+/// True when the settings close.
+fn after_keys_closed() -> bool {
+    KEYS_OPEN.with(|o| o.set(false));
+    if !KEYS_FROM_HELP.with(|f| f.replace(false)) {
+        return false;
+    }
+    ADVANCED.with(|a| a.set(false));
+    OPENED_WITH.with(|o| *o.borrow_mut() = None);
+    BACK_TO_HELP.with(|b| b.set(true));
+    true
 }
 
 /// The F1 list (over the map) asks for the keys window: the map's frame then opens the settings
@@ -1703,6 +1799,7 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     // The keys window (Razdor's, the owner's request): every action's key, rebound by a click.
     if row(tr("Keyboard shortcuts"), tr("Keys…"), &mut y) {
         KEYS_OPEN.with(|o| o.set(true));
+        KEYS_FROM_HELP.with(|f| f.set(false));
     }
     // The language list (Razdor's): Russian, English and the translations of the data found
     // in the install; the button opens it.
@@ -2241,8 +2338,8 @@ fn phone_options(audio: &mut super::audio::Settings, install_wide: bool, over_ma
         }
         if orientation_row && on_list(orient_y - scroll, row_h) {
             let y = at(orient_y);
-            chrome::shadow_text(tr("Screen orientation"), x0, y + 26.0 * u, 14.0 * u, chrome::CREAM);
             let r = Rect::new(inner.x + inner.w - pad - 150.0 * u, y + 4.0 * u, 150.0 * u, 36.0 * u);
+            right_row_label(tr("Screen orientation"), x0, r.x - x0 - 6.0 * u, 14.0 * u, y + 26.0 * u, r.center().y);
             if row_button(r, orientation_label(audio.orientation)) {
                 audio.orientation = match audio.orientation {
                     None => Some(super::audio::Orientation::Landscape),
@@ -2253,16 +2350,16 @@ fn phone_options(audio: &mut super::audio::Settings, install_wide: bool, over_ma
         }
         if on_list(text_y - scroll, row_h) {
             let y = at(text_y);
-            chrome::shadow_text(tr("Text size"), x0, y + 26.0 * u, 14.0 * u, chrome::CREAM);
             let r = Rect::new(inner.x + inner.w - pad - 150.0 * u, y + 4.0 * u, 150.0 * u, 36.0 * u);
+            right_row_label(tr("Text size"), x0, r.x - x0 - 6.0 * u, 14.0 * u, y + 26.0 * u, r.center().y);
             if row_button(r, super::display::text_size_label(audio.text_size)) {
                 audio.text_size = super::display::next_text_size(audio.text_size);
             }
         }
         if on_list(large_y - scroll, row_h) {
             let y = at(large_y);
-            chrome::shadow_text(tr("Large message windows"), x0, y + 26.0 * u, 14.0 * u, chrome::CREAM);
             let r = Rect::new(inner.x + inner.w - pad - 150.0 * u, y + 4.0 * u, 150.0 * u, 36.0 * u);
+            right_row_label(tr("Large message windows"), x0, r.x - x0 - 6.0 * u, 14.0 * u, y + 26.0 * u, r.center().y);
             if row_button(r, if audio.large_windows { tr("On") } else { tr("Off") }) {
                 audio.large_windows = !audio.large_windows;
             }
@@ -2275,9 +2372,11 @@ fn phone_options(audio: &mut super::audio::Settings, install_wide: bool, over_ma
         // The buttons row: «Ещё…» at the left, «Принять» and «Отмена» at the right, 44 units high.
         let bh = 40.0 * u;
         let by = inner.y + inner.h - 12.0 * u - bh;
-        let advanced = Rect::new(x0, by, 120.0 * u, bh);
-        let cancel = Rect::new(inner.x + inner.w - pad - 110.0 * u, by, 110.0 * u, bh);
-        let apply = Rect::new(cancel.x - 8.0 * u - 110.0 * u, by, 110.0 * u, bh);
+        // The three scale down together when their widths would overlap (`bottom_row_widths`).
+        let [wa, wb, wc] = bottom_row_widths(inner.w - 2.0 * pad, [120.0 * u, 110.0 * u, 110.0 * u], 8.0 * u);
+        let advanced = Rect::new(x0, by, wa, bh);
+        let cancel = Rect::new(inner.x + inner.w - pad - wc, by, wc, bh);
+        let apply = Rect::new(cancel.x - 8.0 * u - wb, by, wb, bh);
         if row_button(advanced, tr("Advanced…")) {
             ADVANCED.with(|a| a.set(true));
             return false;
@@ -2303,8 +2402,8 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     if ADVANCED.with(|a| a.get()) {
         // The keys window stands over the advanced one, which takes no input meanwhile.
         if KEYS_OPEN.with(|o| o.get()) {
-            if keys_window(audio, over_map) {
-                KEYS_OPEN.with(|o| o.set(false));
+            if keys_window(audio, over_map) && after_keys_closed() {
+                return true;
             }
             return false;
         }
@@ -2426,8 +2525,8 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     // landscape or portrait, cycled by the button. `ui::android::follow_orientation` applies it.
     if orientation_row {
         let y = cy(9) - 4.0 * k;
-        chrome::shadow_text(tr("Screen orientation"), cx, y + 18.0 * k, 14.0 * k, chrome::CREAM);
         let r = Rect::new(inner.x + inner.w - 14.0 * k - 170.0 * k, y, 170.0 * k, 28.0 * k * g);
+        right_row_label(tr("Screen orientation"), cx, r.x - cx - 6.0 * k, 14.0 * k, y + 18.0 * k, r.center().y);
         if row_button(r, orientation_label(audio.orientation)) {
             audio.orientation = match audio.orientation {
                 None => Some(super::audio::Orientation::Landscape),
@@ -2443,14 +2542,14 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     let last_y = if orientation_row { cy(9) - 4.0 * k } else if touch_row { cy(8) } else { cy(7) };
     let step = option_row_step(g) * k;
     let text_y = last_y + step;
-    chrome::shadow_text(tr("Text size"), cx, text_y + 18.0 * k, 14.0 * k, chrome::CREAM);
     let r = Rect::new(inner.x + inner.w - 14.0 * k - 170.0 * k, text_y, 170.0 * k, 28.0 * k * g);
+    right_row_label(tr("Text size"), cx, r.x - cx - 6.0 * k, 14.0 * k, text_y + 18.0 * k, r.center().y);
     if row_button(r, super::display::text_size_label(audio.text_size)) {
         audio.text_size = super::display::next_text_size(audio.text_size);
     }
     let large_y = text_y + step;
-    chrome::shadow_text(tr("Large message windows"), cx, large_y + 18.0 * k, 14.0 * k, chrome::CREAM);
     let r = Rect::new(inner.x + inner.w - 14.0 * k - 170.0 * k, large_y, 170.0 * k, 28.0 * k * g);
+    right_row_label(tr("Large message windows"), cx, r.x - cx - 6.0 * k, 14.0 * k, large_y + 18.0 * k, r.center().y);
     if row_button(r, if audio.large_windows { tr("On") } else { tr("Off") }) {
         audio.large_windows = !audio.large_windows;
     }
@@ -2461,14 +2560,16 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     // Razdor's own settings, in a window of their own.
     let bh = 32.0 * g;
     let button_y = outer.y + (h - 10.0 - bh) * k;
-    let xr = Rect::new(inner.x + 14.0 * k, button_y, 120.0 * k * g, bh * k);
+    // The three scale down together when their widths would overlap (`bottom_row_widths`).
+    let [wa, wb, wc] = bottom_row_widths(inner.w - 28.0 * k, [120.0 * k * g, 89.0 * k * g, 89.0 * k * g], 8.0 * k);
+    let xr = Rect::new(inner.x + 14.0 * k, button_y, wa, bh * k);
     if row_button(xr, tr("Advanced…")) {
         ADVANCED.with(|a| a.set(true));
         return false;
     }
     // «Принять» keeps what was changed, «Отмена» (the close box and Esc too) puts it back.
-    let cancel = Rect::new(inner.x + inner.w - 14.0 * k - 89.0 * k * g, button_y, 89.0 * k * g, bh * k);
-    let apply = Rect::new(cancel.x - 8.0 * k - 89.0 * k * g, cancel.y, 89.0 * k * g, bh * k);
+    let cancel = Rect::new(inner.x + inner.w - 14.0 * k - wc, button_y, wc, bh * k);
+    let apply = Rect::new(cancel.x - 8.0 * k - wb, cancel.y, wb, bh * k);
     let (apply_label, cancel_label) = (own("Buttons", "Apply", n_("Apply")), own("Buttons", "Cancel", n_("Cancel")));
     // Both act when the button is let go over it (PR #5's buttons).
     let apply_pressed = settings_button(apply, &apply_label);
@@ -2492,12 +2593,46 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
 pub fn close_options_kept() {
     ADVANCED.with(|a| a.set(false));
     KEYS_OPEN.with(|o| o.set(false));
+    KEYS_FROM_HELP.with(|f| f.set(false));
+    BACK_TO_HELP.with(|b| b.set(false));
     OPENED_WITH.with(|o| *o.borrow_mut() = None);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_bottom_row_scales_down_to_its_room_and_keeps_its_gaps() {
+        // Fits: as given.
+        assert_eq!(bottom_row_widths(400.0, [120.0, 89.0, 89.0], 8.0), [120.0, 89.0, 89.0]);
+        // Too wide: scaled together, the three and both gaps fill the room exactly, none overlaps.
+        let w = bottom_row_widths(300.0, [120.0, 110.0, 110.0], 8.0);
+        assert!((w.iter().sum::<f32>() + 16.0 - 300.0).abs() < 1e-3, "{w:?}");
+        assert!(w.iter().all(|x| *x > 0.0));
+        assert!((w[0] / 120.0 - w[1] / 110.0).abs() < 1e-4 && (w[1] - w[2]).abs() < 1e-4, "{w:?}");
+        // No room at all: never negative.
+        assert!(bottom_row_widths(10.0, [120.0, 110.0, 110.0], 8.0).iter().all(|x| *x == 0.0));
+    }
+
+    #[test]
+    fn the_corner_clearance_is_the_radius_at_the_edge_and_none_above_the_curve() {
+        assert_eq!(corner_clearance(110.0, 0.0), 110.0);
+        assert_eq!(corner_clearance(110.0, 110.0), 0.0);
+        assert_eq!(corner_clearance(110.0, 300.0), 0.0);
+        assert_eq!(corner_clearance(0.0, 0.0), 0.0);
+        // At depth r - r/sqrt(2) the curve is at 45 degrees: the inset is r - r/sqrt(2).
+        let r = 110.0_f32;
+        let mid = corner_clearance(r, r - r / 2.0_f32.sqrt());
+        assert!((mid - (r - r / 2.0_f32.sqrt())).abs() < 1e-3, "{mid}");
+        // Higher up the curve the inset is smaller, never negative.
+        let mut last = f32::MAX;
+        for i in 0..=110 {
+            let c = corner_clearance(r, i as f32);
+            assert!(c <= last + 1e-4 && c >= 0.0, "depth {i}: {c} after {last}");
+            last = c;
+        }
+    }
 
     /// The bar's settings button closes the window with what was changed kept: the state the
     /// window opened with is dropped (no revert), and the sub-windows close with it.
@@ -2509,6 +2644,37 @@ mod tests {
         close_options_kept();
         assert!(OPENED_WITH.with(|o| o.borrow().is_none()));
         assert!(!ADVANCED.with(|a| a.get()) && !KEYS_OPEN.with(|o| o.get()));
+    }
+
+    /// The keys window opened from the F1 list: its close closes the settings too (the advanced
+    /// window and the keys with them, the changes kept), and the list reopens once.
+    #[test]
+    fn keys_from_the_help_list_close_back_to_it() {
+        open_keys_from_help();
+        assert!(after_keys_closed());
+        assert!(!ADVANCED.with(|a| a.get()) && !KEYS_OPEN.with(|o| o.get()));
+        assert!(OPENED_WITH.with(|o| o.borrow().is_none()));
+        assert!(take_back_to_help());
+        assert!(!take_back_to_help());
+    }
+
+    /// Keys opened any other way (the advanced window's row, the snapshot scene) close to the
+    /// advanced window, as before: the list does not come back.
+    #[test]
+    fn plain_keys_close_to_the_advanced_window() {
+        open_keys();
+        assert!(!after_keys_closed());
+        assert!(ADVANCED.with(|a| a.get()) && !KEYS_OPEN.with(|o| o.get()));
+        assert!(!take_back_to_help());
+    }
+
+    /// Closing the settings from the bar clears the list's return with the rest.
+    #[test]
+    fn closing_from_the_bar_forgets_the_list_return() {
+        open_keys_from_help();
+        close_options_kept();
+        assert!(!take_back_to_help());
+        assert!(!KEYS_FROM_HELP.with(|f| f.get()));
     }
 
     /// A phone of 1080×2376 px at 2.625 px per dp, its interface scale the fit (1.125).

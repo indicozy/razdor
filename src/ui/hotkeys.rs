@@ -394,6 +394,11 @@ pub fn keys_button_on(place: Place) -> bool {
     place == Place::WorldMap
 }
 
+/// A snapshot scene's scroll (`RAZDOR_SCENE_SCROLL`): the list starts `px` down (clamped when drawn).
+pub fn scene_scroll(px: f32) {
+    SCROLL.with(|s| s.set(px));
+}
+
 pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
     let (sw, sh) = (screen_width(), screen_height());
     draw_rectangle(0.0, 0.0, sw, sh, Color::new(0.0, 0.0, 0.0, 0.45));
@@ -544,27 +549,27 @@ pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
                     draw_tile(tl, &fitted_folded[i], r, &mut on_control, &mut press);
                 }
             }
-        }
-        let mut ly = at(after + 6.0 * k);
-        if !info.is_empty() {
-            text(tr("Other keys and mouse"), inner.x + pad, ly + 20.0 * t, 17.0 * t, ACCENT);
-            ly += 30.0 * t;
-            let dx = inner.x + inner.w * 0.42;
-            for (key, what) in &info {
-                if ly > body.bottom() {
-                    break;
-                }
-                if ly >= body.y - line {
-                    if upright {
-                        let width = inner.w - 2.0 * pad - 16.0 * k;
-                        text_fit(tr(&fill_keys(key)), inner.x + pad + 8.0 * k, ly + 17.0 * t, width, 16.0 * t, INK);
-                        text_fit(tr(what), inner.x + pad + 8.0 * k, ly + 36.0 * t, width, 16.0 * t, DIM);
-                    } else {
-                        text_fit(tr(&fill_keys(key)), inner.x + pad + 8.0 * k, ly + 16.0 * t, dx - inner.x - pad - 16.0 * k, 16.0 * t, INK);
-                        text_fit(tr(what), dx, ly + 16.0 * t, inner.right() - dx - pad, 16.0 * t, DIM);
+            let mut ly = at(after + 6.0 * k);
+            if !info.is_empty() {
+                text(tr("Other keys and mouse"), inner.x + pad, ly + 20.0 * t, 17.0 * t, ACCENT);
+                ly += 30.0 * t;
+                let dx = inner.x + inner.w * 0.42;
+                for (key, what) in &info {
+                    if ly > body.bottom() {
+                        break;
                     }
+                    if ly >= body.y - line {
+                        if upright {
+                            let width = inner.w - 2.0 * pad - 16.0 * k;
+                            text_fit(tr(&fill_keys(key)), inner.x + pad + 8.0 * k, ly + 17.0 * t, width, 16.0 * t, INK);
+                            text_fit(tr(what), inner.x + pad + 8.0 * k, ly + 36.0 * t, width, 16.0 * t, DIM);
+                        } else {
+                            text_fit(tr(&fill_keys(key)), inner.x + pad + 8.0 * k, ly + 16.0 * t, dx - inner.x - pad - 16.0 * k, 16.0 * t, INK);
+                            text_fit(tr(what), dx, ly + 16.0 * t, inner.right() - dx - pad, 16.0 * t, DIM);
+                        }
+                    }
+                    ly += line;
                 }
-                ly += line;
             }
         }
         // The foot, under the body: the keys window's button (over the map), or the line that says

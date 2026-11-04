@@ -1390,8 +1390,17 @@ impl App {
                 if world_view::settings_backdrop(game, &self.assets) {
                     main_menu::close_options_kept();
                     Some(Screen::WorldMap)
+                } else if main_menu::options_window(&mut self.audio.settings, install_wide, true) {
+                    // The keys window opened from the F1 list closed the settings: the list reopens over the map.
+                    if main_menu::take_back_to_help() {
+                        self.help = true;
+                        self.help_fresh = true;
+                        // As the list's other openings: the closing tap must not reach the list's tiles.
+                        widgets::swallow_input();
+                    }
+                    Some(Screen::WorldMap)
                 } else {
-                    main_menu::options_window(&mut self.audio.settings, install_wide, true).then_some(Screen::WorldMap)
+                    None
                 }
             }
             (Screen::Save(view), Some(game)) => saves::save_screen(game, &self.assets, view, quick_save_ok, &mut self.message),
@@ -1489,7 +1498,8 @@ impl App {
                 // «Изменить клавиши…» (the list over the map): the settings open over the map with the
                 // keys window on top, as the bar's gears and «Ещё…» → «Клавиши…» do.
                 if main_menu::take_keys_request() {
-                    main_menu::open_keys();
+                    // Closing that window returns to this list (`take_back_to_help`).
+                    main_menu::open_keys_from_help();
                     widgets::swallow_input();
                     next = Some(Screen::Settings);
                 }

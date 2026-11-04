@@ -36,6 +36,7 @@
 //! then not used (only `classes` needs it). A save that does not load is logged with its reason.
 //! `RAZDOR_TEXT_SIZE=<1|1.25|1.5>` sets the text size and `RAZDOR_LARGE_WINDOWS=1` turns the large
 //! pop-up message windows on (the original's size and off otherwise; the saved settings are ignored).
+//! `RAZDOR_SCENE_SCROLL=<px>` starts a scrolled list (the phone's options, the F1 list) that far down.
 //! `RAZDOR_DP=<f32>` is a phone's density (screen px per dp): the phone layout of the pop-ups and
 //! the event window (their size in dp, the window's width following the screen), on the desktop.
 //! `RAZDOR_KEYBOARD=<px>` is the on-screen keyboard's height (physical px) a phone reports: the
@@ -969,6 +970,12 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
         _ => return Err(format!("unknown scene {kind}")),
     };
     game.look_around();
+    // `RAZDOR_SCENE_SCROLL=<px>`: the phone's options list and the F1 list start that far down (a
+    // large value shows their ends; each clamps it when drawn).
+    if let Some(px) = std::env::var("RAZDOR_SCENE_SCROLL").ok().and_then(|v| v.trim().parse::<f32>().ok()) {
+        super::main_menu::scene_scroll(px);
+        super::hotkeys::scene_scroll(px);
+    }
     // `RAZDOR_SCENE_SHOW=x,y,r`: an event shows that place (as a lantern does), to see the
     // camera fly there and the area fade in (or, explored already, Razdor's red ring).
     if let Some((x, y, r)) = std::env::var("RAZDOR_SCENE_SHOW").ok().and_then(|v| {
