@@ -16,6 +16,16 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   owner-reported original bug (scrolling to the map's lower-right corner breaks the game; row O1
   of `indicozy/dt-fix`'s `docs/FIXES.md`). Settled by the values Map_Load stores at
   0x68ecc8 / 0x68eccc in Ghidra; then fix the spec that is wrong.
+- **A closed start reads another route than the passes** (2026-11-04, the flood fuzz
+  `the_flood_matches_the_originals_passes_on_random_grids`, `src/rules/map.rs`). When the start
+  cell is closed (an army standing in a barred building, a closed cell of the planner map), the
+  closed branch of `flood_eff` stops once the start's neighbours are final, and the descent from
+  them can read a shorter route than the original's passes give (on the square grid too: case 1114
+  of that test; hex: case 2629). Only the route differs: open starts match the passes in every
+  case. The baseline's shortcut is kept, since the AI's paths must not change in a speed change.
+  Whether the original's route is the one to copy is the owner's call: a fix changes the AI's
+  paths, so it goes on the experimental track.
+
 - **The event window's OK label under 12 sp on a small portrait phone** (2026-10-31, backlog 1453's
   check). The mobile UI check measures «Ок» at 11.4 sp on the 1080×2400 phone in portrait, in the
   victory window too (it was there before 1453's fix): the label follows the window's scale `o`
