@@ -20,6 +20,7 @@ mod forms;
 mod mcp;
 mod inspector;
 mod map_tab;
+mod records;
 mod scene;
 mod story;
 mod story_forms;
@@ -104,6 +105,10 @@ pub enum Tab {
     Story,
     /// Every variable: where it is set and read, rename (`vars.rs`).
     Vars,
+    /// The package's units: the list, the new unit, the form in the Inspector (`records.rs`).
+    Units,
+    /// The package's items: the same as the units, with the artefact price (`records.rs`).
+    Items,
 }
 
 impl Tab {
@@ -124,6 +129,8 @@ impl Tab {
             Tab::Characters => tr("Characters"),
             Tab::Story => tr("Story"),
             Tab::Vars => tr("Variables"),
+            Tab::Units => tr("Units"),
+            Tab::Items => tr("Items"),
         }
     }
 }
@@ -389,6 +396,26 @@ impl StudioScreen {
                 }
                 "texts" | "characters" => {
                     let tab = if *opt == "texts" { Tab::Texts } else { Tab::Characters };
+                    if let Some(at) = self.dock.find_tab(&tab) {
+                        self.dock.set_active_tab(at);
+                    }
+                }
+                "units" | "items" => {
+                    // The first record of the package is selected, its price steps open (records.rs).
+                    let (pkg, _) = self.ws.read_package()?;
+                    let (kind, tab, focus) = if *opt == "units" {
+                        (razdor::studio::records::Kind::Unit, Tab::Units, Focus::Units)
+                    } else {
+                        (razdor::studio::records::Kind::Item, Tab::Items, Focus::Items)
+                    };
+                    let first = razdor::studio::records::rows(&pkg, kind).into_iter().next().map(|r| r.id);
+                    match kind {
+                        razdor::studio::records::Kind::Unit => self.scen.unit = first,
+                        razdor::studio::records::Kind::Item => self.scen.item = first,
+                    }
+                    self.scen.focus = focus;
+                    self.scen.price_open = true;
+                    self.selection = None;
                     if let Some(at) = self.dock.find_tab(&tab) {
                         self.dock.set_active_tab(at);
                     }
@@ -751,7 +778,7 @@ impl StudioScreen {
                         self.scen.focus = Focus::Header;
                         ui.close_menu();
                     }
-                    for (label, tab) in [("Story", Tab::Story), ("Campaign", Tab::Campaign), ("Texts", Tab::Texts), ("Characters", Tab::Characters), ("Variables", Tab::Vars)] {
+                    for (label, tab) in [("Story", Tab::Story), ("Campaign", Tab::Campaign), ("Texts", Tab::Texts), ("Characters", Tab::Characters), ("Variables", Tab::Vars), ("Units", Tab::Units), ("Items", Tab::Items)] {
                         if ui.button(tr(label)).clicked() {
                             self.pending_tab = Some(tab);
                             ui.close_menu();
@@ -797,6 +824,7 @@ impl StudioScreen {
             focus_map: false,
             changed: false,
             scen: &mut self.scen,
+            install: self.install.clone(),
         };
         DockArea::new(&mut self.dock)
             .style(style)
@@ -1051,7 +1079,7 @@ fn char_index(text: &str, byte: usize) -> usize {
 /// puts the Script beside the Map instead of in its tabs (the snapshot's `side` option).
 fn layout(side: bool) -> DockState<Tab> {
     // The main screens: Map, Campaign and Texts (Script beside the Map when `side` is off).
-    let mut centre_tabs = vec![Tab::Map, Tab::Story, Tab::Campaign, Tab::Texts];
+    let mut centre_tabs = vec![Tab::Map, Tab::Story, Tab::Campaign, Tab::Texts, Tab::Units, Tab::Items];
     if !side {
         centre_tabs.push(Tab::Script);
     }
@@ -1125,6 +1153,8 @@ struct Viewer<'a> {
     changed: bool,
     /// The scenario screens' state.
     scen: &'a mut ScenarioUi,
+    /// The game's install, for the records' prices (`None` without one).
+    install: Option<Arc<DtInstall>>,
 }
 
 impl TabViewer for Viewer<'_> {
@@ -1151,6 +1181,8 @@ impl TabViewer for Viewer<'_> {
             Tab::Characters => self.characters_dock(ui),
             Tab::Story => self.story_screen(ui),
             Tab::Vars => self.vars_dock(ui),
+            Tab::Units => self.units_screen(ui),
+            Tab::Items => self.items_screen(ui),
         }
     }
 

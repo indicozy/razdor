@@ -89,6 +89,16 @@ routes of the story) and **Fog** (what the hero and the lit lanterns see at the 
 
 Each change is one undo step (Ctrl+Z).
 
+## Units and items
+
+- **Units** and **Items** (main screens): the package's records as a list with a filter. **New unit** (or item) makes a record on a base game unit: its file `units/<id>.toml` and its name in every language.
+- Pick a record to edit it in the Inspector. Each field shows its override, with the base value next to it; **Reset** returns the base.
+- **Suggested price** comes from the game's formula: the unit's strength, its tactical cost, the gold rounded down in bands; doubled for the three hero classes. The steps open under the price. **Apply** writes the price into the price field in one undo step. The formula needs the game's install; without it there is no price.
+- An item gets the price of the gain it gives the units that can wear it. A price of 1 and potions are left alone.
+- **Levels 1–5** (for a unit): the stats and the tactical cost in percent of the base. The gains per level come from the base.
+- **Rename** changes the id in every file (references, the base and the name keys) in one step. **Delete** is refused while the record is named somewhere; the first place is shown.
+- The package format does not hold what DTMapEdit has: gains per level, nature, magic school and direction, bonuses, icons, upgrade units, surrender, starting experience and the price multipliers. These come from the base; an item's stat changes come from its base too.
+
 ## Not yet
 
 The studio does not have route checks or map generators yet. These come in later versions.

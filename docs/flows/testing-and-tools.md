@@ -256,6 +256,19 @@ is printed under its own dialog. UI: `ui/studio/story.rs` (the Story screen, the
 `story_forms.rs` (the row widgets, generated from the schema), `vars.rs` (the Variables dock). Snapshot
 options: `story`, `trigger`, `dialog`, `vars`. Tests: `the_story_forms_and_wiring_edit_check_and_undo_on_a_copy_of_pepelnaya_marka`.
 
+Units and items (phase 2, milestone 4): `studio/cost.rs` is DT's price (records.md §5.2 and §6.3): the
+battle core's strength on the base stats, times the cost multiplier, gold in bands, doubled for the hero
+classes; an artefact's automatic price from the gain it gives the unit types that can wear it. The formula
+reads the game's content (`Content`) with the package's units and items in it. `studio/records.rs` holds the
+records' fields (each override with the base value it overrides), the places that name a record (`uses`:
+a delete is refused while there are some), the rename across the files that name it (references, a unit's
+or item's `base`, and the `unit.<id>.name` keys in the texts), the new and delete edits, and `Priced`: the
+game's content on the install, built by `pack::compile::package_defs` (the definitions the compile uses) and
+rebuilt with the package. UI: `ui/studio/records.rs` (the Units and Items screens; the form in the Inspector,
+with the price and its steps first). Snapshot options: `units`, `items`. Tests:
+`the_unit_and_item_forms_edit_rename_and_price_on_a_copy_of_pepelnaya_marka`; the price tests of `studio::cost`
+read the install (`RAZDOR_DT_DIR`) and skip without it.
+
 ## The map translator (`razdor-translate`)
 
 Not part of the original game (asked for by the owner): a second program that writes English

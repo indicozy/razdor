@@ -63,6 +63,10 @@ pub enum Focus {
     Campaign,
     /// A trigger or a dialog of the story (`story::StoryUi`'s selection).
     Story,
+    /// A unit of the package (the Units screen's selection, `ScenarioUi::unit`).
+    Units,
+    /// An item of the package (the Items screen's selection, `ScenarioUi::item`).
+    Items,
 }
 
 /// The state of the scenario screens, kept across frames.
@@ -90,6 +94,18 @@ pub struct ScenarioUi {
     pub story: super::story::StoryUi,
     /// A main screen or dock the story asks to show after the dock is drawn (a usage's click).
     pub want_tab: Option<super::Tab>,
+    /// The Units and Items screens (P5): the selected record of each, the list's filter, the new
+    /// record's id and base, the rename's new id, and the last refusal shown under the form (`error`).
+    pub unit: Option<String>,
+    pub item: Option<String>,
+    pub record_filter: String,
+    pub new_id: String,
+    pub new_base: String,
+    pub record_rename: String,
+    /// The price's steps are open (the snapshot option `units` opens them).
+    pub price_open: bool,
+    /// The game's prices of the package, for the package they were made of (`ui::studio::records`).
+    pub priced: Option<(std::sync::Arc<razdor::pack::load::Package>, razdor::studio::records::Priced)>,
 }
 
 impl ScenarioUi {

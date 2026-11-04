@@ -106,6 +106,8 @@ impl Viewer<'_> {
             Focus::Header => return egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| self.header_form(ui)).inner,
             Focus::Campaign => return egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| self.campaign_inspector(ui)).inner,
             Focus::Story => return egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| self.story_inspector(ui)).inner,
+            Focus::Units => return egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| self.unit_inspector(ui)).inner,
+            Focus::Items => return egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| self.item_inspector(ui)).inner,
             Focus::Table => {}
         }
         let Some(sel) = self.selection.clone() else {

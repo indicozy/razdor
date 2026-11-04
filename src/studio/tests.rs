@@ -881,3 +881,109 @@ fn the_story_forms_and_wiring_edit_check_and_undo_on_a_copy_of_pepelnaya_marka()
     assert_eq!(steps_undone, 6, "each change is one undo step (two edits, three grouped operations, the rename)");
     assert_eq!(snapshot(&ws), before, "undo restores every text");
 }
+
+/// The units and items forms (P5) on a copy of Pepelnaya Marka: a unit's field is set and reset, the
+/// suggested price is applied (the game's formula when the install is there, a fixed price without it),
+/// a unit is added on a base, an item is renamed across the files that name it, and a delete is refused
+/// while the package names the item. After each step the package parses and the checks add no error;
+/// the saves write the files; undoing every step puts each text back byte for byte.
+#[test]
+fn the_unit_and_item_forms_edit_rename_and_price_on_a_copy_of_pepelnaya_marka() {
+    use super::records::{self as rec, Kind, Refused};
+    use crate::pack::diag::Severity as Severity2;
+    let copy = Copy::of("pepelnaya-marka");
+    let mut ws = Workspace::open(&copy.0).unwrap();
+    let (errors0, _) = ws.check().unwrap();
+    let originals: Vec<(String, String)> = ws
+        .entries
+        .clone()
+        .into_iter()
+        .filter(|p| p.ends_with(".toml"))
+        .map(|p| {
+            let text = ws.read_text(&p).unwrap();
+            (p, text)
+        })
+        .collect();
+    // After a step: the package is rebuilt and the checks add no error to the copy's own.
+    let check_step = |ws: &mut Workspace, step: &str| {
+        let (errors, _) = ws.check().unwrap();
+        let messages: Vec<String> = ws.problems.iter().filter(|d| d.severity == Severity2::Error).map(|d| format!("{}: {}", d.file, d.message)).collect();
+        assert!(errors <= errors0, "{step} adds errors ({errors} against {errors0}): {messages:?}");
+    };
+
+    // A field: the override is set, then reset (one undo step each).
+    let pkg = ws.package().unwrap();
+    let (file, edit) = rec::set_edit(&pkg, Kind::Unit, "ash_knight", "hits", Some(60)).unwrap();
+    ws.apply_doc(&file, "set hits of ash_knight", &[edit]).unwrap();
+    check_step(&mut ws, "set hits");
+    assert_eq!(rec::override_of(&ws.package().unwrap(), Kind::Unit, "ash_knight", "hits"), Some(60));
+    ws.undo().unwrap();
+    check_step(&mut ws, "undo hits");
+    assert_eq!(rec::override_of(&ws.package().unwrap(), Kind::Unit, "ash_knight", "hits"), None, "undo takes the override back");
+
+    // The suggested price: the game's formula on the install, a fixed price without one. The unit's
+    // price is written into its cost field.
+    let pkg = ws.package().unwrap();
+    let price = match std::env::var_os(crate::dt::install::ENV_VAR) {
+        Some(dir) => {
+            let dt = crate::dt::install::DtInstall::load(Path::new(&dir)).unwrap();
+            let mut priced = rec::Priced::new(&dt, &pkg, "en");
+            priced.unit_price("ash_knight").unwrap().price.expect("the unit has a price")
+        }
+        None => 77,
+    };
+    let (file, edit) = rec::set_edit(&pkg, Kind::Unit, "ash_knight", "cost", Some(price)).unwrap();
+    ws.apply_doc(&file, "set price of ash_knight", &[edit]).unwrap();
+    check_step(&mut ws, "apply the price");
+    assert_eq!(rec::override_of(&ws.package().unwrap(), Kind::Unit, "ash_knight", "cost"), Some(price));
+
+    // A new unit on a base game unit: its file, its text key in every language, one undo step.
+    let pkg = ws.package().unwrap();
+    let n = rec::new_record(&pkg, Kind::Unit, "scout", "militiaman", "Scout").unwrap();
+    ws.begin_group();
+    ws.create_text_file(&n.file, &n.text, "add unit scout").unwrap();
+    for (file, edit) in n.texts {
+        ws.apply_doc(&file, "add unit scout", &[edit]).unwrap();
+    }
+    ws.end_group("add unit scout");
+    check_step(&mut ws, "add a unit");
+    assert!(rec::rows(&ws.package().unwrap(), Kind::Unit).iter().any(|r| r.id == "scout"));
+    ws.save_all().unwrap();
+    check_step(&mut ws, "save after the new unit");
+
+    // An item renamed across the files that name it: its file, its triggers and dialog, its texts.
+    let pkg = ws.package().unwrap();
+    let plan = {
+        let ws_ref = &ws;
+        rec::rename_plan(&pkg, Kind::Item, "marsh_charm", "bog_charm", &|f: &str| ws_ref.text_of(f).ok()).unwrap()
+    };
+    let files: Vec<String> = plan.iter().map(|(f, _)| f.clone()).collect();
+    for f in ["items/brod.toml", "triggers/brod.toml", "dialogs/gates.toml", "texts/en.toml", "texts/ru.toml"] {
+        assert!(files.iter().any(|x| x == f), "{f} names the charm: {files:?}");
+    }
+    ws.set_texts("rename marsh_charm to bog_charm", plan).unwrap();
+    check_step(&mut ws, "rename the charm");
+    assert!(ws.text_of("triggers/brod.toml").unwrap().contains("give_item = \"bog_charm\""));
+    assert!(ws.text_of("texts/en.toml").unwrap().contains("[item.bog_charm]"));
+    ws.save_all().unwrap();
+    let on_disk = fs::read_to_string(copy.0.join("items/brod.toml")).unwrap();
+    assert!(on_disk.contains("id = \"bog_charm\""), "the save wrote the rename");
+
+    // A delete is refused while the package names the charm; the unused scout goes, and undo brings it back.
+    let pkg = ws.package().unwrap();
+    assert!(matches!(rec::delete_edit(&pkg, Kind::Item, "bog_charm"), Err(Refused::Used(_))));
+    let (file, edit) = rec::delete_edit(&pkg, Kind::Unit, "scout").expect("nothing names the scout");
+    ws.apply_doc(&file, "delete unit scout", &[edit]).unwrap();
+    check_step(&mut ws, "delete the scout");
+    assert!(!rec::rows(&ws.package().unwrap(), Kind::Unit).iter().any(|r| r.id == "scout"));
+
+    // Every step undone: each text is the original, and saving writes the original bytes.
+    while ws.undo().unwrap().is_some() {}
+    for (path, text) in &originals {
+        assert_eq!(&ws.text_of(path).unwrap(), text, "{path} is back");
+    }
+    ws.save_all().unwrap();
+    for (path, text) in &originals {
+        assert_eq!(&fs::read_to_string(copy.0.join(path)).unwrap(), text, "{path} on disk is the original");
+    }
+}

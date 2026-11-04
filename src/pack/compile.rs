@@ -224,6 +224,38 @@ pub fn item_ids(pkg: &Package) -> BTreeMap<&str, u32> {
     ids
 }
 
+/// The package's units and items as the game plays them, each with its new id, without a map: the
+/// definitions `compile_map` builds (the same `unit_def` and `item_def`), so the studio can price
+/// them. Each entry is the local id with its definition, or the message of why it does not resolve.
+/// A unit's second value is the `GlobalIndex` of its root base unit.
+pub struct PackageDefs {
+    pub units: Vec<(String, UnitDefResult)>,
+    pub items: Vec<(String, Result<ArtefactDef, String>)>,
+}
+
+/// A package unit's definition with its root base's `GlobalIndex`, or why it does not resolve.
+pub type UnitDefResult = Result<(UnitDef, u32), String>;
+
+/// The definitions of [`PackageDefs`] for `pkg` on `base`, in the texts of `lang`.
+pub fn package_defs(pkg: &Package, base: &Base, lang: &str) -> PackageDefs {
+    let texts = Texts { pkg, lang };
+    let units = unit_ids(pkg);
+    let items = item_ids(pkg);
+    let unit_defs = pkg
+        .units
+        .iter()
+        .filter(|u| units.contains_key(u.value.id.as_str()))
+        .map(|u| (u.value.id.clone(), unit_def(pkg, &units, base, &texts, &u.value.id, 0)))
+        .collect();
+    let item_defs = pkg
+        .items
+        .iter()
+        .filter(|i| items.contains_key(i.value.id.as_str()))
+        .map(|i| (i.value.id.clone(), item_def(pkg, &items, base, &texts, &i.value.id, 0)))
+        .collect();
+    PackageDefs { units: unit_defs, items: item_defs }
+}
+
 /// The texts of a package in one language, with the other languages as the fallback.
 struct Texts<'a> {
     pkg: &'a Package,

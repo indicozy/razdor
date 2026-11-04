@@ -586,6 +586,21 @@ left out, never faked; a format decision would settle it (`docs/reference/rzpack
 - **Ruin pictures on burn.** The original gives burnt buildings ruin pictures and renames their
   nouns; a package's building keeps its type and name (a `ruins` type would change play).
 
+- **Unit and item stats the format cannot hold.** DTMapEdit's unit window has per-level gains, nature, magic
+  school and direction, bonus, icon, upgrade units, surrender, starting experience, level multiplier, cost
+  multiplier and gold divisor (`records.md` §5.1); its artefact window has type, magic school, bonus and the
+  three stat-change blocks (§6.1). A package's unit or item takes them from its base, so its price uses the
+  base's cost multiplier and gold divisor, and its level table the base's gains. A format decision would add
+  them, or keep them with the base.
+- **Evasion.** The format has an `evasion` field for a unit. No engine stat reads it, and the original's unit
+  window has no such field, so the studio shows it as an override with a range of its own (0 to 1000) and the
+  engine ignores it. Whether it should exist at all is for the format decision.
+- **Hero doubling of a package unit.** The original doubles the price of the three hero classes by their unit
+  index (1 to 3, records.md §5.2 step 5). A package unit has an index of its own (200 and up), so the studio
+  never doubles it, even one based on a hero class. Whether it should double, the owner's call.
+- **Name keys of a deleted record.** Deleting a unit or item leaves its name keys in the texts (the Texts table
+  shows them grey, as unused); the studio does not remove them yet.
+
 ## Settled
 
 - **Pepelnaya Marka: the allies never reach the palace** (2026-11-03, settled 04221dc0). The goal planner
