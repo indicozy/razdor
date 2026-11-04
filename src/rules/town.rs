@@ -827,6 +827,34 @@ mod tests {
         assert_eq!(g.stored_income, 40, "the fort's nominal income, without F");
     }
 
+    /// «Бесплатные юниты» (`ExperimentalRules::free_units`): the player's units ask no wages,
+    /// gold or mana, in the bills, the cards and the noon report; the hire price is unchanged.
+    #[test]
+    fn free_units_ask_no_wages_in_gold_or_mana() {
+        use crate::rules::content::ExperimentalRules;
+        let mut s = map();
+        s.header.heroes[0] = hero(2, 2, 100, &[troop(4, 0, 1), troop(8, 0, 1)]);
+        let mut fort = town(BuildingType::Fort, 8, 2, 3);
+        fort.faction = 1;
+        fort.owner_army = 0;
+        fort.gold_per_day = 40;
+        fort.mana_per_day = 7;
+        s.buildings = vec![fort];
+        let mut classic = start(&s);
+        classic.first_noon_today();
+        assert!(classic.daily_wages() > 0 && classic.daily_mana_wages() > 0, "the classic rules pay both");
+        let rules = ExperimentalRules { free_units: true, ..Default::default() };
+        let mut free = Game::from_scenario(Arc::new(content().with_experimental(rules)), &s, HeroClass::Knight);
+        free.first_noon_today();
+        assert_eq!((free.daily_wages(), free.daily_mana_wages(), free.bills()), (0, 0, (0, 0)));
+        assert_eq!((free.wage(1), free.wage(2)), (0, 0), "the cards read no wage");
+        assert_eq!(free.hire_price(UnitId(4)), classic.hire_price(UnitId(4)), "hiring keeps its price");
+        let mut events = Vec::new();
+        free.pass_time(3.0 * 60.0, &mut events);
+        assert!(events.iter().any(|e| matches!(e, Event::NewDay(r) if r.wages == 0 && r.mana_wages == 0 && r.unpaid == 0)), "the noon report asks nothing");
+        assert!(!free.mana_short, "no elemental goes unpaid");
+    }
+
     #[test]
     fn castles_and_forts_pay_their_grown_stock_and_towns_nothing() {
         let mut s = map();

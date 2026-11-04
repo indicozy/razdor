@@ -30,8 +30,11 @@ use super::{screens, ScenarioEntry, Screen};
 local! {
     static EXPERIMENTAL: Cell<ExperimentalRules> = const { Cell::new(ExperimentalRules {
         simultaneous_bonuses: false, multiple_rings: false, multiple_amulets: false, allow_duplicate_items: false, two_potions: false, six_cells: false,
+        multiple_weapons: false, free_units: false, auto_promotion: false, undying_units: false,
     }) };
     static RULES_OPEN: Cell<bool> = const { Cell::new(false) };
+    /// The rules window's scroll (px) on an upright phone, reset when it closes.
+    static RULES_SCROLL: Cell<f32> = const { Cell::new(0.0) };
     /// The scenario group picked (index into the list shown), the list's scroll in pixels
     /// at k = 1, and the hero picked.
     static PICKED: Cell<usize> = const { Cell::new(0) };
@@ -1356,6 +1359,10 @@ pub(super) fn open_experimental_menu() { RULES_OPEN.with(|p| p.set(true)); }
 
 pub(super) fn snapshot_experimental(rules: ExperimentalRules) { EXPERIMENTAL.with(|p| p.set(rules)); }
 
+/// A snapshot scene's scroll for the rules window (`RAZDOR_SCENE_SCROLL`): it starts `px` down, and
+/// the window clamps it when drawn.
+pub(super) fn scene_scroll(px: f32) { RULES_SCROLL.with(|s| s.set(px)); }
+
 /// The menu's equipment-slot hint for the six-cell switch, in the current language.
 fn slots_hint(six_cells: bool) -> &'static str {
     if six_cells {
@@ -1377,9 +1384,11 @@ const OK_DP: f32 = 44.0;
 /// OK are touch targets: `big` (`o` times the text size's growth), and at least 40 dp on a phone.
 /// Its texts take Razdor's text size: a phone's text is one px per dp (`tx`), grown with the text
 /// size (`button_grow`), never under its Normal size. The hints wrap to the window's width and the
-/// window grows with them. On a phone's landscape the rows take two columns when one column would
-/// not fit the height; the window then takes the screen's width.
+/// window grows with them. The rows take one, two or three columns: the fewest whose height fits
+/// the screen (a phone's landscape takes two or three); the window then takes the screen's width.
 fn experimental_menu() {
+    /// The switches in the window (one row each).
+    const ROWS: usize = 10;
     let (sw, sh) = (screen_width(), screen_height());
     let k = chrome::k();
     let o = super::display::popup_o(k, 550.0, 410.0).min((sw - 12.0) / 550.0).min((sh - 12.0) / 410.0);
@@ -1394,51 +1403,138 @@ fn experimental_menu() {
     let upright = dp.is_some_and(|d| d > 0.0 && sw < sh);
     let ok_h = (28.0 * big).max(if upright { OK_DP * dp.unwrap_or(0.0) } else { touch });
     let (hint_size, hint_pitch) = (14.0 * tx * g, 21.0 * tx * g);
-    let hints = [slots_hint(experimental_rules().six_cells), tr("One weapon per unit always."), tr("Applies to all armies; saved with this playthrough."), tr("The potion limit resets after a battle.")];
+    // The hint lines of the switches that are on (the two big ones say what they change); the
+    // weapon line says which rule holds.
+    let now = experimental_rules();
+    let mut hints = vec![slots_hint(now.six_cells), if now.multiple_weapons { tr("Several weapons allowed.") } else { tr("One weapon per unit always.") }];
+    if now.free_units {
+        hints.push(tr("Units of the hero's army ask no daily wages."));
+    }
+    if now.undying_units {
+        hints.push(tr("Dead units of the hero's army come back with 1 HP after a battle."));
+    }
+    if now.auto_promotion {
+        hints.push(tr("Units promote on their own to a random option of their upgrade tree."));
+    }
+    hints.push(tr("Applies to all armies; saved with this playthrough."));
+    hints.push(tr("The potion limit resets after a battle."));
     let wrapped = |iw: f32| -> Vec<String> { super::dt_font::legacy_metrics_if(true, || hints.iter().flat_map(|l| wrap_cached(l, iw, hint_size)).collect()) };
+    // Every label is drawn at the same size (Normal); one too wide for its column wraps to two
+    // lines. A row is as tall as two lines when any label wraps at that column count, else one.
+    let normal = 16.0 * tx;
+    let label_pitch = normal * 1.2;
+    let labels: [&str; ROWS] = [
+        tr("All special bonuses simultaneously"),
+        tr("Allow multiple rings"),
+        tr("Allow multiple amulets"),
+        tr("Allow duplicate items"),
+        tr("At most two potions per character"),
+        tr("Six equipment cells"),
+        tr("Allow multiple weapons"),
+        tr("Free units"),
+        tr("Automatic promotion"),
+        tr("Units don't die"),
+    ];
+    // An upright phone's window takes the screen less the safe area (cutouts) and 12 px each side.
+    let safe = super::display::safe_area();
+    let phone_w = (sw - safe.left - safe.right - 24.0).max(0.0);
+    let width_for = |cols: usize| match cols {
+        1 if upright => phone_w,
+        1 => (550.0 * big).min(sw - 12.0),
+        2 => (1100.0 * big).min(sw - 12.0),
+        _ => (1500.0 * big).min(sw - 12.0),
+    };
+    // On an upright phone the window is at most 60% of the screen high: its rows and hints scroll
+    // between the title and the OK button, with a bar at the right, and the rows keep clear of it.
+    let bar_w = if upright { 14.0 * big } else { 0.0 };
+    let col_w_for = |cols: usize| {
+        let iw = width_for(cols) - 40.0 * big - bar_w;
+        (iw - 20.0 * big * (cols as f32 - 1.0)) / cols as f32
+    };
+    let wraps = |cols: usize| labels.iter().any(|l| super::dt_font::legacy_metrics_if(true, || wrap_cached(l, col_w_for(cols) - 30.0 * big, normal)).len() > 1);
+    let row_h_for = |cols: usize| if wraps(cols) { row_h.max(2.0 * label_pitch + 6.0 * big) } else { row_h };
     // The window's height with `cols` columns of rows and `lines` lines of hints.
     let height = |cols: usize, lines: usize| {
-        let per = 6_usize.div_ceil(cols) as f32;
-        54.0 * o + per * row_h + (per - 1.0) * gap + 8.0 * big + lines as f32 * hint_pitch + 8.0 * big + ok_h + 12.0 * big
+        let per = ROWS.div_ceil(cols) as f32;
+        54.0 * o + per * row_h_for(cols) + (per - 1.0) * gap + 8.0 * big + lines as f32 * hint_pitch + 8.0 * big + ok_h + 12.0 * big
     };
-    let w1 = (550.0 * big).min(sw - 12.0);
-    let lines1 = wrapped(w1 - 40.0 * big);
-    let cols = if height(1, lines1.len()) <= sh - 12.0 { 1 } else { 2 };
-    let (w, lines) = if cols == 1 { (w1, lines1) } else { let w = (1100.0 * big).min(sw - 12.0); (w, wrapped(w - 40.0 * big)) };
-    let h = height(cols, lines.len()).min(sh - 12.0);
+    let lines_for = |cols: usize| wrapped(width_for(cols) - 40.0 * big - bar_w);
+    // An upright phone has one column: its height scrolls, so the rows are never squeezed.
+    let cols = if upright { 1 } else { (1..=3).find(|&c| height(c, lines_for(c).len()) <= sh - 12.0).unwrap_or(3) };
+    let (w, lines) = (width_for(cols), lines_for(cols));
+    let row_h = row_h_for(cols);
+    let cap = if upright { (sh * 0.6).min(sh - 12.0) } else { sh - 12.0 };
+    let h = height(cols, lines.len()).min(cap);
     let r = Rect::new(((sw - w) / 2.0).round(), ((sh - h) / 2.0).round(), w, h);
-    let iw = w - 40.0 * big;
-    let per_col = 6_usize.div_ceil(cols);
+    let iw = w - 40.0 * big - bar_w;
+    let per_col = ROWS.div_ceil(cols);
     let col_gap = 20.0 * big;
-    let col_w = if cols == 1 { iw } else { (iw - col_gap) / 2.0 };
-    let (_, close) = chrome::window(r, tr("Experimental scenario rules"), chrome::Skin::Marble, true);
+    let col_w = (iw - col_gap * (cols as f32 - 1.0)) / cols as f32;
+    // The scroll area: from under the title down to 8 units above the OK button. Its rows and
+    // hints are as tall as the window's natural content, so it scrolls only when the cap bites.
+    let ok_top = r.bottom() - 12.0 * big - ok_h;
+    let view = Rect::new(r.x + 20.0 * big, r.y + 54.0 * o, iw + bar_w, (ok_top - 8.0 * big) - (r.y + 54.0 * o));
+    let content_h = per_col as f32 * row_h + (per_col as f32 - 1.0) * gap + 8.0 * big + lines.len() as f32 * hint_pitch;
+    let most = (content_h - view.h).max(0.0);
+    let mut scroll = RULES_SCROLL.with(|s| s.get()).clamp(0.0, most);
+    if most > 0.0 {
+        swipe_rows(view, 40.0 * big);
+        if !input_blocked() && view.contains(crate::ui::widgets::pointer().into()) {
+            scroll = wheel_scroll(scroll, wheel()).clamp(0.0, most);
+        }
+    }
+    let content_top = view.y - scroll;    let (_, close) = chrome::window(r, tr("Experimental scenario rules"), chrome::Skin::Marble, true);
     let mut rules = experimental_rules();
     let check = |index: usize, label: &str, value: &mut bool| {
         let (c, rr) = (index / per_col, index % per_col);
-        let row = Rect::new(r.x + 20.0 * big + c as f32 * (col_w + col_gap), r.y + 54.0 * o + rr as f32 * (row_h + gap), col_w, row_h);
+        let row = Rect::new(r.x + 20.0 * big + c as f32 * (col_w + col_gap), content_top + rr as f32 * (row_h + gap), col_w, row_h);
         let box_r = Rect::new(row.x, row.y + (row_h - 20.0 * big) / 2.0, 20.0 * big, 20.0 * big);
         chrome::silver_frame(box_r, big.max(1.0));
         if *value {
             draw_line(box_r.x+4.0*big,box_r.y+10.0*big,box_r.x+8.0*big,box_r.y+15.0*big,2.0*big,chrome::GOLD);
             draw_line(box_r.x+8.0*big,box_r.y+15.0*big,box_r.x+17.0*big,box_r.y+5.0*big,2.0*big,chrome::GOLD);
         }
-        let normal = 16.0 * tx;
-        let size = row_text_size(label, normal, g, row.w - 30.0 * big);
-        super::dt_font::legacy_metrics_if(true, || chrome::shadow_text(label, row.x + 30.0 * big, row.y + row_h / 2.0 + size * 0.375, size, chrome::CREAM));
-        if row.contains(pointer().into()) && clicked() { *value = !*value; }
+        // The label's lines at the column's width: one, or two when it wraps.
+        let text = super::dt_font::legacy_metrics_if(true, || wrap_cached(label, row.w - 30.0 * big, normal));
+        if text.len() <= 1 {
+            super::dt_font::legacy_metrics_if(true, || chrome::shadow_text(label, row.x + 30.0 * big, row.y + row_h / 2.0 + normal * 0.375, normal, chrome::CREAM));
+        } else {
+            let top = row.y + (row_h - text.len() as f32 * label_pitch) / 2.0;
+            for (i, line) in text.iter().enumerate() {
+                let base = top + i as f32 * label_pitch + normal * 0.8;
+                super::dt_font::legacy_metrics_if(true, || chrome::shadow_text(line, row.x + 30.0 * big, base, normal, chrome::CREAM));
+            }
+        }
+        // A row toggles on a press of its own, only where the pointer is in the visible view (a
+        // swipe is no press), so a row scrolled out of view cannot toggle.
+        let in_view = row.bottom() > view.y && row.y < view.bottom();
+        let (_, _, pressed) = if in_view { button_state(row, true) } else { (false, false, false) };
+        if pressed && view.contains(crate::ui::widgets::pointer().into()) { *value = !*value; }
     };
-    check(0,tr("All special bonuses simultaneously"),&mut rules.simultaneous_bonuses);
-    check(1,tr("Allow multiple rings"),&mut rules.multiple_rings);
-    check(2,tr("Allow multiple amulets"),&mut rules.multiple_amulets);
-    check(3,tr("Allow duplicate items"),&mut rules.allow_duplicate_items);
-    check(4,tr("At most two potions per character"),&mut rules.two_potions);
-    check(5,tr("Six equipment cells"),&mut rules.six_cells);
+    let clip = super::widgets::Clip::new(view);
+    check(0, labels[0], &mut rules.simultaneous_bonuses);
+    check(1, labels[1], &mut rules.multiple_rings);
+    check(2, labels[2], &mut rules.multiple_amulets);
+    check(3, labels[3], &mut rules.allow_duplicate_items);
+    check(4, labels[4], &mut rules.two_potions);
+    check(5, labels[5], &mut rules.six_cells);
+    check(6, labels[6], &mut rules.multiple_weapons);
+    check(7, labels[7], &mut rules.free_units);
+    check(8, labels[8], &mut rules.auto_promotion);
+    check(9, labels[9], &mut rules.undying_units);
     EXPERIMENTAL.with(|p| p.set(rules));
-    let hints_top = r.y + 54.0 * o + per_col as f32 * row_h + (per_col as f32 - 1.0) * gap + 8.0 * big;
+    let hints_top = content_top + per_col as f32 * row_h + (per_col as f32 - 1.0) * gap + 8.0 * big;
     for (i, line) in lines.iter().enumerate() {
         // The baseline sits 0.8 of the size below the line's top.
         super::dt_font::legacy_metrics_if(true, || chrome::shadow_text(line, r.x + 20.0 * big, hints_top + i as f32 * hint_pitch + hint_size * 0.8, hint_size, chrome::CREAM));
     }
+    drop(clip);
+    if most > 0.0 {
+        // The bar in the strip the rows keep clear of, its track the view's height.
+        let bar = Rect::new(view.right() - 12.0 * big, view.y, 10.0 * big, view.h);
+        scrollbar_px(bar, &mut scroll, most, view.h, 40.0 * big);
+    }
+    RULES_SCROLL.with(|s| s.set(scroll));
     let ok_w = match dp {
         Some(d) if upright => (120.0 * d).max(100.0 * big),
         _ => 100.0 * big,

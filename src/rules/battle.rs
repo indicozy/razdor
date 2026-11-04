@@ -3546,13 +3546,19 @@ impl Battle {
     /// survives: he comes back with 1 HP (4906a0). Slots are where they stand at the end:
     /// the army's formation is rebuilt from the battle grid (4988c0, see
     /// `Game::settle_battle` for the units without a cell).
+    ///
+    /// Razdor's «Юниты не умирают» (`ExperimentalRules::undying_units`): while the army
+    /// survives, every dead unit of the player's comes back with 1 HP the same way. Only the
+    /// fighters of the battle are counted, so a corpse from an earlier battle stays one; the
+    /// battle has no summoned units. An army wiped out (a defeat) keeps the classic result.
     pub fn player_results(&self) -> Vec<FighterResult> {
         let survivors = self.living(Team::Player).next().is_some();
+        let undying = survivors && self.content.experimental.undying_units;
         self.fighters
             .iter()
             .filter_map(|f| {
                 let squad_index = f.squad_index?;
-                let hp = if f.is_hero && !f.alive() && survivors { 1 } else { f.hp.max(0) };
+                let hp = if !f.alive() && survivors && (f.is_hero || undying) { 1 } else { f.hp.max(0) };
                 Some(FighterResult { squad_index, hp, slot: f.slot })
             })
             .collect()

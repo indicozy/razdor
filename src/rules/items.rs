@@ -265,7 +265,9 @@ pub fn slot_for(content: &Content, unit: &Unit, item: ItemId) -> Result<usize, E
         return Err(EquipError::WrongSchool);
     }
     let worn: Vec<&ArtefactDef> = unit.items[..slot_count(content)].iter().flatten().filter_map(|&i| content.try_item(i)).collect();
-    if def.kind.is_weapon() && worn.iter().any(|w| w.kind.is_weapon()) {
+    // Razdor's «Разрешить несколько оружий»: the one-weapon refusal lifts; the class checks above
+    // still apply to each weapon. Every worn weapon's bonuses count, as any worn item's do.
+    if !content.experimental.multiple_weapons && def.kind.is_weapon() && worn.iter().any(|w| w.kind.is_weapon()) {
         return Err(EquipError::SecondWeapon);
     }
     let repeated_accessory = (def.kind == ArtefactType::Ring && content.experimental.multiple_rings)
@@ -1101,6 +1103,23 @@ mod tests {
         w.items = [Some(ItemId(5)), Some(ItemId(10)), None, None, None, None];
         // 20 → +50% = 30 → +50% = 45 (summed it would be 40).
         assert_eq!(w.stats(&c)[Stat::AttackBlow], 45);
+    }
+
+    /// «Разрешить несколько оружий»: the one-weapon refusal lifts and both weapons' bonuses count;
+    /// the class checks and the one-item-per-type rule stay. Off, the classic refusal holds.
+    #[test]
+    fn multiple_weapons_switch_lifts_only_the_one_weapon_refusal() {
+        // A warrior who also shoots: a sword (blow) and a bow (shot) are both within its classes.
+        let both = UnitDef { attack_shot: 10, ..warrior(9, 20, 5) };
+        let classic = content(vec![both], gear());
+        let on = classic.with_experimental(super::super::content::ExperimentalRules { multiple_weapons: true, ..Default::default() });
+        let w = wearing(&classic, 9, &[1]);
+        assert_eq!(slot_for(&classic, &w, ItemId(2)), Err(EquipError::SecondWeapon), "classic: one weapon");
+        assert_eq!(slot_for(&on, &w, ItemId(2)), Ok(1), "the switch: a second weapon, its cell free");
+        assert_eq!(slot_for(&on, &w, ItemId(3)), Err(EquipError::WrongClass), "a staff still needs magic");
+        assert_eq!(slot_for(&on, &w, ItemId(1)), Err(EquipError::SameType), "one item of each type still");
+        let s = wearing(&on, 9, &[1, 2]).stats(&on);
+        assert_eq!((s[Stat::AttackBlow], s[Stat::AttackShot]), (25, 14), "the sword's and the bow's bonuses both count");
     }
 
     #[test]

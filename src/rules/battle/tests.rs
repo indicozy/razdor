@@ -1390,6 +1390,27 @@ fn hero_survives_while_his_army_lives() {
     assert_eq!(bt.player_results()[0].hp, 0);
 }
 
+/// «Юниты не умирают» (`undying_units`): a dead unit of the player's comes back with 1 HP while
+/// its army survives, the hero's rule for the others; a wiped army keeps the classic result, and
+/// off the rule changes nothing.
+#[test]
+fn undying_units_come_back_with_one_hp_while_the_army_survives() {
+    let rules = crate::rules::content::ExperimentalRules { undying_units: true, ..Default::default() };
+    let mut bt = battle(&[(10, f(2)), (10, f(3))], &[(18, f(2))]);
+    bt.content = std::sync::Arc::new(bt.content.with_experimental(rules));
+    bt.fighters[1].hp = 0;
+    assert_eq!(bt.outcome(), Outcome::Ongoing, "the hero and the enemy live");
+    let res = bt.player_results();
+    assert_eq!((res[0].hp, res[1].hp), (bt.fighters[0].hp, 1), "the dead unit comes back with 1 HP");
+    let mut classic = battle(&[(10, f(2)), (10, f(3))], &[(18, f(2))]);
+    classic.fighters[1].hp = 0;
+    assert_eq!(classic.player_results()[1].hp, 0, "the classic rule: the dead stay dead");
+    // The whole army dead: a defeat, nobody comes back.
+    bt.fighters[0].hp = 0;
+    assert_eq!(bt.outcome(), Outcome::Defeat);
+    assert_eq!(bt.player_results().iter().map(|r| r.hp).collect::<Vec<_>>(), vec![0, 0], "the wiped army keeps today's result");
+}
+
 #[test]
 fn the_battle_grid_is_kept_after_the_battle() {
     let c = content_with(vec![], Formation::WIDE);

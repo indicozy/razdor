@@ -122,6 +122,18 @@ pub struct ExperimentalRules {
     /// Six item cells per unit instead of the classic four (the «Шесть ячеек снаряжения»
     /// switch). Fixed for a playthrough; see [`ExperimentalRules::from`] for old saves.
     pub six_cells: bool,
+    /// «Разрешить несколько оружий»: a unit may wear several weapons (blow, shot, staff); the
+    /// class checks still apply (`items::slot_for`).
+    pub multiple_weapons: bool,
+    /// «Бесплатные юниты»: the player's units ask no daily wages, gold or mana
+    /// (`Game::unit_wage`). Hiring, healing and refunds keep their prices.
+    pub free_units: bool,
+    /// «Автоматическая прокачка»: a player's unit takes an open upgrade-tree promotion at once,
+    /// to a random option (`Game::auto_promote_squad`).
+    pub auto_promotion: bool,
+    /// «Юниты не умирают»: the player's dead units come back with 1 HP after a battle that
+    /// their army survives (`Battle::player_results`), as the hero does.
+    pub undying_units: bool,
 }
 
 impl ExperimentalRules {
@@ -143,6 +155,10 @@ struct RulesWire {
     /// The inverse of `allow_duplicate_items`, written for older builds and read only from
     /// saves that predate `allow_duplicate_items`.
     no_duplicate_items: Option<bool>,
+    multiple_weapons: bool,
+    free_units: bool,
+    auto_promotion: bool,
+    undying_units: bool,
 }
 
 impl From<RulesWire> for ExperimentalRules {
@@ -163,6 +179,10 @@ impl From<RulesWire> for ExperimentalRules {
             allow_duplicate_items,
             two_potions: w.two_potions,
             six_cells,
+            multiple_weapons: w.multiple_weapons,
+            free_units: w.free_units,
+            auto_promotion: w.auto_promotion,
+            undying_units: w.undying_units,
         }
     }
 }
@@ -177,6 +197,10 @@ impl From<ExperimentalRules> for RulesWire {
             six_cells: Some(r.six_cells),
             allow_duplicate_items: Some(r.allow_duplicate_items),
             no_duplicate_items: Some(!r.allow_duplicate_items),
+            multiple_weapons: r.multiple_weapons,
+            free_units: r.free_units,
+            auto_promotion: r.auto_promotion,
+            undying_units: r.undying_units,
         }
     }
 }
@@ -758,5 +782,19 @@ mod experimental_rules_save_tests {
         let json = serde_json::to_value(six).unwrap();
         assert_eq!(json["six_cells"], true);
         assert_eq!(serde_json::from_value::<ExperimentalRules>(json).unwrap(), six);
+    }
+
+    /// The four newer switches are written and read back as they are; an old save without
+    /// them reads all four off (classic rules).
+    #[test]
+    fn the_newer_switches_round_trip_and_default_off_in_old_saves() {
+        let all = ExperimentalRules { multiple_weapons: true, free_units: true, auto_promotion: true, undying_units: true, ..Default::default() };
+        let json = serde_json::to_value(all).unwrap();
+        assert_eq!((json["multiple_weapons"].as_bool(), json["free_units"].as_bool()), (Some(true), Some(true)));
+        assert_eq!((json["auto_promotion"].as_bool(), json["undying_units"].as_bool()), (Some(true), Some(true)));
+        assert_eq!(serde_json::from_value::<ExperimentalRules>(json).unwrap(), all);
+        let old: ExperimentalRules = serde_json::from_str(r#"{"simultaneous_bonuses": true, "multiple_rings": true, "no_duplicate_items": true}"#).unwrap();
+        assert!(!old.multiple_weapons && !old.free_units && !old.auto_promotion && !old.undying_units);
+        assert!(old.simultaneous_bonuses && old.multiple_rings);
     }
 }

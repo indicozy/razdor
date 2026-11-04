@@ -292,6 +292,11 @@ impl Game {
     /// (Community). This is the full wage: Rear Service cuts only the whole bill (see
     /// [`Game::daily_wages`]).
     pub fn unit_wage(&self, u: &Unit) -> Price {
+        // Razdor's «Бесплатные юниты» (`free_units`): the player's units ask no wage in either
+        // currency. Only the army's wages come here (`bills`, `wage`); hiring keeps its price.
+        if self.content.experimental.free_units {
+            return Price::gold(0);
+        }
         let w = self.content.wage_for(u.def, u.wage_kind);
         if u.wage_kind == WageKind::Recruit && self.content.paid_in_mana(u.def) {
             Price { amount: w, currency: Currency::Mana }
@@ -373,7 +378,10 @@ impl Game {
         self.stored_income = stored;
         let (_, mana_bill) = self.bills();
         self.gold -= self.daily_wages();
-        self.pay_mana_bill(mana_bill);
+        // Free units (`free_units`) owe no mana: no payment, so an empty purse does not flag a short noon.
+        if !self.content.experimental.free_units {
+            self.pay_mana_bill(mana_bill);
+        }
         let c = self.content.clone();
         let elemental = |u: &Unit| c.paid_in_mana(u.def);
         let short = self.gold < 0;

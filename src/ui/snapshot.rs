@@ -16,7 +16,7 @@
 //! the scenario's messages every frame, to see the screen under them; `RAZDOR_MOUSE=x,y`
 //! puts the pointer there (`RAZDOR_MOUSE_RIGHT=1` also holds the right button there: the map's tooltips); `RAZDOR_SCENE_SPELLS=<id>,…` puts those spells on every unit; `RAZDOR_SCENE_TARGET=<id>` starts the targeting of that enemy spell on the map; `RAZDOR_SCENE_MANA=<n>` sets the hero's mana in the `spells` scene; `RAZDOR_SCENE_PREVIEW=1` shows the first spell's card at the pointer in the `learnt` scene; `RAZDOR_SCENE_POTION=1` gives every unit of the army a
 //! drunk potion. `RAZDOR_SCENE_LANGUAGE=1` opens the language list (`title`, `options:advanced`, `settings:<map>:advanced`). `replay:<step>` with `RAZDOR_REPLAY=<actions.jsonl>`: the diff
-//! `RAZDOR_SCENE_EXPERIMENTAL=bonuses,rings,amulets` enables selected playthrough rules;
+//! `RAZDOR_SCENE_EXPERIMENTAL=bonuses,rings,amulets,potions,cells,weapons,free,auto,undying` enables selected playthrough rules;
 //! `RAZDOR_SCENE_RULES=1` opens their menu over `scenarios`. `RAZDOR_SCENE_CARD=1` opens the picked map's card
 //! in the `scenarios:<map>` scene on a phone held upright (its list view otherwise). `RAZDOR_SCENE_BONUS_ITEMS=1`
 //! equips the hero with available distinct bonus items to exercise the trait scrollbar.
@@ -358,6 +358,7 @@ pub fn stage(app: &mut App) {
         let has = |key| flags.split(',').any(|f| f.trim() == key);
         super::new_game::snapshot_experimental(razdor::rules::content::ExperimentalRules {
             simultaneous_bonuses: has("bonuses"), multiple_rings: has("rings"), multiple_amulets: has("amulets"), allow_duplicate_items: !has("unique"), two_potions: has("potions"), six_cells: has("cells"),
+            multiple_weapons: has("weapons"), free_units: has("free"), auto_promotion: has("auto"), undying_units: has("undying"),
         });
     }
     if let Err(e) = try_stage(app, &scene) {
@@ -369,7 +370,12 @@ pub fn stage(app: &mut App) {
     if let Ok(names) = std::env::var("RAZDOR_SCENE_ARCHIVES") {
         super::mobile::snapshot_archives(&names, std::env::var("RAZDOR_SCENE_UNPACK").ok().and_then(|p| p.parse().ok()));
     }
-    if std::env::var("RAZDOR_SCENE_RULES").is_ok_and(|v| v == "1") { super::new_game::open_experimental_menu(); }
+    if std::env::var("RAZDOR_SCENE_RULES").is_ok_and(|v| v == "1") {
+        super::new_game::open_experimental_menu();
+        if let Some(px) = std::env::var("RAZDOR_SCENE_SCROLL").ok().and_then(|v| v.trim().parse::<f32>().ok()) {
+            super::new_game::scene_scroll(px);
+        }
+    }
     // `RAZDOR_SCENE_BATTLE_EXIT=1`: a battle scene with its leave-battle window open (Esc).
     if std::env::var("RAZDOR_SCENE_BATTLE_EXIT").is_ok_and(|v| v == "1") {
         if let Screen::Battle(v) | Screen::CustomBattle(v) = &mut app.screen {
@@ -975,6 +981,7 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
     if let Some(px) = std::env::var("RAZDOR_SCENE_SCROLL").ok().and_then(|v| v.trim().parse::<f32>().ok()) {
         super::main_menu::scene_scroll(px);
         super::hotkeys::scene_scroll(px);
+        super::new_game::scene_scroll(px);
     }
     // `RAZDOR_SCENE_SHOW=x,y,r`: an event shows that place (as a lantern does), to see the
     // camera fly there and the area fade in (or, explored already, Razdor's red ring).

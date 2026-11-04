@@ -1275,6 +1275,7 @@ impl Game {
         if u.gain_xp(&c, xp.clamp(0, i32::MAX as i64) as i32) > 0 {
             let level = u.level;
             self.effect_events.push(Event::LevelUp(k, level));
+            self.auto_promote_unit(k);
         }
     }
 
@@ -2449,7 +2450,7 @@ mod tests {
     fn experimental_rules_carry_to_next_map_and_restart() {
         let scenario = world(vec![]);
         let mut game = start(&scenario);
-        let rules = super::super::content::ExperimentalRules { simultaneous_bonuses: true, multiple_rings: true, multiple_amulets: false, allow_duplicate_items: false, two_potions: true, six_cells: false };
+        let rules = super::super::content::ExperimentalRules { simultaneous_bonuses: true, multiple_rings: true, multiple_amulets: false, allow_duplicate_items: false, two_potions: true, six_cells: false, multiple_weapons: false, free_units: false, auto_promotion: false, undying_units: false };
         game.experimental = rules;
         game.content = std::sync::Arc::new(game.content.with_experimental(rules));
         let next = game.hand_over("Road".into(), None);

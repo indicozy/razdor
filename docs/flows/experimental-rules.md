@@ -1,6 +1,6 @@
 # Experimental scenario rules
 
-The `...` button beside Next on the scenario screen opens six independent switches.
+The `...` button beside Next on the scenario screen opens ten independent switches.
 Only the duplicate-item restriction is on by default for new games (the switch
 «Разрешить надевать одинаковые предметы» is off). Choices reset when
 starting a new playthrough from the main menu.
@@ -24,10 +24,35 @@ for an existing game through this menu.
 - **Allow duplicate items** (default off): with it off, compare item IDs per character, not
   item categories. Different rings/amulets are permitted when their corresponding switch is on.
   Repeated copies of one item are refused. Turning it on lifts only that refusal. A weapon is
-  still one per unit: the hint line «Оружие у бойца всегда одно.» says so in the menu.
+  still one per unit unless the multiple-weapons switch is on: the hint line «Оружие у бойца всегда одно.» says so in the menu, «Можно надеть несколько оружий.» when it is on.
   Old saves keep their previous rules: `RulesWire` maps `no_duplicate_items` to the inverse.
 A save without `six_cells` (before the switch) gets `six_cells = multiple_rings || multiple_amulets`,
 so a playthrough that already had six cells keeps them and no worn item is lost.
+- **Allow multiple weapons** («Разрешить несколько оружий», default off): `items::slot_for` skips
+  its one-weapon refusal (`SecondWeapon`); the class checks (blow, shot, staff) and one item of
+  each type still apply. Every worn weapon's bonuses count like any worn item's: the battle picks
+  no «the» weapon (`NoHeal` marks and the cannon sound follow the unit's base attacks, not a
+  worn item), so nothing else changes.
+- **Free units** («Бесплатные юниты», default off): `Game::unit_wage` returns no wage for the
+  player's units, so `bills`, `wage(i)`, `daily_wages`, `daily_mana_wages`, the noon payment, the
+  short-of-money check and the cards all read 0. Hiring, healing, resurrection and refunds keep
+  their prices (they never read `unit_wage`). Garrisons and AI armies were never billed through it.
+- **Automatic promotion** («Автоматическая прокачка», default off): `Game::auto_promote_unit`
+  takes every open option (`Unit::promotions`) of a squad member other than the hero at once, to
+  an option drawn by the game's RNG (`self.rng`, one draw per promotion, so saves and replays keep
+  their stream), and looks again while one is open (at most 8 promotions, a guard against a cyclic
+  tree). It runs for every squad member after a battle (`settle_battle`, after the XP and the
+  deaths are settled, before the result is reported) and after an event's XP to a player's unit
+  (`unit_gains`, script.rs). The «Не напоминать» switch hides only the reminder and does not stop
+  it; a corpse is not promoted (it waits until it lives again), and the hero never is. The level-up report still lists the
+  level the battle reached. The promotion shows in the army window only (no separate message).
+- **Units don't die** («Юниты не умирают», default off): `Battle::player_results` gives a dead
+  fighter of the player's 1 HP while the army survives (any living player fighter at the end),
+  the same way the hero does; the classic rule leaves it at 0 (`0x4906a0` for the hero). A wiped
+  army keeps today's result. The battle has no summoned units: the engine's fighters are the
+  squad's living units and the enemy's, and the only non-kept death mark (`kept_death`) belongs to
+  AI troops. Corpses from an earlier battle are not fighters, so they stay dead. The revived unit
+  keeps its spells and XP; the battle's `lost` count does not include it.
 - **At most two potions per character:** two successful drinks between army battles,
   including instant healing and revival potions. Failed attempts consume neither an item
   nor a count. The counter survives saving, loading and campaign carry-over, and resets
@@ -63,7 +88,7 @@ its scrollbar. Abilities carry no source line.
 Name, stats, equipment slots and the panel's outer bounds remain fixed. Hero class traits
 and state lines share the region with unit abilities.
 
-For reproducible screenshots, `RAZDOR_SCENE_EXPERIMENTAL=bonuses,rings,amulets` enables
+For reproducible screenshots, `RAZDOR_SCENE_EXPERIMENTAL=bonuses,rings,amulets,...` enables
 rules in snapshot scenes; `RAZDOR_SCENE_RULES=1` opens the options over `scenarios`, and
 `RAZDOR_SCENE_BONUS_ITEMS=1` equips available distinct bonus items on the hero in an army scene.
 
@@ -132,14 +157,16 @@ keep the item and show the existing refusal. All equipment rules and potion limi
 
 ## The rules window (new_game.rs `experimental_menu`)
 
-The choice is remembered (the owner's yes, 2026-11-02): when the window closes (OK, Esc, Enter or its close button) and when a game starts, the six switches are written to `settings.json` (`language::Settings::experimental_rules`, all off on an older file). `open_list` starts from them, so the scenario list's «Экспериментальные правила включены» label shows a remembered choice too.
+The choice is remembered (the owner's yes, 2026-11-02): when the window closes (OK, Esc, Enter or its close button) and when a game starts, the ten switches are written to `settings.json` (`language::Settings::experimental_rules`, all off on an older file). `open_list` starts from them, so the scenario list's «Экспериментальные правила включены» label shows a remembered choice too.
 
 Opened from the scenario list's «Экспериментальные правила» button. Its scale is `display::popup_o`
-fitted to the screen. Its six rows and OK are touch targets (40 dp on a phone); its texts are one
+fitted to the screen. Its ten rows and OK are touch targets (40 dp on a phone); its texts are one
 px per dp on a phone, grown with the text size (`button_grow`) and never under Normal; the hints
-wrap to its width and the window grows with them. On a phone's landscape the rows take two columns
-when one column would not fit the height, and the window takes the screen's width. Snapshot:
-`RAZDOR_SCENE=scenarios RAZDOR_SCENE_RULES=1`; the mobile check's case «rules».
+wrap to its width and the window grows with them. The rows take one, two or three columns: the
+fewest whose height fits the screen (a phone's landscape takes two or three), and the window takes
+the screen's width. The hint lines of the free-units and units-don't-die rules show only while those are on (they say «армии героя»: both rules touch the player's units only). Every label is drawn at the same size; a label too wide for its column wraps to two lines, and every row is then two lines tall. On an upright phone the window is at most 60% of the screen high and has one column: the rows and hints scroll between the title and the OK button (a swipe, the wheel, the bar at the right; `RULES_SCROLL`, kept until the game ends, `RAZDOR_SCENE_SCROLL` for a shot). A row toggles only on a press inside the visible view. Any window that overflows the screen scrolls the same way. Snapshot:
+`RAZDOR_SCENE=scenarios RAZDOR_SCENE_RULES=1`, with `RAZDOR_SCENE_EXPERIMENTAL` keys
+`bonuses,rings,amulets,potions,cells,weapons,free,auto,undying`; the mobile check's case «rules».
 
 ## Battle AI: Caster guard (Максимум)
 

@@ -2332,6 +2332,36 @@ impl Game {
         self.squad.get_mut(unit).ok_or(PromoteError::NotAvailable)?.promote(&c, to)
     }
 
+    /// Razdor's «Автоматическая прокачка» (`ExperimentalRules::auto_promotion`), for every
+    /// player's unit after battle and after an event's experience (`auto_promote_unit`).
+    pub(crate) fn auto_promote_squad(&mut self) {
+        for k in 1..self.squad.len() {
+            self.auto_promote_unit(k);
+        }
+    }
+
+    /// Takes every promotion open to squad member `k` (not the hero) at once, each to an option
+    /// drawn by the game's own RNG (`self.rng`: one draw per promotion, so saves and replays
+    /// stay the same). A promotion can open another, so the unit is looked at again until none
+    /// is open; the cap stops a cyclic tree. The «Не напоминать» switch only hides the reminder,
+    /// so it does not stop this. A corpse is not promoted: it waits until it lives again.
+    pub(crate) fn auto_promote_unit(&mut self, k: usize) {
+        const CAP: usize = 8;
+        if !self.content.experimental.auto_promotion || k == 0 || self.squad.get(k).is_none_or(|u| !u.alive()) {
+            return;
+        }
+        for _ in 0..CAP {
+            let options = self.squad[k].promotions(&self.content);
+            if options.is_empty() {
+                break;
+            }
+            let to = options[self.rng.range(0, options.len() as i32 - 1) as usize];
+            if self.squad[k].promote(&self.content, to).is_err() {
+                break;
+            }
+        }
+    }
+
     /// The defence of the building the hero's army stands in (army +0x378c): one of his own or
     /// of a friend (attitude above 0); 0 elsewhere. It is added to his units' defences in
     /// battle (battle.md §0, 485908) and to their tactical cost, and shown on their cards
@@ -2612,6 +2642,9 @@ impl Game {
                 lost += 1;
             }
         }
+        // The XP is paid and the deaths are settled: the open promotions are taken now
+        // («Автоматическая прокачка»), before the result is reported.
+        self.auto_promote_squad();
         let mut dropped_left = 0;
         let foe = self.foe.take();
         // The opponent's record is recounted too (0x4d21fd), a garrison's as well.
@@ -4074,6 +4107,47 @@ mod tests {
         assert_eq!(g.path.last(), Some(&(11, 2)));
         let events = walk_until_stopped(&mut g);
         assert_eq!(events.last(), Some(&Event::Arrived(0)));
+    }
+
+    /// «Автоматическая прокачка» (`auto_promotion`): a player's unit at level 2 takes an open
+    /// option of its tree at once, the hero never; off, the promotion waits for the player.
+    #[test]
+    fn auto_promotion_takes_an_open_option_at_once_and_never_the_hero() {
+        use crate::rules::content::{testkit as ck, ExperimentalRules, Upgrade, UnitDef};
+        use crate::rules::formation::Row;
+        let warrior = UnitDef {
+            upgrades: vec![
+                Upgrade { target_name: "warrior4".into(), target: Some(4), level: 2, slot: 2 },
+                Upgrade { target_name: "shooter5".into(), target: Some(5), level: 2, slot: 3 },
+            ],
+            ..ck::warrior(1, 20, 5)
+        };
+        let base = Arc::new(ck::content(vec![warrior, ck::mage(2, 10, super::super::content::MagicSchool::Elemental, super::super::content::MagicDirection::ToEnemy), ck::shooter(3, 15), ck::warrior(4, 10, 2), ck::shooter(5, 8)], vec![]));
+        let mut s = scenario(24, 6);
+        s.header.heroes[0] = hero(2, 2, 200, &[]);
+        let mut g = Game::from_scenario(base.clone(), &s, HeroClass::Knight);
+        g.squad.push(Unit::new(&base, UnitId(1), Slot::new(Row::Front, 3)));
+        g.squad[1].gain_xp(&base, 60);
+        assert_eq!(g.squad[1].level, 2);
+        assert!(g.squad[1].promotion_ready(&base));
+        // Off: the option waits for the player.
+        g.auto_promote_squad();
+        assert_eq!(g.squad[1].def, UnitId(1), "the classic rules wait for the player");
+        // On: a random open option, the level restarts at 1.
+        g.content = Arc::new(base.with_experimental(ExperimentalRules { auto_promotion: true, ..Default::default() }));
+        g.squad[0].gain_xp(&g.content.clone(), 60);
+        g.auto_promote_squad();
+        assert!([UnitId(4), UnitId(5)].contains(&g.squad[1].def), "promoted to {:?}", g.squad[1].def);
+        assert_eq!(g.squad[1].level, 1);
+        assert_eq!(g.squad[0].def, UnitId(1), "the hero is not promoted this way");
+        // A corpse at the same level waits: only the living are promoted.
+        g.squad.push(Unit::new(&base, UnitId(1), Slot::new(Row::Front, 4)));
+        let corpse = g.squad.len() - 1;
+        g.squad[corpse].gain_xp(&base, 60);
+        g.squad[corpse].hp = 0;
+        g.auto_promote_squad();
+        assert_eq!(g.squad[corpse].def, UnitId(1), "a corpse is not promoted");
+        assert_eq!(g.squad[corpse].level, 2);
     }
 
     fn strip() -> Scenario {
