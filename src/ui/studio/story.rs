@@ -538,7 +538,7 @@ impl Viewer<'_> {
         let q = super::inspector::head(ui, ic::LIGHTNING, &format!("{}: {id}", tr("Trigger")), &format!("{file}:{line}"));
         let mut pending: Vec<(&str, Vec<DocEdit>)> = Vec::new();
         kit::section(ui, "trigger", "main", tr("Main"), true, &q, |ui| {
-            if let Some(new) = kit::row(ui, &q, tr("Name"), "trigger.id", None, |ui| forms::text_field(ui, "st-tid", id, 170.0)).value.flatten() {
+            if let Some(new) = kit::row(ui, &q, tr("Name"), "trigger.id", None, |ui| forms::text_field(ui, "st-tid", id, ui.available_width())).value.flatten() {
                 let taken = pkg.triggers.iter().any(|t| t.value.id == new);
                 if !st::is_name(&new) {
                     self.scen.story.error = Some(trf!("{name} is not a name: lowercase letters, digits and _", name = new.as_str()));

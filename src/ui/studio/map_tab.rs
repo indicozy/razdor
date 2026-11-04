@@ -287,8 +287,10 @@ pub struct Canvas {
     rect_from: Option<(i32, i32)>,
     /// The derived layers of the compile they were made for (`overlay::Layers`).
     layers: Option<(u64, Layers)>,
-    /// The AI viewer («Просмотр ИИ»): its mode, its run and the day the slider shows.
+    /// The AI viewer («Просмотр ИИ», the Тест workspace's ИИ tab): its run and the day the slider shows.
     pub ai: super::aiview::AiView,
+    /// The AI tab is drawn in this frame: the AI layer goes over the canvas (`ai_canvas`, reset each frame).
+    pub ai_shown: bool,
     /// The brush's shape (round or square) and the scatter density in per cent (objects).
     pub shape: brush::Shape,
     pub density: u32,
@@ -368,6 +370,7 @@ impl Default for Canvas {
             layers: None,
             layer_sets: Default::default(),
             ai: super::aiview::AiView::default(),
+            ai_shown: false,
             shape: brush::Shape::Square,
             density: 100,
             paint_last: None,
@@ -501,25 +504,50 @@ enum Act {
 }
 
 impl Viewer<'_> {
+    /// The map as a read-only canvas for the Тест workspace's ИИ tab (UX6, `aiview.rs`): the same camera and its
+    /// pan and zoom (Ctrl+wheel, the middle or primary drag), the map and the AI layer drawn over it by
+    /// [`draw`], and no tool. `height` is the canvas's height in points.
+    pub(super) fn ai_canvas(&mut self, ui: &mut Ui, height: f32) {
+        let size = egui::vec2(ui.available_width(), height.max(60.0));
+        let (rect, resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
+        let ppp = ui.ctx().pixels_per_point();
+        let to_px = |p: egui::Pos2| mq::vec2(p.x * ppp, p.y * ppp);
+        let canvas = &mut *self.canvas;
+        canvas.rect = Some(rect);
+        canvas.shown = true;
+        canvas.ai_shown = true;
+        canvas.ppp = ppp;
+        canvas.hover = None;
+        let Some(good) = self.maps.current() else { return };
+        let (w, h) = (good.compiled.scenario.width(), good.compiled.scenario.height());
+        let view = mq::Rect::new(rect.min.x * ppp, rect.min.y * ppp, rect.width() * ppp, rect.height() * ppp);
+        let fresh = canvas.cam.is_none();
+        let cam = canvas.cam.get_or_insert_with(|| Cam::new(view, w, h));
+        cam.view = view;
+        if fresh || std::mem::take(&mut canvas.fit) {
+            cam.fit(w, h);
+        }
+        if let Some((x, y)) = canvas.centre.take() {
+            cam.centre = mq::vec2(x, y);
+        }
+        let ctrl = ui.input(|i| i.modifiers.command);
+        if resp.hovered() {
+            let scroll = ui.input(|i| i.raw_scroll_delta.y);
+            if let (true, true, Some(p)) = (scroll != 0.0, ctrl, resp.hover_pos()) {
+                cam.zoom_at(1.0015f32.powf(scroll), to_px(p));
+            }
+        }
+        if resp.dragged_by(PointerButton::Middle) || resp.dragged_by(PointerButton::Primary) || resp.dragged_by(PointerButton::Secondary) {
+            let d = ui.input(|i| i.pointer.delta());
+            cam.pan(mq::vec2(d.x * ppp, d.y * ppp));
+        }
+        cam.clamp(w, h);
+    }
+
     /// The Map tab: the map picker and the tool bar, the stale banners, the canvas (its input here,
     /// its drawing in [`draw`]), and the hovered cell at the bottom left.
     pub(super) fn map_tab(&mut self, ui: &mut Ui) {
         self.options_bar(ui);
-        // The AI viewer's strip (its controls only while the mode is on); the map takes the rest.
-        let ready = match (&self.pkg, &self.install, &self.maps.map) {
-            (_, None, _) => Err(tr("The AI viewer needs the game's files: set RAZDOR_DT_DIR")),
-            (Some(_), Some(_), Some(_)) => Ok(()),
-            _ => Err(tr("No map to show.")),
-        };
-        match self.canvas.ai.strip(ui, ready) {
-            super::aiview::Req::Start => {
-                if let (Some(pkg), Some(install), Some(map)) = (self.pkg.clone(), self.install.clone(), self.maps.map.clone()) {
-                    self.canvas.ai.start(pkg, install, &map);
-                }
-            }
-            super::aiview::Req::Cancel => self.canvas.ai.cancel(),
-            super::aiview::Req::None => {}
-        }
         let burn = self.burn_question(ui.ctx());
         for stale in &self.ws.stale {
             banner(ui, &stale.banner());
@@ -1876,7 +1904,9 @@ pub fn draw(canvas: &mut Canvas, maps: &MapView, pkg: Option<&Package>, selectio
             }
         }
     }
-    super::aiview::draw(cam, &canvas.ai);
+    if canvas.ai_shown {
+        super::aiview::draw(cam, &canvas.ai);
+    }
     if let (Some(spec), Some(sel)) = (spec, selection) {
         for r in outline_of(&good.compiled, spec, sel) {
             outline(cam, r, 2.0, accent());

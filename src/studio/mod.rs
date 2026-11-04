@@ -38,6 +38,8 @@ pub mod history;
 pub mod layers;
 pub mod map;
 pub mod nav;
+pub mod palette;
+pub mod play;
 pub mod sheet;
 pub mod mcp;
 pub mod paint;

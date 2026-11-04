@@ -19,6 +19,7 @@ mod battletest;
 mod canvas;
 mod data;
 mod outline;
+mod palette;
 mod claude;
 mod forms;
 mod inspector;
@@ -61,6 +62,10 @@ use razdor::pack::diag::{Diagnostic, Severity};
 use razdor::pack::load::{line_of, Package};
 use razdor::pack::open::lang;
 use razdor::studio::build::Job;
+use razdor::studio::nav;
+use razdor::studio::play;
+use razdor::studio::story_graph as sg;
+use story::StorySel;
 use razdor::studio::mcp::server::{runtime_file, Server};
 use razdor::studio::mcp::{Frame, SnapTarget};
 use razdor::studio::map::{choose_map, map_of_file, marks, selection_of, targets, MapView, Selection};
@@ -138,6 +143,8 @@ pub enum Tab {
     Items,
     /// The battle tester: two sides, N battles on the game's engine (`battletest.rs`).
     Battle,
+    /// The Тест workspace's ИИ view: the AI run on a read-only map, the day slider and the log (`aiview.rs`, `Viewer::ai_tab`).
+    AiTest,
     /// The two scores: Richness and Health, each with its breakdown (`scores.rs`).
     Scores,
     /// The Сюжет outline (UX5, `outline.rs`): the triggers and dialogs by map, the characters, the variables.
@@ -172,6 +179,7 @@ impl Tab {
             Tab::Units => "units",
             Tab::Items => "items",
             Tab::Battle => "battle",
+            Tab::AiTest => "ai-test",
             Tab::Scores => "scores",
             Tab::Outline => "outline",
             Tab::DataNav => "data-nav",
@@ -200,7 +208,8 @@ impl Tab {
             Tab::Vars => tr("Variables"),
             Tab::Units => tr("Units"),
             Tab::Items => tr("Items"),
-            Tab::Battle => tr("Battle test"),
+            Tab::Battle => tr("Battle"),
+            Tab::AiTest => tr("AI"),
             Tab::Scores => tr("Scores"),
             Tab::Outline => tr("Outline"),
             Tab::DataNav => tr("Data"),
@@ -331,6 +340,15 @@ pub struct StudioScreen {
     /// The snapshot's `ws=` workspace, kept for every frame of the snapshot (a jump to the Script would
     /// otherwise move the shown workspace to the Данные one).
     snap_ws: Option<WsKind>,
+    /// The command palette (UX6, `palette.rs`): Ctrl+Shift+P, Ctrl+P and the top bar's field.
+    palette: palette::Palette,
+    /// The game started by «Играть» (F5), while it runs; `play_shown` is the snapshot's stand-in for it.
+    play: Option<std::process::Child>,
+    play_shown: bool,
+    /// Ctrl+F in the Inspector was asked for (by the palette too): the field search takes the focus this frame.
+    find_asked: bool,
+    /// The snapshot's `jump=score`: the Оценка view clicks its first target once (`scores.rs`).
+    snap_jump: bool,
 }
 
 impl StudioScreen {
@@ -418,6 +436,11 @@ impl StudioScreen {
             snap_watch: false,
             side_hidden: false,
             snap_ws: None,
+            palette: palette::Palette::default(),
+            play: None,
+            play_shown: false,
+            find_asked: false,
+            snap_jump: false,
         })
     }
 
@@ -492,6 +515,26 @@ impl StudioScreen {
                     self.snap_todo.push("battletest");
                 }
                 "aiview" => self.snap_todo.push("aiview"),
+                // `test=battle|ai|scores`: the Тест workspace's view; `palette[=<text>]` and `goto[=<text>]` open the
+                // command palette (Ctrl+Shift+P) and the Ctrl+P list, typed with the text; `play` shows the game
+                // running (the status bar), without starting it.
+                other if other.starts_with("test=") => {
+                    self.pending_tab = Some(match &other["test=".len()..] {
+                        "battle" => Tab::Battle,
+                        "ai" => Tab::AiTest,
+                        "scores" => Tab::Scores,
+                        _ => return Err(format!("{other}: battle, ai or scores")),
+                    });
+                }
+                // `jump=score`: the first score line with a target is clicked (the jump to Карта or Файлы, as a click does).
+                "jump=score" => self.snap_jump = true,
+                "play" => self.play_shown = true,
+                other if other == "palette" || other.starts_with("palette=") => {
+                    self.palette.request(palette::Mode::Commands, other.strip_prefix("palette=").unwrap_or(""));
+                }
+                other if other == "goto" || other.starts_with("goto=") => {
+                    self.palette.request(palette::Mode::Go, other.strip_prefix("goto=").unwrap_or(""));
+                }
                 "generated" => self.snapshot_generated()?,
                 "scores" => self.snap_scores(),
                 "scores-generated" => {
@@ -804,6 +847,8 @@ impl StudioScreen {
         self.claude.pump();
         self.serve_mcp();
         self.canvas.shown = false;
+        self.canvas.ai_shown = false;
+        self.poll_play();
         self.canvas.mini = None;
         self.canvas.rect = None;
         // The palette's object thumbnails are read from the install's sprites before egui draws the frame.
@@ -872,8 +917,7 @@ impl StudioScreen {
                     }
                 }
                 _ => {
-                    self.pending_tab = Some(Tab::Map);
-                    self.canvas.ai.on = true;
+                    self.pending_tab = Some(Tab::AiTest);
                     self.canvas.ai.days = 10;
                     if let Err(e) = self.canvas.ai.run_now(&pkg, &install, &map) {
                         self.canvas.ai.error = Some(e);
@@ -1144,8 +1188,8 @@ impl StudioScreen {
         // The terminal of the Claude dock takes the keys first while it has the keyboard.
         self.claude.begin_frame();
         self.claude.take_input(ctx);
-        // The shortcuts wait while the Settings window captures a key.
-        if !self.settings.capturing() {
+        // The shortcuts wait while the Settings window captures a key, and while the palette has the keyboard.
+        if !self.settings.capturing() && !self.palette.is_open() {
             if let Some(asked) = self.commands_frame(ctx, prefs) {
                 action = asked;
             }
@@ -1204,6 +1248,8 @@ impl StudioScreen {
             battle: &mut self.battle,
             battle_req: &mut self.battle_req,
             scores: &self.scores,
+            goto: None,
+            snap_jump: &mut self.snap_jump,
         };
         let mut drawer_open = self.drawer_open;
         let mut drawer = self.drawer;
@@ -1225,8 +1271,12 @@ impl StudioScreen {
             .show_leaf_close_all_buttons(false)
             .show(ctx, &mut viewer);
         let (open, focus_map, changed) = (viewer.open.take(), viewer.focus_map, viewer.changed);
+        let goto = viewer.goto.take();
         if let Some(id) = strip_cmd {
             self.run_command(id, prefs);
+        }
+        if let Some(dest) = goto {
+            self.jump_to(dest);
         }
         if changed {
             self.touch();
@@ -1259,6 +1309,26 @@ impl StudioScreen {
         self.settings.show(ctx, prefs, scale, &mq);
         if std::mem::take(&mut self.settings.reset_layout) {
             self.reset_layout(prefs);
+        }
+        // The command palette (Ctrl+Shift+P, Ctrl+P, the top bar's field): its pick runs like the command or jumps.
+        let pkg_for_goto = self.ws.package();
+        let files: Vec<String> = self.ws.entries.iter().filter(|e| is_text(e)).cloned().collect();
+        let goto_list = move || match pkg_for_goto {
+            Some(pkg) => razdor::studio::nav::goto_index(&pkg, &files),
+            None => Vec::new(),
+        };
+        if let Some(pick) = self.palette.show(ctx, &prefs.keys, goto_list) {
+            match pick {
+                palette::Pick::Command(id) => {
+                    if let Some(asked) = self.run_command(id, prefs) {
+                        action = asked;
+                    }
+                }
+                palette::Pick::Go(g) => self.jump_to(g.dest),
+            }
+        }
+        if std::mem::take(&mut self.find_asked) {
+            inspector_kit::request_find(ctx);
         }
         self.conflict_ui(ctx);
         if let Some(id) = self.newmap.show(ctx, &mut self.ws, self.install.as_ref()) {
@@ -1310,8 +1380,11 @@ impl StudioScreen {
                 if cmd_button(ui, "check", keys, true, false, "").clicked() {
                     self.check();
                 }
-                // Играть needs the game's own run from the studio (UX6): shown disabled with the reason.
-                cmd_button(ui, "play", keys, false, false, "");
+                // Играть starts the game on this map (F5); a refusal shows as the button's note and as a message.
+                let note = self.play_refusal().map(|r| self.refusal_text(r)).unwrap_or_default();
+                if cmd_button(ui, "play", keys, !self.playing(), false, &note).clicked() {
+                    self.play_game();
+                }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if cmd_button(ui, "exit", keys, true, false, "").clicked() {
                         exit = true;
@@ -1332,26 +1405,33 @@ impl StudioScreen {
                             self.scen.focus = Focus::Header;
                             ui.close_menu();
                         }
-                        for (label, tab) in [("Story", Tab::Story), ("Campaign", Tab::Campaign), ("Texts", Tab::Texts), ("Characters", Tab::Characters), ("Variables", Tab::Vars), ("Units", Tab::Units), ("Items", Tab::Items), ("Battle test", Tab::Battle)] {
+                        for (label, tab) in [("Story", Tab::Story), ("Campaign", Tab::Campaign), ("Texts", Tab::Texts), ("Characters", Tab::Characters), ("Variables", Tab::Vars), ("Units", Tab::Units), ("Items", Tab::Items)] {
                             if ui.button(tr(label)).clicked() {
                                 self.pending_tab = Some(tab);
                                 ui.close_menu();
                             }
                         }
+                        if ui.button(tr("Battle test")).clicked() {
+                            self.pending_tab = Some(Tab::Battle);
+                            ui.close_menu();
+                        }
                     })
                     .response
                     .on_hover_text(tr("Package"));
-                    // The command field: the palette comes with UX6, so it shows its shortcut and opens nothing.
+                    // The command field: a click opens the palette with commands and objects (`palette.rs`).
                     let tip = commands::command("palette").map(|c| commands::tip(c, keys)).unwrap_or_default();
-                    chrome_frame(6, 2).fill(theme::WELL).stroke(egui::Stroke::new(1.0, theme::LINE)).show(ui, |ui| {
+                    let field = chrome_frame(6, 2).fill(theme::WELL).stroke(egui::Stroke::new(1.0, theme::LINE)).show(ui, |ui| {
                         ui.set_width(230.0);
                         ui.horizontal(|ui| {
                             ui.label(RichText::new(ic::MAGNIFYING_GLASS).color(theme::DIM));
                             ui.label(RichText::new(tr("Commands and objects")).color(theme::DIM));
                         });
-                    })
-                    .response
-                    .on_hover_text(tip);
+                    });
+                    let click = ui.interact(field.response.rect, Id::new("studio-command-field"), Sense::click());
+                    if click.clicked() {
+                        self.palette.request(palette::Mode::All, "");
+                    }
+                    click.on_hover_text(tip);
                 });
             });
         });
@@ -1362,6 +1442,10 @@ impl StudioScreen {
     fn status_bar(&self, ctx: &egui::Context) {
         egui::TopBottomPanel::bottom("studio_status").exact_height(theme::STATUS_H).frame(chrome_frame(8, 2)).show(ctx, |ui| {
             ui.horizontal_centered(|ui| {
+                if self.playing() {
+                    ui.label(RichText::new(format!("{} {}", ic::PLAY, tr("The game is running"))).text_style(egui::TextStyle::Small).color(theme::TEXT));
+                    ui.label(RichText::new("·").color(theme::FAINT));
+                }
                 if self.ws_kind == WsKind::Map {
                     if let Some((x, y)) = self.canvas.hover {
                         ui.label(RichText::new(format!("{}: {x}, {y}", tr("Cell"))).text_style(egui::TextStyle::Small));
@@ -1428,27 +1512,10 @@ impl StudioScreen {
         }
         if ws == WsKind::Map {
             for clip in clips {
-                let set = selection::set_of(&self.canvas, &self.maps);
-                match clip {
-                    Clip::Copy => selection::copy(&mut self.ws, &self.maps, &mut self.canvas, &set, &mut self.log),
-                    Clip::Cut => {
-                        if selection::cut(&mut self.ws, &mut self.maps, &mut self.canvas, &set, &mut self.log) {
-                            self.touch();
-                        }
-                    }
-                    Clip::Paste => selection::arm_paste(&mut self.canvas, &mut self.log),
-                    Clip::PasteInPlace => {
-                        if selection::paste_in_place(&mut self.ws, &mut self.maps, &mut self.canvas, &set, &mut self.log) {
-                            self.touch();
-                        }
-                    }
-                }
+                self.clip(clip);
             }
         }
         let mut action = None;
-        if ids.contains(&"find") {
-            inspector_kit::request_find(ctx);
-        }
         for id in ids {
             if let Some(asked) = self.run_command(id, prefs) {
                 action = Some(asked);
@@ -1462,6 +1529,14 @@ impl StudioScreen {
         match id {
             "save" => self.save_selected(),
             "save-all" => self.save_all(),
+            "play" => self.play_game(),
+            "palette" => self.palette.request(palette::Mode::Commands, ""),
+            "goto" => self.palette.request(palette::Mode::Go, ""),
+            "find" => self.find_asked = true,
+            "copy" => self.clip(Clip::Copy),
+            "cut" => self.clip(Clip::Cut),
+            "paste" => self.clip(Clip::Paste),
+            "paste-in-place" => self.clip(Clip::PasteInPlace),
             "undo" => self.undo(),
             "redo" => self.redo(),
             "check" => self.check(),
@@ -1576,6 +1651,190 @@ impl StudioScreen {
             }
         }
         None
+    }
+
+    /// A jump (Ctrl+P, a score line, an AI log entry): the workspace of the destination is shown, and its
+    /// object is selected, or its cell centred, or its file's line is the caret (`studio::nav`).
+    fn jump_to(&mut self, dest: nav::Destination) {
+        match dest {
+            nav::Destination::Map { map, object, cell } => {
+                if self.maps.map.as_deref() != Some(map.as_str()) {
+                    switch_map(&mut self.maps, &mut self.canvas, &mut self.selection, &map);
+                    self.reload();
+                }
+                // The object's cell is centred on; a cell is outlined too (the Оценка line's cells).
+                let at = match (&object, cell) {
+                    (_, Some(c)) => Some((c.0 as f32 + 0.5, c.1 as f32 + 0.5)),
+                    (Some(sel), None) => self
+                        .ws
+                        .package()
+                        .and_then(|pkg| pkg.maps.get(&map).and_then(|m| m.spec.as_ref()).and_then(|spec| razdor::studio::map::cell_of(spec, sel)))
+                        .map(|[x, y]| (x as f32 + 0.5, y as f32 + 0.5)),
+                    (None, None) => None,
+                };
+                if let Some(sel) = object {
+                    self.selection = Some(sel);
+                }
+                if let Some((x, y)) = at {
+                    self.canvas.centre = Some((x, y));
+                }
+                self.pending_tab = Some(Tab::Map);
+            }
+            nav::Destination::Story(node) => {
+                let (sel, centre, owner) = match &node {
+                    nav::StoryNode::Trigger(id) => {
+                        let owner = self.ws.package().and_then(|pkg| pkg.triggers.iter().find(|t| &t.value.id == id).and_then(|t| t.value.map.clone()));
+                        (StorySel::Trigger(id.clone()), sg::trigger_id(id), owner)
+                    }
+                    nav::StoryNode::Dialog(id) => (StorySel::Dialog(id.clone()), sg::dialog_id(id), None),
+                };
+                // The node's map is shown when it is another one (the outline does the same).
+                if let Some(m) = owner.filter(|m| self.maps.map.as_deref() != Some(m.as_str())) {
+                    self.scen.want_map = Some(m);
+                }
+                self.scen.story.sel = sel;
+                self.scen.story.centre = Some(centre);
+                self.scen.story_view = outline::StoryView::Story;
+                self.scen.focus = Focus::Story;
+                self.pending_tab = Some(Tab::Story);
+            }
+            nav::Destination::Var(name) => {
+                self.scen.outline_tab = outline::OutlineTab::Vars;
+                self.scen.story.sel = StorySel::Var(name.clone());
+                self.scen.story.centre = Some(sg::var_id(&name));
+                self.scen.story_view = outline::StoryView::Story;
+                self.scen.focus = Focus::Story;
+                self.pending_tab = Some(Tab::Story);
+            }
+            nav::Destination::Character(id) => {
+                self.scen.outline_tab = outline::OutlineTab::Characters;
+                self.scen.character = Some(id);
+                self.pending_tab = Some(Tab::Outline);
+            }
+            nav::Destination::Unit(id) => {
+                self.scen.unit = Some(id);
+                self.scen.focus = Focus::Units;
+                self.scen.data_view = data::DataView::Units;
+                self.pending_tab = Some(Tab::Units);
+            }
+            nav::Destination::Item(id) => {
+                self.scen.item = Some(id);
+                self.scen.focus = Focus::Items;
+                self.scen.data_view = data::DataView::Items;
+                self.pending_tab = Some(Tab::Items);
+            }
+            nav::Destination::File { path, line } => {
+                self.open_file(&path);
+                self.scen.data_view = data::DataView::Files;
+                self.jump = Some(Jump { line, range: None });
+                self.pending_tab = Some(Tab::Script);
+            }
+        }
+    }
+
+    /// One clipboard action on the Map (Copy, Cut, Paste, Paste in place) on the selection, as the keys and the
+    /// palette run it. On the Данные workspace Copy copies the sheet's cells (the sheet takes it).
+    fn clip(&mut self, clip: Clip) {
+        if self.ws_kind == WsKind::Data {
+            if clip == Clip::Copy {
+                self.scen.sheet.copy = true;
+            }
+            return;
+        }
+        let set = selection::set_of(&self.canvas, &self.maps);
+        match clip {
+            Clip::Copy => selection::copy(&mut self.ws, &self.maps, &mut self.canvas, &set, &mut self.log),
+            Clip::Cut => {
+                if selection::cut(&mut self.ws, &mut self.maps, &mut self.canvas, &set, &mut self.log) {
+                    self.touch();
+                }
+            }
+            Clip::Paste => selection::arm_paste(&mut self.canvas, &mut self.log),
+            Clip::PasteInPlace => {
+                if selection::paste_in_place(&mut self.ws, &mut self.maps, &mut self.canvas, &set, &mut self.log) {
+                    self.touch();
+                }
+            }
+        }
+    }
+
+    /// Whether the game started by «Играть» is running (the snapshot's `play` shows it so as well).
+    fn playing(&self) -> bool {
+        self.play.is_some() || self.play_shown
+    }
+
+    /// Why «Играть» cannot start now, if it cannot: no install, errors in the package (Проверка's), no map.
+    fn play_refusal(&self) -> Option<play::Refusal> {
+        let errors = self.all_problems().iter().filter(|d| d.severity == Severity::Error).count();
+        play::refusal(self.install.is_some(), errors, self.maps.map.is_some())
+    }
+
+    /// The words of a refusal, as the status and the log say them.
+    fn refusal_text(&self, why: play::Refusal) -> String {
+        match why {
+            play::Refusal::NoInstall => tr("The game does not start: its files are needed (set RAZDOR_DT_DIR)").to_string(),
+            play::Refusal::Errors(errors) => trf!("The game does not start: the package has {errors} errors (see Problems)", errors = errors),
+            play::Refusal::NoMap => tr("The game does not start: no map is shown").to_string(),
+        }
+    }
+
+    /// Logs a refusal and opens the drawer on what explains it (Проблемы for errors, else Вывод).
+    fn refuse(&mut self, text: String, why: Option<play::Refusal>) {
+        self.log.push(text);
+        self.drawer = if matches!(why, Some(play::Refusal::Errors(_))) { Drawer::Problems } else { Drawer::Output };
+        self.drawer_open = true;
+    }
+
+    /// «Играть» (F5, UX6): saves the open files, then starts the game on the shown map in its own process, from
+    /// the package's own start (`--pack <folder> --map <id>`, `studio::play`). A refusal is logged. The studio keeps
+    /// running; the game is watched by `poll_play`.
+    fn play_game(&mut self) {
+        if self.playing() {
+            self.refuse(tr("The game is already running").to_string(), None);
+            return;
+        }
+        if let Some(why) = self.play_refusal() {
+            let text = self.refusal_text(why);
+            self.refuse(text, Some(why));
+            return;
+        }
+        if self.ws.any_dirty() {
+            self.save_all();
+            if self.ws.any_dirty() {
+                return;
+            }
+        }
+        let (Some(install), Some(map)) = (self.install.clone(), self.maps.map.clone()) else { return };
+        let launch = match std::env::current_exe() {
+            Ok(exe) => play::launch(&exe, &self.ws.root, &map, &install.dir),
+            Err(e) => {
+                let text = trf!("The game could not start: {reason}", reason = e.to_string());
+                self.refuse(text, None);
+                return;
+            }
+        };
+        let mut command = std::process::Command::new(&launch.program);
+        command.args(&launch.args).envs(launch.envs.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+        match command.spawn() {
+            Ok(child) => {
+                self.play = Some(child);
+                self.log.push(trf!("The game starts on {map}", map = map));
+            }
+            Err(e) => {
+                let text = trf!("The game could not start: {reason}", reason = e.to_string());
+                self.refuse(text, None);
+            }
+        }
+    }
+
+    /// Takes the game's exit when it comes (the status bar stops saying it runs).
+    fn poll_play(&mut self) {
+        let Some(child) = self.play.as_mut() else { return };
+        if let Ok(None) = child.try_wait() {
+            return;
+        }
+        self.play = None;
+        self.log.push(tr("The game has closed").to_string());
     }
 
     /// Makes a Map tool the current one (the tool strip and its shortcut). The stamp tool needs an armed
@@ -1994,6 +2253,10 @@ struct Viewer<'a> {
     battle_req: &'a mut Option<battletest::Req>,
     /// The scores of the shown map (`scores.rs`), read by the Scores tab.
     scores: &'a scores::State,
+    /// A jump asked for by a view (a score line, an AI log entry): taken after the dock is drawn.
+    goto: Option<nav::Destination>,
+    /// The snapshot's `jump=score` flag (taken by the Оценка view).
+    snap_jump: &'a mut bool,
 }
 
 impl Viewer<'_> {
@@ -2017,6 +2280,47 @@ impl Viewer<'_> {
         }
         if let Some(req) = self.battle.show(ui, ready) {
             *self.battle_req = Some(req);
+        }
+    }
+
+    /// The Тест workspace's ИИ view (UX6): the AI run's controls, the map as a read-only canvas with the armies,
+    /// their trails and the story's marks at the day the slider shows, and the day slider and the log under it.
+    /// A click on a log line sets the day and jumps to that moment's object (`studio::nav::of_moment`).
+    fn ai_tab(&mut self, ui: &mut Ui) {
+        ui.heading(tr("AI viewer"));
+        let ready = match (&self.pkg, &self.install, &self.maps.map) {
+            (_, None, _) => Err(tr("The AI viewer needs the game's files: set RAZDOR_DT_DIR")),
+            (Some(_), Some(_), Some(_)) => Ok(()),
+            _ => Err(tr("No map to show.")),
+        };
+        match self.canvas.ai.controls(ui, ready) {
+            aiview::Req::Start => {
+                if let (Some(pkg), Some(install), Some(map)) = (self.pkg.clone(), self.install.clone(), self.maps.map.clone()) {
+                    self.canvas.ai.start(pkg, install, &map);
+                }
+            }
+            aiview::Req::Cancel => self.canvas.ai.cancel(),
+            aiview::Req::None => {}
+        }
+        let recorded = self.canvas.ai.recording.is_some();
+        if !recorded {
+            ui.weak(tr("Run the AI for the armies and the story on the map."));
+        }
+        // The map takes the height the slider and the log leave.
+        let under = if recorded { 200.0 } else { 0.0 };
+        self.ai_canvas(ui, ui.available_height() - under);
+        if recorded {
+            if let Some(i) = self.canvas.ai.timeline(ui) {
+                let moment = self.canvas.ai.recording.as_ref().and_then(|r| r.moments.get(i));
+                let dest = match (&self.pkg, &self.maps.map, moment) {
+                    (Some(pkg), Some(map), Some(moment)) => nav::of_moment(pkg, map, moment),
+                    _ => None,
+                };
+                // The moment's cell is outlined on the canvas, as a score line's cells are.
+                let cell = moment.and_then(|m| m.cell).map(|(x, y)| (i64::from(x), i64::from(y)));
+                self.canvas.score_cells = cell.into_iter().collect();
+                self.goto = dest;
+            }
         }
     }
 }
@@ -2058,14 +2362,15 @@ impl TabViewer for Viewer<'_> {
             Tab::Units => self.units_screen(ui),
             Tab::Items => self.items_screen(ui),
             Tab::Battle => self.battle_tab(ui),
+            Tab::AiTest => self.ai_tab(ui),
             Tab::Scores => self.scores_dock(ui),
         }
     }
 
     /// The map is drawn over the Map tab's body by the macroquad pass, so egui paints nothing there.
     fn clear_background(&self, tab: &Tab) -> bool {
-        // The map and the minimap are drawn by macroquad after egui: egui must not paint over them.
-        !matches!(tab, Tab::Map | Tab::Minimap)
+        // The map, the minimap and the ИИ view's canvas are drawn by macroquad after egui: egui must not paint over them.
+        !matches!(tab, Tab::Map | Tab::Minimap | Tab::AiTest)
     }
 }
 

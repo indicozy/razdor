@@ -20,6 +20,10 @@ static LOCK: std::sync::OnceLock<std::fs::File> = std::sync::OnceLock::new();
 #[cfg(unix)]
 fn single_instance() {
     use std::os::unix::io::AsRawFd;
+    // The game the studio starts («Играть», `studio::play`) runs while the studio holds the lock.
+    if std::env::var_os(razdor::studio::play::CHILD_ENV).is_some() {
+        return;
+    }
     let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir);
     let path = dir.join("razdor.lock");
     let Ok(file) = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path) else {

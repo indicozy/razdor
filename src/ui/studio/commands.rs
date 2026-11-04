@@ -67,9 +67,9 @@ pub const COMMANDS: &[Command] = &[
     cmd("undo", n_("Undo"), ic::ARROW_COUNTER_CLOCKWISE, "Ctrl+Z"),
     Command { id: "redo", name: n_("Redo"), also: "Ctrl+Y", ..cmd("", "", ic::ARROW_CLOCKWISE, "Ctrl+Shift+Z") },
     cmd("check", n_("Check"), ic::SHIELD_CHECK, "F7"),
-    Command { later: n_("Comes in UX6"), ..cmd("play", n_("Play"), ic::PLAY, "F5") },
-    Command { later: n_("Comes in UX6"), ..cmd("palette", n_("Command palette"), ic::MAGNIFYING_GLASS, "Ctrl+Shift+P") },
-    Command { later: n_("Comes in UX6"), ..cmd("goto", n_("Go to object or file"), ic::CROSSHAIR, "Ctrl+P") },
+    cmd("play", n_("Play"), ic::PLAY, "F5"),
+    cmd("palette", n_("Command palette"), ic::MAGNIFYING_GLASS, "Ctrl+Shift+P"),
+    cmd("goto", n_("Go to object or file"), ic::CROSSHAIR, "Ctrl+P"),
     cmd("ws-map", n_("Map workspace"), ic::MAP_TRIFOLD, "Alt+1"),
     cmd("ws-story", n_("Story workspace"), ic::FLOW_ARROW, "Alt+2"),
     cmd("ws-data", n_("Data workspace"), ic::TABLE, "Alt+3"),
@@ -530,6 +530,15 @@ mod tests {
             assert!(c.later.is_empty(), "{id} works now");
         }
         assert_eq!(command("paste-in-place").map(|c| c.default), Some("Ctrl+Shift+V"));
+    }
+
+    #[test]
+    fn play_the_palette_and_go_to_work_now_on_their_keys() {
+        for (id, key) in [("play", "F5"), ("palette", "Ctrl+Shift+P"), ("goto", "Ctrl+P")] {
+            let c = command(id).unwrap_or_else(|| panic!("{id} is a command"));
+            assert_eq!(binding_of(c, &defaults()), Binding::parse(key), "{id} is {key}");
+            assert!(c.later.is_empty(), "{id} works now");
+        }
     }
 
     #[test]

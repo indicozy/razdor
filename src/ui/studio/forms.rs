@@ -82,11 +82,12 @@ fn choice_w(ui: &mut Ui, salt: &str, current: &str, options: &[&str], width: Opt
     picked
 }
 
-/// A text, committed on Enter or when the field loses focus.
+/// A text, committed on Enter or when the field loses focus. It takes the width left in its row (`width` is
+/// that width when the caller has it; the Inspector's rows give the field their remaining width, UX6).
 pub(super) fn text_field(ui: &mut Ui, salt: &str, current: &str, width: f32) -> Option<String> {
     let id = field_id(ui, salt);
     let mut buf: String = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| current.to_string());
-    let r = ui.add(egui::TextEdit::singleline(&mut buf).desired_width(width));
+    let r = ui.add(egui::TextEdit::singleline(&mut buf).desired_width(width.max(40.0)));
     if r.has_focus() {
         ui.data_mut(|d| d.insert_temp(id, buf.clone()));
     } else {
@@ -114,7 +115,9 @@ pub(super) fn text_key(ui: &mut Ui, salt: &str, current: &str, suggestions: &[St
             if picked.is_some() {
                 out = picked;
             }
-            if let Some(v) = text_field(ui, salt, current, 96.0) {
+            // The field takes the row's remaining width (the Inspector's column is the limit, not a fixed 96 px).
+            let width = ui.available_width();
+            if let Some(v) = text_field(ui, salt, current, width) {
                 out = Some(v);
             }
         });
@@ -535,7 +538,7 @@ pub fn army(ui: &mut Ui, cx: &Ctx, at: &Locator, a: &ArmySpec) -> Option<Edit> {
                         });
                     }
                     if let Some(b) = &a.battle {
-                        if let Some(v) = text_field(ui, "army-battle", b, 180.0) {
+                        if let Some(v) = text_field(ui, "army-battle", b, ui.available_width()) {
                             edit = Some(set(at, "battle", Value::from(v.as_str())));
                         }
                     }

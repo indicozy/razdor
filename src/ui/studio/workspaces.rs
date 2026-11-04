@@ -24,6 +24,7 @@ pub const FOLD_W: f32 = 1600.0;
 const MAP_LAYOUT: &str = "map-ux3";
 const STORY_LAYOUT: &str = "story-ux5";
 const DATA_LAYOUT: &str = "data-ux5";
+const TEST_LAYOUT: &str = "test-ux6";
 
 /// One of the four workspaces.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,7 +50,7 @@ impl WsKind {
             WsKind::Map => MAP_LAYOUT,
             WsKind::Story => STORY_LAYOUT,
             WsKind::Data => DATA_LAYOUT,
-            WsKind::Test => "test",
+            WsKind::Test => TEST_LAYOUT,
         }
     }
 
@@ -169,7 +170,8 @@ pub fn default_dock(kind: WsKind, width: f32, side: bool) -> DockState<Tab> {
             dock
         }
         WsKind::Test => {
-            let mut dock = DockState::new(vec![Tab::Battle, Tab::Scores]);
+            // The centre's switch is the tabs: Бой, ИИ, Оценка (UX6, spec §4.2).
+            let mut dock = DockState::new(vec![Tab::Battle, Tab::AiTest, Tab::Scores]);
             let tree = dock.main_surface_mut();
             let _ = tree.split_right(NodeIndex::root(), share(w - inspector, w), vec![Tab::Inspector]);
             dock
@@ -227,6 +229,15 @@ mod tests {
     }
 
     #[test]
+    fn the_test_workspace_switches_between_the_three_views() {
+        let t = tabs(&default_dock(WsKind::Test, 1280.0, false));
+        for tab in [Tab::Battle, Tab::AiTest, Tab::Scores] {
+            assert!(t.contains(&tab), "{tab:?} is one of the Тест views");
+        }
+        assert_eq!(t.iter().filter(|x| **x == Tab::Inspector).count(), 1, "the Inspector is the right column, once");
+    }
+
+    #[test]
     fn the_side_option_puts_the_script_beside_the_map() {
         assert!(!tabs(&default_dock(WsKind::Map, 1280.0, false)).contains(&Tab::Script));
         assert!(tabs(&default_dock(WsKind::Map, 1280.0, true)).contains(&Tab::Script));
@@ -264,7 +275,7 @@ mod tests {
     #[test]
     fn the_workspace_keys_and_commands_are_fixed() {
         assert_eq!(WsKind::of_command("ws-data"), Some(WsKind::Data));
-        assert_eq!(WsKind::Test.key(), "test");
+        assert_eq!(WsKind::Test.key(), "test-ux6", "the Test layout is keyed by its version: UX6 adds the ИИ tab");
         assert_eq!(WsKind::Map.index(), 0);
         assert_eq!(WsKind::Test.index(), 3);
     }

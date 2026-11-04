@@ -29,13 +29,14 @@ The studio has four workspaces. Switch between them with the buttons in the top 
 * **Map** — the map, the stamps on the left, the minimap and Scene on the right.
 * **Story** — the outline on the left (the tabs Story, Characters and Variables), the story or campaign graph in the centre.
 * **Data** — on the left a choice of Units, Items, Texts, Package and Files; the chosen view in the centre. Files shows the file tree on the left and the code editor in the centre.
-* **Test** — the battle test and the package's scores.
+* **Test** — three views on the whole area, switched by the tabs Battle, AI and Scores: the battle test,
+  the AI viewer on the map, and the package's two scores.
 
 Each workspace has the Inspector on the right. The studio remembers each workspace's window layout;
 **Reset layout** brings back the original one.
 
-The top bar holds Save, Undo and Redo, **Check** (F7), **Play** (F5, not working yet), the Package menu,
-**Settings** (Ctrl+,) and Exit. The bottom has the status bar (the cell under the pointer, the tool's hint,
+The top bar holds Save, Undo and Redo, **Check** (F7), **Play** (F5), the Package menu, the command field
+«Commands and objects» (the palette), **Settings** (Ctrl+,) and Exit. The bottom has the status bar (the cell under the pointer, the tool's hint,
 whether the package is saved) and the bottom panel with the tabs Problems, Output and Claude. The panel is
 closed; it opens with Ctrl+J, and by itself when a new error appears.
 
@@ -46,7 +47,67 @@ cancels). A key that another command has is refused, and the page says which com
 puts one command back, **Reset all** puts back all of them. The shortcuts are kept in the program's
 settings, not in the package.
 
+The default list:
+
+| Action | Shortcut |
+|---|---|
+| Save / save all | Ctrl+S / Ctrl+Shift+S |
+| Undo / redo | Ctrl+Z / Ctrl+Shift+Z (also Ctrl+Y) |
+| Command palette / go to an object or file | Ctrl+Shift+P / Ctrl+P |
+| Workspaces Map, Story, Data, Test | Alt+1 … Alt+4 |
+| Check | F7 |
+| Play | F5 |
+| Bottom panel | Ctrl+J |
+| Hide or show the side panels | Tab |
+| Find in the current view | Ctrl+F |
+| Open the selection in its file | Ctrl+Shift+O |
+| Cancel, close a window, drop a floating paste | Esc |
+| Settings | Ctrl+, |
+
+On the Map, tools: V select and move; B brush; E eraser; G fill; I eyedropper; M marquee; L lasso;
+W magic wand; S stamp; A army; U building; P point; H hand (R trigger zone, not available yet).
+
+On the Map, the rest: [ and ] brush size; Shift+[ and Shift+] density by 10 %; 1–6 and 9 brush sizes;
+Shift+click a straight line from the last point; Alt (hold) eyedropper while painting; X swaps the last two
+picks; Space (hold), middle button or H pans; Ctrl+=, Ctrl+-, Ctrl+0, Ctrl+1 and Ctrl+wheel zoom; Shift and
+Alt while selecting add and subtract (Tiled and Godot use Ctrl); Ctrl+A, Ctrl+D, Ctrl+Shift+I select all,
+deselect, invert; Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+Shift+V copy, cut, paste, paste in place; Enter commits a
+paste; Delete and Backspace delete; Alt+drag (tool V) copies an object; Ctrl+Alt+S saves the selection as a
+stamp; Alt+click a layer's eye shows only that layer.
+
+In the Story view: F frames the selected node, Home the whole graph; Ctrl+F finds a node; Delete removes a
+node; Ctrl+D copies a node. In Data: arrows move between cells; Enter or F2 edit; Esc cancels; Ctrl+C and
+Ctrl+V copy and paste cells; Ctrl+F filters. In the Inspector, Ctrl+F searches the fields while the
+Inspector has the focus. One key does different things in different views (Ctrl+F, Ctrl+D, Ctrl+C and
+Ctrl+V): the one for the view you are in acts.
+
 The interface scale (80 % to 150 %) is in the same Settings window. No text is drawn smaller than 12 pixels.
+
+## Command palette and go to
+
+**Ctrl+Shift+P** opens the command palette: every command of the studio, with its icon, name and shortcut.
+Type part of a name (in Russian or English, or the command's id): the list narrows, the arrows pick a row,
+Enter runs it, Esc closes. A click runs a row too.
+
+**Ctrl+P** opens go to: the package's files, maps, armies, buildings, triggers, dialogs, units, items,
+characters and variables. The choice opens in its own workspace: a map, army or building on the Map; a
+trigger or dialog in the Story; a variable or a character in the Story's outline tabs; a unit or an item in
+Data; a file in Data › Files, at its line.
+
+The «Commands and objects» field in the top bar opens the palette with both commands and objects. While the
+palette is open the studio's shortcuts wait: the keys go to its search field.
+
+## Play (F5)
+
+**Play** saves the open files and starts the game on the package's shown map in its own window: the game opens
+the package as it does for a normal game with a package (the hero is picked first). The studio stays open, and
+the status bar says «The game is running» while the game's window is open.
+
+The game does not start, and the studio says why (in the Output, or in Problems for errors in the package):
+
+* the game's folder is not set (`RAZDOR_DT_DIR`);
+* the package has errors (run **Check**, F7, first: its errors are in Problems);
+* no map is open.
 
 ## Windows
 
@@ -236,23 +297,23 @@ battle itself; this one does not.
 
 ## AI viewer
 
-On the Map tab, tick «AI viewer». A strip appears with the number of days (30 by default) and «Run». The
-map runs with the same calculation as `razdor-pack sim`: the armies' AI, the hero where he starts, dialogs
-answered by the first choice.
+The AI tab of the Test workspace shows the map read-only: you can move and zoom it, not edit it. The top
+row has the number of days (30 by default) and **Run**. The map runs with the same calculation as
+`razdor-pack sim`: the armies' AI, the hero where he starts, dialogs answered by the first choice.
 
 - **The day slider** shows the armies at their cells on that day. Coloured trails show their last five days;
   the number on an army is its place in the map's order.
 - **Story.** Triggers that name a cell (the hero enters a cell, an army arrives at one) are marked with a
   diamond and their id from the day they fired.
-- **Log.** Lines «day: what happened». A click on a line moves the slider to its day.
-- The game's files are needed (`RAZDOR_DT_DIR`); without them the strip says so. «Cancel» stops a run.
+- **Log** under the map. Lines «day: what happened». A click moves the slider to that day and opens the object
+  of the event: the trigger or dialog in the Story, the army or the cell on the Map.
+- The game's files are needed (`RAZDOR_DT_DIR`); without them the panel says so. **Cancel** stops a run.
 
-Not shown: moments without a cell (a dialog, a variable) are only in the log; buildings and garrisons
-are not marked by day.
+Moments without a cell (a dialog, a variable) are only in the log.
 
 ## Scores
 
-The Scores tab, at the bottom beside Problems, Characters and Variables, shows two numbers for the open map.
+The Scores view of the Test workspace shows two numbers for the open map, side by side, each at the full height with its breakdown.
 
 - **Richness** is DT's playability score: the more content (events, armies, buildings), varied terrain and
   even rewards, the higher. Penalties come off for monotonous terrain, scattered buildings, castles and villages
@@ -264,18 +325,14 @@ The Scores tab, at the bottom beside Problems, Characters and Variables, shows t
   guide (a hunting army with no goal, a meeting area that does not cover its army, a neutral army, a town as a
   capture goal).
 
-A click on a line selects what it describes: an object, army or building, a cell (highlighted in yellow), or a
-line of a file in the Script. The numbers update after each change; while they are counted the tab shows the
+A click on a line takes you to what it describes: an army or a building opens on the Map (its fields show in the
+Inspector), a cell is highlighted in yellow on the Map, a file's line opens in Data › Files. The numbers update after each change; while they are counted the tab shows the
 last result. Health only warns: it never stops a save or a play. The game's files are needed
 (`RAZDOR_DT_DIR`).
 
 ## Not yet
 
 The studio does not have route checks for every story yet. These come in later versions.
-
-The studio is being rebuilt in steps. Not done yet: the command palette
-(Ctrl+Shift+P) and go to an object (Ctrl+P), the Play button (F5), and the AI
-viewer inside Test (it is still on the map).
 
 ## .DTm maps
 

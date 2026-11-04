@@ -780,7 +780,8 @@ impl Viewer<'_> {
                 kit::row(ui, &q, tr("Text"), &format!("{kind_key}.text"), None, |ui| ui.label(text.as_str()));
             }
             let rename = kit::row(ui, &q, tr("Rename to"), &format!("{kind_key}.id"), None, |ui| {
-                ui.add(TextEdit::singleline(&mut self.scen.record_rename).desired_width(120.0));
+                let width = ui.available_width().max(120.0);
+                ui.add(TextEdit::singleline(&mut self.scen.record_rename).desired_width(width));
                 ui.button(tr("Rename")).on_hover_text(tr("Renames the id in every file that names it, and its name keys (one undo step)")).clicked()
             });
             if rename.value == Some(true) {
