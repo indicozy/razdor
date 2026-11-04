@@ -300,6 +300,23 @@ day). The M5 fixes: `to_package` drops objects under a building's footprint (wor
 `generated` snapshot's copy and the generator tests' folders are removed by drop guards (`TempCopy`,
 `TempDir`; the snapshot releases its copy in `exit_now`).
 
+Scores (phase 2, milestone 7): `studio/richness.rs` is DT's playability score (mapcheck-files.md §6, the rebuild
+on `dt-editor`) on a package: the compiled map's armies, buildings, terrain and objects as the DT records they
+become, the package's triggers and dialogs as events (the table in `events_of`), the victory as the compiled map's
+own event; a term with no package equivalent is listed «не в формате» with no points. `studio/health.rs` is Health:
+reachability (`pack::reach`), the scripted fights on the battle tester's engine (one run each, the hero's starting
+squad, cached by the content hash of the map, units and items), the gold budget over 30 days, the dead ends (a
+once-only offer gated on gold, a «later» answer whose dialog never returns, a named character removed or who may die
+in a fight), and the guide §8 traps the files show (`hunting_no_goal`, `hero_enters_misses_army`,
+`hero_enters_overlap`, `escort_blocks`, `attack_hero_waits`, `sheltered_victory`, `capture_town`, `altar_target`,
+`income_not_held`; a story fight the squad loses is `fight_lost`, whichever choice starts it). Health warns and never blocks; its 0 to 100 summary is
+Razdor's own measure. `studio/scores.rs` is the job and its thread (newest first, like the build thread): a job per
+applied rebuild. UI: `ui/studio/scores.rs`, the «Оценка» tab in the bottom group; a line selects its targets (an
+object, army, building, point, the hero, a cell highlighted on the canvas, or a file line). MCP: the `scores` tool.
+Tests: the rebuild's own cases on DT inputs (`studio::richness`), the health checks on copies with an added trigger
+or dialog (`studio::health`), the JSON of both scores (`studio::mcp`). Snapshot options: `scores` (brod) and
+`scores-generated` (a copy of the generated map). The generator's default clock is the seed (see OPEN_QUESTIONS).
+
 ## The map translator (`razdor-translate`)
 
 Not part of the original game (asked for by the owner): a second program that writes English

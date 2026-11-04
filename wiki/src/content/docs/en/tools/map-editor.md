@@ -168,6 +168,25 @@ answered by the first choice.
 Not shown: moments without a cell (a dialog, a variable) are only in the log; buildings and garrisons
 are not marked by day.
 
+## Scores
+
+The Scores tab, at the bottom beside Problems, Characters and Variables, shows two numbers for the open map.
+
+- **Richness** is DT's playability score: the more content (events, armies, buildings), varied terrain and
+  even rewards, the higher. Penalties come off for monotonous terrain, scattered buildings, castles and villages
+  without income, empty ruins and quests that nothing completes. The number under the curve is the score.
+- **Health** runs from 0 to 100. It is not DT's score but Razdor's own measure: 100 less the findings (a
+  warning takes 10, a note 2). The findings are: places the hero cannot walk to; scripted fights the starting
+  squad loses; the gold budget against the wages; dead ends (a once-only offer gated on gold, a «later» answer
+  whose dialog never comes back, a named character who can be removed or killed); and the traps of the editor's
+  guide (a hunting army with no goal, a meeting area that does not cover its army, a neutral army, a town as a
+  capture goal).
+
+A click on a line selects what it describes: an object, army or building, a cell (highlighted in yellow), or a
+line of a file in the Script. The numbers update after each change; while they are counted the tab shows the
+last result. Health only warns: it never stops a save or a play. The game's files are needed
+(`RAZDOR_DT_DIR`).
+
 ## Not yet
 
 The studio does not have route checks for every story yet. These come in later versions.

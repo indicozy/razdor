@@ -33,9 +33,11 @@ pub struct Request {
 }
 
 /// The default Randomize clock of a seed: the original reads the processor's time-stamp
-/// counter there, which Razdor cannot replay, so the seed stands in for it.
+/// counter there, which Razdor cannot replay, so the seed stands in for it. The clock is the seed
+/// itself (milestone 7): a stand-in that scrambled the seed made the default maps sparse (seed
+/// 4242 on a 100 map gave 1 building and 1 army, where clock 4242 gives 8 and 4).
 pub fn clock_of(seed: i32) -> u32 {
-    (seed as u32).wrapping_mul(0x9e37_79b9) | 1
+    seed as u32
 }
 
 /// The world generator's three steps (each on or off) and its settings.

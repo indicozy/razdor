@@ -104,7 +104,7 @@ fn a_client_with_the_token_talks_json_rpc_to_the_studio() {
 
     let listed = client.call(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
     let names: Vec<&str> = listed["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["get_state", "check", "sim", "query_refs", "focus", "snapshot"]);
+    assert_eq!(names, ["get_state", "check", "scores", "sim", "query_refs", "focus", "snapshot"]);
 
     let state = client.call(json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "get_state", "arguments": {} } }));
     assert!(state["result"]["content"][0]["text"].as_str().unwrap().contains("first-light"));
@@ -180,4 +180,38 @@ fn query_refs_finds_the_variable_and_the_army_uses_of_hello_story() {
     assert_eq!(found["uses"], json!([]));
     assert!(found["covers"].as_str().unwrap().contains("dialog choices"));
     drop(server);
+}
+
+/// The `scores` tool needs the game's files: without them it says so (the fake window has no
+/// install), and the tool is listed with its name between `check` and `sim`.
+#[test]
+fn scores_without_the_install_says_what_it_needs() {
+    let (server, file) = start("scores");
+    let runtime = read_runtime(&file).unwrap();
+    let (mut client, _) = Client::open(runtime.port, &runtime.token);
+    let reply = client.call(json!({ "jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": { "name": "scores", "arguments": {} } }));
+    assert_eq!(reply["result"]["isError"], true, "{reply}");
+    let text = reply["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("RAZDOR_DT_DIR"), "{text}");
+    drop(server);
+}
+
+/// The JSON of both scores: the items' targets are objects with a kind, and the findings name their check.
+#[test]
+fn the_scores_json_names_its_targets() {
+    use crate::studio::health::{Finding, Health, Severity};
+    use crate::studio::richness::Score;
+    use crate::studio::scores::{Item, Scores, Target as ScoreTarget};
+    let s = Scores {
+        map: "brod".into(),
+        richness: Ok(Score { total: 10, curve_value: 3, stages: [10, 10, 10, 10], variety: Default::default(), quests: 0, items: vec![Item::new("Armies", "x", 5, "army 1", "", vec![ScoreTarget::Army("toll".into()), ScoreTarget::Cell(3, 4)])] }),
+        health: Health { findings: vec![Finding { kind: "fight_lost", severity: Severity::Warning, note: "x", name: "army toll".into(), figures: String::new(), targets: vec![ScoreTarget::Line { file: "triggers/brod.toml".into(), line: 9 }] }], summary: 90 },
+    };
+    let v = super::tools::scores_json(&s);
+    assert_eq!(v["richness"]["items"][0]["targets"][0], json!({ "kind": "army", "id": "toll" }));
+    assert_eq!(v["richness"]["items"][0]["targets"][1], json!({ "kind": "cell", "x": 3, "y": 4 }));
+    assert_eq!(v["health"]["summary"], 90);
+    assert_eq!(v["health"]["findings"][0]["check"], "fight_lost");
+    assert_eq!(v["health"]["findings"][0]["severity"], "warning");
+    assert_eq!(v["health"]["findings"][0]["targets"][0], json!({ "kind": "line", "file": "triggers/brod.toml", "line": 9 }));
 }

@@ -15,12 +15,13 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   100 %), or give the seed a job (a placement shuffle would be an invented rule, not allowed without the RE). Field
   battles (sieges) keep a seed (`field::Field`), outside the tester.
 - **Generator clock (Razdor Studio).** The original's world generator seeds its `Randomize` from the processor's
-  time-stamp counter, which Razdor cannot replay; the studio derives that clock from the map's seed instead
-  (`gen::clock_of`), so the same seed gives the same world but not the original's world for a given clock. Checked in milestone 6: a 100 map of
-  seed 4242 gets 1 building and 1 army with `clock_of` and 8 buildings and 4 armies with clock 4242; the editor's
-  rebuild on the same install gives the same two pairs, so the port agrees and the 1 comes from the clock. The
-  new-map terrain has no clock dependence and matches the original's pinned hash. Owner's call: keep the seed
-  derivation, or let the window take a clock.
+  time-stamp counter, which Razdor cannot replay, so the studio takes the map's seed as that clock
+  (`gen::clock_of(seed) = seed`, milestone 7). The milestone 6 stand-in scrambled the seed and made the default maps
+  sparse: a 100 map of seed 4242 got 1 building and 1 army, and gets 8 and 4 with the clock 4242 (the editor's
+  rebuild on the same install gives the same pairs; `gen::tests::the_default_clock_is_the_seed_and_fills_the_map`).
+  The same seed gives the same world, but not the original's world for a given clock. The new-map terrain has no
+  clock dependence and matches the original's pinned hash. Owner's call: keep the seed as the clock, or let the
+  window take a clock.
 - **Worldgen stage tests not ported (generator).** The original's per-stage unit tests of `src/editor/worldgen`
   (sectors, roads, bridges, economy, the army builder) are not in `src/studio/gen` yet; the install's pinned
   counts and the stand-in tests cover the step as a whole.

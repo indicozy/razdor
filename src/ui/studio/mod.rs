@@ -22,6 +22,7 @@ mod forms;
 mod mcp;
 mod inspector;
 mod map_tab;
+mod scores;
 mod newmap;
 mod records;
 mod scene;
@@ -117,6 +118,8 @@ pub enum Tab {
     Items,
     /// The battle tester: two sides, N battles on the game's engine (`battletest.rs`).
     Battle,
+    /// The two scores: Richness and Health, each with its breakdown (`scores.rs`).
+    Scores,
 }
 
 impl Tab {
@@ -140,6 +143,7 @@ impl Tab {
             Tab::Units => tr("Units"),
             Tab::Items => tr("Items"),
             Tab::Battle => tr("Battle test"),
+            Tab::Scores => tr("Scores"),
         }
     }
 }
@@ -185,6 +189,12 @@ pub struct StudioScreen {
     want_build: bool,
     /// The snapshot's build waits for its result before the first frame is drawn.
     wait_build: bool,
+    /// The snapshot's scores wait for their result after the build (`scores`, `scores-generated`).
+    wait_scores: bool,
+    /// The scores thread and the last scores (`scores.rs`).
+    scores: scores::State,
+    /// The copy of the package a generator snapshot works on (removed with the screen).
+    snapshot_copy: Option<razdor::studio::gen::apply::TempCopy>,
     /// The Check button was pressed: its counts are logged when the build comes back.
     check_asked: bool,
     /// The canvas's marks are to be made again (the text or the diagnostics changed).
@@ -277,6 +287,9 @@ impl StudioScreen {
             applied: 0,
             want_build: true,
             wait_build: false,
+            wait_scores: false,
+            scores: scores::State::start(),
+            snapshot_copy: None,
             check_asked: false,
             marks_dirty: true,
             opened: None,
@@ -309,6 +322,13 @@ impl StudioScreen {
     /// `overlap`, `reach`, `grid`, `footprints`, `tool=<name>`, `building=<id>`. None keeps the
     /// Script as it is.
     pub fn preselect(&mut self, map: Option<&str>, army: Option<&str>, opts: &[&str]) -> Result<(), String> {
+        // `scores-generated` adds a map, so it runs on a copy of the package, removed with the screen
+        // (`generated` is copied by the scene, `ui::snapshot`), and the package the scene names is never written.
+        if opts.contains(&"scores-generated") {
+            let copy = razdor::studio::gen::apply::copy_package(&self.ws.root)?;
+            self.ws = Workspace::open(copy.path())?;
+            self.snapshot_copy = Some(copy);
+        }
         if let Some(id) = map {
             // The package is built in the background, so the map is looked for in the folder.
             if !self.ws.root.join("maps").join(id).join("map.toml").is_file() {
@@ -336,6 +356,11 @@ impl StudioScreen {
                 }
                 "aiview" => self.snap_todo.push("aiview"),
                 "generated" => self.snapshot_generated()?,
+                "scores" => self.snap_scores(),
+                "scores-generated" => {
+                    self.snapshot_generated()?;
+                    self.snap_scores();
+                }
                 "side" => self.dock = layout(true),
                 "stale" => self.snapshot_stale()?,
                 "conflict" => self.snapshot_conflict(&path)?,
@@ -562,6 +587,11 @@ impl StudioScreen {
             self.wait_build = false;
             self.wait_for_build();
         }
+        self.scores.poll();
+        if self.wait_scores {
+            self.wait_scores = false;
+            self.scores.wait();
+        }
         self.refresh_marks();
         self.canvas.ai.poll();
         self.battle.poll();
@@ -678,6 +708,12 @@ impl StudioScreen {
 
     /// The snapshot's generated map: the fixed seed on the 100-cell land, all three steps, added
     /// to the (copied) package and shown.
+    /// The snapshot of the Scores tab: its picture waits for the scores of the shown map.
+    fn snap_scores(&mut self) {
+        self.wait_scores = true;
+        self.pending_tab = Some(Tab::Scores);
+    }
+
     fn snapshot_generated(&mut self) -> Result<(), String> {
         // The snapshot runs before the first frame, which is where the install is read: read it here.
         let install = match self.install.clone() {
@@ -743,6 +779,15 @@ impl StudioScreen {
         }
     }
 
+    /// Asks the scores thread for the shown map's scores of the package as it now is.
+    fn request_scores(&mut self) {
+        let job = match (self.ws.package(), self.maps.map.clone()) {
+            (Some(pkg), Some(map)) => Some(razdor::studio::scores::Job { pkg, map, lang: lang().to_string(), install: self.install.clone() }),
+            _ => None,
+        };
+        self.scores.request(job);
+    }
+
     /// Applies one finished rebuild, if it is newer than the last one applied.
     fn apply_build(&mut self, gen: u64, result: Result<razdor::studio::build::Built, String>) {
         match result {
@@ -751,6 +796,7 @@ impl StudioScreen {
                 let done = self.ws.install(built);
                 self.apply_installed(done);
                 self.keep_a_map();
+                self.request_scores();
             }
             Ok(_) => {}
             Err(e) => self.log.push(e),
@@ -964,6 +1010,7 @@ impl StudioScreen {
             install: self.install.clone(),
             battle: &mut self.battle,
             battle_req: &mut self.battle_req,
+            scores: &self.scores,
         };
         DockArea::new(&mut self.dock)
             .style(style)
@@ -1239,7 +1286,7 @@ fn layout(side: bool) -> DockState<Tab> {
     let [_inspector, _side] = tree.split_below(inspector, 0.55, vec![Tab::Minimap, Tab::Stamps]);
     let [centre, files] = tree.split_left(centre, 0.25, vec![Tab::FileSystem]);
     let [_files, _scene] = tree.split_below(files, 0.5, vec![Tab::Scene]);
-    let [centre, _bottom] = tree.split_below(centre, 0.75, vec![Tab::Problems, Tab::Characters, Tab::Vars, Tab::Output, Tab::Claude]);
+    let [centre, _bottom] = tree.split_below(centre, 0.75, vec![Tab::Problems, Tab::Characters, Tab::Vars, Tab::Scores, Tab::Output, Tab::Claude]);
     if side {
         tree.split_right(centre, 0.5, vec![Tab::Script]);
     }
@@ -1308,6 +1355,8 @@ struct Viewer<'a> {
     /// The battle tester's state, and its request for after the dock (start, cancel, watch).
     battle: &'a mut battletest::BattleTest,
     battle_req: &'a mut Option<battletest::Req>,
+    /// The scores of the shown map (`scores.rs`), read by the Scores tab.
+    scores: &'a scores::State,
 }
 
 impl Viewer<'_> {
@@ -1362,6 +1411,7 @@ impl TabViewer for Viewer<'_> {
             Tab::Units => self.units_screen(ui),
             Tab::Items => self.items_screen(ui),
             Tab::Battle => self.battle_tab(ui),
+            Tab::Scores => self.scores_dock(ui),
         }
     }
 

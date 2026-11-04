@@ -165,6 +165,8 @@ pub struct Canvas {
     pub passable: bool,
     pub patrols: bool,
     pub fog: bool,
+    /// The cells a Scores line selects (`scores.rs`), outlined on the canvas (not saved).
+    pub score_cells: Vec<(i64, i64)>,
     /// Whether the tab was drawn in this frame (the snapshot's canvas is taken only then).
     pub shown: bool,
     /// The live diagnostics on the map's tables (`studio::map::marks`).
@@ -220,6 +222,7 @@ impl Default for Canvas {
             reach: false,
             passable: false,
             patrols: false,
+            score_cells: Vec::new(),
             fog: false,
             shown: false,
             marks: Vec::new(),
@@ -1290,6 +1293,9 @@ pub fn draw(canvas: &mut Canvas, maps: &MapView, pkg: Option<&Package>, selectio
         for p in &layers.patrols {
             patrol(cam, &p.army, &p.cells);
         }
+    }
+    for &(x, y) in &canvas.score_cells {
+        outline(cam, CellRect::brush(x as i32, y as i32, 1), 2.0, mq::Color::new(1.0, 0.85, 0.2, 0.95));
     }
     if let Some(spec) = spec {
         hero_marker(cam, spec.hero.cell);

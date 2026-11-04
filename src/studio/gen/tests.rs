@@ -257,6 +257,27 @@ fn the_install_gives_the_pinned_counts() {
 }
 
 
+/// The default clock is the seed (milestone 7): the window and the snapshot use `clock_of`, so the
+/// seed alone gives the world. Seed 4242 on a 100 map was 1 building and 1 army under the old
+/// stand-in and is 8 and 4 with the clock 4242 (milestone 6's measurement); the install checks it.
+#[test]
+fn the_default_clock_is_the_seed_and_fills_the_map() {
+    assert_eq!(super::clock_of(4242), 4242);
+    assert_eq!(super::clock_of(1), 1);
+    let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+    let dt = crate::dt::install::DtInstall::load(Path::new(&dir)).expect("install loads");
+    let data = super::InstallData::from_install(&dt).expect("the install's data");
+    let src = data.sources();
+    let req = Request {
+        map: newmap::Options { size: 100, kind: newmap::LAND, keep: true, rebuild: true, ..newmap::Options::default() },
+        seed: 4242,
+        clock: super::clock_of(4242),
+        world: Some(World { buildings: true, economy: true, armies: true, options: super::worldgen::Options::new(100) }),
+    };
+    let g = generate(&req, &src, &AtomicBool::new(false)).expect("generates");
+    assert_eq!((g.scenario.buildings.len(), g.scenario.armies.len()), (8, 4));
+}
+
 /// A copy of the example package in a temporary folder, removed when dropped.
 struct ExampleCopy(PathBuf);
 

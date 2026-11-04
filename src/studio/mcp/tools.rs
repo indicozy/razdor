@@ -1,8 +1,9 @@
-//! The six tools of the studio's MCP server: `get_state`, `check`, `sim`, `query_refs`, `focus` and
-//! `snapshot`. Their schemas (`list`) and their calls (`call`). The checks and the sim are the CLI's
+//! The seven tools of the studio's MCP server: `get_state`, `check`, `scores`, `sim`, `query_refs`,
+//! `focus` and `snapshot`. Their schemas (`list`) and their calls (`call`). The checks and the sim are the CLI's
 //! own: `check` is `build::run` and `Report::to_json` (what `razdor-pack check --json` prints), `sim`
 //! is `sim::sim_map` with `--trace --json`'s options and reply. Nothing here edits a file.
 
+use std::sync::Arc;
 use std::thread;
 
 use serde_json::{json, Value};
@@ -12,7 +13,9 @@ use super::image;
 use crate::pack::sim::{check_presets, parse_set, sim_map, Choices, SimOptions};
 use crate::pack::uses::{uses, Target};
 use crate::studio::build::{self, Built, Job};
+use crate::studio::health::{self, Severity};
 use crate::studio::map::Selection;
+use crate::studio::scores::{self, Scores, Target as ScoreTarget};
 use crate::studio::vars::variable_uses;
 
 /// The longest a sim may run, in story days.
@@ -63,6 +66,15 @@ pub fn list() -> Value {
             "name": "check",
             "description": "Checks the package as it is now, including unsaved edits in the studio: the errors and warnings of the package format, each with its file, line, message and hint. Run it after every edit. Errors block play; warnings do not. Same JSON as `razdor-pack check --json`.",
             "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+        },
+        {
+            "name": "scores",
+            "description": "The map's two scores: Richness (DT's playability score, 0 and up: the curve value and its points) and Health (findings and a 0 to 100 summary; Razdor's own measure, not DT's). Each breakdown item names its targets (an army, building, point, object, hero, a cell, or a file line). Warnings are problems to look at; they do not block. Needs the game's install.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "map": { "type": "string", "description": "The map's id (maps/<id>/). Default: the map open on the canvas." } },
+                "additionalProperties": false
+            }
         },
         {
             "name": "sim",
@@ -130,6 +142,7 @@ pub fn call(host: &dyn Host, name: &str, args: &Value) -> Option<Value> {
             Err(e) => Reply::fail(e),
         },
         "check" => check(host).unwrap_or_else(Reply::fail),
+        "scores" => scores(host, args).unwrap_or_else(Reply::fail),
         "sim" => sim(host, args).unwrap_or_else(Reply::fail),
         "query_refs" => query_refs(host, args).unwrap_or_else(Reply::fail),
         "focus" => focus(host, args).unwrap_or_else(Reply::fail),
@@ -147,6 +160,62 @@ fn built(job: Job) -> Result<Built, String> {
 fn check(host: &dyn Host) -> Result<Reply, String> {
     let built = built(host.job()?)?;
     Ok(Reply::ok(vec![text(built.report.to_json())]))
+}
+
+/// The two scores of a map (`map`, default the shown one), as the Scores tab shows them.
+fn scores(host: &dyn Host, args: &Value) -> Result<Reply, String> {
+    let job = host.job()?;
+    let map = match optional(args, "map")? {
+        Some(m) => m.to_string(),
+        None => job.map.clone().ok_or("no map is open on the canvas: pass `map`")?,
+    };
+    let (lang, install) = (job.lang.clone(), job.install.clone());
+    let pkg = Arc::new(built(job)?.package);
+    let scored = scores::compute(&scores::Job { pkg, map, lang, install }, &mut health::Cache::default())?;
+    Ok(Reply::json(&scores_json(&scored)))
+}
+
+/// A score target as the agent reads it.
+fn target_json(t: &ScoreTarget) -> Value {
+    match t {
+        ScoreTarget::Hero => json!({ "kind": "hero" }),
+        ScoreTarget::Army(id) => json!({ "kind": "army", "id": id }),
+        ScoreTarget::Building(id) => json!({ "kind": "building", "id": id }),
+        ScoreTarget::Point(i) => json!({ "kind": "point", "index": i }),
+        ScoreTarget::Object(i) => json!({ "kind": "object", "index": i }),
+        ScoreTarget::Cell(x, y) => json!({ "kind": "cell", "x": x, "y": y }),
+        ScoreTarget::Line { file, line } => json!({ "kind": "line", "file": file, "line": line }),
+    }
+}
+
+/// Both scores as JSON: the richness (its total, the curve value, the four stages, the quests and its
+/// items) or its error, and the health (the summary and its findings).
+pub(super) fn scores_json(s: &Scores) -> Value {
+    let richness = match &s.richness {
+        Ok(r) => json!({
+            "points": r.total,
+            "score": r.curve_value,
+            "stages": r.stages,
+            "quests": r.quests,
+            "items": r.items.iter().map(|i| json!({
+                "term": i.term, "note": i.note, "name": i.name, "figures": i.figures,
+                "points": i.points, "targets": i.targets.iter().map(target_json).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+        }),
+        Err(e) => json!({ "error": e }),
+    };
+    let findings: Vec<Value> = s
+        .health
+        .findings
+        .iter()
+        .map(|f| json!({
+            "check": f.kind,
+            "severity": match f.severity { Severity::Warning => "warning", Severity::Info => "info" },
+            "note": f.note, "name": f.name, "figures": f.figures,
+            "targets": f.targets.iter().map(target_json).collect::<Vec<_>>(),
+        }))
+        .collect();
+    json!({ "map": s.map, "richness": richness, "health": { "summary": s.health.summary, "findings": findings } })
 }
 
 /// A string argument, required.
