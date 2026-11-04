@@ -29,8 +29,10 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
+pub(crate) mod direct;
 pub(crate) mod flood_pool;
-use flood_pool::{max_in_flight, PlanInput, PlanOutput, Ticket};
+pub(crate) mod window;
+use flood_pool::{max_in_flight, PlanInput, PlanOutput, Search, Ticket};
 
 /// The inputs of a plan's flood that the planner makes ([`Game::plan_flood`]).
 struct PlanFlood {
@@ -40,6 +42,7 @@ struct PlanFlood {
     from: Tile,
     erase: Vec<Tile>,
     reach: i32,
+    search: Search,
 }
 
 use crate::dt::dtm::Army as DtArmy;
@@ -2228,7 +2231,8 @@ impl Game {
                 erase.push(self.next_cell(p, hero));
             }
         }
-        self.plan_flood(uid, PlanFlood { sails, mult, seeds, from: here, erase, reach });
+        let search = search_for(c.experimental, (w.max(0) * h.max(0)) as usize);
+        self.plan_flood(uid, PlanFlood { sails, mult, seeds, from: here, erase, reach, search });
         true
     }
 
@@ -2236,7 +2240,7 @@ impl Game {
     /// result waits in the pending plans until it is written), else at once, from the map's own
     /// costs. At most [`flood_pool::max_in_flight`] plans wait at once: the oldest is written first.
     fn plan_flood(&mut self, uid: u32, input: PlanFlood) {
-        let PlanFlood { sails, mult, seeds, from, erase, reach } = input;
+        let PlanFlood { sails, mult, seeds, from, erase, reach, search } = input;
         self.settle(uid);
         while self.plans.list.len() >= max_in_flight() {
             if let Some((u, ticket)) = self.plans.list.pop_front() {
@@ -2247,14 +2251,14 @@ impl Game {
         let cells = (map.w.max(0) * map.h.max(0)) as usize;
         if flood_pool::offloads(cells) {
             let cost = if sails { map.water_costs() } else { map.land_costs() }.to_vec();
-            let input = PlanInput { geom: map.geometry(), cost, mult, seeds, from, erase, reach };
+            let input = PlanInput { geom: map.geometry(), cost, mult, seeds, from, erase, reach, search };
             match flood_pool::dispatch(input) {
                 Ticket::Ready(out) => self.apply_plan(uid, *out),
                 ticket => self.plans.list.push_back((uid, ticket)),
             }
         } else {
             let cost = if sails { map.water_costs() } else { map.land_costs() };
-            let out = flood_pool::compute_with(map, cost, &mult, &seeds, from, &erase, reach);
+            let out = flood_pool::compute_with(map, cost, &mult, &seeds, from, &erase, reach, search);
             self.apply_plan(uid, out);
         }
     }
@@ -2306,6 +2310,15 @@ impl Game {
             self.apply_plan(u, ticket.wait());
         }
     }
+}
+
+/// The search a plan makes under the experimental rules. «Ускоренный ИИ» (`fast_ai`) turns on both:
+/// the window of [`window::RADIUS`] (only on maps of [`window::MIN_CELLS`] cells or more: a smaller
+/// map plans exactly, the window is slower there) and the A* for a single target. Off is the
+/// original's flood over the whole map.
+pub(crate) fn search_for(rules: super::content::ExperimentalRules, cells: usize) -> Search {
+    let window_on = rules.fast_ai && cells >= window::MIN_CELLS;
+    Search { window: window_on.then_some(window::RADIUS), direct: rules.fast_ai }
 }
 
 /// Closes the footprint `size` at top-left `(x0, y0)` on the multiplier map (0x47650c): the

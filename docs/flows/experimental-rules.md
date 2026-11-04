@@ -1,6 +1,6 @@
 # Experimental scenario rules
 
-The `...` button beside Next on the scenario screen opens seven independent switches,
+The `...` button beside Next on the scenario screen opens eight independent switches,
 all off by default for new games. Choices reset when
 starting a new playthrough from the main menu.
 Returning from hero selection preserves the selection. The switches cannot be changed
@@ -55,6 +55,25 @@ so a playthrough that already had six cells keeps them and no worn item is lost.
   including instant healing and revival potions. Failed attempts consume neither an item
   nor a count. The counter survives saving, loading and campaign carry-over, and resets
   alongside the existing potion block after a battle.
+
+- **Faster AI** («Ускоренный ИИ», default off, `fast_ai`): one switch for two planner searches
+  (`ai::search_for`). On maps of 300×300 cells (`ai::window::MIN_CELLS`) or more, each AI plan
+  floods only a square window of radius 64 around the army (`ai::window::RADIUS`); seeds outside
+  it move to the window's nearest open border cell, valued at their own value plus their octile
+  distance times the map's median passable cost times 2 (`ai::window::step_estimate`). The window
+  is off on smaller maps: measured on the 200×200 map «Другой берег», it was 10–20% slower there,
+  the 129×129 window covering most of the map. A plan with exactly one target cell is an A* path
+  to it (`ai::direct`) at any map size, instead of the flood and the descent: its objective is the
+  flood's (the cell left is charged), erased cells are closed except the target, and no path (or
+  an erased target) gives no direct plan, so the normal planner makes it (the window where it
+  applies, else the whole-map flood). Razdor's own choice: armies move a little differently from
+  the original. See `battle-ai.md` §5c.
+
+The switch is saved as `fast_ai` in the rules block, read with a serde default (old saves have it
+off). It is read where the plan is made: `ai::search_for` turns the rules and the map's size into
+the `flood_pool::Search` that every plan carries (in its input, so the worker threads compute it
+the same way; `compute_routed` reports the route for the tests). With it off `Search::default()`
+is the original's flood, and `ai_fingerprint` is unchanged.
 
 Rules apply to all armies, including opponents, garrisons and subsequently recruited units.
 They live in an isolated per-playthrough Content copy so menu choices never mutate an
@@ -154,16 +173,16 @@ keep the item and show the existing refusal. All equipment rules and potion limi
 
 ## The rules window (new_game.rs `experimental_menu`)
 
-The choice is remembered (the owner's yes, 2026-11-02): when the window closes (OK, Esc, Enter or its close button) and when a game starts, the seven switches are written to `settings.json` (`language::Settings::experimental_rules`, all off on an older file). `open_list` starts from them, so the scenario list's «Экспериментальные правила включены» label shows a remembered choice too.
+The choice is remembered (the owner's yes, 2026-11-02): when the window closes (OK, Esc, Enter or its close button) and when a game starts, the eight switches are written to `settings.json` (`language::Settings::experimental_rules`, all off on an older file). `open_list` starts from them, so the scenario list's «Экспериментальные правила включены» label shows a remembered choice too.
 
 Opened from the scenario list's «Экспериментальные правила» button. Its scale is `display::popup_o`
-fitted to the screen. Its seven rows and OK are touch targets (40 dp on a phone); its texts are one
+fitted to the screen. Its eight rows and OK are touch targets (40 dp on a phone); its texts are one
 px per dp on a phone, grown with the text size (`button_grow`) and never under Normal; the hints
 wrap to its width and the window grows with them. The rows take one, two or three columns: the
 fewest whose height fits the screen (a phone's landscape takes two or three), and the window takes
 the screen's width. The hint lines of the free-units and units-don't-die rules show only while those are on (they say «армии героя»: both rules touch the player's units only). Every label is drawn at the same size; a label too wide for its column wraps to two lines, and every row is then two lines tall. On an upright phone the window is at most 60% of the screen high and has one column: the rows and hints scroll between the title and the OK button (a swipe, the wheel, the bar at the right; `RULES_SCROLL`, kept until the game ends, `RAZDOR_SCENE_SCROLL` for a shot). A row toggles only on a press inside the visible view. Any window that overflows the screen scrolls the same way. Snapshot:
 `RAZDOR_SCENE=scenarios RAZDOR_SCENE_RULES=1`, with `RAZDOR_SCENE_EXPERIMENTAL` keys
-`bonuses,items,potions,cells,free,auto,undying`; the mobile check's case «rules».
+`bonuses,items,potions,cells,free,auto,undying,fast`; the mobile check's case «rules».
 
 ## Battle AI: Caster guard (Максимум)
 

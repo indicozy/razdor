@@ -116,6 +116,41 @@ the timing:
   the hand-off. Any new code that reads or writes an army's path during `ai_move` must settle
   that army first.
 
+## 5c. The world AI's experimental planner («Ускоренный ИИ», off by default)
+
+One switch, `fast_ai`, in `experimental-rules.md`. With it off the planner is §5b's whole-map
+flood, bit for bit (`ai_fingerprint`). `ai_plan` makes the plan's `Search` from the rules and the
+map's size (`ai::search_for`: the window only from `window::MIN_CELLS`, 300×300, the A* always),
+and `flood_pool::compute_routed` takes the route, in this order:
+
+1. **Direct** (`ai::direct`): exactly one distinct seed cell after the flood's own filter (not on
+   a closed cell, not the army's cell) and not erased. A* from that cell back to the army, with
+   the flood's objective (each cell entered is charged its cost × multiplier × the step weight;
+   a closed army cell costs 1; erased cells closed except the target), heuristic the least
+   positive static cost × the octile weight bound, less the last step's saving. No path gives no
+   direct plan. An army on an erased cell stands (an empty path), as the descent does. The test
+   `a_star_path_costs_the_optimum` checks the cost against a plain Dijkstra on random maps (both
+   grids, erasures and closed cells).
+2. **Window** (`ai::window`, maps of 300×300 cells or more only): the flood inside a square of
+   radius 64 around the army (`window::RADIUS`, clipped to the map): the multiplier map is closed
+   outside it, a seed outside moves to the window's cell nearest to it (the clamp to the box, or
+   the nearest open border cell when the clamp is closed; dropped when the border has none),
+   valued at its value plus its octile distance × `step_estimate` (twice the median passable cost
+   of a sample of at most 4096 cells). The erasures and the descent are as §5b.
+3. **Exact**: the whole-map flood (§5b).
+
+Route 1 falls back to 2 or 3 when it makes no plan. The window's and the direct plan's inputs are
+fixed at the plan like the flood's, so §5b's join points and worker threads apply to both
+unchanged (`flood_pool::dispatch` takes the `Search` in its `PlanInput`). Measured: the window is
+10–20% slower than the flood on the 200×200 map «Другой берег», hence the size gate.
+
+Tests: `faster_ai_sets_the_planner_searches` (the mapping and the size gate),
+`the_default_search_is_the_whole_map_flood`, `the_window_switch_plans_inside_its_box`,
+`the_direct_switch_routes_a_single_target_by_a_star` (routes and fallbacks), `window.rs` (bounds,
+closing, seed moves, closed clamps).
+Bench: `RAZDOR_BENCH_RULES=fast` on `bigmap_ai_bench` (the switch for the bench's playthrough;
+none by default).
+
 ## 6. Traps
 
 - Scores are integers with the original's rounding (`experience::round_half_even`) and 32-bit

@@ -133,6 +133,11 @@ pub struct ExperimentalRules {
     /// «Юниты не умирают»: the player's dead units come back with 1 HP after a battle that
     /// their army survives (`Battle::player_results`), as the hero does.
     pub undying_units: bool,
+    /// «Ускоренный ИИ» («Faster AI»): on maps of 300×300 cells or more, each AI plan floods only a
+    /// square window around the army (`ai::window`); and a plan with exactly one target cell is an
+    /// A* path to it (`ai::direct`) instead of the flood. Armies move a little differently from the
+    /// original. See `ai::search_for`.
+    pub fast_ai: bool,
 }
 
 impl ExperimentalRules {
@@ -153,6 +158,8 @@ struct RulesWire {
     free_units: bool,
     auto_promotion: bool,
     undying_units: bool,
+    /// Missing (false) in saves from before the planner switch.
+    fast_ai: bool,
     /// Older switches, read only (see the `From` impl).
     #[serde(skip_serializing)]
     multiple_rings: bool,
@@ -190,6 +197,7 @@ impl From<RulesWire> for ExperimentalRules {
             free_units: w.free_units,
             auto_promotion: w.auto_promotion,
             undying_units: w.undying_units,
+            fast_ai: w.fast_ai,
         }
     }
 }
@@ -204,6 +212,7 @@ impl From<ExperimentalRules> for RulesWire {
             free_units: r.free_units,
             auto_promotion: r.auto_promotion,
             undying_units: r.undying_units,
+            fast_ai: r.fast_ai,
             multiple_rings: false,
             multiple_amulets: false,
             multiple_weapons: false,
@@ -836,5 +845,18 @@ mod experimental_rules_save_tests {
         let old: ExperimentalRules = serde_json::from_str(r#"{"simultaneous_bonuses": true, "no_duplicate_items": true}"#).unwrap();
         assert!(!old.free_units && !old.auto_promotion && !old.undying_units && !old.unlimited_items);
         assert!(old.simultaneous_bonuses);
+    }
+
+    /// The planner switch («Ускоренный ИИ») is written and read back; an older save without it
+    /// reads it off, so the AI plans as before.
+    #[test]
+    fn the_planner_switch_round_trips_and_defaults_off_in_old_saves() {
+        let on = ExperimentalRules { fast_ai: true, ..Default::default() };
+        let json = serde_json::to_value(on).unwrap();
+        assert_eq!(json["fast_ai"].as_bool(), Some(true));
+        assert_eq!(serde_json::from_value::<ExperimentalRules>(json).unwrap(), on);
+        let old: ExperimentalRules = serde_json::from_str(r#"{"unlimited_items": true, "six_cells": true}"#).unwrap();
+        assert!(!old.fast_ai);
+        assert!(old.unlimited_items && old.six_cells);
     }
 }

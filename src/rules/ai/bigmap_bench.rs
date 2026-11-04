@@ -11,7 +11,7 @@ use crate::dt::dtm::{Army as DtArmy, Scenario, Surface};
 use crate::dt::install::{DtInstall, MapEntry};
 use crate::editor::defaults::{new_scenario, NewMap};
 use crate::editor::events::new_event;
-use crate::rules::content::HeroClass;
+use crate::rules::content::{ExperimentalRules, HeroClass};
 use crate::rules::game::STEP_SECONDS;
 use crate::rules::map::{object_class, surface_value};
 
@@ -220,17 +220,27 @@ fn quantile(sorted: &[f64], q: f64) -> f64 {
     sorted[((sorted.len() - 1) as f64 * q).round() as usize]
 }
 
+/// The experimental switches of the bench's playthrough, from `RAZDOR_BENCH_RULES` (a comma list:
+/// `fast` for «Ускоренный ИИ», the one planner switch);
+/// none by default, the original's planner.
+fn bench_rules_from_env() -> ExperimentalRules {
+    let list = std::env::var("RAZDOR_BENCH_RULES").unwrap_or_default();
+    let has = |k: &str| list.split(',').any(|f| f.trim() == k);
+    ExperimentalRules { fast_ai: has("fast"), ..Default::default() }
+}
+
 /// Times the AI's planner on big synthetic maps: one line per size and variant, with the ticks,
 /// the plans, the median, p95 and max of a `Game::tick` (ms) and the total for the 2 days.
-/// `RAZDOR_BENCH_SIZES` (e.g. `200,400`) and `RAZDOR_BENCH_VARIANT` (`armies|events|both`) pick
-/// the maps. Deterministic maps (fixed seeds); time it pinned to one core:
+/// `RAZDOR_BENCH_SIZES` (e.g. `200,400`), `RAZDOR_BENCH_VARIANT` (`armies|events|both`) and
+/// `RAZDOR_BENCH_RULES` (`fast`) picks the maps and the switch. Deterministic maps
+/// (fixed seeds); time it pinned to one core:
 /// `nice -n 19 taskset -c 8 <test binary> bigmap_ai_bench --ignored --nocapture`.
 #[test]
 #[ignore]
 fn bigmap_ai_bench() {
     let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
     let dt = DtInstall::load(std::path::Path::new(&dir)).unwrap();
-    let c = Arc::new(Content::from_dt(&dt));
+    let c = Arc::new(Content::from_dt(&dt).with_experimental(bench_rules_from_env()));
     let template = roaming_template(&dt);
     for side in sizes_from_env() {
         for variant in Variant::from_env() {

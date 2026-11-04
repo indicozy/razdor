@@ -2396,3 +2396,20 @@ fn finish_pause_completes_the_step_and_its_events_come_with_the_next_tick() {
     assert_eq!(got, want);
     assert_eq!(serde_json::to_string(&cut).unwrap(), serde_json::to_string(&whole).unwrap());
 }
+
+// ----------------------------------------------------------------------------------------
+// The experimental searches
+// ----------------------------------------------------------------------------------------
+
+/// «Ускоренный ИИ» sets both searches; off is the original's flood over the whole map.
+#[test]
+fn faster_ai_sets_the_planner_searches() {
+    use crate::rules::content::ExperimentalRules;
+    let big = window::MIN_CELLS;
+    assert_eq!(search_for(ExperimentalRules::default(), big), Search::default());
+    let fast = search_for(ExperimentalRules { fast_ai: true, ..Default::default() }, big);
+    assert_eq!((fast.window, fast.direct), (Some(window::RADIUS), true));
+    // A 200x200 map: the window is off, the single-target A* stays on.
+    let small = search_for(ExperimentalRules { fast_ai: true, ..Default::default() }, 200 * 200);
+    assert_eq!((small.window, small.direct), (None, true));
+}
