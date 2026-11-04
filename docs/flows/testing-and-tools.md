@@ -40,6 +40,27 @@ Known slow-machine failure: `rules::ai::real_maps::thirty_days_on_every_map` has
 budget per map (`RELEASE_BUDGET_SECS`); on slow cores scale it with
 `RAZDOR_PERF_BUDGET_SCALE=2` (РК6 takes about 8 s on E-cores).
 
+## The AI's planner: bench and fingerprint
+
+Two `#[ignore]`d tests in `src/rules/ai/bigmap_bench.rs` (they pass without the install and need
+`RAZDOR_DT_DIR`; the maps are built in memory):
+
+- `bigmap_ai_bench`: 200², 400² and 800² synthetic maps (grass, blobs of forest, marsh, swamp and
+  lakes; 100 roaming AI armies and/or 10 000 never-holding global events). It times each
+  `Game::tick` over 2 game days of endless wait and prints the median, p95 and max per tick and the
+  total. `RAZDOR_BENCH_SIZES` (e.g. `200,400`) and `RAZDOR_BENCH_VARIANT` (`armies|events|both`,
+  default `both`) pick the maps. Time it on one core, pinned away from the desktop's cores:
+
+  ```sh
+  RAZDOR_DT_DIR=<install> nice -n 19 taskset -c 8 <test binary> bigmap_ai_bench --ignored --nocapture
+  ```
+
+- `ai_fingerprint`: prints `<map> <hash>` for every install map (30 days, as `real_maps` plays
+  them), every map of `RAZDOR_COMMUNITY_DIR` (30 days) and every bench map (2 days). The hash
+  (FNV-1a) covers each army's record, the game's generator state, the clock and the plan count.
+  Save the output before a change to the planner and diff it after: identical output proves the AI
+  did not change.
+
 ## Community map smoke test
 
 `rules::ai::real_maps::community_maps_smoke` is the community part of the Definition of Done

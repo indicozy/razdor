@@ -10,7 +10,7 @@ use crate::rules::content::HeroClass;
 use crate::rules::game::BattleResult;
 
 /// Days simulated on every map.
-const DAYS: u64 = 30;
+pub(super) const DAYS: u64 = 30;
 /// Seconds a map may take in a release build, times `RAZDOR_PERF_BUDGET_SCALE` (a float,
 /// 1 by default) for slower cores: the E-cores the tests are pinned to need 2 (РК6 takes ~8 s).
 const RELEASE_BUDGET_SECS: f64 = 5.0;
@@ -22,7 +22,7 @@ fn release_budget_secs() -> f64 {
 }
 
 /// Auto-plays the player's pending battle, the AI on both sides.
-fn fight_it_out(g: &mut Game) -> Outcome {
+pub(super) fn fight_it_out(g: &mut Game) -> Outcome {
     let mut b = g.start_battle();
     b.auto_play_to_end();
     g.resolve_battle(&b);
@@ -59,9 +59,11 @@ fn quick_battles_against_real_armies() {
 }
 
 /// What [`play_days`] saw on one map.
-struct DaysRun {
+pub(super) struct DaysRun {
     /// The AI's counts over the run.
-    ai: AiStats,
+    pub(super) ai: AiStats,
+    /// [`fingerprint`] of the game at the end of the run.
+    pub(super) fingerprint: u64,
     /// Armies at the start and at the end of the run.
     armies: usize,
     armies_after: usize,
@@ -77,7 +79,7 @@ struct DaysRun {
 
 /// Plays `days` days of `s` with the hero standing at his start: he fights whoever comes and
 /// answers yes to every question.
-fn play_days(c: &Arc<Content>, s: &Scenario, days: u64) -> DaysRun {
+pub(super) fn play_days(c: &Arc<Content>, s: &Scenario, days: u64) -> DaysRun {
     let t0 = Instant::now();
     let mut g = Game::from_scenario(c.clone(), s, HeroClass::Knight);
     let end = g.clock.total_minutes() + (days * MINUTES_PER_DAY) as f64;
@@ -107,6 +109,7 @@ fn play_days(c: &Arc<Content>, s: &Scenario, days: u64) -> DaysRun {
         g.wait(4);
     }
     DaysRun {
+        fingerprint: fingerprint(&g),
         ai: g.ai_stats,
         armies,
         armies_after: g.world.armies.len(),
@@ -116,6 +119,21 @@ fn play_days(c: &Arc<Content>, s: &Scenario, days: u64) -> DaysRun {
         stalled: g.clock.total_minutes() < end,
         secs: t0.elapsed().as_secs_f64(),
     }
+}
+
+/// A stable hash of the AI's whole state at a moment: every army's record (its Debug text, which
+/// holds its position, path, countdown, scores, talk counters and path weights), the game's
+/// generator state, the clock and the AI's plan count. FNV-1a over that text; the maps in the
+/// records are ordered (`BTreeMap`), so the text, and the hash, does not depend on the run.
+/// `ai_fingerprint` prints it for every map (`bigmap_bench.rs`).
+pub(super) fn fingerprint(g: &Game) -> u64 {
+    use std::fmt::Write;
+    let mut text = String::new();
+    for a in &g.world.armies {
+        let _ = writeln!(text, "{:?} {:?} {a:?}", a.tile(&g.world.map), a.path);
+    }
+    let _ = writeln!(text, "rng {} clock {} day {} plans {}", g.rng.state(), g.clock.total_minutes().to_bits(), g.clock.day_index(), g.ai_stats.paths);
+    text.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3))
 }
 
 /// Every shipped map for 30 days with the hero standing at his start (he fights whoever

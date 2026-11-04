@@ -3803,3 +3803,6 @@ mod tests;
 #[cfg(test)]
 mod real_maps;
 
+#[cfg(test)]
+mod bigmap_bench;
+
