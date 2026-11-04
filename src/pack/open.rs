@@ -27,7 +27,8 @@ pub struct Opened {
     /// The package's id and version (`package.toml`).
     pub id: String,
     pub version: String,
-    /// The package's content hash ([`package_hash`]).
+    /// The package's content hash ([`package_hash`]). It identifies the package in a save; the
+    /// story's seed does not come from it ([`story_seed`]).
     pub hash: u64,
     /// The path the package was read from: its folder or its `.rzpack`.
     pub path: PathBuf,
@@ -74,9 +75,23 @@ pub fn package_hash(files: &Files) -> u64 {
     fnv1a(&bytes)
 }
 
-/// The seed of a package's story generator: from its hash, never zero.
-pub fn story_seed(hash: u64) -> u32 {
-    (hash as u32) | 1
+/// The run seed a game is opened with when none is named. `razdor-pack sim --seed` names another
+/// (see [`story_seed`]).
+pub const RUN_SEED: u32 = 1;
+
+/// The seed of a package's story generator for a map and a run: FNV-1a over `id/map/run`, odd so
+/// never zero. It comes from the package's id, never its content: a text or unit edit leaves every
+/// battle and roll of the run as it was. (The content hash stays for the save's package check.)
+pub fn story_seed(id: &str, map: &str, run: u32) -> u32 {
+    (fnv1a(format!("{id}/{map}/{run}").as_bytes()) as u32) | 1
+}
+
+impl Opened {
+    /// This map's story seeded for run `run` ([`story_seed`]); the rest of the map is unchanged.
+    pub fn with_run(mut self, run: u32) -> Opened {
+        self.story.seed = story_seed(&self.id, &self.map, run);
+        self
+    }
 }
 
 /// Reads the package at `path` and opens its map `map` (the first map when none is named) on
@@ -115,7 +130,7 @@ pub fn package_scripts(files: &Files) -> BTreeMap<String, String> {
 /// `hash` is the package's [`package_hash`]. The tests open packages this way without an install.
 pub fn build(package: &Package, hash: u64, path: &Path, map: &str, compiled: Compiled, lang: &str) -> Result<Opened, String> {
     let manifest = package.manifest.as_ref().ok_or("the package has no package.toml")?;
-    let mut story = triggers::compile(package, lang, map, &compiled.names, story_seed(hash)).map_err(|errors| errors.join("\n"))?;
+    let mut story = triggers::compile(package, lang, map, &compiled.names, story_seed(&manifest.id, map, RUN_SEED)).map_err(|errors| errors.join("\n"))?;
     story.battles = compiled.names.battles.clone();
     story.scripts = Some(Arc::new(package_scripts(&package.files)));
     let routes = campaign::routes(package, map).map_err(|errors| errors.join("\n"))?;
@@ -231,7 +246,31 @@ mod tests {
         assert_eq!(package_hash(&a), package_hash(&b));
         b.insert("package.toml", "z");
         assert_ne!(package_hash(&a), package_hash(&b));
-        assert_ne!(story_seed(7), 0);
+    }
+
+    #[test]
+    fn the_story_seed_is_the_ids_map_and_run_not_the_content() {
+        assert_eq!(story_seed("pkg", "brod", 1), story_seed("pkg", "brod", 1));
+        assert_ne!(story_seed("pkg", "brod", 1), story_seed("pkg", "brod", 2), "the run seed counts");
+        assert_ne!(story_seed("pkg", "brod", 1), story_seed("pkg", "salt", 1), "the map counts");
+        assert_ne!(story_seed("pkg", "brod", 1), story_seed("other", "brod", 1), "the id counts");
+        assert_eq!(story_seed("pkg", "brod", 3) & 1, 1, "odd, so never zero");
+    }
+
+    /// Two packages that differ only in a text file: the same story seed for the same map and run.
+    #[test]
+    fn a_text_edit_leaves_the_story_seed() {
+        let original = super::test_support::story_package();
+        let mut files = original.files.clone();
+        let text = std::str::from_utf8(original.files.get("texts/en.toml").expect("the texts")).expect("UTF-8").to_string();
+        files.insert("texts/en.toml", format!("{text}\n[extra]\nnote = \"An edit that changes no key the map uses.\"\n"));
+        let (edited, _) = Package::parse(files);
+        assert_ne!(package_hash(&original.files), package_hash(&edited.files), "the hash follows the edit");
+        let a = super::test_support::opened(&original);
+        let b = super::test_support::opened(&edited);
+        assert_eq!(a.story.seed, b.story.seed, "the seed does not follow the content");
+        assert_eq!(a.clone().with_run(5).story.seed, b.clone().with_run(5).story.seed, "the same run seed");
+        assert_ne!(a.clone().with_run(5).story.seed, a.story.seed, "another run seed, another seed");
     }
 
     use crate::dt::install::DtInstall;
@@ -242,10 +281,9 @@ mod tests {
     use crate::rules::triggers::{Ending, Trace, When};
     use std::sync::Arc;
 
-    /// The story seed the chapter tests play with. A package's own seed comes from its hash (every
-    /// file), so any content edit would re-roll chapter 1's dread and omens; the tests pin this one
-    /// (the value the package had when they were written), so only a change to the story itself can
-    /// move them.
+    /// The story seed the chapter tests play with: a fixed value (the one the package's content hash
+    /// gave chapter 1 when the tests were written; the seed no longer comes from content), so only a
+    /// change to the story itself can move them.
     const CHAPTER_ONE_SEED: u32 = 2517464231;
 
     /// Chapter 1 «Брод» of the reference package, on the install (skipped without `RAZDOR_DT_DIR`).

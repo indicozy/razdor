@@ -9,7 +9,9 @@ save's own bytes when those do, and rebuilds the statics. A save with neither is
 All code is in `src/rules/save.rs`; the windows are `src/ui/saves.rs`.
 
 A game of a content package's map (`razdor --pack`) saves with `ScenarioRef::Pack`: the package's
-id, version, content hash, the path it was read from and the map's id. Its save carries no map
+id, version, content hash, the path it was read from and the map's id. The story's generator state (`TriggerState::rng`) is in the save's `triggers`
+field, so a reload resumes the same rolls; the story's seed is never read back from the save
+(`pack::open::story_seed`, from the package id, the map and the run seed). Its save carries no map
 bytes. A load finds the package again (`ui/pack_play.rs` `ensure_pack`, before `save::load`): only
 among the packages the player opened (`packages.json` in the data folder, written by `open_pack`,
 `pack::trust`) and the Hub's `packages/` folder, matched by id, version, hash and map. The save's

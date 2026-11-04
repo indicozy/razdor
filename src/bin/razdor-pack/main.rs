@@ -33,6 +33,8 @@ const HELP: &str = "razdor-pack: content packages (.rzpack) for Razdor 2.0
                              choice taken (--json gives it as data); --choices says how
                              dialogs are answered (first by default; random is seeded;
                              dialog=choice forces that choice, the first elsewhere).
+                             --seed <n> is the run seed of the story (the same n gives the
+                             same dice on any edit of the texts or units).
                              exit status: 0 all played, 1 a panic, a softlock or errors
   razdor-pack play <folder-or-.rzpack> [--map <id>]
                              opens the package's map in Razdor (`razdor --pack`)
