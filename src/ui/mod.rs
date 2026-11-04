@@ -1310,6 +1310,11 @@ impl App {
         #[cfg(target_os = "android")]
         android::follow_orientation(self.audio.settings.orientation);
         #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+        if studio::ux_proto::active() {
+            studio::ux_proto::frame();
+            return;
+        }
+        #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
         if matches!(self.screen, Screen::Studio) {
             self.studio_frame();
             return;

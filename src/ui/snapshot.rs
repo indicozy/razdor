@@ -530,6 +530,12 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             app.open_studio(&dir)?;
             return Ok(());
         }
+        // `studio-ux:<option>`: THROWAWAY UX mockups (`studio::ux_proto`), no package opened.
+        #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
+        "studio-ux" => {
+            super::studio::ux_proto::select(parts.next().unwrap_or("map"));
+            return Ok(());
+        }
         // `studio[:<folder>]`: Razdor Studio on a package folder (the example package by default).
         #[cfg(all(feature = "studio", not(any(target_os = "android", target_os = "ios"))))]
         "studio" => {

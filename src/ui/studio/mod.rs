@@ -31,6 +31,8 @@ mod story_forms;
 mod vars;
 pub(crate) mod scenarios;
 pub mod start;
+// THROWAWAY: the studio UX mockups (`studio-ux:<option>` snapshot scenes; #41, #42).
+pub(crate) mod ux_proto;
 mod watch;
 
 use std::collections::BTreeMap;
