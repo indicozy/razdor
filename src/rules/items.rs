@@ -41,7 +41,6 @@ pub enum EquipError {
     NoFreeSlot,
     /// Already wears an item of this type.
     SameType,
-    DuplicateItem,
     /// Already holds a weapon or staff.
     SecondWeapon,
     /// A melee weapon or shield on a non-warrior, a bow on a non-shooter (or on artillery),
@@ -229,11 +228,17 @@ pub fn take_off(content: &Content, unit: &mut Unit, slot: usize) -> Option<ItemI
 /// the crown on a unit other than the hero or a leader needs one of its unit types (Razdor
 /// fixes the original's off-by-one bug: the code compared the type's index, GlobalIndex − 1,
 /// with the list, so the listed numbers + 1 could wear it); the dead take nothing
-/// but a reviving potion; potions and trade goods are not worn; a shield needs melee
-/// attack at the unit's level; no holy item on a unit of Nature Undead; a melee weapon needs
-/// melee attack, a ranged weapon ranged attack and a type `AttackShot` not above
-/// `ShotWeaponRange`, a staff magic power; an item with a school only on a unit of that
+/// but a reviving potion; potions and trade goods are not worn. Then the classic rules: a
+/// shield needs melee attack at the unit's level; no holy item on a unit of Nature Undead; a
+/// melee weapon needs melee attack, a ranged weapon ranged attack and a type `AttackShot` not
+/// above `ShotWeaponRange`, a staff magic power; an item with a school only on a unit of that
 /// school; one weapon (staffs included); one item of each type.
+///
+/// Razdor's «Без ограничений на предметы» (`unlimited_items`) skips every class, school, holy,
+/// weapon and kind check after the crown, dead and potion refusals: any wearable item goes on
+/// any living fighter while a cell is free. Battle needs no change for it: a worn item's
+/// `AttackBlow`, `AttackShot` and `MagicPower` count only where the unit's own level has them
+/// (`rebuild_stats`), so a bow on a warrior or a staff on a non-mage gives no role.
 pub fn slot_for(content: &Content, unit: &Unit, item: ItemId) -> Result<usize, EquipError> {
     let def = content.try_item(item).ok_or(EquipError::NoSuchItem)?;
     if item.0 == CROWN && unit.wage_kind != WageKind::Leader && !CROWN_TYPES.contains(&unit.def.0) {
@@ -244,6 +249,10 @@ pub fn slot_for(content: &Content, unit: &Unit, item: ItemId) -> Result<usize, E
     }
     if matches!(def.kind, ArtefactType::Potion | ArtefactType::Item) {
         return Err(EquipError::NotWearable);
+    }
+    let free_cell = || unit.items[..slot_count(content)].iter().position(Option::is_none).ok_or(EquipError::NoFreeSlot);
+    if content.experimental.unlimited_items {
+        return free_cell();
     }
     let lvl = unit.base_stats(content);
     if def.kind == ArtefactType::Shield && lvl[Stat::AttackBlow] == 0 {
@@ -265,21 +274,13 @@ pub fn slot_for(content: &Content, unit: &Unit, item: ItemId) -> Result<usize, E
         return Err(EquipError::WrongSchool);
     }
     let worn: Vec<&ArtefactDef> = unit.items[..slot_count(content)].iter().flatten().filter_map(|&i| content.try_item(i)).collect();
-    // Razdor's «Разрешить несколько оружий»: the one-weapon refusal lifts; the class checks above
-    // still apply to each weapon. Every worn weapon's bonuses count, as any worn item's do.
-    if !content.experimental.multiple_weapons && def.kind.is_weapon() && worn.iter().any(|w| w.kind.is_weapon()) {
+    if def.kind.is_weapon() && worn.iter().any(|w| w.kind.is_weapon()) {
         return Err(EquipError::SecondWeapon);
     }
-    let repeated_accessory = (def.kind == ArtefactType::Ring && content.experimental.multiple_rings)
-        || (def.kind == ArtefactType::Amulet && content.experimental.multiple_amulets);
-    if !repeated_accessory && worn.iter().any(|w| w.kind == def.kind) {
+    if worn.iter().any(|w| w.kind == def.kind) {
         return Err(EquipError::SameType);
     }
-    // Razdor's option after the original's refusals, so classic rules still say SameType.
-    if !content.experimental.allow_duplicate_items && unit.items[..slot_count(content)].contains(&Some(item)) {
-        return Err(EquipError::DuplicateItem);
-    }
-    unit.items[..slot_count(content)].iter().position(Option::is_none).ok_or(EquipError::NoFreeSlot)
+    free_cell()
 }
 
 /// Healing of a potion (`f-Hits`).
@@ -946,25 +947,6 @@ mod tests {
         assert!(!original.experimental.simultaneous_bonuses);
     }
 
-    #[test]
-    fn experimental_accessories_are_independent_and_six_cells_add_two() {
-        let original = content(vec![warrior(5, 20, 0)], vec![item(1, ArtefactType::Ring), item(2, ArtefactType::Amulet), item(3, ArtefactType::Helm)]);
-        let u = wearing(&original, 5, &[1, 2, 3]);
-        let rings = super::super::content::ExperimentalRules { multiple_rings: true, allow_duplicate_items: true, ..Default::default() };
-        let c = original.with_experimental(rings);
-        assert_eq!(slot_for(&c, &u, ItemId(1)), Ok(3));
-        assert_eq!(slot_for(&c, &u, ItemId(2)), Err(EquipError::SameType));
-        assert_eq!(slot_for(&c, &u, ItemId(3)), Err(EquipError::SameType));
-        let amulets = super::super::content::ExperimentalRules { multiple_amulets: true, allow_duplicate_items: true, six_cells: true, ..Default::default() };
-        let c = original.with_experimental(amulets);
-        assert_eq!(slot_for(&c, &u, ItemId(1)), Err(EquipError::SameType));
-        assert_eq!(slot_for(&c, &u, ItemId(2)), Ok(3));
-        let four = wearing(&c, 5, &[2, 2, 2, 2]);
-        assert_eq!(slot_for(&c, &four, ItemId(2)), Ok(4), "the rule adds cells 4 and 5");
-        let six = wearing(&c, 5, &[2, 2, 2, 2, 2, 2]);
-        assert_eq!(slot_for(&c, &six, ItemId(2)), Err(EquipError::NoFreeSlot));
-    }
-
     /// Six cells under the six-cell switch, four under the classic rules: the classic rules
     /// never offer cells 4 and 5. The rings and amulets switches keep four cells.
     #[test]
@@ -987,18 +969,14 @@ mod tests {
     #[test]
     fn slot_count_follows_only_the_six_cell_switch() {
         let base = content(vec![warrior(5, 20, 0)], vec![]);
-        for (rings, amulets, six, want) in [
-            (false, false, false, CLASSIC_SLOTS),
-            (true, false, false, CLASSIC_SLOTS),
-            (false, true, false, CLASSIC_SLOTS),
-            (true, true, false, CLASSIC_SLOTS),
-            (false, false, true, MAX_SLOTS),
-            (true, false, true, MAX_SLOTS),
-            (false, true, true, MAX_SLOTS),
-            (true, true, true, MAX_SLOTS),
+        for (unlimited, six, want) in [
+            (false, false, CLASSIC_SLOTS),
+            (true, false, CLASSIC_SLOTS),
+            (false, true, MAX_SLOTS),
+            (true, true, MAX_SLOTS),
         ] {
-            let c = base.with_experimental(super::super::content::ExperimentalRules { multiple_rings: rings, multiple_amulets: amulets, six_cells: six, ..Default::default() });
-            assert_eq!(slot_count(&c), want, "rings {rings}, amulets {amulets}, six cells {six}");
+            let c = base.with_experimental(super::super::content::ExperimentalRules { unlimited_items: unlimited, six_cells: six, ..Default::default() });
+            assert_eq!(slot_count(&c), want, "unlimited items {unlimited}, six cells {six}");
         }
     }
 
@@ -1012,26 +990,114 @@ mod tests {
         assert_eq!(wearing(&c, 5, &[1]).stats(&c).bonuses, vec![Bonus::PoisonS]);
     }
 
-    #[test]
-    fn experimental_duplicate_items_compare_ids_not_categories() {
-        let c = content(vec![warrior(5, 20, 0)], vec![item(1, ArtefactType::Ring), item(2, ArtefactType::Ring), item(3, ArtefactType::Amulet)])
-            .with_experimental(super::super::content::ExperimentalRules { multiple_rings: true, multiple_amulets: true, six_cells: true, ..Default::default() });
-        let u = wearing(&c, 5, &[1, 3]);
-        assert_eq!(slot_for(&c, &u, ItemId(1)), Err(EquipError::DuplicateItem));
-        assert_eq!(slot_for(&c, &u, ItemId(3)), Err(EquipError::DuplicateItem));
-        assert_eq!(slot_for(&c, &u, ItemId(2)), Ok(2));
-        let mut unrestricted = c.clone();
-        unrestricted.experimental.allow_duplicate_items = true;
-        assert_eq!(slot_for(&unrestricted, &u, ItemId(1)), Ok(2));
+    /// The item fixture of the «Без ограничений на предметы» tests: a warrior (5), a shooter (2),
+    /// a Death mage (3), a non-mage with magic power (4), an undead warrior (6), a warrior that
+    /// also shoots (7), and the items
+    /// they might wear. Item 12 is holy, 13 a Life item, 154 the crown, 20 a potion, 21 goods.
+    fn unlimited_fixture(unlimited: bool) -> Content {
+        let mut life = item(13, ArtefactType::Helm);
+        life.magic = Some(MagicSchool::Life);
+        let mut potion = item(20, ArtefactType::Potion);
+        potion.fixed.insert(Stat::Hits, 5);
+        let mut staff = item(3, ArtefactType::Staff);
+        staff.add = StatMods::from([(Stat::MagicPower, 5)]);
+        let c = content(
+            vec![
+                warrior(5, 20, 0),
+                shooter(2, 10),
+                mage(3, 10, MagicSchool::Death, MagicDirection::ToEnemy),
+                UnitDef { magic: None, ..mage(4, 10, MagicSchool::Death, MagicDirection::ToEnemy) },
+                UnitDef { nature: Nature::Undead, ..warrior(6, 20, 0) },
+                UnitDef { attack_shot: 10, ..warrior(7, 20, 0) },
+            ],
+            vec![
+                item(1, ArtefactType::BlowWeapon),
+                item(2, ArtefactType::ShotWeapon),
+                staff,
+                item(10, ArtefactType::Shield),
+                item(11, ArtefactType::Ring),
+                item(12, ArtefactType::Amulet),
+                life,
+                potion,
+                item(21, ArtefactType::Item),
+                item(154, ArtefactType::Helm),
+            ],
+        );
+        c.with_experimental(crate::rules::content::ExperimentalRules { unlimited_items: unlimited, ..Default::default() })
     }
 
+    /// «Без ограничений на предметы» on: a second blow weapon, the same item twice, a staff on a
+    /// non-mage, a bow on a warrior, a shield on a pure shooter, a school item on another
+    /// school and a holy item on undead all go on. Off, the classic refusals hold.
     #[test]
-    fn duplicate_item_check_comes_after_the_originals_same_type_refusal() {
-        // The original refuses a second item of a type with SameType; the new-game option's
-        // duplicate check must not replace that message.
-        let c = content(vec![warrior(5, 20, 0)], vec![item(1, ArtefactType::Ring)]).with_experimental(super::super::content::ExperimentalRules::for_new_game());
-        let u = wearing(&c, 5, &[1]);
-        assert_eq!(slot_for(&c, &u, ItemId(1)), Err(EquipError::SameType));
+    fn the_unlimited_switch_wears_what_the_classic_rules_refuse() {
+        let on = unlimited_fixture(true);
+        let classic = unlimited_fixture(false);
+        let warrior_sword = wearing(&on, 5, &[1]);
+        assert_eq!(slot_for(&on, &warrior_sword, ItemId(2)), Ok(1), "a second weapon");
+        assert_eq!(slot_for(&on, &warrior_sword, ItemId(1)), Ok(1), "the same item twice");
+        assert_eq!(slot_for(&on, &warrior_sword, ItemId(11)), Ok(1), "a ring with no class rule");
+        assert_eq!(slot_for(&on, &wearing(&on, 5, &[]), ItemId(3)), Ok(0), "a staff on a warrior");
+        assert_eq!(slot_for(&on, &wearing(&on, 5, &[]), ItemId(2)), Ok(0), "a bow on a warrior");
+        assert_eq!(slot_for(&on, &wearing(&on, 2, &[]), ItemId(10)), Ok(0), "a shield on a pure shooter");
+        assert_eq!(slot_for(&on, &wearing(&on, 3, &[]), ItemId(13)), Ok(0), "a Life item on a Death mage");
+        assert_eq!(slot_for(&on, &wearing(&on, 6, &[]), ItemId(12)), Ok(0), "a holy item on undead");
+        assert_eq!(slot_for(&on, &wearing(&on, 5, &[]), ItemId(154)), Err(EquipError::NotAllowed), "the crown keeps its refusal");
+
+        // Unit 7 has a blow and a shot, so the bow is refused by the one-weapon rule alone.
+        assert_eq!(slot_for(&classic, &wearing(&classic, 7, &[1]), ItemId(2)), Err(EquipError::SecondWeapon));
+        assert_eq!(slot_for(&on, &wearing(&on, 7, &[1]), ItemId(2)), Ok(1));
+        assert_eq!(slot_for(&classic, &wearing(&classic, 5, &[1]), ItemId(1)), Err(EquipError::SecondWeapon), "a second sword: the weapon rule first");
+        assert_eq!(slot_for(&classic, &wearing(&classic, 5, &[11]), ItemId(11)), Err(EquipError::SameType), "a second ring: one of each kind");
+        assert_eq!(slot_for(&classic, &wearing(&classic, 5, &[]), ItemId(3)), Err(EquipError::WrongClass));
+        assert_eq!(slot_for(&classic, &wearing(&classic, 5, &[]), ItemId(2)), Err(EquipError::WrongClass));
+        assert_eq!(slot_for(&classic, &wearing(&classic, 2, &[]), ItemId(10)), Err(EquipError::WrongClass));
+        assert_eq!(slot_for(&classic, &wearing(&classic, 3, &[]), ItemId(13)), Err(EquipError::WrongSchool));
+        assert_eq!(slot_for(&classic, &wearing(&classic, 6, &[]), ItemId(12)), Err(EquipError::Unholy));
+        assert_eq!(slot_for(&classic, &wearing(&classic, 5, &[]), ItemId(154)), Err(EquipError::NotAllowed));
+    }
+
+    /// Potions and goods stay unwearable, the dead take nothing, and a full unit has no cell,
+    /// with the switch on too.
+    #[test]
+    fn unlimited_items_keep_potions_the_dead_and_full_cells() {
+        let on = unlimited_fixture(true);
+        assert_eq!(slot_for(&on, &wearing(&on, 5, &[]), ItemId(20)), Err(EquipError::NotWearable));
+        assert_eq!(slot_for(&on, &wearing(&on, 5, &[]), ItemId(21)), Err(EquipError::NotWearable));
+        let mut dead = wearing(&on, 5, &[]);
+        dead.hp = 0;
+        assert_eq!(slot_for(&on, &dead, ItemId(1)), Err(EquipError::Dead));
+        let full = wearing(&on, 5, &[1, 11, 12, 13]);
+        assert_eq!(slot_for(&on, &full, ItemId(10)), Err(EquipError::NoFreeSlot));
+        let six = on.with_experimental(crate::rules::content::ExperimentalRules { unlimited_items: true, six_cells: true, ..Default::default() });
+        assert_eq!(slot_for(&six, &wearing(&six, 5, &[1, 11, 12, 13]), ItemId(10)), Ok(4), "the extra pair is free too");
+    }
+
+    /// A worn item's attack or power counts only where the unit's own level has it: a bow on a
+    /// warrior and a staff on a non-mage (both allowed by the switch) give no shooter or caster.
+    #[test]
+    fn unlimited_items_give_no_battle_role_the_level_lacks() {
+        let on = unlimited_fixture(true);
+        let bowed = wearing(&on, 5, &[2]).stats(&on);
+        assert_eq!(bowed[Stat::AttackShot], 0);
+        assert!(!bowed.is_shooter());
+        let unworn = wearing(&on, 4, &[]).stats(&on);
+        let staffed = wearing(&on, 4, &[3]).stats(&on);
+        assert_eq!(staffed[Stat::MagicPower], unworn[Stat::MagicPower], "no school: the staff's power does not count");
+        assert!(!staffed.is_mage());
+    }
+
+    /// Under the switch the one-weapon rule and the one-per-kind rule are gone: a warrior with a
+    /// sword and a bow has both bonuses counted.
+    #[test]
+    fn unlimited_items_count_every_worn_weapons_bonus() {
+        let both = UnitDef { attack_shot: 10, ..warrior(9, 20, 5) };
+        let c = content(vec![both], gear()).with_experimental(crate::rules::content::ExperimentalRules { unlimited_items: true, ..Default::default() });
+        let w = wearing(&c, 9, &[1]);
+        assert_eq!(slot_for(&c, &w, ItemId(2)), Ok(1), "a second weapon, its cell free");
+        assert_eq!(slot_for(&c, &w, ItemId(1)), Ok(1), "the same item twice");
+        let s = wearing(&c, 9, &[1, 2]).stats(&c);
+        assert_eq!((s[Stat::AttackBlow], s[Stat::AttackShot]), (25, 14), "the sword's and the bow's bonuses both count");
     }
 
     #[test]
@@ -1103,23 +1169,6 @@ mod tests {
         w.items = [Some(ItemId(5)), Some(ItemId(10)), None, None, None, None];
         // 20 → +50% = 30 → +50% = 45 (summed it would be 40).
         assert_eq!(w.stats(&c)[Stat::AttackBlow], 45);
-    }
-
-    /// «Разрешить несколько оружий»: the one-weapon refusal lifts and both weapons' bonuses count;
-    /// the class checks and the one-item-per-type rule stay. Off, the classic refusal holds.
-    #[test]
-    fn multiple_weapons_switch_lifts_only_the_one_weapon_refusal() {
-        // A warrior who also shoots: a sword (blow) and a bow (shot) are both within its classes.
-        let both = UnitDef { attack_shot: 10, ..warrior(9, 20, 5) };
-        let classic = content(vec![both], gear());
-        let on = classic.with_experimental(super::super::content::ExperimentalRules { multiple_weapons: true, ..Default::default() });
-        let w = wearing(&classic, 9, &[1]);
-        assert_eq!(slot_for(&classic, &w, ItemId(2)), Err(EquipError::SecondWeapon), "classic: one weapon");
-        assert_eq!(slot_for(&on, &w, ItemId(2)), Ok(1), "the switch: a second weapon, its cell free");
-        assert_eq!(slot_for(&on, &w, ItemId(3)), Err(EquipError::WrongClass), "a staff still needs magic");
-        assert_eq!(slot_for(&on, &w, ItemId(1)), Err(EquipError::SameType), "one item of each type still");
-        let s = wearing(&on, 9, &[1, 2]).stats(&on);
-        assert_eq!((s[Stat::AttackBlow], s[Stat::AttackShot]), (25, 14), "the sword's and the bow's bonuses both count");
     }
 
     #[test]

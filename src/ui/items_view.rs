@@ -92,7 +92,6 @@ fn equip_error(e: EquipError) -> String {
     match e {
         EquipError::NoFreeSlot => tr("No free slot.").into(),
         EquipError::SameType => tr("Already wears an item of that type.").into(),
-        EquipError::DuplicateItem => tr("Already wears this item. Duplicate items are disabled.").into(),
         EquipError::PotionLimit => tr("This character has already drunk two potions. The limit resets after a battle.").into(),
         EquipError::SecondWeapon => tr("Only one weapon or staff at a time.").into(),
         EquipError::WrongClass => tr("This unit cannot use that (warrior, shooter or mage only).").into(),

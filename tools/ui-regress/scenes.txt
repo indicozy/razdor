@@ -53,7 +53,7 @@ hero-done-1280 | hero:РК1-Начало пути:1 | 1280x800 |
 hero-rumours-1280 | hero:РК1-Начало пути:2 | 1280x800 |
 hero-messages-1280 | hero:РК1-Начало пути:3 | 1280x800 |
 spells-1280 | spells:РК1-Начало пути | 1280x800 |
-experimental-army-1280 | army:РК1-Начало пути | 1280x800 | RAZDOR_SCENE_EXPERIMENTAL=bonuses,rings,amulets;RAZDOR_SCENE_BONUS_ITEMS=1
+experimental-army-1280 | army:РК1-Начало пути | 1280x800 | RAZDOR_SCENE_EXPERIMENTAL=bonuses,items;RAZDOR_SCENE_BONUS_ITEMS=1
 # Battles and setups
 battle-rk1-1280 | battle:РК1-Начало пути:0 | 1280x800 |
 battle-rk3-1280 | battle:РК3-Столица:0 | 1280x800 |

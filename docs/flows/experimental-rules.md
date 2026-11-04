@@ -1,8 +1,7 @@
 # Experimental scenario rules
 
-The `...` button beside Next on the scenario screen opens ten independent switches.
-Only the duplicate-item restriction is on by default for new games (the switch
-«Разрешить надевать одинаковые предметы» is off). Choices reset when
+The `...` button beside Next on the scenario screen opens seven independent switches,
+all off by default for new games. Choices reset when
 starting a new playthrough from the main menu.
 Returning from hero selection preserves the selection. The switches cannot be changed
 for an existing game through this menu.
@@ -17,22 +16,21 @@ for an existing game through this menu.
   (the four classic ones plus a third pair), otherwise four. The count is `items::slot_count`
   and follows only this switch. It is fixed for a playthrough; the menu edits a new game's
   rules only, so no unit can wear items in cells 5–6 while the switch is off.
-- **Multiple rings** and **multiple amulets:** allow those item types to occupy any of
-  the equipment cells the unit has (four, or six with the six-cell switch). Class, magic
-  school, holy-item, weapon and all other equipment restrictions remain in force. Each switch
-  is independent of bonus stacking. Neither changes the cell count.
-- **Allow duplicate items** (default off): with it off, compare item IDs per character, not
-  item categories. Different rings/amulets are permitted when their corresponding switch is on.
-  Repeated copies of one item are refused. Turning it on lifts only that refusal. A weapon is
-  still one per unit unless the multiple-weapons switch is on: the hint line «Оружие у бойца всегда одно.» says so in the menu, «Можно надеть несколько оружий.» when it is on.
-  Old saves keep their previous rules: `RulesWire` maps `no_duplicate_items` to the inverse.
+- **No item limits** («Без ограничений на предметы», default off): any wearable item goes on any
+  living fighter while a cell is free. `items::slot_for` skips the class checks (a shield's blow,
+  a blow weapon's melee, a shot weapon's range, a staff's magic), the school and holy-item checks,
+  the one-weapon refusal (`SecondWeapon`) and the one-per-kind refusal (`SameType`). What stays:
+  potions and goods are not worn (`NotWearable`), the dead wear nothing but a reviving potion
+  (`Dead`), the crown keeps its own refusal (`NotAllowed`), and a full unit has no cell
+  (`NoFreeSlot`). Battle needs no change: a worn item's attack and magic power count only where
+  the unit's own level has them (`items::rebuild_stats` zeroes the others), so a bow gives a
+  warrior no shots and a staff gives a non-mage no power. A repeated item is refused by
+  `SameType` in the classic rules, since it has the same kind.
+  Saves write `unlimited_items` only. An older save with multiple rings, multiple amulets,
+  multiple weapons, or duplicates allowed (`allow_duplicate_items` true, or `no_duplicate_items`
+  false) loads with it on (`RulesWire`).
 A save without `six_cells` (before the switch) gets `six_cells = multiple_rings || multiple_amulets`,
 so a playthrough that already had six cells keeps them and no worn item is lost.
-- **Allow multiple weapons** («Разрешить несколько оружий», default off): `items::slot_for` skips
-  its one-weapon refusal (`SecondWeapon`); the class checks (blow, shot, staff) and one item of
-  each type still apply. Every worn weapon's bonuses count like any worn item's: the battle picks
-  no «the» weapon (`NoHeal` marks and the cannon sound follow the unit's base attacks, not a
-  worn item), so nothing else changes.
 - **Free units** («Бесплатные юниты», default off): `Game::unit_wage` returns no wage for the
   player's units, so `bills`, `wage(i)`, `daily_wages`, `daily_mana_wages`, the noon payment, the
   short-of-money check and the cards all read 0. Hiring, healing, resurrection and refunds keep
@@ -63,8 +61,7 @@ They live in an isolated per-playthrough Content copy so menu choices never muta
 installation's shared definitions. `Game.experimental` is the persisted source of truth;
 loading rebuilds the runtime Content copy from this field before setting up the AI.
 
-A save writes `allow_duplicate_items` and the inverse `no_duplicate_items` for older builds, which
-read the restriction from that key; it also writes `six_cells`. Format 12 is unchanged by the switches.
+A save writes `unlimited_items` and `six_cells`; the four older item keys are read, never written. Format 12 is unchanged by the switches.
 
 Save format 11 stores the rules in Game and the campaign hand-over record, potion counters
 and noncombatant marks in units. Missing rules in older saves use false values. Manual saves, autosaves, restarting the same scenario
@@ -88,7 +85,7 @@ its scrollbar. Abilities carry no source line.
 Name, stats, equipment slots and the panel's outer bounds remain fixed. Hero class traits
 and state lines share the region with unit abilities.
 
-For reproducible screenshots, `RAZDOR_SCENE_EXPERIMENTAL=bonuses,rings,amulets,...` enables
+For reproducible screenshots, `RAZDOR_SCENE_EXPERIMENTAL=bonuses,items,...` enables
 rules in snapshot scenes; `RAZDOR_SCENE_RULES=1` opens the options over `scenarios`, and
 `RAZDOR_SCENE_BONUS_ITEMS=1` equips available distinct bonus items on the hero in an army scene.
 
@@ -157,16 +154,16 @@ keep the item and show the existing refusal. All equipment rules and potion limi
 
 ## The rules window (new_game.rs `experimental_menu`)
 
-The choice is remembered (the owner's yes, 2026-11-02): when the window closes (OK, Esc, Enter or its close button) and when a game starts, the ten switches are written to `settings.json` (`language::Settings::experimental_rules`, all off on an older file). `open_list` starts from them, so the scenario list's «Экспериментальные правила включены» label shows a remembered choice too.
+The choice is remembered (the owner's yes, 2026-11-02): when the window closes (OK, Esc, Enter or its close button) and when a game starts, the seven switches are written to `settings.json` (`language::Settings::experimental_rules`, all off on an older file). `open_list` starts from them, so the scenario list's «Экспериментальные правила включены» label shows a remembered choice too.
 
 Opened from the scenario list's «Экспериментальные правила» button. Its scale is `display::popup_o`
-fitted to the screen. Its ten rows and OK are touch targets (40 dp on a phone); its texts are one
+fitted to the screen. Its seven rows and OK are touch targets (40 dp on a phone); its texts are one
 px per dp on a phone, grown with the text size (`button_grow`) and never under Normal; the hints
 wrap to its width and the window grows with them. The rows take one, two or three columns: the
 fewest whose height fits the screen (a phone's landscape takes two or three), and the window takes
 the screen's width. The hint lines of the free-units and units-don't-die rules show only while those are on (they say «армии героя»: both rules touch the player's units only). Every label is drawn at the same size; a label too wide for its column wraps to two lines, and every row is then two lines tall. On an upright phone the window is at most 60% of the screen high and has one column: the rows and hints scroll between the title and the OK button (a swipe, the wheel, the bar at the right; `RULES_SCROLL`, kept until the game ends, `RAZDOR_SCENE_SCROLL` for a shot). A row toggles only on a press inside the visible view. Any window that overflows the screen scrolls the same way. Snapshot:
 `RAZDOR_SCENE=scenarios RAZDOR_SCENE_RULES=1`, with `RAZDOR_SCENE_EXPERIMENTAL` keys
-`bonuses,rings,amulets,potions,cells,weapons,free,auto,undying`; the mobile check's case «rules».
+`bonuses,items,potions,cells,free,auto,undying`; the mobile check's case «rules».
 
 ## Battle AI: Caster guard (Максимум)
 

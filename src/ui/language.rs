@@ -296,7 +296,7 @@ mod tests {
 
     #[test]
     fn the_remembered_experimental_rules_round_trip_through_the_settings_file() {
-        let rules = razdor::rules::content::ExperimentalRules { multiple_rings: true, six_cells: true, ..Default::default() };
+        let rules = razdor::rules::content::ExperimentalRules { unlimited_items: true, six_cells: true, ..Default::default() };
         let saved = serde_json::to_string(&Settings { experimental_rules: rules, ..Settings::default() }).unwrap();
         let back: Settings = serde_json::from_str(&saved).unwrap();
         assert_eq!(back.experimental_rules, rules);

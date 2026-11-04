@@ -108,23 +108,22 @@ impl Source {
 
 /// Rules chosen for one playthrough. Missing fields in older saves mean classic rules.
 ///
-/// `allow_duplicate_items` is the switch's meaning (default off: a unit cannot wear the same
-/// item twice). Saves also carry the inverse as `no_duplicate_items` for older builds, which
-/// read it as the restriction; a save with only that key maps to the inverse.
+/// `unlimited_items` is the «Без ограничений на предметы» switch: any wearable item goes on any
+/// living fighter while a cell is free (`items::slot_for`). Older saves had four item switches
+/// (multiple rings, multiple amulets, multiple weapons, duplicate items); [`RulesWire`] maps
+/// them to this one.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(from = "RulesWire", into = "RulesWire")]
 pub struct ExperimentalRules {
     pub simultaneous_bonuses: bool,
-    pub multiple_rings: bool,
-    pub multiple_amulets: bool,
-    pub allow_duplicate_items: bool,
     pub two_potions: bool,
     /// Six item cells per unit instead of the classic four (the «Шесть ячеек снаряжения»
     /// switch). Fixed for a playthrough; see [`ExperimentalRules::from`] for old saves.
     pub six_cells: bool,
-    /// «Разрешить несколько оружий»: a unit may wear several weapons (blow, shot, staff); the
-    /// class checks still apply (`items::slot_for`).
-    pub multiple_weapons: bool,
+    /// «Без ограничений на предметы»: no class, school, holy, one-weapon or one-per-kind check,
+    /// and no duplicate check; potions and goods stay unwearable, the dead wear nothing but a
+    /// reviving potion, and the crown keeps its own refusal (`items::slot_for`).
+    pub unlimited_items: bool,
     /// «Бесплатные юниты»: the player's units ask no daily wages, gold or mana
     /// (`Game::unit_wage`). Hiring, healing and refunds keep their prices.
     pub free_units: bool,
@@ -140,46 +139,54 @@ impl ExperimentalRules {
     pub fn for_new_game() -> Self { Self::default() }
 }
 
-/// The save's form of [`ExperimentalRules`].
+/// The save's form of [`ExperimentalRules`]. Written: the current fields only. Read: also the
+/// four item switches of older builds (`skip_serializing`), which map to `unlimited_items`.
 #[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 struct RulesWire {
     simultaneous_bonuses: bool,
-    multiple_rings: bool,
-    multiple_amulets: bool,
     two_potions: bool,
-    allow_duplicate_items: Option<bool>,
-    /// Missing in saves from before the switch: those with the rings or amulets rule had six
-    /// cells, so the rule's old meaning is kept (see the `From` impl).
+    /// Missing in saves from before the switch: a save with the old rings or amulets rule had six
+    /// cells, so that rule's old meaning is kept (see the `From` impl).
     six_cells: Option<bool>,
-    /// The inverse of `allow_duplicate_items`, written for older builds and read only from
-    /// saves that predate `allow_duplicate_items`.
-    no_duplicate_items: Option<bool>,
-    multiple_weapons: bool,
+    unlimited_items: bool,
     free_units: bool,
     auto_promotion: bool,
     undying_units: bool,
+    /// Older switches, read only (see the `From` impl).
+    #[serde(skip_serializing)]
+    multiple_rings: bool,
+    #[serde(skip_serializing)]
+    multiple_amulets: bool,
+    #[serde(skip_serializing)]
+    multiple_weapons: bool,
+    #[serde(skip_serializing)]
+    allow_duplicate_items: Option<bool>,
+    /// The inverse of `allow_duplicate_items` in saves from before that switch.
+    #[serde(skip_serializing)]
+    no_duplicate_items: Option<bool>,
 }
 
 impl From<RulesWire> for ExperimentalRules {
     fn from(w: RulesWire) -> Self {
-        // Missing in a save from before the switch means classic rules: duplicates allowed.
-        let allow_duplicate_items = match (w.allow_duplicate_items, w.no_duplicate_items) {
-            (Some(allow), _) => allow,
-            (None, Some(no_duplicate)) => !no_duplicate,
-            (None, None) => true,
-        };
+        // Duplicates allowed by an older save (explicitly: the switch on, or its inverse off).
+        // A save without either key had the classic restriction and stays so.
+        let old_duplicates_allowed = match (w.allow_duplicate_items, w.no_duplicate_items) {
+            (Some(allow), _) => Some(allow),
+            (None, Some(no_duplicate)) => Some(!no_duplicate),
+            (None, None) => None,
+        } == Some(true);
         // Before the switch, six cells came with the multiple rings or amulets rule; a save
         // without the key keeps the six cells it had, so no worn item is lost.
         let six_cells = w.six_cells.unwrap_or(w.multiple_rings || w.multiple_amulets);
+        // The four switches of older builds become the one: any of them on (the weapon or the
+        // duplicate rule lifted, or a repeated ring or amulet) is the lifted rules now.
+        let unlimited_items = w.unlimited_items || w.multiple_rings || w.multiple_amulets || w.multiple_weapons || old_duplicates_allowed;
         Self {
             simultaneous_bonuses: w.simultaneous_bonuses,
-            multiple_rings: w.multiple_rings,
-            multiple_amulets: w.multiple_amulets,
-            allow_duplicate_items,
             two_potions: w.two_potions,
             six_cells,
-            multiple_weapons: w.multiple_weapons,
+            unlimited_items,
             free_units: w.free_units,
             auto_promotion: w.auto_promotion,
             undying_units: w.undying_units,
@@ -191,16 +198,17 @@ impl From<ExperimentalRules> for RulesWire {
     fn from(r: ExperimentalRules) -> Self {
         Self {
             simultaneous_bonuses: r.simultaneous_bonuses,
-            multiple_rings: r.multiple_rings,
-            multiple_amulets: r.multiple_amulets,
             two_potions: r.two_potions,
             six_cells: Some(r.six_cells),
-            allow_duplicate_items: Some(r.allow_duplicate_items),
-            no_duplicate_items: Some(!r.allow_duplicate_items),
-            multiple_weapons: r.multiple_weapons,
+            unlimited_items: r.unlimited_items,
             free_units: r.free_units,
             auto_promotion: r.auto_promotion,
             undying_units: r.undying_units,
+            multiple_rings: false,
+            multiple_amulets: false,
+            multiple_weapons: false,
+            allow_duplicate_items: None,
+            no_duplicate_items: None,
         }
     }
 }
@@ -729,31 +737,63 @@ mod tests {
 mod experimental_rules_save_tests {
     use super::ExperimentalRules;
 
-    /// A save from before the switch (`no_duplicate_items`, the restriction on when true)
-    /// maps to the inverse: true is the restriction, false allows duplicates.
+    /// A save from before the item switches with the classic restriction (no duplicates key
+    /// set, or `no_duplicate_items` true) keeps the item rules classic: `unlimited_items` off.
     #[test]
-    fn an_old_save_maps_no_duplicate_items_to_the_inverse() {
+    fn an_old_save_with_the_classic_duplicate_rule_stays_classic() {
         let on: ExperimentalRules = serde_json::from_str(r#"{"no_duplicate_items": true}"#).unwrap();
-        assert!(!on.allow_duplicate_items);
-        let off: ExperimentalRules = serde_json::from_str(r#"{"no_duplicate_items": false}"#).unwrap();
-        assert!(off.allow_duplicate_items);
-        // A save with neither field had the restriction off (classic rules).
+        assert!(!on.unlimited_items);
         let missing: ExperimentalRules = serde_json::from_str("{}").unwrap();
-        assert!(missing.allow_duplicate_items);
+        assert!(!missing.unlimited_items);
     }
 
-    /// The rules default to the classic restriction (a unit cannot wear one item twice), and
-    /// a new save writes both the switch and the inverse for older builds.
+    /// Old saves with any of the lifted item rules (multiple rings, multiple amulets, multiple
+    /// weapons, or duplicates allowed explicitly) load with `unlimited_items` on.
     #[test]
-    fn the_default_restricts_duplicates_and_the_save_carries_both_forms() {
-        assert!(!ExperimentalRules::default().allow_duplicate_items);
+    fn an_old_save_with_a_lifted_item_rule_loads_unlimited_items() {
+        for old in [
+            r#"{"multiple_rings": true}"#,
+            r#"{"multiple_amulets": true}"#,
+            r#"{"multiple_weapons": true}"#,
+            r#"{"allow_duplicate_items": true}"#,
+            r#"{"no_duplicate_items": false}"#,
+        ] {
+            let rules: ExperimentalRules = serde_json::from_str(old).unwrap();
+            assert!(rules.unlimited_items, "{old}");
+        }
+        let explicit_off: ExperimentalRules = serde_json::from_str(r#"{"multiple_rings": false, "allow_duplicate_items": false, "no_duplicate_items": true}"#).unwrap();
+        assert!(!explicit_off.unlimited_items);
+    }
+
+    /// The whole old save shape from the 1.3.6 build (every switch written, the new-game
+    /// defaults) maps to the new rules, and the old keys are not written back.
+    #[test]
+    fn an_old_1_3_6_save_maps_to_the_new_rules_and_is_rewritten_without_the_old_keys() {
+        let old = r#"{"simultaneous_bonuses": true, "multiple_rings": true, "multiple_amulets": false,
+            "allow_duplicate_items": false, "no_duplicate_items": true, "two_potions": true,
+            "six_cells": true, "multiple_weapons": false, "free_units": true, "auto_promotion": false,
+            "undying_units": false}"#;
+        let rules: ExperimentalRules = serde_json::from_str(old).unwrap();
+        assert!(rules.unlimited_items && rules.six_cells && rules.simultaneous_bonuses && rules.two_potions && rules.free_units);
+        assert!(!rules.auto_promotion && !rules.undying_units);
+        let json = serde_json::to_value(rules).unwrap();
+        for gone in ["multiple_rings", "multiple_amulets", "multiple_weapons", "allow_duplicate_items", "no_duplicate_items"] {
+            assert!(json.get(gone).is_none(), "{gone} is not written");
+        }
+        assert_eq!(json["unlimited_items"], true);
+        assert_eq!(serde_json::from_value::<ExperimentalRules>(json).unwrap(), rules);
+    }
+
+    /// The defaults are classic (the switch off), and a save writes the switch explicitly.
+    #[test]
+    fn the_default_is_classic_and_the_save_writes_the_switch() {
+        assert!(!ExperimentalRules::default().unlimited_items);
         assert_eq!(ExperimentalRules::for_new_game(), ExperimentalRules::default());
-        let allowed = ExperimentalRules { allow_duplicate_items: true, ..Default::default() };
-        let json = serde_json::to_value(allowed).unwrap();
-        assert_eq!(json["allow_duplicate_items"], true);
-        assert_eq!(json["no_duplicate_items"], false);
+        let unlimited = ExperimentalRules { unlimited_items: true, ..Default::default() };
+        let json = serde_json::to_value(unlimited).unwrap();
+        assert_eq!(json["unlimited_items"], true);
         let back: ExperimentalRules = serde_json::from_value(json).unwrap();
-        assert_eq!(back, allowed);
+        assert_eq!(back, unlimited);
     }
 
     /// A save from before the six-cell switch keeps the six cells it had: the rings or amulets
@@ -761,7 +801,7 @@ mod experimental_rules_save_tests {
     #[test]
     fn an_old_save_without_the_key_maps_six_cells_from_the_rings_or_amulets_rules() {
         let rings: ExperimentalRules = serde_json::from_str(r#"{"multiple_rings": true}"#).unwrap();
-        assert!(rings.six_cells && rings.multiple_rings);
+        assert!(rings.six_cells && rings.unlimited_items);
         let amulets: ExperimentalRules = serde_json::from_str(r#"{"multiple_amulets": true, "two_potions": true}"#).unwrap();
         assert!(amulets.six_cells);
         let both_off: ExperimentalRules = serde_json::from_str(r#"{"multiple_rings": false, "multiple_amulets": false}"#).unwrap();
@@ -770,11 +810,11 @@ mod experimental_rules_save_tests {
         assert!(!missing.six_cells);
     }
 
-    /// A save written with the switch carries it explicitly, whatever the ring and amulet
-    /// switches say, so the mapping above never applies to it.
+    /// A save written with the switch carries it explicitly, whatever the other switches say, so
+    /// the mapping above never applies to it.
     #[test]
     fn a_new_save_writes_the_six_cell_switch_explicitly() {
-        let four = ExperimentalRules { multiple_rings: true, ..Default::default() };
+        let four = ExperimentalRules { unlimited_items: true, ..Default::default() };
         let json = serde_json::to_value(four).unwrap();
         assert_eq!(json["six_cells"], false);
         assert_eq!(serde_json::from_value::<ExperimentalRules>(json).unwrap(), four);
@@ -784,17 +824,17 @@ mod experimental_rules_save_tests {
         assert_eq!(serde_json::from_value::<ExperimentalRules>(json).unwrap(), six);
     }
 
-    /// The four newer switches are written and read back as they are; an old save without
-    /// them reads all four off (classic rules).
+    /// The newer switches are written and read back as they are; an old save without them
+    /// reads them off (classic rules).
     #[test]
     fn the_newer_switches_round_trip_and_default_off_in_old_saves() {
-        let all = ExperimentalRules { multiple_weapons: true, free_units: true, auto_promotion: true, undying_units: true, ..Default::default() };
+        let all = ExperimentalRules { unlimited_items: true, free_units: true, auto_promotion: true, undying_units: true, ..Default::default() };
         let json = serde_json::to_value(all).unwrap();
-        assert_eq!((json["multiple_weapons"].as_bool(), json["free_units"].as_bool()), (Some(true), Some(true)));
+        assert_eq!((json["free_units"].as_bool(), json["unlimited_items"].as_bool()), (Some(true), Some(true)));
         assert_eq!((json["auto_promotion"].as_bool(), json["undying_units"].as_bool()), (Some(true), Some(true)));
         assert_eq!(serde_json::from_value::<ExperimentalRules>(json).unwrap(), all);
-        let old: ExperimentalRules = serde_json::from_str(r#"{"simultaneous_bonuses": true, "multiple_rings": true, "no_duplicate_items": true}"#).unwrap();
-        assert!(!old.multiple_weapons && !old.free_units && !old.auto_promotion && !old.undying_units);
-        assert!(old.simultaneous_bonuses && old.multiple_rings);
+        let old: ExperimentalRules = serde_json::from_str(r#"{"simultaneous_bonuses": true, "no_duplicate_items": true}"#).unwrap();
+        assert!(!old.free_units && !old.auto_promotion && !old.undying_units && !old.unlimited_items);
+        assert!(old.simultaneous_bonuses);
     }
 }

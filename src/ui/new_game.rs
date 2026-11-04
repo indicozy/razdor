@@ -29,8 +29,8 @@ use super::{screens, ScenarioEntry, Screen};
 
 local! {
     static EXPERIMENTAL: Cell<ExperimentalRules> = const { Cell::new(ExperimentalRules {
-        simultaneous_bonuses: false, multiple_rings: false, multiple_amulets: false, allow_duplicate_items: false, two_potions: false, six_cells: false,
-        multiple_weapons: false, free_units: false, auto_promotion: false, undying_units: false,
+        simultaneous_bonuses: false, two_potions: false, six_cells: false, unlimited_items: false,
+        free_units: false, auto_promotion: false, undying_units: false,
     }) };
     static RULES_OPEN: Cell<bool> = const { Cell::new(false) };
     /// The rules window's scroll (px) on an upright phone, reset when it closes.
@@ -1388,7 +1388,7 @@ const OK_DP: f32 = 44.0;
 /// the screen (a phone's landscape takes two or three); the window then takes the screen's width.
 fn experimental_menu() {
     /// The switches in the window (one row each).
-    const ROWS: usize = 10;
+    const ROWS: usize = 7;
     let (sw, sh) = (screen_width(), screen_height());
     let k = chrome::k();
     let o = super::display::popup_o(k, 550.0, 410.0).min((sw - 12.0) / 550.0).min((sh - 12.0) / 410.0);
@@ -1403,10 +1403,12 @@ fn experimental_menu() {
     let upright = dp.is_some_and(|d| d > 0.0 && sw < sh);
     let ok_h = (28.0 * big).max(if upright { OK_DP * dp.unwrap_or(0.0) } else { touch });
     let (hint_size, hint_pitch) = (14.0 * tx * g, 21.0 * tx * g);
-    // The hint lines of the switches that are on (the two big ones say what they change); the
-    // weapon line says which rule holds.
+    // The hint lines of the switches that are on (the two big ones say what they change).
     let now = experimental_rules();
-    let mut hints = vec![slots_hint(now.six_cells), if now.multiple_weapons { tr("Several weapons allowed.") } else { tr("One weapon per unit always.") }];
+    let mut hints = vec![slots_hint(now.six_cells)];
+    if now.unlimited_items {
+        hints.push(tr("Any wearable item on any living fighter."));
+    }
     if now.free_units {
         hints.push(tr("Units of the hero's army ask no daily wages."));
     }
@@ -1425,12 +1427,9 @@ fn experimental_menu() {
     let label_pitch = normal * 1.2;
     let labels: [&str; ROWS] = [
         tr("All special bonuses simultaneously"),
-        tr("Allow multiple rings"),
-        tr("Allow multiple amulets"),
-        tr("Allow duplicate items"),
+        tr("No item limits"),
         tr("At most two potions per character"),
         tr("Six equipment cells"),
-        tr("Allow multiple weapons"),
         tr("Free units"),
         tr("Automatic promotion"),
         tr("Units don't die"),
@@ -1513,15 +1512,12 @@ fn experimental_menu() {
     };
     let clip = super::widgets::Clip::new(view);
     check(0, labels[0], &mut rules.simultaneous_bonuses);
-    check(1, labels[1], &mut rules.multiple_rings);
-    check(2, labels[2], &mut rules.multiple_amulets);
-    check(3, labels[3], &mut rules.allow_duplicate_items);
-    check(4, labels[4], &mut rules.two_potions);
-    check(5, labels[5], &mut rules.six_cells);
-    check(6, labels[6], &mut rules.multiple_weapons);
-    check(7, labels[7], &mut rules.free_units);
-    check(8, labels[8], &mut rules.auto_promotion);
-    check(9, labels[9], &mut rules.undying_units);
+    check(1, labels[1], &mut rules.unlimited_items);
+    check(2, labels[2], &mut rules.two_potions);
+    check(3, labels[3], &mut rules.six_cells);
+    check(4, labels[4], &mut rules.free_units);
+    check(5, labels[5], &mut rules.auto_promotion);
+    check(6, labels[6], &mut rules.undying_units);
     EXPERIMENTAL.with(|p| p.set(rules));
     let hints_top = content_top + per_col as f32 * row_h + (per_col as f32 - 1.0) * gap + 8.0 * big;
     for (i, line) in lines.iter().enumerate() {

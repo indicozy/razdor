@@ -5,10 +5,10 @@ sidebar:
   order: 2
 ---
 
-On the scenario screen, next to the "Next" button, there is a "..." button. It opens ten independent toggles that change the game rules. Razdor added these; they are not in the original game.
+On the scenario screen, next to the "Next" button, there is a "..." button. It opens seven independent toggles that change the game rules. Razdor added these; they are not in the original game.
 
 :::caution
-By default, for a new game, all ten are turned off, except for the restriction on duplicate items (the "Allow duplicate items" toggle is off). Your selection is remembered: it is saved in the settings when closing the window ("OK", Esc, Enter, or the close button) and upon starting a game, so when you next open the list of new games, the toggles will be as you left them, and will remain so after restarting the game. In the scenario list, an orange "Experimental rules enabled" label indicates that a toggle is on. Returning from the hero selection window preserves it. For an already started game, toggles cannot be changed through this menu.
+By default, for a new game, all seven are turned off. Your selection is remembered: it is saved in the settings when closing the window ("OK", Esc, Enter, or the close button) and upon starting a game, so when you next open the list of new games, the toggles will be as you left them, and will remain so after restarting the game. In the scenario list, an orange "Experimental rules enabled" label indicates that a toggle is on. Returning from the hero selection window preserves it. For an already started game, toggles cannot be changed through this menu.
 :::
 
 ![Scenario Selection](../../../../assets/shots/scenarios.webp)
@@ -17,10 +17,8 @@ By default, for a new game, all ten are turned off, except for the restriction o
 
 * **All special bonuses simultaneously:** the fighter retains their type abilities and the abilities of equipped items. Identical abilities do not stack: a duplicate copy does not enhance the effect.
 * **Six equipment slots:** the fighter has six item slots instead of four (a third pair is added).
-* **Allow multiple rings** and **Allow multiple amulets:** these items can occupy any equipment slots. Restrictions on class, magic school, holy items, and weapon type remain.
-* **Allow duplicate items:** if off — a single fighter cannot have two identical items. If on — you can have multiple copies of one item, but the fighter still has only one weapon.
+* **No item limits:** any wearable item can be worn by any living fighter while they have a free slot. The class (shield, melee and ranged weapon, staff), magic school and holy item restrictions are lifted, as are the one-weapon rule and the one-item-per-kind rule. Potions and other goods still cannot be worn, the dead wear nothing, and the crown stays for its own unit types only.
 * **No more than two potions per character:** between army battles, you can drink no more than two potions (including healing and resurrection potions).
-* **Allow multiple weapons:** a fighter may wear more than one weapon; class restrictions remain.
 * **Free units:** the hero's army asks for no daily wages (neither gold nor mana). Hiring costs as usual.
 * **Automatic promotion:** as soon as a fighter of the hero's army can be promoted, it is promoted on its own, along a random branch of its upgrade tree. The hero is not promoted this way.
 * **Units don't die:** fighters of the hero's army killed in a battle come back with 1 hit point after it, if the army survived the battle.
