@@ -243,7 +243,10 @@ fn bigmap_ai_bench() {
     for side in sizes_from_env() {
         for variant in Variant::from_env() {
             let s = bench_scenario(&template, side, variant);
+            planner_proto::take_tally();
             let run = bench_run(&c, &s, BENCH_DAYS);
+            let tl = planner_proto::take_tally();
+            println!("HYBRID plans {} astar {} fallback {}", tl.hybrid_plans, tl.hybrid_astar, tl.hybrid_fallback);
             let mut sorted = run.ms.clone();
             sorted.sort_by(f64::total_cmp);
             let total: f64 = run.ms.iter().sum();
@@ -333,8 +336,8 @@ fn planner_free_run() {
         let r = play_days(c, s, days);
         let t = planner_proto::take_tally();
         println!(
-            "{label} ai_battles {} hero_battles {} captures {} steps {} armies {}->{} plans {} fp {:016x} stalled {} secs {:.2}",
-            r.ai.battles, r.player_battles, r.ai.captures, t.steps, r.armies, r.armies_after, r.ai.paths, r.fingerprint, r.stalled, r.secs
+            "{label} ai_battles {} hero_battles {} captures {} steps {} armies {}->{} plans {} fp {:016x} stalled {} secs {:.2} hybrid {} astar {} fallback {}",
+            r.ai.battles, r.player_battles, r.ai.captures, t.steps, r.armies, r.armies_after, r.ai.paths, r.fingerprint, r.stalled, r.secs, t.hybrid_plans, t.hybrid_astar, t.hybrid_fallback
         );
         total.add(&t);
     };
@@ -391,6 +394,6 @@ fn planner_free_run() {
             a.exact_empty
         );
     }
-    println!("TOTAL steps {} lod_skips {}", total.steps, total.lod_skips);
+    println!("TOTAL steps {} lod_skips {} hybrid_plans {} hybrid_astar {} hybrid_fallback {}", total.steps, total.lod_skips, total.hybrid_plans, total.hybrid_astar, total.hybrid_fallback);
     println!("DIAG target plans {} static_vs_mult_mismatch {} ({:.2}%)", total.diag_plans, total.diag_mismatch, if total.diag_plans == 0 { 0.0 } else { 100.0 * total.diag_mismatch as f64 / total.diag_plans as f64 });
 }

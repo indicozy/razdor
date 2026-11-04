@@ -13,6 +13,10 @@
 //!   - `astar-dist-alt`: as `astar-dist`, with the ALT heuristic.
 //!   - `astar-distmult`: an oracle: the target by seed value + the real distance (multipliers
 //!     included), octile A*. Used by `RAZDOR_PLANNER_DIAG` to measure what the static choice loses.
+//! - `RAZDOR_PLANNER=hybrid[:N]` (radius `RAZDOR_PLANNER_R`, default 64 here): when the plan has
+//!   exactly one distinct seed cell (after the flood's seed filtering), A* from the army to that
+//!   cell with the flood's effective costs and step weights, the erased cells closed; otherwise,
+//!   or when A* finds no path, the window flood of radius N.
 //! - `RAZDOR_PLANNER_LOD=off|countdown|keep|both`, `RAZDOR_PLANNER_LOD_D` (30),
 //!   `RAZDOR_PLANNER_LOD_K` (3): armies beyond D cells (octile) from the hero.
 //! - `RAZDOR_PLANNER_SHADOW=window:32,astar-alt,...`: at every plan, also compute these modes and
@@ -50,6 +54,19 @@ pub enum Mode {
     DistAlt,
     /// Oracle: target by the real (multiplier-aware) distance, octile A*.
     DistMult,
+    /// One seed cell: A* to it; otherwise (or when A* finds no path) the window flood of radius N.
+    Hybrid(i32),
+}
+
+/// How a hybrid plan was made.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Route {
+    /// A single seed cell, and A* found its path.
+    Astar,
+    /// A single seed cell, A* found no path: the window flood made the plan.
+    Fallback,
+    /// Several seed cells (or none): the window flood made the plan.
+    Window,
 }
 
 /// How an A* mode picks its target.
@@ -125,12 +142,19 @@ fn parse_mode(s: &str, r: i32) -> Option<Mode> {
         "astar-dist" => Some(Mode::Dist),
         "astar-dist-alt" => Some(Mode::DistAlt),
         "astar-distmult" => Some(Mode::DistMult),
-        _ => s.strip_prefix("window:").and_then(|n| n.parse().ok()).map(Mode::Window),
+        "hybrid" => Some(Mode::Hybrid(r)),
+        _ => s
+            .strip_prefix("window:")
+            .and_then(|n| n.parse().ok())
+            .map(Mode::Window)
+            .or_else(|| s.strip_prefix("hybrid:").and_then(|n| n.parse().ok()).map(Mode::Hybrid)),
     }
 }
 
 fn from_env() -> Cfg {
-    let r = env("RAZDOR_PLANNER_R").and_then(|s| s.parse().ok()).unwrap_or(48);
+    let raw = env("RAZDOR_PLANNER").unwrap_or_default();
+    let r_default = if raw.starts_with("hybrid") { 64 } else { 48 };
+    let r = env("RAZDOR_PLANNER_R").and_then(|s| s.parse().ok()).unwrap_or(r_default);
     let mode = env("RAZDOR_PLANNER").and_then(|s| parse_mode(&s, r)).unwrap_or(Mode::Exact);
     let lod = match env("RAZDOR_PLANNER_LOD").as_deref() {
         Some("countdown") => Lod::Countdown,
@@ -177,6 +201,10 @@ pub struct Tally {
     /// multiplier-aware one.
     pub diag_plans: u64,
     pub diag_mismatch: u64,
+    /// Hybrid plans made by the active mode, those A* answered, and those A* left to the window.
+    pub hybrid_plans: u64,
+    pub hybrid_astar: u64,
+    pub hybrid_fallback: u64,
 }
 
 impl Tally {
@@ -199,11 +227,14 @@ impl Tally {
         self.lod_skips += o.lod_skips;
         self.diag_plans += o.diag_plans;
         self.diag_mismatch += o.diag_mismatch;
+        self.hybrid_plans += o.hybrid_plans;
+        self.hybrid_astar += o.hybrid_astar;
+        self.hybrid_fallback += o.hybrid_fallback;
     }
 }
 
 /// Global (not thread-local): floods run on the planner's worker threads too.
-static TALLY: Mutex<Tally> = Mutex::new(Tally { shadow: Vec::new(), steps: 0, lod_skips: 0, diag_plans: 0, diag_mismatch: 0 });
+static TALLY: Mutex<Tally> = Mutex::new(Tally { shadow: Vec::new(), steps: 0, lod_skips: 0, diag_plans: 0, diag_mismatch: 0, hybrid_plans: 0, hybrid_astar: 0, hybrid_fallback: 0 });
 
 fn with_tally<R>(f: impl FnOnce(&mut Tally) -> R) -> R {
     f(&mut TALLY.lock().unwrap_or_else(|e| e.into_inner()))
@@ -680,6 +711,7 @@ fn run(mode: Mode, map: &TileMap, costs: &[u16], mult: &[u16], seeds: &[(Tile, u
     let (choice, heur) = match mode {
         Mode::Exact => return (exact_path(map, costs, mult, seeds, here, erased), None),
         Mode::Window(r) => return (window_path(map, costs, mult, seeds, here, erased, r), None),
+        Mode::Hybrid(r) => return (hybrid(map, costs, mult, seeds, here, erased, r), None),
         Mode::AStar => (Choice::Octile, Heur::Octile),
         Mode::Alt => (Choice::Bound, Heur::Alt),
         Mode::Dist => (Choice::Static, Heur::Octile),
@@ -700,13 +732,74 @@ fn run(mode: Mode, map: &TileMap, costs: &[u16], mult: &[u16], seeds: &[(Tile, u
     ((!p.is_empty()).then_some(p), Some(target))
 }
 
+/// The hybrid plan's path (see [`Mode::Hybrid`]): `Some` with the path (empty: stand), `None`
+/// with no seed kept.
+fn hybrid(map: &TileMap, costs: &[u16], mult: &[u16], seeds: &[(Tile, u32)], here: Tile, erased: &[Tile], r: i32) -> Option<Vec<Tile>> {
+    hybrid_route(map, costs, mult, seeds, here, erased, r).0
+}
+
+/// [`hybrid`] with the route it took.
+fn hybrid_route(map: &TileMap, costs: &[u16], mult: &[u16], seeds: &[(Tile, u32)], here: Tile, erased: &[Tile], r: i32) -> (Option<Vec<Tile>>, Route) {
+    let cands = candidates(map, costs, seeds, here, erased);
+    let [(target, _)] = cands[..] else {
+        return (window_path(map, costs, mult, seeds, here, erased, r), Route::Window);
+    };
+    // The exact planner's stand: its own cell erased, the descent reads nothing.
+    if erased.contains(&here) {
+        return (Some(Vec::new()), Route::Astar);
+    }
+    let p = single_target_path(map, costs, mult, target, here, erased);
+    if !p.is_empty() {
+        return (Some(p), Route::Astar);
+    }
+    (window_path(map, costs, mult, seeds, here, erased, r), Route::Fallback)
+}
+
+/// The path from `here` to the single seed cell `target`, by A* run from the target back to
+/// `here`. The flood's objective is the walk from the army: a cell the walk leaves is charged
+/// its effective cost (cost × multiplier) times the step weight, the target is free. A search
+/// from the target charges the same cells (each entered on the way back), so the path it finds
+/// is the one that objective minimises. The erased cells are closed; a closed `here` is entered
+/// at cost 1, as the flood seeds closed cells. The heuristic: the least positive static cost
+/// (every open cell costs at least that) times the octile weight bound to `here`, less the
+/// last step's possible saving of `(min - 1)` per the weight 3 of a diagonal. Empty when no path.
+fn single_target_path(map: &TileMap, costs: &[u16], mult: &[u16], target: usize, here: Tile, erased: &[Tile]) -> Vec<Tile> {
+    let (Some(start), grid) = (idx(map, here), map.grid) else { return Vec::new() };
+    let t = tile_of(map, target);
+    let min_step = costs.iter().copied().filter(|&c| c > 0).min().unwrap_or(1).max(1) as u32;
+    let h = |x: usize| -> u32 { (min_step * weight_bound(grid, tile_of(map, x), here)).saturating_sub((min_step - 1) * DIAGONAL_WEIGHT) };
+    let mut back = astar(map, costs, mult, erased, t, &|j| j == start, &|j| j == start, &h);
+    if back.is_empty() {
+        return back;
+    }
+    // `back` runs from the target's neighbour to `here`: drop `here`, reverse, end at the target.
+    back.pop();
+    back.reverse();
+    back.push(t);
+    back
+}
+
 /// The planner's path for one plan (the inputs of `Game::ai_plan` after its seeds): `Some`
 /// with the path (empty: stand), `None` with no seed kept. `erased` are the cells of the
 /// parties in reach and the cells they step to, which the path never steps onto. `lm`: the
 /// landmark tables of this cost map when a mode reads them ([`landmarks_for`]).
 pub fn plan(map: &TileMap, costs: &[u16], mult: &[u16], seeds: &[(Tile, u32)], here: Tile, erased: &[Tile], lm: Option<&Landmarks>) -> Option<Vec<Tile>> {
     let c = cfg();
-    let (path, target) = run(c.mode, map, costs, mult, seeds, here, erased, lm);
+    let (path, target) = match c.mode {
+        Mode::Hybrid(r) => {
+            let (path, route) = hybrid_route(map, costs, mult, seeds, here, erased, r);
+            with_tally(|tl| {
+                tl.hybrid_plans += 1;
+                match route {
+                    Route::Astar => tl.hybrid_astar += 1,
+                    Route::Fallback => tl.hybrid_fallback += 1,
+                    Route::Window => {}
+                }
+            });
+            (path, None)
+        }
+        _ => run(c.mode, map, costs, mult, seeds, here, erased, lm),
+    };
     if c.diag && matches!(c.mode, Mode::AStar | Mode::Alt | Mode::Dist | Mode::DistAlt) {
         if let Some(t) = target {
             let oracle = choose(Choice::Mult, map, costs, mult, seeds, here, erased, lm);
@@ -826,6 +919,8 @@ mod tests {
         assert_eq!(parse_mode("astar-dist", 48), Some(Mode::Dist));
         assert_eq!(parse_mode("astar-dist-alt", 48), Some(Mode::DistAlt));
         assert_eq!(parse_mode("astar-distmult", 48), Some(Mode::DistMult));
+        assert_eq!(parse_mode("hybrid", 64), Some(Mode::Hybrid(64)));
+        assert_eq!(parse_mode("hybrid:48", 64), Some(Mode::Hybrid(48)));
         assert_eq!(parse_mode("nope", 48), None);
     }
 
@@ -951,5 +1046,77 @@ mod tests {
             let v = cand_value(&cands, j).unwrap() as u64;
             assert_eq!(v + full[j] as u64, total);
         }
+    }
+
+    /// The flood's objective of a path from `from`: each cell the walk leaves is charged its
+    /// effective cost (cost × multiplier) times the step weight to the next cell; the last cell
+    /// (the target) is free.
+    fn flood_cost(map: &TileMap, costs: &[u16], mult: &[u16], from: Tile, path: &[Tile]) -> u64 {
+        let mut prev = from;
+        let mut total = 0u64;
+        for &t in path {
+            let j = idx(map, prev).unwrap();
+            total += costs[j].wrapping_mul(mult[j]) as u64 * map.grid.weight(prev, t) as u64;
+            prev = t;
+        }
+        total
+    }
+
+    /// On a single-seed grid the hybrid's A* path costs no more than the exact planner's descent,
+    /// in the flood's objective (the same effective costs and step weights): the descent follows
+    /// the flood's distances greedily, which is only optimal where each step is the flood's
+    /// tree step. The counts of equal and cheaper paths are printed (`--nocapture`).
+    #[test]
+    fn single_target_astar_costs_no_more_than_the_exact_path() {
+        let (mut equal, mut cheaper) = ([0u32; 2], [0u32; 2]);
+        for seed in 0..60u32 {
+            let map = walled(900 + seed);
+            let costs = map.land_costs().to_vec();
+            let mut state = seed.wrapping_mul(2_654_435_761).wrapping_add(7);
+            let mut next = |m: u32| {
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                (state >> 8) % m
+            };
+            // Multipliers 1..3 with some closed cells (0) that the paths must go around (even
+            // seeds), or all 1 (odd seeds: no repulsion, the common case of a real map).
+            let uniform = seed % 2 == 1;
+            let mult: Vec<u16> = (0..costs.len()).map(|_| if uniform { 1 } else if next(12) == 0 { 0 } else { 1 + next(3) as u16 }).collect();
+            for _ in 0..4 {
+                let here = (next(60) as i32, next(40) as i32);
+                let target_i = next(costs.len() as u32) as usize;
+                let target = tile_of(&map, target_i);
+                // The target is a seed the flood can reach: passable, open, not the army's cell
+                // (and the army's cell open: a closed one is charged differently, see the A*).
+                let here_closed = idx(&map, here).is_some_and(|h| costs[h] == 0 || mult[h] == 0);
+                if costs[target_i] == 0 || mult[target_i] == 0 || target == here || here_closed {
+                    continue;
+                }
+                let seeds = [(target, 0u32)];
+                let exact = exact_path(&map, &costs, &mult, &seeds, here, &[]).unwrap_or_default();
+                let astar = single_target_path(&map, &costs, &mult, target_i, here, &[]);
+                assert_eq!(exact.is_empty(), astar.is_empty(), "seed {seed}: reachability differs");
+                if exact.is_empty() {
+                    continue;
+                }
+                assert_eq!(astar.last(), Some(&target), "seed {seed}: the path ends at the target");
+                let (ce, ca) = (flood_cost(&map, &costs, &mult, here, &exact), flood_cost(&map, &costs, &mult, here, &astar));
+                // The optimum: a full Dijkstra from the target in the same charges (the flood
+                // stops at the army's cell, so its value there need not be the least).
+                let full = full_dist(&map, &costs, Some(&mult), &[], target, &[]);
+                let opt = full[idx(&map, here).unwrap()] as u64;
+                assert_eq!(ca, opt, "seed {seed}: A* path is not the optimum");
+                assert!(ce >= opt, "seed {seed}: the exact descent {ce} below the optimum {opt}");
+                assert!(ca <= ce, "seed {seed}: A* path cost {ca} above the exact {ce}");
+                if ca == ce {
+                    equal[uniform as usize] += 1;
+                } else {
+                    cheaper[uniform as usize] += 1;
+                }
+            }
+        }
+        println!("single-target A* vs exact descent, multipliers 1..3: {} equal, {} cheaper; all 1: {} equal, {} cheaper", equal[0], cheaper[0], equal[1], cheaper[1]);
+        let (equal, cheaper) = (equal[0] + equal[1], cheaper[0] + cheaper[1]);
+        let checked = equal + cheaper;
+        assert!(checked > 100, "only {checked} reachable cases");
     }
 }
