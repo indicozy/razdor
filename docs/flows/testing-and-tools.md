@@ -335,7 +335,10 @@ or dialog (`studio::health`), the JSON of both scores (`studio::mcp`). Snapshot 
 **Package tests** (`tests/*.toml`, `pack::playtest`, the format in `docs/reference/rzpack-format.md`, «Tests»). A
 test is a playthrough of a map or of the campaign from its start, played by `pack::runner` (the engine the Rust
 playthroughs use: the hero walks, battles are auto-resolved, the campaign hands over on a `leave` step). `razdor-pack test`
-runs them over their seeds in parallel threads; the studio's MCP `run_test` tool gives the same JSON. Tests of the
+runs them over their seeds in parallel threads (the cores but two). Each seed has its own story (`open::story_seed`,
+the same as `sim --seed N`, for each map it plays) and a budget (60 s and 400 game days, checked in `Run::service`:
+a seed past it fails with the limit it hit); a failing seed prints its `replay` line. The studio's MCP `run_test`
+tool gives the same JSON, within 300 s for the whole call. Tests of the
 engine: `pack::playtest` (the reader, the checks, the expectations), `studio::mcp` (`run_test`); the example
 package's routes are the playthrough of «Пепельная Марка» (`examples/packs/pepelnaya-marka/tests/`).
 

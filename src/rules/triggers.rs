@@ -2222,6 +2222,26 @@ mod tests {
         assert!(!g.story_meet(7).1, "a once trigger is spent by its first meeting");
     }
 
+    /// The AI's side: an army that comes to the hero (`Game::meet` of the `Met` or `Encounter` that
+    /// `ai_contact` raises) runs its `hero_meets_army` triggers too, and a `once = false` one fires at
+    /// each such meeting; a meeting the trigger answers starts no battle.
+    #[test]
+    fn a_meeting_the_ai_starts_fires_a_trigger_that_is_not_once_each_time() {
+        let mut g = game();
+        g.world.spawn_army(7, (5, 5), 1, 0, Vec::new(), 10);
+        let i = g.world.armies.len() - 1;
+        let greet = Trigger { once: false, ..trig("greet", When::HeroMeetsArmy(7), vec![], vec![Act::Add { name: "greeted".into(), value: 1, min: None, max: None }]) };
+        g.attach_story(story(&[("greeted", VarValue::Int(0))], vec![greet], vec![]));
+        let mut events = Vec::new();
+        assert!(g.meet(Event::Met(i), &mut events), "the AI's greeting fires the trigger");
+        assert!(g.meet(Event::Met(i), &mut events), "not once: it fires at the next meeting too");
+        assert_eq!(g.story_var("greeted"), Some(VarValue::Int(2)));
+        let mut events = Vec::new();
+        assert!(g.meet(Event::Encounter(i), &mut events), "an attack the trigger answers");
+        assert!(g.foe.is_none(), "no battle opens: the event fired");
+        assert_eq!(g.story_var("greeted"), Some(VarValue::Int(3)));
+    }
+
     #[test]
     fn a_meeting_trigger_that_fires_without_a_dialog_still_counts_as_fired() {
         let mut g = game();

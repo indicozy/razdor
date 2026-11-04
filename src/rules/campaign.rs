@@ -453,7 +453,7 @@ mod tests {
         let pkg = package();
         let base = Content::builtin();
         let mut open_map = |map: &str| -> Result<Opened, String> { Ok(open(&pkg, map)) };
-        let opts = CampaignOptions { days: 3, choices: Choices::Forced(vec![("intro".into(), "a".into())]), trace: true, auto_win_after: Some(1), preset: Vec::new(), save_on_revisit: false, meet: None };
+        let opts = CampaignOptions { days: 3, choices: Choices::Forced(vec![("intro".into(), "a".into())]), trace: true, auto_win_after: Some(1), preset: Vec::new(), save_on_revisit: false, meet: None, seed: None };
         let run = run_campaign(&pkg, &base, &mut open_map, &opts);
         assert!(run.ok(), "{}", run.text());
         assert_eq!(run.steps.len(), 2, "{}", run.text());

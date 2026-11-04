@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 use std::thread;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
@@ -24,7 +25,7 @@ use crate::studio::vars::variable_uses;
 pub const MAX_DAYS: u64 = 365;
 
 /// The most seeds a `run_test` may play for one test.
-pub const MAX_SEEDS: u64 = 200;
+pub const MAX_SEEDS: u64 = playtest::MAX_SEEDS as u64;
 
 /// The uses a `query_refs` answer covers, for the agent to read with the list.
 const COVERS_MAP: &str = "triggers (when, if, then), dialogs' choices (if, then), the map's own victory";
@@ -107,7 +108,7 @@ pub fn list() -> Value {
         },
         {
             "name": "run_test",
-            "description": "Plays the package's tests (tests/<name>.toml) headless over their seeds, as `razdor-pack test` does: a playthrough of a map or of the campaign from its start, with its steps' expectations. One result per test: its pass rate against its min_rate and, for a failing test, the first failing seed's step, line, what went wrong and the log's tail. `name` runs one test; `seeds` replaces each test's seed count. Same JSON as `razdor-pack test --json`; isError when a test misses its min_rate. Needs the game's install.",
+            "description": "Plays the package's tests (tests/<name>.toml) headless over their seeds, as `razdor-pack test` does: a playthrough of a map or of the campaign from its start, with its steps' expectations. One result per test: its pass rate against its min_rate and, for a failing test, the first failing seed's step, line, what went wrong and the log's tail. `name` runs one test; `seeds` replaces each test's seed count. Same JSON as `razdor-pack test --json`; isError when a test misses its min_rate. Needs the game's install. A seed has 60 s and 400 game days; one past them fails with the limit it hit, and the call ends within 300 s. A failing seed's `replay` is the `razdor-pack sim` line that plays the same story.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -337,7 +338,9 @@ fn run_test(host: &dyn Host, args: &Value) -> Result<Reply, String> {
     }
     let install = install.ok_or("the game's install is not found: set RAZDOR_DT_DIR, the tests play their maps on it")?;
     let package = built.package;
-    let opts = TestOptions { only: name, seeds: seeds.map(|n| n as u32) };
+    // The call ends within `CALL_SECONDS`: a seed still running then fails with the reason (no hang).
+    let call = Instant::now() + Duration::from_secs(playtest::CALL_SECONDS);
+    let opts = TestOptions { only: name, seeds: seeds.map(|n| n as u32), deadline: Some(call) };
     // The tests run on their own thread: a panic in the engine is an answer, not a dead server.
     let worker = thread::Builder::new()
         .name("studio-tests".into())

@@ -682,11 +682,11 @@ expect = { var = "marsh_trust", op = ">=", value = 3, alive = "tess" }
 line); exactly one of `campaign = true` and `map` is set, and the map exists (the campaign's maps, for a
 campaign); a step with no action and no `expect` is an error; every dialog, choice, building, army, variable,
 map and ending a test names exists in the package (a choice is checked against the dialog's choices; an army
-may be one a trigger spawns); `seeds` is at least 1, `min_rate` is above 0 and at most 1.
+may be one a trigger spawns); `seeds` is 1 to 200, a step's `days` and `wait_days` are 1 to 365, `min_rate` is above 0 and at most 1.
 
 **Running** (`razdor-pack test <folder-or-.rzpack> [--only <name>] [--seeds <n>] [--json]`). The package
-checks first (an error stops it). Each test runs over its seeds (1 to its `seeds`, or `--seeds`), on as many
-threads as the machine has. The result of a test is its share of passing seeds against `min_rate`. A failing
+checks first (an error stops it). Each test runs over its seeds (1 to its `seeds`, or `--seeds`), on the machine's
+cores but two (at least one thread). The result of a test is its share of passing seeds against `min_rate`. A failing
 seed reports the step (its number and line), the failed check or walk and the log's last 40 lines (days, walks,
 dialogs, battles, the hand-overs); the text output shows the first failing seed, `--json` gives all of them.
 Exit status 0 only when every test meets its `min_rate`. The engine is the one the Rust playthrough tests use
@@ -694,6 +694,18 @@ Exit status 0 only when every test meets its `min_rate`. The engine is the one t
 
 **Seeds.** A seed fixes the game's and the story's random draws. Battles are auto-resolved, so a seed decides
 their outcome; a route wins on most seeds when the choices are sound, and `min_rate` is what the author accepts.
+Each seed has its own story: the story's generator is seeded with `open::story_seed(package id, map, seed)` for
+every map the seed plays (a campaign's maps too, at each hand-over), the same derivation as `razdor-pack sim
+--seed`. So a failing seed `N` replays with `razdor-pack sim <folder> --map <id> --seed N` (a map's test) or
+`razdor-pack sim <folder> --campaign --seed N` (a campaign's); the failure output prints that line as `replay:`,
+and `--json` gives it per failure. The replay shares the story's draws only: the sim walks the hero by its own play,
+not by the test's steps, so the two agree on the story, not on each walk.
+
+**Limits.** The file's limits are checked by `check`: `seeds` is 1 to 200 (`MAX_SEEDS`), and a step's `days`
+and `wait_days` are 1 to 365 (`MAX_DAYS`); `--seeds` and the studio's `seeds` take the same range. A seed also
+has a budget: 400 game days in all (its steps' walks and waits together, across the campaign's maps) and 60
+seconds of wall-clock time. A seed past either fails with the limit it hit (`out of time` or `out of game
+days`), and the run's threads leave two cores free. `run_test` in the studio ends its whole call within 300 seconds.
 
 ## Commands
 

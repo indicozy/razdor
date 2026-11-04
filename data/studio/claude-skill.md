@@ -79,15 +79,27 @@ Run `check` after every edit. Run `sim` after every change to the story, not aft
   unsaved changes, and the file that does not parse (`stale`). Call it first, and when you lost track.
 - `check`: the package's diagnostics as they are now, including the author's unsaved edits. Same JSON
   as `razdor-pack check --json`.
+- `schema`: the vocabulary of the trigger files: every event (`when`), condition (`if`) and action (`then`)
+  with its keys, their types and defaults, one sentence and one example, and the names agents tried for it
+  (aliases). Call it before writing an action you are not sure of, and before inventing a name.
 - `scores`: the map's two scores. Richness is DT's playability score (the points, and the curve value as the
   score); Health is Razdor's own 0 to 100 measure, with its findings: a `fight_lost` is a scripted fight the
   starting squad loses, `unreached` a story place it cannot walk to, and `once_offer_gold`, `later_never_returns`
   and `named_removed` are dead ends. Each item and finding names its targets (object, army, building, point, a
   cell or a file line). Warnings do not block. Needs the game's install.
 - `sim`: the story played headless for `days` (1 to 365) on a map. `set` forces variables before the
-  start (`var=value`), `choices` says how dialogs are answered (`first`, `random`, or `dialog=choice`).
-  Returns the trace: days, triggers, variables, dialogs. The hero does not walk in the sim, so a
-  `hero_enters` trigger never fires there; test a meeting with `set` and `choices`, and say so.
+  start (`var=value`), `choices` says how dialogs are answered (`first`, `random`, or `dialog=choice`),
+  `seed` fixes the story's draws. Returns the trace: days, triggers, variables, dialogs. The hero does not
+  walk in the sim, so a `hero_enters` trigger never fires there, and a `hero_meets_army` trigger fires only
+  when an army comes to the standing hero. A meeting the hero walks into is checked with `run_test`; say so
+  when a result comes from `sim` alone.
+- `run_test`: the package's tests (`tests/<name>.toml`) played headless over their seeds, as `razdor-pack test`
+  does. Recommended for checking a route: a test walks the hero to a building or into an army
+  (`walk_to_building`, `walk_to_army`), wins a map and hands it on (`leave`), and checks the story with
+  `expect` (variables, dialogs seen, the map, the ending). `name` runs one test; `seeds` replaces each test's
+  count (1 to 200). Each test gives its pass rate against its `min_rate`. A failing seed names its step and
+  line, what went wrong, the log's tail, and a `replay`: the `sim` line (with its `seed`) that plays the same
+  story. A seed has 60 s and 400 game days; one past them fails with the limit it hit.
 - `query_refs`: who uses an army, building or point id on a map (`kind` army, building or point), or
   who declares, reads or writes a variable (`kind` variable). The answer says what it covers.
 - `focus`: points the author's view at a table (`kind` army, building, point, object or hero, with

@@ -124,7 +124,7 @@ An editor in another language (web, Tauri, Godot) can shell out instead:
 - `razdor-pack sim <path> --map <id> --days N --json --trace [--choices …] [--set var=value]`
   returns the day-by-day story trace as data.
 - `razdor-pack test <path> --json` returns the playthrough results as data: one object per test with
-  `passed`, `seeds`, `rate`, `min_rate`, `ok` and its `failures` (`seed`, `step`, `line`, `what`, `log_tail`).
+  `passed`, `seeds`, `rate`, `min_rate`, `ok` and its `failures` (`seed`, `step`, `line`, `what`, `log_tail`, `replay`: the `razdor-pack sim` line of that seed).
 - `razdor-pack info <path>` gives the manifest, the maps, the size and the SHA-256.
 - `razdor-pack pack <folder> -o out.rzpack` packs the folder.
 

@@ -96,12 +96,15 @@ fn valid_name(s: &str) -> bool {
     valid_id(s)
 }
 
-/// The closest of `options` to `word` (edit distance at most 3), if any.
+/// The closest of `options` to `word`, if any is near enough: within a third of the word's length,
+/// rounded up (at least one edit), so `wehn` finds `when`, a short key (`id`, `if`) only by a
+/// one-letter slip, and no name three edits away from `ab`.
 pub fn closest<'a>(word: &str, options: impl IntoIterator<Item = &'a str>) -> Option<&'a str> {
+    let near = word.chars().count().div_ceil(3).max(1);
     options
         .into_iter()
         .map(|o| (edit_distance(word, o), o))
-        .filter(|(d, _)| *d <= 3)
+        .filter(|(d, _)| *d <= near)
         .min_by_key(|(d, _)| *d)
         .map(|(_, o)| o)
 }
@@ -1901,6 +1904,18 @@ mod tests {
         assert_eq!(closest("hero_at", CONDITIONS), Some("hero_at"));
         assert_eq!(closest("xyzzy", CONDITIONS), None);
         assert_eq!(edit_distance("kitten", "sitting"), 3);
+    }
+
+    /// The distance scales with the word: a short key is not «close» to a name three letters away.
+    #[test]
+    fn closest_scales_its_distance_with_the_word() {
+        assert_eq!(closest("iff", ["if", "else"]), Some("if"), "a one-letter slip in a short key");
+        assert_eq!(closest("ab", ["xyz"]), None, "two letters, three edits away: not close");
+        assert_eq!(closest("id", ["in", "trigger_id_x"]), Some("in"), "one edit is near for a short key");
+        assert_eq!(closest("heroat", ["hero_at"]), Some("hero_at"), "a long name's typo of two edits");
+        assert_eq!(closest("zzzzzz", ["hero_at"]), None);
+        assert_eq!(closest("pathfindin", ["pathfinding"]), Some("pathfinding"));
+        assert_eq!(closest("wehn", ["when", "then"]), Some("when"), "a transposed four-letter key is two edits, near enough");
     }
 }
 

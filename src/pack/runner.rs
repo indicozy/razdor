@@ -10,6 +10,7 @@ use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Instant;
 
 use super::open::{open, Opened};
 use super::triggers::VarValue;
@@ -25,6 +26,11 @@ use crate::rules::sim::{fight_it_out, FieldFight};
 use crate::rules::triggers::{Ending, PendingDialog};
 
 
+/// The game minutes of `days` days, or a stop when the count does not fit a clock (checked, never wrapped).
+pub fn minutes_of(days: u64) -> Result<f64, Stuck> {
+    days.checked_mul(MINUTES_PER_DAY).map(|m| m as f64).ok_or_else(|| Stuck::Broken(format!("{days} days is more than a clock can count")))
+}
+
 /// One battle the hero fought.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Fight {
@@ -37,6 +43,18 @@ pub struct Fight {
     pub squad: usize,
 }
 
+/// How long one run may go on: a wall-clock moment, and the game days it may play from its start. A run
+/// past either stops with [`Stuck::Over`] at its next step (`Run::service`), so a package that hangs or
+/// waits for ever fails its seed instead of holding the thread.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Budget {
+    pub deadline: Instant,
+    /// The game days the run may play (from its own start).
+    pub days: f64,
+    /// Whose limit the deadline is, for the message (`seed's time budget`, `test run's time limit`).
+    pub reason: &'static str,
+}
+
 /// Why a playthrough stopped before its goal.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Stuck {
@@ -46,6 +64,8 @@ pub enum Stuck {
     Late { to: Tile, day: f64 },
     /// The hero lost a battle.
     Lost { enemy: String, day: f64 },
+    /// The run went past its [`Budget`]: its time or its game days are spent.
+    Over(String),
     /// A dialog's choice is not one it offers, or a loop did not end.
     Broken(String),
 }
@@ -56,6 +76,7 @@ impl fmt::Display for Stuck {
             Stuck::NoRoute { to, day } => write!(f, "no route to {to:?} on day {day:.1}"),
             Stuck::Late { to, day } => write!(f, "did not reach {to:?} by day {day:.1}"),
             Stuck::Lost { enemy, day } => write!(f, "lost the battle against {enemy} on day {day:.1}"),
+            Stuck::Over(what) => write!(f, "{what}"),
             Stuck::Broken(what) => write!(f, "{what}"),
         }
     }
@@ -98,14 +119,16 @@ pub struct Run {
     pub stop_near_raids: Option<i32>,
     /// The index into `path` of each story beat (a dialog, a capture, an encounter), in order.
     pub beats: Vec<usize>,
+    /// The run's limit ([`Budget`]), when a caller sets one (`pack::playtest` does, per seed).
+    pub budget: Option<Budget>,
     start: f64,
     last_day: i64,
 }
 
 impl Run {
-    /// A game of `opened` (its story seeded with `seed`, the game's generator at `seed`), the map
-    /// revealed (the planner needs explored cells; no route waits for the fog), its opening moment
-    /// answered. Campaign-free: the package's first map.
+    /// A game of `opened` (its story seeded for run `seed` ([`Opened::with_run`], the same seed `razdor-pack
+    /// sim --seed` gives), the game's generator at `seed`), the map revealed (the planner needs explored
+    /// cells; no route waits for the fog), its opening moment answered. Campaign-free: the package's first map.
     pub fn new(opened: &Opened, content: Arc<Content>, seed: u32, choices: &[(&str, &str)]) -> Result<Run, Stuck> {
         Run::carried(opened, content, seed, choices, &Carried::default())
     }
@@ -113,8 +136,7 @@ impl Run {
     /// [`Run::new`] with what the earlier chapters carry in (`carry`): the gold, the squad and the
     /// story's variables, set before the map's moments fire (as `Carried::apply` says).
     pub(crate) fn carried(opened: &Opened, content: Arc<Content>, seed: u32, choices: &[(&str, &str)], carry: &Carried) -> Result<Run, Stuck> {
-        let mut o = opened.clone();
-        o.story.seed = seed | 1;
+        let o = opened.clone().with_run(seed);
         let mut g = Game::from_scenario(content, &o.scenario, HeroClass::Knight);
         g.rng = Rng::new(seed);
         g.seed_events(seed);
@@ -142,6 +164,7 @@ impl Run {
             path: vec![here],
             stop_near_raids: None,
             beats: Vec::new(),
+            budget: None,
             start,
             last_day: -1,
         }
@@ -193,6 +216,7 @@ impl Run {
     /// has raised (dialogs, captures, encounters). Runs until nothing waits.
     pub fn service(&mut self) -> Result<(), Stuck> {
         self.sample();
+        self.check_budget()?;
         for _ in 0..10_000 {
             if self.g.pending_question().is_some() {
                 let ev = self.g.answer_question(true);
@@ -216,6 +240,18 @@ impl Run {
             self.settle(ev)?;
         }
         Err(Stuck::Broken("the events did not settle".into()))
+    }
+
+    /// Stops the run when it is past its [`Budget`] (its wall-clock deadline or its game days).
+    fn check_budget(&self) -> Result<(), Stuck> {
+        let Some(b) = self.budget else { return Ok(()) };
+        if Instant::now() >= b.deadline {
+            return Err(Stuck::Over(format!("out of time: the {} is spent on day {:.1}", b.reason, self.day())));
+        }
+        if self.day() >= b.days {
+            return Err(Stuck::Over(format!("out of game days: the seed has no days left on day {:.1} of this map", self.day())));
+        }
+        Ok(())
     }
 
     /// Records the day's sample when a new day has begun.
@@ -309,7 +345,7 @@ impl Run {
     /// battle ends the walk (a building or an army he goes for is fought on the way, so his walk
     /// ends there). A lost battle, no route, or `max_days` without arriving are errors.
     pub fn walk_to(&mut self, to: Tile, max_days: u64) -> Result<(), Stuck> {
-        let deadline = self.g.clock.total_minutes() + (max_days * MINUTES_PER_DAY) as f64;
+        let deadline = self.g.clock.total_minutes() + minutes_of(max_days)?;
         let before = self.battles.len();
         // The minute of the last route planned: a second plan in the same minute (a friendly army
         // in the way stops the walk at once, see `Game::step_contact`) lets a minute pass first,
@@ -372,7 +408,7 @@ impl Run {
     /// Stands still for `days` days (the clock runs; the armies move; the story's moments fire),
     /// fighting whatever comes. Stops early when the chapter is over.
     pub fn wait_days(&mut self, days: u64) -> Result<(), Stuck> {
-        let end = self.g.clock.total_minutes() + (days * MINUTES_PER_DAY) as f64;
+        let end = self.g.clock.total_minutes() + minutes_of(days)?;
         for _ in 0..2_000_000 {
             self.service()?;
             if self.done() || self.g.clock.total_minutes() >= end {

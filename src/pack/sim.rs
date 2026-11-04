@@ -473,6 +473,9 @@ pub struct CampaignOptions {
     /// Each map entered a second time is saved and restored first (`rules::save`): the sim's check
     /// that a campaign's save round-trips mid-campaign. A developer switch.
     pub save_on_revisit: bool,
+    /// The run seed (`--seed`): each map is opened for it ([`super::open::Opened::with_run`]), the seed a
+    /// `razdor-pack test` seed plays its campaign with. None: [`super::open::RUN_SEED`].
+    pub seed: Option<u32>,
 }
 
 /// One map of a campaign run: what it was entered with, how its play ended and on which day, and
@@ -747,7 +750,11 @@ pub fn sim_campaign(pkg: &Package, install: &DtInstall, opts: &CampaignOptions) 
     let hash = open::package_hash(&pkg.files);
     let mut open_map = |map: &str| -> Result<Opened, String> {
         let compiled = compile::compile(pkg, install, "en", map).map_err(|r| r.to_text())?;
-        open::build(pkg, hash, Path::new(""), map, compiled, "en")
+        let opened = open::build(pkg, hash, Path::new(""), map, compiled, "en")?;
+        Ok(match opts.seed {
+            Some(run) => opened.with_run(run),
+            None => opened,
+        })
     };
     Ok(run_campaign(pkg, &base, &mut open_map, opts))
 }
@@ -842,6 +849,7 @@ mod tests {
             auto_win_after: Some(20),
             preset: vec![("quests_done".into(), VarValue::Int(2)), ("order".into(), VarValue::Int(2)), ("crown".into(), VarValue::Int(1))],
             save_on_revisit: true,
+            seed: None,
             meet: None,
         };
         let run = sim_campaign(&pkg, &install, &opts).unwrap_or_else(|r| panic!("{}", r.to_text()));
@@ -883,6 +891,7 @@ mod tests {
                 auto_win_after: Some(20),
                 preset: preset.iter().map(|(k, v)| (k.to_string(), v.clone())).collect(),
                 save_on_revisit: false,
+                seed: None,
                 meet: None,
             };
             let run = sim_campaign(&pkg, &install, &opts).unwrap_or_else(|r| panic!("{}", r.to_text()));

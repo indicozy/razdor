@@ -285,6 +285,7 @@ fn sim_campaign_cmd(package: &Package, a: &Args) -> Result<u8, String> {
         preset,
         save_on_revisit: false,
         meet: meet_of(a)?,
+        seed: a.seed,
     };
     let run = pack::sim::sim_campaign(package, &install, &opts).map_err(|r| r.to_text())?;
     if a.json {

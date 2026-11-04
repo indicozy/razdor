@@ -10,7 +10,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -20,7 +20,7 @@ use super::compile;
 use super::diag::Report;
 use super::load::{Located, Package};
 use super::open::{self, Opened};
-use super::runner::{drink_for_wounded, heal_within_means, hire_within_means_keeping, raise_within_means, Carried, Run, Stuck};
+use super::runner::{drink_for_wounded, heal_within_means, hire_within_means_keeping, minutes_of, raise_within_means, Budget, Carried, Run, Stuck};
 use super::triggers::VarValue;
 use crate::dt::install::DtInstall;
 use crate::rules::campaign::{after_victory, enter};
@@ -34,6 +34,78 @@ pub const DIR: &str = "tests/";
 
 /// How many lines of the run's log a failure shows.
 const TAIL: usize = 40;
+
+/// The most seeds one test plays (`seeds`, `razdor-pack test --seeds`, the studio's `run_test`).
+pub const MAX_SEEDS: u32 = 200;
+/// The most game days one step may ask for (`days`, `wait_days`): a year, as the studio's `sim` allows.
+pub const MAX_DAYS: u64 = 365;
+/// The most game days one seed plays in all, its steps together.
+pub const SEED_GAME_DAYS: u64 = 400;
+/// The wall-clock time one seed may take.
+pub const SEED_SECONDS: u64 = 60;
+/// The wall-clock time one call of the studio's `run_test` may take, all its seeds together.
+pub const CALL_SECONDS: u64 = 300;
+
+/// What one seed may spend: a wall-clock deadline and the game days it may play in all. A seed past it
+/// fails with a message saying which limit it hit (see [`Budget`]).
+#[derive(Clone, Copy, Debug)]
+pub struct Limit {
+    pub deadline: Instant,
+    pub game_days: u64,
+    /// Whose deadline it is, for the message.
+    pub reason: &'static str,
+}
+
+impl Limit {
+    /// One seed's own limit from now (`SEED_SECONDS`, `SEED_GAME_DAYS`), or the call's deadline when that
+    /// comes first.
+    pub fn for_seed(call: Option<Instant>) -> Limit {
+        let own = Instant::now() + Duration::from_secs(SEED_SECONDS);
+        match call {
+            Some(c) if c < own => Limit { deadline: c, game_days: SEED_GAME_DAYS, reason: "test run's time limit" },
+            _ => Limit { deadline: own, game_days: SEED_GAME_DAYS, reason: "seed's time budget" },
+        }
+    }
+
+    /// The run's [`Budget`] when `spent` game days are already played by the seed's earlier maps.
+    fn budget(&self, spent: f64) -> Budget {
+        Budget { deadline: self.deadline, days: self.game_days as f64 - spent, reason: self.reason }
+    }
+}
+
+/// The seed count a caller asks for (`--seeds`, the studio's `seeds`), checked against `MAX_SEEDS`.
+pub fn seeds_asked(n: u32) -> Result<u32, String> {
+    if (1..=MAX_SEEDS).contains(&n) {
+        Ok(n)
+    } else {
+        Err(format!("the seed count must be between 1 and {MAX_SEEDS}, not {n}"))
+    }
+}
+
+/// The threads a run uses: the cores but two (the desktop's), at least one, and no more than the seeds.
+pub fn threads_for(cores: usize, seeds: usize) -> usize {
+    cores.saturating_sub(2).max(1).min(seeds.max(1))
+}
+
+/// A shell line that replays one seed with `razdor-pack sim` (the story's seed is the same, see
+/// `open::story_seed`): a map's test on its map, a campaign's on the campaign.
+pub fn replay_of(r: &TestResult, seed: u32) -> String {
+    let package = shell_word(&r.package);
+    match (&r.map, r.campaign) {
+        (Some(map), _) => format!("razdor-pack sim {package} --map {map} --seed {seed}"),
+        (None, true) => format!("razdor-pack sim {package} --campaign --seed {seed}"),
+        (None, false) => format!("razdor-pack sim {package} --seed {seed}"),
+    }
+}
+
+/// A path as one shell word: quoted when it has a character a shell would split or expand.
+fn shell_word(p: &str) -> String {
+    if !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+=:,@%".contains(c)) {
+        p.to_string()
+    } else {
+        format!("'{}'", p.replace('\'', "'\\''"))
+    }
+}
 
 // ---- the file as read -------------------------------------------------------------------------
 
@@ -297,6 +369,8 @@ pub fn read(file: &Located<TestFile>) -> Result<Test, Vec<Problem>> {
     let seeds = t.seeds.unwrap_or(1);
     if seeds == 0 {
         problem(Some(file.line), "seeds is 0: a test runs at least one seed".into(), "seeds = 15");
+    } else if seeds > MAX_SEEDS {
+        problem(Some(file.line), format!("seeds is {seeds}: a test plays at most {MAX_SEEDS} seeds"), &format!("seeds = {MAX_SEEDS} or fewer"));
     }
     let min_rate = t.min_rate.unwrap_or(1.0);
     if !(min_rate > 0.0 && min_rate <= 1.0) {
@@ -335,6 +409,9 @@ fn read_step(s: &StepSpec, line: u32) -> Result<Step, Vec<(String, String)>> {
     if s.days == Some(0) {
         problems.push(("days is 0".into(), "days = 1 or more".into()));
     }
+    if days > MAX_DAYS {
+        problems.push((format!("days is {days}: a step plays at most {MAX_DAYS} days"), format!("days = {MAX_DAYS} or fewer")));
+    }
     if let Some([x, y]) = s.walk {
         if x < 0 || y < 0 {
             problems.push((format!("walk [{x}, {y}]: a cell has no negative coordinate"), "walk = [x, y] on the map".into()));
@@ -354,6 +431,8 @@ fn read_step(s: &StepSpec, line: u32) -> Result<Step, Vec<(String, String)>> {
     if let Some(n) = s.wait_days {
         if n == 0 {
             problems.push(("wait_days is 0".into(), "wait_days = 1 or more".into()));
+        } else if n > MAX_DAYS {
+            problems.push((format!("wait_days is {n}: a step waits at most {MAX_DAYS} days"), format!("wait_days = {MAX_DAYS} or fewer")));
         }
         acts.push(Act::Wait(n));
     }
@@ -706,6 +785,11 @@ struct Session<'a> {
     log: Vec<String>,
     /// The option «Обход армий на пути» for the maps after the first (`TestFile::avoid_armies`).
     avoid: bool,
+    /// The seed: each map of the run is opened for it (`open::Opened::with_run`), as `razdor-pack sim --seed`.
+    seed: u32,
+    /// The game days the maps left behind have played (the current run counts its own from its start).
+    spent: f64,
+    limit: Limit,
 }
 
 impl Session<'_> {
@@ -732,10 +816,14 @@ impl Session<'_> {
             return Err(format!("the map `{}` has no way on: the campaign ends here", self.map));
         };
         let (to, content) = maps.by_id.get(&next).ok_or_else(|| format!("the campaign goes to `{next}`, which the package does not have"))?;
-        let g = enter(&self.run.g, from, to, None, content.clone()).map_err(|e| format!("the hand-over to {next}: {e}"))?;
+        // The next map's story is seeded for this run, as the first map's is (`Run::carried`).
+        let to = to.clone().with_run(self.seed);
+        let g = enter(&self.run.g, from, &to, None, content.clone()).map_err(|e| format!("the hand-over to {next}: {e}"))?;
         let refs: Vec<(&str, &str)> = self.choices.iter().map(|(d, c)| (d.as_str(), c.as_str())).collect();
         let mut run = Run::resume(g, &refs).map_err(|e| format!("entering {next}: {e}"))?;
         run.g.avoid_armies = self.avoid;
+        self.spent += self.run.day();
+        run.budget = Some(self.limit.budget(self.spent));
         let old = std::mem::replace(&mut self.run, run);
         self.log.extend(old.log);
         self.log.push(format!("-- entering {next}"));
@@ -782,7 +870,7 @@ impl Session<'_> {
     /// (`Run::walk_to`), and the hero walks on from where he stands until he is there, the chapter is over,
     /// or the days are gone.
     fn walk(&mut self, to: Tile, days: u64) -> Result<(), String> {
-        let deadline = self.run.g.clock.total_minutes() + (days * MINUTES_PER_DAY) as f64;
+        let deadline = self.run.g.clock.total_minutes() + minutes_of(days).map_err(|e| e.to_string())?;
         for _ in 0..1000 {
             if self.run.g.tile() == to || self.run.done() {
                 return Ok(());
@@ -978,7 +1066,7 @@ fn longest_gap_of(last: usize, beats: &[usize]) -> usize {
 
 /// Plays one seed of `test`: the first map (the campaign's start, or the test's map) with the leading
 /// `choose` steps answered at its start, then the steps in order, the expectations checked after each.
-pub fn play_seed(pkg: &Package, maps: &Maps, test: &Test, seed: u32) -> SeedRun {
+pub fn play_seed(pkg: &Package, maps: &Maps, test: &Test, seed: u32, limit: Limit) -> SeedRun {
     let started = Instant::now();
     let first = if test.campaign {
         pkg.campaign.as_ref().map(|c| c.start.clone()).unwrap_or_default()
@@ -1013,7 +1101,8 @@ pub fn play_seed(pkg: &Package, maps: &Maps, test: &Test, seed: u32) -> SeedRun 
     if !test.campaign {
         run.g.avoid_armies = test.avoid_armies;
     }
-    let mut session = Session { pkg, maps, campaign: test.campaign, map: first.clone(), run, choices, played: vec![first], log: Vec::new(), avoid: test.avoid_armies };
+    run.budget = Some(limit.budget(0.0));
+    let mut session = Session { pkg, maps, campaign: test.campaign, map: first.clone(), run, choices, played: vec![first], log: Vec::new(), avoid: test.avoid_armies, seed, spent: 0.0, limit };
     let mut failure = None;
     for (i, step) in test.steps.iter().enumerate() {
         let result = (|| -> Result<(), String> {
@@ -1053,6 +1142,8 @@ pub struct TestResult {
     pub map: Option<String>,
     pub seeds: u32,
     pub min_rate: f64,
+    /// The package's path as given to the run (for the replay line).
+    pub package: String,
     pub passed: u32,
     /// The seeds' playing time, summed.
     pub secs: f64,
@@ -1071,11 +1162,13 @@ impl TestResult {
     }
 }
 
-/// What to run: one test by its name, and the seeds (instead of each test's own count).
+/// What to run: one test by its name, the seeds (instead of each test's own count), and the moment the
+/// whole run must end by (`None`: each seed has only its own budget).
 #[derive(Debug, Clone, Default)]
 pub struct Options {
     pub only: Option<String>,
     pub seeds: Option<u32>,
+    pub deadline: Option<Instant>,
 }
 
 /// Runs the package's tests over their seeds, in parallel threads (at most the cores the machine has).
@@ -1090,8 +1183,9 @@ pub fn run_package(pkg: &Package, root: &Path, install: &DtInstall, opts: &Optio
         all.retain(|t| &t.name == name);
     }
     if let Some(n) = opts.seeds {
+        let n = seeds_asked(n)?;
         for t in &mut all {
-            t.seeds = n.max(1);
+            t.seeds = n;
         }
     }
     let started = Instant::now();
@@ -1109,14 +1203,16 @@ pub fn run_package(pkg: &Package, root: &Path, install: &DtInstall, opts: &Optio
     let work: Vec<(usize, u32)> = all.iter().enumerate().flat_map(|(i, t)| (1..=t.seeds).map(move |s| (i, s))).collect();
     let next = AtomicUsize::new(0);
     let done: Mutex<Vec<(usize, SeedRun)>> = Mutex::new(Vec::new());
-    let threads = thread::available_parallelism().map(|n| n.get()).unwrap_or(1).clamp(1, work.len().max(1));
+    let threads = threads_for(thread::available_parallelism().map(|n| n.get()).unwrap_or(1), work.len());
+    let call = opts.deadline;
     thread::scope(|scope| {
         for _ in 0..threads {
             scope.spawn(|| loop {
                 let i = next.fetch_add(1, Ordering::SeqCst);
                 let Some(&(t, seed)) = work.get(i) else { break };
                 let test = &all[t];
-                let run = panic::catch_unwind(AssertUnwindSafe(|| play_seed(pkg, &maps, test, seed))).unwrap_or_else(|payload| {
+                let limit = Limit::for_seed(call);
+                let run = panic::catch_unwind(AssertUnwindSafe(|| play_seed(pkg, &maps, test, seed, limit))).unwrap_or_else(|payload| {
                     let msg = payload.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| payload.downcast_ref::<String>().cloned()).unwrap_or_default();
                     SeedRun { seed, failure: Some(Failure { step: 0, line: 0, label: "engine".into(), what: format!("the engine panicked: {msg}"), tail: Vec::new() }), maps: Vec::new(), ending: None, log: Vec::new(), secs: 0.0 }
                 });
@@ -1142,6 +1238,7 @@ pub fn run_package(pkg: &Package, root: &Path, install: &DtInstall, opts: &Optio
                 map: t.map.clone(),
                 seeds: t.seeds,
                 min_rate: t.min_rate,
+                package: root.display().to_string(),
                 passed: runs.len() as u32 - failures.len() as u32,
                 secs,
                 failures,
@@ -1179,6 +1276,7 @@ pub fn text(results: &[TestResult], wall: f64) -> String {
             let fail = f.failure.as_ref().expect("a failure");
             out.push_str(&format!("     seed {}: step {} (tests/{}.toml line {}), {}\n", f.seed, fail.step, r.name, fail.line, fail.label));
             out.push_str(&format!("       {}\n", fail.what));
+            out.push_str(&format!("       replay: {}\n", replay_of(r, f.seed)));
             if r.failures.len() > 1 {
                 let seeds: Vec<String> = r.failures.iter().map(|x| x.seed.to_string()).collect();
                 out.push_str(&format!("     failing seeds: {}\n", seeds.join(", ")));
@@ -1204,7 +1302,7 @@ pub fn json(results: &[TestResult]) -> Value {
                     .iter()
                     .map(|f| {
                         let fail = f.failure.as_ref().expect("a failure");
-                        json!({ "seed": f.seed, "step": fail.step, "line": fail.line, "label": fail.label, "what": fail.what, "log_tail": fail.tail, "maps": f.maps })
+                        json!({ "seed": f.seed, "step": fail.step, "line": fail.line, "label": fail.label, "what": fail.what, "log_tail": fail.tail, "maps": f.maps, "replay": replay_of(r, f.seed) })
                     })
                     .collect();
                 json!({
@@ -1302,5 +1400,110 @@ mod tests {
         let (pkg, _) = Package::parse(files);
         let (results, _) = run_package(&pkg, &root, &install, &Options::default()).unwrap_or_else(|e| panic!("{e}"));
         assert!(all_ok(&results), "{}", text(&results, 0.0));
+    }
+
+    /// The caps: a test plays at most `MAX_SEEDS` seeds, a step at most `MAX_DAYS` game days (a
+    /// `days`, a `wait_days`), and both read as problems past them.
+    #[test]
+    fn the_seed_and_day_caps_read_as_problems() {
+        let at_cap = file("map = \"marka\"\nseeds = 200\n[[step]]\nwait_days = 365\n[[step]]\nwalk_to_building = \"ashford\"\ndays = 365\n");
+        assert!(read(&at_cap).is_ok(), "the caps themselves read");
+        let seeds = read(&file("map = \"marka\"\nseeds = 201\n[[step]]\nwait_days = 1\n")).expect_err("201 seeds");
+        assert!(seeds.iter().any(|p| p.message.contains("at most 200 seeds")), "{seeds:?}");
+        let huge = read(&file("map = \"marka\"\nseeds = 4294967295\n[[step]]\nwait_days = 1\n")).expect_err("u32::MAX seeds");
+        assert!(huge.iter().any(|p| p.message.contains("at most 200 seeds")), "{huge:?}");
+        let wait = read(&file("map = \"marka\"\n[[step]]\nwait_days = 366\n")).expect_err("a 366-day wait");
+        assert!(wait.iter().any(|p| p.message.contains("wait_days is 366")), "{wait:?}");
+        let walk = read(&file("map = \"marka\"\n[[step]]\nwalk_to_building = \"ashford\"\ndays = 366\n")).expect_err("a 366-day walk");
+        assert!(walk.iter().any(|p| p.message.contains("days is 366")), "{walk:?}");
+        let fight = read(&file("map = \"marka\"\n[[step]]\nfight = \"patrol\"\ndays = 9999999999\n")).expect_err("a fight of ten billion days");
+        assert!(fight.iter().any(|p| p.message.contains("days is 9999999999")), "{fight:?}");
+    }
+
+    /// The seed count asked on the command line or by the studio is checked, and the threads leave two
+    /// cores to the machine (at least one thread, never more than the seeds).
+    #[test]
+    fn the_seed_count_asked_is_checked_and_two_cores_are_left_free() {
+        assert_eq!(seeds_asked(1), Ok(1));
+        assert_eq!(seeds_asked(MAX_SEEDS), Ok(MAX_SEEDS));
+        assert!(seeds_asked(0).is_err(), "no seeds");
+        assert!(seeds_asked(MAX_SEEDS + 1).is_err(), "over the cap");
+        assert_eq!(threads_for(1, 15), 1, "one core: one thread");
+        assert_eq!(threads_for(2, 15), 1, "two cores: still one");
+        assert_eq!(threads_for(12, 15), 10, "twelve cores leave two");
+        assert_eq!(threads_for(12, 3), 3, "never more threads than seeds");
+        assert_eq!(threads_for(32, 100), 30);
+        assert_eq!(threads_for(0, 0), 1, "nothing to run still gives a thread");
+    }
+
+    /// The replay line names the `razdor-pack sim` run that plays the same story: a map's on its map, a
+    /// campaign's with `--campaign`, a folder with a space quoted.
+    #[test]
+    fn a_failing_seed_names_the_sim_that_replays_it() {
+        let result = |campaign: bool, map: Option<&str>, package: &str| TestResult {
+            name: "t".into(),
+            file: "tests/t.toml".into(),
+            campaign,
+            map: map.map(str::to_string),
+            seeds: 15,
+            min_rate: 0.8,
+            package: package.into(),
+            passed: 14,
+            secs: 0.0,
+            failures: Vec::new(),
+        };
+        assert_eq!(replay_of(&result(false, Some("marka"), "examples/pack"), 4), "razdor-pack sim examples/pack --map marka --seed 4");
+        assert_eq!(replay_of(&result(true, None, "examples/pack"), 7), "razdor-pack sim examples/pack --campaign --seed 7");
+        assert_eq!(replay_of(&result(true, None, "my packs/a'b"), 2), "razdor-pack sim 'my packs/a'\\''b' --campaign --seed 2");
+    }
+
+    /// A seed gets its own story: two neighbouring seeds do not share one (the old `seed | 1` made
+    /// seeds 2 and 3 the same), and seed N is the story `razdor-pack sim --seed N` plays on the same map.
+    #[test]
+    fn neighbouring_seeds_have_their_own_story_and_seed_n_is_the_sims() {
+        let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+        let install = DtInstall::load(Path::new(&dir)).unwrap_or_else(|e| panic!("{e}"));
+        let (opened, content) = super::super::playthrough::brod(&install);
+        let story_of = |seed: u32| {
+            let run = Run::new(&opened, content.clone(), seed, super::super::playthrough::PREPARED).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+            run.g.story().map(|s| s.seed).expect("the map has a story")
+        };
+        let (two, three) = (story_of(2), story_of(3));
+        assert_ne!(two, three, "neighbouring seeds share a story");
+        assert_eq!(two, open::story_seed(&opened.id, &opened.map, 2), "seed 2 is `sim --seed 2`'s story");
+        assert_eq!(three, open::story_seed(&opened.id, &opened.map, 3), "seed 3 is `sim --seed 3`'s story");
+    }
+
+    /// The limits: a Limit whose deadline is already past stops a long wait at its first step, and a seed
+    /// with fewer game days than the wait stops with the game-day message. Both fail the seed (no hang).
+    #[test]
+    fn a_seed_past_its_time_or_its_game_days_fails_with_the_reason() {
+        let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+        let install = DtInstall::load(Path::new(&dir)).unwrap_or_else(|e| panic!("{e}"));
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/packs/pepelnaya-marka");
+        let files = super::super::files::Files::load(&root).unwrap_or_else(|e| panic!("{e}"));
+        let (pkg, _) = Package::parse(files);
+        let maps = open_maps(&pkg, &root, &install, &["brod".to_string()]).unwrap_or_else(|e| panic!("{e}"));
+        let test = read(&file("map = \"brod\"\n[[step]]\nwait_days = 30\n")).unwrap_or_else(|p| panic!("{p:?}"));
+        let now = Instant::now();
+        let out_of_time = Limit { deadline: now, game_days: SEED_GAME_DAYS, reason: "seed's time budget" };
+        let run = play_seed(&pkg, &maps, &test, 1, out_of_time);
+        let f = run.failure.expect("a seed past its deadline fails");
+        assert!(f.what.contains("out of time") && f.what.contains("seed's time budget"), "{}", f.what);
+        let few_days = Limit { deadline: now + Duration::from_secs(600), game_days: 5, reason: "seed's time budget" };
+        let run = play_seed(&pkg, &maps, &test, 1, few_days);
+        let f = run.failure.expect("a seed past its game days fails");
+        assert!(f.what.contains("out of game days"), "{}", f.what);
+        let plenty = Limit { deadline: now + Duration::from_secs(600), game_days: SEED_GAME_DAYS, reason: "seed's time budget" };
+        assert!(play_seed(&pkg, &maps, &test, 1, plenty).failure.is_none(), "30 days fit the budget");
+    }
+
+    /// A call's deadline before the seed's own one is the limit that applies, and it says so.
+    #[test]
+    fn the_call_deadline_applies_when_it_comes_first() {
+        let soon = Instant::now() + Duration::from_secs(1);
+        assert_eq!(Limit::for_seed(Some(soon)).reason, "test run's time limit");
+        assert_eq!(Limit::for_seed(None).reason, "seed's time budget");
+        assert_eq!(Limit::for_seed(Some(Instant::now() + Duration::from_secs(SEED_SECONDS * 10))).reason, "seed's time budget");
     }
 }
