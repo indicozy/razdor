@@ -83,6 +83,7 @@ routes of the story) and **Fog** (what the hero and the lit lanterns see at the 
 - **Package settings** («Package» → «Package settings», or `package.toml` in the file tree): version, title, description, author, licence, base. The id is read only.
 - **Map settings** («Package» → «Map settings», or the map's name in the scene): title, description, start date, the relations between the sides (−3 to 3), terrain colours and the victory (its kind and its argument).
 - **Campaign** (the «Campaign» main screen): maps as nodes, next-maps as arrows with numbers (1 is tried first). Drag a node to move it; drag from its right edge to another node to add a next-map. Select an arrow to change its order, delete it or set its conditions. Dashed arrows are set by triggers (travel, victory with a next map, ending); they are read only here and are edited in Script.
+- **Story** (the «Story» main screen): the map's dialogs, triggers and variables as nodes. A dialog's dots are its choices; drag from a choice's dot (or a trigger's) onto a dialog to wire it: the choice opens the dialog, or, when a `dialog_choice` trigger already answers the choice, a new trigger is made. Edges read «opens», «sets X», «if X». Select a node to edit it in the Inspector: a trigger (when, if, then, with each kind and its arguments from a list), a dialog (its title and text in each language, the speaker, its choices with their conditions and actions). «Variables» (bottom dock) shows where each variable is set and read, warns about the unused ones, and renames it across the files in one step.
 - **Characters** (the «Characters» tab at the bottom): where each character is given, required and removed. A warning when a character is needed before any map gives it. Renaming changes it in every file in one undo step.
 - **Texts** (the «Texts» main screen): one row per key, one column per language. Red: used but defined in no language; grey: defined but never used; amber: a language lacks it. «Add language» creates `texts/<language>.toml` with every key empty.
 
@@ -90,8 +91,7 @@ Each change is one undo step (Ctrl+Z).
 
 ## Not yet
 
-The studio does not have a story editor (triggers and dialogues), a campaign graph, a table of
-texts or route checks yet. These come in later versions.
+The studio does not have route checks or map generators yet. These come in later versions.
 
 ## .DTm maps
 

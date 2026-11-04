@@ -21,6 +21,9 @@ mod mcp;
 mod inspector;
 mod map_tab;
 mod scene;
+mod story;
+mod story_forms;
+mod vars;
 pub(crate) mod scenarios;
 pub mod start;
 mod watch;
@@ -97,6 +100,10 @@ pub enum Tab {
     Texts,
     /// The named characters: where each is given, required and removed.
     Characters,
+    /// The flow graph of the shown map: dialogs, triggers, variables (the Story main screen).
+    Story,
+    /// Every variable: where it is set and read, rename (`vars.rs`).
+    Vars,
 }
 
 impl Tab {
@@ -115,6 +122,8 @@ impl Tab {
             Tab::Campaign => tr("Campaign"),
             Tab::Texts => tr("Texts"),
             Tab::Characters => tr("Characters"),
+            Tab::Story => tr("Story"),
+            Tab::Vars => tr("Variables"),
         }
     }
 }
@@ -356,6 +365,25 @@ impl StudioScreen {
                 "campaign" => {
                     self.scen.focus = Focus::Campaign;
                     if let Some(at) = self.dock.find_tab(&Tab::Campaign) {
+                        self.dock.set_active_tab(at);
+                    }
+                }
+                "story" | "vars" => {
+                    // The story screens show their own selection: the army the scene named is not theirs.
+                    if *opt == "story" {
+                        self.selection = None;
+                        self.scen.focus = Focus::Story;
+                    }
+                    let tab = if *opt == "story" { Tab::Story } else { Tab::Vars };
+                    if let Some(at) = self.dock.find_tab(&tab) {
+                        self.dock.set_active_tab(at);
+                    }
+                }
+                "trigger" | "dialog" => {
+                    // The package is built after the first frames: the Story screen picks the node then.
+                    self.selection = None;
+                    self.scen.story.pending = Some(opt.to_string());
+                    if let Some(at) = self.dock.find_tab(&Tab::Story) {
                         self.dock.set_active_tab(at);
                     }
                 }
@@ -723,7 +751,7 @@ impl StudioScreen {
                         self.scen.focus = Focus::Header;
                         ui.close_menu();
                     }
-                    for (label, tab) in [("Campaign", Tab::Campaign), ("Texts", Tab::Texts), ("Characters", Tab::Characters)] {
+                    for (label, tab) in [("Story", Tab::Story), ("Campaign", Tab::Campaign), ("Texts", Tab::Texts), ("Characters", Tab::Characters), ("Variables", Tab::Vars)] {
                         if ui.button(tr(label)).clicked() {
                             self.pending_tab = Some(tab);
                             ui.close_menu();
@@ -787,7 +815,7 @@ impl StudioScreen {
                 self.dock.set_active_tab(at);
             }
         }
-        if let Some(tab) = self.pending_tab.take() {
+        if let Some(tab) = self.pending_tab.take().or_else(|| self.scen.want_tab.take()) {
             if let Some(at) = self.dock.find_tab(&tab) {
                 self.dock.set_active_tab(at);
             }
@@ -1023,7 +1051,7 @@ fn char_index(text: &str, byte: usize) -> usize {
 /// puts the Script beside the Map instead of in its tabs (the snapshot's `side` option).
 fn layout(side: bool) -> DockState<Tab> {
     // The main screens: Map, Campaign and Texts (Script beside the Map when `side` is off).
-    let mut centre_tabs = vec![Tab::Map, Tab::Campaign, Tab::Texts];
+    let mut centre_tabs = vec![Tab::Map, Tab::Story, Tab::Campaign, Tab::Texts];
     if !side {
         centre_tabs.push(Tab::Script);
     }
@@ -1036,7 +1064,7 @@ fn layout(side: bool) -> DockState<Tab> {
     let [_inspector, _side] = tree.split_below(inspector, 0.55, vec![Tab::Minimap, Tab::Stamps]);
     let [centre, files] = tree.split_left(centre, 0.25, vec![Tab::FileSystem]);
     let [_files, _scene] = tree.split_below(files, 0.5, vec![Tab::Scene]);
-    let [centre, _bottom] = tree.split_below(centre, 0.75, vec![Tab::Problems, Tab::Characters, Tab::Output, Tab::Claude]);
+    let [centre, _bottom] = tree.split_below(centre, 0.75, vec![Tab::Problems, Tab::Characters, Tab::Vars, Tab::Output, Tab::Claude]);
     if side {
         tree.split_right(centre, 0.5, vec![Tab::Script]);
     }
@@ -1121,6 +1149,8 @@ impl TabViewer for Viewer<'_> {
             Tab::Campaign => self.campaign_screen(ui),
             Tab::Texts => self.texts_screen(ui),
             Tab::Characters => self.characters_dock(ui),
+            Tab::Story => self.story_screen(ui),
+            Tab::Vars => self.vars_dock(ui),
         }
     }
 

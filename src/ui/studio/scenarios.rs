@@ -29,6 +29,16 @@ const NODE_FILL: Color32 = Color32::from_rgb(0x2b, 0x30, 0x3d);
 const NODE_START: Color32 = Color32::from_rgb(0x2f, 0x5d, 0x3a);
 const GREY: Color32 = Color32::from_rgb(0x8a, 0x8f, 0x9c);
 
+/// Where an edge's label sits: on the edge at 40–60% of its length, staggered by the edge's index
+/// (the three positions and two offsets across the line) so that neighbouring labels do not overlap.
+pub(super) fn edge_label_at(from: Pos2, to: Pos2, index: usize) -> Pos2 {
+    let t = [0.5, 0.42, 0.58][index % 3];
+    let d = to - from;
+    let normal = if d.length() > 0.0 { Vec2::new(-d.y, d.x).normalized() } else { Vec2::ZERO };
+    let offset = [0.0, -12.0, 12.0][(index / 3) % 3];
+    from + d * t + normal * offset
+}
+
 /// The node's size on the canvas, in points.
 const NODE: Vec2 = Vec2::new(176.0, 58.0);
 
@@ -51,6 +61,8 @@ pub enum Focus {
     Package,
     Header,
     Campaign,
+    /// A trigger or a dialog of the story (`story::StoryUi`'s selection).
+    Story,
 }
 
 /// The state of the scenario screens, kept across frames.
@@ -74,6 +86,10 @@ pub struct ScenarioUi {
     pub new_map: String,
     /// The palette's new kind (the colour is the field next to it).
     pub new_kind: String,
+    /// The story screens' state: the selection and the wiring in progress.
+    pub story: super::story::StoryUi,
+    /// A main screen or dock the story asks to show after the dock is drawn (a usage's click).
+    pub want_tab: Option<super::Tab>,
 }
 
 impl ScenarioUi {
@@ -436,7 +452,7 @@ impl Viewer<'_> {
             }
             if ui.button(tr("Auto layout")).clicked() {
                 self.scen.saved = Some(BTreeMap::new());
-                let _ = self.ws.write_editor_file(cg::LAYOUT, &cg::layout_json(&BTreeMap::new()));
+                let _ = self.ws.write_editor_file(cg::LAYOUT, &cg::layout_json(self.ws.read_editor_file(cg::LAYOUT).as_deref(), &BTreeMap::new()));
             }
             ui.weak(tr("Drag a node to move it. Drag from its right edge to another node to add a next edge."));
         });
@@ -452,7 +468,7 @@ impl Viewer<'_> {
         let rect_of = |id: &str| positions.get(id).map(|p| Rect::from_min_size(at(*p), NODE));
         // Edges (drawn first, under the nodes).
         let mut hover_text: Option<String> = None;
-        for e in &graph.edges {
+        for (ei, e) in graph.edges.iter().enumerate() {
             let (Some(a), Some(b)) = (rect_of(&e.from), rect_of(&e.to)) else { continue };
             let (p1, p2) = (Pos2::new(a.right(), a.center().y), Pos2::new(b.left(), b.center().y));
             let selected = self.scen.camp == CampSel::Edge(e.from.clone(), e.index);
@@ -463,8 +479,10 @@ impl Viewer<'_> {
                 painter.line_segment([p1, p2], stroke);
                 arrow(&painter, p1, p2, stroke);
             }
-            let mid = Pos2::new((p1.x + p2.x) / 2.0, (p1.y + p2.y) / 2.0);
             let label = if e.conds.is_empty() { format!("{}", e.index + 1) } else { format!("{} if", e.index + 1) };
+            let mid = edge_label_at(p1, p2, ei);
+            let w = label.chars().count() as f32 * 7.0 + 8.0;
+            painter.rect_filled(Rect::from_center_size(mid, Vec2::new(w, 16.0)), 3.0, Color32::from_rgb(0x1c, 0x1f, 0x26));
             painter.text(mid, Align2::CENTER_CENTER, label, FontId::proportional(12.0), if selected { ACCENT } else { Color32::from_gray(0xc8) });
             // Clicking near the line selects the edge.
             if let Some(pos) = resp.hover_pos() {
@@ -555,7 +573,7 @@ impl Viewer<'_> {
     /// Writes the saved node positions (`.editor/layout.json`); not an undo step.
     fn save_layout(&mut self) {
         let saved = self.scen.saved.clone().unwrap_or_default();
-        if let Err(e) = self.ws.write_editor_file(cg::LAYOUT, &cg::layout_json(&saved)) {
+        if let Err(e) = self.ws.write_editor_file(cg::LAYOUT, &cg::layout_json(self.ws.read_editor_file(cg::LAYOUT).as_deref(), &saved)) {
             self.log.push(e);
         }
     }
@@ -734,7 +752,7 @@ impl Viewer<'_> {
             ui.label(tr("Filter"));
             ui.add(egui::TextEdit::singleline(&mut self.scen.filter).desired_width(180.0));
             ui.label(tr("New language"));
-            ui.add(egui::TextEdit::singleline(&mut self.scen.new_lang).desired_width(60.0));
+            ui.add(egui::TextEdit::singleline(&mut self.scen.new_lang).hint_text(tr("code, e.g. de")).desired_width(110.0));
             if ui.button(tr("Add language")).clicked() {
                 let lang = self.scen.new_lang.trim().to_string();
                 if !tx::valid_lang(&lang) {

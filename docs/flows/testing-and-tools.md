@@ -244,6 +244,18 @@ screen). Snapshot options: `package`, `header`, `campaign`, `characters`, `texts
 `the_scenario_forms_edit_save_and_undo_on_a_copy_of_pepelnaya_marka` (a copy of the example, through the
 workspace, not XTest).
 
+Story editor (phase 2, milestone 3): `studio/story.rs` is the trigger and dialog edits. The kinds come from
+`pack::triggers`; `story::spec` lists each kind's arguments (the test reads every kind back through the
+format's parsers), and a row is valid when the parser reads it. A list (`if`, `then`) is written as one array;
+a wiring (a choice to a dialog, as the graph drag does) is `story::wire_choice`, which adds the action to the
+choice or, when a `dialog_choice` trigger answers it, a new trigger. `studio/story_graph.rs` is the flow graph
+of a map (dialogs, triggers, variables; labelled edges); positions are under `story` in `.editor/layout.json`
+(`campaign_graph::layout_json` keeps that key). `studio/vars.rs` has the usages and the rename across files
+(`rename_in_story`, one undo step). A nested `Push` clears the stored positions of its array, so a new choice
+is printed under its own dialog. UI: `ui/studio/story.rs` (the Story screen, the trigger and dialog forms),
+`story_forms.rs` (the row widgets, generated from the schema), `vars.rs` (the Variables dock). Snapshot
+options: `story`, `trigger`, `dialog`, `vars`. Tests: `the_story_forms_and_wiring_edit_check_and_undo_on_a_copy_of_pepelnaya_marka`.
+
 ## The map translator (`razdor-translate`)
 
 Not part of the original game (asked for by the owner): a second program that writes English

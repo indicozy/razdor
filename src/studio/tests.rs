@@ -742,3 +742,142 @@ fn the_scenario_forms_edit_save_and_undo_on_a_copy_of_pepelnaya_marka() {
     assert!(!ws.text_of("texts/ru.toml").unwrap().contains("Тестовый перевод"));
     let _ = (entry_id("map", "x"), table("x"), DocEdit::Remove { path: vec![], key: "x".into() }, Value::from(1_i64));
 }
+
+/// The story editor (P4) on a copy of Pepelnaya Marka: a trigger's action changes kind and a field,
+/// a dialog gets a choice, a choice is wired to a dialog (as the graph's drag does: first a choice
+/// nothing answers, then one a `dialog_choice` trigger answers), a variable is renamed across the
+/// files, the layout is written, the package is saved; each step parses, adds no check error, and
+/// undo restores every text byte for byte.
+#[test]
+fn the_story_forms_and_wiring_edit_check_and_undo_on_a_copy_of_pepelnaya_marka() {
+    use super::story::{self as st, Options, Section, Step};
+    use super::{campaign_graph, story_graph, vars};
+    use crate::pack::triggers as pt;
+    use toml_edit::Value;
+    let copy = Copy::of("pepelnaya-marka");
+    let mut ws = Workspace::open(&copy.0).unwrap();
+    // The package as the edits leave it in memory (the disk does not have them until a save).
+    fn pkg_now(ws: &mut Workspace) -> Arc<crate::pack::load::Package> {
+        ws.rebuild().unwrap();
+        ws.package().expect("the package parses")
+    }
+    let base_errors = ws.check().unwrap().0;
+    let snapshot = |ws: &Workspace| -> Vec<(String, String)> {
+        let mut files: Vec<String> = ws.entries.iter().filter(|p| p.ends_with(".toml")).cloned().collect();
+        files.sort();
+        files.into_iter().map(|p| {
+            let t = ws.text_of(&p).unwrap();
+            (p, t)
+        }).collect()
+    };
+    let before = snapshot(&ws);
+    let check_now = |ws: &mut Workspace, what: &str| {
+        let errors = ws.check().unwrap().0;
+        assert_eq!(errors, base_errors, "{what}: no new check error");
+        assert!(ws.package().is_some(), "{what}: the package parses");
+    };
+
+    // 1. A trigger's first action changes kind (`dialog` to `give_gold`) and its `once` is off.
+    let file = "triggers/brod.toml";
+    let text = ws.text_of(file).unwrap();
+    let draft = st::trigger_draft(&text, "arrival").expect("the arrival trigger reads");
+    let pkg = pkg_now(&mut ws);
+    let opts = Options::of(&pkg, "brod");
+    let mut rows = draft.then.clone();
+    let mut gold = st::new_row(Section::Action, "give_gold", &opts, None).unwrap();
+    gold.insert("give_gold", Value::from(5_i64));
+    rows[0] = gold;
+    ws.apply_doc(file, "change action", &st::set_trigger_list("arrival", "then", &rows, true)).unwrap();
+    ws.apply_doc(file, "once off", &[st::set_trigger_key("arrival", "once", Some(Value::from(false)))]).unwrap();
+    let edited = ws.text_of(file).unwrap();
+    assert!(edited.contains("give_gold = 5") && edited.contains("once = false"), "{edited}");
+    check_now(&mut ws, "a trigger's action and field");
+
+    // 2. A dialog gets a choice: its title and text keys in every language, one undo step.
+    let pkg = pkg_now(&mut ws);
+    let (cid, steps) = st::add_choice_steps(&pkg, "toll").expect("toll has room for a choice");
+    ws.begin_group();
+    for s in &steps {
+        if let Step::Edit(f, e) = s {
+            ws.apply_doc(f, "add a choice", e).unwrap();
+        }
+    }
+    ws.end_group("add a choice");
+    let pkg = pkg_now(&mut ws);
+    let toll = pkg.dialogs.iter().find(|d| d.value.id == "toll").unwrap();
+    assert_eq!(toll.value.choices.last().map(|c| c.id.as_str()), Some(cid.as_str()), "the choice is the last one");
+    check_now(&mut ws, "a dialog's new choice");
+
+    // 3. A choice nothing answers is wired to a dialog: its own action opens the target.
+    let pkg = pkg_now(&mut ws);
+    let listened = |d: &str, c: &str| pkg.triggers.iter().any(|t| matches!(&t.value.when, pt::Event::DialogChoice { dialog, choice } if dialog == d && choice == c));
+    let (dialog, choice) = pkg
+        .dialogs
+        .iter()
+        .flat_map(|d| d.value.choices.iter().map(move |c| (d.value.id.clone(), c.id.clone())))
+        .find(|(d, c)| !listened(d, c))
+        .expect("a choice nothing answers");
+    let target = pkg.dialogs.iter().map(|d| d.value.id.clone()).find(|d| *d != dialog).unwrap();
+    let steps = st::wire_choice(&pkg, &|f| ws.text_of(f).ok(), "brod", &dialog, &choice, &target).expect("wired");
+    ws.begin_group();
+    for s in &steps {
+        if let Step::Edit(f, e) = s {
+            ws.apply_doc(f, "wire a choice", e).unwrap();
+        }
+    }
+    ws.end_group("wire a choice to a dialog");
+    let pkg = pkg_now(&mut ws);
+    let wired = pkg.dialogs.iter().find(|d| d.value.id == dialog).unwrap().value.choices.iter().find(|c| c.id == choice).unwrap();
+    assert!(wired.then.iter().any(|a| matches!(a, pt::Action::Dialog(d) if *d == target)), "the choice opens {target}");
+    check_now(&mut ws, "a choice wired to a dialog");
+
+    // 4. A choice a trigger answers is wired: the action goes on a new `dialog_choice` trigger.
+    let pkg = pkg_now(&mut ws);
+    let steps = st::wire_choice(&pkg, &|f| ws.text_of(f).ok(), "brod", "varga_meet", "join", "marsh_plea").expect("wired through a trigger");
+    let triggers_before = pkg.triggers.len();
+    ws.begin_group();
+    for s in &steps {
+        if let Step::Edit(f, e) = s {
+            ws.apply_doc(f, "wire a choice", e).unwrap();
+        }
+    }
+    ws.end_group("wire a choice to a dialog");
+    let pkg = pkg_now(&mut ws);
+    assert_eq!(pkg.triggers.len(), triggers_before + 1, "one new trigger");
+    let new = pkg.triggers.iter().find(|t| t.value.id == "varga_meet_join_to_marsh_plea").expect("the wired trigger is named by its choice and target");
+    assert!(matches!(&new.value.when, pt::Event::DialogChoice { dialog, choice } if dialog == "varga_meet" && choice == "join"));
+    assert!(matches!(new.value.then.as_slice(), [pt::Action::Dialog(d)] if d == "marsh_plea"));
+    check_now(&mut ws, "a choice wired through a trigger");
+    let wiring_steps = 1;
+    let after_wire = ws.history.undo_label().map(str::to_string);
+    assert_eq!(after_wire.as_deref(), Some("wire a choice to a dialog"), "the wiring is one undo step");
+    let _ = wiring_steps;
+
+    // 5. A variable is renamed in every file that names it.
+    let pkg = pkg_now(&mut ws);
+    let plan = vars::rename_plan(&pkg, "dread", "fear", &|f| ws.text_of(f).ok()).expect("the plan");
+    assert!(plan.len() >= 2, "triggers and dialogs name dread: {}", plan.len());
+    ws.set_texts("rename dread to fear", plan).unwrap();
+    let pkg = pkg_now(&mut ws);
+    assert!(pkg.vars.iter().any(|v| v.value.name == "fear") && !pkg.vars.iter().any(|v| v.value.name == "dread"));
+    check_now(&mut ws, "a renamed variable");
+    assert!(vars::variable_uses(&pkg, "fear").len() > 1, "its uses follow it");
+
+    // 6. The layout is written through the guarded write; the package is saved and read back.
+    let mut saved = std::collections::BTreeMap::new();
+    saved.insert("t:arrival".to_string(), [40.0_f32, 60.0]);
+    let bytes = story_graph::layout_json(None, "brod", &saved);
+    ws.write_editor_file(campaign_graph::LAYOUT, &bytes).unwrap();
+    assert_eq!(story_graph::read_layout(Some(&bytes), "brod")["t:arrival"], [40.0, 60.0]);
+    ws.save_all().unwrap();
+    let on_disk = fs::read_to_string(copy.0.join("triggers/brod.toml")).unwrap();
+    assert_eq!(on_disk, ws.text_of("triggers/brod.toml").unwrap(), "the save writes the file");
+
+    // Undo every step: each text is back, byte for byte.
+    let mut steps_undone = 0;
+    while ws.undo().unwrap().is_some() {
+        steps_undone += 1;
+    }
+    assert_eq!(steps_undone, 6, "each change is one undo step (two edits, three grouped operations, the rename)");
+    assert_eq!(snapshot(&ws), before, "undo restores every text");
+}

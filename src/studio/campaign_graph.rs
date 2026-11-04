@@ -276,13 +276,18 @@ pub fn read_layout(bytes: Option<&[u8]>) -> BTreeMap<String, [f32; 2]> {
         .collect()
 }
 
-/// The text of `layout.json` for the positions given (ids sorted).
-pub fn layout_json(positions: &BTreeMap<String, [f32; 2]>) -> Vec<u8> {
+/// The text of `layout.json` with the campaign's positions set to `positions` (ids sorted). The
+/// other keys of the file (the story's positions) are kept as they are.
+pub fn layout_json(existing: Option<&[u8]>, positions: &BTreeMap<String, [f32; 2]>) -> Vec<u8> {
+    let mut root: Json = existing.and_then(|b| serde_json::from_slice::<Json>(b).ok()).filter(Json::is_object).unwrap_or_else(|| json!({}));
     let mut campaign = serde_json::Map::new();
     for (id, [x, y]) in positions {
         campaign.insert(id.clone(), json!([round1(*x), round1(*y)]));
     }
-    let mut bytes = serde_json::to_vec_pretty(&json!({ "campaign": Json::Object(campaign) })).unwrap_or_default();
+    if let Some(obj) = root.as_object_mut() {
+        obj.insert("campaign".into(), Json::Object(campaign));
+    }
+    let mut bytes = serde_json::to_vec_pretty(&root).unwrap_or_default();
     bytes.push(b'\n');
     bytes
 }
@@ -364,7 +369,7 @@ mod tests {
     fn the_layout_file_round_trips() {
         let mut positions = BTreeMap::new();
         positions.insert("brod".to_string(), [40.0_f32, 80.5]);
-        let bytes = layout_json(&positions);
+        let bytes = layout_json(None, &positions);
         assert!(String::from_utf8_lossy(&bytes).contains("\"brod\": ["));
         assert_eq!(read_layout(Some(&bytes))["brod"], [40.0, 80.5]);
         assert!(read_layout(Some(b"not json")).is_empty());

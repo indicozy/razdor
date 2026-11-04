@@ -45,6 +45,8 @@ pub mod newpkg;
 pub mod overlay;
 pub mod region;
 pub mod scenario;
+pub mod story;
+pub mod story_graph;
 pub mod texts;
 pub mod vars;
 pub mod worker;

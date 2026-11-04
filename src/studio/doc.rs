@@ -104,7 +104,17 @@ pub fn apply_text(text: &str, edit: &DocEdit) -> Result<String, String> {
                 row.insert(k, Item::Value(v.clone()));
             }
             match t.get_mut(key) {
-                Some(Item::ArrayOfTables(a)) => a.push(row),
+                Some(Item::ArrayOfTables(a)) => {
+                    a.push(row);
+                    // A new entry of a nested array has no stored position, so toml_edit would print it
+                    // after the file's last table; with the positions cleared, every entry comes out in
+                    // the array's order, under its parent (as `Move` does).
+                    if !path.is_empty() {
+                        for r in a.iter_mut() {
+                            r.set_position(None);
+                        }
+                    }
+                }
                 Some(_) => return Err(format!("`{key}` is not an array of tables")),
                 None => {
                     let mut a = ArrayOfTables::new();
