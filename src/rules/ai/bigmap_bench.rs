@@ -17,7 +17,7 @@ use crate::rules::map::{object_class, surface_value};
 
 /// Map sides of the bench, unless `RAZDOR_BENCH_SIZES` (a comma list) picks others.
 const SIZES: [u32; 3] = [200, 400, 800];
-/// Armies on a bench map (the `armies` and `both` variants).
+/// Armies on a bench map (the `armies` and `both` variants), unless `RAZDOR_BENCH_ARMIES` picks another count.
 const BENCH_ARMIES: u32 = 100;
 /// Global once-events on a bench map (the `events` and `both` variants).
 const BENCH_EVENTS: u32 = 10_000;
@@ -76,6 +76,11 @@ fn sizes_from_env() -> Vec<u32> {
     }
 }
 
+/// Roaming armies on a bench map: `RAZDOR_BENCH_ARMIES` (a count), [`BENCH_ARMIES`] by default.
+fn armies_from_env() -> u32 {
+    std::env::var("RAZDOR_BENCH_ARMIES").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(BENCH_ARMIES)
+}
+
 /// A fixed-seed generator for the synthetic maps (not the game's).
 struct Lcg(u32);
 
@@ -102,6 +107,91 @@ fn roaming_template(dt: &DtInstall) -> DtArmy {
     panic!("no roaming army in the install's maps");
 }
 
+/// The bench's terrain: `RAZDOR_BENCH_TERRAIN=islands` for the islands map ([`islands_land`]),
+/// else the blobs map.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BenchTerrain {
+    Blobs,
+    Islands,
+}
+
+fn terrain_from_env() -> BenchTerrain {
+    match std::env::var("RAZDOR_BENCH_TERRAIN").ok().as_deref().map(str::trim) {
+        Some("islands") => BenchTerrain::Islands,
+        _ => BenchTerrain::Blobs,
+    }
+}
+
+/// Island clusters of the islands map (besides its continent).
+const ISLAND_CLUSTERS: usize = 6;
+
+/// A straight one-cell line of land from `a` to `b` (both on the map's grid): its cells that were
+/// water become land, and are marked as bridge when `as_bridge`.
+fn walk(land: &mut [bool], bridge: &mut [bool], a: (i32, i32), b: (i32, i32), as_bridge: bool) {
+    let w = (land.len() as f64).sqrt().round() as i32;
+    let steps = (b.0 - a.0).abs().max((b.1 - a.1).abs()).max(1);
+    for i in 0..=steps {
+        let x = (a.0 as f64 + (b.0 - a.0) as f64 * i as f64 / steps as f64).round() as i32;
+        let y = (a.1 as f64 + (b.1 - a.1) as f64 * i as f64 / steps as f64).round() as i32;
+        if x < 0 || y < 0 || x >= w || y >= w {
+            continue;
+        }
+        let k = (y * w + x) as usize;
+        if !land[k] {
+            land[k] = true;
+            bridge[k] = as_bridge;
+        }
+    }
+}
+
+/// The islands map's shape: a land mask and a bridge mask (`bridge` cells are land too). The
+/// continent is a disc of about 60% of the map at its centre; each island cluster is four discs
+/// of land in the water, outside the continent's edge. A bridge is a one-cell line of land across
+/// the water from each cluster's centre to the continent's centre, and every second cluster also
+/// gets one to the cluster before it, so each cluster is joined to the rest of the land.
+fn islands_land(side: u32, rng: &mut Lcg) -> (Vec<bool>, Vec<bool>) {
+    let w = side as i32;
+    let c = w / 2;
+    let idx = |x: i32, y: i32| (y * w + x) as usize;
+    let inside = |x: i32, y: i32| x >= 0 && y >= 0 && x < w && y < w;
+    let r = (side as f64 * (0.6 / std::f64::consts::PI).sqrt()) as i32;
+    let mut land = vec![false; (side * side) as usize];
+    let mut bridge = vec![false; land.len()];
+    for y in 0..w {
+        for x in 0..w {
+            land[idx(x, y)] = (x - c).pow(2) + (y - c).pow(2) <= r * r;
+        }
+    }
+    let mut centres: Vec<(i32, i32)> = Vec::new();
+    while centres.len() < ISLAND_CLUSTERS {
+        let (cx, cy) = (rng.below(side) as i32, rng.below(side) as i32);
+        if (cx - c).pow(2) + (cy - c).pow(2) <= (r + 12).pow(2) {
+            continue;
+        }
+        // Each disc is joined to the cluster's centre by a one-cell land line (island land, not a bridge).
+        for _ in 0..4 {
+            let (bx, by) = (cx + rng.below(13) as i32 - 6, cy + rng.below(13) as i32 - 6);
+            let br = 2 + rng.below(3) as i32;
+            for y in by - br..=by + br {
+                for x in bx - br..=bx + br {
+                    if inside(x, y) && (x - bx).pow(2) + (y - by).pow(2) <= br * br {
+                        land[idx(x, y)] = true;
+                    }
+                }
+            }
+            walk(&mut land, &mut bridge, (cx, cy), (bx, by), false);
+        }
+        centres.push((cx, cy));
+    }
+    for k in 0..centres.len() {
+        walk(&mut land, &mut bridge, centres[k], (c, c), true);
+        if k % 2 == 1 {
+            walk(&mut land, &mut bridge, centres[k], centres[k - 1], true);
+        }
+    }
+    (land, bridge)
+}
+
 /// A `side × side` map with grass, blobs of forest (tree objects), marsh, swamp and lakes (about
 /// one blob per 900 cells of each kind, radius 2–6), the hero's start cleared, and the variant's
 /// armies (cloned from `template`, on random passable cells, not patrolling, not hunting only the
@@ -110,19 +200,30 @@ fn bench_scenario(template: &DtArmy, side: u32, variant: Variant) -> Scenario {
     let mut s = new_scenario(NewMap { width: side, height: side, fill: GRASS });
     let (w, n) = (side as i32, (side * side) as usize);
     let mut rng = Lcg(0x5eed_0000 ^ side);
-    let mut terrain = vec![GRASS; n];
+    let islands = terrain_from_env() == BenchTerrain::Islands;
+    // The islands variant: the land mask and the bridge mask (land that is only a bridge).
+    let shape = islands.then(|| islands_land(side, &mut rng));
+    let open = |i: usize| shape.as_ref().is_none_or(|(land, bridge)| land[i] && !bridge[i]);
+    let mut terrain = match &shape {
+        Some((land, _)) => land.iter().map(|&l| if l { GRASS } else { LAKE }).collect(),
+        None => vec![GRASS; n],
+    };
     let mut trees = vec![false; n];
     let hero = (w / 2, w / 2);
     let in_hero_start = |x: i32, y: i32| (x - hero.0).abs() <= 3 && (y - hero.1).abs() <= 3;
     let idx = |x: i32, y: i32| (y * w + x) as usize;
     for (kind, code) in [(None, GRASS), (Some(MARSH), MARSH), (Some(SWAMP), SWAMP), (Some(LAKE), LAKE)] {
+        // The islands' water is already lake: no lake blobs there.
+        if islands && code == LAKE {
+            continue;
+        }
         // `None` is the forest: tree objects on grass.
         for _ in 0..(n as u32 / 900).max(1) {
             let (cx, cy) = (rng.below(side) as i32, rng.below(side) as i32);
             let r = 2 + rng.below(5) as i32;
             for y in cy - r..=cy + r {
                 for x in cx - r..=cx + r {
-                    if x < 0 || y < 0 || x >= w || y >= w || (x - cx).pow(2) + (y - cy).pow(2) > r * r || in_hero_start(x, y) {
+                    if x < 0 || y < 0 || x >= w || y >= w || (x - cx).pow(2) + (y - cy).pow(2) > r * r || in_hero_start(x, y) || !open(idx(x, y)) {
                         continue;
                     }
                     match kind {
@@ -139,7 +240,7 @@ fn bench_scenario(template: &DtArmy, side: u32, variant: Variant) -> Scenario {
         .map(|i| crate::dt::dtm::MapObject { x: (i as i32 % w) as u16, y: (i as i32 / w) as u16, sprite: 0, class: object_class::TREES })
         .collect();
     if variant.has_armies() {
-        for k in 0..BENCH_ARMIES {
+        for k in 0..armies_from_env() {
             let (x, y) = loop {
                 let (x, y) = (rng.below(side) as i32, rng.below(side) as i32);
                 let passable = surface_value(Surface::from_code(s.terrain[idx(x, y)]).unwrap_or(Surface::GrassPlain)) > 0;
@@ -184,6 +285,11 @@ struct BenchRun {
 /// fight the hero is pulled into is played out (the AI on both sides) and does not count.
 fn bench_run(c: &Arc<Content>, s: &Scenario, days: u64) -> BenchRun {
     let mut g = Game::from_scenario(c.clone(), s, HeroClass::Knight);
+    // Army ids are u8 (a bench map with more than 255 armies wraps them), but the AI looks armies
+    // up by `uid`: give each army its own uid here (bench only; the engine keeps `uid = id`).
+    for (k, a) in g.world.armies.iter_mut().enumerate() {
+        a.uid = k as u32 + 1;
+    }
     let end = g.clock.total_minutes() + (days * MINUTES_PER_DAY) as f64;
     let plans0 = g.ai_stats.paths;
     g.begin_endless_wait();
@@ -232,7 +338,8 @@ fn bench_rules_from_env() -> ExperimentalRules {
 /// Times the AI's planner on big synthetic maps: one line per size and variant, with the ticks,
 /// the plans, the median, p95 and max of a `Game::tick` (ms) and the total for the 2 days.
 /// `RAZDOR_BENCH_SIZES` (e.g. `200,400`), `RAZDOR_BENCH_VARIANT` (`armies|events|both`) and
-/// `RAZDOR_BENCH_RULES` (`fast`) picks the maps and the switch. Deterministic maps
+/// `RAZDOR_BENCH_RULES` (`fast`) picks the maps and the switch, `RAZDOR_BENCH_ARMIES` (a count,
+/// 100 by default) the roaming armies of the `armies` and `both` variants. Deterministic maps
 /// (fixed seeds); time it pinned to one core:
 /// `nice -n 19 taskset -c 8 <test binary> bigmap_ai_bench --ignored --nocapture`.
 #[test]
@@ -311,6 +418,48 @@ fn ai_fingerprint() {
         for variant in [Variant::Armies, Variant::Both] {
             let s = bench_scenario(&template, side, variant);
             println!("bench-{side}x{side}-{} {:016x}", variant.name(), play_days(&c, &s, BENCH_DAYS).fingerprint);
+        }
+    }
+}
+
+#[cfg(test)]
+mod islands_tests {
+    use super::*;
+
+    /// The islands map: the continent is about 60% of the map, and every land cell is joined to
+    /// the continent's centre by land (a flood over the land mask reaches all of it).
+    #[test]
+    fn islands_are_joined_to_the_continent() {
+        for side in [200u32, 400, 800] {
+            let mut rng = Lcg(0x5eed_0000 ^ side);
+            let (land, bridge) = islands_land(side, &mut rng);
+            let w = side as i32;
+            let idx = |x: i32, y: i32| (y * w + x) as usize;
+            let c = w / 2;
+            let r = (side as f64 * (0.6 / std::f64::consts::PI).sqrt()) as i32;
+            let disc = (0..w * w).filter(|&i| {
+                let (x, y) = (i % w, i / w);
+                (x - c).pow(2) + (y - c).pow(2) <= r * r
+            });
+            let share = disc.count() as f64 / (side * side) as f64;
+            assert!((0.55..=0.65).contains(&share), "continent share {share}");
+            assert!(bridge.iter().any(|&b| b), "no bridges at {side}");
+            let mut seen = vec![false; land.len()];
+            let mut stack = vec![(c, c)];
+            seen[idx(c, c)] = true;
+            while let Some((x, y)) = stack.pop() {
+                for (dx, dy) in [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
+                    let (nx, ny) = (x + dx, y + dy);
+                    if nx < 0 || ny < 0 || nx >= w || ny >= w || seen[idx(nx, ny)] || !land[idx(nx, ny)] {
+                        continue;
+                    }
+                    seen[idx(nx, ny)] = true;
+                    stack.push((nx, ny));
+                }
+            }
+            let land_total = land.iter().filter(|&&l| l).count();
+            let reached = seen.iter().filter(|&&s| s).count();
+            assert_eq!(reached, land_total, "land not joined at {side}: {reached} of {land_total}");
         }
     }
 }
