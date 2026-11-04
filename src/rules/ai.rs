@@ -26,8 +26,21 @@
 //!
 //! Everything the original leaves open is marked *(guess)*.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
+
+pub(crate) mod flood_pool;
+use flood_pool::{max_in_flight, PlanInput, PlanOutput, Ticket};
+
+/// The inputs of a plan's flood that the planner makes ([`Game::plan_flood`]).
+struct PlanFlood {
+    sails: bool,
+    mult: Vec<u16>,
+    seeds: Vec<(Tile, u32)>,
+    from: Tile,
+    erase: Vec<Tile>,
+    reach: i32,
+}
 
 use crate::dt::dtm::Army as DtArmy;
 use crate::frame_probe::{self, Stage};
@@ -374,6 +387,14 @@ pub struct Clash {
     pub tile: Tile,
     /// Game minute.
     pub at: u64,
+}
+
+/// The planner's floods made and not yet written into their armies (`flood_pool`), by army uid,
+/// in the order they were made. `ai_move` writes them all before it returns, so none is pending
+/// between ticks (and none is saved).
+#[derive(Default)]
+pub(crate) struct PendingPlans {
+    list: VecDeque<(u32, Ticket)>,
 }
 
 /// Counts for the simulation reports and tests.
@@ -1666,6 +1687,8 @@ impl Game {
         if !std::mem::take(&mut self.snap_due) {
             return;
         }
+        // Reads every army's facing, which a planner's flood may still owe (`settle_all`).
+        self.settle_all();
         for k in 0..self.world.armies.len() {
             let a = &self.world.armies[k];
             if managed(a) && !a.mind.facing_none && a.patrol_radius > 0 && a.mind.standing.is_none() {
@@ -1745,6 +1768,15 @@ impl Game {
     /// progress; false stops it there, with the queue as it stands. Returns true when no arrival
     /// is left. `hero` and `hero_end` are the hero's cells of the tick (see `ai_move_begin`).
     pub(crate) fn ai_move_run(&mut self, job: &mut AiMove, hero: &HeroCells, hero_end: &HeroCells, keep_going: &mut dyn FnMut() -> bool) -> bool {
+        let done = self.ai_move_steps(job, hero, hero_end, keep_going);
+        // Every plan made in this slice is written before it ends (`flood_pool`): a pause leaves
+        // none in flight for the frames after it, and a save sees none.
+        self.settle_all();
+        done
+    }
+
+    /// The arrivals of [`Game::ai_move_run`], without the join at its end.
+    fn ai_move_steps(&mut self, job: &mut AiMove, hero: &HeroCells, hero_end: &HeroCells, keep_going: &mut dyn FnMut() -> bool) -> bool {
         let mut first = true;
         while let Some(&(t, seq, id, uid)) = job.queue.first() {
             if !first && !keep_going() {
@@ -1820,6 +1852,8 @@ impl Game {
     /// step after is charged on the cell this step enters, times the weight its path buffer
     /// holds for that node when the path goes on from it, raw when it does not.
     fn ai_start(&mut self, uid: u32, hero: &HeroCells, tick: i64, total: i64, window: i64) -> Option<(Pending, i64)> {
+        // Its path (and so its next cell) is the plan's, which may still be on a worker.
+        self.settle(uid);
         let i = self.army_by_uid(uid)?;
         let (need, next, moves, after) = {
             let w = &self.world;
@@ -2009,15 +2043,16 @@ impl Game {
             }
             dist.push((p, d));
         }
-        if replan {
-            frame_probe::time(Stage::AiPlan, || self.ai_plan(i, &dist, hero));
+        // A plan's result sets the facing when it is written (`apply_plan`).
+        let planned = replan && frame_probe::time(Stage::AiPlan, || self.ai_plan(i, &dist, hero));
+        if !planned {
+            // The step clock ends by setting the direction of the next step from the path, 8
+            // when it has no next cell (0x4a399c), before the arrival rules run (0x4ade3c).
+            let here = self.world.armies[i].tile(&self.world.map);
+            let a = &mut self.world.armies[i];
+            a.mind.facing_none = a.path.is_empty();
+            a.mind.stand_facing = a.path.first().map(|t| (t.0 - here.0, t.1 - here.1));
         }
-        // The step clock ends by setting the direction of the next step from the path, 8
-        // when it has no next cell (0x4a399c), before the arrival rules run (0x4ade3c).
-        let here = self.world.armies[i].tile(&self.world.map);
-        let a = &mut self.world.armies[i];
-        a.mind.facing_none = a.path.is_empty();
-        a.mind.stand_facing = a.path.first().map(|t| (t.0 - here.0, t.1 - here.1));
         if let Some(c) = self.ai_arrive(uid, hero) {
             if let Some(i) = self.army_by_uid(uid) {
                 self.world.armies[i].mind.contact = Some(c);
@@ -2043,10 +2078,14 @@ impl Game {
     /// 5. one flood from all seeds, the cells of the parties within `AIGetPathDistance` and
     ///    the cells they step to next erased, the path read by steepest descent. With no seed
     ///    kept it stands (an empty path) and the countdown is left as it is.
-    pub(crate) fn ai_plan(&mut self, i: usize, dist: &[(Party, i32)], hero: &HeroCells) {
+    ///
+    /// The flood is dispatched here ([`flood_pool::dispatch`]): its inputs are fixed now, and
+    /// its result is written into the army by [`Game::settle`] or [`Game::apply_plan`] (the
+    /// facing with it), before the army's path is next read. Returns whether a plan was made.
+    pub(crate) fn ai_plan(&mut self, i: usize, dist: &[(Party, i32)], hero: &HeroCells) -> bool {
         #[cfg(test)]
         if self.world.armies[i].mind.scripted {
-            return;
+            return false;
         }
         let c = self.content.clone();
         let o = &c.options;
@@ -2175,41 +2214,97 @@ impl Game {
                 }
             }
         }
-        let world = &self.world;
-        let costs = if a.sails() { world.map.water_costs() } else { world.map.land_costs() };
-        let mut field = world.map.flood_maps(costs, &mult, &seeds, here);
+        let sails = a.sails();
         let reach = o.ai_get_path_distance;
+        // The cells the flood erases: each party within reach and the cell it steps to next. A
+        // party's next cell is its path's, so an army's plan still on a worker is written first.
+        let mut erase = Vec::new();
         for &(p, d) in dist {
             if 0 < d && d <= reach {
-                field.erase(self.cell_of(p, hero));
-                field.erase(self.next_cell(p, hero));
+                erase.push(self.cell_of(p, hero));
+                if let Party::Army(j) = p {
+                    self.settle_index(j);
+                }
+                erase.push(self.next_cell(p, hero));
             }
         }
-        let path = (field.kept > 0).then(|| world.map.descend(&field, here));
+        self.plan_flood(uid, PlanFlood { sails, mult, seeds, from: here, erase, reach });
+        true
+    }
 
+    /// Makes army `uid`'s plan's flood: on a worker when [`flood_pool::offloads`] says so (its
+    /// result waits in the pending plans until it is written), else at once, from the map's own
+    /// costs. At most [`flood_pool::max_in_flight`] plans wait at once: the oldest is written first.
+    fn plan_flood(&mut self, uid: u32, input: PlanFlood) {
+        let PlanFlood { sails, mult, seeds, from, erase, reach } = input;
+        self.settle(uid);
+        while self.plans.list.len() >= max_in_flight() {
+            if let Some((u, ticket)) = self.plans.list.pop_front() {
+                self.apply_plan(u, ticket.wait());
+            }
+        }
+        let map = &self.world.map;
+        let cells = (map.w.max(0) * map.h.max(0)) as usize;
+        if flood_pool::offloads(cells) {
+            let cost = if sails { map.water_costs() } else { map.land_costs() }.to_vec();
+            let input = PlanInput { geom: map.geometry(), cost, mult, seeds, from, erase, reach };
+            match flood_pool::dispatch(input) {
+                Ticket::Ready(out) => self.apply_plan(uid, *out),
+                ticket => self.plans.list.push_back((uid, ticket)),
+            }
+        } else {
+            let cost = if sails { map.water_costs() } else { map.land_costs() };
+            let out = flood_pool::compute_with(map, cost, &mult, &seeds, from, &erase, reach);
+            self.apply_plan(uid, out);
+        }
+    }
+
+    /// Writes army `uid`'s plan into the army, as the serial planner did at its plan: the path
+    /// and its weights, the countdown and the walk index (a path), the facing of the next step.
+    fn apply_plan(&mut self, uid: u32, out: PlanOutput) {
+        let Some(i) = self.army_by_uid(uid) else { return };
         let a = &mut self.world.armies[i];
         // A path read puts its index back at its start; with no seed the path is one cell
         // long and the index stays where it was (0x4a2d88).
         a.mind.no_path = false;
-        match path {
+        match out.path {
             Some(path) => {
-                let grid = self.world.map.grid;
                 let w = &mut a.mind.path_weights;
                 if w.len() < path.len() + 1 {
                     w.resize(path.len() + 1, 0);
                 }
-                let mut from = here;
-                for (k, &t) in path.iter().enumerate() {
-                    w[k] = grid.weight(from, t) as u8;
-                    from = t;
-                }
+                w[..out.weights.len()].copy_from_slice(&out.weights);
                 a.path = path;
-                a.mind.countdown = reach;
+                a.mind.countdown = out.reach;
                 a.mind.walked = 0;
             }
             None => a.path.clear(),
         }
-        let _ = uid;
+        a.mind.facing_none = a.path.is_empty();
+        a.mind.stand_facing = out.facing;
+    }
+
+    /// Writes army `uid`'s pending plan, if it has one.
+    pub(crate) fn settle(&mut self, uid: u32) {
+        if let Some(k) = self.plans.list.iter().position(|(u, _)| *u == uid) {
+            if let Some((u, ticket)) = self.plans.list.remove(k) {
+                self.apply_plan(u, ticket.wait());
+            }
+        }
+    }
+
+    /// Writes the pending plan of the army at index `i`, if it has one.
+    fn settle_index(&mut self, i: usize) {
+        if let Some(uid) = self.world.armies.get(i).map(|a| a.uid) {
+            self.settle(uid);
+        }
+    }
+
+    /// Writes every pending plan, in the order they were made.
+    pub(crate) fn settle_all(&mut self) {
+        while let Some((u, ticket)) = self.plans.list.pop_front() {
+            self.apply_plan(u, ticket.wait());
+        }
     }
 }
 
@@ -2345,11 +2440,13 @@ impl Game {
                     result = Some(Contact::Greet);
                 }
                 if p != Party::Hero || mine > 0 {
+                    self.settle_index(i);
                     self.world.armies[i].mind.countdown = 0;
                     self.set_talk(i, key, TALKED);
                     self.ai_wander(i);
                 }
                 if let Party::Army(j) = p {
+                    self.settle_index(j);
                     self.world.armies[j].mind.countdown = 0;
                     self.set_talk(j, uid, TALKED);
                 }
@@ -2499,6 +2596,7 @@ impl Game {
         }
         // Its strengths are recounted with the defence it has here now (0x4a79c5).
         self.recount_bill(i);
+        self.settle_index(i);
         let m = &mut self.world.armies[i].mind;
         m.strength_bd = m.defence;
         m.countdown = 0;
@@ -3393,6 +3491,7 @@ impl Game {
                 self.rescore_buildings(i);
             }
         }
+        self.settle(att_uid);
         if let Some(i) = self.army_by_uid(att_uid) {
             self.world.armies[i].mind.countdown = 0;
         }
@@ -3426,6 +3525,7 @@ impl Game {
     /// comes back. With a home and a respawn delay it waits for its respawn; without, it
     /// waits for good ([`NEVER`]), where an event's activation can still bring it back.
     pub(crate) fn army_beaten(&mut self, i: usize, by: Beaten) {
+        self.settle_all();
         let now = self.clock.total_minutes();
         let mut a = self.remove_army(i);
         if a.id != 0 {
@@ -3467,6 +3567,7 @@ impl Game {
     /// building's centre with every unit of its record alive, unhurt and paid, its first
     /// wander point at its post, "just respawned", and the delay's days of income in gold.
     fn ai_respawns(&mut self, now: f64) {
+        self.settle_all();
         let mut k = 0;
         while k < self.world.respawns.len() {
             if self.world.respawns[k].due >= now {

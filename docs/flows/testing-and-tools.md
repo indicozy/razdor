@@ -59,7 +59,9 @@ Two `#[ignore]`d tests in `src/rules/ai/bigmap_bench.rs` (they pass without the 
   them), every map of `RAZDOR_COMMUNITY_DIR` (30 days) and every bench map (2 days). The hash
   (FNV-1a) covers each army's record, the game's generator state, the clock and the plan count.
   Save the output before a change to the planner and diff it after: identical output proves the AI
-  did not change.
+  did not change. The planner's floods run on worker threads (`battle-ai.md` §5b): run the
+  fingerprint both pinned to one core (no workers) and to several (`taskset -c 8-15`), and compare
+  both with the baseline. `RAZDOR_PLAN_THREADS=0` turns the workers off inside a run.
 
 ## Community map smoke test
 

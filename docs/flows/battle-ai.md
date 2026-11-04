@@ -88,6 +88,34 @@ sides, `set_side_records`, `begin`, then steps to the end; `simulate` wraps it i
 (`ai.md` §4). Changing anything in the battle AI changes the world AI's choices too —
 run the real-maps AI test (`src/rules/ai/real_maps.rs`, needs `RAZDOR_DT_DIR`).
 
+## 5b. The world AI's planner floods (threads)
+
+The world AI's plan (`Game::ai_plan`, `src/rules/ai.rs`, §7 of `ai.md`) is one flood over the
+map, and on big maps it is most of the AI's time (about 90% on the 200² bench). `ai_plan` builds
+the flood's inputs (costs, multiplier map, seeds, the cells to erase), dispatches the flood to
+`src/rules/ai/flood_pool.rs` and returns; the arrival rules go on. The flood depends only on those
+inputs, which are fixed at the plan, so the result is the one the serial planner gives, whatever
+the timing:
+
+- A **join point** writes a plan into its army (`Game::settle`, `settle_index`, `settle_all`)
+  before anything reads or writes that army's path, countdown or facing: the army's own next step
+  (`ai_start`), another army's plan that erases its next cell (the plan's cell list),
+  `army_beaten`, `ai_respawns`, the contact and building countdown resets, `armies_snap` and the
+  end of `ai_move` (no plan is pending between ticks, so none is saved).
+- A moment's planners (all the armies whose step ends at one centi-minute, often dozens on the
+  bench) run on the workers while the arrivals of that moment go on. Their floods take the
+  inputs as the serial planner had them at each plan: the wander draws and battles of the
+  arrivals before are already in.
+- Threads: `RAZDOR_PLAN_THREADS` (0 turns them off), else the cores left after one, at most 7
+  (`flood_pool::workers`). No threads on wasm, below `MIN_CELLS` (40 000 cells), or with one
+  core. A caller that needs a result no worker has started runs it itself.
+- The pending plans are at most `max_in_flight()` (2 per worker, plus 2); the oldest is written
+  first when more are made.
+- Test: `ai_fingerprint` is identical with the threads on and off (the baseline in
+  `docs/flows/testing-and-tools.md`); `pooled_floods_are_the_inline_ones_in_any_order` checks
+  the hand-off. Any new code that reads or writes an army's path during `ai_move` must settle
+  that army first.
+
 ## 6. Traps
 
 - Scores are integers with the original's rounding (`experience::round_half_even`) and 32-bit

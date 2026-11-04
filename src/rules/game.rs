@@ -328,6 +328,10 @@ pub struct Game {
     /// What the AI did so far (counts).
     #[serde(default)]
     pub ai_stats: AiStats,
+    /// The planner's floods still on their way to their armies (`ai::flood_pool`): none
+    /// between ticks, so nothing is saved.
+    #[serde(skip)]
+    pub(crate) plans: super::ai::PendingPlans,
     /// Reports of AI battles the player heard of, newest last.
     #[serde(default)]
     pub ai_log: Vec<AiNews>,
@@ -721,6 +725,7 @@ impl Game {
             beaten_armies: BTreeSet::new(),
             ai_beaten: BTreeSet::new(),
             ai_stats: AiStats::default(),
+            plans: Default::default(),
             ai_log: Vec::new(),
             archetype: 1,
             old_effects: Vec::new(),

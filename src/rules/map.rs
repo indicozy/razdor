@@ -701,6 +701,23 @@ impl TileMap {
         x >= 0 && y >= 0 && x < self.w && y < self.h
     }
 
+    /// The grid and the size of this map, nothing else: all a planner flood reads of the map
+    /// ([`TileMap::flood_maps`], [`TileMap::descend`]), so the flood can run on another thread
+    /// without copying the terrain.
+    pub fn geometry(&self) -> TileMap {
+        TileMap {
+            grid: self.grid,
+            w: self.w,
+            h: self.h,
+            surface: Vec::new(),
+            land: Vec::new(),
+            water: Vec::new(),
+            objects: Vec::new(),
+            row_start: Vec::new(),
+            markers: Vec::new(),
+        }
+    }
+
     fn index(&self, t: Tile) -> Option<usize> {
         self.in_bounds(t).then(|| (t.1 * self.w + t.0) as usize)
     }
