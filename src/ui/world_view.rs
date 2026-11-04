@@ -3535,6 +3535,127 @@ fn draw_walkable(game: &Game, cam: &Camera) {
     }
 }
 
+/// The colour of a package trigger's place in the debug overlay (F3): violet, grey once a `once`
+/// trigger ran.
+const PACKAGE_COLOUR: Color = Color::new(0.75, 0.45, 1.0, 1.0);
+const PACKAGE_RAN_COLOUR: Color = Color::new(0.6, 0.6, 0.6, 1.0);
+
+/// The debug overlay's marks of the attached package's triggers that have a place on this map
+/// ([`Story::placed`]): an outline of the cell, area or building's footprint, a ring on an army,
+/// and a label per cell (the trigger ids; an army's arrival names the army). Read-only, and only
+/// what is on screen is drawn. The triggers under the pointer go to `under` (as lines of the hover
+/// panel).
+fn draw_package_places(
+    game: &Game,
+    cam: &Camera,
+    place_label: &mut impl FnMut(&[String], Vec2, Color),
+    under: &mut Vec<String>,
+) {
+    use razdor::pack::triggers::Place as Cells;
+    use razdor::rules::triggers::Spot;
+    let Some(story) = game.story() else { return };
+    let placed = story.placed(&game.triggers.fired);
+    if placed.is_empty() {
+        return;
+    }
+    let map = &game.world.map;
+    let cell = cam.cell_size();
+    let at_pointer = cam.tile_under_mouse();
+    let army_name = |id: u8| story.army_names.get(&id).cloned().unwrap_or_else(|| format!("#{id}"));
+    // The labels of one cell, in the order the package wrote them.
+    let mut groups: std::collections::BTreeMap<Tile, Vec<(String, bool)>> = std::collections::BTreeMap::new();
+    let outline = |a: Tile, b: Tile, fill: Color, line: Color| {
+        let c0 = cam.cell_centre(a) - cell * 0.5;
+        let c1 = cam.cell_centre(b) + cell * 0.5;
+        let r = Rect::new(c0.x, c0.y, c1.x - c0.x, c1.y - c0.y);
+        if cam.view.overlaps(&r) {
+            draw_rectangle(r.x, r.y, r.w, r.h, fill);
+            draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, line);
+        }
+    };
+    for p in &placed {
+        let colour = if p.fired { PACKAGE_RAN_COLOUR } else { PACKAGE_COLOUR };
+        let fill = Color::new(colour.r, colour.g, colour.b, if p.fired { 0.05 } else { 0.12 });
+        let text = match (p.kind, p.army) {
+            ("army_arrives", Some(a)) => format!("{} {} → {}", tr("army"), army_name(a), p.id),
+            ("hero_meets_army", _) => format!("{}: {}", tr("meet"), p.id),
+            _ => p.id.clone(),
+        };
+        let anchor = match p.spot {
+            Spot::Place(Cells::Cell(x, y)) => {
+                outline((x, y), (x, y), fill, colour);
+                (x, y)
+            }
+            Spot::Place(Cells::Area(x, y, w, h)) => {
+                outline((x, y), (x + w - 1, y + h - 1), fill, colour);
+                (x, y)
+            }
+            Spot::Building(b) => {
+                let Some((l, loc)) = game.world.locations.iter().enumerate().find(|(_, loc)| loc.id == b) else { continue };
+                // The footprint: each cell tinted, its border drawn where the footprint ends.
+                let covered = |t: Tile| game.world.location_covering(t) == Some(l);
+                let ((c0, c1), (r0, r1)) = cam.visible(map);
+                for y in r0..r1 {
+                    for x in c0..c1 {
+                        if !covered((x, y)) {
+                            continue;
+                        }
+                        let tl = cam.cell_centre((x, y)) - cell * 0.5;
+                        draw_rectangle(tl.x, tl.y, cell.x, cell.y, fill);
+                        let (tr, bl, br) = (tl + vec2(cell.x, 0.0), tl + vec2(0.0, cell.y), tl + cell);
+                        if !covered((x, y - 1)) {
+                            draw_line(tl.x, tl.y, tr.x, tr.y, 2.0, colour);
+                        }
+                        if !covered((x, y + 1)) {
+                            draw_line(bl.x, bl.y, br.x, br.y, 2.0, colour);
+                        }
+                        if !covered((x - 1, y)) {
+                            draw_line(tl.x, tl.y, bl.x, bl.y, 2.0, colour);
+                        }
+                        if !covered((x + 1, y)) {
+                            draw_line(tr.x, tr.y, br.x, br.y, 2.0, colour);
+                        }
+                    }
+                }
+                loc.anchor
+            }
+            Spot::Army(a) => {
+                let Some(army) = game.world.armies.iter().find(|x| x.id == a) else { continue };
+                let c = cam.screen_at(army.pos);
+                draw_circle_lines(c.x, c.y, cell.x * 0.6, 2.0, colour);
+                army.tile(map)
+            }
+        };
+        if at_pointer.is_some_and(|t| under_spot(game, p, t)) {
+            let fired = if p.fired { format!(" {}", tr("(fired)")) } else { String::new() };
+            under.push(format!("{} ({}){fired}", p.id, p.kind));
+        }
+        groups.entry(anchor).or_default().push((text, p.fired));
+    }
+    for (anchor, items) in groups {
+        let c = cam.cell_centre(anchor);
+        if !cam.view.contains(c) {
+            continue;
+        }
+        let colour = if items.iter().all(|(_, fired)| *fired) { PACKAGE_RAN_COLOUR } else { PACKAGE_COLOUR };
+        let lines: Vec<String> = items.into_iter().map(|(t, _)| t).collect();
+        place_label(&lines, c + vec2(6.0, 6.0), colour);
+    }
+}
+
+/// Whether the package place `p` covers cell `t` (a cell, an area, a building's footprint or an
+/// army's cell).
+fn under_spot(game: &Game, p: &razdor::rules::triggers::Placed, t: Tile) -> bool {
+    use razdor::pack::triggers::Place as Cells;
+    use razdor::rules::triggers::Spot;
+    match p.spot {
+        Spot::Place(Cells::Cell(x, y)) => (x, y) == t,
+        Spot::Place(Cells::Area(x, y, w, h)) => t.0 >= x && t.0 < x + w && t.1 >= y && t.1 < y + h,
+        Spot::Building(b) => game.world.locations.iter().enumerate().any(|(l, loc)| loc.id == b && game.world.location_covering(t) == Some(l)),
+        Spot::Army(a) => game.world.armies.iter().any(|x| x.id == a && x.tile(&game.world.map) == t),
+    }
+}
+
 /// Razdor's debug overlay (F3): every event point and lantern with its id, radius and
 /// events, the buildings' events, and a panel with the hero's and the pointer's cells and the
 /// events of the place under the pointer. Drawn through the fog.
@@ -3606,6 +3727,16 @@ fn draw_debug(game: &Game, cam: &Camera) {
         }
         if over {
             place_under = Some((lines, colour));
+        }
+    }
+    let mut under_triggers: Vec<String> = Vec::new();
+    draw_package_places(game, cam, &mut place_label, &mut under_triggers);
+    if !under_triggers.is_empty() {
+        let mut extra = vec![tr("package triggers").to_string()];
+        extra.extend(under_triggers);
+        match place_under.as_mut() {
+            Some((lines, _)) => lines.extend(extra),
+            None => place_under = Some((extra, PACKAGE_COLOUR)),
         }
     }
     // The panel.

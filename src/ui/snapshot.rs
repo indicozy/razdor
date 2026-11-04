@@ -657,6 +657,10 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                 game.pos = game.world.map.center((x, y));
                 game.reveal(x, y, 4);
             }
+            // `RAZDOR_SCENE_DEBUG=1` also turns the debug overlay (F3) on here (the package's places).
+            if std::env::var("RAZDOR_SCENE_DEBUG").is_ok_and(|v| !v.is_empty()) {
+                app.map_view.debug = true;
+            }
             return Ok(());
         }
         "replay" => return stage_replay(app, parts.next()),

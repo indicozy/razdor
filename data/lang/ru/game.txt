@@ -401,6 +401,10 @@ Pin the save (P): it is never overwritten, stays on top and is not counted in th
 lantern r{r}{lit} = фонарь r{r}{lit}
 , lit = , горит
 Debug (F3) = Отладка (F3)
+package triggers = триггеры пакета
+meet = встреча
+army = армия
+(fired) = (сработал)
 Hero at ({x}, {y}), {time} = Герой на ({x}, {y}), {time}
 Pointer at ({x}, {y}) = Курсор на ({x}, {y})
 debug: event points, lanterns, events of places = отладка: точки событий, фонари, события мест

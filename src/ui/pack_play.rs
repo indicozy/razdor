@@ -90,6 +90,10 @@ impl App {
             for (var, value) in snapshot_vars() {
                 game.triggers.vars.insert(var, value);
             }
+            // `RAZDOR_PACK_FIRED=<trigger id>,…`: those `once` triggers already ran (the debug overlay's grey places).
+            for id in std::env::var("RAZDOR_PACK_FIRED").unwrap_or_default().split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                game.triggers.fired.insert(id.to_string());
+            }
             if let Some(p) = self.scenarios[index].pack.clone() {
                 p.start(&mut game);
             }

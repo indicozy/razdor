@@ -291,6 +291,60 @@ impl Story {
     pub fn is_empty(&self) -> bool {
         self.triggers.is_empty() && self.dialogs.is_empty() && self.battles.is_empty()
     }
+
+    /// The triggers that have a place on the map, in the package's order: where each waits (a
+    /// cell or an area, a building, an army), and whether a `once` trigger already ran (`fired`
+    /// is [`TriggerState::fired`]). An arrival with neither `at` nor `building` has no place and
+    /// is left out. Read-only: for the debug overlay (F3) and the package author's tools.
+    pub fn placed(&self, fired: &BTreeSet<String>) -> Vec<Placed> {
+        self.triggers
+            .iter()
+            .filter_map(|t| {
+                let (kind, spot, army) = match &t.when {
+                    When::HeroEnters(p) => ("hero_enters", Spot::Place(*p), None),
+                    When::HeroEntersBuilding(b) => ("hero_enters_building", Spot::Building(*b), None),
+                    When::BuildingCaptured(b) => ("building_captured", Spot::Building(*b), None),
+                    When::BuildingLost(b) => ("building_lost", Spot::Building(*b), None),
+                    When::HeroMeetsArmy(a) => ("hero_meets_army", Spot::Army(*a), Some(*a)),
+                    When::ArmyArrives { army, at, building } => {
+                        let spot = match (at, building) {
+                            (Some((x, y)), _) => Spot::Place(Place::Cell(*x, *y)),
+                            (None, Some(b)) => Spot::Building(*b),
+                            (None, None) => return None,
+                        };
+                        ("army_arrives", spot, Some(*army))
+                    }
+                    _ => return None,
+                };
+                Some(Placed { id: t.id.clone(), kind, spot, army, fired: t.once && fired.contains(&t.id) })
+            })
+            .collect()
+    }
+}
+
+/// Where a trigger of a package's story waits on the map.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Spot {
+    /// A cell (`[x, y]`) or an area (`[x, y, w, h]`).
+    Place(Place),
+    /// A building by its scenario id.
+    Building(u16),
+    /// An army, where it stands (`hero_meets_army`).
+    Army(ArmyId),
+}
+
+/// A trigger with a place on the map ([`Story::placed`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Placed {
+    /// The trigger's id.
+    pub id: String,
+    /// The moment it waits for, as the package writes it (`hero_enters`, `army_arrives`, ...).
+    pub kind: &'static str,
+    pub spot: Spot,
+    /// The army the trigger is about: the arrival's or the meeting's (its name is `Story::army_names`).
+    pub army: Option<ArmyId>,
+    /// A `once` trigger that already ran.
+    pub fired: bool,
 }
 
 /// A campaign request a story made: the map to travel to, and the point of it to come in at.
@@ -1981,6 +2035,49 @@ mod tests {
         ]);
         let errs = compile(&pkg, "en", "demo", &NoScenario, 1).unwrap_err();
         assert!(errs.iter().any(|e| e.contains("no army `ghost`") && e.contains("triggers/main.toml:")), "{errs:?}");
+    }
+
+    #[test]
+    fn the_triggers_with_a_place_are_listed_for_their_map() {
+        let manifest = "id = \"demo\"\nversion = \"0.1.0\"\nformat = 1\ntitle = \"story.title\"\nauthor = \"Razdor\"\nlicense = \"MIT\"\n";
+        let pkg = package(&[
+            ("package.toml", manifest),
+            ("texts/en.toml", "[story]\ntitle = \"Story\"\n"),
+            (
+                "triggers/main.toml",
+                "[[trigger]]\nid = \"spawn\"\nwhen = { event = \"game_start\" }\nthen = [ { spawn_army = \"rebels\", at = [5, 5], faction = \"enemy\", troops = [\"dt:knight\"] } ]\n\n\
+                 [[trigger]]\nid = \"cell\"\nonce = true\nwhen = { event = \"hero_enters\", at = [3, 4] }\nthen = [ { give_gold = 1 } ]\n\n\
+                 [[trigger]]\nid = \"area\"\nonce = false\nwhen = { event = \"hero_enters\", at = [10, 5, 4, 3] }\nthen = [ { give_gold = 1 } ]\n\n\
+                 [[trigger]]\nid = \"arrive\"\nwhen = { event = \"army_arrives\", army = \"rebels\", at = [6, 6] }\nthen = [ { give_gold = 1 } ]\n\n\
+                 [[trigger]]\nid = \"nowhere\"\nwhen = { event = \"army_arrives\", army = \"rebels\" }\nthen = [ { give_gold = 1 } ]\n\n\
+                 [[trigger]]\nid = \"meet\"\nwhen = { event = \"hero_meets_army\", army = \"rebels\" }\nthen = [ { give_gold = 1 } ]\n\n\
+                 [[trigger]]\nid = \"elsewhere\"\nmap = \"two\"\nwhen = { event = \"hero_enters\", at = [1, 1] }\nthen = [ { give_gold = 1 } ]\n",
+            ),
+        ]);
+        let story = compile(&pkg, "en", "one", &NoScenario, 1).unwrap_or_else(|e| panic!("{e:?}"));
+        let fired: BTreeSet<String> = ["cell", "area"].iter().map(|s| s.to_string()).collect();
+        let placed = story.placed(&fired);
+        let got: Vec<(&str, &str, Spot, Option<ArmyId>, bool)> = placed.iter().map(|p| (p.id.as_str(), p.kind, p.spot, p.army, p.fired)).collect();
+        assert_eq!(
+            got,
+            vec![
+                ("cell", "hero_enters", Spot::Place(Place::Cell(3, 4)), None, true),
+                ("area", "hero_enters", Spot::Place(Place::Area(10, 5, 4, 3)), None, false),
+                ("arrive", "army_arrives", Spot::Place(Place::Cell(6, 6)), Some(200), false),
+                ("meet", "hero_meets_army", Spot::Army(200), Some(200), false),
+            ],
+            "the spawn, the cell-less arrival and the other map's trigger are left out; a `once` one that ran is fired"
+        );
+        // Buildings: a building trigger has its place, and a non-`once` one is never fired.
+        let mut bld = trig("bld", When::HeroEntersBuilding(7), vec![], vec![]);
+        bld.once = false;
+        let captured = trig("taken", When::BuildingCaptured(8), vec![], vec![]);
+        let lost = trig("lost", When::BuildingLost(9), vec![], vec![]);
+        let by_id = Story { triggers: vec![bld, captured, lost], ..Story::default() };
+        let fired: BTreeSet<String> = ["bld", "taken"].iter().map(|s| s.to_string()).collect();
+        let placed = by_id.placed(&fired);
+        let spots: Vec<(&str, Spot, bool)> = placed.iter().map(|p| (p.id.as_str(), p.spot, p.fired)).collect();
+        assert_eq!(spots, vec![("bld", Spot::Building(7), false), ("taken", Spot::Building(8), true), ("lost", Spot::Building(9), false)]);
     }
 
     #[test]

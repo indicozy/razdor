@@ -685,6 +685,10 @@ Input goes through `src/ui/input.rs` (mouse/keys with gamepad emulation from
 The map's F3 debug overlay (Razdor's, `world_view::draw_debug`) also tints every visible cell
 (`world_view::draw_walkable`, `walk_tint`): on foot green for passable (brighter on roads), red
 for impassable; aboard the ship blue for sailable, red otherwise, all faint so the map shows through.
+Razdor's F3 overlay also marks a package's triggers that have a place on the map (`world_view::draw_package_places`,
+from `rules::triggers::Story::placed`): violet outlines for a cell, an area or a building's footprint, a ring on
+an army, a label per cell with the trigger ids (`army <name> → id` for an arrival, `meet: id` on an army);
+grey once a `once` trigger ran. The hover panel lists the triggers under the pointer. Read-only, drawn through the fog.
 ### Maps and mods (the hub; a Razdor extra)
 
 `main_menu` link (the corner row, or the chips held upright) → `Screen::Hub(HubView)` (`ui/hub_view.rs`) → `razdor::hub` on a thread:
