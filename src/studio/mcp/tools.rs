@@ -1,4 +1,4 @@
-//! The eight tools of the studio's MCP server: `get_state`, `check`, `scores`, `sim`, `run_test`, `query_refs`,
+//! The nine tools of the studio's MCP server: `get_state`, `check`, `schema`, `scores`, `sim`, `run_test`, `query_refs`,
 //! `focus` and `snapshot`. Their schemas (`list`) and their calls (`call`). The checks and the sim are the CLI's
 //! own: `check` is `build::run` and `Report::to_json` (what `razdor-pack check --json` prints), `sim`
 //! is `sim::sim_map` with `--trace --json`'s options and reply. Nothing here edits a file.
@@ -12,6 +12,7 @@ use super::host::{FocusTarget, Host, SnapTarget};
 use super::image;
 use crate::pack::playtest::{self, Options as TestOptions};
 use crate::pack::sim::{check_presets, parse_set, sim_map, Choices, SimOptions};
+use crate::pack::vocab;
 use crate::pack::uses::{uses, Target};
 use crate::studio::build::{self, Built, Job};
 use crate::studio::health::{self, Severity};
@@ -70,6 +71,15 @@ pub fn list() -> Value {
             "name": "check",
             "description": "Checks the package as it is now, including unsaved edits in the studio: the errors and warnings of the package format, each with its file, line, message and hint. Run it after every edit. Errors block play; warnings do not. Same JSON as `razdor-pack check --json`.",
             "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+        },
+        {
+            "name": "schema",
+            "description": "The vocabulary of trigger files: every event (when), condition (if) and action (then) with its keys, their types and defaults, one sentence and one TOML example, and the names agents tried for it (aliases). Read it before writing an action you are not sure of. Same data as `razdor-pack schema --json`; a name keeps its one entry.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "name": { "type": "string", "description": "An event, condition or action's name, e.g. `restore_army`. Default: all of them." } },
+                "additionalProperties": false
+            }
         },
         {
             "name": "scores",
@@ -158,6 +168,7 @@ pub fn call(host: &dyn Host, name: &str, args: &Value) -> Option<Value> {
             Err(e) => Reply::fail(e),
         },
         "check" => check(host).unwrap_or_else(Reply::fail),
+        "schema" => schema(args).unwrap_or_else(Reply::fail),
         "scores" => scores(host, args).unwrap_or_else(Reply::fail),
         "sim" => sim(host, args).unwrap_or_else(Reply::fail),
         "run_test" => run_test(host, args).unwrap_or_else(Reply::fail),
@@ -177,6 +188,12 @@ fn built(job: Job) -> Result<Built, String> {
 fn check(host: &dyn Host) -> Result<Reply, String> {
     let built = built(host.job()?)?;
     Ok(Reply::ok(vec![text(built.report.to_json())]))
+}
+
+/// The vocabulary of trigger files (`pack::vocab`), all of it or the entry of `name`.
+fn schema(args: &Value) -> Result<Reply, String> {
+    let name = optional(args, "name")?;
+    Ok(Reply::json(&vocab::json(name)?))
 }
 
 /// The two scores of a map (`map`, default the shown one), as the Scores tab shows them.

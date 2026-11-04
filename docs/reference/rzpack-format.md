@@ -170,6 +170,14 @@ Story logic in TOML: `triggers/*.toml` (variables and `[[trigger]]`) and `dialog
 (`{ var = "dread", op = ">=", value = 3 }`); its other keys are its arguments. A wrong key is an
 error with the closest name (`did you mean …`). Numbers are whole numbers.
 
+The three tables of this section (events, conditions, actions, with their keys) are mirrored by
+`razdor-pack schema`: the same entries, from one vocabulary (`src/pack/vocab.rs`) that a test ties to
+the reader's name lists, so the two cannot drift. `razdor-pack schema [<name>] [--json]` prints them
+(or one entry), and `razdor-pack schema --json-schema [triggers|dialogs]` gives the JSON Schema of
+`triggers/*.toml` and `dialogs/*.toml` that editors and the studio's `schema` tool read. A name that is
+not known is an error with the nearest known one; an agent's invented name can be an alias of a known
+action (`heal_army` answers `restore_army`).
+
 ### Shape
 
 ```toml
@@ -330,6 +338,13 @@ values of the wrong type; unknown dialogs and choices; a dialog that no trigger 
 text too); a `complete_quest` of a quest id that no `quest` action adds (with the closest id); unknown
 `dt:` units, items and spells; a package that is not in `requires`; a variable declared twice; a
 trigger id used twice; a `map` that is not in the package.
+
+Warnings about what the rules do not say (the story still plays): a `hero_meets_army` trigger with
+`once` (the default, when `once` is not written): its second meeting becomes a battle, so write
+`once = false` to greet every meeting; a variable that a `game_start` trigger sets from a condition
+and only later triggers read (it keeps its value from the start); a greeting army that stands on or
+next to a building, when no action of its greetings (the triggers and the dialogs they open) moves it
+(`army_goal`, `remove_army`, `start_battle` or `teleport_army` of that army): it may block the way.
 
 **The diary.** A `quest` and a `complete_quest` are the package's journal entries (`rules::journal`,
 `Entry::story`). Every dialog that is shown is also recorded in «Сообщения», with its title and text,

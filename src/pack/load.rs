@@ -76,10 +76,22 @@ pub(super) fn parse_toml<T: DeserializeOwned>(file: &str, text: &str, report: &m
         Ok(v) => Some(v),
         Err(e) => {
             let line = e.span().map(|s| line_of(text, s.start));
-            report.error(file, line, e.message());
+            match unknown_key_hint(e.message()) {
+                Some(hint) => report.error_hint(file, line, e.message(), hint),
+                None => report.error(file, line, e.message()),
+            }
             None
         }
     }
+}
+
+/// The hint for a key a table does not take: serde names the key and the keys it expects (`unknown
+/// field `wehn`, expected one of `id`, `when`, …`), and the nearest of those is suggested.
+fn unknown_key_hint(message: &str) -> Option<String> {
+    let rest = message.split_once("unknown field `")?.1;
+    let (key, expected) = rest.split_once('`')?;
+    let names: Vec<&str> = expected.split_once("expected one of ")?.1.split('`').enumerate().filter(|(i, _)| i % 2 == 1).map(|(_, n)| n).collect();
+    triggers::closest(key, names.iter().copied()).map(|near| format!("did you mean `{near}`?"))
 }
 
 impl Package {
@@ -267,6 +279,14 @@ fn content_text<'a>(files: &'a Files, path: &str, report: &mut Report) -> Option
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unknown_key_names_the_nearest_key_the_table_takes() {
+        let msg = "unknown field `wehn`, expected one of `id`, `when`, `if`, `then`, `once`, `chance`, `map`";
+        assert_eq!(unknown_key_hint(msg).as_deref(), Some("did you mean `when`?"));
+        assert_eq!(unknown_key_hint("unknown field `zzzzzzzz`, expected one of `id`").as_deref(), None);
+        assert_eq!(unknown_key_hint("expected a table").as_deref(), None);
+    }
 
     #[test]
     fn game_extensions_are_case_insensitive() {

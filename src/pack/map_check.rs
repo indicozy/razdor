@@ -251,6 +251,8 @@ fn check_map(pkg: &Package, entry: &MapEntry, r: &mut Report) {
 
     // Armies.
     let mut army_ids: BTreeMap<&str, usize> = BTreeMap::new();
+    // Each army with its line and whether it stands on or next to a building (the greeters' lint).
+    let mut sites: Vec<(&str, Option<u32>, bool)> = Vec::new();
     let mut named = 0usize;
     if m.army.len() > 255 {
         r.error_hint(file, None, format!("{} armies: a map holds 255 at most", m.army.len()), "an army is one byte in the file");
@@ -294,6 +296,9 @@ fn check_map(pkg: &Package, entry: &MapEntry, r: &mut Report) {
         if let Some(b) = covering(&a.cell) {
             r.error_hint(file, at(span), format!("army `{}` stands inside building `{b}`'s footprint", a.id), "move it onto a cell no building covers");
         }
+        let (ax, ay) = (a.cell[0] as i32, a.cell[1] as i32);
+        let near_building = (-1..=1).any(|dx| (-1..=1).any(|dy| covered.contains_key(&(ax + dx, ay + dy))));
+        sites.push((a.id.as_str(), at(span), near_building));
         let ships = ship != "none";
         match at_cell(&a.cell).map(ground) {
             Some(Ground::Water) if !ships => r.error_hint(
@@ -364,6 +369,7 @@ fn check_map(pkg: &Package, entry: &MapEntry, r: &mut Report) {
         }
     }
 
+    super::triggers::check_greeters(pkg, &entry.id, &sites, file, r);
     // The package's triggers and dialogs that apply to this map name its armies and buildings, and
     // their cells lie inside it: the map's size is known only now (`triggers::check_map_refs`).
     if let Some(t) = &terrain {

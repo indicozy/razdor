@@ -38,6 +38,7 @@ pub mod texts;
 pub mod trust;
 pub mod uses;
 pub mod triggers;
+pub mod vocab;
 
 pub use check::check;
 pub use diag::{Diagnostic, Report, Severity};
