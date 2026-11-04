@@ -1881,6 +1881,7 @@ impl Game {
             Some(t) if on_path => {
                 if moves {
                     a.pos = map.center(t);
+                    planner_proto::count_step();
                     a.path.remove(0);
                     a.walk.points.push(a.pos);
                     a.walk.minutes.push(minutes);
@@ -1954,13 +1955,22 @@ impl Game {
         let reach = self.content.options.ai_get_path_distance;
         let mut dist: Vec<(Party, i32)> = Vec::new();
         let mut replan = self.world.armies[i].mind.countdown < 1;
+        // PROTOTYPE LOD: beyond D cells from the hero, a party other than the hero does not
+        // re-plan the army when the lod mode keeps walking.
+        let lod = planner_proto::cfg();
+        let far = lod.lod != planner_proto::Lod::Off && grid.octile(here, self.cell_of(Party::Hero, hero)) > lod.lod_d;
+        let keep_walking = far && matches!(lod.lod, planner_proto::Lod::Keep | planner_proto::Lod::Both);
         for p in self.parties() {
             if p == Party::Army(i) {
                 continue;
             }
             let d = grid.octile(here, self.cell_of(p, hero));
             if 0 < d && d <= reach {
-                replan = true;
+                if keep_walking && p != Party::Hero {
+                    planner_proto::count_lod_skip();
+                } else {
+                    replan = true;
+                }
             }
             if d > 0 {
                 let key = self.key_of(p);
@@ -2142,15 +2152,19 @@ impl Game {
         }
         let world = &self.world;
         let costs = if a.sails() { world.map.water_costs() } else { world.map.land_costs() };
-        let mut field = world.map.flood_maps(costs, &mult, &seeds, here);
         let reach = o.ai_get_path_distance;
+        let mut erased: Vec<Tile> = Vec::new();
         for &(p, d) in dist {
             if 0 < d && d <= reach {
-                field.erase(self.cell_of(p, hero));
-                field.erase(self.next_cell(p, hero));
+                erased.push(self.cell_of(p, hero));
+                erased.push(self.next_cell(p, hero));
             }
         }
-        let path = (field.kept > 0).then(|| world.map.descend(&field, here));
+        // PROTOTYPE: the planner mode (exact by default) and the LOD countdown.
+        let path = planner_proto::plan(&world.map, costs, &mult, &seeds, here, &erased);
+        let lod = planner_proto::cfg();
+        let far_cd = matches!(lod.lod, planner_proto::Lod::Countdown | planner_proto::Lod::Both) && grid.octile(here, self.cell_of(Party::Hero, hero)) > lod.lod_d;
+        let countdown = if far_cd { reach * lod.lod_k } else { reach };
 
         let a = &mut self.world.armies[i];
         // A path read puts its index back at its start; with no seed the path is one cell
@@ -2169,7 +2183,7 @@ impl Game {
                     from = t;
                 }
                 a.path = path;
-                a.mind.countdown = reach;
+                a.mind.countdown = countdown;
                 a.mind.walked = 0;
             }
             None => a.path.clear(),
@@ -3796,6 +3810,9 @@ fn building_name(l: &Location) -> String {
         l.name.trim().to_string()
     }
 }
+
+/// PROTOTYPE (proto/planner-a): approximate planners behind env vars; default exact.
+pub(crate) mod planner_proto;
 
 #[cfg(test)]
 mod tests;

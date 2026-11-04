@@ -304,3 +304,84 @@ fn ai_fingerprint() {
         }
     }
 }
+
+/// PROTOTYPE (proto/planner-a): the free runs of a planner mode, one line per map: the AI battles,
+/// the hero's battles, captures, AI steps, armies at the start and end, plans, fingerprint and
+/// seconds. Install maps and community entries play 30 days (as `ai_fingerprint`), the bench maps
+/// (armies and both variants, every size) 2 days. Then the shadow agreement of
+/// `RAZDOR_PLANNER_SHADOW` (summed over all maps) and the LOD skips. Modes come from the env
+/// (`planner_proto`). Run by name with `--ignored --nocapture`; not part of any suite.
+#[test]
+#[ignore]
+fn planner_free_run() {
+    let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+    let dt = DtInstall::load(std::path::Path::new(&dir)).unwrap();
+    let c = Arc::new(Content::from_dt(&dt));
+    let cfg = planner_proto::cfg();
+    println!("CONFIG {cfg:?}");
+    let mut total = planner_proto::Tally::default();
+    let mut run_one = |label: &str, c: &Arc<Content>, s: &Scenario, days: u64| {
+        planner_proto::take_tally();
+        let r = play_days(c, s, days);
+        let t = planner_proto::take_tally();
+        println!(
+            "{label} ai_battles {} hero_battles {} captures {} steps {} armies {}->{} plans {} fp {:016x} stalled {} secs {:.2}",
+            r.ai.battles, r.player_battles, r.ai.captures, t.steps, r.armies, r.armies_after, r.ai.paths, r.fingerprint, r.stalled, r.secs
+        );
+        total.add(&t);
+    };
+    for m in &dt.maps {
+        let s = m.load().unwrap();
+        run_one(&m.name, &c, &s, DAYS);
+    }
+    if let Some(root) = std::env::var_os("RAZDOR_COMMUNITY_DIR") {
+        let root = std::path::PathBuf::from(root);
+        let mut entries: Vec<std::path::PathBuf> = std::fs::read_dir(&root).unwrap().filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.is_dir()).collect();
+        entries.sort();
+        for entry in entries {
+            let name = entry.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            let install = entry.join("install");
+            if !install.exists() {
+                continue;
+            }
+            let edt = DtInstall::load(&install).unwrap();
+            let ec = Arc::new(Content::from_dt(&edt));
+            let mut maps = edt.maps.clone();
+            if let Ok(read) = std::fs::read_dir(entry.join("maps")) {
+                let mut extra: Vec<MapEntry> = read
+                    .filter_map(|e| e.ok().map(|e| e.path()))
+                    .filter(|p| p.is_file() && p.extension().is_some_and(|x| x.eq_ignore_ascii_case(crate::dt::install::MAP_EXTENSION)))
+                    .map(|p| MapEntry { name: p.file_stem().unwrap_or_default().to_string_lossy().into_owned(), path: p })
+                    .collect();
+                extra.sort_by(|a, b| a.name.cmp(&b.name));
+                maps.extend(extra);
+            }
+            for m in &maps {
+                let s = m.load().unwrap();
+                run_one(&format!("{name}/{}", m.name), &ec, &s, DAYS);
+            }
+        }
+    }
+    let template = roaming_template(&dt);
+    for side in sizes_from_env() {
+        for variant in [Variant::Armies, Variant::Both] {
+            let s = bench_scenario(&template, side, variant);
+            run_one(&format!("bench-{side}x{side}-{}", variant.name()), &c, &s, BENCH_DAYS);
+        }
+    }
+    for (k, m) in cfg.shadow.iter().enumerate() {
+        let a = total.shadow.get(k).cloned().unwrap_or_default();
+        let pct = |n: u64| if a.plans == 0 { 0.0 } else { 100.0 * n as f64 / a.plans as f64 };
+        let ratio = if a.ratio_n == 0 { 0.0 } else { a.ratio_sum / a.ratio_n as f64 };
+        println!(
+            "SHADOW {m:?} plans {} same_first {:.2}% same_target {:.2}% len_ratio {:.4} alt_empty {} exact_empty {}",
+            a.plans,
+            pct(a.same_first),
+            pct(a.same_target),
+            ratio,
+            a.alt_empty,
+            a.exact_empty
+        );
+    }
+    println!("TOTAL steps {} lod_skips {}", total.steps, total.lod_skips);
+}

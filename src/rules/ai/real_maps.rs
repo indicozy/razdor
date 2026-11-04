@@ -65,16 +65,16 @@ pub(super) struct DaysRun {
     /// [`fingerprint`] of the game at the end of the run.
     pub(super) fingerprint: u64,
     /// Armies at the start and at the end of the run.
-    armies: usize,
-    armies_after: usize,
+    pub(super) armies: usize,
+    pub(super) armies_after: usize,
     /// Armies waiting to respawn at the end.
-    waiting: usize,
-    player_battles: usize,
+    pub(super) waiting: usize,
+    pub(super) player_battles: usize,
     /// The hero lost a battle (the world went on without him).
-    player_lost: bool,
+    pub(super) player_lost: bool,
     /// The clock did not reach the end within the call budget (a softlock).
-    stalled: bool,
-    secs: f64,
+    pub(super) stalled: bool,
+    pub(super) secs: f64,
 }
 
 /// Plays `days` days of `s` with the hero standing at his start: he fights whoever comes and
