@@ -17,6 +17,7 @@
 use crate::local;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
+use std::sync::{Arc, OnceLock};
 
 pub use crate::dt::dtm::Surface;
 
@@ -581,6 +582,9 @@ pub struct TileMap {
     row_start: Vec<usize>,
     /// Non-terrain characters of a text map (location markers) and where they are.
     pub markers: Vec<(char, Tile)>,
+    /// PROTOTYPE (proto/planner-c): the landmark tables of the planner's ALT modes, land and
+    /// ship, built on first use; dropped when a cell's cost changes.
+    planner_cache: [OnceLock<Arc<crate::rules::ai::planner_proto::Landmarks>>; 2],
 }
 
 /// An empty 0×0 map: the placeholder a loaded save holds until the real map is rebuilt.
@@ -614,7 +618,7 @@ impl TileMap {
             row_start.push(i);
         }
         let n = codes.len();
-        let mut m = TileMap { grid, w, h, surface: codes.to_vec(), land: vec![0; n], water: vec![0; n], objects, row_start, markers: Vec::new() };
+        let mut m = TileMap { grid, w, h, surface: codes.to_vec(), land: vec![0; n], water: vec![0; n], objects, row_start, markers: Vec::new(), planner_cache: Default::default() };
         let index = |t: Tile| (t.0 >= 0 && t.1 >= 0 && t.0 < w && t.1 < h).then(|| (t.1 * w + t.0) as usize);
         // Hills set the base of their square (later in the row-by-row scan over earlier).
         let mut v = vec![0i32; n];
@@ -715,7 +719,14 @@ impl TileMap {
             objects: Vec::new(),
             row_start: Vec::new(),
             markers: Vec::new(),
+            planner_cache: Default::default(),
         }
+    }
+
+    /// PROTOTYPE: the landmark tables of the land (`sails` false) or ship cost map, built by
+    /// `build` on first use.
+    pub(crate) fn planner_landmarks(&self, sails: bool, build: impl FnOnce() -> Arc<crate::rules::ai::planner_proto::Landmarks>) -> Arc<crate::rules::ai::planner_proto::Landmarks> {
+        self.planner_cache[sails as usize].get_or_init(build).clone()
     }
 
     fn index(&self, t: Tile) -> Option<usize> {
@@ -765,6 +776,7 @@ impl TileMap {
         if let Some(i) = self.index(t) {
             self.land[i] = 0;
             self.water[i] = 0;
+            self.planner_cache = Default::default();
         }
     }
 
@@ -773,6 +785,7 @@ impl TileMap {
         if let Some(i) = self.index(t) {
             self.land[i] = ROAD;
             self.water[i] = ROAD;
+            self.planner_cache = Default::default();
         }
     }
 
@@ -780,6 +793,7 @@ impl TileMap {
     pub fn open(&mut self, t: Tile, cost: u16) {
         if let Some(i) = self.index(t) {
             self.land[i] = cost.max(1);
+            self.planner_cache = Default::default();
         }
     }
 

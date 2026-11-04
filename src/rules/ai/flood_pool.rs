@@ -20,6 +20,7 @@ use std::sync::{Condvar, Mutex, OnceLock};
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 
+use super::planner_proto::{self, Landmarks};
 use crate::rules::map::{Tile, TileMap};
 
 /// The most worker threads the planner starts (the game's others take the rest of the cores).
@@ -40,6 +41,8 @@ pub struct PlanInput {
     pub erase: Vec<Tile>,
     /// The re-plan countdown a found path sets (`AIGetPathDistance`).
     pub reach: i32,
+    /// PROTOTYPE: the landmark tables of the ALT modes ([`planner_proto::landmarks_for`]).
+    pub lm: Option<Arc<Landmarks>>,
 }
 
 /// What a plan leaves in its army, as the serial planner would have written it.
@@ -55,13 +58,10 @@ pub struct PlanOutput {
 }
 
 /// The flood, the erasures, the read path: the serial planner's work from its inputs. `geom`
-/// is the map or its [`TileMap::geometry`].
-pub fn compute_with(geom: &TileMap, cost: &[u16], mult: &[u16], seeds: &[(Tile, u32)], from: Tile, erase: &[Tile], reach: i32) -> PlanOutput {
-    let mut field = geom.flood_maps(cost, mult, seeds, from);
-    for &t in erase {
-        field.erase(t);
-    }
-    let path = (field.kept > 0).then(|| geom.descend(&field, from));
+/// is the map or its [`TileMap::geometry`]. PROTOTYPE: the path is the planner mode's
+/// ([`planner_proto::plan`]); the exact mode is the flood, as before.
+pub fn compute_with(geom: &TileMap, cost: &[u16], mult: &[u16], seeds: &[(Tile, u32)], from: Tile, erase: &[Tile], reach: i32, lm: Option<&Landmarks>) -> PlanOutput {
+    let path = planner_proto::plan(geom, cost, mult, seeds, from, erase, lm);
     let grid = geom.grid;
     let weights = path.as_ref().map_or_else(Vec::new, |p| {
         let mut prev = from;
@@ -79,8 +79,8 @@ pub fn compute_with(geom: &TileMap, cost: &[u16], mult: &[u16], seeds: &[(Tile, 
 
 /// [`compute_with`] on an owned input (a job's).
 pub fn compute(input: PlanInput) -> PlanOutput {
-    let PlanInput { geom, cost, mult, seeds, from, erase, reach } = input;
-    compute_with(&geom, &cost, &mult, &seeds, from, &erase, reach)
+    let PlanInput { geom, cost, mult, seeds, from, erase, reach, lm } = input;
+    compute_with(&geom, &cost, &mult, &seeds, from, &erase, reach, lm.as_deref())
 }
 
 /// A flood on its way to its result: dispatched and not yet taken.
@@ -295,7 +295,7 @@ mod tests {
         let mult: Vec<u16> = (0..cost.len()).map(|_| if next(20) == 0 { 0 } else { 1 + next(3) as u16 }).collect();
         let seeds: Vec<(Tile, u32)> = (0..6).map(|_| ((next(w as u32) as i32, next(h as u32) as i32), next(40))).collect();
         let erase: Vec<Tile> = (0..4).map(|_| (next(w as u32) as i32, next(h as u32) as i32)).collect();
-        PlanInput { geom: map.geometry(), cost, mult, seeds, from, erase, reach: 7 }
+        PlanInput { geom: map.geometry(), cost, mult, seeds, from, erase, reach: 7, lm: None }
     }
 
     fn same(a: &PlanOutput, b: &PlanOutput) -> bool {

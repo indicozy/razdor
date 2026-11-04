@@ -1950,6 +1950,7 @@ impl Game {
             Some(t) if on_path => {
                 if moves {
                     a.pos = map.center(t);
+                    planner_proto::count_step();
                     a.path.remove(0);
                     a.walk.points.push(a.pos);
                     a.walk.minutes.push(minutes);
@@ -2023,13 +2024,22 @@ impl Game {
         let reach = self.content.options.ai_get_path_distance;
         let mut dist: Vec<(Party, i32)> = Vec::new();
         let mut replan = self.world.armies[i].mind.countdown < 1;
+        // PROTOTYPE LOD: beyond D cells from the hero, a party other than the hero does not
+        // re-plan the army when the lod mode keeps walking.
+        let lod = planner_proto::cfg();
+        let far = lod.lod != planner_proto::Lod::Off && grid.octile(here, self.cell_of(Party::Hero, hero)) > lod.lod_d;
+        let keep_walking = far && matches!(lod.lod, planner_proto::Lod::Keep | planner_proto::Lod::Both);
         for p in self.parties() {
             if p == Party::Army(i) {
                 continue;
             }
             let d = grid.octile(here, self.cell_of(p, hero));
             if 0 < d && d <= reach {
-                replan = true;
+                if keep_walking && p != Party::Hero {
+                    planner_proto::count_lod_skip();
+                } else {
+                    replan = true;
+                }
             }
             if d > 0 {
                 let key = self.key_of(p);
@@ -2228,7 +2238,11 @@ impl Game {
                 erase.push(self.next_cell(p, hero));
             }
         }
-        self.plan_flood(uid, PlanFlood { sails, mult, seeds, from: here, erase, reach });
+        // PROTOTYPE: the LOD countdown (exact: the reach), set from the flood's input.
+        let lod = planner_proto::cfg();
+        let far_cd = matches!(lod.lod, planner_proto::Lod::Countdown | planner_proto::Lod::Both) && grid.octile(here, self.cell_of(Party::Hero, hero)) > lod.lod_d;
+        let countdown = if far_cd { reach * lod.lod_k } else { reach };
+        self.plan_flood(uid, PlanFlood { sails, mult, seeds, from: here, erase, reach: countdown });
         true
     }
 
@@ -2245,16 +2259,18 @@ impl Game {
         }
         let map = &self.world.map;
         let cells = (map.w.max(0) * map.h.max(0)) as usize;
+        // PROTOTYPE: the landmark tables of the ALT modes (built on the first plan of the map).
+        let lm = planner_proto::landmarks_for(map, sails);
         if flood_pool::offloads(cells) {
             let cost = if sails { map.water_costs() } else { map.land_costs() }.to_vec();
-            let input = PlanInput { geom: map.geometry(), cost, mult, seeds, from, erase, reach };
+            let input = PlanInput { geom: map.geometry(), cost, mult, seeds, from, erase, reach, lm };
             match flood_pool::dispatch(input) {
                 Ticket::Ready(out) => self.apply_plan(uid, *out),
                 ticket => self.plans.list.push_back((uid, ticket)),
             }
         } else {
             let cost = if sails { map.water_costs() } else { map.land_costs() };
-            let out = flood_pool::compute_with(map, cost, &mult, &seeds, from, &erase, reach);
+            let out = flood_pool::compute_with(map, cost, &mult, &seeds, from, &erase, reach, lm.as_deref());
             self.apply_plan(uid, out);
         }
     }
@@ -3932,6 +3948,9 @@ fn building_name(l: &Location) -> String {
         l.name.trim().to_string()
     }
 }
+
+/// PROTOTYPE (proto/planner-a): approximate planners behind env vars; default exact.
+pub(crate) mod planner_proto;
 
 #[cfg(test)]
 mod tests;

@@ -65,16 +65,16 @@ pub(super) struct DaysRun {
     /// [`fingerprint`] of the game at the end of the run.
     pub(super) fingerprint: u64,
     /// Armies at the start and at the end of the run.
-    armies: usize,
-    armies_after: usize,
+    pub(super) armies: usize,
+    pub(super) armies_after: usize,
     /// Armies waiting to respawn at the end.
-    waiting: usize,
-    player_battles: usize,
+    pub(super) waiting: usize,
+    pub(super) player_battles: usize,
     /// The hero lost a battle (the world went on without him).
-    player_lost: bool,
+    pub(super) player_lost: bool,
     /// The clock did not reach the end within the call budget (a softlock).
-    stalled: bool,
-    secs: f64,
+    pub(super) stalled: bool,
+    pub(super) secs: f64,
 }
 
 /// Plays `days` days of `s` with the hero standing at his start: he fights whoever comes and
@@ -82,6 +82,12 @@ pub(super) struct DaysRun {
 pub(super) fn play_days(c: &Arc<Content>, s: &Scenario, days: u64) -> DaysRun {
     let t0 = Instant::now();
     let mut g = Game::from_scenario(c.clone(), s, HeroClass::Knight);
+    // PROTOTYPE (proto/planner-c): `RAZDOR_PLAY_SEED` re-seeds the game's generators (the AI's
+    // wander draws and the events) to measure the noise floor of the outcomes; unset, nothing changes.
+    if let Some(seed) = std::env::var("RAZDOR_PLAY_SEED").ok().and_then(|v| v.trim().parse::<u32>().ok()) {
+        g.rng = crate::rules::rng::Rng::new(seed);
+        g.event_rng = crate::rules::rng::EventRng::new(seed);
+    }
     let end = g.clock.total_minutes() + (days * MINUTES_PER_DAY) as f64;
     let armies = g.world.armies.len();
     let mut player_battles = 0;
