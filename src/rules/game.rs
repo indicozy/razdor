@@ -512,6 +512,16 @@ pub struct Game {
     /// none (a run into an army or a garrison, 0x4ad94c in the middle of the step).
     #[serde(skip)]
     pub(crate) snapped: bool,
+    /// The slice of time a frame's budget left unfinished ([`Game::tick_within`]): its AI moves
+    /// are played on by the next frames. Never saved: the game is not saved mid-step.
+    #[serde(skip)]
+    pause: Option<Pause>,
+    /// The events of a step that [`Game::finish_pause`] completed, for the next tick.
+    #[serde(skip)]
+    finished_events: Vec<Event>,
+    /// Whether the tick under way walked and waited (`tick_within`'s snap at its end).
+    #[serde(skip)]
+    walk_flags: (bool, bool),
     /// "Improved enemy AI in battle" (the original's `OptValue9`, "expert" in Razdor's
     /// settings): the player's choice, set by the interface, not part of the save.
     #[serde(skip)]
@@ -599,6 +609,33 @@ pub(crate) struct HeroCells {
     /// The frame where his step ends (his step flag 0x75e0c7 set): only an arrival then
     /// attacks or greets him (0x4ade3c).
     pub(crate) boundary: bool,
+}
+
+/// What a slice of time belongs to: a walk (the hero's step), a noclip step, a wait tick, or a
+/// plain pass of time (`pass_time`, for the callers outside a tick).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StepKind {
+    Walk,
+    FlyOver,
+    Wait,
+    Pass,
+}
+
+/// A slice of time whose AI moves are under way ([`Game::begin_slice`]): the AI's arrivals are
+/// played on in [`Game::run_pause`], and the slice's rest runs once they are done.
+pub(crate) struct Pause {
+    kind: StepKind,
+    job: ai::AiMove,
+    minutes: f32,
+    /// The clock when the armies moved, and the hero's tile then.
+    now: f64,
+    hero_tile: Tile,
+    /// The AI's view of the hero: while the step plays, and once it has ended.
+    hero: HeroCells,
+    hero_end: HeroCells,
+    ticks: Vec<Tick>,
+    /// The events the step raised before its AI moves.
+    events: Vec<Event>,
 }
 
 /// Talk counter an army towards the hero is set to after a greeting (world.md §4.3).
@@ -730,6 +767,9 @@ impl Game {
             stretch_minutes: 0.0,
             snap_due: false,
             snapped: false,
+            pause: None,
+            finished_events: Vec::new(),
+            walk_flags: (false, false),
             improved_ai: false,
             max_ai: false,
             max_guard: false,
@@ -1559,8 +1599,13 @@ impl Game {
     /// come at the end of the step; an attacking army is seen arriving. The rules' order is
     /// the same; only what the player sees waits.
     pub fn tick_shown(&mut self, real_dt: f32) -> Vec<Event> {
+        self.tick_shown_within(real_dt, &mut || true)
+    }
+
+    /// [`Game::tick_shown`] within a frame's budget ([`Game::tick_within`]): the screen's frame.
+    pub fn tick_shown_within(&mut self, real_dt: f32, keep_going: &mut dyn FnMut() -> bool) -> Vec<Event> {
         let before = self.shown.len();
-        let events = self.tick(real_dt);
+        let events = self.tick_within(real_dt, keep_going);
         let now = self.stretches;
         self.held.extend(events.into_iter().map(|e| (now, e)));
         // A lantern or a shown army of the stretch waits too: its flight comes at its
@@ -1624,57 +1669,84 @@ impl Game {
 
     /// Advance the world by `real_dt` seconds (world.md §2): each hero step and each wait
     /// tick plays over [`STEP_SECONDS`]; the game time a step takes is its own cost. Time only
-    /// flows while the party walks or waits.
+    /// flows while the party walks or waits. Runs every AI move to its end (the headless
+    /// callers: tests, replays, difftests and the AI's fingerprint).
     pub fn tick(&mut self, real_dt: f32) -> Vec<Event> {
-        let mut events = Vec::new();
-        // "Скорость перемещения героя": a slower walk stretches every step and wait tick.
-        let real_dt = real_dt * self.walk_pace;
-        self.since_step += real_dt;
-        if self.foe.is_some() || (!self.moving() && self.wait_ticks == 0) {
-            self.step_elapsed = 0.0;
-            if self.foe.is_some() {
-                self.end_reading(&mut events);
-                self.wait_ticks = 0;
-                self.endless_wait = None;
-            }
-            return events;
-        }
-        self.step_elapsed += real_dt;
-        // A snap still due from the last stop comes before the world moves again.
-        frame_probe::time(Stage::Snap, || self.armies_snap());
-        let (mut walked, mut waited) = (false, false);
-        self.snapped = false;
-        while self.step_elapsed >= STEP_SECONDS && (self.moving() || self.wait_ticks > 0) {
-            self.step_elapsed -= STEP_SECONDS;
-            let stepping = self.moving();
-            let go = if stepping {
-                walked = true;
-                self.hero_step(&mut events)
-            } else {
-                waited = true;
-                match self.endless_wait.as_mut() {
-                    // The endless wait's end test is off: its one tick never runs out.
-                    Some(done) => *done += 1,
-                    None => self.wait_ticks -= 1,
+        self.tick_within(real_dt, &mut || true)
+    }
+
+    /// [`Game::tick`] within a frame's budget (the screen): the AI's arrivals of a step stop
+    /// when `keep_going` says so (it is asked before each arrival but the call's first) and go
+    /// on in the next call. The unfinished step adds no real time, so its glide, the armies'
+    /// walks and the clock wait with it. Only when the step ends do its rest and the next
+    /// steps run; the rules' order and results are those of [`Game::tick`]. While the step is
+    /// unfinished ([`Game::ai_pending`]) the game is never saved, and the interface finishes it
+    /// before a press acts on the game ([`Game::finish_pause`]).
+    pub(crate) fn tick_within(&mut self, real_dt: f32, keep_going: &mut dyn FnMut() -> bool) -> Vec<Event> {
+        // The events of a step finished by `finish_pause` come with this tick.
+        let mut events = std::mem::take(&mut self.finished_events);
+        if self.pause.is_none() {
+            // "Скорость перемещения героя": a slower walk stretches every step and wait tick.
+            let real_dt = real_dt * self.walk_pace;
+            self.since_step += real_dt;
+            if self.foe.is_some() || (!self.moving() && self.wait_ticks == 0) {
+                self.step_elapsed = 0.0;
+                if self.foe.is_some() {
+                    self.end_reading(&mut events);
+                    self.wait_ticks = 0;
+                    self.endless_wait = None;
                 }
-                let from = events.len();
-                let mut go = self.wait_tick(&mut events);
+                return events;
+            }
+            self.step_elapsed += real_dt;
+            // A snap still due from the last stop comes before the world moves again.
+            frame_probe::time(Stage::Snap, || self.armies_snap());
+            self.snapped = false;
+        }
+        loop {
+            let mut it = Vec::new();
+            let (stepping, mut go) = if self.pause.is_some() {
+                match self.run_pause(keep_going, &mut it) {
+                    Some(done) => done,
+                    None => return events,
+                }
+            } else {
+                if !(self.step_elapsed >= STEP_SECONDS && (self.moving() || self.wait_ticks > 0)) {
+                    break;
+                }
+                self.step_elapsed -= STEP_SECONDS;
+                let stepping = self.moving();
+                if stepping {
+                    self.walk_flags.0 = true;
+                } else {
+                    self.walk_flags.1 = true;
+                }
+                let begun = if stepping { self.begin_walk(&mut it) } else { self.begin_wait_tick(&mut it) };
+                match begun {
+                    Some(go) => (stepping, go),
+                    None => match self.run_pause(keep_going, &mut it) {
+                        Some(done) => done,
+                        None => return events,
+                    },
+                }
+            };
+            if !stepping {
                 // The noon report opens in the event window and the scan counts it as an
                 // event that fired (0x4abfbc): it ends the wait (0x4ae42f → 0xc2782b), not the
                 // endless one.
-                if self.endless_wait.is_none() && events[from..].iter().any(|e| matches!(e, Event::NewDay(_))) {
+                if self.endless_wait.is_none() && it.iter().any(|e| matches!(e, Event::NewDay(_))) {
                     go = false;
                 }
                 // The reading is done, an event opened its window (the original's scan returns
                 // 1 and the wait's test stops it, 0x4ae4e9–0x4ae4f0, 0x4ae4f2: the spell lands
-                // at once; a silent event does not), or an event set a battle
-                // over his book.
-                if self.wait_ticks == 0 || self.foe.is_some() || events[from..].iter().any(fires) {
-                    self.end_reading(&mut events);
+                // at once; a silent event does not), or an event set a battle over his book.
+                if self.wait_ticks == 0 || self.foe.is_some() || it.iter().any(fires) {
+                    self.end_reading(&mut it);
                 }
-                go
-            };
-            if !go || events.iter().any(Event::needs_reading) {
+            }
+            let stop = !go || it.iter().any(Event::needs_reading);
+            events.append(&mut it);
+            if stop {
                 // An event's window opened by the step's scan ends the walk on this cell
                 // (0x4aed41 → 0x4ae5d8), which counts as arriving on it again; the building
                 // he clicked waits for the windows to be read if he stands in it (0x4aed64).
@@ -1697,6 +1769,7 @@ impl Game {
         // wait, also one an event cut short (0x4ae24c, 0x4ae42f); not a run into an army or a
         // garrison in the middle of a step (0x4ad94c snaps them without the idle draws), nor
         // the endless wait going on under an event's dialog (0xc2782b).
+        let (walked, waited) = std::mem::take(&mut self.walk_flags);
         if (walked && !self.moving() && !self.snapped) || (waited && self.wait_ticks == 0 && !self.snapped) {
             self.snap_due = true;
         }
@@ -1707,6 +1780,57 @@ impl Game {
         events
     }
 
+    /// Finishes the AI moves a frame's budget left unfinished ([`Game::tick_within`]), with the
+    /// step they belong to. The interface calls it before a press acts on the game, so the press
+    /// meets the world as the step leaves it. The step's events come with the next tick.
+    pub fn finish_pause(&mut self) {
+        if self.pause.is_some() {
+            let mut events = self.tick_within(0.0, &mut || true);
+            self.finished_events.append(&mut events);
+        }
+    }
+
+    /// Whether a step's AI moves are unfinished ([`Game::tick_within`]): the game is mid-tick
+    /// and must not be saved.
+    pub fn ai_pending(&self) -> bool {
+        self.pause.is_some()
+    }
+
+    /// Plays a paused slice of time on, without a budget: the callers that cannot wait for a
+    /// frame ([`Game::pass_time`], [`Game::wait`], the tests).
+    fn play_pause(&mut self, it: &mut Vec<Event>) -> (bool, bool) {
+        self.run_pause(&mut || true, it).expect("an unbounded run ends")
+    }
+
+    /// Plays the paused slice of time on: its AI moves within `keep_going`
+    /// ([`Game::ai_move_run`]); then its rest in order, the slice's ([`Game::slice_tail`]), the
+    /// walk's end of his step flag (0x4ae975), and its own tail ([`Game::walk_tail`],
+    /// [`Game::fly_tail`], [`Game::wait_tail`]). Returns `None` when the budget ran out first,
+    /// else whether it was a walk and whether the walk goes on (`hero_step`'s value).
+    fn run_pause(&mut self, keep_going: &mut dyn FnMut() -> bool, it: &mut Vec<Event>) -> Option<(bool, bool)> {
+        let mut p = self.pause.take().expect("a paused slice to play on");
+        let done = frame_probe::time(Stage::AiMove, || self.ai_move_run(&mut p.job, &p.hero, &p.hero_end, keep_going));
+        if !done {
+            self.pause = Some(p);
+            return None;
+        }
+        it.append(&mut p.events);
+        let later = self.ai_move_end(p.job);
+        frame_probe::time(Stage::Armies, || self.slice_tail(p.minutes, (p.now, p.hero_tile), &p.hero, p.ticks, later, it));
+        let stepping = matches!(p.kind, StepKind::Walk | StepKind::FlyOver);
+        if stepping {
+            self.step_from = None;
+            self.step_flag = true;
+        }
+        let go = match p.kind {
+            StepKind::Walk => self.walk_tail(it),
+            StepKind::FlyOver => self.fly_tail(it),
+            StepKind::Wait => self.wait_tail(it),
+            StepKind::Pass => true,
+        };
+        Some((stepping, go))
+    }
+
     /// The hero takes the next step of his route (world.md §2.2, §4.2): the cell he is about
     /// to enter is checked first ([`Game::step_contact`]): an army there or a building's
     /// guard or garrison stops him where he is; an unguarded village, or an empty castle,
@@ -1714,17 +1838,34 @@ impl Game {
     /// route on it. Then he moves, charged the cell he leaves, and the world moves on by the
     /// step's time; an AI army that stepped next to him may attack or greet him
     /// ([`Game::ai_contact`]). At the end of the route he stops, and the building he stands
-    /// in (not a bridge or an obelisk) opens. Returns false when the walk ended.
+    /// in (not a bridge or an obelisk) opens. Returns false when the walk ended. Run to its
+    /// end at once: the tests drive a step this way.
+    #[cfg(test)]
     fn hero_step(&mut self, events: &mut Vec<Event>) -> bool {
+        let mut it = Vec::new();
+        let go = match self.begin_walk(&mut it) {
+            Some(go) => go,
+            None => self.play_pause(&mut it).1,
+        };
+        events.append(&mut it);
+        go
+    }
+
+    /// The first part of a hero's step (`hero_step`): the cell ahead is checked
+    /// ([`Game::step_contact`]) and he moves onto it, charged the time of the cell he leaves;
+    /// then the step's time begins ([`Game::begin_pass`]), and the rest of the step runs in
+    /// [`Game::run_pause`] ([`Game::walk_tail`]). `Some(go)` when the walk ends without a
+    /// step's time; `None` when the time is pending.
+    fn begin_walk(&mut self, it: &mut Vec<Event>) -> Option<bool> {
         if !frame_probe::time(Stage::Route, || self.follow_army()) || !frame_probe::time(Stage::Route, || self.reroute_around_armies()) {
-            return false;
+            return Some(false);
         }
-        let Some(&next) = self.path.first() else { return false };
+        let Some(&next) = self.path.first() else { return Some(false) };
         let from = self.tile();
         // The walk timer's frame clears the step flag; the step sets it again as it ends.
         self.step_flag = false;
         if self.cheats.noclip && self.path.len() > 1 {
-            return self.fly_over(from, next, events);
+            return self.begin_fly(from, next, it);
         }
         match self.step_contact(next) {
             Some(StepContact::Army(i)) => {
@@ -1744,8 +1885,8 @@ impl Game {
                 }
                 // The scan of this contact reads no point (see `point_zeroed`).
                 self.point_zeroed = true;
-                self.engage(e, events);
-                return false;
+                self.engage(e, it);
+                return Some(false);
             }
             Some(StepContact::Garrison(l)) => {
                 self.snapped = true;
@@ -1753,13 +1894,13 @@ impl Game {
                 self.goal = None;
                 self.talk_to = None;
                 self.foe = Some(Foe::Garrison(l));
-                events.push(Event::Arrived(l));
-                return false;
+                it.push(Event::Arrived(l));
+                return Some(false);
             }
             Some(StepContact::Captured(l)) => {
                 if !self.world.locations[l].owned() {
                     self.world.give_to_player(l);
-                    events.push(Event::Captured(l));
+                    it.push(Event::Captured(l));
                 }
             }
             None => {}
@@ -1779,10 +1920,19 @@ impl Game {
         // His facing stays the step's direction until the next one (0x4ae8e0).
         self.facing = Some((next.0 - from.0, next.1 - from.1));
         self.stand_on_bridge(next);
-        self.pass_time_walking(minutes, from, events);
-        // His step plays over the window its time opened (an event that moved him meanwhile
-        // drops it: drawn where he is).
+        // His step plays over the window its time opens (an event that moved him meanwhile
+        // drops it: drawn where he is). Set before the time: the armies' AI moves may pause,
+        // and the hero waits drawn where he was.
         self.hero_glide = Some((was, self.world.map.center(next)));
+        self.step_from = Some(from);
+        self.begin_pass(StepKind::Walk, minutes, it);
+        None
+    }
+
+    /// The rest of a hero's step after its time (`hero_step`): an AI army that stepped next to
+    /// him may attack or greet him ([`Game::ai_contact`]), the route is replanned around the
+    /// armies, and the walk ends on its last cell (`arrive_at_end`).
+    fn walk_tail(&mut self, events: &mut Vec<Event>) -> bool {
         if let Some(e) = self.ai_contact() {
             let attack = matches!(e, Event::Encounter(_));
             // The stop snaps the armies (0x4ad8a0) before an attack's events run, after a
@@ -1815,7 +1965,8 @@ impl Game {
     /// A step of the console's `noclip` onto a cell short of the route's end: nothing there
     /// is met, entered, captured or landed on, and no army comes at him; the time passes as
     /// on the cell he leaves (nothing on the impassable). The last step is an ordinary one.
-    fn fly_over(&mut self, from: Tile, next: Tile, events: &mut Vec<Event>) -> bool {
+    /// Its time begins as a walk's does ([`Game::begin_pass`]); its rest is [`Game::fly_tail`].
+    fn begin_fly(&mut self, from: Tile, next: Tile, it: &mut Vec<Event>) -> Option<bool> {
         let minutes = self.step_time(from, next);
         self.path.remove(0);
         let was = self.pos;
@@ -1825,8 +1976,14 @@ impl Game {
         self.step_base = None;
         frame_probe::time(Stage::Look, || self.look_around());
         self.facing = Some((next.0 - from.0, next.1 - from.1));
-        self.pass_time_walking(minutes, from, events);
         self.hero_glide = Some((was, self.world.map.center(next)));
+        self.step_from = Some(from);
+        self.begin_pass(StepKind::FlyOver, minutes, it);
+        None
+    }
+
+    /// The rest of a noclip step after its time: the walk ends on its last cell, else goes on.
+    fn fly_tail(&mut self, events: &mut Vec<Event>) -> bool {
         if self.path.is_empty() {
             self.arrive_at_end(events);
             return false;
@@ -2017,12 +2174,36 @@ impl Game {
     }
 
     /// One wait tick: [`WAIT_TICK_MINUTES`] pass, armies move. AI armies never attack or
-    /// greet the hero while he waits (world.md §4.3). Returns false when it ended.
+    /// greet the hero while he waits (world.md §4.3). Returns false when it ended. Run to its
+    /// end at once: [`Game::wait`] has no frame to wait for.
     fn wait_tick(&mut self, events: &mut Vec<Event>) -> bool {
-        self.pass_time(WAIT_TICK_MINUTES, events);
-        // An AI army's attack or greeting while he waits, his step flag still set from his
-        // last walk (0x4ade3c): as after a step, the stop snaps the armies, the events run
-        // with the army met, and a greeting stops the wait only when one of them fired.
+        self.hero_glide = None;
+        let mut it = Vec::new();
+        self.begin_pass(StepKind::Wait, WAIT_TICK_MINUTES, &mut it);
+        let (_, go) = self.play_pause(&mut it);
+        events.append(&mut it);
+        go
+    }
+
+    /// The start of a wait tick in the tick's loop: the wait's count goes down, then the tick's
+    /// time begins ([`Game::begin_pass`]). Always paused: the caller plays it on.
+    fn begin_wait_tick(&mut self, it: &mut Vec<Event>) -> Option<bool> {
+        match self.endless_wait.as_mut() {
+            // The endless wait's end test is off: its one tick never runs out.
+            Some(done) => *done += 1,
+            None => self.wait_ticks -= 1,
+        }
+        // A wait tick does not replay the last walk's glide (`pass_time`).
+        self.hero_glide = None;
+        self.begin_pass(StepKind::Wait, WAIT_TICK_MINUTES, it);
+        None
+    }
+
+    /// The rest of a wait tick after its time (`wait_tick`): an AI army's attack or greeting
+    /// while he waits, his step flag still set from his last walk (0x4ade3c): as after a step,
+    /// the stop snaps the armies, the events run with the army met, and a greeting stops the
+    /// wait only when one of them fired. Returns false when the wait ends.
+    fn wait_tail(&mut self, events: &mut Vec<Event>) -> bool {
         if let Some(e) = self.ai_contact() {
             let attack = matches!(e, Event::Encounter(_));
             if attack {
@@ -2097,8 +2278,11 @@ impl Game {
 
     /// Game time passes, in slices of at most one wait tick: the day's moments (00:00 and
     /// 12:00, world.md §6), spells run out, armies move with the minutes banked, the
-    /// scenario's events run.
+    /// scenario's events run. Run to its end at once: the callers outside a tick (the magic's
+    /// reading, the events' waits) need the time passed when they return.
     pub(crate) fn pass_time(&mut self, minutes: f32, events: &mut Vec<Event>) {
+        // A wait tick does not replay the last walk's glide.
+        self.hero_glide = None;
         self.pass_time_as(minutes, WAIT_TICK_MINUTES, events);
     }
 
@@ -2106,82 +2290,82 @@ impl Game {
     /// step clock (a hero's step is one, however long: the original banks it at once).
     fn pass_time_as(&mut self, minutes: f32, slice: f32, events: &mut Vec<Event>) {
         let mut left = minutes.max(0.0);
-        self.stretch_minutes = left;
-        // The new stretch plays from the start of a window; only a step of his own glides
-        // the hero ([`Game::hero_step`] sets it after), a wait tick does not replay the last.
-        self.since_step = 0.0;
-        self.hero_glide = None;
-        self.stretches += 1;
-        // A new stretch for drawing: the steps of this time play in the next window.
-        for a in &mut self.world.armies {
-            a.walk.points.clear();
-            a.walk.points.push(a.pos);
-            a.walk.minutes.clear();
-            a.walk.banked = (a.budget + left).min(AI_BUDGET_CAP);
-            a.arrived = false;
-            a.mind.contact = None;
-        }
+        self.begin_stretch(left);
         loop {
-            let slice = left.min(slice);
-            left -= slice;
-            self.pass_slice(slice, events);
+            let s = left.min(slice);
+            left -= s;
+            let mut it = Vec::new();
+            self.begin_slice(StepKind::Pass, s, &mut it);
+            self.play_pause(&mut it);
+            events.append(&mut it);
             if left <= 0.0 {
                 break;
             }
         }
     }
 
-    /// [`Game::pass_time`] for the hero's step from `from`: while it plays, AI armies keep
-    /// off both his cells (world.md §5).
-    fn pass_time_walking(&mut self, minutes: f32, from: Tile, events: &mut Vec<Event>) {
-        self.step_from = Some(from);
-        self.pass_time_as(minutes, minutes.max(WAIT_TICK_MINUTES), events);
-        self.step_from = None;
-        self.step_flag = true;
+    /// One walk or wait tick's time, from its start to its end on the AI's side: a stretch of
+    /// one slice ([`Game::begin_stretch`], [`Game::begin_slice`]). The slice's rest runs in
+    /// [`Game::run_pause`], after the AI's moves.
+    fn begin_pass(&mut self, kind: StepKind, minutes: f32, it: &mut Vec<Event>) {
+        let left = minutes.max(0.0);
+        self.begin_stretch(left);
+        self.begin_slice(kind, left, it);
     }
 
-    /// A slice of time (world.md §6.4): the armies move, then 00:00 comes (0x4a1998 runs at
-    /// the end of the AI's advance); the scenario's events run, and the hero's 12:00 comes
-    /// in that scan when no event fired and no spell is being read (0x4abfbc), else at a
-    /// later scan. His first noon is the day after the start, even after a morning start
-    /// (0x4b4388); the AI's armies keep theirs.
-    fn pass_slice(&mut self, minutes: f32, events: &mut Vec<Event>) {
+    /// A new stretch of time, for drawing: the steps of this time play in the next window (the
+    /// armies' walks, the hero's glide). The stretch plays from the start of a window; only a
+    /// step of his own glides the hero.
+    fn begin_stretch(&mut self, minutes: f32) {
+        self.stretch_minutes = minutes;
+        self.since_step = 0.0;
+        self.stretches += 1;
+        for a in &mut self.world.armies {
+            a.walk.points.clear();
+            a.walk.points.push(a.pos);
+            a.walk.minutes.clear();
+            a.walk.banked = (a.budget + minutes).min(AI_BUDGET_CAP);
+            a.arrived = false;
+            a.mind.contact = None;
+        }
+    }
+
+    /// The head of one slice of time (`pass_slice` and `move_armies` before the AI's moves):
+    /// the clock advances, spells run out, and the AI's moves of the slice are begun
+    /// ([`Game::ai_move_begin`]). The slice's rest waits in [`Game::run_pause`]; its events so
+    /// far are kept with it. The hero's cells are those of the AI's view of him (world.md §5):
+    /// where he is, the cell ahead of him, and the cell he leaves while a step is under way.
+    fn begin_slice(&mut self, kind: StepKind, minutes: f32, it: &mut Vec<Event>) {
         let start = self.clock.total_minutes();
         let ticks = self.clock.advance(minutes as f64);
         self.expire_spells();
-        // A midnight comes among the AI's arrivals, at its moment (`Game::ai_move`).
-        let midnights: Vec<f64> = ticks.iter().filter_map(|t| match t {
-            Tick::Midnight(day) => Some((day * super::clock::MINUTES_PER_DAY) as f64),
-            Tick::Noon(_) => None,
-        }).collect();
-        frame_probe::time(Stage::Armies, || self.move_armies(minutes, start, &midnights, events));
-        for tick in ticks {
-            match tick {
-                Tick::Midnight(_) => {}
-                Tick::Noon(day) => {
-                    // AI armies run their noon at their first arrival after it (`rules::ai`).
-                    if day >= self.noon_from.unwrap_or(self.start_day + 1) {
-                        self.noon_due = Some(day);
-                    }
-                }
-            }
-        }
-        // Time passed: the scenario's events run.
-        let script = frame_probe::time(Stage::Script, || self.run_script());
-        let fired = script.iter().any(fires);
-        events.extend(script);
-        if let Some(day) = self.noon_due.filter(|_| !fired && self.reading.is_none()) {
-            self.noon_due = None;
-            // The next noon is the day after now (0x4a41d8): a noon paid late, after
-            // midnight, skips that day's own noon (the original's behaviour).
-            self.noon_from = Some(self.clock.day_index() + 1);
-            if let Some(report) = frame_probe::time(Stage::Day, || self.new_day(day)) {
-                events.push(Event::NewDay(report));
-                // The original autosaves as the noon report opens, named by the date; a noon
-                // with no report (no wages, no income) writes none (0x4abfbc).
-                self.autosave_due = Some(super::save::date_name(&self.clock));
-            }
-        }
+        // A midnight comes among the AI's arrivals, at its moment (`Game::ai_move_run`).
+        let midnights: Vec<f64> = ticks
+            .iter()
+            .filter_map(|t| match t {
+                Tick::Midnight(day) => Some((day * super::clock::MINUTES_PER_DAY) as f64),
+                Tick::Noon(_) => None,
+            })
+            .collect();
+        let now = self.clock.total_minutes();
+        let hero_tile = self.tile();
+        // The hero's cells while the tick plays, and once his step has ended: the arrivals at the
+        // tick's very end come in the frame where the walk timer has already ended his step
+        // (0x4ae8cc), so they see him on his new cell, facing the step he took (0x4ae8e0).
+        // While he steps his logical cell is still the cell he leaves and the cell ahead of him
+        // the one he steps to; the walk timer moves it only in the frame the step ends (0x4ae8cc).
+        let ahead = self.facing.map(|(dx, dy)| (hero_tile.0 + dx, hero_tile.1 + dy));
+        // His step flag: clear during a step (each frame of the walk timer), set in the frame it
+        // ends (the walk timer runs before the armies, 0x4ae975); standing or waiting, as his last
+        // walk left it.
+        let walking = self.step_from.is_some();
+        let hero = match self.step_from {
+            Some(from) => HeroCells { cells: [Some(from), Some(hero_tile)], at: from, boundary: false },
+            None => HeroCells { cells: [Some(hero_tile), ahead], at: hero_tile, boundary: self.step_flag },
+        };
+        let hero_end = HeroCells { cells: [Some(hero_tile), ahead], at: hero_tile, boundary: walking || self.step_flag };
+        let job = self.ai_move_begin(minutes, start, &midnights);
+        self.pause = Some(Pause { kind, job, minutes, now, hero_tile, hero, hero_end, ticks, events: std::mem::take(it) });
     }
 
     /// 00:00 (world.md §6): villages refill (slower as they fill), barracks may gain a unit,
@@ -2222,32 +2406,17 @@ impl Game {
         shown.then_some(DayReport { day, income, wages, mana_wages, unpaid, deserted, gold, mana_total })
     }
 
-    /// Armies move for `minutes` (world.md §2): the AI's armies by its step clock and
-    /// arrival rules (`rules::ai`); the demo's gangs bank the minutes (up to
-    /// [`AI_BUDGET_CAP`]), chase a nearby hostile hero or patrol, and take the steps they
-    /// cover.
-    fn move_armies(&mut self, minutes: f32, start: f64, midnights: &[f64], events: &mut Vec<Event>) {
-        let now = self.clock.total_minutes();
-        let hero_tile = self.tile();
-        // The hero's cells: where he stands and, while he steps, the cell he left; standing,
-        // the cell ahead of him in the direction of his last step (the original tests his
-        // cell plus his direction, which a stop does not clear: 0x4a399c).
-        // While he steps his logical cell (the record's, 0x75c064) is still the cell he
-        // leaves and the cell ahead of him the one he steps to; the walk timer moves it only
-        // in the frame the step ends (0x4ae8cc), so the AI's arrivals of the tick see him
-        // there (world.md §5).
-        let ahead = self.facing.map(|(dx, dy)| (hero_tile.0 + dx, hero_tile.1 + dy));
-        // His step flag: clear during a step (each frame of the walk timer), set in the
-        // frame it ends (the walk timer runs before the armies, 0x4ae975); standing or
-        // waiting, as his last walk left it.
-        let walking = self.step_from.is_some();
-        let hero = match self.step_from {
-            Some(from) => HeroCells { cells: [Some(from), Some(hero_tile)], at: from, boundary: false },
-            None => HeroCells { cells: [Some(hero_tile), ahead], at: hero_tile, boundary: self.step_flag },
-        };
-        // At the tick's end his step has ended: his cell and the one ahead of him.
-        let hero_end = HeroCells { cells: [Some(hero_tile), ahead], at: hero_tile, boundary: walking || self.step_flag };
-        let later = frame_probe::time(Stage::AiMove, || self.ai_move(minutes, &hero, &hero_end, start, midnights));
+    /// The rest of a slice of time after the AI's moves (`move_armies` after the AI, then
+    /// `pass_slice`): the events the AI's arrivals raised, the armies the AI does not steer
+    /// (the demo's gangs bank the minutes, chase a nearby hostile hero or patrol, and take the
+    /// steps they cover), the midnights the arrivals did not pass, then 00:00 and the hero's
+    /// 12:00 in the scenario's scan (0x4a1998 runs at the end of the AI's advance; the hero's
+    /// 12:00 comes in that scan when no event fired and no spell is being read, 0x4abfbc, else at a
+    /// later scan. His first noon is the day after the start, even after a morning start
+    /// (0x4b4388); the AI's armies keep theirs).
+    fn slice_tail(&mut self, minutes: f32, at: (f64, Tile), hero: &HeroCells, ticks: Vec<Tick>, later: Vec<f64>, events: &mut Vec<Event>) {
+        // The clock and the hero's tile when the armies moved.
+        let (now, hero_tile) = at;
         events.append(&mut self.ai_events);
         let mut armies = std::mem::take(&mut self.world.armies);
         let world = &self.world;
@@ -2282,7 +2451,7 @@ impl Game {
                 // Rest between patrol legs, or after failing to find one *(guess)*.
                 a.rest_until = now + self.rng.range(30, 180) as f64;
             }
-            step_army(map, a, &|t| map.cost(t), &hero);
+            step_army(map, a, &|t| map.cost(t), hero);
         }
         self.world.armies = armies;
         let end = self.clock.total_minutes();
@@ -2291,6 +2460,33 @@ impl Game {
             self.midnight();
         }
         self.clock.set_total_minutes(end);
+        for tick in ticks {
+            match tick {
+                Tick::Midnight(_) => {}
+                Tick::Noon(day) => {
+                    // AI armies run their noon at their first arrival after it (`rules::ai`).
+                    if day >= self.noon_from.unwrap_or(self.start_day + 1) {
+                        self.noon_due = Some(day);
+                    }
+                }
+            }
+        }
+        // Time passed: the scenario's events run.
+        let script = frame_probe::time(Stage::Script, || self.run_script());
+        let fired = script.iter().any(fires);
+        events.extend(script);
+        if let Some(day) = self.noon_due.filter(|_| !fired && self.reading.is_none()) {
+            self.noon_due = None;
+            // The next noon is the day after now (0x4a41d8): a noon paid late, after
+            // midnight, skips that day's own noon (the original's behaviour).
+            self.noon_from = Some(self.clock.day_index() + 1);
+            if let Some(report) = frame_probe::time(Stage::Day, || self.new_day(day)) {
+                events.push(Event::NewDay(report));
+                // The original autosaves as the noon report opens, named by the date; a noon
+                // with no report (no wages, no income) writes none (0x4abfbc).
+                self.autosave_due = Some(super::save::date_name(&self.clock));
+            }
+        }
     }
 
     /// Price to hire unit type `kind`: its `Cost` (in mana for elementals).

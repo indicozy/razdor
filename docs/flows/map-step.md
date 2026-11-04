@@ -6,15 +6,18 @@ attacking armies, ships, fog or the AI armies' movement.
 ## In one paragraph
 
 The UI turns two clicks into a route (`Game::route_to` to show it, `Game::set_destination` to
-walk it). Every frame `Game::tick` (through `tick_shown`) plays at most one step per
-`STEP_SECONDS`: `hero_step` checks the cell ahead (`step_contact`: an army, a guard, a building to
-take), moves the hero, and passes the step's game time (`pass_time_walking` → `pass_slice`). A time
-slice moves the clock (`Clock::advance`, reporting midnights and noons), moves the AI armies on the
-minutes the hero banked (`move_armies` → `ai_move`), runs the scenario's event scan
-(`run_script`), and pays the hero's noon if the scan fired nothing (`new_day`). After the step, AI
-arrivals next to the hero may greet or attack him (`ai_contact` → `meet`). Anything that needs a
-window (`Event::needs_reading`) stops the walk on that cell, and the UI drains the events into
-dialogs (`ui::world_view::handle_events`). Time never runs while a window is open.
+walk it). Every frame the screen calls `Game::tick_shown_within` (`Game::tick` headless), which
+plays at most one step per `STEP_SECONDS`. `begin_walk` checks the cell ahead (`step_contact`: an
+army, a guard, a building to take), moves the hero, and starts the step's game time (`begin_pass`
+→ `begin_slice`: the clock moves, and the AI armies' moves begin, `ai_move_begin`). `ai_move_run`
+plays the armies' arrivals on in time order; then `slice_tail` moves the armies the AI does not
+steer, runs the scenario's event scan (`run_script`) and pays the hero's noon if the scan fired
+nothing (`new_day`). `walk_tail` then lets an AI army greet or attack him (`ai_contact` → `meet`),
+and the route's end opens its building. A frame's budget (8 ms, `AI_FRAME_BUDGET` in
+`ui/world_view.rs`) can stop the arrivals of a step between two of them: the step waits (see *A
+paused step* below), and the screen keeps drawing. Anything that needs a window
+(`Event::needs_reading`) stops the walk on that cell, and the UI drains the events into dialogs
+(`ui::world_view::handle_events`). Time never runs while a window is open.
 
 ## Call chain
 
@@ -25,21 +28,24 @@ ui/world_view.rs  click on the map
     Game::set_destination(t)         also sets the chased army when an army is clicked
   each frame (only when no window is open, i.e. !input_blocked()):
     Game::drain_events()             events raised outside a tick (answers, window closes)
-    Game::tick_shown(dt) → Game::tick(dt)
+    Game::tick_shown_within(dt, budget) → Game::tick_within      rules/game.rs
       while step_elapsed >= STEP_SECONDS:
-        hero_step()                                         rules/game.rs
+        begin_walk()                                        (a wait: begin_wait_tick)
           follow_army()          re-plan to a chased army that moved; false = pursuit ended
           step_contact(next)     army / guard / garrison ahead → engage() (no move)
           landing()/land()       ships: land ahead at sea ends the route (rules/ships.rs)
           move_to_cell(); look_around()                     fog reveal
-          pass_time_walking(minutes) → pass_time_as → pass_slice
+          begin_pass(minutes) → begin_slice                 the clock moves; AI moves begin
             Clock::advance       → Tick::Midnight / Tick::Noon      rules/clock.rs
-            move_armies()        → ai_move()  (AI steps, arrivals, midnight in between)
-            run_script()         → EventEngine::tick (rules/events.rs) → script_events()
-            new_day()            noon pay, only if the scan fired nothing
-          ai_contact()           AI arrivals next to him: greet or attack → meet()
-          arrive_at_end()        route done: enter_building() opens its window
-        or wait_tick()           when waiting (Game::wait, begin_wait, begin_endless_wait)
+            ai_move_begin()      the AI's arrivals queued (rules/ai.rs)
+        run_pause()            the same frame, or a later one (the budget)
+          ai_move_run()        AI steps, arrivals, midnight in between
+          ai_move_end()        the clock back to the tick's end
+          slice_tail()         the gang armies; the noon; run_script → EventEngine::tick
+                               (rules/events.rs) → script_events()
+          walk_tail()          ai_contact → meet(); route's end: arrive_at_end → enter_building()
+          or wait_tail()       ai_contact → meet() while he waits
+  finish_pause()               a press (ui/mod.rs, frame_content) completes a paused step first
   handle_events(game, events, …)     events → dialogs, battles, screens   ui/world_view.rs
   ui/mod.rs: closing a dialog → answer_question / event_window_closed /
              enter_waiting_building / window_closed (building window)
@@ -87,7 +93,7 @@ army or being reached by one runs the event scan with that army as "the met army
 true }` or `Question`). Silent events fire and the battle still opens (commit 6928d9d: РК4's
 repeating silent event blocked every fight). If a window event fired after a step onto the army, the
 army forgets the hero for now (talk counter `TALKED`, path cleared). Razdor's
-`friends_let_pass` option changes only an unclicked step onto a friendly army (`hero_step` meets it);
+`friends_let_pass` option changes only an unclicked step onto a friendly army (`begin_walk` meets it);
 a clicked one is engaged, and `meet_as` fights every step's `Encounter`; `pass_on_bridges` changes
 `step_contact` for armies just passing over a bridge.
 
@@ -151,6 +157,18 @@ stay dark wherever the map is drawn, also under a building window or an event's 
 is open in the rules at once, so the fog layer draws them as before (`Game::unshown_cells`,
 `minimap::darkness_held`).
 
+**A paused step** (Razdor's frame budget, not a rule). `tick_within` stops the AI's arrivals of a
+step when the frame's budget is spent, between two arrivals: the step waits in `Game::pause` (the
+AI's queue, the hero's cells, the slice's ticks, the events raised so far). The next frames go on
+with it, each doing at least one arrival, and they add no real time, so the hero's glide (set
+before the time, drawn at his cell) and the clock wait with it. Its result is the unbounded
+tick's: `a_tick_cut_by_the_frame_budget_ends_as_an_unbounded_one` compares every frame's events and
+the whole serialised game. While it is unfinished: `Game::ai_pending()` is true, nothing saves
+(`ui/session.rs` looks only when savable, the autosave waits, `ui/mod.rs`), the minimap's meeting
+marks and battle notices wait, and a press (`input::any_press`) finishes the step first
+(`Game::finish_pause`; its events come with the next tick). Headless callers (`Game::tick`,
+`wait`, `pass_time`, the replays, the difftests, the AI fingerprint) run it to its end at once.
+
 ## Traps (from past bugs)
 
 - *Window vs silent events.* Only window events stop a walk, a battle or a wait. Check
@@ -170,7 +188,7 @@ is open in the rules at once, so the fog layer draws them as before (`Game::unsh
 - *No clicks while a step's events are held.* A village entered twice gave "already taken"
   (5d10303).
 - *Bridges.* A building on a bridge is never entered (no window, `location` stays none). A bridge
-  is the building he is on for events on every step of a walk, not only the last: `hero_step` sets
+  is the building he is on for events on every step of a walk, not only the last: `begin_walk` sets
   `Game::bridge_stood_on` (`stand_on_bridge`) before the step's time and scan (0x497c68, 0x4abfbc;
   world.md §7.2), so a walk across a bridge runs its local events on that step and goes on unless
   one opens a window. Not the building his move began on (0x4ed434, `click_buildings.1`). Armies on
@@ -208,7 +226,7 @@ is open in the rules at once, so the fog layer draws them as before (`Game::unsh
 
 ## How to …
 
-- **Change what a step does.** Find the branch in `hero_step` / `step_contact`, read world.md §4.2,
+- **Change what a step does.** Find the branch in `begin_walk` / `step_contact` (its tail is `walk_tail`), read world.md §4.2,
   add a test in `src/rules/game.rs` with a small built map (`walk_until_stopped`-style helpers), and
   run the replays with `RAZDOR_DT_DIR` set.
 - **Add an event opcode or condition.** `src/rules/events.rs` (`run_opcode`, `check`), add the world

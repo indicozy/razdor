@@ -2310,3 +2310,89 @@ fn an_ai_army_beaten_at_a_garrison_records_the_garrison_as_winner() {
     assert!(matches!(clashes[0].winner, Combatant::Garrison(_)), "{:?}", clashes[0]);
     assert_eq!(clashes[0].loser, Combatant::Army("Gamma".to_string()));
 }
+
+/// Four AI armies on the way along short paths of their own, the hero's cells in the corner.
+fn walking_armies() -> Scenario {
+    let mut s = map();
+    s.armies = (0..4u16).map(|k| army(k as u8 + 1, (20 + 3 * k, 8 + k), 4, ENEMY, 0, &[troop(4, 0, 1)])).collect();
+    s
+}
+
+fn prepare_walkers(g: &mut Game) {
+    for (k, a) in g.world.armies.iter_mut().enumerate() {
+        let (x, y) = (20 + 3 * k as i32, 8 + k as i32);
+        (a.patrols, a.patrol_radius, a.budget) = (true, 5, 200.0);
+        a.path = vec![(x + 1, y), (x + 2, y)];
+        (a.mind.scripted, a.mind.countdown, a.mind.free_step) = (true, 100, false);
+    }
+}
+
+/// Ticks `whole` (unbounded) and `cut` (budget: no arrival after the first of a call) one frame
+/// at a time until `done` says the run is over, asserting after each frame that the events and
+/// the whole serialised game are the same. Returns how many calls of `cut` were paused.
+fn tick_both_alike(whole: &mut Game, cut: &mut Game, done: impl Fn(&Game) -> bool) -> u32 {
+    let step = crate::rules::game::STEP_SECONDS;
+    let mut paused = 0;
+    for _ in 0..500 {
+        if done(whole) {
+            break;
+        }
+        let want = whole.tick(step);
+        // The cell he stands on, the glide's start.
+        let before = cut.world.map.center(cut.tile());
+        let mut got = cut.tick_within(step, &mut || false);
+        if cut.ai_pending() {
+            // The unfinished step: the hero waits drawn where he was, the game time stands.
+            assert_eq!(cut.display_pos(), before, "the glide waits for the step");
+        }
+        while cut.ai_pending() {
+            paused += 1;
+            got.extend(cut.tick_within(0.0, &mut || false));
+        }
+        assert_eq!(got, want, "the events of a frame");
+        assert_eq!(serde_json::to_string(cut).unwrap(), serde_json::to_string(whole).unwrap(), "the state of a frame");
+    }
+    paused
+}
+
+#[test]
+fn a_tick_cut_by_the_frame_budget_ends_as_an_unbounded_one() {
+    // `Game::tick_within`: the arrivals of a step stop between two arrivals and go on in the next
+    // calls, which add no time. Every frame ends in the state of an unbounded tick, the whole
+    // serialised game compared frame by frame: a wait, and a walk of the hero past the armies.
+    let s = walking_armies();
+    let (mut whole, mut cut) = (start(&s), start(&s));
+    prepare_walkers(&mut whole);
+    prepare_walkers(&mut cut);
+    whole.begin_wait(4);
+    cut.begin_wait(4);
+    let paused = tick_both_alike(&mut whole, &mut cut, |g| g.wait_ticks == 0);
+    assert!(paused > 0, "the budget cut the waits' ticks");
+    let (mut whole, mut cut) = (start(&s), start(&s));
+    prepare_walkers(&mut whole);
+    prepare_walkers(&mut cut);
+    assert!(whole.set_destination((8, 0)) && cut.set_destination((8, 0)));
+    let paused = tick_both_alike(&mut whole, &mut cut, |g| !g.moving());
+    assert!(paused > 0, "the budget cut the walk's steps");
+}
+
+#[test]
+fn finish_pause_completes_the_step_and_its_events_come_with_the_next_tick() {
+    // The interface finishes a paused step before a press acts on the game: the step ends as an
+    // unbounded tick would have ended it, and its events come with the next tick.
+    let step = crate::rules::game::STEP_SECONDS;
+    let s = walking_armies();
+    let (mut whole, mut cut) = (start(&s), start(&s));
+    prepare_walkers(&mut whole);
+    prepare_walkers(&mut cut);
+    whole.begin_wait(1);
+    cut.begin_wait(1);
+    let want = whole.tick(step);
+    assert!(cut.tick_within(step, &mut || false).is_empty());
+    assert!(cut.ai_pending(), "the budget stopped the tick");
+    cut.finish_pause();
+    assert!(!cut.ai_pending());
+    let got = cut.tick_within(0.0, &mut || true);
+    assert_eq!(got, want);
+    assert_eq!(serde_json::to_string(&cut).unwrap(), serde_json::to_string(&whole).unwrap());
+}

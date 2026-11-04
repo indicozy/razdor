@@ -30,7 +30,7 @@ pub const CSV_HEADER: &str = "frame,kind,work_ms,total_ms,tick,terrain,world,fog
 /// The parts of a frame that are timed.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Stage {
-    /// The game's tick (`Game::tick_shown`): the hero's walk, the armies, the AI.
+    /// The game's tick (`Game::tick_shown_within`): the hero's walk, the armies, the AI.
     Tick,
     /// The terrain layer of the map (inside [`Stage::World`]).
     Terrain,
@@ -40,13 +40,13 @@ pub enum Stage {
     Fog,
     /// The minimap window.
     Minimap,
-    /// The hero's route: the army he follows and the reroute around armies (`hero_step`, in the
+    /// The hero's route: the army he follows and the reroute around armies (`begin_walk`, in the
     /// tick).
     Route,
     /// The fog reveal around the hero (`look_around`, in the tick).
     Look,
-    /// The AI armies' moves and plans and the midnights among them (`move_armies`, in the
-    /// tick's time).
+    /// The AI armies' other moves (the gangs), the midnights among them and the rest of the
+    /// slice (`slice_tail`, in the tick's time).
     Armies,
     /// The scenario's events (`run_script`, in the tick's time).
     Script,
@@ -59,7 +59,7 @@ pub enum Stage {
     /// The session slot's look at the game (`ui::session::Keeper::tick`). It runs outside the
     /// tick (in the UI's frame).
     Session,
-    /// The AI armies' moves and plans (`ai_move`, inside [`Stage::Armies`]). Includes
+    /// The AI armies' moves and plans (`ai_move_run`, inside [`Stage::Armies`]). Includes
     /// [`Stage::AiPlan`].
     AiMove,
     /// The AI's plans of the armies that replanned (`ai_plan`, inside [`Stage::AiMove`]).

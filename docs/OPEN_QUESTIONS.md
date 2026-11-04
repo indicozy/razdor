@@ -73,7 +73,7 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   report, Другой берег, «В Таверне #4»). The building's local question is in the same scan as the
   noon when the walk's last step enters it (world.md §7.2, events.md §2 «Noon»): the question takes
   the pass, the noon waits for its OK, then the report and the building. Razdor pays the noon in the
-  step's time slice (`pass_slice`), before the arrival's scan, so the report opens first and the
+  step's time slice (`slice_tail`), before the arrival's scan, so the report opens first and the
   question after it. Fixed for the walk's other case (the report of an earlier step, where the
   question comes after the report, as in the original): the building waits for the question
   (`Game::enter_waiting_building`). Not changed here: moving the noon into the step-complete scan
@@ -453,7 +453,7 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   (pair 03): check 0x4c01fc's caller. (5) Hints now follow the install's `OptValue6` until the
   checkbox is touched; the shipped ini has 1 (hints off), so the bar's button names are off
   by default, as in the original.
-- **AI step clock: the tick banked at its start** (2026-10-14). `Game::ai_move` adds a hero
+- **AI step clock: the tick banked at its start** (2026-10-14). `Game::ai_move_begin` adds a hero
   tick's minutes to every army's bank at the tick's start, so a step can start at once; the
   original banks each frame's `dt` (0x4ade3c → 0x4a399c) and starts a step only in the frame
   its bank covers it. Even in the limit of short frames, which Razdor aims at, the bank then

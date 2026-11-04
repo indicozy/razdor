@@ -40,7 +40,7 @@ ui/building_view.rs BuildingView                            tabs = town::tabs_he
   Shipyard   → its own small window: ship_price(), rent_ship()           rules/ships.rs
 ui/mod.rs  window closed → Game::window_closed()   runs the scan if a service asked for it
 
-daily (from pass_slice, see map-step.md):
+daily (from slice_tail, see map-step.md):
   Tick::Midnight → Game::midnight → economy_midnight() (markets, barracks, stocks, healing)
                                    → ai_midnight()
   Tick::Noon     → new_day() → pay_noon() → NoonPay; Event::NewDay(DayReport) if a report shows

@@ -1172,6 +1172,13 @@ impl App {
         };
         pan::begin_frame(pannable, std::mem::discriminant(&self.screen), self.dialogs.len());
         input::begin_frame();
+        // A press acts on the game as the step leaves it: an AI move paused at a frame's budget
+        // finishes first (`Game::tick_within`, `Game::finish_pause`).
+        if input::any_press() {
+            if let Some(g) = self.game.as_mut() {
+                g.finish_pause();
+            }
+        }
         rest::tick();
         item_pull::tick();
         chrome::begin_frame();
@@ -1678,14 +1685,14 @@ impl App {
             }
         }
         // The noon report asks for an autosave, named by the date.
-        if let Some(g) = self.game.as_mut() {
+        if let Some(g) = self.game.as_mut().filter(|g| !g.ai_pending()) {
             if let Some(name) = g.autosave_due.take() {
                 razdor::frame_probe::time(razdor::frame_probe::Stage::Autosave, || saves::autosave_at_noon(g, &name));
             }
         }
         // The session slot (`session`): kept fresh while the game is played; no game on screen
         // (the main menu, the editor) ends the session.
-        let session_ok = quick_save_ok && !self.test_play && !matches!(self.screen, Screen::Battle(_) | Screen::CustomBattle(_) | Screen::Editor);
+        let session_ok = quick_save_ok && !self.test_play && !matches!(self.screen, Screen::Battle(_) | Screen::CustomBattle(_) | Screen::Editor) && !self.game.as_ref().is_some_and(|g| g.ai_pending());
         razdor::frame_probe::time(razdor::frame_probe::Stage::Session, || self.session.tick(self.game.as_ref(), session_ok, crate::ui::clock::now()));
         if let Some(path) = self.pending_load.take() {
             self.load(&path);

@@ -404,6 +404,13 @@ pub fn is_mouse_button_released(b: MouseButton) -> bool {
     mq::is_mouse_button_released(b) || button(b).released
 }
 
+/// Whether a press came this frame: a click, a key, the wheel (a pad's buttons and a tap are
+/// among them). A press acts on the game, so an AI move paused at a frame's budget finishes
+/// before it (`App::frame_content`).
+pub fn any_press() -> bool {
+    [MouseButton::Left, MouseButton::Right, MouseButton::Middle].into_iter().any(is_mouse_button_pressed) || !get_keys_pressed().is_empty() || mouse_wheel() != (0.0, 0.0)
+}
+
 pub fn is_key_pressed(k: KeyCode) -> bool {
     mq::is_key_pressed(k) || key_edge(k).pressed || with_taps(|t| t.pressed(k))
 }

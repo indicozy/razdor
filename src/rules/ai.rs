@@ -312,6 +312,20 @@ struct Pending {
     minutes: f32,
 }
 
+/// One tick's AI moves, under way ([`Game::ai_move_begin`]): the arrivals still to come, in
+/// the order of their times, and the steps begun and not yet arrived. The game keeps it while
+/// a frame's budget stops the tick ([`Game::tick_within`]).
+pub(crate) struct AiMove {
+    queue: BTreeSet<(i64, u32, u8, u32)>,
+    totals: BTreeMap<u32, i64>,
+    pending: BTreeMap<u32, Pending>,
+    /// The midnights not yet passed.
+    midnights: Vec<f64>,
+    tick: i64,
+    start: f64,
+    end: f64,
+}
+
 /// Game minutes in the original's centi-minutes.
 fn cmin(minutes: f32) -> i64 {
     (minutes as f64 * 100.0).round() as i64
@@ -1694,12 +1708,13 @@ impl Game {
     /// arrival, and the next step starts at the next frame. A midnight inside the tick comes
     /// after the arrivals up to its moment (0x4a1998 ends the frame's advance); the clock
     /// reads each arrival's moment. `start` is the tick's first minute, `midnights` the
-    /// midnights in it; the ones after the last arrival are returned.
-    /// `hero` are the hero's cells while the tick plays, `hero_end` those once his step has
-    /// ended: the arrivals at the tick's very end come in the frame where the walk timer has
-    /// already ended his step (0x4ae8cc), so they see him on his new cell, facing the step he
-    /// took (0x4ae8e0), before the AI's advance of that frame (0x4ade3c).
-    pub(crate) fn ai_move(&mut self, minutes: f32, hero: &HeroCells, hero_end: &HeroCells, start: f64, midnights: &[f64]) -> Vec<f64> {
+    /// midnights in it; the ones after the last arrival are returned by [`Game::ai_move_end`].
+    ///
+    /// The tick runs in three parts, so that the game can stop between two arrivals and go on
+    /// in a later frame (`Game::tick_within`): [`Game::ai_move_begin`] banks the minutes and
+    /// queues the arrivals, [`Game::ai_move_run`] plays them on, and [`Game::ai_move_end`] sets
+    /// the clock back to the tick's end. Run to the end at once, they are the whole tick.
+    pub(crate) fn ai_move_begin(&mut self, minutes: f32, start: f64, midnights: &[f64]) -> AiMove {
         let end = self.clock.total_minutes();
         self.ai_respawns(end);
         let tick = cmin(minutes);
@@ -1721,28 +1736,42 @@ impl Game {
             }
             queue.insert((0, 0, id, uid));
         }
-        let mut pending: BTreeMap<u32, Pending> = BTreeMap::new();
-        let mut midnights: Vec<f64> = midnights.to_vec();
-        while let Some((t, seq, id, uid)) = queue.pop_first() {
-            let at = start + t as f64 / 100.0;
+        AiMove { queue, totals, pending: BTreeMap::new(), midnights: midnights.to_vec(), tick, start, end }
+    }
+
+    /// Plays a tick's AI moves on ([`Game::ai_move_begin`]): its arrivals in the order of their
+    /// times, each arrival ([`Game::ai_finish`]) and the next step's start ([`Game::ai_start`]).
+    /// `keep_going` is asked before each arrival but the call's first, so the run always makes
+    /// progress; false stops it there, with the queue as it stands. Returns true when no arrival
+    /// is left. `hero` and `hero_end` are the hero's cells of the tick (see `ai_move_begin`).
+    pub(crate) fn ai_move_run(&mut self, job: &mut AiMove, hero: &HeroCells, hero_end: &HeroCells, keep_going: &mut dyn FnMut() -> bool) -> bool {
+        let mut first = true;
+        while let Some(&(t, seq, id, uid)) = job.queue.first() {
+            if !first && !keep_going() {
+                return false;
+            }
+            first = false;
+            job.queue.pop_first();
+            let tick = job.tick;
+            let at = job.start + t as f64 / 100.0;
             // A midnight comes after the calls of the moment it falls in (0x4a1998).
-            while midnights.first().is_some_and(|&m| m < at) {
-                let m = midnights.remove(0);
+            while job.midnights.first().is_some_and(|&m| m < at) {
+                let m = job.midnights.remove(0);
                 self.clock.set_total_minutes(m);
                 self.midnight();
             }
             self.clock.set_total_minutes(at);
             let goes_on = |g: &Game| t < tick && g.army_by_uid(uid).is_some_and(|i| !g.is_foe(i));
-            if let Some(p) = pending.remove(&uid) {
+            if let Some(p) = job.pending.remove(&uid) {
                 // The arrival, as its play time runs out; the next step starts at the next
                 // frame, within this tick only.
                 self.ai_finish(&p, if t >= tick { hero_end } else { hero });
                 if goes_on(self) {
-                    queue.insert((t, seq + 1, id, uid));
+                    job.queue.insert((t, seq + 1, id, uid));
                 }
                 continue;
             }
-            let total = totals.get(&uid).copied().unwrap_or(0);
+            let total = job.totals.get(&uid).copied().unwrap_or(0);
             let Some((p, play)) = self.ai_start(uid, hero, tick, total, tick - t) else { continue };
             if play < 1 {
                 // A play time under one centi-minute runs out in the call that starts it. A
@@ -1750,15 +1779,21 @@ impl Game {
                 // takes one such step per frame *(Razdor has no frames: it stops there)*.
                 self.ai_finish(&p, hero);
                 if p.minutes > 0.0 && goes_on(self) {
-                    queue.insert((t, seq + 1, id, uid));
+                    job.queue.insert((t, seq + 1, id, uid));
                 }
                 continue;
             }
-            pending.insert(uid, p);
-            queue.insert((t + play, 0, id, uid));
+            job.pending.insert(uid, p);
+            job.queue.insert((t + play, 0, id, uid));
         }
-        self.clock.set_total_minutes(end);
-        midnights
+        true
+    }
+
+    /// The end of a tick's AI moves: the clock is set to the tick's end, and the midnights
+    /// the arrivals did not pass are returned (they come after the slice's own calls).
+    pub(crate) fn ai_move_end(&mut self, job: AiMove) -> Vec<f64> {
+        self.clock.set_total_minutes(job.end);
+        job.midnights
     }
 
     /// Army `uid` takes, one after another, every step its bank covers (tests: the steps of

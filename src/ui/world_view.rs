@@ -41,6 +41,10 @@ use super::Screen;
 /// screen: its 32 px cells.
 const PX: f32 = 32.0;
 
+/// The time a frame may spend on the AI's moves of a walk or a wait tick (`Game::tick_within`).
+/// A slow step (a big map, many armies) takes several frames; the screen keeps drawing meanwhile.
+const AI_FRAME_BUDGET: std::time::Duration = std::time::Duration::from_millis(8);
+
 /// The map's scale at zoom 1, against the original's 32 px cells: the interface scale the
 /// player chose in the settings, so a bigger interface gives a closer map (Razdor's choice,
 /// the owner's request; the original shows a fixed 1024×682 view).
@@ -2762,7 +2766,8 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     // The minimap's meeting marks are recomputed only while the event display is idle (the
     // original's 0x4abf44 runs when the scan is idle, after the dialogs): an army met keeps its
     // ally colour while the meeting's dialog or a showing is on screen.
-    if dialogs.is_empty() && !view.flying() && view.spell_fx.is_empty() && !game.event_display_busy() {
+    // An unfinished step (`Game::tick_within`) has not happened yet for the marks either.
+    if dialogs.is_empty() && !view.flying() && view.spell_fx.is_empty() && !game.event_display_busy() && !game.ai_pending() {
         game.refresh_meeting_marks();
     }
 
@@ -2952,7 +2957,11 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     let tile0 = game.tile();
     let ticked = !input_blocked() && events.is_empty();
     if ticked {
-        events = frame_probe::time(Stage::Tick, || game.tick_shown(crate::ui::clock::frame_dt().min(0.1)));
+        // The AI's moves of a step may take more than the frame has: they stop at the budget and
+        // go on in the next frames, which keep drawing (`Game::tick_within`).
+        let frame_start = std::time::Instant::now();
+        let mut within_budget = || frame_start.elapsed() < AI_FRAME_BUDGET;
+        events = frame_probe::time(Stage::Tick, || game.tick_shown_within(crate::ui::clock::frame_dt().min(0.1), &mut within_budget));
     }
     // The frame probe's kind: a step (the hero moved to another cell), a walk, or idle. Only a
     // frame whose tick ran is one of these; a frame with a window open or events held stays
@@ -2970,7 +2979,9 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     // Battles between map parties (Razdor's): taken every frame, shown where the player sees
     // the cell and the option is on; the notice replaces the battle's plain line.
     let battles_shown = game.battle_marks;
-    for clash in game.take_clashes() {
+    // The battles of an unfinished step wait for it (`Game::tick_within`).
+    let clashes = if game.ai_pending() { Vec::new() } else { game.take_clashes() };
+    for clash in clashes {
         if battles_shown && game.fog.explored(clash.tile) {
             *message = Some(clash_notice(&clash, &info("NoNameArmy", n_("Unknown army"))));
             view.clash_marks.push_back((clash.tile, crate::ui::clock::now()));
