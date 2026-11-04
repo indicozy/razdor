@@ -11,17 +11,19 @@ use serde_json::{json, Value};
 
 use super::host::{FocusTarget, Frame, Host, SnapTarget};
 use super::server::{read_runtime, Server};
+use crate::dt::install::DtInstall;
 use crate::studio::build::Job;
 use crate::studio::map::Selection;
 
-/// A window with a fixed package (the hello-story example) and canned answers.
+/// A window with a fixed package (the hello-story example, or the install's) and canned answers.
 struct FakeWindow {
     root: PathBuf,
+    install: Option<Arc<DtInstall>>,
 }
 
 impl Host for FakeWindow {
     fn job(&self) -> Result<Job, String> {
-        Ok(Job { root: self.root.clone(), overlays: Vec::new(), map: Some("first-light".into()), lang: "en".into(), install: None })
+        Ok(Job { root: self.root.clone(), overlays: Vec::new(), map: Some("first-light".into()), lang: "en".into(), install: self.install.clone() })
     }
 
     fn state(&self) -> Result<Value, String> {
@@ -82,8 +84,13 @@ impl Client {
 }
 
 fn start(name: &str) -> (Server, PathBuf) {
+    start_with(name, hello_story(), None)
+}
+
+/// A studio server on the package `root`, with the game's `install` when given.
+fn start_with(name: &str, root: PathBuf, install: Option<Arc<DtInstall>>) -> (Server, PathBuf) {
     let file = runtime_path(name);
-    let host: Arc<dyn Host> = Arc::new(FakeWindow { root: hello_story() });
+    let host: Arc<dyn Host> = Arc::new(FakeWindow { root, install });
     let server = Server::start(host, file.clone()).expect("the server starts");
     (server, file)
 }
@@ -104,7 +111,7 @@ fn a_client_with_the_token_talks_json_rpc_to_the_studio() {
 
     let listed = client.call(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
     let names: Vec<&str> = listed["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["get_state", "check", "scores", "sim", "query_refs", "focus", "snapshot"]);
+    assert_eq!(names, ["get_state", "check", "scores", "sim", "run_test", "query_refs", "focus", "snapshot"]);
 
     let state = client.call(json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "get_state", "arguments": {} } }));
     assert!(state["result"]["content"][0]["text"].as_str().unwrap().contains("first-light"));
@@ -215,3 +222,46 @@ fn the_scores_json_names_its_targets() {
     assert_eq!(v["health"]["findings"][0]["severity"], "warning");
     assert_eq!(v["health"]["findings"][0]["targets"][0], json!({ "kind": "line", "file": "triggers/brod.toml", "line": 9 }));
 }
+
+/// `run_test` needs the game's files: without them it says so, as `scores` does.
+#[test]
+fn run_test_without_the_install_says_what_it_needs() {
+    let (server, file) = start("run-test");
+    let runtime = read_runtime(&file).unwrap();
+    let (mut client, _) = Client::open(runtime.port, &runtime.token);
+    let reply = client.call(json!({ "jsonrpc": "2.0", "id": 10, "method": "tools/call", "params": { "name": "run_test", "arguments": {} } }));
+    assert_eq!(reply["result"]["isError"], true, "{reply}");
+    assert!(reply["result"]["content"][0]["text"].as_str().unwrap().contains("RAZDOR_DT_DIR"), "{reply}");
+    drop(server);
+}
+
+/// `run_test` plays the package's tests on the install, as `razdor-pack test --json` does: one result per
+/// test, with its pass rate; a name that is no test is an error. Skipped without `RAZDOR_DT_DIR`.
+#[test]
+fn run_test_plays_the_package_tests_as_the_cli_does() {
+    let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+    let install = Arc::new(DtInstall::load(Path::new(&dir)).expect("the install loads"));
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/packs/pepelnaya-marka");
+    let (server, file) = start_with("run-test-play", root, Some(install));
+    let runtime = read_runtime(&file).unwrap();
+    let (mut client, _) = Client::open(runtime.port, &runtime.token);
+
+    let reply = client.call(json!({ "jsonrpc": "2.0", "id": 11, "method": "tools/call", "params": { "name": "run_test", "arguments": { "name": "chapter1_patrol", "seeds": 1 } } }));
+    assert_eq!(reply["result"]["isError"], false, "{reply}");
+    let results: Value = serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let first = &results[0];
+    assert_eq!(results.as_array().unwrap().len(), 1, "{results}");
+    assert_eq!(first["test"], "chapter1_patrol");
+    assert_eq!(first["seeds"], 1);
+    assert_eq!(first["passed"], 1, "{results}");
+    assert_eq!(first["ok"], true);
+    assert_eq!(first["failures"], json!([]));
+
+    let missing = client.call(json!({ "jsonrpc": "2.0", "id": 12, "method": "tools/call", "params": { "name": "run_test", "arguments": { "name": "no_such_test" } } }));
+    assert_eq!(missing["result"]["isError"], true, "{missing}");
+    assert!(missing["result"]["content"][0]["text"].as_str().unwrap().contains("no test named"), "{missing}");
+    let too_many = client.call(json!({ "jsonrpc": "2.0", "id": 13, "method": "tools/call", "params": { "name": "run_test", "arguments": { "seeds": 0 } } }));
+    assert_eq!(too_many["result"]["isError"], true);
+    drop(server);
+}
+

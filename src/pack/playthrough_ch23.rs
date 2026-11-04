@@ -25,17 +25,7 @@ fn into_marka(install: &DtInstall, seed: u32, choices: &[(&str, &str)]) -> Resul
     hand_over(install, &brod, &mut run, &to, choices)
 }
 
-/// Drinks a potion of the pack for each wounded living unit, until none is wounded or the pack has
-/// no potion left (a player drinks from the army screen).
-pub(crate) fn drink_for_wounded(run: &mut Run) {
-    loop {
-        let wounded = (0..run.g.squad.len()).find(|&i| run.g.squad[i].alive() && run.g.squad[i].hp < run.g.squad[i].max_hp(&run.g.content));
-        let Some(unit) = wounded else { return };
-        let drunk = (0..24).find_map(|k| run.g.drink(unit, k).ok().map(|healed| (k, healed)));
-        let Some((_, healed)) = drunk else { return };
-        run.log.push(format!("drank a potion: {} +{healed} HP", run.squad_names()[unit]));
-    }
-}
+pub(crate) use super::runner::drink_for_wounded;
 
 /// The game of `to`, entered from `from` (the run's game) by the campaign's hand-over.
 fn hand_over(install: &DtInstall, from: &Opened, run: &mut Run, to: &str, choices: &[(&str, &str)]) -> Result<Run, Stuck> {

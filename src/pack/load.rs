@@ -9,6 +9,7 @@ use super::content::{ItemFile, ItemSpec, UnitFile, UnitSpec};
 use super::diag::{Report, Severity};
 use super::files::Files;
 use super::manifest::Manifest;
+use super::playtest::{self, TestFile};
 use super::triggers::{self, Dialog, DialogFile, Trigger, TriggerFile, Var};
 use super::map::{MapEntry, MapFile};
 
@@ -35,6 +36,8 @@ pub struct Package {
     pub vars: Vec<Located<Var>>,
     pub triggers: Vec<Located<Trigger>>,
     pub dialogs: Vec<Located<Dialog>>,
+    /// `tests/<name>.toml`: the package's playthroughs (`pack::playtest`).
+    pub tests: Vec<Located<TestFile>>,
     /// Maps by folder id (`maps/<id>/`).
     pub maps: BTreeMap<String, MapEntry>,
     /// The campaign's graph (`campaign.toml`), if the package has one.
@@ -93,6 +96,7 @@ impl Package {
             vars: Vec::new(),
             triggers: Vec::new(),
             dialogs: Vec::new(),
+            tests: Vec::new(),
             maps: BTreeMap::new(),
             campaign: None,
             problems: Report::default(),
@@ -187,6 +191,19 @@ impl Package {
                     Err(p) => report.error_hint(path, Some(line), p.message, p.hint),
                 }
             }
+        }
+        // tests/<name>.toml: playthroughs. A file that does not read is reported at its line.
+        for path in paths.iter().filter(|p| p.starts_with(playtest::DIR)) {
+            if playtest::name_of(path).is_none() {
+                if !is_game_file(path) {
+                    report.warning(path, None, "not read: a test is tests/<name>.toml");
+                }
+                continue;
+            }
+            let Some(text) = story_text(&files, path, &mut report) else { continue };
+            let Some(mut f) = parse_toml::<TestFile>(path, text, &mut report) else { continue };
+            f.step_lines = f.step.iter().map(|s| line_of(text, s.span().start)).collect();
+            package.tests.push(Located { file: path.clone(), line: line_of(text, 0), value: f });
         }
         // maps/<id>/map.toml; the other files of a map folder are read by `check` (the terrain).
         for path in paths.iter().filter(|p| p.starts_with("maps/")) {

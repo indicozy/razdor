@@ -16,7 +16,7 @@ Anything not listed here is not read yet. The code is `src/pack/`; the tool is `
   them reads without them).
 - Text files are UTF-8; configuration is TOML.
 - Top level: the files `package.toml`, `README.md`, `LICENSE`, and the folders `texts/`,
-  `units/`, `items/`, `maps/`, `dialogs/`, `triggers/`, `art/`, `scripts/`. Any other top-level
+  `units/`, `items/`, `maps/`, `dialogs/`, `triggers/`, `art/`, `scripts/`, `tests/`. Any other top-level
   entry is a warning and is not read. Read in format 1: `texts/`, `units/`, `items/`, `maps/`,
   `triggers/` and `dialogs/` (the last two in the section below).
 - Game files are an error anywhere in a package: any file whose extension is `ini`, `dtm`,
@@ -595,10 +595,95 @@ the sim's hero does not walk, so the graph is walked this way). `--trace` prints
 squad, named characters, the pack, the variables) and what the story did on it, by day; `--json` gives the same
 as data.
 
+## Tests: `tests/<name>.toml`
+
+A test is a playthrough of one of the package's maps, or of its whole campaign from the start, that the
+engine plays headless: the hero walks by the game's route planner and clock, the armies move, battles are
+fought by the battle engine (auto-resolved), questions are answered yes, and the dialogs are answered by
+the test's choices. Each step is checked by its `expect`. `razdor-pack test` runs them (see Commands); the
+studio's `run_test` tool does the same. The file's name is the test's name (`tests/marsh_route.toml` is
+`marsh_route`).
+
+```toml
+campaign = true           # play campaign.toml from its start; or `map = "marka"` to play one map
+seeds = 15                # battle and story seeds 1..15 (default 1)
+min_rate = 0.8            # the share of seeds that must pass (default 1.0)
+avoid_armies = true       # optional: the option «Обход армий на пути» from the first hand-over on
+
+[[step]]
+choose = { dialog = "varga_meet", choice = "join" }   # leading choose steps: answered when the first map starts
+[[step]]
+walk = [44, 14]           # walks to the cell (days = 10 by default; a battle on the way is fought, the walk goes on)
+days = 13
+[[step]]
+walk_to_building = "ashford"    # a building of the map, by its id
+[[step]]
+walk_to_army = "patrol_w"       # walks into the army where it stands: a greeting or a battle
+[[step]]
+fight = "host"                  # walks into the army until its battle is fought, a day at a time
+days = 40
+[[step]]
+wait_days = 3                   # stands still; returns early when the chapter is over
+[[step]]
+leave = true                    # a campaign: the map is won, the hero goes on to its next map (the victory's route)
+expect = { map = "marka" }
+[[step]]
+expect = { var = "marsh_trust", op = ">=", value = 3, alive = "tess" }
+```
+
+**Steps.** A step has at most one action, and may have an `expect` (alone, too). The actions:
+
+| Key | Does |
+|---|---|
+| `walk = [x, y]`, `days` | walks to the cell, within `days` (default 10); a battle or a dialog on the way does not end the walk |
+| `walk_to_building = "<id>"`, `days` | walks to the building's cell (the map's `[[building]]` id) |
+| `walk_to_army = "<id>"`, `days` | walks into the army where it stands, a few times (it moves): a greeting or a battle ends it |
+| `fight = "<id>"`, `days` | walks into the army a day at a time until its battle is fought; no battle in `days` is a failure |
+| `wait_days = n` | stands still for n days (stops early when the chapter is over) |
+| `choose = { dialog, choice }` | the choice the dialog takes when it opens (until another `choose` for it); a choice the dialog does not offer is a failure |
+| `hire_all = true` or `hire_all = <gold>` | hires what the town offers, cheapest first, while the purse keeps three days of wages (and the gold kept back, for a number) |
+| `service = true` | at a town or the tower: heals the wounded and raises the fallen, the same purse rule |
+| `drink = true` | drinks a potion of the pack for each wounded unit |
+| `leave = true` | a campaign only: the map is won (the chapter is over); the hero enters the next map by the campaign's route, with the choices so far. A revisit's map is over when he arrives, so the hand-over is a step of its own |
+
+**Expectations.** `expect = { … }` takes these keys, each one a check (all must hold):
+
+| Key | Checks |
+|---|---|
+| `var`, `op`, `value` | the story's variable against the value (`op`: `==` default, `!=`, `>=`, `<=`, `>`, `<`; a flag takes `==`/`!=`) |
+| `squad_size`, `gold` (with `op`) | the living squad's size, the gold |
+| `map` | the map the hero is on now |
+| `ending` | the ending dialog the story reached (`end_free`, …) |
+| `dialog_seen = "<id>"` or `"<id> -> <choice>"` | the dialog opened so far in the test (and the choice it took) |
+| `battle = true`, `false` or `"<enemy>"` | a battle was fought on the current map; none; or a battle with that army or building |
+| `beat_gap = n` | the longest walk between two beats (dialogs, captures, encounters) on the current map is at most n cells |
+| `alive = "<name>"` | the named character of the package is in the squad, alive |
+
+**Checks** (`razdor-pack check`). The file reads (`deny_unknown_fields`: an unknown key is an error with its
+line); exactly one of `campaign = true` and `map` is set, and the map exists (the campaign's maps, for a
+campaign); a step with no action and no `expect` is an error; every dialog, choice, building, army, variable,
+map and ending a test names exists in the package (a choice is checked against the dialog's choices; an army
+may be one a trigger spawns); `seeds` is at least 1, `min_rate` is above 0 and at most 1.
+
+**Running** (`razdor-pack test <folder-or-.rzpack> [--only <name>] [--seeds <n>] [--json]`). The package
+checks first (an error stops it). Each test runs over its seeds (1 to its `seeds`, or `--seeds`), on as many
+threads as the machine has. The result of a test is its share of passing seeds against `min_rate`. A failing
+seed reports the step (its number and line), the failed check or walk and the log's last 40 lines (days, walks,
+dialogs, battles, the hand-overs); the text output shows the first failing seed, `--json` gives all of them.
+Exit status 0 only when every test meets its `min_rate`. The engine is the one the Rust playthrough tests use
+(`pack::runner`): a campaign is compiled on the install (`RAZDOR_DT_DIR`), the maps once per run.
+
+**Seeds.** A seed fixes the game's and the story's random draws. Battles are auto-resolved, so a seed decides
+their outcome; a route wins on most seeds when the choices are sound, and `min_rate` is what the author accepts.
+
 ## Commands
 
 - `razdor-pack check <folder-or-.rzpack> [--json]`: the rules above; exit 0 with no errors, 1 with
   errors, 2 on a usage or read problem.
+- `razdor-pack test <folder-or-.rzpack> [--only <name>] [--seeds <n>] [--json]`: plays the package's tests
+  (see «Tests»), in parallel over their seeds; one line per test with its pass rate, and for a failing test its
+  first failing seed's step and log tail. Exit 0 only when every test meets its `min_rate`; 1 when a test fails
+  or the package does not check; 2 on a usage problem. Needs `RAZDOR_DT_DIR`.
 - `razdor-pack sim <folder-or-.rzpack> [--map <id>] [--days <n>=30] [--json] [--trace]
   [--choices first|random|<dialog>=<choice>,…]`: the AI plays the map headless for N days, as the
   community map smoke test does (`rules::sim`, shared with it), with the package's story attached.

@@ -112,6 +112,7 @@ same functions the game uses:
 | compile a map against an install | `pack::compile::compile(&package, &install, lang, map_id)` |
 | open a map as the game does | `pack::open::open(path, map, lang, &install)` |
 | headless play | `rules::sim` (the `razdor-pack sim` code) |
+| play the package's tests | `pack::playtest::run_package(&package, root, &install, &Options)` (the `razdor-pack test` code) |
 | deterministic zip | `pack::archive` (`razdor-pack pack`) |
 | the trigger vocabulary | `pack::triggers::{EVENTS, CONDITIONS, ACTIONS}` and the argument lists in `pack::triggers` |
 
@@ -122,6 +123,8 @@ An editor in another language (web, Tauri, Godot) can shell out instead:
   errors, 1 means errors, 2 means a usage or read problem.
 - `razdor-pack sim <path> --map <id> --days N --json --trace [--choices …] [--set var=value]`
   returns the day-by-day story trace as data.
+- `razdor-pack test <path> --json` returns the playthrough results as data: one object per test with
+  `passed`, `seeds`, `rate`, `min_rate`, `ok` and its `failures` (`seed`, `step`, `line`, `what`, `log_tail`).
 - `razdor-pack info <path>` gives the manifest, the maps, the size and the SHA-256.
 - `razdor-pack pack <folder> -o out.rzpack` packs the folder.
 
@@ -218,13 +221,12 @@ campaign, a travel to a missing point, and conditions that name an army, a build
    dialog opened, by day. `--choices dialog=choice,…` and `--set var=value` drive a branch.
    `--campaign` walks the graph. The sim's hero **does not walk**, so `hero_enters` triggers never
    fire there. `--auto-win-after` forces victories to walk the graph.
-3. **Real play test:** the playthrough harness (`src/pack/playthrough.rs`, test-only today). The
-   hero walks a route with the AI running, battles are fought by the battle engine, dialogs are
-   answered by a script, and the carry is real (`playthrough_campaign.rs`). This is the only check
-   that catches "the bandits attack before the dialog" or "this fight can't be won". Exposing it as
-   a CLI (`razdor-pack route <path> <route.toml>` with a list of `walk_to`, `wait`, `hire`, `answer`
-   steps and per-fight win rates over seeds) would give an editor a "test this route" button. Not
-   built yet.
+3. **Real play test:** the package's own tests, `tests/<name>.toml` (the format is in
+   `rzpack-format.md`, «Tests»). `razdor-pack test <path> [--only <name>] [--seeds <n>] [--json]` plays
+   each test headless over its seeds, in parallel, with the real hero walk, the battle engine, the
+   campaign's hand-over and the script's choices (`pack::runner`, `pack::playtest`). The `--json` result
+   gives each test's pass rate and, for a failing seed, the step, its line, what went wrong and the log's
+   tail. It needs `RAZDOR_DT_DIR`. The studio's MCP server has the same as `run_test`.
 4. **Play:** `razdor --pack <folder> --map <id>` starts the game on the map. An editor can launch it
    as "Play from here".
 5. **Pictures without a window:** `RAZDOR_PACK=<path> RAZDOR_SCENE=map:<id>` renders the map off

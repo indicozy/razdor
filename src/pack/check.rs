@@ -15,7 +15,7 @@ use super::manifest::{self, Manifest, BASES, FORMAT, RULESETS};
 use super::refs::{valid_id, valid_package_id, DtKind, Ref};
 
 /// Directories a package may have at its top.
-const TOP_DIRS: [&str; 8] = ["texts", "units", "items", "maps", "dialogs", "triggers", "art", "scripts"];
+const TOP_DIRS: [&str; 9] = ["texts", "units", "items", "maps", "dialogs", "triggers", "art", "scripts", "tests"];
 /// Files a package may have at its top.
 const TOP_FILES: [&str; 4] = ["package.toml", "README.md", "LICENSE", "campaign.toml"];
 
@@ -46,6 +46,7 @@ pub fn check(pkg: &Package) -> Report {
     check_cycles(&units, &mut r);
     super::triggers::check(pkg, &mut r);
     super::campaign::check(pkg, &mut r);
+    super::playtest::check(pkg, &mut r);
     check_limits(pkg, &mut r);
     map_check::check_maps(pkg, &mut r);
     check_scripts(pkg, &mut r);

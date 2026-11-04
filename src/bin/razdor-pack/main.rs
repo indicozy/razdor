@@ -34,6 +34,17 @@ const HELP: &str = "razdor-pack: content packages (.rzpack) for Razdor 2.0
                              dialogs are answered (first by default; random is seeded;
                              dialog=choice forces that choice, the first elsewhere).
                              exit status: 0 all played, 1 a panic, a softlock or errors
+  razdor-pack test <folder-or-.rzpack> [--only <name>] [--seeds <n>] [--json]
+                             plays the package's tests (tests/<name>.toml) headless over
+                             their seeds, in parallel: a test is a playthrough of a map or
+                             of the campaign from its start, its steps walk, wait, answer
+                             dialogs and hire, and its expect checks the game (docs/reference/
+                             rzpack-format.md, Tests). One line per test with its pass rate;
+                             a failing test shows its first failing seed's step and log tail.
+                             --only runs one test by name; --seeds overrides each test's
+                             seed count; --json gives the results as data.
+                             exit status: 0 every test meets its min_rate, 1 a test fails or
+                             the package does not check, 2 usage (needs RAZDOR_DT_DIR)
   razdor-pack play <folder-or-.rzpack> [--map <id>]
                              opens the package's map in Razdor (`razdor --pack`)
   razdor-pack pack <folder> [-o <out.rzpack>]
@@ -72,6 +83,7 @@ fn run(args: &[String]) -> Result<u8, String> {
         }
         Some("check") => check(&args[1..]),
         Some("sim") => sim(&args[1..]),
+        Some("test") => test_cmd(&args[1..]),
         Some("play") => play(&args[1..]),
         Some("gen-aliases") => gen_aliases(&args[1..]),
         Some("pack") => pack_cmd(&args[1..]),
@@ -270,6 +282,46 @@ fn sim_campaign_cmd(package: &Package, a: &Args) -> Result<u8, String> {
         print!("{}", run.text());
     }
     Ok(if run.ok() { 0 } else { 1 })
+}
+
+/// `test <folder-or-.rzpack> [--only <name>] [--seeds <n>] [--json]`: the package's tests (`pack::playtest`).
+fn test_cmd(args: &[String]) -> Result<u8, String> {
+    let mut opts = pack::playtest::Options::default();
+    let mut json = false;
+    let mut path: Option<PathBuf> = None;
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--only" => opts.only = Some(it.next().ok_or("--only needs a test name")?.clone()),
+            "--seeds" => {
+                let v = it.next().ok_or("--seeds needs a number")?;
+                opts.seeds = Some(v.parse().map_err(|_| format!("--seeds {v}: a whole number"))?);
+            }
+            "--json" => json = true,
+            flag if flag.starts_with('-') => return Err(format!("unknown option `{flag}` for test")),
+            p if path.is_none() => path = Some(PathBuf::from(p)),
+            _ => return Err("test takes one folder or .rzpack file".into()),
+        }
+    }
+    let path = path.ok_or("test needs a folder or a .rzpack file")?;
+    let files = Files::load(&path)?;
+    let (package, _) = Package::parse(files);
+    let report = pack::check(&package);
+    if report.has_errors() {
+        print!("{}", report.to_text());
+        return Ok(1);
+    }
+    razdor::dt::install::load_dotenv();
+    let dir = razdor::dt::install::locate().ok_or("no Discord Times install found (set RAZDOR_DT_DIR)")?;
+    let install = razdor::dt::install::DtInstall::load(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let (results, wall) = pack::playtest::run_package(&package, &path, &install, &opts)?;
+    let ok = pack::playtest::all_ok(&results);
+    if json {
+        println!("{}", pack::playtest::json(&results));
+    } else {
+        print!("{}", pack::playtest::text(&results, wall));
+    }
+    Ok(if ok { 0 } else { 1 })
 }
 
 /// Opens the package's map in Razdor: `razdor --pack <path> --map <id>`, the binary next to this one.

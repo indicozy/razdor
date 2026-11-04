@@ -1,0 +1,99 @@
+# Chapter 1 «Брод» on the side-quest route (the campaign's own, playthrough_campaign.rs chapter_one), then the
+# hub «Марка»: the Crown's patrol on the west road greets the hero, and a greeting is no battle.
+campaign = true
+seeds = 5
+min_rate = 1.0
+
+# Chapter 1's choices: the barrow left, the deserters handed to the Crown, the refugees taken to Reedmere, the
+# marsh folk helped, Varga joins, the toll talked away. Leading choose steps are answered when chapter one starts.
+[[step]]
+choose = { dialog = "varga_meet", choice = "join" }
+[[step]]
+choose = { dialog = "toll", choice = "talk" }
+[[step]]
+choose = { dialog = "marsh_plea", choice = "help" }
+[[step]]
+choose = { dialog = "barrow", choice = "leave" }
+[[step]]
+choose = { dialog = "refugees", choice = "take" }
+[[step]]
+choose = { dialog = "deserters", choice = "hand" }
+
+# Chapter 1 «Брод» on the side-quest route (the campaign's own, playthrough_campaign.rs chapter_one): the
+# hanged man's note and the farm, the tower and its recruits, the scout's letter, Varga, the toll talked away,
+# the barrow left, the deserters handed to the Crown, the refugees taken home, the marsh folk helped; the raids
+# come as the Dread brings them and the hero fights them as he walks (a battle on the way); the host is fought.
+[[step]]
+walk = [38, 23]
+days = 4
+[[step]]
+walk = [41, 21]
+days = 3
+[[step]]
+walk = [44, 14]
+days = 6
+[[step]]
+hire_all = true
+[[step]]
+walk = [37, 12]
+days = 5
+[[step]]
+walk = [32, 17]
+days = 5
+[[step]]
+walk = [29, 23]
+days = 6
+[[step]]
+walk = [44, 14]
+days = 6
+[[step]]
+service = true
+[[step]]
+hire_all = true
+[[step]]
+walk = [41, 6]
+days = 8
+[[step]]
+walk = [33, 7]
+days = 6
+[[step]]
+walk = [24, 8]
+days = 6
+[[step]]
+walk = [17, 5]
+days = 8
+[[step]]
+walk = [12, 14]
+days = 6
+[[step]]
+walk = [11, 25]
+days = 8
+[[step]]
+walk = [13, 31]
+days = 6
+[[step]]
+walk = [9, 38]
+days = 6
+[[step]]
+walk = [6, 38]
+days = 6
+[[step]]
+walk = [6, 44]
+days = 8
+[[step]]
+drink = true
+[[step]]
+fight = "host"
+days = 30
+[[step]]
+wait_days = 3
+[[step]]
+leave = true
+expect = { map = "marka" }
+
+# The rider's hand-over ended the chapter: the hero is in the hub «Марка» from here on.
+
+# The Crown's patrol on the west road: it greets the hero when he walks into it, and that is no battle.
+[[step]]
+walk_to_army = "patrol_w"
+expect = { dialog_seen = "meet_patrol_w", battle = false }

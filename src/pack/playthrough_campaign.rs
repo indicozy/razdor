@@ -18,7 +18,7 @@ use super::playthrough_ch45::{barrows_by_the_grey_throne, barrows_by_the_king, e
 use super::triggers::VarValue;
 use crate::dt::install::DtInstall;
 use crate::rules::campaign::{after_victory, enter};
-use crate::rules::content::{Content, WageKind};
+use crate::rules::content::Content;
 
 /// The branch a campaign takes at the hub, and the gates' and barrows' endings it ends on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,75 +34,7 @@ pub(crate) enum Plan {
     Companies,
 }
 
-/// The player's hiring: the cheapest offer first, while the purse still holds `RUNWAY` days of the
-/// squad's wage bill with the new unit. Returns the names of the units hired.
-pub(crate) const RUNWAY: i32 = 3;
-
-pub(crate) fn hire_within_means(run: &mut Run) -> Vec<String> {
-    hire_within_means_keeping(run, 0)
-}
-
-/// [`hire_within_means`] with `keep` gold kept back (a rite's price, for one).
-pub(crate) fn hire_within_means_keeping(run: &mut Run, keep: i32) -> Vec<String> {
-    let mut hired = Vec::new();
-    loop {
-        let bill = run.g.daily_wages();
-        let mut offers = run.g.recruits_here();
-        offers.sort_by_key(|&k| run.g.hire_price(k).amount);
-        let pick = offers.into_iter().find(|&k| {
-            let price = run.g.hire_price(k).amount;
-            let wage = run.g.content.wage_for(k, WageKind::Recruit);
-            run.g.gold - price - keep >= RUNWAY * (bill + wage)
-        });
-        let Some(kind) = pick else { break };
-        let price = run.g.hire_price(kind).amount;
-        if run.g.hire(kind).is_err() {
-            break;
-        }
-        let name = run.g.content.unit(kind).name.clone();
-        run.note(format!("hired {name} for {price}"));
-        hired.push(name);
-    }
-    hired
-}
-
-/// The player's healing at a town's service: each wounded unit is healed while the purse still holds
-/// `RUNWAY` days of the wage bill after the payment. Returns the number of units healed.
-pub(crate) fn heal_within_means(run: &mut Run) -> usize {
-    let mut healed = 0;
-    for i in 0..run.g.squad.len() {
-        let Some(price) = run.g.heal_price(i) else { continue };
-        if run.g.gold - price.amount < RUNWAY * run.g.daily_wages() {
-            continue;
-        }
-        if run.g.heal(i).is_ok() {
-            healed += 1;
-        }
-    }
-    if healed > 0 {
-        run.note(format!("healed {healed} unit(s) at the service"));
-    }
-    healed
-}
-
-/// The player's raising of the dead at a town's service (a town or a church): each fallen unit is raised while
-/// the purse still holds `RUNWAY` days of the wage bill after the payment. Returns the number of units raised.
-pub(crate) fn raise_within_means(run: &mut Run) -> usize {
-    let mut raised = 0;
-    for i in 0..run.g.squad.len() {
-        let Some(price) = run.g.resurrect_price(i) else { continue };
-        if run.g.gold - price.amount < RUNWAY * run.g.daily_wages() {
-            continue;
-        }
-        if run.g.resurrect(i).is_ok() {
-            raised += 1;
-        }
-    }
-    if raised > 0 {
-        run.note(format!("raised {raised} unit(s) at the service"));
-    }
-    raised
-}
+pub(crate) use super::runner::{heal_within_means, hire_within_means, hire_within_means_keeping, raise_within_means};
 
 /// The hub's town: the walk to Ashford (its recruits and its service), the healing, then the hiring.
 pub(crate) fn ashford(run: &mut Run) -> Result<(), Stuck> {

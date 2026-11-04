@@ -1,0 +1,211 @@
+# The heretic's route (playthrough_campaign.rs, Plan::Heretic): the Order's council, the abbey's trial spares the
+# village, the gates by the Order's means and the messenger heard, the barrows' grey throne: the ending «grey».
+campaign = true
+seeds = 15
+min_rate = 0.8
+# The option «Обход армий на пути» (the route goes round the armies), on from the first hand-over: the
+# campaign's own maps are played so (the armies would stop the walks otherwise).
+avoid_armies = true
+
+# Chapter 1's choices (the side-quest route): the barrow left, the deserters handed to the Crown, the refugees
+# taken to Reedmere, the marsh folk helped, Varga joins, the toll talked away.
+[[step]]
+choose = { dialog = "varga_meet", choice = "join" }
+[[step]]
+choose = { dialog = "toll", choice = "talk" }
+[[step]]
+choose = { dialog = "marsh_plea", choice = "help" }
+[[step]]
+choose = { dialog = "barrow", choice = "leave" }
+[[step]]
+choose = { dialog = "refugees", choice = "take" }
+[[step]]
+choose = { dialog = "deserters", choice = "hand" }
+# The hub «Марка»: the arrival, the shrine, the marsh folk's offer, the council's Order.
+[[step]]
+choose = { dialog = "marka_arrival", choice = "take" }
+[[step]]
+choose = { dialog = "shrine_inside", choice = "cleanse" }
+[[step]]
+choose = { dialog = "shrine_offer", choice = "accept" }
+[[step]]
+choose = { dialog = "marsh_offer", choice = "accept" }
+[[step]]
+choose = { dialog = "council", choice = "order" }
+# The abbey's trial spares the village, the heresy is accepted; the gate's messenger is heard; the grey throne.
+[[step]]
+choose = { dialog = "abbey_trial", choice = "spare" }
+[[step]]
+choose = { dialog = "abbey_heresy", choice = "accept" }
+[[step]]
+choose = { dialog = "gt_messenger", choice = "listen" }
+[[step]]
+choose = { dialog = "bw_grey_throne", choice = "kneel" }
+
+# Chapter 1 «Брод» on the side-quest route (the campaign's own, playthrough_campaign.rs chapter_one): the
+# hanged man's note and the farm, the tower and its recruits, the scout's letter, Varga, the toll talked away,
+# the barrow left, the deserters handed to the Crown, the refugees taken home, the marsh folk helped; the raids
+# come as the Dread brings them and the hero fights them as he walks (a battle on the way); the host is fought.
+[[step]]
+walk = [38, 23]
+days = 4
+[[step]]
+walk = [41, 21]
+days = 3
+[[step]]
+walk = [44, 14]
+days = 6
+[[step]]
+hire_all = true
+[[step]]
+walk = [37, 12]
+days = 5
+[[step]]
+walk = [32, 17]
+days = 5
+[[step]]
+walk = [29, 23]
+days = 6
+[[step]]
+walk = [44, 14]
+days = 6
+[[step]]
+service = true
+[[step]]
+hire_all = true
+[[step]]
+walk = [41, 6]
+days = 8
+[[step]]
+walk = [33, 7]
+days = 6
+[[step]]
+walk = [24, 8]
+days = 6
+[[step]]
+walk = [17, 5]
+days = 8
+[[step]]
+walk = [12, 14]
+days = 6
+[[step]]
+walk = [11, 25]
+days = 8
+[[step]]
+walk = [13, 31]
+days = 6
+[[step]]
+walk = [9, 38]
+days = 6
+[[step]]
+walk = [6, 38]
+days = 6
+[[step]]
+walk = [6, 44]
+days = 8
+[[step]]
+drink = true
+[[step]]
+fight = "host"
+days = 30
+[[step]]
+wait_days = 3
+[[step]]
+leave = true
+expect = { map = "marka" }
+
+# The hub, first visit: the drink, Ashford's service and hire, then the quests on the way to the council. The
+# council's answer ends the visit, and the hero goes on to the branch.
+[[step]]
+drink = true
+[[step]]
+walk = [58, 44]
+days = 2
+[[step]]
+service = true
+[[step]]
+hire_all = true
+[[step]]
+walk = [15, 69]
+days = 10
+[[step]]
+walk = [30, 84]
+days = 12
+[[step]]
+walk = [28, 36]
+days = 10
+# The council's answer ends the visit, and the hero goes on to the branch.
+[[step]]
+wait_days = 40
+[[step]]
+leave = true
+expect = { map = "abbey" }
+
+# The abbey: the heretic's walk round the siege, the abbey's trial spared, the victory hands back to the hub.
+[[step]]
+drink = true
+[[step]]
+walk = [50, 50]
+days = 6
+[[step]]
+walk = [16, 60]
+days = 10
+[[step]]
+walk = [50, 40]
+days = 12
+[[step]]
+wait_days = 40
+[[step]]
+leave = true
+expect = { map = "marka" }
+
+# The hub's revisit: the wounded healed, the hire, and the hub ends the chapter for the gates.
+[[step]]
+drink = true
+[[step]]
+walk = [58, 44]
+days = 2
+[[step]]
+service = true
+[[step]]
+hire_all = true
+[[step]]
+wait_days = 5
+[[step]]
+leave = true
+expect = { map = "gates" }
+
+# The gates: the guards and the stones on the way (the walks of the gates' routes).
+[[step]]
+drink = true
+[[step]]
+walk = [84, 44]
+days = 12
+[[step]]
+walk = [30, 62]
+days = 12
+[[step]]
+walk = [12, 42]
+days = 12
+[[step]]
+walk = [46, 16]
+days = 12
+[[step]]
+wait_days = 5
+[[step]]
+leave = true
+expect = { map = "barrows" }
+
+# The barrows: the chapel's rite on the way, then the heretic kneels at the grey throne.
+[[step]]
+walk = [48, 170]
+days = 3
+[[step]]
+service = true
+[[step]]
+walk = [166, 26]
+days = 40
+
+[[step]]
+wait_days = 3
+expect = { ending = "end_grey", map = "barrows" }

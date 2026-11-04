@@ -1,4 +1,4 @@
-//! The seven tools of the studio's MCP server: `get_state`, `check`, `scores`, `sim`, `query_refs`,
+//! The eight tools of the studio's MCP server: `get_state`, `check`, `scores`, `sim`, `run_test`, `query_refs`,
 //! `focus` and `snapshot`. Their schemas (`list`) and their calls (`call`). The checks and the sim are the CLI's
 //! own: `check` is `build::run` and `Report::to_json` (what `razdor-pack check --json` prints), `sim`
 //! is `sim::sim_map` with `--trace --json`'s options and reply. Nothing here edits a file.
@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 
 use super::host::{FocusTarget, Host, SnapTarget};
 use super::image;
+use crate::pack::playtest::{self, Options as TestOptions};
 use crate::pack::sim::{check_presets, parse_set, sim_map, Choices, SimOptions};
 use crate::pack::uses::{uses, Target};
 use crate::studio::build::{self, Built, Job};
@@ -20,6 +21,9 @@ use crate::studio::vars::variable_uses;
 
 /// The longest a sim may run, in story days.
 pub const MAX_DAYS: u64 = 365;
+
+/// The most seeds a `run_test` may play for one test.
+pub const MAX_SEEDS: u64 = 200;
 
 /// The uses a `query_refs` answer covers, for the agent to read with the list.
 const COVERS_MAP: &str = "triggers (when, if, then), dialogs' choices (if, then), the map's own victory";
@@ -92,6 +96,18 @@ pub fn list() -> Value {
             }
         },
         {
+            "name": "run_test",
+            "description": "Plays the package's tests (tests/<name>.toml) headless over their seeds, as `razdor-pack test` does: a playthrough of a map or of the campaign from its start, with its steps' expectations. One result per test: its pass rate against its min_rate and, for a failing test, the first failing seed's step, line, what went wrong and the log's tail. `name` runs one test; `seeds` replaces each test's seed count. Same JSON as `razdor-pack test --json`; isError when a test misses its min_rate. Needs the game's install.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "The test's name: its file's name without .toml. Default: every test." },
+                    "seeds": { "type": "integer", "minimum": 1, "maximum": MAX_SEEDS, "description": "Seeds to play for each test, 1 to 200. Default: each test's own count." }
+                },
+                "additionalProperties": false
+            }
+        },
+        {
             "name": "query_refs",
             "description": "Who refers to a name: the triggers, dialogs and victory that use an army, building or point of a map by its id (with the line of each use), or the triggers and dialogs that declare, read or write a story variable by its name.",
             "inputSchema": {
@@ -144,6 +160,7 @@ pub fn call(host: &dyn Host, name: &str, args: &Value) -> Option<Value> {
         "check" => check(host).unwrap_or_else(Reply::fail),
         "scores" => scores(host, args).unwrap_or_else(Reply::fail),
         "sim" => sim(host, args).unwrap_or_else(Reply::fail),
+        "run_test" => run_test(host, args).unwrap_or_else(Reply::fail),
         "query_refs" => query_refs(host, args).unwrap_or_else(Reply::fail),
         "focus" => focus(host, args).unwrap_or_else(Reply::fail),
         "snapshot" => snapshot(host, args).unwrap_or_else(Reply::fail),
@@ -282,6 +299,36 @@ fn sim(host: &dyn Host, args: &Value) -> Result<Reply, String> {
             is_error: true,
         },
     })
+}
+
+/// The package's tests, played as the CLI plays them (`playtest::run_package`) on a thread of their own.
+fn run_test(host: &dyn Host, args: &Value) -> Result<Reply, String> {
+    let name = optional(args, "name")?.map(str::to_string);
+    let seeds = number(args, "seeds")?;
+    if let Some(n) = seeds {
+        if !(1..=MAX_SEEDS).contains(&n) {
+            return Err(format!("`seeds` must be between 1 and {MAX_SEEDS}"));
+        }
+    }
+    let job = host.job()?;
+    let install = job.install.clone();
+    let root = job.root.clone();
+    let built = built(job)?;
+    if built.report.has_errors() {
+        // The CLI stops here too: a package with errors does not play its tests.
+        return Ok(Reply { content: vec![text(built.report.to_json())], is_error: true });
+    }
+    let install = install.ok_or("the game's install is not found: set RAZDOR_DT_DIR, the tests play their maps on it")?;
+    let package = built.package;
+    let opts = TestOptions { only: name, seeds: seeds.map(|n| n as u32) };
+    // The tests run on their own thread: a panic in the engine is an answer, not a dead server.
+    let worker = thread::Builder::new()
+        .name("studio-tests".into())
+        .spawn(move || playtest::run_package(&package, &root, &install, &opts))
+        .map_err(|e| format!("cannot start the tests: {e}"))?;
+    let (results, _wall) = worker.join().map_err(|_| "the tests panicked".to_string())??;
+    let ok = playtest::all_ok(&results);
+    Ok(Reply { content: vec![text(playtest::json(&results).to_string())], is_error: !ok })
 }
 
 fn query_refs(host: &dyn Host, args: &Value) -> Result<Reply, String> {

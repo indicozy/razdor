@@ -332,6 +332,13 @@ Tests: the rebuild's own cases on DT inputs (`studio::richness`), the health che
 or dialog (`studio::health`), the JSON of both scores (`studio::mcp`). Snapshot options: `scores` (brod) and
 `scores-generated` (a copy of the generated map). The generator's default clock is the seed (see OPEN_QUESTIONS).
 
+**Package tests** (`tests/*.toml`, `pack::playtest`, the format in `docs/reference/rzpack-format.md`, «Tests»). A
+test is a playthrough of a map or of the campaign from its start, played by `pack::runner` (the engine the Rust
+playthroughs use: the hero walks, battles are auto-resolved, the campaign hands over on a `leave` step). `razdor-pack test`
+runs them over their seeds in parallel threads; the studio's MCP `run_test` tool gives the same JSON. Tests of the
+engine: `pack::playtest` (the reader, the checks, the expectations), `studio::mcp` (`run_test`); the example
+package's routes are the playthrough of «Пепельная Марка» (`examples/packs/pepelnaya-marka/tests/`).
+
 Studio UX, milestone UX1 (the foundation; spec `docs/superpowers/specs/2026-11-04-studio-ux-design.md`,
 sections 4, 8, 9, 11, 12, 13). `ui/studio/theme.rs` is the token set (colours, sizes, the 12 px text floor at
 the UI scale) applied in one place (`theme::apply`; the scale is egui's zoom factor). The UI font is Noto Sans
