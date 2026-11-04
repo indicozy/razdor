@@ -22,6 +22,18 @@ phase 2 of the studio).
 | UX5 | Сюжет and Данные | The story outline with search and tabs, the story/campaign graph switch; unit and item spreadsheets, the texts table moved here, the package form, files with the code editor, «Открыть в файле» | done |
 | UX6 | Тест, «Играть», command palette | Бой / ИИ / Оценка at full size with jumps to objects; «Играть» (F5: save, start the game on the current map from its hero start, back to the studio on close); the command palette (Ctrl+Shift+P actions, Ctrl+P go to object or file) | done |
 
+## Next: adapt the studio to format 2 (waits for format 2)
+
+The owner's decision (2026-11-05): the studio is adapted once, after `.rzpack` format 2 is built
+([`../specs/2026-11-05-rzpack-format-2-design.md`](../specs/2026-11-05-rzpack-format-2-design.md), on hold
+for now), not before. That one milestone covers:
+- format 2's files: names scoped to their map, the separate scenery file, texts per map, opening an old
+  package through `razdor-pack upgrade`;
+- «Проверить кампанию» in the Тест workspace: runs the package's `tests/*.toml` (`run_test`) and shows each
+  route's pass or fail, with the replay command of a failed seed;
+- the trigger and dialog forms built from the format vocabulary (`razdor-pack schema`), with its
+  «может, вы имели в виду …» hints in the Inspector.
+
 ## Later (not in this build)
 
 The first-run tour (at the stable release), the light theme (a second token set), user-created layers
