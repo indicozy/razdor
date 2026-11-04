@@ -718,3 +718,27 @@ id = "poi_bridge"
 map = "marka"
 when = { event = "hero_enters", at = [55, 43, 4, 4] }
 then = [ { dialog = "poi_bridge" } ]
+
+# ---- the meetings: the Crown's patrols and the caravan greet the hero (hero_meets_army). A greeting that fires
+# means no battle; its choices fight the army. Each meeting greets (once = false): the patrols walk their loops.
+
+[[trigger]]
+id = "m_meet_patrol_w"
+map = "marka"
+when = { event = "hero_meets_army", army = "patrol_w" }
+once = false
+then = [ { dialog = "meet_patrol_w" } ]
+
+[[trigger]]
+id = "m_meet_patrol_n"
+map = "marka"
+when = { event = "hero_meets_army", army = "patrol_n" }
+once = false
+then = [ { dialog = "meet_patrol_n" } ]
+
+[[trigger]]
+id = "m_meet_caravan"
+map = "marka"
+when = { event = "hero_meets_army", army = "caravan" }
+once = false
+then = [ { dialog = "meet_caravan" } ]

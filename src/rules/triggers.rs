@@ -110,6 +110,9 @@ pub enum When {
     /// As a trigger: an army's arrival at a cell and/or in a building, each if given (`None`:
     /// any). Raised with the cell of an arrival at its goal, and its building if it has one.
     ArmyArrives { army: ArmyId, at: Option<(i32, i32)>, building: Option<u16> },
+    /// As a trigger: the hero meets this army (he steps onto it, or it greets him). Raised by the
+    /// meeting itself, before any battle (`Game::meet_as`); a trigger that fires there stops the battle.
+    HeroMeetsArmy(ArmyId),
 }
 
 /// Whose units, items or spells an action or a condition looks at.
@@ -695,6 +698,7 @@ impl Builder<'_> {
                 };
                 When::ArmyArrives { army: self.army(army)?, at: *at, building }
             }
+            pt::Event::HeroMeetsArmy(army) => When::HeroMeetsArmy(self.army(army)?),
         })
     }
 
@@ -867,6 +871,7 @@ fn moment_name(story: &Story, when: &When) -> String {
             }
             text
         }
+        When::HeroMeetsArmy(a) => format!("hero_meets_army {}", army(a)),
     }
 }
 
@@ -1032,8 +1037,14 @@ impl Game {
 
     /// Runs the triggers for each raised moment in the queue, in order, and hands on the dialogs
     /// they opened. A variable's change queues its `var_changed` moment.
-    fn run_queue(&mut self, story: &Story, mut queue: VecDeque<When>) -> Vec<Event> {
+    fn run_queue(&mut self, story: &Story, queue: VecDeque<When>) -> Vec<Event> {
+        self.run_queue_counted(story, queue).0
+    }
+
+    /// [`Game::run_queue`], also telling whether any trigger fired (its conditions and chance held).
+    fn run_queue_counted(&mut self, story: &Story, mut queue: VecDeque<When>) -> (Vec<Event>, bool) {
         let mut runs = 0;
+        let mut fired_any = false;
         while let Some(when) = queue.pop_front() {
             runs += 1;
             if runs > MAX_RUNS {
@@ -1053,13 +1064,28 @@ impl Game {
                 if t.once {
                     self.triggers.fired.insert(t.id.clone());
                 }
+                fired_any = true;
                 self.note(Trace::Fired { trigger: t.id.clone(), moment: moment_name(story, &when) });
                 for a in &t.then {
                     self.act(a, story, &mut queue);
                 }
             }
         }
-        std::mem::take(&mut self.triggers.dialogs).into_iter().map(Event::Package).collect()
+        (std::mem::take(&mut self.triggers.dialogs).into_iter().map(Event::Package).collect(), fired_any)
+    }
+
+    /// The package's meeting triggers for army `id` (`hero_meets_army`), run at a meeting (see
+    /// `Game::meet_as`). Returns their events, and whether any trigger fired: then the meeting
+    /// stops the battle. A trigger's `start_battle` joins the events as the battle they start.
+    pub(crate) fn story_meet(&mut self, id: ArmyId) -> (Vec<Event>, bool) {
+        let Some(story) = self.story.clone() else { return (Vec::new(), false) };
+        let (mut events, fired) = self.run_queue_counted(&story, VecDeque::from([When::HeroMeetsArmy(id)]));
+        // A battle a trigger started (`start_battle`) is a battle the meeting's events started, so
+        // it comes back as an `Encounter` (the event's own battle, not a cancel of the meeting's).
+        for e in std::mem::take(&mut self.effect_events) {
+            events.push(e);
+        }
+        (events, fired)
     }
 
     /// What a battle's end is compared with: the armies beaten and the buildings taken so far.
@@ -2087,6 +2113,28 @@ mod tests {
         assert_eq!((active.len(), active[0].chapter), (1, 1), "updated on the next map, it is listed there");
     }
 
+
+    #[test]
+    fn a_meeting_trigger_fires_for_its_army_and_a_once_one_only_once() {
+        let mut g = game();
+        let greet = trig("greet", When::HeroMeetsArmy(7), vec![], vec![Act::Add { name: "greeted".into(), value: 1, min: None, max: None }]);
+        g.attach_story(story(&[("greeted", VarValue::Int(0))], vec![greet], vec![]));
+        assert!(!g.story_meet(8).1, "another army: no trigger fires");
+        assert!(g.story_meet(7).1, "its meeting fires the trigger");
+        assert_eq!(g.story_var("greeted"), Some(VarValue::Int(1)));
+        assert!(!g.story_meet(7).1, "a once trigger is spent by its first meeting");
+    }
+
+    #[test]
+    fn a_meeting_trigger_that_fires_without_a_dialog_still_counts_as_fired() {
+        let mut g = game();
+        let quiet = Trigger { once: false, ..trig("quiet", When::HeroMeetsArmy(7), vec![], vec![Act::Set("seen".into(), VarValue::Bool(true))]) };
+        g.attach_story(story(&[("seen", VarValue::Bool(false))], vec![quiet], vec![]));
+        let (events, fired) = g.story_meet(7);
+        assert!(fired, "its actions ran");
+        assert!(events.is_empty(), "no window opened: {events:?}");
+        assert_eq!(g.story_var("seen"), Some(VarValue::Bool(true)));
+    }
 }
 
 #[cfg(test)]

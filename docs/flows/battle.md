@@ -22,6 +22,8 @@ hero steps onto an army ─ src/rules/game.rs  Game::step (StepContact::Army)
    └─ src/rules/script.rs  Game::engage → Game::meet_as
          runs the scenario events with this army as the "met army";
          a battle opens only if no event stopped on a window (message or question)
+         then the package's `hero_meets_army` triggers for it (src/rules/triggers.rs story_meet):
+         a trigger that fires (its `if` holds) counts as an event that stopped the walk: no battle
 hero steps onto a defended building ─ Game::step (StepContact::Garrison) → foe = Foe::Garrison(l)
 an AI army reaches the hero ─ Game::ai_contact → Game::meet (attack = Event::Encounter)
 a scenario event starts one ─ src/rules/script.rs  start_battle(army) → effect_events

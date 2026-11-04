@@ -364,3 +364,51 @@ text = "marka.poi_reeds.text"
 id = "poi_bridge"
 title = "marka.poi_bridge.title"
 text = "marka.poi_bridge.text"
+
+# ---- the meetings: the Crown's patrols and the caravan greet the hero (triggers/marka.toml, hero_meets_army).
+# The choices let him ride on, or fight the army (start_battle); attacking the Crown costs its standing.
+
+[[dialog]]
+id = "meet_patrol_w"
+title = "marka.meet_patrol_w.title"
+text = "marka.meet_patrol_w.text"
+speaker = "dt:halberdier"
+
+[[dialog.choice]]
+id = "pass"
+text = "marka.meet_patrol.pass"
+
+[[dialog.choice]]
+id = "attack"
+text = "marka.meet_patrol.attack"
+then = [ { add = "crown", value = -2, min = -5, max = 5 }, { start_battle = "patrol_w", rules = "dt" } ]
+
+[[dialog]]
+id = "meet_patrol_n"
+title = "marka.meet_patrol_n.title"
+text = "marka.meet_patrol_n.text"
+speaker = "dt:halberdier"
+
+[[dialog.choice]]
+id = "pass"
+text = "marka.meet_patrol.pass"
+
+[[dialog.choice]]
+id = "attack"
+text = "marka.meet_patrol.attack"
+then = [ { add = "crown", value = -2, min = -5, max = 5 }, { start_battle = "patrol_n", rules = "dt" } ]
+
+[[dialog]]
+id = "meet_caravan"
+title = "marka.meet_caravan.title"
+text = "marka.meet_caravan.text"
+speaker = "dt:militiaman"
+
+[[dialog.choice]]
+id = "pass"
+text = "marka.meet_caravan.pass"
+
+[[dialog.choice]]
+id = "attack"
+text = "marka.meet_caravan.attack"
+then = [ { add = "crown", value = -1, min = -5, max = 5 }, { start_battle = "caravan", rules = "dt" } ]

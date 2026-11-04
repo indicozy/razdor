@@ -18,7 +18,7 @@ use super::load::{Located, Package};
 use super::refs::{valid_id, DtKind, Ref};
 
 /// The events a trigger can wait for (`when`).
-pub const EVENTS: [&str; 13] = [
+pub const EVENTS: [&str; 14] = [
     "game_start",
     "day_start",
     "week_start",
@@ -32,6 +32,7 @@ pub const EVENTS: [&str; 13] = [
     "dialog_choice",
     "var_changed",
     "army_arrives",
+    "hero_meets_army",
 ];
 /// The conditions (`if`). Each is a table with one of these keys (its kind).
 pub const CONDITIONS: [&str; 10] = ["var", "random", "hero_at", "army_at", "has_named_unit", "has_item", "gold", "army_alive", "building_owner", "has_spell"];
@@ -343,6 +344,10 @@ pub enum Event {
     /// An army with a goal reaches it: at a cell (`at`), or in a building (`building`); none:
     /// any arrival of the army at its goal.
     ArmyArrives { army: String, at: Option<(i32, i32)>, building: Option<String> },
+    /// The hero meets an army: he steps onto it, or it greets him. Its triggers run before any battle; one
+    /// that fires (its `if` holds) means no battle, and the army forgets him for now (the original's meeting
+    /// events, `Game::meet_as`). No trigger fires: the battle is as before (a hostile army, or a step onto any).
+    HeroMeetsArmy(String),
 }
 
 /// A cell or an area of the map: `[x, y]` or `[x, y, w, h]`.
@@ -682,6 +687,10 @@ pub fn parse_event(t: &Table) -> Res<Event> {
                 return bad("`army_arrives` takes `at` or `building`, not both", "a cell, or the building the goal names");
             }
             Ok(Event::ArmyArrives { army, at, building })
+        }
+        "hero_meets_army" => {
+            rest(&["army"])?;
+            Ok(Event::HeroMeetsArmy(name_of(need(t, "hero_meets_army", "army")?, "army")?))
         }
         other => bad(format!("unknown event `{other}`"), closest(other, EVENTS).map_or_else(|| format!("events are: {}", EVENTS.join(", ")), |n| format!("did you mean `{n}`?"))),
     }
@@ -1370,7 +1379,7 @@ impl Scope<'_, '_> {
         match &t.when {
             Event::HeroEnters(p) => self.place(file, line, "hero_enters", p),
             Event::HeroEntersBuilding(b) | Event::BuildingCaptured(b) | Event::BuildingLost(b) => self.building(file, line, b),
-            Event::ArmyDefeated(a) => self.army(file, line, a),
+            Event::ArmyDefeated(a) | Event::HeroMeetsArmy(a) => self.army(file, line, a),
             Event::ArmyArrives { army, at, building } => {
                 self.army(file, line, army);
                 if let Some((x, y)) = at {
@@ -1647,6 +1656,13 @@ mod tests {
         );
         assert_eq!(parse_cond(&table("army_alive = \"caravan\"\nvalue = false")), Ok(Cond::ArmyAlive { army: "caravan".into(), alive: false }));
         assert!(parse_cond(&table("army_alive = \"caravan\"\nvalue = 1")).unwrap_err().message.contains("true or false"));
+    }
+
+    #[test]
+    fn hero_meets_army_reads_its_army() {
+        assert_eq!(parse_event(&table("event = \"hero_meets_army\"\narmy = \"patrol_w\"")), Ok(Event::HeroMeetsArmy("patrol_w".into())));
+        assert!(parse_event(&table("event = \"hero_meets_army\"")).is_err(), "a meeting names its army");
+        assert!(parse_event(&table("event = \"hero_meets_army\"\narmy = \"e\"\ncell = [1, 2]")).is_err(), "no other key");
     }
 
     #[test]
@@ -2163,5 +2179,17 @@ mod map_refs_tests {
         assert_eq!(errors(story, dialogs), "", "a choice's quest is one a trigger may complete");
         let missing = "[[trigger]]\nid = \"a\"\nwhen = { event = \"game_start\" }\nthen = [ { quest = \"ford\", title = \"t.nope\", text = \"t.x\" } ]\n";
         assert!(errors(missing, "").contains("text key `t.nope` has no text in any language"), "a quest's title is a text key");
+    }
+
+    #[test]
+    fn a_meeting_names_an_army_its_map_or_a_spawn_has() {
+        let dialogs = "[[dialog]]\nid = \"d\"\ntitle = \"t.x\"\ntext = \"t.x\"\n";
+        let ok = "[[trigger]]\nid = \"a\"\nwhen = { event = \"hero_meets_army\", army = \"e\" }\nthen = [ { dialog = \"d\" } ]\n";
+        assert_eq!(errors(ok, dialogs), "", "the map's army");
+        let spawned = "[[trigger]]\nid = \"a\"\nwhen = { event = \"day_start\" }\nthen = [ { spawn_army = \"host\", at = [20, 20], faction = \"ally\", model = 5, troops = [\"dt:bandit\"] } ]\n\n[[trigger]]\nid = \"b\"\nwhen = { event = \"hero_meets_army\", army = \"host\" }\nthen = [ { dialog = \"d\" } ]\n";
+        assert_eq!(errors(spawned, dialogs), "", "a spawned army");
+        let missing = "[[trigger]]\nid = \"a\"\nwhen = { event = \"hero_meets_army\", army = \"ghost\" }\nthen = [ { dialog = \"d\" } ]\n";
+        let e = errors(missing, dialogs);
+        assert!(e.contains("no army `ghost` in map `m`"), "{e}");
     }
 }

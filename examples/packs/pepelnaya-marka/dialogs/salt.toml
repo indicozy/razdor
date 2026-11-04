@@ -118,3 +118,67 @@ speaker = "dt:bandit"
 id = "salt_bones"
 title = "salt.bones.title"
 text = "salt.bones.text"
+
+# ---- the meetings: the Crown's men greet the disguised hero, and the marsh ghosts greet every walker
+# (triggers/salt.toml, hero_meets_army). A fight in disguise is a reveal: the figure is his again, the Crown's
+# men are hostile, the bounty men hunt him (the same as the «salt_caught» draw).
+
+[[dialog]]
+id = "meet_patrol_north"
+title = "salt.meet_patrol_north.title"
+text = "salt.meet_patrol_north.text"
+speaker = "dt:guardsman"
+
+[[dialog.choice]]
+id = "pass"
+text = "salt.meet.pass"
+
+[[dialog.choice]]
+id = "attack"
+text = "salt.meet.attack"
+then = [
+    { set = "salt_disguise", value = false },
+    { set = "salt_hunting", value = true },
+    { hero_figure = "default" },
+    { set_relation = "patrol_north", towards = "player", value = -3 },
+    { set_relation = "bounty", towards = "player", value = -3 },
+    { army_goal = "bounty", follow = "hero" },
+    { start_battle = "patrol_north", rules = "dt" },
+]
+
+[[dialog]]
+id = "meet_bounty"
+title = "salt.meet_bounty.title"
+text = "salt.meet_bounty.text"
+speaker = "dt:hunter"
+
+[[dialog.choice]]
+id = "pass"
+text = "salt.meet.pass"
+
+[[dialog.choice]]
+id = "attack"
+text = "salt.meet.attack"
+then = [
+    { set = "salt_disguise", value = false },
+    { set = "salt_hunting", value = true },
+    { hero_figure = "default" },
+    { set_relation = "patrol_north", towards = "player", value = -3 },
+    { set_relation = "bounty", towards = "player", value = -3 },
+    { start_battle = "bounty", rules = "dt" },
+]
+
+[[dialog]]
+id = "meet_bog_ghosts"
+title = "salt.meet_bog_ghosts.title"
+text = "salt.meet_bog_ghosts.text"
+speaker = "dt:ghost"
+
+[[dialog.choice]]
+id = "pass"
+text = "salt.meet.pass"
+
+[[dialog.choice]]
+id = "attack"
+text = "salt.meet_bog_ghosts.attack"
+then = [ { add = "marsh_trust", value = -2, min = -5, max = 5 }, { start_battle = "bog_ghosts", rules = "dt" } ]

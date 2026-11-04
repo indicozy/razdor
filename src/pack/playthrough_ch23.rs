@@ -175,4 +175,44 @@ mod tests {
         eprintln!("the marka roads: {} cells, {} beats, the longest gap {gap} cells (path {from}..{to})", run.path.len() - 1, run.beats.len());
         assert!(gap <= 10, "the longest walk between beats on marka is {gap} cells: {:?}", &run.path[from..=to]);
     }
+
+    /// The army `name` of the story, where it stands now.
+    fn army_cell(run: &Run, name: &str) -> Option<crate::rules::map::Tile> {
+        let story = run.g.story()?;
+        let (&id, _) = story.army_names.iter().find(|(_, n)| n.as_str() == name)?;
+        run.g.world.armies.iter().find(|a| a.id == id).map(|a| a.tile(&run.g.world.map))
+    }
+
+    /// Walks the hero at the Crown's army `name` (its cell now; a patrol moves, so the walk is repeated)
+    /// until a greeting opens or a battle is fought. A walk the patrol's move cuts short is not an error.
+    fn meet_army(run: &mut Run, name: &str) -> Result<(), Stuck> {
+        for _ in 0..8 {
+            if run.log.iter().any(|l| l.contains(": dialog meet_") || l.contains("battle with")) {
+                return Ok(());
+            }
+            let Some(cell) = army_cell(run, name) else { return Err(Stuck::Broken(format!("no army {name} on the map"))) };
+            match run.walk_to(cell, 4) {
+                Ok(()) | Err(Stuck::Late { .. }) => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
+    }
+
+    /// The Crown's patrol on the west road greets the hero when he walks into it: the greeting opens and no
+    /// battle starts. Its «Напасть на патруль» starts the fight with that patrol (`start_battle`).
+    #[test]
+    fn the_crown_patrol_greets_the_hero_and_its_attack_starts_the_fight() {
+        let Some(install) = install() else { return };
+        let mut run = into_marka(&install, 1, &[]).unwrap_or_else(|e| panic!("{e}"));
+        meet_army(&mut run, "patrol_w").unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+        assert!(run.log.iter().any(|l| l.contains("dialog meet_patrol_w -> pass")), "the patrol greets him: {:?}", run.log);
+        assert!(run.battles.iter().all(|b| b.enemy != "patrol_w"), "a greeting is no battle: {:?}", run.battles);
+
+        let mut run = into_marka(&install, 1, &[("meet_patrol_w", "attack")]).unwrap_or_else(|e| panic!("{e}"));
+        let walked = meet_army(&mut run, "patrol_w");
+        assert!(run.log.iter().any(|l| l.contains("dialog meet_patrol_w -> attack")), "the attack is chosen: {:?}", run.log);
+        let fought = run.battles.iter().any(|b| b.enemy == "patrol_w") || matches!(&walked, Err(Stuck::Lost { enemy, .. }) if enemy == "patrol_w");
+        assert!(fought, "the attack starts the fight: {:?} {walked:?}\n{}", run.battles, run.log.join("\n"));
+    }
 }

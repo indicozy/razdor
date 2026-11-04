@@ -93,6 +93,7 @@ pub fn event_text(e: &Event) -> String {
         Event::DialogChoice { dialog, choice } => format!("dialog_choice {dialog}.{choice}"),
         Event::VarChanged(v) => format!("var_changed {v}"),
         Event::ArmyArrives { army, .. } => format!("army_arrives {army}"),
+        Event::HeroMeetsArmy(army) => format!("hero_meets_army {army}"),
     }
 }
 

@@ -804,7 +804,7 @@ pub fn band(score: i64) -> usize {
 /// | package | DT event (§6.2) |
 /// |---|---|
 /// | a trigger with a `quest` action | a quest (kind 3, 40 points) |
-/// | a trigger on `hero_enters`, `hero_enters_building`, `army_defeated`, `building_captured`, `building_lost`, `army_arrives`, `dialog_choice`, `var_changed` | local (kind 2, 15) |
+/// | a trigger on `hero_enters`, `hero_enters_building`, `army_defeated`, `building_captured`, `building_lost`, `army_arrives`, `hero_meets_army`, `dialog_choice`, `var_changed` | local (kind 2, 15) |
 /// | any other trigger (the day, the week, the game's start) | global (kind 1, 0) |
 /// | `hero_enters` | a met army (74, +10) |
 /// | `army_defeated`, or `army_alive = false` | defeated armies (53, +10) |
@@ -905,7 +905,7 @@ fn trigger_kind(t: &Trigger) -> u8 {
         return 3;
     }
     match t.when {
-        When::HeroEnters(_) | When::HeroEntersBuilding(_) | When::ArmyDefeated(_) | When::BuildingCaptured(_) | When::BuildingLost(_) | When::ArmyArrives { .. } | When::DialogChoice { .. } | When::VarChanged(_) => 2,
+        When::HeroEnters(_) | When::HeroEntersBuilding(_) | When::ArmyDefeated(_) | When::BuildingCaptured(_) | When::BuildingLost(_) | When::ArmyArrives { .. } | When::HeroMeetsArmy(_) | When::DialogChoice { .. } | When::VarChanged(_) => 2,
         _ => 1,
     }
 }

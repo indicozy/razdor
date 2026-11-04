@@ -128,3 +128,53 @@ id = "abbey_ilm_home"
 title = "abbey.ilm_home.title"
 text = "abbey.ilm_home.text"
 speaker = "dt:pilgrim"
+
+# ---- the meeting: the Order's inquisitors greet the hero on the road (triggers/abbey.toml, hero_meets_army).
+# A tainted hero in the Order's disfavour is judged instead (`abbey_inquisition`): they never greet him then,
+# and the fight is theirs. The attack choice costs the Order's favour.
+
+[[dialog]]
+id = "meet_inquisitors"
+title = "abbey.meet_inquisitors.title"
+text = "abbey.meet_inquisitors.text"
+speaker = "dt:inquisitor"
+
+[[dialog.choice]]
+id = "pass"
+text = "abbey.meet_inquisitors.pass"
+if = [ { var = "inq_at_gate", value = false } ]
+
+# At the gate they step aside: the hero walks on to the abbey, and the inquisitors ride back north.
+[[dialog.choice]]
+id = "yield"
+text = "abbey.meet_inquisitors.yield"
+if = [ { var = "inq_at_gate", value = true } ]
+then = [ { army_goal = "inquisitors", go_to = [50, 4] } ]
+
+[[dialog.choice]]
+id = "attack"
+text = "abbey.meet_inquisitors.attack"
+then = [ { add = "order", value = -1, min = -5, max = 5 }, { start_battle = "inquisitors", rules = "dt" } ]
+
+[[dialog]]
+id = "meet_inquisitors_judging"
+title = "abbey.meet_inquisitors.title"
+text = "abbey.meet_inquisitors.judging"
+speaker = "dt:inquisitor"
+
+[[dialog.choice]]
+id = "pass"
+text = "abbey.meet_inquisitors.pass"
+if = [ { var = "inq_at_gate", value = false } ]
+
+# At the gate they step aside: the hero walks on to the abbey, and the inquisitors ride back north.
+[[dialog.choice]]
+id = "yield"
+text = "abbey.meet_inquisitors.yield"
+if = [ { var = "inq_at_gate", value = true } ]
+then = [ { army_goal = "inquisitors", go_to = [50, 4] } ]
+
+[[dialog.choice]]
+id = "attack"
+text = "abbey.meet_inquisitors.attack"
+then = [ { add = "order", value = -1, min = -5, max = 5 }, { start_battle = "inquisitors", rules = "dt" } ]

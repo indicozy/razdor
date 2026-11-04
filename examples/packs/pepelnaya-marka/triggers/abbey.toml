@@ -18,6 +18,7 @@ abbey_siege = false         # the dead have been sent at the abbey
 abbey_siege_fight = false   # the siege battle has begun (once)
 abbey_alder = 0             # Ольховка: 0 not judged, 1 burned, 2 spared, 3 ridden past
 abbey_siege_due = false     # the trial is judged: the dead march on the abbey the next midnight
+inq_at_gate = false        # the inquisitors stand at the gate (they yield the way to the hero then)
 
 # The story starts: the Order's letter, the inquisitors ride to the abbey, the dead walk their patrol.
 [[trigger]]
@@ -48,6 +49,7 @@ when = { event = "army_arrives", army = "inquisitors", building = "abbey" }
 then = [
     { dialog = "abbey_inquisitors" },
     { complete_quest = "abbey_inquisitors" },
+    { set = "inq_at_gate", value = true },
     { quest = "abbey_alder", title = "quest.abbey_alder.title", text = "quest.abbey_alder.text" },
 ]
 
@@ -383,3 +385,22 @@ id = "abbey_sim_end"
 map = "abbey"
 when = { event = "sim_victory" }
 then = [ { set = "abbey_done", value = true } ]
+
+# ---- the meeting: the inquisitors greet the hero on the road (hero_meets_army). Two greetings, exclusive, and
+# neither in the verdict's case (a tainted hero in the Order's disfavour, judged by `abbey_inquisition`): then
+# the fight is theirs, and no greeting stops it.
+[[trigger]]
+id = "abbey_meet_inquisitors"
+map = "abbey"
+when = { event = "hero_meets_army", army = "inquisitors" }
+once = false
+if = [ { var = "order", op = ">", value = -2 } ]
+then = [ { dialog = "meet_inquisitors" } ]
+
+[[trigger]]
+id = "abbey_meet_inquisitors_judging"
+map = "abbey"
+when = { event = "hero_meets_army", army = "inquisitors" }
+once = false
+if = [ { var = "order", op = "<=", value = -2 }, { var = "taint", op = "<", value = 4 } ]
+then = [ { dialog = "meet_inquisitors_judging" } ]

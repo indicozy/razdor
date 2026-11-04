@@ -1513,3 +1513,48 @@ text = "The Crown's tax wagon crosses the causeway. Stop it: Crown −1, +30 gol
 [quest.salt_reedmere]
 title = "Reedmere"
 text = "The witch sent word through Tess. Find the marsh folk on their dry island."
+
+# ---- the meetings (dialogs/*.toml, hero_meets_army): a greeting, then the choice to ride on or to fight ----
+
+[marka.meet_patrol_w]
+title = "The Crown's patrol"
+text = "Ride on, traveller. This road is under the Crown's guard."
+
+[marka.meet_patrol_n]
+title = "The northern patrol"
+text = "Halt! All right, ride on. The northern road is under the Crown's guard, and keep your eyes open: there has been robbery here of late."
+
+[marka.meet_patrol]
+pass = "Ride on"
+attack = "Attack the patrol"
+
+[marka.meet_caravan]
+title = "The Crown's caravan"
+text = "The caravan's head waves you off the road: “Don't drift off it. If you're bound for the Free Companies, fall in. Safer in company.”"
+pass = "Ride past"
+attack = "Attack the caravan"
+
+[abbey.meet_inquisitors]
+title = "Inquisitors"
+text = "The inquisitor raises a hand: “Blessed be your road, traveller. The Order is not looking for you. Yet.”"
+judging = "The inquisitor looks at you a moment too long: “There is heresy on you. Go on, before we decide otherwise.”"
+pass = "Ride on"
+yield = "Ride on. Let them go back to the Order"
+attack = "Attack the inquisitors"
+
+[salt.meet_patrol_north]
+title = "The Crown's patrol"
+text = "Ride on, bandit. The Crown is hunting others today."
+
+[salt.meet_bounty]
+title = "Bounty hunters"
+text = "A hunter squints at your scarf: “A bandit? Lucky for you, we have other game today. Ride on.”"
+
+[salt.meet_bog_ghosts]
+title = "Bog ghosts"
+text = "The cold comes out of the fog. A voice without a face: “You chose this road, walker of the bog. Go on.”"
+attack = "Scatter the ghosts"
+
+[salt.meet]
+pass = "Ride on"
+attack = "Attack"

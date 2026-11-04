@@ -338,3 +338,28 @@ id = "salt_sim_end"
 map = "salt"
 when = { event = "sim_victory" }
 then = [ { set = "salt_done", value = true } ]
+
+# ---- the meetings: the Crown's men greet the disguised hero, and the ghosts greet every walker
+# (hero_meets_army). Found out (salt_disguise false), the Crown's men are hostile: no greeting, the fight as before.
+[[trigger]]
+id = "salt_meet_patrol"
+map = "salt"
+when = { event = "hero_meets_army", army = "patrol_north" }
+once = false
+if = [ { var = "salt_disguise", value = true } ]
+then = [ { dialog = "meet_patrol_north" } ]
+
+[[trigger]]
+id = "salt_meet_bounty"
+map = "salt"
+when = { event = "hero_meets_army", army = "bounty" }
+once = false
+if = [ { var = "salt_disguise", value = true } ]
+then = [ { dialog = "meet_bounty" } ]
+
+[[trigger]]
+id = "salt_meet_ghosts"
+map = "salt"
+when = { event = "hero_meets_army", army = "bog_ghosts" }
+once = false
+then = [ { dialog = "meet_bog_ghosts" } ]

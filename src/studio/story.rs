@@ -161,6 +161,7 @@ static EVENT_SPECS: &[KindSpec] = &[
     k("dialog_choice", None, &[req("dialog", Arg::Dialog), req("choice", Arg::Choice)]),
     k("var_changed", None, &[req("var", Arg::Var)]),
     k("army_arrives", None, &[req("army", Arg::Army), grp_opt("at", Arg::Cell, "where"), grp_opt("building", Arg::Building, "where")]),
+    k("hero_meets_army", None, &[req("army", Arg::Army)]),
 ];
 
 static COND_SPECS: &[KindSpec] = &[

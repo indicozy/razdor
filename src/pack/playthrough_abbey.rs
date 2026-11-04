@@ -132,7 +132,13 @@ fn the_siege_starts_when_the_hero_walks_into_the_abbey_after_the_dead_came() {
     run.walk_to(GATE_SOUTH, 6).unwrap_or_else(|e| panic!("{e}"));
     run.wait_days(14).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
     assert!(run.battles.is_empty(), "a waiting hero outside is not attacked: {:?}", run.log);
+    // The inquisitors on the abbey's cell greet him and yield the way: the greeting ends his step on the
+    // cell, outside the entry, so he steps back out and in (as a player does), and the walk enters the abbey.
     run.walk_to(ABBEY, 2).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+    if run.log.iter().any(|l| l.contains("dialog meet_inquisitors")) {
+        run.walk_to(GATE_SOUTH, 2).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+        run.walk_to(ABBEY, 2).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
+    }
     run.wait_until_done(5).unwrap_or_else(|e| panic!("{e}\n{}", run.log.join("\n")));
     assert!(run.victory(), "{}", run.log.join("\n"));
     assert_eq!(run.battles.iter().filter(|b| b.enemy == "dead_wave").count(), 1, "{}", run.log.join("\n"));

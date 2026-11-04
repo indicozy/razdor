@@ -88,7 +88,7 @@ An editor needs this for autocomplete, safe rename, safe delete ("used by 3 trig
 | set, add, random_var, var cond, var_changed, campaign `if` | var | `[vars]` name |
 | dialog action, `ending`, dialog_choice event | dialog (+ choice) | dialog id / choice id |
 | quest, complete_quest | quest | a quest id: `quest` actions of the package add it (any trigger or dialog choice); `complete_quest` only names one that some `quest` adds |
-| army_defeated, army_arrives, army_at, army_alive, army_goal, army_speed, army_figure, remove_army, teleport_army, start_battle, set_faction/set_relation `of` army, holders `in = "<army>"` | army | army id of the trigger's map, or an id a `spawn_army` creates |
+| hero_meets_army, army_defeated, army_arrives, army_at, army_alive, army_goal, army_speed, army_figure, remove_army, teleport_army, start_battle, set_faction/set_relation `of` army, holders `in = "<army>"` | army | army id of the trigger's map, or an id a `spawn_army` creates |
 | hero_enters_building, building_captured/lost, building_owner, go_to_building, teleport_army `to`, `garrison = "<b>"` | building | building id of the trigger's map |
 | victory `defeat_army` / `capture` | army / building | its map |
 | travel `at`, campaign entry | point | `[[point]] id` of the target map |

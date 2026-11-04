@@ -234,12 +234,12 @@ impl Game {
             return false;
         };
         let id = self.world.armies[i].id;
-        if id == 0 || self.script.is_none() {
+        if id == 0 || (self.script.is_none() && self.story.is_none()) {
             events.push(e);
             return false;
         }
         self.met_armies.insert(id);
-        let after = match self.script.take() {
+        let mut after = match self.script.take() {
             Some(mut engine) => {
                 let out = engine.meet(self, id);
                 self.script = Some(engine);
@@ -247,13 +247,17 @@ impl Game {
             }
             None => Vec::new(),
         };
+        // The package's own meeting triggers (`hero_meets_army`) run after the scenario's events. A
+        // trigger that fired counts as an event that fired (no battle, the army forgets him).
+        let (story, story_fired) = self.story_meet(id);
+        after.extend(story);
         let now = self.world.armies.iter().position(|a| a.id == id);
         // The scan counts as having fired only when it stops on an event's window (a message
         // or a question; 0x4abfbc returns 1 then): silent events fire, finish and the scan
         // goes on, and when it runs out it returns 0 (0x4a7b80 clears the silent-run flag
         // 0x674966 on each event that does not pass), so the battle opens all the same.
         // РК4's «- Колдуны мертвы» fires silently on every scan once the warlocks are beaten.
-        let fired = after.iter().any(super::game::fires);
+        let fired = after.iter().any(super::game::fires) || story_fired;
         // A step's `Encounter` is already decided by `Game::hero_step` (hostile, clicked, or any
         // army with the option off), so it fights; an attack fights only a hostile army.
         let fights = |a: &Army| on_step || a.hostile();
@@ -3267,6 +3271,82 @@ mod tests {
         g.set_hero_name(" ");
         assert_eq!(g.hero_name(), name, "an empty name is the class's");
     }
+
+    /// A package story with one meeting trigger for army `2`: its dialog `greet` offers «pass» and «attack»
+    /// (the latter starts the battle with the army, `start_battle` with `dt`). `cond` gates the greeting.
+    fn meeting_story(cond: Vec<crate::rules::triggers::Cond>) -> crate::rules::triggers::Story {
+        use crate::rules::triggers::{Act, Choice, DialogDef, Story, Trigger, When};
+        use crate::pack::triggers::VarKind;
+        let greet = Trigger { id: "greet".into(), when: When::HeroMeetsArmy(2), cond, then: vec![Act::Dialog("greet".into())], once: false, chance: 100 };
+        let choice = |id: &str, then: Vec<Act>| Choice { id: id.into(), text: id.into(), cond: vec![], then };
+        let greet_dialog = DialogDef {
+            id: "greet".into(),
+            title: "t".into(),
+            text: "x".into(),
+            speaker: None,
+            choices: vec![choice("pass", vec![]), choice("attack", vec![Act::StartBattle(2, "dt".into())])],
+        };
+        let vars = [("dread".to_string(), (VarKind::Int, crate::pack::triggers::VarValue::Int(0)))].into_iter().collect();
+        Story { vars, triggers: vec![greet], dialogs: vec![greet_dialog], ..Story::default() }
+    }
+
+    /// A patrol-like army `2` (hostile at -2, or friendly at 2) standing at (6, 2), the hero two cells west.
+    fn meeting_game(attitude: i8) -> Game {
+        let mut s = world(vec![]);
+        let mut guard = army(2, 6, 2, attitude, &[troop(4, 0, 1)]);
+        (guard.patrols, guard.patrol_radius) = (1, 0);
+        s.armies = vec![guard];
+        let mut g = start(&s);
+        read(&mut g);
+        g
+    }
+
+    #[test]
+    fn a_greeting_stops_the_battle_for_a_friend_and_a_foe_and_its_choice_starts_it() {
+        // `hero_meets_army`: a trigger that fires at the meeting means no battle, and the army forgets him
+        // for now (0x4ad94c, 0x4ade3c). Its dialog's «attack» starts the battle with it.
+        for attitude in [-2, 2] {
+            let mut g = meeting_game(attitude);
+            g.attach_story(meeting_story(vec![]));
+            assert!(g.set_destination((6, 2)));
+            let events = walk(&mut g);
+            assert!(events.iter().any(|e| matches!(e, Event::Package(d) if d.id == "greet")), "{attitude}: {events:?}");
+            assert!(!events.iter().any(|e| matches!(e, Event::Encounter(_))), "{attitude}: no battle: {events:?}");
+            assert_eq!((g.foe, g.tile(), g.world.armies[0].talk), (None, (5, 2), super::super::game::TALKED), "{attitude}");
+            let mut fight = meeting_game(attitude);
+            fight.attach_story(meeting_story(vec![]));
+            assert!(fight.set_destination((6, 2)));
+            walk(&mut fight);
+            fight.answer_story_dialog("greet", Some("attack"));
+            assert_eq!(fight.foe, Some(Foe::Army(0)), "{attitude}: the choice starts the battle");
+        }
+    }
+
+    #[test]
+    fn a_greeting_that_does_not_fire_leaves_the_battle_as_before() {
+        // The trigger's `if` fails: nothing fired, so the army is fought as the original fights it: a
+        // hostile one always, a friendly one on a step (the «Let pass» option is off).
+        for attitude in [-2, 2] {
+            let mut g = meeting_game(attitude);
+            let gate = vec![crate::rules::triggers::Cond::Var { name: "dread".into(), cmp: crate::pack::triggers::Cmp::Ge, value: crate::pack::triggers::VarValue::Int(1) }];
+            g.attach_story(meeting_story(gate));
+            assert!(g.set_destination((6, 2)));
+            let events = walk(&mut g);
+            assert!(!events.iter().any(|e| matches!(e, Event::Package(_))), "{attitude}: {events:?}");
+            assert_eq!(events.last(), Some(&Event::Encounter(0)), "{attitude}: {events:?}");
+            assert_eq!(g.foe, Some(Foe::Army(0)), "{attitude}");
+        }
+    }
+
+    #[test]
+    fn a_greeting_pass_choice_leaves_the_hero_free_to_ride_on() {
+        let mut g = meeting_game(2);
+        g.attach_story(meeting_story(vec![]));
+        assert!(g.set_destination((6, 2)));
+        walk(&mut g);
+        g.answer_story_dialog("greet", Some("pass"));
+        assert_eq!(g.foe, None, "no battle after «pass»");
+    }
 }
 
 #[cfg(test)]
@@ -3648,4 +3728,3 @@ mod real_maps {
         assert!(g.foe.is_some(), "the battle with Warlock opens: {events:?}");
     }
 }
-

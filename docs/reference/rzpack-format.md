@@ -215,11 +215,21 @@ then = [ { give_gold = -20 } ]                      # optional actions
 | `hero_enters_building` | `building` | the hero enters a building |
 | `army_defeated` | `army` | the player beats an army (battle end) |
 | `army_arrives` | `army`, and `at` (a cell) or `building` (a building id), either or neither | an army with an `army_goal` reaches its cell (`go_to`, each `patrol` cell) or walks into its building (`go_to_building`); raised at the end of the AI's tick, at the arrival's minute |
+| `hero_meets_army` | `army` | the hero steps onto that army, or it greets him: its triggers run before any battle (below) |
 | `building_captured` | `building` | the hero takes a building (walking in, or its garrison beaten) |
 | `dialog_choice` | `dialog`, `choice` | the player picks that choice |
 | `var_changed` | `var` | a variable changes value |
 | `building_lost` | `building` | the player's building changes owner: the AI takes it (after the AI's tick), or a `set_faction` takes it |
 | `sim_victory` | | developer only: `razdor-pack sim --auto-win-after` raises it before a map's victory, so a story can play its last dialog (the game never raises it) |
+
+`hero_meets_army` is the meeting rule of the original: the army's triggers run when the hero steps onto it
+(a battle is what a step onto a hostile army, or any army with the «Let pass» option off, starts) or when it
+greets him. If a trigger for that army fires (its `if` holds and its `chance` passes), there is no battle:
+the army forgets him for now, and its dialog (if any) opens. A trigger that fires with no dialog (only its
+actions) counts too. If none fires, the battle is as before. To fight after the greeting, a choice takes
+`start_battle = "<army>", rules = "dt"`. A `once` trigger greets the first meeting only: the later meetings
+fight, so a greeting that should last is `once = false`. The package's armies are the trigger's map's (or a
+spawned one), checked by `razdor-pack check`.
 
 ### Conditions (`if`): all must hold, checked in order
 
