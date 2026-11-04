@@ -83,6 +83,8 @@ local! {
     static WANT: Cell<Shape> = const { Cell::new(Shape::Arrow) };
     /// A system pointer asked for this frame (Razdor's own drags, the studio's canvas).
     static SYSTEM: Cell<Option<CursorIcon>> = const { Cell::new(None) };
+    /// egui draws this frame's pointer (the studio): see `egui_pointer`.
+    static EGUI: Cell<bool> = const { Cell::new(false) };
     /// What the window shows now: the system pointer (with its icon) or none.
     static SHOWN: Cell<Option<Option<CursorIcon>>> = const { Cell::new(None) };
     /// The window has the keyboard focus, and its input subscriber.
@@ -93,6 +95,14 @@ local! {
 pub fn begin_frame() {
     WANT.with(|w| w.set(Shape::Arrow));
     SYSTEM.with(|s| s.set(None));
+    EGUI.with(|e| e.set(false));
+}
+
+/// This frame's pointer is egui's: a screen drawn with egui (the studio) sets it, and egui shows its own
+/// icon (its text cursor, its resize cursors). Razdor's pointer is not drawn over it (`draw`).
+#[cfg_attr(not(feature = "studio"), allow(dead_code))] // only the studio draws with egui
+pub fn egui_pointer(on: bool) {
+    EGUI.with(|e| e.set(on));
 }
 
 /// This frame's pointer is `s` (the last call wins).
@@ -161,6 +171,11 @@ fn show_system(icon: Option<CursorIcon>) {
 /// without the install's picture, the system pointer shows instead; outside the window
 /// nothing is drawn.
 pub fn draw() {
+    // egui's pointer (the studio): egui has set its icon this frame, Razdor draws nothing over it.
+    if EGUI.with(|e| e.get()) {
+        SHOWN.with(|s| s.set(None));
+        return;
+    }
     // The gestures (`ui::gestures`) have no pointer of their own: the finger is the pointer.
     if super::gestures::enabled() {
         show_system(None);

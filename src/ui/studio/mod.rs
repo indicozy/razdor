@@ -32,6 +32,10 @@ mod vars;
 pub(crate) mod scenarios;
 pub mod start;
 mod watch;
+mod commands;
+mod settings;
+mod theme;
+mod workspaces;
 
 use std::collections::BTreeMap;
 use std::ops::Range;
@@ -42,10 +46,13 @@ use std::time::{Duration, Instant};
 
 use egui::text::{CCursor, CCursorRange};
 use egui_macroquad::egui;
-use egui::{Align2, Button, Color32, CornerRadius, Key, KeyboardShortcut, Modifiers, ScrollArea, Sense, TextEdit, Ui, WidgetText};
-use egui_dock::{DockArea, DockState, NodeIndex, Style, TabViewer};
+use egui::{Align2, Button, Color32, ScrollArea, Sense, TextEdit, Ui, WidgetText};
+use egui_dock::{DockArea, DockState, Style, TabViewer};
+use egui_macroquad::egui::{Align, Id, Layout, Margin, RichText, Stroke};
+use egui_phosphor::regular as ic;
+use serde::{Deserialize, Serialize};
 use razdor::dt::install::DtInstall;
-use razdor::i18n::tr;
+use razdor::i18n::{n_, tr};
 use razdor::pack::diag::{Diagnostic, Severity};
 use razdor::pack::load::{line_of, Package};
 use razdor::pack::open::lang;
@@ -56,6 +63,10 @@ use razdor::studio::map::{choose_map, map_of_file, marks, selection_of, targets,
 use razdor::studio::worker::Worker;
 use razdor::studio::{is_text, unified, Edit, Installed, Kind, Locator, Reconcile, Workspace};
 use razdor::trf;
+
+use crate::ui::audio::StudioPrefs;
+use commands::{Clip, Scope};
+use workspaces::{default_dock, Drawer, WsKind};
 
 use crate::ui::dt_art::DtArt;
 use map_tab::{draw as draw_map_tab, switch_map, Canvas, Tool};
@@ -86,8 +97,9 @@ pub enum Action {
     Watch(Box<crate::ui::battle_view::BattleView>),
 }
 
-/// One dock tab. Godot 4's docks, after the studio's design.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// One dock tab. Godot 4's docks, after the studio's design. Saved layouts name a tab by its variant
+/// (serde) and its `key`: neither is translated, so a change of language keeps every layout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Tab {
     FileSystem,
     Scene,
@@ -123,6 +135,31 @@ pub enum Tab {
 }
 
 impl Tab {
+    /// The tab's fixed key: its dock id, which is not its title (the titles are translated).
+    pub fn key(self) -> &'static str {
+        match self {
+            Tab::FileSystem => "file-system",
+            Tab::Scene => "scene",
+            Tab::Map => "map",
+            Tab::Script => "script",
+            Tab::Inspector => "inspector",
+            Tab::Problems => "problems",
+            Tab::Output => "output",
+            Tab::Claude => "claude",
+            Tab::Minimap => "minimap",
+            Tab::Stamps => "stamps",
+            Tab::Campaign => "campaign",
+            Tab::Texts => "texts",
+            Tab::Characters => "characters",
+            Tab::Story => "story",
+            Tab::Vars => "vars",
+            Tab::Units => "units",
+            Tab::Items => "items",
+            Tab::Battle => "battle",
+            Tab::Scores => "scores",
+        }
+    }
+
     fn title(self) -> &'static str {
         match self {
             Tab::FileSystem => tr("File system"),
@@ -166,7 +203,26 @@ struct Conflict {
 /// The studio's state for one open package folder.
 pub struct StudioScreen {
     ws: Workspace,
-    dock: DockState<Tab>,
+    /// The four workspaces' docks, in `WsKind::ALL` order, and the shown one (`ws_kind`).
+    docks: [DockState<Tab>; 4],
+    ws_kind: WsKind,
+    /// The layouts are made (the first frame, at the window's width): before that the docks are nominal.
+    laid_out: bool,
+    width: f32,
+    /// Each workspace's default layout as JSON (the layout is saved only when it differs from it).
+    layout_default: [String; 4],
+    /// The snapshot options: `side` (the Script beside the map), and that a snapshot runs (its layouts
+    /// are the defaults and are not saved).
+    side: bool,
+    snapshot: bool,
+    /// The bottom drawer: open or closed, its tab, and the error count seen (a new error opens it).
+    drawer: Drawer,
+    drawer_open: bool,
+    errors_seen: usize,
+    /// The snapshot's `scale=` (not saved).
+    scale_override: Option<u32>,
+    /// The Settings window (scale, shortcuts).
+    settings: settings::Window,
     /// Index into `ws.docs` of the document the Script tab shows and Ctrl+S saves.
     selected: Option<usize>,
     /// The output log: one line per action and its result.
@@ -274,7 +330,18 @@ impl StudioScreen {
         };
         Ok(StudioScreen {
             ws,
-            dock: layout(false),
+            docks: WsKind::ALL.map(|k| default_dock(k, workspaces::NOMINAL_W, false)),
+            ws_kind: WsKind::Map,
+            laid_out: false,
+            width: workspaces::NOMINAL_W,
+            layout_default: Default::default(),
+            side: false,
+            snapshot: false,
+            drawer: Drawer::Problems,
+            drawer_open: false,
+            errors_seen: 0,
+            scale_override: None,
+            settings: settings::Window::default(),
             selected: None,
             log,
             name,
@@ -322,6 +389,7 @@ impl StudioScreen {
     /// `overlap`, `reach`, `grid`, `footprints`, `tool=<name>`, `building=<id>`. None keeps the
     /// Script as it is.
     pub fn preselect(&mut self, map: Option<&str>, army: Option<&str>, opts: &[&str]) -> Result<(), String> {
+        self.snapshot = true;
         // `scores-generated` adds a map, so it runs on a copy of the package, removed with the screen
         // (`generated` is copied by the scene, `ui::snapshot`), and the package the scene names is never written.
         if opts.contains(&"scores-generated") {
@@ -361,7 +429,11 @@ impl StudioScreen {
                     self.snapshot_generated()?;
                     self.snap_scores();
                 }
-                "side" => self.dock = layout(true),
+                "side" => self.side = true,
+                "drawer" => self.drawer_open = true,
+                "keys" => self.settings.show_keys(),
+                "settings" => self.settings.open = true,
+                "keys-conflict" => self.settings.show_conflict(&StudioPrefs::default()),
                 "stale" => self.snapshot_stale()?,
                 "conflict" => self.snapshot_conflict(&path)?,
                 "overlap" => self.snapshot_overlap(&id)?,
@@ -376,14 +448,10 @@ impl StudioScreen {
                 "patrols" => self.canvas.patrols = true,
                 "fog" => self.canvas.fog = true,
                 "minimap" => {
-                    if let Some(at) = self.dock.find_tab(&Tab::Minimap) {
-                        self.dock.set_active_tab(at);
-                    }
+                    self.pending_tab = Some(Tab::Minimap);
                 }
                 "stamps" => {
-                    if let Some(at) = self.dock.find_tab(&Tab::Stamps) {
-                        self.dock.set_active_tab(at);
-                    }
+                    self.pending_tab = Some(Tab::Stamps);
                 }
                 "burn" => {
                     let map = self.maps.map.clone().ok_or("no map shown")?;
@@ -426,9 +494,7 @@ impl StudioScreen {
                 "header" => self.scen.focus = Focus::Header,
                 "campaign" => {
                     self.scen.focus = Focus::Campaign;
-                    if let Some(at) = self.dock.find_tab(&Tab::Campaign) {
-                        self.dock.set_active_tab(at);
-                    }
+                    self.pending_tab = Some(Tab::Campaign);
                 }
                 "story" | "vars" => {
                     // The story screens show their own selection: the army the scene named is not theirs.
@@ -437,23 +503,17 @@ impl StudioScreen {
                         self.scen.focus = Focus::Story;
                     }
                     let tab = if *opt == "story" { Tab::Story } else { Tab::Vars };
-                    if let Some(at) = self.dock.find_tab(&tab) {
-                        self.dock.set_active_tab(at);
-                    }
+                    self.pending_tab = Some(tab);
                 }
                 "trigger" | "dialog" => {
                     // The package is built after the first frames: the Story screen picks the node then.
                     self.selection = None;
                     self.scen.story.pending = Some(opt.to_string());
-                    if let Some(at) = self.dock.find_tab(&Tab::Story) {
-                        self.dock.set_active_tab(at);
-                    }
+                    self.pending_tab = Some(Tab::Story);
                 }
                 "texts" | "characters" => {
                     let tab = if *opt == "texts" { Tab::Texts } else { Tab::Characters };
-                    if let Some(at) = self.dock.find_tab(&tab) {
-                        self.dock.set_active_tab(at);
-                    }
+                    self.pending_tab = Some(tab);
                 }
                 "units" | "items" => {
                     // The first record of the package is selected, its price steps open (records.rs).
@@ -471,23 +531,27 @@ impl StudioScreen {
                     self.scen.focus = focus;
                     self.scen.price_open = true;
                     self.selection = None;
-                    if let Some(at) = self.dock.find_tab(&tab) {
-                        self.dock.set_active_tab(at);
-                    }
+                    self.pending_tab = Some(tab);
                 }
                 "claude" => {
-                    if let Some(at) = self.dock.find_tab(&Tab::Claude) {
-                        self.dock.set_active_tab(at);
-                    }
+                    self.pending_tab = Some(Tab::Claude);
                 }
                 "claude-start" => self.claude.start(&self.ws.root.clone()),
                 "map" => {
-                    if let Some(at) = self.dock.find_tab(&Tab::Map) {
-                        self.dock.set_active_tab(at);
-                    }
+                    self.pending_tab = Some(Tab::Map);
                 }
                 other => {
-                    if let Some(name) = other.strip_prefix("tool=") {
+                    if let Some(key) = other.strip_prefix("ws=") {
+                        // The workspace shown is its default view: the file the snapshot opened (the Script) does not take it.
+                        self.ws_kind = [WsKind::Map, WsKind::Story, WsKind::Data, WsKind::Test]
+                            .into_iter()
+                            .find(|k| k.key() == key)
+                            .ok_or_else(|| format!("no workspace {key:?}: map, story, data or test"))?;
+                        self.pending_tab = None;
+                    } else if let Some(pct) = other.strip_prefix("scale=") {
+                        let pct: u32 = pct.parse().map_err(|_| format!("scale {pct:?} is not a number"))?;
+                        self.scale_override = Some(theme::scale_pct(pct));
+                    } else if let Some(name) = other.strip_prefix("tool=") {
                         self.canvas.tool = Tool::named(name).ok_or_else(|| format!("no tool {name:?}"))?;
                     } else if let Some(id) = other.strip_prefix("building=") {
                         self.selection = Some(Selection::Building(id.to_string()));
@@ -574,8 +638,9 @@ impl StudioScreen {
     /// one it waits for), the egui interface, then the map drawn into the Map tab's rectangle, then
     /// the egui meshes over the game's frame. `art` is the game's art and install (`None` when the
     /// install is not there).
-    pub fn frame(&mut self, art: Option<&DtArt>) -> Action {
+    pub fn frame(&mut self, art: Option<&DtArt>, prefs: &mut StudioPrefs) -> Action {
         let mut action = Action::None;
+        crate::ui::cursor::egui_pointer(true);
         macroquad::prelude::clear_background(macroquad::prelude::Color::new(0.125, 0.145, 0.19, 1.0));
         self.installed = art.is_some();
         if self.install.is_none() {
@@ -600,10 +665,11 @@ impl StudioScreen {
         self.serve_mcp();
         self.canvas.shown = false;
         self.canvas.mini = None;
+        self.canvas.rect = None;
         // egui may run the frame's UI twice (a relayout pass): a pass's request is kept, a pass
         // without one does not clear it.
         egui_macroquad::ui(|ctx| {
-            let asked = self.show(ctx);
+            let asked = self.show(ctx, prefs);
             if !matches!(asked, Action::None) {
                 action = asked;
             }
@@ -700,9 +766,7 @@ impl StudioScreen {
         // The map's own file is opened: the package shows the map of the file it has open.
         self.open_file(&format!("maps/{id}/map.toml"));
         switch_map(&mut self.maps, &mut self.canvas, &mut self.selection, id);
-        if let Some(at) = self.dock.find_tab(&Tab::Map) {
-            self.dock.set_active_tab(at);
-        }
+        self.pending_tab = Some(Tab::Map);
         self.pending_tab = Some(Tab::Map);
     }
 
@@ -920,76 +984,41 @@ impl StudioScreen {
         }
     }
 
-    fn show(&mut self, ctx: &egui::Context) -> Action {
-        theme(ctx);
+    /// The frame's chrome and the four workspaces: the top bar, the status bar, the drawer, the
+    /// workspace's dock, the Settings window. The commands of the frame run first (`commands_frame`).
+    fn show(&mut self, ctx: &egui::Context, prefs: &mut StudioPrefs) -> Action {
+        // The zoom this pass's screen rectangle was measured at, before the scale is applied.
+        let zoom_before = ctx.zoom_factor();
+        theme::apply(ctx, self.scale(prefs));
+        if !self.laid_out {
+            self.lay_out(ctx, prefs, zoom_before);
+        }
         let mut action = Action::None;
         // The terminal of the Claude dock takes the keys first while it has the keyboard.
         self.claude.begin_frame();
         self.claude.take_input(ctx);
-        self.shortcuts(ctx);
+        // The shortcuts wait while the Settings window captures a key.
+        if !self.settings.capturing() {
+            if let Some(asked) = self.commands_frame(ctx, prefs) {
+                action = asked;
+            }
+        }
         let pkg = self.ws.package();
-        egui::TopBottomPanel::top("studio_top").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.strong(self.name.as_str());
-                ui.weak("Razdor Studio");
-                ui.separator();
-                ui.menu_button(tr("Edit"), |ui| {
-                    let undo = self.ws.history.undo_label().map(str::to_string);
-                    let redo = self.ws.history.redo_label().map(str::to_string);
-                    let undo_text = undo.as_ref().map_or_else(|| tr("Undo").to_string(), |l| trf!("Undo: {label}", label = l));
-                    let redo_text = redo.as_ref().map_or_else(|| tr("Redo").to_string(), |l| trf!("Redo: {label}", label = l));
-                    if ui.add_enabled(undo.is_some(), Button::new(undo_text)).clicked() {
-                        self.undo();
-                        ui.close_menu();
-                    }
-                    if ui.add_enabled(redo.is_some(), Button::new(redo_text)).clicked() {
-                        self.redo();
-                        ui.close_menu();
-                    }
-                });
-                ui.separator();
-                ui.menu_button(tr("Package"), |ui| {
-                    if ui.button(tr("Package settings")).clicked() {
-                        self.scen.focus = Focus::Package;
-                        ui.close_menu();
-                    }
-                    if ui.button(tr("New map (generator)…")).clicked() {
-                        self.newmap.open = true;
-                        ui.close_menu();
-                    }
-                    if ui.button(tr("Map settings")).clicked() {
-                        self.scen.focus = Focus::Header;
-                        ui.close_menu();
-                    }
-                    for (label, tab) in [("Story", Tab::Story), ("Campaign", Tab::Campaign), ("Texts", Tab::Texts), ("Characters", Tab::Characters), ("Variables", Tab::Vars), ("Units", Tab::Units), ("Items", Tab::Items), ("Battle test", Tab::Battle)] {
-                        if ui.button(tr(label)).clicked() {
-                            self.pending_tab = Some(tab);
-                            ui.close_menu();
-                        }
-                    }
-                });
-                ui.separator();
-                if ui.button(tr("Save")).clicked() {
-                    self.save_selected();
-                }
-                if ui.button(tr("Save all")).clicked() {
-                    self.save_all();
-                }
-                if ui.button(tr("Check")).clicked() {
-                    self.check();
-                }
-                ui.separator();
-                if ui.button(tr("Exit")).clicked() {
-                    if self.ws.any_dirty() {
-                        self.exit_prompt = true;
-                    } else {
-                        action = Action::Exit;
-                    }
-                }
-            });
-        });
-        let style = Style::from_egui(ctx.style().as_ref());
         let problems = self.all_problems();
+        let errors = problems.iter().filter(|d| matches!(d.severity, Severity::Error)).count();
+        if errors > self.errors_seen {
+            // A new error opens the drawer on Проблемы by itself.
+            self.drawer_open = true;
+            self.drawer = Drawer::Problems;
+        }
+        self.errors_seen = errors;
+        if self.top_bar(ctx, prefs) {
+            action = self.leave();
+        }
+        self.status_bar(ctx);
+        let style = Style::from_egui(ctx.style().as_ref());
+        let idx = self.ws_kind.index();
+        let key = self.ws_kind.key();
         let mut viewer = Viewer {
             ws: &mut self.ws,
             pkg: pkg.clone(),
@@ -1012,7 +1041,18 @@ impl StudioScreen {
             battle_req: &mut self.battle_req,
             scores: &self.scores,
         };
-        DockArea::new(&mut self.dock)
+        let mut drawer_open = self.drawer_open;
+        let mut drawer = self.drawer;
+        let drawer_h = if drawer_open { theme::DRAWER_OPEN_H } else { theme::DRAWER_CLOSED_H };
+        egui::TopBottomPanel::bottom("studio_drawer")
+            .exact_height(drawer_h)
+            .resizable(false)
+            .frame(chrome_frame(8, 3))
+            .show(ctx, |ui| drawer_panel(ui, &mut viewer, &mut drawer_open, &mut drawer, problems.len()));
+        self.drawer_open = drawer_open;
+        self.drawer = drawer;
+        DockArea::new(&mut self.docks[idx])
+            .id(Id::new(("studio-workspace", key)))
             .style(style)
             .show_close_buttons(false)
             .show_leaf_close_all_buttons(false)
@@ -1030,14 +1070,18 @@ impl StudioScreen {
             }
         }
         if focus_map {
-            if let Some(at) = self.dock.find_tab(&Tab::Map) {
-                self.dock.set_active_tab(at);
-            }
+            self.pending_tab = Some(Tab::Map);
         }
         if let Some(tab) = self.pending_tab.take().or_else(|| self.scen.want_tab.take()) {
-            if let Some(at) = self.dock.find_tab(&tab) {
-                self.dock.set_active_tab(at);
-            }
+            self.show_tab(tab);
+        }
+        self.save_layout(prefs);
+        let scale = self.scale(prefs);
+        // The function keys are read only while the Settings window captures a key.
+        let mq = if self.settings.capturing() { commands::mq_presses() } else { Vec::new() };
+        self.settings.show(ctx, prefs, scale, &mq);
+        if std::mem::take(&mut self.settings.reset_layout) {
+            self.reset_layout(prefs);
         }
         self.conflict_ui(ctx);
         if let Some(id) = self.newmap.show(ctx, &mut self.ws, self.install.as_ref()) {
@@ -1052,47 +1096,242 @@ impl StudioScreen {
         action
     }
 
-    /// Ctrl+Shift+Z and Ctrl+Y redo, Ctrl+Z undoes, Ctrl+S saves the shown file, Delete removes the
-    /// selected table. They are taken before the docks draw, so the Script's own undo does not run:
-    /// there is one history.
-    fn shortcuts(&mut self, ctx: &egui::Context) {
-        let redo = ctx.input_mut(|i| {
-            i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z))
-                || i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::Y))
+    /// The interface scale of this frame: the snapshot's, else the setting's.
+    fn scale(&self, prefs: &StudioPrefs) -> u32 {
+        theme::scale_pct(self.scale_override.unwrap_or(prefs.scale))
+    }
+
+    /// The top bar: the workspace switcher, Save, Undo, Redo, Проверка, Играть, and on the right Exit,
+    /// Settings, the Package menu and the command field. Returns whether Exit was clicked.
+    fn top_bar(&mut self, ctx: &egui::Context, prefs: &StudioPrefs) -> bool {
+        let keys = &prefs.keys;
+        let mut exit = false;
+        egui::TopBottomPanel::top("studio_top").exact_height(theme::TOP_H).frame(chrome_frame(8, 4)).show(ctx, |ui| {
+            ui.horizontal_centered(|ui| {
+                ui.label(RichText::new(self.name.as_str()).strong());
+                ui.add_space(8.0);
+                for kind in WsKind::ALL {
+                    let tip = commands::command(kind.command()).map(|c| commands::tip(c, keys)).unwrap_or_default();
+                    let text = RichText::new(format!("{}  {}", kind.icon(), tr(kind.name())));
+                    if ui.add(Button::new(text).selected(self.ws_kind == kind)).on_hover_text(tip).clicked() {
+                        self.ws_kind = kind;
+                    }
+                }
+                ui.separator();
+                if cmd_button(ui, "save", keys, true, false, "").clicked() {
+                    self.save_selected();
+                }
+                let undo = self.ws.history.undo_label().map(str::to_string);
+                let redo = self.ws.history.redo_label().map(str::to_string);
+                if cmd_button(ui, "undo", keys, undo.is_some(), false, &label_note(undo.as_deref())).clicked() {
+                    self.undo();
+                }
+                if cmd_button(ui, "redo", keys, redo.is_some(), false, &label_note(redo.as_deref())).clicked() {
+                    self.redo();
+                }
+                ui.separator();
+                if cmd_button(ui, "check", keys, true, false, "").clicked() {
+                    self.check();
+                }
+                // Играть needs the game's own run from the studio (UX6): shown disabled with the reason.
+                cmd_button(ui, "play", keys, false, false, "");
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if cmd_button(ui, "exit", keys, true, false, "").clicked() {
+                        exit = true;
+                    }
+                    if cmd_button(ui, "settings", keys, true, self.settings.open, "").clicked() {
+                        self.settings.open = !self.settings.open;
+                    }
+                    ui.menu_button(RichText::new(ic::PACKAGE).size(theme::ICON), |ui| {
+                        if ui.button(tr("Package settings")).clicked() {
+                            self.scen.focus = Focus::Package;
+                            ui.close_menu();
+                        }
+                        if ui.button(tr("New map (generator)…")).clicked() {
+                            self.newmap.open = true;
+                            ui.close_menu();
+                        }
+                        if ui.button(tr("Map settings")).clicked() {
+                            self.scen.focus = Focus::Header;
+                            ui.close_menu();
+                        }
+                        for (label, tab) in [("Story", Tab::Story), ("Campaign", Tab::Campaign), ("Texts", Tab::Texts), ("Characters", Tab::Characters), ("Variables", Tab::Vars), ("Units", Tab::Units), ("Items", Tab::Items), ("Battle test", Tab::Battle)] {
+                            if ui.button(tr(label)).clicked() {
+                                self.pending_tab = Some(tab);
+                                ui.close_menu();
+                            }
+                        }
+                    })
+                    .response
+                    .on_hover_text(tr("Package"));
+                    // The command field: the palette comes with UX6, so it shows its shortcut and opens nothing.
+                    let tip = commands::command("palette").map(|c| commands::tip(c, keys)).unwrap_or_default();
+                    chrome_frame(6, 2).fill(theme::WELL).stroke(egui::Stroke::new(1.0, theme::LINE)).show(ui, |ui| {
+                        ui.set_width(230.0);
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(ic::MAGNIFYING_GLASS).color(theme::DIM));
+                            ui.label(RichText::new(tr("Commands and objects")).color(theme::DIM));
+                        });
+                    })
+                    .response
+                    .on_hover_text(tip);
+                });
+            });
         });
-        let undo = ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::Z)));
-        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::S))) {
-            self.save_selected();
-        }
-        if redo {
-            self.redo();
-        } else if undo {
-            self.undo();
-        }
-        if !ctx.wants_keyboard_input() {
-            if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::C))) {
-                map_tab::copy_region(&mut self.ws, &self.maps, &mut self.canvas, &mut self.log);
+        exit
+    }
+
+    /// The status bar: the cell under the pointer and the Map tool's hint, and the save state.
+    fn status_bar(&self, ctx: &egui::Context) {
+        egui::TopBottomPanel::bottom("studio_status").exact_height(theme::STATUS_H).frame(chrome_frame(8, 2)).show(ctx, |ui| {
+            ui.horizontal_centered(|ui| {
+                if self.ws_kind == WsKind::Map {
+                    if let Some((x, y)) = self.canvas.hover {
+                        ui.label(RichText::new(format!("{}: {x}, {y}", tr("Cell"))).text_style(egui::TextStyle::Small));
+                        ui.label(RichText::new("·").color(theme::FAINT));
+                    }
+                    ui.label(RichText::new(tr(tool_hint(self.canvas.tool))).text_style(egui::TextStyle::Small).color(theme::DIM));
+                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let state = if self.ws.any_dirty() { tr("Unsaved changes").to_string() } else { format!("{} {}", ic::CHECK, tr("Saved")) };
+                    ui.label(RichText::new(state).color(theme::DIM).text_style(egui::TextStyle::Small));
+                });
+            });
+        });
+    }
+
+    /// The commands of this frame: the clipboard events, the shortcuts (the registry's, with the
+    /// author's bindings) and the function keys. Returns the action a command asked for.
+    fn commands_frame(&mut self, ctx: &egui::Context, prefs: &mut StudioPrefs) -> Option<Action> {
+        let ws = self.ws_kind;
+        let active = move |scope: Scope| match scope {
+            Scope::Global => true,
+            Scope::Map => ws == WsKind::Map,
+        };
+        let wants = ctx.wants_keyboard_input();
+        // The function keys come from macroquad (egui-miniquad does not deliver them). A relayout pass of the
+        // same frame may read them again: a command that runs twice (Проверка) only rebuilds twice.
+        let ids = commands::pressed(ctx, &prefs.keys, active, &commands::mq_presses());
+        let clips = ctx.input_mut(|i| {
+            let held = i.modifiers.command;
+            commands::clipboard(&mut i.events, held, wants)
+        });
+        if ws == WsKind::Map {
+            for clip in clips {
+                match clip {
+                    Clip::Copy => map_tab::copy_region(&mut self.ws, &self.maps, &mut self.canvas, &mut self.log),
+                    Clip::Paste => map_tab::arm_paste(&mut self.canvas, &mut self.log),
+                    // Cut needs the selections (UX4): the key is taken, nothing is cut yet.
+                    Clip::Cut => {}
+                }
             }
-            if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::V))) {
-                map_tab::arm_paste(&mut self.canvas, &mut self.log);
+        }
+        let mut action = None;
+        for id in ids {
+            if let Some(asked) = self.run_command(id, prefs) {
+                action = Some(asked);
             }
-            if ctx.input(|i| i.key_pressed(Key::Escape)) {
+        }
+        action
+    }
+
+    /// Runs one command of the registry.
+    fn run_command(&mut self, id: &str, prefs: &mut StudioPrefs) -> Option<Action> {
+        match id {
+            "save" => self.save_selected(),
+            "save-all" => self.save_all(),
+            "undo" => self.undo(),
+            "redo" => self.redo(),
+            "check" => self.check(),
+            "drawer" => self.drawer_open = !self.drawer_open,
+            "cancel" => {
                 self.canvas.paste = false;
                 self.canvas.region = None;
             }
-        }
-        let delete = !ctx.wants_keyboard_input() && ctx.input(|i| i.key_pressed(Key::Delete));
-        if delete {
-            if let (Some(sel), Some(map)) = (self.selection.clone(), self.maps.map.clone()) {
-                let pkg = self.ws.package();
-                if inspector::delete_selected(&mut self.ws, &mut self.log, pkg.as_deref(), &map, &sel) {
-                    self.selection = None;
-                    self.touch();
+            "settings" => self.settings.open = true,
+            "delete" => self.delete_selection(),
+            "reset-layout" => self.reset_layout(prefs),
+            "exit" => return Some(self.leave()),
+            other => {
+                if let Some(kind) = WsKind::of_command(other) {
+                    self.ws_kind = kind;
                 }
+            }
+        }
+        None
+    }
+
+    /// Delete: removes the selected object (the Inspector's delete).
+    fn delete_selection(&mut self) {
+        if let (Some(sel), Some(map)) = (self.selection.clone(), self.maps.map.clone()) {
+            let pkg = self.ws.package();
+            if inspector::delete_selected(&mut self.ws, &mut self.log, pkg.as_deref(), &map, &sel) {
+                self.selection = None;
+                self.touch();
             }
         }
     }
 
+    /// Exit (the button, Проверка's neighbour): the unsaved changes ask first.
+    fn leave(&mut self) -> Action {
+        if self.ws.any_dirty() {
+            self.exit_prompt = true;
+            Action::None
+        } else {
+            Action::Exit
+        }
+    }
+
+    /// Shows a tab: in the current workspace when it has the tab, else in the first workspace that has it.
+    fn show_tab(&mut self, tab: Tab) {
+        let order = std::iter::once(self.ws_kind).chain(WsKind::ALL.into_iter().filter(|k| *k != self.ws_kind));
+        for kind in order.collect::<Vec<_>>() {
+            let dock = &mut self.docks[kind.index()];
+            if let Some(at) = dock.find_tab(&tab) {
+                dock.set_active_tab(at);
+                self.ws_kind = kind;
+                return;
+            }
+        }
+    }
+
+    /// The first frame: each workspace's layout is its saved one (a snapshot uses the defaults), made for
+    /// the window's width.
+    fn lay_out(&mut self, ctx: &egui::Context, prefs: &StudioPrefs, zoom_before: f32) {
+        // The window's width in points at the studio's scale (the rectangle is in points at `zoom_before`).
+        self.width = ctx.screen_rect().width() * zoom_before / theme::zoom(self.scale(prefs));
+        for kind in WsKind::ALL {
+            let fresh = default_dock(kind, self.width, self.side && kind == WsKind::Map);
+            let saved = if self.snapshot { None } else { prefs.layouts.get(kind.key()).and_then(|j| serde_json::from_str::<DockState<Tab>>(j).ok()) };
+            self.docks[kind.index()] = saved.unwrap_or(fresh);
+            self.layout_default[kind.index()] = workspaces::to_json(&default_dock(kind, self.width, false)).unwrap_or_default();
+        }
+        self.laid_out = true;
+    }
+
+    /// Keeps the shown workspace's layout in the settings when it differs from the default (and drops it
+    /// when it is the default again). A snapshot keeps nothing.
+    fn save_layout(&self, prefs: &mut StudioPrefs) {
+        if self.snapshot || !self.laid_out {
+            return;
+        }
+        let kind = self.ws_kind;
+        let Some(json) = workspaces::to_json(&self.docks[kind.index()]) else { return };
+        if json == self.layout_default[kind.index()] {
+            prefs.layouts.remove(kind.key());
+        } else if prefs.layouts.get(kind.key()) != Some(&json) {
+            prefs.layouts.insert(kind.key().to_string(), json);
+        }
+    }
+
+    /// «Сбросить раскладку»: the shown workspace's default layout, and its saved one forgotten.
+    fn reset_layout(&mut self, prefs: &mut StudioPrefs) {
+        let kind = self.ws_kind;
+        self.docks[kind.index()] = default_dock(kind, self.width, false);
+        prefs.layouts.remove(kind.key());
+    }
+
+    /// Undo: one history for the whole studio (the Script's own undo does not run).
     fn undo(&mut self) {
         match self.ws.undo() {
             Ok(Some(label)) => {
@@ -1131,9 +1370,7 @@ impl StudioScreen {
                         self.reload();
                     }
                 }
-                if let Some(at) = self.dock.find_tab(&Tab::Script) {
-                    self.dock.set_active_tab(at);
-                }
+                self.pending_tab = Some(Tab::Script);
             }
             Err(e) => self.log.push(e),
         }
@@ -1271,58 +1508,83 @@ fn char_index(text: &str, byte: usize) -> usize {
 /// The default layout, as Godot 4's: FileSystem over Scene on the left, Map and Script in the
 /// centre (Script shown), Inspector on the right, Problems and Output under the centre. `side`
 /// puts the Script beside the Map instead of in its tabs (the snapshot's `side` option).
-fn layout(side: bool) -> DockState<Tab> {
-    // The main screens: Map, Campaign and Texts (Script beside the Map when `side` is off).
-    let mut centre_tabs = vec![Tab::Map, Tab::Story, Tab::Campaign, Tab::Texts, Tab::Units, Tab::Items, Tab::Battle];
-    if !side {
-        centre_tabs.push(Tab::Script);
-    }
-    let mut dock = DockState::new(centre_tabs);
-    let tree = dock.main_surface_mut();
-    // egui_dock's fraction is the share of the node that comes first (the new left or upper
-    // node): the Inspector is the last quarter of the width (26%: its forms need the room).
-    let [centre, inspector] = tree.split_right(NodeIndex::root(), 0.74, vec![Tab::Inspector]);
-    // The minimap and the stamps sit under the Inspector (the Godot-style right column).
-    let [_inspector, _side] = tree.split_below(inspector, 0.55, vec![Tab::Minimap, Tab::Stamps]);
-    let [centre, files] = tree.split_left(centre, 0.25, vec![Tab::FileSystem]);
-    let [_files, _scene] = tree.split_below(files, 0.5, vec![Tab::Scene]);
-    let [centre, _bottom] = tree.split_below(centre, 0.75, vec![Tab::Problems, Tab::Characters, Tab::Vars, Tab::Scores, Tab::Output, Tab::Claude]);
-    if side {
-        tree.split_right(centre, 0.5, vec![Tab::Script]);
-    }
-    if let Some(at) = dock.find_tab(&Tab::Map) {
-        dock.set_active_tab(at);
-    }
-    dock
+/// A frame of the chrome (the bars and the drawer): the panel fill and the margins, a 1 px line.
+fn chrome_frame(x: i8, y: i8) -> egui::Frame {
+    egui::Frame::NONE.fill(theme::PANEL).stroke(Stroke::new(1.0, theme::LINE)).inner_margin(Margin::symmetric(x, y))
 }
 
-/// The Godot 4-like dark theme: flat grey panels, one blue accent, small rounding.
-pub(super) fn theme(ctx: &egui::Context) {
-    let c = Color32::from_rgb;
-    let mut v = egui::Visuals::dark();
-    v.panel_fill = c(0x20, 0x25, 0x31);
-    v.window_fill = c(0x1a, 0x1d, 0x26);
-    // Text fields are drawn in a darker box with a visible frame, so an empty field still shows.
-    v.extreme_bg_color = c(0x12, 0x15, 0x1c);
-    v.faint_bg_color = c(0x24, 0x29, 0x36);
-    v.override_text_color = Some(c(0xe0, 0xe0, 0xe0));
-    v.selection.bg_fill = c(0x4f, 0x8e, 0xdc);
-    v.hyperlink_color = c(0x4f, 0x8e, 0xdc);
-    let states = [
-        (&mut v.widgets.noninteractive, c(0x20, 0x25, 0x31)),
-        (&mut v.widgets.inactive, c(0x2b, 0x30, 0x3d)),
-        (&mut v.widgets.hovered, c(0x36, 0x3c, 0x4c)),
-        (&mut v.widgets.active, c(0x4f, 0x8e, 0xdc)),
-        (&mut v.widgets.open, c(0x2b, 0x30, 0x3d)),
-    ];
-    for (w, fill) in states {
-        w.bg_fill = fill;
-        w.weak_bg_fill = fill;
-        w.corner_radius = CornerRadius::same(3);
+/// A toolbar button: the command's icon, its tooltip (the name and the shortcut, `commands::tip`), a
+/// note after it (the undo's label), greyed when disabled.
+fn cmd_button(ui: &mut Ui, id: &str, keys: &commands::Prefs, enabled: bool, on: bool, note: &str) -> egui::Response {
+    let c = commands::command(id).expect("a studio command");
+    let mut tip = commands::tip(c, keys);
+    if !note.is_empty() {
+        tip.push(' ');
+        tip.push_str(note);
     }
-    v.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, c(0x4a, 0x52, 0x66));
-    v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, c(0x6a, 0x74, 0x8c));
-    ctx.set_visuals(v);
+    let button = Button::new(RichText::new(c.icon).size(theme::ICON)).min_size(egui::vec2(theme::BTN_H, theme::BTN_H)).selected(on);
+    ui.add_enabled(enabled, button).on_hover_text(tip)
+}
+
+/// The note of an undo or redo button: its label, in brackets, when there is one.
+fn label_note(label: Option<&str>) -> String {
+    label.map_or_else(String::new, |l| format!("({l})"))
+}
+
+/// The one-line hint of the Map tool, shown in the status bar.
+fn tool_hint(tool: Tool) -> &'static str {
+    match tool {
+        Tool::Select => n_("Click selects an object, drag moves it"),
+        Tool::Army => n_("Click places an army"),
+        Tool::Point => n_("Click places a point"),
+        Tool::Object => n_("Click places an object"),
+        Tool::Building => n_("Click places a building"),
+        Tool::Terrain => n_("Drag paints terrain"),
+        Tool::Hills => n_("Drag paints hills"),
+        Tool::Forests => n_("Drag paints forests"),
+        Tool::Items => n_("Not in the package format yet"),
+        Tool::Rect => n_("Drag takes a rectangle to copy"),
+        Tool::Fill => n_("Click fills an area"),
+        Tool::Region => n_("Drag takes a rectangle"),
+    }
+}
+
+/// The drawer's strip and, when open, its content: Проблемы (the problems list), Вывод (the log) or
+/// Claude (the terminal). Its tabs are always shown; a click on the open tab closes the drawer.
+fn drawer_panel(ui: &mut Ui, viewer: &mut Viewer<'_>, open: &mut bool, which: &mut Drawer, problems: usize) {
+    ui.horizontal(|ui| {
+        for d in Drawer::ALL {
+            let label = match d {
+                Drawer::Problems if problems > 0 => format!("{} {problems}", tr(d.name())),
+                _ => tr(d.name()).to_string(),
+            };
+            let on = *open && *which == d;
+            if ui.add(Button::new(RichText::new(label).text_style(egui::TextStyle::Small)).selected(on)).clicked() {
+                if on {
+                    *open = false;
+                } else {
+                    *which = d;
+                    *open = true;
+                }
+            }
+        }
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let c = commands::command("drawer").expect("the drawer command");
+            let icon = if *open { ic::CARET_DOWN } else { ic::CARET_UP };
+            let toggle = Button::new(RichText::new(icon).size(theme::ICON)).min_size(egui::vec2(theme::SMALL_BTN, theme::SMALL_BTN)).frame(false);
+            if ui.add(toggle).on_hover_text(commands::tip(c, &commands::Prefs::new())).clicked() {
+                *open = !*open;
+            }
+        });
+    });
+    if *open {
+        ui.separator();
+        match *which {
+            Drawer::Problems => viewer.problems(ui),
+            Drawer::Output => viewer.output(ui),
+            Drawer::Claude => viewer.claude.show(ui, &viewer.ws.root),
+        }
+    }
 }
 
 /// The tabs' contents. Each tab is drawn from the same borrowed state; a file asked for (a click
@@ -1386,6 +1648,11 @@ impl Viewer<'_> {
 
 impl TabViewer for Viewer<'_> {
     type Tab = Tab;
+
+    /// The tab's id is its fixed key, not its translated title: a saved layout survives a language change.
+    fn id(&mut self, tab: &mut Tab) -> Id {
+        Id::new(("studio-tab", tab.key()))
+    }
 
     fn title(&mut self, tab: &mut Tab) -> WidgetText {
         tab.title().into()

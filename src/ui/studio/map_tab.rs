@@ -133,9 +133,9 @@ pub struct Canvas {
     /// A cell-unit point to centre the view on (a row of the Scene dock was clicked, the minimap).
     pub centre: Option<(f32, f32)>,
     /// The tab's rectangle in egui points, and the pixels per point it was laid out with.
-    rect: Option<egui::Rect>,
+    pub(super) rect: Option<egui::Rect>,
     pub ppp: f32,
-    hover: Option<(i32, i32)>,
+    pub(super) hover: Option<(i32, i32)>,
     overview: Overview,
     overview_serial: u64,
     /// The move in progress, or the one applied and not compiled yet.

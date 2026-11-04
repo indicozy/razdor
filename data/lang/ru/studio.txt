@@ -45,9 +45,6 @@ Objects ({count}) = Объекты ({count})
 Triggers here ({count}) = Триггеры здесь ({count})
 
 # Step 3: menus, undo, outside changes, the drag on the map
-Edit = Правка
-Undo: {label} = Отменить: {label}
-Redo: {label} = Вернуть: {label}
 Undone: {label} = Отменено: {label}
 Redone: {label} = Возвращено: {label}
 {path} changed on disk: reloaded (Ctrl+Z takes the old text back) = {path} изменён на диске: перечитан (Ctrl+Z вернёт прежний текст)
@@ -112,7 +109,6 @@ Where = Где
 Choose folder… = Выбрать папку…
 Create package = Создать пакет
 Back to the menu = В меню
-Open a package folder, or make a new package. = Откройте папку пакета или создайте новый пакет.
 The package needs a folder name. = Нужно имя папки пакета.
 Unit = Отряд
 Remove = Удалить
@@ -141,7 +137,6 @@ Claude runs here, in the package folder, with the studio's tools attached (razdo
 Claude Code is not installed: no `claude` program on PATH. = Claude Code не установлен: программа `claude` не найдена в PATH.
 Install Claude Code = Установить Claude Code
 scrollback = прокрутка
-Open the last package = Последний пакет
 The MCP server is not started: {reason} = MCP-сервер не запущен: {reason}
 The MCP server is not started: no folder for its runtime file = MCP-сервер не запущен: нет папки для его файла
 
@@ -623,3 +618,58 @@ town = город
 altar = алтарь
 church = церковь
 garrison = гарнизон
+
+# Razdor Studio UX1: the frame (top bar, status bar, drawer), the workspaces, the commands and their
+# shortcuts, the start page, the Settings window (scale and shortcuts).
+Map workspace = Карта
+Story workspace = Сюжет
+Data workspace = Данные
+Test workspace = Тест
+Command palette = Команды
+Go to object or file = Перейти к объекту или файлу
+Commands and objects = Команды и объекты
+Comes in UX2 = будет в UX2
+Comes in UX3 = будет в UX3
+Comes in UX4 = будет в UX4
+Comes in UX5 = будет в UX5
+Comes in UX6 = будет в UX6
+Bottom panel = Нижняя панель
+Hide side panels = Скрыть боковые панели
+Find in view = Найти в текущем виде
+Open in file = Открыть в файле
+Settings = Настройки
+Copy region = Копировать область
+Cut = Вырезать
+Reset layout = Сбросить раскладку
+Saved = Сохранено
+Copy, cut and paste keys are fixed = Клавиши копирования, вырезания и вставки фиксированы
+Click a shortcut, then press the new key. Esc cancels. = Щёлкните сочетание, затем нажмите новую клавишу. Esc — отмена.
+Reset all = Сбросить все
+Not set = Не назначено
+Press a key… = Нажмите клавишу…
+This key is fixed = Эта клавиша фиксирована
+Taken by = Занято
+Interface = Интерфейс
+Keyboard shortcuts = Горячие клавиши
+Interface scale = Масштаб интерфейса
+The scale changes the whole studio. No text is drawn under 12 px. = Масштаб меняет весь редактор. Текст мельче 12 px не рисуется.
+Studio guide = Справка по студии
+Recent packages = Недавние пакеты
+No package opened yet. = Пакеты ещё не открывались.
+The editor for Razdor 2.0 packages. = Редактор пакетов Razdor 2.0.
+Open the example = Открыть пример
+The example package is not in this folder. = Пример не найден в этой папке.
+Click selects an object, drag moves it = Щелчок выбирает объект, протяжка двигает его
+Click places an army = Щелчок ставит армию
+Click places a point = Щелчок ставит точку
+Click places an object = Щелчок ставит объект
+Click places a building = Щелчок ставит постройку
+Drag paints terrain = Протяжка рисует местность
+Drag paints hills = Протяжка рисует холмы
+Drag paints forests = Протяжка рисует леса
+Not in the package format yet = Пока не поддерживается форматом пакета
+Drag takes a rectangle to copy = Протяжка берёт прямоугольник для копирования
+Click fills an area = Щелчок заливает область
+Drag takes a rectangle = Протяжка берёт прямоугольник
+
+Workspace layout = Раскладка пространства

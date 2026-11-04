@@ -4,6 +4,11 @@ NotoSansDevanagari-Regular.ttf: Copyright 2022 The Noto Project Authors (https:/
 Both files are modified versions: the Regular instance (wght 400) of the variable fonts,
 subset with fontTools to the characters Razdor draws with them, without hinting.
 
+NotoSans-Regular.ttf (Razdor Studio's UI font, UX1): made from Noto Sans v2.015
+(NotoSans[wght].ttf, the variable font of the Noto Sans release NotoSans-v2.015), the wght 400
+instance with fontTools' instancer, subset with pyftsubset --no-hinting to the characters of the
+previous subset plus U+0400 to U+045F (all Cyrillic letters of the Russian alphabet, 66 of them).
+
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
 https://openfontlicense.org

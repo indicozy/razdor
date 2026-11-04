@@ -21,6 +21,33 @@ none, a start page appears:
 
 **Back to the menu** returns to the main menu.
 
+## Workspaces
+
+The studio has four workspaces. Switch between them with the buttons in the top bar or with
+**Alt+1** … **Alt+4**:
+
+* **Map** — the map, the stamps on the left, the minimap and Scene on the right.
+* **Story** — the characters and variables on the left, the story or campaign graph in the centre.
+* **Data** — the package's files on the left, units, items, texts and the script in the centre.
+* **Test** — the battle test and the package's scores.
+
+Each workspace has the Inspector on the right. The studio remembers each workspace's window layout;
+**Reset layout** brings back the original one.
+
+The top bar holds Save, Undo and Redo, **Check** (F7), **Play** (F5, not working yet), the Package menu,
+**Settings** (Ctrl+,) and Exit. The bottom has the status bar (the cell under the pointer, the tool's hint,
+whether the package is saved) and the bottom panel with the tabs Problems, Output and Claude. The panel is
+closed; it opens with Ctrl+J, and by itself when a new error appears.
+
+## Keyboard shortcuts
+
+Change them in **Settings** → **Keyboard shortcuts**: click a shortcut, then press the new key (Esc
+cancels). A key that another command has is refused, and the page says which command has it. **Reset**
+puts one command back, **Reset all** puts back all of them. The shortcuts are kept in the program's
+settings, not in the package.
+
+The interface scale (80 % to 150 %) is in the same Settings window. No text is drawn smaller than 12 pixels.
+
 ## Windows
 
 * **File system** — the files of the package. A click opens a file in the Script.
@@ -32,7 +59,7 @@ none, a start page appears:
 * **Problems** — the result of the checks. A click goes to the place of the error.
 * **Output** — the log of the actions.
 
-Windows can be dragged, split and opened as tabs.
+Windows can be dragged, split and opened as tabs inside their workspace.
 
 ## The map
 
@@ -190,6 +217,11 @@ last result. Health only warns: it never stops a save or a play. The game's file
 ## Not yet
 
 The studio does not have route checks for every story yet. These come in later versions.
+
+The studio is being rebuilt in steps. Not done yet: the new tool strip and the map palette, layers and
+selections (copy, cut and paste of areas), search in the Inspector fields (Ctrl+F), the command palette
+(Ctrl+Shift+P) and go to an object (Ctrl+P), the Play button (F5), Tab to hide the side panels, and the AI
+viewer inside Test (it is still on the map).
 
 ## .DTm maps
 

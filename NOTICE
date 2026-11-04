@@ -46,3 +46,5 @@ FONTS
 
 The fonts in data/fonts/ keep their own licenses (the *-OFL.txt and *-LICENSE.txt files next
 to them).
+The icon font Phosphor (Regular, egui-phosphor 0.9.0, MIT) is in the studio's build; its licence is
+data/fonts/Phosphor-MIT.txt.

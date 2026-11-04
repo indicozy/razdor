@@ -317,6 +317,30 @@ Tests: the rebuild's own cases on DT inputs (`studio::richness`), the health che
 or dialog (`studio::health`), the JSON of both scores (`studio::mcp`). Snapshot options: `scores` (brod) and
 `scores-generated` (a copy of the generated map). The generator's default clock is the seed (see OPEN_QUESTIONS).
 
+Studio UX, milestone UX1 (the foundation; spec `docs/superpowers/specs/2026-11-04-studio-ux-design.md`,
+sections 4, 8, 9, 11, 12, 13). `ui/studio/theme.rs` is the token set (colours, sizes, the 12 px text floor at
+the UI scale) applied in one place (`theme::apply`; the scale is egui's zoom factor). The UI font is Noto Sans
+Regular (`data/fonts/NotoSans-Regular.ttf`, with the Cyrillic letters) and the icons are Phosphor Regular
+(`egui-phosphor`); egui's default fonts are not used. `ui/studio/commands.rs` is the command registry: id, the
+English name (the catalogue key in `data/lang/ru/studio.txt`), icon, default shortcut, scope, and whether the
+command is fixed (the clipboard keys) or still later (shown disabled). `pressed` dispatches the frame's key
+events with exact modifiers, leaves typed keys to a focused text field, and reads the function keys from
+macroquad (egui-miniquad does not deliver F-keys); `clipboard` takes Copy, Cut and Paste events (Ctrl+C/X/V
+are not key events); `rebind` refuses a clash and keeps only the changed bindings in `StudioPrefs::keys`
+(`ui/audio.rs`, the user's settings). `ui/studio/workspaces.rs` holds the four workspaces: each is a
+`DockState` with its default layout for the window's width and its saved JSON (`to_json` writes the
+laid-out rectangles as zeros, since egui_dock's unlaid rectangles are infinite). `ui/studio/mod.rs` draws the
+top bar, the status bar, the bottom drawer (`drawer_panel`: Problems, Output, Claude) and the shown
+workspace's dock; `TabViewer::id` is the fixed `Tab::key`, not the title. `ui/studio/settings.rs` is the
+Settings window (interface scale, shortcut page); `ui/studio/start.rs` is the start page (recent packages from
+`StudioPrefs::recent`, the example, the guide). The studio sets `cursor::egui_pointer`, so Razdor's own
+pointer is not drawn over egui's cursors. Snapshot options: `ws=`, `drawer`, `settings`, `keys`,
+`keys-conflict`, `scale=`, and `studio-start`. Tests: `ui::studio::{commands, theme, workspaces, settings,
+start}` (run with `--bin razdor`). Not in UX1 yet: the Map tool strip and palette, the layers, selections and
+Cut (UX3, UX4), Find and the Inspector search (UX2), the command palette and Ctrl+P, F5 Play and the AI viewer
+inside Тест (UX6), Tab to hide the side panels (UX3). Not checked at run time: the pointer shape on the desktop
+and a language switch with a saved layout (the unit tests cover the stable keys).
+
 ## The map translator (`razdor-translate`)
 
 Not part of the original game (asked for by the owner): a second program that writes English

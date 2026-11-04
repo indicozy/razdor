@@ -602,6 +602,7 @@ impl App {
         self.screen = Screen::Studio;
         // The package played last is the one the main menu's «Редактор» opens.
         self.audio.settings.studio_package = Some(folder.display().to_string());
+        studio::start::remember(&mut self.audio.settings.studio, folder);
         self.audio.save_now();
         Ok(())
     }
@@ -631,9 +632,8 @@ impl App {
     pub fn open_studio_start(&mut self) {
         self.studio = None;
         if self.studio_start.is_none() {
-            // The package opened last is the start page's third action (when it is still a package).
-            let recent = self.audio.settings.studio_package.clone().map(PathBuf::from);
-            self.studio_start = Some(Box::new(studio::start::StartPage::with_recent(recent)));
+            // The recent packages (the ones still on disk) are the start page's list.
+            self.studio_start = Some(Box::new(studio::start::StartPage::with_recent(&self.audio.settings.studio.recent)));
         }
         self.screen = Screen::Studio;
     }
@@ -644,7 +644,7 @@ impl App {
     fn studio_frame(&mut self) {
         if self.studio.is_none() {
             let action = match self.studio_start.as_mut() {
-                Some(page) => studio::start::frame(page),
+                Some(page) => studio::start::frame(page, &self.audio.settings.studio),
                 None => studio::start::Action::Back,
             };
             match action {
@@ -664,7 +664,10 @@ impl App {
             return;
         }
         let Some(studio) = self.studio.as_mut() else { return };
-        match studio.frame(self.assets.dt.as_ref()) {
+        let asked = studio.frame(self.assets.dt.as_ref(), &mut self.audio.settings.studio);
+        // The studio's own settings (layouts, shortcuts, scale) are written when they changed.
+        self.audio.save_now();
+        match asked {
             studio::Action::None => {}
             studio::Action::Exit => {
                 self.studio = None;
