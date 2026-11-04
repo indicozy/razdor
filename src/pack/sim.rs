@@ -87,8 +87,8 @@ pub struct SimOptions {
     pub trace: bool,
     /// Variables forced at the start (`--set var=value`).
     pub preset: Vec<(String, VarValue)>,
-    /// The story's seed (`--seed`): the package generator's and the field battles' draws. None:
-    /// the package's own (from its hash).
+    /// The run seed (`--seed`): the package generator's and the field battles' draws, through
+    /// [`super::open::story_seed`] for the map. None: [`super::open::RUN_SEED`].
     pub seed: Option<u32>,
 }
 
@@ -361,8 +361,8 @@ pub fn sim_map_observed(pkg: &Package, install: &DtInstall, map: &str, opts: &Si
     let mut state = 0x9E37_79B9u32;
     let mut pick = |d: &PendingDialog| opts.choices.pick(&mut state, d);
     let mut story = opened.story.clone();
-    if let Some(seed) = opts.seed {
-        story.seed = seed.max(1);
+    if let Some(run) = opts.seed {
+        story.seed = super::open::story_seed(&opened.id, map, run);
     }
     let play = StoryPlay { story, trace: opts.trace, preset: opts.preset.clone(), pick: &mut pick };
     let mut frames: Vec<Frame> = Vec::new();

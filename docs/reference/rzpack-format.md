@@ -316,7 +316,11 @@ every step is still reached. Armies without a goal and paces of 100 are the orig
 
 A story with no triggers and no dialogs attaches nothing: no draw, no state, no save field. The
 package generator is its own (`TriggerState::rng`, seeded from the story); `rules::rng` is never
-drawn for a package. Package armies and named characters take the ids 200 up (56 each at most).
+drawn for a package. The story's seed is `pack::open::story_seed(id, map, run)`: FNV-1a over
+`id/map/run`, odd, with `run` = `RUN_SEED` (1) in the game and `--seed` in the sim. It never comes
+from the package's files, so a text or unit edit does not reshuffle the story's dice of a
+campaign (the battles still change with the units they fight); only a change to the story does. The content hash identifies the package in a
+save and nothing else. Package armies and named characters take the ids 200 up (56 each at most).
 
 ### Checks (`razdor-pack check`)
 
@@ -844,5 +848,5 @@ battle that names a script must find it, and it must define `setup` and `check_e
 
 **Sim (`razdor-pack sim`).** A field battle is played on the AI (both sides) when it starts. With
 `--trace` the sim prints each field battle's rounds and winner; `--seed <n>` sets the seed of the
-story (and so of the field battles). The example `siege-test` map is the test: `razdor-pack sim
+story (the run seed: `story_seed(id, map, n)`, and so of the field battles). The example `siege-test` map is the test: `razdor-pack sim
 examples/packs/pepelnaya-marka --map siege-test --trace --seed 1`.

@@ -20,8 +20,9 @@ trigger start_battle (rules = "lua:x")   ─ Game::start_field_battle sets foe a
 ```
 
 `Game::start_battle` returns a placeholder `Battle` while a field battle is under way; callers check
-`Game::field_active()` and use the `field_*` methods. The seed is the story's seed, the clock and the
-battle count, never the wall clock.
+`Game::field_active()` and use the `field_*` methods. The seed is the story's seed (`pack::open::story_seed`: the
+package id, the map and the run seed, never the content), the clock and the battle count, never the
+wall clock.
 
 ## 2. The field API (for the screen)
 
