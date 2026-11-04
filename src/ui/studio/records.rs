@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use egui::{CollapsingHeader, ComboBox, Grid, ScrollArea, TextEdit, Ui};
+use egui::{Align2, CollapsingHeader, ComboBox, FontId, Grid, Id, Pos2, Rect, Sense, Stroke, TextEdit, Ui, Vec2};
 use egui_macroquad::egui;
 use egui_phosphor::regular as ic;
 use razdor::dt::data::Stat;
@@ -17,11 +17,13 @@ use razdor::pack::load::Package;
 use razdor::pack::refs::Ref;
 use razdor::studio::cost::{ItemPrice, UnitPrice};
 use razdor::studio::records::{self as rec, ItemFail, Kind, Priced, Refused};
+use razdor::studio::sheet::{self, Cell, Column};
 use razdor::trf;
 
 use super::forms;
 use super::inspector_kit as kit;
 use super::scenarios::Focus;
+use super::theme;
 use super::{Jump, Viewer, ERROR_RED, WARNING_AMBER};
 
 /// The label of an override field (the Russian names of the original's windows, records.md §5.1).
@@ -68,6 +70,64 @@ enum ItemQuote {
     Price(ItemPrice),
     Skip(razdor::studio::cost::PriceSkip),
     Unresolved(String),
+}
+
+/// The sheet's row height and header height (points), and the frozen id column's width.
+const ROW_H: f32 = 22.0;
+const HEAD_H: f32 = 24.0;
+const ID_W: f32 = 104.0;
+
+/// A column's width on the sheet (points): sized so that the id, the stats and the suggested price fit a 1280 px
+/// window beside the navigation and the Inspector (the rest scrolls).
+fn col_w(c: Column) -> f32 {
+    match c {
+        Column::Id => ID_W,
+        Column::Suggested => 136.0,
+        Column::Base | Column::Type => 90.0,
+        Column::Xp => 88.0,
+        Column::Hits => 54.0,
+        Column::Cost => 74.0,
+        Column::Attack => 58.0,
+        Column::Speed => 70.0,
+        Column::Defence => 66.0,
+    }
+}
+
+/// A column's header label (the catalogue's text).
+fn column_label(c: Column) -> &'static str {
+    match c {
+        Column::Id => tr("Id"),
+        Column::Base => tr("Base"),
+        Column::Xp => tr("XP to level 2"),
+        Column::Hits => tr("Hits"),
+        Column::Attack => tr("Attack"),
+        Column::Defence => tr("Defence"),
+        Column::Speed => tr("Speed"),
+        Column::Type => tr("Type"),
+        Column::Cost => tr("Gold"),
+        Column::Suggested => tr("Suggested"),
+    }
+}
+
+/// What the sheet asks this frame, applied after its painter: a pick (the record and its cell), a sort by a
+/// column, a cell to type in, a typed value to write, a paste, a suggested price to use.
+#[derive(Default)]
+struct SheetAsks {
+    pick: Option<(String, (usize, usize))>,
+    sort: Option<usize>,
+    begin: Option<(String, usize, String)>,
+    commit: Option<(String, usize, String)>,
+    paste: Option<(String, usize, String)>,
+    use_price: Option<String>,
+}
+
+/// A numeric cell being typed in: the record's id, the column, the text, and whether it takes the focus.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SheetEdit {
+    pub id: String,
+    pub col: usize,
+    pub text: String,
+    pub focus: bool,
 }
 
 impl Viewer<'_> {
@@ -165,26 +225,223 @@ impl Viewer<'_> {
             self.record_create(&pkg, kind);
         }
         ui.separator();
-        let filter = self.scen.record_filter.trim().to_lowercase();
-        let selected = self.record_sel(kind).clone();
-        let mut pick: Option<String> = None;
-        ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            for r in rec::rows(&pkg, kind) {
-                if !filter.is_empty() && !format!("{} {} {}", r.id, r.base, r.name).to_lowercase().contains(&filter) {
-                    continue;
-                }
-                ui.horizontal_wrapped(|ui| {
-                    let text = format!("{} · {}", r.id, r.base);
-                    if ui.selectable_label(selected.as_deref() == Some(r.id.as_str()), text).clicked() {
-                        pick = Some(r.id.clone());
+        self.sheet(ui, &pkg, kind);
+    }
+
+    /// The spreadsheet of `kind` (spec §4.3): one row per record, the columns of `sheet::columns`, sorted and filtered
+    /// by the toolbar. The id column and the header stay in place while the rest scrolls. A click picks the record (its
+    /// form shows in the Inspector and the cell is the cursor); a double click, Enter or F2 types into a numeric cell
+    /// (Enter commits, Esc cancels, one undo step); «Use» writes the suggested price; Ctrl+C copies the cursor's cell
+    /// and Ctrl+V pastes a number into it; the arrows move the cursor.
+    fn sheet(&mut self, ui: &mut Ui, pkg: &Arc<Package>, kind: Kind) {
+        let si = if kind == Kind::Unit { 0 } else { 1 };
+        let cols: Vec<Column> = sheet::columns(kind).to_vec();
+        let mut rows = {
+            let priced = self.priced(pkg);
+            sheet::rows(pkg, priced, kind)
+        };
+        let total = rows.len();
+        let filter = self.scen.record_filter.clone();
+        rows.retain(|r| sheet::matches(r, &filter));
+        if let Some((col, desc)) = self.scen.sheet.sort[si] {
+            sheet::sort(&mut rows, col, desc);
+        }
+        let selected_id = self.record_sel(kind).clone();
+        ui.weak(trf!("{shown} of {total} records", shown = rows.len(), total = total));
+
+        // Esc (the cancel command) drops a cell being typed in, before the cell is drawn.
+        if std::mem::take(&mut self.scen.sheet.cancel) {
+            self.scen.sheet.edit = None;
+        }
+        let typing = ui.ctx().wants_keyboard_input();
+        let (down, up, left, right, enter) = if typing || self.scen.sheet.edit.is_some() {
+            (false, false, false, false, false)
+        } else {
+            ui.input(|i| (i.key_pressed(egui::Key::ArrowDown), i.key_pressed(egui::Key::ArrowUp), i.key_pressed(egui::Key::ArrowLeft), i.key_pressed(egui::Key::ArrowRight), i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::F2)))
+        };
+        let mut asks = SheetAsks::default();
+        if !rows.is_empty() {
+            let (r, c) = self.scen.sheet.cursor;
+            let (r, c) = (r.min(rows.len() - 1), c.min(cols.len() - 1));
+            let r2 = if down { (r + 1).min(rows.len() - 1) } else if up { r.saturating_sub(1) } else { r };
+            let c2 = if right { (c + 1).min(cols.len() - 1) } else if left { c.saturating_sub(1) } else { c };
+            self.scen.sheet.cursor = (r2, c2);
+            if (r2, c2) != (r, c) && r2 != r {
+                asks.pick = Some((rows[r2].id.clone(), (r2, c2)));
+            }
+            if enter && sheet::field_of(cols[c2]).is_some() {
+                let cell = &rows[r2].cells[c2];
+                self.scen.sheet.edit = Some(SheetEdit { id: rows[r2].id.clone(), col: c2, text: cell.text(), focus: true });
+            }
+            if std::mem::take(&mut self.scen.sheet.copy) {
+                ui.ctx().copy_text(rows[r2].cells[c2].text());
+            }
+            if let Some(text) = self.scen.sheet.paste.take() {
+                asks.paste = Some((rows[r2].id.clone(), c2, text));
+            }
+        } else {
+            self.scen.sheet.paste = None;
+            self.scen.sheet.copy = false;
+        }
+        let cursor = self.scen.sheet.cursor;
+        let sort = self.scen.sheet.sort[si];
+        let mut edit = self.scen.sheet.edit.take();
+
+        // The geometry: the id column is frozen, the others scroll; the header is the top row.
+        let widths: Vec<f32> = cols.iter().map(|c| col_w(*c)).collect();
+        let mut xs: Vec<f32> = Vec::with_capacity(widths.len());
+        let mut acc = 0.0;
+        for w in &widths {
+            xs.push(acc);
+            acc += w;
+        }
+        let content_w: f32 = widths.iter().sum();
+        let content_h = HEAD_H + ROW_H * rows.len() as f32;
+        let area = egui::ScrollArea::both().id_salt(("sheet", si)).auto_shrink([false, false]);
+        area.show_viewport(ui, |ui, viewport| {
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(content_w.max(viewport.width()), content_h.max(viewport.height())), Sense::hover());
+            let origin = rect.min;
+            let at = |x: f32, y: f32| origin + Vec2::new(x, y);
+            let painter = ui.painter().clone();
+            let body_font = FontId::proportional(theme::TEXT_SIZE);
+            // The body: each row's background and cells (the id column is drawn last, frozen).
+            for (ri, row) in rows.iter().enumerate() {
+                let y = HEAD_H + ri as f32 * ROW_H;
+                let is_sel = selected_id.as_deref() == Some(row.id.as_str());
+                let bg = if is_sel { theme::ACCENT.gamma_multiply(0.22) } else if ri % 2 == 1 { theme::PANEL } else { theme::BG };
+                painter.rect_filled(Rect::from_min_size(at(0.0, y), Vec2::new(content_w, ROW_H)), 0.0, bg);
+                for ci in 1..cols.len() {
+                    let cell_rect = Rect::from_min_size(at(xs[ci], y), Vec2::new(widths[ci], ROW_H));
+                    let editing = edit.as_ref().is_some_and(|e| e.id == row.id && e.col == ci);
+                    if editing {
+                        let e = edit.as_mut().expect("an edit");
+                        let eid = Id::new(("sheet-edit", si, ri, ci));
+                        let r = ui.put(cell_rect.shrink(1.0), TextEdit::singleline(&mut e.text).id(eid).desired_width(cell_rect.width() - 6.0));
+                        if std::mem::take(&mut e.focus) {
+                            r.request_focus();
+                        }
+                        if r.lost_focus() {
+                            asks.commit = Some((row.id.clone(), ci, std::mem::take(&mut e.text)));
+                        }
+                        continue;
                     }
-                    ui.weak(format!("{}:{}", r.file, r.line));
-                });
+                    let cell = &row.cells[ci];
+                    let numeric = matches!(cell, Cell::Num(_));
+                    let colour = if row.overridden[ci] { theme::ACCENT } else { theme::TEXT };
+                    let (align, pos) = if numeric { (Align2::RIGHT_CENTER, cell_rect.right_center() - Vec2::new(6.0, 0.0)) } else { (Align2::LEFT_CENTER, cell_rect.left_center() + Vec2::new(6.0, 0.0)) };
+                    if cols[ci] == Column::Suggested {
+                        // The suggested price's number, then the «Use» button at the right of the cell.
+                        let btn = Rect::from_min_size(at(xs[ci] + widths[ci] - 88.0, y + 2.0), Vec2::new(84.0, ROW_H - 4.0));
+                        painter.with_clip_rect(cell_rect).text(cell_rect.left_center() + Vec2::new(6.0, 0.0), Align2::LEFT_CENTER, cell.text(), body_font.clone(), theme::TEXT);
+                        // The button is there only when the formula gives a price.
+                        if numeric && ui.put(btn, egui::Button::new(tr("Use")).small().wrap_mode(egui::TextWrapMode::Extend)).on_hover_text(tr("Write the suggested price into the price field (one undo step)")).clicked() {
+                            asks.use_price = Some(row.id.clone());
+                        }
+                        continue;
+                    }
+                    // The text is clipped to its cell, so a long base does not run into the next column.
+                    painter.with_clip_rect(cell_rect).text(pos, align, cell.text(), body_font.clone(), colour);
+                    let resp = ui.interact(cell_rect, Id::new(("sheet-cell", si, ri, ci)), Sense::click());
+                    if resp.double_clicked() && sheet::field_of(cols[ci]).is_some() {
+                        asks.begin = Some((row.id.clone(), ci, cell.text()));
+                    } else if resp.clicked() {
+                        asks.pick = Some((row.id.clone(), (ri, ci)));
+                    }
+                }
+            }
+            // The cursor's frame.
+            if rows.get(cursor.0).is_some() {
+                let y = HEAD_H + cursor.0 as f32 * ROW_H;
+                let rect = Rect::from_min_size(at(xs[cursor.1], y), Vec2::new(widths[cursor.1], ROW_H));
+                painter.rect_stroke(rect, 0.0, Stroke::new(1.0, theme::ACCENT), egui::StrokeKind::Inside);
+            }
+            // The frozen column and the header: they stay at the viewport's left and top.
+            let left = rect.min.x + viewport.min.x;
+            let top = rect.min.y + viewport.min.y;
+            for (ri, row) in rows.iter().enumerate() {
+                let y = origin.y + HEAD_H + ri as f32 * ROW_H;
+                let is_sel = selected_id.as_deref() == Some(row.id.as_str());
+                let bg = if is_sel { theme::ACCENT.gamma_multiply(0.22) } else { theme::PANEL };
+                let r = Rect::from_min_size(Pos2::new(left, y), Vec2::new(widths[0], ROW_H));
+                painter.rect_filled(r, 0.0, bg);
+                painter.with_clip_rect(r).text(r.left_center() + Vec2::new(6.0, 0.0), Align2::LEFT_CENTER, row.id.as_str(), FontId::monospace(theme::MONO), theme::TEXT);
+                let resp = ui.interact(r, Id::new(("sheet-id", si, ri)), Sense::click());
+                if resp.clicked() {
+                    asks.pick = Some((row.id.clone(), (ri, 0)));
+                }
+            }
+            let head = Rect::from_min_size(Pos2::new(rect.min.x, top), Vec2::new(viewport.width().max(content_w), HEAD_H));
+            painter.rect_filled(head, 0.0, theme::RAISED);
+            for (ci, col) in cols.iter().enumerate() {
+                let x = if ci == 0 { left } else { origin.x + xs[ci] };
+                let r = Rect::from_min_size(Pos2::new(x, top), Vec2::new(widths[ci], HEAD_H));
+                let mut label = column_label(*col).to_string();
+                if let Some((sc, desc)) = sort {
+                    if sc == ci {
+                        label.push_str(if desc { ic::CARET_DOWN } else { ic::CARET_UP });
+                    }
+                }
+                painter.with_clip_rect(r).text(r.left_center() + Vec2::new(6.0, 0.0), Align2::LEFT_CENTER, label, FontId::proportional(theme::SMALL + 1.0), theme::DIM);
+                let resp = ui.interact(r, Id::new(("sheet-head", si, ci)), Sense::click());
+                if resp.clicked() {
+                    asks.sort = Some(ci);
+                }
             }
         });
-        if let Some(id) = pick {
-            self.record_pick(kind, id);
+        self.scen.sheet.edit = edit;
+        self.apply_sheet_asks(pkg, kind, asks);
+    }
+
+    /// Applies what the sheet asked this frame: a pick, a sort, a cell's edit (one undo step), a paste, the price.
+    fn apply_sheet_asks(&mut self, pkg: &Arc<Package>, kind: Kind, asks: SheetAsks) {
+        let si = if kind == Kind::Unit { 0 } else { 1 };
+        if let Some(ci) = asks.sort {
+            let cur = self.scen.sheet.sort[si];
+            self.scen.sheet.sort[si] = match cur {
+                Some((c, false)) if c == ci => Some((ci, true)),
+                Some((c, true)) if c == ci => None,
+                _ => Some((ci, false)),
+            };
         }
+        if let Some((id, (r, c))) = asks.pick {
+            self.scen.sheet.cursor = (r, c);
+            if self.record_sel(kind).as_deref() != Some(id.as_str()) {
+                self.record_pick(kind, id);
+            }
+        }
+        if let Some((id, col, text)) = asks.begin {
+            self.scen.sheet.edit = Some(SheetEdit { id, col, text, focus: true });
+        }
+        if let Some((id, col, text)) = asks.commit {
+            self.scen.sheet.edit = None;
+            self.sheet_set(pkg, kind, &id, col, &text);
+        }
+        if let Some((id, col, text)) = asks.paste {
+            let first = text.lines().next().unwrap_or("").to_string();
+            self.sheet_set(pkg, kind, &id, col, &first);
+        }
+        if let Some(id) = asks.use_price {
+            self.record_pick(kind, id.clone());
+            self.record_apply_price(pkg, kind, &id);
+        }
+    }
+
+    /// Writes a typed number into a numeric cell of the sheet: refused when the text is not a number or the field's
+    /// range does not hold it, and a no-op when it is the value the cell has.
+    fn sheet_set(&mut self, pkg: &Arc<Package>, kind: Kind, id: &str, col: usize, text: &str) {
+        let cols = sheet::columns(kind);
+        let Some(key) = cols.get(col).and_then(|c| sheet::field_of(*c)) else { return };
+        let Ok(value) = text.trim().parse::<i64>() else {
+            return self.record_fail(trf!("{text} is not a number", text = text.trim()));
+        };
+        let (lo, hi) = rec::field_range(key);
+        if value < lo || value > hi {
+            return self.record_fail(trf!("{key} must be between {lo} and {hi}", key = key, lo = lo, hi = hi));
+        }
+        if rec::override_of(pkg, kind, id, key) == Some(value) {
+            return;
+        }
+        self.record_set(pkg, kind, id, key, Some(value));
     }
 
     /// Makes the new record of the form's id and base: its file and its name text in every language,

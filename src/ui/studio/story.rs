@@ -12,7 +12,7 @@ use razdor::i18n::tr;
 use razdor::pack::load::Package;
 use razdor::pack::triggers as pt;
 use razdor::studio::campaign_graph as cg;
-use razdor::studio::doc::DocEdit;
+use razdor::studio::doc::{DocEdit, Pick};
 use razdor::studio::story::{self as st, Options, Section};
 use razdor::studio::story_graph::{self as sg, Kind, Story};
 use razdor::studio::texts as tx;
@@ -36,9 +36,11 @@ const LABEL_FILL: Color32 = Color32::from_rgb(0x1c, 0x1f, 0x26);
 /// The first choice row's centre, below a dialog's title, and the step between rows.
 const ROW_Y0: f32 = 40.0;
 const ROW_STEP: f32 = 20.0;
-/// The graph's zoom: Ctrl+scroll (or a pinch) stays within these; the first view fits the tab.
+/// The graph's zoom: Ctrl+scroll (or a pinch) stays within these. A map's first view is at the readable
+/// zoom (node titles at 13 px, the smallest text 12 px), centred on the selected node; Home fits all.
 const ZOOM_MIN: f32 = 0.3;
 const ZOOM_MAX: f32 = 2.0;
+const READABLE_ZOOM: f32 = 1.0;
 
 /// What the Story screen has selected (the Inspector shows its form).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -48,6 +50,14 @@ pub enum StorySel {
     Trigger(String),
     Dialog(String),
     Var(String),
+}
+
+/// A graph command the story screen runs in its own frame: the node's removal or its duplicate (the shortcuts
+/// Delete and Ctrl+D in the Story workspace).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StoryReq {
+    Delete,
+    Duplicate,
 }
 
 /// A port a link is dragged from: a dialog's choice, or a trigger's output.
@@ -70,8 +80,15 @@ pub struct StoryUi {
     link: Option<Port>,
     /// The last operation's refusal, shown under the screen and the forms.
     pub error: Option<String>,
-    /// The graph's zoom for a map. Unset (or for another map) the view fits the tab.
+    /// The graph's zoom for a map. Unset (or for another map) the view is the first one: the readable zoom,
+    /// centred on the selected node.
     pub zoom: Option<(String, f32)>,
+    /// The node the next frame centres the view on (an outline click, a find).
+    pub centre: Option<String>,
+    /// Home: the next frame fits the whole graph in the tab.
+    pub fit: bool,
+    /// Each variable is a node of its own (the default: one node for all of them).
+    pub vars_expanded: bool,
 }
 
 /// The texts of the language shown (any language when that one is missing).
@@ -140,7 +157,7 @@ impl Viewer<'_> {
         self.scen.focus = Focus::Story;
     }
 
-    /// The Story screen: the toolbar, then the map's flow graph.
+    /// The Story screen: the toolbar, then the map's flow graph (variables collapsed unless asked for).
     pub(super) fn story_screen(&mut self, ui: &mut Ui) {
         self.story_resolve_pending();
         let Some(pkg) = self.pkg.clone() else {
@@ -151,7 +168,12 @@ impl Viewer<'_> {
             ui.weak(tr("No map to show: open one on the Map tab."));
             return;
         };
-        ui.horizontal(|ui| {
+        match self.scen.story_req.take() {
+            Some(StoryReq::Delete) => self.story_delete(&pkg),
+            Some(StoryReq::Duplicate) => self.story_duplicate(&pkg),
+            None => {}
+        }
+        ui.horizontal_wrapped(|ui| {
             if ui.button(tr("New trigger")).clicked() {
                 self.story_new_trigger(&pkg, &map);
             }
@@ -162,18 +184,21 @@ impl Viewer<'_> {
                 self.scen.story.saved = Some((map.clone(), BTreeMap::new()));
                 self.story_save_layout(&map);
             }
-            if ui.button(tr("Fit")).on_hover_text(tr("Fit the whole graph in the tab")).clicked() {
-                self.scen.story.zoom = None;
+            if ui.button(tr("Fit")).on_hover_text(tr("Fit the whole graph in the tab (Home)")).clicked() {
+                self.scen.story.fit = true;
             }
-            if ui.button(tr("Variables")).clicked() {
-                self.scen.want_tab = Some(Tab::Vars);
+            if ui.button(tr("Variables")).on_hover_text(tr("Open the variables in the outline")).clicked() {
+                self.scen.outline_tab = super::outline::OutlineTab::Vars;
+                self.scen.want_tab = Some(Tab::Outline);
             }
+            ui.checkbox(&mut self.scen.story.vars_expanded, tr("Each variable")).on_hover_text(tr("Show every variable as a node of its own; by default they are one node"));
         });
         ui.weak(tr("Drag from a choice's or a trigger's dot onto a dialog to wire it. Drag a node to move it."));
         if let Some(e) = self.scen.story.error.clone() {
             ui.colored_label(ERROR_RED, e);
         }
-        let story = sg::build(&pkg, &map);
+        let built = sg::build(&pkg, &map);
+        let story = if self.scen.story.vars_expanded { built } else { sg::collapse_vars(&built) };
         if self.scen.story.saved.as_ref().is_none_or(|(m, _)| m != &map) {
             let saved = sg::read_layout(self.ws.read_editor_file(cg::LAYOUT).as_deref(), &map);
             self.scen.story.saved = Some((map.clone(), saved));
@@ -188,24 +213,123 @@ impl Viewer<'_> {
                 h = h.max(p[1] + s[1] + 60.0);
             }
         }
-        let z = match &self.scen.story.zoom {
-            Some((m, z)) if *m == map => *z,
-            _ => {
-                let z = fit_zoom(w, h, ui.available_size());
-                self.scen.story.zoom = Some((map.clone(), z));
-                z
+        let avail = ui.available_size();
+        let first_view = !matches!(&self.scen.story.zoom, Some((m, _)) if *m == map);
+        let fit = std::mem::take(&mut self.scen.story.fit);
+        let centre = self.scen.story.centre.take();
+        let z = if fit {
+            fit_zoom(w, h, avail)
+        } else {
+            match &self.scen.story.zoom {
+                Some((m, z)) if *m == map => *z,
+                _ => READABLE_ZOOM,
             }
         };
-        egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
+        self.scen.story.zoom = Some((map.clone(), z));
+        // The view: fit all goes to the top left; otherwise the node asked for (or, on a map's first view, the
+        // selected node, else the first) is centred. Other frames keep the scroll the author made.
+        // Without a selection the first view centres on the first trigger (the variables node sits at the corner).
+        let sel = self.story_sel_id().or_else(|| story.nodes.iter().find(|n| n.kind == Kind::Trigger).or(story.nodes.first()).map(|n| n.id.clone()));
+        let target = if fit { None } else { centre.or_else(|| if first_view { sel.clone() } else { None }) };
+        let mut area = egui::ScrollArea::both().auto_shrink([false, false]);
+        if fit {
+            area = area.scroll_offset(Vec2::ZERO);
+        } else if let Some(id) = target {
+            if let (Some(node), Some(p)) = (story.node(&id), positions.get(&id)) {
+                let off = sg::centred_offset(*p, sg::size(node), z, [avail.x, avail.y], [w * z, h * z]);
+                area = area.scroll_offset(Vec2::from(off));
+            }
+        }
+        area.show(ui, |ui| {
             let (resp, painter) = ui.allocate_painter(Vec2::new(w * z, h * z), Sense::click());
-            self.story_draw(ui, &resp, &painter, &story, &positions, &pkg, &map, z);
+            self.story_draw(ui, &resp, &painter, &story, &positions, &pkg, &map, z, sel.as_deref());
         });
+    }
+
+    /// The graph node of the Story selection (a variable is the collapsed variables' node while they are collapsed).
+    pub(super) fn story_sel_id(&self) -> Option<String> {
+        match &self.scen.story.sel {
+            StorySel::None => None,
+            StorySel::Trigger(t) => Some(sg::trigger_id(t)),
+            StorySel::Dialog(d) => Some(sg::dialog_id(d)),
+            StorySel::Var(_) if !self.scen.story.vars_expanded => Some(sg::VARS_ID.to_string()),
+            StorySel::Var(v) => Some(sg::var_id(v)),
+        }
+    }
+
+    /// Makes the trigger's copy (its `when`, actions, conditions, `once` and `chance`) as one undo step, selected.
+    fn story_duplicate(&mut self, pkg: &Package) {
+        let StorySel::Trigger(id) = self.scen.story.sel.clone() else {
+            return self.story_refuse(tr("Duplicate needs a trigger selected in the graph.").to_string());
+        };
+        let Some(t) = pkg.triggers.iter().find(|t| t.value.id == id) else { return };
+        let file = t.file.clone();
+        let text = match self.ws.text_of(&file) {
+            Ok(x) => x,
+            Err(e) => return self.story_refuse(e),
+        };
+        let Some(draft) = st::trigger_draft(&text, &id) else { return };
+        let taken: Vec<String> = pkg.triggers.iter().map(|t| t.value.id.clone()).collect();
+        let new_id = st::free_name(&taken, &format!("{id}_copy"));
+        let mut fields = vec![("id".to_string(), Value::from(new_id.as_str())), ("when".to_string(), Value::InlineTable(draft.when.clone()))];
+        if let Some(m) = &draft.map {
+            fields.insert(1, ("map".to_string(), Value::from(m.as_str())));
+        }
+        if !draft.then.is_empty() {
+            fields.push(("then".to_string(), st::rows_value(&draft.then)));
+        }
+        let mut edits = vec![DocEdit::Push { path: vec![], key: "trigger".into(), fields }];
+        if !draft.cond.is_empty() {
+            edits.extend(st::set_trigger_list(&new_id, "cond", &draft.cond, true));
+        }
+        if let Some(once) = draft.once {
+            edits.push(st::set_trigger_key(&new_id, "once", Some(Value::from(once))));
+        }
+        if let Some(chance) = draft.chance {
+            edits.push(st::set_trigger_key(&new_id, "chance", Some(Value::from(chance))));
+        }
+        self.story_apply(&format!("duplicate trigger {id}"), &file, &edits);
+        if self.scen.story.error.is_none() {
+            self.story_goto(StorySel::Trigger(new_id.clone()));
+            self.scen.story.centre = Some(sg::trigger_id(&new_id));
+        }
+    }
+
+    /// Removes the selected trigger, or a dialog that nothing opens or answers, as one undo step. A dialog that is
+    /// still named is refused with the count of places that name it.
+    fn story_delete(&mut self, pkg: &Package) {
+        match self.scen.story.sel.clone() {
+            StorySel::None => {}
+            StorySel::Trigger(id) => {
+                let Some(t) = pkg.triggers.iter().find(|t| t.value.id == id) else { return };
+                let file = t.file.clone();
+                self.story_apply(&format!("delete trigger {id}"), &file, &[st::drop_trigger(&id)]);
+                if self.scen.story.error.is_none() {
+                    self.scen.story.sel = StorySel::None;
+                }
+            }
+            StorySel::Dialog(id) => {
+                let refs = dialog_refs(pkg, &id);
+                if refs > 0 {
+                    let msg = trf!("Cannot delete: opened or answered by {count} places", count = refs);
+                    return self.story_refuse(msg);
+                }
+                let Some(d) = pkg.dialogs.iter().find(|d| d.value.id == id) else { return };
+                let file = d.file.clone();
+                let edit = DocEdit::Drop { path: Vec::new(), key: "dialog".into(), pick: Pick::Id(id.clone()) };
+                self.story_apply(&format!("delete dialog {id}"), &file, &[edit]);
+                if self.scen.story.error.is_none() {
+                    self.scen.story.sel = StorySel::None;
+                }
+            }
+            StorySel::Var(_) => {}
+        }
     }
 
     /// Draws the graph at zoom `z` and takes its clicks, drags, zooms and links. Edges come first,
     /// so the opaque nodes are drawn over them.
     #[allow(clippy::too_many_arguments)]
-    fn story_draw(&mut self, ui: &mut Ui, resp: &egui::Response, painter: &egui::Painter, story: &Story, positions: &BTreeMap<String, [f32; 2]>, pkg: &Package, map: &str, z: f32) {
+    fn story_draw(&mut self, ui: &mut Ui, resp: &egui::Response, painter: &egui::Painter, story: &Story, positions: &BTreeMap<String, [f32; 2]>, pkg: &Package, map: &str, z: f32, sel_id: Option<&str>) {
         if resp.hovered() {
             let d = ui.input(|i| i.zoom_delta());
             if (d - 1.0).abs() > f32::EPSILON {
@@ -233,26 +357,27 @@ impl Viewer<'_> {
         };
         let font = |size: f32| FontId::proportional(size * z);
         let off = |x: f32, y: f32| Vec2::new(x, y) * z;
-        // Edges, under the nodes. A label sits on the edge at 40–60%, staggered so that labels of
-        // neighbouring edges do not overlap.
+        // Edges, under the nodes. Only the selected node's edges are drawn at full strength, with their labels
+        // (a label sits on the edge at 40–60%, staggered so that labels of neighbouring edges do not overlap); the
+        // rest are faint lines, so the graph's wiring reads as the selection's.
+        let faint = Color32::from_rgba_unmultiplied(0x8a, 0x8f, 0x9c, 26);
         for (i, e) in story.edges.iter().enumerate() {
             let (Some(from), Some(r)) = (port_at(&e.from, e.port.as_deref()), node_rect(&e.to)) else { continue };
             let to = Pos2::new(r.left(), r.center().y);
-            let stroke = Stroke::new(1.4, GREY);
+            let on = sel_id.is_some_and(|s| s == e.from || s == e.to);
+            let stroke = if on { Stroke::new(1.6, Color32::from_gray(0xc8)) } else { Stroke::new(0.8, faint) };
             painter.line_segment([from, to], stroke);
             arrow(painter, from, to, stroke, z);
+            if !on {
+                continue;
+            }
             let mid = super::scenarios::edge_label_at(from, to, i);
             let text = e.label.clone();
-            let w = (text.chars().count() as f32 * 6.4 + 10.0) * z;
-            painter.rect_filled(Rect::from_center_size(mid, Vec2::new(w, 15.0 * z)), 3.0, LABEL_FILL);
-            painter.text(mid, Align2::CENTER_CENTER, text, font(11.0), Color32::from_gray(0xd0));
+            let w = (text.chars().count() as f32 * 6.8 + 10.0) * z;
+            painter.rect_filled(Rect::from_center_size(mid, Vec2::new(w, 16.0 * z)), 3.0, LABEL_FILL);
+            painter.text(mid, Align2::CENTER_CENTER, text, font(12.0), Color32::from_gray(0xe0));
         }
-        let selected_id = match &self.scen.story.sel {
-            StorySel::Trigger(t) => Some(sg::trigger_id(t)),
-            StorySel::Dialog(d) => Some(sg::dialog_id(d)),
-            StorySel::Var(v) => Some(sg::var_id(v)),
-            StorySel::None => None,
-        };
+        let selected_id = sel_id.map(str::to_string);
         let mut ports: Vec<(Port, Pos2)> = Vec::new();
         for n in &story.nodes {
             let Some(r) = node_rect(&n.id) else { continue };
@@ -266,7 +391,7 @@ impl Viewer<'_> {
                     painter.text(r.left_top() + off(8.0, 7.0), Align2::LEFT_TOP, format!("{} {}", tr("Dialog"), n.name), font(13.0), Color32::WHITE);
                     for (i, c) in n.choices.iter().enumerate() {
                         let y = row_y(r, i);
-                        painter.text(Pos2::new(r.left() + 10.0 * z, y), Align2::LEFT_CENTER, c.as_str(), font(11.0), Color32::from_gray(0xc8));
+                        painter.text(Pos2::new(r.left() + 10.0 * z, y), Align2::LEFT_CENTER, c.as_str(), font(12.0), Color32::from_gray(0xc8));
                         // Each choice's own output port, at the right edge of its row.
                         let port = Pos2::new(r.right(), y);
                         painter.circle_filled(port, 4.5 * z, ACCENT);
@@ -277,7 +402,7 @@ impl Viewer<'_> {
                     painter.rect_filled(r, egui::CornerRadius::same(4), TRIGGER_FILL);
                     painter.rect_stroke(r, egui::CornerRadius::same(4), Stroke::new(stroke_w, border), egui::StrokeKind::Inside);
                     painter.text(r.left_top() + off(8.0, 7.0), Align2::LEFT_TOP, format!("{} {}", tr("Trigger"), n.name), font(13.0), Color32::WHITE);
-                    painter.text(r.left_top() + off(8.0, 30.0), Align2::LEFT_TOP, n.detail.as_str(), font(11.0), GREY);
+                    painter.text(r.left_top() + off(8.0, 30.0), Align2::LEFT_TOP, n.detail.as_str(), font(12.0), Color32::from_gray(0xb4));
                     let port = Pos2::new(r.right(), r.center().y);
                     painter.circle_filled(port, 4.5 * z, ACCENT);
                     ports.push((Port::Trigger(n.name.clone()), port));
@@ -285,17 +410,22 @@ impl Viewer<'_> {
                 Kind::Var => {
                     painter.rect_filled(r, egui::CornerRadius::same(12), VAR_FILL);
                     painter.rect_stroke(r, egui::CornerRadius::same(12), Stroke::new(stroke_w, border), egui::StrokeKind::Inside);
-                    painter.text(r.center(), Align2::CENTER_CENTER, format!("{} · {}", n.name, n.detail), font(11.5), Color32::WHITE);
+                    let label = if n.id == sg::VARS_ID { format!("{} · {}", tr("Variables"), n.detail) } else { format!("{} · {}", n.name, n.detail) };
+                    painter.text(r.center(), Align2::CENTER_CENTER, label, font(12.0), Color32::WHITE);
                 }
             }
             let body = ui.interact(r.shrink(4.0 * z), ui.id().with(("story-node", n.id.as_str())), Sense::click_and_drag());
             if body.clicked() {
-                let sel = match n.kind {
-                    Kind::Dialog => StorySel::Dialog(n.name.clone()),
-                    Kind::Trigger => StorySel::Trigger(n.name.clone()),
-                    Kind::Var => StorySel::Var(n.name.clone()),
-                };
-                self.story_goto(sel);
+                match n.kind {
+                    // The collapsed variables node opens the outline's variables; the variables are its own list.
+                    Kind::Var if n.id == sg::VARS_ID => {
+                        self.scen.outline_tab = super::outline::OutlineTab::Vars;
+                        self.scen.want_tab = Some(Tab::Outline);
+                    }
+                    Kind::Dialog => self.story_goto(StorySel::Dialog(n.name.clone())),
+                    Kind::Trigger => self.story_goto(StorySel::Trigger(n.name.clone())),
+                    Kind::Var => self.story_goto(StorySel::Var(n.name.clone())),
+                }
             }
             if body.dragged() {
                 let d = body.drag_delta() / z;
@@ -696,6 +826,15 @@ pub(super) fn snapshot_select(scen: &mut super::scenarios::ScenarioUi, pkg: Opti
         }
     }
     scen.focus = Focus::Story;
+}
+
+/// How many places open or answer dialog `id`: the triggers that open it or are answered by it, and the choices
+/// of the other dialogs that open it.
+pub(super) fn dialog_refs(pkg: &Package, id: &str) -> usize {
+    let opens = |a: &pt::Action| matches!(a, pt::Action::Dialog(d) | pt::Action::Ending(d) if d == id);
+    let triggers = pkg.triggers.iter().filter(|t| t.value.then.iter().any(opens) || matches!(&t.value.when, pt::Event::DialogChoice { dialog, .. } if dialog == id)).count();
+    let choices: usize = pkg.dialogs.iter().filter(|d| d.value.id != id).map(|d| d.value.choices.iter().map(|c| c.then.iter().filter(|a| opens(a)).count()).sum::<usize>()).sum();
+    triggers + choices
 }
 
 /// A variable's use holder as the selection it opens (`None` for the declaration).

@@ -17,6 +17,8 @@
 mod aiview;
 mod battletest;
 mod canvas;
+mod data;
+mod outline;
 mod claude;
 mod forms;
 mod inspector;
@@ -138,6 +140,12 @@ pub enum Tab {
     Battle,
     /// The two scores: Richness and Health, each with its breakdown (`scores.rs`).
     Scores,
+    /// The Сюжет outline (UX5, `outline.rs`): the triggers and dialogs by map, the characters, the variables.
+    Outline,
+    /// The Данные navigation (UX5, `data.rs`): the five views, and the file tree on Файлы.
+    DataNav,
+    /// The Данные centre (UX5, `data.rs`): the view the navigation picked.
+    Data,
 }
 
 impl Tab {
@@ -165,6 +173,9 @@ impl Tab {
             Tab::Items => "items",
             Tab::Battle => "battle",
             Tab::Scores => "scores",
+            Tab::Outline => "outline",
+            Tab::DataNav => "data-nav",
+            Tab::Data => "data-view",
         }
     }
 
@@ -191,6 +202,9 @@ impl Tab {
             Tab::Items => tr("Items"),
             Tab::Battle => tr("Battle test"),
             Tab::Scores => tr("Scores"),
+            Tab::Outline => tr("Outline"),
+            Tab::DataNav => tr("Data"),
+            Tab::Data => tr("Data"),
         }
     }
 }
@@ -462,7 +476,8 @@ impl StudioScreen {
                 }
                 "campaign-edge" => {
                     self.scen.focus = Focus::Campaign;
-                    self.pending_tab = Some(Tab::Campaign);
+                    self.scen.story_view = outline::StoryView::Campaign;
+                    self.pending_tab = Some(Tab::Story);
                     let text = self.ws.text_of(razdor::studio::campaign_graph::FILE).ok();
                     if let Ok((pkg, _)) = self.ws.read_package() {
                         let graph = razdor::studio::campaign_graph::build(&pkg, text.as_deref(), lang());
@@ -551,7 +566,8 @@ impl StudioScreen {
                 "header" => self.scen.focus = Focus::Header,
                 "campaign" => {
                     self.scen.focus = Focus::Campaign;
-                    self.pending_tab = Some(Tab::Campaign);
+                    self.scen.story_view = outline::StoryView::Campaign;
+                    self.pending_tab = Some(Tab::Story);
                 }
                 "story" | "vars" => {
                     // The story screens show their own selection: the army the scene named is not theirs.
@@ -559,8 +575,44 @@ impl StudioScreen {
                         self.selection = None;
                         self.scen.focus = Focus::Story;
                     }
-                    let tab = if *opt == "story" { Tab::Story } else { Tab::Vars };
-                    self.pending_tab = Some(tab);
+                    if *opt == "vars" {
+                        self.scen.outline_tab = outline::OutlineTab::Vars;
+                    }
+                    self.pending_tab = Some(if *opt == "story" { Tab::Story } else { Tab::Outline });
+                }
+                // `outline=story|characters|vars`: the Сюжет outline's tab; `story-view=campaign` the centre's switch.
+                other if other.starts_with("outline=") => {
+                    self.scen.outline_tab = match &other["outline=".len()..] {
+                        "story" => outline::OutlineTab::Story,
+                        "characters" => outline::OutlineTab::Characters,
+                        "vars" => outline::OutlineTab::Vars,
+                        _ => return Err(format!("{other}: story, characters or vars")),
+                    };
+                    self.pending_tab = Some(Tab::Outline);
+                }
+                // `data=texts|package|files`: the Данные view (`units`, `items` are the spreadsheets).
+                other if other.starts_with("data=") => {
+                    self.scen.data_view = match &other["data=".len()..] {
+                        "texts" => data::DataView::Texts,
+                        "package" => data::DataView::Package,
+                        "files" => data::DataView::Files,
+                        _ => return Err(format!("{other}: texts, package or files")),
+                    };
+                    self.pending_tab = Some(Tab::Data);
+                }
+                // `sort=price`: the spreadsheets sorted by the suggested price, highest first.
+                "sort=price" => {
+                    self.scen.sheet.sort = [Some((8, true)), Some((4, true))];
+                }
+                // `file=<path>` opens the file in Данные › Файлы, and `at=<line>` (after it) puts the caret at the line.
+                other if other.starts_with("file=") => {
+                    self.open_file(&other["file=".len()..]);
+                    self.scen.data_view = data::DataView::Files;
+                    self.pending_tab = Some(Tab::Script);
+                }
+                other if other.starts_with("at=") => {
+                    let line: u32 = other["at=".len()..].parse().map_err(|_| format!("{other}: the line"))?;
+                    self.jump = Some(Jump { line, range: None });
                 }
                 "trigger" | "dialog" => {
                     // The package is built after the first frames: the Story screen picks the node then.
@@ -588,6 +640,7 @@ impl StudioScreen {
                     self.scen.focus = focus;
                     self.scen.price_open = true;
                     self.selection = None;
+                    self.scen.data_view = if kind == razdor::studio::records::Kind::Unit { data::DataView::Units } else { data::DataView::Items };
                     self.pending_tab = Some(tab);
                 }
                 "claude" => {
@@ -668,7 +721,8 @@ impl StudioScreen {
                 }
             }
         }
-        if let Some(sel) = self.selection.clone() {
+        // The caret starts at the selection's table, unless the snapshot named a line (`at=`).
+        if let (Some(sel), None) = (self.selection.clone(), self.jump.as_ref()) {
             self.jump = jump_for(&self.ws, self.ws.package().as_deref(), &path, &sel);
         }
         Ok(())
@@ -1191,6 +1245,10 @@ impl StudioScreen {
         if let Some(tab) = self.pending_tab.take().or_else(|| self.scen.want_tab.take()) {
             self.show_tab(tab);
         }
+        if let Some(id) = self.scen.want_map.take() {
+            switch_map(&mut self.maps, &mut self.canvas, &mut self.selection, &id);
+            self.reload();
+        }
         if let Some(kind) = self.snap_ws {
             self.ws_kind = kind;
         }
@@ -1339,15 +1397,35 @@ impl StudioScreen {
             // A Map shortcut with Ctrl (Ctrl+A, Ctrl+D) waits while a text field has the keyboard.
             Scope::Map => ws == WsKind::Map && !wants,
             Scope::Inspector => inspector_hot,
+            // The graph's and the sheet's keys wait while the Inspector has the pointer (its Ctrl+F is the field search).
+            Scope::Story => ws == WsKind::Story && !wants && !inspector_hot,
+            Scope::Data => ws == WsKind::Data && !wants && !inspector_hot,
         };
         // The function keys come from macroquad (egui-miniquad does not deliver them). A relayout pass of the
         // same frame may read them again: a command that runs twice (Проверка) only rebuilds twice.
         let ids = commands::pressed(ctx, &prefs.keys, active, &commands::mq_presses());
+        // A paste's text is read before the clipboard events are taken: the sheet types it into its cell.
+        let pasted = ctx.input(|i| {
+            i.events.iter().find_map(|e| match e {
+                egui::Event::Paste(t) => Some(t.clone()),
+                egui::Event::Text(t) if i.modifiers.command => Some(t.clone()),
+                _ => None,
+            })
+        });
         let clips = ctx.input_mut(|i| {
             let held = i.modifiers.command;
             let shift = i.modifiers.shift;
             commands::clipboard(&mut i.events, held, shift, wants)
         });
+        if ws == WsKind::Data {
+            for clip in &clips {
+                match clip {
+                    Clip::Copy => self.scen.sheet.copy = true,
+                    Clip::Paste | Clip::PasteInPlace => self.scen.sheet.paste = pasted.clone(),
+                    Clip::Cut => {}
+                }
+            }
+        }
         if ws == WsKind::Map {
             for clip in clips {
                 let set = selection::set_of(&self.canvas, &self.maps);
@@ -1389,6 +1467,7 @@ impl StudioScreen {
             "check" => self.check(),
             "drawer" => self.drawer_open = !self.drawer_open,
             "cancel" => {
+                self.scen.sheet.cancel = true;
                 self.canvas.paste = false;
                 self.canvas.float = false;
                 // Esc leaves a placement too: the tool goes back to Select.
@@ -1397,6 +1476,23 @@ impl StudioScreen {
                 }
             }
             "settings" => self.settings.open = true,
+            "open-in-file" => self.open_in_file(),
+            "find-node" => {
+                self.scen.outline_tab = outline::OutlineTab::Story;
+                self.scen.want_tab = Some(Tab::Outline);
+                self.scen.focus_find = true;
+            }
+            "find-data" => self.scen.focus_find = true,
+            // The graph's keys: the frame goes back to the readable zoom centred on the node, Home fits all,
+            // Delete and Ctrl+D act on the selected trigger or dialog (in the story screen's own frame).
+            "frame-node" => self.scen.story.zoom = None,
+            "fit-nodes" => self.scen.story.fit = true,
+            "dup-node" => self.scen.story_req = Some(story::StoryReq::Duplicate),
+            "delete" if self.ws_kind == WsKind::Story => {
+                if self.scen.story.sel != story::StorySel::None {
+                    self.scen.story_req = Some(story::StoryReq::Delete);
+                }
+            }
             "delete" => {
                 // Delete clears the selection's contents on the visible unlocked layers; without one it
                 // removes the selected object, as before.
@@ -1523,7 +1619,11 @@ impl StudioScreen {
     }
 
     /// Shows a tab: in the current workspace when it has the tab, else in the first workspace that has it.
+    /// The screens of UX5 have their own places: the old tabs of the Story and Data screens route to them
+    /// (the Campaign to the Story centre's switch, the Characters and Variables to the outline's tabs, the
+    /// units, items and texts to the Данные views, the Script to the Файлы view unless a Script dock shows).
     fn show_tab(&mut self, tab: Tab) {
+        let tab = self.route(tab);
         let order = std::iter::once(self.ws_kind).chain(WsKind::ALL.into_iter().filter(|k| *k != self.ws_kind));
         for kind in order.collect::<Vec<_>>() {
             let dock = &mut self.docks[kind.index()];
@@ -1532,6 +1632,33 @@ impl StudioScreen {
                 self.ws_kind = kind;
                 return;
             }
+        }
+    }
+
+    /// The dock tab a screen tab is shown in, after the screen's own place (`show_tab`) is set.
+    fn route(&mut self, tab: Tab) -> Tab {
+        match tab {
+            Tab::Campaign => {
+                self.scen.story_view = outline::StoryView::Campaign;
+                Tab::Story
+            }
+            Tab::Characters | Tab::Vars => {
+                self.scen.outline_tab = if tab == Tab::Vars { outline::OutlineTab::Vars } else { outline::OutlineTab::Characters };
+                Tab::Outline
+            }
+            Tab::Units | Tab::Items | Tab::Texts => {
+                self.scen.data_view = match tab {
+                    Tab::Units => data::DataView::Units,
+                    Tab::Items => data::DataView::Items,
+                    _ => data::DataView::Texts,
+                };
+                Tab::Data
+            }
+            Tab::Script if !self.docks.iter().any(|d| d.find_tab(&Tab::Script).is_some()) => {
+                self.scen.data_view = data::DataView::Files;
+                Tab::Data
+            }
+            other => other,
         }
     }
 
@@ -1920,10 +2047,13 @@ impl TabViewer for Viewer<'_> {
             Tab::Stamps => self.stamps_dock(ui),
             Tab::Palette => self.palette_dock(ui),
             Tab::Layers => self.layers_dock(ui),
-            Tab::Campaign => self.campaign_screen(ui),
+            Tab::Campaign => self.story_centre(ui),
             Tab::Texts => self.texts_screen(ui),
             Tab::Characters => self.characters_dock(ui),
-            Tab::Story => self.story_screen(ui),
+            Tab::Story => self.story_centre(ui),
+            Tab::Outline => self.outline_panel(ui),
+            Tab::DataNav => self.data_nav(ui),
+            Tab::Data => self.data_centre(ui),
             Tab::Vars => self.vars_dock(ui),
             Tab::Units => self.units_screen(ui),
             Tab::Items => self.items_screen(ui),
@@ -1983,6 +2113,9 @@ impl Viewer<'_> {
         let id = ui.id().with("studio-script");
         let row = ui.text_style_height(&egui::TextStyle::Monospace);
         let mut area = ScrollArea::vertical().auto_shrink([false, false]);
+        // A jump's scroll is kept for a few frames: egui clamps an offset to the text's height, which is known only
+        // once the text is laid out (a file opened by a jump is new to the view).
+        let scroll_id = Id::new("studio-script-scroll");
         if let Some(j) = self.jump.take() {
             // The caret goes to the table's start, the table is selected, and the view scrolls to
             // a few lines above it. A line alone puts the caret at its start.
@@ -1996,7 +2129,11 @@ impl Viewer<'_> {
             state.cursor.set_char_range(Some(CCursorRange::two(CCursor::new(char_index(text, start)), CCursor::new(char_index(text, end)))));
             state.store(ui.ctx(), id);
             ui.memory_mut(|m| m.request_focus(id));
-            area = area.vertical_scroll_offset(line.saturating_sub(4) as f32 * row);
+            ui.ctx().data_mut(|d| d.insert_temp(scroll_id, (line.saturating_sub(4) as f32 * row, 4u8)));
+        }
+        if let Some((at, frames)) = ui.ctx().data(|d| d.get_temp::<(f32, u8)>(scroll_id)) {
+            area = area.vertical_scroll_offset(at);
+            ui.ctx().data_mut(|d| if frames <= 1 { d.remove::<(f32, u8)>(scroll_id) } else { d.insert_temp(scroll_id, (at, frames - 1)) });
         }
         let resp = area
             .show(ui, |ui| {

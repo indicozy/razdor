@@ -110,6 +110,8 @@ impl Viewer<'_> {
     pub(super) fn inspector(&mut self, ui: &mut Ui) {
         // Ctrl+F reads this next frame: the Inspector has the focus while the pointer is in it.
         kit::set_hot(ui.ctx(), ui.rect_contains_pointer(ui.max_rect()));
+        // «Открыть в файле» for the selection's object, above its form (spec §4.2).
+        self.open_link(ui);
         // The scenario forms take the Inspector while they are in focus (`scenarios`).
         match self.scen.focus.clone() {
             Focus::Package => return egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| self.package_form(ui)).inner,

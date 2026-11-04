@@ -37,6 +37,8 @@ pub mod edit;
 pub mod history;
 pub mod layers;
 pub mod map;
+pub mod nav;
+pub mod sheet;
 pub mod mcp;
 pub mod paint;
 pub mod place;

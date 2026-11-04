@@ -42,10 +42,10 @@ impl Viewer<'_> {
                 let sets: Vec<&VarUse> = uses.iter().filter(|u| u.role == Role::Write).collect();
                 let reads: Vec<&VarUse> = uses.iter().filter(|u| u.role == Role::Read).collect();
                 ui.group(|ui| {
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         ui.strong(name.as_str());
                         ui.weak(format!("{} · {}", kind_word(v.value.kind), default_word(&v.value.default)));
-                        if let Some(new) = forms::text_field(ui, &format!("var-name-{name}"), &name, 150.0) {
+                        if let Some(new) = forms::text_field(ui, &format!("var-name-{name}"), &name, 120.0) {
                             rename = Some((name.clone(), new));
                         }
                     });

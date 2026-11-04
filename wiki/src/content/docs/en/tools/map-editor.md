@@ -27,8 +27,8 @@ The studio has four workspaces. Switch between them with the buttons in the top 
 **Alt+1** … **Alt+4**:
 
 * **Map** — the map, the stamps on the left, the minimap and Scene on the right.
-* **Story** — the characters and variables on the left, the story or campaign graph in the centre.
-* **Data** — the package's files on the left, units, items, texts and the script in the centre.
+* **Story** — the outline on the left (the tabs Story, Characters and Variables), the story or campaign graph in the centre.
+* **Data** — on the left a choice of Units, Items, Texts, Package and Files; the chosen view in the centre. Files shows the file tree on the left and the code editor in the centre.
 * **Test** — the battle test and the package's scores.
 
 Each workspace has the Inspector on the right. The studio remembers each workspace's window layout;
@@ -164,16 +164,17 @@ is in the selection are copied. The hero is never copied or removed.
 - **Package settings** («Package» → «Package settings», or `package.toml` in the file tree): version, title, description, author, licence, base. The id is read only.
 - **Map settings** («Package» → «Map settings», or the map's name in the scene): title, description, start date, the relations between the sides (−3 to 3), terrain colours and the victory (its kind and its argument).
 - **Campaign** (the «Campaign» main screen): maps as nodes, next-maps as arrows with numbers (1 is tried first). Drag a node to move it; drag from its right edge to another node to add a next-map. Select an arrow to change its order, delete it or set its conditions. Dashed arrows are set by triggers (travel, victory with a next map, ending); they are read only here and are edited in Script.
-- **Story** (the «Story» main screen): the map's dialogs, triggers and variables as nodes. A dialog's dots are its choices; drag from a choice's dot (or a trigger's) onto a dialog to wire it: the choice opens the dialog, or, when a `dialog_choice` trigger already answers the choice, a new trigger is made. Edges read «opens», «sets X», «if X». Select a node to edit it in the Inspector: a trigger (when, if, then, with each kind and its arguments from a list), a dialog (its title and text in each language, the speaker, its choices with their conditions and actions). «Variables» (bottom dock) shows where each variable is set and read, warns about the unused ones, and renames it across the files in one step.
-- **Characters** (the «Characters» tab at the bottom): where each character is given, required and removed. A warning when a character is needed before any map gives it. Renaming changes it in every file in one undo step.
-- **Texts** (the «Texts» main screen): one row per key, one column per language. Red: used but defined in no language; grey: defined but never used; amber: a language lacks it. «Add language» creates `texts/<language>.toml` with every key empty.
+- **Outline** (the Story tab on the left of Story): the triggers and dialogs by map; a trigger shows its condition under its name, a dialog its title. Search at the top. A click selects the node, opens it in the Inspector and centres the graph on it. The graph opens at a readable zoom, centred on the selected node (or the first trigger). Variables fold into one «Variables» node; «Each variable» above the graph shows them one by one. Keys in the graph: **F** frames the selected node, **Home** fits the whole graph, **Ctrl+F** finds a node in the outline, **Ctrl+D** duplicates a trigger, **Delete** removes the selected trigger or dialog when nothing names it. The selected node is highlighted, its edges are bright and the others faint.
+- **Story** (the «Story» main screen): the map's dialogs, triggers and variables as nodes. A dialog's dots are its choices; drag from a choice's dot (or a trigger's) onto a dialog to wire it: the choice opens the dialog, or, when a `dialog_choice` trigger already answers the choice, a new trigger is made. Edges read «opens», «sets X», «if X». Select a node to edit it in the Inspector: a trigger (when, if, then, with each kind and its arguments from a list), a dialog (its title and text in each language, the speaker, its choices with their conditions and actions). «Variables» (a tab of the outline) shows where each variable is set and read, warns about the unused ones, and renames it across the files in one step.
+- **Characters** (the «Characters» tab of the outline): where each character is given, required and removed. A warning when a character is needed before any map gives it. Renaming changes it in every file in one undo step.
+- **Texts** (in Data, the «Texts» view): one row per key, one column per language. Red: used but defined in no language; grey: defined but never used; amber: a language lacks it. «Add language» creates `texts/<language>.toml` with every key empty.
 
 Each change is one undo step (Ctrl+Z).
 
 ## Units and items
 
-- **Units** and **Items** (main screens): the package's records as a list with a filter. **New unit** (or item) makes a record on a base game unit: its file `units/<id>.toml` and its name in every language.
-- Pick a record to edit it in the Inspector. Each field shows its override, with the base value next to it; **Reset** returns the base.
+- **Units** and **Items** (in Data): the package's records as spreadsheets. Columns: the id (pinned on the left), the base, the experience to level 2, hits, attack, defence, speed, gold and the suggested price from the game's formula. A click on a header sorts: ascending, descending, then none. The filter is Ctrl+F. A number cell is edited by a double click, Enter or F2; Enter writes it, Esc cancels, and each edit is one undo step. The Apply button in a row writes its suggested price. The arrows move the cursor; Ctrl+C and Ctrl+V copy and paste a number. The picked record opens in the Inspector. **New unit** (or item) makes a record on a base game unit: its file `units/<id>.toml` and its name in every language.
+- Pick a record to edit it in the Inspector. Ctrl+Shift+O (or «Open in file» at the top of the Inspector) goes to the object's line in Data › Files. Each field shows its override, with the base value next to it; **Reset** returns the base.
 - **Suggested price** comes from the game's formula: the unit's strength, its tactical cost, the gold rounded down in bands; doubled for the three hero classes. The steps open under the price. **Apply** writes the price into the price field in one undo step. The formula needs the game's install; without it there is no price.
 - An item gets the price of the gain it gives the units that can wear it. A price of 1 and potions are left alone.
 - **Levels 1–5** (for a unit): the stats and the tactical cost in percent of the base. The gains per level come from the base.
@@ -273,7 +274,7 @@ last result. Health only warns: it never stops a save or a play. The game's file
 The studio does not have route checks for every story yet. These come in later versions.
 
 The studio is being rebuilt in steps. Not done yet: the command palette
-(Ctrl+Shift+P) and go to an object (Ctrl+P), the Play button (F5), Tab to hide the side panels, and the AI
+(Ctrl+Shift+P) and go to an object (Ctrl+P), the Play button (F5), and the AI
 viewer inside Test (it is still on the map).
 
 ## .DTm maps

@@ -13,15 +13,17 @@ use super::Tab;
 
 /// The width the layouts are first made at, before the window's width is known (points).
 pub const NOMINAL_W: f32 = 1280.0;
-/// The Сюжет and Данные outline and file columns (points).
-const OUTLINE_W: f32 = 240.0;
-const FILES_W: f32 = 260.0;
+/// The Сюжет outline and the Данные navigation columns (points).
+const OUTLINE_W: f32 = 260.0;
+const NAV_W: f32 = 150.0;
 /// Below this window width the Map workspace folds its Слои | Сцена column into the Inspector column's tabs,
 /// with the minimap pinned on top (spec §5.8; the canvas keeps about 650 px at 1280).
 pub const FOLD_W: f32 = 1600.0;
-/// The layout's version for the Map workspace: its saved layout is keyed by it, so a change of the layout
-/// (here UX3's) resets the layouts the earlier version saved.
+/// The layouts' versions: a saved layout is keyed by its version, so a change of a workspace's layout
+/// (here UX3's Map, UX5's Story and Data) resets the layouts the earlier version saved.
 const MAP_LAYOUT: &str = "map-ux3";
+const STORY_LAYOUT: &str = "story-ux5";
+const DATA_LAYOUT: &str = "data-ux5";
 
 /// One of the four workspaces.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,8 +47,8 @@ impl WsKind {
     pub fn key(self) -> &'static str {
         match self {
             WsKind::Map => MAP_LAYOUT,
-            WsKind::Story => "story",
-            WsKind::Data => "data",
+            WsKind::Story => STORY_LAYOUT,
+            WsKind::Data => DATA_LAYOUT,
             WsKind::Test => "test",
         }
     }
@@ -150,17 +152,20 @@ pub fn default_dock(kind: WsKind, width: f32, side: bool) -> DockState<Tab> {
             dock
         }
         WsKind::Story => {
-            let mut dock = DockState::new(vec![Tab::Story, Tab::Campaign]);
+            // The graph or the campaign graph in the centre, the outline (Сюжет | Персонажи | Переменные) at the
+            // left, the Inspector at the right (spec §4.2).
+            let mut dock = DockState::new(vec![Tab::Story]);
             let tree = dock.main_surface_mut();
             let [centre, _inspector] = tree.split_right(NodeIndex::root(), share(w - inspector, w), vec![Tab::Inspector]);
-            let _ = tree.split_left(centre, share(OUTLINE_W, w - inspector), vec![Tab::Characters, Tab::Vars]);
+            let _ = tree.split_left(centre, share(OUTLINE_W, w - inspector), vec![Tab::Outline]);
             dock
         }
         WsKind::Data => {
-            let mut dock = DockState::new(vec![Tab::Units, Tab::Items, Tab::Texts, Tab::Script]);
+            // The view in the centre (spreadsheets, texts, package, files), its navigation at the left, the Inspector.
+            let mut dock = DockState::new(vec![Tab::Data]);
             let tree = dock.main_surface_mut();
             let [centre, _inspector] = tree.split_right(NodeIndex::root(), share(w - inspector, w), vec![Tab::Inspector]);
-            let _ = tree.split_left(centre, share(FILES_W, w - inspector), vec![Tab::FileSystem]);
+            let _ = tree.split_left(centre, share(NAV_W, w - inspector), vec![Tab::DataNav]);
             dock
         }
         WsKind::Test => {
@@ -215,7 +220,9 @@ mod tests {
         }
         assert!(tabs(&default_dock(WsKind::Map, 1280.0, false)).contains(&Tab::Map));
         assert!(tabs(&default_dock(WsKind::Story, 1280.0, false)).contains(&Tab::Story));
-        assert!(tabs(&default_dock(WsKind::Data, 1280.0, false)).contains(&Tab::Units));
+        assert!(tabs(&default_dock(WsKind::Story, 1280.0, false)).contains(&Tab::Outline));
+        assert!(tabs(&default_dock(WsKind::Data, 1280.0, false)).contains(&Tab::Data));
+        assert!(tabs(&default_dock(WsKind::Data, 1280.0, false)).contains(&Tab::DataNav));
         assert!(tabs(&default_dock(WsKind::Test, 1280.0, false)).contains(&Tab::Battle));
     }
 
@@ -233,7 +240,7 @@ mod tests {
         assert_eq!(to_json(&back).as_deref(), Some(json.as_str()), "a saved layout is the same text again");
         assert_eq!(tabs(&back), tabs(&dock));
         // The keys are the tabs' fixed keys, not their titles: a change of language cannot break them.
-        assert!(json.contains("Units") || json.contains("units"), "{json}");
+        assert!(json.contains("DataNav"), "{json}");
         assert_eq!(Tab::Units.key(), "units");
     }
 
@@ -250,6 +257,8 @@ mod tests {
     #[test]
     fn the_map_layout_is_keyed_by_its_version() {
         assert_eq!(WsKind::Map.key(), "map-ux3", "a change of the Map layout bumps the key, so saved layouts reset");
+        assert_eq!(WsKind::Story.key(), "story-ux5");
+        assert_eq!(WsKind::Data.key(), "data-ux5");
     }
 
     #[test]
