@@ -1162,6 +1162,7 @@ pub fn impossible(audio: &super::audio::Settings) -> bool {
 /// (the original writes them back into its ini): the scroll speed, the autosave, the hints.
 pub fn apply_options(audio: &super::audio::Settings) {
     super::world_view::set_tilt_view(audio.map_tilt);
+    super::world_view::set_sprite_size(audio.map_sprite_size);
     chrome::set_option_override("ScrollSpeed", audio.scroll_speed.map(|v| (v.round() as i32).to_string()));
     chrome::set_option_override("OptValue8", audio.autosave.map(|on| if on { "1" } else { "0" }.to_string()));
     set_hints(!hints_off(audio));
@@ -1465,7 +1466,9 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     let lang_hint = wrap(super::language::hint(), rw, 12.0 * k);
     let hints_h = 44.0 * k + ai_hint.len() as f32 * 17.0 * k + 48.0 * k + lang_hint.len() as f32 * 17.0 * k;
     let ok_top = inner.h - 16.0 * k - ok_h - 4.0 * k;
-    let mut pitch = right_column_pitch(30.0 * k, ok_top, 12.0, hints_h, 44.0 * k);
+    // The 2.5D view's sprite size row is there only with the 2.5D view on: one more pitch then.
+    let extra_rows = if audio.map_tilt { 1.0 } else { 0.0 };
+    let mut pitch = right_column_pitch(30.0 * k, ok_top, 12.0 + extra_rows, hints_h, 44.0 * k);
     // At a grown size the rows keep a 2 px gap under their grown buttons (at Normal nothing).
     if row_h > 28.0 * k {
         pitch = pitch.max(row_h + 2.0 * k);
@@ -1547,6 +1550,11 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     if row(tr("Map view"), view_label, &mut y) {
         audio.map_tilt = !audio.map_tilt;
     }
+    // Razdor's (the owner's decision, 2026-11-05): the standing sprites' size, shown with the 2.5D
+    // view it changes (1×, 1.5× or 2×; a stored size of another value shows as it is).
+    if audio.map_tilt && row(tr("Sprite size"), &sprite_size_label(audio.map_sprite_size), &mut y) {
+        audio.map_sprite_size = super::world_view::next_sprite_size(audio.map_sprite_size);
+    }
     // Razdor's options (a player's report: the minimap dragged where it is hard to move back):
     // its corner, cycled clockwise, and «Сбросить» puts its size and place back to the default.
     let corner_label = match minimap::corner() {
@@ -1590,6 +1598,11 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
         ADV_SCROLL.with(|s| s.set(0.0));
     }
     done
+}
+
+/// The sprite size as the settings button shows it: `1×`, `1.5×`, `2×`, or the stored value (`1.3×`).
+fn sprite_size_label(f: f32) -> String {
+    format!("{}×", (f * 100.0).round() / 100.0)
 }
 
 /// The right column's row pitch in the advanced window (px at its scale): `max` (the original's

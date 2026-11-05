@@ -63,6 +63,16 @@ float fold(float c, float n) {
     return m < n ? m : 2.0 * n - 1.0 - m;
 }
 
+// How far the ground past the border (d cells out, 0 inside) has sunk into the sky: 45% at the
+// edge, all of it at Fade cells, along a smoothstep (`terrain::sky_sink`, the same curve).
+float sky_sink(float d) {
+    if (d <= 0.0) {
+        return 0.0;
+    }
+    float s = clamp(d / Fade, 0.0, 1.0);
+    return 0.45 + 0.55 * s * s * (3.0 - 2.0 * s);
+}
+
 float code_at(vec2 c) {
     c = Edge.x > 0.5 ? vec2(fold(c.x, MapSize.x), fold(c.y, MapSize.y)) : clamp(c, vec2(0.0), MapSize - 1.0);
     return floor(texture2D(Cells, (c + 0.5) / MapSize).r * 15.0 + 0.5);
@@ -88,13 +98,13 @@ void main() {
     vec3 col = mix(top, bottom, f.y);
     if (Edge.x > 0.5) {
         // Past the border (p in cell units, the border at -0.5 and MapSize - 0.5): the ground
-        // greys a little from the edge on, and sinks into the sky over Fade cells, so the
-        // extension reads as not playable.
+        // greys a little from the edge on, and sinks into the sky (a step of 45% at the edge,
+        // all of it over Fade cells), so the extension reads as not playable.
         vec2 gap = max(max(vec2(-0.5) - p, p - (MapSize - 0.5)), vec2(0.0));
         float d = length(gap);
         float grey = dot(col, vec3(0.299, 0.587, 0.114));
         col = mix(col, vec3(grey), 0.35 * clamp(d * 2.0, 0.0, 1.0));
-        col = mix(col, Edge.yzw, smoothstep(0.0, Fade, d));
+        col = mix(col, Edge.yzw, sky_sink(d));
     }
     gl_FragColor = vec4(col, 1.0);
 }
@@ -107,6 +117,20 @@ const PAD: u32 = 2;
 pub const EDGE_FADE: f32 = 14.0;
 /// The sky the ground sinks into, as the map's shader gets it (the sky of `world_view`).
 pub const EDGE_SKY: [f32; 3] = [0.06, 0.08, 0.11];
+/// The share of the sky the ground past the edge takes at once, at the edge itself (the owner's
+/// decision, 2026-11-05: a dark step at the border, so the extension reads as a wall's far side).
+pub const EDGE_SINK_AT_EDGE: f32 = 0.45;
+
+/// How far the ground `d` cells past the border has sunk into the sky (0 inside the map): the
+/// step of [`EDGE_SINK_AT_EDGE`] at the edge, then a smoothstep to all of it at [`EDGE_FADE`].
+/// The shader's `sky_sink` is the same curve; the standing sprites' shade uses it too.
+pub fn sky_sink(d: f32) -> f32 {
+    if d <= 0.0 {
+        return 0.0;
+    }
+    let s = (d / EDGE_FADE).clamp(0.0, 1.0);
+    EDGE_SINK_AT_EDGE + (1.0 - EDGE_SINK_AT_EDGE) * s * s * (3.0 - 2.0 * s)
+}
 
 /// The cell the mirrored ground shows at cell `c` of a map `n` cells long (the shader's
 /// `fold`): cells inside are their own, and past the border `c` is reflected back about it, so
@@ -354,6 +378,20 @@ mod tests {
         // A one-cell map is one cell everywhere.
         assert!((-7..9).all(|c| mirror_cell(c, 1) == 0));
         assert_eq!(mirror_cell(3, 0), 0, "an empty map shows nothing");
+    }
+
+    #[test]
+    fn the_sky_sink_steps_to_45_percent_at_the_edge_then_fades_to_all() {
+        assert_eq!(sky_sink(0.0), 0.0, "inside the map nothing sinks");
+        assert!((sky_sink(0.5) - 0.45).abs() < 0.02, "{}", sky_sink(0.5));
+        let mut last = sky_sink(0.5);
+        for i in 1..=28 {
+            let k = sky_sink(i as f32 * 0.5);
+            assert!(k >= last, "monotone at {i}");
+            last = k;
+        }
+        assert_eq!(sky_sink(EDGE_FADE), 1.0);
+        assert_eq!(sky_sink(EDGE_FADE * 3.0), 1.0);
     }
 
     #[test]

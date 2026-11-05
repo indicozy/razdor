@@ -958,11 +958,35 @@ static TILT_YAW: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::ne
 static TILT_YAW_SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x7fc0_0000);
 /// Degrees per Q or E press (and per two-finger twist step).
 const TILT_YAW_STEP: f32 = 45.0;
-/// The size factor of the standing sprites in the 2.5D view (`RAZDOR_VIEW_SPRITE` sets it for a
-/// look experiment; 1 is their own size).
+/// The size factor of the standing sprites in the 2.5D view (1 is their own size): the setting
+/// (`audio::Settings::map_sprite_size`, pushed by [`set_sprite_size`]).
+static SPRITE_VIEW: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(DEFAULT_SPRITE_SIZE.to_bits());
+/// The sprite size the game starts with (the owner's decision, 2026-11-05).
+pub const DEFAULT_SPRITE_SIZE: f32 = 1.5;
+/// The sizes the settings button cycles through (1×, 1.5×, 2×).
+pub const SPRITE_SIZES: [f32; 3] = [1.0, 1.5, 2.0];
+
+/// The standing sprites' size factor: `RAZDOR_VIEW_SPRITE`, when set (a look experiment for the
+/// snapshots), else the setting.
 pub fn sprite_size() -> f32 {
-    static SIZE: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
-    *SIZE.get_or_init(|| std::env::var("RAZDOR_VIEW_SPRITE").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0).clamp(0.5, 3.0))
+    static ENV: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
+    let env = *ENV.get_or_init(|| std::env::var("RAZDOR_VIEW_SPRITE").ok().and_then(|v| v.parse::<f32>().ok()).map(|v| v.clamp(0.5, 3.0)));
+    env.unwrap_or_else(|| f32::from_bits(SPRITE_VIEW.load(std::sync::atomic::Ordering::Relaxed)))
+}
+
+/// Puts the sprites' size from the settings (a value outside 0.5..=3 or not finite is the default).
+pub fn set_sprite_size(f: f32) {
+    let f = if f.is_finite() { f.clamp(0.5, 3.0) } else { DEFAULT_SPRITE_SIZE };
+    SPRITE_VIEW.store(f.to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The size the settings button shows after `f`: 1× → 1.5× → 2× → 1×. A size not in
+/// [`SPRITE_SIZES`] (a file's own) goes to 1×.
+pub fn next_sprite_size(f: f32) -> f32 {
+    match SPRITE_SIZES.iter().position(|&s| (s - f).abs() < 1e-3) {
+        Some(i) => SPRITE_SIZES[(i + 1) % SPRITE_SIZES.len()],
+        None => SPRITE_SIZES[0],
+    }
 }
 
 /// `deg` wrapped to (-180, 180].
@@ -2055,8 +2079,8 @@ fn edge_tiles(t: Tile, w: i32, h: i32) -> Vec<Tile> {
 fn sprite_shade(map: &TileMap, fog: &Fog, held: &HashSet<Tile>, t: Tile) -> Color {
     let (w, h) = (map.w, map.h);
     let gap = vec2(terrain::edge_gap(t.0, w), terrain::edge_gap(t.1, h));
-    let s = (gap.length() / terrain::EDGE_FADE).clamp(0.0, 1.0);
-    let sink = s * s * (3.0 - 2.0 * s);
+    // The same curve as the terrain's (a step of 45% at the edge, all of it at EDGE_FADE).
+    let sink = terrain::sky_sink(gap.length());
     let cell = (terrain::mirror_cell(t.0, w), terrain::mirror_cell(t.1, h));
     let dark = minimap::darkness_at(w, h, |c| fog.explored(c) && !held.contains(&c), cell);
     let lit = 1.0 - f32::from(dark) / 255.0;
@@ -2065,20 +2089,32 @@ fn sprite_shade(map: &TileMap, fog: &Fog, held: &HashSet<Tile>, t: Tile) -> Colo
     Color::new(k(0), k(1), k(2), 1.0)
 }
 
-/// The map's border in the 2.5D view, drawn on the ground after the fog: a dark line under a thin
-/// warm one along the fog grid's outer edge ([`Camera::fog_corners`]), so the playable map ends
-/// where the ground past it begins.
+/// The map's border in the 2.5D view, drawn on the ground after the fog: a wall of black lines
+/// along the fog grid's outer edge ([`Camera::fog_corners`]), so the playable map ends where the
+/// ground past it begins. The main line sits on the edge; a thinner one runs 0.35 cell outside it.
 fn draw_border(game: &Game, cam: &Camera) {
     let (tl, br) = cam.fog_corners(game);
-    let zoom = cam.scale / PX;
     let (w, h) = (br.x - tl.x, br.y - tl.y);
-    draw_rectangle_lines(tl.x, tl.y, w, h, (3.0 * zoom).max(1.0), BORDER_SHADOW);
-    draw_rectangle_lines(tl.x, tl.y, w, h, (1.5 * zoom).max(1.0), BORDER_LINE);
+    // The offsets and widths are in cells (the ground pass is in the 2D space's pixels, so a cell
+    // is `cam.scale` wide and `cam.scale * row_height` high).
+    let (dx, dy) = (BORDER_OUTER_AT * cam.scale, BORDER_OUTER_AT * cam.scale * cam.grid.row_height());
+    draw_rectangle_lines(tl.x, tl.y, w, h, border_width(BORDER_LINE_CELLS, cam), BORDER_LINE);
+    draw_rectangle_lines(tl.x - dx, tl.y - dy, w + 2.0 * dx, h + 2.0 * dy, border_width(BORDER_OUTER_CELLS, cam), BORDER_OUTER);
 }
 
-/// The border's lines: the dark shadow under the warm line.
-const BORDER_SHADOW: Color = Color::new(0.0, 0.0, 0.0, 0.6);
-const BORDER_LINE: Color = Color::new(0.95, 0.82, 0.5, 0.7);
+/// The border's main line, in cells wide (the owner's decision, 2026-11-05: a wall, not a hairline).
+const BORDER_LINE_CELLS: f32 = 0.15;
+/// The outer line's width in cells, and how far outside the edge it runs (in cells).
+const BORDER_OUTER_CELLS: f32 = 0.07;
+const BORDER_OUTER_AT: f32 = 0.35;
+/// The border's colours: opaque black on the edge, a fainter one outside it.
+const BORDER_LINE: Color = Color::new(0.0, 0.0, 0.0, 0.95);
+const BORDER_OUTER: Color = Color::new(0.0, 0.0, 0.0, 0.8);
+
+/// A border line `cells` wide at this zoom, at least 1.5 px so it stays visible when zoomed out.
+fn border_width(cells: f32, cam: &Camera) -> f32 {
+    (cells * cam.scale).max(1.5)
+}
 
 /// Pushes the scenery past the map's edges into `items` (2.5D): the mirrored copies
 /// ([`edge_tiles`]) of the explored scenery within [`terrain::EDGE_FADE`] of an edge, that stand
@@ -4082,6 +4118,27 @@ mod tests {
     use razdor::rules::magic::SpellLine;
     use razdor::trf;
 
+    /// The sprite size button cycles 1× → 1.5× → 2× → 1×; a size not in the list goes to 1×.
+    #[test]
+    fn sprite_size_cycles_through_the_three_sizes() {
+        assert_eq!(next_sprite_size(1.0), 1.5);
+        assert_eq!(next_sprite_size(1.5), 2.0);
+        assert_eq!(next_sprite_size(2.0), 1.0);
+        assert_eq!(next_sprite_size(1.3), 1.0);
+        assert_eq!(next_sprite_size(f32::NAN), 1.0);
+    }
+
+    /// The setting reaches the drawing; a value outside 0.5..=3 (or not finite) is the default.
+    #[test]
+    fn set_sprite_size_falls_back_to_the_default() {
+        set_sprite_size(2.0);
+        assert_eq!(f32::from_bits(SPRITE_VIEW.load(std::sync::atomic::Ordering::Relaxed)), 2.0);
+        set_sprite_size(9.0);
+        assert_eq!(f32::from_bits(SPRITE_VIEW.load(std::sync::atomic::Ordering::Relaxed)), 3.0);
+        set_sprite_size(f32::NAN);
+        assert_eq!(f32::from_bits(SPRITE_VIEW.load(std::sync::atomic::Ordering::Relaxed)), DEFAULT_SPRITE_SIZE);
+    }
+
     #[test]
     fn an_army_spell_shows_endless_as_infinity_and_the_units_under_a_part_of_the_army() {
         let now = 1_000;
@@ -4796,8 +4853,9 @@ mod edge_tests {
         // Unexplored: black.
         let dark = sprite_shade(&map, &lit, &none, (10, 10));
         assert!(near(dark, [0.0, 0.0, 0.0], 1e-3), "{dark:?}");
-        // A half cell past the edge: barely sunk. Far past it: the sky's colour.
-        assert!(near(sprite_shade(&map, &open, &none, (-1, 10)), [1.0, 1.0, 1.0], 0.02));
+        // A half cell past the edge: sunk by the step (45%), not barely. Far past it: the sky's colour.
+        let step = terrain::EDGE_SKY.map(|c| 1.0 + (c - 1.0) * terrain::EDGE_SINK_AT_EDGE);
+        assert!(near(sprite_shade(&map, &open, &none, (-1, 10)), step, 0.02));
         assert!(near(sprite_shade(&map, &open, &none, (-40, 10)), terrain::EDGE_SKY, 1e-3));
         // Cells the fog keeps (held, a block around the sprite) are dark there, as the fog is.
         let held: HashSet<Tile> = (8..=12).flat_map(|y| (8..=12).map(move |x| (x, y))).collect();

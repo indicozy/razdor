@@ -225,6 +225,9 @@ pub struct Settings {
     /// Advanced, Razdor's: the world map's 2.5D view (`world_view::tilt_view`): a tilted camera
     /// over the map, the standing sprites as billboards. Off (the default), the flat map as before.
     pub map_tilt: bool,
+    /// Advanced, Razdor's: the size of the standing sprites in the 2.5D view, 1.5 by default (the
+    /// owner's decision, 2026-11-05); `world_view::SPRITE_SIZES` cycles it (1×, 1.5×, 2×).
+    pub map_sprite_size: f32,
     /// Advanced: new releases are offered (`Ask`), put in place without a word (`Always`), or
     /// not looked for (`Off`); `razdor::update`.
     pub updates: razdor::update::Mode,
@@ -334,7 +337,7 @@ pub fn must_request(asked: Option<i32>, want: i32) -> bool {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), friends_let_pass: false, pass_on_bridges: false, avoid_armies: false, keep_formation: true, battle_marks: true, army_list: false, map_tilt: false, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new(), studio_package: None, studio: StudioPrefs::default() }
+        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), friends_let_pass: false, pass_on_bridges: false, avoid_armies: false, keep_formation: true, battle_marks: true, army_list: false, map_tilt: false, map_sprite_size: super::world_view::DEFAULT_SPRITE_SIZE, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new(), studio_package: None, studio: StudioPrefs::default() }
     }
 }
 
@@ -395,7 +398,12 @@ impl Settings {
         let anim_speed = self.anim_speed.filter(|s| s.is_finite()).map(|s| s.clamp(0.0, 99.0));
         let pct = |v: Option<f32>| v.filter(|s| s.is_finite()).map(|s| s.clamp(0.0, 100.0));
         let walk = |v: Option<f32>| v.filter(|s| s.is_finite()).map(|s| s.clamp(0.0, razdor::rules::game::WALK_SPEED_MAX as f32));
-        Settings { music_volume: fix(self.music_volume), sfx_volume: fix(self.sfx_volume), ui_scale, text_size, map_zoom, anim_speed, scroll_speed: pct(self.scroll_speed), walk_speed: walk(self.walk_speed), ..self }
+        let map_sprite_size = if self.map_sprite_size.is_finite() && (0.5..=3.0).contains(&self.map_sprite_size) {
+            self.map_sprite_size
+        } else {
+            super::world_view::DEFAULT_SPRITE_SIZE
+        };
+        Settings { music_volume: fix(self.music_volume), sfx_volume: fix(self.sfx_volume), ui_scale, text_size, map_zoom, anim_speed, scroll_speed: pct(self.scroll_speed), walk_speed: walk(self.walk_speed), map_sprite_size, ..self }
     }
 
     fn save(&self) {
@@ -877,6 +885,18 @@ mod tests {
         // The army's arrangement: both (the default) unless the file says otherwise.
         use crate::ui::unit_drag::Controls::Both;
         assert_eq!(partial.formation_controls, Both);
+    }
+
+    /// The 2.5D sprite size: 1.5 for a file without it, and a value outside 0.5..=3 is the default.
+    #[test]
+    fn map_sprite_size_defaults_to_one_and_a_half() {
+        let old: Settings = serde_json::from_str(r#"{"map_tilt": true}"#).unwrap();
+        assert_eq!(old.map_sprite_size, 1.5);
+        assert_eq!(old.clamped().map_sprite_size, 1.5);
+        let odd: Settings = serde_json::from_str(r#"{"map_sprite_size": 9.0}"#).unwrap();
+        assert_eq!(odd.clamped().map_sprite_size, 1.5);
+        let kept: Settings = serde_json::from_str(r#"{"map_sprite_size": 2.0}"#).unwrap();
+        assert_eq!(kept.clamped().map_sprite_size, 2.0);
     }
 
     /// «Расстановка армии»: a file's own values load as their choice, the key round-trips, and

@@ -231,7 +231,7 @@ a vertical one would shrink with the pitch). Pointer tests use `map_pointer` (th
 pointer, in the 2D space; the drag scales the screen delta by the rows' foreshortening instead). What
 stands on the window (the tooltip, battle marks, effects, the travel time) is placed with
 `Camera::screen_at`. Simplifications of this step: a figure is picked by its cell (not its sprite),
-the F3 overlay is off in 2.5D, and the setting has no row in the settings windows yet.
+the F3 overlay is off in 2.5D, and the sprite size row is in the settings window.
 
 The view turns too (yaw, `TiltCamera::yaw_deg`: 0 is the eye south of the target, positive turns the eye
 toward the east, so the ground turns clockwise on the screen). Q and E turn it 45° (a two-finger twist
@@ -241,13 +241,15 @@ through `Camera::screen_to_world_delta` (and `turn_ground` for the scroll's step
 sprites are sorted back to front by their foot's depth along the view's forward (`sprite_key`, 1/64 of a
 cell, the layer as tiebreak; bridges still first), every side of the cull takes the larger margin, and a
 figure's facing row follows the screen (`Camera::facing`). At yaw 0 the order is the cell pass, as before.
-`RAZDOR_VIEW_SPRITE` sets the standing sprites' size (`sprite_size`, a look experiment). With the
+The standing sprites' size is the setting «Размер фигур» (`audio::Settings::map_sprite_size`, 1.5 by default,
+pushed by `world_view::set_sprite_size`; the row shows with the 2.5D view); `RAZDOR_VIEW_SPRITE` overrides it (`sprite_size`, a look experiment). With the
 setting off, `in_view`, `ground` and `standing` only call their closures, so the flat view is the
 same code path.
 
 The ground goes on past the map's edges in 2.5D (visual only). The terrain shader (`terrain.rs`, `mirror`
 on) folds a cell past a border back about it (`mirror_cell`, period 2n: the cell past the edge is the
-edge's neighbour's twin) and sinks the ground into the sky over `EDGE_FADE` (14) cells, greying it by 35%
+edge's neighbour's twin) and sinks the ground into the sky (a step of 45% at the edge, all of it over `EDGE_FADE` (14) cells: `terrain::sky_sink`,
+the same curve as the shader's `sky_sink`), greying it by 35%
 from the edge on. The fog is drawn over the whole drawn ground, mirrored the same way
 (`minimap::draw_mirrored`: the texture wraps `TextureWrap::Mirror`; the showing masks too), so the
 extension is as dark as the edge it goes on from. Scenery within 14 cells of an edge gets mirrored copies
@@ -256,9 +258,9 @@ map's own, so a building or tree at an edge stands whole. The fog lies under the
 as before; 2.5D: no black beyond the map), and each standing sprite is multiplied by its shade
 (`standing`'s `shade`, read by the draws through `sprite_color`; `sprite_shade`: the fog at its foot cell,
 `minimap::darkness_at`, and the sinking into the sky). Placeholder shapes drawn without the install's art
-are not shaded. The map's border is a line on the ground after the fog (`draw_border`: 3 px dark under
-1.5 px warm, scaled by zoom) before the fog, so the fog darkens it where the ground is unexplored; standing
-sprites on the edge hide parts of it.
+are not shaded. The map's border is a wall of black lines on the ground after the fog (`draw_border`: a 0.15-cell
+black line on the edge and a 0.07-cell one 0.35 cell outside it, at least 1.5 px) before the fog, so the fog darkens it where the ground
+is unexplored; standing sprites on the edge hide parts of it.
 
 ## Sound and music
 

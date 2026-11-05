@@ -44,6 +44,7 @@ Minimap army list = Список у миникарты
 Minimap corner = Угол миникарты
 Minimap size and place = Место миникарты
 Map view = Вид карты
+Sprite size = Размер фигур
 Flat = Плоский
 Top left = Слева вверху
 Top right = Справа вверху
