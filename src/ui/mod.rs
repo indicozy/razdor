@@ -1828,7 +1828,11 @@ mod tests {
 
     /// Opening the editor shows its notice and keeps the editor on screen; the notice's close
     /// leaves the editor on screen too (the owner's decision, 2026-11-06).
+    /// Ignored in the parallel run: `App::new` reads the player's real settings and switches the
+    /// global language, which breaks tests running beside it that look up English names. Run it
+    /// alone: `cargo test --release --bin razdor opening_the_editor -- --ignored`.
     #[test]
+    #[ignore = "builds a real App (user settings, global language); run alone with --ignored"]
     fn opening_the_editor_shows_the_abandoned_notice_and_closing_it_keeps_the_editor() {
         use std::future::Future;
         use std::task::{Context, Poll, Waker};
