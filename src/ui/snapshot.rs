@@ -470,6 +470,10 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             // `options:advanced`: Razdor's advanced settings over it.
             if parts.next() == Some("advanced") {
                 super::main_menu::open_advanced();
+                // `RAZDOR_SCENE_SCROLL` starts the phone's advanced window that far down (this branch returns early).
+                if let Some(px) = std::env::var("RAZDOR_SCENE_SCROLL").ok().and_then(|v| v.trim().parse::<f32>().ok()) {
+                    super::main_menu::scene_scroll(px);
+                }
             }
             return Ok(());
         }

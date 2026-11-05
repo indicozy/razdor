@@ -1888,7 +1888,10 @@ fn advanced_window_phone(audio: &mut super::audio::Settings, over_map: bool, dp:
         let bar = Rect::new(inner.x + inner.w - 28.0 * k, inner.y, 24.0 * k, view_h);
         super::widgets::scrollbar_px(bar, &mut scroll, most, view_h, 40.0 * k);
     }
-    ADV_SCROLL.with(|s| s.set(scroll));
+    // Kept while the content's height is unknown (the first frame): a snapshot's start scroll waits for it.
+    if most > 0.0 {
+        ADV_SCROLL.with(|s| s.set(scroll));
+    }
     phone_clip(Some(view));
     ADV_VIEW.with(|v| v.set(Some(view)));
     let top_y = inner.y - scroll;
