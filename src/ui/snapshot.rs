@@ -372,6 +372,15 @@ pub fn stage(app: &mut App) {
     if let Ok(names) = std::env::var("RAZDOR_SCENE_ARCHIVES") {
         super::mobile::snapshot_archives(&names, std::env::var("RAZDOR_SCENE_UNPACK").ok().and_then(|p| p.parse().ok()));
     }
+    // `RAZDOR_SCENE_DESCRIPTION=<text>`: the scenario window's description is that text (a fixture of a
+    // long description: the install's own are all shorter than the box).
+    if let Ok(text) = std::env::var("RAZDOR_SCENE_DESCRIPTION") {
+        super::new_game::scene_description(text);
+    }
+    // `RAZDOR_SCENE_DESC_SCROLL=<units>`: the scenario window's description scrolled that far down.
+    if let Some(units) = std::env::var("RAZDOR_SCENE_DESC_SCROLL").ok().and_then(|v| v.trim().parse::<f32>().ok()) {
+        super::new_game::scene_desc_scroll(units);
+    }
     if std::env::var("RAZDOR_SCENE_RULES").is_ok_and(|v| v == "1") {
         super::new_game::open_experimental_menu();
         if let Some(px) = std::env::var("RAZDOR_SCENE_SCROLL").ok().and_then(|v| v.trim().parse::<f32>().ok()) {

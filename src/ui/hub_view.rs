@@ -463,7 +463,7 @@ fn bar_rect(right: f32, y: f32, h: f32, k: f32, phone: bool) -> Rect {
 
 /// Pixels a press may move before it is a drag, not a tap: 12 px of a 1080 px high screen (the
 /// gestures' tap slop).
-fn drag_slop() -> f32 {
+pub(super) fn drag_slop() -> f32 {
     12.0 * screen_height() / 1080.0
 }
 
@@ -522,13 +522,20 @@ pub(super) fn wrap_long(s: &str, width: f32, size: f32) -> Vec<String> {
 /// pointer's slide past `slop` moves the scroll (`drag_to`: `per` pixels a unit, `most` the
 /// most). Returns the scroll now, and where the press began when the button came up without a
 /// drag (a click there).
-fn drag_frame(drag: &mut Option<Drag>, area: Rect, scroll: f32, per: f32, most: f32, slop: f32) -> (f32, Option<(f32, f32)>) {
-    let now = pointer();
-    if drag.is_none() && !input_swallowed() && is_mouse_button_pressed(MouseButton::Left) && mouse_in(area.x, area.y, area.w, area.h) {
+pub(super) fn drag_frame(drag: &mut Option<Drag>, area: Rect, scroll: f32, per: f32, most: f32, slop: f32) -> (f32, Option<(f32, f32)>) {
+    let press = !input_swallowed() && is_mouse_button_pressed(MouseButton::Left) && mouse_in(area.x, area.y, area.w, area.h);
+    drag_step(drag, press, is_mouse_button_down(MouseButton::Left), pointer(), scroll, per, most, slop)
+}
+
+/// `drag_frame`'s logic on the frame's input: `press` is a left press that began in the area this
+/// frame, `down` whether the button is still held, `now` the pointer.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn drag_step(drag: &mut Option<Drag>, press: bool, down: bool, now: (f32, f32), scroll: f32, per: f32, most: f32, slop: f32) -> (f32, Option<(f32, f32)>) {
+    if drag.is_none() && press {
         *drag = Some(Drag { at: now, start: scroll, moved: false });
     }
     let Some(d) = drag.as_mut() else { return (scroll, None) };
-    if !is_mouse_button_down(MouseButton::Left) {
+    if !down {
         let click = (!d.moved).then_some(d.at);
         *drag = None;
         return (scroll, click);

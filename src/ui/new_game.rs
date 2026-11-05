@@ -23,7 +23,7 @@ use super::audio::{cue, Cue};
 use super::chrome;
 use super::dt_font::{with_face, Face};
 use super::language;
-use super::hub_view::{hero, pane_scroll, Drag};
+use super::hub_view::{clamp_scroll, drag_frame, drag_slop, hero, pane_scroll, Drag};
 use super::map_import;
 use super::widgets::*;
 use super::{screens, ScenarioEntry, Screen};
@@ -45,7 +45,13 @@ local! {
     /// Whether the base game's group under a played mod is open (1445b): shut when the list opens.
     static BASE_OPEN: Cell<bool> = const { Cell::new(false) };
     /// The description's first shown line, and the group it was scrolled for.
-    static DESC_SCROLL: Cell<(usize, usize)> = const { Cell::new((usize::MAX, 0)) };
+    static DESC_SCROLL: Cell<(usize, f32)> = const { Cell::new((usize::MAX, 0.0)) };
+    /// The description box's drag (backlog 1527): on a phone held sideways, while a finger moves it.
+    static DESC_DRAG: Cell<Option<Drag>> = const { Cell::new(None) };
+    /// A snapshot's description text in place of the scenario's (`RAZDOR_SCENE_DESCRIPTION`).
+    static SCENE_TEXT: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// A snapshot's description scroll (`RAZDOR_SCENE_DESC_SCROLL`, units), taken by the next frame.
+    static DESC_SCENE: Cell<Option<f32>> = const { Cell::new(None) };
     static HERO: Cell<usize> = const { Cell::new(0) };
     /// On a phone held upright a tap on a startable entry opens its card (`card_view`): whether it is
     /// open, its scroll, the content's height as the last frame drew it, and the drag of its scroll.
@@ -851,6 +857,33 @@ fn desc_max_scroll(steps: &[f32], room: f32) -> usize {
     first
 }
 
+/// The scroll (units) of the description box's most: its first line that fits, down to the top of
+/// that line (a line top, so the box never starts in the middle of a line).
+fn desc_most(steps: &[f32], room: f32) -> f32 {
+    steps[..desc_max_scroll(steps, room)].iter().sum()
+}
+
+/// The top of each line of the description box, from its top, in units.
+fn desc_tops(steps: &[f32]) -> Vec<f32> {
+    steps.iter().scan(0.0, |top, s| {
+        let at = *top;
+        *top += s;
+        Some(at)
+    }).collect()
+}
+
+/// The scroll one wheel notch moves the box to: the next line's top down, the previous one up (units).
+fn desc_wheel(steps: &[f32], scroll: f32, turned: f32) -> f32 {
+    let tops = desc_tops(steps);
+    if turned > 0.0 {
+        tops.iter().rev().copied().find(|&t| t < scroll - 0.01).unwrap_or(0.0)
+    } else if turned < 0.0 {
+        tops.iter().copied().find(|&t| t > scroll + 0.01).unwrap_or(scroll)
+    } else {
+        scroll
+    }
+}
+
 /// The art's corner ornaments are 34 px at the interface scale (`chrome::text_box_frame`).
 const CORNER_PX: f32 = 34.0;
 
@@ -1224,44 +1257,52 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
         let title_rows = rows.len();
         // The description is added as plain lines (0x4c1bb4 → 0x47ea80): marks stay as typed,
         // no indent, justified, in ae24f4 over the shadow font ae2510.
-        rows.extend(plain_rows_face(&e.scenario.description, room, size, Face::Bold));
+        rows.extend(plain_rows_face(&shown_description(e), room, size, Face::Bold));
         let line_h = 14.0 * kk;
-        let steps = desc_steps(title_rows, rows.len(), kk);
-        // The box is a text list (0x65ae00): the wheel over it scrolls it a line a frame
-        // (0x47ede0), down to its last line; a new map starts it at the top (0x47cc90).
-        let max_scroll = desc_max_scroll(&steps, desc.h - 20.0 * k);
-        let (for_group, mut first) = DESC_SCROLL.with(|d| d.get());
+        // The box is a text list (0x65ae00): the wheel over it scrolls it a line a notch (0x47ede0),
+        // down to its last line; a new map starts it at the top (0x47cc90). On a phone held sideways
+        // there is no wheel: a swipe turns it a line per 14 dp of slide, and a finger's drag moves the
+        // lines with the finger (backlog 1527). The scroll is in units; `kk` is the px per unit.
+        let steps = desc_steps(title_rows, rows.len(), 1.0);
+        let most = desc_most(&steps, (desc.h - 20.0 * k) / kk);
+        let (mut for_group, mut scroll) = DESC_SCROLL.with(|d| d.get());
+        if let Some(at) = DESC_SCENE.with(|d| d.take()) {
+            scroll = at;
+            for_group = picked;
+        }
         if for_group != picked {
-            first = 0;
+            scroll = 0.0;
+        }
+        let phone = super::display::dp_px().is_some();
+        if phone {
+            swipe_rows(desc, line_h);
         }
         if !input_blocked() && desc.contains(crate::ui::widgets::pointer().into()) {
-            let turned = wheel();
-            if turned > 0.0 {
-                first = first.saturating_sub(1);
-            } else if turned < 0.0 {
-                first += 1;
-            }
+            scroll = desc_wheel(&steps, scroll, wheel());
         }
-        let first = first.min(max_scroll);
-        DESC_SCROLL.with(|d| d.set((picked, first)));
-        // A text list lays its lines from its top (0x47e46c).
-        let mut y = desc.y + 10.0 * k + 14.0 * k;
+        if phone {
+            let mut drag = DESC_DRAG.with(Cell::get);
+            scroll = drag_frame(&mut drag, desc, scroll, kk, most, drag_slop()).0;
+            DESC_DRAG.with(|d| d.set(drag));
+        }
+        let scroll = clamp_scroll(scroll, most);
+        DESC_SCROLL.with(|d| d.set((picked, scroll)));
+        // A text list lays its lines from its top (0x47e46c): the first line at 24 px (10 + 14).
+        let top = desc.y + 10.0 * k + 14.0 * k;
+        let tops = desc_tops(&steps);
         let clip = crate::ui::widgets::Clip::new(desc);
         for (n, row) in rows.iter().enumerate() {
-            if n < first {
+            let y = top + (tops[n] - scroll) * kk;
+            // A line above the box's text is not drawn (the lines before the first one shown).
+            if y < top - 0.5 {
                 continue;
             }
             if n < title_rows {
                 // The name in ae2498 over its shadow font ae24b0 (0x4c1b33).
                 draw_markup_row_shadowed(row, desc.x + 17.0 * k, y, room, 16.0 * kk, Face::Subtitle, super::typography::Ink::Plain.color());
-                y += 20.0 * kk;
-                if n + 1 == title_rows {
-                    y += 12.0 * kk;
-                }
             } else {
                 let orange = with_face(Face::Bold, || super::typography::Ink::Orange.color());
                 with_face(Face::Bold, || draw_markup_row_shadowed(row, desc.x + 17.0 * k, y, room, size, Face::Bold, orange));
-                y += line_h;
             }
         }
         drop(clip);
@@ -1407,7 +1448,7 @@ fn card_view(p: &Portrait, scenarios: &[ScenarioEntry], list: &[Group], picked: 
         let orange = with_face(Face::Bold, || super::typography::Ink::Orange.color());
         // Wrapped as the hub's text is, each line centred (the owner's note of 2026-11-02; justified
         // lines leave wide gaps at this size).
-        let lines = with_face(Face::Bold, || super::hub_view::wrap_long(&e.scenario.description, room, p.card_px));
+        let lines = with_face(Face::Bold, || super::hub_view::wrap_long(&shown_description(e), room, p.card_px));
         for l in &lines {
             with_face(Face::Bold, || chrome::shadow_centered(l, r.x + r.w / 2.0, y, p.card_px, orange));
             y += p.card_step;
@@ -1432,6 +1473,20 @@ pub(super) fn experimental_rules() -> ExperimentalRules { EXPERIMENTAL.with(Cell
 pub(super) fn open_experimental_menu() { RULES_OPEN.with(|p| p.set(true)); }
 
 pub(super) fn snapshot_experimental(rules: ExperimentalRules) { EXPERIMENTAL.with(|p| p.set(rules)); }
+
+/// A snapshot scene's scroll for the scenario's description (`RAZDOR_SCENE_DESC_SCROLL`), in units.
+pub(super) fn scene_desc_scroll(units: f32) { DESC_SCENE.with(|d| d.set(Some(units))); }
+
+/// A snapshot's description text in place of the scenario's (`RAZDOR_SCENE_DESCRIPTION`).
+pub(super) fn scene_description(text: String) { SCENE_TEXT.with(|t| *t.borrow_mut() = Some(text)); }
+
+/// The description the window shows for `e`: the scenario's own, or a snapshot's (`scene_description`).
+fn shown_description(e: &ScenarioEntry) -> std::borrow::Cow<'_, str> {
+    match SCENE_TEXT.with(|t| t.borrow().clone()) {
+        Some(text) => std::borrow::Cow::Owned(text),
+        None => std::borrow::Cow::Borrowed(&e.scenario.description),
+    }
+}
 
 /// A snapshot scene's scroll for the rules window (`RAZDOR_SCENE_SCROLL`): it starts `px` down, and
 /// the window clamps it when drawn.
@@ -1992,6 +2047,7 @@ fn choose_class(offered: [bool; 3], pick: usize, clicked: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::hub_view::drag_step;
 
     /// The footer at Normal keeps the original's places: the buttons at 443 and the list and the
     /// description ending at 432, with or without the extras row (1458); the extras row sits under
@@ -2101,6 +2157,26 @@ mod tests {
         assert_eq!(desc_max_scroll(&steps, 200.0), 0, "it fits: no scrolling");
         assert_eq!(desc_max_scroll(&steps, 140.0), 2, "the name scrolls away first");
         assert_eq!(desc_max_scroll(&steps, 100.0), 5);
+    }
+
+    /// Backlog 1527: on a phone held sideways the description has no wheel, so a long one could not be
+    /// scrolled at all. A finger's drag moves it (the range is more than nothing, the drag moves the
+    /// lines with the finger, a drag past the end stops at it), and a wheel notch steps it a line.
+    #[test]
+    fn a_long_description_scrolls_by_drag_on_a_phone_held_sideways() {
+        // Two name lines and 30 description lines (units): a box of 200 units holds about 13 of them.
+        let steps = desc_steps(2, 32, 1.0);
+        let most = desc_most(&steps, 200.0);
+        assert!(most > 0.0, "a long description has a range to scroll");
+        assert_eq!(desc_wheel(&steps, 0.0, -1.0), 20.0, "a notch down: the next line's top (after the name)");
+        assert_eq!(desc_wheel(&steps, 20.0, 1.0), 0.0, "a notch up: the previous line's top");
+        // A press at y 300, then the finger 60 px up on the next frame, at 2 px a unit: 30 units down.
+        let mut drag = None;
+        let (_, _) = drag_step(&mut drag, true, true, (50.0, 300.0), 0.0, 2.0, most, 12.0);
+        let (scroll, _) = drag_step(&mut drag, false, true, (50.0, 240.0), 0.0, 2.0, most, 12.0);
+        assert_eq!(scroll, 30.0, "the lines follow the finger");
+        let (far, _) = drag_step(&mut drag, false, true, (50.0, -2000.0), 30.0, 2.0, most, 12.0);
+        assert_eq!(far, most, "a drag past the end stops at the last line");
     }
 
     #[test]
