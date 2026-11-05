@@ -92,10 +92,10 @@ army or being reached by one runs the event scan with that army as "the met army
 (`EventEngine::meet`). The battle opens only if no event *stopped on a window* (`Fired { message:
 true }` or `Question`). Silent events fire and the battle still opens (commit 6928d9d: РК4's
 repeating silent event blocked every fight). If a window event fired after a step onto the army, the
-army forgets the hero for now (talk counter `TALKED`, path cleared). Razdor's
-`friends_let_pass` option changes only an unclicked step onto a friendly army (`begin_walk` meets it);
-a clicked one is engaged, and `meet_as` fights every step's `Encounter`; `pass_on_bridges` changes
-`step_contact` for armies just passing over a bridge.
+army forgets the hero for now (talk counter `TALKED`, path cleared). An unclicked step onto a
+friendly army is fought too, as the original does (`begin_walk` engages it; the Razdor option that let
+it pass is gone, backlog 1530), and `meet_as` fights every step's `Encounter`. Only the console's
+`noclip` walks past such an army (`begin_fly`).
 
 **Events** (events.md §1–§9). `EventEngine::tick` runs the scan once per time slice and on entering
 a place (`EventEngine::visit`). Answers come from the UI (`Game::answer_question` →
@@ -192,7 +192,7 @@ marks and battle notices wait, and a press (`input::any_press`) finishes the ste
   `Game::bridge_stood_on` (`stand_on_bridge`) before the step's time and scan (0x497c68, 0x4abfbc;
   world.md §7.2), so a walk across a bridge runs its local events on that step and goes on unless
   one opens a window. Not the building his move began on (0x4ed434, `click_buildings.1`). Armies on
-  bridges block unless the Razdor option is on (`pass_on_bridges`).
+  bridges block, as in the original (the Razdor option that let them pass is gone; `noclip` passes them).
   The scan checks the event point under him first, then the building (0x4abfbc, events.md §2):
   `EventWorld::point` gives the point (none while `point_zeroed`), `candidates` lists globals, the
   point's events, then the building's local ones. `EventWorld::place` still prefers the building (or

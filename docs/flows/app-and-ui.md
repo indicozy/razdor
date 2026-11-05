@@ -392,7 +392,7 @@ Phone placement (backlog 1449): every pop-up that follows the pointer goes throu
   `widgets::track_held_key` (the original's one held key: any key up clears it, and the
   system's repeats of the newest key still down hold it again, 0x475820); Alt+Enter display mode (`display::hotkey_pressed`);
 - settings pushed into the game each frame (`main_menu::follow_settings`: `g.improved_ai`,
-  `g.max_ai`, `g.friends_let_pass`, `g.pass_on_bridges`, `g.pursue`, `g.walk_pace`; animation
+  `g.max_ai`, `g.pursue`, `g.walk_pace`; animation
   speed, row width) — the settings live in the UI, the rules only read plain fields; a game
   just loaded or restored gets them at once, before the battle it may start (#19: a pending
   foe, a battle's «Рестарт»); `main_menu::apply_options` puts the
@@ -859,7 +859,7 @@ the install's, so they show in the new-game list. Snapshot scene: `hub[:<tab>[:<
 
 `ui::audio::Settings` (`src/ui/audio.rs`, saved as `audio.json` in the save folder, all
 fields `#[serde(default)]`) holds every setting: volumes, display, scale, battle AI level,
-row width, and Razdor's own options (`friends_let_pass`, `pass_on_bridges`, `updates`,
+row width, and Razdor's own options (`updates`,
 map zoom, `leader_caption`: the leader's name under the event picture of a meeting, see
 `story::leader_caption` and `EventOutcome::MeetingArmy`). The windows are `main_menu::options` / `main_menu::options_window` (the
 original's: five slider rows, eight checkboxes, «Принять» keeps, «Отмена» restores what the

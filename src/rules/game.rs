@@ -538,12 +538,6 @@ pub struct Game {
     /// set by the interface, not part of the save.
     #[serde(skip)]
     pub max_guard: bool,
-    /// Razdor's option: stepping onto a friendly army (attitude above 0) with no event for
-    /// the meeting lets the hero pass. Off (the default) is the original: every army he
-    /// steps onto is engaged, and with no event firing the battle opens (world.md §4.2).
-    /// Set by the interface, not part of the save.
-    #[serde(skip)]
-    pub friends_let_pass: bool,
     /// Razdor's option «Обход армий на пути» (`Settings::avoid_armies`): on, the route closes
     /// every army's cell and the hero replans round armies; off, the original's routing.
     /// Set by the interface, not part of the save.
@@ -572,12 +566,6 @@ pub struct Game {
     /// shipped 100. Set by the interface, not part of the save.
     #[serde(skip, default = "pace_default")]
     pub walk_pace: f32,
-    /// Razdor's option: on a bridge the hero walks through the armies that only pass by (not
-    /// ill-disposed to him, not a stationary guard, not the army he clicked). Off (the
-    /// default) is the original: any army on the bridge's cell ahead, or standing anywhere on
-    /// that bridge, is engaged (world.md §4.2). Set by the interface, not part of the save.
-    #[serde(skip)]
-    pub pass_on_bridges: bool,
     /// Razdor's interface options «Битвы армий на карте» (`Settings::battle_marks`) and
     /// «Список армий у миникарты» (`Settings::army_list`): set by the interface, not part of
     /// the save; no rule reads them.
@@ -778,14 +766,12 @@ impl Game {
             improved_ai: false,
             max_ai: false,
             max_guard: false,
-            friends_let_pass: false,
             avoid_armies: false,
             keep_formation: false,
             formation_before_battle: None,
             allow_unit_benching: false,
             pursue: true,
             walk_pace: 1.0,
-            pass_on_bridges: false,
             battle_marks: true,
             army_list: false,
             leader_caption: true,
@@ -1883,7 +1869,7 @@ impl Game {
                 // The original engages any army stepped onto (world.md §4.2); Razdor's option
                 // lets a friend pass instead.
                 // The option skips only the accidental step: the army clicked is still fought.
-                let engage = self.world.armies[i].attitude <= 0 || deliberate || (!self.friends_let_pass && !self.avoid_armies);
+                let engage = self.world.armies[i].attitude <= 0 || deliberate || !self.avoid_armies;
                 let e = if engage { Event::Encounter(i) } else { Event::Met(i) };
                 if let Event::Encounter(i) = e {
                     self.foe = Some(Foe::Army(i));
@@ -2135,19 +2121,13 @@ impl Game {
     /// 3. Unguarded: a castle or fort whose attitude is 0 or less, or ruins, with an empty
     ///    garrison is taken (else the garrison is engaged); a village is taken whatever its
     ///    owner, also when the route only crosses it.
-    ///
-    /// With [`Game::pass_on_bridges`] (Razdor's), 1 and 2 leave out the armies on a bridge
-    /// that only pass by.
     fn step_contact(&self, next: Tile) -> Option<StepContact> {
         use LocationKind as K;
         let w = &self.world;
         let map = &w.map;
         let building = w.location_covering(next);
         let kind = building.map(|l| w.locations[l].kind);
-        let bridge = kind.is_some_and(LocationKind::is_bridge);
-        // Razdor's option: on a bridge an army only passing by lets him through.
-        let passes = |a: &Army| bridge && self.pass_on_bridges && !a.hostile() && !ai::stationary(a) && self.talk_to != Some(a.uid);
-        if let Some(i) = w.armies.iter().position(|a| a.tile(map) == next && !passes(a)) {
+        if let Some(i) = w.armies.iter().position(|a| a.tile(map) == next) {
             let sheltered = matches!(kind, Some(K::Town | K::Tavern | K::Church | K::Smithy | K::Shipyard | K::Altar | K::Entrance));
             let welcome = w.armies[i].attitude > 0 && kind.is_some_and(|k| !k.is_bridge());
             if !sheltered && !welcome {
@@ -2159,7 +2139,7 @@ impl Game {
         if !matches!(loc.kind, K::Village | K::Castle | K::Fort | K::Ruins | K::Camp) && !loc.kind.is_bridge() {
             return None;
         }
-        if let Some(g) = w.armies.iter().rposition(|a| a.mind.standing == Some(l) && !passes(a)) {
+        if let Some(g) = w.armies.iter().rposition(|a| a.mind.standing == Some(l)) {
             if w.armies[g].attitude <= 0 || loc.kind.is_bridge() {
                 return Some(StepContact::Army(g));
             }
@@ -4741,18 +4721,12 @@ mod tests {
         assert!(g.set_destination((5, 2)));
         let events = walk_until_stopped(&mut g);
         assert_eq!((events.last(), g.tile(), g.foe), (Some(&Event::Encounter(0)), (4, 2), Some(Foe::Army(0))), "a friend too, as the original");
-        // The option: a friend he steps onto by chance (his route goes past it) lets him pass.
+        // A friend he steps onto by chance (his route goes past it) is fought too, with no event
+        // for the meeting (the original; Razdor's pass option is gone).
         let mut g = with_walker(2, (5, 2), vec![]);
-        g.friends_let_pass = true;
         assert!(g.set_destination((6, 2)));
         let events = walk_until_stopped(&mut g);
-        assert_eq!((events.last(), g.tile(), g.foe), (Some(&Event::Met(0)), (4, 2), None), "the option: a friend lets him pass");
-        // The same friend clicked is still fought under the option.
-        let mut g = with_walker(2, (5, 2), vec![]);
-        g.friends_let_pass = true;
-        assert!(g.set_destination((5, 2)));
-        let events = walk_until_stopped(&mut g);
-        assert_eq!((events.last(), g.tile(), g.foe), (Some(&Event::Encounter(0)), (4, 2), Some(Foe::Army(0))), "the clicked friend is fought");
+        assert_eq!((events.last(), g.tile(), g.foe), (Some(&Event::Encounter(0)), (4, 2), Some(Foe::Army(0))), "a friend stepped on is fought");
     }
 
     #[test]
@@ -4793,7 +4767,7 @@ mod tests {
         // A one-cell bridge at (5, 2) with an army of attitude 0 on it, standing in it (its
         // guard by §4.2): the original engages it, Razdor's option lets him walk on through.
         // A stationary guard, an ill-disposed army or the army clicked is still engaged.
-        let on_bridge = |attitude: i8, stationary: bool, pass: bool| {
+        let on_bridge = |attitude: i8, stationary: bool| {
             let mut s = strip();
             s.buildings = vec![building(BuildingType::StoneBridge, 5, 2, (1, 1))];
             s.armies = vec![army(1, 5, 2, attitude, &[troop(4, 0, 1)])];
@@ -4804,25 +4778,20 @@ mod tests {
             a.mind.standing = Some(0);
             a.patrols = stationary;
             a.patrol_radius = 0;
-            g.pass_on_bridges = pass;
             g
         };
-        let mut g = on_bridge(0, false, false);
+        let mut g = on_bridge(0, false);
         assert!(g.set_destination((8, 2)));
         let events = walk_until_stopped(&mut g);
-        assert_eq!((events.last(), g.tile()), (Some(&Event::Encounter(0)), (4, 2)), "the original");
-        let mut g = on_bridge(0, false, true);
-        assert!(g.set_destination((8, 2)));
-        walk_until_stopped(&mut g);
-        assert_eq!((g.tile(), g.foe), ((8, 2), None), "the option: through it");
-        let mut g = on_bridge(-1, false, true);
+        assert_eq!((events.last(), g.tile()), (Some(&Event::Encounter(0)), (4, 2)), "the original: an army on the bridge blocks");
+        let mut g = on_bridge(-1, false);
         assert!(g.set_destination((8, 2)));
         walk_until_stopped(&mut g);
         assert!(g.tile().0 < 5 && g.foe == Some(Foe::Army(0)), "an ill-disposed army is engaged");
         // (The planner walks round a stationary guard's cell here, on open ground.)
-        let g = on_bridge(0, true, true);
+        let g = on_bridge(0, true);
         assert_eq!(g.step_contact((5, 2)), Some(StepContact::Army(0)), "a stationary guard is engaged");
-        let mut g = on_bridge(0, false, true);
+        let mut g = on_bridge(0, false);
         assert!(g.set_destination((5, 2)), "the army clicked");
         let events = walk_until_stopped(&mut g);
         assert_eq!((events.last(), g.tile()), (Some(&Event::Encounter(0)), (4, 2)));
@@ -4831,9 +4800,9 @@ mod tests {
     #[test]
     fn routes_avoid_armies_on_bridges_and_keep_deliberate_contact() {
         // A one-cell bridge at (5, 2) with an army of attitude 0 on it, standing in it (its
-        // guard by §4.2): the original engages it, Razdor's option lets him walk on through.
-        // A stationary guard, an ill-disposed army or the army clicked is still engaged.
-        let on_bridge = |attitude: i8, stationary: bool, pass: bool| {
+        // guard by §4.2). «Обход армий на пути» routes round it; a stationary guard and the
+        // army clicked are still engaged.
+        let on_bridge = |attitude: i8, stationary: bool| {
             let mut s = strip();
             s.buildings = vec![building(BuildingType::StoneBridge, 5, 2, (1, 1))];
             s.armies = vec![army(1, 5, 2, attitude, &[troop(4, 0, 1)])];
@@ -4844,30 +4813,41 @@ mod tests {
             a.mind.standing = Some(0);
             a.patrols = stationary;
             a.patrol_radius = 0;
-            g.pass_on_bridges = pass;
             g.avoid_armies = true;
             g
         };
-        let mut g = on_bridge(0, false, false);
+        let mut g = on_bridge(0, false);
         assert!(g.set_destination((8, 2)));
         let events = walk_until_stopped(&mut g);
         assert_eq!(g.tile(), (8, 2));
         assert!(!events.iter().any(|e| matches!(e, Event::Encounter(_))));
-        let mut g = on_bridge(0, false, true);
-        assert!(g.set_destination((8, 2)));
-        walk_until_stopped(&mut g);
-        assert_eq!((g.tile(), g.foe), ((8, 2), None), "the option: through it");
-        let mut g = on_bridge(-1, false, true);
-        assert!(g.set_destination((8, 2)));
-        walk_until_stopped(&mut g);
-        assert_eq!((g.tile(), g.foe), ((8, 2), None), "an ill-disposed army is bypassed too");
-        // (The planner walks round a stationary guard's cell here, on open ground.)
-        let g = on_bridge(0, true, true);
+        let g = on_bridge(0, true);
         assert_eq!(g.step_contact((5, 2)), Some(StepContact::Army(0)), "a stationary guard is engaged");
-        let mut g = on_bridge(0, false, true);
+        let mut g = on_bridge(0, false);
         assert!(g.set_destination((5, 2)), "the army clicked");
         let events = walk_until_stopped(&mut g);
         assert_eq!((events.last(), g.tile()), (Some(&Event::Encounter(0)), (4, 2)));
+    }
+
+    #[test]
+    fn noclip_passes_a_friendly_army_and_one_on_a_bridge() {
+        // The console's `noclip` is what lets the hero pass the armies the map's author placed:
+        // a friend on the route and an army standing on a bridge are both walked through.
+        let mut s = strip();
+        s.buildings = vec![building(BuildingType::StoneBridge, 5, 2, (1, 1))];
+        s.armies = vec![army(1, 5, 2, 1, &[troop(4, 0, 1)])];
+        let mut g = start(&s);
+        g.fog = Fog::disabled(24, 6);
+        let a = &mut g.world.armies[0];
+        a.mind.scripted = true;
+        a.mind.standing = Some(0);
+        a.patrols = true;
+        a.patrol_radius = 0;
+        g.cheats.noclip = true;
+        assert!(g.set_destination((8, 2)));
+        let events = walk_until_stopped(&mut g);
+        assert_eq!((g.tile(), g.foe), ((8, 2), None));
+        assert!(!events.iter().any(|e| matches!(e, Event::Encounter(_) | Event::Met(_))), "{events:?}");
     }
 
     #[test]
@@ -4875,7 +4855,6 @@ mod tests {
         // It walks away east; after each of its steps his route is planned again to its new
         // cell (0x4aedd1), until he steps onto it.
         let mut g = with_walker(1, (8, 2), (9..=14).map(|x| (x, 2)).collect());
-        g.friends_let_pass = true;
         g.world.armies[0].speed = 10;
         assert!(g.set_destination((8, 2)));
         let events = walk_until_stopped(&mut g);
@@ -4917,11 +4896,9 @@ mod tests {
     }
 
     #[test]
-    fn clicking_a_friendly_army_under_the_option_fights_it() {
-        // The option skips only the accidental step: the friend he walks to on purpose is
-        // engaged (world.md §4.2), whatever its talk counter, as it is without the option.
+    fn clicking_a_friendly_army_fights_it() {
+        // The friend he walks to on purpose is engaged (world.md §4.2), whatever its talk counter.
         let mut g = with_walker(1, (10, 2), vec![]);
-        g.friends_let_pass = true;
         let at = g.world.armies[0].tile(&g.world.map);
         assert!(g.set_destination(at));
         let events = walk_until_stopped(&mut g);
@@ -4930,15 +4907,14 @@ mod tests {
     }
 
     #[test]
-    fn an_unclicked_friendly_army_passes_the_hero_under_the_option() {
-        // A friend on his route, not clicked: it is met, not fought, and no battle opens.
+    fn an_unclicked_friendly_army_on_the_route_is_fought() {
+        // A friend on his route, not clicked: the original fights it, as it fights any army it
+        // steps onto (world.md §4.2).
         let mut g = with_walker(1, (10, 2), vec![]);
-        g.friends_let_pass = true;
         assert!(g.set_destination((11, 2)));
         let events = walk_until_stopped(&mut g);
-        assert!(events.contains(&Event::Met(0)), "{events:?}");
-        assert!(!events.iter().any(|e| matches!(e, Event::Encounter(_))), "{events:?}");
-        assert_eq!((g.foe, g.tile()), (None, (9, 2)));
+        assert!(events.contains(&Event::Encounter(0)), "{events:?}");
+        assert_eq!((g.foe, g.tile()), (Some(Foe::Army(0)), (9, 2)));
     }
 
     #[test]

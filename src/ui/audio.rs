@@ -201,12 +201,6 @@ pub struct Settings {
     pub minimap_size: Option<(f32, f32)>,
     /// The corner the minimap window was dragged to (Razdor's); the original's top right.
     pub minimap_corner: super::minimap::Corner,
-    /// Advanced: stepping onto a friendly army with no event for the meeting lets the hero
-    /// pass (`Game::friends_let_pass`); off, the original's battle. An army clicked is still fought.
-    pub friends_let_pass: bool,
-    /// Advanced: on a bridge the hero walks through the armies only passing by
-    /// (`Game::pass_on_bridges`); off, the original's meeting with each.
-    pub pass_on_bridges: bool,
     /// Advanced: the route closes every army's cell and the hero replans round them
     /// (`Game::avoid_armies`); off, the original's route, which walks through the armies it
     /// does not stop for.
@@ -305,7 +299,7 @@ pub fn must_request(asked: Option<i32>, want: i32) -> bool {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), friends_let_pass: false, pass_on_bridges: false, avoid_armies: false, keep_formation: true, battle_marks: true, army_list: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new() }
+        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), avoid_armies: false, keep_formation: true, battle_marks: true, army_list: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new() }
     }
 }
 
@@ -866,6 +860,17 @@ mod tests {
         let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
         assert_eq!(back.formation_controls, Clicks);
         assert!(serde_json::to_string(&s).unwrap().contains(r#""formation_controls":"clicks""#));
+    }
+
+    /// The passing options «Шаг на дружественный отряд» and «Отряды на мостах» are gone (backlog
+    /// 1530): an old settings file that still has their keys loads, the keys ignored, and the
+    /// original's rules hold (`Game` has no such flags; noclip is the way past).
+    #[test]
+    fn the_removed_passing_options_are_ignored_on_load() {
+        let file = r#"{"friends_let_pass": true, "pass_on_bridges": true, "music_volume": 0.3}"#;
+        let s: Settings = serde_json::from_str(file).expect("an old settings file must still load");
+        assert_eq!(s.music_volume, 0.3);
+        assert!(!serde_json::to_string(&s).unwrap().contains("friends_let_pass"));
     }
 
     /// «Сила ИИ в бою» and the improved AI's checkbox (`OptValue9`) stay in step: «Максимум»
