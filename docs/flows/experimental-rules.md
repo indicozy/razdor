@@ -147,7 +147,7 @@ global preference in an isolated snapshot save directory to display its controls
 
 «Сохранять расстановку» (`Settings::keep_formation`, `Game::keep_formation`) is Razdor's
 deviation, asked for by the owner ("why is the army's layout a bit different at every new fight?"),
-on by default, in «Ещё…» beside «Обход армий на пути». The original rewrites the army's formation
+on by default, in «Ещё…». The original rewrites the army's formation
 after each battle from the cells the battle left (4988c0), after its start fix (4d2141) and its
 collapses (489f50): survivors keep the cells they ended on, the rest take free ones. On, every
 unit that was in the army before the battle goes back to its cell from before it, the dead too.
@@ -157,16 +157,9 @@ build `Game` with the flag off (`Game::new`), so they keep the original's rule.
 
 ## Travel and Shift shortcuts
 
-Route avoidance is Razdor's advanced setting «Обход армий на пути» (`Settings::avoid_armies`,
-`Game::avoid_armies`), off by default. Off, the route is the original's: stationary guards and
-armies with a meeting waiting next to the hero close their cells, and other armies are walked
-through and met on the step. On, every army's cell closes whatever its allegiance or patrol state;
-the route is checked before each hero step and after the world advances, and a blocking army causes
-a route search to the same destination. If no bypass exists, the planner falls back to a route that
-walks up to the first army on the way: an enemy starts combat, a friendly army is met, and a
-friendly army clicked on purpose is fought. Clicking an army
-directly still selects it as the intentional target, including pursuit. These are convenience
-changes rather than original-game behavior, and they apply only while the option is on.
+The route is the original's: stationary guards and armies with a meeting waiting next to the hero
+close their cells, and other armies are walked through and fought on the step. Clicking an army
+directly selects it as the intentional target, including pursuit.
 
 Holding either Shift key while clicking a garrison/squad card transfers the unit to the
 other formation's first available place. Existing restrictions on heroes, named units,

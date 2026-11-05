@@ -1206,7 +1206,6 @@ pub fn follow_settings(audio: &super::audio::Settings, g: &mut razdor::rules::ga
     g.max_guard = audio.max_guard;
     g.pursue = pursue(audio);
     g.walk_pace = walk_pace(audio);
-    g.avoid_armies = audio.avoid_armies;
     g.keep_xp_on_promotion = audio.keep_xp_on_promotion;
     g.keep_formation = audio.keep_formation;
     g.allow_unit_benching = audio.allow_unit_benching;
@@ -1777,10 +1776,6 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     y = (hint_top + ai_hint.len() as f32 * 17.0 * k + 8.0 * k).max(y);
     if row(tr("Unit battle participation"), if audio.allow_unit_benching { tr("On") } else { tr("Off") }, &mut y) {
         audio.allow_unit_benching = !audio.allow_unit_benching;
-    }
-    // Razdor's option: the route closes every army's cell (off: the original's route).
-    if row(tr("Route around armies"), if audio.avoid_armies { tr("On") } else { tr("Off") }, &mut y) {
-        audio.avoid_armies = !audio.avoid_armies;
     }
     // Razdor's deviation (the owner's request): after a battle every unit goes back to its cell
     // from before it (`Game::keep_formation`); off, the original's write-back.

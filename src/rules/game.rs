@@ -224,17 +224,6 @@ pub enum Foe {
     Army(usize),
 }
 
-/// Which armies close their cells in a route plan ([`Game::plan_avoiding`]).
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ArmyBlock {
-    /// The original's: stationary guards and armies a meeting waits for next to the hero.
-    Original,
-    /// Razdor's option `avoid_armies`: every army's cell.
-    Every,
-    /// Razdor's option's second try: no army's cell.
-    Passable,
-}
-
 /// The whole game state. It is saved with serde (`rules::save`), except the content and the
 /// statics of the world and the event engine, which a load rebuilds from the scenario.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -538,11 +527,6 @@ pub struct Game {
     /// set by the interface, not part of the save.
     #[serde(skip)]
     pub max_guard: bool,
-    /// Razdor's option «Обход армий на пути» (`Settings::avoid_armies`): on, the route closes
-    /// every army's cell and the hero replans round armies; off, the original's routing.
-    /// Set by the interface, not part of the save.
-    #[serde(skip)]
-    pub avoid_armies: bool,
     /// Razdor's option «Опыт при повышении» (`Settings::keep_xp_on_promotion`): on, a promoted
     /// unit keeps its XP ([`Unit::promote`]); off (the default), the original's reset (0x4b1df0).
     /// Set by the interface, not part of the save.
@@ -813,7 +797,6 @@ impl Game {
             improved_ai: false,
             max_ai: false,
             max_guard: false,
-            avoid_armies: false,
             keep_xp_on_promotion: false,
             keep_formation: false,
             formation_before_battle: None,
@@ -1217,31 +1200,6 @@ impl Game {
         true
     }
 
-    /// Razdor's option `avoid_armies`: replans an obstructed route, keeping its destination
-    /// and deliberate contact. Off, the route is the original's and nothing is replanned.
-    fn reroute_around_armies(&mut self) -> bool {
-        if !self.avoid_armies {
-            return true;
-        }
-        if self.cheats.noclip || self.path.is_empty() {
-            return true;
-        }
-        let blocked = self.world.armies.iter().any(|a| {
-            Some(a.uid) != self.talk_to && self.path.contains(&a.tile(&self.world.map))
-        });
-        if !blocked {
-            return true;
-        }
-        let Some(goal) = self.goal else { return false };
-        self.path = self.plan_from(self.tile(), goal, self.click_buildings, self.talk_to, true);
-        if self.path.is_empty() {
-            self.goal = None;
-            self.talk_to = None;
-            return false;
-        }
-        true
-    }
-
     /// The route a click on `to` would walk (world.md §1.3): the first click shows it.
     /// Empty if `to` is not a target ([`Game::can_target`]) or out of reach.
     pub fn route_to(&self, to: Tile) -> Vec<Tile> {
@@ -1309,7 +1267,6 @@ impl Game {
     /// stationary guards and of the armies with a meeting event waiting that stand next to
     /// him (both except the army clicked; 0x4cc583, 0x4cc601). Moving armies and other
     /// buildings are crossed. A click on the parked ship costs 1 there for the plan.
-    /// Razdor's option `avoid_armies` closes every army's cell instead.
     pub fn plan(&self, to: Tile) -> Vec<Tile> {
         if !self.can_target(to) {
             return Vec::new();
@@ -1330,19 +1287,6 @@ impl Game {
     /// not, and keeps the buildings of the original click: 0x4aedd1); `clicked`: the army
     /// clicked or chased, which the army mask leaves open.
     fn plan_from(&self, from: Tile, to: Tile, (target, standing): (Option<usize>, Option<usize>), clicked: Option<u32>, reopen: bool) -> Vec<Tile> {
-        if !self.avoid_armies {
-            return self.plan_avoiding(from, to, (target, standing), clicked, reopen, ArmyBlock::Original);
-        }
-        let path = self.plan_avoiding(from, to, (target, standing), clicked, reopen, ArmyBlock::Every);
-        if !path.is_empty() || from == to {
-            return path;
-        }
-        // If armies seal the only passage, walk up to the first one for contact.
-        self.plan_avoiding(from, to, (target, standing), clicked, reopen, ArmyBlock::Passable)
-    }
-
-    /// [`Game::plan_from`] with the armies that close their cells given by `armies`.
-    fn plan_avoiding(&self, from: Tile, to: Tile, (target, standing): (Option<usize>, Option<usize>), clicked: Option<u32>, reopen: bool, armies: ArmyBlock) -> Vec<Tile> {
         let w = &self.world;
         let map = &w.map;
         if map.mask_index(to).is_none() {
@@ -1365,21 +1309,13 @@ impl Game {
         // or when a meeting event waits for it (+0x3826) and it stands next to the hero
         // (0x4826f8 distance 1, any of the 8 neighbours). Friend or foe alike; every other
         // army, a moving one included, can be walked through (its contact comes on the step,
-        // `Game::step_contact`). Razdor's option closes every army's cell, or none (the
-        // walk then ends in contact with the first army on the way).
+        // `Game::step_contact`).
         for a in &w.armies {
             if Some(a.uid) == clicked {
                 continue;
             }
             let t = a.tile(map);
-            let closed = match armies {
-                ArmyBlock::Every => true,
-                ArmyBlock::Passable => false,
-                ArmyBlock::Original => {
-                    ai::stationary(a)
-                        || (map.distance(t, from) == 1 && self.script.as_deref().is_some_and(|e| e.meeting_waiting(self, a.id)))
-                }
-            };
+            let closed = ai::stationary(a) || (map.distance(t, from) == 1 && self.script.as_deref().is_some_and(|e| e.meeting_waiting(self, a.id)));
             if let Some(i) = map.mask_index(t).filter(|_| closed) {
                 mask[i] = 0;
             }
@@ -1401,9 +1337,8 @@ impl Game {
         let open = |t: Tile| map.mask_index(t).map_or(0, |i| if self.fog.explored(t) { mask[i] } else { 0 });
         // The pursuit gives up on a target cell closed once the fog is laid over the mask
         // (0x4aedd1): an army gone into the dark is not followed. A click is not tested (the
-        // seed only needs a cost; the dark is no target anyway). Under the option a
-        // destination blocked by an army is not seeded either.
-        if (!reopen || self.avoid_armies) && open(to) == 0 {
+        // seed only needs a cost; the dark is no target anyway).
+        if !reopen && open(to) == 0 {
             return Vec::new();
         }
         map.flood_route(&cost, &open, &[(to, 0)], from).map(|r| r.0).unwrap_or_default()
@@ -1897,7 +1832,7 @@ impl Game {
     /// [`Game::run_pause`] ([`Game::walk_tail`]). `Some(go)` when the walk ends without a
     /// step's time; `None` when the time is pending.
     fn begin_walk(&mut self, it: &mut Vec<Event>) -> Option<bool> {
-        if !frame_probe::time(Stage::Route, || self.follow_army()) || !frame_probe::time(Stage::Route, || self.reroute_around_armies()) {
+        if !frame_probe::time(Stage::Route, || self.follow_army()) {
             return Some(false);
         }
         let Some(&next) = self.path.first() else { return Some(false) };
@@ -1909,23 +1844,15 @@ impl Game {
         }
         match self.step_contact(next) {
             Some(StepContact::Army(i)) => {
-                // Under the option a friendly army is engaged only when clicked; a hostile one always.
-                let deliberate = self.talk_to == Some(self.world.armies[i].uid);
                 self.snapped = true;
                 self.path.clear();
                 self.goal = None;
                 self.talk_to = None;
-                // The original engages any army stepped onto (world.md §4.2); Razdor's option
-                // lets a friend pass instead.
-                // The option skips only the accidental step: the army clicked is still fought.
-                let engage = self.world.armies[i].attitude <= 0 || deliberate || !self.avoid_armies;
-                let e = if engage { Event::Encounter(i) } else { Event::Met(i) };
-                if let Event::Encounter(i) = e {
-                    self.foe = Some(Foe::Army(i));
-                }
+                // The original engages any army stepped onto, friend or foe (world.md §4.2).
+                self.foe = Some(Foe::Army(i));
                 // The scan of this contact reads no point (see `point_zeroed`).
                 self.point_zeroed = true;
-                self.engage(e, it);
+                self.engage(Event::Encounter(i), it);
                 return Some(false);
             }
             Some(StepContact::Garrison(l)) => {
@@ -1991,9 +1918,6 @@ impl Game {
                 self.talk_to = None;
                 return false;
             }
-        }
-        if !frame_probe::time(Stage::Route, || self.reroute_around_armies()) {
-            return false;
         }
         if self.path.is_empty() {
             self.arrive_at_end(events);
@@ -4858,38 +4782,6 @@ mod tests {
     }
 
     #[test]
-    fn routes_avoid_armies_on_bridges_and_keep_deliberate_contact() {
-        // A one-cell bridge at (5, 2) with an army of attitude 0 on it, standing in it (its
-        // guard by §4.2). «Обход армий на пути» routes round it; a stationary guard and the
-        // army clicked are still engaged.
-        let on_bridge = |attitude: i8, stationary: bool| {
-            let mut s = strip();
-            s.buildings = vec![building(BuildingType::StoneBridge, 5, 2, (1, 1))];
-            s.armies = vec![army(1, 5, 2, attitude, &[troop(4, 0, 1)])];
-            let mut g = start(&s);
-            g.fog = Fog::disabled(24, 6);
-            let a = &mut g.world.armies[0];
-            a.mind.scripted = true;
-            a.mind.standing = Some(0);
-            a.patrols = stationary;
-            a.patrol_radius = 0;
-            g.avoid_armies = true;
-            g
-        };
-        let mut g = on_bridge(0, false);
-        assert!(g.set_destination((8, 2)));
-        let events = walk_until_stopped(&mut g);
-        assert_eq!(g.tile(), (8, 2));
-        assert!(!events.iter().any(|e| matches!(e, Event::Encounter(_))));
-        let g = on_bridge(0, true);
-        assert_eq!(g.step_contact((5, 2)), Some(StepContact::Army(0)), "a stationary guard is engaged");
-        let mut g = on_bridge(0, false);
-        assert!(g.set_destination((5, 2)), "the army clicked");
-        let events = walk_until_stopped(&mut g);
-        assert_eq!((events.last(), g.tile()), (Some(&Event::Encounter(0)), (4, 2)));
-    }
-
-    #[test]
     fn noclip_passes_a_friendly_army_and_one_on_a_bridge() {
         // The console's `noclip` is what lets the hero pass the armies the map's author placed:
         // a friend on the route and an army standing on a bridge are both walked through.
@@ -5632,31 +5524,6 @@ mod tests {
     }
 
     #[test]
-    fn player_routes_avoid_all_armies_and_replan_obstructions() {
-        for attitude in [-2, 1] {
-            let mut s = strip();
-            let mut other = army(1, 12, 5, attitude, &[troop(4, 0, 1)]);
-            other.patrols = 1;
-            other.patrol_radius = 5;
-            s.armies = vec![other];
-            let mut g = start(&s);
-            g.fog = Fog::disabled(24, 6);
-            g.avoid_armies = true;
-            g.world.armies[0].mind.scripted = true;
-            g.world.armies[0].path.clear();
-            assert!(g.set_destination((20, 2)));
-            let blocked = g.path[g.path.len() / 2];
-            g.world.armies[0].pos = g.world.map.center(blocked);
-            assert!(g.hero_step(&mut Vec::new()));
-            assert_eq!(g.goal, Some((20, 2)));
-            assert!(!g.path.contains(&blocked));
-            assert!(g.set_destination((20, 2)));
-            assert!(!g.path.contains(&blocked), "initial route avoids occupied cells too");
-            assert!(g.set_destination(blocked), "deliberate contact remains possible");
-            assert_eq!(g.path.last(), Some(&blocked));
-        }
-    }
-    #[test]
     fn stationary_guards_block_the_route_except_the_one_clicked() {
         let mut s = strip();
         for y in [0u32, 1, 3, 4, 5] {
@@ -5674,24 +5541,9 @@ mod tests {
 
 
     #[test]
-    fn stationary_guards_block_the_route_except_the_one_clicked_with_avoid_armies() {
-        let mut s = strip();
-        for y in [0u32, 1, 3, 4, 5] {
-            tk::set(&mut s, 10, y, crate::dt::dtm::Surface::DeepSea);
-        }
-        let mut guard = army(1, 10, 2, 1, &[troop(4, 0, 1)]);
-        guard.patrols = 1;
-        guard.patrol_radius = 0;
-        s.armies = vec![guard];
-        let mut g = start(&s);
-        g.fog = Fog::disabled(24, 6);
-        g.avoid_armies = true;
-        assert!(g.set_destination((20, 2)), "the only passage leads to contact with its guard");
-        assert!(g.set_destination((10, 2)), "the guard himself can be clicked");
-    }
-
-    #[test]
-    fn a_blocked_pass_leads_to_enemy_combat_or_friendly_dialogue() {
+    fn a_blocked_pass_leads_to_combat_as_in_the_original() {
+        // An army that steps into the gap in the sea wall is fought whatever its attitude: the
+        // original engages any army stepped onto (world.md §4.2).
         for attitude in [-2, 1] {
             for moved in [false, true] {
                 let mut s = strip();
@@ -5701,23 +5553,34 @@ mod tests {
                 s.armies = vec![army(1, if moved { 12 } else { 10 }, if moved { 5 } else { 2 }, attitude, &[troop(4, 0, 1)])];
                 let mut g = start(&s);
                 g.fog = Fog::disabled(24, 6);
-                g.avoid_armies = true;
                 g.world.armies[0].mind.scripted = true;
                 g.world.armies[0].path.clear();
                 assert!(g.set_destination((20, 2)));
                 g.world.armies[0].pos = g.world.map.center((10, 2));
                 let events = walk_until_stopped(&mut g);
-                if attitude < 0 {
-                    assert_eq!(g.foe, Some(Foe::Army(0)));
-                    assert!(events.iter().any(|e| matches!(e, Event::Encounter(0))));
-                } else {
-                    assert_eq!(g.foe, None);
-                    assert!(events.iter().any(|e| matches!(e, Event::Met(0))));
-                }
+                assert_eq!(g.foe, Some(Foe::Army(0)), "attitude {attitude}, moved {moved}");
+                assert!(events.iter().any(|e| matches!(e, Event::Encounter(0))), "{events:?}");
                 assert!(g.tile().0 < 10, "contact happens before entering the occupied cell");
             }
         }
     }
+    #[test]
+    fn a_moving_army_on_the_route_is_walked_into_not_routed_round() {
+        // The original's route closes only stationary guards and the armies a meeting waits for
+        // (world.md §1.3): a hostile army that moves stays on the straight route, no detour is
+        // planned round it, and the step onto it is the contact (world.md §4.2).
+        let mut s = strip();
+        s.armies = vec![army(1, 5, 2, -2, &[troop(4, 0, 1)])];
+        let mut g = start(&s);
+        g.fog = Fog::disabled(24, 6);
+        g.world.armies[0].mind.scripted = true;
+        g.world.armies[0].path.clear();
+        assert!(g.set_destination((8, 2)));
+        assert!(g.path.contains(&(5, 2)), "the route goes through the army's cell: {:?}", g.path);
+        let events = walk_until_stopped(&mut g);
+        assert_eq!((events.last(), g.foe, g.tile()), (Some(&Event::Encounter(0)), Some(Foe::Army(0)), (4, 2)), "{events:?}");
+    }
+
     #[test]
     fn noclip_walks_through_the_sea_and_the_guard_and_meets_nobody_on_the_way() {
         // The console's `noclip` (`rules::cheats`): the sea wall and the guard in its gap

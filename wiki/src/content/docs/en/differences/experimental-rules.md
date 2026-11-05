@@ -45,7 +45,6 @@ When it is enabled, select a living non-hero in the army window and tick the **"
 In the "More..." menu, there are two additional Razdor parameters:
 
 * **"Preserve formation"** (on by default): after a battle, all warriors, including those who perished, return to the cells they occupied before the battle. If off — warriors remain in the cells where they ended the battle, as in the original.
-* **"Avoid armies on path"** (off by default): if off — the hero passes through the cells of other armies, and a battle begins upon encounter, as in the original. If on — the route is searched to bypass armies. If a bypass is impossible, the hero takes the shortest path to the first army encountered.
 
 ## Quick Actions with Shift
 

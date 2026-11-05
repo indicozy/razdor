@@ -201,10 +201,6 @@ pub struct Settings {
     pub minimap_size: Option<(f32, f32)>,
     /// The corner the minimap window was dragged to (Razdor's); the original's top right.
     pub minimap_corner: super::minimap::Corner,
-    /// Advanced: the route closes every army's cell and the hero replans round them
-    /// (`Game::avoid_armies`); off, the original's route, which walks through the armies it
-    /// does not stop for.
-    pub avoid_armies: bool,
     /// Advanced, Razdor's deviation: «Опыт при повышении». Off (the default) is the original's
     /// reset: a promoted unit's XP is dropped (0x4b1df0); on, it is kept (`Game::keep_xp_on_promotion`).
     pub keep_xp_on_promotion: bool,
@@ -302,7 +298,7 @@ pub fn must_request(asked: Option<i32>, want: i32) -> bool {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), avoid_armies: false, keep_xp_on_promotion: false, keep_formation: true, battle_marks: true, army_list: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new() }
+        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), keep_xp_on_promotion: false, keep_formation: true, battle_marks: true, army_list: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new() }
     }
 }
 
@@ -1013,14 +1009,14 @@ mod tests {
         assert!(back.allow_unit_benching);
     }
 
+    /// The option «Обход армий на пути» is gone (backlog 1530): an old settings file that still
+    /// has its key loads, the key ignored, and the original's route holds (no flag in `Game`).
     #[test]
-    fn avoid_armies_defaults_off_and_survives_settings_serialization() {
-        let old: Settings = serde_json::from_str("{}").unwrap();
-        assert!(!old.avoid_armies, "an older file: the original's route");
-        assert!(!Settings::default().avoid_armies);
-        let enabled = Settings { avoid_armies: true, ..Settings::default() };
-        let back: Settings = serde_json::from_str(&serde_json::to_string(&enabled).unwrap()).unwrap();
-        assert!(back.avoid_armies);
+    fn the_removed_avoid_armies_option_is_ignored_on_load() {
+        let file = r#"{"avoid_armies": true, "music_volume": 0.3}"#;
+        let s: Settings = serde_json::from_str(file).expect("an old settings file must still load");
+        assert_eq!(s.music_volume, 0.3);
+        assert!(!serde_json::to_string(&s).unwrap().contains("avoid_armies"));
     }
 
     #[test]
