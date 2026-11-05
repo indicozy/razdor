@@ -15,6 +15,7 @@ use macroquad::prelude::*;
 use razdor::i18n::{self, n_, tr, Lang};
 use razdor::rules::content::{Content, ExperimentalRules, HeroClass};
 use razdor::rules::game::Game;
+use razdor::rules::marks;
 
 
 use super::assets::Assets;
@@ -520,6 +521,8 @@ struct Facts {
     favourite: bool,
     width: u32,
     name: String,
+    /// The row's mark: the map's record, or a campaign's worst once every map is won.
+    mark: Option<marks::RunMark>,
 }
 
 /// The rows `list` (in the original's order) as `show` and `order` want them, with each
@@ -546,6 +549,8 @@ struct Marks {
     favourites: Vec<String>,
     show: i64,
     order: i64,
+    /// The best run mark of each map won (`rules::marks`, Razdor's, 1532): the checkmarks.
+    records: marks::Records,
 }
 
 local! {
@@ -557,7 +562,7 @@ fn marks() -> Marks {
         m.borrow_mut()
             .get_or_insert_with(|| {
                 let s = super::language::Settings::load();
-                Marks { completed: s.completed_by_mod, favourites: s.favourite_scenarios, show: s.scenario_show, order: s.scenario_order }
+                Marks { completed: s.completed_by_mod, favourites: s.favourite_scenarios, show: s.scenario_show, order: s.scenario_order, records: marks::Records::load() }
             })
             .clone()
     })
@@ -630,6 +635,9 @@ fn listed(names: &[String], file: &str) -> bool {
 fn facts_of(scenarios: &[ScenarioEntry], g: &Group, m: &Marks, active: Option<&str>) -> Facts {
     let e = &scenarios[g.first];
     let last = g.chapters.last().map_or(g.first, |&c| c);
+    // A campaign's maps are its chapters (the first included).
+    let files: Vec<&str> = g.chapters.iter().map(|&c| scenarios[c].file.as_str()).collect();
+    let mark = if g.chapters.is_empty() { m.records.get(&e.file) } else { m.records.campaign(&files) };
     Facts {
         campaign: !g.chapters.is_empty(),
         original: is_original_map(&e.file),
@@ -637,6 +645,7 @@ fn facts_of(scenarios: &[ScenarioEntry], g: &Group, m: &Marks, active: Option<&s
         favourite: listed(&m.favourites, &e.file),
         width: e.scenario.width(),
         name: group_name(scenarios, g).to_string(),
+        mark: mark.map(|r| r.mark.clone()),
     }
 }
 
@@ -678,6 +687,51 @@ fn star(c: Vec2, r: f32, color: Color, filled: bool) {
             draw_line(a.x, a.y, b.x, b.y, (r * 0.18).max(1.0), color);
         }
     }
+}
+
+/// The favourite star's box at a row's head (its finger area grows from it, `mark_button_state`).
+fn star_box(head: Rect, k: f32) -> Rect {
+    Rect::new(head.x + head.w - 22.0 * k, head.y + head.h / 2.0 - 9.0 * k, 18.0 * k, 18.0 * k)
+}
+
+/// The completed mark's box at a row's head, left of the star (a campaign: its last map's, or
+/// its worst mark). Drawn only, never a tap target: a tap on it is a tap on the row.
+fn mark_box(head: Rect, k: f32) -> Rect {
+    Rect::new(head.x + head.w - 42.0 * k, head.y + head.h / 2.0 - 7.0 * k, 14.0 * k, 14.0 * k)
+}
+
+/// The checkmark's colour of a run mark (`rules::marks::Level`): green, grey, yellow or red.
+fn mark_ink(level: marks::Level) -> Color {
+    match level {
+        marks::Level::Green => TICK_GREEN,
+        marks::Level::Grey => MARK_GREY,
+        marks::Level::Yellow => MARK_YELLOW,
+        marks::Level::Red => MARK_RED,
+    }
+}
+
+const MARK_GREY: Color = Color::new(0.72, 0.72, 0.74, 1.0);
+const MARK_YELLOW: Color = Color::new(1.0, 0.93, 0.28, 1.0);
+const MARK_RED: Color = Color::new(1.0, 0.38, 0.34, 1.0);
+
+/// The tooltip of a run mark: what it means and what set it, from `t` (the catalog's
+/// translation). Russian: «Пройдено с читами (god)», «Пройдено с экспериментальными правилами:
+/// Шесть ячеек снаряжения», «Пройдено с настройками не как в оригинале: Обход армий на пути»,
+/// «Пройдено честно».
+fn mark_text_in(mark: &marks::RunMark, t: impl Fn(&str) -> &str) -> String {
+    match &mark.reason {
+        marks::Reason::Honest => t(n_("Completed honestly")).to_string(),
+        marks::Reason::Cheat(command) if command.is_empty() => t(n_("Completed with cheats")).to_string(),
+        marks::Reason::Cheat(command) => format!("{} ({command})", t(n_("Completed with cheats"))),
+        marks::Reason::Rule(rule) => format!("{}: {}", t(n_("Completed with experimental rules")), t(rule)),
+        marks::Reason::Setting(setting) => format!("{}: {}", t(n_("Completed with settings not as in the original")), t(setting)),
+        marks::Reason::Unknown => t(n_("Completed; the game's history is unknown (an old save)")).to_string(),
+    }
+}
+
+/// The tooltip of a run mark in the current language.
+fn mark_text(mark: &marks::RunMark) -> String {
+    mark_text_in(mark, tr)
 }
 
 /// A tick (the completed mark) in a box of side `s` at `(x, y)`.
@@ -987,7 +1041,7 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
         // Razdor's marks at the head's right end: the favourite star (shown on the row under
         // the pointer, lit when marked; a click on it marks or unmarks) and the tick of a
         // scenario won (a campaign: its last map).
-        let star_r = Rect::new(head.x + head.w - 22.0 * k, head.y + head.h / 2.0 - 9.0 * k, 18.0 * k, 18.0 * k);
+        let star_r = star_box(head, k);
         let on_star = over_list && star_r.contains(crate::ui::widgets::pointer().into());
         let (row_hover, _, _) = button_state(r, over_list && !on_star);
         let head_pressed = head.contains(pointer().into()) && clicked() && over_list && !on_star;
@@ -1007,8 +1061,17 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
             }
             keep_marks(m.clone());
         }
-        if f.completed {
-            tick(head.x + head.w - 42.0 * k, head.y + head.h / 2.0 - 7.0 * k, 14.0 * k, TICK_GREEN);
+        // The row's mark (1532): its checkmark in the mark's colour, the tooltip on hover; a won
+        // map with no record (won before the marks) keeps the plain green tick.
+        let mark_r = mark_box(head, k);
+        if let Some(mark) = &f.mark {
+            tick(mark_r.x, mark_r.y, mark_r.w, mark_ink(mark.level));
+            if over_list && mark_r.contains(crate::ui::widgets::pointer().into()) {
+                // Queued: drawn over the whole window once its frame is up (`draw_later`), not cut at the rows.
+                tooltip_later(&[(mark_text(mark), INK)]);
+            }
+        } else if f.completed {
+            tick(mark_r.x, mark_r.y, mark_r.w, TICK_GREEN);
         }
         scenario_icon(e.scenario.header.scenario_picture_index, vec2(head.x + 14.0 * k, head.y + head.h / 2.0), k);
         let name = group_name(scenarios, g);
@@ -1031,7 +1094,7 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
         // The name leaves room for the marks it has (none: the original's width). The row's right
         // end is 32 px past the name's start (the name ends at the row's edge, 2 px short of the
         // scrollbar), so a name fits the row as it was before the corner insets (208 px).
-        let name_w = r.w - (32.0 + if f.completed { 44.0 } else if f.favourite { 24.0 } else { 0.0 }) * k;
+        let name_w = r.w - (32.0 + if f.mark.is_some() || f.completed { 44.0 } else if f.favourite { 24.0 } else { 0.0 }) * k;
         with_face(Face::Subtitle, || {
             // Shrunk to fit the name's room (`fit_size`, 15 px at most), as before the insets; grown
             // with its row (`row_text_size`), cut by its room when the grown name is longer.
@@ -1053,15 +1116,22 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
         let small_normal = pl.as_ref().map_or(12.0 * k, |p| p.chapter_px);
         with_face(Face::Body, || for (n, &c) in chapters.iter().enumerate() {
             let ink = if lit { super::typography::Ink::Plain } else { super::typography::Ink::Orange };
-            // Each map of a campaign won has its tick too.
+            // Each map of a campaign won has its tick too: its record's mark (1532), else the green one.
             let won = listed(language::won_under(&m.completed, active), &scenarios[c].file);
-            let room = r.w - (if won { 84.0 } else { 60.0 }) * k;
+            let mark = m.records.get(&scenarios[c].file).map(|r| r.mark.clone());
+            let room = r.w - (if won || mark.is_some() { 84.0 } else { 60.0 }) * k;
             let small = if pl.is_some() { small_normal } else { row_text_size(title(&scenarios[c]), small_normal, grow, room) };
             let is_grown = small > small_normal;
             let cy = r.y + head_h + n as f32 * chapter_h + chapter_h * 0.5 + small * 0.36;
             super::dt_font::legacy_metrics_if(is_grown, || chrome::shadow_text(&ellipsize(title(&scenarios[c]), room, small), r.x + 52.0 * k, cy, small, ink.color()));
-            if won {
-                tick(head.x + head.w - 40.0 * k, cy - small * 0.36 - 5.0 * k, 10.0 * k, TICK_GREEN);
+            let tick_r = Rect::new(head.x + head.w - 40.0 * k, cy - small * 0.36 - 5.0 * k, 10.0 * k, 10.0 * k);
+            if let Some(mark) = &mark {
+                tick(tick_r.x, tick_r.y, tick_r.w, mark_ink(mark.level));
+                if over_list && Rect::new(tick_r.x - 4.0 * k, tick_r.y - 4.0 * k, tick_r.w + 8.0 * k, tick_r.h + 8.0 * k).contains(crate::ui::widgets::pointer().into()) {
+                    tooltip_later(&[(mark_text(mark), INK)]);
+                }
+            } else if won {
+                tick(tick_r.x, tick_r.y, tick_r.w, TICK_GREEN);
             }
         });
         // A campaign heading or individual chapter is selected only on click.
@@ -1275,6 +1345,7 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
     let next_r = win.rect(next_x, win.foot_y, next_w, FOOT_H * grow);
     if button_rect(dots_r, "...", can) {
         RULES_OPEN.with(|p| p.set(true));
+        draw_later();
         return None;
     }
     let selected_map = campaign_start(&list, picked);
@@ -1284,8 +1355,11 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
         next = selected_map.map(|i| Screen::ClassSelect { scenario: Some(i) });
     }
     if button_rect(cancel_r, &own("Buttons", "Cancel", n_("Cancel")), true) || closed || key(KeyCode::Escape) {
+        draw_later();
         return Some(Screen::MainMenu);
     }
+    // The mark's tooltip (queued among the rows) is drawn last, over the window (1532).
+    draw_later();
     next
 }
 
@@ -2087,6 +2161,49 @@ mod tests {
         assert!(hit.contains(star.center()), "the star's own tap still works");
         assert!(!hit.contains(vec2(bar.x + 4.0 * k, star.center().y)), "a tap on the bar's track is not the star's");
         assert_eq!(clip_left_of(grown, None), grown, "no bar: the area as grown");
+    }
+
+    /// The mark's checkmark sits left of the star with a gap, and the star's box is where it was
+    /// (1532: the mark is drawn, never a tap target of its own).
+    #[test]
+    fn the_mark_s_checkmark_sits_left_of_the_star_and_the_star_s_tap_area_is_unchanged() {
+        let k = 2.0;
+        let rows = Rect::new(4.0, 31.0, 278.0, 329.0);
+        let view = list_view(rows, k);
+        let row_w = view.w - 22.0 * k;
+        let head = Rect::new(view.x + 4.0 * k, view.y + FIRST_ROW_PX * k, row_w, 30.0 * k - 2.0 * k);
+        let star = star_box(head, k);
+        assert_eq!(star, Rect::new(head.x + head.w - 22.0 * k, head.y + head.h / 2.0 - 9.0 * k, 18.0 * k, 18.0 * k), "the star where it was");
+        let mark = mark_box(head, k);
+        assert!(mark.right() + 4.0 * k <= star.x, "the checkmark ends left of the star with a gap");
+        assert_eq!(mark.w, 14.0 * k, "the completed tick's size, as before the marks");
+        // The star's grown finger area still reaches the checkmark, as it reached the old tick
+        // (the tap area is kept as it was; the checkmark is not a tap target of its own).
+        let screen = Rect::new(0.0, 0.0, 1280.0 * 2.0, 800.0 * 2.0);
+        let area = finger_hit_at(star, Some(2.0), screen, screen.h, &[]);
+        assert!(area.contains(star.center()), "the star's own tap still works");
+    }
+
+    /// Each mark's tooltip names what it means and what set it (the house style), in both languages.
+    #[test]
+    fn a_mark_s_tooltip_says_what_it_is_and_what_set_it() {
+        use marks::{Level, Reason, RunMark};
+        let mark = |level, reason| RunMark { level, reason };
+        let ru = |m: &RunMark| mark_text_in(m, |s| i18n::tr_in(Lang::Ru, s));
+        let en = |m: &RunMark| mark_text_in(m, |s| i18n::tr_in(Lang::En, s));
+        let cheat = mark(Level::Red, Reason::Cheat("god".into()));
+        assert_eq!(ru(&cheat), "Пройдено с читами (god)");
+        assert_eq!(en(&cheat), "Completed with cheats (god)");
+        let rule = mark(Level::Yellow, Reason::Rule("Six equipment cells".into()));
+        assert_eq!(ru(&rule), "Пройдено с экспериментальными правилами: Шесть ячеек снаряжения");
+        assert_eq!(en(&rule), "Completed with experimental rules: Six equipment cells");
+        let setting = mark(Level::Grey, Reason::Setting("Route around armies".into()));
+        assert_eq!(ru(&setting), "Пройдено с настройками не как в оригинале: Обход армий на пути");
+        assert_eq!(en(&setting), "Completed with settings not as in the original: Route around armies");
+        assert_eq!(ru(&RunMark::start()), "Пройдено честно");
+        assert_eq!(en(&RunMark::start()), "Completed honestly");
+        assert_eq!(ru(&mark(Level::Red, Reason::Cheat(String::new()))), "Пройдено с читами", "an old save: no cheat named");
+        assert_eq!(ru(&RunMark::unknown_history()), "Пройдено, история игры неизвестна (сохранение старой версии)");
     }
 
     /// A mod being built starts nothing (1441): Next and Enter wait for the folder, as an empty

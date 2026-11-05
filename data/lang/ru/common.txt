@@ -61,6 +61,12 @@ Fan-made = Фанатские
 Completed scenarios = Пройденные
 Not completed = Не пройденные
 Favourites = Избранные
+# The scenario list's run marks (checkmarks and their tooltips)
+Completed honestly = Пройдено честно
+Completed with cheats = Пройдено с читами
+Completed with experimental rules = Пройдено с экспериментальными правилами
+Completed with settings not as in the original = Пройдено с настройками не как в оригинале
+Completed; the game's history is unknown (an old save) = Пройдено, история игры неизвестна (сохранение старой версии)
 As in the game = Как в игре
 Small maps first = Сначала малые карты
 Large maps first = Сначала большие карты
