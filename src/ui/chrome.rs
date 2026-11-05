@@ -20,6 +20,7 @@ use razdor::dt::ini::Ini;
 use razdor::dt::preload;
 use razdor::dt::install::{find_path, SETTINGS_FILE};
 
+use super::sharp;
 use super::widgets::{measure, text};
 
 /// How a decoded picture is turned into a texture.
@@ -1207,7 +1208,7 @@ fn with_material(material: Option<Material>, draw: impl FnOnce()) {
     match material {
         Some(m) => {
             gl_use_material(&m);
-            draw();
+            super::sharp::in_blend(draw);
             gl_use_default_material();
         }
         None => draw(),
@@ -1376,15 +1377,15 @@ pub fn cover_source(pic: (f32, f32), screen: (f32, f32)) -> Option<Rect> {
 }
 
 pub fn tex(t: &Texture2D, r: Rect, color: Color) {
-    draw_texture_ex(t, r.x, r.y, color, DrawTextureParams { dest_size: Some(vec2(r.w, r.h)), ..Default::default() });
+    sharp::draw(t, r.x, r.y, color, DrawTextureParams { dest_size: Some(vec2(r.w, r.h)), ..Default::default() });
 }
 
 pub fn tex_src(t: &Texture2D, src: Rect, dst: Rect, color: Color) {
-    draw_texture_ex(t, dst.x, dst.y, color, DrawTextureParams { dest_size: Some(vec2(dst.w, dst.h)), source: Some(src), ..Default::default() });
+    sharp::draw(t, dst.x, dst.y, color, DrawTextureParams { dest_size: Some(vec2(dst.w, dst.h)), source: Some(src), ..Default::default() });
 }
 
 fn tex_src_flipped_x(t: &Texture2D, src: Rect, dst: Rect, color: Color) {
-    draw_texture_ex(t, dst.x, dst.y, color, DrawTextureParams {
+    sharp::draw(t, dst.x, dst.y, color, DrawTextureParams {
         dest_size: Some(vec2(dst.w, dst.h)),
         source: Some(src),
         flip_x: true,
@@ -1639,7 +1640,7 @@ pub fn paper_panel(r: Rect) {
                     if flip_y { t.height() - sh } else { 0.0 },
                     sw, sh,
                 );
-                draw_texture_ex(&t, x, y, c, DrawTextureParams {
+                sharp::draw(&t, x, y, c, DrawTextureParams {
                     dest_size: Some(vec2(w, h)), source: Some(source), flip_x, flip_y,
                     ..Default::default()
                 });

@@ -1420,7 +1420,7 @@ impl BattleView {
             if let Some(t) = chrome::win_masked(slide_sprite(hit.kind, team), "army-alpha") {
                 let size = 56.0 * l.card.x / 92.0;
                 let p = card(from).lerp(card(to), s.clamp(0.0, 1.0));
-                draw_texture_ex(&t, p.x - size / 2.0, p.y - size / 2.0, WHITE, DrawTextureParams { dest_size: Some(vec2(size, size)), ..Default::default() });
+                super::sharp::draw(&t, p.x - size / 2.0, p.y - size / 2.0, WHITE, DrawTextureParams { dest_size: Some(vec2(size, size)), ..Default::default() });
             }
         };
         if fx.t < *slide {

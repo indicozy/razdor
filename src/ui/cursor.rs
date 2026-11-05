@@ -211,7 +211,7 @@ pub fn draw() {
     let px = super::chrome::k() * 0.9375;
     let (x, y) = ((mx + hot.0 * px).round(), (my + hot.1 * px).round());
     let size = vec2(tex.width(), tex.height()) * px;
-    draw_texture_ex(&tex, x, y, WHITE, DrawTextureParams { dest_size: Some(size), ..Default::default() });
+    super::sharp::draw(&tex, x, y, WHITE, DrawTextureParams { dest_size: Some(size), ..Default::default() });
 }
 
 /// Razdor's stand-in for the system arrow at the gamepad's pointer: white, outlined in black,

@@ -132,7 +132,7 @@ impl Assets {
     /// greyed, darkened and vignetted; without it the plain portrait under a dark veil.
     pub fn draw_portrait_locked(&self, kind: UnitId, team: Team, r: Rect) {
         if let Some(tex) = self.dt_id(kind).and_then(|id| self.dt.as_ref()?.unit_portrait_locked(id)) {
-            draw_texture_ex(&tex, r.x, r.y, WHITE, DrawTextureParams { dest_size: Some(vec2(r.w, r.h)), ..Default::default() });
+            super::sharp::draw(&tex, r.x, r.y, WHITE, DrawTextureParams { dest_size: Some(vec2(r.w, r.h)), ..Default::default() });
             return;
         }
         self.draw_portrait(kind, team, r);
@@ -144,7 +144,7 @@ impl Assets {
     pub fn draw_portrait(&self, kind: UnitId, team: Team, r: Rect) {
         let custom = self.custom_sprites().then(|| self.sprites.get(&kind).cloned()).flatten();
         if let Some(tex) = self.dt_portrait(kind) {
-            draw_texture_ex(&tex, r.x, r.y, WHITE, DrawTextureParams { dest_size: Some(vec2(r.w, r.h)), ..Default::default() });
+            super::sharp::draw(&tex, r.x, r.y, WHITE, DrawTextureParams { dest_size: Some(vec2(r.w, r.h)), ..Default::default() });
             return;
         }
         let sky = match team {
@@ -228,9 +228,14 @@ impl Assets {
     /// Draw an item icon filling the square at (x, y).
     pub fn draw_item(&self, item: ItemId, x: f32, y: f32, size: f32) {
         let custom = self.custom_sprites().then(|| self.item_sprites.get(&item).cloned()).flatten();
+        let is_custom = custom.is_some();
         if let Some(tex) = custom.or_else(|| self.dt_item_icon(item)) {
             let params = DrawTextureParams { dest_size: Some(vec2(size, size)), ..Default::default() };
-            draw_texture_ex(&tex, x, y, WHITE, params);
+            if is_custom {
+                draw_texture_ex(&tex, x, y, WHITE, params);
+            } else {
+                super::sharp::draw(&tex, x, y, WHITE, params);
+            }
             return;
         }
         let (fill, letter) = item_token(&self.content, item);
@@ -247,15 +252,16 @@ impl Assets {
         let ring = team_color(team);
         let dt_portrait = || self.dt_portrait(kind);
         let custom = self.custom_sprites().then(|| self.sprites.get(&kind).cloned()).flatten();
+        let is_custom = custom.is_some();
         if let Some(tex) = custom.or_else(dt_portrait) {
             draw_circle(cx, cy + size * 0.38, size * 0.4, Color { a: 0.5, ..ring });
-            draw_texture_ex(
-                &tex,
-                cx - size / 2.0,
-                cy - size / 2.0,
-                WHITE,
-                DrawTextureParams { dest_size: Some(vec2(size, size)), ..Default::default() },
-            );
+            let params = DrawTextureParams { dest_size: Some(vec2(size, size)), ..Default::default() };
+            let (x, y) = (cx - size / 2.0, cy - size / 2.0);
+            if is_custom {
+                draw_texture_ex(&tex, x, y, WHITE, params);
+            } else {
+                super::sharp::draw(&tex, x, y, WHITE, params);
+            }
             return;
         }
         let (fill, letter) = token(&self.content, kind);

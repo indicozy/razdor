@@ -119,12 +119,36 @@ pub fn set_uniforms(m: &Material, tex: &Texture2D, params: &DrawTextureParams) {
     m.set_uniform("Scale", draw_scale(tex_size, params));
 }
 
+razdor::local! {
+    /// How many blend materials (`chrome::additive` and the like) are set around the draw.
+    static BLEND_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// Runs `draw` with a blend material set by the caller (`chrome::with_material`). Sharp draws
+/// inside it are plain: their own material would replace the blend, and the blend's shader
+/// does not sample sharp yet.
+pub fn in_blend<R>(draw: impl FnOnce() -> R) -> R {
+    struct Leave;
+    impl Drop for Leave {
+        fn drop(&mut self) {
+            BLEND_DEPTH.with(|d| d.set(d.get() - 1));
+        }
+    }
+    BLEND_DEPTH.with(|d| d.set(d.get() + 1));
+    let _leave = Leave;
+    draw()
+}
+
+fn in_blend_now() -> bool {
+    BLEND_DEPTH.with(|d| d.get() > 0)
+}
+
 /// `draw_texture_ex` with sharp sampling: the same placement and parameters, each original
-/// pixel drawn as a crisp square. Every call is its own draw (the uniforms change per draw),
-/// so do not call it inside another material's block (`chrome::additive` and the like): this
-/// draw ends by restoring the default material, not the outer one.
+/// pixel drawn as a crisp square. Every call is its own draw (the uniforms change per draw).
+/// Inside a blend material ([`in_blend`]) it is the plain draw.
 pub fn draw(tex: &Texture2D, x: f32, y: f32, color: Color, params: DrawTextureParams) {
-    match material() {
+    let material = if in_blend_now() { None } else { material() };
+    match material {
         Some(m) => {
             set_uniforms(&m, tex, &params);
             gl_use_material(&m);
@@ -132,6 +156,22 @@ pub fn draw(tex: &Texture2D, x: f32, y: f32, color: Color, params: DrawTexturePa
             gl_use_default_material();
         }
         None => draw_texture_ex(tex, x, y, color, params),
+    }
+}
+
+/// `draw_mesh` with sharp sampling, for a mesh whose texture is drawn at `scale` screen pixels
+/// per texel on each axis (the swaying trees: their atlas quad). Same blend rule as [`draw`].
+pub fn draw_mesh_sharp(mesh: &Mesh, scale: Vec2) {
+    let material = if in_blend_now() { None } else { material() };
+    match (material, mesh.texture.as_ref()) {
+        (Some(m), Some(tex)) => {
+            m.set_uniform("TexSize", vec2(tex.width(), tex.height()));
+            m.set_uniform("Scale", scale.abs());
+            gl_use_material(&m);
+            draw_mesh(mesh);
+            gl_use_default_material();
+        }
+        _ => draw_mesh(mesh),
     }
 }
 

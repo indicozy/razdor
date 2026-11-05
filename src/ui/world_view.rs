@@ -1110,7 +1110,7 @@ pub(super) fn draw_wrapped(tex: &Texture2D, dest: Rect, src: Vec2, src_size: Vec
         let mut dx = 0.0;
         while dx < src_size.x - 0.01 {
             let wid = (tw - u).min(src_size.x - dx);
-            draw_texture_ex(
+            super::sharp::draw(
                 tex,
                 dest.x + dx * k.x,
                 dest.y + dy * k.y,
@@ -1290,7 +1290,7 @@ fn draw_leaning(texture: &Texture2D, src: Rect, at: Vec2, size: Vec2, lean: f32)
             vertex(at.x, at.y + size.y, u0, v1),
         ]);
         m.texture = Some(texture.clone());
-        draw_mesh(&m);
+        super::sharp::draw_mesh_sharp(&m, vec2(size.x / src.w, size.y / src.h));
     });
 }
 
@@ -1316,7 +1316,7 @@ fn draw_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera) {
             draw_leaning(&atlas.texture, r, at, size, lean);
             return;
         }
-        draw_texture_ex(&atlas.texture, at.x, at.y, WHITE, DrawTextureParams { dest_size: Some(size), source: Some(r), ..Default::default() });
+        super::sharp::draw(&atlas.texture, at.x, at.y, WHITE, DrawTextureParams { dest_size: Some(size), source: Some(r), ..Default::default() });
         return;
     }
     let s = cam.scale;
@@ -1363,7 +1363,7 @@ fn draw_building(l: &Location, art: Option<&DtArt>, cam: &Camera, outlined: bool
                 }
             });
         }
-        draw_texture_ex(&atlas.texture, at.x, at.y, WHITE, params);
+        super::sharp::draw(&atlas.texture, at.x, at.y, WHITE, params);
     } else {
         let (w, h) = (l.size.0 as f32 * cam.scale, (l.size.1 as f32 * cam.cell_size().y).max(cam.scale * 0.8));
         let wall = match l.kind {
@@ -1820,7 +1820,7 @@ fn draw_route(game: &Game, path: &[Tile], cam: &Camera) {
         match &arrows {
             Some(a) => {
                 let (w, h) = (a[dir].width() * zoom, a[dir].height() * zoom);
-                draw_texture_ex(&a[dir], c.x - w / 2.0, c.y - h / 2.0, Color::new(v, v, v, 1.0), DrawTextureParams { dest_size: Some(vec2(w, h)), ..Default::default() });
+                super::sharp::draw(&a[dir], c.x - w / 2.0, c.y - h / 2.0, Color::new(v, v, v, 1.0), DrawTextureParams { dest_size: Some(vec2(w, h)), ..Default::default() });
             }
             None => {
                 draw_circle(c.x, c.y, 3.5, Color::new(0.0, 0.0, 0.0, 0.5));
@@ -3222,7 +3222,7 @@ fn draw_clash_marks(view: &mut MapView, cam: &Camera, now: f64) {
         };
         let c = cam.cell_centre(*tile);
         let s = cam.cell_size().x * 1.5;
-        draw_texture_ex(&tex, c.x - s / 2.0, c.y - s / 2.0, Color { a, ..WHITE }, DrawTextureParams { dest_size: Some(vec2(s, s)), ..Default::default() });
+        super::sharp::draw(&tex, c.x - s / 2.0, c.y - s / 2.0, Color { a, ..WHITE }, DrawTextureParams { dest_size: Some(vec2(s, s)), ..Default::default() });
     }
 }
 
