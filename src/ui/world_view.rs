@@ -84,8 +84,9 @@ static ZOOM_LOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 pub const ZOOM_RANGE: (f32, f32) = (0.4, 2.0);
 
 /// The wheel's, pinch's and +/- keys' highest zoom (Razdor's, the owner's request 2026-10-30:
-/// closer for tapping on phones), above the settings' range.
-pub const ZOOM_WHEEL_MAX: f32 = 4.0;
+/// closer for tapping on phones), above the settings' range. Raised to 8 (the owner's request,
+/// 2026-11-05): closer still, for the 2.5D view.
+pub const ZOOM_WHEEL_MAX: f32 = 8.0;
 
 /// Takes the settings' map zoom and lock in (every frame).
 pub fn set_zoom_prefs(home: f32, locked: bool) {
@@ -3895,15 +3896,15 @@ mod tests {
         }
         assert!(zoom_at(1.0, s, false, lo) >= lo && step_zoom(1.0, s, 1, lo) == s + 1);
         assert_eq!(zoom_at(1.0, s, false, lo), (1.1f32.powi(s)).max(lo));
-        // In, the steps stop at the wheel's ×4 ceiling, above the settings' ×2 (the owner's request).
+        // In, the steps stop at the wheel's ×8 ceiling, above the settings' ×2 (the owner's request).
         let mut t = 0;
         for _ in 0..60 {
             t = step_zoom(1.0, t, 1, lo);
         }
-        // The top notch is the highest one still at most ×4 (×3.8 here: a notch is ×1.1).
+        // The top notch is the highest one still at most ×8 (×7.4 here: a notch is ×1.1).
         let top = zoom_at(1.0, t, false, lo);
         assert!(top <= ZOOM_WHEEL_MAX && top * 1.1 > ZOOM_WHEEL_MAX, "the top notch: {top}");
-        assert_eq!(step_zoom(1.0, t, 1, lo), t, "no step past ×4");
+        assert_eq!(step_zoom(1.0, t, 1, lo), t, "no step past ×8");
         // The settings' slider keeps its own range (×0.4 to ×2).
         assert_eq!(ZOOM_RANGE, (0.4, 2.0));
     }
@@ -3927,8 +3928,8 @@ mod tests {
 
     #[test]
     fn a_lowered_zoom_ceiling_brings_the_steps_back() {
-        // Stepped in to the ×4 ceiling at home 0.5, then the settings' zoom rises to 2.0:
-        // the steps come back so that the zoom is at most ×4 and a step out lowers it.
+        // Stepped in to the ×8 ceiling at home 0.5, then the settings' zoom rises to 2.0:
+        // the steps come back so that the zoom is at most ×8 and a step out lowers it.
         let mut s = 0;
         for _ in 0..40 {
             s = step_zoom(0.5, s, 1, ZOOM_RANGE.0);
@@ -3943,7 +3944,7 @@ mod tests {
     #[test]
     fn fit_steps_leaves_steps_in_range_alone() {
         // Home 1.0 and a floor of 0.4: the steps run from -9 (0.4 is at most 9 notches out)
-        // up to 14 (×4 is at most 14 notches in); 0 is always in range.
+        // up to 21 (×8 is at most 21 notches in); 0 is always in range.
         assert_eq!(fit_steps(1.0, 0, 0.4), 0);
         assert_eq!(fit_steps(1.0, -5, 0.4), -5);
         assert_eq!(fit_steps(1.0, -9, 0.4), -9);
@@ -3953,7 +3954,7 @@ mod tests {
         assert_eq!(fit_steps(2.0, 0, 0.4), 0);
         // Out of range: brought to the nearest limit.
         assert_eq!(fit_steps(1.0, -30, 0.4), -9);
-        assert_eq!(fit_steps(1.0, 30, 0.4), 14);
+        assert_eq!(fit_steps(1.0, 30, 0.4), 21);
         assert!(zoom_at(1.0, fit_steps(1.0, 30, 0.4), false, 0.4) <= ZOOM_WHEEL_MAX);
     }
 
