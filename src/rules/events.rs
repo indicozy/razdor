@@ -559,16 +559,13 @@ pub struct EventEngine {
     /// An event whose test holds `end_tutorial` finished (0x4ac9fc).
     #[serde(default)]
     tutorial_done: bool,
-    /// An event's window is shown: the scan stopped at it (0x4ac3b4 opens the window and
-    /// the scan returns) and goes on only when it is closed ([`EventEngine::window_closed`]:
-    /// OK → Event_Finish 0x4ab1ec → its chain or a new scan). Not saved: a loaded game
-    /// scans afresh.
-    #[serde(skip)]
-    held: bool,
-    /// The chained event of a shown event, opened when its window is closed (the chain timer
-    /// 0x4af658 that Event_Finish starts).
-    #[serde(skip)]
-    held_chain: Option<EventId>,
+    /// The event whose message window is shown. The scan stopped at it (0x4ac3b4 opens the
+    /// window and the scan returns), and the event's finish-time results wait for its OK
+    /// (0x4c206c → 0x4ab1ec): [`EventEngine::window_closed`] runs them, then its chain, then
+    /// the scan on. Saved, so a game saved with the window open shows it again after a load
+    /// and finishes the event at its OK (a save from before this field has none).
+    #[serde(default)]
+    window: Option<EventId>,
     /// An event finished in this step queued a battle (its `start_battle_with`). The scan
     /// stops there (0x4abfbc, 0x4ac248): the events after it wait for the scan that follows
     /// the battle. Set in [`EventEngine::finish`], taken by [`EventEngine::run`].
@@ -768,8 +765,7 @@ impl EventEngine {
             branch: None,
             random_digit: None,
             tutorial_done: false,
-            held: false,
-            held_chain: None,
+            window: None,
             battle_queued: false,
             named_units: Vec::new(),
             next_map: String::new(),
@@ -1201,26 +1197,25 @@ impl EventEngine {
                 // The window opens again without the question (the dialog-time results, the
                 // message); ask is set back for later firings; OK finishes.
                 self.set_event_field(id, 76, 1);
-                self.show(id, w, &mut out);
-                self.finish(id, w, &mut out, 0);
+                if !self.show(id, w, &mut out) {
+                    self.finish(id, w, &mut out, 0);
+                }
             }
         }
         self.run(w, &mut out);
         out
     }
 
-    /// The window of the shown event was closed: its chain, then the scan goes on (0x4c206c
-    /// OK → Event_Finish 0x4ab1ec → the chain timer or a new scan). Nothing when no event's
-    /// window holds the scan.
+    /// The window of the shown event was closed (OK, 0x4c206c): the event is finished (its
+    /// results, then its chain, delay or battle, 0x4ab1ec), then the scan goes on. Nothing when
+    /// no event's window holds the scan.
     pub fn window_closed(&mut self, w: &mut dyn EventWorld) -> Vec<EventOutcome> {
         let mut out = Vec::new();
-        if !std::mem::take(&mut self.held) {
+        let Some(id) = self.window.take() else {
             return out;
-        }
-        if let Some(next) = self.held_chain.take() {
-            if self.ended.is_none() {
-                self.open(next, w, &mut out, 1);
-            }
+        };
+        if self.ended.is_none() {
+            self.finish(id, w, &mut out, 0);
         }
         self.run(w, &mut out);
         out
@@ -1228,7 +1223,13 @@ impl EventEngine {
 
     /// An event's window is shown and holds the scan.
     pub fn holds_window(&self) -> bool {
-        self.held
+        self.window.is_some()
+    }
+
+    /// The event whose message window is shown, if any (the interface shows it again after a
+    /// load).
+    pub fn shown_window(&self) -> Option<EventId> {
+        self.window
     }
 
     /// The main hall's list where the hero stands (0x4beaac): the building's quests and
@@ -1250,7 +1251,7 @@ impl EventEngine {
     /// check (0x4bb798), then the events run on.
     pub fn take(&mut self, w: &mut dyn EventWorld, id: EventId) -> Vec<EventOutcome> {
         let mut out = Vec::new();
-        if self.pending.is_none() && self.ended.is_none() && self.hall(w).contains(&id) {
+        if self.pending.is_none() && self.ended.is_none() && self.window.is_none() && self.hall(w).contains(&id) {
             // The list's check (with apply) cleared the ask of an event without texts.
             let e = self.ev(id);
             if e.conditions.confirm_question != 0 && e.question.is_empty() && e.message.is_empty() {
@@ -1269,7 +1270,7 @@ impl EventEngine {
     /// ended, or no event has that number.
     pub fn force(&mut self, w: &mut dyn EventWorld, id: EventId) -> Vec<EventOutcome> {
         let mut out = Vec::new();
-        if self.pending.is_none() && self.ended.is_none() && !self.held && self.event(id).is_some() {
+        if self.pending.is_none() && self.ended.is_none() && self.window.is_none() && self.event(id).is_some() {
             let e = self.ev(id);
             if e.conditions.confirm_question != 0 && e.question.is_empty() && e.message.is_empty() {
                 self.set_event_field(id, 76, 0);
@@ -1291,7 +1292,7 @@ impl EventEngine {
             return;
         }
         let mut fired = 0;
-        while self.pending.is_none() && self.ended.is_none() && !self.held {
+        while self.pending.is_none() && self.ended.is_none() && self.window.is_none() {
             let Some(id) = self.first_eligible(w) else { break };
             if fired == LOOP_GUARD {
                 out.push(EventOutcome::LoopGuard);
@@ -1310,7 +1311,7 @@ impl EventEngine {
                 return;
             }
         }
-        if self.pending.is_none() && !self.held {
+        if self.pending.is_none() && self.window.is_none() {
             // The scan goes idle (0x4ac369): a last fired in the future is set back to now,
             // so the guard only holds within one scan; the meeting is over (0x4ac3a0).
             let now = w.now();
@@ -1463,33 +1464,30 @@ impl EventEngine {
     }
 
     /// Open an event (0x4a8ae8): with "ask" set its question waits; else the dialog-time
-    /// results are applied and it is finished (the original finishes at OK, or at once for a
-    /// silent event; nothing changes in between).
+    /// results are applied (see [`Self::show`]) and the event is finished, at once for a silent
+    /// event, or at its window's OK when it has a message (0x4c206c; nothing changes between).
     fn open(&mut self, id: EventId, w: &mut dyn EventWorld, out: &mut Vec<EventOutcome>, depth: usize) {
         if self.ev(id).conditions.confirm_question != 0 {
             self.pending = Some(id);
             out.push(EventOutcome::Question(id));
             out.extend(self.met_army_window(id));
-        } else {
-            self.show(id, w, out);
+        } else if !self.show(id, w, out) {
             self.finish(id, w, out, depth);
         }
     }
 
     /// The window without the question (0x4a8ae8, ask clear): the answer is cleared and the
     /// dialog-time results applied in the original's order: artifacts gained, artifacts lost,
-    /// units added, units removed, spells learned.
-    fn show(&mut self, id: EventId, w: &mut dyn EventWorld, out: &mut Vec<EventOutcome>) {
+    /// units added, units removed, spells learned. A message opens the window (0x4ac3b4): the
+    /// scan stops there and the event's finish waits for its OK. Returns whether a window
+    /// opened; the caller finishes the event when none did.
+    fn show(&mut self, id: EventId, w: &mut dyn EventWorld, out: &mut Vec<EventOutcome>) -> bool {
         self.st_mut(id).set_answer_byte(0);
         let e = self.ev(id).clone();
         out.push(EventOutcome::Fired { event: id, message: !e.message.is_empty() });
         if !e.message.is_empty() {
             out.extend(self.met_army_window(id));
-        }
-        // A message opens the window (0x4ac3b4) and the scan stops there; an event without
-        // one is finished at once and the scan goes on.
-        if !e.message.is_empty() {
-            self.held = true;
+            self.window = Some(id);
         }
         let r = &e.results;
         // Opcode 6 gives the four artifacts to a unit instead (c278e8).
@@ -1550,6 +1548,7 @@ impl EventEngine {
                 w.learn_spell(s);
             }
         }
+        !e.message.is_empty()
     }
 
     /// Deactivate `army` (0x496900): it also stops being the army met, so the meet-army
@@ -1688,10 +1687,7 @@ impl EventEngine {
             return;
         }
         let next = r.chained_event;
-        if self.held && self.event(next).is_some() {
-            // Its window is up: the chain waits for it to be closed.
-            self.held_chain = Some(next);
-        } else if depth < CHAIN_DEPTH && self.event(next).is_some() {
+        if depth < CHAIN_DEPTH && self.event(next).is_some() {
             // A chained event is opened as it is: its done flag, window, guard, once flag,
             // class, place and conditions are not checked (0x4ab1ec, 0x4af658).
             self.open(next, w, out, depth + 1);
@@ -2950,6 +2946,97 @@ mod tests {
         assert_eq!(w.log, vec![Fx::Gold(5)]);
     }
 
+    /// G1 (0x4c206c → 0x4ab1ec, the exe's OK): a message event's finish-time results (gold, a
+    /// flag, an army's activation) apply at its OK, not when its window opens. A Yes that opens
+    /// the window waits the same way. The dialog-time results (artefacts, units, spells) are
+    /// applied when the window opens (events.md §6.1, §7.1).
+    #[test]
+    fn a_message_events_finish_time_results_apply_at_ok() {
+        let mut shown = titled(with_message(global()), "+DONE");
+        shown.results.gold = 5;
+        shown.results.activate_armies[0] = 2;
+        let mut g = engine(vec![shown]);
+        let mut w = MockWorld::new();
+        assert_eq!(fired(&g.tick(&mut w)), vec![1]);
+        assert!(g.holds_window());
+        assert!(w.log.is_empty() && w.gold == 0, "nothing applied while the window is up: {:?}", w.log);
+        assert!(!g.flag("DONE"), "the flag waits for the OK too");
+        read(&mut g, &mut w, Vec::new());
+        assert_eq!(w.log, vec![Fx::Gold(5), Fx::Activate(2)]);
+        assert!(g.flag("DONE"));
+        assert!(!g.holds_window());
+
+        let mut asked = asking(with_message(global()));
+        asked.results.gold = 5;
+        let mut g = engine(vec![asked]);
+        let mut w = MockWorld::new();
+        assert_eq!(g.tick(&mut w), vec![EventOutcome::Question(1)]);
+        let out = g.answer(&mut w, true);
+        assert_eq!(fired(&out), vec![1]);
+        assert!(g.holds_window() && w.log.is_empty(), "a Yes opens the window; its gold waits for OK");
+        read(&mut g, &mut w, out);
+        assert_eq!(w.log, vec![Fx::Gold(5)]);
+    }
+
+    /// G1: the next event of the same scan sees a message event's flag only after the OK, as
+    /// the scan stops at the open window (0x4ac3b4). A silent event's flag is set at once, so the
+    /// next event of the same scan sees it in that scan.
+    #[test]
+    fn the_scan_after_a_message_event_sees_its_results_after_ok() {
+        let mut first = titled(with_message(global()), "+Foo");
+        first.results.gold = 5;
+        let second = titled(global(), "=Foo");
+        let mut g = engine(vec![first, second]);
+        let mut w = MockWorld::new();
+        assert_eq!(fired(&g.tick(&mut w)), vec![1], "the second event waits for the window");
+        assert_eq!(w.gold, 0);
+        assert_eq!(fired(&g.window_closed(&mut w)), vec![2], "after OK it sees Foo");
+        assert_eq!(w.gold, 5);
+
+        let mut silent = titled(global(), "+Foo");
+        silent.results.gold = 5;
+        let mut g = engine(vec![silent, titled(global(), "=Foo")]);
+        let mut w = MockWorld::new();
+        assert_eq!(fired(&g.tick(&mut w)), vec![1, 2], "a silent event's flag is set at once");
+        assert_eq!(w.log, vec![Fx::Gold(5)]);
+    }
+
+    /// G1: a message event with a battle starts the battle at its OK (0x4ab51b's battle branch
+    /// runs in the finish), not when the window opens.
+    #[test]
+    fn a_message_events_battle_starts_at_its_ok() {
+        let mut shown = with_message(global());
+        shown.results.start_battle_with = 2;
+        let mut g = engine(vec![shown]);
+        let mut w = MockWorld::new();
+        assert_eq!(fired(&g.tick(&mut w)), vec![1]);
+        assert!(w.log.is_empty(), "no battle while the window is up");
+        read(&mut g, &mut w, Vec::new());
+        assert_eq!(w.log, vec![Fx::Battle(2)]);
+    }
+
+    /// G1: a game saved with a message window open shows it again after a load, and the
+    /// window's finish-time results apply at its OK; the event does not fire a second time.
+    #[test]
+    fn a_window_saved_open_applies_its_results_at_ok_after_a_load() {
+        let mut shown = with_message(global());
+        shown.results.gold = 5;
+        let mut g = engine(vec![shown.clone()]);
+        let mut w = MockWorld::new();
+        assert_eq!(fired(&g.tick(&mut w)), vec![1]);
+        let mut loaded: EventEngine = serde_json::from_str(&serde_json::to_string(&g).unwrap()).unwrap();
+        loaded.restore_statics(engine(vec![shown])).unwrap();
+        assert!(loaded.holds_window());
+        assert_eq!(loaded.shown_window(), Some(1));
+        w.now = 10;
+        assert!(fired(&loaded.tick(&mut w)).is_empty(), "the scan waits for the window");
+        assert!(w.log.is_empty());
+        read(&mut loaded, &mut w, Vec::new());
+        assert_eq!(w.log, vec![Fx::Gold(5)]);
+        assert!(tick_at(&mut loaded, &mut w, 20).is_empty(), "fired once");
+        assert_eq!(w.log, vec![Fx::Gold(5)]);
+    }
+
     /// РК1's ending on the "No" path: a local event chains the victory event, whose own
     /// conditions (a Yes to the herald) do not hold. It still fires, and so does a used-up
     /// once-event chained again.
@@ -3292,9 +3379,11 @@ mod tests {
         w.place = Some(Place::Building(6));
         assert!(g.tick(&mut w).is_empty(), "a quest in a building waits in the main hall");
         assert_eq!(g.hall(&w), vec![1]);
+        // The journal entry is made at the window's OK (0x4ab1ec), not when it opens.
         let out = g.take(&mut w, 1);
+        assert_eq!(out, vec![EventOutcome::Fired { event: 1, message: true }]);
+        let out = read(&mut g, &mut w, out);
         assert_eq!(out, vec![EventOutcome::Fired { event: 1, message: true }, EventOutcome::QuestAdded(1)]);
-        read(&mut g, &mut w, Vec::new());
         w.now = 10;
         let out = g.take(&mut w, 1);
         read(&mut g, &mut w, out);
@@ -3376,6 +3465,8 @@ mod tests {
         assert!(g.take(&mut w, 2).is_empty(), "not on offer");
         let out = g.take(&mut w, 1);
         assert_eq!(fired(&out), vec![1]);
+        assert_eq!(w.gold, 0, "the rumour's gold waits for its window's OK");
+        read(&mut g, &mut w, out);
         assert_eq!(w.gold, 75);
         assert!(g.hall(&w).is_empty(), "a once-rumour is heard once");
         w.place = None;

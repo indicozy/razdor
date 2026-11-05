@@ -34,7 +34,6 @@ Razdor fixes bugs that made the original behave other than intended. For example
 ## Known differences still being fixed
 
 * **AI ships** sail about twice as fast as in the original.
-* **Event messages:** gold, experience and other rewards arrive when the window opens, not at OK.
 
 ## Razdor's additions
 

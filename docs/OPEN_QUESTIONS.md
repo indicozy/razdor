@@ -15,13 +15,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   a map yet. Settle: check the original's behaviour for such a join (what the first unit is after it) and,
   if it differs, make the hero a position or a flag instead of the kind.
 
-- **G1 reverted: which message-event results wait for OK** (2026-11-06). The fix that moved every
-  finish-time result of a message event to the window's OK (0x4c206c → 0x4ab1ec) broke tests built from
-  the original's recordings: `rules::replay::rk1_church_windows_come_in_the_originals_order` (the original
-  shows the army *before* OK: window 9, show 9, ok 9), `difftest::rk7_the_kings_squad_greets_only_with_the_step_flag_set`,
-  `difftest::rk2_the_peasant_offers_and_the_mines`, plus fog, world-load and max_bench checks. So part of the
-  finish runs at open in the original. Reverted before 1.3.12; redo with the recordings as the reference
-  (backlog 1539). G2's test and G7's evidence were reverted with it (1540, 1541).
 - **The editor's event window reads "на 24 часов", but the game plays a 24 h window as 1,440 hours** (2026-11-05, the editor-guide screenshot pass, docs/reference/editor-guide.md, chapters 5 and 6). The unit is settled (see Settled): the editor stores hours × 60 and the game reads the stored number as hours, so the label and the played length differ by a factor of 60. Razdor plays the game's length (`src/rules/events.rs:625`). Every event duration in the 24 base-install maps is a multiple of 60 (values 0, 720, 780, 1440, 1500, 1860, 2160, 2400), so the shipped data was made under this rule, and the guide's 24 h recipes (6.4, 6.5, 6.18) play 60 days. Known difference in the editor's label and stored unit, not in the rule. Owner's call: relabel the editor's control (the value shown, or its unit), or keep it and document it in the editor help. Settled by that decision.
 
 - **Known difference: a new army starts with garrison strength 50 in Razdor, 0 in the original** (2026-11-05, the editor-guide screenshot pass; gap E9 in docs/reference/editor-guide.md). The original's new-army record is zero except position, id, model, style and experience correction (dt-editor records §3). The guide's army windows (pp. 56 and 63) show 0 and say that armies do not defend castles by default. Razdor sets 50 in `src/editor/defaults.rs:89`. Shipped maps use 50 on 82 of 94 feudal armies (earlier data), so the default is not what makes those maps. Owner's call on the editor default. Settled by that decision.
@@ -79,17 +72,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   found; whether any code branches on model 9 for a point is not checked here. Not changed in this pass (no code
   changes); fix the comment with the next change to `dtm.rs`.
 
-- **Message events: the finish results apply when the window opens, not at OK** (2026-11-05, the
-  Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G1). `EventEngine::open` calls
-  `show` and then `finish` (`src/rules/events.rs:1455`; the Yes path at `:1194-1195`), so gold,
-  mana, XP, activations and deactivations, flags, the journal, relative starts and the victory latch
-  apply while the window is up. The battle, spell and delay also start under it (`:1655`, `:1658`,
-  `:1661`). The exe applies the finish results at OK (0x4c206c calls 0x4ab1ec) and queues the
-  battle, spell and delay until then. The spec's "When results apply" row said "Matches" and now
-  says it differs. Settled by the guide's scenario S2 (gold and an army activation unchanged while
-  the window is up, both applied at OK) and by what the player sees in between. Fix: move the finish
-  to the OK path; the owner decides whether a change to when map results land goes on the
-  experimental track.
 - **Lanterns, a shown army, a spell and a delay: do they end the scan like a battle does?** (2026-11-08, the
   parity pass, P3). The exe's scan (0x4abfbc) loops over silent events only (0x674966: no texts, spell, battle,
   lanterns, show army, delay), so by that definition all of these end it. `events.md §2` and the spec's table say
@@ -809,6 +791,7 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Settled
 
+- **Message events: the finish results apply at the window's OK, not when it opens** (2026-11-05, the Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G1; settled 2026-11-09, parity pass P1, backlog 1539; a parity fix with no toggle, as the parity pass lists it). `EventEngine::show` applies the dialog-time results (artefacts, units, spells) when the window opens. `finish` (flags, XP, gold, mana, activations, patrol, show army, lanterns, the journal, relative starts, victory or defeat, then the battle, spell, delay and chain) runs at the window's OK (`EventEngine::window_closed`). The open window is saved as `window`, so a loaded game shows it again and finishes it at the OK. The first try (2026-11-06, reverted) broke three tests. Each one's cause, settled against the recordings: (a) `rules::replay::rk1_church_windows_come_in_the_originals_order` asserted Razdor's open-time order. The original's order is window 9, OK 9 (EventFinish 8, the lantern's flight), then window 10 (EventOpen 9): FINDINGS §22, Frida step 49. The test now says so, and the flight comes before the chained window. (b) `difftest::rk7_the_kings_squad_greets_only_with_the_step_flag_set`: the recorded clock and RNG after the wait, with event 4's window still up, match with the finish at OK, and matched with it at open too. So no draw up to that point in the recording depends on the finish's timing. The failing check was `events_done` (times fired, which only the finish sets), so the test now checks that event 4 is not done while its window is up and is done after its OK. Its gold is the result that waits (FINDINGS §26). (c) `difftest::rk2_the_peasant_offers_and_the_mines`: the hall lists event 5 only once event 4's flag is set, and that flag is set at 4's OK, so the test reads 4's window before the next entry, as the player does. Knock-on test changes, each with its reason: a start-time window keeps its gold for the OK (`every_shipped_map_loads_into_a_world` no longer compares gold and squad then); the fog check asks for the hero's disc of sight, not a count of 150, because the start event's lanterns may be dark until its OK; the max_bench battle set pairs armies by strength at load, and the start state now follows G1, so 10 battle ids changed. The other 78 battles have the same numbers (both sides, Max against the original's AI and against the focus-fire player), and the baseline gains the 10 new ids.
 - **The Evolution Mod's exe: FirstShot's value** (2026-11-07; settled 2026-11-07, parity pass P8). Read in the mod's own exe (sha256 `b09ae259…`): at c26e95 the turn-1 test and the bonus byte 0x24 add 0x3c (+60) to the current initiative, with no building-defence term. Community 1.2 keeps +30 (+30 with building defence ≥ 10). `OLDER_FIRST_SHOT_INITIATIVE` (`src/rules/battle.rs`); test `older_first_shot_is_a_flat_60_on_turn_1_with_or_without_building_defence`. Commit b10656c1. The smoke-test install carries the 1.2 exe, not the mod's (evolution-mod.md §0).
 - **Death-school vampirism on magic and a negative value** (2026-10-20, #1046; settled 2026-11-07, parity pass P7). The magic strike's vampirism is the original's Death branch (0x48ac7e): the caster gains vampirism × damage / 100 (the damage before the cap at the target's HP), capped at its max HP, only when vampirism > 0 (a signed test: a negative value does nothing), when the caster's school is Death and the target is neither Undead nor Elemental. Razdor's code (`src/rules/battle.rs`, "Vampirism on magic") does this; battle.md row 15 is Matches on both paths. Docs only.
 - **Two battle events in one tick** (2026-11-05; settled 2026-11-08, parity pass P3, gap G2). A battle-only event

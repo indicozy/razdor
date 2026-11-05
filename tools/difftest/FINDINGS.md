@@ -575,7 +575,9 @@ ai.md §8.1). Campaign round (РК7 started without carry-over, run `c1-РК7`).
   and as his last walk left it while he stands or waits; a wait tick takes the contacts as a
   step does (the snap, the meeting's events, a battle).
 - After the fix the РК7 run is 12 of 13 steps equal (10 before; the one left is the event's
-  gold before its OK, window timing); the other recorded runs as before.
+  gold before its OK, window timing); the other recorded runs as before. Settled 2026-11-09
+  (G1, backlog 1539): the event's gold is applied at its window's OK, as the original does
+  (events.md §7.2), and the rk7 difftest checks that.
 
 ## 27. The off-screen battles' static sides keep their old records
 

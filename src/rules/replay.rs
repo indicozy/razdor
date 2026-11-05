@@ -530,18 +530,24 @@ fn rk1_church_windows_come_in_the_originals_order() {
             seen.push(format!("show {}", s.event.unwrap_or(0)));
         }
         take(d.g.release_unshown_window(!windows.is_empty()), &mut windows, &mut seen);
-        // A window is read a few frames after it opens.
+        // A window is read a few frames after it opens. Its OK finishes the event (0x4c206c →
+        // 0x4ab1ec): the lantern's flight comes first, then the chained event's window
+        // (FINDINGS §22, Frida step 49: EventFinish 8, EventOpen 9).
         if frame % 10 == 9 && !windows.is_empty() {
             let id = windows.remove(0);
             seen.push(format!("ok {id}"));
-            take(d.g.event_window_closed(), &mut windows, &mut seen);
+            let events = d.g.event_window_closed();
+            for s in std::mem::take(&mut d.g.shown) {
+                seen.push(format!("show {}", s.event.unwrap_or(0)));
+            }
+            take(events, &mut windows, &mut seen);
         }
         if d.has_fired(10) && windows.is_empty() && !d.g.moving() && d.g.held.is_empty() {
             break;
         }
     }
     let church: Vec<&str> = seen.iter().map(String::as_str).skip_while(|s| *s != "window 9" && *s != "show 9" && *s != "window 10").collect();
-    assert_eq!(church, ["window 9", "show 9", "ok 9", "window 10", "ok 10"], "{seen:?}");
+    assert_eq!(church, ["window 9", "ok 9", "show 9", "window 10", "ok 10"], "{seen:?}");
 }
 
 /// РК1 both ways: the Yes to the herald and the No (the herald waits at the inn; the inn's

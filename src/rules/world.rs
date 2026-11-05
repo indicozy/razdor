@@ -2254,10 +2254,12 @@ mod real_maps {
                 totals.0 += ok;
                 totals.1 += n;
                 let g = Game::from_scenario(c.clone(), &s, class);
-                // Opening events may change the preset (a companion joins, gold is given).
-                if g.script().is_some_and(|e| e.total_fired() == 0) {
-                    assert_eq!(g.squad.len(), 1 + h.troops.len());
-                    assert_eq!(g.gold, h.gold);
+                // Opening events may change the preset (a companion joins, gold is given). A
+                // window open at the start has already given its dialog-time units, and its
+                // gold comes at its OK (G1, 0x4ab1ec), so such a start is not compared.
+                if g.script().is_some_and(|e| e.total_fired() == 0 && !e.holds_window()) {
+                    assert_eq!(g.squad.len(), 1 + h.troops.len(), "{} {class:?}", m.name);
+                    assert_eq!(g.gold, h.gold, "{} {class:?}: window {:?}", m.name, g.event_window());
                 }
             }
         }

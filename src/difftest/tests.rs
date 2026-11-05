@@ -580,7 +580,8 @@ fn rk7_the_kings_squad_greets_only_with_the_step_flag_set() {
         r#"{"op":"new_game","map":"РК7-Конец","hero":1}
 {"op":"ok"}
 {"op":"click_map","x":59,"y":152}
-{"op":"wait","hours":1}"#,
+{"op":"wait","hours":1}
+{"op":"ok"}"#,
     )
     .unwrap();
     let (states, notes) = replay(Source::Install(&dt), &actions).unwrap();
@@ -588,6 +589,11 @@ fn rk7_the_kings_squad_greets_only_with_the_step_flag_set() {
     assert_eq!((s.hero.x, s.hero.y, s.clock, s.rng), (59, 152, 624_557_568, 1_587_391_380), "{notes:?}");
     let s = &states[3];
     assert_eq!((s.clock, s.rng), (624_557_598, 2_572_407_127), "{notes:?}");
+    // The meeting's window stops the wait and is still up: the event's finish (its gold, its
+    // flag) waits for the window's OK (0x4c206c → 0x4ab1ec, G1), so it has not fired its
+    // finish yet. The recorded clock and draws are the same either way.
+    assert!(!s.events_done.contains(&4), "{:?}", s.events_done);
+    let s = &states[4];
     assert!(s.events_done.contains(&4), "{:?}", s.events_done);
 }
 
@@ -987,6 +993,11 @@ fn rk2_the_peasant_offers_and_the_mines() {
         g.take_hall_entry(id).unwrap();
         if g.pending_question().is_some() {
             g.answer_question(true);
+        }
+        // The player reads the entry's window: its OK finishes the event (its flag, its gold;
+        // 0x4c206c → 0x4ab1ec), and the hall's next entry is checked only after it (G1).
+        while g.event_window().is_some() {
+            g.event_window_closed();
         }
         g.drain_events();
     }

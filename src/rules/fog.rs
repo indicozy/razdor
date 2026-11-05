@@ -428,9 +428,13 @@ mod real_maps {
                 let here = g.tile();
                 let n = g.fog.explored_count();
                 assert!(g.fog.enabled && g.fog.explored(here), "{prefix} {class:?}");
-                // At least the hero's own circle (8–10 cells each way), far from the whole map.
-                assert!(n >= 150 && n < (w * h / 4) as usize, "{prefix} {class:?}: {n} of {}", w * h);
+                // The hero's own disc of sight (the original's stamp, `within`) is explored, and
+                // the map is not. A start event's lanterns are lit at its window's OK (G1), so
+                // they may still be dark here: the disc is the floor, not a count.
                 let r = g.sight_radius();
+                let disc: Vec<Tile> = (-r..=r).flat_map(|dy| (-r..=r).map(move |dx| (here.0 + dx, here.1 + dy))).filter(|&t| within(here, t, r) && g.world.map.in_bounds(t)).collect();
+                assert!(disc.iter().all(|&t| g.fog.explored(t)), "{prefix} {class:?}: the hero's disc");
+                assert!(n >= disc.len() && n < (w * h / 4) as usize, "{prefix} {class:?}: {n} of {}", w * h);
                 for (dx, dy) in [(r, 0), (-r, 0), (0, r), (0, -r)] {
                     let t = (here.0 + dx, here.1 + dy);
                     assert!(!g.world.map.in_bounds(t) || g.fog.explored(t), "{prefix} {class:?}: {t:?}");
