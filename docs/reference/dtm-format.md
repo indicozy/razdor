@@ -305,7 +305,7 @@ archetype suffixes like `#рыцарь`, appear inside the strings.
 | 0 | u16 | x | C |
 | 2 | u16 | y | C |
 | 4 | u8 | point id (1-based). Events refer to points by this id. | C |
-| 5 | u8 | model: 8 = active lantern (reveals an area), 9 = event point or inactive lantern | C |
+| 5 | u8 | model: 8 = lantern (the radius dialog; reveals an area), 9 = event point (the point window, with the "active at start" flag), 10 = AI target point (the target window; not checked against the shipped maps) | C |
 | 6 | u16 | running serial number. Events do not reference it. | L |
 | 8 | u16[10] | local events attached to the point (the editor allows 5) | C |
 | 28 | u16[4] | target priorities for green, blue, yellow and red | L (always 0) |
@@ -341,8 +341,6 @@ condition next to it. The editor holds at most 5000 events.
 | 11 | i16 squad count (at most 12). The sign encodes ≥ or ≤: the editor's switch stores the value, or its negation when set to ≤. The same holds for 13, 19, 21 and 25. |
 | 13 | i16 army strength |
 | 15 | u8 army must be inactive |
-| 16 | u8 army whose patrol changes (a result) |
-| 17 | i8 patrol delta. The community patch overloads this as an opcode; see its guide. |
 | 18 | u8 check "current stats" |
 | 19 | i16 level |
 | 21 | i16 gold |
@@ -376,6 +374,8 @@ condition next to it. The editor holds at most 5000 events.
 
 | off | field |
 |---|---|
+| 16 | u8 army whose patrol changes |
+| 17 | i8 patrol change: the signed delta (-120..120 in steps of 5, records §9.1). The community patch overloads this as an opcode; see its guide. |
 | 77 | u16 relative event |
 | 79 | u16 relative event delay, in hours |
 | 81 | u8 spell to activate on the player |

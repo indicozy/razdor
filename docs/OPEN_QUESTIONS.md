@@ -8,6 +8,48 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **Picture window title: the original shows "Произошло событие!" on a picture event** (2026-11-05, the
+  editor-guide screenshot pass, docs/reference/editor-guide.md, chapter 5, gap G13). The screens of pp. 132-135
+  show that fixed title for an event with a picture. A plain event's window shows the event's name (pp. 91,
+  101). Razdor uses the event name for every window (`src/ui/story.rs:41`). A known difference, and a UI change,
+  so the owner decides. Settled by the exe's picture-window title path (not traced), then the owner's call.
+
+- **Group colour range: dtm says 0-5, the editor offers 14 colours** (2026-11-05, the editor-guide screenshot
+  pass, docs/reference/editor-guide.md, chapter 5, 5.1-5.2). `dtm-format.md §9` (byte 0) says 0-5. The event
+  form's group combo (`docs/notes/mapedit/out/forms/TINFOEVENTS.dfm.txt`, ComboBoxGrupp) has 14 items, the
+  colour routine near `docs/notes/mapedit/out/decomp.c:239890` indexes a 14-entry table and wraps above 13, and
+  p. 74 shows 14 colours. The save routine that writes byte 0 is not traced, so the stored range is unknown.
+  The game does not use the byte (dtm §9: editor only). Settled by tracing the save routine, or by a shipped
+  map whose events hold a group above 5. Then fix `dtm-format.md §9` byte 0.
+
+- **The "many times" default for a new event** (2026-11-05, the editor-guide screenshot pass,
+  docs/reference/editor-guide.md, chapter 5, 5.5). Records §9.2 and §11 say a new event starts "many times" when
+  the editor's option "New events repeat" is on, and that the shipped ini has it on. The screens show the box
+  unchecked on new events (pp. 73, 86), and p. 85 says events are once by default. The option's key was not
+  found by name in the install's `DTMapEdit.Ini`, `Rus_MapEdit.ini`, `_Global.ini` or `Rus_DiscordTimes.ini`.
+  Settled by the option's loader (records §11, 0x55d7b0) and the shipped value, or by a new event in the editor.
+
+- **Editor day 0: "the last day of the previous month" against the exe's clamp** (2026-11-05, the
+  editor-guide screenshot pass, docs/reference/editor-guide.md, chapter 5, 5.5). The guide (p. 84) says day 0 of
+  the calendar is the last day of the previous month. Records §8.4 give day 0 as -1,440 minutes, and the exe
+  clamps a negative start to 0 (0x4a7b80; `events.md §3.3`). If the clamp holds, day 0 is the scenario start,
+  not the previous month. The settled part (a window still open at the start fires) is in the Settled list.
+  Settled by a live test: set a day-0 start in a scenario and see the first day the event opens, or by reading
+  the editor's date write against records §8.4.
+
+- **Knight battle bonus after a class change: the guide's wording and our spec differ** (2026-11-05, the
+  editor-guide screenshot pass, docs/reference/editor-guide.md, chapter 5, 5.12). The guide's wording differs
+  between pp. 124 and 125: p. 125 says the bonus is tied to the character, not the type.
+  `battle.md` ("Which army is a knight army") says the flag comes from the first unit's type (0x49855c). Whether
+  a knight hero's bonus stays after an event's class change is not traced. Settled by tracing 0x49855c and the
+  knight percentage's use after a class change, or in game: an event makes a knight an archmage, then a battle.
+
+- **dtm.rs: the point-model comment is stale (known difference, comment only)** (2026-11-05, the editor-guide
+  screenshot pass). `src/dt/dtm.rs:945` says model 9 is "event point or inactive lantern". `dtm-format.md §8`
+  now follows records §10: 8 lantern, 9 event point, 10 AI target point. The comment is the only difference
+  found; whether any code branches on model 9 for a point is not checked here. Not changed in this pass (no code
+  changes); fix the comment with the next change to `dtm.rs`.
+
 - **Message events: the finish results apply when the window opens, not at OK** (2026-11-05, the
   Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G1). `EventEngine::open` calls
   `show` and then `finish` (`src/rules/events.rs:1455`; the Yes path at `:1194-1195`), so gold,
@@ -44,13 +86,16 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   for any army, so a dead army shows its death cell. The inactive case (the guide says the start
   cell) is not traced. Settled by a trace of the inactive path in the exe; then reveal the record's
   cell for a dead army.
-- **Picture 202 (the met army's leader) is not drawn** (2026-11-05, the Hristos editor-guide
-  analysis, docs/reference/editor-guide.md, gap G5). `src/ui/story.rs:53-63` treats any picture
-  value other than 0, 200 and 201 as a unit id, so 202 gives no picture. The meeting caption
-  (`story.rs:133-137`) shows only the leader's name. The editor offers portraits below 200 and the
-  two stock pictures (`src/ui/editor/events.rs:99-100`). `events.md §6.3` lists 202 as the met
-  army's leader. Settled by checking the shipped maps for 202; if one uses it, draw the leader's
-  picture.
+- **Picture 202 (the met army's leader) is not drawn, and the editor cannot pick it** (2026-11-05, the
+  Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G5; the screenshot pass). `src/ui/story.rs:53-63`
+  treats any picture value other than 0, 200 and 201 as a unit id, so 202 gives no picture. The meeting
+  caption (`story.rs:133-137`) shows only the leader's name. The editor's list (`src/ui/editor/events.rs:98-101`)
+  holds none, 200, 201 and the portraits below 200. The original's list also holds the install's global images
+  from id 200 up (records §9.1, dt-editor), and the p. 132 screen has a scroll bar. `events.md §6.3` lists 202 as
+  the met army's leader. Settled by finding the install's global images and checking the shipped maps for 202
+  and any other id above 201. The install's `.ini` files have no picture keys under that name, so the source is
+  not located yet. If a shipped map uses 202, draw the leader's portrait and add the id to the editor's list.
+
 - **Event scan: a chain-depth cap and the idle-reset placement** (2026-11-05, the Hristos
   editor-guide analysis, docs/reference/editor-guide.md, gaps G6 and G7). `CHAIN_DEPTH = 32`
   (`src/rules/events.rs:34`, used at `:1672`) drops a deeper chain without a trace; the exe has no
@@ -162,18 +207,21 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   default. Settled by the editor's new-army record initializer (the placement path) and by how
   `ai.rs:2603` uses the value (0 means none).
 - **The interval N: hours, or the editor's N × 60?** (2026-11-05, the Hristos editor-guide analysis,
-  docs/reference/editor-guide.md, chapter 5, 5.5). `events.md §3.4` and the exe reading of 0x4a7b80
-  disagree on the length of a window of N. The exe reading: the window ends at the day's start plus
-  the stored value × 60 minutes. So for a repeating event any stored N of 1 or more covers the whole
-  cycle day, and only 0 cuts it short; the 6.17 hourly relative calls depend on the same window. The
-  guide says N hours (its N = 6 example opens for six hours). Settled by a shipped map with N other
-  than 0 or 24, and a live window at N = 6.
+  docs/reference/editor-guide.md, chapter 5, 5.5; the screenshot pass). `events.md §3.4` and the exe reading of
+  0x4a7b80 disagree on the length of a window of N. The exe reading: the window ends at the day's start plus
+  the stored value × 60 minutes. So for a repeating event any stored N of 1 or more covers the whole cycle
+  day, and only 0 cuts it short; the 6.17 hourly relative calls depend on the same window. The guide says N
+  hours (p. 83; its N = 6 example opens for six hours). The screens (pp. 83, 86) show the box as "на N часов"
+  with the default 24 and do not settle the length. Settled by a shipped map with N other than 0 or 24, and a
+  live window at N = 6.
+
 - **A text-only event with a duration of 0** (2026-11-05, the Hristos editor-guide analysis,
-  docs/reference/editor-guide.md, chapter 5, 5.5). The guide says it never happens. The exe reading
-  (0x4a7b80): a stored 0 counts as one hour, so the event fires once in the first hour of each
-  eligible day, and `events.md §3.2` and `§3.4` agree with that reading. The guide's "crash for
-  other results" is not traced. Settled by a live test: a text-only event with duration 0, checked
-  hour by hour.
+  docs/reference/editor-guide.md, chapter 5, 5.5; the screenshot pass). The guide says it never happens
+  (p. 84; the text only, no screen). The exe reading (0x4a7b80): a stored 0 counts as one hour, so the event
+  fires once in the first hour of each eligible day, and `events.md §3.2` and `§3.4` agree with that reading.
+  The guide's "crash for other results" is not traced. Settled by a live test: a text-only event with duration
+  0, checked hour by hour.
+
 - **An army activated and deactivated in one tick, and the related crashes** (2026-11-05, the
   Hristos editor-guide analysis, docs/reference/editor-guide.md, chapters 5, 6, 7 and 9). The guide
   says it crashes (5.12.4, cited in 6.13-6.15 and 7.5), and cites a Community fix that is not in
@@ -209,12 +257,14 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   unnamed unit, not the hero; for the added unit, the event's wage kind). Settled by the code
   numbers the dispatcher at 0x4961d0 compares, against `events.rs:78-86`.
 - **The wage kind of an event-moved unit, and named units' pay** (2026-11-05, the Hristos
-  editor-guide analysis, docs/reference/editor-guide.md, chapters 5 and 7, 5.8 and 7.16). `events.md
-  §7.1`: a unit taken from an army keeps its whole record, wage kind included; an event unit is kind
-  3 (never paid, 0x4a94b3). The guide says units moved from an army pay and named ones never do; its
-  7.16 leans the other way. `script.rs:653-665` copies the record into a full army. Settled by
-  tracing the wage kind through the record copy (0x4a8fe5) and the wage code (0x496310), or in game:
-  a named unit moved out of the hero's army, then its wage.
+  editor-guide analysis, docs/reference/editor-guide.md, chapters 5 and 7, 5.8 and 7.16; the screenshot pass).
+  `events.md §7.1`: a unit taken from an army keeps its whole record, wage kind included; an event unit is kind
+  3 (never paid, 0x4a94b3). The guide's text (p. 104) says units moved from an army pay and named ones never
+  do; its 7.16 leans the other way. The screens (pp. 96, 104, 119) show unit costs in the combos, not pay, so
+  they do not settle it. `script.rs:653-665` copies the record into a full army. Settled by tracing the wage
+  kind through the record copy (0x4a8fe5) and the wage code (0x496310), or in game: a named unit moved out of
+  the hero's army, then its wage.
+
 - **The hire row: does an empty first slot hide the hire list?** (2026-11-05, the Hristos
   editor-guide analysis, docs/reference/editor-guide.md, chapter 3 and 7.4). The guide says a
   building with an empty first hire slot heals but does not hire. The game's tab test opens the tab
@@ -782,6 +832,12 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   should grow (it needs room the list gives up) is the owner's call, a Razdor choice.
 
 ## Settled
+
+- **The flag test is a substring, not a prefix** (2026-11-05, the editor-guide screenshot pass,
+  docs/reference/editor-guide.md, chapter 5, 5.11). The guide says the flag test matches a prefix (SAD matches
+  SADDLE, p. 117). The exe's test is a substring anywhere in the flag string (0x4a8a22; `events.md §5`), so AB
+  matches XAB too. The guide's rule is narrower than the exe's; the screens do not decide it. Razdor matches the
+  exe (`src/rules/events.rs:1005-1013`). Settled by the exe trace recorded in the editor-guide analysis.
 
 - **Mana carry-over is the header's byte 1** (2026-11-05, docs only). The campaign hand-over's
   "Gods' favour" (the mana) is header byte 1 (`saves-data.md §6`, the same as the other carry-over

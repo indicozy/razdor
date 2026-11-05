@@ -194,35 +194,41 @@ points where the exe is clear. The largest group: a text-less event still applie
 artefacts and spells in the exe, and the guide says it does not. The interval model is contested and
 open (the window length); the sections below mark it.
 
+Page numbers are the guide's printed PDF pages, checked against the page images. The screens are the
+guide's own, so they show what the guide shows, not what the exe does; where the two differ, the verdict
+follows the exe.
+
 ### 5.1-5.2 Theory, archetype, group (pp. 70-74)
 
 | Guide p. | Fact | Verdict | Evidence |
 |---|---|---|---|
-| 70-71 | Each tick the first event whose conditions hold fires; the check restarts from the top; "exact" for global events, "formal" for others | confirms | `events.md §1-2`; the scan at 0x4abfbc restarts after each taken event |
-| 72 | The event name shows in the game when the event opens a window, and in the editor list | confirms | `events.md §6.3` |
-| 72-73 | Text after `#` in an event name (and an army name) is an editor comment | confirms for events; army names not traced | `events.md §6.3` |
-| 73 | The group colour is editor-only | confirms | `dtm-format.md §9` (byte 0) |
-| 73-74 | The hero archetype (all, knight, archmage, ranger) restricts an event to one class; a class change does not change which archetype's events fire | confirms | `events.md §3.6` (byte 10); the start class is read at load (`start_class`) |
-| 74 | Deleting the last event crashes the editor | unclear, editor-only | Not traced |
+| 72 | Each tick the first event whose conditions hold fires; the check restarts from the top; "exact" for global events, "formal" for others | confirms | `events.md §1-2`; the scan at 0x4abfbc restarts after each taken event |
+| 73 | The event name is the window title for plain text windows (p. 91, the Yes/No dialog; p. 101, a text example). For picture events the title is the fixed text "Произошло событие!" (pp. 132-135). The diary shows the name too (p. 81) | plain windows confirm; the picture title is a known difference (G13, OQ "Picture window title") | `events.md §6.3`; Razdor uses the event name as the title of every window (`src/ui/story.rs:41`) |
+| 73 | Text after `#` in an event name (and an army name) is an editor comment | confirms for events; army names not traced | `events.md §6.3` |
+| 74 | The group colour is editor-only | confirms (editor-only); the stored range is open (OQ "Group colour range") | `dtm-format.md §9` (byte 0) |
+| 74 | The group colour drop-down offers 14 colours | the editor agrees with the screen (14 items); dtm says 0-5. Open (OQ "Group colour range") | `docs/notes/mapedit/out/forms/TINFOEVENTS.dfm.txt` (ComboBoxGrupp, 14 items); the colour routine near `decomp.c:239890` indexes a 14-entry table and wraps above 13 |
+| 73-74 | The hero archetype (all, knight, archmage, ranger) restricts an event to one class; a class change does not change which archetype's events fire. The screen labels index 2 as the archmage, so the dfm caption "Священник" is stale | confirms | `events.md §3.6` (byte 10); the start class is read at load (`start_class`) |
+| 74 | Deleting the last event crashes the editor (the guide's warning); the editor forces a new event on opening | the guide states it; editor behaviour not traced | |
 
-### 5.3 Global and local events (pp. 75-77)
+### 5.3 Global and local events (pp. 75-78)
 
 | Guide p. | Fact | Verdict | Evidence |
 |---|---|---|---|
-| 75 | A global event can happen anywhere on the map once its conditions hold | confirms | `events.md §2` step 1 |
-| 75-76 | A local event is tied to a point or a building and runs only when the hero is on that point or inside that building, with its conditions checked then | confirms | `events.md §2` steps 2-3 (points on every step; buildings only on entry, 0x4ed434) |
-| 76 | Points accept events of any type, but "only local events and quests" work there; rumours do not | guide wrong (exe says any type) | The point loop at 0x4abfbc takes every listed event whatever its type. `events.md §2` step 2 agrees with the exe |
-| 77 | Buildings accept any type, but only local events, quests and rumours work | confirms | `events.md §2` step 3 and §10 |
-| 77-78 | Some buildings do not support rumours and quests properly; villages and shipyards run them as local events | confirms | `events.md §2` step 3, §10 (villages and shipyards fire every listed event on entry) |
-| 77 | A point's "active at start" flag is only a lamp switch | confirms | `events.md §2` step 2 (the active byte is not tested) |
+| 76 | A global event can happen anywhere on the map once its conditions hold | confirms | `events.md §2` step 1 |
+| 76 | A local event is tied to a point or a building and runs only when the hero is on that point or inside that building, with its conditions checked then | confirms | `events.md §2` steps 2-3 (points on every step; buildings only on entry, 0x4ed434) |
+| 77 | Points accept events of any type, but "only local events and quests" work there; rumours do not | guide wrong (exe says any type) | The point loop at 0x4abfbc takes every listed event whatever its type. `events.md §2` step 2 agrees with the exe |
+| 78 | Buildings accept any type, but only local events, quests and rumours work | confirms | `events.md §2` step 3 and §10: buildings fire local events; quests and rumours are listed in the main hall and taken by the player |
+| 82 | Some buildings do not support rumours and quests properly. The guide defers to chapter 3.3 for which ones, and does not name villages or shipyards here | the village and shipyard detail is not in the guide's chapter 5 pages; removed from this table. Our rule stands: villages and shipyards fire every listed event on entry | `events.md §2` step 3, §10 |
+| 77 | A point's "active at start" flag is only a lamp switch | confirms | `events.md §2` step 2 (the point's active byte is not tested; it only lights a lantern at load) |
 
 ### 5.4 Quests and rumours (pp. 78-81)
 
 | Guide p. | Fact | Verdict | Evidence |
 |---|---|---|---|
-| 78 | A rumour or quest in a building is shown in the main hall once its conditions hold, and does nothing until taken | confirms | `events.md §10` |
-| 79 | Taking a quest adds a diary entry, recorded even when it is a repeat | confirms | `events.md §7.2` step 11, §10 |
-| 79-80 | A rumour's results run after the player takes it; a rumour with a price has a negative gold result | confirms | `events.md §10` (rumours have no price field) |
+| 78-79 | A rumour or quest in a building is listed in the main hall once its conditions hold, and does nothing until taken. Quests in the hall list are highlighted blue; rumours are not (pp. 79-80) | confirms | `events.md §10` (the hall list passes the full check) |
+| 80 | Taking a quest adds a diary entry, recorded even when it is a repeat | confirms | `events.md §7.2` step 11, §10 |
+| 81 | The diary entry shows the event name, its text and the time elapsed, e.g. "less than an hour" | the screen agrees; the diary text not checked in code | |
+| 79 | A rumour's results run after the player takes it. The guide's "rumour with a price has a negative gold result" is not on pp. 70-138; removed from this table | the results rule confirms; there is no price claim to check | `events.md §10` (rumours have no price field) |
 | 80 | A quest on a point fires like a local event when the hero stands on it | confirms | `events.md §2` step 2 |
 | 80-81 | A quest or rumour whose conditions fail is not listed at all | confirms | `events.md §10` (the hall list needs the full check) |
 
@@ -230,149 +236,175 @@ open (the window length); the sections below mark it.
 
 | Guide p. | Fact | Verdict | Evidence |
 |---|---|---|---|
-| 82 | The activation time defaults to the scenario start | confirms | `dtm-format.md §9` (offset 2, minutes) |
-| 82-83 | "N hours": the window is N hours from the start, repeated every P days; defaults N = 24, P = 1 | open | Our `events.md §3.4` and the exe reading disagree on the window's length. The exe reading (0x4a7b80): the window ends at day start + stored × 60 minutes. So for a repeating event any stored N of 1 or more covers the whole cycle day, and only N = 0 cuts it short. The guide's N = 6 example would open all day. OQ "interval N" |
+| 83 | The activation time defaults to the scenario start. The date field reads "hh h dd.mm.yyyy", the hour first (pp. 70, 83, 86) | confirms | `dtm-format.md §9` (offset 2, minutes); the field format is the screen's |
+| 83 | "на N часов" (N hours): the window is N hours from the start, repeated every P days; defaults N = 24, P = 1 | open | Our `events.md §3.4` and the exe reading disagree on the window's length. The exe reading (0x4a7b80): the window ends at day start + stored × 60 minutes. So for a repeating event any stored N of 1 or more covers the whole cycle day, and only N = 0 cuts it short. The guide's N = 6 example would open all day. OQ "interval N" |
 | 83 | N = 24 with P = 2 gives an event available every other day | confirms the cycle | `events.md §3.4` (only even cycle days open) |
-| 83 | The editor's day count starts at zero; day 0 means the last day of the previous month | unclear | The editor date formula gives day 0 as -1,440 minutes, which the exe clamps to 0 |
-| 84 | A start date before the scenario start means the event never fires on its own | guide wrong (exe says it fires) | Exe 0x4a7b80: a negative start is set to 0; only start > now is refused. A window still open at the start fires. Our `events.md §3.3` matches the exe. Settled (Settled list). The editor-side date is not checked |
+| 84 | Day 0 of the calendar is the last day of the previous month (the guide's text) | open | The editor date formula gives day 0 as -1,440 minutes; the exe clamps a negative start to 0 (0x4a7b80). OQ "Editor day 0" |
+| 84 | A start date before the scenario start means the event never fires on its own | guide wrong (exe says it fires) | Exe 0x4a7b80: a negative start is set to 0; only start > now is refused. A window still open at the start fires. Our `events.md §3.3` matches the exe. Settled (Settled list) |
 | 84 | Interval settings do not apply to local events; local events are available any time after their start | guide wrong (exe says they apply) | 0x4a7b80 has no event-kind test; the scan 0x4abfbc passes point and building candidates through it. Local events obey P and N |
-| 83-84 | A text-only event with N = 0 never happens | open | The exe reading: a stored 0 counts as one hour, so the event fires once in the first hour of each eligible day. Our `events.md §3.2` and `§3.4` agree with that reading. The guide's "never" needs a live test. OQ "N = 0" |
+| 84 | A text-only event with N = 0 never happens | open | The exe reading: a stored 0 counts as one hour, so the event fires once in the first hour of each eligible day. Our `events.md §3.2` and `§3.4` agree with that reading. The guide's "never" needs a live test. OQ "N = 0" |
 | 84 | The same N = 0 event with a victory or defeat result still fires; with other results the game crashes | unclear | Not traced |
 | 85 | A multi-time event with a text window blocks movement, because the window reopens every tick | confirms | `events.md §3.2` (with a duration, the next tick fires again) |
 | 85 | A multi-time event fires any number of times within each interval | confirms | `events.md §3.4` |
-| 84-85 | All events fire once per playthrough unless "many times" is set | confirms | `events.md §3.5` (byte 141) |
+| 85 | Events fire once per playthrough unless "many times" is set | confirms the rule; the default of the box is open | `events.md §3.5` (byte 141). The "many times" box is unchecked on new events on the screens (pp. 73, 86), and records §9.2 say the default follows the shipped ini's option. OQ "many times default" |
 
-### 5.6 Events and the player (pp. 85-91)
-
-| Guide p. | Fact | Verdict | Evidence |
-|---|---|---|---|
-| 85-86 | Dependencies: "happened with yes", "happened with no", "not happened" | confirms | `events.md §4` rows 2-4 |
-| 86-87 | Victory over an enemy: the listed armies were beaten by the player and have not come back | confirms | `events.md §4` row 1; the mark is cleared on activation (§7.2 step 7) |
-| 87-88 | "Meeting an army" works only for global events and interrupts the battle start | confirms | `events.md §9`; the global-only limit follows from the scan (contacts read no point, buildings are scanned on entry only) |
-| 88-89 | Current stats: level, gold, squads, strength, "1 HP", holiness and mana | gold, squads, strength and 1 HP confirm | `events.md §4` rows 9, 11 |
-| 89 | "Current level" checks the hero's experience (the guide calls it a bug to avoid) | guide wrong (exe says level) | 0x4a80b4 → 0x4a7b40 compares the hero's 0-based level (`experience.md`). Razdor's `hero_level` is level − 1 (`script.rs:440-450`), which matches |
-| 89 | "Squads" counts the characters in the player's squad, at most 12, the hero included | new, exe | 0x4a8102 and the count block: the count is the number of unit records, dead units included (the guide does not say this) |
-| 89-90 | "Holiness and mana" is not processed and is always true | guide wrong (exe compares mana) | The vanilla numeric block at 0xc2875e compares mana with the same counter the finish adds to. Razdor's `mana()` (`script.rs:448-450`) matches |
-| 90 | The answer box: a question shows Yes and No; No counts as happened and runs no results; Yes runs them; "repeat after yes" decides whether a once-event closes | confirms | `events.md §6.2` (byte 149, xor) |
-| 90-91 | The table of once, many-times and repeat-after-yes combinations | confirms | `events.md §6.2` (once = 149 xor 1; a No uses up a once-event) |
-
-### 5.7-5.8 Events and heroes (pp. 92-97)
+### 5.6 Events and the player (pp. 85-92)
 
 | Guide p. | Fact | Verdict | Evidence |
 |---|---|---|---|
-| 92-93 | Building ownership per slot: the player, not the player, or a faction (codes 2-5); the player always belongs to the green team | ownership confirms (`events.md §4` row 12); the green team unclear | |
-| 94 | Artefacts held: for AI armies only the worn items count, so an item no unit can use never passes | confirms | `events.md §4` row 14 |
-| 95 | Named units: the check ignores the unit's class, and dead units do not count | confirms | `events.md §4` row 13 (codes 1 and 6 search living units) |
-| 96 | "Army already beaten by anyone": dead, whether beaten by the player or by an army, until it is revived | confirms | `events.md §4` row 7 |
-| 96-97 | Active and inactive: active is on the map, inactive is off the map; a dead army can be either | outcome confirms; a destroyed army fails the active test in the exe | `events.md §4` rows 5-6 |
-| 97 | "Army in its home building": an army with no home is never in it, so the event never fires | guide wrong (exe says it passes) | 0x4a7b80 tests the home only when it is above 0 (army +0x16B3). Our `script.rs:520-522` matches the exe |
-| 97 | A deactivated army standing in its home building still counts as there | unclear | Not traced |
+| 87 | Dependencies: "happened with yes", "happened with no", "not happened"; two slots each | confirms | `events.md §4` rows 2-4 |
+| 88 | Victory over an enemy: two slots; the listed armies were beaten by the player and have not come back | confirms | `events.md §4` row 1; the drop-downs show the army name, its leader and its value in dollars, e.g. "Army 1 / One Hero (40$)" |
+| 89 | "Meeting an army" works only for global events and interrupts the battle start | confirms | `events.md §9`; the global-only limit follows from the scan (contacts read no point, buildings are scanned on entry only) |
+| 90 | Current stats, in this order on the screen: level, gold, holiness and mana, squad count, army strength, then a 1-HP checkbox. Each numeric box has a grey toggle between "at least" and "at most", and the screens show "at most" | gold, squads, strength and 1 HP confirm; the toggle is new (screens) | `events.md §4` rows 9, 11; the sign of the stored value encodes the toggle (`dtm-format.md §9`, Conditions, offset 11) |
+| 90 | "Current level" checks the hero's experience (the guide calls it a bug to avoid) | guide wrong (exe says level) | 0x4a80b4 → 0x4a7b40 compares the hero's 0-based level (`experience.md`). Razdor's `hero_level` is level − 1 (`script.rs:440-450`), which matches. The blue note on p. 90 says both this field and the mana one are repaired in an unofficial community fix (chapter 7.17); the exe checked here is the vanilla build, which has the bug |
+| 90 | "Squads" counts the characters in the player's squad, at most 12, the hero included | the guide states it (p. 90); the exe adds that dead units are counted, which the guide does not say | 0x4a8102 and the count block: the count is the number of unit records, dead units included |
+| 90 | "Holiness and mana" is not processed and is always true | guide wrong (exe compares mana). The unofficial-fix note above applies too | The vanilla numeric block at 0xc2875e compares mana with the same counter the finish adds to. Razdor's `mana()` (`script.rs:448-450`) matches |
+| 91 | The answer box: a question shows Yes and No (the dialog's title is the event name and its buttons are "Да" and "Нет"); No counts as happened and runs no results; Yes runs them; "repeat after yes" decides whether a once-event closes | confirms | `events.md §6.2` (byte 149, xor) |
+| 92 | The table of once, many-times and repeat-after-yes combinations | confirms | `events.md §6.2` (once = 149 xor 1; a No uses up a once-event) |
+
+### 5.7-5.8 Events and heroes (pp. 92-98)
+
+| Guide p. | Fact | Verdict | Evidence |
+|---|---|---|---|
+| 94 | Building ownership per slot: the player, not the player, or a faction (codes 2-5). The test is on the building's faction byte, whoever holds the building | confirms, and the spec stands: the routine at 0x4a815a tests the faction byte (offset 337) for codes 2-5, and the owner-army byte (offset 292) for codes 1 and 6. The guide's "must belong" is loose wording | `events.md §4` row 12; `dtm-format.md §9` (row 33); `docs/notes/out/decomp.c` (FUN_004a815a) |
+| 94 | The player always belongs to the green team | the guide states it (p. 94); not checked in code | |
+| 95 | Artefacts held: for AI armies only the worn items count, so an item no unit can use never passes | confirms | `events.md §4` row 14 |
+| 96 | Named units: the check ignores the unit's class, and dead units do not count | confirms | `events.md §4` row 13 (codes 1 and 6 search living units) |
+| 97 | "Army already beaten by anyone": dead, whether beaten by the player or by an army, until it is revived | confirms | `events.md §4` row 7 |
+| 98 | Active and inactive: active is on the map, inactive is off the map; a dead army can be either | outcome confirms; a destroyed army fails the active test in the exe | `events.md §4` rows 5-6 |
+| 98 | "Army in its home building": an army with no home is never in it, so the event never fires | guide wrong (exe says it passes) | 0x4a7b80 tests the home only when it is above 0 (army +0x16B3). Our `script.rs:520-522` matches the exe |
+| 98 | A deactivated army standing in its home building still counts as there | the guide says so (p. 98); the exe test is not traced | |
 
 ### 5.8 Results, first group (pp. 98-108)
 
 | Guide p. | Fact | Verdict | Evidence |
 |---|---|---|---|
-| 98-99 | Text limits of about 25,000 characters (Cyrillic) and 16,000 (Latin); more crashes | unclear | Not traced; Razdor sets no limit |
-| 99-100 | Colour markers at the start of a paragraph: `*` white, `@` orange, `\|` blue; the last marker in a paragraph wins | guide wrong (exe has a fixed order) | 0x48e1cc tests the markers in the order `*`, `\|`, `@`, and each one found sets the colour, so `@` beats `\|`, which beats `*`, wherever they stand. Razdor matches (`src/dt/markup.rs:102-103`) |
+| 100 | Text limits of about 25,000 characters (Cyrillic) and 16,000 (Latin); more crashes | unclear | Not traced; Razdor sets no limit |
+| 100 | Colour markers at the start of a paragraph: `*` white, `@` orange, `\|` blue; the last marker in a paragraph wins | guide wrong (exe has a fixed order) | 0x48e1cc tests the markers in the order `*`, `\|`, `@`, and each one found sets the colour, so `@` beats `\|`, which beats `*`, wherever they stand. Razdor matches (`src/dt/markup.rs:102-103`) |
 | 100 | `^` centres a paragraph and combines with colour; put it first | confirms | 0x48e1cc (the `^` is found anywhere in the line and removed); `markup.rs:111` |
-| 100 | `#HERONAME` is replaced by the hero's name | confirms | `events.md §6.4` |
+| 100 | `#HERONAME` is replaced by the hero's name. On a screen (p. 101) an unnamed hero shows as "(Нет имени)" | the replacement confirms (`events.md §6.4`); the placeholder text is unclear: the screen may be the editor's preview, and Razdor uses the class name for an unnamed hero (`game.rs:1007`) | |
 | 100 | A text of only markers shows an empty window | confirms | `events.md §6.3` (markers are stripped) |
-| 100-101 | Functions that need text (gold, mana, units, artefacts, spells, picture) do not work on an event without text; the event still counts as happened | guide wrong (exe applies them) | Artefacts and units: 0x4a8ae8 → 0x4a8e66, no message test. Spells: 0x4a9b75 → 0x49c144. Gold and mana: at the finish (0x4ab51b, +0x55 and +0x59), no text test. Razdor matches (`src/rules/events.rs:1575-1583`). The text-dependent case is a Yes on a question with an empty message, which skips the dialog-time results (`events.md §6.2`) |
-| 101 | Experience works without text; a negative value does nothing to XP | experience confirms; negative part unclear | `events.md §7.2` step 4 |
-| 101 | Gold does not work without text | guide wrong | 0x4ab51b (gold at +0x55, no text test); `events.rs:1575-1583` |
-| 101 | Mana does not work without text | guide wrong | 0x4ab51b (+0x59 into the mana counter, no text test) |
-| 102 | Units added: at most four slots; a named unit keeps its name; units taken from an army keep their state | confirms | `events.md §7.1`; `dtm-format.md §9` (offsets 97-104) |
-| 102-103 | Units added by an event need no payment; units moved from an army pay; named units never pay | open | Our `events.md §7.1`: an event unit is wage kind 3 (never paid); a unit taken from an army keeps its whole record, wage kind included. The guide's split is not settled. OQ "wage kind" |
-| 103 | A full army (12 units) loses its weakest unit (not the leader) when an event adds one | confirms | `events.md §7.1` |
-| 104 | Spells learned: a full book does not block a spell; the guide says it does | guide wrong (exe has no capacity test) | 0x49c144 has a duplicate check (0x49c100) and no capacity test; the spell is appended. Razdor matches (`events.md §7.1`) |
-| 104 | A spell the hero already knows is not learned again | confirms | `events.md §7.1` (duplicate check) |
-| 105 | Artefacts gained: up to four per event; a full pack loses the item silently | confirms | `events.md §7.1`; `dtm-format.md §9` (113-116) |
-| 106 | Delay: the hero waits N hours; a text event or a battle can interrupt the wait | delay confirms; interruption unclear | `events.md §8` (delay ticks; a chain behind a delay is dropped) |
-| 106-107 | A subordinate event that also delays does not run | confirms | `events.md §8` |
-| 107 | A rumour that delays keeps its window open after OK; Esc closes it | unclear (UI) | Not traced |
-| 107-108 | "Complete quest" removes the quest from the diary; completing a quest never taken is harmless; it works without text | confirms | `events.md §7.2` step 12, §10 |
+| 102 | Functions that need text (gold, mana, units, artefacts, spells, picture) do not work on an event without text; the event still counts as happened | guide wrong (exe applies them) | Artefacts and units: 0x4a8ae8 → 0x4a8e66, no message test. Spells: 0x4a9b75 → 0x49c144. Gold and mana: at the finish (0x4ab51b, +0x55 and +0x59), no text test. Razdor matches (`src/rules/events.rs:1575-1583`). The text-dependent case is a Yes on a question with an empty message, which skips the dialog-time results (`events.md §6.2`) |
+| 101 | Experience works without text; a negative experience change does nothing to XP (p. 103) | experience confirms; negative part unclear | `events.md §7.2` step 4 |
+| 103 | Gold does not work without text (p. 103) | guide wrong | 0x4ab51b (gold at +0x55, no text test); `events.rs:1575-1583` |
+| 103 | Mana does not work without text (p. 103) | guide wrong | 0x4ab51b (+0x59 into the mana counter, no text test) |
+| 104 | Units added: at most four slots; a named unit keeps its name; units taken from an army keep their state | confirms | `events.md §7.1`; `dtm-format.md §9` (offsets 97-104) |
+| 104 | Units added by an event need no payment; units moved from an army pay; named units never pay | open | Our `events.md §7.1`: an event unit is wage kind 3 (never paid); a unit taken from an army keeps its whole record, wage kind included. The guide's split is not settled. OQ "wage kind" |
+| 104 | A full army (12 units) when an event adds one: our rule dismisses the weakest of units 2-12. The guide does not say "weakest"; its pp. 119-120 rule ("the last unit that joined is replaced") is for squads moved by a result, a different case | our rule stands (`events.md §7.1`, exe 0x4a8fe5); no guide verdict | `events.md §7.1` |
+| 105 | Spells learned: a full book does not block a spell; the guide says it does | guide wrong (exe has no capacity test) | 0x49c144 has a duplicate check (0x49c100) and no capacity test; the spell is appended. Razdor matches (`events.md §7.1`) |
+| 105 | A spell the hero already knows is not learned again | confirms | `events.md §7.1` (duplicate check) |
+| 106 | Artefacts gained: up to four per event. The guide's "a full pack loses the item silently" is not on pp. 105-106; removed from this table | the four-slot limit confirms; our own rule (lost silently, 0x49a85c) stands and is not a guide claim | `events.md §7.1`; `dtm-format.md §9` (113-116) |
+| 107 | Delay: the hero waits N hours; a text event or a battle can interrupt the wait | delay confirms; interruption unclear | `events.md §8` (delay ticks; a chain behind a delay is dropped) |
+| 107 | A subordinate event that also delays does not run | confirms | `events.md §8` |
+| 107 | A rumour that delays keeps its window open after OK; Esc closes it | the guide states it (p. 107); not traced | |
+| 108 | "Complete quest" removes the quest from the diary; completing a quest never taken is harmless; it works without text | confirms | `events.md §7.2` step 12, §10 |
 
 ### 5.9-5.10 Subordinate and relative events (pp. 108-111)
 
 | Guide p. | Fact | Verdict | Evidence |
 |---|---|---|---|
-| 108-109 | A subordinate event fires at once, unconditionally, once per call, even if it happened before; it is many-times automatically | confirms | `events.md §8`; `dtm-format.md §9` (offset 140 is the done flag) |
+| 109 | A subordinate event fires at once, unconditionally, once per call, even if it happened before; it is many-times automatically | confirms | `events.md §8`; `dtm-format.md §9` (offset 140 is the done flag) |
 | 109 | A subordinate event is reached only through a chain | confirms | `events.md §3.1` |
-| 109-110 | A relative call moves the target's start to now + hours (the 30-hour example works) | confirms | `events.md §7.2` step 19; 0x4ab51b writes the start field as now + 60 × delay |
-| 110 | "Relative time only" stores the year-2000 start; the event has no start of its own until a relative call sets one | confirms | `dtm-format.md §9` (offset 2 = 1,036,800,000); `events.md §3.3` |
+| 110 | A relative call moves the target's start to now + hours (the 30-hour example works) | confirms | `events.md §7.2` step 19; 0x4ab51b writes the start field as now + 60 × delay |
+| 110 | "Relative time only" stores the year-2000 start; the editor shows the default 01.01.2000 (screen). The event has no start of its own until a relative call sets one | confirms | `dtm-format.md §9` (offset 2 = 1,036,800,000); `events.md §3.3` |
+| 109-110 | Subordinate and relative-only are mutually exclusive in the editor: setting one clears and greys the other (screens) | editor behaviour, new (screens); the stored fields are as `dtm-format.md §9` | |
 | 110 | A relative call on a repeating event sets its duration N to 24 hours; P stays | guide wrong (exe writes the start only) | 0x4ab51b writes the start field only; Razdor matches (`src/rules/events.rs:1640-1643`) |
-| 110-111 | A relative call with 0 hours re-bases the start and the event is then checked normally; a subordinate call runs at once | confirms | `events.md §7.2` step 19, §8 |
-| 111 | A rumour with no text that calls a relative event with 0 hours shows visual artefacts inside buildings | unclear | Not traced (chapter 9, 9.8) |
+| 111 | A relative call with 0 hours re-bases the start and the event is then checked normally; a subordinate call runs at once | confirms | `events.md §7.2` step 19, §8 |
+| 111 | A rumour with no text that calls a relative event with 0 hours shows visual artefacts inside buildings. The screen shows exactly this setup: empty rumour text, relative "Цикл слух", 0 h | unclear (not traced); chapter 9, 9.8 | |
 
 ### 5.11 Flags and counters (pp. 111-117)
 
 | Guide p. | Fact | Verdict | Evidence |
 |---|---|---|---|
-| 112 | Set a flag with `+NAME`, clear it with `-NAME`, test `NAME` (true) and `/NAME` (false); default false | confirms | `events.md §5` |
-| 112 | Flag names need at least two characters | confirms | `events.md §5`: an action of two characters or fewer does nothing |
-| 112 | Five-character names avoid the prefix bug | advice; the test is a substring, so length does not remove the trap | `events.md §5`; chapter 9, 9.16 |
-| 113 | A counter's name must end in a digit to use counter logic | guide wrong | The `^` form works on any name; the engine writes the digit itself (`+X^` appends X and 1, or raises the byte after X). Exe 0x4ab2a3 (the `^` branch) |
-| 113-114 | `+NAME^` creates the counter at 1 or raises it by 1; `-NAME^` lowers it and removes it at 0; counters are not limited to 9 | confirms | `events.md §5` (counter form; the digit is the character after the name) |
-| 114 | Two counters with the same name: the first created one is changed by `+` and `-` | confirms | `events.md §5` (first occurrence) |
-| 114-115 | Flags and counters carry over between maps of a campaign | confirms | `events.md §5` (lifetime), §12 |
-| 114-116 | The prefix bug: a flag test matches a flag that begins with the tested name (SAD matches SADDLE) | confirms, and wider | The test is a substring anywhere in the flag string (exe 0x4a8a22): AB matches XAB too. `events.md §5` |
-| 116 | A test for a counter's absence or presence uses the name without its digit | confirms | `events.md §5` (substring test) |
+| 113 | Set a flag with `+NAME`, clear it with `-NAME`, test `NAME` (true) and `/NAME` (false); default false | confirms | `events.md §5` |
+| 113 | Flag names need at least two characters | confirms | `events.md §5`: an action of two characters or fewer does nothing |
+| 117 | Five-character names avoid the prefix bug | advice; the test is a substring, so length does not remove the trap | `events.md §5`; chapter 9, 9.16 |
+| 114 | A counter's name must end in a digit to use counter logic. The same page's "+COUNT^" screen and p. 116's "+CASTLE^" with a "CASTLE9" test show the form on names that end in a letter | guide wrong (the guide contradicts its own screens; the `^` form works on any name) | The engine writes the digit itself (`+X^` appends X and 1, or raises the byte after X). Exe 0x4ab2a3 (the `^` branch) |
+| 114-115 | `+NAME^` creates the counter at 1 or raises it by 1; `-NAME^` lowers it and removes it at 0; counters are not limited to 9 | confirms | `events.md §5` (counter form; the digit is the character after the name) |
+| 115 | Two counters with the same name: the first created one is changed by `+` and `-` | confirms | `events.md §5` (first occurrence) |
+| 115 | Flags and counters carry over between maps of a campaign | confirms | `events.md §5` (lifetime), §12 |
+| 117 | The prefix bug: a flag test matches a flag that begins with the tested name (SAD matches SADDLE). The test is in fact a substring anywhere in the flag string (AB matches XAB) | confirms, and wider. The guide's narrower "prefix" is wrong for the exe (Settled list) | The test is a substring anywhere in the flag string (exe 0x4a8a22). `events.md §5` |
+| 117 | A test for a counter's absence or presence uses the name without its digit | confirms | `events.md §5` (substring test) |
 
-### 5.12 Results, second group (pp. 117-126)
+### 5.12 Results, second group (pp. 117-127)
 
 | Guide p. | Fact | Verdict | Evidence |
 |---|---|---|---|
-| 117-118 | Take units from the player, by name or by type; "squad goes to army" moves them with XP, artefacts and health; a full target army loses its last unit | confirms | `events.md §7.1` (removal; a full target overwrites its last unit) |
-| 118 | With no room at all, nothing moves; with some room but not enough for all, none of the moved units is added | guide wrong (exe appends while there is room) | 0x4a8fe5: each unit is added while count < 12; once the army is full the copy overwrites record 12. Razdor matches (`script.rs:653-665`) |
-| 118 | A unit removed from the squad and given to an army goes there with its record | confirms | `events.md §7.1` |
+| 118 | Take units from the player, by name or by type; "squad goes to army" moves them with XP, artefacts and health; a full target army loses its last unit | confirms | `events.md §7.1` (removal; a full target overwrites its last unit) |
+| 120 | With no room at all, nothing moves; with some room but not enough for all, none of the moved units is added | guide wrong (exe appends while there is room) | 0x4a8fe5: each unit is added while count < 12; once the army is full the copy overwrites record 12. Razdor matches (`script.rs:653-665`) |
+| 119 | A unit removed from the squad and given to an army goes there with its record | confirms | `events.md §7.1` |
 | 119 | The moved unit keeps its XP, artefacts and health | confirms | `events.md §7.1` |
-| 120 | "Move to hero": the army is put next to the hero on the first passable cell, clockwise from the top left | guide wrong (exe takes the cheapest neighbour) | 0x4980d8 takes the lowest cost of the eight neighbours, ties to the first clockwise; +50,000 for a building cell, +100,000 for an occupied cell; no move when every cell costs 100,000 or more. Razdor matches (`script.rs:758-790`) |
-| 120 | An army on water moves to a hero on water only, and one on land to a hero on land | unclear | 0x4980d8 uses the hero's cost map and tests no army medium. Razdor matches the exe |
-| 120-121 | "Move to hero" leaves a phantom army on the old cell, which cannot capture or interact | new, exe; Razdor has no phantom | 0x4980d8 zeroes the old cell's logical occupant byte (+8) but not the drawn byte (+9). Razdor clears the cell correctly (`script.rs:758-790`). Whether to copy the phantom is open (OQ "phantom"; a decision) |
+| 121 | "Move to hero": the army is put next to the hero on the first passable cell, clockwise from the top left. The screen numbers the 8 candidate cells | guide wrong (exe takes the cheapest neighbour) | 0x4980d8 takes the lowest cost of the eight neighbours, ties to the first clockwise; +50,000 for a building cell, +100,000 for an occupied cell; no move when every cell costs 100,000 or more. Razdor matches (`script.rs:758-790`) |
+| 121 | An army on water moves to a hero on water only, and one on land to a hero on land | unclear | 0x4980d8 uses the hero's cost map and tests no army medium. Razdor matches the exe |
+| 121 | "Move to hero" leaves a phantom army on the old cell, which cannot capture or interact | new, exe; Razdor has no phantom | 0x4980d8 zeroes the old cell's logical occupant byte (+8) but not the drawn byte (+9). Razdor clears the cell correctly (`script.rs:758-790`). Whether to copy the phantom is open (OQ "phantom"; a decision) |
 | 121 | "Move to hero" works without text | confirms | `events.md §7.2` step 14 |
-| 121 | Taking artefacts works only with text | guide wrong | Artefacts are removed when the window opens, with no text test (0x4a8e66 → 0x49a8a8; Razdor `events.rs:1481-1493`) |
-| 122 | Activating an army puts it on its start cell, even if it was deactivated elsewhere; it keeps its troops, XP and resources | confirms | `events.md §7.2` step 7 |
-| 122 | A deactivated dead army stays dead; activating a dead army revives it early | confirms | `events.md §7.2` step 7, §4 row 6 |
-| 122 | Activating and deactivating the same army in one tick can crash the game | open | No fault path in 0x4969b8, 0x496900, 0x496774 or 0x48eeb0 (chapter 6, F31). OQ "same tick" |
-| 122-123 | "Change patrol": a negative result stops the army (radius 0); a patrol change on an inactive army can crash at the lower map edge | radius confirms; the crash unclear | `events.md §7.2` step 8 |
-| 123-124 | "Change hero class" keeps level, XP and equipment | confirms | `events.md §7.2` step 16 (only the unit type changes) |
-| 124 | The archmage and ranger class bonuses are not tied to the hero and stay after a change; the knight bonus is tied to the unit type and is lost; a knight's bonus can go to AI armies | archmage and knight confirm; ranger is a gap | The exe fixes speed, sight and cast divisor from the start-class global (0x68dccc) at load (0x4b2504). The ranger's noon heal is the exception: the exe reads 0x68dccc, Razdor the current class (gap G3) |
-| 124 | Frequent class changes crash or misbehave; at most once a day | unclear | Not traced |
-| 125 | "Start battle with army": the battle starts even if the army is inactive, and the army becomes active | confirms | `events.md §7.2` step 15, §8 |
-| 125 | Only one battle can start per tick; the second event's army is just activated | open | The exe's direct-finish path and the battle army's local (0x4ab51b, DAT_00668c50) are not fully traced. Razdor overwrites the first battle (gap G2). OQ "two battles" |
-| 125-126 | A battle in a building, or in the same tick as a text event, shows overlapping interfaces | unclear (UI) | Not traced (chapter 9, 9.13) |
-| 126 | Loading an autosave cannot replay a battle that started far away; a few hours back is needed | unclear (save and UI) | Not traced |
-| 126 | "No meeting with army" ends the meeting; later meeting conditions of that scan fail | confirms | `events.md §7.2` step 1, §9 |
-| 126 | "No meeting" carries an exclamation mark in the editor; do not use it | confirms | `events.md §9` (byte 148, which also switches the Community opcodes) |
+| 122 | Taking artefacts works only with text | guide wrong | Artefacts are removed when the window opens, with no text test (0x4a8e66 → 0x49a8a8; Razdor `events.rs:1481-1493`) |
+| 123 | Activating an army puts it on its start cell, even if it was deactivated elsewhere; it keeps its troops, XP and resources | confirms | `events.md §7.2` step 7 |
+| 123 | A deactivated dead army stays dead; activating a dead army revives it early | confirms | `events.md §7.2` step 7, §4 row 6 |
+| 123 | Activating and deactivating the same army in one tick can crash the game | open | No fault path in 0x4969b8, 0x496900, 0x496774 or 0x48eeb0 (chapter 6, F31). OQ "same tick" |
+| 124 | "Change patrol": a negative result stops the army (radius 0); a patrol change on an inactive army can crash at the lower map edge (the guide ties this to chapter 4.6, not to a screen) | radius confirms; the crash unclear | `events.md §7.2` step 8 |
+| 125 | "Change hero class" keeps level, XP and equipment | confirms | `events.md §7.2` step 16 (only the unit type changes) |
+| 125 | The archmage and ranger class bonuses are not tied to the hero and stay after a change | archmage confirms; ranger is a gap | The exe fixes speed, sight and cast divisor from the start-class global (0x68dccc) at load (0x4b2504). The ranger's noon heal is the exception: the exe reads 0x68dccc, Razdor the current class (gap G3) |
+| 125 | The knight bonus: the guide's wording differs between pp. 124 and 125; p. 125 says it is tied to the character, not the type. Our spec says the unit type | open (OQ "Knight bonus after a class change") | `battle.md` ("Which army is a knight army": the flag comes from the first unit's type, 0x49855c); the class-change case is not traced |
+| 125 | Frequent class changes: "not recommended more than once a day" | advice, not a limit (the crash claim is unclear) | Not traced |
+| 126 | "Start battle with army": the battle starts even if the army is inactive, and the army becomes active | confirms | `events.md §7.2` step 15, §8 |
+| 126 | Only one battle can start per tick: the lower event number wins; a later battle event only activates its army | the guide states it as a rule; Razdor does not follow it (gap G2). The exe ordering is open | `events.rs` (battle path); OQ "two battles" |
+| 126 | A battle in a building, or in the same tick as a text event, shows overlapping interfaces; loading an autosave cannot replay a battle that started far away | unclear (UI and save) | Not traced (chapter 9, 9.13) |
+| 127 | "No meeting with army" ends the meeting; later meeting conditions of that scan fail | confirms | `events.md §7.2` step 1, §9 |
+| 127 | "No meeting" has a "!" warning label next to the checkbox in the editor (the label appears when the event has a meeting-with-army condition). The mark is a warning label, not part of the checkbox; do not use the option | confirms; the label wording corrected | `events.md §9` (byte 148, which also switches the Community opcodes); the form's label is LabelMA |
 
 ### 5.13 Lamps, show army, spells (pp. 127-131)
 
 | Guide p. | Fact | Verdict | Evidence |
 |---|---|---|---|
-| 127 | A lamp (point) reveals fog of war; up to 24 cells of radius | confirms | `dtm-format.md §8`; `events.md §7.2` step 10 |
-| 127-128 | A radius above 24 crashes the editor and the game; a negative radius crashes the editor once | unclear | Not traced. Razdor does not clamp (`script.rs:789-794`): deliberate, not replicated |
-| 128 | An activated lamp works as a plain lamp | confirms | `events.md §2` |
-| 128-129 | Several lamps in one event light in order; the same lamp may be named several times | confirms | `events.md §7.2` step 10 |
-| 129 | "Show army" scrolls to and reveals an army; a dead army shows the cell where it died; an inactive one shows its start cell | new, exe; gap G4 | 0x4ab51b reads the record's current cell (+0x1724, +0x1728) for any army, with no activity test. Razdor reveals only on-map armies (`script.rs:745-750`). The inactive start-cell claim is open |
-| 129-130 | "Activate spell": a self-target spell lasts exactly five times as long as when the player casts it; an enemy-target spell lasts as long as when cast | guide wrong (flat 5×) | Own-army event spells last 10 × TimeWork hours when TimeWork < 8, and 5× when TimeWork ≥ 8 (`magic-items.md §4.1`). Razdor matches (`magic.rs:215`, `:620`) |
-| 130 | A lamp, show army and spell in one event: the first runnable event runs without checking some conditions, causing random events and crashes | open | Unverified. `events.md §8` describes the chain timer, not this effect. OQ "lantern, show or spell with another effect" |
-| 130-131 | These functions work without text | confirms | `events.md §8` (lanterns, shown army and spell start the chain timer; no text needed) |
+| 128 | A lamp (point) reveals fog of war; up to 24 cells of radius. The lamp dialog's default in the screen is 10 | confirms | `dtm-format.md §8`; `events.md §7.2` step 10; records §2 (a new lamp gets radius 10) |
+| 129 | A radius above 24 crashes the editor and the game; a negative radius crashes the editor once | unclear | Not traced. Razdor does not clamp (`script.rs:789-794`): deliberate, not replicated |
+| 129 | An activated lamp (a point with "active at start") works as a plain lamp | confirms | `events.md §2` |
+| 130 | Several lamps in one event light in order; the lamp slots are a 2×2 block numbered 1-4 in row order; the same lamp may be named several times | confirms | `events.md §7.2` step 10; `dtm-format.md §9` (lantern slots 128-135, lit ids) |
+| 130 | "Show army" scrolls to and reveals an army; a dead army shows the cell where it died; an inactive one shows its start cell | new, exe; gap G4; the inactive start-cell claim is open | 0x4ab51b reads the record's current cell (+0x1724, +0x1728) for any army, with no activity test. Razdor reveals only on-map armies (`script.rs:745-750`). OQ "show army" |
+| 131 | "Activate spell": a self-target spell lasts exactly five times as long as when the player casts it; an enemy-target spell lasts as long as when cast | guide wrong (flat 5×) | Own-army event spells last 10 × TimeWork hours when TimeWork < 8, and 5× when TimeWork ≥ 8 (`magic-items.md §4.1`). Razdor matches (`magic.rs:215`, `:620`) |
+| 131 | A lamp, show army and spell in one event (two or more of them): the first available event runs without some of its conditions, causing random events and crashes | open | Unverified. `events.md §8` describes the chain timer, not this effect. OQ "lantern, show or spell with another effect" |
+| 131 | These functions work without text | confirms | `events.md §8` (lanterns, shown army and spell start the chain timer; no text needed) |
 
 ### 5.15 Pictures (pp. 131-136)
 
 | Guide p. | Fact | Verdict | Evidence |
 |---|---|---|---|
-| 131-132 | An event picture is a stock picture or a custom one; the victory and defeat stock pictures render badly | stock values confirm; the bad rendering unclear | `events.md §6.3` (200 defeat, 201 victory, 0 own picture) |
-| 132-134 | Custom pictures must be 32-bit TGA, uncompressed, with no semi-transparent pixels; 581×563 or larger with a one-space text crashes; semi-transparent pixels can break the editor | unclear (the size and alpha limits are not traced) | The stored format is 16-bit ARGB4444 with width and height (`dtm-format.md §9` offset 163, §11). Gap E8 and the open picture-size entry |
-| 134-135 | The picture's index breaks when an event is deleted or moved; add pictures last | new, explained by the format | Pictures are read by position in event order (`dtm-format.md §9`, §11); the editor re-links by index |
-| 135 | A picture needs text to show | confirms | `events.md §2` (a text-less event opens no window) |
+| 132 | An event picture is none, a stock picture (victory or defeat) or a custom one. The victory and defeat stock pictures render badly in the game | stock values confirm (200 defeat, 201 victory); the bad rendering unclear | `events.md §6.3`; `src/ui/story.rs:57-58` |
+| 132 | The picture drop-down starts with none, defeat, victory, then portraits, and has a scroll bar. The original's list also holds the install's global images from id 200 up (records §9.1). Razdor's editor offers none, 200, 201 and the portraits below 200 | the original list is wider than Razdor's; gap G5 | `src/ui/editor/events.rs:98-101`; records §9.1 (dt-editor). OQ "Picture 202" |
+| 133-134 | Custom pictures: 32-bit uncompressed TGA with no semi-transparent pixels. The guide's route is a JPG, then a community TGA converter with H and W fields | unclear (not traced); the stored format is 16-bit ARGB4444 with width and height | `dtm-format.md §9` (offset 163), §11; gap E8 |
+| 135 | A custom picture with a one-space text: 581 × 563 works (the screen on p. 135); the guide says a picture larger than that crashes, so the limit is above 581 × 563, not at it | unclear (the size limit is not traced); the wording corrected | gap E8; the open picture-size entry |
+| 135 | Semi-transparent pixels crash the game and can stop the editor saving the map | unclear | Not traced |
+| 136 | The picture's index breaks when an event is deleted or moved; add pictures last | new, explained by the format | Pictures are read by position in event order (`dtm-format.md §9`, §11); the editor re-links by index |
+| 136 | A picture needs text to show | confirms | `events.md §2` (a text-less event opens no window) |
 
 ### 5.16 The function table (pp. 136-138)
 
-- Rows that agree with the exe and with us: subordinate call, relative call, quest completion, experience, delay, flags and counters, lamps, show army, spell learning, active and deactivated armies, patrol, class change, battle start, move to hero (`events.md §7-8`).
-- Rows the exe contradicts: gold, mana, army plus and minus, artefacts plus and minus, spells learned, and the army moves the guide marks as text-dependent. All of them apply on a text-less event (see 5.8). Guide wrong.
-- "The result never decides whether the event fires; the conditions do": confirms (`events.md §4`, §6).
-- "If a text-less event has both kinds of result, only the kinds that do not need text run": guide wrong, for the same reason.
+The table (p. 137) marks which functions need text. The verdicts below are the table's rows.
+
+- Rows that agree with the exe and with us: subordinate call, relative call, quest completion, experience, delay, flags and counters, lamps, show army, activate spell, active and deactivated armies, patrol, class change, battle start, move to hero (`events.md §7-8`).
+- Rows the exe contradicts: gold, mana, army plus and minus, artefacts plus and minus, and spells learned. The table marks spell learning as needing text; the exe applies it on a text-less event (0x49c144). Guide wrong for all of them (see 5.8).
+- "The result never decides whether the event fires; the conditions do" (p. 138): confirms (`events.md §4`, §6).
+- "If a text-less event has both kinds of result, only the kinds that do not need text run" (p. 138): guide wrong, for the same reason as above.
+
+### Added from the screenshots (pp. 70-138)
+
+Facts the screens show that the text does not, and that matter for parity or for the file format. Editor-only
+layout facts (lists, filters, captions) are left out.
+
+- Window titles: a plain event window takes the event's name; a picture event takes the fixed title "Произошло событие!" (pp. 91, 101, 132-135). Razdor shows the event name for both (G13).
+- The Yes/No dialog takes the event's name as its title, with the buttons "Да" and "Нет" (p. 91).
+- Each numeric current-stat box has a grey ≤/≥ toggle, default "at most" (pp. 70, 86, 90). It is the sign of the stored value (`dtm-format.md §9`, Conditions).
+- New spins start at 0 for experience, gold, mana, delay and relative hours (pp. 99, 103, 107, 110).
+- Subordinate and relative-only are mutually exclusive (pp. 109-110), as above.
+- Points: the point window header shows "№ N" (p. 130). Point priorities and active time have no function and are always 0 (pp. 77, 130; `dtm-format.md §8`, rows 28-36).
+- A lamp's slots are a 2×2 block numbered 1-4 in row order (p. 130).
+- Army activation block: two activated-army slots and one deactivated-army slot (p. 123).
+- Patrol change example: a spin value of -5 (p. 124); the range is -120..120 in steps of 5 (records §9.1).
+- The diary entry shows the event's name, its text and the elapsed time (p. 81).
+- Quests in a building are highlighted blue in the hall list; rumours are not (pp. 79-80).
+- Hidden control: "generate the battle army" is hidden and disabled in the form (dfm; records §9.1). It shows on no screen.
+- The "!" next to the no-meeting checkbox is a warning label (p. 127).
 
 ## Chapter 6: Event examples (pp. 139-194)
 
@@ -657,9 +689,11 @@ A quick list of the guide's claims that the exe settles against it. Each is deta
 - Move to hero: the cheapest neighbour, not the first passable cell (0x4980d8).
 - Own-army event spell: 10 × TimeWork hours below TimeWork 8, 5× from 8 (`magic-items.md §4.1`); not a flat 5×.
 - Full spell book: no capacity test, the spell is appended (0x49c144).
+- Function table, spell row (p. 137): the guide marks learned spells as needing text. The exe applies them on a text-less event (0x49c144). Only "activate spell" works without text in the guide's table and in the exe.
 - A counter's `^` form works on any name, not only names ending in a digit (0x4ab2a3).
 - "Current level" compares the hero's 0-based level, not XP (0x4a80b4 → 0x4a7b40).
 - "Holiness and mana" is not always true: the exe compares mana (0xc2875e).
+- Current level and holiness and mana (p. 90): the guide's blue note says both are repaired in an unofficial community fix (chapter 7.17). The exe checked here is the vanilla build; Razdor matches the vanilla behaviour, so the note does not change the verdicts.
 - An army with no home passes the "in its home" test (0x4a7b80 tail).
 - Text-less events: gold, mana, units, artefacts and spells apply (0x4ab51b, 0x4a8ae8, 0x4a9b75, 0x4a8e66). Gold and mana need no text.
 - Units moved into a full army: appended while there is room; then the copy overwrites the last record (0x4a8fe5).
@@ -675,6 +709,7 @@ A quick list of the guide's claims that the exe settles against it. Each is deta
 - The randomness "cache": there is none; one LCG, seeded at load, draws from the listed sources (0x4832fc).
 - The 6.14 "respawn all" checkbox revives nobody on activation (0x4969b8).
 - The guide says the "same-tick" crash exists; no fault path was found in the four routines. Unverified, open.
+- Claims the guide does not make, removed from chapter 5 (2026-11-05): a rumour with a price has a negative gold result; a full pack loses an artefact silently (the guide shows four slots only, pp. 105-106); the village and shipyard list for rumours and quests (the guide defers to chapter 3.3, p. 82); "the weakest unit" for a full army (the guide does not say it).
 
 Our docs that were stale, now corrected (2026-11-05):
 
@@ -683,6 +718,8 @@ Our docs that were stale, now corrected (2026-11-05):
 - `docs/reference/dtm-format.md` §13: the passability open item is settled from the exe (`original-mechanics/world.md §1.1`).
 - `docs/reference/dtm-format.md` §6, byte 357: the editor writes "garrison is AI only"; the game never reads it.
 - `docs/reference/original-mechanics/events.md`, "Razdor now" row "When results apply": was "Matches"; now a difference (gap G1).
+- `docs/reference/dtm-format.md` §8, byte 5 (the point model): 8 is the lantern (radius dialog), 9 the event point (point window, with "active at start"), 10 the AI target point (records §10 and the screens, pp. 128-129). The old "9 = event point or inactive lantern" was wrong.
+- `docs/reference/dtm-format.md` §9, bytes 16-17: moved from Conditions to Results. They are the army whose patrol changes and its signed delta (the Результат 2 tab, "Изменить патруль армии", p. 124).
 
 ## Razdor gaps found
 
@@ -710,7 +747,8 @@ deliberate deviations (D1 to D5) are kept as they are; only D4 has an open entry
 - **G2. A second battle in one tick overwrites the first.** `src/rules/script.rs:827-833` (`start_battle` sets `foe` and pushes the encounter) is called from `finish` (`events.rs:1654-1656`) while `run` (`events.rs:1277-1288`) goes on; `held` is set only for a message (`events.rs:1466-1473`). A battle-only event with no message does not stop the scan, so a later battle event replaces `foe`. The exe ordering is open (OQ "two battles").
 - **G3. The ranger's noon heal uses the current class.** `src/rules/economy.rs:483-491` (`ranger_heal`) calls `hero_class()` (`src/rules/game.rs:1021-1023`). The exe reads the start-class global (0x68dccc) at the noon scan (0x4abfbc) and in the noon report (0x4ac427). After an event class change (`set_hero_class`, `src/rules/script.rs:818-824`, which only retypes the unit) the two differ. The doc comment at `script.rs:812-817` says the class bonuses are lost on a change; that is wrong for archmage and ranger, which keep the start class (`game.rs:1069-1085`, `magic.rs:368-373`).
 - **G4. Show army does nothing for a dead or inactive army.** `src/rules/script.rs:745-750` reveals only an on-map army. The exe (0x4ab51b) reads the record's current cell (+0x1724, +0x1728) for any army, so a dead army shows its death cell. The inactive case is open.
-- **G5. Picture 202 (the met army's leader) is not drawn.** `src/ui/story.rs:53-63` treats any value other than 0, 200 and 201 as a unit id, so 202 gives no picture. The meeting caption (`story.rs:133-137`) shows the leader's name only. The editor offers portraits below 200 and the two stock pictures (`src/ui/editor/events.rs:99-100`). Whether any shipped map uses 202 is open.
+- **G5. Picture 202 (the met army's leader) is not drawn, and the editor cannot pick it.** `src/ui/story.rs:53-63` treats any value other than 0, 200 and 201 as a unit id, so 202 gives no picture. The meeting caption (`story.rs:133-137`) shows the leader's name only. The editor's list (`src/ui/editor/events.rs:98-101`) holds none, the two stock pictures (200 defeat, 201 victory) and the portraits of units below 200. The original's list also holds the install's global images from id 200 up, and every unit's portrait (records §9.1; the screen on p. 132 has a scroll bar). So the original can offer ids above 201 that Razdor cannot pick or draw. Which global images exist, and whether any shipped map uses 202, is open: the install's `.ini` files hold no picture keys under that name, so the list is not located yet.
+- **G13. Picture windows take the event name as their title.** The screens of pp. 132-135 show the fixed title "Произошло событие!" for an event with a picture. `src/ui/story.rs:41` uses the event title for every window. This is a UI difference, so any change is the owner's call (OQ "Picture window title").
 - **G6. Chain depth cap.** `src/rules/events.rs:34` (`CHAIN_DEPTH = 32`), used at `events.rs:1672`. A deeper chain is dropped silently; the exe has no limit. Emit an outcome or log it.
 - **G7. Idle reset placement.** `src/rules/events.rs:1293-1301` resets the last-fired values at the end of `run`. The exe resets in each idle pass, including the nested passes that chain tails call (0x4abfbc tail, 0x4ab51b tail), so it can reset events fired earlier in the same tick. A check with a test (S10's variant).
 - **G8. Managed armies skip the revival.** `src/rules/script.rs:340-343` returns an army that `ai::managed` rejects (`src/rules/ai.rs:423-425`, which is `a.ai.enabled`) before the revival, the building copy and the wander points (`script.rs:344-366`). The exe has no such test (0x4969b8). The default is true (`src/rules/ai.rs:203`), so only the save-compatibility path sets it false.
