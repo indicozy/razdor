@@ -543,6 +543,11 @@ pub struct Game {
     /// Set by the interface, not part of the save.
     #[serde(skip)]
     pub avoid_armies: bool,
+    /// Razdor's option «Опыт при повышении» (`Settings::keep_xp_on_promotion`): on, a promoted
+    /// unit keeps its XP ([`Unit::promote`]); off (the default), the original's reset (0x4b1df0).
+    /// Set by the interface, not part of the save.
+    #[serde(skip)]
+    pub keep_xp_on_promotion: bool,
     /// Razdor's deviation «Сохранять расстановку после боя» (`Settings::keep_formation`, the
     /// owner's request): on, after a battle every unit returns to the cell it had before it
     /// (the dead too), instead of the cells the battle left it on (4988c0, 4d2141, 489f50).
@@ -767,6 +772,7 @@ impl Game {
             max_ai: false,
             max_guard: false,
             avoid_armies: false,
+            keep_xp_on_promotion: false,
             keep_formation: false,
             formation_before_battle: None,
             allow_unit_benching: false,
@@ -2515,7 +2521,8 @@ impl Game {
         if unit == 0 {
             return Err(PromoteError::NotAvailable);
         }
-        self.squad.get_mut(unit).ok_or(PromoteError::NotAvailable)?.promote(&c, to)
+        let keep = self.keep_xp_on_promotion;
+        self.squad.get_mut(unit).ok_or(PromoteError::NotAvailable)?.promote(&c, to, keep)
     }
 
     /// Razdor's «Автоматическая прокачка» (`ExperimentalRules::auto_promotion`), for every
@@ -2542,7 +2549,7 @@ impl Game {
                 break;
             }
             let to = options[self.rng.range(0, options.len() as i32 - 1) as usize];
-            if self.squad[k].promote(&self.content, to).is_err() {
+            if self.squad[k].promote(&self.content, to, self.keep_xp_on_promotion).is_err() {
                 break;
             }
         }
@@ -3922,7 +3929,17 @@ mod tests {
         assert_eq!(g.promote(0, sword), Err(PromoteError::NotAvailable), "the hero rises by levels only");
         let gold = g.gold;
         g.promote(1, sword).unwrap();
-        // The 40 XP are kept (a Razdor choice) and pay the swordsman's first level (35).
+        // The default drops the 40 XP, as the original does (0x4b1df0): level 1, no XP, no gold.
+        assert_eq!((g.squad[1].def, g.squad[1].level, g.squad[1].xp, g.gold), (sword, 1, 0, gold));
+        // With «Опыт при повышении» on, the 40 XP are kept and pay the swordsman's first level (35).
+        let mut g = quiet_game(HeroClass::Knight);
+        let (spear, sword) = (unit(&g, "spearman"), unit(&g, "swordsman"));
+        g.hire(spear).unwrap();
+        g.squad[1].level = 3;
+        g.squad[1].xp = 40;
+        g.keep_xp_on_promotion = true;
+        let gold = g.gold;
+        g.promote(1, sword).unwrap();
         assert_eq!((g.squad[1].def, g.squad[1].level, g.squad[1].xp, g.gold), (sword, 2, 5, gold));
     }
 

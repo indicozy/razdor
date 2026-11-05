@@ -37,6 +37,7 @@ Razdor plays the original game's scenarios using its original rules. Below is wh
 * **New Game:** campaigns are grouped into a single line; the list can be filtered and sorted; "Add map..." button.
 * **Experimental Scenario Rules:** six toggles for new games; selections are remembered between games (see [Experimental Rules](/razdor/wiki/en/differences/experimental-rules/)).
 * **Bypass armies on path** and **Save formation** in additional settings.
+* **Experience on promotion** in additional settings: as in the original, a unit's experience is dropped when it is promoted to a new class; "Kept" keeps it.
 * **Leader's name under the event picture:** when an event fires on meeting an army, its window writes the army's leader name under the picture; turn it off in the additional settings ("Leader's name").
 * **Minimap corner** in additional settings: the minimap can be placed in any corner, and the "Reset" button will return it to its default size and position.
 

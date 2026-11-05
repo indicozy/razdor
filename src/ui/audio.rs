@@ -205,6 +205,9 @@ pub struct Settings {
     /// (`Game::avoid_armies`); off, the original's route, which walks through the armies it
     /// does not stop for.
     pub avoid_armies: bool,
+    /// Advanced, Razdor's deviation: «Опыт при повышении». Off (the default) is the original's
+    /// reset: a promoted unit's XP is dropped (0x4b1df0); on, it is kept (`Game::keep_xp_on_promotion`).
+    pub keep_xp_on_promotion: bool,
     /// Advanced, Razdor's deviation: «Сохранять расстановку после боя». On (the default), every
     /// unit goes back after a battle to the cell it had before it (`Game::keep_formation`); off,
     /// the original's write-back, where the battle's cells stay.
@@ -299,7 +302,7 @@ pub fn must_request(asked: Option<i32>, want: i32) -> bool {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), avoid_armies: false, keep_formation: true, battle_marks: true, army_list: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new() }
+        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), avoid_armies: false, keep_xp_on_promotion: false, keep_formation: true, battle_marks: true, army_list: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new() }
     }
 }
 
@@ -860,6 +863,18 @@ mod tests {
         let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
         assert_eq!(back.formation_controls, Clicks);
         assert!(serde_json::to_string(&s).unwrap().contains(r#""formation_controls":"clicks""#));
+    }
+
+    /// «Опыт при повышении» is off by default, the original's reset (backlog 1529): a settings
+    /// file without the key reads so, and the key round-trips when it is on.
+    #[test]
+    fn the_promotion_xp_setting_defaults_to_the_original() {
+        let old: Settings = serde_json::from_str("{}").expect("an old settings file must load");
+        assert!(!old.keep_xp_on_promotion && !Settings::default().keep_xp_on_promotion);
+        let on: Settings = serde_json::from_str(r#"{"keep_xp_on_promotion": true}"#).unwrap();
+        assert!(on.keep_xp_on_promotion);
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&on).unwrap()).unwrap();
+        assert!(back.keep_xp_on_promotion);
     }
 
     /// The passing options «Шаг на дружественный отряд» and «Отряды на мостах» are gone (backlog

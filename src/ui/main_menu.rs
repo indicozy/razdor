@@ -1190,6 +1190,7 @@ pub fn follow_settings(audio: &super::audio::Settings, g: &mut razdor::rules::ga
     g.pursue = pursue(audio);
     g.walk_pace = walk_pace(audio);
     g.avoid_armies = audio.avoid_armies;
+    g.keep_xp_on_promotion = audio.keep_xp_on_promotion;
     g.keep_formation = audio.keep_formation;
     g.allow_unit_benching = audio.allow_unit_benching;
     g.battle_marks = audio.battle_marks;
@@ -1584,6 +1585,19 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     let y = col.y + 30.0 * k;
     // The left column's buttons: the right edge's 170 px, as the rows of the right column.
     let br = Rect::new(col.x + col.w - 24.0 * k - 170.0 * k, y, 170.0 * k, row_h);
+    // Razdor's deviation (backlog 1529, the owner's decision: reset by default, as the original):
+    // a promoted unit's XP is dropped (0x4b1df0), or kept with «Сохраняется» (`Game::keep_xp_on_promotion`).
+    // Its button is wider than the others: the choice's words are long.
+    chrome::shadow_text(tr("Experience on promotion"), col.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
+    let xr = Rect::new(col.x + col.w - 24.0 * k - 240.0 * k, y, 240.0 * k, row_h);
+    let label = if audio.keep_xp_on_promotion { tr("Kept (Razdor)") } else { tr("Reset (original)") };
+    if row_button(xr, label) {
+        audio.keep_xp_on_promotion = !audio.keep_xp_on_promotion;
+    }
+    let hint = tr("As in the original, a unit's experience is dropped when it is promoted; Kept keeps it. Experience left over after a level is kept either way.");
+    for (i, line) in wrap(hint, col.w - 48.0 * k, 12.0 * k).iter().enumerate() {
+        chrome::shadow_text(line, col.x + 24.0 * k, y + 56.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
+    }
     // Updates from the GitHub releases (`razdor::update`): offered, put in place quietly, or
     // not looked for; "Check now" asks at once and shows the answer.
     // Phones have their own update window (Android installs through the system, iOS opens the
@@ -1592,6 +1606,7 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     let y = if razdor::platform::MOBILE {
         y
     } else {
+        let y = y + 100.0 * k;
         chrome::shadow_text(tr("Updates"), col.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
         let ur = Rect::new(br.x, y, br.w, br.h);
         let mode = match audio.updates {

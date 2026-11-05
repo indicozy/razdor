@@ -474,17 +474,17 @@ impl Unit {
     }
 
     /// Switch to class `to` from the upgrade tree, free of charge. The unit starts the new
-    /// class at level 1 (experience.md §4, 0x4b1df0). The original drops its XP there; Razdor
-    /// keeps it, banked into the new class by the gain rule, as the hero keeps what is left
-    /// over a level (a choice of the user's, 2026-10-09). Its worn items stay worn,
-    /// whether the new class could put them on or not (the original never checks), and the
-    /// stat rebuild after it rescales a wounded unit's HP to the new maximum.
-    pub fn promote(&mut self, content: &Content, to: UnitId) -> Result<(), PromoteError> {
+    /// class at level 1 (experience.md §4, 0x4b1df0), with its XP dropped as the original drops
+    /// it. `keep_xp` (Razdor's «Опыт при повышении», `Game::keep_xp_on_promotion`) keeps the XP,
+    /// banked into the new class by the gain rule, as the hero keeps what is left over a level.
+    /// Its worn items stay worn, whether the new class could put them on or not (the original
+    /// never checks), and the stat rebuild after it rescales a wounded unit's HP to the new maximum.
+    pub fn promote(&mut self, content: &Content, to: UnitId, keep_xp: bool) -> Result<(), PromoteError> {
         if !self.promotions(content).contains(&to) {
             return Err(PromoteError::NotAvailable);
         }
         let before = self.max_hp(content);
-        let banked = self.xp;
+        let banked = if keep_xp { self.xp } else { 0 };
         self.def = to;
         (self.level, self.xp, _) = experience::add_xp(1, 0, banked, |l| content.xp_to_next(to, l));
         // The switch is the player's, not the class's: a promotion keeps it, as a level gain does.
@@ -567,16 +567,31 @@ mod tests {
         let mut u = Unit::new(&c, UnitId(1), slot());
         assert_eq!(u.upgrade_tree(&c), vec![(UnitId(2), 3, false)]);
         assert!(u.promotions(&c).is_empty(), "needs a level");
-        assert_eq!(u.promote(&c, UnitId(2)), Err(PromoteError::NotAvailable));
+        assert_eq!(u.promote(&c, UnitId(2), false), Err(PromoteError::NotAvailable));
         u.gain_xp(&c, 60);
         assert_eq!(u.level, 2);
         assert_eq!(u.promotions(&c), vec![UnitId(2)], "NextUnitNLevel is not checked for the player");
         u.gain_xp(&c, 20);
         u.hp = 30; // of 55
-        assert_eq!(u.promote(&c, UnitId(2)), Ok(()));
+        assert_eq!(u.promote(&c, UnitId(2), false), Ok(()));
         // The guard's maximum is 50 against the militia's 55: 50 × 30 / 55 = 27.27.
-        assert_eq!((u.def, u.level, u.xp, u.hp), (UnitId(2), 1, 20, 27), "level 1, XP kept, HP rescaled");
+        assert_eq!((u.def, u.level, u.xp, u.hp), (UnitId(2), 1, 0, 27), "level 1, XP dropped as the original does, HP rescaled");
         assert!((u.carry.0 - 0.272_727).abs() < 1e-4, "{}", u.carry.0);
+    }
+
+    #[test]
+    fn promotion_resets_xp_by_default_and_keeps_it_with_the_option() {
+        // 0x4b1df0: the promotion starts at level 1 with no XP. Razdor's option keeps the XP.
+        let c = content(vec![militia(), warrior(2, 30, 8)], vec![]);
+        let mut reset = Unit::new(&c, UnitId(1), slot());
+        reset.gain_xp(&c, 60);
+        reset.gain_xp(&c, 20);
+        assert_eq!((reset.level, reset.xp), (2, 20));
+        let mut kept = reset.clone();
+        assert_eq!(reset.promote(&c, UnitId(2), false), Ok(()));
+        assert_eq!((reset.def, reset.level, reset.xp), (UnitId(2), 1, 0), "the default drops the XP");
+        assert_eq!(kept.promote(&c, UnitId(2), true), Ok(()));
+        assert_eq!((kept.def, kept.level, kept.xp), (UnitId(2), 1, 20), "the option keeps it");
     }
 
     #[test]
@@ -618,7 +633,7 @@ mod tests {
         let mut u = Unit::new(&c, UnitId(1), slot());
         u.gain_xp(&c, 60);
         u.set_sign_off(true);
-        assert_eq!(u.promote(&c, UnitId(2)), Ok(()));
+        assert_eq!(u.promote(&c, UnitId(2), false), Ok(()));
         assert_eq!(u.def, UnitId(2));
         assert!(u.sign_off(), "the promoted unit keeps the switch");
         assert!(!u.promotion_sign(&c), "and its «+» stays hidden");
@@ -679,7 +694,7 @@ mod tests {
         let mut u = Unit::new(&c, UnitId(1), slot());
         u.items[0] = Some(ItemId(1));
         u.level = 2;
-        u.promote(&c, UnitId(2)).unwrap();
+        u.promote(&c, UnitId(2), false).unwrap();
         assert!(items::slot_for(&c, &u, ItemId(1)).is_err());
         assert_eq!(u.items[0], Some(ItemId(1)), "the original never takes an item off");
     }
