@@ -1217,12 +1217,12 @@ pub(crate) mod tests {
         use crate::rules::marks::{Level, Reason, RunMark};
         let c = demo();
         let mut g = Game::new(c.clone(), HeroClass::Knight);
-        g.note_settings(Some("Route around armies"));
+        g.note_settings(Some("Unit battle participation"));
         g.note_cheat("god");
         let loaded = roundtrip(&g, c.clone(), None);
         assert_eq!(loaded.run_mark(), RunMark { level: Level::Red, reason: Reason::Cheat("god".into()) });
         let mut grey = Game::new(c.clone(), HeroClass::Knight);
-        grey.note_settings(Some("Route around armies"));
+        grey.note_settings(Some("Unit battle participation"));
         let mut back = roundtrip(&grey, c, None);
         back.note_settings(None);
         assert_eq!(back.run_mark().level, Level::Grey, "a setting changed back is still counted after a load");

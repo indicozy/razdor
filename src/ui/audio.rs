@@ -331,8 +331,7 @@ impl Settings {
     /// what counts as gameplay (the owner's decisions, 1532). A setting counts when it changes
     /// how the game plays, judged from its help text and code; interface-only ones never do.
     ///
-    /// Counted: the battle AI's strength; «Отключение бойцов» (noncombatants); «Обход армий на
-    /// пути»; «Опыт при повышении» kept (the original resets it); the front row's width, the
+    /// Counted: the battle AI's strength; «Отключение бойцов» (noncombatants); «Опыт при повышении» kept (the original resets it); the front row's width, the
     /// difficulty and the pursuit when they are not the install's. «Бережёт магов» (max_guard)
     /// changes play only under «Максимум», which is already counted, so it adds no mark of its own.
     /// «Сохранять расстановку» (keep_formation) is a convenience and does not count: a default
@@ -350,9 +349,6 @@ impl Settings {
         }
         if self.allow_unit_benching {
             return Some(n_("Unit battle participation"));
-        }
-        if self.avoid_armies { // removed by advanced-2
-            return Some(n_("Route around armies"));
         }
         if self.keep_xp_on_promotion {
             return Some(n_("Experience on promotion: kept"));
@@ -1116,7 +1112,6 @@ mod gameplay_mark_tests {
             (Settings { max_ai: true, ..clean() }, "Battle AI strength"),
             (Settings { expert_ai: Some(true), ..clean() }, "Battle AI strength"),
             (Settings { allow_unit_benching: true, ..clean() }, "Unit battle participation"),
-            (Settings { avoid_armies: true, ..clean() }, "Route around armies"),
             (Settings { keep_xp_on_promotion: true, ..clean() }, "Experience on promotion: kept"),
             (Settings { wide_row: Some(false), ..clean() }, "Wide front row in battle (for new games)"),
             (Settings { impossible: Some(true), ..clean() }, "Impossible difficulty (needs a restart)"),

@@ -35,7 +35,6 @@ Only gameplay settings affect the color. If one differs from the original game (
 **The following changes are counted:**
 *   "Battle AI strength";
 *   "Unit battle participation";
-*   "Route around armies";
 *   "Experience on promotion", when it is kept (the original resets it);
 *   "Wide front row in battle (for new games)";
 *   "Impossible difficulty (needs a restart)";

@@ -36,7 +36,7 @@ pub enum Reason {
     Cheat(String),
     /// The experimental rule's name, as the catalog has it («Six equipment cells»).
     Rule(String),
-    /// The gameplay setting's name, as the catalog has it («Route around armies»).
+    /// The gameplay setting's name, as the catalog has it («Unit battle participation»).
     Setting(String),
     /// The run's history is unknown: a save from before the mark.
     Unknown,
@@ -202,7 +202,7 @@ mod tests {
     fn a_run_goes_green_grey_yellow_red_and_never_back_up() {
         let mut m = RunMark::start();
         assert_eq!(m, mark(Level::Green, Reason::Honest));
-        assert!(m.worsen(Level::Grey, Reason::Setting("Route around armies".into())));
+        assert!(m.worsen(Level::Grey, Reason::Setting("Unit battle participation".into())));
         assert!(m.worsen(Level::Yellow, Reason::Rule("Six equipment cells".into())));
         assert!(m.worsen(Level::Red, Reason::Cheat("god".into())));
         assert!(!m.worsen(Level::Yellow, Reason::Rule("Free units".into())), "a better level never lowers it");
@@ -213,9 +213,9 @@ mod tests {
     #[test]
     fn the_first_cause_of_a_level_stays_the_reason() {
         let mut m = RunMark::start();
-        m.worsen(Level::Grey, Reason::Setting("Route around armies".into()));
+        m.worsen(Level::Grey, Reason::Setting("Unit battle participation".into()));
         m.worsen(Level::Grey, Reason::Setting("Keep formation after battle".into()));
-        assert_eq!(m.reason, Reason::Setting("Route around armies".into()));
+        assert_eq!(m.reason, Reason::Setting("Unit battle participation".into()));
     }
 
     #[test]
@@ -240,7 +240,7 @@ mod tests {
     fn a_victory_keeps_the_best_mark_and_its_date() {
         let mut r = Records::default();
         assert!(r.record_victory("Тихая пристань", &mark(Level::Red, Reason::Cheat("god".into())), "2026-11-01"));
-        assert!(r.record_victory("Тихая пристань", &mark(Level::Grey, Reason::Setting("Route around armies".into())), "2026-11-02"));
+        assert!(r.record_victory("Тихая пристань", &mark(Level::Grey, Reason::Setting("Unit battle participation".into())), "2026-11-02"));
         assert!(!r.record_victory("Тихая пристань", &mark(Level::Red, Reason::Cheat("win".into())), "2026-11-03"), "a worse one changes nothing");
         assert!(!r.record_victory("Тихая пристань", &mark(Level::Grey, Reason::Setting("Keep formation after battle".into())), "2026-11-04"), "a tie keeps the earlier record");
         let got = r.get("тихая пристань").expect("the key is the file name, any case");
@@ -262,7 +262,7 @@ mod tests {
         r.record_victory("РК1-Начало пути", &RunMark::start(), "2026-11-06");
         r.record_victory("РК2-Дикие пустоши", &mark(Level::Yellow, Reason::Rule("Free units".into())), "2026-11-06");
         assert!(r.campaign(&["РК1-Начало пути", "РК2-Дикие пустоши", "РК3-Столица"]).is_none(), "a map not won yet");
-        r.record_victory("РК3-Столица", &mark(Level::Grey, Reason::Setting("Route around armies".into())), "2026-11-06");
+        r.record_victory("РК3-Столица", &mark(Level::Grey, Reason::Setting("Unit battle participation".into())), "2026-11-06");
         let worst = r.campaign(&["РК1-Начало пути", "РК2-Дикие пустоши", "РК3-Столица"]).expect("all won");
         assert_eq!(worst.mark, mark(Level::Yellow, Reason::Rule("Free units".into())), "the worst of its maps");
         assert!(r.campaign(&[]).is_none());
@@ -279,8 +279,8 @@ mod tests {
         assert_eq!(g.run_mark(), RunMark::start(), "a run starts green");
         g.note_settings(None);
         assert_eq!(g.run_mark().level, Level::Green, "the original's settings: still green");
-        g.note_settings(Some("Route around armies"));
-        assert_eq!(g.run_mark(), mark(Level::Grey, Reason::Setting("Route around armies".into())));
+        g.note_settings(Some("Unit battle participation"));
+        assert_eq!(g.run_mark(), mark(Level::Grey, Reason::Setting("Unit battle participation".into())));
         g.note_settings(None);
         assert_eq!(g.run_mark().level, Level::Grey, "a setting changed back does not clean the run");
         g.note_cheat("god");
@@ -298,7 +298,7 @@ mod tests {
         };
         assert_eq!(g.run_mark(), mark(Level::Yellow, Reason::Rule("Six equipment cells".into())));
         let mut g2 = game(ExperimentalRules { free_units: true, two_potions: true, ..Default::default() });
-        g2.note_settings(Some("Route around armies"));
+        g2.note_settings(Some("Unit battle participation"));
         assert_eq!(g2.run_mark(), mark(Level::Yellow, Reason::Rule("At most two potions per character".into())), "the first rule on in the panel's order names it; yellow beats grey");
     }
 

@@ -722,7 +722,7 @@ const MARK_RED: Color = Color::new(1.0, 0.38, 0.34, 1.0);
 
 /// The tooltip of a run mark: what it means and what set it, from `t` (the catalog's
 /// translation). Russian: «Пройдено с читами (god)», «Пройдено с экспериментальными правилами:
-/// Шесть ячеек снаряжения», «Пройдено с настройками не как в оригинале: Обход армий на пути»,
+/// Шесть ячеек снаряжения», «Пройдено с настройками не как в оригинале: Отключение бойцов»,
 /// «Пройдено честно».
 fn mark_text_in(mark: &marks::RunMark, t: impl Fn(&str) -> &str) -> String {
     match &mark.reason {
@@ -2273,9 +2273,9 @@ mod tests {
         let rule = mark(Level::Yellow, Reason::Rule("Six equipment cells".into()));
         assert_eq!(ru(&rule), "Пройдено с экспериментальными правилами: Шесть ячеек снаряжения");
         assert_eq!(en(&rule), "Completed with experimental rules: Six equipment cells");
-        let setting = mark(Level::Grey, Reason::Setting("Route around armies".into()));
-        assert_eq!(ru(&setting), "Пройдено с настройками не как в оригинале: Обход армий на пути");
-        assert_eq!(en(&setting), "Completed with settings not as in the original: Route around armies");
+        let setting = mark(Level::Grey, Reason::Setting("Unit battle participation".into()));
+        assert_eq!(ru(&setting), "Пройдено с настройками не как в оригинале: Отключение бойцов");
+        assert_eq!(en(&setting), "Completed with settings not as in the original: Unit battle participation");
         assert_eq!(ru(&RunMark::start()), "Пройдено честно");
         assert_eq!(en(&RunMark::start()), "Completed honestly");
         assert_eq!(ru(&mark(Level::Red, Reason::Cheat(String::new()))), "Пройдено с читами", "an old save: no cheat named");
