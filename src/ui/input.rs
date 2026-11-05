@@ -378,16 +378,19 @@ pub fn screen_pointer() -> (f32, f32) {
 
 /// The wheel this frame (x, y; up is positive): the mouse's and the pad's.
 pub fn mouse_wheel() -> (f32, f32) {
+    if held() {
+        return (0.0, 0.0);
+    }
     let (x, y) = mq::mouse_wheel();
     (x, y + with_frame(|f| f.wheel))
 }
 
 pub fn is_mouse_button_pressed(b: MouseButton) -> bool {
-    mq::is_mouse_button_pressed(b) || button(b).pressed
+    !held() && (mq::is_mouse_button_pressed(b) || button(b).pressed)
 }
 
 pub fn is_mouse_button_down(b: MouseButton) -> bool {
-    mq::is_mouse_button_down(b) || button(b).down || (b == MouseButton::Right && SNAPSHOT_RIGHT.with(|r| r.get()))
+    !held() && (mq::is_mouse_button_down(b) || button(b).down || (b == MouseButton::Right && SNAPSHOT_RIGHT.with(|r| r.get())))
 }
 
 local! {
@@ -401,7 +404,24 @@ pub fn hold_right_for_snapshot(on: bool) {
 }
 
 pub fn is_mouse_button_released(b: MouseButton) -> bool {
-    mq::is_mouse_button_released(b) || button(b).released
+    !held() && (mq::is_mouse_button_released(b) || button(b).released)
+}
+
+local! {
+    /// The input is held back (`hold`).
+    static HELD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Holds the input back: until `hold(false)`, the presses, releases, keys and the wheel that
+/// the screens read through this module come as none (the pointer's place still does). Razdor's
+/// own: the map editor's notice is drawn over the editor, which is drawn with the input held,
+/// and the notice itself reads the input after it.
+pub fn hold(on: bool) {
+    HELD.with(|h| h.set(on));
+}
+
+fn held() -> bool {
+    HELD.with(|h| h.get())
 }
 
 /// Whether a press came this frame: a click, a key, the wheel (a pad's buttons and a tap are
@@ -412,14 +432,17 @@ pub fn any_press() -> bool {
 }
 
 pub fn is_key_pressed(k: KeyCode) -> bool {
-    mq::is_key_pressed(k) || key_edge(k).pressed || with_taps(|t| t.pressed(k))
+    !held() && (mq::is_key_pressed(k) || key_edge(k).pressed || with_taps(|t| t.pressed(k)))
 }
 
 pub fn is_key_down(k: KeyCode) -> bool {
-    mq::is_key_down(k) || key_edge(k).down
+    !held() && (mq::is_key_down(k) || key_edge(k).down)
 }
 
 pub fn get_keys_pressed() -> HashSet<KeyCode> {
+    if held() {
+        return HashSet::new();
+    }
     let mut keys = mq::get_keys_pressed();
     keys.extend(keys_where(|e| e.pressed));
     keys.extend(with_taps(|t| t.keys().to_vec()));
@@ -431,6 +454,9 @@ fn with_taps<R>(f: impl FnOnce(&TapQueue) -> R) -> R {
 }
 
 pub fn get_keys_released() -> HashSet<KeyCode> {
+    if held() {
+        return HashSet::new();
+    }
     let mut keys = mq::get_keys_released();
     keys.extend(keys_where(|e| e.released));
     keys
@@ -438,7 +464,7 @@ pub fn get_keys_released() -> HashSet<KeyCode> {
 
 /// `k` went down this frame on the pad only (not on the keyboard).
 pub fn pad_key_pressed(k: KeyCode) -> bool {
-    key_edge(k).pressed && !mq::is_key_pressed(k)
+    !held() && key_edge(k).pressed && !mq::is_key_pressed(k)
 }
 
 #[cfg(test)]

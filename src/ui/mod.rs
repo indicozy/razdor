@@ -285,6 +285,8 @@ pub struct App {
     play_last: (&'static str, Option<String>),
     /// The map editor, kept while a test play runs.
     editor: Option<Box<editor::EditorScreen>>,
+    /// The notice that the editor is abandoned is up over it: shown at each opening.
+    editor_notice: bool,
     /// The game is a test play of the editor's map: leaving it returns to the editor.
     test_play: bool,
     /// The F1 key list is open over the screen.
@@ -386,6 +388,7 @@ impl App {
             tap_press: None,
             play_last: ("", None),
             editor: None,
+            editor_notice: false,
             test_play: false,
             help: false,
             help_fresh: false,
@@ -486,12 +489,19 @@ impl App {
         }
     }
 
-    /// Opens the map editor (the title screen's button and `--editor`).
+    /// Opens the map editor (`--editor`). Its notice that the editor is abandoned (the owner's
+    /// decision, 2026-11-06) comes up each time it opens.
     pub fn open_editor(&mut self) {
         if self.editor.is_none() {
             self.editor = Some(Box::new(editor::EditorScreen::new(&self.assets, self.dt_content.clone(), self.demo.clone())));
         }
         self.screen = Screen::Editor;
+        self.editor_notice = true;
+    }
+
+    /// The editor's notice is read ([`editor_frame`]): the editor stays on screen.
+    fn close_editor_notice(&mut self) {
+        self.editor_notice = false;
     }
 
     /// The content custom battles are fought with: the install's, else the demo's.
@@ -582,6 +592,7 @@ impl App {
     fn editor_frame(&mut self) {
         if hotkeys::allowed(hotkeys::Place::Editor, hotkeys::Global::Language, self.guard())
             && !widgets::popup_open()
+            && !self.editor_notice
             && is_key_pressed(keymap::key(Action::Language))
         {
             language::cycle();
@@ -590,7 +601,16 @@ impl App {
             self.open_editor();
             return;
         };
-        match ed.frame(&self.assets) {
+        // Under the notice the editor is drawn but takes no input; the notice reads it after.
+        let notice = self.editor_notice;
+        input::hold(notice);
+        let action = ed.frame(&self.assets);
+        input::hold(false);
+        // The notice each time the editor opens: Razdor's decision of 2026-11-06.
+        if notice && map_import::notice_window(tr("Map editor"), &[tr("Razdor's map editor is abandoned and no longer updated. It may have bugs. To make maps, use the original editor, DTMapEdit.").to_string()]) {
+            self.close_editor_notice();
+        }
+        match action {
             editor::EditorAction::None => {}
             editor::EditorAction::Exit => {
                 self.editor = None;
@@ -1805,6 +1825,27 @@ fn last_save_path() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Opening the editor shows its notice and keeps the editor on screen; the notice's close
+    /// leaves the editor on screen too (the owner's decision, 2026-11-06).
+    #[test]
+    fn opening_the_editor_shows_the_abandoned_notice_and_closing_it_keeps_the_editor() {
+        use std::future::Future;
+        use std::task::{Context, Poll, Waker};
+        let content = Arc::new(Content::builtin());
+        // The assets' load awaits nothing without a window: one poll finishes it.
+        let mut load = std::pin::pin!(Assets::load(content.clone()));
+        let Poll::Ready(assets) = load.as_mut().poll(&mut Context::from_waker(Waker::noop())) else {
+            panic!("the assets load waits for something a test has no window for");
+        };
+        let mut app = App::new(assets, content);
+        app.open_editor();
+        assert!(matches!(app.screen, Screen::Editor));
+        assert!(app.editor_notice, "the notice is up over the editor");
+        app.close_editor_notice();
+        assert!(!app.editor_notice, "closed");
+        assert!(matches!(app.screen, Screen::Editor), "closing the notice leaves the editor");
+    }
 
     /// The defeat report's load (Razdor's, the owner's request) takes the newest save of
     /// either kind, and none when there is no save: the button is then disabled.

@@ -5,6 +5,10 @@ sidebar:
   order: 1
 ---
 
+:::caution
+Razdor's map editor is abandoned and no longer updated. It may have bugs. To make maps, use the original editor, DTMapEdit.
+:::
+
 Razdor includes a built-in scenario editor that allows you to create `.DTm` format maps. These maps are compatible with both the original game and the Razdor engine.
 
 ![The map editor](../../../../assets/shots/editor.webp)

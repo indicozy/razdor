@@ -1,5 +1,7 @@
 # The Hristos map-editor guide, checked against our specs, the code and the exe
 
+Razdor's map editor is abandoned (the owner, 2026-11-06): the E-gaps below will not be fixed; only game-runtime items (G) matter.
+
 Analysis of 2026-11-05. The guide's claims were checked against `docs/reference/` (the specs),
 the code on `main` (`src/`), and the original's exe (the Community Update build, decompiled; the
 decompile notes are local). Nothing was built or run. Chapters 1-4 and 6-9 were also checked against every page image (two screenshot

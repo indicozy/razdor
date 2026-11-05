@@ -229,8 +229,9 @@ Other diagnostics: `razdor.log` in the data folder (`razdor::diag`, `RAZDOR_LOG=
 
 `src/editor/` is the model (pure, tested): `doc` (the scenario document), `command`
 (undoable edits), `validate`, `files` (writes `.DTm` byte-identical for an unchanged map).
-The window is `src/ui/editor/`. Started with `--editor` (the menus have no button for it). Its
-parity work with the original DTMapEdit is paused.
+The window is `src/ui/editor/`. Started with `--editor` (the menus have no button for it). Each opening shows a notice that the
+editor is abandoned (`App::open_editor`, `editor_notice`): the editor is drawn under it, with the
+input held (`ui::input::hold`), until its OK. Its parity work with the original DTMapEdit is paused.
 
 ## The map translator (`razdor-translate`)
 

@@ -1,6 +1,9 @@
 # Razdor interface in Russian: our own translation. "English = Russian", one per line;
 # \n is a line break, {name} a value filled in by the game. See src/i18n.rs.
 
+# Map editor: the notice that it is abandoned (each opening)
+Razdor's map editor is abandoned and no longer updated. It may have bugs. To make maps, use the original editor, DTMapEdit. = Редактор карт Раздора заброшен и больше не обновляется. В нём могут быть ошибки. Для создания карт используйте оригинальный редактор DTMapEdit.
+
 # Map editor: toolbar
 New = Новая
 Open = Открыть
