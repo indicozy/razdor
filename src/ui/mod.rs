@@ -674,6 +674,9 @@ impl App {
                 self.dt_content = saves::session_content(self.dt_content.take(), &game);
                 if let Some(q) = game.pending_question() {
                     story::show(&game, &EventOutcome::Question(q), &mut self.dialogs);
+                } else if let Some(event) = game.event_window() {
+                    // A window saved open: its finish-time results wait for its OK.
+                    story::show(&game, &EventOutcome::Fired { event, message: true }, &mut self.dialogs);
                 }
                 self.screen = if game.foe.is_some() {
                     Screen::Battle(Box::new(BattleView::new(game.start_battle())))

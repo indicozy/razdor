@@ -780,7 +780,7 @@ Our docs that were stale, now corrected (2026-11-05):
 - `docs/reference/mechanics.md` (rewards): the player's loot has no minimum; `MinVictoryGold` applies to AI-against-AI fights only.
 - `docs/reference/dtm-format.md` §13: the passability open item is settled from the exe (`original-mechanics/world.md §1.1`).
 - `docs/reference/dtm-format.md` §6, byte 357: the editor writes "garrison is AI only"; the game never reads it.
-- `docs/reference/original-mechanics/events.md`, "Razdor now" row "When results apply": was "Matches"; now a difference (gap G1).
+- `docs/reference/original-mechanics/events.md`, "Razdor now" row "When results apply": was "Matches"; now a difference (gap G1); fixed 2026-11-06, matches again.
 - `docs/reference/dtm-format.md` §8, byte 5 (the point model): 8 is the lantern (radius dialog), 9 the event point (point window, with "active at start"), 10 the AI target point (records §10 and the screens, pp. 128-129). The old "9 = event point or inactive lantern" was wrong.
 - `docs/reference/dtm-format.md` §9, bytes 16-17: moved from Conditions to Results. They are the army whose patrol changes and its signed delta (the Результат 2 tab, "Изменить патруль армии", p. 124).
 
@@ -828,7 +828,7 @@ deliberate deviations (D1 to D5) are kept as they are; only D4 has an open entry
 
 ### Engine (src/rules, src/ui)
 
-- **G1 (medium). A message event applies its finish-time results when its window opens.** `src/rules/events.rs:1455` (`open` calls `show`, then `finish`), `:1472-1474` (`show` sets `held`), `:1194-1195` (Yes with a message: `show`, then `finish`). The exe applies the finish-time results at OK (0x4c206c calls 0x4ab1ec). Affected: gold, mana and XP, activations and deactivations, patrol, lanterns, shown army, flags, journal, relative starts, and the victory or defeat latch. The battle, spell and delay start at `events.rs:1655, 1658, 1661` under the window, where the exe queues them until OK. Fix the path and add a test (events.md S2). Owner's call whether this goes on the experimental track, since it changes when a map's results land.
+- **G1 (fixed 2026-11-06). A message event applies its finish-time results at its window's OK.** The exe applies them at OK: 0x4c206c calls 0x4ab1ec (the finish, which runs on to the battle and the chain) at 0x4c20b8. The Yes path with a message opens the window through 0x4a8ae8 without a finish (0x4c2220); a textless Yes finishes at once (0x4c2214). Razdor now opens the window in `EventEngine::show`, which keeps the finish for `window_closed` (`src/rules/events.rs`); the open window is saved (`window`), and a loaded game shows it again (`Game::event_window`, `src/ui/mod.rs` load). Tests: `a_message_events_finish_time_results_apply_at_ok`, `a_message_events_battle_starts_at_its_ok`, `a_window_saved_open_applies_its_results_at_ok_after_a_load`, `the_scan_after_a_message_event_sees_its_results_after_ok`.
 - **G2. A second battle in one tick overwrites the first.** `src/rules/script.rs:827-833` (`start_battle` sets `foe` and pushes the encounter) is called from `finish` (`events.rs:1654-1656`) while `run` (`events.rs:1277-1288`) goes on; `held` is set only for a message (`events.rs:1466-1473`). A battle-only event with no message does not stop the scan, so a later battle event replaces `foe`. The exe ordering is open (OQ "two battles").
 - **G3. The ranger's noon heal uses the current class.** `src/rules/economy.rs:483-491` (`ranger_heal`) calls `hero_class()` (`src/rules/game.rs:1021-1023`). The exe reads the start-class global (0x68dccc) at the noon scan (0x4abfbc) and in the noon report (0x4ac427). After an event class change (`set_hero_class`, `src/rules/script.rs:818-824`, which only retypes the unit) the two differ. The doc comment at `script.rs:812-817` says the class bonuses are lost on a change; that is wrong for archmage and ranger, which keep the start class (`game.rs:1069-1085`, `magic.rs:368-373`).
 - **G4. Show army does nothing for a dead or inactive army.** `src/rules/script.rs:745-750` reveals only an on-map army. The exe (0x4ab51b) reads the record's current cell (+0x1724, +0x1728) for any army, so a dead army shows its death cell. The inactive case is open.
@@ -878,7 +878,7 @@ A stored duration of N plays as N × 60 hours in the game (the 2026-11-05 open e
   rule, `game.rs:2152`).
 - **S2. Finish timing (G1). Not from the screens; an engine test.** A message event with gold +5 and an
   activation of army X. Expect (exe): gold unchanged and X off the map while the window is up; both applied at OK.
-  Razdor applies them at open until G1 is fixed, so this test documents the gap.
+  Razdor applies them at OK (G1, fixed 2026-11-06; test `a_message_events_finish_time_results_apply_at_ok`).
 - **S3. Quest chain (6.2, 6.3, 6.19.1).** Event 1: global, once, archetype "all"; meet an allied feudal army
   (One Hero, 280$); result 1 a message; subordinate event 2; gold, mana and XP 0; no completed quest; no relative
   event; flag empty. Event 2 (the quest): type quest; subordinate ticked (repeat 0 days, duration 0 h, "many

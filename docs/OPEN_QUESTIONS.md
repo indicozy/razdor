@@ -65,17 +65,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   found; whether any code branches on model 9 for a point is not checked here. Not changed in this pass (no code
   changes); fix the comment with the next change to `dtm.rs`.
 
-- **Message events: the finish results apply when the window opens, not at OK** (2026-11-05, the
-  Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G1). `EventEngine::open` calls
-  `show` and then `finish` (`src/rules/events.rs:1455`; the Yes path at `:1194-1195`), so gold,
-  mana, XP, activations and deactivations, flags, the journal, relative starts and the victory latch
-  apply while the window is up. The battle, spell and delay also start under it (`:1655`, `:1658`,
-  `:1661`). The exe applies the finish results at OK (0x4c206c calls 0x4ab1ec) and queues the
-  battle, spell and delay until then. The spec's "When results apply" row said "Matches" and now
-  says it differs. Settled by the guide's scenario S2 (gold and an army activation unchanged while
-  the window is up, both applied at OK) and by what the player sees in between. Fix: move the finish
-  to the OK path; the owner decides whether a change to when map results land goes on the
-  experimental track.
 - **Two battle events in one tick: the second replaces the first** (2026-11-05, the Hristos
   editor-guide analysis, docs/reference/editor-guide.md, gap G2). `start_battle`
   (`src/rules/script.rs:827-833`) sets `foe` and queues the encounter when `finish` runs
@@ -806,6 +795,13 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 - **Decrement recipe: `-X^` with X absent** (2026-11-05; settled 2026-11-06, docs only). The owner kept
   Razdor's no-op (D4): `src/rules/events.rs:1054` does nothing when X is absent, a deliberate deviation
   from the exe, which lowers the byte at position len(X) (0x4ab2a3) and corrupts another flag.
+- **Message events: the finish results apply at the window's OK** (2026-11-05, the Hristos editor-guide analysis,
+  docs/reference/editor-guide.md, gap G1; settled 2026-11-06). The exe applies the finish-time results at OK:
+  0x4c206c calls 0x4ab1ec (0x4c20b8). The Yes path with a message opens the window through 0x4a8ae8 and does not
+  finish (0x4c2220); a textless Yes finishes at once (0x4c2214). Razdor now holds the finish until
+  `EventEngine::window_closed` and saves the open window (`window`), so a loaded game shows it and applies the
+  results at its OK. Changes the timing of gold, mana, XP, flags, armies, the battle and the victory on a message
+  event: a player-visible change (changelog, unreleased).
 - **The stale comments on the speed bonus and the mana carry-over are reworded** (2026-11-05, the Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G11; settled 2026-11-06). `src/rules/world.rs` (`speed_for`) now says the test is unit 2, the archmage (GlobalIndex 2, the loader's test at 0x4b4824, `world.md §2`), and points to the open question on the Ranger, which stays open ("The speed bonus: unit 2 or the ranger?"). `src/rules/script.rs` (`NextMap::mana`) no longer calls the mana a "(guess)": it is byte 1 of the carry-over group (next map's header bytes 0x110..0x116, `saves-data.md §6`), settled in "Mana carry-over is the header's byte 1". The tests are unchanged.
 - **A chain deeper than the cap is reported, not dropped** (2026-11-05, the Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G6; settled 2026-11-06). `CHAIN_DEPTH = 32` (`src/rules/events.rs`) stays as a safety net against infinite recursion: a deliberate deviation, listed in `docs/reference/original-mechanics/events.md` ("Razdor now → original"). A cut now emits `EventOutcome::ChainCut(id)`, and the UI logs it, as it logs the loop guard. Test: `a_chain_deeper_than_the_cap_is_cut_and_reported` (`src/rules/events.rs`).
 - **The ranger's noon heal uses the start class, as the exe does** (2026-11-05, the Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G3; settled 2026-11-06). The noon scan (0x4abfbc) and the noon report's heal (0x4ac427) read the start-class global (0x68dccc), which only a new game and a load write (never an event's class change). `ranger_heal` (`src/rules/economy.rs`) now tests `start_class()`, and the comment at `set_hero_class` (`src/rules/script.rs`) no longer says class bonuses are lost on a change. Test: `the_ranger_noon_heal_follows_the_start_class` (`src/rules/game.rs`).

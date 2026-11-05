@@ -95,6 +95,13 @@ the leader's caption is the same kind: an event fired on meeting an army sends `
 `EventEngine::hall` / `Game::take_hall_entry`; `QuestAdded` / `QuestCompleted` go into the journal
 (`History::record_outcomes`); `#HERONAME` is the only text placeholder (`Game::fill_text`).
 
+**Window and OK** (events.md §6-7). A message event's dialog-time results (artefacts, units, spells) apply
+when its window opens; its finish (gold, mana, XP, flags, armies, lanterns, the victory or defeat latch, the
+battle, spell and delay, then its chain) runs at the OK (`EventEngine::show` keeps it, `window_closed` runs
+it; `Game::event_window_closed`). The open window is `EventEngine::window`, saved in the engine's state: a
+loaded game shows it again (`Game::event_window`, `ui/mod.rs` `load`) and its finish waits for that OK.
+Tests: `a_message_events_finish_time_results_apply_at_ok` and the window tests in `src/rules/events.rs`.
+
 **Victory and defeat** (events.md §11). The scenario's victory or defeat event stops the engine
 (`EventEngine::ended`); after its window the game returns to the main menu. Losing the whole army
 (in battle, or to a spell) is a defeat too, without the map's defeat event: the battle screen closes
