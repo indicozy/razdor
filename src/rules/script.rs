@@ -809,8 +809,11 @@ impl EventWorld for Game {
         }
     }
 
-    /// The hero becomes unit type `unit`, keeping level, XP and items; the class bonuses
-    /// (tied to the three hero types) are lost. His HP follows the same rule as opcode 7
+    /// The hero becomes unit type `unit`, keeping level, XP and items. The unit's own stats and
+    /// bonuses come with the new type; the values the game ties to the START class do not change
+    /// (sight, speed and the archmage's cast divisor, `Game::start_class`; the Ranger's noon heal,
+    /// `Game::ranger_heal`, 0x68dccc). So an archmage or a ranger keeps his start class's values
+    /// whatever unit he becomes. His HP follows the same rule as opcode 7
     /// (`retype_unit`): the original's event 16 (events.md, "New hero class") writes only the
     /// unit's type, so an unhurt hero stays unhurt at the new maximum (an unhurt unit's HP is
     /// −1, magic-items.md §4.1) and a wounded one keeps its HP number. His map figure is not

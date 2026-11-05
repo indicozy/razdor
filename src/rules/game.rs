@@ -3521,6 +3521,39 @@ mod tests {
     }
 
     #[test]
+    fn the_ranger_noon_heal_follows_the_start_class() {
+        // The noon scan (0x4abfbc) and the report's heal (0x4ac427) test the start-class global
+        // (0x68dccc), not the hero's unit: an event that makes a Ranger a Knight keeps the heal,
+        // and one that makes a Knight a Ranger adds none.
+        use crate::rules::events::EventWorld as _;
+        // The (hp, max) of every unit after one noon, each wounded to 1 HP first. No report
+        // opens (no income, no bill), so only the 15% is in play.
+        let noon = |start: HeroClass, unit: u8| {
+            let mut g = quiet_game(start);
+            for l in g.world.locations.iter_mut().filter(|l| l.owned()) {
+                l.owner = crate::rules::world::Owner::Neutral;
+            }
+            g.set_hero_class(unit);
+            assert_ne!(g.hero_class(), Some(g.start_class()), "the class really changed");
+            g.first_noon_today();
+            let c = g.content.clone();
+            for u in g.squad.iter_mut() {
+                u.hp = 1;
+            }
+            let mut events = Vec::new();
+            g.pass_time(4.0 * 60.0, &mut events);
+            assert!(events.iter().all(|e| !matches!(e, Event::NewDay(_))), "{events:?}");
+            g.squad.iter().map(|u| (u.hp, u.max_hp(&c))).collect::<Vec<_>>()
+        };
+        for (hp, max) in noon(HeroClass::Ranger, 1) {
+            assert_eq!(hp, (1 + max * 15 / 100).min(max), "a Ranger start heals 15% after a Knight change");
+        }
+        for (hp, _) in noon(HeroClass::Knight, 3) {
+            assert_eq!(hp, 1, "a Knight start does not heal after a Ranger change");
+        }
+    }
+
+    #[test]
     fn unpaid_units_sit_out_battles() {
         let mut g = quiet_game(HeroClass::Knight);
         let spear = unit(&g, "spearman");

@@ -479,9 +479,13 @@ impl Game {
     }
 
     /// The Ranger hero heals every wounded unit of his army `pct`% (truncated): 15 at noon,
-    /// 20 more when the noon report is shown.
+    /// 20 more when the noon report is shown. The test is the START class, as in the original:
+    /// the noon scan (0x4abfbc) and the noon report's heal (0x4ac427) read the start-class
+    /// global 0x68dccc, which only new game and load write (never an event's class change).
+    /// So an event that makes a Ranger a Knight keeps the heal, and one that makes a Knight a
+    /// Ranger adds none.
     pub(crate) fn ranger_heal(&mut self, pct: i32) {
-        if self.hero_class() == Some(HeroClass::Ranger) {
+        if self.start_class() == HeroClass::Ranger {
             let c = self.content.clone();
             for u in self.squad.iter_mut() {
                 heal_percent(&c, u, pct);

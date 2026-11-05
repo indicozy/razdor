@@ -85,16 +85,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   by the exe's exit from the scan after a battle-only finish (0x4abfbc) and the battle army's local
   (0x4ab51b), or by a map with two battle events and no text. Then stop the scan at a battle, or
   document the difference.
-- **The ranger's noon heal follows the current class; the exe follows the start class** (2026-11-05,
-  the Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G3). `ranger_heal`
-  (`src/rules/economy.rs:483-491`) calls `hero_class()` (`src/rules/game.rs:1021-1023`). The exe
-  reads the start-class global (0x68dccc) at the noon scan (0x4abfbc) and in the noon report
-  (0x4ac427). An event class change (`set_hero_class`, `src/rules/script.rs:818-824`) makes the two
-  differ, in both directions. The comment at `script.rs:812-817` says class bonuses are lost on a
-  change, which is wrong for archmage and ranger (`game.rs:1069-1085`, `magic.rs:368-373`). Settled
-  by the exe's writes to 0x68dccc (the class picker and the restart restore; the event change is not
-  known to write it). Fix: key the heal to the start class and correct the comment. Live test: an
-  event class change to ranger on a wounded army, then a noon.
 - **Show army reveals nothing for a dead or inactive army** (2026-11-05, the Hristos editor-guide
   analysis, docs/reference/editor-guide.md, gap G4). `show_army` (`src/rules/script.rs:745-750`)
   reveals only an on-map army. The exe (0x4ab51b) reads the record's current cell (+0x1724, +0x1728)
@@ -827,6 +817,7 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Settled
 
+- **The ranger's noon heal uses the start class, as the exe does** (2026-11-05, the Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G3; settled 2026-11-06). The noon scan (0x4abfbc) and the noon report's heal (0x4ac427) read the start-class global (0x68dccc), which only a new game and a load write (never an event's class change). `ranger_heal` (`src/rules/economy.rs`) now tests `start_class()`, and the comment at `set_hero_class` (`src/rules/script.rs`) no longer says class bonuses are lost on a change. Test: `the_ranger_noon_heal_follows_the_start_class` (`src/rules/game.rs`).
 - **A trailing `=` in a result flag is an empty test, and the test passes** (2026-11-05, the editor-guide screenshot pass, docs/reference/editor-guide.md, chapter 7, 7.3). `events.md §5` splits a title at `%`, then the action is the text up to `=` and the test is the text after it. For `+DRAW=` the action is `+DRAW` and the test is empty, which passes (the empty-test rule). So the guide's example does no harm in the game. Whether the editor drops the `=` when the field is typed is still open (the entry above).
 - **Spec items the screens confirm, with no change** (2026-11-05, the editor-guide screenshot pass, grouped). "Once" and "many times": the box is the inverse of byte 141 (records §9.1, `dtm-format.md §9`); the default is the open "many times default" entry. A subordinate event has repeat 0, duration 0 and "many times" ticked and greyed (records §9.1). A relative-only start is year 2000 in minutes (1,036,800,000). A relative call's hours are the unit of byte 79 (`dtm-format.md §9`). The owner code 6 in a named-character check is "not the player" (`dtm-format.md §9` owner codes). A named-character record sets the unit combo to its class (records §9). Each was checked against the screens of pp. 139-262 (chapters 6 to 9); none contradicts the spec.
 - **Editor layout points, no parity effect** (2026-11-05, the editor-guide screenshot pass, grouped). The garrison's checkboxes sit on different tabs than the spec's one row (records §4.2 puts both in one row; the barracks and garrison tabs hold them on the screens, pp. 36-37 and 44). The building window's income labels are sums (records §8.1; castles plus forts, and villages). Neither changes a byte.
