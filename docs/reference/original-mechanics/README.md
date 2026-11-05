@@ -32,6 +32,7 @@ differs. Those tables are the work list for bringing Razdor in line.
 Not covered here: the file formats, which are in [../dtm-format.md](../dtm-format.md) and
 [../graphics-formats.md](../graphics-formats.md).
 The older overview with the data-file semantics is [../mechanics.md](../mechanics.md).
+A community map-editor guide, checked against these specs and the exe: [../editor-guide.md](../editor-guide.md).
 
 ## How far this is verified (status 2026-10-03)
 

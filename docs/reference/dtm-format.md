@@ -221,7 +221,7 @@ Buildings have 1-based ids in file order. Events refer to buildings by that id.
 | 352 | u8 | always 0 (U) |
 | 353 | u8 ×3 | starting building for knight, archmage, ranger |
 | 356 | u8 | "all types" recruitment flag (allows bandits and similar) |
-| 357 | u8 | garrison is AI-only |
+| 357 | u8 | "garrison is AI-only" as the editor writes it; no code reads it (the exe reads no byte at +0x165), so the game ignores it |
 
 Building types (byte 6), confirmed against the building names:
 
@@ -489,7 +489,8 @@ then ARGB4444 pixels as the UGS sprites have them, but not scrambled (C: 0x4d169
 
 ## 13. Open questions
 
-- Exact passability and speed factor for each terrain code and object class.
+- Passability and speed factor per terrain code and object class: settled from the exe in
+  `original-mechanics/world.md §1.1` (the editor guide's passability legend agrees).
 - The grid topology (see section 4; 8-neighbour squares is the working assumption).
 - Army bytes 8, 59 and 80. Hero preset bytes 0–7 and 17–18. Header 0x120.
 - Event bytes 151–162.

@@ -8,6 +8,265 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **Message events: the finish results apply when the window opens, not at OK** (2026-11-05, the
+  Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G1). `EventEngine::open` calls
+  `show` and then `finish` (`src/rules/events.rs:1455`; the Yes path at `:1194-1195`), so gold,
+  mana, XP, activations and deactivations, flags, the journal, relative starts and the victory latch
+  apply while the window is up. The battle, spell and delay also start under it (`:1655`, `:1658`,
+  `:1661`). The exe applies the finish results at OK (0x4c206c calls 0x4ab1ec) and queues the
+  battle, spell and delay until then. The spec's "When results apply" row said "Matches" and now
+  says it differs. Settled by the guide's scenario S2 (gold and an army activation unchanged while
+  the window is up, both applied at OK) and by what the player sees in between. Fix: move the finish
+  to the OK path; the owner decides whether a change to when map results land goes on the
+  experimental track.
+- **Two battle events in one tick: the second replaces the first** (2026-11-05, the Hristos
+  editor-guide analysis, docs/reference/editor-guide.md, gap G2). `start_battle`
+  (`src/rules/script.rs:827-833`) sets `foe` and queues the encounter when `finish` runs
+  (`src/rules/events.rs:1654-1656`), while `run` (`:1277-1288`) keeps going. `held` is set only for
+  a message (`:1466-1473`), so a battle-only event with no message does not stop the scan.
+  `events.md §2` lists lanterns, shown army and spell as holding nothing, but not battles. Settled
+  by the exe's exit from the scan after a battle-only finish (0x4abfbc) and the battle army's local
+  (0x4ab51b), or by a map with two battle events and no text. Then stop the scan at a battle, or
+  document the difference.
+- **The ranger's noon heal follows the current class; the exe follows the start class** (2026-11-05,
+  the Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G3). `ranger_heal`
+  (`src/rules/economy.rs:483-491`) calls `hero_class()` (`src/rules/game.rs:1021-1023`). The exe
+  reads the start-class global (0x68dccc) at the noon scan (0x4abfbc) and in the noon report
+  (0x4ac427). An event class change (`set_hero_class`, `src/rules/script.rs:818-824`) makes the two
+  differ, in both directions. The comment at `script.rs:812-817` says class bonuses are lost on a
+  change, which is wrong for archmage and ranger (`game.rs:1069-1085`, `magic.rs:368-373`). Settled
+  by the exe's writes to 0x68dccc (the class picker and the restart restore; the event change is not
+  known to write it). Fix: key the heal to the start class and correct the comment. Live test: an
+  event class change to ranger on a wounded army, then a noon.
+- **Show army reveals nothing for a dead or inactive army** (2026-11-05, the Hristos editor-guide
+  analysis, docs/reference/editor-guide.md, gap G4). `show_army` (`src/rules/script.rs:745-750`)
+  reveals only an on-map army. The exe (0x4ab51b) reads the record's current cell (+0x1724, +0x1728)
+  for any army, so a dead army shows its death cell. The inactive case (the guide says the start
+  cell) is not traced. Settled by a trace of the inactive path in the exe; then reveal the record's
+  cell for a dead army.
+- **Picture 202 (the met army's leader) is not drawn** (2026-11-05, the Hristos editor-guide
+  analysis, docs/reference/editor-guide.md, gap G5). `src/ui/story.rs:53-63` treats any picture
+  value other than 0, 200 and 201 as a unit id, so 202 gives no picture. The meeting caption
+  (`story.rs:133-137`) shows only the leader's name. The editor offers portraits below 200 and the
+  two stock pictures (`src/ui/editor/events.rs:99-100`). `events.md §6.3` lists 202 as the met
+  army's leader. Settled by checking the shipped maps for 202; if one uses it, draw the leader's
+  picture.
+- **Event scan: a chain-depth cap and the idle-reset placement** (2026-11-05, the Hristos
+  editor-guide analysis, docs/reference/editor-guide.md, gaps G6 and G7). `CHAIN_DEPTH = 32`
+  (`src/rules/events.rs:34`, used at `:1672`) drops a deeper chain without a trace; the exe has no
+  limit, so emit an outcome or log it. The idle reset (`events.rs:1293-1301`) runs at the end of
+  `run`; the exe resets in each idle pass, including the nested passes of chain tails (0x4abfbc
+  tail, 0x4ab51b tail), so it can reset events fired earlier in the same tick. Low risk. Settled by
+  the S10 variant (a window-opening chain inside a procedure) and the exe's tail order.
+- **Managed armies skip the revival on activation** (2026-11-05, the Hristos editor-guide analysis,
+  docs/reference/editor-guide.md, gap G8). `src/rules/script.rs:340-343` returns an army that
+  `ai::managed` rejects (`src/rules/ai.rs:423-425`, which is `a.ai.enabled`) before the revival, the
+  building copy and the wander points (`script.rs:344-366`). The exe has no such test (0x4969b8).
+  `AiProfile::from_dt` sets `enabled: true` (`ai.rs:203`), so only a save-compatibility path sets it
+  false. Settled by finding that path; then make the revival unconditional or document the path.
+- **A player's ship summon is not special-cased** (2026-11-05, the Hristos editor-guide analysis,
+  docs/reference/editor-guide.md, gap G9). `activate` (`src/rules/script.rs:305-320`) places any
+  waiting army through `placement` (`src/rules/ships.rs:133`). The exe treats leader type 0xFE as
+  the hero's single parked-ship record: the summon at 0x4969b8 → 0x496ec4, the dismissal at 0x496900
+  → 0x49704c. The only 0xFE handling in `src/rules` is for event units
+  (`src/rules/events.rs:78-86`). Known: in the exe a second summon leaves the old cell's occupancy
+  set (the guide's "blocked" claim); Razdor keeps one parked tile. Open: whether a second ship is
+  drawn at once. Settled by two summons in game, then the leader-type rule.
+- **The village gate reads the hero's base nature** (2026-11-05, the Hristos editor-guide analysis,
+  docs/reference/editor-guide.md, gap G10). `village_ready` (`src/rules/economy.rs:770-775`) tests
+  the base unit's nature; the exe reads the hero's current nature byte (0x75aa61). The two differ
+  only if an item or a spell changes the nature. Low risk. Settled by checking whether any item or
+  spell changes the nature byte; then read the current nature.
+- **Stale comments on the speed bonus and the mana carry-over** (2026-11-05, the Hristos
+  editor-guide analysis, docs/reference/editor-guide.md, gap G11; tiny, two files).
+  `src/rules/world.rs:791-793` says the archmage test is "probably meaning the Ranger" (the test is
+  unit 2, the archmage, as `world.md §2` says; the question stays open, see "The speed bonus").
+  `src/rules/script.rs:1147` calls the mana carry-over a "(guess)"; byte 1 settles it (see Settled).
+  Fix the comments; keep the tests.
+- **Game draw order: buildings draw above trees, rocks and mountains in one cell** (2026-11-05, the
+  Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G12, unverified).
+  `src/ui/world_view.rs:1640-1655` (`LAYER_BUILDING` 2 above the object layers 0 and 1, from
+  `object_layer`) and `:1682-1686`. The guide's p.240 screenshot shows stones over a town. The cell
+  pass follows 0x4c8864 by row and layer, as the comment says. Settled by 0x4c8864 and 0x4c9459 (the
+  layer of stones and trees against buildings), or by footage of a town with stones in its cell. Do
+  not change the order before then.
+- **The editor's draw order does not follow the editor's layers** (2026-11-05, the Hristos
+  editor-guide analysis, docs/reference/editor-guide.md, gap E7). `src/ui/editor/canvas.rs:249-300`
+  sorts terrain objects, buildings and armies by y only (the sort at `:278`). The original editor
+  draws hills of classes 1-4 first, then per cell: forest, mountains and rocks, buildings, figures
+  (`dt-editor` main-window §8.1, editor 0x5ab588). A change to the editor's view is a UI change, so
+  the owner approves it. Fix: follow the layered order, or decide to keep the sort.
+- **The editor has no control for the army's daily income, and two army fields are misnamed**
+  (2026-11-05, the Hristos editor-guide analysis, docs/reference/editor-guide.md, gaps E1 and E2).
+  Byte 80 (`src/dt/dtm.rs:797-798`, `unknown_80`, the daily income in tens) is read as
+  `extra_income` (`src/rules/ai.rs:210`), but the troops tab (`src/ui/editor/props.rs:253-263`) has
+  only "Starting gold". `gold_income` (`src/dt/dtm.rs:739-740`) is the starting gold (byte 17),
+  bound at `props.rs:259`. The original's troops tab shows the income ×10 (dt-editor `records.md
+  §2`). Fix: add the control (display ×10, stored 0-250, step 10) and rename both fields.
+- **"Garrison serves the AI only" does nothing** (2026-11-05, the Hristos editor-guide analysis,
+  docs/reference/editor-guide.md, gap E3). The checkbox (`src/ui/editor/props.rs:149`, byte 357) is
+  set by `src/editor/defaults.rs:71` (towns and ruins) and `src/editor/doc.rs:1021` (the sample
+  map). No code in `src/rules` reads it, and the exe reads no byte at +0x165. `dtm-format.md §6` row
+  357 now says so (2026-11-05). Fix: remove the checkbox, or label it "no effect in the game".
+- **Editor ranges wider than the original's** (2026-11-05, the Hristos editor-guide analysis,
+  docs/reference/editor-guide.md, gap E4; one file). `props.rs:148` garrison defence 0-255 (the
+  original's trackbar is 0-50; six shipped buildings hold 65, 75 or 100, so a Razdor save and an
+  original save disagree); `props.rs:263` garrison strength 0-255 (original 0-90); `props.rs:274`
+  speed correction -10..10 (original -3..5); `props.rs:269` aggression -128..127 (original -100..100
+  in steps of 10); `props.rs:282` respawn 0-255 (original 0-30); `props.rs:284` experience
+  correction 0-255 (original 10-250 in steps of 5); `props.rs:273` patrol radius 0-255 (original
+  0-250 in steps of 5); `props.rs:188` income per day 0-2500 (original 0-250 in steps of 10);
+  `props.rs:189` most kept 0-25000 (original 0-2500). The original's ranges are in dt-editor
+  `records.md §2-3`. Fix: clamp to the original's ranges, or record that the wider values are kept
+  on purpose.
+- **Ruin treasure shows six slots, the game takes five; the stock label is misleading** (2026-11-05,
+  the Hristos editor-guide analysis, docs/reference/editor-guide.md, gaps E5 and E6; one file).
+  `src/editor/records.rs:36-37` (`GOODS = 6`) sizes the ruin slots at
+  `src/ui/editor/props.rs:154-155`; the game uses the first five (`src/rules/world.rs:1127, 1131`,
+  `goods(5)`). `props.rs:189` labels the stock maximum "Most kept (villages)", but it applies to
+  every building with a max (0x4a1998; `economy.md §3`). Fix: five slots for ruins; relabel.
+- **Editor validator gaps** (2026-11-05, the Hristos editor-guide analysis,
+  docs/reference/editor-guide.md, gap E8; `src/editor/validate.rs`, `src/editor/events.rs:186-197`).
+  (a) No flag-name length rule (the guide says 20 or more characters risk memory errors; see "The
+  guide's chapter 7 limits" below). (b) No warning when a test is a substring of another flag name
+  (the 9.16 trap; the runtime keeps the substring behaviour on purpose). (c) No warning for a
+  counter test that ends in `^` (the guide's "RAND^^"; the exe says it never matches). (d) The
+  picture size and the inventory limit are unchecked (see "The guide's chapter 7 limits"). Fix: add
+  the warnings in (b) and (c), and the length rule once its real limit is known.
+- **The guide's chapter 7 limits: event points, the picture size, the inventory, the flag name**
+  (2026-11-05, the Hristos editor-guide analysis, docs/reference/editor-guide.md, chapter 7 and gap
+  E8). The guide says an event point holds five events, an event picture without text must not
+  exceed 581 × 563, the player's inventory holds 253, and a flag name of 20 or more characters can
+  cause memory errors. The validator checks an event point against its 10-slot array
+  (`src/dt/dtm.rs:950`), checks a building's 64 local events against its array (`validate.rs:266`),
+  and has no picture-size, inventory or flag-length rule. The flag buffer size (0x68ed00) is not
+  checked. Settled by the exe's arrays and checks for each limit, and the editor's maxima; only then
+  fix the validator.
+- **A scenario picture: does the decoder accept a BMP?** (2026-11-05, the Hristos editor-guide
+  analysis, docs/reference/editor-guide.md, chapter 1). The guide (pp. 18-19) says only a 267×134
+  LIT made by one tool works, and that other converters write newer LIT versions the game rejects.
+  `docs/reference/graphics-formats.md` says the UI picture loader (0x48cd90) chooses BMP or LIT by
+  the first byte. Where: the header's picture bytes (0x11C; the reader in `saves-data.md`) and the
+  decoder. Settled by the scenario picture's decoder: whether it has the same first-byte test, and
+  any version or flag check.
+- **The speed bonus: unit 2 or the ranger?** (2026-11-05, the Hristos editor-guide analysis,
+  docs/reference/editor-guide.md, chapter 4). `speed_for` (`src/rules/world.rs:794-796`) subtracts
+  one when the leader is unit 2 (the archmage), while the comment says "probably meaning the Ranger"
+  (`:791-793`). `world.md §2` gives the same test. The guide (p.61) says correction 1 gives the
+  ranger's speed, which does not settle it. Settled by the constant the exe's loader compares for
+  the -1, and by a Community note.
+- **The default garrison strength of a new army** (2026-11-05, the Hristos editor-guide analysis,
+  docs/reference/editor-guide.md, chapter 4). The guide (p.63) implies a new army does not defend
+  its castles by default. Razdor creates new armies with 50 (`src/editor/defaults.rs:89`); shipped
+  maps use 50 on 82 of 94 feudal armies. The original's form gives the spin a maximum of 90 and no
+  default. Settled by the editor's new-army record initializer (the placement path) and by how
+  `ai.rs:2603` uses the value (0 means none).
+- **The interval N: hours, or the editor's N × 60?** (2026-11-05, the Hristos editor-guide analysis,
+  docs/reference/editor-guide.md, chapter 5, 5.5). `events.md §3.4` and the exe reading of 0x4a7b80
+  disagree on the length of a window of N. The exe reading: the window ends at the day's start plus
+  the stored value × 60 minutes. So for a repeating event any stored N of 1 or more covers the whole
+  cycle day, and only 0 cuts it short; the 6.17 hourly relative calls depend on the same window. The
+  guide says N hours (its N = 6 example opens for six hours). Settled by a shipped map with N other
+  than 0 or 24, and a live window at N = 6.
+- **A text-only event with a duration of 0** (2026-11-05, the Hristos editor-guide analysis,
+  docs/reference/editor-guide.md, chapter 5, 5.5). The guide says it never happens. The exe reading
+  (0x4a7b80): a stored 0 counts as one hour, so the event fires once in the first hour of each
+  eligible day, and `events.md §3.2` and `§3.4` agree with that reading. The guide's "crash for
+  other results" is not traced. Settled by a live test: a text-only event with duration 0, checked
+  hour by hour.
+- **An army activated and deactivated in one tick, and the related crashes** (2026-11-05, the
+  Hristos editor-guide analysis, docs/reference/editor-guide.md, chapters 5, 6, 7 and 9). The guide
+  says it crashes (5.12.4, cited in 6.13-6.15 and 7.5), and cites a Community fix that is not in
+  `community-patches.md`. No fault path turns up in 0x4969b8, 0x496900, 0x496774 or 0x48eeb0. The
+  related guide claims are also open: activating an army on an empty map crashes (9.4), and a patrol
+  change on an inactive army crashes at the lower edge (5.12). Settled by a replay or Frida trace of
+  the two calls in one scan, or the Community mod's hooks on those routines.
+- **Emptying the hero's army, and the leader choice** (2026-11-05, the Hristos editor-guide
+  analysis, docs/reference/editor-guide.md, chapter 7, 7.14). The guide says that emptying the
+  hero's army with an event crashes the game once the army window is opened (not verified), and that
+  taking the hero's unit can make the earliest-joined character the leader (not traced). Settled by
+  a test (empty the hero's army in an event, then open the army window) and a trace of the leader
+  choice in 0x4961d0.
+- **A lantern, army show or spell in one event with another effect** (2026-11-05, the Hristos
+  editor-guide analysis, docs/reference/editor-guide.md, chapters 5 and 9, 5.13 and 9.9). The guide
+  says the first runnable event fires without its conditions being checked, causing random events
+  and crashes. `events.md §8` describes the chain timer, not this effect. Settled by tracing
+  0x4ab1ec and 0x4af658 for the condition test on a chained lantern, show or spell.
+- **Crash, UI and size claims the guide makes and nobody has traced** (2026-11-05, the Hristos
+  editor-guide analysis, docs/reference/editor-guide.md, chapters 1 and 5-9; grouped). Map sizes 400
+  and 800 break the game and the editor (chapter 1); text limits of about 25,000 Cyrillic and 16,000
+  Latin characters; a lantern radius above 24 crashes; a 581 × 563 picture with one space of text
+  crashes; levels near 100 crash; a delayed rumour window needs Esc; overlapping interfaces when a
+  battle starts in a building or with a text event (9.13); an autosave cannot replay a far battle;
+  frequent class changes crash; a custom alliance crashes (9.14); the victory and defeat pictures
+  render badly; a negative tactical cost crashes (9.2, which is a different mechanism from the
+  negative vampirism entry). Settled by a test of each claim in game.
+- **Unit codes for "any unit" and "added unit"** (2026-11-05, the Hristos editor-guide analysis,
+  docs/reference/editor-guide.md, chapter 7, 7.13). `events.md §7` and `src/rules/events.rs:78-86`
+  give 255 for any unit and 254 (0xFE) for an event unit. The guide's trace notes the exe's 0x4961d0
+  tests 0xFE for "any unit" and 0xFD for "added unit" (the last unnamed unit of wage kind 3). The
+  two readings disagree on which number is which. Known: the search is the same kind in both (an
+  unnamed unit, not the hero; for the added unit, the event's wage kind). Settled by the code
+  numbers the dispatcher at 0x4961d0 compares, against `events.rs:78-86`.
+- **The wage kind of an event-moved unit, and named units' pay** (2026-11-05, the Hristos
+  editor-guide analysis, docs/reference/editor-guide.md, chapters 5 and 7, 5.8 and 7.16). `events.md
+  §7.1`: a unit taken from an army keeps its whole record, wage kind included; an event unit is kind
+  3 (never paid, 0x4a94b3). The guide says units moved from an army pay and named ones never do; its
+  7.16 leans the other way. `script.rs:653-665` copies the record into a full army. Settled by
+  tracing the wage kind through the record copy (0x4a8fe5) and the wage code (0x496310), or in game:
+  a named unit moved out of the hero's army, then its wage.
+- **The hire row: does an empty first slot hide the hire list?** (2026-11-05, the Hristos
+  editor-guide analysis, docs/reference/editor-guide.md, chapter 3 and 7.4). The guide says a
+  building with an empty first hire slot heals but does not hire. The game's tab test opens the tab
+  if any of the six slots holds a unit (0x4bbc84), so the first slot alone does not hide it; the
+  hire-row builder was not traced. Razdor's tab covers all six (`src/rules/world.rs:593-601`).
+  Settled by tracing the hire-row builder and testing a town with an empty first slot.
+- **The battle tester's five options** (2026-11-05, the Hristos editor-guide analysis,
+  docs/reference/editor-guide.md, chapter 7, 7.18; on the `dt-editor` branch). The guide's five
+  switches (counter attack, ranged attack, one defender, attack one, movement and initiative) show
+  all unticked in its screenshot, while our defaults have three on. The controls are cbAnswer,
+  cbDist, cbOneDef, cbAtkOne and cbMovIni; only cbAnswer and cbMovIni map clearly (testers §2.4,
+  0x5bb114-0x5bb124). Settled by the switch mapping at those addresses, and by whether a ticked box
+  means on.
+- **The editor's attitude steps for a messenger** (2026-11-05, the Hristos editor-guide analysis,
+  docs/reference/editor-guide.md, chapter 6, 6.11). The guide puts a messenger at 66 per cent as +2
+  and at 100 per cent as +3 (inferred). The exe-traced price steps give 66 per cent as +1 and 83 per
+  cent as +2. Both are above 0, so the messenger behaves the same either way. Settled by the
+  editor's slider-to-attitude mapping in the army form.
+- **The vanilla XP above 2147 per unit** (2026-11-05, the Hristos editor-guide analysis,
+  docs/reference/editor-guide.md, chapters 4 and 7). The vanilla award is a 32-bit product divided
+  by 10^6 (0x4c5676-0x4c569d), so a product above about 2147 wraps instead of capping
+  (`experience.md:391`). The guide says the XP resets to 0 above the cap and that the battle gives
+  no XP. Known: the wrap exists; the value it leaves is not known. Settled by the exact result of
+  the wrapped product at those addresses, and by what Razdor does (`src/rules/experience.rs`).
+- **Tactical cost bias** (2026-11-05, the Hristos editor-guide analysis,
+  docs/reference/editor-guide.md, chapter 8, pp. 249-250 balance notes). The guide says the tactical
+  cost over-values regeneration, vampirism and magic resistance. The claim is not compared with our
+  `experience.md §1` weights. Settled by a comparison of the claim with those weights and a battle
+  test.
+- **Unit record +0x18: usable worn slots or personal items?** (2026-11-05, the Hristos editor-guide
+  analysis, docs/reference/editor-guide.md, chapter 6, 6.7). `saves-data.md:570` calls the byte
+  "usable worn slots" and `interface.md:1079` calls it "personal items"; the guide says personal
+  items cannot be taken off. Settled by the exe's use of that byte (the wear test and the personal
+  count), then correcting the wrong spec.
+- **The phantom left by "move army to hero"** (2026-11-05, the Hristos editor-guide analysis,
+  docs/reference/editor-guide.md, chapter 5, 5.12). The exe clears only the logical occupant byte of
+  the old cell (0x4980d8), so a phantom army stays on the old cell and cannot capture or interact
+  (the guide calls it a bug). Razdor clears the cell correctly and has no phantom
+  (`src/rules/script.rs:758-790`). A decision for the owner: keep Razdor's cleaner behaviour (the
+  analysis recommends it), or copy the exe. Copying changes play, so it goes on the experimental
+  track.
+- **Decrement recipe: `-X^` with X absent** (2026-11-05, the Hristos editor-guide analysis,
+  docs/reference/editor-guide.md, chapter 6, 6.17). `src/rules/events.rs:1054` does nothing when X
+  is absent (deliberate, D4 in the guide analysis). The exe lowers the byte at position len(X)
+  (0x4ab2a3), which corrupts a flag, so the guide's random-walk recipe breaks there. A decision for
+  the owner: keep the safer no-op (recommended), or copy the exe, which changes map behaviour
+  (experimental track). Scenario S11(c) documents Razdor's choice.
+- **Per-player divergence after hour 6** (2026-11-05, the Hristos editor-guide analysis,
+  docs/reference/editor-guide.md, chapter 6, 6.17). The guide blames a personal cache; the analysis
+  puts it down to the player's own stops and the real-time music draws (`engine.md §3.4`), which
+  Razdor models. Plausible, not tested. Settled by two recorded runs that differ only in the
+  player's stops.
 - **The original's camera limit: `W×32 − 1056` or `(W+2)×32 − 1056`** (2026-11-04, the dt-fix
   plan). `interface.md` §8 gives the view's bottom-right limit as `width × 32 − 1056` (and
   `height × 22 − 704`); `world.md` (camera line) and the raw notes give `(W+2)×32 − 1056`, from
@@ -43,6 +302,8 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   that chapter; the Hub catalog marks both partial. Unknown: whether the original strips the
   quotes when it opens the next map. Settled by the original's next-map open path in Ghidra
   (the `parity-check` skill); if it strips them, Razdor does too and the two campaigns become full.
+  (2026-11-05) The Hristos guide says a misspelt next-map name ends the campaign, which matches the
+  exact-name reading; it does not mention quotes; see editor-guide.md §2.
 - **Wide-row cells the battle screen does not show** (2026-10-30, a player's report: the witch
   stepped into a hidden reserve cell drawn over the woman standing there). The original opens the
   wide row's blocked cells on the player's battle grid (0x4d2233), so its rules allow a step into
@@ -80,6 +341,9 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   changes when every noon is paid, and the specs do not settle where that scan's noon falls against
   the AI's contact in the same step (events.md §1). Test: `a_tavern_question_at_noon_is_read_before_its_building_opens`
   shows the order Razdor gives.
+  (2026-11-05) The Hristos guide (chapter 5, p.76) says a local event is checked at the moment of
+  the visit, which is the rule Razdor follows; it does not settle the noon order; see
+  editor-guide.md §5.
 
 
 - **The Evolution Mod's exe: FirstShot's value.** Its 1.2 fix (c28935) is absent, so the +60
@@ -199,6 +463,8 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   collapse and the screen's counts are not refreshed by this strike. What the original does with
   the record later (turn-start regeneration, 4846c1, or the battle's end) is not traced. Settled by
   a trace of a drained attacker in Wine or a replay.
+  (2026-11-05) The Hristos guide (chapter 9, 9.2) names negative tactical costs as a crash, a
+  different mechanism; see editor-guide.md §9.
 - **Death-school vampirism on magic and a negative value** (2026-10-20, #1046). The spec's §3 text
   for the magic strike (48ad61) does not say whether the original has a sign test there. Razdor
   keeps `vampirism > 0` on that path (a negative value does nothing). Settled by reading 48ad61.
@@ -211,12 +477,17 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   noon with zero income and Rear Service differs by design (`rear_service`, `economy.md` §1
   step 7). Settled by finding the original's no-income path for wages (the code that reads the
   stored income near 0x4b5xxx/0xc250e4) and modelling it.
+  (2026-11-05) The Hristos guide's income notes (chapter 6, 6.19.4) do not give the formula; a
+  stationary army never earns or pays, which the guide also says; see editor-guide.md §6.
 
 - **The hero's figure on a campaign's next map** (2026-10-20, with the fix for the hero's figure
   after opcode 7). Razdor carries the figure with the hero's record (`NextMap::figure`, a guess:
   the original's hand-over copies the hero's whole record, 0x4b5b64, and the figure byte is in
   it, but this was not traced). Settle it by reading 0x4b5b64 for the army record 0 copy. Also
   unknown: whether the original's restart (0x4b5ef8) keeps a figure changed by opcode 17.
+  (2026-11-05) The Hristos guide does not mention figures. `saves-data.md §6` says the hand-over
+  copies "hero unit 1 := old unit 1" (the whole record), which supports carrying the figure but does
+  not prove it; see editor-guide.md §2.
 
 - **Bridge passed without stopping** (2026-10-20, from #1041). `world.md` §7.2 says a bridge counts
   as "the building the hero is on" for events, never as entered, and the scan runs after every step
@@ -224,6 +495,9 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   exclusion of the building the move began on (0x4ed434) is in. Still open: a live trace of the
   scan on a walk over a bridge (Wine) to confirm the order on the step, and the fight with Сэлдом
   (army 19) on «Устье Трейна» after 77 is done, which no test plays through.
+  (2026-11-05) The Hristos guide (chapter 7, 7.11) says an army on a bridge is open to ship attack
+  and cannot attack ships; no rule for that was found in the specs or the code; see editor-guide.md
+  §7.
 - **Save with unit 121 does not restore** (2026-10-20, #1041). The fort's garrison at (74, 59) on
   «Устье Трейна» has unit type 121 in the save; the install has 102 unit types, so `restore` panics
   in `ai_init` (`Content::unit`). Settled by checking the player's install (its unit count) and
@@ -508,6 +782,43 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   should grow (it needs room the list gives up) is the owner's call, a Razdor choice.
 
 ## Settled
+
+- **Mana carry-over is the header's byte 1** (2026-11-05, docs only). The campaign hand-over's
+  "Gods' favour" (the mana) is header byte 1 (`saves-data.md §6`, the same as the other carry-over
+  bytes). The "(guess)" in `src/rules/script.rs:1147` is stale (see the stale-comments entry above).
+  Settled by the exe's hand-over copy (the Hristos editor-guide analysis,
+  `docs/reference/editor-guide.md`, chapter 2).
+- **A friendly army inside its building never meets the hero** (2026-11-05, docs only).
+  Exe-confirmed: a stationary friendly army in a castle, fort or village is not met by walking onto
+  it (`world.md §4.2` steps 1-2, `ai.md §8`). Razdor does the same (`src/rules/game.rs:2152`,
+  `:2160-2162`). The guide's ally-dialogue scenario keeps its stationary variant as a regression
+  check (the Hristos editor-guide analysis, `docs/reference/editor-guide.md`, chapter 6).
+- **A start date before the scenario start: the event fires** (2026-11-05, docs only). Exe 0x4a7b80
+  sets a negative start to 0 and refuses only a start after now, so an event whose window is still
+  open at the start fires. `events.md §3.3` matches. The editor-side date formula is not checked
+  (the Hristos editor-guide analysis, `docs/reference/editor-guide.md`, chapter 5).
+- **Tribute is refused for the Rogue nature only** (2026-11-05, docs only). The exe tests the nature
+  byte against 3 alone (0x4bbd69, 0x4bbde6); undead and bandits are not refused. Razdor matches
+  (`src/rules/economy.rs:770-778`). The guide's chapter 7 claim is wrong (the Hristos editor-guide
+  analysis, `docs/reference/editor-guide.md`, chapter 7).
+- **The "respawn whole army" box and an event's activation** (2026-11-05, docs only). Activation
+  (0x4969b8) revives every unit left in the army's record, with no flag test; the box is the AI
+  respawn's (`ai.md §12`). Razdor matches (`src/rules/script.rs:340-366`). The guide's chapter 6
+  (6.14) claim is wrong (the Hristos editor-guide analysis, `docs/reference/editor-guide.md`,
+  chapters 6 and 7).
+- **The "RAND^^" counter test never matches** (2026-11-05, docs only). The exe's flag test drops
+  only the first `^`, so "NAME^^" becomes "NAME^", which never occurs in the flag string; "NAME^"
+  tests any value of NAME. Razdor matches (`src/rules/events.rs:998-1013`). An in-game check would
+  only confirm it (the Hristos editor-guide analysis, `docs/reference/editor-guide.md`, chapter 7).
+- **The player's loot has no minimum** (2026-11-05, docs only). Exe 0x4c50ec divides the gold by
+  VictoryGoldDiv with no threshold; MinVictoryGold applies to AI-against-AI fights only (`economy.md
+  §3`). `mechanics.md` said otherwise and is corrected; Razdor matches
+  (`src/rules/economy.rs:972-976`). The guide's "25 minimum" is wrong (the Hristos editor-guide
+  analysis, `docs/reference/editor-guide.md`, chapter 4).
+- **The relative-only event's start is the year 2000** (2026-11-05, docs only). `dtm-format.md §9`
+  (offset 2 = 1,036,800,000) and `events.md §3.3`. A scenario dated after 2000 makes that sentinel
+  earlier than now, so those events are eligible at once; that is the guide's symptom with our
+  mechanism (the Hristos editor-guide analysis, `docs/reference/editor-guide.md`, chapter 1).
 
 - **Author names in letters the bundled fonts lack** (2026-10-31, a player's report, 1438). A name
   such as «Ꙇѵαη Ꚍɣkhøηςhʋk» draws its Cyrillic Extended-B letters (U+A646, U+A68C) as boxes on

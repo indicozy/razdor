@@ -260,8 +260,9 @@ dmg  = max(1, dmg · (100 − target.Evasion)/100)       // Community
 
 ### 2.6 Rewards
 
-- The winner takes the loser's gold divided by `VictoryGoldDiv` (2), and at least
-  `MinVictoryGold` (25), or everything if the loser has less. [doc]
+- The winner takes the loser's gold divided by `VictoryGoldDiv` (2), with no minimum, in a
+  fight against the player's army (exe 0x4c50ec). `MinVictoryGold` (25) applies only to
+  AI-against-AI fights (`original-mechanics/economy.md §3`). [doc]
 - The loser's items become trophies. Surrendered units give mana. Capturing a castle or fort
   changes its owner. Clearing ruins gives the treasure. [doc]
 - Editor flag: an army can "carry no personal money", and then there is no gold to take. [doc]
@@ -656,11 +657,12 @@ Each is marked *(guess)* in the code.
 
 Stage 4 (buildings and economy, `rules/town.rs`, `rules/game.rs`):
 
-- **Building tabs**: every building has a main hall; towns, castles, forts and churches a
-  barracks (villages and altars hire for the AI only); the player's castles and forts a
+- **Building tabs**: every building has a main hall; towns, castles, forts, churches and altars a
+  barracks (villages have one for the AI only); the player's castles and forts a
   garrison; a building with goods a market, with spells a sanctuary; villages a tribute
-  tab. A building of attitude below 0 still trades and heals (the footage shows trading at
-  a market of attitude −2) but does not hire or pay tribute. A garrison still to be beaten
+  tab. A building of attitude below 0 still trades, heals and hires (the footage shows
+  trading at a market of attitude −2); the hire tab and the village tribute have no
+  attitude test (`original-mechanics/economy.md`, Razdor-now table). A garrison still to be beaten
   opens no window. An ill-disposed castle or fort with no garrison is taken by walking in.
 - **Main hall**: lists the building's quest and rumour events (`World::local_events`);
   local events fire by themselves and are not listed. Running them is the event engine's.
