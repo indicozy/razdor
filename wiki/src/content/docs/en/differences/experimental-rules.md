@@ -17,7 +17,7 @@ By default, for a new game, all eight are turned off. Your selection is remember
 
 * **All special bonuses simultaneously:** the fighter retains their type abilities and the abilities of equipped items. Identical abilities do not stack: a duplicate copy does not enhance the effect.
 * **Six equipment slots:** the fighter has six item slots instead of four (a third pair is added).
-* **No item limits:** any wearable item can be worn by any living fighter while they have a free slot. The class (shield, melee and ranged weapon, staff), magic school and holy item restrictions are lifted, as are the one-weapon rule and the one-item-per-kind rule. Potions and other goods still cannot be worn, the dead wear nothing, and the crown stays for its own unit types only.
+* **No item limits:** any wearable item can be worn by any living fighter while they have a free slot. The class (shield, melee and ranged weapon, staff), magic school and holy item restrictions are lifted, as are the one-weapon rule, the one-item-per-kind rule and the crown restriction (only the hero and noble warriors). Anyone can wear the crown. Potions and other goods still cannot be worn, and the dead wear nothing.
 * **No more than two potions per character:** between army battles, you can drink no more than two potions (including healing and resurrection potions).
 * **Free units:** the hero's army asks for no daily wages (neither gold nor mana). Hiring costs as usual.
 * **Automatic promotion:** as soon as a fighter of the hero's army can be promoted, it is promoted on its own, along a random branch of its upgrade tree. The hero is not promoted this way.

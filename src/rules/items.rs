@@ -234,14 +234,15 @@ pub fn take_off(content: &Content, unit: &mut Unit, slot: usize) -> Option<ItemI
 /// above `ShotWeaponRange`, a staff magic power; an item with a school only on a unit of that
 /// school; one weapon (staffs included); one item of each type.
 ///
-/// Razdor's «Без ограничений на предметы» (`unlimited_items`) skips every class, school, holy,
-/// weapon and kind check after the crown, dead and potion refusals: any wearable item goes on
-/// any living fighter while a cell is free. Battle needs no change for it: a worn item's
+/// Razdor's «Без ограничений на предметы» (`unlimited_items`) skips the crown check too, and
+/// every class, school, holy, weapon and kind check after the dead and potion refusals: any
+/// wearable item goes on any living fighter while a cell is free (only the dead and potion/goods
+/// refusals and a free cell remain). Battle needs no change for it: a worn item's
 /// `AttackBlow`, `AttackShot` and `MagicPower` count only where the unit's own level has them
 /// (`rebuild_stats`), so a bow on a warrior or a staff on a non-mage gives no role.
 pub fn slot_for(content: &Content, unit: &Unit, item: ItemId) -> Result<usize, EquipError> {
     let def = content.try_item(item).ok_or(EquipError::NoSuchItem)?;
-    if item.0 == CROWN && unit.wage_kind != WageKind::Leader && !CROWN_TYPES.contains(&unit.def.0) {
+    if item.0 == CROWN && unit.wage_kind != WageKind::Leader && !CROWN_TYPES.contains(&unit.def.0) && !content.experimental.unlimited_items {
         return Err(EquipError::NotAllowed);
     }
     if !unit.alive() && !revives(def) {
@@ -1028,7 +1029,8 @@ mod tests {
 
     /// «Без ограничений на предметы» on: a second blow weapon, the same item twice, a staff on a
     /// non-mage, a bow on a warrior, a shield on a pure shooter, a school item on another
-    /// school and a holy item on undead all go on. Off, the classic refusals hold.
+    /// school, a holy item on undead and the crown on an ordinary warrior all go on. Off, the
+    /// classic refusals hold.
     #[test]
     fn the_unlimited_switch_wears_what_the_classic_rules_refuse() {
         let on = unlimited_fixture(true);
@@ -1042,7 +1044,8 @@ mod tests {
         assert_eq!(slot_for(&on, &wearing(&on, 2, &[]), ItemId(10)), Ok(0), "a shield on a pure shooter");
         assert_eq!(slot_for(&on, &wearing(&on, 3, &[]), ItemId(13)), Ok(0), "a Life item on a Death mage");
         assert_eq!(slot_for(&on, &wearing(&on, 6, &[]), ItemId(12)), Ok(0), "a holy item on undead");
-        assert_eq!(slot_for(&on, &wearing(&on, 5, &[]), ItemId(154)), Err(EquipError::NotAllowed), "the crown keeps its refusal");
+        assert_eq!(slot_for(&on, &wearing(&on, 5, &[]), ItemId(154)), Ok(0), "the crown on an ordinary unit");
+        assert_eq!(slot_for(&classic, &wearing(&classic, 5, &[]), ItemId(154)), Err(EquipError::NotAllowed), "the classic crown refusal");
 
         // Unit 7 has a blow and a shot, so the bow is refused by the one-weapon rule alone.
         assert_eq!(slot_for(&classic, &wearing(&classic, 7, &[1]), ItemId(2)), Err(EquipError::SecondWeapon));

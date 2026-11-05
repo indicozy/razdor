@@ -19,10 +19,10 @@ for an existing game through this menu.
 - **No item limits** («Без ограничений на предметы», default off): any wearable item goes on any
   living fighter while a cell is free. `items::slot_for` skips the class checks (a shield's blow,
   a blow weapon's melee, a shot weapon's range, a staff's magic), the school and holy-item checks,
-  the one-weapon refusal (`SecondWeapon`) and the one-per-kind refusal (`SameType`). What stays:
-  potions and goods are not worn (`NotWearable`), the dead wear nothing but a reviving potion
-  (`Dead`), the crown keeps its own refusal (`NotAllowed`), and a full unit has no cell
-  (`NoFreeSlot`). Battle needs no change: a worn item's attack and magic power count only where
+  the crown's own refusal (`NotAllowed`: the crown goes on any unit), the one-weapon refusal
+  (`SecondWeapon`) and the one-per-kind refusal (`SameType`). What stays: potions and goods are
+  not worn (`NotWearable`), the dead wear nothing but a reviving potion (`Dead`), and a full unit
+  has no cell (`NoFreeSlot`). Battle needs no change: a worn item's attack and magic power count only where
   the unit's own level has them (`items::rebuild_stats` zeroes the others), so a bow gives a
   warrior no shots and a staff gives a non-mage no power. A repeated item is refused by
   `SameType` in the classic rules, since it has the same kind.
