@@ -2054,11 +2054,23 @@ fn phone_row(c: &mut PhoneCol, geo: &PhoneGeo, label: &str, value: &str) -> (boo
     let vw = super::typography::Role::Button.with(|| super::dt_font::legacy_metrics_if(true, || measure(value, geo.size).width));
     let bw = (vw + 28.0 * geo.k).max(120.0 * geo.k);
     let room = c.w - bw - 10.0 * geo.k;
-    let lines = wrap_label(label, room, geo.size);
-    let h = geo.row_h.max(lines.len() as f32 * geo.lh);
+    // A label whose words do not fit the room beside the button goes on its own line, the button
+    // under it, right-aligned like the others (a label under the button was unreadable).
+    let beside = wrap_label(label, room, geo.size);
+    if beside.iter().any(|l| measure(l, geo.size).width > room) {
+        let lines = wrap_label(label, c.w, geo.size);
+        for (i, line) in lines.iter().enumerate() {
+            chrome::shadow_text(line, c.x, c.y + i as f32 * geo.lh + geo.size * 0.9, geo.size, chrome::CREAM);
+        }
+        let top = c.y + lines.len() as f32 * geo.lh + 4.0 * geo.k;
+        let r = Rect::new(c.x + c.w - bw, top, bw, geo.row_h);
+        c.y = top + geo.row_h + geo.gap;
+        return (phone_button(r, value, geo.size), r);
+    }
+    let h = geo.row_h.max(beside.len() as f32 * geo.lh);
     let centre = c.y + h / 2.0;
-    for (i, line) in lines.iter().enumerate() {
-        let base = centre - (lines.len() as f32 - 1.0) * geo.lh / 2.0 + i as f32 * geo.lh + geo.size * 0.36;
+    for (i, line) in beside.iter().enumerate() {
+        let base = centre - (beside.len() as f32 - 1.0) * geo.lh / 2.0 + i as f32 * geo.lh + geo.size * 0.36;
         chrome::shadow_text(line, c.x, base, geo.size, chrome::CREAM);
     }
     let r = Rect::new(c.x + c.w - bw, c.y + (h - geo.row_h) / 2.0, bw, geo.row_h);
