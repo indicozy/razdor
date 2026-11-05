@@ -2416,8 +2416,9 @@ impl Battle {
         // the Counterblow path removes it, 48b566). Its HP stays as it is.
         let vamp = self.fighters[id].stats[Stat::Vampirizm];
         if vamp != 0 && !matches!(self.fighters[target].stats.nature, Nature::Undead | Nature::Elemental) {
+            let gain = self.vampirism_gain(id, raw.saturating_mul(vamp) / 100);
             let f = &mut self.fighters[id];
-            f.hp = f.hp.saturating_add(raw.saturating_mul(vamp) / 100).min(f.max_hp());
+            f.hp = f.hp.saturating_add(gain).min(f.max_hp());
         }
         // Hunger: a melee kill heals the striker to full (c252e9). The original's test reads
         // the HP at a wrong address (unknown outcome); this is the intended reading.
@@ -2657,6 +2658,10 @@ impl Battle {
     /// It is not removed: it waits in its side's list until a counter blow removes it or the
     /// next turn start's regeneration tick does (the original's).
     fn suicide(&mut self, id: usize) {
+        // Under the cheat console's `god` the player's unit keeps its life: it does not give it.
+        if self.god && self.fighters[id].team == Team::Player {
+            return;
+        }
         let f = &mut self.fighters[id];
         if !f.has(Bonus::Suicide) {
             return;
@@ -2746,6 +2751,16 @@ impl Battle {
             0
         } else {
             amount
+        }
+    }
+
+    /// The HP `i` gains from vampirism: `gain` is negative for an item's curse, which takes HP
+    /// from the attacker (48b3d4), and that loss goes the way of `spare` under `god`.
+    fn vampirism_gain(&self, i: usize, gain: i32) -> i32 {
+        if gain < 0 {
+            -self.spare(i, -gain)
+        } else {
+            gain
         }
     }
 

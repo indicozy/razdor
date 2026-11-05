@@ -3357,3 +3357,189 @@ fn older_tokens_it_lacks_are_no_bonus_and_the_rest_stay() {
         assert!(OLDER.has_bonus(&b), "{b:?}");
     }
 }
+
+// ------------------------------------------------------------------------------------------
+// `god` (the cheat console): the player's fighters take no damage from anything and never die
+// from the enemy or from an effect. A player's report showed units losing HP with it on.
+// ------------------------------------------------------------------------------------------
+
+/// A player's fighter that lost HP or died under `god`, with the step that did it.
+struct GodLeak {
+    /// Groups the same leak: the actor's unit, bonuses and the first new log line (digits out).
+    key: String,
+    text: String,
+}
+
+/// Plays `bt` (built, not begun) to its end with the AI on both sides and `god` on. Returns the
+/// first step at which a player's fighter lost HP or died. A surrender sets its side's units
+/// down as the rules end the battle by it (not damage, like a wipe-out), so those are skipped.
+fn god_leak(mut bt: Battle) -> Option<GodLeak> {
+    bt.god = true;
+    bt.begin();
+    for _ in 0..20_000 {
+        if bt.outcome() != Outcome::Ongoing {
+            return None;
+        }
+        let before: Vec<(usize, i32, bool)> = (0..bt.fighters.len())
+            .filter(|&i| bt.fighters[i].team == Team::Player)
+            .map(|i| (i, bt.fighters[i].hp, bt.fighters[i].alive()))
+            .collect();
+        let (log_from, actor) = (bt.log.len(), bt.active());
+        if bt.ai_step().is_none() {
+            bt.skip();
+        }
+        for &(i, hp, alive) in &before {
+            let f = &bt.fighters[i];
+            if !f.surrendered && (f.hp < hp || (alive && !f.alive())) {
+                let new: Vec<String> = bt.log[log_from..].to_vec();
+                let head: String = new.first().map(|l| l.chars().filter(|c| !c.is_ascii_digit()).collect()).unwrap_or_default();
+                let who = actor.map_or_else(
+                    || "nobody (a pass)".to_string(),
+                    |a| {
+                        let g = &bt.fighters[a];
+                        format!("{} (unit {:?}, {:?}, bonuses {:?})", g.name, g.unit, g.team, g.base.bonuses)
+                    },
+                );
+                let key = format!("{who} | {head}");
+                let text = format!("{} went from {hp} to {} HP, by {who}; log: {}", f.name, f.hp, new.join(" / "));
+                return Some(GodLeak { key, text });
+            }
+        }
+    }
+    Some(GodLeak { key: "never ends".into(), text: "the battle never ends".into() })
+}
+
+fn record_god_leak(leaks: &mut std::collections::BTreeMap<String, String>, leak: Option<GodLeak>) {
+    if let Some(l) = leak {
+        leaks.entry(l.key).or_insert(l.text);
+    }
+}
+
+/// Asserts that no battle leaked, listing one example per distinct leak.
+fn assert_no_god_leaks(leaks: &std::collections::BTreeMap<String, String>, battles: usize) {
+    let all: Vec<&str> = leaks.values().map(String::as_str).collect();
+    assert!(leaks.is_empty(), "{} distinct leak(s) in {battles} battles with god on:\n{}", leaks.len(), all.join("\n"));
+}
+
+/// The synthetic player army: a −10% vampirism (an item's, 48b3d4) on one unit and a Suicide
+/// unit, so the rules that take HP from a player's own fighter are run too.
+fn god_player_army(extra: &mut Vec<UnitDef>) -> Vec<(u32, Slot)> {
+    extra.push(UnitDef { vampirism: -10, ..warrior(19, 30, 5) });
+    extra.push(bonus(20, Bonus::Suicide, warrior(20, 30, 5)));
+    vec![(10, f(0)), (11, b(0)), (13, f(1)), (14, b(1)), (16, f(2)), (19, f(3)), (20, f(4)), (1, b(3))]
+}
+
+/// Every battle bonus on the enemy's side against the god army: the bonus's own unit (warrior,
+/// shooter, Death or Life mage) with two more enemies, both attackers, in a garrison or not.
+#[test]
+fn god_takes_no_damage_from_anything_on_synthetic_content() {
+    let mut leaks = std::collections::BTreeMap::new();
+    let mut battles = 0;
+    let bases = [
+        warrior(0, 60, 0),
+        shooter(0, 40),
+        mage(0, 40, MagicSchool::Death, MagicDirection::ToEnemy),
+        mage(0, 40, MagicSchool::Life, MagicDirection::ToAlly),
+    ];
+    for (k, bonus_kind) in Bonus::known().enumerate() {
+        for (j, base) in bases.iter().enumerate() {
+            for attacker in Team::BOTH {
+                for defence in [0, 10] {
+                    let id = 100 + (k * 4 + j) as u32;
+                    let mut extra = vec![bonus(id, bonus_kind.clone(), base.clone()), warrior(30, 30, 5), mage(33, 30, MagicSchool::Elemental, MagicDirection::ToEnemy)];
+                    let player = god_player_army(&mut extra);
+                    let c = content_with(extra, Formation::WIDE);
+                    let enemies = [(id, f(0)), (30, f(1)), (33, b(0))];
+                    let mut bt = prepared(&c, &player, &enemies, attacker);
+                    bt.set_building_defence(Team::Enemy, defence);
+                    battles += 1;
+                    record_god_leak(&mut leaks, god_leak(bt));
+                }
+            }
+        }
+    }
+    assert!(battles > 400, "the synthetic sweep ran {battles} battles");
+    assert_no_god_leaks(&leaks, battles);
+}
+
+/// Every unit of the real install as an enemy (groups of six, both formations, three seeds),
+/// against a mixed player army of ten, with an item's vampirism and a Suicide unit in it.
+#[test]
+fn god_takes_no_damage_from_anything() {
+    let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+    let dt = crate::dt::install::DtInstall::load(std::path::Path::new(&dir)).expect("install loads");
+    let mut leaks = std::collections::BTreeMap::new();
+    let mut battles = 0;
+    for formation in [Formation::WIDE, Formation::VANILLA] {
+        let mut c = Content::from_dt(&dt);
+        c.formation = formation;
+        let c = Arc::new(c);
+        let all: Vec<UnitId> = c.unit_ids().collect();
+        let n = all.len();
+        for seed in 0..3 {
+            let rot = seed * 7 % n;
+            let ids: Vec<UnitId> = all[rot..].iter().chain(all[..rot].iter()).copied().collect();
+            for (group, chunk) in ids.chunks(6).enumerate() {
+                let picks: Vec<UnitId> = (0..10).map(|i| all[(seed * 11 + i * 13 + group * 5) % n]).collect();
+                let army = |picks: &[UnitId]| -> Vec<Unit> {
+                    let mut taken = Vec::new();
+                    picks
+                        .iter()
+                        .map(|&id| {
+                            let s = Stats::of_level(&c, id, 1);
+                            let slot = c.formation.free_slot(&taken, s.preferred_row()).unwrap();
+                            taken.push(slot);
+                            Unit::new(&c, id, slot)
+                        })
+                        .collect()
+                };
+                let (p, e) = (army(&picks), army(chunk));
+                let squad: Vec<_> = p.iter().enumerate().collect();
+                let attacker = if group % 2 == 1 { Team::Enemy } else { Team::Player };
+                let mut bt = Battle::new(c.clone(), &squad, &e, attacker);
+                // An item's −10% vampirism on the first player unit, a Suicide bonus on the third.
+                bt.fighters[0].base[Stat::Vampirizm] = -10;
+                bt.refresh(0);
+                bt.fighters[2].base.bonuses.push(Bonus::Suicide);
+                bt.refresh(2);
+                if group % 3 == 2 {
+                    bt.set_building_defence(Team::Enemy, 10);
+                }
+                battles += 1;
+                record_god_leak(&mut leaks, god_leak(bt));
+            }
+        }
+    }
+    assert!(battles > 100, "the install sweep ran {battles} battles");
+    assert_no_god_leaks(&leaks, battles);
+}
+
+/// `god`: an item's negative vampirism takes no HP from a player's striker (the loss of the
+/// drain goes the way of every loss under the cheat); the enemy is hit all the same.
+#[test]
+fn god_keeps_a_players_hp_under_negative_vampirism() {
+    let drinker = UnitDef { vampirism: -10, hits: 50, ..warrior(60, 50, 0) };
+    for (god, hp) in [(false, 25), (true, 30)] {
+        let mut bt = with(vec![drinker.clone()], &[(60, f(2))], &[(18, f(2))]);
+        bt.god = god;
+        bt.fighters[0].hp = 30;
+        let hit = bt.act(1).unwrap();
+        assert_eq!(hit.amount, 50, "god {god}");
+        assert_eq!(bt.fighters[0].hp, hp, "god {god}");
+    }
+}
+
+/// `god`: a player's Suicide unit keeps its life when it strikes (it gives no life and is not
+/// set down); without the cheat it does give it (c2633c).
+#[test]
+fn god_keeps_a_players_suicide_unit_alive() {
+    let kamikaze = bonus(62, Bonus::Suicide, warrior(62, 50, 0));
+    for god in [false, true] {
+        let mut bt = with(vec![kamikaze.clone()], &[(62, f(2))], &[(18, f(2))]);
+        bt.god = god;
+        let hit = bt.act(1).unwrap();
+        assert_eq!(hit.amount, 50, "god {god}");
+        let f0 = &bt.fighters[0];
+        assert_eq!((f0.alive(), f0.suicided), (god, !god), "god {god}");
+    }
+}
