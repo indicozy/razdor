@@ -51,6 +51,10 @@ so a playthrough that already had six cells keeps them and no worn item is lost.
   squad's living units and the enemy's, and the only non-kept death mark (`kept_death`) belongs to
   AI troops. Corpses from an earlier battle are not fighters, so they stay dead. The revived unit
   keeps its spells and XP; the battle's `lost` count does not include it.
+  A map spell on the army (`Game::spell_on_player`, an enemy's or an event's) is covered the
+  same way while someone lives: each unit it killed gets 1 HP after the spell's own slot strip
+  (so it comes back without spells), corpses from before the cast stay dead, and the cast's
+  `killed` counts only units dead at its end. A wiped army is lost as before.
 - **At most two potions per character:** two successful drinks between army battles,
   including instant healing and revival potions. Failed attempts consume neither an item
   nor a count. The counter survives saving, loading and campaign carry-over, and resets

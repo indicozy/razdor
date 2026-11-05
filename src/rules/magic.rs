@@ -609,8 +609,10 @@ impl Game {
     }
 
     /// [`spell_on_units`] on the hero's army. If someone lives and the hero has 0 HP he is
-    /// set to 1, before the rebuild (so his 1 HP follows his maximum too); if nobody lives
-    /// the game is lost ([`Game::army_fallen`]).
+    /// set to 1, before the rebuild (so his 1 HP follows his maximum too). Razdor's
+    /// «Юниты не умирают» (`undying_units`) covers map spells as it covers battles: while
+    /// someone lives, every unit this spell killed comes back with 1 HP (corpses from before
+    /// stay dead). If nobody lives the game is lost ([`Game::army_fallen`]), as after a battle.
     fn spell_on_player(&mut self, spell: &SpellDef, by_event: bool) -> CastOutcome {
         let c = self.content.clone();
         let now = self.clock.total_minutes() as u64;
@@ -618,6 +620,14 @@ impl Game {
         let reset = by_event && !targets_enemy(spell);
         let (alive, max) = spell_on_units(&c, spell, &mut self.squad, now, reset);
         if alive {
+            if c.experimental.undying_units {
+                for (u, b) in self.squad.iter_mut().zip(&before) {
+                    if b.1 && !u.alive() {
+                        u.hp = 1;
+                        u.died_at = None;
+                    }
+                }
+            }
             raise_leader(&mut self.squad);
             rebuild_after_spell(&c, &mut self.squad, &max, now);
             // 0x4900fc → 0x497240(0): the rebuild recounts his army.
@@ -1291,6 +1301,62 @@ mod tests {
         g.squad[2].spells = [None; SPELL_SLOTS];
         g.apply_spell_to_army(&mend);
         assert_eq!((g.squad[2].hp, g.squad[2].spells), (0, [None; SPELL_SLOTS]));
+    }
+
+    /// Razdor's «Юниты не умирают» (`undying_units`) on the hero's army.
+    fn with_undying(g: &mut Game) {
+        let rules = crate::rules::content::ExperimentalRules { undying_units: true, ..Default::default() };
+        g.content = Arc::new(g.content.with_experimental(rules));
+    }
+
+    #[test]
+    fn undying_units_survive_a_map_spell() {
+        // A lightning on the hero's army kills the 10 HP unit; with the rule it comes back with
+        // 1 HP as someone lives, as after a battle, and it is not counted as killed.
+        let mut g = game(HeroClass::Knight);
+        with_undying(&mut g);
+        g.squad[1].hp = 10;
+        let lightning = g.spell(3).unwrap().clone();
+        let cast = g.spell_on_player(&lightning, false);
+        assert!(matches!(cast, CastOutcome::Done { killed: 0, destroyed: false, .. }), "{cast:?}");
+        assert_eq!((g.squad[1].hp, g.squad[1].alive()), (1, true));
+        assert!(g.squad[0].alive(), "the hero lives");
+    }
+
+    #[test]
+    fn a_map_spell_kills_for_good_without_undying() {
+        let mut g = game(HeroClass::Knight);
+        g.squad[1].hp = 10;
+        let lightning = g.spell(3).unwrap().clone();
+        let cast = g.spell_on_player(&lightning, false);
+        assert!(matches!(cast, CastOutcome::Done { killed: 1, destroyed: false, .. }), "{cast:?}");
+        assert!(!g.squad[1].alive(), "the classic rule: the dead stay dead");
+    }
+
+    #[test]
+    fn undying_does_not_raise_old_corpses() {
+        let mut g = game(HeroClass::Knight);
+        with_undying(&mut g);
+        g.squad[1].hp = 0;
+        g.squad[1].died_at = Some(1);
+        let lightning = g.spell(3).unwrap().clone();
+        let cast = g.spell_on_player(&lightning, false);
+        assert!(matches!(cast, CastOutcome::Done { killed: 0, destroyed: false, .. }), "{cast:?}");
+        assert_eq!(g.squad[1].hp, 0, "a corpse from before the spell stays one");
+    }
+
+    #[test]
+    fn undying_army_wiped_out_by_a_spell_is_still_lost() {
+        let mut g = game(HeroClass::Knight);
+        with_undying(&mut g);
+        let n = g.squad.len();
+        for u in g.squad.iter_mut() {
+            u.hp = 10;
+        }
+        let lightning = g.spell(3).unwrap().clone();
+        let cast = g.spell_on_player(&lightning, false);
+        assert!(matches!(cast, CastOutcome::Done { killed, destroyed: true, .. } if killed == n), "{cast:?}");
+        assert!(g.army_fallen(), "nobody lives: the game is lost, as after a lost battle");
     }
 
     #[test]

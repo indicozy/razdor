@@ -131,7 +131,8 @@ pub struct ExperimentalRules {
     /// to a random option (`Game::auto_promote_squad`).
     pub auto_promotion: bool,
     /// «Юниты не умирают»: the player's dead units come back with 1 HP after a battle that
-    /// their army survives (`Battle::player_results`), as the hero does.
+    /// their army survives (`Battle::player_results`), as the hero does. A map spell on the
+    /// army (`Game::spell_on_player`, the enemy's or an event's) is covered the same way.
     pub undying_units: bool,
     /// «Ускоренный ИИ» («Faster AI»): on maps of 300×300 cells or more, each AI plan floods only a
     /// square window around the army (`ai::window`); and a plan with exactly one target cell is an
