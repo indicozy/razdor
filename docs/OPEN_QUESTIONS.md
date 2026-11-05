@@ -101,13 +101,11 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   and any other id above 201. The install's `.ini` files have no picture keys under that name, so the source is
   not located yet. If a shipped map uses 202, draw the leader's portrait and add the id to the editor's list.
 
-- **Event scan: a chain-depth cap and the idle-reset placement** (2026-11-05, the Hristos
-  editor-guide analysis, docs/reference/editor-guide.md, gaps G6 and G7). `CHAIN_DEPTH = 32`
-  (`src/rules/events.rs:34`, used at `:1672`) drops a deeper chain without a trace; the exe has no
-  limit, so emit an outcome or log it. The idle reset (`events.rs:1293-1301`) runs at the end of
-  `run`; the exe resets in each idle pass, including the nested passes of chain tails (0x4abfbc
-  tail, 0x4ab51b tail), so it can reset events fired earlier in the same tick. Low risk. Settled by
-  the S10 variant (a window-opening chain inside a procedure) and the exe's tail order.
+- **Event scan: the idle-reset placement** (2026-11-05, the Hristos editor-guide analysis,
+  docs/reference/editor-guide.md, gap G7). The idle reset (`src/rules/events.rs:1297-1308`) runs at
+  the end of `run`; the exe resets in each idle pass, including the nested passes of chain tails
+  (0x4abfbc tail, 0x4ab51b tail), so it can reset events fired earlier in the same tick. Low risk.
+  Settled by the S10 variant (a window-opening chain inside a procedure) and the exe's tail order.
 - **Managed armies skip the revival on activation** (2026-11-05, the Hristos editor-guide analysis,
   docs/reference/editor-guide.md, gap G8). `src/rules/script.rs:340-343` returns an army that
   `ai::managed` rejects (`src/rules/ai.rs:423-425`, which is `a.ai.enabled`) before the revival, the
@@ -817,6 +815,7 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Settled
 
+- **A chain deeper than the cap is reported, not dropped** (2026-11-05, the Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G6; settled 2026-11-06). `CHAIN_DEPTH = 32` (`src/rules/events.rs`) stays as a safety net against infinite recursion: a deliberate deviation, listed in `docs/reference/original-mechanics/events.md` ("Razdor now → original"). A cut now emits `EventOutcome::ChainCut(id)`, and the UI logs it, as it logs the loop guard. Test: `a_chain_deeper_than_the_cap_is_cut_and_reported` (`src/rules/events.rs`).
 - **The ranger's noon heal uses the start class, as the exe does** (2026-11-05, the Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G3; settled 2026-11-06). The noon scan (0x4abfbc) and the noon report's heal (0x4ac427) read the start-class global (0x68dccc), which only a new game and a load write (never an event's class change). `ranger_heal` (`src/rules/economy.rs`) now tests `start_class()`, and the comment at `set_hero_class` (`src/rules/script.rs`) no longer says class bonuses are lost on a change. Test: `the_ranger_noon_heal_follows_the_start_class` (`src/rules/game.rs`).
 - **A trailing `=` in a result flag is an empty test, and the test passes** (2026-11-05, the editor-guide screenshot pass, docs/reference/editor-guide.md, chapter 7, 7.3). `events.md §5` splits a title at `%`, then the action is the text up to `=` and the test is the text after it. For `+DRAW=` the action is `+DRAW` and the test is empty, which passes (the empty-test rule). So the guide's example does no harm in the game. Whether the editor drops the `=` when the field is typed is still open (the entry above).
 - **Spec items the screens confirm, with no change** (2026-11-05, the editor-guide screenshot pass, grouped). "Once" and "many times": the box is the inverse of byte 141 (records §9.1, `dtm-format.md §9`); the default is the open "many times default" entry. A subordinate event has repeat 0, duration 0 and "many times" ticked and greyed (records §9.1). A relative-only start is year 2000 in minutes (1,036,800,000). A relative call's hours are the unit of byte 79 (`dtm-format.md §9`). The owner code 6 in a named-character check is "not the player" (`dtm-format.md §9` owner codes). A named-character record sets the unit combo to its class (records §9). Each was checked against the screens of pp. 139-262 (chapters 6 to 9); none contradicts the spec.

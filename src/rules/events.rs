@@ -30,7 +30,8 @@ pub const PICTURE_VICTORY: u8 = 201;
 /// At most this many events fire in one [`EventEngine::tick`] (or answer, or hall entry);
 /// more means a script loop. The original has no such guard (a Razdor safety net).
 pub const LOOP_GUARD: usize = 256;
-/// Chains deeper than this are cut (the original has no limit: a Razdor safety net).
+/// Chains deeper than this are cut and reported as [`EventOutcome::ChainCut`] (the original has
+/// no limit: a Razdor safety net against infinite recursion).
 const CHAIN_DEPTH: usize = 32;
 /// The size of an event record: Community opcodes 1–5 address bytes across records.
 const RECORD: i64 = 171;
@@ -352,6 +353,9 @@ pub enum EventOutcome {
     Defeat(EventId),
     /// [`LOOP_GUARD`] events fired in one run; the rest waits for the next tick.
     LoopGuard,
+    /// A chain deeper than [`CHAIN_DEPTH`] was cut: this chained event does not run (a Razdor
+    /// safety net; the original has no limit). The UI logs it (`story::show`).
+    ChainCut(EventId),
 }
 
 /// The game as the events see it. Factions are 1–4 (the player's side, ally, neighbour,
@@ -1673,6 +1677,9 @@ impl EventEngine {
             // A chained event is opened as it is: its done flag, window, guard, once flag,
             // class, place and conditions are not checked (0x4ab1ec, 0x4af658).
             self.open(next, w, out, depth + 1);
+        } else if self.event(next).is_some() {
+            // The depth cap (the original has none): the chain stops here, and says so.
+            out.push(EventOutcome::ChainCut(next));
         }
     }
 
@@ -3328,6 +3335,37 @@ mod tests {
         let out = g.tick(&mut w);
         assert_eq!(fired(&out).len(), LOOP_GUARD);
         assert_eq!(out.last(), Some(&EventOutcome::LoopGuard));
+    }
+
+    /// A chain of `len` events, each chaining to the next, all silent subordinates after the
+    /// first (a chained event runs whatever its conditions).
+    fn chain_of(len: u16) -> Vec<Event> {
+        (1..=len)
+            .map(|id| {
+                let mut e = global();
+                e.subordinate = u8::from(id > 1);
+                e.results.chained_event = if id < len { id + 1 } else { 0 };
+                e
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_chain_deeper_than_the_cap_is_cut_and_reported() {
+        // Event k is opened at depth k − 1. Event CHAIN_DEPTH + 1 is opened at depth CHAIN_DEPTH,
+        // so its chained event, CHAIN_DEPTH + 2, is the one cut.
+        let cut = CHAIN_DEPTH as EventId + 2;
+        let mut g = engine(chain_of(cut + 6));
+        let mut w = MockWorld::new();
+        let out = g.tick(&mut w);
+        assert_eq!(fired(&out), (1..=cut - 1).collect::<Vec<_>>(), "{out:?}");
+        assert_eq!(out.iter().filter(|o| matches!(o, EventOutcome::ChainCut(_))).count(), 1, "{out:?}");
+        assert_eq!(out.last(), Some(&EventOutcome::ChainCut(cut)));
+        // A chain that ends at the cap is not cut: nothing is reported.
+        let mut g = engine(chain_of(cut - 1));
+        let out = g.tick(&mut MockWorld::new());
+        assert_eq!(fired(&out), (1..=cut - 1).collect::<Vec<_>>());
+        assert!(!out.iter().any(|o| matches!(o, EventOutcome::ChainCut(_))), "{out:?}");
     }
 
     #[test]

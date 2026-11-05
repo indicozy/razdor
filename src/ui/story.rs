@@ -138,6 +138,7 @@ pub fn show(game: &Game, o: &EventOutcome, dialogs: &mut VecDeque<Dialog>) {
         EventOutcome::QuestAdded(id) => notice(&quest_line("AddQuest", QUEST_ADDED), id, dialogs),
         EventOutcome::QuestCompleted { by, .. } => notice(&quest_line("DelQuest", QUEST_COMPLETED), by, dialogs),
         EventOutcome::LoopGuard => razdor::diag!("scenario events: loop guard reached"),
+        EventOutcome::ChainCut(id) => razdor::diag!("scenario events: chain at event {id} cut (depth limit)"),
         EventOutcome::Fired { .. } | EventOutcome::Declined(_) | EventOutcome::Victory(_) | EventOutcome::Defeat(_) => {}
     }
 }
