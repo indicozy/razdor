@@ -150,13 +150,15 @@ impl Game {
         self.script_events(out)
     }
 
-    /// A scenario event's window was closed (its OK): the event's finish (its battle, delay and
-    /// level-ups are effects of the world, not outcomes), then the events after it, which the
+    /// A scenario event's window was closed (its OK): the events after it, which the
     /// original scans only now (0x4c206c → 0x4ab1ec → the chain or a new scan), run.
     pub fn event_window_closed(&mut self) -> Vec<Event> {
         let Some(mut engine) = self.script.take() else { return Vec::new() };
         let out = engine.window_closed(self);
         self.script = Some(engine);
+        if out.is_empty() {
+            return Vec::new();
+        }
         self.script_events(out)
     }
 
@@ -174,12 +176,6 @@ impl Game {
     /// The question waiting for an answer, if any.
     pub fn pending_question(&self) -> Option<EventId> {
         self.script()?.pending_question()
-    }
-
-    /// The event whose message window is shown and waits for its OK, if any (a loaded game
-    /// shows it again).
-    pub fn event_window(&self) -> Option<EventId> {
-        self.script()?.shown_window()
     }
 
     /// The main hall's list here (0x4beaac): the building's quests and rumours that pass
@@ -1476,8 +1472,7 @@ mod tests {
         let c = Content::new(base.units.clone(), base.items.clone(), vec![spell], base.options.clone(), base.formation);
         let mut g = Game::from_scenario(Arc::new(c), &s, HeroClass::Knight);
         let now = g.clock.total_minutes() as u64;
-        // The spell is cast at the window's OK (0x4ab1ec), so the window is read first.
-        assert_eq!(fired(&read(&mut g)), vec![1]);
+        assert_eq!(fired(&g.drain_events()), vec![1]);
         // An event's spell lasts TimeWork × 10 (5 h → 50 h).
         assert_eq!(g.active_spells(), vec![SpellSlot { spell: 1, until: now + 50 * 60 }]);
         let plain = crate::rules::units::Stats::of_level(&g.content, g.squad[1].def, g.squad[1].level)[Stat::Initiative];
@@ -1517,16 +1512,11 @@ mod tests {
         let events = g.drain_events();
         assert_eq!(fired(&events), vec![1]);
         assert!(events.iter().any(Event::needs_reading));
-        // The dialog-time results (units, artefacts, spells) are there when the window opens; the
-        // gold, the mana and the army's activation wait for its OK (0x4ab1ec).
-        assert_eq!((g.gold, g.mana), (100, 0));
+        assert_eq!((g.gold, g.mana), (150, 7));
         assert_eq!(g.squad.len(), 3, "hero, the preset's unit and the one the event adds");
         assert!(g.squad[2].from_event && g.squad[2].def == UnitId(5));
         assert_eq!(g.pack, vec![ItemId(7)]);
         assert_eq!(g.spells, vec![4]);
-        assert!(g.world.inactive.iter().any(|a| a.id == 3));
-        read(&mut g);
-        assert_eq!((g.gold, g.mana), (150, 7));
         assert!(g.world.armies.iter().any(|a| a.id == 3) && g.world.inactive.is_empty());
         assert!(g.drain_events().is_empty());
     }
@@ -1595,8 +1585,6 @@ mod tests {
         let c = Content::new(base.units.clone(), base.items.clone(), vec![spell], base.options.clone(), base.formation);
         let mut g = Game::from_scenario(Arc::new(c), &s, HeroClass::Knight);
         assert_eq!(fired(&g.drain_events()), vec![1]);
-        // The spell is cast at the window's OK; the unit joined when the window opened.
-        read(&mut g);
         let added = g.squad.last().unwrap();
         assert!(added.from_event && added.spells[0].is_some_and(|x| x.spell == 1), "{:?}", added.spells);
     }
@@ -1749,9 +1737,6 @@ mod tests {
         g.wait(1);
         assert_eq!(g.squad.len(), 2, "the units the event added leave again");
         assert!(g.pack.is_empty());
-        // The army is deactivated at the window's OK.
-        assert!(!g.world.armies.is_empty());
-        read(&mut g);
         assert!(g.world.armies.is_empty());
         let a = &g.world.inactive[0];
         assert_eq!((a.id, a.troops[0].named), (2, 1), "it joined army 2, now waiting");
@@ -2128,11 +2113,9 @@ mod tests {
         assert!(g.set_destination((9, 2)));
         let events = walk(&mut g);
         assert_eq!(fired(&events), vec![1]);
-        assert_eq!(g.gold, 100, "the gold waits for the window's OK");
+        assert_eq!(g.gold, 125);
         // Its window open, the town is entered only once it is read (0x4ed42c).
         assert!(!events.contains(&Event::Arrived(0)));
-        read(&mut g);
-        assert_eq!(g.gold, 125);
         assert_eq!(g.enter_waiting_building(), vec![Event::Arrived(0)]);
         assert!(g.enter_waiting_building().is_empty(), "once");
     }
@@ -2155,11 +2138,10 @@ mod tests {
         assert!(g.set_destination((9, 2)));
         let events = walk(&mut g);
         assert_eq!(fired(&events), vec![1]);
-        assert_eq!(g.script_end(), None, "the defeat is decided at the window's OK (0x4ab1ec)");
+        assert_eq!(g.script_end(), Some(ScriptEnd::Defeat(1)));
         assert!(g.waiting_entry.is_some(), "the building waits for its window to be read");
         // The window's OK, as the interface makes it.
         let after = read(&mut g);
-        assert_eq!(g.script_end(), Some(ScriptEnd::Defeat(1)));
         assert!(!after.contains(&Event::Arrived(0)), "{after:?}");
         assert!(g.enter_waiting_building().is_empty(), "the game is over: no building is entered");
         assert_eq!(g.waiting_entry, None, "the waiting building is dropped");
@@ -2281,10 +2263,7 @@ mod tests {
         g.world.armies[0].mind.clean.insert(crate::rules::ai::HERO);
         let events = g.answer_question(true);
         assert_eq!(fired(&events), vec![1]);
-        // The artefact is given when the window opens; the gold changes at its OK.
-        assert_eq!((g.gold, g.pack.items()), (100, vec![ItemId(9)]));
-        read(&mut g);
-        assert_eq!(g.gold, 60);
+        assert_eq!((g.gold, g.pack.items()), (60, vec![ItemId(9)]));
         assert_eq!(g.pending_question(), None);
         // The event took effect: the AI rescores the hero (0x4ab1ec → 0x497240(0, 1)).
         assert!(!g.world.armies[0].mind.clean.contains(&crate::rules::ai::HERO));
@@ -2320,8 +2299,6 @@ mod tests {
         assert_eq!(g.hall_entries(), vec![HallEntry::Rumour(1), HallEntry::Quest(2)], "the quest waits in the hall");
         let events = g.take_hall_entry(1).unwrap();
         assert_eq!(fired(&events), vec![1]);
-        assert_eq!(g.gold, 15, "the event's gold waits for its window's OK");
-        read(&mut g);
         assert_eq!((g.gold, g.mana), (11, 3), "no flat price: only the event's own -4 gold");
         assert_eq!(g.take_hall_entry(1), Err(ServiceError::NotHere), "heard");
         assert_eq!(g.hall_entries(), vec![HallEntry::Quest(2)]);
@@ -2442,7 +2419,6 @@ mod tests {
         g.set_destination((9, 2));
         walk(&mut g);
         g.take_hall_entry(1).unwrap();
-        read(&mut g);
         assert_eq!(g.journal_rows(Tab::Active).len(), 1);
         g.journal = Default::default(); // a save from before the history
         let rows = g.journal_rows(Tab::Active);
@@ -2554,7 +2530,7 @@ mod tests {
             f.hp = 0;
         }
         assert!(matches!(g.resolve_battle(&b), crate::rules::game::BattleResult::Victory { .. }));
-        let events = read(&mut g);
+        let events = g.drain_events();
         assert!(events.contains(&Event::Script(EventOutcome::Victory(1))));
         assert_eq!(g.script_end(), Some(ScriptEnd::Victory(1)));
 
@@ -2564,8 +2540,6 @@ mod tests {
         s.header.defeat_event = 1;
         let mut g = start(&s);
         g.wait(4);
-        assert_eq!(g.script_end(), None, "the defeat is decided at the window's OK");
-        read(&mut g);
         assert_eq!(g.script_end(), Some(ScriptEnd::Defeat(1)));
     }
 
@@ -2581,8 +2555,7 @@ mod tests {
         sleeper.inactive = 1;
         s.armies = vec![sleeper];
         let mut g = start(&s);
-        // The battle and the delay are the window's OK's (0x4ab1ec), so the window is read first.
-        let events = read(&mut g);
+        let events = g.drain_events();
         assert!(events.iter().any(|e| matches!(e, Event::NewDay(_))), "the delay crosses noon: {events:?}");
         assert_eq!(events.last(), Some(&Event::Encounter(0)));
         assert_eq!(g.foe, Some(Foe::Army(0)));
@@ -2610,8 +2583,7 @@ mod tests {
         e.results.light_lanterns = [7, 0, 0, 0];
         let mut s = world(vec![e]);
         s.points = vec![point(7, 10, 4, 6)];
-        let mut g = start(&s);
-        read(&mut g);
+        let g = start(&s);
         assert_eq!(g.pending_reveals, vec![(10, 4, 6)]);
         let shown = g.shown.last().expect("the lantern is shown on the map");
         assert_eq!(shown.at, (10, 4));
@@ -2748,36 +2720,23 @@ mod tests {
         assert!(g.set_destination((8, 4)));
         let events = walk(&mut g);
         assert_eq!(fired(&events), vec![1]);
+        assert!(!g.script().is_some_and(|e| e.meeting_waiting(&g, 2)), "the event has run");
         assert!(g.event_display_busy(), "its window is on screen");
         assert!(g.meeting_marked(2), "the mark holds while the dialog shows");
         read(&mut g);
-        assert!(!g.script().is_some_and(|e| e.meeting_waiting(&g, 2)), "the event has run at its OK");
         assert!(!g.event_display_busy(), "the dialog is done");
         assert!(g.meeting_marked(2), "still the mark until the idle refresh");
         g.refresh_meeting_marks();
         assert!(!g.meeting_marked(2), "recomputed at the idle refresh (0x4abf44)");
     }
 
-    /// G1: a message event at the start opens its window, which the interface shows again after
-    /// a load (`event_window`); its gold changes at the OK, and the window is then closed.
     #[test]
-    fn the_open_window_is_named_for_the_interface_until_its_ok() {
-        let mut m = ev(EventKind::Global);
-        m.results.gold = 5;
-        let mut g = start(&world(vec![m]));
-        assert_eq!(g.event_window(), Some(1));
-        assert_eq!(g.gold, 100);
-        read(&mut g);
-        assert_eq!(g.event_window(), None);
-        assert_eq!(g.gold, 105);
-    }
-
-    #[test]
-    fn a_victory_met_on_a_step_ends_the_scenario_at_its_windows_ok() {
+    fn a_victory_met_on_a_step_is_over_before_its_window_is_on_screen() {
         // Обучающий1 ends with victory event 21, "meet army 11" (the royal herald walking up).
-        // The victory is decided at the window's OK (0x4ab1ec, events.md §7.2 step 20), so the
-        // step's events, the window among them, reach the screen (`tick_shown`) while the
-        // scenario is still running; the end comes when the window is read (events.md §11).
+        // The rules end the scenario inside the step, but the screen gets the step's events,
+        // the event's window among them, only once the step has played (`tick_shown`): until
+        // then the game holds them, and the end must wait for that window (events.md §11:
+        // the window is read, then the hand-over).
         let mut win = ev(EventKind::Global);
         win.conditions.meet_army = 2;
         let mut s = world(vec![win]);
@@ -2789,15 +2748,18 @@ mod tests {
         a.mind.scripted = true;
         a.path = vec![(4, 2)];
         assert!(g.set_destination((8, 4)));
+        let mut ended_unshown = false;
         for _ in 0..10_000 {
             let events = g.tick_shown(0.01);
             if fired(&events).contains(&1) {
                 assert!(events.contains(&Event::Script(EventOutcome::Fired { event: 1, message: true })), "{events:?}");
                 assert!(!g.holds_events());
-                assert_eq!(g.script_end(), None, "the end waits for the window's OK");
-                read(&mut g);
-                assert_eq!(g.script_end(), Some(ScriptEnd::Victory(1)));
+                assert!(ended_unshown, "the scenario ended while its window was still held");
                 return;
+            }
+            if g.script_end().is_some() {
+                assert!(g.holds_events(), "over, with no window held or shown");
+                ended_unshown = true;
             }
         }
         panic!("no meeting");
@@ -2969,7 +2931,7 @@ mod tests {
         let mut gift = ev(EventKind::Global);
         gift.results.experience = 100;
         let mut g = start(&world(vec![gift]));
-        let events = read(&mut g);
+        let events = g.drain_events();
         // The knight of the test content needs 60, then 84: level 2 with 40 left.
         assert_eq!((g.squad[0].level, g.squad[0].xp), (2, 40));
         assert_eq!(g.squad[1].xp, 0, "only the hero");
@@ -2989,7 +2951,6 @@ mod tests {
         assert_eq!(g.gold, 100, "level 1 is the original's level 0");
         g.squad[0].level = 2;
         g.wait(1);
-        read(&mut g);
         assert_eq!(g.gold, 105, "level 2 passes a level-1 condition");
     }
 
@@ -3091,9 +3052,9 @@ mod tests {
         let events = walk(&mut g);
         assert_eq!(g.tile(), (5, 2));
         assert_eq!(fired(&events), vec![1], "its event fires as he enters");
-        // Its window opens once the event's is read; the gold changes at that OK.
-        g.event_window_closed();
         assert!(g.gold >= gold + 9);
+        // Its window opens once the event's is read.
+        g.event_window_closed();
         assert_eq!(g.enter_waiting_building(), vec![Event::Arrived(0)]);
     }
 
@@ -3225,8 +3186,6 @@ mod tests {
         s.next_map = "0-0 Road".into();
         s.header.carry_over = [1, 0, 0, 1, 0, 1, 1];
         let mut g = start(&s);
-        // The chained victory is decided at the branch window's OK (0x4ab1ec).
-        read(&mut g);
         assert_eq!(g.script_end(), Some(ScriptEnd::Victory(2)));
         // Every unit's spell slots are wiped at the hand-over; the drain is the unit's.
         g.squad[1].spells[0] = Some(SpellSlot { spell: 1, until: u64::MAX });
@@ -3252,7 +3211,6 @@ mod tests {
         let mut g = start(&s);
         assert_eq!(g.next_map(), None);
         g.wait(4);
-        read(&mut g);
         assert_eq!(g.next_map().map(|n| n.name), Some("Road".to_string()));
         assert_eq!(branch_name("Road", (4, 1)), "4-1");
         assert_eq!(branch_name("12-3.DTm", (4, 1)), "4-1.DTm");
