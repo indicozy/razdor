@@ -125,12 +125,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   the base unit's nature; the exe reads the hero's current nature byte (0x75aa61). The two differ
   only if an item or a spell changes the nature. Low risk. Settled by checking whether any item or
   spell changes the nature byte; then read the current nature.
-- **Stale comments on the speed bonus and the mana carry-over** (2026-11-05, the Hristos
-  editor-guide analysis, docs/reference/editor-guide.md, gap G11; tiny, two files).
-  `src/rules/world.rs:791-793` says the archmage test is "probably meaning the Ranger" (the test is
-  unit 2, the archmage, as `world.md §2` says; the question stays open, see "The speed bonus").
-  `src/rules/script.rs:1147` calls the mana carry-over a "(guess)"; byte 1 settles it (see Settled).
-  Fix the comments; keep the tests.
 - **Game draw order: buildings draw above trees, rocks and mountains in one cell** (2026-11-05, the
   Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G12, unverified).
   `src/ui/world_view.rs:1640-1655` (`LAYER_BUILDING` 2 above the object layers 0 and 1, from
@@ -199,8 +193,8 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   any version or flag check.
 - **The speed bonus: unit 2 or the ranger?** (2026-11-05, the Hristos editor-guide analysis,
   docs/reference/editor-guide.md, chapter 4). `speed_for` (`src/rules/world.rs:794-796`) subtracts
-  one when the leader is unit 2 (the archmage), while the comment says "probably meaning the Ranger"
-  (`:791-793`). `world.md §2` gives the same test. The guide (p.61) says correction 1 gives the
+  one when the leader is unit 2 (the archmage). Its comment (`:791-793`) now states the question as
+  open, not "probably meaning the Ranger" (reworded 2026-11-06, gap G11). `world.md §2` gives the same test. The guide (p.61) says correction 1 gives the
   ranger's speed, which does not settle it. Settled by the constant the exe's loader compares for
   the -1, and by a Community note.
 - **A text-only event with a duration of 0** (2026-11-05, the Hristos editor-guide analysis,
@@ -815,6 +809,7 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Settled
 
+- **The stale comments on the speed bonus and the mana carry-over are reworded** (2026-11-05, the Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G11; settled 2026-11-06). `src/rules/world.rs` (`speed_for`) now says the test is unit 2, the archmage (GlobalIndex 2, the loader's test at 0x4b4824, `world.md §2`), and points to the open question on the Ranger, which stays open ("The speed bonus: unit 2 or the ranger?"). `src/rules/script.rs` (`NextMap::mana`) no longer calls the mana a "(guess)": it is byte 1 of the carry-over group (next map's header bytes 0x110..0x116, `saves-data.md §6`), settled in "Mana carry-over is the header's byte 1". The tests are unchanged.
 - **A chain deeper than the cap is reported, not dropped** (2026-11-05, the Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G6; settled 2026-11-06). `CHAIN_DEPTH = 32` (`src/rules/events.rs`) stays as a safety net against infinite recursion: a deliberate deviation, listed in `docs/reference/original-mechanics/events.md` ("Razdor now → original"). A cut now emits `EventOutcome::ChainCut(id)`, and the UI logs it, as it logs the loop guard. Test: `a_chain_deeper_than_the_cap_is_cut_and_reported` (`src/rules/events.rs`).
 - **The ranger's noon heal uses the start class, as the exe does** (2026-11-05, the Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G3; settled 2026-11-06). The noon scan (0x4abfbc) and the noon report's heal (0x4ac427) read the start-class global (0x68dccc), which only a new game and a load write (never an event's class change). `ranger_heal` (`src/rules/economy.rs`) now tests `start_class()`, and the comment at `set_hero_class` (`src/rules/script.rs`) no longer says class bonuses are lost on a change. Test: `the_ranger_noon_heal_follows_the_start_class` (`src/rules/game.rs`).
 - **A trailing `=` in a result flag is an empty test, and the test passes** (2026-11-05, the editor-guide screenshot pass, docs/reference/editor-guide.md, chapter 7, 7.3). `events.md §5` splits a title at `%`, then the action is the text up to `=` and the test is the text after it. For `+DRAW=` the action is `+DRAW` and the test is empty, which passes (the empty-test rule). So the guide's example does no harm in the game. Whether the editor drops the `=` when the field is typed is still open (the entry above).

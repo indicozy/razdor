@@ -1147,7 +1147,9 @@ pub struct NextMap {
     pub branch: Option<(i16, i16)>,
     /// Header byte 0: the gold, which the next map's gold is set to.
     pub gold: Option<i32>,
-    /// Gods' favour: Razdor's mana *(guess)*, set alike.
+    /// Gods' favour: the mana, byte 1 of the carry-over group (the next map's header bytes
+    /// 0x110..0x116, saves-data.md §6; the gold is byte 0), set alike. Settled in
+    /// docs/OPEN_QUESTIONS.md ("Mana carry-over is the header's byte 1").
     pub mana: Option<i32>,
     /// Fame carries over (no code reads it).
     pub fame: bool,

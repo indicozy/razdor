@@ -789,8 +789,10 @@ impl Army {
     }
 
     /// Speed of an army from the editor's speed correction (world.md §2): `max(1, 5 − c)`,
-    /// then one less when its leader is the Archmage unit (GlobalIndex 2; the original's
-    /// loader does so, probably meaning the Ranger), at least 1. One point is 20% of the time.
+    /// then one less when its leader is unit 2, the Archmage (GlobalIndex 2, the loader's test at
+    /// 0x4b4824; world.md §2), at least 1. One point is 20% of the time. Whether the original
+    /// meant the Ranger is still open (docs/OPEN_QUESTIONS.md, "The speed bonus: unit 2 or the
+    /// ranger?"); the test stays on unit 2.
     pub fn speed_for(correction: i8, leader: u32) -> u32 {
         let s = (BASE_SPEED as i32 - correction as i32).max(1);
         let s = if leader == ARCHMAGE_UNIT { s - 1 } else { s };
