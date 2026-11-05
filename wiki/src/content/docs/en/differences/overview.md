@@ -11,6 +11,7 @@ Razdor plays the original game's scenarios using its original rules. Below is wh
 
 * **UI Scale** from 1× to 4×, "Auto" is the largest that fits within the window.
 * **Screen:** window, borderless window, or full screen (via "Screen" settings).
+* **Sharp graphics:** the original's pictures are not blurred when scaled up: every pixel stays a crisp square of the same size at any scale.
 * **Minimap** can be resized and moved to any corner of the screen.
 * **Closing windows:** a window opened from the bottom panel can be closed by clicking or tapping outside of it, or by pressing `Esc`.
 * **Equipment Search** (`Ctrl+F`): filters items in your backpack and at the market by name, type, stats, and description.
