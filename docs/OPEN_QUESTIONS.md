@@ -65,6 +65,15 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   found; whether any code branches on model 9 for a point is not checked here. Not changed in this pass (no code
   changes); fix the comment with the next change to `dtm.rs`.
 
+- **Two battle events in one tick: the second replaces the first** (2026-11-05, the Hristos
+  editor-guide analysis, docs/reference/editor-guide.md, gap G2). `start_battle`
+  (`src/rules/script.rs:827-833`) sets `foe` and queues the encounter when `finish` runs
+  (`src/rules/events.rs:1654-1656`), while `run` (`:1277-1288`) keeps going. `held` is set only for
+  a message (`:1466-1473`), so a battle-only event with no message does not stop the scan.
+  `events.md §2` lists lanterns, shown army and spell as holding nothing, but not battles. Settled
+  by the exe's exit from the scan after a battle-only finish (0x4abfbc) and the battle army's local
+  (0x4ab51b), or by a map with two battle events and no text. Then stop the scan at a battle, or
+  document the difference.
 - **Show army reveals nothing for a dead or inactive army** (2026-11-05, the Hristos editor-guide
   analysis, docs/reference/editor-guide.md, gap G4). `show_army` (`src/rules/script.rs:745-750`)
   reveals only an on-map army. The exe (0x4ab51b) reads the record's current cell (+0x1724, +0x1728)
@@ -793,14 +802,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   `EventEngine::window_closed` and saves the open window (`window`), so a loaded game shows it and applies the
   results at its OK. Changes the timing of gold, mana, XP, flags, armies, the battle and the victory on a message
   event: a player-visible change (changelog, unreleased).
-- **Two battle events in one tick: the later one takes the foe, as in the exe** (2026-11-05, gap G2; settled
-  2026-11-06, no code change). The exe does not stop the scan at a battle: the finish's battle branch stores the foe
-  (0x4abb52), activates its army (0x4969b8) and clears 0x4ed42c (0x4abb79); the tail then runs the scan again
-  (0x4abea0, tested against 0x4ed42c ≤ 0 only). A later battle event of that scan overwrites the foe; the first
-  army stays activated, unfought. Razdor's `start_battle` does the same, and `script_events` gives one `Encounter`
-  for the foe as it stands (`src/rules/script.rs`). The printed guide's rule (row 126 of the guide's table: the lower
-  event number wins, a later battle only activates its army) is not the exe's: the foe goes to the later event.
-  Test `two_battle_starts_in_one_scan_the_later_one_takes_the_foe`.
 - **The stale comments on the speed bonus and the mana carry-over are reworded** (2026-11-05, the Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G11; settled 2026-11-06). `src/rules/world.rs` (`speed_for`) now says the test is unit 2, the archmage (GlobalIndex 2, the loader's test at 0x4b4824, `world.md §2`), and points to the open question on the Ranger, which stays open ("The speed bonus: unit 2 or the ranger?"). `src/rules/script.rs` (`NextMap::mana`) no longer calls the mana a "(guess)": it is byte 1 of the carry-over group (next map's header bytes 0x110..0x116, `saves-data.md §6`), settled in "Mana carry-over is the header's byte 1". The tests are unchanged.
 - **A chain deeper than the cap is reported, not dropped** (2026-11-05, the Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G6; settled 2026-11-06). `CHAIN_DEPTH = 32` (`src/rules/events.rs`) stays as a safety net against infinite recursion: a deliberate deviation, listed in `docs/reference/original-mechanics/events.md` ("Razdor now → original"). A cut now emits `EventOutcome::ChainCut(id)`, and the UI logs it, as it logs the loop guard. Test: `a_chain_deeper_than_the_cap_is_cut_and_reported` (`src/rules/events.rs`).
 - **The ranger's noon heal uses the start class, as the exe does** (2026-11-05, the Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G3; settled 2026-11-06). The noon scan (0x4abfbc) and the noon report's heal (0x4ac427) read the start-class global (0x68dccc), which only a new game and a load write (never an event's class change). `ranger_heal` (`src/rules/economy.rs`) now tests `start_class()`, and the comment at `set_hero_class` (`src/rules/script.rs`) no longer says class bonuses are lost on a change. Test: `the_ranger_noon_heal_follows_the_start_class` (`src/rules/game.rs`).

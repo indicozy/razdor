@@ -3000,23 +3000,6 @@ mod tests {
         assert_eq!(w.log, vec![Fx::Gold(5)]);
     }
 
-    /// G2 (0x4abb52, 0x4abea0): a battle-only event with no message does not stop the scan. The
-    /// battle branch of the finish stores the foe and runs the scan on before the battle opens,
-    /// so a later battle event of the same scan activates its army too and takes the foe. The
-    /// engine lists both starts in order; the game opens one battle, against the last army.
-    #[test]
-    fn two_battle_starts_in_one_scan_the_later_one_takes_the_foe() {
-        let mut first = global();
-        first.results.start_battle_with = 2;
-        let mut second = global();
-        second.results.start_battle_with = 3;
-        let mut g = engine(vec![first, second]);
-        let mut w = MockWorld::new();
-        assert_eq!(fired(&g.tick(&mut w)), vec![1, 2]);
-        assert!(!g.holds_window());
-        assert_eq!(w.log, vec![Fx::Battle(2), Fx::Battle(3)]);
-    }
-
     /// РК1's ending on the "No" path: a local event chains the victory event, whose own
     /// conditions (a Yes to the herald) do not hold. It still fires, and so does a used-up
     /// once-event chained again.
