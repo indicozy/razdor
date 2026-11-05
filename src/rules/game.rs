@@ -5577,6 +5577,7 @@ mod tests {
         g.world.armies[0].path.clear();
         assert!(g.set_destination((8, 2)));
         assert!(g.path.contains(&(5, 2)), "the route goes through the army's cell: {:?}", g.path);
+        assert!(g.hero_step(&mut Vec::new()), "the first step is taken, the army still ahead");
         let events = walk_until_stopped(&mut g);
         assert_eq!((events.last(), g.foe, g.tile()), (Some(&Event::Encounter(0)), Some(Foe::Army(0)), (4, 2)), "{events:?}");
     }

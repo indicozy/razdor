@@ -1405,6 +1405,8 @@ local! {
 /// (clamped to its end when drawn).
 pub fn scene_scroll(px: f32) {
     PHONE_SCROLL.with(|c| c.set(px));
+    // The phone's advanced window starts that far down too (clamped to its content).
+    ADV_SCROLL.with(|s| s.set(px));
 }
 
 /// Opens the advanced settings over the settings window (a snapshot scene).
@@ -1542,6 +1544,9 @@ fn advanced_width(over_map: bool, wh: f32) -> f32 {
 /// from the original on the left, the screen, the interface scale, the font and the
 /// language on the right. Returns true when closed.
 fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
+    if let Some(dp) = super::display::dp_px() {
+        return advanced_window_phone(audio, over_map, dp);
+    }
     // 650 high since «Расстановка армии» joined the left column (it still fits the 682 px view above
     // the bar); on the title screens 682, for the row «Имя предводителя» in the right column (over the
     // map the view above the bar has no room for it, so the rows there are pitched closer).
@@ -1844,6 +1849,252 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
         ADV_SCROLL.with(|s| s.set(0.0));
     }
     done
+}
+
+/// The advanced window on a phone, either orientation (the owner's phone-text request: the text
+/// is 14 sp, the rows 40 dp or more). Laid out in dp (the window scale is one unit per dp, as the
+/// keys window's upright layout), so a 14 px label is 14 sp. Held sideways the two columns sit side
+/// by side. Held upright two columns cannot hold 14 sp labels and their buttons, so the right
+/// column follows the left one: the same rows, buttons and hints. Both scroll together above the
+/// Ok button. The desktop keeps [`advanced_window`]'s layout.
+fn advanced_window_phone(audio: &mut super::audio::Settings, over_map: bool, dp: f32) -> bool {
+    let _scale = super::display::enter_window_scale(Some(dp));
+    let k = chrome::k();
+    let g = super::display::button_grow();
+    // A row is 36 dp grown by the text size (45 dp at the phone's Large), never under 40 dp.
+    let row_h = (36.0 * g).max(40.0) * k;
+    let geo = PhoneGeo { k, row_h, gap: 8.0 * k, size: 16.5 * k, lh: 20.0 * k };
+    let upright = window_layout::portrait();
+    let (sw, sh) = (screen_width(), screen_height());
+    let safe = super::display::safe_area();
+    let top = safe.top + 8.0 * k;
+    let bottom = if over_map { sh - chrome::bar_height() - 8.0 * k } else { window_layout::title_bottom() - 8.0 * k };
+    // On a phone the window keeps clear margins (as PHONE_WINDOW_SHRINK): at most 88% of the screen's
+    // width and of the height between the top inset and the bar.
+    let w = ((sw - safe.left - safe.right) * PHONE_WINDOW_SHRINK).min(900.0 * k);
+    let h = (bottom - top) * PHONE_WINDOW_SHRINK;
+    let frame = Rect::new((sw - w) / 2.0, top + (bottom - top - h) / 2.0, w, h);
+    let (inner, closed) = chrome::window(frame, tr("Advanced settings"), chrome::Skin::Marble, true);
+    let ok_h = row_h;
+    let view_h = inner.h - geo.gap - ok_h - 4.0 * k;
+    let view = Rect::new(inner.x, inner.y, inner.w, view_h);
+    let most = scroll_most(ADV_BOTTOM.with(|b| b.get()), view_h);
+    let mut scroll = ADV_SCROLL.with(|s| s.get()).clamp(0.0, most);
+    if most > 0.0 {
+        super::widgets::swipe_rows(view, 40.0 * k);
+        if crate::ui::widgets::mouse_in(view.x, view.y, view.w, view.h) {
+            scroll = (scroll - wheel() * 40.0 * k).clamp(0.0, most);
+        }
+        let bar = Rect::new(inner.x + inner.w - 28.0 * k, inner.y, 24.0 * k, view_h);
+        super::widgets::scrollbar_px(bar, &mut scroll, most, view_h, 40.0 * k);
+    }
+    ADV_SCROLL.with(|s| s.set(scroll));
+    phone_clip(Some(view));
+    ADV_VIEW.with(|v| v.set(Some(view)));
+    let top_y = inner.y - scroll;
+    let pad = 12.0 * k;
+    let column_w = inner.w - 2.0 * pad - 28.0 * k;
+    let (lw, rx, rw) = if upright {
+        (column_w, inner.x + pad, column_w)
+    } else {
+        let lw = (column_w - 24.0 * k) / 2.0;
+        (lw, inner.x + pad + lw + 24.0 * k, column_w - lw - 24.0 * k)
+    };
+    let mut left = PhoneCol { x: inner.x + pad, w: lw, y: top_y + pad };
+    let mut right = PhoneCol { x: rx, w: rw, y: top_y + pad };
+
+    // The left column: the rules, each with its explanation.
+    let label = if audio.keep_xp_on_promotion { tr("Kept (Razdor)") } else { tr("Reset (original)") };
+    if phone_row(&mut left, &geo, tr("Experience on promotion"), label).0 {
+        audio.keep_xp_on_promotion = !audio.keep_xp_on_promotion;
+    }
+    phone_hint(&mut left, &geo, tr("As in the original, a unit's experience is dropped when it is promoted; Kept keeps it. Experience left over after a level is kept either way."));
+    if !razdor::platform::MOBILE {
+        let mode = match audio.updates {
+            razdor::update::Mode::Ask => tr("Ask"),
+            razdor::update::Mode::Always => tr("Always"),
+            razdor::update::Mode::Off => tr("Off"),
+        };
+        if phone_row(&mut left, &geo, tr("Updates"), mode).0 {
+            audio.updates = audio.updates.next();
+        }
+        let state = super::update_view::status_label();
+        if phone_row(&mut left, &geo, &state, tr("Check now")).0 {
+            super::update_view::check_by_hand();
+        }
+        phone_hint(&mut left, &geo, tr("Ask: a newer release is offered in a window. Always: it is downloaded and starts the next time. The check never holds up the game."));
+    }
+    let lock_label = if audio.zoom_locked { tr("Locked") } else { tr("Wheel and +/-") };
+    if phone_row(&mut left, &geo, tr("Map zoom"), lock_label).0 {
+        audio.zoom_locked = !audio.zoom_locked;
+    }
+    let (lo, hi) = super::world_view::ZOOM_RANGE;
+    let value = format!("×{:.2}", audio.map_zoom);
+    let value_w = measure(&value, geo.size).width;
+    let track = Rect::new(left.x, left.y, (left.w - value_w - 12.0 * k).max(60.0 * k), 32.0 * k);
+    chrome::shadow_text(&value, track.x + track.w + 8.0 * k, track.y + 21.0 * k, geo.size, chrome::GOLD);
+    if let Some(v) = slider(track, (audio.map_zoom - lo) / (hi - lo)).filter(|_| in_adv_view(track)) {
+        audio.map_zoom = ((lo + v * (hi - lo)) / 0.05).round() * 0.05;
+    }
+    left.y += track.h + geo.gap;
+    phone_hint(&mut left, &geo, tr("The zoom the map plays at. The wheel steps away from it and the 0 key comes back to it; locked, the map always shows it."));
+    let arrangement = match audio.formation_controls {
+        super::unit_drag::Controls::Clicks => tr("Clicks"),
+        super::unit_drag::Controls::Drag => tr("Dragging"),
+        super::unit_drag::Controls::Both => tr("Both"),
+    };
+    if phone_row(&mut left, &geo, tr("Army arrangement"), arrangement).0 {
+        audio.formation_controls = audio.formation_controls.next();
+    }
+    phone_hint(&mut left, &geo, tr("Clicks: the first click picks a unit or an item, the second places it. Dragging: a click only selects, and units and items are moved by dragging. Both: clicks and dragging at once."));
+
+    // The right column: how Razdor shows the game (under the left one when held upright).
+    if upright {
+        right.y = left.y;
+    }
+    let phone = true;
+    let screen_label = tr("Screen");
+    if phone_row(&mut right, &geo, screen_label, audio.display.for_device(phone).label()).0 {
+        audio.display = audio.display.next_on(phone);
+    }
+    let fit = chrome::fit_k();
+    if phone_row(&mut right, &geo, tr("Interface scale"), &super::display::scale_label(audio.ui_scale, fit)).0 {
+        audio.ui_scale = super::display::next_scale(audio.ui_scale, fit);
+    }
+    let font_label = match audio.font {
+        super::dt_font::FontMode::Original => tr("As in the original"),
+        super::dt_font::FontMode::Modern => tr("Modern"),
+    };
+    if phone_row(&mut right, &geo, tr("Font"), font_label).0 {
+        audio.font = audio.font.next();
+    }
+    let strength = ai_strength(audio);
+    let strength_label = match strength {
+        AiStrength::Original => tr("As in the original"),
+        AiStrength::Improved => tr("Improved"),
+        AiStrength::Max => tr("Maximum (Razdor)"),
+    };
+    if phone_row(&mut right, &geo, tr("Battle AI strength"), strength_label).0 {
+        set_ai_strength(audio, strength.next());
+    }
+    phone_hint(&mut right, &geo, tr("Maximum: before each move the enemy of your battles weighs every move and answer ahead and plays each out to the end of the battle."));
+    if phone_row(&mut right, &geo, tr("Unit battle participation"), if audio.allow_unit_benching { tr("On") } else { tr("Off") }).0 {
+        audio.allow_unit_benching = !audio.allow_unit_benching;
+    }
+    if phone_row(&mut right, &geo, tr("Keep formation after battle"), if audio.keep_formation { tr("On") } else { tr("Off") }).0 {
+        audio.keep_formation = !audio.keep_formation;
+    }
+    if phone_row(&mut right, &geo, tr("Max guards casters"), if audio.max_guard { tr("On") } else { tr("Off") }).0 {
+        audio.max_guard = !audio.max_guard;
+    }
+    if phone_row(&mut right, &geo, tr("Battles on the map"), if audio.battle_marks { tr("On") } else { tr("Off") }).0 {
+        audio.battle_marks = !audio.battle_marks;
+    }
+    if phone_row(&mut right, &geo, tr("Minimap army list"), if audio.army_list { tr("On") } else { tr("Off") }).0 {
+        audio.army_list = !audio.army_list;
+    }
+    if phone_row(&mut right, &geo, tr("Leader's name"), if audio.leader_caption { tr("On") } else { tr("Off") }).0 {
+        audio.leader_caption = !audio.leader_caption;
+    }
+    let corner_label = match minimap::corner() {
+        minimap::Corner::TopRight => tr("Top right"),
+        minimap::Corner::BottomRight => tr("Bottom right"),
+        minimap::Corner::BottomLeft => tr("Bottom left"),
+        minimap::Corner::TopLeft => tr("Top left"),
+    };
+    if phone_row(&mut right, &geo, tr("Minimap corner"), corner_label).0 {
+        minimap::set_corner(minimap::corner().next());
+    }
+    if phone_row(&mut right, &geo, tr("Minimap size and place"), tr("Reset")).0 {
+        minimap::reset();
+    }
+    if phone_row(&mut right, &geo, tr("Keyboard shortcuts"), tr("Keys…")).0 {
+        KEYS_OPEN.with(|o| o.set(true));
+        KEYS_FROM_HELP.with(|f| f.set(false));
+    }
+    let (clicked, lr) = phone_row(&mut right, &geo, tr("Language"), &super::language::current_label());
+    if clicked || super::snapshot::open_language_list() {
+        super::language::open_list(lr, k);
+    }
+    phone_hint(&mut right, &geo, super::language::hint());
+
+    let content_bottom = left.y.max(right.y);
+    phone_clip(None);
+    ADV_VIEW.with(|v| v.set(None));
+    ADV_BOTTOM.with(|b| b.set(content_bottom - top_y));
+    let ok = Rect::new(inner.x + inner.w - 120.0 * k - pad, inner.y + inner.h - geo.gap - ok_h, 120.0 * k, ok_h);
+    let ok_label = own("Buttons", "Ok", n_("OK"));
+    let done = closed || key(KeyCode::Escape) || key(KeyCode::Enter) || phone_button_draw(ok, &ok_label, geo.size);
+    if done {
+        ADV_SCROLL.with(|s| s.set(0.0));
+    }
+    done
+}
+
+/// The phone advanced window's geometry (px at its scale, the text in px = sp × dp).
+struct PhoneGeo {
+    k: f32,
+    row_h: f32,
+    gap: f32,
+    size: f32,
+    lh: f32,
+}
+
+/// A column of the phone advanced window: its left, width and the next row's top (px).
+struct PhoneCol {
+    x: f32,
+    w: f32,
+    y: f32,
+}
+
+/// A row on the phone: its label on the left (wrapped to the room beside the button) and its
+/// button on the right, the button as wide as its value needs (at least 120 dp). Returns whether
+/// it was clicked and the button's rectangle.
+fn phone_row(c: &mut PhoneCol, geo: &PhoneGeo, label: &str, value: &str) -> (bool, Rect) {
+    let vw = super::typography::Role::Button.with(|| super::dt_font::legacy_metrics_if(true, || measure(value, geo.size).width));
+    let bw = (vw + 28.0 * geo.k).max(120.0 * geo.k);
+    let room = c.w - bw - 10.0 * geo.k;
+    let lines = wrap_label(label, room, geo.size);
+    let h = geo.row_h.max(lines.len() as f32 * geo.lh);
+    let centre = c.y + h / 2.0;
+    for (i, line) in lines.iter().enumerate() {
+        let base = centre - (lines.len() as f32 - 1.0) * geo.lh / 2.0 + i as f32 * geo.lh + geo.size * 0.36;
+        chrome::shadow_text(line, c.x, base, geo.size, chrome::CREAM);
+    }
+    let r = Rect::new(c.x + c.w - bw, c.y + (h - geo.row_h) / 2.0, bw, geo.row_h);
+    c.y += h + geo.gap;
+    (phone_button(r, value, geo.size), r)
+}
+
+/// A hint under a phone row: its lines at 14 sp across the column.
+fn phone_hint(c: &mut PhoneCol, geo: &PhoneGeo, text: &str) {
+    let lines = wrap(text, c.w, geo.size);
+    for (i, line) in lines.iter().enumerate() {
+        chrome::shadow_text(line, c.x, c.y + i as f32 * geo.lh + geo.size * 0.9, geo.size, WHITE);
+    }
+    c.y += lines.len() as f32 * geo.lh + geo.gap;
+}
+
+/// A phone button with its label at `size` px, clicked only where it shows in the scroll view.
+fn phone_button(r: Rect, label: &str, size: f32) -> bool {
+    if let Some(view) = ADV_VIEW.with(|v| v.get()) {
+        if !overlaps(r, view) {
+            return false;
+        }
+        let pressed = phone_button_draw(r, label, size);
+        let (mx, my) = crate::ui::widgets::pointer();
+        return pressed && in_rect((mx, my), view);
+    }
+    phone_button_draw(r, label, size)
+}
+
+fn phone_button_draw(r: Rect, label: &str, size: f32) -> bool {
+    let (_, down, pressed) = super::widgets::button_state(r, true);
+    chrome::marble_button_sized(r, label, true, down, size);
+    if pressed {
+        cue(Cue::Button);
+    }
+    pressed
 }
 
 /// The right column's row pitch in the advanced window (px at its scale): `max` (the original's
