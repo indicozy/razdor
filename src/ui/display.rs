@@ -738,6 +738,10 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
         set_dp_px(std::env::var("RAZDOR_DP").ok().and_then(|s| s.trim().parse::<f32>().ok()));
         // `RAZDOR_KEYBOARD=<px>`: the on-screen keyboard's height (physical px), as the phone reads it.
         set_keyboard_inset(std::env::var("RAZDOR_KEYBOARD").ok().and_then(|s| s.trim().parse::<f32>().ok()).unwrap_or(0.0));
+        // `RAZDOR_MAP_ZOOM=<f32>`: the map's zoom, locked (a snapshot of the world view at that zoom).
+        if let Some(z) = std::env::var("RAZDOR_MAP_ZOOM").ok().and_then(|s| s.trim().parse::<f32>().ok()) {
+            crate::ui::world_view::set_zoom_prefs(z, true);
+        }
         return;
     }
     read_dp_once();
