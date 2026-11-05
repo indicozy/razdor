@@ -519,7 +519,7 @@ pub(super) fn draw_effect(content: &razdor::rules::content::Content, n: usize, s
     let size = 220.0 * px;
     let (cx, cy) = (sq.x + sq.w / 2.0, sq.y + sq.h / 2.0 + e.y as f32 * px);
     chrome::premultiplied(|| {
-        draw_texture_ex(&frames[i], cx - size / 2.0, cy - size / 2.0, WHITE, DrawTextureParams { dest_size: Some(vec2(size, size)), ..Default::default() });
+        super::sharp::draw(&frames[i], cx - size / 2.0, cy - size / 2.0, WHITE, DrawTextureParams { dest_size: Some(vec2(size, size)), ..Default::default() });
     });
     true
 }

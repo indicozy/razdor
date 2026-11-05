@@ -1001,32 +1001,21 @@ void main() {
     uv = texcoord;
 }"#;
 
-const ADD_FRAGMENT: &str = r#"#version 100
-varying lowp vec4 color;
-varying lowp vec2 uv;
-uniform sampler2D Texture;
-void main() {
-    gl_FragColor = color * texture2D(Texture, uv);
-}"#;
+/// The main body of the blend shaders (see [`sharp::fragment`]): the colour times the sharp
+/// picture. Additive, multiply, premultiplied and subtractive blends all use it.
+const ADD_MAIN: &str = "gl_FragColor = color * sharp_tex(uv);";
 
 // Rotate the circular source art before the quad is vertically compressed into a
 // ground-plane ellipse. Rotating the finished quad instead makes the oval itself spin.
-const GROUND_RING_FRAGMENT: &str = r#"#version 100
-precision mediump float;
-varying lowp vec4 color;
-varying lowp vec2 uv;
-uniform sampler2D Texture;
-uniform float Rotation;
-void main() {
-    vec2 p = uv - vec2(0.5);
+const GROUND_RING_EXTRA: &str = "uniform float Rotation;";
+const GROUND_RING_MAIN: &str = r#"vec2 p = uv - vec2(0.5);
     float c = cos(Rotation);
     float s = sin(Rotation);
     vec2 source_uv = mat2(c, -s, s, c) * p + vec2(0.5);
     if (source_uv.x < 0.0 || source_uv.x > 1.0 || source_uv.y < 0.0 || source_uv.y > 1.0) {
         discard;
     }
-    gl_FragColor = color * texture2D(Texture, source_uv);
-}"#;
+    gl_FragColor = color * sharp_tex(source_uv);"#;
 
 local! {
     static ADDITIVE: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
@@ -1038,48 +1027,24 @@ local! {
 /// Draw a circular marker texture projected onto the ground. The source pattern rotates
 /// in its own plane while the output remains a stable foreshortened ellipse.
 pub fn ground_ring(texture: &Texture2D, rect: Rect, color: Color, angle: f32) {
-    use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation, PipelineParams};
     let material = GROUND_RING.with(|cell| {
         cell.get_or_init(|| {
-            load_material(
-                ShaderSource::Glsl { vertex: ADD_VERTEX, fragment: GROUND_RING_FRAGMENT },
-                MaterialParams {
-                    uniforms: vec![UniformDesc::new("Rotation", UniformType::Float1)],
-                    pipeline_params: PipelineParams {
-                        color_blend: Some(BlendState::new(
-                            Equation::Add,
-                            BlendFactor::Value(BlendValue::SourceAlpha),
-                            BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
-                        )),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
+            sharp::material(
+                &sharp::fragment(GROUND_RING_EXTRA, GROUND_RING_MAIN),
+                sharp::alpha_pipeline(),
+                vec![UniformDesc::new("Rotation", UniformType::Float1)],
             )
             .map_err(|e| razdor::diag!("ground ring material: {e}"))
             .ok()
         })
         .clone()
     });
+    let params = DrawTextureParams { dest_size: Some(vec2(rect.w, rect.h)), ..Default::default() };
     if let Some(material) = material {
         material.set_uniform("Rotation", angle);
-        with_material(Some(material), || {
-            draw_texture_ex(
-                texture,
-                rect.x,
-                rect.y,
-                color,
-                DrawTextureParams { dest_size: Some(vec2(rect.w, rect.h)), ..Default::default() },
-            );
-        });
+        with_material(Some(material), || sharp::draw(texture, rect.x, rect.y, color, params));
     } else {
-        draw_texture_ex(
-            texture,
-            rect.x,
-            rect.y,
-            color,
-            DrawTextureParams { dest_size: Some(vec2(rect.w, rect.h)), ..Default::default() },
-        );
+        sharp::draw(texture, rect.x, rect.y, color, params);
     }
 }
 
@@ -1098,7 +1063,7 @@ pub fn premultiplied(draw: impl FnOnce()) {
 
 fn blend_material(blend: macroquad::miniquad::BlendState, what: &str) -> Option<Material> {
     let pipeline_params = macroquad::miniquad::PipelineParams { color_blend: Some(blend), ..Default::default() };
-    load_material(ShaderSource::Glsl { vertex: ADD_VERTEX, fragment: ADD_FRAGMENT }, MaterialParams { pipeline_params, ..Default::default() })
+    sharp::material(&sharp::fragment("", ADD_MAIN), pipeline_params, Vec::new())
         .map_err(|e| razdor::diag!("{what} material: {e}"))
         .ok()
 }
@@ -1114,13 +1079,7 @@ pub fn additive(draw: impl FnOnce()) {
     with_material(material, draw);
 }
 
-const SILHOUETTE_FRAGMENT: &str = r#"#version 100
-varying lowp vec4 color;
-varying lowp vec2 uv;
-uniform sampler2D Texture;
-void main() {
-    gl_FragColor = vec4(color.rgb, color.a * step(0.77, texture2D(Texture, uv).a));
-}"#;
+const SILHOUETTE_MAIN: &str = "gl_FragColor = vec4(color.rgb, color.a * step(0.77, sharp_tex(uv).a));";
 
 local! {
     static SILHOUETTE: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
@@ -1131,12 +1090,9 @@ local! {
 /// [`razdor::dt::gfx::BUILDING_SHADOW_ALPHA`], 0.733) is left out and its edges (from 0.8)
 /// kept. Without the material, nothing is drawn.
 pub fn silhouette(draw: impl FnOnce()) {
-    use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation, PipelineParams};
     let material = SILHOUETTE.with(|m| {
         m.get_or_init(|| {
-            let blend = BlendState::new(Equation::Add, BlendFactor::Value(BlendValue::SourceAlpha), BlendFactor::OneMinusValue(BlendValue::SourceAlpha));
-            let pipeline_params = PipelineParams { color_blend: Some(blend), ..Default::default() };
-            load_material(ShaderSource::Glsl { vertex: ADD_VERTEX, fragment: SILHOUETTE_FRAGMENT }, MaterialParams { pipeline_params, ..Default::default() })
+            sharp::material(&sharp::fragment("", SILHOUETTE_MAIN), sharp::alpha_pipeline(), Vec::new())
                 .map_err(|e| razdor::diag!("silhouette material: {e}"))
                 .ok()
         })
@@ -1162,16 +1118,17 @@ pub fn multiply(draw: impl FnOnce()) {
 /// original's blend mode 1 (476790, 4768f8), the window's alpha kept. Without the material,
 /// normal blending.
 pub fn subtractive(draw: impl FnOnce()) {
-    subtract_with(&SUBTRACT, ADD_FRAGMENT, draw);
+    subtract_with(&SUBTRACT, true, draw);
 }
 
 /// Subtractive blending for text: like [`subtractive`], but the fragment is premultiplied by the
 /// glyph's coverage, so only the glyph's ink is taken off the parchment, not its whole box.
+/// Text stays plain (not sharp).
 pub fn subtractive_text(draw: impl FnOnce()) {
-    subtract_with(&SUBTRACT_TEXT, SUBTRACT_TEXT_FRAGMENT, draw);
+    subtract_with(&SUBTRACT_TEXT, false, draw);
 }
 
-fn subtract_with(cell: &'static razdor::local::Local<std::cell::OnceCell<Option<Material>>>, fragment: &'static str, draw: impl FnOnce()) {
+fn subtract_with(cell: &'static razdor::local::Local<std::cell::OnceCell<Option<Material>>>, sharp_art: bool, draw: impl FnOnce()) {
     use macroquad::miniquad::{BlendFactor, BlendState, Equation, PipelineParams};
     let material = cell.with(|m| {
         m.get_or_init(|| {
@@ -1180,13 +1137,19 @@ fn subtract_with(cell: &'static razdor::local::Local<std::cell::OnceCell<Option<
                 alpha_blend: Some(BlendState::new(Equation::Add, BlendFactor::Zero, BlendFactor::One)),
                 ..Default::default()
             };
-            load_material(ShaderSource::Glsl { vertex: ADD_VERTEX, fragment }, MaterialParams { pipeline_params, ..Default::default() })
-                .map_err(|e| razdor::diag!("subtractive material: {e}"))
-                .ok()
+            let made = if sharp_art {
+                sharp::material(&sharp::fragment("", ADD_MAIN), pipeline_params, Vec::new())
+            } else {
+                load_material(ShaderSource::Glsl { vertex: ADD_VERTEX, fragment: SUBTRACT_TEXT_FRAGMENT }, MaterialParams { pipeline_params, ..Default::default() })
+            };
+            made.map_err(|e| razdor::diag!("subtractive material: {e}")).ok()
         })
         .clone()
     });
-    with_material(material, draw);
+    match material {
+        Some(m) => with_blend(Some(m), sharp_art, draw),
+        None => draw(),
+    }
 }
 
 local! {
@@ -1204,12 +1167,17 @@ void main() {
     gl_FragColor = vec4(color.rgb * t.rgb * t.a, t.a);
 }"#;
 
+/// Sets `material` for `draw`: its sharp draws keep the blend (see [`sharp::in_blend`]).
 fn with_material(material: Option<Material>, draw: impl FnOnce()) {
+    with_blend(material, true, draw);
+}
+
+fn with_blend(material: Option<Material>, sharp_art: bool, draw: impl FnOnce()) {
     match material {
         Some(m) => {
             gl_use_material(&m);
-            super::sharp::in_blend(draw);
-            gl_use_default_material();
+            sharp::in_blend(sharp_art.then(|| m.clone()), draw);
+            sharp::leave_blend();
         }
         None => draw(),
     }
@@ -3082,7 +3050,7 @@ mod tests {
     #[test]
     fn the_silhouette_leaves_building_shadows_out() {
         let cut = 0.77;
-        assert!(SILHOUETTE_FRAGMENT.contains("step(0.77,"));
+        assert!(SILHOUETTE_MAIN.contains("step(0.77,"));
         assert!(cut * 255.0 > razdor::dt::gfx::BUILDING_SHADOW_ALPHA as f32);
         assert!(cut * 255.0 < 204.0);
     }

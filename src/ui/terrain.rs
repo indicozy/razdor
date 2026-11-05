@@ -21,6 +21,7 @@ use macroquad::prelude::*;
 
 use macroquad::miniquad::TextureWrap;
 use razdor::dt::gfx::{water_frame, Image, WATER_FRAMES};
+use super::sharp;
 
 const VERTEX: &str = r#"#version 100
 attribute vec3 position;
@@ -34,6 +35,7 @@ void main() {
 }
 "#;
 
+// `// @SHARP_UV@` is replaced by `sharp::SHARP_UV_GLSL` when the material is made.
 const FRAGMENT: &str = r#"#version 100
 precision highp float;
 varying highp vec2 uv;
@@ -51,6 +53,11 @@ uniform vec2 CellPx;
 uniform vec2 Tile;
 uniform vec2 Slot;
 uniform vec2 AtlasSize;
+// Screen pixels per texel of the atlas and of the water frame (sharp sampling).
+uniform vec2 AtlasScale;
+uniform vec2 WaterSize;
+uniform vec2 WaterScale;
+// @SHARP_UV@
 
 float code_at(vec2 c) {
     c = clamp(c, vec2(0.0), MapSize - 1.0);
@@ -60,7 +67,8 @@ float code_at(vec2 c) {
 vec3 ground(float code, vec2 px, vec3 water) {
     vec2 slot = vec2(mod(code, 4.0), floor(code / 4.0));
     vec2 t = mod(px, Tile);
-    vec3 c = texture2D(Atlas, (slot * Slot + (Slot - Tile) * 0.5 + t) / AtlasSize).rgb;
+    vec2 atlas_uv = (slot * Slot + (Slot - Tile) * 0.5 + t) / AtlasSize;
+    vec3 c = texture2D(Atlas, sharp_uv(atlas_uv, AtlasSize, AtlasScale)).rgb;
     return code < 2.5 && WaterOn > 0.5 ? min(c * water * 2.0, 1.0) : c;
 }
 
@@ -71,7 +79,7 @@ void main() {
     vec2 px = p * CellPx;
     // The water stage's coordinates: 1/3 per cell from the corner of the cell before map cell 0
     // (the original's terrain has a 1-cell border); the frame texture repeats.
-    vec3 w = texture2D(Water, (p + 1.5) / 3.0).rgb;
+    vec3 w = texture2D(Water, sharp_uv((p + 1.5) / 3.0, WaterSize, WaterScale)).rgb;
     vec3 top = mix(ground(code_at(i), px, w), ground(code_at(i + vec2(1.0, 0.0)), px, w), f.x);
     vec3 bottom = mix(ground(code_at(i + vec2(0.0, 1.0)), px, w), ground(code_at(i + vec2(1.0, 1.0)), px, w), f.x);
     gl_FragColor = vec4(mix(top, bottom, f.y), 1.0);
@@ -148,9 +156,9 @@ impl TerrainLayer {
     pub fn new(textures: &[Option<Image>; 16], fill: &[[u8; 4]; 16], water: &[Image]) -> Option<TerrainLayer> {
         let (image, (tw, th)) = pack_terrain_atlas(textures, fill)?;
         let material = load_material(
-            ShaderSource::Glsl { vertex: VERTEX, fragment: FRAGMENT },
+            ShaderSource::Glsl { vertex: VERTEX, fragment: &FRAGMENT.replace("// @SHARP_UV@", sharp::SHARP_UV_GLSL) },
             MaterialParams {
-                uniforms: ["View", "MapSize", "CellPx", "Tile", "Slot", "AtlasSize", "WaterOn"]
+                uniforms: ["View", "MapSize", "CellPx", "Tile", "Slot", "AtlasSize", "WaterOn", "AtlasScale", "WaterSize", "WaterScale"]
                     .iter()
                     .zip([
                         UniformType::Float4,
@@ -160,6 +168,9 @@ impl TerrainLayer {
                         UniformType::Float2,
                         UniformType::Float2,
                         UniformType::Float1,
+                        UniformType::Float2,
+                        UniformType::Float2,
+                        UniformType::Float2,
                     ])
                     .map(|(n, t)| UniformDesc::new(n, t))
                     .collect(),
@@ -217,7 +228,14 @@ impl TerrainLayer {
         // Without frames the stage samples the atlas and is switched off.
         let water = water_ms.filter(|_| !self.water.is_empty()).map(|ms| self.water[water_frame(ms)].clone());
         m.set_uniform("WaterOn", if water.is_some() { 1.0f32 } else { 0.0 });
-        m.set_texture("Water", water.unwrap_or_else(|| self.atlas.clone()));
+        let water = water.unwrap_or_else(|| self.atlas.clone());
+        m.set_uniform("WaterSize", vec2(water.width(), water.height()));
+        // Screen pixels per texel: the quad spans `view` cells over `dest`; the atlas has
+        // `cell_px` texels per cell, and the water frame 1/3 of its texture per cell.
+        let (cells_w, cells_h) = (view.z - view.x, view.w - view.y);
+        m.set_uniform("AtlasScale", vec2(dest.w / (cells_w * cell_px.x), dest.h / (cells_h * cell_px.y)));
+        m.set_uniform("WaterScale", vec2(3.0 * dest.w / (cells_w * water.width()), 3.0 * dest.h / (cells_h * water.height())));
+        m.set_texture("Water", water);
         m.set_uniform("View", view);
         m.set_uniform("MapSize", vec2(w as f32, h as f32));
         m.set_uniform("CellPx", cell_px);

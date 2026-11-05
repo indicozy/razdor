@@ -6,9 +6,13 @@
 //! colour is that texel's own; only a thin band at each texel edge (one screen pixel wide)
 //! is blended, which the hardware's bilinear filter does for us.
 //!
-//! [`SHARP_UV_GLSL`] is the GLSL function; [`draw`] is a drop-in for `draw_texture_ex` that
-//! samples with it. The textures stay `FilterMode::Linear`: the function needs the hardware
-//! bilinear step inside the blend band.
+//! [`SHARP_UV_GLSL`] is the GLSL function; [`fragment`] builds a fragment shader that samples
+//! with it, [`material`] loads one, and [`draw`] is a drop-in for `draw_texture_ex`. The
+//! textures stay `FilterMode::Linear`: the function needs the hardware bilinear step inside
+//! the blend band.
+//!
+//! Blend modes (`chrome::additive` and the like) set their material with [`in_blend`]; a
+//! sharp draw inside it sets its uniforms on that material instead of replacing it.
 
 use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation, PipelineParams};
 use macroquad::prelude::*;
@@ -19,24 +23,26 @@ use macroquad::prelude::*;
 /// Scale below 1 (a picture drawn smaller than its texels) gives plain bilinear.
 pub const SHARP_UV_GLSL: &str = r#"
 vec2 sharp_uv(vec2 uv, vec2 tex_size, vec2 scale) {
+    vec2 ts = max(tex_size, vec2(1.0));
     vec2 s = max(scale, vec2(1.0));
-    vec2 texel = uv * tex_size;
+    vec2 texel = uv * ts;
     vec2 base = floor(texel - 0.5) + 0.5;
     vec2 f = texel - base;
     vec2 t = clamp((f - 0.5) * s + 0.5, 0.0, 1.0);
-    return (base + t) / tex_size;
+    return (base + t) / ts;
 }
 "#;
 
 /// Rust mirror of [`SHARP_UV_GLSL`], line for line, for the tests. Keep the two in step.
 #[cfg(test)]
 fn sharp_uv_ref(uv: Vec2, tex_size: Vec2, scale: Vec2) -> Vec2 {
+    let ts = tex_size.max(Vec2::ONE);
     let s = scale.max(Vec2::ONE);
-    let texel = uv * tex_size;
+    let texel = uv * ts;
     let base = (texel - 0.5).floor() + 0.5;
     let f = texel - base;
     let t = ((f - 0.5) * s + 0.5).clamp(Vec2::ZERO, Vec2::ONE);
-    (base + t) / tex_size
+    (base + t) / ts
 }
 
 /// Screen pixels per texel on each axis for a draw: the destination size over the source
@@ -48,7 +54,8 @@ pub fn draw_scale(tex_size: Vec2, params: &DrawTextureParams) -> Vec2 {
     dest.abs() / source
 }
 
-const SHARP_VERTEX: &str = r#"#version 100
+/// The vertex stage of every sharp material: as `chrome`'s own, with a highp `uv`.
+pub const SHARP_VERTEX: &str = r#"#version 100
 attribute vec3 position;
 attribute vec2 texcoord;
 attribute vec4 color0;
@@ -62,10 +69,13 @@ void main() {
     uv = texcoord;
 }"#;
 
-/// The fragment source: `uv` stays highp (the texel maths needs it on large textures), and
-/// the precision of the other values follows the device. A device without highp in the
-/// fragment stage fails to compile this and gets the plain draw (see [`material`]).
-fn sharp_fragment() -> String {
+/// A fragment shader with `sharp_uv` and the uniforms `TexSize` and `Scale` declared, then
+/// `extra` (more declarations, e.g. `uniform float Rotation;`), then `main` as the body of
+/// `void main()`. In `main`: `uv` and `color` are the varyings, `sharp_tex(at)` samples
+/// `Texture` at texture coordinate `at` with sharp sampling. The precision is highp where the
+/// device has it; without highp in the fragment stage this fails to compile and the caller
+/// gets the plain draw.
+pub fn fragment(extra: &str, main: &str) -> String {
     format!(
         r#"#version 100
 #ifdef GL_FRAGMENT_PRECISION_HIGH
@@ -78,47 +88,112 @@ varying lowp vec4 color;
 uniform sampler2D Texture;
 uniform vec2 TexSize;
 uniform vec2 Scale;
+{extra}
 {SHARP_UV_GLSL}
+vec4 sharp_tex(vec2 at) {{
+    return texture2D(Texture, sharp_uv(at, TexSize, Scale));
+}}
 void main() {{
-    gl_FragColor = color * texture2D(Texture, sharp_uv(uv, TexSize, Scale));
+{main}
 }}"#
     )
 }
 
-razdor::local! {
-    static SHARP: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
+/// Loads a sharp material: [`SHARP_VERTEX`] and `fragment` (from [`fragment`]), with the
+/// given pipeline and the extra uniforms. `TexSize` and `Scale` start at 1, so a draw that
+/// does not set them (a flat colour) samples a sane grid.
+pub fn material(fragment: &str, pipeline_params: PipelineParams, mut extra: Vec<UniformDesc>) -> Result<Material, macroquad::Error> {
+    extra.push(UniformDesc::new("TexSize", UniformType::Float2));
+    extra.push(UniformDesc::new("Scale", UniformType::Float2));
+    let m = load_material(
+        ShaderSource::Glsl { vertex: SHARP_VERTEX, fragment },
+        MaterialParams { uniforms: extra, pipeline_params, ..Default::default() },
+    )?;
+    m.set_uniform("TexSize", Vec2::ONE);
+    m.set_uniform("Scale", Vec2::ONE);
+    Ok(m)
 }
 
-/// The sharp material, made once. `None` when the shader does not compile on this GPU or
-/// driver: the draws then fall back to plain `draw_texture_ex` (the look before this module),
-/// and the reason is logged once.
-fn material() -> Option<Material> {
-    SHARP.with(|m| {
+/// The colour blend of macroquad's own pipeline (source alpha over), for the draw material.
+pub fn alpha_pipeline() -> PipelineParams {
+    PipelineParams {
+        color_blend: Some(BlendState::new(
+            Equation::Add,
+            BlendFactor::Value(BlendValue::SourceAlpha),
+            BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
+        )),
+        ..Default::default()
+    }
+}
+
+razdor::local! {
+    static DRAW_MATERIAL: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
+    /// The blend contexts set by [`in_blend`], innermost last: `Some(material)` for a sharp
+    /// blend, `None` for a plain one (text).
+    static BLEND: std::cell::RefCell<Vec<Option<Material>>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// The sharp material kept set by [`session`] (`None` outside one).
+    static BASE: std::cell::RefCell<Option<Material>> = const { std::cell::RefCell::new(None) };
+    /// The draw material's last uniforms (texture size, scale) set in the session.
+    static LAST: std::cell::Cell<Option<(Vec2, Vec2)>> = const { std::cell::Cell::new(None) };
+}
+
+/// Runs `draw` with the sharp material kept set: its sharp draws share one material switch,
+/// and a uniform that did not change is not set again. Macroquad breaks its batch at every
+/// material switch and at every uniform set, even an unchanged one, so this keeps the draws
+/// of a pass batched as before. Inside, only sharp draws and white shapes (`draw_circle`,
+/// lines) may draw: a plain textured draw would sample with the sharp uniforms. A blend
+/// context ends by going back to this material ([`leave_blend`]).
+pub fn session<R>(draw: impl FnOnce() -> R) -> R {
+    struct End;
+    impl Drop for End {
+        fn drop(&mut self) {
+            BASE.with(|b| b.borrow_mut().take());
+            LAST.with(|l| l.set(None));
+            gl_use_default_material();
+        }
+    }
+    let Some(m) = draw_material() else { return draw() };
+    if in_session() {
+        return draw();
+    }
+    BASE.with(|b| *b.borrow_mut() = Some(m.clone()));
+    LAST.with(|l| l.set(None));
+    gl_use_material(&m);
+    let _end = End;
+    draw()
+}
+
+fn in_session() -> bool {
+    BASE.with(|b| b.borrow().is_some())
+}
+
+/// Ends a blend context: back to the session's material, or the default one outside a session.
+pub fn leave_blend() {
+    match BASE.with(|b| b.borrow().clone()) {
+        Some(m) => gl_use_material(&m),
+        None => gl_use_default_material(),
+    }
+}
+
+/// Sets the draw material's `TexSize` and `Scale` unless they are the values already set in
+/// this session.
+fn set_cached(m: &Material, tex_size: Vec2, scale: Vec2) {
+    if LAST.with(|l| l.get()) != Some((tex_size, scale)) {
+        m.set_uniform("TexSize", tex_size);
+        m.set_uniform("Scale", scale);
+        LAST.with(|l| l.set(Some((tex_size, scale))));
+    }
+}
+
+/// The sharp draw material, made once. `None` when the shader does not compile on this GPU
+/// or driver: the draws then fall back to plain `draw_texture_ex` (the look before this
+/// module), and the reason is logged once.
+fn draw_material() -> Option<Material> {
+    DRAW_MATERIAL.with(|m| {
         m.get_or_init(|| {
-            // The default pipeline blends with no blend state at all, so the picture's
-            // transparent pixels would draw black: the same colour blend macroquad's own
-            // pipeline uses (its alpha blend stays off, as there).
-            let pipeline_params = PipelineParams {
-                color_blend: Some(BlendState::new(
-                    Equation::Add,
-                    BlendFactor::Value(BlendValue::SourceAlpha),
-                    BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
-                )),
-                ..Default::default()
-            };
-            load_material(
-                ShaderSource::Glsl { vertex: SHARP_VERTEX, fragment: &sharp_fragment() },
-                MaterialParams {
-                    uniforms: vec![
-                        UniformDesc::new("TexSize", UniformType::Float2),
-                        UniformDesc::new("Scale", UniformType::Float2),
-                    ],
-                    pipeline_params,
-                    ..Default::default()
-                },
-            )
-            .map_err(|e| razdor::diag!("sharp material: {e}"))
-            .ok()
+            material(&fragment("", "gl_FragColor = color * sharp_tex(uv);"), alpha_pipeline(), Vec::new())
+                .map_err(|e| razdor::diag!("sharp material: {e}"))
+                .ok()
         })
         .clone()
     })
@@ -132,59 +207,84 @@ pub fn set_uniforms(m: &Material, tex: &Texture2D, params: &DrawTextureParams) {
     m.set_uniform("Scale", draw_scale(tex_size, params));
 }
 
-razdor::local! {
-    /// How many blend materials (`chrome::additive` and the like) are set around the draw.
-    static BLEND_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
-}
-
-/// Runs `draw` with a blend material set by the caller (`chrome::with_material`). Sharp draws
-/// inside it are plain: their own material would replace the blend, and the blend's shader
-/// does not sample sharp yet.
-pub fn in_blend<R>(draw: impl FnOnce() -> R) -> R {
+/// Runs `draw` inside a blend context set by the caller (`chrome::with_material`). With
+/// `Some(material)` (a sharp blend) a sharp draw inside it sets its uniforms on that material
+/// and keeps the blend; with `None` (a plain blend, text) it is the plain draw.
+pub fn in_blend<R>(material: Option<Material>, draw: impl FnOnce() -> R) -> R {
     struct Leave;
     impl Drop for Leave {
         fn drop(&mut self) {
-            BLEND_DEPTH.with(|d| d.set(d.get() - 1));
+            BLEND.with(|b| {
+                b.borrow_mut().pop();
+            });
         }
     }
-    BLEND_DEPTH.with(|d| d.set(d.get() + 1));
+    BLEND.with(|b| b.borrow_mut().push(material));
     let _leave = Leave;
     draw()
 }
 
-fn in_blend_now() -> bool {
-    BLEND_DEPTH.with(|d| d.get() > 0)
+/// The innermost blend context: `None` outside any blend, `Some(None)` in a plain blend,
+/// `Some(Some(m))` in a sharp one.
+fn blend_context() -> Option<Option<Material>> {
+    BLEND.with(|b| b.borrow().last().cloned())
 }
 
 /// `draw_texture_ex` with sharp sampling: the same placement and parameters, each original
 /// pixel drawn as a crisp square. Every call is its own draw (the uniforms change per draw).
-/// Inside a blend material ([`in_blend`]) it is the plain draw.
 pub fn draw(tex: &Texture2D, x: f32, y: f32, color: Color, params: DrawTextureParams) {
-    let material = if in_blend_now() { None } else { material() };
-    match material {
-        Some(m) => {
+    match blend_context() {
+        Some(Some(m)) => {
             set_uniforms(&m, tex, &params);
-            gl_use_material(&m);
             draw_texture_ex(tex, x, y, color, params);
-            gl_use_default_material();
         }
-        None => draw_texture_ex(tex, x, y, color, params),
+        Some(None) => draw_texture_ex(tex, x, y, color, params),
+        None => match draw_material() {
+            Some(m) if in_session() => {
+                let tex_size = vec2(tex.width(), tex.height());
+                set_cached(&m, tex_size, draw_scale(tex_size, &params));
+                draw_texture_ex(tex, x, y, color, params);
+            }
+            Some(m) => {
+                set_uniforms(&m, tex, &params);
+                gl_use_material(&m);
+                draw_texture_ex(tex, x, y, color, params);
+                gl_use_default_material();
+            }
+            None => draw_texture_ex(tex, x, y, color, params),
+        },
     }
 }
 
 /// `draw_mesh` with sharp sampling, for a mesh whose texture is drawn at `scale` screen pixels
 /// per texel on each axis (the swaying trees: their atlas quad). Same blend rule as [`draw`].
 pub fn draw_mesh_sharp(mesh: &Mesh, scale: Vec2) {
-    let material = if in_blend_now() { None } else { material() };
-    match (material, mesh.texture.as_ref()) {
-        (Some(m), Some(tex)) => {
+    let set = |m: &Material| {
+        if let Some(tex) = mesh.texture.as_ref() {
             m.set_uniform("TexSize", vec2(tex.width(), tex.height()));
-            m.set_uniform("Scale", scale.abs());
-            gl_use_material(&m);
-            draw_mesh(mesh);
-            gl_use_default_material();
         }
-        _ => draw_mesh(mesh),
+        m.set_uniform("Scale", scale.abs());
+    };
+    match blend_context() {
+        Some(Some(m)) => {
+            set(&m);
+            draw_mesh(mesh);
+        }
+        Some(None) => draw_mesh(mesh),
+        None => match draw_material() {
+            Some(m) if mesh.texture.is_some() && in_session() => {
+                let tex_size = mesh.texture.as_ref().map_or(Vec2::ONE, |t| vec2(t.width(), t.height()));
+                set_cached(&m, tex_size, scale.abs());
+                draw_mesh(mesh);
+            }
+            Some(m) if mesh.texture.is_some() => {
+                set(&m);
+                gl_use_material(&m);
+                draw_mesh(mesh);
+                gl_use_default_material();
+            }
+            _ => draw_mesh(mesh),
+        },
     }
 }
 
@@ -247,6 +347,14 @@ mod tests {
             },
         );
         assert!(close(s, vec2(3.0, 3.0)), "{s:?}");
+    }
+
+    #[test]
+    fn sharp_uv_zero_size_is_finite() {
+        // A flat colour's draw leaves the size uniforms at their start value; a zero size
+        // must not divide by zero.
+        let out = sharp_uv_ref(vec2(0.3, 0.6), Vec2::ZERO, Vec2::splat(2.0));
+        assert!(out.is_finite(), "{out:?}");
     }
 
     #[test]

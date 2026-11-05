@@ -491,7 +491,7 @@ fn draw_effect_frame(c: &Content, n: usize, i: usize, at: Vec2, px: f32) {
     let Some(frames) = c.options.battle_effects.get(n).and_then(chrome::battle_effect) else { return };
     let size = 220.0 * px;
     chrome::premultiplied(|| {
-        draw_texture_ex(&frames[i.min(frames.len() - 1)], at.x - size / 2.0, at.y - size / 2.0, WHITE, DrawTextureParams { dest_size: Some(vec2(size, size)), ..Default::default() });
+        super::sharp::draw(&frames[i.min(frames.len() - 1)], at.x - size / 2.0, at.y - size / 2.0, WHITE, DrawTextureParams { dest_size: Some(vec2(size, size)), ..Default::default() });
     });
 }
 

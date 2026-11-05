@@ -279,7 +279,9 @@ impl BitmapFont {
     fn draw_cells(&self, sheet: &BitmapFont, s: &str, at: Vec2, size: f32, (color, offset): (Color, f32), fallback: &dyn Fn(&str, f32, f32) -> f32) {
         let (x, y) = (at.x, at.y);
         let k = self.scale(size);
-        let texture = if k.fract() == 0.0 { &sheet.texture } else { &sheet.smooth };
+        // A whole-number scale draws the Nearest sheet as it is; any other scale draws the
+        // Linear sheet with sharp sampling, so each sheet pixel stays a crisp square.
+        let whole = k.fract() == 0.0;
         let mut pen = x.round();
         let top = (y - self.baseline * k).round() + offset * k;
         for piece in self.pieces(s) {
@@ -295,7 +297,12 @@ impl BitmapFont {
                     if c != ' ' {
                         let src = Rect::new(cell.x as f32, cell.y as f32, cell.w as f32, cell.h as f32);
                         let dest = vec2(cell.w as f32 * k, cell.h as f32 * k);
-                        draw_texture_ex(texture, pen + offset * k, top, color, DrawTextureParams { dest_size: Some(dest), source: Some(src), ..Default::default() });
+                        let params = DrawTextureParams { dest_size: Some(dest), source: Some(src), ..Default::default() };
+                        if whole {
+                            draw_texture_ex(&sheet.texture, pen + offset * k, top, color, params);
+                        } else {
+                            super::sharp::draw(&sheet.smooth, pen + offset * k, top, color, params);
+                        }
                     }
                     pen += g.w as f32 * k;
                 }

@@ -1359,7 +1359,7 @@ fn draw_building(l: &Location, art: Option<&DtArt>, cam: &Camera, outlined: bool
             let d = (1.5 * zoom).max(1.0);
             super::chrome::silhouette(|| {
                 for (dx, dy) in [(-d, 0.0), (d, 0.0), (0.0, -d), (0.0, d), (-d, -d), (d, -d), (-d, d), (d, d)] {
-                    draw_texture_ex(&atlas.texture, at.x + dx, at.y + dy, BUILDING_OUTLINE, params.clone());
+                    super::sharp::draw(&atlas.texture, at.x + dx, at.y + dy, BUILDING_OUTLINE, params.clone());
                 }
             });
         }
@@ -1488,7 +1488,7 @@ fn draw_figure(art: Option<&DtArt>, stem: &str, pos: (f32, f32), next: Option<(f
     // SRCBLEND ONE, DESTBLEND INVSRCALPHA (0x4c9ef6, 0x4ca0d9): the Ghost's light where its
     // alpha is 0 is added to the map, its glow.
     super::chrome::premultiplied(|| {
-        draw_texture_ex(
+        super::sharp::draw(
             &sheet,
             dest.x,
             dest.y,
@@ -1752,27 +1752,30 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
     }
     // Stable: figures sharing a cell keep the order they were pushed in.
     items.sort_by_key(|a| a.0);
-    for d in items.iter().map(|(_, d)| d) {
-        match d {
-            Drawable::Object(o) => draw_object(o, art, cam),
-            Drawable::Building(i) => draw_building(&game.world.locations[*i], art, cam, hover.is_some_and(|h| h.building == Some(*i))),
-            Drawable::Army(i) => draw_army(game, &game.world.armies[*i], assets, art, cam),
-            Drawable::Ship => {
-                if let Some(ship) = game.ship {
-                    let at = map.center(ship.tile);
-                    if !draw_figure(art, ship_stem(razdor::rules::ships::kind::HERO), at, None, 0, cam, Stand::Afloat) {
-                        draw_ship(cam, at, HERO_SAIL);
+    // One sharp session for the pass: its art shares the material switch (see `sharp::session`).
+    super::sharp::session(|| {
+        for d in items.iter().map(|(_, d)| d) {
+            match d {
+                Drawable::Object(o) => draw_object(o, art, cam),
+                Drawable::Building(i) => draw_building(&game.world.locations[*i], art, cam, hover.is_some_and(|h| h.building == Some(*i))),
+                Drawable::Army(i) => draw_army(game, &game.world.armies[*i], assets, art, cam),
+                Drawable::Ship => {
+                    if let Some(ship) = game.ship {
+                        let at = map.center(ship.tile);
+                        if !draw_figure(art, ship_stem(razdor::rules::ships::kind::HERO), at, None, 0, cam, Stand::Afloat) {
+                            draw_ship(cam, at, HERO_SAIL);
+                        }
+                    }
+                }
+                Drawable::Hero => draw_hero(game, assets, art, cam),
+                Drawable::Spell(n) => {
+                    if let Some(s) = spell {
+                        draw_spell_layer(s, *n, cam);
                     }
                 }
             }
-            Drawable::Hero => draw_hero(game, assets, art, cam),
-            Drawable::Spell(n) => {
-                if let Some(s) = spell {
-                    draw_spell_layer(s, *n, cam);
-                }
-            }
         }
-    }
+    });
     items.clear();
     WORLD_ITEMS.with(|c| *c.borrow_mut() = items);
 }
