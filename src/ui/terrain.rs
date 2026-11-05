@@ -51,9 +51,20 @@ uniform vec2 CellPx;
 uniform vec2 Tile;
 uniform vec2 Slot;
 uniform vec2 AtlasSize;
+// x: 1.0 when the ground goes on past the map's edges (2.5D), else 0.0; yzw: the sky colour
+// the ground sinks into there. Fade: the cells over which it sinks.
+uniform vec4 Edge;
+uniform float Fade;
+
+// The cell index c folded back about the map's border (mirror tiling: the cell past the edge
+// is the edge's neighbour's twin), period 2·n. Cells inside the map are their own.
+float fold(float c, float n) {
+    float m = mod(c, 2.0 * n);
+    return m < n ? m : 2.0 * n - 1.0 - m;
+}
 
 float code_at(vec2 c) {
-    c = clamp(c, vec2(0.0), MapSize - 1.0);
+    c = Edge.x > 0.5 ? vec2(fold(c.x, MapSize.x), fold(c.y, MapSize.y)) : clamp(c, vec2(0.0), MapSize - 1.0);
     return floor(texture2D(Cells, (c + 0.5) / MapSize).r * 15.0 + 0.5);
 }
 
@@ -74,12 +85,74 @@ void main() {
     vec3 w = texture2D(Water, (p + 1.5) / 3.0).rgb;
     vec3 top = mix(ground(code_at(i), px, w), ground(code_at(i + vec2(1.0, 0.0)), px, w), f.x);
     vec3 bottom = mix(ground(code_at(i + vec2(0.0, 1.0)), px, w), ground(code_at(i + vec2(1.0, 1.0)), px, w), f.x);
-    gl_FragColor = vec4(mix(top, bottom, f.y), 1.0);
+    vec3 col = mix(top, bottom, f.y);
+    if (Edge.x > 0.5) {
+        // Past the border (p in cell units, the border at -0.5 and MapSize - 0.5): the ground
+        // greys a little from the edge on, and sinks into the sky over Fade cells, so the
+        // extension reads as not playable.
+        vec2 gap = max(max(vec2(-0.5) - p, p - (MapSize - 0.5)), vec2(0.0));
+        float d = length(gap);
+        float grey = dot(col, vec3(0.299, 0.587, 0.114));
+        col = mix(col, vec3(grey), 0.35 * clamp(d * 2.0, 0.0, 1.0));
+        col = mix(col, Edge.yzw, smoothstep(0.0, Fade, d));
+    }
+    gl_FragColor = vec4(col, 1.0);
 }
 "#;
 
 /// Wrapped border around each atlas slot, in pixels.
 const PAD: u32 = 2;
+
+/// Cells over which the ground past a map's edge (2.5D) sinks into the sky.
+pub const EDGE_FADE: f32 = 14.0;
+/// The sky the ground sinks into, as the map's shader gets it (the sky of `world_view`).
+pub const EDGE_SKY: [f32; 3] = [0.06, 0.08, 0.11];
+
+/// The cell the mirrored ground shows at cell `c` of a map `n` cells long (the shader's
+/// `fold`): cells inside are their own, and past the border `c` is reflected back about it, so
+/// `-1` shows cell 0 and `n` shows cell `n - 1`. Period `2n`.
+pub fn mirror_cell(c: i32, n: i32) -> i32 {
+    if n <= 0 {
+        return 0;
+    }
+    let m = c.rem_euclid(2 * n);
+    if m < n {
+        m
+    } else {
+        2 * n - 1 - m
+    }
+}
+
+/// How far cell `c` lies past a map `n` cells long, in cells from its border (the cell centres
+/// are half a cell from it): 0 inside, 0.5 for `-1` and `n`.
+pub fn edge_gap(c: i32, n: i32) -> f32 {
+    if c < 0 {
+        -0.5 - c as f32
+    } else if c >= n {
+        c as f32 - n as f32 + 0.5
+    } else {
+        0.0
+    }
+}
+
+/// The cells past a map `n` cells long that show cell `c` (inside it) in the mirrored ground,
+/// and lie within `fade` cells of its border: the reflections of `c` about either border, and
+/// those of the reflections, as far as `fade` reaches.
+pub fn mirror_images(c: i32, n: i32, fade: f32) -> Vec<i32> {
+    let mut out = Vec::new();
+    if n <= 0 {
+        return out;
+    }
+    let reach = (fade / (2 * n) as f32).ceil() as i32 + 2;
+    for k in -reach..=reach {
+        for cand in [c + 2 * n * k, -1 - c + 2 * n * k] {
+            if (cand < 0 || cand >= n) && edge_gap(cand, n) < fade && mirror_cell(cand, n) == c {
+                out.push(cand);
+            }
+        }
+    }
+    out
+}
 
 /// A map's surface codes, its size and their texture.
 type CellCache = Option<(Vec<u8>, (u32, u32), Texture2D)>;
@@ -150,7 +223,7 @@ impl TerrainLayer {
         let material = load_material(
             ShaderSource::Glsl { vertex: VERTEX, fragment: FRAGMENT },
             MaterialParams {
-                uniforms: ["View", "MapSize", "CellPx", "Tile", "Slot", "AtlasSize", "WaterOn"]
+                uniforms: ["View", "MapSize", "CellPx", "Tile", "Slot", "AtlasSize", "WaterOn", "Edge", "Fade"]
                     .iter()
                     .zip([
                         UniformType::Float4,
@@ -159,6 +232,8 @@ impl TerrainLayer {
                         UniformType::Float2,
                         UniformType::Float2,
                         UniformType::Float2,
+                        UniformType::Float1,
+                        UniformType::Float4,
                         UniformType::Float1,
                     ])
                     .map(|(n, t)| UniformDesc::new(n, t))
@@ -204,8 +279,11 @@ impl TerrainLayer {
     /// Draws the terrain of a `w`×`h` map (`codes` row by row) into screen rectangle `dest`,
     /// which shows the map area `view` in cells (x0, y0, x1, y1; cell centres at integers).
     /// `cell_px` is the texture pixels per cell (the textures' scale). `water_ms` is the clock
-    /// (ms) that animates the water, `None` for still water.
-    pub fn draw(&self, codes: &[u8], (w, h): (u32, u32), dest: Rect, view: Vec4, cell_px: Vec2, water_ms: Option<i64>) {
+    /// (ms) that animates the water, `None` for still water. `mirror`: the ground goes on past
+    /// the map's edges, mirrored and sinking into the sky ([`mirror_cell`]); `view` may reach
+    /// past the map then.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw(&self, codes: &[u8], (w, h): (u32, u32), dest: Rect, view: Vec4, cell_px: Vec2, water_ms: Option<i64>, mirror: bool) {
         if w == 0 || h == 0 || w > u16::MAX as u32 || h > u16::MAX as u32 || codes.len() != (w * h) as usize {
             return;
         }
@@ -224,6 +302,9 @@ impl TerrainLayer {
         m.set_uniform("Tile", self.tile);
         m.set_uniform("Slot", self.slot);
         m.set_uniform("AtlasSize", vec2(self.atlas.width(), self.atlas.height()));
+        let sky = EDGE_SKY;
+        m.set_uniform("Edge", vec4(if mirror { 1.0 } else { 0.0 }, sky[0], sky[1], sky[2]));
+        m.set_uniform("Fade", EDGE_FADE);
         draw_texture_ex(&cells, dest.x, dest.y, WHITE, DrawTextureParams { dest_size: Some(dest.size()), ..Default::default() });
         gl_use_default_material();
     }
@@ -258,6 +339,52 @@ mod tests {
         assert_eq!(atlas.pixel(ox + PAD + 3, oy + PAD + 2)[0], 0);
         // Other codes are the fill colour.
         assert_eq!(atlas.pixel(0, 0), [1, 2, 3, 255]);
+    }
+
+    #[test]
+    fn the_mirror_reflects_about_the_border_and_repeats() {
+        // A 5-cell map: 0..4 are their own, -1 shows 0, -2 shows 1, 5 shows 4, 6 shows 3.
+        let inside: Vec<i32> = (0..5).map(|c| mirror_cell(c, 5)).collect();
+        assert_eq!(inside, [0, 1, 2, 3, 4]);
+        assert_eq!([-1, -2, -5, -6].map(|c| mirror_cell(c, 5)), [0, 1, 4, 4]);
+        assert_eq!([5, 6, 9, 10].map(|c| mirror_cell(c, 5)), [4, 3, 0, 0]);
+        // Cells past both borders at once (a corner) fold the same way on each axis.
+        assert_eq!(mirror_cell(-3, 5), 2);
+        assert_eq!(mirror_cell(12, 5), 2);
+        // A one-cell map is one cell everywhere.
+        assert!((-7..9).all(|c| mirror_cell(c, 1) == 0));
+        assert_eq!(mirror_cell(3, 0), 0, "an empty map shows nothing");
+    }
+
+    #[test]
+    fn the_mirror_gap_is_half_a_cell_at_the_border() {
+        assert_eq!(edge_gap(0, 5), 0.0);
+        assert_eq!(edge_gap(4, 5), 0.0);
+        assert_eq!(edge_gap(-1, 5), 0.5);
+        assert_eq!(edge_gap(5, 5), 0.5);
+        assert_eq!(edge_gap(-3, 5), 2.5);
+        assert_eq!(edge_gap(7, 5), 2.5);
+    }
+
+    #[test]
+    fn the_mirror_images_are_the_outside_cells_showing_a_cell() {
+        // Cell 0 of a 5-cell map is shown by -1 (its reflection about the west border), by 9 (about
+        // the east one), and by -10 and 10 (the period 2n), and -11 (the reflection of -10). Within
+        // 14 cells of the map only: -21 and 19 are too far.
+        let mut near = mirror_images(0, 5, 14.0);
+        near.sort();
+        assert_eq!(near, [-11, -10, -1, 9, 10]);
+        for c in 0..5 {
+            for cand in mirror_images(c, 5, 14.0) {
+                assert_eq!(mirror_cell(cand, 5), c, "{cand} shows {c}");
+                assert!(cand < 0 || cand >= 5, "{cand} is outside");
+                assert!(edge_gap(cand, 5) < 14.0);
+            }
+        }
+        // A fade that reaches no cell past the border has no images; one that reaches the
+        // half cell has the border's reflection only.
+        assert!(mirror_images(2, 5, 1.0).is_empty());
+        assert_eq!(mirror_images(4, 5, 1.0), [5]);
     }
 
     #[test]

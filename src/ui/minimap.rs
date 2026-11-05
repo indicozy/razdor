@@ -17,6 +17,7 @@ use razdor::local;
 use std::cell::RefCell;
 
 use crate::ui::input::{is_mouse_button_down};
+use macroquad::miniquad::TextureWrap;
 use macroquad::prelude::*;
 
 use razdor::rules::fog::Fog;
@@ -133,6 +134,28 @@ fn held_key(held: &[(i32, i32)]) -> u64 {
     h.finish()
 }
 
+/// [`darkness_of`] of the one cell `t` of a `w` × `h` fog (`explored` tells the explored cells),
+/// without the whole map's table: the 2.5D view shades each standing sprite by the fog at its foot.
+pub fn darkness_at(w: i32, h: i32, explored: impl Fn((i32, i32)) -> bool, t: (i32, i32)) -> u8 {
+    let f = FEATHER;
+    let (x, y) = t;
+    let (x0, x1, y0, y1) = ((x - f).max(0), (x + f + 1).min(w), (y - f).max(0), (y + f + 1).min(h));
+    let mut dark = 0;
+    for ny in y0..y1 {
+        for nx in x0..x1 {
+            dark += (!explored((nx, ny))) as u32;
+        }
+    }
+    let share = dark as f32 / ((x1 - x0) * (y1 - y0)) as f32;
+    let k = ((share - 0.2) / 0.5).clamp(0.0, 1.0);
+    let mut v = (k * k * (3.0 - 2.0 * k) * 255.0).round() as u8;
+    if explored(t) {
+        let edge = (y - 1..y + 2).filter(|&ny| (0..h).contains(&ny)).any(|ny| (x - 1..x + 2).filter(|&nx| (0..w).contains(&nx)).any(|nx| !explored((nx, ny))));
+        v = v.min(if edge { EDGE_DARK } else { 0 });
+    }
+    v
+}
+
 /// The darkness to draw over the fog layer (whose darkness is `now`) so that the two add up
 /// to `kept`, the darkness a reveal still keeps over a cell (alpha over alpha:
 /// `1 − (1 − a)(1 − now)`). Where the reveal changed nothing (`kept ≤ now`) it is 0: the
@@ -167,6 +190,26 @@ pub fn draw_fog(fog: &Fog, held: &[(i32, i32)], tl: Vec2, br: Vec2) {
     }
     let tex = fog_texture(fog, held);
     draw_texture_ex(&tex, tl.x, tl.y, WHITE, DrawTextureParams { dest_size: Some(br - tl), ..Default::default() });
+}
+
+/// [`draw_fog`] of a 2.5D map past its edges: `dest` shows the fog's texels `src` (in cells:
+/// texel `i` is cell `i`, its centre at `i + ½`), and the texels past the fog's own are mirrored
+/// about its border, as the ground is ([`super::terrain::mirror_cell`]). See [`draw_mirrored`].
+pub fn draw_fog_mirrored(fog: &Fog, held: &[(i32, i32)], dest: Rect, src: Rect) {
+    if !fog.enabled || fog.w <= 0 || fog.h <= 0 {
+        return;
+    }
+    draw_mirrored(&fog_texture(fog, held), dest, src);
+}
+
+/// Draws a map's one-texel-per-cell texture `tex` (the fog, or a showing's mask) into `dest`,
+/// showing its texels `src` (see [`draw_fog_mirrored`]). The texture wraps mirrored from now on:
+/// inside its texels a mirrored sample is the clamped one, so the flat draws of it are the same.
+pub fn draw_mirrored(tex: &Texture2D, dest: Rect, src: Rect) {
+    // SAFETY: called on the main thread while macroquad runs, as every texture call.
+    let gl = unsafe { get_internal_gl() };
+    gl.quad_context.texture_set_wrap(tex.raw_miniquad_id(), TextureWrap::Mirror, TextureWrap::Mirror);
+    draw_texture_ex(tex, dest.x, dest.y, WHITE, DrawTextureParams { dest_size: Some(dest.size()), source: Some(src), ..Default::default() });
 }
 
 
@@ -913,6 +956,27 @@ mod tests {
         assert!(!follows(true, true, true), "a press that grips the frame or an edge does not");
         assert!(!follows(true, false, false), "held outside does not");
         assert!(!follows(false, false, true), "not held does not");
+    }
+
+    #[test]
+    fn the_darkness_of_one_cell_is_the_map_s() {
+        // An irregular fog: a block, a hole and a strip, so every edge rule is hit.
+        let (w, h) = (23, 17);
+        let mut fog = Fog::new(w, h);
+        for y in 0..h {
+            for x in 0..w {
+                if (x < 9 && y < 6) || (x > 14 && y > 9) || y == 12 {
+                    fog.mark((x, y));
+                }
+            }
+        }
+        let table = darkness(&fog);
+        for y in 0..h {
+            for x in 0..w {
+                let at = darkness_at(w, h, |t| fog.explored(t), (x, y));
+                assert_eq!(at, table[(y * w + x) as usize], "cell ({x}, {y})");
+            }
+        }
     }
 
     #[test]

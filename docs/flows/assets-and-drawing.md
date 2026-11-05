@@ -224,8 +224,8 @@ the view, so the cell under the target is as wide as a flat cell, and the ground
 (`plan`, the minimap's rectangle) and the ground the drawing culls to (`cull`). Nothing in the
 drawing changes: `draw_world` runs its passes in the flat camera's 2D space, the cull footprint
 from `Camera::tilted_space` (`in_view` sets the 3D view, `View3d`: depth off, no viewport). `ground`
-lays that space flat on the ground for the terrain, the hills' pass and marks, the route, spell
-layer 1, bridges, the fog and the reveal; `standing` makes each sprite a billboard through its foot
+lays that space flat on the ground for the terrain, marks, the route, spell layer 1, bridges, the border,
+the fog; the hills' pass is drawn after the fog, under the other standing sprites; `standing` makes each sprite a billboard through its foot
 (`view25::billboard_model`: the plane faces the eye, so a sprite keeps its size at the target, where
 a vertical one would shrink with the pitch). Pointer tests use `map_pointer` (the ground under the
 pointer, in the 2D space; the drag scales the screen delta by the rows' foreshortening instead). What
@@ -244,6 +244,21 @@ figure's facing row follows the screen (`Camera::facing`). At yaw 0 the order is
 `RAZDOR_VIEW_SPRITE` sets the standing sprites' size (`sprite_size`, a look experiment). With the
 setting off, `in_view`, `ground` and `standing` only call their closures, so the flat view is the
 same code path.
+
+The ground goes on past the map's edges in 2.5D (visual only). The terrain shader (`terrain.rs`, `mirror`
+on) folds a cell past a border back about it (`mirror_cell`, period 2n: the cell past the edge is the
+edge's neighbour's twin) and sinks the ground into the sky over `EDGE_FADE` (14) cells, greying it by 35%
+from the edge on. The fog is drawn over the whole drawn ground, mirrored the same way
+(`minimap::draw_mirrored`: the texture wraps `TextureWrap::Mirror`; the showing masks too), so the
+extension is as dark as the edge it goes on from. Scenery within 14 cells of an edge gets mirrored copies
+(`push_edge_scenery`, `edge_tiles`: classes 1–11, from explored sources only), keyed and drawn like the
+map's own, so a building or tree at an edge stands whole. The fog lies under the standing sprites (flat:
+as before; 2.5D: no black beyond the map), and each standing sprite is multiplied by its shade
+(`standing`'s `shade`, read by the draws through `sprite_color`; `sprite_shade`: the fog at its foot cell,
+`minimap::darkness_at`, and the sinking into the sky). Placeholder shapes drawn without the install's art
+are not shaded. The map's border is a line on the ground after the fog (`draw_border`: 3 px dark under
+1.5 px warm, scaled by zoom) before the fog, so the fog darkens it where the ground is unexplored; standing
+sprites on the edge hide parts of it.
 
 ## Sound and music
 

@@ -5,7 +5,7 @@
 //! simple shapes. Only the visible cells are drawn, so 200×200 maps stay fast.
 
 use razdor::local;
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 
 use crate::ui::input::{get_keys_pressed, is_mouse_button_down};
 use macroquad::prelude::*;
@@ -16,6 +16,7 @@ use razdor::rules::ai::{Clash, Combatant};
 use razdor::rules::battle::Team;
 use razdor::trf;
 use razdor::rules::clock::duration_label;
+use razdor::rules::fog::Fog;
 use razdor::rules::game::{Event, Foe, Game};
 use razdor::rules::idle;
 use razdor::rules::magic::{spell_lines, CastOutcome, CastTarget, SpellLine};
@@ -32,6 +33,7 @@ use super::dt_art::DtArt;
 use super::game_bar::{self, BarButton, Look, TimeButton};
 use super::keymap::{self, Action};
 use super::minimap;
+use super::terrain;
 use super::saves::{self, Back, LoadView, SaveView};
 use super::story;
 use super::widgets::*;
@@ -1043,13 +1045,23 @@ fn ground<R>(cam: &Camera, draw: impl FnOnce() -> R) -> R {
 }
 
 /// Draws a standing sprite whose foot is at `foot` (a point of the 2D space) as a billboard
-/// ([`view25::billboard_model`]); under a flat camera, as drawn.
-fn standing<R>(cam: &Camera, foot: Vec2, draw: impl FnOnce() -> R) -> R {
+/// ([`view25::billboard_model`]); under a flat camera, as drawn. Its colours are multiplied by
+/// `shade` (the fog and the edge's dimming at its foot, [`sprite_shade`]) where the draws read
+/// them ([`sprite_color`]).
+fn standing<R>(cam: &Camera, foot: Vec2, shade: Color, draw: impl FnOnce() -> R) -> R {
     let Some(tilt) = cam.tilt else { return draw() };
     push_model(view25::billboard_model(cam.origin, foot, cam.scale, tilt.cam.pitch_deg, tilt.cam.yaw_deg, sprite_size()));
+    let prev = SPRITE_SHADE.with(|s| s.replace(shade));
     let r = draw();
+    SPRITE_SHADE.with(|s| s.set(prev));
     pop_model();
     r
+}
+
+/// The colour the sprites drawn now are multiplied by: the shade of the standing sprite being
+/// drawn ([`standing`]), white outside one.
+fn sprite_color() -> Color {
+    SPRITE_SHADE.with(|s| s.get())
 }
 
 fn push_model(m: Mat4) {
@@ -1227,9 +1239,31 @@ impl Camera {
 
     /// The fog layer over the whole map (`ui::minimap`), and black beyond the map's limits:
     /// nothing drawn past its edges shows (a map smaller than the window, the overhang of
-    /// staggered rows).
+    /// staggered rows). 2.5D draws its fog itself ([`Camera::draw_fog_tilted`], in
+    /// `draw_world_in`), over the ground and under the standing sprites, past the edges too.
     fn draw_fog(&self, game: &Game) {
+        if self.tilt.is_some() {
+            return;
+        }
         in_view(self, |c| ground(c, || c.draw_fog_flat(game)));
+    }
+
+    /// The 2.5D fog over the drawn ground, past the map's edges as well: the fog texture's
+    /// texels mirrored about its border, as the ground is ([`terrain::mirror_cell`]), so the
+    /// extension is as dark as the edge it goes on from. Ground pass.
+    fn draw_fog_tilted(&self, game: &Game, unshown: &[Tile]) {
+        let (dest, src) = self.fog_texels();
+        minimap::draw_fog_mirrored(&game.fog, unshown, dest, src);
+    }
+
+    /// The drawn ground of a 2.5D camera as a map texture's rectangles: where it is in the 2D
+    /// space (`dest`) and which texels of a one-texel-per-cell map texture it shows (`src`, in
+    /// texels, past the map's own where the ground goes on; texel `i` is cell `i`, its centre at
+    /// `i + ½`, rows over the row height).
+    fn fog_texels(&self) -> (Rect, Rect) {
+        let r = self.drawn_world_rect();
+        let rh = self.grid.row_height();
+        (Rect::new(self.draw.x, self.draw.y, self.draw.w, self.draw.h), Rect::new(r.x + 0.5, r.y / rh + 0.5, r.w, r.h / rh))
     }
 
     fn draw_fog_flat(&self, game: &Game) {
@@ -1308,7 +1342,13 @@ impl Camera {
                 }
                 mask.update(&image);
             }
-            draw_texture_ex(mask, tl.x, tl.y, WHITE, DrawTextureParams { dest_size: Some(br - tl), ..Default::default() });
+            // 2.5D: the mask goes on past the map's edges as the fog does; flat, over the map.
+            if self.tilt.is_some() {
+                let (dest, src) = self.fog_texels();
+                minimap::draw_mirrored(mask, dest, src);
+            } else {
+                draw_texture_ex(mask, tl.x, tl.y, WHITE, DrawTextureParams { dest_size: Some(br - tl), ..Default::default() });
+            }
         }
     }
 
@@ -1389,11 +1429,14 @@ fn draw_terrain(game: &Game, art: Option<&DtArt>, cam: &Camera) {
         let rh = cam.grid.row_height();
         let (map_tl, map_br) = (vec2(-0.5, -0.5 * rh), vec2(map.w as f32 - 0.5, (map.h as f32 - 0.5) * rh));
         let w = cam.drawn_world_rect();
-        let (tl, br) = (map_tl.max(w.point()), map_br.min(w.point() + w.size()));
+        // 2.5D: the whole drawn ground, and past the map's edges the ground goes on (mirrored,
+        // sinking into the sky); flat, the map's area in view.
+        let mirror = cam.tilt.is_some();
+        let (tl, br) = if mirror { (w.point(), w.point() + w.size()) } else { (map_tl.max(w.point()), map_br.min(w.point() + w.size())) };
         if tl.x < br.x && tl.y < br.y {
             let (a, b) = (cam.to_screen(tl.into()), cam.to_screen(br.into()));
             let view = vec4(tl.x, tl.y / rh, br.x, br.y / rh);
-            layer.draw(map.surface_codes(), (map.w as u32, map.h as u32), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(PX, PX * rh), Some((crate::ui::clock::now() * 1000.0) as i64));
+            layer.draw(map.surface_codes(), (map.w as u32, map.h as u32), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(PX, PX * rh), Some((crate::ui::clock::now() * 1000.0) as i64), mirror);
         }
         return;
     }
@@ -1542,19 +1585,19 @@ fn building_foot(l: &Location, cam: &Camera) -> Vec2 {
 }
 
 /// The part `src` of `texture` drawn at `at`, `size` big, its top edge moved `lean` px right.
-fn draw_leaning(texture: &Texture2D, src: Rect, at: Vec2, size: Vec2, lean: f32) {
+fn draw_leaning(texture: &Texture2D, src: Rect, at: Vec2, size: Vec2, lean: f32, tint: Color) {
     let (tw, th) = (texture.width(), texture.height());
     let (u0, v0, u1, v1) = (src.x / tw, src.y / th, (src.x + src.w) / tw, (src.y + src.h) / th);
-    let vertex = |x: f32, y: f32, u: f32, v: f32| Vertex::new(x, y, 0.0, u, v, WHITE);
+    let vertex = |x: f32, y: f32, u: f32, v: f32, c: Color| Vertex::new(x, y, 0.0, u, v, c);
     // One quad mesh, reused by every swaying tree (its vertex buffer keeps its capacity).
     LEAN_MESH.with(|m| {
         let mut m = m.borrow_mut();
         m.vertices.clear();
         m.vertices.extend([
-            vertex(at.x + lean, at.y, u0, v0),
-            vertex(at.x + size.x + lean, at.y, u1, v0),
-            vertex(at.x + size.x, at.y + size.y, u1, v1),
-            vertex(at.x, at.y + size.y, u0, v1),
+            vertex(at.x + lean, at.y, u0, v0, tint),
+            vertex(at.x + size.x + lean, at.y, u1, v0, tint),
+            vertex(at.x + size.x, at.y + size.y, u1, v1, tint),
+            vertex(at.x, at.y + size.y, u0, v1, tint),
         ]);
         m.texture = Some(texture.clone());
         draw_mesh(&m);
@@ -1562,6 +1605,9 @@ fn draw_leaning(texture: &Texture2D, src: Rect, at: Vec2, size: Vec2, lean: f32)
 }
 
 local! {
+    /// The colour the standing sprites being drawn are multiplied by ([`standing`]); white
+    /// outside them, so the flat view draws as it always did.
+    static SPRITE_SHADE: std::cell::Cell<Color> = std::cell::Cell::new(WHITE);
     /// The swaying trees' quad (`draw_leaning`): indices fixed, vertices and texture refilled.
     static LEAN_MESH: std::cell::RefCell<Mesh> = std::cell::RefCell::new(Mesh { vertices: Vec::new(), indices: vec![0, 1, 2, 0, 2, 3], texture: None });
     /// The map's painter's list (`draw_world`): cleared and refilled each frame.
@@ -1580,10 +1626,10 @@ fn draw_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera) {
             // their phase, the bottom stays (0x4c99d0, engine.md §7).
             let (_, _, phase) = razdor::rules::rng::plant_jitter(o.tile.0, o.tile.1, u16::from(o.class) << 8 | u16::from(o.sprite));
             let lean = razdor::rules::rng::tree_sway(clock_ms(), phase) * zoom;
-            draw_leaning(&atlas.texture, r, at, size, lean);
+            draw_leaning(&atlas.texture, r, at, size, lean, sprite_color());
             return;
         }
-        draw_texture_ex(&atlas.texture, at.x, at.y, WHITE, DrawTextureParams { dest_size: Some(size), source: Some(r), ..Default::default() });
+        draw_texture_ex(&atlas.texture, at.x, at.y, sprite_color(), DrawTextureParams { dest_size: Some(size), source: Some(r), ..Default::default() });
         return;
     }
     let s = cam.scale;
@@ -1630,7 +1676,7 @@ fn draw_building(l: &Location, art: Option<&DtArt>, cam: &Camera, outlined: bool
                 }
             });
         }
-        draw_texture_ex(&atlas.texture, at.x, at.y, WHITE, params);
+        draw_texture_ex(&atlas.texture, at.x, at.y, sprite_color(), params);
     } else {
         let (w, h) = (l.size.0 as f32 * cam.scale, (l.size.1 as f32 * cam.cell_size().y).max(cam.scale * 0.8));
         let wall = match l.kind {
@@ -1760,7 +1806,7 @@ fn draw_figure(art: Option<&DtArt>, stem: &str, pos: (f32, f32), next: Option<(f
             &sheet,
             dest.x,
             dest.y,
-            WHITE,
+            sprite_color(),
             DrawTextureParams { dest_size: Some(vec2(size, size)), source: Some(Rect::new(frame * n, row * n, n, n)), ..Default::default() },
         )
     });
@@ -1966,11 +2012,121 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
     in_view(cam, |c| draw_world_in(game, assets, c, preview, spell, hover));
 }
 
+/// Whether a scenery class (`map::object_class`) is in the hills' own pass: the original draws
+/// classes 1–3 before anything else (0x4c8864, see [`draw_world_in`]).
+fn in_hill_pass(class: u8) -> bool {
+    (object_class::HILLS..=object_class::ROCKY_HILLS).contains(&class)
+}
+
+/// The scenery the 2.5D view mirrors past the map's edges: the massifs, hills and rocks (classes
+/// 1–8), the trees and plants (9–11). Never buildings, figures or anything the player uses.
+fn is_scenery(class: u8) -> bool {
+    (object_class::HILLS..=object_class::ROCKS).contains(&class) || (object_class::TREES..=object_class::THICKET).contains(&class)
+}
+
+/// The sort key of the hills' pass in the 2.5D view (their own, below every other item, as the
+/// flat view draws them before anything else); the cell's pass key adds the order within it.
+const HILL_PASS_KEY: i64 = i64::MIN / 4;
+
+/// The cells past a `w` × `h` map's edges that show the cell `t` of the map in the mirrored
+/// ground, within [`terrain::EDGE_FADE`]: each axis's images ([`terrain::mirror_images`]) with the
+/// cell itself, paired, so a corner's copies reflect about both borders.
+fn edge_tiles(t: Tile, w: i32, h: i32) -> Vec<Tile> {
+    let fade = terrain::EDGE_FADE;
+    let xs: Vec<i32> = std::iter::once(t.0).chain(terrain::mirror_images(t.0, w, fade)).collect();
+    let ys: Vec<i32> = std::iter::once(t.1).chain(terrain::mirror_images(t.1, h, fade)).collect();
+    let mut out = Vec::new();
+    for &x in &xs {
+        for &y in &ys {
+            let far = vec2(terrain::edge_gap(x, w), terrain::edge_gap(y, h)).length();
+            if (x, y) != t && far < fade {
+                out.push((x, y));
+            }
+        }
+    }
+    out
+}
+
+/// The colour a standing sprite whose foot is on cell `t` is multiplied by in the 2.5D view: the
+/// fog at its foot (the darkness of the cell the mirrored fog shows there, [`minimap::darkness_at`])
+/// and the sky the ground past the map's edge sinks into ([`terrain::EDGE_FADE`]). White where
+/// neither applies, so a sprite in the light is drawn as it is. `held`: the cells the fog keeps
+/// dark ([`minimap::darkness_held`]).
+fn sprite_shade(map: &TileMap, fog: &Fog, held: &HashSet<Tile>, t: Tile) -> Color {
+    let (w, h) = (map.w, map.h);
+    let gap = vec2(terrain::edge_gap(t.0, w), terrain::edge_gap(t.1, h));
+    let s = (gap.length() / terrain::EDGE_FADE).clamp(0.0, 1.0);
+    let sink = s * s * (3.0 - 2.0 * s);
+    let cell = (terrain::mirror_cell(t.0, w), terrain::mirror_cell(t.1, h));
+    let dark = minimap::darkness_at(w, h, |c| fog.explored(c) && !held.contains(&c), cell);
+    let lit = 1.0 - f32::from(dark) / 255.0;
+    let sky = terrain::EDGE_SKY;
+    let k = |i: usize| (1.0 + (sky[i] - 1.0) * sink) * lit;
+    Color::new(k(0), k(1), k(2), 1.0)
+}
+
+/// The map's border in the 2.5D view, drawn on the ground after the fog: a dark line under a thin
+/// warm one along the fog grid's outer edge ([`Camera::fog_corners`]), so the playable map ends
+/// where the ground past it begins.
+fn draw_border(game: &Game, cam: &Camera) {
+    let (tl, br) = cam.fog_corners(game);
+    let zoom = cam.scale / PX;
+    let (w, h) = (br.x - tl.x, br.y - tl.y);
+    draw_rectangle_lines(tl.x, tl.y, w, h, (3.0 * zoom).max(1.0), BORDER_SHADOW);
+    draw_rectangle_lines(tl.x, tl.y, w, h, (1.5 * zoom).max(1.0), BORDER_LINE);
+}
+
+/// The border's lines: the dark shadow under the warm line.
+const BORDER_SHADOW: Color = Color::new(0.0, 0.0, 0.0, 0.6);
+const BORDER_LINE: Color = Color::new(0.95, 0.82, 0.5, 0.7);
+
+/// Pushes the scenery past the map's edges into `items` (2.5D): the mirrored copies
+/// ([`edge_tiles`]) of the explored scenery within [`terrain::EDGE_FADE`] of an edge, that stand
+/// within reach of the drawn ground. Copies are drawn as the map's own (in their mirrored place,
+/// with the same keys), so the ground goes on past the edge with its trees and rocks.
+fn push_edge_scenery(game: &Game, cam: &Camera, items: &mut Vec<(i64, Drawable)>) {
+    let map = &game.world.map;
+    let (w, h) = (map.w, map.h);
+    let fog = &game.fog;
+    // The scenery within this many cells of an edge has copies; a plant reaches a few cells up.
+    let near = terrain::EDGE_FADE as i32 + 1;
+    // The copies that may stand in view: the drawn ground, with a margin for sprites that reach
+    // up from their foot (in world units, as the map's centres).
+    let r = cam.drawn_world_rect();
+    let (margin, rh) = (12.0, cam.grid.row_height());
+    for o in map.objects_in_rows(0, h) {
+        let (x, y) = o.tile;
+        let at_edge = x < near || x >= w - near || y < near || y >= h - near;
+        if !at_edge || !is_scenery(o.class) || !razdor::rules::map::object_cells(o).any(|t| fog.explored_near(t, minimap::FEATHER)) {
+            continue;
+        }
+        for t in edge_tiles(o.tile, w, h) {
+            let (cx, cy) = map.center(t);
+            if cx < r.x - margin || cx > r.x + r.w + margin || cy < r.y - margin * rh || cy > r.y + r.h + margin * rh {
+                continue;
+            }
+            let c = Decoration { tile: t, ..*o };
+            if in_hill_pass(c.class) {
+                items.push((HILL_PASS_KEY + cell_pass_key(t, 0), Drawable::Object(c)));
+            } else {
+                items.push((sprite_key(cam, t, object_foot(&c, cam), object_layer(c.class)), Drawable::Object(c)));
+            }
+        }
+    }
+}
+
+/// Whether a drawn item is a bridge: it lies on the ground, so the 2.5D view draws it before the
+/// fog ([`draw_world_in`]).
+fn is_bridge_item(game: &Game, d: &Drawable) -> bool {
+    matches!(d, Drawable::Building(i) if game.world.locations[*i].kind.is_bridge())
+}
+
 fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<MapHoverLook>) {
     let art = assets.dt.as_ref();
     stamp_idle(game, clock_ms());
     frame_probe::time(Stage::Terrain, || ground(cam, || draw_terrain(game, art, cam)));
     let map = &game.world.map;
+    let tilted = cam.tilt.is_some();
     let ((c0, c1), (r0, r1)) = cam.visible(map);
     // Sprites stand on their cell and reach up to ~8 cells above it. Turned, a sprite reaches any
     // way up the screen, so every side takes the larger margin.
@@ -1980,49 +2136,31 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     let mut items = WORLD_ITEMS.with(|c| std::mem::take(&mut *c.borrow_mut()));
     items.clear();
     let fog = &game.fog;
+    // 2.5D: the fog the standing sprites are shaded by ([`sprite_shade`]); flat, nothing.
+    let unshown = if tilted { game.unshown_cells() } else { Vec::new() };
+    let held: HashSet<Tile> = unshown.iter().copied().collect();
+    let shade = |t: Tile| if tilted { sprite_shade(map, fog, &held, t) } else { WHITE };
     // The original (0x4c8864) draws the hills of classes 1-3 in a pass of their own before
     // anything else, so they lie under every tree, mountain, building and army, the ones
     // above them included. Its test is `0x100 < class·256 + sprite < 0x401`: class 4's
     // sprites are 10 and up, so the yellow hills are drawn with the mountains, row by row.
+    // Flat, the hills are drawn here; 2.5D keeps them for the standing pass after the fog.
     for o in map.objects_in_rows(r0 - up, r1 + below) {
         if o.tile.0 >= c0 - side && o.tile.0 < c1 + side && razdor::rules::map::object_cells(o).any(|t| fog.explored_near(t, minimap::FEATHER)) {
-            if (object_class::HILLS..=object_class::ROCKY_HILLS).contains(&o.class) {
-                standing(cam, object_foot(o, cam), || draw_object(o, art, cam));
+            if in_hill_pass(o.class) {
+                if tilted {
+                    items.push((HILL_PASS_KEY + cell_pass_key(o.tile, 0), Drawable::Object(*o)));
+                } else {
+                    standing(cam, object_foot(o, cam), WHITE, || draw_object(o, art, cam));
+                }
             } else {
                 items.push((sprite_key(cam, o.tile, object_foot(o, cam), object_layer(o.class)), Drawable::Object(*o)));
             }
         }
     }
-    // A spell's layer 1 lies on the ground over the hills, under the marks and every
-    // standing sprite (0x4c935b: the cell loop before the marks' 0x4c9459).
-    if let Some(s) = spell {
-        ground(cam, || draw_spell_layer(s, 1, cam));
+    if tilted {
+        push_edge_scenery(game, cam, &mut items);
     }
-    // The marks under the hero and every army (cell byte +0xA, 0x48eeb0: the hero's kind 1,
-    // an army's 3) lie on the ground in the same pass, under every tree, building and
-    // figure (0x4c9459), so the figures' shadows fall over them. The hover's ring takes the
-    // place of the mark of the cell it is on (one mark byte a cell, 0x48eeb0).
-    let ring = hover.and_then(|h| Some((h.cell, h.ring?)));
-    ground(cam, || {
-        for a in game.world.armies.iter().filter(|a| fog.explored(a.tile(map)) && !a.sails()) {
-            if ring.is_none_or(|(t, _)| a.tile(map) != t) {
-                draw_mark(cam, game.army_display_pos(a), "Selection-1", MARK_ARMY);
-            }
-        }
-        if let Some((t, (texture, color))) = ring {
-            draw_mark(cam, map.center(t), texture, color);
-        }
-        if !game.aboard() {
-            draw_mark(cam, game.display_pos(), "Selection-1", MARK_HERO);
-        }
-        // The route being walked, or the one a first click shows, lies on the ground under the
-        // figures (the original's second pass, over the hills).
-        if game.moving() {
-            draw_route(game, &game.path, cam);
-        } else if let Some(path) = preview {
-            draw_route(game, path, cam);
-        }
-    });
     // The standing scenery and the buildings share one pass over the cells, row by row and
     // left to right (0x4c8864's cell loop): each cell draws its massif object (+0), then its
     // plant (+2), then the building whose footprint covers it (+0xC) if that building is not
@@ -2061,9 +2199,61 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     }
     // Stable: figures sharing a cell keep the order they were pushed in.
     items.sort_by_key(|a| a.0);
+    // A spell's layer 1 lies on the ground over the hills, under the marks and every
+    // standing sprite (0x4c935b: the cell loop before the marks' 0x4c9459).
+    if let Some(s) = spell {
+        ground(cam, || draw_spell_layer(s, 1, cam));
+    }
+    // The marks under the hero and every army (cell byte +0xA, 0x48eeb0: the hero's kind 1,
+    // an army's 3) lie on the ground in the same pass, under every tree, building and
+    // figure (0x4c9459), so the figures' shadows fall over them. The hover's ring takes the
+    // place of the mark of the cell it is on (one mark byte a cell, 0x48eeb0).
+    let ring = hover.and_then(|h| Some((h.cell, h.ring?)));
+    ground(cam, || {
+        for a in game.world.armies.iter().filter(|a| fog.explored(a.tile(map)) && !a.sails()) {
+            if ring.is_none_or(|(t, _)| a.tile(map) != t) {
+                draw_mark(cam, game.army_display_pos(a), "Selection-1", MARK_ARMY);
+            }
+        }
+        if let Some((t, (texture, color))) = ring {
+            draw_mark(cam, map.center(t), texture, color);
+        }
+        if !game.aboard() {
+            draw_mark(cam, game.display_pos(), "Selection-1", MARK_HERO);
+        }
+        // The route being walked, or the one a first click shows, lies on the ground under the
+        // figures (the original's second pass, over the hills).
+        if game.moving() {
+            draw_route(game, &game.path, cam);
+        } else if let Some(path) = preview {
+            draw_route(game, path, cam);
+        }
+    });
+    // 2.5D: the bridges, the border and the fog lie on the ground, over the ground's marks and
+    // route and under every standing sprite (the fog is no longer drawn over them, which cut the
+    // sprites that stand past the fog's edge). The border goes under the fog, so the fog darkens
+    // it where the ground is unexplored, and the fog runs past the map's edges too.
+    if tilted {
+        for d in items.iter().map(|(_, d)| d).filter(|d| is_bridge_item(game, d)) {
+            if let Drawable::Building(i) = d {
+                let l = &game.world.locations[*i];
+                let outlined = hover.is_some_and(|h| h.building == Some(*i));
+                ground(cam, || draw_building(l, art, cam, outlined));
+            }
+        }
+        ground(cam, || {
+            draw_border(game, cam);
+            cam.draw_fog_tilted(game, &unshown);
+        });
+    }
+    // The standing sprites: the hills first, then each by its key (the cell's pass or, turned,
+    // its depth). Bridges are drawn above, in 2.5D.
     for d in items.iter().map(|(_, d)| d) {
+        if tilted && is_bridge_item(game, d) {
+            continue;
+        }
         match d {
-            Drawable::Object(o) => standing(cam, object_foot(o, cam), || draw_object(o, art, cam)),
+            Drawable::Object(o) => standing(cam, object_foot(o, cam), shade(o.tile), || draw_object(o, art, cam)),
             Drawable::Building(i) => {
                 let l = &game.world.locations[*i];
                 let outlined = hover.is_some_and(|h| h.building == Some(*i));
@@ -2071,27 +2261,27 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                     // A bridge lies on the ground (Razdor's), so it is drawn in the ground pass.
                     ground(cam, || draw_building(l, art, cam, outlined));
                 } else {
-                    standing(cam, building_foot(l, cam), || draw_building(l, art, cam, outlined));
+                    standing(cam, building_foot(l, cam), shade(l.anchor), || draw_building(l, art, cam, outlined));
                 }
             }
             Drawable::Army(i) => {
                 let a = &game.world.armies[*i];
-                standing(cam, cam.to_screen(game.army_display_pos(a)), || draw_army(game, a, assets, art, cam));
+                standing(cam, cam.to_screen(game.army_display_pos(a)), shade(a.tile(map)), || draw_army(game, a, assets, art, cam));
             }
             Drawable::Ship => {
                 if let Some(ship) = game.ship {
                     let at = map.center(ship.tile);
-                    standing(cam, cam.to_screen(at), || {
+                    standing(cam, cam.to_screen(at), shade(ship.tile), || {
                         if !draw_figure(art, ship_stem(razdor::rules::ships::kind::HERO), at, None, 0, cam, Stand::Afloat) {
                             draw_ship(cam, at, HERO_SAIL);
                         }
                     });
                 }
             }
-            Drawable::Hero => standing(cam, cam.to_screen(game.display_pos()), || draw_hero(game, assets, art, cam)),
+            Drawable::Hero => standing(cam, cam.to_screen(game.display_pos()), shade(game.tile()), || draw_hero(game, assets, art, cam)),
             Drawable::Spell(n) => {
                 if let Some(s) = spell {
-                    standing(cam, cam.to_screen(s.at), || draw_spell_layer(s, *n, cam));
+                    standing(cam, cam.to_screen(s.at), WHITE, || draw_spell_layer(s, *n, cam));
                 }
             }
         }
@@ -4554,5 +4744,68 @@ mod tests {
         assert_eq!(plan_click(&mut planned, a, here, Vec::new), MapClick::SetOff);
         // A click elsewhere plans too.
         assert_eq!(plan_click(&mut planned, c, here, || vec![(2, 1), (3, 1), c]), MapClick::Planned);
+    }
+}
+
+#[cfg(test)]
+mod edge_tests {
+    use super::*;
+
+    fn near(a: Color, b: [f32; 3], eps: f32) -> bool {
+        (a.r - b[0]).abs() < eps && (a.g - b[1]).abs() < eps && (a.b - b[2]).abs() < eps
+    }
+
+    #[test]
+    fn the_sky_of_the_map_shader_is_the_sky_of_the_view() {
+        assert_eq!([SKY.r, SKY.g, SKY.b], terrain::EDGE_SKY);
+    }
+
+    #[test]
+    fn a_scenery_edge_copy_stands_where_the_mirrored_ground_shows_its_cell() {
+        // Cell (0, 0) of a 5 × 5 map: its copies are the reflections about both borders and
+        // their corner, all within the fade; never the cell itself.
+        let copies = edge_tiles((0, 0), 5, 5);
+        for t in [(-1, 0), (0, -1), (-1, -1), (9, 0), (0, 9), (9, 9), (-10, -1)] {
+            assert!(copies.contains(&t), "{t:?} is a copy of (0, 0): {copies:?}");
+        }
+        assert!(!copies.contains(&(0, 0)));
+        // The far corner's copies reach the next border cell over, the same way.
+        let far = edge_tiles((4, 4), 5, 5);
+        assert!(far.contains(&(5, 4)) && far.contains(&(4, 5)) && far.contains(&(5, 5)), "{far:?}");
+        for &(x, y) in copies.iter().chain(&far) {
+            assert!(x < 0 || x >= 5 || y < 0 || y >= 5, "({x}, {y}) is outside");
+            assert!((0..5).contains(&terrain::mirror_cell(x, 5)) && (0..5).contains(&terrain::mirror_cell(y, 5)));
+        }
+        // A cell in the middle of a big map has none.
+        assert!(edge_tiles((50, 50), 100, 100).is_empty());
+    }
+
+    #[test]
+    fn the_sprites_in_the_light_are_white_and_past_the_edge_they_sink_into_the_sky() {
+        let map = TileMap::from_codes(Grid::Square8, 20, 20, &[0u8; 400], vec![]);
+        let lit = Fog::new(20, 20);
+        let mut open = Fog::new(20, 20);
+        for y in 0..20 {
+            for x in 0..20 {
+                open.mark((x, y));
+            }
+        }
+        let none = HashSet::new();
+        // Explored and far from the edge: no shade.
+        assert_eq!(sprite_shade(&map, &open, &none, (10, 10)), WHITE);
+        // Unexplored: black.
+        let dark = sprite_shade(&map, &lit, &none, (10, 10));
+        assert!(near(dark, [0.0, 0.0, 0.0], 1e-3), "{dark:?}");
+        // A half cell past the edge: barely sunk. Far past it: the sky's colour.
+        assert!(near(sprite_shade(&map, &open, &none, (-1, 10)), [1.0, 1.0, 1.0], 0.02));
+        assert!(near(sprite_shade(&map, &open, &none, (-40, 10)), terrain::EDGE_SKY, 1e-3));
+        // Cells the fog keeps (held, a block around the sprite) are dark there, as the fog is.
+        let held: HashSet<Tile> = (8..=12).flat_map(|y| (8..=12).map(move |x| (x, y))).collect();
+        assert!(near(sprite_shade(&map, &open, &held, (10, 10)), [0.0, 0.0, 0.0], 1e-3));
+    }
+
+    #[test]
+    fn outside_a_standing_sprite_the_colours_are_white() {
+        assert_eq!(sprite_color(), WHITE);
     }
 }
