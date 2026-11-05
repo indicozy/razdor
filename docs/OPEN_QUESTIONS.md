@@ -8,6 +8,13 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **G1 reverted: which message-event results wait for OK** (2026-11-06). The fix that moved every
+  finish-time result of a message event to the window's OK (0x4c206c → 0x4ab1ec) broke tests built from
+  the original's recordings: `rules::replay::rk1_church_windows_come_in_the_originals_order` (the original
+  shows the army *before* OK: window 9, show 9, ok 9), `difftest::rk7_the_kings_squad_greets_only_with_the_step_flag_set`,
+  `difftest::rk2_the_peasant_offers_and_the_mines`, plus fog, world-load and max_bench checks. So part of the
+  finish runs at open in the original. Reverted before 1.3.12; redo with the recordings as the reference
+  (backlog 1539). G2's test and G7's evidence were reverted with it (1540, 1541).
 - **The editor's event window reads "на 24 часов", but the game plays a 24 h window as 1,440 hours** (2026-11-05, the editor-guide screenshot pass, docs/reference/editor-guide.md, chapters 5 and 6). The unit is settled (see Settled): the editor stores hours × 60 and the game reads the stored number as hours, so the label and the played length differ by a factor of 60. Razdor plays the game's length (`src/rules/events.rs:625`). Every event duration in the 24 base-install maps is a multiple of 60 (values 0, 720, 780, 1440, 1500, 1860, 2160, 2400), so the shipped data was made under this rule, and the guide's 24 h recipes (6.4, 6.5, 6.18) play 60 days. Known difference in the editor's label and stored unit, not in the rule. Owner's call: relabel the editor's control (the value shown, or its unit), or keep it and document it in the editor help. Settled by that decision.
 
 - **Known difference: a new army starts with garrison strength 50 in Razdor, 0 in the original** (2026-11-05, the editor-guide screenshot pass; gap E9 in docs/reference/editor-guide.md). The original's new-army record is zero except position, id, model, style and experience correction (dt-editor records §3). The guide's army windows (pp. 56 and 63) show 0 and say that armies do not defend castles by default. Razdor sets 50 in `src/editor/defaults.rs:89`. Shipped maps use 50 on 82 of 94 feudal armies (earlier data), so the default is not what makes those maps. Owner's call on the editor default. Settled by that decision.
