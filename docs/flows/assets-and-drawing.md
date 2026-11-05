@@ -231,7 +231,17 @@ a vertical one would shrink with the pitch). Pointer tests use `map_pointer` (th
 pointer, in the 2D space; the drag scales the screen delta by the rows' foreshortening instead). What
 stands on the window (the tooltip, battle marks, effects, the travel time) is placed with
 `Camera::screen_at`. Simplifications of this step: a figure is picked by its cell (not its sprite),
-the F3 overlay is off in 2.5D, and the setting has no row in the settings windows yet. With the
+the F3 overlay is off in 2.5D, and the setting has no row in the settings windows yet.
+
+The view turns too (yaw, `TiltCamera::yaw_deg`: 0 is the eye south of the target, positive turns the eye
+toward the east, so the ground turns clockwise on the screen). Q and E turn it 45° (a two-finger twist
+does too, `gestures` `rotate`); the shown yaw eases to its target (`ease_tilt_yaw`); `RAZDOR_VIEW_YAW`
+starts it. Screen moves (the arrows, the edge, the stick, the right-button drag, the touch slide) go
+through `Camera::screen_to_world_delta` (and `turn_ground` for the scroll's steps). Turned, the standing
+sprites are sorted back to front by their foot's depth along the view's forward (`sprite_key`, 1/64 of a
+cell, the layer as tiebreak; bridges still first), every side of the cull takes the larger margin, and a
+figure's facing row follows the screen (`Camera::facing`). At yaw 0 the order is the cell pass, as before.
+`RAZDOR_VIEW_SPRITE` sets the standing sprites' size (`sprite_size`, a look experiment). With the
 setting off, `in_view`, `ground` and `standing` only call their closures, so the flat view is the
 same code path.
 

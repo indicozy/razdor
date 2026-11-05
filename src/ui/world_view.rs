@@ -332,16 +332,16 @@ enum GrabStep {
 }
 
 impl Grab {
-    /// The press with the pointer at `at` and the button `down` or not, at `scale` screen
-    /// pixels per world unit.
-    fn step(&mut self, at: Vec2, down: bool, scale: Vec2) -> GrabStep {
+    /// The press with the pointer at `at` and the button `down` or not; `to_world` turns a
+    /// screen move into world units ([`Camera::screen_to_world_delta`]).
+    fn step(&mut self, at: Vec2, down: bool, to_world: impl Fn(Vec2) -> Vec2) -> GrabStep {
         if !down {
             return if self.moved { GrabStep::Dropped } else { GrabStep::Click };
         }
         let d = at - self.start;
         self.moved |= d.length() > GRAB_START;
         if self.moved {
-            GrabStep::Drag(self.from - d / scale)
+            GrabStep::Drag(self.from - to_world(d))
         } else {
             GrabStep::Held
         }
@@ -363,7 +363,7 @@ fn grab_map(game: &Game, view: &mut MapView, cam: &Camera, off_map: bool) -> boo
         return false;
     };
     let down = is_mouse_button_down(MouseButton::Right) && !input_blocked();
-    match grab.step(m, down, cam.screen_scale()) {
+    match grab.step(m, down, |d| cam.screen_to_world_delta(d)) {
         GrabStep::Held => view.grab = Some(grab),
         GrabStep::Drag(at) => {
             // The drag is Razdor's: the system's hand, not one of the original's pointers.
@@ -396,7 +396,7 @@ fn razdor_stop(game: &mut Game) {
 /// F2) and the quick save leave him walking, as they did before the parity pass.
 fn cuts_walk(k: KeyCode) -> bool {
     const KEPT: [Action; 6] = [Action::Minimap, Action::CentreHero, Action::Music, Action::Help, Action::Language, Action::QuickSave];
-    !(matches!(k, KeyCode::Equal | KeyCode::Minus | KeyCode::KpAdd | KeyCode::KpSubtract) || KEPT.into_iter().any(|a| keymap::key(a) == k))
+    !(matches!(k, KeyCode::Equal | KeyCode::Minus | KeyCode::KpAdd | KeyCode::KpSubtract | KeyCode::Q | KeyCode::E) || KEPT.into_iter().any(|a| keymap::key(a) == k))
 }
 
 /// The original's scroll speed setting (`[Options] ScrollSpeed` of the interface ini,
@@ -436,8 +436,9 @@ fn pan(game: &Game, view: &mut MapView, slide: (f32, f32)) {
     if slide == (0.0, 0.0) || input_blocked() || !view.shows.is_empty() {
         return;
     }
-    let scale = PX * view.zoom * map_scale();
-    let at = Vec2::from(view.look.unwrap_or(game.display_pos())) - vec2(slide.0, slide.1) / scale;
+    let look = view.look.unwrap_or(game.display_pos());
+    let cam = Camera::looking_at(game, view.zoom, look);
+    let at = Vec2::from(look) - cam.screen_to_world_delta(vec2(slide.0, slide.1));
     view.look = Some(Camera::looking_at(game, view.zoom, at.into()).centre());
 }
 
@@ -481,7 +482,7 @@ fn scroll(game: &Game, view: &mut MapView, dt_ms: i64, pad: (f32, f32)) {
     let (sx, sy) = scroll_step(scroll_speed(), dt_ms as f64);
     // Original pixels to world units: a cell is 32 px across, its row 22 px down.
     let rh = game.world.map.grid.row_height();
-    let step = dir * vec2(sx as f32 / PX, sy as f32 / 22.0 * rh) / view.zoom;
+    let step = cam.turn_ground(dir * vec2(sx as f32 / PX, sy as f32 / 22.0 * rh) / view.zoom);
     let at = Vec2::from(view.look.unwrap_or(game.display_pos())) + step;
     // Where the camera can really look: at the map's border it stops, and so does the
     // scroll, so turning back moves the view at once.
@@ -948,6 +949,57 @@ fn set_tilt_pitch(deg: f32) {
     TILT_PITCH.store(deg.clamp(view25::PITCH_MIN, view25::PITCH_MAX).to_bits(), std::sync::atomic::Ordering::Relaxed);
 }
 
+/// The yaw's target in degrees (Q and E turn it by [`TILT_YAW_STEP`]), wrapped to (-180, 180];
+/// NaN until it is set. The shown yaw eases toward it ([`ease_tilt_yaw`]).
+static TILT_YAW: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x7fc0_0000);
+/// The shown yaw in degrees, the one the camera uses; NaN until the first frame.
+static TILT_YAW_SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x7fc0_0000);
+/// Degrees per Q or E press (and per two-finger twist step).
+const TILT_YAW_STEP: f32 = 45.0;
+/// The size factor of the standing sprites in the 2.5D view (`RAZDOR_VIEW_SPRITE` sets it for a
+/// look experiment; 1 is their own size).
+pub fn sprite_size() -> f32 {
+    static SIZE: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *SIZE.get_or_init(|| std::env::var("RAZDOR_VIEW_SPRITE").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0).clamp(0.5, 3.0))
+}
+
+/// `deg` wrapped to (-180, 180].
+fn wrap_yaw(deg: f32) -> f32 {
+    let w = deg.rem_euclid(360.0);
+    if w > 180.0 { w - 360.0 } else { w }
+}
+
+/// The start yaw: `RAZDOR_VIEW_YAW` (any angle, for the snapshots), else 0 (north up).
+fn tilt_yaw_start() -> f32 {
+    std::env::var("RAZDOR_VIEW_YAW").ok().and_then(|v| v.parse().ok()).map_or(0.0, wrap_yaw)
+}
+
+/// The yaw the camera shows, in degrees (see [`ease_tilt_yaw`]).
+fn tilt_yaw() -> f32 {
+    let deg = f32::from_bits(TILT_YAW_SHOWN.load(std::sync::atomic::Ordering::Relaxed));
+    if deg.is_nan() { tilt_yaw_start() } else { deg }
+}
+
+/// The yaw the player turned to, in degrees.
+fn tilt_yaw_target() -> f32 {
+    let deg = f32::from_bits(TILT_YAW.load(std::sync::atomic::Ordering::Relaxed));
+    if deg.is_nan() { tilt_yaw_start() } else { deg }
+}
+
+/// Turns the yaw target by `deg` (wrapped).
+fn turn_tilt_yaw(deg: f32) {
+    TILT_YAW.store(wrap_yaw(tilt_yaw_target() + deg).to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Eases the shown yaw toward its target over the frame's `dt_ms` (a rate of 12 a second, the
+/// shortest way round), snapping within 0.05°.
+fn ease_tilt_yaw(dt_ms: i64) {
+    let (target, shown) = (tilt_yaw_target(), tilt_yaw());
+    let d = wrap_yaw(target - shown);
+    let next = if d.abs() < 0.05 { target } else { wrap_yaw(shown + d * (1.0 - (-(dt_ms as f32 / 1000.0) * 12.0).exp())) };
+    TILT_YAW_SHOWN.store(next.to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
 /// A 3D view for `set_camera`: depth off (the map is painted back to front, as the flat view
 /// is), no viewport (not every backend has one), the matrix of [`view25::window_matrix`].
 struct View3d(Mat4);
@@ -994,7 +1046,7 @@ fn ground<R>(cam: &Camera, draw: impl FnOnce() -> R) -> R {
 /// ([`view25::billboard_model`]); under a flat camera, as drawn.
 fn standing<R>(cam: &Camera, foot: Vec2, draw: impl FnOnce() -> R) -> R {
     let Some(tilt) = cam.tilt else { return draw() };
-    push_model(view25::billboard_model(cam.origin, foot, cam.scale, tilt.cam.pitch_deg));
+    push_model(view25::billboard_model(cam.origin, foot, cam.scale, tilt.cam.pitch_deg, tilt.cam.yaw_deg, sprite_size()));
     let r = draw();
     pop_model();
     r
@@ -1061,7 +1113,7 @@ impl Camera {
         let mut cam = Camera { origin: origin - pad, view, draw, scale, grid: map.grid, tilt: None };
         // A view with no height (a minimised window) has no perspective: it stays flat.
         if tilt_view() && view.w >= 1.0 && view.h >= 1.0 {
-            let tilt = TiltCamera::new(Vec2::from(cam.centre()), scale, view, tilt_pitch());
+            let tilt = TiltCamera::new(Vec2::from(cam.centre()), scale, view, tilt_pitch(), tilt_yaw());
             cam.tilt = Some(Tilt { cam: tilt, plan: tilt.ground_footprint(view, view), cull: tilt.ground_footprint(view, draw) });
         }
         cam
@@ -1102,6 +1154,32 @@ impl Camera {
         match self.tilt {
             None => Vec2::splat(self.scale),
             Some(t) => vec2(self.scale, self.scale * t.cam.pitch_deg.to_radians().sin()),
+        }
+    }
+
+    /// World units moved by a screen move of `d` pixels (y down) with the look point: the ground
+    /// under the pointer follows the move. Turned, the move is turned into the ground too.
+    fn screen_to_world_delta(&self, d: Vec2) -> Vec2 {
+        let s = self.screen_scale();
+        let c = vec2(d.x / s.x, d.y / s.y);
+        self.turn_ground(c)
+    }
+
+    /// A ground step given in the screen's plane (x right, y down the screen, in world units),
+    /// turned by the view's yaw; the step itself at yaw 0 and in the flat view.
+    fn turn_ground(&self, g: Vec2) -> Vec2 {
+        match self.tilt {
+            None => g,
+            Some(t) => t.cam.ground_of_screen(g),
+        }
+    }
+
+    /// A ground direction (2D space) as the screen sees it (x right, y down): the sprites' facing
+    /// rows follow the screen, not the map.
+    fn facing(&self, g: Vec2) -> Vec2 {
+        match self.tilt {
+            None => g,
+            Some(t) => t.cam.screen_of_ground(g),
         }
     }
 
@@ -1669,7 +1747,8 @@ fn draw_figure(art: Option<&DtArt>, stem: &str, pos: (f32, f32), next: Option<(f
     let Some(rect) = figure_rect(art, stem, pos, cam, stand) else { return false };
     let n = sheet.width() / 8.0;
     let p = cam.to_screen(pos);
-    let heading = next.map_or(Vec2::ZERO, |n| cam.to_screen(n) - p);
+    // The sheet's rows are the screen's directions, so a turned view turns the heading too.
+    let heading = cam.facing(next.map_or(Vec2::ZERO, |n| cam.to_screen(n) - p));
     let row = facing_row(heading);
     let frame = frame.min(7) as f32;
     let (dest, size) = (vec2(rect.x, rect.y), rect.w);
@@ -1844,7 +1923,31 @@ fn object_layer(class: u8) -> i64 {
 /// a building or a tree in a later cell covers it (its tall picture reaches up into the
 /// cells north of it), while a figure in a later cell stands in front.
 fn cell_pass_key((x, y): Tile, layer: i64) -> i64 {
-    ((i64::from(y) + 64) * 65536 + (i64::from(x) + 64)) * 8 + layer
+    ((i64::from(y) + 64) * 65536 + (i64::from(x) + 64)) * LAYERS + layer
+}
+
+/// The layers of a cell's turn in the pass (below 8: [`cell_pass_key`] and [`sprite_key`]).
+const LAYERS: i64 = 8;
+
+/// Whether the 2.5D view is turned (its shown yaw beyond 0.01°): then the standing sprites are
+/// sorted by depth and every side takes the larger margin ([`draw_world_in`]).
+fn is_turned(cam: &Camera) -> bool {
+    cam.tilt.is_some_and(|t| t.cam.yaw_deg.abs() > 0.01)
+}
+
+/// The sort key of a standing sprite of cell `tile` whose foot is at `foot` (in the 2D space of
+/// `cam`). Flat, or with the view not turned, its cell's pass key ([`cell_pass_key`]); turned,
+/// back to front by the foot's depth along the view's forward (farther first, in 1/64 of a cell),
+/// the layer breaking ties.
+fn sprite_key(cam: &Camera, tile: Tile, foot: Vec2, layer: i64) -> i64 {
+    match cam.tilt {
+        Some(t) if is_turned(cam) => {
+            let world = (foot + cam.origin) / cam.scale;
+            let depth = world.dot(view25::forward(t.cam.yaw_deg));
+            -((depth * 64.0).floor() as i64) * LAYERS + layer
+        }
+        _ => cell_pass_key(tile, layer),
+    }
 }
 
 /// The first cell of a building's footprint in the pass's order: the top row's left cell
@@ -1869,8 +1972,10 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     frame_probe::time(Stage::Terrain, || ground(cam, || draw_terrain(game, art, cam)));
     let map = &game.world.map;
     let ((c0, c1), (r0, r1)) = cam.visible(map);
-    // Sprites stand on their cell and reach up to ~8 cells above it.
+    // Sprites stand on their cell and reach up to ~8 cells above it. Turned, a sprite reaches any
+    // way up the screen, so every side takes the larger margin.
     let (below, side) = (10, 8);
+    let (up, side) = if is_turned(cam) { (below, below) } else { (1, side) };
     // The list is the thread's buffer taken for this frame (its capacity is kept).
     let mut items = WORLD_ITEMS.with(|c| std::mem::take(&mut *c.borrow_mut()));
     items.clear();
@@ -1879,12 +1984,12 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // anything else, so they lie under every tree, mountain, building and army, the ones
     // above them included. Its test is `0x100 < class·256 + sprite < 0x401`: class 4's
     // sprites are 10 and up, so the yellow hills are drawn with the mountains, row by row.
-    for o in map.objects_in_rows(r0 - 1, r1 + below) {
+    for o in map.objects_in_rows(r0 - up, r1 + below) {
         if o.tile.0 >= c0 - side && o.tile.0 < c1 + side && razdor::rules::map::object_cells(o).any(|t| fog.explored_near(t, minimap::FEATHER)) {
             if (object_class::HILLS..=object_class::ROCKY_HILLS).contains(&o.class) {
                 standing(cam, object_foot(o, cam), || draw_object(o, art, cam));
             } else {
-                items.push((cell_pass_key(o.tile, object_layer(o.class)), Drawable::Object(*o)));
+                items.push((sprite_key(cam, o.tile, object_foot(o, cam), object_layer(o.class)), Drawable::Object(*o)));
             }
         }
     }
@@ -1928,11 +2033,11 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     for (i, l) in game.world.locations.iter().enumerate() {
         let (ax, ay) = l.anchor;
         let seen = l.cells().any(|t| fog.explored_near(t, minimap::FEATHER));
-        if seen && ay >= r0 - 1 && ay < r1 + below && ax >= c0 - side && ax - l.size.0 < c1 + side {
+        if seen && ay >= r0 - up && ay < r1 + below && ax >= c0 - side && ax - l.size.0 < c1 + side {
             if l.kind.is_bridge() {
                 items.push((i64::MIN / 2 + cell_pass_key(l.anchor, 0), Drawable::Building(i)));
             } else {
-                items.push((cell_pass_key(first_footprint_cell(l), LAYER_BUILDING), Drawable::Building(i)));
+                items.push((sprite_key(cam, first_footprint_cell(l), building_foot(l, cam), LAYER_BUILDING), Drawable::Building(i)));
             }
         }
     }
@@ -1942,17 +2047,17 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // (the castle's walls hide a hero behind them, a player's report).
     // Armies in the dark keep moving but are not shown.
     for (i, a) in game.world.armies.iter().enumerate().filter(|(_, a)| fog.explored(a.tile(map))) {
-        items.push((cell_pass_key(a.tile(map), LAYER_FIGURE), Drawable::Army(i)));
+        items.push((sprite_key(cam, a.tile(map), cam.to_screen(game.army_display_pos(a)), LAYER_FIGURE), Drawable::Army(i)));
     }
     if let Some(ship) = game.ship.filter(|s| !s.aboard && fog.explored(s.tile)) {
-        items.push((cell_pass_key(ship.tile, LAYER_FIGURE), Drawable::Ship));
+        items.push((sprite_key(cam, ship.tile, cam.to_screen(map.center(ship.tile)), LAYER_FIGURE), Drawable::Ship));
     }
-    items.push((cell_pass_key(game.tile(), LAYER_FIGURE), Drawable::Hero));
+    items.push((sprite_key(cam, game.tile(), cam.to_screen(game.display_pos()), LAYER_FIGURE), Drawable::Hero));
     // A spell's layer 2 just behind its target's figure, layer 3 just in front (0x4c9b5b
     // draws them in the cell's pass before its armies, 0x4c9dca, and after, 0x4ca108).
     if let Some(s) = spell {
-        items.push((cell_pass_key(s.cell, LAYER_SPELL_BELOW), Drawable::Spell(2)));
-        items.push((cell_pass_key(s.cell, LAYER_SPELL_ABOVE), Drawable::Spell(3)));
+        items.push((sprite_key(cam, s.cell, cam.to_screen(s.at), LAYER_SPELL_BELOW), Drawable::Spell(2)));
+        items.push((sprite_key(cam, s.cell, cam.to_screen(s.at), LAYER_SPELL_ABOVE), Drawable::Spell(3)));
     }
     // Stable: figures sharing a cell keep the order they were pushed in.
     items.sort_by_key(|a| a.0);
@@ -3029,13 +3134,28 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
         }
     }
     view.zoom = zoom_at(home, view.zoom_steps, locked, lo);
-    // PageUp and PageDown tilt the 2.5D view, 5° a press (the flat view ignores them).
+    // PageUp and PageDown tilt the 2.5D view, 5° a press; Q and E turn it 45° (the flat view
+    // ignores them). The shown yaw eases toward its target every frame.
+    if tilt_view() {
+        ease_tilt_yaw(dt_ms);
+    }
     if tilt_view() && dialogs.is_empty() {
         if key(KeyCode::PageUp) {
             set_tilt_pitch(tilt_pitch() - TILT_STEP);
         }
         if key(KeyCode::PageDown) {
             set_tilt_pitch(tilt_pitch() + TILT_STEP);
+        }
+        if key(KeyCode::Q) {
+            turn_tilt_yaw(-TILT_YAW_STEP);
+        }
+        if key(KeyCode::E) {
+            turn_tilt_yaw(TILT_YAW_STEP);
+        }
+        // A two-finger twist turns it a step a turn (clockwise, as E).
+        let turns = crate::ui::input::map_rotate();
+        if turns != 0 {
+            turn_tilt_yaw(turns as f32 * TILT_YAW_STEP);
         }
     }
 
@@ -4343,14 +4463,14 @@ mod tests {
     fn the_right_button_drags_the_map_or_clicks() {
         // Held still: the tooltip; let go: a click (Razdor's stop).
         let mut g = Grab { start: vec2(100.0, 100.0), from: vec2(10.0, 10.0), moved: false };
-        assert_eq!(g.step(vec2(102.0, 101.0), true, Vec2::splat(32.0)), GrabStep::Held);
-        assert_eq!(g.step(vec2(102.0, 101.0), false, Vec2::splat(32.0)), GrabStep::Click);
+        assert_eq!(g.step(vec2(102.0, 101.0), true, |d| d / 32.0), GrabStep::Held);
+        assert_eq!(g.step(vec2(102.0, 101.0), false, |d| d / 32.0), GrabStep::Click);
         // Moved past the threshold it drags: the ground follows the mouse, the camera goes
         // the other way, and it stays a drag back at the start.
         let mut g = Grab { start: vec2(100.0, 100.0), from: vec2(10.0, 10.0), moved: false };
-        assert_eq!(g.step(vec2(164.0, 100.0), true, Vec2::splat(32.0)), GrabStep::Drag(vec2(8.0, 10.0)));
-        assert_eq!(g.step(vec2(100.0, 100.0), true, Vec2::splat(32.0)), GrabStep::Drag(vec2(10.0, 10.0)));
-        assert_eq!(g.step(vec2(100.0, 100.0), false, Vec2::splat(32.0)), GrabStep::Dropped, "a drag is no click");
+        assert_eq!(g.step(vec2(164.0, 100.0), true, |d| d / 32.0), GrabStep::Drag(vec2(8.0, 10.0)));
+        assert_eq!(g.step(vec2(100.0, 100.0), true, |d| d / 32.0), GrabStep::Drag(vec2(10.0, 10.0)));
+        assert_eq!(g.step(vec2(100.0, 100.0), false, |d| d / 32.0), GrabStep::Dropped, "a drag is no click");
     }
 
     /// A minimized window (1 pixel high on Windows) left the map view −39 high, and the
@@ -4376,7 +4496,7 @@ mod tests {
         assert_eq!(esc_on_map(false), BarButton::Menu);
         // Zoom, minimap, Tab, music, help, language and the quick save leave a walk alone;
         // other keys cut it as in the original.
-        for k in [KeyCode::Equal, KeyCode::Minus, KeyCode::KpAdd, KeyCode::KpSubtract] {
+        for k in [KeyCode::Equal, KeyCode::Minus, KeyCode::KpAdd, KeyCode::KpSubtract, KeyCode::Q, KeyCode::E] {
             assert!(!cuts_walk(k), "{k:?}");
         }
         // The keys the player has bound to them, as their defaults.
