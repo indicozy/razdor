@@ -10,6 +10,7 @@
 //! samples with it. The textures stay `FilterMode::Linear`: the function needs the hardware
 //! bilinear step inside the blend band.
 
+use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation, PipelineParams};
 use macroquad::prelude::*;
 
 /// GLSL ES 1.00 source of `sharp_uv`, pasted into fragment shaders (the caller declares
@@ -94,6 +95,17 @@ razdor::local! {
 fn material() -> Option<Material> {
     SHARP.with(|m| {
         m.get_or_init(|| {
+            // The default pipeline blends with no blend state at all, so the picture's
+            // transparent pixels would draw black: the same colour blend macroquad's own
+            // pipeline uses (its alpha blend stays off, as there).
+            let pipeline_params = PipelineParams {
+                color_blend: Some(BlendState::new(
+                    Equation::Add,
+                    BlendFactor::Value(BlendValue::SourceAlpha),
+                    BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
+                )),
+                ..Default::default()
+            };
             load_material(
                 ShaderSource::Glsl { vertex: SHARP_VERTEX, fragment: &sharp_fragment() },
                 MaterialParams {
@@ -101,6 +113,7 @@ fn material() -> Option<Material> {
                         UniformDesc::new("TexSize", UniformType::Float2),
                         UniformDesc::new("Scale", UniformType::Float2),
                     ],
+                    pipeline_params,
                     ..Default::default()
                 },
             )
