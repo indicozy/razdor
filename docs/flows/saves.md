@@ -179,6 +179,23 @@ Opening the list never reads a save on the UI thread (commits c04fa1b, b2ecf89):
   time saved once (a selected row stays selected).
 - `save::warm_meta_cache` reads the install's folder at startup, newest first.
 
+## The run's mark (1532; `rules/marks.rs`)
+
+A run (a game from the map's start) carries its mark: green, grey (a gameplay setting that is not
+the original's), yellow (an experimental rule on) or red (a cheat used), with the first cause as
+its reason. It is `Game::run_mark` (`run_mark` in the save, `#[serde(default)]`), so it rises and is
+saved with the run. It is brought up to date every frame from the settings
+(`main_menu::follow_settings` → `Game::note_settings`; the classification is one function,
+`ui::audio::Settings::gameplay_differs_from_original`), on every load, and by the cheat console
+(`Game::note_cheat`). A load or a battle's restart in the same run keeps the worse mark
+(`Game::keep_run_mark`); a new game, a campaign's next map and «Рестарт» of the map start a new run.
+A save from before the mark has no `run_mark`: its history is unknown, so it reads grey at most,
+except where the save itself shows a cheat (`cheats.used`) or an experimental rule.
+
+The player's best mark per map (and its date) is `marks.json` beside `settings.json`
+(`marks::Records`, keyed by the map's file name without the extension, as the favourites are). A
+victory writes it (`ui/mod.rs` at the scenario's end, next to the list's tick); a loss writes nothing.
+
 ## Compatibility rules when adding state
 
 - New fields on anything saved (`Game`, `World`, `Army`, units, the event engine …) get

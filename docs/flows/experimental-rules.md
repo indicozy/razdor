@@ -197,3 +197,10 @@ gameplay change of the «Максимум» AI; the switch stays so a player can
 With it on, «Максимум» does not move a mage or healer of its side into a cell where one action
 of an opposing unit kills it, while another move leaves none exposed (`battle-ai.md` §8,
 `Battle::guard_moves`). Off, «Максимум» plays as before (the `max_bench` baseline).
+
+## The run's mark (1532)
+
+Any experimental rule on in the playthrough makes its run yellow, with the first rule on (in the panel's
+order) as the reason (`ExperimentalRules::first_on`, read by `Game::note_settings`). The rules are fixed for
+a playthrough, so the mark comes from `Game::experimental`, not from the window's setting. A gameplay setting
+that differs from the original's is grey (`ui::audio::Settings::gameplay_differs_from_original`); see `saves.md`.

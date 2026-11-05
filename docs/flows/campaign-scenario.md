@@ -116,6 +116,12 @@ carries over is set by the next map's header bytes (`EventEngine::carry_over`): 
 and XP (else level 1 and the map's book), worn items, the pack, the army (paid as of now, its dead
 dropped); flags always carry over. Named characters travel with the army (`set_named_units`).
 
+**Run marks** (1532; `rules/marks.rs`, the flow in `saves.md`). Each map's victory writes the run's mark
+into the player's `marks.json` (`ui/mod.rs`, where the list's tick is set; not in the editor's test play).
+The scenario list shows the row's mark as a checkmark left of the star: the map's record, or a campaign's
+worst record once every map of it is won (`marks::Records::campaign`). A campaign's next map is a new run
+(its own mark), but it inherits the playthrough's experimental rules as before.
+
 **Journal** (events.md §10). One chapter per campaign map (`History::next_chapter`,
 `name_chapter`), newest first; Razdor keeps the history across maps (an addition; the original's
 journal is per map).
