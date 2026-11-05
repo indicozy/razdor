@@ -64,7 +64,7 @@ The following invariants hold for all 15 maps (C):
 | 0x00 | char[12] | `MapLDV V.4\r\n` | C |
 | 0x0C | u32 | width in cells (50 / 100 / 200) | C |
 | 0x10 | u32 | height in cells (all shipped maps are square) | C |
-| 0x14 | u32 | random-generator seed from the "generate map" dialog. Several maps share one value. | L |
+| 0x14 | u32 | random-generator seed from the "generate map" dialog. Several maps share one value. The editor's generator shows it as a signed value (the guide's p.10 shows -282439294 for a u32 header value). | L |
 | 0x18 | u32 | `text_offset`: absolute offset of the first string, just after the text marker. The game seeks here before reading the strings and never reads the marker | C |
 | 0x1C | u32 | terrain RLE size | C |
 | 0x20 | u32 | objects size (a multiple of 6) | C |
@@ -96,7 +96,8 @@ The following invariants hold for all 15 maps (C):
 | off | type | field | conf |
 |---|---|---|---|
 | 0 | u32 | always 0 in shipped maps. Possibly fame or gods' favour. | U |
-| 4 | u32 | always 0 | U |
+| 4 | 2 B | bytes 4–5: no editor control; always 0 in the 24 shipped maps of the base install (checked 2026-11-05) | U |
+| 6 | i16 | experience (the editor's "Боевой опыт" spin, 0 to 32000). The editor writes it here and the game never reads it: the loader reads bytes 8, 12, 16, 19–49 and no others of the preset, and the hero starts at level 0 with 0 XP (original-mechanics/experience.md §5). Always 0 in the shipped maps (checked 2026-11-05) | C |
 | 8 | u32 | starting gold (the exe reads the low 16 bits, signed; the same for every class in the shipped maps) | C |
 | 12 | u32 | starting mana (low 16 bits, signed; largest for the archmage). There is no starting experience (original-mechanics/experience.md §5) | C |
 | 16 | u8 | starting building (1-based building id, 0 = none) | C |
@@ -105,16 +106,16 @@ The following invariants hold for all 15 maps (C):
 | 37 | u16 | start x | C |
 | 39 | u16 | start y | C |
 | 41 | u8[3] | starting artifacts (artifact GlobalIndex), put into the pack | C |
-| 44 | u8[6] | starting spells and prayers (1-based index into `Rus_Spells.ini`), learned | C |
+| 44 | u8[6] | starting spells and prayers (1-based index into `Rus_Spells.ini`), learned. The loader reads all six (the spell loop runs over bytes 44–49). The editor edits five of them: byte 49 has no control there (dt-editor records §8.2), so an editor-made map leaves it 0 | C |
 
 The game offers a class on the new-game screen only when its start x or start y is non-zero
 (0x4c1804). Troop triples with unit id 1–3 (the hero types) are skipped, here and in armies and
-garrisons (0x4b44db). Bytes 0–7 and 17–18 are not read by the map loader. (C)
+garrisons (0x4b44db). Bytes 0–7 and 17–18 are not read by the map loader (checked 2026-11-05 against the preset reads; bytes 6–7 are the editor-only experience, see above). (C)
 
 ### Game clock (C)
 
 Time values count minutes from year 0, month 1, day 1, 00:00. A day is 1440 minutes, a month is 30 days and a year is
-12 months (360 days). Durations and repeat intervals in events use the same unit. For example, 1440 means one day.
+12 months (360 days). Repeat intervals in events use the same unit (1440 is one day). Event durations do not: the stored duration is in hours (section 9, offset 8).
 
 This was checked against gameplay footage: the header of РК3 decodes to year 1204, month 5, day index 19, 09:00. The
 game shows days 0-based (`5 месяц, 29 день` is followed by `6 месяц, 0 день`), so the screen reads `1204 год, 5 месяц,
@@ -193,7 +194,7 @@ Buildings have 1-based ids in file order. Events refer to buildings by that id.
 | 6 | u8 | building type (table below) |
 | 7 | u8 | always 0 (U) |
 | 8 | u16[64] | local events available here (1-based event ids). Only the first `event_count` entries are used, and 0 marks a deleted slot. |
-| 136 | u16[64] | fixed artifacts: market goods, or the ruin treasure (клад). Only the first 6 are ever used. Ids are artifact GlobalIndex values up to 146. |
+| 136 | u16[64] | fixed artifacts: market goods, or the ruin treasure (клад). Markets use the first six; the ruin treasure uses the first five (the editor shows five ruin slots, guide p.45; economy.md §3). Ids are artifact GlobalIndex values up to 146. |
 | 264 | 6 × (u8 unit, u8 count_at_start, u8 max_count) | barracks: units available to recruit |
 | 282 | u16 | gold income per day |
 | 284 | u16 | maximum gold that can accumulate (villages) |
@@ -210,7 +211,7 @@ Buildings have 1-based ids in file order. Events refer to buildings by that id.
 | 302 | 6 B | always 0 (U) |
 | 308 | u8[6] | spells for sale (1-based spell index) |
 | 314 | 6 × (u8 unit, u8 level, u8 count) | garrison (0-based levels) |
-| 332 | u8 | extra garrison defence |
+| 332 | u8 | extra garrison defence. The original editor's slider is 0–50 and inverted: the stored byte is 50 minus the slider value (dt-editor records §4.2, 0x54c3fc, 0x549210). Razdor's control shows the byte itself (gap E10 in editor-guide.md) |
 | 333 | u16 | minimum random-artifact price |
 | 335 | u16 | maximum random-artifact price. For ruins, the treasure gold. |
 | 337 | u8 | faction: 1 player, 2 ally, 3 neighbour, 4 enemy |
@@ -285,7 +286,7 @@ The army id is at byte 4, and it always equals the 1-based record index. Unit id
 | 79 | u8 | no socialising with other armies | C |
 | 80 | u8 | base daily gold income ÷ 10 (the game stores value × 10) | C |
 | 81 | u8 | no interest in buildings | C |
-| 82 | u8 | garrison strength (default 50) | C |
+| 82 | u8 | garrison strength (0 to 90 in the original's editor). A new army is 0 in the original (dt-editor records §3); Razdor's new-army default is 50 (gap E9 in editor-guide.md) | C |
 | 83 | u8 | respawn the whole army, not only the leader | C |
 | 84 | u8 | spell cast on the army (1-based spell index) | C |
 | 85 | u8 | target-selection model: 0 standard, 1 aggressive, 2 passive, 3 hoarding, 4 trading | C |

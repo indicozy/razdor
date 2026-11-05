@@ -224,7 +224,9 @@ one on purpose (a short prefix test meant as "any of these numbered flags").
   occur, else raises the character after X by one; `-X^` lowers the character after the first
   occurrence of X by one and removes X, the digit and the space when it reaches 0. The lower
   form does not check that X exists (it then changes an unrelated character). No shipped map
-  uses `^`.
+  uses `^` (checked 2026-11-05: no flag script of the 1,972 events of the 24 maps in the base install
+  or of the 1,346 events of the 16 in the Evolution install contains `^`; the guide's named maps are
+  not in either install).
 - Community opcode 18 makes the digit written by this event's `+X^` a random byte (§15).
 - After the action: a test part containing `end_tutorial` marks the tutorial done (§13).
 
