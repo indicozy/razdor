@@ -39,6 +39,7 @@ pub mod saves;
 pub mod screens;
 pub mod session;
 pub mod script_font;
+pub mod sharp;
 pub mod snapshot;
 pub mod spell_badges;
 pub mod spellbook;
