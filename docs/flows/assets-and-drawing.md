@@ -142,6 +142,24 @@ install file ──► src/dt/gfx.rs decode_file ──► gfx::Image (RGBA, not
   card, 262 px panel), each text by its cell's top as the original does (`dt_font::cell_baseline`
   turns that into Razdor's baseline), with the sheet scale snapped by `dt_font::whole_scale`.
 
+- **Sharp pixels** (`src/ui/sharp.rs`): DT art is sampled "sharp bilinear", so each original
+  pixel is a crisp square of one size at any scale. `sharp::draw` is the drop-in for
+  `draw_texture_ex` (the same placement and parameters); `sharp::fragment` builds a shader
+  with `sharp_uv` (GLSL ES 1.00, highp uv, the `TexSize` and `Scale` uniforms, `sharp_tex`
+  to sample), and `sharp::material` loads it. A blend (`with_material`) keeps its own
+  material and its art draws sharp inside it (`sharp::in_blend`); the world's painter pass
+  keeps one material set for all its art (`sharp::session`), and its uniforms are set only
+  when they change, because macroquad breaks its batch at every material switch and every
+  uniform set. Textures stay `FilterMode::Linear` (the step needs the hardware bilinear
+  inside its band). Stays smooth on purpose: the minimap and the fog, `Nearest` textures
+  (window lines, custom PNGs, event pictures), the editor, the hub's catalog pictures and
+  the TrueType fonts. The bitmap font draws its non-whole-scale sheet sharp (`dt_font`); a
+  whole-number scale keeps the Nearest sheet. The terrain shader and the water frame sample
+  sharp too (`terrain.rs`, its screen scales set in `TerrainLayer::draw`). Shaders that do
+  texel math use highp (a Global Constraint: the credits scroll's 455×2840 texture breaks
+  under mediump). A device whose fragment stage lacks highp fails to compile the sharp
+  material: `sharp::draw` then draws plain, once logged with `diag!`.
+
 ## Window frames and lines
 
 Every outline the original draws round a window or panel is one routine (0x48d1d4) with the
