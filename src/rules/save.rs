@@ -1210,6 +1210,24 @@ pub(crate) mod tests {
         assert!(loaded.squad.iter().all(|u| !u.battle_disabled && u.potions_drunk == 0));
     }
 
+    /// The run's mark is saved with the run (1532): a save and its load keep it, and a load keeps
+    /// the worse of what the run used and what the save says (`Game::keep_run_mark`).
+    #[test]
+    fn the_run_mark_survives_a_save_and_a_load() {
+        use crate::rules::marks::{Level, Reason, RunMark};
+        let c = demo();
+        let mut g = Game::new(c.clone(), HeroClass::Knight);
+        g.note_settings(Some("Route around armies"));
+        g.note_cheat("god");
+        let loaded = roundtrip(&g, c.clone(), None);
+        assert_eq!(loaded.run_mark(), RunMark { level: Level::Red, reason: Reason::Cheat("god".into()) });
+        let mut grey = Game::new(c.clone(), HeroClass::Knight);
+        grey.note_settings(Some("Route around armies"));
+        let mut back = roundtrip(&grey, c, None);
+        back.note_settings(None);
+        assert_eq!(back.run_mark().level, Level::Grey, "a setting changed back is still counted after a load");
+    }
+
     /// Format 11 stored four item cells per unit: they load with two empty cells added, and a
     /// unit with six cells (the multiple rings or amulets rule) roundtrips whole.
     #[test]

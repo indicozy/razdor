@@ -102,6 +102,33 @@ pub const COMMANDS: [(&str, &str); 19] = [
     ("routes", n_("on / off: the minimap shows the enemy armies' routes and where they head")),
 ];
 
+impl Cheat {
+    /// The command's word as the player types it: the run's mark names the cheat by it.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Cheat::Help => "help",
+            Cheat::Gold(_) => "gold",
+            Cheat::Mana(_) => "mana",
+            Cheat::Reveal => "reveal",
+            Cheat::Heal => "heal",
+            Cheat::Xp(_) => "xp",
+            Cheat::Level(_) => "level",
+            Cheat::Item(_) => "item",
+            Cheat::Spell(_) => "spell",
+            Cheat::Unit(..) => "unit",
+            Cheat::Time(_) => "time",
+            Cheat::Event(_) => "event",
+            Cheat::Win => "win",
+            Cheat::Lose => "lose",
+            Cheat::God => "god",
+            Cheat::Speed(_) => "speed",
+            Cheat::Noclip => "noclip",
+            Cheat::Peace => "peace",
+            Cheat::Routes => "routes",
+        }
+    }
+}
+
 /// Why a line is not a command.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ParseError {
@@ -354,12 +381,12 @@ pub fn run(cheat: &Cheat, game: Option<&mut Game>, battle: Option<&mut Battle>) 
         (Cheat::Win | Cheat::Lose, Some(b)) if b.outcome() != Outcome::Ongoing => return Err(tr("The battle is over.").into()),
         (Cheat::Win, Some(b)) => {
             b.force_end(Team::Player);
-            mark(game);
+            mark(game, cheat);
             return Ok(Done::line(tr("The enemy falls: the battle is won.").into()));
         }
         (Cheat::Lose, Some(b)) => {
             b.force_end(Team::Enemy);
-            mark(game);
+            mark(game, cheat);
             return Ok(Done::line(tr("Your army falls: the battle is lost.").into()));
         }
         (Cheat::God, b) => {
@@ -367,6 +394,7 @@ pub fn run(cheat: &Cheat, game: Option<&mut Game>, battle: Option<&mut Battle>) 
                 Some(g) => {
                     g.cheats.god = !g.cheats.god;
                     g.cheats.used = true;
+                    g.note_cheat(cheat.name());
                     g.cheats.god
                 }
                 None => !b.as_ref().is_some_and(|b| b.god),
@@ -384,12 +412,15 @@ pub fn run(cheat: &Cheat, game: Option<&mut Game>, battle: Option<&mut Battle>) 
     }
     let done = run_on_game(cheat, game)?;
     game.cheats.used = true;
+    game.note_cheat(cheat.name());
     Ok(done)
 }
 
-fn mark(game: Option<&mut Game>) {
+/// Marks the game as having had cheat `cheat` used (the console's `win` or `lose` in battle).
+fn mark(game: Option<&mut Game>, cheat: &Cheat) {
     if let Some(g) = game {
         g.cheats.used = true;
+        g.note_cheat(cheat.name());
     }
 }
 
@@ -609,6 +640,23 @@ mod tests {
         assert_eq!(parse("unit bandit 0"), Err(ParseError::Usage("unit <id | name> [level]")));
         assert_eq!(parse("win now"), Err(ParseError::Usage("win")));
         assert!(parse("money").unwrap_err().to_string().contains("money"));
+    }
+
+    #[test]
+    fn a_cheat_that_works_sets_the_run_red_for_its_first_command() {
+        use crate::rules::marks::{Level, Reason, RunMark};
+        let mut g = game();
+        assert_eq!(g.run_mark(), RunMark::start());
+        cheat(&mut g, "help").unwrap();
+        assert!(cheat(&mut g, "gold nope").is_err());
+        assert_eq!(g.run_mark(), RunMark::start(), "help and a refused line are no cheat");
+        cheat(&mut g, "gold 5").unwrap();
+        assert_eq!(g.run_mark(), RunMark { level: Level::Red, reason: Reason::Cheat("gold".into()) });
+        cheat(&mut g, "god").unwrap();
+        assert_eq!(g.run_mark().reason, Reason::Cheat("gold".into()), "the first cheat names the mark");
+        let mut god = game();
+        cheat(&mut god, "god").unwrap();
+        assert_eq!(god.run_mark(), RunMark { level: Level::Red, reason: Reason::Cheat("god".into()) });
     }
 
     #[test]

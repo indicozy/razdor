@@ -595,6 +595,11 @@ pub struct Game {
     /// The cheat console's marks and switches (`rules::cheats`); none in older saves.
     #[serde(default)]
     pub cheats: super::cheats::CheatState,
+    /// The run's mark (`rules::marks`): the worst it has used, sticky and saved with the run.
+    /// None in a save from before the mark: its history is unknown, so it reads grey at most
+    /// ([`Game::run_mark`]).
+    #[serde(default)]
+    pub run_mark: Option<super::marks::RunMark>,
 }
 
 /// What an AI army's step needs of the hero: the cells it may not enter (his logical cell
@@ -680,6 +685,43 @@ enum StepContact {
 }
 
 impl Game {
+    /// The run's mark now (see [`Game::run_mark`]'s field): the worst it has reached.
+    pub fn run_mark(&self) -> super::marks::RunMark {
+        self.run_mark.clone().unwrap_or_else(super::marks::RunMark::unknown_history)
+    }
+
+    /// A cheat worked in this run: red, for the command's name (`rules::cheats`).
+    pub fn note_cheat(&mut self, command: &str) {
+        self.run_mark.get_or_insert_with(super::marks::RunMark::unknown_history).worsen(super::marks::Level::Red, super::marks::Reason::Cheat(command.to_string()));
+    }
+
+    /// Brings the run's mark up to what the run uses now, as the interface reads the settings
+    /// every frame and on every load: a cheat used (red), an experimental rule on (yellow: the
+    /// playthrough's rules, fixed for it), and the gameplay setting that differs from the
+    /// original (`gameplay`, from `ui::audio::Settings::gameplay_differs_from_original`; grey).
+    /// It only rises: a setting that was non-original stays counted for the rest of the run.
+    pub fn note_settings(&mut self, gameplay: Option<&str>) {
+        use super::marks::{Level, Reason};
+        let mark = self.run_mark.get_or_insert_with(super::marks::RunMark::unknown_history);
+        if self.cheats.used {
+            mark.worsen(Level::Red, Reason::Cheat(String::new()));
+        }
+        if let Some(rule) = self.experimental.first_on() {
+            mark.worsen(Level::Yellow, Reason::Rule(rule.to_string()));
+        }
+        if let Some(setting) = gameplay {
+            mark.worsen(Level::Grey, Reason::Setting(setting.to_string()));
+        }
+    }
+
+    /// The run's mark is at least the earlier one of the same run (a load of a save made earlier
+    /// in it, or a battle's restart): what the run has used is not cleared by going back.
+    pub fn keep_run_mark(&mut self, earlier: Option<&super::marks::RunMark>) {
+        if let Some(earlier) = earlier {
+            self.run_mark.get_or_insert_with(super::marks::RunMark::unknown_history).absorb(earlier);
+        }
+    }
+
     fn with_world(content: Arc<Content>, world: World, squad: Vec<Unit>, tile: Tile) -> Game {
         let clock = world.start;
         let wide_row = content.formation == super::formation::Formation::WIDE;
@@ -785,6 +827,7 @@ impl Game {
             clashes: Vec::new(),
             sims: Default::default(),
             cheats: Default::default(),
+            run_mark: Some(super::marks::RunMark::start()),
         };
         // The hero draws no wage; everyone counts as paid at the start.
         let now = clock.total_minutes() as u64;

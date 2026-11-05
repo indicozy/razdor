@@ -16,6 +16,7 @@ pub mod idle;
 pub mod item_text;
 pub mod items;
 pub mod journal;
+pub mod marks;
 pub mod magic;
 pub mod map;
 pub mod map_refs;

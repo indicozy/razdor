@@ -143,6 +143,24 @@ pub struct ExperimentalRules {
 
 impl ExperimentalRules {
     pub fn for_new_game() -> Self { Self::default() }
+
+    /// The first rule that is on, by its catalog name (the one the scenario list's yellow mark
+    /// gives as its reason, `rules::marks`); `None` with the classic rules.
+    pub fn first_on(&self) -> Option<&'static str> {
+        [
+            (self.simultaneous_bonuses, crate::i18n::n_("All special bonuses simultaneously")),
+            (self.unlimited_items, crate::i18n::n_("No item limits")),
+            (self.two_potions, crate::i18n::n_("At most two potions per character")),
+            (self.six_cells, crate::i18n::n_("Six equipment cells")),
+            (self.free_units, crate::i18n::n_("Free units")),
+            (self.auto_promotion, crate::i18n::n_("Automatic promotion")),
+            (self.undying_units, crate::i18n::n_("Units don't die")),
+            (self.fast_ai, crate::i18n::n_("Faster AI")),
+        ]
+        .into_iter()
+        .find(|(on, _)| *on)
+        .map(|(_, name)| name)
+    }
 }
 
 /// The save's form of [`ExperimentalRules`]. Written: the current fields only. Read: also the
