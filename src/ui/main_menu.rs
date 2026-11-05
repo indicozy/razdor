@@ -1140,7 +1140,24 @@ fn slider(r: Rect, value: f32) -> Option<f32> {
 /// The battle AI's level: the player's choice, else the install's "improved enemy AI in
 /// battle" (`[Options] OptValue9`), else easy.
 pub fn expert_ai(audio: &super::audio::Settings) -> bool {
-    audio.expert_ai.unwrap_or_else(|| chrome::ui_text("Options", "OptValue9").is_some_and(|v| razdor::dt::ini::loose_int(&v) == 1))
+    audio.expert_ai.unwrap_or_else(install_expert_ai)
+}
+
+/// The install's improved enemy AI in battle (`OptValue9`).
+fn install_expert_ai() -> bool {
+    chrome::ui_text("Options", "OptValue9").is_some_and(|v| razdor::dt::ini::loose_int(&v) == 1)
+}
+
+/// The original's own values: the install's `[Options]`, never the player's choices. They are
+/// what a gameplay setting is compared with for the run's mark
+/// (`audio::Settings::gameplay_differs_from_original`).
+pub fn install_originals() -> super::audio::Originals {
+    super::audio::Originals {
+        improved_ai: install_expert_ai(),
+        wide_row: chrome::install_option("OptValue11").is_none_or(|v| razdor::dt::ini::loose_int(&v) == 1),
+        impossible: install_on("OptValue10", false),
+        pursue: install_on("OptValue7", true),
+    }
 }
 
 /// Razdor's «Сила ИИ в бою» (the owner's request): the original's AI, its improved level
@@ -1196,6 +1213,9 @@ pub fn follow_settings(audio: &super::audio::Settings, g: &mut razdor::rules::ga
     g.battle_marks = audio.battle_marks;
     g.army_list = audio.army_list;
     g.leader_caption = audio.leader_caption;
+    // The run's mark follows what it uses now: a gameplay setting that is not the original's
+    // (`Game::note_settings`; the rules and the cheats are read from the game itself).
+    g.note_settings(audio.gameplay_differs_from_original(&install_originals()));
 }
 
 /// The improved AI's checkbox clicked: on gives the improved level, off the original's (and

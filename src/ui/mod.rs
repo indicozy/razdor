@@ -611,6 +611,12 @@ impl App {
         }
     }
 
+    /// The mark of the game on screen when it plays the same map as `next` (its run may go on
+    /// in `next`): a load or a battle's restart keeps the worse of the two (`Game::keep_run_mark`).
+    fn run_mark_of_same_map(&self, next: &Game) -> Option<razdor::rules::marks::RunMark> {
+        self.game.as_ref().filter(|old| old.origin == next.origin).map(Game::run_mark)
+    }
+
     /// Loads save file `path`: the demo from the built-in data, a map from the install (the
     /// same map file only). A pending battle starts again; a pending question is asked again.
     /// The battle under way played again from the game as it began (`BattleView::restart_state`).
@@ -619,6 +625,8 @@ impl App {
         let restored = save::decode(bytes).and_then(|(_, game)| save::restore(meta, game, self.demo.clone(), install.as_ref()));
         match restored {
             Ok(mut game) => {
+                // A battle's restart is the same run: it keeps what the run has used (1532).
+                game.keep_run_mark(self.run_mark_of_same_map(&game).as_ref());
                 main_menu::follow_settings(&self.audio.settings, &mut game);
                 self.dialogs.clear();
                 self.message = None;
@@ -633,6 +641,8 @@ impl App {
         let install = self.assets.dt.as_ref().zip(self.dt_content.clone()).map(|(d, content)| Install { dir: &d.install.dir, content });
         match save::load(path, self.demo.clone(), install.as_ref()) {
             Ok(mut game) => {
+                // Loading a save made earlier in the same run does not clear what the run has used (1532).
+                game.keep_run_mark(self.run_mark_of_same_map(&game).as_ref());
                 main_menu::follow_settings(&self.audio.settings, &mut game);
                 self.dialogs.clear();
                 self.message = None;
@@ -1652,6 +1662,10 @@ impl App {
                     // The scenario list marks the map as won under the mod played (Razdor's, kept in the settings).
                     if let Some(razdor::rules::save::ScenarioRef::Map { file, .. }) = self.game.as_ref().and_then(|g| g.origin.as_ref()).filter(|_| !self.test_play) {
                         language::mark_completed(self.active_mod.as_deref(), file);
+                        // The map's best mark ever, with the run's mark as it is now (Razdor's, 1532).
+                        if let Some(game) = self.game.as_ref() {
+                            razdor::rules::marks::record_victory(file, &game.run_mark());
+                        }
                     }
                     let handed = (!self.test_play).then(|| screens::hand_over(&self.game, &self.scenarios, self.dt_content.clone())).flatten();
                     match handed {

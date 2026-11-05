@@ -432,6 +432,7 @@ Elemental magic power = Сила магии стихий
 Immunity to magic = Иммунитет к магии
 {name} wears {n} item(s): they will be lost with it. Take them off first to keep them. = У «{name}» надето предметов: {n}, они пропадут вместе с ним. Чтобы сохранить, сначала снимите их.
 Experience on promotion = Опыт при повышении
+Experience on promotion: kept = Опыт при повышении: сохраняется
 Reset (original) = Сбрасывается (оригинал)
 Kept (Razdor) = Сохраняется (Раздор)
 As in the original, a unit's experience is dropped when it is promoted; Kept keeps it. Experience left over after a level is kept either way. = Как в оригинале, опыт юнита сбрасывается при повышении; «Сохраняется» оставляет его. Опыт, оставшийся после уровня, сохраняется в любом случае.
