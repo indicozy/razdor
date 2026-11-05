@@ -617,12 +617,14 @@ impl EventWorld for Game {
         }
     }
 
-    /// The unit leaves the army. The original's removal (0x496310) deletes the unit's record:
-    /// a unit sent to an army that exists goes with the whole record, worn items included, and
-    /// the items never touch the pack (the original's behaviour). A unit that just leaves
-    /// (`to_army` None, or an army that does not exist) loses its worn items with the record
-    /// in the original; Razdor deviates here (the owner's choice): its worn items other than
-    /// its personal ones go to the pack, the personal ones leave with it.
+    /// The unit leaves the army. The original's removal (0x496310) deletes the unit's record
+    /// (the records below it shift up over it, 0x1db bytes each, worn items at +0xcd), and the
+    /// units-removed loop of 0x4a8e66 and 0x4a8fe5 (slots 105–108) writes nothing to the pack
+    /// when no army is given (byte 136 = 0). So a unit sent to an army that exists goes with
+    /// the whole record, worn items included. A unit that just leaves (`to_army` None, or an
+    /// army that does not exist) takes its worn items, personal ones too, with the record: they
+    /// are gone, and the unit cannot come back wearing them (no record is kept). This was a
+    /// Razdor deviation (1492, the owner's 2026-11-03 choice), cancelled by the owner (1531).
     /// Sent to an army, the record is appended, over the last one of a full army; when the
     /// slot names a character (`lead`), it becomes the army's leader instead, the others
     /// moving down (the last of a full army is lost). The original decides by the slot's
@@ -631,18 +633,9 @@ impl EventWorld for Game {
         if index == 0 || index >= self.squad.len() {
             return;
         }
-        let mut u = self.squad.remove(index);
-        // Decided before any item moves: a `to_army` that is not there counts as no army.
+        let u = self.squad.remove(index);
+        // A `to_army` that is not there counts as no army: the unit and its items are dropped.
         let to_army = to_army.filter(|&a| self.army_mut(a).is_some());
-        // Razdor's deviation (the owner's choice): with no army to go to, the worn items that
-        // are not personal go to the pack; the original (0x496310) lets them go with the record.
-        if to_army.is_none() {
-            for i in u.personal as usize..u.items.len() {
-                if let Some(item) = u.items[i].take() {
-                    self.pack.add(item);
-                }
-            }
-        }
         let c = self.content.clone();
         let now = self.clock.total_minutes() as u64;
         if let Some(a) = to_army.and_then(|a| self.army_mut(a)) {
@@ -1753,12 +1746,12 @@ mod tests {
         assert!(units.iter().any(|u| u[0].named == 1), "the character is with the faction's army: {units:?}");
     }
 
-    /// A unit removed with no army to go to: Razdor deviates (the owner's choice), its worn
-    /// items other than its personal ones go to the pack (the original loses them with the
-    /// record, 0x496310). Given to an army, it keeps its whole record and leads that army when
-    /// the slot names a character, even an unnamed unit (type 255 under a named slot).
+    /// A unit removed with no army to go to loses its worn items with its record: the pack
+    /// gains none (0x496310; the units-removed loop of 0x4a8e66 and 0x4a8fe5 has no pack write
+    /// when no army is given). Given to an army, it keeps its whole record and leads that army
+    /// when the slot names a character, even an unnamed unit (type 255 under a named slot).
     #[test]
-    fn a_removed_unit_leaves_its_worn_items_in_the_pack_and_leads_by_the_slot_name() {
+    fn a_removed_unit_with_no_army_takes_its_worn_items_with_it_and_leads_by_the_slot_name() {
         let mut s = world(vec![]);
         s.armies = vec![army(2, 12, 10, 1, &[troop(4, 0, 1)])];
         let mut g = start(&s);
@@ -1767,8 +1760,8 @@ mod tests {
         g.squad[1].items[1] = Some(ItemId(8));
         g.squad[1].personal = 0;
         EventWorld::remove_unit(&mut g, 1, false, None);
-        assert!(g.pack.contains(ItemId(7)) && g.pack.contains(ItemId(8)), "the worn items went to the pack (Razdor's deviation)");
-        assert_eq!(g.pack.count(), 2);
+        assert_eq!(g.pack.count(), 0, "the worn items leave with the record; the pack gains none (0x496310)");
+        assert!(!g.pack.contains(ItemId(7)) && !g.pack.contains(ItemId(8)));
         let c = g.content.clone();
         let taken: Vec<_> = g.squad.iter().map(|u| u.slot).collect();
         let mut u = Unit::new(&c, UnitId(5), c.formation.new_unit_slot(&taken).unwrap());
@@ -1794,10 +1787,10 @@ mod tests {
     }
 
     /// A unit sent to an army that exists keeps its worn items with its record (0x496310); one
-    /// that just leaves gives them to the pack (Razdor's deviation, the owner's choice). A
-    /// `to_army` that is not there counts as no army.
+    /// that just leaves takes them with it (no pack write, as the original). A `to_army` that is
+    /// not there counts as no army.
     #[test]
-    fn a_unit_sent_to_an_army_keeps_its_worn_items_and_one_that_leaves_gives_them_to_the_pack() {
+    fn a_unit_sent_to_an_army_keeps_its_worn_items_and_one_that_leaves_takes_them_with_it() {
         let mut s = world(vec![]);
         s.armies = vec![army(2, 12, 10, 1, &[troop(4, 0, 1)])];
         let mut g = start(&s);
@@ -1821,11 +1814,37 @@ mod tests {
 
         let left = add(&mut g, 8);
         EventWorld::remove_unit(&mut g, left, false, None);
-        assert!(g.pack.contains(ItemId(8)), "with no army to go to, the item goes to the pack");
+        assert!(!g.pack.contains(ItemId(8)), "with no army to go to, the item leaves with its record (0x496310)");
 
         let gone = add(&mut g, 9);
         EventWorld::remove_unit(&mut g, gone, false, Some(77));
-        assert!(g.pack.contains(ItemId(9)), "an army that does not exist counts as no army");
+        assert!(!g.pack.contains(ItemId(9)), "an army that does not exist counts as no army");
+    }
+
+    /// A named unit that leaves with no army is gone with its worn items: the original keeps no
+    /// record of it (0x496310 deletes it), so a unit added back later by an event (0x4a8fe5, a
+    /// fresh unit, wage kind 3) comes back bare, and the pack never gained the items.
+    #[test]
+    fn a_named_unit_that_leaves_with_no_army_does_not_come_back_wearing_its_items() {
+        let mut s = world(vec![]);
+        s.armies = vec![army(2, 12, 10, 1, &[troop(4, 0, 1)])];
+        let mut g = start(&s);
+        read(&mut g);
+        let c = g.content.clone();
+        let taken: Vec<_> = g.squad.iter().map(|u| u.slot).collect();
+        let mut u = Unit::new(&c, UnitId(5), c.formation.new_unit_slot(&taken).unwrap());
+        u.named = 1;
+        u.items[0] = Some(ItemId(7));
+        g.squad.push(u);
+        let last = g.squad.len() - 1;
+        EventWorld::remove_unit(&mut g, last, false, None);
+        assert_eq!(g.pack.count(), 0, "the sword is not in the pack");
+
+        EventWorld::add_unit(&mut g, 5, 1, None);
+        let back = g.squad.last().unwrap();
+        assert_eq!((back.def, back.named), (UnitId(5), 1), "the character is added back");
+        assert!(back.items.iter().all(|w| w.is_none()), "with no record, it wears nothing: {:?}", back.items);
+        assert_eq!(g.pack.count(), 0);
     }
 
     /// A full army (0x4a8fe5): the unit with the lowest level value after the hero is

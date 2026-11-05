@@ -23,7 +23,6 @@ Razdor plays the original game's scenarios using its original rules. Below is wh
 ## Convenience
 
 * **Armies:** reorder warriors by dragging; pursue a selected army until an encounter occurs; the path is shown on click, and a second click sends the hero on the journey.
-* **Warriors leaving the army:** if a warrior simply leaves the army, their items (except personal ones) are added to the hero's backpack. If a map event transfers a warrior to another army, they leave with their items, as in the original.
 * **Clicking on the map** while walking stops the hero; **waiting** can be interrupted by a click or a keypress.
 * **Hero Speed:** the "Hero Movement Speed" slider goes up to 2× faster than the fastest speed in the original (the middle of the slider is the original maximum).
 * **Hero Log:** four tabs — "Quests", "Completed", "Rumors", "Messages", with entries marked by in-game date.
