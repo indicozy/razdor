@@ -82,15 +82,10 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   not located yet. If a shipped map uses 202, draw the leader's portrait and add the id to the editor's list.
 
 - **Event scan: the idle-reset placement** (2026-11-05, the Hristos editor-guide analysis,
-  docs/reference/editor-guide.md, gap G7; evidence added 2026-11-06, still open). The idle reset of *last fired*
-  (0x4ac369, in the scan's exit at 0x4abfbc) runs at the end of every scan call, nested ones included: the chain
-  tail calls the scan again (0x4abea0) when a finish has no chain, shown army, spell or delay, and the scan's
-  direct-finish loop (on 0x674966) goes on checking candidates after that. Razdor resets once, at the end of the
-  outer `run` (`src/rules/events.rs`, the idle block). So in the exe an event with a duration, fired earlier in the
-  tick, may fire again in that loop, and Razdor does not. Not changed: whether the loop re-fires it and when it
-  stops (the nested checks rewrite 0x674966) is not settled from the code read so far, and a wrong match could
-  loop. Settles by a closer read of 0x4abfbc's loop, or by a difftest on the original (not run: the owner's
-  Wine rule). The S10 variant (`docs/reference/editor-guide.md`, regression scenarios) depends on it.
+  docs/reference/editor-guide.md, gap G7). The idle reset (`src/rules/events.rs:1297-1308`) runs at
+  the end of `run`; the exe resets in each idle pass, including the nested passes of chain tails
+  (0x4abfbc tail, 0x4ab51b tail), so it can reset events fired earlier in the same tick. Low risk.
+  Settled by the S10 variant (a window-opening chain inside a procedure) and the exe's tail order.
 - **Managed armies skip the revival on activation** (2026-11-05, the Hristos editor-guide analysis,
   docs/reference/editor-guide.md, gap G8). `src/rules/script.rs:340-343` returns an army that
   `ai::managed` rejects (`src/rules/ai.rs:423-425`, which is `a.ai.enabled`) before the revival, the
