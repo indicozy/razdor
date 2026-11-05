@@ -318,17 +318,26 @@ fn part_path(program: &Path, asset: &str) -> PathBuf {
     program.with_file_name(format!(".{asset}.update"))
 }
 
-/// `curl` with its window hidden on Windows (Razdor has no console there).
+/// `curl` with its window hidden on Windows (Razdor has no console there). It does not fail on an
+/// HTTP error status by itself (see [`curl`]).
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn curl() -> Command {
+fn curl_base() -> Command {
     let mut c = Command::new("curl");
-    c.args(["-fsSL", "--proto", "=https", "-A", concat!("razdor/", env!("CARGO_PKG_VERSION"))]);
+    c.args(["-sSL", "--proto", "=https", "-A", concat!("razdor/", env!("CARGO_PKG_VERSION"))]);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         c.creation_flags(CREATE_NO_WINDOW);
     }
+    c
+}
+
+/// `curl` that fails on an HTTP error status (its body is then not written).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn curl() -> Command {
+    let mut c = curl_base();
+    c.arg("-f");
     c
 }
 
@@ -501,6 +510,73 @@ pub(crate) fn download_to(url: &str, path: &Path, seconds: u32, max_bytes: u64) 
     }
     let why = String::from_utf8_lossy(&out.stderr).trim().to_string();
     Err(if why.is_empty() { format!("curl: {}", out.status) } else { why })
+}
+
+/// Downloads `url` into `path` for the game's download (`gdrive`), from byte `from` on (`from` > 0
+/// continues a partial file with a Range request; the phones cannot, so they only take 0).
+/// `progress` gets the file's size so far, and `cancelled` is asked every fraction of a second;
+/// true stops the transfer at once (an error, the file kept). Returns the HTTP status (the body is
+/// written whatever it is: the caller checks it). Desktop: `curl` is watched. The phones take the
+/// system downloader's file, which cannot be stopped in the middle (checked before and after it),
+/// and report a failed status as `HTTP <code>`.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub(crate) fn download_watched(url: &str, path: &Path, from: u64, seconds: u32, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool) -> Result<u16, String> {
+    use std::io::Read;
+    let mut cmd = curl_base();
+    cmd.args(["--retry", "2", "--max-time", &seconds.to_string(), "-w", "%{http_code}", "-o"]).arg(path);
+    if from > 0 {
+        cmd.args(["-C", &from.to_string()]);
+    }
+    let mut child = cmd
+        .arg(url)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("curl: {e}"))?;
+    loop {
+        if let Ok(Some(status)) = child.try_wait() {
+            progress(std::fs::metadata(path).map(|m| m.len()).unwrap_or(0));
+            let mut out = String::new();
+            let mut err = String::new();
+            if let Some(mut o) = child.stdout.take() {
+                let _ = o.read_to_string(&mut out);
+            }
+            if let Some(mut e) = child.stderr.take() {
+                let _ = e.read_to_string(&mut err);
+            }
+            if !status.success() {
+                let why = err.trim();
+                return Err(if why.is_empty() { format!("curl: {status}") } else { why.to_string() });
+            }
+            return Ok(out.trim().parse().unwrap_or(0));
+        }
+        if cancelled() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("cancelled".into());
+        }
+        progress(std::fs::metadata(path).map(|m| m.len()).unwrap_or(0));
+        std::thread::sleep(std::time::Duration::from_millis(150));
+    }
+}
+
+/// See the desktop's `download_watched`: the system downloader, checked before and after.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub(crate) fn download_watched(url: &str, path: &Path, from: u64, seconds: u32, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool) -> Result<u16, String> {
+    if from > 0 {
+        return Err("the phone's downloader cannot continue a file".into());
+    }
+    if cancelled() {
+        return Err("cancelled".into());
+    }
+    if let Err(e) = download_to(url, path, seconds, u64::MAX) {
+        return match e.strip_prefix("HTTP ").and_then(|code| code.trim().parse().ok()) {
+            Some(code) => Ok(code),
+            None => Err(e),
+        };
+    }
+    progress(std::fs::metadata(path).map(|m| m.len()).unwrap_or(0));
+    Ok(200)
 }
 
 /// Downloads `url` into the file `path` through the system's downloader (Android).

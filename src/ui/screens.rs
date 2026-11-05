@@ -21,7 +21,9 @@ use super::audio::{cue, Cue};
 use super::mobile;
 use super::text_edit::TextEdit;
 use super::widgets::*;
+use super::game_import;
 use super::{ScenarioEntry, Screen};
+use razdor::gdrive;
 
 /// Longest hero name the class screen takes.
 const NAME_MAX: usize = 24;
@@ -227,8 +229,10 @@ fn ios_not_found(x: f32, w: f32) {
 /// On the main menu while no install is found, on every platform: the not-found block in the
 /// column left of the menu's buttons (the left half of the screen, in landscape and portrait),
 /// over a dark panel. It says that Razdor plays the player's own copy of the game, gives the
-/// steps to put it in place, and offers «How to install» (the install guide on the website) and
-/// «Where to get the game» (the Discord). The phones also have their access button or «Check
+/// steps to put it in place: a short numbered tutorial (download the game archive from the
+/// community's Google Drive folder, then import it with the platform's importer button, which is
+/// on the block too), and «How to install» (the install guide on the website) and «Help on Discord»
+/// (the players' server, a secondary link). The phones also have their access button or «Check
 /// again» (their steps' texts). The buttons stack; the two links share a row when the stack does
 /// not fit the screen's height. The scale is the interface's (`chrome::k`, which fits the width
 /// and the height), so the column is not scaled by the height alone.
@@ -246,14 +250,14 @@ pub fn menu_not_found(no_install: bool) {
     let gap = 12.0 * k;
     let (title_size, body_size, lead) = (20.0 * k, 16.0 * k, 22.0 * k);
     let mut body = vec![tr("Razdor plays your own copy of Discord Times: version 1.8 with Community Update 1.2.").to_string()];
-    body.extend(not_found_steps());
+    body.extend(download_lines());
     body.extend(unpack_lines());
     body.extend(install_problem());
     let body_lines: Vec<String> = body.iter().flat_map(|s| wrap(s, w, body_size)).flat_map(|l| break_wide(&l, w, body_size)).collect();
     let text_h = title_size + 10.0 * k + body_lines.len() as f32 * lead;
-    // The rows of buttons, from the top: the platform's own, then the two links.
-    let (how, there) = ((tr("How to install"), open_guide as fn()), (tr("Where to get the game"), open_discord as fn()));
-    let mut rows = not_found_rows();
+    // The rows of buttons, from the top: the tutorial's (the download, the importer), then the two links.
+    let (how, there) = ((tr("How to install"), open_guide as fn()), (tr("Help on Discord"), open_discord as fn()));
+    let mut rows = not_found_rows(manual_block(game_import::download_failure().as_deref(), game_import::download_available()));
     let stack_height = |n: usize| n as f32 * btn_h + (n as f32 - 1.0) * gap;
     let stacked = stack_height(rows.len() + 2);
     if bottom - stacked - 18.0 * k - text_h - 10.0 * k >= 16.0 * k {
@@ -312,26 +316,51 @@ fn button_height(sh: f32, k: f32) -> f32 {
     if cfg!(any(target_os = "android", target_os = "ios")) { (sh * 0.12).max(34.0 * k) } else { 40.0 * k }
 }
 
-/// The steps that put the game in place, as the menu's not-found block gives them.
-fn not_found_steps() -> Vec<String> {
+/// Whether the block shows the manual path: the automatic download failed (its one-line error
+/// comes first), or the platform has no download (iPhone). Pure, for the tests.
+fn manual_block(failure: Option<&str>, available: bool) -> bool {
+    failure.is_some() || !available
+}
+
+/// The block's download lines: the community's source when the download is offered, else (the
+/// manual path) the error, the folder's link as text and the steps by hand.
+fn download_lines() -> Vec<String> {
+    let failure = game_import::download_failure();
+    if !manual_block(failure.as_deref(), game_import::download_available()) {
+        return vec![tr("The game is downloaded from the community's Google Drive: the «ИГРУ КАЧАТЬ ЗДЕСЬ» thread of the Discord server.").to_string()];
+    }
+    let mut lines: Vec<String> = failure.into_iter().collect();
+    lines.push(tr("Download it by hand:").to_string());
+    lines.push(trf!("The file: {link}", link = gdrive::file_page(&gdrive::GAME)));
+    lines.extend(manual_steps());
+    lines
+}
+
+/// The steps by hand: the one .zip file (not unpacked: Razdor reads it). The step 3 names the
+/// platform's way to hand it over: the picker («Pick the game archive…»), or on the phones the
+/// unpacking of the archive found in the Download folder or the Files app.
+fn manual_steps() -> Vec<String> {
     #[cfg(target_os = "android")]
-    let steps = vec![
-        tr("1. Give Razdor access to all files: the «Grant access» button, or Settings > Apps > Special app access > All files access > Razdor.").to_string(),
-        tr("2. Put the game folder in internal storage, in a folder named DiscordTimes (or in Download).").to_string(),
-        tr("Or download the game archive from the Discord (the «Where to get the game» button) into Download and press «Unpack the game archive».").to_string(),
+    return vec![
+        tr("1. Open the link («Open the link» button) and download the file: one .zip, saved to Download.").to_string(),
+        tr("2. Do not unpack it: Razdor reads the .zip itself.").to_string(),
+        tr("3. Press «Unpack the game archive» (Razdor finds the .zip in Download), or «Pick the game archive…» and choose it.").to_string(),
+        tr("4. The game is in place when the main menu opens without «Discord Times not found».").to_string(),
     ];
     #[cfg(target_os = "ios")]
-    let steps = vec![
-        tr("1. Copy the game folder to the Files app: On My iPhone (or iPad) > Razdor, in a folder named DiscordTimes.").to_string(),
-        tr("2. From a computer: Finder (or iTunes) > the device > Files > Razdor.").to_string(),
-        tr("Or save the game archive from the Discord into the Files app: On iPhone > Razdor, and press «Unpack the game archive».").to_string(),
+    return vec![
+        tr("1. Open the link («Open the link» button) and download the file: one .zip.").to_string(),
+        tr("2. Do not unpack it: Razdor reads the .zip itself.").to_string(),
+        tr("3. Save the .zip in the Files app: On iPhone > Razdor, and press «Unpack the game archive».").to_string(),
+        tr("4. The game is in place when the main menu opens without «Discord Times not found».").to_string(),
     ];
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    let steps = vec![
-        tr("Put Razdor into the game folder, next to DiscordTimes.exe.").to_string(),
-        tr("Or download the game archive from the Discord (the «Where to get the game» button) into Downloads and press «Unpack the game archive».").to_string(),
+    return vec![
+        tr("1. Open the link («Open the link» button) and download the file: one .zip.").to_string(),
+        tr("2. Do not unpack it: Razdor reads the .zip itself.").to_string(),
+        tr("3. Press «Pick the game archive…» and choose the .zip.").to_string(),
+        tr("4. The game is in place when the main menu opens without «Discord Times not found».").to_string(),
     ];
-    steps
 }
 
 /// The game archives found, and the unpacking's progress or error, as the block's lines.
@@ -352,19 +381,42 @@ fn unpack_lines() -> Vec<String> {
     lines
 }
 
-/// The buttons of the menu's not-found block above the two links: the platform's own (the phones'
-/// access button), «Unpack the game archive» when a game archive was found, and the phones'
-/// «Check again».
-fn not_found_rows() -> Vec<Vec<NotFoundButton>> {
+/// The buttons of the menu's not-found block above the two links: the phones' access button, the
+/// download («Скачать игру», the retry too; the first option), the picker of a game archive
+/// («Pick the game archive…»: the desktop's dialog, Android's document picker; a secondary option
+/// below the download, in the failure state too), on the manual path the link's two buttons, the
+/// phones' unpacking of an archive found in their folders (offered once one is found there) and
+/// the phones' «Check again».
+fn not_found_rows(manual: bool) -> Vec<Vec<NotFoundButton>> {
     let mut rows = Vec::new();
     #[cfg(target_os = "android")]
     rows.push(vec![(tr("Grant access"), super::android::request_storage as fn())]);
+    // A folder with missing game files is repaired from the archive (the offer), not downloaded over.
+    let damaged = matches!(razdor::dt::install::problem(), Some(Problem::Missing { .. }));
+    if damaged {
+        rows.push(vec![(tr("Restore the game files"), game_import::request_repair as fn())]);
+    } else if game_import::download_available() {
+        rows.push(vec![(tr("Download the game"), game_import::request_download as fn())]);
+    }
+    if game_import::pick_available() {
+        rows.push(vec![(picker_label(), game_import::request as fn())]);
+    }
+    if manual {
+        rows.push(vec![(tr("Open the link"), open_folder_link as fn())]);
+        rows.push(vec![(tr("Copy the link"), copy_folder_link as fn())]);
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     if mobile::unpack_offered() {
         rows.push(vec![(tr("Unpack the game archive"), mobile::start_unpack as fn())]);
     }
     #[cfg(any(target_os = "android", target_os = "ios"))]
     rows.push(vec![(tr("Check again"), super::mobile::ask_recheck as fn())]);
     rows
+}
+
+/// The picker's button label: the same words as the picker's own steps (`manual_steps`).
+fn picker_label() -> &'static str {
+    tr("Pick the game archive…")
 }
 
 /// Why the install was not found, for the player: the folder that was looked at, what is missing
@@ -374,14 +426,26 @@ fn install_problem() -> Option<String> {
     match razdor::dt::install::problem() {
         Some(Problem::NotInstall { dir, missing }) => Some(trf!("This folder has no {missing}: {dir}", missing = missing.join(", "), dir = dir.display())),
         Some(Problem::Load(e)) => Some(e),
+        Some(Problem::Missing { files, .. }) => Some(missing_files_line(&files)),
         None => None,
     }
 }
 
-/// The phones: no line about the problem.
+/// The phones: the lines about missing game files only (the rest of the problem is not shown).
 #[cfg(any(target_os = "android", target_os = "ios"))]
 fn install_problem() -> Option<String> {
-    None
+    match razdor::dt::install::problem() {
+        Some(Problem::Missing { files, .. }) => Some(missing_files_line(&files)),
+        _ => None,
+    }
+}
+
+/// «Не хватает файлов игры: …», with the files named (a long list is cut to a few, the rest counted).
+fn missing_files_line(files: &[String]) -> String {
+    let shown = files.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
+    let rest = files.len().saturating_sub(5);
+    let names = if rest == 0 { shown } else { format!("{shown} …") };
+    trf!("Missing game files: {names}", names = names)
 }
 
 /// «How to install»: the install guide of the interface language, in the browser.
@@ -389,9 +453,97 @@ fn open_guide() {
     super::main_menu::open_link(super::main_menu::install_guide());
 }
 
-/// «Where to get the game»: the Razdor players' Discord, in the browser.
+/// «Help on Discord»: the Razdor players' Discord, in the browser.
 fn open_discord() {
-    super::main_menu::open_link(super::main_menu::DISCORD_INVITE);
+    help_action(&super::main_menu::open_link);
+}
+
+/// The help link's action: the players' Discord invite, through `open`.
+fn help_action(open: &dyn Fn(&str)) {
+    open(super::main_menu::DISCORD_INVITE);
+}
+
+/// «Открыть ссылку»: the community's game archive's page on Google Drive, in the browser.
+fn open_folder_link() {
+    open_link_with(&super::main_menu::open_link);
+}
+
+/// The open button's action: the file's page, through `open`.
+fn open_link_with(open: &dyn Fn(&str)) {
+    open(&gdrive::file_page(&gdrive::GAME));
+}
+
+/// «Копировать ссылку»: the file's page on the clipboard (Razdor's clipboard, as the battle code's).
+fn copy_folder_link() {
+    copy_link_with(&macroquad::miniquad::window::clipboard_set);
+}
+
+/// The copy button's action: the file's page, through `set`.
+fn copy_link_with(set: &dyn Fn(&str)) {
+    set(&gdrive::file_page(&gdrive::GAME));
+}
+
+#[cfg(test)]
+mod not_found_tests {
+    use super::*;
+
+    fn recorded(action: impl Fn(&dyn Fn(&str))) -> Vec<String> {
+        let seen = std::cell::RefCell::new(Vec::new());
+        action(&|text| seen.borrow_mut().push(text.to_string()));
+        seen.into_inner()
+    }
+
+    #[test]
+    fn the_open_and_copy_buttons_use_the_file_page() {
+        let page = gdrive::file_page(&gdrive::GAME);
+        assert_eq!(recorded(|f| open_link_with(f)), std::slice::from_ref(&page));
+        assert_eq!(recorded(|f| copy_link_with(f)), std::slice::from_ref(&page));
+        assert_eq!(page, "https://drive.google.com/file/d/1xKIpVbDIuCWh7LFgtFn59D9t5RPkiH0y/view");
+    }
+
+    #[test]
+    fn the_help_link_opens_the_discord_invite() {
+        assert_eq!(recorded(|f| help_action(f)), [super::super::main_menu::DISCORD_INVITE]);
+        assert_eq!(super::super::main_menu::DISCORD_INVITE, "https://discord.gg/wmMksmWFDM");
+    }
+
+    #[test]
+    fn the_manual_path_shows_on_a_failure_or_without_a_download() {
+        assert!(!manual_block(None, true));
+        assert!(manual_block(Some("Download failed: no network."), true));
+        assert!(manual_block(None, false));
+    }
+
+    #[test]
+    fn the_steps_are_one_zip_and_name_the_platforms_way_in_the_third_step() {
+        let steps = manual_steps();
+        assert_eq!(steps.len(), 4, "{steps:?}");
+        assert!(steps[0].starts_with("1. Open the link") && steps[0].contains(".zip"), "{steps:?}");
+        assert!(steps[1].starts_with("2. Do not unpack"), "{steps:?}");
+        assert!(steps[2].starts_with("3. ") && steps[2].contains(".zip"), "{steps:?}");
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        assert!(steps[2].contains("Pick the game archive…"), "{steps:?}");
+        #[cfg(target_os = "android")]
+        assert!(steps[2].contains("Unpack the game archive") && steps[2].contains("Pick the game archive…"), "{steps:?}");
+        assert!(!steps.iter().any(|s| s.contains("folder") || s.contains("splits")), "the file is one archive: {steps:?}");
+    }
+
+    #[test]
+    fn the_block_has_the_download_then_the_picker_then_the_manual_links() {
+        let labels = |manual: bool| -> Vec<&'static str> { not_found_rows(manual).iter().flatten().map(|(label, _)| *label).collect() };
+        // The picker is a secondary option right after the download, with or without the manual path.
+        for manual in [false, true] {
+            let labels = labels(manual);
+            let download = labels.iter().position(|l| *l == "Download the game").expect("the download is offered");
+            assert_eq!(labels[download + 1], "Pick the game archive…", "{labels:?}");
+            assert!(labels.contains(&"Pick the game archive…"), "{labels:?}");
+        }
+        assert!(!labels(false).contains(&"Open the link"));
+        assert!(labels(true).contains(&"Open the link") && labels(true).contains(&"Copy the link"));
+        let manual = labels(true);
+        let picker = manual.iter().position(|l| *l == "Pick the game archive…").unwrap();
+        assert!(manual.iter().position(|l| *l == "Open the link").unwrap() > picker, "{manual:?}");
+    }
 }
 
 /// The layout of a phone's not-found block, scaled to the screen: the scale `k` (at least 1),

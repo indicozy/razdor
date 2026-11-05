@@ -19,6 +19,7 @@ use std::thread::JoinHandle;
 use macroquad::prelude::*;
 use razdor::dt::game_import::{self as import, Done, Error};
 use razdor::dt::unpack::{Found, Kind, UnpackError};
+use razdor::gdrive;
 use razdor::i18n::tr;
 use razdor::local;
 use razdor::platform;
@@ -76,6 +77,8 @@ struct Job {
     handle: Option<JoinHandle<Result<Done, Error>>>,
     done: Arc<AtomicU64>,
     total: Arc<AtomicU64>,
+    /// The game folder's download (`gdrive`), when this job is one: its files and cancel.
+    progress: Option<Arc<gdrive::Progress>>,
 }
 
 local! {
@@ -85,10 +88,46 @@ local! {
     static JOB: RefCell<Option<Job>> = const { RefCell::new(None) };
     /// The folder an import writes to this frame (`dt::game_import::target`), None when not offered.
     static TARGET: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    static DOWNLOAD_REQUESTED: Cell<bool> = const { Cell::new(false) };
+    static REPAIR_REQUESTED: Cell<bool> = const { Cell::new(false) };
+    /// The last game download's failure, one line, for the no-install screen (None: none).
+    static DOWNLOAD_FAILURE: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// «Скачать игру» was pressed: the download starts at the next frame (`tick`), unless an import
+/// or a download runs.
+pub(super) fn request_download() {
+    DOWNLOAD_REQUESTED.with(|r| r.set(true));
+}
+
+/// Whether the no-install screen offers the game download (not on iPhone: its import is not there yet).
+pub fn download_available() -> bool {
+    !cfg!(target_os = "ios")
+}
+
+/// Whether the no-install screen offers picking a game archive by hand: the desktop's dialog and
+/// Android's document picker (iPhone has no picker here).
+pub fn pick_available() -> bool {
+    !cfg!(target_os = "ios")
+}
+
+/// «Восстановить файлы игры» was pressed: the missing game files come back from the archive
+/// (`dt::integrity`), at the next frame (`tick`), unless an import or a download runs.
+pub(super) fn request_repair() {
+    REPAIR_REQUESTED.with(|r| r.set(true));
+}
+
+/// The last game download's failure, in one line, while the screen shows the manual steps.
+pub fn download_failure() -> Option<String> {
+    // The snapshot's `RAZDOR_SCENE_DOWNLOAD_FAILED` shows the manual path after a failed download.
+    if std::env::var_os("RAZDOR_SNAPSHOT").is_some() && std::env::var_os("RAZDOR_SCENE_DOWNLOAD_FAILED").is_some() {
+        return Some(trf!("Download failed: {why}.", why = "could not resolve the host"));
+    }
+    DOWNLOAD_FAILURE.with_borrow(|f| f.clone())
 }
 
 /// The row's button was pressed: the picker opens at the next frame (`tick`).
-fn request() {
+pub(super) fn request() {
     REQUESTED.with(|r| r.set(true));
 }
 
@@ -116,6 +155,12 @@ pub fn tick(install: Option<&Path>) -> bool {
     TARGET.with_borrow_mut(|t| *t = target);
     if REQUESTED.with(|r| r.replace(false)) && !busy() && offered() {
         start_picker();
+    }
+    if DOWNLOAD_REQUESTED.with(|r| r.replace(false)) && !busy() {
+        start_download();
+    }
+    if REPAIR_REQUESTED.with(|r| r.replace(false)) && !busy() {
+        start_repair();
     }
     let changed = finish_job();
     match poll_picker() {
@@ -181,20 +226,130 @@ fn start(pending: Pending) {
         result
     });
     match spawned {
-        Ok(handle) => JOB.with_borrow_mut(|j| *j = Some(Job { name, handle: Some(handle), done, total })),
+        Ok(handle) => JOB.with_borrow_mut(|j| *j = Some(Job { name, handle: Some(handle), done, total, progress: None })),
         Err(e) => notice(vec![trf!("The import cannot start: {e}.", e = e)]),
     }
 }
 
+/// «Скачать игру»: the game archive is downloaded into the cache folder (`gdrive`), verified,
+/// examined and imported into the target (the same import as «Обновить игру из архива…») on a
+/// thread, with its progress. The file is removed after the import; a failed download keeps its
+/// partial copy for the next press. Only with no install (the screen offers it there).
+fn start_download() {
+    let Some(target) = TARGET.with_borrow(|t| t.clone()) else {
+        notice(vec![tr("Only the game in Razdor's own folder can be updated here.").to_string()]);
+        return;
+    };
+    DOWNLOAD_FAILURE.with_borrow_mut(|f| *f = None);
+    let Some(dest) = archive_file() else {
+        DOWNLOAD_FAILURE.with_borrow_mut(|f| *f = Some(trf!("The download cannot start: {e}.", e = "no folder for it")));
+        return;
+    };
+    let (progress, done, total) = (Arc::new(gdrive::Progress::default()), Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
+    let (p, d, t) = (progress.clone(), done.clone(), total.clone());
+    let spawned = std::thread::Builder::new().name("game-download".into()).spawn(move || download_and_import(&dest, &target, &p, &d, &t));
+    match spawned {
+        Ok(handle) => JOB.with_borrow_mut(|j| {
+            *j = Some(Job { name: "Discord Times".into(), handle: Some(handle), done, total, progress: Some(progress) })
+        }),
+        Err(e) => DOWNLOAD_FAILURE.with_borrow_mut(|f| *f = Some(trf!("The download cannot start: {e}.", e = e))),
+    }
+}
+
+/// Where the game archive is downloaded to: the cache folder (not a folder the archive search
+/// scans), made if missing. None where there is no cache folder.
+fn archive_file() -> Option<PathBuf> {
+    let dir = platform::cache_dir()?;
+    let _ = std::fs::create_dir_all(&dir);
+    Some(dir.join("game-download.zip"))
+}
+
+/// «Восстановить файлы игры» (the no-install screen, when files are missing): the archive is got
+/// (cached, or downloaded and verified), and only the missing game files are written from it
+/// (`dt::integrity::repair`). Changed files are never overwritten here. Same job and progress
+/// as the download; the install is loaded again afterwards.
+fn start_repair() {
+    let Some(base) = razdor::dt::install::base_dir() else {
+        DOWNLOAD_FAILURE.with_borrow_mut(|f| *f = Some(trf!("The download cannot start: {e}.", e = "no install folder")));
+        return;
+    };
+    DOWNLOAD_FAILURE.with_borrow_mut(|f| *f = None);
+    let Some(dest) = archive_file() else {
+        DOWNLOAD_FAILURE.with_borrow_mut(|f| *f = Some(trf!("The download cannot start: {e}.", e = "no folder for it")));
+        return;
+    };
+    let (progress, done, total) = (Arc::new(gdrive::Progress::default()), Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
+    let (p, d, t) = (progress.clone(), done.clone(), total.clone());
+    let spawned = std::thread::Builder::new().name("game-repair".into()).spawn(move || repair_from_archive(&base, &dest, &p, &d, &t));
+    match spawned {
+        Ok(handle) => JOB.with_borrow_mut(|j| {
+            *j = Some(Job { name: "Discord Times".into(), handle: Some(handle), done, total, progress: Some(progress) })
+        }),
+        Err(e) => DOWNLOAD_FAILURE.with_borrow_mut(|f| *f = Some(trf!("The download cannot start: {e}.", e = e))),
+    }
+}
+
+/// The repair thread's work (see [`start_repair`]). Its result is `Done::Patched` with the files
+/// written; the job's end reloads the install.
+fn repair_from_archive(base: &Path, dest: &Path, progress: &gdrive::Progress, done: &AtomicU64, total: &AtomicU64) -> Result<Done, Error> {
+    let manifest = razdor::dt::integrity::builtin().map_err(Error::Io)?;
+    let missing = razdor::dt::integrity::missing_files(base, &manifest);
+    if missing.is_empty() {
+        return Ok(Done::Patched(0));
+    }
+    total.store(missing.len() as u64, Ordering::Relaxed);
+    gdrive::download_game(&gdrive::Http, &gdrive::GAME, dest, progress).map_err(|f| match f {
+        gdrive::Failure::Cancelled => Error::Cancelled,
+        gdrive::Failure::Failed(why) => Error::Download(why),
+    })?;
+    progress.set_downloaded();
+    let result = razdor::dt::integrity::repair(base, &manifest, dest, &missing).map(Done::Patched).map_err(Error::Io);
+    done.store(missing.len() as u64, Ordering::Relaxed);
+    let _ = std::fs::remove_file(dest);
+    result
+}
+
+/// The download thread's work: the archive into `dest` (verified), then the archive import into
+/// `target`, whose unpacking reports into `done` and `total`. `dest` is removed at the end.
+fn download_and_import(dest: &Path, target: &Path, progress: &gdrive::Progress, done: &AtomicU64, total: &AtomicU64) -> Result<Done, Error> {
+    let archive = &gdrive::GAME;
+    gdrive::download_game(&gdrive::Http, archive, dest, progress).map_err(|f| match f {
+        gdrive::Failure::Cancelled => Error::Cancelled,
+        gdrive::Failure::Failed(why) => Error::Download(why),
+    })?;
+    progress.set_downloaded();
+    let result = import::examine(dest, archive.name).and_then(|found| {
+        import::import(&found, target, &|bytes, all| {
+            done.store(bytes, Ordering::Relaxed);
+            total.store(all, Ordering::Relaxed);
+        })
+    });
+    let _ = std::fs::remove_file(dest);
+    result
+}
+
 /// Each frame: when the import's thread has ended, its outcome is shown. Always asks for a reload
 /// of the install (a failed one may have moved folders, and the reload is then the right state).
+/// A download's failure is kept for the screen (one line) instead of a window; a cancel is silent.
 fn finish_job() -> bool {
     let ended = JOB.with_borrow(|j| j.as_ref().and_then(|j| j.handle.as_ref()).is_some_and(|h| h.is_finished()));
     if !ended {
         return false;
     }
     let Some(mut job) = JOB.with_borrow_mut(Option::take) else { return false };
-    let text = match job.handle.take().map(|h| h.join()) {
+    let downloading = job.progress.is_some();
+    let result = job.handle.take().map(|h| h.join());
+    if downloading {
+        match result {
+            Some(Ok(Ok(Done::Replaced))) => notice(vec![trf!("The game is updated: «{name}». The saves stay.", name = job.name.clone())]),
+            Some(Ok(Ok(Done::Patched(n)))) => notice(vec![trf!("The game files are restored: {n} files.", n = n)]),
+            Some(Ok(Err(Error::Cancelled))) => {}
+            Some(Ok(Err(e))) => DOWNLOAD_FAILURE.with_borrow_mut(|f| *f = Some(error_text(&e))),
+            _ => DOWNLOAD_FAILURE.with_borrow_mut(|f| *f = Some(tr("The download stopped unexpectedly.").to_string())),
+        }
+        return true;
+    }
+    let text = match result {
         Some(Ok(Ok(Done::Replaced))) => trf!("The game is updated: «{name}». The saves stay.", name = job.name.clone()),
         Some(Ok(Ok(Done::Patched(n)))) => trf!("Written over the game: {n} files.", n = n),
         Some(Ok(Err(e))) => error_text(&e),
@@ -220,6 +375,8 @@ fn error_text(e: &Error) -> String {
         Error::Unpack(UnpackError::NoRoomOrAccess(dir)) => trf!("Could not unpack: no room or no access to the folder {dir}", dir = dir.display()),
         Error::Unpack(other) => trf!("Could not unpack: {error}", error = other.to_string()),
         Error::Io(why) => trf!("The update failed: {why}.", why = why.clone()),
+        Error::Download(why) => trf!("Download failed: {why}.", why = why.clone()),
+        Error::Cancelled => tr("The download was cancelled.").to_string(),
     }
 }
 
@@ -258,11 +415,31 @@ fn confirm_window(name: &str) -> Option<bool> {
     }
 }
 
-/// The import's progress while its thread runs: the percent and a bar.
+/// The import's progress while its thread runs: the download's bar (with Cancel) while the file
+/// comes, then the unpacking's percent and bar. The snapshot's `RAZDOR_SCENE_DOWNLOADING` shows
+/// the download's bar without a job.
 fn progress_window() {
-    let Some((done, total)) = JOB.with_borrow(|j| j.as_ref().map(|j| (j.done.load(Ordering::Relaxed), j.total.load(Ordering::Relaxed)))) else {
+    let Some((done, total, progress)) = JOB.with_borrow(|j| j.as_ref().map(|j| (j.done.load(Ordering::Relaxed), j.total.load(Ordering::Relaxed), j.progress.clone()))) else {
+        if let Some(bytes) = snapshot_download_bytes() {
+            download_window(bytes, None);
+        }
         return;
     };
+    match progress {
+        Some(p) if !p.downloaded() => download_window(p.bytes(), Some(p.as_ref())),
+        _ => unpack_window(done, total),
+    }
+}
+
+/// The snapshot's fake download: `RAZDOR_SCENE_DOWNLOADING=<percent>` (with `RAZDOR_SNAPSHOT`).
+fn snapshot_download_bytes() -> Option<u64> {
+    std::env::var_os("RAZDOR_SNAPSHOT")?;
+    let pct: u64 = std::env::var("RAZDOR_SCENE_DOWNLOADING").ok()?.parse().ok()?;
+    Some(gdrive::GAME.size * pct.min(100) / 100)
+}
+
+/// The unpacking's percent and bar.
+fn unpack_window(done: u64, total: u64) {
     let pct = if total == 0 { 0 } else { (done * 100 / total).min(100) };
     let (inner, _) = map_import::frame(title(), &[trf!("Unpacking… {pct}%", pct = pct)], false);
     let k = chrome::k();
@@ -385,6 +562,27 @@ fn poll_picker() -> Poll {
                     None => Poll::Failed(trf!("The picked file cannot be read: {why}.", why = text.to_string())),
                 },
             }
+        }
+    }
+}
+
+/// The game download's window: the megabytes of the archive and a bar, and Cancel (the close box
+/// too). A cancel keeps the partial copy for the next press; `cancel` is None in the snapshot.
+fn download_window(bytes: u64, cancel: Option<&gdrive::Progress>) {
+    let all = gdrive::GAME.size;
+    let mb = |b: u64| format!("{:.1}", b as f64 / 1_048_576.0);
+    let text = trf!("Downloading the game: {mb} of {all} MB.", mb = mb(bytes), all = mb(all));
+    let (inner, closed) = map_import::frame(title(), &[text], cancel.is_some());
+    let k = chrome::k();
+    let bar = Rect::new(inner.x + 24.0 * k, inner.y + 60.0 * k, inner.w - 48.0 * k, 14.0 * k);
+    let share = (bytes as f32 / all as f32).min(1.0);
+    draw_rectangle(bar.x, bar.y, bar.w, bar.h, Color::new(0.0, 0.0, 0.0, 0.45));
+    draw_rectangle(bar.x, bar.y, bar.w * share, bar.h, Color::new(0.85, 0.65, 0.25, 1.0));
+    draw_rectangle_lines(bar.x, bar.y, bar.w, bar.h, 1.0, Color::new(0.0, 0.0, 0.0, 0.8));
+    let answer = map_import::buttons(inner, &[tr("Cancel")]);
+    if let Some(progress) = cancel {
+        if answer.is_some() || closed {
+            progress.cancel();
         }
     }
 }

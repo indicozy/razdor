@@ -13,4 +13,5 @@ pub mod hub;
 pub mod translate;
 pub mod update;
 pub mod dt;
+pub mod gdrive;
 pub mod editor;

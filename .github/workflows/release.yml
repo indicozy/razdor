@@ -183,6 +183,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Blocking: a dead game-folder link stops the release (no continue-on-error; a network
+      # failure exits 2 and fails here too, it is not skipped).
+      - name: The game download's link is alive
+        run: bash scripts/check-game-link.sh
+
       - name: The tag matches the version and the changelog
         if: github.ref_type == 'tag'
         run: |

@@ -1,0 +1,2945 @@
+{
+ "archive": {
+  "name": "Discord Times Community Update (Unstable).zip",
+  "size": 46726043,
+  "sha256": "fce6d8aa22f8932cddf0dffaf02d3c013d15b298148fc2c50154306d24f9f37e",
+  "top": "Discord Times Community Update (Unstable)"
+ },
+ "files": [
+  {
+   "path": "DDrawCompat.ini",
+   "size": 455,
+   "sha256": "1a5ac2993e273d811da24f1a0e469e0929be99c4e39f3d99e25cd4a61ec90387"
+  },
+  {
+   "path": "DTMapEdit.Ini",
+   "size": 282,
+   "sha256": "cfc679c646ee34aa3f159616f09e8c7f3ea7d9cf5a8804d1b884907776722ca2"
+  },
+  {
+   "path": "DTMapEdit_Rus.Ini",
+   "size": 24800,
+   "sha256": "0f7989caf14156ce91026511d6b957dbedacb76758df26b86685f5686f27df7a"
+  },
+  {
+   "path": "DiscordTimes.exe",
+   "size": 1187840,
+   "sha256": "6a2c1c60c6dba0b3c8d37c2dcc9963cc0d2e856e06c8455aeb4dd33ba9926db8"
+  },
+  {
+   "path": "Graphics/Battle/--CURE.ugs",
+   "size": 1210100,
+   "sha256": "d7bcbfa8d23e1ce99c09579f400696ccf8363e4da4f689d761f4d63859232386"
+  },
+  {
+   "path": "Graphics/Battle/--KUSKI.ugs",
+   "size": 1210100,
+   "sha256": "46c649784e5c91d321cb531fada7cd6e23d85abe4596ff86248fa189330630e2"
+  },
+  {
+   "path": "Graphics/Battle/--KUSKIBIG.ugs",
+   "size": 1210100,
+   "sha256": "555e7d3790a04bb5859216e1d3fca780263a6bb0247875e6412093a8ca32cefe"
+  },
+  {
+   "path": "Graphics/Battle/--PAR.ugs",
+   "size": 1210100,
+   "sha256": "60176e6e57ea04f52c748d53a7c9e2739d0ee103061c63ef107f632b6dbeda9d"
+  },
+  {
+   "path": "Graphics/Battle/--POTION.ugs",
+   "size": 1210100,
+   "sha256": "e4f2568bc8f6e38a91f895ad55ad7e07ca744eaa72a9757e70f64ea877915f1b"
+  },
+  {
+   "path": "Graphics/Battle/--RAYS.ugs",
+   "size": 1210100,
+   "sha256": "bd5ca7b8d2849a1c54f842528d224b8e1a46b18117f922e42f59860bbf056f79"
+  },
+  {
+   "path": "Graphics/Battle/--UPGRADE.ugs",
+   "size": 2420200,
+   "sha256": "4dd47bb0ff72811ea06a0d796d6a9b8187b5d1fdc57b06e7e75abf5ebd4d9a40"
+  },
+  {
+   "path": "Graphics/Editor/0.spi",
+   "size": 1936,
+   "sha256": "99b517b44be93bdb2eb67f6e5de64833e7d06b86fa4d6896bf8a327b0a804470"
+  },
+  {
+   "path": "Graphics/Editor/1.spi",
+   "size": 1936,
+   "sha256": "94a4d59272b8191b3d11dedcf8dcba03ce06ada65bd24f8083bc8096f9b0a03c"
+  },
+  {
+   "path": "Graphics/Editor/10.spi",
+   "size": 1936,
+   "sha256": "c2c143ad6e69531b40a8b8d5009e8782dc7a132133aa9ca952e65df14da3ef30"
+  },
+  {
+   "path": "Graphics/Editor/11.spi",
+   "size": 1936,
+   "sha256": "e7fd9affdb54cbc37db1780b33297ca035aa2b90f60298e9f2da005fb023fbd6"
+  },
+  {
+   "path": "Graphics/Editor/12.spi",
+   "size": 1936,
+   "sha256": "8d89258b9364c8476d0f41ea8e1a65f2ffe8fe14b74fd16638cc845b9d257fec"
+  },
+  {
+   "path": "Graphics/Editor/13.spi",
+   "size": 1936,
+   "sha256": "8733121aaa31b1fd1ab11df90bce8b3aaecae3509f75dcbecba4c5e7659e05e0"
+  },
+  {
+   "path": "Graphics/Editor/14.spi",
+   "size": 1936,
+   "sha256": "5e88d33f81efea49f81ab52c0f2761a7a3498a82e8b1f0d57d73e9432790a71a"
+  },
+  {
+   "path": "Graphics/Editor/15.spi",
+   "size": 1936,
+   "sha256": "51dcf70340038bfaa03c0cd57c5a213cc509f81cac0df3cc2d7545655d8b3501"
+  },
+  {
+   "path": "Graphics/Editor/16.spi",
+   "size": 1936,
+   "sha256": "03683897c79f84b7250266efda7418f34c85d16ea94de64abb562a5ffb334f62"
+  },
+  {
+   "path": "Graphics/Editor/17.spi",
+   "size": 1936,
+   "sha256": "76eb88fd0525356682691e66ef9c7b87727135b076fc1383ff066f4232d97f61"
+  },
+  {
+   "path": "Graphics/Editor/18.spi",
+   "size": 1936,
+   "sha256": "37c744277dbf4ea7e471f4bd472a11d32fe00d433d39bd955adceba5b4d035ac"
+  },
+  {
+   "path": "Graphics/Editor/19.spi",
+   "size": 1936,
+   "sha256": "261141583c7a29f1fad9672421e4d2699fce5540f01ce3b8a9bae3021e4ee36d"
+  },
+  {
+   "path": "Graphics/Editor/2.spi",
+   "size": 1936,
+   "sha256": "9ff2d06509a53efa010a6161de8ca665125ed649672b28996698fafcef3b3f97"
+  },
+  {
+   "path": "Graphics/Editor/20.spi",
+   "size": 1936,
+   "sha256": "cc08944a2e9c4e4a05971f6ceb9c3e1eeb496b01a4462f8c4fa570759b6d0e6b"
+  },
+  {
+   "path": "Graphics/Editor/21.spi",
+   "size": 1936,
+   "sha256": "1dc9820a62f19f24bb4d83cf1efde6f6ba6c9ae1cae8c952d286334d299cee7b"
+  },
+  {
+   "path": "Graphics/Editor/22.spi",
+   "size": 1936,
+   "sha256": "bd6007b81c43241227bbe6116794f5cc470d13bbe28c6cf309c88bb4e4e13251"
+  },
+  {
+   "path": "Graphics/Editor/23.spi",
+   "size": 1936,
+   "sha256": "27b7e72afce5a37e054dc9969fb04d701a8db00fb47a7d2aa24a68c50a828713"
+  },
+  {
+   "path": "Graphics/Editor/24.spi",
+   "size": 1936,
+   "sha256": "6c69d6ec5fdda0d1cd46e1b84a4f9fb3c4d2f25e816227614d031c5a26401fb4"
+  },
+  {
+   "path": "Graphics/Editor/25.spi",
+   "size": 1936,
+   "sha256": "6c69d6ec5fdda0d1cd46e1b84a4f9fb3c4d2f25e816227614d031c5a26401fb4"
+  },
+  {
+   "path": "Graphics/Editor/26.spi",
+   "size": 1936,
+   "sha256": "6c69d6ec5fdda0d1cd46e1b84a4f9fb3c4d2f25e816227614d031c5a26401fb4"
+  },
+  {
+   "path": "Graphics/Editor/27.spi",
+   "size": 1936,
+   "sha256": "6c69d6ec5fdda0d1cd46e1b84a4f9fb3c4d2f25e816227614d031c5a26401fb4"
+  },
+  {
+   "path": "Graphics/Editor/28.spi",
+   "size": 1936,
+   "sha256": "33791a5a7391a5d87078ace5a7b04a01fedf7789e648b5757a4c6c4a86c5255c"
+  },
+  {
+   "path": "Graphics/Editor/29.spi",
+   "size": 1936,
+   "sha256": "f909a905e556c54d20b3b9df6f4c4587a4bc1f9a7a43da398c691b5c44be06c7"
+  },
+  {
+   "path": "Graphics/Editor/3.spi",
+   "size": 1936,
+   "sha256": "afd69332788334af273ebfcd58678066e451a94676f6a15ac32a819f9f36eaf8"
+  },
+  {
+   "path": "Graphics/Editor/30.spi",
+   "size": 1936,
+   "sha256": "6c69d6ec5fdda0d1cd46e1b84a4f9fb3c4d2f25e816227614d031c5a26401fb4"
+  },
+  {
+   "path": "Graphics/Editor/31.spi",
+   "size": 1936,
+   "sha256": "6c69d6ec5fdda0d1cd46e1b84a4f9fb3c4d2f25e816227614d031c5a26401fb4"
+  },
+  {
+   "path": "Graphics/Editor/32.spi",
+   "size": 1936,
+   "sha256": "6c69d6ec5fdda0d1cd46e1b84a4f9fb3c4d2f25e816227614d031c5a26401fb4"
+  },
+  {
+   "path": "Graphics/Editor/4.spi",
+   "size": 1936,
+   "sha256": "b4cc40d0ad6d6a285ca5f9883f67a943e2cd4dcd6e333866a84050e67a160986"
+  },
+  {
+   "path": "Graphics/Editor/5.spi",
+   "size": 1936,
+   "sha256": "71ca21f400e9ddc7730e238109238bc1e0e4787820757234e63ee0dddc609073"
+  },
+  {
+   "path": "Graphics/Editor/6.spi",
+   "size": 1936,
+   "sha256": "7a6392352967d15438d074cc703769f49d931d1d629c284b56ff23ba4c602a56"
+  },
+  {
+   "path": "Graphics/Editor/7.spi",
+   "size": 1936,
+   "sha256": "c93002601796a46aed434655926579d285dff547d9871177a48ea0850a5ad9b2"
+  },
+  {
+   "path": "Graphics/Editor/8.spi",
+   "size": 1936,
+   "sha256": "f5161fb0a461344dfece9a8a009b653ecd54ba1fd2a995610e9c992bf78f32e2"
+  },
+  {
+   "path": "Graphics/Editor/9.spi",
+   "size": 1936,
+   "sha256": "89e53280c7dfc53f0de2a40a9d8ce6ed2472506d90e1ceb4810dbf7045c78482"
+  },
+  {
+   "path": "Graphics/Editor/Cursor.tga",
+   "size": 138028,
+   "sha256": "40e519483444450e774340cd6cf018bf322f33eb09abecc3b60a6820455b6a52"
+  },
+  {
+   "path": "Graphics/Editor/E1.TGA",
+   "size": 4140,
+   "sha256": "1bc0623481d680d081c61d478695663db772b461424dd8d463c1ec95fd05423b"
+  },
+  {
+   "path": "Graphics/Editor/E2.TGA",
+   "size": 4140,
+   "sha256": "7b78a94dbe98891bd4ceccd6c7de2fe9eab4a5ae34bb3af7d5964a54a5e37776"
+  },
+  {
+   "path": "Graphics/Editor/E3.TGA",
+   "size": 4140,
+   "sha256": "ce23f43d17b19ef6d2450649701aceb747a25edeaf162043b32a8c3ce0ba6fa5"
+  },
+  {
+   "path": "Graphics/Editor/E4.TGA",
+   "size": 4140,
+   "sha256": "058a07c977bf037ccef382cadc029c750660df0a894155d53cb755368a415e87"
+  },
+  {
+   "path": "Graphics/Editor/E5.TGA",
+   "size": 4140,
+   "sha256": "a6e3de84b25fc9a35af63e18eef695ee99341403948108260fb28763536b980f"
+  },
+  {
+   "path": "Graphics/Editor/E6.TGA",
+   "size": 4140,
+   "sha256": "128476847a66749a3117edff66e86184f57b53691a61e90eb1a6b80f46d22154"
+  },
+  {
+   "path": "Graphics/Editor/E7.TGA",
+   "size": 4140,
+   "sha256": "e33d5517c61723751b0012745a1121b0f7608dc8d309f571bef8503d01166a7e"
+  },
+  {
+   "path": "Graphics/Editor/ENEMY.TGA",
+   "size": 16428,
+   "sha256": "66201d80f316e4deb44fd0016d818979c2fae56eba686db8fca024e434ce685c"
+  },
+  {
+   "path": "Graphics/Editor/GUARD.TGA",
+   "size": 16428,
+   "sha256": "89bc3434003e25b29ca190e57eba11671ec47f1516e8e8d9ba36f730f4543b15"
+  },
+  {
+   "path": "Graphics/Editor/Ghost.tga",
+   "size": 16428,
+   "sha256": "cfad3aabb9a95fcd5373ede87e8aa61a63c0e67f71a6897f1cda7a0f364f71a8"
+  },
+  {
+   "path": "Graphics/Editor/Grid0.tga",
+   "size": 2860,
+   "sha256": "c1ebbc77a2d4842f586c318177f8929ce31e07bb08a16c46206f168cbadaa1f3"
+  },
+  {
+   "path": "Graphics/Editor/Grid1.tga",
+   "size": 2860,
+   "sha256": "e524aa7a285b43c9aad1187f57ffdbd5c3b64d9a2fafea8a005f59e06e9906c2"
+  },
+  {
+   "path": "Graphics/Editor/Grid2.tga",
+   "size": 2860,
+   "sha256": "cd8cca6c748f92ff8f3674acd16337b38cd24de9ada25e87ac11bc18ef2f62ed"
+  },
+  {
+   "path": "Graphics/Editor/Grid3.tga",
+   "size": 2860,
+   "sha256": "52e434d50565dafbec8172de8a57229e9c3e88b7baea5e83d243d057ac01d78a"
+  },
+  {
+   "path": "Graphics/Editor/Grid4.tga",
+   "size": 2860,
+   "sha256": "a729272299d06f2398c98087870f80392c2b3fcccace2445db4e2f07a485bdea"
+  },
+  {
+   "path": "Graphics/Editor/Grid5.tga",
+   "size": 2860,
+   "sha256": "cc57866edf68c74439d77445b9bd46a3bc929386a8594ddb1f7821cbe4938a01"
+  },
+  {
+   "path": "Graphics/Editor/Grid6.tga",
+   "size": 2860,
+   "sha256": "3c5247c871a70cec7bade7b9d1747de9e11c854dbe0ef191ebec20a565a1bcb9"
+  },
+  {
+   "path": "Graphics/Editor/Grid7.TGA",
+   "size": 2860,
+   "sha256": "f74c1a5a82078a929558afd6ac566f220e69aa04e285e245967c24a7a44432ed"
+  },
+  {
+   "path": "Graphics/Editor/Grid8.tga",
+   "size": 2620,
+   "sha256": "f9cf9321022b122ee02b2efb049968146c111120b181302bee17ae0bf8f5dc16"
+  },
+  {
+   "path": "Graphics/Editor/Grid9.tga",
+   "size": 2620,
+   "sha256": "fd30c2afdbd51a4fba40137b9541122d5ff892a303bb0eefde31f921a13935ae"
+  },
+  {
+   "path": "Graphics/Editor/Hero0.bmp",
+   "size": 76856,
+   "sha256": "a00a06825b3f8720e197c24f68a453c8490a1943aff2e728a31c00e2015fcb23"
+  },
+  {
+   "path": "Graphics/Editor/MAGE.TGA",
+   "size": 16428,
+   "sha256": "d29a1ce47ab79a68e47cc625d2769a44b11f021f8b612ca079156f798f693075"
+  },
+  {
+   "path": "Graphics/Editor/PEASANT.TGA",
+   "size": 16428,
+   "sha256": "41e12205e852804e8036551aa95d659ef7c5609df76013d6c739bb9e67e30de6"
+  },
+  {
+   "path": "Graphics/Editor/ROGUE.TGA",
+   "size": 16428,
+   "sha256": "1dcea6a37bc1946f7c7d92476ea57b3c0a000f3c80fd6be6b43aa106dc41349d"
+  },
+  {
+   "path": "Graphics/Editor/S2.TGA",
+   "size": 4140,
+   "sha256": "addf03d2b03d00548c07e6c1c64dc53b08cccfe1c416277061bbb30bdbe910b7"
+  },
+  {
+   "path": "Graphics/Editor/S3.TGA",
+   "size": 4140,
+   "sha256": "ef2c15b8b922cd7c6bac378fbb935cfa726ff10e30548527fd87f6347a225ede"
+  },
+  {
+   "path": "Graphics/Editor/SHIP1.TGA",
+   "size": 16428,
+   "sha256": "1c3317b74fc82aa77793f9558d0315773be419ad197db7e23b8056dafbd62187"
+  },
+  {
+   "path": "Graphics/Editor/SHIP2.TGA",
+   "size": 16428,
+   "sha256": "31d075d4a628d7bb734a012729a3d971340b6d7e1f745683cbd1d19d72b226e2"
+  },
+  {
+   "path": "Graphics/Editor/SHIP3.TGA",
+   "size": 22544,
+   "sha256": "a17f5c93a2599f81140fd4923f713bc22eff81c881b263f24a936afbc37ad0a4"
+  },
+  {
+   "path": "Graphics/Editor/Undead.tga",
+   "size": 16428,
+   "sha256": "40edc3fc3125f454e327f878e33a84d7cfee4c6e9f60c014c52ea141ee448a2f"
+  },
+  {
+   "path": "Graphics/Editor/UnitMax.Bmp",
+   "size": 1236014,
+   "sha256": "ce2b401d72af58827fa3de9d47b31e00fc6411cb424e3dacf3c0bc6c45a929a6"
+  },
+  {
+   "path": "Graphics/Editor/archer.tga",
+   "size": 16428,
+   "sha256": "de29b5e56b049ef162ab7a61a401820f574f35c4df0e52c5b538f0d551a593fc"
+  },
+  {
+   "path": "Graphics/Editor/hero1.bmp",
+   "size": 76856,
+   "sha256": "8e5f6901e1133c4b5b2a8261928a272742ed1f310cd4948a6f1671e350e8d36c"
+  },
+  {
+   "path": "Graphics/Editor/hero2.bmp",
+   "size": 76856,
+   "sha256": "a79efa2a7fa5d3b6f63369e433f7a635259cdd56bfa975ef88cb4cc16ee41ca6"
+  },
+  {
+   "path": "Graphics/Editor/ship.tga",
+   "size": 16428,
+   "sha256": "1c3317b74fc82aa77793f9558d0315773be419ad197db7e23b8056dafbd62187"
+  },
+  {
+   "path": "Graphics/Editor/zombi.tga",
+   "size": 16428,
+   "sha256": "27ba5a86f23626aac306bcda63df3d3d8f0f39994dc6cc898188b5da7ecff5c8"
+  },
+  {
+   "path": "Graphics/Objects/Icons.ugs",
+   "size": 1727064,
+   "sha256": "8ac90691c375f88af5005e35c14bc5dc307d5b5e39855515a791ecc5e32ad36f"
+  },
+  {
+   "path": "Graphics/Objects/Items.ugs",
+   "size": 938874,
+   "sha256": "8ee314e81cb649d3ab4a6d5d7bffad1ee650b4a0b7ffae79add24bf1d91fdacf"
+  },
+  {
+   "path": "Graphics/Objects/Objects.ugs",
+   "size": 5959510,
+   "sha256": "092868acef18c202746a778ed1667b81a1cacef901b00dc7060044d79317fa2e"
+  },
+  {
+   "path": "Graphics/Objects/Persones.ugs",
+   "size": 11471894,
+   "sha256": "582672679ba9f011bdbe2d94fe8982e2155afb027579fa147dad30eb17437770"
+  },
+  {
+   "path": "Graphics/Spells/BigMoon.lit",
+   "size": 30016,
+   "sha256": "e4a005435c9d2fe5e9cc6b9b99d79bd369aa1b6d754818c84eba6e1868323a3f"
+  },
+  {
+   "path": "Graphics/Spells/Bird.lit",
+   "size": 19216,
+   "sha256": "106435b1db80ffa475474fca5e1258b4be182944b8badc5f5786fa6bc7fd572a"
+  },
+  {
+   "path": "Graphics/Spells/Book.lit",
+   "size": 19216,
+   "sha256": "47e40619a8af7ccf4b290b75666c99ab3614d4c6a7766150efb258674c8d1853"
+  },
+  {
+   "path": "Graphics/Spells/Bowl.lit",
+   "size": 19216,
+   "sha256": "a0274af49fe75dfc97e079c56fc2a1d41cccda8c2af5258c2517451386b237e3"
+  },
+  {
+   "path": "Graphics/Spells/Circle.lit",
+   "size": 19216,
+   "sha256": "0d6ebdfe03f73d60043c03b34e397c3c2ce68885e6fa891c6b0001d66596c96c"
+  },
+  {
+   "path": "Graphics/Spells/Crown.lit",
+   "size": 19216,
+   "sha256": "fde8572b62906871a72bd7c8a8c291edb709c176d4e49025fb72aab650929431"
+  },
+  {
+   "path": "Graphics/Spells/Devil.lit",
+   "size": 19216,
+   "sha256": "e97088fc7b33dc797db2bff9fd11d79ed5af63b7bb5c544339a518638785082c"
+  },
+  {
+   "path": "Graphics/Spells/Eagle.lit",
+   "size": 19216,
+   "sha256": "5887f0e80a3b28bc3f8d9bfe1123dec789e73ba47ae040c738a559170ee6c796"
+  },
+  {
+   "path": "Graphics/Spells/Explosion-2.lit",
+   "size": 30016,
+   "sha256": "4d348354feddf973ed96f2c052f6233e72e04f8557e3260aa8a8c5b995743dc4"
+  },
+  {
+   "path": "Graphics/Spells/Explosion-3.lit",
+   "size": 30016,
+   "sha256": "300354de1866b525e9cbba943d48fb8c675ed27a4aa6f5d6dd58823438df9229"
+  },
+  {
+   "path": "Graphics/Spells/Explosion.lit",
+   "size": 19216,
+   "sha256": "1f86739bb1fefa179929fd77d183cbf63f971ca6d0e2203d92e75a29bbc46976"
+  },
+  {
+   "path": "Graphics/Spells/Eye.lit",
+   "size": 30016,
+   "sha256": "e42c4622e7e14c77ea401de619791590c147e4088ce2583f1482c9cd9e81733e"
+  },
+  {
+   "path": "Graphics/Spells/Fire-3.lit",
+   "size": 19216,
+   "sha256": "3019eb6bb684dc70c54f988b57c6c5108a9063cc9ab9b8b12c4f4e31ebacc436"
+  },
+  {
+   "path": "Graphics/Spells/Fire.lit",
+   "size": 30016,
+   "sha256": "36a26c24e114b7d2bef729447f560782eed74d3be53e02db76b25b04a537f8ac"
+  },
+  {
+   "path": "Graphics/Spells/FireSmall.lit",
+   "size": 19216,
+   "sha256": "b675b798059401190b71e95290ca3f4ecc55120046a2b717ea9410acad615b0a"
+  },
+  {
+   "path": "Graphics/Spells/Fireball.lit",
+   "size": 43792,
+   "sha256": "d77e40877548ea2f66f80b01426e92b08ab2d37efc84e289602de606ac9b2674"
+  },
+  {
+   "path": "Graphics/Spells/Flare.lit",
+   "size": 30016,
+   "sha256": "787d04d771b1922ca4195fe041af4f8cacc2550a98aa93daa709d656353acc6a"
+  },
+  {
+   "path": "Graphics/Spells/Hands-3.lit",
+   "size": 19216,
+   "sha256": "0081ff6132337f009046ddcda98a714ccd9a2558ef35652e148161855a3bd3d3"
+  },
+  {
+   "path": "Graphics/Spells/Hands.lit",
+   "size": 30016,
+   "sha256": "1647d1f634310c1a2edf416e0b68871229c969ed286d147a0824b18319ab2a3d"
+  },
+  {
+   "path": "Graphics/Spells/Helm.lit",
+   "size": 19216,
+   "sha256": "26aa0e4236b137857f8d957b81c3591ca4f9d3e997d490a38ae1e1ccd3c835ce"
+  },
+  {
+   "path": "Graphics/Spells/Jelly-2.lit",
+   "size": 30016,
+   "sha256": "89848e01a5e251eae3ef72eec8ce612c5e9f2c5e0c34ca4e3a47d818e7e6260c"
+  },
+  {
+   "path": "Graphics/Spells/Jelly.lit",
+   "size": 30016,
+   "sha256": "f230b516076579f15363dcce6b9a872ba1ca9055c9911f6ca1cb9644ca7fe0d2"
+  },
+  {
+   "path": "Graphics/Spells/Life-1.lit",
+   "size": 19216,
+   "sha256": "2db2a5f3292011e826b609fd358c6b931fd15233a4acdbfdf268ee3a24dc9273"
+  },
+  {
+   "path": "Graphics/Spells/Life-2.lit",
+   "size": 19216,
+   "sha256": "33ddd9fe7e8c72eee20daa7cf658de543b8e9638926a974c6c23e5eed59066bd"
+  },
+  {
+   "path": "Graphics/Spells/Lightning.lit",
+   "size": 30016,
+   "sha256": "c9b3aaa84f969111c20becac408a141d9ca3b3ba5d814ebf77edf10bc998f0eb"
+  },
+  {
+   "path": "Graphics/Spells/Lightning2.lit",
+   "size": 19216,
+   "sha256": "d4fe9231228568160eb31db3320e5aa93737461bc5abcf9e4a960c567c59966d"
+  },
+  {
+   "path": "Graphics/Spells/Lion.lit",
+   "size": 19216,
+   "sha256": "9f162f5972398834405249b7ce4c73c3b00a1debb6348d5e72acf85a8ad06b94"
+  },
+  {
+   "path": "Graphics/Spells/Meteor.lit",
+   "size": 43792,
+   "sha256": "921dfcea63a8b2b20b722691ae9fdb53090de2561a24349e53035833404bc0e4"
+  },
+  {
+   "path": "Graphics/Spells/Moon.lit",
+   "size": 30016,
+   "sha256": "ad5f60d0b06b8741b9a5831a21acbb9d5a1ccb6646471b8153e02fb64a4dc177"
+  },
+  {
+   "path": "Graphics/Spells/P-Flare.ugs",
+   "size": 1638600,
+   "sha256": "2f684be9edb5c1a56136744a860c5a0e11650022f7a294596fd7e9da713ac9b8"
+  },
+  {
+   "path": "Graphics/Spells/P-Par.ugs",
+   "size": 1638600,
+   "sha256": "2dce5acd97b8d427229b9934b53d40b324878e0e60804013365189b4fb5e5064"
+  },
+  {
+   "path": "Graphics/Spells/P-Rays.ugs",
+   "size": 1638600,
+   "sha256": "12a9aa74d196c5afbe36c4f47cfadf60cf05fff31b726788194372c834eb4031"
+  },
+  {
+   "path": "Graphics/Spells/P-Ring.ugs",
+   "size": 1638600,
+   "sha256": "7a0d931bb2813ded52d8d5cc56e2526bbd35df382e735e9dfc40b572240712b1"
+  },
+  {
+   "path": "Graphics/Spells/Pegase.lit",
+   "size": 19216,
+   "sha256": "c13cd8c7d80b70ef7b32e99e368124a69cb4d3ba840fc86846e541f91c2fa4b1"
+  },
+  {
+   "path": "Graphics/Spells/S-Cluster.ugs",
+   "size": 1638600,
+   "sha256": "1205892c9eb9589ad475a1184c5a95d7931110f86621ddc2f93ae9f3de7527a3"
+  },
+  {
+   "path": "Graphics/Spells/S-Fire.ugs",
+   "size": 1638600,
+   "sha256": "fe9337a59e7be7ebee47ea3b2bb0971fd5595f888e0ae8a9fb0ec57f29a45d06"
+  },
+  {
+   "path": "Graphics/Spells/S-Fog.ugs",
+   "size": 1638600,
+   "sha256": "36cdfec1aa129af3859f9508ff0c784b1644a9b55f9491f417416625964af2cc"
+  },
+  {
+   "path": "Graphics/Spells/S-Fontain.ugs",
+   "size": 1638600,
+   "sha256": "f89fb1a0b504b11f51c76abdcf93f2c521c1a22548d89a3674e968fe8c17efc7"
+  },
+  {
+   "path": "Graphics/Spells/S-Light-Back.ugs",
+   "size": 1638600,
+   "sha256": "5ab716be1fd0f87556db92cb13550c3e5605df082f1d0c7a6fb0d5caf0c8aa55"
+  },
+  {
+   "path": "Graphics/Spells/S-Light-Front.ugs",
+   "size": 1638600,
+   "sha256": "1a3c18a1d4cedf76c6fc886c77cb4ec18341bba21d1e532491218b4c82711af9"
+  },
+  {
+   "path": "Graphics/Spells/S-Lighting.ugs",
+   "size": 1638600,
+   "sha256": "e9c1fcd6fe3e8e365d66532cc145528bca096121f5f28306954e12264e41510d"
+  },
+  {
+   "path": "Graphics/Spells/S-Stone-Explode.ugs",
+   "size": 1638600,
+   "sha256": "567638daa2cb05b4ef05b3c24fb4a0c9074e06d44352023ab6868544c36ecb97"
+  },
+  {
+   "path": "Graphics/Spells/S-Stone-Shower.ugs",
+   "size": 1638600,
+   "sha256": "5340e973dfd80d3291d90511067d7000113cff400f99f6c9439f9b172cf205cd"
+  },
+  {
+   "path": "Graphics/Spells/S-Swirl.ugs",
+   "size": 1638600,
+   "sha256": "5f340a9ed1268416a3dcb0282ee311a3f311ca0008d781edcd34851dc792102b"
+  },
+  {
+   "path": "Graphics/Spells/Shower.lit",
+   "size": 19216,
+   "sha256": "a97e97ab188f4b07cecc9ad76732bf61390fcdf8ae91c09221da09ddd02058a1"
+  },
+  {
+   "path": "Graphics/Spells/Skull.lit",
+   "size": 30016,
+   "sha256": "294b3b8dc051895b4b3dc362d9bc2d42e70f99b8af2a6a8c94fd88b16d4ff0d2"
+  },
+  {
+   "path": "Graphics/Spells/Sky.lit",
+   "size": 43792,
+   "sha256": "53e97f90bef60b76d485d0f5b499c601476c9f88774b54f9c8c48bd82360416c"
+  },
+  {
+   "path": "Graphics/Spells/Stars.lit",
+   "size": 19216,
+   "sha256": "47ddd959a3434c808082033e1b7ddf4f0adda7eca792cb338c4b11e13a93e8fb"
+  },
+  {
+   "path": "Graphics/Spells/StarsSmall.lit",
+   "size": 19216,
+   "sha256": "49e3a9414576bcfe224255474edf562cda55eef3b6235f0ef0cea6a2f92251ed"
+  },
+  {
+   "path": "Graphics/Spells/Swords.lit",
+   "size": 19216,
+   "sha256": "9cfca13a4d67121e9c6c4876db4ccc0c0ba3aab9d21c31ed7629601a50f82a46"
+  },
+  {
+   "path": "Graphics/Spells/_Clouds.lit",
+   "size": 30016,
+   "sha256": "e9ca5b41bc6d33bbdd4412c72fcdb079f5e38ef4a57f5ed0f514fb59a6464010"
+  },
+  {
+   "path": "Graphics/Spells/_fat-rays.lit",
+   "size": 30016,
+   "sha256": "6f0656bbabf28b4efd4c2b80e6c8a2426d28095860817c2c5a91b4f88aa5e9ad"
+  },
+  {
+   "path": "Graphics/Spells/_rays.lit",
+   "size": 30016,
+   "sha256": "9e491f3e5c6ef524fc90bb868b29a243a9882aaa61305a4f425c554ad4dde9af"
+  },
+  {
+   "path": "Graphics/Spells/_swirl.lit",
+   "size": 30016,
+   "sha256": "31e440ef1b604ee928cb22f8a1582950035727f1c642c37978960d44948b2c8b"
+  },
+  {
+   "path": "Graphics/Spells/sphere.lit",
+   "size": 30016,
+   "sha256": "f4635d16040c837ce11e44573d2dd3b00826d80ec5202f017d5995c8e3d4d136"
+  },
+  {
+   "path": "Graphics/Textures/Badground.lit",
+   "size": 98704,
+   "sha256": "245070d85419b8837f41fa9e49dad2fc490beaae9395ef1720643f83d834a7f6"
+  },
+  {
+   "path": "Graphics/Textures/DeepSwamp.lit",
+   "size": 98704,
+   "sha256": "70587783e3ca7776eedc04c98f504fd1c8603b9b523c0a439501a94f28a8310a"
+  },
+  {
+   "path": "Graphics/Textures/DeepWater.lit",
+   "size": 98704,
+   "sha256": "599d5c07c7cabc1727eff90c9744ce6455d8279c55ddb7cffba2089fc91ee0a8"
+  },
+  {
+   "path": "Graphics/Textures/Desert.lit",
+   "size": 98704,
+   "sha256": "422a2835e75db842361cce2528ed34af3205bf13e31aad1b33f040871bf9f5cf"
+  },
+  {
+   "path": "Graphics/Textures/Dust.lit",
+   "size": 190864,
+   "sha256": "d98635af7a84c449f2d3807a89cbe0e145cf8510dc8bbc555127f63946433cff"
+  },
+  {
+   "path": "Graphics/Textures/FlameLand.lit",
+   "size": 190864,
+   "sha256": "7f6dec2a2c3e0f0d28a3ac02b8cef203d4839c0f1a76e57636cc5dff8e7dae21"
+  },
+  {
+   "path": "Graphics/Textures/Ice.lit",
+   "size": 190864,
+   "sha256": "8fb94c92e92495bda25b8cdc6e0e694414aebf178bc4d317f5b337ce4d58f67d"
+  },
+  {
+   "path": "Graphics/Textures/LowLand.lit",
+   "size": 190864,
+   "sha256": "9c4b457f3c5c635caad3b28a68ed264c2e8fc27179ff766ca35421d6f9840d4d"
+  },
+  {
+   "path": "Graphics/Textures/Road.lit",
+   "size": 98704,
+   "sha256": "d14d4d9b657b8c795128c584fa8f6c5d02503dbdf3622261880ad0c2b833da76"
+  },
+  {
+   "path": "Graphics/Textures/Rock.lit",
+   "size": 98704,
+   "sha256": "67f00f426ab061ec06c90a022d8e9df091b613b6da9298a98873def65e6f0269"
+  },
+  {
+   "path": "Graphics/Textures/Shallow.lit",
+   "size": 190864,
+   "sha256": "57060a8642236beebece9c07c962f2c41265307c415a4fd010af00eee77831d0"
+  },
+  {
+   "path": "Graphics/Textures/Snow.lit",
+   "size": 98704,
+   "sha256": "662d7cb6a188855d706ff28ba799ee60a39455de5eec3afbafdc820cf273e451"
+  },
+  {
+   "path": "Graphics/Textures/Swamp.lit",
+   "size": 98704,
+   "sha256": "81a78cb607d2926e97f96d408238b7d2cc85fa7f755bb8a679fc464586878d78"
+  },
+  {
+   "path": "Graphics/Textures/Water.lit",
+   "size": 190864,
+   "sha256": "3806f0942553c153b0d02e099e6e3f53875eebcc68fa1ee0908a98fe20268f32"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE000.BMP",
+   "size": 12344,
+   "sha256": "928d112d1413c4894a7000ae96e8f3e5d81be5ab1c20c97009107fd52ba5783e"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE001.BMP",
+   "size": 12344,
+   "sha256": "f8e27402ae182affa09b613905c222dace8ee13f426a5e1047466d20d98735e5"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE002.BMP",
+   "size": 12344,
+   "sha256": "33c82bc16d9ab7cfad226f3005c6f9bd05af8fdf70ca7821a34bb7507d3a6215"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE003.BMP",
+   "size": 12344,
+   "sha256": "3771c1264b11ebd95a15cb805e3903c0069980d34ca07f9041586d2c53a0037c"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE004.BMP",
+   "size": 12344,
+   "sha256": "ca776e69cfce89ff6c62f70c306a71c9b43ac9d86d1500abd7bf67afca3ccb0e"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE005.BMP",
+   "size": 12344,
+   "sha256": "34eb6dfb22a472867c0c3f34f43ae3160a3b4f0327843d2a39e7078d002f7799"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE006.BMP",
+   "size": 12344,
+   "sha256": "a845f6593d55e3a709650162aa013affe0c2d9670df766d17db2fb114b0ad12b"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE007.BMP",
+   "size": 12344,
+   "sha256": "bc5cfd7759186a3fd60c2758e9b52a0bc8a030ee43faa6352c5879e46e582a88"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE008.BMP",
+   "size": 12344,
+   "sha256": "006e8fdd4958dc1743ca71e70f7565a466fb7044f7d6f3bef5846841427c65e9"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE009.BMP",
+   "size": 12344,
+   "sha256": "e3b940e0e057405d2e6519018ebd3894c46e7094447983a016590c065c4d68c5"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE010.BMP",
+   "size": 12344,
+   "sha256": "681b3b43b17874f95a22fb3fdf7ee5bdee6bb0721274b2879489d9fa6a665d0e"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE011.BMP",
+   "size": 12344,
+   "sha256": "e1d603715f3cd7ec58ec1a3e78e1a9b1e1c9ad7e603d383bc8de85bfe50013e1"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE012.BMP",
+   "size": 12344,
+   "sha256": "46906e4ec86b2a87459a1cdf33bcef7cf0ec0286932b2f74a30d33c8516b461c"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE013.BMP",
+   "size": 12344,
+   "sha256": "c448cb5a395f482e97c468d02492f3330022fe4232eac2b6d2409fb66cb68386"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE014.BMP",
+   "size": 12344,
+   "sha256": "d88a3d2922d9b09e232e88ef41ecfb8ceefbd08a8c57fd82ba8ea8c38ad7e3b6"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE015.BMP",
+   "size": 12344,
+   "sha256": "53d0cf7c1cf0a957791bfc8173d153c534080d788e21b05d414a7c8a9d23ebde"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE016.BMP",
+   "size": 12344,
+   "sha256": "02ba909ba2c025dbc9856cea6918539efa01dd679afe0e695c390100df8f179f"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE017.BMP",
+   "size": 12344,
+   "sha256": "a55d5ece837a0aedbad0ce484c8694b903fb7cc58c3dc4238869363ceee2a6df"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE018.BMP",
+   "size": 12344,
+   "sha256": "15dec63558f222808bc704415dc7baca07c67aa763c940f192137e9eff1f9008"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE019.BMP",
+   "size": 12344,
+   "sha256": "cece0d11992fec328edfe212279bc5606eb4763933d618c0c4b13d1879d1fa5a"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE020.BMP",
+   "size": 12344,
+   "sha256": "7117006c55279681403cf5f75d0ec10425b0fa3e1cc2318ac219ad03271ce972"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE021.BMP",
+   "size": 12344,
+   "sha256": "adfdf56fe5ce022fda148fd4031031b1bb18e1ba69d320064d979f9f8d8a8e1c"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE022.BMP",
+   "size": 12344,
+   "sha256": "50f37ecb109ed3fbecb375e122ef7cfc093c968e2d93092010da702704dcc97b"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE023.BMP",
+   "size": 12344,
+   "sha256": "7e5006e66d7bb3adad7923b9b751631e92111ca4f475a7550e8af7bb8b65096c"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE024.BMP",
+   "size": 12344,
+   "sha256": "68ee3e0bcbf10aee1f1e6a918e595377c638da9fcfa0c0164585b6fa2bb6f261"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE025.BMP",
+   "size": 12344,
+   "sha256": "39950a4b943be226c902618f478fe1d883de1378bf45357f300767eada4366d9"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE026.BMP",
+   "size": 12344,
+   "sha256": "4201e486aac6c4382e7085d69ed7d2a042e7ba4b07ec02d89fddf60373b67e0e"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE027.BMP",
+   "size": 12344,
+   "sha256": "1572ad9df17f1a15d0f3af21e0615e7b400d2f13a1aef03241912366f38da09a"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE028.BMP",
+   "size": 12344,
+   "sha256": "c878db5b671c655e69d03ee5546cac9577cfbabc06038aae8f95653e7b481357"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE029.BMP",
+   "size": 12344,
+   "sha256": "3a782c4e3ac4fa7490df5c26198166465a33c6f0fc21d83610cb1ba6f39f6733"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE030.BMP",
+   "size": 12344,
+   "sha256": "988fd7a201d77178ad2cd83c1a70670cbd7a54ef9e15c1f81206b3cce15862b0"
+  },
+  {
+   "path": "Graphics/Textures/Water/TEXTURE031.BMP",
+   "size": 12344,
+   "sha256": "7577e7f61419444eca49c3298226ef9e53fedd8fb1339a514e0b1e3320a6e421"
+  },
+  {
+   "path": "Graphics/Textures/detail.lit",
+   "size": 98704,
+   "sha256": "4b375e0a0d9360b32ce16606a546b36bf56843e7d916bf8eaf6d51e6f8efaede"
+  },
+  {
+   "path": "Graphics/Textures/land.lit",
+   "size": 190864,
+   "sha256": "7f654bab351114d8d6f501d1d35fda353352db1fea174fe2cc18ea0509fff2d5"
+  },
+  {
+   "path": "Graphics/Textures/plain.lit",
+   "size": 98704,
+   "sha256": "a5769505e0e6d1bcec1643d6b51fae934fa8e2c61bbc17bac70b50091bf939bc"
+  },
+  {
+   "path": "Graphics/Units/Ghost.ugs",
+   "size": 524544,
+   "sha256": "7fd69133490f946f3c19c9f7fa311c19a9a3d2f91029d146d359c7598e57dd1e"
+  },
+  {
+   "path": "Graphics/Units/Hero-Knight.ugs",
+   "size": 524544,
+   "sha256": "a8626fb2669add5a16e35768146710d7396911ec6d87e18327b7106c96f90d38"
+  },
+  {
+   "path": "Graphics/Units/Hero-Mage.ugs",
+   "size": 524544,
+   "sha256": "be8f5d9cdd571ae22386096d13548b651b3b1bdc93ef0b779479adbc3e6884a0"
+  },
+  {
+   "path": "Graphics/Units/Hero-Ranger.ugs",
+   "size": 524544,
+   "sha256": "070fb574c11c2bf79a48c8f7b456c1cbbfbc754a12d648f84d138a22d50f6ea0"
+  },
+  {
+   "path": "Graphics/Units/Hero-Ship-Vesla.ugs",
+   "size": 524544,
+   "sha256": "108346b8bd0d6fe63281af47507c6310de3a3d8117f1e77e7ed0a92c60cb8caa"
+  },
+  {
+   "path": "Graphics/Units/Knight.ugs",
+   "size": 524544,
+   "sha256": "a3b80c851a3fdca08b75ec325649f11c428f32f7a18900e83e4f13bbf5bb3a9d"
+  },
+  {
+   "path": "Graphics/Units/Mage.ugs",
+   "size": 524544,
+   "sha256": "2b156fe3c8d152969ae3705aa82540a19cde54280d543a18914617cf29e8dd25"
+  },
+  {
+   "path": "Graphics/Units/Necromant.ugs",
+   "size": 524544,
+   "sha256": "e850f3edcd3ee1c91b4e85c3d665240a80d2c4fa1d4238a8e4071798557b0f26"
+  },
+  {
+   "path": "Graphics/Units/Peasant.ugs",
+   "size": 524544,
+   "sha256": "084c03cacd9de6221c5e6a26d836c2f1450e41a944e31f03abed3bf1abab9918"
+  },
+  {
+   "path": "Graphics/Units/Rogue.ugs",
+   "size": 524544,
+   "sha256": "ec7b32e7bc039de883cd73478031e60816eb36597938b62a161409868aeb73d4"
+  },
+  {
+   "path": "Graphics/Units/Ship-Merchant.ugs",
+   "size": 2097408,
+   "sha256": "bee0ca42337484ac2b13dc2ff06515a95c837352e9c2d3a4234d618ad1b0cdd8"
+  },
+  {
+   "path": "Graphics/Units/Ship-Pirat.ugs",
+   "size": 2097408,
+   "sha256": "eb158abad5907b0262588c01487771604ab8661e80ecf18aa906daf95b59b5a4"
+  },
+  {
+   "path": "Graphics/Units/Zombie.ugs",
+   "size": 524544,
+   "sha256": "ed49d2120e54265ef0b2fc4cd1e8babc77313cc108cfa54a0f4cae7a6a6d1343"
+  },
+  {
+   "path": "Graphics/Windows/Alt_Tab_ProgressBar.lit",
+   "size": 13840,
+   "sha256": "c1eee3edb8aeab0bcde8a61a716958adaed542120d7d7e5ea8052a914c7f1bac"
+  },
+  {
+   "path": "Graphics/Windows/Alt_Tab_Window_RUS.lit",
+   "size": 139024,
+   "sha256": "d11bbbc2bafbc61d5eddb2aff330ccebb56e8b722577b1c9c3b2d41768726f26"
+  },
+  {
+   "path": "Graphics/Windows/Army-Death.lit",
+   "size": 14224,
+   "sha256": "3b1002db6841347cc448eaf42f875d6235854ebcdc5a727b44d91e1169981a93"
+  },
+  {
+   "path": "Graphics/Windows/Ask.ugs",
+   "size": 160200,
+   "sha256": "60afbcb2d4365718cea57f3920798539af7d6bd0062a1d757cf831ab97b2931b"
+  },
+  {
+   "path": "Graphics/Windows/Authors-Splash.lit",
+   "size": 404752,
+   "sha256": "bab226f1e0ffa02e8c37b0503c6904de01194c10370e3d41f8b4706736eca66c"
+  },
+  {
+   "path": "Graphics/Windows/BI_Castle.lit",
+   "size": 292240,
+   "sha256": "0528d69aabab85fd82c2873c1882442d46e9bae2a4243183b65fa9e53371acb5"
+  },
+  {
+   "path": "Graphics/Windows/BI_Church.lit",
+   "size": 292240,
+   "sha256": "2719da09449dd7498f9806043b296167641c77b77311bc5340cd08956afa456b"
+  },
+  {
+   "path": "Graphics/Windows/BI_Ruin.lit",
+   "size": 292240,
+   "sha256": "e81d0bc253babfaaa68291d54649515a5fb0fbaccc0b0104ea5ce55a57154ed6"
+  },
+  {
+   "path": "Graphics/Windows/BI_Town.lit",
+   "size": 292240,
+   "sha256": "5525eac3a788baa5b137f7c1ca4652f74b8ce1fb1d6a0be9cf259fb840a8069d"
+  },
+  {
+   "path": "Graphics/Windows/Benguiat.lit",
+   "size": 119176,
+   "sha256": "5f15c74d296188622cd6de944cbf41dde493050a2880bc76fbf35fc8f5fd26ea"
+  },
+  {
+   "path": "Graphics/Windows/Benguiat_Shadow.lit",
+   "size": 119176,
+   "sha256": "67c6ff2fc8969dfcbe26525be065c0880c3e33e7b212111f73e958c80b79cd43"
+  },
+  {
+   "path": "Graphics/Windows/Big_Frame_1.lit",
+   "size": 38800,
+   "sha256": "09748d5c76192a52c080bf13758e092fd058d81685add70cc34637107bfa017b"
+  },
+  {
+   "path": "Graphics/Windows/Big_Frame_1a.lit",
+   "size": 66712,
+   "sha256": "570440ae95565b56291726eb39df89da4a39f240abddac3b54231e9933ab0313"
+  },
+  {
+   "path": "Graphics/Windows/Big_Frame_2.lit",
+   "size": 38800,
+   "sha256": "5c2938452bdd6a50b8b58ce209d6d7a736a0222d53c0c5830716199baf99eac1"
+  },
+  {
+   "path": "Graphics/Windows/Big_Frame_2a.lit",
+   "size": 66712,
+   "sha256": "39643e371bafb57766f33f9c4ea52c2928265ae03b5fd839adde64a540c4bb0f"
+  },
+  {
+   "path": "Graphics/Windows/Bonus-2Row.lit",
+   "size": 1891,
+   "sha256": "63007818215b364329142e6e099cca6921eeb83e51bc72d89471fc4c3e125485"
+  },
+  {
+   "path": "Graphics/Windows/Bonus-InCastle.lit",
+   "size": 1891,
+   "sha256": "7336af1d9a8228b39e36cf1fef8da7c535ffe3712576632ac71ff10a140fb59f"
+  },
+  {
+   "path": "Graphics/Windows/Bonus-NoPayment.lit",
+   "size": 1891,
+   "sha256": "49e8689ccc326c07b8a3321979e6cb8b9c53712a0fbf224c788ddbca06c07a71"
+  },
+  {
+   "path": "Graphics/Windows/Bonus-Ressurrect.lit",
+   "size": 1891,
+   "sha256": "2fb13c501444169b9cc03b16031e4c707061ff8114848de881e956bd2ce17009"
+  },
+  {
+   "path": "Graphics/Windows/Bonus1.lit",
+   "size": 1891,
+   "sha256": "f201586e92670acb85b7eb2f09d210234d0ec00b8ee269f5e6bcc76e3f781db4"
+  },
+  {
+   "path": "Graphics/Windows/Bonus10.lit",
+   "size": 1891,
+   "sha256": "79516ffdf0b6029f41873854794a2dbdeea46cbaf241c0ae2b80a0c3c1883c3a"
+  },
+  {
+   "path": "Graphics/Windows/Bonus11.lit",
+   "size": 1891,
+   "sha256": "cd3557117e63336fa66ae56da7aaa531f6495c2a158032f091db030f7c4863a7"
+  },
+  {
+   "path": "Graphics/Windows/Bonus12.lit",
+   "size": 1891,
+   "sha256": "247b6821678057eee42182cb212ec5c42d03cf3d66e53f2e6bd0a1313053f5ae"
+  },
+  {
+   "path": "Graphics/Windows/Bonus13.lit",
+   "size": 1891,
+   "sha256": "fccdb48e75e224693f0b02e8a90476dbfa0806ddab07e3330f8b75edf4287e7a"
+  },
+  {
+   "path": "Graphics/Windows/Bonus14.lit",
+   "size": 1891,
+   "sha256": "fd68ce814b51997fa1d516535ded39bd3ac0cc3fda06fd746fb4fc14e8b95b6c"
+  },
+  {
+   "path": "Graphics/Windows/Bonus15.lit",
+   "size": 1891,
+   "sha256": "ca93ba08af2564b3b2766743ee65461a0bd46c92579fbb4d6a52211182c0d493"
+  },
+  {
+   "path": "Graphics/Windows/Bonus16.lit",
+   "size": 1891,
+   "sha256": "efc910ef00be25044fac741eb70873c0bb22d506b39a3d571bb20b4913e7d5c8"
+  },
+  {
+   "path": "Graphics/Windows/Bonus17.lit",
+   "size": 1891,
+   "sha256": "12390babf313f182a1c4866a6820a206990a9d916bf49b5f43609b3c96b6c841"
+  },
+  {
+   "path": "Graphics/Windows/Bonus18.lit",
+   "size": 1891,
+   "sha256": "0b935ac4ed5c981bad3469055ae0f7e1ec87bb8fcc15aa71ca5e713994c8d299"
+  },
+  {
+   "path": "Graphics/Windows/Bonus19.lit",
+   "size": 1891,
+   "sha256": "144a32af6cc0d871385785e3c7c09b7eb98740e210f0da4d978aa215eecc630a"
+  },
+  {
+   "path": "Graphics/Windows/Bonus2.lit",
+   "size": 1891,
+   "sha256": "6c7d34eb6580f6ce2377d3f811d46fd940ce29fe7f6596d4a2b63c4c443b4f11"
+  },
+  {
+   "path": "Graphics/Windows/Bonus20.lit",
+   "size": 4624,
+   "sha256": "ea44a4ee23c04b2bfc1af18caf31d9103af91784732950a47a9081ea686233a8"
+  },
+  {
+   "path": "Graphics/Windows/Bonus21.lit",
+   "size": 1891,
+   "sha256": "bbd0f7fe492daeca0e20c4bf8672b29be4caf39e7234dcc0d48652bee02cb948"
+  },
+  {
+   "path": "Graphics/Windows/Bonus22.lit",
+   "size": 2128,
+   "sha256": "1062d582741bc7ace993a4449e1836ff7a0fd28bbcf80cfce6cd3da7fb1c68d6"
+  },
+  {
+   "path": "Graphics/Windows/Bonus23.lit",
+   "size": 3472,
+   "sha256": "b194e735c72b52adecbacb3537fcb087d42f8a6bd1297d7e8572063cfbc728e1"
+  },
+  {
+   "path": "Graphics/Windows/Bonus24.lit",
+   "size": 3472,
+   "sha256": "c554731e6cea28abc9e9d7519cae824909cbf0ff2a264fb4299e4d277f407522"
+  },
+  {
+   "path": "Graphics/Windows/Bonus25.lit",
+   "size": 2704,
+   "sha256": "163ec6467aae8f0e26672cbdce7a17f00c8e8c5e2a227ba096865eefe34e82d5"
+  },
+  {
+   "path": "Graphics/Windows/Bonus26.lit",
+   "size": 2704,
+   "sha256": "9ce8c9dcd7d193c666c19bdb7e7d5f510fbe8709027f1a7046db1f90a5e0f54d"
+  },
+  {
+   "path": "Graphics/Windows/Bonus27.lit",
+   "size": 2704,
+   "sha256": "5be333e911a96dd893b6a06e60f4bbb0c0477d1e6ca0d778f3797a46a41d0745"
+  },
+  {
+   "path": "Graphics/Windows/Bonus28.lit",
+   "size": 3472,
+   "sha256": "b6613c5af2f2b2c1c356c9cfc66e1855e01420a3af4b139ef7e1e4a4003ee909"
+  },
+  {
+   "path": "Graphics/Windows/Bonus29.lit",
+   "size": 3472,
+   "sha256": "460ad30997467bb52f1c31dd6c2280fa0ea93d8f388470d47524d25d8bd38e36"
+  },
+  {
+   "path": "Graphics/Windows/Bonus3.lit",
+   "size": 1891,
+   "sha256": "7333b53bbfe52a5009da0e79256981c4b302e815666354d1c09a42c9f675bda9"
+  },
+  {
+   "path": "Graphics/Windows/Bonus30.lit",
+   "size": 2128,
+   "sha256": "bbff9a51efbc72a5495c68bb1cca89a19cc145365133096068dcbcf9d6ca3fa1"
+  },
+  {
+   "path": "Graphics/Windows/Bonus31.lit",
+   "size": 3472,
+   "sha256": "7ed3c5faa264b0aa0be9d812303389a44ae544352933b44148c3368e50d21aa2"
+  },
+  {
+   "path": "Graphics/Windows/Bonus32.lit",
+   "size": 3472,
+   "sha256": "1f28f7d44a0996707de55fa4166fb5d4eb79332a8c1fd789eb33ccf23499864d"
+  },
+  {
+   "path": "Graphics/Windows/Bonus33.lit",
+   "size": 2704,
+   "sha256": "972db24a1b02c3e5e4e70f5214befbdd2f0847f813a6270fb943600c59ca1db0"
+  },
+  {
+   "path": "Graphics/Windows/Bonus34.lit",
+   "size": 1880,
+   "sha256": "90542c504a23dfb4bf7f1ea36586e5f90a7d5fa75783df19246272a60d0bf313"
+  },
+  {
+   "path": "Graphics/Windows/Bonus35.lit",
+   "size": 1956,
+   "sha256": "1369fe503e5910d1e211c2ba4b60a2517884eefef7c26ba9ade1f62c12d3e353"
+  },
+  {
+   "path": "Graphics/Windows/Bonus36.lit",
+   "size": 1956,
+   "sha256": "2be271871ea934de205c46d6ff84286efb3c41a8b2b749d89f56eaa93442d95d"
+  },
+  {
+   "path": "Graphics/Windows/Bonus37.lit",
+   "size": 1956,
+   "sha256": "cbd5a3251abbe5c68e4aa9651db7205b64836d3d62ae07c608b400c3704c738a"
+  },
+  {
+   "path": "Graphics/Windows/Bonus38.lit",
+   "size": 1956,
+   "sha256": "8344b63ef3d813b431fe63708d33069d8d99020b3a1a2a5e2a7afa33153bb26a"
+  },
+  {
+   "path": "Graphics/Windows/Bonus39.lit",
+   "size": 1880,
+   "sha256": "eb931251759dba8ed4ed8cfc9fd20db6030b6e623fc5bef76526b8f4f42db714"
+  },
+  {
+   "path": "Graphics/Windows/Bonus4.lit",
+   "size": 1891,
+   "sha256": "82bc875313ecf717df3ea1ccd9e53e8e27d57e41cf01f84cd481a7c53569a616"
+  },
+  {
+   "path": "Graphics/Windows/Bonus40.lit",
+   "size": 1956,
+   "sha256": "412af8c5010ee6846e75515dc4981141e676f591c5d466c5aacc5a0f1e64205c"
+  },
+  {
+   "path": "Graphics/Windows/Bonus41.lit",
+   "size": 1956,
+   "sha256": "6256f5e8e5fd1d3a4775c2c76b3d52bec3d685a2895dc3913cdcb191f3d5cfc5"
+  },
+  {
+   "path": "Graphics/Windows/Bonus42.lit",
+   "size": 1956,
+   "sha256": "247ed5c9bfbb3194efda1904dcbb42973a2ad497d24bdff85acefe91d6cca61e"
+  },
+  {
+   "path": "Graphics/Windows/Bonus43.lit",
+   "size": 1956,
+   "sha256": "bc507ad4ec9652011e2b637fe46b2d1bb61bccca43da21eb8d85d5d43e349ea2"
+  },
+  {
+   "path": "Graphics/Windows/Bonus44.lit",
+   "size": 2632,
+   "sha256": "2156745ee26751a7869431e7e029a6f757a2df1e3fe38058db5e197718909d1a"
+  },
+  {
+   "path": "Graphics/Windows/Bonus45.lit",
+   "size": 1956,
+   "sha256": "84790a6494533413ae561e7666ae1dba1804fe4bb17ab3d7eed5cb7419f30e6e"
+  },
+  {
+   "path": "Graphics/Windows/Bonus46.lit",
+   "size": 1976,
+   "sha256": "a38df0ee892f331edbfee73fd7be6de9d7b04b8d1f80a22178942848c6a246fa"
+  },
+  {
+   "path": "Graphics/Windows/Bonus47.lit",
+   "size": 2108,
+   "sha256": "6fd3d2430cd2458dc41223070ffc6b2763e37bee24f9721929ca99bb920ec413"
+  },
+  {
+   "path": "Graphics/Windows/Bonus48.lit",
+   "size": 2056,
+   "sha256": "33b1cd9a28c9d0c809a45dfd75c34815bf8246982cf17c8cd0b89b1db14b6f5f"
+  },
+  {
+   "path": "Graphics/Windows/Bonus49.lit",
+   "size": 1620,
+   "sha256": "708489efb508373a97cc38cb8118dae2f09ffdc5d31aed007b6d1eb0ee24a12b"
+  },
+  {
+   "path": "Graphics/Windows/Bonus5.lit",
+   "size": 1891,
+   "sha256": "d8a2ca9c1ede2fb2eb140d1bd80812e252e420e5a7231bb515220f74cb16d6fa"
+  },
+  {
+   "path": "Graphics/Windows/Bonus50.lit",
+   "size": 2240,
+   "sha256": "e8e6d14fdf92f04c9cfb6499420cd01d1de304044c7a5a129a9fe5fa0cc34640"
+  },
+  {
+   "path": "Graphics/Windows/Bonus51.lit",
+   "size": 1956,
+   "sha256": "189c4065cf8e1246b4669483f52733d315b7329bd358ecb76a314de83b015505"
+  },
+  {
+   "path": "Graphics/Windows/Bonus52.lit",
+   "size": 1956,
+   "sha256": "c333c17908319ce2ee42f876226929069fd2f74f887785bb05411c57706ebc86"
+  },
+  {
+   "path": "Graphics/Windows/Bonus6.lit",
+   "size": 1891,
+   "sha256": "ab315b487a448050a2e87120e6b91dd08022f44f66918584dabb5eedffe29223"
+  },
+  {
+   "path": "Graphics/Windows/Bonus7.lit",
+   "size": 1891,
+   "sha256": "aea8223dee93eea1ca0c5585145798107f3eeb61bb3ce153f2f0fe553d4e2de2"
+  },
+  {
+   "path": "Graphics/Windows/Bonus8.lit",
+   "size": 1891,
+   "sha256": "3c02e15dd12e8db55abacbfeed689ef286ba0e3006a74bc9820fdf711fbbef16"
+  },
+  {
+   "path": "Graphics/Windows/Bonus9.lit",
+   "size": 1891,
+   "sha256": "a32d9e98d34efdf59a8a9cfbbd980fa9c997c62a0a76f3fde884b73f4780f601"
+  },
+  {
+   "path": "Graphics/Windows/Btn1Down.lit",
+   "size": 7312,
+   "sha256": "521b808ce689bcde2914d28abd0f5b048c34a0c3e9da87c25a2eff0aa26873cd"
+  },
+  {
+   "path": "Graphics/Windows/Btn1Up.lit",
+   "size": 7312,
+   "sha256": "523a9ddde0bb2634108a71ae31e320af1d753c13adc3d6b89f9310d532a961e5"
+  },
+  {
+   "path": "Graphics/Windows/Btn2Down.lit",
+   "size": 9616,
+   "sha256": "1318eea3e3e5798ff20acced37bac37b71e5fd9386fde66a44b0957b717eac1a"
+  },
+  {
+   "path": "Graphics/Windows/Btn2Up.lit",
+   "size": 9616,
+   "sha256": "9a2526daabe775050ca4379d938ad506e60147090d9bde143e8d916efe245155"
+  },
+  {
+   "path": "Graphics/Windows/Btn3Down.lit",
+   "size": 11920,
+   "sha256": "fc165ab6e25a3bcb965260f406f86d9189db5b3654062176e8ce98bd9265a66b"
+  },
+  {
+   "path": "Graphics/Windows/Btn3Up.lit",
+   "size": 11920,
+   "sha256": "c7a4124a18f5c9be54fde23891ea21c2efd9a9eb02b58fa57fd72e16769e4e27"
+  },
+  {
+   "path": "Graphics/Windows/CBoxChecked-Alpha.lit",
+   "size": 2368,
+   "sha256": "c332436823d9f7d0da12a157b35e90d48927a24538842ed22639a996ac72c225"
+  },
+  {
+   "path": "Graphics/Windows/CBoxChecked.lit",
+   "size": 2368,
+   "sha256": "80eb17a12c0015d6a7e3fb1c812b8aa40c26639b5b0b74ae2fb25017d0b4b8dd"
+  },
+  {
+   "path": "Graphics/Windows/CBoxUn-Alpha.lit",
+   "size": 2368,
+   "sha256": "b87cf3669785ed07812ecae1438867c016e87116a88244618ba1c1fb0b506e41"
+  },
+  {
+   "path": "Graphics/Windows/CBoxUn.lit",
+   "size": 2368,
+   "sha256": "0e3081879ab9051fe8ad9194877d570e0c135f987edd4d300ae614e7db5b580d"
+  },
+  {
+   "path": "Graphics/Windows/Castle.lit",
+   "size": 393616,
+   "sha256": "7457d424f77993a8b34689098d3fbd8dce6d39dd1e888e2231de247c8ad58e16"
+  },
+  {
+   "path": "Graphics/Windows/Clock.ugs",
+   "size": 176600,
+   "sha256": "36385c17c9ad84c030bbec3bb59e8529be40866455229706542b517b5336f456"
+  },
+  {
+   "path": "Graphics/Windows/CloseButtonGreen-Down2.lit",
+   "size": 1339,
+   "sha256": "b49cfbd02c1c6fe7dc3acbb50e863539ddad6485b46e360c9d460de03c4af3b6"
+  },
+  {
+   "path": "Graphics/Windows/CloseButtonGreen-Up.lit",
+   "size": 1339,
+   "sha256": "8c1e82803955d7be8f7ef47e1eb123d83a9d0b68badb0a3ca3f41c966ab42f3e"
+  },
+  {
+   "path": "Graphics/Windows/CloseButtonRed-Down2.lit",
+   "size": 1339,
+   "sha256": "b49cfbd02c1c6fe7dc3acbb50e863539ddad6485b46e360c9d460de03c4af3b6"
+  },
+  {
+   "path": "Graphics/Windows/CloseButtonRed-Up.lit",
+   "size": 1339,
+   "sha256": "5337d93a701e323bc5ec2f6bcd4e76714b15136b21dcaf133dd3b7c59df94f0a"
+  },
+  {
+   "path": "Graphics/Windows/Corner-Left.lit",
+   "size": 6544,
+   "sha256": "bc8f0ae66276314b98dfb8a0ec4fb625cc1c0720a4dff0f7c325eeab19d19b85"
+  },
+  {
+   "path": "Graphics/Windows/Corner-Right.lit",
+   "size": 6544,
+   "sha256": "0d60cf970bbf14dbbd5e17338d1144e62b3b780ac5d75e2a5e0a6b51213ba044"
+  },
+  {
+   "path": "Graphics/Windows/Corner_Frame-LD.lit",
+   "size": 6928,
+   "sha256": "f2ca7ee139b5e36355ee13804369a0532415cdeeae23fa2d5a1bf37a2c56943c"
+  },
+  {
+   "path": "Graphics/Windows/Corner_Frame-LU.lit",
+   "size": 6928,
+   "sha256": "5b40def7be1167fe6f4c09436ce18ad2fc4ebb28280dda888bb824d67d148f73"
+  },
+  {
+   "path": "Graphics/Windows/Corner_Frame-RD.lit",
+   "size": 6928,
+   "sha256": "fc13ef8519386a7995548f6edc1ed753c211750ae94d610cab2aa57d11e61b03"
+  },
+  {
+   "path": "Graphics/Windows/Corner_Frame-RU.lit",
+   "size": 6928,
+   "sha256": "2f1c1a8781f9739372dae6c5ccb4745453764d71490a0b4ff2080b20f5ed53f2"
+  },
+  {
+   "path": "Graphics/Windows/Credits_Alpha.lit",
+   "size": 3876616,
+   "sha256": "0951369d09eb36051160182170bf17860c1f4a19a71898d5c40f6bc217cbd70d"
+  },
+  {
+   "path": "Graphics/Windows/Credits_Color.lit",
+   "size": 3876616,
+   "sha256": "be3c2cf9f394dd677c93e6b53b5b453bc45cb73a712f1f0c1218d224cc615a7b"
+  },
+  {
+   "path": "Graphics/Windows/Cursor-Ask.lit",
+   "size": 6672,
+   "sha256": "90fb5349d1fc5867e631d5e59e586b1ba9070b0e5db5013f149469efcaae609a"
+  },
+  {
+   "path": "Graphics/Windows/Cursor-Denied.lit",
+   "size": 6672,
+   "sha256": "5aeab31f665facc832c21e8e1128f4b409016f2e8390da7ff96500a31cf9bea6"
+  },
+  {
+   "path": "Graphics/Windows/Cursor-Normal.lit",
+   "size": 4368,
+   "sha256": "fec0000cfef4e907b9c81e7a5fc44a76cd3206bfe0c0524da6d635279f7a42a0"
+  },
+  {
+   "path": "Graphics/Windows/DTSplashPBar-Inner.lit",
+   "size": 15376,
+   "sha256": "769583e1a629d93df1987ac5fe4f16ebd1cdbd6079d06671f8a902ef92b9b5ca"
+  },
+  {
+   "path": "Graphics/Windows/DTSplashPBar.lit",
+   "size": 81168,
+   "sha256": "83cb4b6493459c8d228536af53141dc8440b4cbebc87e25c670747df24556432"
+  },
+  {
+   "path": "Graphics/Windows/DTSplash_RUS.lit",
+   "size": 1180048,
+   "sha256": "1e5d179dc80826def6e57f5e6b5655a1c7f54232324a69c3f9a7d26d5f4a219f"
+  },
+  {
+   "path": "Graphics/Windows/DownCorner.lit",
+   "size": 5648,
+   "sha256": "55be622406a598da884e35b66ab0b3491f28caa5c923a01de6aa7bcb5153001e"
+  },
+  {
+   "path": "Graphics/Windows/GP-Button-Alpha.lit",
+   "size": 6160,
+   "sha256": "9ef3315364f1d194ad770706b43443473d06fcec69b7c5fe3c38e940e476509f"
+  },
+  {
+   "path": "Graphics/Windows/GP-ButtonCenter-Alpha.lit",
+   "size": 11152,
+   "sha256": "22af9a7f71abac2a3f85f38404d506f9b36a617ebaa64a281e0b1f3ee0689501"
+  },
+  {
+   "path": "Graphics/Windows/GP-ButtonCenter.lit",
+   "size": 11152,
+   "sha256": "27403fd8d41a91b194470fd06d5aaa8649f5195a66b4a305c6d9d6728c1c18c7"
+  },
+  {
+   "path": "Graphics/Windows/GP-ButtonCenterDown.lit",
+   "size": 11152,
+   "sha256": "d46cd498c3a8c61379a671d76081cfe64cf5aeb4aa85ac13224a06ad1fda2c1a"
+  },
+  {
+   "path": "Graphics/Windows/GP-ButtonLeft.lit",
+   "size": 11920,
+   "sha256": "938a1283725098ff29539ce669e0822e40ed4214f4dead477a2b7c3206b55a90"
+  },
+  {
+   "path": "Graphics/Windows/GP-ButtonLeftDown.lit",
+   "size": 11920,
+   "sha256": "945316d63e84d8c87c8aaf749f237ee78ef2da8a4044ac8f53b2c833849db2a2"
+  },
+  {
+   "path": "Graphics/Windows/GP-ButtonRight.lit",
+   "size": 11920,
+   "sha256": "274b52517419c20c4ab8b877096c621d92d0227608ef41061dae35286047df20"
+  },
+  {
+   "path": "Graphics/Windows/GP-ButtonRightDown.lit",
+   "size": 11920,
+   "sha256": "29e0c33f382990c76a7cd1421faacee02dc5c652a61cb0ca9319a945371f250a"
+  },
+  {
+   "path": "Graphics/Windows/HArrowLeft.lit",
+   "size": 1936,
+   "sha256": "2e5dab0e1d8909b2e217034de0cd5e0f27baaa50c6e75a26a58b3b4adf8eacd7"
+  },
+  {
+   "path": "Graphics/Windows/HArrowRight.lit",
+   "size": 1936,
+   "sha256": "6bc81c8862205dc6fab230762a7b4d4898509c9c20c71193e758c57c2c86a9b4"
+  },
+  {
+   "path": "Graphics/Windows/HSTexture.lit",
+   "size": 6820,
+   "sha256": "3b53c7550b0eac6cfe22ebd2e76998cc60ac010a7c461d48f6ce3e40dde673a8"
+  },
+  {
+   "path": "Graphics/Windows/HSlider.lit",
+   "size": 1744,
+   "sha256": "446144dda5135eca651b1adc068ab1e246f5abb38fbbe636b40b83f7817b098c"
+  },
+  {
+   "path": "Graphics/Windows/Hero0.lit",
+   "size": 38800,
+   "sha256": "b0edab82552e90e84a95bac7daa0ea08a1a3695bd91eae5a2371f073826f547e"
+  },
+  {
+   "path": "Graphics/Windows/HeroBonus1.lit",
+   "size": 1891,
+   "sha256": "a735469aa6b64bc7be1b5dbcba2e63c4991dff98f917fc8fe65032342a772c4f"
+  },
+  {
+   "path": "Graphics/Windows/HeroBonus2.lit",
+   "size": 1891,
+   "sha256": "837ba66107d1741ca98507fa168bd5456464639ff907e1928985c953e4233403"
+  },
+  {
+   "path": "Graphics/Windows/HeroBonus3.lit",
+   "size": 1891,
+   "sha256": "ea3a8e9a79e2b16b4053b2b51e6598462b43c1775338b442ed37bb8aab8f4ffd"
+  },
+  {
+   "path": "Graphics/Windows/HintFrame.lit",
+   "size": 81424,
+   "sha256": "aada38117a1d6637397cbe0d3deb407643350c11fac85eefceb5c7f5ef24383a"
+  },
+  {
+   "path": "Graphics/Windows/House.ugs",
+   "size": 176600,
+   "sha256": "395eb2ef256dcf0f077e203387c040847557afa6b98223f2d29b953d5071b662"
+  },
+  {
+   "path": "Graphics/Windows/Inventory.lit",
+   "size": 124816,
+   "sha256": "053595b11ee359ff2b6036e7cdb6ca8b5f12485ef722843e921e16839e07815a"
+  },
+  {
+   "path": "Graphics/Windows/LSign-Delete-Down.lit",
+   "size": 4624,
+   "sha256": "efb1af8bb721718602485296fa0a5a235eaa61875b7108512235564b2cc247ae"
+  },
+  {
+   "path": "Graphics/Windows/LSign-Delete.lit",
+   "size": 4624,
+   "sha256": "da40c2249bd2b525e4178509d899a3ac15fb99e1484903627cee9577c13f8d3b"
+  },
+  {
+   "path": "Graphics/Windows/LSign-Load-Down.lit",
+   "size": 4624,
+   "sha256": "bc859602fa5fcf108bde9e10c57466ca33a9a1618d972d19cb6ff3df638accff"
+  },
+  {
+   "path": "Graphics/Windows/LSign-Load.lit",
+   "size": 4624,
+   "sha256": "d05747cfc9b97c7d792522cfc7151c4892a01cb06de4ddb4a20667dde39a4db5"
+  },
+  {
+   "path": "Graphics/Windows/MB2.ugs",
+   "size": 114460,
+   "sha256": "474d79ee293a6c09ec9406720b73a37243f22cd78a2e11edb1a0728427c0af09"
+  },
+  {
+   "path": "Graphics/Windows/MLBtn1Down.lit",
+   "size": 23824,
+   "sha256": "47f9f5a2f89ee5e12915ad06e50b6856b7cf86c1cf86e4908091437a86a7ae98"
+  },
+  {
+   "path": "Graphics/Windows/MLBtn1Up.lit",
+   "size": 23824,
+   "sha256": "914b62b4f62d5a7cfa7f6ab5599cf72f9521b58fb5166d569ac80ea3e25774b0"
+  },
+  {
+   "path": "Graphics/Windows/MLBtn2Down.lit",
+   "size": 15888,
+   "sha256": "5e85cdd30c6e562a8d44c1d99c6df0d751b32ca5674670c1f79e753a8c815f43"
+  },
+  {
+   "path": "Graphics/Windows/MLBtn2Up.lit",
+   "size": 15888,
+   "sha256": "099dcc34028981b9aa67cff95f6cf7781dc853e20c6174b8608257e514d480d8"
+  },
+  {
+   "path": "Graphics/Windows/MM_Icons.ugs",
+   "size": 27652,
+   "sha256": "83d1264d3e74827051bd46af4f2b75a64adfb4b0f7a3a1de7bc75ea36205d85f"
+  },
+  {
+   "path": "Graphics/Windows/MRBtn1Down.lit",
+   "size": 23824,
+   "sha256": "214b564ab584d60b552cf6a6d2a576cab0c7c1c37617039e2bda3dc517d862a7"
+  },
+  {
+   "path": "Graphics/Windows/MRBtn1Up.lit",
+   "size": 23824,
+   "sha256": "4c001ec1d023e98bb73464caeca9c42cafa66fe2141dd0b0db19d018a8b2de7a"
+  },
+  {
+   "path": "Graphics/Windows/MRBtn2Down.lit",
+   "size": 15888,
+   "sha256": "4e2b04f8a318718fb17f10f2d950dd03ca92386e18ef7d6b708da6856a5c550d"
+  },
+  {
+   "path": "Graphics/Windows/MRBtn2Up.lit",
+   "size": 15888,
+   "sha256": "ab339ba98368d99149ef0ca92a8dab217e347fee50626da37fa51d79d122431c"
+  },
+  {
+   "path": "Graphics/Windows/MSign.lit",
+   "size": 19216,
+   "sha256": "ceab6e5202f981309de7cc96f43f49dd31e2ad345a12b26e05484e996c84e177"
+  },
+  {
+   "path": "Graphics/Windows/MapButton-1.lit",
+   "size": 784,
+   "sha256": "36a39d995f4feb4380e71de16a699f6ce0a3063b0ab13e7ced70a04528da68e5"
+  },
+  {
+   "path": "Graphics/Windows/MapButton-2.lit",
+   "size": 784,
+   "sha256": "99fc27b45f93a83b0814a7b7cbce793e261dffa813657019e78c0110c83a51dd"
+  },
+  {
+   "path": "Graphics/Windows/MapButton-3.lit",
+   "size": 784,
+   "sha256": "7da79ebf653581a2c6c34d94d89218d0b6adc1f645eac54a3191ae1e6eb70fef"
+  },
+  {
+   "path": "Graphics/Windows/MapImageFrame.lit",
+   "size": 80656,
+   "sha256": "a2a0de076326e12c98a01aff0b468e16de5fc660108302ce806054d8f4b10053"
+  },
+  {
+   "path": "Graphics/Windows/MenuFlame.lit",
+   "size": 393616,
+   "sha256": "509aac5d65aa50ea8f78512c00bfc983cf170fe7c9d7c0977581188ef60628e5"
+  },
+  {
+   "path": "Graphics/Windows/MiniMap_Frame_200x200.lit",
+   "size": 158716,
+   "sha256": "d5882d038787063d58a0b3a98a9ffe773ae4091111079102e7ac11146c1f8094"
+  },
+  {
+   "path": "Graphics/Windows/MiniMap_Frame_400x400.lit",
+   "size": 554716,
+   "sha256": "20a144a373588cc7deac4abe88ce7a3eb48ddd6683bb24047def0c36ea33dc44"
+  },
+  {
+   "path": "Graphics/Windows/NewHero_Paper.lit",
+   "size": 559632,
+   "sha256": "b2964c309f066c128e2193ee5cf841050aae1bd17721aba9933644f936b0e551"
+  },
+  {
+   "path": "Graphics/Windows/QuestBorder.lit",
+   "size": 99088,
+   "sha256": "2fe846da5e9e900358e1a6fef6293dff41dc1e3b6e2a53cdd958d08b39bb9c5b"
+  },
+  {
+   "path": "Graphics/Windows/Res-Income.lit",
+   "size": 2832,
+   "sha256": "f29ac15c0e0ab73c669426edc4d157f3959e009d86003c31861ad5a6663d2d8e"
+  },
+  {
+   "path": "Graphics/Windows/Res-Magic.lit",
+   "size": 3600,
+   "sha256": "7c9fd2eeca7de8cb80e4b3c192f8318407f4230609fb8a5e97cb03d889a2576a"
+  },
+  {
+   "path": "Graphics/Windows/Res-Money.lit",
+   "size": 3600,
+   "sha256": "d3caebf1be165446c2e25d656f1dcb9fbe9d32d5ddd0643ec7c9c9dc4dbd5e98"
+  },
+  {
+   "path": "Graphics/Windows/Res-Payment.lit",
+   "size": 3600,
+   "sha256": "d7844a2db31015fa68948a741018cd1c988ba3a6cce87f83f65590fe79b1bab7"
+  },
+  {
+   "path": "Graphics/Windows/ResFrame.lit",
+   "size": 61328,
+   "sha256": "c1759514f39021205edfc11b9a3353e8043c3b61d4df81a0a09e6c1a1bdde53e"
+  },
+  {
+   "path": "Graphics/Windows/SI_Castle.lit",
+   "size": 4624,
+   "sha256": "12590485ba2275fe959f14947ec0f19026914054e6d467880346f57ae7785f82"
+  },
+  {
+   "path": "Graphics/Windows/SI_Helm.lit",
+   "size": 4624,
+   "sha256": "026e449c5694e752f1d7dd2ba577f9fff4829443625137378dc52d1b04eb7217"
+  },
+  {
+   "path": "Graphics/Windows/SI_Skull.lit",
+   "size": 4624,
+   "sha256": "bce75eef7b1a9ccf4e214c1adce5e27d179e86cea2a568fa727ff29c3a1d61de"
+  },
+  {
+   "path": "Graphics/Windows/SI_Swords.lit",
+   "size": 4624,
+   "sha256": "258695304afbdfe117e56efddd06667634bdc772819f53db39dba1abc31ec884"
+  },
+  {
+   "path": "Graphics/Windows/SI_Tutorial.lit",
+   "size": 4624,
+   "sha256": "b400357a39a73621fe4073f1d90c9c3891b36271c01f5937982f611b74790b6d"
+  },
+  {
+   "path": "Graphics/Windows/SMText_RUS.lit",
+   "size": 24976,
+   "sha256": "4f172e82b063a648361931ed58df578c7ff2d7e4550a79b9a439a5212f448147"
+  },
+  {
+   "path": "Graphics/Windows/STutorial_RUS.lit",
+   "size": 192400,
+   "sha256": "5a1d60b85e3538e1d4e83b3e13a7ad3c9ef9d3905c011a4077a9e1dee02184d0"
+  },
+  {
+   "path": "Graphics/Windows/S_Battle.lit",
+   "size": 404752,
+   "sha256": "5db1fd568a0d0aadfca930c170c3d644dbe1da4414d60d62e504453f163b7291"
+  },
+  {
+   "path": "Graphics/Windows/S_Castle.lit",
+   "size": 292240,
+   "sha256": "9149b91a0881417a0b64ff7ea311a8bc9310f77c367a81295b14039617f59670"
+  },
+  {
+   "path": "Graphics/Windows/S_Church.lit",
+   "size": 292240,
+   "sha256": "702bdebdb663e6d6b1ffa963cae3071737c92d1396288fe2435c4b6bf0feaa76"
+  },
+  {
+   "path": "Graphics/Windows/S_Exit_RUS.lit",
+   "size": 404752,
+   "sha256": "2a0bb84cc1261a478252a39165efcda94993c0136363f472dc6b70880d990435"
+  },
+  {
+   "path": "Graphics/Windows/S_Grave.lit",
+   "size": 292240,
+   "sha256": "fd207c2f144b1a7fc4d9d7895c23da3b5705a23fb145dad12c1b60e2ac086dac"
+  },
+  {
+   "path": "Graphics/Windows/S_Market.lit",
+   "size": 292240,
+   "sha256": "340b8cf9719074afd2cc51228c1039df1f73dd5d65016a95031206aee3521598"
+  },
+  {
+   "path": "Graphics/Windows/S_Ruin.lit",
+   "size": 292240,
+   "sha256": "d593e3f79ce1028decaf9ef2a6d71460b5b67a2161698bafacedc9ce78564642"
+  },
+  {
+   "path": "Graphics/Windows/S_RuinedHouse.lit",
+   "size": 292240,
+   "sha256": "b230236feaf5b718a23f6bc9028b10dbcc92dab4b433021970b5b85149475a54"
+  },
+  {
+   "path": "Graphics/Windows/S_Save.lit",
+   "size": 350608,
+   "sha256": "7dcd8027b6eec5f232193006d1e12f07d787070b09ecf406d8532cf12a7996f6"
+  },
+  {
+   "path": "Graphics/Windows/S_Shipyard.lit",
+   "size": 404752,
+   "sha256": "97265c6f5e33ee104b1b5e7188406c8f525ca1f2905e891d538773a95fecf631"
+  },
+  {
+   "path": "Graphics/Windows/S_Tavern.lit",
+   "size": 292240,
+   "sha256": "a22d4a63cdf87683e8426fbbe0d721d18e846527317c6edec33c133201b37c7b"
+  },
+  {
+   "path": "Graphics/Windows/S_Town.lit",
+   "size": 292240,
+   "sha256": "704fdeff95f077325755ab6b570d876b6df11124639bfcabbc1655fc3b8b297e"
+  },
+  {
+   "path": "Graphics/Windows/S_Tut.lit",
+   "size": 96400,
+   "sha256": "0c1da6eb0f3b4cfc89d810276ab5167cc0e11799dd3704918c34abeb8982096a"
+  },
+  {
+   "path": "Graphics/Windows/S_Village.lit",
+   "size": 404752,
+   "sha256": "b027f9289b692be6fc52ab2e987b73e3a1d8af59338e2e409233149609165d47"
+  },
+  {
+   "path": "Graphics/Windows/SanBlueInv.lit",
+   "size": 77698,
+   "sha256": "a44e575fa0b07f794c10e57e9975200f30bd943d3e8d8d150a0de3d69e73f458"
+  },
+  {
+   "path": "Graphics/Windows/SanLasurInv.lit",
+   "size": 77698,
+   "sha256": "94ec06052adaf48f278cb5eee8e8c09ab5bc89de6b1c5d724d85cd6df8498583"
+  },
+  {
+   "path": "Graphics/Windows/SanOrangeInv.lit",
+   "size": 77698,
+   "sha256": "f56c8975b771a58b60778ca9b9eb92a9e04748daabc1d7a5cf1f9dd7ca05e610"
+  },
+  {
+   "path": "Graphics/Windows/SanSerif.lit",
+   "size": 59356,
+   "sha256": "4e38db8e1eb6a9f50c2ff5c5585e3c4492b1ed20454b34720ce1e917ed0c457a"
+  },
+  {
+   "path": "Graphics/Windows/SanSerifInv.lit",
+   "size": 77698,
+   "sha256": "d829cdfa8a85ddcf332a817bc30b14d03307dfe2cf59c44b51484abe44b3cc7f"
+  },
+  {
+   "path": "Graphics/Windows/SanSerif_Bold.lit",
+   "size": 51682,
+   "sha256": "204b5695593eb4de06b24d38ad0aa267968debacfc136cb0f53b2995533af2c4"
+  },
+  {
+   "path": "Graphics/Windows/SanSerif_Bold2.lit",
+   "size": 51682,
+   "sha256": "18b95fbefb603bd43b952323b39109b4c0d1f5d7f111ad0f0326ccb3e54bfecf"
+  },
+  {
+   "path": "Graphics/Windows/SanSerif_Bold_Shadow.lit",
+   "size": 51682,
+   "sha256": "95592c7a8e06c9941a8946a1977185950370877c7cabf2b42dbe5d9f6d18f530"
+  },
+  {
+   "path": "Graphics/Windows/SanSerif_Shadow.lit",
+   "size": 58804,
+   "sha256": "4c1079b5b9318c0c6b45318a820aba1f9a9caa4d864a0e3fd980dc37745c12fd"
+  },
+  {
+   "path": "Graphics/Windows/SanYellowInv.lit",
+   "size": 77698,
+   "sha256": "d110d0897595d8ac56ee2716a5168f9103195c38449c115421c6fd6d0148afb8"
+  },
+  {
+   "path": "Graphics/Windows/Save_ProgressBar.lit",
+   "size": 17680,
+   "sha256": "68cde94a7ecbac3b65dd018008a6c7bae55800c4282f060cba7825f85c22bbed"
+  },
+  {
+   "path": "Graphics/Windows/Selection-0.lit",
+   "size": 6544,
+   "sha256": "8ef4c00b07cfbdb3e217fe56b8d2ac5bb9c1a698137881e552fc80a324263044"
+  },
+  {
+   "path": "Graphics/Windows/Selection-1.lit",
+   "size": 6544,
+   "sha256": "b7fa0667a282c92769def47a7e1dc9013670f16f43c2a758e4d02e2d5a6ccac2"
+  },
+  {
+   "path": "Graphics/Windows/Selection-2.lit",
+   "size": 6544,
+   "sha256": "d5ca503bde3dae20ba96067f5b3e1468e3e5f88073cf5f5577a2b109cd4b92ee"
+  },
+  {
+   "path": "Graphics/Windows/Shadow-Empty.lit",
+   "size": 40848,
+   "sha256": "5dbbe81c2c808ac3f60ef9cbfd10482042c645bad1f34c4cc767b8230cdb3a9a"
+  },
+  {
+   "path": "Graphics/Windows/Shadow-Unit.lit",
+   "size": 40848,
+   "sha256": "d6612cc6fa5ddc6d19d9def029a271a3e1cc4407a2689a550f874747a5b14742"
+  },
+  {
+   "path": "Graphics/Windows/Sign-Upgrade.lit",
+   "size": 2832,
+   "sha256": "8a6aa911eb2db5504fd9d0c66e11672eb70901014cac04052570090541c1494b"
+  },
+  {
+   "path": "Graphics/Windows/Spell-Frame.lit",
+   "size": 19216,
+   "sha256": "946d06d23074c975873072d14bb32bdfba48736558f192701fbc8094d55d47ee"
+  },
+  {
+   "path": "Graphics/Windows/Spell-FrameAlpha.lit",
+   "size": 30016,
+   "sha256": "2361fc37eee3854028d3af7716a0b38feee4a63b843cb4a0525d78459207bab6"
+  },
+  {
+   "path": "Graphics/Windows/Spell-IconAlpha.lit",
+   "size": 30016,
+   "sha256": "62011334046fbd58bf3a54a1da76ec8e230097fcc1fa179e17f22cecdb8de3ed"
+  },
+  {
+   "path": "Graphics/Windows/Spell-IconMask.lit",
+   "size": 19216,
+   "sha256": "1e95795efb96b0882fe694d7a8a4b33b31a3f114ad87641f519f028fb40b794e"
+  },
+  {
+   "path": "Graphics/Windows/SteelLine.lit",
+   "size": 21904,
+   "sha256": "818b9c77be84b9a19427ecdc79f2dfd99364078f0a52fe816bb93c656b2a76ae"
+  },
+  {
+   "path": "Graphics/Windows/Stnd-1.ugs",
+   "size": 32772,
+   "sha256": "a98368d9eb6d46b7addde01955eb0b367ec24560c5d1a98d03e29ef58211951d"
+  },
+  {
+   "path": "Graphics/Windows/Stnd-2.ugs",
+   "size": 32772,
+   "sha256": "cbe3060a9b727dbdf7f83fb1ed81970bbb5131755170c87ccf92d88f0d1abf49"
+  },
+  {
+   "path": "Graphics/Windows/Swords.ugs",
+   "size": 230600,
+   "sha256": "3d8c7a6497cd18421176230585f1d11f2bff87b7d0035a07cfe45f05fab3b9da"
+  },
+  {
+   "path": "Graphics/Windows/TB-1_RUS.lit",
+   "size": 76688,
+   "sha256": "3a4a4ab7ce77f7b57aad0c9f70c9932005b9789ef9694ba3933abb37ed500a6f"
+  },
+  {
+   "path": "Graphics/Windows/TB-2_RUS.lit",
+   "size": 76688,
+   "sha256": "5fdb84d6421f1116ebae04a2338061a2e71d9ea4fafb32443f6189acd0ad1f91"
+  },
+  {
+   "path": "Graphics/Windows/TB-3_RUS.lit",
+   "size": 76688,
+   "sha256": "73ab4dcdb6ad4a9f238e2ebff9795004cdb98aa5e80d4e2746585d94455168ec"
+  },
+  {
+   "path": "Graphics/Windows/TB-4_RUS.lit",
+   "size": 76688,
+   "sha256": "074502ef12d9ec5bb353fdd4ab70244f74e821101c110064c522457363c4c517"
+  },
+  {
+   "path": "Graphics/Windows/TB-5_RUS.lit",
+   "size": 76688,
+   "sha256": "d125cc94a5bcb95d7eff024ac0492953aac41b47efb0c5880c1c249a0d2366a4"
+  },
+  {
+   "path": "Graphics/Windows/TB-6_RUS.lit",
+   "size": 76688,
+   "sha256": "7363fe10a9a76dfc3e27bac90293431150212769a67b98503eddf6f7c100a532"
+  },
+  {
+   "path": "Graphics/Windows/TBd1_RUS.lit",
+   "size": 76688,
+   "sha256": "f72ea8f84dd0ea0a1e44bcce9f6fbdb4888262e8a127a320ea00ca49b419b009"
+  },
+  {
+   "path": "Graphics/Windows/TBd2_RUS.lit",
+   "size": 76688,
+   "sha256": "f4bf6f6d797dcc5287a2856d732bbfc4e524b7467d411764a6ba38db5eb7c0b2"
+  },
+  {
+   "path": "Graphics/Windows/TBd3_RUS.lit",
+   "size": 76688,
+   "sha256": "d770f79556bd9fcf3dbc7dec3d27f686d9b8045960c449408fc9f58cf2b023b0"
+  },
+  {
+   "path": "Graphics/Windows/TBd4_RUS.lit",
+   "size": 76688,
+   "sha256": "60910c51636dceca2e815733d829b2cff49c7d16dd53157a042281463cf5fbb8"
+  },
+  {
+   "path": "Graphics/Windows/TBd5_RUS.lit",
+   "size": 76688,
+   "sha256": "ee4208f98d3f7092e22594f10e4a0d582d68a031e4c9901858d5ab463e22da0f"
+  },
+  {
+   "path": "Graphics/Windows/TBd6_RUS.lit",
+   "size": 76688,
+   "sha256": "cec35f876bc372a57b6b0f9e4ef385d4b2883f23ed22cc5860259addf0d85c24"
+  },
+  {
+   "path": "Graphics/Windows/TBo1_RUS.lit",
+   "size": 76688,
+   "sha256": "7b9df768306a0fd2e79fda4aab6ed8757ce75c669ece016675bedb23002d255f"
+  },
+  {
+   "path": "Graphics/Windows/TBo2_RUS.lit",
+   "size": 76688,
+   "sha256": "56583fe3ba3b9e6c9f358f47b2f63195eef57519d60b0d77d7f3e70aca699571"
+  },
+  {
+   "path": "Graphics/Windows/TBo3_RUS.lit",
+   "size": 76688,
+   "sha256": "ac4b28bf906eea34564272237c348bc4e148a7ae7b2e6b764530bea96bd0324b"
+  },
+  {
+   "path": "Graphics/Windows/TBo4_RUS.lit",
+   "size": 76688,
+   "sha256": "ae4335b037bec27eb120760420e074ea830735e058b660fd5142ed53089a2552"
+  },
+  {
+   "path": "Graphics/Windows/TBo5_RUS.lit",
+   "size": 76688,
+   "sha256": "18afaea98bf23ebcbeca0c8825051b80c60750117bafacd125963855aeae151c"
+  },
+  {
+   "path": "Graphics/Windows/TBo6_RUS.lit",
+   "size": 76688,
+   "sha256": "2353e3bad6a39abf9a133e298988e6efa8d36083d764f3707169da96ed584249"
+  },
+  {
+   "path": "Graphics/Windows/TitleFlame_RUS.lit",
+   "size": 393616,
+   "sha256": "050f2dc36f55f813f8caedfd6e4b5119627465bc20191d62d012b1c34bbf3c39"
+  },
+  {
+   "path": "Graphics/Windows/Title_RUS.ugs",
+   "size": 229380,
+   "sha256": "94168c051fb16e9a2860a259afd54b8c59b26193d88aabb382c6d9a7745a2da9"
+  },
+  {
+   "path": "Graphics/Windows/UnitFrame.lit",
+   "size": 233872,
+   "sha256": "aca20cd2b5b5bfb6ee56f040abeb3c19c7b311300f308b524a160521a2c1e1b4"
+  },
+  {
+   "path": "Graphics/Windows/UpgradeTree.lit",
+   "size": 215568,
+   "sha256": "38e419558d479abaf66083ca234310ce62d7c54ee8e81b9e67393c9d6382401b"
+  },
+  {
+   "path": "Graphics/Windows/VArrowDown.lit",
+   "size": 1936,
+   "sha256": "4a29311c8ec7beba03adf5f8a8177dc5fa1701ca0500ecfe9f02199db35e68db"
+  },
+  {
+   "path": "Graphics/Windows/VArrowUp.lit",
+   "size": 1936,
+   "sha256": "ca40805f5e298d979682de14d7e57688f2a3dd17105159693f1b4d370bc635d3"
+  },
+  {
+   "path": "Graphics/Windows/VSTexture.lit",
+   "size": 6820,
+   "sha256": "2563fff33edf417f3aa6061172f3cd9f2ee939814b38d954e711cccc967c4946"
+  },
+  {
+   "path": "Graphics/Windows/VSlider.lit",
+   "size": 1744,
+   "sha256": "c7601a4d99a5de46c3a3fd6ba91189d423ab97b0d84b378b204d4fa0594472be"
+  },
+  {
+   "path": "Graphics/Windows/Village_Bonus_1.lit",
+   "size": 38032,
+   "sha256": "9c6b3efda9d3c57daf9a32d6fc8337c4033e97f7f8728d0a76495530a4c387de"
+  },
+  {
+   "path": "Graphics/Windows/Village_Bonus_2.lit",
+   "size": 38032,
+   "sha256": "9c6b3efda9d3c57daf9a32d6fc8337c4033e97f7f8728d0a76495530a4c387de"
+  },
+  {
+   "path": "Graphics/Windows/Village_Bonus_3.lit",
+   "size": 38032,
+   "sha256": "9c6b3efda9d3c57daf9a32d6fc8337c4033e97f7f8728d0a76495530a4c387de"
+  },
+  {
+   "path": "Graphics/Windows/Village_Bonus_3A.lit",
+   "size": 38032,
+   "sha256": "9c6b3efda9d3c57daf9a32d6fc8337c4033e97f7f8728d0a76495530a4c387de"
+  },
+  {
+   "path": "Graphics/Windows/Village_Bonus_4.lit",
+   "size": 38032,
+   "sha256": "9c6b3efda9d3c57daf9a32d6fc8337c4033e97f7f8728d0a76495530a4c387de"
+  },
+  {
+   "path": "Graphics/Windows/Village_Bonus_4A.lit",
+   "size": 38032,
+   "sha256": "9c6b3efda9d3c57daf9a32d6fc8337c4033e97f7f8728d0a76495530a4c387de"
+  },
+  {
+   "path": "Graphics/Windows/Village_Bonus_5.lit",
+   "size": 38032,
+   "sha256": "9c6b3efda9d3c57daf9a32d6fc8337c4033e97f7f8728d0a76495530a4c387de"
+  },
+  {
+   "path": "Graphics/Windows/Village_Bonus_5A.lit",
+   "size": 38032,
+   "sha256": "9c6b3efda9d3c57daf9a32d6fc8337c4033e97f7f8728d0a76495530a4c387de"
+  },
+  {
+   "path": "Graphics/Windows/Village_Gold.lit",
+   "size": 64528,
+   "sha256": "e204127a78649aaeababab0fa966e128806ba1698ba081fbab210fcb2a421c2d"
+  },
+  {
+   "path": "Graphics/Windows/Village_Gold_Empty.lit",
+   "size": 64528,
+   "sha256": "4868ff7346edf99148f078ec50a96adab64347229abca617ac1b6e9d68fee724"
+  },
+  {
+   "path": "Graphics/Windows/Village_Mana.lit",
+   "size": 64528,
+   "sha256": "665655fa3e96d78ee068b27572bada2f231642e8e833c51aafa35edff9483753"
+  },
+  {
+   "path": "Graphics/Windows/Village_Mana_Empty.lit",
+   "size": 64528,
+   "sha256": "7cf192a925aeb89c80f3e3f253764f8cf88423280a2b40457d4438e360fd58a5"
+  },
+  {
+   "path": "Graphics/Windows/Way_Arrows.ugs",
+   "size": 11296,
+   "sha256": "ce80782ee8c1bed503a8c952fb969c7cc3824e6be3020b12636668f372786fad"
+  },
+  {
+   "path": "Graphics/Windows/Win-black.lit",
+   "size": 691256,
+   "sha256": "a3824de904ca7e4a96daf30467231c8c93dc5e546c3102933776048ca0a35848"
+  },
+  {
+   "path": "Graphics/Windows/Win-marble.lit",
+   "size": 346000,
+   "sha256": "ee49f84b2fde8ecc7da45a9a289a3117a56f969c8a3b45c75144f0d9d8dd169a"
+  },
+  {
+   "path": "Graphics/Windows/Win-paper.lit",
+   "size": 839056,
+   "sha256": "f1ae2f72a04d80d1320c1ba18b58ecf4aaf942c4cdf6d599cb85af87a34a19cf"
+  },
+  {
+   "path": "Graphics/Windows/Win-red.lit",
+   "size": 346000,
+   "sha256": "f9d4433610e329391ebc755e9bd9b2fcf58b4339f0d9479485837057e4772027"
+  },
+  {
+   "path": "Graphics/Windows/Win-yellow.lit",
+   "size": 346000,
+   "sha256": "107eb1d32c4d8003d715e5a19e2c90add63d5a1193175ffb6f95cc95d8c09f8a"
+  },
+  {
+   "path": "Graphics/Windows/Win2a.lit",
+   "size": 197008,
+   "sha256": "83a1c7de0b9139e0a5b9a529c8ffbbfec705efc65d255a91c7974ed494c89b9d"
+  },
+  {
+   "path": "Graphics/Windows/WinLong.lit",
+   "size": 197008,
+   "sha256": "4e74adc4f59a24c2543af43d9f9175a684bc944f217bae63fd98825f790ec7ed"
+  },
+  {
+   "path": "Graphics/Windows/army-1.lit",
+   "size": 9808,
+   "sha256": "bae93eb7eb5cfff42f5d9cc9731af0afa86dff86b3c85ff5b666c108968cf29e"
+  },
+  {
+   "path": "Graphics/Windows/army-2.lit",
+   "size": 9808,
+   "sha256": "230fa137c16391fa4b5dc429b8cb2a736134be0ea32f5fc3ba468da78ee970c2"
+  },
+  {
+   "path": "Graphics/Windows/army-3.lit",
+   "size": 9808,
+   "sha256": "f5c56b93a11540dff4590d359b32d6b2cb55947077ae837899eea7884148ccfd"
+  },
+  {
+   "path": "Graphics/Windows/army-4.lit",
+   "size": 9808,
+   "sha256": "4cf496bf62811b91c5650ceba10ce09c5c395ff29201a3dd62e5a3eeeab750b8"
+  },
+  {
+   "path": "Graphics/Windows/army-5.lit",
+   "size": 9808,
+   "sha256": "8f13e636121b4773ad724fc51b6716d9ce2f34448c2315e9199c3248ce57ae62"
+  },
+  {
+   "path": "Graphics/Windows/army-alpha.lit",
+   "size": 6544,
+   "sha256": "f630c48715de9335a619017daeda567525c2ef8edbed1616a7c35d73cd98fcd7"
+  },
+  {
+   "path": "Graphics/Windows/button-icon-1.lit",
+   "size": 1936,
+   "sha256": "312936a2a35ca03ada25a5c10621735907e2a43f4e272bab955879343ccc2544"
+  },
+  {
+   "path": "Graphics/Windows/button-icon-2.lit",
+   "size": 2704,
+   "sha256": "44c81c894d716d70db10419a5c9de318954c29e6dfeda95c63fc3d6558e1d142"
+  },
+  {
+   "path": "Graphics/Windows/button-icon-3.lit",
+   "size": 3472,
+   "sha256": "ae56d98596e9610900553fe908e885230af4398202ecc85347113d002b294ffb"
+  },
+  {
+   "path": "Graphics/Windows/button-icon-4.lit",
+   "size": 3472,
+   "sha256": "53db96ca32fb7bfd15b474d8976487cba7241efa104ba7debfe41934f4b200e1"
+  },
+  {
+   "path": "Graphics/Windows/button-icon-5.lit",
+   "size": 5008,
+   "sha256": "573de4a23d1a90aaec3a783f3f36bffa436e6751674b89bc501d32cea17aa62a"
+  },
+  {
+   "path": "Graphics/Windows/button-icon-6.lit",
+   "size": 3472,
+   "sha256": "ebff3dc976ea97d4832cbd99afe666bcc0dae56cf669d7e4b0e5a5b0a46b6f79"
+  },
+  {
+   "path": "Graphics/Windows/button-icon-7.lit",
+   "size": 3472,
+   "sha256": "035b8ee2b04f71a4459b878e0d9a289ffd80ddcace5e114e73a222bb9c5c14cf"
+  },
+  {
+   "path": "Graphics/Windows/button-icon-8.lit",
+   "size": 3472,
+   "sha256": "418b01dc21638b095cd228f8b98b4dc45e817f36c5735161d75af9c5fde559c2"
+  },
+  {
+   "path": "Graphics/Windows/exp-hole.lit",
+   "size": 14224,
+   "sha256": "8933ce06c272307fb9fff98474382e10baabaa3746dcc92907506f33be2873f2"
+  },
+  {
+   "path": "Graphics/Windows/exp.lit",
+   "size": 87952,
+   "sha256": "18ff8913c58761863fd5dc665d62c49eed1e433934eb1dda237d1fd2aea58025"
+  },
+  {
+   "path": "Graphics/Windows/hero1.lit",
+   "size": 38800,
+   "sha256": "5ac3abe694d7558cd304a2df7e1f999d79708abd9927405d91c05003401cc90d"
+  },
+  {
+   "path": "Graphics/Windows/hero2.lit",
+   "size": 38800,
+   "sha256": "62611b9d0b615609a0427ed980412d0259bef2d01ddc4544e5f4116098d9e954"
+  },
+  {
+   "path": "Graphics/Windows/load-button-1.lit",
+   "size": 21648,
+   "sha256": "adabe6cca2c7395a951545e4d5068184849af3193c5a414c852ff2f8e0f43adc"
+  },
+  {
+   "path": "Graphics/Windows/load-button-2.lit",
+   "size": 21648,
+   "sha256": "3833db51d96052d84ceff2e8946f7c7417a0c90582292af7876fab8e5708fd5c"
+  },
+  {
+   "path": "Graphics/Windows/minimapview.lit",
+   "size": 6544,
+   "sha256": "05af14879795fbbb1c05105ede365cfa3f729dcf1c06c8b1132bd436c332ae60"
+  },
+  {
+   "path": "Graphics/Windows/nameframe.lit",
+   "size": 14608,
+   "sha256": "18236fd981f11f9dcd9c04364afe8376042cf37568bd8a9b0813f6685e771c6d"
+  },
+  {
+   "path": "Graphics/Windows/res0-44.lit",
+   "size": 6288,
+   "sha256": "9e61d78056f23f8244b1b8a07cd663cbde99ee57db0ce0e175845175a994eec5"
+  },
+  {
+   "path": "Graphics/Windows/res0-x.lit",
+   "size": 10768,
+   "sha256": "de7e4875a937dad74d31ab28f70d30c6331f6fffaa0405fe56457b5932ed9b88"
+  },
+  {
+   "path": "Graphics/Windows/res0.lit",
+   "size": 16528,
+   "sha256": "64c02d7850a60c9b50376bc521dfea076ee9463a11bd41e86f775929a1f03b96"
+  },
+  {
+   "path": "Graphics/Windows/res1-44.lit",
+   "size": 6288,
+   "sha256": "7fc09849ccc8cc133c5a987cb67bf3b84c3986f2790bb38c58a69ee7d5a23b8e"
+  },
+  {
+   "path": "Graphics/Windows/res1-x.lit",
+   "size": 10768,
+   "sha256": "73af8437b0c46a30bed1650ed22fb1dad2cc6f7af749d3e74a65766fb4cd661e"
+  },
+  {
+   "path": "Graphics/Windows/res1.lit",
+   "size": 16528,
+   "sha256": "d88ffa2c713c17d4fbc87367b2eeb99634ff3c7d0c65aeeb98e1adec560688c9"
+  },
+  {
+   "path": "Graphics/Windows/res2-44.lit",
+   "size": 6288,
+   "sha256": "3a4b7aa50f7df9de8035a6da433c9f5ec172185609877180512dd32c469b0334"
+  },
+  {
+   "path": "Graphics/Windows/res2-x.lit",
+   "size": 10768,
+   "sha256": "80d774b2c3cd64fdcf901997b1ce525cd581643097cdbed4b6c40a1de41abc12"
+  },
+  {
+   "path": "Graphics/Windows/res2.lit",
+   "size": 16528,
+   "sha256": "7e0168c7572d3e883ed788045900552889c55ed192f41bb40c462535e0674eca"
+  },
+  {
+   "path": "Graphics/Windows/res3-44.lit",
+   "size": 6288,
+   "sha256": "78af6b44ff44f76deb5d7d358bcc9e4e86cb632cb64339b33a0ce717dc658c02"
+  },
+  {
+   "path": "Graphics/Windows/res3-x.lit",
+   "size": 10768,
+   "sha256": "702afb21d316fdd1bd6c2e845ef247b0f83588fccea6c4087951dc4d77599110"
+  },
+  {
+   "path": "Graphics/Windows/res3.lit",
+   "size": 16528,
+   "sha256": "15bf313ff20dbff6726dfca12bf9eb9f152e9caf5a0dbb44b7f6a3ac49ea1e7e"
+  },
+  {
+   "path": "Graphics/Windows/si-alpha.lit",
+   "size": 1468,
+   "sha256": "3f14298d5e4b88c8c8795a0140e2bc5c246952ce1e6fe6f06b596fcf7976efab"
+  },
+  {
+   "path": "Graphics/Windows/si-border.lit",
+   "size": 3088,
+   "sha256": "ea2b7b8b766cfb31b6d24778936d14ae3526d412d9fa6124b45e836a5c2778f9"
+  },
+  {
+   "path": "Graphics/Windows/si-mask.lit",
+   "size": 1468,
+   "sha256": "badbf955ac98f81c425ff636ef9b66025a9d500773b0d34e03fb246f720dd51f"
+  },
+  {
+   "path": "Graphics/Windows/sign-bless.lit",
+   "size": 2832,
+   "sha256": "d1afba1b84438cb714b520c2722d73bef9d3653e9014e06c52dbf3ca735c2d0d"
+  },
+  {
+   "path": "Graphics/Windows/sign-curse.lit",
+   "size": 2832,
+   "sha256": "d93a22b649991ddc2d9a40fba0d20eb48029452604f15d6ec82d1f5ee2b0fb9b"
+  },
+  {
+   "path": "Graphics/Windows/sign-payment.lit",
+   "size": 2832,
+   "sha256": "113403154e6ac7512e64068931331fb1d47503444aad3b4f04f9eab096da5ea4"
+  },
+  {
+   "path": "Graphics/Windows/sign-poison.lit",
+   "size": 2832,
+   "sha256": "b9957d6d1cf5e5081202d01b6e1b70d4695fc470f5aa9dcf5f0d44a5909420d9"
+  },
+  {
+   "path": "Graphics/Windows/sign-potion.lit",
+   "size": 2832,
+   "sha256": "60bd9e8c8b5d8d442111213102f74e6fe27af6299bf9cbee5c6ec2f996dfff8c"
+  },
+  {
+   "path": "Graphics/Windows/smb-alpha.lit",
+   "size": 5434,
+   "sha256": "99a002a1c719f5f86809eb79a847a035e084e7117f63556467f5df43066b5cea"
+  },
+  {
+   "path": "Graphics/Windows/smb-disable.lit",
+   "size": 5434,
+   "sha256": "1b391260f9c9976f2785cfe50373263bdbe3c1ef17b08aa8f718dd86b6e29838"
+  },
+  {
+   "path": "Graphics/Windows/smb-down.lit",
+   "size": 5434,
+   "sha256": "7c36cf424ee9e943bcee049a0fcc3c4f80be7b2d58cf0bf57a6df728b055bdf6"
+  },
+  {
+   "path": "Graphics/Windows/smb-up.lit",
+   "size": 5434,
+   "sha256": "75550f6b675506aab2288b7cc2357277f75eeab8e6a3b0ad6ab37637f5637a13"
+  },
+  {
+   "path": "Graphics/Windows/wb1.lit",
+   "size": 23568,
+   "sha256": "6ccf7bb284c7489ca2a791c766ecd42efb04451addea321ec6d910a145fe39b3"
+  },
+  {
+   "path": "Graphics/Windows/wb2.lit",
+   "size": 23568,
+   "sha256": "168f064c8788ea96b45fa4c75021d45a0e7dd5393e73e203382f538997b69922"
+  },
+  {
+   "path": "Graphics/Windows/wb3.lit",
+   "size": 23568,
+   "sha256": "e8a9b65ce1894be329ac3ede5b1c576e4c502f23a92059e8d8bf5b1728566015"
+  },
+  {
+   "path": "Help/global.css",
+   "size": 2038,
+   "sha256": "9784b76d1fe532be3917037d2f38dab7fc809174c1509df1ec3d7f219a6a52a5"
+  },
+  {
+   "path": "Help/Документация к Редактору Сценариев.doc",
+   "size": 805376,
+   "sha256": "46fbb5c8215c854d2f86e6ec3113f2051603ccceafe54f55102e7d6c1b0bb49c"
+  },
+  {
+   "path": "Help/Как Играть.htm",
+   "size": 38886,
+   "sha256": "b718ff1736d0d64492dc0c1cec4afd40de25cb74c7f12598f84e5778bda0ccbb"
+  },
+  {
+   "path": "License.txt",
+   "size": 2169,
+   "sha256": "ec0da923f6a39ae3d311e198e1b24832a5c5eb25c989c43b03d75c8569e416a3"
+  },
+  {
+   "path": "Logo/AE_Logo.lit",
+   "size": 384016,
+   "sha256": "92bf9d926014643a8907ee6c7b816f13598f51d7cfd83f381c2cef81d2a633bf"
+  },
+  {
+   "path": "Logo/Logo.ini",
+   "size": 85,
+   "sha256": "1ec2cf60b8bb5d052adc0037dc74fe3ea761b8ef04ae5f1f65fa3e5c924a5f94"
+  },
+  {
+   "path": "Maps_Rus/ДС1-С чего все начиналось.DTm",
+   "size": 40095,
+   "sha256": "40c89d3aa0672aad2e75bec0e5868282df38a0fcb9b1221a73fe2d9dacff2069"
+  },
+  {
+   "path": "Maps_Rus/ДС2-Страшная история.DTm",
+   "size": 78550,
+   "sha256": "756b415b35541076d152efc884a48616118019c66ba2e106f5ee5b478a36d432"
+  },
+  {
+   "path": "Maps_Rus/Другой берег.DTm",
+   "size": 105367,
+   "sha256": "4d52cf0b8f44900a943668a370973e6ecd92be403a2c29ef7ea1c98b68f60ee7"
+  },
+  {
+   "path": "Maps_Rus/Обучающий1.DTm",
+   "size": 33279,
+   "sha256": "af631b72634610144dd5b8f31193a2cd589b56e62bbc9fe200d6a4f0167e104e"
+  },
+  {
+   "path": "Maps_Rus/Обучающий2.DTm",
+   "size": 10900,
+   "sha256": "4046726cbb3f7e2e0519fb66504e2dac0fe7af8c625225f914b4681f2946f70f"
+  },
+  {
+   "path": "Maps_Rus/Проклятое озеро.DTm",
+   "size": 39154,
+   "sha256": "683beab1cacd4f7b3c5cdf5c52c8017eec004c1acf85e92252c99840a0c56e53"
+  },
+  {
+   "path": "Maps_Rus/РК1-Начало пути.DTm",
+   "size": 36708,
+   "sha256": "47306f0179e48772d2ea625c65076a591754b94983aac558914f2eb959d29b35"
+  },
+  {
+   "path": "Maps_Rus/РК2-Дикие пустоши.DTm",
+   "size": 21230,
+   "sha256": "5aebb4aec62c889a189d5c43a3b8d1d1c791581496c7b02814aaf23f30fe266f"
+  },
+  {
+   "path": "Maps_Rus/РК3-Столица.DTm",
+   "size": 71527,
+   "sha256": "474f7f118b989db257f04b83a416ddb700fbeb712340e378bac58f94da42e5cd"
+  },
+  {
+   "path": "Maps_Rus/РК4-Восточная провинция.DTm",
+   "size": 25667,
+   "sha256": "a5ef052c93aa9ba67054c2dde8cdd42a2c4decd11b5ca52f3dd0adfd2c984149"
+  },
+  {
+   "path": "Maps_Rus/РК5-Столица в огне.DTm",
+   "size": 66827,
+   "sha256": "b793b27ecefe78839ab34eaa8d6990d9c3180c4541d2aa8fa90a3c73a3c6b6e3"
+  },
+  {
+   "path": "Maps_Rus/РК6-Северная битва.DTm",
+   "size": 84084,
+   "sha256": "571fae0936c1d5c4580633438ea5174e0df97a607b7a26633012088180eb83fd"
+  },
+  {
+   "path": "Maps_Rus/РК7-Конец.DTm",
+   "size": 8673,
+   "sha256": "2e2d3b12c76982790a8c88d60c65d0737bac2e69e53cf34c7d69c1ea3477e81d"
+  },
+  {
+   "path": "Maps_Rus/Тихая пристань.DTm",
+   "size": 34848,
+   "sha256": "74f974ce9dcfb73650962d7c16a5e20b588d09de6af8e611faf6c2145974b22e"
+  },
+  {
+   "path": "Maps_Rus/Устье Трейна.DTm",
+   "size": 69536,
+   "sha256": "ab0d4ecdb4441734650ecb431f3f51ef97f0924b76d6269485b8d0026b3825eb"
+  },
+  {
+   "path": "Rus_Artefacts.ini",
+   "size": 47617,
+   "sha256": "612f0e652411e8db9a956c20bc291f7b09391f9332fc499810501a5db2080686"
+  },
+  {
+   "path": "Rus_DiscordTimes.ini",
+   "size": 21678,
+   "sha256": "df951b633e6c30a53d4cb6b8c0590cecad38cd8225d690ca04f859cf52956718"
+  },
+  {
+   "path": "Rus_MapEdit.ini",
+   "size": 15193,
+   "sha256": "6cf647288754bc12ee945197be99269cf1ec9dfa163593580dedeb058cfadc76"
+  },
+  {
+   "path": "Rus_Spells.ini",
+   "size": 36099,
+   "sha256": "7122b36ec78c93d2036922e41bf24aea4594f44585aa2765a23f4c849c32d71f"
+  },
+  {
+   "path": "Rus_Units.ini",
+   "size": 57924,
+   "sha256": "fbda4880a003c606b2c13250fb72df077f11100013bdf3f51d3560205ae55156"
+  },
+  {
+   "path": "Sounds/-Gold.WAV",
+   "size": 9214,
+   "sha256": "0672edde79562d3a348a57659b1b5603c742aa3ce863039d903fb6b1cdd28567"
+  },
+  {
+   "path": "Sounds/MUS_4.WAV",
+   "size": 1552,
+   "sha256": "79c64832709b66195f4aea7549f3dbb941b9ebc4687407ec5956250695afb951"
+  },
+  {
+   "path": "Sounds/MUS_6.WAV",
+   "size": 6640,
+   "sha256": "2d0827199da5cdf6d5f7b5ed7274b4dbcdd3686d0b32ad59ee81dcde93154443"
+  },
+  {
+   "path": "Sounds/MUS_7.WAV",
+   "size": 10160,
+   "sha256": "6d9d17924f7a0777eacf170c0a883ca30418ce1472d2081400841aa76b4ecb25"
+  },
+  {
+   "path": "Sounds/Unregister.wav",
+   "size": 6298,
+   "sha256": "e19f75a5d87a0af53d8a38d53e37e7566643af349e1b0d2add74e27b53b2ff14"
+  },
+  {
+   "path": "Sounds/Unregitered.WAV",
+   "size": 6298,
+   "sha256": "e19f75a5d87a0af53d8a38d53e37e7566643af349e1b0d2add74e27b53b2ff14"
+  },
+  {
+   "path": "Sounds/accord1.raw",
+   "size": 56578,
+   "sha256": "4cb259ef4cb51ad3fc3bf3929dbd15daa59b42c2b15c7182700125ad3cb4d952"
+  },
+  {
+   "path": "Sounds/accord2.raw",
+   "size": 53378,
+   "sha256": "767d9b92cbd2b12a71daf91efd8b1e087bba3d9c85dbffd2e8d2ab5e8a3c9e47"
+  },
+  {
+   "path": "Sounds/accord3.raw",
+   "size": 57346,
+   "sha256": "9d6ba36a8610b66e3d348908c893c9ed8f54735b032212ff1b37ba5370a33e23"
+  },
+  {
+   "path": "Sounds/akkord.raw",
+   "size": 59710,
+   "sha256": "a1a6e0aabc4ec901242d70b61fe8e3eb9356bf3b254ec96ac1289b7eb0d7a58c"
+  },
+  {
+   "path": "Sounds/battle-bless.wav",
+   "size": 19298,
+   "sha256": "d2de2c900a5e9feb40d17d8fa405837df2543de506ecc75a12d8f18ecb9d5bf1"
+  },
+  {
+   "path": "Sounds/battle-cure.WAV",
+   "size": 30446,
+   "sha256": "0a7e3901604a89df24b16cf5046092eb4bd6367b1415f0e1f15b45b1f0a8a957"
+  },
+  {
+   "path": "Sounds/battle-fight.wav",
+   "size": 15118,
+   "sha256": "41e9b35a7de7010c46531692ea325b954fd1d1be4dd4d01f7ba3b8ce27972c80"
+  },
+  {
+   "path": "Sounds/battle-shoot.wav",
+   "size": 3788,
+   "sha256": "27bd2c8729571e90a7fe68ab8c5bfe4ae0224db1c7f5172dfba56a8c9a25defb"
+  },
+  {
+   "path": "Sounds/battle-sorcery.wav",
+   "size": 23340,
+   "sha256": "9b50739c50ab21fe3ce319931793a770537190f0827fe60c46e6d490be0a19f3"
+  },
+  {
+   "path": "Sounds/battle-strike.wav",
+   "size": 23876,
+   "sha256": "271612a231cf79d86560f0fbbf4a8dbfd683bc1ec5fba14bad54a7ccb10a62ad"
+  },
+  {
+   "path": "Sounds/battle1.raw",
+   "size": 2382394,
+   "sha256": "9ea5fa26c6edd6008d07fa1eb776f2a910b37d13e44a0289395f62ed697597a5"
+  },
+  {
+   "path": "Sounds/battle2.raw",
+   "size": 1354560,
+   "sha256": "1d163ab3f56ff5d9521370711be2d669c77776000de3ab3bcc58db8b384a07f4"
+  },
+  {
+   "path": "Sounds/bell1.wav",
+   "size": 22766,
+   "sha256": "4708d0f2d9ecee582cc8a527066465db7ac60946a4d73b5d9875e955e62208c1"
+  },
+  {
+   "path": "Sounds/bell2.wav",
+   "size": 22964,
+   "sha256": "82d9c1559796a37427fcf2ac0e94b708e5b5464aa80f08622b77d26aa52acbf8"
+  },
+  {
+   "path": "Sounds/bell3.wav",
+   "size": 22926,
+   "sha256": "32197984cc9aea50077e0204816ff426a2db03020b752bdb97be478841811898"
+  },
+  {
+   "path": "Sounds/defeat.raw",
+   "size": 846216,
+   "sha256": "16816802b4813a087b1dfc1dc9bc30a7d0c3d58009194c19486d0c0e8ed72898"
+  },
+  {
+   "path": "Sounds/downbutton.wav",
+   "size": 1550,
+   "sha256": "5f1087bb6083dd365ab70d62690817c2bbe949fe18bdaf9a4cc5f524f05e42b6"
+  },
+  {
+   "path": "Sounds/downpanel.wav",
+   "size": 2382,
+   "sha256": "2e8d51ff851835e234a52baa1cec6cba7b2b923ef6b7abfcdb7395206844b7d6"
+  },
+  {
+   "path": "Sounds/downspell.wav",
+   "size": 7326,
+   "sha256": "27cc493ae01426bb64a5c2c59f019f534225b56465df6166c690ac7dcb2ac39b"
+  },
+  {
+   "path": "Sounds/evil-fn.wav",
+   "size": 55340,
+   "sha256": "892a61ebd4918e8004881aa55f7018f054fdf587eacf46e03b93ae5db8a78295"
+  },
+  {
+   "path": "Sounds/good-fn8.wav",
+   "size": 56332,
+   "sha256": "346ad5016f494ed504c1d64518d8ce7a90f5361e188ee4e5f8b5ac43d8caa16c"
+  },
+  {
+   "path": "Sounds/help.ico",
+   "size": 6006,
+   "sha256": "d8079211a5253e4353190c51a9fd0e7de3c6b350efe03fb3ca8a7133da3cb67f"
+  },
+  {
+   "path": "Sounds/horn.raw",
+   "size": 144770,
+   "sha256": "8fdb717183249c4ac3d2492753d69f56dec53bb87c2bbc84c90aa102b9c9806d"
+  },
+  {
+   "path": "Sounds/map1.raw",
+   "size": 1815220,
+   "sha256": "23f6598d5f998fd2c64e57a20d07f82785cd67718b13c1fff56425f6bc01fcb6"
+  },
+  {
+   "path": "Sounds/map2.raw",
+   "size": 2542412,
+   "sha256": "2468d4321816bd2efbfec61ac4f80b799a4d1caf3c9c5ee8868e81454f9a6b37"
+  },
+  {
+   "path": "Sounds/map3.raw",
+   "size": 1813698,
+   "sha256": "934b7242b7a12ec28c4fe5718dee190e35c913ba9fb233c976c35ce4087cf552"
+  },
+  {
+   "path": "Sounds/map4.raw",
+   "size": 3136588,
+   "sha256": "b21f759014827b1a5864db6162951fa33a2a47b3506e33838c7f103f9f2bf875"
+  },
+  {
+   "path": "Sounds/map5.raw",
+   "size": 3227904,
+   "sha256": "4ce8ff0de580902bed20449d7fa574a7d5c7952a4323aaa8913a502aa6bb8e76"
+  },
+  {
+   "path": "Sounds/map6.raw",
+   "size": 3586176,
+   "sha256": "6cef357a55d8336ea71aad1c2fa8aebf17ba1f887e9000f5090d9be4380f71f1"
+  },
+  {
+   "path": "Sounds/map7.raw",
+   "size": 2309760,
+   "sha256": "de1e51420206cd5a2588bb4f2d633a0320fdc76fd519495d04a3d5a56dafe96f"
+  },
+  {
+   "path": "Sounds/map8.raw",
+   "size": 2195458,
+   "sha256": "7824e8d3a8d412f2fe8923ba89fb085c2ab74f54dc0f59ec6bd517a4730df1d5"
+  },
+  {
+   "path": "Sounds/menu.raw",
+   "size": 1422300,
+   "sha256": "bb99c65fdacda98b53fcdbd354a791d7368854f10133ebfc2e8a15359429549f"
+  },
+  {
+   "path": "Sounds/move.wav",
+   "size": 4668,
+   "sha256": "235bafa2b14e139fc791838a8293b4d6337bb14150d051896c72935821e1bfec"
+  },
+  {
+   "path": "Sounds/mus_0.wav",
+   "size": 4204,
+   "sha256": "0b4c0123827848ef25fefb6727eb0106b3a72dd2752b6aa282eceb448f76433b"
+  },
+  {
+   "path": "Sounds/mus_1.wav",
+   "size": 5902,
+   "sha256": "333fcde3f307dba7871e2a020381bc1937a5328ac948c298d8cf222344497c09"
+  },
+  {
+   "path": "Sounds/mus_2.wav",
+   "size": 4844,
+   "sha256": "886ea281b84a152e01e201f5523e7d2e979970b9ac73451fe3aa453dfa5e9100"
+  },
+  {
+   "path": "Sounds/mus_3.wav",
+   "size": 6436,
+   "sha256": "0e3cbade7f7800bbe6b0d444ec51d6057b5782e3a006a03f135b46102dfc236c"
+  },
+  {
+   "path": "Sounds/mus_5.wav",
+   "size": 8236,
+   "sha256": "1b40630a12e382bca9c88a2ab68974e527ac4ac2713a1f6a43c7fd8f8eb6ad4b"
+  },
+  {
+   "path": "Sounds/mus_8.wav",
+   "size": 3884,
+   "sha256": "99bbbac9384aea5c9e80f01a96b9e458b67ea30764b35e5c0a90ed95455662f3"
+  },
+  {
+   "path": "Sounds/mus_9.wav",
+   "size": 4152,
+   "sha256": "b8b35b1ef1ee6f58fc4e9fa13fdf95d80778e64bcb006136ccc74639ae826ec5"
+  },
+  {
+   "path": "Sounds/pressmenu.wav",
+   "size": 7788,
+   "sha256": "45f0f5ebe5fff8c296775f88558611fdaf1ea8d5f1600fba5a078491ffb6e89d"
+  },
+  {
+   "path": "Sounds/scroll.wav",
+   "size": 5662,
+   "sha256": "0909e851669f86a781a7366b218f5c1aca82bdc73cbd74717287a518ba5eb01a"
+  },
+  {
+   "path": "Sounds/selectmenu.wav",
+   "size": 32336,
+   "sha256": "737bbb4e29e61a47548ae404b84bceb5746d17b3d29c8047ea427d79bf1850c3"
+  },
+  {
+   "path": "Sounds/triumph.raw",
+   "size": 1581742,
+   "sha256": "96a131a5948bd7c0d6d96f30c5189e37437bbb05fa903ffe0bf508f78b48a903"
+  },
+  {
+   "path": "Sounds/upg-fin.wav",
+   "size": 56002,
+   "sha256": "b976d4367b17123558e5e1d4503837b8a7fbadb63a234336d20022feb3ad1650"
+  },
+  {
+   "path": "_Global.ini",
+   "size": 4446,
+   "sha256": "03f2896eb788df913a07cc314d578d0e92eaa93a84516c5d8893e3edb3e51e4e"
+  },
+  {
+   "path": "_Sounds.ini",
+   "size": 1558,
+   "sha256": "265fd86aced3f30b47e6743c16ad5e3b5606249028c028207cef0a86c026a255"
+  },
+  {
+   "path": "ddraw.dll",
+   "size": 3602944,
+   "sha256": "71157f096ec692b5d2dd469bc16749466401d2523048037cfc54103db7283ea2"
+  },
+  {
+   "path": "detoured.dll",
+   "size": 4096,
+   "sha256": "f6b6d75fa3bf5e8cee4f2c5896a892dca6ebddfd4df7e43cf05d681c8008bd1e"
+  },
+  {
+   "path": "help.ico",
+   "size": 6006,
+   "sha256": "d8079211a5253e4353190c51a9fd0e7de3c6b350efe03fb3ca8a7133da3cb67f"
+  },
+  {
+   "path": "ogg.dll",
+   "size": 49152,
+   "sha256": "1d777828a4fd17ae82fb40b7e9455ac1a029a7440d74c26ae78aea734e1c98e4"
+  },
+  {
+   "path": "vorbis.dll",
+   "size": 94208,
+   "sha256": "813e7b14aaa4f7d85b74fd10dda4e538d693616298bfcd7c49dc4a3d742b6a5f"
+  },
+  {
+   "path": "vorbisfile.dll",
+   "size": 28672,
+   "sha256": "0280882a651420cba4af16976d2f9b8be0607b693914f4aed8abcacbe4e904b3"
+  },
+  {
+   "path": "Дополнительные файлы/Блокноты с ID/Армия.txt",
+   "size": 4335,
+   "sha256": "5146c5bd8798d3e8b36107deccd1ac2953ae772cb06639e7cc1d2c02f8ed37b1"
+  },
+  {
+   "path": "Дополнительные файлы/Блокноты с ID/События.txt",
+   "size": 10710,
+   "sha256": "9484f93377e65d8c64542a4587905d51a94ae5e7fedf52fc51699662a0f6c200"
+  },
+  {
+   "path": "Дополнительные файлы/Блокноты с ID/Строения.txt",
+   "size": 3411,
+   "sha256": "a0105000fb50b9e5974885aa9362c500bdd56b407055e7bfebaa6635cd1f1674"
+  },
+  {
+   "path": "Дополнительные файлы/Блокноты с ID/Фонарики.txt",
+   "size": 3252,
+   "sha256": "e49c3409293a11e4e931cdbabdb75ba0ad264ef43f955f11c80fa6e506850b79"
+  },
+  {
+   "path": "Дополнительные файлы/Бонусы.zip",
+   "size": 38555,
+   "sha256": "042270feb33fb48f3aed6c7f775b1b33f7ec7679652eeeebb6c7322599de15d4"
+  },
+  {
+   "path": "Дополнительные файлы/Гайд на новые фунции редактора карт.docx",
+   "size": 128049,
+   "sha256": "c67dde0c3d4cf42c0cdb97527fcbf4a7176aad35b533c5042d29cb66bcc67472"
+  },
+  {
+   "path": "Дополнительные файлы/Заметка для мододелов.txt",
+   "size": 2140,
+   "sha256": "a4d94e4a3e8bf86eddab655936a7b1474cee14435f7ab5f15c22dc60f336dad4"
+  },
+  {
+   "path": "Дополнительные файлы/ПРОЧТИ МЕНЯ.txt",
+   "size": 308,
+   "sha256": "201c863bccde5c609f6e1b33cabdaa4f71ba75fdf48e08272f02d5d2098ccc31"
+  },
+  {
+   "path": "Дополнительные файлы/Список изменений.txt",
+   "size": 10035,
+   "sha256": "e74fb1bf0f2525bf4f5381afaf77c0da017b0eed8ad9d7a121009a9eb635ac31"
+  }
+ ]
+}

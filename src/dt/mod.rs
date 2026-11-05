@@ -12,6 +12,7 @@ pub mod game_import;
 pub mod gfx;
 pub mod ini;
 pub mod install;
+pub mod integrity;
 pub mod map_import;
 pub mod markup;
 pub mod picture_cache;
@@ -48,6 +49,8 @@ pub enum DtError {
     Image { what: &'static str, offset: usize },
     /// A sound file is malformed or in a format Razdor does not play.
     Sound(String),
+    /// The install lacks files of the community's archive (`integrity`): their paths.
+    MissingGameFiles(Vec<String>),
 }
 
 impl fmt::Display for DtError {
@@ -64,6 +67,7 @@ impl fmt::Display for DtError {
             DtError::Missing { section, key } => write!(f, "[{section}] {key} is missing"),
             DtError::Image { what, offset } => write!(f, "bad {what} at offset {offset:#x}"),
             DtError::Sound(e) => write!(f, "sound: {e}"),
+            DtError::MissingGameFiles(files) => write!(f, "missing game files: {}", files.join(", ")),
         }
     }
 }

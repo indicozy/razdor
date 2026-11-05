@@ -76,6 +76,12 @@ EVENT_TEXT = ("Зайдя внутрь церкви, вы обнаружили �
               "Дитя моё, возьми эти средства и помолись за нас. Вы поблагодарили его и приняли дар.")
 SCREENS = [
     ("title", "title", {}),
+    # The main menu without an install: the not-found block (the same env as scenes.txt).
+    ("title-noinstall", "title", {"RAZDOR_DT_DIR": "/nonexistent-razdor-dt", "RAZDOR_CONFIG_DIR": "/nonexistent-razdor-config", "HOME": "/nonexistent-razdor-home"}),
+    # The same, after a failed download: the one-line error and the manual path.
+    ("title-noinstall-manual", "title", {"RAZDOR_DT_DIR": "/nonexistent-razdor-dt", "RAZDOR_CONFIG_DIR": "/nonexistent-razdor-config", "HOME": "/nonexistent-razdor-home", "RAZDOR_SCENE_DOWNLOAD_FAILED": "1"}),
+    # The same, while the game downloads (the progress window at 40%).
+    ("title-noinstall-downloading", "title", {"RAZDOR_DT_DIR": "/nonexistent-razdor-dt", "RAZDOR_CONFIG_DIR": "/nonexistent-razdor-config", "HOME": "/nonexistent-razdor-home", "RAZDOR_SCENE_DOWNLOADING": "40"}),
     ("options", "options", {}),
     # Razdor's advanced settings (the phone's Advanced window, scrolled; its rows are measured in the view).
     ("advanced", "options:advanced", {}),

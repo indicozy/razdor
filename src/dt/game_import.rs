@@ -36,6 +36,10 @@ pub enum Error {
     Unpack(UnpackError),
     /// The swap or the moving of the files failed: the reason.
     Io(String),
+    /// The game folder's download failed (`gdrive`): the reason.
+    Download(String),
+    /// The game folder's download was cancelled (its files kept for a retry).
+    Cancelled,
 }
 
 impl std::fmt::Display for Error {
@@ -48,6 +52,8 @@ impl std::fmt::Display for Error {
             Error::NotInstall => f.write_str("the archive does not hold a Discord Times install"),
             Error::Unpack(e) => write!(f, "{e}"),
             Error::Io(why) => write!(f, "{why}"),
+            Error::Download(why) => write!(f, "the download failed: {why}"),
+            Error::Cancelled => f.write_str("the download was cancelled"),
         }
     }
 }
@@ -137,16 +143,21 @@ pub fn import(found: &Found, target: &Path, progress: &dyn Fn(u64, u64)) -> Resu
     result
 }
 
+/// A whole game that is already unpacked in `staged` (an archive's unpacking, or the folder the
+/// game download fills, `gdrive`) replaces the install folder `target`: the install check, then
+/// the swap. Every failure leaves `target` as it was, and `staged` for the caller to keep or drop.
+pub fn import_folder(staged: &Path, target: &Path) -> Result<Done, Error> {
+    if !is_install(staged) {
+        return Err(Error::NotInstall);
+    }
+    swap_in(target, staged).map_err(|e| Error::Io(e.to_string()))?;
+    Ok(Done::Replaced)
+}
+
 fn unpack_and_apply(found: &Found, target: &Path, staging: &Path, progress: &dyn Fn(u64, u64)) -> Result<Done, Error> {
     unpack::unpack(std::slice::from_ref(found), staging, progress).map_err(Error::Unpack)?;
     match found.kind {
-        Kind::Game => {
-            if !is_install(staging) {
-                return Err(Error::NotInstall);
-            }
-            swap_in(target, staging).map_err(|e| Error::Io(e.to_string()))?;
-            Ok(Done::Replaced)
-        }
+        Kind::Game => import_folder(staging, target),
         Kind::Patch => move_over(staging, target).map(Done::Patched).map_err(|e| Error::Io(e.to_string())),
     }
 }

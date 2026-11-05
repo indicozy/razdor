@@ -5,6 +5,7 @@
 use super::data::{self, ArtefactDef, Build, DrainRule, GlobalOptions, SpellDef, UnitDef};
 use super::dtm::Scenario;
 use super::ini::Ini;
+use super::integrity;
 use super::DtError;
 use std::path::{Path, PathBuf};
 
@@ -201,6 +202,13 @@ impl DtInstall {
             return Err(DtError::NoInstallDir);
         };
         *BASE.lock().unwrap_or_else(|e| e.into_inner()) = Some(base.clone());
+        // The game's own folder is checked before anything is read: a missing file is damage the
+        // screen repairs from the archive, never a crash (`dt::integrity`).
+        if let Err(files) = guard_game_files(&base) {
+            crate::diag!("install: {} lacks {} game file(s)", base.display(), files.len());
+            set_problem(Some(Problem::Missing { dir: base.clone(), files: files.clone() }));
+            return Err(DtError::MissingGameFiles(files));
+        }
         let dir = crate::hub::active_install_dir(&base);
         let loaded = DtInstall::load(&dir);
         match &loaded {
@@ -247,6 +255,9 @@ pub enum Problem {
     NotInstall { dir: PathBuf, missing: Vec<String> },
     /// The install was found but a file of it failed to load.
     Load(String),
+    /// The Community Update install lacks files of the community's archive (`dt::integrity`): the
+    /// folder and the paths. The screen offers the repair from the archive.
+    Missing { dir: PathBuf, files: Vec<String> },
 }
 
 static PROBLEM: std::sync::Mutex<Option<Problem>> = std::sync::Mutex::new(None);
@@ -263,6 +274,36 @@ pub fn base_dir() -> Option<PathBuf> {
 fn set_problem(why: Option<Problem>) {
     if let Ok(mut p) = PROBLEM.lock() {
         *p = why;
+    }
+}
+
+/// The game files of the base install `base` that the community's archive has and the folder
+/// lacks (`Err` with their paths). A changed file is logged and kept; a folder that is not a
+/// Community Update build is not checked (logged). A broken manifest is logged and skipped.
+pub fn guard_game_files(base: &Path) -> Result<(), Vec<String>> {
+    match integrity::builtin() {
+        Ok(manifest) => check_game_files(base, &manifest),
+        Err(why) => {
+            crate::diag!("install: {why}");
+            Ok(())
+        }
+    }
+}
+
+/// [`guard_game_files`] with a given manifest.
+pub fn check_game_files(base: &Path, manifest: &integrity::Manifest) -> Result<(), Vec<String>> {
+    let report = integrity::check(base, manifest, false);
+    if !report.community {
+        crate::diag!("install: {} is not the Community Update build: its files are not checked", base.display());
+        return Ok(());
+    }
+    for changed in &report.changed {
+        crate::diag!("install: {changed} differs from the community archive (kept)");
+    }
+    if report.missing.is_empty() {
+        Ok(())
+    } else {
+        Err(report.missing)
     }
 }
 

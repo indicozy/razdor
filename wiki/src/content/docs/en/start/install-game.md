@@ -9,7 +9,22 @@ sidebar:
 
 Razdor is an engine for the scenarios of the original game *Discord Times* (Community Update). It reads data from **your own installed copy** while it runs. The Razdor repository contains no maps, data, texts or graphics, and nothing from your installation is copied or changed.
 
-You need version 1.8 with Community Update 1.2 (game 1.8.1). If the game is missing, the main menu explains that you need your own copy and links to the [installation guide](https://indicozy.github.io/razdor/install.html) and to the Discord where it is obtained.
+You need version 1.8 with Community Update 1.2 (game 1.8.1). If the game is missing, the main menu explains that you need your own copy and offers to download it (see «Download the game» below), and it links to the [installation guide](https://indicozy.github.io/razdor/install.html) and to the Discord for help.
+
+## Download the game
+
+If the game is missing, the main menu downloads it itself from the community's Google Drive (the «ИГРУ КАЧАТЬ ЗДЕСЬ» thread on the Discord server): one `.zip` file of about 45 MB. Press «Download the game» on the main menu. While it runs, the megabytes done are shown. «Cancel» stops it; the part already downloaded is kept, and the next press goes on from it. The file is checked by its size and checksum, then unpacked into the game folder. When the game is in place, the main menu opens as usual.
+
+If the archive is already on your disk, press «Pick the game archive…» (on a phone, the system's file window opens) and choose the `.zip`: it is installed the same way as the downloaded one.
+
+If the download does not work (no network, Google Drive does not give the file, or refuses it because too many people downloaded it), the same screen shows the reason and the manual way:
+
+1. Open the [file page](https://drive.google.com/file/d/1xKIpVbDIuCWh7LFgtFn59D9t5RPkiH0y/view) («Open the link» or «Copy the link» on the screen) and download the file: one `.zip` archive.
+2. Do not unpack it: Razdor reads the `.zip` itself.
+3. On a computer, press «Pick the game archive…» and choose the `.zip`. On a phone, press «Unpack the game archive»: Razdor finds the `.zip` in the Downloads folder (Download) on Android or in the Files app on iPhone; on Android «Pick the game archive…» works too.
+4. The game is in place when the main menu opens without the «Discord Times not found» message.
+
+If the game is there but some of its files are missing, the main menu says «Missing game files» and offers «Restore the game files»: the missing files are taken from the same archive, the other files stay as they are. Files you have changed yourself are not overwritten.
 
 ## How to connect the game
 

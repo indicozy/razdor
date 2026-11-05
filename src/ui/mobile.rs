@@ -185,6 +185,7 @@ pub fn unpacking() -> bool {
 }
 
 /// The "Unpack the game archive" button is offered: a game archive was found and nothing runs.
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub fn unpack_offered() -> bool {
     !unpacking() && !game_archive_names().is_empty()
 }
@@ -210,6 +211,7 @@ pub fn unpack_error() -> Option<UnpackError> {
 
 /// The player pressed "Unpack the game archive": the archives are unpacked on a thread into the
 /// unpack folder ([`platform::unpack_dir`]). Its end is seen by [`unpack_tick`].
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub fn start_unpack() {
     let archives = ARCHIVES.with_borrow(|archives| archives.clone());
     let state = match razdor::platform::unpack_dir() {
