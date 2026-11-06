@@ -11,8 +11,25 @@
 показывают старый идентификатор своего коммита, а у их версий указаны оба.
 
 ## Не выпущено
+### Изменено
 
+- Android: приложение собрано под Android 16 (требование Google Play).
 ## 1.3.12 — 2026-11-06
+
+Коммит `007fb430` (тег `v1.3.12`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+fc172ac2589d6b60a34d74b8608905729455621c8e07007eaedbba9f59835f39  razdor
+fbf0d266caf909917728957b9831372ef8d7cb27f6d5cbd135c0e4ad1a6d5164  Razdor.exe
+0c43fec13d6ad293f7d8ee5dc4ce57bda30230515c81ec22784f5b12ecc163c0  razdor-macos
+2b252462acfabe5f98bdee61e9f2d82405e8583698a30822f4b2bf6b8195b0a0  razdor-translate
+50aff5771b9d39d607a64f21f99aa01cece8917ff99bad9f0b993f15bebff42f  Razdor-translate.exe
+54fa1a8c1b7c030125999b822dde676975a6a692f2f4784c25f9fb9f3535ce03  razdor-translate-macos
+80ea68b906123071f192bc8eac0fa0899d738bbf09580f25f0173ded94711b85  razdor.apk
+637d9932653b1f7c0fc3b02add064012a63be43ba64cd581b6c39e9ffc0dd104  razdor.ipa
+```
 
 ### Изменено
 
