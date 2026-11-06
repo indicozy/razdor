@@ -731,6 +731,24 @@ fn mark_box(head: Rect, k: f32) -> Rect {
     Rect::new(head.x + head.w - 42.0 * k, head.y + head.h / 2.0 - 7.0 * k, 14.0 * k, 14.0 * k)
 }
 
+/// A finger's square on a phone for a tick's hover (its reason's box): 40 dp.
+const TICK_HIT_DP: f32 = 40.0;
+
+/// A tick's hover area. On a phone (`dp` is the pixels per dp) a square of [`TICK_HIT_DP`] centred on
+/// the drawn tick `mark`, cut to `within` (the row) and at `limit_right` (the favourite star's tap
+/// area's left edge, so the star keeps its taps). Never smaller than `mark`. On the desktop
+/// (`dp` None) the tick's own box. The drawn tick does not change. Pure.
+fn tick_hit(mark: Rect, dp: Option<f32>, within: Rect, limit_right: f32) -> Rect {
+    let Some(dp) = dp else { return mark };
+    let half = TICK_HIT_DP * dp / 2.0;
+    let c = mark.center();
+    let x0 = (c.x - half).max(within.x).min(mark.x);
+    let x1 = (c.x + half).min(within.right()).min(limit_right).max(mark.right());
+    let y0 = (c.y - half).max(within.y).min(mark.y);
+    let y1 = (c.y + half).min(within.bottom()).max(mark.bottom());
+    Rect::new(x0, y0, x1 - x0, y1 - y0)
+}
+
 /// The checkmark's colour of a run mark (`rules::marks::Level`): green, grey, yellow or red.
 fn mark_ink(level: marks::Level) -> Color {
     match level {
@@ -1124,9 +1142,12 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
         let mark_r = mark_box(head, k);
         if let Some(mark) = &f.mark {
             tick(mark_r.x, mark_r.y, mark_r.w, mark_ink(mark.level));
-            if over_list && mark_r.contains(crate::ui::widgets::pointer().into()) {
+            // The hover area: a finger's square on a phone, cut at the star's tap area (`tick_hit`).
+            let hit = tick_hit(mark_r, super::display::dp_px(), r, finger_hit(star_r).x);
+            if over_list && hit.contains(crate::ui::widgets::pointer().into()) {
                 // Queued: drawn over the whole window once its frame is up (`draw_later`), not cut at the rows.
-                tooltip_later(&[(mark_text(mark), INK)]);
+                // Razdor's own information: it shows whatever the hints option says (`info_later`).
+                info_later(&[(mark_text(mark), INK)]);
             }
         } else if f.completed {
             tick(mark_r.x, mark_r.y, mark_r.w, TICK_GREEN);
@@ -1185,8 +1206,10 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
             let tick_r = Rect::new(head.x + head.w - 40.0 * k, cy - small * 0.36 - 5.0 * k, 10.0 * k, 10.0 * k);
             if let Some(mark) = &mark {
                 tick(tick_r.x, tick_r.y, tick_r.w, mark_ink(mark.level));
-                if over_list && Rect::new(tick_r.x - 4.0 * k, tick_r.y - 4.0 * k, tick_r.w + 8.0 * k, tick_r.h + 8.0 * k).contains(crate::ui::widgets::pointer().into()) {
-                    tooltip_later(&[(mark_text(mark), INK)]);
+                let margin = Rect::new(tick_r.x - 4.0 * k, tick_r.y - 4.0 * k, tick_r.w + 8.0 * k, tick_r.h + 8.0 * k);
+                let hit = tick_hit(margin, super::display::dp_px(), r, r.right());
+                if over_list && hit.contains(crate::ui::widgets::pointer().into()) {
+                    info_later(&[(mark_text(mark), INK)]);
                 }
             } else if won {
                 tick(tick_r.x, tick_r.y, tick_r.w, TICK_GREEN);
@@ -2299,6 +2322,37 @@ mod tests {
         assert!(hit.contains(star.center()), "the star's own tap still works");
         assert!(!hit.contains(vec2(bar.x + 4.0 * k, star.center().y)), "a tap on the bar's track is not the star's");
         assert_eq!(clip_left_of(grown, None), grown, "no bar: the area as grown");
+    }
+
+    /// A tick's hover area is the drawn box on the desktop, a 40 dp square on a phone (centred on the
+    /// box, within the row), cut at the star's tap area and never smaller than the box.
+    #[test]
+    fn a_tick_s_hover_area_is_a_finger_square_on_a_phone_and_cut_at_the_star() {
+        let mark = Rect::new(100.0, 100.0, 14.0, 14.0);
+        let within = Rect::new(0.0, 0.0, 1000.0, 1000.0);
+        assert_eq!(tick_hit(mark, None, within, 1000.0), mark, "the desktop: the box");
+        let square = tick_hit(mark, Some(2.625), within, 1000.0);
+        assert!((square.w - 40.0 * 2.625).abs() < 1e-3 && (square.h - 40.0 * 2.625).abs() < 1e-3);
+        assert!((square.center().x - mark.center().x).abs() < 1e-3 && (square.center().y - mark.center().y).abs() < 1e-3);
+        let cut = tick_hit(mark, Some(2.625), within, 120.0);
+        assert_eq!(cut.right(), 120.0, "cut at the star's tap area");
+        assert!(cut.contains(mark.center()) && cut.w >= mark.w);
+        let tight = tick_hit(mark, Some(2.625), within, 90.0);
+        assert!(tight.w >= mark.w && tight.h >= mark.h, "never smaller than the drawn box");
+        // The real row (as the favourite star's test lays it, k = 2, a phone of 2 px per dp): the
+        // hover area stays left of the star's tap area, or is the box itself where they meet.
+        let k = 2.0;
+        let rows = Rect::new(4.0, 31.0, 278.0, 329.0);
+        let view = list_view(rows, k);
+        let row_w = view.w - 22.0 * k;
+        let head = Rect::new(view.x + 4.0 * k, view.y + FIRST_ROW_PX * k, row_w, 30.0 * k - 2.0 * k);
+        let row = Rect::new(view.x + 4.0 * k, head.y, row_w, head.h);
+        let screen = Rect::new(0.0, 0.0, 1280.0 * 2.0, 800.0 * 2.0);
+        let star_tap = finger_hit_at(star_box(head, k), Some(2.0), screen, screen.h, &[]);
+        let mark = mark_box(head, k);
+        let hit = tick_hit(mark, Some(2.0), row, star_tap.x);
+        assert!(hit.right() <= star_tap.x.max(mark.right()), "the hover area ends at the star's tap area");
+        assert!(hit.contains(mark.center()));
     }
 
     /// The mark's checkmark sits left of the star with a gap, and the star's box is where it was

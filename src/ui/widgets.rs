@@ -802,11 +802,28 @@ local! {
 /// building windows): queued now, drawn by [`draw_later`] once the frame is up, so no steel
 /// line crosses the box (the original draws its pop-ups over the frame).
 pub fn tooltip_later(lines: &[(String, Color)]) {
-    if !hints_on() || !hint_hover() {
+    queue_later(false, lines);
+}
+
+/// [`tooltip_later`] for Razdor's own information (a run mark's reason, the scenario list's tick):
+/// it shows whatever «Отключить всплывающие подсказки» says, the hover gate still applies (a long
+/// press in gestures, the rest in the touchpad mode, the hover on the desktop).
+pub fn info_later(lines: &[(String, Color)]) {
+    queue_later(true, lines);
+}
+
+fn queue_later(info: bool, lines: &[(String, Color)]) {
+    if !queued_shown(info, hints_on(), hint_hover()) {
         return;
     }
     let alpha = hint_fade(lines, 160.0 / 255.0);
     LATER.with(|q| q.borrow_mut().push((lines.to_vec(), alpha)));
+}
+
+/// Whether a queued hint box shows this frame: the hover gate, and the hints option unless the
+/// box is `info` (Razdor's own information, [`info_later`]). Pure.
+pub fn queued_shown(info: bool, hints: bool, hover: bool) -> bool {
+    hover && (info || hints)
 }
 
 /// Draws the hint boxes queued by [`tooltip_later`], in the order they were asked for.
@@ -2579,6 +2596,17 @@ pub fn scrollbar_px(r: Rect, scroll: &mut f32, most: f32, view: f32, step: f32) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Razdor's own information ([`info_later`]) ignores the hints option, but not the hover
+    /// gate; a hint box ([`tooltip_later`]) follows the option and the same gate.
+    #[test]
+    fn info_boxes_ignore_the_hints_option_and_keep_the_hover_gate() {
+        assert!(queued_shown(true, false, true), "info shows with the hints off");
+        assert!(!queued_shown(true, false, false), "info still needs the hover");
+        assert!(queued_shown(false, true, true));
+        assert!(!queued_shown(false, false, true), "a hint box follows the hints option");
+        assert!(!queued_shown(false, true, false));
+    }
 
     /// Runs `capture_step` over (down edge, up edge, held, hover) frames for one button and
     /// returns each frame's `pressed`.
