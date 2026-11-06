@@ -1973,10 +1973,10 @@ pub fn class_select(game: &mut Option<Game>, demo: &Arc<Content>, scenario: Opti
         chrome::marble_button(r, label, !asking, down);
         pressed
     };
-    // «Продолжить» (the owner's request): the map's own last game, left of «Начать», with its date
-    // in small text to the left of it. Razdor's own; the slot is what the map's last game saved.
+    // «Продолжить» (the owner's request): the map's own last game, left of «Начать». Its date is
+    // not shown here (the owner's decision); the «Начать» question names it.
     let slot = HERO_SLOT.with_borrow(Clone::clone);
-    if let Some((path, meta)) = &slot {
+    if let Some((path, _)) = &slot {
         let label = tr("Continue");
         let cont_w = (chrome::marble_label_width(34.0 * grow * k, label) / k + 32.0 * grow).max(94.0 * grow);
         let cont_x = start_x - 10.0 - cont_w;
@@ -1985,11 +1985,6 @@ pub fn class_select(game: &mut Option<Game>, demo: &Arc<Content>, scenario: Opti
             CONTINUE_REQUEST.with_borrow_mut(|r| *r = Some(path.clone()));
             return leave_hero_window(Screen::MainMenu);
         }
-        let size = 13.0 * k;
-        let date_room = win.rect(10.0, 470.0, cont_x - 20.0, 0.0).w;
-        let line = ellipsize(&razdor::trf!("Last game: {date}", date = meta.date.as_str()), date_room, size);
-        let row = win.rect(10.0, 470.0, 0.0, 34.0 * grow);
-        chrome::shadow_text(&line, row.x, row.center().y + size * 0.36, size, DESC_INK);
     }
     // On a phone with the name's keyboard up, Enter is the keyboard's key: it hides the keyboard, not Start.
     let enter = screens::HERO_TYPING.with(|t| {

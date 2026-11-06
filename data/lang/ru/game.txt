@@ -77,7 +77,6 @@ Quick save = Быстрое сохранение
 Last session = Последний сеанс
 Continue the game? = Продолжить игру?
 Continue = Продолжить
-Last game: {date} = Последняя игра: {date}
 Start this map anew? Your last game on it ({date}) will be replaced at the new game's first autosave. = Начать карту заново? Прошлая игра на ней ({date}) будет заменена при первом автосохранении новой.
 
 # Save and load windows

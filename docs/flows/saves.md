@@ -96,7 +96,7 @@ from the load window's saves, so playing another map never loses it.
 - Read: `save::map_slot(dir, key)` (the meta through `read_meta`; a missing or damaged file is
   `None`). The hero window (`new_game::class_select`, marble path) looks it up once when it
   opens (`HERO_SLOT`, cleared by `leave_hero_window`) and offers «Продолжить» left of «Начать»
-  with «Последняя игра: {date}» in small text. The click sets `CONTINUE_REQUEST`, which
+  (no date line: the «Начать» question names the slot's date). The click sets `CONTINUE_REQUEST`, which
   `App::frame_content` takes and loads with `App::load`, as a save picked in the load window is
   (a failed load is a dialog on the main menu). «Начать» on a map with a slot first asks (`HERO_ASK`, `saves::question`): Yes starts
   the game as before, No returns to the window; the row takes no clicks meanwhile.
