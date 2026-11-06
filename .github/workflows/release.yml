@@ -95,7 +95,7 @@ jobs:
         run: |
           sdk="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$sdk" --licenses > /dev/null
-          "$sdk" "platforms;android-34" "build-tools;35.0.0" "ndk;$NDK_VERSION"
+          "$sdk" "platforms;android-36" "build-tools;36.0.0" "ndk;$NDK_VERSION"
           echo "NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
 
       - name: Rust (rust-toolchain.toml) and the Android targets

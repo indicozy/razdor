@@ -5,8 +5,8 @@
 # «Android»); the app asks for the all-files access itself.
 #
 # Prerequisites (the release workflow installs the same, .github/workflows/release.yml):
-#   - the Android SDK in $ANDROID_HOME: platform-tools, platform android-34, build-tools 35.0.0
-#     (or another 34.x / 35.x: the highest one is used);
+#   - the Android SDK in $ANDROID_HOME: platform-tools, platform android-36, build-tools 36.0.0
+#     (or another 36.x: the highest one is used);
 #   - the NDK 29 (29.0.14206865) in $NDK_HOME, or in $ANDROID_HOME/ndk/29.0.14206865;
 #   - a JDK (javac, keytool) on the PATH or in $JAVA_HOME: cargo-quad-apk compiles the glue;
 #   - cargo-quad-apk from its master, pinned to d411c8fe1c08339e46d7dc6b40ac04ea5e3a01b6:
