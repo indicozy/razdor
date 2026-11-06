@@ -337,6 +337,11 @@ pub struct Game {
     /// The scenario the game plays (`rules::save`): the demo, or a map file of the install
     /// with a hash of its bytes. The UI sets it for maps ([`Game::set_origin`]).
     pub origin: Option<ScenarioRef>,
+    /// The file name (without extension) of the map the playthrough started on: the campaign's
+    /// first map, or the single map of a new game. Its save slot is `maps/<key>` (`rules::save`,
+    /// [`super::save::map_slot_key`]); `None` in saves before it, which use `origin`.
+    #[serde(default)]
+    pub campaign: Option<String>,
     /// The bytes of the map file `origin` names, as the game was started or loaded. A save
     /// carries them ([`super::save::encode`]), so it loads without the install's copy, as the
     /// original's saves do (saves-data §12.2). Not saved as state: it is the map's own file.
@@ -750,6 +755,7 @@ impl Game {
             old_effects: Vec::new(),
             map_start: Some(clock.total_minutes() as u64),
             origin: None,
+            campaign: None,
             map_bytes: None,
             autosave_due: None,
             carried: None,

@@ -435,6 +435,22 @@ pub fn stage(app: &mut App) {
 /// (`save::load` with the install, then the settings' follow). `Ok(None)` when it is not set; a
 /// save that does not load (another install, another version, a damaged file) is an error, and
 /// its message names the file.
+/// Writes the map slot (`save::write_map_slot`) of a new game on scenario `index`, as the game
+/// writes it at its autosaves, into the save folder: the hero window then offers «Продолжить».
+fn seed_map_slot(app: &App, index: usize) -> Result<(), String> {
+    use razdor::rules::save::{self, ScenarioRef};
+    let content = app.dt_content.clone().ok_or("no install content")?;
+    let content = std::sync::Arc::new(content.with_experimental(super::new_game::experimental_rules()));
+    let e = &app.scenarios[index];
+    let mut game = Game::from_scenario(content, &e.scenario, HeroClass::Knight);
+    let (origin, bytes) = ScenarioRef::of_map(&e.path, &e.file).map_err(|err| err.to_string())?;
+    game.set_map(origin, bytes);
+    game.seed_events(0x5EED);
+    let dir = save::games_dir().ok_or("no save folder")?;
+    save::write_map_slot(&dir, &save::date_name(&game.clock), &game).map_err(|err| err.to_string())?;
+    Ok(())
+}
+
 fn game_from_save(app: &mut App) -> Result<Option<Game>, String> {
     let Some(path) = std::env::var("RAZDOR_SCENE_SAVE").ok().filter(|p| !p.is_empty()) else { return Ok(None) };
     let install = app.assets.dt.as_ref().zip(app.dt_content.clone()).map(|(d, content)| razdor::rules::save::Install { dir: &d.install.dir, content });
@@ -567,6 +583,15 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
     let index = app.scenarios.iter().position(|e| e.file == map);
     if kind == "classes" {
         let index = index.ok_or_else(|| format!("no map {map} in the install"))?;
+        // `RAZDOR_SCENE_SLOT=1`: the map has its save slot (a new game of it written to the save
+        // folder, `RAZDOR_SAVE_DIR`), so the hero window offers «Продолжить».
+        if std::env::var("RAZDOR_SCENE_SLOT").is_ok_and(|v| v == "1") {
+            seed_map_slot(app, index)?;
+        }
+        // `RAZDOR_SCENE_ASK=1`: the «Начать» question of a map with a slot is up.
+        if std::env::var("RAZDOR_SCENE_ASK").is_ok_and(|v| v == "1") {
+            super::new_game::snapshot_hero_ask();
+        }
         app.screen = Screen::ClassSelect { scenario: Some(index) };
         return Ok(());
     }

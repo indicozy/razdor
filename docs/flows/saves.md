@@ -75,6 +75,32 @@ put(): save::meta_of → save::encode (serde_json + BzEncoder) → write .tmp �
   `main_menu::follow_settings` before the battle starts, so the restarted battle is fought by
   the same AI (#19; before, it fell back to the original's AI on its normal level).
 
+## Map slot (continue a map)
+
+Razdor's own (the owner's request): every playthrough keeps one latest save of its map, apart
+from the load window's saves, so playing another map never loses it.
+
+- What: the latest autosave of the playthrough, the same bytes. The key is `Game::campaign`, the
+  file name of the map the playthrough started on (set by `screens::start_game_with_rules`, carried
+  to the next campaign map by `screens::campaign_game` from `save::campaign_of`, kept by
+  `Game::restart`); `save::map_slot_key` falls back to the origin's map for a save from before the
+  key, and is `None` for the demo. The key is lowercased and passed through `slug`.
+- Where: `<games folder>/maps/<key>.rzsave` (`save::map_slot_path`), a sibling of `manual/` and
+  `auto/`. Nothing lists `maps/`: `list`, `list_files`, `by_time`, the rotation, «Очистить всё» and
+  `claim_old_saves` only walk the two kind folders.
+- When written: at every autosave moment, the same bytes as the autosave. `save::write_autosave`
+  and the noon background path (`spawn_autosave`, which takes the key computed on the frame) write
+  it after the autosave. With the install's `OptValue8` off, `ui::saves::map_slot_only` writes it
+  alone (`save::write_map_slot`, synchronous). Nothing else writes it (not manual or quick saves,
+  not the session slot).
+- Read: `save::map_slot(dir, key)` (the meta through `read_meta`; a missing or damaged file is
+  `None`). The hero window (`new_game::class_select`, marble path) looks it up once when it
+  opens (`HERO_SLOT`, cleared by `leave_hero_window`) and offers «Продолжить» left of «Начать»
+  with «Последняя игра: {date}» in small text. The click sets `CONTINUE_REQUEST`, which
+  `App::frame_content` takes and loads with `App::load`, as a save picked in the load window is
+  (a failed load is a dialog on the main menu). «Начать» on a map with a slot first asks (`HERO_ASK`, `saves::question`): Yes starts
+  the game as before, No returns to the window; the row takes no clicks meanwhile.
+
 ## Session slot (resume after the OS kills the app)
 
 The phone's OS may end the app in the background, and the game may crash: the player then

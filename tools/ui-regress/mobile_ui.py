@@ -107,6 +107,10 @@ SCREENS = [
     ("spells", "spells:РК1-Начало пути", {}),
     ("battle", "battle:РК1-Начало пути:0", {}),
     ("classes", "classes:РК1-Начало пути", {}),
+    # The hero window of a map with a save slot («Продолжить» left of «Начать», the date line), and
+    # its «Начать» question (a map with a slot asks first).
+    ("classes-slot", "classes:РК1-Начало пути", {"RAZDOR_SCENE_SLOT": "1"}),
+    ("classes-ask", "classes:РК1-Начало пути", {"RAZDOR_SCENE_SLOT": "1", "RAZDOR_SCENE_ASK": "1"}),
     ("hub", "hub", {}),
     ("hub-mods", "hub:1:evolution-mock", {}),
     ("update", "update", {}),

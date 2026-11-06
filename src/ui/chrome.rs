@@ -2525,6 +2525,16 @@ fn label_size_original(h: f32) -> f32 {
     super::dt_font::sheet_size(super::dt_font::Face::Subtitle, super::dt_font::whole_scale(h / 36.0))
 }
 
+/// The width `label` takes on a marble button `h` px tall, drawn as [`button_label`] draws it at
+/// its grown size (before any fit to the button; the «Продолжить» button widens to it).
+pub fn marble_label_width(h: f32, label: &str) -> f32 {
+    let g = super::display::button_grow();
+    super::typography::Role::Button.with(|| {
+        let size = super::display::grown_text(label_size(h / g, 1.0), g);
+        super::dt_font::legacy_metrics_if(g > 1.0, || super::widgets::measure(label, size).width)
+    })
+}
+
 /// The width `label` takes on a pill `h` tall, as [`pill_button`] draws it (before the fit to the pill).
 pub fn pill_label_width(h: f32, label: &str) -> f32 {
     let mut width = 0.0;

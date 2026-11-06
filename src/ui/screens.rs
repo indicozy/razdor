@@ -436,6 +436,8 @@ pub(super) fn start_game_with_rules(demo: &Arc<Content>, scenario: Option<(&Scen
                 Ok((origin, bytes)) => g.set_map(origin, bytes),
                 Err(err) => razdor::diag!("{}: {err}; this game cannot be saved", e.file),
             }
+            // The playthrough's map: its save slot is this map's (`save::map_slot_key`).
+            g.campaign = Some(e.file.clone());
             g
         }
         None => Game::new(Arc::new(demo.with_experimental(rules)), hero),
@@ -562,13 +564,15 @@ fn next_campaign_map<'a>(game: &Option<Game>, scenarios: &'a [ScenarioEntry]) ->
     Some((next, entry))
 }
 
-/// The next campaign map's game, started from `prev`'s hand-over.
-fn campaign_game(content: Arc<Content>, prev: &NextMap, e: &ScenarioEntry) -> Game {
+/// The next campaign map's game, started from `prev`'s hand-over. `campaign` is the playthrough's
+/// first map (`save::campaign_of` of the game before), which keeps its save slot.
+fn campaign_game(content: Arc<Content>, prev: &NextMap, e: &ScenarioEntry, campaign: Option<String>) -> Game {
     let mut g = Game::from_campaign(content, &e.scenario, prev);
     match ScenarioRef::of_map(&e.path, &e.file) {
         Ok((origin, bytes)) => g.set_map(origin, bytes),
         Err(err) => razdor::diag!("{}: {err}; this game cannot be saved", e.file),
     }
+    g.campaign = campaign;
     razdor::diag::play(&g.clock.label(), &super::play_game_line(&g, "next campaign map"));
     g
 }
@@ -583,7 +587,7 @@ pub fn hand_over(game: &Option<Game>, scenarios: &[ScenarioEntry], content: Opti
     if !razdor::rules::map_refs::unknown(&e.scenario, &content).is_empty() {
         return None;
     }
-    Some(campaign_game(content, &prev, e))
+    Some(campaign_game(content, &prev, e, game.as_ref().and_then(razdor::rules::save::campaign_of)))
 }
 
 /// The victory screen. After a campaign map whose next map is in the install, "Next map"
@@ -602,13 +606,14 @@ pub fn victory(game: &mut Option<Game>, scenarios: &[ScenarioEntry], content: Op
         // The button only when the next map can start: a map that needs a mod's units or items is
         // not offered (`hand_over` refuses it the same way).
         let startable = razdor::rules::map_refs::unknown(&e.scenario, &c).is_empty();
+        let campaign = game.as_ref().and_then(razdor::rules::save::campaign_of);
         // Below «New game», which is grown: the 20 px gap is kept (as at Normal, 450).
         let g = super::display::button_grow();
         let (w, h) = (320.0 * g, 50.0 * g);
         let y = 380.0 + 50.0 * g + 20.0;
         if startable && button(screen_width() / 2.0 - w / 2.0, y, w, h, &trf!("Next map: {title}", title = e.scenario.title), true) {
             cue(Cue::MenuPress);
-            *game = Some(campaign_game(c, &prev, e));
+            *game = Some(campaign_game(c, &prev, e, campaign));
             return Some(Screen::WorldMap);
         }
     }

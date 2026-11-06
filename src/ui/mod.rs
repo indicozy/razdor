@@ -1485,6 +1485,19 @@ impl App {
         if let Some(id) = new_game::take_mod_request() {
             self.choose_mod(id);
         }
+        // «Продолжить» of the hero window: the map's slot loads as a save picked in the load window
+        // does (`App::load`); a failed load is told in a dialog on the main menu, as the launch's
+        // «Продолжить игру?» tells its own.
+        if let Some(path) = new_game::take_continue_request() {
+            self.load(&path);
+            if let Some(error) = self.load_error.take() {
+                self.screen = Screen::MainMenu;
+                let mut d = Dialog::new(tr(n_("Continue the game?")));
+                d.text = vec![error];
+                self.dialogs.push_back(d);
+            }
+            return;
+        }
         // A spell badge's hint over the screen that drew it (under the dialogs).
         spell_badges::flush();
         widgets::set_input_blocked(false);

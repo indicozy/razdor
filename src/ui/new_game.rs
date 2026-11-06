@@ -66,6 +66,14 @@ local! {
     static MOD_REQUEST: RefCell<Option<Option<String>>> = const { RefCell::new(None) };
     /// Whether the hero window is open (its class was set on opening).
     static HERO_OPEN: Cell<bool> = const { Cell::new(false) };
+    /// The map's save slot (`save::map_slot`) the hero window offers as «Продолжить»: looked up
+    /// once when the window opens, cleared when it closes.
+    static HERO_SLOT: RefCell<Option<(std::path::PathBuf, razdor::rules::save::SaveMeta)>> = const { RefCell::new(None) };
+    /// The «Начать» question of a map with a slot is up: the window's buttons take no clicks.
+    static HERO_ASK: Cell<bool> = const { Cell::new(false) };
+    /// The «Продолжить» choice made this frame: the slot's file, for the app to load
+    /// (`take_continue_request`).
+    static CONTINUE_REQUEST: RefCell<Option<std::path::PathBuf>> = const { RefCell::new(None) };
     /// The map preview of the scenario shown: (index into `scenarios`, texture).
     static PREVIEW: RefCell<Option<(usize, Texture2D)>> = const { RefCell::new(None) };
     /// The scenario's own picture, decoded once per scenario shown (`None`: it has none).
@@ -622,6 +630,23 @@ pub(super) fn mod_choice(mods: &[(String, razdor::hub::Text)], active: Option<&s
 /// The mod id of a choice's index (`None`: the base game, index 0).
 pub(super) fn mod_id_at(mods: &[(String, razdor::hub::Text)], index: i64) -> Option<String> {
     (index > 0).then(|| mods.get(index as usize - 1).map(|(id, _)| id.clone())).flatten()
+}
+
+/// The map slot of map `file` in the game's save folder, if the map has one (its last game).
+fn map_slot_of(file: &str) -> Option<(std::path::PathBuf, razdor::rules::save::SaveMeta)> {
+    let dir = razdor::rules::save::games_dir()?;
+    razdor::rules::save::map_slot(&dir, &razdor::rules::save::map_slot_key_of_file(file))
+}
+
+/// The «Продолжить» choice made since the last call: the file of the map slot to load (the app
+/// loads it, as a save picked in the load window).
+pub fn take_continue_request() -> Option<std::path::PathBuf> {
+    CONTINUE_REQUEST.with_borrow_mut(Option::take)
+}
+
+/// A snapshot's hero window with the «Начать» question up (`RAZDOR_SCENE_ASK=1`).
+pub fn snapshot_hero_ask() {
+    HERO_ASK.with(|a| a.set(true));
 }
 
 /// Asks the app to play `id` (`take_mod_request`; `None`: the base game) and starts the list
@@ -1827,12 +1852,15 @@ pub fn class_select(game: &mut Option<Game>, demo: &Arc<Content>, scenario: Opti
     let offered = e.scenario.header.offered_classes();
     if !HERO_OPEN.with(|o| o.replace(true)) {
         fill_name_field();
+        HERO_SLOT.with_borrow_mut(|s| *s = map_slot_of(&e.file));
         match e.scenario.header.first_offered_class() {
             Some(c) => HERO.with(|h| h.set(c)),
             None => return leave_hero_window(Screen::MainMenu),
         }
     }
     let mut pick = HERO.with(|h| h.get()).min(2);
+    // The «Начать» question of a map with a slot is up (below): the portraits take no clicks either.
+    let asking = HERO_ASK.with(|a| a.get());
     // The three heroes (0x4d7d30, 0x4c1458): the portraits 160 px square, 37 apart, 43 under
     // the window's top. The picked one is drawn from the brightened picture; another offered
     // class from its blue copy, a class the map leaves out from its dark red one (65bcd8 /
@@ -1840,7 +1868,7 @@ pub fn class_select(game: &mut Option<Game>, demo: &Arc<Content>, scenario: Opti
     // silver chain; under the picked one the name field instead.
     for (i, hero) in HeroClass::ALL.into_iter().enumerate() {
         let r = win.rect(38.0 + i as f32 * 197.0, 42.0, 160.0, 160.0);
-        let (hover, down, pressed) = button_state(r, offered[i]);
+        let (hover, down, pressed) = button_state(r, offered[i] && !asking);
         let look = if !offered[i] {
             chrome::Fx::HeroLocked
         } else if i == pick {
@@ -1937,12 +1965,32 @@ pub fn class_select(game: &mut Option<Game>, demo: &Arc<Content>, scenario: Opti
     let cancel_x = 622.0 - cancel_w;
     let start_w = 94.0 * grow;
     let start_x = cancel_x - 10.0 - start_w;
+    // While the «Начать» question is up, the row is greyed and takes no clicks (the book's rule
+    // for a question over it, as the save window's delete question).
     let hero_button = |x, w, label: &str| {
         let r = win.rect(x, 470.0, w, 34.0 * grow);
-        let (_, down, pressed) = button_state(r, true);
-        chrome::marble_button(r, label, true, down);
+        let (_, down, pressed) = button_state(r, !asking);
+        chrome::marble_button(r, label, !asking, down);
         pressed
     };
+    // «Продолжить» (the owner's request): the map's own last game, left of «Начать», with its date
+    // in small text to the left of it. Razdor's own; the slot is what the map's last game saved.
+    let slot = HERO_SLOT.with_borrow(Clone::clone);
+    if let Some((path, meta)) = &slot {
+        let label = tr("Continue");
+        let cont_w = (chrome::marble_label_width(34.0 * grow * k, label) / k + 32.0 * grow).max(94.0 * grow);
+        let cont_x = start_x - 10.0 - cont_w;
+        if hero_button(cont_x, cont_w, label) && !asking {
+            cue(Cue::Button);
+            CONTINUE_REQUEST.with_borrow_mut(|r| *r = Some(path.clone()));
+            return leave_hero_window(Screen::MainMenu);
+        }
+        let size = 13.0 * k;
+        let date_room = win.rect(10.0, 470.0, cont_x - 20.0, 0.0).w;
+        let line = ellipsize(&razdor::trf!("Last game: {date}", date = meta.date.as_str()), date_room, size);
+        let row = win.rect(10.0, 470.0, 0.0, 34.0 * grow);
+        chrome::shadow_text(&line, row.x, row.center().y + size * 0.36, size, DESC_INK);
+    }
     // On a phone with the name's keyboard up, Enter is the keyboard's key: it hides the keyboard, not Start.
     let enter = screens::HERO_TYPING.with(|t| {
         let mut typing = t.get();
@@ -1950,7 +1998,23 @@ pub fn class_select(game: &mut Option<Game>, demo: &Arc<Content>, scenario: Opti
         t.set(typing);
         enter
     });
-    if hero_button(start_x, start_w, &own("NewHero", "Start", n_("Start"))) || enter {
+    let start_pressed = hero_button(start_x, start_w, &own("NewHero", "Start", n_("Start"))) || enter;
+    let mut start = false;
+    if asking {
+        // The question: Yes starts the game, No goes back to the window (Esc too).
+        let text = razdor::trf!("Start this map anew? Your last game on it ({date}) will be replaced at the new game's first autosave.", date = slot.as_ref().map_or("", |(_, m)| m.date.as_str()));
+        if let Some(yes) = super::saves::question(tr("New game"), &text) {
+            HERO_ASK.with(|a| a.set(false));
+            start = yes;
+        }
+    } else if start_pressed {
+        if slot.is_some() {
+            HERO_ASK.with(|a| a.set(true));
+        } else {
+            start = true;
+        }
+    }
+    if start {
         cue(Cue::Button);
         super::items_view::reset_pack_view();
         keep_rules(experimental_rules());
@@ -1958,7 +2022,8 @@ pub fn class_select(game: &mut Option<Game>, demo: &Arc<Content>, scenario: Opti
         return leave_hero_window(Screen::WorldMap);
     }
     // Back or Esc returns to the main menu, not to the scenario list (0x4c0fd4).
-    if hero_button(cancel_x, cancel_w, &own("Buttons", "Cancel", n_("Cancel"))) || closed || key(KeyCode::Escape) {
+    let cancel = hero_button(cancel_x, cancel_w, &own("Buttons", "Cancel", n_("Cancel")));
+    if !asking && (cancel || closed || key(KeyCode::Escape)) {
         return leave_hero_window(Screen::MainMenu);
     }
     None
@@ -2021,6 +2086,8 @@ fn hero_stats(content: &Content, hero: HeroClass) -> Vec<(String, String)> {
 /// Closes the hero window: the next opening starts again on the map's first offered class.
 fn leave_hero_window(next: Screen) -> Option<Screen> {
     HERO_OPEN.with(|o| o.set(false));
+    HERO_SLOT.with_borrow_mut(|s| *s = None);
+    HERO_ASK.with(|a| a.set(false));
     Some(next)
 }
 

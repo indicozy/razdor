@@ -196,11 +196,23 @@ fn battle_name(game: &Game) -> String {
 /// Writes an autosave named `name` (`in_battle`: the one before a battle, see
 /// [`save::write_autosave`]); a failure is reported on stderr (the game goes on).
 pub fn autosave(game: &Game, name: &str, in_battle: bool) {
+    let Some(dir) = save::games_dir() else { return };
     if !autosaves_on(super::chrome::has_texts().then(|| super::chrome::options_value("OptValue8")).flatten().as_deref()) {
+        map_slot_only(&dir, game, name);
         return;
     }
-    let Some(dir) = save::games_dir() else { return };
     if let Err(e) = save::write_autosave(&dir, name, game, in_battle) {
+        razdor::diag!("autosave: {e}");
+    }
+}
+
+/// With the install's autosaves off, the map's slot still takes the game (Razdor's, so «Продолжить»
+/// has the map's last game); the demo has none.
+fn map_slot_only(dir: &std::path::Path, game: &Game, name: &str) {
+    if save::map_slot_key(game).is_none() {
+        return;
+    }
+    if let Err(e) = save::write_map_slot(dir, name, game) {
         razdor::diag!("autosave: {e}");
     }
 }
@@ -209,11 +221,12 @@ pub fn autosave(game: &Game, name: &str, in_battle: bool) {
 /// packs and writes it ([`save::write_autosave_in_background`]). The same file and name as
 /// [`autosave`], with the same rotation.
 pub fn autosave_at_noon(game: &Game, name: &str) {
-    if !autosaves_on(super::chrome::has_texts().then(|| super::chrome::options_value("OptValue8")).flatten().as_deref()) {
-        return;
-    }
     save::finish_pending_writes();
     let Some(dir) = save::games_dir() else { return };
+    if !autosaves_on(super::chrome::has_texts().then(|| super::chrome::options_value("OptValue8")).flatten().as_deref()) {
+        map_slot_only(&dir, game, name);
+        return;
+    }
     if let Err(e) = save::write_autosave_in_background(dir, name, game) {
         razdor::diag!("autosave: {e}");
     }

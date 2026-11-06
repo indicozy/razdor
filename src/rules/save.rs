@@ -671,6 +671,68 @@ fn files_of(dir: &Path, kind: SaveKind) -> Vec<(PathBuf, FileStamp)> {
     files
 }
 
+/// The map slots' folder (Razdor's): beside `manual/` and `auto/`, so the load window, its
+/// «Очистить всё», the rotation and the limits never see a slot.
+const MAPS_DIR: &str = "maps";
+
+/// The save slot key of a map file name: the name lowercased, through [`slug`].
+pub fn map_slot_key_of_file(file: &str) -> String {
+    slug(&file.to_lowercase())
+}
+
+/// The save slot key of `game` (Razdor's, see [`map_slot_path`]): its campaign's first map
+/// ([`Game::campaign`]), else the map of its origin; `None` for the demo or no origin.
+pub fn map_slot_key(game: &Game) -> Option<String> {
+    let file = match (&game.campaign, &game.origin) {
+        (Some(first), _) => first.clone(),
+        (None, Some(ScenarioRef::Map { file, .. })) => file.clone(),
+        _ => return None,
+    };
+    Some(map_slot_key_of_file(&file))
+}
+
+/// The save key a campaign's next map inherits from the map before it (the playthrough's first
+/// map): `prev`'s campaign key, else its origin's map (a save from before the key).
+pub fn campaign_of(prev: &Game) -> Option<String> {
+    prev.campaign.clone().or_else(|| match &prev.origin {
+        Some(ScenarioRef::Map { file, .. }) => Some(file.clone()),
+        _ => None,
+    })
+}
+
+/// The map slot file of `key` in save folder `dir`: `maps/<key>.rzsave`. It holds the latest
+/// autosave of the playthrough on that map, written at every autosave moment, and it is kept
+/// apart from the player's saves and the autosaves: playing another map never replaces it.
+pub fn map_slot_path(dir: &Path, key: &str) -> PathBuf {
+    dir.join(MAPS_DIR).join(format!("{key}.{EXTENSION}"))
+}
+
+/// The map slot of `key` in save folder `dir` with its meta; `None` when there is none or it
+/// is damaged.
+pub fn map_slot(dir: &Path, key: &str) -> Option<(PathBuf, SaveMeta)> {
+    finish_pending_writes();
+    let path = map_slot_path(dir, key);
+    let meta = read_meta(&path).ok()?;
+    Some((path, meta))
+}
+
+/// Writes `game` into its map slot alone, as an autosave named `name` would be written (the
+/// autosaves are off in the install, or the slot is wanted without one). The demo has no slot.
+pub fn write_map_slot(dir: &Path, name: &str, game: &Game) -> Result<PathBuf, SaveError> {
+    finish_pending_writes();
+    let key = map_slot_key(game).ok_or(SaveError::NoScenario)?;
+    let meta = meta_of(game, SaveKind::Auto, name)?;
+    let bytes = encode(&meta, game)?;
+    store_slot(dir, &key, &meta, &bytes)
+}
+
+/// Stores the packed bytes of the slot `key` (see [`map_slot_path`]).
+fn store_slot(dir: &Path, key: &str, meta: &SaveMeta, bytes: &[u8]) -> Result<PathBuf, SaveError> {
+    let path = map_slot_path(dir, key);
+    std::fs::create_dir_all(path.parent().unwrap_or(dir))?;
+    put_bytes(&path, meta, bytes)
+}
+
 /// The player's data folder for a kind of save.
 fn kind_dir(dir: &Path, kind: SaveKind) -> PathBuf {
     dir.join(match kind {
@@ -724,7 +786,12 @@ pub fn write_autosave(dir: &Path, name: &str, game: &Game, in_battle: bool) -> R
     finish_pending_writes();
     let meta = meta_of(game, SaveKind::Auto, name)?;
     let bytes = encode(&meta, game)?;
-    store_autosave(dir, &meta, &bytes, in_battle)
+    let path = store_autosave(dir, &meta, &bytes, in_battle)?;
+    // The map's own slot too (Razdor's): the same bytes, kept apart from the rotation.
+    if let Some(key) = map_slot_key(game) {
+        store_slot(dir, &key, &meta, &bytes)?;
+    }
+    Ok(path)
 }
 
 /// The noon autosave, written on a writer thread (Razdor's): the frame only takes the save's
@@ -736,15 +803,22 @@ pub fn write_autosave_in_background(dir: PathBuf, name: &str, game: &Game) -> Re
     finish_pending_writes();
     let meta = meta_of(game, SaveKind::Auto, name)?;
     let json = encode_json(&meta, game)?;
-    spawn_autosave(dir, meta, json);
+    spawn_autosave(dir, meta, json, map_slot_key(game));
     Ok(())
 }
 
 /// The writer thread of [`write_autosave_in_background`]; its errors are logged, as the
 /// frame's autosave logs its own.
-fn spawn_autosave(dir: PathBuf, meta: SaveMeta, json: Vec<u8>) {
+fn spawn_autosave(dir: PathBuf, meta: SaveMeta, json: Vec<u8>, slot: Option<String>) {
     let writer = std::thread::Builder::new().name("autosave".into()).spawn(move || {
-        if let Err(e) = pack(&json).and_then(|bytes| store_autosave(&dir, &meta, &bytes, false)) {
+        let written = pack(&json).and_then(|bytes| {
+            store_autosave(&dir, &meta, &bytes, false)?;
+            match &slot {
+                Some(key) => store_slot(&dir, key, &meta, &bytes).map(|_| ()),
+                None => Ok(()),
+            }
+        });
+        if let Err(e) = written {
             crate::diag!("autosave: {e}");
         }
     });
@@ -2012,7 +2086,7 @@ pub(crate) mod tests {
         let meta = meta_of(&g, SaveKind::Auto, "1204.06.03, 12 h").unwrap();
         let sync_bytes = encode(&meta, &g).unwrap();
         let sync_path = store_autosave(&dir_sync, &meta, &sync_bytes, false).unwrap();
-        spawn_autosave(dir_bg.clone(), meta.clone(), encode_json(&meta, &g).unwrap());
+        spawn_autosave(dir_bg.clone(), meta.clone(), encode_json(&meta, &g).unwrap(), None);
         finish_pending_writes();
         // The names are stamped with the time: the one file of each folder is compared.
         let bg_files = files_of(&dir_bg, SaveKind::Auto);
@@ -2056,5 +2130,90 @@ pub(crate) mod tests {
         finish_pending_writes();
         assert_eq!(list(&dir, SaveKind::Auto).len(), 3, "each autosave kept under its own name");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A game on map `file` (no install needed to save it): its origin names the map.
+    fn game_on(file: &str) -> Game {
+        let mut g = Game::new(demo(), HeroClass::Knight);
+        g.set_origin(ScenarioRef::Map { file: file.into(), hash: 7 });
+        g
+    }
+
+    #[test]
+    fn autosaves_write_the_map_slot_and_a_later_one_replaces_it() {
+        let dir = temp_dir("slot-replace");
+        let mut g = game_on("Map One");
+        write_autosave(&dir, "auto a", &g, false).unwrap();
+        let slot = map_slot_path(&dir, "map_one");
+        assert_eq!(slot, dir.join("maps").join("map_one.rzsave"));
+        assert_eq!(read_meta(&slot).unwrap().name, "auto a");
+        g.gold = 5;
+        write_autosave(&dir, "auto b", &g, true).unwrap();
+        let (path, meta) = map_slot(&dir, "map_one").unwrap();
+        assert_eq!((path, meta.name.as_str()), (slot, "auto b"), "the slot holds the latest autosave");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn two_maps_keep_two_slots_and_the_slots_are_not_autosaves_or_manual_saves() {
+        let dir = temp_dir("slot-two");
+        write_autosave(&dir, "one", &game_on("Map One"), false).unwrap();
+        write_autosave(&dir, "two", &game_on("Map Two"), false).unwrap();
+        assert_eq!(map_slot(&dir, "map_one").unwrap().1.name, "one");
+        assert_eq!(map_slot(&dir, "map_two").unwrap().1.name, "two");
+        // The autosaves are the two writes; the slots are not listed in either tab.
+        let names: Vec<String> = list(&dir, SaveKind::Auto).into_iter().map(|e| e.meta.name).collect();
+        assert_eq!(names.len(), 2, "one autosave per write, no slot among them: {names:?}");
+        assert!(list(&dir, SaveKind::Manual).is_empty());
+        assert!(list_files(&dir, SaveKind::Auto).iter().all(|e| e.path.parent() == Some(dir.join("auto").as_path())));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_map_slot_works_alone_and_a_damaged_slot_is_none() {
+        let dir = temp_dir("slot-alone");
+        assert!(map_slot(&dir, "map_one").is_none(), "no slot yet");
+        assert!(matches!(write_map_slot(&dir, "x", &Game::new(demo(), HeroClass::Knight)), Err(SaveError::NoScenario)), "the demo has no slot");
+        write_map_slot(&dir, "alone", &game_on("Map One")).unwrap();
+        assert_eq!(map_slot(&dir, "map_one").unwrap().1.name, "alone");
+        assert!(list(&dir, SaveKind::Auto).is_empty(), "no autosave written");
+        std::fs::write(map_slot_path(&dir, "map_two"), b"not a save").unwrap();
+        assert!(map_slot(&dir, "map_two").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn map_slot_key_prefers_the_campaign_and_is_none_for_the_demo() {
+        let mut g = Game::new(demo(), HeroClass::Knight);
+        assert_eq!(map_slot_key(&g), None, "no origin: no slot");
+        g.set_origin(ScenarioRef::Demo);
+        assert_eq!(map_slot_key(&g), None, "the demo: no slot");
+        g.set_origin(ScenarioRef::Map { file: "Second Map".into(), hash: 0 });
+        assert_eq!(map_slot_key(&g), Some("second_map".into()));
+        g.campaign = Some("First Map".into());
+        assert_eq!(map_slot_key(&g), Some("first_map".into()), "the campaign's first map");
+        assert_eq!(map_slot_key_of_file("Second Map"), "second_map");
+    }
+
+    #[test]
+    fn the_next_campaign_map_keeps_the_first_maps_key() {
+        let mut prev = game_on("Second Map");
+        assert_eq!(campaign_of(&prev), Some("Second Map".into()), "a game from before the key: its map");
+        prev.campaign = Some("First Map".into());
+        assert_eq!(campaign_of(&prev), Some("First Map".into()));
+        assert_eq!(campaign_of(&Game::new(demo(), HeroClass::Knight)), None);
+    }
+
+    #[test]
+    fn the_campaign_key_roundtrips_and_an_old_save_loads_without_it() {
+        let c = demo();
+        let mut g = Game::new(c.clone(), HeroClass::Knight);
+        g.campaign = Some("First Map".into());
+        let loaded = roundtrip(&g, c.clone(), None);
+        assert_eq!(loaded.campaign, Some("First Map".into()));
+        let mut old = serde_json::to_value(&g).unwrap();
+        old.as_object_mut().unwrap().remove("campaign");
+        let old: Game = serde_json::from_value(old).unwrap();
+        assert_eq!(old.campaign, None);
     }
 }
