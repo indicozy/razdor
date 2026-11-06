@@ -182,6 +182,14 @@ impl Layout {
         self.stacked
     }
 
+    /// Whether the hover box is drawn after the quick buttons. Held upright, the enemy's back row
+    /// lies right under them and a box above a back-row card covers them (a player's report: its
+    /// damage line hid under «Доиграть самим» and «Смотреть»). Landscape's buttons are in the column
+    /// at the left, far below the grid's back row, so its order stays as it was.
+    fn hint_after_buttons(&self) -> bool {
+        self.stacked
+    }
+
     /// The ground under the unit's card: the landscape column down to the window's bottom, or the band.
     fn column(&self) -> Rect {
         if self.is_stacked() {
@@ -967,6 +975,9 @@ impl BattleView {
         if !self.exiting || just_opened {
             self.close_clicked |= self.draw(&l, &battle_title(game), game.clock.total_minutes() as u64, assets);
             self.controls(&l, over);
+            if l.hint_after_buttons() {
+                self.hint(&l);
+            }
         }
         super::cursor::set(self.pointer());
         if over && !self.quick_played {
@@ -1012,6 +1023,9 @@ impl BattleView {
         super::display::with_window_scale(None, super::main_menu::backdrop);
         self.close_clicked |= self.draw(&l, tr("Custom battle"), 0, assets);
         self.controls(&l, over);
+        if l.hint_after_buttons() {
+            self.hint(&l);
+        }
         super::cursor::set(self.pointer());
         if over && !self.quick_played {
             if self.result_shown() {
@@ -1255,11 +1269,27 @@ impl BattleView {
             let separator = l.win.x + 247.0 * l.k;
             chrome::silver_line(vec2(separator, l.win.y + 29.0 * px), vec2(separator, l.win.bottom() - 2.0 * px), 2.0 * px);
         }
-        // One hint box at a time: a spell badge's hint replaces the hover box (49e710).
-        if player_turn && !super::spell_badges::hovered() {
-            self.draw_preview(l, active.expect("player turn"));
+        // The hover box comes after the quick buttons on a phone held upright (`hint`, `frame`).
+        if !l.hint_after_buttons() {
+            self.hint(l);
         }
         close
+    }
+
+    /// The hover box of the player's turn: one at a time, a spell badge's hint replaces it (49e710).
+    fn hint(&self, l: &Layout) {
+        if let Some(active) = self.player_turn_unit() {
+            if !super::spell_badges::hovered() {
+                self.draw_preview(l, active);
+            }
+        }
+    }
+
+    /// The unit the player moves now: the active unit, of a side the player plays, while no action
+    /// animates (the same test `draw` makes for the targets and the strip's text).
+    fn player_turn_unit(&self) -> Option<usize> {
+        let a = self.battle.active()?;
+        (self.human(self.battle.fighters[a].team) && self.fx.is_none()).then_some(a)
     }
 
     /// The strip's text: the last action, or what the player can do.
@@ -1807,6 +1837,25 @@ mod tests {
         }
         // The band starts under the title strip (the desktop's 26 px at this scale, the content's own top).
         assert!(band.y >= win.y + chrome::strip_height(l.k, chrome::FIXED_TITLE), "{band:?} under the strip of {win:?}");
+    }
+
+    /// A player's report: held upright, the enemy's back row lies right under the quick buttons, so
+    /// the hover box of a unit aimed there (above the finger, a finger's width off) lands on them.
+    /// Its box must be drawn after the buttons, or its damage line hides under them. Landscape's
+    /// buttons sit in the column at the left, far below the enemy's back row, so its order stays.
+    #[test]
+    fn the_hover_box_of_an_upright_back_row_target_is_drawn_over_the_quick_buttons() {
+        let up = upright(Formation::default());
+        let back = up.cell_pos(Team::Enemy, Slot::new(Row::Back, 0));
+        let finger = (back.x + up.card.x / 2.0, back.y + up.card.y / 2.0);
+        let size = (200.0 * up.k, 2.0 * 16.0 * up.k + 8.0 * up.k);
+        let screen = Rect::new(0.0, 0.0, 1080.0, 2400.0 - 90.0);
+        let hint = super::super::popup::place_popup(finger, size, screen, FINGER_DP * 2.75);
+        assert!(overlaps(hint, up.quick), "the box {hint:?} lies under the buttons {:?}", up.quick);
+        assert!(up.hint_after_buttons(), "the upright box is drawn after the buttons");
+
+        let land = Layout::landscape(1.0, (1280.0, 800.0), 80.0, Formation::default(), None, 0.0);
+        assert!(!land.hint_after_buttons(), "landscape keeps its order");
     }
 
     #[test]
