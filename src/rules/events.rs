@@ -2827,6 +2827,25 @@ mod tests {
         assert_eq!(g.flag_string(), "Abcd\u{a0}");
     }
 
+    /// A counter's digit runs past 9 into the cp1251 characters, as the original's (the digit
+    /// bytes at 0x4ab38e–0x4ab39d): `+X^` starts X1 (0x31) and raises it by one per call, so
+    /// ten calls give ':' (0x3A) and 207 calls give 'я' (0xFF). One more call wraps the byte to
+    /// 0x00 (`wrapping_add`, as the code does).
+    #[test]
+    fn a_counter_runs_past_9_into_the_cp1251_letters() {
+        let mut g = engine(Vec::new());
+        for _ in 0..10 {
+            g.flag_action("+Foo^");
+        }
+        assert_eq!(g.flag_string(), "Foo:\u{a0}");
+        for _ in 10..207 {
+            g.flag_action("+Foo^");
+        }
+        assert_eq!(g.flag_string(), "Fooя\u{a0}");
+        g.flag_action("+Foo^");
+        assert_eq!(g.flags, b"Foo\x00\xa0".to_vec(), "the byte wraps to 0x00");
+    }
+
     /// Saves before format 8 kept a list of flag names.
     #[test]
     fn old_saves_keep_their_flags() {
