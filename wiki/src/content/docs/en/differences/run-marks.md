@@ -26,7 +26,7 @@ If you lose a card, no mark is placed.
 
 ## Tooltips
 
-Hover your cursor over the checkmark (on a phone, press and hold) to read the reason for its color.
+Hover your cursor over the checkmark (on a phone, press and hold) to read the reason for its color. This hint shows even when "Turn off pop-up hints" is on in the settings.
 
 ## What Affects the Mark
 

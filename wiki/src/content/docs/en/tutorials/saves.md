@@ -41,6 +41,22 @@ If the game was closed without a proper exit (crash, power loss, swiping the app
 
 If the game closed during a battle, "Last session" stores the moment before the battle: after loading, the hero will be standing on the map next to the enemy, and the battle will restart upon your attack. Open windows (town or hero) are not restored — the game will continue on the map. When the game goes to the background (on a phone) or the computer shuts down, "Last session" is written at once; if the hero was walking at that moment, the game continues from where he last stopped.
 
+## Continue a map
+
+Each map has its own last save, which is stored separately from the list of saves in the Load window. A campaign is considered a single map: its save is the last chapter you reached.
+
+This save updates at the same moments as autosaves: before every battle and during the daily report at 12:00. It updates even when autosaves are turned off in the install (`OptValue8`). Therefore, even if playing on a different map has pushed old saves out of the general list, the map retains its last state.
+
+**How to continue:** "New game" → select a map → "Next". If the map has such a save, a "Continue" button will appear next to the "Start" button in the "The hero's starting characteristics" window. It loads this save.
+
+:::caution
+If a map has a save and you press "Start", the game will ask "Start this map anew?" and show the date of the previous game. The previous game will be overwritten upon the first autosave of the new one (before the first battle or at 12:00); until then, "Continue" will still load the old save.
+:::
+
+* These saves are not visible in the Load window and do not occupy the 30 autosave slots; "Clear all" does not delete them.
+* They are located in the `maps` subfolder of your installation's save folder.
+* There is one save per map, not per hero: starting a new game with a different hero on this map will overwrite it.
+
 ## Where saves are kept
 
 Saves are kept in the data folder, not in the game folder:
