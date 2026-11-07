@@ -12,7 +12,8 @@ Reads the hook's JSON on stdin and exits 2 (with the reason on stderr) to block 
   (.lit .ugs .dtm .dtc .wav .ogg .mp3 .bik .rzsave, Rus_*.ini, _Global.ini);
 - pushes to the frozen dt-feat, force pushes, `--no-verify`;
 - recursive `rm`, `find -delete` and `git clean -f` outside the scratch folders
-  (/tmp/claude-<id>/…, /mnt/ai_models/razdor-scratch/…).
+  (/tmp/claude-<id>/…, /mnt/ai_models/razdor-scratch/… and its target /mnt/ai_models/razdor/scratch/…,
+  ~/.cache/razdor-scratch/…).
 
 Commands are parsed, not grepped: `git push` inside a commit message or an `echo` is not a push.
 `bash -c` / `sh -c` / `eval` / `env -S` strings, `$( )` and backtick substitutions (also in
@@ -48,7 +49,14 @@ PIN_HINT = "CARGO_BUILD_JOBS=12 nice -n 19 taskset -c 8-19 cargo …"
 FROZEN = {"dt-feat", "dt-original"}
 GAME_EXT = re.compile(r"\.(lit|ugs|dtm|dtc|wav|ogg|mp3|bik|rzsave)$", re.I)
 GAME_INI = re.compile(r"(^|/)(rus_[^/]*|_global)\.ini$", re.I)
-SCRATCH = (re.compile(r"^/tmp/claude-[^/]+/.+"), re.compile(r"^/mnt/ai_models/razdor-scratch/.+"))
+# Scratch roots where recursive deletes are allowed (the owner's decision, 2026-11-07, adds the
+# real target of the razdor-scratch symlink and the home-disk scratch ~/.cache/razdor-scratch).
+SCRATCH = (
+    re.compile(r"^/tmp/claude-[^/]+/.+"),
+    re.compile(r"^/mnt/ai_models/razdor-scratch/.+"),
+    re.compile(r"^/mnt/ai_models/razdor/scratch/.+"),
+    re.compile("^" + re.escape(os.path.realpath(os.path.expanduser("~/.cache/razdor-scratch"))) + "/.+"),
+)
 CARGO_PINNED = {"build", "b", "test", "t", "run", "r", "clippy", "check", "c", "bench"}
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh", "fish"}
 # Words that make an unreadable command dangerous enough to refuse.
@@ -516,12 +524,12 @@ def in_scratch(path):
 def check_delete_targets(targets, cwd, what):
     for t in targets:
         if "$" in t or "`" in t or t.startswith("~"):
-            raise Block(f"{what} {t}: the path comes from a variable; spell it out (deletes only inside /tmp/claude-<id>/… or /mnt/ai_models/razdor-scratch/…).")
+            raise Block(f"{what} {t}: the path comes from a variable; spell it out (deletes only inside /tmp/claude-<id>/…, /mnt/ai_models/razdor-scratch/… or ~/.cache/razdor-scratch/…).")
         if cwd is None and not t.startswith("/"):
             raise Block(f"{what} {t}: a relative path after an unknown cd.")
         p = os.path.normpath(os.path.join(cwd or "/", t))
         if not in_scratch(p.rstrip("*?") or "/"):
-            raise Block(f"{what} {t}: recursive deletes only inside /tmp/claude-<id>/… or /mnt/ai_models/razdor-scratch/…. Ask the owner (or queue it for them) before deleting anything else.")
+            raise Block(f"{what} {t}: recursive deletes only inside /tmp/claude-<id>/…, /mnt/ai_models/razdor-scratch/… (and its target /mnt/ai_models/razdor/scratch/…) or ~/.cache/razdor-scratch/…. Ask the owner (or queue it for them) before deleting anything else.")
 
 
 def check_rm(argv, cwd):
