@@ -451,7 +451,7 @@ fn bar_px(k: f32, phone: bool) -> f32 {
 }
 
 /// The room a list or pane gives its scrollbar on its right: the bar and a gap either side.
-fn bar_room(k: f32, phone: bool) -> f32 {
+pub(super) fn bar_room(k: f32, phone: bool) -> f32 {
     bar_px(k, phone) + 4.0 * k
 }
 

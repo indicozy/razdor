@@ -1,3 +1,4 @@
+use std::cell::{Cell, RefCell};
 use razdor::local;
 use macroquad::prelude::*;
 
@@ -232,28 +233,73 @@ const BLOCK_TEXT: f32 = 2.1;
 /// A phone button's height on the not-found block, in dp.
 const BLOCK_TOUCH_DP: f32 = 44.0;
 
-/// On the main menu while no install is found, on every platform: the not-found block in the
-/// column left of the menu's buttons (the left half of the screen, in landscape and portrait),
-/// over a dark panel. It says that Razdor plays the player's own copy of the game, gives the
-/// steps to put it in place: a short numbered tutorial (download the game archive from the
-/// community's Google Drive folder, then import it with the platform's importer button, which is
-/// on the block too), and «How to install» (the install guide on the website) and «Help on Discord»
-/// (the players' server, a secondary link). The phones also have their access button or «Check
-/// again» (their steps' texts). The buttons stack; the two links share a row when the stack does
-/// not fit the screen's height. The scale is the interface's (`chrome::k`, which fits the width
-/// and the height), so the column is not scaled by the height alone.
-pub fn menu_not_found(no_install: bool) {
-    if !no_install {
-        return;
+/// The block's layout on a `w`-wide column at scale `k`: its texts, its rows of buttons and the
+/// sizes they take. `bottom`: where the block ends on the desktop and the landscape phones (the
+/// block grows up from there); `sh`: the screen's height. Shared by the drawing and the upright
+/// menu's reserve (`upright_reserve`), so the two cannot disagree.
+struct Block {
+    k: f32,
+    tf: f32,
+    title_size: f32,
+    body_size: f32,
+    lead: f32,
+    label_px: f32,
+    btn_w: f32,
+    btn_h: f32,
+    gap: f32,
+    body_lines: Vec<String>,
+    text_h: f32,
+    rows: Vec<Vec<NotFoundButton>>,
+    /// The tallest the block may be (`main_menu::upright_block_budget`): above it the body scrolls.
+    cap: f32,
+}
+
+impl Block {
+    /// The height of `n` rows of buttons with their gaps.
+    fn stack_of(&self, n: usize) -> f32 {
+        n as f32 * self.btn_h + (n as f32 - 1.0).max(0.0) * self.gap
     }
-    let sh = screen_height();
-    let k = super::chrome::k();
-    let (x, w, bottom) = super::main_menu::not_found_box(k);
-    // Razdor's own: the buttons grow with the text size (`button_grow`); the block grows upward.
+
+    /// The block's height with its body in full: the panel's margins, the texts, the gap, the
+    /// buttons and the margin.
+    fn full_height(&self) -> f32 {
+        10.0 * self.k + self.text_h + 18.0 * self.k + self.stack_of(self.rows.len()) + 10.0 * self.k
+    }
+
+    /// The block's height, at most its cap.
+    fn height(&self) -> f32 {
+        self.full_height().min(self.cap)
+    }
+
+    /// The height of the body's view: the block less the parts around the body (the margins, the
+    /// gap, the buttons and the title with its gap).
+    fn body_view(&self) -> f32 {
+        let around = 38.0 * self.k + self.stack_of(self.rows.len()) + self.title_size + 10.0 * self.k * self.tf;
+        (self.height() - around).max(2.0 * self.lead)
+    }
+
+    /// The body's text in full, in px.
+    fn body_in_full(&self) -> f32 {
+        self.body_lines.len() as f32 * self.lead
+    }
+
+    /// Whether the body is taller than its view, so it scrolls.
+    fn scrolls(&self) -> bool {
+        self.body_in_full() > self.body_view()
+    }
+}
+
+local! {
+    /// The upright not-found block's body scroll (px) and the finger's drag on it.
+    static NOT_FOUND_SCROLL: Cell<f32> = const { Cell::new(0.0) };
+    static NOT_FOUND_DRAG: RefCell<Option<super::hub_view::Drag>> = const { RefCell::new(None) };
+}
+
+fn block(k: f32, w: f32, bottom: f32, sh: f32, phone: Option<f32>) -> Block {
+    // Razdor's own: the buttons grow with the text size (`button_grow`).
     let g = super::display::button_grow();
     // A phone: the text about 14 sp (the phone rule), a button 44 dp, and two buttons a row when
     // the column takes two (the phones' landscape is short). The desktop keeps its layout.
-    let phone = super::display::dp_px();
     let tf = if phone.is_some() { BLOCK_TEXT } else { 1.0 };
     let btn_h = match phone {
         Some(dp) => BLOCK_TOUCH_DP * dp,
@@ -277,14 +323,15 @@ pub fn menu_not_found(no_install: bool) {
     body.extend(download_lines());
     body.extend(unpack_lines());
     body.extend(install_problem());
-    let body_lines: Vec<String> = body.iter().flat_map(|s| wrap(s, w, body_size)).flat_map(|l| break_wide(&l, w, body_size)).collect();
+    let wrap_body = |width: f32| -> Vec<String> { body.iter().flat_map(|s| wrap(s, width, body_size)).flat_map(|l| break_wide(&l, width, body_size)).collect() };
+    let body_lines = wrap_body(w);
     let text_h = title_size + 10.0 * k * tf + body_lines.len() as f32 * lead;
     // The rows of buttons, from the top: the tutorial's (the download, the picker, the repair),
     // then the two links.
     let (how, there) = ((tr("How to install"), open_guide as fn()), (tr("Help on Discord"), open_discord as fn()));
     let mut rows = not_found_rows(manual_block(game_import::download_failure().as_deref(), game_import::download_available()));
-    let stack_height = |n: usize| n as f32 * btn_h + (n as f32 - 1.0) * gap;
-    let stacked = stack_height(rows.len() + 2);
+    let stack_of = |n: usize| n as f32 * btn_h + (n as f32 - 1.0).max(0.0) * gap;
+    let stacked = stack_of(rows.len() + 2);
     if phone.is_some() {
         // A phone's column has no room for the links: they are left out there (Discord stays on
         // the bottom bar; the install guide is in the wiki).
@@ -299,25 +346,95 @@ pub fn menu_not_found(no_install: bool) {
         let flat: Vec<NotFoundButton> = rows.into_iter().flatten().collect();
         rows = flat.chunks(per_row).map(|c| c.to_vec()).collect();
     }
-    let buttons_top = bottom - stack_height(rows.len());
-    let text_top = buttons_top - 18.0 * k - text_h;
-    draw_rectangle(x - 10.0 * k, text_top - 10.0 * k, w + 20.0 * k, bottom - text_top + 20.0 * k, Color::new(0.0, 0.0, 0.0, 0.6));
-    let title_base = text_top + title_size;
-    text(tr("Discord Times not found."), x, title_base, title_size, INK);
-    for (i, line) in body_lines.iter().enumerate() {
-        text(line, x, title_base + 10.0 * k * tf + (i + 1) as f32 * lead, body_size, DIM);
+    let cap = match phone {
+        Some(_) => super::main_menu::upright_block_budget(k),
+        None => f32::MAX,
+    };
+    let mut b = Block { k, tf, title_size, body_size, lead, label_px: 16.0 * k * tf, btn_w, btn_h, gap, body_lines, text_h, rows, cap };
+    // A body taller than the block allows scrolls, and is wrapped narrower for the scroll bar.
+    if phone.is_some() && b.full_height() > cap {
+        b.body_lines = wrap_body(w - super::hub_view::bar_room(k, true));
+        b.text_h = title_size + 10.0 * k * tf + b.body_lines.len() as f32 * lead;
     }
-    // A phone's label at about 14 sp: the label's size is set (`button_sized`).
-    let label_px = 16.0 * k * tf;
-    for (i, row) in rows.iter().enumerate() {
-        let y = buttons_top + i as f32 * (btn_h + gap);
+    b
+}
+
+/// The phone held upright: its dp size, or none (the block then grows up from the column's bottom).
+fn upright_phone() -> Option<f32> {
+    super::display::dp_px().filter(|_| super::window_layout::portrait())
+}
+
+/// The height the upright phone's menu keeps above its logo for the not-found block: the block's
+/// top margin, the block (at most its budget) and the gap to the logo. Zero when the block is not
+/// drawn upright.
+pub fn upright_reserve(k: f32) -> f32 {
+    if upright_phone().is_none() {
+        return 0.0;
+    }
+    let b = block(k, screen_width() - 32.0 * k, 0.0, screen_height(), upright_phone());
+    8.0 * k + b.height() + 16.0 * k
+}
+
+/// On the main menu while no install is found, on every platform: the not-found block in the
+/// column left of the menu's buttons (the left half of the screen, in landscape and portrait),
+/// over a dark panel. It says that Razdor plays the player's own copy of the game, gives the
+/// steps to put it in place: a short numbered tutorial (download the game archive from the
+/// community's Google Drive folder, then import it with the platform's importer button, which is
+/// on the block too), and «How to install» (the install guide on the website) and «Help on Discord»
+/// (the players' server, a secondary link). The phones also have their access button or «Check
+/// again» (their steps' texts). The buttons stack; the two links share a row when the stack does
+/// not fit the screen's height. The scale is the interface's (`chrome::k`, which fits the width
+/// and the height), so the column is not scaled by the height alone. Held upright on a phone the
+/// block hangs from the top, below the safe area, and the menu sits under it (`upright_reserve`);
+/// its body scrolls when the menu would not fit with it in full.
+pub fn menu_not_found(no_install: bool) {
+    if !no_install {
+        return;
+    }
+    let sh = screen_height();
+    let k = super::chrome::k();
+    let (x, w, bottom) = super::main_menu::not_found_box(k);
+    let phone = super::display::dp_px();
+    let b = block(k, w, bottom, sh, phone);
+    let height = b.height();
+    let panel_top = match upright_phone() {
+        Some(_) => super::display::safe_area().top + 8.0 * k,
+        None => bottom - height + 10.0 * k,
+    };
+    let text_top = panel_top + 10.0 * k;
+    draw_rectangle(x - 10.0 * k, panel_top, w + 20.0 * k, height, Color::new(0.0, 0.0, 0.0, 0.6));
+    let title_base = text_top + b.title_size;
+    text(tr("Discord Times not found."), x, title_base, b.title_size, INK);
+    let body_top = title_base + 10.0 * k * b.tf;
+    if b.scrolls() {
+        let pane = Rect::new(x, body_top, w, b.body_view());
+        let most = (b.body_in_full() - b.body_view()).max(0.0);
+        let mut scroll = NOT_FOUND_SCROLL.with(Cell::get);
+        NOT_FOUND_DRAG.with(|d| super::hub_view::pane_scroll(&mut scroll, &mut d.borrow_mut(), pane, most, k, true));
+        NOT_FOUND_SCROLL.with(|s| s.set(scroll));
+        // The lines drawn are the ones that fit the view whole: a line cut by its edge would run
+        // into the title or the buttons.
+        for (i, line) in b.body_lines.iter().enumerate() {
+            let base = body_top + (i + 1) as f32 * b.lead - scroll;
+            if base - b.lead * 0.75 >= pane.y && base <= pane.y + pane.h {
+                text(line, x, base, b.body_size, DIM);
+            }
+        }
+    } else {
+        for (i, line) in b.body_lines.iter().enumerate() {
+            text(line, x, body_top + (i + 1) as f32 * b.lead, b.body_size, DIM);
+        }
+    }
+    let buttons_top = panel_top + height - 10.0 * k - b.stack_of(b.rows.len());
+    for (i, row) in b.rows.iter().enumerate() {
+        let y = buttons_top + i as f32 * (b.btn_h + b.gap);
         let n = row.len() as f32;
-        let bw = btn_w.min((w - gap * (n - 1.0)) / n);
+        let bw = b.btn_w.min((w - b.gap * (n - 1.0)) / n);
         for (j, (label, action)) in row.iter().enumerate() {
-            let bx = x + j as f32 * (bw + gap);
+            let bx = x + j as f32 * (bw + b.gap);
             let pressed = match phone {
-                Some(_) => button_sized(bx, y, bw, btn_h, label, true, label_px),
-                None => button(bx, y, bw, btn_h, label, true),
+                Some(_) => button_sized(bx, y, bw, b.btn_h, label, true, b.label_px),
+                None => button(bx, y, bw, b.btn_h, label, true),
             };
             if pressed {
                 action();

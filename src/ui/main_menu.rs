@@ -550,7 +550,7 @@ impl PortraitMenu {
 /// per dp, its top safe inset `safe_top` (physical px). `mod_row`: a mod is installed, so the
 /// chosen mod's tile sits above the four tiles and lifts the foot lines and the buttons by its
 /// height and gap.
-fn portrait_menu(sw: f32, sh: f32, k: f32, dp: f32, safe_top: f32, mod_row: bool) -> PortraitMenu {
+fn portrait_menu(sw: f32, sh: f32, k: f32, dp: f32, safe_top: f32, mod_row: bool, reserve: f32) -> PortraitMenu {
     // The logo (`logo`): 840 px wide, 128/896 of that high.
     let logo_h = 840.0 * 128.0 / 896.0 * k;
     // The chips grow with the text size (`button_grow`, the owner's decision of 2026-10-31); the
@@ -572,7 +572,8 @@ fn portrait_menu(sw: f32, sh: f32, k: f32, dp: f32, safe_top: f32, mod_row: bool
     // buttons (at least 6 px, at most 20 px).
     let column_end = column_foot - 70.0 * k;
     let middle = (safe_top + column_foot) / 2.0;
-    let min_first = safe_top + logo_h + 24.0 * k;
+    // `reserve`: the space above the logo that the not-found block takes (zero without it).
+    let min_first = safe_top + reserve + logo_h + 24.0 * k;
     let gap = ((column_end - min_first - 5.0 * size.y) / 4.0).clamp(6.0 * k, 20.0 * k);
     let span = 5.0 * size.y + 4.0 * gap;
     let first = (middle - span / 2.0).clamp(min_first, (column_end - span).max(min_first));
@@ -589,19 +590,22 @@ local! {
     /// Whether a mod is installed, as the title menu last drew it (`frame`): the chosen mod's row
     /// is held above the tiles, and the title windows keep above it too (`portrait_foot_top`).
     static MOD_ROW: Cell<bool> = const { Cell::new(false) };
+    /// The space the not-found block takes above the upright menu's logo, as this frame draws it
+    /// (`screens::upright_reserve`; zero when an install is found).
+    static BLOCK_RESERVE: Cell<f32> = const { Cell::new(0.0) };
 }
 
 /// The top of the footer lines (the version and copyright row) of the portrait menu on a `sw` ×
 /// `sh` screen at scale `k`: the title windows keep above it (`window_layout::portrait_title`).
 pub fn portrait_foot_top(sw: f32, sh: f32, k: f32, dp: f32, safe_top: f32) -> f32 {
-    portrait_menu(sw, sh, k, dp, safe_top, MOD_ROW.with(Cell::get)).foot_y
+    portrait_menu(sw, sh, k, dp, safe_top, MOD_ROW.with(Cell::get), BLOCK_RESERVE.with(Cell::get)).foot_y
 }
 
 /// The current menu's portrait geometry, when the phone is held upright.
 fn upright_menu() -> Option<PortraitMenu> {
     let dp = upright_dp()?;
     let safe_top = super::display::safe_area().top;
-    Some(portrait_menu(screen_width(), screen_height(), chrome::k(), dp, safe_top, MOD_ROW.with(Cell::get)))
+    Some(portrait_menu(screen_width(), screen_height(), chrome::k(), dp, safe_top, MOD_ROW.with(Cell::get), BLOCK_RESERVE.with(Cell::get)))
 }
 
 /// The screen rectangle of oval button `i`.
@@ -620,6 +624,23 @@ pub fn not_found_box(k: f32) -> (f32, f32, f32) {
         Some(m) => (16.0 * k, screen_width() - 32.0 * k, m.block_bottom(k)),
         None => (16.0 * k, (left_edge() - 32.0 * k).max(120.0 * k), screen_height() - 60.0 * k),
     }
+}
+
+/// The tallest the not-found block may be on an upright phone, in px: the menu keeps its logo and
+/// its five ovals at their smallest gaps above the bottom bar (`portrait_menu`), and the block takes
+/// the rest from the safe area. Unbounded when the phone is not held upright.
+pub fn upright_block_budget(k: f32) -> f32 {
+    let Some(dp) = upright_dp() else {
+        return f32::MAX;
+    };
+    let g = super::display::button_grow();
+    let size = OVAL * (PORTRAIT_SCALE * k);
+    let lift = if MOD_ROW.with(Cell::get) { TILE_DP * dp + CHIP_GAP_DP * dp } else { 0.0 };
+    let column_foot = screen_height() - 16.0 * k - (TOUCH_DP * dp).max(24.0 * k) * g - 12.0 * k - lift;
+    let column_end = column_foot - 70.0 * k;
+    let logo_h = 840.0 * 128.0 / 896.0 * k;
+    let span_min = 5.0 * size.y + 4.0 * 6.0 * k;
+    column_end - span_min - logo_h - 24.0 * k - 16.0 * k - 8.0 * k - super::display::safe_area().top
 }
 
 /// The baseline of the title screen's update notice (`update_view::title_line`).
@@ -649,6 +670,7 @@ pub fn left_edge() -> f32 {
 pub fn frame(no_install: bool, mods: &[(String, razdor::hub::Text)], active: Option<&str>, busy: bool) -> Option<Pick> {
     // The mod row is held only with a mod installed, as the menu draws it below.
     MOD_ROW.with(|m| m.set(!mods.is_empty()));
+    BLOCK_RESERVE.with(|r| r.set(if no_install { super::screens::upright_reserve(chrome::k()) } else { 0.0 }));
     let mod_choice = (!mods.is_empty()).then(|| super::new_game::mod_choice(mods, active, busy));
     backdrop();
     let mut pick = None;
@@ -2992,7 +3014,7 @@ mod tests {
     #[test]
     fn upright_buttons_are_a_column_of_touch_sized_ovals_above_the_chips() {
         let (sw, sh, k, dp) = PHONE;
-        let m = portrait_menu(sw, sh, k, dp, 0.0, false);
+        let m = portrait_menu(sw, sh, k, dp, 0.0, false, 0.0);
         for r in &m.buttons {
             assert!(close(r.h, OVAL.y * PORTRAIT_SCALE * k), "{r:?}");
             assert!(close(r.w, OVAL.x * PORTRAIT_SCALE * k), "{r:?}");
@@ -3014,7 +3036,7 @@ mod tests {
         // 1080×2376 and 1080×1920 (the owner's phone and a shorter one): the column's middle is
         // the middle of the area above the foot lines, within 4 px.
         for (sh, dp) in [(2376.0, 2.75), (1920.0, 2.75)] {
-            let m = portrait_menu(1080.0, sh, 1.125, dp, 0.0, false);
+            let m = portrait_menu(1080.0, sh, 1.125, dp, 0.0, false, 0.0);
             let first = m.buttons[0];
             let last = m.buttons[4];
             let centre = (first.y + last.y + last.h) / 2.0;
@@ -3032,7 +3054,7 @@ mod tests {
     fn upright_logo_never_goes_above_the_safe_inset() {
         // A cutout of 120 px: the logo's top is at the inset, and the column moves down to suit.
         let (sw, sh, k, dp) = PHONE;
-        let m = portrait_menu(sw, sh, k, dp, 120.0, false);
+        let m = portrait_menu(sw, sh, k, dp, 120.0, false, 0.0);
         assert!(m.logo_top >= 120.0, "logo at {} is above the inset", m.logo_top);
         assert!(m.buttons[0].y >= m.logo_top + 840.0 * 128.0 / 896.0 * k);
         // And with the logo on the inset the column still ends above the lines.
@@ -3043,7 +3065,7 @@ mod tests {
     #[test]
     fn upright_chips_are_touch_sized_and_on_the_bottom_of_the_screen() {
         let (sw, sh, k, dp) = PHONE;
-        let m = portrait_menu(sw, sh, k, dp, 0.0, false);
+        let m = portrait_menu(sw, sh, k, dp, 0.0, false, 0.0);
         assert!(m.chip_h >= TOUCH_DP * dp, "chips are {} px tall", m.chip_h);
         assert!(m.chip_top + m.chip_h <= sh, "chips leave the screen");
         assert!(m.foot_y <= m.chip_top, "the lines run into the chips");
@@ -3053,8 +3075,8 @@ mod tests {
     #[test]
     fn a_mod_row_sits_above_the_four_tiles_and_lifts_the_foot_lines() {
         let (sw, sh, k, dp) = PHONE;
-        let plain = portrait_menu(sw, sh, k, dp, 0.0, false);
-        let with = portrait_menu(sw, sh, k, dp, 0.0, true);
+        let plain = portrait_menu(sw, sh, k, dp, 0.0, false, 0.0);
+        let with = portrait_menu(sw, sh, k, dp, 0.0, true, 0.0);
         assert_eq!(plain.mod_row, None, "no row without a mod");
         assert!(close(with.chip_top, plain.chip_top), "the four tiles stay at the bottom");
         let row = with.mod_row.expect("a row with a mod installed");
@@ -3068,7 +3090,7 @@ mod tests {
     #[test]
     fn the_buttons_end_above_the_foot_lines_with_a_mod_row() {
         for (sw, sh, k, dp) in [PHONE, (720.0, 1600.0, 0.75, 2.0)] {
-            let m = portrait_menu(sw, sh, k, dp, 0.0, true);
+            let m = portrait_menu(sw, sh, k, dp, 0.0, true, 0.0);
             let last = m.buttons[4];
             assert!(last.y + last.h <= m.notice_y(k), "{sh}: the last button runs into the foot lines");
             assert!(m.logo_top >= 0.0, "{sh}: the logo leaves the screen");
@@ -3078,7 +3100,7 @@ mod tests {
     #[test]
     fn upright_geometry_fits_a_small_phone_too() {
         // 720×1600 at 2 px per dp: the fit is 0.75.
-        let m = portrait_menu(720.0, 1600.0, 0.75, 2.0, 0.0, false);
+        let m = portrait_menu(720.0, 1600.0, 0.75, 2.0, 0.0, false, 0.0);
         for pair in m.buttons.windows(2) {
             assert!(pair[0].y + pair[0].h <= pair[1].y);
         }
