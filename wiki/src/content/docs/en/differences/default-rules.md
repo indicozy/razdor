@@ -38,9 +38,6 @@ Razdor fixes bugs that made the original behave other than intended. For example
 
 * **AI ships** sail about twice as fast as in the original.
 * **Event messages:** gold, experience and other rewards arrive when the window opens, not at OK.
-* **Two battle events at one moment:** the second battle replaces the first.
-* **Village gates** read the hero's nature without items and spells.
-* **"Show army"** shows nothing for a dead army. The original shows where it died.
 
 ## Razdor's additions
 
