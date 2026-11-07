@@ -735,9 +735,13 @@ impl EventWorld for Game {
         }
     }
 
+    /// The army's record's current cell, for any army (0x4ab51b reads its +0x1724/+0x1728
+    /// with no alive or active test): on the map, waiting, or beaten and waiting for its
+    /// respawn. A dead army shows the cell where it died; an inactive one its last cell (its
+    /// file cell if it never moved).
     fn show_army(&mut self, army: ArmyId) {
-        if let Some(i) = self.army_index(army) {
-            let t = self.world.armies[i].tile(&self.world.map);
+        let at = self.army_records().find(|a| a.id == army).map(|a| a.tile(&self.world.map));
+        if let Some(t) = at {
             self.reveal_area(t, SHOW_ARMY_RADIUS);
         }
     }
@@ -2561,6 +2565,34 @@ mod tests {
         assert_eq!(events.last(), Some(&Event::Encounter(0)));
         assert_eq!(g.foe, Some(Foe::Army(0)));
         assert_eq!(g.world.armies[0].id, 5);
+    }
+
+    /// Show army (0x4ab51b, the view's scroll 0x4af96c, the reveal 0x4af83c): the army record's
+    /// current cell, for any army. A dead army shows the cell it died on; an inactive one its
+    /// file cell. The radius is the one a shown army always had here.
+    #[test]
+    fn show_army_reveals_the_record_of_a_dead_or_inactive_army() {
+        use crate::rules::ai::Beaten;
+        let mut s = world(vec![]);
+        s.armies = vec![army(2, 4, 3, -2, &[troop(4, 0, 1)])];
+        let mut g = start(&s);
+        let i = g.world.armies.iter().position(|a| a.id == 2).expect("on the map");
+        g.world.armies[i].pos = g.world.map.center((9, 7));
+        Game::army_beaten(&mut g, i, Beaten::ByPlayer);
+        assert!(g.world.armies.is_empty(), "beaten: off the map");
+        g.shown.clear();
+        g.pending_reveals.clear();
+        EventWorld::show_army(&mut g, 2);
+        assert_eq!(g.pending_reveals, vec![(9, 7, SHOW_ARMY_RADIUS)], "the death cell");
+        assert_eq!(g.shown.last().map(|s| s.at), Some((9, 7)));
+
+        let mut sleeper = army(5, 12, 10, -2, &[troop(4, 0, 1)]);
+        sleeper.inactive = 1;
+        s.armies = vec![sleeper];
+        let mut g = start(&s);
+        g.pending_reveals.clear();
+        EventWorld::show_army(&mut g, 5);
+        assert_eq!(g.pending_reveals, vec![(12, 10, SHOW_ARMY_RADIUS)], "the file cell of the inactive army");
     }
 
     #[test]
