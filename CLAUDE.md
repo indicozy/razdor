@@ -50,9 +50,15 @@ mobile support; there is no roadmap and nothing else is started unless the owner
 
 ## Hard rules
 
-- Parity is a means, not the goal: the original's behaviour, its bugs and imbalances included,
-  stays wherever community maps and mods depend on it, or where it is simply fun. Comment each
-  kept original bug as original behaviour.
+- By default Razdor is 100% the same as DT (the owner's hard rule, 2026-11-07): every rule, and
+  what the original's screens let the player do, matches the original by default, its bugs and
+  imbalances included. Any deviation (a Razdor rule or feature the original lacks, or a fix of an
+  original bug that changes play) ships behind an experimental switch, off by default (the
+  new-game "..." window, `ExperimentalRules`). A crash or softlock gets the narrowest guard,
+  commented as Razdor's, not the original's. Comment each kept original bug as original
+  behaviour. Settled exceptions stay as decided: the original-bug fixes in the spec tables
+  (the owner, 2026-11-07) and the deviations listed as kept in
+  `docs/specs/parity-pass-2026-11-07.md`.
 - Who decides a change (the owner's decision, 2026-10-28):
   - crashes, softlocks, wrong text: fix without asking, as long as the community map smoke test
     stays green;
