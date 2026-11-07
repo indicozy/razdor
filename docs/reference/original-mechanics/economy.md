@@ -430,7 +430,10 @@ refill. Razdor: the same (`rk1_a_village_emptied_by_an_army_pays_the_hero_nothin
 The events are scanned first; one that opens its window keeps the village pending (0x4ed42c)
 until it is read, and a walk that ends in the village as an event opens enters it only after
 that window (world.md §7.2): the offer rolls below come after the event's OK.
-- A hero of Nature Rogue gets nothing: no offer, no window.
+- A hero of Nature Rogue gets nothing: no offer, no window. The nature is the hero's current one
+  (his live nature byte, 0x75aa61), not his type's; Razdor reads it from his live stats
+  (`village_ready`, 2026-11-08, gap G10). No item or spell changes it in Razdor's model, so the two
+  agree today.
 - Otherwise, if the village has gold in stock and it is not the village of the last offer (0x671d0c),
   the offer chooser runs (below). If it offers something, the offer opens.
 - Otherwise the **village window** opens. Taking, and also closing the window, gives **all the gold

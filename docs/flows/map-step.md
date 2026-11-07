@@ -97,7 +97,9 @@ a place (`EventEngine::visit`). Answers come from the UI (`Game::answer_question
 `EventEngine::answer`); a "No" counts the firing but applies nothing, so a declined repeating offer
 is asked again on the next visit. A question blocks the engine until answered. Results that touch
 the army recount it and mark the hero's AI pairs dirty (`script_events`). An event that starts a
-battle reports `Event::Encounter` after all its effects. Text placeholders: only `#HERONAME`
+battle reports `Event::Encounter` after all its effects. A battle-only event ends the scan the way a
+message does (`battle_queued`, 2026-11-08): the events after it run in the scan that `resolve_battle`
+starts after the battle. Text placeholders: only `#HERONAME`
 (`Game::fill_text`).
 
 **Clock and daily moments** (world.md §6). `Clock::advance` reports `Tick::Midnight` and

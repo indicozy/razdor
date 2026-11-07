@@ -83,21 +83,13 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   the window is up, both applied at OK) and by what the player sees in between. Fix: move the finish
   to the OK path; the owner decides whether a change to when map results land goes on the
   experimental track.
-- **Two battle events in one tick: the second replaces the first** (2026-11-05, the Hristos
-  editor-guide analysis, docs/reference/editor-guide.md, gap G2). `start_battle`
-  (`src/rules/script.rs:827-833`) sets `foe` and queues the encounter when `finish` runs
-  (`src/rules/events.rs:1654-1656`), while `run` (`:1277-1288`) keeps going. `held` is set only for
-  a message (`:1466-1473`), so a battle-only event with no message does not stop the scan.
-  `events.md §2` lists lanterns, shown army and spell as holding nothing, but not battles. Settled
-  by the exe's exit from the scan after a battle-only finish (0x4abfbc) and the battle army's local
-  (0x4ab51b), or by a map with two battle events and no text. Then stop the scan at a battle, or
-  document the difference.
-- **Show army reveals nothing for a dead or inactive army** (2026-11-05, the Hristos editor-guide
-  analysis, docs/reference/editor-guide.md, gap G4). `show_army` (`src/rules/script.rs:745-750`)
-  reveals only an on-map army. The exe (0x4ab51b) reads the record's current cell (+0x1724, +0x1728)
-  for any army, so a dead army shows its death cell. The inactive case (the guide says the start
-  cell) is not traced. Settled by a trace of the inactive path in the exe; then reveal the record's
-  cell for a dead army.
+- **Lanterns, a shown army, a spell and a delay: do they end the scan like a battle does?** (2026-11-08, the
+  parity pass, P3). The exe's scan (0x4abfbc) loops over silent events only (0x674966: no texts, spell, battle,
+  lanterns, show army, delay), so by that definition all of these end it. `events.md §2` and the spec's table say
+  they hold nothing. Razdor now ends the scan at a battle-only event (2026-11-08) and not at these four. Settled by
+  a Frida or difftest trace of an event with lanterns and no text (the second event of the scan fires in the same
+  scan or the next one), then the change.
+
 - **Picture 202 (the met army's leader) is not drawn, and the editor cannot pick it** (2026-11-05, the
   Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G5; the screenshot pass). `src/ui/story.rs:53-63`
   treats any picture value other than 0, 200 and 201 as a unit id, so 202 gives no picture. The meeting
@@ -127,11 +119,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   (`src/rules/events.rs:78-86`). Known: in the exe a second summon leaves the old cell's occupancy
   set (the guide's "blocked" claim); Razdor keeps one parked tile. Open: whether a second ship is
   drawn at once. Settled by two summons in game, then the leader-type rule.
-- **The village gate reads the hero's base nature** (2026-11-05, the Hristos editor-guide analysis,
-  docs/reference/editor-guide.md, gap G10). `village_ready` (`src/rules/economy.rs:770-775`) tests
-  the base unit's nature; the exe reads the hero's current nature byte (0x75aa61). The two differ
-  only if an item or a spell changes the nature. Low risk. Settled by checking whether any item or
-  spell changes the nature byte; then read the current nature.
 - **Game draw order: buildings draw above trees, rocks and mountains in one cell** (2026-11-05, the
   Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G12, unverified).
   `src/ui/world_view.rs:1640-1655` (`LAYER_BUILDING` 2 above the object layers 0 and 1, from
@@ -809,6 +796,18 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   should grow (it needs room the list gives up) is the owner's call, a Razdor choice.
 
 ## Settled
+
+- **Two battle events in one tick** (2026-11-05; settled 2026-11-08, parity pass P3, gap G2). A battle-only event
+  now ends the scan, as a message does (`src/rules/events.rs`, `battle_queued`): the scan that `resolve_battle`
+  starts after the battle gives the rest. Before, the second battle replaced the first through the one foe slot.
+  The exe's exit after a battle-only finish is 0x4abfbc → 0x4ac248 (test `a_battle_ends_the_scan`; commit "Events: a battle-only event ends the scan (P3, gap G2)").
+- **Show army for a dead or inactive army** (2026-11-05; settled 2026-11-08, parity pass P5, gap G4). `show_army`
+  reveals the army record's current cell for any army (0x4ab51b reads +0x1724/+0x1728 with no alive or active
+  test): a dead one its death cell, an inactive one its last cell (test `show_army_reveals_the_record_of_a_dead_or_inactive_army`;
+  commit "Show army: the record's current cell for a dead or inactive army (P5, gap G4)").
+- **The village gate reads the hero's base nature** (2026-11-05; settled 2026-11-08, parity pass P4, gap G10).
+  `village_ready` reads the hero's live nature (`Unit::stats`, the exe's 0x75aa61). Razdor's rebuild never changes
+  the nature, so the two agree today; the gate reads the live value for when one does (commit "Village gate: the hero's live nature (P4, gap G10)").
 
 - **Decrement recipe: `-X^` with X absent** (2026-11-05; settled 2026-11-06, docs only). The owner kept
   Razdor's no-op (D4): `src/rules/events.rs:1054` does nothing when X is absent, a deliberate deviation
