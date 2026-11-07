@@ -2598,7 +2598,15 @@ impl Battle {
         } else {
             out.kind = ActionKind::Bless;
             out.buff = self.bless_of(id, target, p);
-            self.apply_buff(id, target, out.buff);
+            // Razdor's softlock guard, not the original: with `bless_once` off a blessing may land on a
+            // unit already blessed this turn (the original's stacking, kept). An Elemental blessing's
+            // change to actions left is then not applied again: its stat parts still stack as the original.
+            // Without it a wounded reserve Elemental caster (0x485670 keeps its own cell castable while
+            // wounded) re-blessing itself, or two reserve casters blessing each other, would gain actions
+            // without end. Curses are unchanged.
+            let again = self.fighters[target].blessed;
+            let applied = if again { Buff { actions: 0, ..out.buff } } else { out.buff };
+            self.apply_buff(id, target, applied);
             self.fighters[target].blessed = true;
             if self.log_on {
                 self.log.push(crate::trf!("{name} blesses {tname}: {what}", name, tname, what = out.buff.describe()));

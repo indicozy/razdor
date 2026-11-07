@@ -82,7 +82,9 @@ off).
   (`Battle::option_at`), a Splash follow-up gives no second blessing (`friendly_case`), and the AI's
   bless pick skips a blessed unit. Off (the original, 48555b, 4857fb → 484b64, 48a8d3–48a93c): a
   blessed wounded ally with a heal of 0 is blessed again, a reserve caster tends every reserve unit,
-  and blessings add up. See `battle.md` row 2.
+  and blessings add up. Razdor's softlock guard (not the original, `friendly_case`): with it off, an
+  Elemental blessing's actions part is not applied to a unit already blessed this turn, so a reserve
+  Elemental caster's turn ends. See `battle.md` row 2.
 - **Poison spares the Undead** («Яд не действует на нежить», default off, `undead_poison_immune`):
   on, no poison takes hold on an Undead unit and the AI counts none (`Battle::poisonable`). Off, every
   poison works on every nature (48b299–48b2bd, 48b398, c2639c, c2a27c, c25c43, c259da). `battle.md` row 50.

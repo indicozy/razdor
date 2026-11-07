@@ -2124,6 +2124,28 @@ fn bless_once_off_blesses_again_and_the_reserve_caster_tends_every_reserve_unit(
     assert!(bt.options(1, 2).is_empty(), "Razdor's rule: no second blessing from the reserve");
 }
 
+/// Razdor's softlock guard (not the original; see `friendly_case`): with `bless_once` off, a wounded
+/// reserve Elemental caster may keep casting on its own cell (0x485670), and an Elemental blessing
+/// adds an action each time. Re-blessing an already blessed unit must not add one again, so the
+/// caster's turn ends.
+#[test]
+fn a_wounded_reserve_elemental_caster_ends_its_turn_with_bless_once_off() {
+    let caster = mage(60, 30, MagicSchool::Elemental, MagicDirection::ToAlly);
+    let c = content_with(vec![caster], Formation::VANILLA);
+    let mut bt = battle_in(&c, &[(60, r(0))], &[(18, f(1))]);
+    turn_of(&mut bt, 0);
+    bt.fighters[0].hp = 10;
+    let mut casts = 0;
+    while bt.active() == Some(0) && casts < 60 {
+        if bt.own_cell().is_none() {
+            break;
+        }
+        casts += 1;
+    }
+    assert!(bt.active() != Some(0), "the caster's turn ended after {casts} casts");
+    assert!(casts < 60, "the caster kept its actions");
+}
+
 /// The original's poison (battle.md row 50; 48b299–48b2bd): a poison takes hold on an Undead unit
 /// with `undead_poison_immune` off, the default. The switch on spares the Undead.
 #[test]
@@ -3534,10 +3556,7 @@ fn god_takes_no_damage_from_anything() {
     for formation in [Formation::WIDE, Formation::VANILLA] {
         let mut c = Content::from_dt(&dt);
         c.formation = formation;
-        // Under Razdor's rules for blessing once a turn: the original's reserve caster blesses itself
-        // again on every action, each blessing adding an action (OPEN_QUESTIONS.md), so the battle
-        // would never end with the switch off. The cheat's own check is the same either way.
-        let c = razdor(Arc::new(c));
+        let c = Arc::new(c);
         let all: Vec<UnitId> = c.unit_ids().collect();
         let n = all.len();
         for seed in 0..3 {

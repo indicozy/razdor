@@ -796,14 +796,16 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   should grow (it needs room the list gives up) is the owner's call, a Razdor choice.
 
 - **A reserve Elemental caster may bless itself without end, with the original's rule** (2026-11-07,
-  the parity pass's switch `bless_once`, off). With the switch off a reserve caster tends every
+  the parity pass's switch `bless_once`, off; the guard below is in, whether the original hangs stays open). With the switch off a reserve caster tends every
   reserve unit with no blessed test (4857fb → 484b64), itself included, and an Elemental blessing
   adds an action left. The god test on the install (`god_takes_no_damage_from_anything`) found a
   battle that never ends: the reserve caster blesses itself on every action, keeping its two
   actions. Not yet checked whether the original hangs the same way (a RE of 4857fb, 484b64 and
   the Elemental action path, with a step count in the exe), or whether the original stops it
-  elsewhere. Until it is settled the test runs under Razdor's rule; the owner decides whether the
-  off switch needs a guard for it.
+  elsewhere. Razdor's softlock guard is in (`friendly_case`, not the original): with the switch
+  off, an Elemental blessing's actions part is not applied to a unit already blessed this turn,
+  so the caster's turn ends. The god test runs under the default rule again. Still open: whether
+  the original hangs the same way, and whether its exe has a guard that this one does not model.
 
 ## Settled
 
