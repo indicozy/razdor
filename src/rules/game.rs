@@ -229,7 +229,7 @@ pub enum Foe {
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Game {
     /// Persisted per playthrough, independently of the new-game menu and installation.
-    #[serde(default)]
+    #[serde(default = "super::content::ExperimentalRules::before_the_rules_were_saved")]
     pub experimental: super::content::ExperimentalRules,
     #[serde(skip)]
     pub content: Arc<Content>,

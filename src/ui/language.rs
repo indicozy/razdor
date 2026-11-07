@@ -48,8 +48,23 @@ pub struct Settings {
     pub scenario_show: i64,
     pub scenario_order: i64,
     /// The experimental scenario rules last set in the rules window (`ui::new_game`), kept between
-    /// games (Razdor's, a players' wish); all off on a file without them.
+    /// games (Razdor's, a players' wish); all off on a file without them, and a key a file lacks
+    /// is off too (see [`remembered_rules`]).
+    #[serde(deserialize_with = "remembered_rules")]
     pub experimental_rules: razdor::rules::content::ExperimentalRules,
+}
+
+/// The remembered rules: a switch whose key the file lacks is off, a new game's default. (A save's
+/// missing key reads ON for the five parity switches, the rule the save had then: `RulesWire`.)
+fn remembered_rules<'de, D: serde::Deserializer<'de>>(d: D) -> Result<razdor::rules::content::ExperimentalRules, D::Error> {
+    use serde::de::Error;
+    let mut v = <serde_json::Value as serde::Deserialize>::deserialize(d)?;
+    if let Some(o) = v.as_object_mut() {
+        for k in ["bless_once", "undead_poison_immune", "unlimited_spells", "merchant_item", "rear_service_flat"] {
+            o.entry(k).or_insert(serde_json::Value::Bool(false));
+        }
+    }
+    serde_json::from_value(v).map_err(D::Error::custom)
 }
 
 /// The maps won, by mod: the mod's id (`hub::active_mod`), or `NO_MOD` for the base game.
@@ -300,6 +315,14 @@ mod tests {
         let saved = serde_json::to_string(&Settings { experimental_rules: rules, ..Settings::default() }).unwrap();
         let back: Settings = serde_json::from_str(&saved).unwrap();
         assert_eq!(back.experimental_rules, rules);
+    }
+
+    #[test]
+    fn a_settings_file_from_before_the_parity_switches_reads_them_off() {
+        let old = r#"{"experimental_rules": {"fast_ai": true, "six_cells": true}}"#;
+        let s: Settings = serde_json::from_str(old).unwrap();
+        assert!(s.experimental_rules.fast_ai && s.experimental_rules.six_cells);
+        assert!(!s.experimental_rules.bless_once && !s.experimental_rules.rear_service_flat);
     }
 
     #[test]

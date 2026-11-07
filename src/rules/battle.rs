@@ -1793,17 +1793,17 @@ impl Battle {
                 return None;
             }
             let heals = t.wounded() && self.heal_amount(id, target, f.power) > 0;
-            // Razdor fixes the original's bug (the owner's decision, main only): a unit is
-            // blessed at most once a turn. The original offers a blessed ally while it is
-            // wounded (48555b, flag +0x9d), and every reserve unit to a reserve caster with
-            // no test at all (4857fb → 484b64 writes code 9; only the caster's own cell is
-            // checked, 485854). The action then heals only when the heal power is above 0
-            // (48a8d3, tested at 48a911/48a917), else it blesses again (48a93c), and the
-            // blessings add up. So a Death caster re-blessed a wounded living ally on every
-            // action (its heal is 0 there), and a sorceress in the reserve stacked blessings
-            // on the reserve units. Here an already-blessed unit is a target only for a heal
-            // that does something.
-            let blessed_again = t.blessed && !heals;
+            // The experimental «Благословение раз в ход» (`bless_once`, Razdor's rule, the owner's
+            // decision): a unit is blessed at most once a turn. Off, the original's rule: it
+            // offers a blessed ally while it is wounded (48555b, flag +0x9d), and every reserve
+            // unit to a reserve caster with no test at all (4857fb → 484b64 writes code 9; only
+            // the caster's own cell is checked, 485854). The action then heals only when the heal
+            // power is above 0 (48a8d3, tested at 48a911/48a917), else it blesses again (48a93c),
+            // and the blessings add up. So a Death caster re-blesses a wounded living ally on
+            // every action (its heal is 0 there), and a sorceress in the reserve stacks blessings
+            // on the reserve units: the original's bug, kept as original behaviour. On, an
+            // already-blessed unit is a target only for a heal that does something.
+            let blessed_again = self.content.experimental.bless_once && t.blessed && !heals;
             if from.row == Row::Reserve {
                 // A caster in the reserve tends the reserve, and nothing else.
                 if t.slot.row != Row::Reserve || blessed_again {
@@ -2589,11 +2589,11 @@ impl Battle {
             if self.log_on {
                 self.log.push(crate::trf!("{name} heals {tname} +{healed}", name, tname, healed = out.amount));
             }
-        } else if t.blessed {
-            // Razdor fixes the original's bug (the owner's decision, main only): no second
-            // blessing in a turn (see `option_at`). Only a Splash follow-up on a blessed
-            // neighbour (c26fd2 runs the case again on it, 48a93c blesses it again) or a
-            // Splash heal scaled down to 0 gets here; it does nothing.
+        } else if t.blessed && self.content.experimental.bless_once {
+            // The experimental «Благословение раз в ход» (`bless_once`): no second blessing in a
+            // turn (see `option_at`). Only a Splash follow-up on a blessed neighbour (c26fd2 runs
+            // the case again on it, 48a93c blesses it again) or a Splash heal scaled down to 0
+            // gets here; it does nothing. Off, it blesses again: the original's bug, kept.
             out.kind = ActionKind::Bless;
         } else {
             out.kind = ActionKind::Bless;
@@ -2901,13 +2901,14 @@ impl Battle {
         self.fighters[id].has(Bonus::Poison) && self.fighters[t].regen >= 0 && dmg > 1 && self.poisonable(t)
     }
 
-    /// Poison takes hold on unit `t`: not on the Undead. Razdor's deviation (the owner's
-    /// decision, 2026-10-18): the original poisons every target whatever its nature (vanilla
-    /// Poison 48b299–48b2bd and 48b398, PoisonS c2639c, PoisonArmorIgnore c2a27c, CtrPoison
-    /// c25c43, the mages' poison c259da), so its Undead lose 20% a turn like the living. Here
-    /// none of them poisons an Undead unit, and the AI no longer counts a poison on one.
+    /// Poison takes hold on unit `t`. The experimental «Яд не действует на нежить»
+    /// (`undead_poison_immune`, the owner's decision, 2026-10-18): none of the poisons takes hold
+    /// on an Undead unit, and the AI counts none. Off, the original poisons every target whatever
+    /// its nature (vanilla Poison 48b299–48b2bd and 48b398, PoisonS c2639c, PoisonArmorIgnore
+    /// c2a27c, CtrPoison c25c43, the mages' poison c259da), so its Undead lose 20% a turn like
+    /// the living.
     fn poisonable(&self, t: usize) -> bool {
-        self.fighters[t].stats.nature != Nature::Undead
+        !self.content.experimental.undead_poison_immune || self.fighters[t].stats.nature != Nature::Undead
     }
 
     /// Hits `u` needs to kill the enemy in the front row of `col` (4863e8): a blow if it has
@@ -3184,7 +3185,8 @@ impl Battle {
                 }
                 let bless = self.pick_target(friendly.iter().map(|&t| {
                     let tf = &self.fighters[t];
-                    let ok = !tf.blessed && tf.actions > 0 && tf.ai_role != AiRole::Mage;
+                    // A blessed unit is no pick under `bless_once` (the once-a-turn rule, see `option_at`).
+                    let ok = (!tf.blessed || !self.content.experimental.bless_once) && tf.actions > 0 && tf.ai_role != AiRole::Mage;
                     (t, if ok { (tf.actions as i64 * tf.ai_power as i64 * tf.hp as i64) as f64 } else { 0.0 })
                 }));
                 bless.map(|(_, t)| act(t))

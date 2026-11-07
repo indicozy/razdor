@@ -69,6 +69,17 @@ fn with(extra: Vec<UnitDef>, player: &[(u32, Slot)], enemies: &[(u32, Slot)]) ->
     battle_in(&content_with(extra, Formation::WIDE), player, enemies)
 }
 
+/// Today's Razdor rules on the parity switches `bless_once` and `undead_poison_immune` (both off
+/// by default: the original's). The tests of Razdor's deviations build their battles with them.
+fn razdor(c: Arc<Content>) -> Arc<Content> {
+    Arc::new(c.with_experimental(crate::rules::content::ExperimentalRules { bless_once: true, undead_poison_immune: true, ..Default::default() }))
+}
+
+/// [`with`] under [`razdor`]'s rules.
+fn with_razdor(extra: Vec<UnitDef>, player: &[(u32, Slot)], enemies: &[(u32, Slot)]) -> Battle {
+    battle_in(&razdor(content_with(extra, Formation::WIDE)), player, enemies)
+}
+
 /// A battle where the enemy fights in a building of `defence`.
 fn in_building(extra: Vec<UnitDef>, player: &[(u32, Slot)], enemies: &[(u32, Slot)], defence: i32) -> Battle {
     let c = content_with(extra, Formation::WIDE);
@@ -197,7 +208,7 @@ fn row6_hostile_mage_curses_a_fresh_target_then_strikes_it() {
 #[test]
 fn row7_friendly_mage_heals_the_wounded_else_blesses_once_a_turn() {
     let healer = acts(42, 2, mage(42, 20, MagicSchool::Life, MagicDirection::ToAlly));
-    let mut bt = with(vec![healer], &[(42, b(2)), (10, f(2)), (10, f(3))], &[(18, f(2))]);
+    let mut bt = with_razdor(vec![healer], &[(42, b(2)), (10, f(2)), (10, f(3))], &[(18, f(2))]);
     assert_eq!(bt.options(0, 2), vec![ActionKind::Bless]);
     assert_eq!(bt.options(0, 0), vec![ActionKind::Bless], "itself too");
     bt.fighters[1].hp = 20;
@@ -874,7 +885,7 @@ fn deviation_poison_does_not_take_hold_on_the_undead() {
     let witch = bonus(73, Bonus::Poison, mage(73, 30, MagicSchool::Life, MagicDirection::ToEnemy));
     let sting = bonus(85, Bonus::PoisonArmorIgnore, warrior(85, 30, 0));
     let ghoul = UnitDef { nature: Nature::Undead, hits: 200, ..warrior(191, 1, 0) };
-    let mut bt = with(
+    let mut bt = with_razdor(
         vec![viper, cobra, witch, sting, ghoul],
         &[(71, f(1)), (72, f(2)), (73, b(1)), (85, f(3))],
         &[(191, f(1)), (191, f(2)), (191, f(3))],
@@ -892,7 +903,7 @@ fn deviation_poison_does_not_take_hold_on_the_undead() {
     // CtrPoison spares an Undead striker too.
     let toad = bonus(65, Bonus::CtrPoison, UnitDef { hits: 300, ..warrior(65, 1, 0) });
     let wight = UnitDef { nature: Nature::Undead, ..warrior(192, 30, 0) };
-    let mut bt = with(vec![toad, wight], &[(192, f(2))], &[(65, f(2))]);
+    let mut bt = with_razdor(vec![toad, wight], &[(192, f(2))], &[(65, f(2))]);
     turn_of(&mut bt, 0);
     bt.act(1).unwrap();
     assert_eq!(bt.fighters[0].regen, 0);
@@ -1991,7 +2002,7 @@ fn row34_counter_blows_and_poison_are_not_damage_taken() {
 #[test]
 fn row10_the_space_key_is_the_own_cell_one_action() {
     let healer = acts(128, 2, mage(128, 20, MagicSchool::Life, MagicDirection::ToAlly));
-    let mut bt = with(vec![healer], &[(128, b(2)), (10, f(2))], &[(18, f(2))]);
+    let mut bt = with_razdor(vec![healer], &[(128, b(2)), (10, f(2))], &[(18, f(2))]);
     turn_of(&mut bt, 0);
     bt.fighters[0].hp = 20;
     // A wounded friendly caster heals itself, one action.
@@ -2008,7 +2019,7 @@ fn row10_the_space_key_is_the_own_cell_one_action() {
 
 #[test]
 fn row10_a_blessed_reserve_caster_passes_on_its_own_cell() {
-    let c = content_with(vec![], Formation::VANILLA);
+    let c = razdor(content_with(vec![], Formation::VANILLA));
     let mut bt = battle_in(&c, &[(10, f(1)), (13, r(1)), (10, r(2))], &[(18, f(1))]);
     turn_of(&mut bt, 1);
     bt.fighters[1].blessed = true;
@@ -2027,7 +2038,7 @@ fn row2_a_death_mage_blesses_a_wounded_living_ally_once_a_turn() {
     // wounded blessed ally (48555b) and, the Death heal being 0 on the living (485b3c), blesses
     // it again on every action (48a93c), the blessings adding up.
     let death = acts(44, 3, mage(44, 30, MagicSchool::Death, MagicDirection::ToAlly));
-    let mut bt = with(vec![death], &[(44, b(2)), (10, f(2)), (16, f(3))], &[(18, f(2))]);
+    let mut bt = with_razdor(vec![death], &[(44, b(2)), (10, f(2)), (16, f(3))], &[(18, f(2))]);
     turn_of(&mut bt, 0);
     bt.fighters[1].hp = 20;
     assert_eq!(bt.options(0, 1), vec![ActionKind::Bless], "the first blessing of the turn");
@@ -2053,7 +2064,7 @@ fn row2_the_battle_ais_never_bless_a_unit_twice_a_turn() {
     // 0 the original's AI between AI armies, 1 normal, 2 improved; 3 the hero's auto-battle;
     // 4 «Максимум».
     for who in 0..5u8 {
-        let mut bt = with(vec![death.clone()], &[(44, b(2)), (10, f(2))], &[(18, f(2))]);
+        let mut bt = with_razdor(vec![death.clone()], &[(44, b(2)), (10, f(2))], &[(18, f(2))]);
         bt.ai_level = who.min(2);
         turn_of(&mut bt, 0);
         bt.fighters[1].hp = 20;
@@ -2077,6 +2088,56 @@ fn row2_the_battle_ais_never_bless_a_unit_twice_a_turn() {
         }
         assert!(blessings <= 1, "player {who}: blessed {blessings} times");
     }
+}
+
+/// The original's rule with `bless_once` off (battle.md row 2; 48555b, 4857fb → 484b64, 48a93c): a
+/// Death mage blesses a wounded living ally again (its heal is 0 there) and the blessings add up, and
+/// a reserve caster tends a blessed reserve unit. The switch on (Razdor's) refuses both.
+#[test]
+fn bless_once_off_blesses_again_and_the_reserve_caster_tends_every_reserve_unit() {
+    let death = acts(44, 3, mage(44, 30, MagicSchool::Death, MagicDirection::ToAlly));
+    let mut bt = with(vec![death.clone()], &[(44, b(2)), (10, f(2)), (16, f(3))], &[(18, f(2))]);
+    turn_of(&mut bt, 0);
+    bt.fighters[1].hp = 20;
+    assert_eq!(bt.act(1).map(|h| h.kind), Ok(ActionKind::Bless));
+    let once = bt.fighters[1].mods;
+    assert_eq!(bt.options(0, 1), vec![ActionKind::Bless], "the original blesses the wounded ally again");
+    assert_eq!(bt.act(1).map(|h| h.kind), Ok(ActionKind::Bless));
+    assert_ne!(bt.fighters[1].mods, once, "the blessings add up");
+    let mut bt = with_razdor(vec![death], &[(44, b(2)), (10, f(2)), (16, f(3))], &[(18, f(2))]);
+    turn_of(&mut bt, 0);
+    bt.fighters[1].hp = 20;
+    assert_eq!(bt.act(1).map(|h| h.kind), Ok(ActionKind::Bless));
+    assert!(bt.options(0, 1).is_empty(), "Razdor's rule: blessed and nothing to heal");
+
+    let c = content_with(vec![], Formation::VANILLA);
+    let mut bt = battle_in(&c, &[(10, f(1)), (13, r(1)), (10, r(2))], &[(18, f(1))]);
+    turn_of(&mut bt, 1);
+    bt.fighters[1].blessed = true;
+    bt.fighters[2].blessed = true;
+    assert_eq!(bt.options(1, 2), vec![ActionKind::Bless], "the original tends every reserve unit, blessed or not");
+    let c = razdor(content_with(vec![], Formation::VANILLA));
+    let mut bt = battle_in(&c, &[(10, f(1)), (13, r(1)), (10, r(2))], &[(18, f(1))]);
+    turn_of(&mut bt, 1);
+    bt.fighters[1].blessed = true;
+    bt.fighters[2].blessed = true;
+    assert!(bt.options(1, 2).is_empty(), "Razdor's rule: no second blessing from the reserve");
+}
+
+/// The original's poison (battle.md row 50; 48b299–48b2bd): a poison takes hold on an Undead unit
+/// with `undead_poison_immune` off, the default. The switch on spares the Undead.
+#[test]
+fn poison_takes_hold_on_the_undead_unless_the_switch_spares_them() {
+    let viper = bonus(71, Bonus::Poison, warrior(71, 30, 0));
+    let ghoul = UnitDef { nature: Nature::Undead, hits: 200, ..warrior(191, 1, 0) };
+    let mut bt = with(vec![viper.clone(), ghoul.clone()], &[(71, f(1))], &[(191, f(1))]);
+    turn_of(&mut bt, 0);
+    bt.act(1).unwrap();
+    assert!(bt.fighters[1].regen < 0, "the original poisons the Undead: {}", bt.fighters[1].regen);
+    let mut bt = with_razdor(vec![viper, ghoul], &[(71, f(1))], &[(191, f(1))]);
+    turn_of(&mut bt, 0);
+    bt.act(1).unwrap();
+    assert_eq!(bt.fighters[1].regen, 0, "Razdor's rule: no poison on the Undead");
 }
 
 #[test]
@@ -3473,7 +3534,10 @@ fn god_takes_no_damage_from_anything() {
     for formation in [Formation::WIDE, Formation::VANILLA] {
         let mut c = Content::from_dt(&dt);
         c.formation = formation;
-        let c = Arc::new(c);
+        // Under Razdor's rules for blessing once a turn: the original's reserve caster blesses itself
+        // again on every action, each blessing adding an action (OPEN_QUESTIONS.md), so the battle
+        // would never end with the switch off. The cheat's own check is the same either way.
+        let c = razdor(Arc::new(c));
         let all: Vec<UnitId> = c.unit_ids().collect();
         let n = all.len();
         for seed in 0..3 {

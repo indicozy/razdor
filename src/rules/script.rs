@@ -1135,7 +1135,7 @@ fn hp_after_type_change(hp: i32, old_max: i32, new_max: i32) -> i32 {
 /// in a hand-over saved before that (which read the old map's bytes).
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NextMap {
-    #[serde(default)]
+    #[serde(default = "super::content::ExperimentalRules::before_the_rules_were_saved")]
     pub experimental: super::content::ExperimentalRules,
     /// The map to load: the scenario's next-map name; after an opcode 15 branch its leading
     /// "number-variant" (or the whole name) is the chosen `N-V` *(guess: the guide names maps
@@ -2479,7 +2479,7 @@ mod tests {
     fn experimental_rules_carry_to_next_map_and_restart() {
         let scenario = world(vec![]);
         let mut game = start(&scenario);
-        let rules = super::super::content::ExperimentalRules { simultaneous_bonuses: true, unlimited_items: true, two_potions: true, six_cells: false, free_units: false, auto_promotion: false, undying_units: false, fast_ai: false };
+        let rules = super::super::content::ExperimentalRules { simultaneous_bonuses: true, unlimited_items: true, two_potions: true, six_cells: false, free_units: false, auto_promotion: false, undying_units: false, fast_ai: false, bless_once: true, undead_poison_immune: false, unlimited_spells: false, merchant_item: true, rear_service_flat: false };
         game.experimental = rules;
         game.content = std::sync::Arc::new(game.content.with_experimental(rules));
         let next = game.hand_over("Road".into(), None);

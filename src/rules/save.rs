@@ -1258,7 +1258,7 @@ pub(crate) mod tests {
     #[test]
     fn experimental_rules_survive_save_load_without_changing_install_defaults() {
         let install = demo();
-        let rules = super::super::content::ExperimentalRules { simultaneous_bonuses: true, unlimited_items: true, two_potions: true, six_cells: true, free_units: false, auto_promotion: false, undying_units: false, fast_ai: true };
+        let rules = super::super::content::ExperimentalRules { simultaneous_bonuses: true, unlimited_items: true, two_potions: true, six_cells: true, free_units: false, auto_promotion: false, undying_units: false, fast_ai: true, bless_once: true, undead_poison_immune: false, unlimited_spells: true, merchant_item: false, rear_service_flat: true };
         let mut g = Game::new(Arc::new(install.with_experimental(rules)), HeroClass::Knight);
         g.squad[0].potions_drunk = 2;
         g.squad[0].battle_disabled = true;
@@ -1270,8 +1270,10 @@ pub(crate) mod tests {
         assert_eq!(install.experimental, Default::default());
     }
 
+    /// A save with no rules block (from before the rules were saved) keeps the five parity
+    /// switches as Razdor had them (on); the eight older switches read off.
     #[test]
-    fn experimental_missing_save_rules_default_to_classic() {
+    fn experimental_missing_save_rules_keep_razdors_five_parity_rules() {
         let g = Game::new(demo(), HeroClass::Knight);
         let mut old = serde_json::to_value(&g).unwrap();
         old.as_object_mut().unwrap().remove("experimental");
@@ -1280,7 +1282,8 @@ pub(crate) mod tests {
             u.as_object_mut().unwrap().remove("potions_drunk");
         }
         let loaded: Game = serde_json::from_value(old).unwrap();
-        assert_eq!(loaded.experimental, Default::default());
+        assert_eq!(loaded.experimental, super::super::content::ExperimentalRules::before_the_rules_were_saved());
+        assert!(loaded.experimental.bless_once && loaded.experimental.rear_service_flat && !loaded.experimental.fast_ai);
         assert!(loaded.squad.iter().all(|u| !u.battle_disabled && u.potions_drunk == 0));
     }
 

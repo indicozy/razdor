@@ -104,15 +104,16 @@ pub fn merchant_price(price: i32) -> i32 {
 
 /// Rear Service (`AddPayment`): the whole gold bill ×178/256 (−30%).
 pub const REAR_SERVICE: i32 = 178;
+/// Rear Service's factor when the player's stored income is 0 (the original's code, 0xc250e4 →
+/// 0xc25001 skipped): ×78/256 (−70%). The Community patch author's rule is ×178/256 always; that
+/// is the experimental «Интендантство всегда −30%» (`rear_service_flat`). See
+/// `Game::rear_service_factor`.
+pub const REAR_SERVICE_NO_INCOME: i32 = 78;
 
-/// The gold bill as Rear Service cuts it: the whole bill times 178 div 256, truncated once.
-/// Rear Service is always ×178/256 (−30%): the Community patch author's intended rule (the
-/// owner's decision, 2026-10-20). The original's code takes ×78/256 (−70%) when the player's
-/// stored income is 0 (0xc250e4 → 0xc25001 skipped); the patch author says that compensates
-/// another, unidentified no-income wage formula of the original, which Razdor does not model
-/// (OPEN_QUESTIONS.md), so Razdor does not reproduce the 78 branch.
-pub fn rear_service(bill: i32) -> i32 {
-    bill * REAR_SERVICE / 256
+/// The gold bill as Rear Service cuts it by `factor` (178 or 78): the whole bill times the factor
+/// div 256, truncated once.
+pub fn rear_service(bill: i32, factor: i32) -> i32 {
+    bill * factor / 256
 }
 
 /// Daily heals: a Medic in any army at midnight, the Ranger hero at noon and again when the
@@ -331,7 +332,7 @@ impl Game {
     /// Service; the payment and every display read this one function, so they cannot drift.
     pub fn daily_wages(&self) -> i32 {
         let bill = self.bills().0;
-        if self.squad_has_any(&Bonus::AddPayment) { rear_service(bill) } else { bill }
+        if self.squad_has_any(&Bonus::AddPayment) { self.rear_cut(bill) } else { bill }
     }
 
     /// Mana wages due at the next noon (elementals).
@@ -475,7 +476,20 @@ impl Game {
     /// is Razdor's deviation, the owner's wish (2026-10-20); the original counts only the army.
     pub(crate) fn has_merchant(&self) -> bool {
         self.squad_has_any(&Bonus::Merchant)
-            || self.pack.iter().any(|i| self.content.try_item(i).is_some_and(|d| d.bonus == Some(Bonus::Merchant)))
+            || (self.content.experimental.merchant_item && self.pack.iter().any(|i| self.content.try_item(i).is_some_and(|d| d.bonus == Some(Bonus::Merchant))))
+    }
+
+    /// The factor Rear Service cuts a bill by (economy.md §1 step 7, 0xc250e4 → 0xc25001): ×178 when
+    /// the player's stored income is not 0, else ×78. The experimental «Интендантство всегда −30%»
+    /// (`rear_service_flat`, Razdor's rule) is ×178 always. The test reads the player's income even
+    /// for an AI army's cut, as the original does (`Game::ai_pay_wages`).
+    pub(crate) fn rear_service_factor(&self) -> i32 {
+        if self.content.experimental.rear_service_flat || self.stored_income != 0 { REAR_SERVICE } else { REAR_SERVICE_NO_INCOME }
+    }
+
+    /// A bill as Rear Service cuts it ([`Game::rear_service_factor`]).
+    pub(crate) fn rear_cut(&self, bill: i32) -> i32 {
+        rear_service(bill, self.rear_service_factor())
     }
 
     /// The Ranger hero heals every wounded unit of his army `pct`% (truncated): 15 at noon,
@@ -1105,8 +1119,9 @@ mod tests {
         assert_eq!(grow_mana(200, 255, 255), 255);
         assert_eq!(grow_mana(5, 5, 20), 9, "5 × √0.75 = 4.33");
         assert_eq!(grow_mana(3, 5, 0), 3, "no maximum: no growth");
-        assert_eq!(rear_service(59), 41);
-        assert_eq!(rear_service(0), 0);
+        assert_eq!(rear_service(59, REAR_SERVICE), 41);
+        assert_eq!(rear_service(59, REAR_SERVICE_NO_INCOME), 17, "59 × 78 div 256");
+        assert_eq!(rear_service(0, REAR_SERVICE), 0);
     }
 
     #[test]

@@ -242,6 +242,7 @@ pub fn service_error(e: ServiceError) -> String {
         ServiceError::GarrisonFull => tr("The garrison is full.").into(),
         ServiceError::Hero => tr("The hero stays with his army.").into(),
         ServiceError::AlreadyKnown => tr("Already in your book.").into(),
+        ServiceError::BookFull => tr("Your spell book is full.").into(),
         ServiceError::Named => tr("A named hero stays with the army.").into(),
         ServiceError::Dead => tr("A fallen unit cannot be left in a garrison!").into(),
         ServiceError::Unpaid(price) => trf!("Unpaid: {price} gold to take back.", price),
@@ -2410,7 +2411,8 @@ fn sanctuary(game: &mut Game, f: &Frame, view: &mut BuildingView, message: &mut 
     let (can, said) = match chosen {
         Some(s) if game.knows_spell(s.id) => (false, Some((own_text("Building", "AlreadySpell", n_("This spell is already in your book!")), Color::from_rgba(55, 180, 255, 255)))),
         Some(s) if game.gold < s.cost_gold => (false, Some((own_text("Building", "NoMoneyForSpell", n_("You do not have enough money for this spell!")), chrome::RED_TEXT))),
-        Some(_) => (true, None),
+        // A full book of 15 is refused (the original's test, 0x4ba078); no note, the button is off.
+        Some(_) => (game.spell_room(), None),
         None => (false, None),
     };
     if let Some((t, color)) = said {

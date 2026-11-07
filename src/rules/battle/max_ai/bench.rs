@@ -130,6 +130,11 @@ struct Baseline {
 /// Plays `b` to its end. `max` (if any) plays by «Максимум» on that side; the original's AI
 /// plays the rest, and all of it when `max` is `None` (then both sides' decisions are tallied).
 fn play(mut b: Battle, max: Option<Team>, opponent: Opponent) -> Game {
+    // The baseline was measured under Razdor's rules for blessing once a turn and Undead poison
+    // immunity (`bless_once`, `undead_poison_immune`, off by default since the parity pass of
+    // 2026-11-07). The bench keeps them on, so its numbers stay comparable with the baseline.
+    let razdor = crate::rules::content::ExperimentalRules { bless_once: true, undead_poison_immune: true, ..Default::default() };
+    b.content = std::sync::Arc::new(b.content.with_experimental(razdor));
     b.begin();
     let budget = bench_budget();
     let tables = MaxTables::default();

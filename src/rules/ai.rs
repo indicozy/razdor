@@ -51,7 +51,7 @@ use crate::frame_probe::{self, Stage};
 use super::battle::{Battle, Outcome, Team, RECORDS};
 use super::clock::MINUTES_PER_DAY;
 use super::content::{Bonus, Content, GlobalOptions, ItemId, Nature, UnitId, WageKind};
-use super::economy::{delphi_round, rear_service, relation_price};
+use super::economy::{delphi_round, relation_price};
 use super::events::ArmyId;
 use super::fog;
 use super::game::{troop_unit, troop_unit_stats, Event, Foe, Game, HeroCells, TALKED};
@@ -3718,7 +3718,7 @@ impl Game {
         let c = self.content.clone();
         let mut bill = self.army_totals(i).wages;
         if super::economy::army_has(&c, &self.world.armies[i], &Bonus::AddPayment) {
-            bill = rear_service(bill);
+            bill = self.rear_cut(bill);
         }
         // The mana bill is one global in the original, rebuilt by every army's totals; this
         // army's own (dormant: no shipped unit is an Elemental).

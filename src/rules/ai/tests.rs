@@ -10,6 +10,7 @@ use crate::rules::content::{ArtefactDef, ArtefactType, HeroClass, Stat, StatMods
 use crate::rules::formation::{Row, Slot};
 use crate::rules::world::Stationed;
 use crate::rules::world::testkit::{self as tk, building, hero, scenario, troop};
+use crate::rules::economy::rear_service;
 
 /// Units 1–3 heroes, 4 a weak warrior (cost 50), 5 a shooter, 6 a strong warrior (cost 200,
 /// 120 HP), 7 a rogue warrior; item 7 a ring, 9 a potion, 11 a ring of +10 attack, 12 a ring
@@ -1151,12 +1152,21 @@ fn an_armys_rear_service_is_its_own() {
     g.world.armies[0].gold = 1000;
     g.ai_noon(0, now);
     assert_eq!(g.world.armies[0].gold, 1000 - bill);
-    // Its own quartermaster cuts them (× 178 div 256, whatever the army's income).
+    // Its own quartermaster cuts them (× 178 div 256 with the experimental «Интендантство всегда
+    // −30%», whatever the army's income).
     g.world.armies[0].troops[1].unit = UnitId(8);
+    g.content = Arc::new(g.content.with_experimental(crate::rules::content::ExperimentalRules { rear_service_flat: true, ..Default::default() }));
     let bill = g.army_totals(0).wages;
     g.world.armies[0].gold = 1000;
     g.ai_noon(0, now + MINUTES_PER_DAY as f64);
-    assert_eq!(g.world.armies[0].gold, 1000 - rear_service(bill));
+    assert_eq!(g.world.armies[0].gold, 1000 - rear_service(bill, crate::rules::economy::REAR_SERVICE));
+    // By default the cut is the player's test: ×78 div 256 while his stored income is 0.
+    g.content = Arc::new(g.content.with_experimental(Default::default()));
+    g.stored_income = 0;
+    let bill = g.army_totals(0).wages;
+    g.world.armies[0].gold = 1000;
+    g.ai_noon(0, now + 2.0 * MINUTES_PER_DAY as f64);
+    assert_eq!(g.world.armies[0].gold, 1000 - rear_service(bill, crate::rules::economy::REAR_SERVICE_NO_INCOME));
 }
 
 #[test]

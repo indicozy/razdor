@@ -139,10 +139,37 @@ pub struct ExperimentalRules {
     /// A* path to it (`ai::direct`) instead of the flood. Armies move a little differently from the
     /// original. See `ai::search_for`.
     pub fast_ai: bool,
+    /// «Благословение раз в ход» («Bless once a turn»): a unit is blessed at most once a turn
+    /// (`Battle::option_at`, `friendly_case`, the AI's bless pick). Off: the original's rule
+    /// (48555b, 4857fb → 484b64, 48a8d3–48a93c), where blessings stack. Razdor's rule: on.
+    pub bless_once: bool,
+    /// «Яд не действует на нежить» («Poison spares the Undead»): no poison takes hold on an
+    /// Undead unit, and the AI counts none (`Battle::poisonable`). Off: the original poisons every
+    /// nature. Razdor's rule: on.
+    pub undead_poison_immune: bool,
+    /// «Без предела книги заклинаний» («No spell book limit»): every spell of the book is
+    /// castable, and the shop sells into any book. Off: only the first 15 spells can be cast, and
+    /// the shop refuses at exactly 15 (`magic::check_cast`, `town::learn_spell`). Razdor's rule: on.
+    pub unlimited_spells: bool,
+    /// «Скидка торговца от предмета» («Merchant discount from an item»): a Merchant item in the
+    /// hero's pack gives the Merchant prices (`Game::has_merchant`). Off: only a unit of the army
+    /// with the bonus does. Razdor's rule: on.
+    pub merchant_item: bool,
+    /// «Интендантство всегда −30%» («Rear Service always −30%»): Rear Service cuts every bill by
+    /// ×178/256 whatever the player's stored income. Off: ×78/256 while that income is 0
+    /// (`Game::rear_service_factor`). Razdor's rule: on.
+    pub rear_service_flat: bool,
 }
 
 impl ExperimentalRules {
     pub fn for_new_game() -> Self { Self::default() }
+
+    /// The rules of a save with no `experimental` block at all (before the rules were saved):
+    /// the five parity switches were Razdor's rules then, so they stay on; the eight others
+    /// were off.
+    pub fn before_the_rules_were_saved() -> Self {
+        Self { bless_once: true, undead_poison_immune: true, unlimited_spells: true, merchant_item: true, rear_service_flat: true, ..Self::default() }
+    }
 
     /// The first rule that is on, by its catalog name (the one the scenario list's yellow mark
     /// gives as its reason, `rules::marks`); `None` with the classic rules.
@@ -156,6 +183,11 @@ impl ExperimentalRules {
             (self.auto_promotion, crate::i18n::n_("Automatic promotion")),
             (self.undying_units, crate::i18n::n_("Units don't die")),
             (self.fast_ai, crate::i18n::n_("Faster AI")),
+            (self.bless_once, crate::i18n::n_("Bless once a turn")),
+            (self.undead_poison_immune, crate::i18n::n_("Poison spares the Undead")),
+            (self.unlimited_spells, crate::i18n::n_("No spell book limit")),
+            (self.merchant_item, crate::i18n::n_("Merchant discount from an item")),
+            (self.rear_service_flat, crate::i18n::n_("Rear Service always −30%")),
         ]
         .into_iter()
         .find(|(on, _)| *on)
@@ -179,6 +211,13 @@ struct RulesWire {
     undying_units: bool,
     /// Missing (false) in saves from before the planner switch.
     fast_ai: bool,
+    /// The five parity switches. Missing in a save from before them: the rule was Razdor's then,
+    /// so it reads ON (see the `From` impl). A new game writes them all.
+    bless_once: Option<bool>,
+    undead_poison_immune: Option<bool>,
+    unlimited_spells: Option<bool>,
+    merchant_item: Option<bool>,
+    rear_service_flat: Option<bool>,
     /// Older switches, read only (see the `From` impl).
     #[serde(skip_serializing)]
     multiple_rings: bool,
@@ -217,6 +256,11 @@ impl From<RulesWire> for ExperimentalRules {
             auto_promotion: w.auto_promotion,
             undying_units: w.undying_units,
             fast_ai: w.fast_ai,
+            bless_once: w.bless_once.unwrap_or(true),
+            undead_poison_immune: w.undead_poison_immune.unwrap_or(true),
+            unlimited_spells: w.unlimited_spells.unwrap_or(true),
+            merchant_item: w.merchant_item.unwrap_or(true),
+            rear_service_flat: w.rear_service_flat.unwrap_or(true),
         }
     }
 }
@@ -232,6 +276,11 @@ impl From<ExperimentalRules> for RulesWire {
             auto_promotion: r.auto_promotion,
             undying_units: r.undying_units,
             fast_ai: r.fast_ai,
+            bless_once: Some(r.bless_once),
+            undead_poison_immune: Some(r.undead_poison_immune),
+            unlimited_spells: Some(r.unlimited_spells),
+            merchant_item: Some(r.merchant_item),
+            rear_service_flat: Some(r.rear_service_flat),
             multiple_rings: false,
             multiple_amulets: false,
             multiple_weapons: false,
@@ -877,5 +926,48 @@ mod experimental_rules_save_tests {
         let old: ExperimentalRules = serde_json::from_str(r#"{"unlimited_items": true, "six_cells": true}"#).unwrap();
         assert!(!old.fast_ai);
         assert!(old.unlimited_items && old.six_cells);
+    }
+
+    /// The five parity switches: a new game has them off (the original's rules); a save or a
+    /// hand-over without their keys was Razdor's rules then, so they read ON; each written key
+    /// reads back as it is.
+    #[test]
+    fn the_parity_switches_default_on_in_old_saves_and_off_in_new_games() {
+        let new_game = ExperimentalRules::for_new_game();
+        assert!(!(new_game.bless_once || new_game.undead_poison_immune || new_game.unlimited_spells || new_game.merchant_item || new_game.rear_service_flat));
+        let old: ExperimentalRules = serde_json::from_str(r#"{"fast_ai": true, "two_potions": true}"#).unwrap();
+        assert!(old.bless_once && old.undead_poison_immune && old.unlimited_spells && old.merchant_item && old.rear_service_flat);
+        assert!(old.fast_ai && old.two_potions && !old.free_units);
+        let off = ExperimentalRules { bless_once: false, merchant_item: false, ..Default::default() };
+        let json = serde_json::to_value(off).unwrap();
+        assert_eq!((json["bless_once"].as_bool(), json["merchant_item"].as_bool()), (Some(false), Some(false)));
+        assert_eq!(serde_json::from_value::<ExperimentalRules>(json).unwrap(), off);
+        let json = serde_json::to_value(ExperimentalRules::default()).unwrap();
+        assert_eq!(json["rear_service_flat"].as_bool(), Some(false));
+        assert_eq!(serde_json::from_value::<ExperimentalRules>(json).unwrap(), ExperimentalRules::default());
+    }
+
+    /// A save with no rules block at all keeps the five parity switches on and the eight others off.
+    #[test]
+    fn a_save_with_no_rules_block_is_razdors_five_parity_rules() {
+        let before = ExperimentalRules::before_the_rules_were_saved();
+        assert!(before.bless_once && before.undead_poison_immune && before.unlimited_spells && before.merchant_item && before.rear_service_flat);
+        assert!(!before.simultaneous_bonuses && !before.unlimited_items && !before.two_potions && !before.six_cells && !before.free_units && !before.auto_promotion && !before.undying_units && !before.fast_ai);
+    }
+
+    /// Each of the five names the rules window and the scenario list's mark (`first_on`).
+    #[test]
+    fn each_parity_switch_has_its_own_name() {
+        let names: Vec<_> = [
+            ExperimentalRules { bless_once: true, ..Default::default() },
+            ExperimentalRules { undead_poison_immune: true, ..Default::default() },
+            ExperimentalRules { unlimited_spells: true, ..Default::default() },
+            ExperimentalRules { merchant_item: true, ..Default::default() },
+            ExperimentalRules { rear_service_flat: true, ..Default::default() },
+        ]
+        .iter()
+        .map(|r| r.first_on())
+        .collect();
+        assert_eq!(names, [Some("Bless once a turn"), Some("Poison spares the Undead"), Some("No spell book limit"), Some("Merchant discount from an item"), Some("Rear Service always −30%")]);
     }
 }

@@ -308,7 +308,8 @@ pub struct Reading {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CastError {
-    /// Not among the first 15 spells of the book (the only ones the window shows).
+    /// Not in the book, or past its first 15 spells (the only ones the original casts; see
+    /// `Game::in_cast_reach`).
     NotInBook,
     NoSuchSpell,
     NotEnoughMana,
@@ -553,11 +554,19 @@ impl Game {
     /// A cast may start (0x4c2e34): the spell is in the book (Razdor's choice, the owner's
     /// 2026-10-22: any page, the original casts only the first 15, 0x4d261c), the target
     /// suits it and can be pointed at, the mana covers its cost, no battle is pending.
+    /// Whether `spell` of the book can be cast. The original's window shows and casts only the
+    /// first [`BOOK_PAGE`] entries (0x4d261c, 0x4dad08); a spell learnt from an event past them is
+    /// known but never castable there. The experimental «Без предела книги заклинаний»
+    /// (`unlimited_spells`, Razdor's rule) casts every spell of the book.
+    pub fn in_cast_reach(&self, spell: u32) -> bool {
+        self.content.experimental.unlimited_spells || self.spells.iter().position(|&s| s as u32 == spell).is_some_and(|i| i < BOOK_PAGE)
+    }
+
     fn check_cast(&self, spell: u32, target: CastTarget) -> Result<(), CastError> {
         if self.foe.is_some() {
             return Err(CastError::Busy);
         }
-        if !self.spells.iter().any(|&s| s as u32 == spell) {
+        if !self.spells.iter().any(|&s| s as u32 == spell) || !self.in_cast_reach(spell) {
             return Err(CastError::NotInBook);
         }
         let def = self.spell(spell).ok_or(CastError::NoSuchSpell)?;
@@ -682,7 +691,7 @@ mod tests {
     use super::*;
     use crate::rules::battle::{Outcome, Team};
     use crate::rules::content::testkit as ck;
-    use crate::rules::content::{Content, Stat, StatMods, UnitDef, UnitId};
+    use crate::rules::content::{Content, ExperimentalRules, Stat, StatMods, UnitDef, UnitId};
     use crate::rules::formation::Formation;
     use crate::rules::game::Foe;
     use crate::rules::world::testkit::{self as tk, army, hero, scenario, troop};
@@ -804,13 +813,28 @@ mod tests {
     }
 
     #[test]
-    fn a_spell_past_the_15th_can_be_cast() {
-        // Razdor's choice (the owner's, 2026-10-22): the 16th spell is on page 2 and castable.
+    fn a_spell_past_the_15th_can_be_cast_with_the_unlimited_book() {
+        // The experimental «Без предела книги заклинаний» (Razdor's rule, owner's decision of
+        // 2026-10-22): the 16th spell is on page 2 and castable.
         let mut g = game(HeroClass::Knight);
+        g.content = Arc::new(g.content.with_experimental(ExperimentalRules { unlimited_spells: true, ..Default::default() }));
         g.spells = (20..35).chain([1]).collect();
         assert_eq!(g.spells.len(), 16);
         assert!(g.book().iter().any(|s| s.id == 1), "the 16th is in the book");
         assert_ne!(g.cast(1, CastTarget::Own), Err(CastError::NotInBook));
+    }
+
+    /// The original (0x4d261c, 0x4dad08): only the first 15 spells of the book are castable; the
+    /// 16th, taught by an event, is known but refused, and so is the 15th once the book is cut.
+    #[test]
+    fn a_spell_past_the_15th_is_not_castable_by_default() {
+        let mut g = game(HeroClass::Knight);
+        g.spells = (20..35).chain([1]).collect();
+        assert_eq!(g.spells.len(), 16);
+        assert!(g.knows_spell(1), "known, as the event taught it");
+        assert!(!g.in_cast_reach(1));
+        assert!(g.in_cast_reach(34), "the 15th is castable");
+        assert_eq!(g.cast(1, CastTarget::Own), Err(CastError::NotInBook));
     }
 
     #[test]

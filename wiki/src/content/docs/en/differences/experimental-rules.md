@@ -5,10 +5,10 @@ sidebar:
   order: 2
 ---
 
-On the scenario screen, next to the "Next" button, there is a "..." button. It opens eight independent toggles that change the game rules. Razdor added these; they are not in the original game.
+On the scenario screen, next to the "Next" button, there is a "..." button. It opens thirteen independent toggles that change the game rules. The first eight are Razdor's additions; they are not in the original game. The last five ("Bless once a turn", "Poison spares the Undead", "No spell book limit", "Merchant discount from an item", "Rear Service always −30%") cover rules where Razdor differed from the original: by default the game plays as the original does, and a toggle turns on Razdor's earlier rule.
 
 :::caution
-By default, for a new game, all eight are turned off. Your selection is remembered: it is saved in the settings when closing the window ("OK", Esc, Enter, or the close button) and upon starting a game, so when you next open the list of new games, the toggles will be as you left them, and will remain so after restarting the game. In the scenario list, an orange "Experimental rules enabled" label indicates that a toggle is on. Returning from the hero selection window preserves it. For an already started game, toggles cannot be changed through this menu.
+By default, for a new game, all thirteen are turned off. Your selection is remembered: it is saved in the settings when closing the window ("OK", Esc, Enter, or the close button) and upon starting a game, so when you next open the list of new games, the toggles will be as you left them, and will remain so after restarting the game. In the scenario list, an orange "Experimental rules enabled" label indicates that a toggle is on. Returning from the hero selection window preserves it. For an already started game, toggles cannot be changed through this menu.
 :::
 
 ![Scenario Selection](../../../../assets/shots/scenarios.webp)
@@ -23,6 +23,11 @@ By default, for a new game, all eight are turned off. Your selection is remember
 * **Automatic promotion:** as soon as a fighter of the hero's army can be promoted, it is promoted on its own, along a random branch of its upgrade tree. The hero is not promoted this way.
 * **Units don't die:** fighters of the hero's army killed in a battle come back with 1 hit point after it, if the army survived the battle.
 * **Faster AI:** armies think faster on big maps (from 300×300 cells): there they search for a path only within a 64-cell square around themselves, and an army with a single target takes the shortest path to it. They move slightly differently from the original.
+* **Bless once a turn:** a fighter receives a blessing at most once a turn, and a blessed ally is healed or blessed only when that does something. Off (as in the original): blessings can be repeated and their effects add up.
+* **Poison spares the Undead:** the Undead are not poisoned by any poison. Off (as in the original): poison works on every fighter.
+* **No spell book limit:** any spell in the book can be cast. Off (as in the original): only the first 15 spells of the book can be cast; a spell taught by an event past the 15th is known but cannot be cast. In the sanctuary, a book of exactly 15 spells cannot be added to (a bug of the original, kept).
+* **Merchant discount from an item:** an item with the Merchant property in the hero's pack also gives the merchant discount. Off (as in the original): only fighters in the army with that property do.
+* **Rear Service always −30%:** Rear Service always cuts wages by 30%. Off (as in the original): when the player has no income from towns, the cut is larger, about 70%.
 
 On a phone, when the window does not fit, the list of toggles scrolls.
 

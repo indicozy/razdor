@@ -1,7 +1,8 @@
 # Experimental scenario rules
 
-The `...` button beside Next on the scenario screen opens eight independent switches,
-all off by default for new games. Choices reset when
+The `...` button beside Next on the scenario screen opens thirteen independent switches,
+all off by default for new games. The last five (`bless_once` through `rear_service_flat`, below)
+are the parity switches: off gives the original's rule, on gives Razdor's rule of today. Choices reset when
 starting a new playthrough from the main menu.
 Returning from hero selection preserves the selection. The switches cannot be changed
 for an existing game through this menu.
@@ -74,7 +75,35 @@ so a playthrough that already had six cells keeps them and no worn item is lost.
   the original. See `battle-ai.md` §5c.
 
 The switch is saved as `fast_ai` in the rules block, read with a serde default (old saves have it
-off). It is read where the plan is made: `ai::search_for` turns the rules and the map's size into
+off).
+
+- **Bless once a turn** («Благословение раз в ход», default off, `bless_once`): a unit is blessed at
+  most once a turn. On: an already-blessed ally is a target only for a heal that does something
+  (`Battle::option_at`), a Splash follow-up gives no second blessing (`friendly_case`), and the AI's
+  bless pick skips a blessed unit. Off (the original, 48555b, 4857fb → 484b64, 48a8d3–48a93c): a
+  blessed wounded ally with a heal of 0 is blessed again, a reserve caster tends every reserve unit,
+  and blessings add up. See `battle.md` row 2.
+- **Poison spares the Undead** («Яд не действует на нежить», default off, `undead_poison_immune`):
+  on, no poison takes hold on an Undead unit and the AI counts none (`Battle::poisonable`). Off, every
+  poison works on every nature (48b299–48b2bd, 48b398, c2639c, c2a27c, c25c43, c259da). `battle.md` row 50.
+- **No spell book limit** («Без предела книги заклинаний», default off, `unlimited_spells`): on, every
+  spell of the book is castable and the shop sells into any book. Off, a spell past the book's first 15
+  is known (events still teach it) but not castable (`Game::in_cast_reach`, which the book window's
+  clicks read; the shop refuses a book of exactly 15 (`Game::spell_room`, the original's bug, kept).
+  `magic-items.md` §2, row «Event learning past 15».
+- **Merchant discount from an item** («Скидка торговца от предмета», default off, `merchant_item`): on,
+  a Merchant item in the hero's pack gives the Merchant prices (`Game::has_merchant`). Off, only a unit
+  of the army with the bonus does (dead counts). `economy.md`, «Merchant discount source».
+- **Rear Service always −30%** («Интендантство всегда −30%», default off, `rear_service_flat`): on, every
+  Rear Service cut is ×178/256. Off, the original's test (0xc250e4 → 0xc25001): ×178/256 while the
+  player's stored income is not 0, else ×78/256. `Game::rear_service_factor`, read by `daily_wages`
+  and the AI's own quartermaster cut (`Game::rear_cut`). `economy.md` §1 step 7 and «Rear Service».
+
+Saves: each switch is written as its own key. A save (or a `NextMap` hand-over) from before the five
+parity switches has no key for them, and those read ON (`RulesWire`): the rule that save had. A save
+with no rules block at all (before the rules were saved) gets `ExperimentalRules::before_the_rules_were_saved`:
+the five ON, the eight others off. The settings file's remembered choice (`language::Settings`) is
+different: a key it lacks reads OFF (`remembered_rules`), so a new game starts from the original. It is read where the plan is made: `ai::search_for` turns the rules and the map's size into
 the `flood_pool::Search` that every plan carries (in its input, so the worker threads compute it
 the same way; `compute_routed` reports the route for the tests). With it off `Search::default()`
 is the original's flood, and `ai_fingerprint` is unchanged.
@@ -87,7 +116,7 @@ loading rebuilds the runtime Content copy from this field before setting up the 
 A save writes `unlimited_items` and `six_cells`; the four older item keys are read, never written. Format 12 is unchanged by the switches.
 
 Save format 11 stores the rules in Game and the campaign hand-over record, potion counters
-and noncombatant marks in units. Missing rules in older saves use false values. Manual saves, autosaves, restarting the same scenario
+and noncombatant marks in units. Missing rules in older saves use false values, except the five parity switches (see above: ON). Manual saves, autosaves, restarting the same scenario
 and advancing to the next campaign map preserve the rules. Older Razdor builds reject
 format 11 rather than silently dropping the experimental rules.
 
@@ -170,16 +199,16 @@ keep the item and show the existing refusal. All equipment rules and potion limi
 
 ## The rules window (new_game.rs `experimental_menu`)
 
-The choice is remembered (the owner's yes, 2026-11-02): when the window closes (OK, Esc, Enter or its close button) and when a game starts, the eight switches are written to `settings.json` (`language::Settings::experimental_rules`, all off on an older file). `open_list` starts from them, so the scenario list's «Экспериментальные правила включены» label shows a remembered choice too.
+The choice is remembered (the owner's yes, 2026-11-02): when the window closes (OK, Esc, Enter or its close button) and when a game starts, the thirteen switches are written to `settings.json` (`language::Settings::experimental_rules`, all off on an older file, and a switch whose key a file lacks is off, `remembered_rules`). `open_list` starts from them, so the scenario list's «Экспериментальные правила включены» label shows a remembered choice too.
 
 Opened from the scenario list's «Экспериментальные правила» button. Its scale is `display::popup_o`
-fitted to the screen. Its eight rows and OK are touch targets (40 dp on a phone); its texts are one
+fitted to the screen. Its thirteen rows and OK are touch targets (40 dp on a phone); its texts are one
 px per dp on a phone, grown with the text size (`button_grow`) and never under Normal; the hints
 wrap to its width and the window grows with them. The rows take one, two or three columns: the
 fewest whose height fits the screen (a phone's landscape takes two or three), and the window takes
 the screen's width. The hint lines of the free-units and units-don't-die rules show only while those are on (they say «армии героя»: both rules touch the player's units only). Every label is drawn at the same size; a label too wide for its column wraps to two lines, and every row is then two lines tall. On an upright phone the window is at most 60% of the screen high and has one column: the rows and hints scroll between the title and the OK button (a swipe, the wheel, the bar at the right; `RULES_SCROLL`, kept until the game ends, `RAZDOR_SCENE_SCROLL` for a shot). A row toggles only on a press inside the visible view. Any window that overflows the screen scrolls the same way. Snapshot:
 `RAZDOR_SCENE=scenarios RAZDOR_SCENE_RULES=1`, with `RAZDOR_SCENE_EXPERIMENTAL` keys
-`bonuses,items,potions,cells,free,auto,undying,fast`; the mobile check's case «rules».
+`bonuses,items,potions,cells,free,auto,undying,fast,bless,poison,spells,merchant,rear`; the mobile check's case «rules».
 
 ## Battle AI: Caster guard (Максимум)
 

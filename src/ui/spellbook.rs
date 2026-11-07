@@ -342,9 +342,11 @@ pub fn frame(
         }
     }
     // A spell on the hero's army is cast at once; an enemy spell closes the book and the map
-    // asks for its target (0x4c2e34 → 0x4c2f39). Without the mana the click does nothing.
+    // asks for its target (0x4c2e34 → 0x4c2f39). Without the mana the click does nothing, and
+    // neither does a spell past the book's first 15 (the original casts only those, 0x4d261c; see
+    // `Game::in_cast_reach`, lifted by the experimental «Без предела книги заклинаний»).
     let mut next = None;
-    if let Some(s) = cast.filter(|s| game.mana >= game.cast_cost(s).mana) {
+    if let Some(s) = cast.filter(|s| game.mana >= game.cast_cost(s).mana && game.in_cast_reach(s.id)) {
         if magic::targets_enemy(&s) {
             if game.foe.is_none() {
                 world_view::begin_targeting(s.id);

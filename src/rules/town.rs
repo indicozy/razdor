@@ -55,6 +55,9 @@ pub enum ServiceError {
     /// An unpaid garrison unit costs this much gold to take back.
     Unpaid(i32),
     AlreadyKnown,
+    /// The spell book holds exactly 15 spells, and the shop refuses a book of 15 (the original's
+    /// test, 0x4ba078; see [`Game::spell_room`]).
+    BookFull,
     NoSuchUnit,
     /// The hero's pack has no room (never in Razdor's growing pack; see `pack.rs`).
     PackFull,
@@ -437,11 +440,12 @@ impl Game {
         let spell = self.spells_here().into_iter().find(|s| s.id == id).ok_or(ServiceError::NotHere)?;
         // Exactly `CostGold`, a negative one too (it then pays the hero).
         let price = Price::gold(spell.cost_gold);
-        // The shop's tests in its order (0x4ba078): known, then gold. Razdor's choice (the
-        // owner's, 2026-10-22): no room test, the book pages past 15; the original refuses
-        // a full book of 15 here.
+        // The shop's tests in its order (0x4ba078): known, then room, then gold.
         if self.knows_spell(id) {
             return Err(ServiceError::AlreadyKnown);
+        }
+        if !self.spell_room() {
+            return Err(ServiceError::BookFull);
         }
         if !self.can_afford(price) {
             return Err(ServiceError::CannotAfford);
@@ -449,6 +453,15 @@ impl Game {
         self.spend(price);
         self.spells.push(id as u8);
         Ok(())
+    }
+
+    /// Whether the shop sells into the book (the buy button and [`Game::learn_spell`]). The
+    /// original refuses exactly when the book holds 15 spells (0x4ba078), so a book of 16 or more
+    /// (an event taught past 15) buys again: the original's bug, kept as original behaviour. The
+    /// experimental «Без предела книги заклинаний» (`unlimited_spells`, Razdor's rule) has no room
+    /// test at all.
+    pub fn spell_room(&self) -> bool {
+        self.content.experimental.unlimited_spells || self.spells.len() != super::magic::BOOK_PAGE
     }
 
     /// Sends squad member `i` away (the army screen's "dismiss"), or buries a corpse: the
@@ -940,6 +953,7 @@ mod tests {
         // Golem (an elemental, 20 mana), quartermaster 25 (Rear Service), archer 22, militia 6.
         s.header.heroes[0] = hero(2, 2, 0, &[troop(8, 0, 1), troop(10, 0, 1), troop(5, 0, 1), troop(4, 0, 1)]);
         let mut g = start(&s);
+        g.content = std::sync::Arc::new(g.content.with_experimental(crate::rules::content::ExperimentalRules { rear_service_flat: true, ..Default::default() }));
         g.first_noon_today();
         g.mana = 100;
         g.squad[4].hp = 0; // the militia is a corpse: not billed
@@ -1011,6 +1025,9 @@ mod tests {
         fort.gold_per_day = 10;
         s.buildings = vec![fort];
         let mut g = start(&s);
+        // The experimental «Интендантство всегда −30%» (`rear_service_flat`, Razdor's rule): ×178 at
+        // any income.
+        g.content = std::sync::Arc::new(g.content.with_experimental(crate::rules::content::ExperimentalRules { rear_service_flat: true, ..Default::default() }));
         g.first_noon_today();
         g.mana = 1000;
         // The shown wages are the bill after Rear Service (Razdor's deviation): 59 × 178 div 256.
@@ -1029,6 +1046,25 @@ mod tests {
         assert_eq!(g.gold, 918 - 34 * 178 / 256);
     }
 
+    /// The original's Rear Service (economy.md §1 step 7, 0xc250e4 → 0xc25001): ×78/256 while the
+    /// player's stored income is 0, ×178/256 otherwise. The experimental «Интендантство всегда −30%»
+    /// (`rear_service_flat`) keeps ×178. An AI army's own quartermaster cut reads the same test.
+    #[test]
+    fn rear_service_is_the_originals_cut_by_default() {
+        let mut s = map();
+        // Quartermaster 25, archer 22, two militia 6: a bill of 59.
+        s.header.heroes[0] = hero(2, 2, 1000, &[troop(10, 0, 1), troop(5, 0, 1), troop(4, 0, 2)]);
+        let mut g = start(&s);
+        g.mana = 1000;
+        g.stored_income = 0;
+        assert_eq!(g.daily_wages(), 17, "59 × 78 div 256");
+        g.stored_income = 10;
+        assert_eq!(g.daily_wages(), 41, "59 × 178 div 256");
+        g.content = std::sync::Arc::new(g.content.with_experimental(crate::rules::content::ExperimentalRules { rear_service_flat: true, ..Default::default() }));
+        g.stored_income = 0;
+        assert_eq!(g.daily_wages(), 41, "the flat cut at no income too");
+    }
+
     /// Razdor's deviation (the owner's decision, 2026-10-20): the wage bill the screens and the
     /// noon report show is the bill after Rear Service, the one the payment takes. A bill of 130
     /// (two Quartermasters 50, two archers 44, six militia 36) shows 130 × 178 div 256 = 90;
@@ -1038,6 +1074,7 @@ mod tests {
         let mut s = map();
         s.header.heroes[0] = hero(2, 2, 1000, &[troop(10, 0, 2), troop(5, 0, 2), troop(4, 0, 6)]);
         let mut g = start(&s);
+        g.content = std::sync::Arc::new(g.content.with_experimental(crate::rules::content::ExperimentalRules { rear_service_flat: true, ..Default::default() }));
         g.first_noon_today();
         assert_eq!(g.daily_wages(), 90, "130 × 178 div 256");
         let mut events = Vec::new();
@@ -1900,7 +1937,9 @@ mod tests {
         use crate::rules::content::Bonus;
         let mut c = content();
         c.items.push(crate::rules::content::ArtefactDef { cost: 300, bonus: Some(Bonus::Merchant), ..ck::item(26, ArtefactType::Ring) });
-        let c = Arc::new(Content::new(c.units.clone(), c.items.clone(), c.spells.clone(), Default::default(), crate::rules::formation::Formation::WIDE));
+        // The experimental «Скидка торговца от предмета» (`merchant_item`, Razdor's rule).
+        let rules = crate::rules::content::ExperimentalRules { merchant_item: true, ..Default::default() };
+        let c = Arc::new(Content::new(c.units.clone(), c.items.clone(), c.spells.clone(), Default::default(), crate::rules::formation::Formation::WIDE).with_experimental(rules));
         let mut g = Game::from_scenario(c, &shop_town(-2), HeroClass::Knight);
         g.location = Some(0);
         assert!(!g.has_merchant(), "no Merchant anywhere");
@@ -1912,6 +1951,22 @@ mod tests {
         assert_eq!(g.sell_price(ItemId(26)), 135, "+50% with the item in the pack");
         g.pack = vec![ItemId(23)].into();
         assert_eq!(g.buy_price(ItemId(24)), 1450, "an item without the bonus: the plain price");
+    }
+
+    /// The original (economy.md, «Merchant discount source»): only a unit of the army with the
+    /// bonus gives the Merchant prices; a Merchant item in the pack gives none.
+    #[test]
+    fn a_merchant_item_in_the_pack_gives_no_merchant_price_by_default() {
+        use crate::rules::content::Bonus;
+        let mut c = content();
+        c.items.push(crate::rules::content::ArtefactDef { cost: 300, bonus: Some(Bonus::Merchant), ..ck::item(26, ArtefactType::Ring) });
+        let c = Arc::new(Content::new(c.units.clone(), c.items.clone(), c.spells.clone(), Default::default(), crate::rules::formation::Formation::WIDE));
+        let mut g = Game::from_scenario(c, &shop_town(-2), HeroClass::Knight);
+        g.location = Some(0);
+        g.pack = vec![ItemId(26)].into();
+        assert!(!g.has_merchant(), "the pack's Merchant does not count by default");
+        assert_eq!(g.buy_price(ItemId(24)), 1450);
+        assert_eq!(g.sell_price(ItemId(26)), 90);
     }
 
     #[test]
@@ -1964,12 +2019,20 @@ mod tests {
         assert_eq!(g.learn_spell(1), Err(ServiceError::AlreadyKnown));
         g.gold = 499;
         assert_eq!(g.learn_spell(2), Err(ServiceError::CannotAfford));
-        // Razdor's choice (the owner's, 2026-10-22): a book of 16 still buys; the original
-        // refuses at 15 (0x4ba078).
+        // The original refuses a book of exactly 15 (0x4ba078), and a book of 16 buys again (its
+        // bug, kept). The experimental «Без предела книги заклинаний» has no room test.
         g.gold = 500;
+        g.spells = (3..18).collect();
+        assert_eq!(g.learn_spell(2), Err(ServiceError::BookFull));
         g.spells = (3..19).collect();
         g.learn_spell(2).unwrap();
         assert_eq!(g.spells.len(), 17);
+        g.spells = (3..18).collect();
+        g.gold = 500;
+        g.content = std::sync::Arc::new(g.content.with_experimental(crate::rules::content::ExperimentalRules { unlimited_spells: true, ..Default::default() }));
+        g.learn_spell(2).unwrap();
+        assert_eq!(g.spells.len(), 16, "no room test with the unlimited book");
+        g.content = std::sync::Arc::new(g.content.with_experimental(Default::default()));
         g.gold = 0;
         g.spells = vec![1];
         assert_eq!(g.learn_spell(7), Err(ServiceError::NotHere));
