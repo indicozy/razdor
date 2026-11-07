@@ -338,8 +338,9 @@ pub struct Game {
     /// with a hash of its bytes. The UI sets it for maps ([`Game::set_origin`]).
     pub origin: Option<ScenarioRef>,
     /// The file name (without extension) of the map the playthrough started on: the campaign's
-    /// first map, or the single map of a new game. Its save slot is `maps/<key>` (`rules::save`,
-    /// [`super::save::map_slot_key`]); `None` in saves before it, which use `origin`.
+    /// first map, or the single map of a new game. Carried to the next campaign map and kept by
+    /// [`Game::restart`]; it does not key the save slot (that is the map being played, `origin`,
+    /// see [`super::save::map_slot_key`]). `None` in saves before it.
     #[serde(default)]
     pub campaign: Option<String>,
     /// The bytes of the map file `origin` names, as the game was started or loaded. A save

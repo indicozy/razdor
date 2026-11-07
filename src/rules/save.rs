@@ -680,19 +680,19 @@ pub fn map_slot_key_of_file(file: &str) -> String {
     slug(&file.to_lowercase())
 }
 
-/// The save slot key of `game` (Razdor's, see [`map_slot_path`]): its campaign's first map
-/// ([`Game::campaign`]), else the map of its origin; `None` for the demo or no origin.
+/// The save slot key of `game` (Razdor's, see [`map_slot_path`]): the map it is being played on
+/// (its origin's file, which a campaign's next map sets too), so every campaign map has its own
+/// slot. `None` for the demo or no origin. [`Game::campaign`] is not part of it.
 pub fn map_slot_key(game: &Game) -> Option<String> {
-    let file = match (&game.campaign, &game.origin) {
-        (Some(first), _) => first.clone(),
-        (None, Some(ScenarioRef::Map { file, .. })) => file.clone(),
-        _ => return None,
-    };
-    Some(map_slot_key_of_file(&file))
+    match &game.origin {
+        Some(ScenarioRef::Map { file, .. }) => Some(map_slot_key_of_file(file)),
+        _ => None,
+    }
 }
 
-/// The save key a campaign's next map inherits from the map before it (the playthrough's first
-/// map): `prev`'s campaign key, else its origin's map (a save from before the key).
+/// The campaign a game's next map carries on: `prev`'s campaign (the playthrough's first map),
+/// else its origin's map (a save from before the key). Kept on the game for «Рестарт» and the
+/// hand-over; it no longer names the save slot.
 pub fn campaign_of(prev: &Game) -> Option<String> {
     prev.campaign.clone().or_else(|| match &prev.origin {
         Some(ScenarioRef::Map { file, .. }) => Some(file.clone()),
@@ -2186,15 +2186,15 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn map_slot_key_prefers_the_campaign_and_is_none_for_the_demo() {
+    fn map_slot_key_is_the_map_played_and_is_none_for_the_demo() {
         let mut g = Game::new(demo(), HeroClass::Knight);
         assert_eq!(map_slot_key(&g), None, "no origin: no slot");
         g.set_origin(ScenarioRef::Demo);
         assert_eq!(map_slot_key(&g), None, "the demo: no slot");
         g.set_origin(ScenarioRef::Map { file: "Second Map".into(), hash: 0 });
-        assert_eq!(map_slot_key(&g), Some("second_map".into()));
+        assert_eq!(map_slot_key(&g), Some("second_map".into()), "a game from before the campaign key: its map");
         g.campaign = Some("First Map".into());
-        assert_eq!(map_slot_key(&g), Some("first_map".into()), "the campaign's first map");
+        assert_eq!(map_slot_key(&g), Some("second_map".into()), "the map played, not the campaign's first map");
         assert_eq!(map_slot_key_of_file("Second Map"), "second_map");
     }
 
@@ -2205,6 +2205,25 @@ pub(crate) mod tests {
         prev.campaign = Some("First Map".into());
         assert_eq!(campaign_of(&prev), Some("First Map".into()));
         assert_eq!(campaign_of(&Game::new(demo(), HeroClass::Knight)), None);
+    }
+
+    /// A campaign's next map writes its own slot (the map played); the first map's slot keeps the
+    /// last save made on the first map, and the hero window of the second map finds its own.
+    #[test]
+    fn each_campaign_map_has_its_own_slot() {
+        let dir = temp_dir("slot-campaign");
+        let mut first = game_on("First Map");
+        first.campaign = Some("First Map".into());
+        write_autosave(&dir, "first end", &first, false).unwrap();
+        // The next map, as `screens::campaign_game` starts it: its origin, the campaign carried.
+        let mut second = game_on("Second Map");
+        second.campaign = campaign_of(&first);
+        write_autosave(&dir, "second a", &second, true).unwrap();
+        assert_eq!(map_slot(&dir, "first_map").unwrap().1.name, "first end", "the first map keeps its last save");
+        let (path, meta) = map_slot(&dir, &map_slot_key_of_file("Second Map")).unwrap();
+        assert_eq!((path, meta.name.as_str()), (map_slot_path(&dir, "second_map"), "second a"), "the hero window finds the second map's slot");
+        assert_eq!(second.campaign.as_deref(), Some("First Map"), "the campaign still carries on");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

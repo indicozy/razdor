@@ -80,11 +80,12 @@ put(): save::meta_of → save::encode (serde_json + BzEncoder) → write .tmp �
 Razdor's own (the owner's request): every playthrough keeps one latest save of its map, apart
 from the load window's saves, so playing another map never loses it.
 
-- What: the latest autosave of the playthrough, the same bytes. The key is `Game::campaign`, the
-  file name of the map the playthrough started on (set by `screens::start_game_with_rules`, carried
-  to the next campaign map by `screens::campaign_game` from `save::campaign_of`, kept by
-  `Game::restart`); `save::map_slot_key` falls back to the origin's map for a save from before the
-  key, and is `None` for the demo. The key is lowercased and passed through `slug`.
+- What: the latest autosave of the map being played, the same bytes. The key is the map's own file
+  name, `Game::origin` (set by `screens::start_game_with_rules` and by `screens::campaign_game` for
+  each campaign map), so every campaign map has its own slot; `save::map_slot_key` is `None` for the
+  demo. The key is lowercased and passed through `slug`. `Game::campaign` (the map the playthrough
+  started on, carried to the next campaign map by `save::campaign_of`, kept by `Game::restart`) no
+  longer keys the slot. A slot made before this, under a campaign's first map, is that map's slot.
 - Where: `<games folder>/maps/<key>.rzsave` (`save::map_slot_path`), a sibling of `manual/` and
   `auto/`. Nothing lists `maps/`: `list`, `list_files`, `by_time`, the rotation, «Очистить всё» and
   `claim_old_saves` only walk the two kind folders.

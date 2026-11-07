@@ -43,7 +43,7 @@ If the game closed during a battle, "Last session" stores the moment before the 
 
 ## Continue a map
 
-Each map has its own last save, which is stored separately from the list of saves in the Load window. A campaign is considered a single map: its save is the last chapter you reached.
+Each map has its own last save, which is stored separately from the list of saves in the Load window. Each map of a campaign has its own save too: the first chapter keeps its own, the next chapter its own, and playing one does not replace the other.
 
 This save updates at the same moments as autosaves: before every battle and during the daily report at 12:00. It updates even when autosaves are turned off in the install (`OptValue8`). Therefore, even if playing on a different map has pushed old saves out of the general list, the map retains its last state.
 
