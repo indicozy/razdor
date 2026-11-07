@@ -149,13 +149,34 @@ fn hub_entries(install: Option<&razdor::dt::install::DtInstall>) -> Vec<Scenario
     let gate = razdor::hub::MapGate::read(&dir);
     let install_maps: Vec<PathBuf> = install.iter().flat_map(|d| d.maps.iter()).map(|m| m.path.clone()).collect();
     let install = razdor::hub::InstallMaps::new(&install_maps);
+    // A map whose file is missing, changed or unreadable is not listed until it is fetched again
+    // (`hub::Hub::repair_maps`, started at launch and after each change): it is never played damaged.
+    let damaged = razdor::hub::damaged_map_files(&dir);
     razdor::editor::files::list_dir(&razdor::hub::maps_dir(&dir))
         .iter()
         .filter_map(|m| {
+            if damaged.contains(&m.path) {
+                return None;
+            }
             let group = gate.group(&m.name, install.has_same(&m.path));
             (group != razdor::hub::MapGroup::Hidden).then(|| load_entry(m).map(|e| ScenarioEntry { base_game: group == razdor::hub::MapGroup::Base, ..e })).flatten()
         })
         .collect()
+}
+
+/// The hub's damaged maps are fetched again on a worker at launch (`Hub::repair_maps`: nothing
+/// is fetched when all are intact); the App takes the result on the UI thread (`poll_map_repair`).
+fn start_map_repair() -> Option<std::sync::mpsc::Receiver<razdor::hub::MapRepair>> {
+    let local = razdor::hub::local_dir()?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("hub-maps".into())
+        .spawn(move || {
+            let hub = razdor::hub::Hub { source: razdor::hub::Source::from_env(), local };
+            let _ = tx.send(hub.repair_maps());
+        })
+        .ok()?;
+    Some(rx)
 }
 
 /// The installed mods (id and title) for the new-game window's picker.
@@ -180,19 +201,36 @@ struct ModSwitch {
 /// What a mod switch's worker made.
 struct ModBuilt {
     /// The folder built (`razdor::hub::use_mod`), or why not.
-    built: Result<(), String>,
+    built: Result<(), ModFault>,
+    /// Whether the mod's damaged files were restored first (`Hub::repair_mod`).
+    repaired: bool,
     /// The install read again (the mod's folder when it plays), if it reads.
     install: Option<razdor::dt::install::DtInstall>,
     /// The scenario list of that install (`scenarios_of`).
     scenarios: Vec<ScenarioEntry>,
 }
 
-/// The worker's work of a mod switch: the choice `id` made (its folder built, `use_mod`), then
-/// the install read again and its scenario list. A choice that does not build reads nothing.
+/// Why a mod does not play: its files could not be restored, or its folder does not build.
+enum ModFault {
+    Repair(String),
+    Play(String),
+}
+
+/// The worker's work of a mod switch: the choice `id` made (its damaged files restored first,
+/// `Hub::repair_mod`; its folder built, `use_mod`), then the install read again and its scenario
+/// list. A choice that does not build reads nothing.
 fn build_mod(local: &std::path::Path, base: &std::path::Path, id: Option<&str>) -> ModBuilt {
-    let built = razdor::hub::use_mod(local, base, id).map(|_| ());
+    let mut repaired = false;
+    if let Some(mod_id) = id {
+        let hub = razdor::hub::Hub { source: razdor::hub::Source::from_env(), local: local.to_path_buf() };
+        match hub.repair_mod(mod_id) {
+            Ok(restored) => repaired = restored,
+            Err(e) => return ModBuilt { built: Err(ModFault::Repair(e)), repaired: false, install: None, scenarios: Vec::new() },
+        }
+    }
+    let built = razdor::hub::use_mod(local, base, id).map(|_| ()).map_err(ModFault::Play);
     if built.is_err() {
-        return ModBuilt { built, install: None, scenarios: Vec::new() };
+        return ModBuilt { built, repaired: false, install: None, scenarios: Vec::new() };
     }
     razdor::dt::preload::forget_ready();
     let install = match razdor::dt::install::DtInstall::from_env() {
@@ -203,7 +241,7 @@ fn build_mod(local: &std::path::Path, base: &std::path::Path, id: Option<&str>) 
         }
     };
     let scenarios = scenarios_of(install.as_ref());
-    ModBuilt { built, install, scenarios }
+    ModBuilt { built, repaired, install, scenarios }
 }
 
 /// A worker's result once it is there: `None` while it runs; `Err` when it ended without one.
@@ -317,6 +355,8 @@ pub struct App {
     active_mod: Option<String>,
     /// A mod switch whose folder is built on a worker (`choose_mod`, 1441), until it is applied.
     mod_switch: Option<ModSwitch>,
+    /// The hub's damaged maps being fetched again on a worker (`start_map_repair`), until it is done.
+    map_repair: Option<std::sync::mpsc::Receiver<razdor::hub::MapRepair>>,
 }
 
 /// The install's content for the new-game windows (`None` without an install).
@@ -403,6 +443,7 @@ impl App {
             mods: hub_mods(),
             active_mod: hub_active(),
             mod_switch: None,
+            map_repair: start_map_repair(),
         };
         app.follow_row_setting();
         app
@@ -466,13 +507,39 @@ impl App {
         }
     }
 
+    /// Takes the hub maps' repair once it is done (each frame): the restored maps join the list, and
+    /// a map that could not be restored is said so.
+    fn poll_map_repair(&mut self) {
+        let Some(job) = self.map_repair.as_ref() else { return };
+        let Some(done) = finished(job) else { return };
+        self.map_repair = None;
+        let Ok(repair) = done else { return };
+        if !repair.restored.is_empty() {
+            let dir = razdor::hub::local_dir().map(|d| razdor::hub::maps_dir(&d));
+            self.scenarios.retain(|e| dir.as_ref().is_none_or(|d| !e.path.starts_with(d)));
+            self.scenarios.extend(hub_entries(self.assets.dt.as_ref().map(|d| &d.install)));
+            self.message = Some(tr("The hub's damaged or missing maps were restored.").into());
+        }
+        if let Some(first) = repair.failed.first() {
+            self.message = Some(razdor::trf!("A hub map is damaged or missing and could not be restored: {e}.", e = first));
+        }
+    }
+
     /// Applies a finished switch: the install the worker read is adopted (the art is made here,
     /// it is cheap), the list is the one it made, and the others' built folders go, as the
     /// game reads the new one now.
     fn apply_mod(&mut self, id: Option<String>, built: ModBuilt) {
-        if let Err(e) = built.built {
-            self.message = Some(razdor::trf!("Cannot play the mod: {e}.", e));
-            return;
+        let repaired = built.repaired;
+        match built.built {
+            Ok(()) => {}
+            Err(ModFault::Repair(e)) => {
+                self.message = Some(razdor::trf!("The mod's files are damaged or missing (an antivirus may have removed them) and could not be restored: {e}.", e));
+                return;
+            }
+            Err(ModFault::Play(e)) => {
+                self.message = Some(razdor::trf!("Cannot play the mod: {e}.", e));
+                return;
+            }
         }
         if let Some(install) = built.install {
             self.assets.adopt_install(dt_art::DtArt::load(install));
@@ -483,6 +550,9 @@ impl App {
         if self.active_mod != id {
             self.message = Some(tr("The mod does not play; the base game is played.").into());
             return;
+        }
+        if repaired {
+            self.message = Some(tr("The mod's damaged or missing files were restored.").into());
         }
         if let Some(local) = razdor::hub::local_dir() {
             razdor::hub::keep_only_game_folder(&local, id.as_deref());
@@ -1147,6 +1217,7 @@ impl App {
         mobile::refresh_keyboard_inset();
         self.mobile_install_poll();
         self.poll_mod_switch();
+        self.poll_map_repair();
         // The screen's orientation from the settings (Android; applied at start and on each change).
         #[cfg(target_os = "android")]
         android::follow_orientation(self.audio.settings.orientation);
@@ -1384,7 +1455,15 @@ impl App {
             (Screen::TutorialOffer, _) => new_game::tutorial_offer(&self.scenarios),
             (Screen::ClassSelect { scenario }, game) => {
                 let pick = scenario.and_then(|i| Some((self.scenarios.get(i)?, self.dt_content.clone()?)));
-                new_game::class_select(game, &self.demo, pick, &self.assets)
+                // A map that names units or items the install lacks (a mod's files damaged or removed)
+                // is not started: the game would panic on them (`map_refs`), so the list stays.
+                let lacking = pick.as_ref().is_some_and(|(entry, content)| !razdor::rules::map_refs::unknown(&entry.scenario, content).is_empty());
+                if lacking {
+                    self.message = Some(tr("This map needs units or items the install does not have: a mod's files may be damaged or missing.").into());
+                    Some(Screen::ScenarioSelect)
+                } else {
+                    new_game::class_select(game, &self.demo, pick, &self.assets)
+                }
             }
             // The map itself stays where it is; a dialog over it is panned (`ui::pan`).
             (Screen::WorldMap, Some(game)) => pan::unpanned(|| {

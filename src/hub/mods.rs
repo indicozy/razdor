@@ -14,12 +14,16 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::{read_installed, safe_id, safe_rel_name, Installed, Kind, Text};
+use super::{read_installed, safe_id, safe_rel_name, FileRef, Installed, Kind, Text};
 
 /// The file naming the active mod, under the hub folder.
 const ACTIVE: &str = "active.json";
 /// The file recording how a merged game folder was built, inside it.
 const STAMP: &str = "stamp.json";
+/// The mod's manifest, beside its `files/` (`mods/<id>/manifest.json`).
+const MANIFEST: &str = "manifest.json";
+/// The folder of the mod zips kept from its install (`mods/<id>/archives/<n>.zip`).
+const ARCHIVES: &str = "archives";
 
 /// The mod's folder: `<hub>/mods/<id>/`, with `files/` (what was installed) and `game/` (the
 /// merged folder the game plays from).
@@ -35,6 +39,78 @@ pub fn mod_files_dir(local: &Path, id: &str) -> PathBuf {
 /// The mod's merged game folder (`<hub>/mods/<id>/game/`), built by [`prepare_mod`].
 pub fn mod_game_dir(local: &Path, id: &str) -> PathBuf {
     mod_dir(local, id).join("game")
+}
+
+/// What a mod's files should be, written at each install (`mods/<id>/manifest.json`, beside
+/// `files/`): every file's path, size and SHA-256, and the catalog files they came from, so a
+/// damaged file can be restored (`Hub::repair_mod`). A mod installed before manifests has none.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Manifest {
+    pub files: Vec<ManifestFile>,
+    pub sources: Vec<FileRef>,
+}
+
+/// One file of a mod as installed: its path in the mod, size and SHA-256.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestFile {
+    pub path: String,
+    pub size: u64,
+    pub sha256: String,
+}
+
+/// The zip a mod's archive source `n` was unpacked from, kept for a repair.
+pub fn archive_path(local: &Path, id: &str, n: usize) -> PathBuf {
+    mod_dir(local, id).join(ARCHIVES).join(format!("{n}.zip"))
+}
+
+/// The manifest of mod `id`; None when it has none or it does not read.
+pub fn read_manifest(local: &Path, id: &str) -> Option<Manifest> {
+    serde_json::from_slice(&std::fs::read(mod_dir(local, id).join(MANIFEST)).ok()?).ok()
+}
+
+/// Writes mod `id`'s manifest.
+pub fn write_manifest(local: &Path, id: &str, manifest: &Manifest) -> Result<(), String> {
+    let json = serde_json::to_vec_pretty(manifest).map_err(|e| e.to_string())?;
+    crate::editor::files::write_atomically(&mod_dir(local, id).join(MANIFEST), &json).map_err(|e| format!("{MANIFEST}: {e}"))
+}
+
+/// The files under `files_dir` as a manifest lists them: path, size and SHA-256 of each.
+pub fn file_entries(files_dir: &Path) -> Result<Vec<ManifestFile>, String> {
+    list_mod_files(files_dir)?
+        .into_iter()
+        .map(|(path, file)| {
+            let size = std::fs::metadata(&file).map_err(|e| format!("{path}: {e}"))?.len();
+            let sha256 = crate::update::sha256_file(&file).map_err(|e| format!("{path}: {e}"))?;
+            Ok(ManifestFile { path, size, sha256 })
+        })
+        .collect()
+}
+
+/// The files of mod `id` that are missing or differ from its manifest (their paths in the mod).
+/// A mod with no manifest (installed before manifests) has only its unreadable files reported:
+/// its files are trusted until a repair can tell better. An error when a file name is not one a
+/// mod may use.
+pub fn damaged_files(local: &Path, id: &str) -> Result<Vec<String>, String> {
+    let dir = mod_files_dir(local, id);
+    let Some(manifest) = read_manifest(local, id) else {
+        let mut bad = Vec::new();
+        for (rel, file) in list_mod_files(&dir)? {
+            if std::fs::File::open(&file).and_then(|mut f| std::io::copy(&mut f, &mut std::io::sink())).is_err() {
+                bad.push(rel);
+            }
+        }
+        return Ok(bad);
+    };
+    Ok(manifest.files.iter().filter(|f| !matches_entry(&dir, f)).map(|f| f.path.clone()).collect())
+}
+
+/// Whether the file `f` names under `dir` is there with its size and SHA-256.
+fn matches_entry(dir: &Path, f: &ManifestFile) -> bool {
+    if !safe_rel_name(&f.path) {
+        return false;
+    }
+    let file = dir.join(&f.path);
+    std::fs::metadata(&file).is_ok_and(|m| m.is_file() && m.len() == f.size) && crate::update::sha256_file(&file).is_ok_and(|sum| sum == f.sha256.to_lowercase())
 }
 
 #[derive(Serialize, Deserialize)]
@@ -275,6 +351,10 @@ struct Stamp {
     base_files: String,
     /// Every mod laid, in the order they are laid (see [`layer_chain`]).
     layers: Vec<LayerStamp>,
+    /// The merged folder's own files when it was built (see [`game_fingerprint`]); empty while
+    /// it is being built. A file lost from the folder (an antivirus) rebuilds it.
+    #[serde(default)]
+    game: String,
 }
 
 /// One mod laid over the base: its id, its installed version and each of its files' path and
@@ -325,6 +405,12 @@ pub fn prepare_mod(local: &Path, base: &Path, id: &str) -> Result<PathBuf, Strin
     if !safe_id(id) {
         return Err(format!("{id}: not a mod id"));
     }
+    // A mod whose files are damaged is not laid: a folder built from them would lack what the
+    // mod's maps name (the caller repairs it first, `Hub::repair_mod`).
+    let bad = damaged_files(local, id)?;
+    if !bad.is_empty() {
+        return Err(format!("{id}: damaged or missing: {}", bad.join(", ")));
+    }
     let installed = read_installed(local);
     let order = layer_chain(&installed, id)?;
     let mut layers = Vec::with_capacity(order.len());
@@ -340,15 +426,20 @@ pub fn prepare_mod(local: &Path, base: &Path, id: &str) -> Result<PathBuf, Strin
         stamps.push(LayerStamp { id: lid.clone(), version, files: digests });
         layers.push(files);
     }
-    let stamp = Stamp { base: base.display().to_string(), base_files: base_fingerprint(base)?, layers: stamps };
+    let stamp = Stamp { base: base.display().to_string(), base_files: base_fingerprint(base)?, layers: stamps, game: String::new() };
     let game = mod_game_dir(local, id);
-    if read_stamp(&game).as_ref() == Some(&stamp) {
-        return Ok(game);
+    if let Some(mut built) = read_stamp(&game) {
+        let fingerprint = std::mem::take(&mut built.game);
+        if built == stamp && !fingerprint.is_empty() && game_fingerprint(&game).ok().as_deref() == Some(fingerprint.as_str()) {
+            return Ok(game);
+        }
     }
     let tmp = mod_dir(local, id).join("game.tmp");
     let _ = std::fs::remove_dir_all(&tmp);
     let built = build(base, &layers, &tmp).and_then(|()| {
-        let json = serde_json::to_vec_pretty(&stamp).map_err(|e| e.to_string())?;
+        let mut recorded = stamp.clone();
+        recorded.game = game_fingerprint(&tmp)?;
+        let json = serde_json::to_vec_pretty(&recorded).map_err(|e| e.to_string())?;
         write_fresh(&tmp.join(STAMP), &json)
     });
     if let Err(e) = built {
@@ -549,6 +640,23 @@ fn unpack_zip_within(zip_path: &Path, dest: &Path, max_bytes: u64, max_entries: 
     Ok(names)
 }
 
+/// A digest of a merged game folder's files: their names and sizes (its stamp left out). A
+/// folder that lost a file, or gained one, does not match the stamp's and is built again.
+fn game_fingerprint(game: &Path) -> Result<String, String> {
+    let mut all = Vec::new();
+    walk(game, game, &mut all)?;
+    let mut lines = Vec::new();
+    for (rel, path, is_dir) in all {
+        if is_dir || rel == STAMP {
+            continue;
+        }
+        let len = std::fs::metadata(&path).map_err(|e| format!("{rel}: {e}"))?.len();
+        lines.push(format!("{rel}\t{len}"));
+    }
+    lines.sort();
+    Ok(crate::update::sha256_hex(lines.join("\n").as_bytes()))
+}
+
 /// A digest of the base's files: their names, sizes and modification times.
 fn base_fingerprint(base: &Path) -> Result<String, String> {
     let mut all = Vec::new();
@@ -609,6 +717,7 @@ mod tests {
             title: Text { ru: id.into(), en: String::new() },
             requires: requires.iter().map(|r| r.to_string()).collect(),
             files: files.iter().map(|(rel, _)| format!("mods/{id}/files/{rel}")).collect(),
+            sources: Vec::new(),
         };
         installed.entries.insert(id.into(), record);
         std::fs::create_dir_all(local).unwrap();
@@ -653,9 +762,12 @@ mod tests {
         let first = std::fs::metadata(game.join(STAMP)).unwrap().modified().ok();
         assert!(first.is_some());
         // Same mod: the folder is reused as it is.
+        prepare_mod(&local, &base, "m1").unwrap();
+        assert_eq!(std::fs::metadata(game.join(STAMP)).unwrap().modified().ok(), first, "an unchanged folder is not rebuilt");
+        // A file added to the folder is a change: rebuilt without it.
         put(&game.join("marker.txt"), "kept");
         prepare_mod(&local, &base, "m1").unwrap();
-        assert!(game.join("marker.txt").exists(), "an unchanged folder is not rebuilt");
+        assert!(!game.join("marker.txt").exists(), "any change in the folder rebuilds it");
         // A new file in the mod: rebuilt, the new file is there.
         install_mod(&local, "m1", "1.0", &[("Data/Units.ini", "mod units"), ("Data/Extra.ini", "extra")]);
         prepare_mod(&local, &base, "m1").unwrap();
@@ -721,13 +833,14 @@ mod tests {
                 title: Text::default(),
                 requires: vec!["evo".into()],
                 files: vec!["maps/Hub_Rotten.DTm".into()],
+                sources: Vec::new(),
             },
         );
         installed.entries.insert(
             "ford".into(),
-            super::super::InstalledEntry { version: "1".into(), kind: Kind::Map, lang: String::new(), title: Text::default(), requires: vec![], files: vec!["maps/Hub_Ford.DTm".into()] },
+            super::super::InstalledEntry { version: "1".into(), kind: Kind::Map, lang: String::new(), title: Text::default(), requires: vec![], files: vec!["maps/Hub_Ford.DTm".into()], sources: vec![] },
         );
-        installed.entries.insert("evo".into(), super::super::InstalledEntry { version: "1".into(), kind: Kind::Mod, lang: String::new(), title: Text::default(), requires: vec![], files: vec![] });
+        installed.entries.insert("evo".into(), super::super::InstalledEntry { version: "1".into(), kind: Kind::Mod, lang: String::new(), title: Text::default(), requires: vec![], files: vec![], sources: vec![] });
         std::fs::create_dir_all(&local).unwrap();
         std::fs::write(local.join("installed.json"), serde_json::to_vec(&installed).unwrap()).unwrap();
         assert!(MapGate::read(&local).group("Hub_Rotten.DTm", false) == MapGroup::Hidden, "no mod is active");
@@ -1014,5 +1127,63 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
         let _ = std::fs::remove_dir_all(&local);
         let _ = std::fs::remove_dir_all(&saves_root);
+    }
+
+    /// Writes mod `id`'s manifest from its files as they are now (what an install writes).
+    fn write_manifest_now(local: &Path, id: &str) {
+        let files = file_entries(&mod_files_dir(local, id)).unwrap();
+        write_manifest(local, id, &Manifest { files, sources: Vec::new() }).unwrap();
+    }
+
+    #[test]
+    fn a_missing_file_in_the_merged_folder_forces_a_rebuild() {
+        let base = base_install("gone-game");
+        let local = temp("gone-game-hub");
+        install_mod(&local, "m1", "1.0", &[("Data/Units.ini", "mod units")]);
+        let game = prepare_mod(&local, &base, "m1").unwrap();
+        // The antivirus takes the base's picture out of the merged folder (a link, not the base's file).
+        std::fs::remove_file(game.join("Pictures/a.lit")).unwrap();
+        prepare_mod(&local, &base, "m1").unwrap();
+        assert_eq!(std::fs::read_to_string(game.join("Pictures/a.lit")).unwrap(), "picture", "the folder is built again");
+        assert_eq!(std::fs::read_to_string(base.join("Pictures/a.lit")).unwrap(), "picture", "the base keeps its file");
+        // A mod file taken from the folder: rebuilt too.
+        std::fs::remove_file(game.join("Data/Units.ini")).unwrap();
+        prepare_mod(&local, &base, "m1").unwrap();
+        assert_eq!(std::fs::read_to_string(game.join("Data/Units.ini")).unwrap(), "mod units");
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    #[test]
+    fn a_damaged_mod_file_is_refused_and_no_folder_is_built() {
+        let base = base_install("damaged");
+        let local = temp("damaged-hub");
+        install_mod(&local, "m1", "1.0", &[("Data/Units.ini", "mod units"), ("Scripts/New.txt", "new")]);
+        write_manifest_now(&local, "m1");
+        assert!(damaged_files(&local, "m1").unwrap().is_empty(), "an intact mod is not damaged");
+        assert!(prepare_mod(&local, &base, "m1").is_ok());
+        std::fs::remove_file(mod_files_dir(&local, "m1").join("Data/Units.ini")).unwrap();
+        std::fs::remove_dir_all(mod_game_dir(&local, "m1")).unwrap();
+        assert_eq!(damaged_files(&local, "m1").unwrap(), ["Data/Units.ini"]);
+        let err = prepare_mod(&local, &base, "m1").unwrap_err();
+        assert!(err.contains("Data/Units.ini"), "{err}");
+        assert!(!mod_game_dir(&local, "m1").exists(), "no folder is built from a damaged mod");
+        // A changed file (same name, other bytes) is damaged too.
+        put(&mod_files_dir(&local, "m1").join("Scripts/New.txt"), "changed!");
+        assert_eq!(damaged_files(&local, "m1").unwrap(), ["Data/Units.ini", "Scripts/New.txt"]);
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    #[test]
+    fn a_mod_without_a_manifest_is_damaged_only_where_its_files_do_not_read() {
+        let base = base_install("legacy");
+        let local = temp("legacy-hub");
+        install_mod(&local, "m1", "1.0", &[("Data/Units.ini", "mod units")]);
+        assert!(read_manifest(&local, "m1").is_none());
+        assert!(damaged_files(&local, "m1").unwrap().is_empty(), "readable files are trusted");
+        assert!(prepare_mod(&local, &base, "m1").is_ok());
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&local);
     }
 }

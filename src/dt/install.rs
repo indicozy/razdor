@@ -628,6 +628,20 @@ mod tests {
         assert!(matches!(err, DtError::Io { .. }), "{err}");
     }
 
+    #[test]
+    fn a_missing_data_file_is_an_error_not_a_panic() {
+        let dir = std::env::temp_dir().join(format!("razdor-install-missing-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(MAPS_DIR)).unwrap();
+        for f in [GLOBAL_FILE, ARTEFACTS_FILE, SPELLS_FILE] {
+            std::fs::write(dir.join(f), b"").unwrap();
+        }
+        // Units.ini is gone (a quarantined file): the install does not load, and the error names it.
+        let err = DtInstall::load(&dir).unwrap_err();
+        assert!(matches!(&err, DtError::Io { path, .. } if path.ends_with(UNITS_FILE)), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     fn install() -> Option<DtInstall> {
         let dir = std::env::var_os(ENV_VAR)?;
         let mut dt = DtInstall::load(Path::new(&dir)).expect("install loads");

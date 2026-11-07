@@ -711,6 +711,7 @@ may be an `archive` (a zip, mods only): it is downloaded to `downloads/` (stream
 checked by size and SHA-256, unpacked into `files.tmp/` under the zip's own paths (a `\` counts as `/`;
 the same name checks as a mod's file; at most 2 GiB and 20 000 entries, `hub::mods::unpack_zip`), and
 `files.tmp/` then replaces `files/` in one rename. The window's downloads show «Загрузка…».
+The install also keeps the verified zip as `mods/<id>/archives/<n>.zip` (`mods::archive_path`, `n` the file's place in the entry) and writes `mods/<id>/manifest.json` (`mods::Manifest`: each file's path, size and SHA-256, and the catalog files they came from; `write_mod`, `keep_archives`). `fetch_files` takes an archive from its kept zip when that still matches the catalog. **Damaged files** (an antivirus takes them): `mods::damaged_files` compares `files/` with the manifest (a mod with no manifest, installed before manifests, reports only the files that do not read); `Hub::repair_mod` writes the whole mod again from its sources (the kept zips, else downloaded and checked; with no manifest, the catalog's entry of the installed version) and drops its merged folder. `prepare_mod` refuses a damaged mod (`damaged: …`) and builds no folder from it. **Hub maps** get the same check: a map's record keeps its catalog files as `sources` (`InstalledEntry::sources`; older records have none and are checked for readability only, repaired from the catalog). `hub::damaged_map_files` lists the damaged map files, `hub_entries` leaves them out of the new-game list (never played damaged), and `start_map_repair` runs `Hub::repair_maps` on a worker at launch (`App::poll_map_repair` takes it: the restored maps join the list, a failure is said); a map that will not read is skipped with a log line.
 
 **Search** (`ui/hub_view.rs`, Razdor's): a field (`widgets::text_field`, key `hub-search`, placeholder «Поиск…») with a square cross button (`chrome::close_button`),
 above the list on a phone held upright, and in the bottom row between «Обновить» and «Установить» elsewhere (a phone
@@ -761,7 +762,7 @@ keeping the base's spelling (`Data/Units.ini` replaced by `data/units.ini`); a f
 added. A link is removed before its file is replaced, so the base is never written. The build goes into
 `game.tmp/` and is renamed into place; `stamp.json` in the folder holds the base path, a digest of the
 base's names, sizes and times, the mod's version and the SHA-256 of each mod file, and a folder whose
-stamp differs is rebuilt (a reinstall, a changed base or file list). `hub::active_install_dir(base)`
+stamp differs is rebuilt (a reinstall, a changed base or file list). The stamp also holds a digest of the folder's own files (`game_fingerprint`: names and sizes), so a folder that lost a file (an antivirus) is built again from the mod's files. `hub::active_install_dir(base)`
 (called by `DtInstall::from_env` after `locate`, so the whole app reads it: assets, content, maps,
 language, `save::set_install`) returns the active mod's folder, else `base`; the choice is
 `<hub>/active.json` (`{"mod": "<id>"}`, none = the base). A choice whose mod is gone or does not build
@@ -779,12 +780,12 @@ are not in the mod's folder.
 **Switching** (the new-game window, `new_game::scenario_select`): when a mod is installed, a «Мод» drop-down
 (`view_choice_at`, the extras row under the buttons (1458: `new_game::extra_top`, half the width beside «Добавить карту…», full alone; the hint is «Добавить карту…»'s tooltip); «Мод: нет» then
 «Мод: <title>» per installed mod) sets
-`MOD_REQUEST`; `App::choose_mod` starts `build_mod` on a worker (1441): `hub::use_mod` builds the folder and
+`MOD_REQUEST`; `App::choose_mod` starts `build_mod` on a worker (1441), which repairs the mod's damaged files first (`Hub::repair_mod`, the one network step; `ModBuilt::repaired` gives the notice «…restored», `ModFault::Repair` the failure message, and the choice stays), then `hub::use_mod` builds the folder and
 writes `active.json`, then `DtInstall::from_env` and the scenario list are made there too. `App::poll_mod_switch`
 (each frame) applies the result on the UI thread (`apply_mod`: `DtArt::load` → `Assets::adopt_install` → content →
 scenarios). While it runs the window's mod row reads «Готовлю мод…» and takes no choice, and Next, Enter and
 «Добавить карту…» wait (`new_game::start_allowed`): no game starts on a half-built folder.
-A mod that does not build shows its reason in `App::message` and the base is played. Titles come from
+A mod that does not build shows its reason in `App::message` and the base is played. The class select (`Screen::ClassSelect`, `App::frame`) does not start a map that names units or items the install lacks (`rules::map_refs::unknown`): `Content::unit` would panic on them ("no unit 104"), so the list stays with a message. This is what a mod with damaged files looks like without the repair. Titles come from
 `installed.json` (`hub::installed_mods`), not from the catalog, so the picker reads no network.
 
 **Maps by mod**: `hub::MapGate` (read in `ui::hub_entries`, the hub's maps only) gives a hub map its

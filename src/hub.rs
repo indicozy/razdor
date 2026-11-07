@@ -478,6 +478,11 @@ pub struct InstalledEntry {
     pub requires: Vec<String>,
     /// Relative to the hub folder.
     pub files: Vec<String>,
+    /// A map's catalog files as installed (path, size, SHA-256), to check the map files against
+    /// and to download them again (`Hub::repair_maps`). Empty for a map installed before this,
+    /// and for a mod (its manifest has them).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<FileRef>,
 }
 
 impl Installed {
@@ -489,6 +494,44 @@ impl Installed {
 /// What is installed in `local`, or nothing when the record is missing or does not read.
 pub fn read_installed(local: &Path) -> Installed {
     std::fs::read(local.join("installed.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+}
+
+/// What a repair of the hub's maps (`Hub::repair_maps`) did: the entries restored, and those that
+/// could not be, each with why.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MapRepair {
+    pub restored: Vec<String>,
+    pub failed: Vec<String>,
+}
+
+/// The files of an installed map entry that are missing, changed or unreadable. With its sources
+/// recorded each file is checked against them (size and SHA-256); without (installed before
+/// sources were recorded) each file it lists must read.
+fn entry_damaged_files(local: &Path, e: &InstalledEntry) -> Vec<PathBuf> {
+    if e.sources.is_empty() {
+        return e
+            .files
+            .iter()
+            .filter(|rel| safe_path(rel))
+            .map(|rel| local.join(rel))
+            .filter(|p| std::fs::File::open(p).and_then(|mut f| std::io::copy(&mut f, &mut std::io::sink())).is_err())
+            .collect();
+    }
+    // A name that is not one the hub may use is not joined to a path (the repair refuses it).
+    e.sources
+        .iter()
+        .filter(|f| safe_name(&f.name))
+        .filter_map(|f| {
+            let path = local.join(format!("maps/{}", f.name));
+            Hub::check_file(&path, f).is_err().then_some(path)
+        })
+        .collect()
+}
+
+/// The installed hub maps' files (paths in the hub folder) that are missing, changed or
+/// unreadable. The new-game list leaves them out until `Hub::repair_maps` restores them.
+pub fn damaged_map_files(local: &Path) -> Vec<PathBuf> {
+    read_installed(local).entries.values().filter(|e| matches!(e.kind, Kind::Map | Kind::Campaign)).flat_map(|e| entry_damaged_files(local, e)).collect()
 }
 
 /// Why an entry cannot be installed.
@@ -757,23 +800,8 @@ impl Hub {
         for pid in plan {
             let e = catalog.entry(pid).expect("planned from the catalog");
             let files = e.files_for(code);
-            // All files are fetched and checked before any is written.
-            let mut got: Vec<(&FileRef, Got)> = Vec::new();
-            for (n, &f) in files.iter().enumerate() {
-                if f.archive {
-                    std::fs::create_dir_all(downloads).map_err(|err| format!("downloads: {err}"))?;
-                    let part = downloads.join(format!("{}-{n}.zip", e.id));
-                    self.download(&f.path, &part, MAX_ARCHIVE_DOWNLOAD)?;
-                    Hub::check_file(&part, f)?;
-                    got.push((f, Got::Zip(part)));
-                } else {
-                    let bytes = self.fetch(&f.path)?;
-                    if bytes.len() as u64 != f.size || crate::update::sha256_hex(&bytes) != f.sha256.to_lowercase() {
-                        return Err(format!("{}: the file does not match the catalog", f.path));
-                    }
-                    got.push((f, Got::Bytes(bytes)));
-                }
-            }
+            let got = self.fetch_files(&e.id, &files, downloads)?;
+            let got_sources: Vec<FileRef> = got.iter().map(|(f, _)| (*f).clone()).collect();
             let written = match e.kind {
                 Kind::Mod => self.write_mod(&e.id, &got)?,
                 Kind::Map | Kind::Campaign => {
@@ -788,22 +816,57 @@ impl Hub {
                 }
             };
             let lang = files.iter().find_map(|f| f.lang.clone()).unwrap_or_default();
-            let record = InstalledEntry { version: e.version.clone(), kind: e.kind, lang, title: e.title.clone(), requires: e.requires.clone(), files: written };
+            let sources = if e.kind == Kind::Mod { Vec::new() } else { got_sources };
+            let record = InstalledEntry { version: e.version.clone(), kind: e.kind, lang, title: e.title.clone(), requires: e.requires.clone(), files: written, sources };
             installed.entries.insert(e.id.clone(), record);
             self.save_installed(&installed)?;
         }
         Ok(())
     }
 
+    /// The files of one entry, fetched and checked before anything is written (`files` in
+    /// their catalog order). An archive is taken from its kept zip (`mods::archive_path`, its
+    /// index is its place in `files`) when that still matches the catalog, else downloaded to
+    /// `downloads`; the rest are fetched.
+    fn fetch_files<'a>(&self, id: &str, files: &[&'a FileRef], downloads: &Path) -> Result<Vec<(&'a FileRef, Got)>, String> {
+        let mut got = Vec::with_capacity(files.len());
+        for (n, &f) in files.iter().enumerate() {
+            // The names come from the local record too (a repair reads them): checked where they are used.
+            if !safe_name(&f.name) {
+                return Err(format!("{}: not a file name the hub may use", f.name));
+            }
+            if f.archive {
+                let kept = mods::archive_path(&self.local, id, n);
+                if kept.is_file() && Hub::check_file(&kept, f).is_ok() {
+                    got.push((f, Got::Zip(kept)));
+                    continue;
+                }
+                std::fs::create_dir_all(downloads).map_err(|err| format!("downloads: {err}"))?;
+                let part = downloads.join(format!("{id}-{n}.zip"));
+                self.download(&f.path, &part, MAX_ARCHIVE_DOWNLOAD)?;
+                Hub::check_file(&part, f)?;
+                got.push((f, Got::Zip(part)));
+            } else {
+                let bytes = self.fetch(&f.path)?;
+                if bytes.len() as u64 != f.size || crate::update::sha256_hex(&bytes) != f.sha256.to_lowercase() {
+                    return Err(format!("{}: the file does not match the catalog", f.path));
+                }
+                got.push((f, Got::Bytes(bytes)));
+            }
+        }
+        Ok(got)
+    }
+
     /// Writes a mod's files: the files it ships and its archives' entries, built in
     /// `files.tmp/` and put in place of the old `files/` in one rename (a reinstall replaces
-    /// them all, and a file the new version dropped goes too). Returns the records' paths.
+    /// them all, and a file the new version dropped goes too). Then the archives are kept and
+    /// the manifest written (`mods::Manifest`). Returns the records' paths.
     fn write_mod(&self, id: &str, got: &[(&FileRef, Got)]) -> Result<Vec<String>, String> {
         let tmp = mod_dir(&self.local, id).join("files.tmp");
         let _ = std::fs::remove_dir_all(&tmp);
-        let built = self.build_mod_files(&tmp, got);
-        let names = match built {
-            Ok(names) => names,
+        let built = self.build_mod_files(&tmp, got).and_then(|names| mods::file_entries(&tmp).map(|entries| (names, entries)));
+        let (names, entries) = match built {
+            Ok(built) => built,
             Err(e) => {
                 let _ = std::fs::remove_dir_all(&tmp);
                 return Err(e);
@@ -812,7 +875,112 @@ impl Hub {
         let files = mod_files_dir(&self.local, id);
         let _ = std::fs::remove_dir_all(&files);
         std::fs::rename(&tmp, &files).map_err(|e| format!("{}: {e}", files.display()))?;
+        self.keep_archives(id, got)?;
+        let manifest = mods::Manifest { files: entries, sources: got.iter().map(|(f, _)| (*f).clone()).collect() };
+        mods::write_manifest(&self.local, id, &manifest)?;
         Ok(names.into_iter().map(|n| format!("mods/{id}/files/{n}")).collect())
+    }
+
+    /// Keeps the zips of `got`'s archives under `mods/<id>/archives/<n>.zip` (`n`: the place in
+    /// `got`), replacing the kept ones. Without archives, none is kept.
+    fn keep_archives(&self, id: &str, got: &[(&FileRef, Got)]) -> Result<(), String> {
+        let dir = mod_dir(&self.local, id);
+        let kept = dir.join("archives");
+        let fresh = dir.join("archives.tmp");
+        let _ = std::fs::remove_dir_all(&fresh);
+        if !got.iter().any(|(_, g)| matches!(g, Got::Zip(_))) {
+            let _ = std::fs::remove_dir_all(&kept);
+            return Ok(());
+        }
+        std::fs::create_dir_all(&fresh).map_err(|e| format!("{}: {e}", fresh.display()))?;
+        for (n, (_, g)) in got.iter().enumerate() {
+            if let Got::Zip(path) = g {
+                let to = fresh.join(format!("{n}.zip"));
+                std::fs::rename(path, &to).or_else(|_| std::fs::copy(path, &to).map(|_| ())).map_err(|e| format!("{n}.zip: {e}"))?;
+            }
+        }
+        let _ = std::fs::remove_dir_all(&kept);
+        std::fs::rename(&fresh, &kept).map_err(|e| format!("{}: {e}", kept.display()))
+    }
+
+    /// Restores mod `id`'s files that are missing or changed (an antivirus may have quarantined
+    /// them): the whole mod is written again from its sources, the kept zips where they still
+    /// match and the rest downloaded and checked as an install checks them, and its merged folder
+    /// is dropped to be built again. Returns whether anything was damaged. A mod with no manifest
+    /// takes its sources from the catalog, which must hold the installed version.
+    pub fn repair_mod(&self, id: &str) -> Result<bool, String> {
+        let damaged = mods::damaged_files(&self.local, id)?;
+        if damaged.is_empty() {
+            return Ok(false);
+        }
+        let installed = self.installed();
+        let record = installed.entries.get(id).filter(|e| e.kind == Kind::Mod).ok_or_else(|| format!("{id}: not installed"))?;
+        let sources = match mods::read_manifest(&self.local, id) {
+            Some(manifest) => manifest.sources,
+            None => self.catalog_files(id, &record.version, if record.lang.is_empty() { "ru" } else { &record.lang })?,
+        };
+        let downloads = self.local.join("downloads");
+        let _ = std::fs::remove_dir_all(&downloads);
+        let refs: Vec<&FileRef> = sources.iter().collect();
+        let done = self.fetch_files(id, &refs, &downloads).and_then(|got| self.write_mod(id, &got));
+        let _ = std::fs::remove_dir_all(&downloads);
+        done.map_err(|e| format!("{id}: {e}"))?;
+        mods::drop_game_folder(&self.local, id);
+        crate::diag!("hub: restored the damaged files of mod {id}: {}", damaged.join(", "));
+        Ok(true)
+    }
+
+    /// The files of mod `id` in the catalog at `version`, for `lang` (the cached catalog when the
+    /// hub cannot be reached).
+    fn catalog_files(&self, id: &str, version: &str, lang: &str) -> Result<Vec<FileRef>, String> {
+        let catalog = match self.catalog() {
+            Ok(catalog) => catalog,
+            Err(e) => self.cached_catalog().ok_or(e)?,
+        };
+        let entry = catalog.entry(id).ok_or_else(|| format!("{id}: not in the hub"))?;
+        if entry.version != version {
+            return Err(format!("{id}: the hub has version {}, {version} is installed", entry.version));
+        }
+        Ok(entry.files_for(lang).into_iter().cloned().collect())
+    }
+
+    /// Restores the installed maps whose files are missing, changed or unreadable (see
+    /// [`damaged_map_files`]): each such entry's files are fetched again through the download
+    /// path with its checks, written over the damaged ones, and its record kept with its sources.
+    /// An entry installed before sources were recorded takes them from the catalog.
+    pub fn repair_maps(&self) -> MapRepair {
+        let installed = self.installed();
+        let mut out = MapRepair::default();
+        for (id, e) in installed.entries.iter().filter(|(_, e)| matches!(e.kind, Kind::Map | Kind::Campaign)) {
+            if entry_damaged_files(&self.local, e).is_empty() {
+                continue;
+            }
+            match self.repair_map_entry(id, e) {
+                Ok(()) => out.restored.push(id.clone()),
+                Err(why) => out.failed.push(format!("{id}: {why}")),
+            }
+        }
+        out
+    }
+
+    fn repair_map_entry(&self, id: &str, e: &InstalledEntry) -> Result<(), String> {
+        let lang = if e.lang.is_empty() { "ru" } else { e.lang.as_str() };
+        let sources = if e.sources.is_empty() { self.catalog_files(id, &e.version, lang)? } else { e.sources.clone() };
+        let downloads = self.local.join("downloads");
+        let _ = std::fs::remove_dir_all(&downloads);
+        let refs: Vec<&FileRef> = sources.iter().collect();
+        let got = self.fetch_files(id, &refs, &downloads);
+        let _ = std::fs::remove_dir_all(&downloads);
+        for (f, g) in got? {
+            let Got::Bytes(bytes) = g else { return Err(format!("{}: only a mod may be an archive", f.path)) };
+            let rel = format!("maps/{}", f.name);
+            crate::editor::files::write_atomically(&self.local.join(&rel), &bytes).map_err(|err| format!("{rel}: {err}"))?;
+        }
+        let mut installed = self.installed();
+        if let Some(record) = installed.entries.get_mut(id) {
+            record.sources = sources;
+        }
+        self.save_installed(&installed)
     }
 
     /// The files of `got` built in `tmp` (a fresh folder); their names.
@@ -1160,7 +1328,7 @@ mod tests {
         assert_eq!(plan_install(&c, &none, "ford-outpost").unwrap(), ["ford-outpost"]);
         assert_eq!(plan_install(&c, &none, "lost-update"), Err(PlanError::Missing("community-update".into())));
         let mut some = Installed::default();
-        some.entries.insert("evolution-mock".into(), InstalledEntry { version: "9.0".into(), kind: Kind::Mod, lang: String::new(), title: Text::default(), requires: vec![], files: vec![] });
+        some.entries.insert("evolution-mock".into(), InstalledEntry { version: "9.0".into(), kind: Kind::Mod, lang: String::new(), title: Text::default(), requires: vec![], files: vec![], sources: vec![] });
         assert_eq!(plan_install(&c, &some, "merc-road").unwrap(), ["evolution-mercs", "merc-road"]);
     }
 
@@ -1390,6 +1558,153 @@ mod tests {
         assert!(size > 0);
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&local);
+    }
+
+    /// Installs the zip mod `pack` from a folder hub and returns the hub and its folders.
+    fn installed_pack(tag: &str) -> (Hub, PathBuf, PathBuf) {
+        let (root, local, _, _) = zip_hub(tag);
+        let hub = Hub { source: Source::Dir(root.clone()), local: local.clone() };
+        let catalog = hub.catalog().unwrap();
+        hub.install(&catalog, "pack", Lang::Ru).unwrap();
+        (hub, root, local)
+    }
+
+    #[test]
+    fn an_install_keeps_the_zip_and_writes_a_manifest() {
+        let (_hub, root, local) = installed_pack("manifest");
+        let manifest = mods::read_manifest(&local, "pack").expect("the install writes a manifest");
+        let paths: Vec<&str> = manifest.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["Pictures/a.lit", "data/units.ini"]);
+        assert_eq!(manifest.sources.len(), 1);
+        assert_eq!(std::fs::read(mods::archive_path(&local, "pack", 0)).unwrap(), std::fs::read(root.join("mods/pack/pack.zip")).unwrap());
+        assert!(mods::damaged_files(&local, "pack").unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    #[test]
+    fn a_missing_and_a_changed_mod_file_are_restored_from_the_kept_zip() {
+        let (hub, root, local) = installed_pack("restore");
+        std::fs::remove_file(local.join("mods/pack/files/data/units.ini")).unwrap();
+        std::fs::write(local.join("mods/pack/files/Pictures/a.lit"), b"changed").unwrap();
+        // The catalog's zip is gone: the kept one is what restores the files.
+        std::fs::remove_file(root.join("mods/pack/pack.zip")).unwrap();
+        assert_eq!(mods::damaged_files(&local, "pack").unwrap().len(), 2);
+        assert!(hub.repair_mod("pack").unwrap());
+        assert_eq!(std::fs::read(local.join("mods/pack/files/data/units.ini")).unwrap(), b"units");
+        assert_eq!(std::fs::read(local.join("mods/pack/files/Pictures/a.lit")).unwrap(), b"pic");
+        assert!(mods::damaged_files(&local, "pack").unwrap().is_empty());
+        assert!(!hub.repair_mod("pack").unwrap(), "an intact mod is not written again");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    #[test]
+    fn a_repair_without_the_kept_zip_downloads_it_again_and_checks_it() {
+        let (hub, root, local) = installed_pack("download");
+        std::fs::remove_dir_all(local.join("mods/pack/archives")).unwrap();
+        std::fs::remove_file(local.join("mods/pack/files/data/units.ini")).unwrap();
+        assert!(hub.repair_mod("pack").unwrap());
+        assert_eq!(std::fs::read(local.join("mods/pack/files/data/units.ini")).unwrap(), b"units");
+        assert!(mods::archive_path(&local, "pack", 0).is_file(), "the zip is kept again");
+        assert!(!local.join("downloads").exists());
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    #[test]
+    fn a_mod_that_cannot_be_restored_says_why_and_stays_damaged() {
+        let (hub, root, local) = installed_pack("unrestorable");
+        std::fs::remove_file(local.join("mods/pack/files/data/units.ini")).unwrap();
+        std::fs::remove_dir_all(local.join("mods/pack/archives")).unwrap();
+        std::fs::remove_file(root.join("mods/pack/pack.zip")).unwrap();
+        let err = hub.repair_mod("pack").unwrap_err();
+        assert!(err.starts_with("pack:"), "{err}");
+        assert_eq!(mods::damaged_files(&local, "pack").unwrap(), ["data/units.ini"]);
+        assert!(!local.join("downloads").exists(), "nothing is left behind");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    #[test]
+    fn a_mod_without_a_manifest_is_repaired_only_when_a_file_does_not_read() {
+        let (hub, root, local) = installed_pack("legacy");
+        let manifest = mods::mod_dir(&local, "pack").join("manifest.json");
+        std::fs::remove_file(&manifest).unwrap();
+        // Without a manifest a missing file is not known to be damage (only a file that does not
+        // read is): nothing is written again, and no manifest is made from the damaged files.
+        std::fs::remove_file(local.join("mods/pack/files/data/units.ini")).unwrap();
+        assert!(!hub.repair_mod("pack").unwrap());
+        assert!(!manifest.exists(), "no manifest is made from damaged files");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    #[test]
+    fn a_deleted_or_changed_hub_map_is_fetched_again() {
+        let (hub, c) = mock_hub("map-repair");
+        hub.install(&c, "merc-road", Lang::En).unwrap();
+        let map = hub.local.join("maps/Hub_Merc1.DTm");
+        let want = std::fs::read(&map).unwrap();
+        assert!(damaged_map_files(&hub.local).is_empty(), "an intact map is not damaged");
+        // Deleted (an antivirus took it): listed as damaged, then fetched again through the download path.
+        std::fs::remove_file(&map).unwrap();
+        assert_eq!(damaged_map_files(&hub.local), vec![map.clone()]);
+        let out = hub.repair_maps();
+        assert_eq!(out.restored, ["merc-road"]);
+        assert!(out.failed.is_empty(), "{:?}", out.failed);
+        assert_eq!(std::fs::read(&map).unwrap(), want);
+        // Changed: its bytes differ from the catalog's, so it is fetched again too.
+        std::fs::write(&map, b"changed").unwrap();
+        assert_eq!(damaged_map_files(&hub.local), vec![map.clone()]);
+        assert_eq!(hub.repair_maps().restored, ["merc-road"]);
+        assert_eq!(std::fs::read(&map).unwrap(), want);
+        assert!(damaged_map_files(&hub.local).is_empty());
+        assert!(hub.repair_maps() == MapRepair::default(), "nothing to do once intact");
+        let _ = std::fs::remove_dir_all(&hub.local);
+    }
+
+    #[test]
+    fn a_hub_map_that_cannot_be_fetched_again_is_reported_and_left_out() {
+        let (hub, c) = mock_hub("map-unfetchable");
+        hub.install(&c, "merc-road", Lang::En).unwrap();
+        let map = hub.local.join("maps/Hub_Merc1.DTm");
+        std::fs::remove_file(&map).unwrap();
+        // The hub (an empty folder here) no longer has the file: the repair says so and the map stays out of the list.
+        let gone = Hub { source: Source::Dir(hub.local.join("empty-hub")), local: hub.local.clone() };
+        let out = gone.repair_maps();
+        assert!(out.restored.is_empty());
+        assert_eq!(out.failed.len(), 1, "{:?}", out.failed);
+        assert!(out.failed[0].starts_with("merc-road:"), "{:?}", out.failed);
+        assert_eq!(damaged_map_files(&hub.local), vec![map.clone()]);
+        let _ = std::fs::remove_dir_all(&hub.local);
+    }
+
+    #[test]
+    fn a_tampered_record_with_a_name_outside_the_maps_folder_writes_nothing() {
+        let (hub, c) = mock_hub("map-tamper");
+        hub.install(&c, "merc-road", Lang::En).unwrap();
+        // A local record edited by hand: a source named out of the maps folder, next to a real map
+        // that is missing, so the repair runs.
+        let outside = format!("razdor-tamper-{}", std::process::id());
+        let mut installed = read_installed(&hub.local);
+        installed.entries.get_mut("merc-road").unwrap().sources.push(FileRef {
+            path: "x".into(),
+            name: format!("../{outside}"),
+            lang: None,
+            size: 1,
+            sha256: "0".repeat(64),
+            archive: false,
+        });
+        std::fs::write(hub.local.join("installed.json"), serde_json::to_vec(&installed).unwrap()).unwrap();
+        std::fs::remove_file(hub.local.join("maps/Hub_Merc1.DTm")).unwrap();
+        let out = hub.repair_maps();
+        assert!(out.restored.is_empty());
+        assert_eq!(out.failed.len(), 1, "{:?}", out.failed);
+        assert!(!hub.local.join(&outside).exists(), "nothing is written beside the hub folder");
+        assert!(!hub.local.join("maps").join(format!("../{outside}")).exists());
+        assert!(!hub.local.parent().unwrap().join(&outside).exists(), "nothing is written outside the hub");
+        let _ = std::fs::remove_dir_all(&hub.local);
     }
 
     #[test]

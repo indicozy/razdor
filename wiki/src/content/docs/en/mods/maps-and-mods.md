@@ -59,6 +59,8 @@ The window opens immediately: the list is taken from a copy saved during the las
 
 In the New Game window, select a mod from the "Mod" list; it is located at the bottom of the window next to "Add map...". You can also select a mod in the main menu, see below. The game will run using the mod's data on top of the base game. Maps that require a mod are only visible when the mod is selected. Base game maps are shown at the end of the list in the "Base game maps" group: it is collapsed; click its header to expand it. Saves for each mod are stored separately. Green checkmarks for completed maps are also stored per mod: a map completed under one mod is only marked as such under that mod, while without a mod, the base game checkmarks are shown.
 
+If an antivirus removed or damaged a mod's files, Razdor checks them when you choose the mod and restores them: from the mod's kept archive, or by downloading the mod from the catalog again. A message then appears. If the files cannot be restored (for example, there is no connection to the catalog), the mod does not start and the previous choice stays.
+
 ## Mod in the main menu
 
 When a mod is installed, the main menu displays the line "Mod: <name>".
