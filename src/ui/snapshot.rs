@@ -974,6 +974,13 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             // `RAZDOR_SCENE_MEET=<army id>`: the event as met on that army, through the outcome the
             // engine sends (its window names the army's leader under the picture).
             if let Some(army) = std::env::var("RAZDOR_SCENE_MEET").ok().and_then(|v| v.trim().parse::<u8>().ok()) {
+                // `RAZDOR_SCENE_LEADER=<name>`: that army's leader is named so (a long name, to see the
+                // caption fit its picture's column).
+                if let Ok(name) = std::env::var("RAZDOR_SCENE_LEADER") {
+                    if let Some(a) = game.world.armies.iter_mut().find(|a| a.id == army) {
+                        a.leader_name = name;
+                    }
+                }
                 super::story::show(&game, &razdor::rules::events::EventOutcome::MeetingArmy { event: id, army }, &mut app.dialogs);
             }
             Screen::WorldMap

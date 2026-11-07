@@ -626,10 +626,6 @@ const STACK_GAP: f32 = 10.0;
 /// caption is the event text's cream, in its face.
 const CAPTION_MAX_LINES: usize = 3;
 const CAPTION_GAP: f32 = 7.0;
-/// A caption too long for its lines is set smaller: each step is this share of the text size, and
-/// there are [`CAPTION_SHRINKS`] of them at most.
-const CAPTION_SHRINK: f32 = 0.1;
-const CAPTION_SHRINKS: usize = 3;
 /// An upright phone's picture floats in the marked text box, as an author's picture in Word: the
 /// lines beside it are narrowed by its column (the picture and [`FLOAT_W_GAP`]); a line whose top
 /// is less than [`FLOAT_GAP`] under the picture's block (caption included) is still beside it.
@@ -684,54 +680,50 @@ fn event_frame_cap(side: Option<(f32, f32)>, stacked: bool, text_h: f32, below: 
     EventFrame { w, h: top + box_h + below + EVENT_REST, box_x: 19.0 + side_w, box_w: w - 38.0 - side_w, box_h, top }
 }
 
-/// The caption's lines under a picture `width` screen px wide, in the window's cream face: wrapped,
-/// at most [`CAPTION_MAX_LINES`]. A name that needs more is set smaller, in steps of
-/// [`CAPTION_SHRINK`] down to [`CAPTION_SHRINKS`] of them; at the smallest a longer one still ends
-/// with «…». Returns the lines and their size.
-fn caption_fit(text: &str, width: f32, size: f32) -> (Vec<String>, f32) {
-    super::dt_font::with_original_face(super::dt_font::Face::Subtitle, || {
-        let words: Vec<&str> = text.split_whitespace().collect();
-        let mut last = (Vec::new(), size);
-        for k in 0..=CAPTION_SHRINKS {
-            let s = size * (1.0 - CAPTION_SHRINK * k as f32);
-            let lines = wrap_cached(text, width, s);
-            if lines.len() <= CAPTION_MAX_LINES {
-                return (lines, s);
-            }
-            // Greedy wrapping ran past three lines: the words split into three runs whose widest is
-            // the narrowest (a name's «Барон / Оскар фон / Ньюстон»), when that fits the picture.
-            if let Some(runs) = balanced_runs(&words, width, s) {
-                return (runs, s);
-            }
-            last = (lines, s);
-        }
-        let (mut lines, s) = last;
-        let rest = lines.split_off(CAPTION_MAX_LINES - 1).join(" ");
-        let mut tail = rest;
-        while !tail.is_empty() && measure(&format!("{tail}…"), s).width > width {
-            tail.pop();
-        }
-        lines.push(format!("{}…", tail.trim_end()));
-        (lines, s)
-    })
+/// The caption's lines under a picture `width` screen px wide, in the window's cream face: the
+/// words wrapped as the text runs (at most [`CAPTION_MAX_LINES`]; the rest joins the last line),
+/// and each line wider than `width` is cut with «…» (Razdor's, the owner's request: no shrinking,
+/// the caption never draws past its picture's column).
+fn caption_fit(text: &str, width: f32, size: f32) -> Vec<String> {
+    super::dt_font::with_original_face(super::dt_font::Face::Subtitle, || caption_lines(text, width, |s| measure(s, size).width))
 }
 
-/// The three runs of `words` (in order) whose widest is the narrowest, if that is no wider than
-/// `width` (screen px, `size`); None when no split fits. Pure but for the measure.
-fn balanced_runs(words: &[&str], width: f32, size: f32) -> Option<Vec<String>> {
-    let n = words.len();
-    let run = |a: usize, b: usize| words[a..b].join(" ");
-    let mut best: Option<(f32, usize, usize)> = None;
-    for i in 1..n {
-        for j in i + 1..n {
-            let widest = [(0, i), (i, j), (j, n)].iter().map(|&(a, b)| measure(&run(a, b), size).width).fold(0.0, f32::max);
-            if best.is_none_or(|(w, _, _)| widest < w) {
-                best = Some((widest, i, j));
-            }
+/// [`caption_fit`] with the widths of `measure_w` (screen px per string). Pure.
+fn caption_lines(text: &str, width: f32, measure_w: impl Fn(&str) -> f32) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        let cand = if line.is_empty() { word.to_string() } else { format!("{line} {word}") };
+        if !line.is_empty() && measure_w(&cand) > width {
+            lines.push(std::mem::replace(&mut line, word.to_string()));
+        } else {
+            line = cand;
         }
     }
-    let (widest, i, j) = best?;
-    (widest <= width).then(|| vec![run(0, i), run(i, j), run(j, n)])
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    if lines.len() > CAPTION_MAX_LINES {
+        let rest = lines.split_off(CAPTION_MAX_LINES - 1).join(" ");
+        lines.push(rest);
+    }
+    lines.iter().map(|l| ellipsize_to(l, width, &measure_w)).collect()
+}
+
+/// `line` cut to `width` screen px, its end set with «…» when it is cut. Pure but for `measure_w`.
+fn ellipsize_to(line: &str, width: f32, measure_w: &impl Fn(&str) -> f32) -> String {
+    if measure_w(line) <= width {
+        return line.to_string();
+    }
+    let mut kept: Vec<char> = line.chars().collect();
+    while !kept.is_empty() {
+        kept.pop();
+        let cand = format!("{}…", kept.iter().collect::<String>().trim_end());
+        if measure_w(&cand) <= width {
+            return cand;
+        }
+    }
+    "…".to_string()
 }
 
 /// The frame of a window whose picture floats in the box (`EventLayout::float`): the box is as tall as
@@ -896,10 +888,10 @@ fn event_layout(d: &Dialog, o: f32, t: f32, w: f32, fit: bool) -> EventLayout {
     let stacked = fit && super::window_layout::portrait() && side.is_some();
     let side_w = if stacked { 0.0 } else { side.map_or(0.0, |(pw, _)| pw + 14.0) };
     let room = (w - 38.0 - side_w - 40.0) * o;
-    // The leader's caption under the picture (`Dialog::caption`): as wide as the picture and the
-    // 14 px gap to the text box, centred on the picture, so it takes half that gap on each side.
+    // The leader's caption under the picture (`Dialog::caption`): as wide as the picture, centred on
+    // it; a line wider than that is cut with «…» (`caption_fit`).
     let (caption, caption_size) = match (&d.caption, side) {
-        (Some(c), Some((pw, _))) if d.picture.is_some() => caption_fit(c, (pw + 14.0) * o, size),
+        (Some(c), Some((pw, _))) if d.picture.is_some() => (caption_fit(c, pw * o, size), size),
         _ => (Vec::new(), size),
     };
     let cap_h = if caption.is_empty() { 0.0 } else { (CAPTION_GAP * o + caption.len() as f32 * line) / o };
@@ -1710,6 +1702,26 @@ mod tests {
         assert_eq!(event_frame_cap(side, false, 19.0, 0.0, EVENT_MAX_BOX, EVENT_W, 0.0), event_frame(side, false, 19.0, 0.0, EVENT_MAX_BOX, EVENT_W));
         let stacked = event_frame_cap(side, true, 19.0, 0.0, EVENT_MAX_BOX, EVENT_W, 40.0);
         assert_eq!(stacked.top, 1.0 + UNIT_BUST + STACK_GAP + 40.0, "the caption sits above the box, under the picture");
+    }
+
+    /// The leader's caption never draws past its picture's column (a player's report: «Проповедник
+    /// Алластер» was cut at the window's edge). Two words wrap onto lines inside the column; a single
+    /// word wider than the column is cut with «…»; a short name is left as it is. Widths: 8 px a char.
+    #[test]
+    fn a_leader_caption_stays_inside_its_picture_column() {
+        let measured = |s: &str| s.chars().count() as f32 * 8.0;
+        let two = caption_lines("Проповедник Алластер", 120.0, measured);
+        assert_eq!(two, vec!["Проповедник".to_string(), "Алластер".to_string()], "two words wrap onto two lines");
+        assert!(two.iter().all(|l| measured(l) <= 120.0), "every line inside the column: {two:?}");
+        assert_eq!(caption_lines("Проповедник Алластер", 200.0, measured), vec!["Проповедник Алластер".to_string()], "a name that fits keeps its words");
+        let long = "Преподобнейшийархиепископпроповедническийнеобыкновенныйвеликий";
+        let one = caption_lines(long, 120.0, measured);
+        assert_eq!(one.len(), 1, "one word stays one line: {one:?}");
+        assert!(one[0].ends_with('…'), "a word too wide for the column is cut: {one:?}");
+        assert!(measured(&one[0]) <= 120.0, "the cut word is inside the column: {one:?}");
+        let many = caption_lines("а б в г д е ж з и к л м н о п р с т у ф х ц ч ш щ", 16.0, measured);
+        assert!(many.len() <= CAPTION_MAX_LINES && many.iter().all(|l| measured(l) <= 16.0), "never more than three lines: {many:?}");
+        assert_eq!(caption_lines("Алластер", 400.0, measured), vec!["Алластер".to_string()], "a short name is left whole");
     }
 
     /// A floating picture: the box is as tall as the text or the picture's block, whichever is taller,

@@ -94,6 +94,10 @@ SCREENS = [
     ("custom-battle", "custom-battle", {}),
     ("victory", "victory:РК1-Начало пути", {}),
     # An event's rewards (a player's report 1453): mana, a joined unit and items; and more rows.
+    # An event met on an army: the leader's name under its picture (a player's report: a long name ran
+    # out of its column). Two words, and one long word wider than the picture.
+    ("event-meet", "event:ДС1-С чего все начиналось:37", {"RAZDOR_SCENE_MEET": "6", "RAZDOR_SCENE_LEADER": "Проповедник Алластер"}),
+    ("event-meet-long", "event:ДС1-С чего все начиналось:37", {"RAZDOR_SCENE_MEET": "6", "RAZDOR_SCENE_LEADER": "Преподобнейшийархиепископпроповедническийнеобыкновенный"}),
     ("event", "message:РК1-Начало пути", {"RAZDOR_SCENE_TITLE": "Разговор со святым отцом", "RAZDOR_SCENE_TEXT": EVENT_TEXT, "RAZDOR_SCENE_UNIT": "31", "RAZDOR_SCENE_MANA": "200", "RAZDOR_SCENE_ITEMS": "99,99", "RAZDOR_SCENE_JOINED": "31"}),
     ("event-more", "message:РК1-Начало пути", {"RAZDOR_SCENE_TITLE": "Разговор со святым отцом", "RAZDOR_SCENE_TEXT": EVENT_TEXT, "RAZDOR_SCENE_UNIT": "31", "RAZDOR_SCENE_MANA": "200", "RAZDOR_SCENE_GOLD": "150", "RAZDOR_SCENE_ITEMS": "99,99,99,99,99,99,99,99", "RAZDOR_SCENE_JOINED": "31,31,31,31", "RAZDOR_SCENE_LEFT": "31,31", "RAZDOR_SCENE_LOST": "99,99,99", "RAZDOR_SCENE_SPELLS": "1,2"}),
     # A spell icon's pop-up card (a player's report: its text was tiny on an upright phone): the
