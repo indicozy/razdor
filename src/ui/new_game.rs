@@ -1632,7 +1632,9 @@ fn experimental_menu() {
     };
     // On an upright phone the window is at most 60% of the screen high: its rows and hints scroll
     // between the title and the OK button, with a bar at the right, and the rows keep clear of it.
-    let bar_w = if upright { 14.0 * big } else { 0.0 };
+    // A phone held landscape scrolls the same way when its columns do not fit, so it keeps the
+    // strip too (the desktop window keeps its layout: no strip there).
+    let bar_w = if dp.is_some() { 14.0 * big } else { 0.0 };
     let col_w_for = |cols: usize| {
         let iw = width_for(cols) - 40.0 * big - bar_w;
         (iw - 20.0 * big * (cols as f32 - 1.0)) / cols as f32
