@@ -1813,6 +1813,15 @@ impl Battle {
             // on the reserve units: the original's bug, kept as original behaviour. On, an
             // already-blessed unit is a target only for a heal that does something.
             let blessed_again = self.content.experimental.bless_once && t.blessed && !heals;
+            // Off, the original's cell test still holds (485670): a friendly cell is offered only
+            // while its unit is wounded or not yet blessed; in the reserve that test is left out for
+            // the other reserve units (484b64 writes code 9 for all of them) but the caster's own
+            // cell turns to a pass (code 1) when it is at full health and already blessed.
+            let original_full_blessed = !self.content.experimental.bless_once
+                && t.blessed
+                && !t.wounded()
+                && (from.row != Row::Reserve || target == id);
+            let blessed_again = blessed_again || original_full_blessed;
             if from.row == Row::Reserve {
                 // A caster in the reserve tends the reserve, and nothing else.
                 if t.slot.row != Row::Reserve || blessed_again {
