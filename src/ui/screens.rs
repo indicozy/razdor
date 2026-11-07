@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use razdor::dt::data::MagicSchool;
 use razdor::dt::install::map_stem;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use razdor::dt::install::Problem;
 use razdor::i18n::tr;
 use razdor::rules::battle::Team;
