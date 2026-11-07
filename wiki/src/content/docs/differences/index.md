@@ -9,4 +9,5 @@ sidebar:
 - [Обзор возможностей](/razdor/wiki/differences/overview/): все добавления по темам.
 - [Отметки о прохождении](/razdor/wiki/differences/run-marks/): цветные галочки у карт в списке сценариев и их причины.
 - [Экспериментальные правила сценария](/razdor/wiki/differences/experimental-rules/): шесть переключателей для новой игры.
+- [Правила по умолчанию](/razdor/wiki/differences/default-rules/): где правила Razdor без переключателей отличаются от оригинала.
 - [Звук и музыка](/razdor/wiki/differences/sound-music/): что настраивается и как Razdor берёт звук из игры.
