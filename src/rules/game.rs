@@ -366,6 +366,11 @@ pub struct Game {
     /// A ship was just bought: his planner works on the MIXED map until his next step.
     #[serde(default)]
     pub(crate) ship_bought: bool,
+    /// The shipyard the ship's home is (the original's global 0x671f78, `None` = -1): set when
+    /// he lands into a shipyard from the water, cleared when he boards, buys a ship or steps
+    /// from the water into another building (`rules::ships`). Saves before it load with none.
+    #[serde(default)]
+    pub(crate) ship_yard: Option<usize>,
     /// The hero's noon (by its day) waiting for an event scan in which no event fires and
     /// no spell is being read.
     #[serde(default)]
@@ -762,6 +767,7 @@ impl Game {
             wide_row,
             ship: None,
             ship_bought: false,
+            ship_yard: None,
             noon_due: None,
             speed_set: None,
             hero_figure: None,

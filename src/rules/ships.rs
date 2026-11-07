@@ -211,6 +211,7 @@ impl Game {
         }
         self.gold -= price;
         self.ship = None;
+        self.ship_removed();
         self.ship_bought = true;
         Ok(())
     }
@@ -271,6 +272,7 @@ impl Game {
             Some(_) => {}
             None => self.location = None,
         }
+        self.yard_flags(old, ob, nb);
         if at_sea != self.aboard() {
             self.sea_changed(at_sea);
         }
@@ -278,16 +280,56 @@ impl Game {
         self.ship_bought = false;
     }
 
-    /// The hero goes to sea (`true`) or leaves it (0x496d28): the scenario's flag `Sea` is
-    /// added (when it does not occur yet) or removed; going to sea also removes the flag
-    /// `EnterShipyard`. The AI armies on the medium he is now on (ships, or land armies) lose
-    /// their banked time and plan again at their next arrival.
-    fn sea_changed(&mut self, at_sea: bool) {
+    /// The shipyard flags of a step from `old` (cell's building `ob`) to `new` (`nb`), as the
+    /// original's step does (0x497c68). Into a shipyard from outside it, with the ship's
+    /// shipyard being that one and the flag `EnterShipyard` not set, the flag is set. Then a
+    /// step from the water into a shipyard makes it the ship's shipyard, and a step from the
+    /// water into any other building clears it (0x671f78 = -1). A step onto a cell in no
+    /// building (a bridge is no building for this) clears the flag `EnterShipyard`.
+    fn yard_flags(&mut self, old: Tile, ob: Option<usize>, nb: Option<usize>) {
+        let Some(l) = nb else {
+            self.set_flag("EnterShipyard", false);
+            return;
+        };
+        if self.world.locations[l].kind.is_bridge() {
+            return;
+        }
+        if ob != Some(l) && self.ship_yard == Some(l) && !self.flag_is("EnterShipyard") {
+            self.set_flag("EnterShipyard", true);
+        }
+        if is_water(self.world.map.surface(old)) {
+            self.ship_yard = (self.world.locations[l].kind == LocationKind::Shipyard).then_some(l);
+        }
+    }
+
+    /// Ship_Remove (0x49704c): the ship is taken off the map (bought over, or dismissed by an
+    /// event): the flag `EnterShipyard` goes and the ship's shipyard is forgotten.
+    fn ship_removed(&mut self) {
+        self.set_flag("EnterShipyard", false);
+        self.ship_yard = None;
+    }
+
+    /// Sets or clears an engine flag of the scenario's event script (`+X` or `-X`); no script,
+    /// no flag.
+    fn set_flag(&mut self, name: &str, on: bool) {
         if let Some(engine) = self.script.as_mut() {
-            engine.set_engine_flag("Sea", at_sea);
-            if at_sea {
-                engine.set_engine_flag("EnterShipyard", false);
-            }
+            engine.set_engine_flag(name, on);
+        }
+    }
+
+    fn flag_is(&self, name: &str) -> bool {
+        self.script.as_ref().is_some_and(|e| e.flag(name))
+    }
+
+    /// The hero goes to sea (`true`) or leaves it (0x496d28): the scenario's flag `Sea` is
+    /// added (when it does not occur yet) or removed. Boarding also removes the flag
+    /// `EnterShipyard` and forgets the ship's shipyard. The AI armies on the medium he is now
+    /// on (ships, or land armies) lose their banked time and plan again at their next arrival.
+    fn sea_changed(&mut self, at_sea: bool) {
+        self.set_flag("Sea", at_sea);
+        if at_sea {
+            self.set_flag("EnterShipyard", false);
+            self.ship_yard = None;
         }
         for a in self.world.armies.iter_mut().filter(|a| a.sails() == at_sea) {
             a.budget = 0.0;
@@ -544,6 +586,71 @@ mod tests {
         walk_until_stopped(&mut g);
         assert!(g.aboard());
         assert_eq!(g.script().unwrap().flag_string(), "A\u{a0}Sea\u{a0}");
+    }
+
+    fn enter_shipyard(g: &Game) -> bool {
+        g.script().unwrap().flag("EnterShipyard")
+    }
+
+    /// Landing into a shipyard from the water makes it the ship's shipyard (0x497c68); walking
+    /// out and back in on foot sets `EnterShipyard` (0x497c68, entering from outside).
+    #[test]
+    fn landing_into_a_shipyard_then_walking_out_and_back_in_sets_enter_shipyard() {
+        let mut g = at_sea(&strait(), 12);
+        assert!(g.set_destination((9, 5)));
+        walk_until_stopped(&mut g);
+        assert_eq!(g.tile(), (9, 5), "he lands in the yard");
+        assert!(!g.aboard() && g.ship_yard == Some(0), "{:?}", g.ship_yard);
+        assert!(!enter_shipyard(&g), "the walk in from the water sets no flag");
+        assert!(g.set_destination((8, 5)));
+        walk_until_stopped(&mut g);
+        assert!(!enter_shipyard(&g), "leaving the yard removes the flag");
+        assert!(g.set_destination((9, 5)));
+        walk_until_stopped(&mut g);
+        assert!(enter_shipyard(&g), "back in from outside, the ship's shipyard: the flag is set");
+        assert_eq!(g.ship_yard, Some(0));
+    }
+
+    /// Stepping out of a shipyard onto land removes `EnterShipyard`; the ship's shipyard stays
+    /// (a walk on foot does not clear it).
+    #[test]
+    fn leaving_the_shipyard_removes_enter_shipyard() {
+        let mut g = at_yard(&strait());
+        g.ship_yard = Some(0);
+        g.script.as_mut().unwrap().set_flag_string("EnterShipyard\u{a0}A\u{a0}");
+        assert!(g.set_destination((8, 5)));
+        walk_until_stopped(&mut g);
+        assert!(!enter_shipyard(&g), "left the yard");
+        assert!(g.script().unwrap().flag("A"), "other flags stay");
+        assert_eq!(g.ship_yard, Some(0));
+    }
+
+    /// Boarding (0x496d28) removes `EnterShipyard` and forgets the ship's shipyard.
+    #[test]
+    fn boarding_removes_enter_shipyard_and_the_ship_yard() {
+        let mut g = at_yard(&strait());
+        g.rent_ship().unwrap();
+        g.ship_yard = Some(0);
+        g.script.as_mut().unwrap().set_flag_string("EnterShipyard\u{a0}A\u{a0}");
+        assert!(g.set_destination((12, 5)));
+        walk_until_stopped(&mut g);
+        assert!(g.aboard());
+        assert!(!enter_shipyard(&g), "boarding removes the flag");
+        assert_eq!(g.ship_yard, None);
+        assert!(g.script().unwrap().flag("Sea"));
+    }
+
+    /// Buying a ship (Ship_Remove, 0x49704c, from the purchase at 0x4c60ac) removes
+    /// `EnterShipyard` and forgets the ship's shipyard.
+    #[test]
+    fn buying_a_ship_removes_enter_shipyard_and_the_ship_yard() {
+        let mut g = at_yard(&strait());
+        g.ship_yard = Some(0);
+        g.script.as_mut().unwrap().set_flag_string("EnterShipyard\u{a0}A\u{a0}");
+        g.rent_ship().unwrap();
+        assert!(!enter_shipyard(&g));
+        assert_eq!(g.ship_yard, None);
+        assert!(g.script().unwrap().flag("A"));
     }
 
     #[test]

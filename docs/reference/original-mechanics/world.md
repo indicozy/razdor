@@ -606,8 +606,10 @@ map or is destroyed during the ticks (0x4ae536).
   walking onto it puts him at sea again. How the parked ship's own marker is cleared when he
   boards it is **unknown** (not found).
 - **Shipyards**: landing into a shipyard from the water makes it the ship's home
-  (`[0x671f78]`); entering that shipyard later sets the event flag `EnterShipyard`, leaving it
-  clears the flag.
+  (`[0x671f78]`); a step from the water into any other building clears it (-1). Walking into
+  that shipyard from outside sets the event flag `EnterShipyard` (0x497c68); stepping onto open
+  ground clears the flag. Boarding, buying a ship (0x49704c) and the ship's removal clear both
+  the flag and the ship's shipyard. **code** (P6, 2026-11-07)
 - **Ship armies of the scenario**: an army whose first unit type is the ship marker places or
   removes the hero's ship when an event activates or deactivates it (0x4969b8, 0x496900). AI
   armies loaded on water use the SHIP map and ship figures by DTm byte 72 (loader 0x4b4824,
