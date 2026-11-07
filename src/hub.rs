@@ -504,6 +504,18 @@ pub struct MapRepair {
     pub failed: Vec<String>,
 }
 
+impl MapRepair {
+    /// The repair to apply now, taken out of `pending`: none while the new-game list is on the
+    /// screen (`list_open`), since the list's indexes must not move under the player; it stays
+    /// pending until the list closes.
+    pub fn take_when_closed(pending: &mut Option<MapRepair>, list_open: bool) -> Option<MapRepair> {
+        if list_open {
+            return None;
+        }
+        pending.take()
+    }
+}
+
 /// The files of an installed map entry that are missing, changed or unreadable. With its sources
 /// recorded each file is checked against them (size and SHA-256); without (installed before
 /// sources were recorded) each file it lists must read.
@@ -1678,6 +1690,16 @@ mod tests {
         assert!(out.failed[0].starts_with("merc-road:"), "{:?}", out.failed);
         assert_eq!(damaged_map_files(&hub.local), vec![map.clone()]);
         let _ = std::fs::remove_dir_all(&hub.local);
+    }
+
+    #[test]
+    fn a_map_repair_waits_while_the_list_is_open() {
+        let mut pending = Some(MapRepair { restored: vec!["merc-road".into()], failed: vec![] });
+        assert!(MapRepair::take_when_closed(&mut pending, true).is_none(), "the list is on the screen: nothing changes");
+        assert!(pending.is_some(), "the repair is kept");
+        let now = MapRepair::take_when_closed(&mut pending, false).expect("applied once the list closes");
+        assert_eq!(now.restored, ["merc-road"]);
+        assert!(pending.is_none());
     }
 
     #[test]

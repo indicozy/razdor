@@ -357,6 +357,8 @@ pub struct App {
     mod_switch: Option<ModSwitch>,
     /// The hub's damaged maps being fetched again on a worker (`start_map_repair`), until it is done.
     map_repair: Option<std::sync::mpsc::Receiver<razdor::hub::MapRepair>>,
+    /// A finished repair waiting until the new-game list is closed (`poll_map_repair`).
+    map_repair_done: Option<razdor::hub::MapRepair>,
 }
 
 /// The install's content for the new-game windows (`None` without an install).
@@ -444,6 +446,7 @@ impl App {
             active_mod: hub_active(),
             mod_switch: None,
             map_repair: start_map_repair(),
+            map_repair_done: None,
         };
         app.follow_row_setting();
         app
@@ -510,10 +513,18 @@ impl App {
     /// Takes the hub maps' repair once it is done (each frame): the restored maps join the list, and
     /// a map that could not be restored is said so.
     fn poll_map_repair(&mut self) {
-        let Some(job) = self.map_repair.as_ref() else { return };
-        let Some(done) = finished(job) else { return };
-        self.map_repair = None;
-        let Ok(repair) = done else { return };
+        if let Some(job) = self.map_repair.as_ref() {
+            if let Some(done) = finished(job) {
+                self.map_repair = None;
+                if let Ok(repair) = done {
+                    self.map_repair_done = Some(repair);
+                }
+            }
+        }
+        // While the new-game list (or what picks from it) is on the screen, its indexes must not move:
+        // the repair waits until it closes.
+        let list_open = matches!(self.screen, Screen::ScenarioSelect | Screen::ClassSelect { .. } | Screen::TutorialOffer);
+        let Some(repair) = razdor::hub::MapRepair::take_when_closed(&mut self.map_repair_done, list_open) else { return };
         if !repair.restored.is_empty() {
             let dir = razdor::hub::local_dir().map(|d| razdor::hub::maps_dir(&d));
             self.scenarios.retain(|e| dir.as_ref().is_none_or(|d| !e.path.starts_with(d)));
