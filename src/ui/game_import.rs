@@ -442,7 +442,7 @@ fn snapshot_download_bytes() -> Option<u64> {
 fn unpack_window(done: u64, total: u64) {
     let pct = if total == 0 { 0 } else { (done * 100 / total).min(100) };
     let (inner, _) = map_import::frame(title(), &[trf!("Unpacking… {pct}%", pct = pct)], false);
-    let k = chrome::k();
+    let k = chrome::k() * map_import::phone_factor();
     let bar = Rect::new(inner.x + 24.0 * k, inner.y + 60.0 * k, inner.w - 48.0 * k, 14.0 * k);
     draw_rectangle(bar.x, bar.y, bar.w, bar.h, Color::new(0.0, 0.0, 0.0, 0.45));
     draw_rectangle(bar.x, bar.y, bar.w * pct as f32 / 100.0, bar.h, Color::new(0.85, 0.65, 0.25, 1.0));
@@ -573,7 +573,7 @@ fn download_window(bytes: u64, cancel: Option<&gdrive::Progress>) {
     let mb = |b: u64| format!("{:.1}", b as f64 / 1_048_576.0);
     let text = trf!("Downloading the game: {mb} of {all} MB.", mb = mb(bytes), all = mb(all));
     let (inner, closed) = map_import::frame(title(), &[text], cancel.is_some());
-    let k = chrome::k();
+    let k = chrome::k() * map_import::phone_factor();
     let bar = Rect::new(inner.x + 24.0 * k, inner.y + 60.0 * k, inner.w - 48.0 * k, 14.0 * k);
     let share = (bytes as f32 / all as f32).min(1.0);
     draw_rectangle(bar.x, bar.y, bar.w, bar.h, Color::new(0.0, 0.0, 0.0, 0.45));

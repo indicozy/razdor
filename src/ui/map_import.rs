@@ -362,31 +362,73 @@ fn replace_window(taken: &[String]) -> Option<bool> {
 /// close box was pressed.
 pub(super) fn frame(title: &str, lines: &[String], with_buttons: bool) -> (Rect, bool) {
     let k = chrome::k();
+    let f = phone_factor();
     draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.35));
-    let w = (460.0 * k).min(screen_width() - 24.0 * k);
-    let size = 14.0 * k;
-    let text_w = w - 48.0 * k;
+    let w = (460.0 * k * f).min(screen_width() - 24.0 * k);
+    let size = 14.0 * k * f;
+    let text_w = w - 48.0 * k * f;
     let wrapped: Vec<String> = lines.iter().flat_map(|l| wrap(l, text_w, size)).collect();
-    let h = (92.0 * k + wrapped.len() as f32 * 20.0 * k + if with_buttons { 44.0 * k } else { 0.0 }).min(screen_height() - 16.0 * k);
+    let button_area = if with_buttons { button_area(k, f) } else { 0.0 };
+    let h = (92.0 * k * f + wrapped.len() as f32 * 20.0 * k * f + button_area).min(screen_height() - 16.0 * k);
     let r = Rect::new((screen_width() - w) / 2.0, (screen_height() - h) / 2.0, w, h);
-    let (inner, closed) = chrome::window(r, title, chrome::Skin::Marble, true);
+    // A phone's title grows with the text (the window grows with it); the desktop's is as it was.
+    let (inner, closed) = if f > 1.0 {
+        chrome::window_grown(r, title, chrome::Skin::Marble, true)
+    } else {
+        chrome::window(r, title, chrome::Skin::Marble, true)
+    };
     for (i, line) in wrapped.iter().enumerate() {
-        chrome::shadow_text(line, inner.x + 24.0 * k, inner.y + 34.0 * k + i as f32 * 20.0 * k, size, chrome::CREAM);
+        chrome::shadow_text(line, inner.x + 24.0 * k * f, inner.y + 34.0 * k * f + i as f32 * 20.0 * k * f, size, chrome::CREAM);
     }
     (inner, closed)
 }
 
+/// The phones' text and touch targets, in these windows: the text is this factor times the
+/// desktop's (about 14 sp, the phone rule), and a button is at least 44 dp.
+const PHONE_TEXT: f32 = 2.5;
+/// A phone button's height, in dp.
+const PHONE_TOUCH_DP: f32 = 44.0;
+
+/// The text factor of these windows: [`PHONE_TEXT`] on a phone, 1 on the desktop.
+pub(super) fn phone_factor() -> f32 {
+    if super::display::dp_px().is_some() { PHONE_TEXT } else { 1.0 }
+}
+
+/// The height the buttons take at a window's bottom, with the gap above them.
+fn button_area(k: f32, f: f32) -> f32 {
+    match super::display::dp_px() {
+        Some(dp) => PHONE_TOUCH_DP * dp + 16.0 * k * f,
+        None => 44.0 * k,
+    }
+}
+
 /// The window's buttons at its bottom right (as the update window's): the pressed one's index.
+/// On a phone a button is 44 dp high, its label at the phone's text size, and the buttons share
+/// the window's width when they must.
 pub(super) fn buttons(inner: Rect, labels: &[&str]) -> Option<usize> {
     let k = chrome::k();
-    let (w, h, gap) = (150.0 * k, 28.0 * k, 12.0 * k);
-    let mut x = inner.x + inner.w - 24.0 * k - labels.len() as f32 * (w + gap) + gap;
-    let y = inner.y + inner.h - 40.0 * k;
+    let f = phone_factor();
+    let n = labels.len() as f32;
+    let (w, h, gap, y) = match super::display::dp_px() {
+        Some(dp) => {
+            let gap = 12.0 * k * f;
+            let h = PHONE_TOUCH_DP * dp;
+            let w = (150.0 * k * f).min((inner.w - 48.0 * k * f - (n - 1.0) * gap) / n);
+            (w, h, gap, inner.y + inner.h - h - 12.0 * k * f)
+        }
+        None => (150.0 * k, 28.0 * k, 12.0 * k, inner.y + inner.h - 40.0 * k),
+    };
+    let total = n * w + (n - 1.0) * gap;
+    let mut x = inner.x + inner.w - 24.0 * k * f - total;
     let mut picked = None;
     for (i, label) in labels.iter().enumerate() {
         let r = Rect::new(x, y, w, h);
         let (_, down, pressed) = button_state(r, true);
-        chrome::marble_button(r, label, true, down);
+        if f > 1.0 {
+            chrome::marble_button_sized(r, label, true, down, 14.0 * k * f);
+        } else {
+            chrome::marble_button(r, label, true, down);
+        }
         if pressed {
             cue(Cue::Button);
             picked = Some(i);

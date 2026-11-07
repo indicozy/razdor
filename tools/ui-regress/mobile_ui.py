@@ -80,6 +80,9 @@ SCREENS = [
     ("title-noinstall", "title", {"RAZDOR_DT_DIR": "/nonexistent-razdor-dt", "RAZDOR_CONFIG_DIR": "/nonexistent-razdor-config", "HOME": "/nonexistent-razdor-home"}),
     # The same, after a failed download: the one-line error and the manual path.
     ("title-noinstall-manual", "title", {"RAZDOR_DT_DIR": "/nonexistent-razdor-dt", "RAZDOR_CONFIG_DIR": "/nonexistent-razdor-config", "HOME": "/nonexistent-razdor-home", "RAZDOR_SCENE_DOWNLOAD_FAILED": "1"}),
+    # A damaged install (a copy under the game-download scratch folder without DDrawCompat.ini):
+    # the repair offer and the missing-files line.
+    ("title-noinstall-repair", "title", {"RAZDOR_DT_DIR": "/mnt/ai_models/razdor-scratch/game-download/copy-install", "RAZDOR_CONFIG_DIR": "/nonexistent-razdor-config", "HOME": "/nonexistent-razdor-home"}),
     # The same, while the game downloads (the progress window at 40%).
     ("title-noinstall-downloading", "title", {"RAZDOR_DT_DIR": "/nonexistent-razdor-dt", "RAZDOR_CONFIG_DIR": "/nonexistent-razdor-config", "HOME": "/nonexistent-razdor-home", "RAZDOR_SCENE_DOWNLOADING": "40"}),
     ("options", "options", {}),

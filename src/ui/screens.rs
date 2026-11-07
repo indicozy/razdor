@@ -226,6 +226,12 @@ fn ios_not_found(x: f32, w: f32) {
     }
 }
 
+/// The phones' not-found block: its text about 14 sp (`BLOCK_TEXT` times the desktop's size), its
+/// buttons 44 dp high (`BLOCK_TOUCH_DP`).
+const BLOCK_TEXT: f32 = 2.1;
+/// A phone button's height on the not-found block, in dp.
+const BLOCK_TOUCH_DP: f32 = 44.0;
+
 /// On the main menu while no install is found, on every platform: the not-found block in the
 /// column left of the menu's buttons (the left half of the screen, in landscape and portrait),
 /// over a dark panel. It says that Razdor plays the player's own copy of the game, gives the
@@ -245,17 +251,25 @@ pub fn menu_not_found(no_install: bool) {
     let (x, w, bottom) = super::main_menu::not_found_box(k);
     // Razdor's own: the buttons grow with the text size (`button_grow`); the block grows upward.
     let g = super::display::button_grow();
-    let btn_h = button_height(sh, k) * g;
+    // A phone: the text about 14 sp (the phone rule), a button 44 dp, and two buttons a row when
+    // the column takes two (the phones' landscape is short). The desktop keeps its layout.
+    let phone = super::display::dp_px();
+    let tf = if phone.is_some() { BLOCK_TEXT } else { 1.0 };
+    let btn_h = match phone {
+        Some(dp) => BLOCK_TOUCH_DP * dp,
+        None => button_height(sh, k) * g,
+    };
     let btn_w = (240.0 * k * g).min(w);
     let gap = 12.0 * k;
-    let (title_size, body_size, lead) = (20.0 * k, 16.0 * k, 22.0 * k);
+    let (title_size, body_size, lead) = (20.0 * k * tf, 16.0 * k * tf, 22.0 * k * tf);
     let mut body = vec![tr("Razdor plays your own copy of Discord Times: version 1.8 with Community Update 1.2.").to_string()];
     body.extend(download_lines());
     body.extend(unpack_lines());
     body.extend(install_problem());
     let body_lines: Vec<String> = body.iter().flat_map(|s| wrap(s, w, body_size)).flat_map(|l| break_wide(&l, w, body_size)).collect();
-    let text_h = title_size + 10.0 * k + body_lines.len() as f32 * lead;
-    // The rows of buttons, from the top: the tutorial's (the download, the importer), then the two links.
+    let text_h = title_size + 10.0 * k * tf + body_lines.len() as f32 * lead;
+    // The rows of buttons, from the top: the tutorial's (the download, the picker, the repair),
+    // then the two links.
     let (how, there) = ((tr("How to install"), open_guide as fn()), (tr("Help on Discord"), open_discord as fn()));
     let mut rows = not_found_rows(manual_block(game_import::download_failure().as_deref(), game_import::download_available()));
     let stack_height = |n: usize| n as f32 * btn_h + (n as f32 - 1.0) * gap;
@@ -266,20 +280,32 @@ pub fn menu_not_found(no_install: bool) {
     } else {
         rows.push(vec![how, there]);
     }
+    if let Some(dp) = phone {
+        let per_row = if w >= 2.0 * 150.0 * dp + gap { 2 } else { 1 };
+        let flat: Vec<NotFoundButton> = rows.into_iter().flatten().collect();
+        rows = flat.chunks(per_row).map(|c| c.to_vec()).collect();
+    }
     let buttons_top = bottom - stack_height(rows.len());
     let text_top = buttons_top - 18.0 * k - text_h;
     draw_rectangle(x - 10.0 * k, text_top - 10.0 * k, w + 20.0 * k, bottom - text_top + 20.0 * k, Color::new(0.0, 0.0, 0.0, 0.6));
     let title_base = text_top + title_size;
     text(tr("Discord Times not found."), x, title_base, title_size, INK);
     for (i, line) in body_lines.iter().enumerate() {
-        text(line, x, title_base + 10.0 * k + (i + 1) as f32 * lead, body_size, DIM);
+        text(line, x, title_base + 10.0 * k * tf + (i + 1) as f32 * lead, body_size, DIM);
     }
+    // A phone's label at about 14 sp: the label's size is set (`button_sized`).
+    let label_px = 16.0 * k * tf;
     for (i, row) in rows.iter().enumerate() {
         let y = buttons_top + i as f32 * (btn_h + gap);
         let n = row.len() as f32;
         let bw = btn_w.min((w - gap * (n - 1.0)) / n);
         for (j, (label, action)) in row.iter().enumerate() {
-            if button(x + j as f32 * (bw + gap), y, bw, btn_h, label, true) {
+            let bx = x + j as f32 * (bw + gap);
+            let pressed = match phone {
+                Some(_) => button_sized(bx, y, bw, btn_h, label, true, label_px),
+                None => button(bx, y, bw, btn_h, label, true),
+            };
+            if pressed {
                 action();
             }
         }
@@ -427,6 +453,8 @@ fn install_problem() -> Option<String> {
         Some(Problem::NotInstall { dir, missing }) => Some(trf!("This folder has no {missing}: {dir}", missing = missing.join(", "), dir = dir.display())),
         Some(Problem::Load(e)) => Some(e),
         Some(Problem::Missing { files, .. }) => Some(missing_files_line(&files)),
+        // A phone (its density) has only the missing files' line, as on the phones themselves.
+        _ if super::display::dp_px().is_some() => None,
         None => None,
     }
 }
