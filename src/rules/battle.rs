@@ -108,6 +108,9 @@ const BERSERK_PERCENT: i32 = 75;
 const FLOCK_PERCENT: i32 = 25;
 /// `Artillery` and `FirstShot`: initiative on turn 1, twice with building defence ≥ 10.
 const FIRST_TURN_INITIATIVE: i32 = 30;
+/// `FirstShot` on the older Community exe (the Evolution Mod's): a flat +60 on turn 1, with no
+/// building-defence term. The turn-1 `ADD` of 0x3c at c26e9a (the 1.2 fix c28935 is absent).
+const OLDER_FIRST_SHOT_INITIATIVE: i32 = 60;
 /// `FateGift`: protections +20, regeneration +20, max HP +20%, initiative modifier +5.
 const FATE_PROTECTION: i32 = 20;
 const FATE_REGEN: i32 = 20;
@@ -1448,6 +1451,7 @@ impl Battle {
         let team = self.fighters[i].team;
         let own_building = self.building_defence[team.index()];
         let their_building = self.building_defence[team.other().index()];
+        let twelve = self.content.options.build.has_12_features();
         if round == 1 {
             // Cleared on turn 1, once per unit (c29fbb, c2a5ca).
             self.crippled = [[false; RECORDS]; 2];
@@ -1457,9 +1461,14 @@ impl Battle {
         }
         let g = patch_globals();
         let f = &mut self.fighters[i];
-        if round == 1 && (f.has(Bonus::Artillery) || f.has(Bonus::FirstShot)) {
+        if round == 1 {
             // To the current initiative, not to the modifier (484365, c28935).
-            f.cur_initiative += FIRST_TURN_INITIATIVE * if own_building >= 10 { 2 } else { 1 };
+            if f.has(Bonus::FirstShot) && !twelve {
+                // The older exe: flat +60, the building term is not there (c26e95, evolution-mod.md §1).
+                f.cur_initiative += OLDER_FIRST_SHOT_INITIATIVE;
+            } else if f.has(Bonus::Artillery) || (f.has(Bonus::FirstShot) && twelve) {
+                f.cur_initiative += FIRST_TURN_INITIATIVE * if own_building >= 10 { 2 } else { 1 };
+            }
         }
         // Hunger: a removal since the last look (anywhere: the counter is global) heals it to
         // full, except on turn 1, where it only looks. One look for all Hunger units, so only

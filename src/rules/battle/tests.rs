@@ -3235,6 +3235,31 @@ const OLDER: Build = Build::OlderCommunity;
 const TWELVE: Build = Build::Community12;
 
 #[test]
+fn older_first_shot_is_a_flat_60_on_turn_1_with_or_without_building_defence() {
+    // c26e95 (the turn-1 test and the 0x24 bonus byte), the 0x3c add; no building-defence term.
+    // 1.2 gives 30, and 60 with building defence ≥ 10 (row40).
+    let quick = || bonus(76, Bonus::FirstShot, UnitDef { initiative: 1, ..warrior(76, 10, 0) });
+    // The enemy fights in a building of `defence` (set before the battle begins, as in_building).
+    let start = |build: Build, defence: i32| {
+        let mut c = match Arc::try_unwrap(content_with(vec![quick()], Formation::WIDE)) {
+            Ok(c) => c,
+            Err(_) => unreachable!("freshly made"),
+        };
+        c.options.build = build;
+        c.options.drain_rule = build.drain_rule();
+        let c = Arc::new(c);
+        let mut bt = prepared(&c, &[(10, f(0))], &[(76, f(0))], Team::Player);
+        bt.set_building_defence(Team::Enemy, defence);
+        bt.begin();
+        bt.fighters[1].stats[Stat::Initiative]
+    };
+    assert_eq!(start(OLDER, 0), 61);
+    assert_eq!(start(OLDER, 10), 61, "no building term on the older exe");
+    assert_eq!(start(TWELVE, 0), 31, "1.2: +30 without building defence");
+    assert_eq!(start(TWELVE, 10), 61, "1.2: +30 more with building defence ≥ 10");
+}
+
+#[test]
 fn older_fortify_is_20_percent_of_defence_per_turn() {
     // c25a51: max(1, DB × 20 / 100) × min(turn − 1, 5); 1.2 has 25 (row36).
     let wall = bonus(68, Bonus::Fortify, UnitDef { hits: 3000, ..warrior(68, 1, 20) });
