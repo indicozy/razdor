@@ -31,7 +31,7 @@ the community map smoke test green, a changelog line, the wiki pages updated.
 | P3 | Two battle events in one tick (G2) | RE the scan's exit after a battle-only finish (0x4abfbc); make the second battle not replace the first as the exe does. |
 | P4 | Village gate nature (G10) | `village_ready` (`src/rules/economy.rs`) reads the hero's **current** nature byte, as the exe (0x75aa61). |
 | P5 | Show army for a dead army (G4) | Reveal the record's current cell for a dead army (0x4ab51b reads +0x1724/+0x1728); trace the inactive case first. |
-| P6 | `EnterShipyard` engine flag | Set it as the original's ship logic does (events.md "Engine flags"). |
+| P6 | `EnterShipyard` engine flag | Set it as the original's ship logic does (events.md "Engine flags"). **Done 2026-11-07, 86460158** (`Game::ship_yard`, `Game::yard_flags`; events.md now Matches). |
 | P7 | Vampirism on the magic path | Check the magic path against the exe (battle.md #15, OPEN_QUESTIONS #1046); fix if it differs. |
 | P8 | Evolution Mod's FirstShot value | Read the value on the Evolution exe (c28935 absent); set it. |
 
