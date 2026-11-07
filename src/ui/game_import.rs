@@ -79,6 +79,8 @@ struct Job {
     total: Arc<AtomicU64>,
     /// The game folder's download (`gdrive`), when this job is one: its files and cancel.
     progress: Option<Arc<gdrive::Progress>>,
+    /// The window's title: the import's, the download's, or the repair's.
+    title: &'static str,
 }
 
 local! {
@@ -226,7 +228,7 @@ fn start(pending: Pending) {
         result
     });
     match spawned {
-        Ok(handle) => JOB.with_borrow_mut(|j| *j = Some(Job { name, handle: Some(handle), done, total, progress: None })),
+        Ok(handle) => JOB.with_borrow_mut(|j| *j = Some(Job { name, handle: Some(handle), done, total, progress: None, title: title() })),
         Err(e) => notice(vec![trf!("The import cannot start: {e}.", e = e)]),
     }
 }
@@ -250,7 +252,7 @@ fn start_download() {
     let spawned = std::thread::Builder::new().name("game-download".into()).spawn(move || download_and_import(&dest, &target, &p, &d, &t));
     match spawned {
         Ok(handle) => JOB.with_borrow_mut(|j| {
-            *j = Some(Job { name: "Discord Times".into(), handle: Some(handle), done, total, progress: Some(progress) })
+            *j = Some(Job { name: "Discord Times".into(), handle: Some(handle), done, total, progress: Some(progress), title: tr("Loading the game") })
         }),
         Err(e) => DOWNLOAD_FAILURE.with_borrow_mut(|f| *f = Some(trf!("The download cannot start: {e}.", e = e))),
     }
@@ -283,7 +285,7 @@ fn start_repair() {
     let spawned = std::thread::Builder::new().name("game-repair".into()).spawn(move || repair_from_archive(&base, &dest, &p, &d, &t));
     match spawned {
         Ok(handle) => JOB.with_borrow_mut(|j| {
-            *j = Some(Job { name: "Discord Times".into(), handle: Some(handle), done, total, progress: Some(progress) })
+            *j = Some(Job { name: "Discord Times".into(), handle: Some(handle), done, total, progress: Some(progress), title: tr("Restoring the game files") })
         }),
         Err(e) => DOWNLOAD_FAILURE.with_borrow_mut(|f| *f = Some(trf!("The download cannot start: {e}.", e = e))),
     }
@@ -419,15 +421,15 @@ fn confirm_window(name: &str) -> Option<bool> {
 /// comes, then the unpacking's percent and bar. The snapshot's `RAZDOR_SCENE_DOWNLOADING` shows
 /// the download's bar without a job.
 fn progress_window() {
-    let Some((done, total, progress)) = JOB.with_borrow(|j| j.as_ref().map(|j| (j.done.load(Ordering::Relaxed), j.total.load(Ordering::Relaxed), j.progress.clone()))) else {
+    let Some((done, total, progress, title)) = JOB.with_borrow(|j| j.as_ref().map(|j| (j.done.load(Ordering::Relaxed), j.total.load(Ordering::Relaxed), j.progress.clone(), j.title))) else {
         if let Some(bytes) = snapshot_download_bytes() {
-            download_window(bytes, None);
+            download_window(bytes, None, tr("Loading the game"));
         }
         return;
     };
     match progress {
-        Some(p) if !p.downloaded() => download_window(p.bytes(), Some(p.as_ref())),
-        _ => unpack_window(done, total),
+        Some(p) if !p.downloaded() => download_window(p.bytes(), Some(p.as_ref()), title),
+        _ => unpack_window(done, total, title),
     }
 }
 
@@ -439,14 +441,13 @@ fn snapshot_download_bytes() -> Option<u64> {
 }
 
 /// The unpacking's percent and bar.
-fn unpack_window(done: u64, total: u64) {
+fn unpack_window(done: u64, total: u64, title: &str) {
     let pct = if total == 0 { 0 } else { (done * 100 / total).min(100) };
-    let (inner, _) = map_import::frame(title(), &[trf!("Unpacking… {pct}%", pct = pct)], false);
-    let k = chrome::k() * map_import::phone_factor();
-    let bar = Rect::new(inner.x + 24.0 * k, inner.y + 60.0 * k, inner.w - 48.0 * k, 14.0 * k);
-    draw_rectangle(bar.x, bar.y, bar.w, bar.h, Color::new(0.0, 0.0, 0.0, 0.45));
-    draw_rectangle(bar.x, bar.y, bar.w * pct as f32 / 100.0, bar.h, Color::new(0.85, 0.65, 0.25, 1.0));
-    draw_rectangle_lines(bar.x, bar.y, bar.w, bar.h, 1.0, Color::new(0.0, 0.0, 0.0, 0.8));
+    let share = pct as f32 / 100.0;
+    let (_, _, bar) = map_import::frame_bar(title, &[trf!("Unpacking… {pct}%", pct = pct)], Some(share), false);
+    if let Some(bar) = bar {
+        map_import::draw_bar(bar, share);
+    }
 }
 
 /// The settings window's row (`main_menu::options_window`), `r` its full width: the button, or
@@ -568,17 +569,15 @@ fn poll_picker() -> Poll {
 
 /// The game download's window: the megabytes of the archive and a bar, and Cancel (the close box
 /// too). A cancel keeps the partial copy for the next press; `cancel` is None in the snapshot.
-fn download_window(bytes: u64, cancel: Option<&gdrive::Progress>) {
+fn download_window(bytes: u64, cancel: Option<&gdrive::Progress>, title: &str) {
     let all = gdrive::GAME.size;
     let mb = |b: u64| format!("{:.1}", b as f64 / 1_048_576.0);
     let text = trf!("Downloading the game: {mb} of {all} MB.", mb = mb(bytes), all = mb(all));
-    let (inner, closed) = map_import::frame(title(), &[text], cancel.is_some());
-    let k = chrome::k() * map_import::phone_factor();
-    let bar = Rect::new(inner.x + 24.0 * k, inner.y + 60.0 * k, inner.w - 48.0 * k, 14.0 * k);
     let share = (bytes as f32 / all as f32).min(1.0);
-    draw_rectangle(bar.x, bar.y, bar.w, bar.h, Color::new(0.0, 0.0, 0.0, 0.45));
-    draw_rectangle(bar.x, bar.y, bar.w * share, bar.h, Color::new(0.85, 0.65, 0.25, 1.0));
-    draw_rectangle_lines(bar.x, bar.y, bar.w, bar.h, 1.0, Color::new(0.0, 0.0, 0.0, 0.8));
+    let (inner, closed, bar) = map_import::frame_bar(title, &[text], Some(share), cancel.is_some());
+    if let Some(bar) = bar {
+        map_import::draw_bar(bar, share);
+    }
     let answer = map_import::buttons(inner, &[tr("Cancel")]);
     if let Some(progress) = cancel {
         if answer.is_some() || closed {

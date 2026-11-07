@@ -260,9 +260,20 @@ pub fn menu_not_found(no_install: bool) {
         None => button_height(sh, k) * g,
     };
     let btn_w = (240.0 * k * g).min(w);
-    let gap = 12.0 * k;
+    // A phone's gap: each button's touch area takes half of it to the neighbour (`finger_hit_at`),
+    // so 16 dp lets a 44 dp button keep its 44 dp. The desktop keeps its gap.
+    let gap = match phone {
+        Some(dp) => 16.0 * dp,
+        None => 12.0 * k,
+    };
     let (title_size, body_size, lead) = (20.0 * k * tf, 16.0 * k * tf, 22.0 * k * tf);
-    let mut body = vec![tr("Razdor plays your own copy of Discord Times: version 1.8 with Community Update 1.2.").to_string()];
+    // A phone's first line is one line long (the block must fit above the menu).
+    let first = if phone.is_some() {
+        tr("Version 1.8 with Community Update 1.2.")
+    } else {
+        tr("Razdor plays your own copy of Discord Times: version 1.8 with Community Update 1.2.")
+    };
+    let mut body = vec![first.to_string()];
     body.extend(download_lines());
     body.extend(unpack_lines());
     body.extend(install_problem());
@@ -274,7 +285,10 @@ pub fn menu_not_found(no_install: bool) {
     let mut rows = not_found_rows(manual_block(game_import::download_failure().as_deref(), game_import::download_available()));
     let stack_height = |n: usize| n as f32 * btn_h + (n as f32 - 1.0) * gap;
     let stacked = stack_height(rows.len() + 2);
-    if bottom - stacked - 18.0 * k - text_h - 10.0 * k >= 16.0 * k {
+    if phone.is_some() {
+        // A phone's column has no room for the links: they are left out there (Discord stays on
+        // the bottom bar; the install guide is in the wiki).
+    } else if bottom - stacked - 18.0 * k - text_h - 10.0 * k >= 16.0 * k {
         rows.push(vec![how]);
         rows.push(vec![there]);
     } else {
@@ -351,9 +365,13 @@ fn manual_block(failure: Option<&str>, available: bool) -> bool {
 /// The block's download lines: the community's source when the download is offered, else (the
 /// manual path) the error, the folder's link as text and the steps by hand.
 fn download_lines() -> Vec<String> {
+    // Missing files: the block offers the repair, not the download, so no download text.
+    if matches!(razdor::dt::install::problem(), Some(Problem::Missing { .. })) {
+        return Vec::new();
+    }
     let failure = game_import::download_failure();
     if !manual_block(failure.as_deref(), game_import::download_available()) {
-        return vec![tr("The game is downloaded from the community's Google Drive: the «ИГРУ КАЧАТЬ ЗДЕСЬ» thread of the Discord server.").to_string()];
+        return vec![tr("Press «Download the game»: Razdor downloads the game archive (45 MB) from the server's moderators' Google Drive and installs it.").to_string()];
     }
     let mut lines: Vec<String> = failure.into_iter().collect();
     lines.push(tr("Download it by hand:").to_string());
@@ -370,7 +388,7 @@ fn manual_steps() -> Vec<String> {
     return vec![
         tr("1. Open the link («Open the link» button) and download the file: one .zip, saved to Download.").to_string(),
         tr("2. Do not unpack it: Razdor reads the .zip itself.").to_string(),
-        tr("3. Press «Unpack the game archive» (Razdor finds the .zip in Download), or «Pick the game archive…» and choose it.").to_string(),
+        trf!("3. Press «Unpack the game archive» (Razdor finds the .zip in Download), or «{label}» and choose it.", label = picker_label()),
         tr("4. The game is in place when the main menu opens without «Discord Times not found».").to_string(),
     ];
     #[cfg(target_os = "ios")]
@@ -384,7 +402,7 @@ fn manual_steps() -> Vec<String> {
     return vec![
         tr("1. Open the link («Open the link» button) and download the file: one .zip.").to_string(),
         tr("2. Do not unpack it: Razdor reads the .zip itself.").to_string(),
-        tr("3. Press «Pick the game archive…» and choose the .zip.").to_string(),
+        trf!("3. Press «{label}» and choose the .zip.", label = picker_label()),
         tr("4. The game is in place when the main menu opens without «Discord Times not found».").to_string(),
     ];
 }
@@ -420,7 +438,7 @@ fn not_found_rows(manual: bool) -> Vec<Vec<NotFoundButton>> {
     // A folder with missing game files is repaired from the archive (the offer), not downloaded over.
     let damaged = matches!(razdor::dt::install::problem(), Some(Problem::Missing { .. }));
     if damaged {
-        rows.push(vec![(tr("Restore the game files"), game_import::request_repair as fn())]);
+        rows.push(vec![(restore_label(), game_import::request_repair as fn())]);
     } else if game_import::download_available() {
         rows.push(vec![(tr("Download the game"), game_import::request_download as fn())]);
     }
@@ -440,9 +458,23 @@ fn not_found_rows(manual: bool) -> Vec<Vec<NotFoundButton>> {
     rows
 }
 
+/// The repair button's label: a phone's is short (two buttons a row, no ellipsis).
+fn restore_label() -> &'static str {
+    if super::display::dp_px().is_some() {
+        tr("Restore…")
+    } else {
+        tr("Restore the game files")
+    }
+}
+
 /// The picker's button label: the same words as the picker's own steps (`manual_steps`).
 fn picker_label() -> &'static str {
-    tr("Pick the game archive…")
+    // A phone's label is shorter: the two buttons of a row must fit it (no ellipsis).
+    if super::display::dp_px().is_some() {
+        tr("Choose the archive…")
+    } else {
+        tr("Pick the game archive…")
+    }
 }
 
 /// Why the install was not found, for the player: the folder that was looked at, what is missing
@@ -450,11 +482,11 @@ fn picker_label() -> &'static str {
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn install_problem() -> Option<String> {
     match razdor::dt::install::problem() {
-        Some(Problem::NotInstall { dir, missing }) => Some(trf!("This folder has no {missing}: {dir}", missing = missing.join(", "), dir = dir.display())),
-        Some(Problem::Load(e)) => Some(e),
         Some(Problem::Missing { files, .. }) => Some(missing_files_line(&files)),
         // A phone (its density) has only the missing files' line, as on the phones themselves.
         _ if super::display::dp_px().is_some() => None,
+        Some(Problem::NotInstall { dir, missing }) => Some(trf!("This folder has no {missing}: {dir}", missing = missing.join(", "), dir = dir.display())),
+        Some(Problem::Load(e)) => Some(e),
         None => None,
     }
 }

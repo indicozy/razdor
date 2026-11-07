@@ -361,26 +361,57 @@ fn replace_window(taken: &[String]) -> Option<bool> {
 /// The window's frame at its width, with its lines wrapped; returns its inside and whether its
 /// close box was pressed.
 pub(super) fn frame(title: &str, lines: &[String], with_buttons: bool) -> (Rect, bool) {
+    let (inner, closed, _) = frame_bar(title, lines, None, with_buttons);
+    (inner, closed)
+}
+
+/// [`frame`] with a progress bar at `share` (0 to 1) when `share` is given. On a phone the bar is
+/// drawn here, full width under the text (the text, the bar, then the buttons from
+/// [`buttons`], one below the other); on the desktop the caller draws the bar at its place, which
+/// is returned (`Some`).
+pub(super) fn frame_bar(title: &str, lines: &[String], share: Option<f32>, with_buttons: bool) -> (Rect, bool, Option<Rect>) {
     let k = chrome::k();
     let f = phone_factor();
+    let phone = f > 1.0;
     draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.35));
     let w = (460.0 * k * f).min(screen_width() - 24.0 * k);
     let size = 14.0 * k * f;
     let text_w = w - 48.0 * k * f;
     let wrapped: Vec<String> = lines.iter().flat_map(|l| wrap(l, text_w, size)).collect();
     let button_area = if with_buttons { button_area(k, f) } else { 0.0 };
-    let h = (92.0 * k * f + wrapped.len() as f32 * 20.0 * k * f + button_area).min(screen_height() - 16.0 * k);
+    // The bar's own space and the gap above the buttons (a phone's centred button sits under it).
+    let bar_area = match super::display::dp_px() {
+        Some(dp) if share.is_some() => 24.0 * k * f + 24.0 * dp,
+        _ => 0.0,
+    };
+    let h = (92.0 * k * f + wrapped.len() as f32 * 20.0 * k * f + button_area + bar_area).min(screen_height() - 16.0 * k);
     let r = Rect::new((screen_width() - w) / 2.0, (screen_height() - h) / 2.0, w, h);
     // A phone's title grows with the text (the window grows with it); the desktop's is as it was.
-    let (inner, closed) = if f > 1.0 {
+    let (inner, closed) = if phone {
         chrome::window_grown(r, title, chrome::Skin::Marble, true)
     } else {
         chrome::window(r, title, chrome::Skin::Marble, true)
     };
+    let text_bottom = 34.0 * k * f + wrapped.len() as f32 * 20.0 * k * f;
     for (i, line) in wrapped.iter().enumerate() {
         chrome::shadow_text(line, inner.x + 24.0 * k * f, inner.y + 34.0 * k * f + i as f32 * 20.0 * k * f, size, chrome::CREAM);
     }
-    (inner, closed)
+    match share {
+        Some(share) if phone => {
+            let bar = Rect::new(inner.x + 24.0 * k * f, inner.y + text_bottom + 4.0 * k * f, inner.w - 48.0 * k * f, 14.0 * k * f);
+            draw_bar(bar, share);
+            (inner, closed, None)
+        }
+        Some(_) => (inner, closed, Some(Rect::new(inner.x + 24.0 * k, inner.y + 60.0 * k, inner.w - 48.0 * k, 14.0 * k))),
+        None => (inner, closed, None),
+    }
+}
+
+/// A progress bar: a dark trough with the amber share of it on top.
+pub(super) fn draw_bar(bar: Rect, share: f32) {
+    draw_rectangle(bar.x, bar.y, bar.w, bar.h, Color::new(0.0, 0.0, 0.0, 0.45));
+    draw_rectangle(bar.x, bar.y, bar.w * share.clamp(0.0, 1.0), bar.h, Color::new(0.85, 0.65, 0.25, 1.0));
+    draw_rectangle_lines(bar.x, bar.y, bar.w, bar.h, 1.0, Color::new(0.0, 0.0, 0.0, 0.8));
 }
 
 /// The phones' text and touch targets, in these windows: the text is this factor times the
@@ -419,7 +450,11 @@ pub(super) fn buttons(inner: Rect, labels: &[&str]) -> Option<usize> {
         None => (150.0 * k, 28.0 * k, 12.0 * k, inner.y + inner.h - 40.0 * k),
     };
     let total = n * w + (n - 1.0) * gap;
-    let mut x = inner.x + inner.w - 24.0 * k * f - total;
+    // A phone centres its row (the one button under the text); the desktop keeps it at the right.
+    let mut x = match super::display::dp_px() {
+        Some(_) => inner.x + (inner.w - total) / 2.0,
+        None => inner.x + inner.w - 24.0 * k * f - total,
+    };
     let mut picked = None;
     for (i, label) in labels.iter().enumerate() {
         let r = Rect::new(x, y, w, h);
