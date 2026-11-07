@@ -1414,6 +1414,20 @@ mod tests {
         assert_eq!(g.collect_tribute(), None);
     }
 
+    /// The gate reads the hero's live nature (`Unit::stats`, 0x75aa61), not only his type's:
+    /// a hero whose stats say Rogue gets nothing, whatever his def says. Razdor's rebuild
+    /// keeps the type's nature, so this is the same test as above, through the stats.
+    #[test]
+    fn the_village_gate_reads_the_heros_live_nature() {
+        let mut g = visit_village(40, 5, 1, &|_| {});
+        assert!(g.tribute_available().is_some());
+        assert_eq!(g.squad[0].stats(&g.content).nature, g.content.unit(g.squad[0].def).nature);
+        let rogue = UnitId(9);
+        g.squad[0].def = rogue;
+        assert_eq!(g.squad[0].stats(&g.content).nature, Nature::Rogue);
+        assert_eq!(g.tribute_available(), None);
+    }
+
     #[test]
     fn village_tribute_accumulates_to_its_cap_and_is_collected_on_a_visit() {
         let mut s = map();

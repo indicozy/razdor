@@ -772,11 +772,17 @@ impl Game {
 
     /// The village here, if it pays: something waiting, and the hero not a Rogue (a Rogue
     /// gets nothing from villages). No attitude test (0x4c6000): entering captures it.
+    /// The nature is the hero's current one (the original reads his live nature byte,
+    /// 0x75aa61, not his type's): [`Unit::stats`] carries it. Razdor's rebuild copies the
+    /// type's nature and no item or spell changes it, so today the two are the same.
     fn village_ready(&self) -> Option<usize> {
         let l = self.location?;
         let v = &self.world.locations[l];
-        let rogue = self.content.unit(self.hero().def).nature == Nature::Rogue;
-        (v.kind == LocationKind::Village && (v.tribute_gold > 0 || v.tribute_mana > 0) && !rogue).then_some(l)
+        if v.kind != LocationKind::Village || (v.tribute_gold <= 0 && v.tribute_mana <= 0) {
+            return None;
+        }
+        let rogue = self.hero().stats(&self.content).nature == Nature::Rogue;
+        (!rogue).then_some(l)
     }
 
     /// Tribute (gold) the village here would pay now, if any is waiting.
