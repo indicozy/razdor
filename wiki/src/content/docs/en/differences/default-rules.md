@@ -5,15 +5,12 @@ sidebar:
   order: 3
 ---
 
-Razdor plays by the original's rules. Below is everything that differs **by default**, without the [experimental rules](/razdor/wiki/en/differences/experimental-rules/). Some of these will soon become experimental switches, with the original's rule back as the default: those are marked "becomes an experiment".
+Razdor plays by the original's rules. Below is everything that differs **by default**, without the [experimental rules](/razdor/wiki/en/differences/experimental-rules/). Five differences that used to be here are now experimental switches: by default they follow the original's rule (see below).
 
 ## Deliberate differences
 
-* **Bless once a turn:** a unit gets at most one blessing a turn, and a blessed ally is a mage's target only when a heal helps it. *Becomes an experiment.*
-* **Poison does not work on the Undead.** In the original every poison works on everyone. *Becomes an experiment.*
-* **More than 15 spells:** any learnt spell can be cast, and the shop sells into a full book. In the original spells past the 15th are learnt but cannot be cast. *Becomes an experiment.*
-* **Merchant discount from an item:** an item with the Merchant bonus in the hero's pack gives the discount too. In the original only a unit in the army does. *Becomes an experiment.*
-* **Rear Service:** always −30% to wages. In the original the cut differs at zero income. *Becomes an experiment.*
+Five former differences (bless once a turn, poison and the Undead, the spell book, the merchant discount from an item, Rear Service) are now experimental switches: by default the original's rule applies. You can turn them on in the "..." window on the scenario screen, see [experimental rules](/razdor/wiki/en/differences/experimental-rules/).
+
 * **Wide front row:** your units step only to the 12 cells the screen shows.
 * **Formation after a battle:** units go back to their cells (the "Keep formation" option, which can be turned off).
 * **The fallen keep their worn items.** You can take them off the corpse and put them in the pack.
