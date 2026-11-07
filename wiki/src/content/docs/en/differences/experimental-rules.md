@@ -5,10 +5,10 @@ sidebar:
   order: 2
 ---
 
-On the scenario screen, next to the "Next" button, there is a "..." button. It opens thirteen independent toggles that change the game rules. The first eight are Razdor's additions; they are not in the original game. The last five ("Bless once a turn", "Poison spares the Undead", "No spell book limit", "Merchant discount from an item", "Rear Service always −30%") cover rules where Razdor differed from the original: by default the game plays as the original does, and a toggle turns on Razdor's earlier rule.
+On the scenario screen, next to the "Next" button, there is a "..." button. It opens fourteen independent toggles that change the game rules. The first eight are Razdor's additions; they are not in the original game. The last six ("Bless once a turn", "Poison spares the Undead", "No spell book limit", "Merchant discount from an item", "Rear Service always −30%", "Store in your own buildings") cover rules where Razdor differed from the original: by default the game plays as the original does, and a toggle turns on Razdor's earlier rule.
 
 :::caution
-By default, for a new game, all thirteen are turned off. Your selection is remembered: it is saved in the settings when closing the window ("OK", Esc, Enter, or the close button) and upon starting a game, so when you next open the list of new games, the toggles will be as you left them, and will remain so after restarting the game. In the scenario list, an orange "Experimental rules enabled" label indicates that a toggle is on. Returning from the hero selection window preserves it. For an already started game, toggles cannot be changed through this menu.
+By default, for a new game, all fourteen are turned off. Your selection is remembered: it is saved in the settings when closing the window ("OK", Esc, Enter, or the close button) and upon starting a game, so when you next open the list of new games, the toggles will be as you left them, and will remain so after restarting the game. In the scenario list, an orange "Experimental rules enabled" label indicates that a toggle is on. Returning from the hero selection window preserves it. For an already started game, toggles cannot be changed through this menu.
 :::
 
 ![Scenario Selection](../../../../assets/shots/scenarios.webp)
@@ -28,6 +28,7 @@ By default, for a new game, all thirteen are turned off. Your selection is remem
 * **No spell book limit:** any spell in the book can be cast. Off (as in the original): only the first 15 spells of the book can be cast; a spell taught by an event past the 15th is known but cannot be cast. In the sanctuary, a book of exactly 15 spells cannot be added to (a bug of the original, kept).
 * **Merchant discount from an item:** an item with the Merchant property in the hero's pack also gives the merchant discount. Off (as in the original): only fighters in the army with that property do.
 * **Rear Service always −30%:** Rear Service always cuts wages by 30%. Off (as in the original): when the player has no income from towns, the cut is larger, about 70%.
+* **Store in your own buildings:** in your castle, fort or town with the hero in it, a "Store" tab shows the loot your garrison could not wear; a click puts the item into the hero's pack. Off (as in the original): no tab, the loot stays in the building.
 
 On a phone, when the window does not fit, the list of toggles scrolls.
 

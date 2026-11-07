@@ -104,7 +104,7 @@ SCREENS = [
     # event's first spell held at the pointer, which sits at the screen's centre (`centre`).
     ("learnt-spell", "learnt:РК1-Начало пути", {"RAZDOR_SCENE_PREVIEW": "1", "RAZDOR_MOUSE_RIGHT": "1", "RAZDOR_MOUSE": "centre"}),
     ("barracks", "building:РК1-Начало пути:0:barracks", {}),
-    ("store", "building:РК1-Начало пути:0:store", {}),
+    ("store", "building:РК1-Начало пути:0:store", {"RAZDOR_SCENE_EXPERIMENTAL": "store"}),
     ("market", "building:РК3-Столица:8:market", {}),
     ("army", "army:РК1-Начало пути", {}),
     ("hero", "hero:РК1-Начало пути:0", {}),

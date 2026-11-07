@@ -627,7 +627,7 @@ mod experimental_tests {
     #[test]
     fn experimental_menu_choices_only_affect_the_new_party() {
         let demo = Arc::new(Content::builtin());
-        let rules = razdor::rules::content::ExperimentalRules { simultaneous_bonuses: true, unlimited_items: true, two_potions: true, six_cells: false, free_units: false, auto_promotion: false, undying_units: false, fast_ai: false, bless_once: false, undead_poison_immune: false, unlimited_spells: false, merchant_item: false, rear_service_flat: false };
+        let rules = razdor::rules::content::ExperimentalRules { simultaneous_bonuses: true, unlimited_items: true, two_potions: true, six_cells: false, free_units: false, auto_promotion: false, undying_units: false, fast_ai: false, bless_once: false, undead_poison_immune: false, unlimited_spells: false, merchant_item: false, rear_service_flat: false, building_store: false };
         super::super::new_game::snapshot_experimental(rules);
         let game = start_game(&demo, None, HeroClass::Knight, "Test");
         assert_eq!(game.experimental, rules);

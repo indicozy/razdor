@@ -159,6 +159,13 @@ pub struct ExperimentalRules {
     /// ×178/256 whatever the player's stored income. Off: ×78/256 while that income is 0
     /// (`Game::rear_service_factor`). Razdor's rule: on.
     pub rear_service_flat: bool,
+    /// «Склад в своих зданиях» («Store in your own buildings»): the owner's store tab in a
+    /// building he owns (`Tab::Store`, `Game::take_from_store`) shows the loot his garrison could
+    /// not wear and takes it into the pack. Off: no store tab, nothing is taken out. The original
+    /// never lets the owner take items out of his own building (only 0x4c50ec loots a building
+    /// the hero beat, 0x4a473c keeps the loot in the record), so off is the original's rule.
+    /// Razdor's own (the owner's request), on in old saves.
+    pub building_store: bool,
 }
 
 impl ExperimentalRules {
@@ -168,7 +175,7 @@ impl ExperimentalRules {
     /// the five parity switches were Razdor's rules then, so they stay on; the eight others
     /// were off.
     pub fn before_the_rules_were_saved() -> Self {
-        Self { bless_once: true, undead_poison_immune: true, unlimited_spells: true, merchant_item: true, rear_service_flat: true, ..Self::default() }
+        Self { bless_once: true, undead_poison_immune: true, unlimited_spells: true, merchant_item: true, rear_service_flat: true, building_store: true, ..Self::default() }
     }
 
     /// The first rule that is on, by its catalog name (the one the scenario list's yellow mark
@@ -188,6 +195,7 @@ impl ExperimentalRules {
             (self.unlimited_spells, crate::i18n::n_("No spell book limit")),
             (self.merchant_item, crate::i18n::n_("Merchant discount from an item")),
             (self.rear_service_flat, crate::i18n::n_("Rear Service always −30%")),
+            (self.building_store, crate::i18n::n_("Store in your own buildings")),
         ]
         .into_iter()
         .find(|(on, _)| *on)
@@ -218,6 +226,8 @@ struct RulesWire {
     unlimited_spells: Option<bool>,
     merchant_item: Option<bool>,
     rear_service_flat: Option<bool>,
+    /// Missing in a save from before the store switch: the store was Razdor's then, so it reads ON.
+    building_store: Option<bool>,
     /// Older switches, read only (see the `From` impl).
     #[serde(skip_serializing)]
     multiple_rings: bool,
@@ -261,6 +271,7 @@ impl From<RulesWire> for ExperimentalRules {
             unlimited_spells: w.unlimited_spells.unwrap_or(true),
             merchant_item: w.merchant_item.unwrap_or(true),
             rear_service_flat: w.rear_service_flat.unwrap_or(true),
+            building_store: w.building_store.unwrap_or(true),
         }
     }
 }
@@ -281,6 +292,7 @@ impl From<ExperimentalRules> for RulesWire {
             unlimited_spells: Some(r.unlimited_spells),
             merchant_item: Some(r.merchant_item),
             rear_service_flat: Some(r.rear_service_flat),
+            building_store: Some(r.building_store),
             multiple_rings: false,
             multiple_amulets: false,
             multiple_weapons: false,
@@ -969,5 +981,26 @@ mod experimental_rules_save_tests {
         .map(|r| r.first_on())
         .collect();
         assert_eq!(names, [Some("Bless once a turn"), Some("Poison spares the Undead"), Some("No spell book limit"), Some("Merchant discount from an item"), Some("Rear Service always −30%")]);
+    }
+
+    /// «Склад в своих зданиях» (`building_store`): a new game has it off (the original's rule: the
+    /// owner takes nothing out of his building); a save or a hand-over without its key was Razdor's
+    /// rule then, so it reads ON; before the rules were saved it is ON too; its name is the rules
+    /// window's and the scenario mark's.
+    #[test]
+    fn the_store_switch_is_off_in_new_games_and_on_in_old_saves() {
+        assert!(!ExperimentalRules::for_new_game().building_store);
+        let old: ExperimentalRules = serde_json::from_str(r#"{"fast_ai": true}"#).unwrap();
+        assert!(old.building_store);
+        let missing: ExperimentalRules = serde_json::from_str("{}").unwrap();
+        assert!(missing.building_store);
+        assert!(ExperimentalRules::before_the_rules_were_saved().building_store);
+        let off = ExperimentalRules { building_store: false, fast_ai: true, ..Default::default() };
+        let json = serde_json::to_value(off).unwrap();
+        assert_eq!(json["building_store"].as_bool(), Some(false));
+        assert_eq!(serde_json::from_value::<ExperimentalRules>(json).unwrap(), off);
+        let on = ExperimentalRules { building_store: true, ..Default::default() };
+        assert_eq!(on.first_on(), Some("Store in your own buildings"));
+        assert_eq!(ExperimentalRules::default().first_on(), None);
     }
 }

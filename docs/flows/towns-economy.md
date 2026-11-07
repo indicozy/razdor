@@ -28,7 +28,7 @@ ui/building_view.rs BuildingView                            tabs = town::tabs_he
                Game::heal(i), resurrect(i), dismiss(i)                   rules/town.rs
   Garrison   → open_garrison(), leave_in_garrison(), take_from_garrison(),
                swap_with_garrison(), move_guard(), garrison_price()      rules/town.rs
-  Store      → store_here(), take_from_store(i)  (Razdor's deviation)  rules/town.rs;
+  Store      → store_here(), take_from_store(i)  (Razdor's deviation, switch `building_store`)  rules/town.rs;
                UI: building_view::store (the loot as the backpack's squares in the upper pane,
                items_view::item_squares, a press takes the item; the hero's pack read-only below;
                its tab picture is the barracks' one with the label, building_view::store_tab_art)
@@ -106,9 +106,11 @@ still come back. Garrisons are never paid and heal `GarrisonAutoHeal`% at midnig
 `open_garrison` sets the paid marks, the only place they are set; an unpaid unit costs one day's
 wage to take back.
 
-**Store** (Razdor's deviation, the owner's request; not parity). In a building he owns, with
-the hero in it, the tab `Tab::Store` shows while `Location::treasure` holds items: the loot his
-garrison could not wear (ai.md §10.1). A press takes an item into the pack; nothing goes in.
+**Store** (Razdor's deviation, the owner's request; not parity; the experimental switch
+`building_store`, off by default, so the original's rule holds: `tabs` offers no `Tab::Store` and
+`take_from_store` is refused). In a building he owns, with the hero in it, the tab `Tab::Store`
+shows while `Location::treasure` holds items: the loot his garrison could not wear (ai.md §10.1).
+A press takes an item into the pack; nothing goes in.
 The original never lets the owner take items out of his own building (only 0x4c50ec loots a
 building the hero beat), so this is Razdor-only and never on `dt-original`. The pack
 (`pack.rs`) never reports full, so `ServiceError::PackFull` is a guard that cannot trigger.

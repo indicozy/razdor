@@ -1,7 +1,7 @@
 # Experimental scenario rules
 
-The `...` button beside Next on the scenario screen opens thirteen independent switches,
-all off by default for new games. The last five (`bless_once` through `rear_service_flat`, below)
+The `...` button beside Next on the scenario screen opens fourteen independent switches,
+all off by default for new games. The last five (`bless_once` through `rear_service_flat`, below) and `building_store`
 are the parity switches: off gives the original's rule, on gives Razdor's rule of today. Choices reset when
 starting a new playthrough from the main menu.
 Returning from hero selection preserves the selection. The switches cannot be changed
@@ -100,11 +100,20 @@ off).
   Rear Service cut is ×178/256. Off, the original's test (0xc250e4 → 0xc25001): ×178/256 while the
   player's stored income is not 0, else ×78/256. `Game::rear_service_factor`, read by `daily_wages`
   and the AI's own quartermaster cut (`Game::rear_cut`). `economy.md` §1 step 7 and «Rear Service».
+- **Store in your own buildings** («Склад в своих зданиях», default off, `building_store`): on, a
+  building the player owns, with the hero in it, shows the store tab (`Tab::Store`) while its
+  treasure holds items; a press takes one into the pack (`Game::take_from_store`). Off (the
+  original's rule: the garrison's loot stays in the record, 0x4a473c; only a hero who beats the
+  garrison loots it, 0x4c50ec): `town::tabs` offers no store tab, `store_here` is empty and
+  `take_from_store` is refused. Razdor's own (the owner's request), so off is the original.
+  Old saves and hand-overs read it ON (`RulesWire`); a settings file's remembered choice reads it
+  OFF (`remembered_rules`). `towns-economy.md`, «Store».
 
 Saves: each switch is written as its own key. A save (or a `NextMap` hand-over) from before the five
-parity switches has no key for them, and those read ON (`RulesWire`): the rule that save had. A save
-with no rules block at all (before the rules were saved) gets `ExperimentalRules::before_the_rules_were_saved`:
-the five ON, the eight others off. The settings file's remembered choice (`language::Settings`) is
+parity switches (or before `building_store`) has no key for them, and those read ON (`RulesWire`): the
+rule that save had. A save with no rules block at all (before the rules were saved) gets
+`ExperimentalRules::before_the_rules_were_saved`: the six ON (the five parity switches and
+`building_store`), the eight others off. The settings file's remembered choice (`language::Settings`) is
 different: a key it lacks reads OFF (`remembered_rules`), so a new game starts from the original. It is read where the plan is made: `ai::search_for` turns the rules and the map's size into
 the `flood_pool::Search` that every plan carries (in its input, so the worker threads compute it
 the same way; `compute_routed` reports the route for the tests). With it off `Search::default()`
@@ -118,7 +127,7 @@ loading rebuilds the runtime Content copy from this field before setting up the 
 A save writes `unlimited_items` and `six_cells`; the four older item keys are read, never written. Format 12 is unchanged by the switches.
 
 Save format 11 stores the rules in Game and the campaign hand-over record, potion counters
-and noncombatant marks in units. Missing rules in older saves use false values, except the five parity switches (see above: ON). Manual saves, autosaves, restarting the same scenario
+and noncombatant marks in units. Missing rules in older saves use false values, except the parity switches and `building_store` (see above: ON). Manual saves, autosaves, restarting the same scenario
 and advancing to the next campaign map preserve the rules. Older Razdor builds reject
 format 11 rather than silently dropping the experimental rules.
 
@@ -201,10 +210,10 @@ keep the item and show the existing refusal. All equipment rules and potion limi
 
 ## The rules window (new_game.rs `experimental_menu`)
 
-The choice is remembered (the owner's yes, 2026-11-02): when the window closes (OK, Esc, Enter or its close button) and when a game starts, the thirteen switches are written to `settings.json` (`language::Settings::experimental_rules`, all off on an older file, and a switch whose key a file lacks is off, `remembered_rules`). `open_list` starts from them, so the scenario list's «Экспериментальные правила включены» label shows a remembered choice too.
+The choice is remembered (the owner's yes, 2026-11-02): when the window closes (OK, Esc, Enter or its close button) and when a game starts, the fourteen switches are written to `settings.json` (`language::Settings::experimental_rules`, all off on an older file, and a switch whose key a file lacks is off, `remembered_rules`). `open_list` starts from them, so the scenario list's «Экспериментальные правила включены» label shows a remembered choice too.
 
 Opened from the scenario list's «Экспериментальные правила» button. Its scale is `display::popup_o`
-fitted to the screen. Its thirteen rows and OK are touch targets (40 dp on a phone); its texts are one
+fitted to the screen. Its fourteen rows and OK are touch targets (40 dp on a phone); its texts are one
 px per dp on a phone, grown with the text size (`button_grow`) and never under Normal; the hints
 wrap to its width and the window grows with them. The rows take one, two or three columns: the
 fewest whose height fits the screen (a phone's landscape takes two or three), and the window takes

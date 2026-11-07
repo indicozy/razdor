@@ -93,9 +93,10 @@ pub fn tabs(l: &Location, c: &Content) -> Vec<Tab> {
     if l.takes_garrison() {
         tabs.push(Tab::Garrison);
     }
-    // Razdor's deviation (the owner's request): the store of his own building, shown only
-    // while it holds loot. The original never lets the owner take items out of his building.
-    if l.owned() && !l.treasure.is_empty() {
+    // Razdor's deviation (the owner's request, the experimental «Склад в своих зданиях»): the
+    // store of his own building, shown only while it holds loot. Off, the original's rule: the
+    // owner never takes items out of his building.
+    if c.experimental.building_store && l.owned() && !l.treasure.is_empty() {
         tabs.push(Tab::Store);
     }
     if l.shop.is_some() {
@@ -311,9 +312,10 @@ impl Game {
     }
 
     /// Takes store item `index` of the building here into the hero's pack (Razdor's deviation,
-    /// the owner's request). The original never lets the owner take items out of his own
-    /// building: only a hero who beats its garrison loots the record (0x4c50ec). Taking only:
-    /// nothing goes in. Refused unless the building is his and the hero stands in it.
+    /// the owner's request, the experimental «Склад в своих зданиях»). The original never lets the
+    /// owner take items out of his own building: only a hero who beats its garrison loots the
+    /// record (0x4c50ec). Taking only: nothing goes in. Refused unless the switch is on, the
+    /// building is his and the hero stands in it (`offers`, which the switch gates through `tabs`).
     pub fn take_from_store(&mut self, index: usize) -> Result<ItemId, ServiceError> {
         if !self.offers(Tab::Store) {
             return Err(ServiceError::NotHere);
@@ -1548,11 +1550,33 @@ mod tests {
         inside(&s)
     }
 
+    /// His castle with the experimental «Склад в своих зданиях» on (the store tab's rule).
+    fn in_own_castle_with_store() -> Game {
+        let mut g = in_own_castle();
+        g.content = std::sync::Arc::new(g.content.with_experimental(crate::rules::content::ExperimentalRules { building_store: true, ..Default::default() }));
+        g
+    }
+
+    #[test]
+    fn with_the_store_switch_off_his_building_has_no_store_and_takes_nothing() {
+        // The original's rule (the switch off, a new game's): loot stays in his building, no store
+        // tab, the window opens on the main hall, and a take is refused.
+        let mut g = in_own_castle();
+        g.world.locations[0].treasure = vec![ItemId(7), ItemId(9)];
+        assert!(!g.tabs_here().contains(&Tab::Store));
+        assert!(g.store_here().is_empty());
+        assert_eq!(g.take_from_store(1), Err(ServiceError::NotHere));
+        assert_eq!(g.world.locations[0].treasure, [ItemId(7), ItemId(9)]);
+        assert_eq!(g.window_at(0), Some(Tab::MainHall));
+        assert_eq!(g.tabs_here().first(), Some(&Tab::MainHall));
+    }
+
     #[test]
     fn the_store_of_his_own_building_gives_its_loot_to_the_pack_and_shows_only_with_loot() {
-        // Razdor's deviation (the owner's request): the loot in his own building is taken to the
-        // pack. The original never lets the owner take items out of his building (0x4c50ec only).
-        let mut g = in_own_castle();
+        // Razdor's deviation (the owner's request, the experimental «Склад в своих зданиях», on):
+        // the loot in his own building is taken to the pack. The original never lets the owner
+        // take items out of his building (0x4c50ec only).
+        let mut g = in_own_castle_with_store();
         assert!(!g.tabs_here().contains(&Tab::Store), "no loot, no store tab");
         assert_eq!(g.take_from_store(0), Err(ServiceError::NotHere));
         g.world.locations[0].treasure = vec![ItemId(7), ItemId(9)];
@@ -1572,7 +1596,7 @@ mod tests {
     #[test]
     fn the_store_is_only_his_own_building_s() {
         // Another owner's building with loot: no store, nothing taken out of it.
-        let mut g = in_own_castle();
+        let mut g = in_own_castle_with_store();
         g.world.locations[0].owner = Owner::Neutral;
         g.world.locations[0].treasure = vec![ItemId(7)];
         assert!(!g.tabs_here().contains(&Tab::Store));

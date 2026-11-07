@@ -60,7 +60,7 @@ fn remembered_rules<'de, D: serde::Deserializer<'de>>(d: D) -> Result<razdor::ru
     use serde::de::Error;
     let mut v = <serde_json::Value as serde::Deserialize>::deserialize(d)?;
     if let Some(o) = v.as_object_mut() {
-        for k in ["bless_once", "undead_poison_immune", "unlimited_spells", "merchant_item", "rear_service_flat"] {
+        for k in ["bless_once", "undead_poison_immune", "unlimited_spells", "merchant_item", "rear_service_flat", "building_store"] {
             o.entry(k).or_insert(serde_json::Value::Bool(false));
         }
     }
@@ -323,6 +323,7 @@ mod tests {
         let s: Settings = serde_json::from_str(old).unwrap();
         assert!(s.experimental_rules.fast_ai && s.experimental_rules.six_cells);
         assert!(!s.experimental_rules.bless_once && !s.experimental_rules.rear_service_flat);
+        assert!(!s.experimental_rules.building_store);
     }
 
     #[test]

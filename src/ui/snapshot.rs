@@ -6,7 +6,7 @@
 //! Scenes (`<map>` is a map file name of the install without `.DTm`, e.g. `РК3-Столица`):
 //! `title`, `fonts` (sample lines in many scripts), `update` (a made-up release on offer), `authors[:<seconds>]`, `options[:advanced]`, `scenarios[:<map>]`, `import-notice` (the scenario list with «Добавить карту…»'s notice), `tutorial`, `load[:manual|auto[:<row>]]`, `editor[:<map>[:<text to find>]]`, `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `clash:<map>` (the first two armies fight on the explored map), `walk:<map>:dx,dy` (the
 //! hero sets off that many cells away), `building:<map>:<n>`
-//! (the hero in the n-th building; `:barracks`, `:garrison`, `:market`, `:sanctuary` open that tab; `:store` makes it his with loot and opens its store; `:market-pack` the market's pack list), `army:<map>[:<n>[:<unit id>[:<level>]]]` (squad member n selected, made that unit at that level), `journal:<map>` / `hero:<map>[:<tab>]`, `spells:<map>` (`spells-pages:<map>`: 20 spells, page 2 open),
+//! (the hero in the n-th building; `:barracks`, `:garrison`, `:market`, `:sanctuary` open that tab; `:store` makes it his with loot and opens its store (the store tab shows only with `RAZDOR_SCENE_EXPERIMENTAL=store`, the switch «Склад в своих зданиях»); `:market-pack` the market's pack list), `army:<map>[:<n>[:<unit id>[:<level>]]]` (squad member n selected, made that unit at that level), `journal:<map>` / `hero:<map>[:<tab>]`, `spells:<map>` (`spells-pages:<map>`: 20 spells, page 2 open),
 //! `menu:<map>`, `defeat:<map>` (the lost battle's report), `event:<map>:<n>` (the map's event n's window; `RAZDOR_SCENE_LOST=<id>,…` adds its lost-items row; `RAZDOR_SCENE_JOINED=<id>,…` and `RAZDOR_SCENE_LEFT=<id>,…` its units rows),`learnt:<map>[:<id>,…]` (the event window with new spells, the hero with no mana), `report:<map>[:<gold>]` (the noon report), `settings:<map>[:advanced|keys]` (`keys`: Razdor's keys window over the advanced settings), `battle:<map>:<n>` (against the n-th army), `hub[:<tab>[:<id>[:<search>]]]` ("Maps and mods"), `custom` (the custom battle
 //! setup), `custom-battle` (its first round; `custom-battle:watch` watches the AI play it). `RAZDOR_SCENE_DEBUG=1` turns the map's debug overlay (F3) on; `RAZDOR_SCENE_SHOW=x,y,r` shows
 //! a place as a lantern event does; `RAZDOR_SCENE_CONSOLE=help;gold 100` opens the cheat
@@ -16,7 +16,7 @@
 //! the scenario's messages every frame, to see the screen under them; `RAZDOR_MOUSE=x,y`
 //! puts the pointer there (`RAZDOR_MOUSE_RIGHT=1` also holds the right button there: the map's tooltips); `RAZDOR_SCENE_SPELLS=<id>,…` puts those spells on every unit; `RAZDOR_SCENE_TARGET=<id>` starts the targeting of that enemy spell on the map; `RAZDOR_SCENE_MANA=<n>` sets the hero's mana in the `spells` scene; `RAZDOR_SCENE_PREVIEW=1` shows the first spell's card at the pointer in the `learnt` scene; `RAZDOR_SCENE_POTION=1` gives every unit of the army a
 //! drunk potion. `RAZDOR_SCENE_LANGUAGE=1` opens the language list (`title`, `options:advanced`, `settings:<map>:advanced`). `replay:<step>` with `RAZDOR_REPLAY=<actions.jsonl>`: the diff
-//! `RAZDOR_SCENE_EXPERIMENTAL=bonuses,items,potions,cells,free,auto,undying,fast,bless,poison,spells,merchant,rear` enables selected playthrough rules;
+//! `RAZDOR_SCENE_EXPERIMENTAL=bonuses,items,potions,cells,free,auto,undying,fast,bless,poison,spells,merchant,rear,store` enables selected playthrough rules;
 //! `RAZDOR_SCENE_RULES=1` opens their menu over `scenarios`. `RAZDOR_SCENE_CARD=1` opens the picked map's card
 //! in the `scenarios:<map>` scene on a phone held upright (its list view otherwise). `RAZDOR_SCENE_BONUS_ITEMS=1`
 //! equips the hero with available distinct bonus items to exercise the trait scrollbar.
@@ -361,7 +361,7 @@ pub fn stage(app: &mut App) {
             simultaneous_bonuses: has("bonuses"), two_potions: has("potions"), six_cells: has("cells"), unlimited_items: has("items"),
             free_units: has("free"), auto_promotion: has("auto"), undying_units: has("undying"),
             fast_ai: has("fast"), bless_once: has("bless"), undead_poison_immune: has("poison"), unlimited_spells: has("spells"),
-            merchant_item: has("merchant"), rear_service_flat: has("rear"),
+            merchant_item: has("merchant"), rear_service_flat: has("rear"), building_store: has("store"),
         });
     }
     if let Err(e) = try_stage(app, &scene) {
