@@ -55,8 +55,13 @@ SCRATCH = (
     re.compile(r"^/tmp/claude-[^/]+/.+"),
     re.compile(r"^/mnt/ai_models/razdor-scratch/.+"),
     re.compile(r"^/mnt/ai_models/razdor/scratch/.+"),
-    re.compile("^" + re.escape(os.path.realpath(os.path.expanduser("~/.cache/razdor-scratch"))) + "/.+"),
 )
+# The home-disk scratch counts only while it is a real folder at its fixed path: its root is never
+# resolved through a symlink (one swapped in could widen the allowed area), so a symlinked or
+# missing root allows nothing.
+_HOME_SCRATCH = os.path.join(os.path.expanduser("~"), ".cache", "razdor-scratch")
+if os.path.isdir(_HOME_SCRATCH) and not os.path.islink(_HOME_SCRATCH) and os.path.realpath(_HOME_SCRATCH) == _HOME_SCRATCH:
+    SCRATCH += (re.compile("^" + re.escape(_HOME_SCRATCH) + "/.+"),)
 CARGO_PINNED = {"build", "b", "test", "t", "run", "r", "clippy", "check", "c", "bench"}
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh", "fish"}
 # Words that make an unreadable command dangerous enough to refuse.

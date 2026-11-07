@@ -163,3 +163,4 @@ allow	clean	rm -rf /mnt/ai_models/razdor/scratch/old-task/target
 allow	clean	rm -rf /home/indicozy/.cache/razdor-scratch/old-task
 block	clean	rm -rf /home/indicozy/.cache/other
 block	clean	rm -rf /mnt/ai_models/razdor/other
+block	clean	rm -rf //home/indicozy/.cache/other
