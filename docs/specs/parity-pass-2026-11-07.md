@@ -32,8 +32,8 @@ the community map smoke test green, a changelog line, the wiki pages updated.
 | P4 | Village gate nature (G10) | `village_ready` (`src/rules/economy.rs`) reads the hero's **current** nature byte, as the exe (0x75aa61). |
 | P5 | Show army for a dead army (G4) | Reveal the record's current cell for a dead army (0x4ab51b reads +0x1724/+0x1728); trace the inactive case first. |
 | P6 | `EnterShipyard` engine flag | Set it as the original's ship logic does (events.md "Engine flags"). **Done 2026-11-07, 86460158** (`Game::ship_yard`, `Game::yard_flags`; events.md now Matches). |
-| P7 | Vampirism on the magic path | Check the magic path against the exe (battle.md #15, OPEN_QUESTIONS #1046); fix if it differs. |
-| P8 | Evolution Mod's FirstShot value | Read the value on the Evolution exe (c28935 absent); set it. |
+| P7 | Vampirism on the magic path | Check the magic path against the exe (battle.md #15, OPEN_QUESTIONS #1046); fix if it differs. **Done 2026-11-07, docs only: the code already matches 0x48ac7e (battle.md row 15 Matches; OPEN_QUESTIONS settled); commit: "Parity P7-P8: docs" (the commit after b10656c1).** |
+| P8 | Evolution Mod's FirstShot value | Read the value on the Evolution exe (c28935 absent); set it. **Done 2026-11-07, b10656c1** (`OLDER_FIRST_SHOT_INITIATIVE`, +60 flat on the older exe; evolution-mod.md §1 Matches). |
 
 ### Check and report to the owner (no change yet)
 | # | Item |

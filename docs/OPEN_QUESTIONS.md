@@ -360,10 +360,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   editor-guide.md §5.
 
 
-- **The Evolution Mod's exe: FirstShot's value.** Its 1.2 fix (c28935) is absent, so the +60
-  path at c26e9a runs; the exact initiative of FirstShot on that build is unread. Razdor keeps 1.2's
-  rule (+30, +30 with building defence ≥ 10) there. Step 4 of the mod support reads it
-  (evolution-mod.md §1, §4).
 - **The Evolution Mod's exe: opcode 14's signed unit byte.** Razdor reads the byte signed
   (`events::opcode14_unit`), but its unit model gives no observable difference (a negative index
   and a byte past the unit list both match no unit). How the exe uses its loop counter after the
@@ -479,9 +475,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   a trace of a drained attacker in Wine or a replay.
   (2026-11-05) The Hristos guide (chapter 9, 9.2) names negative tactical costs as a crash, a
   different mechanism; see editor-guide.md §9.
-- **Death-school vampirism on magic and a negative value** (2026-10-20, #1046). The spec's §3 text
-  for the magic strike (48ad61) does not say whether the original has a sign test there. Razdor
-  keeps `vampirism > 0` on that path (a negative value does nothing). Settled by reading 48ad61.
 
 - **The original's no-income wage formula is not identified** (2026-10-20, from #1044). The
   Community patch's Rear Service takes ×78/256 (−70%) of the wage bill when the player's stored
@@ -809,6 +802,8 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Settled
 
+- **The Evolution Mod's exe: FirstShot's value** (2026-11-07; settled 2026-11-07, parity pass P8). Read in the mod's own exe (sha256 `b09ae259…`): at c26e95 the turn-1 test and the bonus byte 0x24 add 0x3c (+60) to the current initiative, with no building-defence term. Community 1.2 keeps +30 (+30 with building defence ≥ 10). `OLDER_FIRST_SHOT_INITIATIVE` (`src/rules/battle.rs`); test `older_first_shot_is_a_flat_60_on_turn_1_with_or_without_building_defence`. Commit b10656c1. The smoke-test install carries the 1.2 exe, not the mod's (evolution-mod.md §0).
+- **Death-school vampirism on magic and a negative value** (2026-10-20, #1046; settled 2026-11-07, parity pass P7). The magic strike's vampirism is the original's Death branch (0x48ac7e): the caster gains vampirism × damage / 100 (the damage before the cap at the target's HP), capped at its max HP, only when vampirism > 0 (a signed test: a negative value does nothing), when the caster's school is Death and the target is neither Undead nor Elemental. Razdor's code (`src/rules/battle.rs`, "Vampirism on magic") does this; battle.md row 15 is Matches on both paths. Docs only.
 - **Two battle events in one tick** (2026-11-05; settled 2026-11-08, parity pass P3, gap G2). A battle-only event
   now ends the scan, as a message does (`src/rules/events.rs`, `battle_queued`): the scan that `resolve_battle`
   starts after the battle gives the rest. Before, the second battle replaced the first through the one foe slot.

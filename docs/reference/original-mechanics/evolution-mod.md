@@ -20,6 +20,11 @@ in the executable), **data** (read in the ini files), **unknown**.
 - How Razdor can tell the builds apart: Community 1.2 has a `JMP` (`E9`) at 0x484466 (the magic
   drain hook) and the strings `ManaDrain`, `MinMagicPower`, `MinSpellLife`; this build has the
   original `IMUL` there and none of those strings. **code**
+- **The community smoke-test install is not this exe.** `/mnt/ai_models/razdor-community/evolution/install`
+  (a symlink to the Evolution install folder) carries the Community 1.2 exe (sha256 `defba6a4…`, the
+  same as `community-update`'s), not the mod's own exe (`b09ae259…`). So `community_maps_smoke` runs
+  Evolution's data under 1.2 rules. This build's rules are covered by the unit tests only (`older_*`
+  in `src/rules/battle/tests.rs`).
 
 ## 1. Battle rules that differ
 
@@ -33,7 +38,7 @@ in the executable), **data** (read in the ini files), **unknown**.
 | Stun, magic | −30% (c26e1f) | **−21%** (c26e44) | **code** |
 | Stun, shot | −30% (c2899a) | **none**: the shot path returns to the game at 0x48b2cf instead of c2899a | **code** |
 | Splash | the hit target ×80%, the neighbours ×40% (c270ae, c2731a, c27337, magic c27374) | ×**70%** and ×**30%** (constants 0xb3333333 / 0x4ccccccd) | **code** |
-| FirstShot | +30 initiative on turn 1 (+30 more with building defence ≥ 10), fix c28935 | the fix is absent (c26e95 runs the original code): the +60 variant at c26e9a is reached. Exact value **unknown** (to read) | **code**, value **unknown** |
+| FirstShot | +30 initiative on turn 1 (+30 more with building defence ≥ 10), fix c28935 | flat **+60** on turn 1: c26e95 tests turn 1 and the bonus byte 0x24, then adds 0x3c to the current initiative (c26e9a). No building-defence term; the 1.2 fix is absent | **code** |
 | On-hit block on magic hits | c29984 (PoisonArmorIgnore, Bleed, …) | absent (returns at 0x48b1ed) | **code** |
 | Flying (legal cells) | 0x485554 | absent | **code** |
 | NoHeal target filter | 0x485669 | absent | **code** |
@@ -99,7 +104,8 @@ four sliders (no battle-animation row) when the install has `Option0` and no `Op
 
 ## 4. Open
 
-- FirstShot's value in this build (c26e9a path), the magic on-hit block's absence in practice, and
+- Artillery's turn-1 value on this build: kept at 1.2's +30 (+60 with building defence ≥ 10), not read
+  at c26e95 (the FirstShot value is read, §1). The magic on-hit block's absence in practice, and
   what the mod's new event features do in code.
 - The mana payment (mod changelog) and the options window's exact 4-row layout in the mod
   (its row offsets and window height are unread; Razdor keeps the 1.2 positions of the
@@ -123,7 +129,7 @@ Razdor: `src/dt/install.rs` (`build`, `drain_rule`), `src/dt/data.rs` (`Build`, 
 | Stun on a shot | none (the shot path returns at 0x48b2cf) | Matches |
 | Splash | the hit target ×70% (0xb3333333), the neighbours ×30% (0x4ccccccd), the 1.2 multiply-high method; a negative attack keeps its sign (1.2's fix) | Matches the constants; the sign rule not checked on this exe (OPEN_QUESTIONS) |
 | Elemental speed steps (483680) | 20–44 → 1, 45–99 → 2, 100–255 → 3, else 0 | Matches |
-| FirstShot | 1.2's rule (+30, +30 with building defence ≥ 10) | Open: the value on this build is unread (OPEN_QUESTIONS) |
+| FirstShot | flat +60 on turn 1, no building term (`OLDER_FIRST_SHOT_INITIATIVE`, c26e95, 0x3c); 1.2 keeps +30, +30 with building defence ≥ 10 | Matches |
 | Flying (legal cells, 0x485554) | off | Matches |
 | NoHeal target filter (0x485669) and NoHeal marks | off | Matches |
 | PoisonArmorIgnore piercing (0x485992, 0x4859f4) | off; its poison is kept | Matches |

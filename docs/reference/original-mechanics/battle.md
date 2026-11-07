@@ -346,7 +346,9 @@ HP. Life-school curses do not drain. **code**
 
 **Extra: vampirism on magic.** A Death-school **strike** heals the caster by
 `Vampirizm% × strike power / 100` (the strike value before it is capped at the target's HP),
-but not against Undead or Elemental targets (48ad61). **code**
+capped at its max HP, only when the caster's Vampirizm is > 0 (a signed test: a negative value does
+nothing), and not against Undead or Elemental targets (0x48ac7e, the Death branch of the magic
+strike). **code**
 
 ## 4. AI in battle
 
@@ -928,7 +930,7 @@ were implemented and tested earlier (`src/rules/battle/tests.rs`, `rowN_…`); t
 | 12 | Map priority | Melee, then shot, then magic, later wins | Same | 3 | Matches |
 | 13 | Ghost casters | Reach the opposite front cells from any row, with no direction test, with any magic power above 0; written after Flying's melee | Same, but the power test reads the power's low byte as signed (128..255 fails: bug) | 3 | Razdor fixes the original's bug |
 | 14 | Undead caster drain | Caster gains the full drain; only the target's loss is capped | Caster gains the full drain; only the target's loss is capped | 3 | Matches |
-| 15 | Vampirism | Melee and long strike only; any non-zero value, signed (negative takes HP from the attacker, no lower bound, capped at max only); not from Undead or Elemental targets; Death strikes | Melee and long strike only; signed, as the original (48b3d4–48b42a); Death strikes still ignore a negative value (see §3, open) | 8 | Matches on the melee path; the magic path open |
+| 15 | Vampirism | Melee and long strike only; any non-zero value, signed (negative takes HP from the attacker, no lower bound, capped at max only); not from Undead or Elemental targets; Death strikes | Melee and long strike: signed, as the original (48b3d4–48b42a). Death strikes (0x48ac7e): only when vampirism > 0, so a negative value does nothing (§3); not from Undead or Elemental targets | 8 | Matches on both paths |
 | 16 | Into the reserve | Front or back row, one reserve transition per turn | Same | 2 | Matches |
 | 17 | Collapse timing | Only after a death and after the actor's last action | Only after a death and after the actor's last action; never at a turn start | 2 | Matches |
 | 18 | Battle start | At `begin()` (after Razdor's deployment) only the player's back row moves into an empty front row; it persists. The front counts as taken while a unit that does not fight (a corpse, an unpaid unit of an attack) holds a cell there (`Battle::set_bench`) | Only the player's army back row moves into an empty front row, in the army formation (persists) | 2, 9 | Matches |
