@@ -569,6 +569,11 @@ pub struct EventEngine {
     /// 0x4af658 that Event_Finish starts).
     #[serde(skip)]
     held_chain: Option<EventId>,
+    /// An event finished in this step queued a battle (its `start_battle_with`). The scan
+    /// stops there (0x4abfbc, 0x4ac248): the events after it wait for the scan that follows
+    /// the battle. Set in [`EventEngine::finish`], taken by [`EventEngine::run`].
+    #[serde(skip)]
+    battle_queued: bool,
     /// The unit type of each named character (1-based), for opcode 12.
     #[serde(skip)]
     named_units: Vec<u8>,
@@ -765,6 +770,7 @@ impl EventEngine {
             tutorial_done: false,
             held: false,
             held_chain: None,
+            battle_queued: false,
             named_units: Vec::new(),
             next_map: String::new(),
             carry_over: [0; 7],
@@ -1279,6 +1285,11 @@ impl EventEngine {
     // ---------------------------------------------------------------------------------------
 
     fn run(&mut self, w: &mut dyn EventWorld, out: &mut Vec<EventOutcome>) {
+        // A battle queued by an event opened just before this run ends the scan (see
+        // `battle_queued`): the scan after the battle picks the rest up.
+        if std::mem::take(&mut self.battle_queued) {
+            return;
+        }
         let mut fired = 0;
         while self.pending.is_none() && self.ended.is_none() && !self.held {
             let Some(id) = self.first_eligible(w) else { break };
@@ -1293,6 +1304,11 @@ impl EventEngine {
                 self.set_event_field(id, 76, 0);
             }
             self.open(id, w, out, 0);
+            // A battle-only event finished at once: the scan ends here (0x4ac248), as it does
+            // for a message. The battle opens (the caller's), then the next scan runs.
+            if std::mem::take(&mut self.battle_queued) {
+                return;
+            }
         }
         if self.pending.is_none() && !self.held {
             // The scan goes idle (0x4ac369): a last fired in the future is set back to now,
@@ -1657,6 +1673,8 @@ impl EventEngine {
         self.st_mut(id).set_answer_byte(0);
         if q.battle != 0 {
             w.start_battle(q.battle);
+            // The scan stops at a battle (0x4abfbc; see `battle_queued`).
+            self.battle_queued = true;
         }
         if q.spell != 0 {
             w.apply_spell(q.spell);
@@ -2992,6 +3010,26 @@ mod tests {
         let mut w = MockWorld::new();
         assert_eq!(tick_at(&mut g, &mut w, 0), vec![2]);
         assert_eq!(w.log, vec![Fx::Gold(9)], "no spell, battle, delay or chain after the victory");
+    }
+
+    /// A battle-only event ends the scan (0x4abfbc, 0x4ac248), as a message does: the events
+    /// after it wait for the scan after the battle, and give their battle then. The second
+    /// battle does not replace the first (it used to, through the one `foe` slot). A silent
+    /// event before the battle still fires in the same scan.
+    #[test]
+    fn a_battle_ends_the_scan() {
+        let mut silent = global();
+        silent.results.gold = 1;
+        let mut first = global();
+        first.results.start_battle_with = 6;
+        let mut second = global();
+        second.results.start_battle_with = 7;
+        let mut g = engine(vec![silent, first, second]);
+        let mut w = MockWorld::new();
+        assert_eq!(tick_at(&mut g, &mut w, 0), vec![1, 2], "the silent event, then the first battle");
+        assert_eq!(w.log, vec![Fx::Gold(1), Fx::Battle(6)], "one battle in the scan");
+        assert_eq!(tick_at(&mut g, &mut w, 0), vec![3], "the scan after the battle gives the second");
+        assert_eq!(w.log, vec![Fx::Gold(1), Fx::Battle(6), Fx::Battle(7)], "both battles, in order");
     }
 
     /// The original's "meet army" is the army met right now (0x68dc7c): set when the hero
