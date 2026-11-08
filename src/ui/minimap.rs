@@ -1152,6 +1152,19 @@ mod tests {
     }
 
     #[test]
+    fn a_saved_place_is_clamped_again_when_the_bar_grows() {
+        // The same saved place (the drag's target), under a bar that spans the screen: the window
+        // stops above the bar's top; when the bar grows the map view's bottom rises and the window
+        // is pulled up again (backlog 1560).
+        let o = Rect::new(0.0, 0.0, 200.0, 200.0);
+        let at = vec2(0.0, 900.0);
+        let small = (Rect::new(0.0, 960.0, 1920.0, 120.0), 1080.0, 0.0);
+        assert_eq!(carried(Rect::new(0.0, 0.0, 1920.0, 960.0), o, at, small).y, 760.0);
+        let big = (Rect::new(0.0, 1000.0, 1920.0, 80.0), 1080.0, 0.0);
+        assert_eq!(carried(Rect::new(0.0, 0.0, 1920.0, 1000.0), o, at, big).y, 800.0);
+    }
+
+    #[test]
     fn the_window_stands_in_any_corner_and_resizes_by_its_inner_edges() {
         let view = Rect::new(0.0, 0.0, 1000.0, 700.0);
         let at = |c| outer_sized(view, 1.0, None, 1.0, c);

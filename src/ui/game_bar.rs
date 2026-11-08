@@ -632,7 +632,10 @@ fn portrait_readouts(game: &Game, x0: f32, width: f32, y: f32, top: f32, dp: f32
     let col = width / 4.0;
     let icon = (22.0 * dp).round();
     let gap = 2.0 * dp;
-    let fits = |kk: f32| items.iter().all(|(l, _, v, _)| icon + gap + readout_text_width(l, v, kk) <= col - 4.0 * dp);
+    // An icon takes its picture's own width (wider than the square for some art), and the text
+    // starts after it, never over it.
+    let icon_w = |art: &str| chrome::win(art).map_or(icon, |t| t.width() * icon / t.height());
+    let fits = |kk: f32| items.iter().all(|(l, art, v, _)| icon_w(art) + gap + readout_text_width(l, v, kk) <= col - 4.0 * dp);
     let kk = if fits(k) { k } else { k * 12.0 / 14.0 };
     for (i, (label, art, value, color)) in items.iter().enumerate() {
         let cx = x0 + i as f32 * col + 2.0 * dp;
@@ -649,7 +652,7 @@ fn portrait_readouts(game: &Game, x0: f32, width: f32, y: f32, top: f32, dp: f32
                 icon,
             ),
         }
-        let tx = cx + icon + gap;
+        let tx = cx + icon_w(art) + gap;
         at_scale(kk, || {
             let label_size = super::typography::Role::Body.size((19.0 * kk).round());
             let value_size = super::typography::Role::Name.size((19.0 * kk).round());
