@@ -132,6 +132,22 @@ impl PlayOptions {
     }
 }
 
+/// The unit types and items of an install whose files are read through `bytes_of` (a file's bytes
+/// by its name at the install's top, None when it is missing): the tables `DtInstall::load` builds,
+/// with the build's changes applied, and nothing else read (no maps, spells or texts). `build_dir`
+/// is where the drain rule's exe is read from. The inference of a refused save's mod reads a mod's
+/// tables this way (`hub::save_mod`), without building its folder.
+pub fn read_tables(build_dir: &Path, bytes_of: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<(Vec<UnitDef>, Vec<ArtefactDef>), DtError> {
+    let need = |name: &str| bytes_of(name).ok_or_else(|| DtError::Io { path: build_dir.join(name), source: std::io::ErrorKind::NotFound.into() });
+    let global = Ini::from_cp1251(&need(GLOBAL_FILE)?);
+    let mut options = GlobalOptions::from_ini(&global).value;
+    options.build = build(build_dir, &global);
+    let mut units = data::parse_units(&Ini::from_cp1251(&need(UNITS_FILE)?)).value;
+    let mut artefacts = data::parse_artefacts(&Ini::from_cp1251(&need(ARTEFACTS_FILE)?)).value;
+    data::apply_build(&mut units, &mut artefacts, options.build);
+    Ok((units, artefacts))
+}
+
 /// All `*.DTm` files of the maps folder, sorted by name.
 pub fn list_maps(dir: &Path) -> Result<Vec<MapEntry>, DtError> {
     let maps_dir = find(dir, MAPS_DIR)?;

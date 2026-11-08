@@ -7,11 +7,9 @@
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver};
 
-use razdor::dt::install::DtInstall;
 use razdor::hub::save_mod::{self, Need, Offer};
 use razdor::hub::{self, Hub, Installed, Kind, Source};
 use razdor::i18n::{lang, tr, Lang};
-use razdor::rules::content::Content;
 use razdor::rules::map_refs::Unknown;
 use razdor::rules::save::SaveMod;
 use razdor::trf;
@@ -63,20 +61,10 @@ fn lang_code() -> &'static str {
     }
 }
 
-/// The installed mods that have every id the save lacks, by id (an old save's check; a worker).
+/// The installed mods whose own tables have every id the save lacks, by id (an old save's check, on
+/// a worker). It reads the tables only (`save_mod::installed_matching`): no mod's folder is built.
 fn check_installed(local: &std::path::Path, base: &std::path::Path, missing: &Unknown) -> Vec<String> {
-    let installed = hub::read_installed(local);
-    let mut contents: Vec<(String, Content)> = Vec::new();
-    for (id, e) in &installed.entries {
-        if e.kind != Kind::Mod {
-            continue;
-        }
-        // The mod's folder as the switch builds it (`prepare_mod`), read as the game reads an install.
-        let Ok(dir) = hub::prepare_mod(local, base, id) else { continue };
-        let Ok(dt) = DtInstall::load(&dir) else { continue };
-        contents.push((id.clone(), Content::from_dt(&dt)));
-    }
-    save_mod::matching(missing, contents.iter().map(|(id, c)| (id.as_str(), c)))
+    save_mod::installed_matching(local, base, missing)
 }
 
 /// The download of mod `id` from the catalog (its cached copy), on a thread.

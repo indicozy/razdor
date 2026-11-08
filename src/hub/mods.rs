@@ -131,6 +131,28 @@ pub fn installed_mods(local: &Path) -> Vec<(String, Text)> {
     read_installed(local).entries.iter().filter(|(_, e)| e.kind == Kind::Mod).map(|(id, e)| (id.clone(), e.title.clone())).collect()
 }
 
+/// The bytes of file `name` (a name at the install's top, matched without case) as the game reads
+/// them with the layers `chain` over `base`: the topmost layer that has it (its copy in the mod's
+/// files folder), else the base install's. None when none has it. Builds no folder and copies
+/// nothing.
+pub fn layer_bytes(local: &Path, base: &Path, chain: &[String], name: &str) -> Option<Vec<u8>> {
+    for lid in chain.iter().rev() {
+        if let Some(path) = top_file(&mod_files_dir(local, lid), name) {
+            return std::fs::read(path).ok();
+        }
+    }
+    top_file(base, name).and_then(|path| std::fs::read(path).ok())
+}
+
+/// The file `name` at the top of `dir`, matched without case.
+fn top_file(dir: &Path, name: &str) -> Option<PathBuf> {
+    let exact = dir.join(name);
+    if exact.is_file() {
+        return Some(exact);
+    }
+    std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).find(|p| p.is_file() && p.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(name)))
+}
+
 /// Makes `id` the mod the game plays from now on (`None`: the base game), after its folder is
 /// built. Returns the folder the game reads.
 pub fn use_mod(local: &Path, base: &Path, id: Option<&str>) -> Result<PathBuf, String> {

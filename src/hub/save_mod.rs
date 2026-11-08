@@ -2,8 +2,10 @@
 //! mod whose content has every unit and item the save lacks. Pure: the App reads the installed
 //! mods and their content, and asks what to offer.
 
-use super::{plan_install, Catalog, Installed, Kind};
-use crate::rules::content::{Content, ItemId, UnitId};
+use std::path::Path;
+
+use super::{layer_bytes, layer_chain, plan_install, read_installed, Catalog, Installed, Kind};
+use crate::dt::install::read_tables;
 use crate::rules::map_refs::Unknown;
 use crate::rules::save::SaveMod;
 
@@ -41,14 +43,39 @@ pub fn need(recorded: Option<&SaveMod>, matches: &[String]) -> Need {
     }
 }
 
-/// Whether `content` has every unit and item of `missing`.
-pub fn covers(content: &Content, missing: &Unknown) -> bool {
-    missing.units.iter().all(|&u| content.try_unit(UnitId(u)).is_some()) && missing.items.iter().all(|&i| content.try_item(ItemId(i)).is_some())
+/// The unit types and item types an install has (their `GlobalIndex`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Ids {
+    pub units: Vec<u32>,
+    pub items: Vec<u32>,
 }
 
-/// The installed mods (id, content) whose content covers `missing`, in the order given.
-pub fn matching<'a>(missing: &Unknown, mods: impl IntoIterator<Item = (&'a str, &'a Content)>) -> Vec<String> {
-    mods.into_iter().filter(|(_, c)| covers(c, missing)).map(|(id, _)| id.to_string()).collect()
+/// Whether an install with `ids` has every unit and item of `missing`.
+pub fn covers(ids: &Ids, missing: &Unknown) -> bool {
+    missing.units.iter().all(|u| ids.units.contains(u)) && missing.items.iter().all(|i| ids.items.contains(i))
+}
+
+/// The installed mods whose own tables cover `missing`, by id, in the record's order. A mod's tables
+/// are read the way the game reads them with its layers (`layer_bytes`: the topmost layer's file,
+/// else the base's), and nothing else: no folder is built and nothing is copied (a mod's merged
+/// folder is a full copy of the install on a phone). A mod whose layers are not all installed, or
+/// whose tables do not read, is not a match.
+pub fn installed_matching(local: &Path, base: &Path, missing: &Unknown) -> Vec<String> {
+    let installed = read_installed(local);
+    let mut found = Vec::new();
+    for (id, entry) in &installed.entries {
+        if entry.kind != Kind::Mod {
+            continue;
+        }
+        let Ok(chain) = layer_chain(&installed, id) else { continue };
+        let bytes_of = |name: &str| layer_bytes(local, base, &chain, name);
+        let Ok((units, artefacts)) = read_tables(base, &bytes_of) else { continue };
+        let ids = Ids { units: units.iter().map(|u| u.id).collect(), items: artefacts.iter().map(|a| a.id).collect() };
+        if covers(&ids, missing) {
+            found.push(id.clone());
+        }
+    }
+    found
 }
 
 /// What to offer for `need`: `installed` is whether the recorded mod is installed, `download` the
@@ -83,14 +110,7 @@ pub fn download_size(catalog: &Catalog, installed: &Installed, id: &str, lang: &
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rules::content::testkit;
-    use crate::rules::map_refs::Unknown;
-
-    fn content(units: &[u32], items: &[u32]) -> Content {
-        let us = units.iter().map(|&u| testkit::warrior(u, 3, 3)).collect();
-        let is = items.iter().map(|&i| testkit::item(i, crate::dt::data::ArtefactType::Ring)).collect();
-        testkit::content(us, is)
-    }
+    use crate::hub::{mod_game_dir, mod_files_dir, InstalledEntry, Text};
 
     fn saved(id: &str) -> SaveMod {
         SaveMod { id: id.into(), version: "1.0".into() }
@@ -98,6 +118,10 @@ mod tests {
 
     fn missing(units: &[u32], items: &[u32]) -> Unknown {
         Unknown { units: units.to_vec(), items: items.to_vec() }
+    }
+
+    fn ids(units: &[u32], items: &[u32]) -> Ids {
+        Ids { units: units.to_vec(), items: items.to_vec() }
     }
 
     #[test]
@@ -114,14 +138,11 @@ mod tests {
     }
 
     #[test]
-    fn a_mod_matches_when_its_content_has_every_missing_id() {
+    fn a_mod_covers_the_missing_ids_only_when_it_has_all_of_them() {
         let m = missing(&[104, 105], &[35]);
-        assert!(covers(&content(&[104, 105], &[35]), &m));
-        assert!(!covers(&content(&[104], &[35]), &m), "a missing unit");
-        assert!(!covers(&content(&[104, 105], &[]), &m), "a missing item");
-        let evo = content(&[104, 105], &[35]);
-        let base = content(&[1], &[7]);
-        assert_eq!(matching(&m, [("evo", &evo), ("base", &base)]), vec!["evo".to_string()]);
+        assert!(covers(&ids(&[104, 105], &[35]), &m));
+        assert!(!covers(&ids(&[104], &[35]), &m), "a missing unit");
+        assert!(!covers(&ids(&[104, 105], &[]), &m), "a missing item");
     }
 
     #[test]
@@ -144,5 +165,104 @@ mod tests {
     fn an_inferred_mod_is_installed_and_no_known_mod_is_unknown() {
         assert_eq!(offer(&Need::Inferred("evo".into()), true, None), Offer::Installed { id: "evo".into() });
         assert_eq!(offer(&Need::Unknown, false, Some(1)), Offer::Unknown);
+    }
+
+    /// A scratch install and hub folder for one test: a base with three unit and item tables, and
+    /// mods recorded as installed. Removed by the caller.
+    struct Scratch {
+        local: std::path::PathBuf,
+        base: std::path::PathBuf,
+    }
+
+    impl Scratch {
+        fn new(tag: &str) -> Scratch {
+            let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+            let local = std::env::temp_dir().join(format!("razdor-savemod-{tag}-{}-{nanos}", std::process::id()));
+            let base = local.join("base");
+            std::fs::create_dir_all(&base).unwrap();
+            std::fs::write(base.join("_Global.ini"), "").unwrap();
+            std::fs::write(base.join("Rus_Units.ini"), "[Unit1]\r\nName=Base\r\nStartExpirience=1\r\nCost=1\r\nGlobalIndex=1\r\n").unwrap();
+            std::fs::write(base.join("Rus_Artefacts.ini"), "[Item7]\r\nIcon=a\r\nName=b\r\nType=Item\r\nCost=1\r\nGlobalIndex=7\r\n").unwrap();
+            Scratch { local, base }
+        }
+
+        /// Records mod `id` as installed (with `requires`) and writes its own tables (`units`, `items`).
+        fn mod_with(&self, id: &str, requires: &[&str], units: &[u32], items: &[u32]) {
+            let files = mod_files_dir(&self.local, id);
+            std::fs::create_dir_all(&files).unwrap();
+            let unit_text: String = units.iter().map(|u| format!("[Unit{u}]\r\nName=U{u}\r\nStartExpirience=1\r\nCost=1\r\nGlobalIndex={u}\r\n")).collect();
+            let item_text: String = items.iter().map(|i| format!("[Item{i}]\r\nIcon=a\r\nName=I{i}\r\nType=Item\r\nCost=1\r\nGlobalIndex={i}\r\n")).collect();
+            std::fs::write(files.join("Rus_Units.ini"), unit_text).unwrap();
+            std::fs::write(files.join("Rus_Artefacts.ini"), item_text).unwrap();
+            let mut installed = read_installed(&self.local);
+            installed.entries.insert(
+                id.into(),
+                InstalledEntry {
+                    version: "2.1".into(),
+                    kind: Kind::Mod,
+                    lang: "ru".into(),
+                    title: Text { ru: id.into(), en: String::new() },
+                    requires: requires.iter().map(|r| r.to_string()).collect(),
+                    files: Vec::new(),
+                    sources: Vec::new(),
+                },
+            );
+            std::fs::write(self.local.join("installed.json"), serde_json::to_vec(&installed).unwrap()).unwrap();
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.local);
+        }
+    }
+
+    #[test]
+    fn an_old_save_finds_the_installed_mod_that_has_the_missing_ids() {
+        let s = Scratch::new("found");
+        s.mod_with("evo", &[], &[104, 105], &[35]);
+        s.mod_with("other", &[], &[1], &[7]);
+        assert_eq!(installed_matching(&s.local, &s.base, &missing(&[104, 105], &[35])), vec!["evo".to_string()], "inferred-one");
+        assert_eq!(installed_matching(&s.local, &s.base, &missing(&[1], &[7])), vec!["other".to_string()], "the base's ids count for a mod too");
+        assert!(installed_matching(&s.local, &s.base, &missing(&[999], &[])).is_empty(), "inferred-none");
+    }
+
+    #[test]
+    fn several_installed_mods_that_cover_the_ids_are_several_matches() {
+        let s = Scratch::new("several");
+        s.mod_with("evo", &[], &[104], &[]);
+        s.mod_with("twin", &[], &[104], &[]);
+        let found = installed_matching(&s.local, &s.base, &missing(&[104], &[]));
+        assert_eq!(found.len(), 2);
+        assert_eq!(need(None, &found), Need::Unknown, "inferred-several is no known mod");
+    }
+
+    #[test]
+    fn a_mods_own_table_replaces_the_base_one() {
+        // The layer's file is the file the game reads: the base's unit 1 is not in the mod's table.
+        let s = Scratch::new("replace");
+        s.mod_with("evo", &[], &[104], &[]);
+        assert!(installed_matching(&s.local, &s.base, &missing(&[1], &[])).is_empty());
+    }
+
+    #[test]
+    fn a_mod_with_a_missing_requirement_is_not_a_match() {
+        let s = Scratch::new("requires");
+        s.mod_with("needs-base-mod", &["not-installed"], &[104], &[]);
+        assert!(installed_matching(&s.local, &s.base, &missing(&[104], &[])).is_empty());
+    }
+
+    /// Inferring a mod builds no game folder and copies nothing (a phone's copy of the install is
+    /// gigabytes; 1550's black screen came from one).
+    #[test]
+    fn the_inference_creates_no_game_folder() {
+        let s = Scratch::new("no-folder");
+        s.mod_with("evo", &[], &[104], &[35]);
+        let found = installed_matching(&s.local, &s.base, &missing(&[104], &[35]));
+        assert_eq!(found, vec!["evo".to_string()]);
+        assert!(!mod_game_dir(&s.local, "evo").exists(), "the mod's game folder must not be built");
+        assert!(!s.local.join("mods").join("evo").join("game").exists());
+        let built_anything = std::fs::read_dir(s.local.join("mods")).map(|d| d.count()).unwrap_or(0);
+        assert_eq!(built_anything, 1, "only the mod's own files folder is there");
     }
 }
