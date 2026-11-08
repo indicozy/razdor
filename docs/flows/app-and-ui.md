@@ -290,13 +290,13 @@ and the top of the bottom bar (`chrome::bar_height`, at the interface scale, 8 p
 title twin (the game menu's art window: `saves::exit_window`, `exit_dialog`, at the art's 634×516 px scaled by `opx`;
 the spellbook; the battle's stacked window). The windows over the map that have a title twin take `window_layout::over_map_scale`
 / `over_map_rect` (`window_scale` / `window_rect` pick them by `in_game`): the settings window (its guard is set in
-`options_window` over the map), «Ещё…» (`advanced_window`), the keys window (`keys_window`), the save window (`save_screen`,
+`options_window` over the map), the settings groups' windows («Карта», «Бой и армия», «Экран», «Управление», «Прочее», `group_window`), the keys window (`keys_window`), the save window (`save_screen`,
 the name field's keyboard lift applies to the scaled rect), the load window (`load_screen`), and `map_window`, which
 centres them over the map. Sideways on a phone these take the title's rule (`window_layout::sideways_window`, the same
 scale and rectangle as the main menu's window, a phone choice: the windows were small in landscape, playtest 1365).
 Over the map they use `window_layout::sideways_game_window`: the same, but never over the bottom bar; where the title
 rule's floor (the base scale) would make the window taller than the room between the top inset and the bar, it scales
-down to that room and stays centred there (the advanced settings, 900×650, at 2400×1080 and 2.625 px per dp). The map and the bar under them are drawn at the interface scale
+down to that room and stays centred there (a settings group window: 600 video px wide on the desktop, the room's size on a phone, as the group's rows need). The map and the bar under them are drawn at the interface scale
 (`world_view::window_backdrop`, `backdrop_lit`). The help overlay (F1, «Клавиши» in game, `hotkeys::help_overlay`)
 already spans the phone's width; on a phone with a bar it stands between the top inset and the bar (`has_bar`).
 Desktop is byte-identical, and so is landscape for the windows with no title twin (`game_rect` is None there, the old placements stay).
@@ -328,7 +328,7 @@ desktop and sideways pixel-identical, texts drawn under `dt_font::legacy_metrics
 - the title's bottom links are four marble tiles (`main_menu`); the options/settings windows take the phone's width
   and height with wrapped checkbox labels and sliders under their names (`option_slider_stacked`); the list
   scrolls by finger, the wheel and its bar (`phone_options`: `scrollbar_px`, 24 × k wide, twice the new-game
-  list's 12 × k, `new_game::list_track`); the advanced settings scroll both columns above «Ок» (`advanced_window`,
+  list's 12 × k, `new_game::list_track`); the settings group windows scroll their rows above «Ок» (`group_window`,
   `ADV_SCROLL`, `ADV_VIEW`: rows drawn and clicked only in the view, the right margin keeps 32 × k for the bar); keys
   (`keys_window_upright`) and the F1 list in dp; save/load with their buttons in one row; the reward windows'
   OK 120 × 44 dp and larger text (`dialog::OK_W_DP`, `BIG_TEXT`); the learnt-spell window padded, its spell card in
@@ -873,7 +873,7 @@ the install's, so they show in the new-game list. Snapshot scene: `hub[:<tab>[:<
   `sys-locale` crate; `language::lang_for_locale`: Russian for ru, uk, be, kk, English for the
   rest, and English when the locale cannot be read), with no cyrillic font English. Nothing is
   written for it, so a later change of the system language still applies until a pick is saved. The main menu's corner
-  link and the advanced settings' «Язык» button open it (`language::open_list`, the editor's
+  link and the Screen group's «Язык» button open it (`language::open_list`, the editor's
   drop-down list `widgets::open_list` drawn by `widgets::draw_popup` at the end of
   `App::frame`; while it is open the screen takes no input); `App::follow_language` takes the
   pick (`language::follow_pick`); F2 steps through it (`language::cycle`).
@@ -900,8 +900,7 @@ row width, and Razdor's own options (`updates`,
 map zoom, `leader_caption`: the leader's name under the event picture of a meeting, see
 `story::leader_caption` and `EventOutcome::MeetingArmy`). The windows are `main_menu::options` / `main_menu::options_window` (the
 original's: five slider rows, eight checkboxes, «Принять» keeps, «Отмена» restores what the
-window opened with) and `advanced_window` («Ещё…»: Razdor's own options, the screen, scale, the battle AI strength (`main_menu::AiStrength`, kept in sync with the `OptValue9` checkbox),
-font and language). Razdor's map options «Битвы армий на карте» (`battle_marks`, on) and «Список у
+window opened with) and the five group windows (`main_menu::Group`, `group_window`): Razdor's own rows, each in its group (`Group::rows`, the `Row` enum; a test checks that every row is in exactly one group). The settings window keeps the original's sliders and checkboxes and, under them, the five group buttons (`group_label_widths`, `group_per_row`: five, three or two to a row by the labels' widths, in a fixed block above Apply and Cancel on a phone). The groups: «Карта» (map zoom and its lock, 2.5D view, sprite size, two-finger turn, extending the map past its edges, battles on the map, minimap army list, leader's name, minimap corner and reset), «Бой и армия» (battle AI strength (`main_menu::AiStrength`, kept in sync with the `OptValue9` checkbox), unit battle participation, keep formation, max guards casters, army arrangement, experience on promotion), «Экран» (screen mode, interface scale, font, text size, large message windows, screen orientation on Android, language), «Управление» (keyboard shortcuts, touchpad mode on a phone), «Прочее» (updates and «Проверить», the game import). Razdor's map options «Битвы армий на карте» (`battle_marks`, on) and «Список у
 миникарты» (`army_list`, off) are pushed into `Game::battle_marks` / `Game::army_list` by
 `follow_settings`, like the rule options. The battles' mark and notice are drawn in
 `world_view::map_frame` (`draw_clash_marks`, `clash_notice`, from `Game::take_clashes`); the
@@ -965,7 +964,7 @@ time, the windows' keys, F1, F2, the saves, N), each with today's key as its def
 before, with its own guards. `keymap::set` swaps with a key another action has (the endless
 wait and the quick save may share F5). The overrides are saved as (action, key) names in
 `Settings::keys` (`audio.json`): `keymap::load` at start, `keymap::overrides` each frame. The
-window «Клавиши» (`main_menu::keys_window`) opens from the advanced settings: a click on a key
+window «Клавиши» (`main_menu::keys_window`) opens from the Controls group: a click on a key
 waits for the new one (`keymap::listen`); while it waits no shortcut fires. The F1 list fills
 its `{Action}` tokens with the keys (`hotkeys::fill_keys`). Fixed keys (dialogs, arrows, +/-,
 0, Space, the editor's) stay literal.
@@ -1014,7 +1013,7 @@ and, like Alt and F10, never the held key (`widgets::is_system_key`).
 ## How to add a setting
 
 Add a `#[serde(default)]` field to `ui::audio::Settings` (and to its `Default`), a checkbox
-or slider in `options_window` (an original option) or a button in `advanced_window` (a
+or slider in `options_window` (an original option) or a row of a group window (`Row`, `Group::rows`; a
 Razdor one), a translation line, and push it into `Game` at
 the top of `App::frame` if the rules need it. Old `audio.json` files keep loading.
 

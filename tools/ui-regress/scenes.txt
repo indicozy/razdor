@@ -15,7 +15,11 @@ title-noinstall-manual-1280 | title | 1280x800 | RAZDOR_DT_DIR=/nonexistent-razd
 title-noinstall-repair-1280 | title | 1280x800 | RAZDOR_DT_DIR=/mnt/ai_models/razdor-scratch/game-download/copy-install;RAZDOR_CONFIG_DIR=/nonexistent-razdor-config;HOME=/nonexistent-razdor-home
 title-noinstall-downloading-1280 | title | 1280x800 | RAZDOR_DT_DIR=/nonexistent-razdor-dt;RAZDOR_CONFIG_DIR=/nonexistent-razdor-config;HOME=/nonexistent-razdor-home;RAZDOR_SCENE_DOWNLOADING=40
 options-1280 | options | 1280x800 |
-options-advanced-1280 | options:advanced | 1280x800 |
+options-map-1280 | options:map | 1280x800 |
+options-battle-1280 | options:battle | 1280x800 |
+options-screen-1280 | options:screen | 1280x800 |
+options-controls-1280 | options:controls | 1280x800 |
+options-other-1280 | options:other | 1280x800 |
 scenarios-1280 | scenarios:РК1-Начало пути | 1280x800 |
 rules-menu-1280 | scenarios:РК1-Начало пути | 1280x800 | RAZDOR_SCENE_RULES=1
 # The rules window with the «Правила Раздора» row on (its six switches set; the others off).
@@ -37,8 +41,8 @@ army-tooltip-1280 | map:РК1-Начало пути | 1280x800 | RAZDOR_SCENE_AR
 clash-rk3-1280 | clash:РК3-Столица | 1280x800 |
 menu-1280 | menu:РК1-Начало пути | 1280x800 |
 settings-1280 | settings:РК1-Начало пути | 1280x800 |
-settings-advanced-1280 | settings:РК1-Начало пути:advanced | 1280x800 |
-settings-25d-advanced-1280 | settings:РК1-Начало пути:advanced | 1280x800 | RAZDOR_CASE_AUDIO={"map_tilt": true, "map_twist": true}
+settings-map-1280 | settings:РК1-Начало пути:map | 1280x800 |
+settings-25d-map-1280 | settings:РК1-Начало пути:map | 1280x800 | RAZDOR_CASE_AUDIO={"map_tilt": true, "map_twist": true}
 keys-1280 | settings:РК1-Начало пути:keys | 1280x800 |
 # The F1 list on the map (its «Изменить клавиши…» button) and in battle (the line that says where the keys change)
 help-map-1280 | map:РК1-Начало пути | 1280x800 | RAZDOR_SCENE_OPEN=3:keys
@@ -156,7 +160,7 @@ phone-options-dp-landscape | options | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_
 phone-save-dp-landscape | save:РК1-Начало пути | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
 phone-load-dp-landscape | map:РК1-Начало пути | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1;RAZDOR_SCENE_OPEN=3:load
 phone-settings-dp-landscape | settings:РК1-Начало пути | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
-phone-settings-advanced-dp-landscape | settings:РК1-Начало пути:advanced | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
+phone-settings-map-dp-landscape | settings:РК1-Начало пути:map | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
 # The noon report on phones (all four labels shown: gold 30881, mana 2000, income 500, wages 595):
 # held upright they stack the labels 2 × 2 (the owner's request); landscape keeps one row.
 phone-report-portrait | report:РК1-Начало пути:30881 | 1080x2160 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1

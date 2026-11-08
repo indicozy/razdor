@@ -124,10 +124,10 @@ RAZDOR_SNAPSHOT=/tmp/shot.png \
 xvfb-run -a -s "-screen 0 1280x800x24" target/release/razdor
 ```
 
-- `RAZDOR_SCENE` sets a screen up (`snapshot::stage`): `title`, `options[:advanced]`,
+- `RAZDOR_SCENE` sets a screen up (`snapshot::stage`): `title`, `options[:<group>]`,
   `load[:manual|auto[:<row>]]`, `map:<map>[:x,y]`, `walk:<map>:dx,dy`,
   `building:<map>:<n>[:barracks|garrison|market|sanctuary]`, `army:<map>[:<n>…]`,
-  `journal:<map>`, `spells:<map>`, `spells-pages:<map>`, `menu:<map>`, `settings:<map>[:advanced]`,
+  `journal:<map>`, `spells:<map>`, `spells-pages:<map>`, `menu:<map>`, `settings:<map>[:<group>]`,
   `battle:<map>:<n>`, `save:<map>`, `victory:<map>[:<gold>]`, `defeat:<map>`, `custom`,
   `custom-battle[:watch]`, `replay:<step>` (with `RAZDOR_REPLAY=<actions.jsonl>`). The full
   list is the module's doc comment. A window pushed by the scene (victory, defeat, a hall

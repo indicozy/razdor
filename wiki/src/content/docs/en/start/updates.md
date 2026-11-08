@@ -24,7 +24,7 @@ The window displays information about the changes relative to your current versi
 
 ## Update Settings
 
-You can change the system behavior via the "Settings" → "More..." → "Updates" menu.
+You can change the system behavior via the "Settings" → "Other..." → "Updates" menu.
 
 Available modes:
 * **"Ask"** — the default mode. A window appears prompting you to update.

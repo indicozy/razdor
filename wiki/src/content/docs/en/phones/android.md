@@ -37,7 +37,7 @@ By default, your finger acts as a cursor.
 
 ### Scrolling the Settings
 
-The "Sound, graphics and gameplay settings" window and the "Advanced settings" window scroll with a finger or the mouse wheel. The scrollbar on the right is the game's own, twice as wide as the one in the scenario list; you can drag its knob with a finger. In "Advanced settings" both columns scroll, and the "Ok" button stays at the bottom.
+The "Sound, graphics and gameplay settings" window and its group windows scroll with a finger or the mouse wheel. The scrollbar on the right is the game's own, twice as wide as the one in the scenario list; you can drag its knob with a finger. In a group window the rows scroll, and the "Ok" button stays at the bottom.
 
 ### Touchpad Mode
 

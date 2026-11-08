@@ -134,7 +134,7 @@ F1, Esc or a click closes this list = F1, Esc или щелчок закрыва
 Show the keys that have a button on the screen = Показать клавиши, для которых есть кнопка на экране
 Hide the keys that have a button on the screen = Скрыть клавиши, для которых есть кнопка на экране
 Change the keys… = Изменить клавиши…
-Keys change in: Settings → Advanced… → Keys… = Клавиши меняются: Настройки → Ещё… → Клавиши…
+Keys change in: Settings → Controls… → Keys… = Клавиши меняются: Настройки → Управление → Клавиши…
 Title screen = Титульный экран
 Hero choice = Выбор героя
 World map = Карта мира
@@ -432,8 +432,6 @@ Debug (F3) = Отладка (F3)
 Hero at ({x}, {y}), {time} = Герой на ({x}, {y}), {time}
 Pointer at ({x}, {y}) = Курсор на ({x}, {y})
 debug: event points, lanterns, events of places = отладка: точки событий, фонари, события мест
-Advanced settings = Дополнительные настройки
-Advanced… = Ещё…
 Map scroll speed = Скорость скроллинга карты
 Hero's walking speed = Скорость перемещения героя
 Do not load music and sounds (needs a restart) = Не загружать музыку и звуки (требует рестарта игры)
@@ -502,6 +500,15 @@ No units of this type are left for hire! = Нет персонажей тако�
 Restart the battle = Перезапуск битвы
 Do you really want to start this battle again? = Вы действительно хотите начать эту битву заново?
 Attention!\n\nYou cannot go back to the map without finishing the battle!\nTo stop the game under way, leave to the main menu (the game is not saved), or start this battle again (restart). = Внимание!!!\n\nНельзя выйти в режим игрового поля, не завершив битву!\nЕсли Вы желаете прервать активную игру, воспользуйтесь возможностью выйти в главное меню (без сохранения данных активной игры) или начните эту битву заново (рестарт).
+
+# The settings groups (backlog 1559): the buttons of the settings window and the groups' windows
+Map… = Карта…
+Battle and army… = Бой и армия…
+Screen… = Экран…
+Controls… = Управление…
+Other… = Прочее…
+Battle and army = Бой и армия
+Controls = Управление
 
 # Advanced settings: the map's zoom
 Map zoom = Масштаб карты

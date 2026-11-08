@@ -40,7 +40,7 @@ The item and potion rules apply to all armies: your troops, opponents, and garri
 
 ## Warrior Participation in Battles
 
-In the advanced settings (the "More..." button in the settings window), there is a parameter called **"Disable fighters"**, which is off by default.
+In the "Battle and army..." group of the settings window, there is a parameter called **"Disable fighters"**, which is off by default.
 
 When it is enabled, select a living non-hero in the army window and tick the **"Does not participate in battle"** check box above the "Don't remind" line (top right of the army window). After it is ticked or unticked the warrior is deselected. To return a warrior to battle, untick it.
 
@@ -50,7 +50,7 @@ When it is enabled, select a living non-hero in the army window and tick the **"
 
 ## Army Deployment and Pathfinding
 
-In the "More..." menu, there are two additional Razdor parameters:
+In the settings groups, there are two additional Razdor parameters:
 
 * **"Preserve formation"** (on by default): after a battle, all warriors, including those who perished, return to the cells they occupied before the battle. If off — warriors remain in the cells where they ended the battle, as in the original.
 
@@ -62,4 +62,4 @@ In the "More..." menu, there are two additional Razdor parameters:
 
 ## "Maximum" Protects Mages
 
-In the advanced settings ("More..."), there is a parameter called **"Protects mages"**, which is on by default. When enabled, "Maximum" will not place their mage or healer where a single enemy strike would kill them, if a move exists that avoids this. The original AI does not do this; disable the parameter to make "Maximum" play as before.
+In the "Battle and army..." group, there is a parameter called **"Protects mages"**, which is on by default. When enabled, "Maximum" will not place their mage or healer where a single enemy strike would kill them, if a move exists that avoids this. The original AI does not do this; disable the parameter to make "Maximum" play as before.

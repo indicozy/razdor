@@ -588,7 +588,7 @@ pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
                 asked = true;
             }
         } else {
-            text_fit(tr("Keys change in: Settings → Advanced… → Keys…"), inner.x + pad, foot.center().y + 6.0 * t, inner.w - 2.0 * pad, 16.0 * t, DIM);
+            text_fit(tr("Keys change in: Settings → Controls… → Keys…"), inner.x + pad, foot.center().y + 6.0 * t, inner.w - 2.0 * pad, 16.0 * t, DIM);
         }
         text_centered(tr("F1, Esc or a click closes this list"), inner.center().x, inner.bottom() - 12.0 * k, 15.0 * t, DIM);
     });

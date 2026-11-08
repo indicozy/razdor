@@ -86,8 +86,13 @@ SCREENS = [
     # The same, while the game downloads (the progress window at 40%).
     ("title-noinstall-downloading", "title", {"RAZDOR_DT_DIR": "/nonexistent-razdor-dt", "RAZDOR_CONFIG_DIR": "/nonexistent-razdor-config", "HOME": "/nonexistent-razdor-home", "RAZDOR_SCENE_DOWNLOADING": "40"}),
     ("options", "options", {}),
-    # Razdor's advanced settings (the phone's Advanced window, scrolled; its rows are measured in the view).
-    ("advanced", "options:advanced", {}),
+    # The settings group windows (backlog 1559): the Map window is the longest and scrolls; its rows are
+    # measured in the view.
+    ("options-group-map", "options:map", {}),
+    ("options-group-battle", "options:battle", {}),
+    ("options-group-screen", "options:screen", {}),
+    ("options-group-controls", "options:controls", {}),
+    ("options-group-other", "options:other", {}),
     ("scenarios", "scenarios:РК1-Начало пути", {}),
     # The scenario card (the owner's order of 2026-11-02): the picked map's picture, description and «Далее».
     ("scenarios-card", "scenarios:РК1-Начало пути", {"RAZDOR_SCENE_CARD": "1"}),
@@ -104,8 +109,8 @@ SCREENS = [
     # pointer on the first enemy army with the right button held, as the map's tooltips.
     ("army-tooltip", "map:РК1-Начало пути", {"RAZDOR_SCENE_ARMY_HOVER": "enemy", "RAZDOR_MOUSE_RIGHT": "1", "RAZDOR_SCENE_QUIET": "1"}),
     ("settings", "settings:РК1-Начало пути", {}),
-    # The advanced window with the 2.5D view on: its «Размер фигур» and «Поворот двумя пальцами» rows.
-    ("settings-25d", "settings:РК1-Начало пути:advanced", {"RAZDOR_CASE_AUDIO": '{"map_tilt": true, "map_twist": true}'}),
+    # The Map window with the 2.5D view on: its «Размер фигур» and «Поворот двумя пальцами» rows.
+    ("settings-25d", "settings:РК1-Начало пути:map", {"RAZDOR_CASE_AUDIO": '{"map_tilt": true, "map_twist": true}'}),
     ("keys", "settings:РК1-Начало пути:keys", {}),
     ("help", "map:РК1-Начало пути", {"RAZDOR_SCENE_OPEN": "3:keys"}),
     ("save", "save:РК1-Начало пути", {}),

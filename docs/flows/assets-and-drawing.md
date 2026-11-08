@@ -295,8 +295,8 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   flat fog's rectangles, laid on the ground), unless «Продолжать карту за краем» is on: then the
   ground and its fog go on past the edges (a short strip, then the fog) in the tilted view too (see «The world
   map» above).
-- The settings rows: «Вид карты» always in the advanced window; «Размер фигур» and «Поворот двумя
-  пальцами» beneath it with the 2.5D view on (desktop `advanced_window`, phone `advanced_window_phone`).
+- The settings rows: «Вид карты» always in the Map group; «Размер фигур» and «Поворот двумя
+  пальцами» beneath it with the 2.5D view on (`main_menu::Row`, the Map group's rows, drawn by `group_window` on both platforms).
 - Simplifications: the F3 overlay is off in 2.5D (its labels are placed on the flat map).
 
 ## Sound and music
