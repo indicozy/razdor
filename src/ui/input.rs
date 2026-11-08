@@ -172,6 +172,9 @@ pub fn begin_frame() {
         s.frame = if touchpad_on {
             merge(s.touch.step(&touches, dt, from, screen, map_scrolls), pad_frame)
         } else if gestures_on {
+            // A twist turns the 2.5D map only: with the flat map (or the setting off) two fingers
+            // only pinch and slide, as before.
+            s.gestures.twist_on = gestures::twist_on() && super::world_view::tilt_view();
             merge(s.gestures.step(&touches, dt, screen, map_scrolls, &s.swipe_prev), pad_frame)
         } else {
             pad_frame
@@ -221,6 +224,7 @@ fn merge(touch: Frame, pad: Frame) -> Frame {
         keys,
         scroll: if touch.scroll != (0.0, 0.0) { touch.scroll } else { pad.scroll },
         pan: (touch.pan.0 + pad.pan.0, touch.pan.1 + pad.pan.1),
+        rotate: touch.rotate + pad.rotate,
     }
 }
 
@@ -324,6 +328,11 @@ pub fn swipe_area(rect: Rect, kind: SwipeKind) {
 /// The map's pan this frame: the finger's slide over the map, in screen pixels.
 pub fn map_pan() -> (f32, f32) {
     with_frame(|f| f.pan)
+}
+
+/// The 2.5D map's turns this frame (a two-finger twist): +1 clockwise, -1 back.
+pub fn map_rotate() -> i32 {
+    with_frame(|f| f.rotate)
 }
 
 /// Where the pad's pointer is, while it is the pointer.

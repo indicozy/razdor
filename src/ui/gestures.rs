@@ -2,8 +2,9 @@
 //! phone or tablet, where the finger is the pointer. A tap clicks where the finger lifts; a
 //! double tap clicks at the first tap's place (the second tap does not shift the hero's route);
 //! a finger dragged holds the left button; a long press holds the right one (army and building
-//! information, tooltips, and every hint and item description in gesture mode); two fingers pinch the wheel (the map's zoom) or slide together (the
-//! map's scroll, or the wheel of a list). A one-finger swipe that starts on a registered area
+//! information, tooltips, and every hint and item description in gesture mode); two fingers pinch the wheel (the map's zoom), slide together (the
+//! map's scroll, or the wheel of a list) or twist (the 2.5D map turns, clockwise a step per 45°
+//! of twist). A one-finger swipe that starts on a registered area
 //! (`ui::input::swipe_area`: the map pans, a list or text box scrolls) is no click at all: it
 //! moves the map or turns the list's wheel; only a finger held still before it moves drags as
 //! above. [`GestureMapper`] turns the frame's touches into that mouse, purely; `ui::input` feeds
@@ -37,6 +38,24 @@ const DOUBLE_SLOP: f32 = 24.0;
 const PINCH_STEP: f32 = 60.0;
 /// Two fingers sliding turn the wheel a step per this many pixels.
 const WHEEL_STEP: f32 = 40.0;
+/// Two fingers twisting turn the 2.5D map a step per this many radians (45°) of twist, clockwise
+/// on the screen: the map follows the fingers 1:1.
+const TWIST_STEP: f32 = std::f32::consts::PI / 4.0;
+/// The fingers must turn this far (radians, 12°) since they came down before their motion is a
+/// twist rather than a pinch or a slide: a pinch's line between the fingers stays nearly still.
+const TWIST_LATCH: f32 = std::f32::consts::PI / 15.0;
+/// The setting «Поворот двумя пальцами» (`audio::Settings::map_twist`, pushed by [`set_twist`]).
+static TWIST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Puts the two-finger twist on or off (the setting; off, two fingers only pinch and slide).
+pub fn set_twist(on: bool) {
+    TWIST.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether the setting «Поворот двумя пальцами» is on.
+pub fn twist_on() -> bool {
+    TWIST.load(std::sync::atomic::Ordering::Relaxed)
+}
 /// A one-finger slide past the slop within this many seconds of the touch is a swipe over its
 /// area (shorter than [`LONG_TIME`]); a finger held still longer first is a held drag as before.
 const SWIPE_TIME: f32 = 0.25;
@@ -144,11 +163,21 @@ pub struct GestureMapper {
     /// A click made by the last frame's lift: let go this frame.
     release_left: bool,
     release_right: bool,
-    /// The two fingers' ids and the distance between them last frame.
-    pair: Option<(u64, u64, f32)>,
+    /// The two fingers' ids, the distance between them and the angle of the line from the first
+    /// to the second (screen radians, y down: clockwise grows) last frame.
+    pair: Option<(u64, u64, f32, f32)>,
     /// The pinch's distance change not yet a whole wheel step, and the same for the slide.
     pinch: f32,
     wheel: f32,
+    /// The twist not yet a whole map step (radians, clockwise positive).
+    twist: f32,
+    /// Whether the twist turns the map at all (the setting, and the 2.5D view: set by `ui::input`
+    /// each frame). Off, two fingers only pinch and slide, as before.
+    pub twist_on: bool,
+    /// The angle the pair has turned since it came down, and whether that turn has passed
+    /// [`TWIST_LATCH`] (then it is a twist, and the turns count).
+    turned: f32,
+    latched: bool,
     /// The swipe's rows not yet a whole wheel step.
     rows: f32,
 }
@@ -198,6 +227,9 @@ impl GestureMapper {
             }
         }
 
+        if self.fingers.len() < 2 && self.pair.take().is_some() {
+            self.settle_twist(&mut f);
+        }
         match self.fingers.len() {
             1 if !self.multi => {
                 let mut g = self.fingers[0];
@@ -279,12 +311,40 @@ impl GestureMapper {
     fn pinch_or_slide(&mut self, f: &mut Frame, dt: f32, screen: (f32, f32), map_scrolls: bool) {
         let (a, b) = (self.fingers[0], self.fingers[1]);
         let d = dist(a.last, b.last);
-        if let Some((_, _, prev)) = self.pair.filter(|p| (p.0, p.1) == (a.id, b.id)) {
+        let angle = (b.last.1 - a.last.1).atan2(b.last.0 - a.last.0);
+        let prev = self.pair.filter(|p| (p.0, p.1) == (a.id, b.id));
+        if prev.is_none() {
+            self.turned = 0.0;
+            self.latched = false;
+        }
+        if let Some((_, _, prev, prev_angle)) = prev {
             let change = d - prev;
             let moving: Vec<(f32, f32)> = [a.delta, b.delta].into_iter().filter(|v| *v != (0.0, 0.0)).collect();
             let n = moving.len().max(1) as f32;
             let mean = (moving.iter().map(|v| v.0).sum::<f32>() / n, moving.iter().map(|v| v.1).sum::<f32>() / n);
-            if change.abs() > mean.0.hypot(mean.1) {
+            let slide = mean.0.hypot(mean.1);
+            // The fingers go round each other: the arc they travel (half the distance between
+            // them a radian) beats both the change of the distance and the slide. And they must
+            // have turned past TWIST_LATCH since they came down: a pinch's or a slide's angle is
+            // small, so it stays a pinch or a slide.
+            let turn = (angle - prev_angle + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+            self.turned += turn;
+            let arc = turn.abs() * d / 2.0;
+            // Once latched, the fingers stay a twist until they lift: turning back past the start's
+            // angle is still a twist.
+            if self.twist_on && (self.latched || self.turned.abs() >= TWIST_LATCH) && arc > change.abs() && arc > slide {
+                // The first frame past the latch counts the whole turn since the fingers came down.
+                let credit = if self.latched {
+                    turn
+                } else {
+                    self.latched = true;
+                    self.turned
+                };
+                self.twist += credit;
+                let steps = (self.twist / TWIST_STEP).trunc();
+                self.twist -= steps * TWIST_STEP;
+                f.rotate += steps as i32;
+            } else if change.abs() > slide {
                 // Fingers apart is the wheel up, which zooms the map in.
                 let step = px(screen, PINCH_STEP);
                 self.pinch += change;
@@ -308,7 +368,15 @@ impl GestureMapper {
                 f.wheel += steps;
             }
         }
-        self.pair = Some((a.id, b.id, d));
+        self.pair = Some((a.id, b.id, d, angle));
+    }
+
+    /// The two fingers have lifted (fewer than two are down): a twist's leftover, under a step,
+    /// goes to the nearest step, so the view ends at a 45° multiple of the turns it took.
+    fn settle_twist(&mut self, f: &mut Frame) {
+        let steps = (self.twist / TWIST_STEP).round();
+        f.rotate += steps as i32;
+        self.twist = 0.0;
     }
 
     /// A finger came down at `pos`. The first one starts a session; a tap near the last one's
@@ -321,6 +389,9 @@ impl GestureMapper {
             self.pair = None;
             self.pinch = 0.0;
             self.wheel = 0.0;
+            self.twist = 0.0;
+            self.turned = 0.0;
+            self.latched = false;
             self.rows = 0.0;
             let anchor = match self.last_tap.take() {
                 Some((clicked, at)) if now - clicked <= DOUBLE_TIME && dist(at, pos) <= px(screen, DOUBLE_SLOP) => at,
@@ -630,6 +701,105 @@ mod tests {
             wheel += step(&mut m, &[touch(1, a, 500.0, Phase::Moved), touch(2, b, 500.0, Phase::Moved)], true).wheel;
         }
         assert_eq!(wheel, -1.0);
+    }
+
+    /// Two fingers round their midpoint (500, 500) on a 50 px radius, the second at `deg` from
+    /// east (clockwise on the screen grows it), the first opposite.
+    fn twist_touches(deg: f32, phase: Phase) -> [TouchPoint; 2] {
+        let (c, r) = ((350.0f32, 500.0f32), 50.0f32);
+        let (s, k) = deg.to_radians().sin_cos();
+        [touch(1, c.0 - r * k, c.1 - r * s, phase), touch(2, c.0 + r * k, c.1 + r * s, phase)]
+    }
+
+    #[test]
+    fn a_two_finger_twist_turns_the_map_a_step_per_forty_five_degrees() {
+        let mut m = GestureMapper { twist_on: true, ..GestureMapper::default() };
+        step(&mut m, &twist_touches(0.0, Phase::Started), true);
+        let mut rotate = 0;
+        let mut wheel = 0.0;
+        // 95 degrees clockwise in ten-degree frames (a little past 90, so float rounding is no
+        // matter): two steps of 45 degrees, and no wheel.
+        for i in 1..=10 {
+            let f = step(&mut m, &twist_touches(9.5 * i as f32, Phase::Moved), true);
+            rotate += f.rotate;
+            wheel += f.wheel;
+        }
+        assert_eq!((rotate, wheel), (2, 0.0));
+        // And back, counter-clockwise: the same two steps the other way.
+        for i in 1..=10 {
+            // Ends at -0.5°, not on a step's edge: float sums at exactly -90° could fall short of it.
+            rotate += step(&mut m, &twist_touches(95.0 - 9.55 * i as f32, Phase::Moved), true).rotate;
+        }
+        assert_eq!(rotate, 0);
+    }
+
+    #[test]
+    fn a_pinch_and_a_slide_turn_no_map() {
+        let mut m = GestureMapper { twist_on: true, ..GestureMapper::default() };
+        step(&mut m, &[touch(1, 300.0, 500.0, Phase::Started), touch(2, 400.0, 500.0, Phase::Started)], true);
+        for i in 0..3 {
+            let (a, b) = (300.0 - 10.0 * (i + 1) as f32, 400.0 + 10.0 * (i + 1) as f32);
+            assert_eq!(step(&mut m, &[touch(1, a, 500.0, Phase::Moved), touch(2, b, 500.0, Phase::Moved)], true).rotate, 0);
+        }
+        let mut s = GestureMapper { twist_on: true, ..GestureMapper::default() };
+        step(&mut s, &[touch(1, 300.0, 500.0, Phase::Started), touch(2, 400.0, 500.0, Phase::Started)], true);
+        for i in 0..3 {
+            let y = 500.0 - 10.0 * (i + 1) as f32;
+            assert_eq!(step(&mut s, &[touch(1, 300.0, y, Phase::Moved), touch(2, 400.0, y, Phase::Moved)], true).rotate, 0);
+        }
+    }
+
+    /// The twist is the setting's: off, the same turn of the fingers is no map turn at all, and
+    /// the pinch and slide it would be stay as they were.
+    #[test]
+    fn with_the_setting_off_a_twist_turns_no_map() {
+        let mut m = GestureMapper::default();
+        step(&mut m, &twist_touches(0.0, Phase::Started), true);
+        let mut rotate = 0;
+        for i in 1..=10 {
+            rotate += step(&mut m, &twist_touches(9.5 * i as f32, Phase::Moved), true).rotate;
+        }
+        assert_eq!(rotate, 0);
+    }
+
+    /// A pinch whose line between the fingers tilts a little (under the latch, 12°, in all) zooms
+    /// the wheel as before and turns no map; past the latch, a pinch still is a pinch, as its
+    /// arc is small against its distance change.
+    #[test]
+    fn a_pinch_with_a_small_tilt_zooms_and_turns_no_map() {
+        let mut m = GestureMapper { twist_on: true, ..GestureMapper::default() };
+        step(&mut m, &[touch(1, 300.0, 500.0, Phase::Started), touch(2, 400.0, 500.0, Phase::Started)], true);
+        let apart = |i: i32| {
+            let (deg, r) = (0.5 * i as f32, 50.0 + 10.0 * i as f32);
+            let (s, k) = deg.to_radians().sin_cos();
+            [touch(1, 350.0 - r * k, 500.0 - r * s, Phase::Moved), touch(2, 350.0 + r * k, 500.0 + r * s, Phase::Moved)]
+        };
+        let (mut rotate, mut wheel_up) = (0, 0.0);
+        for i in 1..=30 {
+            let f = step(&mut m, &apart(i), true);
+            rotate += f.rotate;
+            wheel_up += f.wheel;
+        }
+        assert!(wheel_up > 0.0, "fingers apart zoom in: {wheel_up}");
+        assert_eq!(rotate, 0, "a pinch with its line tilted 15° in all is no map turn");
+    }
+
+    /// A twist past a step, and the fingers lift before the next: the leftover goes to the
+    /// nearest step, so 30° of twist turns the map a step (45°), and 20° turns nothing.
+    #[test]
+    fn the_leftover_twist_snaps_to_the_nearest_step_when_the_fingers_lift() {
+        for (deg, want) in [(30.0f32, 1), (20.0, 0)] {
+            let mut m = GestureMapper { twist_on: true, ..GestureMapper::default() };
+            step(&mut m, &twist_touches(0.0, Phase::Started), true);
+            let mut rotate = 0;
+            for i in 1..=10 {
+                rotate += step(&mut m, &twist_touches(deg * i as f32 / 10.0, Phase::Moved), true).rotate;
+            }
+            assert_eq!(rotate, 0, "{deg}°: under a step while the fingers are down");
+            let lift = [touch(1, 350.0 - 50.0 * (deg.to_radians()).cos(), 500.0 - 50.0 * (deg.to_radians()).sin(), Phase::Ended)];
+            rotate += step(&mut m, &lift, true).rotate;
+            assert_eq!(rotate, want, "{deg}° of twist when the fingers lift");
+        }
     }
 
     #[test]

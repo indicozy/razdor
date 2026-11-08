@@ -108,6 +108,11 @@ def run_case(case, index, out, dt_dir, binary):
         "RAZDOR_SNAPSHOT": str(shot),
     }
     env.update(case["extra"])
+    # A case's own saved settings: `RAZDOR_CASE_AUDIO` (the JSON of `audio.json`) is this tool's key,
+    # not the game's; the case's save folder gets the file, so the game starts with those settings.
+    audio = env.pop("RAZDOR_CASE_AUDIO", None)
+    if audio is not None:
+        (saves / "audio.json").write_text(audio, encoding="utf-8")
     w, h = case["size"].split("x")
     # A display number of its own per case: `xvfb-run -a` races when several start at once.
     display = str(XVFB_FIRST_DISPLAY + index)

@@ -96,11 +96,16 @@ SCREENS = [
     # The same window with the «Правила Раздора» row on (its six switches set).
     ("rules-preset", "scenarios:РК1-Начало пути", {"RAZDOR_SCENE_RULES": "1", "RAZDOR_SCENE_EXPERIMENTAL": "bless,poison,spells,merchant,rear,store"}),
     ("map","map:РК1-Начало пути", {}),
+    # The 2.5D map (the setting on) turned 45°, with its compass beside the bottom bar (the start turn
+    # is the snapshot's; the compass shows while the view is turned away from north up).
+    ("map-compass", "map:РК1-Начало пути", {"RAZDOR_CASE_AUDIO": '{"map_tilt": true}', "RAZDOR_VIEW_YAW": "45"}),
     ("minimap", "minimap:РК1-Начало пути", {}),
     # An army's hover card on the map (its 2×6 cells beside the text, a player's report 1554): the
     # pointer on the first enemy army with the right button held, as the map's tooltips.
     ("army-tooltip", "map:РК1-Начало пути", {"RAZDOR_SCENE_ARMY_HOVER": "enemy", "RAZDOR_MOUSE_RIGHT": "1", "RAZDOR_SCENE_QUIET": "1"}),
     ("settings", "settings:РК1-Начало пути", {}),
+    # The advanced window with the 2.5D view on: its «Размер фигур» and «Поворот двумя пальцами» rows.
+    ("settings-25d", "settings:РК1-Начало пути:advanced", {"RAZDOR_CASE_AUDIO": '{"map_tilt": true, "map_twist": true}'}),
     ("keys", "settings:РК1-Начало пути:keys", {}),
     ("help", "map:РК1-Начало пути", {"RAZDOR_SCENE_OPEN": "3:keys"}),
     ("save", "save:РК1-Начало пути", {}),

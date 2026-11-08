@@ -40,6 +40,7 @@ Razdor plays the original game's scenarios using its original rules. Below is wh
 * **Experience on promotion** in additional settings: as in the original, a unit's experience is dropped when it is promoted to a new class; "Kept" keeps it.
 * **Leader's name under the event picture:** when an event fires on meeting an army, its window writes the army's leader name under the picture; turn it off in the additional settings ("Leader's name").
 * **Minimap corner** in additional settings: the minimap can be placed in any corner, and the "Reset" button will return it to its default size and position.
+* **2.5D map view** in additional settings ("Map view", off by default): the map is tilted, and the figures stand on the ground. Q and E turn the map 45°; on a phone, the two-finger turn is switched on by the "Two-finger turn" setting. A compass button next to the bottom bar appears while the map is turned, and brings it back to north up. "Sprite size" (1×, 1.5× or 2×) is 1.5× by default.
 
 ## Sound
 

@@ -1317,6 +1317,9 @@ pub fn impossible(audio: &super::audio::Settings) -> bool {
 /// Puts the settings window's choices where the interface reads the install's `[Options]`
 /// (the original writes them back into its ini): the scroll speed, the autosave, the hints.
 pub fn apply_options(audio: &super::audio::Settings) {
+    super::world_view::set_tilt_view(audio.map_tilt);
+    super::world_view::set_sprite_size(audio.map_sprite_size);
+    super::gestures::set_twist(audio.map_twist);
     chrome::set_option_override("ScrollSpeed", audio.scroll_speed.map(|v| (v.round() as i32).to_string()));
     chrome::set_option_override("OptValue8", audio.autosave.map(|on| if on { "1" } else { "0" }.to_string()));
     set_hints(!hints_off(audio));
@@ -1746,7 +1749,9 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     let lang_hint = wrap(super::language::hint(), rw, 12.0 * k);
     let hints_h = 44.0 * k + ai_hint.len() as f32 * 17.0 * k + 48.0 * k + lang_hint.len() as f32 * 17.0 * k;
     let ok_top = inner.h - 16.0 * k - ok_h - 4.0 * k;
-    let mut pitch = right_column_pitch(30.0 * k, ok_top, 12.0, hints_h, 44.0 * k);
+    // The 2.5D rows (`map_view_rows`): «Вид карты» always, and «Размер фигур» and «Поворот двумя
+    // пальцами» with the 2.5D view on, one pitch each more.
+    let mut pitch = right_column_pitch(30.0 * k, ok_top, 13.0 + map_view_rows(audio), hints_h, 44.0 * k);
     // At a grown size the rows keep a 2 px gap under their grown buttons (at Normal nothing).
     if row_h > 28.0 * k {
         pitch = pitch.max(row_h + 2.0 * k);
@@ -1841,6 +1846,17 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     // picture (`Game::leader_caption`, `story::show`).
     if row(tr("Leader's name"), if audio.leader_caption { tr("On") } else { tr("Off") }, &mut y) {
         audio.leader_caption = !audio.leader_caption;
+    }
+    // Razdor's (the owner's decision, 2026-11-02): the world map's 2.5D view (`world_view::tilt_view`),
+    // and with it its sprites' size and the two-finger turn (`gestures`); the rows stay together.
+    if row(tr("Map view"), map_view_label(audio), &mut y) {
+        audio.map_tilt = !audio.map_tilt;
+    }
+    if audio.map_tilt && row(tr("Sprite size"), &sprite_size_label(audio.map_sprite_size), &mut y) {
+        audio.map_sprite_size = super::world_view::next_sprite_size(audio.map_sprite_size);
+    }
+    if audio.map_tilt && row(tr("Two-finger turn"), if audio.map_twist { tr("On") } else { tr("Off") }, &mut y) {
+        audio.map_twist = !audio.map_twist;
     }
     // Razdor's options (a player's report: the minimap dragged where it is hard to move back):
     // its corner, cycled clockwise, and «Сбросить» puts its size and place back to the default.
@@ -2031,6 +2047,16 @@ fn advanced_window_phone(audio: &mut super::audio::Settings, over_map: bool, dp:
     if phone_row(&mut right, &geo, tr("Leader's name"), if audio.leader_caption { tr("On") } else { tr("Off") }).0 {
         audio.leader_caption = !audio.leader_caption;
     }
+    // The world map's 2.5D view and, with it, its sprites' size and the two-finger turn (as on the desktop).
+    if phone_row(&mut right, &geo, tr("Map view"), map_view_label(audio)).0 {
+        audio.map_tilt = !audio.map_tilt;
+    }
+    if audio.map_tilt && phone_row(&mut right, &geo, tr("Sprite size"), &sprite_size_label(audio.map_sprite_size)).0 {
+        audio.map_sprite_size = super::world_view::next_sprite_size(audio.map_sprite_size);
+    }
+    if audio.map_tilt && phone_row(&mut right, &geo, tr("Two-finger turn"), if audio.map_twist { tr("On") } else { tr("Off") }).0 {
+        audio.map_twist = !audio.map_twist;
+    }
     let corner_label = match minimap::corner() {
         minimap::Corner::TopRight => tr("Top right"),
         minimap::Corner::BottomRight => tr("Bottom right"),
@@ -2147,6 +2173,22 @@ fn phone_button_draw(r: Rect, label: &str, size: f32) -> bool {
 /// The right column's row pitch in the advanced window (px at its scale): `max` (the original's
 /// 44 px), or less when the column's `rows` pitches and its `hints` (px, the hint slots and the
 /// language's description) would run past `limit` (the Ok button's top), counted from `top`.
+/// The advanced window's world-map view row: «Плоский» or «2.5D».
+fn map_view_label(audio: &super::audio::Settings) -> &'static str {
+    if audio.map_tilt { "2.5D" } else { tr("Flat") }
+}
+
+/// The 2.5D view's rows beside «Вид карты» in the right column: two when the view is on (the
+/// sprites' size, the two-finger turn), none when it is off.
+fn map_view_rows(audio: &super::audio::Settings) -> f32 {
+    if audio.map_tilt { 2.0 } else { 0.0 }
+}
+
+/// The sprites' size as its row shows it: `1×`, `1.5×`, `2×`, or a stored value.
+fn sprite_size_label(f: f32) -> String {
+    format!("{}×", (f * 100.0).round() / 100.0)
+}
+
 fn right_column_pitch(top: f32, limit: f32, rows: f32, hints: f32, max: f32) -> f32 {
     ((limit - top - hints) / rows).min(max)
 }

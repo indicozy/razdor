@@ -43,6 +43,8 @@ Keys do nothing while you type text (the hero's name, a save name, the editor fi
 | 1 / 4, or left / right click on the time panel | Wait 1 or 4 hours |
 | F4 / F5 | F4 — wait without end; F5 — stop waiting |
 | M | Minimap |
+| Q / E (2.5D view) | Turn the map 45° left / right |
+| Two fingers, twist (phone, with the "Two-finger turn" setting) | Turn the map 45° as the fingers turn (2.5D view) |
 | Tab | Centre the camera on the hero |
 | J / B / A | Hero's diary / Spell book / Hero and army |
 | F5 | Quick save (replaces the previous one) |

@@ -235,6 +235,51 @@ with its offset `AiMind::idle_offset`. The offsets come from the loads
 also counts `idle_restarts`); `stamp_idle` stamps each army at the first frame drawn and again when
 its restart count changes, and `MapView::forget_shows` drops the stamps of the last game.
 
+**The 2.5D view** (`src/ui/view25.rs`: the tilted camera's maths, pure and tested). The setting
+«Вид карты» (`audio::Settings::map_tilt`, off by default, pushed by `main_menu::apply_options` into
+`world_view::set_tilt_view`); the env `RAZDOR_VIEW=25d|flat` overrides it for snapshots, with
+`RAZDOR_VIEW_PITCH` (the start tilt), `RAZDOR_VIEW_YAW` (the start turn) and `RAZDOR_VIEW_SPRITE` (the
+sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
+
+- `looking_in` gives the flat camera a `Tilt`: a `TiltCamera` fitted to the view, so the cell under
+  the target is as wide as a flat cell, and the ground the view shows (`plan`) and the ground the
+  drawing culls to (`cull`). The drawing runs in the flat camera's 2D space, `in_view` sets the 3D
+  view (`View3d`: depth off, no viewport) on the cull footprint (`tilted_space`). `ground` lays that
+  space on the ground for the terrain, the hills, marks, the route, bridges and the fog;
+  `standing` makes each sprite a billboard through its foot (`view25::billboard_model`). With the
+  setting off, `in_view`, `ground` and `standing` only call their closures: the flat view is the same
+  code path.
+- Picking: `map_pointer` is the ground under the pointer (NaN over the sky), `tile_under_pixel` the
+  cell under a pixel at any turn (tested in `tilt_tests`). Overlays on the window (tooltip, battle
+  marks, effects, the travel time) use `Camera::screen_at`. A figure is picked by its cell.
+- **Turning.** Q and E turn 45° (`TILT_YAW_STEP`); the shown yaw eases to its target (`ease_yaw`,
+  12 a second, the short way round, snapped within 0.05°). Q and E cut a walk only on the flat map
+  (`cuts_walk`). Screen moves (keys, edge, stick, drag, slide) go through `Camera::screen_to_world_delta`
+  and `turn_ground`. Turned, standing sprites sort back to front by their foot's depth (`sprite_key`,
+  `is_turned`; at yaw 0 the cell pass), every side of the cull takes the larger margin, and a figure's
+  facing row follows the screen (`Camera::facing`).
+- **Two-finger turn** (setting «Поворот двумя пальцами», `Settings::map_twist`, off by default; `gestures::set_twist`).
+  `ui::input` sets the mapper's `twist_on` only with the setting and the 2.5D view on. The fingers must
+  turn 12° past their touch (`TWIST_LATCH`) before the motion is a twist: a pinch or a slide keeps its
+  wheel and pan. Then each 45° of turn is a step, quantized while the fingers move (the eased view
+  follows); the leftover under a step goes to the nearest step when the fingers lift (`settle_twist`).
+- **Compass.** `compass_rect` shows the button while the view is turned away from north up
+  (`compass_shows`, the flat view never). Its place is the first of: beside the bottom bar (right,
+  then left), above it at its right or left end, the top right corner, clear of the minimap window
+  and its army list (`compass_place`); phones 48 dp, the desktop 40 px. Its needle is north on the
+  screen (`view25::north_on_screen`). A tap (`tapped_in`) sets the yaw target to 0 (`reset_tilt_yaw`);
+  it hides once the view is back. Its rectangle counts as the minimap's pointer (`on_minimap`), so the
+  map takes no click under it.
+- **Sprites' size** «Размер фигур» (`Settings::map_sprite_size`, 1.5 by default, cycled 1×, 1.5×, 2×
+  by `next_sprite_size`; `set_sprite_size` pushes it; `sprite_size()` is what `standing` scales by).
+- **The border** (`draw_border`): black lines on the ground before the sprites, a 0.15-cell line on the
+  fog grid's edge and a 0.07-cell one 0.35 cell outside (at least 1.5 px). The fog, drawn after the
+  world, darkens it where the ground is unexplored. Past the map's edges the ground is black (the
+  flat fog's rectangles, laid on the ground); the ground does not go on past the edges.
+- The settings rows: «Вид карты» always in the advanced window; «Размер фигур» and «Поворот двумя
+  пальцами» beneath it with the 2.5D view on (desktop `advanced_window`, phone `advanced_window_phone`).
+- Simplifications: the F3 overlay is off in 2.5D (its labels are placed on the flat map).
+
 ## Sound and music
 
 - `src/dt/sound.rs`: `SoundTable::from_ini` (`_Sounds.ini`: `[Backgrounds]` music keys,

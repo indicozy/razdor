@@ -26,6 +26,9 @@ authors-1280 | authors:25 | 1280x800 |
 fonts-1280 | fonts | 1280x800 |
 # The world map and its windows
 map-rk1-1280 | map:РК1-Начало пути | 1280x800 |
+# The 2.5D world map (the setting on, from its own audio.json): level, and turned 45° with its compass.
+map-25d-rk1-1280 | map:РК1-Начало пути | 1280x800 | RAZDOR_CASE_AUDIO={"map_tilt": true}
+map-25d-turned-rk1-1280 | map:РК1-Начало пути | 1280x800 | RAZDOR_CASE_AUDIO={"map_tilt": true};RAZDOR_VIEW_YAW=45
 map-rk3-1280 | map:РК3-Столица | 1280x800 |
 minimap-rk1-1280 | minimap:РК1-Начало пути | 1280x800 |
 minimap-rk3-1280 | minimap:РК3-Столица | 1280x800 |
@@ -35,6 +38,7 @@ clash-rk3-1280 | clash:РК3-Столица | 1280x800 |
 menu-1280 | menu:РК1-Начало пути | 1280x800 |
 settings-1280 | settings:РК1-Начало пути | 1280x800 |
 settings-advanced-1280 | settings:РК1-Начало пути:advanced | 1280x800 |
+settings-25d-advanced-1280 | settings:РК1-Начало пути:advanced | 1280x800 | RAZDOR_CASE_AUDIO={"map_tilt": true, "map_twist": true}
 keys-1280 | settings:РК1-Начало пути:keys | 1280x800 |
 # The F1 list on the map (its «Изменить клавиши…» button) and in battle (the line that says where the keys change)
 help-map-1280 | map:РК1-Начало пути | 1280x800 | RAZDOR_SCENE_OPEN=3:keys

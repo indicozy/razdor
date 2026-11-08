@@ -849,6 +849,12 @@ fn list_rect(n: usize, o: Rect, bottom: f32, k: f32) -> Option<Rect> {
     Some(Rect::new(o.x, top, o.w, h))
 }
 
+/// The army list's rectangle under the minimap window `o` (`None` when no list is drawn): the
+/// compass keeps off it.
+pub fn list_area(game: &Game, o: Rect, bottom: f32) -> Option<Rect> {
+    list_rect(game.visible_armies().len(), o, bottom, super::chrome::k())
+}
+
 /// The pointer is over the army list under the minimap `o`.
 pub fn list_under_pointer(game: &Game, o: Rect, bottom: f32) -> bool {
     list_rect(game.visible_armies().len(), o, bottom, super::chrome::k()).is_some_and(|r| r.contains(Vec2::from(crate::ui::widgets::pointer())))

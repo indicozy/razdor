@@ -86,6 +86,9 @@ pub struct Frame {
     /// A one-finger swipe over the map this frame: the finger's slide in screen pixels
     /// (`ui::gestures`, `SwipeKind::Pan`); the map moves with it.
     pub pan: (f32, f32),
+    /// Turns of the 2.5D map this frame (`ui::gestures`, a two-finger twist): +1 turns the
+    /// ground clockwise on the screen, -1 back.
+    pub rotate: i32,
 }
 
 /// The keys of the buttons: Start is Esc (menus, back), X Enter (OK, Yes), Y Space (the
