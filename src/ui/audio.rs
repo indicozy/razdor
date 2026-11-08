@@ -235,6 +235,9 @@ pub struct Settings {
     pub map_zoom: f32,
     /// The wheel and the +/- keys leave the map's zoom alone: it stays `map_zoom`.
     pub zoom_locked: bool,
+    /// «Продолжать карту за краем» (Razdor's, off by default): the ground goes on past the map's
+    /// edges, mirrored and sinking into the sky, where the original shows black (`world_view`).
+    pub map_extended: bool,
     /// The Community's battle animation speed (`AnimationSpeed`, percent 0..99); `None`
     /// until chosen: the install's.
     pub anim_speed: Option<f32>,
@@ -307,7 +310,7 @@ pub fn must_request(asked: Option<i32>, want: i32) -> bool {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), keep_xp_on_promotion: false, keep_formation: true, battle_marks: true, army_list: false, map_tilt: false, map_sprite_size: super::world_view::DEFAULT_SPRITE_SIZE, map_twist: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new() }
+        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), keep_xp_on_promotion: false, keep_formation: true, battle_marks: true, army_list: false, map_tilt: false, map_sprite_size: super::world_view::DEFAULT_SPRITE_SIZE, map_twist: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, map_extended: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new() }
     }
 }
 
@@ -1037,6 +1040,16 @@ mod tests {
         let off = Settings { keep_formation: false, ..Settings::default() };
         let back: Settings = serde_json::from_str(&serde_json::to_string(&off).unwrap()).unwrap();
         assert!(!back.keep_formation);
+    }
+
+    #[test]
+    fn map_extended_defaults_off_and_survives_serialization() {
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert!(!old.map_extended, "an older file: the map's edges stay black, as the original's");
+        assert!(!Settings::default().map_extended);
+        let on = Settings { map_extended: true, ..Settings::default() };
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&on).unwrap()).unwrap();
+        assert!(back.map_extended);
     }
 
     #[test]

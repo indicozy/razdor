@@ -200,6 +200,23 @@ original pixel on screen (0.9375 × `k`). Without the install the lines are plai
 
 ## The world map
 
+**Past the map's edges** (the setting «Продолжать карту за краем», `Settings::map_extended`,
+off by default; `world_view::set_edge_pref` takes it every frame): off, the original's black.
+On, the ground goes on there. The terrain shader folds a cell past the border back about it
+(`terrain::mirror_cell`, GLSL `fold`, period 2n), greys it 35% from the edge and sinks it into
+the sky colour (`terrain::EDGE_SKY`) over `EDGE_FADE` = 14 cells; `draw_terrain` then covers the
+whole drawn ground. The fog and a showing's mask are drawn mirrored over it
+(`Camera::fog_texels`, `minimap::draw_fog_mirrored` / `draw_mirrored`, the texture's wrap set to
+mirror), so the extension is as dark as the edge it goes on from, and the black beyond the map
+is not drawn. Scenery within 14 cells of an edge has mirrored copies (`edge_scenery`,
+`edge_tiles`: explored sources only, classes 1–11 only, drawn as the map's own, never
+hit-tested). Visual only: no rule, path, click or AI change. Hex maps (the built-in demo) keep
+black. The sprites are not tinted toward the sky there (the fog is still drawn over them).
+The camera may reach `EDGE_FADE` cells past each edge (`Camera::looking_in`, the scroll range
+included), and a map narrower than the view is centred; off, the view stays on the map as before.
+The 2.5D view (`tilt_view`) takes the same passes in its ground footprint, so the extension goes
+on at every turn (the edge copies are depth-sorted with the map's sprites by `sprite_key`).
+
 `src/ui/world_view.rs`: `draw_world` draws only the visible cells — `draw_terrain`
 (`TerrainLayer::draw` in `src/ui/terrain.rs`: one shader quad mixing the four nearest cell
 textures from a 4×4 atlas, water frames multiplied in), then decorations
@@ -275,7 +292,9 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
 - **The border** (`draw_border`): black lines on the ground before the sprites, a 0.15-cell line on the
   fog grid's edge and a 0.07-cell one 0.35 cell outside (at least 1.5 px). The fog, drawn after the
   world, darkens it where the ground is unexplored. Past the map's edges the ground is black (the
-  flat fog's rectangles, laid on the ground); the ground does not go on past the edges.
+  flat fog's rectangles, laid on the ground), unless «Продолжать карту за краем» is on: then the
+  ground, the fog and the scenery copies go on past the edges in the tilted view too (see «The world
+  map» above).
 - The settings rows: «Вид карты» always in the advanced window; «Размер фигур» and «Поворот двумя
   пальцами» beneath it with the 2.5D view on (desktop `advanced_window`, phone `advanced_window_phone`).
 - Simplifications: the F3 overlay is off in 2.5D (its labels are placed on the flat map).

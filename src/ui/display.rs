@@ -742,6 +742,8 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
         if let Some(z) = std::env::var("RAZDOR_MAP_ZOOM").ok().and_then(|s| s.trim().parse::<f32>().ok()) {
             crate::ui::world_view::set_zoom_prefs(z, true);
         }
+        // `RAZDOR_MAP_EDGE=1`: the map's ground goes on past its edges («Продолжать карту за краем»).
+        crate::ui::world_view::set_edge_pref(std::env::var("RAZDOR_MAP_EDGE").is_ok_and(|v| v.trim() == "1"));
         return;
     }
     read_dp_once();
@@ -749,6 +751,7 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
     set_text_size(settings.text_size);
     set_large_windows(settings.large_windows);
     crate::ui::world_view::set_zoom_prefs(settings.map_zoom, settings.zoom_locked);
+    crate::ui::world_view::set_edge_pref(settings.map_extended);
     follow(settings.display.for_device(dp_px().is_some()));
 }
 

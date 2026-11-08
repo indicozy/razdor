@@ -755,6 +755,15 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                 let t = (x.parse().map_err(|_| "bad x")?, y.parse().map_err(|_| "bad y")?);
                 game.pos = game.world.map.center(t);
             }
+            // `RAZDOR_SCENE_EXPLORED=1`: the whole map explored, so the fog shows no more than the
+            // ground (the map's edges, for the «Продолжать карту за краем» renders).
+            if std::env::var("RAZDOR_SCENE_EXPLORED").is_ok_and(|v| v.trim() == "1") {
+                for y in 0..game.world.map.h {
+                    for x in 0..game.world.map.w {
+                        game.fog.mark((x, y));
+                    }
+                }
+            }
             Screen::WorldMap
         }
         "walk" => {

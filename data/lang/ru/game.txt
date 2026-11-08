@@ -510,6 +510,10 @@ Wheel and +/- = Колесо и +/−
 The zoom the map plays at. The wheel steps away from it and the 0 key comes back to it; locked, the map always shows it. = Масштаб, в котором идёт игра. Колесо мыши отходит от него, клавиша 0 возвращает к нему; зафиксированный, он не меняется.
 back to the map's zoom from the settings = вернуть масштаб карты из настроек
 
+# Advanced settings: the ground past the map's edges (Razdor's, off by default)
+Extend the map past its edges = Продолжать карту за краем
+Off: past the map's edges is black, as in the original. On: the ground goes on there, mirrored and sinking into the sky, with its scenery and fog. = Выключено: за краем карты чернота, как в оригинале. Включено: местность продолжается за краем — зеркально, с затуханием в небо, вместе с деревьями и туманом.
+
 # Advanced settings: arranging the army outside battle
 Army arrangement = Расстановка армии
 Clicks = Щелчками

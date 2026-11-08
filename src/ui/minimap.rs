@@ -17,6 +17,7 @@ use razdor::local;
 use std::cell::RefCell;
 
 use crate::ui::input::{is_mouse_button_down};
+use macroquad::miniquad::TextureWrap;
 use macroquad::prelude::*;
 
 use razdor::rules::fog::Fog;
@@ -167,6 +168,27 @@ pub fn draw_fog(fog: &Fog, held: &[(i32, i32)], tl: Vec2, br: Vec2) {
     }
     let tex = fog_texture(fog, held);
     draw_texture_ex(&tex, tl.x, tl.y, WHITE, DrawTextureParams { dest_size: Some(br - tl), ..Default::default() });
+}
+
+/// [`draw_fog`] of a map past its edges (the setting «Продолжать карту за краем»): `dest` shows the
+/// fog's texels `src` (in cells: texel `i` is cell `i`, its centre at `i + ½`), and the texels past
+/// the fog's own are mirrored about its border, as the ground is ([`super::terrain::mirror_cell`]).
+/// See [`draw_mirrored`].
+pub fn draw_fog_mirrored(fog: &Fog, held: &[(i32, i32)], dest: Rect, src: Rect) {
+    if !fog.enabled || fog.w <= 0 || fog.h <= 0 {
+        return;
+    }
+    draw_mirrored(&fog_texture(fog, held), dest, src);
+}
+
+/// Draws a map's one-texel-per-cell texture `tex` (the fog, or a showing's mask) into `dest`,
+/// showing its texels `src` (see [`draw_fog_mirrored`]). The texture wraps mirrored from now on:
+/// inside its texels a mirrored sample is the clamped one, so the flat draws of it are the same.
+pub fn draw_mirrored(tex: &Texture2D, dest: Rect, src: Rect) {
+    // SAFETY: called on the main thread while macroquad runs, as every texture call.
+    let gl = unsafe { get_internal_gl() };
+    gl.quad_context.texture_set_wrap(tex.raw_miniquad_id(), TextureWrap::Mirror, TextureWrap::Mirror);
+    draw_texture_ex(tex, dest.x, dest.y, WHITE, DrawTextureParams { dest_size: Some(dest.size()), source: Some(src), ..Default::default() });
 }
 
 
