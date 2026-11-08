@@ -5,11 +5,11 @@ sidebar:
   order: 3
 ---
 
-Razdor plays by the original's rules. Below is everything that differs **by default**, without the [experimental rules](/razdor/wiki/en/differences/experimental-rules/). Five differences that used to be here are now experimental switches: by default they follow the original's rule (see below).
+Razdor plays by the original's rules. Below is everything that differs **by default**, without the [experimental rules](/razdor/wiki/en/differences/experimental-rules/). Seven differences that used to be here are now experimental switches: by default they follow the original's rule (see below).
 
 ## Deliberate differences
 
-Five former differences (bless once a turn, poison and the Undead, the spell book, the merchant discount from an item, Rear Service) are now experimental switches: by default the original's rule applies. You can turn them on in the "..." window on the scenario screen, see [experimental rules](/razdor/wiki/en/differences/experimental-rules/).
+Seven former differences (bless once a turn, poison and the Undead, the spell book, the merchant discount from an item, Rear Service, the store in your own buildings, the death curse on counter blows) are now experimental switches: by default the original's rule applies. You can turn them on in the "..." window on the scenario screen, see [experimental rules](/razdor/wiki/en/differences/experimental-rules/).
 
 * **Wide front row:** your units step only to the 12 cells the screen shows.
 * **Formation after a battle:** units go back to their cells (the "Keep formation" option, which can be turned off).

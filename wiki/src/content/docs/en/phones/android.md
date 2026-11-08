@@ -73,6 +73,16 @@ When the phone is held vertically, windows span the width of the screen, and tex
 
 When the phone is held horizontally, the windows are the same as on a PC (the journal is also a separate window: list on the left, text on the right).
 
+## Landscape Screen
+
+On the main menu lying sideways, the five buttons stay on the left, as before, and the four links ("Custom battle", "Maps and mods", Discord and the language) are big tiles stacked down the right edge. If a mod is installed, its "Mod: <name>" tile comes first.
+
+The map's bottom bar has a size setting: **"Bottom bar size"** in the **"Screen..."** group of the settings window, with the values **"Normal"**, **"Medium"** and **"Large"**. The default is **"Large"**. With the large bar, the buttons are bigger and easier to press, the time slider is easier to press too, and the date on the bar is shown in full.
+
+:::tip
+The bottom bar size only changes the layout when the phone lies sideways. Held upright, the bar is the same at every value.
+:::
+
 ## Razdor Updates
 
 Razdor on Android updates itself just like on a PC: when a new version is released, a window offers the update along with a changelog. **"Update"** downloads the new APK, verifies it, and passes it to the Android installer; you then confirm the installation. An already downloaded APK will not be downloaded again, and old versions are deleted after installation. For more details: [Updates](/razdor/wiki/en/start/updates/).

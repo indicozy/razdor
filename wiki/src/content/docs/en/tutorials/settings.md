@@ -1,6 +1,6 @@
 ---
 title: Settings
-description: The original's settings window and Razdor's five groups: Map, Battle and army, Screen, Controls and Other.
+description: "The original's settings window and Razdor's five groups: Map, Battle and army, Screen, Controls and Other."
 sidebar:
   order: 6
 ---
@@ -13,7 +13,7 @@ Under them are five Razdor group buttons. Each opens its own window with only th
 |---|---|
 | **Map...** | the map's zoom and its lock; the map view (flat or 2.5D); with 2.5D, the sprite size and the two-finger turn; extending the map past its edges; battles on the map; the army list beside the minimap; the leader's name; the minimap's corner and its reset |
 | **Battle and army...** | battle AI strength; unit battle participation; keeping the formation after battle; max guards casters; army arrangement; experience on promotion |
-| **Screen...** | the screen (windowed or full); the interface scale; the font; the text size; large message windows; screen orientation (Android); the language |
+| **Screen...** | the screen (windowed or full); the interface scale; the bottom bar size (phone); the font; the text size; large message windows; screen orientation (Android); the language |
 | **Controls...** | keyboard shortcuts (the **"Keys..."** button); touchpad mode (on a phone) |
 | **Other...** | updates and the **"Check now"** button; updating the game from an archive |
 

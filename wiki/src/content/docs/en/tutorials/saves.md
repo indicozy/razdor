@@ -21,7 +21,7 @@ The load window has two tabs: your saves and autosaves. New entries are on top. 
 An autosave is made automatically before each battle and at the daily report at 12:00. Its name contains the date, for example "1204.06.03, 12 h".
 :::
 
-A save remembers the hub mod you played it with. If a save was made with a mod that is not in your game, the load window says so and offers to start the right mod: an installed one at once, or one downloaded from the hub (after you confirm its download size). Older saves without that mark are also matched against the installed mods; when none or several fit, no mod is guessed.
+A save remembers the hub mod it was played with. New saves remember their mod. If a save was made with a mod that is not in your game, the load window names the missing units and items and the mod the save was made with. The **"Start with the mod"** button switches to the installed mod and loads the save. If the mod is only in the hub, the **"Download and start"** button first asks you to confirm the download size in MB, then downloads the mod and loads the save. If the mod is not in the hub catalog, the window says so. Older saves with no mod mark are matched against the installed mods; if zero or more than one fits, no mod is guessed. Such saves no longer crash the game on load.
 
 ## Autosaves
 

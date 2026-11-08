@@ -5,7 +5,7 @@ sidebar:
   order: 2
 ---
 
-On the scenario screen, next to the "Next" button, there is a "..." button. It opens fifteen independent toggles that change the game rules. The first eight are Razdor's additions; they are not in the original game. The last six ("Bless once a turn", "Poison spares the Undead", "No spell book limit", "Merchant discount from an item", "Rear Service always −30%", "Store in your own buildings") cover rules where Razdor differed from the original: by default the game plays as the original does, and a toggle turns on Razdor's earlier rule.
+On the scenario screen, next to the "Next" button, there is a "..." button. It opens fifteen independent toggles that change the game rules. The first eight are Razdor's additions; they are not in the original game. The next six ("Bless once a turn", "Poison spares the Undead", "No spell book limit", "Merchant discount from an item", "Rear Service always −30%", "Store in your own buildings") and the last one, "Death curse on counter blows", cover rules where Razdor differed from the original: by default the game plays as the original does, and a toggle turns on Razdor's rule.
 
 :::caution
 By default, for a new game, all fifteen are turned off. Your selection is remembered: it is saved in the settings when closing the window ("OK", Esc, Enter, or the close button) and upon starting a game, so when you next open the list of new games, the toggles will be as you left them, and will remain so after restarting the game. In the scenario list, an orange "Experimental rules enabled" label indicates that a toggle is on. Returning from the hero selection window preserves it. For an already started game, toggles cannot be changed through this menu.
@@ -31,7 +31,7 @@ By default, for a new game, all fifteen are turned off. Your selection is rememb
 * **Store in your own buildings:** in your castle, fort or town with the hero in it, a "Store" tab shows the loot your garrison could not wear; a click puts the item into the hero's pack. Off (as in the original): no tab, the loot stays in the building.
 * **Death curse on counter blows:** when a counter blow or a preventive strike kills a fighter with a death curse (or a Ghost under its condition, as in a normal kill), the fighter who struck back dies too, and its remaining hit points count as its side's losses. Off (as in the original): a counter blow does not work like a normal kill, and the striker survives.
 
-The "Razdor's rules" row above the toggles turns on at once all of Razdor's former rules and its fixes (the ones listed above, "Death curse on counter blows" included) and leaves the other toggles as they are. The row shows on when all of them are on; press it again to turn them all off. Afterwards each toggle can be switched on or off on its own.
+The "Razdor's rules" row above the toggles turns on seven at once: the six former Razdor rules (from "Bless once a turn" to "Store in your own buildings") and "Death curse on counter blows". It leaves the first eight toggles alone. The row shows on when all seven are on; press it again to turn them all off. Afterwards each toggle can be switched on or off on its own.
 
 On a phone, when the window does not fit, the list of toggles scrolls.
 

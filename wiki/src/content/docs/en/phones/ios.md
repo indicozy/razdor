@@ -61,3 +61,7 @@ The picture cache is kept separately, in the app's cache (not shown in Files), a
 ## Controls
 
 On iOS, controls are performed via touch only. The same gestures available on Android are supported. Touchpad mode is switched on in the same settings window as on Android.
+
+## Screen
+
+The windows, the main menu and the bottom bar work in landscape and upright positions the same way as on Android. See [Razdor on Android](/razdor/wiki/en/phones/android/).

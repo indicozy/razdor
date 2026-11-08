@@ -28,6 +28,24 @@ From left to right: the menu (**"Main menu (Esc)"**), **"Sound settings"**, save
 To return the interface scale to "Auto", press `Ctrl+0` on any screen.
 :::
 
+## Minimap
+
+The minimap is a window with the whole scenario map scaled down. Explored cells show their terrain colour, unexplored cells are black. Towns and places show small icons, armies and the hero show as shields, and a light rectangle marks the part of the map on screen.
+
+Open it with the **"Map of the scenario (M)"** button on the bottom bar (the button turns orange while the minimap is open) or with the `M` key. The `M` key closes it too, and `Esc` closes it before the game menu.
+
+By default it sits in the top right corner. Drag it by its frame to any other corner; drag an edge to change its size.
+
+In the settings, group **"Map..."**:
+
+* **"Minimap corner"** moves it to the next corner (clockwise);
+* **"Minimap size and place"** with the **"Reset"** button returns its size and place to the default;
+* **"Minimap army list"** shows the list of armies beside the map.
+
+:::note
+On a computer, when the bottom bar does not reach the screen's edges, the minimap can stand in a free corner beside the bar, without touching it.
+:::
+
 ## Hero window and diary
 
 The hero and army window opens with the **"Hero and army"** button on the bar or the `A` key. The hero's diary opens with the flag on the bottom bar or the `J` key.
