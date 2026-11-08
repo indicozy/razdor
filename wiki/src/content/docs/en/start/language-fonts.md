@@ -23,7 +23,7 @@ The native Razdor interface (buttons, windows, tooltips, battle log, map editor,
 
 The names and descriptions of warriors, items, and spells are pulled from the files of the selected language. If the selected translation lacks a specific string, the engine will display the text in English. Scenario texts depend on the maps selected in New Game mode.
 
-The language selection is saved in the `settings.json` file in the saves folder. If the file is not found, the game will launch in Russian (or in English if no suitable font is found for Russian).
+The language selection is saved in the `settings.json` file in the saves folder. On the first start the language follows the system language: Russian for Russian, Ukrainian, Belarusian and Kazakh, English for the others. Until you pick a language in the list, a change of the system language changes the game's language too. If no suitable font is found for Russian, the game launches in English.
 
 ## Fonts
 

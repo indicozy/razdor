@@ -1,8 +1,9 @@
 //! The language: the player's choice kept in `settings.json` (next to `audio.json` in the
-//! save folder), the language list (a drop-down) and its F2 key. Russian when nothing is
-//! saved (English when no font with Cyrillic was found). The same file remembers that the
-//! tutorial is done, and the scenario list's marks and view (Razdor's): the scenarios won,
-//! the player's favourites, and how the list is filtered and sorted.
+//! save folder), the language list (a drop-down) and its F2 key. Nothing saved: the system's
+//! language decides (`lang_for_locale`; English when no font with Cyrillic
+//! was found). The same file remembers that the tutorial is done, and the scenario list's
+//! marks and view (Razdor's): the scenarios won, the player's favourites, and how the list is
+//! filtered and sorted.
 //!
 //! The list (Razdor's own, asked for by the owner): «Русский» (the game as it is), «English»,
 //! then each translation of the game data found in the install (`razdor::dt::english::discover`:
@@ -29,7 +30,8 @@ const LIST: &str = "razdor:language";
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-    /// "ru", "en", or the prefix of a translation's files ("Hindi-native"); empty: never chosen.
+    /// "ru", "en", or the prefix of a translation's files ("Hindi-native"); empty: never chosen
+    /// (the system's language is used, and nothing is written until the player picks one).
     pub language: String,
     /// The tutorial's last event finished (its title test holds `end_tutorial`): the original
     /// writes `[Tutorial] Completed=1` into its language ini (0x4ac9fc); Razdor keeps it here.
@@ -167,15 +169,30 @@ pub fn code_of(data: Option<&str>) -> String {
     }
 }
 
+/// The interface language for a system locale (a BCP 47 tag, or a POSIX one such as
+/// `ru_RU.UTF-8`): Russian for Russian, Ukrainian, Belarusian and Kazakh, English for every
+/// other language, and for no locale at all (`""`, `C`, `POSIX`). Only the two exist.
+pub fn lang_for_locale(locale: &str) -> Lang {
+    let primary = locale.trim().split(['-', '_', '.', '@']).next().unwrap_or_default();
+    if ["ru", "uk", "be", "kk"].iter().any(|l| primary.eq_ignore_ascii_case(l)) { Lang::Ru } else { Lang::En }
+}
+
+/// The system's interface language (`sys-locale`); English when the system's locale cannot be read.
+pub fn system_lang() -> Lang {
+    sys_locale::get_locale().map_or(Lang::En, |l| lang_for_locale(&l))
+}
+
 /// The data language to start in from the saved code: "ru" Russian, "en" English (the codes
-/// of the EN / RU switch before the list), another code that translation; nothing saved:
-/// Russian (English without a Cyrillic font, which would only show transliterations).
-pub fn initial(saved: &Settings, cyrillic_font: bool) -> Option<String> {
+/// of the EN / RU switch before the list), another code that translation. Nothing saved: the
+/// system's language (`system`), Russian for Russian; English without a Cyrillic font, which
+/// would only show transliterations. Nothing is written: a later change of the system's
+/// language still applies until the player picks one.
+pub fn initial(saved: &Settings, cyrillic_font: bool, system: Lang) -> Option<String> {
     let code = saved.language.trim();
     match Lang::from_code(code) {
         Some(Lang::Ru) => None,
         Some(Lang::En) => Some(ENGLISH.into()),
-        None if code.is_empty() => (!cyrillic_font).then(|| ENGLISH.into()),
+        None if code.is_empty() => (system == Lang::En || !cyrillic_font).then(|| ENGLISH.into()),
         None => Some(code.to_string()),
     }
 }
@@ -225,10 +242,10 @@ fn set(data: Option<String>) {
     state(|s| s.data = data);
 }
 
-/// At startup: sets the saved language (a translation is checked once the install is known,
-/// [`set_install`]).
+/// At startup: sets the saved language, or the system's when none is saved (a translation is
+/// checked once the install is known, [`set_install`]).
 pub fn init() {
-    set(initial(&Settings::load(), has_font()));
+    set(initial(&Settings::load(), has_font(), system_lang()));
 }
 
 /// The install at `dir`: its translations join the list; a saved one it lacks becomes English.
@@ -334,18 +351,32 @@ mod tests {
         assert_eq!(s.scenario_show, 2);
     }
 
+    #[test]
+    fn the_system_locale_picks_russian_or_english() {
+        for ru in ["ru-RU", "ru_RU.UTF-8", "ru", "RU", "uk-UA", "uk_UA.UTF-8", "be-BY", "kk-KZ"] {
+            assert_eq!(lang_for_locale(ru), Lang::Ru, "{ru}");
+        }
+        for en in ["en-US", "en_GB.UTF-8", "de-DE", "es", "", "C", "POSIX", "C.UTF-8", "ky-KG", "uz", "rux-XX", "ruler"] {
+            assert_eq!(lang_for_locale(en), Lang::En, "{en:?}");
+        }
+        assert_eq!(lang_for_locale("  ru-RU  "), Lang::Ru, "blanks around it");
+        assert_eq!(lang_for_locale("sr@latin"), Lang::En);
+    }
+
     fn found() -> Vec<DataLanguage> {
         vec![DataLanguage { prefix: "Hindi-native".into(), name: "Hindi (native letters)".into() }]
     }
 
     #[test]
-    fn russian_unless_chosen_otherwise() {
+    fn the_system_language_decides_until_the_player_chooses() {
         let s = |code: &str| Settings { language: code.into(), ..Settings::default() };
-        assert_eq!(initial(&Settings::default(), true), None, "the default: Russian");
-        assert_eq!(initial(&Settings::default(), false).as_deref(), Some("Eng"), "no Cyrillic font");
-        assert_eq!(initial(&s("en"), true).as_deref(), Some("Eng"), "the old EN of the switch");
-        assert_eq!(initial(&s("ru"), false), None, "the old RU: a choice is kept");
-        assert_eq!(initial(&s("Hindi-native"), true).as_deref(), Some("Hindi-native"));
+        assert_eq!(initial(&Settings::default(), true, Lang::Ru), None, "a Russian system: Russian");
+        assert_eq!(initial(&Settings::default(), true, Lang::En).as_deref(), Some("Eng"), "any other system: English");
+        assert_eq!(initial(&Settings::default(), false, Lang::Ru).as_deref(), Some("Eng"), "no Cyrillic font");
+        assert_eq!(initial(&s("en"), true, Lang::Ru).as_deref(), Some("Eng"), "the old EN of the switch");
+        assert_eq!(initial(&s("ru"), false, Lang::En), None, "the old RU: a choice is kept");
+        assert_eq!(initial(&s("en"), true, Lang::Ru).as_deref(), Some("Eng"), "a saved choice beats the system's");
+        assert_eq!(initial(&s("Hindi-native"), true, Lang::Ru).as_deref(), Some("Hindi-native"));
         let s: Settings = serde_json::from_str(r#"{"language":"en","other":1,"tutorial_offered":true}"#).unwrap();
         assert_eq!(s.language, "en");
         assert!(!s.tutorial_completed, "older files: the tutorial is not done (an offer seen does not count)");

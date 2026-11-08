@@ -839,7 +839,11 @@ the install's, so they show in the new-game list. Snapshot scene: `hub[:<tab>[:<
   Russian, `Eng`, `Hindi-native`); Razdor's own texts (`razdor::i18n`) are Russian for
   «Русский» and English for every other entry (`language::interface_of`). Saved in
   `settings.json` as "ru", "en" or the prefix (`language::code_of`, `language::initial`; a
-  prefix whose files are gone becomes English, `language::resolve`). The main menu's corner
+  prefix whose files are gone becomes English, `language::resolve`). Nothing saved (empty
+  `language`, the first start): the system's language decides (`language::system_lang`, the
+  `sys-locale` crate; `language::lang_for_locale`: Russian for ru, uk, be, kk, English for the
+  rest, and English when the locale cannot be read), with no cyrillic font English. Nothing is
+  written for it, so a later change of the system language still applies until a pick is saved. The main menu's corner
   link and the advanced settings' «Язык» button open it (`language::open_list`, the editor's
   drop-down list `widgets::open_list` drawn by `widgets::draw_popup` at the end of
   `App::frame`; while it is open the screen takes no input); `App::follow_language` takes the

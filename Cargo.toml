@@ -18,6 +18,9 @@ rustybuzz = "0.20"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
 sha2 = "0.10.9"
+# The system language (`ui::language`): the first start picks Russian or English from it. Pinned:
+# 0.3.2 (2024-11-01) reads the locale on Linux, macOS, iOS, Windows and Android.
+sys-locale = "=0.3.2"
 # Unpacking the game archive on the phones (`dt::unpack`): pure Rust, no deflate C code.
 sevenz-rust2 = { version = "0.20.2", default-features = false, features = ["ppmd"] }
 zip = { version = "9.1.0", default-features = false, features = ["deflate-flate2"] }
