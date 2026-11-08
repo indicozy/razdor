@@ -45,6 +45,7 @@ the community map smoke test green, a changelog line, the wiki pages updated.
 - «Сохранять расстановку» (battle #51): stays a Razdor option, on by default.
 - Fallen units keep their worn items; they can be taken off the corpse into the pack (`Game::press_worn`, works today).
 - Chain depth cap 32.
+- Battle autosave per foe (saves-data §14, backlog 1561): the original reuses the autosave by name only; Razdor reuses it only for the same foe (`battle_foe`), the owner's decision 2026-11-08. The name shown is unchanged.
 - Caster discount: the original's global flag is a bug; Razdor's "the hero's army has a Caster" stays.
 - Market lists sorted cheapest first.
 - Every original bug fix in the spec tables (battle, community patches, economy, AI, experience, magic and items, events, world, saves).

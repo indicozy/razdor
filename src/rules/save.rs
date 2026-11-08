@@ -30,7 +30,7 @@ use crate::trf;
 use super::clock::Clock;
 use super::content::Content;
 use super::events::EventEngine;
-use super::game::Game;
+use super::game::{Foe, Game};
 use super::map_refs::{self, Unknown};
 use super::rng::{self, EventRng, Rng};
 use super::world::World;
@@ -126,6 +126,11 @@ pub struct SaveMeta {
     /// The hub mod the game was played with (1552); none for the base game, and older saves have none.
     #[serde(default, rename = "mod", skip_serializing_if = "Option::is_none")]
     pub played_mod: Option<SaveMod>,
+    /// The foe of a battle autosave ([`foe_id`]: "army:<uid>", "building:<id>", "location:<index>");
+    /// none for other saves and for those of older versions. Razdor's: a battle autosave is reused
+    /// only for the same foe ([`store_autosave`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub battle_foe: Option<String>,
 }
 
 /// A hub mod a save was made with: its id and version as installed then.
@@ -230,6 +235,24 @@ pub const LESS_THAN_AN_HOUR: &str = crate::i18n::n_("Less than an hour");
 /// trailing spaces trimmed. Two foes whose names differ only after a `#` share an autosave.
 pub fn autosave_foe(name: &str) -> &str {
     name.split_once('#').map_or(name, |(head, _)| head).trim_end_matches(' ')
+}
+
+/// The identity of the foe of a battle autosave (Razdor's): an army's `uid` (unique for the
+/// whole game), a building's scenario `id`, or, for the demo's buildings (id 0), the index of
+/// the location. Empty when there is no foe. The name alone does not tell two foes apart: many
+/// maps have several armies or buildings of one name.
+pub fn foe_id(world: &World, foe: Option<&Foe>) -> String {
+    match foe {
+        Some(Foe::Army(i)) => match world.armies.get(*i) {
+            Some(a) => format!("army:{}", a.uid),
+            None => format!("army:index:{i}"),
+        },
+        Some(Foe::Garrison(l)) => match world.locations.get(*l) {
+            Some(loc) if loc.id != 0 => format!("building:{}", loc.id),
+            _ => format!("location:{l}"),
+        },
+        None => String::new(),
+    }
 }
 
 /// The save folder: `RAZDOR_SAVE_DIR`, else `razdor/saves` in the platform data folder.
@@ -361,6 +384,7 @@ pub fn meta_of(game: &Game, kind: SaveKind, name: &str) -> Result<SaveMeta, Save
         saved_at: now_secs(),
         cheats: game.cheats.used,
         played_mod: played_mod(),
+        battle_foe: None,
     })
 }
 
@@ -804,7 +828,7 @@ pub fn write(dir: &Path, kind: SaveKind, name: &str, game: &Game) -> Result<Path
             }
             put(&path, kind, name, game)
         }
-        SaveKind::Auto => write_autosave(dir, name, game, false),
+        SaveKind::Auto => write_autosave(dir, name, game, None),
     }
 }
 
@@ -813,11 +837,14 @@ pub fn write(dir: &Path, kind: SaveKind, name: &str, game: &Game) -> Result<Path
 /// (when several match, the last in the list, newest first, so the oldest of them); with no
 /// match a new one is made while there are fewer than [`AUTOSAVES_KEPT`], else the last of
 /// the list, the oldest, is overwritten. Pinned autosaves are left out of all of it.
-pub fn write_autosave(dir: &Path, name: &str, game: &Game, in_battle: bool) -> Result<PathBuf, SaveError> {
+/// `battle` is the foe's identity ([`foe_id`]) for the autosave before a battle, `None` for
+/// the others. Razdor's: a battle autosave is reused only for the same foe (see [`store_autosave`]).
+pub fn write_autosave(dir: &Path, name: &str, game: &Game, battle: Option<&str>) -> Result<PathBuf, SaveError> {
     finish_pending_writes();
-    let meta = meta_of(game, SaveKind::Auto, name)?;
+    let mut meta = meta_of(game, SaveKind::Auto, name)?;
+    meta.battle_foe = battle.map(str::to_string);
     let bytes = encode(&meta, game)?;
-    let path = store_autosave(dir, &meta, &bytes, in_battle)?;
+    let path = store_autosave(dir, &meta, &bytes, battle.is_some())?;
     // The map's own slot too (Razdor's): the same bytes, kept apart from the rotation.
     if let Some(key) = map_slot_key(game) {
         store_slot(dir, &key, &meta, &bytes)?;
@@ -881,7 +908,17 @@ fn store_autosave(dir: &Path, meta: &SaveMeta, bytes: &[u8], in_battle: bool) ->
     std::fs::create_dir_all(&folder)?;
     // Pinned autosaves and the session slot are left out of the rotation (the slot is still listed).
     let saves: Vec<SaveEntry> = by_time(dir, SaveKind::Auto).into_iter().filter(|e| !e.pinned && e.meta.name != SESSION).collect();
-    let same = |e: &&SaveEntry| e.meta.name == meta.name && (in_battle || e.meta.title == meta.title);
+    // Razdor's: the original reuses by name only (0x4b7410); kept per foe, the owner's decision
+    // 2026-11-08. An autosave of another foe is not reused; one with no foe (an older version's,
+    // or one made outside a battle) still is, by name, as before.
+    let same = |e: &&SaveEntry| {
+        e.meta.name == meta.name
+            && if in_battle {
+                e.meta.battle_foe.is_none() || e.meta.battle_foe == meta.battle_foe
+            } else {
+                e.meta.title == meta.title
+            }
+    };
     let reused = saves.iter().filter(same).next_back().or_else(|| saves.get(AUTOSAVES_KEPT - 1));
     let path = match reused {
         Some(e) => e.path.clone(),
@@ -1599,7 +1636,7 @@ pub(crate) mod tests {
         assert_eq!(autos.len(), AUTOSAVES_KEPT + 1, "the pin is not counted");
         assert_eq!((autos[0].path.clone(), autos[0].meta.name.as_str(), autos[0].pinned), (first.clone(), "auto 0", true), "first in the list");
         // Its name reused before a battle: a new autosave, the pinned one stays.
-        write_autosave(&dir, "auto 0", &g, true).unwrap();
+        write_autosave(&dir, "auto 0", &g, Some("army:1")).unwrap();
         assert_eq!(read_meta(&first).unwrap().saved_at, autos[0].meta.saved_at);
         // A pinned quick save is kept, and F9 still loads the newest.
         let q = quick_save(&dir, &g).unwrap();
@@ -1720,14 +1757,62 @@ pub(crate) mod tests {
         // Outside a battle the map title must match too; before a battle the name alone.
         let mut other = Game::new(demo(), HeroClass::Ranger);
         other.world.title = "Another map".into();
-        write_autosave(&dir, "auto 5", &other, false).unwrap();
+        write_autosave(&dir, "auto 5", &other, None).unwrap();
         let now = names(&dir);
         assert_eq!(now.iter().filter(|n| *n == "auto 5").count(), 2, "a new slot, over the oldest (auto 1)");
         assert!(!now.contains(&"auto 1".to_string()));
-        write_autosave(&dir, "auto 6", &other, true).unwrap();
+        write_autosave(&dir, "auto 6", &other, Some("army:1")).unwrap();
         let now = names(&dir);
         assert_eq!((now.len(), now.iter().filter(|n| *n == "auto 6").count(), now.contains(&"auto 2".to_string())), (AUTOSAVES_KEPT, 1, true));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn battle_autosaves_are_kept_per_foe() {
+        // Razdor's (0x4b7410 reuses by name only): two foes of one name get two autosaves, the
+        // same foe is reused, and an autosave with no foe (an older version's) is reused by name.
+        let g = Game::new(demo(), HeroClass::Ranger);
+        let count = |dir: &Path| list(dir, SaveKind::Auto).len();
+        let dir = temp_dir("auto-foe");
+        write_autosave(&dir, "Battle - Bandits", &g, Some("army:17")).unwrap();
+        write_autosave(&dir, "Battle - Bandits", &g, Some("army:23")).unwrap();
+        assert_eq!(count(&dir), 2, "two foes of one name, two autosaves");
+        write_autosave(&dir, "Battle - Bandits", &g, Some("army:17")).unwrap();
+        assert_eq!(count(&dir), 2, "the same foe reuses its autosave");
+        let old = temp_dir("auto-foe-old");
+        write_autosave(&old, "Battle - Bandits", &g, None).unwrap();
+        write_autosave(&old, "Battle - Bandits", &g, Some("army:17")).unwrap();
+        assert_eq!(count(&old), 1, "an autosave with no foe is reused by name");
+        assert_eq!(list(&old, SaveKind::Auto)[0].meta.battle_foe.as_deref(), Some("army:17"));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&old);
+    }
+
+    #[test]
+    fn the_battle_foe_round_trips_and_is_left_out_when_there_is_none() {
+        let dir = temp_dir("auto-foe-meta");
+        let g = Game::new(demo(), HeroClass::Ranger);
+        let with = write_autosave(&dir, "Battle - Bandits", &g, Some("building:5")).unwrap();
+        assert_eq!(read_meta(&with).unwrap().battle_foe.as_deref(), Some("building:5"));
+        let without = write_autosave(&dir, "noon", &g, None).unwrap();
+        assert_eq!(read_meta(&without).unwrap().battle_foe, None);
+        let mut meta = meta_of(&g, SaveKind::Auto, "noon").unwrap();
+        assert!(!serde_json::to_string(&meta).unwrap().contains("battle_foe"), "no field in the JSON when there is none");
+        meta.battle_foe = Some("army:9".into());
+        let back: SaveMeta = serde_json::from_str(&serde_json::to_string(&meta).unwrap()).unwrap();
+        assert_eq!(back.battle_foe.as_deref(), Some("army:9"));
+        // A meta of an older version (no field) reads as none.
+        let mut old = serde_json::to_value(meta_of(&g, SaveKind::Auto, "noon").unwrap()).unwrap();
+        old.as_object_mut().unwrap().remove("battle_foe");
+        assert_eq!(serde_json::from_value::<SaveMeta>(old).unwrap().battle_foe, None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn foe_ids_name_the_foe_and_none_has_no_id() {
+        let g = Game::new(demo(), HeroClass::Ranger);
+        assert_eq!(foe_id(&g.world, None), "");
+        assert_eq!(foe_id(&g.world, Some(&Foe::Garrison(0))), "location:0", "the demo's buildings have no id: their index");
     }
 
     #[test]
@@ -2125,7 +2210,7 @@ pub(crate) mod tests {
         let mut g = Game::new(c.clone(), HeroClass::Knight);
         walk(&mut g, 60);
         let (dir_sync, dir_bg) = (temp_dir("autosave-same-sync"), temp_dir("autosave-same-bg"));
-        let sync_path = write_autosave(&dir_sync, "1204.06.03, 12 h", &g, false).unwrap();
+        let sync_path = write_autosave(&dir_sync, "1204.06.03, 12 h", &g, None).unwrap();
         write_autosave_in_background(dir_bg.clone(), "1204.06.03, 12 h", &g).unwrap();
         finish_pending_writes();
         let listed = list(&dir_bg, SaveKind::Auto);
@@ -2145,7 +2230,7 @@ pub(crate) mod tests {
         write_autosave_in_background(dir.clone(), "first", &g).unwrap();
         assert_eq!(list_files(&dir, SaveKind::Auto).len(), 1, "the listing joins the writer");
         write_autosave_in_background(dir.clone(), "second", &g).unwrap();
-        write_autosave(&dir, "third", &g, false).unwrap();
+        write_autosave(&dir, "third", &g, None).unwrap();
         finish_pending_writes();
         finish_pending_writes();
         assert_eq!(list(&dir, SaveKind::Auto).len(), 3, "each autosave kept under its own name");
@@ -2163,12 +2248,12 @@ pub(crate) mod tests {
     fn autosaves_write_the_map_slot_and_a_later_one_replaces_it() {
         let dir = temp_dir("slot-replace");
         let mut g = game_on("Map One");
-        write_autosave(&dir, "auto a", &g, false).unwrap();
+        write_autosave(&dir, "auto a", &g, None).unwrap();
         let slot = map_slot_path(&dir, "map_one");
         assert_eq!(slot, dir.join("maps").join("map_one.rzsave"));
         assert_eq!(read_meta(&slot).unwrap().name, "auto a");
         g.gold = 5;
-        write_autosave(&dir, "auto b", &g, true).unwrap();
+        write_autosave(&dir, "auto b", &g, Some("army:1")).unwrap();
         let (path, meta) = map_slot(&dir, "map_one").unwrap();
         assert_eq!((path, meta.name.as_str()), (slot, "auto b"), "the slot holds the latest autosave");
         let _ = std::fs::remove_dir_all(&dir);
@@ -2177,8 +2262,8 @@ pub(crate) mod tests {
     #[test]
     fn two_maps_keep_two_slots_and_the_slots_are_not_autosaves_or_manual_saves() {
         let dir = temp_dir("slot-two");
-        write_autosave(&dir, "one", &game_on("Map One"), false).unwrap();
-        write_autosave(&dir, "two", &game_on("Map Two"), false).unwrap();
+        write_autosave(&dir, "one", &game_on("Map One"), None).unwrap();
+        write_autosave(&dir, "two", &game_on("Map Two"), None).unwrap();
         assert_eq!(map_slot(&dir, "map_one").unwrap().1.name, "one");
         assert_eq!(map_slot(&dir, "map_two").unwrap().1.name, "two");
         // The autosaves are the two writes; the slots are not listed in either tab.
@@ -2231,11 +2316,11 @@ pub(crate) mod tests {
         let dir = temp_dir("slot-campaign");
         let mut first = game_on("First Map");
         first.campaign = Some("First Map".into());
-        write_autosave(&dir, "first end", &first, false).unwrap();
+        write_autosave(&dir, "first end", &first, None).unwrap();
         // The next map, as `screens::campaign_game` starts it: its origin, the campaign carried.
         let mut second = game_on("Second Map");
         second.campaign = campaign_of(&first);
-        write_autosave(&dir, "second a", &second, true).unwrap();
+        write_autosave(&dir, "second a", &second, Some("army:1")).unwrap();
         assert_eq!(map_slot(&dir, "first_map").unwrap().1.name, "first end", "the first map keeps its last save");
         let (path, meta) = map_slot(&dir, &map_slot_key_of_file("Second Map")).unwrap();
         assert_eq!((path, meta.name.as_str()), (map_slot_path(&dir, "second_map"), "second a"), "the hero window finds the second map's slot");

@@ -25,7 +25,7 @@ A save remembers the hub mod you played it with. If a save was made with a mod t
 
 ## Autosaves
 
-There are up to 30 autosave slots (12 in the original). When the slots are full, the oldest one is overwritten. An autosave on the same map replaces the previous one with the same name.
+There are up to 30 autosave slots (12 in the original). When the slots are full, the oldest one is overwritten. An autosave on the same map replaces the previous one with the same name. Before a battle, it replaces only the previous autosave for the same opponent: two armies with the same name each keep their own.
 
 :::caution
 If the install has the autosave option turned off (`OptValue8`), no autosaves are made.

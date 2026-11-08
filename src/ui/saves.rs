@@ -193,15 +193,15 @@ fn battle_name(game: &Game) -> String {
     }
 }
 
-/// Writes an autosave named `name` (`in_battle`: the one before a battle, see
-/// [`save::write_autosave`]); a failure is reported on stderr (the game goes on).
-pub fn autosave(game: &Game, name: &str, in_battle: bool) {
+/// Writes an autosave named `name` (`battle`: the foe's identity for the one before a battle,
+/// see [`save::write_autosave`]); a failure is reported on stderr (the game goes on).
+pub fn autosave(game: &Game, name: &str, battle: Option<&str>) {
     let Some(dir) = save::games_dir() else { return };
     if !autosaves_on(super::chrome::has_texts().then(|| super::chrome::options_value("OptValue8")).flatten().as_deref()) {
         map_slot_only(&dir, game, name);
         return;
     }
-    if let Err(e) = save::write_autosave(&dir, name, game, in_battle) {
+    if let Err(e) = save::write_autosave(&dir, name, game, battle) {
         razdor::diag!("autosave: {e}");
     }
 }
@@ -257,7 +257,8 @@ pub fn session_content(install: Option<Arc<Content>>, game: &Game) -> Option<Arc
 pub fn battle(game: &mut Game, session: Option<&mut super::session::Keeper>) -> Screen {
     let name = battle_name(game);
     let foe = game.foe.take();
-    autosave(game, &name, true);
+    let foe_id = save::foe_id(&game.world, foe.as_ref());
+    autosave(game, &name, Some(&foe_id));
     // The session slot holds the same moment, the foe taken off too (`None`: a test play has none).
     if let Some(session) = session {
         session.save_now(game);
