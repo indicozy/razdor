@@ -8,6 +8,18 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **The hero's figure byte is read two ways** (2026-11-09, found while gathering hero facts for the
+  art pipeline). Armies read their figure byte as a 0-based index into `FIGURES`
+  (`src/ui/world_view.rs` `FIGURES.get(a.figure)`; `Army::figure` in `src/rules/world.rs`, "an index
+  into the 13 sprite names"). The hero reads it as a 1-based model code: `draw_hero` →
+  `figure_stem(model)` maps 1 → Hero-Knight, 2 → Hero-Mage, 3 → Hero-Ranger, 5 → Rogue, 6 → Peasant,
+  10 → Necromant, 11 → Ghost, 12 → Zombie, anything else → Knight; the hero starts with 1 for the
+  Knight (`game.rs`). The readings disagree for every value, so opcode 17 (army record +0x169D := B,
+  events.md) gives the hero a different sheet than the same byte gives an army. Which one the original
+  uses is unverified. Settle: read the original's hero draw (0x4ad4cc / 0x4ad5ac, cited in
+  `src/rules/game.rs`) and its figure index (0x71c430 + figure·0x2c00) in Ghidra, then make both paths
+  agree.
+
 - **The hero is the unit of kind Leader** (2026-11-08). `Unit::is_hero` (`WageKind::Leader`) is what
   keeps the hero from promotion and the «+». The original's hero is the first unit of the army (experience.md
   §4). An event that takes a unit from an AI army (`add_unit` with `from_army`, `script.rs`) copies that
