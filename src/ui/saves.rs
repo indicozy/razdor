@@ -1361,10 +1361,16 @@ fn load_failed_box(title: &str, message: &str, lacking: &mut LackingBox) -> bool
     let base_row_h = if phone.is_some() { 44.0 * u } else { 28.0 * k * g };
     let row_h = if mod_lines.len() > 1 { base_row_h.max(mod_lines.len() as f32 * label_size * 1.25 + 10.0 * u) } else { base_row_h };
     // The reason's lines sit between the message and the row, with a line's room above the row.
-    let reason_extra = if reason.is_empty() { 0.0 } else { (reason.len() as f32 + 1.0) * step + 12.0 * u };
-    let row_extra = if lacking.active { reason_extra + (row_h - 28.0 * u).max(0.0) } else { 0.0 };
-    let h = (60.0 * u + lines.len() as f32 * step + if phone.is_some() { 20.0 * u } else { 0.0 } + row_extra).max(150.0 * u);
-    let h = h + 28.0 * k * (g - 1.0) + super::chrome::title_grow();
+    // A refused save's box is laid out from its parts, so the row (one or more lines tall) always
+    // clears the message and the reason: the title strip, the message, the reason, then the row.
+    let h = if lacking.active {
+        let strip = 26.0 * k + super::chrome::title_grow();
+        let reason_block = if reason.is_empty() { 0.0 } else { 4.0 * u + reason.len() as f32 * step + 8.0 * u };
+        strip + 24.0 * u + lines.len() as f32 * step + reason_block + 10.0 * u + row_h + 8.0 * u
+    } else {
+        (60.0 * u + lines.len() as f32 * step + if phone.is_some() { 20.0 * u } else { 0.0 }).max(150.0 * u) + super::chrome::title_grow()
+    };
+    let h = h + 28.0 * k * (g - 1.0);
     let r = Rect::new((screen_width() - w) / 2.0, (screen_height() - h) / 2.0, w, h);
     let inner = message_window(r, title, phone.is_some(), u);
     super::dt_font::legacy_metrics_if(phone.is_some(), || {
