@@ -202,20 +202,20 @@ original pixel on screen (0.9375 × `k`). Without the install the lines are plai
 
 **Past the map's edges** (the setting «Продолжать карту за краем», `Settings::map_extended`,
 off by default; `world_view::set_edge_pref` takes it every frame): off, the original's black.
-On, the ground goes on there. The terrain shader folds a cell past the border back about it
-(`terrain::mirror_cell`, GLSL `fold`, period 2n), greys it 35% from the edge and sinks it into
-the sky colour (`terrain::EDGE_SKY`) over `EDGE_FADE` = 14 cells; `draw_terrain` then covers the
-whole drawn ground. The fog and a showing's mask are drawn mirrored over it
-(`Camera::fog_texels`, `minimap::draw_fog_mirrored` / `draw_mirrored`, the texture's wrap set to
-mirror), so the extension is as dark as the edge it goes on from, and the black beyond the map
-is not drawn. Scenery within 14 cells of an edge has mirrored copies (`edge_scenery`,
-`edge_tiles`: explored sources only, classes 1–11 only, drawn as the map's own, never
-hit-tested). Visual only: no rule, path, click or AI change. Hex maps (the built-in demo) keep
-black. The sprites are not tinted toward the sky there (the fog is still drawn over them).
-The camera may reach `EDGE_FADE` cells past each edge (`Camera::looking_in`, the scroll range
-included), and a map narrower than the view is centred; off, the view stays on the map as before.
-The 2.5D view (`tilt_view`) takes the same passes in its ground footprint, so the extension goes
-on at every turn (the edge copies are depth-sorted with the map's sprites by `sprite_key`).
+On, the ground goes on for `terrain::EDGE_STRIP` (3) cells past each border, continuing the
+border's own row or column (the shader clamps the cell index, `code_at`); then an animated fog
+(in the terrain shader, after the ground): its opacity is `fog_opacity` (the shader's
+`smoothstep` from `EDGE_STRIP` to `EDGE_FULL`, 7 cells, and opaque beyond), modulated by two
+soft value-noise layers of different scales drifting in different directions (`Clock`, the
+water clock). The haze is `terrain::EDGE_HAZE`, a grey-blue. The shader runs the noise only past
+the strip. `draw_terrain` covers the whole drawn ground, so the fog reaches every edge, and in the
+2.5D view the same ground pass gives a haze wall at every turn. The fog of war is drawn over it
+(`Camera::fog_texels`, `minimap::draw_fog_extended` / `draw_extended`, the texture clamped to its
+edge texels: the border's status goes on outward), so explored and unexplored both read right.
+No scenery is copied past the edges. The camera may reach `EDGE_FULL` cells past each edge
+(`Camera::looking_in`, the scroll range included), and a map narrower than the view is centred;
+off, the view stays on the map as before. Visual only: no rule, path, click or AI change. Hex maps
+(the built-in demo) keep black.
 
 `src/ui/world_view.rs`: `draw_world` draws only the visible cells — `draw_terrain`
 (`TerrainLayer::draw` in `src/ui/terrain.rs`: one shader quad mixing the four nearest cell
@@ -293,7 +293,7 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   fog grid's edge and a 0.07-cell one 0.35 cell outside (at least 1.5 px). The fog, drawn after the
   world, darkens it where the ground is unexplored. Past the map's edges the ground is black (the
   flat fog's rectangles, laid on the ground), unless «Продолжать карту за краем» is on: then the
-  ground, the fog and the scenery copies go on past the edges in the tilted view too (see «The world
+  ground and its fog go on past the edges (a short strip, then the fog) in the tilted view too (see «The world
   map» above).
 - The settings rows: «Вид карты» always in the advanced window; «Размер фигур» and «Поворот двумя
   пальцами» beneath it with the 2.5D view on (desktop `advanced_window`, phone `advanced_window_phone`).

@@ -100,8 +100,8 @@ pub fn set_edge_pref(on: bool) {
     EXTEND_EDGE.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// Whether the map's ground goes on past its edges (mirrored, sinking into the sky), instead of
-/// black (the original's). Razdor's setting, off by default: the visual only, no rule or path.
+/// Whether the map's ground goes on past its edges (a short strip, then the animated fog), instead
+/// of black (the original's). Razdor's setting, off by default: the visual only, no rule or path.
 fn extend_edge() -> bool {
     EXTEND_EDGE.load(std::sync::atomic::Ordering::Relaxed)
 }
@@ -1181,10 +1181,10 @@ impl Camera {
         let centre = Vec2::from(at) * scale + pad;
         let mut origin = centre - vec2(view.w, view.h) / 2.0;
         if extend_edge() {
-            // «Продолжать карту за краем»: the view may reach the ground past each edge (the fade's
-            // width), and a map narrower than the view is centred, so the extension shows on every
-            // side. Off, the view stays on the map as it always did.
-            let over = vec2(terrain::EDGE_FADE * scale, terrain::EDGE_FADE * rh * scale);
+            // «Продолжать карту за краем»: the view may reach past each edge as far as the fog
+            // goes (`terrain::EDGE_FULL`), and a map narrower than the view is centred, so the
+            // extension shows on every side. Off, the view stays on the map as it always did.
+            let over = vec2(terrain::EDGE_FULL * scale, terrain::EDGE_FULL * rh * scale);
             origin.x = if world.x <= view.w { (world.x - view.w) / 2.0 } else { origin.x.clamp(-over.x, world.x - view.w + over.x) };
             origin.y = if world.y <= view.h { (world.y - view.h) / 2.0 } else { origin.y.clamp(-over.y, world.y - view.h + over.y) };
         } else {
@@ -1325,10 +1325,10 @@ impl Camera {
     }
 
     fn draw_fog_flat(&self, game: &Game) {
-        // «Продолжать карту за краем»: the fog goes on past the edges too, mirrored as the ground is.
+        // «Продолжать карту за краем»: the fog goes on past the edges too (its texels clamp there).
         if extend_edge() {
             let (dest, src) = self.fog_texels();
-            minimap::draw_fog_mirrored(&game.fog, &game.unshown_cells(), dest, src);
+            minimap::draw_fog_extended(&game.fog, &game.unshown_cells(), dest, src);
             return;
         }
         let (tl, br) = self.fog_corners(game);
@@ -1408,7 +1408,7 @@ impl Camera {
             }
             if extend_edge() {
                 let (dest, src) = self.fog_texels();
-                minimap::draw_mirrored(mask, dest, src);
+                minimap::draw_extended(mask, dest, src);
             } else {
                 draw_texture_ex(mask, tl.x, tl.y, WHITE, DrawTextureParams { dest_size: Some(br - tl), ..Default::default() });
             }
@@ -1503,7 +1503,7 @@ fn draw_terrain(game: &Game, art: Option<&DtArt>, cam: &Camera) {
         let (map_tl, map_br) = (vec2(-0.5, -0.5 * rh), vec2(map.w as f32 - 0.5, (map.h as f32 - 0.5) * rh));
         let w = cam.drawn_world_rect();
         // «Продолжать карту за краем»: the whole drawn ground, and past the map's edges the ground
-        // goes on (mirrored, sinking into the sky); otherwise the map's area in view.
+        // goes on (a short strip, then the fog); otherwise the map's area in view.
         let extend = extend_edge();
         let (tl, br) = if extend { (w.point(), w.point() + w.size()) } else { (map_tl.max(w.point()), map_br.min(w.point() + w.size())) };
         if tl.x < br.x && tl.y < br.y {
@@ -2157,70 +2157,6 @@ fn border_width(cells: f32, cam: &Camera) -> f32 {
     (cells * cam.scale).max(1.5)
 }
 
-/// Whether a scenery class (`map::object_class`) is in the hills' own pass: the original draws
-/// classes 1–3 before anything else (0x4c8864, see [`draw_world_in`]).
-fn in_hill_pass(class: u8) -> bool {
-    (object_class::HILLS..=object_class::ROCKY_HILLS).contains(&class)
-}
-
-/// The scenery «Продолжать карту за краем» mirrors past the map's edges: the massifs, hills and
-/// rocks (classes 1–8), the trees and plants (9–11). Never buildings, figures or anything the
-/// player uses.
-fn is_scenery(class: u8) -> bool {
-    (object_class::HILLS..=object_class::ROCKS).contains(&class) || (object_class::TREES..=object_class::THICKET).contains(&class)
-}
-
-/// The cells past a `w` × `h` map's edges that show the cell `t` of the map in the mirrored
-/// ground, within [`terrain::EDGE_FADE`]: each axis's images ([`terrain::mirror_images`]) with the
-/// cell itself, paired, so a corner's copies reflect about both borders.
-fn edge_tiles(t: Tile, w: i32, h: i32) -> Vec<Tile> {
-    let fade = terrain::EDGE_FADE;
-    let xs: Vec<i32> = std::iter::once(t.0).chain(terrain::mirror_images(t.0, w, fade)).collect();
-    let ys: Vec<i32> = std::iter::once(t.1).chain(terrain::mirror_images(t.1, h, fade)).collect();
-    let mut out = Vec::new();
-    for &x in &xs {
-        for &y in &ys {
-            let far = vec2(terrain::edge_gap(x, w), terrain::edge_gap(y, h)).length();
-            if (x, y) != t && far < fade {
-                out.push((x, y));
-            }
-        }
-    }
-    out
-}
-
-/// The mirrored copies of the explored scenery within [`terrain::EDGE_FADE`] of an edge that
-/// stand within reach of the drawn ground (`«Продолжать карту за краем»`), in the 2D space of
-/// `cam` (flat, or the 2.5D view's ground footprint). Each copy keeps its source's class, sprite
-/// and layer; it is drawn only.
-fn edge_scenery(game: &Game, cam: &Camera) -> Vec<Decoration> {
-    let map = &game.world.map;
-    let (w, h) = (map.w, map.h);
-    let fog = &game.fog;
-    // The scenery within this many cells of an edge has copies; a plant reaches a few cells up.
-    let near = terrain::EDGE_FADE as i32 + 1;
-    // The copies that may stand in view: the drawn ground, with a margin for sprites that reach
-    // up from their foot (in world units, as the map's centres).
-    let r = cam.drawn_world_rect();
-    let (margin, rh) = (12.0, cam.grid.row_height());
-    let mut out = Vec::new();
-    for o in map.objects_in_rows(0, h) {
-        let (x, y) = o.tile;
-        let at_edge = x < near || x >= w - near || y < near || y >= h - near;
-        if !at_edge || !is_scenery(o.class) || !razdor::rules::map::object_cells(o).any(|t| fog.explored_near(t, minimap::FEATHER)) {
-            continue;
-        }
-        for t in edge_tiles(o.tile, w, h) {
-            let (cx, cy) = map.center(t);
-            if cx < r.x - margin || cx > r.x + r.w + margin || cy < r.y - margin * rh || cy > r.y + r.h + margin * rh {
-                continue;
-            }
-            out.push(Decoration { tile: t, ..*o });
-        }
-    }
-    out
-}
-
 /// The world map: the flat view as it always was, or the 2.5D view (`tilt_view`), where the
 /// same passes are laid on the ground and stand up as billboards.
 fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<MapHoverLook>) {
@@ -2254,18 +2190,6 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                 standing(cam, object_foot(o, cam), || draw_object(o, art, cam));
             } else {
                 items.push((sprite_key(cam, o.tile, object_foot(o, cam), object_layer(o.class)), Drawable::Object(*o)));
-            }
-        }
-    }
-    // «Продолжать карту за краем»: the scenery past the edges is the mirrored map's, its copies drawn
-    // as the map's own: a hill in the hills' pass, the rest sorted with the map's sprites, so a tree
-    // or rock at an edge stands whole. Drawn only, never hit-tested.
-    if extend_edge() {
-        for c in edge_scenery(game, cam) {
-            if in_hill_pass(c.class) {
-                standing(cam, object_foot(&c, cam), || draw_object(&c, art, cam));
-            } else {
-                items.push((sprite_key(cam, c.tile, object_foot(&c, cam), object_layer(c.class)), Drawable::Object(c)));
             }
         }
     }
@@ -4894,56 +4818,6 @@ mod tilt_tests {
         assert!(clear(compass_place(screen, bar, 40.0, &[]).unwrap(), bar));
         assert!(clear(above_right, phone_bar) && clear(top, phone_bar));
         assert_eq!(compass_place(screen, bar, 40.0, &[Rect::new(0.0, 0.0, 1280.0, 800.0)]), None, "no clear place: no compass");
-    }
-}
-
-#[cfg(test)]
-mod edge_tests {
-    use super::*;
-
-    #[test]
-    fn a_scenery_edge_copy_stands_where_the_mirrored_ground_shows_its_cell() {
-        // Cell (0, 0) of a 5 × 5 map: its copies are the reflections about both borders and
-        // their corner, all within the fade; never the cell itself.
-        let copies = edge_tiles((0, 0), 5, 5);
-        for t in [(-1, 0), (0, -1), (-1, -1), (9, 0), (0, 9), (9, 9), (-10, -1)] {
-            assert!(copies.contains(&t), "{t:?} is a copy of (0, 0): {copies:?}");
-        }
-        assert!(!copies.contains(&(0, 0)));
-        // The far corner's copies reach the next border cell over, the same way.
-        let far = edge_tiles((4, 4), 5, 5);
-        assert!(far.contains(&(5, 4)) && far.contains(&(4, 5)) && far.contains(&(5, 5)), "{far:?}");
-        for &(x, y) in copies.iter().chain(&far) {
-            assert!(x < 0 || x >= 5 || y < 0 || y >= 5, "({x}, {y}) is outside");
-            assert!((0..5).contains(&terrain::mirror_cell(x, 5)) && (0..5).contains(&terrain::mirror_cell(y, 5)));
-        }
-        // A cell in the middle of a big map has none.
-        assert!(edge_tiles((50, 50), 100, 100).is_empty());
-    }
-
-    #[test]
-    fn the_copies_are_made_on_both_axes_and_at_every_corner() {
-        // A cell near the west edge has copies to the west only; one near the south edge to the
-        // south only; one in a corner to both and the corner. The same on the east and north.
-        let w_only = edge_tiles((0, 20), 40, 40);
-        assert!(w_only.iter().any(|&(x, _)| x < 0) && w_only.iter().all(|&(_, y)| y == 20 || y >= 0 && y < 40));
-        let s_only = edge_tiles((20, 39), 40, 40);
-        assert!(s_only.iter().any(|&(_, y)| y >= 40) && s_only.iter().all(|&(x, _)| x == 20 || (0..40).contains(&x)));
-        let corner = edge_tiles((0, 0), 40, 40);
-        assert!(corner.contains(&(-1, -1)), "the north-west corner's reflection");
-        let east = edge_tiles((39, 20), 40, 40);
-        assert!(east.iter().any(|&(x, _)| x >= 40), "east copies: {east:?}");
-        let north = edge_tiles((20, 0), 40, 40);
-        assert!(north.iter().any(|&(_, y)| y < 0), "north copies: {north:?}");
-    }
-
-    #[test]
-    fn only_the_scenery_classes_are_mirrored() {
-        assert!(is_scenery(object_class::HILLS) && is_scenery(object_class::ROCKS));
-        assert!(is_scenery(object_class::TREES) && is_scenery(object_class::THICKET));
-        assert!(!is_scenery(0), "class 0 is not scenery");
-        assert!(!is_scenery(object_class::THICKET + 1), "past the plants: not scenery");
-        assert!(in_hill_pass(object_class::HILLS) && !in_hill_pass(object_class::MOUNTAINS));
     }
 }
 

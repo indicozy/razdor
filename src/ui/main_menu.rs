@@ -1724,7 +1724,7 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     if row_button(Rect::new(br.x, edge_y, br.w, br.h), if audio.map_extended { tr("On") } else { tr("Off") }) {
         audio.map_extended = !audio.map_extended;
     }
-    let edge_hint = tr("Off: past the map's edges is black, as in the original. On: the ground goes on there, mirrored and sinking into the sky, with its scenery and fog.");
+    let edge_hint = tr("Off: past the map's edges is black, as in the original. On: a short stretch of ground goes on past the edges, then fades into a grey-blue fog.");
     for (i, line) in wrap(edge_hint, col.w - 48.0 * k, 12.0 * k).iter().enumerate() {
         chrome::shadow_text(line, col.x + 24.0 * k, edge_y + 56.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
     }
@@ -2007,7 +2007,7 @@ fn advanced_window_phone(audio: &mut super::audio::Settings, over_map: bool, dp:
     if phone_row(&mut left, &geo, tr("Extend the map past its edges"), if audio.map_extended { tr("On") } else { tr("Off") }).0 {
         audio.map_extended = !audio.map_extended;
     }
-    phone_hint(&mut left, &geo, tr("Off: past the map's edges is black, as in the original. On: the ground goes on there, mirrored and sinking into the sky, with its scenery and fog."));
+    phone_hint(&mut left, &geo, tr("Off: past the map's edges is black, as in the original. On: a short stretch of ground goes on past the edges, then fades into a grey-blue fog."));
     let arrangement = match audio.formation_controls {
         super::unit_drag::Controls::Clicks => tr("Clicks"),
         super::unit_drag::Controls::Drag => tr("Dragging"),

@@ -236,7 +236,7 @@ pub struct Settings {
     /// The wheel and the +/- keys leave the map's zoom alone: it stays `map_zoom`.
     pub zoom_locked: bool,
     /// «Продолжать карту за краем» (Razdor's, off by default): the ground goes on past the map's
-    /// edges, mirrored and sinking into the sky, where the original shows black (`world_view`).
+    /// edges, a short stretch and then fog, where the original shows black (`world_view`).
     pub map_extended: bool,
     /// The Community's battle animation speed (`AnimationSpeed`, percent 0..99); `None`
     /// until chosen: the install's.

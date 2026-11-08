@@ -170,27 +170,26 @@ pub fn draw_fog(fog: &Fog, held: &[(i32, i32)], tl: Vec2, br: Vec2) {
     draw_texture_ex(&tex, tl.x, tl.y, WHITE, DrawTextureParams { dest_size: Some(br - tl), ..Default::default() });
 }
 
-/// [`draw_fog`] of a map past its edges (the setting «Продолжать карту за краем»): `dest` shows the
-/// fog's texels `src` (in cells: texel `i` is cell `i`, its centre at `i + ½`), and the texels past
-/// the fog's own are mirrored about its border, as the ground is ([`super::terrain::mirror_cell`]).
-/// See [`draw_mirrored`].
-pub fn draw_fog_mirrored(fog: &Fog, held: &[(i32, i32)], dest: Rect, src: Rect) {
+/// [`draw_fog`] past a map's edges («Продолжать карту за краем»): `dest` shows the fog's texels
+/// `src` (in cells: texel `i` is cell `i`, its centre at `i + ½`). The texels past the fog's own
+/// hold the border's status ([`draw_extended`]), so the war fog runs on at the edge's own colour.
+pub fn draw_fog_extended(fog: &Fog, held: &[(i32, i32)], dest: Rect, src: Rect) {
     if !fog.enabled || fog.w <= 0 || fog.h <= 0 {
         return;
     }
-    draw_mirrored(&fog_texture(fog, held), dest, src);
+    draw_extended(&fog_texture(fog, held), dest, src);
 }
 
 /// Draws a map's one-texel-per-cell texture `tex` (the fog, or a showing's mask) into `dest`,
-/// showing its texels `src` (see [`draw_fog_mirrored`]). The texture wraps mirrored from now on:
-/// inside its texels a mirrored sample is the clamped one, so the flat draws of it are the same.
-pub fn draw_mirrored(tex: &Texture2D, dest: Rect, src: Rect) {
+/// showing its texels `src` (see [`draw_fog_extended`]). The texture clamps to its edge texels
+/// from now on: inside its texels the draw is the same as before, and past them the border's
+/// status goes on (a short strip, then the animated fog of `terrain`).
+pub fn draw_extended(tex: &Texture2D, dest: Rect, src: Rect) {
     // SAFETY: called on the main thread while macroquad runs, as every texture call.
     let gl = unsafe { get_internal_gl() };
-    gl.quad_context.texture_set_wrap(tex.raw_miniquad_id(), TextureWrap::Mirror, TextureWrap::Mirror);
+    gl.quad_context.texture_set_wrap(tex.raw_miniquad_id(), TextureWrap::Clamp, TextureWrap::Clamp);
     draw_texture_ex(tex, dest.x, dest.y, WHITE, DrawTextureParams { dest_size: Some(dest.size()), source: Some(src), ..Default::default() });
 }
-
 
 /// The minimap window's side in pixels of the 960×720 video (`MiniMap_Frame_400x400.lit` is
 /// 430 px at the original's 1024×768), and its frame's border.
