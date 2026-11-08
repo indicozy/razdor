@@ -33,6 +33,8 @@ Available modes:
 
 There is also a **"Check"** button to manually trigger a search for a new version.
 
+On phones (Android and iPhone) there are only **"Ask"** and **"Disabled"**: Android's installer asks before it installs anyway, and on iPhone an update opens the release page. The "Updates" row and the "Check" button are the same as on the computer.
+
 :::note
 For the update system to work, `curl` must be installed on your system (it is built into Windows 10 and newer, macOS, and most Linux distributions).
 :::

@@ -48,12 +48,14 @@ pub enum Mode {
 }
 
 impl Mode {
-    /// The settings button's next choice.
-    pub fn next(self) -> Mode {
-        match self {
-            Mode::Ask => Mode::Always,
-            Mode::Always => Mode::Off,
-            Mode::Off => Mode::Ask,
+    /// The settings button's next choice. On a phone (`phone`) there is no "Always" (see
+    /// [`effective_on`]): Ask and Off only, and a stored "Always" moves on as "Ask" does.
+    pub fn next_on(self, phone: bool) -> Mode {
+        match (self, phone) {
+            (Mode::Ask, false) => Mode::Always,
+            (Mode::Always, false) => Mode::Off,
+            (Mode::Ask | Mode::Always, true) => Mode::Off,
+            (Mode::Off, _) => Mode::Ask,
         }
     }
 }
@@ -246,7 +248,8 @@ pub fn effective(mode: Mode) -> Mode {
     effective_on(mode, crate::platform::MOBILE)
 }
 
-fn effective_on(mode: Mode, phone: bool) -> Mode {
+/// [`effective`] for a system given as `phone`: the settings show and act on this one.
+pub fn effective_on(mode: Mode, phone: bool) -> Mode {
     if phone && mode == Mode::Always {
         Mode::Ask
     } else {
@@ -843,7 +846,9 @@ mod tests {
     #[test]
     fn modes_cycle_and_are_saved_by_name() {
         assert_eq!(Mode::default(), Mode::Ask);
-        assert_eq!(Mode::Ask.next().next().next(), Mode::Ask);
+        assert_eq!(Mode::Ask.next_on(false), Mode::Always);
+        assert_eq!(Mode::Always.next_on(false), Mode::Off);
+        assert_eq!(Mode::Off.next_on(false), Mode::Ask);
         assert_eq!(serde_json::to_string(&Mode::Always).unwrap(), "\"always\"");
         assert_eq!(serde_json::from_str::<Mode>("\"off\"").unwrap(), Mode::Off);
     }
@@ -978,6 +983,18 @@ mod tests {
         assert_eq!(effective_on(Mode::Ask, true), Mode::Ask);
         assert_eq!(effective_on(Mode::Off, true), Mode::Off);
         assert_eq!(effective_on(Mode::Off, false), Mode::Off);
+    }
+
+    #[test]
+    fn phone_cycle_is_ask_and_off() {
+        // On a phone the row cycles Ask <-> Off; a stored Always reads as Ask, so it moves to Off.
+        assert_eq!(Mode::Ask.next_on(true), Mode::Off);
+        assert_eq!(Mode::Off.next_on(true), Mode::Ask);
+        assert_eq!(Mode::Always.next_on(true), Mode::Ask.next_on(true));
+        for m in [Mode::Ask, Mode::Always, Mode::Off] {
+            assert_ne!(m.next_on(true), Mode::Always);
+            assert_eq!(effective_on(m.next_on(true), true), m.next_on(true));
+        }
     }
 
     #[test]

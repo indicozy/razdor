@@ -1562,6 +1562,24 @@ fn advanced_width(over_map: bool, wh: f32) -> f32 {
     ((avail - 12.0) / k).floor().clamp(WIDE, 1120.0)
 }
 
+/// The «Обновления» row's hint on a phone (the row cycles Ask and Off there, `Mode::next_on`).
+const UPDATES_PHONE_HINT: &str = "Ask: at start a newer version is offered in a window. Off: Razdor does not check for updates.";
+
+/// The update row is the phone's (Ask and Off, the phone's hint) on a phone, held upright or
+/// sideways, and on a phone-sized layout (`display::dp_px`).
+fn updates_phone() -> bool {
+    razdor::platform::MOBILE || super::display::dp_px().is_some()
+}
+
+/// The «Обновления» row's value: the mode the row acts on (a stored "Always" reads as "Ask" on a phone).
+fn updates_label(mode: razdor::update::Mode, phone: bool) -> &'static str {
+    match razdor::update::effective_on(mode, phone) {
+        razdor::update::Mode::Ask => tr("Ask"),
+        razdor::update::Mode::Always => tr("Always"),
+        razdor::update::Mode::Off => tr("Off"),
+    }
+}
+
 /// Razdor's advanced settings (the settings window's "Ещё…"): rules where Razdor can differ
 /// from the original on the left, the screen, the interface scale, the font and the
 /// language on the right. Returns true when closed.
@@ -1646,36 +1664,33 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     }
     // Updates from the GitHub releases (`razdor::update`): offered, put in place quietly, or
     // not looked for; "Check now" asks at once and shows the answer.
-    // Phones have their own update window (Android installs through the system, iOS opens the
-    // release's page; `razdor::update::opens_page`): the row is not drawn there and the zoom
-    // row takes its place.
-    let y = if razdor::platform::MOBILE {
-        y
+    // Updates from the GitHub releases. On a phone (`updates_phone`) there is no "Always": the
+    // system's installer asks, and iOS opens the release's page (`razdor::update::opens_page`),
+    // so the row cycles Ask and Off and its hint is the phone's.
+    let phone_ui = updates_phone();
+    let y = y + 100.0 * k;
+    chrome::shadow_text(tr("Updates"), col.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
+    let ur = Rect::new(br.x, y, br.w, br.h);
+    let mode = updates_label(audio.updates, phone_ui);
+    if row_button(ur, mode) {
+        audio.updates = audio.updates.next_on(phone_ui);
+    }
+    let cr = Rect::new(ur.x, y + 40.0 * k, ur.w, ur.h);
+    if row_button(cr, tr("Check now")) {
+        super::update_view::check_by_hand();
+    }
+    let state = super::update_view::status_label();
+    let sw = measure(&state, 13.0 * k).width;
+    chrome::shadow_text(&state, cr.x - 16.0 * k - sw, cr.y + 19.0 * k, 13.0 * k, chrome::GOLD);
+    let (hint, size) = if phone_ui {
+        (tr(UPDATES_PHONE_HINT), 14.0)
     } else {
-        let y = y + 100.0 * k;
-        chrome::shadow_text(tr("Updates"), col.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
-        let ur = Rect::new(br.x, y, br.w, br.h);
-        let mode = match audio.updates {
-            razdor::update::Mode::Ask => tr("Ask"),
-            razdor::update::Mode::Always => tr("Always"),
-            razdor::update::Mode::Off => tr("Off"),
-        };
-        if row_button(ur, mode) {
-            audio.updates = audio.updates.next();
-        }
-        let cr = Rect::new(ur.x, y + 40.0 * k, ur.w, ur.h);
-        if row_button(cr, tr("Check now")) {
-            super::update_view::check_by_hand();
-        }
-        let state = super::update_view::status_label();
-        let sw = measure(&state, 13.0 * k).width;
-        chrome::shadow_text(&state, cr.x - 16.0 * k - sw, cr.y + 19.0 * k, 13.0 * k, chrome::GOLD);
-        let hint = tr("Ask: a newer release is offered in a window. Always: it is downloaded and starts the next time. The check never holds up the game.");
-        for (i, line) in wrap(hint, col.w - 48.0 * k, 12.0 * k).iter().enumerate() {
-            chrome::shadow_text(line, col.x + 24.0 * k, y + 92.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
-        }
-        y + 40.0 * k
+        (tr("Ask: a newer release is offered in a window. Always: it is downloaded and starts the next time. The check never holds up the game."), 12.0)
     };
+    for (i, line) in wrap(hint, col.w - 48.0 * k, size * k).iter().enumerate() {
+        chrome::shadow_text(line, col.x + 24.0 * k, y + 92.0 * k + i as f32 * 17.0 * k, size * k, WHITE);
+    }
+    let y = y + 40.0 * k;
     // The map's own zoom (Razdor's): the wheel steps from it, 0 comes back to it; locked, the
     // wheel and +/- leave it alone.
     let y = y + 100.0 * k;
@@ -1934,21 +1949,16 @@ fn advanced_window_phone(audio: &mut super::audio::Settings, over_map: bool, dp:
         audio.keep_xp_on_promotion = !audio.keep_xp_on_promotion;
     }
     phone_hint(&mut left, &geo, tr("As in the original, a unit's experience is dropped when it is promoted; Kept keeps it. Experience left over after a level is kept either way."));
-    if !razdor::platform::MOBILE {
-        let mode = match audio.updates {
-            razdor::update::Mode::Ask => tr("Ask"),
-            razdor::update::Mode::Always => tr("Always"),
-            razdor::update::Mode::Off => tr("Off"),
-        };
-        if phone_row(&mut left, &geo, tr("Updates"), mode).0 {
-            audio.updates = audio.updates.next();
-        }
-        let state = super::update_view::status_label();
-        if phone_row(&mut left, &geo, &state, tr("Check now")).0 {
-            super::update_view::check_by_hand();
-        }
-        phone_hint(&mut left, &geo, tr("Ask: a newer release is offered in a window. Always: it is downloaded and starts the next time. The check never holds up the game."));
+    // Updates (on a phone: Ask and Off only, see `updates_phone`).
+    let phone_ui = updates_phone();
+    if phone_row(&mut left, &geo, tr("Updates"), updates_label(audio.updates, phone_ui)).0 {
+        audio.updates = audio.updates.next_on(phone_ui);
     }
+    let state = super::update_view::status_label();
+    if phone_row(&mut left, &geo, &state, tr("Check now")).0 {
+        super::update_view::check_by_hand();
+    }
+    phone_hint(&mut left, &geo, tr(UPDATES_PHONE_HINT));
     let lock_label = if audio.zoom_locked { tr("Locked") } else { tr("Wheel and +/-") };
     if phone_row(&mut left, &geo, tr("Map zoom"), lock_label).0 {
         audio.zoom_locked = !audio.zoom_locked;

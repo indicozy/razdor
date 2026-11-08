@@ -466,6 +466,7 @@ Ask = Спрашивать
 Always = Всегда
 Off = Выключены
 Check now = Проверить
+Ask: at start a newer version is offered in a window. Off: Razdor does not check for updates. = Спрашивать: при запуске новая версия предлагается в окне. Выключены: Раздор не проверяет обновления.
 Checking… = Проверка…
 Up to date ({v}) = Последняя версия ({v})
 Could not check = Не удалось проверить
