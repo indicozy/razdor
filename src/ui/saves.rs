@@ -1366,7 +1366,7 @@ fn load_failed_box(title: &str, message: &str, lacking: &mut LackingBox) -> bool
     let h = (60.0 * u + lines.len() as f32 * step + if phone.is_some() { 20.0 * u } else { 0.0 } + row_extra).max(150.0 * u);
     let h = h + 28.0 * k * (g - 1.0) + super::chrome::title_grow();
     let r = Rect::new((screen_width() - w) / 2.0, (screen_height() - h) / 2.0, w, h);
-    let (inner, _) = super::chrome::window_grown(r, title, super::chrome::Skin::Marble, false);
+    let inner = message_window(r, title, phone.is_some(), u);
     super::dt_font::legacy_metrics_if(phone.is_some(), || {
         for (i, line) in lines.iter().enumerate() {
             super::chrome::shadow_centered(line, inner.center().x, inner.y + 24.0 * u + i as f32 * step, size, super::chrome::CREAM);
@@ -1410,6 +1410,19 @@ fn load_failed_box(title: &str, message: &str, lacking: &mut LackingBox) -> bool
     pressed || answer_key().is_some()
 }
 
+/// A message window of a refused save (1552). On a phone its title is drawn at 14 sp in the title strip
+/// (the shared window title is 11 sp there); on the desktop it is the window's own title. Returns the
+/// window's body.
+fn message_window(r: Rect, title: &str, own_title: bool, u: f32) -> Rect {
+    if !own_title {
+        return super::chrome::window_grown(r, title, super::chrome::Skin::Marble, false).0;
+    }
+    let (inner, _) = super::chrome::window_grown(r, "", super::chrome::Skin::Marble, false);
+    let mid = r.y + (inner.y - r.y) / 2.0;
+    super::dt_font::legacy_metrics_if(true, || super::chrome::shadow_centered(title, r.center().x, mid + 0.35 * 14.0 * u, 14.0 * u, super::chrome::CREAM));
+    inner
+}
+
 /// The download's question of a refused save (1552): the question with Yes and No, in Razdor's own
 /// window and sizes (the shared question box is the original's size, too small on a phone). The
 /// answer goes to `lacking.answer`.
@@ -1424,7 +1437,7 @@ fn lacking_question_box(title: &str, question: &str, lacking: &mut LackingBox) {
     let h = (60.0 * u + lines.len() as f32 * step + row_h - 28.0 * u).max(150.0 * u) + 28.0 * k * (g - 1.0) + super::chrome::title_grow();
     let w = if phone.is_some() { (420.0 * u).min(screen_width() - 24.0 * k) } else { 440.0 * k };
     let r = Rect::new((screen_width() - w) / 2.0, (screen_height() - h) / 2.0, w, h);
-    let (inner, _) = super::chrome::window_grown(r, title, super::chrome::Skin::Marble, false);
+    let inner = message_window(r, title, phone.is_some(), u);
     super::dt_font::legacy_metrics_if(phone.is_some(), || {
         for (i, line) in lines.iter().enumerate() {
             super::chrome::shadow_centered(line, inner.center().x, inner.y + 24.0 * u + i as f32 * step, size, super::chrome::CREAM);
