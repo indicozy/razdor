@@ -1857,11 +1857,29 @@ fn tip_grid_h(lines: usize) -> f32 {
     lines as f32 * TIP_PITCH - (TIP_PITCH - TIP_CELL)
 }
 
+/// The width of the tooltips' cells, `cols` columns less the last gap.
+fn tip_grid_w(cols: usize) -> f32 {
+    cols as f32 * TIP_PITCH - (TIP_PITCH - TIP_CELL)
+}
+
+/// The scale (screen px per original px) of an army tooltip's cells. Off a phone, and for a
+/// building's garrison, the interface scale `k`, as before. On a phone an army's cells take the
+/// text's scale `tk` (Razdor's, a player's report, backlog 1554: the text grew with the phone's
+/// dp and the pictures stayed at the window's scale, so they looked tiny beside it), capped at
+/// what the box holds: `room` px of height under the text (`grid_h` and `grid_w` in the cells'
+/// own units) and the box's width `box_w` px. Never under `k`.
+fn army_cells_scale(phone_army: bool, k: f32, tk: f32, grid_h: f32, grid_w: f32, room: f32, box_w: f32) -> f32 {
+    if !phone_army {
+        return k;
+    }
+    tk.min(room / grid_h).min(box_w / grid_w).max(k)
+}
+
 /// A 2×6 (or 3×4) mini formation of portraits, the front row at the bottom as the enemy's
-/// in battle; empty cells show their row's icon. Returns its height.
-fn formation_grid(game: &Game, assets: &Assets, troops: &[Troop], team: Team, x: f32, y: f32) -> f32 {
-    let k = super::chrome::k();
-    let (cell, pitch) = (TIP_CELL * k, TIP_PITCH * k);
+/// in battle; empty cells show their row's icon. Its cells are `cs` px per original px. Returns
+/// its height.
+fn formation_grid(game: &Game, assets: &Assets, troops: &[Troop], team: Team, x: f32, y: f32, cs: f32) -> f32 {
+    let (cell, pitch) = (TIP_CELL * cs, TIP_PITCH * cs);
     let f = game.content.formation;
     let lines = f.display_lines();
     for r in 0..lines {
@@ -1873,7 +1891,7 @@ fn formation_grid(game: &Game, assets: &Assets, troops: &[Troop], team: Team, x:
             match troop {
                 None => super::chrome::cell_icon(super::chrome::CellIcon::of(f, slot), sq),
                 Some(t) => {
-                    let face = Rect::new(cx + k, cy + k, cell - 2.0 * k, cell - 2.0 * k);
+                    let face = Rect::new(cx + cs, cy + cs, cell - 2.0 * cs, cell - 2.0 * cs);
                     assets.draw_portrait(t.unit, team, face);
                     // Wounds left by world spells.
                     let max = razdor::rules::units::Stats::of_level(&game.content, t.unit, t.level).max_hp();
@@ -1884,7 +1902,7 @@ fn formation_grid(game: &Game, assets: &Assets, troops: &[Troop], team: Team, x:
             draw_rectangle_lines(cx, cy, cell, cell, 1.0, super::chrome::SILVER);
         }
     }
-    tip_grid_h(lines) * k
+    tip_grid_h(lines) * cs
 }
 
 /// What a tooltip line is drawn in (0x4ca9f0, 0x4cb18c): the style's label font (SanSerif),
@@ -2193,7 +2211,12 @@ fn draw_tooltip_at(game: &Game, assets: &Assets, t: &Tooltip) {
     let rows = rows_at(tk);
     let text_h = text_h_of(&rows, tk) / tk;
     let w = tip_box_w(tk);
-    let h = tip_height(t.army, text_h, grid * k / tk, caption(tk)) * tk;
+    // The cells' scale: a phone's army takes the text's (capped to what the box holds, see
+    // `army_cells_scale`); the desktop and a garrison keep the interface scale.
+    let cols = game.content.formation.display_cols() as usize;
+    let room = screen_height() - bar_h() - tip_height(true, text_h, 0.0, None) * tk;
+    let cs = army_cells_scale(t.army && super::display::dp_px().is_some(), k, tk, grid_h, tip_grid_w(cols), room, w);
+    let h = tip_height(t.army, text_h, grid * cs / tk, caption(tk)) * tk;
     // Centred on the mouse and kept inside the map's view, above the bottom bar (interface.md
     // §7.4; 0x4ca8ac).
     let (mx, my) = crate::ui::widgets::pointer();
@@ -2208,10 +2231,10 @@ fn draw_tooltip_at(game: &Game, assets: &Assets, t: &Tooltip) {
         let title = ellipsize(&t.title, w * TIP_TITLE_W / TIP_W, title_size);
         shadow_centered(&title, x + w / 2.0, y + 13.5 * tk + title_size * 0.36, title_size, TIP_TITLE);
     });
-    let grid_x = x + (w - (game.content.formation.display_cols() as f32 * TIP_PITCH - (TIP_PITCH - TIP_CELL)) * k) / 2.0;
+    let grid_x = x + (w - tip_grid_w(cols) * cs) / 2.0;
     let mut ly = y + TIP_TOP * tk;
     if t.army {
-        ly += formation_grid(game, assets, &t.troops, t.team, grid_x, ly) + 8.0 * k;
+        ly += formation_grid(game, assets, &t.troops, t.team, grid_x, ly, cs) + 8.0 * cs;
     }
     let bottom = y + h - 2.0 * tk;
     for (s, ink) in &rows {
@@ -2233,7 +2256,7 @@ fn draw_tooltip_at(game: &Game, assets: &Assets, t: &Tooltip) {
         }
         let ink = Ink::Label;
         with_face(face(ink), || shadow_centered(caption_text, x + w / 2.0, caption_y + tip_size(ink, tk), glyph(face(ink), tk), tip_color(t.style, ink)));
-        formation_grid(game, assets, &t.troops, t.team, grid_x, grid_y);
+        formation_grid(game, assets, &t.troops, t.team, grid_x, grid_y, k);
     }
 }
 
@@ -3784,6 +3807,20 @@ mod tests {
         assert_eq!(tip_height(false, 0.0, grid, Some(15.0)), 15.0 + 159.0, "cells only: caption + 0x9f");
         assert_eq!(tip_height(false, 40.0, grid, Some(15.0)), 40.0 + 47.0 + 15.0 + 121.0, "+ caption + 0x79");
         assert_eq!(tip_height(false, 600.0, grid, Some(15.0)), 512.0, "at most 0x200");
+    }
+
+    /// A phone's army cells take the text's scale (a player's report 1554: the text was dp-scaled
+    /// and the 2×6 pictures stayed small), capped by the room under the text and the box's width.
+    /// The desktop and a garrison keep the interface scale, whatever the text's.
+    #[test]
+    fn a_phone_s_army_cells_take_the_text_s_scale_within_the_box() {
+        let (grid_h, grid_w) = (tip_grid_h(2), tip_grid_w(6));
+        assert_eq!((grid_h, grid_w), (104.0, 328.0));
+        assert_eq!(army_cells_scale(false, 1.0, 2.5, grid_h, grid_w, 1000.0, 900.0), 1.0, "the desktop: the interface scale");
+        assert_eq!(army_cells_scale(true, 1.0, 2.5, grid_h, grid_w, 1000.0, 900.0), 2.5, "a phone's army: the text's scale");
+        assert_eq!(army_cells_scale(true, 1.0, 2.5, grid_h, grid_w, 150.0, 900.0), 150.0 / 104.0, "capped by the room under the text");
+        assert_eq!(army_cells_scale(true, 1.0, 2.5, grid_h, grid_w, 1000.0, 492.0), 1.5, "capped by the box's width");
+        assert_eq!(army_cells_scale(true, 1.0, 2.5, grid_h, grid_w, 10.0, 900.0), 1.0, "never under the interface scale");
     }
 
     /// A castle taken shows the units the player left in it, not the garrison beaten for it.

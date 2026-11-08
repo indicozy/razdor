@@ -29,6 +29,8 @@ map-rk1-1280 | map:РК1-Начало пути | 1280x800 |
 map-rk3-1280 | map:РК3-Столица | 1280x800 |
 minimap-rk1-1280 | minimap:РК1-Начало пути | 1280x800 |
 minimap-rk3-1280 | minimap:РК3-Столица | 1280x800 |
+# An enemy army's hover card on the map (the cells beside its text; a player's report 1554)
+army-tooltip-1280 | map:РК1-Начало пути | 1280x800 | RAZDOR_SCENE_ARMY_HOVER=enemy;RAZDOR_MOUSE_RIGHT=1;RAZDOR_SCENE_QUIET=1
 clash-rk3-1280 | clash:РК3-Столица | 1280x800 |
 menu-1280 | menu:РК1-Начало пути | 1280x800 |
 settings-1280 | settings:РК1-Начало пути | 1280x800 |
