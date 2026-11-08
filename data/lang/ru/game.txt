@@ -316,8 +316,6 @@ the map "{m}" has changed since the game was saved = карта «{m}» изме
 the save does not fit the map or the data: {e} = сохранение не подходит к карте или данным: {e}
 the map's size differs = размер карты другой
 events saved for the demo = события сохранены для демо
-unknown unit {id} = неизвестный воин {id}
-unknown item {id} = неизвестный предмет {id}
 no hero = нет героя
 
 Time: {date} = Время: {date}
@@ -578,6 +576,7 @@ Nothing was added: the maps are already in the game. = Ничего не доб�
 Cannot copy the map: {e}. = Не удалось скопировать карту: {e}.
 «{file}» uses units or items that are not in your game ({ids}): it needs a mod, and it may work wrongly. It cannot be started. = «{file}» использует воинов или предметы, которых нет в вашей игре ({ids}): ей нужен мод, и она может работать неправильно. Начать её нельзя.
 The map «{title}» uses units or items that are not in your game ({ids}). It needs a mod, so it cannot be started. = Карта «{title}» использует воинов или предметы, которых нет в вашей игре ({ids}). Ей нужен мод, поэтому её нельзя начать.
+The save «{name}» uses units or items that are not in your game ({ids}). It was made with another mod: choose that mod and load it again. = Сохранение «{name}» использует воинов или предметы, которых нет в вашей игре ({ids}). Оно сделано с другим модом: выберите этот мод и загрузите снова.
 units {units}; items {items} = воины {units}; предметы {items}
 units {units} = воины {units}
 items {items} = предметы {items}

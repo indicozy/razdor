@@ -28,9 +28,10 @@ use crate::i18n::tr;
 use crate::trf;
 
 use super::clock::Clock;
-use super::content::{Content, ItemId, UnitId};
+use super::content::Content;
 use super::events::EventEngine;
 use super::game::Game;
+use super::map_refs::{self, Unknown};
 use super::rng::{self, EventRng, Rng};
 use super::world::World;
 
@@ -141,6 +142,10 @@ pub enum SaveError {
     MapChanged(String),
     /// The saved game does not fit the map or the install's data any more.
     Mismatch(String),
+    /// The save (its game or its map) names units or items the content lacks: it was made with
+    /// another mod. Razdor's crash guard, not the original's: refused with the ids (see
+    /// [`map_refs::unknown_in_game`]); `name` is the save's name.
+    Lacking { name: String, unknown: Unknown },
     /// [`MANUAL_SAVES_KEPT`] unpinned saves already: replace, delete or pin one.
     Full,
     /// The save to replace is pinned.
@@ -159,6 +164,7 @@ impl std::fmt::Display for SaveError {
             SaveError::MapMissing(m) => f.write_str(&trf!("the scenario's map file \"{m}.DTm\" is missing from the game folder (Maps_Rus)", m)),
             SaveError::MapChanged(m) => f.write_str(&trf!("the map \"{m}\" has changed since the game was saved", m)),
             SaveError::Mismatch(e) => f.write_str(&trf!("the save does not fit the map or the data: {e}", e)),
+            SaveError::Lacking { name, unknown } => f.write_str(&trf!("The save «{name}» uses units or items that are not in your game ({ids}). It was made with another mod: choose that mod and load it again.", name, ids = unknown.text())),
             SaveError::Pinned => f.write_str(tr("that save is pinned: unpin it first")),
             SaveError::Full => f.write_str(&trf!("there are {n} unpinned saves already: save over one, delete one or pin one", n = MANUAL_SAVES_KEPT)),
         }
@@ -1055,6 +1061,13 @@ pub fn restore(meta: &SaveMeta, mut game: Game, demo: Arc<Content>, install: Opt
             let install = install.ok_or(SaveError::NoInstall)?;
             let bytes = map_bytes(install.dir, file, *hash, embedded.as_deref())?;
             let scenario = Scenario::from_file_bytes(&bytes).map_err(|e| SaveError::Mismatch(e.to_string()))?;
+            // Razdor's crash guard (not the original's): the map a save carries may come from
+            // another mod, which names units or items this install lacks. Refused before the world
+            // is built from it (the same check as a map's start, `map_refs::unknown`).
+            let lacking = map_refs::unknown(&scenario, &install.content);
+            if !lacking.is_empty() {
+                return Err(SaveError::Lacking { name: meta.name.clone(), unknown: lacking });
+            }
             game.map_bytes = Some(bytes.into());
             let world = World::from_scenario(&scenario, &install.content);
             let (w, h) = (scenario.header.width as i32, scenario.header.height as i32);
@@ -1062,6 +1075,12 @@ pub fn restore(meta: &SaveMeta, mut game: Game, demo: Arc<Content>, install: Opt
             (install.content.clone(), world, Some(EventEngine::new(&scenario)), plants, scenario.armies.len())
         }
     };
+    // Razdor's crash guard (not the original's): the save's own state names units or items the
+    // content lacks (a save made with another mod). Refused before anything reads them by id.
+    let lacking = map_refs::unknown_in_game(&game, &content);
+    if !lacking.is_empty() {
+        return Err(SaveError::Lacking { name: meta.name.clone(), unknown: lacking });
+    }
     if (game.fog.w, game.fog.h) != (fresh.map.w, fresh.map.h) {
         return Err(SaveError::Mismatch(tr("the map's size differs").into()));
     }
@@ -1105,7 +1124,10 @@ pub fn restore(meta: &SaveMeta, mut game: Game, demo: Arc<Content>, install: Opt
     // game opens on the map, so the item goes back into the pack as the window's closing
     // would put it (0x4b8d28 → 0x49a85c).
     game.drop_held();
-    check_content(&game).map_err(SaveError::Mismatch)?;
+    // The units and items the game names are checked before it is built (`map_refs::unknown_in_game`).
+    if game.squad.is_empty() {
+        return Err(SaveError::Mismatch(tr("no hero").into()));
+    }
     Ok(game)
 }
 
@@ -1150,39 +1172,9 @@ fn migrate_spells(game: &mut Game) {
     }
 }
 
-/// Every unit, item and spell the game refers to exists in its content.
-fn check_content(g: &Game) -> Result<(), String> {
-    let c = &g.content;
-    let unit = |id: UnitId| c.try_unit(id).map(|_| ()).ok_or_else(|| trf!("unknown unit {id}", id = id.0));
-    let item = |id: ItemId| c.try_item(id).map(|_| ()).ok_or_else(|| trf!("unknown item {id}", id = id.0));
-    let w = &g.world;
-    let stationed = w.locations.iter().flat_map(|l| l.stationed.iter().map(|s| &s.unit));
-    for u in g.squad.iter().chain(stationed) {
-        unit(u.def)?;
-        u.items.iter().flatten().chain(&u.potions).try_for_each(|&i| item(i))?;
-    }
-    g.pack.iter().try_for_each(item)?;
-    let armies = w.armies.iter().chain(w.inactive.iter()).chain(w.respawns.iter().map(|r| &r.army));
-    let troops = w.locations.iter().flat_map(|l| l.garrison.iter()).chain(armies.clone().flat_map(|a| a.troops.iter())).chain(w.gang.iter());
-    for t in troops {
-        unit(t.unit)?;
-    }
-    for l in &w.locations {
-        l.recruits.iter().try_for_each(|r| unit(r.unit))?;
-        l.treasure.iter().try_for_each(|&i| item(i))?;
-        if let Some(s) = &l.shop {
-            s.goods().iter().try_for_each(|&i| item(i))?;
-        }
-    }
-    armies.flat_map(|a| a.items.iter()).try_for_each(|&i| item(i))?;
-    if g.squad.is_empty() {
-        return Err(tr("no hero").into());
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
+    use super::super::content::{ItemId, UnitId};
     use super::*;
     use crate::rules::battle::Outcome;
     use crate::rules::content::HeroClass;
@@ -2237,5 +2229,61 @@ pub(crate) mod tests {
         old.as_object_mut().unwrap().remove("campaign");
         let old: Game = serde_json::from_value(old).unwrap();
         assert_eq!(old.campaign, None);
+    }
+
+    /// Razdor's crash guard (not the original's): a save whose game names a unit and an item the
+    /// content lacks (made with another mod) is refused with its name and ids, not restored.
+    #[test]
+    fn a_save_naming_a_unit_or_an_item_the_content_lacks_is_refused() {
+        let c = demo();
+        let mut g = Game::new(c.clone(), HeroClass::Knight);
+        let meta = meta_of(&g, SaveKind::Manual, "Mod save").unwrap();
+        let mut second = g.squad[0].clone();
+        second.def = UnitId(900);
+        second.items[0] = Some(ItemId(901));
+        g.squad.push(second);
+        let (m, loaded) = decode(&encode(&meta, &g).unwrap()).unwrap();
+        match restore(&m, loaded, c, None) {
+            Err(SaveError::Lacking { name, unknown }) => {
+                assert_eq!(name, "Mod save");
+                assert_eq!((unknown.units, unknown.items), (vec![900], vec![901]));
+            }
+            other => panic!("the save must be refused with its ids, got {:?}", other.map(|_| ())),
+        }
+    }
+
+    /// The same guard for the map a save carries: a map of another mod (its bytes are in the
+    /// save and the install lacks the map) that names a unit the content lacks is refused.
+    #[test]
+    fn a_save_carrying_a_map_of_another_mod_is_refused() {
+        use crate::rules::world::testkit as tk;
+        let dir = temp_dir("lacking-map");
+        let content = Arc::new(tk::content());
+        let mut s1 = tk::scenario(24, 6);
+        s1.header.heroes[0] = tk::hero(2, 2, 200, &[tk::troop(4, 0, 2)]);
+        let mut s2 = s1.clone();
+        let troop = crate::dt::dtm::Troop { unit: 200, level: 1, count: 1 };
+        s2.armies.push(crate::dt::dtm::Army { leader_unit: 1, troops: [troop, Default::default(), Default::default(), Default::default(), Default::default(), Default::default()], ..Default::default() });
+        let bytes = s2.to_payload();
+        let mut g = Game::from_scenario(content.clone(), &s1, HeroClass::Knight);
+        g.set_map(ScenarioRef::Map { file: "Other".into(), hash: fnv1a(&bytes) }, bytes.into());
+        let meta = meta_of(&g, SaveKind::Manual, "Other mod save").unwrap();
+        let (m, loaded) = decode(&encode(&meta, &g).unwrap()).unwrap();
+        let install = Install { dir: &dir, content: content.clone() };
+        match restore(&m, loaded, content, Some(&install)) {
+            Err(SaveError::Lacking { unknown, .. }) => assert_eq!(unknown.units, vec![200]),
+            other => panic!("the map must be refused with its unit, got {:?}", other.map(|_| ())),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An intact save loads as before, and the refusal's words name the save and its ids.
+    #[test]
+    fn an_intact_save_loads_and_the_refusal_names_the_save_and_its_ids() {
+        let c = demo();
+        let g = Game::new(c.clone(), HeroClass::Knight);
+        assert_eq!(roundtrip(&g, c, None).squad.len(), 1);
+        let e = SaveError::Lacking { name: "Autumn".into(), unknown: Unknown { units: vec![104, 105], items: vec![35] } };
+        assert_eq!(e.to_string(), "The save «Autumn» uses units or items that are not in your game (units 104, 105; items 35). It was made with another mod: choose that mod and load it again.");
     }
 }

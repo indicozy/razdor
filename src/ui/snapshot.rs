@@ -539,6 +539,14 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             app.screen = Screen::Load(view);
             return Ok(());
         }
+        // `load-lacking`: the load window with the box a save made with another mod gets (the
+        // error `App::load` shows for `SaveError::Lacking`, as the game words it).
+        "load-lacking" => {
+            let e = razdor::rules::save::SaveError::Lacking { name: "Осенний поход".into(), unknown: razdor::rules::map_refs::Unknown { units: vec![104, 105, 106], items: vec![35] } };
+            app.load_error = Some(e.to_string());
+            app.screen = Screen::Load(LoadView::new(Back::Title));
+            return Ok(());
+        }
         "editor" => {
             app.open_editor();
             // `editor:<map>[:find text]`: that map of the install open, the find window

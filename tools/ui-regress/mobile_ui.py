@@ -110,6 +110,8 @@ SCREENS = [
     ("help", "map:РК1-Начало пути", {"RAZDOR_SCENE_OPEN": "3:keys"}),
     ("save", "save:РК1-Начало пути", {}),
     ("load", "load", {}),
+    # A save made with another mod (1552): the load window's message box with the save's name and ids.
+    ("load-lacking", "load-lacking", {}),
     ("custom-battle", "custom-battle", {}),
     ("victory", "victory:РК1-Начало пути", {}),
     # An event's rewards (a player's report 1453): mana, a joined unit and items; and more rows.

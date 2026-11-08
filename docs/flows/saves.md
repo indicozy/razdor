@@ -175,7 +175,15 @@ save::load(path, demo, install) → save::decode (unpack, check_version, serde)
 
 Errors are `save::SaveError` (version, map missing or changed, mismatch, full, pinned) and
 show in the load window. A save of a map the install lacks loads from its own bytes, so a
-player can load a save sent from another install. Moving on to the next campaign map still
+player can load a save sent from another install.
+
+Razdor's crash guard (1552, not the original's): a save made with another mod names units or
+items the install lacks. `restore` checks the save's map (`map_refs::unknown`, before the world
+is built from it) and the save's state (`map_refs::unknown_in_game`, before anything reads them
+by id; the same places `Content::unit` would be asked for) and refuses it with
+`SaveError::Lacking { name, unknown }`. The load window shows its text (the save's name and the
+ids, `Unknown::text`) in its message box, as it shows the other load errors. The save does not
+record its mod, so the text does not name one. Moving on to the next campaign map still
 needs that map in the install (the hand-over reads it from there, as the original does), and
 the install is still needed for the content (`NoInstall` without it).
 

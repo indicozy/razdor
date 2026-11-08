@@ -1297,21 +1297,28 @@ const WARNING_INK: Color = Color::new(1.0, 1.0, 0.61, 1.0);
 /// and one OK (or Enter, Escape). True once it is answered.
 fn load_failed_box(title: &str, message: &str) -> bool {
     let k = super::chrome::k();
-    let size = 13.0 * k;
-    let step = 17.0 * k;
-    let lines = wrap(message, 330.0 * k, size);
-    let h = (60.0 * k + lines.len() as f32 * step).max(150.0 * k);
+    // Razdor's own (1552): on a phone the message is 13 sp in either orientation, drawn with Razdor's
+    // own metrics (`legacy_metrics_if`, as the save window's phone rows are), and the box's margins
+    // and line steps are in dp too (`u`), so the OK stays below the text. The interface scale
+    // gave the text about 9 sp there. The desktop keeps 13 px and its own margins (`u` is `k`).
+    let phone = super::display::dp_px();
+    let u = phone.unwrap_or(k);
+    let (size, step) = (13.0 * u, 17.0 * u);
+    let lines = super::dt_font::legacy_metrics_if(phone.is_some(), || wrap(message, 330.0 * k, size));
+    let h = (60.0 * u + lines.len() as f32 * step + if phone.is_some() { 20.0 * u } else { 0.0 }).max(150.0 * u);
     let w = 380.0 * k;
     // Razdor's own: the OK grows with the text size (`button_grow`), the box with it.
     let g = super::display::button_grow();
     let h = h + 28.0 * k * (g - 1.0);
     let r = Rect::new((screen_width() - w) / 2.0, (screen_height() - h) / 2.0, w, h);
     let (inner, _) = super::chrome::window(r, title, super::chrome::Skin::Marble, false);
-    for (i, line) in lines.iter().enumerate() {
-        super::chrome::shadow_centered(line, inner.center().x, inner.y + 24.0 * k + i as f32 * step, size, super::chrome::CREAM);
-    }
+    super::dt_font::legacy_metrics_if(phone.is_some(), || {
+        for (i, line) in lines.iter().enumerate() {
+            super::chrome::shadow_centered(line, inner.center().x, inner.y + 24.0 * u + i as f32 * step, size, super::chrome::CREAM);
+        }
+    });
     let (bw, bh) = (90.0 * k * g, 28.0 * k * g);
-    let ok = Rect::new(inner.center().x - bw / 2.0, inner.y + inner.h - 38.0 * k + (28.0 * k - bh), bw, bh);
+    let ok = Rect::new(inner.center().x - bw / 2.0, inner.y + inner.h - 38.0 * u + (28.0 * u - bh), bw, bh);
     let ok_label = own("Buttons", "Ok", n_("OK"));
     let (_, down, pressed) = super::widgets::button_state(ok, true);
     super::chrome::marble_button(ok, &ok_label, true, down);

@@ -4,9 +4,14 @@
 //! mod the install lacks does ("no unit 104"). So a map is checked before it starts (the
 //! new-game window refuses it with the ids) and when it is imported (the import warns). The
 //! install's own maps name only the install's content (a test checks this with the real files).
+//! A save is checked the same way before it is restored ([`unknown_in_game`] for the save's state,
+//! and [`unknown`] for its map): a save made with another mod is refused with the ids, not loaded.
+//! That is Razdor's crash guard, not the original's.
 
 use super::content::{Content, ItemId, UnitId};
+use super::game::Game;
 use crate::dt::dtm::{Scenario, Troop};
+use crate::trf;
 
 /// The ids a scenario names that the content does not have, sorted, without repeats.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -19,11 +24,33 @@ impl Unknown {
     pub fn is_empty(&self) -> bool {
         self.units.is_empty() && self.items.is_empty()
     }
+
+    /// The words for the ids, as the notices say them: «units 104, 105; items 35».
+    pub fn text(&self) -> String {
+        let units = self.units.iter().map(u32::to_string).collect::<Vec<_>>().join(", ");
+        let items = self.items.iter().map(u32::to_string).collect::<Vec<_>>().join(", ");
+        match (self.units.is_empty(), self.items.is_empty()) {
+            (false, false) => trf!("units {units}; items {items}", units, items),
+            (false, true) => trf!("units {units}", units),
+            _ => trf!("items {items}", items),
+        }
+    }
 }
 
 /// The unit types and items of `s` that `content` does not have. An empty slot (0) names nothing.
 pub fn unknown(s: &Scenario, content: &Content) -> Unknown {
     let (units, items) = references(s);
+    collect(units, items, content)
+}
+
+/// The unit types and items a game names that `content` does not have: its state (what a save
+/// holds) and not its map (which [`unknown`] checks).
+pub fn unknown_in_game(g: &Game, content: &Content) -> Unknown {
+    let (units, items) = game_references(g);
+    collect(units, items, content)
+}
+
+fn collect(units: Vec<u32>, items: Vec<u32>, content: &Content) -> Unknown {
     let mut out = Unknown {
         units: units.into_iter().filter(|&id| id != 0 && content.try_unit(UnitId(id)).is_none()).collect(),
         items: items.into_iter().filter(|&id| id != 0 && content.try_item(ItemId(id)).is_none()).collect(),
@@ -33,6 +60,35 @@ pub fn unknown(s: &Scenario, content: &Content) -> Unknown {
     out.items.sort_unstable();
     out.items.dedup();
     out
+}
+
+/// Every unit type and item id a game's state names: the squad and the units on the stations
+/// with their item cells and potions, the pack, the armies, the garrisons, the gang, the
+/// respawns, the recruits, the treasure and the shops' goods. Each place has a case in
+/// `game_references_cover_every_place`.
+fn game_references(g: &Game) -> (Vec<u32>, Vec<u32>) {
+    let mut units: Vec<u32> = Vec::new();
+    let mut items: Vec<u32> = Vec::new();
+    let w = &g.world;
+    let stationed = w.locations.iter().flat_map(|l| l.stationed.iter().map(|s| &s.unit));
+    for u in g.squad.iter().chain(stationed) {
+        units.push(u.def.0);
+        items.extend(u.items.iter().flatten().chain(&u.potions).map(|i| i.0));
+    }
+    items.extend(g.pack.iter().map(|i| i.0));
+    let armies = || w.armies.iter().chain(w.inactive.iter()).chain(w.respawns.iter().map(|r| &r.army));
+    units.extend(w.locations.iter().flat_map(|l| l.garrison.iter()).chain(armies().flat_map(|a| a.troops.iter())).chain(w.gang.iter()).map(|t| t.unit.0));
+    for a in armies() {
+        items.extend(a.items.iter().map(|i| i.0));
+    }
+    for l in &w.locations {
+        units.extend(l.recruits.iter().map(|r| r.unit.0));
+        items.extend(l.treasure.iter().map(|i| i.0));
+        if let Some(s) = &l.shop {
+            items.extend(s.goods().iter().map(|i| i.0));
+        }
+    }
+    (units, items)
 }
 
 /// Every unit type and item id the scenario names (empty slots included: [`unknown`] drops them).
@@ -185,6 +241,60 @@ mod tests {
             let s = map.load().unwrap_or_else(|e| panic!("{}: {e}", map.name));
             let u = unknown(&s, &content);
             assert!(u.is_empty(), "{}: units {:?}, items {:?}", map.name, u.units, u.items);
+        }
+    }
+
+    /// A game of the install content names nothing unknown, whatever its state.
+    #[test]
+    fn an_intact_game_names_nothing_unknown() {
+        use crate::rules::content::HeroClass;
+        let c = std::sync::Arc::new(Content::builtin());
+        let g = Game::new(c.clone(), HeroClass::Knight);
+        assert!(unknown_in_game(&g, &c).is_empty());
+    }
+
+    /// Every place a game's state names a unit type or an item, each with an id the content lacks:
+    /// the unknown list must name it. (A field missed here would reach `Content::unit` and panic.)
+    #[test]
+    fn game_references_cover_every_place() {
+        use crate::rules::content::HeroClass;
+        use crate::rules::world::Troop as WorldTroop;
+        let known = std::sync::Arc::new(Content::builtin());
+        let content = testkit::content(vec![testkit::warrior(1, 3, 3)], vec![testkit::item(7, crate::dt::data::ArtefactType::Ring)]);
+        let fresh = || Game::new(known.clone(), HeroClass::Knight);
+        // (the place, a game with that place holding an id the content lacks, whether it is a unit, the id)
+        type Fill = fn(&mut Game);
+        let cases: Vec<(&str, Fill, bool)> = vec![
+            ("squad unit", |g| g.squad[0].def = UnitId(200), true),
+            ("squad item", |g| g.squad[0].items[0] = Some(ItemId(200)), false),
+            ("squad potion", |g| g.squad[0].potions.push(ItemId(200)), false),
+            ("station unit", |g| {
+                let unit = g.squad[0].clone();
+                g.world.locations[0].stationed.push(crate::rules::world::Stationed { unit: crate::rules::units::Unit { def: UnitId(200), ..unit } });
+            }, true),
+            ("army troop", |g| g.world.armies[0].troops[0].unit = UnitId(200), true),
+            ("army item", |g| g.world.armies[0].items.push(ItemId(200)), false),
+            ("garrison troop", |g| {
+                let t = g.world.armies[0].troops[0].clone();
+                g.world.locations[0].garrison.push(WorldTroop { unit: UnitId(200), ..t });
+            }, true),
+            ("gang troop", |g| {
+                let t = g.world.armies[0].troops[0].clone();
+                g.world.gang.push(WorldTroop { unit: UnitId(200), ..t });
+            }, true),
+            ("recruit", |g| {
+                if let Some(r) = g.world.locations.iter_mut().find(|l| !l.recruits.is_empty()) {
+                    r.recruits[0].unit = UnitId(200);
+                }
+            }, true),
+            ("treasure", |g| g.world.locations[0].treasure.push(ItemId(200)), false),
+        ];
+        for (place, fill, is_unit) in cases {
+            let mut g = fresh();
+            fill(&mut g);
+            let u = unknown_in_game(&g, &content);
+            let named = if is_unit { &u.units } else { &u.items };
+            assert!(named.contains(&200), "{place}: 200 must be named, got {u:?}");
         }
     }
 }

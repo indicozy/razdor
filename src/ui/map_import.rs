@@ -19,7 +19,7 @@ use razdor::dt::map_import::{self, ImportError, Map};
 use razdor::i18n::tr;
 use razdor::local;
 use razdor::rules::content::Content;
-use razdor::rules::map_refs::{self, Unknown};
+use razdor::rules::map_refs;
 use razdor::trf;
 
 use super::audio::{cue, Cue};
@@ -91,17 +91,6 @@ pub fn notice(title: &str, lines: Vec<String>) {
     MODAL.with_borrow_mut(|m| *m = Some(Modal::Notice { title: title.to_string(), lines }));
 }
 
-/// The words for the ids a map names that the install lacks: «воины 104, 105; предметы 35».
-pub fn missing_text(u: &Unknown) -> String {
-    let units = u.units.iter().map(u32::to_string).collect::<Vec<_>>().join(", ");
-    let items = u.items.iter().map(u32::to_string).collect::<Vec<_>>().join(", ");
-    match (u.units.is_empty(), u.items.is_empty()) {
-        (false, false) => trf!("units {units}; items {items}", units, items),
-        (false, true) => trf!("units {units}", units),
-        _ => trf!("items {items}", items),
-    }
-}
-
 /// Refuses the start of `entry` when it names units or items the content lacks: the reason is
 /// shown in a notice, and true is returned (a map of a mod the install does not have).
 pub fn refused(entry: &ScenarioEntry, content: &Content) -> bool {
@@ -110,7 +99,7 @@ pub fn refused(entry: &ScenarioEntry, content: &Content) -> bool {
         return false;
     }
     let title = if entry.scenario.title.trim().is_empty() { entry.file.as_str() } else { entry.scenario.title.as_str() };
-    let text = trf!("The map «{title}» uses units or items that are not in your game ({ids}). It needs a mod, so it cannot be started.", title, ids = missing_text(&unknown));
+    let text = trf!("The map «{title}» uses units or items that are not in your game ({ids}). It needs a mod, so it cannot be started.", title, ids = unknown.text());
     notice(tr("Add a map…"), vec![text]);
     true
 }
@@ -125,7 +114,7 @@ fn warnings(maps: &[Map], content: &Content) -> Vec<String> {
                 trf!(
                     "«{file}» uses units or items that are not in your game ({ids}): it needs a mod, and it may work wrongly. It cannot be started.",
                     file = m.file_name.clone(),
-                    ids = missing_text(&unknown)
+                    ids = unknown.text()
                 )
             })
         })

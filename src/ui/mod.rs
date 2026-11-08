@@ -764,6 +764,8 @@ impl App {
                 };
                 self.game = Some(game);
             }
+            // A save made with another mod is told with its own words (the save names its ids).
+            Err(e @ razdor::rules::save::SaveError::Lacking { .. }) => self.load_error = Some(e.to_string()),
             Err(e) => self.load_error = Some(razdor::trf!("Cannot load: {e}.", e)),
         }
     }
