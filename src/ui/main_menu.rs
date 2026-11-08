@@ -1563,7 +1563,7 @@ fn advanced_width(over_map: bool, wh: f32) -> f32 {
 }
 
 /// The «Обновления» row's hint on a phone (the row cycles Ask and Off there, `Mode::next_on`).
-const UPDATES_PHONE_HINT: &str = "Ask: at start a newer version is offered in a window. Off: Razdor does not check for updates.";
+const UPDATES_PHONE_HINT: &str = n_("Ask: at start a newer version is offered in a window. Off: Razdor does not check for updates.");
 
 /// The update row is the phone's (Ask and Off, the phone's hint) on a phone, held upright or
 /// sideways, and on a phone-sized layout (`display::dp_px`).
