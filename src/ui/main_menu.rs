@@ -2610,7 +2610,7 @@ fn option_check_lines(x: f32, y: f32, width: f32, lines: &[String], on: bool, in
 /// the room from the top inset to the bar (over a map) or to the title's foot; one unit is one
 /// dp, so the labels are 14 units (14 sp) and the rows 40 units. A long checkbox label wraps to a
 /// second line; the rows scroll when they are taller than the window. Its last rows are the five
-/// group buttons (backlog 1559), two or three to a row. Desktop and sideways keep
+/// group buttons (backlog 1559), as many to a row as their labels fit. The desktop keeps
 /// [`options_window`]'s own layout. Returns true when closed.
 fn phone_options(audio: &mut super::audio::Settings, install_wide: bool, over_map: bool, u: f32) -> bool {
     super::dt_font::legacy_metrics_if(true, || {
@@ -2806,8 +2806,9 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     if OPENED_WITH.with(|o| o.borrow().is_none()) {
         OPENED_WITH.with(|o| *o.borrow_mut() = Some(audio.clone()));
     }
-    // A phone held upright: its own layout (`phone_options`).
-    if let Some(u) = upright_dp() {
+    // A phone (held upright or sideways): its own layout (`phone_options`), in dp, so the group
+    // buttons keep the finger's 44 dp and their 14 sp labels (backlog 1559).
+    if let Some(u) = super::display::dp_px() {
         return phone_options(audio, install_wide, over_map, u);
     }
     let title = own("Options", "Title", n_("Sound, graphics and gameplay settings"));
