@@ -187,6 +187,50 @@ fn thirty_days_on_every_map() {
 /// there: from next to the village one step onto any of its cells engages the army standing
 /// in it (world.md §4.2 rule 2, 0x4ad94c); with the hero inside his village they assault it
 /// and fight him (ai.md §9.1, 0x4a548c). Playtest 2026-10-08: "they cannot be caught".
+/// Backlog 1450 («Другой берег»): a merchant ship in the bridge fort and an army on the bridge
+/// cell in front of it, its target across the bridge. The report's jam did not come back here:
+/// the ship leaves the fort and the army leaves the bridge within three days (no save of the
+/// report exists, so this is the state it describes, not a replay of it).
+#[test]
+fn other_shore_bridge_fort_does_not_jam() {
+    let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+    let dt = DtInstall::load(std::path::Path::new(&dir)).unwrap();
+    let Some(m) = dt.maps.iter().find(|m| m.name == "Другой берег") else { return };
+    let c = Arc::new(Content::from_dt(&dt));
+    let s = m.load().unwrap();
+    let mut g = Game::from_scenario(c.clone(), &s, HeroClass::Knight);
+    let fort: Tile = (190, 157);
+    let bridge: Tile = (191, 155);
+    let town = g.world.locations.iter().position(|l| l.name == "Город Голденбург").expect("the town across the bridge");
+    let ship = g.world.armies.iter().position(|a| a.id == 27).expect("the merchant ship");
+    let army = g.world.armies.iter().position(|a| a.id == 4).expect("an army of the enemy faction");
+    for (i, t) in [(ship, fort), (army, bridge)] {
+        let (x, y) = g.world.map.center(t);
+        g.world.armies[i].pos = (x, y);
+        g.world.armies[i].post = t;
+        g.world.armies[i].patrols = false;
+        g.world.armies[i].ai.no_random = true;
+        g.world.armies[i].mind.buildings = vec![0; g.world.locations.len()];
+        g.world.armies[i].mind.buildings[town] = 100;
+    }
+    let (mut ship_left_fort, mut army_left_bridge) = (false, false);
+    let end = g.clock.total_minutes() + (3 * MINUTES_PER_DAY) as f64;
+    let mut calls = 0;
+    while g.clock.total_minutes() < end && calls < 200_000 {
+        calls += 1;
+        if g.pending_question().is_some() {
+            g.answer_question(true);
+            continue;
+        }
+        ship_left_fort |= g.world.armies[ship].tile(&g.world.map) != fort;
+        army_left_bridge |= g.world.armies[army].tile(&g.world.map) != bridge;
+        g.drain_events();
+        g.wait(4);
+    }
+    assert!(ship_left_fort, "the merchant ship stayed in the fort for three days");
+    assert!(army_left_bridge, "the army stayed on the bridge cell for three days");
+}
+
 #[test]
 fn rk1_sea_robbers_are_caught_in_the_village() {
     let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
