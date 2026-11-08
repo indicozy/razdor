@@ -8,6 +8,13 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **The hero is the unit of kind Leader** (2026-11-08). `Unit::is_hero` (`WageKind::Leader`) is what
+  keeps the hero from promotion and the «+». The original's hero is the first unit of the army (experience.md
+  §4). An event that takes a unit from an AI army (`add_unit` with `from_army`, `script.rs`) copies that
+  unit's kind, so an AI army leader who joins the player's squad would be taken for the hero. Not seen in
+  a map yet. Settle: check the original's behaviour for such a join (what the first unit is after it) and,
+  if it differs, make the hero a position or a flag instead of the kind.
+
 - **G1 reverted: which message-event results wait for OK** (2026-11-06). The fix that moved every
   finish-time result of a message event to the window's OK (0x4c206c → 0x4ab1ec) broke tests built from
   the original's recordings: `rules::replay::rk1_church_windows_come_in_the_originals_order` (the original

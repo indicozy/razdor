@@ -853,6 +853,10 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                     let slot = game.squad[i].slot;
                     let mut u = razdor::rules::units::Unit::new(&game.content, def, slot);
                     u.level = parts.next().and_then(|v| v.parse().ok()).unwrap_or(2);
+                    // The hero keeps his kind (`WageKind::Leader`): that is what makes him the hero.
+                    if i == 0 {
+                        u.wage_kind = razdor::rules::content::WageKind::Leader;
+                    }
                     game.squad[i] = u;
                 }
                 // `RAZDOR_SCENE_SIGN_OFF=1`: the promotion sign of that member switched off (its
@@ -1056,7 +1060,26 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                 return Err("no such army".into());
             }
             game.foe = Some(Foe::Army(i));
-            Screen::Battle(Box::new(BattleView::new(game.start_battle())))
+            // `RAZDOR_SCENE_BATTLE_END=1`: the hero's auto-battle played to its end, so the battle's
+            // experience cards show (the hero at least level 3, the level that can take a promotion).
+            let end = std::env::var_os("RAZDOR_SCENE_BATTLE_END").is_some();
+            if end {
+                game.squad[0].level = game.squad[0].level.max(3);
+            }
+            // `RAZDOR_SCENE_HERO=<unit id>`: the hero made that class (at his level), still the hero.
+            if let Some(id) = std::env::var("RAZDOR_SCENE_HERO").ok().and_then(|v| v.parse::<u32>().ok()) {
+                let def = razdor::rules::content::UnitId(id);
+                game.content.try_unit(def).ok_or("no such unit")?;
+                let mut hero = razdor::rules::units::Unit::new(&game.content, def, game.squad[0].slot);
+                hero.level = game.squad[0].level.max(if end { 3 } else { 1 });
+                hero.wage_kind = razdor::rules::content::WageKind::Leader;
+                game.squad[0] = hero;
+            }
+            let mut battle = game.start_battle();
+            if end {
+                battle.hero_auto_play_to_end();
+            }
+            Screen::Battle(Box::new(BattleView::new(battle)))
         }
         _ => return Err(format!("unknown scene {kind}")),
     };

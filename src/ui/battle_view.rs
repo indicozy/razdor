@@ -1347,12 +1347,13 @@ impl BattleView {
 
     /// The experience card's `Sign-Upgrade` (4b0684): after the award the unit is past its
     /// first level (the original's L > 0) and its type has a next one (492dd4). The «Не
-    /// напоминать» switch hides it too (Razdor's own).
+    /// напоминать» switch hides it too (Razdor's own). The hero never has it (experience.md
+    /// §4, «The player»).
     fn can_promote_after(&self, a: &XpAward) -> bool {
         let f = &self.battle.fighters[a.fighter];
         let c = self.battle.content();
         let level = f.level + self.levels_gained(a);
-        sign_after(level, c.unit(f.unit).upgrades.iter().any(|u| u.target.is_some()), f.sign_off)
+        !f.is_hero && sign_after(level, c.unit(f.unit).upgrades.iter().any(|u| u.target.is_some()), f.sign_off)
     }
 
     /// Fighter `id` as the screen shows it: as it was until the action's effect lands on it

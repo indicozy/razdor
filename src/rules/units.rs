@@ -441,9 +441,16 @@ impl Unit {
     }
 
     /// The original lets the player promote any unit that has gained a level (level 2 here,
-    /// its level 1), whatever `NextUnitNLevel` says; the hero never.
+    /// its level 1), whatever `NextUnitNLevel` says; the hero never: experience.md §4, «The
+    /// player» («any unit except the hero (the first unit)»; the army screen's 4c3d38 → 4b1a04).
     fn can_promote(&self) -> bool {
-        self.level >= 2
+        self.level >= 2 && !self.is_hero()
+    }
+
+    /// The hero (the player's first unit) is the one of [`WageKind::Leader`]: it draws no
+    /// wage and has no promotion, no «+» and no «Не напоминать» switch.
+    pub fn is_hero(&self) -> bool {
+        self.wage_kind == WageKind::Leader
     }
 
     /// Classes this unit may be promoted to now.
@@ -592,6 +599,29 @@ mod tests {
         assert_eq!((reset.def, reset.level, reset.xp), (UnitId(2), 1, 0), "the default drops the XP");
         assert_eq!(kept.promote(&c, UnitId(2), true), Ok(()));
         assert_eq!((kept.def, kept.level, kept.xp), (UnitId(2), 1, 20), "the option keeps it");
+    }
+
+    #[test]
+    fn the_hero_is_never_promoted_and_has_no_sign() {
+        // experience.md §4, «The player»: any unit except the hero. The hero has a tree and a
+        // level 3, yet no option, no «+» and no way to switch the «+» off; an ordinary unit at
+        // level 2 keeps its sign.
+        let c = content(vec![militia(), warrior(2, 30, 8)], vec![]);
+        let mut hero = Unit::new(&c, UnitId(1), slot());
+        hero.wage_kind = WageKind::Leader;
+        hero.gain_xp(&c, 1_000);
+        assert!(hero.level >= 3 && hero.is_hero());
+        assert!(!hero.promotion_sign(&c), "the hero shows no «+»");
+        assert!(!hero.promotion_ready(&c), "the hero has no open option");
+        assert!(hero.promotions(&c).is_empty());
+        assert!(hero.upgrade_tree(&c).iter().all(|&(_, _, ok)| !ok), "the tree is shown locked");
+        assert_eq!(hero.clone().promote(&c, UnitId(2), false), Err(PromoteError::NotAvailable));
+
+        let mut ordinary = Unit::new(&c, UnitId(1), slot());
+        ordinary.gain_xp(&c, 60);
+        assert!(!ordinary.is_hero());
+        assert!(ordinary.promotion_sign(&c), "an ordinary unit at level 2 shows the sign");
+        assert_eq!(ordinary.promotions(&c), vec![UnitId(2)]);
     }
 
     #[test]
