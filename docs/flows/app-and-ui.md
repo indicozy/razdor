@@ -563,11 +563,20 @@ Building a window (`src/ui/chrome.rs`):
   bottom bar, the FPS counter and the keyboard strip use `chrome::bar_k`, the chosen scale cut to the fit
   (`display::fitted_scale`), so they stay as large as the fit allows. On a phone the bottom bar has its own
   scale, `chrome::bar_k` = `display::phone_bar_k` (Razdor's, backlog 1557): the scale at which its readouts
-  reach 14 sp (`BAR_TEXT_SP`), kept to the width less the safe area with a 90 dp time panel (portrait is
-  width-bound: its readouts stay under 12 sp). `game_bar::draw_with_time` draws the bar as the window scale
-  (`display::with_window_scale`) at that scale; the bar's place is its width capped at the screen less the
-  safe area. The FPS counter and the keyboard strip keep the fit (`chrome::strip_k`). Everything that takes
-  `chrome::bar_height` (the windows above the bar, the map's bottom edge) follows the taller bar.
+  reach 14 sp (`BAR_TEXT_SP`), kept to the width less the safe area with a 90 dp time panel.
+  `game_bar::draw_with_time` draws the bar as the window scale (`display::with_window_scale`) at that scale;
+  the bar's place is its width capped at the screen less the safe area. The FPS counter and the keyboard
+  strip keep the fit (`chrome::strip_k`). Upright (the owner's layout, 2026-11-08) the bar is two rows, sized
+  in dp (`game_bar::portrait_height`, `portrait_layout`): the date pane and the four readouts on top (the date
+  wraps to lines, `stack_time`), the eight round buttons across the full width below; its time buttons stand
+  over the date pane. Sideways the windows above the bar keep the old bar height (`chrome::bar_height`), so
+  they keep their size and may overlap its taller part. The map's bottom edge, the pan's bounds
+  (`pan::begin_frame`) and the bar's place use `chrome::bar_top_height`, the drawn bar's top; the bar's cover
+  (`pan::cover_bar`, the clips, the presses on the bar) uses `pan::bar_top`, which sideways is the old line
+  (`chrome::bar_height`); pop-ups (`popup::usable`) keep to the drawn top, so they never cover a bar button.
+  `game_bar::bar_rect` is the bar's rect for what hangs off it (the compass).
+  The minimap may stand in a corner beside a bar that does not span the screen, down to the screen's bottom
+  (`minimap::bottom_edge`, backlog 1560).
 - Buttons grow with the text size (Razdor's, the owner's decision of 2026-10-31; every screen
   except the bottom bar's readouts and the market row). At ×1 every
   button keeps the original's size; above it `display::button_grow` (the text size) multiplies

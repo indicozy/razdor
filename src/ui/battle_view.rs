@@ -132,7 +132,7 @@ impl Layout {
             (Some(win), Some(_)) => Layout::upright(k, win, f, custom),
             _ => {
                 let (sw, safe) = (screen_width(), super::display::safe_area());
-                Layout::landscape(k, (sw, screen_height()), chrome::bar_height(), f, dp, safe.top)
+                Layout::landscape(k, (sw, screen_height()), chrome::fit_bar_height(), f, dp, safe.top)
             }
         }
     }

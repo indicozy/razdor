@@ -16,10 +16,10 @@ pub fn finger_gap() -> Option<f32> {
     display::dp_px().map(|dp| FINGER_DP * dp)
 }
 
-/// The rectangle a phone's pop-ups may use: the screen above the bottom bar (a pop-up never
-/// covers the bar's buttons).
+/// The rectangle a phone's pop-ups may use: the screen above the bottom bar's drawn top (a pop-up
+/// never covers the bar's buttons). The windows above the bar keep the old line (`pan::bar_top`).
 pub fn usable() -> Rect {
-    Rect::new(0.0, 0.0, screen_width(), super::pan::bar_top().min(screen_height()))
+    Rect::new(0.0, 0.0, screen_width(), (screen_height() - super::chrome::bar_top_height()).min(screen_height()))
 }
 
 /// The pop-up for a pointer at `at` on a phone: `desktop` as it is on the desktop, else

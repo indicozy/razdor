@@ -247,7 +247,7 @@ fn bounds(rects: impl IntoIterator<Item = Rect>) -> Option<Rect> {
 
 /// The top of the bottom bar on the screen (the bar's own scale, `chrome::bar_height`).
 pub fn bar_top() -> f32 {
-    screen_height() - chrome::bar_top_height()
+    screen_height() - chrome::bar_height()
 }
 
 /// The screen above the bar: what a window drawn over the bar may show ([`cover_bar`]).

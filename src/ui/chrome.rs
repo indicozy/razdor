@@ -1324,6 +1324,12 @@ pub fn bar_top_height() -> f32 {
     }
 }
 
+/// The bar's height at the window fit (the old bar's height in both orientations): a screen that
+/// reserves the bottom for the bar but has none of its own (the battle) keeps its layout.
+pub fn fit_bar_height() -> f32 {
+    (80.0 * strip_k()).round()
+}
+
 /// The bar's height as the windows above it fit against it. On a phone held sideways the windows
 /// keep the old bar height (its scale at the fit), so they keep their size and may overlap the
 /// bar's taller part: a modal window covers the bar anyway (the owner's choice, 2026-11-08).
