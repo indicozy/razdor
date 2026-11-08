@@ -18,6 +18,8 @@ options-1280 | options | 1280x800 |
 options-advanced-1280 | options:advanced | 1280x800 |
 scenarios-1280 | scenarios:РК1-Начало пути | 1280x800 |
 rules-menu-1280 | scenarios:РК1-Начало пути | 1280x800 | RAZDOR_SCENE_RULES=1
+# The rules window with the «Правила Раздора» row on (its six switches set; the others off).
+rules-preset-1280 | scenarios:РК1-Начало пути | 1280x800 | RAZDOR_SCENE_RULES=1;RAZDOR_SCENE_EXPERIMENTAL=bless,poison,spells,merchant,rear,store
 load-manual-1280 | load | 1280x800 |
 load-auto-1280 | load:auto | 1280x800 |
 authors-1280 | authors:25 | 1280x800 |

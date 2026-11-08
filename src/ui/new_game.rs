@@ -1607,6 +1607,7 @@ fn experimental_menu() {
     // lines. A row is as tall as two lines when any label wraps at that column count, else one.
     let normal = 16.0 * tx;
     let label_pitch = normal * 1.2;
+    let preset_label = tr("Razdor's rules");
     let labels: [&str; ROWS] = [
         tr("All special bonuses simultaneously"),
         tr("No item limits"),
@@ -1643,10 +1644,14 @@ fn experimental_menu() {
     };
     let wraps = |cols: usize| labels.iter().any(|l| super::dt_font::legacy_metrics_if(true, || wrap_cached(l, col_w_for(cols) - 30.0 * big, normal)).len() > 1);
     let row_h_for = |cols: usize| if wraps(cols) { row_h.max(2.0 * label_pitch + 6.0 * big) } else { row_h };
+    // The «Правила Раздора» row (full width, above the switches) and its hint lines (wrapped to the
+    // window's width, as the hints at the bottom); the switches start under them.
+    let preset_lines = |cols: usize| super::dt_font::legacy_metrics_if(true, || wrap_cached(tr("Turns on at once all Razdor's rules that differ from the original; each can be turned off on its own afterwards."), width_for(cols) - 40.0 * big - bar_w, hint_size));
+    let top_h = |cols: usize| row_h + 4.0 * big + preset_lines(cols).len() as f32 * hint_pitch + gap;
     // The window's height with `cols` columns of rows and `lines` lines of hints.
     let height = |cols: usize, lines: usize| {
         let per = ROWS.div_ceil(cols) as f32;
-        54.0 * o + per * row_h_for(cols) + (per - 1.0) * gap + 8.0 * big + lines as f32 * hint_pitch + 8.0 * big + ok_h + 12.0 * big
+        54.0 * o + top_h(cols) + per * row_h_for(cols) + (per - 1.0) * gap + 8.0 * big + lines as f32 * hint_pitch + 8.0 * big + ok_h + 12.0 * big
     };
     let lines_for = |cols: usize| wrapped(width_for(cols) - 40.0 * big - bar_w);
     // An upright phone has one column: its height scrolls, so the rows are never squeezed.
@@ -1664,7 +1669,7 @@ fn experimental_menu() {
     // hints are as tall as the window's natural content, so it scrolls only when the cap bites.
     let ok_top = r.bottom() - 12.0 * big - ok_h;
     let view = Rect::new(r.x + 20.0 * big, r.y + 54.0 * o, iw + bar_w, (ok_top - 8.0 * big) - (r.y + 54.0 * o));
-    let content_h = per_col as f32 * row_h + (per_col as f32 - 1.0) * gap + 8.0 * big + lines.len() as f32 * hint_pitch;
+    let content_h = top_h(cols) + per_col as f32 * row_h + (per_col as f32 - 1.0) * gap + 8.0 * big + lines.len() as f32 * hint_pitch;
     let most = (content_h - view.h).max(0.0);
     let mut scroll = RULES_SCROLL.with(|s| s.get()).clamp(0.0, most);
     if most > 0.0 {
@@ -1673,11 +1678,11 @@ fn experimental_menu() {
             scroll = wheel_scroll(scroll, wheel()).clamp(0.0, most);
         }
     }
-    let content_top = view.y - scroll;    let (_, close) = chrome::window(r, tr("Experimental scenario rules"), chrome::Skin::Marble, true);
+    let content_top = view.y - scroll;
+    let grid_top = content_top + top_h(cols);
+    let (_, close) = chrome::window(r, tr("Experimental scenario rules"), chrome::Skin::Marble, true);
     let mut rules = experimental_rules();
-    let check = |index: usize, label: &str, value: &mut bool| {
-        let (c, rr) = (index / per_col, index % per_col);
-        let row = Rect::new(r.x + 20.0 * big + c as f32 * (col_w + col_gap), content_top + rr as f32 * (row_h + gap), col_w, row_h);
+    let check_row = |row: Rect, label: &str, value: &mut bool| {
         let box_r = Rect::new(row.x, row.y + (row_h - 20.0 * big) / 2.0, 20.0 * big, 20.0 * big);
         chrome::silver_frame(box_r, big.max(1.0));
         if *value {
@@ -1701,7 +1706,22 @@ fn experimental_menu() {
         let (_, _, pressed) = if in_view { button_state(row, true) } else { (false, false, false) };
         if pressed && view.contains(crate::ui::widgets::pointer().into()) { *value = !*value; }
     };
+    let check = |index: usize, label: &str, value: &mut bool| {
+        let (c, rr) = (index / per_col, index % per_col);
+        check_row(Rect::new(r.x + 20.0 * big + c as f32 * (col_w + col_gap), grid_top + rr as f32 * (row_h + gap), col_w, row_h), label, value);
+    };
     let clip = super::widgets::Clip::new(view);
+    // The «Правила Раздора» row: on when all six of its switches are on. Pressed, it sets all six
+    // (on, or off when they are all on) and leaves the other switches alone. Its hint is under it.
+    let mut preset_on = rules.is_razdor_preset_on();
+    check_row(Rect::new(r.x + 20.0 * big, content_top, iw, row_h), preset_label, &mut preset_on);
+    if preset_on != rules.is_razdor_preset_on() {
+        rules.set_razdor_preset(preset_on);
+    }
+    let preset_top = content_top + row_h + 4.0 * big;
+    for (i, line) in preset_lines(cols).iter().enumerate() {
+        super::dt_font::legacy_metrics_if(true, || chrome::shadow_text(line, r.x + 20.0 * big, preset_top + i as f32 * hint_pitch + hint_size * 0.8, hint_size, chrome::CREAM));
+    }
     check(0, labels[0], &mut rules.simultaneous_bonuses);
     check(1, labels[1], &mut rules.unlimited_items);
     check(2, labels[2], &mut rules.two_potions);
@@ -1717,7 +1737,7 @@ fn experimental_menu() {
     check(12, labels[12], &mut rules.rear_service_flat);
     check(13, labels[13], &mut rules.building_store);
     EXPERIMENTAL.with(|p| p.set(rules));
-    let hints_top = content_top + per_col as f32 * row_h + (per_col as f32 - 1.0) * gap + 8.0 * big;
+    let hints_top = grid_top + per_col as f32 * row_h + (per_col as f32 - 1.0) * gap + 8.0 * big;
     for (i, line) in lines.iter().enumerate() {
         // The baseline sits 0.8 of the size below the line's top.
         super::dt_font::legacy_metrics_if(true, || chrome::shadow_text(line, r.x + 20.0 * big, hints_top + i as f32 * hint_pitch + hint_size * 0.8, hint_size, chrome::CREAM));

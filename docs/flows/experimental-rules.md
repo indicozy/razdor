@@ -212,14 +212,15 @@ keep the item and show the existing refusal. All equipment rules and potion limi
 
 The choice is remembered (the owner's yes, 2026-11-02): when the window closes (OK, Esc, Enter or its close button) and when a game starts, the fourteen switches are written to `settings.json` (`language::Settings::experimental_rules`, all off on an older file, and a switch whose key a file lacks is off, `remembered_rules`). `open_list` starts from them, so the scenario list's «Экспериментальные правила включены» label shows a remembered choice too.
 
-Opened from the scenario list's «Экспериментальные правила» button. Its scale is `display::popup_o`
+Opened from the scenario list's «Экспериментальные правила» button. Above the fourteen rows is a full-width
+«Правила Раздора» row with its hint line (`ExperimentalRules::razdor_preset` and `set_razdor_preset`, `is_razdor_preset_on`): on when all six parity switches (`bless_once`, `undead_poison_immune`, `unlimited_spells`, `merchant_item`, `rear_service_flat`, `building_store`) are on, and pressed it sets all six together (off when they are all on), leaving the other eight alone. The row and its hint scroll with the rows (the grid starts under them, `grid_top`). Its scale is `display::popup_o`
 fitted to the screen. Its fourteen rows and OK are touch targets (40 dp on a phone); its texts are one
 px per dp on a phone, grown with the text size (`button_grow`) and never under Normal; the hints
 wrap to its width and the window grows with them. The rows take one, two or three columns: the
 fewest whose height fits the screen (a phone's landscape takes two or three), and the window takes
 the screen's width. The hint lines of the free-units and units-don't-die rules show only while those are on (they say «армии героя»: both rules touch the player's units only). Every label is drawn at the same size; a label too wide for its column wraps to two lines, and every row is then two lines tall. On an upright phone the window is at most 60% of the screen high and has one column; a phone held landscape scrolls its columns the same way when they do not fit (the hints are the last scrolled lines in both). The window keeps a strip at the right on any phone, so the columns clear the bar. The rows and hints scroll between the title and the OK button (a swipe, the wheel, the bar at the right; `RULES_SCROLL`, kept until the game ends, `RAZDOR_SCENE_SCROLL` for a shot). A row toggles only on a press inside the visible view. Any window that overflows the screen scrolls the same way. Snapshot:
 `RAZDOR_SCENE=scenarios RAZDOR_SCENE_RULES=1`, with `RAZDOR_SCENE_EXPERIMENTAL` keys
-`bonuses,items,potions,cells,free,auto,undying,fast,bless,poison,spells,merchant,rear`; the mobile check's case «rules».
+`bonuses,items,potions,cells,free,auto,undying,fast,bless,poison,spells,merchant,rear`; the mobile check's case «rules» (the preset off), «rules-preset» (the preset's six on, `RAZDOR_SCENE_EXPERIMENTAL=bless,poison,spells,merchant,rear,store`) and the UI regression case `rules-preset-1280`.
 
 ## Battle AI: Caster guard (Максимум)
 

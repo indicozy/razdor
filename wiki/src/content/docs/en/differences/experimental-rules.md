@@ -30,6 +30,8 @@ By default, for a new game, all fourteen are turned off. Your selection is remem
 * **Rear Service always −30%:** Rear Service always cuts wages by 30%. Off (as in the original): when the player has no income from towns, the cut is larger, about 70%.
 * **Store in your own buildings:** in your castle, fort or town with the hero in it, a "Store" tab shows the loot your garrison could not wear; a click puts the item into the hero's pack. Off (as in the original): no tab, the loot stays in the building.
 
+The "Razdor's rules" row above the toggles turns on the last six Razdor rules at once (the six listed above) and leaves the other toggles as they are. The row shows on when all six are on; press it again to turn all six off. Afterwards each toggle can be switched on or off on its own.
+
 On a phone, when the window does not fit, the list of toggles scrolls.
 
 :::tip

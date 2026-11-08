@@ -178,6 +178,36 @@ impl ExperimentalRules {
         Self { bless_once: true, undead_poison_immune: true, unlimited_spells: true, merchant_item: true, rear_service_flat: true, building_store: true, ..Self::default() }
     }
 
+    /// The six switches that hold Razdor's own former rules (the set
+    /// `before_the_rules_were_saved` turns on). The rules window's «Правила Раздора» row sets them
+    /// together; the other switches are extra experiments and are left alone.
+    const RAZDOR_PRESET: [fn(&mut Self) -> &mut bool; 6] = [
+        |r| &mut r.bless_once,
+        |r| &mut r.undead_poison_immune,
+        |r| &mut r.unlimited_spells,
+        |r| &mut r.merchant_item,
+        |r| &mut r.rear_service_flat,
+        |r| &mut r.building_store,
+    ];
+
+    /// Turns on the six «Правила Раздора» switches; the other switches stay as they are.
+    pub fn razdor_preset(&mut self) {
+        self.set_razdor_preset(true);
+    }
+
+    /// Sets the six «Правила Раздора» switches together (`on`), the others untouched.
+    pub fn set_razdor_preset(&mut self, on: bool) {
+        for switch in Self::RAZDOR_PRESET {
+            *switch(self) = on;
+        }
+    }
+
+    /// Whether all six «Правила Раздора» switches are on (the row shows on); a partly set preset is off.
+    pub fn is_razdor_preset_on(&self) -> bool {
+        let mut all = *self;
+        Self::RAZDOR_PRESET.iter().all(|switch| *switch(&mut all))
+    }
+
     /// The first rule that is on, by its catalog name (the one the scenario list's yellow mark
     /// gives as its reason, `rules::marks`); `None` with the classic rules.
     pub fn first_on(&self) -> Option<&'static str> {
@@ -965,6 +995,32 @@ mod experimental_rules_save_tests {
         let before = ExperimentalRules::before_the_rules_were_saved();
         assert!(before.bless_once && before.undead_poison_immune && before.unlimited_spells && before.merchant_item && before.rear_service_flat);
         assert!(!before.simultaneous_bonuses && !before.unlimited_items && !before.two_potions && !before.six_cells && !before.free_units && !before.auto_promotion && !before.undying_units && !before.fast_ai);
+    }
+
+    /// The «Правила Раздора» row turns on exactly the six former rules and leaves the others alone;
+    /// it is on only when all six are on.
+    #[test]
+    fn the_razdor_preset_turns_on_the_six_former_rules_and_nothing_else() {
+        let mut rules = ExperimentalRules { fast_ai: true, free_units: true, ..Default::default() };
+        assert!(!rules.is_razdor_preset_on());
+        rules.razdor_preset();
+        assert!(rules.is_razdor_preset_on());
+        assert_eq!(rules, ExperimentalRules { fast_ai: true, free_units: true, ..ExperimentalRules::before_the_rules_were_saved() });
+        rules.set_razdor_preset(false);
+        assert_eq!(rules, ExperimentalRules { fast_ai: true, free_units: true, ..Default::default() });
+        assert!(!rules.is_razdor_preset_on());
+    }
+
+    /// A preset with one of its six switches off is not on, and turning the row on sets all six.
+    #[test]
+    fn a_partly_set_preset_is_off_and_the_row_sets_all_six() {
+        let mut rules = ExperimentalRules::before_the_rules_were_saved();
+        rules.building_store = false;
+        assert!(!rules.is_razdor_preset_on());
+        rules.set_razdor_preset(true);
+        assert!(rules.is_razdor_preset_on() && rules.building_store);
+        assert!(!ExperimentalRules::default().is_razdor_preset_on());
+        assert!(ExperimentalRules::before_the_rules_were_saved().is_razdor_preset_on());
     }
 
     /// Each of the five names the rules window and the scenario list's mark (`first_on`).

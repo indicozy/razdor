@@ -93,6 +93,8 @@ SCREENS = [
     ("scenarios-card", "scenarios:РК1-Начало пути", {"RAZDOR_SCENE_CARD": "1"}),
     # The experimental scenario rules window over the scenario list (a player's report 1461).
     ("rules", "scenarios:РК1-Начало пути", {"RAZDOR_SCENE_RULES": "1"}),
+    # The same window with the «Правила Раздора» row on (its six switches set).
+    ("rules-preset", "scenarios:РК1-Начало пути", {"RAZDOR_SCENE_RULES": "1", "RAZDOR_SCENE_EXPERIMENTAL": "bless,poison,spells,merchant,rear,store"}),
     ("map","map:РК1-Начало пути", {}),
     ("minimap", "minimap:РК1-Начало пути", {}),
     ("settings", "settings:РК1-Начало пути", {}),
