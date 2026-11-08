@@ -201,6 +201,8 @@ pub struct Settings {
     pub minimap_size: Option<(f32, f32)>,
     /// The corner the minimap window was dragged to (Razdor's); the original's top right.
     pub minimap_corner: super::minimap::Corner,
+    /// The bottom bar's size on a phone held sideways (`display::BarSize`, the default: largest).
+    pub bottom_bar_size: super::display::BarSize,
     /// Advanced, Razdor's deviation: «Опыт при повышении». Off (the default) is the original's
     /// reset: a promoted unit's XP is dropped (0x4b1df0); on, it is kept (`Game::keep_xp_on_promotion`).
     pub keep_xp_on_promotion: bool,
@@ -310,7 +312,7 @@ pub fn must_request(asked: Option<i32>, want: i32) -> bool {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), keep_xp_on_promotion: false, keep_formation: true, battle_marks: true, army_list: false, map_tilt: false, map_sprite_size: super::world_view::DEFAULT_SPRITE_SIZE, map_twist: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, map_extended: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new() }
+        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), bottom_bar_size: Default::default(), keep_xp_on_promotion: false, keep_formation: true, battle_marks: true, army_list: false, map_tilt: false, map_sprite_size: super::world_view::DEFAULT_SPRITE_SIZE, map_twist: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, map_extended: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new() }
     }
 }
 

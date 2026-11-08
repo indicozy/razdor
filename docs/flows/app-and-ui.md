@@ -566,15 +566,17 @@ Building a window (`src/ui/chrome.rs`):
   reach 14 sp (`BAR_TEXT_SP`), kept to the width less the safe area with a 90 dp time panel.
   `game_bar::draw_with_time` draws the bar as the window scale (`display::with_window_scale`) at that scale;
   the bar's place is its width capped at the screen less the safe area. The FPS counter and the keyboard
-  strip keep the fit (`chrome::strip_k`). Upright (the owner's layout, 2026-11-08, third version) the bar is
-  three rows sized in dp (`game_bar::portrait_height`, `portrait_layout`): the date pane centred on top (its
-  time buttons stand over it), the eight round buttons in one full-width row, and the money line as on the
-  desktop (`resources`, at the fitted scale). Sideways and upright the windows above the bar keep main's
-  height (`chrome::bar_height`), so they keep their size and may overlap the bar's taller part. The map's
-  bottom edge, the pan's bounds (`pan::begin_frame`) and the bar's place use `chrome::bar_top_height`, the
-  drawn bar's top; the bar's cover (`pan::cover_bar`, the clips, the presses on the bar) uses `pan::bar_top`,
-  the old line (`chrome::bar_height`); pop-ups (`popup::usable`) keep to the drawn top, so they never cover a
-  bar button.
+  strip keep the fit (`chrome::strip_k`). On a phone held sideways the bar's scale is `chrome::bar_k` =
+  `display::bar_size_k` of the setting «Размер нижней панели» (`display::BarSize`, `audio.json`
+  `bottom_bar_size`, default Large): Normal is main's scale (the fit), Large the phone's text size
+  (`display::phone_bar_k`), Medium halfway. The landscape date wraps and stacks in its pane (`stack_time`),
+  so it is never cut. Upright and on the desktop the bar is main's, one row at the fitted scale: the owner
+  rejected two other layouts (2026-11-08), so the upright bar does not change with the setting. Windows
+  above the bar keep main's height (`chrome::bar_height`), so they keep their size and may overlap the bar's
+  taller part. The map's bottom edge, the pan's bounds (`pan::begin_frame`) and the bar's place use
+  `chrome::bar_top_height`, the drawn bar's top; the bar's cover (`pan::cover_bar`, the clips, the presses on
+  the bar) uses `pan::bar_top`, the old line (`chrome::bar_height`); pop-ups (`popup::usable`) keep to the
+  drawn top, so they never cover a bar button.
   `game_bar::bar_rect` is the bar's rect for what hangs off it (the compass).
   The minimap may stand in a corner beside a bar that does not span the screen, down to the screen's bottom
   (`minimap::bottom_edge`, backlog 1560).

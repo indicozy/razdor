@@ -1303,7 +1303,8 @@ pub fn bar_k() -> f32 {
         Some(_) if super::window_layout::portrait() => super::display::fitted_scale(fit_k()),
         Some(dp) => {
             let safe = super::display::safe_area();
-            super::display::phone_bar_k(fit_k(), dp, screen_width() - safe.left - safe.right)
+            let large = super::display::phone_bar_k(fit_k(), dp, screen_width() - safe.left - safe.right);
+            super::display::bar_size_k(super::display::bar_size(), super::display::fitted_scale(fit_k()), large)
         }
         None => super::display::fitted_scale(fit_k()),
     }
@@ -1318,10 +1319,7 @@ pub fn strip_k() -> f32 {
 /// The bottom game bar's own height: the map's bottom edge, the bar's place and the pan's bar
 /// (`bar_top_height`). On a phone held upright it is the bar's three rows (`game_bar::portrait_height`).
 pub fn bar_top_height() -> f32 {
-    match super::display::dp_px() {
-        Some(dp) if super::window_layout::portrait() => super::game_bar::portrait_height(dp, bar_k()),
-        _ => (80.0 * bar_k()).round(),
-    }
+    (80.0 * bar_k()).round()
 }
 
 /// The bar's height at the window fit (the old bar's height in both orientations): a screen that

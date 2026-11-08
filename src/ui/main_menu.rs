@@ -2031,6 +2031,10 @@ fn advanced_window_phone(audio: &mut super::audio::Settings, over_map: bool, dp:
     if phone_row(&mut right, &geo, tr("Interface scale"), &super::display::scale_label(audio.ui_scale, fit)).0 {
         audio.ui_scale = super::display::next_scale(audio.ui_scale, fit);
     }
+    // The bottom bar's size on a phone held sideways (Razdor's; the desktop has no such row).
+    if phone_row(&mut right, &geo, tr("Bottom bar size"), super::display::bar_size_label(audio.bottom_bar_size)).0 {
+        audio.bottom_bar_size = super::display::next_bar_size(audio.bottom_bar_size);
+    }
     let font_label = match audio.font {
         super::dt_font::FontMode::Original => tr("As in the original"),
         super::dt_font::FontMode::Modern => tr("Modern"),

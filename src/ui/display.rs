@@ -7,7 +7,7 @@
 //! `NSWindow`. Wayland is not used (miniquad runs on X11 alone by default).
 
 use razdor::local;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -224,6 +224,76 @@ pub fn default_large_windows() -> bool {
 pub fn next_text_size(s: f32) -> f32 {
     let at = TEXT_SIZES.iter().position(|&t| (t - s).abs() < 1e-3).unwrap_or(0);
     TEXT_SIZES[(at + 1) % TEXT_SIZES.len()]
+}
+
+// ------------------------------------------------------------------------------------------
+// The bottom bar's size on a phone held sideways («Размер нижней панели», the owner's setting)
+// ------------------------------------------------------------------------------------------
+
+/// How big the bottom bar is on a phone held sideways: main's size, halfway, or the largest (the
+/// default). Upright and on the desktop the bar keeps main's size whatever this is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BarSize {
+    Normal,
+    Medium,
+    #[default]
+    Large,
+}
+
+/// The chosen bar size as its index in [`BarSize`] (`Large`).
+static BAR_SIZE: AtomicU8 = AtomicU8::new(BarSize::Large as u8);
+
+pub fn set_bar_size(s: BarSize) {
+    BAR_SIZE.store(s as u8, Ordering::Relaxed);
+}
+
+/// The chosen bar size, read by the bar's scale each frame.
+pub fn bar_size() -> BarSize {
+    match BAR_SIZE.load(Ordering::Relaxed) {
+        0 => BarSize::Normal,
+        1 => BarSize::Medium,
+        _ => BarSize::Large,
+    }
+}
+
+/// The bar's scale on a phone held sideways for `size`: `fitted` (main's bar, the window fit) for
+/// Normal, `large` (the phone's text size, `phone_bar_k`) for Large, halfway between for Medium.
+pub fn bar_size_k(size: BarSize, fitted: f32, large: f32) -> f32 {
+    match size {
+        BarSize::Normal => fitted,
+        BarSize::Medium => (fitted + large) / 2.0,
+        BarSize::Large => large,
+    }
+}
+
+/// The settings row's label for a bar size.
+pub fn bar_size_label(size: BarSize) -> &'static str {
+    use razdor::i18n::tr;
+    match size {
+        BarSize::Normal => tr("Bar normal"),
+        BarSize::Medium => tr("Bar medium"),
+        BarSize::Large => tr("Bar large"),
+    }
+}
+
+/// The size after `s` in the settings' cycle: Normal, Medium, Large, Normal.
+pub fn next_bar_size(s: BarSize) -> BarSize {
+    match s {
+        BarSize::Normal => BarSize::Medium,
+        BarSize::Medium => BarSize::Large,
+        BarSize::Large => BarSize::Normal,
+    }
+}
+
+/// A bar size by its name in the snapshots' `RAZDOR_BAR_SIZE` (`normal`, `medium`, `large`).
+pub fn parse_bar_size(s: &str) -> Option<BarSize> {
+    match s.trim() {
+        "normal" => Some(BarSize::Normal),
+        "medium" => Some(BarSize::Medium),
+        "large" => Some(BarSize::Large),
+        _ => None,
+    }
 }
 
 /// How much buttons grow with the text size (the owner's decision, 2026-10-31): at the
@@ -764,6 +834,8 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
         let text = std::env::var("RAZDOR_TEXT_SIZE").ok().and_then(|s| s.trim().parse::<f32>().ok());
         set_text_size(text.and_then(|t| TEXT_SIZES.iter().copied().find(|&v| (v - t).abs() < 1e-3)).unwrap_or(1.0));
         set_large_windows(std::env::var("RAZDOR_LARGE_WINDOWS").is_ok_and(|v| v.trim() == "1"));
+        // `RAZDOR_BAR_SIZE=normal|medium|large`: the bottom bar's size on a phone held sideways (the default).
+        set_bar_size(std::env::var("RAZDOR_BAR_SIZE").ok().and_then(|s| parse_bar_size(&s)).unwrap_or(BarSize::Large));
         // `RAZDOR_DP=<f32>`: a phone's density (screen px per dp), the phone layout on the desktop.
         set_dp_px(std::env::var("RAZDOR_DP").ok().and_then(|s| s.trim().parse::<f32>().ok()));
         // `RAZDOR_KEYBOARD=<px>`: the on-screen keyboard's height (physical px), as the phone reads it.
@@ -780,6 +852,7 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
     set_scale(settings.ui_scale);
     set_text_size(settings.text_size);
     set_large_windows(settings.large_windows);
+    set_bar_size(settings.bottom_bar_size);
     crate::ui::world_view::set_zoom_prefs(settings.map_zoom, settings.zoom_locked);
     crate::ui::world_view::set_edge_pref(settings.map_extended);
     follow(settings.display.for_device(dp_px().is_some()));
@@ -1569,6 +1642,30 @@ mod sys {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_bar_size_picks_main_halfway_or_the_large_scale() {
+        // Main's scale 1.5, the phone's large scale 3.0.
+        assert_eq!(bar_size_k(BarSize::Normal, 1.5, 3.0), 1.5);
+        assert_eq!(bar_size_k(BarSize::Medium, 1.5, 3.0), 2.25);
+        assert_eq!(bar_size_k(BarSize::Large, 1.5, 3.0), 3.0);
+        // The three sizes grow in order, and the default is the largest.
+        assert!(bar_size_k(BarSize::Normal, 1.5, 3.0) < bar_size_k(BarSize::Medium, 1.5, 3.0));
+        assert!(bar_size_k(BarSize::Medium, 1.5, 3.0) < bar_size_k(BarSize::Large, 1.5, 3.0));
+        assert_eq!(BarSize::default(), BarSize::Large);
+    }
+
+    #[test]
+    fn the_bar_size_cycles_and_reads_its_names() {
+        assert_eq!(next_bar_size(BarSize::Normal), BarSize::Medium);
+        assert_eq!(next_bar_size(BarSize::Medium), BarSize::Large);
+        assert_eq!(next_bar_size(BarSize::Large), BarSize::Normal);
+        assert_eq!(parse_bar_size(" medium "), Some(BarSize::Medium));
+        assert_eq!(parse_bar_size("big"), None);
+        set_bar_size(BarSize::Medium);
+        assert_eq!(bar_size(), BarSize::Medium);
+        set_bar_size(BarSize::Large);
+    }
 
     #[test]
     fn a_windowed_start_grows_its_window_and_puts_it_back_later() {

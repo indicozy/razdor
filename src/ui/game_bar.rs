@@ -403,12 +403,10 @@ pub fn draw_with_time(game: &Game, look: impl Fn(BarButton) -> Look, time_button
     // phone it is drawn at its own scale (`chrome::bar_k`) as its window scale, so its text and
     // buttons take that size (Razdor's: the phone's readouts reach the text size).
     super::pan::unpanned(|| match super::display::dp_px() {
-        // The upright phone: three rows (`draw_portrait`), at the fitted scale.
-        Some(dp) if portrait_bar() => super::display::with_fitted(super::chrome::fit_k(), || draw_portrait(game, &look, time_buttons, dp)),
         // A landscape phone: the bar at its own scale (`chrome::bar_k`), the date in full.
-        Some(_) => super::display::with_window_scale(Some(super::chrome::bar_k()), || draw_bar(game, &look, time_buttons)),
-        // The desktop: main's bar at the fitted scale, its text included.
-        None => super::display::with_fitted(super::chrome::fit_k(), || draw_bar(game, &look, time_buttons)),
+        Some(_) if date_wraps() => super::display::with_window_scale(Some(super::chrome::bar_k()), || draw_bar(game, &look, time_buttons)),
+        // The desktop and the upright phone: main's bar at the fitted scale, its text included.
+        _ => super::display::with_fitted(super::chrome::fit_k(), || draw_bar(game, &look, time_buttons)),
     })
 }
 
@@ -569,135 +567,6 @@ fn stack_time(lines: &[(String, Color)], room: f32, k: f32, height: f32) -> (Vec
     }
 }
 
-/// The upright phone's bar (the owner's layout, 2026-11-08, third version), three rows stacked:
-/// the date pane centred on top (its three time buttons stand over it while the pointer is on it),
-/// the eight round buttons in one full-width row under it, and the money line at the bottom as on
-/// the desktop (`resources`, at the fitted scale). The rows are sized in dp, so the height does not
-/// depend on the text. Razdor's phone choice (the date and the buttons); the money line is main's.
-const PORTRAIT_DATE_DP: f32 = 48.0;
-const PORTRAIT_BUTTON_ROW_DP: f32 = 52.0;
-/// The buttons' largest diameter (dp); a slot of the row is two dp narrower than that at most.
-const PORTRAIT_BUTTON_DP: f32 = 48.0;
-/// The date pane's share of the bar's width.
-const PORTRAIT_DATE_FRACTION: f32 = 0.6;
-
-/// Whether the bar takes the upright phone's layout now.
-pub fn portrait_bar() -> bool {
-    super::display::dp_px().is_some() && super::window_layout::portrait()
-}
-
-/// The money line's height at the fitted scale `k`: main's bar strip under its top row
-/// (the bar's 80 units less the row's 60).
-fn stats_height(k: f32) -> f32 {
-    (80.0 * k).round() - (60.0 * k).round()
-}
-
-/// The upright bar's height on a phone of `dp` px per dp at the fitted scale `k`.
-pub fn portrait_height(dp: f32, k: f32) -> f32 {
-    (PORTRAIT_DATE_DP * dp).round() + (PORTRAIT_BUTTON_ROW_DP * dp).round() + stats_height(k)
-}
-
-/// The upright bar's pieces on `bar` (from [`portrait_height`]): the eight buttons in one row (the
-/// left group, then the right one), and the date pane centred on top.
-pub fn portrait_layout(bar: Rect, dp: f32) -> Layout {
-    let top = (PORTRAIT_DATE_DP * dp).round();
-    let row = (PORTRAIT_BUTTON_ROW_DP * dp).round();
-    let slot = bar.w / 8.0;
-    let d = (PORTRAIT_BUTTON_DP * dp).min(slot - 2.0 * dp).min(row - 2.0 * dp).max(0.0).round();
-    let row_y = (bar.y + top + (row - d) / 2.0).round();
-    let mut rects = [Rect::default(); 8];
-    for (i, r) in rects.iter_mut().enumerate() {
-        let cx = bar.x + (i as f32 + 0.5) * slot;
-        *r = Rect::new((cx - d / 2.0).round(), row_y, d, d);
-    }
-    let w = (PORTRAIT_DATE_FRACTION * bar.w).round();
-    let time = Rect::new((bar.x + (bar.w - w) / 2.0).round(), bar.y, w, top);
-    Layout { bar, left: [rects[0], rects[1], rects[2], rects[3]], right: [rects[4], rects[5], rects[6], rects[7]], time }
-}
-
-/// A time button's place in the upright bar's date pane: three squares of 48 dp side by side,
-/// centred in the pane (their finger area is then 48 dp too).
-fn portrait_time_rect(b: TimeButton, zone: Rect, dp: f32) -> Rect {
-    let d = (48.0 * dp).min(zone.h).round();
-    let i = match b {
-        TimeButton::Wait1 => 0.0,
-        TimeButton::ShowHero => 1.0,
-        TimeButton::Wait4 => 2.0,
-    };
-    let x0 = zone.x + (zone.w - 3.0 * d) / 2.0;
-    Rect::new((x0 + i * d).round(), (zone.y + (zone.h - d) / 2.0).round(), d, d)
-}
-
-/// Draws the upright bar: the date pane, the button row and the money line. Returns the bar
-/// button and the time button pressed.
-fn draw_portrait(game: &Game, look: &impl Fn(BarButton) -> Look, time_buttons: bool, dp: f32) -> (Option<BarButton>, Option<TimeButton>) {
-    let k = chrome::bar_k();
-    let lay = current_layout();
-    let bar = lay.bar;
-    let zone = lay.time;
-    let visual = super::window_layout::visual();
-    tex(&lower_strip_gradient(visual.bar_gradient_bottom), bar, WHITE);
-    // The date pane: the wooden panel of the original's ribbon, its two rules.
-    draw_rectangle(zone.x, zone.y, zone.w, zone.h, Color::new(0.42, 0.22, 0.10, 1.0));
-    draw_rectangle_lines(zone.x, zone.y, zone.w, zone.h, 2.0, chrome::SILVER);
-    let row_bottom = zone.y + zone.h + (PORTRAIT_BUTTON_ROW_DP * dp).round();
-    chrome::silver_line(vec2(bar.x, row_bottom), vec2(bar.x + bar.w, row_bottom), k.max(1.0));
-
-    let pointer = Vec2::from(super::widgets::pointer());
-    let buttons = time_buttons && !super::widgets::input_blocked() && zone.contains(pointer);
-    let mut timed = None;
-    let mut timed_hint = None;
-    if buttons {
-        for b in TimeButton::ALL {
-            let (clicked, hint) = time_button(b, portrait_time_rect(b, zone, dp));
-            if clicked {
-                timed = Some(b);
-            }
-            timed_hint = hint.or(timed_hint);
-        }
-    } else {
-        // The date reads at the text size (14 sp, `display::phone_text_k`), stacked in its pane.
-        let kt0 = super::display::phone_text_k(k, dp);
-        let (lines, kt) = stack_time(&time_lines(game), zone.w - 8.0 * dp, kt0, zone.h - 4.0 * dp);
-        let size = at_scale(kt, || super::typography::Role::Bold.size((13.0 * kt).round()));
-        let lh = at_scale(kt, || super::typography::Role::Bold.line_height(size * 1.25));
-        let top_y = zone.y + zone.h / 2.0 - lh * (lines.len() as f32 - 1.0) / 2.0 + size * 0.36;
-        at_scale(kt, || {
-            super::dt_font::with_face(super::dt_font::Face::Bold, || {
-                for (i, (l, c)) in lines.iter().enumerate() {
-                    shadow_centered(l, zone.x + zone.w / 2.0, top_y + i as f32 * lh, size, *c);
-                }
-            });
-        });
-    }
-
-    let mut pressed = None;
-    let mut hovered_hint = None;
-    for (i, b) in BarButton::LEFT.iter().copied().enumerate() {
-        let (clicked, hint) = oval(b, lay.left[i], look(b));
-        if clicked {
-            pressed = Some(b);
-        }
-        hovered_hint = hint.or(hovered_hint);
-    }
-    for (i, b) in BarButton::RIGHT.iter().copied().enumerate().rev() {
-        let (clicked, hint) = oval(b, lay.right[i], look(b));
-        if clicked {
-            pressed = Some(b);
-        }
-        hovered_hint = hint.or(hovered_hint);
-    }
-
-    // The money line: main's, in the strip under the button row.
-    let sh = stats_height(k);
-    resources(game, row_bottom, sh, bar, safe_area(), vec2(screen_width(), screen_height()));
-
-    if let Some(hint) = timed_hint.or(hovered_hint).filter(|_| super::input::hint_hover()) {
-        panel_hint(&[(hint, CREAM)]);
-    }
-    (pressed, timed)
-}
-
 /// Whether the point `p` is on the screen (`size`) with its rounded corners (the phone's radii,
 /// `display::SafeArea`): outside a corner's arc is off the screen.
 pub fn on_screen(p: Vec2, size: Vec2, safe: SafeArea) -> bool {
@@ -826,9 +695,6 @@ pub fn layout(bar: Rect, screen: Vec2, k: f32, row: f32, safe: SafeArea) -> Layo
 /// The layout the bar is drawn and hit with now (the screen's size, the safe area).
 pub fn current_layout() -> Layout {
     let bar = bar_rect();
-    if let (true, Some(dp)) = (portrait_bar(), super::display::dp_px()) {
-        return portrait_layout(bar, dp);
-    }
     let row = (60.0 * chrome::bar_k()).round();
     let screen = vec2(screen_width(), screen_height());
     layout(bar, screen, chrome::bar_k(), row, safe_area())
