@@ -1135,6 +1135,9 @@ pub struct LackingBox {
     pub active: bool,
     /// The mod button: its label and whether it takes a click.
     pub button: Option<(String, bool)>,
+    /// The message of the box when it differs from the save's refusal (the mod the window offers
+    /// ends the text: what the button does, 1552).
+    pub message: Option<String>,
     /// The line under the buttons: why the button is off, or what is being done.
     pub reason: Option<String>,
     /// Something is being done (checking, preparing the mod, downloading): OK and the button wait.
@@ -1259,7 +1262,7 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     if let Some(message) = error.as_deref() {
         if let Some(question) = lacking.asking.clone() {
             lacking_question_box(tr("Download the mod"), &question, lacking);
-        } else if load_failed_box(&own("LoadGame", "Title", n_("Load a saved game")), message, lacking) {
+        } else if load_failed_box(&own("LoadGame", "Title", n_("Load a saved game")), &lacking.message.clone().unwrap_or_else(|| message.to_string()), lacking) {
             *error = None;
         }
         return None;
@@ -1335,29 +1338,41 @@ fn load_failed_box(title: &str, message: &str, lacking: &mut LackingBox) -> bool
     };
     // Razdor's own: the OK grows with the text size (`button_grow`), the box with it.
     let g = super::display::button_grow();
-    // The mod row (1552): its buttons are 44 dp tall on a phone; a phone's box is wide enough for the
-    // mod button's words (280 dp, or the screen less a margin).
-    let row_h = if phone.is_some() { 44.0 * u } else { 28.0 * k * g };
+    // The box's width: a phone's box grows to the screen (420 dp at most), so the mod button's words fit.
+    let w = if !lacking.active {
+        380.0 * k
+    } else if phone.is_some() {
+        (420.0 * u).min(screen_width() - 24.0 * k)
+    } else {
+        440.0 * k
+    };
+    // The mod row (1552): the mod button takes the box's width less a margin and OK's; its words are
+    // 14 sp (their size is not cut), on one line or, when they do not fit, on two in a taller row.
+    let (bw, gap, margin) = (90.0 * k * g, 10.0 * k, 30.0 * k);
+    let mw = (w - 2.0 * margin - bw - gap).max(0.0);
+    let label_size = 14.0 * u;
+    let mod_lines: Vec<String> = match lacking.button.as_ref() {
+        Some((label, _)) if lacking.active => {
+            // As many lines as the words take: the row grows with them (row_h), nothing is cut.
+            super::chrome::wrap_label(label, mw - 12.0 * k, label_size)
+        }
+        _ => Vec::new(),
+    };
+    let base_row_h = if phone.is_some() { 44.0 * u } else { 28.0 * k * g };
+    let row_h = if mod_lines.len() > 1 { base_row_h.max(mod_lines.len() as f32 * label_size * 1.25 + 10.0 * u) } else { base_row_h };
     // The reason's lines sit between the message and the row, with a line's room above the row.
     let reason_extra = if reason.is_empty() { 0.0 } else { (reason.len() as f32 + 1.0) * step + 12.0 * u };
     let row_extra = if lacking.active { reason_extra + (row_h - 28.0 * u).max(0.0) } else { 0.0 };
     let h = (60.0 * u + lines.len() as f32 * step + if phone.is_some() { 20.0 * u } else { 0.0 } + row_extra).max(150.0 * u);
-    let w = if !lacking.active {
-        380.0 * k
-    } else if phone.is_some() {
-        (300.0 * u).min(screen_width() - 24.0 * k)
-    } else {
-        440.0 * k
-    };
-    let h = h + 28.0 * k * (g - 1.0);
+    let h = h + 28.0 * k * (g - 1.0) + super::chrome::title_grow();
     let r = Rect::new((screen_width() - w) / 2.0, (screen_height() - h) / 2.0, w, h);
-    let (inner, _) = super::chrome::window(r, title, super::chrome::Skin::Marble, false);
+    let (inner, _) = super::chrome::window_grown(r, title, super::chrome::Skin::Marble, false);
     super::dt_font::legacy_metrics_if(phone.is_some(), || {
         for (i, line) in lines.iter().enumerate() {
             super::chrome::shadow_centered(line, inner.center().x, inner.y + 24.0 * u + i as f32 * step, size, super::chrome::CREAM);
         }
     });
-    let (bw, bh) = (90.0 * k * g, if lacking.active { row_h } else { 28.0 * k * g });
+    let bh = if lacking.active { row_h } else { 28.0 * k * g };
     let ok_y = inner.y + inner.h - 38.0 * u + (28.0 * u - bh);
     let mut mod_pressed = false;
     if lacking.active {
@@ -1368,28 +1383,20 @@ fn load_failed_box(title: &str, message: &str, lacking: &mut LackingBox) -> bool
             }
         });
         // The mod button and OK side by side, centred; the mod button takes the box's width left.
-        let gap = if lacking.button.is_some() { 10.0 * k } else { 0.0 };
-        let mw = if lacking.button.is_some() { (inner.w - bw - gap - 40.0 * k).max(0.0) } else { 0.0 };
         let total = mw + gap + bw;
         let start = inner.center().x - total / 2.0;
-        if let Some((label, enabled)) = lacking.button.clone() {
+        if let Some((_, enabled)) = lacking.button.clone() {
             let mr = Rect::new(start, ok_y, mw, bh);
             let on = enabled && !lacking.busy;
             let (_, down, pressed) = super::widgets::button_state(mr, on);
-            // The words of the mod button are Razdor's own size on a phone (the label fits the
-            // button's height otherwise, and a phone's would be too small).
-            if phone.is_some() {
-                super::chrome::marble_button_sized(mr, &label, on, down, 14.0 * u);
-            } else {
-                super::chrome::marble_button(mr, &label, on, down);
-            }
+            super::chrome::marble_button_lines(mr, &mod_lines, on, down, label_size);
             mod_pressed = pressed;
         }
         let ok = Rect::new(start + mw + gap, ok_y, bw, bh);
         let ok_label = own("Buttons", "Ok", n_("OK"));
         let (_, down, pressed) = super::widgets::button_state(ok, !lacking.busy);
         if phone.is_some() {
-            super::chrome::marble_button_sized(ok, &ok_label, !lacking.busy, down, 14.0 * u);
+            super::chrome::marble_button_sized(ok, &ok_label, !lacking.busy, down, label_size);
         } else {
             super::chrome::marble_button(ok, &ok_label, !lacking.busy, down);
         }
@@ -1414,10 +1421,10 @@ fn lacking_question_box(title: &str, question: &str, lacking: &mut LackingBox) {
     let lines = super::dt_font::legacy_metrics_if(phone.is_some(), || wrap(question, 330.0 * k, size));
     let g = super::display::button_grow();
     let row_h = if phone.is_some() { 44.0 * u } else { 28.0 * k * g };
-    let h = (60.0 * u + lines.len() as f32 * step + row_h - 28.0 * u).max(150.0 * u) + 28.0 * k * (g - 1.0);
-    let w = if phone.is_some() { (300.0 * u).min(screen_width() - 24.0 * k) } else { 440.0 * k };
+    let h = (60.0 * u + lines.len() as f32 * step + row_h - 28.0 * u).max(150.0 * u) + 28.0 * k * (g - 1.0) + super::chrome::title_grow();
+    let w = if phone.is_some() { (420.0 * u).min(screen_width() - 24.0 * k) } else { 440.0 * k };
     let r = Rect::new((screen_width() - w) / 2.0, (screen_height() - h) / 2.0, w, h);
-    let (inner, _) = super::chrome::window(r, title, super::chrome::Skin::Marble, false);
+    let (inner, _) = super::chrome::window_grown(r, title, super::chrome::Skin::Marble, false);
     super::dt_font::legacy_metrics_if(phone.is_some(), || {
         for (i, line) in lines.iter().enumerate() {
             super::chrome::shadow_centered(line, inner.center().x, inner.y + 24.0 * u + i as f32 * step, size, super::chrome::CREAM);

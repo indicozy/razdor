@@ -780,8 +780,8 @@ impl App {
             Err(e @ razdor::rules::save::SaveError::Lacking { .. }) => self.load_error = Some(e.to_string()),
             Err(e) => {
                 // A save made with another mod (1552): its mod is looked for, and the window offers it.
-                if let razdor::rules::save::SaveError::Lacking { unknown, played_mod, .. } = &e {
-                    self.lacking_start(path.to_path_buf(), played_mod.clone(), unknown.clone());
+                if let razdor::rules::save::SaveError::Lacking { name, unknown, played_mod } = &e {
+                    self.lacking_start(path.to_path_buf(), name.clone(), played_mod.clone(), unknown.clone());
                 }
                 self.load_error = Some(match &e {
                     razdor::rules::save::SaveError::Lacking { .. } => e.to_string(),

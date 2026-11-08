@@ -2452,6 +2452,52 @@ pub fn marble_button_sized(r: Rect, label: &str, enabled: bool, hover: bool, siz
     button_label_at(r, label, enabled, size);
 }
 
+/// A button label broken into lines that each fit `width` px at `size`, measured as
+/// [`marble_button_lines`] draws them (so no line runs past the button). Words are not cut.
+pub fn wrap_label(label: &str, width: f32, size: f32) -> Vec<String> {
+    super::typography::Role::Button.with(|| {
+        super::dt_font::legacy_metrics_if(true, || {
+            let mut lines = Vec::new();
+            let mut cur = String::new();
+            for word in label.split_whitespace() {
+                let cand = if cur.is_empty() { word.to_string() } else { format!("{cur} {word}") };
+                if cur.is_empty() || measure(&cand, size).width <= width {
+                    cur = cand;
+                } else {
+                    lines.push(std::mem::take(&mut cur));
+                    cur = word.to_string();
+                }
+            }
+            if !cur.is_empty() {
+                lines.push(cur);
+            }
+            lines
+        })
+    })
+}
+
+/// A marble button whose label is drawn at `size` px on the given `lines` (one or two, each already
+/// fitted to the button by the caller), centred as a block. Nothing is shrunk or cut off (1552's mod
+/// buttons: the box grows to the words instead).
+pub fn marble_button_lines(r: Rect, lines: &[String], enabled: bool, hover: bool, size: f32) {
+    marble_frame(r, enabled, hover, false);
+    let color = if !enabled { Color::new(0.6, 0.6, 0.58, 1.0) } else { Color::new(1.0, 0.98, 0.94, 1.0) };
+    let line_h = size * 1.25;
+    let top = r.y + (r.h - lines.len() as f32 * line_h) / 2.0;
+    super::typography::Role::Button.with(|| {
+        super::dt_font::legacy_metrics_if(true, || {
+            for (i, line) in lines.iter().enumerate() {
+                let d = measure(line, size);
+                let x = r.x + (r.w - d.width) / 2.0;
+                let y = top + i as f32 * line_h + (line_h + d.offset_y) / 2.0 - 1.0;
+                let offset = (size / 22.0).max(1.0);
+                text(line, x + offset, y + offset, size, Color::new(0.0, 0.0, 0.0, 0.35 * color.a));
+                text(line, x, y, size, color);
+            }
+        })
+    });
+}
+
 /// A button's label centred at the size `size` (px), its shadow as [`button_label`]'s; it is
 /// ellipsized only when it does not fit the width.
 fn button_label_at(r: Rect, label: &str, enabled: bool, size: f32) {

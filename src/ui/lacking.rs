@@ -21,6 +21,11 @@ use super::{finished, App};
 pub struct Lacking {
     /// The save, to load once its mod is in place.
     pub path: PathBuf,
+    /// The save's name and the ids it lacks, as the refusal's words name them.
+    name: String,
+    ids: String,
+    /// The box's message when a mod is offered: it ends with what the button does.
+    message: Option<String>,
     /// The mod it needs; None while an old save's installed mods are checked.
     need: Option<Need>,
     checking: Option<Receiver<Vec<String>>>,
@@ -39,18 +44,32 @@ pub struct Lacking {
 
 impl Lacking {
     fn new(path: PathBuf) -> Lacking {
-        Lacking { path, need: None, checking: None, offer: Offer::Unknown, title: String::new(), confirm: false, download: None, switching: false, note: None }
+        Lacking { path, name: String::new(), ids: String::new(), message: None, need: None, checking: None, offer: Offer::Unknown, title: String::new(), confirm: false, download: None, switching: false, note: None }
     }
 
     /// The window of a refused save with its offer (the snapshot scenes; no hub is read).
     pub(super) fn scene(path: PathBuf, offer: Offer, title: &str, confirm: bool) -> Lacking {
         let mut l = Lacking::new(path);
+        l.name = "Осенний поход".into();
+        l.ids = Unknown { units: vec![104, 105, 106], items: vec![35] }.text();
         l.offer = offer;
         l.title = title.into();
         l.confirm = confirm;
         // The need is known (a scene reads no hub): the offer is shown as it is.
         l.need = Some(Need::Unknown);
+        l.refresh_message();
         l
+    }
+
+    /// The box's message for the offer: when a mod is offered, the text ends with what the button
+    /// does; otherwise the save's refusal stands (`None`).
+    fn refresh_message(&mut self) {
+        let (name, ids, title) = (self.name.clone(), self.ids.clone(), self.title.clone());
+        self.message = match &self.offer {
+            Offer::Installed { .. } => Some(trf!("The save «{name}» uses units or items that are not in your game ({ids}). It was made with the mod «{title}».", name = name, ids = ids, title = title)),
+            Offer::Download { .. } => Some(trf!("The save «{name}» uses units or items that are not in your game ({ids}). It was made with the mod «{title}», which you do not have.", name = name, ids = ids, title = title)),
+            Offer::NotInCatalog { .. } | Offer::Unknown => None,
+        };
     }
 }
 
@@ -87,8 +106,10 @@ fn start_download(local: PathBuf, id: String) -> Receiver<Result<(), String>> {
 impl App {
     /// A save was refused (`SaveError::Lacking`): its mod is the one it records, else the one the
     /// installed mods are checked for on a worker (`check_installed`).
-    pub(super) fn lacking_start(&mut self, path: PathBuf, recorded: Option<SaveMod>, missing: Unknown) {
+    pub(super) fn lacking_start(&mut self, path: PathBuf, name: String, recorded: Option<SaveMod>, missing: Unknown) {
         let mut l = Lacking::new(path);
+        l.name = name;
+        l.ids = missing.text();
         match recorded {
             Some(m) => l.need = Some(Need::Recorded(m)),
             None => match (razdor::hub::local_dir(), razdor::dt::install::base_dir()) {
@@ -144,6 +165,7 @@ impl App {
             None => String::new(),
         };
         l.offer = offer;
+        l.refresh_message();
     }
 
     /// Each frame: the box's answers (the mod button), the workers' results, and the box's words for
@@ -278,7 +300,7 @@ impl App {
             None => why.or_else(|| l.note.clone()),
         };
         let asking = if l.confirm { Some(self.download_question(l)) } else { None };
-        LackingBox { active: true, button, reason, busy: busy.is_some() || l.need.is_none(), pressed: false, asking, answer: None }
+        LackingBox { active: true, button, message: l.message.clone(), reason, busy: busy.is_some() || l.need.is_none(), pressed: false, asking, answer: None }
     }
 
     /// The question of a download: its size in MB (the mod's download, `Offer::Download`).

@@ -610,3 +610,5 @@ Download «{title}» ({mb} MB) and load the save with it? = Скачать «{ti
 Download the mod = Скачать мод
 The mod could not be downloaded: {e}. = Мод не скачан: {e}.
 The mod catalog is not loaded. = Каталог модов не загружен.
+The save «{name}» uses units or items that are not in your game ({ids}). It was made with the mod «{title}». = Сохранение «{name}» использует воинов или предметы, которых нет в вашей игре ({ids}). Оно сделано с модом «{title}».
+The save «{name}» uses units or items that are not in your game ({ids}). It was made with the mod «{title}», which you do not have. = Сохранение «{name}» использует воинов или предметы, которых нет в вашей игре ({ids}). Оно сделано с модом «{title}», которого у вас нет.

@@ -111,10 +111,12 @@ SCREENS = [
     ("save", "save:РК1-Начало пути", {}),
     ("load", "load", {}),
     # A save made with another mod (1552): the load window's message box with the save's name and ids.
-    ("load-lacking", "load-lacking", {}),
-    ("load-lacking-installed", "load-lacking:installed", {}),
-    ("load-lacking-download", "load-lacking:downloadable", {}),
-    ("load-lacking-confirm", "load-lacking:confirm", {}),
+    # Russian (the runner's environment has no locale, which would pick English).
+    ("load-lacking", "load-lacking", {"LANG": "ru_RU.UTF-8"}),
+    ("load-lacking-installed", "load-lacking:installed", {"LANG": "ru_RU.UTF-8"}),
+    ("load-lacking-download", "load-lacking:downloadable", {"LANG": "ru_RU.UTF-8"}),
+    ("load-lacking-confirm", "load-lacking:confirm", {"LANG": "ru_RU.UTF-8"}),
+    ("load-lacking-installed-long", "load-lacking:installed-long", {"LANG": "ru_RU.UTF-8"}),
     ("custom-battle", "custom-battle", {}),
     ("victory", "victory:РК1-Начало пути", {}),
     # An event's rewards (a player's report 1453): mana, a joined unit and items; and more rows.

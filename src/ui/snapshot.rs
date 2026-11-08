@@ -549,11 +549,11 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             // of that download is up; anything else (the default): no mod is known, the button is off.
             let state = parts.next().unwrap_or("");
             let offer = match state {
-                "installed" => razdor::hub::save_mod::Offer::Installed { id: "evolution".into() },
+                "installed" | "installed-long" => razdor::hub::save_mod::Offer::Installed { id: "evolution".into() },
                 "downloadable" | "confirm" => razdor::hub::save_mod::Offer::Download { id: "evolution".into(), size: 14_300_000 },
                 _ => razdor::hub::save_mod::Offer::Unknown,
             };
-            app.lacking_scene(super::lacking::Lacking::scene(std::path::PathBuf::from("Осенний поход.rzsave"), offer, "Эволюция", state == "confirm"));
+            app.lacking_scene(super::lacking::Lacking::scene(std::path::PathBuf::from("Осенний поход.rzsave"), offer, if state == "installed-long" { "Эволюция: расширенное издание для долгих походов" } else { "Эволюция" }, state == "confirm"));
             app.screen = Screen::Load(LoadView::new(Back::Title));
             return Ok(());
         }
