@@ -225,10 +225,38 @@ pub fn outer(map: &TileMap, view: Rect) -> Rect {
 
 fn outer_at(map: &TileMap, view: Rect, k: f32) -> Rect {
     let view = in_safe_area(view);
-    let o = outer_sized(view, k, SIZE.with(|s| s.get()), aspect(map), corner());
-    match MOVE.with(|m| m.get()) {
-        Some(grab) => carried(view, o, Vec2::from(crate::ui::widgets::pointer()) - grab),
+    let mut o = outer_sized(view, k, SIZE.with(|s| s.get()), aspect(map), corner());
+    let moving = MOVE.with(|m| m.get());
+    if !corner().bottom() && moving.is_none() {
+        return o;
+    }
+    let room = bottom_bar_room();
+    if corner().bottom() {
+        o.y = bottom_edge(view.y + view.h, room.0, room.1, room.2, o.x, o.w) - o.h - 2.0 * k;
+    }
+    match moving {
+        Some(grab) => carried(view, o, Vec2::from(crate::ui::widgets::pointer()) - grab, room),
         None => o,
+    }
+}
+
+/// The bottom bar's rect, the screen's height and the safe area's bottom: the room below the map
+/// view (backlog 1560).
+fn bottom_bar_room() -> (Rect, f32, f32) {
+    (super::game_bar::bar_rect(), screen_height(), super::display::safe_area().bottom)
+}
+
+/// The lowest edge a minimap window spanning `x..x+w` may reach. Where the window's horizontal
+/// span meets the bottom bar `bar`, that is the map view's bottom `view_bottom` (the bar's top,
+/// as before). Beside the bar (a corner the bar does not reach, as a bar that does not span the
+/// screen leaves), it is the screen's bottom less the safe area's `safe_bottom`, so the window can
+/// stand in that corner without touching the bar (backlog 1560).
+pub fn bottom_edge(view_bottom: f32, bar: Rect, screen_h: f32, safe_bottom: f32, x: f32, w: f32) -> f32 {
+    let beside = x + w <= bar.x || x >= bar.x + bar.w;
+    if beside {
+        (screen_h - safe_bottom).max(view_bottom)
+    } else {
+        view_bottom
     }
 }
 
@@ -246,10 +274,14 @@ fn inset_view(view: Rect, a: super::display::SafeArea) -> Rect {
     Rect::new(view.x + a.left, view.y + a.top, (view.w - a.left - a.right).max(0.0), (view.h - a.top).max(0.0))
 }
 
-/// The window `o` carried to the top-left `at`, kept within `view`.
-fn carried(view: Rect, o: Rect, at: Vec2) -> Rect {
+/// The window `o` carried to the top-left `at`, kept within `view`, or, where it is beside the
+/// bottom bar (`room`: the bar, the screen's height, the safe area's bottom), down to the screen's
+/// bottom (`bottom_edge`).
+fn carried(view: Rect, o: Rect, at: Vec2, room: (Rect, f32, f32)) -> Rect {
     let x = at.x.min(view.x + view.w - o.w).max(view.x);
-    let y = at.y.min(view.y + view.h - o.h).max(view.y);
+    let (bar, screen_h, safe_bottom) = room;
+    let bottom = bottom_edge(view.y + view.h, bar, screen_h, safe_bottom, x, o.w);
+    let y = at.y.min(bottom - o.h).max(view.y);
     Rect::new(x, y, o.w, o.h)
 }
 
@@ -1086,6 +1118,40 @@ mod tests {
     }
 
     #[test]
+    fn beside_a_bar_that_does_not_span_the_screen_the_window_reaches_the_screen_bottom() {
+        // A 1920x1080 screen, the bar 1440 px wide in the middle (240 px corners each side), the map
+        // view above it (its bottom is the bar's top).
+        let bar = Rect::new(240.0, 1000.0, 1440.0, 80.0);
+        let view_bottom = 1000.0;
+        // The left corner beside the bar: down to the screen's bottom less the safe area.
+        assert_eq!(bottom_edge(view_bottom, bar, 1080.0, 0.0, 10.0, 200.0), 1080.0);
+        assert_eq!(bottom_edge(view_bottom, bar, 1080.0, 30.0, 10.0, 200.0), 1050.0);
+        // The right corner too.
+        assert_eq!(bottom_edge(view_bottom, bar, 1080.0, 0.0, 1700.0, 200.0), 1080.0);
+        // A window whose span reaches under the bar keeps today's clamp: never over the bar.
+        assert_eq!(bottom_edge(view_bottom, bar, 1080.0, 0.0, 100.0, 300.0), 1000.0);
+        assert_eq!(bottom_edge(view_bottom, bar, 1080.0, 0.0, 1600.0, 300.0), 1000.0);
+        // A bar spanning the whole width (a phone): no corner, the clamp stays.
+        let full = Rect::new(0.0, 1000.0, 1920.0, 80.0);
+        assert_eq!(bottom_edge(view_bottom, full, 1080.0, 0.0, 10.0, 200.0), 1000.0);
+    }
+
+    #[test]
+    fn a_carried_window_goes_into_the_free_corner_and_not_under_the_bar() {
+        let view = Rect::new(0.0, 0.0, 1920.0, 1000.0);
+        let bar = Rect::new(240.0, 1000.0, 1440.0, 80.0);
+        let room = (bar, 1080.0, 0.0);
+        let o = Rect::new(0.0, 0.0, 200.0, 200.0);
+        // Dragged down into the left corner beside the bar: it reaches the screen's bottom.
+        let got = carried(view, o, vec2(10.0, 1000.0), room);
+        assert_eq!(got.bottom(), 1080.0);
+        assert!(got.x + got.w <= bar.x, "beside the bar");
+        // Dragged under the bar's span: it stops at the bar's top, as before.
+        let got = carried(view, o, vec2(400.0, 1000.0), room);
+        assert_eq!(got.bottom(), 1000.0);
+    }
+
+    #[test]
     fn the_window_stands_in_any_corner_and_resizes_by_its_inner_edges() {
         let view = Rect::new(0.0, 0.0, 1000.0, 700.0);
         let at = |c| outer_sized(view, 1.0, None, 1.0, c);
@@ -1099,7 +1165,9 @@ mod tests {
         assert_eq!(Corner::nearest(view, vec2(900.0, 650.0)), Corner::BottomRight);
         // Carried, it stays within the view.
         let o = Rect::new(0.0, 0.0, 400.0, 400.0);
-        assert_eq!(carried(view, o, vec2(-50.0, 500.0)).point(), vec2(0.0, 300.0));
+        let bar = Rect::new(200.0, 700.0, 600.0, 80.0);
+        let room = (bar, 800.0, 0.0);
+        assert_eq!(carried(view, o, vec2(-50.0, 500.0), room).point(), vec2(0.0, 300.0));
         // In the bottom left: its right and top edges resize, growing right and up.
         let o = Rect::new(10.0, 300.0, 400.0, 400.0);
         let bl = Corner::BottomLeft;
