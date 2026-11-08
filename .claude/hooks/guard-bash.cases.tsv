@@ -160,7 +160,7 @@ block	clean	CARGO_BUILD_JOBS=4 taskset -c 16-19 cargo run --manifest-path ./Carg
 block	clean	CARGO_BUILD_JOBS=4 taskset -c 16-19 cargo run --manifest-path $X/Cargo.toml
 block	clean	cd /mnt/ai_models/razdor-orig-port && CARGO_BUILD_JOBS=4 taskset -c 16-19 cargo run --release
 allow	clean	rm -rf /mnt/ai_models/razdor/scratch/old-task/target
-allow	clean	rm -rf /home/indicozy/.cache/razdor-scratch/old-task
-block	clean	rm -rf /home/indicozy/.cache/other
+allow	clean	rm -rf @HOME@/.cache/razdor-scratch/old-task
+block	clean	rm -rf @HOME@/.cache/other
 block	clean	rm -rf /mnt/ai_models/razdor/other
 block	clean	rm -rf //home/indicozy/.cache/other

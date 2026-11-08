@@ -43,11 +43,15 @@ touch "$tmp/clean/data/x.lit" "$tmp/clean/saves/backrok.rzsave" "$tmp/clean/Rus_
 mkdir -p "$tmp/helper/src"
 printf '[package]\nname = "helper"\nversion = "0.1.0"\nedition = "2021"\n' > "$tmp/helper/Cargo.toml"
 echo 'fn main() {}' > "$tmp/helper/src/main.rs"
+# The home-disk scratch (~/.cache/razdor-scratch) counts only where it is a real folder, and a CI
+# runner has none: the hook runs with a fixture HOME that has one (its real path, as the hook
+# compares realpaths), and the cases name that home as @HOME@.
+fhome=$(mkdir -p "$tmp/home/.cache/razdor-scratch" && cd "$tmp/home" && pwd -P)
 pass=0 fail=0
 while IFS='	' read -r expect repo cmd; do
     case "$expect" in ''|'#'*) continue ;; esac
-    json=$(CMD="$cmd" CWD="$tmp/$repo" TMPD="$tmp" python3 -I -c 'import json,os;print(json.dumps({"tool_name":"Bash","cwd":os.environ["CWD"],"tool_input":{"command":os.environ["CMD"].replace("\\n","\n").replace("@TMP@",os.environ["TMPD"])}}))')
-    printf '%s' "$json" | DISPLAY=:0 python3 -I "$here/guard-bash.py" 2>/dev/null
+    json=$(CMD="$cmd" CWD="$tmp/$repo" TMPD="$tmp" HOMED="$fhome" python3 -I -c 'import json,os;print(json.dumps({"tool_name":"Bash","cwd":os.environ["CWD"],"tool_input":{"command":os.environ["CMD"].replace("\\n","\n").replace("@TMP@",os.environ["TMPD"]).replace("@HOME@",os.environ["HOMED"])}}))')
+    printf '%s' "$json" | DISPLAY=:0 HOME="$fhome" python3 -I "$here/guard-bash.py" 2>/dev/null
     code=$?
     got=allow; [ $code -eq 2 ] && got=block
     if [ "$got" = "$expect" ]; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL (expected $expect, got $got): [$repo] $cmd"; fi
