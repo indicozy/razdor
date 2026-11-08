@@ -131,6 +131,7 @@ mod tests {
 
     #[test]
     fn track_caller_reports_the_test_file() {
-        assert_eq!(caller_place(), "src/ui/touch_probe.rs");
+        // The razdor-translate binary compiles this module through src/bin/razdor-translate/../../ui/.
+        assert!(caller_place().ends_with("ui/touch_probe.rs"), "{}", caller_place());
     }
 }
