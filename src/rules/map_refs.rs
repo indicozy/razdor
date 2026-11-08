@@ -275,11 +275,11 @@ mod tests {
             ("army troop", |g| g.world.armies[0].troops[0].unit = UnitId(200), true),
             ("army item", |g| g.world.armies[0].items.push(ItemId(200)), false),
             ("garrison troop", |g| {
-                let t = g.world.armies[0].troops[0].clone();
+                let t = g.world.armies[0].troops[0];
                 g.world.locations[0].garrison.push(WorldTroop { unit: UnitId(200), ..t });
             }, true),
             ("gang troop", |g| {
-                let t = g.world.armies[0].troops[0].clone();
+                let t = g.world.armies[0].troops[0];
                 g.world.gang.push(WorldTroop { unit: UnitId(200), ..t });
             }, true),
             ("recruit", |g| {
