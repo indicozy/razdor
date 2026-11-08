@@ -426,9 +426,14 @@ const BAR_TIME_MIN_DP: f32 = 90.0;
 /// `fit`. Portrait phones are width-bound (the buttons and the ribbon ends fill the width), so
 /// their readouts stay under the text size; landscape ones reach it.
 pub fn phone_bar_k(fit: f32, dp: f32, avail: f32) -> f32 {
-    let want = BAR_TEXT_SP * CAP_RATIO * dp / BAR_CAP_PX_PER_K;
     let room = (avail - BAR_TIME_MIN_DP * dp) / BAR_ENDS_PER_K;
-    fit.max(want.min(room))
+    phone_text_k(fit, dp).min(room).max(fit)
+}
+
+/// The bar's scale whose readouts reach [`BAR_TEXT_SP`] on a phone of `dp` px per dp, never under
+/// the window fit `fit` (the portrait bar's text scale, and the landscape bar's before the width).
+pub fn phone_text_k(fit: f32, dp: f32) -> f32 {
+    fit.max(BAR_TEXT_SP * CAP_RATIO * dp / BAR_CAP_PX_PER_K)
 }
 
 /// A phone screen's unsafe areas, in physical pixels: the display cutout's insets (left, top,

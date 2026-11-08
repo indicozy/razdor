@@ -16,7 +16,7 @@ use razdor::trf;
 
 use super::chrome::{self, shadow_centered, shadow_text, tex, Fx, CREAM, GOLD};
 use super::display::{safe_area, SafeArea};
-use super::widgets::{fit_size, measure, panel_hint};
+use super::widgets::{fit_size, measure, panel_hint, wrap};
 
 /// A bar button.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -403,6 +403,7 @@ pub fn draw_with_time(game: &Game, look: impl Fn(BarButton) -> Look, time_button
     // phone it is drawn at its own scale (`chrome::bar_k`) as its window scale, so its text and
     // buttons take that size (Razdor's: the phone's readouts reach the text size).
     super::pan::unpanned(|| match super::display::dp_px() {
+        Some(dp) if portrait_bar() => super::display::with_window_scale(Some(super::chrome::bar_k()), || draw_portrait(game, &look, time_buttons, dp)),
         Some(_) => super::display::with_window_scale(Some(super::chrome::bar_k()), || draw_bar(game, &look, time_buttons)),
         None => super::display::with_fitted(super::chrome::fit_k(), || draw_bar(game, &look, time_buttons)),
     })
@@ -451,21 +452,11 @@ fn draw_bar(game: &Game, look: &impl Fn(BarButton) -> Look, time_buttons: bool) 
 
     // The time panel.
     let cx = w / 2.0;
-    let size = super::typography::Role::Bold.size((13.0 * k).round());
-    // "Время:", the date, and while walking "До конца пути: 4 час" (the video's bar).
-    let mut lines = vec![(tr("Time:").to_string(), Color::new(1.0, 0.93, 0.55, 1.0)), (game.clock.label(), WHITE)];
-    if game.moving() {
-        lines.push((trf!("Path left: {left}", left = duration_label(game.minutes_left() as f64)), GOLD));
-    } else if let Some((_, left)) = game.reading() {
-        // "Чтение: 2 час", the reading time as the original's book gives it.
-        lines.push((trf!("Reading: {left}", left = duration_label(left as f64)), GOLD));
-    } else if game.waiting() {
-        lines.push((tr("waiting…").to_string(), GOLD));
-    }
-    // Russian dates run longer: the lines shrink to the time panel's width.
+    // Russian dates run longer: the lines wrap to the time panel's width and stack in the row.
     let room = (lay.time.w - 16.0 * k).max(60.0 * k);
-    let size = super::typography::Role::Bold.with(|| lines.iter().map(|(l, _)| fit_size(l, room, size)).fold(size, f32::min));
-    let lh = super::typography::Role::Bold.line_height(size * 1.25);
+    let (lines, kt) = stack_time(&time_lines(game), room, k, row - 8.0 * k);
+    let size = at_scale(kt, || super::typography::Role::Bold.size((13.0 * kt).round()));
+    let lh = at_scale(kt, || super::typography::Role::Bold.line_height(size * 1.25));
     let top = y + row / 2.0 - lh * (lines.len() as f32 - 1.0) / 2.0 + size * 0.36;
     // The message box hovered on the idle map: the three buttons stand over it, its text
     // hidden (as the original draws it).
@@ -483,10 +474,12 @@ fn draw_bar(game: &Game, look: &impl Fn(BarButton) -> Look, time_buttons: bool) 
             timed_hint = hint.or(timed_hint);
         }
     } else {
-        super::dt_font::with_face(super::dt_font::Face::Bold, || {
-            for (i, (l, c)) in lines.iter().enumerate() {
-                shadow_centered(&super::widgets::ellipsize(l, room, size), lay.time.x + lay.time.w / 2.0, top + i as f32 * lh, size, *c);
-            }
+        at_scale(kt, || {
+            super::dt_font::with_face(super::dt_font::Face::Bold, || {
+                for (i, (l, c)) in lines.iter().enumerate() {
+                    shadow_centered(l, lay.time.x + lay.time.w / 2.0, top + i as f32 * lh, size, *c);
+                }
+            });
         });
     }
 
@@ -508,6 +501,224 @@ fn draw_bar(game: &Game, look: &impl Fn(BarButton) -> Look, time_buttons: bool) 
         hovered_hint = hint.or(hovered_hint);
     }
     // Both are hover hints: on a phone only while a long press holds (`input::hint_hover`).
+    if let Some(hint) = timed_hint.or(hovered_hint).filter(|_| super::input::hint_hover()) {
+        panel_hint(&[(hint, CREAM)]);
+    }
+    (pressed, timed)
+}
+
+/// The upright phone's bar (the owner's layout, 2026-11-08): a top row with the date pane and the
+/// four readouts, and under it the eight round buttons across the full width. Both rows are sized
+/// in dp, so the bar's height does not depend on the text.
+const PORTRAIT_TOP_DP: f32 = 52.0;
+const PORTRAIT_BUTTON_ROW_DP: f32 = 50.0;
+/// The buttons' largest diameter (dp); a slot of the row is two dp narrower than that at most.
+const PORTRAIT_BUTTON_DP: f32 = 48.0;
+/// The date pane's share of the bar's width.
+const PORTRAIT_DATE_FRACTION: f32 = 0.30;
+
+/// Whether the bar takes the upright phone's layout now.
+pub fn portrait_bar() -> bool {
+    super::display::dp_px().is_some() && super::window_layout::portrait()
+}
+
+/// The bar's height on a phone held upright, `dp` px per dp.
+pub fn portrait_height(dp: f32) -> f32 {
+    ((PORTRAIT_TOP_DP + PORTRAIT_BUTTON_ROW_DP) * dp).round()
+}
+
+/// The upright bar's pieces on `bar` (its width and height from [`portrait_height`]): the eight
+/// buttons in a row (the left group, then the right one, each in its slot), and the date pane at
+/// the top left. The readouts take the rest of the top row.
+pub fn portrait_layout(bar: Rect, dp: f32) -> Layout {
+    let top = (PORTRAIT_TOP_DP * dp).round();
+    let slot = bar.w / 8.0;
+    let d = (PORTRAIT_BUTTON_DP * dp).min(slot - 2.0 * dp).max(0.0).round();
+    let row_y = (bar.y + top + (bar.h - top - d) / 2.0).round();
+    let mut rects = [Rect::default(); 8];
+    for (i, r) in rects.iter_mut().enumerate() {
+        let cx = bar.x + (i as f32 + 0.5) * slot;
+        *r = Rect::new((cx - d / 2.0).round(), row_y, d, d);
+    }
+    let left = [rects[0], rects[1], rects[2], rects[3]];
+    let right = [rects[4], rects[5], rects[6], rects[7]];
+    let time = Rect::new(bar.x, bar.y, (PORTRAIT_DATE_FRACTION * bar.w).round(), top);
+    Layout { bar, left, right, time }
+}
+
+/// A time button's place in the upright bar's date pane: the three squares of 48 dp side by side
+/// from the pane's left edge (their finger area is then 48 dp too).
+fn portrait_time_rect(b: TimeButton, zone: Rect, dp: f32) -> Rect {
+    let d = (48.0 * dp).min(zone.h).round();
+    let i = match b {
+        TimeButton::Wait1 => 0.0,
+        TimeButton::ShowHero => 1.0,
+        TimeButton::Wait4 => 2.0,
+    };
+    Rect::new((zone.x + i * d).round(), (zone.y + (zone.h - d) / 2.0).round(), d, d)
+}
+
+/// Runs `f` with the window scale `k` (the bar's text and icons take it, as `chrome::k`).
+fn at_scale<R>(k: f32, f: impl FnOnce() -> R) -> R {
+    super::display::with_window_scale(Some(k), f)
+}
+
+/// The date pane's lines: the clock, and while walking, reading or waiting a fourth line.
+fn time_lines(game: &Game) -> Vec<(String, Color)> {
+    // "Время:", the date, and while walking "До конца пути: 4 час" (the video's bar).
+    let mut lines = vec![(tr("Time:").to_string(), Color::new(1.0, 0.93, 0.55, 1.0)), (game.clock.label(), WHITE)];
+    if game.moving() {
+        lines.push((trf!("Path left: {left}", left = duration_label(game.minutes_left() as f64)), GOLD));
+    } else if let Some((_, left)) = game.reading() {
+        // "Чтение: 2 час", the reading time as the original's book gives it.
+        lines.push((trf!("Reading: {left}", left = duration_label(left as f64)), GOLD));
+    } else if game.waiting() {
+        lines.push((tr("waiting…").to_string(), GOLD));
+    }
+    lines
+}
+
+/// The date pane's lines wrapped to `room` px, at the window scale `k` or, when they do not stack
+/// in `height` px, at a smaller one (never under 70 %): the date is never cut off. Returns the
+/// wrapped lines and the scale they take.
+fn stack_time(lines: &[(String, Color)], room: f32, k: f32, height: f32) -> (Vec<(String, Color)>, f32) {
+    let mut kt = k;
+    loop {
+        let (out, lh) = at_scale(kt, || {
+            let size = super::typography::Role::Bold.size((13.0 * kt).round());
+            let out = super::typography::Role::Bold.with(|| {
+                lines.iter().flat_map(|(l, c)| wrap(l, room, size).into_iter().map(move |s| (s, *c))).collect::<Vec<_>>()
+            });
+            (out, super::typography::Role::Bold.line_height(size * 1.25))
+        });
+        if out.len() as f32 * lh <= height || kt <= k * 0.7 {
+            return (out, kt);
+        }
+        kt *= 0.97;
+    }
+}
+
+/// The readouts' items (mana, gold, income, wages): the label, the icon's picture, the value and
+/// the colour, as the row shows them.
+fn readout_items(game: &Game) -> [(String, &'static str, String, Color); 4] {
+    let mut wages = format!("- {}", game.daily_wages());
+    if game.daily_mana_wages() > 0 {
+        wages += &format!(" / {}", game.daily_mana_wages());
+    }
+    [
+        (tr("mana").to_string(), "Res-Magic", game.mana.to_string(), Color::new(0.45, 0.85, 1.0, 1.0)),
+        (tr("gold").to_string(), "Res-Money", game.gold.to_string(), GOLD),
+        (tr("income").to_string(), "Res-Income", format!("+ {}", game.daily_income()), GOLD),
+        (tr("wages").to_string(), "Res-Payment", wages, Color::new(1.0, 0.62, 0.25, 1.0)),
+    ]
+}
+
+/// The width of a readout's text block (the wider of its label and value) at the window scale `k`.
+fn readout_text_width(label: &str, value: &str, k: f32) -> f32 {
+    at_scale(k, || {
+        let label_size = super::typography::Role::Body.size((19.0 * k).round());
+        let value_size = super::typography::Role::Name.size((19.0 * k).round());
+        let lw = super::dt_font::with_face(super::dt_font::Face::Body, || measure(label, label_size).width);
+        let vw = super::dt_font::with_face(super::dt_font::Face::Subtitle, || measure(value, value_size).width);
+        lw.max(vw)
+    })
+}
+
+/// Draws the four readouts in the upright bar's top row, right of the date pane (`x0`, `width`):
+/// each an icon with its label above its value, the text at the bar's scale or, if a column is too
+/// narrow for it, at 12 sp (the scale times 12/14).
+fn portrait_readouts(game: &Game, x0: f32, width: f32, y: f32, top: f32, dp: f32, k: f32) {
+    let items = readout_items(game);
+    let col = width / 4.0;
+    let icon = (22.0 * dp).round();
+    let gap = 2.0 * dp;
+    let fits = |kk: f32| items.iter().all(|(l, _, v, _)| icon + gap + readout_text_width(l, v, kk) <= col - 4.0 * dp);
+    let kk = if fits(k) { k } else { k * 12.0 / 14.0 };
+    for (i, (label, art, value, color)) in items.iter().enumerate() {
+        let cx = x0 + i as f32 * col + 2.0 * dp;
+        let mid = y + top / 2.0;
+        match chrome::win(art) {
+            Some(t) => {
+                let iw = t.width() * icon / t.height();
+                tex(&t, Rect::new(cx, mid - icon / 2.0, iw, icon), WHITE);
+            }
+            None => super::dialog::resource_icon(
+                [super::dialog::Resource::Mana, super::dialog::Resource::Gold, super::dialog::Resource::Income, super::dialog::Resource::Wages][i],
+                cx + icon / 2.0,
+                mid,
+                icon,
+            ),
+        }
+        let tx = cx + icon + gap;
+        at_scale(kk, || {
+            let label_size = super::typography::Role::Body.size((19.0 * kk).round());
+            let value_size = super::typography::Role::Name.size((19.0 * kk).round());
+            super::dt_font::with_face(super::dt_font::Face::Body, || shadow_text(label, tx, y + top * 0.42, label_size, *color));
+            super::dt_font::with_face(super::dt_font::Face::Subtitle, || shadow_text(value, tx, y + top * 0.86, value_size, *color));
+        });
+    }
+}
+
+/// Draws the upright bar and returns the bar button pressed and the time button pressed. The date
+/// pane shows the clock (its three time buttons stand over it while the pointer is on it).
+fn draw_portrait(game: &Game, look: &impl Fn(BarButton) -> Look, time_buttons: bool, dp: f32) -> (Option<BarButton>, Option<TimeButton>) {
+    let k = chrome::bar_k();
+    let lay = current_layout();
+    let bar = lay.bar;
+    let top = (PORTRAIT_TOP_DP * dp).round();
+    let visual = super::window_layout::visual();
+    tex(&lower_strip_gradient(visual.bar_gradient_bottom), bar, WHITE);
+    chrome::silver_line(vec2(bar.x, bar.y + top), vec2(bar.x + bar.w, bar.y + top), k.max(1.0));
+    // The date pane: the wooden panel of the original's ribbon.
+    let zone = lay.time;
+    draw_rectangle(zone.x, zone.y, zone.w, zone.h, Color::new(0.42, 0.22, 0.10, 1.0));
+    draw_rectangle_lines(zone.x, zone.y, zone.w, zone.h, 2.0, chrome::SILVER);
+    portrait_readouts(game, zone.x + zone.w, bar.w - zone.w, bar.y, top, dp, k);
+
+    let pointer = Vec2::from(super::widgets::pointer());
+    let buttons = time_buttons && !super::widgets::input_blocked() && zone.contains(pointer);
+    let mut timed = None;
+    let mut timed_hint = None;
+    if buttons {
+        for b in TimeButton::ALL {
+            let (clicked, hint) = time_button(b, portrait_time_rect(b, zone, dp));
+            if clicked {
+                timed = Some(b);
+            }
+            timed_hint = hint.or(timed_hint);
+        }
+    } else {
+        let (lines, kt) = stack_time(&time_lines(game), zone.w - 8.0 * dp, k, zone.h - 4.0 * dp);
+        let (size, lh) = at_scale(kt, || {
+            let size = super::typography::Role::Bold.size((13.0 * kt).round());
+            (size, super::typography::Role::Bold.line_height(size * 1.25))
+        });
+        let top_y = zone.y + zone.h / 2.0 - lh * (lines.len() as f32 - 1.0) / 2.0 + size * 0.36;
+        at_scale(kt, || {
+            super::dt_font::with_face(super::dt_font::Face::Bold, || {
+                for (i, (l, c)) in lines.iter().enumerate() {
+                    shadow_centered(l, zone.x + zone.w / 2.0, top_y + i as f32 * lh, size, *c);
+                }
+            });
+        });
+    }
+
+    let mut pressed = None;
+    let mut hovered_hint = None;
+    for (i, b) in BarButton::LEFT.iter().copied().enumerate() {
+        let (clicked, hint) = oval(b, lay.left[i], look(b));
+        if clicked {
+            pressed = Some(b);
+        }
+        hovered_hint = hint.or(hovered_hint);
+    }
+    for (i, b) in BarButton::RIGHT.iter().copied().enumerate().rev() {
+        let (clicked, hint) = oval(b, lay.right[i], look(b));
+        if clicked {
+            pressed = Some(b);
+        }
+        hovered_hint = hint.or(hovered_hint);
+    }
     if let Some(hint) = timed_hint.or(hovered_hint).filter(|_| super::input::hint_hover()) {
         panel_hint(&[(hint, CREAM)]);
     }
@@ -571,7 +782,7 @@ const BAR_W: f32 = 960.0;
 /// is left (on the desktop the safe area is zero, so nothing moves).
 pub fn bar_rect() -> Rect {
     let (w, h) = (screen_width(), screen_height());
-    let bar = chrome::bar_height();
+    let bar = chrome::bar_top_height();
     let safe = safe_area();
     let avail = w - safe.left - safe.right;
     let bw = (BAR_W * chrome::bar_k()).round().min(avail);
@@ -642,6 +853,9 @@ pub fn layout(bar: Rect, screen: Vec2, k: f32, row: f32, safe: SafeArea) -> Layo
 /// The layout the bar is drawn and hit with now (the screen's size, the safe area).
 pub fn current_layout() -> Layout {
     let bar = bar_rect();
+    if let (true, Some(dp)) = (portrait_bar(), super::display::dp_px()) {
+        return portrait_layout(bar, dp);
+    }
     let row = (60.0 * chrome::bar_k()).round();
     let screen = vec2(screen_width(), screen_height());
     layout(bar, screen, chrome::bar_k(), row, safe_area())

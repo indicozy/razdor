@@ -1299,6 +1299,8 @@ pub fn fit_k() -> f32 {
 /// chosen scale is; on the desktop the chosen one kept to the fit, as before.
 pub fn bar_k() -> f32 {
     match super::display::dp_px() {
+        // Upright, the bar's rows are sized in dp and only the text scale matters here.
+        Some(dp) if super::window_layout::portrait() => super::display::phone_text_k(fit_k(), dp),
         Some(dp) => {
             let safe = super::display::safe_area();
             super::display::phone_bar_k(fit_k(), dp, screen_width() - safe.left - safe.right)
@@ -1313,9 +1315,24 @@ pub fn strip_k() -> f32 {
     super::display::fitted_scale(fit_k())
 }
 
-/// Height of the bottom game bar.
+/// The bottom game bar's own height: the map's bottom edge, the bar's place and the pan's bar
+/// (`bar_top_height`); on a phone held upright the bar's two rows (`game_bar::portrait_height`).
+pub fn bar_top_height() -> f32 {
+    match super::display::dp_px() {
+        Some(dp) if super::window_layout::portrait() => super::game_bar::portrait_height(dp),
+        _ => (80.0 * bar_k()).round(),
+    }
+}
+
+/// The bar's height as the windows above it fit against it. On a phone held sideways the windows
+/// keep the old bar height (its scale at the fit), so they keep their size and may overlap the
+/// bar's taller part: a modal window covers the bar anyway (the owner's choice, 2026-11-08).
+/// Elsewhere it is the bar's own height.
 pub fn bar_height() -> f32 {
-    (80.0 * bar_k()).round()
+    match super::display::dp_px() {
+        Some(_) if !super::window_layout::portrait() => (80.0 * strip_k()).round(),
+        _ => bar_top_height(),
+    }
 }
 
 /// Top of a `canvas_h`-tall canvas centred vertically on a `screen_w`×`screen_h` screen. Only

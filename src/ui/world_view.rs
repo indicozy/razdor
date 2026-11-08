@@ -68,7 +68,7 @@ fn map_scale_for(chosen: f32, fit: f32) -> f32 {
 /// Sail colour of the hero's own ship.
 const HERO_SAIL: Color = Color::new(0.35, 0.8, 0.45, 1.0);
 fn bar_h() -> f32 {
-    super::chrome::bar_height()
+    super::chrome::bar_top_height()
 }
 /// The map view: the window above the bottom bar.
 fn map_area() -> Rect {

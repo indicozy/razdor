@@ -180,7 +180,7 @@ pub fn begin_frame(allowed: bool, screen: Discriminant<Screen>, dialogs: usize) 
         touch: super::input::map_pan(),
         size,
         k: chrome::k(),
-        bar: chrome::bar_height(),
+        bar: chrome::bar_top_height(),
     };
     PAN.with(|p| {
         let mut p = p.borrow_mut();
@@ -247,7 +247,7 @@ fn bounds(rects: impl IntoIterator<Item = Rect>) -> Option<Rect> {
 
 /// The top of the bottom bar on the screen (the bar's own scale, `chrome::bar_height`).
 pub fn bar_top() -> f32 {
-    screen_height() - chrome::bar_height()
+    screen_height() - chrome::bar_top_height()
 }
 
 /// The screen above the bar: what a window drawn over the bar may show ([`cover_bar`]).
