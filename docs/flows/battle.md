@@ -134,7 +134,9 @@ act_with(target, kind) / move_active(to) / pass() / own_cell() / skip()
   (`Battle::poisonable`); off (the default), the original poisons them as any other unit.
 - `on_hit` applies Community side effects (poison, bleed, stun, vampirism …); `kill_check`
   removes the dead (`died`) and runs on-kill bonuses; `collapse` moves rows forward when a
-  side's front empties after its unit's last action.
+  side's front empties after its unit's last action. A counter blow or preventive strike that
+  kills its striker (`answer_kill`) runs no on-kill bonuses, except the experimental
+  `death_curse_counter` (off by default): then the answerer dies too, first (`curse_kill`).
 - The result of an action is a `Hit` (target, kind, amount, buff, killed, counter,
   actor_died, splash). AI and auto steps return a `Step` (`Act`, `Move`, `Wait`).
 

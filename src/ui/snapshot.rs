@@ -361,7 +361,7 @@ pub fn stage(app: &mut App) {
             simultaneous_bonuses: has("bonuses"), two_potions: has("potions"), six_cells: has("cells"), unlimited_items: has("items"),
             free_units: has("free"), auto_promotion: has("auto"), undying_units: has("undying"),
             fast_ai: has("fast"), bless_once: has("bless"), undead_poison_immune: has("poison"), unlimited_spells: has("spells"),
-            merchant_item: has("merchant"), rear_service_flat: has("rear"), building_store: has("store"),
+            merchant_item: has("merchant"), rear_service_flat: has("rear"), building_store: has("store"), death_curse_counter: has("counter"),
         });
     }
     if let Err(e) = try_stage(app, &scene) {

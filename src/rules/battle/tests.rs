@@ -2508,6 +2508,69 @@ fn row30_a_counter_blow_kill_has_no_on_kill_effects() {
     assert!(bt.fighters[1].alive(), "no curse from a counter blow kill");
 }
 
+/// `bt` with Razdor's experimental «Проклятие смерти при контрударе» on (backlog 1467).
+fn with_counter_curse(mut bt: Battle) -> Battle {
+    bt.content = Arc::new(bt.content.with_experimental(crate::rules::content::ExperimentalRules { death_curse_counter: true, ..Default::default() }));
+    bt
+}
+
+#[test]
+fn counter_curse_switch_on_takes_the_counterattacker_off_only_with_the_switch() {
+    // The DeathCurse attacker (10 HP) is killed by the chief's counter blow. Off: the original,
+    // the chief survives (row30). On: the chief dies too, its remaining HP counted in the
+    // enemy side's damage taken (its blow's damage and the rest make its whole HP).
+    let doomed = bonus(147, Bonus::DeathCurse, warrior(147, 30, 0));
+    let chief = bonus(126, Bonus::Counterblow, UnitDef { hits: 100, ..warrior(126, 25, 0) });
+    let setup = || {
+        let mut bt = with(vec![doomed.clone(), chief.clone()], &[(147, f(2))], &[(126, f(2))]);
+        bt.fighters[0].hp = 10;
+        bt
+    };
+    let mut off = setup();
+    let hit = off.act(1).unwrap();
+    assert!(hit.actor_died && off.fighters[1].alive(), "the original: no curse on the counter");
+    let mut on = with_counter_curse(setup());
+    let chief_hp = on.fighters[1].hp;
+    let hit = on.act(1).unwrap();
+    assert!(hit.actor_died && !on.fighters[1].alive(), "the counter-striker dies by the curse");
+    assert_eq!(on.fighters[1].lost, chief_hp, "its remaining HP is counted as lost");
+    assert_eq!(on.turn_lost[Team::Enemy.index()], chief_hp as i64, "in its side's damage taken");
+}
+
+#[test]
+fn counter_curse_switch_on_a_preventive_strike_takes_the_attacker_too() {
+    // The preventive strike kills the DeathCurse attacker first (the same no-on-kill rule).
+    let doomed = bonus(147, Bonus::DeathCurse, warrior(147, 30, 0));
+    let guard = bonus(89, Bonus::PreventiveStrike, UnitDef { hits: 100, ..warrior(89, 25, 0) });
+    let setup = || {
+        let mut bt = with(vec![doomed.clone(), guard.clone()], &[(147, f(2))], &[(89, f(2))]);
+        bt.fighters[0].hp = 10;
+        bt
+    };
+    let mut off = setup();
+    off.act(1).unwrap();
+    assert!(!off.fighters[0].alive() && off.fighters[1].alive(), "off: the original");
+    let mut on = with_counter_curse(setup());
+    on.act(1).unwrap();
+    assert!(!on.fighters[0].alive() && !on.fighters[1].alive(), "on: the guard dies too");
+}
+
+#[test]
+fn counter_curse_switch_on_a_ghost_follows_its_conditional_curse() {
+    // A Ghost (1 action) killed by a counter blow: its killer dies only below 30 Death protection,
+    // as on a normal kill (row23).
+    let ghost = bonus(147, Bonus::Ghost, warrior(147, 30, 0));
+    for (protect, dies) in [(0, true), (30, false)] {
+        let chief = bonus(126, Bonus::Counterblow, UnitDef { hits: 100, protect_death: protect, ..warrior(126, 25, 0) });
+        let mut bt = with_counter_curse(with(vec![ghost.clone(), chief], &[(147, f(2))], &[(126, f(2))]));
+        // A ghost takes 1 from a blow (row 28): at 1 HP the counter kills it.
+        bt.fighters[0].hp = 1;
+        let hit = bt.act(1).unwrap();
+        assert!(hit.actor_died, "the ghost dies to the counter ({protect})");
+        assert_eq!(!bt.fighters[1].alive(), dies, "Death protection {protect} against 30 × 1");
+    }
+}
+
 #[test]
 fn row30_the_attack_modifier_counts_on_an_attack_of_0() {
     // A Counterblow unit without AttackBlow answers with its attack modifier: 0 + 20 − 5.

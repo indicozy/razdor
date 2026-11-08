@@ -2390,7 +2390,7 @@ impl Battle {
             self.log.push(crate::trf!("{name} strikes first for {dmg}", name = self.fighters[target].name, dmg));
         }
         if self.fighters[id].hp <= 0 {
-            self.died(id);
+            self.answer_kill(id, target);
             return false;
         }
         true
@@ -2458,7 +2458,9 @@ impl Battle {
             self.log.push(msg);
         }
         // Counterblow: a surviving target answers with a blow, even a Suicide striker waiting
-        // for its removal; a striker it kills is removed with no on-kill effects (48b4b3).
+        // for its removal; a striker it kills is removed with no on-kill effects (48b4b3). The
+        // original's rule; Razdor's switch `death_curse_counter` lets a curse take the answerer
+        // (`answer_kill`).
         let t = &self.fighters[target];
         if t.alive() && t.has(Bonus::Counterblow) {
             let dmg = self.physical_damage(target, id, ActionKind::Melee).min(self.fighters[id].hp.max(0));
@@ -2469,7 +2471,7 @@ impl Battle {
                 self.log.push(crate::trf!("{name} hits back for {dmg}", name = self.fighters[target].name, dmg));
             }
             if self.fighters[id].hp <= 0 {
-                self.died(id);
+                self.answer_kill(id, target);
             }
             return out;
         }
@@ -2812,24 +2814,49 @@ impl Battle {
         if self.fighters[i].alive() {
             return false;
         }
-        if self.fighters[killer].listed() {
-            let dead = &self.fighters[i];
-            let curse = dead.has(Bonus::DeathCurse)
-                || (dead.has(Bonus::Ghost) && self.fighters[killer].stats[Stat::ProtectDeath] < 30 * dead.base[Stat::Manevres]);
-            if curse && self.spare(killer, 1) > 0 {
-                let kf = &mut self.fighters[killer];
-                let hp = kf.hp.max(0);
-                kf.lost += hp;
-                self.turn_lost[kf.team.index()] += hp as i64;
-                kf.hp = 0;
-                if self.log_on {
-                    self.log.push(crate::trf!("{name} dies by {caster}'s curse", name = self.fighters[killer].name, caster = self.fighters[i].name));
-                }
-                self.died(killer);
-            }
+        if self.fighters[killer].listed() && self.curse_takes(i, killer) {
+            self.curse_kill(killer, i);
         }
         self.died(i);
         true
+    }
+
+    /// Whether the death of `dead` takes `killer` with it (48a3f0): a `DeathCurse` unit always,
+    /// a `Ghost` when its killer's Death protection is below 30 × the ghost's actions. The
+    /// killer must be able to die (`spare`: the player's side in god mode cannot).
+    fn curse_takes(&self, dead: usize, killer: usize) -> bool {
+        let d = &self.fighters[dead];
+        let curse = d.has(Bonus::DeathCurse) || (d.has(Bonus::Ghost) && self.fighters[killer].stats[Stat::ProtectDeath] < 30 * d.base[Stat::Manevres]);
+        curse && self.spare(killer, 1) > 0
+    }
+
+    /// The killer of a curse dies first: its remaining HP counts in its side's damage taken, and
+    /// its removal comes before the dead unit's.
+    fn curse_kill(&mut self, killer: usize, dead: usize) {
+        let kf = &mut self.fighters[killer];
+        let hp = kf.hp.max(0);
+        kf.lost += hp;
+        self.turn_lost[kf.team.index()] += hp as i64;
+        kf.hp = 0;
+        if self.log_on {
+            self.log.push(crate::trf!("{name} dies by {caster}'s curse", name = self.fighters[killer].name, caster = self.fighters[dead].name));
+        }
+        self.died(killer);
+    }
+
+    /// The striker `id` is killed by an answer of `answerer` (a counter blow or a preventive
+    /// strike; 48b49f, 48b566): it is removed with no on-kill effects, as the original does. Razdor's
+    /// experimental «Проклятие смерти при контрударе» (`death_curse_counter`, backlog 1467; not
+    /// in the original, which runs no on-kill effects here): when the striker's death is a curse
+    /// (`curse_takes`, a `DeathCurse` unit or a `Ghost` under its condition), the answerer dies
+    /// too, first, as a normal kill's killer does (48a3f0). True when it did.
+    fn answer_kill(&mut self, id: usize, answerer: usize) -> bool {
+        let curse = self.content.experimental.death_curse_counter && self.curse_takes(id, answerer);
+        if curse {
+            self.curse_kill(answerer, id);
+        }
+        self.died(id);
+        curse
     }
 
     // ------------------------------------------------------------------------------------

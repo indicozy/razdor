@@ -166,6 +166,11 @@ pub struct ExperimentalRules {
     /// the hero beat, 0x4a473c keeps the loot in the record), so off is the original's rule.
     /// Razdor's own (the owner's request), on in old saves.
     pub building_store: bool,
+    /// «Проклятие смерти при контрударе» («Death curse on counter blows»; backlog 1467): a counter
+    /// blow (or a preventive strike) that kills a `DeathCurse` unit, or a `Ghost` under its
+    /// conditional curse, takes the striking unit with it, as a normal kill does (48a3f0). Off: the
+    /// original's rule (48b49f, the counter path has no on-kill effects). Razdor's deviation.
+    pub death_curse_counter: bool,
 }
 
 impl ExperimentalRules {
@@ -226,6 +231,7 @@ impl ExperimentalRules {
             (self.merchant_item, crate::i18n::n_("Merchant discount from an item")),
             (self.rear_service_flat, crate::i18n::n_("Rear Service always −30%")),
             (self.building_store, crate::i18n::n_("Store in your own buildings")),
+            (self.death_curse_counter, crate::i18n::n_("Death curse on counter blows")),
         ]
         .into_iter()
         .find(|(on, _)| *on)
@@ -258,6 +264,8 @@ struct RulesWire {
     rear_service_flat: Option<bool>,
     /// Missing in a save from before the store switch: the store was Razdor's then, so it reads ON.
     building_store: Option<bool>,
+    /// Missing (false) in saves from before the counter-blow curse switch: the original's rule.
+    death_curse_counter: bool,
     /// Older switches, read only (see the `From` impl).
     #[serde(skip_serializing)]
     multiple_rings: bool,
@@ -302,6 +310,7 @@ impl From<RulesWire> for ExperimentalRules {
             merchant_item: w.merchant_item.unwrap_or(true),
             rear_service_flat: w.rear_service_flat.unwrap_or(true),
             building_store: w.building_store.unwrap_or(true),
+            death_curse_counter: w.death_curse_counter,
         }
     }
 }
@@ -323,6 +332,7 @@ impl From<ExperimentalRules> for RulesWire {
             merchant_item: Some(r.merchant_item),
             rear_service_flat: Some(r.rear_service_flat),
             building_store: Some(r.building_store),
+            death_curse_counter: r.death_curse_counter,
             multiple_rings: false,
             multiple_amulets: false,
             multiple_weapons: false,
@@ -1058,5 +1068,28 @@ mod experimental_rules_save_tests {
         let on = ExperimentalRules { building_store: true, ..Default::default() };
         assert_eq!(on.first_on(), Some("Store in your own buildings"));
         assert_eq!(ExperimentalRules::default().first_on(), None);
+    }
+
+    /// «Проклятие смерти при контрударе» (`death_curse_counter`, backlog 1467): off by default, in a
+    /// new game, before the rules were saved, and in a save without its key (the original's rule).
+    /// Written as its own key; its name is the rules window's and the scenario mark's; it is not
+    /// one of the six preset switches.
+    #[test]
+    fn the_counter_curse_switch_is_off_without_its_key() {
+        assert!(!ExperimentalRules::for_new_game().death_curse_counter);
+        assert!(!ExperimentalRules::before_the_rules_were_saved().death_curse_counter);
+        let old: ExperimentalRules = serde_json::from_str(r#"{"fast_ai": true, "building_store": false}"#).unwrap();
+        assert!(!old.death_curse_counter);
+        let missing: ExperimentalRules = serde_json::from_str("{}").unwrap();
+        assert!(!missing.death_curse_counter);
+        let on = ExperimentalRules { death_curse_counter: true, ..Default::default() };
+        let json = serde_json::to_value(on).unwrap();
+        assert_eq!(json["death_curse_counter"].as_bool(), Some(true));
+        assert_eq!(serde_json::from_value::<ExperimentalRules>(json).unwrap(), on);
+        assert_eq!(on.first_on(), Some("Death curse on counter blows"));
+        let mut preset_only = ExperimentalRules::before_the_rules_were_saved();
+        assert!(preset_only.is_razdor_preset_on() && !preset_only.death_curse_counter);
+        preset_only.set_razdor_preset(false);
+        assert!(!preset_only.death_curse_counter);
     }
 }

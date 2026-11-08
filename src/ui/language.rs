@@ -351,6 +351,7 @@ mod tests {
         assert!(s.experimental_rules.fast_ai && s.experimental_rules.six_cells);
         assert!(!s.experimental_rules.bless_once && !s.experimental_rules.rear_service_flat);
         assert!(!s.experimental_rules.building_store);
+        assert!(!s.experimental_rules.death_curse_counter, "the counter curse has no key: the original's rule");
     }
 
     #[test]

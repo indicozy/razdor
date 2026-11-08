@@ -945,7 +945,7 @@ were implemented and tested earlier (`src/rules/battle/tests.rs`, `rowN_…`); t
 | 27 | Piercing set | Melee: ArmorIgnore, PoisonArmorIgnore, both vampire gifts; shots: ArmorIgnore, PoisonArmorIgnore, Artillery | Same | 0 | Matches |
 | 28 | Defence order | SpearDefense, piercing, long strike, then building (+Row2Def for shots); the attack modifier added to an attack of 0; Unvulnerabe/Ghost 1 with GodAnger/GodStrike on top | Same | 0 | Matches |
 | 29 | Knight | Any side whose first unit is of the Knight type, AI lords included | Any army whose first unit is of the Knight type, AI lords included | 0 | Matches |
-| 30 | Counterblow | Any Counterblow unit, after melee or a long strike; its kill (and a preventive strike's) has no on-kill effects | Same | 8 | Matches |
+| 30 | Counterblow | Any Counterblow unit, after melee or a long strike; its kill (and a preventive strike's) has no on-kill effects | Same by default. Behind the experimental switch `death_curse_counter` («Проклятие смерти при контрударе», off by default; backlog 1467), a counter blow or preventive strike that kills a DeathCurse unit (or a Ghost under its condition, 48a3f0) takes the striker too, first, its remaining HP counted in its side's damage taken | 8 | Matches by default; deviation behind the switch |
 | 31 | Ghost | Killer dies if ProtectDeath < 30 × Manevres | Same | 8 | Matches |
 | 32 | Garrison | ×2 AB, DB, DS (≥ 10); Community +AS at exactly 10 | Same | 8, 7 | Matches |
 | 33 | Regen and poison | `round(maxHP × regen/100)`, half to even, no minimum | Same | 8 | Matches |
