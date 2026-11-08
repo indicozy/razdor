@@ -98,7 +98,7 @@ SCREENS = [
     ("map","map:РК1-Начало пути", {}),
     # The 2.5D map (the setting on) turned 45°, with its compass beside the bottom bar (the start turn
     # is the snapshot's; the compass shows while the view is turned away from north up).
-    ("map-compass", "map:РК1-Начало пути", {"RAZDOR_CASE_AUDIO": '{"map_tilt": true}', "RAZDOR_VIEW_YAW": "45"}),
+    ("map-compass", "map:РК1-Начало пути", {"RAZDOR_CASE_AUDIO": '{"map_tilt": true}', "RAZDOR_VIEW_YAW": "45", "RAZDOR_SCENE_QUIET": "1"}),
     ("minimap", "minimap:РК1-Начало пути", {}),
     # An army's hover card on the map (its 2×6 cells beside the text, a player's report 1554): the
     # pointer on the first enemy army with the right button held, as the map's tooltips.
