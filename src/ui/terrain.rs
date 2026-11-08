@@ -374,7 +374,7 @@ mod tests {
 
     #[test]
     fn the_fog_starts_at_the_border_thickens_and_is_solid_at_the_full_distance() {
-        assert!(0.0 < EDGE_SOLID && EDGE_SOLID < EDGE_FULL);
+        const { assert!(0.0 < EDGE_SOLID && EDGE_SOLID < EDGE_FULL) };
         assert_eq!(fog_opacity(0.0), 0.0, "clear on the border");
         assert_eq!(fog_opacity(EDGE_FULL), 1.0, "solid at the full distance");
         assert_eq!(fog_opacity(EDGE_FULL + 5.0), 1.0, "and beyond");
