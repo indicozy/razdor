@@ -398,9 +398,14 @@ pub fn draw(game: &Game, look: impl Fn(BarButton) -> Look) -> Option<BarButton> 
 /// three time buttons over it instead of its text. Returns the bar button and the time
 /// button pressed.
 pub fn draw_with_time(game: &Game, look: impl Fn(BarButton) -> Look, time_buttons: bool) -> (Option<BarButton>, Option<TimeButton>) {
-    // The bar stays at the screen's bottom whatever the windows' pan is (`ui::pan`), and at
-    // the fitted scale, its text included (`display::with_fitted`).
-    super::pan::unpanned(|| super::display::with_fitted(super::chrome::fit_k(), || draw_bar(game, &look, time_buttons)))
+    // The bar stays at the screen's bottom whatever the windows' pan is (`ui::pan`). On the
+    // desktop it is drawn at the fitted scale, its text included (`display::with_fitted`). On a
+    // phone it is drawn at its own scale (`chrome::bar_k`) as its window scale, so its text and
+    // buttons take that size (Razdor's: the phone's readouts reach the text size).
+    super::pan::unpanned(|| match super::display::dp_px() {
+        Some(_) => super::display::with_window_scale(Some(super::chrome::bar_k()), || draw_bar(game, &look, time_buttons)),
+        None => super::display::with_fitted(super::chrome::fit_k(), || draw_bar(game, &look, time_buttons)),
+    })
 }
 
 fn draw_bar(game: &Game, look: &impl Fn(BarButton) -> Look, time_buttons: bool) -> (Option<BarButton>, Option<TimeButton>) {
@@ -561,12 +566,16 @@ pub fn smallest_shift(max: f32, ok: impl Fn(f32) -> bool) -> Option<f32> {
 /// screen the map shows beside it (Razdor's choice, not the original's 800 px bar).
 const BAR_W: f32 = 960.0;
 
-/// The bar's place on the screen: its natural width, centred, at the screen's bottom.
+/// The bar's place on the screen: its natural width, centred, at the screen's bottom. On a phone
+/// the width is capped at the screen's less the safe area's sides, and the bar is centred in what
+/// is left (on the desktop the safe area is zero, so nothing moves).
 pub fn bar_rect() -> Rect {
     let (w, h) = (screen_width(), screen_height());
     let bar = chrome::bar_height();
-    let bw = (BAR_W * chrome::bar_k()).round().min(w);
-    Rect::new(((w - bw) / 2.0).round(), h - bar, bw, bar)
+    let safe = safe_area();
+    let avail = w - safe.left - safe.right;
+    let bw = (BAR_W * chrome::bar_k()).round().min(avail);
+    Rect::new((safe.left + (avail - bw) / 2.0).round(), h - bar, bw, bar)
 }
 
 /// A bar button's size at the bar's row height `row` (the original's art sizes).
@@ -821,6 +830,23 @@ mod tests {
             assert!(on_screen(vec2(a, low), screen, safe), "label start {a} is clear of the corner");
             assert!(on_screen(vec2(b, low), screen, safe), "value end {b} is clear of the corner");
         }
+    }
+
+    #[test]
+    fn a_landscape_phone_bar_at_its_own_scale_keeps_its_groups_apart() {
+        // 2400x1080 at 2.75 px/dp: the bar's own scale (the readouts' text size) and the full
+        // width; the two groups and the time panel stay in order, the time panel keeps 90 dp.
+        let screen = vec2(2400.0, 1080.0);
+        let k = crate::ui::display::phone_bar_k(1.5, 2.75, 2400.0);
+        let row = (60.0 * k).round();
+        let bar = bar_on(screen, k, 0.0, 2400.0);
+        let lay = layout(bar, screen, k, row, SafeArea::default());
+        let left_end = lay.left[3].x + lay.left[3].w;
+        assert!(left_end <= lay.time.x && lay.time.x + lay.time.w <= lay.right[0].x, "{lay:?}");
+        assert!(lay.time.w >= 90.0 * 2.75 - 1.0, "the time panel is {} px", lay.time.w);
+        assert!(lay.right[3].x + lay.right[3].w <= screen.x);
+        // Each small oval is 44 dp tall at least (its drawn height, the row's share of 44 units).
+        assert!(lay.left[0].h >= 44.0 * 2.75 - 1.0, "{}", lay.left[0].h);
     }
 
     #[test]

@@ -559,8 +559,15 @@ Building a window (`src/ui/chrome.rs`):
   kept to the fit too, so the settings always fit the screen (players got stuck with them
   off-screen in 1.0.0). `display::chosen_scale` is the setting as it is. Ctrl+0
   (`display::scale_reset_pressed`, `ui/mod.rs`) sets it back to Auto on any screen, with a notice
-  (`display::notice_scale`), and swallows the key so the world map's 0 does not fire. The bottom bar, the FPS counter and the keyboard strip use `chrome::bar_k`, the chosen
-  scale cut to the fit (`display::fitted_scale`), so they stay as large as the fit allows.
+  (`display::notice_scale`), and swallows the key so the world map's 0 does not fire. On the desktop the
+  bottom bar, the FPS counter and the keyboard strip use `chrome::bar_k`, the chosen scale cut to the fit
+  (`display::fitted_scale`), so they stay as large as the fit allows. On a phone the bottom bar has its own
+  scale, `chrome::bar_k` = `display::phone_bar_k` (Razdor's, backlog 1557): the scale at which its readouts
+  reach 14 sp (`BAR_TEXT_SP`), kept to the width less the safe area with a 90 dp time panel (portrait is
+  width-bound: its readouts stay under 12 sp). `game_bar::draw_with_time` draws the bar as the window scale
+  (`display::with_window_scale`) at that scale; the bar's place is its width capped at the screen less the
+  safe area. The FPS counter and the keyboard strip keep the fit (`chrome::strip_k`). Everything that takes
+  `chrome::bar_height` (the windows above the bar, the map's bottom edge) follows the taller bar.
 - Buttons grow with the text size (Razdor's, the owner's decision of 2026-10-31; every screen
   except the bottom bar's readouts and the market row). At ×1 every
   button keeps the original's size; above it `display::button_grow` (the text size) multiplies

@@ -406,6 +406,31 @@ pub fn dp_px() -> Option<f32> {
     (dp > 0.0).then_some(dp)
 }
 
+/// The phone bottom bar's readout text, in sp (Razdor's: the owner's «about 14 sp»; the mobile
+/// check flags under 12).
+pub const BAR_TEXT_SP: f32 = 14.0;
+/// The bar's label capitals in px per unit of its scale `k`, from the mobile check's phones
+/// (`Body` and `Bold` faces: 10.1 px at k 1.125 on 2.75 px/dp, 13.5 px at k 1.5 on 3.5 px/dp).
+const BAR_CAP_PX_PER_K: f32 = 9.0;
+/// The mobile check's capital ratio: sp = capital px / dp / 0.7.
+const CAP_RATIO: f32 = 0.7;
+/// The bar's two ribbon ends (370 px each at a 64 px row) with the row at 60 px per `k`: the width
+/// they take from the bar, per `k` (2 × 370 × 60 / 64).
+const BAR_ENDS_PER_K: f32 = 2.0 * 370.0 * 60.0 / 64.0;
+/// The time panel's least width on a phone, in dp (its date line shrinks to it).
+const BAR_TIME_MIN_DP: f32 = 90.0;
+
+/// The bottom bar's scale on a phone of `dp` px per dp, whose width `avail` (px, the safe area's
+/// sides taken off): the scale at which its readouts reach [`BAR_TEXT_SP`], kept to what the width
+/// holds with the ribbon ends and a time panel of [`BAR_TIME_MIN_DP`]. Never below the window fit
+/// `fit`. Portrait phones are width-bound (the buttons and the ribbon ends fill the width), so
+/// their readouts stay under the text size; landscape ones reach it.
+pub fn phone_bar_k(fit: f32, dp: f32, avail: f32) -> f32 {
+    let want = BAR_TEXT_SP * CAP_RATIO * dp / BAR_CAP_PX_PER_K;
+    let room = (avail - BAR_TIME_MIN_DP * dp) / BAR_ENDS_PER_K;
+    fit.max(want.min(room))
+}
+
 /// A phone screen's unsafe areas, in physical pixels: the display cutout's insets (left, top,
 /// right, bottom; the system bars are hidden in full screen, so they are not in it) and the
 /// radii of the four rounded corners (the landscape's top corners are the device's own bottom
@@ -1791,6 +1816,26 @@ mod tests {
         assert!(!hidden_by_system(900.0, 900.0), "still up");
         assert!(!hidden_by_system(0.0, 0.0), "down all along");
         assert!(!hidden_by_system(0.0, 900.0), "coming up is not hiding");
+    }
+
+    #[test]
+    fn a_phone_bar_reaches_the_text_size_in_landscape_and_is_width_bound_in_portrait() {
+        // Landscape 2400x1080 at 2.75 px/dp: the readouts reach 14 sp at k ≈ 3.0 and the width
+        // holds it (a time panel of 90 dp between the ribbon ends).
+        let k = phone_bar_k(1.5, 2.75, 2400.0);
+        assert!((k - 3.0).abs() < 0.05, "landscape k {k}");
+        let sp = BAR_CAP_PX_PER_K * k / (CAP_RATIO * 2.75);
+        assert!((sp - 14.0).abs() < 0.1, "the label reads {sp} sp");
+        // Portrait 1080x2400: the width is the limit (k ≈ 1.2), the readouts stay under 12 sp.
+        let k = phone_bar_k(1.125, 2.75, 1080.0);
+        assert!((k - 1.2).abs() < 0.01, "portrait k {k}");
+        let time_panel = 1080.0 - BAR_ENDS_PER_K * k;
+        assert!(time_panel >= BAR_TIME_MIN_DP * 2.75 - 0.5, "the time panel keeps {time_panel} px");
+        assert!(BAR_CAP_PX_PER_K * k / (CAP_RATIO * 2.75) < 12.0);
+        // Big portrait 1440x3120 at 3.5 px/dp: the width limit again.
+        assert!((phone_bar_k(1.5, 3.5, 1440.0) - 1.62).abs() < 0.01);
+        // A narrow phone never drops under the window fit.
+        assert_eq!(phone_bar_k(1.0, 2.0, 400.0), 1.0);
     }
 
     #[test]

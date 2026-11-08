@@ -1118,7 +1118,7 @@ impl App {
         if !self.audio.settings.show_fps {
             return;
         }
-        let k = chrome::bar_k();
+        let k = chrome::strip_k();
         let label = format!("FPS {shown}");
         let size = (14.0 * k).round();
         let w = widgets::measure(&label, size).width;

@@ -1294,9 +1294,22 @@ pub fn fit_k() -> f32 {
     ((screen_width() / 1024.0).min(screen_height() / 768.0) / 0.9375).max(0.5)
 }
 
-/// The scale of the bottom bar, the FPS counter and the keyboard strip: the chosen one kept to
-/// the fit, so they stay fully visible whatever the windows' scale is.
+/// The scale of the bottom bar. On a phone it is the bar's own (`display::phone_bar_k`: its
+/// readouts at the text size, its width the screen's less the safe area's sides), whatever the
+/// chosen scale is; on the desktop the chosen one kept to the fit, as before.
 pub fn bar_k() -> f32 {
+    match super::display::dp_px() {
+        Some(dp) => {
+            let safe = super::display::safe_area();
+            super::display::phone_bar_k(fit_k(), dp, screen_width() - safe.left - safe.right)
+        }
+        None => super::display::fitted_scale(fit_k()),
+    }
+}
+
+/// The scale of the FPS counter and the keyboard strip: the chosen one kept to the fit, so they
+/// stay fully visible whatever the windows' scale is (the bar's scale before phones had their own).
+pub fn strip_k() -> f32 {
     super::display::fitted_scale(fit_k())
 }
 
