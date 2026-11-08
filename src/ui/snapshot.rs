@@ -492,6 +492,10 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                 if let Some(px) = std::env::var("RAZDOR_SCENE_SCROLL").ok().and_then(|v| v.trim().parse::<f32>().ok()) {
                     super::main_menu::scene_scroll(px);
                 }
+                // `RAZDOR_SCENE_HELP=<row>`: that row's «?» pop-up pinned (its name as `main_menu::Row` spells it).
+                if let Ok(row) = std::env::var("RAZDOR_SCENE_HELP") {
+                    super::main_menu::scene_help(row.trim());
+                }
             }
             return Ok(());
         }

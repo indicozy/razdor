@@ -17,6 +17,8 @@ Under them are five Razdor group buttons. Each opens its own window with only th
 | **Controls...** | keyboard shortcuts (the **"Keys..."** button); touchpad mode (on a phone) |
 | **Other...** | updates and the **"Check now"** button; updating the game from an archive |
 
+Short explanations stand under their rows. Long ones sit behind a **"?"** button at the end of the row: click it (on a computer, hovering is enough) and the explanation appears. A click elsewhere or Esc closes it.
+
 Changes made in a group window are kept. **"Apply"** keeps everything that was changed; **"Cancel"** in the settings window undoes only what was changed in that window.
 
 :::tip

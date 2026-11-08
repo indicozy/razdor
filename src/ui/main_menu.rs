@@ -1574,8 +1574,7 @@ pub enum Row {
 }
 
 impl Row {
-    /// Every row (the group table's test checks each is in one group).
-    #[cfg(test)]
+    /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
     pub const ALL: [Row; 28] = [
         Row::MapZoom,
         Row::MapView,
@@ -1606,6 +1605,24 @@ impl Row {
         Row::Updates,
         Row::Import,
     ];
+
+    /// The long hint a «?» pop-up shows (backlog 1508), for the rows whose hint runs past a line.
+    fn help_text(self) -> Option<&'static str> {
+        match self {
+            Row::MapZoom => Some(tr("The zoom the map plays at. The wheel steps away from it and the 0 key comes back to it; locked, the map always shows it.")),
+            Row::MapEdge => Some(tr("Off: past the map's edges is black, as in the original. On: a short stretch of ground goes on past the edges, then thickens into the same black fog as the unexplored map.")),
+            Row::AiStrength => Some(tr("Maximum: before each move the enemy of your battles weighs every move and answer ahead and plays each out to the end of the battle.")),
+            Row::ArmyArrangement => Some(tr("Clicks: the first click picks a unit or an item, the second places it. Dragging: a click only selects, and units and items are moved by dragging. Both: clicks and dragging at once.")),
+            Row::Experience => Some(tr("As in the original, a unit's experience is dropped when it is promoted; Kept keeps it. Experience left over after a level is kept either way.")),
+            Row::Language => Some(super::language::hint()),
+            Row::Updates => Some(if updates_phone() {
+                tr(UPDATES_PHONE_HINT)
+            } else {
+                tr("Ask: a newer release is offered in a window. Always: it is downloaded and starts the next time. The check never holds up the game.")
+            }),
+            _ => None,
+        }
+    }
 
     /// Whether the row is drawn now: the 2.5D rows only with the 2.5D view on, the screen
     /// orientation on Android, the touchpad mode where it exists.
@@ -1686,8 +1703,6 @@ struct RowGeo {
     size: f32,
     /// The line pitch of a wrapped label or hint.
     lh: f32,
-    /// A hint's size.
-    hint: f32,
     /// The narrowest value button.
     min_w: f32,
     /// The buttons' label size (the phone's); None: the marble's own (the desktop's).
@@ -1697,13 +1712,13 @@ struct RowGeo {
 impl RowGeo {
     /// The desktop's: the original's 28 px rows and 14 px labels, the hints at 12.
     fn desktop(k: f32, g: f32) -> RowGeo {
-        RowGeo { k, row_h: 28.0 * k * g, gap: 8.0 * k, size: 14.0 * k, lh: 17.0 * k, hint: 12.0 * k, min_w: 170.0 * k, btn_size: None }
+        RowGeo { k, row_h: 28.0 * k * g, gap: 8.0 * k, size: 14.0 * k, lh: 17.0 * k, min_w: 170.0 * k, btn_size: None }
     }
 
     /// The phone's, in dp (`k` px per dp): 36 dp rows grown by the text size, never under 40 dp;
     /// 16.5 sp labels and hints.
     fn phone(k: f32, g: f32) -> RowGeo {
-        RowGeo { k, row_h: (36.0 * g).max(40.0) * k, gap: 8.0 * k, size: 16.5 * k, lh: 20.0 * k, hint: 16.5 * k, min_w: 120.0 * k, btn_size: Some(16.5 * k) }
+        RowGeo { k, row_h: (36.0 * g).max(40.0) * k, gap: 8.0 * k, size: 16.5 * k, lh: 20.0 * k, min_w: 120.0 * k, btn_size: Some(16.5 * k) }
     }
 }
 
@@ -1741,22 +1756,64 @@ fn scroll_button(r: Rect, label: &str, size: Option<f32>) -> bool {
     button_draw(r, label, size)
 }
 
+// The «?» pop-up's states (backlog 1508): the pinned one (a click), the one under the pointer on the
+// desktop, and the buttons drawn this frame (the next frame's outside-click test).
+local! {
+    /// The «?» pop-up a click pinned: its text, until a click outside it or Esc.
+    static HELP_PINNED: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
+    /// The «?» buttons drawn this frame: the next frame's click test takes them.
+    static HELP_SPOTS: std::cell::RefCell<Vec<Rect>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// The «?» under the pointer this frame (the desktop shows its pop-up without a click).
+    static HELP_HOVER: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
+}
+
+/// A «?» button's size: the row's button height, at least 44 dp on a phone.
+fn help_size(geo: &RowGeo) -> f32 {
+    if geo.btn_size.is_some() { geo.row_h.max(44.0 * geo.k) } else { geo.row_h }
+}
+
+/// A row's «?» button (backlog 1508) at the row's right end, its top at `y`: pressed, it pins its
+/// pop-up (pressed again, it unpins); on the desktop the pointer over it shows the pop-up too.
+fn help_button(c: &RowCol, geo: &RowGeo, y: f32, text: &'static str) {
+    let s = help_size(geo);
+    let r = Rect::new(c.x + c.w - s, y, s, s);
+    HELP_SPOTS.with(|h| h.borrow_mut().push(r));
+    let (mx, my) = crate::ui::widgets::pointer();
+    if geo.btn_size.is_none() && in_rect((mx, my), r) && in_adv_view(r) {
+        HELP_HOVER.with(|h| h.set(Some(text)));
+    }
+    if scroll_button(r, "?", geo.btn_size) {
+        HELP_PINNED.with(|p| p.set(if p.get() == Some(text) { None } else { Some(text) }));
+    }
+}
+
 /// A row: its label on the left (wrapped to the room beside the button, or on its own line above
 /// the button when a word does not fit) and its button on the right. Returns whether the button
 /// was clicked, and its rectangle.
 fn labelled_row(c: &mut RowCol, geo: &RowGeo, label: &str, value: &str) -> (bool, Rect) {
+    labelled_row_help(c, geo, label, value, None)
+}
+
+/// [`labelled_row`] with a «?» button after its value (backlog 1508) when `help` is given: the
+/// long hint that the row would otherwise show under it.
+fn labelled_row_help(c: &mut RowCol, geo: &RowGeo, label: &str, value: &str, help: Option<&'static str>) -> (bool, Rect) {
+    let help_w = if help.is_some() { help_size(geo) + geo.gap } else { 0.0 };
     let vw = super::typography::Role::Button.with(|| super::dt_font::legacy_metrics_if(true, || measure(value, geo.size).width));
     let bw = (vw + 28.0 * geo.k).max(geo.min_w);
-    let room = c.w - bw - 10.0 * geo.k;
+    let room = c.w - bw - 10.0 * geo.k - help_w;
+    let right = c.x + c.w - help_w;
     let beside = wrap_label(label, room, geo.size);
     if beside.iter().any(|l| measure(l, geo.size).width > room) {
-        let lines = wrap_label(label, c.w, geo.size);
+        let lines = wrap_label(label, c.w - help_w, geo.size);
         for (i, line) in lines.iter().enumerate() {
             chrome::shadow_text(line, c.x, c.y + i as f32 * geo.lh + geo.size * 0.9, geo.size, chrome::CREAM);
         }
         let top = c.y + lines.len() as f32 * geo.lh + 4.0 * geo.k;
-        let r = Rect::new(c.x + c.w - bw, top, bw, geo.row_h);
+        let r = Rect::new(right - bw, top, bw, geo.row_h);
         c.y = top + geo.row_h + geo.gap;
+        if let Some(text) = help {
+            help_button(c, geo, r.y, text);
+        }
         return (scroll_button(r, value, geo.btn_size), r);
     }
     let h = geo.row_h.max(beside.len() as f32 * geo.lh);
@@ -1765,18 +1822,12 @@ fn labelled_row(c: &mut RowCol, geo: &RowGeo, label: &str, value: &str) -> (bool
         let base = centre - (beside.len() as f32 - 1.0) * geo.lh / 2.0 + i as f32 * geo.lh + geo.size * 0.36;
         chrome::shadow_text(line, c.x, base, geo.size, chrome::CREAM);
     }
-    let r = Rect::new(c.x + c.w - bw, c.y + (h - geo.row_h) / 2.0, bw, geo.row_h);
+    let r = Rect::new(right - bw, c.y + (h - geo.row_h) / 2.0, bw, geo.row_h);
     c.y += h + geo.gap;
-    (scroll_button(r, value, geo.btn_size), r)
-}
-
-/// A hint under a row: its lines across the column.
-fn hint_under(c: &mut RowCol, geo: &RowGeo, text: &str) {
-    let lines = wrap(text, c.w, geo.hint);
-    for (i, line) in lines.iter().enumerate() {
-        chrome::shadow_text(line, c.x, c.y + i as f32 * geo.lh + geo.hint * 0.9, geo.hint, WHITE);
+    if let Some(text) = help {
+        help_button(c, geo, r.y, text);
     }
-    c.y += lines.len() as f32 * geo.lh + geo.gap;
+    (scroll_button(r, value, geo.btn_size), r)
 }
 
 /// A checkbox row whose label may wrap (the box stays on the first line). True when clicked.
@@ -1801,7 +1852,7 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
             // The map's own zoom (Razdor's): the wheel steps from it, 0 comes back to it; locked,
             // the wheel and +/- leave it alone. The slider sits under the row.
             let lock = if audio.zoom_locked { tr("Locked") } else { tr("Wheel and +/-") };
-            if labelled_row(c, geo, tr("Map zoom"), lock).0 {
+            if labelled_row_help(c, geo, tr("Map zoom"), lock, Row::MapZoom.help_text()).0 {
                 audio.zoom_locked = !audio.zoom_locked;
             }
             let (lo, hi) = super::world_view::ZOOM_RANGE;
@@ -1813,7 +1864,6 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
                 audio.map_zoom = ((lo + v * (hi - lo)) / 0.05).round() * 0.05;
             }
             c.y += track.h + geo.gap;
-            hint_under(c, geo, tr("The zoom the map plays at. The wheel steps away from it and the 0 key comes back to it; locked, the map always shows it."));
         }
         Row::MapView => {
             // Razdor's (the owner's decision, 2026-11-02): the world map's 2.5D view.
@@ -1834,10 +1884,9 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
         }
         Row::MapEdge => {
             // «Продолжать карту за краем» (Razdor's, off by default).
-            if labelled_row(c, geo, tr("Extend the map past its edges"), yes_no(audio.map_extended)).0 {
+            if labelled_row_help(c, geo, tr("Extend the map past its edges"), yes_no(audio.map_extended), Row::MapEdge.help_text()).0 {
                 audio.map_extended = !audio.map_extended;
             }
-            hint_under(c, geo, tr("Off: past the map's edges is black, as in the original. On: a short stretch of ground goes on past the edges, then thickens into the same black fog as the unexplored map."));
         }
         Row::MapBattles => {
             if labelled_row(c, geo, tr("Battles on the map"), yes_no(audio.battle_marks)).0 {
@@ -1878,10 +1927,9 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
                 AiStrength::Improved => tr("Improved"),
                 AiStrength::Max => tr("Maximum (Razdor)"),
             };
-            if labelled_row(c, geo, tr("Battle AI strength"), label).0 {
+            if labelled_row_help(c, geo, tr("Battle AI strength"), label, Row::AiStrength.help_text()).0 {
                 set_ai_strength(audio, strength.next());
             }
-            hint_under(c, geo, tr("Maximum: before each move the enemy of your battles weighs every move and answer ahead and plays each out to the end of the battle."));
         }
         Row::UnitBattle => {
             if labelled_row(c, geo, tr("Unit battle participation"), yes_no(audio.allow_unit_benching)).0 {
@@ -1906,18 +1954,16 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
                 super::unit_drag::Controls::Drag => tr("Dragging"),
                 super::unit_drag::Controls::Both => tr("Both"),
             };
-            if labelled_row(c, geo, tr("Army arrangement"), label).0 {
+            if labelled_row_help(c, geo, tr("Army arrangement"), label, Row::ArmyArrangement.help_text()).0 {
                 audio.formation_controls = audio.formation_controls.next();
             }
-            hint_under(c, geo, tr("Clicks: the first click picks a unit or an item, the second places it. Dragging: a click only selects, and units and items are moved by dragging. Both: clicks and dragging at once."));
         }
         Row::Experience => {
             // Razdor's deviation (backlog 1529): a promoted unit's XP is dropped as in the original, or kept.
             let label = if audio.keep_xp_on_promotion { tr("Kept (Razdor)") } else { tr("Reset (original)") };
-            if labelled_row(c, geo, tr("Experience on promotion"), label).0 {
+            if labelled_row_help(c, geo, tr("Experience on promotion"), label, Row::Experience.help_text()).0 {
                 audio.keep_xp_on_promotion = !audio.keep_xp_on_promotion;
             }
-            hint_under(c, geo, tr("As in the original, a unit's experience is dropped when it is promoted; Kept keeps it. Experience left over after a level is kept either way."));
         }
         Row::Screen => {
             // Windowed, borderless or full screen, set at once (`display::follow_settings`); a phone has two.
@@ -1971,11 +2017,10 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
         Row::Language => {
             // The language list (Razdor's): Russian, English and the translations found in the install.
             let current = super::language::current_label();
-            let (clicked, lr) = labelled_row(c, geo, tr("Language"), &current);
+            let (clicked, lr) = labelled_row_help(c, geo, tr("Language"), &current, Row::Language.help_text());
             if clicked || super::snapshot::open_language_list() {
                 super::language::open_list(lr, geo.k);
             }
-            hint_under(c, geo, super::language::hint());
         }
         Row::Keys => {
             // The keys window (Razdor's, the owner's request): every action's key, rebound by a click.
@@ -1994,15 +2039,13 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
         Row::Updates => {
             // Updates from the GitHub releases (`razdor::update`); on a phone Ask and Off only.
             let phone_ui = updates_phone();
-            if labelled_row(c, geo, tr("Updates"), updates_label(audio.updates, phone_ui)).0 {
+            if labelled_row_help(c, geo, tr("Updates"), updates_label(audio.updates, phone_ui), Row::Updates.help_text()).0 {
                 audio.updates = audio.updates.next_on(phone_ui);
             }
             let state = super::update_view::status_label();
             if labelled_row(c, geo, &state, tr("Check now")).0 {
                 super::update_view::check_by_hand();
             }
-            let hint = if phone_ui { tr(UPDATES_PHONE_HINT) } else { tr("Ask: a newer release is offered in a window. Always: it is downloaded and starts the next time. The check never holds up the game.") };
-            hint_under(c, geo, hint);
         }
         Row::Import => {
             // «Обновить игру из архива…» (Razdor's): the button, or why it is not offered.
@@ -2016,6 +2059,20 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
 /// desktop's window is `GROUP_W` wide and the group's height; a phone's fills the room (both
 /// orientations). Returns true when closed (Ok, Esc, Enter, the close box).
 fn group_window(audio: &mut super::audio::Settings, over_map: bool, group: Group) -> bool {
+    // A click outside the «?» buttons closes their pop-up, and the click is taken; Esc closes the pop-up
+    // and not the window (the press is swallowed, so the window's own Esc check sees none).
+    let spots = HELP_SPOTS.with(|h| std::mem::take(&mut *h.borrow_mut()));
+    HELP_HOVER.with(|h| h.set(None));
+    if HELP_PINNED.with(|p| p.get()).is_some() {
+        let (mx, my) = crate::ui::widgets::pointer();
+        if key(KeyCode::Escape) {
+            HELP_PINNED.with(|p| p.set(None));
+            swallow_input();
+        } else if clicked() && !spots.iter().any(|r| in_rect((mx, my), *r)) {
+            HELP_PINNED.with(|p| p.set(None));
+            swallow_input();
+        }
+    }
     // The scroll bar's width is the new-game list's (`new_game::list_track`), whatever the window's scale.
     let list_k = chrome::k();
     let title = group.title();
@@ -2088,10 +2145,32 @@ fn group_window(audio: &mut super::audio::Settings, over_map: bool, group: Group
     let ok = Rect::new(inner.x + inner.w - pad - ok_w, inner.y + inner.h - gap - ok_h, ok_w, ok_h);
     let ok_label = own("Buttons", "Ok", n_("OK"));
     let done = closed || key(KeyCode::Escape) || key(KeyCode::Enter) || button_draw(ok, &ok_label, geo.btn_size);
+    // The «?» pop-up: the pinned one, or on the desktop the one under the pointer, drawn last (over the rows).
+    if let Some(text) = HELP_PINNED.with(|p| p.get()).or(HELP_HOVER.with(|h| h.get())) {
+        help_popup(text, geo.k, on_phone);
+    }
     if done {
         ADV_SCROLL.with(|s| s.set(0.0));
+        HELP_PINNED.with(|p| p.set(None));
     }
     done
+}
+
+/// The «?» pop-up (backlog 1508): the game's hint box (`widgets::hint_box_always`) with the text
+/// wrapped to its width. On a phone it is 80% of the screen's width (420 dp at most).
+fn help_popup(text: &str, k: f32, phone: bool) {
+    let w = if phone { (screen_width() * 0.8).min(420.0 * k) } else { 340.0 * k };
+    let size = super::typography::Role::Hint.size(17.0 * k);
+    let lines = super::typography::Role::Hint.with(|| wrap(text, w - 16.0 * k, size));
+    let lines: Vec<(String, Color)> = lines.into_iter().map(|l| (l, chrome::CREAM)).collect();
+    super::widgets::hint_box_always(&lines, w);
+}
+
+/// A snapshot scene's «?» pop-up pinned (`RAZDOR_SCENE_HELP=<row>`, the row's name as `Row` spells it).
+pub fn scene_help(row: &str) {
+    if let Some(text) = Row::ALL.iter().find(|r| format!("{r:?}") == row).and_then(|r| r.help_text()) {
+        HELP_PINNED.with(|p| p.set(Some(text)));
+    }
 }
 
 /// Whether two rectangles share a point.
@@ -3118,6 +3197,16 @@ mod tests {
     }
 
     /// The group buttons: five to a row when their labels fit, else three, else two.
+    /// The long hints sit behind a «?» (backlog 1508): the rows that have one, and no others.
+    #[test]
+    fn the_long_hints_are_behind_a_question_mark() {
+        let with: Vec<Row> = Row::ALL.into_iter().filter(|r| r.help_text().is_some()).collect();
+        assert_eq!(with, vec![Row::MapZoom, Row::MapEdge, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::Language, Row::Updates]);
+        scene_help("Experience");
+        assert_eq!(HELP_PINNED.with(|p| p.get()), Row::Experience.help_text());
+        HELP_PINNED.with(|p| p.set(None));
+    }
+
     #[test]
     fn the_group_buttons_take_five_three_or_two_to_a_row() {
         // A 60 px label needs 76 px with its pad: five fit in 500 (95 px each), three in 300.
