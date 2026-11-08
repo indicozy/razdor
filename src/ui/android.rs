@@ -426,6 +426,43 @@ pub fn hide_for_exit() {
 /// screen are not reported by every system, so the interface keeps this much from each edge.
 const CORNER_DP: f32 = 24.0;
 
+/// The system's language as a BCP 47 tag, `java.util.Locale.getDefault().toLanguageTag()` (e.g.
+/// "ru-RU"); None when the call fails or gives nothing. Read through the JNI and not through
+/// sys-locale's system properties: an app may not read `persist.sys.locale` (SELinux), and some
+/// global ROMs set `ro.product.locale` to en-US whatever the player's language is.
+pub fn read_locale() -> Option<String> {
+    // SAFETY: as in `density`; every reference made here is local and freed by `Local`.
+    unsafe { locale_tag(attach_jni_env()) }
+}
+
+/// See [`read_locale`]. Every failed call clears its Java exception and frees its references.
+///
+/// # Safety
+/// `env` is the JNI environment of the current thread.
+unsafe fn locale_tag(env: *mut sys::JNIEnv) -> Option<String> {
+    let locale_cls = class(env, "java/util/Locale");
+    if locale_cls.obj.is_null() || cleared(env) {
+        return None;
+    }
+    let get_default = method(env, locale_cls.obj, "getDefault", "()Ljava/util/Locale;", true);
+    if get_default.is_null() || cleared(env) {
+        return None;
+    }
+    let locale = Local::new(env, ((**env).CallStaticObjectMethod.unwrap())(env, locale_cls.obj, get_default));
+    if locale.obj.is_null() || cleared(env) {
+        return None;
+    }
+    let tag_m = method(env, locale_cls.obj, "toLanguageTag", "()Ljava/lang/String;", false);
+    if tag_m.is_null() || cleared(env) {
+        return None;
+    }
+    let tag = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, locale.obj, tag_m));
+    if cleared(env) {
+        return None;
+    }
+    razdor::jni::to_text(env, tag.obj).filter(|t| !t.trim().is_empty())
+}
+
 /// `Resources.getDisplayMetrics().density` (2.0 when it cannot be read).
 unsafe fn density(env: *mut sys::JNIEnv) -> f32 {
     let get = method(env, activity_class(env).obj, "getResources", "()Landroid/content/res/Resources;", false);

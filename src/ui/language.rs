@@ -177,9 +177,19 @@ pub fn lang_for_locale(locale: &str) -> Lang {
     if ["ru", "uk", "be", "kk"].iter().any(|l| primary.eq_ignore_ascii_case(l)) { Lang::Ru } else { Lang::En }
 }
 
-/// The system's interface language (`sys-locale`); English when the system's locale cannot be read.
+/// The system's interface language; English when the system's locale cannot be read.
 pub fn system_lang() -> Lang {
-    sys_locale::get_locale().map_or(Lang::En, |l| lang_for_locale(&l))
+    system_locale().map_or(Lang::En, |l| lang_for_locale(&l))
+}
+
+/// The system's locale: on Android the JNI's `Locale.getDefault()` (`ui::android::read_locale`),
+/// then `sys-locale` when that fails; `sys-locale` everywhere else.
+fn system_locale() -> Option<String> {
+    #[cfg(target_os = "android")]
+    if let Some(tag) = super::android::read_locale() {
+        return Some(tag);
+    }
+    sys_locale::get_locale()
 }
 
 /// The data language to start in from the saved code: "ru" Russian, "en" English (the codes
