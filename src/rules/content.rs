@@ -183,16 +183,19 @@ impl ExperimentalRules {
         Self { bless_once: true, undead_poison_immune: true, unlimited_spells: true, merchant_item: true, rear_service_flat: true, building_store: true, ..Self::default() }
     }
 
-    /// The six switches that hold Razdor's own former rules (the set
-    /// `before_the_rules_were_saved` turns on). The rules window's «Правила Раздора» row sets them
-    /// together; the other switches are extra experiments and are left alone.
-    const RAZDOR_PRESET: [fn(&mut Self) -> &mut bool; 6] = [
+    /// The «Правила Раздора» switches: the six that hold Razdor's own former rules (the set
+    /// `before_the_rules_were_saved` turns on) and Razdor's fixes of the original's gaps
+    /// (`death_curse_counter`). The owner's rule (2026-11-08): every Razdor QoL fix behind a
+    /// switch joins this preset. The rules window's «Правила Раздора» row sets them together;
+    /// the other switches are extra experiments and are left alone.
+    const RAZDOR_PRESET: [fn(&mut Self) -> &mut bool; 7] = [
         |r| &mut r.bless_once,
         |r| &mut r.undead_poison_immune,
         |r| &mut r.unlimited_spells,
         |r| &mut r.merchant_item,
         |r| &mut r.rear_service_flat,
         |r| &mut r.building_store,
+        |r| &mut r.death_curse_counter,
     ];
 
     /// Turns on the six «Правила Раздора» switches; the other switches stay as they are.
@@ -1015,7 +1018,7 @@ mod experimental_rules_save_tests {
         assert!(!rules.is_razdor_preset_on());
         rules.razdor_preset();
         assert!(rules.is_razdor_preset_on());
-        assert_eq!(rules, ExperimentalRules { fast_ai: true, free_units: true, ..ExperimentalRules::before_the_rules_were_saved() });
+        assert_eq!(rules, ExperimentalRules { fast_ai: true, free_units: true, death_curse_counter: true, ..ExperimentalRules::before_the_rules_were_saved() });
         rules.set_razdor_preset(false);
         assert_eq!(rules, ExperimentalRules { fast_ai: true, free_units: true, ..Default::default() });
         assert!(!rules.is_razdor_preset_on());
@@ -1030,7 +1033,8 @@ mod experimental_rules_save_tests {
         rules.set_razdor_preset(true);
         assert!(rules.is_razdor_preset_on() && rules.building_store);
         assert!(!ExperimentalRules::default().is_razdor_preset_on());
-        assert!(ExperimentalRules::before_the_rules_were_saved().is_razdor_preset_on());
+        // A save from before the rules were saved has the six former rules but not the newer fix.
+        assert!(!ExperimentalRules::before_the_rules_were_saved().is_razdor_preset_on());
     }
 
     /// Each of the five names the rules window and the scenario list's mark (`first_on`).
@@ -1072,8 +1076,8 @@ mod experimental_rules_save_tests {
 
     /// «Проклятие смерти при контрударе» (`death_curse_counter`, backlog 1467): off by default, in a
     /// new game, before the rules were saved, and in a save without its key (the original's rule).
-    /// Written as its own key; its name is the rules window's and the scenario mark's; it is not
-    /// one of the six preset switches.
+    /// Written as its own key; its name is the rules window's and the scenario mark's; the
+    /// «Правила Раздора» preset includes it.
     #[test]
     fn the_counter_curse_switch_is_off_without_its_key() {
         assert!(!ExperimentalRules::for_new_game().death_curse_counter);
@@ -1087,9 +1091,12 @@ mod experimental_rules_save_tests {
         assert_eq!(json["death_curse_counter"].as_bool(), Some(true));
         assert_eq!(serde_json::from_value::<ExperimentalRules>(json).unwrap(), on);
         assert_eq!(on.first_on(), Some("Death curse on counter blows"));
-        let mut preset_only = ExperimentalRules::before_the_rules_were_saved();
-        assert!(preset_only.is_razdor_preset_on() && !preset_only.death_curse_counter);
-        preset_only.set_razdor_preset(false);
-        assert!(!preset_only.death_curse_counter);
+        // The «Правила Раздора» row sets it with the others (the owner's rule: Razdor's fixes
+        // join the preset), and clears it with them.
+        let mut rules = ExperimentalRules::default();
+        rules.set_razdor_preset(true);
+        assert!(rules.is_razdor_preset_on() && rules.death_curse_counter);
+        rules.set_razdor_preset(false);
+        assert!(!rules.death_curse_counter);
     }
 }

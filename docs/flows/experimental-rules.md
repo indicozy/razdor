@@ -113,8 +113,7 @@ off).
   DeathCurse unit (or a Ghost under its condition, the same test as a normal kill) takes the
   striking unit with it: the answerer dies first, its remaining HP counted in its side's damage
   taken (`Battle::answer_kill`, `curse_takes`, `curse_kill`). Off (the original's rule, 48b49f and
-  48a3f0: no on-kill effects for a counter blow): the answerer survives. Not one of the six preset
-  switches. Old saves and settings files have no key and read it OFF. `battle.md`, «Counterblow».
+  48a3f0: no on-kill effects for a counter blow): the answerer survives. Part of the «Правила Раздора» preset (the owner's rule, 2026-11-08: Razdor's fixes join it). Old saves and settings files have no key and read it OFF. `battle.md`, «Counterblow».
 
 Saves: each switch is written as its own key. A save (or a `NextMap` hand-over) from before the five
 parity switches (or before `building_store`) has no key for them, and those read ON (`RulesWire`): the
@@ -220,7 +219,7 @@ keep the item and show the existing refusal. All equipment rules and potion limi
 The choice is remembered (the owner's yes, 2026-11-02): when the window closes (OK, Esc, Enter or its close button) and when a game starts, the fifteen switches are written to `settings.json` (`language::Settings::experimental_rules`, all off on an older file, and a switch whose key a file lacks is off, `remembered_rules`). `open_list` starts from them, so the scenario list's «Экспериментальные правила включены» label shows a remembered choice too.
 
 Opened from the scenario list's «Экспериментальные правила» button. Above the fifteen rows is a full-width
-«Правила Раздора» row with its hint line (`ExperimentalRules::razdor_preset` and `set_razdor_preset`, `is_razdor_preset_on`): on when all six parity switches (`bless_once`, `undead_poison_immune`, `unlimited_spells`, `merchant_item`, `rear_service_flat`, `building_store`) are on, and pressed it sets all six together (off when they are all on), leaving the other eight alone. The row and its hint scroll with the rows (the grid starts under them, `grid_top`). Its scale is `display::popup_o`
+«Правила Раздора» row with its hint line (`ExperimentalRules::razdor_preset` and `set_razdor_preset`, `is_razdor_preset_on`): on when all seven preset switches (the six parity switches `bless_once`, `undead_poison_immune`, `unlimited_spells`, `merchant_item`, `rear_service_flat`, `building_store`, and Razdor's fix `death_curse_counter`) are on, and pressed it sets all seven together (off when they are all on), leaving the other experiments alone. The owner's rule (2026-11-08): every Razdor QoL fix behind a switch joins the preset. The row and its hint scroll with the rows (the grid starts under them, `grid_top`). Its scale is `display::popup_o`
 fitted to the screen. Its fifteen rows and OK are touch targets (40 dp on a phone); its texts are one
 px per dp on a phone, grown with the text size (`button_grow`) and never under Normal; the hints
 wrap to its width and the window grows with them. The rows take one, two or three columns: the

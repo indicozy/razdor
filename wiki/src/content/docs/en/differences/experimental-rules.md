@@ -31,7 +31,7 @@ By default, for a new game, all fifteen are turned off. Your selection is rememb
 * **Store in your own buildings:** in your castle, fort or town with the hero in it, a "Store" tab shows the loot your garrison could not wear; a click puts the item into the hero's pack. Off (as in the original): no tab, the loot stays in the building.
 * **Death curse on counter blows:** when a counter blow or a preventive strike kills a fighter with a death curse (or a Ghost under its condition, as in a normal kill), the fighter who struck back dies too, and its remaining hit points count as its side's losses. Off (as in the original): a counter blow does not work like a normal kill, and the striker survives.
 
-The "Razdor's rules" row above the toggles turns on the last six Razdor rules at once (the six listed above) and leaves the other toggles as they are; "Death curse on counter blows" is not part of that row. The row shows on when all six are on; press it again to turn all six off. Afterwards each toggle can be switched on or off on its own.
+The "Razdor's rules" row above the toggles turns on at once all of Razdor's former rules and its fixes (the ones listed above, "Death curse on counter blows" included) and leaves the other toggles as they are. The row shows on when all of them are on; press it again to turn them all off. Afterwards each toggle can be switched on or off on its own.
 
 On a phone, when the window does not fit, the list of toggles scrolls.
 
