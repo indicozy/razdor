@@ -186,8 +186,7 @@ local! {
 /// An oval button: the violet swirl, the frame (gold under the mouse) and its word. Returns
 /// true when clicked.
 fn oval(i: usize, label: &str, hot: Option<usize>) -> bool {
-    let upright = upright_dp().is_some();
-    let k = chrome::k() * if upright { PORTRAIT_SCALE } else { 1.0 };
+    let k = chrome::k() * upright_menu().map_or(1.0, |m| m.scale);
     let r = oval_rect(i);
     let c = r.center();
     let size = OVAL * k;
@@ -516,6 +515,8 @@ struct PortraitMenu {
     /// The chips' row: its top and height (a touch target of at least [`TOUCH_DP`]).
     chip_top: f32,
     chip_h: f32,
+    /// The four links, left to right (upright) or top to bottom (sideways, the stack).
+    chips: [Rect; 4],
     /// The baseline of the foot lines' bottom row (the version and copyright), just above the chips.
     foot_y: f32,
     /// The height the foot's lines take above `foot_y` (a copyright too wide for the screen goes on
@@ -526,6 +527,9 @@ struct PortraitMenu {
     /// The chosen mod's full-width tile, above the four tiles, when a mod is installed (its height
     /// and gap lift the foot lines and the button column; see [`portrait_menu`]).
     mod_row: Option<Rect>,
+    /// The ovals' scale over the landscape size: [`PORTRAIT_SCALE`] held upright, less sideways
+    /// when five ovals in one row would not fit the width (`landscape_menu`).
+    scale: f32,
 }
 
 impl PortraitMenu {
@@ -583,7 +587,48 @@ fn portrait_menu(sw: f32, sh: f32, k: f32, dp: f32, safe_top: f32, mod_row: bool
     let safe = super::display::safe_area();
     let foot_x = foot_x0(k, foot_y, VERSION_PHONE_DP * dp, sh, &safe);
     let foot_above = foot(k, dp, sw, foot_x).above();
-    PortraitMenu { buttons, chip_top, chip_h, foot_y, foot_above, logo_top, mod_row: row }
+    let margin = CHIP_MARGIN_DP * dp;
+    let gap = CHIP_GAP_DP * dp;
+    let w = (sw - 2.0 * margin - 3.0 * gap) / 4.0;
+    let chips = std::array::from_fn(|j| Rect::new(margin + j as f32 * (w + gap), chip_top, w, chip_h));
+    PortraitMenu { buttons, chip_top, chip_h, chips, foot_y, foot_above, logo_top, mod_row: row, scale: PORTRAIT_SCALE }
+}
+
+/// The menu held sideways on a phone (`dp` screen px per dp, `safe_top` as `portrait_menu`): the
+/// five ovals stay in the original's column (`landscape_buttons`, unchanged), the logo and the
+/// foot lines stay where the landscape menu puts them, and the four links are big tiles stacked
+/// down the right edge (the owner's choice, 2026-11-09). The stack starts right of the logo and
+/// the column, ends above the version line, and each tile is [`TILE_DP`] tall or less to fit
+/// (never under [`TOUCH_DP`]). With a mod installed its tile is the first of the stack.
+fn landscape_menu(sw: f32, sh: f32, k: f32, dp: f32, safe_top: f32, mod_row: bool) -> PortraitMenu {
+    let safe = super::display::safe_area();
+    let margin = CHIP_MARGIN_DP * dp;
+    let gap = CHIP_GAP_DP * dp;
+    let buttons = landscape_buttons(sw, sh, k);
+    let column_right = buttons.iter().map(|r| r.x + r.w).fold(f32::MIN, f32::max);
+    // The logo as `logo` draws it: 840 k wide, its letters 25 k right of the centre.
+    let logo_w = 840.0 * k;
+    let logo_top = chrome::centred_top(sw, sh, 720.0 * k) + 50.0 * k;
+    let logo_right = sw / 2.0 - logo_w / 2.0 + 25.0 * k + logo_w;
+    // The foot lines at the bottom, the version line above them (as the landscape foot draws them).
+    let foot_y = sh - 4.0 * k;
+    let foot_above = foot(k, dp, sw, foot_x0(k, foot_y, VERSION_PHONE_DP * dp, sh, &safe)).above();
+    let version_y = foot_y - 24.0 * k - foot_above;
+    // The stack: from the top safe inset to just above the version line, right of the logo and the column.
+    // Half of the room right of the logo and the column (the owner, 2026-11-09), kept at the right edge.
+    let right = sw - safe.right - margin;
+    let room = right - (logo_right.max(column_right) + gap);
+    let left = right - room / 2.0;
+    let top = safe_top + 8.0 * k;
+    let bottom = version_y - VERSION_PHONE_DP * dp - 12.0 * k;
+    let n = if mod_row { 5.0 } else { 4.0 };
+    let tile_h = (TILE_DP * dp).min((bottom - top - (n - 1.0) * gap) / n);
+    let total = n * tile_h + (n - 1.0) * gap;
+    let first = top + ((bottom - top) - total) / 2.0;
+    let row = mod_row.then(|| Rect::new(left, first, right - left, tile_h));
+    let chips_top = first + if mod_row { tile_h + gap } else { 0.0 };
+    let chips = std::array::from_fn(|j| Rect::new(left, chips_top + j as f32 * (tile_h + gap), right - left, tile_h));
+    PortraitMenu { buttons, chip_top: chips_top, chip_h: tile_h, chips, foot_y, foot_above, logo_top, mod_row: row, scale: 1.0 }
 }
 
 local! {
@@ -593,6 +638,9 @@ local! {
     /// The space the not-found block takes above the upright menu's logo, as this frame draws it
     /// (`screens::upright_reserve`; zero when an install is found).
     static BLOCK_RESERVE: Cell<f32> = const { Cell::new(0.0) };
+    /// The main menu is being drawn sideways on a phone with the tile layout (`frame`): only this
+    /// frame's logo, foot and buttons take it; the other screens' backdrops keep the corner links.
+    static SIDE_TILES: Cell<bool> = const { Cell::new(false) };
 }
 
 /// The top of the footer lines (the version and copyright row) of the portrait menu on a `sw` ×
@@ -601,11 +649,16 @@ pub fn portrait_foot_top(sw: f32, sh: f32, k: f32, dp: f32, safe_top: f32) -> f3
     portrait_menu(sw, sh, k, dp, safe_top, MOD_ROW.with(Cell::get), BLOCK_RESERVE.with(Cell::get)).foot_y
 }
 
-/// The current menu's portrait geometry, when the phone is held upright.
+/// The current menu's tile geometry on a phone: held upright, or sideways while `frame` draws the
+/// tile layout there (`SIDE_TILES`). None on the desktop and on the other screens' backdrops.
 fn upright_menu() -> Option<PortraitMenu> {
-    let dp = upright_dp()?;
+    let dp = super::display::dp_px()?;
+    let (sw, sh) = (screen_width(), screen_height());
     let safe_top = super::display::safe_area().top;
-    Some(portrait_menu(screen_width(), screen_height(), chrome::k(), dp, safe_top, MOD_ROW.with(Cell::get), BLOCK_RESERVE.with(Cell::get)))
+    if sh > sw {
+        return Some(portrait_menu(sw, sh, chrome::k(), dp, safe_top, MOD_ROW.with(Cell::get), BLOCK_RESERVE.with(Cell::get)));
+    }
+    SIDE_TILES.with(Cell::get).then(|| landscape_menu(sw, sh, chrome::k(), dp, safe_top, MOD_ROW.with(Cell::get)))
 }
 
 /// The screen rectangle of oval button `i`.
@@ -671,6 +724,10 @@ pub fn frame(no_install: bool, mods: &[(String, razdor::hub::Text)], active: Opt
     // The mod row is held only with a mod installed, as the menu draws it below.
     MOD_ROW.with(|m| m.set(!mods.is_empty()));
     BLOCK_RESERVE.with(|r| r.set(if no_install { super::screens::upright_reserve(chrome::k()) } else { 0.0 }));
+    // Sideways on a phone the menu takes the tile layout, unless the not-found block needs the
+    // left column (no install): then the corner links stay, as before.
+    let sideways = screen_width() > screen_height() && super::display::dp_px().is_some();
+    SIDE_TILES.with(|t| t.set(sideways && !no_install));
     let mod_choice = (!mods.is_empty()).then(|| super::new_game::mod_choice(mods, active, busy));
     backdrop();
     let mut pick = None;
@@ -719,6 +776,7 @@ pub fn frame(no_install: bool, mods: &[(String, razdor::hub::Text)], active: Opt
     if key(KeyCode::Escape) && !crate::ui::input::pad_key_pressed(KeyCode::Escape) {
         pick = Some(Pick::Exit);
     }
+    SIDE_TILES.with(|t| t.set(false));
     pick
 }
 
@@ -771,40 +829,45 @@ fn corner_links(k: f32, mods: &[(String, razdor::hub::Text)], mod_choice: Option
 /// tile is a touch target of [`TILE_DP`] high. The language tile opens the list above the bar.
 fn chip_links(m: &PortraitMenu, k: f32, mods: &[(String, razdor::hub::Text)], mod_choice: Option<&super::new_game::ModChoice>) -> Option<Pick> {
     let mut pick = None;
-    let dp = upright_dp().unwrap_or(1.0);
+    let dp = super::display::dp_px().unwrap_or(1.0);
     let lang = super::language::current_label();
     let labels: [&str; 4] = [tr("Custom battle"), tr("Maps and mods"), "Discord", &lang];
     // The game bar's icons (`button-icon-N`): 6 the crossed swords, 8 the map; the Discord and
     // language tiles have no icon in the install and show their label alone.
     let icons: [Option<&str>; 4] = [Some("button-icon-6"), Some("button-icon-8"), None, None];
-    let margin = CHIP_MARGIN_DP * dp;
-    let gap = CHIP_GAP_DP * dp;
-    let w = (screen_width() - 2.0 * margin - 3.0 * gap) / 4.0;
+    let w = m.chips[0].w;
     let marble = chrome::win("Win-marble");
+    // Sideways the tiles are narrow: the labels keep their size and wrap inside the tile (`label_lines`).
+    let wrap = screen_width() > screen_height();
     // One size for all four labels (grown by `button_grow`): the largest that fits the widest one.
     let size = super::dt_font::legacy_metrics_if(true, || {
         let base = 14.0 * dp * super::display::button_grow();
+        if wrap {
+            return base;
+        }
         labels.iter().fold(base, |size, l| {
             let tw = measure(l, size).width;
             if tw > w - 8.0 * dp { size * (w - 8.0 * dp) / tw } else { size }
         })
     });
     // The chosen mod's full-width tile above the four: the same size as their labels, shrunk only
-    // if its text is wider than the row (a mod's title can be long).
+    // if its text is wider than the row (a mod's title can be long); sideways it wraps instead.
     if let (Some(mc), Some(row)) = (mod_choice, m.mod_row) {
         let label = mc.shown();
         let fit = super::dt_font::legacy_metrics_if(true, || {
             let tw = measure(label, size).width;
             let room = row.w - 8.0 * dp;
-            if tw > room { size * room / tw } else { size }
+            if wrap || tw <= room { size } else { size * room / tw }
         });
-        let pressed = chip_tile(row, k, dp, label, fit, None, marble.as_ref());
+        let lines = super::dt_font::legacy_metrics_if(true, || label_lines(label, row.w - 8.0 * dp, fit, wrap));
+        let pressed = chip_tile(row, k, dp, &lines, fit, None, marble.as_ref());
         mod_link_action(row, pressed, mods, mc, k);
     }
     let (mut lang_tile, mut lang_pressed) = (Rect::new(0.0, 0.0, 0.0, 0.0), false);
     for (j, label) in labels.iter().enumerate() {
-        let r = Rect::new(margin + j as f32 * (w + gap), m.chip_top, w, m.chip_h);
-        let pressed = chip_tile(r, k, dp, label, size, icons[j], marble.as_ref());
+        let r = m.chips[j];
+        let lines = super::dt_font::legacy_metrics_if(true, || label_lines(label, r.w - 8.0 * dp, size, wrap));
+        let pressed = chip_tile(r, k, dp, &lines, size, icons[j], marble.as_ref());
         match j {
             0 if pressed => pick = Some(Pick::Custom),
             1 if pressed => pick = Some(Pick::Hub),
@@ -822,9 +885,16 @@ fn chip_links(m: &PortraitMenu, k: f32, mods: &[(String, razdor::hub::Text)], mo
     pick
 }
 
-/// One marble tile of the bottom bar held upright, at `r`, with its label (and the game bar's icon
-/// `icon`, when the install has it). Returns whether it was pressed this frame.
-fn chip_tile(r: Rect, k: f32, dp: f32, label: &str, size: f32, icon: Option<&str>, marble: Option<&Texture2D>) -> bool {
+/// The lines of a tile's label within `room` px: one line, or (`wrap`, sideways) the words wrapped
+/// so that no line is wider than `room`. A word wider than the room stays whole (never cut).
+fn label_lines(label: &str, room: f32, size: f32, wrap: bool) -> Vec<String> {
+    if wrap { wrap_label(label, room, size) } else { vec![label.to_string()] }
+}
+
+/// One marble tile of the bottom bar, at `r`, with its label lines (`label_lines`) and the game
+/// bar's icon `icon`, when the install has it. Two lines take a smaller icon above them. Returns
+/// whether it was pressed this frame.
+fn chip_tile(r: Rect, k: f32, dp: f32, lines: &[String], size: f32, icon: Option<&str>, marble: Option<&Texture2D>) -> bool {
     let (hover, down, pressed) = super::widgets::button_state(r, true);
     // The marble tile, its silver edge and the gold when the pointer is on it.
     match marble {
@@ -836,18 +906,26 @@ fn chip_tile(r: Rect, k: f32, dp: f32, label: &str, size: f32, icon: Option<&str
     let color = if down || hover { chrome::GOLD } else { Color::new(0.95, 0.88, 0.72, 1.0) };
     // The label is drawn at its own size, not snapped to the original's bitmap sizes (phones).
     super::dt_font::legacy_metrics_if(true, || {
-        let tw = measure(label, size).width;
-        let text_y = match icon.and_then(|n| chrome::win_fx(n, Fx::Glow)) {
-            Some(t) => {
-                let ih = 28.0 * dp;
-                let iw = t.width() * ih / t.height();
-                chrome::tex(&t, Rect::new(r.x + (r.w - iw) / 2.0, r.y + 7.0 * dp, iw, ih), WHITE);
-                r.y + r.h - 9.0 * dp
-            }
-            // Without an icon the label is centred in the tile.
-            None => r.y + r.h / 2.0 + size * 0.35,
-        };
-        chrome::shadow_text(label, r.x + (r.w - tw) / 2.0, text_y, size, color);
+        let n = lines.len() as f32;
+        let wrapped = lines.len() > 1;
+        let pitch = size * 1.2;
+        // With an icon, the last line sits on the tile's bottom; the lines above it.
+        let last_base = icon.and_then(|name| chrome::win_fx(name, Fx::Glow)).map(|t| {
+            let ih = if wrapped { 22.0 * dp } else { 28.0 * dp };
+            let iw = t.width() * ih / t.height();
+            let top = if wrapped { 4.0 * dp } else { 7.0 * dp };
+            chrome::tex(&t, Rect::new(r.x + (r.w - iw) / 2.0, r.y + top, iw, ih), WHITE);
+            r.y + r.h - if wrapped { 6.0 * dp } else { 9.0 * dp }
+        });
+        for (i, line) in lines.iter().enumerate() {
+            let tw = measure(line, size).width;
+            let y = match last_base {
+                Some(last) => last - pitch * (n - 1.0 - i as f32),
+                // Without an icon the lines are centred in the tile (one line: as before).
+                None => r.y + r.h / 2.0 - (pitch * (n - 1.0) + size) / 2.0 + size * 0.85 + pitch * i as f32,
+            };
+            chrome::shadow_text(line, r.x + (r.w - tw) / 2.0, y, size, color);
+        }
     });
     if pressed {
         cue(Cue::Button);
@@ -3225,6 +3303,37 @@ mod tests {
         for pair in rects.windows(2) {
             assert!(close(pair[1].y - pair[0].y, 92.0 * k), "pitch of the column");
             assert!(close(pair[0].y + pair[0].h - pair[1].y, 20.0 * k), "the 20 px overlap");
+        }
+    }
+
+    #[test]
+    fn sideways_tiles_are_a_stack_on_the_right_beside_the_original_column() {
+        // The two phones of the mobile check, held sideways (2400×1080 at 2.75, 3120×1440 at 3.5).
+        for (sw, sh, dp, k) in [(2400.0, 1080.0, 2.75, 1.5), (3120.0, 1440.0, 3.5, 2.0)] {
+            for mod_row in [false, true] {
+                let m = landscape_menu(sw, sh, k, dp, 0.0, mod_row);
+                // The five ovals are the original's column, unchanged.
+                assert!(m.buttons == landscape_buttons(sw, sh, k), "the column as before");
+                assert!(m.scale == 1.0, "the ovals keep their size");
+                let column_right = m.buttons[0].x + m.buttons[0].w;
+                // The logo's right edge, as `logo` draws it.
+                let logo_right = sw / 2.0 - 420.0 * k + 25.0 * k + 840.0 * k;
+                let version_y = m.version_y(k);
+                let mut tiles: Vec<Rect> = m.mod_row.into_iter().collect();
+                tiles.extend(m.chips);
+                assert_eq!(tiles.len(), if mod_row { 5 } else { 4 });
+                for (i, t) in tiles.iter().enumerate() {
+                    assert!(t.h >= 48.0 * dp, "a touch target of 48 dp: {t:?}");
+                    assert!(t.x >= column_right && t.x >= logo_right, "clear of the column and the logo: {t:?}");
+                    assert!(t.x + t.w <= sw - 12.0 * dp + 1e-3, "on the screen, the margin kept: {t:?}");
+                    assert!(t.y >= 0.0 && t.y + t.h <= version_y - 12.0 * k, "above the version line: {t:?}");
+                    if i > 0 {
+                        assert!(t.y >= tiles[i - 1].y + tiles[i - 1].h - 1e-3, "stacked, not overlapping");
+                    }
+                }
+                assert!(tiles.windows(2).all(|p| close(p[0].x, p[1].x) && close(p[0].w, p[1].w)), "one column of tiles");
+                assert!(close(m.logo_top, chrome::centred_top(sw, sh, 720.0 * k) + 50.0 * k), "the logo as before");
+            }
         }
     }
 
