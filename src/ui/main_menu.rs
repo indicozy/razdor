@@ -1715,10 +1715,10 @@ impl RowGeo {
         RowGeo { k, row_h: 28.0 * k * g, gap: 8.0 * k, size: 14.0 * k, lh: 17.0 * k, min_w: 170.0 * k, btn_size: None }
     }
 
-    /// The phone's, in dp (`k` px per dp): 36 dp rows grown by the text size, never under 40 dp;
-    /// 16.5 sp labels and hints.
+    /// The phone's, in dp (`k` px per dp): 36 dp rows grown by the text size, never under 48 dp
+    /// (Android's minimum; backlog 1509); 16.5 sp labels and hints.
     fn phone(k: f32, g: f32) -> RowGeo {
-        RowGeo { k, row_h: (36.0 * g).max(40.0) * k, gap: 8.0 * k, size: 16.5 * k, lh: 20.0 * k, min_w: 120.0 * k, btn_size: Some(16.5 * k) }
+        RowGeo { k, row_h: (36.0 * g).max(48.0) * k, gap: 8.0 * k, size: 16.5 * k, lh: 20.0 * k, min_w: 120.0 * k, btn_size: Some(16.5 * k) }
     }
 }
 
@@ -1744,9 +1744,12 @@ fn button_draw(r: Rect, label: &str, size: Option<f32>) -> bool {
 }
 
 /// A button in a group window's scroll view: drawn where it shows, clicked only where it shows.
+/// On a phone (`size` given) a button only partly in the view is neither drawn nor clicked: the
+/// view's cut does not reach a button's art (backlog 1509; the frame ignores the scissor, so it
+/// showed under «Ок»).
 fn scroll_button(r: Rect, label: &str, size: Option<f32>) -> bool {
     if let Some(view) = ADV_VIEW.with(|v| v.get()) {
-        if !overlaps(r, view) {
+        if !overlaps(r, view) || (size.is_some() && !inside(r, view)) {
             return false;
         }
         let pressed = button_draw(r, label, size);
@@ -1860,7 +1863,9 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
             let value_w = measure(&value, geo.size).width;
             let track = Rect::new(c.x, c.y, (c.w - value_w - 12.0 * geo.k).max(60.0 * geo.k), 32.0 * geo.k);
             chrome::shadow_text(&value, track.x + track.w + 8.0 * geo.k, track.y + 21.0 * geo.k, geo.size, chrome::GOLD);
-            if let Some(v) = slider(track, (audio.map_zoom - lo) / (hi - lo)).filter(|_| in_adv_view(track)) {
+            // On a phone a slider only partly in the scroll view is neither drawn nor moved (as its buttons).
+            let shown = geo.btn_size.is_none() || ADV_VIEW.with(|v| v.get()).is_none_or(|view| inside(track, view));
+            if let Some(v) = shown.then(|| slider(track, (audio.map_zoom - lo) / (hi - lo))).flatten().filter(|_| in_adv_view(track)) {
                 audio.map_zoom = ((lo + v * (hi - lo)) / 0.05).round() * 0.05;
             }
             c.y += track.h + geo.gap;
@@ -2084,7 +2089,8 @@ fn group_window(audio: &mut super::audio::Settings, over_map: bool, group: Group
             let (sw, sh) = (screen_width(), screen_height());
             let safe = super::display::safe_area();
             let top = safe.top + 8.0 * k;
-            let bottom = if over_map { sh - chrome::bar_height() - 8.0 * k } else { window_layout::title_bottom() - 8.0 * k };
+            // The bar's real height (sideways it grows with the bar's size; upright it is the same).
+            let bottom = if over_map { sh - chrome::bar_top_height() - 8.0 * k } else { window_layout::title_bottom() - 8.0 * k };
             // On a phone the window keeps clear margins (as PHONE_WINDOW_SHRINK).
             let w = ((sw - safe.left - safe.right) * PHONE_WINDOW_SHRINK).min(900.0 * k);
             let h = (bottom - top) * PHONE_WINDOW_SHRINK;
@@ -2133,11 +2139,14 @@ fn group_window(audio: &mut super::audio::Settings, over_map: bool, group: Group
     ADV_VIEW.with(|v| v.set(Some(view)));
     let top = inner.y - scroll;
     let mut c = RowCol { x: inner.x + pad, w: inner.w - 2.0 * pad - 28.0 * list_k, y: top + pad };
-    for row in group.rows() {
-        if row.shown(audio) {
-            draw_row(*row, &mut c, &geo, audio, over_map);
+    // A phone's labels and hints take their requested size under every font (backlog 1509).
+    super::dt_font::legacy_metrics_if(on_phone, || {
+        for row in group.rows() {
+            if row.shown(audio) {
+                draw_row(*row, &mut c, &geo, audio, over_map);
+            }
         }
-    }
+    });
     let content_bottom = c.y;
     phone_clip(None);
     ADV_VIEW.with(|v| v.set(None));
@@ -2160,10 +2169,14 @@ fn group_window(audio: &mut super::audio::Settings, over_map: bool, group: Group
 /// wrapped to its width. On a phone it is 80% of the screen's width (420 dp at most).
 fn help_popup(text: &str, k: f32, phone: bool) {
     let w = if phone { (screen_width() * 0.8).min(420.0 * k) } else { 340.0 * k };
-    let size = super::typography::Role::Hint.size(17.0 * k);
-    let lines = super::typography::Role::Hint.with(|| wrap(text, w - 16.0 * k, size));
-    let lines: Vec<(String, Color)> = lines.into_iter().map(|l| (l, chrome::CREAM)).collect();
-    super::widgets::hint_box_always(&lines, w);
+    // On a phone the text takes its requested size under «Как в оригинале» too (backlog 1509: the
+    // font sheet's native size read 12.9 sp); the desktop keeps the native size.
+    super::dt_font::legacy_metrics_if(phone, || {
+        let size = super::typography::Role::Hint.size(17.0 * k);
+        let lines = super::typography::Role::Hint.with(|| wrap(text, w - 16.0 * k, size));
+        let lines: Vec<(String, Color)> = lines.into_iter().map(|l| (l, chrome::CREAM)).collect();
+        super::widgets::hint_box_always(&lines, w);
+    });
 }
 
 /// A snapshot scene's «?» pop-up pinned (`RAZDOR_SCENE_HELP=<row>`, the row's name as `Row` spells it).
@@ -2176,6 +2189,11 @@ pub fn scene_help(row: &str) {
 /// Whether two rectangles share a point.
 fn overlaps(a: Rect, b: Rect) -> bool {
     a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+}
+
+/// Whether `r` lies wholly inside `view`.
+fn inside(r: Rect, view: Rect) -> bool {
+    r.x >= view.x && r.y >= view.y && r.x + r.w <= view.x + view.w && r.y + r.h <= view.y + view.h
 }
 
 /// Whether the point is inside the rectangle.
@@ -2378,11 +2396,27 @@ fn keys_layout(g: f32) -> (f32, f32, f32) {
     (pitch, row_h, height)
 }
 
-/// The keys window on a phone held upright (the owner's notes, 2026-11-02; Razdor's own, not in the
-/// original): it takes the phone's width and is laid out in dp (`dp` px per dp, so one unit is one
-/// dp and a 14 px label is 14 sp). Two columns of actions, each with its key button (52 × 44 dp),
-/// the hint under the rows, «По умолчанию» and «Ok» (44 dp) at the bottom. A label that takes more
-/// than two lines is set at 13 sp, else 12 sp. The desktop keeps [`keys_window`]'s layout.
+// The keys window's scroll on a phone, in dp (sideways the rows run past the window's height).
+local! {
+    static KEYS_SCROLL: std::cell::Cell<f32> = const { std::cell::Cell::new(0.0) };
+}
+
+/// A key button of the phone keys window: in its scroll view (`view`, when the rows scroll) it is
+/// drawn and clicked only when it lies wholly in the view (backlog 1509, as [`scroll_button`]).
+fn key_button(r: Rect, label: &str, view: Option<Rect>) -> bool {
+    if view.is_some_and(|v| !inside(r, v)) {
+        return false;
+    }
+    settings_button(r, label)
+}
+
+/// The keys window on a phone (the owner's notes, 2026-11-02; Razdor's own, not in the original):
+/// it takes the phone's width and is laid out in dp (`dp` px per dp, so one unit is one dp and a 14
+/// px label is 14 sp). Two columns of actions, each with its key button (52 × 44 dp), the hint under
+/// the rows, «По умолчанию» and «Ok» (44 dp) at the bottom. A label that takes more than two lines is
+/// set at 13 sp, else 12 sp. Where the window is shorter than its rows (a phone held sideways, backlog
+/// 1509), the rows and the hint scroll above the bottom buttons, between the bar and the top. The
+/// desktop keeps [`keys_window`]'s layout.
 fn keys_window_upright(audio: &mut super::audio::Settings, over_map: bool, dp: f32) -> bool {
     let _scale = super::display::enter_window_scale(Some(dp));
     let k = chrome::k();
@@ -2400,23 +2434,49 @@ fn keys_window_upright(audio: &mut super::audio::Settings, over_map: bool, dp: f
     let hint_h = hint_lines.len().max(1) as f32 * 19.0 * k;
     let content = 10.0 * k + rows_h + 12.0 * k + hint_h + 12.0 * k + bh + 10.0 * k;
     let h = content + 44.0 * k;
-    // Between the top inset and the bottom bar (over the map) or the title screen's footer.
+    // Between the top inset and the bottom bar (over the map) or the title screen's footer. The bar's
+    // real height: sideways it grows with the bar's size (backlog 1509), upright it is the same.
     let safe = super::display::safe_area();
     let top = safe.top + 8.0 * k;
-    let bottom = if over_map { sh - chrome::bar_height() - 8.0 * k } else { window_layout::title_bottom() - 8.0 * k };
+    let bottom = if over_map { sh - chrome::bar_top_height() - 8.0 * k } else { window_layout::title_bottom() - 8.0 * k };
+    // Where the window is shorter than its rows, they scroll above «По умолчанию» and «Ок»; where
+    // they fit (upright, as before), nothing scrolls.
+    let scrolls = h > bottom - top;
     let h = h.min(bottom - top);
     let y = top + ((bottom - top - h) / 2.0).max(0.0);
     let (inner, closed) = chrome::window(Rect::new(margin, y, w, h), tr("Keys"), chrome::Skin::Marble, true);
+    let by = inner.bottom() - 10.0 * k - bh;
+    let view = scrolls.then(|| Rect::new(inner.x, inner.y, inner.w, by - 8.0 * k - inner.y));
+    // At the most, the hint's last line stands 4 dp above the view's bottom.
+    let rows_end = inner.y + 10.0 * k + rows_h + 12.0 * k + hint_h;
+    let most = view.map_or(0.0, |v| (rows_end - (v.bottom() - 4.0 * k)).max(0.0));
+    let mut scroll = KEYS_SCROLL.with(|s| s.get()).clamp(0.0, most);
+    if let Some(v) = view.filter(|_| most > 0.0) {
+        super::widgets::swipe_rows(v, 40.0 * k);
+        if crate::ui::widgets::mouse_in(v.x, v.y, v.w, v.h) {
+            scroll = (scroll - wheel() * 40.0 * k).clamp(0.0, most);
+        }
+        let bar = Rect::new(inner.x + inner.w - 28.0 * k, inner.y, 24.0 * k, v.h);
+        super::widgets::scrollbar_px(bar, &mut scroll, most, v.h, 40.0 * k);
+    }
+    KEYS_SCROLL.with(|s| s.set(scroll));
+    let rows_top = inner.y - scroll;
     let waiting = keymap::listening();
     let was_waiting = waiting.is_some();
     let col_gap = 12.0 * k;
-    let col_w = (inner.w - 20.0 * k - col_gap) / 2.0;
+    // The scroll bar's room on the right, only where the rows scroll.
+    let reserve = if view.is_some() { 28.0 * k } else { 0.0 };
+    let col_w = (inner.w - 20.0 * k - reserve - col_gap) / 2.0;
     let key_w = 52.0 * k;
     let mut started = false;
+    // The rows' labels and hint are cut at the scroll view's edges (the phone's scissor).
+    if view.is_some() {
+        phone_clip(view);
+    }
     super::dt_font::legacy_metrics_if(true, || {
         for (i, a) in keymap::ALL.into_iter().enumerate() {
             let x = inner.x + 10.0 * k + (i / 9) as f32 * (col_w + col_gap);
-            let y = inner.y + 10.0 * k + (i % 9) as f32 * pitch;
+            let y = rows_top + 10.0 * k + (i % 9) as f32 * pitch;
             let (size, lines) = upright_label(tr(a.label()), col_w - key_w - 8.0 * k, k);
             if lines.len() == 1 {
                 text_fit(&lines[0], x, y + row_h / 2.0 + size * 0.35, col_w - key_w - 8.0 * k, size, chrome::CREAM);
@@ -2430,21 +2490,23 @@ fn keys_window_upright(audio: &mut super::audio::Settings, over_map: bool, dp: f
     });
     for (i, a) in keymap::ALL.into_iter().enumerate() {
         let x = inner.x + 10.0 * k + (i / 9) as f32 * (col_w + col_gap);
-        let y = inner.y + 10.0 * k + (i % 9) as f32 * pitch;
+        let y = rows_top + 10.0 * k + (i % 9) as f32 * pitch;
         let br = Rect::new(x + col_w - key_w, y, key_w, row_h);
         let shown = if waiting == Some(a) { tr("press a key…").to_string() } else { keymap::display(keymap::key(a)) };
-        if row_button(br, &shown) && waiting != Some(a) {
+        if key_button(br, &shown, view) && waiting != Some(a) {
             keymap::listen(Some(a));
             started = true;
         }
     }
     super::dt_font::legacy_metrics_if(true, || {
         for (n, line) in hint_lines.iter().enumerate() {
-            chrome::shadow_text(line, inner.x + 10.0 * k, inner.y + 10.0 * k + rows_h + 12.0 * k + hint_size * 0.85 + n as f32 * 19.0 * k, hint_size, WHITE);
+            chrome::shadow_text(line, inner.x + 10.0 * k, rows_top + 10.0 * k + rows_h + 12.0 * k + hint_size * 0.85 + n as f32 * 19.0 * k, hint_size, WHITE);
         }
     });
     take_new_key(audio, waiting, started);
-    let by = inner.bottom() - 10.0 * k - bh;
+    if view.is_some() {
+        phone_clip(None);
+    }
     let ok_w = 120.0 * k;
     let defaults = Rect::new(inner.x + 10.0 * k, by, inner.w - 20.0 * k - ok_w - 10.0 * k, bh);
     let ok = Rect::new(inner.right() - 10.0 * k - ok_w, by, ok_w, bh);
@@ -2453,7 +2515,11 @@ fn keys_window_upright(audio: &mut super::audio::Settings, over_map: bool, dp: f
     }
     let ok_label = own("Buttons", "Ok", n_("OK"));
     let ok_pressed = settings_button(ok, &ok_label);
-    closed || ok_pressed || (!was_waiting && key(KeyCode::Escape))
+    let done = closed || ok_pressed || (!was_waiting && key(KeyCode::Escape));
+    if done {
+        KEYS_SCROLL.with(|s| s.set(0.0));
+    }
+    done
 }
 
 /// A key action's label on a phone's keys window: 14 px (sp at one unit per dp), set at 13 or 12
@@ -2497,7 +2563,8 @@ fn reset_keys(audio: &mut super::audio::Settings) {
 }
 
 fn keys_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
-    if let Some(dp) = super::display::dp_px().filter(|_| window_layout::portrait()) {
+    // A phone takes the phone layout in both orientations (backlog 1509: sideways its rows scroll).
+    if let Some(dp) = super::display::dp_px() {
         return keys_window_upright(audio, over_map, dp);
     }
     // The rows grow with the text size, unless that only makes the window's scale smaller (a phone

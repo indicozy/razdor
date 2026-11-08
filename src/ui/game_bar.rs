@@ -547,9 +547,14 @@ fn time_lines(game: &Game) -> Vec<(String, Color)> {
     lines
 }
 
+/// The smallest share of the bar's scale the date pane's stacked lines shrink to (backlog 1509: the
+/// large bar's narrow pane stacked the date to four lines, which at the old 70 % floor still rose
+/// above the bar's row and over the buttons).
+const DATE_MIN_SCALE: f32 = 0.5;
+
 /// The date pane's lines wrapped to `room` px, at the window scale `k` or, when they do not stack
-/// in `height` px, at a smaller one (never under 70 %): the date is never cut off. Returns the
-/// wrapped lines and the scale they take.
+/// in `height` px, at a smaller one (never under [`DATE_MIN_SCALE`]): the date stays in its pane.
+/// Returns the wrapped lines and the scale they take.
 fn stack_time(lines: &[(String, Color)], room: f32, k: f32, height: f32) -> (Vec<(String, Color)>, f32) {
     let mut kt = k;
     loop {
@@ -560,7 +565,7 @@ fn stack_time(lines: &[(String, Color)], room: f32, k: f32, height: f32) -> (Vec
             });
             (out, super::typography::Role::Bold.line_height(size * 1.25))
         });
-        if out.len() as f32 * lh <= height || kt <= k * 0.7 {
+        if out.len() as f32 * lh <= height || kt <= k * DATE_MIN_SCALE {
             return (out, kt);
         }
         kt *= 0.97;
