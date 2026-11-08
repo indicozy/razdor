@@ -765,7 +765,7 @@ keeping the base's spelling (`Data/Units.ini` replaced by `data/units.ini`); a f
 added. A link is removed before its file is replaced, so the base is never written. The build goes into
 `game.tmp/` and is renamed into place; `stamp.json` in the folder holds the base path, a digest of the
 base's names, sizes and times, the mod's version and the SHA-256 of each mod file, and a folder whose
-stamp differs is rebuilt (a reinstall, a changed base or file list). The stamp also holds a digest of the folder's own files (`game_fingerprint`: names and sizes), so a folder that lost a file (an antivirus) is built again from the mod's files. `hub::active_install_dir(base)`
+stamp differs is rebuilt (a reinstall, a changed base or file list). The stamp also holds a digest of the folder's own files (`game_fingerprint`: names and sizes), so a folder that lost a file (an antivirus) is built again from the mod's files. A stamp written before fingerprints (1.3.13 and older) matches in everything else: the folder is adopted and its fingerprint written, not rebuilt (a rebuild is a full copy on a phone, and it ran at each start). `hub::active_install_dir(base)`
 (called by `DtInstall::from_env` after `locate`, so the whole app reads it: assets, content, maps,
 language, `save::set_install`) returns the active mod's folder, else `base`; the choice is
 `<hub>/active.json` (`{"mod": "<id>"}`, none = the base). A choice whose mod is gone or does not build

@@ -433,6 +433,20 @@ pub fn prepare_mod(local: &Path, base: &Path, id: &str) -> Result<PathBuf, Strin
         if built == stamp && !fingerprint.is_empty() && game_fingerprint(&game).ok().as_deref() == Some(fingerprint.as_str()) {
             return Ok(game);
         }
+        // A stamp written before fingerprints (1.3.13 and older) matches in everything else:
+        // the folder is adopted, its fingerprint recorded, not rebuilt. On a phone the rebuild
+        // is a full copy of the install, so it must not run at every start.
+        if built == stamp && fingerprint.is_empty() && game.is_dir() {
+            if let Ok(now) = game_fingerprint(&game) {
+                let mut adopted = stamp.clone();
+                adopted.game = now;
+                if let Ok(json) = serde_json::to_vec_pretty(&adopted) {
+                    if write_fresh(&game.join(STAMP), &json).is_ok() {
+                        return Ok(game);
+                    }
+                }
+            }
+        }
     }
     let tmp = mod_dir(local, id).join("game.tmp");
     let _ = std::fs::remove_dir_all(&tmp);
@@ -781,6 +795,31 @@ mod tests {
         put(&base.join("Data/Added.ini"), "x");
         prepare_mod(&local, &base, "m1").unwrap();
         assert!(game.join("Data/Added.ini").exists(), "the base's own files reach the folder");
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    #[test]
+    fn a_stamp_from_before_fingerprints_is_adopted_not_rebuilt() {
+        let base = base_install("adopt");
+        let local = temp("adopt-hub");
+        install_mod(&local, "m1", "1.0", &[("Data/Units.ini", "mod units")]);
+        let game = prepare_mod(&local, &base, "m1").unwrap();
+        // Rewrite the stamp the way 1.3.13 wrote it: no `game` key.
+        let path = game.join(STAMP);
+        let mut json: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        json.as_object_mut().unwrap().remove("game");
+        std::fs::write(&path, serde_json::to_vec_pretty(&json).unwrap()).unwrap();
+        assert!(read_stamp(&game).unwrap().game.is_empty());
+        // A marker in the folder survives only if the folder is not rebuilt.
+        put(&game.join("marker.txt"), "kept");
+        let again = prepare_mod(&local, &base, "m1").unwrap();
+        assert_eq!(again, game);
+        assert_eq!(std::fs::read_to_string(game.join("marker.txt")).unwrap(), "kept", "the folder is adopted, not rebuilt");
+        assert!(!read_stamp(&game).unwrap().game.is_empty(), "the adopted stamp records the folder's fingerprint");
+        // And the next start reuses it as any other built folder.
+        prepare_mod(&local, &base, "m1").unwrap();
+        assert_eq!(std::fs::read_to_string(game.join("marker.txt")).unwrap(), "kept");
         let _ = std::fs::remove_dir_all(&base);
         let _ = std::fs::remove_dir_all(&local);
     }
