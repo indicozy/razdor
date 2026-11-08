@@ -290,9 +290,10 @@ impl App {
             None
         };
         let (button, why) = match &l.offer {
-            Offer::Installed { .. } => (Some((trf!("Start with the mod «{title}»", title = l.title.clone()), true)), None),
-            Offer::Download { .. } => (Some((trf!("Download «{title}» and start", title = l.title.clone()), true)), None),
-            Offer::NotInCatalog { id } => (Some((trf!("Start with the mod «{title}»", title = id.clone()), false)), Some(trf!("The mod «{id}» is not in the catalog", id = id.clone()))),
+            // Short labels: the message names the mod (`refresh_message`), the reason names a missing one.
+            Offer::Installed { .. } => (Some((tr("Start with the mod").into(), true)), None),
+            Offer::Download { .. } => (Some((tr("Download and start").into(), true)), None),
+            Offer::NotInCatalog { id } => (Some((tr("Start with the mod").into(), false)), Some(trf!("The mod «{id}» is not in the catalog", id = id.clone()))),
             Offer::Unknown => (Some((tr("Start with the mod").into(), false)), Some(tr("Unknown which mod made this save").into())),
         };
         let reason = match busy {
