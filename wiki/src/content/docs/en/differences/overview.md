@@ -41,7 +41,7 @@ Razdor plays the original game's scenarios using its original rules. Below is wh
 * **Leader's name under the event picture:** when an event fires on meeting an army, its window writes the army's leader name under the picture; turn it off in the additional settings ("Leader's name").
 * **Minimap corner** in additional settings: the minimap can be placed in any corner, and the "Reset" button will return it to its default size and position.
 * **2.5D map view** in additional settings ("Map view", off by default): the map is tilted, and the figures stand on the ground. Q and E turn the map 45°; on a phone, the two-finger turn is switched on by the "Two-finger turn" setting. A compass button next to the bottom bar appears while the map is turned, and brings it back to north up. "Sprite size" (1×, 1.5× or 2×) is 1.5× by default.
-* **Extend the map past its edges** in additional settings (off, as in the original, where the area past the edges is black): a short stretch of ground goes on past the map's edges, then a grey-blue fog. Only the view changes: rules and paths stay as they are.
+* **Extend the map past its edges** in additional settings (off, as in the original, where the area past the edges is black): a short stretch of ground goes on past the map's edges, then the same black fog as the unexplored map. Only the view changes: rules and paths stay as they are.
 
 ## Sound
 

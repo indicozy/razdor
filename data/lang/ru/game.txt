@@ -512,7 +512,7 @@ back to the map's zoom from the settings = вернуть масштаб кар�
 
 # Advanced settings: the ground past the map's edges (Razdor's, off by default)
 Extend the map past its edges = Продолжать карту за краем
-Off: past the map's edges is black, as in the original. On: a short stretch of ground goes on past the edges, then fades into a grey-blue fog. = Выключено: за краем карты чернота, как в оригинале. Включено: местность продолжается за краем на несколько клеток, затем её скрывает серо-голубой туман.
+Off: past the map's edges is black, as in the original. On: a short stretch of ground goes on past the edges, then thickens into the same black fog as the unexplored map. = Выключено: за краем карты чернота, как в оригинале. Включено: местность продолжается за краем на несколько клеток, затем её скрывает такой же чёрный туман, как неисследованная часть карты.
 
 # Advanced settings: arranging the army outside battle
 Army arrangement = Расстановка армии

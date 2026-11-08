@@ -152,9 +152,13 @@ pub fn reveal_overlay(kept: u8, now: u8) -> u8 {
 
 /// The fog's dark as a black texture, one texel per cell, alpha = its darkness ([`darkness_held`]),
 /// made when the fog or its held cells change. The map view and the minimap draw the same one.
+/// The war fog's colour (its unexplored dark is this colour at the cell's alpha). The map's
+/// edge fog (`terrain`) takes it too, so the fog past the edges is the same black.
+pub const FOG_RGB: [u8; 3] = [0, 0, 0];
+
 pub fn fog_texture(fog: &Fog, held: &[(i32, i32)]) -> Texture2D {
     cached(&FOG_TEX, fog.fingerprint() ^ held_key(held), FilterMode::Linear, || {
-        let rgba = darkness_held(fog, held).into_iter().flat_map(|a| [0, 0, 0, a]).collect();
+        let rgba = darkness_held(fog, held).into_iter().flat_map(|a| [FOG_RGB[0], FOG_RGB[1], FOG_RGB[2], a]).collect();
         (fog.w as u16, fog.h as u16, rgba)
     })
 }

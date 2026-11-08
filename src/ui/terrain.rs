@@ -58,8 +58,8 @@ uniform vec2 AtlasScale;
 uniform vec2 WaterSize;
 uniform vec2 WaterScale;
 // x: 1.0 when the ground goes on past the map's edges (Razdor's «Продолжать карту за краем»),
-// else 0.0; yzw: the fog's haze colour there. Ramp: the cells where the ground stops (x) and the
-// fog is opaque (y), counted from the border. Clock: seconds, animates the fog.
+// else 0.0; yzw: the fog's colour there (the war fog's black). Ramp: the cells where the fog
+// thickens to solid (x) and where it is solid (y), counted from the border. Clock: seconds.
 uniform vec4 Edge;
 uniform vec2 Ramp;
 uniform float Clock;
@@ -103,19 +103,18 @@ void main() {
     vec3 bottom = mix(ground(code_at(i + vec2(0.0, 1.0)), px, w), ground(code_at(i + vec2(1.0, 1.0)), px, w), f.x);
     vec3 col = mix(top, bottom, f.y);
     if (Edge.x > 0.5) {
-        // Past the border (p in cell units, the border at -0.5 and MapSize - 0.5). The fog's
-        // opacity rises from the strip's end to fully opaque at Ramp.y, with the two noise layers
-        // (different scales, drifting in different directions) breaking it up; past Ramp.y it is
-        // opaque. No line anywhere: the fog starts where the ground's colour ends.
+        // Past the border (p in cell units, the border at -0.5 and MapSize - 0.5): the war fog's
+        // own colour, its opacity rising from the border (thin wisps, darker and lighter with two
+        // noise layers at different scales drifting in different directions), thickening to solid
+        // from Ramp.x and solid at Ramp.y. Solid is the same black as the unexplored war fog, so
+        // the two meet with no seam.
         vec2 gap = max(max(vec2(-0.5) - p, p - (MapSize - 0.5)), vec2(0.0));
         float d = length(gap);
-        // Inside the strip the ground stays as it is: the noise is only computed past it.
-        if (d > Ramp.x) {
+        if (d > 0.0) {
             float n = 0.6 * vnoise(p * 0.11 + Clock * vec2(0.05, 0.02)) + 0.4 * vnoise(p * 0.27 + Clock * vec2(-0.08, 0.05));
-            float o = smoothstep(Ramp.x, Ramp.y, d) * (0.75 + 0.5 * n);
-            o = mix(o, 1.0, step(Ramp.y, d));
-            vec3 haze = Edge.yzw * (0.85 + 0.3 * n);
-            col = mix(col, haze, clamp(o, 0.0, 1.0));
+            float o = smoothstep(0.0, Ramp.y, d) * (0.35 + 0.65 * n);
+            o = mix(o, 1.0, smoothstep(Ramp.x, Ramp.y, d));
+            col = mix(col, Edge.yzw, clamp(o, 0.0, 1.0));
         }
     }
     gl_FragColor = vec4(col, 1.0);
@@ -125,17 +124,20 @@ void main() {
 /// Wrapped border around each atlas slot, in pixels.
 const PAD: u32 = 2;
 
-/// The ground past a map's edge goes on this many cells (its border's own row or column, continued
-/// outward), then the fog begins (`fog_opacity`).
-pub const EDGE_STRIP: f32 = 3.0;
-/// The fog is fully opaque this many cells past the border (the fog's ramp ends here).
+/// The fog thickens into solid from this many cells past the border.
+pub const EDGE_SOLID: f32 = 5.0;
+/// The fog is solid (the war fog's black) this many cells past the border, and beyond.
 pub const EDGE_FULL: f32 = 7.0;
-/// The fog's haze: grey-blue, between the map's ground and black (the fog of war is drawn over it).
-pub const EDGE_HAZE: [f32; 3] = [0.36, 0.42, 0.49];
+
+/// The edge fog's colour: the war fog's own (`minimap::FOG_RGB`), not a guess.
+pub fn edge_fog_colour() -> [f32; 3] {
+    let c = crate::ui::minimap::FOG_RGB;
+    [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0]
+}
 
 /// The cell the ground shows at cell `c` of a map `n` cells long: the border's own cell, clamped
 /// (the shader's `clamp`). Past the border it continues the edge's row or column.
-#[allow(dead_code)] // The shader's formula in Rust, pinned by the tests (`the_extension_...`, `the_fog_...`).
+#[allow(dead_code)] // The shader's formula in Rust, pinned by the tests.
 pub fn edge_cell(c: i32, n: i32) -> i32 {
     if n <= 0 {
         0
@@ -144,11 +146,20 @@ pub fn edge_cell(c: i32, n: i32) -> i32 {
     }
 }
 
-/// The fog's opacity at `d` cells past the border: 0 through the strip, a smooth rise (the
-/// shader's `smoothstep`) to 1 at `EDGE_FULL`, and 1 beyond.
-#[allow(dead_code)] // The shader's formula in Rust, pinned by the tests (`the_extension_...`, `the_fog_...`).
+/// The fog's opacity at `d` cells past the border, without the wisps (the noise at its brightest):
+/// the shader's `smoothstep` from the border to `EDGE_FULL`, solid (1) from `EDGE_SOLID` on, so it
+/// is continuous at the thickening and at the full distance.
+#[allow(dead_code)] // The shader's formula in Rust, pinned by the tests.
 pub fn fog_opacity(d: f32) -> f32 {
-    let t = ((d - EDGE_STRIP) / (EDGE_FULL - EDGE_STRIP)).clamp(0.0, 1.0);
+    let base = smoothstep01(0.0, EDGE_FULL, d);
+    let solid = smoothstep01(EDGE_SOLID, EDGE_FULL, d);
+    base + (1.0 - base) * solid
+}
+
+/// GLSL's smoothstep (clamped, Hermite).
+#[allow(dead_code)] // Used by `fog_opacity` only, which the tests pin.
+fn smoothstep01(e0: f32, e1: f32, x: f32) -> f32 {
+    let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
 
@@ -282,7 +293,7 @@ impl TerrainLayer {
     /// which shows the map area `view` in cells (x0, y0, x1, y1; cell centres at integers).
     /// `cell_px` is the texture pixels per cell (the textures' scale). `water_ms` is the clock
     /// (ms) that animates the water, `None` for still water. `edge`: the ground goes on past the
-    /// map's edges for [`EDGE_STRIP`] cells, then the animated fog ([`fog_opacity`]); `view` may
+    /// map's edges: the ground continues, then the animated fog ([`fog_opacity`]); `view` may
     /// reach past the map then. The fog's clock is `water_ms`.
     #[allow(clippy::too_many_arguments)]
     pub fn draw(&self, codes: &[u8], (w, h): (u32, u32), dest: Rect, view: Vec4, cell_px: Vec2, water_ms: Option<i64>, edge: bool) {
@@ -311,9 +322,9 @@ impl TerrainLayer {
         m.set_uniform("Tile", self.tile);
         m.set_uniform("Slot", self.slot);
         m.set_uniform("AtlasSize", vec2(self.atlas.width(), self.atlas.height()));
-        let haze = EDGE_HAZE;
-        m.set_uniform("Edge", vec4(if edge { 1.0 } else { 0.0 }, haze[0], haze[1], haze[2]));
-        m.set_uniform("Ramp", vec2(EDGE_STRIP, EDGE_FULL));
+        let fog = edge_fog_colour();
+        m.set_uniform("Edge", vec4(if edge { 1.0 } else { 0.0 }, fog[0], fog[1], fog[2]));
+        m.set_uniform("Ramp", vec2(EDGE_SOLID, EDGE_FULL));
         m.set_uniform("Clock", water_ms.map_or(0.0, |ms| (ms as f32 / 1000.0) % 1000.0));
         draw_texture_ex(&cells, dest.x, dest.y, WHITE, DrawTextureParams { dest_size: Some(dest.size()), ..Default::default() });
         gl_use_default_material();
@@ -362,13 +373,13 @@ mod tests {
     }
 
     #[test]
-    fn the_fog_is_clear_through_the_strip_and_opaque_from_the_full_distance() {
-        assert!(EDGE_STRIP < EDGE_FULL && EDGE_STRIP >= 1.0);
-        assert_eq!(fog_opacity(0.0), 0.0, "on the border");
-        assert_eq!(fog_opacity(EDGE_STRIP), 0.0, "the strip's end");
-        assert_eq!(fog_opacity(EDGE_FULL), 1.0, "fully opaque at the full distance");
+    fn the_fog_starts_at_the_border_thickens_and_is_solid_at_the_full_distance() {
+        assert!(0.0 < EDGE_SOLID && EDGE_SOLID < EDGE_FULL);
+        assert_eq!(fog_opacity(0.0), 0.0, "clear on the border");
+        assert_eq!(fog_opacity(EDGE_FULL), 1.0, "solid at the full distance");
         assert_eq!(fog_opacity(EDGE_FULL + 5.0), 1.0, "and beyond");
-        // Non-decreasing in between, no step: the ramp has no hard line.
+        assert!(fog_opacity(EDGE_SOLID) >= 0.8 && fog_opacity(EDGE_SOLID) < 1.0, "thick, not yet solid: {}", fog_opacity(EDGE_SOLID));
+        // Monotone and within [0, 1] across the whole range: no step, no line.
         let mut last = 0.0;
         for i in 0..=400 {
             let d = i as f32 / 40.0;
@@ -376,16 +387,15 @@ mod tests {
             assert!((0.0..=1.0).contains(&o) && o >= last - 1e-6, "{d}: {o}");
             last = o;
         }
-        // Halfway up the ramp is half opaque (the smoothstep's midpoint).
-        assert!((fog_opacity((EDGE_STRIP + EDGE_FULL) / 2.0) - 0.5).abs() < 1e-6);
     }
 
     #[test]
-    fn the_haze_is_grey_blue_and_not_black() {
-        let [r, g, b] = EDGE_HAZE;
-        assert!(r.min(g).min(b) > 0.2, "not black: {EDGE_HAZE:?}");
-        assert!(b > r && g > r, "blue-grey, not warm: {EDGE_HAZE:?}");
-        assert!(r.max(g).max(b) < 0.6, "a haze, not a glare: {EDGE_HAZE:?}");
+    fn the_edge_fog_is_the_war_fogs_own_black() {
+        // The war fog is drawn in `minimap::FOG_RGB`; the edge fog takes the same colour.
+        let c = edge_fog_colour();
+        let w = crate::ui::minimap::FOG_RGB;
+        assert_eq!(c, [w[0] as f32 / 255.0, w[1] as f32 / 255.0, w[2] as f32 / 255.0]);
+        assert_eq!(c, [0.0, 0.0, 0.0], "the war fog is black");
     }
 
     #[test]

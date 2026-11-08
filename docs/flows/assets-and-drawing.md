@@ -202,20 +202,20 @@ original pixel on screen (0.9375 × `k`). Without the install the lines are plai
 
 **Past the map's edges** (the setting «Продолжать карту за краем», `Settings::map_extended`,
 off by default; `world_view::set_edge_pref` takes it every frame): off, the original's black.
-On, the ground goes on for `terrain::EDGE_STRIP` (3) cells past each border, continuing the
-border's own row or column (the shader clamps the cell index, `code_at`); then an animated fog
-(in the terrain shader, after the ground): its opacity is `fog_opacity` (the shader's
-`smoothstep` from `EDGE_STRIP` to `EDGE_FULL`, 7 cells, and opaque beyond), modulated by two
-soft value-noise layers of different scales drifting in different directions (`Clock`, the
-water clock). The haze is `terrain::EDGE_HAZE`, a grey-blue. The shader runs the noise only past
-the strip. `draw_terrain` covers the whole drawn ground, so the fog reaches every edge, and in the
-2.5D view the same ground pass gives a haze wall at every turn. The fog of war is drawn over it
-(`Camera::fog_texels`, `minimap::draw_fog_extended` / `draw_extended`, the texture clamped to its
-edge texels: the border's status goes on outward), so explored and unexplored both read right.
-No scenery is copied past the edges. The camera may reach `EDGE_FULL` cells past each edge
-(`Camera::looking_in`, the scroll range included), and a map narrower than the view is centred;
-off, the view stays on the map as before. Visual only: no rule, path, click or AI change. Hex maps
-(the built-in demo) keep black.
+On, the ground goes on past each border, continuing the border's own row or column (the shader
+clamps the cell index, `code_at`). From the border, the fog takes the war fog's own colour
+(`minimap::FOG_RGB`, black, read by `terrain::edge_fog_colour`): thin, patchy wisps, darker and
+lighter with two soft value-noise layers of different scales drifting in different directions
+(`Clock`, the water clock), thickening into solid by `EDGE_SOLID` (5 cells) and solid at
+`EDGE_FULL` (7 cells), as `fog_opacity` (the shader's `smoothstep`, the noise at its brightest).
+The fog is drawn after the ground and before the war fog, so the unexplored black and the edge
+fog are the same colour and meet with no seam. `draw_terrain` covers the whole drawn ground, so
+the fog reaches every edge; in the 2.5D view the same ground pass gives a black wall at every
+turn. No scenery is copied past the edges. The war fog's texture clamps to the border's status
+past the map (`minimap::draw_fog_extended` / `draw_extended`). The camera may reach `EDGE_FULL`
+cells past each edge (`Camera::looking_in`, the scroll range included), and a map narrower than
+the view is centred; off, the view stays on the map as before. Visual only: no rule, path, click
+or AI change. Hex maps (the built-in demo) keep black.
 
 `src/ui/world_view.rs`: `draw_world` draws only the visible cells — `draw_terrain`
 (`TerrainLayer::draw` in `src/ui/terrain.rs`: one shader quad mixing the four nearest cell
