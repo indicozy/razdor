@@ -690,6 +690,16 @@ The map's F3 debug overlay (Razdor's, `world_view::draw_debug`) also tints every
 for impassable; aboard the ship blue for sailable, red otherwise, all faint so the map shows through.
 ### Maps and mods (the hub; a Razdor extra)
 
+A refused save (1552, `ui/lacking.rs`, `hub/save_mod.rs`): the load window's message box gets a mod button
+beside OK when the save lacks units or items. The mod it needs is the one the save records
+(`SaveMeta.played_mod`, see `saves.md`); an old save has none, so the installed mods are checked on a
+worker (`check_installed`: each mod's merged folder via `hub::prepare_mod`, read as an install, must
+have every missing id), and exactly one match is the need. `save_mod::offer` gives: installed (the
+button runs `choose_mod`, then the save loads when `poll_mod_switch` lands), downloadable (the button
+asks Yes/No with the size, then `Hub::install` on a thread and the same switch), or unavailable (the
+button is off with its reason). The box's words, buttons and Yes/No are `saves::lacking_question_box`
+and `load_failed_box`.
+
 `main_menu` link (the corner row, or the chips held upright) → `Screen::Hub(HubView)` (`ui/hub_view.rs`) → `razdor::hub` on a thread:
 `Hub::catalog()` reads `index.json` from `RAZDOR_HUB` (an `https://` address or a folder; unset:
 `hub::DEFAULT_SOURCE`, the latest release of indicozy/razdor-community; `RAZDOR_HUB=mock`, or a

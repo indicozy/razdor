@@ -182,8 +182,12 @@ items the install lacks. `restore` checks the save's map (`map_refs::unknown`, b
 is built from it) and the save's state (`map_refs::unknown_in_game`, before anything reads them
 by id; the same places `Content::unit` would be asked for) and refuses it with
 `SaveError::Lacking { name, unknown }`. The load window shows its text (the save's name and the
-ids, `Unknown::text`) in its message box, as it shows the other load errors. The save does not
-record its mod, so the text does not name one. Moving on to the next campaign map still
+ids, `Unknown::text`) in its message box, and the mod button of `ui/lacking.rs` beside OK.
+
+A save records the hub mod it was made with: `SaveMeta.played_mod` (JSON `mod`, `SaveMod { id, version }`,
+optional, none for the base game). `save::set_played_mod` sets it (the App does, in
+`App::record_played_mod` at start and on every `refresh_mods`); `meta_of` writes it. An older save
+has no field and reads as none (`an_old_save_without_the_mod_field_reads_as_none`); no format bump. Moving on to the next campaign map still
 needs that map in the install (the hand-over reads it from there, as the original does), and
 the install is still needed for the content (`NoInstall` without it).
 

@@ -26,6 +26,8 @@
 //! which is also the phones' storage).
 
 mod mods;
+/// Which mod a refused save needs (1552): pure decision, see the module.
+pub mod save_mod;
 
 pub use mods::*;
 

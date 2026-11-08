@@ -1128,7 +1128,26 @@ pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, quick: boo
 /// "Авто-сохр." tabs; a row's delete sign opens a confirmation. "Clear all" deletes the tab's
 /// saves but the pinned ones after a question. Loading itself is
 /// the app's (`pending` receives the file).
-pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pending: &mut Option<PathBuf>, error: &mut Option<String>) -> Option<Screen> {
+/// The mod row of a refused save's box (1552): set by the App each frame, read back by the box.
+#[derive(Default)]
+pub struct LackingBox {
+    /// A refused save is being told (the mod row is shown).
+    pub active: bool,
+    /// The mod button: its label and whether it takes a click.
+    pub button: Option<(String, bool)>,
+    /// The line under the buttons: why the button is off, or what is being done.
+    pub reason: Option<String>,
+    /// Something is being done (checking, preparing the mod, downloading): OK and the button wait.
+    pub busy: bool,
+    /// The mod button was pressed this frame (taken by the App).
+    pub pressed: bool,
+    /// The download's question is up (its text): the box asks Yes or No instead of telling.
+    pub asking: Option<String>,
+    /// The Yes or No of the question, taken by the App.
+    pub answer: Option<bool>,
+}
+
+pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pending: &mut Option<PathBuf>, error: &mut Option<String>, lacking: &mut LackingBox) -> Option<Screen> {
     match game {
         Some(g) if view.back != Back::Title => world_view::backdrop(g, assets),
         _ => super::main_menu::backdrop(),
@@ -1238,11 +1257,15 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     set_input_blocked(previously_blocked);
     if asking { super::chrome::grey_out(book.win); }
     if let Some(message) = error.as_deref() {
-        if load_failed_box(&own("LoadGame", "Title", n_("Load a saved game")), message) { *error = None; }
+        if let Some(question) = lacking.asking.clone() {
+            lacking_question_box(tr("Download the mod"), &question, lacking);
+        } else if load_failed_box(&own("LoadGame", "Title", n_("Load a saved game")), message, lacking) {
+            *error = None;
+        }
         return None;
     }
     if let Some(message) = view.folder_error.clone() {
-        if load_failed_box(tr("Folder"), &message) { view.folder_error = None; }
+        if load_failed_box(tr("Folder"), &message, &mut LackingBox::default()) { view.folder_error = None; }
         return None;
     }
     if asking_delete {
@@ -1294,8 +1317,9 @@ const VERSION_INK: Color = Color::new(0.22, 0.7, 1.0, 1.0);
 /// Its warning: the ae24a0 tint.
 const WARNING_INK: Color = Color::new(1.0, 1.0, 0.61, 1.0);
 /// Razdor's message box for a failed load: the message wrapped over as many lines as it takes,
-/// and one OK (or Enter, Escape). True once it is answered.
-fn load_failed_box(title: &str, message: &str) -> bool {
+/// and one OK (or Enter, Escape). True once it is answered. A refused save (`lacking.active`,
+/// 1552) has a mod button beside OK, and a line under it when it is off.
+fn load_failed_box(title: &str, message: &str, lacking: &mut LackingBox) -> bool {
     let k = super::chrome::k();
     // Razdor's own (1552): on a phone the message is 13 sp in either orientation, drawn with Razdor's
     // own metrics (`legacy_metrics_if`, as the save window's phone rows are), and the box's margins
@@ -1305,10 +1329,26 @@ fn load_failed_box(title: &str, message: &str) -> bool {
     let u = phone.unwrap_or(k);
     let (size, step) = (13.0 * u, 17.0 * u);
     let lines = super::dt_font::legacy_metrics_if(phone.is_some(), || wrap(message, 330.0 * k, size));
-    let h = (60.0 * u + lines.len() as f32 * step + if phone.is_some() { 20.0 * u } else { 0.0 }).max(150.0 * u);
-    let w = 380.0 * k;
+    let reason = match (lacking.active, lacking.reason.as_deref()) {
+        (true, Some(text)) => super::dt_font::legacy_metrics_if(phone.is_some(), || wrap(text, 330.0 * k, size)),
+        _ => Vec::new(),
+    };
     // Razdor's own: the OK grows with the text size (`button_grow`), the box with it.
     let g = super::display::button_grow();
+    // The mod row (1552): its buttons are 44 dp tall on a phone; a phone's box is wide enough for the
+    // mod button's words (280 dp, or the screen less a margin).
+    let row_h = if phone.is_some() { 44.0 * u } else { 28.0 * k * g };
+    // The reason's lines sit between the message and the row, with a line's room above the row.
+    let reason_extra = if reason.is_empty() { 0.0 } else { (reason.len() as f32 + 1.0) * step + 12.0 * u };
+    let row_extra = if lacking.active { reason_extra + (row_h - 28.0 * u).max(0.0) } else { 0.0 };
+    let h = (60.0 * u + lines.len() as f32 * step + if phone.is_some() { 20.0 * u } else { 0.0 } + row_extra).max(150.0 * u);
+    let w = if !lacking.active {
+        380.0 * k
+    } else if phone.is_some() {
+        (300.0 * u).min(screen_width() - 24.0 * k)
+    } else {
+        440.0 * k
+    };
     let h = h + 28.0 * k * (g - 1.0);
     let r = Rect::new((screen_width() - w) / 2.0, (screen_height() - h) / 2.0, w, h);
     let (inner, _) = super::chrome::window(r, title, super::chrome::Skin::Marble, false);
@@ -1317,12 +1357,92 @@ fn load_failed_box(title: &str, message: &str) -> bool {
             super::chrome::shadow_centered(line, inner.center().x, inner.y + 24.0 * u + i as f32 * step, size, super::chrome::CREAM);
         }
     });
-    let (bw, bh) = (90.0 * k * g, 28.0 * k * g);
-    let ok = Rect::new(inner.center().x - bw / 2.0, inner.y + inner.h - 38.0 * u + (28.0 * u - bh), bw, bh);
+    let (bw, bh) = (90.0 * k * g, if lacking.active { row_h } else { 28.0 * k * g });
+    let ok_y = inner.y + inner.h - 38.0 * u + (28.0 * u - bh);
+    let mut mod_pressed = false;
+    if lacking.active {
+        let reason_top = inner.y + 24.0 * u + lines.len() as f32 * step;
+        super::dt_font::legacy_metrics_if(phone.is_some(), || {
+            for (i, line) in reason.iter().enumerate() {
+                super::chrome::shadow_centered(line, inner.center().x, reason_top + 4.0 * u + i as f32 * step, size, super::chrome::CREAM);
+            }
+        });
+        // The mod button and OK side by side, centred; the mod button takes the box's width left.
+        let gap = if lacking.button.is_some() { 10.0 * k } else { 0.0 };
+        let mw = if lacking.button.is_some() { (inner.w - bw - gap - 40.0 * k).max(0.0) } else { 0.0 };
+        let total = mw + gap + bw;
+        let start = inner.center().x - total / 2.0;
+        if let Some((label, enabled)) = lacking.button.clone() {
+            let mr = Rect::new(start, ok_y, mw, bh);
+            let on = enabled && !lacking.busy;
+            let (_, down, pressed) = super::widgets::button_state(mr, on);
+            // The words of the mod button are Razdor's own size on a phone (the label fits the
+            // button's height otherwise, and a phone's would be too small).
+            if phone.is_some() {
+                super::chrome::marble_button_sized(mr, &label, on, down, 14.0 * u);
+            } else {
+                super::chrome::marble_button(mr, &label, on, down);
+            }
+            mod_pressed = pressed;
+        }
+        let ok = Rect::new(start + mw + gap, ok_y, bw, bh);
+        let ok_label = own("Buttons", "Ok", n_("OK"));
+        let (_, down, pressed) = super::widgets::button_state(ok, !lacking.busy);
+        if phone.is_some() {
+            super::chrome::marble_button_sized(ok, &ok_label, !lacking.busy, down, 14.0 * u);
+        } else {
+            super::chrome::marble_button(ok, &ok_label, !lacking.busy, down);
+        }
+        lacking.pressed = mod_pressed;
+        return !lacking.busy && (pressed || answer_key().is_some());
+    }
+    let ok = Rect::new(inner.center().x - bw / 2.0, ok_y, bw, bh);
     let ok_label = own("Buttons", "Ok", n_("OK"));
     let (_, down, pressed) = super::widgets::button_state(ok, true);
     super::chrome::marble_button(ok, &ok_label, true, down);
     pressed || answer_key().is_some()
+}
+
+/// The download's question of a refused save (1552): the question with Yes and No, in Razdor's own
+/// window and sizes (the shared question box is the original's size, too small on a phone). The
+/// answer goes to `lacking.answer`.
+fn lacking_question_box(title: &str, question: &str, lacking: &mut LackingBox) {
+    let k = super::chrome::k();
+    let phone = super::display::dp_px();
+    let u = phone.unwrap_or(k);
+    let (size, step) = (13.0 * u, 17.0 * u);
+    let lines = super::dt_font::legacy_metrics_if(phone.is_some(), || wrap(question, 330.0 * k, size));
+    let g = super::display::button_grow();
+    let row_h = if phone.is_some() { 44.0 * u } else { 28.0 * k * g };
+    let h = (60.0 * u + lines.len() as f32 * step + row_h - 28.0 * u).max(150.0 * u) + 28.0 * k * (g - 1.0);
+    let w = if phone.is_some() { (300.0 * u).min(screen_width() - 24.0 * k) } else { 440.0 * k };
+    let r = Rect::new((screen_width() - w) / 2.0, (screen_height() - h) / 2.0, w, h);
+    let (inner, _) = super::chrome::window(r, title, super::chrome::Skin::Marble, false);
+    super::dt_font::legacy_metrics_if(phone.is_some(), || {
+        for (i, line) in lines.iter().enumerate() {
+            super::chrome::shadow_centered(line, inner.center().x, inner.y + 24.0 * u + i as f32 * step, size, super::chrome::CREAM);
+        }
+    });
+    let (bw, bh) = (120.0 * k * g, row_h);
+    let gap = 16.0 * k;
+    let y = inner.y + inner.h - 38.0 * u + (28.0 * u - bh);
+    let start = inner.center().x - (2.0 * bw + gap) / 2.0;
+    let (yes, no) = (Rect::new(start, y, bw, bh), Rect::new(start + bw + gap, y, bw, bh));
+    let (yes_label, no_label) = (own("Buttons", "Yes", n_("Yes")), own("Buttons", "No", n_("No")));
+    let (_, yes_down, yes_pressed) = super::widgets::button_state(yes, true);
+    let (_, no_down, no_pressed) = super::widgets::button_state(no, true);
+    if phone.is_some() {
+        super::chrome::marble_button_sized(yes, &yes_label, true, yes_down, 14.0 * u);
+        super::chrome::marble_button_sized(no, &no_label, true, no_down, 14.0 * u);
+    } else {
+        super::chrome::marble_button(yes, &yes_label, true, yes_down);
+        super::chrome::marble_button(no, &no_label, true, no_down);
+    }
+    if yes_pressed || answer_key() == Some(true) {
+        lacking.answer = Some(true);
+    } else if no_pressed || answer_key() == Some(false) {
+        lacking.answer = Some(false);
+    }
 }
 
 /// The original's delete confirmation: a parchment panel and two green buttons.

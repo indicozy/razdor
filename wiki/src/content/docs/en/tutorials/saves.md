@@ -21,6 +21,8 @@ The load window has two tabs: your saves and autosaves. New entries are on top. 
 An autosave is made automatically before each battle and at the daily report at 12:00. Its name contains the date, for example "1204.06.03, 12 h".
 :::
 
+A save remembers the hub mod you played it with. If a save was made with a mod that is not in your game, the load window says so and offers to start the right mod: an installed one at once, or one downloaded from the hub (after you confirm its download size). Older saves without that mark are also matched against the installed mods; when none or several fit, no mod is guessed.
+
 ## Autosaves
 
 There are up to 30 autosave slots (12 in the original). When the slots are full, the oldest one is overwritten. An autosave on the same map replaces the previous one with the same name.

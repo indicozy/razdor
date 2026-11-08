@@ -123,6 +123,30 @@ pub struct SaveMeta {
     /// The cheat console was used in this game (`rules::cheats`); older saves: no.
     #[serde(default)]
     pub cheats: bool,
+    /// The hub mod the game was played with (1552); none for the base game, and older saves have none.
+    #[serde(default, rename = "mod", skip_serializing_if = "Option::is_none")]
+    pub played_mod: Option<SaveMod>,
+}
+
+/// A hub mod a save was made with: its id and version as installed then.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SaveMod {
+    pub id: String,
+    pub version: String,
+}
+
+/// The mod the game is played with now (set by the App when the mod is chosen, read by
+/// [`meta_of`]): a save records it, so a refused save can name the mod it needs (1552).
+static PLAYED_MOD: std::sync::Mutex<Option<SaveMod>> = std::sync::Mutex::new(None);
+
+/// Sets the mod the game is played with (`None`: the base game).
+pub fn set_played_mod(played: Option<SaveMod>) {
+    *PLAYED_MOD.lock().unwrap_or_else(|e| e.into_inner()) = played;
+}
+
+/// The mod the game is played with (see [`set_played_mod`]).
+pub fn played_mod() -> Option<SaveMod> {
+    PLAYED_MOD.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 #[derive(Debug)]
@@ -145,7 +169,7 @@ pub enum SaveError {
     /// The save (its game or its map) names units or items the content lacks: it was made with
     /// another mod. Razdor's crash guard, not the original's: refused with the ids (see
     /// [`map_refs::unknown_in_game`]); `name` is the save's name.
-    Lacking { name: String, unknown: Unknown },
+    Lacking { name: String, unknown: Unknown, played_mod: Option<SaveMod> },
     /// [`MANUAL_SAVES_KEPT`] unpinned saves already: replace, delete or pin one.
     Full,
     /// The save to replace is pinned.
@@ -164,7 +188,7 @@ impl std::fmt::Display for SaveError {
             SaveError::MapMissing(m) => f.write_str(&trf!("the scenario's map file \"{m}.DTm\" is missing from the game folder (Maps_Rus)", m)),
             SaveError::MapChanged(m) => f.write_str(&trf!("the map \"{m}\" has changed since the game was saved", m)),
             SaveError::Mismatch(e) => f.write_str(&trf!("the save does not fit the map or the data: {e}", e)),
-            SaveError::Lacking { name, unknown } => f.write_str(&trf!("The save «{name}» uses units or items that are not in your game ({ids}). It was made with another mod: choose that mod and load it again.", name, ids = unknown.text())),
+            SaveError::Lacking { name, unknown, .. } => f.write_str(&trf!("The save «{name}» uses units or items that are not in your game ({ids}). It was made with another mod: choose that mod and load it again.", name, ids = unknown.text())),
             SaveError::Pinned => f.write_str(tr("that save is pinned: unpin it first")),
             SaveError::Full => f.write_str(&trf!("there are {n} unpinned saves already: save over one, delete one or pin one", n = MANUAL_SAVES_KEPT)),
         }
@@ -336,6 +360,7 @@ pub fn meta_of(game: &Game, kind: SaveKind, name: &str) -> Result<SaveMeta, Save
         date: game.clock.label(),
         saved_at: now_secs(),
         cheats: game.cheats.used,
+        played_mod: played_mod(),
     })
 }
 
@@ -1066,7 +1091,7 @@ pub fn restore(meta: &SaveMeta, mut game: Game, demo: Arc<Content>, install: Opt
             // is built from it (the same check as a map's start, `map_refs::unknown`).
             let lacking = map_refs::unknown(&scenario, &install.content);
             if !lacking.is_empty() {
-                return Err(SaveError::Lacking { name: meta.name.clone(), unknown: lacking });
+                return Err(SaveError::Lacking { name: meta.name.clone(), unknown: lacking, played_mod: meta.played_mod.clone() });
             }
             game.map_bytes = Some(bytes.into());
             let world = World::from_scenario(&scenario, &install.content);
@@ -1079,7 +1104,7 @@ pub fn restore(meta: &SaveMeta, mut game: Game, demo: Arc<Content>, install: Opt
     // content lacks (a save made with another mod). Refused before anything reads them by id.
     let lacking = map_refs::unknown_in_game(&game, &content);
     if !lacking.is_empty() {
-        return Err(SaveError::Lacking { name: meta.name.clone(), unknown: lacking });
+        return Err(SaveError::Lacking { name: meta.name.clone(), unknown: lacking, played_mod: meta.played_mod.clone() });
     }
     if (game.fog.w, game.fog.h) != (fresh.map.w, fresh.map.h) {
         return Err(SaveError::Mismatch(tr("the map's size differs").into()));
@@ -2244,7 +2269,7 @@ pub(crate) mod tests {
         g.squad.push(second);
         let (m, loaded) = decode(&encode(&meta, &g).unwrap()).unwrap();
         match restore(&m, loaded, c, None) {
-            Err(SaveError::Lacking { name, unknown }) => {
+            Err(SaveError::Lacking { name, unknown, .. }) => {
                 assert_eq!(name, "Mod save");
                 assert_eq!((unknown.units, unknown.items), (vec![900], vec![901]));
             }
@@ -2283,7 +2308,42 @@ pub(crate) mod tests {
         let c = demo();
         let g = Game::new(c.clone(), HeroClass::Knight);
         assert_eq!(roundtrip(&g, c, None).squad.len(), 1);
-        let e = SaveError::Lacking { name: "Autumn".into(), unknown: Unknown { units: vec![104, 105], items: vec![35] } };
+        let e = SaveError::Lacking { name: "Autumn".into(), unknown: Unknown { units: vec![104, 105], items: vec![35] }, played_mod: None };
         assert_eq!(e.to_string(), "The save «Autumn» uses units or items that are not in your game (units 104, 105; items 35). It was made with another mod: choose that mod and load it again.");
+    }
+
+    /// A save records the hub mod it was made with and reads it back (1552); the base game's save
+    /// has no such field at all.
+    #[test]
+    fn a_save_records_its_mod_and_reads_it_back() {
+        let c = demo();
+        let g = Game::new(c.clone(), HeroClass::Knight);
+        set_played_mod(Some(SaveMod { id: "evolution".into(), version: "2.1".into() }));
+        let meta = meta_of(&g, SaveKind::Manual, "With mod");
+        set_played_mod(None);
+        let meta = meta.unwrap();
+        let (m, _) = decode(&encode(&meta, &g).unwrap()).unwrap();
+        assert_eq!(m.played_mod, Some(SaveMod { id: "evolution".into(), version: "2.1".into() }));
+        let base = meta_of(&g, SaveKind::Manual, "Base").unwrap();
+        assert_eq!(base.played_mod, None);
+        let json = encode_json(&base, &g).unwrap();
+        assert!(!String::from_utf8_lossy(&json).contains("\"mod\""), "the base game's save writes no mod field");
+    }
+
+    /// An older save, written before the mod field, reads with no mod (`None`) and loads as before.
+    #[test]
+    fn an_old_save_without_the_mod_field_reads_as_none() {
+        let c = demo();
+        let g = Game::new(c.clone(), HeroClass::Knight);
+        set_played_mod(Some(SaveMod { id: "evolution".into(), version: "2.1".into() }));
+        let meta = meta_of(&g, SaveKind::Manual, "Old");
+        set_played_mod(None);
+        let meta = meta.unwrap();
+        let mut v: serde_json::Value = serde_json::from_slice(&encode_json(&meta, &g).unwrap()).unwrap();
+        v["meta"].as_object_mut().unwrap().remove("mod");
+        let packed = pack(&serde_json::to_vec(&v).unwrap()).unwrap();
+        let (m, loaded) = decode(&packed).unwrap();
+        assert_eq!(m.played_mod, None);
+        assert!(restore(&m, loaded, c, None).is_ok(), "an old save still loads");
     }
 }

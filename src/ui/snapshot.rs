@@ -542,8 +542,18 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
         // `load-lacking`: the load window with the box a save made with another mod gets (the
         // error `App::load` shows for `SaveError::Lacking`, as the game words it).
         "load-lacking" => {
-            let e = razdor::rules::save::SaveError::Lacking { name: "Осенний поход".into(), unknown: razdor::rules::map_refs::Unknown { units: vec![104, 105, 106], items: vec![35] } };
+            let e = razdor::rules::save::SaveError::Lacking { name: "Осенний поход".into(), unknown: razdor::rules::map_refs::Unknown { units: vec![104, 105, 106], items: vec![35] }, played_mod: None };
             app.load_error = Some(e.to_string());
+            // `load-lacking:<state>`: the mod row as the App shows it. `installed`: the mod is there;
+            // `downloadable`: it is in the catalog (its button downloads it); `confirm`: the question
+            // of that download is up; anything else (the default): no mod is known, the button is off.
+            let state = parts.next().unwrap_or("");
+            let offer = match state {
+                "installed" => razdor::hub::save_mod::Offer::Installed { id: "evolution".into() },
+                "downloadable" | "confirm" => razdor::hub::save_mod::Offer::Download { id: "evolution".into(), size: 14_300_000 },
+                _ => razdor::hub::save_mod::Offer::Unknown,
+            };
+            app.lacking_scene(super::lacking::Lacking::scene(std::path::PathBuf::from("Осенний поход.rzsave"), offer, "Эволюция", state == "confirm"));
             app.screen = Screen::Load(LoadView::new(Back::Title));
             return Ok(());
         }

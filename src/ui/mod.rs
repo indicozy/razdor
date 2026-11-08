@@ -26,6 +26,7 @@ pub mod item_text;
 pub mod items_view;
 pub mod jukebox;
 pub mod keymap;
+pub mod lacking;
 pub mod language;
 pub mod game_import;
 pub mod main_menu;
@@ -356,6 +357,10 @@ pub struct App {
     active_mod: Option<String>,
     /// A mod switch whose folder is built on a worker (`choose_mod`, 1441), until it is applied.
     mod_switch: Option<ModSwitch>,
+    /// A refused save waiting for its mod (1552, `lacking.rs`).
+    lacking: Option<lacking::Lacking>,
+    /// The refusal window's mod row for this frame (set by `poll_lacking`).
+    lacking_box: saves::LackingBox,
     /// The hub's damaged maps being fetched again on a worker (`start_map_repair`), until it is done.
     map_repair: Option<std::sync::mpsc::Receiver<razdor::hub::MapRepair>>,
     /// A finished repair waiting until the new-game list is closed (`poll_map_repair`).
@@ -448,8 +453,11 @@ impl App {
             mod_switch: None,
             map_repair: start_map_repair(),
             map_repair_done: None,
+            lacking: None,
+            lacking_box: Default::default(),
         };
         app.follow_row_setting();
+        app.record_played_mod();
         app
     }
 
@@ -471,6 +479,7 @@ impl App {
     fn refresh_mods(&mut self) {
         self.mods = hub_mods();
         self.active_mod = hub_active();
+        self.record_played_mod();
     }
 
     /// The new-game window's «Мод» choice: `None` is the base game. The mod's folder is built and
@@ -492,6 +501,7 @@ impl App {
             // No thread to be had: the switch is made here, as before.
             let built = build_mod(&local, &base, id.as_deref());
             self.apply_mod(id, built);
+            self.lacking_switched();
         }
     }
 
@@ -509,6 +519,7 @@ impl App {
                 self.message = Some(tr("The mod does not play; the base game is played.").into());
             }
         }
+        self.lacking_switched();
     }
 
     /// Takes the hub maps' repair once it is done (each frame): the restored maps join the list, and
@@ -749,6 +760,7 @@ impl App {
                 self.dialogs.clear();
                 self.message = None;
                 self.load_error = None;
+                self.lacking = None;
                 self.map_view.reset();
                 self.map_view.forget_shows();
                 items_view::reset_pack_view();
@@ -766,7 +778,16 @@ impl App {
             }
             // A save made with another mod is told with its own words (the save names its ids).
             Err(e @ razdor::rules::save::SaveError::Lacking { .. }) => self.load_error = Some(e.to_string()),
-            Err(e) => self.load_error = Some(razdor::trf!("Cannot load: {e}.", e)),
+            Err(e) => {
+                // A save made with another mod (1552): its mod is looked for, and the window offers it.
+                if let razdor::rules::save::SaveError::Lacking { unknown, played_mod, .. } = &e {
+                    self.lacking_start(path.to_path_buf(), played_mod.clone(), unknown.clone());
+                }
+                self.load_error = Some(match &e {
+                    razdor::rules::save::SaveError::Lacking { .. } => e.to_string(),
+                    _ => razdor::trf!("Cannot load: {e}.", e),
+                });
+            }
         }
     }
 
@@ -1231,6 +1252,7 @@ impl App {
         mobile::refresh_keyboard_inset();
         self.mobile_install_poll();
         self.poll_mod_switch();
+        self.poll_lacking();
         self.poll_map_repair();
         // The screen's orientation from the settings (Android; applied at start and on each change).
         #[cfg(target_os = "android")]
@@ -1535,7 +1557,7 @@ impl App {
                 }
             }
             (Screen::Save(view), Some(game)) => saves::save_screen(game, &self.assets, view, quick_save_ok, &mut self.message),
-            (Screen::Load(view), game) => saves::load_screen(game.as_ref(), &self.assets, view, &mut self.pending_load, &mut self.load_error),
+            (Screen::Load(view), game) => saves::load_screen(game.as_ref(), &self.assets, view, &mut self.pending_load, &mut self.load_error, &mut self.lacking_box),
             (Screen::Victory, game) => screens::victory(game, &self.scenarios, self.dt_content.clone()),
             (Screen::Editor, _) => None,
             (Screen::CustomSetup, _) => {
