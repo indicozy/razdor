@@ -14,6 +14,21 @@
 
 ## 1.4.0 — 2026-11-09
 
+Коммит `f726a803` (тег `v1.4.0`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+b36144ba6635dad1b59599ea9a55b6c6835a09a9a7d1c606dcfc3f3abad498e3  razdor
+59e1ca3dc9878aeea61d538d11d38ce05de8963696289883a31601afa7194b60  Razdor.exe
+f88773b1c7457ce2ffc90d82f54ca0f1e847bb6dc9ed2eb4ada91ab6c0934d32  razdor-macos
+7f5e5cdeee86287df4216be3e2058afb56aacaf3c0e0364e557594fb51a18e1c  razdor-translate
+4ea3803a024146b0b51ca130152c1de5cbf77deaae26db385f1a32658449eba1  Razdor-translate.exe
+a04e0414541e6956c7c5a45f33abf9e86c7e8326e501c5a1a908f6770e3751ab  razdor-translate-macos
+9fa7efb35dfaf637633546c84b7857c23c828a694677b1b429a8adb8ecff2f59  razdor.apk
+b02540391db2a1bbbfc98b1e7b36b3d4137132030a9b813652dd968f2a0d944b  razdor.ipa
+```
+
 ### Добавлено
 
 - В окне «...» у списка сценариев появился переключатель «Правила Раздора»: он сразу включает все прежние правила Раздора и его исправления.
