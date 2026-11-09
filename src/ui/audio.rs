@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use razdor::dt::data::ArtefactType;
 use razdor::dt::install::DtInstall;
+use razdor::dt::DtError;
 use razdor::dt::sound::{self, SoundTable};
 
 pub use super::jukebox::Mood;
@@ -796,9 +797,15 @@ impl Backend {
             Change::Play(track) => {
                 let file = self.table.background(track).unwrap_or_default().to_string();
                 let t0 = std::time::Instant::now();
-                let loaded = sound::read_sound(&self.dir, &file, self.raw_rate)
-                    .map_err(|e| e.to_string())
-                    .and_then(|pcm| load_now(&pcm.resampled(OUTPUT_RATE).to_wav()).map(|s| (s, pcm.duration())).ok_or_else(|| "cannot be played".into()));
+                // Razdor's own: a read that fails for now is retried after a wait (`transient`),
+                // a file that cannot be played stays failed for the run.
+                let loaded: Result<(Sound, f64), (String, bool)> = match sound::read_sound(&self.dir, &file, self.raw_rate) {
+                    Ok(pcm) => {
+                        let len = pcm.duration();
+                        load_now(&pcm.resampled(OUTPUT_RATE).to_wav()).map(|s| (s, len)).ok_or_else(|| ("cannot be played".to_string(), false))
+                    }
+                    Err(e) => Err((e.to_string(), transient(&e))),
+                };
                 match loaded {
                     Ok((sound, len)) => {
                         let now = crate::ui::clock::now();
@@ -812,14 +819,27 @@ impl Backend {
                             razdor::diag!("audio: music {track} ({file}, {len:.1} s, decoded in {} ms) at {gain:.1}, fading in over {secs:.1} s", t0.elapsed().as_millis());
                         }
                     }
-                    Err(e) => {
+                    Err((e, false)) => {
                         razdor::diag!("{track}={file}: {e}");
                         self.jukebox.failed(track);
+                    }
+                    Err((e, true)) => {
+                        let wait = self.jukebox.retry_later(track, now);
+                        razdor::diag!("{track}={file}: {e} (will retry in {wait:.0} s)");
                     }
                 }
             }
         }
     }
+}
+
+/// Whether a music file that could not be read may be read later. Only an I/O error is: after
+/// the app sat in the background, Android's shared storage can be briefly unavailable, and a
+/// folder listing can fail; a missing file reads the same way, and a retry is cheap. A file that
+/// is there but is malformed or in a format Razdor does not play (`DtError::Sound`,
+/// `BadMagic`, and the rest) fails the same way every time, so it is not retried.
+fn transient(e: &DtError) -> bool {
+    matches!(e, DtError::Io { .. })
 }
 
 #[cfg(test)]
@@ -1105,6 +1125,15 @@ mod tests {
         assert!(!wide_row(&four, true));
         let back: Settings = serde_json::from_str(&serde_json::to_string(&four).unwrap()).unwrap();
         assert_eq!(back.wide_row, Some(false));
+    }
+
+    #[test]
+    fn a_read_error_is_transient_and_a_bad_file_is_not() {
+        let io = DtError::Io { path: "Sounds/x.raw".into(), source: std::io::ErrorKind::NotFound.into() };
+        assert!(transient(&io), "a failed read or listing may pass");
+        assert!(!transient(&DtError::Sound("WAV has no data".into())), "a malformed file stays malformed");
+        assert!(!transient(&DtError::BadMagic { what: "WAV file" }));
+        assert!(!transient(&DtError::Bzip2("corrupt".into())));
     }
 
     #[test]

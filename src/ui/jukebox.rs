@@ -13,7 +13,9 @@
 //! ([`ROTATION_FADE`]); the program's first track starts without one. The levels ([`Fade`]) are
 //! advanced by the frames' lengths and scale the music volume.
 //!
-//! Tracks are named by their `_Sounds.ini` keys (`[Backgrounds]`).
+//! Tracks are named by their `_Sounds.ini` keys (`[Backgrounds]`). A track whose file could
+//! not be read for now is retried after a wait ([`Jukebox::retry_later`]); one that cannot be
+//! played at all is dropped for the run ([`Jukebox::failed`]).
 
 pub use razdor::rules::music::ROTATION as MAP;
 
@@ -26,6 +28,12 @@ pub use razdor::av::{BATTLE, DEFEAT, TRIUMPH};
 pub const SCREEN_FADE: f32 = 2.0;
 /// A crossfade's length when the map rotation picks the next track, in seconds.
 pub const ROTATION_FADE: f32 = 4.0;
+
+/// The wait after a track's first transient read failure, in seconds: Razdor's own retry (the
+/// original reads its music once). It doubles per consecutive failure up to [`RETRY_MAX`].
+pub const RETRY_FIRST: f64 = 5.0;
+/// The longest wait between two tries of a track that keeps failing to read, in seconds.
+pub const RETRY_MAX: f64 = 60.0;
 
 /// One track's loudness in a crossfade (0x4819cc): its level, a share of the music volume,
 /// goes in a straight line from `from` to `to` over `secs`.
@@ -108,9 +116,21 @@ struct Current {
     once: bool,
 }
 
+/// A track whose last read failed transiently (see [`Jukebox::retry_later`]).
+#[derive(Clone, Copy, Debug)]
+struct Retry {
+    track: &'static str,
+    /// Consecutive transient failures since the track last started.
+    failures: u32,
+    /// The earliest time the track is asked for again, in the player's clock.
+    not_before: f64,
+}
+
 pub struct Jukebox {
-    /// Tracks that have a file and have not failed.
+    /// Tracks that have a file and have not failed for good.
     available: Vec<&'static str>,
+    /// Tracks waiting to be read again after a transient failure.
+    retries: Vec<Retry>,
     mood: Mood,
     current: Option<Current>,
     /// The Won/Lost piece has played: silence until the mood changes.
@@ -126,7 +146,7 @@ impl Jukebox {
     pub fn new(has: impl Fn(&str) -> bool) -> Jukebox {
         let all = [MENU, AUTHORS, TRIUMPH, DEFEAT].into_iter().chain(MAP).chain(BATTLE);
         let available: Vec<&'static str> = all.filter(|t| has(t)).collect();
-        Jukebox { available, mood: Mood::Silent, current: None, finished: false, map_track: MAP[razdor::rules::music::WORLD_THEME], triumph: false }
+        Jukebox { available, retries: Vec::new(), mood: Mood::Silent, current: None, finished: false, map_track: MAP[razdor::rules::music::WORLD_THEME], triumph: false }
     }
 
     /// The track playing (or being started), if any.
@@ -152,8 +172,8 @@ impl Jukebox {
         self.triumph = true;
     }
 
-    /// The mood's track, and whether it loops.
-    fn wanted(&self) -> Option<(&'static str, bool)> {
+    /// The mood's track, and whether it loops; none while the track waits for a retry.
+    fn wanted(&self, now: f64) -> Option<(&'static str, bool)> {
         let (track, looped) = match self.mood {
             Mood::Silent => return None,
             _ if self.triumph && matches!(self.mood, Mood::Map | Mood::Battle { .. } | Mood::Won) => (TRIUMPH, true),
@@ -165,7 +185,8 @@ impl Jukebox {
             Mood::Won => (TRIUMPH, false),
             Mood::Lost => (DEFEAT, false),
         };
-        self.has(track).then_some((track, looped))
+        let waiting = self.retries.iter().any(|r| r.track == track && now < r.not_before);
+        (self.has(track) && !waiting).then_some((track, looped))
     }
 
     /// What to change for `mood` at time `now` (seconds).
@@ -186,12 +207,12 @@ impl Jukebox {
                 return None;
             }
             // A looping track that ended: it starts again.
-            if self.wanted().is_some_and(|(t, _)| t == c.track) {
+            if self.wanted(now).is_some_and(|(t, _)| t == c.track) {
                 self.current = Some(Current { track: c.track, ends: f64::INFINITY, once: false });
                 return Some(Change::Play(c.track));
             }
         }
-        match self.wanted() {
+        match self.wanted(now) {
             None => self.current.take().map(|_| Change::Stop),
             Some((track, _)) if self.current.is_some_and(|c| c.track == track) => None,
             Some((track, looped)) => {
@@ -201,8 +222,9 @@ impl Jukebox {
         }
     }
 
-    /// The player started `track` at `now`; it lasts `secs`.
+    /// The player started `track` at `now`; it lasts `secs`. A start resets its retry wait.
     pub fn started(&mut self, track: &'static str, now: f64, secs: f64) {
+        self.retries.retain(|r| r.track != track);
         if let Some(c) = self.current.as_mut().filter(|c| c.track == track) {
             c.ends = now + secs;
         }
@@ -211,9 +233,33 @@ impl Jukebox {
     /// `track` could not be played: it is never picked again.
     pub fn failed(&mut self, track: &'static str) {
         self.available.retain(|t| *t != track);
+        self.retries.retain(|r| r.track != track);
         if self.current.is_some_and(|c| c.track == track) {
             self.current = None;
         }
+    }
+
+    /// `track` could not be read for now (a transient failure, e.g. the storage was briefly
+    /// unavailable): it stays available and is not asked for again until the wait is over.
+    /// The wait is [`RETRY_FIRST`] at the first failure, doubling per consecutive failure up to
+    /// [`RETRY_MAX`]; a start resets it. Until then the mood's music is silent. Returns the
+    /// wait in seconds.
+    pub fn retry_later(&mut self, track: &'static str, now: f64) -> f64 {
+        if self.current.is_some_and(|c| c.track == track) {
+            self.current = None;
+        }
+        let i = match self.retries.iter().position(|r| r.track == track) {
+            Some(i) => i,
+            None => {
+                self.retries.push(Retry { track, failures: 0, not_before: now });
+                self.retries.len() - 1
+            }
+        };
+        let r = &mut self.retries[i];
+        r.failures = r.failures.saturating_add(1);
+        let wait = (RETRY_FIRST * 2f64.powi((r.failures.min(16) - 1) as i32)).min(RETRY_MAX);
+        r.not_before = now + wait;
+        wait
     }
 }
 
@@ -353,5 +399,47 @@ mod tests {
         j.set_map_track("BkgMap1");
         assert_eq!(step(&mut j, Mood::Map, 4.0, 5.0), Some(Change::Stop), "no file: silence");
         assert_eq!(step(&mut j, Mood::Lost, 5.0, 10.0), Some(Change::Play(DEFEAT)));
+    }
+
+    #[test]
+    fn a_transient_failure_is_asked_for_again_after_its_wait() {
+        let mut j = Jukebox::new(|t| t == "BkgMap2");
+        assert_eq!(step(&mut j, Mood::Map, 0.0, 5.0), Some(Change::Play("BkgMap2")));
+        assert_eq!(j.retry_later("BkgMap2", 0.0), 5.0);
+        assert_eq!(step(&mut j, Mood::Map, 0.5, 5.0), None, "silent while it waits");
+        assert_eq!(step(&mut j, Mood::Map, 4.9, 5.0), None, "not before the wait is over");
+        assert_eq!(step(&mut j, Mood::Map, 5.0, 5.0), Some(Change::Play("BkgMap2")), "asked for again");
+        assert!(j.has("BkgMap2"), "a transient failure keeps the track available");
+    }
+
+    #[test]
+    fn a_transient_failure_does_not_put_another_track_in_its_place() {
+        let mut j = all();
+        assert_eq!(step(&mut j, Mood::Menu, 0.0, 50.0), Some(Change::Play(MENU)));
+        assert_eq!(step(&mut j, Mood::Map, 1.0, 50.0), Some(Change::Play("BkgMap2")));
+        j.retry_later("BkgMap2", 1.0);
+        assert_eq!(step(&mut j, Mood::Map, 2.0, 50.0), None, "the map's music waits; the menu's is not played instead");
+        assert_eq!(step(&mut j, Mood::Map, 5.9, 50.0), None);
+        assert_eq!(step(&mut j, Mood::Map, 6.0, 50.0), Some(Change::Play("BkgMap2")));
+    }
+
+    #[test]
+    fn a_permanent_failure_is_never_asked_for_again() {
+        let mut j = all();
+        assert_eq!(step(&mut j, Mood::Map, 0.0, 5.0), Some(Change::Play("BkgMap2")));
+        j.failed("BkgMap2");
+        assert!(!j.has("BkgMap2"));
+        assert_eq!(step(&mut j, Mood::Map, 1000.0, 5.0), None);
+    }
+
+    #[test]
+    fn the_retry_wait_doubles_to_a_minute_and_a_start_resets_it() {
+        let mut j = all();
+        let waits: Vec<f64> = (0..7).map(|i| j.retry_later("BkgMap2", i as f64 * 100.0)).collect();
+        assert_eq!(waits, [5.0, 10.0, 20.0, 40.0, 60.0, 60.0, 60.0]);
+        j.started("BkgMap2", 1000.0, 5.0);
+        assert_eq!(j.retry_later("BkgMap2", 1000.0), 5.0, "a start resets the wait");
+        assert_eq!(j.retry_later("BkgMap2", 1000.0), 10.0);
+        assert_eq!(j.retry_later("BkgMap5", 1000.0), 5.0, "each track has its own wait");
     }
 }

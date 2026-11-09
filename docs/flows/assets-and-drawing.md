@@ -320,6 +320,10 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   triumph, defeat), crossfades (`Fade`, `SCREEN_FADE`, `ROTATION_FADE`). The map
   rotation's picks are draws of the game's generator (`rules::music`, `App::rotate_music`),
   so they matter for parity with the original's random state.
+- A music file that fails to read is handled by `apply` in `src/ui/audio.rs`: an I/O error
+  (`transient`: the storage can be briefly unavailable after the app sat in the background)
+  is retried after a wait of 5 s doubling to 60 s (`Jukebox::retry_later`, Razdor's own);
+  a malformed file or one that cannot be played is dropped for the run (`Jukebox::failed`).
 - `RAZDOR_NO_AUDIO=1` silences; `RAZDOR_AUDIO_LOG=1` logs every sound.
 
 ## Fonts
