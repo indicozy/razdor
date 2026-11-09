@@ -25,11 +25,6 @@ const ALL_FILES: &str = "android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION
 const ALL_FILES_LIST: &str = "android.settings.MANAGE_ALL_FILES_ACCESS_PERMISSION";
 const STORAGE_PERMISSIONS: [&str; 2] = ["android.permission.READ_EXTERNAL_STORAGE", "android.permission.WRITE_EXTERNAL_STORAGE"];
 
-local! {
-    /// The not-found screen has looked at the storage access once in this run ([`ask_once`]).
-    static ASKED: Cell<bool> = const { Cell::new(false) };
-}
-
 /// `Build.VERSION.SDK_INT` (0 when it cannot be read).
 unsafe fn sdk_int(env: *mut sys::JNIEnv) -> i32 {
     let cls = class(env, "android/os/Build$VERSION");
@@ -270,7 +265,9 @@ pub fn pick_outcome() -> String {
     unsafe { text_call("razdorPickOutcome") }.unwrap_or_default()
 }
 
-/// Whether Razdor may read the shared storage (the install and the saves live there).
+/// Whether Razdor may read the shared storage (the legacy folders). Nothing waits for it now: a
+/// new player's install is in the app's own folder.
+#[allow(dead_code)]
 pub fn storage_granted() -> bool {
     // SAFETY: the activity exists once the window is open (the screens run after it).
     unsafe {
@@ -296,6 +293,8 @@ pub fn storage_granted() -> bool {
 
 /// Asks for the storage: the all-files page of the settings (Android 11 and later), or the
 /// two runtime permissions' dialog (Android 8 to 10). Returns at once; the player answers there.
+/// No screen calls it now (kept: the settings page, for a player who wants to grant it by hand).
+#[allow(dead_code)]
 pub fn request_storage() {
     // SAFETY: as in `storage_granted`.
     unsafe {
@@ -319,18 +318,6 @@ pub fn request_storage() {
             ((**env).CallVoidMethod.unwrap())(env, ACTIVITY, ask, perms.obj, 1i32);
             cleared(env);
         }
-    }
-}
-
-/// Asks for the storage the first time the not-found screen is shown in this run, when it is
-/// not granted yet, so the player lands on the access page without finding the button. Later
-/// calls do nothing.
-pub fn ask_once() {
-    if ASKED.with(|a| a.replace(true)) {
-        return;
-    }
-    if !storage_granted() {
-        request_storage();
     }
 }
 

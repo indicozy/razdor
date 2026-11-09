@@ -131,6 +131,9 @@ assets = "menu-art"
 # keeps the panel at its top rate for a game while no finger touches the screen. The surface
 # asks for the rate too (android/MainActivityInject.java, razdorWatchSurfaceFrameRate).
 "android:appCategory" = "game"
+# Android 10+ asks on uninstall whether to keep the app's data (the install and the saves live
+# in the app's own folder).
+"android:hasFragileUserData" = "true"
 
 [package.metadata.android.activity_attributes]
 # Any way up the phone is held (the owner's request, 2026-10-23), following the system's

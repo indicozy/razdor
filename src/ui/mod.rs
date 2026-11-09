@@ -1260,16 +1260,14 @@ impl App {
     }
 
     /// The install was not there at start. On the menus, loads it when the player asks ("Check
-    /// again", or the unpacking's end on the desktop) or, on the phones, when the poll finds it in
-    /// place (the storage is granted and an install folder is listed; iOS always has the storage).
-    /// The first frame without an install asks for the storage access once (Android), so the
-    /// player lands on the access page at once; the poll also reopens the log once the storage is
-    /// granted. Game archives found in the folders are looked for here too (`ui::mobile`).
+    /// again", or the unpacking's end on the desktop) or, on the phones, when the poll finds it
+    /// listed (an install in the game folder or a search root; `mobile::install_listed`). No
+    /// storage permission is waited for: a new player's game folder is the app's own. Game
+    /// archives found in the folders are looked for here too (`ui::mobile`).
     fn mobile_install_poll(&mut self) {
         if self.dt_content.is_some() {
             return;
         }
-        mobile::ask_access_once();
         if !matches!(self.screen, Screen::MainMenu | Screen::ScenarioSelect) {
             return;
         }
@@ -1282,11 +1280,7 @@ impl App {
         let asked = mobile::take_recheck();
         mobile::look_for_archives(now, asked);
         let due = mobile::poll_due(now);
-        let granted = due && mobile::storage_granted();
-        if granted {
-            razdor::diag::reopen_log();
-        }
-        if !(asked || (granted && mobile::install_listed())) {
+        if !(asked || (due && mobile::install_listed())) {
             return;
         }
         if let Some(dt) = dt_art::DtArt::from_env() {

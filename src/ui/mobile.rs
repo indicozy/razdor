@@ -3,8 +3,9 @@
 //! «Check again» while no install is found; the player's press, or a poll every
 //! [`POLL_SECONDS`] that finds the install in place, loads it without a restart.
 //!
-//! The storage is the only difference: Android needs the all-files access (see
-//! `ui::android::storage_granted`), iOS has no permission at all (the app's Documents folder).
+//! The storage is the only difference: Android's install is in the app's own folder (no permission
+//! is waited for, see `platform::install_roots`), iOS has no permission at all (the app's Documents
+//! folder).
 
 use razdor::dt::unpack::{self, Found, Kind, UnpackError};
 use razdor::local;
@@ -14,7 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-/// How often the not-found screen looks for the install while the storage is granted.
+/// How often the not-found screen looks for the install.
 const POLL_SECONDS: f64 = 5.0;
 /// How often the not-found screen looks for game archives in the folders (`dt::unpack`).
 const SCAN_SECONDS: f64 = 5.0;
@@ -96,26 +97,6 @@ pub fn refresh_keyboard_inset() {
     if let Some(px) = super::android::read_keyboard_inset() {
         super::display::set_keyboard_inset(px);
     }
-}
-
-/// Whether Razdor may read the install's folder: Android's storage access; iOS has no
-/// permission (the app's own Documents folder), so it is always granted there.
-pub fn storage_granted() -> bool {
-    #[cfg(target_os = "android")]
-    {
-        super::android::storage_granted()
-    }
-    #[cfg(not(target_os = "android"))]
-    {
-        true
-    }
-}
-
-/// The first frame without an install asks for the storage access, once in the run (Android:
-/// the all-files settings page, `ui::android::ask_once`). iOS has no permission to ask for.
-pub fn ask_access_once() {
-    #[cfg(target_os = "android")]
-    super::android::ask_once();
 }
 
 /// The player pressed "Check again" on the not-found screen.

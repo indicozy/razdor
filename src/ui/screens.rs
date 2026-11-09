@@ -190,22 +190,16 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
     None
 }
 
-/// Android: the install is not there. Tells the player what to do, and offers the two buttons:
-/// give Razdor the storage access (the settings page; a dialog on Android 8 to 10), and look
-/// again. The permission is in `ui::android`, the look in `ui::mobile`; the look runs on the
-/// title screen. The access page is opened at the first frame of the run without an install
-/// (`App::mobile_install_poll`). The block is scaled to the screen ([`PhoneBlock`]).
+/// Android: the install is not there. Tells the player what to do, and offers «Check again», the
+/// look that runs on the title screen (`ui::mobile`). No storage permission is asked for here: a
+/// new player's game folder is the app's own. The block is scaled to the screen ([`PhoneBlock`]).
+/// Its step 2 and «Check again» keep their places (no grant line or button above them).
 #[cfg(target_os = "android")]
 fn android_not_found(x: f32, w: f32) {
-    use super::android::request_storage;
     use super::mobile::ask_recheck;
     let b = PhoneBlock::new(w, 2);
     text_fit(tr("Discord Times not found."), x, b.y, w, 20.0 * b.k, INK);
-    text_fit(tr("1. Give Razdor access to all files: the «Grant access» button, or Settings > Apps > Special app access > All files access > Razdor."), x, b.y + 26.0 * b.k, w, 16.0 * b.k, DIM);
     text_fit(tr("2. Put the game folder in internal storage, in a folder named DiscordTimes (or in Download)."), x, b.y + 46.0 * b.k, w, 16.0 * b.k, DIM);
-    if button(x, b.buttons_y, b.btn_w, b.btn_h, tr("Grant access"), true) {
-        request_storage();
-    }
     if button(x + b.btn_w + 16.0 * b.k, b.buttons_y, b.btn_w, b.btn_h, tr("Check again"), true) {
         ask_recheck();
     }
@@ -558,16 +552,14 @@ fn unpack_lines() -> Vec<String> {
     lines
 }
 
-/// The buttons of the menu's not-found block above the two links: the phones' access button, the
-/// download («Скачать игру», the retry too; the first option), the picker of a game archive
+/// The buttons of the menu's not-found block above the two links: the download («Скачать игру»,
+/// the retry too; the first option), the picker of a game archive
 /// («Pick the game archive…»: the desktop's dialog, Android's document picker; a secondary option
 /// below the download, in the failure state too), on the manual path the link's two buttons, the
 /// phones' unpacking of an archive found in their folders (offered once one is found there) and
 /// the phones' «Check again».
 fn not_found_rows(manual: bool) -> Vec<Vec<NotFoundButton>> {
     let mut rows = Vec::new();
-    #[cfg(target_os = "android")]
-    rows.push(vec![(tr("Grant access"), super::android::request_storage as fn())]);
     // A folder with missing game files is repaired from the archive (the offer), not downloaded over.
     let damaged = matches!(razdor::dt::install::problem(), Some(Problem::Missing { .. }));
     if damaged {
