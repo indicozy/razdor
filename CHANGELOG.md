@@ -14,6 +14,29 @@
 
 ## 1.4.1 — 2026-11-10
 
+Коммит `31a85c96` (тег `v1.4.1`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+0f338d481f24dc495b0bf0d71b28c322fad6f47d435e80c9f28b8d413e16db5e  razdor
+dd9dd841729a719a755a14af96d19471751cc635546b38c9a685edd8fc2ce594  Razdor.exe
+00a95dc9af3e528855e8ce20ed438d4c553615dc526c2e7684523e9ea665c659  razdor-macos
+19904a0b4cf8053d616838f247a5af26a8dbbdce92c3f3fa697a3b68a09b640f  razdor-translate
+1cca1635825a17fd8cb4214826a111760e642588a8019ea9608ae322d50a1a46  Razdor-translate.exe
+6910335f1d2136672aaccc99c8347d7658cde5ef9b1a361938e877d932af262a  razdor-translate-macos
+552eba21185824024b8e6474f62d4f0128a4dd3abea7601a39eb9471f6967c2b  razdor.apk
+ea0cf63db02665f4daecfcde6011b4e83c842063f7126deb02a1b3b8b8bd07da  razdor.ipa
+0f338d481f24dc495b0bf0d71b28c322fad6f47d435e80c9f28b8d413e16db5e  razdor-1.4.1-linux
+dd9dd841729a719a755a14af96d19471751cc635546b38c9a685edd8fc2ce594  Razdor-1.4.1.exe
+00a95dc9af3e528855e8ce20ed438d4c553615dc526c2e7684523e9ea665c659  razdor-1.4.1-macos
+552eba21185824024b8e6474f62d4f0128a4dd3abea7601a39eb9471f6967c2b  razdor-1.4.1.apk
+ea0cf63db02665f4daecfcde6011b4e83c842063f7126deb02a1b3b8b8bd07da  razdor-1.4.1.ipa
+19904a0b4cf8053d616838f247a5af26a8dbbdce92c3f3fa697a3b68a09b640f  razdor-translate-1.4.1-linux
+1cca1635825a17fd8cb4214826a111760e642588a8019ea9608ae322d50a1a46  Razdor-translate-1.4.1.exe
+6910335f1d2136672aaccc99c8347d7658cde5ef9b1a361938e877d932af262a  razdor-translate-1.4.1-macos
+```
+
 ### Изменено
 
 - Из настроек убрана галочка «Не загружать музыку и звуки»: звук загружается всегда, выключить его можно громкостью.
