@@ -370,16 +370,7 @@ private void razdorPreferTopRefreshRate() {
             return;
         }
         Display.Mode current = display.getMode();
-        Display.Mode best = null;
-        for (Display.Mode mode : display.getSupportedModes()) {
-            if (mode.getPhysicalWidth() != current.getPhysicalWidth()
-                    || mode.getPhysicalHeight() != current.getPhysicalHeight()) {
-                continue;
-            }
-            if (best == null || mode.getRefreshRate() > best.getRefreshRate()) {
-                best = mode;
-            }
-        }
+        Display.Mode best = razdorTopMode(display);
         if (best == null) {
             return;
         }
@@ -394,6 +385,84 @@ private void razdorPreferTopRefreshRate() {
         }
     } catch (Throwable t) {
         // Not fatal: the system keeps its own refresh rate choice.
+    }
+}
+
+// The display's mode with the highest refresh rate at its current resolution, or null. Used by
+// the window's preference (razdorPreferTopRefreshRate) and by the surface's vote below.
+private Display.Mode razdorTopMode(Display display) {
+    Display.Mode current = display.getMode();
+    Display.Mode best = null;
+    for (Display.Mode mode : display.getSupportedModes()) {
+        if (mode.getPhysicalWidth() != current.getPhysicalWidth()
+                || mode.getPhysicalHeight() != current.getPhysicalHeight()) {
+            continue;
+        }
+        if (best == null || mode.getRefreshRate() > best.getRefreshRate()) {
+            best = mode;
+        }
+    }
+    return best;
+}
+
+// The surface vote (API 30+). miniquad draws into a SurfaceView, and the frame rate that counts
+// for the panel is the one the surface asks for, not only the window's: adaptive refresh (OnePlus's
+// ADFR) drops a game to 60 Hz while no finger touches the screen unless the surface says it is a
+// game. Razdor's, like razdorPreferTopRefreshRate. Voted on each new surface (surfaceCreated), so
+// a recreated surface is voted again. Never fatal.
+private void razdorWatchSurfaceFrameRate() {
+    if (Build.VERSION.SDK_INT < 30) {
+        return;
+    }
+    try {
+        view.getHolder().addCallback(new SurfaceHolder.Callback() {
+            @Override
+            public void surfaceCreated(SurfaceHolder holder) {
+                razdorVoteSurfaceFrameRate(holder.getSurface());
+            }
+
+            @Override
+            public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+            }
+
+            @Override
+            public void surfaceDestroyed(SurfaceHolder holder) {
+            }
+        });
+        // The surface may already exist (then no callback comes for it).
+        Surface now = view.getHolder().getSurface();
+        if (now != null && now.isValid()) {
+            razdorVoteSurfaceFrameRate(now);
+        }
+    } catch (Throwable t) {
+        // Not fatal: the system keeps its own choice.
+    }
+}
+
+// Asks the surface for the display's top refresh rate (API 30: the 2-argument form; API 31+: the
+// 3-argument form, which lets the system change the rate at any time), and the view for the
+// game category (API 35+: REQUESTED_FRAME_RATE_CATEGORY_HIGH). Each call is guarded on its own.
+private void razdorVoteSurfaceFrameRate(Surface surface) {
+    try {
+        Display display = getDisplay();
+        Display.Mode best = display == null ? null : razdorTopMode(display);
+        if (best != null) {
+            if (Build.VERSION.SDK_INT >= 31) {
+                surface.setFrameRate(best.getRefreshRate(), Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE,
+                        Surface.CHANGE_FRAME_RATE_ALWAYS);
+            } else {
+                surface.setFrameRate(best.getRefreshRate(), Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE);
+            }
+        }
+    } catch (Throwable t) {
+        // Not fatal: the surface keeps the system's default vote.
+    }
+    try {
+        if (Build.VERSION.SDK_INT >= 35) {
+            view.setRequestedFrameRate(View.REQUESTED_FRAME_RATE_CATEGORY_HIGH);
+        }
+    } catch (Throwable t) {
+        // Not fatal: the view keeps the system's default.
     }
 }
 
@@ -503,6 +572,7 @@ if (Build.VERSION.SDK_INT >= 30) {
 
 setVolumeControlStream(AudioManager.STREAM_MUSIC);
 razdorPreferTopRefreshRate();
+razdorWatchSurfaceFrameRate();
 
 //% END
 

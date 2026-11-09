@@ -91,6 +91,10 @@ res = "android/res"
 [package.metadata.android.application_attributes]
 # Android 10 (API 29): the old storage layout, for the install folder and the saves.
 "android:requestLegacyExternalStorage" = "true"
+# Razdor is a game to the system (API 26+): the adaptive refresh (OnePlus's ADFR and the like)
+# keeps the panel at its top rate for a game while no finger touches the screen. The surface
+# asks for the rate too (android/MainActivityInject.java, razdorWatchSurfaceFrameRate).
+"android:appCategory" = "game"
 
 [package.metadata.android.activity_attributes]
 # Any way up the phone is held (the owner's request, 2026-10-23), following the system's

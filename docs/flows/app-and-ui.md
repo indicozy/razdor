@@ -956,7 +956,10 @@ miniquad has no borderless mode. On Windows every step is logged to `razdor.log`
   bar only, as the fullscreen theme did in 1.0.3, and shows the navigation bar.
   The activity re-applies it when the window regains the focus. The activity also asks for the display's
   highest refresh rate (`razdorPreferTopRefreshRate`, on create and on each focus gain): in the phone's dynamic
-  refresh mode Android gives an app 60 Hz unless it states a preference. On a phone the «Экран» row
+  refresh mode Android gives an app 60 Hz unless it states a preference. The manifest marks Razdor as a
+  game (`android:appCategory="game"`, Cargo.toml), and the drawing surface votes for the same top rate
+  (`razdorWatchSurfaceFrameRate`, on each new surface; API 30+, plus the game category on API 35+), so
+  adaptive refresh (OnePlus's ADFR) keeps 120 Hz without a touch. On a phone the «Экран» row
   cycles only Windowed and Full screen (`DisplayMode::next_on`); a saved Borderless is Full screen.
 
 Rule: a parity setting reads the install's value until the player chooses
