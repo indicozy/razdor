@@ -109,13 +109,11 @@ pub struct PlayOptions {
     pub impossible: bool,
     /// `OptValue11`: the wide front row, 6 units per row instead of 4.
     pub wide_row: bool,
-    /// `OptValue4`: no music and sounds (read at start).
-    pub no_sound: bool,
 }
 
 impl Default for PlayOptions {
     fn default() -> Self {
-        PlayOptions { expert_ai: false, impossible: false, wide_row: true, no_sound: false }
+        PlayOptions { expert_ai: false, impossible: false, wide_row: true }
     }
 }
 
@@ -124,7 +122,7 @@ impl PlayOptions {
         let options = ini.section("Options");
         let on = |key: &str| options.is_some_and(|s| s.int(key) == 1);
         let wide_row = options.and_then(|s| s.get("OptValue11")).is_none_or(|_| on("OptValue11"));
-        PlayOptions { expert_ai: on("OptValue9"), impossible: on("OptValue10"), wide_row, no_sound: on("OptValue4") }
+        PlayOptions { expert_ai: on("OptValue9"), impossible: on("OptValue10"), wide_row }
     }
 
     pub fn read(dir: &Path) -> PlayOptions {
@@ -673,17 +671,14 @@ mod tests {
     fn play_options_read_as_the_original() {
         // 0x4b8974: on when the value reads 1, loosely; anything else, or nothing, is off.
         let ini = Ini::parse("[Options]\nOptValue9=1\nOptValue10= 1 \nOptValue11=1x\n");
-        assert_eq!(PlayOptions::from_ini(&ini), PlayOptions { expert_ai: true, impossible: true, wide_row: true, no_sound: false });
+        assert_eq!(PlayOptions::from_ini(&ini), PlayOptions { expert_ai: true, impossible: true, wide_row: true });
         let ini = Ini::parse("[Options]\nOptValue9=01\nOptValue10=2\nOptValue11=on\n");
-        assert_eq!(PlayOptions::from_ini(&ini), PlayOptions { expert_ai: true, impossible: false, wide_row: false, no_sound: false });
+        assert_eq!(PlayOptions::from_ini(&ini), PlayOptions { expert_ai: true, impossible: false, wide_row: false });
         assert_eq!(PlayOptions::from_ini(&Ini::default()), PlayOptions::default());
         // Razdor's wide row default: with no OptValue11 the row is wide.
-        assert_eq!(PlayOptions::default(), PlayOptions { expert_ai: false, impossible: false, wide_row: true, no_sound: false });
+        assert_eq!(PlayOptions::default(), PlayOptions { expert_ai: false, impossible: false, wide_row: true });
         assert!(PlayOptions::from_ini(&Ini::parse("[Options]\nOptValue9=1\n")).wide_row);
         assert!(!PlayOptions::from_ini(&Ini::parse("[Options]\nOptValue11=0\n")).wide_row);
-        // "No music and sounds" (OptValue4), read at start.
-        assert!(PlayOptions::from_ini(&Ini::parse("[Options]\nOptValue4=1\n")).no_sound);
-        assert!(!PlayOptions::from_ini(&Ini::parse("[Options]\nOptValue4=0\n")).no_sound);
     }
 
     #[test]

@@ -46,6 +46,7 @@ Razdor plays the original game's scenarios using its original rules. Below is wh
 ## Sound
 
 * Music changes based on context, just like in the original; volume settings are in the `Esc` menu.
+* The original's "Do not load music and sounds" checkbox is removed from the settings: sound always loads, and volume turns it off.
 * More details: [Sound and Music](/razdor/wiki/en/differences/sound-music/).
 
 ## Tools and Mods

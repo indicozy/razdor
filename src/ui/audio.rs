@@ -251,7 +251,9 @@ pub struct Settings {
     /// "Скорость перемещения героя" (`WalkSpeed`, 0..`WALK_SPEED_MAX`: 0..100 is the original's
     /// range, above it is Razdor's extra speed).
     pub walk_speed: Option<f32>,
-    /// "Не загружать музыку и звуки" (`OptValue4`; read at start, as the original).
+    /// The original's «Не загружать музыку и звуки» (`OptValue4`) is removed (the owner's decision,
+    /// 2026-11-10): sound always loads; volume 0 silences it. The field stays so an old save still
+    /// reads; nothing reads it now.
     pub no_sound: Option<bool>,
     /// "Отключить всплывающие подсказки" (`OptValue6`).
     pub hints_off: Option<bool>,
@@ -604,9 +606,8 @@ impl Audio {
             _ if !cfg!(feature = "audio") => "built without the audio feature",
             _ if env_flag("RAZDOR_NO_AUDIO") => "RAZDOR_NO_AUDIO is set",
             None => "no install",
-            // "Не загружать музыку и звуки" (`OptValue4`, interface.md §16): read at start, as
-            // the original's, so a change waits for the next start.
-            Some(dt) if audio.settings.no_sound.unwrap_or_else(|| razdor::dt::install::PlayOptions::read(&dt.dir).no_sound) => "no music and sounds, as the settings say",
+            // The original's «Не загружать музыку и звуки» (`OptValue4`) is removed (the owner's
+            // decision, 2026-11-10): sound always loads; volume 0 silences it.
             Some(_) if !device_ok() => "no sound device",
             Some(dt) => match (std::time::Instant::now(), Backend::load(&dt.dir)) {
                 (t0, Ok(b)) => {

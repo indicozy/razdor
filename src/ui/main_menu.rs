@@ -1382,11 +1382,6 @@ pub fn autosave(audio: &super::audio::Settings) -> bool {
     audio.autosave.unwrap_or_else(|| super::saves::autosaves_on(chrome::has_texts().then(|| chrome::install_option("OptValue8")).flatten().as_deref()))
 }
 
-/// "Не загружать музыку и звуки" (`OptValue4`), read at start.
-pub fn no_sound(audio: &super::audio::Settings) -> bool {
-    audio.no_sound.unwrap_or_else(|| install_on("OptValue4", false))
-}
-
 /// "Невозможный уровень сложности игры" (`OptValue10`), read at start.
 pub fn impossible(audio: &super::audio::Settings) -> bool {
     audio.impossible.unwrap_or_else(|| install_on("OptValue10", false))
@@ -2262,11 +2257,11 @@ fn set_slider(audio: &mut super::audio::Settings, i: usize, old: f32, v: f32) {
     }
 }
 
-/// The checkboxes of the General tab, top to bottom, as (key, label, on, ink): the original's eight
-/// (`Option4`…`Option11`), and on a phone the touchpad mode after them.
+/// The checkboxes of the General tab, top to bottom, as (key, label, on, ink): the original's seven
+/// (`Option5`…`Option11`; the original's `Option4`, «Не загружать музыку и звуки», is removed, the
+/// owner's decision, 2026-11-10), and on a phone the touchpad mode after them.
 fn general_checks(audio: &super::audio::Settings, install_wide: bool) -> Vec<(&'static str, String, bool, Color)> {
     let mut checks = vec![
-        ("Option4", own("Options", "Option4", n_("Do not load music and sounds (needs a restart)")), no_sound(audio), CHECK_ORANGE),
         ("Option5", own("Options", "Option5", n_("Show FPS")), audio.show_fps, CHECK_INK),
         ("Option6", own("Options", "Option6", n_("Turn off hints")), hints_off(audio), CHECK_INK),
         ("Option7", own("Options", "Option7", n_("Automatically pursue the chosen army")), pursue(audio), CHECK_INK),
@@ -2285,7 +2280,6 @@ fn general_checks(audio: &super::audio::Settings, install_wide: bool) -> Vec<(&'
 /// mode takes effect on «Принять» only (`apply_options`).
 fn toggle_check(audio: &mut super::audio::Settings, key: &str, on: bool) {
     match key {
-        "Option4" => audio.no_sound = Some(!on),
         "Option5" => audio.show_fps = !on,
         "Option6" => audio.hints_off = Some(!on),
         "Option7" => audio.pursue = Some(!on),
@@ -2298,7 +2292,7 @@ fn toggle_check(audio: &mut super::audio::Settings, key: &str, on: bool) {
     }
 }
 
-/// The General tab on the desktop: the original's five slider rows and eight checkboxes at their
+/// The General tab on the desktop: the original's five slider rows and seven checkboxes at their
 /// places in `pane` (they fit it, so it does not scroll).
 fn general_desktop(audio: &mut super::audio::Settings, install_wide: bool, pane: Rect, k: f32) {
     let row = |i: usize| Rect::new(pane.x + 10.0 * k, pane.y + i as f32 * 37.5 * k, pane.w - 20.0 * k, 30.0 * k);
@@ -2308,7 +2302,9 @@ fn general_desktop(audio: &mut super::audio::Settings, install_wide: bool, pane:
         }
     }
     let cx = pane.x + 14.0 * k;
-    let cy = |i: usize| row(5).y + 4.0 * k + i as f32 * 27.0 * k + if i >= 5 { 11.0 * k } else { 0.0 };
+    // The gap sits before the battle group: its first checkbox, «Улучшенный интеллект противника в
+    // битве» (`Option9`), is the fifth of the seven (index 4).
+    let cy = |i: usize| row(5).y + 4.0 * k + i as f32 * 27.0 * k + if i >= 4 { 11.0 * k } else { 0.0 };
     for (i, (key, label, on, ink)) in general_checks(audio, install_wide).into_iter().enumerate() {
         if option_check(cx, cy(i), &label, on, ink) {
             toggle_check(audio, key, on);
@@ -2515,9 +2511,8 @@ fn option_slider_sized(r: Rect, label: &str, value: f32, size: f32) -> Option<f3
 
 /// The labels of the settings window's slider rows: pale green, as the original's.
 const OPTION_INK: Color = Color::new(0.78, 0.95, 0.55, 1.0);
-/// A checkbox's label (the ae24a0 tint) and the "no sound" one (ae24a4), as the original's.
+/// A checkbox's label (the ae24a0 tint), as the original's.
 const CHECK_INK: Color = Color::new(0.98, 0.92, 0.35, 1.0);
-const CHECK_ORANGE: Color = Color::new(1.0, 0.55, 0.15, 1.0);
 
 /// One of the original's checkboxes (`CBoxChecked` / `CBoxUn` with their alpha masks): true
 /// when clicked (on the box or its label).

@@ -36,6 +36,8 @@ Sound can be controlled in several ways:
 2. **Esc Menu:** the volume of music and sounds is set here (the **−** and **+** buttons; for music, the **+** and **−** keys). Each sound type can be set to **Off** or **On**.
 3. **Configuration File:** all volume settings are saved in `audio.json` within your saves folder.
 
+The original had a "Do not load music and sounds" checkbox in its settings (it took effect after a game restart). Razdor has no such checkbox: sound always loads, and you turn it off with the volume.
+
 :::caution
 For complete silence, you can use the variable `RAZDOR_NO_AUDIO=1`. If you need to track every sound playback, use `RAZDOR_AUDIO_LOG=1`.
 :::

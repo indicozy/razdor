@@ -916,9 +916,9 @@ The world map's 2.5D settings are in the same window, after «Имя предв�
 (`map_tilt`, always shown), and «Размер фигур» (`map_sprite_size`) and «Поворот двумя пальцами»
 (`map_twist`, `gestures::set_twist`) only with the 2.5D view on. `apply_options` pushes all three
 every frame (see `assets-and-drawing.md`, the 2.5D view).
-Two options are read at start only, as the original's: «no music and
-sounds» (`Audio::new`) and «impossible difficulty» (the content's difficulty factor in
-`App::new`).
+The option «impossible difficulty» is read at start only, as the original's (the content's
+difficulty factor in `App::new`). The original's «no music and sounds» (`OptValue4`) is removed
+(the owner's decision, 2026-11-10): `Audio::new` always loads the sound, volume 0 silences it.
 
 «Расстановка армии» (`unit_drag::Controls`, saved as `formation_controls`: `clicks`, `drag`,
 `both`; pushed in by `main_menu::apply_options` → `unit_drag::set_controls`) is a Razdor
