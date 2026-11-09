@@ -284,7 +284,8 @@ public String razdorInstall(String path) {
 // AndroidX). A map is copied into the app's cache, because the game reads a file, not a content URI.
 // An archive is not copied: its descriptor goes to Rust, which reads it in place (a stream that cannot
 // seek is copied there). razdorPickOutcome is the game's poll: "" while the picker is open or the copy
-// runs, "cancel", "error: <why>", "ok\n<name>\n<path>" (a map copy) or "fd\n<name>\n<fd>" (an archive).
+// runs, "cancel", "error: <why>", "ok\n<name>\n<path>" (a map copy) or "fd\n<name>\n<size>\n<fd>" (an
+// archive; size is -1 when the document does not say).
 private static final int RAZDOR_PICK_REQUEST = 7301;
 // "" until the picker answers; then as razdorPickOutcome describes.
 private volatile String razdorPickResult = "";
@@ -365,16 +366,29 @@ private String razdorDisplayName(Uri uri) {
     return name;
 }
 
+// The picked document's size from OpenableColumns.SIZE, -1 when the document does not say.
+private long razdorArchiveSize(Uri uri) {
+    try (Cursor cursor = getContentResolver().query(uri, new String[] {OpenableColumns.SIZE}, null, null, null)) {
+        if (cursor != null && cursor.moveToFirst() && !cursor.isNull(0)) {
+            return cursor.getLong(0);
+        }
+    } catch (Exception e) {
+        // No size: the room check is left to the copy's own failure.
+    }
+    return -1;
+}
+
 // Opens the picked archive for reading in place: the descriptor is detached from the ParcelFileDescriptor
 // (so nothing closes it here) and handed to Rust, which owns it from then on.
 private String razdorOpenArchive(Uri uri) {
     String name = razdorDisplayName(uri);
+    long size = razdorArchiveSize(uri);
     try {
         ParcelFileDescriptor pfd = getContentResolver().openFileDescriptor(uri, "r");
         if (pfd == null) {
             return "error: the file has no data";
         }
-        return "fd\n" + name + "\n" + pfd.detachFd();
+        return "fd\n" + name + "\n" + size + "\n" + pfd.detachFd();
     } catch (Exception e) {
         return "error: " + e;
     }

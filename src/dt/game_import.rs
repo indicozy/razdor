@@ -38,6 +38,8 @@ pub enum Error {
     NotInstall,
     /// The unpacking failed (its error, with the archive's name where known).
     Unpack(UnpackError),
+    /// The file is neither a 7z nor a zip archive (by its name or its first bytes).
+    NotArchive,
     /// The swap or the moving of the files failed: the reason.
     Io(String),
     /// The archive's files do not fit on the disk: the bytes needed (with the margin) and free.
@@ -57,6 +59,7 @@ impl std::fmt::Display for Error {
             Error::NoInstall => f.write_str("there is no game to patch"),
             Error::NotInstall => f.write_str("the archive does not hold a Discord Times install"),
             Error::Unpack(e) => write!(f, "{e}"),
+            Error::NotArchive => f.write_str("not a 7z or zip archive"),
             Error::Io(why) => write!(f, "{why}"),
             Error::NoSpace { needed, free } => write!(f, "{needed} bytes are needed and {free} are free"),
             Error::Download(why) => write!(f, "the download failed: {why}"),
@@ -88,6 +91,9 @@ pub fn examine(path: &Path, name: &str) -> Result<Found, Error> {
 /// [`examine`] of an archive that is open already (a phone's picked document, read in place):
 /// its listing is read from the file's start.
 pub fn examine_file(file: &mut File, name: &str) -> Result<Found, Error> {
+    if !unpack::is_archive(file, name) {
+        return Err(Error::NotArchive);
+    }
     let archive = file.metadata().map(|m| m.len()).map_err(|e| Error::Unreadable(e.to_string()))?;
     classify(unpack::inspect_file(file, name), archive, name)
 }
@@ -103,6 +109,25 @@ fn classify(listing: Result<Option<Found>, String>, archive: u64, name: &str) ->
         Some(e) => Err(e),
         None => Ok(found),
     }
+}
+
+/// Whether an error of a write is the disk running out of room (`ENOSPC`, or the StorageFull kind).
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub fn is_out_of_room(e: &io::Error) -> bool {
+    e.kind() == io::ErrorKind::StorageFull || e.raw_os_error() == Some(28)
+}
+
+/// Refuses an archive of `archive` bytes (None: unknown, not refused) when its files with
+/// [`SPACE_MARGIN`] do not fit in the free room of `dir` (`free`: [`free_space`], or a test's). A
+/// room that cannot be read is not refused either.
+pub fn check_room(archive: Option<u64>, dir: &Path, free: &dyn Fn(&Path) -> Option<u64>) -> Result<(), Error> {
+    let Some(archive) = archive else { return Ok(()) };
+    let Some(free) = free(dir) else { return Ok(()) };
+    let needed = archive.saturating_add(SPACE_MARGIN);
+    if needed > free {
+        return Err(Error::NoSpace { needed, free });
+    }
+    Ok(())
 }
 
 /// Whether `file` can seek, so it can be read as an archive (a pipe or a stream cannot).
@@ -179,10 +204,11 @@ fn stage_and_apply(
     if found.kind == Kind::Patch && !target.is_dir() {
         return Err(Error::NoInstall);
     }
+    // Refused before anything is deleted or written.
+    check_space(found, target, free)?;
     let staging = staging_dir(target);
     // A folder left by an import that did not finish.
     let _ = fs::remove_dir_all(&staging);
-    check_space(found, target, free)?;
     let result = unpack(&staging, progress).map_err(Error::Unpack).and_then(|()| apply(found, target, &staging));
     // After a swap the staging folder is the install (renamed away); after a patch it is empty;
     // after a failure it holds the unpacked files. Whatever is left goes.
@@ -198,19 +224,13 @@ fn apply(found: &Found, target: &Path, staging: &Path) -> Result<Done, Error> {
     }
 }
 
-/// Refuses an archive whose files, with [`SPACE_MARGIN`], do not fit in the free room of the disk
-/// the staging folder is written to. A room that cannot be read is not refused.
+/// [`check_room`] for an import into `target`: the room of the disk the staging folder goes to.
 fn check_space(found: &Found, target: &Path, free: &dyn Fn(&Path) -> Option<u64>) -> Result<(), Error> {
     let dir = match target.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
         _ => Path::new("."),
     };
-    let Some(free) = free(dir) else { return Ok(()) };
-    let needed = found.size.saturating_add(SPACE_MARGIN);
-    if needed > free {
-        return Err(Error::NoSpace { needed, free });
-    }
-    Ok(())
+    check_room(Some(found.size), dir, free)
 }
 
 /// The bytes free to the player on the disk of `dir` (`statvfs`), or None when they cannot be read
@@ -822,6 +842,49 @@ mod tests {
         assert!(report.missing.iter().all(|m| !crate::dt::integrity::needed_to_play(m)), "nothing Razdor reads is missing: {:?}", report.missing);
         assert!(crate::dt::install::check_game_files(&install, &manifest).is_ok());
         assert!(crate::dt::install::DtInstall::load(&install).is_ok(), "the install loads without an exe");
+    }
+
+    fn a_room_check_refuses_only_a_known_archive_that_does_not_fit() {
+        let dir = Path::new("/cache");
+        assert_eq!(check_room(Some(10), dir, &|_| Some(10 + SPACE_MARGIN)), Ok(()), "exactly enough");
+        assert_eq!(check_room(Some(10), dir, &|_| Some(10 + SPACE_MARGIN - 1)), Err(Error::NoSpace { needed: 10 + SPACE_MARGIN, free: 10 + SPACE_MARGIN - 1 }));
+        assert_eq!(check_room(Some(10), dir, &|_| None), Ok(()), "an unknown room is not refused");
+        assert_eq!(check_room(None, dir, &|_| Some(0)), Ok(()), "an unknown size is not refused here");
+    }
+
+    #[test]
+    fn a_full_disk_is_recognised_by_its_kind_or_its_errno() {
+        assert!(is_out_of_room(&io::Error::from(io::ErrorKind::StorageFull)));
+        assert!(is_out_of_room(&io::Error::from_raw_os_error(28)), "ENOSPC");
+        assert!(!is_out_of_room(&io::Error::from(io::ErrorKind::PermissionDenied)));
+    }
+
+    #[test]
+    fn a_refused_import_deletes_nothing_not_even_a_stale_staging_folder() {
+        let s = Scratch::new("refused-no-delete");
+        let install = s.0.join("DiscordTimes");
+        fake_install(&install, "old");
+        // A staging folder left by an earlier import: a refused import must leave it alone.
+        fake_install(&staging_dir(&install), "stale");
+        let before_install = tree(&install);
+        let before_staging = tree(&staging_dir(&install));
+        let archive = s.0.join("game.zip");
+        game_zip(&archive, "new");
+        let (mut file, found) = open_found(&archive);
+        let mut unpack = |staging: &Path, progress: &dyn Fn(u64, u64)| unpack::unpack_file(&mut file, &found, staging, progress);
+        let refused = stage_and_apply(&found, &install, &|_, _| {}, &|_| Some(1), &mut unpack);
+        assert!(matches!(refused, Err(Error::NoSpace { .. })));
+        assert_eq!(tree(&install), before_install);
+        assert_eq!(tree(&staging_dir(&install)), before_staging, "the stale staging folder is not deleted");
+    }
+
+    #[test]
+    fn a_picked_file_that_is_no_archive_is_refused_as_not_an_archive() {
+        let s = Scratch::new("not-archive");
+        let picked = s.0.join("picked-archive");
+        fs::write(&picked, b"plain text, not an archive").unwrap();
+        let mut file = File::open(&picked).unwrap();
+        assert_eq!(examine_file(&mut file, "picked-archive"), Err(Error::NotArchive));
     }
 
     #[test]

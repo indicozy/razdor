@@ -86,6 +86,34 @@ enum Format {
     Zip,
 }
 
+/// Whether the open `file` is a 7z or zip archive: its name's extension says so, or else its first
+/// bytes do (a picked file may have no 7z or zip name).
+pub fn is_archive(file: &mut File, name: &str) -> bool {
+    format_for(file, name).is_some()
+}
+
+/// The format of an open archive: by the name's extension, else by its first bytes. The file's
+/// position is left at its start.
+fn format_for(file: &mut File, name: &str) -> Option<Format> {
+    format_of(Path::new(name)).or_else(|| sniff(file))
+}
+
+/// The format of an archive by its first bytes: 7z starts with 37 7A BC AF 27 1C, zip with
+/// 50 4B 03 04. None for anything else (or a file that cannot be read).
+fn sniff(file: &mut File) -> Option<Format> {
+    file.seek(SeekFrom::Start(0)).ok()?;
+    let mut head = Vec::with_capacity(6);
+    (&mut *file).take(6).read_to_end(&mut head).ok()?;
+    file.seek(SeekFrom::Start(0)).ok()?;
+    if head.starts_with(&[0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C]) {
+        Some(Format::SevenZ)
+    } else if head.starts_with(&[0x50, 0x4B, 0x03, 0x04]) {
+        Some(Format::Zip)
+    } else {
+        None
+    }
+}
+
 fn format_of(path: &Path) -> Option<Format> {
     let ext = path.extension()?.to_str()?;
     if ext.eq_ignore_ascii_case("7z") {
@@ -128,7 +156,7 @@ pub fn inspect(path: &Path) -> Result<Option<Found>, String> {
 /// extension gives its format). Read from its start. The archive has no path of its own, so the
 /// returned `Found`'s path is `name`: unpack it with [`unpack_file`], not [`unpack`].
 pub fn inspect_file(file: &mut File, name: &str) -> Result<Option<Found>, String> {
-    let format = format_of(Path::new(name)).ok_or("not a 7z or zip archive")?;
+    let format = format_for(file, name).ok_or("not a 7z or zip archive")?;
     file.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
     let entries = list_from(format, &mut *file)?;
     Ok(found_from(&entries, PathBuf::from(name)))
@@ -289,7 +317,7 @@ pub fn unpack_within(archives: &[Found], dest: &Path, progress: &dyn Fn(u64, u64
 /// a path: `file` is read from its start, and its bytes are capped as [`unpack_within`] caps them.
 pub fn unpack_file(file: &mut File, found: &Found, dest: &Path, progress: &dyn Fn(u64, u64)) -> Result<(), UnpackError> {
     fs::create_dir_all(dest).map_err(|e| write_error(&e, dest))?;
-    let format = format_of(&found.path).ok_or_else(|| UnpackError::Other("not a 7z or zip archive".into()))?;
+    let format = format_for(file, &found.name).ok_or_else(|| UnpackError::Other("not a 7z or zip archive".into()))?;
     file.seek(SeekFrom::Start(0)).map_err(|e| UnpackError::Other(format!("{}: {e}", found.name)))?;
     let mut count = counter(found.size, found.size.min(MAX_UNPACKED_BYTES), progress);
     unpack_stream(format, &mut *file, &found.strip, dest, &mut count).map_err(|e| named(&found.name, e))
@@ -636,11 +664,28 @@ mod tests {
     }
 
     #[test]
-    fn an_open_file_with_a_name_of_no_archive_is_refused() {
-        let s = Scratch::new("open-file-name");
-        make_zip(&s.0.join("game.zip"), &[("Rus_Units.ini", "units")]);
-        let mut file = File::open(s.0.join("game.zip")).unwrap();
-        assert!(inspect_file(&mut file, "picked").is_err(), "no 7z or zip extension: not read");
+    fn a_picked_file_without_an_archive_name_is_read_by_its_first_bytes() {
+        let s = Scratch::new("sniff");
+        make_zip(&s.0.join("game.zip"), &[("DiscordTimes/Maps_Rus/a.DTm", "map"), ("DiscordTimes/Rus_Units.ini", "units")]);
+        let mut w = sevenz_rust2::ArchiveWriter::create(s.0.join("game.7z")).unwrap();
+        w.push_archive_entry(sevenz_rust2::ArchiveEntry::new_file("DiscordTimes/Maps_Rus/a.DTm"), Some(&b"map"[..])).unwrap();
+        w.push_archive_entry(sevenz_rust2::ArchiveEntry::new_file("DiscordTimes/Rus_Units.ini"), Some(&b"units"[..])).unwrap();
+        w.finish().unwrap();
+        fs::write(s.0.join("notes.txt"), b"not an archive at all").unwrap();
+
+        for (file, kind) in [("game.zip", Kind::Game), ("game.7z", Kind::Game)] {
+            let mut open = File::open(s.0.join(file)).unwrap();
+            assert!(is_archive(&mut open, "picked-archive"), "{file} is read by its bytes");
+            let found = inspect_file(&mut open, "picked-archive").unwrap().expect("a game");
+            assert_eq!(found.kind, kind, "{file}");
+            let dest = s.0.join(format!("out-{file}"));
+            unpack_file(&mut open, &found, &dest, &|_, _| {}).unwrap();
+            assert_eq!(read(&dest.join("Rus_Units.ini")), "units", "{file}");
+            assert_eq!(read(&dest.join("Maps_Rus/a.DTm")), "map", "{file}");
+        }
+        let mut plain = File::open(s.0.join("notes.txt")).unwrap();
+        assert!(!is_archive(&mut plain, "picked-archive"), "neither 7z nor zip");
+        assert!(inspect_file(&mut plain, "picked-archive").is_err());
     }
 
     #[test]
