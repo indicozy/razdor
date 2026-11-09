@@ -162,7 +162,11 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
     }
     // Kept 40 px from the right edge at Normal; grown to the left.
     if button(screen_width() - 40.0 - 180.0 * g, 40.0, 180.0 * g, 44.0 * g, tr("Load a game"), true) {
-        return Some(Screen::Load(super::saves::LoadView::new(super::saves::Back::Title)));
+        if super::migrate::busy() {
+            super::migrate::refuse();
+        } else {
+            return Some(Screen::Load(super::saves::LoadView::new(super::saves::Back::Title)));
+        }
     }
     let y = screen_height() - 110.0;
     if let Some((Some(_), desc)) = hovered {
@@ -852,10 +856,14 @@ pub fn class_select(
             draw_rectangle(x, y, w, h, Color::new(0.0, 0.0, 0.0, 0.6));
         }
         if hover && clicked() {
-            cue(Cue::MenuPress);
-            super::items_view::reset_pack_view();
-            *game = Some(start_game(&content, scenario.as_ref().map(|(e, c)| (*e, c)), hero, &name));
-            return Some(Screen::WorldMap);
+            if super::migrate::busy() {
+                super::migrate::refuse();
+            } else {
+                cue(Cue::MenuPress);
+                super::items_view::reset_pack_view();
+                *game = Some(start_game(&content, scenario.as_ref().map(|(e, c)| (*e, c)), hero, &name));
+                return Some(Screen::WorldMap);
+            }
         }
     }
     // Razdor's own: grows with the text size (`button_grow`), its bottom edge where it is at Normal.

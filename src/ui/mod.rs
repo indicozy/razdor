@@ -88,6 +88,7 @@ pub mod android;
 pub mod transfer;
 #[cfg(target_os = "ios")]
 pub mod ios;
+pub mod migrate;
 pub mod mobile;
 pub mod water;
 pub mod weather;
@@ -1302,6 +1303,23 @@ impl App {
         }
     }
 
+    /// The move of the player's files into the app's folder (Android, `ui::migrate`): started on
+    /// the first frame, and its end applied here: the install is read from the new folder, the
+    /// log moves to it, and the player is told.
+    fn migration_tick(&mut self) {
+        migrate::start_if_needed();
+        match migrate::tick() {
+            Some(migrate::Outcome::Moved { game_skipped }) => {
+                razdor::diag::reopen_log();
+                self.reload_install();
+                migrate::notify(migrate::moved_message(game_skipped));
+            }
+            Some(migrate::Outcome::NoRoom { needed, free }) => migrate::notify(migrate::no_room_message(needed, free)),
+            Some(migrate::Outcome::Failed(why)) => razdor::diag::log(&format!("move: {why}; the next start tries again")),
+            None => {}
+        }
+    }
+
     pub fn frame(&mut self) {
         // Esc (or Back) closes the performance test's windows, or stops its run: the key is used here.
         if bench::handle_escape(self) {
@@ -1311,6 +1329,7 @@ impl App {
         mobile::refresh_safe_insets();
         #[cfg(target_os = "android")]
         mobile::refresh_keyboard_inset();
+        self.migration_tick();
         self.mobile_install_poll();
         // The hub's promo ad is kept in the app folder once the launch's catalog has come (`ui::ads::sync_tick`).
         ads::sync_tick();
@@ -1473,8 +1492,9 @@ impl App {
                 c.session.end_round();
             }
         }
-        // The launch after an unfinished session offers to continue it (once, at the first frame).
-        if !self.session_checked {
+        // The launch after an unfinished session offers to continue it (once, at the first frame
+        // the files are not being moved: a continued game is a load, see `migrate`).
+        if !self.session_checked && !migrate::busy() {
             self.session_checked = true;
             self.check_session();
         }
@@ -1571,6 +1591,10 @@ impl App {
                 Some(main_menu::Pick::NewGame) => {
                     new_game::open_list();
                     Some(Screen::ScenarioSelect)
+                }
+                Some(main_menu::Pick::Load) if migrate::busy() => {
+                    migrate::refuse();
+                    None
                 }
                 Some(main_menu::Pick::Load) => Some(Screen::Load(saves::LoadView::new(saves::Back::Title))),
                 Some(main_menu::Pick::Custom) => {

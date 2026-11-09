@@ -350,9 +350,15 @@ pub fn write_nomedia(root: &Path) {
 
 /// Start-up housekeeping on the phones (`main` runs it on a thread): the old picture cache is
 /// removed from [`app_dir`], and on Android `.nomedia` is written there. Desktop: nothing.
+/// Android before the move ([`android_migrated`] false): nothing, since [`app_dir`] is then the
+/// legacy shared folder, which is only read until its files are copied (`migration`).
 pub fn tidy_app_dir() {
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
+        #[cfg(target_os = "android")]
+        if !android_migrated() {
+            return;
+        }
         if let Some(root) = app_dir() {
             retire_old_cache(&root);
             #[cfg(target_os = "android")]

@@ -775,6 +775,8 @@ pub fn frame(no_install: bool, mods: &[(String, razdor::hub::Text)], active: Opt
     thorny_promo(k, version_y - vsize - 6.0 * k);
     // An update put in place says so (an "Always" update has no window of its own).
     super::update_view::title_line();
+    // The files being moved into the app's folder (Android; nothing else on the desktop).
+    super::migrate::title_line();
     // Esc quits the game at once, without a question, as in the original (0x4c8059); a
     // gamepad's Start, which is Esc elsewhere, does not (Razdor's: pressed to open a menu,
     // it would end the game).
