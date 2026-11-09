@@ -15,7 +15,7 @@ You need version 1.8 with Community Update 1.2 (game 1.8.1). If the game is miss
 
 If the game is missing, the main menu downloads it itself from the community's Google Drive (the «ИГРУ КАЧАТЬ ЗДЕСЬ» thread on the Discord server): one `.zip` file of about 45 MB. Press «Download the game» on the main menu. While it runs, the megabytes done are shown. «Cancel» stops it; the part already downloaded is kept, and the next press goes on from it. The file is checked by its size and checksum, then unpacked into the game folder. When the game is in place, the main menu opens as usual.
 
-If the archive is already on your disk, press «Pick the game archive…» (on a phone, the system's file window opens) and choose the `.zip`: it is installed the same way as the downloaded one.
+If the archive is already on your disk, press «Pick the game archive…» (on a phone this is the «Choose the archive…» button on the title screen, and the system's file window opens at once) and choose the `.zip`: it is installed the same way as the downloaded one.
 
 If the download does not work (no network, Google Drive does not give the file, or refuses it because too many people downloaded it), the same screen shows the reason and the manual way:
 

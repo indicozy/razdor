@@ -16,7 +16,7 @@ The Android version (**`razdor-<version>.apk`** file) is experimental. It requir
    * "Download the game" — downloads the game archive (approx. 45 MB) from the community.
    * "Choose the archive…" — select a game archive (.zip or .7z) that is already on your phone.
 3. If you played an older version, Razdor will automatically migrate saves, settings, and the game from the `Internal Storage/Razdor` and `Internal Storage/DiscordTimes` folders during the first launch. While the migration is in progress, the title screen will display "Moving files… N%", and the game cannot be launched. The old Razdor folders are not deleted: once the transfer is complete, a message will appear stating they can be safely removed.
-4. If there is insufficient space during the transfer, the game folder will remain in its old location. A message will appear on the screen: "The game folder was not moved: there was not enough room. If the game is not found, pick its archive."
+4. If there is not enough room even for the Razdor folder (saves and settings), nothing is moved: Razdor shows how many MB are needed and how many are free. The files stay in the old folders, and the move is tried again at the next start. If there is only not enough room for the game, the saves are moved and the game has to be picked as an archive. A message will appear on the screen: "The game folder was not moved: there was not enough room. If the game is not found, pick its archive."
 
 :::note
 If you granted the app "All Files Access" in a previous version, this permission will be preserved for the file transfer. In newer versions, file access is no longer requested.
@@ -119,12 +119,12 @@ This is how you install the game with a mod (e.g., Community Update Evolution Mo
 Saves (in the `saves` folder) and the log are stored in the app's own folder: `Android/data/io.github.indicozy.razdor/files/Razdor`. The game files are located alongside them in the `DiscordTimes` folder. This folder is not deleted when the app is updated.
 
 In the loading window, the "Transfer…" button opens three actions:
-* "Export saves" — all saves are packed into a single .zip file and saved via the system "Save as" dialog.
-* "Import a save" — allows you to select a .rzsave file or a .zip file containing saves. Old saves are not overwritten: if the file is identical, it is skipped; if it differs, a new copy with a new number is created. App settings remain unchanged during this process.
+* "Export saves" — all saves and pins are packed into a single .zip file together with the settings (`settings.json`, `audio.json`, `marks.json`); the file is saved via the system "Save as" dialog.
+* "Import a save" — allows you to select a .rzsave file or a .zip file containing saves. Old saves are not overwritten: if the file is identical, it is skipped; if it differs, a new copy with a new number is created. Settings already on the phone are not overwritten: the settings in the file are skipped for them.
 * "Export the log" — creates a game log file for submitting bug reports.
 
 :::caution
-When you uninstall the app, Android also deletes its data folder. Always perform an "Export saves" before uninstalling. If Android asks whether to "Keep" app data during uninstallation, select "Keep."
+When you uninstall the app, Android also deletes its data folder: saves, pins and settings. Always perform an "Export saves" before uninstalling. If Android asks whether to "Keep" app data during uninstallation, select "Keep": then the settings and saves remain.
 :::
 
 The image cache is stored in the app's own cache (Settings → Apps → Razdor → Storage) and does not exceed 256 MB. There is nothing critical in it: you can clear it using the "Clear cache" button; saves will not be lost, and images will simply take slightly longer to load upon the next launch.

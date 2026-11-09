@@ -84,12 +84,12 @@ the log, `app_dir`) and `<files>/DiscordTimes` (the game, `unpack_dir`), where `
 Before the move they are the legacy `/storage/emulated/0/Razdor` and `/storage/emulated/0/DiscordTimes`
 (`platform::legacy_android_paths`). Desktop keeps the platform's data and config folders.
 
-The migration gate (release N): `platform::set_android_files_dir`, called first in `main`, reads
+The migration gate (release N): `platform::set_android_files_dir`, called in `main` after the CLI's early exits and just before `diag::init`, reads
 `platform::start_state` from the marker `<files>/Razdor/migrated-from-shared` (`migrated_marker`) and from
 the two legacy folders (`legacy_state`). With the marker the app's folders are in use (`android_migrated`).
 No legacy data (a fresh install) writes the marker with `fresh`. Legacy data leaves the legacy paths in use
 until the move. A legacy folder that cannot be read (no storage access) gives the app's folders for this run,
-with no marker, so the next start asks again. `platform::android_current` takes the paths from this gate,
+with no marker, so the gate checks again at the next start (nothing is asked). `platform::android_current` takes the paths from this gate,
 so `app_dir`, `unpack_dir` and `install_roots` all follow it.
 
 The move (`migration::migrate`, its screen and thread in `ui::migrate`): `migrate::start_if_needed` starts it
@@ -97,7 +97,7 @@ on the first frame. Each legacy folder is copied into `<dest>.part` and every na
 absolute legacy paths in the copy's text files are rewritten (`rewrite_text`, on the copy only); the legacy
 trees are scanned again, and a change discards the copy (the move starts again at the next start). Then the copy
 is put in place, the marker is written, and `set_android_migrated` flips the paths. A game folder that does not
-fit (`SPACE_MARGIN`) stays where it was (`Moved::game_skipped`): the install is then asked for as an archive.
+fit (`SPACE_MARGIN`) stays where it was (`Moved::game_skipped`): the install is then asked for as an archive. A Razdor folder that does not fit (the saves) is not moved at all: `Failure::NoRoom` shows the room needed and the room free in MB (`migrate::no_room_message`), the files stay in the legacy folders, and the next start tries again.
 The legacy folders are only read, never written or deleted. While it runs, the title screen shows its percent
 (`migrate::title_line`) and `migrate::busy` holds a game's start, a load and a mod's choice; its end shows the
 notice that the old folders can be deleted (`migrate::moved_message`).
@@ -105,14 +105,15 @@ notice that the old folders can be deleted (`migrate::moved_message`).
 Storage access: release N asks for none. The move reads the legacy folders, so a player who granted «All files
 access» in an earlier release keeps it until the next release drops the permission. `ui::android::storage_granted`
 and `request_storage` (the settings page on Android 11 and later, the runtime dialog on 8 to 10) are kept, unused,
-for that release. The title screen's not-found block (`screens::android_not_found`, scaled to the screen) offers
-the download and the archive picker, and «Проверить снова»; no settings page opens by itself.
-The main menu shows the
-same block while no install is found (`screens::menu_not_found`, drawn by `main_menu::frame(no_install)`
+for that release. No settings page opens by itself. The scenario-select screen's not-found block
+(`screens::android_not_found`, scaled to the screen) offers only «Проверить снова» and points to the main menu.
+The main menu shows its not-found block while no install is found (`screens::menu_not_found`, drawn by
+`main_menu::frame(no_install)`, whose buttons come from `screens::not_found_rows`: «Скачать игру», the archive picker
+«Выбрать архив…» and «Проверить снова»;
 in the column left of the buttons, stacked, over a dark panel, at the interface scale; the column is the
 left half of the screen, in either orientation). The block is the same on the desktop (a Razdor extra, not
 the original's): it says that Razdor plays the player's own copy of the game (1.8 with Community Update
-1.2), gives «Скачать игру» (`game_import::request_download`: `gdrive::download_tree` into the staging folder beside the target, then `dt::game_import::import_folder`, the archive path's install check and swap; on a thread on the import's `Job`, with a progress window and Cancel; a failure is one line on the block, `game_import::download_failure`). On a failure, or with no download (iPhone), the manual path: the folder's link as text, «Открыть ссылку» and «Копировать ссылку» (`gdrive::folder_page`), and the steps by hand (one .zip, then the importer's button: «Обновить игру из архива…» on the desktop, «Распаковать архив игры» on the phones). «Как установить» (`main_menu::install_guide`) and the secondary link «Помощь в Discord» (`main_menu::DISCORD_INVITE`).
+1.2), gives «Скачать игру» (`game_import::request_download`: `gdrive::download_tree` into the staging folder beside the target, then `dt::game_import::import_folder`, the archive path's install check and swap; on a thread on the import's `Job`, with a progress window and Cancel; a failure is one line on the block, `game_import::download_failure`). On a failure, or with no download (iPhone), the manual path: the folder's link as text, «Открыть ссылку» and «Копировать ссылку» (`gdrive::folder_page`), and the steps by hand (one .zip, then the importer's button: «Обновить игру из архива…» on the desktop, «Выбрать архив…» on the phones). «Как установить» (`main_menu::install_guide`) and the secondary link «Помощь в Discord» (`main_menu::DISCORD_INVITE`).
 Both links, and the bottom «Discord» link, go through `main_menu::open_link`: `xdg-open` / `explorer` / `open`
 on desktop, `ui::android::open_url` (an `ACTION_VIEW` intent) on Android, `ui::mobile::open_url`
 (`UIApplication openURL:`) on iOS. The two link buttons share a row when the stack does not fit the height.

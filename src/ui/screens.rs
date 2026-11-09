@@ -515,13 +515,13 @@ fn download_lines() -> Vec<String> {
 
 /// The steps by hand: the one .zip file (not unpacked: Razdor reads it). The step 3 names the
 /// platform's way to hand it over: the picker («Pick the game archive…»), or on the phones the
-/// unpacking of the archive found in the Download folder or the Files app.
+/// unpacking of an archive found in the phone's folders (the Files app on iPhone).
 fn manual_steps() -> Vec<String> {
     #[cfg(target_os = "android")]
     return vec![
         tr("1. Open the link («Open the link» button) and download the file: one .zip, saved to Download.").to_string(),
         tr("2. Do not unpack it: Razdor reads the .zip itself.").to_string(),
-        trf!("3. Press «Unpack the game archive» (Razdor finds the .zip in Download), or «{label}» and choose it.", label = picker_label()),
+        trf!("3. Press «{label}» and choose the game's .zip or .7z.", label = picker_label()),
         tr("4. The game is in place when the main menu opens without «Discord Times not found».").to_string(),
     ];
     #[cfg(target_os = "ios")]
