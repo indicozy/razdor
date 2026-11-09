@@ -20,7 +20,7 @@ Comparison on a single GPU (RTX 4060) at 1024x768 resolution:
 | frames per second (unlocked) | about 2000 | about 176 |
 | frames per second (capped, 60 Hz screen) | 60 | 60 |
 
-Razdor renders a frame approximately 11 times faster on the same GPU. When using software rendering (Mesa llvmpipe), Razdor delivers about 4t8-73 FPS, while the original delivers about 19-34 FPS (the original's internal counter showed 13-20).
+Razdor renders a frame approximately 11 times faster on the same GPU. When using software rendering (Mesa llvmpipe), Razdor delivers about 48-73 FPS, while the original delivers about 19-34 FPS (the original's internal counter showed 13-20).
 
 ## If the original lags
 
