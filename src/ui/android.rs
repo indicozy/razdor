@@ -130,66 +130,41 @@ unsafe fn view_url(env: *mut sys::JNIEnv, url: &str) -> bool {
     !cleared(env)
 }
 
-/// Razdor's own (a player's request): opens the folder `dir` in the Files app. Any path under
-/// `/storage/emulated/0` gets a document URI (`platform::android_document_uri`), the app's own folder
-/// under `Android/data` included. Android 11 and later may refuse that URI in the Files app, and then
-/// the call falls back to the storage root as it does for any folder. The document's own URI with the
-/// directory type first; if the system refuses it, the storage root. True when one of them started.
-/// (A later task replaces these uses with an export.)
-pub fn open_folder(dir: &str) -> bool {
-    /// `FLAG_GRANT_READ_URI_PERMISSION` | `FLAG_ACTIVITY_NEW_TASK`.
-    const FLAGS: i32 = 0x1 | 0x1000_0000;
-    let Some(doc) = razdor::platform::android_document_uri(dir) else { return false };
-    // SAFETY: as in `open_url`: the activity exists while the menu runs; the locals are freed by `Local`.
+/// Opens the system's document creator (`razdorCreateDocument`, ACTION_CREATE_DOCUMENT) for a new file
+/// `name` of type `mime`, and names `source` as the file to copy into the one the player picks
+/// (`razdorSetExportSource`). False when a call fails; the answer comes through [`export_outcome`].
+pub fn start_document_export(name: &str, mime: &str, source: &str) -> bool {
+    // SAFETY: as in `text_call`: every reference made here is local and freed by `Local`.
     unsafe {
         let env = attach_jni_env();
-        if view_document(env, &doc, Some("vnd.android.document/directory"), FLAGS) {
-            return true;
+        let activity = activity_class(env);
+        let set = method(env, activity.obj, "razdorSetExportSource", "(Ljava/lang/String;)V", false);
+        if set.is_null() || cleared(env) {
+            return false;
         }
-        let root = "content://com.android.externalstorage.documents/root/primary";
-        view_document(env, root, None, FLAGS)
+        let path = string(env, source);
+        ((**env).CallVoidMethod.unwrap())(env, ACTIVITY, set, path.obj);
+        if cleared(env) {
+            return false;
+        }
+        let create = method(env, activity.obj, "razdorCreateDocument", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;", false);
+        if create.is_null() || cleared(env) {
+            return false;
+        }
+        let (name, mime) = (string(env, name), string(env, mime));
+        let reply = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, ACTIVITY, create, name.obj, mime.obj));
+        if cleared(env) {
+            return false;
+        }
+        razdor::jni::to_text(env, reply.obj).is_some_and(|text| text.is_empty())
     }
 }
 
-/// An `ACTION_VIEW` intent over the content URI `uri` (with its MIME type when given), with `flags`
-/// added, started from the activity. False when a call failed (the Java exception is cleared).
-unsafe fn view_document(env: *mut sys::JNIEnv, uri: &str, mime: Option<&str>, flags: i32) -> bool {
-    let uri_cls = class(env, "android/net/Uri");
-    let parse = method(env, uri_cls.obj, "parse", "(Ljava/lang/String;)Landroid/net/Uri;", true);
-    if parse.is_null() || cleared(env) {
-        return false;
-    }
-    let text = string(env, uri);
-    let uri = Local::new(env, ((**env).CallStaticObjectMethod.unwrap())(env, uri_cls.obj, parse, text.obj));
-    if uri.obj.is_null() || cleared(env) {
-        return false;
-    }
-    let intent_cls = class(env, "android/content/Intent");
-    let action = string(env, "android.intent.action.VIEW");
-    let ctor = method(env, intent_cls.obj, "<init>", "(Ljava/lang/String;Landroid/net/Uri;)V", false);
-    if ctor.is_null() || cleared(env) {
-        return false;
-    }
-    let mut intent = Local::new(env, ((**env).NewObject.unwrap())(env, intent_cls.obj, ctor, action.obj, uri.obj));
-    if intent.obj.is_null() || cleared(env) {
-        return false;
-    }
-    if let Some(mime) = mime {
-        let mime = string(env, mime);
-        let set = method(env, intent_cls.obj, "setDataAndType", "(Landroid/net/Uri;Ljava/lang/String;)Landroid/content/Intent;", false);
-        intent = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, intent.obj, set, uri.obj, mime.obj));
-        if intent.obj.is_null() || cleared(env) {
-            return false;
-        }
-    }
-    let add = method(env, intent_cls.obj, "addFlags", "(I)Landroid/content/Intent;", false);
-    intent = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, intent.obj, add, flags));
-    if intent.obj.is_null() || cleared(env) {
-        return false;
-    }
-    let start = method(env, activity_class(env).obj, "startActivity", "(Landroid/content/Intent;)V", false);
-    ((**env).CallVoidMethod.unwrap())(env, ACTIVITY, start, intent.obj);
-    !cleared(env)
+/// The export's answer (`razdorExportOutcome`): "" while the picker is open or the copy runs, "ok",
+/// "cancel", or "error: <why>".
+pub fn export_outcome() -> String {
+    // SAFETY: as in `text_call`.
+    unsafe { text_call("razdorExportOutcome") }.unwrap_or_default()
 }
 
 /// The app's private cache folder: `Context.getCacheDir()` (the picture cache lives there, out

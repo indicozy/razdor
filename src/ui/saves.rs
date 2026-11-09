@@ -89,6 +89,8 @@ pub struct LoadView {
     /// The message box of a folder that could not be opened (Razdor's own: «Папка»), with
     /// the folder's path in it.
     folder_error: Option<String>,
+    /// The message box of an Android transfer (Razdor's own: «Перенос…», `ui::transfer`).
+    transfer_message: Option<String>,
 }
 
 local! {
@@ -108,7 +110,7 @@ impl LoadView {
     pub fn new(back: Back) -> LoadView {
         let first = LAST_TAB.with(|t| t.get());
         let other = if first == SaveKind::Auto { SaveKind::Manual } else { SaveKind::Auto };
-        let mut v = LoadView { confirm_clear: false, confirm_delete: None, tab: first, entries: Vec::new(), asked: None, settled: false, selected: 0, scroll: 0, back, folder_error: None };
+        let mut v = LoadView { confirm_clear: false, confirm_delete: None, tab: first, entries: Vec::new(), asked: None, settled: false, selected: 0, scroll: 0, back, folder_error: None, transfer_message: None };
         v.refresh();
         if v.entries.is_empty() {
             v.tab = other;
@@ -995,6 +997,7 @@ fn replay_file(e: &ListedSave) -> Option<PathBuf> {
 /// What «Папка» shows when the folder cannot be opened: the box's message, with the folder's
 /// path so the player can find it by hand. None when the system took the folder (or it was made
 /// ready). The folder is made first, so it exists.
+#[cfg(not(target_os = "android"))]
 fn open_folder_notice() -> Option<String> {
     let Some(dir) = razdor::platform::app_dir() else {
         return Some(tr("Could not open the folder.").to_string());
@@ -1010,14 +1013,10 @@ fn open_folder_notice() -> Option<String> {
     }
 }
 
-/// The folder's place as the player finds it: the Files app's way on a phone («Internal storage >
-/// Razdor», «On iPhone > Razdor», as the catalog writes them), the path on the desktop.
+/// The folder's place as the player finds it: the Files app's way on iOS («On iPhone > Razdor», as
+/// the catalog writes it), the path on the desktop.
+#[cfg(not(target_os = "android"))]
 fn folder_where(dir: &std::path::Path) -> String {
-    #[cfg(target_os = "android")]
-    {
-        let _ = dir;
-        tr("Internal storage > Razdor").to_string()
-    }
     #[cfg(target_os = "ios")]
     {
         let _ = dir;
@@ -1164,15 +1163,67 @@ pub struct LackingBox {
     pub answer: Option<bool>,
 }
 
+/// The Load window's «Папка» button: the folder in the file manager on desktop and iOS (Razdor's own).
+#[cfg(not(target_os = "android"))]
+fn folder_label() -> &'static str {
+    tr("Folder")
+}
+
+/// Android: the same button is «Перенос…», which opens the transfer menu (`ui::transfer`): the app's
+/// folder is out of the Files app's reach there.
+#[cfg(target_os = "android")]
+fn folder_label() -> &'static str {
+    tr("Transfer…")
+}
+
+#[cfg(not(target_os = "android"))]
+fn folder_pressed(view: &mut LoadView) {
+    view.folder_error = open_folder_notice();
+}
+
+#[cfg(target_os = "android")]
+fn folder_pressed(_view: &mut LoadView) {
+    super::transfer::open_menu();
+}
+
+/// Android: whether the transfer menu or one of its pickers is up (the window takes no clicks then).
+#[cfg(target_os = "android")]
+fn transfer_asking() -> bool {
+    super::transfer::asking()
+}
+
+#[cfg(not(target_os = "android"))]
+fn transfer_asking() -> bool {
+    false
+}
+
+/// Android: the transfer menu (`menu`, drawn each frame it is open) or the picker's answers (`poll`);
+/// what they report goes into the window's message box, a finished import reads the list again.
+#[cfg(target_os = "android")]
+fn transfer_frame(view: &mut LoadView, menu: bool) {
+    let done = if menu { super::transfer::menu() } else { super::transfer::poll() };
+    if let Some(done) = done {
+        view.transfer_message = Some(done.message);
+        if done.saves_changed {
+            view.refresh();
+        }
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+fn transfer_frame(_view: &mut LoadView, _menu: bool) {}
+
 pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pending: &mut Option<PathBuf>, error: &mut Option<String>, lacking: &mut LackingBox) -> Option<Screen> {
     match game {
         Some(g) if view.back != Back::Title => world_view::backdrop(g, assets),
         _ => super::main_menu::backdrop(),
     }
+    // Android's transfer: the picker's answers come in first (a finished import reads the list again).
+    transfer_frame(view, false);
     let asking_delete = view.confirm_delete.is_some();
     // A failed load is told in its own message box, which takes the window until its OK.
     let failed = error.is_some();
-    let asking = view.confirm_clear || asking_delete || failed || view.folder_error.is_some();
+    let asking = view.confirm_clear || asking_delete || failed || view.folder_error.is_some() || view.transfer_message.is_some() || transfer_asking();
     let previously_blocked = input_blocked();
     if asking { set_input_blocked(true); }
     let over_map = game.is_some() && view.back != Back::Title;
@@ -1274,8 +1325,8 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
         view.confirm_clear = true;
         return None;
     }
-    if book.button(folder.0, folder.1, tr("Folder"), true) && !asking {
-        view.folder_error = open_folder_notice();
+    if book.button(folder.0, folder.1, folder_label(), true) && !asking {
+        folder_pressed(view);
     }
     if let (Some((rx, rw)), Some(file)) = (record, record_file.as_ref()) {
         if book.button(rx, rw, tr("Record"), true) && !asking {
@@ -1296,6 +1347,8 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     }
     set_input_blocked(previously_blocked);
     if asking { super::chrome::grey_out(book.win); }
+    // Android's transfer menu, drawn over the window while it is open.
+    transfer_frame(view, true);
     if let Some(message) = error.as_deref() {
         if let Some(question) = lacking.asking.clone() {
             lacking_question_box(tr("Download the mod"), &question, lacking);
@@ -1306,6 +1359,10 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     }
     if let Some(message) = view.folder_error.clone() {
         if load_failed_box(tr("Folder"), &message, &mut LackingBox::default()) { view.folder_error = None; }
+        return None;
+    }
+    if let Some(message) = view.transfer_message.clone() {
+        if load_failed_box(tr("Transfer"), &message, &mut LackingBox::default()) { view.transfer_message = None; }
         return None;
     }
     if asking_delete {

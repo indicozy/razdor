@@ -328,9 +328,89 @@ public String razdorPickOutcome() {
     return razdorPickResult;
 }
 
+// The system's document creator (Storage Access Framework) for the exports of the Load window's
+// «Перенос…» (src/ui/transfer.rs). razdorSetExportSource names the file the export copies (in the app's
+// cache); razdorCreateDocument opens the creator with the suggested name and MIME type. The picked
+// file gets the copy on a thread; razdorExportOutcome is the game's poll: "" while the creator is open
+// or the copy runs, "ok", "cancel" or "error: <why>".
+private static final int RAZDOR_EXPORT_REQUEST = 7302;
+// The file the export copies, as the game set it (razdorSetExportSource).
+private volatile String razdorExportSource = "";
+// "" until the creator answers; then as razdorExportOutcome describes.
+private volatile String razdorExportResult = "";
+
+// Names the file the next export copies. Called from the game's thread.
+public void razdorSetExportSource(String path) {
+    razdorExportSource = path;
+}
+
+// Opens the creator on the UI thread. "" once it is requested; a failure to open it is the poll's
+// answer ("error: ..."), so the game learns of it from razdorExportOutcome.
+public String razdorCreateDocument(final String name, final String mime) {
+    razdorExportResult = "";
+    runOnUiThread(new Runnable() {
+        @Override
+        public void run() {
+            try {
+                Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType(mime);
+                intent.putExtra(Intent.EXTRA_TITLE, name);
+                startActivityForResult(intent, RAZDOR_EXPORT_REQUEST);
+            } catch (Exception e) {
+                razdorExportResult = "error: " + e;
+            }
+        }
+    });
+    return "";
+}
+
+// The export's poll (see above). Taken as it is: the answer is kept until it is read.
+public String razdorExportOutcome() {
+    return razdorExportResult;
+}
+
+// The creator's answer: the copy of the export source into the picked file, on a thread (a big
+// file must not stall the activity).
+private void razdorExportAnswer(int resultCode, Intent data) {
+    if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+        razdorExportResult = "cancel";
+        return;
+    }
+    final Uri uri = data.getData();
+    final String source = razdorExportSource;
+    new Thread(new Runnable() {
+        @Override
+        public void run() {
+            razdorExportResult = razdorCopyExport(source, uri);
+        }
+    }).start();
+}
+
+// Copies the file `source` into the document `uri`; returns the answer for the poll.
+private String razdorCopyExport(String source, Uri uri) {
+    try (InputStream in = new FileInputStream(source); OutputStream out = getContentResolver().openOutputStream(uri, "wt")) {
+        if (out == null) {
+            return "error: the file cannot be written";
+        }
+        byte[] buffer = new byte[65536];
+        int n;
+        while ((n = in.read(buffer)) > 0) {
+            out.write(buffer, 0, n);
+        }
+        return "ok";
+    } catch (Exception e) {
+        return "error: " + e;
+    }
+}
+
 // Called from miniquad's own onActivityResult (the MAIN_ACTIVITY_ON_ACTIVITY_RESULT section at
 // the end of this file): MainActivity already defines that method, so it can't be overridden here.
 private void razdorOnActivityResult(int requestCode, int resultCode, Intent data) {
+    if (requestCode == RAZDOR_EXPORT_REQUEST) {
+        razdorExportAnswer(resultCode, data);
+        return;
+    }
     if (requestCode != RAZDOR_PICK_REQUEST) {
         return;
     }

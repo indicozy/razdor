@@ -314,11 +314,11 @@ pub fn open_link(url: &str) {
 }
 
 /// Opens the folder `dir` in the system's file manager (Razdor's own, a player's request: the
-/// Files app on Android and iOS). True when it was handed to the system.
+/// Files app on iOS). True when it was handed to the system. Not on Android: there the Load window's
+/// «Перенос…» exports and imports instead (`ui::transfer`), as the Files app cannot open the app's folder.
+#[cfg(not(target_os = "android"))]
 pub fn open_folder(dir: &std::path::Path) -> bool {
     let text = dir.to_string_lossy();
-    #[cfg(target_os = "android")]
-    return super::android::open_folder(&text);
     #[cfg(target_os = "ios")]
     return super::mobile::open_folder(&text);
     #[cfg(not(any(target_os = "android", target_os = "ios")))]

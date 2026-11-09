@@ -8,6 +8,7 @@ pub mod i18n;
 #[cfg(target_os = "android")]
 pub mod jni;
 pub mod platform;
+pub mod transfer;
 pub mod rules;
 pub mod search;
 pub mod hub;

@@ -468,15 +468,6 @@ pub fn downloads_dir() -> Option<PathBuf> {
     dirs::download_dir().or_else(|| dirs::home_dir().map(|home| home.join("Downloads")))
 }
 
-/// Android: the document URI of a folder under the shared storage, the one the Files app opens
-/// (`content://com.android.externalstorage.documents/document/primary%3A<path>`). `dir` must be
-/// inside `/storage/emulated/0`; `None` otherwise. Razdor's own (a player's request), not the original's.
-pub fn android_document_uri(dir: &str) -> Option<String> {
-    let rel = dir.strip_prefix("/storage/emulated/0/")?.trim_matches('/');
-    let doc = format!("primary:{rel}").replace(':', "%3A").replace('/', "%2F");
-    Some(format!("content://com.android.externalstorage.documents/document/{doc}"))
-}
-
 /// iOS: the `shareddocuments://` link that opens the Files app at the absolute path `dir`
 /// (percent-encoded). Razdor's own (a player's request), not the original's.
 pub fn ios_files_url(dir: &str) -> String {
@@ -600,19 +591,6 @@ mod tests {
         assert_eq!(roots, vec![storage.join("DiscordTimes"), storage.join("Download"), storage.join("Games"), storage.join("")]);
         // The shared storage unreadable: the app's game folder only.
         assert_eq!(android_install_roots(true, storage, false, game.clone()), vec![game]);
-    }
-
-    #[test]
-    fn android_folder_becomes_its_document_uri() {
-        assert_eq!(
-            android_document_uri("/storage/emulated/0/Razdor").as_deref(),
-            Some("content://com.android.externalstorage.documents/document/primary%3ARazdor")
-        );
-        assert_eq!(
-            android_document_uri("/storage/emulated/0/Razdor/hub/maps").as_deref(),
-            Some("content://com.android.externalstorage.documents/document/primary%3ARazdor%2Fhub%2Fmaps")
-        );
-        assert_eq!(android_document_uri("/data/data/razdor"), None);
     }
 
     #[test]

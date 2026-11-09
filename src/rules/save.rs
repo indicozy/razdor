@@ -267,6 +267,11 @@ pub fn default_dir() -> Option<PathBuf> {
     crate::platform::app_dir().map(|d| d.join("saves"))
 }
 
+/// The manual saves folder of the install played now (the one the Load window lists first).
+pub fn manual_dir() -> Option<PathBuf> {
+    games_dir().map(|d| kind_dir(&d, SaveKind::Manual))
+}
+
 /// The install the games are played on ([`set_install`]), whose saves [`games_dir`] keeps.
 static INSTALL: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
 
