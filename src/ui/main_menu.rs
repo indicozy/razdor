@@ -1420,16 +1420,16 @@ fn touchpad_in_effect(live: Option<bool>, opened_with: Option<Option<bool>>) -> 
 /// closed.
 pub fn options(audio: &mut super::audio::Settings, install_wide: bool) -> bool {
     backdrop();
-    let _scale = window_layout::title_scale((594.0, options_h()));
+    let _scale = window_layout::title_scale((OPTIONS_W, options_h()));
     options_window(audio, install_wide, false)
 }
 
-/// The settings window's height in video px: the original's rows (ending 425 px down), the
-/// group buttons' row under them (`desktop_group_block`: one row, two when the text is grown), 12 px
-/// to its top, then Apply and Cancel with their margin (the window's inner top is 27 px down).
+/// The settings window's height on the desktop in video px: the original's rows (ending 425 px
+/// down, the General tab's last checkbox just above the rule), 12 px to the rule, then «Принять» and
+/// «Отмена» with their margin (`32 × g` high; the window's inner top is 27 px down).
 fn options_h() -> f32 {
     let g = super::display::button_grow();
-    484.0 + desktop_group_block(g) + 32.0 * g
+    484.0 + 32.0 * g
 }
 
 /// The widths of a settings window's bottom buttons in `avail` px, with `gap` between them: as
@@ -1446,7 +1446,7 @@ fn bottom_row_widths(avail: f32, widths: &[f32], gap: f32) -> Vec<f32> {
 }
 
 local! {
-    /// The settings group window open over the settings (`None`: the settings window alone).
+    /// The settings window's tab shown: `None` is the General tab (the original's rows), else the group's.
     static GROUP: std::cell::Cell<Option<Group>> = const { std::cell::Cell::new(None) };
     /// The settings as the window found them: «Отмена» puts them back (the original's
     /// Cancel drops what was changed, its Apply keeps it).
@@ -1466,27 +1466,27 @@ local! {
 }
 
 local! {
-    /// The advanced window's scroll on a phone: px of its content above the top of the window.
+    /// The settings pane's scroll on a phone: px of its content above the top of the pane.
     static ADV_SCROLL: std::cell::Cell<f32> = const { std::cell::Cell::new(0.0) };
     /// Where the advanced window's content ends on a phone, px below the window's content top (as
     /// the last frame drew it, unscrolled): the scroll's range is this less the view.
     static ADV_BOTTOM: std::cell::Cell<f32> = const { std::cell::Cell::new(0.0) };
     /// The area the advanced window's rows show in on a phone (screen px); None elsewhere.
     static ADV_VIEW: std::cell::Cell<Option<Rect>> = const { std::cell::Cell::new(None) };
+    /// The phone's sideways tab column's scroll, px: it runs only when the tabs do not fit its height.
+    static TAB_SCROLL: std::cell::Cell<f32> = const { std::cell::Cell::new(0.0) };
 }
 
-/// A snapshot scene's scroll (`RAZDOR_SCENE_SCROLL`): the phone's options list starts `px` down
-/// (clamped to its end when drawn).
+/// A snapshot scene's scroll (`RAZDOR_SCENE_SCROLL`): the settings pane starts `px` down (clamped
+/// to its end when drawn).
 pub fn scene_scroll(px: f32) {
-    PHONE_SCROLL.with(|c| c.set(px));
-    // The phone's advanced window starts that far down too (clamped to its content).
     ADV_SCROLL.with(|s| s.set(px));
 }
 
-/// Opens a settings group's window over the settings window (the snapshot scenes, the keys row).
+/// Selects a settings group's tab (the snapshot scenes, the keys row).
 pub fn open_group(group: Group) {
     GROUP.with(|g| g.set(Some(group)));
-    ADV_SCROLL.with(|s| s.set(0.0));
+    reset_pane();
 }
 
 /// Opens the keys window over the advanced settings (a snapshot scene, and the keys row).
@@ -1554,22 +1554,11 @@ pub enum Group {
 }
 
 impl Group {
-    /// The groups, in the settings window's order.
+    /// The groups, in the settings window's tab order (after the General tab).
     pub const ALL: [Group; 5] = [Group::Map, Group::Battle, Group::Screen, Group::Controls, Group::Other];
 
-    /// The group's button in the settings window.
-    fn button(self) -> &'static str {
-        match self {
-            Group::Map => tr("Map…"),
-            Group::Battle => tr("Battle and army…"),
-            Group::Screen => tr("Screen…"),
-            Group::Controls => tr("Controls…"),
-            Group::Other => tr("Other…"),
-        }
-    }
-
-    /// The group's window title.
-    fn title(self) -> &'static str {
+    /// The group's tab label.
+    fn tab(self) -> &'static str {
         match self {
             Group::Map => tr("Map"),
             Group::Battle => tr("Battle and army"),
@@ -1601,24 +1590,13 @@ impl Group {
             Group::Map => &[Row::MapZoom, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::MapEdge, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
             Group::Battle => &[Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::Orientation, Row::Language],
-            Group::Controls => &[Row::Keys, Row::Touchpad],
+            Group::Controls => &[Row::Keys],
             Group::Other => &[Row::Updates, Row::Import],
-        }
-    }
-
-    /// The window's height on the desktop, in video px (a phone's fills the room; both scroll).
-    fn height(self) -> f32 {
-        match self {
-            Group::Map => 540.0,
-            Group::Battle => 440.0,
-            Group::Screen => 370.0,
-            Group::Controls => 200.0,
-            Group::Other => 250.0,
         }
     }
 }
 
-/// One setting's row in a group window (its label, its button or slider, its hint).
+/// One setting's row in a settings pane (its label, its button or slider, its hint).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Row {
     MapZoom,
@@ -1646,14 +1624,13 @@ pub enum Row {
     Orientation,
     Language,
     Keys,
-    Touchpad,
     Updates,
     Import,
 }
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-    pub const ALL: [Row; 28] = [
+    pub const ALL: [Row; 27] = [
         Row::MapZoom,
         Row::MapView,
         Row::SpriteSize,
@@ -1679,7 +1656,6 @@ impl Row {
         Row::Orientation,
         Row::Language,
         Row::Keys,
-        Row::Touchpad,
         Row::Updates,
         Row::Import,
     ];
@@ -1709,68 +1685,119 @@ impl Row {
             Row::SpriteSize | Row::TwoFingerTurn => audio.map_tilt,
             Row::Orientation => cfg!(target_os = "android"),
             // The bottom bar's size is a phone's (Razdor's; the desktop has no such row).
-            Row::BottomBar => super::display::dp_px().is_some(),
-            Row::Touchpad => super::touchpad::MOBILE,
+            Row::BottomBar => bottom_bar_row_shown(super::display::dp_px().is_some(), window_layout::portrait()),
             _ => true,
         }
     }
 }
 
-/// The group window's width on the desktop, in video px (the settings window's 594 and a margin).
-const GROUP_W: f32 = 600.0;
+/// The settings window's width on the desktop, video px: the tab column and the original's 594 px
+/// pane beside it (the pane starts at `PANE_X` and stops `PANE_R` short of the right edge).
+const OPTIONS_W: f32 = 774.0;
 
-/// The label size of the group buttons and the settings window's button rows (video px or dp).
+/// The tab column's left edge and width on the desktop, video px.
+const TAB_X: f32 = 12.0;
+const TAB_W: f32 = 150.0;
+
+/// The pane's left edge on the desktop, video px from the window's left, and its right margin.
+const PANE_X: f32 = 172.0;
+const PANE_R: f32 = 10.0;
+
+/// The label size of the tabs and the group rows' buttons on the desktop (video px at Normal).
 const GROUP_LABEL: f32 = 14.0;
 
-/// The width of the group buttons' area in the settings window, video px (its 594 less the margins).
-const GROUP_AREA_W: f32 = 538.0;
+/// The settings window's tabs, top to bottom: the General one (`None`, the original's rows), then
+/// the five groups.
+const TABS: [Option<Group>; 6] = [None, Some(Group::Map), Some(Group::Battle), Some(Group::Screen), Some(Group::Controls), Some(Group::Other)];
 
-/// The width in px of `label` drawn at `size` px, as a button draws it.
-fn label_px(label: &str, size: f32) -> f32 {
-    super::typography::Role::Button.with(|| super::dt_font::legacy_metrics_if(true, || measure(label, size).width))
+/// A tab's label: the General tab is «Основное».
+fn tab_label(tab: Option<Group>) -> &'static str {
+    match tab {
+        None => tr("General settings"),
+        Some(g) => g.tab(),
+    }
 }
 
-/// The buttons per row of a group of buttons: as many as the widest label fits, five, then three,
-/// else two. `widths` and `avail` are in one unit; `pad` is the room a label needs on each side.
-fn group_per_row(widths: &[f32], avail: f32, gap: f32, pad: f32) -> usize {
-    let widest = widths.iter().cloned().fold(0.0_f32, f32::max);
-    for n in [5, 3] {
-        if widest + 2.0 * pad <= (avail - (n as f32 - 1.0) * gap) / n as f32 {
-            return n;
+/// How the settings window ends: «Принять» (or Enter) keeps what was changed, «Отмена» (the close
+/// box, Esc) puts the settings back as the window found them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Close {
+    Apply,
+    Cancel,
+}
+
+/// Whether the bottom bar's size row shows: only on a phone held sideways, where the size changes
+/// the bar (upright the bar is the main's size whatever it is set to; a player's report).
+fn bottom_bar_row_shown(phone: bool, portrait: bool) -> bool {
+    phone && !portrait
+}
+
+/// The phone's tab column in `col` (dp at `u` px per dp): six tabs of 44 dp with 6 dp gaps. When
+/// they do not fit the column's height the gaps shrink first (2 dp at least), then the tabs, never
+/// under 40 dp; the column does not scroll.
+fn tab_column_rects(col: Rect, u: f32) -> Vec<Rect> {
+    let n = TABS.len() as f32;
+    let (mut h, mut gap) = (44.0 * u, 6.0 * u);
+    if n * h + (n - 1.0) * gap > col.h {
+        gap = ((col.h - n * h) / (n - 1.0)).max(2.0 * u);
+        if n * h + (n - 1.0) * gap > col.h {
+            h = ((col.h - (n - 1.0) * gap) / n).max(40.0 * u);
         }
     }
-    2
+    (0..TABS.len()).map(|i| Rect::new(col.x, col.y + i as f32 * (h + gap), col.w, h)).collect()
 }
 
-/// The rectangles of the group buttons in `area`, one per width in `widths`: `group_per_row` to a
-/// row, the rows `gap` apart, each `row_h` high. The buttons of a row share its width.
-fn group_rects(area: Rect, widths: &[f32], pad: f32, gap: f32, row_h: f32) -> Vec<Rect> {
-    let per = group_per_row(widths, area.w, gap, pad);
-    let bw = (area.w - (per as f32 - 1.0) * gap) / per as f32;
-    (0..widths.len())
-        .map(|i| {
-            let (row, col) = (i / per, i % per);
-            Rect::new(area.x + col as f32 * (bw + gap), area.y + row as f32 * (row_h + gap), bw, row_h)
-        })
-        .collect()
+/// The tab buttons, the selected one drawn pressed (the marble's «down» art). A tab pressed that
+/// is not the selected one becomes it, and its pane starts at the top. True when a tab was pressed
+/// that changed the selection.
+fn tab_buttons(rects: &[Rect], size: f32, clip: Option<Rect>) -> bool {
+    let mut switched = false;
+    for (tab, r) in TABS.into_iter().zip(rects.iter().copied()) {
+        // A tab of a scrolled column only partly in it is neither drawn nor pressed (as the scroll views' rows).
+        if clip.is_some_and(|c| !inside(r, c)) {
+            continue;
+        }
+        let selected = GROUP.with(|g| g.get()) == tab;
+        let (_, down, pressed) = super::widgets::button_state(r, true);
+        chrome::marble_button_sized(r, tab_label(tab), true, down || selected, size);
+        if selected {
+            // A gold frame as well: the pressed art alone reads too like the other tabs at this size.
+            draw_rectangle_lines(r.x + 1.0, r.y + 1.0, r.w - 2.0, r.h - 2.0, 2.0 * chrome::k(), chrome::GOLD);
+        }
+        if pressed {
+            cue(Cue::Button);
+            if !selected {
+                GROUP.with(|g| g.set(tab));
+                reset_pane();
+                switched = true;
+            }
+        }
+    }
+    switched
 }
 
-/// The widths of the group labels at `size` px, in Group::ALL's order.
-fn group_label_widths(size: f32) -> Vec<f32> {
-    Group::ALL.iter().map(|g| label_px(g.button(), size)).collect()
+/// The sideways tab column's scroll (px) for `most` px of tabs running past its bottom: the wheel and a
+/// finger's slide over the column move it, clamped to that range; `u` px per dp.
+fn tab_column_scroll(col: Rect, most: f32, u: f32) -> f32 {
+    if most <= 0.0 {
+        return 0.0;
+    }
+    super::widgets::swipe_rows(col, 24.0 * u);
+    let mut scroll = TAB_SCROLL.with(|s| s.get()).clamp(0.0, most);
+    if crate::ui::widgets::mouse_in(col.x, col.y, col.w, col.h) {
+        scroll = (scroll - wheel() * 24.0 * u).clamp(0.0, most);
+    }
+    TAB_SCROLL.with(|s| s.set(scroll));
+    scroll
 }
 
-/// The height in video px of the desktop settings window's group buttons at the text size `g`
-/// (the rows `group_rects` makes, with the labels measured as the window draws them).
-fn desktop_group_block(g: f32) -> f32 {
-    let k0 = chrome::k();
-    // The labels measured in px at their size, then taken back to the window's units.
-    let widths: Vec<f32> = Group::ALL.iter().map(|grp| label_px(grp.button(), GROUP_LABEL * g * k0) / k0).collect();
-    let rows = (Group::ALL.len() as f32 / group_per_row(&widths, GROUP_AREA_W, 6.0, 14.0) as f32).ceil();
-    rows * 28.0 * g + (rows - 1.0) * 6.0
+/// Puts the selected pane back at its top (a tab was picked, or the window opened or closed).
+fn reset_pane() {
+    ADV_SCROLL.with(|s| s.set(0.0));
+    ADV_BOTTOM.with(|b| b.set(0.0));
 }
 
-/// A row's layout in a group window (px at its scale): the desktop's and the phone's.
+/// A row's layout in a settings pane (px at its scale): the desktop's and the phone's.
 struct RowGeo {
     k: f32,
     /// A button's height.
@@ -1793,14 +1820,14 @@ impl RowGeo {
         RowGeo { k, row_h: 28.0 * k * g, gap: 8.0 * k, size: 14.0 * k, lh: 17.0 * k, min_w: 170.0 * k, btn_size: None }
     }
 
-    /// The phone's, in dp (`k` px per dp): 36 dp rows grown by the text size, never under 48 dp
-    /// (Android's minimum; backlog 1509); 16.5 sp labels and hints.
-    fn phone(k: f32, g: f32) -> RowGeo {
-        RowGeo { k, row_h: (36.0 * g).max(48.0) * k, gap: 8.0 * k, size: 16.5 * k, lh: 20.0 * k, min_w: 120.0 * k, btn_size: Some(16.5 * k) }
+    /// The phone's compact rows, in dp (`k` px per dp), for the settings tabs: 44 dp buttons, 14 sp
+    /// labels and hints (the owner's design, 2026-11-09), 8 dp gaps.
+    fn phone_compact(k: f32) -> RowGeo {
+        RowGeo { k, row_h: 44.0 * k, gap: 8.0 * k, size: 14.0 * k, lh: 18.0 * k, min_w: 120.0 * k, btn_size: Some(14.0 * k) }
     }
 }
 
-/// A column of a group window: its left, width and the next row's top (px).
+/// A column of a settings pane: its left, width and the next row's top (px).
 struct RowCol {
     x: f32,
     w: f32,
@@ -1821,7 +1848,7 @@ fn button_draw(r: Rect, label: &str, size: Option<f32>) -> bool {
     pressed
 }
 
-/// A button in a group window's scroll view: drawn where it shows, clicked only where it shows.
+/// A button in a settings pane's scroll view: drawn where it shows, clicked only where it shows.
 /// On a phone (`size` given) a button only partly in the view is neither drawn nor clicked: the
 /// view's cut does not reach a button's art (backlog 1509; the frame ignores the scissor, so it
 /// showed under «Ок»).
@@ -1911,15 +1938,7 @@ fn labelled_row_help(c: &mut RowCol, geo: &RowGeo, label: &str, value: &str, hel
     (scroll_button(r, value, geo.btn_size), r)
 }
 
-/// A checkbox row whose label may wrap (the box stays on the first line). True when clicked.
-fn check_row(c: &mut RowCol, geo: &RowGeo, label: &str, on: bool, ink: Color) -> bool {
-    let lines = wrap_label(label, c.w - 34.0 * geo.k, geo.size);
-    let clicked = option_check_lines(c.x, c.y, c.w, &lines, on, ink, geo.k);
-    c.y += (10.0 + lines.len() as f32 * 18.0).max(38.0) * geo.k + geo.gap;
-    clicked
-}
-
-/// One row of a group window (the same widgets the settings window had them in).
+/// One row of a settings pane (the same widgets the settings window had them in).
 fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Settings, over_map: bool) {
     let yes_no = |on: bool| -> &'static str {
         if on {
@@ -2112,13 +2131,6 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
                 KEYS_FROM_HELP.with(|f| f.set(false));
             }
         }
-        Row::Touchpad => {
-            let on = audio.touchpad.unwrap_or(false);
-            let label = own("Options", "RazdorTouchpad", n_("Touchpad mode (the screen moves a cursor)"));
-            if check_row(c, geo, &label, on, CHECK_INK) {
-                audio.touchpad = Some(!on);
-            }
-        }
         Row::Updates => {
             // Updates from the GitHub releases (`razdor::update`); on a phone Ask and Off only.
             let phone_ui = updates_phone();
@@ -2138,12 +2150,41 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
     }
 }
 
-/// A group window: its rows in one column, scrolling above Ok when they run past the view. The
-/// desktop's window is `GROUP_W` wide and the group's height; a phone's fills the room (both
-/// orientations). Returns true when closed (Ok, Esc, Enter, the close box).
-fn group_window(audio: &mut super::audio::Settings, over_map: bool, group: Group) -> bool {
-    // A click outside the «?» buttons closes their pop-up, and the click is taken; Esc closes the pop-up
-    // and not the window (the press is swallowed, so the window's own Esc check sees none).
+/// Starts a settings pane's scroll view (`view`, screen px): the scroll the last frame settled
+/// (`ADV_SCROLL`, clamped to what its content ran past the view by, `ADV_BOTTOM`), the wheel and a
+/// finger's slide over it, and its bar at the right edge (24 × `list_k` wide, as the new-game
+/// list's). Returns the content's top for this frame (the view's top less the scroll). The content
+/// is clipped to the view and drawn and clicked only where it shows (`ADV_VIEW`, `in_adv_view`).
+fn pane_begin(view: Rect, step: f32, list_k: f32) -> f32 {
+    let most = scroll_most(ADV_BOTTOM.with(|b| b.get()), view.h);
+    let mut scroll = ADV_SCROLL.with(|s| s.get()).clamp(0.0, most);
+    if most > 0.0 {
+        super::widgets::swipe_rows(view, step);
+        if crate::ui::widgets::mouse_in(view.x, view.y, view.w, view.h) {
+            scroll = (scroll - wheel() * step).clamp(0.0, most);
+        }
+        let bar = Rect::new(view.x + view.w - 24.0 * list_k, view.y, 24.0 * list_k, view.h);
+        super::widgets::scrollbar_px(bar, &mut scroll, most, view.h, step);
+        // Kept while the content's height is unknown (the first frame): a snapshot's start scroll waits for it.
+        ADV_SCROLL.with(|s| s.set(scroll));
+    }
+    phone_clip(Some(view));
+    ADV_VIEW.with(|v| v.set(Some(view)));
+    view.y - scroll
+}
+
+/// Ends a pane's scroll view (`pane_begin`): the clip is lifted and the content's height, from the
+/// top `top` (screen px) down to `content_bottom`, is kept for the next frame's scroll range.
+fn pane_end(top: f32, content_bottom: f32) {
+    phone_clip(None);
+    ADV_VIEW.with(|v| v.set(None));
+    ADV_BOTTOM.with(|b| b.set(content_bottom - top));
+}
+
+/// Starts a settings frame's «?» pop-up state: a click outside the «?» buttons closes the pinned
+/// pop-up (the click is taken), and Esc closes it and not the window (the press is swallowed, so
+/// the window's own Esc check sees none). The buttons drawn last frame are the click test's.
+fn help_frame_start() {
     let spots = HELP_SPOTS.with(|h| std::mem::take(&mut *h.borrow_mut()));
     HELP_HOVER.with(|h| h.set(None));
     if HELP_PINNED.with(|p| p.get()).is_some() {
@@ -2156,91 +2197,165 @@ fn group_window(audio: &mut super::audio::Settings, over_map: bool, group: Group
             swallow_input();
         }
     }
-    // The scroll bar's width is the new-game list's (`new_game::list_track`), whatever the window's scale.
-    let list_k = chrome::k();
-    let title = group.title();
-    let (_scale, geo, inner, closed) = match super::display::dp_px() {
-        Some(dp) => {
-            let scale = super::display::enter_window_scale(Some(dp));
-            let k = chrome::k();
-            let geo = RowGeo::phone(k, super::display::button_grow());
-            let (sw, sh) = (screen_width(), screen_height());
-            let safe = super::display::safe_area();
-            let top = safe.top + 8.0 * k;
-            // The bar's real height (sideways it grows with the bar's size; upright it is the same).
-            let bottom = if over_map { sh - chrome::bar_top_height() - 8.0 * k } else { window_layout::title_bottom() - 8.0 * k };
-            // On a phone the window keeps clear margins (as PHONE_WINDOW_SHRINK).
-            let w = ((sw - safe.left - safe.right) * PHONE_WINDOW_SHRINK).min(900.0 * k);
-            let h = (bottom - top) * PHONE_WINDOW_SHRINK;
-            let frame = Rect::new((sw - w) / 2.0, top + (bottom - top - h) / 2.0, w, h);
-            let (inner, closed) = chrome::window(frame, title, chrome::Skin::Marble, true);
-            (scale, geo, inner, closed)
-        }
-        None => {
-            let (ww, wh) = (GROUP_W, group.height());
-            let scale = window_layout::window_scale(over_map, (ww, wh));
-            let k = chrome::k();
-            let geo = RowGeo::desktop(k, super::display::button_grow());
-            let (inner, closed) = if over_map {
-                map_window(title, ww, wh, 1.0)
-            } else {
-                let (w, h) = (ww * k, wh * k);
-                let r = window_layout::title_rect((ww, wh)).unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, ((screen_height() - h) / 2.0).max(0.0), w, h));
-                chrome::window(r, title, chrome::Skin::Marble, true)
-            };
-            (scale, geo, inner, closed)
-        }
-    };
-    let k = geo.k;
-    let on_phone = geo.btn_size.is_some();
-    let pad = 12.0 * k;
-    let (ok_h, gap) = (geo.row_h, geo.gap);
-    let ok_w = if on_phone { 120.0 * k } else { 96.0 * k };
-    // The rows scroll in the view above the Ok button, by what the last frame found they ran past it.
-    let view_h = inner.h - gap - ok_h - 4.0 * k;
-    let view = Rect::new(inner.x, inner.y, inner.w, view_h);
-    let most = scroll_most(ADV_BOTTOM.with(|b| b.get()), view_h);
-    let mut scroll = ADV_SCROLL.with(|s| s.get()).clamp(0.0, most);
-    if most > 0.0 {
-        super::widgets::swipe_rows(view, 40.0 * k);
-        if crate::ui::widgets::mouse_in(view.x, view.y, view.w, view.h) {
-            scroll = (scroll - wheel() * 40.0 * k).clamp(0.0, most);
-        }
-        let bar = Rect::new(inner.x + inner.w - 28.0 * list_k, inner.y, 24.0 * list_k, view_h);
-        super::widgets::scrollbar_px(bar, &mut scroll, most, view_h, 40.0 * k);
+}
+
+/// The «?» pop-up to draw this frame, last (over the rows): the pinned one, or the one under the
+/// pointer on the desktop.
+fn draw_help_pop(k: f32, phone: bool) {
+    if let Some(text) = HELP_PINNED.with(|p| p.get()).or(HELP_HOVER.with(|h| h.get())) {
+        help_popup(text, k, phone);
     }
-    // Kept while the content's height is unknown (the first frame): a snapshot's start scroll waits for it.
-    if most > 0.0 {
-        ADV_SCROLL.with(|s| s.set(scroll));
-    }
-    phone_clip(Some(view));
-    ADV_VIEW.with(|v| v.set(Some(view)));
-    let top = inner.y - scroll;
-    let mut c = RowCol { x: inner.x + pad, w: inner.w - 2.0 * pad - 28.0 * list_k, y: top + pad };
+}
+
+/// A group's rows in the pane `view`: one column, scrolling when they run past the view.
+fn group_pane(audio: &mut super::audio::Settings, over_map: bool, group: Group, view: Rect, geo: &RowGeo, step: f32, list_k: f32) {
+    let top = pane_begin(view, step, list_k);
+    let pad = 12.0 * geo.k;
+    let mut c = RowCol { x: view.x + pad, w: view.w - 2.0 * pad - 28.0 * list_k, y: top + pad };
     // A phone's labels and hints take their requested size under every font (backlog 1509).
-    super::dt_font::legacy_metrics_if(on_phone, || {
+    super::dt_font::legacy_metrics_if(geo.btn_size.is_some(), || {
         for row in group.rows() {
             if row.shown(audio) {
-                draw_row(*row, &mut c, &geo, audio, over_map);
+                draw_row(*row, &mut c, geo, audio, over_map);
             }
         }
     });
-    let content_bottom = c.y;
-    phone_clip(None);
-    ADV_VIEW.with(|v| v.set(None));
-    ADV_BOTTOM.with(|b| b.set(content_bottom - top));
-    let ok = Rect::new(inner.x + inner.w - pad - ok_w, inner.y + inner.h - gap - ok_h, ok_w, ok_h);
-    let ok_label = own("Buttons", "Ok", n_("OK"));
-    let done = closed || key(KeyCode::Escape) || key(KeyCode::Enter) || button_draw(ok, &ok_label, geo.btn_size);
-    // The «?» pop-up: the pinned one, or on the desktop the one under the pointer, drawn last (over the rows).
-    if let Some(text) = HELP_PINNED.with(|p| p.get()).or(HELP_HOVER.with(|h| h.get())) {
-        help_popup(text, geo.k, on_phone);
+    pane_end(top, c.y);
+}
+
+/// The five slider rows of the General tab, top to bottom: the label (the install's own name for
+/// it, as the original's window had) and the value (0..1).
+fn slider_rows(audio: &super::audio::Settings) -> [(String, f32); 5] {
+    // The Evolution Mod has four slider rows, labelled `Option0`…`Option3` (its exe builds the key from
+    // `Option` and the row number); the Community's five are `OptionSld0`…`OptionSld4`.
+    let mod_rows = chrome::install_option("Option0").is_some() && chrome::install_option("OptionSld0").is_none();
+    let slider_label = |n: usize, ours: &'static str| own("Options", &if mod_rows { format!("Option{n}") } else { format!("OptionSld{n}") }, ours);
+    // The Community's "Скорость анимаций в битве" (`AnimationSpeed`); the Evolution Mod's window has
+    // no such row, and Razdor shows it for every install under its own label (the owner, 2026-10-29).
+    let anim_label = if mod_rows { tr(n_("Battle animation speed")).to_string() } else { slider_label(4, n_("Battle animation speed")) };
+    [
+        (slider_label(0, n_("Background music volume")), audio.music_volume),
+        (slider_label(1, n_("Sound effects volume")), audio.sfx_volume),
+        (slider_label(2, n_("Map scroll speed")), scroll_speed(audio) / 100.0),
+        (slider_label(3, n_("Hero's walking speed")), walk_speed(audio) / razdor::rules::game::WALK_SPEED_MAX as f32),
+        (anim_label, anim_speed(audio).unwrap_or(0.0) / 99.0),
+    ]
+}
+
+/// A slider row of the General tab moved to `v` from `old`: the volumes step (1% each), the others
+/// are set at once.
+fn set_slider(audio: &mut super::audio::Settings, i: usize, old: f32, v: f32) {
+    match i {
+        0 | 1 => {
+            let steps = ((v - old) / super::audio::VOLUME_STEP).round() as i32;
+            if i == 0 {
+                audio.music_muted = false;
+                audio.step_music(steps);
+            } else {
+                audio.sfx_muted = false;
+                audio.step_sfx(steps);
+            }
+        }
+        2 => audio.scroll_speed = Some((v * 100.0).round()),
+        3 => audio.walk_speed = Some((v * razdor::rules::game::WALK_SPEED_MAX as f32).round()),
+        _ => audio.anim_speed = Some((v * 99.0).round()),
     }
-    if done {
-        ADV_SCROLL.with(|s| s.set(0.0));
-        HELP_PINNED.with(|p| p.set(None));
+}
+
+/// The checkboxes of the General tab, top to bottom, as (key, label, on, ink): the original's eight
+/// (`Option4`…`Option11`), and on a phone the touchpad mode after them.
+fn general_checks(audio: &super::audio::Settings, install_wide: bool) -> Vec<(&'static str, String, bool, Color)> {
+    let mut checks = vec![
+        ("Option4", own("Options", "Option4", n_("Do not load music and sounds (needs a restart)")), no_sound(audio), CHECK_ORANGE),
+        ("Option5", own("Options", "Option5", n_("Show FPS")), audio.show_fps, CHECK_INK),
+        ("Option6", own("Options", "Option6", n_("Turn off hints")), hints_off(audio), CHECK_INK),
+        ("Option7", own("Options", "Option7", n_("Automatically pursue the chosen army")), pursue(audio), CHECK_INK),
+        ("Option8", own("Options", "Option8", n_("Automatically save the current game")), autosave(audio), CHECK_INK),
+        ("Option9", own("Options", "Option9", n_("Improved enemy AI in battle")), expert_ai(audio), CHECK_INK),
+        ("Option10", own("Options", "Option10", n_("Impossible difficulty (needs a restart)")), impossible(audio), CHECK_INK),
+        ("Option11", own("Options", "Option11", n_("Wide front row in battle (for new games)")), wide_row(audio, install_wide), CHECK_INK),
+    ];
+    if super::touchpad::MOBILE {
+        checks.push(("Touchpad", own("Options", "RazdorTouchpad", n_("Touchpad mode (the screen moves a cursor)")), audio.touchpad.unwrap_or(false), CHECK_INK));
     }
-    done
+    checks
+}
+
+/// A checkbox of the General tab clicked while it was `on`: it takes the other state. The touchpad
+/// mode takes effect on «Принять» only (`apply_options`).
+fn toggle_check(audio: &mut super::audio::Settings, key: &str, on: bool) {
+    match key {
+        "Option4" => audio.no_sound = Some(!on),
+        "Option5" => audio.show_fps = !on,
+        "Option6" => audio.hints_off = Some(!on),
+        "Option7" => audio.pursue = Some(!on),
+        "Option8" => audio.autosave = Some(!on),
+        "Option9" => toggle_expert_ai(audio),
+        "Option10" => audio.impossible = Some(!on),
+        "Option11" => audio.wide_row = Some(!on),
+        "Touchpad" => audio.touchpad = Some(!on),
+        _ => {}
+    }
+}
+
+/// The General tab on the desktop: the original's five slider rows and eight checkboxes at their
+/// places in `pane` (they fit it, so it does not scroll).
+fn general_desktop(audio: &mut super::audio::Settings, install_wide: bool, pane: Rect, k: f32) {
+    let row = |i: usize| Rect::new(pane.x + 10.0 * k, pane.y + i as f32 * 37.5 * k, pane.w - 20.0 * k, 30.0 * k);
+    for (i, (label, value)) in slider_rows(audio).iter().enumerate() {
+        if let Some(v) = option_slider(row(i), label, *value) {
+            set_slider(audio, i, *value, v);
+        }
+    }
+    let cx = pane.x + 14.0 * k;
+    let cy = |i: usize| row(5).y + 4.0 * k + i as f32 * 27.0 * k + if i >= 5 { 11.0 * k } else { 0.0 };
+    for (i, (key, label, on, ink)) in general_checks(audio, install_wide).into_iter().enumerate() {
+        if option_check(cx, cy(i), &label, on, ink) {
+            toggle_check(audio, key, on);
+        }
+    }
+}
+
+/// The General tab on a phone (dp at `u`): each slider on one line (its label, then its track),
+/// 40 dp high at a 44 dp pitch; each checkbox 34 dp for one line of its label, more when it wraps.
+/// The pane scrolls, and a row only partly in the view is drawn and clicked where it shows.
+fn general_phone(audio: &mut super::audio::Settings, install_wide: bool, view: Rect, u: f32, list_k: f32) {
+    let top = pane_begin(view, 24.0 * u, list_k);
+    let x0 = view.x + 4.0 * u;
+    let cw = view.w - 28.0 * list_k - 8.0 * u;
+    let (slider_h, pitch) = (40.0 * u, 44.0 * u);
+    let rows = slider_rows(audio);
+    let checks = general_checks(audio, install_wide);
+    let lines: Vec<Vec<String>> = checks.iter().map(|c| wrap_label(&c.1, cw - 34.0 * u, 14.0 * u)).collect();
+    let check_h: Vec<f32> = lines.iter().map(|l| (10.0 + l.len() as f32 * 18.0).max(34.0) * u).collect();
+    let mut y = rows.len() as f32 * pitch + 6.0 * u;
+    let mut check_y = Vec::with_capacity(checks.len());
+    for h in &check_h {
+        check_y.push(y);
+        y += h;
+    }
+    let content_bottom = top + y + 8.0 * u;
+    let on_view = |sy: f32, h: f32| sy + h > view.y && sy < view.y + view.h;
+    for (i, (label, value)) in rows.iter().enumerate() {
+        let sy = top + i as f32 * pitch;
+        if !on_view(sy, slider_h) {
+            continue;
+        }
+        let r = Rect::new(x0, sy, cw, slider_h);
+        if let Some(v) = option_slider_sized(r, label, *value, 14.0 * u).filter(|_| in_adv_view(r)) {
+            set_slider(audio, i, *value, v);
+        }
+    }
+    for (i, (key, _, on, ink)) in checks.iter().enumerate() {
+        let (sy, h) = (top + check_y[i], check_h[i]);
+        if !on_view(sy, h) {
+            continue;
+        }
+        if option_check_lines(x0, sy, cw, &lines[i], *on, *ink, u) && in_adv_view(Rect::new(x0, sy, cw, h)) {
+            toggle_check(audio, key, *on);
+        }
+    }
+    pane_end(top, content_bottom);
 }
 
 /// The «?» pop-up (backlog 1508): the game's hint box (`widgets::hint_box_always`) with the text
@@ -2279,7 +2394,7 @@ fn in_rect(p: (f32, f32), r: Rect) -> bool {
     p.0 >= r.x && p.0 < r.x + r.w && p.1 >= r.y && p.1 < r.y + r.h
 }
 
-/// Whether a control at `r` may take input now: in a group window's scroll view only where it shows.
+/// Whether a control at `r` may take input now: in a settings pane's scroll view only where it shows.
 fn in_adv_view(r: Rect) -> bool {
     ADV_VIEW.with(|v| v.get()).is_none_or(|view| overlaps(r, view))
 }
@@ -2289,9 +2404,6 @@ fn in_adv_view(r: Rect) -> bool {
 fn scroll_most(bottom: f32, view: f32) -> f32 {
     (bottom - view).max(0.0)
 }
-
-/// The phone's window scale and frame, as a share of the fit (the owner's request, 2026-11-03).
-const PHONE_WINDOW_SHRINK: f32 = 0.88;
 
 /// `r` scaled by `s` about its centre (the same centre, so the window stays centred in its room).
 fn shrink_about_centre(r: Rect, s: f32) -> Rect {
@@ -2330,7 +2442,7 @@ fn sprite_size_label(f: f32) -> String {
 
 /// A row button of the keys window and the settings (Razdor's own rows), true when clicked.
 fn row_button(r: Rect, label: &str) -> bool {
-    // In a group window's scroll view a row outside it is neither drawn nor clicked, and one half in it
+    // In a settings pane's scroll view a row outside it is neither drawn nor clicked, and one half in it
     // is clicked only where the pointer is in it.
     if let Some(view) = ADV_VIEW.with(|v| v.get()) {
         if !overlaps(r, view) {
@@ -2352,36 +2464,6 @@ fn settings_button(r: Rect, label: &str) -> bool {
     pressed
 }
 
-/// A phone held upright: a slider row with its label on its own line over ◀ the track ▶, which
-/// takes the row's whole width (a long label is never cut by the track).
-fn option_slider_stacked(r: Rect, label: &str, value: f32, size: f32) -> Option<f32> {
-    let k = chrome::k();
-    draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.0, 0.0, 0.35));
-    chrome::silver_frame(r, 1.0);
-    super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
-        chrome::shadow_text(label, r.x + 8.0 * k, r.y + 6.0 * k + size, size, OPTION_INK);
-    });
-    let a = 22.0 * k;
-    let y = r.y + r.h - 6.0 * k - a;
-    let left = Rect::new(r.x + 8.0 * k, y, a, a);
-    let right = Rect::new(r.x + r.w - 8.0 * k - a, y, a, a);
-    let track = Rect::new(left.x + left.w, y, right.x - left.x - left.w, a);
-    for (art, ar) in [("HArrowLeft", left), ("HArrowRight", right)] {
-        match chrome::win(art) {
-            Some(t) => chrome::tex(&t, ar, WHITE),
-            None => draw_rectangle(ar.x, ar.y, ar.w, ar.h, chrome::SILVER),
-        }
-    }
-    let over = |ar: Rect| ar.contains(crate::ui::widgets::pointer().into()) && !input_blocked();
-    if over(left) && clicked() {
-        return Some((value - 0.05).max(0.0));
-    }
-    if over(right) && clicked() {
-        return Some((value + 0.05).min(1.0));
-    }
-    slider(track, value)
-}
-
 /// One of the original's slider rows (0x4d01c9: 32 px boxes 40 apart from 45 px under the
 /// window's top, 18 px in from its sides, a dark fill and a frame, the label 8 px in): the
 /// label on the left, ◀ the track ▶ on the right. Returns the new value (0..1) when moved.
@@ -2394,11 +2476,25 @@ fn option_slider_sized(r: Rect, label: &str, value: f32, size: f32) -> Option<f3
     let k = chrome::k();
     draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.0, 0.0, 0.35));
     chrome::silver_frame(r, 1.0);
-    super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
-        chrome::shadow_text(label, r.x + 8.0 * k, r.y + r.h * 0.5 + 6.0 * k, size, OPTION_INK);
-    });
+    // The label takes at most 60% of the row: a longer one wraps to two lines (a phone's compact row
+    // is 40 dp high, so two lines fit). The arrows sit at the row's middle, or after the label when it
+    // runs past the middle, and never closer than 40 px to the right arrow.
     let a = 17.0 * k;
-    let left = Rect::new(r.x + r.w * 0.505, r.y + (r.h - a) / 2.0, a, a);
+    let (lines, label_w) = super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
+        let max_w = r.w * 0.6 - 8.0 * k;
+        let lines = if measure(label, size).width <= max_w { vec![label.to_string()] } else { wrap_label(label, max_w, size) };
+        let w = lines.iter().map(|l| measure(l, size).width).fold(0.0_f32, f32::max);
+        (lines, w)
+    });
+    let line_h = size * 1.1;
+    let base = r.y + r.h * 0.5 + 6.0 * k;
+    super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
+        for (i, line) in lines.iter().enumerate() {
+            chrome::shadow_text(line, r.x + 8.0 * k, base + (i as f32 - (lines.len() as f32 - 1.0) / 2.0) * line_h, size, OPTION_INK);
+        }
+    });
+    let left_x = (r.x + r.w * 0.505).max(r.x + 8.0 * k + label_w + 12.0 * k).min(r.x + r.w - 6.0 * k - a - 40.0 * k);
+    let left = Rect::new(left_x, r.y + (r.h - a) / 2.0, a, a);
     let right = Rect::new(r.x + r.w - 6.0 * k - a, left.y, a, a);
     let track = Rect::new(left.x + left.w, left.y, right.x - left.x - left.w, a);
     for (art, ar) in [("HArrowLeft", left), ("HArrowRight", right)] {
@@ -2454,10 +2550,6 @@ fn option_check(x: f32, y: f32, label: &str, on: bool, ink: Color) -> bool {
     clicked_it
 }
 
-/// The settings window alone (over the main menu, or `over_map` from the bar's gears: then
-/// above the bar, not over it): the original's "Настройки звука, графики и геймплея"
-/// (0x4d01c9, interface.md §16): five slider rows, eight checkboxes, «Принять» and
-/// «Отмена»; Razdor's own settings behind «Ещё…».
 /// «Клавиши» (Razdor's keys window): every action with its key, in two columns. A click on
 /// a key waits for the new one (`keymap::listen`); Esc or a click elsewhere cancels, and a
 /// key another action has goes to that action (`keymap::set`). «По умолчанию» puts every key
@@ -2692,11 +2784,6 @@ fn keys_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     closed || ok_pressed || (!was_waiting && key(KeyCode::Escape))
 }
 
-// The settings window's scroll on a phone held upright, in dp.
-local! {
-    static PHONE_SCROLL: std::cell::Cell<f32> = const { std::cell::Cell::new(0.0) };
-}
-
 /// Cuts the drawing off outside `clip` (screen px), or lifts the cut (`None`).
 fn phone_clip(clip: Option<Rect>) {
     let dpi = screen_dpi_scale();
@@ -2751,155 +2838,71 @@ fn option_check_lines(x: f32, y: f32, width: f32, lines: &[String], on: bool, in
     clicked_it
 }
 
-/// The options window on a phone held upright, in dp: the window takes the phone's width and
-/// the room from the top inset to the bar (over a map) or to the title's foot; one unit is one
-/// dp, so the labels are 14 units (14 sp) and the rows 40 units. A long checkbox label wraps to a
-/// second line; the rows scroll when they are taller than the window. Its last rows are the five
-/// group buttons (backlog 1559), as many to a row as their labels fit. The desktop keeps
-/// [`options_window`]'s own layout. Returns true when closed.
-fn phone_options(audio: &mut super::audio::Settings, install_wide: bool, over_map: bool, u: f32) -> bool {
+/// The settings window on a phone, in dp (`u` px per dp): it takes the phone's width and the room
+/// from the top inset to the bar (over a map) or to the title's foot. Sideways its tabs are a column
+/// at the left (`tab_column_rects`, 14 sp labels) and the pane is at its right; upright they are a
+/// 3 × 2 grid above the pane. The pane shows the General rows or a group's rows and scrolls (a
+/// finger, the wheel, its bar). «Принять» and «Отмена» (44 dp) are at the bottom right. Returns how
+/// the window ended, if it did. The desktop keeps [`desktop_options`]'s layout.
+fn phone_options(audio: &mut super::audio::Settings, install_wide: bool, over_map: bool, u: f32) -> Option<Close> {
     super::dt_font::legacy_metrics_if(true, || {
         let (sw, sh) = (screen_width(), screen_height());
         let top = super::display::safe_area().top + 8.0 * u;
-        let bottom = if over_map { sh - chrome::bar_height() - 8.0 * u } else { window_layout::title_bottom() - 8.0 * u };
-        // The scale the window came in with (the title's or the map's), which the new-game list's
-        // scroll bar also takes (`new_game::list_track`): the bar's size comes from it, not from `u`.
+        // Over the map the window stops 8 dp above the bar's real top (`bar_top_height`: the bar's buttons
+        // sit there, the readouts' strip under them is not the window's to cover).
+        let bottom = if over_map { sh - chrome::bar_top_height() - 8.0 * u } else { window_layout::title_bottom() - 8.0 * u };
+        // The scale the window came in with (the title's or the map's), which the scroll bars take
+        // (`new_game::list_track`): their size comes from it, not from `u`.
         let list_k = chrome::k();
         let _scale = super::display::enter_window_scale(Some(u));
         let title = own("Options", "Title", n_("Sound, graphics and gameplay settings"));
-        let rect = Rect::new(8.0 * u, top, sw - 16.0 * u, (bottom - top).max(200.0 * u));
+        // Sideways the window is at most 80% of the safe width (and 760 dp), centred in the safe area, so
+        // it keeps margins on a wide phone; upright it takes the phone's width as before.
+        let rect = if window_layout::portrait() {
+            Rect::new(8.0 * u, top, sw - 16.0 * u, (bottom - top).max(200.0 * u))
+        } else {
+            let safe = super::display::safe_area();
+            let safe_w = sw - safe.left - safe.right;
+            let w = (safe_w * 0.8).min(760.0 * u);
+            Rect::new(safe.left + (safe_w - w) / 2.0, top, w, (bottom - top).max(200.0 * u))
+        };
         let (inner, closed) = chrome::window(rect, &title, chrome::Skin::Marble, true);
         let pad = 12.0 * u;
-        let x0 = inner.x + pad;
-        // The scroll bar: twice the new-game list's (`new_game::list_track`, 12 × k), 24 × k wide, 4 × k
-        // from the window's right edge; the rows stop 4 × k before it.
-        let bar_x = inner.x + inner.w - 28.0 * list_k;
-        let cw = bar_x - 4.0 * list_k - x0;
-        // The group buttons (backlog 1559): as many to a row as their labels fit (`group_per_row`), in a
-        // fixed block above the buttons row (44 units high, 10 above its bottom), not in the scroll list.
-        let widths = group_label_widths(14.0 * u);
-        let per = group_per_row(&widths, cw, 8.0 * u, 10.0 * u);
-        let group_rows = (Group::ALL.len() as f32 / per as f32).ceil();
-        let group_h = group_rows * 44.0 * u + (group_rows - 1.0) * 8.0 * u;
-        let group_top = inner.y + inner.h - 12.0 * u - 40.0 * u - 8.0 * u - group_h;
-        // The list between the window's top and the group block.
-        let list = Rect::new(inner.x, inner.y + 6.0 * u, inner.w, group_top - 8.0 * u - (inner.y + 6.0 * u));
-        // A slider row stacks its label over its track, so a long label is never cut by the track.
-        let (slider_h, slider_pitch) = (58.0 * u, 64.0 * u);
-        let mod_rows = chrome::install_option("Option0").is_some() && chrome::install_option("OptionSld0").is_none();
-        let slider_label = |n: usize, ours: &'static str| own("Options", &if mod_rows { format!("Option{n}") } else { format!("OptionSld{n}") }, ours);
-        let anim_label = if mod_rows { tr(n_("Battle animation speed")).to_string() } else { slider_label(4, n_("Battle animation speed")) };
-        let slider_rows: [(String, f32); 5] = [
-            (slider_label(0, n_("Background music volume")), audio.music_volume),
-            (slider_label(1, n_("Sound effects volume")), audio.sfx_volume),
-            (slider_label(2, n_("Map scroll speed")), scroll_speed(audio) / 100.0),
-            (slider_label(3, n_("Hero's walking speed")), walk_speed(audio) / razdor::rules::game::WALK_SPEED_MAX as f32),
-            (anim_label, anim_speed(audio).unwrap_or(0.0) / 99.0),
-        ];
-        let checks: Vec<(&'static str, String, bool, Color)> = vec![
-            ("Option4", own("Options", "Option4", n_("Do not load music and sounds (needs a restart)")), no_sound(audio), CHECK_ORANGE),
-            ("Option5", own("Options", "Option5", n_("Show FPS")), audio.show_fps, CHECK_INK),
-            ("Option6", own("Options", "Option6", n_("Turn off hints")), hints_off(audio), CHECK_INK),
-            ("Option7", own("Options", "Option7", n_("Automatically pursue the chosen army")), pursue(audio), CHECK_INK),
-            ("Option8", own("Options", "Option8", n_("Automatically save the current game")), autosave(audio), CHECK_INK),
-            ("Option9", own("Options", "Option9", n_("Improved enemy AI in battle")), expert_ai(audio), CHECK_INK),
-            ("Option10", own("Options", "Option10", n_("Impossible difficulty (needs a restart)")), impossible(audio), CHECK_INK),
-            ("Option11", own("Options", "Option11", n_("Wide front row in battle (for new games)")), wide_row(audio, install_wide), CHECK_INK),
-        ];
-        // Each checkbox's lines, and the content's height in units from the list's top.
-        let check_lines: Vec<Vec<String>> = checks.iter().map(|c| wrap_label(&c.1, cw - 34.0 * u, 14.0 * u)).collect();
-        let check_h: Vec<f32> = check_lines.iter().map(|l| (10.0 + l.len() as f32 * 18.0).max(38.0) * u).collect();
-        let slider_top = 0.0;
-        let checks_top = slider_top + slider_rows.len() as f32 * slider_pitch + 6.0 * u;
-        let mut check_y = Vec::with_capacity(checks.len());
-        let mut y = checks_top;
-        for h in &check_h {
-            check_y.push(y);
-            y += h;
-        }
-        let content = y + 8.0 * u;
-
-        // Scroll: the wheel and the bar at the list's right edge.
-        let view = list.h;
-        let most = (content - view).max(0.0);
-        let mut scroll = PHONE_SCROLL.with(|c| c.get()).clamp(0.0, most);
-        if most > 0.0 {
-            // A finger's slide over the list turns the wheel a row (24 dp), as the wheel does; the
-            // bar at the right (registered after, so it wins over the list) takes its own slide.
-            super::widgets::swipe_rows(list, 24.0 * u);
-            if crate::ui::widgets::mouse_in(list.x, list.y, list.w, list.h) {
-                scroll = (scroll - wheel() * 24.0 * u).clamp(0.0, most);
-            }
-            // The original's bar (its arrows, track and knob), twice the new-game list's width.
-            let bar = Rect::new(bar_x, list.y, 24.0 * list_k, view);
-            super::widgets::scrollbar_px(bar, &mut scroll, most, view, 24.0 * u);
-        }
-        PHONE_SCROLL.with(|c| c.set(scroll));
-        // A row's screen top, and whether it is on the list at all.
-        let on_list = |cy: f32, h: f32| cy + h > 0.0 && cy < view;
-        let at = |cy: f32| list.y + cy - scroll;
-
-        phone_clip(Some(list));
-        for (i, (label, value)) in slider_rows.iter().enumerate() {
-            let cy = slider_top + i as f32 * slider_pitch;
-            if !on_list(cy - scroll, slider_h) {
-                continue;
-            }
-            // The rows stop before the scroll bar (`bar_x`).
-            let r = Rect::new(x0 - pad + 2.0 * u, at(cy), bar_x - 4.0 * list_k - (x0 - pad + 2.0 * u), slider_h);
-            if let Some(v) = option_slider_stacked(r, label, *value, 14.0 * u) {
-                match i {
-                    0 | 1 => {
-                        let steps = ((v - value) / super::audio::VOLUME_STEP).round() as i32;
-                        if i == 0 {
-                            audio.music_muted = false;
-                            audio.step_music(steps);
-                        } else {
-                            audio.sfx_muted = false;
-                            audio.step_sfx(steps);
-                        }
-                    }
-                    2 => audio.scroll_speed = Some((v * 100.0).round()),
-                    3 => audio.walk_speed = Some((v * razdor::rules::game::WALK_SPEED_MAX as f32).round()),
-                    _ => audio.anim_speed = Some((v * 99.0).round()),
-                }
-            }
-        }
-        for (i, (key, _, on, ink)) in checks.iter().enumerate() {
-            let cy = check_y[i];
-            let h = check_h[i];
-            if !on_list(cy - scroll, h) {
-                continue;
-            }
-            if option_check_lines(x0, at(cy), cw, &check_lines[i], *on, *ink, u) {
-                match *key {
-                    "Option4" => audio.no_sound = Some(!on),
-                    "Option5" => audio.show_fps = !on,
-                    "Option6" => audio.hints_off = Some(!on),
-                    "Option7" => audio.pursue = Some(!on),
-                    "Option8" => audio.autosave = Some(!on),
-                    "Option9" => toggle_expert_ai(audio),
-                    "Option10" => audio.impossible = Some(!on),
-                    _ => audio.wide_row = Some(!on),
-                }
-            }
-        }
-        phone_clip(None);
-        // The group buttons: their block is fixed above the buttons row, so they are not scrolled.
-        let mut opened = None;
-        for (grp, r) in Group::ALL.into_iter().zip(group_rects(Rect::new(x0, group_top, cw, 44.0 * u), &widths, 10.0 * u, 8.0 * u, 44.0 * u)) {
-            if button_draw(r, grp.button(), Some(14.0 * u)) {
-                opened = Some(grp);
-            }
-        }
-        if let Some(grp) = opened {
-            GROUP.with(|g| g.set(Some(grp)));
-            return false;
-        }
-
-        // The buttons row: «Принять» and «Отмена» at the right, 40 units high.
-        let bh = 40.0 * u;
+        // The buttons row: «Принять» and «Отмена» at the right, 44 dp high, 12 dp above the window's foot.
+        let bh = 44.0 * u;
         let by = inner.y + inner.h - 12.0 * u - bh;
+        let (tab_rects, pane, tab_clip) = if window_layout::portrait() {
+            let cw = inner.w - 2.0 * pad;
+            let tw = (cw - 2.0 * 6.0 * u) / 3.0;
+            let rects: Vec<Rect> = (0..TABS.len())
+                .map(|i| {
+                    let (col, row) = ((i % 3) as f32, (i / 3) as f32);
+                    Rect::new(inner.x + pad + col * (tw + 6.0 * u), inner.y + 8.0 * u + row * (44.0 * u + 6.0 * u), tw, 44.0 * u)
+                })
+                .collect();
+            let pane_top = inner.y + 8.0 * u + 2.0 * 44.0 * u + 6.0 * u + 10.0 * u;
+            (rects, Rect::new(inner.x + pad, pane_top, cw, (by - 8.0 * u - pane_top).max(40.0 * u)), None)
+        } else {
+            let col_top = inner.y + 8.0 * u;
+            let col_bottom = by - 8.0 * u;
+            let col = Rect::new(inner.x + pad, col_top, 150.0 * u, (col_bottom - col_top).max(40.0 * u));
+            let x = col.x + col.w + 10.0 * u;
+            let pane = Rect::new(x, col_top, (inner.x + inner.w - pad - x).max(40.0 * u), col.h);
+            // A short window (over the map, a phone held sideways) may not hold six tabs of 40 dp: the
+            // column then scrolls, the tabs past its foot neither drawn nor pressed.
+            let mut rects = tab_column_rects(col, u);
+            let foot = rects.last().map_or(col.y, |r| r.y + r.h);
+            let scroll = tab_column_scroll(col, foot - (col.y + col.h), u);
+            for r in rects.iter_mut() {
+                r.y -= scroll;
+            }
+            (rects, pane, Some(col))
+        };
+        let switched = tab_buttons(&tab_rects, 14.0 * u, tab_clip);
+        match GROUP.with(|g| g.get()) {
+            None => general_phone(audio, install_wide, pane, u, list_k),
+            Some(group) => group_pane(audio, over_map, group, pane, &RowGeo::phone_compact(u), 24.0 * u, list_k),
+        }
         // The two scale down together when their widths would overlap (`bottom_row_widths`).
         let w = bottom_row_widths(inner.w - 2.0 * pad, &[110.0 * u, 110.0 * u], 8.0 * u);
         let cancel = Rect::new(inner.x + inner.w - pad - w[1], by, w[1], bh);
@@ -2907,60 +2910,29 @@ fn phone_options(audio: &mut super::audio::Settings, install_wide: bool, over_ma
         let (apply_label, cancel_label) = (own("Buttons", "Apply", n_("Apply")), own("Buttons", "Cancel", n_("Cancel")));
         let apply_pressed = settings_button(apply, &apply_label);
         let cancel_pressed = settings_button(cancel, &cancel_label);
+        draw_help_pop(u, true);
+        if switched {
+            return None;
+        }
         if apply_pressed || key(KeyCode::Enter) {
-            OPENED_WITH.with(|o| *o.borrow_mut() = None);
-            return true;
+            return Some(Close::Apply);
         }
         if cancel_pressed || closed || key(KeyCode::Escape) {
-            if let Some(before) = OPENED_WITH.with(|o| o.take()) {
-                *audio = before;
-            }
-            return true;
+            return Some(Close::Cancel);
         }
-        false
+        None
     })
 }
 
-/// The settings window (the original's sound, graphics and gameplay rows) with the five group
-/// buttons under them (`group_window`), and «Принять» / «Отмена» at the bottom. A group window
-/// open over it takes the input meanwhile. Returns true when closed.
-pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, over_map: bool) -> bool {
-    if let Some(group) = GROUP.with(|g| g.get()) {
-        // The keys window stands over the group's window, which takes no input meanwhile.
-        if KEYS_OPEN.with(|o| o.get()) {
-            if keys_window(audio, over_map) && after_keys_closed() {
-                return true;
-            }
-            return false;
-        }
-        if group_window(audio, over_map, group) {
-            GROUP.with(|g| g.set(None));
-            // What the group window set is kept, whatever the settings window ends with; the
-            // touchpad mode stays as the settings window opened it, until «Принять».
-            OPENED_WITH.with(|o| {
-                let mut o = o.borrow_mut();
-                let mut kept = audio.clone();
-                if let Some(before) = o.as_ref() {
-                    kept.touchpad = before.touchpad;
-                }
-                *o = Some(kept);
-            });
-        }
-        return false;
-    }
-    if OPENED_WITH.with(|o| o.borrow().is_none()) {
-        OPENED_WITH.with(|o| *o.borrow_mut() = Some(audio.clone()));
-    }
-    // A phone (held upright or sideways): its own layout (`phone_options`), in dp, so the group
-    // buttons keep the finger's 44 dp and their 14 sp labels (backlog 1559).
-    if let Some(u) = super::display::dp_px() {
-        return phone_options(audio, install_wide, over_map, u);
-    }
+/// The settings window on the desktop: the tab column at its left (`TAB_X`, `TAB_W`, tabs of
+/// 28 × g high) and the original's 594 px pane at its right, under the window's top frame and above
+/// the rule over «Принять» and «Отмена». Returns how the window ended, if it did.
+fn desktop_options(audio: &mut super::audio::Settings, install_wide: bool, over_map: bool) -> Option<Close> {
     let title = own("Options", "Title", n_("Sound, graphics and gameplay settings"));
-    let h = options_h();
+    let (w, h) = (OPTIONS_W, options_h());
     let g = super::display::button_grow();
-    // In game on a phone, the window at its own scale (`map_window`, `window_layout::over_map_scale`); the title's is set by `options`.
-    let _scale = over_map.then(|| window_layout::over_map_scale((594.0, h)));
+    // In game, the window at its own scale (`map_window`, `window_layout::over_map_scale`).
+    let _scale = over_map.then(|| window_layout::over_map_scale((w, h)));
     // Razdor's own: grown by the text size, the window may be taller than the room it has (above
     // the bar over the map); it is then drawn at the scale that fits it. Never at Normal.
     let _fit = (g > 1.0).then(|| {
@@ -2968,112 +2940,80 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
         let need = (h + 30.0) * chrome::k();
         (need > room).then(|| super::display::enter_window_scale(Some(chrome::k() * room / need)))
     });
-    let (inner, closed) = if over_map { map_window(&title, 594.0, h, 1.0) } else { window(&title, 594.0, h) };
+    let (inner, closed) = if over_map { map_window(&title, w, h, 1.0) } else { window(&title, w, h) };
     let k = chrome::k();
-    let outer = Rect::new(inner.x - 2.0 * k, inner.y - (26.0 * k).round() - 1.0, 594.0 * k, h * k);
+    let outer = Rect::new(inner.x - 2.0 * k, inner.y - (26.0 * k).round() - 1.0, w * k, h * k);
     // A window with 0x48d710's inner frames (the options window is c2953a, 634×556, 4d2f48).
     chrome::window_inner_frames(outer, chrome::opx());
-    let row = |i: usize| Rect::new(inner.x + 10.0 * k, inner.y + 8.0 * k + i as f32 * 37.5 * k, inner.w - 20.0 * k, 30.0 * k);
-    // The Evolution Mod has four slider rows, labelled `Option0`…`Option3` (its exe builds the key
-    // from `Option` and the row number); the Community's five are `OptionSld0`…`OptionSld4`. A
-    // Community install names its rows the same way with `OptionSld`.
-    let mod_rows = chrome::install_option("Option0").is_some() && chrome::install_option("OptionSld0").is_none();
-    let slider_label = |n: usize, ours: &'static str| own("Options", &if mod_rows { format!("Option{n}") } else { format!("OptionSld{n}") }, ours);
-    // The volumes, in steps of 1%.
-    for (i, music) in [(0, true), (1, false)] {
-        let (ours, value) = if music { (n_("Background music volume"), audio.music_volume) } else { (n_("Sound effects volume"), audio.sfx_volume) };
-        if let Some(v) = option_slider(row(i), &slider_label(i, ours), value) {
-            let steps = ((v - value) / super::audio::VOLUME_STEP).round() as i32;
-            if music {
-                audio.music_muted = false;
-                audio.step_music(steps);
-            } else {
-                audio.sfx_muted = false;
-                audio.step_sfx(steps);
-            }
-        }
-    }
-    // The map's edge scroll (`ScrollSpeed`, world_view) and the hero's step (`WalkSpeed`).
-    if let Some(v) = option_slider(row(2), &slider_label(2, n_("Map scroll speed")), scroll_speed(audio) / 100.0) {
-        audio.scroll_speed = Some((v * 100.0).round());
-    }
-    // The slider runs 0..`WALK_SPEED_MAX`: the original's fastest (100) is its middle.
-    let max = razdor::rules::game::WALK_SPEED_MAX as f32;
-    if let Some(v) = option_slider(row(3), &slider_label(3, n_("Hero's walking speed")), walk_speed(audio) / max) {
-        audio.walk_speed = Some((v * max).round());
-    }
-    // The Community's "Скорость анимаций в битве" (`AnimationSpeed`): it caps a strike's
-    // slide at (100 − S)·5 ms and its effect at (100 − S)·3 ms (0x4afd45, 0x4afe7c). The
-    // Evolution Mod's window has only four sliders (its `Option4` is a checkbox); Razdor shows
-    // this row for every install, under its own label (the owner's decision, 2026-10-29).
-    let anim_label = if mod_rows { tr(n_("Battle animation speed")).to_string() } else { slider_label(4, n_("Battle animation speed")) };
-    if let Some(v) = option_slider(row(4), &anim_label, anim_speed(audio).unwrap_or(0.0) / 99.0) {
-        audio.anim_speed = Some((v * 99.0).round());
-    }
-    // The eight checkboxes (`Option4`…`Option11`), a gap before the three of battle and
-    // difficulty.
-    let cx = inner.x + 14.0 * k;
-    let cy = |i: usize| row(5).y + 4.0 * k + i as f32 * 27.0 * k + if i >= 5 { 11.0 * k } else { 0.0 };
-    let checks: [(&str, &'static str, bool, Color); 8] = [
-        ("Option4", n_("Do not load music and sounds (needs a restart)"), no_sound(audio), CHECK_ORANGE),
-        ("Option5", n_("Show FPS"), audio.show_fps, CHECK_INK),
-        ("Option6", n_("Turn off hints"), hints_off(audio), CHECK_INK),
-        ("Option7", n_("Automatically pursue the chosen army"), pursue(audio), CHECK_INK),
-        ("Option8", n_("Automatically save the current game"), autosave(audio), CHECK_INK),
-        ("Option9", n_("Improved enemy AI in battle"), expert_ai(audio), CHECK_INK),
-        ("Option10", n_("Impossible difficulty (needs a restart)"), impossible(audio), CHECK_INK),
-        ("Option11", n_("Wide front row in battle (for new games)"), wide_row(audio, install_wide), CHECK_INK),
-    ];
-    for (i, (key, ours, on, ink)) in checks.into_iter().enumerate() {
-        if option_check(cx, cy(i), &own("Options", key, ours), on, ink) {
-            match i {
-                0 => audio.no_sound = Some(!on),
-                1 => audio.show_fps = !on,
-                2 => audio.hints_off = Some(!on),
-                3 => audio.pursue = Some(!on),
-                4 => audio.autosave = Some(!on),
-                5 => toggle_expert_ai(audio),
-                6 => audio.impossible = Some(!on),
-                _ => audio.wide_row = Some(!on),
-            }
-        }
-    }
-    // The five group buttons (backlog 1559), a row under the checkboxes: each opens its window.
-    let group_y = cy(7) + 36.0 * k;
-    let row_h = 28.0 * k * g;
-    let widths = group_label_widths(GROUP_LABEL * k * g);
-    let mut rects = group_rects(Rect::new(inner.x + 14.0 * k, group_y, inner.w - 28.0 * k, row_h), &widths, 14.0 * k, 6.0 * k, row_h);
-    let mut opened = None;
-    for (grp, r) in Group::ALL.into_iter().zip(rects.drain(..)) {
-        if button_draw(r, grp.button(), None) {
-            opened = Some(grp);
-        }
+    let tab_h = 28.0 * g * k;
+    let tab_rects: Vec<Rect> = (0..TABS.len()).map(|i| Rect::new(outer.x + TAB_X * k, outer.y + 35.0 * k + i as f32 * (tab_h + 6.0 * k), TAB_W * k, tab_h)).collect();
+    // The pane's top is the original's first row (8 px under the frame's top); its foot stops 60 px
+    // above the window's foot, above the rule over the buttons.
+    let pane = Rect::new(outer.x + PANE_X * k, outer.y + 35.0 * k, (w - PANE_X - PANE_R) * k, (h - 95.0) * k);
+    let switched = tab_buttons(&tab_rects, GROUP_LABEL * k * g, None);
+    match GROUP.with(|c| c.get()) {
+        None => general_desktop(audio, install_wide, pane, k),
+        Some(group) => group_pane(audio, over_map, group, pane, &RowGeo::desktop(k, g), 40.0 * k, k),
     }
     // «Принять» keeps what was changed, «Отмена» (the close box and Esc too) puts it back.
     let bh = 32.0 * g;
     let button_y = outer.y + (h - 10.0 - bh) * k;
-    let w = bottom_row_widths(inner.w - 28.0 * k, &[89.0 * k * g, 89.0 * k * g], 8.0 * k);
-    let cancel = Rect::new(inner.x + inner.w - 14.0 * k - w[1], button_y, w[1], bh * k);
-    let apply = Rect::new(cancel.x - 8.0 * k - w[0], cancel.y, w[0], bh * k);
+    let bw = bottom_row_widths(inner.w - 28.0 * k, &[89.0 * k * g, 89.0 * k * g], 8.0 * k);
+    let cancel = Rect::new(inner.x + inner.w - 14.0 * k - bw[1], button_y, bw[1], bh * k);
+    let apply = Rect::new(cancel.x - 8.0 * k - bw[0], cancel.y, bw[0], bh * k);
     let (apply_label, cancel_label) = (own("Buttons", "Apply", n_("Apply")), own("Buttons", "Cancel", n_("Cancel")));
     // Both act when the button is let go over it (PR #5's buttons).
     let apply_pressed = settings_button(apply, &apply_label);
     let cancel_pressed = settings_button(cancel, &cancel_label);
-    if let Some(grp) = opened {
-        GROUP.with(|g| g.set(Some(grp)));
-        return false;
+    draw_help_pop(k, false);
+    if switched {
+        return None;
     }
     if apply_pressed || key(KeyCode::Enter) {
-        OPENED_WITH.with(|o| *o.borrow_mut() = None);
-        return true;
+        return Some(Close::Apply);
     }
     if cancel_pressed || closed || key(KeyCode::Escape) {
-        if let Some(before) = OPENED_WITH.with(|o| o.take()) {
-            *audio = before;
-        }
-        return true;
+        return Some(Close::Cancel);
     }
-    false
+    None
+}
+
+/// The settings window (the original's sound, graphics and gameplay rows, then the tabs' groups)
+/// with «Принять» and «Отмена» at the bottom, as the one window of the settings: its tabs on the
+/// left choose the pane. The keys window stands over it while open. Returns true when closed.
+pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, over_map: bool) -> bool {
+    // The keys window (the Controls tab's «Клавиши…») stands alone while it is open.
+    if KEYS_OPEN.with(|o| o.get()) {
+        if keys_window(audio, over_map) && after_keys_closed() {
+            return true;
+        }
+        return false;
+    }
+    help_frame_start();
+    if OPENED_WITH.with(|o| o.borrow().is_none()) {
+        OPENED_WITH.with(|o| *o.borrow_mut() = Some(audio.clone()));
+    }
+    // A phone (held upright or sideways): its own layout, in dp (`phone_options`).
+    let closed = match super::display::dp_px() {
+        Some(u) => phone_options(audio, install_wide, over_map, u),
+        None => desktop_options(audio, install_wide, over_map),
+    };
+    let Some(close) = closed else {
+        return false;
+    };
+    GROUP.with(|g| g.set(None));
+    reset_pane();
+    TAB_SCROLL.with(|s| s.set(0.0));
+    HELP_PINNED.with(|p| p.set(None));
+    match close {
+        Close::Apply => OPENED_WITH.with(|o| *o.borrow_mut() = None),
+        Close::Cancel => {
+            if let Some(before) = OPENED_WITH.with(|o| o.take()) {
+                *audio = before;
+            }
+        }
+    }
+    true
 }
 
 /// Closes the in-game settings window with its changes kept, as «Принять» does (the bar's
@@ -3373,7 +3313,6 @@ mod tests {
         }
     }
 
-    /// The group buttons: five to a row when their labels fit, else three, else two.
     /// The long hints sit behind a «?» (backlog 1508): the rows that have one, and no others.
     #[test]
     fn the_long_hints_are_behind_a_question_mark() {
@@ -3384,17 +3323,35 @@ mod tests {
         HELP_PINNED.with(|p| p.set(None));
     }
 
+    /// The settings tabs: the General one first (`None`), then the five groups in their order.
     #[test]
-    fn the_group_buttons_take_five_three_or_two_to_a_row() {
-        // A 60 px label needs 76 px with its pad: five fit in 500 (95 px each), three in 300.
-        assert_eq!(group_per_row(&[60.0; 5], 500.0, 6.0, 8.0), 5);
-        assert_eq!(group_per_row(&[60.0; 5], 300.0, 6.0, 8.0), 3);
-        assert_eq!(group_per_row(&[150.0; 5], 200.0, 6.0, 8.0), 2);
-        let area = Rect::new(0.0, 0.0, 300.0, 0.0);
-        let rects = group_rects(area, &[60.0; 5], 8.0, 6.0, 20.0);
-        assert_eq!(rects.len(), 5);
-        assert!(rects.iter().all(|r| r.x >= 0.0 && r.x + r.w <= 300.0 + 1e-3));
-        // The second row starts under the first.
-        assert!(rects[3].y >= rects[0].y + 20.0);
+    fn the_settings_tabs_are_the_general_one_then_the_five_groups() {
+        assert_eq!(TABS.len(), 6);
+        assert_eq!(TABS[0], None);
+        assert_eq!(TABS[1..].iter().map(|t| t.expect("a group")).collect::<Vec<_>>(), Group::ALL.to_vec());
+        assert_eq!(tab_label(None), tr("General settings"));
+    }
+
+    /// The phone's tab column: six 44 dp tabs with 6 dp gaps when they fit; else the gaps shrink
+    /// (2 dp at least), then the tabs, never under 40 dp, and all six stay in the column.
+    #[test]
+    fn the_tab_column_shrinks_its_gaps_then_its_tabs_to_fit() {
+        let fit = tab_column_rects(Rect::new(0.0, 0.0, 150.0, 294.0), 1.0);
+        assert!(fit.iter().all(|r| (r.h - 44.0).abs() < 1e-3), "{fit:?}");
+        assert!(fit.windows(2).all(|p| (p[1].y - p[0].y - 50.0).abs() < 1e-3), "{fit:?}");
+        let short = tab_column_rects(Rect::new(0.0, 0.0, 150.0, 250.0), 1.0);
+        assert_eq!(short.len(), 6);
+        assert!(short.iter().all(|r| r.h >= 40.0 - 1e-3), "{short:?}");
+        let last = short[5];
+        assert!(last.y + last.h <= 250.0 + 1e-3, "{short:?} runs out of its column");
+    }
+
+    /// The bottom bar's size row shows on a phone held sideways only (a player's report).
+    #[test]
+    fn the_bottom_bar_size_row_is_for_a_phone_held_sideways() {
+        assert!(bottom_bar_row_shown(true, false));
+        assert!(!bottom_bar_row_shown(true, true));
+        assert!(!bottom_bar_row_shown(false, false));
+        assert!(!bottom_bar_row_shown(false, true));
     }
 }

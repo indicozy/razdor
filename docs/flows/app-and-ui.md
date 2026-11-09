@@ -296,13 +296,13 @@ and the top of the bottom bar (`chrome::bar_height`, at the interface scale, 8 p
 title twin (the game menu's art window: `saves::exit_window`, `exit_dialog`, at the art's 634×516 px scaled by `opx`;
 the spellbook; the battle's stacked window). The windows over the map that have a title twin take `window_layout::over_map_scale`
 / `over_map_rect` (`window_scale` / `window_rect` pick them by `in_game`): the settings window (its guard is set in
-`options_window` over the map), the settings groups' windows («Карта», «Бой и армия», «Экран», «Управление», «Прочее», `group_window`), the keys window (`keys_window`), the save window (`save_screen`,
+`options_window` over the map), the settings window (one window with its tabs, `desktop_options` / `phone_options`; its panes scroll in `pane_begin`), the keys window (`keys_window`), the save window (`save_screen`,
 the name field's keyboard lift applies to the scaled rect), the load window (`load_screen`), and `map_window`, which
 centres them over the map. Sideways on a phone these take the title's rule (`window_layout::sideways_window`, the same
 scale and rectangle as the main menu's window, a phone choice: the windows were small in landscape, playtest 1365).
 Over the map they use `window_layout::sideways_game_window`: the same, but never over the bottom bar; where the title
 rule's floor (the base scale) would make the window taller than the room between the top inset and the bar, it scales
-down to that room and stays centred there (a settings group window: 600 video px wide on the desktop, the room's size on a phone, as the group's rows need). The map and the bar under them are drawn at the interface scale
+down to that room and stays centred there (the settings window: 774 video px wide on the desktop, the room's size on a phone, as its tabs and rows need). The map and the bar under them are drawn at the interface scale
 (`world_view::window_backdrop`, `backdrop_lit`). The help overlay (F1, «Клавиши» in game, `hotkeys::help_overlay`)
 already spans the phone's width; on a phone with a bar it stands between the top inset and the bar (`has_bar`).
 Desktop is byte-identical, and so is landscape for the windows with no title twin (`game_rect` is None there, the old placements stay).
@@ -332,10 +332,11 @@ desktop and sideways pixel-identical, texts drawn under `dt_font::legacy_metrics
 - market (`window_layout::market_panes`, `Stack::Market`): the item description strip on top (`ItemBox::MarketStrip`),
   the section icons, the list taking the height, one row of «Инвентарь», money, «Купить», «Торговая лавка»;
 - the title's bottom links are four marble tiles (`main_menu`); the options/settings windows take the phone's width
-  and height with wrapped checkbox labels and sliders under their names (`option_slider_stacked`); the list
-  scrolls by finger, the wheel and its bar (`phone_options`: `scrollbar_px`, 24 × k wide, twice the new-game
-  list's 12 × k, `new_game::list_track`); the settings group windows scroll their rows above «Ок» (`group_window`,
-  `ADV_SCROLL`, `ADV_VIEW`: rows drawn and clicked only in the view, the right margin keeps 32 × k for the bar); keys
+  and height with compact rows (`general_phone`: each slider with its label then its track, 14 sp, 40 dp rows at a 44 dp pitch; a label over 60% of the row wraps to two lines (`option_slider_sized`); each checkbox 34 dp for one line); the panes
+  scroll by finger, the wheel and their bar (`pane_begin`: `scrollbar_px`, 24 × k wide, twice the new-game
+  list's 12 × k, `new_game::list_track`; `ADV_SCROLL`, `ADV_VIEW`: rows drawn and clicked only in the view). The tabs
+  (`tab_column_rects`: a column at the left sideways, a 3 × 2 grid upright, 44 dp each, 14 sp) pick the pane (`phone_options`);
+  «Принять» and «Отмена» (44 dp) stay at the bottom right; keys
   (`keys_window_upright`) and the F1 list in dp; save/load with their buttons in one row; the reward windows'
   OK 120 × 44 dp and larger text (`dialog::OK_W_DP`, `BIG_TEXT`); the learnt-spell window padded, its spell card in
   the empty text box's place (`learnt_slot`, `spellbook::spell_tip_card_padded`); the army window's «Закрыть» a
@@ -372,8 +373,7 @@ castle has neither tab); the snapshot clears the start's due places, which other
 window step aside for the map (`world_view::building_flight`).
 
 Touchpad mode (`src/ui/touchpad.rs`; off by default, on only at `Settings::touchpad == Some(true)`
-on mobile, set by the options window's last checkbox there, which makes the window 28 px taller
-on mobile): the screen is a laptop trackpad, instead of the gestures. `TouchMapper::step` is pure and turns the frame's touches (`TouchPoint`, from
+on mobile, set by the General tab's last checkbox there, `general_checks`): the screen is a laptop trackpad, instead of the gestures. `TouchMapper::step` is pure and turns the frame's touches (`TouchPoint`, from
 `macroquad::input::touches()`) into a `gamepad::Frame`: one finger slides the pointer (1.6 px per
 px, the distances scaled to the screen's height); a tap (down and up within 0.25 s, under 12 px
 of slide) clicks where the pointer is, pressed on the lift and released the next frame; a second
@@ -906,7 +906,7 @@ row width, and Razdor's own options (`updates`,
 map zoom, `leader_caption`: the leader's name under the event picture of a meeting, see
 `story::leader_caption` and `EventOutcome::MeetingArmy`). The windows are `main_menu::options` / `main_menu::options_window` (the
 original's: five slider rows, eight checkboxes, «Принять» keeps, «Отмена» restores what the
-window opened with) and the five group windows (`main_menu::Group`, `group_window`): Razdor's own rows, each in its group (`Group::rows`, the `Row` enum; a test checks that every row is in exactly one group). The settings window keeps the original's sliders and checkboxes and, under them, the five group buttons (`group_label_widths`, `group_per_row`: five, three or two to a row by the labels' widths, in a fixed block above Apply and Cancel on a phone). The long hints of a row (`Row::help_text`: the zoom, the map's edge, the battle AI, the army arrangement, experience on promotion, the language, the updates) sit behind a «?» button at the row's end (`help_button`): a click pins the pop-up (`HELP_PINNED`), the desktop's pointer over it shows it too (`HELP_HOVER`); a click elsewhere or Esc closes it (`group_window`), and the game's hint box draws it (`help_popup`, `widgets::hint_box_always`). `RAZDOR_SCENE_HELP=<row>` pins one in a snapshot. The groups: «Карта» (map zoom and its lock, 2.5D view, sprite size, two-finger turn, extending the map past its edges, battles on the map, minimap army list, leader's name, minimap corner and reset), «Бой и армия» (battle AI strength (`main_menu::AiStrength`, kept in sync with the `OptValue9` checkbox), unit battle participation, keep formation, max guards casters, army arrangement, experience on promotion), «Экран» (screen mode, interface scale, font, text size, large message windows, screen orientation on Android, language), «Управление» (keyboard shortcuts, touchpad mode on a phone), «Прочее» (updates and «Проверить», the game import). Razdor's map options «Битвы армий на карте» (`battle_marks`, on) and «Список у
+window opened with) and the five groups (`main_menu::Group`) as tabs of one settings window (`TABS`; the pane is `group_pane`): Razdor's own rows, each in its group (`Group::rows`, the `Row` enum; a test checks that every row is in exactly one group). The settings window (2026-11-09: one window, the owner's design) has its tabs in a column at the left (`tab_buttons`, the selected one drawn pressed): «Основное» (the General tab: the original's five sliders and eight checkboxes, `general_desktop`, and on a phone the touchpad mode after them, `general_phone`), then «Карта», «Бой и армия», «Экран», «Управление» and «Прочее» (the groups). `GROUP` is the tab shown (`None`: General). «Принять» and «Отмена» at the bottom right act on everything changed in any tab: Cancel (the close box, Esc) puts back what `OPENED_WITH` holds, Apply keeps it (`options_window`). `open_group` selects a tab, `open_keys` selects «Управление» and opens the keys window alone (as before). The «Размер нижней панели» row (`Row::BottomBar`) shows only on a phone held sideways (`bottom_bar_row_shown`: upright the bar is the main's size, so the row did nothing; a player's report). The long hints of a row (`Row::help_text`: the zoom, the map's edge, the battle AI, the army arrangement, experience on promotion, the language, the updates) sit behind a «?» button at the row's end (`help_button`): a click pins the pop-up (`HELP_PINNED`), the desktop's pointer over it shows it too (`HELP_HOVER`); a click elsewhere or Esc closes it (`help_frame_start`), and the game's hint box draws it (`help_popup`, `widgets::hint_box_always`). `RAZDOR_SCENE_HELP=<row>` pins one in a snapshot. The groups: «Карта» (map zoom and its lock, 2.5D view, sprite size, two-finger turn, extending the map past its edges, battles on the map, minimap army list, leader's name, minimap corner and reset), «Бой и армия» (battle AI strength (`main_menu::AiStrength`, kept in sync with the `OptValue9` checkbox), unit battle participation, keep formation, max guards casters, army arrangement, experience on promotion), «Экран» (screen mode, interface scale, font, text size, large message windows, screen orientation on Android, language), «Управление» (keyboard shortcuts; the touchpad mode is on the General tab, on a phone), «Прочее» (updates and «Проверить», the game import). Razdor's map options «Битвы армий на карте» (`battle_marks`, on) and «Список у
 миникарты» (`army_list`, off) are pushed into `Game::battle_marks` / `Game::army_list` by
 `follow_settings`, like the rule options. The battles' mark and notice are drawn in
 `world_view::map_frame` (`draw_clash_marks`, `clash_notice`, from `Game::take_clashes`); the

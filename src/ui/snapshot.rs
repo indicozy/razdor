@@ -488,14 +488,15 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             // `controls`, `other`).
             if let Some(group) = parts.next().and_then(super::main_menu::Group::from_name) {
                 super::main_menu::open_group(group);
-                // `RAZDOR_SCENE_SCROLL` starts the phone's advanced window that far down (this branch returns early).
-                if let Some(px) = std::env::var("RAZDOR_SCENE_SCROLL").ok().and_then(|v| v.trim().parse::<f32>().ok()) {
-                    super::main_menu::scene_scroll(px);
-                }
                 // `RAZDOR_SCENE_HELP=<row>`: that row's «?» pop-up pinned (its name as `main_menu::Row` spells it).
                 if let Ok(row) = std::env::var("RAZDOR_SCENE_HELP") {
                     super::main_menu::scene_help(row.trim());
                 }
+            }
+            // `RAZDOR_SCENE_SCROLL` starts the settings pane that far down, the General tab too (this branch
+            // returns early, so the generic handling below does not reach it).
+            if let Some(px) = std::env::var("RAZDOR_SCENE_SCROLL").ok().and_then(|v| v.trim().parse::<f32>().ok()) {
+                super::main_menu::scene_scroll(px);
             }
             return Ok(());
         }
