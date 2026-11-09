@@ -19,7 +19,11 @@ use razdor::trf;
 
 use super::android;
 use super::chrome;
+use super::map_import;
 use super::widgets::{button_state, key, wrap};
+
+/// A phone's button is this many dp high, as the phone windows' (`map_import::buttons`).
+const PHONE_BUTTON_DP: f32 = 44.0;
 
 /// What a finished action reports: the message box's text, and whether the saves changed (the list
 /// is read again).
@@ -85,7 +89,13 @@ fn draw_menu() -> Option<Option<Choice>> {
     let body = tr("Save the saves or the log to a file, or bring a save back from one.");
     let text_size = 13.0 * k;
     let lines = wrap(body, 340.0 * k, text_size);
-    let (bw, bh, gap) = (260.0 * k * g, 30.0 * k * g, 8.0 * k);
+    // On a phone the buttons are 44 dp high with a 14 sp label, as the other phone windows' buttons.
+    let phone = super::display::dp_px().map(|dp| (dp, map_import::phone_factor()));
+    let (bw, bh, gap) = match phone {
+        Some((dp, f)) => ((260.0 * k * f).min(380.0 * k - 48.0 * k * f), PHONE_BUTTON_DP * dp, 12.0 * k * f),
+        None => (260.0 * k * g, 30.0 * k * g, 8.0 * k),
+    };
+    let label_size = phone.map(|(_, f)| 14.0 * k * f);
     let choices = [
         (tr("Export saves"), Some(Choice::ExportSaves)),
         (tr("Import a save"), Some(Choice::ImportSave)),
@@ -106,7 +116,10 @@ fn draw_menu() -> Option<Option<Choice>> {
     for (label, choice) in choices {
         let b = Rect::new(inner.center().x - bw / 2.0, y, bw, bh);
         let (_, down, pressed) = button_state(b, true);
-        chrome::marble_button(b, label, true, down);
+        match label_size {
+            Some(size) => chrome::marble_button_sized(b, label, true, down, size),
+            None => chrome::marble_button(b, label, true, down),
+        }
         if pressed {
             answer = Some(choice);
         }
