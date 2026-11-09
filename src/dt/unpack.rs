@@ -8,7 +8,7 @@
 
 use super::install::{is_install_path, listing_is_install};
 use std::fs::{self, File};
-use std::io::{self, BufReader, BufWriter, Read, Write};
+use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 /// Bytes copied at a time: the progress is reported after each piece.
@@ -121,11 +121,25 @@ pub fn find_archives(dirs: &[PathBuf]) -> Vec<Found> {
 /// game nor a patch for it, `Err` with the reason when its listing cannot be read.
 pub fn inspect(path: &Path) -> Result<Option<Found>, String> {
     let entries = list(path)?;
-    let plan = plan(&entries);
-    Ok(plan.kind.map(|kind| {
+    Ok(found_from(&entries, path.to_path_buf()))
+}
+
+/// The archive that is open already as `file`, named `name` (a phone's picked document: its
+/// extension gives its format). Read from its start. The archive has no path of its own, so the
+/// returned `Found`'s path is `name`: unpack it with [`unpack_file`], not [`unpack`].
+pub fn inspect_file(file: &mut File, name: &str) -> Result<Option<Found>, String> {
+    let format = format_of(Path::new(name)).ok_or("not a 7z or zip archive")?;
+    file.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
+    let entries = list_from(format, &mut *file)?;
+    Ok(found_from(&entries, PathBuf::from(name)))
+}
+
+fn found_from(entries: &[Entry], path: PathBuf) -> Option<Found> {
+    let plan = plan(entries);
+    plan.kind.map(|kind| {
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        Found { path: path.to_path_buf(), name, kind, strip: plan.strip, size: plan.size }
-    }))
+        Found { path, name, kind, strip: plan.strip, size: plan.size }
+    })
 }
 
 /// Classifies a listing: the entries that are unsafe (see [`components`]) are left out, the top
@@ -215,14 +229,20 @@ fn target(name: &str, strip: &str) -> Option<PathBuf> {
 
 /// The entries of an archive, read from its listing (7z: its header; zip: its central directory).
 fn list(path: &Path) -> Result<Vec<Entry>, String> {
-    match format_of(path).ok_or("not a 7z or zip archive")? {
+    let format = format_of(path).ok_or("not a 7z or zip archive")?;
+    let file = File::open(path).map_err(|e| e.to_string())?;
+    list_from(format, file)
+}
+
+/// The entries of an archive read from `reader` (see [`list`]).
+fn list_from<R: Read + Seek>(format: Format, reader: R) -> Result<Vec<Entry>, String> {
+    match format {
         Format::SevenZ => {
-            let reader = sevenz_rust2::ArchiveReader::open(path, sevenz_rust2::Password::empty()).map_err(|e| e.to_string())?;
+            let reader = sevenz_rust2::ArchiveReader::new(reader, sevenz_rust2::Password::empty()).map_err(|e| e.to_string())?;
             Ok(reader.archive().files.iter().map(|f| Entry { path: f.name().to_string(), is_dir: f.is_directory(), size: f.size() }).collect())
         }
         Format::Zip => {
-            let file = File::open(path).map_err(|e| e.to_string())?;
-            let mut zip = zip::ZipArchive::new(BufReader::new(file)).map_err(|e| e.to_string())?;
+            let mut zip = zip::ZipArchive::new(BufReader::new(reader)).map_err(|e| e.to_string())?;
             let mut out = Vec::with_capacity(zip.len());
             for i in 0..zip.len() {
                 let f = zip.by_index(i).map_err(|e| e.to_string())?;
@@ -256,36 +276,65 @@ pub const MAX_UNPACKED_BYTES: u64 = 4 << 30;
 pub fn unpack_within(archives: &[Found], dest: &Path, progress: &dyn Fn(u64, u64), limit: u64) -> Result<(), UnpackError> {
     fs::create_dir_all(dest).map_err(|e| write_error(&e, dest))?;
     let total: u64 = archives.iter().map(|a| a.size).sum();
-    let mut done = 0u64;
+    let mut count = counter(total, limit, progress);
     for kind in [Kind::Game, Kind::Patch] {
         for archive in archives.iter().filter(|a| a.kind == kind) {
-            unpack_one(archive, dest, &mut |n| {
-                done += n;
-                if done > limit {
-                    return Err(io::Error::new(io::ErrorKind::InvalidData, "the archive unpacks to more than it declares"));
-                }
-                progress(done, total);
-                Ok(())
-            })
-            .map_err(|e| match e {
-                UnpackError::Other(text) => UnpackError::Other(format!("{}: {text}", archive.name)),
-                room => room,
-            })?;
+            unpack_one(archive, dest, &mut count).map_err(|e| named(&archive.name, e))?;
         }
     }
     Ok(())
 }
 
+/// Unpacks one archive handed over open (see [`inspect_file`]) into `dest`, as [`unpack`] does for
+/// a path: `file` is read from its start, and its bytes are capped as [`unpack_within`] caps them.
+pub fn unpack_file(file: &mut File, found: &Found, dest: &Path, progress: &dyn Fn(u64, u64)) -> Result<(), UnpackError> {
+    fs::create_dir_all(dest).map_err(|e| write_error(&e, dest))?;
+    let format = format_of(&found.path).ok_or_else(|| UnpackError::Other("not a 7z or zip archive".into()))?;
+    file.seek(SeekFrom::Start(0)).map_err(|e| UnpackError::Other(format!("{}: {e}", found.name)))?;
+    let mut count = counter(found.size, found.size.min(MAX_UNPACKED_BYTES), progress);
+    unpack_stream(format, &mut *file, &found.strip, dest, &mut count).map_err(|e| named(&found.name, e))
+}
+
+/// The byte counter of an unpacking: each piece written is reported to `progress` (the bytes so
+/// far, and the total), and the bytes written may not pass `limit`.
+fn counter(total: u64, limit: u64, progress: &dyn Fn(u64, u64)) -> impl FnMut(u64) -> io::Result<()> + '_ {
+    let mut done = 0u64;
+    move |n| {
+        done += n;
+        if done > limit {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "the archive unpacks to more than it declares"));
+        }
+        progress(done, total);
+        Ok(())
+    }
+}
+
+/// An unpacking error with the archive's name in front of its text (a room or access error is kept).
+fn named(archive: &str, e: UnpackError) -> UnpackError {
+    match e {
+        UnpackError::Other(text) => UnpackError::Other(format!("{archive}: {text}")),
+        room => room,
+    }
+}
+
 /// Writes one archive's files under `dest`, calling `written` with each piece's size; its error
 /// stops the unpacking.
 fn unpack_one(archive: &Found, dest: &Path, written: &mut dyn FnMut(u64) -> io::Result<()>) -> Result<(), UnpackError> {
+    let format = format_of(&archive.path).ok_or_else(|| UnpackError::Other("not a 7z or zip archive".into()))?;
+    let file = File::open(&archive.path).map_err(|e| UnpackError::Other(e.to_string()))?;
+    unpack_stream(format, file, &archive.strip, dest, written)
+}
+
+/// Writes the files of one archive read from `reader` under `dest`, with its top folder `strip`
+/// dropped; `written` gets the size of each piece.
+fn unpack_stream<R: Read + Seek>(format: Format, reader: R, strip: &str, dest: &Path, written: &mut dyn FnMut(u64) -> io::Result<()>) -> Result<(), UnpackError> {
     let other = |e: &dyn std::fmt::Display| UnpackError::Other(e.to_string());
-    match format_of(&archive.path).ok_or_else(|| UnpackError::Other("not a 7z or zip archive".into()))? {
+    match format {
         Format::SevenZ => {
-            let mut reader = sevenz_rust2::ArchiveReader::open(&archive.path, sevenz_rust2::Password::empty()).map_err(|e| other(&e))?;
+            let mut reader = sevenz_rust2::ArchiveReader::new(reader, sevenz_rust2::Password::empty()).map_err(|e| other(&e))?;
             reader
                 .for_each_entries(|entry, input| {
-                    let r = match (target(entry.name(), &archive.strip), entry.is_directory()) {
+                    let r = match (target(entry.name(), strip), entry.is_directory()) {
                         (Some(rel), true) => fs::create_dir_all(dest.join(rel)),
                         (Some(rel), false) => write_file(input, &dest.join(rel), entry.size(), written),
                         // Not written: the reader must still be drained, the next entry follows it.
@@ -301,13 +350,12 @@ fn unpack_one(archive: &Found, dest: &Path, written: &mut dyn FnMut(u64) -> io::
                 })
         }
         Format::Zip => {
-            let file = File::open(&archive.path).map_err(|e| other(&e))?;
-            let mut zip = zip::ZipArchive::new(BufReader::new(file)).map_err(|e| other(&e))?;
+            let mut zip = zip::ZipArchive::new(BufReader::new(reader)).map_err(|e| other(&e))?;
             for i in 0..zip.len() {
                 let mut f = zip.by_index(i).map_err(|e| other(&e))?;
                 let Ok(name) = f.name().map(|n| n.into_owned()) else { continue };
                 let declared = f.size();
-                let r = match (target(&name, &archive.strip), f.is_dir()) {
+                let r = match (target(&name, strip), f.is_dir()) {
                     (Some(rel), true) => fs::create_dir_all(dest.join(rel)),
                     (Some(rel), false) => write_file(&mut f, &dest.join(rel), declared, written),
                     (None, _) => Ok(()),
@@ -564,6 +612,35 @@ mod tests {
         assert_eq!(write_error(&io::Error::from(io::ErrorKind::PermissionDenied), dir), UnpackError::NoRoomOrAccess(dir.into()));
         assert_eq!(write_error(&io::Error::from(io::ErrorKind::StorageFull), dir), UnpackError::NoRoomOrAccess(dir.into()));
         assert!(matches!(write_error(&io::Error::from(io::ErrorKind::InvalidData), dir), UnpackError::Other(_)));
+    }
+
+    #[test]
+    fn a_zip_and_a_seven_zip_are_inspected_and_unpacked_from_an_open_file() {
+        let s = Scratch::new("open-file");
+        make_zip(&s.0.join("game.zip"), &[("DiscordTimes/", ""), ("DiscordTimes/Maps_Rus/a.DTm", "map"), ("DiscordTimes/Rus_Units.ini", "units")]);
+        let mut w = sevenz_rust2::ArchiveWriter::create(s.0.join("game.7z")).unwrap();
+        w.push_archive_entry(sevenz_rust2::ArchiveEntry::new_directory("DiscordTimes"), None::<&[u8]>).unwrap();
+        w.push_archive_entry(sevenz_rust2::ArchiveEntry::new_file("DiscordTimes/Maps_Rus/a.DTm"), Some(&b"map"[..])).unwrap();
+        w.push_archive_entry(sevenz_rust2::ArchiveEntry::new_file("DiscordTimes/Rus_Units.ini"), Some(&b"units"[..])).unwrap();
+        w.finish().unwrap();
+
+        for name in ["game.zip", "game.7z"] {
+            let mut file = File::open(s.0.join(name)).unwrap();
+            let found = inspect_file(&mut file, name).unwrap().expect("a game");
+            assert_eq!((found.kind, found.name.as_str(), found.strip.as_str()), (Kind::Game, name, "DiscordTimes"));
+            let dest = s.0.join(format!("out-{name}"));
+            unpack_file(&mut file, &found, &dest, &|_, _| {}).unwrap();
+            assert_eq!(read(&dest.join("Maps_Rus/a.DTm")), "map", "{name}");
+            assert_eq!(read(&dest.join("Rus_Units.ini")), "units", "{name}");
+        }
+    }
+
+    #[test]
+    fn an_open_file_with_a_name_of_no_archive_is_refused() {
+        let s = Scratch::new("open-file-name");
+        make_zip(&s.0.join("game.zip"), &[("Rus_Units.ini", "units")]);
+        let mut file = File::open(s.0.join("game.zip")).unwrap();
+        assert!(inspect_file(&mut file, "picked").is_err(), "no 7z or zip extension: not read");
     }
 
     #[test]

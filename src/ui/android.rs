@@ -251,15 +251,26 @@ unsafe fn text_call(name: &str) -> Option<String> {
     razdor::jni::to_text(env, reply.obj)
 }
 
-/// Opens the system's document picker (`razdorPickFile`, the Java side). False when the call
-/// fails; the answer comes through [`pick_outcome`].
+/// Opens the system's document picker for a map (`razdorPickFile`, the Java side). False when the
+/// call fails; the answer comes through [`pick_outcome`].
 pub fn start_pick() -> bool {
+    start_picker_call("razdorPickFile")
+}
+
+/// Opens the system's document picker for a game archive (`razdorPickArchive`): the answer is a
+/// descriptor, read in place (see [`pick_outcome`]). False when the call fails.
+pub fn start_archive_pick() -> bool {
+    start_picker_call("razdorPickArchive")
+}
+
+fn start_picker_call(name: &str) -> bool {
     // SAFETY: as in `text_call`.
-    unsafe { text_call("razdorPickFile") }.is_some_and(|reply| reply.is_empty())
+    unsafe { text_call(name) }.is_some_and(|reply| reply.is_empty())
 }
 
 /// The picker's answer (`razdorPickOutcome`): "" while it is open, "cancel", "error: <why>", or
-/// "ok\n<display name>\n<path of a copy in the app's cache>" (the caller deletes the copy).
+/// "ok\n<display name>\n<path of a copy in the app's cache>" for a map (the caller deletes the copy),
+/// or "fd\n<display name>\n<descriptor>" for an archive (the caller takes ownership of it).
 pub fn pick_outcome() -> String {
     // SAFETY: as in `text_call`.
     unsafe { text_call("razdorPickOutcome") }.unwrap_or_default()

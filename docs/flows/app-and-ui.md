@@ -125,13 +125,18 @@ Updating the game from an archive («Обновить игру из архива
 through `game_import::settings_row`: the button, or why it is not offered (over a map, on iPhone, or
 when the install is not the phones' unpack folder: `game_import::target` returns it only for that
 folder or with no install yet, so a player's own copy is never written). The button sets a request;
-`game_import::tick` (in `frame_content`, every frame) opens the platform's picker (the same one as
-«Добавить карту…»: Android's `pick_outcome`, the Java copy by streaming into the cache). The picked
-archive is `dt::game_import::examine` (listing only, the budget `over_budget`): nothing of the game in
-it is a refusal, nothing written. The declared sizes are not trusted alone: `unpack::unpack` caps the bytes
+`game_import::tick` (in `frame_content`, every frame) opens the platform's picker (Android: `razdorPickArchive`,
+whose answer comes through `pick_outcome` as `fd\n<name>\n<fd>`: the descriptor is detached in Java and Rust owns it;
+`is_seekable` decides: a seekable file is read in place (`Archive::Open`), a stream is copied into the cache on a
+thread (`Archive::Copy`, deleted when the import ends). The map picker «Добавить карту…» still copies). The picked
+archive is `dt::game_import::examine` (a path) or `examine_file` (an open file: `unpack::inspect_file`), listing only,
+the budget `over_budget`: nothing of the game in it is a refusal, nothing written. The declared sizes are not trusted alone: `unpack::unpack` caps the bytes
 written at the declared total or `MAX_UNPACKED_BYTES`, and `unpack::write_file` reads each entry no further
 than its declared size, so a zip bomb stops with an error (the side folder is removed, the install kept). A whole game asks first (`Modal::Confirm`) when the install is
-there; a patch goes straight in, and is refused without an install. `dt::game_import::import` unpacks
+there; a patch goes straight in, and is refused without an install. `dt::game_import::import` (or `import_file` for an open file, `unpack::unpack_file`) first checks the room
+(`check_space`: the archive's uncompressed total plus `SPACE_MARGIN`, 64 MB, against `free_space`, statvfs on the
+folder's disk; a room that cannot be read is not refused): short, it is refused as «Not enough free space…» with
+nothing written. It unpacks
 into `<install>.new` (beside the install, the same disk), then `swap_in` renames the install to
 `<install>.old`, the new folder to the install's name, and deletes the old one (a failed second rename
 puts it back); a patch's files are moved over the install's (`move_over`). Any failure removes

@@ -12,12 +12,16 @@
 
 use super::install::is_install;
 use super::unpack::{self, Found, Kind, UnpackError, MAX_UNPACKED_BYTES};
-use std::fs;
-use std::io;
+use std::fs::{self, File};
+use std::io::{self, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 /// The largest archive file accepted, as it is on disk (a game is hundreds of MB).
 pub const MAX_ARCHIVE_BYTES: u64 = 2 << 30;
+
+/// The room kept free beyond an archive's files when it is unpacked (the staging copy is written
+/// while the install is still there).
+pub const SPACE_MARGIN: u64 = 64 << 20;
 
 /// Why an import did not happen. The install is not changed by any of them.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,6 +40,8 @@ pub enum Error {
     Unpack(UnpackError),
     /// The swap or the moving of the files failed: the reason.
     Io(String),
+    /// The archive's files do not fit on the disk: the bytes needed (with the margin) and free.
+    NoSpace { needed: u64, free: u64 },
     /// The game folder's download failed (`gdrive`): the reason.
     Download(String),
     /// The game folder's download was cancelled (its files kept for a retry).
@@ -52,6 +58,7 @@ impl std::fmt::Display for Error {
             Error::NotInstall => f.write_str("the archive does not hold a Discord Times install"),
             Error::Unpack(e) => write!(f, "{e}"),
             Error::Io(why) => write!(f, "{why}"),
+            Error::NoSpace { needed, free } => write!(f, "{needed} bytes are needed and {free} are free"),
             Error::Download(why) => write!(f, "the download failed: {why}"),
             Error::Cancelled => f.write_str("the download was cancelled"),
         }
@@ -75,7 +82,18 @@ pub fn over_budget(name: &str, archive: u64, unpacked: u64) -> Option<Error> {
 /// the player (a phone's picked file is a copy in the cache, with another name).
 pub fn examine(path: &Path, name: &str) -> Result<Found, Error> {
     let archive = fs::metadata(path).map(|m| m.len()).map_err(|e| Error::Unreadable(e.to_string()))?;
-    let mut found = match unpack::inspect(path) {
+    classify(unpack::inspect(path), archive, name)
+}
+
+/// [`examine`] of an archive that is open already (a phone's picked document, read in place):
+/// its listing is read from the file's start.
+pub fn examine_file(file: &mut File, name: &str) -> Result<Found, Error> {
+    let archive = file.metadata().map(|m| m.len()).map_err(|e| Error::Unreadable(e.to_string()))?;
+    classify(unpack::inspect_file(file, name), archive, name)
+}
+
+fn classify(listing: Result<Option<Found>, String>, archive: u64, name: &str) -> Result<Found, Error> {
+    let mut found = match listing {
         Ok(Some(found)) => found,
         Ok(None) => return Err(Error::NotGame(name.to_string())),
         Err(e) => return Err(Error::Unreadable(e)),
@@ -85,6 +103,11 @@ pub fn examine(path: &Path, name: &str) -> Result<Found, Error> {
         Some(e) => Err(e),
         None => Ok(found),
     }
+}
+
+/// Whether `file` can seek, so it can be read as an archive (a pipe or a stream cannot).
+pub fn is_seekable(file: &mut File) -> bool {
+    file.seek(SeekFrom::End(0)).is_ok() && file.seek(SeekFrom::Start(0)).is_ok()
 }
 
 /// The folder an import unpacks into first: `<install>.new`, beside the install (the same disk,
@@ -127,6 +150,29 @@ fn same_folder(a: &Path, b: &Path) -> bool {
 /// Imports `found` into the install folder `target` (see [`target`]). `progress` gets the bytes
 /// unpacked so far and the total. Every failure leaves `target` as it was.
 pub fn import(found: &Found, target: &Path, progress: &dyn Fn(u64, u64)) -> Result<Done, Error> {
+    let mut unpack = |staging: &Path, progress: &dyn Fn(u64, u64)| unpack::unpack(std::slice::from_ref(found), staging, progress);
+    stage_and_apply(found, target, progress, &free_space, &mut unpack)
+}
+
+/// [`import`] of an archive that is open already (see [`examine_file`]): read from `file`.
+pub fn import_file(file: &mut File, found: &Found, target: &Path, progress: &dyn Fn(u64, u64)) -> Result<Done, Error> {
+    let mut unpack = |staging: &Path, progress: &dyn Fn(u64, u64)| unpack::unpack_file(file, found, staging, progress);
+    stage_and_apply(found, target, progress, &free_space, &mut unpack)
+}
+
+/// Writes an archive into a staging folder, reporting its progress (see [`stage_and_apply`]).
+type Unpacker<'a> = dyn FnMut(&Path, &dyn Fn(u64, u64)) -> Result<(), UnpackError> + 'a;
+
+/// The import's work: a stale staging folder goes, the room is checked (`free` gives the free
+/// bytes of a folder: [`free_space`], or a test's), `unpack` writes the archive into the staging
+/// folder, then the staged files replace the install or are written over it.
+fn stage_and_apply(
+    found: &Found,
+    target: &Path,
+    progress: &dyn Fn(u64, u64),
+    free: &dyn Fn(&Path) -> Option<u64>,
+    unpack: &mut Unpacker<'_>,
+) -> Result<Done, Error> {
     if over_budget(&found.name, 0, found.size).is_some() {
         return Err(Error::TooBig(found.name.clone()));
     }
@@ -136,11 +182,63 @@ pub fn import(found: &Found, target: &Path, progress: &dyn Fn(u64, u64)) -> Resu
     let staging = staging_dir(target);
     // A folder left by an import that did not finish.
     let _ = fs::remove_dir_all(&staging);
-    let result = unpack_and_apply(found, target, &staging, progress);
+    check_space(found, target, free)?;
+    let result = unpack(&staging, progress).map_err(Error::Unpack).and_then(|()| apply(found, target, &staging));
     // After a swap the staging folder is the install (renamed away); after a patch it is empty;
     // after a failure it holds the unpacked files. Whatever is left goes.
     let _ = fs::remove_dir_all(&staging);
     result
+}
+
+/// The unpacked `staging` folder put in place: a whole game replaces `target`, a patch goes over it.
+fn apply(found: &Found, target: &Path, staging: &Path) -> Result<Done, Error> {
+    match found.kind {
+        Kind::Game => import_folder(staging, target),
+        Kind::Patch => move_over(staging, target).map(Done::Patched).map_err(|e| Error::Io(e.to_string())),
+    }
+}
+
+/// Refuses an archive whose files, with [`SPACE_MARGIN`], do not fit in the free room of the disk
+/// the staging folder is written to. A room that cannot be read is not refused.
+fn check_space(found: &Found, target: &Path, free: &dyn Fn(&Path) -> Option<u64>) -> Result<(), Error> {
+    let dir = match target.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    let Some(free) = free(dir) else { return Ok(()) };
+    let needed = found.size.saturating_add(SPACE_MARGIN);
+    if needed > free {
+        return Err(Error::NoSpace { needed, free });
+    }
+    Ok(())
+}
+
+/// The bytes free to the player on the disk of `dir` (`statvfs`), or None when they cannot be read
+/// (Windows: not checked here).
+pub fn free_space(dir: &Path) -> Option<u64> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let path = std::ffi::CString::new(dir.as_os_str().as_bytes()).ok()?;
+        // SAFETY: `path` is a NUL-terminated string that lives across the call, and `stat` is a
+        // statvfs record that the call fills in.
+        let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+        if unsafe { libc::statvfs(path.as_ptr(), &mut stat) } != 0 {
+            return None;
+        }
+        Some(wide(stat.f_bavail).saturating_mul(wide(stat.f_frsize)))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = dir;
+        None
+    }
+}
+
+/// A field of the platform's statvfs record as a u64 (the field widths differ by platform).
+#[cfg(unix)]
+fn wide<T: Into<u64>>(v: T) -> u64 {
+    v.into()
 }
 
 /// A whole game that is already unpacked in `staged` (an archive's unpacking, or the folder the
@@ -152,14 +250,6 @@ pub fn import_folder(staged: &Path, target: &Path) -> Result<Done, Error> {
     }
     swap_in(target, staged).map_err(|e| Error::Io(e.to_string()))?;
     Ok(Done::Replaced)
-}
-
-fn unpack_and_apply(found: &Found, target: &Path, staging: &Path, progress: &dyn Fn(u64, u64)) -> Result<Done, Error> {
-    unpack::unpack(std::slice::from_ref(found), staging, progress).map_err(Error::Unpack)?;
-    match found.kind {
-        Kind::Game => import_folder(staging, target),
-        Kind::Patch => move_over(staging, target).map(Done::Patched).map_err(|e| Error::Io(e.to_string())),
-    }
 }
 
 /// Puts `staged` in place of `install`: the install moves to [`old_dir`], `staged` takes its
@@ -556,6 +646,141 @@ mod tests {
         assert!(matches!(import(&found_of(&archive), &install, &|_, _| {}), Err(Error::Unpack(_))));
         assert_eq!(tree(&install), before, "nothing is moved over the install");
         assert!(!staging_dir(&install).exists());
+    }
+
+    /// The 7z version of [`game_zip`]: the same entries.
+    fn game_7z(path: &Path, tag: &str) {
+        let mut w = sevenz_rust2::ArchiveWriter::create(path).unwrap();
+        w.push_archive_entry(sevenz_rust2::ArchiveEntry::new_directory("DiscordTimes"), None::<&[u8]>).unwrap();
+        w.push_archive_entry(sevenz_rust2::ArchiveEntry::new_directory("DiscordTimes/Maps_Rus"), None::<&[u8]>).unwrap();
+        w.push_archive_entry(sevenz_rust2::ArchiveEntry::new_file("DiscordTimes/Maps_Rus/b.DTm"), Some(format!("map b {tag}").as_bytes())).unwrap();
+        w.push_archive_entry(sevenz_rust2::ArchiveEntry::new_file("DiscordTimes/Rus_Units.ini"), Some(format!("units {tag}").as_bytes())).unwrap();
+        w.push_archive_entry(sevenz_rust2::ArchiveEntry::new_file("DiscordTimes/Rus_Spells.ini"), Some(format!("spells {tag}").as_bytes())).unwrap();
+        w.finish().unwrap();
+    }
+
+    /// The archive at `path` opened as a file, as a phone's picked document is.
+    fn open_found(path: &Path) -> (File, Found) {
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let mut file = File::open(path).unwrap();
+        let found = examine_file(&mut file, &name).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        (file, found)
+    }
+
+    #[test]
+    fn a_game_archive_opened_as_a_file_replaces_the_install_in_zip_and_seven_zip() {
+        for ext in ["zip", "7z"] {
+            let s = Scratch::new(&format!("open-game-{ext}"));
+            let install = s.0.join("DiscordTimes");
+            fake_install(&install, "old");
+            let archive = s.0.join(format!("game.{ext}"));
+            if ext == "zip" { game_zip(&archive, "new") } else { game_7z(&archive, "new") }
+
+            let (mut file, found) = open_found(&archive);
+            assert_eq!(found.kind, Kind::Game, "{ext}");
+            assert_eq!(import_file(&mut file, &found, &install, &|_, _| {}), Ok(Done::Replaced), "{ext}");
+            assert_eq!(fs::read_to_string(install.join("Rus_Units.ini")).unwrap(), "units new", "{ext}");
+            assert!(!install.join("Maps_Rus/a.DTm").exists(), "{ext}: the old install's files are gone");
+            assert!(!old_dir(&install).exists() && !staging_dir(&install).exists(), "{ext}: no side folder is left");
+            assert!(archive.is_file(), "{ext}: the player's archive is not touched");
+        }
+    }
+
+    #[test]
+    fn a_patch_opened_as_a_file_goes_over_the_install() {
+        let s = Scratch::new("open-patch");
+        let install = s.0.join("DiscordTimes");
+        fake_install(&install, "game");
+        let archive = s.0.join("patch.zip");
+        make_zip(&archive, &[("Rus_Spells.ini", "patched spells"), ("Maps_Rus/c.DTm", "map c")]);
+
+        let (mut file, found) = open_found(&archive);
+        assert_eq!(import_file(&mut file, &found, &install, &|_, _| {}), Ok(Done::Patched(2)));
+        assert_eq!(fs::read_to_string(install.join("Rus_Spells.ini")).unwrap(), "patched spells");
+        assert_eq!(fs::read_to_string(install.join("Rus_Units.ini")).unwrap(), "units game");
+    }
+
+    #[test]
+    fn an_unknown_archive_opened_as_a_file_is_refused_and_nothing_is_written() {
+        let s = Scratch::new("open-unknown");
+        let install = s.0.join("DiscordTimes");
+        fake_install(&install, "old");
+        let before = tree(&install);
+        let archive = s.0.join("notes.zip");
+        make_zip(&archive, &[("readme.txt", "hello")]);
+        let mut file = File::open(&archive).unwrap();
+        assert_eq!(examine_file(&mut file, "notes.zip"), Err(Error::NotGame("notes.zip".into())));
+        assert_eq!(tree(&install), before);
+    }
+
+    #[test]
+    fn an_archive_that_does_not_fit_is_refused_and_nothing_is_written() {
+        let s = Scratch::new("no-space");
+        let install = s.0.join("DiscordTimes");
+        fake_install(&install, "old");
+        let before = tree(&install);
+        let archive = s.0.join("game.zip");
+        game_zip(&archive, "new");
+        let (mut file, found) = open_found(&archive);
+        let needed = found.size + SPACE_MARGIN;
+
+        let mut unpack = |staging: &Path, progress: &dyn Fn(u64, u64)| unpack::unpack_file(&mut file, &found, staging, progress);
+        let short = stage_and_apply(&found, &install, &|_, _| {}, &|_| Some(needed - 1), &mut unpack);
+        assert_eq!(short, Err(Error::NoSpace { needed, free: needed - 1 }));
+        assert_eq!(tree(&install), before, "the install is untouched");
+        assert!(!staging_dir(&install).exists() && !old_dir(&install).exists(), "nothing is staged");
+
+        // Exactly enough room: the import goes ahead. A room that cannot be read is not refused.
+        assert_eq!(stage_and_apply(&found, &install, &|_, _| {}, &|_| Some(needed), &mut unpack), Ok(Done::Replaced));
+        assert_eq!(fs::read_to_string(install.join("Rus_Units.ini")).unwrap(), "units new");
+    }
+
+    #[test]
+    fn an_unknown_room_is_not_refused() {
+        let s = Scratch::new("unknown-room");
+        let install = s.0.join("DiscordTimes");
+        let archive = s.0.join("game.zip");
+        game_zip(&archive, "new");
+        let found = found_of(&archive);
+        let mut unpack = |staging: &Path, progress: &dyn Fn(u64, u64)| unpack::unpack(std::slice::from_ref(&found), staging, progress);
+        assert_eq!(stage_and_apply(&found, &install, &|_, _| {}, &|_| None, &mut unpack), Ok(Done::Replaced));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_seekable_file_is_seekable_and_a_pipe_is_not() {
+        use std::os::unix::io::FromRawFd;
+        let s = Scratch::new("seekable");
+        let archive = s.0.join("game.zip");
+        game_zip(&archive, "new");
+        assert!(is_seekable(&mut File::open(&archive).unwrap()));
+
+        let mut fds = [0i32; 2];
+        // SAFETY: `fds` holds room for the two descriptors pipe(2) writes.
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+        // SAFETY: both descriptors are fresh from pipe(2) and owned by these two files only.
+        let (mut read, _write) = unsafe { (File::from_raw_fd(fds[0]), File::from_raw_fd(fds[1])) };
+        assert!(!is_seekable(&mut read));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_free_room_is_read_from_the_folder_disk() {
+        let s = Scratch::new("statvfs");
+        let free = free_space(&s.0).expect("the disk of a folder can be read");
+        assert!(free > 0);
+        assert_eq!(free_space(&s.0.join("missing")), None, "a folder that does not exist has no room to read");
+    }
+
+    #[test]
+    fn the_staging_and_old_folders_are_beside_the_install_in_the_app_folder() {
+        // The phones' unpack folder is `<app folder>/DiscordTimes`: both side folders stay in the app folder.
+        let install = Path::new("/data/user/0/io.github.indicozy.razdor/files/DiscordTimes");
+        let app = install.parent().unwrap();
+        assert_eq!(staging_dir(install).parent(), Some(app));
+        assert_eq!(old_dir(install).parent(), Some(app));
+        assert_eq!(staging_dir(install).file_name().unwrap(), "DiscordTimes.new");
+        assert_eq!(old_dir(install).file_name().unwrap(), "DiscordTimes.old");
     }
 
     #[test]

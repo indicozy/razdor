@@ -7,10 +7,12 @@
 //! The row is not offered over a map (the game under way reads the install).
 //!
 //! The pick: the desktop's dialog (`rfd`) on a thread, or on the main thread on macOS; Android's
-//! document picker through the JNI (`ui::android`), which the Java side copies into the app's
-//! cache by streaming; iOS has no picker, so the row says so.
+//! document picker through the JNI (`ui::android`): the archive is read in place through the
+//! descriptor the Java side hands over, and copied into the app's cache only when it cannot seek;
+//! iOS has no picker, so the row says so.
 
 use std::cell::{Cell, RefCell};
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -36,11 +38,32 @@ fn title() -> &'static str {
     tr("Update the game")
 }
 
-/// The picked file: its name, where its bytes are, and whether the copy there is Razdor's to delete.
+/// The picked file: its name, and the archive as the import reads it.
 struct Picked {
     name: String,
-    path: PathBuf,
-    cached: bool,
+    archive: Archive,
+}
+
+/// The archive as the import reads it. A copy is Razdor's to delete, and an open file is closed,
+/// when the value is dropped: wherever the import ends, nothing is left behind.
+enum Archive {
+    /// A file where the player keeps it (the desktop): never touched.
+    #[cfg_attr(target_os = "android", allow(dead_code))]
+    Path(PathBuf),
+    /// A copy in the app's cache (the phones, for a picked file that cannot seek): deleted.
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    Copy(PathBuf),
+    /// The picked document's open file (the phones): closed.
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    Open(File),
+}
+
+impl Drop for Archive {
+    fn drop(&mut self) {
+        if let Archive::Copy(copy) = self {
+            let _ = std::fs::remove_file(copy);
+        }
+    }
 }
 
 /// Where the pick stands.
@@ -54,14 +77,17 @@ enum Picker {
     /// The Android picker is open: its answer comes through `ui::android::pick_outcome`.
     #[cfg(target_os = "android")]
     Android,
+    /// A picked stream is copied into the cache on a thread (its answer, the copy or why not).
+    #[cfg(target_os = "android")]
+    Copying(std::sync::mpsc::Receiver<Result<Picked, String>>),
 }
 
 /// An archive examined and waiting for the player's answer: the install folder it goes to, and
-/// the cache copy to delete when it is done with.
+/// the archive (dropped, it cleans up after itself).
 struct Pending {
     found: Found,
     target: PathBuf,
-    cleanup: Option<PathBuf>,
+    archive: Archive,
 }
 
 /// A window of this module, shown over the settings until the player answers it.
@@ -195,32 +221,28 @@ pub fn tick(install: Option<&Path>) -> bool {
 /// The picked archive: examined (nothing is written), then either started, or asked about when it
 /// replaces a game that is there.
 fn picked_archive(picked: Picked) {
-    let cleanup = picked.cached.then(|| picked.path.clone());
-    let discard = |cleanup: &Option<PathBuf>| {
-        if let Some(copy) = cleanup {
-            let _ = std::fs::remove_file(copy);
-        }
-    };
+    let Picked { name, mut archive } = picked;
     let Some(target) = TARGET.with_borrow(|t| t.clone()) else {
-        discard(&cleanup);
         notice(vec![tr("Only the game in Razdor's own folder can be updated here.").to_string()]);
         return;
     };
-    let found = match import::examine(&picked.path, &picked.name) {
+    let examined = match &mut archive {
+        Archive::Path(path) | Archive::Copy(path) => import::examine(path.as_path(), &name),
+        Archive::Open(file) => import::examine_file(file, &name),
+    };
+    let found = match examined {
         Ok(found) => found,
         Err(e) => {
-            discard(&cleanup);
             notice(vec![error_text(&e)]);
             return;
         }
     };
     let installed = target.is_dir();
     if found.kind == Kind::Patch && !installed {
-        discard(&cleanup);
         notice(vec![error_text(&Error::NoInstall)]);
         return;
     }
-    let pending = Pending { found, target, cleanup };
+    let pending = Pending { found, target, archive };
     if pending.found.kind == Kind::Game && installed {
         MODAL.with_borrow_mut(|m| *m = Some(Modal::Confirm(pending)));
     } else {
@@ -235,14 +257,17 @@ fn start(pending: Pending) {
     let done = Arc::new(AtomicU64::new(0));
     let (d, t) = (done.clone(), total.clone());
     let spawned = std::thread::Builder::new().name("game-import".into()).spawn(move || {
-        let Pending { found, target, cleanup } = pending;
-        let result = import::import(&found, &target, &|bytes, all| {
+        let Pending { found, target, mut archive } = pending;
+        let progress = |bytes: u64, all: u64| {
             d.store(bytes, Ordering::Relaxed);
             t.store(all, Ordering::Relaxed);
-        });
-        if let Some(copy) = cleanup {
-            let _ = std::fs::remove_file(copy);
-        }
+        };
+        let result = match &mut archive {
+            Archive::Open(file) => import::import_file(file, &found, &target, &progress),
+            Archive::Path(_) | Archive::Copy(_) => import::import(&found, &target, &progress),
+        };
+        // The archive goes here: a cache copy is deleted, an open file closed.
+        drop(archive);
         result
     });
     match spawned {
@@ -478,6 +503,7 @@ fn error_text(e: &Error) -> String {
         Error::Unpack(UnpackError::NoRoomOrAccess(dir)) => trf!("Could not unpack: no room or no access to the folder {dir}", dir = dir.display()),
         Error::Unpack(other) => trf!("Could not unpack: {error}", error = other.to_string()),
         Error::Io(why) => trf!("The update failed: {why}.", why = why.clone()),
+        Error::NoSpace { needed, free } => trf!("Not enough free space: the game needs {need} MB, {free} MB are free.", need = needed.div_ceil(1 << 20), free = free / (1 << 20)),
         Error::Download(why) => trf!("Download failed: {why}.", why = why.clone()),
         Error::Cancelled => tr("The download was cancelled.").to_string(),
     }
@@ -490,11 +516,8 @@ pub fn modal() {
         Some(Modal::Confirm(pending)) => match confirm_window(&pending.found.name) {
             None => MODAL.with_borrow_mut(|m| *m = Some(Modal::Confirm(pending))),
             Some(true) => start(pending),
-            Some(false) => {
-                if let Some(copy) = &pending.cleanup {
-                    let _ = std::fs::remove_file(copy);
-                }
-            }
+            // Cancelled: the pending archive is dropped here (a cache copy is deleted).
+            Some(false) => {}
         },
         Some(Modal::Notice { title, lines }) => {
             if !map_import::notice_window(&title, &lines) {
@@ -604,7 +627,7 @@ fn start_picker() {}
 
 #[cfg(target_os = "android")]
 fn start_picker() {
-    let state = if super::android::start_pick() {
+    let state = if super::android::start_archive_pick() {
         Picker::Android
     } else {
         notice(vec![tr("The file picker cannot be opened on this phone.").to_string()]);
@@ -651,7 +674,7 @@ fn poll_picker() -> Poll {
             Ok(None) => Poll::Cancelled,
             Ok(Some(path)) => {
                 let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                Poll::Got(Picked { name, path, cached: false })
+                Poll::Got(Picked { name, archive: Archive::Path(path) })
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => {
                 PICKER.with_borrow_mut(|p| *p = Picker::Desktop(rx));
@@ -670,12 +693,22 @@ fn poll_picker() -> Poll {
                 }
                 "cancel" => Poll::Cancelled,
                 text if text.starts_with("error: ") => Poll::Failed(text["error: ".len()..].to_string()),
-                text => match text.strip_prefix("ok\n").and_then(|rest| rest.split_once('\n')) {
-                    Some((name, path)) => Poll::Got(Picked { name: name.to_string(), path: PathBuf::from(path), cached: true }),
+                text => match text.strip_prefix("fd\n") {
+                    Some(rest) => open_picked(rest),
                     None => Poll::Failed(trf!("The picked file cannot be read: {why}.", why = text.to_string())),
                 },
             }
         }
+        #[cfg(target_os = "android")]
+        Picker::Copying(rx) => match rx.try_recv() {
+            Ok(Ok(picked)) => Poll::Got(picked),
+            Ok(Err(why)) => Poll::Failed(trf!("The picked file cannot be read: {why}.", why = why)),
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                PICKER.with_borrow_mut(|p| *p = Picker::Copying(rx));
+                Poll::Nothing
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Poll::Failed(tr("The picked file cannot be read.").to_string()),
+        },
     }
 }
 
@@ -686,6 +719,66 @@ fn checking_window() {
     if let Some(bar) = bar {
         map_import::draw_bar(bar, 0.0);
     }
+}
+
+/// The Android picker's descriptor for the picked archive (`rest` is its answer after "fd\n":
+/// "<name>\n<fd>"). A seekable descriptor is read in place. A stream is copied into the cache on a
+/// thread first (the picker then waits in `Picker::Copying`).
+#[cfg(target_os = "android")]
+fn open_picked(rest: &str) -> Poll {
+    let Some((name, fd)) = parse_picked_fd(rest) else {
+        return Poll::Failed(tr("The picked file cannot be read.").to_string());
+    };
+    // SAFETY: the Java side detached this descriptor from its ParcelFileDescriptor and answers it
+    // once, so this is its only owner; the `File` closes it when dropped.
+    use std::os::unix::io::FromRawFd as _;
+    let mut file = unsafe { File::from_raw_fd(fd) };
+    if import::is_seekable(&mut file) {
+        return Poll::Got(Picked { name, archive: Archive::Open(file) });
+    }
+    let Some(dir) = platform::cache_dir() else {
+        return Poll::Failed(tr("The picked file cannot be read.").to_string());
+    };
+    let _ = std::fs::create_dir_all(&dir);
+    // The extension stays: the copy is read as the archive its name says.
+    let ext = Path::new(&name).extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "bin".into());
+    let copy = dir.join(format!("picked-archive.{ext}"));
+    let (tx, rx) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new().name("game-copy".into()).spawn(move || {
+        let result = copy_to(&mut file, &copy).map(|()| Picked { name, archive: Archive::Copy(copy) }).map_err(|e| e.to_string());
+        let _ = tx.send(result);
+    });
+    match spawned {
+        Ok(_) => {
+            PICKER.with_borrow_mut(|p| *p = Picker::Copying(rx));
+            Poll::Nothing
+        }
+        Err(e) => Poll::Failed(trf!("The picked file cannot be read: {why}.", why = e.to_string())),
+    }
+}
+
+/// Copies the stream `file` into `copy`; a failed copy is removed.
+#[cfg(target_os = "android")]
+fn copy_to(file: &mut File, copy: &Path) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let result = (|| {
+        let mut out = File::create(copy)?;
+        std::io::copy(&mut *file, &mut out)?;
+        out.flush()
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(copy);
+    }
+    result
+}
+
+/// The Android picker's answer after its "fd" line, "<name>\n<fd>": the name and the descriptor.
+/// None for anything else (a negative descriptor included).
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+fn parse_picked_fd(rest: &str) -> Option<(String, i32)> {
+    let (name, fd) = rest.rsplit_once('\n')?;
+    let fd: i32 = fd.parse().ok()?;
+    (fd >= 0).then(|| (name.to_string(), fd))
 }
 
 /// The game download's window: the megabytes of the archive, its percent and a bar, and Cancel (the
@@ -706,5 +799,19 @@ fn download_window(bytes: u64, all: u64, cancel: Option<&gdrive::Progress>, titl
         if answer.is_some() || closed {
             progress.cancel();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_picked_fd;
+
+    #[test]
+    fn the_picker_answer_names_the_file_and_its_descriptor() {
+        assert_eq!(parse_picked_fd("game.7z\n42"), Some(("game.7z".into(), 42)));
+        assert_eq!(parse_picked_fd("Discord Times (1).zip\n3"), Some(("Discord Times (1).zip".into(), 3)));
+        assert_eq!(parse_picked_fd("game.7z\n-1"), None, "no descriptor");
+        assert_eq!(parse_picked_fd("game.7z\nx"), None);
+        assert_eq!(parse_picked_fd("game.7z"), None, "no line for the descriptor");
     }
 }

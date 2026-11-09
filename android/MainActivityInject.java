@@ -13,6 +13,7 @@
 import android.app.PendingIntent;
 import android.content.Intent;
 import android.database.Cursor;
+import android.os.ParcelFileDescriptor;
 import android.net.Uri;
 import android.provider.OpenableColumns;
 import android.view.Display;
@@ -277,19 +278,34 @@ public String razdorInstall(String path) {
     }
 }
 
-// «Добавить карту…» (src/ui/map_import.rs): the system's document picker (Storage Access
-// Framework) opens, and its answer comes back in miniquad's onActivityResult, which hands it to
-// razdorOnActivityResult (no AndroidX). The picked file is copied into the app's cache, because the
-// game reads a file, not a content URI. razdorPickOutcome is the game's poll: "" while the
-// picker is open or the copy runs, "cancel", "error: <why>", or "ok\n<name>\n<path>".
+// The system's document picker (Storage Access Framework) for «Добавить карту…» (src/ui/map_import.rs,
+// razdorPickFile) and for «Обновить игру из архива…» (src/ui/game_import.rs, razdorPickArchive). Its
+// answer comes back in miniquad's onActivityResult, which hands it to razdorOnActivityResult (no
+// AndroidX). A map is copied into the app's cache, because the game reads a file, not a content URI.
+// An archive is not copied: its descriptor goes to Rust, which reads it in place (a stream that cannot
+// seek is copied there). razdorPickOutcome is the game's poll: "" while the picker is open or the copy
+// runs, "cancel", "error: <why>", "ok\n<name>\n<path>" (a map copy) or "fd\n<name>\n<fd>" (an archive).
 private static final int RAZDOR_PICK_REQUEST = 7301;
 // "" until the picker answers; then as razdorPickOutcome describes.
 private volatile String razdorPickResult = "";
+// True while the picker is open for a game archive (see above).
+private volatile boolean razdorPickingArchive = false;
+
+// The map picker, on the UI thread. See razdorStartPicker.
+public String razdorPickFile() {
+    return razdorStartPicker(false);
+}
+
+// The archive picker, on the UI thread. See razdorStartPicker.
+public String razdorPickArchive() {
+    return razdorStartPicker(true);
+}
 
 // Opens the picker on the UI thread. "" once it is requested; a failure to open it is the poll's
 // answer ("error: ..."), so the game learns of it from razdorPickOutcome.
-public String razdorPickFile() {
+private String razdorStartPicker(final boolean archive) {
     razdorPickResult = "";
+    razdorPickingArchive = archive;
     runOnUiThread(new Runnable() {
         @Override
         public void run() {
@@ -322,17 +338,19 @@ private void razdorOnActivityResult(int requestCode, int resultCode, Intent data
         return;
     }
     final Uri uri = data.getData();
-    // A thread: the copy of a big file must not stall the activity.
+    final boolean archive = razdorPickingArchive;
+    // A thread: the copy of a big file, or a document's open, must not stall the activity.
     new Thread(new Runnable() {
         @Override
         public void run() {
-            razdorPickResult = razdorCopyPicked(uri);
+            razdorPickResult = archive ? razdorOpenArchive(uri) : razdorCopyPicked(uri);
         }
     }).start();
 }
 
-// Copies the picked document into the app's cache folder; returns the answer for the poll.
-private String razdorCopyPicked(Uri uri) {
+// The picked document's display name, with its line breaks taken out; "picked" when there is none
+// (its extension decides what the file is).
+private String razdorDisplayName(Uri uri) {
     String name = "picked";
     try (Cursor cursor = getContentResolver().query(uri, new String[] {OpenableColumns.DISPLAY_NAME}, null, null, null)) {
         if (cursor != null && cursor.moveToFirst()) {
@@ -342,8 +360,29 @@ private String razdorCopyPicked(Uri uri) {
             }
         }
     } catch (Exception e) {
-        // No display name: the file keeps the name "picked" (its extension decides what it is).
+        // No display name: the file keeps the name "picked".
     }
+    return name;
+}
+
+// Opens the picked archive for reading in place: the descriptor is detached from the ParcelFileDescriptor
+// (so nothing closes it here) and handed to Rust, which owns it from then on.
+private String razdorOpenArchive(Uri uri) {
+    String name = razdorDisplayName(uri);
+    try {
+        ParcelFileDescriptor pfd = getContentResolver().openFileDescriptor(uri, "r");
+        if (pfd == null) {
+            return "error: the file has no data";
+        }
+        return "fd\n" + name + "\n" + pfd.detachFd();
+    } catch (Exception e) {
+        return "error: " + e;
+    }
+}
+
+// Copies the picked document into the app's cache folder; returns the answer for the poll.
+private String razdorCopyPicked(Uri uri) {
+    String name = razdorDisplayName(uri);
     File dir = new File(getCacheDir(), "razdor-import");
     dir.mkdirs();
     File copy = new File(dir, "picked-" + System.currentTimeMillis());
