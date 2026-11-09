@@ -147,9 +147,10 @@ pub fn init() {
     }
 }
 
-/// Opens the log when [`init`] could not (on Android the data folder is not writable before the
-/// all-files access is granted): the file is made now, the output goes there and the summary is
-/// written again, so the crashes of this run are logged. Does nothing when the log is open.
+/// Opens the log when [`init`] could not (on Android the data folder may not exist yet: the
+/// not-found screen's poll and the install's load call this): the file is made now, the output
+/// goes there and the summary is written again, so the crashes of this run are logged. Does
+/// nothing when the log is open.
 pub fn reopen_log() {
     let Some(path) = log_path() else { return };
     {

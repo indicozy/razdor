@@ -193,13 +193,15 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
 /// Android: the install is not there. Tells the player what to do, and offers «Check again», the
 /// look that runs on the title screen (`ui::mobile`). No storage permission is asked for here: a
 /// new player's game folder is the app's own. The block is scaled to the screen ([`PhoneBlock`]).
-/// Its step 2 and «Check again» keep their places (no grant line or button above them).
+/// Its line about the game and «Check again» keep their places (no grant line or button above them).
+/// The line names only what works without the grant: the title screen's download and archive
+/// picker (this screen has no such buttons).
 #[cfg(target_os = "android")]
 fn android_not_found(x: f32, w: f32) {
     use super::mobile::ask_recheck;
     let b = PhoneBlock::new(w, 2);
     text_fit(tr("Discord Times not found."), x, b.y, w, 20.0 * b.k, INK);
-    text_fit(tr("2. Put the game folder in internal storage, in a folder named DiscordTimes (or in Download)."), x, b.y + 46.0 * b.k, w, 16.0 * b.k, DIM);
+    text_fit(tr("Download the game with «Download the game», or choose its archive (.zip or .7z) with «Choose the archive…» on the title screen."), x, b.y + 26.0 * b.k, w, 16.0 * b.k, DIM);
     if button(x + b.btn_w + 16.0 * b.k, b.buttons_y, b.btn_w, b.btn_h, tr("Check again"), true) {
         ask_recheck();
     }

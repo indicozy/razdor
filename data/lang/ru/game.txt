@@ -12,7 +12,7 @@ Discord Times not found: put Razdor into the game folder, next to DiscordTimes.e
 # Android (the not-found screen; see ui/screens.rs)
 Discord Times not found. = «Времена раздора» не найдены.
 Razdor plays your own copy of Discord Times: version 1.8 with Community Update 1.2. = Раздор играет на вашей копии «Времён раздора»: версия 1.8 с Community Update 1.2.
-2. Put the game folder in internal storage, in a folder named DiscordTimes (or in Download). = 2. Положите папку игры во внутреннюю память, в папку DiscordTimes (или в Download).
+Download the game with «Download the game», or choose its archive (.zip or .7z) with «Choose the archive…» on the title screen. = Скачайте игру кнопкой «Скачать игру» или выберите её архив (.zip или .7z) кнопкой «Выбрать архив…» на главном экране.
 1. Copy the game folder to the Files app: On My iPhone (or iPad) > Razdor, in a folder named DiscordTimes. = 1. Скопируйте папку игры в «Файлы»: На iPhone (или iPad) > Раздор, в папку DiscordTimes.
 2. From a computer: Finder (or iTunes) > the device > Files > Razdor. = 2. С компьютера: Finder (или iTunes) > устройство > Файлы > Раздор.
 Download the game = Скачать игру

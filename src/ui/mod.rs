@@ -1280,6 +1280,9 @@ impl App {
         let asked = mobile::take_recheck();
         mobile::look_for_archives(now, asked);
         let due = mobile::poll_due(now);
+        if due {
+            razdor::diag::reopen_log();
+        }
         if !(asked || (due && mobile::install_listed())) {
             return;
         }
