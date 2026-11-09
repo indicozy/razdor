@@ -141,8 +141,9 @@ pub fn start_document_export(name: &str, mime: &str, source: &str) -> bool {
     unsafe {
         let env = attach_jni_env();
         let activity = activity_class(env);
+        // A failed lookup leaves an exception pending: it is cleared before the id is tested.
         let set = method(env, activity.obj, "razdorSetExportSource", "(Ljava/lang/String;)V", false);
-        if set.is_null() || cleared(env) {
+        if cleared(env) || set.is_null() {
             return false;
         }
         let path = string(env, source);
@@ -151,7 +152,7 @@ pub fn start_document_export(name: &str, mime: &str, source: &str) -> bool {
             return false;
         }
         let create = method(env, activity.obj, "razdorCreateDocument", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;", false);
-        if create.is_null() || cleared(env) {
+        if cleared(env) || create.is_null() {
             return false;
         }
         let (name, mime) = (string(env, name), string(env, mime));
