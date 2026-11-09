@@ -1315,10 +1315,10 @@ impl App {
         migrate::start_if_needed();
         audio::flush_deferred();
         match migrate::tick() {
-            Some(migrate::Outcome::Moved { game_skipped }) => {
+            Some(migrate::Outcome::Moved { game_skipped, game_in_app }) => {
                 razdor::diag::switch_log();
                 self.reload_install();
-                migrate::notify(migrate::moved_message(game_skipped));
+                migrate::notify(migrate::moved_message(game_skipped, game_in_app));
             }
             Some(migrate::Outcome::NoRoom { needed, free }) => migrate::notify(migrate::no_room_message(needed, free)),
             Some(migrate::Outcome::Failed(why)) => razdor::diag::log(&format!("move: {why}; the next start tries again")),

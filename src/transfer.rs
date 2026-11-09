@@ -228,15 +228,24 @@ fn put_exact(path: &Path, data: &[u8], undo: &mut Undo) -> Result<Put, String> {
     }
 }
 
-/// Places a save in `dir` under `name`, or the first free numbered name (`stem (2).ext`, ...) whose
-/// file differs. Returns how it was placed and the name it has there.
-fn place_save(dir: &Path, name: &str, data: &[u8], undo: &mut Undo) -> Result<(Put, String), String> {
+/// The name of the `n`th copy of a file called `name`: `name` itself for the first (`n` 1), else
+/// `stem (n).ext`. The import and the move (`migration`) name a clashing save this way.
+pub fn numbered_name(name: &str, n: u32) -> String {
+    if n == 1 {
+        return name.to_string();
+    }
     let path = Path::new(name);
     let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let ext = path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    format!("{stem} ({n}){ext}")
+}
+
+/// Places a save in `dir` under `name`, or the first free numbered name (`stem (2).ext`, ...) whose
+/// file differs. Returns how it was placed and the name it has there.
+fn place_save(dir: &Path, name: &str, data: &[u8], undo: &mut Undo) -> Result<(Put, String), String> {
     let mut n = 1u32;
     loop {
-        let file = if n == 1 { name.to_string() } else { format!("{stem} ({n}){ext}") };
+        let file = numbered_name(name, n);
         match put_exact(&dir.join(&file), data, undo)? {
             Put::Other => n += 1,
             placed => return Ok((placed, file)),

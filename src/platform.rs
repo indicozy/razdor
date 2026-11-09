@@ -162,14 +162,17 @@ pub fn legacy_state(dir: &Path) -> LegacyState {
 
 /// The start-up decision: the marker is there ([`StartState::Migrated`]); else any legacy folder
 /// holds data ([`StartState::Legacy`], the data is copied later); else a legacy folder cannot be
-/// read ([`StartState::Unreadable`]); else nothing is there ([`StartState::Fresh`]).
-pub fn start_state(marker: bool, legacy_root: LegacyState, legacy_game: LegacyState) -> StartState {
-    use LegacyState::{Data, Unreadable};
+/// read, or the shared storage root `storage` (see [`LEGACY_ANDROID_STORAGE`]) cannot be read to
+/// tell whether there is legacy data at all ([`StartState::Unreadable`]); else nothing is there
+/// ([`StartState::Fresh`]). Only a readable root with both folders missing or empty is a fresh install:
+/// the marker is written then, so a later start never looks at the shared folders again.
+pub fn start_state(marker: bool, storage: LegacyState, legacy_root: LegacyState, legacy_game: LegacyState) -> StartState {
+    use LegacyState::{Data, Missing, Unreadable};
     if marker {
         StartState::Migrated
     } else if legacy_root == Data || legacy_game == Data {
         StartState::Legacy
-    } else if legacy_root == Unreadable || legacy_game == Unreadable {
+    } else if storage == Unreadable || storage == Missing || legacy_root == Unreadable || legacy_game == Unreadable {
         StartState::Unreadable
     } else {
         StartState::Fresh
@@ -220,6 +223,7 @@ pub fn set_android_files_dir(files: Option<PathBuf>) {
         Some(files) => {
             let state = start_state(
                 migrated_marker(files).exists(),
+                legacy_state(Path::new(LEGACY_ANDROID_STORAGE)),
                 legacy_state(Path::new(LEGACY_ANDROID_ROOT)),
                 legacy_state(Path::new(LEGACY_ANDROID_GAME)),
             );
@@ -514,9 +518,11 @@ mod tests {
     #[test]
     fn the_marker_wins_over_any_legacy_state() {
         use LegacyState::*;
-        for root in [Missing, Empty, Unreadable, Data] {
-            for game in [Missing, Empty, Unreadable, Data] {
-                assert_eq!(start_state(true, root, game), StartState::Migrated, "{root:?} {game:?}");
+        for storage in [Missing, Empty, Unreadable, Data] {
+            for root in [Missing, Empty, Unreadable, Data] {
+                for game in [Missing, Empty, Unreadable, Data] {
+                    assert_eq!(start_state(true, storage, root, game), StartState::Migrated, "{storage:?} {root:?} {game:?}");
+                }
             }
         }
     }
@@ -525,8 +531,9 @@ mod tests {
     fn legacy_data_without_a_marker_stays_legacy() {
         use LegacyState::*;
         for other in [Missing, Empty, Unreadable, Data] {
-            assert_eq!(start_state(false, Data, other), StartState::Legacy, "root data, game {other:?}");
-            assert_eq!(start_state(false, other, Data), StartState::Legacy, "game data, root {other:?}");
+            assert_eq!(start_state(false, Data, Data, other), StartState::Legacy, "root data, game {other:?}");
+            assert_eq!(start_state(false, Data, other, Data), StartState::Legacy, "game data, root {other:?}");
+            assert_eq!(start_state(false, Unreadable, Data, other), StartState::Legacy, "root data, storage unreadable, game {other:?}");
         }
     }
 
@@ -534,20 +541,34 @@ mod tests {
     fn unreadable_legacy_is_migrated_for_this_run_only() {
         use LegacyState::*;
         for other in [Missing, Empty, Unreadable] {
-            assert_eq!(start_state(false, Unreadable, other), StartState::Unreadable);
-            assert_eq!(start_state(false, other, Unreadable), StartState::Unreadable);
+            assert_eq!(start_state(false, Data, Unreadable, other), StartState::Unreadable);
+            assert_eq!(start_state(false, Data, other, Unreadable), StartState::Unreadable);
         }
         assert!(StartState::Unreadable.migrated());
         assert!(!StartState::Legacy.migrated());
     }
 
     #[test]
-    fn no_legacy_data_is_a_fresh_install() {
+    fn no_legacy_data_is_a_fresh_install_only_when_the_storage_root_is_readable() {
         use LegacyState::*;
-        assert_eq!(start_state(false, Missing, Missing), StartState::Fresh);
-        assert_eq!(start_state(false, Empty, Missing), StartState::Fresh);
-        assert_eq!(start_state(false, Missing, Empty), StartState::Fresh);
-        assert_eq!(start_state(false, Empty, Empty), StartState::Fresh);
+        for storage in [Data, Empty] {
+            assert_eq!(start_state(false, storage, Missing, Missing), StartState::Fresh, "storage {storage:?}");
+            assert_eq!(start_state(false, storage, Empty, Missing), StartState::Fresh, "storage {storage:?}");
+            assert_eq!(start_state(false, storage, Missing, Empty), StartState::Fresh, "storage {storage:?}");
+            assert_eq!(start_state(false, storage, Empty, Empty), StartState::Fresh, "storage {storage:?}");
+        }
+    }
+
+    #[test]
+    fn an_unreadable_or_missing_storage_root_is_never_fresh() {
+        use LegacyState::*;
+        // Without the root, the legacy folders may still hold data: no marker, the move asks again.
+        for storage in [Unreadable, Missing] {
+            for (root, game) in [(Missing, Missing), (Empty, Empty), (Missing, Empty), (Empty, Missing)] {
+                assert_eq!(start_state(false, storage, root, game), StartState::Unreadable, "storage {storage:?}, root {root:?}, game {game:?}");
+            }
+        }
+        assert_eq!(start_state(true, Unreadable, Missing, Missing), StartState::Migrated, "the marker wins");
     }
 
     #[test]

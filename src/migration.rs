@@ -17,6 +17,8 @@
 
 use crate::dt::game_import::SPACE_MARGIN;
 use crate::platform::{self, LEGACY_ANDROID_GAME, LEGACY_ANDROID_ROOT};
+use crate::rules::save;
+use crate::transfer;
 use std::cell::Cell;
 use std::fs;
 use std::io::{self, Read as _};
@@ -28,6 +30,8 @@ use std::time::SystemTime;
 const REWRITE_LIMIT: u64 = 8 << 20;
 /// Folders nested deeper than this are refused (a link loop, say).
 const MAX_DEPTH: u32 = 32;
+/// The numbered names tried for a save that clashes with the app's own (see [`numbered_free`]).
+const MAX_COPIES: u32 = 999;
 /// The logs of the running app, at the top of the Razdor folder: the diagnostic log and the play
 /// log, with the copies kept before them. This process writes to them (and renames them, when
 /// the play log is first written) during the move, so a change to them is not a reason to start
@@ -73,11 +77,13 @@ pub enum Failure {
     Failed(String),
 }
 
-/// The move happened. `game_skipped`: the game folder was left in the legacy place for lack of
-/// room (the install is remembered at the new place, so the archive is asked for when it is not there).
+/// The move happened. `game_skipped`: the game folder was left in the legacy place, for lack of
+/// room or because the app's folder has a game already (`game_in_app`). The install is remembered
+/// at the new place, so the archive is asked for when it is not there.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Moved {
     pub game_skipped: bool,
+    pub game_in_app: bool,
 }
 
 /// The real copy of one file (`len` bytes, see [`CopyFile`]), then its modification time (the
@@ -149,7 +155,7 @@ fn move_in(
     made: &mut Made,
 ) -> Result<Moved, Failure> {
     if platform::migrated_marker(&plan.files).exists() {
-        return Ok(Moved { game_skipped: false });
+        return Ok(Moved { game_skipped: false, game_in_app: false });
     }
     let root = scan(&plan.legacy_root).map_err(io_failure)?;
     let game = scan(&plan.legacy_game).map_err(io_failure)?;
@@ -168,8 +174,10 @@ fn move_in(
             return Err(Failure::NoRoom { needed: root_needed, free: free_now });
         }
     }
+    // A game the app's folder has already is kept as it is: the legacy game is never merged into it.
+    let app_game = fs::symlink_metadata(&dest.game).is_ok();
     let game_fits = match free_now {
-        _ if !game_there => false,
+        _ if !game_there || app_game => false,
         None => true,
         Some(free_now) => game.bytes + SPACE_MARGIN <= free_now.saturating_sub(root.bytes),
     };
@@ -189,6 +197,10 @@ fn move_in(
         pairs.push((LEGACY_ANDROID_GAME, game_to.as_str()));
     }
     rewrite_tree(&part_root, &pairs).map_err(io_failure)?;
+    // The app's paths as the game sees them: the canonical folder of the app's files, so the keys
+    // match the ones the game computes once the folders exist (`save::saves_dir_of`).
+    let after = platform::android_paths(&fs::canonicalize(&plan.files).unwrap_or_else(|_| plan.files.clone()), true);
+    rekey_saves(&part_root, &moved_installs(&part_root, &after)).map_err(io_failure)?;
     if game_there && !game_fits {
         // The game stays where it is, but the remembered install names the new folder, so the
         // not-found screen asks for the archive once the legacy folder cannot be read.
@@ -208,12 +220,58 @@ fn move_in(
         place_folder(&part_game, &dest.game, place, made)?;
     }
     let game_skipped = game_there && !game_fits;
+    let game_in_app = game_there && app_game;
     let how = if game_fits { format!("from {LEGACY_ANDROID_ROOT} and {LEGACY_ANDROID_GAME}") } else { format!("from {LEGACY_ANDROID_ROOT}") };
     platform::write_migrated_marker(&plan.files, &how);
     if !platform::migrated_marker(&plan.files).exists() {
         return Err(Failure::Failed("the marker could not be written".into()));
     }
-    Ok(Moved { game_skipped })
+    Ok(Moved { game_skipped, game_in_app })
+}
+
+/// The installs whose path the move changes, as (legacy path, new path): the game, and each hub
+/// mod's merged game folder (`<hub>/mods/<id>/game`, see `hub::mods`). The game counts even when it
+/// is not moved: a remembered install is then asked for at the new place.
+fn moved_installs(part_root: &Path, after: &platform::AndroidPaths) -> Vec<(PathBuf, PathBuf)> {
+    let legacy = platform::legacy_android_paths();
+    let mut moves = vec![(legacy.game.clone(), after.game.clone())];
+    if let Ok(mods) = fs::read_dir(part_root.join("hub").join("mods")) {
+        for entry in mods.flatten() {
+            let id = entry.file_name();
+            let from = legacy.root.join("hub").join("mods").join(&id).join("game");
+            moves.push((from, after.root.join("hub").join("mods").join(&id).join("game")));
+        }
+    }
+    moves
+}
+
+/// Renames each install's saves folder in the copy `part_root` from its key of the legacy path to
+/// its key of the new path (`save::saves_dir_of`: the same hash the game computes). Without this
+/// the saves of an install whose path changed would sit under a key nothing asks for.
+fn rekey_saves(part_root: &Path, moves: &[(PathBuf, PathBuf)]) -> io::Result<()> {
+    let saves = part_root.join("saves");
+    for (from, to) in moves {
+        let (old, new) = (save::saves_dir_of(&saves, from), save::saves_dir_of(&saves, to));
+        if old != new && fs::symlink_metadata(&old).is_ok_and(|meta| meta.is_dir()) {
+            fs::rename(&old, &new)?;
+        }
+    }
+    Ok(())
+}
+
+/// Whether a copied file is a save (`.rzsave`).
+fn is_save(rel: &Path) -> bool {
+    rel.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("rzsave"))
+}
+
+/// The first free numbered name beside `path` (`stem (2).ext`, as `transfer::numbered_name`).
+fn numbered_free(path: &Path) -> Result<PathBuf, Failure> {
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let dir = path.parent().unwrap_or(Path::new(""));
+    (2..=MAX_COPIES)
+        .map(|n| dir.join(transfer::numbered_name(&name, n)))
+        .find(|candidate| fs::symlink_metadata(candidate).is_err())
+        .ok_or_else(|| Failure::Failed(format!("no free name beside {}", path.display())))
 }
 
 /// `<path>.part`, the folder a copy is written into before it is put in place.
@@ -345,7 +403,8 @@ fn listing(tree: &Tree) -> Listing {
 
 /// Puts the copy `part` at `dest`. Where `dest` does not exist yet, `part` is renamed in whole.
 /// Otherwise the copy's files go in where `dest` has no file at that path: a regular file already
-/// there is the app's own and wins (logged). Anything else in the way (a folder where the copy has
+/// there is the app's own and wins (logged), except a save, which is placed under a numbered name
+/// beside it. Anything else in the way (a folder where the copy has
 /// a file, a file where the copy has a folder, a link) stops the move, so nothing is overwritten
 /// and the undo runs. Each placed file is checked by its size; `part` is then removed.
 fn place_folder(part: &Path, dest: &Path, place: &mut PlaceFile<'_>, made: &mut Made) -> Result<(), Failure> {
@@ -370,8 +429,14 @@ fn place_folder(part: &Path, dest: &Path, place: &mut PlaceFile<'_>, made: &mut 
         }
     }
     for (rel, len, _) in &tree.files {
-        let target = dest.join(rel);
+        let mut target = dest.join(rel);
         match fs::symlink_metadata(&target) {
+            // A save of the same name as the app's own is kept too, under a numbered name: no save
+            // is left only in the legacy folder.
+            Ok(meta) if meta.is_file() && is_save(rel) => {
+                target = numbered_free(&target)?;
+                crate::diag::log(&format!("move: {} clashes with the app's own save: the legacy one is placed as {}", dest.join(rel).display(), target.display()));
+            }
             Ok(meta) if meta.is_file() => {
                 crate::diag::log(&format!("move: {} is kept: the app's own file", target.display()));
                 continue;
@@ -466,6 +531,7 @@ pub fn rewrite_text(text: &str, pairs: &[(&str, &str)]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::platform::LegacyState;
     use std::collections::BTreeMap;
 
     /// A fresh folder for one test (removed by the test that makes it).
@@ -554,7 +620,8 @@ mod tests {
 
     /// The paths the app uses: the legacy ones while the marker is absent, then the app's own.
     fn in_use(plan: &Plan) -> platform::StartState {
-        platform::start_state(platform::migrated_marker(&plan.files).exists(), platform::legacy_state(&plan.legacy_root), platform::legacy_state(&plan.legacy_game))
+        // The shared storage is not in these tests: a readable root stands for it.
+        platform::start_state(platform::migrated_marker(&plan.files).exists(), LegacyState::Data, platform::legacy_state(&plan.legacy_root), platform::legacy_state(&plan.legacy_game))
     }
 
     fn legacy_state_of(plan: &Plan) -> (Snapshot, Snapshot) {
@@ -568,7 +635,7 @@ mod tests {
         assert_eq!(in_use(&plan), platform::StartState::Legacy);
 
         let moved = run(&plan).expect("moves");
-        assert_eq!(moved, Moved { game_skipped: false });
+        assert_eq!(moved, Moved { game_skipped: false, game_in_app: false });
 
         assert!(platform::migrated_marker(&plan.files).is_file());
         assert_eq!(in_use(&plan), platform::StartState::Migrated);
@@ -610,7 +677,7 @@ mod tests {
         assert_eq!(legacy_state_of(&plan), before);
 
         let moved = run(&plan).expect("the next run moves");
-        assert_eq!(moved, Moved { game_skipped: false });
+        assert_eq!(moved, Moved { game_skipped: false, game_in_app: false });
         assert_eq!(in_use(&plan), platform::StartState::Migrated);
         assert!(!part_of(&plan.files.join("Razdor")).exists());
         assert!(!plan.files.join("Razdor/stale.txt").exists());
@@ -679,7 +746,7 @@ mod tests {
         // Room for the Razdor folder with its margin, and less than the game needs on top of it.
         let free = root_bytes + SPACE_MARGIN + 1;
         let moved = migrate(&plan, &room(free), &mut real_copy, &mut real_place, &|_, _| {}).expect("the Razdor folder moves");
-        assert_eq!(moved, Moved { game_skipped: true });
+        assert_eq!(moved, Moved { game_skipped: true, game_in_app: false });
         assert!(platform::migrated_marker(&plan.files).is_file());
         let dest = platform::android_paths(&plan.files, true);
         assert!(!dest.game.exists(), "the game folder is not copied");
@@ -707,7 +774,7 @@ mod tests {
             &mut real_place,
             &|_, _| {},
         );
-        assert_eq!(moved, Ok(Moved { game_skipped: false }));
+        assert_eq!(moved, Ok(Moved { game_skipped: false, game_in_app: false }));
         assert_eq!(copied, 0);
         assert_eq!(everything(&plan.files), before);
         let _ = fs::remove_dir_all(base);
@@ -738,6 +805,7 @@ mod tests {
         assert!(platform::migrated_marker(&plan.files).is_file());
         let root = plan.files.join("Razdor");
         assert_eq!(fs::read(root.join("saves/Autosave.rzsave")).unwrap(), b"app save", "the app's own save survives");
+        assert_eq!(fs::read(root.join("saves/Autosave (2).rzsave")).unwrap(), b"save bytes", "the legacy save of the same name is kept beside it");
         assert_eq!(fs::read(root.join("saves/settings.json")).unwrap(), b"{\"volume\":3}", "the legacy-only file is added");
         assert_eq!(fs::read(root.join("hub/own.json")).unwrap(), b"app hub");
         assert_eq!(fs::read(root.join("hub/mods/mod1/game/Rus_Units.ini")).unwrap(), b"units");
@@ -799,7 +867,7 @@ mod tests {
         assert_eq!(in_use(&plan), platform::StartState::Legacy);
         // The next start copies the file as it is now.
         let moved = run(&plan).expect("the next start moves");
-        assert_eq!(moved, Moved { game_skipped: false });
+        assert_eq!(moved, Moved { game_skipped: false, game_in_app: false });
         assert_eq!(fs::read(plan.files.join("Razdor/saves/settings.json")).unwrap(), b"{\"volume\":3}!");
         let _ = fs::remove_dir_all(base);
     }
@@ -909,6 +977,71 @@ mod tests {
         // The links themselves are left as they were.
         assert!(fs::symlink_metadata(plan.legacy_root.join("saves/link.json")).unwrap().file_type().is_symlink());
         assert_eq!(legacy_state_of(&plan).0.len(), legacy_before.0.len() + 2);
+        let _ = fs::remove_dir_all(base);
+    }
+
+    /// The name of the saves folder `install` is keyed by under `root` (`save::saves_dir_of`).
+    fn key_of(root: &Path, install: &Path) -> String {
+        save::saves_dir_of(root, install).file_name().unwrap().to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn saves_keyed_by_the_legacy_install_paths_are_keyed_by_the_new_ones() {
+        let (base, plan) = plan("rekey");
+        let legacy_saves = plan.legacy_root.join("saves");
+        let legacy_game = key_of(&legacy_saves, Path::new(LEGACY_ANDROID_GAME));
+        let mod_install = Path::new(LEGACY_ANDROID_ROOT).join("hub/mods/mod1/game");
+        let legacy_mod = key_of(&legacy_saves, &mod_install);
+        put(&legacy_saves.join(&legacy_game), "manual/Legacy.rzsave", b"game save");
+        put(&legacy_saves.join(&legacy_mod), "manual/Mod.rzsave", b"mod save");
+        run(&plan).expect("moves");
+
+        // The game and the mod list their saves in the folder their new paths key (games_dir's folder).
+        let dest = platform::android_paths(&plan.files, true);
+        let saves = dest.root.join("saves");
+        let game_saves = save::saves_dir_of(&saves, &dest.game);
+        assert_eq!(fs::read(game_saves.join("manual/Legacy.rzsave")).unwrap(), b"game save");
+        let mod_saves = save::saves_dir_of(&saves, &dest.root.join("hub/mods/mod1/game"));
+        assert_eq!(fs::read(mod_saves.join("manual/Mod.rzsave")).unwrap(), b"mod save");
+        assert!(!saves.join(&legacy_game).exists() && !saves.join(&legacy_mod).exists(), "no save stays under a legacy key");
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn a_legacy_save_clashing_with_the_apps_is_numbered_and_a_file_clash_keeps_the_apps() {
+        let (base, plan) = plan("save-clash");
+        let legacy_before = legacy_state_of(&plan);
+        let root = plan.files.join("Razdor");
+        put(&root, "saves/Autosave.rzsave", b"app save");
+        put(&root, "saves/Autosave (2).rzsave", b"app's second");
+        put(&root, "saves/settings.json", b"app settings");
+
+        let moved = run(&plan).expect("moves");
+        assert_eq!(moved, Moved { game_skipped: false, game_in_app: false });
+        assert_eq!(fs::read(root.join("saves/Autosave.rzsave")).unwrap(), b"app save");
+        assert_eq!(fs::read(root.join("saves/Autosave (2).rzsave")).unwrap(), b"app's second");
+        assert_eq!(fs::read(root.join("saves/Autosave (3).rzsave")).unwrap(), b"save bytes", "the legacy save gets the next free number");
+        assert_eq!(fs::read(root.join("saves/settings.json")).unwrap(), b"app settings", "a file that is not a save keeps the app's version");
+        assert_eq!(legacy_state_of(&plan), legacy_before);
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn an_app_game_is_kept_and_the_legacy_game_is_never_merged_into_it() {
+        let (base, plan) = plan("app-game");
+        let legacy_before = legacy_state_of(&plan);
+        put(&plan.files, "DiscordTimes/DiscordTimes.exe", b"the app's game");
+
+        let moved = run(&plan).expect("moves");
+        assert_eq!(moved, Moved { game_skipped: true, game_in_app: true });
+        let dest = platform::android_paths(&plan.files, true);
+        assert_eq!(fs::read(dest.game.join("DiscordTimes.exe")).unwrap(), b"the app's game");
+        assert!(!dest.game.join("Maps_Rus").exists(), "no legacy folder is merged into the app's game");
+        assert!(!dest.game.join("Rus_Units.ini").exists());
+        // The remembered install names the app's game; the Razdor folder moved as usual.
+        assert_eq!(fs::read_to_string(dest.root.join("install")).unwrap(), dest.game.to_string_lossy());
+        assert_eq!(fs::read(dest.root.join("saves/Autosave.rzsave")).unwrap(), b"save bytes");
+        assert_eq!(legacy_state_of(&plan), legacy_before);
         let _ = fs::remove_dir_all(base);
     }
 

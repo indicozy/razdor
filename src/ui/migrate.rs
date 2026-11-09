@@ -20,8 +20,9 @@ use std::thread::JoinHandle;
 
 /// What the App does when the move ends (see [`tick`]).
 pub enum Outcome {
-    /// The paths are the app's own now (on Android); `game_skipped`: the game stayed where it was.
-    Moved { game_skipped: bool },
+    /// The paths are the app's own now (on Android); `game_skipped`: the game stayed where it was,
+    /// `game_in_app`: because the app's folder has a game already.
+    Moved { game_skipped: bool, game_in_app: bool },
     /// Not enough room for the Razdor folder: nothing moved, the next start tries again.
     NoRoom { needed: u64, free: u64 },
     /// The move failed (its reason is logged); the next start tries again.
@@ -105,8 +106,12 @@ pub fn tick() -> Option<Outcome> {
     Some(match ended? {
         Ok(Ok(moved)) => {
             #[cfg(target_os = "android")]
-            razdor::platform::set_android_migrated();
-            Outcome::Moved { game_skipped: moved.game_skipped }
+            {
+                razdor::platform::set_android_migrated();
+                // The housekeeping of the app's folder (`.nomedia`, the old cache) runs on the new paths.
+                std::thread::spawn(razdor::platform::tidy_app_dir);
+            }
+            Outcome::Moved { game_skipped: moved.game_skipped, game_in_app: moved.game_in_app }
         }
         Ok(Err(Failure::NoRoom { needed, free })) => Outcome::NoRoom { needed, free },
         Ok(Err(Failure::Failed(why))) => Outcome::Failed(why),
@@ -152,9 +157,11 @@ pub fn notify(lines: Vec<String>) {
 
 /// The notice after a move: the files are the app's own; with the game left behind, the archive
 /// is what the player picks when the legacy folder can no longer be read.
-pub fn moved_message(game_skipped: bool) -> Vec<String> {
+pub fn moved_message(game_skipped: bool, game_in_app: bool) -> Vec<String> {
     let mut lines = vec![tr("Razdor's files were moved to the app's folder. The old Razdor and DiscordTimes folders can be deleted.").to_string()];
-    if game_skipped {
+    if game_in_app {
+        lines.push(tr("The game was not moved: the app's folder has a game already, and it is kept. The game in the old DiscordTimes folder stays there.").to_string());
+    } else if game_skipped {
         lines.push(tr("The game folder was not moved: there was not enough room. If the game is not found, pick its archive.").to_string());
     }
     lines
