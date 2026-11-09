@@ -954,7 +954,9 @@ miniquad has no borderless mode. On Windows every step is logged to `razdor.log`
   (`razdorSetImmersive` in `android/MainActivityInject.java`), which hides the status and
   navigation bars (a swipe from the edge shows them for a moment). Windowed hides the status
   bar only, as the fullscreen theme did in 1.0.3, and shows the navigation bar.
-  The activity re-applies it when the window regains the focus. On a phone the «Экран» row
+  The activity re-applies it when the window regains the focus. The activity also asks for the display's
+  highest refresh rate (`razdorPreferTopRefreshRate`, on create and on each focus gain): in the phone's dynamic
+  refresh mode Android gives an app 60 Hz unless it states a preference. On a phone the «Экран» row
   cycles only Windowed and Full screen (`DisplayMode::next_on`); a saved Borderless is Full screen.
 
 Rule: a parity setting reads the install's value until the player chooses

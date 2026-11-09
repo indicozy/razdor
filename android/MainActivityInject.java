@@ -15,6 +15,7 @@ import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
 import android.provider.OpenableColumns;
+import android.view.Display;
 import android.view.DisplayCutout;
 import android.content.BroadcastReceiver;
 import android.content.IntentFilter;
@@ -354,6 +355,48 @@ private String razdorCopyPicked(Uri uri) {
     return "ok\n" + name + "\n" + copy.getAbsolutePath();
 }
 
+// Asks Android for the display's highest refresh rate at its current resolution. In the phone's
+// dynamic refresh mode Android gives an app 60 Hz unless the app states a preference, and the game
+// holds about 120 fps on such phones. Razdor's own: the original is a desktop game. Called on
+// create and on each focus gain (some ROMs reset the window attributes after a dialog). Never
+// fatal: on any failure the system keeps its own choice.
+private void razdorPreferTopRefreshRate() {
+    if (Build.VERSION.SDK_INT < 23) {
+        return;
+    }
+    try {
+        Display display = Build.VERSION.SDK_INT >= 30 ? getDisplay() : getWindowManager().getDefaultDisplay();
+        if (display == null) {
+            return;
+        }
+        Display.Mode current = display.getMode();
+        Display.Mode best = null;
+        for (Display.Mode mode : display.getSupportedModes()) {
+            if (mode.getPhysicalWidth() != current.getPhysicalWidth()
+                    || mode.getPhysicalHeight() != current.getPhysicalHeight()) {
+                continue;
+            }
+            if (best == null || mode.getRefreshRate() > best.getRefreshRate()) {
+                best = mode;
+            }
+        }
+        if (best == null) {
+            return;
+        }
+        WindowManager.LayoutParams params = getWindow().getAttributes();
+        if (best.getRefreshRate() > current.getRefreshRate() || best.getModeId() != params.preferredDisplayModeId) {
+            params.preferredDisplayModeId = best.getModeId();
+            if (Build.VERSION.SDK_INT >= 30) {
+                // Some OEM ROMs read the rate itself, not the mode id.
+                params.preferredRefreshRate = best.getRefreshRate();
+            }
+            getWindow().setAttributes(params);
+        }
+    } catch (Throwable t) {
+        // Not fatal: the system keeps its own refresh rate choice.
+    }
+}
+
 // Full screen (the settings' «Экран» row, src/ui/display.rs): the system bars are hidden, and a
 // swipe from the edge shows them for a moment. Razdor's flag: on again when the window regains
 // the focus (Android drops the immersive state after a dialog, e.g. the package installer).
@@ -419,6 +462,9 @@ public void razdorHideForExit() {
 @Override
 public void onWindowFocusChanged(boolean hasFocus) {
     super.onWindowFocusChanged(hasFocus);
+    if (hasFocus) {
+        razdorPreferTopRefreshRate();
+    }
     if (hasFocus && razdorImmersive) {
         razdorApplyImmersive(true);
     }
@@ -456,6 +502,7 @@ if (Build.VERSION.SDK_INT >= 30) {
 //% MAIN_ACTIVITY_ON_CREATE
 
 setVolumeControlStream(AudioManager.STREAM_MUSIC);
+razdorPreferTopRefreshRate();
 
 //% END
 
