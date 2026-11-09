@@ -434,7 +434,6 @@ Pointer at ({x}, {y}) = Курсор на ({x}, {y})
 debug: event points, lanterns, events of places = отладка: точки событий, фонари, события мест
 Map scroll speed = Скорость скроллинга карты
 Hero's walking speed = Скорость перемещения героя
-Do not load music and sounds (needs a restart) = Не загружать музыку и звуки (требует рестарта игры)
 Show FPS = Показывать FPS
 Touchpad mode (the screen moves a cursor) = Режим тачпада (экран двигает курсор)
 Screen orientation = Ориентация экрана
