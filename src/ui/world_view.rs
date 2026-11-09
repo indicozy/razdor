@@ -1117,11 +1117,17 @@ fn ground<R>(cam: &Camera, draw: impl FnOnce() -> R) -> R {
 
 /// Draws a standing sprite whose foot is at `foot` (a point of the 2D space) as a billboard
 /// ([`view25::billboard_model`]); under a flat camera, as drawn.
+///
+/// The billboard is a CPU-side model transform (macroquad's `push_cpu_model_matrix`, a fork
+/// patch): a GPU model would start a new draw call per sprite, and on the owner's OnePlus 13
+/// (Adreno) each draw call's buffer upload then cost a copy and an orphaned buffer (91% of the
+/// frame in the render passes; the 2.5D frame 17.7 ms against 8.3 ms flat). With the transform
+/// on the CPU the sprites share their draw calls.
 fn standing<R>(cam: &Camera, foot: Vec2, draw: impl FnOnce() -> R) -> R {
     let Some(tilt) = cam.tilt else { return draw() };
-    push_model(view25::billboard_model(cam.origin, foot, cam.scale, tilt.cam.pitch_deg, tilt.cam.yaw_deg, sprite_size()));
+    push_cpu_model(view25::billboard_model(cam.origin, foot, cam.scale, tilt.cam.pitch_deg, tilt.cam.yaw_deg, sprite_size()));
     let r = draw();
-    pop_model();
+    pop_cpu_model();
     r
 }
 
@@ -1133,6 +1139,16 @@ fn push_model(m: Mat4) {
 fn pop_model() {
     // SAFETY: as `push_model`.
     unsafe { get_internal_gl() }.quad_gl.pop_model_matrix();
+}
+
+fn push_cpu_model(m: Mat4) {
+    // SAFETY: called on the main thread while macroquad runs, as every draw.
+    unsafe { get_internal_gl() }.quad_gl.push_cpu_model_matrix(m);
+}
+
+fn pop_cpu_model() {
+    // SAFETY: as `push_cpu_model`.
+    unsafe { get_internal_gl() }.quad_gl.pop_cpu_model_matrix();
 }
 
 /// A camera's 2.5D view: the tilted camera, the ground the view's frame shows (`plan`, in world

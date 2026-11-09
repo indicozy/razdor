@@ -52,6 +52,12 @@ debug = "line-tables-only"
 opt-level = 2
 debug = false
 
+# macroquad 0.4.16 plus one patch (QuadGl::push_cpu_model_matrix: a CPU-side model transform
+# that does not split batches; see the fork's commit). The 2.5D view's billboards batch through
+# it: one draw call instead of one per sprite. Drop the patch once upstream releases it.
+[patch.crates-io]
+macroquad = { git = "https://github.com/indicozy/macroquad", rev = "92a88d9e46dec1b1f03cce65280e649414fada85" }
+
 # The map translator (src/bin/razdor-translate): its own window, built on Razdor's ui module.
 # Its unit tests are the library's (`razdor::translate`); the ui module's run with the game.
 [[bin]]
