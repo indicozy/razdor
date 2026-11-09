@@ -185,11 +185,11 @@ placeholder `0.0.0` (`update_view::shown_version`), so a version bump changes no
    `profile-nosharp` (Android) samples every sharp material plainly (`texture2D`) with the
    same materials and batching; one line `sharp sampling off (profiling)` is logged at start.
    Terrain A/B switches (`ui::terrain::options`, read once; Android: a file in the app folder,
-   desktop: an env var): option 1, the neighbours shader, is on (`profile-terrain-old` /
-   `RAZDOR_TERRAIN_OLD=1` turns it off); 2 the ground cache (`profile-terrain-cache` /
-   `RAZDOR_TERRAIN_CACHE=1`); 3 Adreno's 2×2 shading rate (`profile-terrain-vrs` /
+   desktop: an env var): options 1, the neighbours shader, and 2, the ground cache, are on
+   (`profile-terrain-old` / `RAZDOR_TERRAIN_OLD=1` turns 1 off; `profile-terrain-nocache` /
+   `RAZDOR_TERRAIN_NOCACHE=1` turns 2 off); 3 Adreno's 2×2 shading rate (`profile-terrain-vrs` /
    `RAZDOR_TERRAIN_VRS=1`, no-op off Android); 4 mediump colour maths (`profile-terrain-mediump`
-   / `RAZDOR_TERRAIN_MEDIUMP=1`). The map lines name the active set (`idle[25d opt=1+2]`).
+   / `RAZDOR_TERRAIN_MEDIUMP=1`). The map lines name the active set (`idle[25d opt=1+2]`; the default set is `opt=1+2`).
    Desktop: `RAZDOR_GPU_STAGES=1` with the probe times the terrain's draws on the GPU
    (`glFinish` before and after; serialises the GPU, so A/B runs only; `terrain-gpu` in the line).
    `RAZDOR_SCENE_OPEN=<frame>:<window>[,…]` (`snapshot::open_later`: `load`, `army`,
