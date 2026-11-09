@@ -201,11 +201,20 @@ pub fn tick(install: Option<&Path>) -> bool {
     if REQUESTED.with(|r| r.replace(false)) && !busy() && offered() {
         start_picker();
     }
+    // A download or a repair is not started while the files are moved (the move copies the game folder).
     if DOWNLOAD_REQUESTED.with(|r| r.replace(false)) && !busy() {
-        start_download();
+        if super::migrate::busy() {
+            super::migrate::refuse();
+        } else {
+            start_download();
+        }
     }
     if REPAIR_REQUESTED.with(|r| r.replace(false)) && !busy() {
-        start_repair();
+        if super::migrate::busy() {
+            super::migrate::refuse();
+        } else {
+            start_repair();
+        }
     }
     let changed = finish_job();
     auto_tick(install.is_some());
@@ -252,6 +261,11 @@ fn picked_archive(picked: Picked) {
 
 /// Starts the import on a thread; its end is seen by [`finish_job`].
 fn start(pending: Pending) {
+    // An import is not started while the files are moved: the pending archive is dropped (its cache copy with it).
+    if super::migrate::busy() {
+        super::migrate::refuse();
+        return;
+    }
     let name = pending.found.name.clone();
     let total = Arc::new(AtomicU64::new(pending.found.size));
     let done = Arc::new(AtomicU64::new(0));
