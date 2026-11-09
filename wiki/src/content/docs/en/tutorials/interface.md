@@ -36,7 +36,7 @@ Open it with the **"Map of the scenario (M)"** button on the bottom bar (the but
 
 By default it sits in the top right corner. Drag it by its frame to any other corner; drag an edge to change its size.
 
-In the settings, group **"Map..."**:
+In the settings, on the **"Map"** tab:
 
 * **"Minimap corner"** moves it to the next corner (clockwise);
 * **"Minimap size and place"** with the **"Reset"** button returns its size and place to the default;

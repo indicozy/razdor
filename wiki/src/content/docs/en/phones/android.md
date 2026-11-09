@@ -37,7 +37,7 @@ By default, your finger acts as a cursor.
 
 ### Scrolling the Settings
 
-The "Sound, graphics and gameplay settings" window and its group windows scroll with a finger or the mouse wheel. The scrollbar on the right is the game's own, twice as wide as the one in the scenario list; you can drag its knob with a finger. In a group window the rows scroll, and the "Ok" button stays at the bottom.
+The "Sound, graphics and gameplay settings" window scrolls with a finger or the mouse wheel: the right side of a tab scrolls, and so does the column of tabs on the left if it does not fit. The scrollbar on the right is the game's own, twice as wide as the one in the scenario list; you can drag its knob with a finger. The "Apply" and "Cancel" buttons stay at the bottom of the window.
 
 ### Touchpad Mode
 
@@ -77,7 +77,7 @@ When the phone is held horizontally, the windows are the same as on a PC (the jo
 
 On the main menu lying sideways, the five buttons stay on the left, as before, and the four links ("Custom battle", "Maps and mods", Discord and the language) are big tiles stacked down the right edge. If a mod is installed, its "Mod: <name>" tile comes first.
 
-The map's bottom bar has a size setting: **"Bottom bar size"** in the **"Screen..."** group of the settings window, with the values **"Normal"**, **"Medium"** and **"Large"**. The default is **"Large"**. With the large bar, the buttons are bigger and easier to press, the time slider is easier to press too, and the date on the bar is shown in full.
+The map's bottom bar has a size setting: **"Bottom bar size"** on the **"Screen"** tab of the settings window (held sideways only), with the values **"Normal"**, **"Medium"** and **"Large"**. The default is **"Large"**. With the large bar, the buttons are bigger and easier to press, the time slider is easier to press too, and the date on the bar is shown in full.
 
 :::tip
 The bottom bar size only changes the layout when the phone lies sideways. Held upright, the bar is the same at every value.

@@ -22,7 +22,7 @@ Give Razdor "All files access": the title screen has a "Grant access" button for
 
 ## How do I update Razdor?
 
-Razdor checks GitHub for new releases itself and offers an update when you are not in battle. "Update" downloads the new version, which starts the next time you open the game. It needs the `curl` program. The mode is set in "Other..." → "Updates". See [Updates](/razdor/wiki/en/start/updates/).
+Razdor checks GitHub for new releases itself and offers an update when you are not in battle. "Update" downloads the new version, which starts the next time you open the game. It needs the `curl` program. The mode is set on the "Other" tab → "Updates". See [Updates](/razdor/wiki/en/start/updates/).
 
 ## macOS will not run `razdor-<version>-macos`. Why?
 
@@ -30,7 +30,7 @@ The program is not signed by a developer. Run `xattr -d com.apple.quarantine raz
 
 ## How do I change the language or the font?
 
-The language is changed by the language name in the corner of the main menu, by the "Language" button in the "Screen..." group, or with the F2 key. The font is chosen in the "Sound, graphics and gameplay settings" window. See [Language and fonts](/razdor/wiki/en/start/language-fonts/).
+The language is changed by the language name in the corner of the main menu, by the "Language" button on the "Screen" tab, or with the F2 key. The font is chosen in the "Sound, graphics and gameplay settings" window. See [Language and fonts](/razdor/wiki/en/start/language-fonts/).
 
 ## How do I report a bug?
 

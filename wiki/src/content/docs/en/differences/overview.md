@@ -70,7 +70,7 @@ For automatic updates on Windows, macOS, and Linux, the `curl` program is requir
 ## Game AI
 
 * **Improved enemy intelligence** in combat, as found in the original settings.
-* **"Maximum (Razdor)"** — an experimental mode: the enemy calculates moves and responses several actions ahead. Selected in the "Battle and army..." group → "Battle AI strength".
+* **"Maximum (Razdor)"** — an experimental mode: the enemy calculates moves and responses several actions ahead. Selected on the "Battle and army" tab → "Battle AI strength".
 
 :::caution
 After using the cheat console, a save file will be marked with "(cheats)" in the load list.
