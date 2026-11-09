@@ -1681,7 +1681,12 @@ fn experimental_menu() {
     }
     let content_top = view.y - scroll;
     let grid_top = content_top + top_h(cols);
+    // A phone's frame (its title and close cross) is drawn at the phone's dp scale, as the other phone
+    // windows' frames (`enter_window_scale`): at the desktop's scale the title and the cross were under
+    // the phone's text and touch sizes (the mobile check, 2026-11-10). The desktop is unchanged.
+    let frame_scale = dp.map(|d| super::display::enter_window_scale(Some(d)));
     let (_, close) = chrome::window(r, tr("Experimental scenario rules"), chrome::Skin::Marble, true);
+    drop(frame_scale);
     let mut rules = experimental_rules();
     let check_row = |row: Rect, label: &str, value: &mut bool| {
         let box_r = Rect::new(row.x, row.y + (row_h - 20.0 * big) / 2.0, 20.0 * big, 20.0 * big);
@@ -1758,8 +1763,9 @@ fn experimental_menu() {
     let b = Rect::new(r.center().x - ok_w / 2.0, r.bottom() - 12.0 * big - ok_h, ok_w, ok_h);
     let (_, down, pressed) = button_state(b,true);
     chrome::marble_button(b,"",true,down);
-    if upright {
-        // Its label at 17 dp (the marble's own size at 44 dp is held to the window's scale).
+    if dp.is_some() {
+        // Its label at 17 dp on a phone, held sideways too: the marble's own label is at the desktop's
+        // scale (11 sp on a phone, the mobile check of 2026-11-10).
         let size = 17.0 * dp.unwrap_or(1.0);
         let d = measure(tr("OK"), size);
         super::dt_font::legacy_metrics_if(true, || chrome::shadow_text(tr("OK"), b.center().x - d.width / 2.0, b.y + (b.h + d.offset_y) / 2.0 - 1.0, size, chrome::CREAM));

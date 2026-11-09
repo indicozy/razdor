@@ -2583,8 +2583,8 @@ fn key_button(r: Rect, label: &str, view: Option<Rect>) -> bool {
 /// The keys window on a phone (the owner's notes, 2026-11-02; Razdor's own, not in the original):
 /// it takes the phone's width and is laid out in dp (`dp` px per dp, so one unit is one dp and a 14
 /// px label is 14 sp). Two columns of actions, each with its key button (52 × 44 dp), the hint under
-/// the rows, «По умолчанию» and «Ok» (44 dp) at the bottom. A label that takes more than two lines is
-/// set at 13 sp, else 12 sp. Where the window is shorter than its rows (a phone held sideways, backlog
+/// the rows, «По умолчанию» and «Ok» (44 dp) at the bottom. A label is set at 14, else 13 px (see
+/// `upright_label`); a row grows to fit a three-line label. Where the window is shorter than its rows (a phone held sideways, backlog
 /// 1509), the rows and the hint scroll above the bottom buttons, between the bar and the top. The
 /// desktop keeps [`keys_window`]'s layout.
 fn keys_window_upright(audio: &mut super::audio::Settings, over_map: bool, dp: f32) -> bool {
@@ -2594,7 +2594,15 @@ fn keys_window_upright(audio: &mut super::audio::Settings, over_map: bool, dp: f
     let (sw, sh) = (screen_width(), screen_height());
     let margin = 8.0 * k;
     let w = sw - 2.0 * margin;
-    let row_h = 44.0 * g * k;
+    let col_gap = 12.0 * k;
+    let key_w = 52.0 * k;
+    // Each action's label: its size and lines at the column's width, with the scroll bar's room always
+    // taken off (so the labels stay the same whether or not the rows scroll). A row is as tall as the
+    // tallest label (44 dp at least), so a three-line label fits its row.
+    let label_w = (w - 4.0 * k - 20.0 * k - 28.0 * k - col_gap) / 2.0 - key_w - 8.0 * k;
+    let labels: Vec<(f32, Vec<String>)> = super::dt_font::legacy_metrics_if(true, || keymap::ALL.into_iter().map(|a| upright_label(tr(a.label()), label_w, k)).collect());
+    let label_h = labels.iter().map(|(size, lines)| lines.len() as f32 * size * 1.15).fold(0.0, f32::max);
+    let row_h = (44.0 * g * k).max(label_h);
     let pitch = row_h + 4.0 * k;
     let bh = 44.0 * g * k;
     let hint = tr("Click a key, then press the new one. Esc cancels; a key another action has goes to that action.");
@@ -2633,21 +2641,19 @@ fn keys_window_upright(audio: &mut super::audio::Settings, over_map: bool, dp: f
     let rows_top = inner.y - scroll;
     let waiting = keymap::listening();
     let was_waiting = waiting.is_some();
-    let col_gap = 12.0 * k;
     // The scroll bar's room on the right, only where the rows scroll.
     let reserve = if view.is_some() { 28.0 * k } else { 0.0 };
     let col_w = (inner.w - 20.0 * k - reserve - col_gap) / 2.0;
-    let key_w = 52.0 * k;
     let mut started = false;
     // The rows' labels and hint are cut at the scroll view's edges (the phone's scissor).
     if view.is_some() {
         phone_clip(view);
     }
     super::dt_font::legacy_metrics_if(true, || {
-        for (i, a) in keymap::ALL.into_iter().enumerate() {
+        for (i, (size, lines)) in labels.iter().enumerate() {
+            let (size, lines) = (*size, lines);
             let x = inner.x + 10.0 * k + (i / 9) as f32 * (col_w + col_gap);
             let y = rows_top + 10.0 * k + (i % 9) as f32 * pitch;
-            let (size, lines) = upright_label(tr(a.label()), col_w - key_w - 8.0 * k, k);
             if lines.len() == 1 {
                 text_fit(&lines[0], x, y + row_h / 2.0 + size * 0.35, col_w - key_w - 8.0 * k, size, chrome::CREAM);
             } else {
@@ -2692,18 +2698,19 @@ fn keys_window_upright(audio: &mut super::audio::Settings, over_map: bool, dp: f
     done
 }
 
-/// A key action's label on a phone's keys window: 14 px (sp at one unit per dp), set at 13 or 12
-/// when 14 would take more than two lines of `width`; one line at 12 when even that does not fit
-/// (the caller ellipsizes it). Returns the size and the lines.
+/// A key action's label on a phone's keys window: 14 px (sp at one unit per dp) in at most two lines of
+/// `width`; else 13 px in at most two lines; else 13 px in three lines (its row grows to fit them, see
+/// `keys_window_upright`). Never under 13 px (the mobile check's floor is 12 sp; Razdor's aim is 13).
+/// Returns the size and the lines.
 fn upright_label(s: &str, width: f32, k: f32) -> (f32, Vec<String>) {
-    for n in [14.0, 13.0, 12.0] {
+    for (n, max_lines) in [(14.0, 2), (13.0, 2), (13.0, 3)] {
         let size = n * k;
         let lines = wrap(s, width, size);
-        if lines.len() <= 2 {
+        if lines.len() <= max_lines {
             return (size, lines);
         }
     }
-    (12.0 * k, vec![s.to_string()])
+    (13.0 * k, wrap(s, width, 13.0 * k))
 }
 
 /// The new key for the action waiting for one (`keymap::listen`): the key pressed, unless the
