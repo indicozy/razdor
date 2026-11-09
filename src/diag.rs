@@ -61,6 +61,8 @@ pub fn switch_log() {
         return;
     }
     LOG.lock().unwrap_or_else(|e| e.into_inner()).file = None;
+    // The play log is opened again at the new place on its next line (`play`).
+    *PLAY.lock().unwrap_or_else(|e| e.into_inner()) = None;
     reopen_log();
 }
 

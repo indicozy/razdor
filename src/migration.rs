@@ -28,10 +28,16 @@ use std::time::SystemTime;
 const REWRITE_LIMIT: u64 = 8 << 20;
 /// Folders nested deeper than this are refused (a link loop, say).
 const MAX_DEPTH: u32 = 32;
-/// The diagnostic log of the running app, at the top of the Razdor folder. This process appends
-/// to it during the move, so a change to it is not a reason to start again (its copy takes the
-/// size the scan listed).
-const LIVE_LOG: &str = "razdor.log";
+/// The logs of the running app, at the top of the Razdor folder: the diagnostic log and the play
+/// log, with the copies kept before them. This process writes to them (and renames them, when
+/// the play log is first written) during the move, so a change to them is not a reason to start
+/// again. A copy takes the size the scan listed; a play log that is renamed away meanwhile is
+/// left out of the copy.
+const LIVE_LOGS: [&str; 4] = ["razdor.log", "razdor.previous.log", "razdor-play.log", "razdor-play.previous.log"];
+
+fn is_live_log(rel: &Path) -> bool {
+    LIVE_LOGS.iter().any(|name| rel == Path::new(name))
+}
 
 /// Copies the first `len` bytes of `from` to a new file `to` (`len` is the size the scan listed:
 /// a live file may grow meanwhile). [`copy_file`] is the real one.
@@ -286,11 +292,19 @@ fn copy_tree(src: &Path, part: &Path, tree: &Tree, copy: &mut CopyFile<'_>, copi
     for dir in &tree.dirs {
         fs::create_dir_all(part.join(dir)).map_err(io_failure)?;
     }
+    // What the copy is checked against: a live log renamed away since the scan is not in it.
+    let mut expected = tree.clone();
     for (rel, len, _) in &tree.files {
-        copy(&src.join(rel), &part.join(rel), *len).map_err(io_failure)?;
-        copied(*len);
+        match copy(&src.join(rel), &part.join(rel), *len) {
+            Ok(()) => copied(*len),
+            Err(e) if e.kind() == io::ErrorKind::NotFound && is_live_log(rel) => {
+                crate::diag::log(&format!("move: {} was renamed during the move and is left out", rel.display()));
+                expected.files.retain(|(gone, _, _)| gone != rel);
+            }
+            Err(e) => return Err(io_failure(e)),
+        }
     }
-    verify(tree, &scan(part).map_err(io_failure)?)
+    verify(&expected, &scan(part).map_err(io_failure)?)
 }
 
 /// The copy's list against the source's: the same count, names and sizes.
@@ -310,7 +324,7 @@ fn verify(expected: &Tree, got: &Tree) -> Result<(), Failure> {
 }
 
 /// Scans the legacy folder `dir` again and compares it with `before` (the scan the copy used):
-/// names, sizes and times. The live log is left out (see [`LIVE_LOG`]).
+/// names, sizes and times. The live logs are left out (see [`LIVE_LOGS`]).
 fn unchanged(dir: &Path, before: &Tree) -> Result<(), Failure> {
     let now = scan(dir).map_err(io_failure)?;
     if listing(&now) == listing(before) {
@@ -323,33 +337,47 @@ fn unchanged(dir: &Path, before: &Tree) -> Result<(), Failure> {
 /// The folders, and the files with their sizes and times, of a tree (see [`listing`]).
 type Listing = (Vec<PathBuf>, Vec<(PathBuf, u64, Option<SystemTime>)>);
 
-/// The folders and files of `tree` without the live log, for [`unchanged`].
+/// The folders and files of `tree` without the live logs, for [`unchanged`].
 fn listing(tree: &Tree) -> Listing {
-    let files = tree.files.iter().filter(|(rel, _, _)| rel != Path::new(LIVE_LOG)).cloned().collect();
+    let files = tree.files.iter().filter(|(rel, _, _)| !is_live_log(rel)).cloned().collect();
     (tree.dirs.clone(), files)
 }
 
 /// Puts the copy `part` at `dest`. Where `dest` does not exist yet, `part` is renamed in whole.
-/// Otherwise the copy's files go in where `dest` has no file at that path (the app's own file
-/// wins), and each placed file is checked by its size; `part` is then removed.
+/// Otherwise the copy's files go in where `dest` has no file at that path: a regular file already
+/// there is the app's own and wins (logged). Anything else in the way (a folder where the copy has
+/// a file, a file where the copy has a folder, a link) stops the move, so nothing is overwritten
+/// and the undo runs. Each placed file is checked by its size; `part` is then removed.
 fn place_folder(part: &Path, dest: &Path, place: &mut PlaceFile<'_>, made: &mut Made) -> Result<(), Failure> {
     if fs::symlink_metadata(dest).is_err() {
         place(part, dest).map_err(io_failure)?;
         made.trees.push(dest.to_path_buf());
         return Ok(());
     }
+    if !is_real_folder(dest) {
+        return Err(Failure::Failed(format!("{} is in the app's folder and is not a folder: the move stops", dest.display())));
+    }
     let tree = scan(part).map_err(io_failure)?;
     for dir in &tree.dirs {
         let target = dest.join(dir);
-        if fs::symlink_metadata(&target).is_err() {
-            fs::create_dir(&target).map_err(io_failure)?;
-            made.dirs.push(target);
+        match fs::symlink_metadata(&target) {
+            Ok(meta) if meta.is_dir() => {}
+            Ok(_) => return Err(Failure::Failed(format!("{} is a file in the app's folder, but the legacy copy has a folder there: the move stops", target.display()))),
+            Err(_) => {
+                fs::create_dir(&target).map_err(io_failure)?;
+                made.dirs.push(target);
+            }
         }
     }
     for (rel, len, _) in &tree.files {
         let target = dest.join(rel);
-        if fs::symlink_metadata(&target).is_ok() {
-            continue;
+        match fs::symlink_metadata(&target) {
+            Ok(meta) if meta.is_file() => {
+                crate::diag::log(&format!("move: {} is kept: the app's own file", target.display()));
+                continue;
+            }
+            Ok(_) => return Err(Failure::Failed(format!("{} is not a file in the app's folder, but the legacy copy has a file there: the move stops", target.display()))),
+            Err(_) => {}
         }
         place(&part.join(rel), &target).map_err(io_failure)?;
         made.files.push(target.clone());
@@ -360,6 +388,11 @@ fn place_folder(part: &Path, dest: &Path, place: &mut PlaceFile<'_>, made: &mut 
     }
     let _ = fs::remove_dir_all(part);
     Ok(())
+}
+
+/// A folder that is not a link.
+fn is_real_folder(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir())
 }
 
 /// Rewrites the legacy paths in the text files under `dir`, each `(legacy, new)` pair.
@@ -774,17 +807,90 @@ mod tests {
     #[test]
     fn the_live_log_may_grow_while_it_is_copied() {
         let (base, plan) = plan("live-log");
-        put(&plan.legacy_root, LIVE_LOG, b"line one\n");
+        put(&plan.legacy_root, "razdor.log", b"line one\n");
         let mut grow = |from: &Path, to: &Path, len: u64| {
-            if from.ends_with(LIVE_LOG) {
+            if from.ends_with("razdor.log") {
                 use std::io::Write as _;
                 fs::OpenOptions::new().append(true).open(from).unwrap().write_all(b"line two\n").unwrap();
             }
             copy_file(from, to, len)
         };
         migrate(&plan, &room(plenty()), &mut grow, &mut real_place, &|_, _| {}).expect("the log does not stop the move");
-        let copied = fs::read(plan.files.join("Razdor").join(LIVE_LOG)).unwrap();
+        let copied = fs::read(plan.files.join("Razdor").join("razdor.log")).unwrap();
         assert_eq!(copied, b"line one\n", "the copy takes the size the scan listed");
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn a_play_log_written_during_the_scan_and_the_rescan_does_not_discard_the_move() {
+        let (base, plan) = plan("play-log");
+        put(&plan.legacy_root, "razdor-play.log", b"[1.0] menu | opened\n");
+        // A line of the play log, written after the copy's scan and before the rescan.
+        let mut write_play = |from: &Path, to: &Path, len: u64| {
+            if from.ends_with("install") {
+                use std::io::Write as _;
+                fs::OpenOptions::new().append(true).open(plan.legacy_root.join("razdor-play.log")).unwrap().write_all(b"[2.0] menu | more\n").unwrap();
+            }
+            copy_file(from, to, len)
+        };
+        migrate(&plan, &room(plenty()), &mut write_play, &mut real_place, &|_, _| {}).expect("the play log does not stop the move");
+        assert!(platform::migrated_marker(&plan.files).is_file());
+        let copied = fs::read(plan.files.join("Razdor/razdor-play.log")).unwrap();
+        assert_eq!(copied, b"[1.0] menu | opened\n", "the copy takes the size the scan listed");
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn a_play_log_renamed_away_during_the_copy_is_left_out_and_the_move_goes_on() {
+        let (base, plan) = plan("play-rename");
+        put(&plan.legacy_root, "razdor-play.log", b"[1.0] menu | opened\n");
+        // The play log is first written (renamed to its previous copy) before its turn to be copied.
+        let mut rotate = |from: &Path, to: &Path, len: u64| {
+            if from.ends_with("install") {
+                fs::rename(plan.legacy_root.join("razdor-play.log"), plan.legacy_root.join("razdor-play.previous.log")).unwrap();
+            }
+            copy_file(from, to, len)
+        };
+        migrate(&plan, &room(plenty()), &mut rotate, &mut real_place, &|_, _| {}).expect("the rename does not stop the move");
+        assert!(platform::migrated_marker(&plan.files).is_file());
+        assert!(!plan.files.join("Razdor/razdor-play.log").exists());
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn a_legacy_file_where_the_app_folder_has_a_folder_stops_the_move_and_nothing_is_overwritten() {
+        let (base, plan) = plan("file-vs-folder");
+        let legacy_before = legacy_state_of(&plan);
+        // The app's folder has a folder where the legacy one has a file.
+        put(&plan.files.join("Razdor"), "saves/settings.json/keep.txt", b"app");
+        let app_before = everything(&plan.files);
+        let result = run(&plan);
+        match result {
+            Err(Failure::Failed(why)) => assert!(why.contains("settings.json"), "{why}"),
+            other => panic!("expected the move to stop, got {other:?}"),
+        }
+        assert_eq!(everything(&plan.files), app_before, "the app folder is unchanged");
+        assert!(!platform::migrated_marker(&plan.files).exists());
+        assert_eq!(in_use(&plan), platform::StartState::Legacy);
+        assert_eq!(legacy_state_of(&plan), legacy_before);
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn a_legacy_folder_where_the_app_folder_has_a_file_stops_the_move_with_the_path_named() {
+        let (base, plan) = plan("folder-vs-file");
+        let legacy_before = legacy_state_of(&plan);
+        // The app's folder has a file where the legacy one has the hub's folder.
+        put(&plan.files, "Razdor/hub", b"a file, not a folder");
+        let app_before = everything(&plan.files);
+        match run(&plan) {
+            Err(Failure::Failed(why)) => assert!(why.contains("hub"), "{why}"),
+            other => panic!("expected the move to stop, got {other:?}"),
+        }
+        assert_eq!(everything(&plan.files), app_before, "the app folder is unchanged");
+        assert!(!platform::migrated_marker(&plan.files).exists());
+        assert_eq!(in_use(&plan), platform::StartState::Legacy);
+        assert_eq!(legacy_state_of(&plan), legacy_before);
         let _ = fs::remove_dir_all(base);
     }
 
