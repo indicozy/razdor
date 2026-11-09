@@ -528,6 +528,11 @@ impl App {
         if self.mod_switch.is_some() {
             return;
         }
+        // The mod's choice is written into the hub's folder, which is being moved (`migrate`).
+        if migrate::busy() {
+            migrate::refuse();
+            return;
+        }
         let (Some(local), Some(base)) = (razdor::hub::local_dir(), razdor::dt::install::base_dir()) else { return };
         let (job_local, job_base, asked) = (local.clone(), base.clone(), id.clone());
         let (tx, job) = std::sync::mpsc::channel();
@@ -1308,9 +1313,10 @@ impl App {
     /// log moves to it, and the player is told.
     fn migration_tick(&mut self) {
         migrate::start_if_needed();
+        audio::flush_deferred();
         match migrate::tick() {
             Some(migrate::Outcome::Moved { game_skipped }) => {
-                razdor::diag::reopen_log();
+                razdor::diag::switch_log();
                 self.reload_install();
                 migrate::notify(migrate::moved_message(game_skipped));
             }

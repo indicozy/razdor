@@ -71,7 +71,13 @@ pub fn start_if_needed() {
                 d.store(bytes, Ordering::Relaxed);
                 t.store(all, Ordering::Relaxed);
             };
-            migration::migrate(&plan, &|dir| razdor::dt::game_import::free_space(dir), &mut |from, to, len| migration::copy_file(from, to, len), &progress)
+            migration::migrate(
+                &plan,
+                &|dir| razdor::dt::game_import::free_space(dir),
+                &mut |from, to, len| migration::copy_file(from, to, len),
+                &mut |from, to| std::fs::rename(from, to),
+                &progress,
+            )
         });
         *state = match spawned {
             Ok(handle) => State::Running { handle: Some(handle), done, total },

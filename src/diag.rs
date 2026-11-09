@@ -26,7 +26,8 @@ struct Log {
 
 static LOG: Mutex<Log> = Mutex::new(Log { file: None, stderr_is_file: false });
 static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
-static PATH: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+/// The log's path, found on first use ([`log_path`]); [`switch_log`] forgets it.
+static PATH: Mutex<Option<Option<PathBuf>>> = Mutex::new(None);
 
 local! {
     /// Panics expected and caught by the caller ([`quiet`]): logged, never shown.
@@ -41,12 +42,26 @@ macro_rules! diag {
 
 /// The log file: `RAZDOR_LOG`, else `razdor.log` in the platform's data folder.
 pub fn log_path() -> Option<PathBuf> {
-    PATH.get_or_init(|| {
+    let mut path = PATH.lock().unwrap_or_else(|e| e.into_inner());
+    path.get_or_insert_with(|| {
         std::env::var_os("RAZDOR_LOG")
             .map(PathBuf::from)
             .or_else(|| crate::platform::app_dir().map(|d| d.join("razdor.log")))
     })
     .clone()
+}
+
+/// The log moves to [`log_path`] as it is now: after the app's folder changed (Android: the
+/// data moved, `platform::set_android_migrated`). The file at the old place is closed and the
+/// new one is opened there, with the summary written again. Nothing happens when the path is the same.
+pub fn switch_log() {
+    let before = log_path();
+    *PATH.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    if log_path() == before {
+        return;
+    }
+    LOG.lock().unwrap_or_else(|e| e.into_inner()).file = None;
+    reopen_log();
 }
 
 fn elapsed() -> f64 {

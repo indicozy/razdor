@@ -1160,7 +1160,11 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
     if installed {
         if button(bx, by, bw, bh, tr("Remove"), !busy && users.is_empty()) {
             let id = e.id.clone();
-            view.start(move |hub, c| Done::Removed(hub.remove(&c, &id).map(|_| id)));
+            if super::migrate::busy() {
+                super::migrate::refuse();
+            } else {
+                view.start(move |hub, c| Done::Removed(hub.remove(&c, &id).map(|_| id)));
+            }
         }
         return;
     }
@@ -1170,7 +1174,11 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
             if button(bx, by, bw, bh, &label, !busy) {
                 let id = e.id.clone();
                 let lang_code = lang();
-                view.start(move |hub, c| Done::Installed(hub.install(&c, &id, lang_code)));
+                if super::migrate::busy() {
+                    super::migrate::refuse();
+                } else {
+                    view.start(move |hub, c| Done::Installed(hub.install(&c, &id, lang_code)));
+                }
             }
         }
         _ => {

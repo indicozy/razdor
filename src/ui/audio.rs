@@ -106,6 +106,31 @@ local! {
     static CUES: RefCell<Vec<Cue>> = const { RefCell::new(Vec::new()) };
 }
 
+local! {
+    /// The settings written while the files are moved, kept until the move ends ([`flush_deferred`]).
+    static DEFERRED: RefCell<Option<Vec<u8>>> = const { RefCell::new(None) };
+}
+
+/// Writes the settings to `audio.json`, where the save folder is now.
+fn write_file(bytes: &[u8]) {
+    let Some(path) = Settings::path() else { return };
+    let written = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| std::fs::write(&path, bytes));
+    if let Err(e) = written {
+        razdor::diag!("{}: {e}", path.display());
+    }
+}
+
+/// The settings kept back while the files were moved are written once the move has ended (in the
+/// app's folder when it moved). Nothing happens while the move runs, or when nothing waits.
+pub fn flush_deferred() {
+    if super::migrate::busy() {
+        return;
+    }
+    if let Some(bytes) = DEFERRED.with_borrow_mut(Option::take) {
+        write_file(&bytes);
+    }
+}
+
 /// Asks for a sound effect; it plays at the start of the next frame.
 pub fn cue(c: Cue) {
     CUES.with(|q| q.borrow_mut().push(c));
@@ -596,13 +621,13 @@ impl Settings {
         if super::bench::running() {
             return;
         }
-        let Some(path) = Settings::path() else { return };
-        let written = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| {
-            std::fs::write(&path, serde_json::to_vec_pretty(self).unwrap_or_default())
-        });
-        if let Err(e) = written {
-            razdor::diag!("{}: {e}", path.display());
+        let bytes = serde_json::to_vec_pretty(self).unwrap_or_default();
+        // While the files are moved (`ui::migrate`) the folder is being copied: the write waits.
+        if super::migrate::busy() {
+            DEFERRED.with_borrow_mut(|deferred| *deferred = Some(bytes));
+            return;
         }
+        write_file(&bytes);
     }
 
     pub fn step_music(&mut self, steps: i32) {
