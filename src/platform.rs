@@ -103,18 +103,97 @@ pub fn write_migrated_marker(files: &Path, how: &str) {
     let _ = std::fs::write(marker, format!("{secs} {how}\n"));
 }
 
-/// Whether `dir` holds anything but `.nomedia` (see [`write_nomedia`]): false when it is missing,
-/// empty or unreadable.
-fn has_data(dir: &Path) -> bool {
-    std::fs::read_dir(dir).is_ok_and(|entries| entries.flatten().any(|e| e.file_name() != ".nomedia"))
+/// The shared storage's root (the legacy install search reads it, see [`install_roots`]).
+pub const LEGACY_ANDROID_STORAGE: &str = "/storage/emulated/0";
+
+/// What a legacy folder holds, for the start-up decision ([`start_state`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LegacyState {
+    /// Not there.
+    Missing,
+    /// There, with nothing in it but `.nomedia` (see [`write_nomedia`]).
+    Empty,
+    /// There, but it cannot be read (no permission, or another read error).
+    Unreadable,
+    /// There is something in it besides `.nomedia`.
+    Data,
 }
 
-/// Whether the data counts as moved to the app's own folder `files` at start: the marker is there,
-/// or the legacy folders `legacy_root` (Razdor's) and `legacy_game` (the game's) hold no Razdor data
-/// (missing, empty or unreadable: a fresh install). A player whose game is still in `legacy_game`
-/// is not migrated until the copy.
-pub fn starts_migrated(files: &Path, legacy_root: &Path, legacy_game: &Path) -> bool {
-    migrated_marker(files).exists() || (!has_data(legacy_root) && !has_data(legacy_game))
+/// The start-up decision about the data (see [`start_state`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartState {
+    /// The marker is there: the data is in the app's own folder.
+    Migrated,
+    /// No legacy data in either folder: a fresh install. The data is in the app's own folder, and
+    /// the marker is written.
+    Fresh,
+    /// The legacy folders cannot be read: the app's own folder for this run (without the grant
+    /// nothing can be written to the legacy root), and no marker, so the next start asks again.
+    Unreadable,
+    /// Legacy data is there and not copied yet: the legacy paths stay.
+    Legacy,
+}
+
+impl StartState {
+    /// Whether the app's own folder is in use for this run.
+    pub fn migrated(self) -> bool {
+        !matches!(self, StartState::Legacy)
+    }
+}
+
+/// What `dir` holds (see [`LegacyState`]). A missing folder is [`LegacyState::Missing`], any other
+/// read error is [`LegacyState::Unreadable`].
+pub fn legacy_state(dir: &Path) -> LegacyState {
+    match std::fs::read_dir(dir) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => LegacyState::Missing,
+        Err(_) => LegacyState::Unreadable,
+        Ok(entries) => {
+            for entry in entries {
+                match entry {
+                    Ok(entry) if entry.file_name() == ".nomedia" => {}
+                    Ok(_) => return LegacyState::Data,
+                    Err(_) => return LegacyState::Unreadable,
+                }
+            }
+            LegacyState::Empty
+        }
+    }
+}
+
+/// The start-up decision: the marker is there ([`StartState::Migrated`]); else any legacy folder
+/// holds data ([`StartState::Legacy`], the data is copied later); else a legacy folder cannot be
+/// read ([`StartState::Unreadable`]); else nothing is there ([`StartState::Fresh`]).
+pub fn start_state(marker: bool, legacy_root: LegacyState, legacy_game: LegacyState) -> StartState {
+    use LegacyState::{Data, Unreadable};
+    if marker {
+        StartState::Migrated
+    } else if legacy_root == Data || legacy_game == Data {
+        StartState::Legacy
+    } else if legacy_root == Unreadable || legacy_game == Unreadable {
+        StartState::Unreadable
+    } else {
+        StartState::Fresh
+    }
+}
+
+/// The install folders on Android (see [`install_roots`]). Not migrated: the legacy search list.
+/// Migrated: the app's game folder `game` first, then the legacy search, which only runs while the
+/// shared storage `storage` is readable (`storage_readable`), so a game in `Download` or `Games`
+/// is still found in the release that moves the data.
+pub fn android_install_roots(migrated: bool, storage: &Path, storage_readable: bool, game: PathBuf) -> Vec<PathBuf> {
+    let legacy: Vec<PathBuf> = ["DiscordTimes", "Download", "Games", ""].iter().map(|d| storage.join(d)).collect();
+    if !migrated {
+        return legacy;
+    }
+    let mut roots = vec![game];
+    if storage_readable {
+        for root in legacy {
+            if !roots.contains(&root) {
+                roots.push(root);
+            }
+        }
+    }
+    roots
 }
 
 /// Android: the app's own folder, given by the binary at start ([`set_android_files_dir`]); `None`
@@ -128,27 +207,40 @@ static ANDROID_FILES: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock
 static ANDROID_MIGRATED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Android: stores the app's own folder (`getExternalFilesDir(null)`, or `getFilesDir()`) and
-/// decides whether the data is in it ([`starts_migrated`] on the legacy folders). A fresh install
-/// gets its marker here. Called once, before anything reads a folder (the log's folder included):
-/// `None` (the call failed) keeps the legacy folders.
+/// decides whether the data is in it ([`start_state`]). A fresh install gets its marker here.
+/// Called once, before anything reads a folder (the log's folder included); a second call does
+/// nothing. `None` (the call failed) keeps the legacy folders.
 #[cfg(target_os = "android")]
 pub fn set_android_files_dir(files: Option<PathBuf>) {
     use std::sync::atomic::Ordering::Relaxed;
-    let migrated = match &files {
+    if ANDROID_FILES.get().is_some() {
+        return;
+    }
+    let start = match &files {
         Some(files) => {
-            let migrated = starts_migrated(files, Path::new(LEGACY_ANDROID_ROOT), Path::new(LEGACY_ANDROID_GAME));
-            if migrated && !migrated_marker(files).exists() {
+            let state = start_state(
+                migrated_marker(files).exists(),
+                legacy_state(Path::new(LEGACY_ANDROID_ROOT)),
+                legacy_state(Path::new(LEGACY_ANDROID_GAME)),
+            );
+            if state == StartState::Fresh {
                 write_migrated_marker(files, "fresh");
             }
-            migrated
+            state
         }
         None => {
             crate::diag!("the app's folder could not be read: the data stays in the shared storage");
-            false
+            StartState::Legacy
         }
     };
     let _ = ANDROID_FILES.set(files);
-    ANDROID_MIGRATED.store(migrated, Relaxed);
+    ANDROID_MIGRATED.store(start.migrated(), Relaxed);
+}
+
+/// Android: the app's own folder as [`set_android_files_dir`] found it; `None` when the call failed.
+#[cfg(target_os = "android")]
+pub fn android_files_dir() -> Option<&'static Path> {
+    ANDROID_FILES.get().and_then(|files| files.as_deref())
 }
 
 /// Android: whether the data is in the app's own folder (see [`set_android_files_dir`]).
@@ -158,7 +250,8 @@ pub fn android_migrated() -> bool {
 }
 
 /// Android: records that the data was copied into the app's own folder; from now on the paths are
-/// the app's own ones. The copy (and its marker) is the caller's.
+/// the app's own ones. The caller writes the marker first ([`write_migrated_marker`] with
+/// [`android_files_dir`]), then calls this.
 #[cfg(target_os = "android")]
 pub fn set_android_migrated() {
     ANDROID_MIGRATED.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -167,8 +260,8 @@ pub fn set_android_migrated() {
 /// Android: the paths as they are now: the app's own folder once migrated, else the legacy ones.
 #[cfg(target_os = "android")]
 fn android_current() -> AndroidPaths {
-    match ANDROID_FILES.get().cloned().flatten() {
-        Some(files) => android_paths(&files, android_migrated()),
+    match android_files_dir() {
+        Some(files) => android_paths(files, android_migrated()),
         None => legacy_android_paths(),
     }
 }
@@ -287,18 +380,17 @@ pub fn config_dir() -> Option<PathBuf> {
 }
 
 /// Folders searched for an install when none is set or remembered. Desktop: `~/Games`,
-/// `~/Downloads` and the home folder. Android: once the data is in the app's own folder, that
-/// folder's game folder ([`unpack_dir`]); before the move, the folder the player is told to use
-/// (`DiscordTimes`, in internal storage), then the usual download and game folders, then
-/// the whole internal storage (three levels deep, see `dt::install`). iOS: the folder the
+/// `~/Downloads` and the home folder. Android: the game folder ([`unpack_dir`]) first once the data
+/// is in the app's own folder, then the usual legacy search (`DiscordTimes`, the download and game
+/// folders, then the whole internal storage three levels deep, see `dt::install`; the legacy part
+/// only while the storage is readable, see [`android_install_roots`]). iOS: the folder the
 /// player is told to use (`Documents/DiscordTimes`), then `Documents` itself.
 pub fn install_roots() -> Vec<PathBuf> {
     #[cfg(target_os = "android")]
     {
-        if android_migrated() {
-            return vec![android_current().game];
-        }
-        ["DiscordTimes", "Download", "Games", ""].iter().map(|d| PathBuf::from("/storage/emulated/0").join(d)).collect()
+        let storage = Path::new(LEGACY_ANDROID_STORAGE);
+        let readable = std::fs::read_dir(storage).is_ok();
+        android_install_roots(android_migrated(), storage, readable, android_current().game)
     }
     #[cfg(target_os = "ios")]
     {
@@ -423,53 +515,91 @@ mod tests {
     }
 
     #[test]
-    fn a_marked_install_starts_migrated() {
-        let files = scratch("marked-files");
-        let legacy = scratch("marked-legacy");
-        std::fs::write(legacy.join("saves.rzsave"), b"save").unwrap();
-        let game = legacy.join("game-missing");
-        write_migrated_marker(&files, "copied");
-        assert!(starts_migrated(&files, &legacy, &game), "the marker wins over the legacy data");
-        let text = std::fs::read_to_string(migrated_marker(&files)).unwrap();
-        assert!(text.ends_with(" copied\n") && text.split(' ').next().unwrap().parse::<u64>().is_ok(), "{text:?}");
-        let _ = std::fs::remove_dir_all(&files);
-        let _ = std::fs::remove_dir_all(&legacy);
-    }
-
-    #[test]
-    fn no_legacy_data_is_a_fresh_install() {
-        let files = scratch("fresh-files");
-        let base = scratch("fresh-legacy");
-        // Missing: both folders absent.
-        assert!(starts_migrated(&files, &base.join("no-root"), &base.join("no-game")));
-        // Empty folders.
-        std::fs::create_dir_all(base.join("empty-root")).unwrap();
-        std::fs::create_dir_all(base.join("empty-game")).unwrap();
-        assert!(starts_migrated(&files, &base.join("empty-root"), &base.join("empty-game")));
-        // A `.nomedia` alone is not data.
-        std::fs::write(base.join("empty-root").join(".nomedia"), b"").unwrap();
-        assert!(starts_migrated(&files, &base.join("empty-root"), &base.join("empty-game")));
-        // Unreadable: a file where a folder should be.
-        std::fs::write(base.join("not-a-folder"), b"x").unwrap();
-        assert!(starts_migrated(&files, &base.join("not-a-folder"), &base.join("no-game")));
-        let _ = std::fs::remove_dir_all(&files);
-        let _ = std::fs::remove_dir_all(&base);
+    fn the_marker_wins_over_any_legacy_state() {
+        use LegacyState::*;
+        for root in [Missing, Empty, Unreadable, Data] {
+            for game in [Missing, Empty, Unreadable, Data] {
+                assert_eq!(start_state(true, root, game), StartState::Migrated, "{root:?} {game:?}");
+            }
+        }
     }
 
     #[test]
     fn legacy_data_without_a_marker_stays_legacy() {
-        let files = scratch("legacy-files");
-        let base = scratch("legacy-data");
-        // Saves in the shared Razdor folder.
-        std::fs::create_dir_all(base.join("root").join("saves")).unwrap();
-        std::fs::write(base.join("root").join("saves").join("game.rzsave"), b"save").unwrap();
-        assert!(!starts_migrated(&files, &base.join("root"), &base.join("no-game")));
-        // The game in the shared DiscordTimes folder, Razdor's folder missing.
-        std::fs::create_dir_all(base.join("game")).unwrap();
-        std::fs::write(base.join("game").join("DT.EXE"), b"exe").unwrap();
-        assert!(!starts_migrated(&files, &base.join("no-root"), &base.join("game")));
-        let _ = std::fs::remove_dir_all(&files);
+        use LegacyState::*;
+        for other in [Missing, Empty, Unreadable, Data] {
+            assert_eq!(start_state(false, Data, other), StartState::Legacy, "root data, game {other:?}");
+            assert_eq!(start_state(false, other, Data), StartState::Legacy, "game data, root {other:?}");
+        }
+    }
+
+    #[test]
+    fn unreadable_legacy_is_migrated_for_this_run_only() {
+        use LegacyState::*;
+        for other in [Missing, Empty, Unreadable] {
+            assert_eq!(start_state(false, Unreadable, other), StartState::Unreadable);
+            assert_eq!(start_state(false, other, Unreadable), StartState::Unreadable);
+        }
+        assert!(StartState::Unreadable.migrated());
+        assert!(!StartState::Legacy.migrated());
+    }
+
+    #[test]
+    fn no_legacy_data_is_a_fresh_install() {
+        use LegacyState::*;
+        assert_eq!(start_state(false, Missing, Missing), StartState::Fresh);
+        assert_eq!(start_state(false, Empty, Missing), StartState::Fresh);
+        assert_eq!(start_state(false, Missing, Empty), StartState::Fresh);
+        assert_eq!(start_state(false, Empty, Empty), StartState::Fresh);
+    }
+
+    #[test]
+    fn the_folders_are_read_as_missing_empty_or_data() {
+        let base = scratch("legacy-state");
+        assert_eq!(legacy_state(&base.join("missing")), LegacyState::Missing);
+        std::fs::create_dir_all(base.join("empty")).unwrap();
+        std::fs::write(base.join("empty").join(".nomedia"), b"").unwrap();
+        assert_eq!(legacy_state(&base.join("empty")), LegacyState::Empty);
+        std::fs::create_dir_all(base.join("saves")).unwrap();
+        std::fs::write(base.join("saves").join("game.rzsave"), b"save").unwrap();
+        assert_eq!(legacy_state(&base.join("saves")), LegacyState::Data);
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn the_marker_says_how_it_came_to_be() {
+        let files = scratch("marker-how");
+        write_migrated_marker(&files, "fresh");
+        let text = std::fs::read_to_string(migrated_marker(&files)).unwrap();
+        let (secs, how) = text.trim_end().split_once(' ').unwrap();
+        assert!(secs.parse::<u64>().is_ok(), "{text:?}");
+        assert_eq!(how, "fresh");
+        let _ = std::fs::remove_dir_all(&files);
+    }
+
+    #[test]
+    fn install_roots_before_the_move_are_the_legacy_search() {
+        let storage = Path::new(LEGACY_ANDROID_STORAGE);
+        let game = PathBuf::from("/data/files/DiscordTimes");
+        let legacy: Vec<PathBuf> = ["DiscordTimes", "Download", "Games", ""].iter().map(|d| storage.join(d)).collect();
+        assert_eq!(android_install_roots(false, storage, true, game.clone()), legacy);
+        assert_eq!(android_install_roots(false, storage, false, game), legacy);
+    }
+
+    #[test]
+    fn install_roots_after_the_move_add_the_legacy_search_only_when_readable() {
+        let storage = Path::new(LEGACY_ANDROID_STORAGE);
+        let legacy: Vec<PathBuf> = ["DiscordTimes", "Download", "Games", ""].iter().map(|d| storage.join(d)).collect();
+        // The app's game folder first; the legacy search follows, all of it.
+        let game = PathBuf::from("/data/files/DiscordTimes");
+        let mut expected = vec![game.clone()];
+        expected.extend(legacy.clone());
+        assert_eq!(android_install_roots(true, storage, true, game.clone()), expected);
+        // A game already in the legacy DiscordTimes is listed once.
+        let roots = android_install_roots(true, storage, true, storage.join("DiscordTimes"));
+        assert_eq!(roots, vec![storage.join("DiscordTimes"), storage.join("Download"), storage.join("Games"), storage.join("")]);
+        // The shared storage unreadable: the app's game folder only.
+        assert_eq!(android_install_roots(true, storage, false, game.clone()), vec![game]);
     }
 
     #[test]

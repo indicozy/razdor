@@ -70,8 +70,8 @@ pub fn log(msg: &str) {
     }
 }
 
-/// Profiling is on: `RAZDOR_PROFILE` is set, or the app folder has a `profile` file (how
-/// Android turns it on, where env vars cannot be set: `/storage/emulated/0/Razdor/profile`).
+/// Profiling is on: `RAZDOR_PROFILE` is set, or the app folder (`platform::app_dir`) has a `profile`
+/// file (how Android turns it on, where env vars cannot be set: `<app folder>/profile`).
 /// Slow frames and slow loads are logged, and the frame probe (`frame_probe`) summarises frames.
 pub fn profiling() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();

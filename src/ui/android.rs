@@ -135,9 +135,10 @@ unsafe fn view_url(env: *mut sys::JNIEnv, url: &str) -> bool {
     !cleared(env)
 }
 
-/// Razdor's own (a player's request): opens the folder `dir` (Razdor's app folder on the shared
-/// storage) in the Files app. The document's own URI with the directory type first; if the system
-/// refuses it, the storage root. True when one of them started.
+/// Razdor's own (a player's request): opens the folder `dir` in the Files app. Only a folder on the
+/// shared storage has a document URI (`platform::android_document_uri`), so the app's own folder
+/// (under `Android/data`) gets none and the call returns false. The document's own URI with the
+/// directory type first; if the system refuses it, the storage root. True when one of them started.
 pub fn open_folder(dir: &str) -> bool {
     /// `FLAG_GRANT_READ_URI_PERMISSION` | `FLAG_ACTIVITY_NEW_TASK`.
     const FLAGS: i32 = 0x1 | 0x1000_0000;
