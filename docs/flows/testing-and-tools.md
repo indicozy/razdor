@@ -168,12 +168,18 @@ placeholder `0.0.0` (`update_view::shown_version`), so a version bump changes no
    has the percentiles of total, work and present, and p50/p99/max of each stage (tick,
    terrain, objects, fog, minimap, rest), all in ms, and the texture rebuilds. Present is
    total minus work: the GL submission and the wait for vsync. The stage times are CPU time;
-   GPU time is not visible there.
+   GPU time is not visible there, except on Android.
+   Battle frames (`battle_view`) are `battle[flat]` or `battle[25d]` (the view the map is
+   drawn in), and `battle-effect[…]` when an effect was drawn in the frame (`mark_effect`).
+   Their lines add the stages backdrop, battle-window (effect inside it), and gpu-backdrop and
+   gpu-window: on Android only, the GL queue flushed and waited for (`glFinish`) after each,
+   which serialises the GPU while profiling (0 elsewhere).
    `RAZDOR_SCENE_OPEN=<frame>:<window>[,…]` (`snapshot::open_later`: `load`, `army`,
    `spells`, `journal`, `menu`, `building:<n>`, `map`) opens a window at a set frame and
    logs the frames after it.
    Desktop only: `RAZDOR_PROFILE_FRAMES=<csv path>` writes one row per frame (`frame,kind,
-   work_ms,total_ms,tick,terrain,world,fog,minimap,rebuilds`; `frame_probe::csv_row`), with
+   work_ms,total_ms,tick,terrain,world,fog,minimap,rebuilds,backdrop,battle_window,effect,gpu_backdrop,gpu_window,view`;
+   `frame_probe::csv_row`; the last six columns are appended for the battle kinds), with
    the same kinds and stage times as the summary. Rows are buffered and appended every 5 s
    and at exit, never per frame.
    `RAZDOR_SCENE_SAVE=<file.rzsave>` makes a map scene (`walk:…`, `map:…`) take its game from

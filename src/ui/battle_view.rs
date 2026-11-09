@@ -529,8 +529,26 @@ pub(super) fn draw_effect(content: &razdor::rules::content::Content, n: usize, s
     chrome::premultiplied(|| {
         super::sharp::draw(&frames[i], cx - size / 2.0, cy - size / 2.0, WHITE, DrawTextureParams { dest_size: Some(vec2(size, size)), ..Default::default() });
     });
+    razdor::frame_probe::mark_effect();
     true
 }
+
+/// Profiling only (Android): flushes macroquad's batched draws and waits for the GL queue to
+/// finish, so the GPU's time for the frame so far is timed as `stage`. It serialises the GPU, so
+/// it runs only with the frame probe on. Elsewhere it does nothing (the stage stays zero).
+#[cfg(target_os = "android")]
+fn gpu_wait(stage: razdor::frame_probe::Stage) {
+    if !razdor::frame_probe::on() {
+        return;
+    }
+    razdor::frame_probe::time(stage, || unsafe {
+        macroquad::window::get_internal_gl().flush();
+        macroquad::miniquad::gl::glFinish();
+    });
+}
+
+#[cfg(not(target_os = "android"))]
+fn gpu_wait(_stage: razdor::frame_probe::Stage) {}
 
 /// "Battle: the army of hero Stings against Castle Morgen!"
 fn battle_title(game: &Game) -> String {
@@ -969,16 +987,22 @@ impl BattleView {
         // Every action is written back into the armies as it is taken (0x4c4f8c after the
         // player's, 0x4c57bc after each of the enemy's).
         game.battle_write_back(&self.battle);
-        super::display::with_window_scale(None, || world_view::backdrop(game, assets));
+        // The frame probe's kind: a battle frame, in the view the map is drawn in.
+        razdor::frame_probe::set_kind(razdor::frame_probe::Kind::Battle { tilt: world_view::tilt_view() });
+        razdor::frame_probe::time(razdor::frame_probe::Stage::Backdrop, || super::display::with_window_scale(None, || world_view::backdrop(game, assets)));
+        gpu_wait(razdor::frame_probe::Stage::GpuBackdrop);
         // The leave-battle window stands alone over the map: the original hides the battle
         // window while it is open (86b of the UI audit; 4d3620 is its own window).
-        if !self.exiting || just_opened {
-            self.close_clicked |= self.draw(&l, &battle_title(game), game.clock.total_minutes() as u64, assets);
-            self.controls(&l, over);
-            if l.hint_after_buttons() {
-                self.hint(&l);
+        razdor::frame_probe::time(razdor::frame_probe::Stage::BattleWindow, || {
+            if !self.exiting || just_opened {
+                self.close_clicked |= self.draw(&l, &battle_title(game), game.clock.total_minutes() as u64, assets);
+                self.controls(&l, over);
+                if l.hint_after_buttons() {
+                    self.hint(&l);
+                }
             }
-        }
+        });
+        gpu_wait(razdor::frame_probe::Stage::GpuWindow);
         super::cursor::set(self.pointer());
         if over && !self.quick_played {
             self.result_shown();
@@ -1020,12 +1044,17 @@ impl BattleView {
         // Input the app holds back (the cheat console) stays held for the exit window too.
         let outer = input_blocked();
         let (over, just_opened) = self.advance(&l);
-        super::display::with_window_scale(None, super::main_menu::backdrop);
-        self.close_clicked |= self.draw(&l, tr("Custom battle"), 0, assets);
-        self.controls(&l, over);
-        if l.hint_after_buttons() {
-            self.hint(&l);
-        }
+        razdor::frame_probe::set_kind(razdor::frame_probe::Kind::Battle { tilt: world_view::tilt_view() });
+        razdor::frame_probe::time(razdor::frame_probe::Stage::Backdrop, || super::display::with_window_scale(None, super::main_menu::backdrop));
+        gpu_wait(razdor::frame_probe::Stage::GpuBackdrop);
+        razdor::frame_probe::time(razdor::frame_probe::Stage::BattleWindow, || {
+            self.close_clicked |= self.draw(&l, tr("Custom battle"), 0, assets);
+            self.controls(&l, over);
+            if l.hint_after_buttons() {
+                self.hint(&l);
+            }
+        });
+        gpu_wait(razdor::frame_probe::Stage::GpuWindow);
         super::cursor::set(self.pointer());
         if over && !self.quick_played {
             if self.result_shown() {
@@ -1472,7 +1501,7 @@ impl BattleView {
                 Some(Echo::Curse) => 2,
                 _ => effect_number(&self.battle, fx.actor, hit.kind),
             };
-            draw_effect(self.battle.content(), n, q, k);
+            razdor::frame_probe::time(razdor::frame_probe::Stage::Effect, || draw_effect(self.battle.content(), n, q, k));
             draw_rectangle(q.x, q.y, q.w, q.h, Color::new(1.0, 0.1, 0.1, 0.35 * (1.0 - k)));
             if let Some(c) = hit.counter {
                 shadow_centered(&razdor::trf!("-{c} counter", c), q.x + q.w / 2.0, q.y + q.h * 0.45 - 26.0 * l.k * k, (18.0 * l.k).round(), RED);
@@ -1482,7 +1511,7 @@ impl BattleView {
         let k = (fx.t - slide) / effect;
         let f = self.fighter(hit.target);
         let sq = l.portrait(l.cell_pos(f.team, f.slot));
-        let drawn = draw_effect(self.battle.content(), effect_number(&self.battle, fx.actor, hit.kind), sq, k);
+        let drawn = razdor::frame_probe::time(razdor::frame_probe::Stage::Effect, || draw_effect(self.battle.content(), effect_number(&self.battle, fx.actor, hit.kind), sq, k));
         let (flash, label, color) = match hit.kind {
             ActionKind::Heal => (Color::new(0.2, 1.0, 0.3, 0.4 * (1.0 - k)), format!("+{}", hit.amount), GREEN),
             ActionKind::Bless => (Color::new(0.4, 0.7, 1.0, 0.4 * (1.0 - k)), tr("blessed").into(), BLUE_TEXT),

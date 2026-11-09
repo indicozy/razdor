@@ -76,9 +76,16 @@ For "did this UI change alter any other screen?": `tools/ui-regress/` renders th
   present and each stage, in ms. For a walk scene on a fresh map add `RAZDOR_SCENE_QUIET=1`,
   or the scenario's messages hold the hero. With `RAZDOR_SCENE_SAVE` leave it off: the day
   change's window is part of what the walk measures.
+  Battle frames are the kinds `battle[flat|25d]` (no effect) and `battle-effect[flat|25d]` (an
+  effect drawn), with the stages backdrop, battle-window, effect and gpu-backdrop, gpu-window
+  (the last two: a flush and `glFinish` after each, on Android only, so the GPU's time shows).
+  On Android an empty `profile` file in Razdor's folder turns the probe on; the lines go to
+  `razdor.log` there.
 - `RAZDOR_PROFILE_FRAMES=<csv path>` (desktop): one CSV row per frame
-  (`frame,kind,work_ms,total_ms,tick,terrain,world,fog,minimap,rebuilds`), buffered and written
-  every 5 s and at exit. The `frame` column counts the probed frames from 1.
+  (`frame,kind,work_ms,total_ms,tick,terrain,world,fog,minimap,rebuilds,backdrop,battle_window,effect,gpu_backdrop,gpu_window,view`),
+  buffered and written every 5 s and at exit. The `frame` column counts the probed frames from 1.
+  The last five stage columns and `view` (`flat`, `25d`; empty for other kinds) were added for
+  the battle kinds, after the old columns.
 - `RAZDOR_SCENE_SAVE=<file.rzsave>`: a map scene (`walk:<map>:dx,dy`, `map:…`) takes its game
   from that save, as the Load screen loads it, instead of a fresh scenario; the scene's map
   name is then unused. A save that does not load (another install hash, a damaged file) is
