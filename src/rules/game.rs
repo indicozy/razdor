@@ -883,6 +883,9 @@ impl Game {
     pub fn from_scenario(content: Arc<Content>, scenario: &Scenario, hero: HeroClass) -> Self {
         let mut g = Game::unstarted(content, scenario, hero);
         g.start_script();
+        // «Автоматическая прокачка» (Razdor's): a unit that starts with an open promotion takes
+        // it at once, the opening script's units and experience included.
+        g.auto_promote_squad();
         g
     }
 
@@ -2506,7 +2509,9 @@ impl Game {
     }
 
     /// Razdor's «Автоматическая прокачка» (`ExperimentalRules::auto_promotion`), for every
-    /// player's unit after battle and after an event's experience (`auto_promote_unit`).
+    /// player's unit (`auto_promote_unit`): after battle, after an event's experience, when a
+    /// game starts ([`Game::from_scenario`]), when a campaign map starts with the carried-over
+    /// squad (`apply_carry_over`) and when an event's unit joins (`add_unit`).
     pub(crate) fn auto_promote_squad(&mut self) {
         for k in 1..self.squad.len() {
             self.auto_promote_unit(k);
@@ -4364,6 +4369,28 @@ mod tests {
         g.auto_promote_squad();
         assert_eq!(g.squad[corpse].def, UnitId(1), "a corpse is not promoted");
         assert_eq!(g.squad[corpse].level, 2);
+    }
+
+    /// «Автоматическая прокачка» at the start: a unit that starts with an open promotion takes
+    /// it when the game starts (`from_scenario`) with the rule on; off, it waits for the player.
+    #[test]
+    fn auto_promotion_takes_an_open_option_when_the_game_starts() {
+        use crate::rules::content::{testkit as ck, ExperimentalRules, Upgrade, UnitDef};
+        // Unit 4 (ids 1-3 are the hero's types, not a preset's troop), DT level 1: level 2, open.
+        let promoted = UnitDef {
+            upgrades: vec![Upgrade { target_name: "shooter5".into(), target: Some(5), level: 2, slot: 2 }],
+            ..ck::warrior(4, 10, 2)
+        };
+        let base = Arc::new(ck::content(vec![ck::warrior(1, 20, 5), ck::shooter(5, 8), promoted], vec![]));
+        let mut s = scenario(24, 6);
+        s.header.heroes[0] = hero(2, 2, 200, &[troop(4, 1, 1)]);
+        let g = Game::from_scenario(base.clone(), &s, HeroClass::Knight);
+        assert_eq!((g.squad[1].def, g.squad[1].level), (UnitId(4), 2), "off: the option waits for the player");
+        assert!(g.squad[1].promotion_ready(&base));
+        let on = Arc::new(base.with_experimental(ExperimentalRules { auto_promotion: true, ..Default::default() }));
+        let g = Game::from_scenario(on, &s, HeroClass::Knight);
+        assert_eq!((g.squad[1].def, g.squad[1].level), (UnitId(5), 1), "on: promoted at once, the level restarts");
+        assert_eq!(g.squad[0].def, UnitId(1), "the hero is not promoted this way");
     }
 
     fn strip() -> Scenario {

@@ -616,6 +616,10 @@ impl EventWorld for Game {
             }
         }
         self.squad.push(u);
+        // «Автоматическая прокачка» (Razdor's): a unit that joins with an open promotion (taken
+        // from an army at a level above 1) takes it at once.
+        let joined = self.squad.len() - 1;
+        self.auto_promote_unit(joined);
         if let Some(a) = emptied {
             self.deactivate_army(a);
         }
@@ -1358,6 +1362,9 @@ impl Game {
         // items gone) is cut to it *(guess: the hand-over is not traced for it)*.
         let max = self.squad[0].max_hp(&c);
         self.squad[0].hp = self.squad[0].hp.min(max);
+        // «Автоматическая прокачка» (Razdor's): the carried-over units that are ready for a
+        // promotion take it at once, before the map's opening events run.
+        self.auto_promote_squad();
     }
 
     /// The troops of an AI army (on the map or waiting) or of a building's garrison.
@@ -1903,6 +1910,56 @@ mod tests {
         let u = g.squad.last().unwrap();
         assert_eq!((u.def, u.level, u.xp), (UnitId(5), 3, 9), "the army's unit, its whole record");
         assert!(g.world.armies.iter().all(|a| a.id != 2) && g.world.inactive.iter().any(|a| a.id == 2), "emptied: off the map");
+    }
+
+    /// «Автоматическая прокачка» (Razdor's): a unit that joins from an army with an open
+    /// promotion (level 2) takes it at once with the rule on; off, it waits for the player.
+    #[test]
+    fn auto_promotion_takes_an_open_option_when_a_unit_joins_with_it() {
+        use crate::rules::content::{testkit as ck, ExperimentalRules, Upgrade, UnitDef};
+        let promoted = UnitDef {
+            upgrades: vec![Upgrade { target_name: "shooter5".into(), target: Some(5), level: 2, slot: 2 }],
+            ..ck::warrior(4, 10, 2)
+        };
+        let base = Arc::new(ck::content(vec![ck::warrior(1, 20, 5), ck::shooter(5, 8), promoted], vec![]));
+        let mut s = world(vec![]);
+        s.armies = vec![army(2, 12, 10, 1, &[troop(4, 1, 1)])];
+        for (on, expect) in [(false, (UnitId(4), 2)), (true, (UnitId(5), 1))] {
+            let c = Arc::new(base.with_experimental(ExperimentalRules { auto_promotion: on, ..Default::default() }));
+            let mut g = Game::from_scenario(c, &s, HeroClass::Knight);
+            EventWorld::add_unit(&mut g, 4, 0, Some(2));
+            let u = g.squad.last().unwrap();
+            assert_eq!((u.def, u.level), expect, "auto promotion {on}");
+        }
+    }
+
+    /// «Автоматическая прокачка» (Razdor's): the squad a campaign map carries over takes its open
+    /// promotions when the map starts (`apply_carry_over`); off, they wait.
+    #[test]
+    fn auto_promotion_takes_an_open_option_of_the_carried_squad() {
+        use crate::rules::content::{testkit as ck, ExperimentalRules, Upgrade, UnitDef};
+        let promoted = UnitDef {
+            upgrades: vec![Upgrade { target_name: "shooter5".into(), target: Some(5), level: 2, slot: 2 }],
+            ..ck::warrior(4, 10, 2)
+        };
+        let base = Arc::new(ck::content(vec![ck::warrior(1, 20, 5), ck::shooter(5, 8), promoted], vec![]));
+        // The next map's header takes the army of the last map (its carry-over bytes).
+        let mut s = world(vec![]);
+        s.header.carry_over = [1; 7];
+        // The previous map: the preset's unit 4 gains enough XP for level 2 (open), then is handed over.
+        // The flags travel with the squad (`apply_carry_over` takes the previous map's), so the
+        // previous map is played under the same rule as the next one.
+        for (on, expect) in [(false, (UnitId(4), 2)), (true, (UnitId(5), 1))] {
+            let c = Arc::new(base.with_experimental(ExperimentalRules { auto_promotion: on, ..Default::default() }));
+            let mut prev = Game::from_scenario(c.clone(), &s, HeroClass::Knight);
+            prev.squad[1].gain_xp(&c, 60);
+            assert_eq!(prev.squad[1].level, 2);
+            let next = prev.hand_over("next".into(), None);
+            let mut fresh = Game::from_scenario(c, &s, HeroClass::Knight);
+            fresh.apply_carry_over(&next);
+            let u = fresh.squad.iter().find(|u| !u.is_hero()).unwrap();
+            assert_eq!((u.def, u.level), expect, "auto promotion {on}");
+        }
     }
 
     #[test]
