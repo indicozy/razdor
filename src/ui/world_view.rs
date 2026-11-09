@@ -38,7 +38,7 @@ use super::story;
 use super::widgets::*;
 use super::view25::{self, TiltCamera};
 use super::Screen;
-use macroquad::camera::{set_camera, set_default_camera};
+use macroquad::camera::set_camera;
 use macroquad::window::get_internal_gl;
 
 /// Screen pixels per world unit (one cell width) at zoom 1 on the original's 1024×768
@@ -1085,7 +1085,8 @@ impl macroquad::camera::Camera for View3d {
         false
     }
     fn render_pass(&self) -> Option<RenderPass> {
-        None
+        // The screen, or the target of a cached picture being filled (`render_cache`).
+        super::render_cache::target().map(|rt| rt.render_pass)
     }
     fn viewport(&self) -> Option<(i32, i32, i32, i32)> {
         None
@@ -1100,7 +1101,7 @@ fn in_view(cam: &Camera, f: impl FnOnce(&Camera)) {
     let (w, h) = (screen_width(), screen_height());
     set_camera(&View3d(view25::window_matrix(cam.view, w, h) * tilt.cam.view_proj(cam.view)));
     f(&cam.tilted_space());
-    set_default_camera();
+    super::render_cache::back_to_2d();
 }
 
 /// Draws the ground pass: under a tilted camera, the 2D space laid flat on the ground
@@ -3170,6 +3171,49 @@ pub fn settings_backdrop(game: &Game, assets: &Assets) -> bool {
 
 pub fn backdrop(game: &Game, assets: &Assets) {
     backdrop_lit(game, assets, None);
+}
+
+/// The map behind a battle (the window's backdrop), drawn once and shown again: the picture of
+/// [`draw_map_backdrop`] is filled into `cache` when its key changes, and the game bar is drawn
+/// live over it, as [`backdrop`] does. The animations behind the battle (trees, water, marks,
+/// idle figures) stand still while the picture is kept: that is the battle's by design.
+pub fn battle_backdrop(game: &Game, assets: &Assets, cache: &mut super::render_cache::Cached) {
+    cache.show(battle_backdrop_key(game), || draw_map_backdrop(game, assets));
+    game_bar::draw(game, |_| Look::Grey);
+    super::pan::cover_bar();
+}
+
+/// The key of the battle's cached map picture: everything the picture reads except the
+/// animations (the clock): the screen's pixels, the interface scale and DPI, the backdrop
+/// camera (zoom, look, the hero, the 2.5D tilt and yaw), the fog, the places being shown, and
+/// each army's and the hero's place and look. A battle changes none of these (its hit points
+/// are not drawn on the map).
+fn battle_backdrop_key(game: &Game) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    let bits = |(x, y): (f32, f32)| (x.to_bits(), y.to_bits());
+    (screen_width().to_bits(), screen_height().to_bits(), screen_dpi_scale().to_bits()).hash(&mut h);
+    super::chrome::k().to_bits().hash(&mut h);
+    super::display::dp_px().map(f32::to_bits).hash(&mut h);
+    let area = map_area();
+    (area.x.to_bits(), area.y.to_bits(), area.w.to_bits(), area.h.to_bits()).hash(&mut h);
+    let (zoom, look) = LAST_CAM.with(|c| c.get()).unwrap_or((1.0, None));
+    zoom.to_bits().hash(&mut h);
+    look.map(bits).hash(&mut h);
+    bits(game.display_pos()).hash(&mut h);
+    (tilt_view(), tilt_pitch().to_bits(), tilt_yaw().to_bits(), extend_edge()).hash(&mut h);
+    (game.fog.enabled, &game.fog.bits).hash(&mut h);
+    game.unshown_cells().hash(&mut h);
+    (game.aboard(), game.hero_hidden()).hash(&mut h);
+    if let Some(s) = game.ship {
+        (s.tile, s.aboard).hash(&mut h);
+    }
+    for a in &game.world.armies {
+        (a.uid, a.tile(&game.world.map), a.figure, a.ship, a.sails(), a.hostile(), a.chasing).hash(&mut h);
+        bits(game.army_display_pos(a)).hash(&mut h);
+        (game.army_hidden(a), a.path.first().copied()).hash(&mut h);
+    }
+    h.finish()
 }
 
 /// The map under a window the bar stays live for (army, spell book, journal, a building),

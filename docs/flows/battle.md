@@ -143,6 +143,11 @@ act_with(target, kind) / move_active(to) / pass() / own_cell() / skip()
 ## 5. The screen: `BattleView`
 
 `BattleView::frame` runs every frame:
+0. The map behind the battle is `world_view::battle_backdrop`: its picture (clear, map, fog,
+   dim) is filled once into a render target (`render_cache::Cached`, owned by `BattleView`)
+   and shown again while its key holds (screen pixels, interface scale and DPI, backdrop
+   camera, tilt, fog, army and hero places). The map's animations (trees, water, marks, idle
+   figures) stand still behind the battle by design. The game bar is drawn live over it.
 1. `advance(l)`: plays the current `Fx` (slide → effect → optional echo for a counter or a
    death curse), cues sounds (`action_cue`), marks curse/bless signs as effects end;
    Esc → exit window; **Q** → `quick_battle` (`hero_auto_play_to_end`); **W** →

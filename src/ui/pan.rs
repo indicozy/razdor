@@ -17,7 +17,7 @@
 use std::cell::{Cell, RefCell};
 use std::mem::Discriminant;
 
-use macroquad::camera::{set_camera, set_default_camera, Camera2D};
+use macroquad::camera::{set_camera, Camera2D};
 use macroquad::math::Rect;
 use macroquad::window::{get_internal_gl, screen_dpi_scale, screen_height, screen_width};
 use razdor::local;
@@ -161,7 +161,7 @@ fn sync() {
         camera.zoom.y = -camera.zoom.y;
         set_camera(&camera);
     } else if CAMERA.with(|c| c.get()) {
-        set_default_camera();
+        super::render_cache::back_to_2d();
     }
     CAMERA.with(|c| c.set(want));
 }

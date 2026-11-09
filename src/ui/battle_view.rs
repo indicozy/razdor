@@ -413,6 +413,8 @@ pub struct BattleView {
     quick: Option<std::sync::mpsc::Receiver<(Battle, PatchGlobals)>>,
     /// The battle's moment the last look ahead was for.
     pondered: Option<(usize, Option<usize>, i32, u32)>,
+    /// The map behind the battle, drawn once (`world_view::battle_backdrop`); dropped with the battle.
+    backdrop: super::render_cache::Cached,
 }
 
 /// A card's curse and blessing signs.
@@ -596,6 +598,7 @@ impl BattleView {
             max: [None, None],
             quick: None,
             pondered: None,
+            backdrop: Default::default(),
         }
     }
 
@@ -989,7 +992,7 @@ impl BattleView {
         game.battle_write_back(&self.battle);
         // The frame probe's kind: a battle frame, in the view the map is drawn in.
         razdor::frame_probe::set_kind(razdor::frame_probe::Kind::Battle { tilt: world_view::tilt_view() });
-        razdor::frame_probe::time(razdor::frame_probe::Stage::Backdrop, || super::display::with_window_scale(None, || world_view::backdrop(game, assets)));
+        razdor::frame_probe::time(razdor::frame_probe::Stage::Backdrop, || super::display::with_window_scale(None, || world_view::battle_backdrop(game, assets, &mut self.backdrop)));
         gpu_wait(razdor::frame_probe::Stage::GpuBackdrop);
         // The leave-battle window stands alone over the map: the original hides the battle
         // window while it is open (86b of the UI audit; 4d3620 is its own window).
