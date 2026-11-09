@@ -76,6 +76,8 @@ void main() {
 /// device has it; without highp in the fragment stage this fails to compile and the caller
 /// gets the plain draw.
 pub fn fragment(extra: &str, main: &str) -> String {
+    // The profiling A/B (`frame_probe::sharp_off`): the same material with plain sampling.
+    let sample = if razdor::frame_probe::sharp_off() { "return texture2D(Texture, at);" } else { "return texture2D(Texture, sharp_uv(at, TexSize, Scale));" };
     format!(
         r#"#version 100
 #ifdef GL_FRAGMENT_PRECISION_HIGH
@@ -91,7 +93,7 @@ uniform vec2 Scale;
 {extra}
 {SHARP_UV_GLSL}
 vec4 sharp_tex(vec2 at) {{
-    return texture2D(Texture, sharp_uv(at, TexSize, Scale));
+    {sample}
 }}
 void main() {{
 {main}

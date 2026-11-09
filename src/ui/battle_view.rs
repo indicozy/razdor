@@ -32,6 +32,7 @@ use super::unit_sheet::{self, Sheet};
 use super::widgets::*;
 use super::window_layout;
 use super::world_view;
+use super::gpu_probe::gpu_wait;
 use super::Screen;
 
 /// `[Battle] ExitHint` in the strip (4c3dcc): the bold sheet in its red tint, font ae24f8
@@ -534,23 +535,6 @@ pub(super) fn draw_effect(content: &razdor::rules::content::Content, n: usize, s
     razdor::frame_probe::mark_effect();
     true
 }
-
-/// Profiling only (Android): flushes macroquad's batched draws and waits for the GL queue to
-/// finish, so the GPU's time for the frame so far is timed as `stage`. It serialises the GPU, so
-/// it runs only with the frame probe on. Elsewhere it does nothing (the stage stays zero).
-#[cfg(target_os = "android")]
-fn gpu_wait(stage: razdor::frame_probe::Stage) {
-    if !razdor::frame_probe::on() {
-        return;
-    }
-    razdor::frame_probe::time(stage, || unsafe {
-        macroquad::window::get_internal_gl().flush();
-        macroquad::miniquad::gl::glFinish();
-    });
-}
-
-#[cfg(not(target_os = "android"))]
-fn gpu_wait(_stage: razdor::frame_probe::Stage) {}
 
 /// "Battle: the army of hero Stings against Castle Morgen!"
 fn battle_title(game: &Game) -> String {

@@ -259,6 +259,8 @@ async fn main() {
             exit_now(&mut app);
         }
         ui::widgets::sync_keyboard();
+        // The map frame's last GPU wait (profiling, Android): the frame's draws, cursor included.
+        ui::gpu_probe::gpu_wait_ui();
         next_frame().await;
         if frames == 1 {
             razdor::diag::step("first frame shown");

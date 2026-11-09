@@ -12,6 +12,7 @@ use macroquad::prelude::*;
 
 use razdor::i18n::{n_, tr};
 use razdor::frame_probe::{self, Kind, Stage};
+use super::gpu_probe::gpu_wait;
 use razdor::rules::ai::{Clash, Combatant};
 use razdor::rules::battle::Team;
 use razdor::trf;
@@ -1526,6 +1527,7 @@ fn draw_terrain(game: &Game, art: Option<&DtArt>, cam: &Camera) {
         let (tl, br) = if extend { (w.point(), w.point() + w.size()) } else { (map_tl.max(w.point()), map_br.min(w.point() + w.size())) };
         if tl.x < br.x && tl.y < br.y {
             let (a, b) = (cam.to_screen(tl.into()), cam.to_screen(br.into()));
+            frame_probe::terrain(b.x - a.x, b.y - a.y);
             let view = vec4(tl.x, tl.y / rh, br.x, br.y / rh);
             layer.draw(map.surface_codes(), (map.w as u32, map.h as u32), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(PX, PX * rh), Some((crate::ui::clock::now() * 1000.0) as i64), extend);
         }
@@ -1717,6 +1719,7 @@ fn draw_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera) {
             draw_leaning(&atlas.texture, r, at, size, lean);
             return;
         }
+        frame_probe::sprite(size.x, size.y);
         super::sharp::draw(&atlas.texture, at.x, at.y, WHITE, DrawTextureParams { dest_size: Some(size), source: Some(r), ..Default::default() });
         return;
     }
@@ -1755,6 +1758,7 @@ fn draw_building(l: &Location, art: Option<&DtArt>, cam: &Camera, outlined: bool
     if let Some((atlas, r)) = sprite {
         let at = building_sprite_origin(l, r.w, r.h, cam);
         let params = DrawTextureParams { dest_size: Some(vec2(r.w * zoom, r.h * zoom)), source: Some(r), ..Default::default() };
+        frame_probe::sprite(r.w * zoom, r.h * zoom);
         if outlined {
             // The picture's solid shape in gold, a little out every way, under the picture.
             let d = (1.5 * zoom).max(1.0);
@@ -1886,6 +1890,7 @@ fn draw_figure(art: Option<&DtArt>, stem: &str, pos: (f32, f32), next: Option<(f
     let row = facing_row(heading);
     let frame = frame.min(7) as f32;
     let (dest, size) = (vec2(rect.x, rect.y), rect.w);
+    frame_probe::sprite(size, size);
     // The sheets hold premultiplied colour and the original draws every figure with
     // SRCBLEND ONE, DESTBLEND INVSRCALPHA (0x4c9ef6, 0x4ca0d9): the Ghost's light where its
     // alpha is 0 is added to the map, its glow.
@@ -2177,17 +2182,26 @@ fn border_width(cells: f32, cam: &Camera) -> f32 {
 
 /// The world map: the flat view as it always was, or the 2.5D view (`tilt_view`), where the
 /// same passes are laid on the ground and stand up as billboards.
-fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<MapHoverLook>) {
+///
+/// `waits`: the map frame itself, whose passes the frame probe's GPU waits follow (Android,
+/// probe on); a backdrop under a window or a battle does not wait.
+fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<MapHoverLook>, waits: bool) {
     if cam.tilt.is_some() {
         draw_rectangle(cam.draw.x, cam.draw.y, cam.draw.w, cam.draw.h, SKY);
     }
-    in_view(cam, |c| draw_world_in(game, assets, c, preview, spell, hover));
+    if waits {
+        gpu_wait(Stage::GpuSky);
+    }
+    in_view(cam, |c| draw_world_in(game, assets, c, preview, spell, hover, waits));
 }
 
-fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<MapHoverLook>) {
+fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<MapHoverLook>, waits: bool) {
     let art = assets.dt.as_ref();
     stamp_idle(game, clock_ms());
     frame_probe::time(Stage::Terrain, || ground(cam, || draw_terrain(game, art, cam)));
+    if waits {
+        gpu_wait(Stage::GpuTerrain);
+    }
     let map = &game.world.map;
     let ((c0, c1), (r0, r1)) = cam.visible(map);
     // Sprites stand on their cell and reach up to ~8 cells above it. Turned, a sprite reaches any
@@ -2245,6 +2259,9 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // standing sprite; the fog (drawn after the world) darkens it where the ground is unexplored.
     if cam.tilt.is_some() {
         ground(cam, || draw_border(game, cam));
+    }
+    if waits {
+        gpu_wait(Stage::GpuMarks);
     }
     // The standing scenery and the buildings share one pass over the cells, row by row and
     // left to right (0x4c8864's cell loop): each cell draws its massif object (+0), then its
@@ -2322,6 +2339,9 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
             }
         }
     });
+    if waits {
+        gpu_wait(Stage::GpuSprites);
+    }
     items.clear();
     WORLD_ITEMS.with(|c| *c.borrow_mut() = items);
 }
@@ -3153,7 +3173,7 @@ fn draw_map_backdrop(game: &Game, assets: &Assets) {
         clear_background(rgb(10, 12, 10));
         let full = map_area();
         let cam = backdrop_camera(game, full);
-        draw_world(game, assets, &cam, None, None, None);
+        draw_world(game, assets, &cam, None, None, None, false);
         cam.draw_fog(game);
         draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.2));
     });
@@ -3230,7 +3250,7 @@ fn window_backdrop_at_scale(game: &Game, assets: &Assets, lit: Option<BarButton>
         clear_background(rgb(10, 12, 10));
         let full = map_area();
         let cam = backdrop_camera(game, full);
-        draw_world(game, assets, &cam, None, None, None);
+        draw_world(game, assets, &cam, None, None, None, false);
         cam.draw_fog(game);
         draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.2));
     });
@@ -3615,12 +3635,13 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     // frame whose tick ran is one of these; a frame with a window open or events held stays
     // `Other` (a window over a walk is not a walk frame).
     if ticked {
+        let tilt = tilt_view();
         frame_probe::set_kind(if game.tile() != tile0 {
-            Kind::WalkStep
+            Kind::WalkStep { tilt }
         } else if game.moving() {
-            Kind::Walk
+            Kind::Walk { tilt }
         } else {
-            Kind::Idle
+            Kind::Idle { tilt }
         });
     }
     let mut next = handle_events(game, events, message, dialogs).or(reopened);
@@ -3722,8 +3743,9 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
             MapHoverLook { cell: t, ring, building: None }
         });
     }
-    frame_probe::time(Stage::World, || draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()), show.as_ref(), hover));
+    frame_probe::time(Stage::World, || draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()), show.as_ref(), hover, true));
     frame_probe::time(Stage::Fog, || cam.draw_fog(game));
+    gpu_wait(Stage::GpuFog);
     draw_clash_marks(view, &cam, crate::ui::clock::now());
     cam.draw_showing(game, view.opening.iter().chain(&view.shows), show_now);
     if let Some(s) = view.shows.front() {

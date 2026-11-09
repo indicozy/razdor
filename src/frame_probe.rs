@@ -16,8 +16,9 @@
 //! The stage times are CPU time spent building the frame. Macroquad batches draws and issues
 //! the GL calls in `next_frame`, so GL submission and the wait for vsync (`eglSwapBuffers`)
 //! land in "present" (total minus work). GPU time itself is not visible here, except for the
-//! battle frames' `gpu-backdrop` and `gpu-window` stages on Android (`ui::battle_view`): there
-//! the GL queue is flushed and waited for (`glFinish`), which serialises the GPU while profiling.
+//! battle frames' `gpu-backdrop` and `gpu-window` stages and the map frames' `gpu-sky` to
+//! `gpu-ui` stages on Android (`ui::gpu_probe`): there the GL queue is flushed and waited for
+//! (`glFinish`), which serialises the GPU while profiling.
 //!
 //! Battle frames have the kinds `battle` (no effect drawn) and `battle-effect` (an effect drawn,
 //! see [`mark_effect`]), each with the view it was drawn in (`flat` or `25d`), and the stages
@@ -82,22 +83,35 @@ pub enum Stage {
     GpuBackdrop,
     /// Android only: the GL queue flushed and waited for after the battle window.
     GpuWindow,
+    /// Android only, map frames: the GL queue flushed and waited for after the sky (2.5D).
+    GpuSky,
+    /// Android only, map frames: after the terrain (the ground pass).
+    GpuTerrain,
+    /// Android only, map frames: after the marks, the route and the border (ground passes).
+    GpuMarks,
+    /// Android only, map frames: after the standing sprites (the sorted pass).
+    GpuSprites,
+    /// Android only, map frames: after the fog.
+    GpuFog,
+    /// Android only, map frames: after everything else the frame draws (the minimap, the bar,
+    /// the windows and the cursor), at the frame's end.
+    GpuUi,
 }
 
 impl Stage {
-    pub const COUNT: usize = 20;
+    pub const COUNT: usize = 26;
 }
 
 /// What the frame was: the map with the hero walking, or not, or a battle (`tilt`: drawn in
 /// the 2.5D view).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Kind {
-    /// The map, the hero not walking.
-    Idle,
+    /// The map, the hero not walking (`tilt`: drawn in the 2.5D view).
+    Idle { tilt: bool },
     /// The hero walking, no step this frame.
-    Walk,
+    Walk { tilt: bool },
     /// A frame in which the hero moved to another cell.
-    WalkStep,
+    WalkStep { tilt: bool },
     /// A battle frame with no effect drawn.
     Battle { tilt: bool },
     /// A battle frame in which an effect was drawn.
@@ -107,10 +121,13 @@ pub enum Kind {
 }
 
 /// The kinds in the summary's order.
-const KINDS: [Kind; 8] = [
-    Kind::WalkStep,
-    Kind::Walk,
-    Kind::Idle,
+const KINDS: [Kind; 11] = [
+    Kind::WalkStep { tilt: false },
+    Kind::WalkStep { tilt: true },
+    Kind::Walk { tilt: false },
+    Kind::Walk { tilt: true },
+    Kind::Idle { tilt: false },
+    Kind::Idle { tilt: true },
     Kind::Other,
     Kind::Battle { tilt: false },
     Kind::BattleEffect { tilt: false },
@@ -126,12 +143,20 @@ pub struct Sample {
     pub total_ms: f32,
     pub stage_ms: [f32; Stage::COUNT],
     pub rebuilds: u32,
+    /// Standing sprites drawn this frame, and their summed area in pixels of the pass's 2D space.
+    pub sprites: u32,
+    pub sprite_px: f32,
+    /// The terrain layer's summed draw area in pixels of the pass's 2D space.
+    pub terrain_px: f32,
 }
 
 struct State {
     /// This frame's time per stage (calls of one stage add up).
     stage: [Duration; Stage::COUNT],
     rebuilds: u32,
+    sprites: u32,
+    sprite_px: f32,
+    terrain_px: f32,
     kind: Kind,
     /// An effect was drawn this frame ([`mark_effect`]).
     effect: bool,
@@ -146,7 +171,7 @@ struct State {
 
 impl State {
     const fn new() -> State {
-        State { stage: [Duration::ZERO; Stage::COUNT], rebuilds: 0, kind: Kind::Other, effect: false, samples: Vec::new(), since: None, frames: 0, csv_rows: Vec::new() }
+        State { stage: [Duration::ZERO; Stage::COUNT], rebuilds: 0, sprites: 0, sprite_px: 0.0, terrain_px: 0.0, kind: Kind::Other, effect: false, samples: Vec::new(), since: None, frames: 0, csv_rows: Vec::new() }
     }
 }
 
@@ -181,6 +206,54 @@ pub fn tex_rebuilt() {
     if on() {
         STATE.with_borrow_mut(|s| s.rebuilds += 1);
     }
+}
+
+/// A standing sprite of `w`×`h` pixels (in the pass's 2D space) was drawn this frame: the
+/// probe's count and area, for the overdraw estimate.
+pub fn sprite(w: f32, h: f32) {
+    if on() {
+        STATE.with_borrow_mut(|s| {
+            s.sprites += 1;
+            s.sprite_px += w * h;
+        });
+    }
+}
+
+/// The terrain layer was drawn over `w`×`h` pixels (in the pass's 2D space) this frame.
+pub fn terrain(w: f32, h: f32) {
+    if on() {
+        STATE.with_borrow_mut(|s| s.terrain_px += w * h);
+    }
+}
+
+/// This frame is a map frame (its kind is a map kind, see [`is_map`]) and the probe is on: the
+/// map's last GPU wait (`gpu-ui`) applies.
+pub fn map_frame_now() -> bool {
+    on() && STATE.with_borrow(|s| is_map(s.kind))
+}
+
+/// The map kinds: the hero not walking, walking, or stepping. Their lines carry the map's GPU
+/// stages and the sprites.
+pub fn is_map(kind: Kind) -> bool {
+    matches!(kind, Kind::Idle { .. } | Kind::Walk { .. } | Kind::WalkStep { .. })
+}
+
+/// Sharp sampling is off (the profiling A/B of the pixel-art sampler, `ui::sharp`): the
+/// texture is sampled plainly. Read once; `profile-nosharp` in the app folder (Android) or
+/// `RAZDOR_NO_SHARP=1` (desktop) turns it on, and a line says so when it is.
+pub fn sharp_off() -> bool {
+    static OFF: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *OFF.get_or_init(|| {
+        let off = if cfg!(target_os = "android") {
+            crate::platform::app_dir().is_some_and(|d| d.join("profile-nosharp").is_file())
+        } else {
+            std::env::var("RAZDOR_NO_SHARP").is_ok_and(|v| v == "1")
+        };
+        if off {
+            crate::diag::log("sharp sampling off (profiling)");
+        }
+        off
+    })
 }
 
 /// Sets this frame's kind; the default each frame is [`Kind::Other`].
@@ -222,6 +295,9 @@ pub fn end_frame(work: Duration, total: Duration) {
             total_ms: ms(total),
             stage_ms: s.stage.map(ms),
             rebuilds: s.rebuilds,
+            sprites: s.sprites,
+            sprite_px: s.sprite_px,
+            terrain_px: s.terrain_px,
         };
         s.frames += 1;
         if csv {
@@ -230,6 +306,9 @@ pub fn end_frame(work: Duration, total: Duration) {
         s.samples.push(sample);
         s.stage = [Duration::ZERO; Stage::COUNT];
         s.rebuilds = 0;
+        s.sprites = 0;
+        s.sprite_px = 0.0;
+        s.terrain_px = 0.0;
         s.kind = Kind::Other;
         s.effect = false;
         let elapsed = now.duration_since(since);
@@ -272,37 +351,42 @@ fn csv_path() -> Option<PathBuf> {
     PATH.get_or_init(|| std::env::var_os("RAZDOR_PROFILE_FRAMES").filter(|p| !p.is_empty()).map(PathBuf::from)).clone()
 }
 
-/// A kind's name in the CSV and in the summary lines (the battle kinds add their view there).
+/// A kind's name in the CSV and in the summary lines (the view is added there).
 fn kind_name(kind: Kind) -> &'static str {
     match kind {
-        Kind::WalkStep => "walk-step",
-        Kind::Walk => "walk",
-        Kind::Idle => "idle",
+        Kind::WalkStep { .. } => "walk-step",
+        Kind::Walk { .. } => "walk",
+        Kind::Idle { .. } => "idle",
         Kind::Battle { .. } => "battle",
         Kind::BattleEffect { .. } => "battle-effect",
         Kind::Other => "other",
     }
 }
 
-/// The view a battle kind was drawn in: `25d` or `flat`; None for the other kinds.
+/// The view a map or battle kind was drawn in: `25d` or `flat`; None for the other kinds.
 fn view_name(kind: Kind) -> Option<&'static str> {
     match kind {
-        Kind::Battle { tilt } | Kind::BattleEffect { tilt } => Some(if tilt { "25d" } else { "flat" }),
-        _ => None,
+        Kind::Battle { tilt } | Kind::BattleEffect { tilt } | Kind::Walk { tilt } | Kind::WalkStep { tilt } | Kind::Idle { tilt } => Some(if tilt { "25d" } else { "flat" }),
+        Kind::Other => None,
     }
 }
 
-/// A kind's name in the summary lines: the battle kinds carry their view (`battle[25d]`).
+/// A kind's name in the summary lines: the map and battle kinds carry their view (`battle[25d]`),
+/// and `nosharp` when the sharp sampling is off (`idle[25d nosharp]`).
 fn summary_name(kind: Kind) -> String {
     match view_name(kind) {
-        Some(view) => format!("{}[{view}]", kind_name(kind)),
+        Some(view) => {
+            let off = if sharp_off() { " nosharp" } else { "" };
+            format!("{}[{view}{off}]", kind_name(kind))
+        }
         None => kind_name(kind).to_string(),
     }
 }
 
 /// One CSV row of frame `frame` (the probe's count, from 1). The kind's name is the CSV's
 /// (`walk-step`, `walk`, `idle`, `battle`, `battle-effect`, `other`); times in ms with 3
-/// decimals; the last column is the battle kinds' view (`flat` or `25d`, empty otherwise).
+/// decimals; the last column is the view of the map and battle kinds (`flat` or `25d`, empty
+/// otherwise).
 pub fn csv_row(frame: u64, s: &Sample) -> String {
     let stage = |st: Stage| s.stage_ms[st as usize];
     format!(
@@ -385,7 +469,7 @@ fn kind_line(secs: f32, kind: Kind, of: &[&Sample]) -> String {
     let stage = |st: Stage| dist(of.iter().map(|s| s.stage_ms[st as usize])).narrow();
     // The battle kinds split their window's time: the backdrop, the window, its effects and the
     // GPU waits (Android; zero elsewhere).
-    let battle = if view_name(kind).is_some() {
+    let battle = if matches!(kind, Kind::Battle { .. } | Kind::BattleEffect { .. }) {
         format!(
             "backdrop {} | battle-window {} | effect {} | gpu-backdrop {} | gpu-window {} | ",
             stage(Stage::Backdrop),
@@ -397,8 +481,29 @@ fn kind_line(secs: f32, kind: Kind, of: &[&Sample]) -> String {
     } else {
         String::new()
     };
+    // The map kinds split their frame's GPU waits (Android; zero elsewhere) and count the
+    // standing sprites and the terrain's area (the overdraw estimate, pixels of the 2D space).
+    let map = if is_map(kind) {
+        let mean = |f: fn(&Sample) -> f32| of.iter().map(|s| f(s)).sum::<f32>() / of.len() as f32;
+        let max = |f: fn(&Sample) -> f32| of.iter().map(|s| f(s)).fold(0.0, f32::max);
+        format!(
+            "gpu-sky {} | gpu-terrain {} | gpu-marks {} | gpu-sprites {} | gpu-fog {} | gpu-ui {} | sprites n={:.0} area={:.2}Mpx (max {:.2}Mpx) | terrain area={:.2}Mpx | ",
+            stage(Stage::GpuSky),
+            stage(Stage::GpuTerrain),
+            stage(Stage::GpuMarks),
+            stage(Stage::GpuSprites),
+            stage(Stage::GpuFog),
+            stage(Stage::GpuUi),
+            mean(|s| s.sprites as f32),
+            mean(|s| s.sprite_px) / 1e6,
+            max(|s| s.sprite_px) / 1e6,
+            mean(|s| s.terrain_px) / 1e6,
+        )
+    } else {
+        String::new()
+    };
     format!(
-        "frame probe {secs:.1} s {name} n={} | total {} | work {} | present {} | tick {} | route {} | look {} | armies {} | ai-move {} | ai-plan {} | script {} | day {} | snap {} | tick-rest {} | terrain {} | objects {} | fog {} | minimap {} | autosave {} | rest {} | {battle}tex rebuilds {rebuilds}",
+        "frame probe {secs:.1} s {name} n={} | total {} | work {} | present {} | tick {} | route {} | look {} | armies {} | ai-move {} | ai-plan {} | script {} | day {} | snap {} | tick-rest {} | terrain {} | objects {} | fog {} | minimap {} | autosave {} | rest {} | {battle}{map}tex rebuilds {rebuilds}",
         of.len(),
         dist(of.iter().map(|s| s.total_ms)).wide(),
         dist(of.iter().map(|s| s.work_ms)).wide(),
@@ -427,9 +532,12 @@ fn present_ms(s: &Sample) -> f32 {
     s.total_ms - s.work_ms
 }
 
-/// The map's objects (sprites, markers): the world minus its terrain.
+/// The map's objects (sprites, markers): the world minus its terrain and the GPU waits inside
+/// the world (sky, terrain, marks, sprites).
 fn objects_ms(s: &Sample) -> f32 {
-    (s.stage_ms[Stage::World as usize] - s.stage_ms[Stage::Terrain as usize]).max(0.0)
+    let inside = [Stage::Terrain, Stage::GpuSky, Stage::GpuTerrain, Stage::GpuMarks, Stage::GpuSprites];
+    let waits: f32 = inside.iter().map(|st| s.stage_ms[*st as usize]).sum();
+    (s.stage_ms[Stage::World as usize] - waits).max(0.0)
 }
 
 /// The tick's time outside its timed parts (route, look, armies, script, day, snap), clamped at
@@ -456,7 +564,9 @@ fn rest_ms(s: &Sample) -> f32 {
         + s.stage_ms[Stage::Backdrop as usize]
         + s.stage_ms[Stage::BattleWindow as usize]
         + s.stage_ms[Stage::GpuBackdrop as usize]
-        + s.stage_ms[Stage::GpuWindow as usize];
+        + s.stage_ms[Stage::GpuWindow as usize]
+        + s.stage_ms[Stage::GpuFog as usize]
+        + s.stage_ms[Stage::GpuUi as usize];
     (s.work_ms - timed).max(0.0)
 }
 
@@ -505,7 +615,7 @@ mod tests {
     use super::*;
 
     fn sample(kind: Kind, work_ms: f32, total_ms: f32, stage_ms: [f32; Stage::COUNT]) -> Sample {
-        Sample { kind, work_ms, total_ms, stage_ms, rebuilds: 0 }
+        Sample { kind, work_ms, total_ms, stage_ms, rebuilds: 0, sprites: 0, sprite_px: 0.0, terrain_px: 0.0 }
     }
 
     #[test]
@@ -534,7 +644,7 @@ mod tests {
         // Tick 6 (route 1, look 0.5, armies 2, script 0.5 inside it), terrain 2, world 5 (terrain
         // inside it), fog 1, minimap 0.5, autosave 3 (outside the tick).
         let s = sample(
-            Kind::Walk,
+            Kind::Walk { tilt: false },
             20.0,
             22.0,
             stages(&[(Stage::Tick, 6.0), (Stage::Route, 1.0), (Stage::Look, 0.5), (Stage::Armies, 2.0), (Stage::Script, 0.5), (Stage::Terrain, 2.0), (Stage::World, 5.0), (Stage::Fog, 1.0), (Stage::Minimap, 0.5), (Stage::Autosave, 3.0)]),
@@ -544,49 +654,50 @@ mod tests {
         assert_eq!(rest_ms(&s), 4.5);
         assert_eq!(present_ms(&s), 2.0);
         // Stages that add up to more than the work: the rest is clamped at zero.
-        let over = sample(Kind::Walk, 5.0, 6.0, stages(&[(Stage::Tick, 2.0), (Stage::World, 4.0), (Stage::Fog, 2.0)]));
+        let over = sample(Kind::Walk { tilt: false }, 5.0, 6.0, stages(&[(Stage::Tick, 2.0), (Stage::World, 4.0), (Stage::Fog, 2.0)]));
         assert_eq!(rest_ms(&over), 0.0);
         // The tick's parts above the tick: its rest is clamped at zero too.
-        let parts_over = sample(Kind::Walk, 5.0, 6.0, stages(&[(Stage::Tick, 2.0), (Stage::Route, 3.0)]));
+        let parts_over = sample(Kind::Walk { tilt: false }, 5.0, 6.0, stages(&[(Stage::Tick, 2.0), (Stage::Route, 3.0)]));
         assert_eq!(tick_rest_ms(&parts_over), 0.0);
     }
 
     #[test]
     fn a_kind_without_frames_has_no_line() {
-        let samples = [sample(Kind::Walk, 4.0, 5.0, [0.0; Stage::COUNT]), sample(Kind::Walk, 6.0, 7.0, [0.0; Stage::COUNT])];
+        let samples = [sample(Kind::Walk { tilt: false }, 4.0, 5.0, [0.0; Stage::COUNT]), sample(Kind::Walk { tilt: false }, 6.0, 7.0, [0.0; Stage::COUNT])];
         let lines = summary_lines(5.0, &samples);
         assert_eq!(lines.len(), 1);
-        assert!(lines[0].starts_with("frame probe 5.0 s walk n=2 "), "{}", lines[0]);
+        assert!(lines[0].starts_with("frame probe 5.0 s walk[flat] n=2 "), "{}", lines[0]);
         assert!(summary_lines(5.0, &[]).is_empty());
     }
 
     #[test]
     fn the_lines_follow_the_order_and_carry_the_rebuilds() {
-        let mut step = sample(Kind::WalkStep, 3.0, 4.0, stages(&[(Stage::Tick, 1.0), (Stage::Terrain, 1.0), (Stage::World, 2.0)]));
+        let mut step = sample(Kind::WalkStep { tilt: false }, 3.0, 4.0, stages(&[(Stage::Tick, 1.0), (Stage::Terrain, 1.0), (Stage::World, 2.0)]));
         step.rebuilds = 2;
-        let idle = sample(Kind::Idle, 2.0, 3.0, [0.0; Stage::COUNT]);
+        let idle = sample(Kind::Idle { tilt: true }, 2.0, 3.0, [0.0; Stage::COUNT]);
         let lines = summary_lines(5.0, &[idle, step]);
         assert_eq!(lines.len(), 2);
-        assert!(lines[0].contains(" walk-step n=1 "), "{}", lines[0]);
+        assert!(lines[0].contains(" walk-step[flat] n=1 "), "{}", lines[0]);
         assert!(lines[0].ends_with("tex rebuilds 2"), "{}", lines[0]);
         assert!(lines[0].contains(" | tick-rest p50 "), "{}", lines[0]);
-        assert!(lines[1].contains(" idle n=1 "), "{}", lines[1]);
+        assert!(lines[1].contains(" idle[25d] n=1 "), "{}", lines[1]);
     }
 
     #[test]
     fn a_csv_row_has_the_header_columns_in_order() {
         let mut step = sample(
-            Kind::WalkStep,
+            Kind::WalkStep { tilt: false },
             3.0,
             4.25,
             stages(&[(Stage::Tick, 1.0), (Stage::Terrain, 0.5), (Stage::World, 2.0), (Stage::Fog, 0.25), (Stage::Minimap, 0.125), (Stage::Route, 0.5), (Stage::Look, 0.25), (Stage::Armies, 0.75), (Stage::Autosave, 0.125), (Stage::Session, 0.25), (Stage::AiMove, 0.5), (Stage::AiPlan, 0.25)]),
         );
         step.rebuilds = 2;
         let row = csv_row(7, &step);
-        assert_eq!(row, "7,walk-step,3.000,4.250,1.000,0.500,2.000,0.250,0.125,0.500,0.250,0.750,0.000,0.000,0.000,0.125,0.250,0.500,0.250,2,0.000,0.000,0.000,0.000,0.000,");
+        assert_eq!(row, "7,walk-step,3.000,4.250,1.000,0.500,2.000,0.250,0.125,0.500,0.250,0.750,0.000,0.000,0.000,0.125,0.250,0.500,0.250,2,0.000,0.000,0.000,0.000,0.000,flat");
         assert_eq!(row.split(',').count(), CSV_HEADER.split(',').count());
         let other = sample(Kind::Other, 0.5, 1.0, [0.0; Stage::COUNT]);
         assert!(csv_row(1, &other).starts_with("1,other,0.500,1.000,0.000,"));
+        assert!(csv_row(1, &other).ends_with(","));
     }
 
     #[test]
@@ -595,7 +706,7 @@ mod tests {
         assert_eq!(settled_kind(Kind::Battle { tilt: true }, true), Kind::BattleEffect { tilt: true });
         assert_eq!(settled_kind(Kind::Battle { tilt: false }, true), Kind::BattleEffect { tilt: false });
         // Only a battle frame turns into a battle-effect one.
-        assert_eq!(settled_kind(Kind::Walk, true), Kind::Walk);
+        assert_eq!(settled_kind(Kind::Walk { tilt: false }, true), Kind::Walk { tilt: false });
         assert_eq!(settled_kind(Kind::Other, true), Kind::Other);
     }
 
@@ -611,8 +722,9 @@ mod tests {
         assert!(lines[1].contains(" | effect p50 3.0 "), "{}", lines[1]);
         assert!(lines[1].ends_with(" | tex rebuilds 0"), "{}", lines[1]);
         // The walk lines keep their old shape: no battle stages.
-        let walk = summary_lines(5.0, &[sample(Kind::Walk, 1.0, 2.0, [0.0; Stage::COUNT])]);
+        let walk = summary_lines(5.0, &[sample(Kind::Walk { tilt: false }, 1.0, 2.0, [0.0; Stage::COUNT])]);
         assert!(!walk[0].contains("battle-window"), "{}", walk[0]);
+        assert!(walk[0].contains(" | gpu-sky p50 0.0 p99 0.0 max 0.0 | gpu-terrain "), "{}", walk[0]);
         // The window's time less its backdrop and GPU waits is the rest.
         let rest = sample(Kind::Battle { tilt: true }, 9.0, 10.0, stages(&[(Stage::Backdrop, 2.0), (Stage::BattleWindow, 5.0), (Stage::GpuWindow, 1.0)]));
         assert_eq!(rest_ms(&rest), 1.0);
@@ -620,8 +732,8 @@ mod tests {
 
     #[test]
     fn the_csv_names_the_kinds_as_the_summary_does() {
-        let s = sample(Kind::Walk, 1.0, 1.0, [0.0; Stage::COUNT]);
+        let s = sample(Kind::Walk { tilt: false }, 1.0, 1.0, [0.0; Stage::COUNT]);
         assert!(csv_row(1, &s).starts_with("1,walk,"));
-        assert!(summary_lines(5.0, &[s]).iter().all(|l| l.contains(" walk n=1 ")));
+        assert!(summary_lines(5.0, &[s]).iter().all(|l| l.contains(" walk[flat] n=1 ")));
     }
 }

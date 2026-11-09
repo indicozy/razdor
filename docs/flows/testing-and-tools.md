@@ -174,6 +174,16 @@ placeholder `0.0.0` (`update_view::shown_version`), so a version bump changes no
    Their lines add the stages backdrop, battle-window (effect inside it), and gpu-backdrop and
    gpu-window: on Android only, the GL queue flushed and waited for (`glFinish`) after each,
    which serialises the GPU while profiling (0 elsewhere).
+   The map kinds (`walk-step`, `walk`, `idle`) are named with their view too (`idle[25d]`) and
+   add the map's GPU waits (Android, probe on: `gpu-sky`, `gpu-terrain`, `gpu-marks`,
+   `gpu-sprites`, `gpu-fog`, `gpu-ui` after the minimap, bar, windows and cursor; each a flush
+   and `glFinish` after that pass, `ui::gpu_probe`) and the standing sprites' count and summed
+   area (`sprites n=… area=…Mpx`, pixels of the pass's 2D space: an overdraw estimate) and the
+   terrain layer's area. `[… nosharp]` in a name: sharp sampling is off for the A/B (see
+   below).
+   Sharp sampling A/B (profiling): `RAZDOR_NO_SHARP=1` (desktop) or the app folder's file
+   `profile-nosharp` (Android) samples every sharp material plainly (`texture2D`) with the
+   same materials and batching; one line `sharp sampling off (profiling)` is logged at start.
    `RAZDOR_SCENE_OPEN=<frame>:<window>[,…]` (`snapshot::open_later`: `load`, `army`,
    `spells`, `journal`, `menu`, `building:<n>`, `map`) opens a window at a set frame and
    logs the frames after it.
