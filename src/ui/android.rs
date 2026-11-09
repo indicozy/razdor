@@ -228,6 +228,13 @@ pub fn private_cache_dir() -> Option<std::path::PathBuf> {
     }
 }
 
+/// The app's own folder: `getExternalFilesDir(null)`, or `getFilesDir()` without an external volume
+/// (`razdorFilesDir`, MainActivityInject.java). `None` when the call fails; `platform` keeps the answer.
+pub fn files_dir() -> Option<std::path::PathBuf> {
+    // SAFETY: as in `text_call`.
+    unsafe { text_call("razdorFilesDir") }.filter(|path| !path.is_empty()).map(std::path::PathBuf::from)
+}
+
 /// A call of the activity that takes no argument and returns text (`razdor::jni::to_text`), or
 /// `None` when the call is missing or refused.
 ///

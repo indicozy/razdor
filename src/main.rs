@@ -63,6 +63,10 @@ fn conf() -> Conf {
     if let Some(code) = ui::trailer::configure(&args) {
         std::process::exit(code);
     }
+    // Android: the app's own folder, and whether the data has moved to it. Before the log opens: the
+    // log's folder is fixed at its first use (`diag::log_path`), and the folders come from this.
+    #[cfg(target_os = "android")]
+    razdor::platform::set_android_files_dir(ui::android::files_dir());
     // The log of this start (`razdor.log`, see `razdor::diag`), before anything can fail.
     razdor::diag::init();
     // `RAZDOR_DT_DIR` and the other settings may come from a `.env` file.

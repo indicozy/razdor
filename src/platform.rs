@@ -1,10 +1,10 @@
 //! Where Razdor keeps its own files and looks for the install, per platform.
 //!
 //! On desktop these are the platform's folders (`dirs`). Android has no such folders for
-//! a program that is not a game (`dirs` gives nothing useful there), so Razdor uses a
-//! `Razdor` folder on the shared storage: it survives an uninstall, and the player reaches
-//! it with a file manager. Reading and writing it needs the all-files permission (see
-//! `ui::android`).
+//! a program that is not a game (`dirs` gives nothing useful there), so Razdor uses its app's own
+//! folder (`getExternalFilesDir`, see [`android_paths`]). Older releases kept the data on the
+//! shared storage (`/storage/emulated/0`, which needed the all-files permission): until the copy
+//! into the app's folder, those legacy paths stay in use (see [`set_android_files_dir`]).
 //!
 //! iOS keeps everything in the app's own Documents folder (`$HOME/Documents`, the app's
 //! sandbox home). The Files app shows that folder as «На iPhone → Раздор» because Info.plist
@@ -53,9 +53,125 @@ pub fn set_safe_insets(insets: (f32, f32, f32, f32)) {
     }
 }
 
-/// Android: Razdor's folder on the shared internal storage.
+/// Android: Razdor's folder on the shared internal storage, the one older releases used. It stays
+/// the source of the copy into the app's own folder and the place of the data until the move
+/// (see [`android_paths`]).
+pub const LEGACY_ANDROID_ROOT: &str = "/storage/emulated/0/Razdor";
+
+/// Android: the game's folder on the shared internal storage (`dt::install`), the legacy one
+/// as [`LEGACY_ANDROID_ROOT`].
+pub const LEGACY_ANDROID_GAME: &str = "/storage/emulated/0/DiscordTimes";
+
+/// Where Android keeps Razdor's folders: Razdor's own folder ([`AndroidPaths::root`]) and the game's
+/// ([`AndroidPaths::game`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AndroidPaths {
+    pub root: PathBuf,
+    pub game: PathBuf,
+}
+
+/// The paths of the data once it is in the app's own folder `files` (`getExternalFilesDir`, see
+/// `ui::android::files_dir`): `<files>/Razdor` and `<files>/DiscordTimes`. Before the move
+/// (`migrated` false) the legacy shared folders.
+pub fn android_paths(files: &Path, migrated: bool) -> AndroidPaths {
+    if migrated {
+        AndroidPaths { root: files.join("Razdor"), game: files.join("DiscordTimes") }
+    } else {
+        legacy_android_paths()
+    }
+}
+
+/// The legacy shared folders ([`LEGACY_ANDROID_ROOT`], [`LEGACY_ANDROID_GAME`]).
+pub fn legacy_android_paths() -> AndroidPaths {
+    AndroidPaths { root: PathBuf::from(LEGACY_ANDROID_ROOT), game: PathBuf::from(LEGACY_ANDROID_GAME) }
+}
+
+/// The marker that says the data is in the app's own folder: `<files>/Razdor/migrated-from-shared`.
+pub fn migrated_marker(files: &Path) -> PathBuf {
+    files.join("Razdor").join("migrated-from-shared")
+}
+
+/// Writes the marker ([`migrated_marker`]): a line with the time (seconds since the epoch) and
+/// `how` (`fresh` for an install with no legacy data, else how the data came). Errors are ignored:
+/// the next start asks again.
+pub fn write_migrated_marker(files: &Path, how: &str) {
+    let marker = migrated_marker(files);
+    if let Some(dir) = marker.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let _ = std::fs::write(marker, format!("{secs} {how}\n"));
+}
+
+/// Whether `dir` holds anything but `.nomedia` (see [`write_nomedia`]): false when it is missing,
+/// empty or unreadable.
+fn has_data(dir: &Path) -> bool {
+    std::fs::read_dir(dir).is_ok_and(|entries| entries.flatten().any(|e| e.file_name() != ".nomedia"))
+}
+
+/// Whether the data counts as moved to the app's own folder `files` at start: the marker is there,
+/// or the legacy folders `legacy_root` (Razdor's) and `legacy_game` (the game's) hold no Razdor data
+/// (missing, empty or unreadable: a fresh install). A player whose game is still in `legacy_game`
+/// is not migrated until the copy.
+pub fn starts_migrated(files: &Path, legacy_root: &Path, legacy_game: &Path) -> bool {
+    migrated_marker(files).exists() || (!has_data(legacy_root) && !has_data(legacy_game))
+}
+
+/// Android: the app's own folder, given by the binary at start ([`set_android_files_dir`]); `None`
+/// when the call failed.
 #[cfg(target_os = "android")]
-pub const ANDROID_ROOT: &str = "/storage/emulated/0/Razdor";
+static ANDROID_FILES: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+
+/// Android: whether the data is in the app's own folder (the release N gate). Off until
+/// [`set_android_files_dir`] finds it migrated, or [`set_android_migrated`] after the copy.
+#[cfg(target_os = "android")]
+static ANDROID_MIGRATED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Android: stores the app's own folder (`getExternalFilesDir(null)`, or `getFilesDir()`) and
+/// decides whether the data is in it ([`starts_migrated`] on the legacy folders). A fresh install
+/// gets its marker here. Called once, before anything reads a folder (the log's folder included):
+/// `None` (the call failed) keeps the legacy folders.
+#[cfg(target_os = "android")]
+pub fn set_android_files_dir(files: Option<PathBuf>) {
+    use std::sync::atomic::Ordering::Relaxed;
+    let migrated = match &files {
+        Some(files) => {
+            let migrated = starts_migrated(files, Path::new(LEGACY_ANDROID_ROOT), Path::new(LEGACY_ANDROID_GAME));
+            if migrated && !migrated_marker(files).exists() {
+                write_migrated_marker(files, "fresh");
+            }
+            migrated
+        }
+        None => {
+            crate::diag!("the app's folder could not be read: the data stays in the shared storage");
+            false
+        }
+    };
+    let _ = ANDROID_FILES.set(files);
+    ANDROID_MIGRATED.store(migrated, Relaxed);
+}
+
+/// Android: whether the data is in the app's own folder (see [`set_android_files_dir`]).
+#[cfg(target_os = "android")]
+pub fn android_migrated() -> bool {
+    ANDROID_MIGRATED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Android: records that the data was copied into the app's own folder; from now on the paths are
+/// the app's own ones. The copy (and its marker) is the caller's.
+#[cfg(target_os = "android")]
+pub fn set_android_migrated() {
+    ANDROID_MIGRATED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Android: the paths as they are now: the app's own folder once migrated, else the legacy ones.
+#[cfg(target_os = "android")]
+fn android_current() -> AndroidPaths {
+    match ANDROID_FILES.get().cloned().flatten() {
+        Some(files) => android_paths(&files, android_migrated()),
+        None => legacy_android_paths(),
+    }
+}
 
 /// iOS: the app's Documents folder (the sandbox home is `$HOME`).
 #[cfg(target_os = "ios")]
@@ -64,12 +180,12 @@ fn ios_documents() -> Option<PathBuf> {
 }
 
 /// Razdor's own folder: saves, the log, the editor's maps, the translation
-/// jobs. Desktop: `razdor` in the platform's data folder. Android: [`ANDROID_ROOT`]. iOS:
-/// `Documents/Razdor`.
+/// jobs. Desktop: `razdor` in the platform's data folder. Android: [`android_paths`] (the app's
+/// own folder, or the legacy one until the move). iOS: `Documents/Razdor`.
 pub fn app_dir() -> Option<PathBuf> {
     #[cfg(target_os = "android")]
     {
-        Some(PathBuf::from(ANDROID_ROOT))
+        Some(android_current().root)
     }
     #[cfg(target_os = "ios")]
     {
@@ -153,12 +269,12 @@ pub fn tidy_app_dir() {
 }
 
 /// The folder of the settings Razdor remembers (the install's folder): `razdor` in the
-/// platform's config folder on desktop; on Android, [`ANDROID_ROOT`] too; on iOS, the same
+/// platform's config folder on desktop; on Android, the same as [`app_dir`]; on iOS, the same
 /// `Documents/Razdor` as [`app_dir`].
 pub fn config_dir() -> Option<PathBuf> {
     #[cfg(target_os = "android")]
     {
-        Some(PathBuf::from(ANDROID_ROOT))
+        Some(android_current().root)
     }
     #[cfg(target_os = "ios")]
     {
@@ -171,13 +287,17 @@ pub fn config_dir() -> Option<PathBuf> {
 }
 
 /// Folders searched for an install when none is set or remembered. Desktop: `~/Games`,
-/// `~/Downloads` and the home folder. Android: the folder the player is told to use
+/// `~/Downloads` and the home folder. Android: once the data is in the app's own folder, that
+/// folder's game folder ([`unpack_dir`]); before the move, the folder the player is told to use
 /// (`DiscordTimes`, in internal storage), then the usual download and game folders, then
 /// the whole internal storage (three levels deep, see `dt::install`). iOS: the folder the
 /// player is told to use (`Documents/DiscordTimes`), then `Documents` itself.
 pub fn install_roots() -> Vec<PathBuf> {
     #[cfg(target_os = "android")]
     {
+        if android_migrated() {
+            return vec![android_current().game];
+        }
         ["DiscordTimes", "Download", "Games", ""].iter().map(|d| PathBuf::from("/storage/emulated/0").join(d)).collect()
     }
     #[cfg(target_os = "ios")]
@@ -194,13 +314,13 @@ pub fn install_roots() -> Vec<PathBuf> {
 }
 
 /// The folder an unpacked game goes into (`dt::unpack`), and the last install folder the search
-/// checks: Android `DiscordTimes` in the shared storage, iOS `Documents/DiscordTimes`, macOS
+/// checks: Android `DiscordTimes` in the app's own folder ([`android_paths`]), iOS `Documents/DiscordTimes`, macOS
 /// `DiscordTimes` in [`app_dir`] (the app bundle is not written to), elsewhere `DiscordTimes`
 /// next to the program.
 pub fn unpack_dir() -> Option<PathBuf> {
     #[cfg(target_os = "android")]
     {
-        Some(PathBuf::from("/storage/emulated/0/DiscordTimes"))
+        Some(android_current().game)
     }
     #[cfg(target_os = "ios")]
     {
@@ -281,6 +401,76 @@ pub fn ios_files_url(dir: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn android_paths_are_legacy_until_migrated() {
+        let files = Path::new("/data/data/io.github.indicozy.razdor/files");
+        assert_eq!(android_paths(files, false), legacy_android_paths());
+        assert_eq!(legacy_android_paths().root, PathBuf::from("/storage/emulated/0/Razdor"));
+        assert_eq!(legacy_android_paths().game, PathBuf::from("/storage/emulated/0/DiscordTimes"));
+        assert_eq!(
+            android_paths(files, true),
+            AndroidPaths { root: files.join("Razdor"), game: files.join("DiscordTimes") }
+        );
+    }
+
+    /// A scratch folder for one test (removed by the test that makes it).
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("razdor-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_marked_install_starts_migrated() {
+        let files = scratch("marked-files");
+        let legacy = scratch("marked-legacy");
+        std::fs::write(legacy.join("saves.rzsave"), b"save").unwrap();
+        let game = legacy.join("game-missing");
+        write_migrated_marker(&files, "copied");
+        assert!(starts_migrated(&files, &legacy, &game), "the marker wins over the legacy data");
+        let text = std::fs::read_to_string(migrated_marker(&files)).unwrap();
+        assert!(text.ends_with(" copied\n") && text.split(' ').next().unwrap().parse::<u64>().is_ok(), "{text:?}");
+        let _ = std::fs::remove_dir_all(&files);
+        let _ = std::fs::remove_dir_all(&legacy);
+    }
+
+    #[test]
+    fn no_legacy_data_is_a_fresh_install() {
+        let files = scratch("fresh-files");
+        let base = scratch("fresh-legacy");
+        // Missing: both folders absent.
+        assert!(starts_migrated(&files, &base.join("no-root"), &base.join("no-game")));
+        // Empty folders.
+        std::fs::create_dir_all(base.join("empty-root")).unwrap();
+        std::fs::create_dir_all(base.join("empty-game")).unwrap();
+        assert!(starts_migrated(&files, &base.join("empty-root"), &base.join("empty-game")));
+        // A `.nomedia` alone is not data.
+        std::fs::write(base.join("empty-root").join(".nomedia"), b"").unwrap();
+        assert!(starts_migrated(&files, &base.join("empty-root"), &base.join("empty-game")));
+        // Unreadable: a file where a folder should be.
+        std::fs::write(base.join("not-a-folder"), b"x").unwrap();
+        assert!(starts_migrated(&files, &base.join("not-a-folder"), &base.join("no-game")));
+        let _ = std::fs::remove_dir_all(&files);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn legacy_data_without_a_marker_stays_legacy() {
+        let files = scratch("legacy-files");
+        let base = scratch("legacy-data");
+        // Saves in the shared Razdor folder.
+        std::fs::create_dir_all(base.join("root").join("saves")).unwrap();
+        std::fs::write(base.join("root").join("saves").join("game.rzsave"), b"save").unwrap();
+        assert!(!starts_migrated(&files, &base.join("root"), &base.join("no-game")));
+        // The game in the shared DiscordTimes folder, Razdor's folder missing.
+        std::fs::create_dir_all(base.join("game")).unwrap();
+        std::fs::write(base.join("game").join("DT.EXE"), b"exe").unwrap();
+        assert!(!starts_migrated(&files, &base.join("no-root"), &base.join("game")));
+        let _ = std::fs::remove_dir_all(&files);
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn android_folder_becomes_its_document_uri() {

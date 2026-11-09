@@ -131,6 +131,15 @@ public String razdorCacheDir() {
     return getCacheDir().getAbsolutePath();
 }
 
+// The app's own folder (src/ui/android.rs files_dir): the external files folder, else the internal one.
+public String razdorFilesDir() {
+    File dir = getExternalFilesDir(null);
+    if (dir == null) {
+        dir = getFilesDir();
+    }
+    return dir.getAbsolutePath();
+}
+
 // The phone's safe area in physical px (src/ui/display.rs reads it): "left,top,right,bottom,bl,br,tl,tr",
 // the display cutout's insets and the radii of the four rounded corners. A corner the system does
 // not report (before API 31) is -1; "" while the window has no insets yet. The system bars are left
