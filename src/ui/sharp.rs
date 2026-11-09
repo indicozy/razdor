@@ -135,6 +135,9 @@ razdor::local! {
     static BASE: std::cell::RefCell<Option<Material>> = const { std::cell::RefCell::new(None) };
     /// The draw material's last uniforms (texture size, scale) set in the session.
     static LAST: std::cell::Cell<Option<(Vec2, Vec2)>> = const { std::cell::Cell::new(None) };
+    /// A plain draw in the session set the default material and the session's material is not
+    /// current until the next sharp draw ([`plain_draw`], [`session_material`]).
+    static PLAIN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Runs `draw` with the sharp material kept set: its sharp draws share one material switch,
@@ -149,6 +152,7 @@ pub fn session<R>(draw: impl FnOnce() -> R) -> R {
         fn drop(&mut self) {
             BASE.with(|b| b.borrow_mut().take());
             LAST.with(|l| l.set(None));
+            PLAIN.with(|p| p.set(false));
             gl_use_default_material();
         }
     }
@@ -158,6 +162,7 @@ pub fn session<R>(draw: impl FnOnce() -> R) -> R {
     }
     BASE.with(|b| *b.borrow_mut() = Some(m.clone()));
     LAST.with(|l| l.set(None));
+    PLAIN.with(|p| p.set(false));
     gl_use_material(&m);
     let _end = End;
     draw()
@@ -167,8 +172,34 @@ fn in_session() -> bool {
     BASE.with(|b| b.borrow().is_some())
 }
 
+/// Before a plain draw (text, a texture drawn without sharp sampling, or a helper's own
+/// material outside a blend) inside a session: the default material is set for it. Consecutive
+/// plain draws share that material; the next sharp draw sets the session's again
+/// ([`session_material`]). Outside a session, or inside a blend context (whose material the
+/// plain draw keeps), it does nothing. White shapes (`draw_rectangle`, lines, circles) need no
+/// call: they draw with either material.
+pub fn plain_draw() {
+    if !in_session() || blend_context().is_some() {
+        return;
+    }
+    if !PLAIN.with(|p| p.replace(true)) {
+        gl_use_default_material();
+    }
+}
+
+/// Makes the session's material current for a sharp draw inside a session (it may be off after
+/// a plain draw).
+fn session_material() {
+    if PLAIN.with(|p| p.replace(false)) {
+        if let Some(m) = BASE.with(|b| b.borrow().clone()) {
+            gl_use_material(&m);
+        }
+    }
+}
+
 /// Ends a blend context: back to the session's material, or the default one outside a session.
 pub fn leave_blend() {
+    PLAIN.with(|p| p.set(false));
     match BASE.with(|b| b.borrow().clone()) {
         Some(m) => gl_use_material(&m),
         None => gl_use_default_material(),
@@ -243,6 +274,7 @@ pub fn draw(tex: &Texture2D, x: f32, y: f32, color: Color, params: DrawTexturePa
             Some(m) if in_session() => {
                 let tex_size = vec2(tex.width(), tex.height());
                 set_cached(&m, tex_size, draw_scale(tex_size, &params));
+                session_material();
                 draw_texture_ex(tex, x, y, color, params);
             }
             Some(m) => {
@@ -275,6 +307,7 @@ pub fn draw_mesh_sharp(mesh: &Mesh, scale: Vec2) {
             Some(m) if mesh.texture.is_some() && in_session() => {
                 let tex_size = mesh.texture.as_ref().map_or(Vec2::ONE, |t| vec2(t.width(), t.height()));
                 set_cached(&m, tex_size, scale.abs());
+                session_material();
                 draw_mesh(mesh);
             }
             Some(m) if mesh.texture.is_some() => {

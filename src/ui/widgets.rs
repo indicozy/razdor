@@ -216,6 +216,7 @@ fn text_ttf(s: &str, x: f32, y: f32, size: f32, color: Color) {
     let size = size * if super::dt_font::current_ttf().is_some() { face_scale() } else { 1.0 };
     with_font(s, |font, data, s| {
         let px = ttf_size(size);
+        super::sharp::plain_draw();
         if let Some(runs) = data.and_then(|d| super::script_font::runs(d, s)) {
             // Runs side by side, each moving the pen by its measured width, so the text is
             // as wide as `measure_ttf` says.

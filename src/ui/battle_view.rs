@@ -993,13 +993,17 @@ impl BattleView {
         gpu_wait(razdor::frame_probe::Stage::GpuBackdrop);
         // The leave-battle window stands alone over the map: the original hides the battle
         // window while it is open (86b of the UI audit; 4d3620 is its own window).
+        // The window's sharp art (cards, effects, the text's face) shares one material switch:
+        // its plain draws go between them (`sharp::session`).
         razdor::frame_probe::time(razdor::frame_probe::Stage::BattleWindow, || {
             if !self.exiting || just_opened {
-                self.close_clicked |= self.draw(&l, &battle_title(game), game.clock.total_minutes() as u64, assets);
-                self.controls(&l, over);
-                if l.hint_after_buttons() {
-                    self.hint(&l);
-                }
+                super::sharp::session(|| {
+                    self.close_clicked |= self.draw(&l, &battle_title(game), game.clock.total_minutes() as u64, assets);
+                    self.controls(&l, over);
+                    if l.hint_after_buttons() {
+                        self.hint(&l);
+                    }
+                });
             }
         });
         gpu_wait(razdor::frame_probe::Stage::GpuWindow);
@@ -1048,11 +1052,13 @@ impl BattleView {
         razdor::frame_probe::time(razdor::frame_probe::Stage::Backdrop, || super::display::with_window_scale(None, super::main_menu::backdrop));
         gpu_wait(razdor::frame_probe::Stage::GpuBackdrop);
         razdor::frame_probe::time(razdor::frame_probe::Stage::BattleWindow, || {
-            self.close_clicked |= self.draw(&l, tr("Custom battle"), 0, assets);
-            self.controls(&l, over);
-            if l.hint_after_buttons() {
-                self.hint(&l);
-            }
+            super::sharp::session(|| {
+                self.close_clicked |= self.draw(&l, tr("Custom battle"), 0, assets);
+                self.controls(&l, over);
+                if l.hint_after_buttons() {
+                    self.hint(&l);
+                }
+            });
         });
         gpu_wait(razdor::frame_probe::Stage::GpuWindow);
         super::cursor::set(self.pointer());

@@ -1272,7 +1272,7 @@ pub fn grey_out(r: Rect) {
         Some(m) => {
             gl_use_material(&m);
             draw_rectangle(r.x, r.y, r.w, r.h, WHITE);
-            gl_use_default_material();
+            sharp::leave_blend();
         }
         None => draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.0, 0.0, 0.35)),
     }
@@ -1463,6 +1463,7 @@ pub fn engraved_centered(s: &str, c: Vec2, (cap, max_w): (f32, f32), (rim, bold)
     }
     let draw = |x: f32, y: f32, color: Color| {
         for dx in [0.0, bold] {
+            sharp::plain_draw();
             draw_text_ex(s, x + dx, y, TextParams { font: font.as_ref(), font_size: size, color, ..Default::default() });
         }
     };
@@ -1736,6 +1737,7 @@ fn steel_outline(r: Rect, px: f32, thick: u8, line: f32) {
     let along = |start: usize, n: usize, x: f32, y: f32, reversed: bool| {
         for (i, off, len) in steel_pieces(start, n, tw, th) {
             let at = if reversed { n - off - len } else { off };
+            sharp::plain_draw();
             draw_texture_ex(&row, x + at as f32 * px, y, WHITE, DrawTextureParams {
                 dest_size: Some(vec2(len as f32 * px, band)),
                 source: Some(Rect::new((i % tw) as f32, (i / tw) as f32, len as f32, 1.0)),
@@ -1747,6 +1749,7 @@ fn steel_outline(r: Rect, px: f32, thick: u8, line: f32) {
     let down = |start: usize, n: usize, x: f32, y: f32, reversed: bool| {
         for (i, off, len) in steel_pieces(start, n, tw, th) {
             let at = if reversed { n - off - len } else { off };
+            sharp::plain_draw();
             draw_texture_ex(&col, x, y + at as f32 * px, WHITE, DrawTextureParams {
                 dest_size: Some(vec2(band, len as f32 * px)),
                 source: Some(Rect::new((i / tw) as f32, (i % tw) as f32, 1.0, len as f32)),

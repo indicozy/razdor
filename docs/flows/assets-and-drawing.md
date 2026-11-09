@@ -150,7 +150,13 @@ install file ──► src/dt/gfx.rs decode_file ──► gfx::Image (RGBA, not
   material and its art draws sharp inside it (`sharp::in_blend`); the world's painter pass
   keeps one material set for all its art (`sharp::session`), and its uniforms are set only
   when they change, because macroquad breaks its batch at every material switch and every
-  uniform set. Textures stay `FilterMode::Linear` (the step needs the hardware bilinear
+  uniform set. The battle window (`BattleView::frame`, `frame_custom`) is one session too.
+  Inside a session a plain draw (text, a texture without sharp sampling, a helper's own
+  material) calls `sharp::plain_draw` first: it sets the default material once for the run of
+  plain draws, and the next sharp draw sets the session's again. White shapes need no call,
+  and a blend context keeps its own material. Text goes through `plain_draw` in `widgets`,
+  `dt_font`, `script_font` and `chrome`, so a new plain texture or text draw in a session
+  needs the same call. Textures stay `FilterMode::Linear` (the step needs the hardware bilinear
   inside its band). Stays smooth on purpose: the minimap and the fog, `Nearest` textures
   (window lines, custom PNGs, event pictures), the editor, the hub's catalog pictures and
   the TrueType fonts. The bitmap font draws its non-whole-scale sheet sharp (`dt_font`); a

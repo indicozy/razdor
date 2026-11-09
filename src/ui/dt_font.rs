@@ -299,6 +299,7 @@ impl BitmapFont {
                         let dest = vec2(cell.w as f32 * k, cell.h as f32 * k);
                         let params = DrawTextureParams { dest_size: Some(dest), source: Some(src), ..Default::default() };
                         if whole {
+                            super::sharp::plain_draw();
                             draw_texture_ex(&sheet.texture, pen + offset * k, top, color, params);
                         } else {
                             super::sharp::draw(&sheet.smooth, pen + offset * k, top, color, params);

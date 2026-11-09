@@ -428,6 +428,7 @@ pub fn draw(fallback: usize, s: &str, x: f32, y: f32, size: u16, color: Color) -
         let Some(tex) = tex else { continue };
         let gx = x + (g.x + tex.left) / dpi;
         let gy = y - (g.y + tex.top) / dpi;
+        super::sharp::plain_draw();
         draw_texture_ex(&tex.texture, gx, gy, color, DrawTextureParams { dest_size: Some(vec2(tex.w / dpi, tex.h / dpi)), ..Default::default() });
     }
     shaped.advance / dpi

@@ -1426,6 +1426,7 @@ impl Camera {
                 let (dest, src) = self.fog_texels();
                 minimap::draw_extended(mask, dest, src);
             } else {
+                super::sharp::plain_draw();
                 draw_texture_ex(mask, tl.x, tl.y, WHITE, DrawTextureParams { dest_size: Some(br - tl), ..Default::default() });
             }
         }

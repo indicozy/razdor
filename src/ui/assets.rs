@@ -159,6 +159,7 @@ impl Assets {
         }
         if let Some(tex) = custom {
             let params = DrawTextureParams { dest_size: Some(vec2(r.w * 0.8, r.h * 0.8)), ..Default::default() };
+            super::sharp::plain_draw();
             draw_texture_ex(&tex, r.x + r.w * 0.1, r.y + r.h * 0.1, WHITE, params);
             return;
         }
@@ -232,6 +233,7 @@ impl Assets {
         if let Some(tex) = custom.or_else(|| self.dt_item_icon(item)) {
             let params = DrawTextureParams { dest_size: Some(vec2(size, size)), ..Default::default() };
             if is_custom {
+                super::sharp::plain_draw();
                 draw_texture_ex(&tex, x, y, WHITE, params);
             } else {
                 super::sharp::draw(&tex, x, y, WHITE, params);
@@ -258,6 +260,7 @@ impl Assets {
             let params = DrawTextureParams { dest_size: Some(vec2(size, size)), ..Default::default() };
             let (x, y) = (cx - size / 2.0, cy - size / 2.0);
             if is_custom {
+                super::sharp::plain_draw();
                 draw_texture_ex(&tex, x, y, WHITE, params);
             } else {
                 super::sharp::draw(&tex, x, y, WHITE, params);
