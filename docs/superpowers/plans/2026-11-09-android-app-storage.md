@@ -204,8 +204,8 @@ earlier, while the permission is still there.
 - [ ] Permission not granted in N (a player who never granted it): nothing to copy by path; the
   app's folder is used from the start and the fallback below applies.
 
-**Release N+1 or later (2–3 weekly releases after N, the owner decides when, looking at the
-download stats from `tools/stats/downloads.py`): the permission goes.**
+**Release N+1, the weekly release one week after N (the owner's decision, 2026-11-09): the
+permission goes.**
 - [ ] Task 2 ships: the manifest drops every storage permission. The by-path copy code stays
   (harmless: the legacy root is simply not readable).
 - [ ] Fallback for players who skipped N (e.g. 1.3.x → N+1) or whose copy did not finish: when
@@ -231,6 +231,14 @@ download stats from `tools/stats/downloads.py`): the permission goes.**
 Release N wording: the files move into the app's folder and the game comes in through the
 picker; the permission is still asked of nobody new but stays for the move; it goes in a later
 release. Don't write "no storage permission" yet.
+
+Players are told in release N (the owner's decision, 2026-11-09): the changelog line, so the
+release notes and the Discord release post carry it, says in plain Russian that on Android the
+saves (and settings, maps, the game) are moved automatically into the app's own folder at the
+first start, the old folders are kept, and the next release stops asking for «Доступ ко всем
+файлам». E.g.: «Android: при первом запуске Раздор сам перенесёт сохранения, настройки и игру
+в собственную папку приложения (старые папки останутся). Со следующего выпуска «Доступ ко всем
+файлам» больше не понадобится.» The in-game message after the move (Task 6) says the same.
 
 - [ ] `CHANGELOG.md` (ru): no storage permission; where files live now; export/import buttons; the
   migration.
@@ -280,7 +288,7 @@ Release N+1 (permission dropped), weeks later:
   screenshots (desktop unchanged, phones) go to the owner before the push, with the device check.
 - Order: start after the refresh-rate change to `android/MainActivityInject.java` is on `main`.
 - Migration in two releases (Task 6): N keeps the permission and copies the data into the app's
-  folder; a later release (2–3 weeks on, the owner's call) drops the permission, with the
+  folder; the next weekly release, one week after N (the owner, 2026-11-09), drops the permission, with the
   folder-picker fallback for players who skipped N.
 
 ## Open questions for the owner (answered above, kept for the record)
