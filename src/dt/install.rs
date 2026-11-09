@@ -293,9 +293,10 @@ fn set_problem(why: Option<Problem>) {
     }
 }
 
-/// The game files of the base install `base` that the community's archive has and the folder
-/// lacks (`Err` with their paths). A changed file is logged and kept; a folder that is not a
-/// Community Update build is not checked (logged). A broken manifest is logged and skipped.
+/// The game files of the base install `base` that the community's archive has, Razdor reads
+/// (`integrity::needed_to_play`) and the folder lacks (`Err` with their paths). A changed file is
+/// logged and kept; a folder that is not a Community Update build is not checked (logged). A
+/// broken manifest is logged and skipped.
 pub fn guard_game_files(base: &Path) -> Result<(), Vec<String>> {
     match integrity::builtin() {
         Ok(manifest) => check_game_files(base, &manifest),
@@ -316,10 +317,16 @@ pub fn check_game_files(base: &Path, manifest: &integrity::Manifest) -> Result<(
     for changed in &report.changed {
         crate::diag!("install: {changed} differs from the community archive (kept)");
     }
-    if report.missing.is_empty() {
+    // Razdor's own filter (the original checks no files): a missing file Razdor never reads
+    // (`integrity::needed_to_play`) is logged and does not stop the game.
+    let (needed, unneeded): (Vec<String>, Vec<String>) = report.missing.into_iter().partition(|path| integrity::needed_to_play(path));
+    for path in &unneeded {
+        crate::diag!("install: {path} is missing, and Razdor does not read it (not required)");
+    }
+    if needed.is_empty() {
         Ok(())
     } else {
-        Err(report.missing)
+        Err(needed)
     }
 }
 
@@ -696,6 +703,61 @@ mod tests {
         // Units.ini is gone (a quarantined file): the install does not load, and the error names it.
         let err = DtInstall::load(&dir).unwrap_err();
         assert!(matches!(&err, DtError::Io { path, .. } if path.ends_with(UNITS_FILE)), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A Community Update folder for the guard's tests: the files of `GUARD_FILES` except `omit`,
+    /// and the manifest of all of them. Ten files, so a folder without two still counts as the
+    /// community's.
+    const GUARD_FILES: &[(&str, &[u8])] = &[
+        ("DiscordTimes.exe", b"MZ community exe"),
+        ("_Global.ini", b"[Global]\r\n"),
+        ("Rus_Units.ini", b"[Units]\r\n"),
+        ("Maps_Rus/a.DTm", b"map a"),
+        ("Graphics/knight.lit", b"picture"),
+        ("Graphics/knight2.lit", b"picture 2"),
+        ("Graphics/knight3.lit", b"picture 3"),
+        ("Дополнительные файлы/Блокноты с ID/Армия.txt", b"unit ids"),
+        ("Help/Документация.doc", b"help"),
+        ("License.txt", b"license"),
+    ];
+
+    fn guard_folder(name: &str, omit: &[&str]) -> (PathBuf, integrity::Manifest) {
+        let dir = std::env::temp_dir().join(format!("razdor-guard-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for (path, bytes) in GUARD_FILES {
+            if omit.contains(path) {
+                continue;
+            }
+            let p = dir.join(path);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, bytes).unwrap();
+        }
+        let manifest = integrity::Manifest {
+            archive: integrity::ArchiveInfo { name: "game.zip".into(), size: 0, sha256: "0".repeat(64), top: "Discord Times Community Update".into() },
+            files: GUARD_FILES
+                .iter()
+                .map(|(path, bytes)| integrity::FileEntry { path: path.to_string(), size: bytes.len() as u64, sha256: crate::update::sha256_hex(bytes) })
+                .collect(),
+        };
+        (dir, manifest)
+    }
+
+    #[test]
+    fn a_community_folder_without_the_notepads_and_the_exe_still_plays() {
+        let notepad = "Дополнительные файлы/Блокноты с ID/Армия.txt";
+        let (dir, m) = guard_folder("no-notepads", &[notepad, "DiscordTimes.exe"]);
+        let report = integrity::check(&dir, &m, false);
+        assert!(report.community, "still the community's folder by its sizes: {report:?}");
+        assert!(check_game_files(&dir, &m).is_ok(), "nothing Razdor reads is missing");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_missing_needed_file_is_the_only_one_listed() {
+        let notepad = "Дополнительные файлы/Блокноты с ID/Армия.txt";
+        let (dir, m) = guard_folder("needed", &["Graphics/knight2.lit", notepad, "DiscordTimes.exe"]);
+        assert_eq!(check_game_files(&dir, &m), Err(vec!["Graphics/knight2.lit".to_string()]));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

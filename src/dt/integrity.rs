@@ -126,6 +126,34 @@ pub fn missing_files(dir: &Path, m: &Manifest) -> Vec<String> {
     check(dir, m, false).missing
 }
 
+/// Whether Razdor reads the archive's file `path` when it plays. Razdor's own filter: the
+/// original checks no files at all, so a file it never reads must not stop the game (a folder
+/// without the modder's notepads or the exe still plays). Not needed: the notepads folder, the
+/// help folder, the root's programs and libraries (`.exe`, `.dll`, `.ico`), `License.txt`, and the
+/// ini files of the map editor and the DirectDraw shim. Everything else (the data, maps, pictures,
+/// sounds, logo) is needed. The exe is optional for the game: `dt::install::drain_rule` falls back
+/// to `_Global.ini`. Case-insensitive.
+pub fn needed_to_play(path: &str) -> bool {
+    match path.split_once('/') {
+        Some((folder, _)) => !(folder.to_lowercase() == NOTEPADS_FOLDER.to_lowercase() || folder.eq_ignore_ascii_case("Help")),
+        None => !unused_root_file(path),
+    }
+}
+
+/// The modder's notepads (`Дополнительные файлы`): the Community Update's extras, never read.
+const NOTEPADS_FOLDER: &str = "Дополнительные файлы";
+
+/// The root ini files of the map editor and the DirectDraw shim (lowercase).
+const UNUSED_ROOT_INI: [&str; 4] = ["dtmapedit.ini", "dtmapedit_rus.ini", "rus_mapedit.ini", "ddrawcompat.ini"];
+
+/// A file at the archive's root that the game never reads: a program or a library, its icon, the
+/// license, or an editor's or the shim's ini.
+fn unused_root_file(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    let ext = lower.rsplit_once('.').map(|(_, ext)| ext);
+    matches!(ext, Some("exe" | "dll" | "ico")) || lower == "license.txt" || UNUSED_ROOT_INI.contains(&lower.as_str())
+}
+
 /// Restores the files `rels` of the archive into `dir`, from the archive at `zip_path` (the
 /// archive's own folder is `m.archive.top`). Each file is written beside its place, checked
 /// against its size and SHA-256, and then renamed into place; a file that does not check is not
@@ -270,6 +298,59 @@ mod tests {
         assert!(parse("{").is_err());
         assert!(parse(r#"{"archive":{"name":"g","size":1,"sha256":"00","top":"T"},"files":[]}"#).is_err());
         assert!(safe_rel("Maps_Rus/a.DTm") && !safe_rel("/a") && !safe_rel("a/../b") && !safe_rel("a\\b") && !safe_rel(""));
+    }
+
+    #[test]
+    fn needed_to_play_drops_only_what_the_game_never_reads() {
+        for unused in [
+            "Дополнительные файлы/Блокноты с ID/Армия.txt",
+            "дополнительные файлы/x.txt",
+            "Help/Документация к Редактору Сценариев.doc",
+            "help/x.doc",
+            "DiscordTimes.exe",
+            "discordtimes.EXE",
+            "ddraw.dll",
+            "detoured.dll",
+            "ogg.dll",
+            "vorbis.dll",
+            "vorbisfile.dll",
+            "help.ico",
+            "Help.ICO",
+            "License.txt",
+            "license.txt",
+            "DTMapEdit.Ini",
+            "DTMapEdit_Rus.Ini",
+            "Rus_MapEdit.ini",
+            "DDrawCompat.ini",
+            "ddrawcompat.INI",
+        ] {
+            assert!(!needed_to_play(unused), "{unused} is not read by the game");
+        }
+        for needed in [
+            "Graphics/knight.lit",
+            "Maps_Rus/a.DTm",
+            "Rus_Units.ini",
+            "Rus_Artefacts.ini",
+            "Rus_Spells.ini",
+            "Rus_DiscordTimes.ini",
+            "_Global.ini",
+            "_Sounds.ini",
+            "Sounds/battle1.raw",
+            "Logo/AE_Logo.lit",
+        ] {
+            assert!(needed_to_play(needed), "{needed} is read by the game");
+        }
+    }
+
+    #[test]
+    fn the_built_in_manifest_needs_exactly_the_root_files_the_game_reads() {
+        let m = builtin().unwrap();
+        let mut root_needed: Vec<&str> = m.files.iter().map(|f| f.path.as_str()).filter(|p| !p.contains('/') && needed_to_play(p)).collect();
+        root_needed.sort_unstable();
+        assert_eq!(
+            root_needed,
+            ["Rus_Artefacts.ini", "Rus_DiscordTimes.ini", "Rus_Spells.ini", "Rus_Units.ini", "_Global.ini", "_Sounds.ini"],
+        );
     }
 
     #[test]
