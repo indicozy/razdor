@@ -81,8 +81,9 @@ fn target_camera(rt: &RenderTarget) -> Camera2D {
     }
 }
 
-/// Runs `f` with every camera drawing into `rt`; the screen's camera is back after.
-fn fill(rt: &RenderTarget, f: impl FnOnce()) {
+/// Runs `f` with every camera drawing into `rt`; the screen's camera is back after. Used by the
+/// terrain cache too (`terrain`).
+pub fn fill(rt: &RenderTarget, f: impl FnOnce()) {
     struct Done;
     impl Drop for Done {
         fn drop(&mut self) {

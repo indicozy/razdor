@@ -1514,25 +1514,74 @@ pub(super) fn draw_wrapped(tex: &Texture2D, dest: Rect, src: Vec2, src_size: Vec
     }
 }
 
+/// The terrain of the map as the blended layer (`terrain::TerrainLayer`): the quad over the drawn
+/// ground, in `mode` (see [`terrain::Mode`]). `cam` is the 2D space ([`in_view`]).
+fn terrain_quad(game: &Game, layer: &terrain::TerrainLayer, cam: &Camera, mode: terrain::Mode) {
+    let map = &game.world.map;
+    // The map area in view, in world units (cells span ±½ around their centres).
+    let rh = cam.grid.row_height();
+    let (map_tl, map_br) = (vec2(-0.5, -0.5 * rh), vec2(map.w as f32 - 0.5, (map.h as f32 - 0.5) * rh));
+    let w = cam.drawn_world_rect();
+    // «Продолжать карту за краем»: the whole drawn ground, and past the map's edges the ground
+    // goes on (a short strip, then the fog); otherwise the map's area in view.
+    let extend = extend_edge();
+    let (tl, br) = if extend { (w.point(), w.point() + w.size()) } else { (map_tl.max(w.point()), map_br.min(w.point() + w.size())) };
+    if tl.x < br.x && tl.y < br.y {
+        let (a, b) = (cam.to_screen(tl.into()), cam.to_screen(br.into()));
+        if matches!(mode, terrain::Mode::Full | terrain::Mode::Ground) {
+            frame_probe::terrain(b.x - a.x, b.y - a.y);
+        }
+        let view = vec4(tl.x, tl.y / rh, br.x, br.y / rh);
+        layer.draw(map.surface_codes(), (map.w as u32, map.h as u32), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(PX, PX * rh), Some((crate::ui::clock::now() * 1000.0) as i64), extend, mode);
+    }
+}
+
+/// The map's ground (the terrain layer, or square cells without it), drawn under the camera `cam`
+/// of the map frame. Option 2 (the terrain cache) applies to the map frame only, not to a
+/// backdrop, and not inside a picture being filled: the ground is drawn once into the cache when
+/// its key ([`ground_key`]) changes; then the cached ground is copied and the water and the
+/// border's fog drawn over it.
+fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool) {
+    let Some(layer) = art.and_then(|a| a.terrain_layer()).filter(|_| cam.grid == Grid::Square8) else {
+        return in_view(cam, |c| ground(c, || draw_terrain(game, art, c)));
+    };
+    super::gpu_probe::timed(|| {
+        let cached = (waits && layer.cache_on() && super::render_cache::target().is_none()).then(|| layer.ground_target(ground_key(game, cam))).flatten();
+        match cached {
+            Some((rt, fill)) => {
+                if fill {
+                    super::render_cache::fill(&rt, || in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Ground))));
+                }
+                in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Cached)));
+                in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay)));
+            }
+            None => in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Full))),
+        }
+    });
+}
+
+/// The key of the cached ground: everything the ground pass reads (the screen, the camera and
+/// its 2.5D tilt, the map's size and surface codes, and the edge's mode). The clock and the water
+/// are not in it: they are drawn over the cache each frame.
+fn ground_key(game: &Game, cam: &Camera) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    let f = |v: f32| v.to_bits();
+    let rect = |r: Rect| [r.x, r.y, r.w, r.h].map(f);
+    [screen_width(), screen_height(), screen_dpi_scale()].map(f).hash(&mut h);
+    [cam.origin.x, cam.origin.y, cam.scale].map(f).hash(&mut h);
+    rect(cam.view).hash(&mut h);
+    rect(cam.draw).hash(&mut h);
+    if let Some(t) = cam.tilt {
+        (t.cam.pitch_deg.to_bits(), t.cam.yaw_deg.to_bits(), rect(t.plan), rect(t.cull)).hash(&mut h);
+    }
+    let map = &game.world.map;
+    (map.w, map.h, cam.grid.row_height().to_bits(), extend_edge(), map.surface_codes()).hash(&mut h);
+    h.finish()
+}
+
 fn draw_terrain(game: &Game, art: Option<&DtArt>, cam: &Camera) {
     let map = &game.world.map;
-    if let Some(layer) = art.and_then(|a| a.terrain_layer()).filter(|_| cam.grid == Grid::Square8) {
-        // The map area in view, in world units (cells span ±½ around their centres).
-        let rh = cam.grid.row_height();
-        let (map_tl, map_br) = (vec2(-0.5, -0.5 * rh), vec2(map.w as f32 - 0.5, (map.h as f32 - 0.5) * rh));
-        let w = cam.drawn_world_rect();
-        // «Продолжать карту за краем»: the whole drawn ground, and past the map's edges the ground
-        // goes on (a short strip, then the fog); otherwise the map's area in view.
-        let extend = extend_edge();
-        let (tl, br) = if extend { (w.point(), w.point() + w.size()) } else { (map_tl.max(w.point()), map_br.min(w.point() + w.size())) };
-        if tl.x < br.x && tl.y < br.y {
-            let (a, b) = (cam.to_screen(tl.into()), cam.to_screen(br.into()));
-            frame_probe::terrain(b.x - a.x, b.y - a.y);
-            let view = vec4(tl.x, tl.y / rh, br.x, br.y / rh);
-            layer.draw(map.surface_codes(), (map.w as u32, map.h as u32), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(PX, PX * rh), Some((crate::ui::clock::now() * 1000.0) as i64), extend);
-        }
-        return;
-    }
     let ((c0, c1), (r0, r1)) = cam.visible(map);
     let size = cam.cell_size();
     let unscaled = vec2(PX, PX * cam.grid.row_height());
@@ -2192,16 +2241,17 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
     if waits {
         gpu_wait(Stage::GpuSky);
     }
+    // The ground first: it sets its own camera (`in_view`), so the cache can fill through it.
+    stamp_idle(game, clock_ms());
+    frame_probe::time(Stage::Terrain, || draw_ground(game, assets.dt.as_ref(), cam, waits));
+    if waits {
+        gpu_wait(Stage::GpuTerrain);
+    }
     in_view(cam, |c| draw_world_in(game, assets, c, preview, spell, hover, waits));
 }
 
 fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<MapHoverLook>, waits: bool) {
     let art = assets.dt.as_ref();
-    stamp_idle(game, clock_ms());
-    frame_probe::time(Stage::Terrain, || ground(cam, || draw_terrain(game, art, cam)));
-    if waits {
-        gpu_wait(Stage::GpuTerrain);
-    }
     let map = &game.world.map;
     let ((c0, c1), (r0, r1)) = cam.visible(map);
     // Sprites stand on their cell and reach up to ~8 cells above it. Turned, a sprite reaches any

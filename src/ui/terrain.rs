@@ -6,7 +6,8 @@
 //!
 //! The 16 terrain textures sit in one atlas (4×4 slots, each padded with a wrapped border so
 //! linear filtering never bleeds between slots); the map's surface codes are a small texture
-//! with one texel per cell.
+//! with one texel per cell, and a second one (the neighbours, [`neighbour_texels`]) holds each
+//! cell's four codes, so the shader reads one texel instead of four.
 //!
 //! Water (codes 0–2) is animated as the original's (0x4c8864): a second texture stage holds
 //! water frame `(t div 100) mod 32` (0x4c8db2) and is multiplied into the ground twice over
@@ -14,8 +15,17 @@
 //! 3×3 cells. The original applies it on the water cells' own quads only, not on the soft
 //! edges a water cell lays over its neighbours; here it goes with each water code's share of
 //! the blend.
+//!
+//! Profiling switches (read once, [`options`]; Android: a file in the app folder, desktop: an
+//! environment variable). Option 1, the neighbours shader, is on by default; the others are off:
+//! 1 `profile-terrain-old` / `RAZDOR_TERRAIN_OLD=1` turns option 1 OFF (the old four-fetch
+//! shader); 2 `profile-terrain-cache` / `RAZDOR_TERRAIN_CACHE=1` the ground cache; 3
+//! `profile-terrain-vrs` / `RAZDOR_TERRAIN_VRS=1` Adreno's 2×2 shading rate (desktop: a no-op);
+//! 4 `profile-terrain-mediump` / `RAZDOR_TERRAIN_MEDIUMP=1` mediump colour maths. The map lines
+//! of the frame probe name the active set (`opt=1+2`).
 
 use std::cell::RefCell;
+use std::sync::OnceLock;
 
 use macroquad::prelude::*;
 
@@ -35,7 +45,8 @@ void main() {
 }
 "#;
 
-// `// @SHARP_UV@` is replaced by `sharp::SHARP_UV_GLSL` when the material is made.
+// The old shader (option 1 off): four code fetches per pixel. `// @SHARP_UV@` is replaced by
+// `sharp::SHARP_UV_GLSL` when the material is made.
 const FRAGMENT: &str = r#"#version 100
 precision highp float;
 varying highp vec2 uv;
@@ -121,6 +132,126 @@ void main() {
 }
 "#;
 
+// The neighbours shader (option 1). `@CP@` is the precision of the colour and blend-weight
+// values: `highp` (the default) or `mediump` (option 4). Coordinates stay highp.
+// `@SHARP_UV@` as above. Its result is the old shader's, pixel for pixel, with the same float
+// maths except where a pixel's four codes are equal (one ground call, no blend).
+const NEW_FRAGMENT: &str = r#"#version 100
+precision highp float;
+varying highp vec2 uv;
+uniform sampler2D Neighbours;
+uniform sampler2D Atlas;
+uniform sampler2D Water;
+uniform float WaterOn;
+uniform vec4 View;
+uniform vec2 MapSize;
+uniform vec2 CellPx;
+uniform vec2 Tile;
+uniform vec2 Slot;
+uniform vec2 AtlasSize;
+uniform vec2 AtlasScale;
+uniform vec2 WaterSize;
+uniform vec2 WaterScale;
+uniform vec4 Edge;
+uniform vec2 Ramp;
+uniform float Clock;
+// 1.0 in the cache's overlay pass: the pixels with no water and no border fog are discarded
+// (they keep the cached ground), the others are drawn as the full shader draws them.
+uniform float Overlay;
+// @SHARP_UV@
+
+float hash2(vec2 q) {
+    return fract(sin(dot(q, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+float vnoise(vec2 q) {
+    vec2 i = floor(q);
+    vec2 f = fract(q);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash2(i), hash2(i + vec2(1.0, 0.0)), u.x), mix(hash2(i + vec2(0.0, 1.0)), hash2(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+
+@CP@ vec3 ground(float code, vec2 px, @CP@ vec3 water) {
+    vec2 slot = vec2(mod(code, 4.0), floor(code / 4.0));
+    vec2 t = mod(px, Tile);
+    vec2 atlas_uv = (slot * Slot + (Slot - Tile) * 0.5 + t) / AtlasSize;
+    @CP@ vec3 c = texture2D(Atlas, sharp_uv(atlas_uv, AtlasSize, AtlasScale)).rgb;
+    return code < 2.5 && WaterOn > 0.5 ? min(c * water * 2.0, 1.0) : c;
+}
+
+void main() {
+    vec2 p = mix(View.xy, View.zw, uv);
+    vec2 i = floor(p);
+    vec2 px = p * CellPx;
+    // Past the border (p in cell units, the border at -0.5 and MapSize - 0.5): the war fog.
+    vec2 gap = max(max(vec2(-0.5) - p, p - (MapSize - 0.5)), vec2(0.0));
+    float d = length(gap);
+    bool mist = Edge.x > 0.5 && d > 0.0;
+    // The four codes of the cell: code(i), code(i + (1, 0)), code(i + (0, 1)), code(i + (1, 1)),
+    // each clamped to the map as `code_at` does. The texel of cell i (clamped to one cell past
+    // the border, see `neighbour_texels`) holds them; its channels are code · 17 / 255.
+    vec4 k = floor(texture2D(Neighbours, (clamp(i, vec2(-1.0), MapSize) + 1.5) / (MapSize + 2.0)) * 15.0 + 0.5);
+    bool wet = WaterOn > 0.5 && any(lessThan(k, vec4(2.5)));
+    if (Overlay > 0.5 && !wet && !mist) {
+        discard;
+    }
+    vec2 f = p - i;
+    @CP@ float fx = f.x;
+    @CP@ float fy = f.y;
+    // The water stage's coordinates (as the old shader): read only where a code is water.
+    @CP@ vec3 w = vec3(1.0);
+    if (wet) {
+        w = texture2D(Water, sharp_uv((p + 1.5) / 3.0, WaterSize, WaterScale)).rgb;
+    }
+    @CP@ vec3 col;
+    if (k.x == k.y && k.y == k.z && k.z == k.w) {
+        col = ground(k.x, px, w);
+    } else {
+        @CP@ vec3 top = mix(ground(k.x, px, w), ground(k.y, px, w), fx);
+        @CP@ vec3 bottom = mix(ground(k.z, px, w), ground(k.w, px, w), fx);
+        col = mix(top, bottom, fy);
+    }
+    if (mist) {
+        float n = 0.6 * vnoise(p * 0.11 + Clock * vec2(0.05, 0.02)) + 0.4 * vnoise(p * 0.27 + Clock * vec2(-0.08, 0.05));
+        float o = smoothstep(0.0, Ramp.y, d) * (0.35 + 0.65 * n);
+        o = mix(o, 1.0, smoothstep(Ramp.x, Ramp.y, d));
+        col = mix(col, Edge.yzw, clamp(o, 0.0, 1.0));
+    }
+    gl_FragColor = vec4(col, 1.0);
+}
+"#;
+
+/// The cache's composite: the cached ground at each pixel of the quad, read by the pixel's
+/// window position (`gl_FragCoord`), so the quad's own geometry decides the coverage, as the
+/// terrain's own draw does.
+const COMPOSITE_FRAGMENT: &str = r#"#version 100
+precision highp float;
+varying highp vec2 uv;
+uniform sampler2D Ground;
+uniform vec2 ScreenSize;
+void main() {
+    gl_FragColor = texture2D(Ground, gl_FragCoord.xy / ScreenSize);
+}
+"#;
+
+/// The uniforms every terrain shader declares (the old one leaves `Overlay` out of its code).
+const UNIFORMS: [(&str, UniformType); 14] = [
+    ("View", UniformType::Float4),
+    ("MapSize", UniformType::Float2),
+    ("CellPx", UniformType::Float2),
+    ("Tile", UniformType::Float2),
+    ("Slot", UniformType::Float2),
+    ("AtlasSize", UniformType::Float2),
+    ("WaterOn", UniformType::Float1),
+    ("AtlasScale", UniformType::Float2),
+    ("WaterSize", UniformType::Float2),
+    ("WaterScale", UniformType::Float2),
+    ("Edge", UniformType::Float4),
+    ("Ramp", UniformType::Float2),
+    ("Clock", UniformType::Float1),
+    ("Overlay", UniformType::Float1),
+];
+
 /// Wrapped border around each atlas slot, in pixels.
 const PAD: u32 = 2;
 
@@ -137,7 +268,6 @@ pub fn edge_fog_colour() -> [f32; 3] {
 
 /// The cell the ground shows at cell `c` of a map `n` cells long: the border's own cell, clamped
 /// (the shader's `clamp`). Past the border it continues the edge's row or column.
-#[allow(dead_code)] // The shader's formula in Rust, pinned by the tests.
 pub fn edge_cell(c: i32, n: i32) -> i32 {
     if n <= 0 {
         0
@@ -163,19 +293,143 @@ fn smoothstep01(e0: f32, e1: f32, x: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-/// A map's surface codes, its size and their texture.
-type CellCache = Option<(Vec<u8>, (u32, u32), Texture2D)>;
+/// The terrain profiling switches (see the module doc), as they are in effect.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Options {
+    /// Option 1: the neighbours shader (off: the old four-fetch shader).
+    pub new_shader: bool,
+    /// Option 2: the ground cache (only with the new shader).
+    pub cache: bool,
+    /// Option 3: Adreno's 2×2 shading rate on the terrain's ground draws.
+    pub vrs: bool,
+    /// Option 4: mediump colour maths (only with the new shader).
+    pub mediump: bool,
+}
+
+impl Options {
+    /// The active set for the frame probe's lines: `opt=1+2`, or `opt=none`.
+    pub fn label(&self) -> String {
+        let mut on = Vec::new();
+        if self.new_shader {
+            on.push("1");
+        }
+        if self.cache {
+            on.push("2");
+        }
+        if self.vrs {
+            on.push("3");
+        }
+        if self.mediump {
+            on.push("4");
+        }
+        if on.is_empty() {
+            "opt=none".into()
+        } else {
+            format!("opt={}", on.join("+"))
+        }
+    }
+}
+
+/// A switch: on Android the file in the app folder, on desktop the environment variable.
+fn switch(file: &str, env: &str) -> bool {
+    if cfg!(target_os = "android") {
+        razdor::platform::app_dir().is_some_and(|d| d.join(file).is_file())
+    } else {
+        std::env::var(env).is_ok_and(|v| v == "1")
+    }
+}
+
+/// The terrain options, read once. Sets the frame probe's label and logs the set.
+pub fn options() -> Options {
+    static OPTS: OnceLock<Options> = OnceLock::new();
+    *OPTS.get_or_init(|| {
+        let new_shader = !switch("profile-terrain-old", "RAZDOR_TERRAIN_OLD");
+        let o = Options {
+            new_shader,
+            cache: new_shader && switch("profile-terrain-cache", "RAZDOR_TERRAIN_CACHE"),
+            vrs: switch("profile-terrain-vrs", "RAZDOR_TERRAIN_VRS"),
+            mediump: new_shader && switch("profile-terrain-mediump", "RAZDOR_TERRAIN_MEDIUMP"),
+        };
+        let label = o.label();
+        razdor::frame_probe::set_map_options(&label);
+        let vrs_note = if o.vrs && !cfg!(target_os = "android") { " (VRS: Android only, no-op here)" } else { "" };
+        razdor::diag::log(&format!("terrain options: {label}{vrs_note}"));
+        o
+    })
+}
+
+/// The cell texture's texel for a surface code (red = code / 15).
+fn code_texel(code: u8) -> [u8; 4] {
+    [(code & 15) * 17, 0, 0, 255]
+}
+
+/// The neighbours texture of a `w`×`h` map, as RGBA8 bytes: one texel per cell, plus a ring of one
+/// cell around the map, so the shader's clamp past the border is a plain lookup. Texel (x, y)
+/// holds the cell (x − 1, y − 1), clamped to the ring: red = code(c), green = code(c + (1, 0)),
+/// blue = code(c + (0, 1)), alpha = code(c + (1, 1)), each code clamped to the map as
+/// [`edge_cell`] does, in the cell texel's encoding ([`code_texel`]).
+pub fn neighbour_texels(codes: &[u8], w: u32, h: u32) -> Vec<u8> {
+    let (wi, hi) = (w as i32, h as i32);
+    let code = |x: i32, y: i32| codes[(edge_cell(y, hi) * wi + edge_cell(x, wi)) as usize];
+    let mut out = Vec::with_capacity(((wi + 2) * (hi + 2) * 4) as usize);
+    for ty in 0..hi + 2 {
+        for tx in 0..wi + 2 {
+            let (cx, cy) = (tx - 1, ty - 1);
+            for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                out.push(code_texel(code(cx + dx, cy + dy))[0]);
+            }
+        }
+    }
+    out
+}
+
+/// A map's surface codes, their texures and their size, kept while the codes stay the same.
+struct CellTextures {
+    codes: Vec<u8>,
+    size: (u32, u32),
+    cells: Texture2D,
+    neighbours: Texture2D,
+}
+
+/// How a terrain draw is made.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    /// The whole terrain in one pass: ground, water and the border's fog.
+    Full,
+    /// The ground only (water and the fog left out), drawn into the cache.
+    Ground,
+    /// The cache's ground, copied over the quad.
+    Cached,
+    /// Water and the border's fog over the cached ground: the pixels with neither are discarded.
+    Overlay,
+}
+
+/// The ground cache: the target the ground is drawn into and the key it was drawn for.
+#[derive(Default)]
+struct GroundCache {
+    target: Option<RenderTarget>,
+    key: Option<u64>,
+}
 
 /// The blending shader, the terrain atlas and the current map's surface codes.
 pub struct TerrainLayer {
-    material: Material,
+    /// The old shader, when option 1 is off.
+    old: Option<Material>,
+    /// The neighbours shader in highp, and in mediump (option 4), both made at start.
+    new_hp: Option<Material>,
+    new_mp: Option<Material>,
+    /// The cache's copy, when option 2 is on.
+    composite: Option<Material>,
+    /// The options in effect for this layer (a shader that fails to compile turns its options off).
+    opts: Options,
     atlas: Texture2D,
     tile: Vec2,
     slot: Vec2,
     /// The water frames ([`WATER_FRAMES`] or none, then water is still).
     water: Vec<Texture2D>,
     /// Surface codes and size of the map in `cells`, to rebuild it when the map changes.
-    cells: RefCell<CellCache>,
+    cells: RefCell<Option<CellTextures>>,
+    ground: RefCell<GroundCache>,
 }
 
 /// Packs the terrain textures (by surface code) into a 4×4 atlas of padded slots. Every
@@ -218,45 +472,54 @@ fn water_texture(img: &Image) -> Texture2D {
     tex
 }
 
-/// The cell texture's texel for a surface code (red = code / 15).
-fn code_texel(code: u8) -> [u8; 4] {
-    [(code & 15) * 17, 0, 0, 255]
+/// A material of `fragment` with the uniforms and textures it declares.
+fn make_material(fragment: &str, uniforms: &[(&str, UniformType)], textures: &[&str]) -> Result<Material, String> {
+    let params = MaterialParams {
+        uniforms: uniforms.iter().map(|(n, t)| UniformDesc::new(n, *t)).collect(),
+        textures: textures.iter().map(|t| t.to_string()).collect(),
+        ..Default::default()
+    };
+    load_material(ShaderSource::Glsl { vertex: VERTEX, fragment }, params).map_err(|e| e.to_string())
+}
+
+/// The neighbours shader with the given colour precision (`highp` or `mediump`).
+fn new_fragment(precision: &str) -> String {
+    NEW_FRAGMENT.replace("@CP@", precision).replace("@SHARP_UV@", sharp::SHARP_UV_GLSL)
 }
 
 impl TerrainLayer {
-    /// A layer over the given textures, or `None` without any texture or if the shader
-    /// does not compile (callers then draw square cells). `water` are the animated water
-    /// frames, uploaded once; without all [`WATER_FRAMES`] of them water stays still.
+    /// A layer over the given textures, or `None` without any texture or if no shader compiles
+    /// (callers then draw square cells). `water` are the animated water frames, uploaded once;
+    /// without all [`WATER_FRAMES`] of them water stays still.
     pub fn new(textures: &[Option<Image>; 16], fill: &[[u8; 4]; 16], water: &[Image]) -> Option<TerrainLayer> {
         let (image, (tw, th)) = pack_terrain_atlas(textures, fill)?;
-        let material = load_material(
-            ShaderSource::Glsl { vertex: VERTEX, fragment: &FRAGMENT.replace("// @SHARP_UV@", sharp::SHARP_UV_GLSL) },
-            MaterialParams {
-                uniforms: ["View", "MapSize", "CellPx", "Tile", "Slot", "AtlasSize", "WaterOn", "AtlasScale", "WaterSize", "WaterScale", "Edge", "Ramp", "Clock"]
-                    .iter()
-                    .zip([
-                        UniformType::Float4,
-                        UniformType::Float2,
-                        UniformType::Float2,
-                        UniformType::Float2,
-                        UniformType::Float2,
-                        UniformType::Float2,
-                        UniformType::Float1,
-                        UniformType::Float2,
-                        UniformType::Float2,
-                        UniformType::Float2,
-                        UniformType::Float4,
-                        UniformType::Float2,
-                        UniformType::Float1,
-                    ])
-                    .map(|(n, t)| UniformDesc::new(n, t))
-                    .collect(),
-                textures: vec!["Cells".into(), "Atlas".into(), "Water".into()],
-                ..Default::default()
-            },
-        )
-        .map_err(|e| razdor::diag!("terrain shader: {e}"))
-        .ok()?;
+        let mut opts = options();
+        let (mut old, mut new_hp, mut new_mp, mut composite) = (None, None, None, None);
+        if opts.new_shader {
+            let hp_ok = make_material(&new_fragment("highp"), &UNIFORMS, &["Neighbours", "Atlas", "Water"]);
+            match hp_ok {
+                Ok(m) => {
+                    new_hp = Some(m);
+                    // Both precisions are made at start; option 4 picks one.
+                    new_mp = make_material(&new_fragment("mediump"), &UNIFORMS, &["Neighbours", "Atlas", "Water"]).map_err(|e| razdor::diag!("terrain shader (mediump): {e}")).ok();
+                }
+                Err(e) => razdor::diag!("terrain shader: {e}"),
+            }
+            if new_hp.is_none() {
+                razdor::diag!("terrain: the neighbours shader does not compile; the old shader is used");
+                opts = Options { new_shader: false, cache: false, mediump: false, ..opts };
+            }
+        }
+        if !opts.new_shader {
+            old = Some(make_material(&FRAGMENT.replace("// @SHARP_UV@", sharp::SHARP_UV_GLSL), &UNIFORMS, &["Cells", "Atlas", "Water"]).map_err(|e| razdor::diag!("terrain shader: {e}")).ok()?);
+        }
+        if opts.mediump && new_mp.is_none() {
+            opts.mediump = false;
+        }
+        if opts.cache {
+            composite = make_material(COMPOSITE_FRAGMENT, &[("ScreenSize", UniformType::Float2)], &["Ground"]).map_err(|e| razdor::diag!("terrain cache copy: {e}")).ok();
+            opts.cache = composite.is_some();
+        }
         let atlas = Texture2D::from_rgba8(image.width as u16, image.height as u16, &image.rgba);
         atlas.set_filter(FilterMode::Linear);
         let water = if water.len() == WATER_FRAMES && water.iter().all(|f| f.width > 0 && f.height > 0) {
@@ -265,28 +528,65 @@ impl TerrainLayer {
             Vec::new()
         };
         Some(TerrainLayer {
-            material,
+            old,
+            new_hp,
+            new_mp,
+            composite,
+            opts,
             atlas,
             tile: vec2(tw as f32, th as f32),
             slot: vec2((tw + 2 * PAD) as f32, (th + 2 * PAD) as f32),
             water,
             cells: RefCell::new(None),
+            ground: RefCell::new(GroundCache::default()),
         })
     }
 
-    /// The surface-code texture of a `w`×`h` map, rebuilt only when the codes change.
-    fn cells(&self, codes: &[u8], w: u32, h: u32) -> Texture2D {
+    /// Whether the ground cache is in use for this layer (option 2).
+    pub fn cache_on(&self) -> bool {
+        self.opts.cache
+    }
+
+    /// The surface-code textures of a `w`×`h` map (the codes and the neighbours), rebuilt only
+    /// when the codes change.
+    fn cells(&self, codes: &[u8], w: u32, h: u32) -> (Texture2D, Texture2D) {
         let mut cache = self.cells.borrow_mut();
-        if let Some((c, size, tex)) = cache.as_ref() {
-            if *size == (w, h) && c == codes {
-                return tex.clone();
+        if let Some(c) = cache.as_ref() {
+            if c.size == (w, h) && c.codes == codes {
+                return (c.cells.clone(), c.neighbours.clone());
             }
         }
         let rgba: Vec<u8> = codes.iter().flat_map(|&c| code_texel(c)).collect();
-        let tex = Texture2D::from_rgba8(w as u16, h as u16, &rgba);
-        tex.set_filter(FilterMode::Nearest);
-        *cache = Some((codes.to_vec(), (w, h), tex.clone()));
-        tex
+        let cells = Texture2D::from_rgba8(w as u16, h as u16, &rgba);
+        cells.set_filter(FilterMode::Nearest);
+        let neighbours = Texture2D::from_rgba8((w + 2) as u16, (h + 2) as u16, &neighbour_texels(codes, w, h));
+        neighbours.set_filter(FilterMode::Nearest);
+        *cache = Some(CellTextures { codes: codes.to_vec(), size: (w, h), cells: cells.clone(), neighbours: neighbours.clone() });
+        (cells, neighbours)
+    }
+
+    /// The cache's target for `key` (option 2): the screen's size in physical pixels, made or
+    /// resized as needed. Returns it with whether it must be filled now (the key changed).
+    /// `None` when the screen has no usable size (then the terrain is drawn live).
+    pub fn ground_target(&self, key: u64) -> Option<(RenderTarget, bool)> {
+        let (w, h) = macroquad::miniquad::window::screen_size();
+        if !(w >= 1.0 && h >= 1.0 && w <= 8192.0 && h <= 8192.0) {
+            return None;
+        }
+        let (pw, ph) = (w as u32, h as u32);
+        let mut g = self.ground.borrow_mut();
+        let sized = g.target.as_ref().is_some_and(|t| t.texture.width() as u32 == pw && t.texture.height() as u32 == ph);
+        if !sized {
+            let rt = render_target(pw, ph);
+            rt.texture.set_filter(FilterMode::Nearest);
+            g.target = Some(rt);
+            g.key = None;
+        }
+        let fill = g.key != Some(key);
+        if fill {
+            g.key = Some(key);
+        }
+        g.target.clone().map(|rt| (rt, fill))
     }
 
     /// Draws the terrain of a `w`×`h` map (`codes` row by row) into screen rectangle `dest`,
@@ -294,19 +594,28 @@ impl TerrainLayer {
     /// `cell_px` is the texture pixels per cell (the textures' scale). `water_ms` is the clock
     /// (ms) that animates the water, `None` for still water. `edge`: the ground goes on past the
     /// map's edges: the ground continues, then the animated fog ([`fog_opacity`]); `view` may
-    /// reach past the map then. The fog's clock is `water_ms`.
+    /// reach past the map then. The fog's clock is `water_ms`. `mode`: see [`Mode`].
     #[allow(clippy::too_many_arguments)]
-    pub fn draw(&self, codes: &[u8], (w, h): (u32, u32), dest: Rect, view: Vec4, cell_px: Vec2, water_ms: Option<i64>, edge: bool) {
-        if w == 0 || h == 0 || w > u16::MAX as u32 || h > u16::MAX as u32 || codes.len() != (w * h) as usize {
+    pub fn draw(&self, codes: &[u8], (w, h): (u32, u32), dest: Rect, view: Vec4, cell_px: Vec2, water_ms: Option<i64>, edge: bool, mode: Mode) {
+        if w == 0 || h == 0 || w + 2 > u16::MAX as u32 || h + 2 > u16::MAX as u32 || codes.len() != (w * h) as usize {
             return;
         }
-        let cells = self.cells(codes, w, h);
-        let m = &self.material;
+        if mode == Mode::Cached {
+            self.draw_cached(dest);
+            return;
+        }
+        let Some((m, new)) = self.ground_material() else { return };
+        let (cells, neighbours) = self.cells(codes, w, h);
         gl_use_material(m);
-        m.set_texture("Cells", cells.clone());
+        if new {
+            m.set_texture("Neighbours", neighbours.clone());
+        } else {
+            m.set_texture("Cells", cells.clone());
+        }
         m.set_texture("Atlas", self.atlas.clone());
-        // Without frames the stage samples the atlas and is switched off.
-        let water = water_ms.filter(|_| !self.water.is_empty()).map(|ms| self.water[water_frame(ms)].clone());
+        // Water and the fog belong to the full pass and the overlay; the ground pass has neither.
+        let water_on = matches!(mode, Mode::Full | Mode::Overlay);
+        let water = water_ms.filter(|_| water_on && !self.water.is_empty()).map(|ms| self.water[water_frame(ms)].clone());
         m.set_uniform("WaterOn", if water.is_some() { 1.0f32 } else { 0.0 });
         let water = water.unwrap_or_else(|| self.atlas.clone());
         m.set_uniform("WaterSize", vec2(water.width(), water.height()));
@@ -322,13 +631,123 @@ impl TerrainLayer {
         m.set_uniform("Tile", self.tile);
         m.set_uniform("Slot", self.slot);
         m.set_uniform("AtlasSize", vec2(self.atlas.width(), self.atlas.height()));
+        let edge_on = matches!(mode, Mode::Full | Mode::Overlay) && edge;
         let fog = edge_fog_colour();
-        m.set_uniform("Edge", vec4(if edge { 1.0 } else { 0.0 }, fog[0], fog[1], fog[2]));
+        m.set_uniform("Edge", vec4(if edge_on { 1.0 } else { 0.0 }, fog[0], fog[1], fog[2]));
         m.set_uniform("Ramp", vec2(EDGE_SOLID, EDGE_FULL));
         m.set_uniform("Clock", water_ms.map_or(0.0, |ms| (ms as f32 / 1000.0) % 1000.0));
-        draw_texture_ex(&cells, dest.x, dest.y, WHITE, DrawTextureParams { dest_size: Some(dest.size()), ..Default::default() });
+        m.set_uniform("Overlay", if mode == Mode::Overlay { 1.0f32 } else { 0.0 });
+        // The ground draws (the whole terrain, the cache's ground) get the shading rate (option 3).
+        let vrs = self.opts.vrs && matches!(mode, Mode::Full | Mode::Ground);
+        if vrs {
+            shading_rate::begin();
+        }
+        let shown = if new { &neighbours } else { &cells };
+        draw_texture_ex(shown, dest.x, dest.y, WHITE, DrawTextureParams { dest_size: Some(dest.size()), ..Default::default() });
+        if vrs {
+            shading_rate::end();
+        }
         gl_use_default_material();
     }
+
+    /// The cache's copy: the filled ground, read at each pixel of `dest` by its window position.
+    fn draw_cached(&self, dest: Rect) {
+        let (Some(m), Some(rt)) = (self.composite.as_ref(), self.ground.borrow().target.clone()) else { return };
+        let (sw, sh) = macroquad::miniquad::window::screen_size();
+        gl_use_material(m);
+        m.set_texture("Ground", rt.texture.clone());
+        m.set_uniform("ScreenSize", vec2(sw, sh));
+        draw_texture_ex(&rt.texture, dest.x, dest.y, WHITE, DrawTextureParams { dest_size: Some(dest.size()), ..Default::default() });
+        gl_use_default_material();
+    }
+
+    /// The material of the ground draws, and whether it is the neighbours shader.
+    fn ground_material(&self) -> Option<(&Material, bool)> {
+        if self.opts.new_shader {
+            let m = if self.opts.mediump { self.new_mp.as_ref().or(self.new_hp.as_ref()) } else { self.new_hp.as_ref() };
+            m.map(|m| (m, true))
+        } else {
+            self.old.as_ref().map(|m| (m, false))
+        }
+    }
+}
+
+/// Adreno's variable-rate shading for the terrain (option 3). `GL_QCOM_shading_rate` gives
+/// `glShadingRateQCOM`, which applies to the draws after it: the terrain's ground draws are
+/// shaded at 2×2 pixels per fragment, and the rate goes back to 1×1 after them. The batch is
+/// flushed on each side so only the terrain is affected. Off Android, and without the
+/// extension, both do nothing.
+#[cfg(target_os = "android")]
+mod shading_rate {
+    use std::ffi::{c_char, c_void, CStr};
+    use std::sync::OnceLock;
+
+    /// The tokens of the extension spec (GL_QCOM_shading_rate: SHADING_RATE_1X1_PIXELS_QCOM and
+    /// SHADING_RATE_2X2_PIXELS_QCOM).
+    const RATE_1X1: u32 = 0x96A6;
+    const RATE_2X2: u32 = 0x96A9;
+
+    type RateFn = unsafe extern "C" fn(u32);
+    type GetProcFn = unsafe extern "C" fn(*const c_char) -> *const c_void;
+
+    /// `glShadingRateQCOM`, loaded once: from libEGL's `eglGetProcAddress` (miniquad's GL loader
+    /// does not list it). `None` without the extension or the function.
+    fn rate_fn() -> Option<RateFn> {
+        static F: OnceLock<Option<RateFn>> = OnceLock::new();
+        *F.get_or_init(load)
+    }
+
+    fn load() -> Option<RateFn> {
+        // SAFETY: called on the GL thread after the context exists; the symbols are looked up
+        // by name in the library the process already has loaded, and the pointers are called
+        // with the spec's signatures.
+        unsafe {
+            let exts = macroquad::miniquad::gl::glGetString(macroquad::miniquad::gl::GL_EXTENSIONS);
+            let present = !exts.is_null() && CStr::from_ptr(exts as *const c_char).to_string_lossy().split(' ').any(|e| e == "GL_QCOM_shading_rate");
+            if !present {
+                razdor::diag::log("terrain VRS: GL_QCOM_shading_rate is absent; option 3 does nothing");
+                return None;
+            }
+            let lib = libc::dlopen(c"libEGL.so".as_ptr(), libc::RTLD_NOLOAD | libc::RTLD_LAZY);
+            let get: Option<GetProcFn> = if lib.is_null() {
+                None
+            } else {
+                let sym = libc::dlsym(lib, c"eglGetProcAddress".as_ptr());
+                (!sym.is_null()).then(|| std::mem::transmute::<*mut c_void, GetProcFn>(sym))
+            };
+            let p = get.map_or(std::ptr::null(), |get| get(c"glShadingRateQCOM".as_ptr()));
+            razdor::diag::log(&format!("terrain VRS: GL_QCOM_shading_rate present, glShadingRateQCOM {}", if p.is_null() { "not found" } else { "loaded" }));
+            (!p.is_null()).then(|| std::mem::transmute::<*const c_void, RateFn>(p))
+        }
+    }
+
+    fn set(rate: u32) {
+        if let Some(f) = rate_fn() {
+            // SAFETY: the function was loaded with the extension's signature (`ShadingRateQCOM(enum)`).
+            unsafe {
+                macroquad::window::get_internal_gl().flush();
+                f(rate);
+            }
+        }
+    }
+
+    /// The draws after this are shaded at 2×2.
+    pub fn begin() {
+        set(RATE_2X2);
+    }
+
+    /// The draws after this are shaded at 1×1 again.
+    pub fn end() {
+        set(RATE_1X1);
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+mod shading_rate {
+    /// Desktop: no variable-rate shading (option 3 does nothing).
+    pub fn begin() {}
+    /// Desktop: as [`begin`].
+    pub fn end() {}
 }
 
 #[cfg(test)]
@@ -404,5 +823,36 @@ mod tests {
             let r = code_texel(code)[0] as f32 / 255.0;
             assert_eq!((r * 15.0 + 0.5).floor() as u8, code);
         }
+    }
+
+    /// The shader's lookup of the neighbours texture for cell (i, j), as its GLSL reads it: the
+    /// cell clamped to the ring, its texel, and the four channels decoded as `floor(v·15 + ½)`.
+    fn shader_codes(tex: &[u8], w: i32, h: i32, i: i32, j: i32) -> [u8; 4] {
+        let (tx, ty) = (i.clamp(-1, w) + 1, j.clamp(-1, h) + 1);
+        let at = ((ty * (w + 2) + tx) * 4) as usize;
+        [0, 1, 2, 3].map(|c| ((tex[at + c] as f32 / 255.0) * 15.0 + 0.5).floor() as u8)
+    }
+
+    #[test]
+    fn neighbour_texels_hold_the_four_codes_with_the_border_clamp() {
+        // A 3×2 map, row by row: the codes are 1..=6.
+        let codes = [1u8, 2, 3, 4, 5, 6];
+        let tex = neighbour_texels(&codes, 3, 2);
+        assert_eq!(tex.len(), (3 + 2) * (2 + 2) * 4, "one texel per cell plus the ring");
+        // The code the old shader reads at (i, j), clamped as `code_at` clamps it.
+        let code_at = |i: i32, j: i32| codes[(edge_cell(j, 2) * 3 + edge_cell(i, 3)) as usize];
+        // Every cell from one ring cell out past the map: the four codes equal the old shader's
+        // four `code_at` lookups, pixel for pixel.
+        for j in -6..=6 {
+            for i in -6..=6 {
+                let want = [code_at(i, j), code_at(i + 1, j), code_at(i, j + 1), code_at(i + 1, j + 1)];
+                assert_eq!(shader_codes(&tex, 3, 2, i, j), want, "cell ({i}, {j})");
+            }
+        }
+        // The corners, spelled out: the first cell has its right and lower neighbours; the last
+        // one's neighbours past the edge are its own codes.
+        assert_eq!(shader_codes(&tex, 3, 2, 0, 0), [1, 2, 4, 5]);
+        assert_eq!(shader_codes(&tex, 3, 2, 2, 1), [6, 6, 6, 6]);
+        assert_eq!(shader_codes(&tex, 3, 2, -1, -1), [1, 1, 1, 1], "the ring continues the corner");
     }
 }
