@@ -18,6 +18,11 @@ All code is in `src/rules/save.rs`; the windows are `src/ui/saves.rs`.
 - `manual/` (player's saves and quick saves, `MANUAL_SAVES_KEPT`, `QUICK_SAVES_KEPT`) and
   `auto/` (autosaves, `AUTOSAVES_KEPT`).
 
+- Android: the saves folder is `platform::app_dir` (`<files>/Razdor/saves`, the app's own folder; the
+  legacy `/storage/emulated/0/Razdor` until the one-time move, `migration`, see
+  [app-and-ui.md](app-and-ui.md)). Export and import go through the system's documents
+  (`ui::transfer`, «Перенос…» in the Load window): one zip out, `.rzsave` or a zip in, nothing overwritten.
+
 ## Limits and pins
 
 - Own saves: at most `MANUAL_SAVES_KEPT` (50) **unpinned** ones, quick saves not counted; a

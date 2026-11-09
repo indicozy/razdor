@@ -1,13 +1,16 @@
-//! Android: the storage permission, and the settings page where the player grants it, through
-//! the JNI of miniquad's activity (miniquad exposes the activity and the JNI environment, not
-//! these calls). The not-found screen's look for the install is platform-neutral (`ui::mobile`).
-//! Only what Razdor needs. Every call that the Java side may refuse clears its
-//! pending exception, so a refused call never ends the process; the local references it makes
-//! are freed as they go (a long session polls this every few seconds).
+//! Android: the calls of the phone's activity that Razdor makes through the JNI of miniquad's
+//! activity (miniquad exposes the activity and the JNI environment, not these calls): the app's
+//! folder, the file pickers (game archives, maps, saves), the document export, the links, the
+//! immersive mode, the density, the safe insets and the locale. The not-found screen's look for
+//! the install is platform-neutral (`ui::mobile`). Only what Razdor needs. Every call that the
+//! Java side may refuse clears its pending exception, so a refused call never ends the process;
+//! the local references it makes are freed as they go (a long session polls this every few seconds).
 //!
-//! Android 11 (API 30) and later: "All files access" (`MANAGE_EXTERNAL_STORAGE`), granted on
-//! its own settings page. Android 8 to 10: the runtime permissions `READ_EXTERNAL_STORAGE` and
-//! `WRITE_EXTERNAL_STORAGE`, asked with a dialog.
+//! Storage: release N asks for no permission. The move of the old shared folders (`migration`)
+//! still reads them, so a player who granted the storage access in an earlier release keeps it
+//! until the next release drops it. The storage check and its request below are kept for that
+//! release: Android 11 (API 30) and later check the storage manager, and the request opens its
+//! settings page; Android 8 to 10 check and ask the two runtime permissions with a dialog.
 
 use razdor::local;
 use std::cell::Cell;

@@ -68,8 +68,7 @@ binary loads; the player's AltStore or Sideloadly re-signs it. The app icons (Ap
 app as «На iPhone → Раздор», so the player copies the game there; no permission is asked, and
 `platform::MOBILE` (Android or iOS) is the one flag the UI reads for «a phone». The not-found block
 (`screens::ios_not_found`: the copy instructions and «Check again», the Android block's layout) and
-the poll (`App::mobile_install_poll`, `ui::mobile`: the `RECHECK` / `NEXT_POLL` helpers, the 5-s
-look for the install, `storage_granted` = always true on iOS) are shared with Android; the JNI parts
+the poll (`App::mobile_install_poll`, `ui::mobile`: the `RECHECK` / `NEXT_POLL` helpers, the 5-s look for the install) are shared with Android; the JNI parts
 stay in `ui::android` (the shared helpers in `src/jni.rs`). The on-screen keyboard is on for both (`widgets::set_keyboard`). The
 update window (`ui/update_view.rs`) offers a release on the phones too: Android installs it through the system
 installer (`update::poll_installer` takes its report each frame: a cancelled session brings the offer back, a failed one shows why; the APK is kept as `razdor-<X.Y.Z>.apk` in the cache folder, reused by the next try, removed after a successful install and at start when it is not newer than the running version), iOS opens the release page. On a phone (`display::dp_px`) it keeps the desktop's layout, one unit one dp, fitted to the screen less its safe area and the bottom bar, with a little larger text (`NotesStyle::phone`, about 14 sp) and taller buttons in the same row (`button_rects`, 40 dp at Normal); the desktop window is unchanged. The Discord link opens through `ui::mobile::open_url` (see the main menu above). `ui/script_font.rs` skips the fontconfig lookup on iOS, as on Android.
@@ -79,17 +78,36 @@ see `[package.metadata.android]` in `Cargo.toml`). The launcher icon is `android
 (Razdor's own icon, `data/icon/razdor.png` resized to 48–192 px; `res` and `icon` in `Cargo.toml`).
 Per-platform paths live in one place:
 `src/platform.rs` (`app_dir` for saves, log, editor maps, translation jobs; `cache_dir` for the picture cache;
-`config_dir` for the remembered install; `install_roots` for the search). On Android they are
-`/storage/emulated/0/Razdor` (survives an uninstall) and the search starts with `DiscordTimes`
-in internal storage; desktop keeps the platform's data and config folders.
+`config_dir` for the remembered install; `install_roots` for the search). On Android they are in the app's own folder: `platform::android_paths` gives `<files>/Razdor` (saves,
+the log, `app_dir`) and `<files>/DiscordTimes` (the game, `unpack_dir`), where `files` is
+`getExternalFilesDir(null)` (`ui::android::files_dir`, `Android/data/io.github.indicozy.razdor/files`).
+Before the move they are the legacy `/storage/emulated/0/Razdor` and `/storage/emulated/0/DiscordTimes`
+(`platform::legacy_android_paths`). Desktop keeps the platform's data and config folders.
 
-Reading that storage needs the all-files access. `src/ui/android.rs` calls the activity's
-methods through miniquad's JNI (`attach_jni_env`, `ACTIVITY`): the all-files settings page
-(Android 11+: the app's own page, else the general all-files list, else the app's details) or
-the runtime permissions (8 to 10), and `storage_granted`. The title screen's not-found block
-(`screens::android_not_found`, scaled to the screen, its buttons at least 12% of its height)
-has «Выдать доступ» and «Проверить снова». The first frame of a run without an install opens the
-access page by itself, once (`mobile::ask_access_once` → `android::ask_once`). The main menu shows the
+The migration gate (release N): `platform::set_android_files_dir`, called first in `main`, reads
+`platform::start_state` from the marker `<files>/Razdor/migrated-from-shared` (`migrated_marker`) and from
+the two legacy folders (`legacy_state`). With the marker the app's folders are in use (`android_migrated`).
+No legacy data (a fresh install) writes the marker with `fresh`. Legacy data leaves the legacy paths in use
+until the move. A legacy folder that cannot be read (no storage access) gives the app's folders for this run,
+with no marker, so the next start asks again. `platform::android_current` takes the paths from this gate,
+so `app_dir`, `unpack_dir` and `install_roots` all follow it.
+
+The move (`migration::migrate`, its screen and thread in `ui::migrate`): `migrate::start_if_needed` starts it
+on the first frame. Each legacy folder is copied into `<dest>.part` and every name and size is compared; the
+absolute legacy paths in the copy's text files are rewritten (`rewrite_text`, on the copy only); the legacy
+trees are scanned again, and a change discards the copy (the move starts again at the next start). Then the copy
+is put in place, the marker is written, and `set_android_migrated` flips the paths. A game folder that does not
+fit (`SPACE_MARGIN`) stays where it was (`Moved::game_skipped`): the install is then asked for as an archive.
+The legacy folders are only read, never written or deleted. While it runs, the title screen shows its percent
+(`migrate::title_line`) and `migrate::busy` holds a game's start, a load and a mod's choice; its end shows the
+notice that the old folders can be deleted (`migrate::moved_message`).
+
+Storage access: release N asks for none. The move reads the legacy folders, so a player who granted «All files
+access» in an earlier release keeps it until the next release drops the permission. `ui::android::storage_granted`
+and `request_storage` (the settings page on Android 11 and later, the runtime dialog on 8 to 10) are kept, unused,
+for that release. The title screen's not-found block (`screens::android_not_found`, scaled to the screen) offers
+the download and the archive picker, and «Проверить снова»; no settings page opens by itself.
+The main menu shows the
 same block while no install is found (`screens::menu_not_found`, drawn by `main_menu::frame(no_install)`
 in the column left of the buttons, stacked, over a dark panel, at the interface scale; the column is the
 left half of the screen, in either orientation). The block is the same on the desktop (a Razdor extra, not
@@ -99,22 +117,31 @@ Both links, and the bottom «Discord» link, go through `main_menu::open_link`: 
 on desktop, `ui::android::open_url` (an `ACTION_VIEW` intent) on Android, `ui::mobile::open_url`
 (`UIApplication openURL:`) on iOS. The two link buttons share a row when the stack does not fit the height.
 While it
-is shown, `App::mobile_install_poll` (`ui::mobile`; on the main menu and the scenario list; every 5 s
-once the permission is granted, and on the button) loads a newly found install with `Assets::adopt_install` and the `ui/mod.rs` helpers
-`dt_content_of` / `scenarios_of`, without a restart. Its Discord link opens through `open_url` like the desktop's (see the main menu above). The log cannot be opened before
-the access (the folder is not writable), so the poll calls `diag::reopen_log` once it is granted.
+is shown, `App::mobile_install_poll` (`ui::mobile`; on the main menu and the scenario list; every 5 s, and on the button) loads a newly found install with `Assets::adopt_install` and the `ui/mod.rs` helpers
+`dt_content_of` / `scenarios_of`, without a restart. Its Discord link opens through `open_url` like the desktop's (see the main menu above). A log that could not be opened (the legacy folder before the move, without access) is opened again by the poll (`diag::reopen_log`).
 Game archives on the not-found block (`dt::unpack`, `ui::mobile`, every platform): `look_for_archives`
-scans `platform::archive_dirs()` (the phones: the install folders, Download, the storage root; the desktop:
+scans `platform::archive_dirs()` (the phones: the install folders, and while the legacy storage is readable (before the move) Download and the storage root; the desktop:
 the program's folder except on macOS, Downloads, the install folders) at once after «Check again» or the
 unpacking's end, else every 5 s. `unpack::find_archives` lists each `.7z` / `.zip` there without extracting:
 a game when the listing passes `install::listing_is_install` after dropping one top folder, a patch when it
 holds some of `install::is_install_path`'s files, else ignored. `not_found_rows` offers «Распаковать архив
 игры» while a game is found and nothing runs; `start_unpack` writes the archives on a thread into
-`platform::unpack_dir()` (Android `DiscordTimes` in the storage, iOS `Documents/DiscordTimes`, macOS
+`platform::unpack_dir()` (Android `<files>/DiscordTimes`, iOS `Documents/DiscordTimes`, macOS
 `DiscordTimes` in `app_dir`, elsewhere next to the program), the game first, the patches over it. While it
 runs, `mobile_install_poll` does not load the install; its end (`unpack_tick`) asks for it (`ask_recheck`),
 and the same poll loads it (the desktop has no 5-s poll: that reload is its only one). Snapshot fakes:
 `RAZDOR_SCENE_ARCHIVES`, `RAZDOR_SCENE_UNPACK`.
+
+Saves in and out (Android only; `ui::transfer`, `transfer` in the library). On Android the Load window's
+button is «Перенос…» (`saves::folder_label`, `saves::folder_pressed` → `transfer::open_menu`): the app's folder is
+`Android/data/...`, which the Files app cannot open, so the menu goes through the system's documents. «Экспорт
+сохранений» (`transfer::export_saves`) writes one zip into the cache and hands it to the document creator
+(`android::start_document_export`). «Импорт сохранения» (`android::start_pick`) takes a `.zip` through
+`transfer::import_archive` or a `.rzsave` through `transfer::import_save`: nothing is overwritten, an identical save
+is skipped, a different one gets the next number, a root json file (the settings) is kept, and pins are merged.
+«Экспорт журнала» hands over the diagnostic log for a bug report. Desktop and iOS keep «Папка»
+(`saves::open_folder_notice`). The manifest sets `android:hasFragileUserData` (`Cargo.toml`), so Android 10 and later
+asks on uninstall whether to keep the app's data: the saves are in that folder, so export them first or keep the data.
 
 The game download (`gdrive`, `ui/game_import.rs` `start_download`, the no-install block's «Скачать игру»): the community's one archive on Google Drive (`gdrive::GAME`: the file id, size and SHA-256, the owner's constants) is downloaded into `platform::cache_dir()/game-download.zip` on a thread (`gdrive::download_game`: `update::download_watched` with a Range request to continue a `.part` copy, the warning page's form followed, a quota page or 403/429 an error with its reason; a file that does not verify (size or SHA-256) is refused as «the archive on Drive changed», a resumed one first downloaded again from the start). A verified archive is kept, so a retry does not download it again. Then `dt::game_import::examine` and `import` (the same path as «Обновить игру из архива…», below) install it and the archive is removed. The window shows the megabytes (`download_window`, Cancel keeps the partial copy), then the unpacking. A failure is one line on the screen and the manual path (`screens::manual_steps`: the file's page, «Открыть ссылку», «Копировать ссылку»). The picker «Выбрать архив игры…» (`game_import::request`, the desktop dialog or Android's document picker; none on iPhone) is the secondary option, on the same screen and in the failure state: it goes through the same `examine` and `import`. Snapshot fakes: `RAZDOR_SCENE_DOWNLOADING=<percent>`, `RAZDOR_SCENE_DOWNLOAD_FAILED`. The automatic start (desktop and Android, not iPhone; `game_import::auto_tick`, each frame from `tick`): with no install at all and no `RAZDOR_DT_DIR` set by hand (not on a repair, a broken install or a snapshot), the hub's catalog is read once per launch on a thread (`game_import::start_check` and `catalog_game`, `hub::Hub::fetch_catalog`, the same as the hub window; the menu shows «Checking the catalog…» in the block's place, `screens::checking_panel`). A catalog with a `game` (`hub::GameRef`: an https address or a path in the hub, its size, SHA-256 and a file name, checked by `Catalog::checked`) starts the same download at once (`start_archive` with `auto`, the archive kept at its address as `gdrive::Archive::at_url`, no Drive pages), with the same window and Cancel (a cancel keeps the partial copy for the button). Its end shows no notice: the install is reloaded and the main menu opens. No game in the catalog, no catalog (offline, an error), and a failed download, verify or import leave the prompt as it is (a failure is its one line). Once per launch. Snapshot fakes: `RAZDOR_SCENE_CATALOG=checking`, `RAZDOR_SCENE_UNPACKING=<percent>`.
 

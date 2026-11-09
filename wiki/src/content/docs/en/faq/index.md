@@ -14,11 +14,13 @@ In the "Sound, graphics and gameplay settings" window, press "Update the game fr
 
 ## Where are my saves?
 
-On Windows: `%APPDATA%\razdor\saves`. On Linux: `~/.local/share/razdor/saves`. On macOS: `~/Library/Application Support/razdor/saves`. You can set your own folder with `RAZDOR_SAVE_DIR`. See [Saving and loading](/razdor/wiki/en/tutorials/saves/).
+On Windows: `%APPDATA%\razdor\saves`. On Linux: `~/.local/share/razdor/saves`. On macOS: `~/Library/Application Support/razdor/saves`. You can set your own folder using `RAZDOR_SAVE_DIR`. See [Saving and Loading](/razdor/wiki/en/tutorials/saves/). On Android, saves are located in the app's private folder: `Android/data/io.github.indicozy.razdor/files/Razdor/saves`, and they can be exported or imported using the "Transfer…" button in the loading window (see the Android page).
 
-## Android cannot see the game folder. What do I do?
+## Android cannot find the game. What should I do?
 
-Give Razdor "All files access": the title screen has a "Grant access" button for this. Put the game folder in `DiscordTimes` and press "Check again". See [Razdor on Android](/razdor/wiki/en/phones/android/).
+Razdor on Android stores the game and saves in its own app folder and no longer requests "All files access." If the game is not found, tap "Download the game" or "Choose the archive…" on the title screen. On the first launch after an update, saves and settings from the old version will be transferred to the app folder automatically.
+
+[Razdor on Android](/razdor/wiki/en/phones/android/)
 
 ## How do I update Razdor?
 

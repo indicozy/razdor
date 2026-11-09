@@ -1,6 +1,6 @@
 ---
 title: Razdor on Android
-description: Installing Razdor on Android, accessing game files, and gesture controls.
+description: Installing Razdor on Android, moving saves, and gesture controls.
 sidebar:
   order: 1
 ---
@@ -11,15 +11,15 @@ The Android version (**`razdor-<version>.apk`** file) is experimental. It requir
 
 ## Installation and Launch
 
-1. Install **`razdor-<version>.apk`**. Allow installation from this source in your Android settings.
-2. Place the "Discord Times" game folder into your internal storage in the `DiscordTimes` folder (`Internal Storage/DiscordTimes`) or in the `Download` folder. It must contain the `Maps_Rus` folder and the `Rus_Units.ini` file, just like the folder containing `DiscordTimes.exe` on a PC.
-3. Grant Razdor **"All Files Access"**.
-   * If the game is not visible, a **"Grant Access"** button will appear on the title screen. This will open the required settings page where access can be enabled.
-   * Manually: "Settings" → "Apps" → "Special app access" → "All files access" → "Razdor". On Android 8–10, the button requests standard file permissions.
-4. Return to Razdor and tap **"Check Again"**. The title screen also checks the game files every few seconds.
+1. Install **razdor-<version>.apk**. Allow installation from this source in your Android settings.
+2. On the first launch, choose one of the following options on the title screen:
+   * "Download the game" — downloads the game archive (approx. 45 MB) from the community.
+   * "Choose the archive…" — select a game archive (.zip or .7z) that is already on your phone.
+3. If you played an older version, Razdor will automatically migrate saves, settings, and the game from the `Internal Storage/Razdor` and `Internal Storage/DiscordTimes` folders during the first launch. While the migration is in progress, the title screen will display "Moving files… N%", and the game cannot be launched. The old Razdor folders are not deleted: once the transfer is complete, a message will appear stating they can be safely removed.
+4. If there is insufficient space during the transfer, the game folder will remain in its old location. A message will appear on the screen: "The game folder was not moved: there was not enough room. If the game is not found, pick its archive."
 
-:::caution
-Without "All Files Access," the game cannot be read: the title screen will remain stuck on the demo map.
+:::note
+If you granted the app "All Files Access" in a previous version, this permission will be preserved for the file transfer. In newer versions, file access is no longer requested.
 :::
 
 ## Controls
@@ -116,6 +116,15 @@ This is how you install the game with a mod (e.g., Community Update Evolution Mo
 
 ## Data Storage
 
-Saves and logs are located in `Internal Storage/Razdor/saves`. This folder is not deleted along with the application, so reinstalling does not erase your saves.
+Saves (in the `saves` folder) and the log are stored in the app's own folder: `Android/data/io.github.indicozy.razdor/files/Razdor`. The game files are located alongside them in the `DiscordTimes` folder. This folder is not deleted when the app is updated.
 
-The image cache is stored in the application's own cache (Settings → Apps → Razdor → Storage) and takes up no more than 256 MB. There is nothing important in it: it can be cleared using the "Clear Cache" button; saves will not be lost, but images may take slightly longer to load on the next launch.
+In the loading window, the "Transfer…" button opens three actions:
+* "Export saves" — all saves are packed into a single .zip file and saved via the system "Save as" dialog.
+* "Import a save" — allows you to select a .rzsave file or a .zip file containing saves. Old saves are not overwritten: if the file is identical, it is skipped; if it differs, a new copy with a new number is created. App settings remain unchanged during this process.
+* "Export the log" — creates a game log file for submitting bug reports.
+
+:::caution
+When you uninstall the app, Android also deletes its data folder. Always perform an "Export saves" before uninstalling. If Android asks whether to "Keep" app data during uninstallation, select "Keep."
+:::
+
+The image cache is stored in the app's own cache (Settings → Apps → Razdor → Storage) and does not exceed 256 MB. There is nothing critical in it: you can clear it using the "Clear cache" button; saves will not be lost, and images will simply take slightly longer to load upon the next launch.

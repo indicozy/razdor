@@ -14,11 +14,13 @@ sidebar:
 
 ## Где лежат сохранения?
 
-На Windows: `%APPDATA%\razdor\saves`. На Linux: `~/.local/share/razdor/saves`. На macOS: `~/Library/Application Support/razdor/saves`. Свою папку можно задать в `RAZDOR_SAVE_DIR`. См. [Сохранение и загрузка](/razdor/wiki/tutorials/saves/).
+На Windows: `%APPDATA%\razdor\saves`. На Linux: `~/.local/share/razdor/saves`. На macOS: `~/Library/Application Support/razdor/saves`. Свою папку можно задать в `RAZDOR_SAVE_DIR`. См. [Сохранение и загрузка](/razdor/wiki/tutorials/saves/). На Android сохранения находятся в собственной папке приложения: `Android/data/io.github.indicozy.razdor/files/Razdor/saves`, и их можно экспортировать или импортировать с помощью кнопки «Перенос…» в окне загрузки (см. страницу Android).
 
-## Android не видит папку игры. Что делать?
+## Android не находит игру. Что делать?
 
-Дайте Razdor «Доступ ко всем файлам»: на титульном экране для этого есть кнопка «Выдать доступ». Положите папку игры в `DiscordTimes` и нажмите «Проверить снова». См. [Razdor на Android](/razdor/wiki/phones/android/).
+Razdor на Android хранит игру и сохранения в собственной папке приложения и больше не запрашивает «Доступ ко всем файлам». Если игра не найдена, нажмите «Скачать игру» или «Выбрать архив…» на титульном экране. При первом запуске после обновления сохранения и настройки старой версии перенесутся в папку приложения автоматически.
+
+[Razdor на Android](/razdor/wiki/phones/android/)
 
 ## Как обновить Razdor?
 

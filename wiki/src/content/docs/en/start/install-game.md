@@ -21,7 +21,7 @@ If the download does not work (no network, Google Drive does not give the file, 
 
 1. Open the [file page](https://drive.google.com/file/d/1xKIpVbDIuCWh7LFgtFn59D9t5RPkiH0y/view) («Open the link» or «Copy the link» on the screen) and download the file: one `.zip` archive.
 2. Do not unpack it: Razdor reads the `.zip` itself.
-3. On a computer, press «Pick the game archive…» and choose the `.zip`. On a phone, press «Unpack the game archive»: Razdor finds the `.zip` in the Downloads folder (Download) on Android or in the Files app on iPhone; on Android «Pick the game archive…» works too.
+3. On a computer, press «Pick the game archive…» and select a `.zip` file. On Android, press «Choose the archive…» on the title screen and select a `.zip` or `.7z` file. On iPhone, press «Unpack the game archive»: Razdor will find the `.zip` file within the "Files" app ("On My iPhone" > "Razdor" or other app folders).
 4. The game is in place when the main menu opens without the «Discord Times not found» message.
 
 If the game is there but some of its files are missing, the main menu says «Missing game files» and offers «Restore the game files»: the missing files are taken from the same archive, the other files stay as they are. Files you have changed yourself are not overwritten.

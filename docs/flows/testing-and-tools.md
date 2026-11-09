@@ -161,7 +161,7 @@ placeholder `0.0.0` (`update_view::shown_version`), so a version bump changes no
    "slow load" (`razdor::diag::profiling`, `diag::timed`). The threshold is 100 ms; set
    another with `RAZDOR_PROFILE=<ms>` (2 or more). Where env vars cannot be set (Android), a
    file `profile` in the app folder turns it on, and its content (optional) is the threshold
-   in ms: on Android that is `/storage/emulated/0/Razdor/profile`.
+   in ms: on Android that is `<files>/Razdor/profile` (the app's folder, `platform::app_dir`; before the move, `/storage/emulated/0/Razdor/profile`).
    The frame probe (`razdor::frame_probe`) takes every frame and every 5 s logs one
    `frame probe` line per kind: `walk-step` (the hero moved to another cell), `walk` (the hero
    walking, no step), `idle` (the map, the hero still), `other` (any other screen, and any
