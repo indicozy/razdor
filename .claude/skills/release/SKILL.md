@@ -11,11 +11,15 @@ the tests, builds `razdor` (Linux), `Razdor.exe` (Windows) and `razdor-macos`, a
 release «Раздор X.Y.Z» with the changelog section and the SHA-256 as its notes. The game's
 update window shows those notes up to their first `## ` heading.
 
-The programs' file names are read by the game's update check (`update::asset_name`): `razdor`,
-`Razdor.exe`, `razdor-macos`, `razdor.apk` (Android: downloaded, checked and handed to the system
-installer) and `razdor.ipa` (iOS: its release page is opened). Keep the names, and keep
-`SHA256SUMS` listing every one of them; a release without an Android or iOS file gets no offer on
-that system.
+The pipeline publishes every program twice: under its versioned name (`razdor-X.Y.Z-linux`,
+`Razdor-X.Y.Z.exe`, `razdor-X.Y.Z-macos`, `razdor-X.Y.Z.apk`, `razdor-X.Y.Z.ipa`, and the translators
+likewise) and under the old fixed name (`razdor`, `Razdor.exe`, `razdor-macos`, `razdor.apk`,
+`razdor.ipa`, ...). The versioned copies are made in the "Versioned copies" step of `release.yml`.
+The game's update check (`update::asset_name`, `update::versioned_asset`) takes the newest release's
+versioned name and falls back to the old one, so old releases still update; installed copies whose
+updater knows only the fixed names keep updating from the fixed-name copies. Keep both sets: the
+old-named copies stay until the owner drops them. `SHA256SUMS` lists all 16 files. A release
+without an Android or iOS file gets no offer on that system.
 
 ## Steps
 

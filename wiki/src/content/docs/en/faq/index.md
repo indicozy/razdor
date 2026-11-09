@@ -24,9 +24,9 @@ Give Razdor "All files access": the title screen has a "Grant access" button for
 
 Razdor checks GitHub for new releases itself and offers an update when you are not in battle. "Update" downloads the new version, which starts the next time you open the game. It needs the `curl` program. The mode is set in "Other..." → "Updates". See [Updates](/razdor/wiki/en/start/updates/).
 
-## macOS will not run razdor-macos. Why?
+## macOS will not run `razdor-<version>-macos`. Why?
 
-The program is not signed by a developer. Run `xattr -d com.apple.quarantine razdor-macos`, or open it with right-click → Open in Finder. See [Installing Razdor](/razdor/wiki/en/start/install-razdor/).
+The program is not signed by a developer. Run `xattr -d com.apple.quarantine razdor-<version>-macos`, or open it with right-click → Open in Finder. See [Installing Razdor](/razdor/wiki/en/start/install-razdor/).
 
 ## How do I change the language or the font?
 

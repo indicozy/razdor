@@ -11,7 +11,7 @@ Razdor programs are published in the releases on [GitHub](https://github.com/ind
 
 ## Windows
 
-1. Download `Razdor.exe` from the release. It is a single file with no DLLs of its own.
+1. Download `Razdor-<version>.exe` from the release. It is a single file with no DLLs of its own.
 2. Put it in a convenient folder, or next to `DiscordTimes.exe`.
 3. Run it with a double-click.
 
@@ -21,14 +21,14 @@ If the message "WGL_ARB_pixel_format is required" appears, the machine has no Op
 
 ## Linux
 
-1. Download `razdor` from the release.
+1. Download `razdor-<version>-linux` from the release.
 2. If the system does not let you run the file, make it executable: `chmod +x razdor`.
-3. Open a terminal in the folder with the file and run `./razdor`.
+3. Open a terminal in the folder with the file and run `./razdor-<version>-linux`.
 
 ## macOS
 
-1. Download `razdor-macos` from the release.
-2. The program is not signed by a developer, so macOS blocks it after download. Before the first launch, run `xattr -d com.apple.quarantine razdor-macos` in Terminal, or open the program from Finder with right-click → Open.
+1. Download `razdor-<version>-macos` from the release.
+2. The program is not signed by a developer, so macOS blocks it after download. Before the first launch, run `xattr -d com.apple.quarantine razdor-<version>-macos` in Terminal, or open the program from Finder with right-click → Open.
 3. A double-click opens the program in Terminal.
 
 ## Checking the download

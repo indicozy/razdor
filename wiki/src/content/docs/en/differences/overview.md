@@ -63,8 +63,8 @@ For automatic updates on Windows, macOS, and Linux, the `curl` program is requir
 
 ## Phones
 
-* **Android** (trial version): `razdor.apk` file, touch controls, touchpad mode, screen orientation.
-* **iPhone and iPad** (trial version): `razdor.ipa` file, touch controls.
+* **Android** (trial version): `razdor-<version>.apk` file, touch controls, touchpad mode, screen orientation.
+* **iPhone and iPad** (trial version): `razdor-<version>.ipa` file, touch controls.
 * More details: [Razdor on Android](/razdor/wiki/en/phones/android/), [Razdor on iOS](/razdor/wiki/en/phones/ios/).
 
 ## Game AI

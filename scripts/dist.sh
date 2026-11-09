@@ -1,8 +1,10 @@
 #!/bin/sh
 # Builds the release programs into dist/: `razdor` for Linux (x86_64) and `Razdor.exe` for
 # Windows (x86_64), and the map translator beside them (`razdor-translate`,
-# `Razdor-translate.exe`). Either one, put into a Discord Times folder (next to DiscordTimes.exe),
-# plays that install; elsewhere it uses RAZDOR_DT_DIR (also read from a .env file).
+# `Razdor-translate.exe`). The release pipeline (.github/workflows/release.yml) adds the versioned
+# copies (`razdor-X.Y.Z-linux`, `Razdor-X.Y.Z.exe`, ...) of these files. Either one, put into a
+# Discord Times folder (next to DiscordTimes.exe), plays that install; elsewhere it uses
+# RAZDOR_DT_DIR (also read from a .env file).
 # dist/SHA256SUMS lists their SHA-256: publish it with the files, and check a download with
 # `sha256sum -c SHA256SUMS` (Linux) or `Get-FileHash Razdor.exe` (Windows PowerShell).
 #

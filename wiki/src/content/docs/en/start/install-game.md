@@ -34,7 +34,7 @@ Razdor looks for the installed game in this order:
    ```sh
    export RAZDOR_DT_DIR="/path/to/Discord Times"
    ```
-2. **Next to the game**: if you copy `Razdor.exe` (Windows), `razdor` (Linux) or `razdor-macos` (macOS) directly into the folder with `DiscordTimes.exe`, Razdor uses that copy. On a Mac the game is inside the Wine or CrossOver bottle.
+2. **Next to the game**: if you copy `Razdor-<version>.exe` (Windows), `razdor-<version>-linux` (Linux) or `razdor-<version>-macos` (macOS) directly into the folder with `DiscordTimes.exe`, Razdor uses that copy. On a Mac the game is inside the Wine or CrossOver bottle.
 3. **Previous run**: the folder Razdor remembered.
 4. **Standard folders**: `~/Games`, `~/Downloads` and your home folder.
 

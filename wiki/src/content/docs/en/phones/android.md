@@ -7,11 +7,11 @@ sidebar:
 
 ## General Information
 
-The Android version (**razdor.apk** file) is experimental. It requires Android 8 or newer on ARM processors. A new APK can be installed over an old one.
+The Android version (**`razdor-<version>.apk`** file) is experimental. It requires Android 8 or newer on ARM processors. A new APK can be installed over an old one.
 
 ## Installation and Launch
 
-1. Install **razdor.apk**. Allow installation from this source in your Android settings.
+1. Install **`razdor-<version>.apk`**. Allow installation from this source in your Android settings.
 2. Place the "Discord Times" game folder into your internal storage in the `DiscordTimes` folder (`Internal Storage/DiscordTimes`) or in the `Download` folder. It must contain the `Maps_Rus` folder and the `Rus_Units.ini` file, just like the folder containing `DiscordTimes.exe` on a PC.
 3. Grant Razdor **"All Files Access"**.
    * If the game is not visible, a **"Grant Access"** button will appear on the title screen. This will open the required settings page where access can be enabled.
@@ -88,7 +88,7 @@ The bottom bar size only changes the layout when the phone lies sideways. Held u
 Razdor on Android updates itself just like on a PC: when a new version is released, a window offers the update along with a changelog. **"Update"** downloads the new APK, verifies it, and passes it to the Android installer; you then confirm the installation. An already downloaded APK will not be downloaded again, and old versions are deleted after installation. For more details: [Updates](/razdor/wiki/en/start/updates/).
 
 :::tip
-You can also update manually: download the latest **razdor.apk** release and install it over the old one.
+You can also update manually: download the latest **`razdor-<version>.apk`** release and install it over the old one.
 :::
 
 ## Updating the Game from Archive

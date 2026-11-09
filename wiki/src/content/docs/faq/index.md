@@ -24,9 +24,9 @@ sidebar:
 
 Razdor сам проверяет новые выпуски на GitHub и предлагает обновление, когда вы не в бою. Кнопка «Обновить» скачивает новую версию, которая запустится при следующем открытии. Нужна программа `curl`. Режим задаётся в группе «Прочее…» → «Обновления». См. [Обновления](/razdor/wiki/start/updates/).
 
-## macOS не даёт запустить razdor-macos. Почему?
+## macOS не даёт запустить razdor-<версия>-macos. Почему?
 
-Программа не подписана разработчиком. Выполните `xattr -d com.apple.quarantine razdor-macos` или откройте её через правую кнопку → Open в Finder. См. [Установка Razdor](/razdor/wiki/start/install-razdor/).
+Программа не подписана разработчиком. Выполните `xattr -d com.apple.quarantine razdor-<версия>-macos` или откройте её через правую кнопку → Open в Finder. См. [Установка Razdor](/razdor/wiki/start/install-razdor/).
 
 ## Как сменить язык или шрифт?
 

@@ -88,6 +88,9 @@ pub struct Release {
     pub page: String,
     /// This platform's program.
     pub program_url: String,
+    /// The name of that file in the release: its versioned name when the release has one
+    /// (see [`versioned_asset`]), else the old fixed name.
+    pub asset: String,
     /// `SHA256SUMS`.
     pub sums_url: String,
     /// What changed: the notes of every release newer than this program, newest first.
@@ -234,6 +237,22 @@ fn asset_for(os: &str, arch: &str) -> Option<&'static str> {
         ("ios", _) => Some("razdor.ipa"),
         _ => None,
     }
+}
+
+/// The versioned name of a program's release file, for `legacy` (a name [`asset_for`] gives):
+/// `razdor` at 1.4.1 is `razdor-1.4.1-linux`, `Razdor.exe` is `Razdor-1.4.1.exe`. `None` for
+/// any other name. Releases carry both names: copies already installed run an updater that
+/// only knows the old fixed names, so the old names stay in every release as well, and an
+/// old release has no versioned names at all (`parse_releases` falls back to them).
+pub fn versioned_asset(legacy: &str, v: Version) -> Option<String> {
+    Some(match legacy {
+        "razdor" => format!("razdor-{v}-linux"),
+        "Razdor.exe" => format!("Razdor-{v}.exe"),
+        "razdor-macos" => format!("razdor-{v}-macos"),
+        "razdor.apk" => format!("razdor-{v}.apk"),
+        "razdor.ipa" => format!("razdor-{v}.ipa"),
+        _ => return None,
+    })
 }
 
 /// iOS: an update opens the release's page in the browser (`ui::main_menu::open_link`), where
@@ -416,9 +435,11 @@ pub fn parse_notes(body: &str) -> Vec<Note> {
     notes
 }
 
-/// The API's list of releases: a [`Release`] for `asset` when the newest one (drafts and
-/// pre-releases aside) is newer than `current`, `None` when it is not. Its notes are those
-/// of every release newer than `current`.
+/// The API's list of releases: a [`Release`] for `asset` (an old fixed name, see
+/// [`asset_for`]) when the newest one (drafts and pre-releases aside) is newer than
+/// `current`, `None` when it is not. The file is the newest release's versioned name for
+/// `asset` when it has one, else `asset` itself (old releases). Its notes are those of every
+/// release newer than `current`.
 pub fn parse_releases(json: &[u8], current: Version, asset: &str) -> Result<Option<Release>, String> {
     let list: Vec<ApiRelease> = serde_json::from_slice(json).map_err(|e| format!("reply: {e}"))?;
     let mut newer: Vec<(Version, ApiRelease)> = list
@@ -430,13 +451,17 @@ pub fn parse_releases(json: &[u8], current: Version, asset: &str) -> Result<Opti
     newer.sort_by(|a, b| b.0.cmp(&a.0));
     let Some((version, newest)) = newer.first() else { return Ok(None) };
     let url = |name: &str| newest.assets.iter().find(|a| a.name == name).map(|a| a.browser_download_url.clone());
-    let program_url = url(asset).ok_or_else(|| format!("{} has no {asset}", newest.tag_name))?;
+    // Copies on old updaters know only the fixed name; new releases also carry the versioned one.
+    let (name, program_url) = versioned_asset(asset, *version)
+        .and_then(|n| url(&n).map(|u| (n, u)))
+        .or_else(|| url(asset).map(|u| (asset.to_string(), u)))
+        .ok_or_else(|| format!("{} has no {asset}", newest.tag_name))?;
     let sums_url = url("SHA256SUMS").ok_or_else(|| format!("{} has no SHA256SUMS", newest.tag_name))?;
     let notes = newer
         .iter()
         .flat_map(|(v, r)| std::iter::once(Note::Release(*v)).chain(parse_notes(r.body.as_deref().unwrap_or_default())))
         .collect();
-    Ok(Some(Release { version: *version, page: newest.html_url.clone(), program_url, sums_url, notes }))
+    Ok(Some(Release { version: *version, page: newest.html_url.clone(), program_url, asset: name, sums_url, notes }))
 }
 
 /// Asks GitHub for the latest release on a background thread (nothing when a check or a
@@ -702,7 +727,7 @@ fn install_now(r: &Release) -> Result<bool, String> {
     let asset = asset_name().ok_or("no release for this system")?;
     let program = program().ok_or("the program's file is unknown")?;
     let sums = fetch(&r.sums_url, 60)?;
-    let want = expected_sum(&sums, asset)?;
+    let want = expected_sum(&sums, &r.asset)?;
     let part = part_path(&program, asset);
     let out = curl()
         .args(["--max-time", "900", "-o"])
@@ -733,7 +758,7 @@ fn install_now(r: &Release) -> Result<bool, String> {
 fn install_now(r: &Release) -> Result<bool, String> {
     let asset = asset_name().ok_or("no release for this system")?;
     let sums = fetch(&r.sums_url, 60)?;
-    let want = expected_sum(&sums, asset)?;
+    let want = expected_sum(&sums, &r.asset)?;
     let dir = phone::cache_dir()?;
     let apk = dir.join(apk_file_name(r.version));
     let existing = std::fs::read(&apk).ok().map(|bytes| sha256_hex(&bytes));
@@ -907,6 +932,57 @@ mod tests {
         assert_eq!(sum_for(sums, "razdor.exe"), None);
     }
 
+    const BOTH_NAMES: &str = r#"[
+        {"tag_name":"v1.4.1","html_url":"https://x/v1.4.1","draft":false,"prerelease":false,"body":"\n### Fixed\n- A.",
+         "assets":[{"name":"Razdor.exe","browser_download_url":"https://x/Razdor.exe"},
+                   {"name":"Razdor-1.4.1.exe","browser_download_url":"https://x/Razdor-1.4.1.exe"},
+                   {"name":"Razdor-1.4.0.exe","browser_download_url":"https://x/Razdor-1.4.0.exe"},
+                   {"name":"SHA256SUMS","browser_download_url":"https://x/SHA256SUMS"}]}
+    ]"#;
+
+    #[test]
+    fn a_release_with_both_names_gives_the_versioned_one_first() {
+        let r = parse_releases(BOTH_NAMES.as_bytes(), Version(1, 4, 0), "Razdor.exe").unwrap().unwrap();
+        assert_eq!(r.program_url, "https://x/Razdor-1.4.1.exe");
+        assert_eq!(r.asset, "Razdor-1.4.1.exe");
+    }
+
+    #[test]
+    fn an_old_release_with_only_the_old_name_still_works() {
+        let r = parse_releases(REPLY.as_bytes(), Version(0, 3, 13), "Razdor.exe").unwrap().unwrap();
+        assert_eq!(r.program_url, "https://x/Razdor.exe");
+        assert_eq!(r.asset, "Razdor.exe");
+    }
+
+    #[test]
+    fn a_versioned_name_of_another_version_is_not_picked() {
+        // The newest release has a file named for 1.4.0 only: the old name is the one picked.
+        let other = BOTH_NAMES.replace("Razdor-1.4.1.exe", "Razdor-1.4.0.exe");
+        let r = parse_releases(other.as_bytes(), Version(1, 4, 0), "Razdor.exe").unwrap().unwrap();
+        assert_eq!(r.asset, "Razdor.exe");
+        // Without the old name either, it is no program for this release.
+        let only_other = other.replace(r#"{"name":"Razdor.exe","browser_download_url":"https://x/Razdor.exe"},"#, "");
+        assert!(parse_releases(only_other.as_bytes(), Version(1, 4, 0), "Razdor.exe").is_err());
+    }
+
+    #[test]
+    fn sums_find_the_versioned_line() {
+        let sums = "033d  Razdor.exe\n9a1c  Razdor-1.4.1.exe\n";
+        assert_eq!(sum_for(sums, "Razdor-1.4.1.exe").as_deref(), Some("9a1c"));
+        assert_eq!(sum_for(sums, "Razdor.exe").as_deref(), Some("033d"));
+    }
+
+    #[test]
+    fn versioned_names_for_the_five_programs() {
+        let v = Version(1, 4, 1);
+        assert_eq!(versioned_asset("razdor", v).as_deref(), Some("razdor-1.4.1-linux"));
+        assert_eq!(versioned_asset("Razdor.exe", v).as_deref(), Some("Razdor-1.4.1.exe"));
+        assert_eq!(versioned_asset("razdor-macos", v).as_deref(), Some("razdor-1.4.1-macos"));
+        assert_eq!(versioned_asset("razdor.apk", v).as_deref(), Some("razdor-1.4.1.apk"));
+        assert_eq!(versioned_asset("razdor.ipa", v).as_deref(), Some("razdor-1.4.1.ipa"));
+        assert_eq!(versioned_asset("razdor-translate", v), None);
+    }
+
     #[test]
     fn sha256_of_known_text() {
         assert_eq!(sha256_hex(b"abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
@@ -930,6 +1006,7 @@ mod tests {
             version: Version(1, 0, 2),
             page: String::new(),
             program_url: String::new(),
+            asset: String::new(),
             sums_url: String::new(),
             notes: Vec::new(),
         }

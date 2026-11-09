@@ -206,11 +206,14 @@ Other diagnostics: `razdor.log` in the data folder (`razdor::diag`, `RAZDOR_LOG=
   is the `release` skill.
 - `src/update.rs`: the game checks GitHub releases on a background thread
   (`update::Mode`: Ask / Always / Off), downloads through the system `curl`, accepts a file
-  only if its SHA-256 matches `SHA256SUMS`, and replaces itself by rename. A `cargo`
+  only if its SHA-256 matches `SHA256SUMS`, and replaces itself by rename. Each program is
+  published under a versioned name (`razdor-X.Y.Z-linux`, `Razdor-X.Y.Z.exe`, `razdor-X.Y.Z.apk`, ...)
+  and its old fixed name. The newest release's versioned name is taken when it has one
+  (`update::versioned_asset`, `Release.asset`); the fixed name is the fallback for old releases. A `cargo`
   build checks nothing unless `RAZDOR_UPDATE_AS=<X.Y.Z>`. The update window shows the
   release notes up to their first `## ` heading.
-- Phones (`update::asset_name`: `razdor.apk` on Android, `razdor.ipa` on iOS; the names the
-  release workflow publishes, keep them): no `curl`, so `src/update/phone.rs` makes the
+- Phones (`update::asset_name`: `razdor.apk` on Android, `razdor.ipa` on iOS; the fixed names the
+  release workflow also publishes, keep them): no `curl`, so `src/update/phone.rs` makes the
   requests. Android downloads the APK with `HttpURLConnection` in `razdorDownload`
   (`android/MainActivityInject.java`), checks it the same way, and `razdorInstall` copies it into a
   `PackageInstaller` session whose commit the system confirms on screen (the window says so:

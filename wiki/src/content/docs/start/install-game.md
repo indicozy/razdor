@@ -34,7 +34,7 @@ sidebar:
    ```sh
    export RAZDOR_DT_DIR="/path/to/Discord Times"
    ```
-2. **Рядом с игрой**: если скопировать `Razdor.exe` (Windows), `razdor` (Linux) или `razdor-macos` (macOS) прямо в папку с `DiscordTimes.exe`, Razdor возьмёт эту копию. На Mac игра лежит в папке внутри бутылки Wine или CrossOver.
+2. **Рядом с игрой**: если скопировать `Razdor-<версия>.exe` (Windows), `razdor-<версия>-linux` (Linux) или `razdor-<версия>-macos` (macOS) прямо в папку с `DiscordTimes.exe`, Razdor возьмёт эту копию. На Mac игра лежит в папке внутри бутылки Wine или CrossOver.
 3. **Прошлый запуск**: папка, которую Razdor запомнил.
 4. **Стандартные папки**: `~/Games`, `~/Downloads` и домашняя папка.
 

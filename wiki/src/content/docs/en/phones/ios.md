@@ -7,7 +7,7 @@ sidebar:
 
 ## Installation (Experimental)
 
-For iPhone and iPad with iOS 14 and newer, the **razdor.ipa** file is available in the GitHub releases. This is an experimental version. A new IPA is installed over the old one.
+For iPhone and iPad with iOS 14 and newer, the **`razdor-<version>.ipa`** file is available in the GitHub releases. This is an experimental version. A new IPA is installed over the old one.
 
 The file is unsigned, so to install it, use **AltStore** or **Sideloadly** with your Apple ID. You do not need to sign the file yourself.
 
@@ -15,11 +15,11 @@ The file is unsigned, so to install it, use **AltStore** or **Sideloadly** with 
 1. Run AltServer on your computer.
 2. Install AltStore on your phone via AltServer.
 3. In the AltStore app, go to the "My Apps" tab and tap "+".
-4. Select the downloaded **razdor.ipa** file.
+4. Select the downloaded **`razdor-<version>.ipa`** file.
 
 ### Method 2: Sideloadly
 1. Connect your phone to your computer.
-2. Drag the **razdor.ipa** file into the Sideloadly window.
+2. Drag the **`razdor-<version>.ipa`** file into the Sideloadly window.
 3. Enter your Apple ID.
 
 :::caution

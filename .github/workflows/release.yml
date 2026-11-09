@@ -10,6 +10,13 @@
 # (src/update.rs) shows the notes up to their first `## ` heading: keep the pipeline's own
 # part (downloads, SHA-256) under such headings, after the changelog section.
 #
+# Each file is published twice: under its versioned name (razdor-X.Y.Z-linux, Razdor-X.Y.Z.exe,
+# razdor-X.Y.Z-macos, razdor-X.Y.Z.apk, razdor-X.Y.Z.ipa, razdor-translate-X.Y.Z-linux, and so on)
+# and under the old fixed name (razdor, Razdor.exe, ...). The versioned copies are made from the
+# built files by the "Versioned copies" step (the originals stay), and SHA256SUMS lists all 16.
+# Installed copies run an updater that only knows the fixed names, so the fixed-name copies stay
+# in every release until the owner drops them; the updater takes the versioned name when there is one.
+#
 #   1. Set `version` in Cargo.toml, move changelog/unreleased.md into changelog/X.Y.Z.md
 #      under "## X.Y.Z — date", run scripts/changelog.sh (it builds CHANGELOG.md); commit.
 #   2. git tag vX.Y.Z && git push origin vX.Y.Z
@@ -230,10 +237,33 @@ jobs:
           name: razdor-ios
           path: dist
 
+      - name: Versioned copies of the release files
+        id: versions
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            V="${GITHUB_REF_NAME#v}"
+          else
+            V=$(awk '/^\[/ {p = ($0 == "[package]")} p && /^version = / {gsub(/"/, "", $3); print $3; exit}' Cargo.toml)
+          fi
+          echo "V=$V" >> "$GITHUB_ENV"
+          echo "v=$V" >> "$GITHUB_OUTPUT"
+          chmod +x dist/razdor-macos dist/razdor-translate-macos
+          cd dist
+          cp razdor "razdor-$V-linux"
+          cp Razdor.exe "Razdor-$V.exe"
+          cp razdor-macos "razdor-$V-macos"
+          cp razdor.apk "razdor-$V.apk"
+          cp razdor.ipa "razdor-$V.ipa"
+          cp razdor-translate "razdor-translate-$V-linux"
+          cp Razdor-translate.exe "Razdor-translate-$V.exe"
+          cp razdor-translate-macos "razdor-translate-$V-macos"
+          ls -l
+
       - name: SHA-256 of all of them
         run: |
-          chmod +x dist/razdor-macos dist/razdor-translate-macos
-          (cd dist && sha256sum razdor Razdor.exe razdor-macos razdor-translate Razdor-translate.exe razdor-translate-macos razdor.apk razdor.ipa > SHA256SUMS)
+          (cd dist && sha256sum razdor Razdor.exe razdor-macos razdor-translate Razdor-translate.exe razdor-translate-macos razdor.apk razdor.ipa \
+            "razdor-$V-linux" "Razdor-$V.exe" "razdor-$V-macos" "razdor-$V.apk" "razdor-$V.ipa" \
+            "razdor-translate-$V-linux" "Razdor-translate-$V.exe" "razdor-translate-$V-macos" > SHA256SUMS)
           cat dist/SHA256SUMS
 
       - name: The programs of a run by hand
@@ -250,6 +280,14 @@ jobs:
             dist/razdor-translate-macos
             dist/razdor.apk
             dist/razdor.ipa
+            dist/razdor-${{ steps.versions.outputs.v }}-linux
+            dist/Razdor-${{ steps.versions.outputs.v }}.exe
+            dist/razdor-${{ steps.versions.outputs.v }}-macos
+            dist/razdor-${{ steps.versions.outputs.v }}.apk
+            dist/razdor-${{ steps.versions.outputs.v }}.ipa
+            dist/razdor-translate-${{ steps.versions.outputs.v }}-linux
+            dist/Razdor-translate-${{ steps.versions.outputs.v }}.exe
+            dist/razdor-translate-${{ steps.versions.outputs.v }}-macos
             dist/SHA256SUMS
 
       - name: Release notes from changelog/X.Y.Z.md
@@ -260,11 +298,13 @@ jobs:
           {
             echo
             echo "## Загрузка"
-            echo "- **Razdor.exe**: Windows (x86_64). **razdor**: Linux (x86_64). **razdor-macos**: macOS 11+ (Apple Silicon и Intel). **SHA256SUMS**: их контрольные суммы."
+            echo "- **Razdor-$V.exe**: Windows (x86_64). **razdor-$V-linux**: Linux (x86_64). **razdor-$V-macos**: macOS 11+ (Apple Silicon и Intel). **SHA256SUMS**: их контрольные суммы."
             echo "- Положите программу рядом с \`DiscordTimes.exe\` в папке игры и запустите её. Дальше Раздор обновляется сам (Настройки → «Ещё…» → «Обновления»)."
-            echo "- **razdor.apk**: Android 8+ (ARM). Установите, дайте «Доступ ко всем файлам», положите папку игры в \`DiscordTimes\` во внутренней памяти; экспериментально. Управление жестами (касание — щелчок, долгое нажатие — правая кнопка, щипок — масштаб, два пальца — прокрутка); режим тачпада включается в настройках. Раздор сам предлагает обновиться: загружает новый APK, проверяет его SHA-256 и передаёт системному установщику (Android попросит подтвердить установку); сохранения остаются."            echo "- **razdor.ipa**: iPhone и iPad (iOS 14+), экспериментально. Файл не подписан: установите его через AltStore или Sideloadly со своим Apple ID (бесплатная подпись действует 7 дней, AltStore продлевает её сам). Папку игры скопируйте в «Файлы» → На iPhone → Раздор → DiscordTimes; см. README, «iOS»."
-            echo "- **Razdor-translate.exe**, **razdor-translate**, **razdor-translate-macos**: переводчик карт и данных игры на английский языковой моделью (см. README, «Переводчик карт»); кладётся туда же. Сам он не обновляется."
-            echo "- macOS: программа не подписана разработчиком; после загрузки выполните \`xattr -d com.apple.quarantine razdor-macos\` (или правый щелчок → «Открыть») перед первым запуском."
+            echo "- **razdor-$V.apk**: Android 8+ (ARM). Установите, дайте «Доступ ко всем файлам», положите папку игры в \`DiscordTimes\` во внутренней памяти; экспериментально. Управление жестами (касание — щелчок, долгое нажатие — правая кнопка, щипок — масштаб, два пальца — прокрутка); режим тачпада включается в настройках. Раздор сам предлагает обновиться: загружает новый APK, проверяет его SHA-256 и передаёт системному установщику (Android попросит подтвердить установку); сохранения остаются."
+            echo "- **razdor-$V.ipa**: iPhone и iPad (iOS 14+), экспериментально. Файл не подписан: установите его через AltStore или Sideloadly со своим Apple ID (бесплатная подпись действует 7 дней, AltStore продлевает её сам). Папку игры скопируйте в «Файлы» → На iPhone → Раздор → DiscordTimes; см. README, «iOS»."
+            echo "- **Razdor-translate-$V.exe**, **razdor-translate-$V-linux**, **razdor-translate-$V-macos**: переводчик карт и данных игры на английский языковой моделью (см. README, «Переводчик карт»); кладётся туда же. Сам он не обновляется."
+            echo "- macOS: программа не подписана разработчиком; после загрузки выполните \`xattr -d com.apple.quarantine razdor-$V-macos\` (или правый щелчок → «Открыть») перед первым запуском."
+            echo "- Файлы без номера версии (Razdor.exe, razdor, razdor-macos, razdor.apk, razdor.ipa и переводчики) — те же программы под старыми именами, для обновления старых версий Раздора."
             echo
             echo "## SHA-256"
             echo "Собрано из коммита ${GITHUB_SHA::7}."
@@ -282,5 +322,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" --title "Раздор ${GITHUB_REF_NAME#v}" --notes-file notes.md \
-            dist/Razdor.exe dist/razdor dist/razdor-macos \
-            dist/Razdor-translate.exe dist/razdor-translate dist/razdor-translate-macos dist/razdor.apk dist/razdor.ipa dist/SHA256SUMS
+            dist/Razdor.exe dist/razdor dist/razdor-macos dist/razdor.apk dist/razdor.ipa \
+            dist/Razdor-translate.exe dist/razdor-translate dist/razdor-translate-macos \
+            dist/Razdor-$V.exe dist/razdor-$V-linux dist/razdor-$V-macos dist/razdor-$V.apk dist/razdor-$V.ipa \
+            dist/Razdor-translate-$V.exe dist/razdor-translate-$V-linux dist/razdor-translate-$V-macos dist/SHA256SUMS

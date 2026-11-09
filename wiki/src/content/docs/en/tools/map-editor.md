@@ -16,7 +16,7 @@ Razdor includes a built-in scenario editor that allows you to create `.DTm` form
 ## Launching the Editor
 
 There are two ways to launch the editor:
-The game's menu has no editor button yet: the editor is not ready. Start it by launching the game with the `--editor` flag (for example `Razdor.exe --editor` on Windows or `./razdor --editor` on Linux).
+The game's menu has no editor button yet: the editor is not ready. Start it by launching the game with the `--editor` flag (for example `Razdor-<version>.exe --editor` on Windows or `./razdor-<version>-linux --editor` on Linux).
 
 :::tip
 If the `RAZDOR_DT_DIR` environment variable is set on your system, the editor will use original graphics, load object and building images, and use the names of warriors, artifacts, and spells from your installed game. If the variable is not set, placeholders will be displayed instead.
