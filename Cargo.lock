@@ -515,7 +515,7 @@ checksum = "ca93e534d1142d1d0dcca6d25fe302508a5dfb40b302802904577725ea0b695b"
 [[package]]
 name = "macroquad"
 version = "0.4.16"
-source = "git+https://github.com/indicozy/macroquad?rev=92a88d9e46dec1b1f03cce65280e649414fada85#92a88d9e46dec1b1f03cce65280e649414fada85"
+source = "git+https://github.com/indicozy/macroquad?rev=351b2b3e84f5dbbb3f6bb312afb8587abe6f5f7e#351b2b3e84f5dbbb3f6bb312afb8587abe6f5f7e"
 dependencies = [
  "fontdue",
  "glam",
@@ -529,7 +529,7 @@ dependencies = [
 [[package]]
 name = "macroquad_macro"
 version = "0.1.8"
-source = "git+https://github.com/indicozy/macroquad?rev=92a88d9e46dec1b1f03cce65280e649414fada85#92a88d9e46dec1b1f03cce65280e649414fada85"
+source = "git+https://github.com/indicozy/macroquad?rev=351b2b3e84f5dbbb3f6bb312afb8587abe6f5f7e#351b2b3e84f5dbbb3f6bb312afb8587abe6f5f7e"
 
 [[package]]
 name = "malloc_buf"
@@ -555,8 +555,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 [[package]]
 name = "miniquad"
 version = "0.4.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dcbaea978d741f3b60ced666b06a2a1e4a2bc81cb8b9dd29f4a40965e1f59e65"
+source = "git+https://github.com/indicozy/miniquad?rev=3c37a7bb6abb7302df41f60001066fde99806bdb#3c37a7bb6abb7302df41f60001066fde99806bdb"
 dependencies = [
  "libc",
  "ndk-sys",

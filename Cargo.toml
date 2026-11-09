@@ -56,7 +56,11 @@ debug = false
 # that does not split batches; see the fork's commit). The 2.5D view's billboards batch through
 # it: one draw call instead of one per sprite. Drop the patch once upstream releases it.
 [patch.crates-io]
-macroquad = { git = "https://github.com/indicozy/macroquad", rev = "92a88d9e46dec1b1f03cce65280e649414fada85" }
+# Razdor's stack (branch razdor-stack in each fork): upstream master plus our batching fix
+# (not-fl3/macroquad#1082) and picked upstream PRs; miniquad without 413218d
+# (not-fl3/miniquad#704). See the forks' branch history for the list.
+macroquad = { git = "https://github.com/indicozy/macroquad", rev = "351b2b3e84f5dbbb3f6bb312afb8587abe6f5f7e" }
+miniquad = { git = "https://github.com/indicozy/miniquad", rev = "3c37a7bb6abb7302df41f60001066fde99806bdb" }
 
 # The map translator (src/bin/razdor-translate): its own window, built on Razdor's ui module.
 # Its unit tests are the library's (`razdor::translate`); the ui module's run with the game.
