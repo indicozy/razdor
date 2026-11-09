@@ -332,7 +332,7 @@ public String razdorPickOutcome() {
 // «Перенос…» (src/ui/transfer.rs). razdorSetExportSource names the file the export copies (in the app's
 // cache); razdorCreateDocument opens the creator with the suggested name and MIME type. The picked
 // file gets the copy on a thread; razdorExportOutcome is the game's poll: "" while the creator is open
-// or the copy runs, "ok", "cancel" or "error: <why>".
+// or the copy runs, "ok", "cancel" or "error: <code>" (a short code: start, no-output, copy).
 private static final int RAZDOR_EXPORT_REQUEST = 7302;
 // The file the export copies, as the game set it (razdorSetExportSource).
 private volatile String razdorExportSource = "";
@@ -358,7 +358,8 @@ public String razdorCreateDocument(final String name, final String mime) {
                 intent.putExtra(Intent.EXTRA_TITLE, name);
                 startActivityForResult(intent, RAZDOR_EXPORT_REQUEST);
             } catch (Exception e) {
-                razdorExportResult = "error: " + e;
+                // A short code only: the game logs it and shows its own text.
+                razdorExportResult = "error: start";
             }
         }
     });
@@ -391,7 +392,7 @@ private void razdorExportAnswer(int resultCode, Intent data) {
 private String razdorCopyExport(String source, Uri uri) {
     try (InputStream in = new FileInputStream(source); OutputStream out = getContentResolver().openOutputStream(uri, "wt")) {
         if (out == null) {
-            return "error: the file cannot be written";
+            return "error: no-output";
         }
         byte[] buffer = new byte[65536];
         int n;
@@ -400,7 +401,7 @@ private String razdorCopyExport(String source, Uri uri) {
         }
         return "ok";
     } catch (Exception e) {
-        return "error: " + e;
+        return "error: copy";
     }
 }
 

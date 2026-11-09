@@ -78,8 +78,8 @@ pub const QUICK_SAVES_KEPT: usize = 5;
 /// app in the background or the game crashed. Listed with the autosaves, never rotated (see
 /// [`session_path`], [`session_marker`] and `ui::session`).
 pub const SESSION: &str = crate::i18n::n_("Last session");
-const MANUAL_DIR: &str = "manual";
-const AUTO_DIR: &str = "auto";
+pub const MANUAL_DIR: &str = "manual";
+pub const AUTO_DIR: &str = "auto";
 
 /// Which scenario a game plays.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -305,6 +305,15 @@ pub fn games_dir() -> Option<PathBuf> {
 /// across rebuilds, and it is never inside that folder (`root` is the app's saves folder).
 pub fn saves_dir_of(root: &Path, install: &Path) -> PathBuf {
     root.join(install_key(install))
+}
+
+/// Whether `name` is an install's save folder as [`saves_dir_of`] names it (its folder name, `-`, and
+/// the path's hash in eight hex digits).
+pub fn is_install_folder(name: &str) -> bool {
+    let Some((head, hash)) = name.rsplit_once('-') else { return false };
+    hash.len() == 8
+        && hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        && head.chars().all(|c| c.is_alphanumeric() || c == ' ' || c == '-' || c == '_')
 }
 
 /// The name of install `dir`'s save folder: its folder name and the FNV-1a hash of its path.
@@ -749,7 +758,7 @@ fn files_of(dir: &Path, kind: SaveKind) -> Vec<(PathBuf, FileStamp)> {
 
 /// The map slots' folder (Razdor's): beside `manual/` and `auto/`, so the load window, its
 /// «Очистить всё», the rotation and the limits never see a slot.
-const MAPS_DIR: &str = "maps";
+pub const MAPS_DIR: &str = "maps";
 
 /// The save slot key of a map file name: the name lowercased, through [`slug`].
 pub fn map_slot_key_of_file(file: &str) -> String {
@@ -1068,7 +1077,7 @@ fn by_time(dir: &Path, kind: SaveKind) -> Vec<SaveEntry> {
 }
 
 /// The list of pinned saves of a kind's folder: one file name per line.
-const PINS_FILE: &str = "pinned.txt";
+pub const PINS_FILE: &str = "pinned.txt";
 
 fn file_name(path: &Path) -> Option<String> {
     path.file_name().and_then(|n| n.to_str()).map(str::to_string)

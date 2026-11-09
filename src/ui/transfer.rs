@@ -140,13 +140,13 @@ fn prepare_export(log: bool) -> Result<(PathBuf, String, &'static str), Done> {
     let cache = platform::cache_dir().ok_or_else(|| export_failed(tr("the app has no cache folder")))?;
     let dir = cache.join("export");
     let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).map_err(|e| export_failed(&e.to_string()))?;
+    fs::create_dir_all(&dir).map_err(|e| io_failed(export_failed, e))?;
     let stamp = transfer::date_stamp(now_secs());
     if log {
         let src = razdor::diag::log_path().ok_or_else(|| export_failed(tr("there is no log file")))?;
         let name = format!("razdor-log-{stamp}.txt");
         let temp = dir.join(&name);
-        fs::copy(&src, &temp).map_err(|e| export_failed(&e.to_string()))?;
+        fs::copy(&src, &temp).map_err(|e| io_failed(export_failed, e))?;
         return Ok((temp, name, "text/plain"));
     }
     let root = platform::app_dir().map(|d| d.join("saves")).ok_or_else(|| export_failed(tr("the app has no folder")))?;
@@ -191,7 +191,11 @@ pub fn poll() -> Option<Done> {
                     Some(Done { message: message.to_string(), saves_changed: false })
                 }
                 "cancel" => None,
-                text => Some(export_failed(text.strip_prefix("error: ").unwrap_or(text))),
+                text => {
+                    // The Java side names the step that failed (a short code); the player gets the fixed text.
+                    razdor::diag!("export failed: {text}");
+                    Some(export_failed(tr("the file cannot be written")))
+                }
             }
         }
         Step::Importing => {
@@ -204,7 +208,10 @@ pub fn poll() -> Option<Done> {
                 "cancel" => None,
                 text => match text.strip_prefix("ok\n").and_then(|rest| rest.split_once('\n')) {
                     Some((name, path)) => Some(import_picked(name, Path::new(path))),
-                    None => Some(import_failed(text.strip_prefix("error: ").unwrap_or(text))),
+                    None => {
+                        razdor::diag!("the picked file cannot be read: {text}");
+                        Some(import_failed(tr("the file cannot be read")))
+                    }
                 },
             }
         }
@@ -222,7 +229,7 @@ fn import_picked(name: &str, path: &Path) -> Done {
         }
     } else if lower.ends_with(".rzsave") {
         match save::manual_dir() {
-            Some(dir) => transfer::import_save(path, name, &dir).map(|_| 1),
+            Some(dir) => transfer::import_save(path, name, &dir),
             None => Err(tr("the app has no folder").to_string()),
         }
     } else {
@@ -230,9 +237,21 @@ fn import_picked(name: &str, path: &Path) -> Done {
     };
     let _ = fs::remove_file(path);
     match result {
-        Ok(n) => Done { message: trf!("Imported saves: {n}.", n = n), saves_changed: true },
+        Ok(imported) => {
+            let mut message = trf!("Imported saves: {n}, already there: {m}.", n = imported.saves, m = imported.already);
+            if imported.settings_kept {
+                message = format!("{message} {}", tr("Settings were not replaced: they are already there."));
+            }
+            Done { message, saves_changed: true }
+        }
         Err(why) => import_failed(&why),
     }
+}
+
+/// A failed file step: the detail goes to the log, the player gets the fixed text of `done`'s kind.
+fn io_failed(kind: fn(&str) -> Done, e: std::io::Error) -> Done {
+    razdor::diag!("export step failed: {e}");
+    kind(tr("the file cannot be written"))
 }
 
 fn export_failed(why: &str) -> Done {
