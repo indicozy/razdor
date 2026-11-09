@@ -135,10 +135,12 @@ unsafe fn view_url(env: *mut sys::JNIEnv, url: &str) -> bool {
     !cleared(env)
 }
 
-/// Razdor's own (a player's request): opens the folder `dir` in the Files app. Only a folder on the
-/// shared storage has a document URI (`platform::android_document_uri`), so the app's own folder
-/// (under `Android/data`) gets none and the call returns false. The document's own URI with the
+/// Razdor's own (a player's request): opens the folder `dir` in the Files app. Any path under
+/// `/storage/emulated/0` gets a document URI (`platform::android_document_uri`), the app's own folder
+/// under `Android/data` included. Android 11 and later may refuse that URI in the Files app, and then
+/// the call falls back to the storage root as it does for any folder. The document's own URI with the
 /// directory type first; if the system refuses it, the storage root. True when one of them started.
+/// (A later task replaces these uses with an export.)
 pub fn open_folder(dir: &str) -> bool {
     /// `FLAG_GRANT_READ_URI_PERMISSION` | `FLAG_ACTIVITY_NEW_TASK`.
     const FLAGS: i32 = 0x1 | 0x1000_0000;
