@@ -92,3 +92,20 @@ lists) and its layers are skipped when their level is 0.
 - A wiki page and the owner's approval of the screenshots (a UI change) come before `main`.
 - Weather in battles; weather that the rules read (none, by design).
 - Shadows of the clouds on the sprites' own pictures, and a real heat distortion (see above).
+
+## As built (2026-11-11)
+
+- The masks: `weather` (RGBA: snow, swamp rain, heat, ash) and `lowland` (red), per map in the terrain's
+  cache. Nearest-filtered; the shader blends four taps itself (`mask4`). Lowland rain is its own mask
+  because it has its own chance (20 %) and the four channels were taken.
+- Ground point: flat from the camera's scale and origin; 2.5D by the ray through the pixel (the inverse of
+  the view's projection, uniform), hit with Y = 0. The world's y is divided by `Grid::row_height` (the square
+  grid's 22 / 32): the cell rows are not world units.
+- Cloud shadows: screen space at the ground point (the deliberate change above). Heat haze: wavering warm
+  light (no readback). Sand gusts: a heavy heat spell adds sand specks over the desert cells.
+- Cost: not measured on the GPU (the renders are Mesa CPU). The fragment cost is an estimate: about 350 ALU
+  and 15 texture reads per pixel with every layer on; one particle layer on a phone. Measure on a phone before
+  a release.
+- Tests: `ui::weather` (the biome table against the texture names, the mask bytes, the schedule over 1000
+  days, the midnight blend, the easing, the no-weather frame). Weather off is byte-identical to the build
+  before the pass (flat snapshot, noon).

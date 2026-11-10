@@ -549,6 +549,25 @@ it every frame from `display::follow_settings`; `RAZDOR_LIVE_WATER=1` turns it o
   additive) fading from alpha 0.35 to 0 over 1.5 s and growing from 0.3 to 0.7 cell. Explored cells only. Recorded per
   army index and cleared with `MapView::forget_shows`.
 
+**Weather** (the setting «Погода», `Settings::map_weather`, off by default; `display::follow_settings` pushes it
+with `weather::set_pref`; `RAZDOR_WEATHER=1` turns it on for snapshots, `RAZDOR_WEATHER_DAY=<n>` fixes the day).
+Style only; `src/ui/weather.rs`. Each cell's biome comes from its terrain code (`weights`: snow 14 and 15,
+swamp 8 and 9, lowland 5 to 7, desert 10 and 13, fire lands 3 and 11), written as two mask textures per map
+(`mask_texels`, from the terrain's cached cells: `TerrainLayer::weather_masks`, rebuilt only when the codes
+change). The masks are nearest-filtered and blended by four taps in the shader (`mask4`). Each game day's spell
+per biome is `spell`, a hash of the map's seed (`map_seed`), the day and the biome: `Biome::chance` (snow 60 %,
+swamp rain 45 %, lowland rain 20 %, heat 80 %, ash 70 %, clouds 70 %), heavy on 40 % of those days. `Schedule::level`
+blends each midnight over one game hour; `frame_levels` eases the shown levels in real time (`LEVEL_TAU`) and
+forgets them when the weather is off or the map is forgotten (`forget`). `world_view::draw_weather` runs once a
+frame after the flat fog and the daylight, before the clash marks and the UI: the projection maps each pixel to
+its ground cell (`Projection`: flat from the camera's scale; 2.5D by the ray through the pixel, `Tilted`), the
+fog's shown darkness masks the weather to explored ground, and `weather::draw` composes snow, rain, heat haze,
+ash and cloud shadows in one fragment pass (the layers at level 0 are skipped; one particle layer on a phone,
+`display::dp_px`). The cell coordinate is centred on whole numbers (cells span ±½), so a mask lookup is
+`(p + ½) / MapSize`, and the world's y is divided by the grid's row height first. Known: the heat haze is wavering
+warm light, not a distortion (no frame readback); the bent first-person and eyes views use the plane's hit (hidden
+from players); the cloud shadows darken the sprites too.
+
 ## Sound and music
 
 - `src/dt/sound.rs`: `SoundTable::from_ini` (`_Sounds.ini`: `[Backgrounds]` music keys,
