@@ -191,6 +191,16 @@ pub fn billboard_model(origin: Vec2, foot: Vec2, scale: f32, pitch_deg: f32, yaw
     Mat4::from_cols(right3.extend(0.0) * k, (-up).extend(0.0) * k, Vec4::ZERO, at.extend(1.0))
 }
 
+/// [`billboard_model`] grown about `base` instead of `foot`: the sprite turns about `foot` (its
+/// point on the ground at every yaw), but a grown sprite keeps `base` on its row, the point at
+/// `size` 1 stays where it is. The drawn point `p` is first moved by `d = (base − foot)(1/size − 1)`,
+/// so `billboard_model(foot, size)` of `p + d` is the grown picture about `base`. With
+/// `base == foot` this is [`billboard_model`].
+pub fn billboard_model_about(origin: Vec2, foot: Vec2, base: Vec2, scale: f32, pitch_deg: f32, yaw_deg: f32, size: f32) -> Mat4 {
+    let d = (base - foot) * (1.0 / size - 1.0);
+    billboard_model(origin, foot, scale, pitch_deg, yaw_deg, size) * Mat4::from_translation(vec3(d.x, d.y, 0.0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -497,5 +507,31 @@ mod tests {
         // Not mirrored: one pixel to the right is to the right on the screen.
         let right = m * vec4(1.0, 400.0, 0.0, 1.0);
         assert!(c.project(right.truncate(), FRAME).unwrap().x > base.x, "right is right");
+    }
+
+    /// A grown sprite (`billboard_model_about`) keeps its base point where it is at size 1, at
+    /// every yaw; the point that stays on the foot's ground is the one shifted by `d`; and with
+    /// `base == foot` it is [`billboard_model`].
+    #[test]
+    fn a_grown_sprite_keeps_its_base_row_and_turns_about_its_foot() {
+        let (origin, foot, base) = (vec2(10.0, -4.0), vec2(40.0, 300.0), vec2(40.0, 316.0));
+        let size = 1.5;
+        let d = (base - foot) * (1.0 / size - 1.0);
+        for yaw in [0.0, 45.0, 90.0, 180.0, -135.0] {
+            let at_one = billboard_model(origin, foot, SCALE, 55.0, yaw, 1.0);
+            let grown = billboard_model_about(origin, foot, base, SCALE, 55.0, yaw, size);
+            // The base point is where it stands at size 1.
+            let b1 = at_one.transform_point3(vec3(base.x, base.y, 0.0));
+            let bg = grown.transform_point3(vec3(base.x, base.y, 0.0));
+            assert!((b1 - bg).length() < 1e-4, "yaw {yaw}: base {bg:?} vs size 1 {b1:?}");
+            // The sprite point `foot − d` stands on the foot's ground point at every yaw.
+            let fp = grown.transform_point3(vec3((foot - d).x, (foot - d).y, 0.0));
+            let ground = vec3((foot.x + origin.x) / SCALE, 0.0, (foot.y + origin.y) / SCALE);
+            assert!((fp - ground).length() < 1e-4, "yaw {yaw}: pivot {fp:?} vs ground {ground:?}");
+            // With base == foot it is the plain billboard, at any size.
+            let same = billboard_model_about(origin, foot, foot, SCALE, 55.0, yaw, size);
+            let plain = billboard_model(origin, foot, SCALE, 55.0, yaw, size);
+            assert!(same.abs_diff_eq(plain, 1e-5), "yaw {yaw}: base == foot is the plain billboard");
+        }
     }
 }

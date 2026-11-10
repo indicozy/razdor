@@ -1118,16 +1118,18 @@ fn ground<R>(cam: &Camera, draw: impl FnOnce() -> R) -> R {
 }
 
 /// Draws a standing sprite whose foot is at `foot` (a point of the 2D space) as a billboard
-/// ([`view25::billboard_model`]); under a flat camera, as drawn.
+/// ([`view25::billboard_model_about`]); under a flat camera, as drawn. The sprite turns about
+/// `foot` and grows about `base` (its row on the ground: [`object_base`], [`building_base`]; the
+/// foot itself for the figures), so a grown picture keeps its base where it stands.
 ///
 /// The billboard is a CPU-side model transform (macroquad's `push_cpu_model_matrix`, a fork
 /// patch): a GPU model would start a new draw call per sprite, and on the owner's OnePlus 13
 /// (Adreno) each draw call's buffer upload then cost a copy and an orphaned buffer (91% of the
 /// frame in the render passes; the 2.5D frame 17.7 ms against 8.3 ms flat). With the transform
 /// on the CPU the sprites share their draw calls.
-fn standing<R>(cam: &Camera, foot: Vec2, draw: impl FnOnce() -> R) -> R {
+fn standing<R>(cam: &Camera, foot: Vec2, base: Vec2, draw: impl FnOnce() -> R) -> R {
     let Some(tilt) = cam.tilt else { return draw() };
-    push_cpu_model(view25::billboard_model(cam.origin, foot, cam.scale, tilt.cam.pitch_deg, tilt.cam.yaw_deg, sprite_size()));
+    push_cpu_model(view25::billboard_model_about(cam.origin, foot, base, cam.scale, tilt.cam.pitch_deg, tilt.cam.yaw_deg, sprite_size()));
     let r = draw();
     pop_cpu_model();
     r
@@ -1712,18 +1714,38 @@ fn object_sprite_origin(o: &Decoration, w: f32, h: f32, cam: &Camera) -> Vec2 {
     corner + vec2(dx - w - 0.5, dy - h - 0.5) * (cam.scale / PX)
 }
 
-/// The foot of a map object's sprite in the 2D space: the bottom-right corner of its cell, where
-/// [`object_sprite_origin`] puts the sprite's bottom edge.
+/// The foot of a map object's sprite in the 2D space: the centre of its cell. A billboard turns
+/// about its foot, so the foot is the point the sprite stands on; a corner would make the picture
+/// swing across the ground when the view turns. The sort key uses it too ([`sprite_key`]).
 fn object_foot(o: &Decoration, cam: &Camera) -> Vec2 {
-    let (x, y) = cam.grid.center(o.tile);
-    cam.to_screen((x + 0.5, y + cam.grid.row_height() / 2.0))
+    cam.cell_centre(o.tile)
 }
 
-/// The foot of a building's sprite in the 2D space: the bottom-right corner of its anchor cell,
-/// where [`building_sprite_origin`] puts the sprite's bottom edge.
+/// The base a map object's sprite grows about: its foot's x on the bottom edge of its cell. A
+/// grown picture (the sprites' size) keeps its base on the cell's row, centred over the spot,
+/// instead of growing about the centre and sliding down past the cell.
+fn object_base(o: &Decoration, cam: &Camera) -> Vec2 {
+    let (x, y) = cam.grid.center(o.tile);
+    vec2(object_foot(o, cam).x, cam.to_screen((x, y + cam.grid.row_height() / 2.0)).y)
+}
+
+/// The foot of a building's sprite in the 2D space: the centre of its footprint (the mean of its
+/// cells' centres), the point it stands on. A billboard turns about its foot, so a corner would
+/// make a big building slide across the ground when the view turns; the sort key uses it too
+/// ([`sprite_key`]). Without cells (none in a real map) the anchor's centre.
 fn building_foot(l: &Location, cam: &Camera) -> Vec2 {
+    let (sum, n) = l.cells().fold((Vec2::ZERO, 0u32), |(s, n), t| (s + cam.cell_centre(t), n + 1));
+    if n == 0 {
+        return cam.cell_centre(l.anchor);
+    }
+    sum / n as f32
+}
+
+/// The base a building's sprite grows about: its foot's x on the bottom edge of its anchor cell
+/// (the sprite's bottom-right cell), so a grown picture keeps its base on that row.
+fn building_base(l: &Location, cam: &Camera) -> Vec2 {
     let (x, y) = cam.grid.center(l.anchor);
-    cam.to_screen((x + 0.5, y + cam.grid.row_height() / 2.0))
+    vec2(building_foot(l, cam).x, cam.to_screen((x, y + cam.grid.row_height() / 2.0)).y)
 }
 
 /// The part `src` of `texture` drawn at `at`, `size` big, its top edge moved `lean` px right.
@@ -2269,7 +2291,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     for o in map.objects_in_rows(r0 - up, r1 + below) {
         if o.tile.0 >= c0 - side && o.tile.0 < c1 + side && razdor::rules::map::object_cells(o).any(|t| fog.explored_near(t, minimap::FEATHER)) {
             if (object_class::HILLS..=object_class::ROCKY_HILLS).contains(&o.class) {
-                standing(cam, object_foot(o, cam), || draw_object(o, art, cam));
+                standing(cam, object_foot(o, cam), object_base(o, cam), || draw_object(o, art, cam));
             } else {
                 items.push((sprite_key(cam, o.tile, object_foot(o, cam), object_layer(o.class)), Drawable::Object(*o)));
             }
@@ -2355,7 +2377,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     super::sharp::session(|| {
         for d in items.iter().map(|(_, d)| d) {
             match d {
-                Drawable::Object(o) => standing(cam, object_foot(o, cam), || draw_object(o, art, cam)),
+                Drawable::Object(o) => standing(cam, object_foot(o, cam), object_base(o, cam), || draw_object(o, art, cam)),
                 Drawable::Building(i) => {
                     let l = &game.world.locations[*i];
                     let outlined = hover.is_some_and(|h| h.building == Some(*i));
@@ -2363,27 +2385,33 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                         // A bridge lies on the ground (Razdor's), so it is drawn in the ground pass.
                         ground(cam, || draw_building(l, art, cam, outlined));
                     } else {
-                        standing(cam, building_foot(l, cam), || draw_building(l, art, cam, outlined));
+                        standing(cam, building_foot(l, cam), building_base(l, cam), || draw_building(l, art, cam, outlined));
                     }
                 }
                 Drawable::Army(i) => {
                     let a = &game.world.armies[*i];
-                    standing(cam, cam.to_screen(game.army_display_pos(a)), || draw_army(game, a, assets, art, cam));
+                    let f = cam.to_screen(game.army_display_pos(a));
+                    standing(cam, f, f, || draw_army(game, a, assets, art, cam));
                 }
                 Drawable::Ship => {
                     if let Some(ship) = game.ship {
                         let at = map.center(ship.tile);
-                        standing(cam, cam.to_screen(at), || {
+                        let f = cam.to_screen(at);
+                        standing(cam, f, f, || {
                             if !draw_figure(art, ship_stem(razdor::rules::ships::kind::HERO), at, None, 0, cam, Stand::Afloat) {
                                 draw_ship(cam, at, HERO_SAIL);
                             }
                         });
                     }
                 }
-                Drawable::Hero => standing(cam, cam.to_screen(game.display_pos()), || draw_hero(game, assets, art, cam)),
+                Drawable::Hero => {
+                    let f = cam.to_screen(game.display_pos());
+                    standing(cam, f, f, || draw_hero(game, assets, art, cam))
+                }
                 Drawable::Spell(n) => {
                     if let Some(s) = spell {
-                        standing(cam, cam.to_screen(s.at), || draw_spell_layer(s, *n, cam));
+                        let f = cam.to_screen(s.at);
+                        standing(cam, f, f, || draw_spell_layer(s, *n, cam));
                     }
                 }
             }
@@ -4951,6 +4979,72 @@ mod tilt_tests {
         assert!(clear(compass_place(screen, bar, 40.0, &[]).unwrap(), bar));
         assert!(clear(above_right, phone_bar) && clear(top, phone_bar));
         assert_eq!(compass_place(screen, bar, 40.0, &[Rect::new(0.0, 0.0, 1280.0, 800.0)]), None, "no clear place: no compass");
+    }
+
+    /// A building stands on the centre of its footprint, not on a corner: its foot is the mean of
+    /// its cells' centres, at every turn (a billboard turns about its foot).
+    #[test]
+    fn a_building_stands_on_the_centre_of_its_footprint() {
+        let game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        let m = &game.world.map;
+        let mut l = game.world.locations[0].clone();
+        l.anchor = (m.w / 2, m.h / 2);
+        l.size = (2, 2);
+        let cells: Vec<Tile> = l.cells().collect();
+        assert_eq!(cells.len(), 4);
+        for cam in [camera(&game, None), camera(&game, Some((55.0, 0.0))), camera(&game, Some((55.0, 135.0)))] {
+            let (sx, sy) = cells.iter().fold((0.0, 0.0), |(x, y), &t| {
+                let (cx, cy) = m.grid.center(t);
+                (x + cx, y + cy)
+            });
+            let n = cells.len() as f32;
+            let want = cam.to_screen((sx / n, sy / n));
+            let got = building_foot(&l, &cam);
+            assert!((got - want).length() < 1e-3, "foot {got:?}, want {want:?}");
+        }
+    }
+
+    /// A decoration stands on its cell's centre, the point its sprite turns about.
+    #[test]
+    fn a_decoration_stands_on_its_cell_s_centre() {
+        let game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        let m = &game.world.map;
+        let t = (m.w / 2 + 1, m.h / 2 - 1);
+        let o = Decoration { tile: t, class: object_class::TREES, sprite: 0 };
+        for cam in [camera(&game, None), camera(&game, Some((55.0, 30.0)))] {
+            let want = cam.to_screen(m.grid.center(t));
+            assert!((object_foot(&o, &cam) - want).length() < 1e-3);
+        }
+    }
+
+    /// Turned 180°, a tree in the row just north of a 2×2 building (nearer the eye) is drawn
+    /// after the building, and one just south of it before: the sort uses the foot, so a tree
+    /// no longer draws over a building it stands behind. Every turn of the sweep must build
+    /// without a panic, and the 180° case is checked.
+    #[test]
+    fn a_tree_beside_a_building_sorts_by_depth_when_turned_about() {
+        let game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        let m = &game.world.map;
+        let (ax, ay) = (m.w / 2, m.h / 2);
+        let mut l = game.world.locations[0].clone();
+        l.anchor = (ax, ay);
+        l.size = (2, 2);
+        for yaw in [0.0, 45.0, 90.0, 135.0, 180.0, -90.0] {
+            let cam = camera(&game, Some((55.0, yaw)));
+            let building = sprite_key(&cam, first_footprint_cell(&l), building_foot(&l, &cam), LAYER_BUILDING);
+            let tree = |tile: Tile| {
+                let o = Decoration { tile, class: object_class::TREES, sprite: 0 };
+                sprite_key(&cam, o.tile, object_foot(&o, &cam), object_layer(o.class))
+            };
+            // The footprint is the rows ay-1 and ay (`Location::cells`): a tree in row ay-2 is
+            // just north of it, one in row ay+1 just south.
+            let north = tree((ax - 1, ay - 2));
+            let south = tree((ax - 1, ay + 1));
+            if yaw == 180.0 {
+                assert!(north > building, "turned 180: the tree north of the building is nearer, drawn later");
+                assert!(south < building, "turned 180: the tree south of the building is farther, drawn earlier");
+            }
+        }
     }
 }
 

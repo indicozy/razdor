@@ -269,7 +269,9 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   drawing culls to (`cull`). The drawing runs in the flat camera's 2D space, `in_view` sets the 3D
   view (`View3d`: depth off, no viewport) on the cull footprint (`tilted_space`). `ground` lays that
   space on the ground for the terrain, the hills, marks, the route, bridges and the fog;
-  `standing` makes each sprite a billboard through its foot (`view25::billboard_model`). With the
+  `standing` makes each sprite a billboard through its foot (`view25::billboard_model`). A sprite's
+  foot is its cell's centre (a building: the centre of its footprint), the point it turns about and
+  sorts by (`sprite_key`), not the cell's corner, where the picture hangs. With the
   setting off, `in_view`, `ground` and `standing` only call their closures: the flat view is the same
   code path.
 - Picking: `map_pointer` is the ground under the pointer (NaN over the sky), `tile_under_pixel` the
