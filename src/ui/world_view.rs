@@ -1790,7 +1790,7 @@ fn photo_frame(game: &mut Game, assets: &Assets, view: &mut MapView, entering: b
     }
     cursor::set(if strip { Shape::Arrow } else { Shape::Hidden });
     let base = if strip { layout.panel.y - 8.0 * super::chrome::k() } else { sh - 14.0 * super::chrome::k() };
-    draw_toasts(&mut view.toasts, now, base, super::display::dp_px().map(|d| 15.0 * d));
+    draw_toasts(&mut view.toasts, now, base, super::display::dp_px().map(|d| 16.0 * d));
     PhotoStep::Drawn
 }
 

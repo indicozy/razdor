@@ -252,14 +252,14 @@ pub fn strip_input(l: &Layout) -> ([bool; 3], [bool; 3]) {
 }
 
 /// Draws the strip: its panel and the three buttons, `held` ones pressed in. On a phone (`dp`: its
-/// pixels per dp) the labels are 15 sp, as the phone's texts (the desktop's labels fit their buttons).
+/// pixels per dp) the labels are 16 sp, as the phone texts (the desktop's labels fit their buttons).
 pub fn draw_strip(l: &Layout, held: [bool; 3], dp: Option<f32>) {
     let panel = Color { a: 0.55, ..super::widgets::PANEL };
     draw_rectangle(l.panel.x, l.panel.y, l.panel.w, l.panel.h, panel);
     let names = labels();
     for ((r, name), down) in l.buttons.into_iter().zip(names.iter()).zip(held) {
         match dp {
-            Some(d) => super::chrome::marble_button_sized(r, name, true, down, 15.0 * d),
+            Some(d) => super::chrome::marble_button_sized(r, name, true, down, 16.0 * d),
             None => super::chrome::marble_button(r, name, true, down),
         }
     }
