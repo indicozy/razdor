@@ -337,6 +337,42 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   update; it runs only when the fog or held cells change or a cell still eases, so an idle map does no per-cell
   work and uploads nothing (`fog_texture` uploads the texture when a texel changed, counted in the frame probe's
   rebuilds). The flat map, the minimap window and the 2.5D sprites all read the same values.
+- **The first-person view** («Вид карты» = «От первого лица», the owner's decision, 2026-11-10). Its
+  setting is `audio::Settings::map_first_person` within the tilted view (`map_tilt`), pushed by
+  `main_menu::apply_options` into `world_view::set_first_person`; `world_view::first_person()` is the
+  view, `tilt_view()` stays true for both tilted views. The far ground's shape «Даль» is
+  `Settings::map_horizon` (`Row::FarGround`, shown only with the view): off «Вверх» (the far ground
+  rolls up to top-down), on «Горизонт» (it curves down like a planet, the sky above). `RAZDOR_VIEW=first`
+  turns the view on for snapshots. It is visual only: no rule reads it.
+  - The camera: `view25::TiltCamera::first_person(look, scale, frame, yaw, horizon)`. Pitch `FP_PITCH` (12),
+    field of view `FP_FOV` (55), fixed (PageUp and PageDown tilt the 2.5D view only). It looks at the view's
+    centre (the hero when followed) from beyond it, so the centre stands at two thirds of the frame's height;
+    the distance is fitted so the hero's ground is drawn at the flat map's scale (the depth
+    `frame.h / 2 / (tan(fov/2) · scale)`). Yaw, Q and E, the two-finger twist and the compass are as in 2.5D.
+  - The bend: `view25::Bend` with a signed `max_deg`. Up (`FP_BEND_UP` 78°, radius `FP_RADIUS` 8) rolls the
+    sheet to square-on with the eye; down (`FP_BEND_DOWN` -60°, radius `FP_RADIUS_DOWN` 60) curves it away.
+    The down bend's `limit` is its horizon, where the eye's sight line grazes it (`Bend::with_horizon`): past
+    it the sheet is not drawn, not picked, and `Bend::point` stands a point on the horizon's line (`hidden`
+    keeps a sprite there from showing). A tight radius puts the horizon near mid-frame; a wide planet's curve
+    would lift it, and the footprint would need the ground to the horizon (about 170 units).
+  - Drawing: `draw_world` gives a bent view one `in_view`: `ground_in_bent` (the terrain) and `draw_world_in`
+    (the ground overlays, then the sprites) run in one picture, the sheet is drawn once, and the sprites stand
+    on it. The picture covers `TiltCamera::ground_footprint`, which for a bent camera is the bounding box of the
+    sheet the frame's edges meet (`bent_footprint`), so it reaches the top of the frame. `bent_target` rounds the
+    picture to 64 px and keeps four sizes, capped at 8192. A bent `in_view` runs its closure twice (the ground's
+    pass and the sprites' pass): raw 2D draws inside it would land in the wrong space, so draw through `ground` or
+    `standing` only.
+  - Picking: `TiltCamera::pick` marches the ray against the sheet's height at its forward distance (`height_at`, a
+    closed-form inverse `s_of_u`) in steps of 0.1 and bisects the first crossing (`pick_bent`); past the horizon
+    there is none, so the sky sees no ground (NaN in `map_point_at`). Tests: `pick_undoes_the_bent_sheet...`,
+    `a_click_on_the_hero_in_the_first_person_view...`.
+  - The sky: `draw_sky` fills the frame dark (`SKY`) for 2.5D and «Вверх»; for «Горизонт» a gradient from light
+    blue at the top to pale at the projected horizon line, which the ground covers below it.
+  - Near fade: `near_fade_limit` fades a standing sprite nearer the eye than `FP_NEAR_SHARE` (0.9) of the hero's
+    distance, back in fully at 1.35 of it (`NEAR_LIMIT`, set at the start of `draw_world_in` before any sprite,
+    the hills included). The hero never fades (`without_near_fade`). The trailer's near fade uses the same path.
+  - Fog, sprite fade by fog, the smooth reveal and the UI are as in 2.5D; the trailer's hide-UI (`trailer_clean`)
+    is only with `RAZDOR_TRAILER_CAM`. Off the map (past its north and south edges) the ground is black, as in 2.5D.
 - Simplifications: the F3 overlay is off in 2.5D (its labels are placed on the flat map).
 
 ## Sound and music

@@ -221,6 +221,14 @@ pub struct Settings {
     /// Advanced, Razdor's: the world map's 2.5D view (`world_view::tilt_view`): a tilted camera
     /// over the map, the standing sprites as billboards. Off (the default), the flat map as before.
     pub map_tilt: bool,
+    /// Advanced, Razdor's: the first-person view («От первого лица»), within the tilted view
+    /// (`map_tilt` on): the camera stands low behind the hero and the far ground bends with it.
+    /// Off (the default), the 2.5D view as before. Without `map_tilt` it has no effect.
+    pub map_first_person: bool,
+    /// Advanced, Razdor's: the first-person view's far ground («Даль»): «Горизонт» on (the ground
+    /// curves down like the earth's horizon, the sky above), «Вверх» off (the default: it rolls up
+    /// to the top-down map). Only with `map_first_person`.
+    pub map_horizon: bool,
     /// Advanced, Razdor's: the standing sprites' size in the 2.5D view, 1.5 by default (the owner's
     /// decision, 2026-11-05); `world_view::next_sprite_size` cycles it (1×, 1.5×, 2×).
     pub map_sprite_size: f32,
@@ -315,7 +323,7 @@ pub fn must_request(asked: Option<i32>, want: i32) -> bool {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), bottom_bar_size: Default::default(), keep_xp_on_promotion: false, keep_formation: true, battle_marks: true, army_list: false, map_tilt: false, map_sprite_size: super::world_view::DEFAULT_SPRITE_SIZE, map_twist: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, map_extended: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new() }
+        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), bottom_bar_size: Default::default(), keep_xp_on_promotion: false, keep_formation: true, battle_marks: true, army_list: false, map_tilt: false, map_first_person: false, map_horizon: false, map_sprite_size: super::world_view::DEFAULT_SPRITE_SIZE, map_twist: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, map_extended: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new() }
     }
 }
 
@@ -1100,6 +1108,20 @@ mod tests {
 
     /// The 2.5D options: flat and no twist for a file without them, the sprites at 1.5; a size
     /// outside 0.5..=3 is the default.
+    /// The views: a file from before the first-person view keeps its 2.5D (or flat) view and the
+    /// far ground's default («Вверх»); the new keys read back.
+    #[test]
+    fn a_file_from_before_the_first_person_view_keeps_its_view() {
+        let old: Settings = serde_json::from_str(r#"{"map_tilt": true, "map_sprite_size": 1.0}"#).unwrap();
+        let old = old.clamped();
+        assert!(old.map_tilt && !old.map_first_person && !old.map_horizon);
+        let fp: Settings = serde_json::from_str(r#"{"map_tilt": true, "map_first_person": true, "map_horizon": true}"#).unwrap();
+        let fp = fp.clamped();
+        assert!(fp.map_tilt && fp.map_first_person && fp.map_horizon);
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&fp).unwrap()).unwrap();
+        assert_eq!((back.map_first_person, back.map_horizon), (true, true));
+    }
+
     #[test]
     fn the_2_5d_options_default_to_flat_one_and_a_half_and_no_twist() {
         let old: Settings = serde_json::from_str("{}").unwrap();

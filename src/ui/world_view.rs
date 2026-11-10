@@ -966,6 +966,14 @@ pub(super) fn faction_color(faction: u8) -> Color {
 /// The 2.5D view (`view25`): the setting (`audio::Settings::map_tilt`, pushed by
 /// [`set_tilt_view`]) and the tilt in degrees (PageUp and PageDown change it).
 static TILT_VIEW: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The first-person view within the tilted one (`audio::Settings::map_first_person`), and its far
+/// ground's horizon («Горизонт», `audio::Settings::map_horizon`); both off by default.
+static FIRST_PERSON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static HORIZON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The sky's colours in the first-person view with a horizon: light blue at the top, pale at the
+/// horizon.
+const SKY_TOP: Color = Color::new(0.30, 0.55, 0.80, 1.0);
+const SKY_HORIZON: Color = Color::new(0.80, 0.89, 0.95, 1.0);
 /// The tilt's bits; NaN until it is set (then `RAZDOR_VIEW_PITCH`, or the default, starts it).
 static TILT_PITCH: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x7fc0_0000);
 /// Degrees per PageUp or PageDown press.
@@ -973,21 +981,53 @@ const TILT_STEP: f32 = 5.0;
 /// The sky above the ground in the 2.5D view (the part of the view with no map).
 const SKY: Color = Color::new(0.06, 0.08, 0.11, 1.0);
 
-/// Whether the world map is drawn in the 2.5D view: the setting, unless `RAZDOR_VIEW` says
-/// `25d` (on) or `flat` (off), which the debug snapshots use.
+/// The snapshots' view override, `RAZDOR_VIEW`: `25d` (the 2.5D view), `flat`, or `first` (the
+/// first-person view); None for the settings.
+fn view_env() -> Option<&'static str> {
+    static ENV: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    ENV.get_or_init(|| std::env::var("RAZDOR_VIEW").ok()).as_deref()
+}
+
+/// Whether the world map is drawn tilted (the 2.5D view or the first-person one): the setting,
+/// unless `RAZDOR_VIEW` says `25d` or `first` (on) or `flat` (off), which the debug snapshots use.
 pub fn tilt_view() -> bool {
-    static ENV: std::sync::OnceLock<Option<bool>> = std::sync::OnceLock::new();
-    let env = *ENV.get_or_init(|| match std::env::var("RAZDOR_VIEW").ok().as_deref() {
-        Some("25d") => Some(true),
-        Some("flat") => Some(false),
-        _ => None,
-    });
-    env.unwrap_or_else(|| TILT_VIEW.load(std::sync::atomic::Ordering::Relaxed))
+    match view_env() {
+        Some("25d") | Some("first") => true,
+        Some("flat") => false,
+        _ => TILT_VIEW.load(std::sync::atomic::Ordering::Relaxed),
+    }
 }
 
 /// Puts the 2.5D view on or off (from the settings, at once).
 pub fn set_tilt_view(on: bool) {
     TILT_VIEW.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether the tilted view is the first-person one («От первого лица», `view25::TiltCamera::first_person`):
+/// the setting (`audio::Settings::map_first_person`, pushed by [`set_first_person`]) within the tilted view.
+/// `RAZDOR_VIEW=first` (a snapshot) makes it so; `25d` and `flat` do not.
+pub fn first_person() -> bool {
+    tilt_view()
+        && match view_env() {
+            Some(v) => v == "first",
+            None => FIRST_PERSON.load(std::sync::atomic::Ordering::Relaxed),
+        }
+}
+
+/// Puts the first-person view on or off (from the settings, at once).
+pub fn set_first_person(on: bool) {
+    FIRST_PERSON.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether the first-person view's far ground curves down to a horizon with the sky above
+/// («Горизонт»), rather than rolling up to top-down («Вверх»).
+pub fn horizon() -> bool {
+    HORIZON.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Puts the far ground's shape on or off the horizon (from the settings, at once).
+pub fn set_horizon(on: bool) {
+    HORIZON.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// The trailer's camera from `RAZDOR_TRAILER_CAM` (dev-only, read once; see `view25::Trailer`).
@@ -1027,6 +1067,14 @@ fn trailer_camera(t: &view25::Trailer, target: Vec2, scale: f32, view: Rect, pit
     let bend = view25::Bend::new(target, yaw, t.flat, t.radius, t.bend);
     cam.bend = Some(bend);
     (cam, Some(bend.region(t.width, t.ahead, t.behind)))
+}
+
+/// The first-person tilt of a view (`view25::TiltCamera::first_person`, the player's): the camera
+/// looks at `look` (the map view's centre, the hero's place) and its bent sheet's ground is the
+/// footprint of the frame `view`, culled to the strip under the bar `draw` as the 2.5D one is.
+fn first_person_tilt(look: Vec2, scale: f32, view: Rect, draw: Rect, yaw: f32, horizon: bool) -> Tilt {
+    let cam = TiltCamera::first_person(look, scale, view, yaw, horizon);
+    Tilt { cam, plan: cam.ground_footprint(view, view), cull: cam.ground_footprint(view, draw) }
 }
 
 /// The tilt in degrees: the start's (`RAZDOR_VIEW_PITCH`, else the default) until PageUp or
@@ -1223,17 +1271,28 @@ fn bent_target(w: u32, h: u32) -> RenderTarget {
     thread_local! {
         static TARGETS: std::cell::RefCell<Vec<((u32, u32), RenderTarget)>> = const { std::cell::RefCell::new(Vec::new()) };
     }
+    // The size goes up to a multiple of 64 px, so the footprint's size, which moves with the turn,
+    // keeps to a few targets; the picture is drawn over the whole target (`render_cache::fill_space`).
+    let round = |v: u32| v.div_ceil(TARGET_STEP) * TARGET_STEP;
+    let size = (round(w), round(h));
     TARGETS.with(|t| {
         let mut t = t.borrow_mut();
-        if let Some((_, rt)) = t.iter().find(|(size, _)| *size == (w, h)) {
+        if let Some((_, rt)) = t.iter().find(|(s, _)| *s == size) {
             return rt.clone();
         }
-        let rt = render_target(w, h);
+        let rt = render_target(size.0, size.1);
         rt.texture.set_filter(FilterMode::Nearest);
-        t.push(((w, h), rt.clone()));
+        if t.len() >= TARGETS_KEPT {
+            t.remove(0);
+        }
+        t.push((size, rt.clone()));
         rt
     })
 }
+
+/// The steps a bent view's picture is sized by, and how many sizes are kept (the newest).
+const TARGET_STEP: u32 = 64;
+const TARGETS_KEPT: usize = 4;
 
 /// Draws the picture `target` on the bent ground: a grid of `SHEET_ACROSS` × `SHEET_ALONG` cells
 /// over `region` (the ground in world units), each vertex lifted by [`view25::Bend::point`] and
@@ -1336,6 +1395,10 @@ fn standing(cam: &Camera, foot: Vec2, base: Vec2, vis: f32, draw: impl FnOnce())
     }
     let (pitch, yaw, size) = (tilt.cam.pitch_deg, tilt.cam.yaw_deg, sprite_size());
     let g = (foot + cam.origin) / cam.scale;
+    // Past a down bend's horizon the sheet hides the ground, and what stands on it.
+    if tilt.cam.bend.is_some_and(|b| b.hidden(g)) {
+        return;
+    }
     let (model, on_ground) = match (PASS.with(std::cell::Cell::get), tilt.cam.bend) {
         // The sheet holds the ground: no sprite in the ground run.
         (Pass::Ground, _) => return,
@@ -1346,14 +1409,15 @@ fn standing(cam: &Camera, foot: Vec2, base: Vec2, vis: f32, draw: impl FnOnce())
         }
         _ => (view25::billboard_model_about(cam.origin, foot, base, cam.scale, pitch, yaw, size), vec3(g.x, 0.0, g.y)),
     };
-    // The trailer's camera (dev-only): a sprite whose foot is nearer the eye than its `near` fades
-    // out, and the blend band of its sharp draws follows the magnification of a nearer sprite.
+    // The trailer's camera (dev-only) and the first-person view: a sprite whose foot is nearer the
+    // eye than the near fade's distance fades out, and the blend band of its sharp draws follows
+    // the magnification of a nearer sprite. The 2.5D view is as before.
     let mut vis = vis;
     let mut magnify = 1.0;
-    if let Some(t) = trailer() {
+    if trailer().is_some() || first_person() {
         let d = (on_ground - tilt.cam.eye()).length().max(1e-3);
         magnify = tilt.cam.pivot_scale(cam.view) * tilt.cam.distance / (d * cam.scale);
-        let limit = t.near.min(NEAR_LIMIT.with(std::cell::Cell::get));
+        let limit = near_fade_limit();
         if limit > 0.0 && NEAR_FADE.with(std::cell::Cell::get) {
             vis *= near_fade(d, limit);
         }
@@ -1385,8 +1449,25 @@ fn without_near_fade(draw: impl FnOnce()) {
     NEAR_FADE.with(|f| f.set(prev));
 }
 
-/// The fade of a standing sprite whose foot is `d` from the eye, for the trailer's `near` (world
-/// units): 0 at `near`, smoothly 1 at 1.5 `near` and beyond.
+/// The distance inside which a standing sprite fades (world units; 0 is off): the trailer's `near`,
+/// and in the first-person view [`FP_NEAR_SHARE`] of the hero's distance from the eye (the trees
+/// between the eye and him fade, so they do not hide him; he never fades). Never past the hero.
+fn near_fade_limit() -> f32 {
+    let hero = NEAR_LIMIT.with(std::cell::Cell::get);
+    match trailer() {
+        Some(t) => t.near.min(hero),
+        None if hero.is_finite() => FP_NEAR_SHARE * hero,
+        None => 0.0,
+    }
+}
+
+/// The first-person view's near fade: a standing sprite nearer the eye than this share of the
+/// hero's distance is gone, and fully back at 1.35 of it. At 0.5 (the first try) a tree just in
+/// front of him, at 0.8 of his distance, still hid him at a quarter turn.
+const FP_NEAR_SHARE: f32 = 0.9;
+
+/// The fade of a standing sprite whose foot is `d` from the eye, for the near fade's distance
+/// ([`near_fade_limit`]): 0 at `near`, smoothly 1 at 1.5 `near` and beyond.
 fn near_fade(d: f32, near: f32) -> f32 {
     let t = ((d - near) / (0.5 * near)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
@@ -1497,14 +1578,18 @@ impl Camera {
         // A view with no height (a minimised window) has no perspective: it stays flat.
         if tilt_view() && view.w >= 1.0 && view.h >= 1.0 {
             let target = Vec2::from(cam.centre());
-            let (tilt, region) = match trailer() {
-                None => (TiltCamera::new(target, scale, view, tilt_pitch(), tilt_yaw()), None),
-                Some(t) => trailer_camera(t, target, scale, view, tilt_pitch(), tilt_yaw()),
-            };
-            cam.tilt = Some(match region {
-                Some(region) => Tilt { cam: tilt, plan: region, cull: region },
-                None => Tilt { cam: tilt, plan: tilt.ground_footprint(view, view), cull: tilt.ground_footprint(view, draw) },
-            });
+            if trailer().is_none() && first_person() {
+                cam.tilt = Some(first_person_tilt(target, scale, view, draw, tilt_yaw(), horizon()));
+            } else {
+                let (tilt, region) = match trailer() {
+                    None => (TiltCamera::new(target, scale, view, tilt_pitch(), tilt_yaw()), None),
+                    Some(t) => trailer_camera(t, target, scale, view, tilt_pitch(), tilt_yaw()),
+                };
+                cam.tilt = Some(match region {
+                    Some(region) => Tilt { cam: tilt, plan: region, cull: region },
+                    None => Tilt { cam: tilt, plan: tilt.ground_footprint(view, view), cull: tilt.ground_footprint(view, draw) },
+                });
+            }
         }
         cam
     }
@@ -1847,8 +1932,8 @@ fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool) {
         return in_view(cam, |c| ground(c, || draw_terrain(game, art, c)));
     };
     super::gpu_probe::timed(|| {
-        // A bent view (dev-only) draws its ground into its own picture each frame; the cache's
-        // fill would nest inside it.
+        // A bent view draws its ground in `draw_world`'s picture (`ground_in_bent`), never here;
+        // the cache's fill would nest inside that picture, so a bent view is not cached.
         let plain = cam.tilt.is_none_or(|t| t.cam.bend.is_none());
         let cached = (waits && layer.cache_on() && super::render_cache::target().is_none() && plain).then(|| layer.ground_target(ground_key(game, cam))).flatten();
         match cached {
@@ -2636,20 +2721,65 @@ impl Shade<'_> {
 /// probe on); a backdrop under a window or a battle does not wait. `veil`: the fog layers, drawn
 /// here only in the 2.5D view (the flat caller draws them after this).
 #[allow(clippy::too_many_arguments)]
+/// The sky behind a tilted view's ground. The flat dark [`SKY`], or, in the first-person view
+/// with a horizon («Горизонт»), a gradient from light blue at the top of the frame to pale at the
+/// horizon's line, which the ground covers below it.
+fn draw_sky(cam: &Camera) {
+    let Some(tilt) = cam.tilt else { return };
+    let r = cam.draw;
+    let horizon = tilt.cam.bend.filter(|b| b.limit.is_finite()).and_then(|b| {
+        let g = b.pivot + view25::forward(b.yaw_deg) * b.limit;
+        tilt.cam.project(b.point(g), cam.view)
+    });
+    let Some(h) = horizon else {
+        return draw_rectangle(r.x, r.y, r.w, r.h, SKY);
+    };
+    let (y, bottom) = (h.y.clamp(r.y, r.y + r.h), r.y + r.h);
+    let v = |x: f32, y: f32, c: Color| macroquad::models::Vertex::new(x, y, 0.0, 0.0, 0.0, c);
+    let vertices = vec![
+        v(r.x, r.y, SKY_TOP),
+        v(r.x + r.w, r.y, SKY_TOP),
+        v(r.x, y, SKY_HORIZON),
+        v(r.x + r.w, y, SKY_HORIZON),
+        v(r.x, bottom, SKY_HORIZON),
+        v(r.x + r.w, bottom, SKY_HORIZON),
+    ];
+    let indices = vec![0, 1, 2, 1, 3, 2, 2, 3, 4, 3, 5, 4];
+    macroquad::models::draw_mesh(&macroquad::models::Mesh { vertices, indices, texture: None });
+}
+
+#[allow(clippy::too_many_arguments)]
 fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<MapHoverLook>, waits: bool, veil: Veil) {
-    if cam.tilt.is_some() {
-        draw_rectangle(cam.draw.x, cam.draw.y, cam.draw.w, cam.draw.h, SKY);
-    }
+    draw_sky(cam);
     if waits {
         gpu_wait(Stage::GpuSky);
     }
-    // The ground first: it sets its own camera (`in_view`), so the cache can fill through it.
     stamp_idle(game, clock_ms());
+    // A bent view (the trailer's, the first-person one) draws its ground and the ground's overlays
+    // into one picture, laid on one sheet, and the sprites stand on it: one `in_view` for both.
+    if cam.tilt.is_some_and(|t| t.cam.bend.is_some()) {
+        let art = assets.dt.as_ref();
+        return in_view(cam, |c| {
+            ground_in_bent(game, art, c);
+            draw_world_in(game, assets, c, preview, spell, hover, waits, veil);
+        });
+    }
+    // The ground first: it sets its own camera (`in_view`), so the cache can fill through it.
     frame_probe::time(Stage::Terrain, || draw_ground(game, assets.dt.as_ref(), cam, waits));
     if waits {
         gpu_wait(Stage::GpuTerrain);
     }
     in_view(cam, |c| draw_world_in(game, assets, c, preview, spell, hover, waits, veil));
+}
+
+/// The ground of a bent view ([`draw_world`]), drawn in its picture's 2D space `c` (the ground's
+/// pass of [`bent_view`]; the sprites' pass draws none of it): the terrain, as [`draw_ground`] draws
+/// it without the cache, which a bent view does not use.
+fn ground_in_bent(game: &Game, art: Option<&DtArt>, c: &Camera) {
+    match art.and_then(|a| a.terrain_layer()).filter(|_| c.grid == Grid::Square8) {
+        Some(layer) => ground(c, || terrain_quad(game, layer, c, terrain::Mode::Full)),
+        None => ground(c, || draw_terrain(game, art, c)),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2669,6 +2799,13 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // The 2.5D view's fog shade of each standing sprite (none in the flat view: 1 there).
     let shade = tilted.then_some(Shade { fog, veil });
     let shade_of = |foot: Vec2| shade.as_ref().map_or(1.0, |s| s.at(cam, foot));
+    // The trailer's near fade stops at the hero's distance, and the first-person view's is half of
+    // it (see `NEAR_LIMIT`): set before any sprite of the pass, the hills included.
+    if trailer().is_some() || first_person() {
+        if let Some(d) = foot_distance(cam, cam.to_screen(game.display_pos())) {
+            NEAR_LIMIT.with(|l| l.set(d));
+        }
+    }
     // An object of the drawn columns and rows with a cell explored near the feather is seen, and
     // the hills are the classes 1-3 (`hill`).
     let seen = |o: &Decoration| o.tile.0 >= c0 - side && o.tile.0 < c1 + side && razdor::rules::map::object_cells(o).any(|t| fog.explored_near(t, minimap::FEATHER));
@@ -2786,12 +2923,6 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // Stable: figures sharing a cell keep the order they were pushed in.
     items.sort_by_key(|a| a.0);
     // One sharp session for the pass: its art shares the material switch (see `sharp::session`).
-    // The trailer's near fade stops at the hero's distance (see `NEAR_LIMIT`).
-    if trailer().is_some() {
-        if let Some(d) = foot_distance(cam, cam.to_screen(game.display_pos())) {
-            NEAR_LIMIT.with(|l| l.set(d));
-        }
-    }
     super::sharp::session(|| {
         for d in items.iter().map(|(_, d)| d) {
             match d {
@@ -3720,7 +3851,7 @@ fn battle_backdrop_key(game: &Game) -> u64 {
     zoom.to_bits().hash(&mut h);
     look.map(bits).hash(&mut h);
     bits(game.display_pos()).hash(&mut h);
-    (tilt_view(), tilt_pitch().to_bits(), tilt_yaw().to_bits(), extend_edge()).hash(&mut h);
+    (tilt_view(), first_person(), horizon(), tilt_pitch().to_bits(), tilt_yaw().to_bits(), extend_edge()).hash(&mut h);
     (game.fog.enabled, &game.fog.bits).hash(&mut h);
     game.unshown_cells().hash(&mut h);
     (game.aboard(), game.hero_hidden()).hash(&mut h);
@@ -3952,10 +4083,11 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
         ease_tilt_yaw(dt_ms);
     }
     if tilt_view() && dialogs.is_empty() {
-        if key(KeyCode::PageUp) {
+        // The first-person view's pitch is fixed (`view25::FP_PITCH`): only the 2.5D view tilts.
+        if !first_person() && key(KeyCode::PageUp) {
             set_tilt_pitch(tilt_pitch() - TILT_STEP);
         }
-        if key(KeyCode::PageDown) {
+        if !first_person() && key(KeyCode::PageDown) {
             set_tilt_pitch(tilt_pitch() + TILT_STEP);
         }
         if key(KeyCode::Q) {
@@ -5344,6 +5476,47 @@ mod tilt_tests {
                     for (ox, oy) in [(0.0, 0.0), (0.25, 0.0), (-0.25, 0.0), (0.0, 0.25), (0.0, -0.25)] {
                         let at = cam.screen_at((x + ox, y + oy * rh));
                         assert_eq!(cam.tile_under_pixel(at), Some(t), "{name}: the cell {t:?} at {at:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// The first-person camera over the middle of `game`'s map, built as [`Camera::looking_in`]
+    /// builds it (the bend and the footprints included), at `yaw`, with the far ground's horizon or not.
+    fn first_person_camera(game: &Game, yaw: f32, horizon: bool) -> Camera {
+        let view = Rect::new(0.0, 0.0, 1280.0, 760.0);
+        let scale = PX;
+        let grid = game.world.map.grid;
+        let at = (game.world.map.w as f32 / 2.0, game.world.map.h as f32 / 2.0 * grid.row_height());
+        let origin = vec2(at.0 * scale, at.1 * scale) - vec2(view.w, view.h) / 2.0;
+        let mut cam = Camera { origin, view, draw: view, scale, grid, tilt: None };
+        cam.tilt = Some(first_person_tilt(Vec2::from(cam.centre()), scale, view, view, yaw, horizon));
+        cam
+    }
+
+    /// The hero's cell is the one under the pixel the hero is drawn at, in both bends and at every
+    /// yaw: the pointer at his feet picks him, and so do the cells about him (the first-person
+    /// view's click test; the bent sheet is picked by its inverse).
+    #[test]
+    fn a_click_on_the_hero_in_the_first_person_view_picks_his_cell_at_both_bends() {
+        let game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        let m = &game.world.map;
+        let (cx, cy) = (m.w / 2, m.h / 2);
+        for horizon in [false, true] {
+            for yaw in [0.0, 45.0, 90.0, 180.0, -135.0] {
+                let cam = first_person_camera(&game, yaw, horizon);
+                let hero = (cx, cy);
+                let (x, y) = m.grid.center(hero);
+                let at = cam.screen_at((x, y));
+                assert!(at.is_finite() && cam.view.contains(at), "horizon {horizon} yaw {yaw}: the hero at {at:?}");
+                assert_eq!(cam.tile_under_pixel(at), Some(hero), "horizon {horizon} yaw {yaw}: the hero's pixel");
+                for (dc, dr) in [(-1, 0), (0, -1), (1, 1), (0, 2)] {
+                    let t = (cx + dc, cy + dr);
+                    let (x, y) = m.grid.center(t);
+                    let at = cam.screen_at((x, y));
+                    if at.is_finite() && cam.view.contains(at) {
+                        assert_eq!(cam.tile_under_pixel(at), Some(t), "horizon {horizon} yaw {yaw}: the cell {t:?} at {at:?}");
                     }
                 }
             }
