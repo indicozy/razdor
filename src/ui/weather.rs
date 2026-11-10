@@ -254,7 +254,7 @@ impl Levels {
 /// The time constant of the shown levels (seconds).
 pub const LEVEL_TAU: f32 = 0.8;
 
-thread_local! {
+local! {
     /// The shown levels and the real time they were last moved to (per thread: the map's frames).
     static SHOWN: Cell<Option<(Levels, f64)>> = const { Cell::new(None) };
 }
