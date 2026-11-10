@@ -13,7 +13,7 @@ The other tabs are Razdor's:
 
 | Tab | What is in it |
 |---|---|
-| **Map** | the map's zoom and its lock; the map view (flat, 2.5D or first person); with 2.5D and first person, the sprite size and the two-finger turn; with first person, "Far ground" and "Camera"; extending the map past its edges; battles on the map; the army list beside the minimap; the leader's name; the minimap's corner and its reset |
+| **Map** | the map's zoom and its lock; the map view (flat, 2.5D or first person); with 2.5D and first person, the sprite size and the two-finger turn; with first person, "Far ground" and "Camera"; lighting, mist instead of black and moving water ([more](/razdor/wiki/en/differences/map-look/)); extending the map past its edges; battles on the map; the army list beside the minimap; the leader's name; the minimap's corner and its reset |
 | **Battle and army** | battle AI strength; unit battle participation; keeping the formation after battle; max guards casters; army arrangement; experience on promotion |
 | **Screen** | the screen (windowed or full); the interface scale; the bottom bar size (phone, held sideways only); the font; the text size; large message windows; screen orientation (Android); the language |
 | **Controls** | keyboard shortcuts (the **"Keys..."** button) |

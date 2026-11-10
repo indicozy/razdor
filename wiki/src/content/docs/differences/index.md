@@ -11,3 +11,4 @@ sidebar:
 - [Экспериментальные правила сценария](/razdor/wiki/differences/experimental-rules/): шесть переключателей для новой игры.
 - [Правила по умолчанию](/razdor/wiki/differences/default-rules/): где правила Razdor без переключателей отличаются от оригинала.
 - [Звук и музыка](/razdor/wiki/differences/sound-music/): что настраивается и как Razdor берёт звук из игры.
+- [Освещение, туман и вода](/razdor/wiki/differences/map-look/): три новых настройки вида карты и здания в 2.5D, которые стоят на земле.
