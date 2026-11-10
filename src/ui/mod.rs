@@ -71,6 +71,7 @@ pub mod android;
 pub mod ios;
 pub mod mobile;
 pub mod water;
+pub mod weather;
 pub mod widgets;
 pub mod window_layout;
 pub mod world_view;
