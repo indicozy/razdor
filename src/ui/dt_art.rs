@@ -485,7 +485,8 @@ impl DtArt {
             })
             .collect();
         let tex = texture(&Image { width: w, height: h, rgba: building_mask_pixels(w, h, &placed) })?;
-        tex.set_filter(FilterMode::Nearest);
+        // Linear: the emissive layer (G) is feathered, so its edges interpolate. R (the building) is tested at 0.5.
+        tex.set_filter(FilterMode::Linear);
         Some(tex)
     }
 

@@ -30,9 +30,22 @@ const BOX_ENCLOSURE_MIN: f32 = 0.5;
 /// An opening: its pixels (flat indices) and its outer ring.
 type Kept = (Vec<usize>, Vec<(i32, i32)>);
 
+/// A non-boxed component's ring is brighter than it on average by at least this much (contrast).
+const MIN_CONTRAST: f32 = 0.12;
+/// Roofs: the upper share of the picture's opaque height, and how close a hue must be to the roof's to be
+/// one (degrees), with at least this saturation.
+const ROOF_ZONE: f32 = 0.45;
+const ROOF_HUE_TOL: f32 = 25.0;
+const ROOF_SAT_MIN: f32 = 0.15;
+/// A roof speck is brighter than this (a window of the upper wall is darker).
+const ROOF_MEAN_MIN: f32 = 0.18;
 /// The halo: the value of the ring around a kept opening (0.35 of 255), and the opening's (1.0).
 pub const HALO: u8 = 90;
 pub const LIT: u8 = 255;
+/// The feather's gain: the blur halves an opening's edge, so the cores are lifted to keep their strength.
+const FEATHER_GAIN: f32 = 1.25;
+/// The blur's passes.
+const FEATHER_PASSES: usize = 1;
 
 /// A rectangle in a sprite's pixels, half open (`x0..x1`, `y0..y1`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,6 +84,11 @@ pub fn emissive(img: &Image, boxes: &[Rect4]) -> Vec<u8> {
     }
     body.sort_by(|a, b| a.total_cmp(b));
     let median = body[body.len() / 2];
+    // The roof's zone: the top of the body, and the roof's dominant hue within it.
+    let (ymin, ymax) = (0..w * h).filter(|&i| opaque[i]).fold((usize::MAX, 0usize), |(lo, hi), i| (lo.min(i / w), hi.max(i / w)));
+    let upper = ymin + ((ymax - ymin + 1) as f32 * ROOF_ZONE) as usize;
+    let roof = roof_hue(&img.rgba, w, &opaque, upper);
+    let ctx = Ctx { w, h, opaque: &opaque, lum: &lum, rgba: &img.rgba, roof, upper };
     let cand: Vec<bool> = (0..w * h).map(|i| opaque[i] && lum[i] < median - DARK_BELOW_MEDIAN).collect();
 
     let mut seen = vec![false; w * h];
@@ -107,7 +125,7 @@ pub fn emissive(img: &Image, boxes: &[Rect4]) -> Vec<u8> {
                 push(x, y + 1);
             }
         }
-        if let Some(ring) = judge(&comp, w, h, &opaque, &lum, boxes) {
+        if let Some(ring) = judge(&comp, &ctx, boxes) {
             kept.push((comp, ring));
         }
     }
@@ -127,14 +145,43 @@ pub fn emissive(img: &Image, boxes: &[Rect4]) -> Vec<u8> {
             out[j] = LIT;
         }
     }
+    feather(&mut out, w, h, &opaque);
     out
+}
+
+/// Softens the layer's edges: one pass of a 3-tap blur ([1 2 1] / 4, across then down), so an opening's
+/// glow falls off over about 1 px outside it and keeps its shape (two passes made the panes into blobs). Clipped to the picture's body (the
+/// transparent pixels stay clear), and lifted by [`FEATHER_GAIN`] so a pane keeps its strength.
+fn feather(out: &mut [u8], w: usize, h: usize, opaque: &[bool]) {
+    let mut f: Vec<f32> = out.iter().map(|&v| f32::from(v)).collect();
+    let mut tmp = vec![0f32; f.len()];
+    for _ in 0..FEATHER_PASSES {
+        for y in 0..h {
+            for x in 0..w {
+                let at = |xx: isize| if xx < 0 || xx >= w as isize { 0.0 } else { f[y * w + xx as usize] };
+                let x = x as isize;
+                tmp[y * w + x as usize] = (at(x - 1) + 2.0 * at(x) + at(x + 1)) / 4.0;
+            }
+        }
+        for y in 0..h {
+            for x in 0..w {
+                let at = |yy: isize| if yy < 0 || yy >= h as isize { 0.0 } else { tmp[yy as usize * w + x] };
+                let y = y as isize;
+                f[y as usize * w + x] = (at(y - 1) + 2.0 * at(y) + at(y + 1)) / 4.0;
+            }
+        }
+    }
+    for (i, v) in out.iter_mut().enumerate() {
+        *v = if opaque[i] { (f[i] * FEATHER_GAIN).round().min(255.0) as u8 } else { 0 };
+    }
 }
 
 /// Whether a candidate component is an opening, and if so its ring (its outer 1-px ring, which may
 /// hold out-of-picture pixels). The rules: the area and bounding box, then the ring. A window's ring is
 /// all opaque and at least [`RING_BRIGHT_MIN`] brighter than the component; a door (taller than wide)
 /// may have ground under its bottom row. A boxed window needs only [`BOX_ENCLOSURE_MIN`] of its ring.
-fn judge(comp: &[usize], w: usize, h: usize, opaque: &[bool], lum: &[f32], boxes: &[Rect4]) -> Option<Vec<(i32, i32)>> {
+fn judge(comp: &[usize], ctx: &Ctx, boxes: &[Rect4]) -> Option<Vec<(i32, i32)>> {
+    let Ctx { w, h, opaque, lum, .. } = *ctx;
     let (mut minx, mut maxx, mut miny, mut maxy) = (usize::MAX, 0usize, usize::MAX, 0usize);
     for &i in comp {
         let (x, y) = (i % w, i / w);
@@ -164,6 +211,20 @@ fn judge(comp: &[usize], w: usize, h: usize, opaque: &[bool], lum: &[f32], boxes
         }
     }
     let mean = comp.iter().map(|&i| lum[i]).sum::<f32>() / area as f32;
+    // A roof: the component's colour is the roof's, and it lies in the roof's zone (the top of the picture).
+    // Roof shading is mid-dark; a window is darker than the roof tiles and so is never a roof speck.
+    if !boxed && miny < ctx.upper && mean >= ROOF_MEAN_MIN {
+        if let Some(roof) = ctx.roof {
+            let (r, g, b) = comp.iter().fold((0.0f32, 0.0f32, 0.0f32), |(r, g, b), &i| {
+                let p = &ctx.rgba[i * 4..i * 4 + 3];
+                (r + f32::from(p[0]), g + f32::from(p[1]), b + f32::from(p[2]))
+            });
+            let (hue, sat, _) = hsv(r / (255.0 * area as f32), g / (255.0 * area as f32), b / (255.0 * area as f32));
+            if sat >= ROOF_SAT_MIN && hue_dist(hue, roof) <= ROOF_HUE_TOL {
+                return None;
+            }
+        }
+    }
 
     // The outer ring: the pixels 4-adjacent to the component and not part of it, once each.
     let member = |x: i32, y: i32| x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h && cand_in(comp, w, x as usize, y as usize);
@@ -207,8 +268,78 @@ fn judge(comp: &[usize], w: usize, h: usize, opaque: &[bool], lum: &[f32], boxes
         }
     } else if transparent > 0 || counted == 0 || (bright as f32) / (counted as f32) < RING_BRIGHT_MIN {
         return None;
+    } else {
+        // The ring is on average brighter than the component by the contrast floor.
+        let ring_lum: f32 = ring
+            .iter()
+            .filter(|&&(x, y)| x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h)
+            .map(|&(x, y)| lum[y as usize * w + x as usize])
+            .sum::<f32>()
+            / ring.len().max(1) as f32;
+        if ring_lum - mean < MIN_CONTRAST {
+            return None;
+        }
     }
     Some(ring)
+}
+
+/// The picture's data for the judging of its components.
+struct Ctx<'a> {
+    w: usize,
+    h: usize,
+    opaque: &'a [bool],
+    lum: &'a [f32],
+    rgba: &'a [u8],
+    /// The roof's dominant hue (degrees), if the top of the picture has enough saturated colour.
+    roof: Option<f32>,
+    /// The first row below the roof zone.
+    upper: usize,
+}
+
+/// The roof's hue: the most common 30° hue bucket (its centre) among the saturated opaque pixels above
+/// `upper`. None with too few such pixels.
+fn roof_hue(rgba: &[u8], w: usize, opaque: &[bool], upper: usize) -> Option<f32> {
+    let mut hist = [0u32; 12];
+    let mut n = 0u32;
+    for (i, &op) in opaque.iter().enumerate() {
+        if !op || i / w >= upper {
+            continue;
+        }
+        let p = &rgba[i * 4..i * 4 + 3];
+        let (hue, sat, _) = hsv(f32::from(p[0]) / 255.0, f32::from(p[1]) / 255.0, f32::from(p[2]) / 255.0);
+        if sat >= ROOF_SAT_MIN {
+            hist[((hue / 30.0) as usize).min(11)] += 1;
+            n += 1;
+        }
+    }
+    if n < 20 {
+        return None;
+    }
+    let (best, _) = hist.iter().enumerate().max_by_key(|(_, c)| **c)?;
+    Some(best as f32 * 30.0 + 15.0)
+}
+
+/// Hue (degrees, 0..360), saturation and value of an RGB colour in 0..1.
+fn hsv(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    let (mx, mn) = (r.max(g).max(b), r.min(g).min(b));
+    let d = mx - mn;
+    let sat = if mx > 0.0 { d / mx } else { 0.0 };
+    let hue = if d <= 0.0 {
+        0.0
+    } else if mx == r {
+        60.0 * ((g - b) / d).rem_euclid(6.0)
+    } else if mx == g {
+        60.0 * ((b - r) / d + 2.0)
+    } else {
+        60.0 * ((r - g) / d + 4.0)
+    };
+    (hue, sat, mx)
+}
+
+/// The distance between two hues on the circle (degrees, 0..180).
+fn hue_dist(a: f32, b: f32) -> f32 {
+    let d = (a - b).rem_euclid(360.0);
+    d.min(360.0 - d)
 }
 
 /// Whether the component holds the pixel (`comp` is a list of flat indices).
@@ -278,11 +409,13 @@ mod tests {
         let panes = |x: u32, y: u32| (3..6).contains(&x) && (4..7).contains(&y) || (10..13).contains(&x) && (4..7).contains(&y) || (17..20).contains(&x) && (4..7).contains(&y);
         let img = wall(24, 20, 150, 40, panes, |_, _| false);
         let out = emissive(&img, &[]);
-        let lit_count = out.iter().filter(|&&v| v == LIT).count();
-        assert_eq!(lit_count, 27, "three 3×3 panes");
-        assert_eq!(lit(&out, 24, 4, 5), LIT);
-        assert_eq!(lit(&out, 24, 11, 6), LIT);
-        assert_eq!(lit(&out, 24, 2, 5), HALO, "the wall beside a pane is the halo");
+        let glowing = out.iter().filter(|&&v| v >= 200).count();
+        assert!(glowing >= 3, "three panes glow at their cores: {glowing}");
+        assert!(lit(&out, 24, 4, 5) >= 200);
+        assert!(lit(&out, 24, 11, 6) >= 200);
+        let halo = lit(&out, 24, 2, 5);
+        assert!((1..200).contains(&halo), "the wall beside a pane is feathered, not lit: {halo}");
+        assert!(lit(&out, 24, 1, 5) < halo, "the glow falls off outward");
         assert_eq!(lit(&out, 24, 0, 0), 0, "stone far away is nothing");
     }
 
@@ -313,7 +446,7 @@ mod tests {
         let ground = |x: u32, y: u32| y == 12 && (8..12).contains(&x);
         let img = wall(24, 20, 150, 40, door, ground);
         let out = emissive(&img, &[]);
-        assert_eq!(lit(&out, 24, 9, 6), LIT, "the door is kept");
+        assert!(lit(&out, 24, 9, 6) >= 200, "the door is kept");
     }
 
     #[test]
@@ -325,7 +458,56 @@ mod tests {
         let plain = emissive(&img, &[]);
         assert!(plain.iter().all(|&v| v != LIT), "unboxed: enclosed rule rejects it");
         let boxed = emissive(&img, &boxes);
-        assert_eq!(lit(&boxed, 24, 1, 5), LIT, "boxed: the looser rule keeps it");
+        assert!(lit(&boxed, 24, 1, 5) > 0, "boxed: the looser rule keeps it (feathered, so not at full strength)");
+    }
+
+    /// A 24×20 picture: a red roof over the top 14 rows (most of the body, so the median is the roof's) with
+    /// `dark` pixels in it, and grey wall below with its dark windows.
+    fn roofed(dark: impl Fn(u32, u32) -> bool) -> Image {
+        let mut rgba = vec![0u8; 24 * 20 * 4];
+        for y in 0..20u32 {
+            for x in 0..24u32 {
+                let i = ((y * 24 + x) * 4) as usize;
+                let roof = y < 14;
+                let c = if dark(x, y) {
+                    if roof { [110, 50, 40] } else { [40, 40, 40] }
+                } else if roof {
+                    [200, 60, 40]
+                } else {
+                    [150, 150, 150]
+                };
+                rgba[i..i + 3].copy_from_slice(&c);
+                rgba[i + 3] = 255;
+            }
+        }
+        Image { width: 24, height: 20, rgba }
+    }
+
+    #[test]
+    fn a_dark_speck_on_the_roof_is_not_a_window_unless_a_box_marks_it() {
+        // A roof speck (a shadow on the tiles, roof-coloured) at the top; a real window on the wall below.
+        let img = roofed(|x, y| (5..8).contains(&x) && (3..6).contains(&y) || (5..8).contains(&x) && (15..18).contains(&y));
+        let out = emissive(&img, &[]);
+        assert_eq!(lit(&out, 24, 6, 4), 0, "the roof speck is rejected");
+        assert!(lit(&out, 24, 6, 16) >= 200, "the wall window is kept");
+        let boxed = emissive(&img, &[Rect4 { x0: 4, y0: 2, x1: 9, y1: 7 }]);
+        assert!(lit(&boxed, 24, 6, 4) >= 200, "a detector box on the roof speck keeps it");
+    }
+
+    #[test]
+    fn a_speck_with_too_little_contrast_is_not_a_window() {
+        // Wall 120, a speck of 92: the ring is only 0.11 brighter than the speck, under the 0.12 floor.
+        let mut rgba = vec![0u8; 24 * 20 * 4];
+        for y in 0..20u32 {
+            for x in 0..24u32 {
+                let i = ((y * 24 + x) * 4) as usize;
+                let v = if (10..13).contains(&x) && (8..11).contains(&y) { 92 } else { 120 };
+                rgba[i..i + 3].copy_from_slice(&[v, v, v]);
+                rgba[i + 3] = 255;
+            }
+        }
+        let img = Image { width: 24, height: 20, rgba };
+        assert!(emissive(&img, &[]).iter().all(|&v| v == 0), "a faint speck is no window");
     }
 
     #[test]

@@ -644,14 +644,18 @@ razdor::local! {
     static WINDOWS_MATERIAL: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
 }
 
-/// The lit windows' main (`windows_pass`): the emissive layer (the mask's G, `dt::windows`) as a warm
-/// glow at night, added over what is drawn (additive: the pass's blend). Its colour is pre-scaled for
-/// nothing but the night, the flicker and the sprite's own fade: the map's tint is drawn before it.
+/// The lit windows' main (`windows_pass`): the emissive layer (the mask's G, `dt::windows`) as a candle
+/// glow at night, added over what is drawn (additive: the pass's blend), after the map's tint.
 const WINDOWS_MAIN: &str = r#"
     vec4 bm = texture2D(BuildingMask, uv);
     float hsh = fract(sin(dot(floor(spos / 40.0), vec2(127.1, 311.7))) * 43758.5453);
     float flick = 0.94 + 0.06 * sin(mod(Clock, 1000.0) * 2.3 + hsh * 6.2832);
-    gl_FragColor = vec4(vec3(1.0, 0.78, 0.38) * (bm.g * Night * flick * 1.6 * color.a), 1.0);
+    // Candle-orange: the core a warm orange (yellower on some buildings, by the hash), the halo a deeper
+    // amber; the emissive value picks between them. Intensity 1.2 by the night, the sprite's fade with it.
+    vec3 core = mix(vec3(1.0, 0.70, 0.30), vec3(1.0, 0.78, 0.34), hsh);
+    vec3 halo = vec3(0.9, 0.45, 0.15);
+    vec3 col = mix(halo, core, smoothstep(0.35, 1.0, bm.g));
+    gl_FragColor = vec4(col * (bm.g * Night * flick * 1.2 * color.a), 1.0);
 "#;
 
 /// The additive windows material, made once. `None` when it does not compile (no windows then).
