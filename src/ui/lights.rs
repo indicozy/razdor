@@ -174,7 +174,7 @@ pub fn cast(at: Vec2, radius: f32, foot: Vec2, strength: f32) -> Option<Cast> {
 }
 
 /// The uniforms of the lit shaders for one pass: each light as (x, y, radius, strength) in the pass's 2D
-/// pixels, and the four counts/factors (`info`: lights, relief lights, night, the building band).
+/// pixels, and the counts/factors (`info`: lights, relief lights, night; the fourth is unused).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Uniforms {
     pub lights: [Vec4; SLOTS],
@@ -182,8 +182,8 @@ pub struct Uniforms {
 }
 
 /// The shader uniforms for `frame`'s lit lights, the pass's 2D point of each light (`to_px`) and the scale
-/// of its pixels per cell. `band` is the building band's share of the atlas height (`sharp`).
-pub fn uniforms(frame: &Frame, to_px: impl Fn(Vec2) -> Vec2, scale: f32, band: f32) -> Uniforms {
+/// of its pixels per cell.
+pub fn uniforms(frame: &Frame, to_px: impl Fn(Vec2) -> Vec2, scale: f32) -> Uniforms {
     let mut lights = [Vec4::ZERO; SLOTS];
     let lit = frame.lit();
     for (slot, l) in lights.iter_mut().zip(lit) {
@@ -191,7 +191,7 @@ pub fn uniforms(frame: &Frame, to_px: impl Fn(Vec2) -> Vec2, scale: f32, band: f
         *slot = vec4(p.x, p.y, l.radius * scale, l.strength);
     }
     let relief = lit.len().min(frame.quality.relief());
-    Uniforms { lights, info: vec4(lit.len() as f32, relief as f32, frame.night, band) }
+    Uniforms { lights, info: vec4(lit.len() as f32, relief as f32, frame.night, 0.0) }
 }
 
 local! {
@@ -302,8 +302,8 @@ mod tests {
     fn the_uniforms_hold_the_lit_lights_in_pixels_and_count_the_relief_ones() {
         let lights: Vec<Light> = (0..10).map(|i| light(vec2(i as f32, 0.0), 0.5 + 0.01 * i as f32, Owner::Torch)).collect();
         let f = Frame::new(lights, Vec2::ZERO, 0.8, Quality::Medium);
-        let u = uniforms(&f, |p| p * 32.0, 32.0, 0.4);
-        assert_eq!(u.info, vec4(4.0, 2.0, 0.8, 0.4));
+        let u = uniforms(&f, |p| p * 32.0, 32.0);
+        assert_eq!(u.info, vec4(4.0, 2.0, 0.8, 0.0));
         let first = u.lights[0];
         assert!((first.x - 0.0).abs() < 1e-5 && (first.z - 2.0 * 32.0).abs() < 1e-3, "{first:?}");
         assert_eq!(u.lights[4], Vec4::ZERO, "the slots past the lit lights stay empty");

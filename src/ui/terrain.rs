@@ -182,14 +182,8 @@ uniform vec3 Sky;
 uniform vec3 Light;
 uniform float Strength;
 uniform float Cavity;
-// The point lights («Качество света», `lights`): the lights in view in the draw's 2D pixels, the
-// quad's place in them (`Dest`: x, y, width, height), and LightI as in `sharp::POINT_GLSL`.
-uniform vec4 Dest;
-uniform vec4 LightA[8];
-uniform vec4 LightI;
 // @SHARP_UV@
 // @RELIEF@
-// @POINT@
 
 float hash2(vec2 q) {
     return fract(sin(dot(q, vec2(127.1, 311.7))) * 43758.5453);
@@ -219,7 +213,7 @@ vec2 ripple(vec2 q) {
     return texture2D(Atlas, sharp_uv((slot * Slot + (Slot - Tile) * 0.5 + tt) / AtlasSize, AtlasSize, AtlasScale)).rgb;
 }
 
-@CP@ vec3 ground(float code, vec2 px, vec2 spos, @CP@ vec3 water, @CP@ float sea, @CP@ vec3 foam) {
+@CP@ vec3 ground(float code, vec2 px, @CP@ vec3 water, @CP@ float sea, @CP@ vec3 foam) {
     vec2 slot = vec2(mod(code, 4.0), floor(code / 4.0));
     vec2 t = mod(px, Tile);
     vec2 atlas_uv = (slot * Slot + (Slot - Tile) * 0.5 + t) / AtlasSize;
@@ -240,10 +234,6 @@ vec2 ripple(vec2 q) {
         @CP@ float ym = luma(atlas_at(slot, px - vec2(0.0, RELIEF_R)));
         @CP@ float deep = (luma(atlas_at(slot, px + vec2(3.0 * RELIEF_R, 0.0))) + luma(atlas_at(slot, px - vec2(3.0 * RELIEF_R, 0.0))) + luma(atlas_at(slot, px + vec2(0.0, 3.0 * RELIEF_R))) + luma(atlas_at(slot, px - vec2(0.0, 3.0 * RELIEF_R)))) * 0.25;
         c = relief_shade(c, h, xp, xm, yp, ym, deep);
-        // The point lights rake the relief at night (LightI: the count, the relief's count, the night).
-        if (LightI.y > 0.0 && LightI.z > 0.0) {
-            c = clamp(c * point_shade(spos, normalize(vec3(-(xp - xm) * RELIEF_K, -(yp - ym) * RELIEF_K, 1.0))), 0.0, 1.0);
-        }
     }
     return c;
 }
@@ -252,8 +242,6 @@ void main() {
     vec2 p = mix(View.xy, View.zw, uv);
     vec2 i = floor(p);
     vec2 px = p * CellPx;
-    // The pixel's 2D point, for the point lights (the quad spans `Dest` in the draw's pixels).
-    vec2 spos = Dest.xy + uv * Dest.zw;
     // Past the border (p in cell units, the border at -0.5 and MapSize - 0.5): the war fog.
     vec2 gap = max(max(vec2(-0.5) - p, p - (MapSize - 0.5)), vec2(0.0));
     float d = length(gap);
@@ -298,10 +286,10 @@ void main() {
     }
     @CP@ vec3 col;
     if (k.x == k.y && k.y == k.z && k.z == k.w) {
-        col = ground(k.x, px, spos, w, sea, foam);
+        col = ground(k.x, px, w, sea, foam);
     } else {
-        @CP@ vec3 top = mix(ground(k.x, px, spos, w, sea, foam), ground(k.y, px, spos, w, sea, foam), fx);
-        @CP@ vec3 bottom = mix(ground(k.z, px, spos, w, sea, foam), ground(k.w, px, spos, w, sea, foam), fx);
+        @CP@ vec3 top = mix(ground(k.x, px, w, sea, foam), ground(k.y, px, w, sea, foam), fx);
+        @CP@ vec3 bottom = mix(ground(k.z, px, w, sea, foam), ground(k.w, px, w, sea, foam), fx);
         col = mix(top, bottom, fy);
     }
     if (mist) {
@@ -575,6 +563,8 @@ pub struct TerrainLayer {
     /// The neighbours shader in highp, and in mediump (option 4), both made at start.
     new_hp: Option<Material>,
     new_mp: Option<Material>,
+    /// The lit variants of the neighbours shader (highp, mediump), made on the first lit draw.
+    lit: [std::cell::OnceCell<Option<Material>>; 2],
     /// The cache's copy, when option 2 is on.
     composite: Option<Material>,
     /// The options in effect for this layer (a shader that fails to compile turns its options off).
@@ -641,11 +631,33 @@ fn make_material(fragment: &str, uniforms: &[(&str, UniformType)], textures: &[&
 
 /// The neighbours shader with the given colour precision (`highp` or `mediump`).
 fn new_fragment(precision: &str) -> String {
-    NEW_FRAGMENT.replace("@CP@", precision).replace("@SHARP_UV@", sharp::SHARP_UV_GLSL).replace("@RELIEF@", sharp::RELIEF_GLSL).replace("@POINT@", sharp::POINT_GLSL)
+    NEW_FRAGMENT.replace("@CP@", precision).replace("@SHARP_UV@", sharp::SHARP_UV_GLSL).replace("@RELIEF@", sharp::RELIEF_GLSL)
 }
 
-/// The neighbours shader's material: the terrain's uniforms, and the point lights' (`Dest`, `LightA`, `LightI`).
-fn make_new_material(fragment: &str, textures: &[&str]) -> Result<Material, String> {
+/// The neighbours shader with the point lights (the lit variant, used only with the light on): the base
+/// text plus `Dest`, `LightA`, `LightI` and the point code, the ground's place and its relief from the
+/// lights. Built from the base text by exact insertions, so the base shader itself is never changed.
+fn new_fragment_lit(precision: &str) -> String {
+    fn once(text: String, needle: &str, with: &str) -> String {
+        assert_eq!(text.matches(needle).count(), 1, "terrain lit shader: {needle:?}");
+        text.replacen(needle, with, 1)
+    }
+    let t = NEW_FRAGMENT.to_string();
+    let t = once(t, "uniform float Cavity;\n", "uniform float Cavity;\nuniform vec4 Dest;\nuniform vec4 LightA[8];\nuniform vec4 LightI;\n");
+    let t = once(t, "// @RELIEF@\n", "// @RELIEF@\n// @POINT@\n");
+    let t = once(t, "@CP@ vec3 ground(float code, vec2 px, @CP@ vec3 water, @CP@ float sea, @CP@ vec3 foam) {", "@CP@ vec3 ground(float code, vec2 px, vec2 spos, @CP@ vec3 water, @CP@ float sea, @CP@ vec3 foam) {");
+    let t = once(t, "        c = relief_shade(c, h, xp, xm, yp, ym, deep);\n    }", "        c = relief_shade(c, h, xp, xm, yp, ym, deep);\n        // The point lights rake the relief at night (LightI: the count, the relief's count, the night).\n        if (LightI.y > 0.0 && LightI.z > 0.0) {\n            c = clamp(c * point_shade(spos, normalize(vec3(-(xp - xm) * RELIEF_K, -(yp - ym) * RELIEF_K, 1.0))), 0.0, 1.0);\n        }\n    }");
+    let t = once(t, "    vec2 px = p * CellPx;\n", "    vec2 px = p * CellPx;\n    // The pixel's 2D point, for the point lights (the quad spans `Dest` in the draw's pixels).\n    vec2 spos = Dest.xy + uv * Dest.zw;\n");
+    let mut t = t;
+    for k in ["k.x", "k.y", "k.z", "k.w"] {
+        t = t.replace(&format!("ground({k}, px, w, sea, foam)"), &format!("ground({k}, px, spos, w, sea, foam)"));
+    }
+    t.replace("@CP@", precision).replace("@SHARP_UV@", sharp::SHARP_UV_GLSL).replace("@RELIEF@", sharp::RELIEF_GLSL).replace("@POINT@", sharp::POINT_GLSL)
+}
+
+/// The neighbours shader's material with the point lights: the terrain's uniforms, and `Dest`, `LightA`,
+/// `LightI` on top of them.
+fn make_lit_material(fragment: &str, textures: &[&str]) -> Result<Material, String> {
     let mut uniforms: Vec<UniformDesc> = UNIFORMS.iter().map(|(n, t)| UniformDesc::new(n, *t)).collect();
     uniforms.push(UniformDesc::new("Dest", UniformType::Float4));
     uniforms.push(UniformDesc::new("LightA", UniformType::Float4).array(lights::SLOTS));
@@ -663,12 +675,12 @@ impl TerrainLayer {
         let mut opts = options();
         let (mut old, mut new_hp, mut new_mp, mut composite) = (None, None, None, None);
         if opts.new_shader {
-            let hp_ok = make_new_material(&new_fragment("highp"), &["Neighbours", "Atlas", "Water", "WaterMask", "Flow"]);
+            let hp_ok = make_material(&new_fragment("highp"), &UNIFORMS, &["Neighbours", "Atlas", "Water", "WaterMask", "Flow"]);
             match hp_ok {
                 Ok(m) => {
                     new_hp = Some(m);
                     // Both precisions are made at start; option 4 picks one.
-                    new_mp = make_new_material(&new_fragment("mediump"), &["Neighbours", "Atlas", "Water", "WaterMask", "Flow"]).map_err(|e| razdor::diag!("terrain shader (mediump): {e}")).ok();
+                    new_mp = make_material(&new_fragment("mediump"), &UNIFORMS, &["Neighbours", "Atlas", "Water", "WaterMask", "Flow"]).map_err(|e| razdor::diag!("terrain shader (mediump): {e}")).ok();
                 }
                 Err(e) => razdor::diag!("terrain shader: {e}"),
             }
@@ -698,6 +710,7 @@ impl TerrainLayer {
             old,
             new_hp,
             new_mp,
+            lit: Default::default(),
             composite,
             opts,
             atlas,
@@ -789,7 +802,6 @@ impl TerrainLayer {
     /// rivers' flow per cell (`rules::flow::flow_field`), empty for still water. `relief`: the light's
     /// relief on the land (`daylight::relief_at`, turned to the ground), None with the lighting off.
     #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::too_many_arguments)]
     pub fn draw(&self, codes: &[u8], (w, h): (u32, u32), dest: Rect, view: Vec4, cell_px: Vec2, water_ms: Option<i64>, edge: bool, mode: Mode, flow: &[(f32, f32)], relief: Option<daylight::Relief>, points: Option<&lights::Uniforms>) {
         if w == 0 || h == 0 || w + 2 > u16::MAX as u32 || h + 2 > u16::MAX as u32 || codes.len() != (w * h) as usize {
             return;
@@ -798,7 +810,10 @@ impl TerrainLayer {
             self.draw_cached(dest);
             return;
         }
-        let Some((m, new)) = self.ground_material() else { return };
+        let Some((base, new)) = self.ground_material() else { return };
+        // With the lights on, the neighbours shader's lit variant (its point lights); the base shader otherwise.
+        let lit = if new && points.is_some() { self.lit_material() } else { None };
+        let m = lit.unwrap_or(base);
         // The trailer's stills (dev-only): the atlas is sampled nearest, so the grass is not streaked.
         if super::world_view::trailer_active() {
             self.atlas.set_filter(FilterMode::Nearest);
@@ -847,11 +862,12 @@ impl TerrainLayer {
         m.set_uniform("Light", vec3(light[0], light[1], light[2]));
         m.set_uniform("Strength", strength);
         m.set_uniform("Cavity", cavity);
-        // The point lights (the neighbours shader only; the old one has none): none without a light.
-        let points = points.copied().unwrap_or(lights::Uniforms { lights: [Vec4::ZERO; lights::SLOTS], info: Vec4::ZERO });
-        m.set_uniform("Dest", vec4(dest.x, dest.y, dest.w, dest.h));
-        m.set_uniform_array("LightA", &points.lights[..]);
-        m.set_uniform("LightI", points.info);
+        // The point lights (the lit variant only): the quad's place in the pass's pixels, and the lights.
+        if let (Some(_), Some(points)) = (lit, points) {
+            m.set_uniform("Dest", vec4(dest.x, dest.y, dest.w, dest.h));
+            m.set_uniform_array("LightA", &points.lights[..]);
+            m.set_uniform("LightI", points.info);
+        }
         // The ground draws (the whole terrain, the cache's ground) get the shading rate (option 3).
         let vrs = self.opts.vrs && matches!(mode, Mode::Full | Mode::Ground);
         if vrs {
@@ -879,6 +895,19 @@ impl TerrainLayer {
     }
 
     /// The material of the ground draws, and whether it is the neighbours shader.
+    /// The lit variant of the neighbours shader at the current precision (None when it does not compile).
+    fn lit_material(&self) -> Option<&Material> {
+        let mediump = self.opts.mediump;
+        self.lit[usize::from(mediump)]
+            .get_or_init(|| {
+                let precision = if mediump { "mediump" } else { "highp" };
+                make_lit_material(&new_fragment_lit(precision), &["Neighbours", "Atlas", "Water", "WaterMask", "Flow"])
+                    .map_err(|e| razdor::diag!("terrain lit shader ({precision}): {e}"))
+                    .ok()
+            })
+            .as_ref()
+    }
+
     fn ground_material(&self) -> Option<(&Material, bool)> {
         if self.opts.new_shader {
             let m = if self.opts.mediump { self.new_mp.as_ref().or(self.new_hp.as_ref()) } else { self.new_hp.as_ref() };

@@ -2613,7 +2613,7 @@ fn terrain_quad(game: &Game, layer: &terrain::TerrainLayer, cam: &Camera, mode: 
         }
         let view = vec4(tl.x, tl.y / rh, br.x, br.y / rh);
         // The point lights of the ground (`lights`), in this pass's pixels: none with the light off.
-        let points = relief.and_then(|_| lights::with_frame(|f| f.map(|f| lights::uniforms(f, |w| cam.to_screen(w.into()), cam.scale, 0.0))));
+        let points = relief.and_then(|_| lights::with_frame(|f| f.map(|f| lights::uniforms(f, |w| cam.to_screen(w.into()), cam.scale))));
         // The edge's mist is fog: the trailer's no-fog switch leaves the ground going on past the edge.
         layer.draw(map.surface_codes(), (map.w as u32, map.h as u32), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(PX, PX * rh), Some((crate::ui::clock::now() * 1000.0) as i64), extend && !trailer_nofog(), mode, flow, relief, points.as_ref());
     }
@@ -4016,9 +4016,10 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     items.sort_by_key(|a| a.0);
     // One sharp session for the pass: its art shares the material switch (see `sharp::session`).
     // The point lights' relief, pool-free: the lit material's uniforms for this pass (`lights::uniforms`).
-    let band = art.and_then(|a| a.map_atlas()).map_or(0.0, |a| a.building_band());
-    let points = relief.and_then(|_| lights::with_frame(|f| f.map(|f| lights::uniforms(f, |w| cam.to_screen(w.into()), cam.scale, band))));
-    super::sharp::session_lit(relief, points.as_ref(), || {
+    let points = relief.and_then(|_| lights::with_frame(|f| f.map(|f| lights::uniforms(f, |w| cam.to_screen(w.into()), cam.scale))));
+    // The building mask («Качество света»' openings) is built on the first lit frame, never with the light off.
+    let mask = relief.and(art).and_then(|a| a.building_mask());
+    super::sharp::session_lit(relief, points.as_ref(), mask.as_ref(), || {
         for d in items.iter().map(|(_, d)| d) {
             match d {
                 Drawable::Object(o) => standing(cam, object_foot(o, cam), object_foot(o, cam), shade_of(object_foot(o, cam)), object_picture(o, art, cam), || draw_object(o, art, cam)),

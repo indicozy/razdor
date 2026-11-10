@@ -62,7 +62,7 @@ vec3 relief_shade(vec3 rgb, float h, float xp, float xm, float yp, float ym, flo
 /// GLSL ES 1.00 for the point lights («Качество света», `lights`), pasted after [`RELIEF_GLSL`] into a
 /// shader that declares `uniform vec4 LightA[8]` (each light: x, y in the pass's 2D pixels, radius in
 /// pixels, strength), `uniform vec4 LightI` (the lights in use, the ones raking the relief, the night's
-/// factor, the building band's share of the texture's height) and `varying highp vec2 spos` (the
+/// factor; the fourth is unused) and `varying highp vec2 spos` (the
 /// pixel's 2D point, [`SHARP_VERTEX`]). A light's pool is the falloff to its radius; the relief is the
 /// difference of the light's direction from the flat one (zero on flat ground). Night 0 switches it all off.
 pub const POINT_GLSL: &str = r#"
@@ -152,6 +152,22 @@ attribute vec2 texcoord;
 attribute vec4 color0;
 varying highp vec2 uv;
 varying lowp vec4 color;
+uniform mat4 Model;
+uniform mat4 Projection;
+void main() {
+    gl_Position = Projection * Model * vec4(position, 1);
+    color = color0 / 255.0;
+    uv = texcoord;
+}"#;
+
+/// [`SHARP_VERTEX`] with the 2D point of each vertex (`spos`) for the lit material only: the other sharp
+/// materials keep the base vertex shader, so the lighting off compiles exactly what it did.
+pub const SHARP_VERTEX_SPOS: &str = r#"#version 100
+attribute vec3 position;
+attribute vec2 texcoord;
+attribute vec4 color0;
+varying highp vec2 uv;
+varying lowp vec4 color;
 // The vertex's 2D point before the model and projection: the pass's own pixels, the space the lights are in.
 varying highp vec2 spos;
 uniform mat4 Model;
@@ -198,12 +214,22 @@ void main() {{
 /// Loads a sharp material: [`SHARP_VERTEX`] and `fragment` (from [`fragment`]), with the
 /// given pipeline and the extra uniforms. `TexSize` and `Scale` start at 1, so a draw that
 /// does not set them (a flat colour) samples a sane grid.
-pub fn material(fragment: &str, pipeline_params: PipelineParams, mut extra: Vec<UniformDesc>) -> Result<Material, macroquad::Error> {
+pub fn material(fragment: &str, pipeline_params: PipelineParams, extra: Vec<UniformDesc>) -> Result<Material, macroquad::Error> {
+    material_with_textures(fragment, pipeline_params, extra, Vec::new())
+}
+
+/// [`material`] with extra sampler `textures` (their names, bound by the caller with `set_texture`).
+pub fn material_with_textures(fragment: &str, pipeline_params: PipelineParams, extra: Vec<UniformDesc>, textures: Vec<String>) -> Result<Material, macroquad::Error> {
+    material_in(SHARP_VERTEX, fragment, pipeline_params, extra, textures)
+}
+
+/// [`material_with_textures`] with the vertex stage `vertex` (a sharp vertex shader).
+pub fn material_in(vertex: &str, fragment: &str, pipeline_params: PipelineParams, mut extra: Vec<UniformDesc>, textures: Vec<String>) -> Result<Material, macroquad::Error> {
     extra.push(UniformDesc::new("TexSize", UniformType::Float2));
     extra.push(UniformDesc::new("Scale", UniformType::Float2));
     let m = load_material(
-        ShaderSource::Glsl { vertex: SHARP_VERTEX, fragment },
-        MaterialParams { uniforms: extra, pipeline_params, ..Default::default() },
+        ShaderSource::Glsl { vertex, fragment },
+        MaterialParams { uniforms: extra, textures, pipeline_params },
     )?;
     m.set_uniform("TexSize", Vec2::ONE);
     m.set_uniform("Scale", Vec2::ONE);
@@ -249,16 +275,24 @@ pub fn session<R>(draw: impl FnOnce() -> R) -> R {
 
 /// [`session`] with the relief of the frame («Освещение», `daylight::relief_at`): the pass's sharp
 /// draws use the lit material (the relief on the colour, the painted shadows' alpha, the point lights'
-/// relief and the glowing openings of the building band, `points`). Its uniforms are set once here, not
+/// relief and the glowing openings of the building mask, `mask`). Its uniforms are set once here, not
 /// per draw, so the pass batches as [`session`]'s does. `None` (the light is off) is [`session`] itself,
 /// and so is a lit material that does not compile. `points` None: no point light (Low, or no light).
-pub fn session_lit<R>(relief: Option<daylight::Relief>, points: Option<&lights::Uniforms>, draw: impl FnOnce() -> R) -> R {
+pub fn session_lit<R>(relief: Option<daylight::Relief>, points: Option<&lights::Uniforms>, mask: Option<&Texture2D>, draw: impl FnOnce() -> R) -> R {
     let (Some(r), Some(m)) = (relief, lit_material()) else { return session(draw) };
     m.set_uniform("Light", vec3(r.light[0], r.light[1], r.light[2]));
     m.set_uniform("Strength", r.strength);
     m.set_uniform("Cavity", r.cavity);
     m.set_uniform("ShadowK", r.shadow_k);
-    let points = points.copied().unwrap_or(lights::Uniforms { lights: [Vec4::ZERO; lights::SLOTS], info: Vec4::ZERO });
+    // The building mask (`DtArt::building_mask`) is bound once a pass; without it there are no openings to glow.
+    let points = match mask {
+        Some(t) => {
+            m.set_texture("BuildingMask", t.clone());
+            points.copied()
+        }
+        None => None,
+    };
+    let points = points.unwrap_or(lights::Uniforms { lights: [Vec4::ZERO; lights::SLOTS], info: Vec4::ZERO });
     m.set_uniform_array("LightA", &points.lights[..]);
     m.set_uniform("LightI", points.info);
     session_with(m, draw)
@@ -333,9 +367,9 @@ const LIT_MAIN: &str = r#"
     if (a > 0.0 && a <= 0.76) {
         a = min(a * ShadowK, 1.0);
     }
-    // A building picture's openings (the band above `LightI.w`): dark cavities of the solid body glow warm
-    // by the lights' reach at night. Decorations and figures never do (below the band, or another material).
-    if (c.a >= 0.8 && uv.y < LightI.w && LightI.z > 0.0 && LightI.x > 0.0) {
+    // A building picture's openings (the building mask, `BuildingMask`): dark cavities of the solid body glow
+    // warm by the lights' reach at night. Decorations and figures never do (not in the mask, or another material).
+    if (c.a >= 0.8 && LightI.z > 0.0 && LightI.x > 0.0 && texture2D(BuildingMask, uv).a > 0.5) {
         vec3 raw = c.rgb;
         float mx = max(raw.r, max(raw.g, raw.b));
         float mn = min(raw.r, min(raw.g, raw.b));
@@ -356,7 +390,7 @@ razdor::local! {
 fn lit_material() -> Option<Material> {
     LIT_MATERIAL.with(|m| {
         m.get_or_init(|| {
-            let extra = format!("uniform vec3 Light;\nuniform float Strength;\nuniform float Cavity;\nuniform float ShadowK;\nuniform vec4 LightA[{SLOTS}];\nuniform vec4 LightI;\nvarying highp vec2 spos;\n{RELIEF_GLSL}{POINT_GLSL}");
+            let extra = format!("uniform vec3 Light;\nuniform float Strength;\nuniform float Cavity;\nuniform float ShadowK;\nuniform vec4 LightA[{SLOTS}];\nuniform vec4 LightI;\nuniform sampler2D BuildingMask;\nvarying highp vec2 spos;\n{RELIEF_GLSL}{POINT_GLSL}");
             let uniforms = vec![
                 UniformDesc::new("Light", UniformType::Float3),
                 UniformDesc::new("Strength", UniformType::Float1),
@@ -365,7 +399,7 @@ fn lit_material() -> Option<Material> {
                 UniformDesc::new("LightA", UniformType::Float4).array(SLOTS),
                 UniformDesc::new("LightI", UniformType::Float4),
             ];
-            material(&fragment(&extra, LIT_MAIN), alpha_pipeline(), uniforms)
+            material_in(SHARP_VERTEX_SPOS, &fragment(&extra, LIT_MAIN), alpha_pipeline(), uniforms, vec!["BuildingMask".to_string()])
                 .map_err(|e| razdor::diag!("lit sharp material: {e}"))
                 .ok()
         })

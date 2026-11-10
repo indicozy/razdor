@@ -655,37 +655,14 @@ pub fn item_icon_frame(icon: &str) -> Option<usize> {
 /// bridge's pieces, at a zoom between whole steps). Returns the atlas and each image's
 /// top-left corner, in input order. `None` if an image is wider than the atlas.
 pub fn pack_atlas(images: &[&Image], width: u32) -> Option<(Image, Vec<(u32, u32)>)> {
-    let first = vec![false; images.len()];
-    pack_atlas_banded(images, width, &first).map(|(image, pos, _)| (image, pos))
-}
-
-/// [`pack_atlas`] in two bands: the images with `first[i]` set are packed before the others, on their
-/// own shelves, and the rest start on a new shelf below them. Also returns the first row of the rest
-/// (the first band's height in px: 0 with no image in it, the whole atlas with no other image). Without a
-/// band the packing is [`pack_atlas`]'s, pixel for pixel.
-/// A packed atlas: the image, each picture's top-left corner, and the first band's height (`pack_atlas_banded`).
-pub type PackedAtlas = (Image, Vec<(u32, u32)>, u32);
-
-pub fn pack_atlas_banded(images: &[&Image], width: u32, first: &[bool]) -> Option<PackedAtlas> {
     let mut order: Vec<usize> = (0..images.len()).collect();
-    order.sort_by_key(|&i| (!first[i], std::cmp::Reverse((images[i].height, images[i].width))));
+    order.sort_by_key(|&i| std::cmp::Reverse((images[i].height, images[i].width)));
     let mut pos = vec![(0, 0); images.len()];
     let (mut x, mut y, mut shelf) = (0u32, 0u32, 0u32);
-    let has_first = first.iter().any(|&f| f);
-    let mut split = None;
     for &i in &order {
         let im = images[i];
         if im.width + 2 > width {
             return None;
-        }
-        if has_first && split.is_none() && !first[i] {
-            // The first band ends: the rest start on a new shelf.
-            if shelf > 0 {
-                y += shelf + 2;
-                x = 0;
-                shelf = 0;
-            }
-            split = Some(y);
         }
         if x + im.width + 2 > width {
             x = 0;
@@ -697,11 +674,6 @@ pub fn pack_atlas_banded(images: &[&Image], width: u32, first: &[bool]) -> Optio
         shelf = shelf.max(im.height);
     }
     let height = (y + shelf + 2).max(1);
-    let band = match (has_first, split) {
-        (false, _) => 0,
-        (true, Some(s)) => s,
-        (true, None) => height,
-    };
     let mut rgba = vec![0u8; (width * height * 4) as usize];
     for (im, &(px, py)) in images.iter().zip(&pos) {
         if im.width == 0 || im.height == 0 {
@@ -718,7 +690,7 @@ pub fn pack_atlas_banded(images: &[&Image], width: u32, first: &[bool]) -> Optio
             }
         }
     }
-    Some((Image { width, height, rgba }, pos, band))
+    Some((Image { width, height, rgba }, pos))
 }
 
 /// The decoded `Objects.ugs`, with lookups by map object and building picture.
@@ -828,26 +800,6 @@ mod tests {
         assert_eq!(atlas.pixel(10, 1)[0], 10, "a's right ring");
         assert_eq!(atlas.pixel(11, 1)[0], 0, "beyond the rings");
         assert!(pack_atlas(&[&b], 5).is_none());
-    }
-
-    #[test]
-    fn a_first_band_packs_above_the_rest_on_its_own_shelves() {
-        let img = |w: u32, h: u32, v: u8| Image { width: w, height: h, rgba: vec![v; (w * h * 4) as usize] };
-        let (a, b, c) = (img(3, 2, 10), img(4, 3, 20), img(2, 1, 30));
-        // a and c are the first band (buildings); b starts a new shelf below them.
-        let (atlas, pos, band) = pack_atlas_banded(&[&a, &b, &c], 12, &[true, false, true]).unwrap();
-        assert_eq!(band, 4, "the first band ends at the row after its shelf (2 + 2)");
-        assert!(pos[0].1 + 2 <= band && pos[2].1 + 1 <= band, "first-band pictures stay above the band: {pos:?}");
-        assert!(pos[1].1 >= band, "the rest start at or below the band: {pos:?}");
-        assert_eq!(atlas.pixel(pos[1].0, pos[1].1)[0], 20);
-        // Without a first band the packing is pack_atlas's, and the band is 0.
-        let (plain, plain_pos) = pack_atlas(&[&a, &b, &c], 12).unwrap();
-        let (same, same_pos, none) = pack_atlas_banded(&[&a, &b, &c], 12, &[false; 3]).unwrap();
-        assert_eq!((none, same_pos.clone()), (0, plain_pos.clone()));
-        assert_eq!(same.rgba, plain.rgba);
-        // With a first band and nothing else, the band is the whole atlas.
-        let (_, _, all) = pack_atlas_banded(&[&a, &c], 12, &[true, true]).unwrap();
-        assert_eq!(all, 4);
     }
 
     /// Encode an ARGB4444 value the way UGS stores it.

@@ -52,9 +52,6 @@ pub struct Atlas {
     live: RefCell<Overlay>,
     /// The building sprites (positions in the object sprites) the model still has to cut, in order.
     pending: RefCell<VecDeque<usize>>,
-    /// The building band's share of the texture's height: every building picture lies above it, every
-    /// other sprite below (`gfx::pack_atlas_banded`). The lit shader reads an opening's glow from it.
-    band: f32,
 }
 
 /// The atlas's rectangles as a dense table over the two sections and the 8-bit category and index
@@ -84,11 +81,6 @@ impl RectTable {
 }
 
 impl Atlas {
-    /// The building band's share of the texture's height (texture v below it is a building picture).
-    pub fn building_band(&self) -> f32 {
-        self.band
-    }
-
     /// Sprite of a `.DTm` map object (class, sprite id).
     pub fn decoration(&self, class: u8, sprite: u8) -> Option<Rect> {
         self.rects.get(ObjectSprite::DECORATIONS, class.into(), sprite.into())
@@ -137,6 +129,8 @@ pub struct DtArt {
     /// The shadow atlas of «От солнца» (`shadow`): the map atlas's layout, each sprite's blurred
     /// silhouette in its alpha. Made on the first frame that casts sun shadows.
     shadows: OnceCell<Option<Texture2D>>,
+    /// The building mask of the map atlas (`building_mask`), built on the first lit frame.
+    building_mask: OnceCell<Option<Texture2D>>,
 }
 
 fn or_log<T: Default>(what: &str, r: Result<T, DtError>) -> T {
@@ -183,6 +177,7 @@ impl DtArt {
             warm: RefCell::new(VecDeque::new()),
             depth: RefCell::new(None),
             shadows: OnceCell::new(),
+            building_mask: OnceCell::new(),
         }
     }
 
@@ -382,9 +377,7 @@ impl DtArt {
             .get_or_init(|| {
                 let sprites = &self.objects().sprites;
                 let images: Vec<&Image> = sprites.iter().map(|s| &s.image).collect();
-                // The building pictures are packed first, in their own band (the lit shader's openings).
-                let buildings: Vec<bool> = sprites.iter().map(|s| s.section == ObjectSprite::BUILDINGS).collect();
-                let Some((image, pos, band_px)) = gfx::pack_atlas_banded(&images, ATLAS_WIDTH, &buildings) else {
+                let Some((image, pos)) = gfx::pack_atlas(&images, ATLAS_WIDTH) else {
                     razdor::diag!("Discord Times art: map objects do not fit an atlas");
                     return None;
                 };
@@ -422,8 +415,7 @@ impl DtArt {
                 }
                 let pending: VecDeque<usize> = queue::unknown(known).into();
                 depth::set_unknown(pending.len());
-                let band = band_px as f32 / image.height.max(1) as f32;
-                Some(Atlas { texture, rects, cards, live: RefCell::new(live), pending: RefCell::new(pending), band })
+                Some(Atlas { texture, rects, cards, live: RefCell::new(live), pending: RefCell::new(pending) })
             })
             .as_ref()
     }
@@ -467,6 +459,28 @@ impl DtArt {
     /// silhouette is the alpha, the colour black). `None` without the map atlas.
     pub fn shadow_texture(&self) -> Option<Texture2D> {
         self.shadows.get_or_init(|| self.build_shadow_texture()).clone()
+    }
+
+    /// The building mask of the map atlas: the atlas's layout, white (alpha 1) on every building
+    /// picture's rectangle and clear elsewhere, nearest-sampled. Only the lit sprite material reads it
+    /// (`sharp::session_lit`), so it is built on the first lit frame and costs nothing with the light off.
+    pub fn building_mask(&self) -> Option<Texture2D> {
+        self.building_mask.get_or_init(|| self.build_building_mask()).clone()
+    }
+
+    fn build_building_mask(&self) -> Option<Texture2D> {
+        let atlas = self.map_atlas()?;
+        let (w, h) = (atlas.texture.width() as u32, atlas.texture.height() as u32);
+        let rects: Vec<Rect> = self
+            .objects()
+            .sprites
+            .iter()
+            .filter(|s| s.section == ObjectSprite::BUILDINGS)
+            .filter_map(|s| atlas.rect_of(s.section, s.cat, s.idx))
+            .collect();
+        let tex = texture(&Image { width: w, height: h, rgba: building_mask_pixels(w, h, &rects) })?;
+        tex.set_filter(FilterMode::Nearest);
+        Some(tex)
     }
 
     fn build_shadow_texture(&self) -> Option<Texture2D> {
@@ -545,5 +559,43 @@ mod rect_table_tests {
         assert_eq!(table.get(0, 3, 7), Some(r(3.0)));
         assert_eq!(table.get(0, 255, 255), Some(r(6.0)));
         assert_eq!(table.get(2, 0, 0), None, "a section the atlas never asks for");
+    }
+}
+
+/// The pixels of a building mask (`DtArt::building_mask`): `w` × `h` RGBA, white on each rectangle of
+/// `rects` (clipped to the texture), clear elsewhere.
+pub fn building_mask_pixels(w: u32, h: u32, rects: &[Rect]) -> Vec<u8> {
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    for r in rects {
+        let (x0, y0) = (r.x.max(0.0) as u32, r.y.max(0.0) as u32);
+        let (x1, y1) = (((r.x + r.w).max(0.0) as u32).min(w), ((r.y + r.h).max(0.0) as u32).min(h));
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let i = ((y * w + x) * 4) as usize;
+                rgba[i..i + 4].copy_from_slice(&[255, 255, 255, 255]);
+            }
+        }
+    }
+    rgba
+}
+
+#[cfg(test)]
+mod building_mask_tests {
+    use super::*;
+
+    #[test]
+    fn the_mask_is_white_on_the_building_rectangles_and_clear_elsewhere() {
+        let rects = [Rect::new(2.0, 1.0, 3.0, 2.0), Rect::new(7.0, 3.0, 2.0, 1.0)];
+        let px = building_mask_pixels(10, 5, &rects);
+        let at = |x: u32, y: u32| px[((y * 10 + x) * 4 + 3) as usize];
+        assert_eq!(at(2, 1), 255);
+        assert_eq!(at(4, 2), 255);
+        assert_eq!(at(5, 2), 0, "just past the first rectangle");
+        assert_eq!(at(7, 3), 255);
+        assert_eq!(at(0, 0), 0);
+        // A rectangle past the edge is clipped, not a panic.
+        let edge = building_mask_pixels(4, 4, &[Rect::new(3.0, 3.0, 5.0, 5.0)]);
+        assert_eq!(edge.len(), 4 * 4 * 4);
+        assert_eq!(edge[((3 * 4 + 3) * 4 + 3) as usize], 255);
     }
 }
