@@ -63,13 +63,13 @@ const EYE_COMPASS_LOOK: f32 = 3.0;
 /// The horizontal direction the camera looks in at `yaw_deg`, as a ground vector (world x, z):
 /// north `(0, -1)` at yaw 0, east `(-1, 0)` at 90.
 pub fn forward(yaw_deg: f32) -> Vec2 {
-    let (s, c) = yaw_deg.to_radians().sin_cos();
+    let (s, c) = super::memo::sin_cos_deg(yaw_deg);
     vec2(-s, -c)
 }
 
 /// The ground's right on the screen at `yaw_deg`, as a ground vector: east `(1, 0)` at yaw 0.
 pub fn right(yaw_deg: f32) -> Vec2 {
-    let (s, c) = yaw_deg.to_radians().sin_cos();
+    let (s, c) = super::memo::sin_cos_deg(yaw_deg);
     vec2(c, -s)
 }
 
@@ -144,7 +144,7 @@ impl TiltCamera {
         if let Some(e) = self.eye_at {
             return e;
         }
-        let (s, c) = self.pitch_deg.to_radians().sin_cos();
+        let (s, c) = super::memo::sin_cos_deg(self.pitch_deg);
         let f = forward(self.yaw_deg);
         vec3(self.target.x - f.x * self.distance * c, self.distance * s, self.target.y - f.y * self.distance * c)
     }
@@ -271,7 +271,7 @@ impl TiltCamera {
 
     /// The direction the eyes camera looks in (unit): along its pitch below the horizontal, at its yaw.
     fn look_dir(&self) -> Vec3 {
-        let (s, c) = self.pitch_deg.to_radians().sin_cos();
+        let (s, c) = super::memo::sin_cos_deg(self.pitch_deg);
         let f = forward(self.yaw_deg);
         vec3(f.x * c, -s, f.y * c)
     }
@@ -410,7 +410,7 @@ pub fn billboard_model(origin: Vec2, foot: Vec2, scale: f32, pitch_deg: f32, yaw
 /// (the flat ground's point, or a point of a [`Bend`] sheet). The sprite keeps the camera's
 /// orientation, so it faces the eye wherever its foot is.
 pub fn billboard_model_at(foot: Vec2, scale: f32, pitch_deg: f32, yaw_deg: f32, size: f32, ground: Vec3) -> Mat4 {
-    let (s, c) = pitch_deg.to_radians().sin_cos();
+    let (s, c) = super::memo::sin_cos_deg(pitch_deg);
     let (f, r) = (forward(yaw_deg), right(yaw_deg));
     let up = vec3(f.x * s, c, f.y * s);
     let right3 = vec3(r.x, 0.0, r.y);

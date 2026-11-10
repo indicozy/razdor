@@ -42,18 +42,71 @@ enum Warm {
 pub struct Atlas {
     pub texture: Texture2D,
     /// (section, category, index) → source rectangle in `texture`.
-    rects: HashMap<(u32, u32, u32), Rect>,
+    rects: RectTable,
+}
+
+/// The atlas's rectangles as a dense table over the two sections and the 8-bit category and index
+/// that [`Atlas::decoration`] and [`Atlas::building`] look up (a `HashMap` cost a hash per sprite a
+/// frame). A sprite key outside them can never be asked for, so it is not kept.
+struct RectTable(Vec<Option<Rect>>);
+
+impl RectTable {
+    fn slot(section: u32, cat: u32, idx: u32) -> Option<usize> {
+        (section < 2 && cat < 256 && idx < 256).then_some(((section << 16) | (cat << 8) | idx) as usize)
+    }
+
+    /// The table of `entries`; a later entry with the same key replaces an earlier one.
+    fn from_entries(entries: impl IntoIterator<Item = ((u32, u32, u32), Rect)>) -> RectTable {
+        let mut table = vec![None; 2 << 16];
+        for ((section, cat, idx), r) in entries {
+            if let Some(k) = Self::slot(section, cat, idx) {
+                table[k] = Some(r);
+            }
+        }
+        RectTable(table)
+    }
+
+    fn get(&self, section: u32, cat: u32, idx: u32) -> Option<Rect> {
+        Self::slot(section, cat, idx).and_then(|k| self.0[k])
+    }
+}
+
+#[cfg(test)]
+mod rect_table_tests {
+    use super::*;
+
+    fn r(x: f32) -> Rect {
+        Rect::new(x, x + 1.0, 2.0, 3.0)
+    }
+
+    #[test]
+    fn the_table_gives_what_a_map_gives_for_every_key_the_atlas_asks_for() {
+        // A duplicate key (the last one wins, as a map's insert does), a key past 8 bits (never asked for).
+        let entries = vec![((0u32, 3u32, 7u32), r(1.0)), ((1, 0, 0), r(2.0)), ((0, 3, 7), r(3.0)), ((0, 300, 1), r(4.0)), ((2, 0, 0), r(5.0)), ((0, 255, 255), r(6.0))];
+        let map: HashMap<(u32, u32, u32), Rect> = entries.iter().copied().collect();
+        let table = RectTable::from_entries(entries.iter().copied());
+        for section in 0..2 {
+            for cat in 0..256 {
+                for idx in 0..256 {
+                    assert_eq!(table.get(section, cat, idx), map.get(&(section, cat, idx)).copied(), "({section}, {cat}, {idx})");
+                }
+            }
+        }
+        assert_eq!(table.get(0, 3, 7), Some(r(3.0)));
+        assert_eq!(table.get(0, 255, 255), Some(r(6.0)));
+        assert_eq!(table.get(2, 0, 0), None, "a section the atlas never asks for");
+    }
 }
 
 impl Atlas {
     /// Sprite of a `.DTm` map object (class, sprite id).
     pub fn decoration(&self, class: u8, sprite: u8) -> Option<Rect> {
-        self.rects.get(&(ObjectSprite::DECORATIONS, class.into(), sprite.into())).copied()
+        self.rects.get(ObjectSprite::DECORATIONS, class.into(), sprite.into())
     }
 
     /// Sprite of a building by picture type and variant.
     pub fn building(&self, picture_type: u8, variant: u8) -> Option<Rect> {
-        self.rects.get(&(ObjectSprite::BUILDINGS, picture_type.into(), variant.into())).copied()
+        self.rects.get(ObjectSprite::BUILDINGS, picture_type.into(), variant.into())
     }
 }
 
@@ -325,11 +378,12 @@ impl DtArt {
                     return None;
                 };
                 let texture = texture(&image)?;
-                let rects = sprites
-                    .iter()
-                    .zip(pos)
-                    .map(|(s, (x, y))| ((s.section, s.cat, s.idx), Rect::new(x as f32, y as f32, s.image.width as f32, s.image.height as f32)))
-                    .collect();
+                let rects = RectTable::from_entries(
+                    sprites
+                        .iter()
+                        .zip(pos)
+                        .map(|(s, (x, y))| ((s.section, s.cat, s.idx), Rect::new(x as f32, y as f32, s.image.width as f32, s.image.height as f32))),
+                );
                 Some(Atlas { texture, rects })
             })
             .as_ref()

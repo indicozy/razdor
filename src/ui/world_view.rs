@@ -2511,7 +2511,7 @@ fn object_sprite_origin(o: &Decoration, w: f32, h: f32, cam: &Camera) -> Vec2 {
 fn plant_shift(o: &Decoration) -> (f32, f32) {
     match o.class {
         object_class::TREES..=object_class::THICKET => {
-            let (dx, dy) = razdor::rules::rng::plant_offset(o.tile.0, o.tile.1, u16::from(o.class) << 8 | u16::from(o.sprite));
+            let (dx, dy, _) = super::memo::plant_jitter_memo(o.tile.0, o.tile.1, u16::from(o.class) << 8 | u16::from(o.sprite));
             (dx as f32, dy as f32)
         }
         _ => (0.0, 0.0),
@@ -2556,7 +2556,8 @@ fn building_foot(l: &Location, cam: &Camera) -> Vec2 {
 
 /// The part `src` of `texture` drawn at `at`, `size` big, its top edge moved `lean` px right.
 fn draw_leaning(texture: &Texture2D, src: Rect, at: Vec2, size: Vec2, lean: f32) {
-    let (tw, th) = (texture.width(), texture.height());
+    let texel = super::sharp::texels(texture);
+    let (tw, th) = (texel.x, texel.y);
     let (u0, v0, u1, v1) = (src.x / tw, src.y / th, (src.x + src.w) / tw, (src.y + src.h) / th);
     let white = faded(WHITE);
     let vertex = |x: f32, y: f32, u: f32, v: f32| Vertex::new(x, y, 0.0, u, v, white);
@@ -2592,7 +2593,7 @@ fn draw_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera) {
         if o.class == object_class::TREES {
             // The small trees and bushes sway: the quad's top corners move by the lean of
             // their phase, the bottom stays (0x4c99d0, engine.md §7).
-            let (_, _, phase) = razdor::rules::rng::plant_jitter(o.tile.0, o.tile.1, u16::from(o.class) << 8 | u16::from(o.sprite));
+            let (_, _, phase) = super::memo::plant_jitter_memo(o.tile.0, o.tile.1, u16::from(o.class) << 8 | u16::from(o.sprite));
             let lean = razdor::rules::rng::tree_sway(clock_ms(), phase) * zoom;
             draw_leaning(&atlas.texture, r, at, size, lean);
             return;

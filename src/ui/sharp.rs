@@ -15,8 +15,10 @@
 //! sharp draw inside it sets its uniforms on that material instead of replacing it.
 
 use razdor::local;
-use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation, PipelineParams};
+use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation, PipelineParams, TextureId};
 use macroquad::prelude::*;
+
+use super::memo::Recent;
 
 /// GLSL ES 1.00 source of `sharp_uv`, pasted into fragment shaders (the caller declares
 /// the precision and the `TexSize` / `Scale` uniforms). `uv` is the texture coordinate,
@@ -234,6 +236,19 @@ fn set_cached(m: &Material, tex_size: Vec2, scale: Vec2) {
     }
 }
 
+local! {
+    /// The sizes of the last textures drawn, by their miniquad id. A texture's size does not change,
+    /// and miniquad never reuses an id, so a remembered size is the texture's own.
+    static SIZES: std::cell::RefCell<Recent<TextureId, Vec2, 8>> = std::cell::RefCell::new(Recent::new());
+}
+
+/// The size of `tex` in texels: what `tex.width()` and `tex.height()` give, from [`SIZES`] (each of
+/// those looks the texture up in the GL context).
+pub fn texels(tex: &Texture2D) -> Vec2 {
+    let id = tex.raw_miniquad_id();
+    SIZES.with(|s| s.borrow_mut().get_or_insert_with(id, || vec2(tex.width(), tex.height())))
+}
+
 /// The sharp draw material, made once. `None` when the shader does not compile on this GPU
 /// or driver: the draws then fall back to plain `draw_texture_ex` (the look before this
 /// module), and the reason is logged once.
@@ -251,7 +266,7 @@ fn draw_material() -> Option<Material> {
 /// Sets `TexSize` (the texture's size in texels) and `Scale` (the draw's screen pixels per
 /// texel) on a material that includes [`SHARP_UV_GLSL`], for the draw `params` of `tex`.
 pub fn set_uniforms(m: &Material, tex: &Texture2D, params: &DrawTextureParams) {
-    let tex_size = vec2(tex.width(), tex.height());
+    let tex_size = texels(tex);
     m.set_uniform("TexSize", tex_size);
     m.set_uniform("Scale", draw_scale(tex_size, params));
 }
@@ -290,7 +305,7 @@ pub fn draw(tex: &Texture2D, x: f32, y: f32, color: Color, params: DrawTexturePa
         Some(None) => draw_texture_ex(tex, x, y, color, params),
         None => match draw_material() {
             Some(m) if in_session() => {
-                let tex_size = vec2(tex.width(), tex.height());
+                let tex_size = texels(tex);
                 set_cached(&m, tex_size, draw_scale(tex_size, &params));
                 session_material();
                 draw_texture_ex(tex, x, y, color, params);
@@ -311,7 +326,7 @@ pub fn draw(tex: &Texture2D, x: f32, y: f32, color: Color, params: DrawTexturePa
 pub fn draw_mesh_sharp(mesh: &Mesh, scale: Vec2) {
     let set = |m: &Material| {
         if let Some(tex) = mesh.texture.as_ref() {
-            m.set_uniform("TexSize", vec2(tex.width(), tex.height()));
+            m.set_uniform("TexSize", texels(tex));
         }
         m.set_uniform("Scale", scale.abs());
     };
@@ -323,7 +338,7 @@ pub fn draw_mesh_sharp(mesh: &Mesh, scale: Vec2) {
         Some(None) => draw_mesh(mesh),
         None => match draw_material() {
             Some(m) if mesh.texture.is_some() && in_session() => {
-                let tex_size = mesh.texture.as_ref().map_or(Vec2::ONE, |t| vec2(t.width(), t.height()));
+                let tex_size = mesh.texture.as_ref().map_or(Vec2::ONE, texels);
                 set_cached(&m, tex_size, scale.abs());
                 session_material();
                 draw_mesh(mesh);
