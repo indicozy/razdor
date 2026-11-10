@@ -2691,6 +2691,8 @@ impl Game {
             wear(&c, &mut tried, item)?;
             Some(if tactical_now(&c, &tried, bd) > before { item_gain(&c, &tried, bd) } else { 0 })
         };
+        // The troop index `u` addresses `value` and the army's troops alike.
+        #[allow(clippy::needless_range_loop)]
         for u in 0..n {
             for (k, &(_, item)) in goods.iter().enumerate() {
                 if let Some(v) = gain(&self.world.armies[i].troops[u], item) {
@@ -2705,6 +2707,7 @@ impl Game {
         loop {
             let spare = self.spare_gold(i);
             let mut best: Option<(usize, usize, i32)> = None;
+            #[allow(clippy::needless_range_loop)] // `u` names the troop in `value` and the army alike
             for u in 0..n {
                 for k in 0..goods.len() {
                     if price[k] != 0 && price[k] <= spare && value[k][u] > WORTH && value[k][u] > best.map_or(0, |b| b.2) {

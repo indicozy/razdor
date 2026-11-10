@@ -1,6 +1,6 @@
 # The Rust release every build uses, here and in the release pipeline, so the same commit
 # gives the same programs (scripts/dist.sh, scripts/dist-macos.sh, .github/workflows/release.yml).
 [toolchain]
-channel = "1.90.0"
+channel = "1.91.1"
 targets = ["x86_64-pc-windows-gnullvm", "aarch64-apple-darwin", "x86_64-apple-darwin", "aarch64-apple-ios"]
 profile = "minimal"

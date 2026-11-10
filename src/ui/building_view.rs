@@ -1832,7 +1832,6 @@ fn garrison_act(game: &mut Game, view: &mut BuildingView, guards: &[razdor::rule
 
 /// A list with a selection and a scroll bar. Rows are (icon item, name, price, the price in
 /// red); `marks` light a filter's match in the names. Returns the clicked row.
-#[allow(clippy::too_many_arguments)]
 /// `row_h`: a row's height in design px (the market's `MARKET_ROW_H`, or the phone's); `name_px`: the
 /// names' size in design px (the prices one larger); the desktop's 17 and 18 as before.
 #[allow(clippy::too_many_arguments)]

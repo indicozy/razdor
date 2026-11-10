@@ -75,7 +75,7 @@ jobs:
       - name: Rust (rust-toolchain.toml) and the iOS target
         run: |
           rustup show active-toolchain
-          rustup target add --toolchain 1.90.0 aarch64-apple-ios
+          rustup target add --toolchain 1.91.1 aarch64-apple-ios
 
       - name: Build razdor.ipa
         run: sh scripts/dist-ios.sh
@@ -108,7 +108,7 @@ jobs:
       - name: Rust (rust-toolchain.toml) and the Android targets
         run: |
           rustup show active-toolchain
-          rustup target add --toolchain 1.90.0 aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+          rustup target add --toolchain 1.91.1 aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
 
       - name: cargo-quad-apk (pinned)
         run: cargo install --git https://github.com/not-fl3/cargo-quad-apk --rev "$CARGO_QUAD_APK_REV" --locked
