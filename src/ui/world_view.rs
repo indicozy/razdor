@@ -1788,7 +1788,9 @@ fn photo_frame(game: &mut Game, assets: &Assets, view: &mut MapView, entering: b
     if strip {
         photo::draw_strip(&layout, held, super::display::dp_px());
     }
-    cursor::set(if strip { Shape::Arrow } else { Shape::Hidden });
+    // Photo mode has no pointer on screen, the strip's buttons included (the owner's request,
+    // 2026-11-10); the shot never has one (it is read before the pointer is drawn).
+    cursor::set(Shape::Hidden);
     let base = if strip { layout.panel.y - 8.0 * super::chrome::k() } else { sh - 14.0 * super::chrome::k() };
     draw_toasts(&mut view.toasts, now, base, super::display::dp_px().map(|d| 16.0 * d));
     PhotoStep::Drawn
