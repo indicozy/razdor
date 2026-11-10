@@ -64,14 +64,12 @@ pub struct Atlas {
 }
 
 /// A building sprite's living parts (Razdor's «Живая карта», `living`): its chimneys, the boxes
-/// the smoke rises from, and its moving parts (flags, sails). A sprite with moving parts is drawn
+/// the smoke rises from, and its moving parts (flags). A sprite with moving parts is drawn
 /// from `body`, a copy with their areas cleared, whose texture is made on first use.
 pub struct Living {
     /// Each chimney's box in sprite pixels.
     pub chimneys: Vec<[f32; 4]>,
     pub parts: Vec<living::Part>,
-    /// A sails card of the depth cut that turns about its hub (`living::Turning`).
-    pub turning: Option<living::Turning>,
     body: Option<Image>,
     texture: OnceCell<Option<Texture2D>>,
 }
@@ -440,32 +438,15 @@ impl DtArt {
                     // The light points (`dt::lights`) of a building: its chimneys and moving parts.
                     let points = building.then(|| lights::builtin().get(&key).filter(|k| k.w == s.image.width && k.h == s.image.height)).flatten();
                     if let Some(p) = points {
-                        let (w, h) = (s.image.width as f32, s.image.height as f32);
+                        let w = s.image.width as f32;
                         let chimneys: Vec<[f32; 4]> = p.points.iter().filter(|p| p.kind == Kind::Chimney).map(|p| p.rect).collect();
-                        // Only a box whose pixels look like the part moves (sails spokes, cloth), so a
+                        // Only a box whose pixels look like cloth moves, so a
                         // windmill's roof or a figure's blob stays still.
-                        // A flag moves when its box looks like cloth. A sails box turns on its own
-                        // sails card of the depth cut when it has one, else as a disc when its pixels
-                        // look like sails (`living::sails_of`).
-                        let own: &[Card] = entry.map_or(&[], |k| k.cards.as_slice());
-                        let mut parts: Vec<living::Part> = Vec::new();
-                        let mut turning = None;
-                        for (i, q) in p.points.iter().enumerate() {
-                            match q.kind {
-                                Kind::Flag if living::cloth_look(&s.image, q.rect) => parts.extend(living::Part::of(q, w, h, i)),
-                                Kind::Sails if turning.is_none() => match living::sails_of(&s.image, own, q.rect) {
-                                    Some(living::Sails::Card { index, hub }) => {
-                                        turning = Some(living::Turning { index, card: own[index].clone(), hub, phase: living::unit(0x5EED, i as u64) * std::f32::consts::TAU });
-                                    }
-                                    Some(living::Sails::Disc) => parts.extend(living::Part::of(q, w, h, i)),
-                                    None => {}
-                                },
-                                _ => {}
-                            }
-                        }
-                        if !chimneys.is_empty() || !parts.is_empty() || turning.is_some() {
-                            let body = (!parts.is_empty() || turning.is_some()).then(|| living::cleared(&s.image, &parts, turning.as_ref().map(|t| &t.card)));
-                            living_map.insert(id, Living { chimneys, parts, turning, body, texture: OnceCell::new() });
+                        // A flag waves when its box looks like cloth (`living::cloth_look`).
+                        let parts: Vec<living::Part> = p.points.iter().enumerate().filter(|(_, q)| q.kind == Kind::Flag && living::cloth_look(&s.image, q.rect)).filter_map(|(i, q)| living::Part::of(q, w, i)).collect();
+                        if !chimneys.is_empty() || !parts.is_empty() {
+                            let body = (!parts.is_empty()).then(|| living::cleared(&s.image, &parts));
+                            living_map.insert(id, Living { chimneys, parts, body, texture: OnceCell::new() });
                         }
                     }
                     // A one-card building is shipped as known too: it stands as one billboard.

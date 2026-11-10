@@ -3019,7 +3019,7 @@ fn owning_card(cards: &[Card], origin: Vec2, zoom: f32, p: Vec2) -> usize {
     cards.iter().enumerate().min_by(|a, b| card_foot(origin, zoom, a.1).distance_squared(at).total_cmp(&card_foot(origin, zoom, b.1).distance_squared(at))).map_or(0, |(i, _)| i)
 }
 
-/// Draws the moving parts of a sprite (flags, sails: `living::part_mesh`) from the atlas, over the
+/// Draws the moving parts of a sprite (flags: `living::part_mesh`) from the atlas, over the
 /// sprite's rectangle `r` at `at` in the 2D space. The caller's standing transform places them.
 fn draw_parts<'a>(parts: impl Iterator<Item = &'a living::Part>, atlas: &Atlas, r: Rect, at: Vec2, zoom: f32) {
     let now = crate::ui::clock::now();
@@ -3031,25 +3031,12 @@ fn draw_parts<'a>(parts: impl Iterator<Item = &'a living::Part>, atlas: &Atlas, 
     }
 }
 
-/// A sails card turned about its hub (`living::turning_mesh`), from the atlas, over the sprite's
-/// rectangle `r` at `at`. The caller's standing transform places it.
-fn draw_turning(t: &living::Turning, atlas: &Atlas, r: Rect, at: Vec2, zoom: f32) {
-    let now = crate::ui::clock::now();
-    let size = vec2(atlas.texture.width(), atlas.texture.height());
-    let (vertices, indices) = living::turning_mesh(t, now, r, size, at, zoom, faded(WHITE));
-    super::sharp::draw_mesh_sharp(&Mesh { vertices, indices, texture: Some(atlas.texture.clone()) }, vec2(zoom, zoom));
-}
-
-/// A living building drawn flat (or as one billboard): its cleared copy, then its moving parts and
-/// its turning sails card.
+/// A living building drawn flat (or as one billboard): its cleared copy, then its waving flags.
 fn draw_living_picture(ls: &Living, atlas: &Atlas, r: Rect, at: Vec2, zoom: f32) {
     let Some(body) = ls.body() else { return };
     let params = DrawTextureParams { dest_size: Some(vec2(r.w * zoom, r.h * zoom)), source: Some(Rect::new(0.0, 0.0, r.w, r.h)), ..Default::default() };
     super::sharp::draw(body, at.x, at.y, faded(WHITE), params);
     draw_parts(ls.parts.iter(), atlas, r, at, zoom);
-    if let Some(t) = &ls.turning {
-        draw_turning(t, atlas, r, at, zoom);
-    }
 }
 
 /// A card's foot in the 2D space: its ground point in the building's sprite whose top-left is at
@@ -4184,8 +4171,8 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                     let origin = building_sprite_origin(l, r.w, r.h, cam);
                     let f = card_foot(origin, zoom, card);
                     let outlined = hover.is_some_and(|h| h.building == Some(*i));
-                    // Living (flags, sails): the cards draw the cleared copy, and each moving part goes
-                    // with the card whose outline holds its anchor (`owning_card`).
+                    // Living (flags): the cards draw the cleared copy, and each flag goes with the card
+                    // whose outline holds its anchor (`owning_card`).
                     let living = living_of(cam, art, l).filter(|(_, ls)| ls.body().is_some());
                     standing(cam, f, f, shade_of(f), Rect::new(origin.x, origin.y, r.w * zoom, r.h * zoom), || {
                         if *k == 0 {
@@ -4198,10 +4185,6 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                         if let Some((_, ls)) = living {
                             let mine = ls.parts.iter().filter(|p| owning_card(cards, origin, zoom, p.anchor()) == *k);
                             draw_parts(mine, atlas, r, origin, zoom);
-                            // The sails card turns with its own hub, drawn in its own card's pass.
-                            if let Some(t) = ls.turning.as_ref().filter(|t| t.index == *k) {
-                                draw_turning(t, atlas, r, origin, zoom);
-                            }
                         }
                     });
                 }

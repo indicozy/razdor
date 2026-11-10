@@ -546,7 +546,7 @@ Razdor's: the water ripples, foam runs along the shores, rivers flow and ships l
 Weather = Погода
 Razdor's: weather by the land: snow on snow and ice, rain on swamps and lowlands, heat haze over deserts, ash over fire lands, cloud shadows everywhere. Style only. = Раздора: погода по земле: снег над снегами и льдом, дождь над болотами и низинами, марево над пустынями, пепел над огненными землями, тени облаков везде. Только вид.
 Living map = Живая карта
-Razdor's: smoke rises from chimneys, mill sails turn, flags wave, birds cross the sky. Style only. = Раздора: из труб идёт дым, крутятся мельницы, развеваются флаги, пролетают птицы. Только вид.
+Razdor's: smoke rises from chimneys, flags wave, birds cross the sky. Style only. = Раздора: из труб идёт дым, развеваются флаги, пролетают птицы. Только вид.
 Depth model for mods = Модель глубины для модов
 Download (50 MB) = Скачать (50 МБ)
 Downloading {percent}% = Загрузка {percent}%

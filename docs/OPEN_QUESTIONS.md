@@ -8,13 +8,12 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
-- **The windmill's sails do not turn on any windmill checked by eye** (2026-11-11, «Живая карта»). The depth cut
-  gives a thin sails card that the sails box holds to three sprites (`21d57cc1cf16b388`, `a2e856d2522fe2c2`,
-  `ab998a24a640b370`); `f2622fb743902ba8` is just over the size limit (its card is 2.03 times its box). The two
-  windmill-like ones were not found on screen in the maps checked. The one that turns on screen (`ab998…`, the Trein
-  estuary top) turns a small card beside a well-like frame, not sails. The village mill `1092c38902aa05da` has no
-  thin card: its blades sit in a house-sized card, so it stays still. Needs a real windmill checked by eye, or a new
-  cut.
+- **Mill sails: no reliable sails card in the depth cut; later** (2026-11-11, «Живая карта»). The sails do not turn in
+  this release. The cut gives a thin sails card to a few sprites (`21d57cc1cf16b388`, `a2e856d2522fe2c2`,
+  `ab998a24a640b370`), but none of the windmills checked by eye had one; the card that turned on screen (`ab998…`,
+  the Trein estuary top) was a small object beside a well-like frame, and its turn dragged a frame pole. The village
+  mill `1092c38902aa05da` has no thin card: its blades sit in a house-sized card. Later: a real windmill checked by
+  eye, or a new cut with a sails piece of its own.
 - **The castle banners wave on a palette rule, not a variance rule** (2026-11-11). Their stripes are busy (60 to 110
   colours at 4 bits, luminance spread 56 to 84), so a variance test rejects them; the palette (blue or grey, at least
   half the opaque pixels, fill at least 0.75) passes 7 of the 9 installed banners and rejects a figure with skin and

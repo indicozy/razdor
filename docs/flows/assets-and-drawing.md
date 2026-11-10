@@ -590,28 +590,23 @@ sun (`sun_at`: the lighting's shown hour, else the game clock; none at night). S
 **Living map** (the setting «Живая карта», `Settings::map_living`, off by default; `living::set_prefs` takes it
 every frame from `display::follow_settings`; `RAZDOR_LIVING=1` for the snapshots). Style only, no rule reads it.
 The points are the offline detector's boxes (`dt::lights`, `data/lights/objects.json`, keyed by `cards::sprite_key`,
-see `tools/depth/README.md`). `dt_art::Atlas::living` gives each building sprite its chimneys and its moving parts: a
-flag (its pole on the box's edge nearer the sprite's centre) and sails (a disc about the box's centre, kept inside the
-sprite). **Smoke**: `living::push_chimney` makes stateless puffs from each chimney's top (`puff_fraction`: the puffs of
-one chimney spaced through `PUFF_LIFE`, 6 s; each rises 1.5 cells, grows and fades; `wind` is shared). All of a frame's
-puffs are one `living::Batch` drawn over the sprites (`draw_smoke`), each building's puffs placed by the billboard of its
-foot (`living::Space`, the sprite's own model); 7 a chimney on the desktop, 4 on the phones. **Moving parts**: a sprite
-with one is drawn from a copy with those areas cleared (`living::cleared`, made at atlas build; its texture is made on
-first use, `Living::body`), and each part is drawn over it (`living::part_mesh`): a sails box turns on its own card of the depth cut when one
-is a thin piece the box holds (`living::sails_card`: the card's box centre in the sails box, fill under 0.6, its box at
-most twice the sails box's; the hub is the sails box's centre when it lies in the card's box, else the card's box
-centre): that card's outline turns about the hub (`Turning`, `turning_mesh`, `sail_angle`, a turn in 9 s), and its
-pixels are cleared from the body. With no such card, the sails box turns as a disc only when its pixels outside the
-roof card (`roof_card`, the card with most opaque pixels in the box) look like sails (`sails_look`: under 55 % opaque,
-quadrants about even, the hub near the centre). A flag box sways when it looks like cloth (`cloth_look`: at least
-three quarters opaque and at least half of its opaque pixels blue or grey, the castle's blue-and-white banners), its
-columns moving with `flag_sway` (3 px at the free end), the free end most. A house card or a figure stays still. In the card path a part goes with the card whose
-outline holds its anchor (`owning_card`), not the nearest foot: a card pivots about its own foot, so a part drawn under
-another card's billboard would shift by (size − 1) times the feet's distance. **Birds**: `living::flock_at`, one chance a
-40 s slot (a flock 20 to 60 s after the last), 14 s trips across the visible world rectangle, 3 to 7 birds in a V
-(`bird_points`); drawn in screen space after the world (`draw_birds`), each bird skipped over unexplored cells. Not drawn
-in the bent (first-person) view. Off, the map is pixel-identical (checked against the commit before the feature).
-
+see `tools/depth/README.md`). `dt_art::Atlas::living` gives each building sprite its chimneys and its flags (a flag's
+pole on the box's edge nearer the sprite's centre). **Smoke**: `living::push_chimney` makes stateless puffs from each
+chimney's top (`puff_fraction`: the puffs of one chimney spaced through `PUFF_LIFE`, 6 s; each rises 1.5 cells, grows
+and fades; `wind` is shared). All of a frame's puffs are one `living::Batch` drawn over the sprites (`draw_smoke`),
+each building's puffs placed by the billboard of its foot (`living::Space`, the sprite's own model); 7 a chimney on the
+desktop, 4 on the phones. **Flags**: a flag box waves when its pixels look like cloth (`living::cloth_look`: at least
+three quarters opaque, at least half of its opaque pixels blue or grey, as the castle's blue-and-white banners are; a
+figure has skin and gold in an irregular outline and stays still). A sprite with a waving flag is drawn from a copy
+with the flag's box cleared (`living::cleared`, made at atlas build; its texture is made on first use, `Living::body`),
+and the flag is redrawn over it (`part_mesh`): the free end swings 3 px (`flag_sway`), the pole side stays. In the card
+path a flag goes with the card whose outline holds its anchor (`owning_card`), not the nearest foot: a card pivots
+about its own foot, so a flag drawn under another card's billboard would shift by (size − 1) times the feet's distance.
+**Birds**: `living::flock_at`, one chance a 40 s slot (a flock 20 to 60 s after the last), 14 s trips across the visible
+world rectangle, 3 to 7 birds in a V (`bird_points`); drawn in screen space after the world (`draw_birds`), each bird
+skipped over unexplored cells. Not drawn in the bent (first-person) view. Off, the map is pixel-identical (checked
+against the commit before the feature). The mill sails do not turn: the depth cut gives no reliable sails card
+(`docs/OPEN_QUESTIONS.md`).
 ## Sound and music
 
 - `src/dt/sound.rs`: `SoundTable::from_ini` (`_Sounds.ini`: `[Backgrounds]` music keys,
