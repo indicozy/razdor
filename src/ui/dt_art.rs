@@ -42,6 +42,9 @@ enum Warm {
 }
 
 /// Every map object and building sprite in one texture, so the world map draws in few batches.
+/// The soft shadow atlas's blur, in passes of [1 2 1] / 4 (about 3 px at the tip).
+const SOFT_PASSES: usize = 3;
+
 pub struct Atlas {
     pub texture: Texture2D,
     /// (section, category, index) → source rectangle in `texture`.
@@ -129,9 +132,9 @@ pub struct DtArt {
     depth: RefCell<Option<depth::Service>>,
     /// The shadow atlas of «От солнца» (`shadow`): the map atlas's layout, each sprite's blurred
     /// silhouette in its alpha. Made on the first frame that casts sun shadows.
-    shadows: OnceCell<Option<Texture2D>>,
+    shadows: OnceCell<Option<(Texture2D, Texture2D)>>,
     /// The building mask of the map atlas (`building_mask`), built on the first lit frame.
-    building_mask: OnceCell<Option<Texture2D>>,
+    building_mask: OnceCell<Option<(Texture2D, Texture2D)>>,
 }
 
 fn or_log<T: Default>(what: &str, r: Result<T, DtError>) -> T {
@@ -459,17 +462,37 @@ impl DtArt {
     /// The shadow atlas (`shadow::silhouette` of every sprite, in the map atlas's rectangles; the
     /// silhouette is the alpha, the colour black). `None` without the map atlas.
     pub fn shadow_texture(&self) -> Option<Texture2D> {
-        self.shadows.get_or_init(|| self.build_shadow_texture()).clone()
+        self.shadow_pair().map(|(sharp, _)| sharp)
+    }
+
+    /// The soft copy of the shadow atlas (`shadow::blur_alpha`, [`SOFT_PASSES`] passes): the shadows' tips.
+    /// Built with the sharp one, once.
+    pub fn shadow_soft_texture(&self) -> Option<Texture2D> {
+        self.shadow_pair().map(|(_, soft)| soft)
+    }
+
+    fn shadow_pair(&self) -> Option<(Texture2D, Texture2D)> {
+        self.shadows.get_or_init(|| self.build_shadow_textures()).clone()
     }
 
     /// The building mask of the map atlas: the atlas's layout, white (alpha 1) on every building
     /// picture's rectangle and clear elsewhere, nearest-sampled. Only the lit sprite material reads it
     /// (`sharp::session_lit`), so it is built on the first lit frame and costs nothing with the light off.
     pub fn building_mask(&self) -> Option<Texture2D> {
+        self.mask_pair().map(|(nearest, _)| nearest)
+    }
+
+    /// The same mask sampled linearly, for the emissive layer (G) the windows pass draws: the windows' feathered
+    /// edges interpolate here, while the building flag (R, `building_mask`) stays exact for the lit pass.
+    pub fn building_emissive(&self) -> Option<Texture2D> {
+        self.mask_pair().map(|(_, linear)| linear)
+    }
+
+    fn mask_pair(&self) -> Option<(Texture2D, Texture2D)> {
         self.building_mask.get_or_init(|| self.build_building_mask()).clone()
     }
 
-    fn build_building_mask(&self) -> Option<Texture2D> {
+    fn build_building_mask(&self) -> Option<(Texture2D, Texture2D)> {
         let atlas = self.map_atlas()?;
         let (w, h) = (atlas.texture.width() as u32, atlas.texture.height() as u32);
         // Each building picture's lit windows (`dt::windows`), computed once from its own pixels.
@@ -484,13 +507,15 @@ impl DtArt {
                 Some((rect, windows::emissive(&s.image, boxes)))
             })
             .collect();
-        let tex = texture(&Image { width: w, height: h, rgba: building_mask_pixels(w, h, &placed) })?;
-        // Linear: the emissive layer (G) is feathered, so its edges interpolate. R (the building) is tested at 0.5.
-        tex.set_filter(FilterMode::Linear);
-        Some(tex)
+        let img = Image { width: w, height: h, rgba: building_mask_pixels(w, h, &placed) };
+        // Two samplings of the same pixels: exact (R, the building flag, so the lit pass is unchanged by day) and
+        // linear (G, the feathered windows).
+        let nearest = texture(&img)?;
+        nearest.set_filter(FilterMode::Nearest);
+        Some((nearest, texture(&img)?))
     }
 
-    fn build_shadow_texture(&self) -> Option<Texture2D> {
+    fn build_shadow_textures(&self) -> Option<(Texture2D, Texture2D)> {
         let atlas = self.map_atlas()?;
         let (w, h) = (atlas.texture.width() as u32, atlas.texture.height() as u32);
         // White colour, alpha 0: the shadow's colour comes from the vertices (`shadow::strength_colour`).
@@ -506,7 +531,9 @@ impl DtArt {
                 }
             }
         }
-        texture(&Image { width: w, height: h, rgba })
+        let mut soft = rgba.clone();
+        super::shadow::blur_alpha(&mut soft, w as usize, h as usize, SOFT_PASSES);
+        Some((texture(&Image { width: w, height: h, rgba })?, texture(&Image { width: w, height: h, rgba: soft })?))
     }
 
     /// Runs the built-in depth model for the 2.5D view, once a frame of the world map: when the

@@ -2613,7 +2613,8 @@ fn terrain_quad(game: &Game, layer: &terrain::TerrainLayer, cam: &Camera, mode: 
         }
         let view = vec4(tl.x, tl.y / rh, br.x, br.y / rh);
         // The point lights of the ground (`lights`), in this pass's pixels: none with the light off.
-        let points = relief.and_then(|_| lights::with_frame(|f| f.map(|f| lights::uniforms(f, |w| cam.to_screen(w.into()), cam.scale))));
+        let points = relief.and_then(|_| lights::with_frame(|f| f.map(|f| lights::uniforms(f, |w| cam.to_screen(w.into()), cam.scale))))
+            .filter(|u| u.info.z > 0.0);
         // The edge's mist is fog: the trailer's no-fog switch leaves the ground going on past the edge.
         layer.draw(map.surface_codes(), (map.w as u32, map.h as u32), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(PX, PX * rh), Some((crate::ui::clock::now() * 1000.0) as i64), extend && !trailer_nofog(), mode, flow, relief, points.as_ref());
     }
@@ -3049,7 +3050,7 @@ fn draw_building_shadow(l: &Location, atlas: &Atlas, r: Rect, cam: &Camera, shad
 /// silhouette in the cool colour `shadow::TINT`, its alpha the light's times the fog's visibility on the foot's
 /// cell, half on water: it darkens what lies under it. A light's own building casts nothing. Style only.
 fn draw_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, sun: Option<daylight::Casts>, lit: &[(lights::Light, Vec2, f32)], objects: &[&Decoration], locations: &[(usize, &Location)]) {
-    let (Some(art), Some(atlas), Some(texture)) = (art, art.and_then(|a| a.map_atlas()), art.and_then(|a| a.shadow_texture())) else { return };
+    let (Some(art), Some(atlas), Some(texture), Some(soft)) = (art, art.and_then(|a| a.map_atlas()), art.and_then(|a| a.shadow_texture()), art.and_then(|a| a.shadow_soft_texture())) else { return };
     let size = vec2(texture.width(), texture.height());
     let zoom = cam.scale / PX;
     let map = &game.world.map;
@@ -3084,7 +3085,9 @@ fn draw_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, sun: Option<dayl
         }
         out
     };
-    // One picture (`origin`, its rectangle `src`, the foot's row in it) cast from `foot` by each light.
+    // One picture (`origin`, its rectangle `src`, the foot's row in it) cast from `foot` by each light. The
+    // penumbra: the sharp silhouette weighs (1 − t) and the soft one t, t the height above the foot (0 at
+    // the foot, 1 at the tip), so the shadow is crisp at its base and softer as it lengthens.
     let picture = |origin: Vec2, src: Rect, foot_row: f32, foot: Vec2, owner: Option<usize>| {
         let k = shade(foot);
         if k <= 0.0 {
@@ -3092,8 +3095,11 @@ fn draw_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, sun: Option<dayl
         }
         for c in casts_at(foot, owner) {
             let p = shadow::Projection { origin, zoom, foot_row, dir: vec2(c.dir[0], c.dir[1]), len: c.len };
-            if let Some((vertices, indices)) = p.picture_mesh(src, size, shadow::strength_colour(c.alpha * k)) {
+            if let Some((vertices, indices)) = p.picture_mesh_ramp(src, size, |t| shadow::strength_colour(c.alpha * k * (1.0 - t))) {
                 draw_mesh(&Mesh { vertices, indices, texture: Some(texture.clone()) });
+            }
+            if let Some((vertices, indices)) = p.picture_mesh_ramp(src, size, |t| shadow::strength_colour(c.alpha * k * t)) {
+                draw_mesh(&Mesh { vertices, indices, texture: Some(soft.clone()) });
             }
         }
     };
@@ -3109,8 +3115,10 @@ fn draw_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, sun: Option<dayl
                     }
                     for c in casts_at(foot, Some(i)) {
                         let p = shadow::Projection { origin, zoom, foot_row: card.foot.1, dir: vec2(c.dir[0], c.dir[1]), len: c.len };
-                        let (vertices, indices) = p.card_mesh(card, r, size, shadow::strength_colour(c.alpha * k));
+                        let (vertices, indices) = p.card_mesh_ramp(card, r, size, |t| shadow::strength_colour(c.alpha * k * (1.0 - t)));
                         draw_mesh(&Mesh { vertices, indices, texture: Some(texture.clone()) });
+                        let (vertices, indices) = p.card_mesh_ramp(card, r, size, |t| shadow::strength_colour(c.alpha * k * t));
+                        draw_mesh(&Mesh { vertices, indices, texture: Some(soft.clone()) });
                     }
                 }
             }
@@ -3858,7 +3866,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     let sun = daylight::frame_casts();
     // The point lights in view (`lights`, the nearest by the quality), in this pass's pixels: their silhouettes
     // lie on the ground with the sun's. None with the light off.
-    let lit: Vec<(lights::Light, Vec2, f32)> = if relief.is_some() {
+    let lit: Vec<(lights::Light, Vec2, f32)> = if relief.is_some() && lights::with_frame(|f| f.map_or(0.0, |f| f.night)) > 0.0 {
         lights::with_frame(|f| f.map_or(Vec::new(), |f| f.lit().iter().map(|l| (*l, cam.to_screen(l.at.into()), l.radius * cam.scale)).collect()))
     } else {
         Vec::new()
@@ -3871,7 +3879,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // The buildings' light lies on the ground around them, not on them: the pools are drawn here, in the
     // ground pass under every standing sprite, so a building's own picture covers its pool (the owner's
     // report: no blob on a building). Torches are drawn after the world (`draw_daylight`).
-    if relief.is_some() {
+    if relief.is_some() && lights::with_frame(|f| f.map_or(0.0, |f| f.night)) > 0.0 {
         ground(cam, || draw_building_pools(game, cam));
     }
     // The original (0x4c8864) draws the hills of classes 1-3 in a pass of their own before
@@ -4022,7 +4030,8 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     items.sort_by_key(|a| a.0);
     // One sharp session for the pass: its art shares the material switch (see `sharp::session`).
     // The point lights' relief, pool-free: the lit material's uniforms for this pass (`lights::uniforms`).
-    let points = relief.and_then(|_| lights::with_frame(|f| f.map(|f| lights::uniforms(f, |w| cam.to_screen(w.into()), cam.scale))));
+    // The point lights only at night: by day the pass draws as it did before them (`sharp::session_lit`).
+    let points = relief.and_then(|_| lights::with_frame(|f| f.map(|f| lights::uniforms(f, |w| cam.to_screen(w.into()), cam.scale)))).filter(|u| u.info.z > 0.0);
     // The building mask («Качество света»' openings) is built on the first lit frame, never with the light off.
     let mask = relief.and(art).and_then(|a| a.building_mask());
     super::sharp::session_lit(relief, points.as_ref(), mask.as_ref(), || {
@@ -5820,7 +5829,7 @@ fn fog_visible(game: &Game, cam: &Camera, world: Vec2) -> f32 {
 /// adding light. Visible cells only (`fog_visible`). Nothing is drawn at day or with the light off.
 fn draw_building_windows(game: &Game, assets: &Assets, cam: &Camera) {
     let Some(art) = assets.dt.as_ref() else { return };
-    let (Some(atlas), Some(mask)) = (art.map_atlas(), art.building_mask()) else { return };
+    let (Some(atlas), Some(mask)) = (art.map_atlas(), art.building_emissive()) else { return };
     let night = lights::with_frame(|f| f.map_or(0.0, |f| f.night));
     if night <= 0.0 {
         return;

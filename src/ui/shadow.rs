@@ -6,12 +6,44 @@ use razdor::dt::gfx::Image;
 /// black), so a shadow reads as shade on the grass. The shadow texture is white in its colour channels
 /// (`DtArt::shadow_texture`), so the picture's colour is this colour and its alpha the strength times
 /// the silhouette: the default pipeline's source-over blend darkens the ground toward `TINT`.
-pub const TINT: [f32; 3] = [0.35, 0.38, 0.48];
+pub const TINT: [f32; 3] = [0.42, 0.40, 0.45];
+
+/// The shadows read as painted shading on grass: the alpha is eased by this (15 % less darkness).
+pub const EASE: f32 = 0.85;
 
 /// The vertex colour of a shadow quad of `strength` (0 to 1, the light's alpha times the caster's
 /// fog and water factors).
 pub fn strength_colour(strength: f32) -> Color {
-    Color::new(TINT[0], TINT[1], TINT[2], strength)
+    Color::new(TINT[0], TINT[1], TINT[2], strength * EASE)
+}
+
+/// Blurs the alpha channel of an RGBA picture in place, `passes` times, by a separable [1 2 1] / 4 kernel
+/// (each pass about one pixel of softening). The colour channels are left alone (the shadow atlas is white).
+pub fn blur_alpha(rgba: &mut [u8], w: usize, h: usize, passes: usize) {
+    if w == 0 || h == 0 || rgba.len() < w * h * 4 {
+        return;
+    }
+    let mut a: Vec<f32> = rgba.chunks_exact(4).map(|p| f32::from(p[3])).collect();
+    let mut tmp = vec![0f32; a.len()];
+    for _ in 0..passes {
+        for y in 0..h {
+            for x in 0..w {
+                let l = if x > 0 { a[y * w + x - 1] } else { 0.0 };
+                let r = if x + 1 < w { a[y * w + x + 1] } else { 0.0 };
+                tmp[y * w + x] = (l + 2.0 * a[y * w + x] + r) * 0.25;
+            }
+        }
+        for y in 0..h {
+            for x in 0..w {
+                let u = if y > 0 { tmp[(y - 1) * w + x] } else { 0.0 };
+                let d = if y + 1 < h { tmp[(y + 1) * w + x] } else { 0.0 };
+                a[y * w + x] = (u + 2.0 * tmp[y * w + x] + d) * 0.25;
+            }
+        }
+    }
+    for (p, v) in rgba.chunks_exact_mut(4).zip(a) {
+        p[3] = v.round().clamp(0.0, 255.0) as u8;
+    }
 }
 
 /// The alpha a picture's pixel needs to cast (0.8 of 255): the opaque body, not its soft edges.
@@ -75,24 +107,31 @@ impl Projection {
     }
 
     /// The shadow of a whole picture: the quad of its rows down to the foot (`0..=foot_row`, clamped to
-    /// the picture), its atlas rectangle `src` (`atlas` is the atlas's size, the uvs follow `src`).
+    /// the picture), its atlas rectangle `src` (`atlas` is the atlas's size, the uvs follow `src`), each
+    /// vertex's colour from `colour_at(t)`, where `t` is its height above the foot as a share of the
+    /// picture's (0 at the foot, 1 at the top): the penumbra's ramp, sharp near the base, soft at the tip.
     /// `None` when the foot is at the picture's top.
-    pub fn picture_mesh(&self, src: Rect, atlas: Vec2, color: Color) -> Option<(Vec<Vertex>, Vec<u16>)> {
+    pub fn picture_mesh_ramp(&self, src: Rect, atlas: Vec2, colour_at: impl Fn(f32) -> Color) -> Option<(Vec<Vertex>, Vec<u16>)> {
         let bottom = self.foot_row.clamp(0.0, src.h);
         if bottom <= 0.0 {
             return None;
         }
         let corners = [vec2(0.0, 0.0), vec2(src.w, 0.0), vec2(src.w, bottom), vec2(0.0, bottom)];
-        let vertices = corners.map(|px| self.vertex(px, src, atlas, color)).to_vec();
+        let vertices = corners.map(|px| self.vertex(px, src, atlas, colour_at(1.0 - px.y / bottom))).to_vec();
         Some((vertices, vec![0, 1, 2, 0, 2, 3]))
     }
 
     /// The shadow of one of a building's cards (`Card`, its outline's triangles in sprite px): each vertex
-    /// cast from the card's own foot (`card.foot`, in place of `foot_row`), so a village's houses each cast
-    /// their own. The rows below the card's foot cast nothing (clamped per vertex).
-    pub fn card_mesh(&self, card: &Card, src: Rect, atlas: Vec2, color: Color) -> (Vec<Vertex>, Vec<u16>) {
+    /// cast from the card's own foot (`card.foot`, in place of `foot_row`), with the penumbra's ramp (`t` is 0
+    /// at the card's own foot and 1 at its top). The rows below the card's foot cast nothing (clamped per vertex).
+    pub fn card_mesh_ramp(&self, card: &Card, src: Rect, atlas: Vec2, colour_at: impl Fn(f32) -> Color) -> (Vec<Vertex>, Vec<u16>) {
         let by_card = Projection { foot_row: card.foot.1, ..*self };
-        let vertices = card.verts.iter().map(|&(x, y)| by_card.vertex(vec2(x, y), src, atlas, color)).collect();
+        let foot = card.foot.1.max(1e-3);
+        let vertices = card
+            .verts
+            .iter()
+            .map(|&(x, y)| by_card.vertex(vec2(x, y), src, atlas, colour_at((1.0 - y / foot).clamp(0.0, 1.0))))
+            .collect();
         (vertices, card.tris.clone())
     }
 
@@ -160,13 +199,54 @@ mod tests {
         let src = Rect::new(10.0, 20.0, 16.0, 12.0);
         let atlas = vec2(64.0, 64.0);
         let on = |foot_row: f32| Projection { origin: Vec2::ZERO, zoom: 1.0, foot_row, dir: vec2(-1.0, 0.0), len: 1.0 };
-        let (v, i) = on(8.0).picture_mesh(src, atlas, WHITE).expect("a foot inside the picture");
+        let (v, i) = on(8.0).picture_mesh_ramp(src, atlas, |_| WHITE).expect("a foot inside the picture");
         assert_eq!(v.len(), 4);
         assert_eq!(i, vec![0, 1, 2, 0, 2, 3]);
         assert!((v[2].uv - vec2(26.0, 28.0) / atlas).length() < 1e-5, "the bottom-right uv at the foot row: {:?}", v[2].uv);
-        assert!(on(0.0).picture_mesh(src, atlas, WHITE).is_none());
+        assert!(on(0.0).picture_mesh_ramp(src, atlas, |_| WHITE).is_none());
         // A foot below the picture (a hill's centre) covers the whole picture.
-        let (tall, _) = on(40.0).picture_mesh(src, atlas, WHITE).expect("covers the picture");
+        let (tall, _) = on(40.0).picture_mesh_ramp(src, atlas, |_| WHITE).expect("covers the picture");
         assert!((tall[2].uv - vec2(26.0, 32.0) / atlas).length() < 1e-5);
+    }
+}
+
+#[cfg(test)]
+mod penumbra_tests {
+    use super::*;
+
+    #[test]
+    fn a_blur_softens_an_edge_by_about_a_pixel_a_pass_and_keeps_the_body() {
+        // A 9×5 picture with a solid 3×3 body in its middle row band (its vertical neighbours are the body too).
+        let (w, h) = (9usize, 5usize);
+        let mut rgba = vec![0u8; w * h * 4];
+        for y in 1..4 {
+            for x in 3..6 {
+                rgba[(y * w + x) * 4 + 3] = 255;
+            }
+        }
+        let mut once = rgba.clone();
+        blur_alpha(&mut once, w, h, 1);
+        let a = |img: &[u8], x: usize, y: usize| img[(y * w + x) * 4 + 3];
+        assert!(a(&once, 4, 2) > 200, "the body stays strong: {}", a(&once, 4, 2));
+        assert!(a(&once, 2, 2) > 0 && a(&once, 2, 2) < 128, "one pixel out is a soft edge: {}", a(&once, 2, 2));
+        assert_eq!(a(&once, 0, 2), 0, "far out stays clear");
+        let mut twice = rgba.clone();
+        blur_alpha(&mut twice, w, h, 2);
+        assert!(a(&twice, 1, 2) > 0, "two passes spread the edge further");
+    }
+
+    #[test]
+    fn the_penumbra_is_sharp_at_the_foot_and_soft_at_the_tip_and_the_tint_is_warm() {
+        let p = Projection { origin: Vec2::ZERO, zoom: 1.0, foot_row: 10.0, dir: vec2(1.0, 0.0), len: 1.0 };
+        let src = Rect::new(0.0, 0.0, 4.0, 10.0);
+        // The colour's alpha: the sharp layer at weight 1 - t, the soft at t.
+        let (v, _) = p.picture_mesh_ramp(src, vec2(20.0, 20.0), |t| Color::new(0.0, 0.0, 0.0, 1.0 - t)).expect("a foot");
+        // Vertices 0 and 1 are the top (t = 1), 2 and 3 the foot (t = 0).
+        // Vertex colours are bytes: the top's sharp weight is 0, the foot's is full.
+        assert!(v[0].color[3] < 3 && v[2].color[3] > 250, "top is soft, foot sharp: {:?} {:?}", v[0].color, v[2].color);
+        let warm = strength_colour(1.0);
+        // Warmer than the old blue-grey: its red is a larger share of its blue (0.93 against 0.73).
+        assert!(warm.r / warm.b > 0.35 / 0.48, "the tint is warmer than the old blue-grey: {warm:?}");
+        assert!((warm.a - EASE).abs() < 1e-6, "eased by 15 %");
     }
 }

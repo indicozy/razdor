@@ -279,6 +279,16 @@ pub fn session<R>(draw: impl FnOnce() -> R) -> R {
 /// per draw, so the pass batches as [`session`]'s does. `None` (the light is off) is [`session`] itself,
 /// and so is a lit material that does not compile. `points` None: no point light (Low, or no light).
 pub fn session_lit<R>(relief: Option<daylight::Relief>, points: Option<&lights::Uniforms>, mask: Option<&Texture2D>, draw: impl FnOnce() -> R) -> R {
+    // By day (no night: no point light, no glow) the base's lit material draws the pass, as it did before the lights.
+    let night = points.map_or(0.0, |p| p.info.z);
+    if night <= 0.0 {
+        let (Some(r), Some(m)) = (relief, day_lit_material()) else { return session(draw) };
+        m.set_uniform("Light", vec3(r.light[0], r.light[1], r.light[2]));
+        m.set_uniform("Strength", r.strength);
+        m.set_uniform("Cavity", r.cavity);
+        m.set_uniform("ShadowK", r.shadow_k);
+        return session_with(m, draw);
+    }
     let (Some(r), Some(m)) = (relief, lit_material()) else { return session(draw) };
     m.set_uniform("Light", vec3(r.light[0], r.light[1], r.light[2]));
     m.set_uniform("Strength", r.strength);
@@ -369,9 +379,60 @@ const LIT_MAIN: &str = r#"
     gl_FragColor = color * vec4(rgb, a);
 "#;
 
+/// The lit material of the day (no night, so no point light and no window glow): the base's own text, so the
+/// daytime frame with the light on draws what it drew before the lights (`DAY_LIT_MAIN` is the base's `LIT_MAIN`).
+const DAY_LIT_MAIN: &str = r#"
+    vec4 c = sharp_tex(uv);
+    float a = c.a;
+    vec3 rgb = c.rgb;
+    if (a > 0.0) {
+        vec2 ox = vec2(RELIEF_R, 0.0) / TexSize;
+        vec2 oy = vec2(0.0, RELIEF_R) / TexSize;
+        float h = luma(c.rgb);
+        vec4 sxp = sharp_tex(uv + ox);
+        vec4 sxm = sharp_tex(uv - ox);
+        vec4 syp = sharp_tex(uv + oy);
+        vec4 sym = sharp_tex(uv - oy);
+        float xp = sxp.a < 0.5 ? h : luma(sxp.rgb);
+        float xm = sxm.a < 0.5 ? h : luma(sxm.rgb);
+        float yp = syp.a < 0.5 ? h : luma(syp.rgb);
+        float ym = sym.a < 0.5 ? h : luma(sym.rgb);
+        vec2 ox3 = ox * 3.0;
+        vec2 oy3 = oy * 3.0;
+        vec4 fxp = sharp_tex(uv + ox3);
+        vec4 fxm = sharp_tex(uv - ox3);
+        vec4 fyp = sharp_tex(uv + oy3);
+        vec4 fym = sharp_tex(uv - oy3);
+        float deep = ((fxp.a < 0.5 ? h : luma(fxp.rgb)) + (fxm.a < 0.5 ? h : luma(fxm.rgb)) + (fyp.a < 0.5 ? h : luma(fyp.rgb)) + (fym.a < 0.5 ? h : luma(fym.rgb))) * 0.25;
+        rgb = relief_shade(rgb, h, xp, xm, yp, ym, deep);
+    }
+    if (a > 0.0 && a <= 0.76) {
+        a = min(a * ShadowK, 1.0);
+    }
+    gl_FragColor = color * vec4(rgb, a);
+"#;
+
+
 razdor::local! {
     static LIT_MATERIAL: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
+    static DAY_LIT_MATERIAL: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
 }
+
+/// The day's lit material (see [`DAY_LIT_MAIN`]), made once.
+fn day_lit_material() -> Option<Material> {
+    DAY_LIT_MATERIAL.with(|m| {
+        m.get_or_init(|| {
+            let extra = format!("uniform vec3 Light;\nuniform float Strength;\nuniform float Cavity;\nuniform float ShadowK;\n{RELIEF_GLSL}");
+            material(&fragment(&extra, DAY_LIT_MAIN), alpha_pipeline(), LIT_DAY_UNIFORMS.iter().map(|(n, t)| UniformDesc::new(n, *t)).collect())
+                .map_err(|e| razdor::diag!("day lit sharp material: {e}"))
+                .ok()
+        })
+        .clone()
+    })
+}
+
+/// The day's uniforms (the base's four).
+const LIT_DAY_UNIFORMS: [(&str, UniformType); 4] = [("Light", UniformType::Float3), ("Strength", UniformType::Float1), ("Cavity", UniformType::Float1), ("ShadowK", UniformType::Float1)];
 
 /// The lit sharp material, made once. `None` when it does not compile (then the pass is unlit).
 fn lit_material() -> Option<Material> {
