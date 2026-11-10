@@ -487,8 +487,7 @@ pushes it with `mist::set_pref`, `RAZDOR_MIST=1` for snapshots): `world_view::dr
 texture (`minimap::fog_layer`, the same quad and texels) through the material of `src/ui/mist.rs` instead of the
 plain black. Its alpha is `mist::mist_alpha(d, w)`: opaque where the shown darkness `d` is 1 (unexplored), clear
 where it is 0, and only in the opening's edge band the value noise `w` makes it patchy. Its colour is `MIST_RGB`
-(0.74, 0.77, 0.82) times 0.8 to 1.1 with the sheets' brightness. Four sheets of value noise (3 on the desktop, 2 on
-a phone, `Sheets`) at scales 0.18 to 1.1 drift at different speeds on the terrain's clock (`Clock`) and sit at
+(0.74, 0.77, 0.82) times the billows' shade (0.65 to 1.15) and a faint cool-to-warm tint. Four sheets of domain-warped fractal noise ("billows": `warp` shifts each sheet by two fbm fields that evolve on the Clock, the warped fbm is the height; 4 octaves, 2 for the warp; 3 sheets on the desktop, 2 on a phone, `Sheets`, `RAZDOR_MIST_SHEETS=1..4` overrides) at scales 0.18 to 1.1 drift at different speeds on the terrain's clock (`Clock`; every speed is a whole number of lattice periods per `CLOCK_PERIOD`, so the loop is exact, no crossfade) and each billow is shaded by its slope toward a light from the upper left (0.65 to 1.15 of the mist colour). The wisp at the opening's edge is sheet 0's warped height. The sheets sit at
 heights 0.3 to 1.2; in the 2.5D view `Parallax` (`mist::parallax`, from the tilt) shifts the upper ones, flat it is
 zero. The black rectangles past the map stay black; the minimap keeps its black (`minimap::draw_fog` is not used
 for it). Past the map's edges the edge fog takes the mist's colour (`terrain::edge_fog_colour_for`), so they meet.

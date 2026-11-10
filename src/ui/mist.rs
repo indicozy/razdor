@@ -4,7 +4,7 @@
 //! The fog texture (`minimap::fog_layer`: one texel per cell, its alpha the shown darkness) is drawn
 //! through a material, on the same quad and texels as the black fog. Where the darkness is 1 the
 //! mist is opaque, where it is 0 nothing shows, and only at the opening's edge the alpha wisps
-//! ([`mist_alpha`]). Stacked value-noise sheets drift at different speeds and heights; the 2.5D view
+//! ([`mist_alpha`]). Stacked billow sheets (domain-warped noise) drift at different speeds and heights; the 2.5D view
 //! shifts the upper ones by its tilt ([`parallax`]). The mist's colour is the lighting's (the
 //! daylight tint is drawn over it after the fog). The minimap keeps its black.
 
@@ -86,9 +86,13 @@ void main() {
 }
 "#;
 
-// The fragment: the fog texture's alpha is the darkness. Four sheets of value noise at
-// increasing scale, each drifting and shifted by the tilt with its height; the first sheet's value
-// is the wisp, the average the brightness. `Sheets` (1..4) says how many are drawn.
+// The fragment: the fog texture's alpha is the darkness. Four sheets of domain-warped fractal noise
+// ("billows", as rolling smoke): each sheet's coordinates are warped by two fractal fields that
+// evolve with the Clock, and the warped field is the height. Each billow is shaded by its slope
+// toward a light from the upper left (lighter tops, darker undersides) and multiplies the mist's
+// colour; the first sheet's height is the wisp at the opening's edge, so the edge curls too.
+// Everything drifts on the Clock and loops exactly with it (the lattice repeats every 64 cells,
+// and every speed is a whole number of periods per CLOCK_PERIOD). `Sheets` (1..4) says how many.
 const FRAGMENT: &str = r#"#version 100
 precision highp float;
 
@@ -104,7 +108,7 @@ float hash2(vec2 q) {
     return fract(sin(dot(q, vec2(127.1, 311.7))) * 43758.5453);
 }
 
-// The lattice repeats every 64 cells: the drift returns to itself over the Clock's period (terrain.rs).
+// Value noise on a lattice that repeats every 64 cells (see terrain.rs CLOCK_PERIOD).
 float vnoise(vec2 q) {
     vec2 i = floor(q);
     vec2 f = fract(q);
@@ -114,34 +118,89 @@ float vnoise(vec2 q) {
     return mix(mix(hash2(a), hash2(vec2(b.x, a.y)), u.x), mix(hash2(vec2(a.x, b.y)), hash2(b), u.x), u.y);
 }
 
+// Fractal noise, 4 octaves in [0, 1]: each octave at exactly twice the last one's frequency, so a
+// drift of whole periods in the lattice stays whole in every octave. The fine octaves are faint
+// (gain 0.4): the billows read as soft smoke, not as marble.
+float fbm(vec2 q) {
+    float s = vnoise(q) * 0.5;
+    q = q * 2.0 + vec2(1.7, 9.2);
+    s += vnoise(q) * 0.2;
+    q = q * 2.0 + vec2(1.7, 9.2);
+    s += vnoise(q) * 0.08;
+    q = q * 2.0 + vec2(1.7, 9.2);
+    s += vnoise(q) * 0.032;
+    return s / 0.812;
+}
+
 float sheet_scale(float i) { return i < 0.5 ? 0.18 : (i < 1.5 ? 0.33 : (i < 2.5 ? 0.6 : 1.1)); }
 float sheet_height(float i) { return i < 0.5 ? 0.3 : (i < 1.5 ? 0.6 : (i < 2.5 ? 0.9 : 1.2)); }
 float sheet_weight(float i) { return i < 0.5 ? 1.0 : (i < 1.5 ? 0.8 : (i < 2.5 ? 0.6 : 0.4)); }
+// The drift of the sheet (its coordinates) and the two warp fields' evolution, per second.
 vec2 sheet_drift(float i) {
-    if (i < 0.5) return vec2(0.05, 0.02);
-    if (i < 1.5) return vec2(-0.03, 0.06);
-    if (i < 2.5) return vec2(0.07, -0.04);
-    return vec2(-0.09, -0.05);
+    if (i < 0.5) return vec2(0.10, 0.04);
+    if (i < 1.5) return vec2(-0.08, 0.12);
+    if (i < 2.5) return vec2(0.14, -0.10);
+    return vec2(-0.18, -0.12);
+}
+vec2 sheet_evolve1(float i) {
+    if (i < 0.5) return vec2(0.07, -0.05);
+    if (i < 1.5) return vec2(-0.05, 0.09);
+    if (i < 2.5) return vec2(0.09, 0.06);
+    return vec2(-0.11, -0.07);
+}
+vec2 sheet_evolve2(float i) {
+    if (i < 0.5) return vec2(-0.06, 0.08);
+    if (i < 1.5) return vec2(0.08, 0.04);
+    if (i < 2.5) return vec2(-0.07, -0.08);
+    return vec2(0.06, -0.10);
+}
+
+// Two octaves of the same fractal noise (the warp's swirls stay large; the cheap part of the shader).
+float fbm2(vec2 q) {
+    return (vnoise(q) * 0.5 + vnoise(q * 2.0 + vec2(1.7, 9.2)) * 0.2) / 0.7;
+}
+
+// The domain warp: the offset of the billows at the sheet's coordinates x (cells · scale, drifting).
+vec2 warp(vec2 x, float i) {
+    return 1.2 * vec2(fbm2(x + Clock * sheet_evolve1(i)), fbm2(x + vec2(5.2, 1.3) + Clock * sheet_evolve2(i)));
 }
 
 void main() {
     float d = texture2D(Texture, uv).a;
     // The cell coordinates: past the map's own texels (the extended draw) they run on.
     vec2 p = uv * FogSize;
+    // The light from the upper left, and the flat ground's reading of it (the shade's zero).
+    const vec3 LIGHT = vec3(-0.55, -0.65, 0.9);
+    vec3 light = normalize(LIGHT);
+    const float STEP = 0.05;
+    const float SLOPE = 0.6;
     float acc = 0.0;
     float wsum = 0.0;
     float wisp = 0.5;
+    float warm = 0.5;
     for (int i = 0; i < 4; i++) {
         float fi = float(i);
         if (fi >= Sheets) break;
-        vec2 q = (p + Parallax * sheet_height(fi)) * sheet_scale(fi) + Clock * sheet_drift(fi);
-        float n = vnoise(q);
-        if (i == 0) wisp = n;
-        acc += sheet_weight(fi) * n;
+        vec2 x = (p + Parallax * sheet_height(fi)) * sheet_scale(fi) + Clock * sheet_drift(fi);
+        vec2 wv = warp(x, fi);
+        vec2 q = x + wv;
+        float h = fbm(q);
+        // The slope by two more samples of the field (forward differences), as a normal.
+        float gx = (fbm(q + vec2(STEP, 0.0)) - h) / STEP;
+        float gy = (fbm(q + vec2(0.0, STEP)) - h) / STEP;
+        vec3 n = normalize(vec3(-gx * SLOPE, -gy * SLOPE, 1.0));
+        float shade = clamp(0.9 + 1.2 * (dot(n, light) - light.z) + 0.25 * (h - 0.5), 0.65, 1.15);
+        if (i == 0) {
+            wisp = clamp(0.5 + (h - 0.5) * 2.0, 0.0, 1.0);
+            warm = clamp((wv.x / 1.2 - 0.5) * 2.0, 0.0, 1.0);
+        }
+        acc += sheet_weight(fi) * shade;
         wsum += sheet_weight(fi);
     }
-    float b = acc / max(wsum, 0.001);
-    vec3 base = MistRgb * (0.80 + 0.30 * b);
+    float shade = acc / max(wsum, 0.001);
+    // A faint cool-to-warm drift of the colour across the mist.
+    vec3 tint = mix(vec3(0.96, 1.0, 1.06), vec3(1.05, 1.0, 0.94), warm);
+    vec3 base = MistRgb * shade * tint;
     float a = d >= 0.995 ? 1.0 : clamp(d + 0.5 * (wisp - 0.5) * d * (1.0 - d) * 4.0, 0.0, 1.0);
     gl_FragColor = vec4(base, a);
 }
@@ -225,6 +284,22 @@ mod tests {
         // Deep inside the band the wisp changes the alpha; at the ends it cannot.
         assert!(mist_alpha(0.5, 1.0) > mist_alpha(0.5, 0.0));
         assert_eq!(mist_alpha(0.0, 1.0), mist_alpha(0.0, 0.0));
+    }
+
+    #[test]
+    fn every_sheet_speed_loops_exactly_with_the_clock() {
+        // The shader's speeds (drift and the two warp fields' evolution, per sheet): each a whole
+        // number of lattice periods (64 cells) per CLOCK_PERIOD, so the wrap is seamless.
+        let speeds = [
+            [0.10f32, 0.04], [0.07, -0.05], [-0.06, 0.08],
+            [-0.08, 0.12], [-0.05, 0.09], [0.08, 0.04],
+            [0.14, -0.10], [0.09, 0.06], [-0.07, -0.08],
+            [-0.18, -0.12], [-0.11, -0.07], [0.06, -0.10],
+        ];
+        for v in speeds.iter().flatten() {
+            let periods = v * crate::ui::terrain::CLOCK_PERIOD / 64.0;
+            assert!((periods - periods.round()).abs() < 0.01, "speed {v}: {periods} periods");
+        }
     }
 
     #[test]
