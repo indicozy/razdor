@@ -4940,11 +4940,11 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
     let shows: Vec<&Showing> = view.opening.iter().chain(&view.shows).collect();
     let flat = cam.tilt.is_none();
     let hover = hover.filter(|_| !trailer_clean());
-    // The world and the flat view's fog are drawn at the map's resolution (`map_scale`); what comes
-    // after them is drawn at native resolution.
     frame_probe::time(Stage::World, || {
         map_scale::draw(map_render_scale(), rgb(10, 12, 10), || {
             draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()), show.as_ref(), hover, true, Veil { shows: &shows, now: show_now });
+            // Razdor's «Освещение» (off by default): the light over the world, before the flat fog.
+            draw_daylight(game, &cam);
             if flat {
                 frame_probe::time(Stage::Fog, || cam.draw_fog(game, &shows));
                 gpu_wait(Stage::GpuFog);
@@ -5100,6 +5100,80 @@ fn on_minimap_pointer(game: &Game, view: &MapView, map_view: Rect) -> bool {
 const CLASH_SECS: f64 = 3.0;
 /// Battle marks shown at once; a new one pushes the oldest out.
 const CLASH_MAX: usize = 4;
+
+local! {
+    /// The soft round light of a glow (white, its alpha falling to 0 at the rim), made on first use.
+    static GLOW_TEX: std::cell::RefCell<Option<Texture2D>> = const { std::cell::RefCell::new(None) };
+}
+
+/// A 64×64 white disc whose alpha falls off to 0 at its rim, linear-filtered.
+fn glow_texture() -> Texture2D {
+    const N: usize = 64;
+    let mut px = vec![0u8; N * N * 4];
+    for y in 0..N {
+        for x in 0..N {
+            let dx = (x as f32 + 0.5) / (N as f32 / 2.0) - 1.0;
+            let dy = (y as f32 + 0.5) / (N as f32 / 2.0) - 1.0;
+            let r = (dx * dx + dy * dy).sqrt().min(1.0);
+            let i = (y * N + x) * 4;
+            px[i..i + 4].copy_from_slice(&[255, 255, 255, ((1.0 - r) * (1.0 - r) * 255.0) as u8]);
+        }
+    }
+    let tex = Texture2D::from_rgba8(N as u16, N as u16, &px);
+    tex.set_filter(FilterMode::Linear);
+    tex
+}
+
+/// Razdor's «Освещение» (`daylight`, off by default): the map's tint over the drawn world, then the
+/// glows of the towns and of the armies (the hero's too), in screen space. Style only: nothing is
+/// drawn when it is off, and the rules never read it.
+fn draw_daylight(game: &Game, cam: &Camera) {
+    let hour = (game.clock.total_minutes() % razdor::rules::clock::MINUTES_PER_DAY as f64 / 60.0) as f32;
+    let now = crate::ui::clock::now();
+    let Some(light) = super::daylight::frame_light(hour, now, get_frame_time()) else {
+        return;
+    };
+    let t = light.tint;
+    super::chrome::multiply(|| draw_rectangle(cam.draw.x, cam.draw.y, cam.draw.w, cam.draw.h, Color::new(t[0], t[1], t[2], 1.0)));
+    if light.glow <= 0.01 {
+        return;
+    }
+    let tex = GLOW_TEX.with_borrow_mut(|t| t.get_or_insert_with(glow_texture).clone());
+    let map = &game.world.map;
+    let fog = &game.fog;
+    let cell_w = cam.cell_size().x;
+    let glow_at = |at: Vec2, size: f32, rgb: [f32; 3], alpha: f32| {
+        let color = Color::new(rgb[0], rgb[1], rgb[2], alpha.clamp(0.0, 1.0));
+        draw_texture_ex(&tex, at.x - size / 2.0, at.y - size / 2.0, color, DrawTextureParams { dest_size: Some(vec2(size, size)), ..Default::default() });
+    };
+    super::chrome::additive(|| {
+        // The towns and the villages: a warm window glow over the middle of each footprint.
+        for l in game.world.locations.iter() {
+            let town = matches!(l.kind, LocationKind::Palace | LocationKind::Town | LocationKind::Village | LocationKind::Castle | LocationKind::Fort | LocationKind::Tavern | LocationKind::Church);
+            if !town || !l.cells().any(|t| fog.explored(t)) {
+                continue;
+            }
+            let (sum, n) = l.cells().fold(((0.0f32, 0.0f32), 0u32), |((x, y), n), t| {
+                let (cx, cy) = map.center(t);
+                ((x + cx, y + cy), n + 1)
+            });
+            let centre = if n == 0 { map.center(l.anchor) } else { (sum.0 / n as f32, sum.1 / n as f32) };
+            glow_at(cam.screen_at(centre), 2.2 * l.size.0.max(1) as f32 * cell_w, [1.0, 0.72, 0.38], 0.55 * light.glow);
+        }
+        // The armies on the map, the hero's among them: a torch glow, flickering a little.
+        for (i, a) in game.world.armies.iter().enumerate() {
+            if !fog.explored(a.tile(map)) || game.army_hidden(a) {
+                continue;
+            }
+            let flicker = 0.92 + 0.08 * (now * 9.0 + i as f64).sin() as f32;
+            glow_at(cam.screen_at(game.army_display_pos(a)), 1.6 * cell_w, [1.0, 0.65, 0.30], 0.45 * light.glow * flicker);
+        }
+        if !game.hero_hidden() && !game.aboard() {
+            let flicker = 0.92 + 0.08 * (now * 9.0 + game.world.armies.len() as f64).sin() as f32;
+            glow_at(cam.screen_at(game.display_pos()), 1.6 * cell_w, [1.0, 0.65, 0.30], 0.45 * light.glow * flicker);
+        }
+    });
+}
 
 /// The crossed-swords mark of the battles on the map (Razdor's, «Битвы армий на карте»): the
 /// install's swords strip (the cursor's `Swords.ugs`), drawn over its cell above the map's

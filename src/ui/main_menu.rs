@@ -13,8 +13,10 @@ use crate::ui::input::{get_keys_pressed, is_mouse_button_down};
 use macroquad::prelude::*;
 
 use razdor::i18n::{self, n_, tr, Lang};
+use razdor::trf;
 
 use super::audio::{cue, Cue};
+use super::daylight::LightMode;
 use super::chrome::{self, Fx};
 use super::keymap;
 use super::minimap;
@@ -1587,7 +1589,7 @@ impl Group {
     /// The rows the group shows, top to bottom. Every row is in exactly one group (a test checks it).
     pub fn rows(self) -> &'static [Row] {
         match self {
-            Group::Map => &[Row::MapZoom, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
+            Group::Map => &[Row::MapZoom, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
             Group::Battle => &[Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
@@ -1608,6 +1610,9 @@ pub enum Row {
     FarGround,
     ViewCamera,
     MapEdge,
+    Lighting,
+    LightCycle,
+    LightHour,
     MapBattles,
     ArmyList,
     LeaderName,
@@ -1634,7 +1639,7 @@ pub enum Row {
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-    pub const ALL: [Row; 31] = [
+    pub const ALL: [Row; 34] = [
         Row::MapZoom,
         Row::MapResolution,
         Row::FrameCap,
@@ -1644,6 +1649,9 @@ impl Row {
         Row::FarGround,
         Row::ViewCamera,
         Row::MapEdge,
+        Row::Lighting,
+        Row::LightCycle,
+        Row::LightHour,
         Row::MapBattles,
         Row::ArmyList,
         Row::LeaderName,
@@ -1675,6 +1683,7 @@ impl Row {
             Row::FarGround => Some(tr("Up: the far ground rolls up to a top-down map. Horizon: the ground curves down like the earth's horizon, with the sky above it.")),
             Row::ViewCamera => Some(tr("Behind the hero: the low camera behind him. Through the hero's eyes: the camera stands at his eyes and turns with his walk; Q and E turn it while he stands.")),
             Row::MapEdge => Some(tr("Off: past the map's edges is black, as in the original. On: a short stretch of ground goes on past the edges, then thickens into the same black fog as the unexplored map.")),
+            Row::Lighting => Some(tr("Razdor's: the map's light follows the time of day. Style only.")),
             Row::AiStrength => Some(tr("Maximum: before each move the enemy of your battles weighs every move and answer ahead and plays each out to the end of the battle.")),
             Row::ArmyArrangement => Some(tr("Clicks: the first click picks a unit or an item, the second places it. Dragging: a click only selects, and units and items are moved by dragging. Both: clicks and dragging at once.")),
             Row::Experience => Some(tr("As in the original, a unit's experience is dropped when it is promoted; Kept keeps it. Experience left over after a level is kept either way.")),
@@ -1695,6 +1704,8 @@ impl Row {
             Row::SpriteSize | Row::TwoFingerTurn => audio.map_tilt,
             // The far ground's shape is the first-person view's only.
             Row::FarGround | Row::ViewCamera => audio.map_tilt && audio.map_first_person,
+            Row::LightCycle => audio.map_light == LightMode::Cycle,
+            Row::LightHour => audio.map_light == LightMode::Fixed,
             Row::Orientation => cfg!(target_os = "android"),
             // The bottom bar's size is a phone's (Razdor's; the desktop has no such row).
             Row::BottomBar => bottom_bar_row_shown(super::display::dp_px().is_some(), window_layout::portrait()),
@@ -2034,6 +2045,36 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
             // «Продолжать карту за краем» (Razdor's, off by default).
             if labelled_row_help(c, geo, tr("Extend the map past its edges"), yes_no(audio.map_extended), Row::MapEdge.help_text()).0 {
                 audio.map_extended = !audio.map_extended;
+            }
+        }
+        Row::Lighting => {
+            // Razdor's, off by default: the map's light (`daylight`), cycled through its modes.
+            let value = match audio.map_light {
+                LightMode::Off => tr("Off"),
+                LightMode::GameClock => tr("Game clock"),
+                LightMode::Cycle => tr("Real-time cycle"),
+                LightMode::Fixed => tr("Fixed hour"),
+            };
+            if labelled_row_help(c, geo, tr("Lighting"), value, Row::Lighting.help_text()).0 {
+                audio.map_light = audio.map_light.next();
+            }
+        }
+        Row::LightCycle => {
+            // The real minutes of one game day: 12, 24 or 48.
+            let value = trf!("{minutes} min", minutes = audio.map_light_cycle);
+            if labelled_row(c, geo, tr("Day length"), &value).0 {
+                audio.map_light_cycle = match audio.map_light_cycle {
+                    12 => 24,
+                    24 => 48,
+                    _ => 12,
+                };
+            }
+        }
+        Row::LightHour => {
+            // The fixed hour, in steps of three.
+            let value = format!("{}:00", audio.map_light_hour);
+            if labelled_row(c, geo, tr("Hour"), &value).0 {
+                audio.map_light_hour = (audio.map_light_hour / 3 * 3 + 3) % 24;
             }
         }
         Row::MapBattles => {
@@ -3403,7 +3444,7 @@ mod tests {
     #[test]
     fn the_long_hints_are_behind_a_question_mark() {
         let with: Vec<Row> = Row::ALL.into_iter().filter(|r| r.help_text().is_some()).collect();
-        assert_eq!(with, vec![Row::MapZoom, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::Language, Row::Updates]);
+        assert_eq!(with, vec![Row::MapZoom, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::Lighting, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::Language, Row::Updates]);
         scene_help("Experience");
         assert_eq!(HELP_PINNED.with(|p| p.get()), Row::Experience.help_text());
         HELP_PINNED.with(|p| p.set(None));

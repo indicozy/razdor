@@ -12,6 +12,7 @@ pub mod dialog;
 pub mod display;
 pub mod dt_art;
 pub mod dt_font;
+pub mod daylight;
 pub mod editor;
 pub mod game_bar;
 pub mod gamepad;

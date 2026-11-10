@@ -855,6 +855,7 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
     set_bar_size(settings.bottom_bar_size);
     crate::ui::world_view::set_zoom_prefs(settings.map_zoom, settings.zoom_locked);
     crate::ui::world_view::set_edge_pref(settings.map_extended);
+    crate::ui::daylight::set_prefs(settings.map_light, settings.map_light_cycle, settings.map_light_hour);
     follow(settings.display.for_device(dp_px().is_some()));
 }
 

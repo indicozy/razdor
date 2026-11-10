@@ -362,6 +362,7 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   update; it runs only when the fog or held cells change or a cell still eases, so an idle map does no per-cell
   work and uploads nothing (`fog_texture` uploads the texture when a texel changed, counted in the frame probe's
   rebuilds). The flat map, the minimap window and the 2.5D sprites all read the same values.
+<<<<<<< HEAD
 - **The first-person view** («Вид карты» = «От первого лица», the owner's decision, 2026-11-10). Its
   setting is `audio::Settings::map_first_person` within the tilted view (`map_tilt`), pushed by
   `main_menu::apply_options` into `world_view::set_first_person`; `world_view::first_person()` is the
@@ -429,6 +430,15 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
     eye camera's own inverse (`pick_bent`); tests `the_eyes_camera_stands_at_its_height_and_picks_its_sheet_at_both_bends`
     (view25) and `a_click_on_the_ground_in_the_eyes_view_picks_its_cell_at_both_bends` (world_view). Known: a partly
     faded tree over the bright sky looks translucent (the fade's band is 2.5 to 3.75 cells).
+=======
+**Lighting** (the setting «Освещение», `Settings::map_light`, off by default; `daylight::set_prefs` takes
+it every frame, from `display::follow_settings`): `daylight::light_at` maps the hour to a tint and a glow
+strength (a sine of the sun's elevation, a smooth step for the brightness, a bell for the dawn and dusk
+warmth, a night floor). The hour comes from the game clock (eased, `ease_hour`), a real-time cycle, or
+a fixed hour; `RAZDOR_LIGHT_HOUR` overrides it for snapshots. `world_view::draw_daylight` runs right after
+`draw_world` and before the flat `draw_fog`: a multiply tint over the map area, then additive glows in
+screen space (`Camera::screen_at`) at the towns and the armies (the hero's too). Off, it draws nothing.
+>>>>>>> 049827d4 (Lighting: the map's light follows the time of day (style only, off by default))
 - Simplifications: the F3 overlay is off in 2.5D (its labels are placed on the flat map).
 
 ## Sound and music
