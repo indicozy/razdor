@@ -519,39 +519,46 @@ fn resolve(game: &Game, t: Target) -> Option<(f32, f32)> {
 /// Starts the run's map: a new game on the scenario (with the shot's hero and seed) or the
 /// save, the first frame's opening events waiting for the map frame to show them.
 fn start(app: &mut App, cfg: &Config) -> Result<(), String> {
-    if cfg.mode == Mode::Fly {
-        let here = app.game.as_ref().map(|g| g.display_pos());
-        with(|r| r.fly = Some(Fly { target: here.unwrap_or((0.0, 0.0)), pitch: 55.0, yaw: 0.0, dist: 30.0, fov: FOV_DEG, speed: 6.0 }));
-        return Ok(());
-    }
-    let shot = cfg.shot.as_ref().ok_or("no shot")?;
-    let class = match shot.hero.as_str() {
+    // The fly mode starts a map of its own (`RAZDOR_TRAILER_FLY_MAP`, the first campaign map by
+    // default): a shot names its own.
+    let fly_map = std::env::var("RAZDOR_TRAILER_FLY_MAP").ok().filter(|m| !m.trim().is_empty()).unwrap_or_else(|| "РК1-Начало пути".to_string());
+    let (map, hero, seed) = match cfg.shot.as_ref() {
+        Some(shot) if cfg.mode != Mode::Fly => (shot.map.clone().ok_or("the shot names no map")?, shot.hero.clone(), shot.seed),
+        _ => (MapRef::Scenario(fly_map), "knight".to_string(), 0x5EED),
+    };
+    let class = match hero.as_str() {
         "archmage" => HeroClass::Archmage,
         "ranger" => HeroClass::Ranger,
         _ => HeroClass::Knight,
     };
     let install = app.assets.dt.as_ref().zip(app.dt_content.clone()).map(|(d, content)| razdor::rules::save::Install { dir: &d.install.dir, content });
-    let mut game = match shot.map.as_ref().ok_or("the shot names no map")? {
+    let mut game = match &map {
         MapRef::Scenario(name) => {
             let index = app.scenarios.iter().position(|e| e.file == *name).ok_or_else(|| format!("no map {name} in the install"))?;
             let content = app.dt_content.clone().ok_or("no install content")?;
             let content = Arc::new(content.with_experimental(super::new_game::experimental_rules()));
             let mut game = Game::from_scenario(content, &app.scenarios[index].scenario, class);
-            game.seed_events(shot.seed);
+            game.seed_events(seed);
             game
         }
         MapRef::Save(path) => {
             let mut game = razdor::rules::save::load(Path::new(path), app.demo.clone(), install.as_ref()).map_err(|e| format!("cannot load the save {path}: {e}"))?;
-            game.seed_events(shot.seed);
+            game.seed_events(seed);
             game
         }
     };
     game.look_around();
     game.pos = game.world.map.center(game.tile());
+    if cfg.mode == Mode::Fly {
+        let here = game.display_pos();
+        with(|r| r.fly = Some(Fly { target: here, pitch: 55.0, yaw: 0.0, dist: 30.0, fov: FOV_DEG, speed: 6.0 }));
+        log(format!("fly: map {map:?}; WASD, Q/E, right-drag, wheel; F8 prints the camera"));
+    } else {
+        log(format!("start: map {map:?}, hero {hero}, seed {seed}"));
+    }
     app.assets.set_content(game.content.clone());
     app.screen = Screen::WorldMap;
     app.game = Some(game);
-    log(format!("start: map {:?}, hero {}, seed {}", shot.map, shot.hero, shot.seed));
     Ok(())
 }
 
