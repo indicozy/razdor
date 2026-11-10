@@ -152,3 +152,48 @@ card of the ONNX repo says so). The file the engine loads is made from the ONNX 
 The engine loads the file with tract 0.23 (rustc 1.91), in fp32 after the upcast (99 MB of
 weights in memory while loaded). The input is 1x3x266x266; the output is `[1, 266, 266]`, higher
 = closer.
+
+## Light points: windows, doors, gates, chimneys, flags, mill sails (detect_points.py)
+
+An offline detector. It looks for these classes on every building sprite (section 1 of
+`Objects.ugs`, as cut_sprites.py) of each install and writes only numbers to
+`data/lights/objects.json`: boxes in sprite pixels, keyed by the same sprite hash. The engine
+puts a window glow or a torch at each box at night. Nothing else is written; previews go to a
+scratch folder.
+
+- Model: `google/owlv2-base-patch16-ensemble` (OWLv2, open vocabulary). Licence Apache-2.0
+  (its model card). Grounding DINO (`IDEA-Research/grounding-dino-base`) was tried second; its
+  best score on any class was 0.13, so it was dropped.
+- Input: the sprite composited over grey 128 (`cut_sprites.composite_rgb`), upscaled x4 with
+  bicubic before the detector. The detector pads to a square at the bottom and right, so its
+  boxes map back with the sprite's longer side.
+- Queries (one class each): "a window" (window), "a door" (door), "a castle gate" (gate),
+  "a chimney" (chimney), "a flag" (flag), "windmill sails" (sails).
+- Filters, per class: a raw box below score 0.02 is ignored; a box under 2 px on a side, a box
+  over 40 % of the sprite's area, or a box whose pixels are under 50 % opaque (alpha >= 204) is
+  dropped; then greedy NMS per class at IoU 0.5; then the score cut below.
+- Score cuts (chosen on the strict contact sheet, not on a benchmark): window 0.10, door 0.10,
+  gate 0.20, chimney 0.35, flag 0.35, sails 0.15. OWLv2 gives windows low scores on these sprites
+  (its best window box is 0.27), so the window and door cuts are low; chimneys and flags are noisy
+  below 0.35, and gates below 0.20 mark nearly every wall.
+- Output: `{"version":1,"model":"<id>","sprites":{"<key>":{"w":W,"h":H,"points":[{"kind":..,
+  "box":[x0,y0,x1,y1],"score":0.xx}, ...]}}}`; integers for boxes, sorted keys, one sprite per
+  line, only sprites with at least one point.
+- Previews (scratch only): `<key>.png` per sprite with points, and `contact_sheet.png` of all
+  building sprites at 2x, 8 per row, with a legend and per-class counts.
+
+Run it the same way as cut_sprites.py (CUDA index of an RTX card; the script needs CUDA):
+
+```sh
+CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=1 HF_HOME=/mnt/ai_models/hf \
+PYTHONPATH=/home/indicozy/.cache/razdor-scratch/atmosphere/depth/pylib \
+nice -n 19 taskset -c 8-19 /mnt/ai_models/venvs/qwen-tts/bin/python tools/depth/detect_points.py \
+  --out data/lights/objects.json \
+  --preview /home/indicozy/.cache/razdor-scratch/atmo-detect/preview \
+  "/home/indicozy/Games/Discord Times Community Update" \
+  /mnt/ai_models/razdor-community/evolution/install
+```
+
+Known weak spots: most castle windows and gates are missed or land on the wrong part of the
+sprite, and many chimney boxes cover a whole roof. The owner reviews the contact sheet before any
+light is built on these points.
