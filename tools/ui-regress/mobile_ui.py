@@ -155,6 +155,11 @@ SCREENS = [
     ("hub-mods", "hub:1:evolution-mock", {}),
     ("update", "update", {}),
     ("diary", "hero:РК1-Начало пути:1", {"RAZDOR_SCENE_QUEST": "1"}),
+    # The chronicle tab (the diary's fifth tab) over a sample record, and the «Итоги» page after a
+    # victory and after a defeat (`snapshot.rs`, `sample_record`).
+    ("chronicle", "chronicle:РК1-Начало пути", {}),
+    ("summary", "summary:РК1-Начало пути", {}),
+    ("summary-defeat", "summary:РК1-Начало пути:defeat", {}),
 ]
 
 

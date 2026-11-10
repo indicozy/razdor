@@ -173,8 +173,26 @@ no hiring minute).
 
 Texts are stored by reference: a scenario event by its id in the chapter's map (`TextRef::Event`), a
 catalog line by key and arguments (`TextRef::Catalog`), and a string only when built on the fly
-(`TextRef::Text`). A map's names (the buildings, the armies) are kept as scenario ids (`FoeRef`,
+(`TextRef::Text`); the hand-over keeps a finished map's texts in full (see the summary above). The dry
+lines, the template keys and their Russian are in `rules::chronicle_text` and `data/lang/ru/game.txt`
+(the tests `every_template_has_a_russian_line` and `every_kind_renders_a_dry_line_and_the_highlights_name_their_entries`). A map's names (the buildings, the armies) are kept as scenario ids (`FoeRef`,
 `Captured { location }`), so the save holds no map text.
+
+The summary («Итоги», `ui/summary.rs`; the screen is in app-and-ui.md) opens after a map ends, before the
+next screen, when the setting `chronicle_summary` is on (`App::victory_end`, `App::defeat_end`; not in
+the editor's test play): after a campaign victory the page comes first and `App::finish_victory` (the
+hand-over, `screens::hand_over`) runs when it closes; after a defeat (the map's defeat event, or the
+defeat report's OK, which is the hero's fall) the page goes to the main menu. The game is kept while
+the page is up (the end checks skip while `Screen::Summary` shows). Its picture is the chapter just
+played (`Chronicle::summary(from = last chapter, …)`), its totals cover the chapters from there on.
+The tab's «Итоги» (`After::Diary`) covers the whole story (`from` 0) with the route of the map played.
+
+At the hand-over the record keeps each text window's full text where the finished map's script still
+knows it (`Chronicle::with_texts`, `chronicle_text::event_text`, called from `Game::hand_over`): a
+finished map's script is gone after it, so its texts would be lost. This is the one place the record
+keeps texts in full before a load: the saves of the campaign's later maps hold them. The totals and
+highlights read the record only (`Chronicle::summary`, `totals_of`, `highlight_lines`); the walk's day
+counts are `Chapter::walk_days` (each new route cell of a day).
 
 Storage and loads: `Game::chronicle` is `#[serde(default)]`; a save without one starts the record at
 the load with `EarlierDaysNotRecorded` (`save::restore`, `Chronicle::begin_after_load`). A new game

@@ -14,6 +14,8 @@ use razdor::rules::events::{ArmyId, EventId, EventOutcome, PICTURE_DEFEAT, PICTU
 use razdor::rules::game::Game;
 use razdor::rules::journal::Tab;
 
+use super::items_view::DiaryTab;
+
 use super::dialog::{Dialog, Picture, Resource};
 
 pub const QUEST_ADDED: &str = n_("Quest added to the journal");
@@ -176,20 +178,44 @@ fn quest_notice(current: Option<String>, line: &str, quest: &[String; 2]) -> Opt
 }
 
 /// What an empty tab says.
-pub(super) fn empty_note(tab: Tab) -> &'static str {
+pub(super) fn empty_note(tab: DiaryTab) -> &'static str {
     match tab {
-        Tab::Active => tr("No quests under way."),
-        Tab::Completed => tr("No quest completed yet."),
-        Tab::Rumours => tr("No rumours heard yet."),
-        Tab::Messages => tr("No messages yet."),
+        DiaryTab::Journal(Tab::Active) => tr("No quests under way."),
+        DiaryTab::Journal(Tab::Completed) => tr("No quest completed yet."),
+        DiaryTab::Journal(Tab::Rumours) => tr("No rumours heard yet."),
+        DiaryTab::Journal(Tab::Messages) => tr("No messages yet."),
+        DiaryTab::Chronicle => tr("Nothing written down yet."),
     }
 }
 
-/// A line of the journal's list: a chapter's heading or an entry (by index in the rows).
+/// A line of the journal's list: a chapter's heading, an entry (by index in the rows), or, in
+/// the chronicle, a day's heading (the game day's number).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Line {
     Heading(u32),
     Row(usize),
+    Day(u64),
+}
+
+/// The chronicle's lines: each chapter under its heading and each day under its «День N»
+/// heading (a day that starts a chapter's run gets both), one line per entry. `day` gives an
+/// entry's day number.
+pub(super) fn chronicle_lines(rows: &[razdor::rules::journal::Row], day: impl Fn(&razdor::rules::journal::Row) -> u64) -> Vec<Line> {
+    let mut lines = Vec::with_capacity(rows.len() * 2 + 4);
+    for (k, row) in rows.iter().enumerate() {
+        let (new_chapter, new_day) = match k.checked_sub(1).map(|p| &rows[p]) {
+            None => (true, true),
+            Some(prev) => (prev.chapter != row.chapter, day(prev) != day(row)),
+        };
+        if new_chapter {
+            lines.push(Line::Heading(row.chapter));
+        }
+        if new_day {
+            lines.push(Line::Day(day(row)));
+        }
+        lines.push(Line::Row(k));
+    }
+    lines
 }
 
 /// The list's lines: the rows, each run of one chapter under its heading when the rows come

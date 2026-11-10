@@ -1070,6 +1070,15 @@ fn ground(game: &Game, art: Option<&super::dt_art::DtArt>, surface_color: fn(u8)
     })
 }
 
+/// The map as the minimap shows it (its ground and its fog as they stand), drawn into `dest` with no
+/// frame and no symbols: the «Итоги» page's picture (`ui::summary`).
+pub fn picture(game: &Game, art: Option<&super::dt_art::DtArt>, surface_color: fn(u8) -> Color, dest: Rect) {
+    let tex = ground(game, art, surface_color);
+    draw_texture_ex(&tex, dest.x, dest.y, WHITE, DrawTextureParams { dest_size: Some(vec2(dest.w, dest.h)), ..Default::default() });
+    let dark = fog_texture(&game.fog, &game.unshown_cells(), game.tile(), std::iter::empty());
+    draw_texture_ex(&dark, dest.x, dest.y, WHITE, DrawTextureParams { dest_size: Some(vec2(dest.w, dest.h)), ..Default::default() });
+}
+
 /// Makes the minimap's pictures ahead, when the game starts ([`ground`], [`fog_texture`]): the
 /// first open finds them made.
 pub fn prebuild(game: &Game, art: Option<&super::dt_art::DtArt>, surface_color: fn(u8) -> Color) {

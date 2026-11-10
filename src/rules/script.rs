@@ -1252,7 +1252,7 @@ impl Game {
             hero_name: self.hero_name.clone(),
             figure: self.hero_figure,
             journal: self.journal.clone(),
-            chronicle: self.chronicle.clone(),
+            chronicle: self.chronicle.with_texts(|id, asked| super::chronicle_text::event_text(self, id, asked)),
         }
     }
 

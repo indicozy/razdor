@@ -1594,7 +1594,7 @@ impl Group {
             Group::Battle => &[Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
-            Group::Other => &[Row::Updates, Row::Import],
+            Group::Other => &[Row::Updates, Row::Import, Row::ChronicleSummary],
         }
     }
 }
@@ -1640,11 +1640,12 @@ pub enum Row {
     Keys,
     Updates,
     Import,
+    ChronicleSummary,
 }
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 38] = [
+pub const ALL: [Row; 39] = [
         Row::MapZoom,
         Row::MapResolution,
         Row::FrameCap,
@@ -1683,6 +1684,7 @@ pub const ALL: [Row; 38] = [
         Row::Keys,
         Row::Updates,
         Row::Import,
+        Row::ChronicleSummary,
     ];
 
     /// The long hint a «?» pop-up shows (backlog 1508), for the rows whose hint runs past a line.
@@ -1701,6 +1703,7 @@ pub const ALL: [Row; 38] = [
             Row::ArmyArrangement => Some(tr("Clicks: the first click picks a unit or an item, the second places it. Dragging: a click only selects, and units and items are moved by dragging. Both: clicks and dragging at once.")),
             Row::Experience => Some(tr("As in the original, a unit's experience is dropped when it is promoted; Kept keeps it. Experience left over after a level is kept either way.")),
             Row::Language => Some(super::language::hint()),
+            Row::ChronicleSummary => Some(tr("Razdor's: after a map ends or the hero falls, a page sums up the map: the route, battles, highlights and totals.")),
             Row::Updates => Some(if updates_phone() {
                 tr(UPDATES_PHONE_HINT)
             } else {
@@ -2136,6 +2139,11 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
         Row::LeaderName => {
             if labelled_row(c, geo, tr("Leader's name"), yes_no(audio.leader_caption)).0 {
                 audio.leader_caption = !audio.leader_caption;
+            }
+        }
+        Row::ChronicleSummary => {
+            if labelled_row(c, geo, tr("Summary after a map"), yes_no(audio.chronicle_summary)).0 {
+                audio.chronicle_summary = !audio.chronicle_summary;
             }
         }
         Row::MinimapCorner => {
@@ -3490,7 +3498,7 @@ mod tests {
     #[test]
     fn the_long_hints_are_behind_a_question_mark() {
         let with: Vec<Row> = Row::ALL.into_iter().filter(|r| r.help_text().is_some()).collect();
-        assert_eq!(with, vec![Row::MapZoom, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::Lighting, Row::Mist, Row::LiveWater, Row::Weather, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::Language, Row::Updates]);
+        assert_eq!(with, vec![Row::MapZoom, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::Lighting, Row::Mist, Row::LiveWater, Row::Weather, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::Language, Row::Updates, Row::ChronicleSummary]);
         scene_help("Experience");
         assert_eq!(HELP_PINNED.with(|p| p.get()), Row::Experience.help_text());
         HELP_PINNED.with(|p| p.set(None));

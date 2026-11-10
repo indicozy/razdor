@@ -3,6 +3,7 @@ pub mod ai;
 pub mod battle;
 pub mod cheats;
 pub mod chronicle;
+pub mod chronicle_text;
 pub mod clock;
 pub mod content;
 pub mod custom;

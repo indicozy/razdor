@@ -68,6 +68,14 @@ hero-quests-1280 | hero:РК1-Начало пути:0 | 1280x800 |
 hero-done-1280 | hero:РК1-Начало пути:1 | 1280x800 |
 hero-rumours-1280 | hero:РК1-Начало пути:2 | 1280x800 |
 hero-messages-1280 | hero:РК1-Начало пути:3 | 1280x800 |
+# The chronicle (the diary's fifth tab) over a sample record, and the «Итоги» page of that map.
+chronicle-800 | chronicle:РК1-Начало пути | 800x600 |
+chronicle-1280 | chronicle:РК1-Начало пути | 1280x800 |
+chronicle-1920 | chronicle:РК1-Начало пути | 1920x1080 |
+summary-800 | summary:РК1-Начало пути | 800x600 |
+summary-1280 | summary:РК1-Начало пути | 1280x800 |
+summary-1920 | summary:РК1-Начало пути | 1920x1080 |
+summary-defeat-1280 | summary:РК1-Начало пути:defeat | 1280x800 |
 spells-1280 | spells:РК1-Начало пути | 1280x800 |
 experimental-army-1280 | army:РК1-Начало пути | 1280x800 | RAZDOR_SCENE_EXPERIMENTAL=bonuses,items;RAZDOR_SCENE_BONUS_ITEMS=1
 # Battles and setups

@@ -13,7 +13,7 @@
 //! stays small after hundreds of days. Chapters follow the journal's: one per campaign map,
 //! carried over at the hand-over (`Game::apply_carry_over`).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -123,11 +123,15 @@ pub struct Chapter {
     /// The buildings entered in this chapter (scenario ids), for the first visits.
     #[serde(default)]
     pub visited: BTreeSet<u16>,
+    /// The route's new cells per day (the day's index from the game's start, `minutes /
+    /// MINUTES_PER_DAY`): the summary's longest walk.
+    #[serde(default)]
+    pub walk_days: BTreeMap<u64, u32>,
 }
 
 impl Chapter {
     fn new(title: String, from_minutes: u64) -> Chapter {
-        Chapter { title, from_minutes, entries: Vec::new(), route: Vec::new(), visited: BTreeSet::new() }
+        Chapter { title, from_minutes, entries: Vec::new(), route: Vec::new(), visited: BTreeSet::new(), walk_days: BTreeMap::new() }
     }
 }
 
@@ -151,14 +155,134 @@ pub struct Totals {
     pub foe_losses: u32,
     /// Castles, forts, villages and ruins taken.
     pub towns_taken: u32,
+    /// Artefacts found or bought.
+    pub artefacts: u32,
+    /// Quests completed.
+    pub quests_done: u32,
 }
 
 /// Appends `cell` to `route` unless the route already ends on it (a step that does not move
-/// the hero, or a cell repeated in a row, is not a new line of the route).
-pub fn route_push(route: &mut Vec<Tile>, cell: Tile) {
+/// the hero, or a cell repeated in a row, is not a new line of the route). True when it was
+/// appended.
+pub fn route_push(route: &mut Vec<Tile>, cell: Tile) -> bool {
     if route.last() != Some(&cell) {
         route.push(cell);
+        true
+    } else {
+        false
     }
+}
+
+/// The dates of a record: the game day of `at` counted from `first` (the first day is 1).
+pub fn day_of(first: u64, at: u64) -> u64 {
+    at.saturating_sub(first) / MINUTES_PER_DAY + 1
+}
+
+/// The totals of `chapters` up to minute `now` (the first chapter's start is day 1).
+fn totals_of(chapters: &[Chapter], now: u64) -> Totals {
+    let mut t = Totals::default();
+    let Some(first) = chapters.first() else { return t };
+    // The days run to the later of `now` and the record's last entry (a record never ends before it).
+    let last = chapters.iter().flat_map(|c| c.entries.iter()).map(|e| e.at_minutes).max().unwrap_or(0);
+    t.days = now.max(last).saturating_sub(first.from_minutes) / MINUTES_PER_DAY + 1;
+    for e in chapters.iter().flat_map(|c| &c.entries) {
+        match e.kind {
+            EntryKind::Battle { won, own_losses, foe_losses, .. } => {
+                if won {
+                    t.battles_won += 1;
+                } else {
+                    t.battles_lost += 1;
+                }
+                t.own_losses = t.own_losses.saturating_add(own_losses);
+                t.foe_losses = t.foe_losses.saturating_add(foe_losses);
+            }
+            EntryKind::Captured { .. } => t.towns_taken += 1,
+            EntryKind::ArtefactFound { .. } | EntryKind::ArtefactBought { .. } => t.artefacts += 1,
+            EntryKind::QuestDone { .. } => t.quests_done += 1,
+            _ => {}
+        }
+    }
+    t
+}
+
+/// The biggest battle of `chapters` (see [`Chronicle::biggest_battle`]).
+fn biggest_battle_of(chapters: &[Chapter]) -> Option<&Entry> {
+    let mut best: Option<(u32, &Entry)> = None;
+    for e in chapters.iter().flat_map(|c| &c.entries) {
+        if let EntryKind::Battle { own_losses, foe_losses, .. } = e.kind {
+            let total = own_losses.saturating_add(foe_losses);
+            if best.is_none_or(|(b, _)| total > b) {
+                best = Some((total, e));
+            }
+        }
+    }
+    best.map(|(_, e)| e)
+}
+
+/// The richest moment of `chapters` (see [`Chronicle::richest_moment`]).
+fn richest_of(chapters: &[Chapter]) -> Option<&Entry> {
+    let mut best: Option<(i32, &Entry)> = None;
+    for e in chapters.iter().flat_map(|c| &c.entries) {
+        if let EntryKind::Noon { gold, .. } = e.kind {
+            if best.is_none_or(|(b, _)| gold > b) {
+                best = Some((gold, e));
+            }
+        }
+    }
+    best.map(|(_, e)| e)
+}
+
+/// The biggest hiring of `chapters`: the most units taken on in one entry (the earliest on a tie).
+fn most_hired_of(chapters: &[Chapter]) -> Option<&Entry> {
+    let mut best: Option<(u32, &Entry)> = None;
+    for e in chapters.iter().flat_map(|c| &c.entries) {
+        if let EntryKind::Hired { count, .. } = e.kind {
+            if best.is_none_or(|(b, _)| count > b) {
+                best = Some((count, e));
+            }
+        }
+    }
+    best.map(|(_, e)| e)
+}
+
+/// A mark on the summary's map.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mark {
+    /// A battle of the player's, at the cell the hero stood on; `won` or lost.
+    Battle { cell: Tile, won: bool },
+    /// A building taken (its scenario id: the picture finds its cell).
+    Capture { location: u16 },
+}
+
+/// The facts the summary's highlights name (each one an entry of the record).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Highlights {
+    /// The battle with the most units lost on both sides.
+    pub biggest_battle: Option<Entry>,
+    /// The entry that took on the most units at once.
+    pub most_hired: Option<Entry>,
+    /// The noon report with the most gold.
+    pub richest: Option<Entry>,
+    /// The day with the longest walk: its index (`minutes / MINUTES_PER_DAY`, see
+    /// [`Chronicle::day_of`]) and the cells walked that day.
+    pub longest_walk: Option<(u64, u32)>,
+}
+
+/// The «Итоги» page of a map (or of the story so far): what the picture shows, its marks, the
+/// highlights and the totals.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Summary {
+    /// The map's title (the chapter the picture shows).
+    pub title: String,
+    /// The map's picture is the chapter at this index; the totals cover the chapters from `from`.
+    pub from: usize,
+    pub totals: Totals,
+    pub highlights: Highlights,
+    /// The hero's route on the map (the picture's chapter), oldest cell first.
+    pub route: Vec<Tile>,
+    pub marks: Vec<Mark>,
+    /// The hero fell: the route's end is where he died.
+    pub died: bool,
 }
 
 impl Chronicle {
@@ -206,7 +330,10 @@ impl Chronicle {
 
     /// The hero's step ended on `cell`.
     pub fn route_step(&mut self, at: u64, cell: Tile) {
-        route_push(&mut self.current(at).route, cell);
+        let chapter = self.current(at);
+        if route_push(&mut chapter.route, cell) {
+            *chapter.walk_days.entry(at / MINUTES_PER_DAY).or_insert(0) += 1;
+        }
     }
 
     /// A building is entered: recorded only the first time in the chapter.
@@ -254,52 +381,78 @@ impl Chronicle {
 
     /// The record's totals up to minute `now`.
     pub fn totals(&self, now: u64) -> Totals {
-        let mut t = Totals::default();
-        let Some(first) = self.chapters.first() else { return t };
-        t.days = now.saturating_sub(first.from_minutes) / MINUTES_PER_DAY + 1;
-        for e in self.chapters.iter().flat_map(|c| &c.entries) {
-            match e.kind {
-                EntryKind::Battle { won, own_losses, foe_losses, .. } => {
-                    if won {
-                        t.battles_won += 1;
-                    } else {
-                        t.battles_lost += 1;
-                    }
-                    t.own_losses = t.own_losses.saturating_add(own_losses);
-                    t.foe_losses = t.foe_losses.saturating_add(foe_losses);
-                }
-                EntryKind::Captured { .. } => t.towns_taken += 1,
-                _ => {}
-            }
-        }
-        t
+        totals_of(&self.chapters, now)
     }
 
     /// The biggest battle: the most units lost on both sides (the earliest on a tie).
     pub fn biggest_battle(&self) -> Option<&Entry> {
-        let mut best: Option<(u32, &Entry)> = None;
-        for e in self.chapters.iter().flat_map(|c| &c.entries) {
-            if let EntryKind::Battle { own_losses, foe_losses, .. } = e.kind {
-                let total = own_losses.saturating_add(foe_losses);
-                if best.is_none_or(|(b, _)| total > b) {
-                    best = Some((total, e));
-                }
-            }
-        }
-        best.map(|(_, e)| e)
+        biggest_battle_of(&self.chapters)
     }
 
     /// The richest moment: the most gold in a noon report (the earliest on a tie).
     pub fn richest_moment(&self) -> Option<&Entry> {
-        let mut best: Option<(i32, &Entry)> = None;
-        for e in self.chapters.iter().flat_map(|c| &c.entries) {
-            if let EntryKind::Noon { gold, .. } = e.kind {
-                if best.is_none_or(|(b, _)| gold > b) {
-                    best = Some((gold, e));
+        richest_of(&self.chapters)
+    }
+
+    /// The texts the record holds by reference, kept in full where `text_of` still knows them
+    /// (its argument: whether the window was a question). Made at the hand-over, when the
+    /// finished map's script is gone; the save then holds the texts of the maps before.
+    pub fn with_texts(&self, text_of: impl Fn(EventId, bool) -> Option<String>) -> Chronicle {
+        let mut c = self.clone();
+        for e in c.chapters.iter_mut().flat_map(|c| c.entries.iter_mut()) {
+            if let EntryKind::Text { text, answer } = &mut e.kind {
+                let asked = answer.is_some();
+                if let TextRef::Event(id) = *text {
+                    if let Some(full) = text_of(id, asked) {
+                        *text = TextRef::Text(full);
+                    }
                 }
             }
         }
-        best.map(|(_, e)| e)
+        c
+    }
+
+    /// The day number of minute `at` in this record (the first chapter's day is 1).
+    pub fn day_of(&self, at: u64) -> u64 {
+        day_of(self.chapters.first().map_or(at, |c| c.from_minutes), at)
+    }
+
+    /// The «Итоги» of the map being played (the last chapter's picture: its route, its battles and
+    /// captures) with the totals and highlights of the chapters from `from` on. `died`: the hero
+    /// fell. None with no chapter.
+    pub fn summary(&self, from: usize, now: u64, died: bool) -> Option<Summary> {
+        let last = self.chapters.last()?;
+        let covered = &self.chapters[from.min(self.chapters.len() - 1)..];
+        let marks = last
+            .entries
+            .iter()
+            .filter_map(|e| match e.kind {
+                EntryKind::Battle { at, won, .. } => Some(Mark::Battle { cell: at, won }),
+                EntryKind::Captured { location } => Some(Mark::Capture { location }),
+                _ => None,
+            })
+            .collect();
+        let longest_walk = covered
+            .iter()
+            .flat_map(|c| c.walk_days.iter())
+            .fold(None::<(u64, u32)>, |best, (&day, &steps)| match best {
+                Some((_, s)) if s >= steps => best,
+                _ => Some((day, steps)),
+            });
+        Some(Summary {
+            title: last.title.clone(),
+            from: from.min(self.chapters.len() - 1),
+            totals: totals_of(covered, now),
+            highlights: Highlights {
+                biggest_battle: biggest_battle_of(covered).cloned(),
+                most_hired: most_hired_of(covered).cloned(),
+                richest: richest_of(covered).cloned(),
+                longest_walk,
+            },
+            route: last.route.clone(),
+            marks,
+            died,
+        })
     }
 }
 
@@ -548,6 +701,74 @@ mod tests {
         c.begin_after_load("M", 200);
         assert_eq!(c.chapters.len(), 1);
         assert_eq!(c.chapters[0].entries, vec![Entry { at_minutes: 100, kind: EntryKind::EarlierDaysNotRecorded }]);
+    }
+
+    #[test]
+    fn walks_count_each_new_cell_once_per_day() {
+        let mut c = Chronicle::default();
+        c.start("M", 0);
+        c.route_step(5, (1, 1));
+        c.route_step(6, (1, 1));
+        c.route_step(7, (2, 1));
+        c.route_step(MINUTES_PER_DAY + 1, (3, 1));
+        let ch = &c.chapters[0];
+        assert_eq!(ch.route, vec![(1, 1), (2, 1), (3, 1)]);
+        assert_eq!(ch.walk_days.get(&0), Some(&2));
+        assert_eq!(ch.walk_days.get(&1), Some(&1));
+        let s = c.summary(0, MINUTES_PER_DAY * 2, false).expect("a chapter");
+        assert_eq!(s.highlights.longest_walk, Some((0, 2)), "the earliest day with the most cells");
+        assert_eq!(c.day_of(MINUTES_PER_DAY * 2 + 5), 3);
+    }
+
+    #[test]
+    fn the_summary_totals_cover_the_chapters_from_the_given_one_and_the_picture_is_the_last() {
+        let mut c = Chronicle::default();
+        c.start("First", 0);
+        c.record(10, battle(true, 3, 7));
+        c.record(20, EntryKind::Captured { location: 4 });
+        c.next_chapter("Second", MINUTES_PER_DAY);
+        c.route_step(MINUTES_PER_DAY + 1, (5, 5));
+        c.record(MINUTES_PER_DAY + 2, EntryKind::Battle { at: (5, 5), foe: None, won: false, own_losses: 4, foe_losses: 1 });
+        c.record(MINUTES_PER_DAY + 3, EntryKind::QuestDone { quest: 2 });
+        let now = MINUTES_PER_DAY + 10;
+        let last = c.summary(1, now, true).expect("a summary");
+        assert_eq!(last.title, "Second");
+        assert_eq!((last.totals.battles_won, last.totals.battles_lost), (0, 1), "only the second map's battles");
+        assert_eq!(last.totals.quests_done, 1);
+        assert_eq!(last.marks, vec![Mark::Battle { cell: (5, 5), won: false }], "the picture's marks: its own map's");
+        assert_eq!(last.route, vec![(5, 5)]);
+        assert!(last.died);
+        let story = c.summary(0, now, false).expect("a summary");
+        assert_eq!((story.totals.battles_won, story.totals.battles_lost), (1, 1), "the story so far counts both");
+        assert_eq!(story.totals.towns_taken, 1);
+        assert_eq!(story.totals.days, 2);
+        assert_eq!(story.from, 0);
+        assert!(c.summary(0, now, false).is_some() && Chronicle::default().summary(0, now, false).is_none());
+    }
+
+    #[test]
+    fn the_most_hired_is_the_largest_single_hiring() {
+        let mut c = Chronicle::default();
+        c.start("M", 0);
+        c.record(1, EntryKind::Hired { unit: UnitId(4), count: 2 });
+        c.record(50, EntryKind::Hired { unit: UnitId(5), count: 6 });
+        c.record(90, EntryKind::Hired { unit: UnitId(4), count: 3 });
+        let h = c.summary(0, 100, false).expect("a summary").highlights;
+        assert_eq!(h.most_hired.map(|e| e.at_minutes), Some(50));
+        assert!(h.biggest_battle.is_none() && h.richest.is_none() && h.longest_walk.is_none());
+    }
+
+    #[test]
+    fn texts_are_kept_in_full_only_where_the_script_still_knows_them() {
+        let mut c = Chronicle::default();
+        c.start("M", 0);
+        c.note_text(1, 7);
+        c.note_text(2, 8);
+        c.note_answer(2, 8, true);
+        let kept = c.with_texts(|id, asked| (id == 7).then(|| format!("text {id} asked={asked}")));
+        let kinds: Vec<_> = kept.chapters[0].entries.iter().map(|e| e.kind.clone()).collect();
+        assert_eq!(kinds[0], EntryKind::Text { text: TextRef::Text("text 7 asked=false".into()), answer: None });
+        assert_eq!(kinds[1], EntryKind::Text { text: TextRef::Event(8), answer: Some(true) });
     }
 
     #[test]

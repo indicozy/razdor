@@ -1404,12 +1404,26 @@ pub(super) fn row_text(f: razdor::rules::formation::Formation, slot: razdor::rul
 
 /// The hero window's state (side window 5, built by 0x4d8638): the pack's scroll, the
 /// diary's tab, its picked entry (0x6668bf) and how far its list and its entry are scrolled.
+/// What the diary's tabs show: one of the journal's four (the quests under way, the original's
+/// diary, and Razdor's history), or the chronicle («Летопись», Razdor's fifth tab).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiaryTab {
+    Journal(Tab),
+    Chronicle,
+}
+
+impl DiaryTab {
+    /// The tabs in order (Left and Right go round them).
+    pub const ALL: [DiaryTab; 5] = [DiaryTab::Journal(Tab::Active), DiaryTab::Journal(Tab::Completed), DiaryTab::Journal(Tab::Rumours), DiaryTab::Journal(Tab::Messages), DiaryTab::Chronicle];
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HeroView {
     pub scroll: usize,
-    /// The diary's tab: the quests under way (the original's diary), or Razdor's history of
-    /// completed quests, rumours and messages (asked for by the owner).
-    pub tab: Tab,
+    /// The diary's tab: the quests under way (the original's diary), Razdor's history of
+    /// completed quests, rumours and messages (asked for by the owner), or the chronicle (see
+    /// [`DiaryTab`]).
+    pub tab: DiaryTab,
     pub pick: usize,
     pub list_scroll: usize,
     pub text_scroll: usize,
@@ -1425,7 +1439,7 @@ pub struct HeroView {
 
 impl Default for HeroView {
     fn default() -> Self {
-        HeroView { scroll: 0, tab: Tab::Active, pick: 0, list_scroll: 0, text_scroll: 0, reader: false, reader_scroll: 0, list_reader: false, list_reader_scroll: 0 }
+        HeroView { scroll: 0, tab: DiaryTab::Journal(Tab::Active), pick: 0, list_scroll: 0, text_scroll: 0, reader: false, reader_scroll: 0, list_reader: false, list_reader_scroll: 0 }
     }
 }
 
@@ -1491,21 +1505,63 @@ fn diary_column(desc: Rect, list: Rect, entry: Rect, phone: bool, described: boo
 /// original's list (0x68e500, a quest added by 0x49c170 as it is received and taken out by
 /// 0x49c2b8 when it is completed); the other tabs are Razdor's history (asked for by the
 /// owner): completed quests, rumours and messages of the whole campaign, newest first.
-fn diary_rows(game: &Game, tab: Tab) -> Vec<razdor::rules::journal::Row> {
-    let mut rows = game.journal_rows(tab);
-    if tab == Tab::Active {
-        rows.reverse();
+fn diary_rows(game: &Game, tab: DiaryTab) -> Vec<razdor::rules::journal::Row> {
+    match tab {
+        DiaryTab::Journal(t) => {
+            let mut rows = game.journal_rows(t);
+            if t == Tab::Active {
+                rows.reverse();
+            }
+            rows
+        }
+        DiaryTab::Chronicle => razdor::rules::chronicle_text::rows(game),
     }
-    rows
 }
 
-/// A diary tab's short title (the four share the width of the original's list title).
-fn diary_tab_label(tab: Tab) -> &'static str {
+/// The lines of a diary tab's list over `rows` (see `diary_rows`): the journal's chapters, or
+/// the chronicle's chapters and days.
+fn lines_for(game: &Game, tab: DiaryTab, rows: &[razdor::rules::journal::Row]) -> Vec<super::story::Line> {
     match tab {
-        Tab::Active => n_("Quests"),
-        Tab::Completed => n_("Done"),
-        Tab::Rumours => n_("Rumours"),
-        Tab::Messages => n_("Messages"),
+        DiaryTab::Journal(_) => super::story::journal_lines(rows),
+        DiaryTab::Chronicle => super::story::chronicle_lines(rows, |r| game.chronicle.day_of(r.date.map_or(0, |d| d.total_minutes() as u64))),
+    }
+}
+
+/// The text of a list's chapter heading: the journal's chapter, or the chronicle's (its map's
+/// title, «Chapter N» when it has none).
+fn heading_text(game: &Game, tab: DiaryTab, chapter: u32) -> String {
+    match tab {
+        DiaryTab::Journal(_) => game.journal.chapter_heading(chapter),
+        DiaryTab::Chronicle => match game.chronicle.chapters.get(chapter as usize).filter(|c| !c.title.is_empty()) {
+            Some(c) => c.title.clone(),
+            None => razdor::trf!("Chapter {n}", n = chapter + 1),
+        },
+    }
+}
+
+/// A chronicle day's heading («День N»).
+fn day_heading(day: u64) -> String {
+    razdor::trf!("Day {day}", day = day)
+}
+
+/// A diary tab's short title (the tabs share the width of the original's list title).
+fn diary_tab_label(tab: DiaryTab) -> &'static str {
+    match tab {
+        DiaryTab::Journal(Tab::Active) => n_("Quests"),
+        DiaryTab::Journal(Tab::Completed) => n_("Done"),
+        DiaryTab::Journal(Tab::Rumours) => n_("Rumours"),
+        DiaryTab::Journal(Tab::Messages) => n_("Messages"),
+        DiaryTab::Chronicle => n_("Chronicle"),
+    }
+}
+
+/// The entry parts of a row of `tab`: the journal's (`entry_parts`), or for the chronicle the
+/// full text of a text window, or the dry line alone for the other entries.
+fn parts_of(tab: DiaryTab, phone: bool, row: &razdor::rules::journal::Row) -> Vec<EntryPart> {
+    match tab {
+        DiaryTab::Journal(t) => entry_parts(t, phone),
+        DiaryTab::Chronicle if row.text.is_empty() => vec![EntryPart::Title],
+        DiaryTab::Chronicle => vec![EntryPart::Text],
     }
 }
 
@@ -1549,14 +1605,14 @@ fn entry_parts(tab: Tab, phone: bool) -> Vec<EntryPart> {
 /// Benguiat 0xae2498, the headings in SanSerif_Bold less 20, 90, 180, an orange, 0xae24f4, the
 /// text in SanSerif less 25, 25, 125, a yellow, 0xae24c0; a history entry's date is in the
 /// heading's orange and font.
-fn diary_lines(row: &razdor::rules::journal::Row, tab: Tab, phone: bool, room: f32, title: f32, body: f32) -> Vec<DiaryLine> {
-    diary_lines_of(row, tab, &entry_parts(tab, phone), room, title, body, false)
+fn diary_lines(row: &razdor::rules::journal::Row, tab: DiaryTab, phone: bool, room: f32, title: f32, body: f32) -> Vec<DiaryLine> {
+    diary_lines_of(row, tab, &parts_of(tab, phone, row), room, title, body, false)
 }
 
 /// [`diary_lines`] for the given `parts` (the phone's entry, or the reader's full one).
 /// `centre`: the phone's window sets every line centred with no first-line indent (the owner's
 /// request, 2026-11-02); the desktop and the reader keep the justified paragraphs.
-fn diary_lines_of(row: &razdor::rules::journal::Row, tab: Tab, parts: &[EntryPart], room: f32, title: f32, body: f32, centre: bool) -> Vec<DiaryLine> {
+fn diary_lines_of(row: &razdor::rules::journal::Row, tab: DiaryTab, parts: &[EntryPart], room: f32, title: f32, body: f32, centre: bool) -> Vec<DiaryLine> {
     use super::dt_font::{with_original_face, Face};
     use razdor::dt::markup::{Align, Ink};
     let own = |key: &str, ours: &'static str| chrome::ui_text("Hero", key).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr(ours).to_string());
@@ -1587,7 +1643,7 @@ fn diary_lines_of(row: &razdor::rules::journal::Row, tab: Tab, parts: &[EntryPar
             }
             EntryPart::Date => {
                 let date = row.date.map_or_else(|| tr("Date unknown").to_string(), |d| d.label());
-                let when = if tab == Tab::Completed { format!("{}: {date}", tr(super::story::QUEST_COMPLETED)) } else { date };
+                let when = if tab == DiaryTab::Journal(Tab::Completed) { format!("{}: {date}", tr(super::story::QUEST_COMPLETED)) } else { date };
                 out.extend(rows(&when, orange, Align::Centre, Face::Bold, body));
             }
         }
@@ -1666,8 +1722,8 @@ const READER_MARGIN: f32 = 8.0;
 
 /// The parts the phone's diary reader shows: the desktop's full entry (the reader has the room,
 /// so the title and the «Описание:» heading come back), for every tab.
-fn reader_parts(tab: Tab) -> Vec<EntryPart> {
-    entry_parts(tab, false)
+fn reader_parts(tab: DiaryTab, row: &razdor::rules::journal::Row) -> Vec<EntryPart> {
+    parts_of(tab, false, row)
 }
 
 /// The phone diary reader's window: the whole screen less the safe area and [`READER_MARGIN`] on
@@ -1681,7 +1737,7 @@ fn diary_reader_rect((sw, sh): (f32, f32), safe: super::display::SafeArea) -> Re
 /// full text ([`reader_parts`]) at the phone's sizes (`title`, `body`), in a window over almost the
 /// whole screen, scrolled by drag and the wheel. Its close button, its window's cross or Esc closes
 /// it: returns whether it closed this frame.
-fn diary_reader(row: &razdor::rules::journal::Row, tab: Tab, title: f32, body: f32, scroll: &mut usize) -> bool {
+fn diary_reader(row: &razdor::rules::journal::Row, tab: DiaryTab, title: f32, body: f32, scroll: &mut usize) -> bool {
     let k = chrome::k();
     let win = diary_reader_rect((screen_width(), screen_height()), super::display::safe_area());
     let (inner, closed) = chrome::window(win, tr(n_("Diary entry")), chrome::Skin::Marble, true);
@@ -1695,7 +1751,7 @@ fn diary_reader(row: &razdor::rules::journal::Row, tab: Tab, title: f32, body: f
     let bar = Rect::new(inner.right() - pad - bar_w, body_y, bar_w, body_h);
     let text = Rect::new(inner.x + pad, body_y, (bar.x - 4.0 * k - (inner.x + pad)).max(0.0), body_h);
     let room = text.w - 16.0 * k;
-    let lines = super::dt_font::legacy_metrics_if(true, || diary_lines_of(row, tab, &reader_parts(tab), room, title, body, false));
+    let lines = super::dt_font::legacy_metrics_if(true, || diary_lines_of(row, tab, &reader_parts(tab, row), room, title, body, false));
     let line_h = (body * 1.15).round();
     let shown = ((text.h - 12.0 * k) / line_h).floor().max(1.0) as usize;
     chrome::text_box_base(text);
@@ -1728,7 +1784,7 @@ fn diary_reader(row: &razdor::rules::journal::Row, tab: Tab, title: f32, body: f
 /// reader, rows at the list's phone size (`list_t`, shrunk to `row_floor` before they are cut),
 /// scrolled by drag and the wheel. A tap on a row returns its index (the caller opens its entry);
 /// Close, the cross, Esc or Back close it: returns `(closed, picked row)`.
-fn diary_list_reader(game: &Game, rows: &[razdor::rules::journal::Row], lines: &[super::story::Line], tab: Tab, (list_t, row_floor): (f32, f32), scroll: &mut usize, pick: usize) -> (bool, Option<usize>) {
+fn diary_list_reader(game: &Game, rows: &[razdor::rules::journal::Row], lines: &[super::story::Line], tab: DiaryTab, (list_t, row_floor): (f32, f32), scroll: &mut usize, pick: usize) -> (bool, Option<usize>) {
     use super::dt_font::{legacy_metrics_if, sheet_size, with_original_face, Face};
     use razdor::dt::markup::Ink;
     let k = chrome::k();
@@ -1775,11 +1831,19 @@ fn diary_list_reader(game: &Game, rows: &[razdor::rules::journal::Row], lines: &
             let center = list.x + list.w / 2.0;
             match *line {
                 super::story::Line::Heading(chapter) => {
-                    let heading = game.journal.chapter_heading(chapter);
+                    let heading = heading_text(game, tab, chapter);
                     let size = fit_row_size(list_t, row_floor, |z| with_original_face(Face::Bold, || measure(&heading, z).width), room);
                     with_original_face(Face::Bold, || {
                         let text = ellipsize(&heading, room, size);
                         chrome::shadow_centered(&text, center, ry + row_h * 0.78, size, Color::from_rgba(235, 165, 75, 255));
+                    });
+                }
+                super::story::Line::Day(day) => {
+                    let text = day_heading(day);
+                    let size = fit_row_size(list_t, row_floor, |z| with_original_face(Face::Bold, || measure(&text, z).width), room);
+                    with_original_face(Face::Bold, || {
+                        let text = ellipsize(&text, room, size);
+                        chrome::shadow_centered(&text, center, ry + row_h * 0.78, size, Color::from_rgba(230, 230, 130, 255));
                     });
                 }
                 super::story::Line::Row(r) => {
@@ -1801,6 +1865,30 @@ fn diary_list_reader(game: &Game, rows: &[razdor::rules::journal::Row], lines: &
     (closed || pressed || key(KeyCode::Escape), picked)
 }
 
+/// The view after a switch to `tab`: the chronicle opens at its newest entry, its list at the end.
+pub fn switched(view: &HeroView, tab: DiaryTab) -> HeroView {
+    let fresh = HeroView { scroll: view.scroll, tab, ..HeroView::default() };
+    match tab {
+        DiaryTab::Chronicle => HeroView { pick: usize::MAX, list_scroll: usize::MAX, ..fresh },
+        DiaryTab::Journal(_) => fresh,
+    }
+}
+
+/// The desktop diary tabs' label size in a cell `cell` wide: the original's bold size, smaller only
+/// when the longest label would not fit (five tabs share the list's width).
+fn tab_label_size(cell: f32, s: f32) -> f32 {
+    use super::dt_font::{sheet_size, with_original_face, Face};
+    let base = sheet_size(Face::Bold, s);
+    let widest = DiaryTab::ALL.iter().map(|&t| with_original_face(Face::Bold, || measure(tr(diary_tab_label(t)), base).width)).fold(0.0, f32::max);
+    // A gap of 8 px between two neighbouring labels (the tabs' labels run close without it).
+    let room = cell - 8.0 * s;
+    if widest <= room {
+        base
+    } else {
+        base * (room / widest).max(0.6)
+    }
+}
+
 /// The phone's text size of the diary window, in dp at the text size 1 (`phone_diary`): the tabs,
 /// the entry list's titles and the entry's text take it, grown with «Размер текста».
 const DIARY_PHONE_TEXT: f32 = 13.5;
@@ -1812,7 +1900,7 @@ const DIARY_PHONE_TEXT: f32 = 13.5;
 /// of the height over the entry; held sideways it takes 40 % of the width left of the entry.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct PhoneDiary {
-    tabs: [Rect; 4],
+    tabs: [Rect; 5],
     list: Rect,
     list_bar: Rect,
     head: Rect,
@@ -1830,12 +1918,12 @@ fn phone_diary_areas(inner: Rect, k: f32, g: f32, upright: bool) -> PhoneDiary {
     let head_h = DIARY_PHONE_TEXT * k * g * 1.6;
     let w = (inner.w - 2.0 * pad).max(0.0);
     let top_y = inner.y + pad;
-    // Held upright the four tabs lie two by two, so each keeps its word whole at the text size
+    // Held upright the five tabs lie three and two, so each keeps its word whole at the text size
     // (the hub's narrow layout); sideways they are one row.
     let close_w = (140.0 * k).min(w);
-    // Sideways «Закрыть» ends the tabs' row (the four tabs share the rest of it), and the lists run
+    // Sideways «Закрыть» ends the tabs' row (the five tabs share the rest of it), and the lists run
     // down to the window's bottom pad.
-    let (cols, rows, tabs_w) = if upright { (2, 2, w) } else { (4, 1, w - close_w - gap) };
+    let (cols, rows, tabs_w) = if upright { (3, 2, w) } else { (5, 1, w - close_w - gap) };
     let cell = ((tabs_w - (cols as f32 - 1.0) * gap) / cols as f32).max(0.0);
     let tabs = std::array::from_fn(|i| Rect::new(inner.x + pad + (i % cols) as f32 * (cell + gap), top_y + (i / cols) as f32 * (th + gap), cell, th));
     let tabs_h = rows as f32 * th + (rows as f32 - 1.0) * gap;
@@ -1901,7 +1989,7 @@ fn phone_diary(game: &mut Game, assets: &Assets, view: &mut HeroView, message: &
 
     // The tabs: a marble button each, the picked one ringed in gold.
     let mut switch = None;
-    for (i, tab) in Tab::ALL.into_iter().enumerate() {
+    for (i, tab) in DiaryTab::ALL.into_iter().enumerate() {
         let r = a.tabs[i];
         let over = !input_blocked() && mouse_in(r.x, r.y, r.w, r.h);
         // At the entry text's size; the button's label is cut only if a word is wider than its tab.
@@ -1913,21 +2001,21 @@ fn phone_diary(game: &mut Game, assets: &Assets, view: &mut HeroView, message: &
             switch = Some(tab);
         }
     }
-    let at = Tab::ALL.iter().position(|&t| t == view.tab).unwrap_or(0);
+    let at = DiaryTab::ALL.iter().position(|&t| t == view.tab).unwrap_or(0);
     if key(KeyCode::Right) {
-        switch = Some(Tab::ALL[(at + 1) % Tab::ALL.len()]);
+        switch = Some(DiaryTab::ALL[(at + 1) % DiaryTab::ALL.len()]);
     }
     if key(KeyCode::Left) {
-        switch = Some(Tab::ALL[(at + Tab::ALL.len() - 1) % Tab::ALL.len()]);
+        switch = Some(DiaryTab::ALL[(at + DiaryTab::ALL.len() - 1) % DiaryTab::ALL.len()]);
     }
     if let Some(tab) = switch.filter(|&t| t != view.tab) {
         cue(Cue::Button);
-        *view = HeroView { scroll: view.scroll, tab, ..HeroView::default() };
+        *view = switched(view, tab);
     }
 
     let rows = diary_rows(game, view.tab);
     if view.pick >= rows.len() {
-        view.pick = 0;
+        view.pick = if view.tab == DiaryTab::Chronicle { rows.len().saturating_sub(1) } else { 0 };
     }
     if key(KeyCode::Down) && view.pick + 1 < rows.len() {
         view.pick += 1;
@@ -1939,9 +2027,23 @@ fn phone_diary(game: &mut Game, assets: &Assets, view: &mut HeroView, message: &
     }
 
     // The entry list: the tab's chapters and entries (`journal_lines`), two lines a row at most.
-    let lines = super::story::journal_lines(&rows);
-    let list_bar = a.list_bar;
-    let list = Rect::new(a.list.x, a.list.y, a.list.w - list_bar.w - 4.0 * k, a.list.h);
+    let lines = lines_for(game, view.tab, &rows);
+    let mut list = Rect::new(a.list.x, a.list.y, a.list.w - a.list_bar.w - 4.0 * k, a.list.h);
+    // The chronicle's «Итоги» (the whole story so far) stands at the top of its list, a finger-sized
+    // row (44 dp, grown with the text size like the tabs).
+    let summary_row = (view.tab == DiaryTab::Chronicle).then(|| {
+        let h = 44.0 * k * g;
+        let r = Rect::new(list.x, list.y, list.w, h);
+        list.y += h;
+        list.h = (list.h - h).max(0.0);
+        r
+    });
+    if let Some(b) = summary_row {
+        if button(b.x, b.y, b.w, b.h, tr("Summary"), true) {
+            return super::summary::open(game, super::summary::After::Diary(*view), false);
+        }
+    }
+    let list_bar = Rect::new(a.list_bar.x, list.y, a.list_bar.w, list.h);
     let row_h = (48.0 * k).max(text * 2.5);
     let fits = ((list.h - 8.0 * k) / row_h).floor().max(1.0) as usize;
     chrome::text_box_base(list);
@@ -1987,10 +2089,17 @@ fn phone_diary(game: &mut Game, assets: &Assets, view: &mut HeroView, message: &
             let r = Rect::new(list.x + 2.0 * k, ry, list.w - 4.0 * k, row_h);
             match *line {
                 super::story::Line::Heading(chapter) => {
-                    let heading = game.journal.chapter_heading(chapter);
+                    let heading = heading_text(game, view.tab, chapter);
                     with_original_face(Face::Bold, || {
                         let t = ellipsize(&heading, room, text);
                         chrome::shadow_centered(&t, center, ry + row_h * 0.7, text, Color::from_rgba(235, 165, 75, 255));
+                    });
+                }
+                super::story::Line::Day(day) => {
+                    let t = day_heading(day);
+                    with_original_face(Face::Bold, || {
+                        let t = ellipsize(&t, room, text);
+                        chrome::shadow_centered(&t, center, ry + row_h * 0.7, text, Color::from_rgba(230, 230, 130, 255));
                     });
                 }
                 super::story::Line::Row(idx) => {
@@ -2029,7 +2138,7 @@ fn phone_diary(game: &mut Game, assets: &Assets, view: &mut HeroView, message: &
     let body_room = entry.w - 16.0 * k;
     let shown = ((entry.h - 12.0 * k) / line_h).floor().max(1.0) as usize;
     swipe_rows(entry, line_h);
-    let entry_lines = legacy_metrics_if(true, || rows.get(view.pick).map_or_else(Vec::new, |row| diary_lines_of(row, view.tab, &reader_parts(view.tab), body_room, text, text, true)));
+    let entry_lines = legacy_metrics_if(true, || rows.get(view.pick).map_or_else(Vec::new, |row| diary_lines_of(row, view.tab, &reader_parts(view.tab, row), body_room, text, text, true)));
     if mouse_in(entry.x, entry.y, entry.w, entry.h) {
         let w = wheel();
         if w < 0.0 && view.text_scroll + shown < entry_lines.len() {
@@ -2198,42 +2307,58 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     // list's title (`QuestList`) Razdor shows its tabs (asked for by the owner): the quests
     // under way (the original's diary), then the history of completed quests, rumours and
     // messages; Left / Right change them.
-    let list = column.list;
+    let mut list = column.list;
+    // The diary's tabs stand over the list as the original's (the summary row below them moves nothing).
+    let tabs_y = column.list.y;
+    // The chronicle's «Итоги» (the whole story so far) stands at the top of its list, over the
+    // list's first row; the list gives it that row.
+    let summary_row = (view.tab == DiaryTab::Chronicle).then(|| {
+        let h = head * 1.5;
+        let r = Rect::new(list.x, list.y, list_bar0.x + list_bar0.w - list.x, h);
+        list.y += h;
+        list.h = (list.h - h).max(0.0);
+        r
+    });
+    if let Some(b) = summary_row {
+        if button(b.x, b.y, b.w, b.h, tr("Summary"), true) {
+            return super::summary::open(game, super::summary::After::Diary(*view), false);
+        }
+    }
     let list_bar = Rect::new(list_bar0.x, list.y, list_bar0.w, list.h);
     let list_box = Rect::new(list.x, list.y, list_bar.x + list_bar.w - list.x, list.h);
-    let at = Tab::ALL.iter().position(|&t| t == view.tab).unwrap_or(0);
+    let at = DiaryTab::ALL.iter().position(|&t| t == view.tab).unwrap_or(0);
     let mut switch = None;
-    let cell = list_box.w / Tab::ALL.len() as f32;
-    for (i, tab) in Tab::ALL.into_iter().enumerate() {
-        let r = Rect::new(list_box.x + i as f32 * cell, list_box.y - head * 1.45, cell, head * 1.4);
+    let cell = list_box.w / DiaryTab::ALL.len() as f32;
+    for (i, tab) in DiaryTab::ALL.into_iter().enumerate() {
+        let r = Rect::new(list_box.x + i as f32 * cell, tabs_y - head * 1.45, cell, head * 1.4);
         let over = mouse_in(r.x, r.y, r.w, r.h);
         let ink = if tab == view.tab { ACCENT } else if over { INK } else { DIM };
         // In the diary's bold face (the original's bitmap fonts come in one size each, and the
         // four titles do not fit in the title face).
         let label = tr(diary_tab_label(tab));
-        let size = sheet_size(Face::Bold, s);
-        with_original_face(Face::Bold, || chrome::shadow_centered(label, r.x + r.w / 2.0, list_box.y - 7.0 * s, size, ink));
+        let size = tab_label_size(cell, s);
+        with_original_face(Face::Bold, || chrome::shadow_centered(label, r.x + r.w / 2.0, tabs_y - 7.0 * s, size, ink));
         if tab == view.tab {
             let w = with_original_face(Face::Bold, || measure(label, size).width);
-            draw_line(r.x + (r.w - w) / 2.0, list_box.y - 4.0 * s, r.x + (r.w + w) / 2.0, list_box.y - 4.0 * s, 1.0 * s, ACCENT);
+            draw_line(r.x + (r.w - w) / 2.0, tabs_y - 4.0 * s, r.x + (r.w + w) / 2.0, tabs_y - 4.0 * s, 1.0 * s, ACCENT);
         }
         if over && clicked() {
             switch = Some(tab);
         }
     }
     if key(KeyCode::Right) {
-        switch = Some(Tab::ALL[(at + 1) % Tab::ALL.len()]);
+        switch = Some(DiaryTab::ALL[(at + 1) % DiaryTab::ALL.len()]);
     }
     if key(KeyCode::Left) {
-        switch = Some(Tab::ALL[(at + Tab::ALL.len() - 1) % Tab::ALL.len()]);
+        switch = Some(DiaryTab::ALL[(at + DiaryTab::ALL.len() - 1) % DiaryTab::ALL.len()]);
     }
     if let Some(tab) = switch.filter(|&t| t != view.tab) {
         cue(Cue::Button);
-        *view = HeroView { scroll: view.scroll, tab, ..HeroView::default() };
+        *view = switched(view, tab);
     }
     let rows = diary_rows(game, view.tab);
     if view.pick >= rows.len() {
-        view.pick = 0;
+        view.pick = if view.tab == DiaryTab::Chronicle { rows.len().saturating_sub(1) } else { 0 };
     }
     if key(KeyCode::Down) && view.pick + 1 < rows.len() {
         view.pick += 1;
@@ -2244,7 +2369,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
         view.text_scroll = 0;
     }
     // A campaign's history runs over several maps: each map's entries under its title.
-    let lines = super::story::journal_lines(&rows);
+    let lines = lines_for(game, view.tab, &rows);
     chrome::text_box_base(list_box);
     // The quest list's titles take the phone's text scale too (`display::text_for`); the boxes'
     // own headings stay at the window's.
@@ -2286,8 +2411,15 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     for (n, line) in lines.iter().enumerate().skip(view.list_scroll).take(fits) {
         let ry = list.y + 4.0 * s + (n - view.list_scroll) as f32 * row_h;
         let k = match *line {
+            super::story::Line::Day(day) => {
+                let text = day_heading(day);
+                let room = list.w - 12.0 * s;
+                let size = if phone { super::dt_font::legacy_metrics_if(true, || fit_row_size(list_t, row_floor, |z| with_original_face(Face::Bold, || measure(&text, z).width), room)) } else { list_t };
+                super::dt_font::legacy_metrics_if(phone, || with_original_face(Face::Bold, || chrome::shadow_centered(&ellipsize(&text, room, size), list.x + list.w / 2.0, ry + row_h * 0.78, size, Color::from_rgba(230, 230, 130, 255))));
+                continue;
+            }
             super::story::Line::Heading(chapter) => {
-                let heading = game.journal.chapter_heading(chapter);
+                let heading = heading_text(game, view.tab, chapter);
                 let room = list.w - 12.0 * s;
                 let size = if phone { super::dt_font::legacy_metrics_if(true, || fit_row_size(list_t, row_floor, |z| with_original_face(Face::Bold, || measure(&heading, z).width), room)) } else { list_t };
                 let head_text = super::dt_font::legacy_metrics_if(phone, || ellipsize(&heading, room, size));
@@ -2381,7 +2513,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
                 view.reader = false;
             }
         } else if view.list_reader {
-            let all = super::story::journal_lines(&rows);
+            let all = lines_for(game, view.tab, &rows);
             let (closed, picked) = diary_list_reader(game, &rows, &all, view.tab, (list_t, row_floor), &mut view.list_reader_scroll, view.pick);
             if let Some(k) = picked {
                 view.pick = k;
@@ -2411,7 +2543,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
 
 #[cfg(test)]
 mod tests {
-    use super::{card_line, diary_body_size, diary_column, diary_reader_body_size, diary_title_size, held_card_lit, held_hint_ink, class_wage, hero_resources, panel_slots, pointed_line, promo_ease, promo_look, promo_ms, reset_pack_view, set_pack_view, ArmySel, Content, Controls, GridPress, ItemGroup, PackSort, GROUP, SORT, UnitId};
+    use super::{switched, DiaryTab, HeroView, card_line, diary_body_size, diary_column, diary_reader_body_size, diary_title_size, held_card_lit, held_hint_ink, class_wage, hero_resources, panel_slots, pointed_line, promo_ease, promo_look, promo_ms, reset_pack_view, set_pack_view, ArmySel, Content, Controls, GridPress, ItemGroup, PackSort, GROUP, SORT, UnitId};
     use macroquad::prelude::Rect;
 
     fn column_boxes() -> (Rect, Rect, Rect) {
@@ -2513,11 +2645,36 @@ mod tests {
     #[test]
     fn the_phone_reader_shows_the_desktop_s_full_entry() {
         use super::EntryPart::*;
-        for tab in razdor::rules::journal::Tab::ALL {
-            assert_eq!(super::reader_parts(tab), super::entry_parts(tab, false), "{tab:?}");
+        use razdor::rules::journal::Tab;
+        let row = razdor::rules::journal::Row { title: "t".into(), text: "x".into(), date: None, elapsed: None, chapter: 0 };
+        for tab in Tab::ALL {
+            assert_eq!(super::reader_parts(super::DiaryTab::Journal(tab), &row), super::entry_parts(tab, false), "{tab:?}");
         }
-        assert_eq!(super::reader_parts(razdor::rules::journal::Tab::Active), vec![Title, Blank, Description, Text, Blank, TimeHeading, Time]);
-        assert_ne!(super::reader_parts(razdor::rules::journal::Tab::Active), super::entry_parts(razdor::rules::journal::Tab::Active, true));
+        assert_eq!(super::reader_parts(super::DiaryTab::Journal(Tab::Active), &row), vec![Title, Blank, Description, Text, Blank, TimeHeading, Time]);
+        assert_ne!(super::reader_parts(super::DiaryTab::Journal(Tab::Active), &row), super::entry_parts(Tab::Active, true));
+    }
+
+    /// The chronicle's list: each chapter under its heading, each day under its «День N» heading, a
+    /// day that goes on into the next chapter gets no second heading.
+    #[test]
+    fn the_chronicle_lists_each_chapter_and_each_day_under_its_heading() {
+        use super::super::story::{chronicle_lines, Line::*};
+        let row = |chapter: u32, minutes: u64| razdor::rules::journal::Row { title: String::new(), text: String::new(), date: Some(razdor::rules::clock::Clock::at_minutes(minutes)), elapsed: None, chapter };
+        let rows = [row(0, 10), row(0, 20), row(0, 1500), row(1, 1600)];
+        let day = |r: &razdor::rules::journal::Row| r.date.map_or(0, |d| d.total_minutes() as u64 / 1440);
+        assert_eq!(chronicle_lines(&rows, day), vec![Heading(0), Day(0), Row(0), Row(1), Day(1), Row(2), Heading(1), Row(3)]);
+        assert!(chronicle_lines(&[], day).is_empty());
+    }
+
+    /// Switching to the chronicle opens it at the newest entry, its list at the end; the journal's
+    /// tabs open as before.
+    #[test]
+    fn a_switch_to_the_chronicle_opens_at_its_newest_entry() {
+        let view = HeroView::default();
+        let c = switched(&view, DiaryTab::Chronicle);
+        assert_eq!((c.tab, c.pick, c.list_scroll), (DiaryTab::Chronicle, usize::MAX, usize::MAX));
+        let j = switched(&c, DiaryTab::Journal(razdor::rules::journal::Tab::Messages));
+        assert_eq!((j.pick, j.list_scroll), (0, 0));
     }
 
     /// The reader covers the screen less the safe area and a small margin on each side, so the
@@ -2872,8 +3029,8 @@ mod tests {
         let inner = Rect::new(10.0, 20.0, 1000.0, 1700.0);
         let k = 2.75;
         let up = super::phone_diary_areas(inner, k, 1.0, true);
-        // The four tabs on top (two rows held upright), «Закрыть» 44 dp tall at the foot, all inside the frame.
-        assert!(up.tabs[0].y == up.tabs[1].y && up.tabs[2].y == up.tabs[3].y && up.tabs[2].y > up.tabs[0].y);
+        // The five tabs on top (three and two held upright), «Закрыть» 44 dp tall at the foot, all inside the frame.
+        assert!(up.tabs[0].y == up.tabs[1].y && up.tabs[1].y == up.tabs[2].y && up.tabs[3].y == up.tabs[4].y && up.tabs[3].y > up.tabs[0].y);
         assert!(up.tabs.iter().all(|t| t.bottom() <= up.list.y));
         let side_tabs = super::phone_diary_areas(inner, k, 1.0, false).tabs;
         assert!(side_tabs.iter().all(|t| t.y == side_tabs[0].y));
@@ -2891,7 +3048,7 @@ mod tests {
         assert_eq!(side.list.y, side.head.y);
         assert_eq!(side.close.h, 44.0 * k);
         assert!(side.close.y < side.list.y && side.close.right() <= inner.right());
-        assert!(side.tabs[3].right() < side.close.x);
+        assert!(side.tabs[4].right() < side.close.x);
         assert!(side.entry.bottom() <= inner.bottom());
         // The scrollbars are 24 dp wide, at the right of their area.
         assert_eq!(up.list_bar.w, 24.0 * k);

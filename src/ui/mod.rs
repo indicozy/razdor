@@ -53,6 +53,7 @@ pub mod snapshot;
 pub mod spell_badges;
 pub mod spellbook;
 pub mod story;
+pub mod summary;
 pub mod subtract16;
 pub mod text_probe;
 pub mod touch_probe;
@@ -134,6 +135,8 @@ pub enum Screen {
     Save(saves::SaveView),
     Load(saves::LoadView),
     Victory,
+    /// The «Итоги» page of a map (`ui::summary`), after a map ends or from the chronicle tab.
+    Summary(Box<summary::View>),
     /// The map editor (`ui::editor`).
     Editor,
     /// The custom battle setup over the main menu (`ui::custom_battle`).
@@ -889,6 +892,8 @@ impl App {
             Screen::Load(v) if v.back == saves::Back::Title || self.game.is_none() => Mood::Menu,
             Screen::Battle(_) => Mood::Battle { garrison: matches!(self.game.as_ref().and_then(|g| g.foe.as_ref()), Some(Foe::Garrison(_))) },
             Screen::Victory => Mood::Won,
+            Screen::Summary(v) if v.after == summary::After::Victory => Mood::Won,
+            Screen::Summary(v) if v.after == summary::After::Defeat => Mood::Lost,
             // The defeat report plays the defeat theme (4c57ad, 0x4a8ae8's mode 2 → 0x482290).
             _ if self.dialogs.iter().any(|d| d.defeat) => Mood::Lost,
             _ if self.game.is_some() => Mood::Map,
@@ -1026,6 +1031,10 @@ impl App {
             Screen::Save(_) => Place::Save,
             Screen::Load(_) => Place::Load,
             Screen::Victory => Place::End,
+            Screen::Summary(v) => match v.after {
+                summary::After::Diary(_) => Place::Hero,
+                summary::After::Victory | summary::After::Defeat => Place::End,
+            },
             Screen::Editor => Place::Editor,
         }
     }
@@ -1181,6 +1190,7 @@ impl App {
             Screen::Save(_) => "save",
             Screen::Load(_) => "load",
             Screen::Victory => "victory",
+            Screen::Summary(_) => "summary",
             Screen::Editor => "editor",
             Screen::CustomSetup => "custom battle setup",
             Screen::CustomBattle(_) => "custom battle",
@@ -1305,6 +1315,52 @@ impl App {
                 Screen::Load(v) => game && v.back == saves::Back::Map,
                 _ => false,
             }
+    }
+
+    /// A campaign map's victory once its window is read: the «Итоги» page first (Razdor's, when the
+    /// setting is on; not in the editor's test play), then [`App::finish_victory`].
+    fn victory_end(&mut self) -> Screen {
+        if !self.test_play && self.audio.settings.chronicle_summary {
+            if let Some(screen) = self.game.as_ref().and_then(|g| summary::open(g, summary::After::Victory, false)) {
+                return screen;
+            }
+        }
+        self.finish_victory()
+    }
+
+    /// The end of a lost game (a map's defeat event, or the hero's fall: the defeat report's OK): the
+    /// «Итоги» page first (Razdor's, when the setting is on), which then goes to the main menu; else
+    /// the main menu at once, as the original does.
+    fn defeat_end(&mut self, died: bool) -> Screen {
+        if !self.test_play && self.audio.settings.chronicle_summary {
+            if let Some(screen) = self.game.as_ref().and_then(|g| summary::open(g, summary::After::Defeat, died)) {
+                return screen;
+            }
+        }
+        self.game = None;
+        Screen::MainMenu
+    }
+
+    /// The campaign's victory is over once its window and the page are read: the next map starts at
+    /// once with what it carries over (the hand-over, 0x4b5b64); with no next map, the victory
+    /// screen in the editor's test play, else the main menu.
+    fn finish_victory(&mut self) -> Screen {
+        let handed = (!self.test_play).then(|| screens::hand_over(&self.game, &self.scenarios, self.dt_content.clone())).flatten();
+        match handed {
+            Some(g) => {
+                self.map_view.reset();
+                self.map_view.open_around_hero(&g);
+                items_view::reset_pack_view();
+                self.message = None;
+                self.game = Some(g);
+                Screen::WorldMap
+            }
+            None if self.test_play => Screen::Victory,
+            None => {
+                self.game = None;
+                Screen::MainMenu
+            }
+        }
     }
 
     fn frame_content(&mut self) {
@@ -1467,6 +1523,8 @@ impl App {
             None => false,
         };
         widgets::set_outside_tap(outside);
+        // The «Итоги» page's exit, taken after the match (it may start the next map, which needs the app).
+        let mut summary_exit = None;
         let mut next = match (&mut self.screen, &mut self.game) {
             (Screen::MainMenu, _) => match main_menu::frame(self.dt_content.is_none(), &self.mods, self.active_mod.as_deref(), self.mod_switch.is_some()) {
                 Some(main_menu::Pick::NewGame) if new_game::tutorial_map(&self.scenarios).is_some() => {
@@ -1585,6 +1643,11 @@ impl App {
             (Screen::Save(view), Some(game)) => saves::save_screen(game, &self.assets, view, quick_save_ok, &mut self.message),
             (Screen::Load(view), game) => saves::load_screen(game.as_ref(), &self.assets, view, &mut self.pending_load, &mut self.load_error, &mut self.lacking_box),
             (Screen::Victory, game) => screens::victory(game, &self.scenarios, self.dt_content.clone()),
+            (Screen::Summary(view), Some(game)) => {
+                summary_exit = summary::frame(view, game, &self.assets);
+                None
+            }
+            (Screen::Summary(_), None) => Some(Screen::MainMenu),
             (Screen::Editor, _) => None,
             (Screen::CustomSetup, _) => {
                 let view = self.custom.get_or_insert_with(|| custom_battle::SetupView::new(&custom_content));
@@ -1644,6 +1707,15 @@ impl App {
         widgets::set_input_blocked(false);
         widgets::set_outside_tap(false);
         next = next.or(console_next);
+        match summary_exit {
+            Some(summary::Exit::Back(screen)) => next = next.or(Some(*screen)),
+            Some(summary::Exit::Victory) => next = next.or(Some(self.finish_victory())),
+            Some(summary::Exit::Defeat) => {
+                self.game = None;
+                next = next.or(Some(Screen::MainMenu));
+            }
+            None => {}
+        }
         // "Варианты выхода из битвы" chose.
         if let Screen::Battle(v) = &mut self.screen {
             match v.exit.take() {
@@ -1744,8 +1816,7 @@ impl App {
                         self.load_last_save();
                     } else {
                         self.dialogs.clear();
-                        self.game = None;
-                        next = Some(Screen::MainMenu);
+                        next = Some(self.defeat_end(true));
                     }
                 }
                 // Closing a dialog while the triumph plays changes the map track at once
@@ -1833,7 +1904,8 @@ impl App {
         // brought is held until the step has played (`Game::tick_shown`), so it is waited for
         // too: the end comes after it, never before (events.md §11).
         let unshown = self.game.as_ref().is_some_and(Game::holds_events);
-        if next.is_none() && self.dialogs.is_empty() && !unshown && !self.in_custom() {
+        // (While the «Итоги» page is up the game has ended already: it is not ended again.)
+        if next.is_none() && self.dialogs.is_empty() && !unshown && !self.in_custom() && !matches!(self.screen, Screen::Summary(_)) {
             let end = self.game.as_ref().and_then(Game::script_end);
             match end {
                 // A campaign map: the next map starts at once (0x4b5b64), as in the original.
@@ -1849,29 +1921,11 @@ impl App {
                             razdor::rules::marks::record_victory(file, &game.run_mark());
                         }
                     }
-                    let handed = (!self.test_play).then(|| screens::hand_over(&self.game, &self.scenarios, self.dt_content.clone())).flatten();
-                    match handed {
-                        Some(g) => {
-                            self.map_view.reset();
-                            self.map_view.open_around_hero(&g);
-                            items_view::reset_pack_view();
-                            self.message = None;
-                            self.game = Some(g);
-                            next = Some(Screen::WorldMap);
-                        }
-                        None if self.test_play => next = Some(Screen::Victory),
-                        None => {
-                            self.game = None;
-                            next = Some(Screen::MainMenu);
-                        }
-                    }
+                    next = Some(self.victory_end());
                 }
                 // The map's defeat event: its window was the last thing shown; the game
-                // returns to the main menu (events.md §11, 0x4bfb34).
-                Some(ScriptEnd::Defeat(_)) => {
-                    self.game = None;
-                    next = Some(Screen::MainMenu);
-                }
+                // returns to the main menu (events.md §11, 0x4bfb34), after the «Итоги» page.
+                Some(ScriptEnd::Defeat(_)) => next = Some(self.defeat_end(true)),
                 _ => {}
             }
             // A world spell that killed the whole army loses the game: the defeat report,

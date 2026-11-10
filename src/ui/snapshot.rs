@@ -53,6 +53,8 @@ use razdor::rules::content::HeroClass;
 use razdor::rules::game::{Foe, Game};
 use razdor::rules::town::first_tab;
 
+use super::items_view::DiaryTab;
+
 use super::battle_view::BattleView;
 use super::building_view::BuildingView;
 use super::saves::{Back, LoadView};
@@ -452,6 +454,55 @@ fn seed_map_slot(app: &App, index: usize) -> Result<(), String> {
     let dir = save::games_dir().ok_or("no save folder")?;
     save::write_map_slot(&dir, &save::date_name(&game.clock), &game).map_err(|err| err.to_string())?;
     Ok(())
+}
+
+/// The install's scenario index of map `map` (the scene's map name).
+fn index_of(app: &App, map: &str) -> Result<usize, String> {
+    app.scenarios.iter().position(|e| e.file == map).ok_or_else(|| format!("no map {map} in the install"))
+}
+
+/// A sample record for the chronicle and summary scenes: four days of the map's own events (its
+/// texts), a route walked from the hero's cell, a battle won and one lost, a capture, hirings,
+/// a level-up, noon reports. The route's cells are explored, so the page's map shows them.
+fn sample_record(game: &mut Game, title: &str) {
+    use razdor::rules::chronicle::{Chronicle, FoeRef, MINUTES_PER_DAY};
+    use razdor::rules::content::{ItemId, UnitId};
+    let t0 = game.clock.total_minutes() as u64;
+    let mut c = Chronicle::default();
+    c.start(title, t0);
+    let texts: Vec<u16> = (1..=400u16).filter(|&id| game.script().and_then(|s| s.event(id)).is_some_and(|e| !e.message.trim().is_empty())).take(6).collect();
+    let captured = game.world.locations.iter().find(|l| !l.kind.is_bridge()).map(|l| l.id);
+    let army = game.world.armies.first().map(|a| FoeRef::Army(a.id));
+    let start = game.tile();
+    for day in 0..4u64 {
+        let day_t = t0 + day * MINUTES_PER_DAY;
+        for k in 0..40u64 {
+            let cell = (start.0 + (k % 16) as i32 - 6 + day as i32 * 2, start.1 + (k / 16) as i32 + day as i32);
+            c.route_step(day_t + 60 + k * 9, cell);
+            game.fog.mark(cell);
+        }
+        for (w, &id) in texts.iter().enumerate().filter(|(w, _)| w % 4 == day as usize) {
+            c.note_text(day_t + 300 + w as u64, id);
+        }
+        if day == 1 {
+            c.note_text(day_t + 320, texts.first().copied().unwrap_or(1));
+            c.note_answer(day_t + 320, texts.first().copied().unwrap_or(1), true);
+        }
+        let at = day_t + 500;
+        let cell = c.chapters[0].route.last().copied().unwrap_or(start);
+        c.record(at, razdor::rules::chronicle::EntryKind::Battle { at: cell, foe: army, won: day != 2, own_losses: 2 + day as u32, foe_losses: 6 });
+        if let Some(l) = captured.filter(|_| day == 1) {
+            c.record(at + 5, razdor::rules::chronicle::EntryKind::Captured { location: l });
+        }
+        c.record(at + 20, razdor::rules::chronicle::EntryKind::Hired { unit: UnitId(4), count: 2 + day as u32 });
+        c.record(at + 21, razdor::rules::chronicle::EntryKind::Hired { unit: UnitId(5), count: 1 });
+        if day == 3 {
+            c.record(at + 40, razdor::rules::chronicle::EntryKind::LevelUp { level: 2 });
+            c.record(at + 41, razdor::rules::chronicle::EntryKind::ArtefactFound { item: ItemId(1) });
+        }
+        c.record(day_t + 720, razdor::rules::chronicle::EntryKind::Noon { gold: 800 + 150 * day as i32, income: 300, wages: 120 });
+    }
+    game.chronicle = c;
 }
 
 fn game_from_save(app: &mut App) -> Result<Option<Game>, String> {
@@ -891,7 +942,19 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             }
             Screen::Squad { selected, scroll: 0, back: None }
         }
-        // `hero:<map>[:<tab>]`: the diary on tab 0..3 (quests, completed, rumours, messages).
+        // `hero:<map>[:<tab>]`: the diary on tab 0..4 (quests, completed, rumours, messages, chronicle).
+        // `chronicle:<map>`: the diary on the chronicle, over a sample record (`sample_record`).
+        // `summary:<map>[:defeat]`: the «Итоги» page after a victory (or a defeat), over the same record.
+        "chronicle" => {
+            sample_record(&mut game, &app.scenarios[index_of(app, map)?].scenario.title);
+            Screen::Hero(super::items_view::switched(&Default::default(), DiaryTab::Chronicle))
+        }
+        "summary" => {
+            sample_record(&mut game, &app.scenarios[index_of(app, map)?].scenario.title);
+            let defeat = arg == Some("defeat");
+            let after = if defeat { super::summary::After::Defeat } else { super::summary::After::Victory };
+            super::summary::open(&game, after, defeat).ok_or("no chronicle")?
+        }
         "journal" | "hero" => {
             // `RAZDOR_SCENE_QUEST=1`: one completed quest, with a long text, for the diary's box
             // (the «Выполнено» tab, `journal:<map>:1`; the quests under way come from the script).
@@ -904,12 +967,12 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                     "Староста Тилион просит защитить деревню от разбойничьего отряда, который каждую ночь нападает на рыбаков. Разбойники укрылись в старом форте на севере; до их прихода осталось немного времени.",
                 );
             }
-            let tab = arg.and_then(|t| t.parse::<usize>().ok()).and_then(|i| razdor::rules::journal::Tab::ALL.get(i).copied());
+            let tab = arg.and_then(|t| t.parse::<usize>().ok()).and_then(|i| DiaryTab::ALL.get(i).copied()).unwrap_or(DiaryTab::Journal(razdor::rules::journal::Tab::Active));
             // `RAZDOR_SCENE_READER=1`: a phone's diary reader open on the picked entry (`RAZDOR_DP`).
             let reader = std::env::var_os("RAZDOR_SCENE_READER").is_some();
             // `RAZDOR_SCENE_LIST_READER=1`: a phone's whole-list reader open («Весь список»).
             let list_reader = std::env::var_os("RAZDOR_SCENE_LIST_READER").is_some();
-            Screen::Hero(super::items_view::HeroView { tab: tab.unwrap_or(razdor::rules::journal::Tab::Active), reader, list_reader, ..Default::default() })
+            Screen::Hero(super::items_view::HeroView { tab, reader, list_reader, ..Default::default() })
         }
         "spells" | "spells-pages" => {
             // A book full of the install's spells, to see their pictures. `spells-pages`: 20 of

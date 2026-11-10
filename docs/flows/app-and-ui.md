@@ -439,10 +439,30 @@ only its own bar button is live, and a second press on it closes the window with
 (`main_menu::close_options_kept`, as «Принять»; the player's report, 2026-10-30). The bar's flag (`BarButton::Hero`) opens the
 original's hero window (`Screen::Hero`, `items_view::hero_window`: the hero's panel, the pack,
 the item description, the four resource lines and the diary); J opens the same window. The
-diary keeps the original's look; in place of its list title it has four tabs (asked for by the
-owner): the quests under way (the original's diary), and Razdor's history of completed quests,
+diary keeps the original's look; in place of its list title it has five tabs (asked for by the
+owner): the quests under way (the original's diary), Razdor's history of completed quests,
 rumours and messages over the whole campaign, with dates and a heading per campaign map
-(`items_view::HeroView`, `story::journal_lines`). On a phone (`display::dp_px`), while a diary
+(`items_view::HeroView`, `story::journal_lines`), and the chronicle («Летопись», Razdor's, the
+fifth; `items_view::DiaryTab::Chronicle`). The chronicle's rows are `rules::chronicle_text::rows`
+(the dry line of each entry, its full text for a text window): one line per entry under a heading
+per chapter and per day («День N», `story::chronicle_lines`), the newest at the foot; the tab opens
+scrolled to the end (`items_view::switched`). Its entry box shows a text window's whole text, else
+the entry's line. «Итоги» stands at the top of its list (`summary::open`, `After::Diary`: the whole
+story so far, the route of the map being played). The phone's diary has the same five tabs (three
+and two held upright, `phone_diary_areas`) and the same «Итоги» row.
+
+The «Итоги» page (`src/ui/summary.rs`, `Screen::Summary`; the data is `rules::chronicle::Summary`,
+built by `Chronicle::summary`) shows the map as the fog stands (`minimap::picture`), the hero's route
+over it (cool blue at the start, warm orange at the end, `summary::route_colour`), the battles
+(crossed swords, red for a loss) and the captures (a flag) where they happened, and the hero's end (a
+skull, after a defeat); the highlights (`chronicle_text::highlight_lines`: the biggest battle, the
+most units hired at once, the richest noon report, the longest walk in one day) and the totals (days,
+battles won and lost, losses on both sides, places taken, artefacts, quests done). The page fits one
+screen: upright the totals sit at the foot and the highlights above them, the map takes the rest
+(`summary::layout`, the text reserved first); the text shrinks in steps only when it still does not
+fit (`summary::fit_size`). Its one button («Закрыть» from the diary, «Далее» after a map) and Enter
+or Esc leave it: back to the diary, or on to the next map or the main menu (`App::victory_end`,
+`App::defeat_end`, `App::finish_victory`; campaign.md). No share or export button. On a phone (`display::dp_px`), while a diary
 entry is shown and no artifact is described, the artifact description box is not drawn: the
 quest list moves up to its top and the entry takes its height and the gap
 (`items_view::diary_column`, a Razdor phone choice; the justification of the entry is the
@@ -907,7 +927,8 @@ the install's, so they show in the new-game list. Snapshot scene: `hub[:<tab>[:<
 fields `#[serde(default)]`) holds every setting: volumes, display, scale, battle AI level,
 row width, and Razdor's own options (`updates`,
 map zoom, `leader_caption`: the leader's name under the event picture of a meeting, see
-`story::leader_caption` and `EventOutcome::MeetingArmy`). The windows are `main_menu::options` / `main_menu::options_window` (the
+`story::leader_caption` and `EventOutcome::MeetingArmy`; `chronicle_summary`, «Итоги после карты», on
+by default: the «Итоги» page after a map ends or the hero falls, in the Other group). The windows are `main_menu::options` / `main_menu::options_window` (the
 original's: five slider rows, eight checkboxes, «Принять» keeps, «Отмена» restores what the
 window opened with) and the five groups (`main_menu::Group`) as tabs of one settings window (`TABS`; the pane is `group_pane`): Razdor's own rows, each in its group (`Group::rows`, the `Row` enum; a test checks that every row is in exactly one group). The settings window (2026-11-09: one window, the owner's design) has its tabs in a column at the left (`tab_buttons`, the selected one drawn pressed): «Основное» (the General tab: the original's five sliders and eight checkboxes, `general_desktop`, and on a phone the touchpad mode after them, `general_phone`), then «Карта», «Бой и армия», «Экран», «Управление» and «Прочее» (the groups). `GROUP` is the tab shown (`None`: General). «Принять» and «Отмена» at the bottom right act on everything changed in any tab: Cancel (the close box, Esc) puts back what `OPENED_WITH` holds, Apply keeps it (`options_window`). `open_group` selects a tab, `open_keys` selects «Управление» and opens the keys window alone (as before). The «Размер нижней панели» row (`Row::BottomBar`) shows only on a phone held sideways (`bottom_bar_row_shown`: upright the bar is the main's size, so the row did nothing; a player's report). The long hints of a row (`Row::help_text`: the zoom, the map's edge, the battle AI, the army arrangement, experience on promotion, the language, the updates) sit behind a «?» button at the row's end (`help_button`): a click pins the pop-up (`HELP_PINNED`), the desktop's pointer over it shows it too (`HELP_HOVER`); a click elsewhere or Esc closes it (`help_frame_start`), and the game's hint box draws it (`help_popup`, `widgets::hint_box_always`). `RAZDOR_SCENE_HELP=<row>` pins one in a snapshot. The groups: «Карта» (map zoom and its lock, 2.5D view, sprite size, two-finger turn, extending the map past its edges, battles on the map, minimap army list, leader's name, minimap corner and reset), «Бой и армия» (battle AI strength (`main_menu::AiStrength`, kept in sync with the `OptValue9` checkbox), unit battle participation, keep formation, max guards casters, army arrangement, experience on promotion), «Экран» (screen mode, interface scale, font, text size, large message windows, screen orientation on Android, language), «Управление» (keyboard shortcuts; the touchpad mode is on the General tab, on a phone), «Прочее» (updates and «Проверить», the game import). Razdor's map options «Битвы армий на карте» (`battle_marks`, on) and «Список у
 миникарты» (`army_list`, off) are pushed into `Game::battle_marks` / `Game::army_list` by
