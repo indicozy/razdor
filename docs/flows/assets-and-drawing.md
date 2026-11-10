@@ -312,6 +312,23 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   (`card_mesh`, the sprite's uvs in the atlas, `sharp` sampling). Its shadow lies on the ground under the fog
   (`draw_building_shadow`, `chrome::shadow_only`: the sprite's shadow pixels only, with the relief's `ShadowK`). A bridge, a picture with no
   entry, and the flat view keep one billboard as before. The hover's gold outline goes under each card.
+  The bundled `one_card` list (`data/cards/objects.json`) names the base buildings left with no entry (one region):
+  they count as shipped, one billboard, no model. **Buildings with no shipped cut** (mods, community maps: `depth`, feature `depth-model`). `DtArt::map_atlas`
+  reads each one's cached cut (`depth::cached`, the cache folder `cards` under `platform::cache_dir`, keyed as
+  the shipped data) into the atlas's overlay (`queue::Overlay`), and queues the rest (`queue::unknown`).
+  `DtArt::depth_tick` runs once a frame of the world map, and only when it is tilted. Once the model file is there
+  (`depth::fetch::model_file`), it starts `depth::Service`: a loader thread loads the small plan (the download
+  already checked the file), then `depth::worker_count` workers share that plan (half the desktop's cores, at most
+  4; 2 on the phones), each cutting one sprite at a time at the lowest thread priority the platform gives. Each frame
+  it hands the workers the queue, up to two per worker, drains their answers into the overlay, and sets
+  `depth::unknown` (the count the Settings row reads). Input: `queue::input_size`, 266 px up to 120 px on the longer side, else 518 px: the same file,
+  a second plan made on first use (`DepthModel::plan`). Nothing is fetched there. The model comes only from the
+  Settings row **«Модель глубины для модов»** (`main_menu::Row::DepthModel`, shown in 2.5D while `depth::unknown`
+  is above zero): its value is `depth::fetch::status` (Absent, Downloading, Failed, Installed), its click
+  `depth::fetch::start`, a background download of `DEPTH_MODEL_URL` (the `depth-model-v1` asset of the community
+  repository) into `depth::fetch::models_dir` (`app_dir/models`, the phones' cache folder). `fetch_verified` checks the
+  size and SHA-256 before the file takes its place; a failure removes the partial file, and the row offers it again.
+  `RAZDOR_DEPTH_MODEL=<file>` uses a file as it is (no download). Results are cached as they come (`cut`, `cache`).
 - Picking: `map_pointer` is the ground under the pointer (NaN over the sky), `tile_under_pixel` the
   cell under a pixel at any turn (tested in `tilt_tests`). Overlays on the window (tooltip, battle
   marks, effects, the travel time) use `Camera::screen_at`. A figure is picked by its cell.

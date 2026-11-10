@@ -1,18 +1,24 @@
 //! The built-in depth model: the 2.5D cards of a sprite that has no shipped cut data (mods,
 //! community maps). Depth Anything V2 Small runs on the player's machine through tract; the
-//! sprite is cut into depth regions (`cut`), and the cut is cached per sprite (`cache`). Pure
-//! Rust, no macroquad.
+//! sprite is cut into depth regions (`cut`), and the cut is cached per sprite (`cache`). The model
+//! file is downloaded on the player's word (`fetch`, the Settings row), and the sprites are cut on
+//! background workers (`work`). Pure Rust, no macroquad.
 //!
-//! With the feature `depth-model` off, the same API compiles to stubs: `DepthModel::load` gives
-//! `None`, so no model exists and no sprite gets cards from it.
+//! With the feature `depth-model` off, the same API compiles to stubs: no model loads, no worker
+//! starts, and no sprite gets cards from it. `queue` (the bookkeeping) and `fetch` (the file) need
+//! no tract and compile in every build.
 //!
-//! Not here yet: the model file's download and its hash (a release asset), and the switch in the
-//! 2.5D view. See `docs/superpowers/specs/2026-11-10-atmosphere-design.md` §2.
+//! See `docs/superpowers/specs/2026-11-10-atmosphere-design.md` §2 and `docs/flows/assets-and-drawing.md`
+//! («Cards»).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::dt::cards::Card;
 use crate::dt::gfx::Image;
+
+pub mod fetch;
+pub mod queue;
 
 #[cfg(feature = "depth-model")]
 mod cache;
@@ -22,9 +28,13 @@ mod cut;
 mod model;
 #[cfg(all(test, feature = "depth-model"))]
 mod parity;
+#[cfg(feature = "depth-model")]
+mod work;
 
 #[cfg(feature = "depth-model")]
-pub use model::{DepthModel, INPUT};
+pub use model::DepthModel;
+#[cfg(feature = "depth-model")]
+pub use work::{worker_count, Service};
 
 /// Stub: without the feature there is no model, and no model can be loaded.
 #[cfg(not(feature = "depth-model"))]
@@ -41,6 +51,81 @@ impl DepthModel {
     pub fn depth(&self, _rgba: &Image) -> Vec<f32> {
         match self.0 {}
     }
+}
+
+/// Stub: without the feature no worker starts.
+#[cfg(not(feature = "depth-model"))]
+pub struct Service(std::convert::Infallible);
+
+#[cfg(not(feature = "depth-model"))]
+impl Service {
+    /// Always `None` without the feature.
+    pub fn start(_model: PathBuf, _cache: Option<PathBuf>) -> Option<Service> {
+        None
+    }
+
+    /// Unreachable: no `Service` exists without the feature.
+    pub fn room(&self) -> usize {
+        match self.0 {}
+    }
+
+    /// Unreachable: no `Service` exists without the feature.
+    pub fn submit(&mut self, _job: queue::Job) -> bool {
+        match self.0 {}
+    }
+
+    /// Unreachable: no `Service` exists without the feature.
+    pub fn drain(&mut self) -> Vec<queue::Done> {
+        match self.0 {}
+    }
+
+    /// Unreachable: no `Service` exists without the feature.
+    pub fn in_flight(&self) -> usize {
+        match self.0 {}
+    }
+}
+
+/// Whether this build can run the model at all (the feature is on).
+pub fn available() -> bool {
+    cfg!(feature = "depth-model")
+}
+
+/// The folder the cuts are cached in: `cards` under the cache folder (shared by every install,
+/// keyed by the sprite's pixels). `None` where there is no cache folder.
+pub fn cache_folder() -> Option<PathBuf> {
+    crate::platform::cache_dir().map(|d| d.join("cards"))
+}
+
+/// The cached cut of a sprite in `dir`: `Some(empty)` for a sprite with one region, `None` when
+/// there is no entry (or without the feature).
+#[cfg(feature = "depth-model")]
+pub fn cached_in(dir: &Path, img: &Image) -> Option<Vec<Card>> {
+    cache::read(dir, crate::dt::cards::sprite_key(img), img.width, img.height)
+}
+
+/// See the feature build: without the feature nothing is cached.
+#[cfg(not(feature = "depth-model"))]
+pub fn cached_in(_dir: &Path, _img: &Image) -> Option<Vec<Card>> {
+    None
+}
+
+/// The cached cut of a sprite in the cache folder (see [`cached_in`]).
+pub fn cached(img: &Image) -> Option<Vec<Card>> {
+    cached_in(&cache_folder()?, img)
+}
+
+/// Building sprites still waiting for a cut (queued or cut now), as the world map last counted
+/// them. The Settings row shows only while it is above zero.
+static UNKNOWN: AtomicUsize = AtomicUsize::new(0);
+
+/// Records how many building sprites still wait for a cut.
+pub fn set_unknown(n: usize) {
+    UNKNOWN.store(n, Ordering::Relaxed);
+}
+
+/// How many building sprites still wait for a cut.
+pub fn unknown() -> usize {
+    UNKNOWN.load(Ordering::Relaxed)
 }
 
 /// The cards of a sprite cut with `model`, back to front; empty when the sprite stays one card.

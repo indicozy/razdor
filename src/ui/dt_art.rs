@@ -11,6 +11,7 @@ use std::path::Path;
 use macroquad::prelude::*;
 
 use razdor::dt::gfx::{self, water_frame_file, Image, ObjectSprite, ObjectSprites, ITEM_ICONS, MAP_OBJECTS, TERRAIN_TEXTURES, TEXTURES_DIR, UNIT_FIGURES, UNIT_PORTRAITS, WATER_FRAMES};
+use razdor::depth::{self, queue::{self, Job, Overlay}};
 use razdor::dt::cards::{self, Card};
 use razdor::dt::preload;
 use std::path::PathBuf;
@@ -44,8 +45,13 @@ pub struct Atlas {
     pub texture: Texture2D,
     /// (section, category, index) → source rectangle in `texture`.
     rects: RectTable,
-    /// The 2.5D cards of the building sprites that have cut data ([`cards`]), by the same key.
+    /// The 2.5D cards of the building sprites that have shipped cut data ([`cards`]), by the same key.
     cards: HashMap<(u32, u32, u32), &'static [Card]>,
+    /// The cards the depth model cut, or the cache held, for the building sprites with no shipped
+    /// cut (`depth`). Grows while the workers answer ([`DtArt::depth_tick`]).
+    live: RefCell<Overlay>,
+    /// The building sprites (positions in the object sprites) the model still has to cut, in order.
+    pending: RefCell<VecDeque<usize>>,
 }
 
 /// The atlas's rectangles as a dense table over the two sections and the 8-bit category and index
@@ -112,10 +118,11 @@ impl Atlas {
         self.rects.get(ObjectSprite::BUILDINGS, picture_type.into(), variant.into())
     }
 
-    /// The 2.5D cards of a building's sprite, back to front; `None` for a picture with no cut data
-    /// (it stands as one billboard).
+    /// The 2.5D cards of a building's sprite, back to front: the shipped cut, else the depth
+    /// model's. `None` for a picture with no cut data (it stands as one billboard).
     pub fn building_cards(&self, picture_type: u8, variant: u8) -> Option<&[Card]> {
-        self.cards.get(&(ObjectSprite::BUILDINGS, picture_type.into(), variant.into())).copied()
+        let id = (ObjectSprite::BUILDINGS, picture_type.into(), variant.into());
+        self.cards.get(&id).copied().or_else(|| self.live.borrow().get(id))
     }
 }
 
@@ -139,6 +146,8 @@ pub struct DtArt {
     figures_sheets: RefCell<HashMap<String, Option<Texture2D>>>,
     /// Textures [`DtArt::warm`] makes ahead, in order, with the picture each waits for.
     warm: RefCell<VecDeque<(PathBuf, Warm)>>,
+    /// The depth model's workers, once they are started ([`DtArt::depth_tick`]).
+    depth: RefCell<Option<depth::Service>>,
 }
 
 fn or_log<T: Default>(what: &str, r: Result<T, DtError>) -> T {
@@ -183,6 +192,7 @@ impl DtArt {
             textures: RefCell::new(HashMap::new()),
             figures_sheets: RefCell::new(HashMap::new()),
             warm: RefCell::new(VecDeque::new()),
+            depth: RefCell::new(None),
         }
     }
 
@@ -394,16 +404,33 @@ impl DtArt {
                         .map(|(s, (x, y))| ((s.section, s.cat, s.idx), Rect::new(x as f32, y as f32, s.image.width as f32, s.image.height as f32))),
                 );
                 // The cut data is keyed by the sprite's pixels (`tools/depth`); a key whose size
-                // differs is no match.
-                let cards = sprites
-                    .iter()
-                    .filter(|s| s.section == ObjectSprite::BUILDINGS)
-                    .filter_map(|s| {
-                        let known = cards::builtin().get(&cards::sprite_key(&s.image))?;
-                        (known.w == s.image.width && known.h == s.image.height).then_some(((s.section, s.cat, s.idx), known.cards.as_slice()))
-                    })
-                    .collect();
-                Some(Atlas { texture, rects, cards })
+                // differs is no match. A building with no shipped cut takes its cached depth-model
+                // cut now (no model needed), and the rest queue for the model (`depth_tick`).
+                let mut cards = HashMap::new();
+                let mut live = Overlay::default();
+                let mut known = Vec::with_capacity(sprites.len());
+                for s in sprites.iter() {
+                    let id = (s.section, s.cat, s.idx);
+                    let building = s.section == ObjectSprite::BUILDINGS;
+                    let key = cards::sprite_key(&s.image);
+                    let entry = building.then(|| cards::builtin().get(&key).filter(|k| k.w == s.image.width && k.h == s.image.height)).flatten();
+                    if let Some(k) = entry {
+                        cards.insert(id, k.cards.as_slice());
+                    }
+                    // A one-card building is shipped as known too: it stands as one billboard.
+                    let shipped = building && (entry.is_some() || cards::builtin_one_card().contains(&key));
+                    let mut cached = false;
+                    if building && !shipped {
+                        if let Some(c) = depth::cached(&s.image) {
+                            live.insert(id, c);
+                            cached = true;
+                        }
+                    }
+                    known.push(queue::Known { building, shipped, cached });
+                }
+                let pending: VecDeque<usize> = queue::unknown(known).into();
+                depth::set_unknown(pending.len());
+                Some(Atlas { texture, rects, cards, live: RefCell::new(live), pending: RefCell::new(pending) })
             })
             .as_ref()
     }
@@ -441,5 +468,37 @@ impl DtArt {
         self.cached(Key::Building(picture_type, variant), || {
             texture(&self.objects().building(picture_type, variant)?.image)
         })
+    }
+
+    /// Runs the built-in depth model for the 2.5D view, once a frame of the world map: when the
+    /// model file is there, the workers start and the building sprites with no cut are handed to
+    /// them as they have room; the cards that come back join the atlas. Does nothing flat, without
+    /// the feature, in a snapshot run, or without a model file (the model is never fetched here).
+    pub fn depth_tick(&self, tilted: bool) {
+        if !tilted || !depth::available() || std::env::var_os("RAZDOR_SNAPSHOT").is_some() {
+            return;
+        }
+        let Some(atlas) = self.map_atlas() else { return };
+        let mut work = self.depth.borrow_mut();
+        if work.is_none() {
+            if atlas.pending.borrow().is_empty() {
+                return;
+            }
+            let Some(model) = depth::fetch::model_file() else { return };
+            *work = depth::Service::start(model, depth::cache_folder());
+        }
+        let Some(service) = work.as_mut() else { return };
+        let done = service.drain();
+        atlas.live.borrow_mut().add(done);
+        let mut pending = atlas.pending.borrow_mut();
+        while service.room() > 0 {
+            let Some(i) = pending.pop_front() else { break };
+            let s = &self.objects().sprites[i];
+            if !service.submit(Job { id: (s.section, s.cat, s.idx), img: s.image.clone() }) {
+                pending.push_front(i);
+                break;
+            }
+        }
+        depth::set_unknown(pending.len() + service.in_flight());
     }
 }

@@ -533,6 +533,11 @@ Razdor's: unexplored land is drifting mist instead of black. Style only. = Не�
 # Advanced settings: moving water (Razdor's, off by default)
 Moving water = Живая вода
 Razdor's: the water ripples, foam runs along the shores, rivers flow and ships leave a wake. Style only. = Вода на карте рябит, у берегов бежит пена, реки текут, за кораблями остаётся след. Только вид.
+Depth model for mods = Модель глубины для модов
+Download (50 MB) = Скачать (50 МБ)
+Downloading {percent}% = Загрузка {percent}%
+Download failed = Не удалось скачать
+Razdor's: buildings from mods that bring their own art stand in 2.5D on their own ground too. The model (Depth Anything V2 Small, Apache-2.0) is downloaded once, about 50 MB, and runs on this device. = Раздора: постройки из модов со своей графикой тоже стоят в 2.5D на своей земле. Модель (Depth Anything V2 Small, Apache-2.0) скачивается один раз, около 50 МБ, и работает на этом устройстве.
 
 # Advanced settings: arranging the army outside battle
 Army arrangement = Расстановка армии

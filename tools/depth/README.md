@@ -18,7 +18,9 @@ for the 2.5D view: each card stands at its own ground point and sorts like a spr
 5. Splits the opaque pixels into regions: 4-connected, joined when their normalised depths differ
    by at most 0.06. Small regions (under max(60 px, 1.5 % of the opaque pixels)) merge into the
    touching region with the closest mean depth. More than 8 regions merge pairwise by mean depth.
-   A sprite left with one region gets no entry; the engine keeps one card for it.
+   A sprite left with one region gets no entry; the engine keeps one card for it. The file's `one_card` list
+   names every building sprite with no entry (one region, or under 200 opaque pixels), so the engine knows them
+   and never runs the depth model on a base-game building.
 6. Finds each region's foot: the lowest row, and the mean x of its bottom pixels. A region with
    another region directly below 30 % or more of its bottom pixels is occluded; its foot is moved
    down along a ground line fitted through the unoccluded regions of the sprite.

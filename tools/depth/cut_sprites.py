@@ -533,10 +533,12 @@ def build_cards(lab, D, K, op=None):
 # ----------------------------------------------------------------------------------------------
 
 
-def write_json(path: Path, sprites: dict) -> None:
+def write_json(path: Path, sprites: dict, one_card=()) -> None:
+    """`one_card`: the building sprites left with no entry (one region, or too small to cut). The
+    engine treats them as known, so a mod's buildings are the only ones it asks the model about."""
     path.parent.mkdir(parents=True, exist_ok=True)
     keys = sorted(sprites)
-    lines = [f'{{"version":1,"model":{json.dumps(MODEL)},"alpha_opaque":{ALPHA_OPAQUE},"sprites":{{']
+    lines = [f'{{"version":1,"model":{json.dumps(MODEL)},"alpha_opaque":{ALPHA_OPAQUE},"one_card":{json.dumps(list(one_card))},"sprites":{{']
     for i, k in enumerate(keys):
         body = json.dumps(sprites[k], separators=(",", ":"))
         lines.append(f"{json.dumps(k)}:{body}" + ("," if i < len(keys) - 1 else ""))
@@ -707,7 +709,8 @@ def main() -> None:
         if args.preview:
             preview_sprite(args.preview / f"{key}_n{len(cards)}.png", rgba, D, lab, K, cards)
 
-    write_json(args.out, out)
+    one_card = sorted(k for k in sprites if sprites[k][0] == SECTION_BUILDING and k not in out)
+    write_json(args.out, out, one_card)
     if args.preview:
         buildings = [k for k in sorted(sprites) if sprites[k][0] == SECTION_BUILDING]
         items = [(sprites[k][1], sprites[k][2], composite_rgb(sprites[k][3]),

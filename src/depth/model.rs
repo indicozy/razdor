@@ -4,12 +4,15 @@
 //! fp16 weights and casts become fp32 (tract's own fp16 path runs at 23 to 36 s per image; its
 //! fp32 path at 0.3 to 0.5 s on one desktop thread). The loaded weights take 99 MB.
 //!
-//! Thread safety: [`DepthModel`] is `Send`, so a worker can own one. `depth` takes `&self` and the
-//! plan keeps no state between calls, but a model is meant to belong to one worker: tract runs one
-//! image on one thread, so parallel sprites need one model each, and each model holds its own
-//! 99 MB of weights.
+//! Two input sizes come from the one file: [`SMALL`] (266) for most sprites and [`LARGE`] (518)
+//! for big ones. Each size is a plan of its own; the 518 plan is made on first use (about 130 MB
+//! more while loaded), so a install of small sprites never pays for it.
+//!
+//! Thread safety: [`DepthModel`] is `Send` and `Sync`. A run keeps its state in its own call, so
+//! the workers share one model (and its weights) and each cuts one sprite at a time.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use half::f16;
 use image::imageops::{self, FilterType};
@@ -17,10 +20,8 @@ use image::RgbImage;
 use tract_onnx::pb;
 use tract_onnx::prelude::*;
 
+use super::queue::{input_size, LARGE, SMALL};
 use crate::dt::gfx::Image;
-
-/// The side of the model's square input (the file is shape-fixed to 1x3x266x266).
-pub const INPUT: usize = 266;
 /// The background the sprite is composited over before the model sees it.
 const GREY: f32 = 128.0;
 /// ImageNet mean and standard deviation, per RGB channel.
@@ -35,20 +36,39 @@ type Plan = std::sync::Arc<TypedRunnableModel>;
 
 /// Depth Anything V2 Small, loaded and optimised by tract.
 pub struct DepthModel {
-    plan: Plan,
+    path: PathBuf,
+    small: Plan,
+    /// The plan at the large input, made from the same file on first use. `None` when that failed.
+    large: OnceLock<Option<Plan>>,
 }
 
 impl DepthModel {
-    /// Loads the model file. `None`, with the reason on stderr, when the file cannot be read or
-    /// tract refuses it (not a shape-fixed Depth Anything V2 Small file).
+    /// Loads the model file at the small input. `None`, with the reason on stderr, when the file
+    /// cannot be read or tract refuses it (not a shape-fixed Depth Anything V2 Small file).
     pub fn load(path: &Path) -> Option<DepthModel> {
-        match load_plan(path) {
-            Ok(plan) => Some(DepthModel { plan }),
+        match load_plan(path, SMALL) {
+            Ok(small) => Some(DepthModel { path: path.to_path_buf(), small, large: OnceLock::new() }),
             Err(e) => {
                 eprintln!("depth model {}: {e:?}", path.display());
                 None
             }
         }
+    }
+
+    /// The plan for an input side: the small one, or the large one (made now if it is not yet).
+    fn plan(&self, size: usize) -> Option<&Plan> {
+        if size == SMALL {
+            return Some(&self.small);
+        }
+        self.large
+            .get_or_init(|| match load_plan(&self.path, LARGE) {
+                Ok(plan) => Some(plan),
+                Err(e) => {
+                    eprintln!("depth model {} at {LARGE} px: {e:?}", self.path.display());
+                    None
+                }
+            })
+            .as_ref()
     }
 
     /// The sprite's depth map, `width * height` values, row-major, higher = closer. The sprite is
@@ -73,24 +93,26 @@ impl DepthModel {
         if rgba.rgba.len() != w * h * 4 {
             return Ok(Vec::new());
         }
-        let input = preprocess(rgba);
-        let tensor = Tensor::from_shape(&[1, 3, INPUT, INPUT], &input)?;
-        let out = self.plan.run(tvec!(tensor.into()))?;
+        let size = input_size(rgba.width, rgba.height);
+        let Some(plan) = self.plan(size) else { return Ok(Vec::new()) };
+        let input = preprocess(rgba, size);
+        let tensor = Tensor::from_shape(&[1, 3, size, size], &input)?;
+        let out = plan.run(tvec!(tensor.into()))?;
         let view = out[0].to_plain_array_view::<f32>()?;
         let depth: Vec<f32> = view.iter().copied().collect();
-        if depth.len() != INPUT * INPUT {
+        if depth.len() != size * size {
             return Ok(Vec::new());
         }
-        Ok(resize_bilinear(&depth, INPUT, INPUT, w, h))
+        Ok(resize_bilinear(&depth, size, size, w, h))
     }
 }
 
-fn load_plan(path: &Path) -> TractResult<Plan> {
+fn load_plan(path: &Path, size: usize) -> TractResult<Plan> {
     let mut proto = tract_onnx::onnx().proto_model_for_path(path)?;
     upcast_fp16(&mut proto);
     let plan = tract_onnx::onnx()
         .model_for_proto_model(&proto)?
-        .with_input_fact(0, f32::fact([1, 3, INPUT, INPUT]).into())?
+        .with_input_fact(0, f32::fact([1, 3, size, size]).into())?
         .into_optimized()?
         .into_runnable()?;
     Ok(plan)
@@ -145,12 +167,12 @@ fn composite(rgba: &Image) -> Vec<u8> {
     rgb
 }
 
-/// The composite resized to the model's square input (CatmullRom; the spike's measured choice),
-/// normalised with ImageNet's mean and deviation, channels first.
-fn preprocess(rgba: &Image) -> Vec<f32> {
+/// The composite resized to the model's square input of `size` (CatmullRom; the spike's measured
+/// choice), normalised with ImageNet's mean and deviation, channels first.
+fn preprocess(rgba: &Image, size: usize) -> Vec<f32> {
     let img = RgbImage::from_raw(rgba.width, rgba.height, composite(rgba)).expect("the composite is width x height");
-    let img = imageops::resize(&img, INPUT as u32, INPUT as u32, FilterType::CatmullRom);
-    let n = INPUT * INPUT;
+    let img = imageops::resize(&img, size as u32, size as u32, FilterType::CatmullRom);
+    let n = size * size;
     let mut out = vec![0f32; 3 * n];
     for (i, px) in img.pixels().enumerate() {
         for c in 0..3 {
@@ -195,9 +217,24 @@ mod tests {
     }
 
     #[test]
-    fn the_model_is_send_so_a_worker_can_own_it() {
-        fn assert_send<T: Send>() {}
-        assert_send::<DepthModel>();
+    fn the_model_is_send_and_sync_so_the_workers_share_it() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<DepthModel>();
+    }
+
+    /// The large plan comes from the same file: a sprite past the small side's limit gets a depth
+    /// map of its own size. Needs `RAZDOR_DEPTH_MODEL`.
+    #[test]
+    fn a_big_sprite_and_a_small_one_both_get_a_depth_map() {
+        let Some(path) = std::env::var_os(crate::depth::fetch::ENV_VAR) else { return };
+        let model = DepthModel::load(Path::new(&path)).expect("the model loads");
+        let small = image(40, 30, vec![90; 40 * 30 * 4]);
+        let big = image(200, 150, vec![90; 200 * 150 * 4]);
+        assert_eq!(model.depth(&small).len(), 40 * 30);
+        let depth = model.depth(&big);
+        assert_eq!(depth.len(), 200 * 150);
+        assert!(depth.iter().all(|d| d.is_finite()));
+        assert!(model.large.get().is_some_and(|p| p.is_some()), "the large plan was made");
     }
 
     #[test]

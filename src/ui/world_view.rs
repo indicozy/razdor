@@ -3415,6 +3415,10 @@ fn draw_sky(cam: &Camera) {
 
 #[allow(clippy::too_many_arguments)]
 fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<MapHoverLook>, waits: bool, veil: Veil, relief: Option<daylight::Relief>) {
+    // The depth model's workers (2.5D, buildings with no cut): they run beside the frame.
+    if let Some(art) = assets.dt.as_ref() {
+        art.depth_tick(cam.tilt.is_some());
+    }
     draw_sky(cam);
     if waits {
         gpu_wait(Stage::GpuSky);

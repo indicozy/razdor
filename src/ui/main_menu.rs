@@ -8,6 +8,7 @@
 
 use std::cell::Cell;
 
+use razdor::depth;
 use razdor::local;
 use crate::ui::input::{get_keys_pressed, is_mouse_button_down};
 use macroquad::prelude::*;
@@ -1589,7 +1590,7 @@ impl Group {
     /// The rows the group shows, top to bottom. Every row is in exactly one group (a test checks it).
     pub fn rows(self) -> &'static [Row] {
         match self {
-Group::Map => &[Row::MapZoom, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::Mist, Row::LiveWater, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
+Group::Map => &[Row::MapZoom, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::Mist, Row::LiveWater, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
             Group::Battle => &[Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
@@ -1615,6 +1616,7 @@ pub enum Row {
     LightHour,
     Mist,
     LiveWater,
+    DepthModel,
     MapBattles,
     ArmyList,
     LeaderName,
@@ -1641,7 +1643,7 @@ pub enum Row {
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 36] = [
+pub const ALL: [Row; 37] = [
         Row::MapZoom,
         Row::MapResolution,
         Row::FrameCap,
@@ -1656,6 +1658,7 @@ pub const ALL: [Row; 36] = [
         Row::LightHour,
         Row::Mist,
         Row::LiveWater,
+        Row::DepthModel,
         Row::MapBattles,
         Row::ArmyList,
         Row::LeaderName,
@@ -1690,6 +1693,7 @@ pub const ALL: [Row; 36] = [
             Row::Lighting => Some(tr("Razdor's: the map's light follows the time of day. Style only.")),
             Row::Mist => Some(tr("Razdor's: unexplored land is drifting mist instead of black. Style only.")),
             Row::LiveWater => Some(tr("Razdor's: the water ripples, foam runs along the shores, rivers flow and ships leave a wake. Style only.")),
+            Row::DepthModel => Some(tr("Razdor's: buildings from mods that bring their own art stand in 2.5D on their own ground too. The model (Depth Anything V2 Small, Apache-2.0) is downloaded once, about 50 MB, and runs on this device.")),
             Row::AiStrength => Some(tr("Maximum: before each move the enemy of your battles weighs every move and answer ahead and plays each out to the end of the battle.")),
             Row::ArmyArrangement => Some(tr("Clicks: the first click picks a unit or an item, the second places it. Dragging: a click only selects, and units and items are moved by dragging. Both: clicks and dragging at once.")),
             Row::Experience => Some(tr("As in the original, a unit's experience is dropped when it is promoted; Kept keeps it. Experience left over after a level is kept either way.")),
@@ -1712,6 +1716,9 @@ pub const ALL: [Row; 36] = [
             Row::FarGround | Row::ViewCamera => audio.map_tilt && audio.map_first_person,
             Row::LightCycle => audio.map_light == LightMode::Cycle,
             Row::LightHour => audio.map_light == LightMode::Fixed,
+            // Razdor's (the owner's decision, 2026-11-10): the 2.5D view, while a building of the
+            // install still has no cut (`depth`).
+            Row::DepthModel => audio.map_tilt && depth::available() && depth::unknown() > 0,
             Row::Orientation => cfg!(target_os = "android"),
             // The bottom bar's size is a phone's (Razdor's; the desktop has no such row).
             Row::BottomBar => bottom_bar_row_shown(super::display::dp_px().is_some(), window_layout::portrait()),
@@ -2087,6 +2094,18 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
             let value = format!("{}:00", audio.map_light_hour);
             if labelled_row(c, geo, tr("Hour"), &value).0 {
                 audio.map_light_hour = (audio.map_light_hour / 3 * 3 + 3) % 24;
+            }
+        }
+        Row::DepthModel => {
+            // Razdor's: the model is downloaded only on this row's click, once (`depth::fetch`).
+            let value: String = match depth::fetch::status() {
+                depth::fetch::Status::Installed => tr("Installed").to_string(),
+                depth::fetch::Status::Downloading(percent) => trf!("Downloading {percent}%", percent = percent).to_string(),
+                depth::fetch::Status::Failed => tr("Download failed").to_string(),
+                depth::fetch::Status::Absent => tr("Download (50 MB)").to_string(),
+            };
+            if labelled_row_help(c, geo, tr("Depth model for mods"), &value, Row::DepthModel.help_text()).0 {
+                depth::fetch::start();
             }
         }
         Row::LiveWater => {
@@ -3462,10 +3481,26 @@ mod tests {
     #[test]
     fn the_long_hints_are_behind_a_question_mark() {
         let with: Vec<Row> = Row::ALL.into_iter().filter(|r| r.help_text().is_some()).collect();
-        assert_eq!(with, vec![Row::MapZoom, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::Lighting, Row::Mist, Row::LiveWater, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::Language, Row::Updates]);
+        assert_eq!(with, vec![Row::MapZoom, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::Lighting, Row::Mist, Row::LiveWater, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::Language, Row::Updates]);
         scene_help("Experience");
         assert_eq!(HELP_PINNED.with(|p| p.get()), Row::Experience.help_text());
         HELP_PINNED.with(|p| p.set(None));
+    }
+
+    /// The depth model's row shows only with the 2.5D view and while a building of the install
+    /// still waits for its cut (`depth::unknown`).
+    #[test]
+    fn the_depth_model_row_shows_in_2_5d_while_a_building_waits() {
+        if !depth::available() {
+            return;
+        }
+        let tilted = super::super::audio::Settings { map_tilt: true, ..Default::default() };
+        depth::set_unknown(0);
+        assert!(!Row::DepthModel.shown(&tilted), "nothing waits");
+        depth::set_unknown(3);
+        assert!(Row::DepthModel.shown(&tilted));
+        assert!(!Row::DepthModel.shown(&super::super::audio::Settings::default()), "the flat view");
+        depth::set_unknown(0);
     }
 
     /// The settings tabs: the General one first (`None`), then the five groups in their order.

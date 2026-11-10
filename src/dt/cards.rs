@@ -3,7 +3,7 @@
 //! depth model) and ship in `data/cards/objects.json`; only numbers, no pixels. Pure data:
 //! no macroquad.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use serde::Deserialize;
@@ -50,6 +50,10 @@ pub fn sprite_key(img: &Image) -> u64 {
 #[derive(Deserialize)]
 struct File {
     sprites: HashMap<String, RawSprite>,
+    /// Building sprites left with no entry: one region, or too small to cut. They stand as one
+    /// billboard, and the depth model is not asked about them.
+    #[serde(default)]
+    one_card: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -92,10 +96,28 @@ pub fn parse(json: &str) -> HashMap<u64, SpriteCards> {
         .collect()
 }
 
+/// The keys listed as one-card buildings in `json` (16 hex digits each; others are dropped).
+pub fn parse_one_card(json: &str) -> HashSet<u64> {
+    let Ok(file) = serde_json::from_str::<File>(json) else { return HashSet::new() };
+    file.one_card.iter().filter(|k| k.len() == 16).filter_map(|k| u64::from_str_radix(k, 16).ok()).collect()
+}
+
 /// The bundled cards (`data/cards/objects.json`), parsed once.
 pub fn builtin() -> &'static HashMap<u64, SpriteCards> {
     static CARDS: OnceLock<HashMap<u64, SpriteCards>> = OnceLock::new();
     CARDS.get_or_init(|| parse(include_str!("../../data/cards/objects.json")))
+}
+
+/// The bundled one-card keys (see [`parse_one_card`]), parsed once.
+pub fn builtin_one_card() -> &'static HashSet<u64> {
+    static KEYS: OnceLock<HashSet<u64>> = OnceLock::new();
+    KEYS.get_or_init(|| parse_one_card(include_str!("../../data/cards/objects.json")))
+}
+
+/// Whether the bundled data knows a sprite: it has cut data of its size, or it is a one-card one.
+pub fn builtin_knows(img: &Image) -> bool {
+    let key = sprite_key(img);
+    builtin().get(&key).is_some_and(|k| k.w == img.width && k.h == img.height) || builtin_one_card().contains(&key)
 }
 
 #[cfg(test)]
@@ -136,20 +158,29 @@ mod tests {
         assert!(parse("not json").is_empty());
     }
 
-    /// The player's install; skipped without `RAZDOR_DT_DIR`. The keys of the bundled cards are
-    /// the install's building sprites' keys, with their size.
+    /// The player's install; skipped without `RAZDOR_DT_DIR`. Every building sprite of the install
+    /// is known to the bundled data (a cut, or one card), so the depth model is never asked about
+    /// a base-game building.
     #[test]
     fn bundled_keys_match_the_installs_buildings() {
         let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
         let install = crate::dt::install::DtInstall::load(std::path::Path::new(&dir)).expect("install loads");
         let sprites = install.map_objects().expect("map objects decode");
         let buildings: Vec<&super::super::gfx::ObjectSprite> = sprites.sprites.iter().filter(|s| s.section == super::super::gfx::ObjectSprite::BUILDINGS).collect();
-        let matched = buildings
-            .iter()
-            .filter(|s| builtin().get(&sprite_key(&s.image)).is_some_and(|k| k.w == s.image.width && k.h == s.image.height))
-            .count();
-        println!("{matched} of {} building sprites have cards", buildings.len());
-        assert!(matched > 0, "no building sprite of the install has cut data");
+        let cut = buildings.iter().filter(|s| builtin().get(&sprite_key(&s.image)).is_some_and(|k| k.w == s.image.width && k.h == s.image.height)).count();
+        println!("{cut} of {} building sprites have cards", buildings.len());
+        assert!(cut > 0, "no building sprite of the install has cut data");
+        let unknown: Vec<u64> = buildings.iter().filter(|s| !builtin_knows(&s.image)).map(|s| sprite_key(&s.image)).collect();
+        assert!(unknown.is_empty(), "building sprites the bundled data does not know: {unknown:x?}");
+    }
+
+    #[test]
+    fn one_card_keys_are_read_and_bad_ones_dropped() {
+        let json = r#"{"version":1,"one_card":["0000000000000007","xyz","00000000000000080"],"sprites":{}}"#;
+        let keys = parse_one_card(json);
+        assert_eq!(keys, HashSet::from([7]));
+        assert!(parse_one_card(r#"{"sprites":{}}"#).is_empty(), "the list is optional");
+        assert!(builtin_one_card().len() >= 37, "the bundled list is there");
     }
 
     #[test]

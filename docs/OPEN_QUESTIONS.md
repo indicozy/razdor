@@ -8,6 +8,21 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **The depth model's cards are not checked by eye, and the phones are not measured** (2026-11-10,
+  atmosphere part 2). Known: the engine's 266 px and 518 px cuts run (the parity run of part 1,
+  and the end-to-end test on three base-game sprites give two-card cuts on two of them); a
+  mod's buildings have no reference to compare with, so the owner's eye on the 2.5D view is the
+  check. Not measured: the phones' cut time (2 workers; the spike extrapolated 1.2 to 3 s a sprite
+  on one thread), the RAM of the two plans (about 130 MB more for the 518 plan, on top of about 100
+  MB for the small one: desktop RSS, not a phone), and the iOS and macOS thread priority, which
+  is written but never run. Settles with a phone run of a mod with many buildings and the owner's
+  look at the cards.
+- **The depth model's release asset does not exist yet** (2026-11-10). The Settings row downloads
+  `depth-anything-v2-small-fp16-266.onnx` from the community repository's `depth-model-v1` release,
+  which the owner uploads with the licence notice (`tools/depth/LICENSE-depth-anything-v2-small.txt`).
+  Until then the row ends in «Не удалось скачать» (download failed). Settles with the upload and
+  a download check (size 49,562,985 bytes, SHA-256 897f1b87…).
+
 - **The hero's figure byte is read two ways** (2026-11-09, found while gathering hero facts for the
   art pipeline). Armies read their figure byte as a 0-based index into `FIGURES`
   (`src/ui/world_view.rs` `FIGURES.get(a.figure)`; `Army::figure` in `src/rules/world.rs`, "an index
