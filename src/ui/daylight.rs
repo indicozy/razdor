@@ -223,6 +223,11 @@ pub fn frame_light(game_hour: f32, real_secs: f64, dt: f32) -> Option<Light> {
 
 /// The relief of this frame: [`relief_at`] the hour `frame_light` just set, None when the light is
 /// off. Call it after `frame_light` in the same frame.
+/// The hour the lighting shows this frame, when the lighting is on (`frame_light`); None otherwise.
+pub fn shown_hour() -> Option<f32> {
+    LAST_HOUR.get()
+}
+
 pub fn frame_relief() -> Option<Relief> {
     LAST_HOUR.get().map(relief_at)
 }

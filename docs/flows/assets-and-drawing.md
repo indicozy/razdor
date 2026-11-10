@@ -567,7 +567,9 @@ ash and cloud shadows in one fragment pass (the layers at level 0 are skipped; t
 three on the desktop, `display::dp_px`; the flakes and streaks grow with the zoom). The cell coordinate is centred on whole numbers (cells span ±½), so a mask lookup is
 `(p + ½) / MapSize`, and the world's y is divided by the grid's row height first. Known: the heat haze is wavering
 warm light, not a distortion (no frame readback); the bent first-person and eyes views use the plane's fit (hidden
-from players); the cloud shadows darken the sprites too.
+from players); the cloud shadows darken the sprites too. The heat haze's shimmer rises over the hot ground and follows the
+sun (`sun_at`: the lighting's shown hour, else the game clock; none at night). Sand gusts run in a heavy spell on an
+8 s gate (on for a few seconds, then off): ochre streaks and drifting veils. Ash adds a faint dark haze.
 
 ## Sound and music
 

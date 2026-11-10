@@ -5707,6 +5707,8 @@ fn draw_weather(game: &Game, assets: &Assets, cam: &Camera, light: Option<daylig
         tint: light_tint,
         layers: if crate::ui::display::dp_px().is_some() { 2.0 } else { 3.0 },
         zoom: cam.scale / PX,
+        // The lighting's hour when it is on (snapshots too), else the game clock's.
+        sun: weather::sun_at(daylight::shown_hour().unwrap_or((game.clock.total_minutes() % razdor::rules::clock::MINUTES_PER_DAY as f64 / 60.0) as f32)),
         row_height: cam.grid.row_height(),
     };
     weather::draw(&pass);

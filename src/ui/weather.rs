@@ -195,6 +195,16 @@ pub fn mask_texels(codes: &[u8]) -> (Vec<u8>, Vec<u8>) {
     (weather, lowland)
 }
 
+/// The sun's strength at an hour of the day: 0 at night, rising from 7 to 11, full from 11 to 16, and
+/// falling to 0 by 19. The heat haze shows with it.
+pub fn sun_at(hour: f32) -> f32 {
+    let ramp = |a: f32, b: f32, x: f32| {
+        let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    };
+    ramp(7.0, 11.0, hour) * (1.0 - ramp(16.0, 19.0, hour))
+}
+
 /// The levels of every biome shown this frame (0 none … 1 heavy), eased toward the schedule's.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Levels {
@@ -324,6 +334,8 @@ pub struct Pass<'a> {
     pub layers: f32,
     /// The map's zoom: the flakes and streaks grow with it (pixels per cell over 32).
     pub zoom: f32,
+    /// The sun's strength this frame (0 at night, 1 by day: `sun_at`): the heat haze follows it.
+    pub sun: f32,
     /// The grid's row height in world units (`Grid::row_height`): the world's y is rows of it.
     pub row_height: f32,
 }
@@ -373,6 +385,7 @@ uniform float Phase;
 uniform float Clock;
 uniform vec3 Tint;
 uniform float Layers;
+uniform float Sun;
 
 // The loop's angular speed: one whole cycle in the period (32 s), and the multiples used below.
 const float W = 0.19634954;
@@ -567,30 +580,53 @@ void main() {
         oa += c;
     }
 
-    // Heat haze over deserts and dust (and half over fire lands): a faint pale shimmer of bands that
-    // waver, since reading the frame back to bend it would cost a readback each frame. A heavy spell
-    // blows pale sand in gusts.
-    if (Heat > 0.01 && bw.b > 0.01) {
-        float wv = pix.y * 0.09 + 2.0 * sin(pix.x * 0.02 + 2.0 * W * Phase) + 8.0 * W * Phase;
+    // Heat haze over deserts and dust (and half over fire lands): shimmer bands rising over the hot
+    // ground and wavering sideways, strongest by day (`Sun`: none at night), and a warm bleach under a
+    // heavy spell. Not a distortion: reading the frame back would cost a readback each frame.
+    if (Heat > 0.01 && bw.b > 0.01 && Sun > 0.001) {
+        float hot = bw.b * Heat * Sun * vis;
+        float wv = pix.y * 0.06 - 4.0 * W * Phase + 1.2 * sin(pix.x * 0.01 + 2.0 * W * Phase);
         float band = 0.5 + 0.5 * sin(wv);
-        float a = band * bw.b * Heat * 0.06 * vis;
-        ov += vec3(1.0, 0.94, 0.8) * a;
-        oa += a;
-        float gust = clamp((Heat - 0.9) * 10.0, 0.0, 1.0);
-        if (gust > 0.0) {
-            float sand = gusts(pix, 600.0, 3.0);
-            float b = clamp(sand * bw.b * vis * 0.5 * gust, 0.0, 1.0);
+        float shimmer = band * band;
+        float light = 0.22 * shimmer * hot;
+        ov += vec3(1.0, 0.94, 0.8) * light;
+        oa += light;
+        dark += 0.04 * (1.0 - shimmer) * hot;
+        float bleach = 0.10 * clamp((Heat - 0.5) * 2.0, 0.0, 1.0) * bw.b * Sun * vis;
+        ov += vec3(1.0, 0.86, 0.56) * bleach;
+        oa += bleach;
+    }
+
+    // Sand gusts over the desert in a heavy spell: on for a few seconds, then off. While a gust blows,
+    // pale ochre streaks run sideways and soft veils of sand drift across (periodic: the gust gate has
+    // a period of 8 s, the veils move 240 px/s with a lattice of 120 px).
+    float heavy = clamp((Heat - 0.9) * 10.0, 0.0, 1.0);
+    if (heavy > 0.0 && bw.b > 0.01) {
+        float gate = smoothstep(0.5, 0.8, 0.5 + 0.5 * sin(4.0 * W * Phase));
+        float g = heavy * gate * bw.b * vis;
+        if (g > 0.001) {
+            float sand = gusts(pix, 600.0, 3.0) * (Layers > 2.5 ? 1.0 : 0.6);
+            float b = clamp(sand * g * 0.8, 0.0, 1.0);
             ov += vec3(0.86, 0.74, 0.46) * b;
             oa += b;
+            vec2 vq = vec2((pix.x - 240.0 * Phase) / 120.0, pix.y / 160.0);
+            float veil = smoothstep(0.45, 0.75, fbm2(vq)) * g * 0.26;
+            ov += vec3(0.82, 0.70, 0.48) * veil;
+            oa += veil;
         }
     }
 
-    // Ash over fire lands: few soft grey specks, floating and drifting up a little.
+    // Ash over fire lands: soft grey-orange specks rising slowly (fewer on a phone), and a faint dark haze.
     if (Ash > 0.01 && bw.a > 0.01) {
-        float s = flakes(pix, 32.0, vec2(4.0, -8.0), 2.0, 0.24 * Ash, 23.0, 2.0);
-        float a = clamp(s * bw.a * vis * 0.8, 0.0, 1.0);
+        float dens = (Layers > 2.5 ? 0.3 : 0.16) * Ash;
+        float s = flakes(pix, 32.0, vec2(4.0, -8.0), 2.4, dens, 23.0, 2.0);
+        float a = clamp(s * bw.a * vis * 0.85, 0.0, 1.0);
         ov += vec3(0.78, 0.74, 0.68) * a;
         oa += a;
+        float ha = 0.05 * Ash * bw.a * vis;
+        dark += ha;
+        ov += vec3(0.62, 0.55, 0.48) * ha;
+        oa += ha;
     }
 
     float A = clamp(oa, 0.0, 1.0);
@@ -625,6 +661,7 @@ fn load() -> Option<Material> {
         ("Clock", UniformType::Float1),
         ("Tint", UniformType::Float3),
         ("Layers", UniformType::Float1),
+        ("Sun", UniformType::Float1),
         ("Zoom", UniformType::Float1),
         ("RowHeight", UniformType::Float1),
     ];
@@ -670,6 +707,7 @@ pub fn draw(pass: &Pass) {
         m.set_uniform("Clock", pass.clock);
         m.set_uniform("Tint", vec3(pass.tint[0], pass.tint[1], pass.tint[2]));
         m.set_uniform("Layers", pass.layers);
+        m.set_uniform("Sun", pass.sun);
         m.set_uniform("Zoom", pass.zoom);
         m.set_uniform("RowHeight", pass.row_height);
         let d = pass.draw;
@@ -686,6 +724,18 @@ mod tests {
 
     fn schedule(seed: u64) -> Schedule {
         Schedule { seed, day: None }
+    }
+
+    #[test]
+    fn the_sun_is_none_at_night_and_full_from_eleven_to_four() {
+        for h in [0.0, 2.0, 5.0, 6.5, 19.5, 23.0] {
+            assert_eq!(sun_at(h), 0.0, "night at {h}");
+        }
+        for h in [11.0, 12.0, 14.5, 16.0] {
+            assert!((sun_at(h) - 1.0).abs() < 1e-6, "noon at {h}");
+        }
+        assert!(sun_at(9.0) > 0.0 && sun_at(9.0) < 1.0, "rising at 9");
+        assert!(sun_at(17.5) > 0.0 && sun_at(17.5) < 1.0, "falling at 17:30");
     }
 
     #[test]
