@@ -46,11 +46,26 @@ Then:
    (numpy seed 0) wins. No valid K: the sprite keeps one region, no entry, as before.
 3. The clusters' labels split into 4-connected pieces; the pieces go through the same small-region
    merge as step 5, down to at most 5 regions (merging the pair with the closest mean depth).
-4. Feet and ground fit: step 6, unchanged.
-5. Overlap: a bends region's card area is its region dilated by 4 px (a 9x9 square), clipped to the
+4. Post-merge (bends only): for each pair of adjacent regions A, B, look at their boundary pixel
+   pairs (an A pixel with a B 4-neighbour). `vertical_share` is the fraction of those pairs that are
+   left/right neighbours; `dz` is the median |smoothed depth(A) - smoothed depth(B)| over them
+   (computed and reported, not part of the rule). A and B merge when `vertical_share < 0.5` (one
+   sits on the other: a roof on its wall, a wall face on a wall face stacked in the picture) or when
+   their feet are close: |foot y(A) - foot y(B)| < 0.08 h and |foot x(A) - foot x(B)| < 0.15 w. The
+   feet are those of the foot step above, for the current regions, recomputed after each merge; the first qualifying
+   pair in (A, B) order merges, and the loop repeats until no pair qualifies. Side-by-side regions
+   with distinct feet (a tower beside a wall, a back wall in front of a wall) keep their cut. One
+   region left: no entry.
+5. Feet and ground fit: the foot step above, unchanged.
+6. Overlap: a bends region's card area is its region dilated by 4 px (a 9x9 square), clipped to the
    sprite's silhouette (the opaque pixels dilated by 1 px). So a card reaches 4 px into the neighbours
    across a cut, never past the silhouette. Cards are drawn back to front, so the front card covers
    the overlap. Plain regions keep the 1 px dilation.
+7. Polygons (bends cards only): the outline is simplified as in the outline step above (epsilon 1.0), and outer
+   rings under 40 px are dropped. If a triangle has an edge longer than 0.6 x the sprite's larger side
+   whose centroid lies outside the card area dilated by 1 px (a sliver), the card is rebuilt from its
+   full-resolution contour, simplified with epsilon 0.75, and the version with fewer slivers is kept
+   (the first one on a tie). The choice is per card, not per polygon. Plain cards are not touched.
 
 The data file format does not change (version 1). The bends pass only adds entries: a sprite that
 already had cards gets the same cards as before.
@@ -79,7 +94,8 @@ nice -n 19 taskset -c 8-19 /mnt/ai_models/venvs/qwen-tts/bin/python tools/depth/
 `--preview` is optional and writes scratch PNGs only: per sprite (sprite, depth, regions with
 triangles and feet), `contact_sheet.png` of the building sprites and `bends_sheet.png` of the
 bends-cut sprites. Never commit previews.
-A run takes about a minute and a half for both installs.
+A run takes about four minutes for both installs on all cores (230 s with the bends pass). Pinned to
+CPUs 8-19 at nice 19 the same run took 925 s.
 
 ## Licence
 

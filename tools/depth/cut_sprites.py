@@ -56,6 +56,12 @@ BENDS_SAMPLE = 3000  # silhouette sample
 BENDS_SEED = 0
 BENDS_MAX_REGIONS = 5
 BENDS_REACH = 4  # px, into the neighbours across a cut (a 9x9 square)
+BENDS_STACK_SHARE = 0.5  # vertical_share below this: one region sits on the other (roof on wall)
+BENDS_FOOT_DY = 0.08  # of the sprite's height: feet this close in y ...
+BENDS_FOOT_DX = 0.15  # ... and this close in x (of its width) belong to one structure
+BENDS_MIN_AREA = 40  # px: smaller outer polygons are dropped (bends cards only)
+BENDS_SLIVER_FRAC = 0.6  # of the sprite's larger side: the longest edge of a sliver triangle
+BENDS_SPLIT_EPS = 0.75  # the fallback polygon: full-resolution contour, finer simplification
 
 
 # ----------------------------------------------------------------------------------------------
@@ -301,7 +307,52 @@ def bends_regions(op: np.ndarray, D: np.ndarray, n_op: int):
     ev = op[:-1, :] & op[1:, :] & (lc[:-1, :] == lc[1:, :])
     lab = label_regions(op, eh, ev)  # 4-connected pieces of one cluster
     lab, K, _ = merge_regions(lab, D, n_op, BENDS_MAX_REGIONS)
-    return lab, K, k
+    lab, K, n_stacked, n_close = post_merge(lab, K, D, ds, op)
+    return lab, K, k, (n_stacked, n_close)
+
+
+def pair_stats(lab, Ds):
+    """Adjacent region pairs (a < b) -> (vertical_share, dz). vertical_share is the fraction of
+    their boundary pixel pairs that are left/right neighbours (rather than up/down); dz is the
+    median |Ds(a) - Ds(b)| over the boundary pairs, Ds the smoothed depth."""
+    counts = {}
+    cands = ((lab[:, :-1], lab[:, 1:], Ds[:, :-1], Ds[:, 1:], True),
+             (lab[:-1, :], lab[1:, :], Ds[:-1, :], Ds[1:, :], False))
+    for la, lb, da, db, left_right in cands:
+        m = (la >= 0) & (lb >= 0) & (la != lb)
+        for a, b, d in zip(la[m].tolist(), lb[m].tolist(), np.abs(da - db)[m].tolist()):
+            rec = counts.setdefault((min(a, b), max(a, b)), [0, 0, []])
+            rec[0 if left_right else 1] += 1
+            rec[2].append(d)
+    return {p: (lr / (lr + ud), float(np.median(dz))) for p, (lr, ud, dz) in counts.items()}
+
+
+def post_merge(lab, K, D, Ds, op):
+    """Bends only. Merge adjacent regions that stack (vertical_share < 0.5: one sits on the other,
+    as a roof on its wall) or that share their feet (|dy| < 0.08 h and |dx| < 0.15 w: two faces
+    of one structure). Recomputed after each merge until no pair qualifies. Side-by-side regions
+    with distinct feet keep their cut. Returns (lab, K, n_stacked, n_close)."""
+    h, w = lab.shape
+    n_stacked = n_close = 0
+    while K > 1:
+        feet_now = feet(lab, D, K)
+        pick = None
+        for (a, b), (share, _dz) in sorted(pair_stats(lab, Ds).items()):
+            stacked = share < BENDS_STACK_SHARE
+            (ax, ay), (bx, by) = feet_now[a], feet_now[b]
+            close = abs(ay - by) < BENDS_FOOT_DY * h and abs(ax - bx) < BENDS_FOOT_DX * w
+            if stacked or close:
+                pick = (a, b, stacked)
+                break
+        if pick is None:
+            break
+        a, b, stacked = pick
+        lab, K = merge_into(lab, b, a)
+        if stacked:
+            n_stacked += 1
+        else:
+            n_close += 1
+    return lab, K, n_stacked, n_close
 
 
 def is_bends_candidate(section: int, n_op: int, D: np.ndarray, op: np.ndarray) -> bool:
@@ -370,34 +421,93 @@ def card_grown(mask: np.ndarray, op=None) -> np.ndarray:
     return reach & silhouette
 
 
-def region_card(grown: np.ndarray):
-    """Polygon and triangles of one card area (a 0/255 mask): (verts, tris) as flat int lists,
-    or None."""
-    contours, hier = cv2.findContours(grown, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+card_stats = Counter()  # bends cards: specks dropped, slivers seen, fallbacks taken, slivers left
+
+
+def card_rings(grown: np.ndarray, mode, eps, min_area):
+    """The outer rings of a card area (each with its holes) as (flat vertices, ring ends).
+    min_area: outer rings under this many px are dropped (None: keep all)."""
+    contours, hier = cv2.findContours(grown, cv2.RETR_CCOMP, mode)
     if hier is None:
-        return None
+        return []
     hier = hier[0]
-    verts, tris = [], []
+    out = []
     for i, c in enumerate(contours):
         if hier[i][3] != -1:
             continue  # a hole, handled with its outer contour
-        outer = cv2.approxPolyDP(c, SIMPLIFY_EPS, True).reshape(-1, 2)
+        outer = cv2.approxPolyDP(c, eps, True).reshape(-1, 2)
         if len(outer) < 3:
+            continue
+        if min_area is not None and cv2.contourArea(outer.astype(np.float32)) < min_area:
+            card_stats["specks dropped"] += 1
             continue
         rings = [outer]
         for j in range(len(contours)):
             if hier[j][3] == i:
-                hole = cv2.approxPolyDP(contours[j], SIMPLIFY_EPS, True).reshape(-1, 2)
+                hole = cv2.approxPolyDP(contours[j], eps, True).reshape(-1, 2)
                 if len(hole) >= 3:
                     rings.append(hole)
         flat = np.concatenate(rings).astype(np.float64)
         ends = np.cumsum([len(r) for r in rings]).astype(np.uint32)
+        out.append((flat, ends))
+    return out
+
+
+def triangulate_card(grown: np.ndarray, mode, eps, min_area):
+    """(verts, tris) of a card area: flat int lists, empty when nothing is left."""
+    verts, tris = [], []
+    for flat, ends in card_rings(grown, mode, eps, min_area):
         t = mapbox_earcut.triangulate_float64(flat, ends).astype(int)
         if len(t) == 0:
             continue
         base = len(verts) // 2
         verts.extend(flat.astype(int).reshape(-1).tolist())
         tris.extend((t + base).tolist())
+    return verts, tris
+
+
+def sliver_count(verts, tris, limit: float, inside: np.ndarray) -> int:
+    """Triangles with an edge longer than limit whose centroid lies outside the mask `inside`."""
+    if not tris:
+        return 0
+    v = np.array(verts, float).reshape(-1, 2)
+    t = np.array(tris, int).reshape(-1, 3)
+    a, b, c = v[t[:, 0]], v[t[:, 1]], v[t[:, 2]]
+    longest = np.max([np.linalg.norm(a - b, axis=1), np.linalg.norm(b - c, axis=1),
+                      np.linalg.norm(c - a, axis=1)], axis=0)
+    cen = (a + b + c) / 3.0
+    hgt, wid = inside.shape
+    xi = np.clip(np.rint(cen[:, 0]).astype(int), 0, wid - 1)
+    yi = np.clip(np.rint(cen[:, 1]).astype(int), 0, hgt - 1)
+    return int(np.count_nonzero((longest > limit) & ~inside[yi, xi]))
+
+
+def region_card(grown: np.ndarray, side=None):
+    """Polygon and triangles of one card area (a 0/255 mask): (verts, tris) as flat int lists,
+    or None.
+
+    side None: a plain card, as before. side given (bends cards, side = the sprite's larger side):
+    outer rings under BENDS_MIN_AREA px are dropped; if a triangle has an edge longer than
+    BENDS_SLIVER_FRAC * side whose centroid lies outside the dilated card area, the card is rebuilt
+    from a full-resolution contour (BENDS_SPLIT_EPS) and the version with fewer such slivers is
+    kept (the first one on a tie)."""
+    if side is None:
+        verts, tris = triangulate_card(grown, cv2.CHAIN_APPROX_SIMPLE, SIMPLIFY_EPS, None)
+    else:
+        verts, tris = triangulate_card(grown, cv2.CHAIN_APPROX_SIMPLE, SIMPLIFY_EPS, BENDS_MIN_AREA)
+        limit = BENDS_SLIVER_FRAC * side
+        inside = cv2.dilate(grown, np.ones((3, 3), np.uint8)) > 0
+        n = sliver_count(verts, tris, limit, inside)
+        if n:
+            card_stats["cards with slivers"] += 1
+            v2, t2 = triangulate_card(grown, cv2.CHAIN_APPROX_NONE, BENDS_SPLIT_EPS, BENDS_MIN_AREA)
+            n2 = sliver_count(v2, t2, limit, inside)
+            if n2 < n:
+                verts, tris = v2, t2
+                card_stats["switched to the split fallback"] += 1
+                n = n2
+            if n:
+                card_stats["cards still with slivers"] += 1
     if not tris:
         return None
     return verts, tris
@@ -407,8 +517,9 @@ def build_cards(lab, D, K, op=None):
     """Cards sorted back to front (foot y ascending). Each: dict(foot, verts, tris, region).
     op given: the bends pass's overlapping card areas (see card_grown)."""
     cards = []
+    side = max(lab.shape)
     for r, (fx, fy) in enumerate(feet(lab, D, K)):
-        got = region_card(card_grown(lab == r, op))
+        got = region_card(card_grown(lab == r, op), side if op is not None else None)
         if got is None:
             continue
         verts, tris = got
@@ -498,6 +609,22 @@ def contact_sheet(path: Path, items, cell=220, cols=12) -> None:
     sheet.save(path)
 
 
+def bends_sheet(path: Path, items, scale=2, cols=8) -> None:
+    """One tile per bends-cut sprite at `scale` times its pixel size, cols per row.
+    items: (w, h, tinted rgb tile, cards)."""
+    gap = 8
+    cw = max(w for w, _, _, _ in items) * scale + gap
+    ch = max(h for _, h, _, _ in items) * scale + gap
+    rows = max(1, math.ceil(len(items) / cols))
+    sheet = Image.new("RGB", (cols * cw, rows * ch), (60, 60, 60))
+    for i, (w, h, rgb, cards) in enumerate(items):
+        ox, oy = (i % cols) * cw + gap // 2, (i // cols) * ch + gap // 2
+        tile = Image.fromarray(rgb).resize((w * scale, h * scale), Image.Resampling.NEAREST)
+        sheet.paste(tile, (ox, oy))
+        draw_cards(sheet, cards, scale, ox, oy)
+    sheet.save(path)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", required=True, type=Path, help="the data file, e.g. data/cards/objects.json")
@@ -524,6 +651,7 @@ def main() -> None:
     histogram = Counter()
     bends_eligible = bends_no_k = 0
     bends_k = Counter()  # the K the silhouette chose
+    bends_merges = Counter()  # post-merge pairs, by the rule that merged them
     bends_histogram = Counter()  # cards per bends-cut sprite
     bends_items = {}  # key -> (w, h, rgba, lab, K, cards), for the bends contact sheet
     if args.preview:
@@ -555,8 +683,10 @@ def main() -> None:
             if got is None:
                 bends_no_k += 1
             else:
-                lab, K, k = got
+                lab, K, k, (n_stacked, n_close) = got
                 bends_k[k] += 1
+                bends_merges["stacked pairs merged"] += n_stacked
+                bends_merges["close-foot pairs merged"] += n_close
                 bent = True
         if K < 2:
             one_region += 1
@@ -587,7 +717,7 @@ def main() -> None:
         if bends_items:
             items = [(w, h, tinted_composite(rgba, lab, K), cards)
                      for w, h, rgba, lab, K, cards in bends_items.values()]
-            contact_sheet(args.preview / "bends_sheet.png", items)
+            bends_sheet(args.preview / "bends_sheet.png", items)
 
     total_cards = sum(len(v["cards"]) for v in out.values())
     print(f"sprites processed (unique): {len(sprites)}")
@@ -604,6 +734,8 @@ def main() -> None:
           ", ".join(f"{k}: {v}" for k, v in sorted(bends_k.items())) or "none")
     print("  cards histogram of the bends-cut sprites (cards: sprites):",
           ", ".join(f"{k}: {v}" for k, v in sorted(bends_histogram.items())) or "none")
+    print("  post-merge:", ", ".join(f"{k}: {v}" for k, v in sorted(bends_merges.items())) or "none")
+    print("  card polygons:", ", ".join(f"{k}: {v}" for k, v in sorted(card_stats.items())) or "none")
     size = args.out.stat().st_size
     print(f"data file: {args.out} ({size / 1024:.1f} KiB)")
     if args.preview:
