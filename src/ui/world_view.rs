@@ -985,8 +985,10 @@ const TILT_STEP: f32 = 5.0;
 /// The sky above the ground in the 2.5D view (the part of the view with no map).
 const SKY: Color = Color::new(0.06, 0.08, 0.11, 1.0);
 
-/// The snapshots' view override, `RAZDOR_VIEW`: `25d` (the 2.5D view), `flat`, or `first` (the
-/// first-person view); None for the settings.
+/// The view override, `RAZDOR_VIEW`: `25d` (the 2.5D view), `flat`, the snapshots' `first` and `eyes`
+/// (the first-person view forced on), or the developer switch `fp-chase` (the first-person view
+/// behind the hero) and `fp-eyes` (the eyes camera too). The switch is dev-only: the first-person view
+/// is hidden from players (the owner's decision, 2026-11-10). None for the settings.
 fn view_env() -> Option<&'static str> {
     static ENV: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
     ENV.get_or_init(|| std::env::var("RAZDOR_VIEW").ok()).as_deref()
@@ -1000,7 +1002,7 @@ pub fn tilt_view() -> bool {
         return true;
     }
     match view_env() {
-        Some("25d") | Some("first") | Some("eyes") => true,
+        Some("25d") | Some("first") | Some("eyes") | Some("fp-chase") | Some("fp-eyes") => true,
         Some("flat") => false,
         _ => TILT_VIEW.load(std::sync::atomic::Ordering::Relaxed),
     }
@@ -1012,14 +1014,24 @@ pub fn set_tilt_view(on: bool) {
 }
 
 /// Whether the tilted view is the first-person one («От первого лица», `view25::TiltCamera::first_person`):
-/// the setting (`audio::Settings::map_first_person`, pushed by [`set_first_person`]) within the tilted view.
-/// `RAZDOR_VIEW=first` (a snapshot) makes it so; `25d` and `flat` do not.
+/// the setting (`audio::Settings::map_first_person`, pushed by [`set_first_person`]) within the tilted view,
+/// and only with the developer switch (`fp-chase`, `fp-eyes`, see [`first_person_visible`]): with the
+/// env unset, players never get it. `RAZDOR_VIEW=first` or `eyes` (a snapshot) forces it on; `25d` and
+/// `flat` do not.
 pub fn first_person() -> bool {
     tilt_view()
         && match view_env() {
-            Some(v) => v == "first" || v == "eyes",
-            None => FIRST_PERSON.load(std::sync::atomic::Ordering::Relaxed),
+            Some("first") | Some("eyes") => true,
+            Some("fp-chase") | Some("fp-eyes") => FIRST_PERSON.load(std::sync::atomic::Ordering::Relaxed),
+            _ => false,
         }
+}
+
+/// Whether the first-person view shows in the settings (its rows, and the map view's three values): only
+/// with the developer switch `RAZDOR_VIEW=fp-chase` or `fp-eyes`. Hidden from players by the owner's
+/// decision (2026-11-10); the saved fields stay in the settings file.
+pub fn first_person_visible() -> bool {
+    matches!(view_env(), Some("fp-chase") | Some("fp-eyes"))
 }
 
 /// Puts the first-person view on or off (from the settings, at once).
@@ -1030,9 +1042,14 @@ pub fn set_first_person(on: bool) {
 /// Whether the first-person view's far ground curves down to a horizon with the sky above
 /// («Горизонт»), rather than rolling up to top-down («Вверх»).
 pub fn horizon() -> bool {
-    // `RAZDOR_VIEW_HORIZON=1` (a snapshot) makes it the horizon, as the settings do.
-    static ENV: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ENV.get_or_init(|| std::env::var("RAZDOR_VIEW_HORIZON").is_ok_and(|v| v.trim() == "1")) || HORIZON.load(std::sync::atomic::Ordering::Relaxed)
+    // `RAZDOR_VIEW_HORIZON=down` (or `1`) makes it the horizon and `up` the roll, for the snapshots and the
+    // developer switch; unset, the setting counts only with the developer switch (`first_person_visible`).
+    static ENV: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    match ENV.get_or_init(|| std::env::var("RAZDOR_VIEW_HORIZON").ok()).as_deref().map(str::trim) {
+        Some("down") | Some("1") => true,
+        Some("up") => false,
+        _ => first_person_visible() && HORIZON.load(std::sync::atomic::Ordering::Relaxed),
+    }
 }
 
 /// Puts the far ground's shape on or off the horizon (from the settings, at once).
@@ -1045,11 +1062,13 @@ pub fn set_horizon(on: bool) {
 /// view (`first_person`).
 static EYES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Whether the eyes setting is on; `RAZDOR_VIEW=eyes` (a snapshot) turns it on too.
+/// Whether the eyes setting is on: `RAZDOR_VIEW=eyes` (a snapshot) and `fp-eyes` (the developer switch)
+/// turn it on, `fp-chase` takes the setting, and with the env unset it is off (hidden from players).
 pub fn eyes_setting() -> bool {
     match view_env() {
-        Some(v) => v == "eyes",
-        None => EYES.load(std::sync::atomic::Ordering::Relaxed),
+        Some("eyes") | Some("fp-eyes") => true,
+        Some("fp-chase") => EYES.load(std::sync::atomic::Ordering::Relaxed),
+        _ => false,
     }
 }
 
