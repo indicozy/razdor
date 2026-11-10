@@ -373,6 +373,21 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
     the hills included). The hero never fades (`without_near_fade`). The trailer's near fade uses the same path.
   - Fog, sprite fade by fog, the smooth reveal and the UI are as in 2.5D; the trailer's hide-UI (`trailer_clean`)
     is only with `RAZDOR_TRAILER_CAM`. Off the map (past its north and south edges) the ground is black, as in 2.5D.
+  - **The eyes view** («Камера» = «Глазами героя», `audio::Settings::map_eyes`, pushed by `main_menu::apply_options`
+    into `world_view::set_eyes`; `RAZDOR_VIEW=eyes` for snapshots; shown only within the first-person view).
+    `world_view::eyes_view()` says whether the camera stands at the eyes now: the setting, or a shot's `eye`.
+    The camera is `view25::TiltCamera::eyes`: the eye `EYE_HEIGHT` (0.7 cell) above the ground under `target`
+    (`eye_at`), looking `EYE_PITCH` (2°) down along the yaw, with no bend of its own; `eye_bend` adds the sheet
+    and its horizon. `world_view::eyes_tilt` builds it on the hero's displayed place (a shot's target in a run),
+    so it glides with his walk. The yaw follows his next step (`follow_walk`, before `ease_tilt_yaw`); standing,
+    Q, E, the twist and the compass turn it. The far ground: «Вверх» rolls up (`EYE_RADIUS_UP` 8, `EYE_BEND_UP` 78°,
+    after `EYE_FLAT` 2.5); «Горизонт» curves down (`EYE_RADIUS_DOWN` 60, `EYE_BEND_DOWN` -60°) to the horizon that
+    `Bend::with_horizon` finds from the eye. The hero's figure, his ring and the route are not drawn (`eyes_cam`).
+    A standing sprite fades out within `EYE_NEAR` (2.5 cells) of the eye (`near_fade_limit`, a fixed distance, not
+    the hero's, who stands at the eye); a sprite whose foot is behind the eye is not drawn (`standing`). Picking is the
+    eye camera's own inverse (`pick_bent`); tests `the_eyes_camera_stands_at_its_height_and_picks_its_sheet_at_both_bends`
+    (view25) and `a_click_on_the_ground_in_the_eyes_view_picks_its_cell_at_both_bends` (world_view). Known: a partly
+    faded tree over the bright sky looks translucent (the fade's band is 2.5 to 3.75 cells).
 - Simplifications: the F3 overlay is off in 2.5D (its labels are placed on the flat map).
 
 ## Sound and music

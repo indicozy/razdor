@@ -76,6 +76,9 @@ unseeded random draw, a map-dependent cache that changes with the window's size.
   (`continue_pass`), or a 4-day pass stops at day 10.
 - **Walks plan over the explored map only.** A walk into unexplored cells is blocked; a shot that
   walks must `reveal` its route first.
+- **The MP4 was upside down.** macroquad's screen read is bottom row first: its PNG export flips it for the
+  PNG frames, but the ffmpeg pipe took the rows as read (every `--out` and `--preview` MP4 was flipped). `Sinks::write`
+  now writes the rows in reverse. The PNG frames and the hashes were right all along.
 - **`pitch 90` is the top-down view** but the camera's own range stops at 89.9 (look_at degenerates
   at 90); the shot's parser accepts 90 and the camera clamps it.
 

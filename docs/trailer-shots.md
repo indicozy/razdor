@@ -30,7 +30,7 @@ Errors come out before anything starts, one per line, with the line and the fiel
 
 ```
 shot.shot:
-  line 4: pitch: 95: from 5 to 90 (90 is the top-down view)
+  line 4: pitch: 95: from 0 to 90 (90 is the top-down view, 0 to 5 the eyes view)
   line 7: walk: the route has no cell (write x,y x,y ...)
 ```
 
@@ -65,7 +65,7 @@ first keyframe that sets a value it holds, and after the last one it holds.
 
 | Key | Meaning | Range | Default (no key) |
 |---|---|---|---|
-| `pitch` | The view line below the horizontal, in degrees. `90` is the classic top-down map. | 5 to 90 | the player's pitch (35 to 75) |
+| `pitch` | The view line below the horizontal, in degrees. `90` is the classic top-down map; 0 to 5 is the eyes view's (`eye=1`). | 0 to 90 | the player's pitch (35 to 75) |
 | `fit` | The eye's distance as a multiple of the distance the view fits to the zoom. `1` is the classic scale at any window size. Use this, not `dist`. | above 0 | — (`1` once set) |
 | `dist` | The eye's distance in world units, absolute. It depends on the window's height, so the same value frames differently at another size. Wins over `fit`. | above 0 | from `fit` |
 | `fov` | The vertical field of view in degrees. | 5 to 120 | 35 |
@@ -79,10 +79,18 @@ first keyframe that sets a value it holds, and after the last one it holds.
 | `yaw` | The view's turn in degrees (0 looks north; 90 looks west). Interpolated the short way round. | any | the player's yaw |
 | `target` | What the camera looks at: a cell `x,y`, the hero `hero`, or the hero plus an offset in cells `hero+dx,dy`. | — | the map's centre |
 | `ease` | The easing of the segment that **ends** at this keyframe: `linear`, `in`, `out` or `inout`. | — | `inout` |
+| `eye` | The eyes view («Глазами героя», the player's first-person camera from the hero's eyes): `1` stands the camera on the target's ground at `height`, looking along `pitch` and `yaw`; `0` is the chase camera. A 0/1 key switches at the middle of its segment. | 0 or 1 | `0` |
+| `height` | The eye's height above the ground, in cells (eyes view only). | 0.1 to 5 | `0.7` |
+| `horizon` | The eyes view's far ground: `1` curves it down to the horizon (a sky above it; give `bend=60 radius=60`), `0` rolls it up to the top-down map (`bend=78 radius=8`). A 0/1 key switches at the middle of its segment. | 0 or 1 | `0` |
 
 Notes:
 
 - `pitch 90` is the top-down view (rendered at 89.9; the rendering needs a tilt).
+- The eyes view (`eye=1`): the target is the eye's ground (use `target=hero`, which follows the hero's
+  displayed place as he walks). `near` is not used: standing sprites within 2.5 cells of the eye fade out, as in
+  play. `width`, `ahead` and `behind` are not used either: the ground is the sheet's footprint. A shot with no `yaw`
+  keys turns with the hero's walk, as in play; a `yaw` key overrides it. The hero's figure, his route and his ring
+  are not drawn from his eyes. `bend` and `radius` shape the far ground; `flat` is the flat stretch ahead of the eye.
 - Low views need `bend`, `width`, `ahead` and `behind` together: `bend=78 width=120 ahead=200 behind=60`
   is the look of the treatment's descent. A larger `width` and `behind` fill more of the frame.
 - `--plan` prints the fitted distance (`fitted distance` on each keyframe line, for the window
@@ -186,6 +194,36 @@ at 0s pitch=90 fit=1 target=34,40
 at 30s pitch=90 fit=1 target=34,40
 pass 1s 4d
 duration 30
+```
+
+### 4. The eyes view on РК1 (about 20 s): from the hero's eyes, the far ground curves to a horizon
+
+The hero walks from his castle through the village, up the western track and along the top road, and back.
+The camera is at his eyes (0.7 of a cell up) and turns with his walk; «Горизонт» is `horizon=1`. The route
+is the game's own (it plans each leg over the explored map). Example 5 is the same walk with «Вверх».
+
+```
+# A. The first map (РК1-Начало пути) from the hero's eyes, «Горизонт».
+map РК1-Начало пути
+hero knight
+seed 1204
+reveal 0s 24,24 26
+walk 0.5s 36,41 33,38 28,36 24,33 22,30 18,9 42,8 30,8
+at 0s eye=1 height=0.7 horizon=1 pitch=2 fov=55 bend=60 radius=60 flat=2.5 target=hero
+duration 18.5
+```
+
+### 5. The same walk, «Вверх» (the far ground rolls up to the top-down map)
+
+```
+# B. The same route on РК1 from the hero's eyes, «Вверх».
+map РК1-Начало пути
+hero knight
+seed 1204
+reveal 0s 24,24 26
+walk 0.5s 36,41 33,38 28,36 24,33 22,30 18,9 42,8 30,8
+at 0s eye=1 height=0.7 horizon=0 pitch=2 fov=55 bend=78 radius=8 flat=2.5 target=hero
+duration 18.5
 ```
 
 ## Limits (known, not bugs)
