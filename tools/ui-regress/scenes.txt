@@ -177,3 +177,9 @@ editor-find-props-1280 | editor:РК1-Начало пути:Казарм | 1280x
 # An event met on an army: the leader's name under the picture (Razdor's option, on by default)
 event-meet-1280 | event:ДС1-С чего все начиналось:37 | 1280x800 | RAZDOR_SCENE_MEET=6
 event-meet-phone-upright | event:ДС1-С чего все начиналось:37 | 1080x2400 | RAZDOR_DP=2.75;RAZDOR_LARGE_WINDOWS=1;RAZDOR_SCENE_MEET=6
+# Photo mode (ui/photo.rs): the control strip at a low angle, the strip hidden, top-down. No shutter case:
+# its notice carries the time, so the shot would differ on every run.
+photo-strip-rk1-1280 | map:РК1-Начало пути | 1280x800 | RAZDOR_SCENE_PHOTO=1;RAZDOR_SCENE_PHOTO_PITCH=20
+photo-strip-rk3-1280 | map:РК3-Столица | 1280x800 | RAZDOR_SCENE_PHOTO=1;RAZDOR_SCENE_PHOTO_PITCH=20
+photo-hidden-rk1-1280 | map:РК1-Начало пути | 1280x800 | RAZDOR_SCENE_PHOTO=1;RAZDOR_SCENE_PHOTO_PITCH=20;RAZDOR_SCENE_PHOTO_STRIP=0
+photo-top-rk1-1280 | map:РК1-Начало пути | 1280x800 | RAZDOR_SCENE_PHOTO=1;RAZDOR_SCENE_PHOTO_PITCH=90

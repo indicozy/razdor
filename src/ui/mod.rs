@@ -34,6 +34,7 @@ pub mod map_import;
 pub mod minimap;
 pub mod new_game;
 pub mod pan;
+pub mod photo;
 pub mod render_cache;
 pub mod popup;
 pub mod rest;
@@ -1323,8 +1324,9 @@ impl App {
         pan::begin_frame(pannable, std::mem::discriminant(&self.screen), self.dialogs.len());
         input::begin_frame();
         // A press acts on the game as the step leaves it: an AI move paused at a frame's budget
-        // finishes first (`Game::tick_within`, `Game::finish_pause`).
-        if input::any_press() {
+        // finishes first (`Game::tick_within`, `Game::finish_pause`). Not in photo mode: nothing
+        // moves there, the paused move waits for the mode's end (`photo::may_tick`).
+        if input::any_press() && photo::may_tick() {
             if let Some(g) = self.game.as_mut() {
                 g.finish_pause();
             }
@@ -1547,6 +1549,11 @@ impl App {
                     widgets::swallow_input();
                     Some(Screen::WorldMap)
                 }
+                // «Фото»: the map with photo mode on (the map frame takes the request).
+                (Some(saves::ExitChoice::Photo), _) => {
+                    photo::request();
+                    Some(Screen::WorldMap)
+                }
                 (None, next) => next,
             },
             (Screen::Settings, Some(game)) => {
@@ -1635,6 +1642,8 @@ impl App {
             match v.exit.take() {
                 Some(saves::ExitChoice::Quit) => self.quit = true,
                 Some(saves::ExitChoice::MainMenu) => next = Some(Screen::MainMenu),
+                // «Фото» is the game menu's only (the map's): never a battle's.
+                Some(saves::ExitChoice::Photo) => {}
                 // «Клавиши» (phones): the battle stays, the key list opens over it (Place::Battle).
                 Some(saves::ExitChoice::Keys) => {
                     self.help = true;

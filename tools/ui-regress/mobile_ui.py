@@ -98,6 +98,9 @@ SCREENS = [
     ("scenarios-card", "scenarios:РК1-Начало пути", {"RAZDOR_SCENE_CARD": "1"}),
     # The experimental scenario rules window over the scenario list (a player's report 1461).
     ("rules", "scenarios:РК1-Начало пути", {"RAZDOR_SCENE_RULES": "1"}),
+    # Photo mode (ui/photo.rs): the game menu with its row of six («Фото»), and the control strip over the map.
+    ("exit-menu", "menu:РК1-Начало пути", {}),
+    ("photo-strip", "map:РК1-Начало пути", {"RAZDOR_SCENE_PHOTO": "1", "RAZDOR_SCENE_PHOTO_PITCH": "20"}),
     # The same window with the «Правила Раздора» row on (its six switches set).
     ("rules-preset", "scenarios:РК1-Начало пути", {"RAZDOR_SCENE_RULES": "1", "RAZDOR_SCENE_EXPERIMENTAL": "bless,poison,spells,merchant,rear,store"}),
     ("map","map:РК1-Начало пути", {}),

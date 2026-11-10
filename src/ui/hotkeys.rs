@@ -141,6 +141,7 @@ pub fn screen_keys(place: Place) -> Vec<(&'static str, &'static str)> {
             ("{QuickSave} / {QuickLoad}", n_("quick save / quick load")),
             ("Esc", n_("close the minimap, else the game menu")),
             ("{Console}", n_("cheat console (help lists its commands)")),
+            ("{Photo}", n_("photo mode: the game stands still, the camera is free")),
         ],
         Place::Building => vec![
             (n_("Click"), n_("tabs and buttons")),

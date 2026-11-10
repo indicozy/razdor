@@ -13,6 +13,7 @@ use macroquad::prelude::*;
 use razdor::i18n::{n_, tr};
 use razdor::frame_probe::{self, Kind, Stage};
 use super::gpu_probe::gpu_wait;
+use super::photo;
 use razdor::rules::ai::{Clash, Combatant};
 use razdor::rules::battle::Team;
 use razdor::trf;
@@ -69,8 +70,8 @@ fn map_scale_for(chosen: f32, fit: f32) -> f32 {
 /// Sail colour of the hero's own ship.
 const HERO_SAIL: Color = Color::new(0.35, 0.8, 0.45, 1.0);
 fn bar_h() -> f32 {
-    // A trailer run draws no bar: the map takes the whole window (`ui::trailer`).
-    if super::trailer::hides_ui() {
+    // A trailer run draws no bar: the map takes the whole window (`ui::trailer`). Photo mode none either.
+    if super::trailer::hides_ui() || photo::active() {
         return 0.0;
     }
     super::chrome::bar_top_height()
@@ -1140,6 +1141,13 @@ fn trailer_camera(t: &view25::Trailer, target: Vec2, scale: f32, view: Rect, pit
     (cam, Some(bend.region(t.width, t.ahead, t.behind)))
 }
 
+/// The photo mode's tilt (`ui::photo`): the free camera at `pitch` and `yaw` looking at `target`, fitted
+/// to `scale` in `view`, its footprints as the 2.5D view's (the frame and the strip under the bar).
+fn photo_tilt(target: Vec2, scale: f32, view: Rect, draw: Rect, pitch: f32, yaw: f32) -> Tilt {
+    let cam = TiltCamera::free(target, scale, view, pitch, yaw, view25::FOV_DEG);
+    Tilt { cam, plan: cam.ground_footprint(view, view), cull: cam.ground_footprint(view, draw) }
+}
+
 /// The first-person tilt of a view (`view25::TiltCamera::first_person`, the player's): the camera
 /// looks at `look` (the map view's centre, the hero's place) and its bent sheet's ground is the
 /// footprint of the frame `view`, culled to the strip under the bar `draw` as the 2.5D one is.
@@ -1620,6 +1628,172 @@ pub fn trailer_active() -> bool {
     trailer().is_some()
 }
 
+/// What photo mode's frame did (`photo_frame`): it drew the frame, or it was left before drawing and
+/// the map's own frame goes on as in play.
+enum PhotoStep {
+    Drawn,
+    Left,
+}
+
+/// Turns photo mode on for the map (`map_frame`): the camera starts where the play's looks, at the
+/// play's pitch and turn; the map's look is kept for leaving (`photo::Photo::saved_look`). The zoom
+/// and the rest of the play's view are not touched, so leaving gives them back.
+fn enter_photo(game: &Game, view: &mut MapView) {
+    let look = view.look.unwrap_or(game.display_pos());
+    let centre = Camera::looking_at(game, view.zoom, look).centre();
+    let saved = view.look;
+    view.look = Some(centre);
+    let mut p = photo::Photo::new(tilt_pitch(), tilt_yaw(), view.zoom, saved);
+    photo::snapshot_start(&mut p);
+    photo::enter(p);
+}
+
+/// Pans the map by a pointer or finger move of `slide` screen pixels, the map following it (as
+/// `pan`, but with no check on the windows: photo mode has none open).
+fn photo_pan(game: &Game, view: &mut MapView, slide: (f32, f32)) {
+    if slide == (0.0, 0.0) {
+        return;
+    }
+    let look = view.look.unwrap_or(game.display_pos());
+    let cam = Camera::looking_at(game, view.zoom, look);
+    let at = Vec2::from(look) - cam.screen_to_world_delta(vec2(slide.0, slide.1));
+    view.look = Some(Camera::looking_at(game, view.zoom, at.into()).centre());
+}
+
+/// The shutter (`photo_frame`): the screen as drawn so far (the map, no strip, no notice) saved as
+/// a PNG, and a notice of where it went (the folder too on the desktop).
+fn take_shot(view: &mut MapView, now: f64) {
+    let img = get_screen_data();
+    match photo::save_shot(&img.bytes, img.width as u32, img.height as u32) {
+        Ok(path) => {
+            let file = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            view.toasts.push_back((trf!("Shot saved: {file}", file = file), now));
+            if super::display::dp_px().is_none() {
+                let folder = path.parent().map(|d| d.display().to_string()).unwrap_or_default();
+                view.toasts.push_back((trf!("Photos folder: {folder}", folder = folder), now));
+            }
+        }
+        Err(error) => view.toasts.push_back((trf!("The shot was not saved: {error}", error = error), now)),
+    }
+    while view.toasts.len() > TOAST_MAX {
+        view.toasts.pop_front();
+    }
+}
+
+/// The map in photo mode (`ui::photo`, `map_frame`): the game stands still (no tick, no event, no
+/// AI move, no clock), the camera is free (the mouse and fingers, the wheel, the keys), and the frame is
+/// the map alone. The shutter's picture is taken before the control strip and the notices are drawn.
+/// Leaving (the strip's «Выход», the photo key, Esc with the strip shown) gives the view back and returns
+/// `Left` before anything is drawn.
+fn photo_frame(game: &mut Game, assets: &Assets, view: &mut MapView, entering: bool) -> PhotoStep {
+    let (sw, sh) = (screen_width(), screen_height());
+    let layout = photo::layout((sw, sh), super::display::dp_px(), super::chrome::k(), super::display::safe_area().bottom);
+    let shown = photo::with(|p| p.strip).unwrap_or(true);
+    let (pressed, held) = if shown { photo::strip_input(&layout) } else { ([false; 3], [false; 3]) };
+    let at = pointer();
+    let on_strip = shown && photo::on_strip(&layout, at);
+    let esc = esc_pressed();
+    // The key that turned the mode on (this frame, `entering`) does not turn it off again.
+    let toggle = !entering && key(keymap::key(Action::Photo));
+    let leave = toggle || pressed[2] || (esc && shown);
+    if leave {
+        if let Some(p) = photo::leave() {
+            view.look = p.saved_look;
+        }
+        return PhotoStep::Left;
+    }
+    // A drag: a left one pans, a right one turns and tilts; a left press and release without moving
+    // is a tap, which brings a hidden strip back.
+    let mut drag = photo::with(|p| p.drag).flatten();
+    if drag.is_none() && !input_blocked() && !on_strip {
+        if crate::ui::input::is_mouse_button_pressed(MouseButton::Left) {
+            drag = Some(photo::Drag::start(photo::Button::Left, at));
+        } else if crate::ui::input::is_mouse_button_pressed(MouseButton::Right) {
+            drag = Some(photo::Drag::start(photo::Button::Right, at));
+        }
+    }
+    let (mut pan_px, mut turn_px, mut tapped) = ((0.0f32, 0.0f32), (0.0f32, 0.0f32), false);
+    if let Some(mut d) = drag {
+        let button = if d.button == photo::Button::Left { MouseButton::Left } else { MouseButton::Right };
+        let down = is_mouse_button_down(button);
+        match d.step(at, down) {
+            photo::DragOut::Pan(v) => pan_px = v,
+            photo::DragOut::Turn(v) => turn_px = v,
+            photo::DragOut::None => {}
+        }
+        if down {
+            drag = Some(d);
+        } else {
+            tapped = d.button == photo::Button::Left && !d.moved;
+            drag = None;
+        }
+    }
+    // The keys held turn, tilt and pan at their rates; the wheel, pinch and +/- zoom.
+    let dt = crate::ui::clock::frame_dt().clamp(0.0, 0.1);
+    let axis = |neg: KeyCode, pos: KeyCode| (crate::ui::input::is_key_down(pos) as i32 - crate::ui::input::is_key_down(neg) as i32) as f32;
+    let yaw_keys = axis(KeyCode::Q, KeyCode::E) * photo::KEY_YAW * dt;
+    let pitch_keys = axis(KeyCode::PageUp, KeyCode::PageDown) * photo::KEY_PITCH * dt;
+    let view_dir = (axis(KeyCode::Left, KeyCode::Right), axis(KeyCode::Up, KeyCode::Down));
+    let keys_pan = (-view_dir.0 * photo::KEY_PAN * dt, -view_dir.1 * photo::KEY_PAN * dt);
+    // Two fingers: the twist turns (clockwise, as E), their slide tilts; one finger's swipe pans.
+    let turn = crate::ui::input::map_turn().to_degrees();
+    let pair = crate::ui::input::map_pair();
+    let swipe = crate::ui::input::map_pan();
+    let mut notches = wheel();
+    if key(KeyCode::Equal) || key(KeyCode::KpAdd) {
+        notches += 1.0;
+    }
+    if key(KeyCode::Minus) || key(KeyCode::KpSubtract) {
+        notches -= 1.0;
+    }
+    let floor = {
+        let map = &game.world.map;
+        let ms = map_scale();
+        zoom_floor(map.w as f32 * PX * ms, map.h as f32 * map.grid.row_height() * PX * ms, map_area())
+    };
+    let bounds = photo::zoom_bounds(floor);
+    let shutter = pressed[0] || key(KeyCode::Space) || key(KeyCode::Enter);
+    let strip = if pressed[1] && shown {
+        false
+    } else if !shown && (esc || tapped) {
+        true
+    } else {
+        shown
+    };
+    let shot = photo::with(|p| {
+        p.strip = strip;
+        p.drag = drag;
+        p.down = held;
+        p.yaw = photo::wrap_yaw(p.yaw + yaw_keys + turn_px.0 * photo::DRAG_YAW + turn);
+        p.pitch = photo::clamp_pitch(p.pitch + pitch_keys + turn_px.1 * photo::DRAG_PITCH + pair.1 * photo::DRAG_PITCH);
+        p.zoom = photo::zoom_by(p.zoom, notches, bounds);
+        std::mem::take(&mut p.shot) || shutter
+    })
+    .unwrap_or(false);
+    view.zoom = photo::with(|p| p.zoom).unwrap_or(view.zoom);
+    photo_pan(game, view, (pan_px.0 + swipe.0 + keys_pan.0, pan_px.1 + swipe.1 + keys_pan.1));
+    // A one-finger swipe pans over the whole screen; the strip's panel is no pan, and a tap there is the
+    // button's (`ui::gestures`, `SwipeKind::Off`).
+    crate::ui::input::swipe_area(Rect::new(0.0, 0.0, sw, sh), SwipeKind::Pan);
+    if strip {
+        crate::ui::input::swipe_area(layout.panel, SwipeKind::Off);
+    }
+    clear_background(rgb(10, 12, 10));
+    let cam = Camera::looking_at(game, view.zoom, view.look.unwrap_or(game.display_pos()));
+    let now = crate::ui::clock::now();
+    frame_probe::time(Stage::World, || draw_world(game, assets, &cam, None, None, None, true, Veil { shows: &[], now }));
+    if shot {
+        take_shot(view, now);
+    }
+    if strip {
+        photo::draw_strip(&layout, held, super::display::dp_px());
+    }
+    cursor::set(if strip { Shape::Arrow } else { Shape::Hidden });
+    let base = if strip { layout.panel.y - 8.0 * super::chrome::k() } else { sh - 14.0 * super::chrome::k() };
+    draw_toasts(&mut view.toasts, now, base, super::display::dp_px().map(|d| 15.0 * d));
+    PhotoStep::Drawn
+}
+
 /// The trailer's stills (`RAZDOR_TRAILER_CAM`, dev-only) show the world alone: no bar, pointer,
 /// minimap, compass, hover outline, tooltips, messages, marks or debug overlay, and no border line.
 fn trailer_clean() -> bool {
@@ -1706,10 +1880,14 @@ impl Camera {
         }
         let draw = Rect::new(view.x, view.y, view.w, view.h + bar_h());
         let mut cam = Camera { origin: origin - pad, view, draw, scale, grid: map.grid, tilt: None };
-        // A view with no height (a minimised window) has no perspective: it stays flat.
-        if tilt_view() && view.w >= 1.0 && view.h >= 1.0 {
+        // A view with no height (a minimised window) has no perspective: it stays flat. Photo mode
+        // is always tilted, with its own camera whatever the view setting (`ui::photo`).
+        let photo_angles = photo::angles();
+        if (tilt_view() || photo_angles.is_some()) && view.w >= 1.0 && view.h >= 1.0 {
             let target = Vec2::from(cam.centre());
-            if eyes_view() {
+            if let Some((pitch, yaw)) = photo_angles {
+                cam.tilt = Some(photo_tilt(target, scale, view, draw, pitch, yaw));
+            } else if eyes_view() {
                 // The eyes stand on the hero's displayed place (a shot's target in a run), not on the view's
                 // centre, which the map's edges move.
                 let ground = if super::trailer::active() { Vec2::from(at) } else { Vec2::from(game.display_pos()) };
@@ -4174,6 +4352,21 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
 }
 
 fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>, session: Option<&mut super::session::Keeper>) -> Option<Screen> {
+    // Photo mode is asked for by the game menu's «Фото» (`photo::request`) or by its key, on the map
+    // with no dialog open. Once on, its frame draws the map alone and no screen comes from it.
+    let entering = !photo::active() && (photo::take_request() || (dialogs.is_empty() && !input_blocked() && key(keymap::key(Action::Photo))));
+    if entering {
+        enter_photo(game, view);
+    }
+    if photo::active() {
+        if let PhotoStep::Drawn = photo_frame(game, assets, view, entering) {
+            return None;
+        }
+    }
+    world_frame(game, assets, view, message, dialogs, session)
+}
+
+fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>, session: Option<&mut super::session::Keeper>) -> Option<Screen> {
     clear_background(rgb(10, 12, 10));
     // The minimap's meeting marks are recomputed only while the event display is idle (the
     // original's 0x4abf44 runs when the scan is idle, after the dialogs): an army met keeps its
@@ -4405,7 +4598,7 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     // Time stands still while a window is open.
     let mut events = game.drain_events();
     let tile0 = game.tile();
-    let ticked = !input_blocked() && events.is_empty();
+    let ticked = !input_blocked() && events.is_empty() && photo::may_tick();
     if ticked {
         // The AI's moves of a step may take more than the frame has: they stop at the budget and
         // go on in the next frames, which keep drawing (`Game::tick_within`).
@@ -4667,7 +4860,7 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
         }
     }
     if !trailer_clean() {
-        draw_toasts(&mut view.toasts, crate::ui::clock::now());
+        draw_toasts(&mut view.toasts, crate::ui::clock::now(), screen_height() - bar_h() - 14.0 * super::chrome::k(), None);
     }
     next
 }
@@ -4725,12 +4918,17 @@ const TOAST_MAX: usize = 5;
 
 /// The messages above the bar, the newest at the bottom, the older ones stacked above it;
 /// the run-out ones are dropped.
-fn draw_toasts(toasts: &mut VecDeque<(String, f64)>, now: f64) {
+fn draw_toasts(toasts: &mut VecDeque<(String, f64)>, now: f64, base: f32, size_override: Option<f32>) {
     toasts.retain(|(_, at)| now - at < TOAST_SECONDS);
     let k = super::chrome::k();
-    let (size, h, gap) = ((18.0 * k).max(14.0), (30.0 * k).max(24.0), 6.0 * k);
+    // The photo mode's notices (a phone's 15 sp) are taller than the play's; the play's are as before.
+    let (size, h, gap) = match size_override {
+        Some(s) => (s, (s * 1.6).max(30.0 * k), 6.0 * k),
+        None => ((18.0 * k).max(14.0), (30.0 * k).max(24.0), 6.0 * k),
+    };
     let cx = screen_width() / 2.0;
-    let mut y = screen_height() - bar_h() - 14.0 * k - h;
+    // The newest is drawn at the base, the older ones stack above it.
+    let mut y = base - h;
     for (m, at) in toasts.iter().rev() {
         let left = TOAST_SECONDS - (now - at);
         let a = (left / TOAST_FADE).clamp(0.0, 1.0) as f32;

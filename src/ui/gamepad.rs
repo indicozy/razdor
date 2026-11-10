@@ -89,6 +89,12 @@ pub struct Frame {
     /// Turns of the 2.5D map this frame (`ui::gestures`, a two-finger twist): +1 turns the
     /// ground clockwise on the screen, -1 back.
     pub rotate: i32,
+    /// The two fingers' turn this frame in radians, clockwise on the screen (`ui::gestures`, a
+    /// latched twist): photo mode's yaw, unquantized (`rotate` is its 45° steps).
+    pub turn: f32,
+    /// The two fingers' slide this frame, their mean in screen pixels, when they neither pinch nor
+    /// twist (`ui::gestures`): photo mode's tilt.
+    pub pair: (f32, f32),
 }
 
 /// The keys of the buttons: Start is Esc (menus, back), X Enter (OK, Yes), Y Space (the

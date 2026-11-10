@@ -174,7 +174,8 @@ pub fn begin_frame() {
         } else if gestures_on {
             // A twist turns the 2.5D map only: with the flat map (or the setting off) two fingers
             // only pinch and slide, as before.
-            s.gestures.twist_on = gestures::twist_on() && super::world_view::tilt_view();
+            // Photo mode turns freely by the twist (it has no 2.5D steps); the setting still counts the rest.
+            s.gestures.twist_on = (gestures::twist_on() && super::world_view::tilt_view()) || !super::photo::may_tick();
             merge(s.gestures.step(&touches, dt, screen, map_scrolls, &s.swipe_prev), pad_frame)
         } else {
             pad_frame
@@ -225,6 +226,8 @@ fn merge(touch: Frame, pad: Frame) -> Frame {
         scroll: if touch.scroll != (0.0, 0.0) { touch.scroll } else { pad.scroll },
         pan: (touch.pan.0 + pad.pan.0, touch.pan.1 + pad.pan.1),
         rotate: touch.rotate + pad.rotate,
+        turn: touch.turn + pad.turn,
+        pair: (touch.pair.0 + pad.pair.0, touch.pair.1 + pad.pair.1),
     }
 }
 
@@ -333,6 +336,16 @@ pub fn map_pan() -> (f32, f32) {
 /// The 2.5D map's turns this frame (a two-finger twist): +1 clockwise, -1 back.
 pub fn map_rotate() -> i32 {
     with_frame(|f| f.rotate)
+}
+
+/// The two fingers' turn this frame in radians, clockwise on the screen (photo mode's yaw).
+pub fn map_turn() -> f32 {
+    with_frame(|f| f.turn)
+}
+
+/// The two fingers' slide this frame in screen pixels, their mean (photo mode's tilt).
+pub fn map_pair() -> (f32, f32) {
+    with_frame(|f| f.pair)
 }
 
 /// Where the pad's pointer is, while it is the pointer.

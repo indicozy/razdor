@@ -1520,6 +1520,8 @@ pub enum ExitChoice {
     Restart,
     /// Razdor's «Клавиши» (the game menu only): the key list over the map.
     Keys,
+    /// Razdor's «Фото» (the game menu only): photo mode over the map (`ui::photo`).
+    Photo,
 }
 
 /// The bar's X button (and Esc on the map): "Выход из игры", the original's warning that the
@@ -1760,19 +1762,33 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art:
     // key list over the screen; phones have no F1). The desktop windows are the original's
     // four-button rows, as before.
     let phone_menu = (art || battle) && super::display::dp_px().is_some();
-    let mut widths = vec![150.0 * k, 150.0 * k, if phone_menu { 110.0 * k } else { 120.0 * k }];
-    // The phone menu's five buttons take a little less between them (4 px, not 7.5) and
-    // «Клавиши» and «Отмена» are narrower, so the row keeps the labels whole.
-    let gap = if phone_menu { 4.0 * k } else { 7.5 * k };
+    // The desktop map menu's row (Razdor's «Фото» makes five, the owner's request 2026-11-10): «Выйти из
+    // игры» and «В меню» keep the original's 150 so their labels stay whole; «Рестарт» and «Отмена» take
+    // the rest of the row, 5 apart.
+    let (restart_w, cancel_w, gap) = if phone_menu {
+        (110.0, 84.0, 4.0)
+    } else if art {
+        (86.0, 84.0, 5.0)
+    } else {
+        (120.0, 90.0, 7.5)
+    };
+    let mut widths = vec![150.0 * k, 150.0 * k, restart_w * k];
+    let gap = gap * k;
     if phone_menu {
         labels.push((tr(n_("Keys")).to_string(), Some(ExitChoice::Keys)));
         widths.push(104.0 * k);
     }
+    // The game menu's «Фото» (Razdor's, the owner's request 2026-11-10): before «Отмена».
+    if art {
+        labels.push((tr(n_("Photo")).to_string(), Some(ExitChoice::Photo)));
+        widths.push(if phone_menu { 104.0 * k } else { 84.0 * k });
+    }
     labels.push((own("Buttons", "Cancel", n_("Cancel")), None));
-    widths.push(if phone_menu { 84.0 * k } else { 90.0 * k });
+    widths.push(cancel_w * k);
     let n = labels.len();
-    // The phone's row fits the window: the buttons shrink together when they would not.
-    let fit = if phone_menu { ((r.w - 18.75 * k - gap * (n as f32 - 1.0)) / widths.iter().sum::<f32>()).min(1.0) } else { 1.0 };
+    // The row fits the window: the buttons shrink together when they would not (the desktop's four
+    // buttons fit as they are; with «Фото» the map's row may shrink a little).
+    let fit = if phone_menu || art { ((r.w - 18.75 * k - gap * (n as f32 - 1.0)) / widths.iter().sum::<f32>()).min(1.0) } else { 1.0 };
     // The plain window's row: 10 px from the sides and between the buttons (four on the
     // desktop; a phone's five share the same row, 4 px apart).
     let plain_gap = if phone_menu { 4.0 * k } else { 10.0 * k };
@@ -1798,7 +1814,12 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art:
             Rect::new(inner.x + 10.0 * k + i as f32 * (bw + plain_gap), by, bw, 30.0 * k * g)
         };
         let (_, down, pressed) = super::widgets::button_state(b, !*asking);
-        super::chrome::marble_button(b, label, true, down);
+        // The phone's row of six (with «Фото») wraps a label that would not fit its button, on two lines.
+        if phone_menu && art {
+            super::chrome::marble_button_wrapped(b, label, true, down);
+        } else {
+            super::chrome::marble_button(b, label, true, down);
+        }
         if pressed {
             match what {
                 Some(ExitChoice::Restart) => *asking = true,

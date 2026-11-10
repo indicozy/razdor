@@ -367,6 +367,8 @@ pub fn stage(app: &mut App) {
     if let Err(e) = try_stage(app, &scene) {
         razdor::diag!("RAZDOR_SCENE={scene}: {e}");
     }
+    // RAZDOR_SCENE_PHOTO=1: photo mode is on from the scene's first map frame (ui::photo).
+    super::photo::snapshot_request();
     hover_army_for_snapshot(app);
     // `RAZDOR_SCENE_ARCHIVES=a.7z,b.zip`: the not-found block with those game archives found;
     // `RAZDOR_SCENE_UNPACK=<pct>` with it: the unpacking at that percentage (`ui::mobile`).

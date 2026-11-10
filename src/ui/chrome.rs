@@ -2489,6 +2489,22 @@ pub fn marble_button_sized(r: Rect, label: &str, enabled: bool, hover: bool, siz
     button_label_at(r, label, enabled, size);
 }
 
+/// A marble button whose label goes on two lines when one line would not fit its width (Razdor's, the
+/// phone's game menu row of six, where «Выйти из игры» was cut to «Выйти из и...»): the size is the
+/// button's own, cut so two lines fit its height, and the words are not cut. A label that still does not
+/// fit is drawn as [`marble_button`] draws it.
+pub fn marble_button_wrapped(r: Rect, label: &str, enabled: bool, hover: bool) {
+    let g = super::display::button_grow();
+    let size = label_size(r.h / g, 1.0).min(r.h * 0.4).round().max(12.0);
+    let lines = wrap_label(label, r.w - 10.0, size);
+    let fits = lines.len() <= 2 && lines.iter().all(|l| measure(l, size).width <= r.w - 10.0);
+    if fits {
+        marble_button_lines(r, &lines, enabled, hover, size);
+    } else {
+        marble_button(r, label, enabled, hover);
+    }
+}
+
 /// A button label broken into lines that each fit `width` px at `size`, measured as
 /// [`marble_button_lines`] draws them (so no line runs past the button). Words are not cut.
 pub fn wrap_label(label: &str, width: f32, size: f32) -> Vec<String> {

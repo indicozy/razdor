@@ -208,3 +208,14 @@ Spell description = Описание заклятия
 You do not have enough money for this spell! = У Вас недостаточно денег для покупки этого заклятия!
 Money = Деньги
 Spell = Заклятие
+
+# Photo mode (ui/photo.rs): the game menu's button, the control strip, its notices and the key list
+Photo = Фото
+photo mode = режим фото
+photo mode: the game stands still, the camera is free = режим фото: игра стоит, камера свободна
+Shot = Снимок
+Hide the strip = Скрыть
+Exit photo mode = Выход
+Shot saved: {file} = Снимок сохранён: {file}
+Photos folder: {folder} = Папка снимков: {folder}
+The shot was not saved: {error} = Снимок не сохранён: {error}

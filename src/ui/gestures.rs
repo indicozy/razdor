@@ -340,6 +340,7 @@ impl GestureMapper {
                     self.latched = true;
                     self.turned
                 };
+                f.turn += credit;
                 self.twist += credit;
                 let steps = (self.twist / TWIST_STEP).trunc();
                 self.twist -= steps * TWIST_STEP;
@@ -352,6 +353,7 @@ impl GestureMapper {
                 self.pinch -= steps * step;
                 f.wheel += steps;
             } else if map_scrolls {
+                f.pair = (f.pair.0 + mean.0, f.pair.1 + mean.1);
                 self.wheel = 0.0;
                 if dt > 0.0 && !moving.is_empty() {
                     // The stick: a screen's height a second is full push. Fingers moving up push
@@ -360,6 +362,7 @@ impl GestureMapper {
                     f.scroll = (stick(mean.0), stick(mean.1));
                 }
             } else {
+                f.pair = (f.pair.0 + mean.0, f.pair.1 + mean.1);
                 // Fingers moving up scroll the content down, so they turn the wheel down.
                 let step = px(screen, WHEEL_STEP);
                 self.wheel += mean.1;
@@ -731,6 +734,31 @@ mod tests {
             rotate += step(&mut m, &twist_touches(95.0 - 9.55 * i as f32, Phase::Moved), true).rotate;
         }
         assert_eq!(rotate, 0);
+    }
+
+    #[test]
+    fn a_twist_gives_its_raw_turn_and_a_slide_its_mean_for_photo_mode() {
+        // Photo mode's turn is not quantized: 95 degrees of twist are 95 degrees of `turn` (where `rotate`
+        // gives two steps of 45).
+        let mut m = GestureMapper { twist_on: true, ..GestureMapper::default() };
+        step(&mut m, &twist_touches(0.0, Phase::Started), true);
+        let mut turn = 0.0f32;
+        for i in 1..=10 {
+            turn += step(&mut m, &twist_touches(9.5 * i as f32, Phase::Moved), true).turn;
+        }
+        assert!((turn.to_degrees() - 95.0).abs() < 1.0, "{}", turn.to_degrees());
+        // Two fingers sliding down together, 10 px a frame, neither pinching nor twisting: their mean slide
+        // is `pair` (no rotate, no wheel). Twist off, as the setting has it.
+        let mut m = GestureMapper::default();
+        step(&mut m, &[touch(1, 300.0, 400.0, Phase::Started), touch(2, 400.0, 400.0, Phase::Started)], true);
+        let mut pair = (0.0f32, 0.0f32);
+        for i in 1..=3 {
+            let y = 400.0 + 10.0 * i as f32;
+            let f = step(&mut m, &[touch(1, 300.0, y, Phase::Moved), touch(2, 400.0, y, Phase::Moved)], true);
+            pair = (pair.0 + f.pair.0, pair.1 + f.pair.1);
+            assert_eq!((f.rotate, f.wheel), (0, 0.0));
+        }
+        assert!(pair.0.abs() < 1e-3 && (pair.1 - 30.0).abs() < 1e-3, "{pair:?}");
     }
 
     #[test]

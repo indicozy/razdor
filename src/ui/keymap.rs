@@ -48,10 +48,12 @@ pub enum Action {
     LatestAutosave,
     /// Music on or off.
     Music,
+    /// Photo mode (the game menu's «Фото» too): the game stands still, the camera is free.
+    Photo,
 }
 
 /// Every action, in the order of the settings window.
-pub const ALL: [Action; 17] = [
+pub const ALL: [Action; 18] = [
     Action::Wait1,
     Action::Wait4,
     Action::EndlessWait,
@@ -69,6 +71,7 @@ pub const ALL: [Action; 17] = [
     Action::QuickLoad,
     Action::LatestAutosave,
     Action::Music,
+    Action::Photo,
 ];
 
 impl Action {
@@ -91,6 +94,7 @@ impl Action {
             Action::QuickLoad => KeyCode::F9,
             Action::LatestAutosave => KeyCode::F10,
             Action::Music => KeyCode::N,
+            Action::Photo => KeyCode::P,
         }
     }
 
@@ -114,6 +118,7 @@ impl Action {
             Action::QuickLoad => n_("quick load"),
             Action::LatestAutosave => n_("load the latest autosave"),
             Action::Music => n_("music off / on"),
+            Action::Photo => n_("photo mode"),
         }
     }
 }

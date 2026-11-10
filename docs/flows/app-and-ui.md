@@ -1013,6 +1013,48 @@ delivers it; `widgets::is_escape`): a new Esc check goes through these, never a 
 `is_key_pressed(KeyCode::Escape)`. Back is never in the key tables (`keymap::bindable` is false for it)
 and, like Alt and F10, never the held key (`widgets::is_system_key`).
 
+## Photo mode (the player's, 2026-11-10)
+
+Photo mode (`src/ui/photo.rs`) freezes the map and frees its camera for a picture. It starts from the
+game menu's «Фото» (`saves::ExitChoice::Photo`, a fifth button of the menu's row on the desktop, and
+on a phone the row of six, its labels wrapped by `chrome::marble_button_wrapped`) or from the photo key
+(`Action::Photo`, P, rebindable). Either sets `photo::request()`; `world_view::map_frame` takes it on the
+next map frame, with no dialog open, and `enter_photo` keeps the map's look and starts the camera where
+the play's looks (its pitch and turn), so leaving gives the view back: the play's zoom, pitch and turn are
+never written, only the look is restored (`photo::leave` returns it).
+
+- **Nothing advances.** `map_frame` runs `photo_frame` instead of `world_frame` (the old body, unchanged),
+  and `photo_frame` returns before any tick, event, wait or AI move. `photo::may_tick()` is false in the
+  mode: the world frame's own tick gate checks it, and `App::frame_content` does not finish a paused AI
+  step on a press in the mode (it would advance the game). The idle map's animations (wall clock) keep going.
+- **The camera.** `Camera::looking_in` builds `TiltCamera::free` at the mode's pitch (8° to 89.9°, the camera's
+  own top-down limit) and yaw, whatever the view setting: the flat map is tilted in the mode. The zoom is the
+  mode's own, `photo::zoom_bounds` (from the play's whole-map floor halved to twice the wheel's top). Bar height is
+  zero in the mode (`bar_h`), so the map fills the window. The fog, the sprites and the first-person and bent
+  views are as in play; the mode never offers the bend.
+- **Input.** `photo_frame` takes a left drag (pan, `photo_pan`), a right drag (yaw by `DRAG_YAW`, pitch by
+  `DRAG_PITCH`), the wheel and +/- (zoom), Q/E and PageUp/PageDown held (yaw and pitch rates), the arrows held
+  (pan), and on a phone the one-finger swipe (`input::map_pan`), the two-finger twist (`input::map_turn`, raw
+  radians, from `gestures::GestureMapper`'s `Frame::turn`) and the two-finger slide (`input::map_pair`, the mean
+  slide, `Frame::pair`). `gestures` sets `twist_on` in the mode whatever the setting. A tap (a left press and
+  release without moving) brings a hidden strip back. Esc with the strip shown, P, and «Выход» leave; Esc with
+  it hidden shows it again; Space and Enter (and «Снимок») shoot.
+- **The strip.** `photo::layout`: a panel at the bottom left on the desktop, a row of three 48 dp buttons on a
+  phone (labels at 15 sp, `draw_strip`). «Скрыть» hides the strip for a clean shot. The strip's rectangles are
+  swipe areas that take no pan (`SwipeKind::Off`).
+- **The shot.** The shutter's picture is read (macroquad's screen read, which flushes the frame first) after the world
+  is drawn and before the strip and the notices. `photo::upright` reverses the rows (the screen read is bottom
+  row first, as the recorder's `Sinks::write`) and makes the alpha opaque, and `photo::encode_png` (the `png`
+  crate) writes it to `platform::app_dir()/photos/razdor-YYYY-MM-DD-HH-MM-SS.png` (`-2`, `-3` for a second shot
+  in the same second). Local time on unix (`libc::localtime_r`), UTC elsewhere. The notice names the file and,
+  on the desktop, the folder. On Android the folder is the shared `/storage/emulated/0/Razdor/photos` (no gallery
+  export; the root's `.nomedia` keeps it out of the media scanner).
+- **Snapshots.** `RAZDOR_SCENE_PHOTO=1` asks for the mode at a scene's start (`photo::snapshot_request`);
+  `RAZDOR_SCENE_PHOTO_PITCH`, `_YAW`, `_ZOOM`, `_STRIP=0` and `_SHOT=1` set its start (`photo::snapshot_start`).
+  The regression cases are `photo-*` in `tools/ui-regress/scenes.txt` (no shutter case: its notice has the time).
+- **Tests.** `ui::photo::tests` (the limits, the drag's slop and its turn, the strip's phone targets, the stamp,
+  the file name, the flip, the PNG round trip, the entry and leave with the look given back, the pause gate).
+
 ## How to add a window
 
 1. Add a `Screen` variant (or a field on an existing view) in `src/ui/mod.rs`.
