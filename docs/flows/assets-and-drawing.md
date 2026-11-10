@@ -512,8 +512,14 @@ the ground (`mist::draw_ground`, `Sheets` 1, no parallax: opaque where unexplore
 0.42 × the darkness, less the higher they stand, and only the billows above the mean show (`smoothstep(0.44, 0.72)`); a
 raised sheet's rim fades over the last two texels of the fog texture, so it does not end in a hard edge past the map. In 2.5D a
 raised sheet is the ground's model lifted straight up (`view25::raised_ground_model`); in the bent view it is a mesh of its own on
-the sheet's normal (`bent_mist_meshes`, `view25::Bend::normal_at` and `lift`, lifted and faded out over the last three cells
-before the horizon, alpha 0 past it). The raised sheets are drawn over the ground's mist and under the reveals, as the mist is.
+straight up from the sheet (`bent_mist_meshes`, `view25::Bend::lift`, the same lift as the flat sheet; lifted and faded out
+over the last three cells before the horizon, alpha 0 past it). Along the sheet's normal it was wrong: on a steep part of the
+roll the far mist's texels moved toward the eye and covered the explored ground there. The raised sheets are drawn over the ground's mist and under the reveals, as the mist is.
+- **Bent views and explored land** (the owner's report: the first-person view covered the explored land). In a bent view the
+  weather draws in the ground's picture (`draw_world_in`, under the sprites) with the flat projection of the sheet's own ground:
+  the screen-level homography is the flat plane's, which misplaces it on the roll. A bank that would stand in front of explored
+  ground (`bank_hides_explored`: the land 1 and 2 cells ahead along the view is explored) is left out in a bent view only.
+  The flat and 2.5D views are byte-identical to before.
 - **Banks at the contour** (2.5D and first-person): `mist::contour` finds where the shown darkness crosses `mist::FRONTIER`
   (0.5) between two 4-neighbour cells (marching squares on the cell centres: `Crossing`, its fraction `t`, which side is dark).
   `world_view::push_banks` stands two banks a crossing, 0.8 cell (`BANK_OUT`) past the contour into the unexplored side, at

@@ -1474,7 +1474,7 @@ fn draw_sheet(target: &RenderTarget, bend: &view25::Bend, region: Rect) {
 
 /// The mesh of a raised mist sheet `lift` cells above a bent sheet (the first-person view): the fog
 /// quad `dest` (its texels `src` of `tex`, as [`Camera::mist_rects`]) on a grid of 64 × 64 cells, each
-/// vertex lifted along the sheet's normal ([`view25::Bend::lift`]). Its colour's alpha is 0 past the
+/// vertex lifted straight up ([`view25::Bend::lift`]). Its colour's alpha is 0 past the
 /// horizon, so the mist does not float in the sky. Drawn in chunks of 8 rows (a draw takes 5000 indices).
 fn bent_mist_meshes(bend: &view25::Bend, origin: Vec2, scale: f32, dest: Rect, src: Option<Rect>, tex: &Texture2D, lift: f32) -> Vec<Mesh> {
     const ACROSS: usize = 64;
@@ -1485,7 +1485,7 @@ fn bent_mist_meshes(bend: &view25::Bend, origin: Vec2, scale: f32, dest: Rect, s
     let vertex = |i: usize, j: usize| {
         let (fu, fv) = (i as f32 / ACROSS as f32, j as f32 / ALONG as f32);
         let g = (vec2(dest.x + dest.w * fu, dest.y + dest.h * fv) + origin) / scale;
-        // Near the horizon the sheet's normal leans toward the far side, and a lifted point would rise above
+        // Near the horizon the sheet rolls over, and a lifted point would rise above
         // the horizon line: the lift and the alpha fade out over the last cells before it (none past it).
         let fade = if bend.limit.is_finite() { ((bend.limit - (g - bend.pivot).dot(view25::forward(bend.yaw_deg))) / HORIZON_FADE).clamp(0.0, 1.0) } else { 1.0 };
         let fade = fade * fade * (3.0 - 2.0 * fade);
@@ -1540,6 +1540,9 @@ fn push_banks(cam: &Camera, game: &Game, cols: (i32, i32), rows: (i32, i32), ite
     }
     let grid = cam.grid;
     let centre = Vec2::from(cam.centre());
+    // A bent view: a bank that stands in front of explored ground hides it from the eye (the banks are
+    // on the unexplored side, which can be nearer the eye than the land behind), so it is left out.
+    let bent_forward = cam.tilt.and_then(|t| t.cam.bend.map(|_| view25::forward(t.cam.yaw_deg)));
     let mut found: Vec<(f32, i64, BankQuad)> = crossings
         .into_iter()
         .flat_map(|c| {
@@ -1559,10 +1562,15 @@ fn push_banks(cam: &Camera, game: &Game, cols: (i32, i32), rows: (i32, i32), ite
                 let salt = if step < 0.0 { 0 } else { 8 };
                 let (h1, h2, h3, h4) = (unit_hash(c.a, c.b, 1 + salt), unit_hash(c.a, c.b, 2 + salt), unit_hash(c.a, c.b, 3 + salt), unit_hash(c.a, c.b, 4 + salt));
                 let world = at + outward + along * (step + (h1 - 0.5) * 0.2);
+                if bent_forward.is_some_and(|f| bank_hides_explored(world, f, grid, known)) {
+                    return None;
+                }
                 let foot = cam.to_screen((world.x, world.y));
                 let quad = BankQuad { foot, darkness: c.darkness, seed: h4, w: BANK_WIDTH * (0.85 + 0.4 * h2), h: BANK_HEIGHT * (0.8 + 0.45 * h3) };
-                (world.distance_squared(centre), sprite_key(cam, dark, foot, LAYER_BANK), quad)
+                Some((world.distance_squared(centre), sprite_key(cam, dark, foot, LAYER_BANK), quad))
             })
+            .into_iter()
+            .flatten()
         })
         .collect();
     found.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -1602,6 +1610,20 @@ const BANK_OUT: f32 = 0.8;
 
 /// The offsets along the contour (cells) of the two banks a crossing stands.
 const BANK_PER_CROSSING: [f32; 2] = [-0.28, 0.28];
+
+/// In a bent view, how far (cells) past a bank along the view's forward ground the land is looked at:
+/// a bank with explored ground there is left out (see `bank_hides_explored`).
+const BANK_SHADOW_REACH: [f32; 2] = [1.0, 2.0];
+
+/// Whether a bank of mist standing at ground point `world` would hide explored ground in a bent view: the
+/// land `BANK_SHADOW_REACH` cells ahead along the view's forward ground `forward` is explored (its shown
+/// darkness below `mist::FRONTIER`). `known` gives a cell's shown darkness, None off the map.
+fn bank_hides_explored(world: Vec2, forward: Vec2, grid: Grid, known: impl Fn((i32, i32)) -> Option<f32>) -> bool {
+    BANK_SHADOW_REACH.iter().any(|&k| {
+        let p = world + forward * k;
+        known(grid.tile_at((p.x, p.y))).is_some_and(|d| d < mist::FRONTIER)
+    })
+}
 
 /// The depth runs the banks are batched in (each one draw).
 const BANK_BANDS: usize = 4;
@@ -2362,7 +2384,7 @@ impl Camera {
     /// The raised sheets of the mist (`mist::raised_count`, «Туман вместо черноты» in the tilted views): each a
     /// copy of the fog quad lifted off the ground. In 2.5D it is drawn on the ground's pass, lifted straight up
     /// ([`view25::raised_ground_model`]). In a bent view the picture holds the ground, so the raised sheet is a
-    /// mesh of its own, lifted along the sheet's normal ([`bent_mist_meshes`]), in the sprites' run. Drawn over
+    /// mesh of its own, lifted straight up ([`bent_mist_meshes`]), in the sprites' run. Drawn over
     /// the ground's mist and under the reveals, as the mist itself is.
     fn draw_raised_mist(&self, game: &Game, shows: &[&Showing]) {
         let Some(tilt) = self.tilt else { return };
@@ -4081,6 +4103,11 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
             // The raised sheets of the mist lie over the ground's mist and under the reveals, as the mist does.
             cam.draw_raised_mist(game, veil.shows);
             ground(cam, || cam.draw_showing_flat(game, veil.shows.to_vec(), veil.now));
+            // A bent view's weather lies in its picture, on the sheet's ground (`draw_weather`'s projection), under
+            // the sprites; the other views draw it over the world (`draw_world`).
+            if cam.tilt.is_some_and(|t| t.cam.bend.is_some()) {
+                ground(cam, || draw_weather(game, assets, cam, frame_light_of(game), veil.shows));
+            }
         });
         if waits {
             gpu_wait(Stage::GpuFog);
@@ -5691,7 +5718,10 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
             }
             // Razdor's «Погода» (off by default): the land's weather over the drawn map, after the fog and the
             // light, over the explored ground only (`draw_weather`).
-            draw_weather(game, assets, &cam, light, &shows);
+            // A bent view draws it in its ground's picture (in `draw_world_in`), not here.
+            if cam.tilt.is_none_or(|t| t.cam.bend.is_none()) {
+                draw_weather(game, assets, &cam, light, &shows);
+            }
         })
     });
     if !trailer_clean() {
@@ -6103,6 +6133,8 @@ fn draw_weather(game: &Game, assets: &Assets, cam: &Camera, light: Option<daylig
     let projection = match cam.tilt {
         // The flat view's pixel at the cell `p` is `p * scale - origin + view` (`to_screen`).
         None => weather::Projection::Flat { scale: cam.scale, offset: [(cam.origin.x - cam.view.x) / cam.scale, (cam.origin.y - cam.view.y) / cam.scale] },
+        // The picture of a bent view is the ground in the flat 2D space (`bent_view`): the same projection.
+        Some(t) if t.cam.bend.is_some() => weather::Projection::Flat { scale: cam.scale, offset: [(cam.origin.x - cam.view.x) / cam.scale, (cam.origin.y - cam.view.y) / cam.scale] },
         // The ground plane's homography, fitted to the camera's picks (`view25::ground_homography`).
         Some(t) => match view25::ground_homography(&t.cam, cam.view) {
             Some(h) => weather::Projection::Tilted { h },
@@ -7733,5 +7765,18 @@ mod living_parts_tests {
         assert_eq!(owning_card(&cards, Vec2::ZERO, 1.0, vec2(12.0, 5.0)), 1, "held by the second card");
         // No outline holds it: the nearest foot.
         assert_eq!(owning_card(&cards, Vec2::ZERO, 1.0, vec2(60.0, 5.0)), 1);
+    }
+
+    #[test]
+    fn a_bank_in_a_bent_view_is_left_out_when_explored_ground_lies_behind_it() {
+        // Cells x ≤ 4 are explored (darkness 0), x ≥ 5 unexplored (1), and x < 0 is off the map.
+        let known = |t: (i32, i32)| (t.0 >= 0).then(|| if t.0 <= 4 { 0.0 } else { 1.0 });
+        let forward = vec2(1.0, 0.0);
+        // A bank at x 2.0: the land one and two cells ahead (x 3 and 4) is explored.
+        assert!(bank_hides_explored(vec2(2.0, 5.0), forward, Grid::Square8, known));
+        // A bank at x 4.0: x 5 and 6 are unexplored, so nothing explored hides.
+        assert!(!bank_hides_explored(vec2(4.0, 5.0), forward, Grid::Square8, known));
+        // Off the map there is no explored land to hide.
+        assert!(!bank_hides_explored(vec2(-3.0, 5.0), vec2(-1.0, 0.0), Grid::Square8, known));
     }
 }
