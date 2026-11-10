@@ -405,8 +405,8 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
     centre (the hero when followed) from beyond it, so the centre stands at two thirds of the frame's height;
     the distance is fitted so the hero's ground is drawn at the flat map's scale (the depth
     `frame.h / 2 / (tan(fov/2) · scale)`). Yaw, Q and E, the two-finger twist and the compass are as in 2.5D.
-  - The bend: `view25::Bend` with a signed `max_deg`. Up (`FP_BEND_UP` 78°, radius `FP_RADIUS` 8) rolls the
-    sheet to square-on with the eye; down (`FP_BEND_DOWN` -60°, radius `FP_RADIUS_DOWN` 60) curves it away.
+  - The bend: `view25::Bend` with a signed `max_deg`. Up (`FP_BEND_UP` 78°, radius `FP_RADIUS` 24: a wide roll, the
+    tight radius 8 turned the far ground square-on within ten cells, too fast) rolls the sheet to square-on with the eye; down (`FP_BEND_DOWN` -60°, radius `FP_RADIUS_DOWN` 60) curves it away.
     The down bend's `limit` is its horizon, where the eye's sight line grazes it (`Bend::with_horizon`): past
     it the sheet is not drawn, not picked, and `Bend::point` stands a point on the horizon's line (`hidden`
     keeps a sprite there from showing). A tight radius puts the horizon near mid-frame; a wide planet's curve

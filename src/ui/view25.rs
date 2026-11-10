@@ -33,10 +33,12 @@ pub const FREE_PITCH_MAX: f32 = 89.9;
 pub const FP_PITCH: f32 = 12.0;
 pub const FP_FOV: f32 = 55.0;
 pub const FP_FLAT: f32 = 3.0;
-/// The arc's radius of the roll up, and of the curve down: a tight roll (the trailer's) gives a
-/// horizon near the middle of the frame, the wide curve of a planet would put it near the top and
-/// the footprint would need the far ground to the horizon (about 170 units).
-pub const FP_RADIUS: f32 = 8.0;
+/// The arc's radius of the roll up, and of the curve down. The roll up is wide (24 cells: a tight roll
+/// turned the far ground to square-on within about ten cells, too fast to follow; the trailer's 8 was
+/// that tight roll). A tight curve down (the trailer's) gives a horizon near the middle of the frame,
+/// the wide curve of a planet would put it near the top and the footprint would need the far ground to
+/// the horizon (about 170 units).
+pub const FP_RADIUS: f32 = 24.0;
 pub const FP_RADIUS_DOWN: f32 = 60.0;
 pub const FP_BEND_UP: f32 = 78.0;
 pub const FP_BEND_DOWN: f32 = -60.0;
@@ -50,7 +52,7 @@ pub const EYE_NEAR: f32 = 2.5;
 /// The width of the eyes view's fade-out band beyond [`EYE_NEAR`] (cells): a sprite is translucent over it.
 pub const EYE_FADE_BAND: f32 = 0.5;
 pub const EYE_FLAT: f32 = 2.5;
-pub const EYE_RADIUS_UP: f32 = 8.0;
+pub const EYE_RADIUS_UP: f32 = 24.0;
 pub const EYE_RADIUS_DOWN: f32 = 60.0;
 pub const EYE_BEND_UP: f32 = 78.0;
 pub const EYE_BEND_DOWN: f32 = -60.0;
@@ -1417,5 +1419,15 @@ mod homography_tests {
             let py = (h[1][0] * x + h[1][1] * y + h[1][2]) / w;
             assert!((px - g.x).abs() < 0.01 && (py - g.y).abs() < 0.01, "({x},{y}): {px},{py} vs {g:?}");
         }
+    }
+
+    #[test]
+    fn the_first_person_roll_up_rises_gently_from_the_flat_part() {
+        // Eight cells past the flat part the far ground is under 1.5 cells high: the tight roll of
+        // radius 8 was 3.7 there, so the horizon went from flat to square-on too fast.
+        let bend = Bend::new(Vec2::ZERO, 0.0, FP_FLAT, FP_RADIUS, FP_BEND_UP);
+        let (_, h) = bend.profile(FP_FLAT + 8.0);
+        assert!(h < 1.5, "the roll is {h} cells high 8 cells past its flat part");
+        assert!(bend.profile(FP_FLAT + 8.0).0 > FP_FLAT + 7.0, "the roll keeps the ground's distance");
     }
 }
