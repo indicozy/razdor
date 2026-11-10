@@ -172,10 +172,12 @@ placeholder `0.0.0` (`update_view::shown_version`), so a version bump changes no
    Battle frames (`battle_view`) are `battle[flat]` or `battle[25d]` (the view the map is
    drawn in), and `battle-effect[…]` when an effect was drawn in the frame (`mark_effect`).
    Their lines add the stages backdrop, battle-window (effect inside it), and gpu-backdrop and
-   gpu-window: on Android only, the GL queue flushed and waited for (`glFinish`) after each,
-   which serialises the GPU while profiling (0 elsewhere).
+   gpu-window: on Android only with the `profile-gpu` file too, the GL queue flushed and waited for
+   (`glFinish`) after each, which serialises the GPU (0 elsewhere).
    The map kinds (`walk-step`, `walk`, `idle`) are named with their view too (`idle[25d]`) and
-   add the map's GPU waits (Android, probe on: `gpu-sky`, `gpu-terrain`, `gpu-marks`,
+   add the map's GPU waits (Android, only with the app folder's `profile-gpu` file beside `profile`,
+   `frame_probe::gpu_waits_on`: each wait stalls the CPU until the GPU is done and slows every frame,
+   40-55 ms a frame on a 2020 Adreno driver, so a plain `profile` measures the frames as they are: `gpu-sky`, `gpu-terrain`, `gpu-marks`,
    `gpu-sprites`, `gpu-fog`, `gpu-ui` after the minimap, bar, windows and cursor; each a flush
    and `glFinish` after that pass, `ui::gpu_probe`) and the standing sprites' count and summed
    area (`sprites n=… area=…Mpx`, pixels of the pass's 2D space: an overdraw estimate) and the

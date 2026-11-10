@@ -261,6 +261,17 @@ pub fn gpu_timers_on() -> bool {
     on() && *ON.get_or_init(|| !cfg!(target_os = "android") && std::env::var("RAZDOR_GPU_STAGES").is_ok_and(|v| v == "1"))
 }
 
+/// The map's GPU waits on Android (`ui::gpu_probe::gpu_wait`): with the probe on and the app folder's
+/// `profile-gpu` file too. Off by default: each wait flushes the queue and stalls the CPU until the
+/// GPU is done, which slows every frame (40-55 ms a frame on a 2020 Adreno driver, a player's
+/// report), so a plain `profile` measures the frames as they are. Never on the desktop.
+pub fn gpu_waits_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    on() && *ON.get_or_init(|| {
+        cfg!(target_os = "android") && crate::platform::app_dir().is_some_and(|d| d.join("profile-gpu").is_file())
+    })
+}
+
 /// A timed GPU draw of `ms` milliseconds, in a frame of `kind`: counted in its summary line.
 pub fn record_gpu(kind: Kind, ms: f32) {
     if on() {

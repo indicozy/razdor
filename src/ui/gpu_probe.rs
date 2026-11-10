@@ -1,7 +1,8 @@
 //! Profiling only (Android): the GPU waits of the frame probe. A wait flushes macroquad's
 //! batched draws and waits for the GL queue to finish, so the GPU's time for the frame so far
-//! is timed as a stage. It serialises the GPU, so it runs only with the frame probe on;
-//! elsewhere it does nothing (the stage stays zero).
+//! is timed as a stage. It serialises the GPU and slows every frame, so it runs only with the
+//! frame probe on and the app folder's `profile-gpu` file (`frame_probe::gpu_waits_on`); elsewhere,
+//! a plain `profile` included, it does nothing (the stage stays zero).
 
 use razdor::frame_probe::Stage;
 
@@ -9,7 +10,7 @@ use razdor::frame_probe::Stage;
 /// and the material state, so the draws after it are as before.
 #[cfg(target_os = "android")]
 pub fn gpu_wait(stage: Stage) {
-    if !razdor::frame_probe::on() {
+    if !razdor::frame_probe::gpu_waits_on() {
         return;
     }
     razdor::frame_probe::time(stage, || unsafe {
