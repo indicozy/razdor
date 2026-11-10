@@ -619,6 +619,8 @@ impl MapView {
     /// A game was loaded: the places the old one was about to show are dropped.
     pub fn forget_shows(&mut self) {
         IDLE.with(|m| m.borrow_mut().clear());
+        // A game was loaded or started: its fog is shown as it is, with no fade of the whole map.
+        minimap::snap_fog();
         self.shows.clear();
         self.returning = None;
         self.opening = None;
@@ -1150,11 +1152,11 @@ fn faded_premultiplied(c: Color) -> Color {
     Color::new(c.r * v, c.g * v, c.b * v, c.a * v)
 }
 
-/// The visibility of a standing sprite on a cell: 1 less the darkest of the fog's darkness there
-/// (`fog`, 0 to 1, as the fog texture shows it) and the reveal still over it (`shown`), eased by a
-/// smoothstep from 0.15 to 0.85, so an edge sprite is not ghostly for long and a deep one is gone.
-fn sprite_visibility(fog: f32, shown: f32) -> f32 {
-    let x = (1.0 - fog.max(shown)).clamp(0.0, 1.0);
+/// The visibility of a standing sprite on a cell: 1 less the darkness the ground shows there
+/// (`dark`, 0 to 1: the fog and the reveal composed), eased by a smoothstep from 0.15 to 0.85, so
+/// an edge sprite is not ghostly for long and a deep one is gone.
+fn sprite_visibility(dark: f32) -> f32 {
+    let x = (1.0 - dark).clamp(0.0, 1.0);
     let t = ((x - 0.15) / 0.7).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
@@ -1378,8 +1380,8 @@ impl Camera {
     /// The fog layer over the whole map (`ui::minimap`), and black beyond the map's limits:
     /// nothing drawn past its edges shows (a map smaller than the window, the overhang of
     /// staggered rows).
-    fn draw_fog(&self, game: &Game) {
-        in_view(self, |c| ground(c, || c.draw_fog_flat(game)));
+    fn draw_fog(&self, game: &Game, shows: &[&Showing]) {
+        in_view(self, |c| ground(c, || c.draw_fog_flat(game, shows)));
     }
 
     /// The drawn ground as a map texture's rectangles: where it is on screen (`dest`) and which
@@ -1392,15 +1394,19 @@ impl Camera {
         (self.draw, Rect::new(r.x + 0.5, r.y / rh + 0.5, r.w, r.h / rh))
     }
 
-    fn draw_fog_flat(&self, game: &Game) {
+    fn draw_fog_flat(&self, game: &Game, shows: &[&Showing]) {
+        // The reveal cells of the places being shown jump to their target: the mask draws their
+        // circle, so the fog under it does not fade a second time (`minimap::fog_texture`).
+        let settle = shows.iter().filter(|s| s.mask.is_some()).flat_map(|s| s.reveal_cells.iter().map(|&(i, _)| i));
+        let (held, origin) = (game.unshown_cells(), game.tile());
         // «Продолжать карту за краем»: the fog goes on past the edges too (its texels clamp there).
         if extend_edge() {
             let (dest, src) = self.fog_texels();
-            minimap::draw_fog_extended(&game.fog, &game.unshown_cells(), dest, src);
+            minimap::draw_fog_extended(&game.fog, &held, origin, settle, dest, src);
             return;
         }
         let (tl, br) = self.fog_corners(game);
-        minimap::draw_fog(&game.fog, &game.unshown_cells(), tl, br);
+        minimap::draw_fog(&game.fog, &held, origin, settle, tl, br);
         let v = self.draw;
         let (l, r) = (tl.x.clamp(v.x, v.x + v.w), br.x.clamp(v.x, v.x + v.w));
         let (t, b) = (tl.y.clamp(v.y, v.y + v.h), br.y.clamp(v.y, v.y + v.h));
@@ -2323,13 +2329,15 @@ const NO_VEIL: Veil<'static> = Veil { shows: &[], now: 0.0 };
 /// it, the darker of the two.
 struct Shade<'a> {
     fog: &'a razdor::rules::fog::Fog,
-    held: std::collections::HashSet<Tile>,
     veil: Veil<'a>,
 }
 
 impl Shade<'_> {
     /// The shade of a sprite whose foot is at `foot` (a point of the 2D space of `cam`), on the
-    /// cell under it.
+    /// cell under it. The fog's darkness there is the one the ground shows this frame
+    /// (`minimap::shown_darkness`, drawn before the sprites), composed with the reveal's mask
+    /// on that cell (`Showing::alpha_at`, updated this frame too): the same darkness the ground
+    /// has, so a sprite opens as the circle passes it.
     fn at(&self, cam: &Camera, foot: Vec2) -> f32 {
         let world = (foot + cam.origin) / cam.scale;
         let t = cam.grid.tile_at((world.x, world.y));
@@ -2349,14 +2357,16 @@ impl Shade<'_> {
         } else {
             None
         };
-        let (dark, shown) = match on {
-            Some(c) => (
-                minimap::darkness_at(fog.w, fog.h, |n| fog.explored(n) && !self.held.contains(&n), c) as f32 / 255.0,
-                self.veil.shows.iter().filter_map(|s| s.alpha_at(fog.w, c, self.veil.now)).fold(0.0, f32::max),
-            ),
-            None => (1.0, 0.0),
+        let dark = match on {
+            Some(c) => {
+                let fog_dark = minimap::shown_darkness(fog, c);
+                let reveal = self.veil.shows.iter().filter_map(|s| s.alpha_at(fog.w, c, self.veil.now)).fold(0.0, f32::max);
+                // The two layers composed, as the GPU blends them: 1 − (1 − fog)(1 − reveal).
+                1.0 - (1.0 - fog_dark) * (1.0 - reveal)
+            }
+            None => 1.0,
         };
-        sprite_visibility(dark, shown)
+        sprite_visibility(dark)
     }
 }
 
@@ -2398,7 +2408,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     let fog = &game.fog;
     let tilted = cam.tilt.is_some();
     // The 2.5D view's fog shade of each standing sprite (none in the flat view: 1 there).
-    let shade = tilted.then(|| Shade { fog, held: game.unshown_cells().into_iter().collect(), veil });
+    let shade = tilted.then_some(Shade { fog, veil });
     let shade_of = |foot: Vec2| shade.as_ref().map_or(1.0, |s| s.at(cam, foot));
     // An object of the drawn columns and rows with a cell explored near the feather is seen, and
     // the hills are the classes 1-3 (`hill`).
@@ -2465,7 +2475,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     if tilted {
         frame_probe::time(Stage::Fog, || {
             ground(cam, || {
-                cam.draw_fog_flat(game);
+                cam.draw_fog_flat(game, veil.shows);
                 cam.draw_showing_flat(game, veil.shows.to_vec(), veil.now);
             })
         });
@@ -3396,7 +3406,7 @@ fn draw_map_backdrop(game: &Game, assets: &Assets) {
         let cam = backdrop_camera(game, full);
         draw_world(game, assets, &cam, None, None, None, false, NO_VEIL);
         if cam.tilt.is_none() {
-            cam.draw_fog(game);
+            cam.draw_fog(game, &[]);
         }
         draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.2));
     });
@@ -3475,7 +3485,7 @@ fn window_backdrop_at_scale(game: &Game, assets: &Assets, lit: Option<BarButton>
         let cam = backdrop_camera(game, full);
         draw_world(game, assets, &cam, None, None, None, false, NO_VEIL);
         if cam.tilt.is_none() {
-            cam.draw_fog(game);
+            cam.draw_fog(game, &[]);
         }
         draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.2));
     });
@@ -3974,7 +3984,7 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     let flat = cam.tilt.is_none();
     frame_probe::time(Stage::World, || draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()), show.as_ref(), hover, true, Veil { shows: &shows, now: show_now }));
     if flat {
-        frame_probe::time(Stage::Fog, || cam.draw_fog(game));
+        frame_probe::time(Stage::Fog, || cam.draw_fog(game, &shows));
         gpu_wait(Stage::GpuFog);
     }
     draw_clash_marks(view, &cam, crate::ui::clock::now());
@@ -5202,19 +5212,16 @@ mod tilt_tests {
         }
     }
 
-    /// The visibility is 1 less the darker of the fog and the reveal, eased by a smoothstep from
-    /// 0.15 to 0.85 and clamped to 0 to 1.
+    /// The visibility is 1 less the darkness the ground shows, eased by a smoothstep from 0.15 to
+    /// 0.85 and clamped to 0 to 1.
     #[test]
-    fn a_sprite_fades_with_the_darker_of_the_fog_and_the_reveal() {
-        assert_eq!(sprite_visibility(0.0, 0.0), 1.0, "clear ground: plain");
-        assert_eq!(sprite_visibility(1.0, 0.2), 0.0, "deep in the dark: gone");
-        assert_eq!(sprite_visibility(0.5, 0.0), 0.5, "half dark: half there");
-        assert_eq!(sprite_visibility(0.0, 0.5), 0.5, "the reveal's darkness counts too");
-        assert_eq!(sprite_visibility(0.1, 0.5), 0.5, "the darker one counts");
-        assert_eq!(sprite_visibility(0.2, 0.9), 0.0, "a dark reveal hides it");
-        assert!(sprite_visibility(0.25, 0.0) > sprite_visibility(0.4, 0.0), "darker, less visible");
-        assert_eq!(sprite_visibility(1.5, 0.0), 0.0, "clamped above");
-        assert_eq!(sprite_visibility(-0.5, -0.2), 1.0, "clamped below");
+    fn a_sprite_fades_with_the_darkness_of_its_ground() {
+        assert_eq!(sprite_visibility(0.0), 1.0, "clear ground: plain");
+        assert_eq!(sprite_visibility(1.0), 0.0, "deep in the dark: gone");
+        assert_eq!(sprite_visibility(0.5), 0.5, "half dark: half there");
+        assert!(sprite_visibility(0.25) > sprite_visibility(0.4), "darker, less visible");
+        assert_eq!(sprite_visibility(1.5), 0.0, "clamped above");
+        assert_eq!(sprite_visibility(-0.5), 1.0, "clamped below");
     }
 
     /// Plain unless the 2.5D view's standing sprite sets it: a flat camera's sprite is drawn as it is.
@@ -5228,8 +5235,9 @@ mod tilt_tests {
         assert_eq!(got.map(|c| (c.r, c.g, c.b, c.a)), Some((1.0, 1.0, 1.0, 1.0)), "a flat sprite is never faded");
     }
 
-    /// A sprite's shade is read from the fog on its own cell: clear where it is explored, dark
-    /// where it is not, and dark where an event's reveal still holds its cell unshown.
+    /// A sprite's shade is read from the fog on its own cell, as the ground shows it this frame:
+    /// clear where it is explored, dark where it is not, and dark where an event's reveal still
+    /// holds its cell unshown.
     #[test]
     fn a_sprite_on_an_unexplored_cell_is_dark_and_one_on_an_explored_cell_is_not() {
         let game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
@@ -5239,13 +5247,16 @@ mod tilt_tests {
         let (lit, dark) = ((20, 15), (2, 2));
         assert!(fog.explored(lit) && !fog.explored(dark), "the test fog: lit inside, dark far away");
         let foot = |t: Tile| cam.cell_centre(t);
-        let shade = Shade { fog: &fog, held: Default::default(), veil: NO_VEIL };
+        let shade = Shade { fog: &fog, veil: NO_VEIL };
+        minimap::snap_fog();
+        minimap::track(&fog, &[], lit, std::iter::empty(), 0.0);
         assert_eq!(shade.at(&cam, foot(lit)), 1.0, "explored and clear");
         assert_eq!(shade.at(&cam, foot(dark)), 0.0, "unexplored");
-        // A reveal's unshown block (its cells dark as the texture has them, the feather at its rim).
-        let block: std::collections::HashSet<Tile> = (17..=23).flat_map(|x| (12..=18).map(move |y| (x, y))).collect();
-        let held = Shade { fog: &fog, held: block, veil: NO_VEIL };
-        assert_eq!(held.at(&cam, foot(lit)), 0.0, "an unshown cell is dark even when explored");
+        // A reveal's unshown block (its cells dark, the feather at its rim), taken at once.
+        let block: Vec<Tile> = (17..=23).flat_map(|x| (12..=18).map(move |y| (x, y))).collect();
+        minimap::snap_fog();
+        minimap::track(&fog, &block, lit, std::iter::empty(), 0.0);
+        assert_eq!(shade.at(&cam, foot(lit)), 0.0, "an unshown cell is dark even when explored");
     }
 
     /// Visibility 0 draws nothing: a straight-alpha sprite's alpha goes to 0, a premultiplied

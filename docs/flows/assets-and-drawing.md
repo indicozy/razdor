@@ -93,8 +93,8 @@ install file ──► src/dt/gfx.rs decode_file ──► gfx::Image (RGBA, not
   map's atlas and figure sheets are made at first use, from the decoded picture (no decode
   then). The minimap's ground (terrain, objects, bridges) is made once per map when the game starts
   (`minimap::prebuild`, keyed by the map's identity, not the fog); the fog's dark is drawn over it
-  as `minimap::fog_texture`, the same texture the map view draws, so a step of the hero only
-  remakes the dark.
+  as `minimap::fog_texture`, the same texture the map view draws; it holds the shown darkness (see «The fog
+  fades» below), so a step of the hero only changes the dark and the texture is uploaded when a texel changed.
   Snapshot runs make no early textures.
 - **The persistent picture cache** (`src/dt/picture_cache.rs`): a decoded picture's frames
   (raw RGBA with their sizes) are kept in `platform::cache_dir()` + `pictures` + one subfolder
@@ -311,13 +311,25 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   view (`MapView::draw` draws them there, flat only). The hills, drawn first in the flat view, come after them.
   Each standing sprite (`standing`, its visibility from `Shade::at`) fades into the fog on its foot's cell, so
   what is behind it shows through instead of a black silhouette: the visibility is `sprite_visibility`, a smoothstep
-  from 0.15 to 0.85 of 1 less the darker of the fog's darkness on that cell (`minimap::darkness_at`, the texture's
-  value, unshown cells dark) and the reveal's alpha there (`Showing::alpha_at`). A straight-alpha sprite keeps its
+  from 0.15 to 0.85 of 1 less the darkness the ground shows on that cell: the fog's shown darkness there
+  (`minimap::shown_darkness`) composed with the reveal's alpha there (`Showing::alpha_at`), as the GPU blends them.
+  Both are the values this frame's ground was drawn with (the fog and the mask are drawn before the sprites), so an
+  object opens as the reveal's circle passes it. A straight-alpha sprite keeps its
   colour and scales its alpha (`faded`); a premultiplied one (the figures) scales every channel (`faded_premultiplied`).
   At 0 it is not drawn. Off the map the ground is black (visibility 0) unless «Продолжать карту за краем» is on.
   Razdor's visual only: the flat view is pixel-identical. Sprites' fallback drawings (no DT art: procedural
   ships, units by `draw_unit`) are not faded.
-  ships, units by `draw_unit`) are not shaded.
+- **The fog fades** (the owner's request, 2026-11-10: a smooth reveal, not a pop). `minimap::FogShown` (per thread)
+  keeps each cell's shown darkness (0..255, unrounded) and eases it toward its target (`darkness_into` of the fog
+  with its held cells dark): an exponential approach with `FADE_TAU` (0.2 s), monotonic, snapped within half a
+  level (`ease_toward`). A cell that opens waits `WALK_DELAY` (0.05 s) per cell of distance from the hero before its
+  ease starts, so a walk's strip opens outward from him; a cell that closes goes at once. The reveal cells of a
+  place being shown (`Showing::reveal_cells`, passed as the `settle` cells of `draw_fog_flat`) jump to their target
+  each frame: the radial mask (`draw_showing_flat`) draws their circle, so the fog under it does not fade twice.
+  `forget_shows` (a game loaded or started, the map's opening) snaps everything (`snap_fog`). `track` does the
+  update; it runs only when the fog or held cells change or a cell still eases, so an idle map does no per-cell
+  work and uploads nothing (`fog_texture` uploads the texture when a texel changed, counted in the frame probe's
+  rebuilds). The flat map, the minimap window and the 2.5D sprites all read the same values.
 - Simplifications: the F3 overlay is off in 2.5D (its labels are placed on the flat map).
 
 ## Sound and music
