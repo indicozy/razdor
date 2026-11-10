@@ -3868,6 +3868,12 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
         let locations: Vec<(usize, &Location)> = game.world.locations.iter().enumerate().filter(|(_, l)| location_seen(l) && !l.kind.is_bridge()).collect();
         ground(cam, || draw_shadows(game, art, cam, sun, &lit, &objects, &locations));
     }
+    // The buildings' light lies on the ground around them, not on them: the pools are drawn here, in the
+    // ground pass under every standing sprite, so a building's own picture covers its pool (the owner's
+    // report: no blob on a building). Torches are drawn after the world (`draw_daylight`).
+    if relief.is_some() {
+        ground(cam, || draw_building_pools(game, cam));
+    }
     // The original (0x4c8864) draws the hills of classes 1-3 in a pass of their own before
     // anything else, so they lie under every tree, mountain, building and army, the ones
     // above them included. Its test is `0x100 < class·256 + sprite < 0x401`: class 4's
@@ -5791,6 +5797,42 @@ fn point_lights(game: &Game, art: Option<&DtArt>, cam: &Camera, glow: f32) -> Ve
     out
 }
 
+/// What the fog shows at a world point (1 lit, 0 black or off the map), as a pool fades with it.
+fn fog_visible(game: &Game, cam: &Camera, world: Vec2) -> f32 {
+    let (map, fog) = (&game.world.map, &game.fog);
+    let t = cam.grid.tile_at((world.x, world.y));
+    if t.0 < 0 || t.1 < 0 || t.0 >= map.w || t.1 >= map.h {
+        return 0.0;
+    }
+    if !fog.enabled || fog.w <= 0 || fog.h <= 0 {
+        1.0
+    } else {
+        1.0 - minimap::shown_darkness(fog, t)
+    }
+}
+
+/// The warm pool of each building's light (`lights`, `point_lights`), on the ground in the ground pass
+/// (`ground`, the pass's 2D space): a disc of twice the light's reach, faded by the fog on its cell. The
+/// building's own picture is drawn over it, so the light shows around the building and on what stands near it.
+fn draw_building_pools(game: &Game, cam: &Camera) {
+    let tex = glow_tex();
+    lights::with_frame(|frame| {
+        let Some(frame) = frame else { return };
+        super::chrome::additive(|| {
+            for l in frame.lights.iter().filter(|l| matches!(l.owner, lights::Owner::Building(_))) {
+                let vis = fog_visible(game, cam, l.at);
+                if vis < 0.01 {
+                    continue;
+                }
+                let at = cam.to_screen((l.at.x, l.at.y));
+                let size = 2.0 * l.radius * cam.scale;
+                let color = Color::new(lights::WARM[0], lights::WARM[1], lights::WARM[2], (0.7 * l.strength * vis).clamp(0.0, 1.0));
+                draw_texture_ex(&tex, at.x - size / 2.0, at.y - size / 2.0, color, DrawTextureParams { dest_size: Some(vec2(size, size)), ..Default::default() });
+            }
+        });
+    });
+}
+
 /// Razdor's «Освещение» (`daylight`, off by default): the map's tint over the drawn world, then each point
 /// light's warm pool (`lights`, `point_lights`) on the ground and the sprites, in screen space: a building's
 /// over its footprint, a torch's flickering over its flame. Style only: nothing is drawn when it is off, and the
@@ -5828,19 +5870,15 @@ fn draw_daylight(game: &Game, cam: &Camera, light: Option<daylight::Light>) {
     lights::with_frame(|frame| {
         let Some(frame) = frame else { return };
         super::chrome::additive(|| {
-            for (i, l) in frame.lights.iter().enumerate() {
+            // The torches' pools (the buildings' lie on the ground, `draw_building_pools`).
+            for (i, l) in frame.lights.iter().enumerate().filter(|(_, l)| matches!(l.owner, lights::Owner::Torch)) {
                 let vis = visible(l.at);
                 if vis < 0.01 {
                     continue;
                 }
                 let reach = l.radius * cam.scale;
-                let (rgb, alpha) = match l.owner {
-                    lights::Owner::Building(_) => (lights::WARM, 0.7),
-                    lights::Owner::Torch => {
-                        let flicker = 0.92 + 0.08 * (now * 9.0 + i as f64).sin() as f32;
-                        ([1.0, 0.65, 0.30], 0.45 * flicker)
-                    }
-                };
+                let flicker = 0.92 + 0.08 * (now * 9.0 + i as f64).sin() as f32;
+                let (rgb, alpha) = ([1.0, 0.65, 0.30], 0.45 * flicker);
                 glow_at(cam.screen_at((l.at.x, l.at.y)), 2.0 * reach, rgb, alpha * l.strength * vis);
             }
         });

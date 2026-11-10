@@ -89,6 +89,10 @@ float point_shade(vec2 at, vec3 n) {
     }
     return clamp(1.0 + POINT_K * LightI.z * s, 0.0, 1.8);
 }
+// 1 where a sampled pixel is dark (a window's pane or door), 0 for stone and for a transparent pixel.
+float dark_px(vec4 s) {
+    return s.a > 0.5 ? (1.0 - smoothstep(0.18, 0.24, luma(s.rgb))) : 0.0;
+}
 // The night's glow of the lights at `at`, 0 to 1 (a building's openings take it).
 float glow_at(vec2 at) {
     float e = 0.0;
@@ -293,8 +297,10 @@ pub fn session_lit<R>(relief: Option<daylight::Relief>, points: Option<&lights::
         None => None,
     };
     let points = points.unwrap_or(lights::Uniforms { lights: [Vec4::ZERO; lights::SLOTS], info: Vec4::ZERO });
+    // The clock (`LightI.w`) drives the windows' flicker; the pass sets it once, like the rest.
+    let info = vec4(points.info.x, points.info.y, points.info.z, super::clock::now() as f32);
     m.set_uniform_array("LightA", &points.lights[..]);
-    m.set_uniform("LightI", points.info);
+    m.set_uniform("LightI", info);
     session_with(m, draw)
 }
 
@@ -336,8 +342,6 @@ const LIT_MAIN: &str = r#"
     vec4 c = sharp_tex(uv);
     float a = c.a;
     vec3 rgb = c.rgb;
-    // How much darker this pixel is than its surroundings (a cavity: the openings of a building).
-    float cavity_here = 0.0;
     if (a > 0.0) {
         vec2 ox = vec2(RELIEF_R, 0.0) / TexSize;
         vec2 oy = vec2(0.0, RELIEF_R) / TexSize;
@@ -358,26 +362,37 @@ const LIT_MAIN: &str = r#"
         vec4 fym = sharp_tex(uv - oy3);
         float deep = ((fxp.a < 0.5 ? h : luma(fxp.rgb)) + (fxm.a < 0.5 ? h : luma(fxm.rgb)) + (fyp.a < 0.5 ? h : luma(fyp.rgb)) + (fym.a < 0.5 ? h : luma(fym.rgb))) * 0.25;
         rgb = relief_shade(rgb, h, xp, xm, yp, ym, deep);
-        cavity_here = 0.25 * (xp + xm + yp + ym) - h;
         // The point lights rake the relief at night (`LightI.y` of them, `LightI.z` the night).
-        if (LightI.y > 0.0 && LightI.z > 0.0) {
+        if (LightI.y > 0.0 && LightI.z > 0.0 && texture2D(BuildingMask, uv).a < 0.5) {
             rgb = clamp(rgb * point_shade(spos, normalize(vec3(-(xp - xm) * RELIEF_K, -(yp - ym) * RELIEF_K, 1.0))), 0.0, 1.0);
         }
     }
     if (a > 0.0 && a <= 0.76) {
         a = min(a * ShadowK, 1.0);
     }
-    // A building picture's openings (the building mask, `BuildingMask`): dark cavities of the solid body glow
-    // warm by the lights' reach at night. Decorations and figures never do (not in the mask, or another material).
-    if (c.a >= 0.8 && LightI.z > 0.0 && LightI.x > 0.0 && texture2D(BuildingMask, uv).a > 0.5) {
-        vec3 raw = c.rgb;
-        float mx = max(raw.r, max(raw.g, raw.b));
-        float mn = min(raw.r, min(raw.g, raw.b));
-        float sat = mx > 0.001 ? (mx - mn) / mx : 0.0;
-        // Dark (luma 0.14 to 0.22 raw), darker than the four pixels 1.5 texels away (a cavity), and not a warm
-        // colour (saturation 0.36 to 0.44). The art has no window layer: the seams of a wall's corners pass too.
-        float opening = (1.0 - smoothstep(0.14, 0.22, luma(raw))) * smoothstep(0.03, 0.10, cavity_here) * (1.0 - smoothstep(0.36, 0.44, sat));
-        rgb = min(rgb + EMIT_WARM * (EMIT_K * LightI.z * opening * glow_at(spos)), vec3(1.0));
+    // Windows and doors (the building mask, `BuildingMask`): a pixel darker than the ring of pixels 4
+    // texels away (past the neighbouring panes of a row of windows) (a cavity), and dark in itself (luma under 0.35), is an opening. It glows warm at night
+    // (1.4 by the night's factor, a little less where no light reaches), flickering slightly per building
+    // (`LightI.w` is the clock; the hash is of the 40-pixel cell, so one building flickers alike), and the
+    // dark pixels 1.5 texels away spill a soft 30 % halo onto the stone. Decorations and figures never glow.
+    if (c.a >= 0.8 && LightI.z > 0.0 && texture2D(BuildingMask, uv).a > 0.5) {
+        vec2 ox = vec2(RELIEF_R, 0.0) / TexSize;
+        vec2 oy = vec2(0.0, RELIEF_R) / TexSize;
+        vec2 ox2 = vec2(4.0, 0.0) / TexSize;
+        vec2 oy2 = vec2(0.0, 4.0) / TexSize;
+        float lum = luma(c.rgb);
+        // A window is a blob: brighter than the ring on both axes. A dark seam or edge is brighter on one only.
+        float ring_x = 0.5 * (luma(sharp_tex(uv + ox2).rgb) + luma(sharp_tex(uv - ox2).rgb));
+        float ring_y = 0.5 * (luma(sharp_tex(uv + oy2).rgb) + luma(sharp_tex(uv - oy2).rgb));
+        float opening = smoothstep(0.08, 0.14, min(ring_x, ring_y) - lum) * (1.0 - smoothstep(0.24, 0.32, lum));
+        float halo = 0.25 * (dark_px(sharp_tex(uv + ox)) + dark_px(sharp_tex(uv - ox)) + dark_px(sharp_tex(uv + oy)) + dark_px(sharp_tex(uv - oy)));
+        float hsh = fract(sin(dot(floor(spos / 40.0), vec2(127.1, 311.7))) * 43758.5453);
+        float flick = 0.94 + 0.06 * sin(mod(LightI.w, 1000.0) * 2.3 + hsh * 6.2832);
+        float reach = 0.6 + 0.4 * glow_at(spos);
+        vec3 warm = vec3(1.0, 0.78, 0.38);
+        // The halo is for the stone beside an opening, not for the dark seams themselves.
+        float stone = smoothstep(0.18, 0.26, lum);
+        rgb = min(rgb + warm * (1.4 * LightI.z * reach * flick * (opening + 0.3 * halo * stone * (1.0 - opening))), vec3(1.0));
     }
     gl_FragColor = color * vec4(rgb, a);
 "#;
