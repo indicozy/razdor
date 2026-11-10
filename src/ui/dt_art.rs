@@ -86,6 +86,11 @@ impl Atlas {
         self.rects.get(ObjectSprite::DECORATIONS, class.into(), sprite.into())
     }
 
+    /// The atlas rectangle of a sprite by its section, category and index (`ObjectSprite`).
+    pub fn rect_of(&self, section: u32, cat: u32, idx: u32) -> Option<Rect> {
+        self.rects.get(&(section, cat, idx)).copied()
+    }
+
     /// Sprite of a building by picture type and variant.
     pub fn building(&self, picture_type: u8, variant: u8) -> Option<Rect> {
         self.rects.get(ObjectSprite::BUILDINGS, picture_type.into(), variant.into())
@@ -121,6 +126,9 @@ pub struct DtArt {
     warm: RefCell<VecDeque<(PathBuf, Warm)>>,
     /// The depth model's workers, once they are started ([`DtArt::depth_tick`]).
     depth: RefCell<Option<depth::Service>>,
+    /// The shadow atlas of «От солнца» (`shadow`): the map atlas's layout, each sprite's blurred
+    /// silhouette in its alpha. Made on the first frame that casts sun shadows.
+    shadows: OnceCell<Option<Texture2D>>,
 }
 
 fn or_log<T: Default>(what: &str, r: Result<T, DtError>) -> T {
@@ -166,6 +174,7 @@ impl DtArt {
             figures_sheets: RefCell::new(HashMap::new()),
             warm: RefCell::new(VecDeque::new()),
             depth: RefCell::new(None),
+            shadows: OnceCell::new(),
         }
     }
 
@@ -441,6 +450,30 @@ impl DtArt {
         self.cached(Key::Building(picture_type, variant), || {
             texture(&self.objects().building(picture_type, variant)?.image)
         })
+    }
+
+    /// The shadow atlas (`shadow::silhouette` of every sprite, in the map atlas's rectangles; the
+    /// silhouette is the alpha, the colour black). `None` without the map atlas.
+    pub fn shadow_texture(&self) -> Option<Texture2D> {
+        self.shadows.get_or_init(|| self.build_shadow_texture()).clone()
+    }
+
+    fn build_shadow_texture(&self) -> Option<Texture2D> {
+        let atlas = self.map_atlas()?;
+        let (w, h) = (atlas.texture.width() as u32, atlas.texture.height() as u32);
+        let mut rgba = vec![0u8; (w * h * 4) as usize];
+        for s in &self.objects().sprites {
+            let Some(r) = atlas.rect_of(s.section, s.cat, s.idx) else { continue };
+            let mask = super::shadow::silhouette(&s.image);
+            for y in 0..s.image.height {
+                for x in 0..s.image.width {
+                    let alpha = mask[(y * s.image.width + x) as usize];
+                    let at = (((r.y as u32 + y) * w + r.x as u32 + x) * 4 + 3) as usize;
+                    rgba[at] = alpha;
+                }
+            }
+        }
+        texture(&Image { width: w, height: h, rgba })
     }
 
     /// Runs the built-in depth model for the 2.5D view, once a frame of the world map: when the

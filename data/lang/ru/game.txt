@@ -525,6 +525,10 @@ Day length = Длина суток
 {minutes} min = {minutes} мин
 Hour = Час
 Razdor's: the map's light follows the time of day. Style only. = Освещение карты следует за временем суток. Только вид.
+Shadows = Тени
+Painted = Нарисованные
+From the sun = От солнца
+Razdor's: Painted keeps the original's shadows; From the sun removes them, and every building, tree and rock casts its own shadow that turns and lengthens with the hour. = Razdor's: «Нарисованные» оставляет тени оригинала; «От солнца» убирает их, и каждая постройка, дерево и камень отбрасывает свою тень, которая поворачивается и удлиняется с часом.
 
 # Advanced settings: the map's mist (Razdor's, off by default)
 Mist instead of black = Туман вместо черноты

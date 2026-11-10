@@ -38,6 +38,7 @@ use super::keymap::{self, Action};
 use super::map_scale;
 use super::minimap;
 use super::mist;
+use super::shadow;
 use super::terrain;
 use super::water;
 use super::weather;
@@ -2610,8 +2611,6 @@ fn terrain_quad(game: &Game, layer: &terrain::TerrainLayer, cam: &Camera, mode: 
             frame_probe::terrain(b.x - a.x, b.y - a.y);
         }
         let view = vec4(tl.x, tl.y / rh, br.x, br.y / rh);
-        // The ground lies in the map's axes: the light (screen axes) turns with the camera's yaw.
-        let relief = relief.map(|r| r.turned(cam.tilt.map_or(0.0, |t| t.cam.yaw_deg)));
         // The edge's mist is fog: the trailer's no-fog switch leaves the ground going on past the edge.
         layer.draw(map.surface_codes(), (map.w as u32, map.h as u32), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(PX, PX * rh), Some((crate::ui::clock::now() * 1000.0) as i64), extend && !trailer_nofog(), mode, flow, relief);
     }
@@ -3027,6 +3026,80 @@ fn draw_building_shadow(l: &Location, atlas: &Atlas, r: Rect, cam: &Camera, shad
     let at = building_sprite_origin(l, r.w, r.h, cam);
     let params = DrawTextureParams { dest_size: Some(vec2(r.w * zoom, r.h * zoom)), source: Some(r), ..Default::default() };
     super::chrome::shadow_only(shadow_k, || super::sharp::draw(&atlas.texture, at.x, at.y, WHITE, params));
+}
+
+/// Razdor's «От солнца» (`daylight::frame_casts`, `shadow`): each caster in view lays its silhouette on
+/// the ground, sheared from its foot by each light (the sun, and the moon by night). A building with
+/// cards casts one quad per card from the card's own foot; anything else one picture from its foot.
+/// A quad is the silhouette (the shadow atlas) in black, its alpha the light's times the fog's
+/// visibility on the foot's cell, half on water: it darkens what lies under it. Style only.
+fn draw_sun_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, casts: daylight::Casts, objects: &[&Decoration], locations: &[&Location]) {
+    let (Some(art), Some(atlas), Some(texture)) = (art, art.and_then(|a| a.map_atlas()), art.and_then(|a| a.shadow_texture())) else { return };
+    let lights: Vec<daylight::Cast> = [casts.sun, casts.moon].into_iter().filter(|c| c.alpha > 0.0).collect();
+    if lights.is_empty() {
+        return;
+    }
+    let size = vec2(texture.width(), texture.height());
+    let zoom = cam.scale / PX;
+    let map = &game.world.map;
+    let fog = &game.fog;
+    // The darkness factor of a caster standing on `foot`: what the fog shows on its cell (the glows'
+    // rule, `draw_daylight`), nothing off the map, half on water.
+    let shade = |foot: Vec2| -> f32 {
+        let world = (foot + cam.origin) / cam.scale;
+        let t = cam.grid.tile_at((world.x, world.y));
+        if t.0 < 0 || t.1 < 0 || t.0 >= map.w || t.1 >= map.h {
+            return 0.0;
+        }
+        let seen = if !fog.enabled || fog.w <= 0 || fog.h <= 0 { 1.0 } else { 1.0 - minimap::shown_darkness(fog, t) };
+        let water = if razdor::rules::map::is_water(map.surface(t)) { 0.5 } else { 1.0 };
+        seen * water
+    };
+    // The projection of a picture's shadow under each light: its origin, its foot's row, the light's bearing.
+    let projections = |origin: Vec2, foot_row: f32| -> Vec<(daylight::Cast, shadow::Projection)> {
+        lights.iter().map(|c| (*c, shadow::Projection { origin, zoom, foot_row, dir: vec2(c.dir[0], c.dir[1]), len: c.len })).collect()
+    };
+    // One picture (`origin`, its rectangle `src`, the foot's row in it) under each light.
+    let picture = |origin: Vec2, src: Rect, foot_row: f32, foot: Vec2| {
+        let k = shade(foot);
+        if k <= 0.0 {
+            return;
+        }
+        for (c, p) in projections(origin, foot_row) {
+            if let Some((vertices, indices)) = p.picture_mesh(src, size, Color::new(0.0, 0.0, 0.0, c.alpha * k)) {
+                draw_mesh(&Mesh { vertices, indices, texture: Some(texture.clone()) });
+            }
+        }
+    };
+    for l in locations {
+        match card_building(l, Some(art)) {
+            Some((_, r, cards)) => {
+                let origin = building_sprite_origin(l, r.w, r.h, cam);
+                for card in cards {
+                    let k = shade(card_foot(origin, zoom, card));
+                    if k <= 0.0 {
+                        continue;
+                    }
+                    for (c, p) in projections(origin, card.foot.1) {
+                        let (vertices, indices) = p.card_mesh(card, r, size, Color::new(0.0, 0.0, 0.0, c.alpha * k));
+                        draw_mesh(&Mesh { vertices, indices, texture: Some(texture.clone()) });
+                    }
+                }
+            }
+            None => {
+                let Some(r) = atlas.building(l.picture.0, l.picture.1) else { continue };
+                let origin = building_sprite_origin(l, r.w, r.h, cam);
+                let foot = building_foot(l, cam);
+                picture(origin, r, (foot.y - origin.y) / zoom, foot);
+            }
+        }
+    }
+    for o in objects {
+        let Some(r) = atlas.decoration(o.class, o.sprite) else { continue };
+        let origin = object_sprite_origin(o, r.w, r.h, cam);
+        let foot = object_foot(o, cam);
+        picture(origin, r, (foot.y - origin.y) / zoom, foot);
+    }
 }
 
 fn draw_building(l: &Location, art: Option<&DtArt>, cam: &Camera, outlined: bool) {
@@ -3667,21 +3740,36 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
         gpu_wait(Stage::GpuSky);
     }
     stamp_idle(game, clock_ms());
+    // The relief's two frames, decided once for the ground and for the sprites (`lit_axes`).
+    let (ground_relief, sprite_relief) = lit_axes(relief, cam.tilt.map_or(0.0, |t| t.cam.yaw_deg));
     // A bent view (the trailer's, the first-person one) draws its ground and the ground's overlays
     // into one picture, laid on one sheet, and the sprites stand on it: one `in_view` for both.
     if cam.tilt.is_some_and(|t| t.cam.bend.is_some()) {
         let art = assets.dt.as_ref();
         return in_view(cam, |c| {
-            ground_in_bent(game, art, c, relief);
-            draw_world_in(game, assets, c, preview, spell, hover, waits, veil, relief);
+            ground_in_bent(game, art, c, ground_relief);
+            draw_world_in(game, assets, c, preview, spell, hover, waits, veil, sprite_relief);
         });
     }
     // The ground first: it sets its own camera (`in_view`), so the cache can fill through it.
-    frame_probe::time(Stage::Terrain, || draw_ground(game, assets.dt.as_ref(), cam, waits, relief));
+    frame_probe::time(Stage::Terrain, || draw_ground(game, assets.dt.as_ref(), cam, waits, ground_relief));
     if waits {
         gpu_wait(Stage::GpuTerrain);
     }
-    in_view(cam, |c| draw_world_in(game, assets, c, preview, spell, hover, waits, veil, relief));
+    in_view(cam, |c| draw_world_in(game, assets, c, preview, spell, hover, waits, veil, sprite_relief));
+}
+
+/// The relief of a pass in its two frames, decided here for the ground and for the sprites alike. The
+/// painted shadows' light is fixed to the screen (`daylight::relief_at`): the ground's light turns back
+/// into the map's axes by the camera's yaw (`Relief::turned`), and the sprites keep the screen's. The
+/// sun's light is fixed in the world (`daylight::sun_relief`): the ground keeps the map's axes, and the
+/// sprites get the screen's by the inverse turn. Flat (yaw 0) both are the same frame.
+fn lit_axes(relief: Option<daylight::Relief>, yaw_deg: f32) -> (Option<daylight::Relief>, Option<daylight::Relief>) {
+    match relief {
+        None => (None, None),
+        Some(r) if daylight::sun_shadows_on() => (Some(r), Some(r.turned(-yaw_deg))),
+        Some(r) => (Some(r.turned(yaw_deg)), Some(r)),
+    }
 }
 
 /// The ground of a bent view ([`draw_world`]), drawn in its picture's 2D space `c` (the ground's
@@ -3731,6 +3819,20 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // the hills are the classes 1-3 (`hill`).
     let seen = |o: &Decoration| o.tile.0 >= c0 - side && o.tile.0 < c1 + side && razdor::rules::map::object_cells(o).any(|t| fog.explored_near(t, minimap::FEATHER));
     let hill = |o: &Decoration| (object_class::HILLS..=object_class::ROCKY_HILLS).contains(&o.class);
+    // A location is drawn when a cell of its footprint is explored near the feather and it lies in
+    // the drawn rows and columns.
+    let location_seen = |l: &Location| {
+        let (ax, ay) = l.anchor;
+        l.cells().any(|t| fog.explored_near(t, minimap::FEATHER)) && ay >= r0 - up && ay < r1 + below && ax >= c0 - side && ax - l.size.0 < c1 + side
+    };
+    // Razdor's «От солнца» (`daylight::frame_casts`): every caster in view lays its silhouette on the
+    // ground, under the hills, the marks, the fog and every standing sprite (flat and 2.5D alike).
+    let sun = daylight::frame_casts();
+    if let Some(casts) = sun {
+        let objects: Vec<&Decoration> = map.objects_in_rows(r0 - up, r1 + below).iter().filter(|o| seen(o)).collect();
+        let locations: Vec<&Location> = game.world.locations.iter().filter(|l| location_seen(l) && !l.kind.is_bridge()).collect();
+        ground(cam, || draw_sun_shadows(game, art, cam, casts, &objects, &locations));
+    }
     // The original (0x4c8864) draws the hills of classes 1-3 in a pass of their own before
     // anything else, so they lie under every tree, mountain, building and army, the ones
     // above them included. Its test is `0x100 < class·256 + sprite < 0x401`: class 4's
@@ -3790,15 +3892,10 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     if tilted && !trailer_clean() {
         ground(cam, || draw_border(game, cam));
     }
-    // A location is drawn when a cell of its footprint is explored near the feather and it lies in
-    // the drawn rows and columns.
-    let location_seen = |l: &Location| {
-        let (ax, ay) = l.anchor;
-        l.cells().any(|t| fog.explored_near(t, minimap::FEATHER)) && ay >= r0 - up && ay < r1 + below && ax >= c0 - side && ax - l.size.0 < c1 + side
-    };
-    // 2.5D: a card building's shadow lies on the ground too, under the fog below.
+    // 2.5D: a card building's painted shadow lies on the ground too, under the fog below (not with
+    // the sun's shadows: `draw_sun_shadows` replaces it).
     let shadow_k = relief.map_or(1.0, |r| r.shadow_k);
-    if tilted {
+    if tilted && sun.is_none() {
         ground(cam, || {
             for l in game.world.locations.iter().filter(|l| location_seen(l)) {
                 if let Some((atlas, r, _)) = card_building(l, art) {
@@ -6649,6 +6746,23 @@ mod tests {
 #[cfg(test)]
 mod card_tests {
     use super::*;
+
+    #[test]
+    fn the_painted_light_turns_the_ground_and_the_sun_light_turns_the_sprites() {
+        let r = daylight::relief_at(12.0);
+        let (g, s) = lit_axes(Some(r), 30.0);
+        assert_eq!(g, Some(r.turned(30.0)), "painted: the ground turns back into the map's axes");
+        assert_eq!(s, Some(r), "painted: the sprites keep the screen's light");
+        assert_eq!(lit_axes(None, 30.0), (None, None), "lighting off: no relief at all");
+        daylight::set_prefs(daylight::LightMode::Fixed, 24, 10, daylight::ShadowMode::Sun);
+        daylight::frame_light(12.0, 0.0, 0.016);
+        let sun = daylight::sun_relief(10.0);
+        let (g, s) = lit_axes(Some(sun), 30.0);
+        assert_eq!(g, Some(sun), "sun: the ground keeps the map's axes");
+        let (s, g) = (s.expect("sprites lit"), g.expect("ground lit"));
+        assert!((s.turned(30.0).light[0] - g.light[0]).abs() < 1e-5 && (s.turned(30.0).light[1] - g.light[1]).abs() < 1e-5, "the sprites' light turned by the yaw is the ground's");
+        daylight::set_prefs(daylight::LightMode::Off, 24, 18, daylight::ShadowMode::Painted);
+    }
 
     fn close(a: Vec2, b: Vec2) -> bool {
         (a - b).abs().max_element() < 1e-4

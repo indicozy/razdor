@@ -17,7 +17,7 @@ use razdor::i18n::{self, n_, tr, Lang};
 use razdor::trf;
 
 use super::audio::{cue, Cue};
-use super::daylight::LightMode;
+use super::daylight::{LightMode, ShadowMode};
 use super::chrome::{self, Fx};
 use super::keymap;
 use super::minimap;
@@ -1590,7 +1590,7 @@ impl Group {
     /// The rows the group shows, top to bottom. Every row is in exactly one group (a test checks it).
     pub fn rows(self) -> &'static [Row] {
         match self {
-            Group::Map => &[Row::MapZoom, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::Mist, Row::LiveWater, Row::Weather, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
+            Group::Map => &[Row::MapZoom, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::Shadows, Row::Mist, Row::LiveWater, Row::Weather, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
             Group::Battle => &[Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
@@ -1614,6 +1614,7 @@ pub enum Row {
     Lighting,
     LightCycle,
     LightHour,
+    Shadows,
     Mist,
     LiveWater,
     Weather,
@@ -1645,7 +1646,7 @@ pub enum Row {
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 39] = [
+pub const ALL: [Row; 40] = [
         Row::MapZoom,
         Row::MapResolution,
         Row::FrameCap,
@@ -1658,6 +1659,7 @@ pub const ALL: [Row; 39] = [
         Row::Lighting,
         Row::LightCycle,
         Row::LightHour,
+        Row::Shadows,
         Row::Mist,
         Row::LiveWater,
         Row::Weather,
@@ -1695,6 +1697,7 @@ pub const ALL: [Row; 39] = [
             Row::ViewCamera => Some(tr("Behind the hero: the low camera behind him. Through the hero's eyes: the camera stands at his eyes and turns with his walk; Q and E turn it while he stands.")),
             Row::MapEdge => Some(tr("Off: past the map's edges is black, as in the original. On: a short stretch of ground goes on past the edges, then thickens into the same black fog as the unexplored map.")),
             Row::Lighting => Some(tr("Razdor's: the map's light follows the time of day. Style only.")),
+            Row::Shadows => Some(tr("Razdor's: Painted keeps the original's shadows; From the sun removes them, and every building, tree and rock casts its own shadow that turns and lengthens with the hour.")),
             Row::Mist => Some(tr("Razdor's: unexplored land is drifting mist instead of black. Style only.")),
             Row::LiveWater => Some(tr("Razdor's: the water ripples, foam runs along the shores, rivers flow and ships leave a wake. Style only.")),
             Row::Weather => Some(tr("Razdor's: weather by the land: snow on snow and ice, rain on swamps and lowlands, heat haze over deserts, ash over fire lands, cloud shadows everywhere. Style only.")),
@@ -1722,6 +1725,8 @@ pub const ALL: [Row; 39] = [
             Row::FarGround | Row::ViewCamera => audio.map_tilt && audio.map_first_person,
             Row::LightCycle => audio.map_light == LightMode::Cycle,
             Row::LightHour => audio.map_light == LightMode::Fixed,
+            // The shadows are the light's: shown only with the light on.
+            Row::Shadows => audio.map_light != LightMode::Off,
             // Razdor's (the owner's decision, 2026-11-10): the 2.5D view, while a building of the
             // install still has no cut (`depth`).
             Row::DepthModel => audio.map_tilt && depth::available() && depth::unknown() > 0,
@@ -2076,6 +2081,19 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
             };
             if labelled_row_help(c, geo, tr("Lighting"), value, Row::Lighting.help_text()).0 {
                 audio.map_light = audio.map_light.next();
+            }
+        }
+        Row::Shadows => {
+            // Razdor's, painted by default: the shadows of the original, or cast by the sun (`shadow`).
+            let value = match audio.map_shadows {
+                ShadowMode::Painted => tr("Painted"),
+                ShadowMode::Sun => tr("From the sun"),
+            };
+            if labelled_row_help(c, geo, tr("Shadows"), value, Row::Shadows.help_text()).0 {
+                audio.map_shadows = match audio.map_shadows {
+                    ShadowMode::Painted => ShadowMode::Sun,
+                    ShadowMode::Sun => ShadowMode::Painted,
+                };
             }
         }
         Row::Mist => {
@@ -3498,7 +3516,7 @@ mod tests {
     #[test]
     fn the_long_hints_are_behind_a_question_mark() {
         let with: Vec<Row> = Row::ALL.into_iter().filter(|r| r.help_text().is_some()).collect();
-        assert_eq!(with, vec![Row::MapZoom, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::Lighting, Row::Mist, Row::LiveWater, Row::Weather, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::Language, Row::Updates, Row::ChronicleSummary]);
+        assert_eq!(with, vec![Row::MapZoom, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::Lighting, Row::Shadows, Row::Mist, Row::LiveWater, Row::Weather, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::Language, Row::Updates, Row::ChronicleSummary]);
         scene_help("Experience");
         assert_eq!(HELP_PINNED.with(|p| p.get()), Row::Experience.help_text());
         HELP_PINNED.with(|p| p.set(None));

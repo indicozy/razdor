@@ -48,6 +48,7 @@ pub mod screens;
 pub mod session;
 pub mod script_font;
 pub mod gpu_probe;
+pub mod shadow;
 pub mod sharp;
 pub mod snapshot;
 pub mod spell_badges;
