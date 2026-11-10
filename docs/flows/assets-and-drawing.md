@@ -303,6 +303,15 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   sprite and building picture of the install, drift under 2 px at 8 yaws). With the
   setting off, `in_view`, `ground` and `standing` only call their closures: the flat view is the same
   code path.
+- **Cards** (a building sprite cut into pieces, each on its own ground: the owner's report, a village's
+  houses floating in the air). `data/cards/objects.json` (numbers only, made offline by `tools/depth`) keys
+  each sprite by its pixel hash (`dt::cards::sprite_key`, FNV-1a 64); `cards::builtin` parses it once and
+  `DtArt::map_atlas` keeps the cards of each building sprite that has an entry of the same size
+  (`Atlas::building_cards`). In the tilted view only, a building with cards is drawn as one `Drawable::BuildingCard`
+  per card, each on its own foot (`card_foot`, sorted like a sprite) and standing as a billboard, its mesh
+  (`card_mesh`, the sprite's uvs in the atlas, `sharp` sampling). Its shadow lies on the ground under the fog
+  (`draw_building_shadow`, `chrome::shadow_only`: the sprite's shadow pixels only). A bridge, a picture with no
+  entry, and the flat view keep one billboard as before. The hover's gold outline goes under each card.
 - Picking: `map_pointer` is the ground under the pointer (NaN over the sky), `tile_under_pixel` the
   cell under a pixel at any turn (tested in `tilt_tests`). Overlays on the window (tooltip, battle
   marks, effects, the travel time) use `Camera::screen_at`. A figure is picked by its cell.

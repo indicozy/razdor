@@ -11,6 +11,7 @@ use std::path::Path;
 use macroquad::prelude::*;
 
 use razdor::dt::gfx::{self, water_frame_file, Image, ObjectSprite, ObjectSprites, ITEM_ICONS, MAP_OBJECTS, TERRAIN_TEXTURES, TEXTURES_DIR, UNIT_FIGURES, UNIT_PORTRAITS, WATER_FRAMES};
+use razdor::dt::cards::{self, Card};
 use razdor::dt::preload;
 use std::path::PathBuf;
 use razdor::dt::install::DtInstall;
@@ -43,6 +44,8 @@ pub struct Atlas {
     pub texture: Texture2D,
     /// (section, category, index) → source rectangle in `texture`.
     rects: RectTable,
+    /// The 2.5D cards of the building sprites that have cut data ([`cards`]), by the same key.
+    cards: HashMap<(u32, u32, u32), &'static [Card]>,
 }
 
 /// The atlas's rectangles as a dense table over the two sections and the 8-bit category and index
@@ -107,6 +110,12 @@ impl Atlas {
     /// Sprite of a building by picture type and variant.
     pub fn building(&self, picture_type: u8, variant: u8) -> Option<Rect> {
         self.rects.get(ObjectSprite::BUILDINGS, picture_type.into(), variant.into())
+    }
+
+    /// The 2.5D cards of a building's sprite, back to front; `None` for a picture with no cut data
+    /// (it stands as one billboard).
+    pub fn building_cards(&self, picture_type: u8, variant: u8) -> Option<&[Card]> {
+        self.cards.get(&(ObjectSprite::BUILDINGS, picture_type.into(), variant.into())).copied()
     }
 }
 
@@ -384,7 +393,17 @@ impl DtArt {
                         .zip(pos)
                         .map(|(s, (x, y))| ((s.section, s.cat, s.idx), Rect::new(x as f32, y as f32, s.image.width as f32, s.image.height as f32))),
                 );
-                Some(Atlas { texture, rects })
+                // The cut data is keyed by the sprite's pixels (`tools/depth`); a key whose size
+                // differs is no match.
+                let cards = sprites
+                    .iter()
+                    .filter(|s| s.section == ObjectSprite::BUILDINGS)
+                    .filter_map(|s| {
+                        let known = cards::builtin().get(&cards::sprite_key(&s.image))?;
+                        (known.w == s.image.width && known.h == s.image.height).then_some(((s.section, s.cat, s.idx), known.cards.as_slice()))
+                    })
+                    .collect();
+                Some(Atlas { texture, rects, cards })
             })
             .as_ref()
     }

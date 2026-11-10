@@ -4,6 +4,7 @@
 //! everything is read at runtime from the player's own install (see [`install`]).
 //! Formats are documented in `docs/reference/dtm-format.md` and `docs/reference/mechanics.md`,
 //! images in `docs/reference/graphics-formats.md`.
+pub mod cards;
 pub mod container;
 pub mod data;
 pub mod dtm;

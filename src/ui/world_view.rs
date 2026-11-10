@@ -21,6 +21,7 @@ use razdor::rules::clock::duration_label;
 use razdor::rules::game::{Event, Foe, Game};
 use razdor::rules::idle;
 use razdor::rules::magic::{spell_lines, CastOutcome, CastTarget, SpellLine};
+use razdor::dt::cards::Card;
 use razdor::rules::map::{object_class, Decoration, Grid, Tile, TileMap, ROAD};
 use razdor::rules::world::{Army, Location, LocationKind, Owner, Troop};
 
@@ -30,7 +31,7 @@ use super::building_view::BuildingView;
 use super::gestures::SwipeKind;
 use super::cursor::{self, BuildingHover, CellArmy, MapHover, Shape};
 use super::dialog::Dialog;
-use super::dt_art::DtArt;
+use super::dt_art::{Atlas, DtArt};
 use super::game_bar::{self, BarButton, Look, TimeButton};
 use super::keymap::{self, Action};
 use super::map_scale;
@@ -2436,6 +2437,8 @@ fn draw_terrain(game: &Game, art: Option<&DtArt>, cam: &Camera) {
 enum Drawable {
     Object(Decoration),
     Building(usize),
+    /// Card `k` of a building drawn as cards (2.5D, [`card_building`]): location, card.
+    BuildingCard(usize, usize),
     Army(usize),
     /// The hero's ship, waiting where he left it.
     Ship,
@@ -2648,6 +2651,73 @@ fn draw_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera) {
 /// The outline of the building under the pointer (Razdor's choice, see [`MapHoverLook`]).
 const BUILDING_OUTLINE: Color = Color::new(1.0, 0.82, 0.42, 0.9);
 
+/// The eight steps of a building's outline, each a multiple of its width (`draw_building`).
+const OUTLINE_STEPS: [(f32, f32); 8] = [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0), (-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)];
+
+/// A building drawn as cards in the 2.5D view: its sprite's rectangle in the atlas and its cards,
+/// back to front. `None` for a bridge (it lies on the ground) and for a picture with no cut data
+/// (one billboard, as before).
+fn card_building<'a>(l: &Location, art: Option<&'a DtArt>) -> Option<(&'a Atlas, Rect, &'a [Card])> {
+    if l.kind.is_bridge() {
+        return None;
+    }
+    let atlas = art?.map_atlas()?;
+    let cards = atlas.building_cards(l.picture.0, l.picture.1)?;
+    Some((atlas, atlas.building(l.picture.0, l.picture.1)?, cards))
+}
+
+/// A card's foot in the 2D space: its ground point in the building's sprite whose top-left is at
+/// `origin`, drawn `zoom` screen pixels to a sprite pixel.
+fn card_foot(origin: Vec2, zoom: f32, card: &Card) -> Vec2 {
+    origin + vec2(card.foot.0, card.foot.1) * zoom
+}
+
+/// The mesh of a card of a building's sprite whose top-left is at `origin_px` on screen, `zoom`
+/// screen pixels to a sprite pixel: the outline's vertices at their screen places, their uvs in the
+/// atlas texture (`atlas_size`) where the sprite's rectangle `src` lies, all of one `color`.
+fn card_mesh(card: &Card, origin_px: Vec2, zoom: f32, src: Rect, atlas_size: Vec2, color: Color) -> (Vec<Vertex>, Vec<u16>) {
+    let vertices = card
+        .verts
+        .iter()
+        .map(|&(x, y)| {
+            let p = origin_px + vec2(x, y) * zoom;
+            let uv = vec2(src.x + x, src.y + y) / atlas_size;
+            Vertex::new(p.x, p.y, 0.0, uv.x, uv.y, color)
+        })
+        .collect();
+    (vertices, card.tris.clone())
+}
+
+/// Draws a card of a building as its mesh, with the sharp sampling of the other sprites. Outlined
+/// (the pointer on the building), each card's gold silhouette goes under it, as `draw_building`
+/// outlines the whole picture.
+fn draw_card(card: &Card, origin: Vec2, zoom: f32, r: Rect, atlas: &Atlas, outlined: bool) {
+    let size = vec2(atlas.texture.width(), atlas.texture.height());
+    let mesh = |origin: Vec2, color: Color| {
+        let (vertices, indices) = card_mesh(card, origin, zoom, r, size, color);
+        Mesh { vertices, indices, texture: Some(atlas.texture.clone()) }
+    };
+    if outlined {
+        let d = (1.5 * zoom).max(1.0);
+        super::chrome::silhouette(|| {
+            for (dx, dy) in OUTLINE_STEPS {
+                super::sharp::draw_mesh_sharp(&mesh(origin + vec2(dx * d, dy * d), faded(BUILDING_OUTLINE)), vec2(zoom, zoom));
+            }
+        });
+    }
+    super::sharp::draw_mesh_sharp(&mesh(origin, faded(WHITE)), vec2(zoom, zoom));
+}
+
+/// A card building's shadow on the ground (2.5D): the whole sprite, placed as `draw_building`
+/// places it, with only its shadow pixels drawn (`chrome::shadow_only`). It is drawn in the ground
+/// pass before the fog, which then covers it where the ground is dark.
+fn draw_building_shadow(l: &Location, atlas: &Atlas, r: Rect, cam: &Camera) {
+    let zoom = cam.scale / PX;
+    let at = building_sprite_origin(l, r.w, r.h, cam);
+    let params = DrawTextureParams { dest_size: Some(vec2(r.w * zoom, r.h * zoom)), source: Some(r), ..Default::default() };
+    super::chrome::shadow_only(|| super::sharp::draw(&atlas.texture, at.x, at.y, WHITE, params));
+}
+
 fn draw_building(l: &Location, art: Option<&DtArt>, cam: &Camera, outlined: bool) {
     let base = cam.to_screen(footprint_base(cam.grid, l));
     let zoom = cam.scale / PX;
@@ -2662,8 +2732,8 @@ fn draw_building(l: &Location, art: Option<&DtArt>, cam: &Camera, outlined: bool
             // The picture's solid shape in gold, a little out every way, under the picture.
             let d = (1.5 * zoom).max(1.0);
             super::chrome::silhouette(|| {
-                for (dx, dy) in [(-d, 0.0), (d, 0.0), (0.0, -d), (0.0, d), (-d, -d), (d, -d), (-d, d), (d, d)] {
-                    super::sharp::draw(&atlas.texture, at.x + dx, at.y + dy, faded(BUILDING_OUTLINE), params.clone());
+                for (dx, dy) in OUTLINE_STEPS {
+                    super::sharp::draw(&atlas.texture, at.x + dx * d, at.y + dy * d, faded(BUILDING_OUTLINE), params.clone());
                 }
             });
         }
@@ -3393,6 +3463,22 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     if tilted && !trailer_clean() {
         ground(cam, || draw_border(game, cam));
     }
+    // A location is drawn when a cell of its footprint is explored near the feather and it lies in
+    // the drawn rows and columns.
+    let location_seen = |l: &Location| {
+        let (ax, ay) = l.anchor;
+        l.cells().any(|t| fog.explored_near(t, minimap::FEATHER)) && ay >= r0 - up && ay < r1 + below && ax >= c0 - side && ax - l.size.0 < c1 + side
+    };
+    // 2.5D: a card building's shadow lies on the ground too, under the fog below.
+    if tilted {
+        ground(cam, || {
+            for l in game.world.locations.iter().filter(|l| location_seen(l)) {
+                if let Some((atlas, r, _)) = card_building(l, art) {
+                    draw_building_shadow(l, atlas, r, cam);
+                }
+            }
+        });
+    }
     if waits {
         gpu_wait(Stage::GpuMarks);
     }
@@ -3428,11 +3514,16 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // every object after it in the scan (south of that row, or east in the same row) covers
     // it. Bridges stay on the ground, under everything (Razdor's).
     for (i, l) in game.world.locations.iter().enumerate() {
-        let (ax, ay) = l.anchor;
-        let seen = l.cells().any(|t| fog.explored_near(t, minimap::FEATHER));
-        if seen && ay >= r0 - up && ay < r1 + below && ax >= c0 - side && ax - l.size.0 < c1 + side {
+        if location_seen(l) {
             if l.kind.is_bridge() {
                 items.push((i64::MIN / 2 + cell_pass_key(l.anchor, 0), Drawable::Building(i)));
+            } else if let Some((_, r, cards)) = tilted.then(|| card_building(l, art)).flatten() {
+                // 2.5D with cut data: each card goes in the pass on its own foot, back to front.
+                let origin = building_sprite_origin(l, r.w, r.h, cam);
+                let zoom = cam.scale / PX;
+                for (k, card) in cards.iter().enumerate() {
+                    items.push((sprite_key(cam, first_footprint_cell(l), card_foot(origin, zoom, card), LAYER_BUILDING), Drawable::BuildingCard(i, k)));
+                }
             } else {
                 items.push((sprite_key(cam, first_footprint_cell(l), building_foot(l, cam), LAYER_BUILDING), Drawable::Building(i)));
             }
@@ -3472,6 +3563,21 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                     } else {
                         standing(cam, building_foot(l, cam), building_foot(l, cam), shade_of(building_foot(l, cam)), building_picture(l, art, cam), || draw_building(l, art, cam, outlined));
                     }
+                }
+                Drawable::BuildingCard(i, k) => {
+                    let l = &game.world.locations[*i];
+                    let Some((atlas, r, cards)) = card_building(l, art) else { continue };
+                    let card = &cards[*k];
+                    let zoom = cam.scale / PX;
+                    let origin = building_sprite_origin(l, r.w, r.h, cam);
+                    let f = card_foot(origin, zoom, card);
+                    let outlined = hover.is_some_and(|h| h.building == Some(*i));
+                    standing(cam, f, f, shade_of(f), || {
+                        if *k == 0 {
+                            frame_probe::sprite(r.w * zoom, r.h * zoom);
+                        }
+                        draw_card(card, origin, zoom, r, atlas, outlined);
+                    });
                 }
                 Drawable::Army(i) => {
                     let a = &game.world.armies[*i];
@@ -6088,6 +6194,35 @@ mod tests {
 
 /// The 2.5D view's pure parts: the picking at every turn, the sprites' size setting, the easing
 /// back to north up, when the compass shows and where it stands.
+#[cfg(test)]
+mod card_tests {
+    use super::*;
+
+    fn close(a: Vec2, b: Vec2) -> bool {
+        (a - b).abs().max_element() < 1e-4
+    }
+
+    #[test]
+    fn card_mesh_places_a_triangle_on_its_sprite() {
+        // A one-triangle card in a 10 × 10 sprite at (20, 30) of a 100 × 200 atlas, drawn at zoom 2
+        // with the sprite's top-left at (100, 50).
+        let card = Card { foot: (0.0, 0.0), verts: vec![(0.0, 0.0), (10.0, 0.0), (0.0, 10.0)], tris: vec![0, 1, 2] };
+        let (v, i) = card_mesh(&card, vec2(100.0, 50.0), 2.0, Rect::new(20.0, 30.0, 10.0, 10.0), vec2(100.0, 200.0), WHITE);
+        assert_eq!(i, vec![0, 1, 2]);
+        let pos: Vec<Vec2> = v.iter().map(|v| vec2(v.position.x, v.position.y)).collect();
+        assert!(pos.iter().zip([vec2(100.0, 50.0), vec2(120.0, 50.0), vec2(100.0, 70.0)]).all(|(a, b)| close(*a, b)), "{pos:?}");
+        let uv: Vec<Vec2> = v.iter().map(|v| v.uv).collect();
+        assert!(uv.iter().zip([vec2(0.2, 0.15), vec2(0.3, 0.15), vec2(0.2, 0.2)]).all(|(a, b)| close(*a, b)), "{uv:?}");
+        assert!(v.iter().all(|v| v.color == [255, 255, 255, 255]));
+    }
+
+    #[test]
+    fn card_foot_is_on_the_sprite_at_its_zoom() {
+        let card = Card { foot: (4.0, 8.0), verts: vec![], tris: vec![] };
+        assert!(close(card_foot(vec2(10.0, 20.0), 0.5, &card), vec2(12.0, 24.0)));
+    }
+}
+
 #[cfg(test)]
 mod tilt_tests {
     use super::*;
