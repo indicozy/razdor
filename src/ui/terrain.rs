@@ -18,11 +18,12 @@
 //!
 //! Profiling switches (read once, [`options`]; Android: a file in the app folder, desktop: an
 //! environment variable). Options 1 (the neighbours shader) and 2 (the ground cache) are on by
-//! default; 3 and 4 are off: 1 `profile-terrain-old` / `RAZDOR_TERRAIN_OLD=1` turns option 1 OFF
+//! default, 4 too on Android; 3 is off: 1 `profile-terrain-old` / `RAZDOR_TERRAIN_OLD=1` turns option 1 OFF
 //! (the old four-fetch shader); 2 `profile-terrain-nocache` / `RAZDOR_TERRAIN_NOCACHE=1` turns
 //! the ground cache OFF; 3 `profile-terrain-vrs` / `RAZDOR_TERRAIN_VRS=1` Adreno's 2×2 shading
-//! rate (desktop: a no-op); 4 `profile-terrain-mediump` / `RAZDOR_TERRAIN_MEDIUMP=1` mediump
-//! colour maths. The map lines of the frame probe name the active set (`opt=1+2`).
+//! rate (desktop: a no-op); 4 mediump colour maths: on by default on Android (phone GPUs run
+//! mediump at up to twice the rate; `profile-terrain-highp` turns it OFF there), off on the desktop
+//! (`RAZDOR_TERRAIN_MEDIUMP=1` turns it on). The map lines of the frame probe name the active set (`opt=1+2`).
 
 use std::cell::RefCell;
 use std::sync::OnceLock;
@@ -348,7 +349,9 @@ pub fn options() -> Options {
             new_shader,
             cache: new_shader && !switch("profile-terrain-nocache", "RAZDOR_TERRAIN_NOCACHE"),
             vrs: switch("profile-terrain-vrs", "RAZDOR_TERRAIN_VRS"),
-            mediump: new_shader && switch("profile-terrain-mediump", "RAZDOR_TERRAIN_MEDIUMP"),
+            // Android: on unless `profile-terrain-highp`; the desktop: off unless `RAZDOR_TERRAIN_MEDIUMP=1`.
+            mediump: new_shader
+                && if cfg!(target_os = "android") { !switch("profile-terrain-highp", "") } else { switch("", "RAZDOR_TERRAIN_MEDIUMP") },
         };
         let label = o.label();
         razdor::frame_probe::set_map_options(&label);
