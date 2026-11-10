@@ -277,7 +277,9 @@ fn pick_bent(b: &Bend, origin: Vec3, dir: Vec3, distance: f32) -> Option<Vec2> {
     }
     // The farthest forward distance the sheet can be seen at: the horizon, else the footprint's far limit.
     let w_end = if b.limit.is_finite() { b.profile(b.limit).0 } else { FAR + distance };
-    let t_end = (w_end - w0) / dw;
+    // A ray that barely goes forward would march for ever: the march stops at four far limits (a
+    // real hit is within a few dozen units).
+    let t_end = ((w_end - w0) / dw).min(4.0 * (FAR + distance));
     let above = |t: f32| origin.y + dir.y * t - b.height_at(w0 + dw * t);
     if t_end <= 0.0 || above(0.0) <= 0.0 {
         return None;
@@ -1168,6 +1170,18 @@ mod tests {
         let up = TiltCamera::first_person(look, SCALE, FRAME, 0.0, false);
         assert!(up.bend.expect("the bend").limit.is_infinite());
         assert!(up.pick(vec2(x, FRAME.y + 2.0), FRAME).is_some(), "the up bend's top sees the sheet");
+    }
+
+    /// A pick far outside the frame, where the ray runs almost sideways, comes back at once (None or a
+    /// point), never a march without end.
+    #[test]
+    fn a_pick_far_outside_the_frame_ends() {
+        for horizon in [false, true] {
+            let cam = TiltCamera::first_person(vec2(20.5, 13.25), SCALE, FRAME, 0.0, horizon);
+            for p in [vec2(-1.0e5, 380.0), vec2(1.0e5, 380.0), vec2(640.0, -1.0e5), vec2(640.0, 1.0e5)] {
+                let _ = cam.pick(p, FRAME);
+            }
+        }
     }
 
     /// The bent footprint holds the target and the hero's ground, and is the frame's ground.
