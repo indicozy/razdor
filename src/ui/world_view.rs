@@ -5358,7 +5358,8 @@ fn draw_daylight(game: &Game, cam: &Camera, light: Option<daylight::Light>) {
     let cell_w = cam.cell_size().x;
     // What the fog shows on a cell this frame (1 lit, 0 black): a glow fades with it, as the
     // 2.5D sprites do (`Shade::at`), since the fog is drawn inside the world there. A disabled fog
-    // darkens nothing.
+    // darkens nothing. The glows fade with its square: a half-seen town must not spill a warm halo
+    // over the solid fog beside it.
     let visible = |t: Tile| if !fog.enabled || fog.w <= 0 || fog.h <= 0 { 1.0 } else { 1.0 - minimap::shown_darkness(fog, t) };
     let glow_at = |at: Vec2, size: f32, rgb: [f32; 3], alpha: f32| {
         let color = Color::new(rgb[0], rgb[1], rgb[2], alpha.clamp(0.0, 1.0));
@@ -5383,7 +5384,7 @@ fn draw_daylight(game: &Game, cam: &Camera, light: Option<daylight::Light>) {
             if vis < 0.01 {
                 continue;
             }
-            glow_at(cam.screen_at(centre), 2.2 * l.size.0.max(1) as f32 * cell_w, [1.0, 0.72, 0.38], 0.55 * light.glow * vis);
+            glow_at(cam.screen_at(centre), 2.2 * l.size.0.max(1) as f32 * cell_w, [1.0, 0.72, 0.38], 0.55 * light.glow * vis * vis);
         }
         // The armies on the map, the hero's among them: a torch glow, flickering a little.
         for (i, a) in game.world.armies.iter().enumerate() {
@@ -5392,11 +5393,12 @@ fn draw_daylight(game: &Game, cam: &Camera, light: Option<daylight::Light>) {
             }
             let flicker = 0.92 + 0.08 * (now * 9.0 + i as f64).sin() as f32;
             let vis = visible(a.tile(map));
-            glow_at(cam.screen_at(game.army_display_pos(a)), 1.6 * cell_w, [1.0, 0.65, 0.30], 0.45 * light.glow * flicker * vis);
+            glow_at(cam.screen_at(game.army_display_pos(a)), 1.6 * cell_w, [1.0, 0.65, 0.30], 0.45 * light.glow * flicker * vis * vis);
         }
         if !game.hero_hidden() && !game.aboard() {
             let flicker = 0.92 + 0.08 * (now * 9.0 + game.world.armies.len() as f64).sin() as f32;
-            glow_at(cam.screen_at(game.display_pos()), 1.6 * cell_w, [1.0, 0.65, 0.30], 0.45 * light.glow * flicker * visible(game.tile()));
+            let vis = visible(game.tile());
+            glow_at(cam.screen_at(game.display_pos()), 1.6 * cell_w, [1.0, 0.65, 0.30], 0.45 * light.glow * flicker * vis * vis);
         }
     });
 }
