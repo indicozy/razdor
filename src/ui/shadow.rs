@@ -8,8 +8,8 @@ use razdor::dt::gfx::Image;
 /// the silhouette: the default pipeline's source-over blend darkens the ground toward `TINT`.
 pub const TINT: [f32; 3] = [0.42, 0.40, 0.45];
 
-/// The shadows read as painted shading on grass: the alpha is eased by this (15 % less darkness).
-pub const EASE: f32 = 0.85;
+/// The shadows' alpha is scaled by this (1: as drawn; the sun's shadow is 0.6 by day, `daylight::SUN_ALPHA`).
+pub const EASE: f32 = 1.0;
 
 /// The vertex colour of a shadow quad of `strength` (0 to 1, the light's alpha times the caster's
 /// fog and water factors).
@@ -247,6 +247,6 @@ mod penumbra_tests {
         let warm = strength_colour(1.0);
         // Warmer than the old blue-grey: its red is a larger share of its blue (0.93 against 0.73).
         assert!(warm.r / warm.b > 0.35 / 0.48, "the tint is warmer than the old blue-grey: {warm:?}");
-        assert!((warm.a - EASE).abs() < 1e-6, "eased by 15 %");
+        assert!((warm.a - EASE).abs() < 1e-6, "scaled by EASE");
     }
 }

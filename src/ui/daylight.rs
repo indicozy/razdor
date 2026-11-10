@@ -365,6 +365,23 @@ pub fn sun_shadows_on() -> bool {
     LAST_HOUR.get().is_some() && shadow_mode() == ShadowMode::Sun
 }
 
+/// The sun's form shading of this frame (Sun mode, in day): the share of a face turned away from the sun that
+/// takes the shadow tone (0.35 low sun, 0.15 at noon), and the direction toward the sun on the ground (unit,
+/// x east, y south). None with the painted shadows, at night, or with the light off.
+pub fn form_sun() -> Option<(f32, [f32; 2])> {
+    let hour = LAST_HOUR.get()?;
+    if shadow_mode() != ShadowMode::Sun {
+        return None;
+    }
+    let (e, _, _) = sun(hour);
+    let day = smoothstep(-0.05, 0.1, e);
+    if day <= 0.0 {
+        return None;
+    }
+    let k = day * lerp(0.35, 0.15, e.clamp(0.0, 1.0));
+    Some((k, sun_bearing(hour)))
+}
+
 /// The cast shadows of this frame (`casts_at` the hour `frame_light` just set), None unless
 /// `sun_shadows_on`.
 pub fn frame_casts() -> Option<Casts> {

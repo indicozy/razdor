@@ -2947,7 +2947,7 @@ fn draw_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera) {
             return;
         }
         frame_probe::sprite(size.x, size.y);
-        super::sharp::draw(&atlas.texture, at.x, at.y, faded(WHITE), DrawTextureParams { dest_size: Some(size), source: Some(r), ..Default::default() });
+        draw_picture_form(cam, atlas, r, at, size, faded(WHITE), zoom);
         return;
     }
     let s = cam.scale;
@@ -3000,6 +3000,8 @@ fn card_foot(origin: Vec2, zoom: f32, card: &Card) -> Vec2 {
 /// The mesh of a card of a building's sprite whose top-left is at `origin_px` on screen, `zoom`
 /// screen pixels to a sprite pixel: the outline's vertices at their screen places, their uvs in the
 /// atlas texture (`atlas_size`) where the sprite's rectangle `src` lies, all of one `color`.
+/// A card's mesh with one colour (the unshaded form of [`card_mesh_form`]).
+#[cfg(test)]
 fn card_mesh(card: &Card, origin_px: Vec2, zoom: f32, src: Rect, atlas_size: Vec2, color: Color) -> (Vec<Vertex>, Vec<u16>) {
     let vertices = card
         .verts
@@ -3016,10 +3018,66 @@ fn card_mesh(card: &Card, origin_px: Vec2, zoom: f32, src: Rect, atlas_size: Vec
 /// Draws a card of a building as its mesh, with the sharp sampling of the other sprites. Outlined
 /// (the pointer on the building), each card's gold silhouette goes under it, as `draw_building`
 /// outlines the whole picture.
-fn draw_card(card: &Card, origin: Vec2, zoom: f32, r: Rect, atlas: &Atlas, outlined: bool) {
+/// The colour of a point of a picture's face under the sun's form shading (`daylight::form_sun`): `p` in -1..1
+/// across the picture from its centre; the face turned away from the sun takes up to the shadow tone (the
+/// share `k`). None when the form is not shaded (the painted shadows, night, the light off).
+fn form_colour(cam: &Camera, p: Vec2, base: Color) -> Option<Color> {
+    let (k, toward) = daylight::form_sun()?;
+    let s = cam.facing(vec2(toward[0], toward[1]));
+    if s.length_squared() < 1e-8 {
+        return None;
+    }
+    let away = (-p.dot(s.normalize())).clamp(0.0, 1.0);
+    let d = k * away;
+    let t = shadow::TINT;
+    Some(Color::new(base.r * (1.0 - d * (1.0 - t[0])), base.g * (1.0 - d * (1.0 - t[1])), base.b * (1.0 - d * (1.0 - t[2])), base.a))
+}
+
+/// A picture's quad (its rectangle `src` of the atlas, drawn at `at` in `size`) with the sun's form shading at its
+/// four corners (`form_colour`; the colour is interpolated across the quad). Without the shading, `sharp::draw`.
+fn draw_picture_form(cam: &Camera, atlas: &Atlas, src: Rect, at: Vec2, size: Vec2, base: Color, zoom: f32) {
+    let corners = [(vec2(-1.0, -1.0), vec2(0.0, 0.0)), (vec2(1.0, -1.0), vec2(1.0, 0.0)), (vec2(1.0, 1.0), vec2(1.0, 1.0)), (vec2(-1.0, 1.0), vec2(0.0, 1.0))];
+    let colours: Vec<Option<Color>> = corners.iter().map(|(p, _)| form_colour(cam, *p, base)).collect();
+    if colours.iter().any(Option::is_none) {
+        super::sharp::draw(&atlas.texture, at.x, at.y, base, DrawTextureParams { dest_size: Some(size), source: Some(src), ..Default::default() });
+        return;
+    }
+    let atlas_size = vec2(atlas.texture.width(), atlas.texture.height());
+    let vertices = corners
+        .iter()
+        .zip(&colours)
+        .map(|((_, uv), c)| {
+            let p = at + *uv * size;
+            let t = (src.point() + *uv * src.size()) / atlas_size;
+            let c = c.unwrap_or(base);
+            Vertex::new(p.x, p.y, 0.0, t.x, t.y, c)
+        })
+        .collect();
+    let mesh = Mesh { vertices, indices: vec![0, 1, 2, 0, 2, 3], texture: Some(atlas.texture.clone()) };
+    super::sharp::draw_mesh_sharp(&mesh, vec2(zoom, zoom));
+}
+
+/// A card's mesh with the sun's form shading at each vertex (the picture's own centre and half-size are the
+/// reference, so the cards of one building shade like its whole face). Without the shading, [`card_mesh`].
+fn card_mesh_form(cam: &Camera, card: &Card, origin_px: Vec2, zoom: f32, src: Rect, atlas_size: Vec2, base: Color) -> (Vec<Vertex>, Vec<u16>) {
+    let half = vec2(src.w, src.h) * 0.5;
+    let vertices = card
+        .verts
+        .iter()
+        .map(|&(x, y)| {
+            let p = origin_px + vec2(x, y) * zoom;
+            let uv = vec2(src.x + x, src.y + y) / atlas_size;
+            let c = form_colour(cam, (vec2(x, y) - half) / half, base).unwrap_or(base);
+            Vertex::new(p.x, p.y, 0.0, uv.x, uv.y, c)
+        })
+        .collect();
+    (vertices, card.tris.clone())
+}
+
+fn draw_card(cam: &Camera, card: &Card, origin: Vec2, zoom: f32, r: Rect, atlas: &Atlas, outlined: bool) {
     let size = vec2(atlas.texture.width(), atlas.texture.height());
     let mesh = |origin: Vec2, color: Color| {
-        let (vertices, indices) = card_mesh(card, origin, zoom, r, size, color);
+        let (vertices, indices) = card_mesh_form(cam, card, origin, zoom, r, size, color);
         Mesh { vertices, indices, texture: Some(atlas.texture.clone()) }
     };
     if outlined {
@@ -3157,7 +3215,7 @@ fn draw_building(l: &Location, art: Option<&DtArt>, cam: &Camera, outlined: bool
                 }
             });
         }
-        super::sharp::draw(&atlas.texture, at.x, at.y, faded(WHITE), params);
+        draw_picture_form(cam, atlas, r, at, vec2(r.w * zoom, r.h * zoom), faded(WHITE), zoom);
     } else {
         let (w, h) = (l.size.0 as f32 * cam.scale, (l.size.1 as f32 * cam.cell_size().y).max(cam.scale * 0.8));
         let wall = match l.kind {
@@ -4060,7 +4118,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                         if *k == 0 {
                             frame_probe::sprite(r.w * zoom, r.h * zoom);
                         }
-                        draw_card(card, origin, zoom, r, atlas, outlined);
+                        draw_card(cam, card, origin, zoom, r, atlas, outlined);
                     });
                 }
                 Drawable::BankBand(k) => draw_banks(cam, &bank_bands[*k]),
@@ -5854,7 +5912,7 @@ fn draw_building_windows(game: &Game, assets: &Assets, cam: &Camera) {
                     let origin = building_sprite_origin(l, r.w, r.h, c);
                     for card in cards {
                         let f = card_foot(origin, zoom, card);
-                        standing(c, f, f, 1.0, || draw_card(card, origin, zoom, r, atlas, false));
+                        standing(c, f, f, 1.0, || draw_card(c, card, origin, zoom, r, atlas, false));
                     }
                 } else if let Some(r) = atlas.building(l.picture.0, l.picture.1) {
                     let base = building_foot(l, c);
