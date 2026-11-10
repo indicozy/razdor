@@ -17,6 +17,7 @@ Razdor plays the original game's scenarios using its original rules. Below is wh
 * **Equipment Search** (`Ctrl+F`): filters items in your backpack and at the market by name, type, stats, and description.
 * **Sorting** of goods at the market and shrine by name or price.
 * **Combat:** warrior cards show stat changes relative to the start of the battle (blue for increase, red for decrease); spell icons on cards.
+* **Photo mode:** the game stands still and the camera is free; a shot without the interface is saved as a PNG ([more](/razdor/wiki/en/tutorials/photo/)).
 * **Uncovering locations:** a location revealed by an event unfolds from the fog in a circle, from the center to the edges.
 * **Touch modes and gamepads:** gamepad support on Windows, Linux, and macOS; touchpad mode on mobile devices.
 
