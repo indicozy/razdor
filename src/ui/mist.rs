@@ -148,8 +148,10 @@ fn load() -> Option<Material> {
         ("Parallax", UniformType::Float2),
         ("MistRgb", UniformType::Float3),
     ];
+    // The mist is blended over the ground by its alpha (the default pipeline ignores it).
     let params = MaterialParams {
         uniforms: uniforms.iter().map(|(n, t)| UniformDesc::new(n, *t)).collect(),
+        pipeline_params: crate::ui::sharp::alpha_pipeline(),
         ..Default::default()
     };
     load_material(ShaderSource::Glsl { vertex: VERTEX, fragment: FRAGMENT }, params).ok()
