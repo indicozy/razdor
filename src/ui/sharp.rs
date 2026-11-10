@@ -89,10 +89,6 @@ float point_shade(vec2 at, vec3 n) {
     }
     return clamp(1.0 + POINT_K * LightI.z * s, 0.0, 1.8);
 }
-// 1 where a sampled pixel is dark (a window's pane or door), 0 for stone and for a transparent pixel.
-float dark_px(vec4 s) {
-    return s.a > 0.5 ? (1.0 - smoothstep(0.18, 0.24, luma(s.rgb))) : 0.0;
-}
 // The night's glow of the lights at `at`, 0 to 1 (a building's openings take it).
 float glow_at(vec2 at) {
     float e = 0.0;
@@ -363,36 +359,12 @@ const LIT_MAIN: &str = r#"
         float deep = ((fxp.a < 0.5 ? h : luma(fxp.rgb)) + (fxm.a < 0.5 ? h : luma(fxm.rgb)) + (fyp.a < 0.5 ? h : luma(fyp.rgb)) + (fym.a < 0.5 ? h : luma(fym.rgb))) * 0.25;
         rgb = relief_shade(rgb, h, xp, xm, yp, ym, deep);
         // The point lights rake the relief at night (`LightI.y` of them, `LightI.z` the night).
-        if (LightI.y > 0.0 && LightI.z > 0.0 && texture2D(BuildingMask, uv).a < 0.5) {
+        if (LightI.y > 0.0 && LightI.z > 0.0 && texture2D(BuildingMask, uv).r < 0.5) {
             rgb = clamp(rgb * point_shade(spos, normalize(vec3(-(xp - xm) * RELIEF_K, -(yp - ym) * RELIEF_K, 1.0))), 0.0, 1.0);
         }
     }
     if (a > 0.0 && a <= 0.76) {
         a = min(a * ShadowK, 1.0);
-    }
-    // Windows and doors (the building mask, `BuildingMask`): a pixel darker than the ring of pixels 4
-    // texels away (past the neighbouring panes of a row of windows) (a cavity), and dark in itself (luma under 0.35), is an opening. It glows warm at night
-    // (1.4 by the night's factor, a little less where no light reaches), flickering slightly per building
-    // (`LightI.w` is the clock; the hash is of the 40-pixel cell, so one building flickers alike), and the
-    // dark pixels 1.5 texels away spill a soft 30 % halo onto the stone. Decorations and figures never glow.
-    if (c.a >= 0.8 && LightI.z > 0.0 && texture2D(BuildingMask, uv).a > 0.5) {
-        vec2 ox = vec2(RELIEF_R, 0.0) / TexSize;
-        vec2 oy = vec2(0.0, RELIEF_R) / TexSize;
-        vec2 ox2 = vec2(4.0, 0.0) / TexSize;
-        vec2 oy2 = vec2(0.0, 4.0) / TexSize;
-        float lum = luma(c.rgb);
-        // A window is a blob: brighter than the ring on both axes. A dark seam or edge is brighter on one only.
-        float ring_x = 0.5 * (luma(sharp_tex(uv + ox2).rgb) + luma(sharp_tex(uv - ox2).rgb));
-        float ring_y = 0.5 * (luma(sharp_tex(uv + oy2).rgb) + luma(sharp_tex(uv - oy2).rgb));
-        float opening = smoothstep(0.08, 0.14, min(ring_x, ring_y) - lum) * (1.0 - smoothstep(0.24, 0.32, lum));
-        float halo = 0.25 * (dark_px(sharp_tex(uv + ox)) + dark_px(sharp_tex(uv - ox)) + dark_px(sharp_tex(uv + oy)) + dark_px(sharp_tex(uv - oy)));
-        float hsh = fract(sin(dot(floor(spos / 40.0), vec2(127.1, 311.7))) * 43758.5453);
-        float flick = 0.94 + 0.06 * sin(mod(LightI.w, 1000.0) * 2.3 + hsh * 6.2832);
-        float reach = 0.6 + 0.4 * glow_at(spos);
-        vec3 warm = vec3(1.0, 0.78, 0.38);
-        // The halo is for the stone beside an opening, not for the dark seams themselves.
-        float stone = smoothstep(0.18, 0.26, lum);
-        rgb = min(rgb + warm * (1.4 * LightI.z * reach * flick * (opening + 0.3 * halo * stone * (1.0 - opening))), vec3(1.0));
     }
     gl_FragColor = color * vec4(rgb, a);
 "#;
@@ -666,4 +638,55 @@ mod tests {
         );
         assert!(close(s, vec2(2.0, 2.0)), "{s:?}");
     }
+}
+
+razdor::local! {
+    static WINDOWS_MATERIAL: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
+}
+
+/// The lit windows' main (`windows_pass`): the emissive layer (the mask's G, `dt::windows`) as a warm
+/// glow at night, added over what is drawn (additive: the pass's blend). Its colour is pre-scaled for
+/// nothing but the night, the flicker and the sprite's own fade: the map's tint is drawn before it.
+const WINDOWS_MAIN: &str = r#"
+    vec4 bm = texture2D(BuildingMask, uv);
+    float hsh = fract(sin(dot(floor(spos / 40.0), vec2(127.1, 311.7))) * 43758.5453);
+    float flick = 0.94 + 0.06 * sin(mod(Clock, 1000.0) * 2.3 + hsh * 6.2832);
+    gl_FragColor = vec4(vec3(1.0, 0.78, 0.38) * (bm.g * Night * flick * 1.6 * color.a), 1.0);
+"#;
+
+/// The additive windows material, made once. `None` when it does not compile (no windows then).
+fn windows_material() -> Option<Material> {
+    WINDOWS_MATERIAL.with(|m| {
+        m.get_or_init(|| {
+            let extra = "uniform sampler2D BuildingMask;\nuniform float Night;\nuniform float Clock;\nvarying highp vec2 spos;";
+            let pipeline = PipelineParams {
+                color_blend: Some(BlendState::new(Equation::Add, BlendFactor::Value(BlendValue::SourceAlpha), BlendFactor::One)),
+                ..Default::default()
+            };
+            let uniforms = vec![UniformDesc::new("Night", UniformType::Float1), UniformDesc::new("Clock", UniformType::Float1)];
+            material_in(SHARP_VERTEX_SPOS, &fragment(extra, WINDOWS_MAIN), pipeline, uniforms, vec!["BuildingMask".to_string()])
+                .map_err(|e| razdor::diag!("windows material: {e}"))
+                .ok()
+        })
+        .clone()
+    })
+}
+
+/// Runs `draw` (the building pictures' draws) as the lit windows: an additive pass with the building mask
+/// bound, after the map's tint (the glow must not be darkened by the night's colour). `night` is the frame's
+/// night factor; the sprites' own alpha fades them into the fog as usual.
+pub fn windows_pass<R>(mask: &Texture2D, night: f32, draw: impl FnOnce() -> R) -> R {
+    let Some(m) = windows_material() else { return draw() };
+    m.set_texture("BuildingMask", mask.clone());
+    m.set_uniform("Night", night);
+    m.set_uniform("Clock", super::clock::now() as f32);
+    struct End;
+    impl Drop for End {
+        fn drop(&mut self) {
+            gl_use_default_material();
+        }
+    }
+    gl_use_material(&m);
+    let _end = End;
+    in_blend(Some(m), draw)
 }

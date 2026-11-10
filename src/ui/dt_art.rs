@@ -14,6 +14,7 @@ use razdor::dt::gfx::{self, water_frame_file, Image, ObjectSprite, ObjectSprites
 use razdor::depth::{self, queue::{self, Job, Overlay}};
 use razdor::dt::cards::{self, Card};
 use razdor::dt::preload;
+use razdor::dt::windows;
 use std::path::PathBuf;
 use razdor::dt::install::DtInstall;
 use razdor::dt::DtError;
@@ -471,14 +472,19 @@ impl DtArt {
     fn build_building_mask(&self) -> Option<Texture2D> {
         let atlas = self.map_atlas()?;
         let (w, h) = (atlas.texture.width() as u32, atlas.texture.height() as u32);
-        let rects: Vec<Rect> = self
+        // Each building picture's lit windows (`dt::windows`), computed once from its own pixels.
+        let placed: Vec<(Rect, Vec<u8>)> = self
             .objects()
             .sprites
             .iter()
             .filter(|s| s.section == ObjectSprite::BUILDINGS)
-            .filter_map(|s| atlas.rect_of(s.section, s.cat, s.idx))
+            .filter_map(|s| {
+                let rect = atlas.rect_of(s.section, s.cat, s.idx)?;
+                let boxes = windows::boxes_of(cards::sprite_key(&s.image));
+                Some((rect, windows::emissive(&s.image, boxes)))
+            })
             .collect();
-        let tex = texture(&Image { width: w, height: h, rgba: building_mask_pixels(w, h, &rects) })?;
+        let tex = texture(&Image { width: w, height: h, rgba: building_mask_pixels(w, h, &placed) })?;
         tex.set_filter(FilterMode::Nearest);
         Some(tex)
     }
@@ -562,17 +568,29 @@ mod rect_table_tests {
     }
 }
 
-/// The pixels of a building mask (`DtArt::building_mask`): `w` × `h` RGBA, white on each rectangle of
-/// `rects` (clipped to the texture), clear elsewhere.
-pub fn building_mask_pixels(w: u32, h: u32, rects: &[Rect]) -> Vec<u8> {
+/// The pixels of a building mask (`DtArt::building_mask`): `w` × `h` RGBA. Within each building's
+/// rectangle (`placed`: the rectangle and its emissive layer, one byte a pixel of the sprite), R is 255
+/// (a building) and G is the emission; elsewhere R and G are 0. A is 255 throughout.
+pub fn building_mask_pixels(w: u32, h: u32, placed: &[(Rect, Vec<u8>)]) -> Vec<u8> {
     let mut rgba = vec![0u8; (w * h * 4) as usize];
-    for r in rects {
+    for i in (3..rgba.len()).step_by(4) {
+        rgba[i] = 255;
+    }
+    for (r, emissive) in placed {
+        let (rw, rh) = (r.w.max(0.0) as u32, r.h.max(0.0) as u32);
+        if emissive.len() != (rw * rh) as usize {
+            continue;
+        }
         let (x0, y0) = (r.x.max(0.0) as u32, r.y.max(0.0) as u32);
-        let (x1, y1) = (((r.x + r.w).max(0.0) as u32).min(w), ((r.y + r.h).max(0.0) as u32).min(h));
-        for y in y0..y1 {
-            for x in x0..x1 {
+        for dy in 0..rh {
+            for dx in 0..rw {
+                let (x, y) = (x0 + dx, y0 + dy);
+                if x >= w || y >= h {
+                    continue;
+                }
                 let i = ((y * w + x) * 4) as usize;
-                rgba[i..i + 4].copy_from_slice(&[255, 255, 255, 255]);
+                rgba[i] = 255;
+                rgba[i + 1] = emissive[(dy * rw + dx) as usize];
             }
         }
     }
@@ -584,18 +602,24 @@ mod building_mask_tests {
     use super::*;
 
     #[test]
-    fn the_mask_is_white_on_the_building_rectangles_and_clear_elsewhere() {
-        let rects = [Rect::new(2.0, 1.0, 3.0, 2.0), Rect::new(7.0, 3.0, 2.0, 1.0)];
-        let px = building_mask_pixels(10, 5, &rects);
-        let at = |x: u32, y: u32| px[((y * 10 + x) * 4 + 3) as usize];
-        assert_eq!(at(2, 1), 255);
-        assert_eq!(at(4, 2), 255);
-        assert_eq!(at(5, 2), 0, "just past the first rectangle");
-        assert_eq!(at(7, 3), 255);
-        assert_eq!(at(0, 0), 0);
-        // A rectangle past the edge is clipped, not a panic.
-        let edge = building_mask_pixels(4, 4, &[Rect::new(3.0, 3.0, 5.0, 5.0)]);
+    fn the_mask_marks_buildings_in_red_and_their_windows_in_green() {
+        // A 2×2 building at (2,1) whose window is its top-left pixel; a 2×1 building at (7,3), no window.
+        let placed = [(Rect::new(2.0, 1.0, 2.0, 2.0), vec![255, 0, 0, 0]), (Rect::new(7.0, 3.0, 2.0, 1.0), vec![0, 0])];
+        let px = building_mask_pixels(10, 5, &placed);
+        let at = |x: u32, y: u32| {
+            let i = ((y * 10 + x) * 4) as usize;
+            (px[i], px[i + 1], px[i + 3])
+        };
+        assert_eq!(at(2, 1), (255, 255, 255), "the window pixel: building and lit");
+        assert_eq!(at(3, 1), (255, 0, 255), "the building's stone: building, dark");
+        assert_eq!(at(5, 2), (0, 0, 255), "past the first building: neither");
+        assert_eq!(at(7, 3), (255, 0, 255), "the second building is a building too");
+        assert_eq!(at(0, 0), (0, 0, 255));
+        // A rectangle past the edge is clipped, not a panic; a wrong-sized emissive layer is skipped.
+        let edge = building_mask_pixels(4, 4, &[(Rect::new(3.0, 3.0, 2.0, 2.0), vec![1, 2, 3, 4])]);
         assert_eq!(edge.len(), 4 * 4 * 4);
-        assert_eq!(edge[((3 * 4 + 3) * 4 + 3) as usize], 255);
+        assert_eq!((edge[((3 * 4 + 3) * 4) as usize], edge[((3 * 4 + 3) * 4 + 1) as usize]), (255, 1));
+        let skipped = building_mask_pixels(4, 4, &[(Rect::new(0.0, 0.0, 2.0, 2.0), vec![9])]);
+        assert_eq!(skipped[0], 0, "a wrong size is no building");
     }
 }

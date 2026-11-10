@@ -5543,6 +5543,10 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
             if mist_light {
                 draw_daylight(game, &cam, light);
             }
+            // The buildings' lit windows, after the night's tint (`draw_building_windows`).
+            if light.is_some() {
+                draw_building_windows(game, assets, &cam);
+            }
             // Razdor's «Погода» (off by default): the land's weather over the drawn map, after the fog and the
             // light, over the explored ground only (`draw_weather`).
             draw_weather(game, assets, &cam, light, &shows);
@@ -5809,6 +5813,49 @@ fn fog_visible(game: &Game, cam: &Camera, world: Vec2) -> f32 {
     } else {
         1.0 - minimap::shown_darkness(fog, t)
     }
+}
+
+/// The lit windows of the buildings in view (`sharp::windows_pass`): each building picture (each card of a
+/// cut building, in 2.5D) is drawn again over the map, after the night's tint, with only its emissive layer
+/// adding light. Visible cells only (`fog_visible`). Nothing is drawn at day or with the light off.
+fn draw_building_windows(game: &Game, assets: &Assets, cam: &Camera) {
+    let Some(art) = assets.dt.as_ref() else { return };
+    let (Some(atlas), Some(mask)) = (art.map_atlas(), art.building_mask()) else { return };
+    let night = lights::with_frame(|f| f.map_or(0.0, |f| f.night));
+    if night <= 0.0 {
+        return;
+    }
+    let map = &game.world.map;
+    super::sharp::windows_pass(&mask, night, || {
+        in_view(cam, |c| {
+            let zoom = c.scale / PX;
+            for l in game.world.locations.iter() {
+                if l.kind.is_bridge() || !l.cells().any(|t| game.fog.explored_near(t, minimap::FEATHER)) {
+                    continue;
+                }
+                let n = l.cells().count().max(1) as f32;
+                let (sx, sy) = l.cells().fold((0.0f32, 0.0f32), |(x, y), t| {
+                    let (cx, cy) = map.center(t);
+                    (x + cx, y + cy)
+                });
+                if fog_visible(game, c, vec2(sx / n, sy / n)) < 0.01 {
+                    continue;
+                }
+                if let Some((_, r, cards)) = card_building(l, Some(art)).filter(|_| c.tilt.is_some()) {
+                    let origin = building_sprite_origin(l, r.w, r.h, c);
+                    for card in cards {
+                        let f = card_foot(origin, zoom, card);
+                        standing(c, f, f, 1.0, || draw_card(card, origin, zoom, r, atlas, false));
+                    }
+                } else if let Some(r) = atlas.building(l.picture.0, l.picture.1) {
+                    let base = building_foot(l, c);
+                    let at = building_sprite_origin(l, r.w, r.h, c);
+                    let params = DrawTextureParams { dest_size: Some(vec2(r.w * zoom, r.h * zoom)), source: Some(r), ..Default::default() };
+                    standing(c, base, base, 1.0, || super::sharp::draw(&atlas.texture, at.x, at.y, WHITE, params));
+                }
+            }
+        });
+    });
 }
 
 /// The warm pool of each building's light (`lights`, `point_lights`), on the ground in the ground pass

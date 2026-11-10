@@ -21,6 +21,7 @@ pub mod preload;
 pub mod sound;
 pub mod text;
 pub mod unpack;
+pub mod windows;
 
 use std::fmt;
 use std::path::PathBuf;
