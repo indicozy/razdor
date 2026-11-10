@@ -147,7 +147,7 @@ pub struct Casts {
 }
 
 /// The sun's shadow alpha at full light (by day), fading through the dusk.
-const SUN_ALPHA: f32 = 0.6;
+const SUN_ALPHA: f32 = 0.9;
 /// The moon's shadow alpha, from dusk to dawn.
 const MOON_ALPHA: f32 = 0.15;
 /// The shortest and the longest shadow per unit of height (the dawn's cap, `perf-analysis`).
@@ -378,7 +378,7 @@ pub fn form_sun() -> Option<(f32, [f32; 2])> {
     if day <= 0.0 {
         return None;
     }
-    let k = day * lerp(0.35, 0.15, e.clamp(0.0, 1.0));
+    let k = day * lerp(0.40, 0.20, e.clamp(0.0, 1.0));
     Some((k, sun_bearing(hour)))
 }
 
@@ -684,7 +684,8 @@ mod tests {
             assert!((c.sun.dir[0] - prev.sun.dir[0]).abs() < 0.1 && (c.sun.dir[1] - prev.sun.dir[1]).abs() < 0.1, "hour {h}: sun bearing jumps");
             // The steepest step is the dawn's cotangent (about 0.4 a quarter hour, before the cap bites).
             assert!((c.sun.len - prev.sun.len).abs() < 0.5, "hour {h}: sun length jumps {} -> {}", prev.sun.len, c.sun.len);
-            assert!((c.sun.alpha - prev.sun.alpha).abs() < 0.25, "hour {h}: sun alpha jumps");
+            // The dusk fade runs the full alpha (0.9) over about an hour: a step is under 0.4 a quarter hour.
+            assert!((c.sun.alpha - prev.sun.alpha).abs() < 0.4, "hour {h}: sun alpha jumps");
             assert!((c.moon.alpha - prev.moon.alpha).abs() < 0.06, "hour {h}: moon alpha jumps");
             prev = c;
         }

@@ -8,7 +8,7 @@ use razdor::dt::gfx::Image;
 /// the silhouette: the default pipeline's source-over blend darkens the ground toward `TINT`.
 /// The tone a shadow multiplies what it falls on toward (at full strength): a dark, slightly cool shade
 /// (about 45 % darker, with the blue a little higher), so grass in shadow stays green.
-pub const TINT: [f32; 3] = [0.55, 0.57, 0.68];
+pub const TINT: [f32; 3] = [0.48, 0.50, 0.62];
 
 /// The shadows' alpha is scaled by this (1: as drawn; the sun's shadow is 0.6 by day, `daylight::SUN_ALPHA`).
 pub const EASE: f32 = 1.0;

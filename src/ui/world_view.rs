@@ -3027,10 +3027,13 @@ fn form_colour(cam: &Camera, p: Vec2, base: Color) -> Option<Color> {
     if s.length_squared() < 1e-8 {
         return None;
     }
+    // `k` is the darkening at the far edge (0.40 low sun, 0.20 noon): the colour moves toward the tone by the share
+    // that darkens the red by k (the tone's red is 0.48, so the share is k / 0.52).
     let away = (-p.dot(s.normalize())).clamp(0.0, 1.0);
-    let d = k * away;
+    let share = (k * away / (1.0 - shadow::TINT[0])).clamp(0.0, 1.0);
     let t = shadow::TINT;
-    Some(Color::new(base.r * (1.0 - d * (1.0 - t[0])), base.g * (1.0 - d * (1.0 - t[1])), base.b * (1.0 - d * (1.0 - t[2])), base.a))
+    let mix = |c: f32, tc: f32| c * (1.0 - share + share * tc);
+    Some(Color::new(mix(base.r, t[0]), mix(base.g, t[1]), mix(base.b, t[2]), base.a))
 }
 
 /// A picture's quad (its rectangle `src` of the atlas, drawn at `at` in `size`) with the sun's form shading at its
