@@ -1177,6 +1177,10 @@ pub fn restore(meta: &SaveMeta, mut game: Game, demo: Arc<Content>, install: Opt
     if meta.version < 7 {
         migrate_spells(&mut game);
     }
+    // A save from before the chronicle starts it, with a line that the days before are not
+    // written down (`rules::chronicle`).
+    let title = game.journal.chapter_heading(game.journal.chapter);
+    game.chronicle.begin_after_load(&title, game.clock.total_minutes() as u64);
     // Saves from before the last-pay minute count everyone as paid now.
     let now = game.clock.total_minutes() as u64;
     for u in game.squad.iter_mut().filter(|u| u.last_paid == 0) {
@@ -2430,5 +2434,24 @@ pub(crate) mod tests {
         let (m, loaded) = decode(&packed).unwrap();
         assert_eq!(m.played_mod, None);
         assert!(restore(&m, loaded, c, None).is_ok(), "an old save still loads");
+    }
+
+    #[test]
+    fn a_save_without_a_chronicle_starts_it_with_the_earlier_days_line() {
+        use crate::rules::chronicle::EntryKind;
+        let c = demo();
+        let mut g = Game::new(c.clone(), HeroClass::Archmage);
+        // What a save from before the chronicle holds: no record at all.
+        g.chronicle = Default::default();
+        let meta = meta_of(&g, SaveKind::Manual, "test").unwrap();
+        let (m, loaded) = decode(&encode(&meta, &g).unwrap()).unwrap();
+        let loaded = restore(&m, loaded, c.clone(), None).unwrap();
+        let kinds: Vec<EntryKind> = loaded.chronicle.entries().map(|e| e.kind.clone()).collect();
+        assert_eq!(kinds, vec![EntryKind::EarlierDaysNotRecorded]);
+        // Saved and loaded again, the record is kept as it is (no second line).
+        let meta = meta_of(&loaded, SaveKind::Manual, "test").unwrap();
+        let (m, again) = decode(&encode(&meta, &loaded).unwrap()).unwrap();
+        let again = restore(&m, again, c, None).unwrap();
+        assert_eq!(again.chronicle, loaded.chronicle);
     }
 }

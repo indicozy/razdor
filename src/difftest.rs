@@ -180,6 +180,7 @@ impl Carry {
             hero_name: None,
             figure: None,
             journal: Default::default(),
+            chronicle: Default::default(),
         }
     }
 

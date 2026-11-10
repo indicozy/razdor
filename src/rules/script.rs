@@ -107,6 +107,7 @@ impl Game {
     }
 
     fn script_events(&mut self, out: Vec<EventOutcome>) -> Vec<Event> {
+        self.chronicle_outcomes(&out);
         self.record_outcomes(&out);
         // An event that took effect ends with the army recomputed and the hero's pairs with
         // the AI's armies marked to be rescored (0x4ab1ec → 0x497240(0, 1)).
@@ -135,6 +136,9 @@ impl Game {
     /// The player's answer to the question waiting in the engine; then the events run on.
     /// Returns what followed.
     pub fn answer_question(&mut self, yes: bool) -> Vec<Event> {
+        if let Some(id) = self.pending_question() {
+            self.chronicle_answer(id, yes);
+        }
         let Some(mut engine) = self.script.take() else { return Vec::new() };
         let out = engine.answer(self, yes);
         self.script = Some(engine);
@@ -680,8 +684,8 @@ impl EventWorld for Game {
 
     fn give_item(&mut self, artifact: u8) {
         let item = ItemId(artifact as u32);
-        if self.content.try_item(item).is_some() {
-            self.pack.add(item);
+        if self.content.try_item(item).is_some() && self.pack.add(item) {
+            self.chronicle_artefact(item, false);
         }
     }
 
@@ -707,6 +711,7 @@ impl EventWorld for Game {
     fn learn_spell(&mut self, spell: u8) {
         if spell != 0 && !self.spells.contains(&spell) {
             self.spells.push(spell);
+            self.chronicle_spell(spell as u32);
         }
     }
 
@@ -1184,6 +1189,9 @@ pub struct NextMap {
     /// The journal's history (`rules::journal`, a Razdor extra), always carried: the next map
     /// is its next chapter. The quest journal itself is not (0x4b2204).
     pub journal: crate::rules::journal::History,
+    /// The chronicle (`rules::chronicle`), carried the same way: the next map is its next chapter.
+    #[serde(default)]
+    pub chronicle: crate::rules::chronicle::Chronicle,
 }
 
 /// The name of branch (map, variant) for a next-map name such as "0-0 …".
@@ -1244,6 +1252,7 @@ impl Game {
             hero_name: self.hero_name.clone(),
             figure: self.hero_figure,
             journal: self.journal.clone(),
+            chronicle: self.chronicle.clone(),
         }
     }
 
@@ -1286,6 +1295,7 @@ impl Game {
         if u.gain_xp(&c, xp.clamp(0, i32::MAX as i64) as i32) > 0 {
             let level = u.level;
             self.effect_events.push(Event::LevelUp(k, level));
+            self.chronicle_level_up(k, level);
             self.auto_promote_unit(k);
         }
     }
@@ -1323,6 +1333,8 @@ impl Game {
         self.journal.next_chapter();
         let title = self.world.title.clone();
         self.journal.name_chapter(&title);
+        self.chronicle = prev.chronicle.clone();
+        self.chronicle.next_chapter(&title, now);
         let slot = self.squad[0].slot;
         let mut hero = prev.hero.clone();
         if c.try_unit(hero.def).is_none() {
@@ -1453,6 +1465,13 @@ mod tests {
 
     fn start(s: &Scenario) -> Game {
         Game::from_scenario(Arc::new(content()), s, HeroClass::Knight)
+    }
+
+    /// A 10×10 grass map with the knight at (2, 2) and two militia, for the chronicle's tests.
+    fn chronicle_map() -> Scenario {
+        let mut s = crate::rules::world::testkit::scenario(10, 10);
+        s.header.heroes[0] = crate::rules::world::testkit::hero(2, 2, 1000, &[crate::rules::world::testkit::troop(4, 0, 2)]);
+        s
     }
 
     fn fired(events: &[Event]) -> Vec<EventId> {
@@ -2278,6 +2297,10 @@ mod tests {
         assert!(g.enter_waiting_building().is_empty(), "still waiting for the answer");
         let events = g.answer_question(true);
         assert_eq!(fired(&events), vec![1]);
+        assert!(
+            g.chronicle.entries().any(|e| e.kind == crate::rules::chronicle::EntryKind::Text { text: crate::rules::chronicle::TextRef::Event(1), answer: Some(true) }),
+            "the question's answer is in the chronicle"
+        );
         assert_eq!(g.enter_waiting_building(), vec![Event::Arrived(0)], "entered once the question is read");
     }
 
@@ -2532,6 +2555,7 @@ mod tests {
             hero_name: None,
             figure: None,
             journal: g.journal.clone(),
+            chronicle: g.chronicle.clone(),
         };
         let mut fresh = start(&world(vec![]));
         fresh.apply_carry_over(&next);
@@ -3112,6 +3136,7 @@ mod tests {
             hero_name: None,
             figure: None,
             journal: crate::rules::journal::History::default(),
+            chronicle: Default::default(),
         };
         // The next map's header takes it all.
         let mut all = world(vec![]);
@@ -3372,6 +3397,43 @@ mod tests {
         g.set_hero_name(" ");
         assert_eq!(g.hero_name(), name, "an empty name is the class's");
     }
+
+    #[test]
+    fn shown_texts_quests_and_answers_are_in_the_chronicle_by_reference() {
+        use crate::rules::chronicle::{EntryKind as K, TextRef};
+        let mut g = start(&chronicle_map());
+        g.chronicle.chapters[0].entries.clear();
+        g.script_events(vec![
+            EventOutcome::Fired { event: 2, message: true },
+            EventOutcome::Fired { event: 3, message: false },
+            EventOutcome::QuestAdded(4),
+            EventOutcome::Question(5),
+            EventOutcome::QuestCompleted { quest: 4, by: 6 },
+        ]);
+        let kinds: Vec<K> = g.chronicle.entries().map(|e| e.kind.clone()).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                K::Text { text: TextRef::Event(2), answer: None },
+                K::QuestTaken { quest: 4 },
+                K::Text { text: TextRef::Event(5), answer: None },
+                K::QuestDone { quest: 4 },
+            ],
+            "a silent event is not shown, so not kept"
+        );
+    }
+
+    #[test]
+    fn a_heros_level_up_is_in_the_chronicle_and_a_troops_is_not() {
+        use crate::rules::chronicle::EntryKind as K;
+        let mut g = start(&chronicle_map());
+        g.chronicle.chapters[0].entries.clear();
+        g.unit_gains(1, 100_000);
+        assert!(g.chronicle.entries().all(|e| !matches!(e.kind, K::LevelUp { .. })), "a troop's level is not the hero's");
+        g.unit_gains(0, 100_000);
+        let level = g.squad[0].level;
+        assert!(g.chronicle.entries().any(|e| e.kind == K::LevelUp { level }), "{:?}", g.chronicle.entries().collect::<Vec<_>>());
+    }
 }
 
 #[cfg(test)]
@@ -3444,6 +3506,7 @@ mod real_maps {
             hero_name: None,
             figure: None,
             journal: crate::rules::journal::History::default(),
+            chronicle: Default::default(),
         };
         let preset = Game::from_scenario(c.clone(), &rk4, HeroClass::Knight);
         let g = Game::from_campaign(c.clone(), &rk4, &prev);

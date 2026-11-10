@@ -832,3 +832,36 @@ fn rk1_the_road_lightning_is_shown_and_stops_the_walk() {
     assert!(events.iter().filter(|e| matches!(e, Event::EventSpell { .. })).all(Event::needs_reading), "it ends the walk");
     assert!(d.g.squad.iter().map(|u| u.hp).sum::<i32>() < before, "the lightning hurts");
 }
+
+/// A campaign played for 300 days (a noon each day, the hero walking between towns) keeps its
+/// chronicle under the size budget: the save is compressed on top, the budget is on the JSON.
+#[test]
+fn a_300_day_chronicle_of_a_real_campaign_stays_small() {
+    use crate::rules::chronicle::{MINUTES_PER_DAY, SIZE_BUDGET_300_DAYS};
+    let Some(dt) = install() else { return };
+    let c = content(&dt);
+    let mut d = Driver::new(&dt, &c, "РК1", HeroClass::Knight);
+    let towns: Vec<crate::rules::map::Tile> = d.g.world.locations.iter().filter(|l| l.kind.capturable()).map(|l| l.tile).collect();
+    assert!(!towns.is_empty());
+    // The clock counts from year 0: the campaign's own 300 days are counted from its start.
+    let begun = d.g.clock.total_minutes() as u64;
+    let mut i = 0;
+    while (d.g.clock.total_minutes() as u64) < begun + 300 * MINUTES_PER_DAY && d.ended.is_none() {
+        let to = towns[i % towns.len()];
+        i += 1;
+        if !d.walk(to, &|_| false) {
+            d.wait(24);
+        }
+        d.wait(12);
+    }
+    let json = serde_json::to_string(&d.g.chronicle).unwrap();
+    let route: usize = d.g.chronicle.chapters.iter().map(|c| c.route.len()).sum();
+    println!(
+        "chronicle of a real campaign, {} days: {} entries, {} route cells, {} bytes",
+        (d.g.clock.total_minutes() as u64 - begun) / MINUTES_PER_DAY,
+        d.g.chronicle.entries().count(),
+        route,
+        json.len()
+    );
+    assert!(json.len() < SIZE_BUDGET_300_DAYS, "{} bytes", json.len());
+}

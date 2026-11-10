@@ -623,6 +623,13 @@ impl Game {
     /// someone lives, every unit this spell killed comes back with 1 HP (corpses from before
     /// stay dead). If nobody lives the game is lost ([`Game::army_fallen`]), as after a battle.
     fn spell_on_player(&mut self, spell: &SpellDef, by_event: bool) -> CastOutcome {
+        let before = self.alive_mask();
+        let outcome = self.spell_on_player_rules(spell, by_event);
+        self.chronicle_fallen(&before);
+        outcome
+    }
+
+    fn spell_on_player_rules(&mut self, spell: &SpellDef, by_event: bool) -> CastOutcome {
         let c = self.content.clone();
         let now = self.clock.total_minutes() as u64;
         let before: Vec<(i32, bool)> = self.squad.iter().map(|u| (u.hp, u.alive())).collect();
@@ -1409,5 +1416,17 @@ mod tests {
         migrate_old_spells(&old, &mut units, 9000);
         assert_eq!(units[0].spells[..2], [Some(slot(2, 500)), Some(slot(5, 9000))]);
         assert_eq!(units[1].spells[..2], [Some(slot(2, 500)), None]);
+    }
+
+    #[test]
+    fn a_map_spell_that_kills_a_unit_is_a_fall_in_the_chronicle() {
+        let mut g = game(HeroClass::Knight);
+        g.squad[1].hp = 10;
+        let lightning = g.spell(3).unwrap().clone();
+        g.apply_spell_to_army_ext(&lightning, false);
+        assert!(!g.squad[1].alive(), "the lightning kills the 10 HP unit");
+        let unit = g.squad[1].def;
+        let fallen = crate::rules::chronicle::EntryKind::Fell { unit, count: 1 };
+        assert_eq!(g.chronicle.entries().filter(|e| e.kind == fallen).count(), 1);
     }
 }

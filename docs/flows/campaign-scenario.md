@@ -69,6 +69,7 @@ campaign chapter names use orange (`235, 165, 75` in SanSerif).
 | `EventEngine`, `EventOutcome` | `src/rules/events.rs` | the scenario's scripts; `Victory`/`Defeat` end it |
 | `ScriptEnd`, `NextMap` | `src/rules/script.rs` | how the scenario ended; what the next map receives |
 | `History`, `Entry`, `Tab`, `Row` | `src/rules/journal.rs` | quests, rumours and messages by chapter (one chapter per campaign map) |
+| `Chronicle`, `Chapter`, `Entry`, `EntryKind`, `TextRef`, `FoeRef`, `Totals` | `src/rules/chronicle.rs` | the record of what the player saw and did, by chapter (see «Chronicle» below) |
 
 ## The rules that matter
 
@@ -132,6 +133,55 @@ worst record once every map of it is won (`marks::Records::campaign`). A campaig
 **Journal** (events.md §10). One chapter per campaign map (`History::next_chapter`,
 `name_chapter`), newest first; Razdor keeps the history across maps (an addition; the original's
 journal is per map).
+
+## Chronicle («Летопись»)
+
+The design is `docs/superpowers/specs/2026-11-10-chronicle-design.md`. The record (`Game::chronicle`,
+`src/rules/chronicle.rs`) is a dated list of what the player saw or did, one chapter per campaign map
+like the journal, carried over at the hand-over (`NextMap::chronicle`, `Game::apply_carry_over` starts
+the next chapter). It is only appended to: the hooks change no state of the game, so the rules, the
+AI and the difftests are the same with or without it.
+
+Recorded (`EntryKind`): a text window shown (`Text`: a scenario message by its event id, a question with
+its answer once given); the player's battles (`Battle`: the cell, the foe by its scenario id, the result,
+the losses on both sides); captures (`Captured`); the first entry into a building (`FirstVisit`, not a
+bridge or an obelisk); hirings, dismissals and falls of units (`Hired`, `Dismissed`, `Fell`: a fall
+outside battle, from a map spell or a potion; a battle's losses are in its `Battle` entry); the hero's
+level-ups (`LevelUp`); spells learnt (`SpellLearned`); artefacts found or bought (`ArtefactFound`,
+`ArtefactBought`); quests taken and done (`QuestTaken`, `QuestDone`); the noon report (`Noon`); and
+`EarlierDaysNotRecorded`, the first line of a save made before the record. Each hero step's end cell
+goes into the chapter's `route`, without a repeat in a row.
+
+Hooks (each one line in the game, the body in `chronicle.rs`, `impl Game`):
+- windows and quests: `Game::script_events` (every engine outcome, before the journal takes it), and
+  `Game::answer_question` (the answer, before the engine takes the question);
+- the walk: `Game::run_pause` (a step's end), `Game::begin_walk` (a capture on the way);
+- buildings: `Game::enter_building` (first visit), `Game::resolve_battle` (the battle, its captures,
+  the hero's level-ups and the loot), `Game::new_day` (the report when it shows), `Game::unit_gains`
+  (scenario XP); `Game::hire`, `Game::buy`, `Game::learn_spell` (town, sanctuary), `Game::dismiss`,
+  `Game::take_from_store`;
+- events: `EventWorld::give_item` and `EventWorld::learn_spell` for `Game` (a scenario's artefact and spell);
+- falls: `Game::spell_on_player` and `Game::drink` (a map spell or a potion; the rules are in
+  `spell_on_player_rules` and `drink_potion`, the wrappers only compare who is alive).
+
+Not recorded, on purpose: AI armies fighting each other or taking a building (`rules/ai.rs` never calls
+a hook), anything under the fog, the village tribute, the event items and units taken away by a window
+(the window's text is kept), and gold earned or spent (the record has no gold totals: they would need
+a hook in every gold change). The highlights (`Chronicle::biggest_battle`, `richest_moment`) and the
+totals (`Chronicle::totals`) read the record only; the longest-serving unit is not computed (units keep
+no hiring minute).
+
+Texts are stored by reference: a scenario event by its id in the chapter's map (`TextRef::Event`), a
+catalog line by key and arguments (`TextRef::Catalog`), and a string only when built on the fly
+(`TextRef::Text`). A map's names (the buildings, the armies) are kept as scenario ids (`FoeRef`,
+`Captured { location }`), so the save holds no map text.
+
+Storage and loads: `Game::chronicle` is `#[serde(default)]`; a save without one starts the record at
+the load with `EarlierDaysNotRecorded` (`save::restore`, `Chronicle::begin_after_load`). A new game
+starts its chapter in `Game::unstarted` (campaign maps and new games) and `Game::new` (the demo). The
+size budget is `SIZE_BUDGET_300_DAYS` (1 MB of JSON after 300 days): `chronicle::tests` on a synthetic
+record at a realistic rate, and `replay::a_300_day_chronicle_of_a_real_campaign_stays_small` on a
+real campaign (`RAZDOR_DT_DIR`).
 
 ## Adding a map («Добавить карту…»)
 

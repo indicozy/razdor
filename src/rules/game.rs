@@ -444,6 +444,10 @@ pub struct Game {
     /// What the player learnt, with dates (`rules::journal`); empty in older saves.
     #[serde(default)]
     pub journal: History,
+    /// The chronicle («Летопись», `rules::chronicle`): what the player saw and did, by chapter;
+    /// empty in saves made before it (the load starts it).
+    #[serde(default)]
+    pub chronicle: super::chronicle::Chronicle,
     /// The offer of the village the hero stands in, made on entering (`rules::economy`).
     #[serde(default)]
     pub(crate) offer: Option<(usize, VillageOffer)>,
@@ -784,6 +788,7 @@ impl Game {
             scan_on_close: false,
             hero_name: None,
             journal: History::default(),
+            chronicle: Default::default(),
             offer: None,
             offer_roll: 0,
             offer_mana_due: 0,
@@ -858,6 +863,8 @@ impl Game {
         g.archetype = archetype_of(hero);
         g.hero_figure = Some(hero_figure_of(hero));
         g.origin = Some(ScenarioRef::Demo);
+        let (title, now) = (g.world.title.clone(), g.clock.total_minutes() as u64);
+        g.chronicle.start(&title, now);
         g
     }
 
@@ -909,6 +916,8 @@ impl Game {
         let mut g = Game::with_world(content, world, squad, start.tile);
         let title = g.world.title.clone();
         g.journal.name_chapter(&title);
+        let now = g.clock.total_minutes() as u64;
+        g.chronicle.start(&title, now);
         g.arrange_at_load();
         // The class's speed is set first (0x4b4300: 0x68dcd8, copied to the hero's +0x1694),
         // then the map load puts him on his cell (0x4b5913 → 0x497c68), before he is at sea:
@@ -1812,6 +1821,7 @@ impl Game {
         if stepping {
             self.step_from = None;
             self.step_flag = true;
+            self.chronicle_step();
         }
         let go = match p.kind {
             StepKind::Walk => self.walk_tail(it),
@@ -1883,6 +1893,7 @@ impl Game {
             Some(StepContact::Captured(l)) => {
                 if !self.world.locations[l].owned() {
                     self.world.give_to_player(l);
+                    self.chronicle_capture(l);
                     it.push(Event::Captured(l));
                 }
             }
@@ -2089,6 +2100,7 @@ impl Game {
                 return;
             }
         }
+        self.chronicle_first_visit(l);
         self.visit_village(l);
         // The building's window recomputes his army and marks his pairs with the AI's
         // armies to be rescored on its hire, garrison and close tabs (0x4ba854 →
@@ -2377,7 +2389,11 @@ impl Game {
             }
         }
         let super::economy::NoonPay { mana_wages, unpaid, deserted } = pay;
-        shown.then_some(DayReport { day, income, wages, mana_wages, unpaid, deserted, gold, mana_total })
+        let report = shown.then_some(DayReport { day, income, wages, mana_wages, unpaid, deserted, gold, mana_total });
+        if let Some(r) = &report {
+            self.chronicle_noon(r);
+        }
+        report
     }
 
     /// The rest of a slice of time after the AI's moves (`move_armies` after the AI, then
@@ -2494,6 +2510,7 @@ impl Game {
         let mut u = Unit::new(&self.content, kind, slot);
         u.last_paid = self.clock.total_minutes() as u64;
         self.squad.push(u);
+        self.chronicle_hired(kind);
         Ok(())
     }
 
@@ -2682,7 +2699,9 @@ impl Game {
     /// [`Game::drain_events`].
     pub fn resolve_battle(&mut self, battle: &Battle) -> BattleResult {
         crate::diag::play(&self.clock.label(), &format!("BATTLE log:\n  {}\nBATTLE ends: {:?} after {} turns", battle.log.join("\n  "), battle.outcome(), battle.round));
+        let start = self.chronicle_battle_start();
         let result = self.settle_battle(battle);
+        self.chronicle_battle(start, battle, &result);
         // A building taken from its garrison is not entered: he fought it from the cell
         // before it and stays there, outside it (the original's entered building 0x68dc74
         // stays none, no window opens); a click on it walks him in (world.md §7.2, checked
@@ -2962,6 +2981,7 @@ impl Game {
         }
         self.gold = (self.gold - price).max(0);
         self.pack.add(item);
+        self.chronicle_artefact(item, true);
         self.scan_on_close = true;
         Ok(item)
     }
@@ -2998,6 +3018,13 @@ impl Game {
     /// Squad member `unit` drinks the potion at `pack_index` ([`items::drink`]). Returns the
     /// HP gained.
     pub fn drink(&mut self, unit: usize, pack_index: usize) -> Result<i32, EquipError> {
+        let before = self.alive_mask();
+        let result = self.drink_potion(unit, pack_index);
+        self.chronicle_fallen(&before);
+        result
+    }
+
+    fn drink_potion(&mut self, unit: usize, pack_index: usize) -> Result<i32, EquipError> {
         let item = self.pack.get(pack_index).ok_or(EquipError::NoSuchItem)?;
         let c = self.content.clone();
         let now = self.clock.total_minutes() as u64;
@@ -5143,6 +5170,8 @@ mod tests {
         assert!(events.contains(&Event::Captured(0)), "{events:?}");
         assert_eq!((g.location, g.foe), (Some(0), None));
         assert!(g.world.locations[0].owned());
+        let captured = crate::rules::chronicle::EntryKind::Captured { location: g.world.locations[0].id };
+        assert_eq!(g.chronicle.entries().filter(|e| e.kind == captured).count(), 1, "the walk takes it into the chronicle");
         assert!(g.set_destination((20, 2)), "from inside it he walks on");
     }
 
@@ -5685,6 +5714,52 @@ mod tests {
         g.wait(24);
         assert_eq!(g.tribute_available(), Some(25), "refilled at midnight");
     }
+
+    #[test]
+    fn a_building_is_a_first_visit_once() {
+        use crate::rules::chronicle::EntryKind;
+        let mut g = quiet_game(HeroClass::Knight);
+        let l = g.world.index_of("Oakford");
+        let id = g.world.locations[l].id;
+        let mut events = Vec::new();
+        g.enter_building(l, false, &mut events);
+        g.enter_building(l, false, &mut events);
+        assert_eq!(g.chronicle.entries().filter(|e| e.kind == EntryKind::FirstVisit { location: id }).count(), 1);
+    }
+
+    #[test]
+    fn the_noon_report_is_in_the_chronicle_when_it_shows() {
+        use crate::rules::chronicle::EntryKind;
+        let mut g = quiet_game(HeroClass::Knight);
+        let report = g.new_day(g.start_day + 1);
+        assert!(report.is_some(), "a noon with a wage bill shows its report");
+        let noon: Vec<i32> = g.chronicle.entries().filter_map(|e| match e.kind {
+            EntryKind::Noon { gold, .. } => Some(gold),
+            _ => None,
+        }).collect();
+        assert_eq!(noon, vec![report.map_or(0, |r| r.gold)]);
+    }
+
+    #[test]
+    fn each_steps_end_cell_is_on_the_route_once() {
+        let mut g = quiet_game(HeroClass::Knight);
+        let t = g.tile();
+        let target = [(t.0 + 4, t.1), (t.0 + 3, t.1 + 1), (t.0, t.1 + 4), (t.0 - 4, t.1)].into_iter().find(|&c| g.set_destination(c));
+        assert!(target.is_some(), "a reachable cell near the start");
+        let events = walk_until_stopped(&mut g);
+        let route = &g.chronicle.chapters[0].route;
+        assert!(!route.is_empty(), "{events:?}");
+        assert_eq!(route.last(), Some(&g.tile()));
+        assert!(route.windows(2).all(|w| w[0] != w[1]), "{route:?}");
+    }
+
+    #[test]
+    fn a_bought_artefact_is_in_the_chronicle() {
+        use crate::rules::chronicle::EntryKind;
+        let mut g = quiet_game(HeroClass::Knight);
+        g.location = Some(g.world.index_of("Oakford"));
+        g.gold = 1_000_000;
+        let item = g.buy(0).unwrap();
+        assert_eq!(g.chronicle.entries().filter(|e| e.kind == EntryKind::ArtefactBought { item }).count(), 1);
+    }
 }
-
-

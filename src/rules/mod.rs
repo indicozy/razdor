@@ -2,6 +2,7 @@
 pub mod ai;
 pub mod battle;
 pub mod cheats;
+pub mod chronicle;
 pub mod clock;
 pub mod content;
 pub mod custom;

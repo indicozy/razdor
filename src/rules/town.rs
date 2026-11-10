@@ -327,6 +327,7 @@ impl Game {
         }
         self.world.locations[l].treasure.remove(index);
         self.pack.add(item);
+        self.chronicle_artefact(item, false);
         Ok(item)
     }
 
@@ -454,6 +455,7 @@ impl Game {
         }
         self.spend(price);
         self.spells.push(id as u8);
+        self.chronicle_spell(id);
         Ok(())
     }
 
@@ -477,7 +479,11 @@ impl Game {
         if i >= self.squad.len() {
             return Err(ServiceError::NoSuchUnit);
         }
+        let (unit, alive) = (self.squad[i].def, self.squad[i].alive());
         self.squad.remove(i);
+        if alive {
+            self.chronicle_dismissed(unit);
+        }
         Ok(())
     }
 }
@@ -2136,6 +2142,43 @@ mod tests {
         assert_eq!((g.gold, g.mana), (gold + 30, mana + 20));
         assert_eq!(g.daily_income(), 36, "its income (× F/100) counts at once");
         assert_eq!(g.tabs_here(), vec![Tab::MainHall, Tab::Garrison], "no barracks slot, no hire tab");
+    }
+
+    #[test]
+    fn the_chronicle_has_a_won_battle_with_its_losses_and_foe() {
+        let mut g = start(&map());
+        lose_unit_in_battle(&mut g, 1);
+        let battles: Vec<_> = g.chronicle.entries().map(|e| e.kind.clone()).filter(|k| matches!(k, crate::rules::chronicle::EntryKind::Battle { .. })).collect();
+        assert!(
+            matches!(battles.as_slice(), [crate::rules::chronicle::EntryKind::Battle { won: true, own_losses: 1, foe: Some(crate::rules::chronicle::FoeRef::Army(1)), foe_losses, .. }] if *foe_losses >= 1),
+            "{battles:?}"
+        );
+    }
+
+    #[test]
+    fn hirings_dismissals_and_spells_are_in_the_chronicle() {
+        use crate::rules::chronicle::EntryKind as K;
+        let mut s = map();
+        let mut t = town(BuildingType::Town, 2, 2, 1);
+        t.barracks[0] = RecruitSlot { unit: 4, start_count: 1, max_count: 5 };
+        let mut church = town(BuildingType::Church, 5, 2, 1);
+        church.spells_for_sale = [1, 0, 0, 0, 0, 0];
+        s.buildings = vec![t, church];
+        let mut g = inside(&s);
+        g.hire(UnitId(4)).unwrap();
+        g.location = Some(1);
+        g.learn_spell(1).unwrap();
+        let hired = g.squad.len() - 1;
+        g.dismiss(hired).unwrap();
+        // A corpse is buried, not dismissed: nothing is recorded for it.
+        g.squad[1].hp = 0;
+        g.dismiss(1).unwrap();
+        let kinds: Vec<K> = g.chronicle.entries().map(|e| e.kind.clone()).collect();
+        assert_eq!(
+            kinds,
+            vec![K::Hired { unit: UnitId(4), count: 1 }, K::SpellLearned { spell: 1 }, K::Dismissed { unit: UnitId(4), count: 1 }],
+            "{kinds:?}"
+        );
     }
 }
 

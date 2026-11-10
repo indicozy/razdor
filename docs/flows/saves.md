@@ -235,6 +235,14 @@ The player's best mark per map (and its date) is `marks.json` beside `settings.j
 (`marks::Records`, keyed by the map's file name without the extension, as the favourites are). A
 victory writes it (`ui/mod.rs` at the scenario's end, next to the list's tick); a loss writes nothing.
 
+## The chronicle (`rules/chronicle.rs`)
+
+`Game::chronicle` (the «Летопись», `campaign-scenario.md` «Chronicle») is saved whole, chapter by
+chapter; it is `#[serde(default)]`, and the hand-over carries it in `NextMap::chronicle`. A save from
+before it has no record: `save::restore` starts one at the load with an «earlier days not recorded»
+line (`Chronicle::begin_after_load`), and a save that has a record keeps it as it is. Its texts are
+references (scenario event ids, catalog keys), so it stays small (`SIZE_BUDGET_300_DAYS`).
+
 ## Compatibility rules when adding state
 
 - New fields on anything saved (`Game`, `World`, `Army`, units, the event engine …) get
