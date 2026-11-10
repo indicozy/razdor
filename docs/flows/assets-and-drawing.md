@@ -488,8 +488,27 @@ texture (`minimap::fog_layer`, the same quad and texels) through the material of
 plain black. Its alpha is `mist::mist_alpha(d, w)`: opaque where the shown darkness `d` is 1 (unexplored), clear
 where it is 0, and only in the opening's edge band the value noise `w` makes it patchy. Its colour is `MIST_RGB`
 (0.74, 0.77, 0.82) times the billows' shade (0.65 to 1.15) and a faint cool-to-warm tint. Four sheets of domain-warped fractal noise ("billows": `warp` shifts each sheet by two fbm fields that evolve on the Clock, the warped fbm is the height; 4 octaves, 2 for the warp; 3 sheets on the desktop, 2 on a phone, `Sheets`, `RAZDOR_MIST_SHEETS=1..4` overrides) at scales 0.18 to 1.1 drift at different speeds on the terrain's clock (`Clock`; every speed is a whole number of lattice periods per `CLOCK_PERIOD`, so the loop is exact, no crossfade) and each billow is shaded by its slope toward a light from the upper left (0.65 to 1.15 of the mist colour). The wisp at the opening's edge is sheet 0's warped height. The sheets sit at
-heights 0.3 to 1.2; in the 2.5D view `Parallax` (`mist::parallax`, from the tilt) shifts the upper ones, flat it is
-zero. The black rectangles past the map stay black; the minimap keeps its black (`minimap::draw_fog` is not used
+heights 0.3 to 1.2 in the flat view (`Parallax`, zero there). The tilted views (2.5D and first-person) draw sheet 0 alone on
+the ground (`mist::draw_ground`, `Sheets` 1, no parallax: opaque where unexplored, as above) and the others as **raised sheets**
+(`world_view::draw_raised_mist`, `mist::raised`, `Sheet` = 1..3 in the shader): translucent copies of the same quad at
+`mist::raised_height` 0.35, 0.75 and 1.2 cells (`RAZDOR_MIST_RAISED`, default 3 on the desktop, 2 on a phone). Their alpha is
+0.42 × the darkness, less the higher they stand, and only the billows above the mean show (`smoothstep(0.44, 0.72)`); a
+raised sheet's rim fades over the last two texels of the fog texture, so it does not end in a hard edge past the map. In 2.5D a
+raised sheet is the ground's model lifted straight up (`view25::raised_ground_model`); in the bent view it is a mesh of its own on
+the sheet's normal (`bent_mist_meshes`, `view25::Bend::normal_at` and `lift`, lifted and faded out over the last three cells
+before the horizon, alpha 0 past it). The raised sheets are drawn over the ground's mist and under the reveals, as the mist is.
+- **Banks at the frontier** (2.5D and first-person): `mist::frontier` finds the cells whose shown darkness is at least 0.5 with a
+lit neighbour below it (`mist::FRONTIER`), and `world_view::push_banks` stands three banks on the line between each such pair,
+on the lit cell (`sprite_key`, `LAYER_BANK`), nearest the view's centre first, up to `mist::banks_cap` (300 on the desktop, 120 on
+a phone; `RAZDOR_MIST_BANKS` overrides). A bank is a `Drawable::Bank` in the standing pass: 1.4 × 1.5 cells, `draw_bank` through
+the sprite's billboard, its alpha the unexplored side's darkness, its noise rolling up on the Clock (`BANK_FRAGMENT`). It is not
+faded by its own cell (the fog would hide it there); it stands over the lit land, where it shows, and over the mist as a
+churning wall. A bank is drawn with its own material, and `sharp::leave_blend` puts the sprite session's back. The colour is the
+fork's `color0` attribute: raw bytes, so the shader divides it by 255 (the default shader does too); an undivided value clamps
+every fragment to opaque. The flat view is unchanged (pixel-identical with the mist on and off; the 2.5D view with it off too).
+Known: a reveal's animation in the first-person view draws its raised sheets over the circle (the picture holds the reveal); in the
+down horizon the far raised mist shows above the horizon as a soft band (the unexplored land is there, beyond the bend).
+The black rectangles past the map stay black; the minimap keeps its black (`minimap::draw_fog` is not used
 for it). Past the map's edges the edge fog takes the mist's colour (`terrain::edge_fog_colour_for`), so they meet.
 With the mist on, the flat view draws `draw_daylight` after the flat fog, so the mist takes the night's tint; off,
 the order is as above. The ground cache (`ground_key`) and the battle backdrop key hold the setting.

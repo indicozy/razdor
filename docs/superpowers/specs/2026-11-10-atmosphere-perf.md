@@ -108,3 +108,31 @@ Xvfb. Source CSVs and crops live outside git (`/home/indicozy/.cache/razdor-scra
 
 The hero's torch glow is skipped in the first-person eyes camera (`eyes_cam`), so it no longer floats in
 front of the lens. Armies and towns keep their glows.
+
+## Mist in 3D (raised sheets and frontier banks)
+
+The tilted views now draw the mist as raised sheets (`RAZDOR_MIST_RAISED`: 3 on the desktop, 2 on a phone)
+and frontier banks (`RAZDOR_MIST_BANKS`: at most 300 on the desktop, 120 on a phone). The flat view is
+unchanged (pixel-identical with the mist on and off). Method: Xvfb with software GL, pinned to CPUs 8-19,
+`RAZDOR_PROFILE_FRAMES` CSV, 200 frames of map `РК1-Начало пути` at 1280x800, noon, 2.5D yaw 45. Medians of
+the probe's CPU work (`work_ms`, the frame's build time) per run; the wall total (`total_ms`) is the
+software rasteriser's share too and swings by tens of ms between runs of one build, so it is not a cost
+measure here. Two repeats each:
+
+| configuration | work_ms, run 1 | work_ms, run 2 |
+|---|---|---|
+| base (before), desktop | 1.03 | 1.18 |
+| new, desktop (3 raised, 300 banks) | 3.19 | 3.58 |
+| base (before), phone density (`RAZDOR_DP=2.625`) | 1.19 | 1.25 |
+| new, phone density (2 raised, 120 banks) | 3.22 | 3.81 |
+| new, phone density, banks off | 1.61 | 1.73 |
+
+Reading: the banks cost about 1.9 ms of CPU build per frame on both (one standing draw and material switch
+each); the raised sheets about 0.4 ms (their fill is the rest of the wall-time difference, which software GL
+cannot price against a phone GPU). The flat view and the first-person view's CPU build are unchanged within
+noise (flat work 0.6 ms either build). A single run once read 16 ms on the phone density; it did not repeat
+(two later runs at 3.2 and 3.8 ms), and it is noted here as the noise the matrix above is measured against.
+
+Not measured: the phone's GPU fill (no phone here; the owner's device is the test). If a phone run shows
+the raised sheets too costly, `RAZDOR_MIST_RAISED=1` keeps one (the sheet at 0.35 cells) and the banks
+alone carry the wall.
