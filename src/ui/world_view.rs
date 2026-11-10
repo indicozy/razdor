@@ -1578,7 +1578,9 @@ fn near_fade_limit(cam: &Camera) -> f32 {
     let hero = NEAR_LIMIT.with(std::cell::Cell::get);
     match trailer() {
         Some(t) => t.near.min(hero),
-        None if hero.is_finite() => FP_NEAR_SHARE * hero,
+        // Only the first-person view fades by the hero's distance: a saved first-person setting
+        // (which players cannot change, `first_person_visible`) must not fade the 2.5D sprites.
+        None if hero.is_finite() && first_person() => FP_NEAR_SHARE * hero,
         None => 0.0,
     }
 }
@@ -2939,6 +2941,8 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     let shade_of = |foot: Vec2| shade.as_ref().map_or(1.0, |s| s.at(cam, foot));
     // The trailer's near fade stops at the hero's distance, and the first-person view's is half of
     // it (see `NEAR_LIMIT`): set before any sprite of the pass, the hills included.
+    // Reset first, so that no limit from an earlier pass that stopped early can reach this one.
+    NEAR_LIMIT.with(|l| l.set(f32::INFINITY));
     if trailer().is_some() || first_person() {
         if let Some(d) = foot_distance(cam, cam.to_screen(game.display_pos())) {
             NEAR_LIMIT.with(|l| l.set(d));
@@ -5625,6 +5629,32 @@ mod tilt_tests {
                 }
             }
         }
+    }
+
+    /// A saved first-person setting (a settings file with `map_first_person`, `map_horizon` and `map_eyes`
+    /// on, as a test build wrote it) does nothing without the developer switch: the 2.5D view keeps every
+    /// standing sprite's near fade off at any yaw, even with the hero's distance set for the pass (the
+    /// owner's report, 2026-11-10: the sprites between the camera and the hero were gone when turned).
+    /// The tests run with `RAZDOR_VIEW` unset, as a player's game does.
+    #[test]
+    fn the_saved_first_person_settings_leave_the_25d_sprites_whole() {
+        let game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        set_tilt_view(true);
+        set_first_person(true);
+        set_horizon(true);
+        set_eyes(true);
+        assert!(!first_person_visible() && !first_person() && !eyes_view() && !horizon());
+        // The pass's hero distance is set, as `draw_world_in` sets it in the first-person view.
+        NEAR_LIMIT.with(|l| l.set(12.0));
+        for yaw in [0.0, 90.0, 180.0, 270.0] {
+            let cam = camera(&game, Some((view25::PITCH_DEFAULT, yaw)));
+            assert_eq!(near_fade_limit(&cam), 0.0, "yaw {yaw}: the 2.5D sprites do not fade by the hero's distance");
+        }
+        NEAR_LIMIT.with(|l| l.set(f32::INFINITY));
+        set_tilt_view(false);
+        set_first_person(false);
+        set_horizon(false);
+        set_eyes(false);
     }
 
     /// The first-person camera over the middle of `game`'s map, built as [`Camera::looking_in`]
