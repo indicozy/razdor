@@ -36,13 +36,17 @@ path, AI or save change. Analysis: `2026-11-10-shadows-perf-analysis.md`.
 
 ## 2. Light sources
 
-- **Windows, doors, gates** (S6: offline detector only): an open-vocabulary detector (OWLv2 or
-  Grounding DINO) on the RTX 4060 marks windows, doors and gates on every building sprite of the
-  base game, Community Update and Evolution; only boxes ship, as numbers next to the card data,
-  keyed by the sprite hash. The owner reviews a contact sheet before anything is built on them.
-  Mod buildings without data get no window lights.
-- At night each window glows warm (an emissive patch shaped by its box, over the sprite's own
-  darker pixels); the brightest become point lights; gates get torch lights.
+Revised by the owner (2026-11-10): no window detection needed for lights.
+
+- **One light per building**: a single point light at the centre of the building's footprint,
+  radius about the sprite's own size. It lights the ground and neighbours, casts the light shadows
+  (§3) and rakes the relief (§4). Works for every building, mods included.
+- **An emissive layer on top**: at dusk and night a second pass over each building sprite adds warm
+  light where the picture's own pixels look like openings (dark, low-saturation pixels inside the
+  opaque body; never the painted-shadow band), computed in the shader from the sprite itself — no
+  new art, nothing derived ships.
+- The detector data (`data/lights/objects.json`, `tools/depth/detect_points.py`) is optional: the
+  living map's chimneys, flags and mill sails (§5), and an optional boost of known windows.
 - **The hero and every army carry a torch**: about an arm's length (≈ 0.4 of the figure's height)
   from the head, forward along the figure's facing, about 60° above horizontal; it swings with
   the heading and, in 2.5D, follows the screen facing as the sprite row does. Its pool leads the
