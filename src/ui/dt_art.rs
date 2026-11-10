@@ -80,33 +80,6 @@ impl RectTable {
     }
 }
 
-#[cfg(test)]
-mod rect_table_tests {
-    use super::*;
-
-    fn r(x: f32) -> Rect {
-        Rect::new(x, x + 1.0, 2.0, 3.0)
-    }
-
-    #[test]
-    fn the_table_gives_what_a_map_gives_for_every_key_the_atlas_asks_for() {
-        // A duplicate key (the last one wins, as a map's insert does), a key past 8 bits (never asked for).
-        let entries = vec![((0u32, 3u32, 7u32), r(1.0)), ((1, 0, 0), r(2.0)), ((0, 3, 7), r(3.0)), ((0, 300, 1), r(4.0)), ((2, 0, 0), r(5.0)), ((0, 255, 255), r(6.0))];
-        let map: HashMap<(u32, u32, u32), Rect> = entries.iter().copied().collect();
-        let table = RectTable::from_entries(entries.iter().copied());
-        for section in 0..2 {
-            for cat in 0..256 {
-                for idx in 0..256 {
-                    assert_eq!(table.get(section, cat, idx), map.get(&(section, cat, idx)).copied(), "({section}, {cat}, {idx})");
-                }
-            }
-        }
-        assert_eq!(table.get(0, 3, 7), Some(r(3.0)));
-        assert_eq!(table.get(0, 255, 255), Some(r(6.0)));
-        assert_eq!(table.get(2, 0, 0), None, "a section the atlas never asks for");
-    }
-}
-
 impl Atlas {
     /// Sprite of a `.DTm` map object (class, sprite id).
     pub fn decoration(&self, class: u8, sprite: u8) -> Option<Rect> {
@@ -500,5 +473,32 @@ impl DtArt {
             }
         }
         depth::set_unknown(pending.len() + service.in_flight());
+    }
+}
+
+#[cfg(test)]
+mod rect_table_tests {
+    use super::*;
+
+    fn r(x: f32) -> Rect {
+        Rect::new(x, x + 1.0, 2.0, 3.0)
+    }
+
+    #[test]
+    fn the_table_gives_what_a_map_gives_for_every_key_the_atlas_asks_for() {
+        // A duplicate key (the last one wins, as a map's insert does), a key past 8 bits (never asked for).
+        let entries = [((0u32, 3u32, 7u32), r(1.0)), ((1, 0, 0), r(2.0)), ((0, 3, 7), r(3.0)), ((0, 300, 1), r(4.0)), ((2, 0, 0), r(5.0)), ((0, 255, 255), r(6.0))];
+        let map: HashMap<(u32, u32, u32), Rect> = entries.iter().copied().collect();
+        let table = RectTable::from_entries(entries.iter().copied());
+        for section in 0..2 {
+            for cat in 0..256 {
+                for idx in 0..256 {
+                    assert_eq!(table.get(section, cat, idx), map.get(&(section, cat, idx)).copied(), "({section}, {cat}, {idx})");
+                }
+            }
+        }
+        assert_eq!(table.get(0, 3, 7), Some(r(3.0)));
+        assert_eq!(table.get(0, 255, 255), Some(r(6.0)));
+        assert_eq!(table.get(2, 0, 0), None, "a section the atlas never asks for");
     }
 }

@@ -3655,7 +3655,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                     let origin = building_sprite_origin(l, r.w, r.h, cam);
                     let f = card_foot(origin, zoom, card);
                     let outlined = hover.is_some_and(|h| h.building == Some(*i));
-                    standing(cam, f, f, shade_of(f), || {
+                    standing(cam, f, f, shade_of(f), Rect::new(origin.x, origin.y, r.w * zoom, r.h * zoom), || {
                         if *k == 0 {
                             frame_probe::sprite(r.w * zoom, r.h * zoom);
                         }
