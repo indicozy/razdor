@@ -44,6 +44,8 @@ Razdor plays the original game's scenarios using its original rules. Below is wh
 * **2.5D map view** in additional settings ("Map view", off by default): the map is tilted, and the figures stand on the ground. Q and E turn the map 45°; on a phone, the two-finger turn is switched on by the "Two-finger turn" setting. A compass button next to the bottom bar appears while the map is turned, and brings it back to north up. "Sprite size" (1×, 1.5× or 2×) is 1.5× by default.
 * **First-person map view** in the same "Map view" row: a low camera behind the hero or at his eyes, with the far ground rolling up or curving down to a horizon (the "Far ground" and "Camera" rows). More: [First-person view](/razdor/wiki/en/differences/first-person/).
 * **Extend the map past its edges** in additional settings (off, as in the original, where the area past the edges is black): a short stretch of ground goes on past the map's edges, then the same black fog as the unexplored map. Only the view changes: rules and paths stay as they are.
+* **Map resolution** on the "Map" tab (100%, 75% or 50%, 100% by default): the map is drawn at a lower resolution and stretched over the screen, so a weak phone draws it faster; the bottom bar, minimap, windows and text stay sharp.
+* **Frame rate cap** on the "Map" tab ("No cap", 30 or 60, "No cap" by default): the game draws no more than that many frames a second, for less heat and battery use.
 
 ## Sound
 

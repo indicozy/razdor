@@ -83,6 +83,16 @@ The map's bottom bar has a size setting: **"Bottom bar size"** on the **"Screen"
 The bottom bar size only changes the layout when the phone lies sideways. Held upright, the bar is the same at every value.
 :::
 
+## A weak phone
+
+If the map stutters, these rows on the **"Map"** tab of the settings help:
+
+* **"Sprite size"** (in the 2.5D view): **1×**. Trees and houses are smaller, less work for the GPU.
+* **"Map resolution"**: **75%** or **50%**. The map is a little softer but drawn faster; the bars and text stay sharp.
+* **"Frame rate cap"**: **30**. Frames come more evenly and the phone runs cooler.
+
+Screen recording itself lowers the FPS a lot on a weak phone: check the speed without it.
+
 ## Razdor Updates
 
 Razdor on Android updates itself just like on a PC: when a new version is released, a window offers the update along with a changelog. **"Update"** downloads the new APK, verifies it, and passes it to the Android installer; you then confirm the installation. An already downloaded APK will not be downloaded again, and old versions are deleted after installation. For more details: [Updates](/razdor/wiki/en/start/updates/).
