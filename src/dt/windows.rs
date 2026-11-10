@@ -34,11 +34,14 @@ type Kept = (Vec<usize>, Vec<(i32, i32)>);
 const MIN_CONTRAST: f32 = 0.12;
 /// Roofs: the upper share of the picture's opaque height, and how close a hue must be to the roof's to be
 /// one (degrees), with at least this saturation.
-const ROOF_ZONE: f32 = 0.45;
+const ROOF_ZONE: f32 = 0.30;
 const ROOF_HUE_TOL: f32 = 25.0;
-const ROOF_SAT_MIN: f32 = 0.15;
-/// A roof speck is brighter than this (a window of the upper wall is darker).
-const ROOF_MEAN_MIN: f32 = 0.18;
+/// Warm hues (degrees from red, the tile, brick and straw range) that count as roof colour when saturated.
+const ROOF_WARM_MAX: f32 = 75.0;
+/// A dull roof: a warm ring of at least this saturation and at most this luminance.
+const ROOF_DULL_SAT: f32 = 0.20;
+const ROOF_DULL_LUM: f32 = 0.32;
+const ROOF_SAT_MIN: f32 = 0.30;
 /// The halo: the value of the ring around a kept opening (0.35 of 255), and the opening's (1.0).
 pub const HALO: u8 = 90;
 pub const LIT: u8 = 255;
@@ -88,7 +91,7 @@ pub fn emissive(img: &Image, boxes: &[Rect4]) -> Vec<u8> {
     let (ymin, ymax) = (0..w * h).filter(|&i| opaque[i]).fold((usize::MAX, 0usize), |(lo, hi), i| (lo.min(i / w), hi.max(i / w)));
     let upper = ymin + ((ymax - ymin + 1) as f32 * ROOF_ZONE) as usize;
     let roof = roof_hue(&img.rgba, w, &opaque, upper);
-    let ctx = Ctx { w, h, opaque: &opaque, lum: &lum, rgba: &img.rgba, roof, upper };
+    let ctx = Ctx { w, h, opaque: &opaque, lum: &lum, rgba: &img.rgba, roof };
     let cand: Vec<bool> = (0..w * h).map(|i| opaque[i] && lum[i] < median - DARK_BELOW_MEDIAN).collect();
 
     let mut seen = vec![false; w * h];
@@ -212,20 +215,6 @@ fn judge(comp: &[usize], ctx: &Ctx, boxes: &[Rect4]) -> Option<Vec<(i32, i32)>> 
     }
     let mean = comp.iter().map(|&i| lum[i]).sum::<f32>() / area as f32;
     // A roof: the component's colour is the roof's, and it lies in the roof's zone (the top of the picture).
-    // Roof shading is mid-dark; a window is darker than the roof tiles and so is never a roof speck.
-    if !boxed && miny < ctx.upper && mean >= ROOF_MEAN_MIN {
-        if let Some(roof) = ctx.roof {
-            let (r, g, b) = comp.iter().fold((0.0f32, 0.0f32, 0.0f32), |(r, g, b), &i| {
-                let p = &ctx.rgba[i * 4..i * 4 + 3];
-                (r + f32::from(p[0]), g + f32::from(p[1]), b + f32::from(p[2]))
-            });
-            let (hue, sat, _) = hsv(r / (255.0 * area as f32), g / (255.0 * area as f32), b / (255.0 * area as f32));
-            if sat >= ROOF_SAT_MIN && hue_dist(hue, roof) <= ROOF_HUE_TOL {
-                return None;
-            }
-        }
-    }
-
     // The outer ring: the pixels 4-adjacent to the component and not part of it, once each.
     let member = |x: i32, y: i32| x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h && cand_in(comp, w, x as usize, y as usize);
     let mut ring: Vec<(i32, i32)> = Vec::new();
@@ -239,6 +228,39 @@ fn judge(comp: &[usize], ctx: &Ctx, boxes: &[Rect4]) -> Option<Vec<(i32, i32)>> 
     }
     ring.sort_unstable();
     ring.dedup();
+
+    // A roof: the ring around the component is roof-coloured (saturated, the hue of the picture's top band, or any
+    // warm tile hue). Position never decides, and a detector box does not save one: roofs never glow. A stone ring
+    // (grey, beige, blue) always passes, so a castle's arched windows light.
+    {
+        if let Some(roof) = ctx.roof {
+            let (mut r, mut g, mut b, mut n, mut lum_sum) = (0.0f32, 0.0f32, 0.0f32, 0u32, 0.0f32);
+            for &(x, y) in &ring {
+                if x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h && opaque[y as usize * w + x as usize] {
+                    let j = y as usize * w + x as usize;
+                    let p = &ctx.rgba[j * 4..][..3];
+                    r += f32::from(p[0]);
+                    g += f32::from(p[1]);
+                    b += f32::from(p[2]);
+                    lum_sum += lum[j];
+                    n += 1;
+                }
+            }
+            if n > 0 {
+                let count = n as f32;
+                let (hue, sat, _) = hsv(r / (count * 255.0), g / (count * 255.0), b / (count * 255.0));
+                // Roof colour: saturated, and either the picture's roof hue or any warm tile, brick or straw hue (a
+                // village sprite mixes several roofs, so one hue can miss some of them). Stone is not saturated.
+                let warm = hue <= ROOF_WARM_MAX || hue >= 360.0 - ROOF_WARM_MAX;
+                // A shaded roof is dull (saturation 0.12 and up) and darker than stone (luminance under 0.45, where
+                // a castle's wall rings are bright).
+                let dull_roof = warm && sat >= ROOF_DULL_SAT && lum_sum / count <= ROOF_DULL_LUM;
+                if (sat >= ROOF_SAT_MIN && (warm || hue_dist(hue, roof) <= ROOF_HUE_TOL)) || dull_roof {
+                    return None;
+                }
+            }
+        }
+    }
 
     // A ring pixel is bright when it is picture (opaque) and brighter than the component by RING_BRIGHTER.
     let mut transparent = 0usize;
@@ -290,10 +312,8 @@ struct Ctx<'a> {
     opaque: &'a [bool],
     lum: &'a [f32],
     rgba: &'a [u8],
-    /// The roof's dominant hue (degrees), if the top of the picture has enough saturated colour.
+    /// The roof's dominant hue (degrees): the top band's saturated colour, if there is enough of it.
     roof: Option<f32>,
-    /// The first row below the roof zone.
-    upper: usize,
 }
 
 /// The roof's hue: the most common 30° hue bucket (its centre) among the saturated opaque pixels above
@@ -491,7 +511,7 @@ mod tests {
         assert_eq!(lit(&out, 24, 6, 4), 0, "the roof speck is rejected");
         assert!(lit(&out, 24, 6, 16) >= 200, "the wall window is kept");
         let boxed = emissive(&img, &[Rect4 { x0: 4, y0: 2, x1: 9, y1: 7 }]);
-        assert!(lit(&boxed, 24, 6, 4) >= 200, "a detector box on the roof speck keeps it");
+        assert_eq!(lit(&boxed, 24, 6, 4), 0, "a roof never glows, even under a detector box");
     }
 
     #[test]
