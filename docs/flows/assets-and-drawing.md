@@ -472,6 +472,14 @@ it every frame from `display::follow_settings`; `RAZDOR_LIVE_WATER=1` turns it o
   the sky's colour (`daylight::sky_rgb`: day, dusk and dawn warmth, moonlight at night; the day's with the lighting
   off) by `0.18` of its mask. Only the full pass and the cache's overlay draw it (`Mode::Full`, `Mode::Overlay`);
   the cached ground stays as it was. `Clock` is the water clock.
+- **Rivers flow** (`rules::flow::flow_field`, a best guess, pure): a water cell flows toward its neighbour with the
+  smallest distance to the large water (the interior of a lake or the sea, or water on the map's border; the
+  interior stands still). A piece of water with no large water in it (landlocked) flows away from its cell nearest
+  a hill or mountain (classes `HILLS` to `DARK_MOUNTAINS`), or from its first cell when the map has none. The field
+  is built per map (`world_view::map_flow`, kept while the surface codes and the hills stay) and drawn as the `Flow`
+  texture (`terrain::flow_texels`: rg = 128 + 127 · flow, so still water is exactly zero). The shader scrolls the
+  ripple and foam noise by `-flow · Clock · 0.35` on the water. A lake's rim cells flow inward (the same rule), so
+  coasts drift toward the open water; that is part of the best guess.
 - **Wakes** (`world_view::draw_wakes`, `water::Wake`): per sailing army in motion (and the hero's galley), its last
   12 display positions, one every 0.12 s, drawn on the ground behind it as soft white ellipses (the glow's texture,
   additive) fading from alpha 0.35 to 0 over 1.5 s and growing from 0.3 to 0.7 cell. Explored cells only. Recorded per

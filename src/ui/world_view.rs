@@ -2355,7 +2355,7 @@ pub(super) fn draw_wrapped(tex: &Texture2D, dest: Rect, src: Vec2, src_size: Vec
 
 /// The terrain of the map as the blended layer (`terrain::TerrainLayer`): the quad over the drawn
 /// ground, in `mode` (see [`terrain::Mode`]). `cam` is the 2D space ([`in_view`]).
-fn terrain_quad(game: &Game, layer: &terrain::TerrainLayer, cam: &Camera, mode: terrain::Mode) {
+fn terrain_quad(game: &Game, layer: &terrain::TerrainLayer, cam: &Camera, mode: terrain::Mode, flow: &[(f32, f32)]) {
     let map = &game.world.map;
     // The map area in view, in world units (cells span ±½ around their centres).
     let rh = cam.grid.row_height();
@@ -2372,7 +2372,7 @@ fn terrain_quad(game: &Game, layer: &terrain::TerrainLayer, cam: &Camera, mode: 
         }
         let view = vec4(tl.x, tl.y / rh, br.x, br.y / rh);
         // The edge's mist is fog: the trailer's no-fog switch leaves the ground going on past the edge.
-        layer.draw(map.surface_codes(), (map.w as u32, map.h as u32), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(PX, PX * rh), Some((crate::ui::clock::now() * 1000.0) as i64), extend && !trailer_nofog(), mode);
+        layer.draw(map.surface_codes(), (map.w as u32, map.h as u32), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(PX, PX * rh), Some((crate::ui::clock::now() * 1000.0) as i64), extend && !trailer_nofog(), mode, flow);
     }
 }
 
@@ -2385,6 +2385,9 @@ fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool) {
     let Some(layer) = art.and_then(|a| a.terrain_layer()).filter(|_| cam.grid == Grid::Square8) else {
         return in_view(cam, |c| ground(c, || draw_terrain(game, art, c)));
     };
+    // «Живая вода»: the rivers' flow of the map, while the water is alive (else still).
+    let flow = map_flow(game);
+    let flow: &[(f32, f32)] = flow.as_deref().map_or(&[], |f| f.as_slice());
     super::gpu_probe::timed(|| {
         // A bent view draws its ground in `draw_world`'s picture (`ground_in_bent`), never here;
         // the cache's fill would nest inside that picture, so a bent view is not cached.
@@ -2393,14 +2396,48 @@ fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool) {
         match cached {
             Some((rt, fill)) => {
                 if fill {
-                    super::render_cache::fill(&rt, || in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Ground))));
+                    super::render_cache::fill(&rt, || in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Ground, flow))));
                 }
-                in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Cached)));
-                in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay)));
+                in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Cached, flow)));
+                in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow)));
             }
-            None => in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Full))),
+            None => in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Full, flow))),
         }
     });
+}
+
+local! {
+    /// The rivers' flow of the map (`rules::flow`) and the key it was made for: the map's size, its
+    /// surface codes and its hills (the objects that stand on the land).
+    static FLOW: std::cell::RefCell<Option<(u64, std::rc::Rc<Vec<(f32, f32)>>)>> = std::cell::RefCell::new(None);
+}
+
+/// The rivers' flow of the game's map, kept while the map stays; `None` while the water is still
+/// (the setting off), when the flow is not drawn.
+fn map_flow(game: &Game) -> Option<std::rc::Rc<Vec<(f32, f32)>>> {
+    if !water::live() {
+        return None;
+    }
+    use std::hash::{Hash, Hasher};
+    let map = &game.world.map;
+    let key = {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (map.w, map.h, map.surface_codes()).hash(&mut h);
+        for o in map.objects.iter().filter(|o| (object_class::HILLS..=object_class::DARK_MOUNTAINS).contains(&o.class)) {
+            (o.tile, o.class).hash(&mut h);
+        }
+        h.finish()
+    };
+    Some(FLOW.with_borrow_mut(|c| {
+        if let Some((k, f)) = c.as_ref() {
+            if *k == key {
+                return f.clone();
+            }
+        }
+        let f = std::rc::Rc::new(razdor::rules::flow::flow_field(map));
+        *c = Some((key, f.clone()));
+        f
+    }))
 }
 
 /// The key of the cached ground: everything the ground pass reads (the screen, the camera and

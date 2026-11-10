@@ -7,6 +7,7 @@ pub mod content;
 pub mod custom;
 pub mod custom_code;
 pub mod economy;
+pub mod flow;
 pub mod events;
 pub mod experience;
 pub mod fog;

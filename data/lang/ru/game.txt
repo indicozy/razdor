@@ -532,7 +532,7 @@ Razdor's: unexplored land is drifting mist instead of black. Style only. = Не�
 
 # Advanced settings: moving water (Razdor's, off by default)
 Moving water = Живая вода
-Razdor's: the water ripples, foam runs along the shores and ships leave a wake. Style only. = Вода на карте рябит, у берегов бежит пена, за кораблями остаётся след. Только вид.
+Razdor's: the water ripples, foam runs along the shores, rivers flow and ships leave a wake. Style only. = Вода на карте рябит, у берегов бежит пена, реки текут, за кораблями остаётся след. Только вид.
 
 # Advanced settings: arranging the army outside battle
 Army arrangement = Расстановка армии

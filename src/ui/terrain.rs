@@ -439,11 +439,23 @@ struct MapTextures {
     flow: Texture2D,
 }
 
-/// A map's surface codes, their textures and their size, kept while the codes stay the same.
+/// A map's surface codes, their flow, their textures and their size, kept while they stay the same.
 struct CellTextures {
     codes: Vec<u8>,
+    flow: Vec<(f32, f32)>,
     size: (u32, u32),
     tex: MapTextures,
+}
+
+/// One cell's flow component as a `Flow` texel byte: 128 + 127 · v (so zero is exactly 128).
+fn flow_byte(v: f32) -> u8 {
+    (128.0 + 127.0 * v.clamp(-1.0, 1.0)).round() as u8
+}
+
+/// The rivers' flow as the `Flow` texture's RGBA8 bytes, one texel per cell (row by row): red and
+/// green are the flow's x and y as [`flow_byte`]; alpha 255.
+pub fn flow_texels(flow: &[(f32, f32)]) -> Vec<u8> {
+    flow.iter().flat_map(|&(x, y)| [flow_byte(x), flow_byte(y), 128, 255]).collect()
 }
 
 /// The live water's mask of a map's surface codes, as RGBA8 bytes, one texel per cell (row by row):
@@ -615,11 +627,11 @@ impl TerrainLayer {
     }
 
     /// The textures of a `w`×`h` map (the codes, the neighbours, the water mask and the flow),
-    /// rebuilt only when the codes change.
-    fn cells(&self, codes: &[u8], w: u32, h: u32) -> MapTextures {
+    /// rebuilt only when the codes or the flow change.
+    fn cells(&self, codes: &[u8], w: u32, h: u32, flow: &[(f32, f32)]) -> MapTextures {
         let mut cache = self.cells.borrow_mut();
         if let Some(c) = cache.as_ref() {
-            if c.size == (w, h) && c.codes == codes {
+            if c.size == (w, h) && c.codes == codes && c.flow.as_slice() == flow {
                 return c.tex.clone();
             }
         }
@@ -630,11 +642,15 @@ impl TerrainLayer {
         neighbours.set_filter(FilterMode::Nearest);
         let mask = Texture2D::from_rgba8(w as u16, h as u16, &water_mask_texels(codes));
         mask.set_filter(FilterMode::Linear);
-        // Zero flow: rg = ½ (the flow is built from the map's objects in the next step).
-        let flow = Texture2D::from_rgba8(1, 1, &[128, 128, 128, 255]);
-        flow.set_filter(FilterMode::Linear);
-        let tex = MapTextures { cells, neighbours, mask, flow };
-        *cache = Some(CellTextures { codes: codes.to_vec(), size: (w, h), tex: tex.clone() });
+        // The flow: one texel per cell, or a single still texel without the field (rg = 128: zero).
+        let flow_tex = if flow.len() == codes.len() {
+            Texture2D::from_rgba8(w as u16, h as u16, &flow_texels(flow))
+        } else {
+            Texture2D::from_rgba8(1, 1, &[128, 128, 128, 255])
+        };
+        flow_tex.set_filter(FilterMode::Linear);
+        let tex = MapTextures { cells, neighbours, mask, flow: flow_tex };
+        *cache = Some(CellTextures { codes: codes.to_vec(), flow: flow.to_vec(), size: (w, h), tex: tex.clone() });
         tex
     }
 
@@ -667,9 +683,10 @@ impl TerrainLayer {
     /// `cell_px` is the texture pixels per cell (the textures' scale). `water_ms` is the clock
     /// (ms) that animates the water, `None` for still water. `edge`: the ground goes on past the
     /// map's edges: the ground continues, then the animated fog ([`fog_opacity`]); `view` may
-    /// reach past the map then. The fog's clock is `water_ms`. `mode`: see [`Mode`].
+    /// reach past the map then. The fog's clock is `water_ms`. `mode`: see [`Mode`]. `flow`: the
+    /// rivers' flow per cell (`rules::flow::flow_field`), empty for still water.
     #[allow(clippy::too_many_arguments)]
-    pub fn draw(&self, codes: &[u8], (w, h): (u32, u32), dest: Rect, view: Vec4, cell_px: Vec2, water_ms: Option<i64>, edge: bool, mode: Mode) {
+    pub fn draw(&self, codes: &[u8], (w, h): (u32, u32), dest: Rect, view: Vec4, cell_px: Vec2, water_ms: Option<i64>, edge: bool, mode: Mode, flow: &[(f32, f32)]) {
         if w == 0 || h == 0 || w + 2 > u16::MAX as u32 || h + 2 > u16::MAX as u32 || codes.len() != (w * h) as usize {
             return;
         }
@@ -682,7 +699,7 @@ impl TerrainLayer {
         if super::world_view::trailer_active() {
             self.atlas.set_filter(FilterMode::Nearest);
         }
-        let maps = self.cells(codes, w, h);
+        let maps = self.cells(codes, w, h, flow);
         gl_use_material(m);
         if new {
             m.set_texture("Neighbours", maps.neighbours.clone());
@@ -907,6 +924,15 @@ mod tests {
     fn with_the_mist_the_edge_fog_is_the_mists_colour() {
         // «Туман вместо черноты»: the edge fog takes the mist's colour, so it meets the mist with no seam.
         assert_eq!(edge_fog_colour_for(true), crate::ui::mist::MIST_RGB);
+    }
+
+    #[test]
+    fn the_flow_texels_keep_still_water_at_128_and_the_ends_at_the_bytes_0_and_255() {
+        assert_eq!(flow_texels(&[(0.0, 0.0), (1.0, -1.0)]), vec![128, 128, 128, 255, 255, 1, 128, 255]);
+        // The shader's decode of a byte b is (b · 255 - 128) / 127 for b / 255: zero is exact.
+        let back = |b: u8| (b as f32 / 255.0 * 255.0 - 128.0) / 127.0;
+        assert_eq!(back(128), 0.0);
+        assert!((back(255) - 1.0).abs() < 1e-6 && (back(1) + 1.0).abs() < 1e-6);
     }
 
     #[test]
