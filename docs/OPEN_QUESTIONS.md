@@ -8,15 +8,19 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
-- **The living map's sails never turn, and the castle banners never wave** (2026-11-11, «Живая карта»). The
-  pixel check (`living::moves`: sails under 55 % opaque, quadrant-balanced, hub near the centre; flags at most 70 %
-  opaque) rejects every sails box of the install: the real windmills' boxes hold their roofs (50 to 63 % opaque),
-  and the wheel-and-frame false positive is lopsided. The big castle's blue-white banners are solid rectangles
-  (100 % opaque), so they are figure-sized by that test and stay still; the two small pennants that pass
-  (`49fd1883291866c7`, `2ff46ece6b52fe9f`) still wave. Owner's call: loosen the thresholds (they would also pass
-  the roofs), or ask the detector for tighter sails boxes, or drop the test for flags. Not measured: the phones'
-  frame cost with the smoke (4 puffs a chimney). The smoke takes the map's daylight tint through the map's own tint
-  only (the colour is `living::SMOKE_RGB`, a parameter, not yet hooked to any night colour).
+- **The windmill's sails do not turn on any windmill checked by eye** (2026-11-11, «Живая карта»). The depth cut
+  gives a thin sails card that the sails box holds to three sprites (`21d57cc1cf16b388`, `a2e856d2522fe2c2`,
+  `ab998a24a640b370`); `f2622fb743902ba8` is just over the size limit (its card is 2.03 times its box). The two
+  windmill-like ones were not found on screen in the maps checked. The one that turns on screen (`ab998…`, the Trein
+  estuary top) turns a small card beside a well-like frame, not sails. The village mill `1092c38902aa05da` has no
+  thin card: its blades sit in a house-sized card, so it stays still. Needs a real windmill checked by eye, or a new
+  cut.
+- **The castle banners wave on a palette rule, not a variance rule** (2026-11-11). Their stripes are busy (60 to 110
+  colours at 4 bits, luminance spread 56 to 84), so a variance test rejects them; the palette (blue or grey, at least
+  half the opaque pixels, fill at least 0.75) passes 7 of the 9 installed banners and rejects a figure with skin and
+  gold. The rule is tuned on those banners and checked by frame difference, not by eye on each one. Not measured: the
+  phones' frame cost with the smoke (4 puffs a chimney). The smoke takes the map's daylight tint through the map's own
+  tint only (the colour is `living::SMOKE_RGB`, a parameter, not yet hooked to any night colour).
 
 - **The depth model's cards are not checked by eye, and the phones are not measured** (2026-11-10,
   atmosphere part 2). Known: the engine's 266 px and 518 px cuts run (the parity run of part 1,

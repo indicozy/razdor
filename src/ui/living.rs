@@ -9,6 +9,7 @@
 
 use macroquad::prelude::*;
 use razdor::dt::gfx::Image;
+use razdor::dt::cards::Card;
 use razdor::dt::lights::{Kind, Point};
 use razdor::local;
 
@@ -238,10 +239,12 @@ pub fn sail_angle(now: f64, phase: f32) -> f32 {
     turn as f32 + phase
 }
 
-/// A flag's sideways displacement in sprite pixels at `s` (0 at the pole, 1 at the free end) for a
-/// flag `width` pixels wide: the cloth's wave, its free end moving most.
-pub fn flag_sway(s: f32, now: f64, phase: f32, width: f32) -> f32 {
-    let amp = (0.06 * width).clamp(0.6, 2.0);
+/// A flag's sideways displacement in sprite pixels at `s` (0 at the pole, 1 at the free end): the
+/// cloth's wave, its free end moving most (3 px).
+pub fn flag_sway(s: f32, now: f64, phase: f32) -> f32 {
+    /// The free end's swing in sprite pixels (3 px at the 1× map).
+    const AMP: f32 = 3.0;
+    let amp = AMP;
     let t = ((now * std::f64::consts::TAU / FLAG_WAVE_SECS) % std::f64::consts::TAU) as f32;
     amp * s * (t - 3.0 * s + phase).sin()
 }
@@ -295,7 +298,7 @@ pub fn part_mesh(part: &Part, now: f64, src: Rect, tex: Vec2, origin: Vec2, zoom
             for i in 0..=cols {
                 let u = i as f32 / cols as f32;
                 let s = if pole_right { 1.0 - u } else { u };
-                let dx = flag_sway(s, now, phase, w);
+                let dx = flag_sway(s, now, phase);
                 for j in 0..=1 {
                     let v = j as f32;
                     let p = at(x0 + u * w + dx, y0 + v * h);
@@ -338,10 +341,41 @@ pub fn part_mesh(part: &Part, now: f64, src: Rect, tex: Vec2, origin: Vec2, zoom
     }
 }
 
-/// The sprite's pixels with the moving parts' areas cleared (alpha 0): a flag's box and a sails
-/// disc (kept inside the sprite). The parts are drawn over the cleared copy, so the still picture
-/// never shows under a moved one.
-pub fn cleared(img: &Image, parts: &[Part]) -> Image {
+/// A sails card that turns about its hub: its index among the sprite's cards, the card, the hub in
+/// sprite pixels and its phase.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Turning {
+    pub index: usize,
+    pub card: Card,
+    pub hub: [f32; 2],
+    pub phase: f32,
+}
+
+/// The mesh of a turning card at `now`: its outline turned about the hub, its texels where they are
+/// (the same layout as the card's own mesh: `src` the sprite's rectangle in a texture of `tex` texels,
+/// `origin` the sprite's top-left, `zoom` 2D units to a sprite pixel).
+pub fn turning_mesh(t: &Turning, now: f64, src: Rect, tex: Vec2, origin: Vec2, zoom: f32, color: Color) -> (Vec<Vertex>, Vec<u16>) {
+    let (sin, cos) = sail_angle(now, t.phase).sin_cos();
+    let [hx, hy] = t.hub;
+    let vertices = t
+        .card
+        .verts
+        .iter()
+        .map(|&(x, y)| {
+            let (dx, dy) = (x - hx, y - hy);
+            let (px, py) = (hx + dx * cos - dy * sin, hy + dx * sin + dy * cos);
+            let p = origin + vec2(px, py) * zoom;
+            let uv = vec2((src.x + x) / tex.x, (src.y + y) / tex.y);
+            Vertex::new(p.x, p.y, 0.0, uv.x, uv.y, color)
+        })
+        .collect();
+    (vertices, t.card.tris.clone())
+}
+
+/// The sprite's pixels with the moving parts' areas cleared (alpha 0): a flag's box, a sails
+/// disc (kept inside the sprite) and a turning card's pixels. The parts are drawn over the cleared
+/// copy, so the still picture never shows under a moved one.
+pub fn cleared(img: &Image, parts: &[Part], turning: Option<&Card>) -> Image {
     let mut out = img.clone();
     let (w, h) = (img.width as usize, img.height as usize);
     let mut clear = |hit: &dyn Fn(f32, f32) -> bool| {
@@ -358,6 +392,9 @@ pub fn cleared(img: &Image, parts: &[Part]) -> Image {
             Part::Flag { rect, .. } => clear(&|x, y| x >= rect[0] && x < rect[2] && y >= rect[1] && y < rect[3]),
             Part::Sails { disc, .. } => clear(&|x, y| (x - disc.hub[0]).powi(2) + (y - disc.hub[1]).powi(2) <= disc.radius * disc.radius),
         }
+    }
+    if let Some(card) = turning {
+        clear(&|x, y| card_contains(card, (x, y)));
     }
     out
 }
@@ -378,6 +415,12 @@ pub struct BoxLook {
 
 /// The look of the box `rect` of `img`, clamped to the sprite.
 pub fn box_look(img: &Image, rect: [f32; 4]) -> BoxLook {
+    box_look_where(img, rect, |_, _| false)
+}
+
+/// [`box_look`] over the box's pixels that `excluded` does not name (pixel centres, sprite pixels):
+/// the area and the opaque pixels count those left only.
+pub fn box_look_where(img: &Image, rect: [f32; 4], excluded: impl Fn(f32, f32) -> bool) -> BoxLook {
     let (w, h) = (img.width as usize, img.height as usize);
     let x0 = rect[0].max(0.0).floor() as usize;
     let y0 = rect[1].max(0.0).floor() as usize;
@@ -389,12 +432,15 @@ pub fn box_look(img: &Image, rect: [f32; 4]) -> BoxLook {
     let (mut sx, mut sy) = (0.0f64, 0.0f64);
     for y in y0..y1 {
         for x in x0..x1 {
+            let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+            if excluded(px, py) {
+                continue;
+            }
             look.area += 1;
             if img.rgba[(y * w + x) * 4 + 3] < 128 {
                 continue;
             }
             look.opaque += 1;
-            let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
             let q = usize::from(px >= centre.0) + 2 * usize::from(py >= centre.1);
             look.quadrants[q] += 1;
             sx += f64::from(px);
@@ -422,21 +468,132 @@ pub fn sails_look(look: &BoxLook) -> bool {
     coverage < 0.55 && balanced && near_hub
 }
 
-/// Whether a flag box's pixels look like cloth: not a figure-sized opaque blob, so at most 70 % of
-/// the box is opaque.
-pub fn cloth_look(look: &BoxLook) -> bool {
-    look.opaque > 0 && (look.opaque as f32 / look.area.max(1) as f32) <= 0.70
+/// Whether a flag box's pixels look like cloth: a rectangle (at least three quarters of the box
+/// opaque) whose opaque pixels are mostly blue or grey, as the castle's blue-and-white banners are
+/// (at least half). A figure is irregular in outline and has skin, gold and brown in it. Measured on
+/// the install's banners (the palette share is 0.22 to 0.95 there, the fill 1.00); a colour
+/// variance test rejects them, their stripes are busy.
+pub fn cloth_look(img: &Image, rect: [f32; 4]) -> bool {
+    let look = box_look(img, rect);
+    if look.opaque == 0 || look.area == 0 || (look.opaque as f32 / look.area as f32) < 0.75 {
+        return false;
+    }
+    let (w, h) = (img.width as usize, img.height as usize);
+    let (x0, y0) = (rect[0].max(0.0).floor() as usize, rect[1].max(0.0).floor() as usize);
+    let (x1, y1) = ((rect[2].ceil().max(0.0) as usize).min(w), (rect[3].ceil().max(0.0) as usize).min(h));
+    let (mut blue_grey, mut total) = (0usize, 0usize);
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let i = (y * w + x) * 4;
+            if img.rgba[i + 3] < 128 {
+                continue;
+            }
+            total += 1;
+            let (r, g, b) = (i32::from(img.rgba[i]), i32::from(img.rgba[i + 1]), i32::from(img.rgba[i + 2]));
+            let blue = b > r + 40 && b > g + 20;
+            let grey = r.max(g).max(b) - r.min(g).min(b) < 40;
+            blue_grey += usize::from(blue || grey);
+        }
+    }
+    total > 0 && blue_grey * 2 >= total
 }
 
-/// Whether a point's moving part is real: a sails box that looks like sails, a flag box that looks
-/// like cloth. Other kinds never move.
-pub fn moves(img: &Image, point: &Point) -> bool {
-    let look = box_look(img, point.rect);
-    match point.kind {
-        Kind::Sails => sails_look(&look),
-        Kind::Flag => cloth_look(&look),
-        _ => false,
+/// Whether a card's outline holds the sprite point `p` (inside one of its triangles).
+pub fn card_contains(card: &Card, p: (f32, f32)) -> bool {
+    let p = (p.0, p.1);
+    card.tris.chunks_exact(3).any(|t| {
+        let [a, b, c] = [t[0], t[1], t[2]].map(|i| card.verts[usize::from(i)]);
+        let side = |p1: (f32, f32), p2: (f32, f32)| (p.0 - p2.0) * (p1.1 - p2.1) - (p1.0 - p2.0) * (p.1 - p2.1);
+        let sides = [side(a, b), side(b, c), side(c, a)];
+        !(sides.iter().any(|&d| d < 0.0) && sides.iter().any(|&d| d > 0.0))
+    })
+}
+
+/// A card's bounding box area in sprite pixels, and its fill (the outline's triangles over that box).
+fn card_box(card: &Card) -> (f32, f32, f32, f32) {
+    let xs = card.verts.iter().map(|v| v.0);
+    let ys = card.verts.iter().map(|v| v.1);
+    let (x0, x1) = (xs.clone().fold(f32::MAX, f32::min), xs.fold(f32::MIN, f32::max));
+    let (y0, y1) = (ys.clone().fold(f32::MAX, f32::min), ys.fold(f32::MIN, f32::max));
+    (x0, y0, x1, y1)
+}
+
+/// The card whose depth cut is a thin, spoky piece that the box holds: its bounding box centre lies
+/// in the box (2 px grace), its fill is under 0.6 and its bounding box is at most twice the box's
+/// area (so a whole house card, whose outline spans the sprite, never counts). The one with the
+/// lowest fill wins.
+pub fn sails_card(cards: &[Card], rect: [f32; 4]) -> Option<usize> {
+    let box_area = ((rect[2] - rect[0]) * (rect[3] - rect[1])).max(1.0);
+    let mut best: Option<(usize, f32)> = None;
+    for (i, card) in cards.iter().enumerate() {
+        let (x0, y0, x1, y1) = card_box(card);
+        let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+        let inside = cx >= rect[0] - 2.0 && cx <= rect[2] + 2.0 && cy >= rect[1] - 2.0 && cy <= rect[3] + 2.0;
+        let bbox = ((x1 - x0) * (y1 - y0)).max(1.0);
+        if !inside || bbox > 2.0 * box_area {
+            continue;
+        }
+        let tri_area: f32 = card
+            .tris
+            .chunks_exact(3)
+            .map(|t| {
+                let [a, b, c] = [t[0], t[1], t[2]].map(|i| card.verts[usize::from(i)]);
+                ((b.0 - a.0) * (c.1 - a.1) - (c.0 - a.0) * (b.1 - a.1)).abs() / 2.0
+            })
+            .sum();
+        let fill = tri_area / bbox;
+        if fill < 0.6 && best.is_none_or(|(_, f)| fill < f) {
+            best = Some((i, fill));
+        }
     }
+    best.map(|(i, _)| i)
+}
+
+/// The roof card of a box: the card with the most opaque pixels inside the box (none without cards).
+pub fn roof_card(cards: &[Card], img: &Image, rect: [f32; 4]) -> Option<usize> {
+    let w = img.width as usize;
+    let (x0, y0) = (rect[0].max(0.0).floor() as usize, rect[1].max(0.0).floor() as usize);
+    let (x1, y1) = ((rect[2].ceil().max(0.0) as usize).min(img.width as usize), (rect[3].ceil().max(0.0) as usize).min(img.height as usize));
+    let mut counts = vec![0usize; cards.len()];
+    for y in y0..y1 {
+        for x in x0..x1 {
+            if img.rgba[(y * w + x) * 4 + 3] < 128 {
+                continue;
+            }
+            let p = (x as f32 + 0.5, y as f32 + 0.5);
+            for (i, card) in cards.iter().enumerate() {
+                if card_contains(card, p) {
+                    counts[i] += 1;
+                    break;
+                }
+            }
+        }
+    }
+    counts.iter().enumerate().filter(|(_, &c)| c > 0).max_by_key(|(_, &c)| c).map(|(i, _)| i)
+}
+
+/// How a box's moving part is made: a sails card of the depth cut that turns about its hub, or a
+/// sails box whose pixels (without the roof card's) look like sails and turn as a disc.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Sails {
+    Card { index: usize, hub: [f32; 2] },
+    Disc,
+}
+
+/// Whether a sails box moves, and how: the sails card when there is one (the hub is the box centre
+/// when it lies in the card's box, else the card's box centre), else the box's pixels outside the roof
+/// card, when they look like sails.
+pub fn sails_of(img: &Image, cards: &[Card], rect: [f32; 4]) -> Option<Sails> {
+    if let Some(index) = sails_card(cards, rect) {
+        let (x0, y0, x1, y1) = card_box(&cards[index]);
+        let centre = [(rect[0] + rect[2]) / 2.0, (rect[1] + rect[3]) / 2.0];
+        let inside = centre[0] >= x0 && centre[0] <= x1 && centre[1] >= y0 && centre[1] <= y1;
+        let hub = if inside { centre } else { [(x0 + x1) / 2.0, (y0 + y1) / 2.0] };
+        return Some(Sails::Card { index, hub });
+    }
+    let roof = roof_card(cards, img, rect).map(|r| &cards[r]);
+    let look = box_look_where(img, rect, |x, y| roof.is_some_and(|c| card_contains(c, (x, y))));
+    sails_look(&look).then_some(Sails::Disc)
 }
 
 // ----- Birds -----
@@ -593,10 +750,10 @@ mod tests {
     #[test]
     fn the_pole_side_stays_still_and_the_free_end_waves() {
         for t in [0.0, 0.7, 1.9] {
-            assert_eq!(flag_sway(0.0, t, 1.0, 10.0), 0.0, "the pole does not move");
+            assert_eq!(flag_sway(0.0, t, 1.0), 0.0, "the pole does not move");
         }
-        let moved = (0..20).map(|i| flag_sway(1.0, i as f64 * 0.13, 0.0, 10.0).abs()).fold(0.0f32, f32::max);
-        assert!(moved > 0.5 && moved <= 2.0, "the free end swings within its amplitude: {moved}");
+        let moved = (0..40).map(|i| flag_sway(1.0, i as f64 * 0.07, 0.0).abs()).fold(0.0f32, f32::max);
+        assert!(moved > 2.5 && moved <= 3.0 + 1e-4, "the free end swings 3 px at most, 2.5 or more at its peak: {moved}");
     }
 
     #[test]
@@ -616,13 +773,13 @@ mod tests {
     fn the_cleared_copy_lacks_the_parts_and_keeps_the_rest() {
         let img = image(20, 10);
         let parts = [Part::Flag { rect: [2.0, 2.0, 5.0, 4.0], pole_right: false, phase: 0.0 }];
-        let out = cleared(&img, &parts);
+        let out = cleared(&img, &parts, None);
         let alpha = |x: u32, y: u32| out.rgba[((y * 20 + x) * 4 + 3) as usize];
         assert_eq!(alpha(3, 3), 0, "inside the flag's box");
         assert_eq!(alpha(6, 3), 200, "outside it");
         assert_eq!(alpha(2, 4), 200, "the box's bottom edge is open");
         let disc = [Part::Sails { disc: Disc { hub: [10.0, 5.0], radius: 3.0 }, phase: 0.0 }];
-        let out = cleared(&img, &disc);
+        let out = cleared(&img, &disc, None);
         let alpha = |x: u32, y: u32| out.rgba[((y * 20 + x) * 4 + 3) as usize];
         assert_eq!(alpha(10, 5), 0);
         assert_eq!(alpha(16, 5), 200, "outside the disc");
@@ -678,9 +835,8 @@ mod tests {
         assert!(indices.iter().all(|&i| usize::from(i) < verts.len()), "every index is a vertex");
         assert_eq!(verts[0].position.x, 4.0, "the pole's column does not move");
         assert_eq!(verts[1].position.x, 4.0);
-        let amp = (0.06 * 8.0f32).clamp(0.6, 2.0);
         let free = verts.iter().map(|v| v.position.x).fold(f32::MIN, f32::max);
-        assert!(free > 12.0 - amp && free <= 12.0 + amp + 1e-4, "the free end swings within its amplitude: {free}");
+        assert!(free > 12.0 - 3.0 && free <= 12.0 + 3.0 + 1e-4, "the free end swings within 3 px: {free}");
         // The texture coordinates are the box's own texels (the atlas rectangle at the origin here).
         assert!(verts.iter().all(|v| (0.0..=20.0).contains(&(v.uv.x * 20.0))));
     }
@@ -705,7 +861,7 @@ mod tests {
         let spokes = painted(40, 40, |x, y| (10..30).contains(&x) && (10..30).contains(&y) && (x == 19 || x == 20 || y == 19 || y == 20));
         let look = box_look(&spokes, [10.0, 10.0, 30.0, 30.0]);
         assert!(sails_look(&look), "spokes look like sails: {look:?}");
-        assert!(moves(&spokes, &Point { kind: Kind::Sails, rect: [10.0, 10.0, 30.0, 30.0] }));
+        assert_eq!(sails_of(&spokes, &[], [10.0, 10.0, 30.0, 30.0]), Some(Sails::Disc), "without cards, the spokes turn as a disc");
         // A solid block of the box: a roof or a wall, not sails.
         let block = painted(40, 40, |x, y| (10..30).contains(&x) && (10..30).contains(&y));
         assert!(!sails_look(&box_look(&block, [10.0, 10.0, 30.0, 30.0])), "a solid box is not sails");
@@ -717,18 +873,74 @@ mod tests {
     }
 
     #[test]
-    fn a_flag_is_cloth_unless_it_is_a_figure_sized_blob() {
-        // Cloth: about half the box opaque.
-        let cloth = painted(30, 30, |x, y| (4..16).contains(&x) && (4..24).contains(&y) && (x + y) % 2 == 0);
-        assert!(cloth_look(&box_look(&cloth, [4.0, 4.0, 16.0, 24.0])));
-        assert!(moves(&cloth, &Point { kind: Kind::Flag, rect: [4.0, 4.0, 16.0, 24.0] }));
-        // A figure-sized opaque blob (over 70 % of the box): not a flag.
-        let figure = painted(30, 30, |x, y| (4..16).contains(&x) && (4..24).contains(&y));
-        assert!(!cloth_look(&box_look(&figure, [4.0, 4.0, 16.0, 24.0])), "a solid figure is no flag");
-        assert!(!moves(&figure, &Point { kind: Kind::Flag, rect: [4.0, 4.0, 16.0, 24.0] }));
-        // A box past the sprite's edge is clamped, not read out of the image.
-        let edge = box_look(&figure, [20.0, 20.0, 60.0, 60.0]);
-        assert_eq!(edge.area, 100, "clamped to the 30 x 30 sprite's corner");
+    fn a_flag_is_cloth_unless_it_is_a_figure() {
+        // Blue and white stripes filling the box: cloth.
+        let banner = painted_rgb(20, 14, |x, y| if (x + y) % 3 == 0 { [40, 60, 200] } else { [230, 230, 240] });
+        assert!(cloth_look(&banner, [2.0, 2.0, 18.0, 12.0]), "a blue-and-white banner waves");
+        // A figure: an irregular outline with skin and gold in it.
+        let figure = painted_rgb(20, 14, |x, y| {
+            let round = (x as i32 - 10).pow(2) + (y as i32 - 7).pow(2) <= 16;
+            if !round {
+                [0, 0, 0]
+            } else if (x + y) % 2 == 0 {
+                [220, 170, 120]
+            } else {
+                [200, 150, 40]
+            }
+        });
+        let mut figure_alpha = figure.clone();
+        for (i, px) in figure_alpha.rgba.chunks_exact_mut(4).enumerate() {
+            let (x, y) = (i % 20, i / 20);
+            px[3] = if (x as i32 - 10).pow(2) + (y as i32 - 7).pow(2) <= 16 { 255 } else { 0 };
+        }
+        assert!(!cloth_look(&figure_alpha, [2.0, 2.0, 18.0, 12.0]), "a figure is no flag");
+        // Mostly transparent: not a flag either.
+        let mut sparse = painted_rgb(20, 14, |_, _| [40, 60, 200]);
+        for (i, px) in sparse.rgba.chunks_exact_mut(4).enumerate() {
+            px[3] = if i % 20 < 3 { 255 } else { 0 };
+        }
+        assert!(!cloth_look(&sparse, [2.0, 2.0, 18.0, 12.0]), "a box with little opaque in it is no flag");
+    }
+
+    /// A sprite with each pixel `rgb` where `f` says, opaque; a pixel `f` gives `[0, 0, 0]` at alpha
+    /// 0 when it is out of the picture is not needed here.
+    fn painted_rgb(w: u32, h: u32, f: impl Fn(u32, u32) -> [u8; 3]) -> Image {
+        let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+        for y in 0..h {
+            for x in 0..w {
+                let c = f(x, y);
+                rgba.extend_from_slice(&[c[0], c[1], c[2], 255]);
+            }
+        }
+        Image { width: w, height: h, rgba }
+    }
+
+    #[test]
+    fn a_sails_card_is_a_thin_card_the_box_holds() {
+        // A thin spoky card (a cross of two bars) inside the box, and a whole house card around it.
+        // A half-filled sliver of a card (fill 0.5 of its box): spoky, not a blob.
+        let spoke = Card { foot: (0.0, 0.0), verts: vec![(18.0, 8.0), (22.0, 32.0), (18.0, 32.0)], tris: vec![0, 1, 2] };
+        let house = Card { foot: (0.0, 0.0), verts: vec![(0.0, 0.0), (80.0, 0.0), (80.0, 60.0), (0.0, 60.0)], tris: vec![0, 1, 2, 0, 2, 3] };
+        let cards = [house.clone(), spoke.clone()];
+        assert_eq!(sails_card(&cards, [10.0, 5.0, 30.0, 35.0]), Some(1), "the spoke card, not the house card");
+        let img = painted_rgb(80, 60, |_, _| [0, 0, 0]);
+        assert_eq!(sails_of(&img, &cards, [10.0, 5.0, 30.0, 35.0]), Some(Sails::Card { index: 1, hub: [20.0, 20.0] }), "the box centre lies in the card's box");
+        // The house card alone is too big to count as sails.
+        assert_eq!(sails_card(&[house], [10.0, 5.0, 30.0, 35.0]), None);
+    }
+
+    #[test]
+    fn a_turning_card_keeps_its_hub_and_its_texels() {
+        let card = Card { foot: (0.0, 0.0), verts: vec![(9.0, 2.0), (11.0, 2.0), (11.0, 18.0), (9.0, 18.0)], tris: vec![0, 1, 2, 0, 2, 3] };
+        let t = Turning { index: 0, card: card.clone(), hub: [10.0, 10.0], phase: 0.0 };
+        let (verts, indices) = turning_mesh(&t, SAIL_TURN_SECS / 4.0, Rect::new(0.0, 0.0, 20.0, 20.0), vec2(20.0, 20.0), vec2(0.0, 0.0), 1.0, WHITE);
+        assert_eq!(indices, card.tris, "the card's own triangles");
+        // A quarter turn: the top end (10, 2) lands on the hub's right (18, 10) in the turned frame.
+        assert!((verts[0].position.x - 18.0).abs() < 1e-3 && (verts[0].position.y - 9.0).abs() < 1e-3, "the outline turned about the hub: {:?}", verts[0].position);
+        let hub_centre = verts.iter().map(|v| (v.position.x, v.position.y)).fold((0.0, 0.0), |a, b| (a.0 + b.0, a.1 + b.1));
+        assert!((hub_centre.0 / 4.0 - 10.0).abs() < 1.0 && (hub_centre.1 / 4.0 - 10.0).abs() < 1.0, "the outline stays round the hub");
+        assert_eq!(verts[0].uv.x, 9.0 / 20.0, "uv is the card's own texel");
+        assert_eq!(verts[0].uv.y, 2.0 / 20.0);
     }
 
     #[test]

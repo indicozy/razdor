@@ -70,6 +70,8 @@ pub struct Living {
     /// Each chimney's box in sprite pixels.
     pub chimneys: Vec<[f32; 4]>,
     pub parts: Vec<living::Part>,
+    /// A sails card of the depth cut that turns about its hub (`living::Turning`).
+    pub turning: Option<living::Turning>,
     body: Option<Image>,
     texture: OnceCell<Option<Texture2D>>,
 }
@@ -442,10 +444,28 @@ impl DtArt {
                         let chimneys: Vec<[f32; 4]> = p.points.iter().filter(|p| p.kind == Kind::Chimney).map(|p| p.rect).collect();
                         // Only a box whose pixels look like the part moves (sails spokes, cloth), so a
                         // windmill's roof or a figure's blob stays still.
-                        let parts: Vec<living::Part> = p.points.iter().enumerate().filter(|(_, q)| living::moves(&s.image, q)).filter_map(|(i, q)| living::Part::of(q, w, h, i)).collect();
-                        if !chimneys.is_empty() || !parts.is_empty() {
-                            let body = (!parts.is_empty()).then(|| living::cleared(&s.image, &parts));
-                            living_map.insert(id, Living { chimneys, parts, body, texture: OnceCell::new() });
+                        // A flag moves when its box looks like cloth. A sails box turns on its own
+                        // sails card of the depth cut when it has one, else as a disc when its pixels
+                        // look like sails (`living::sails_of`).
+                        let own: &[Card] = entry.map_or(&[], |k| k.cards.as_slice());
+                        let mut parts: Vec<living::Part> = Vec::new();
+                        let mut turning = None;
+                        for (i, q) in p.points.iter().enumerate() {
+                            match q.kind {
+                                Kind::Flag if living::cloth_look(&s.image, q.rect) => parts.extend(living::Part::of(q, w, h, i)),
+                                Kind::Sails if turning.is_none() => match living::sails_of(&s.image, own, q.rect) {
+                                    Some(living::Sails::Card { index, hub }) => {
+                                        turning = Some(living::Turning { index, card: own[index].clone(), hub, phase: living::unit(0x5EED, i as u64) * std::f32::consts::TAU });
+                                    }
+                                    Some(living::Sails::Disc) => parts.extend(living::Part::of(q, w, h, i)),
+                                    None => {}
+                                },
+                                _ => {}
+                            }
+                        }
+                        if !chimneys.is_empty() || !parts.is_empty() || turning.is_some() {
+                            let body = (!parts.is_empty() || turning.is_some()).then(|| living::cleared(&s.image, &parts, turning.as_ref().map(|t| &t.card)));
+                            living_map.insert(id, Living { chimneys, parts, turning, body, texture: OnceCell::new() });
                         }
                     }
                     // A one-card building is shipped as known too: it stands as one billboard.

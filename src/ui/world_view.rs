@@ -3008,24 +3008,11 @@ fn living_of<'a>(cam: &Camera, art: Option<&'a DtArt>, l: &Location) -> Option<(
     Some((atlas, atlas.living(l.picture.0, l.picture.1)?))
 }
 
-/// Whether the card's outline holds the sprite point `p` (inside one of its triangles).
-fn card_holds(card: &Card, p: Vec2) -> bool {
-    card.tris.chunks_exact(3).any(|t| {
-        let [a, b, c] = [t[0], t[1], t[2]].map(|i| {
-            let (x, y) = card.verts[usize::from(i)];
-            vec2(x, y)
-        });
-        let side = |p1: Vec2, p2: Vec2| (p.x - p2.x) * (p1.y - p2.y) - (p1.x - p2.x) * (p.y - p2.y);
-        let sides = [side(a, b), side(b, c), side(c, a)];
-        !(sides.iter().any(|&d| d < 0.0) && sides.iter().any(|&d| d > 0.0))
-    })
-}
-
 /// The card that owns the sprite point `p`: the card whose outline holds it. A card pivots about its
 /// own foot, so a point drawn under another card's billboard would shift by the feet's distance
 /// times (size − 1): a moving part goes with its owner. The nearest foot when no outline holds it.
 fn owning_card(cards: &[Card], origin: Vec2, zoom: f32, p: Vec2) -> usize {
-    if let Some(i) = cards.iter().position(|c| card_holds(c, p)) {
+    if let Some(i) = cards.iter().position(|c| living::card_contains(c, (p.x, p.y))) {
         return i;
     }
     let at = origin + p * zoom;
@@ -3044,12 +3031,25 @@ fn draw_parts<'a>(parts: impl Iterator<Item = &'a living::Part>, atlas: &Atlas, 
     }
 }
 
-/// A living building drawn flat (or as one billboard): its cleared copy, then its moving parts.
+/// A sails card turned about its hub (`living::turning_mesh`), from the atlas, over the sprite's
+/// rectangle `r` at `at`. The caller's standing transform places it.
+fn draw_turning(t: &living::Turning, atlas: &Atlas, r: Rect, at: Vec2, zoom: f32) {
+    let now = crate::ui::clock::now();
+    let size = vec2(atlas.texture.width(), atlas.texture.height());
+    let (vertices, indices) = living::turning_mesh(t, now, r, size, at, zoom, faded(WHITE));
+    super::sharp::draw_mesh_sharp(&Mesh { vertices, indices, texture: Some(atlas.texture.clone()) }, vec2(zoom, zoom));
+}
+
+/// A living building drawn flat (or as one billboard): its cleared copy, then its moving parts and
+/// its turning sails card.
 fn draw_living_picture(ls: &Living, atlas: &Atlas, r: Rect, at: Vec2, zoom: f32) {
     let Some(body) = ls.body() else { return };
     let params = DrawTextureParams { dest_size: Some(vec2(r.w * zoom, r.h * zoom)), source: Some(Rect::new(0.0, 0.0, r.w, r.h)), ..Default::default() };
     super::sharp::draw(body, at.x, at.y, faded(WHITE), params);
     draw_parts(ls.parts.iter(), atlas, r, at, zoom);
+    if let Some(t) = &ls.turning {
+        draw_turning(t, atlas, r, at, zoom);
+    }
 }
 
 /// A card's foot in the 2D space: its ground point in the building's sprite whose top-left is at
@@ -4198,6 +4198,10 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                         if let Some((_, ls)) = living {
                             let mine = ls.parts.iter().filter(|p| owning_card(cards, origin, zoom, p.anchor()) == *k);
                             draw_parts(mine, atlas, r, origin, zoom);
+                            // The sails card turns with its own hub, drawn in its own card's pass.
+                            if let Some(t) = ls.turning.as_ref().filter(|t| t.index == *k) {
+                                draw_turning(t, atlas, r, origin, zoom);
+                            }
                         }
                     });
                 }
