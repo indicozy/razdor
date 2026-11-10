@@ -5987,13 +5987,13 @@ fn draw_building_windows(game: &Game, assets: &Assets, cam: &Camera) {
                     let origin = building_sprite_origin(l, r.w, r.h, c);
                     for card in cards {
                         let f = card_foot(origin, zoom, card);
-                        standing(c, f, f, 1.0, || draw_card(c, card, origin, zoom, r, atlas, false));
+                        standing(c, f, f, 1.0, Rect::new(origin.x, origin.y, r.w * zoom, r.h * zoom), || draw_card(c, card, origin, zoom, r, &atlas.texture, false));
                     }
                 } else if let Some(r) = atlas.building(l.picture.0, l.picture.1) {
                     let base = building_foot(l, c);
                     let at = building_sprite_origin(l, r.w, r.h, c);
                     let params = DrawTextureParams { dest_size: Some(vec2(r.w * zoom, r.h * zoom)), source: Some(r), ..Default::default() };
-                    standing(c, base, base, 1.0, || super::sharp::draw(&atlas.texture, at.x, at.y, WHITE, params));
+                    standing(c, base, base, 1.0, Rect::new(at.x, at.y, r.w * zoom, r.h * zoom), || super::sharp::draw(&atlas.texture, at.x, at.y, WHITE, params));
                 }
             }
         });

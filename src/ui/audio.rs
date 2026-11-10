@@ -1150,6 +1150,9 @@ mod tests {
         let on = Settings { map_weather: true, ..Settings::default() };
         let back: Settings = serde_json::from_str(&serde_json::to_string(&on).unwrap()).unwrap();
         assert!(back.map_weather);
+    }
+
+    #[test]
     fn map_living_defaults_off_and_survives_serialization() {
         let old: Settings = serde_json::from_str("{}").unwrap();
         assert!(!old.map_living, "an older file: the map stays as it was");

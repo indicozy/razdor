@@ -1702,8 +1702,10 @@ pub const ALL: [Row; 42] = [
             Row::MapEdge => Some(tr("Off: past the map's edges is black, as in the original. On: a short stretch of ground goes on past the edges, then thickens into the same black fog as the unexplored map.")),
             Row::Lighting => Some(tr("Razdor's: the map's light follows the time of day. Style only.")),
             Row::Shadows => Some(tr("Razdor's: Painted keeps the original's shadows; From the sun removes them, and every building, tree and rock casts its own shadow that turns and lengthens with the hour.")),
+            Row::LightQuality => Some(tr("Razdor's: high lights up to eight buildings and figures' torches: their shadows, the relief and the glowing windows; medium up to four (the relief of the two nearest); low keeps the warm glows only. The default is high on the desktop, medium on a phone.")),
             Row::Mist => Some(tr("Razdor's: unexplored land is drifting mist instead of black. Style only.")),
             Row::LiveWater => Some(tr("Razdor's: the water ripples, foam runs along the shores, rivers flow and ships leave a wake. Style only.")),
+            Row::Weather => Some(tr("Razdor's: weather by the land: snow on snow and ice, rain on swamps and lowlands, heat haze over deserts, ash over fire lands, cloud shadows everywhere. Style only.")),
             Row::LivingMap => Some(tr("Razdor's: smoke rises from chimneys, flags wave, birds cross the sky. Style only.")),
             Row::DepthModel => Some(tr("Razdor's: buildings from mods that bring their own art stand in 2.5D on their own ground too. The model (Depth Anything V2 Small, Apache-2.0) is downloaded once, about 50 MB, and runs on this device.")),
             Row::AiStrength => Some(tr("Maximum: before each move the enemy of your battles weighs every move and answer ahead and plays each out to the end of the battle.")),
@@ -2159,6 +2161,8 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
             // Razdor's, off by default: the weather follows the land (`weather`), style only.
             if labelled_row_help(c, geo, tr("Weather"), yes_no(audio.map_weather), Row::Weather.help_text()).0 {
                 audio.map_weather = !audio.map_weather;
+            }
+        }
         Row::LivingMap => {
             // Razdor's, off by default: the map lives (`living`), style only.
             if labelled_row_help(c, geo, tr("Living map"), yes_no(audio.map_living), Row::LivingMap.help_text()).0 {
@@ -3537,7 +3541,7 @@ mod tests {
     #[test]
     fn the_long_hints_are_behind_a_question_mark() {
         let with: Vec<Row> = Row::ALL.into_iter().filter(|r| r.help_text().is_some()).collect();
-        assert_eq!(with, vec![Row::MapZoom, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::Lighting, Row::Shadows, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::Language, Row::Updates, Row::ChronicleSummary]);
+        assert_eq!(with, vec![Row::MapZoom, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::Lighting, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::Language, Row::Updates, Row::ChronicleSummary]);
         scene_help("Experience");
         assert_eq!(HELP_PINNED.with(|p| p.get()), Row::Experience.help_text());
         HELP_PINNED.with(|p| p.set(None));

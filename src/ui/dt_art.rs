@@ -115,7 +115,7 @@ impl Atlas {
 
     /// The atlas rectangle of a sprite by its section, category and index (`ObjectSprite`).
     pub fn rect_of(&self, section: u32, cat: u32, idx: u32) -> Option<Rect> {
-        self.rects.get(&(section, cat, idx)).copied()
+        self.rects.get(section, cat, idx)
     }
 
     /// Sprite of a building by picture type and variant.
