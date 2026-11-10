@@ -7,6 +7,7 @@
 
 use macroquad::prelude::*;
 
+use razdor::dt::markup::{Align, Ink};
 use razdor::i18n::tr;
 use razdor::rules::chronicle::{Mark, Summary};
 use razdor::rules::game::Game;
@@ -16,7 +17,8 @@ use super::assets::Assets;
 use super::chrome;
 use super::display;
 use super::dt_font::{with_original_face, Face};
-use super::items_view::{diary_body_size, diary_reader_body_size, HeroView};
+use super::dt_font::sheet_size;
+use super::items_view::{diary_reader_body_size, diary_scale, HeroView};
 use super::minimap;
 use super::widgets::*;
 use super::window_layout;
@@ -88,15 +90,16 @@ pub fn explored_box(w: i32, h: i32, explored: impl Fn(Tile) -> bool, margin: i32
     ((x0 - margin).max(0), (y0 - margin).max(0), (x1 + 1 + margin).min(w), (y1 + 1 + margin).min(h))
 }
 
-/// The window's box on a screen `sw` × `sh`: centred at the game window's proportions (about 4:3),
-/// the screen less a margin when it is smaller; a phone's is the whole screen less its safe area.
+/// The window's box on a screen `sw` × `sh`: centred in the 4:3 frame (800 × 600 at the interface
+/// scale, so the page's text fits at the diary's size), the screen less a margin when it is smaller;
+/// a phone's is the whole screen less its safe area.
 pub fn window_rect(sw: f32, sh: f32, phone: bool, k: f32, safe: display::SafeArea) -> Rect {
     if phone {
         let m = 6.0 * display::dp_px().unwrap_or(1.0);
         return Rect::new(safe.left + m, safe.top + m, (sw - safe.left - safe.right - 2.0 * m).max(0.0), (sh - safe.top - safe.bottom - 2.0 * m).max(0.0));
     }
-    let w = (680.0 * k).min(sw - 16.0).max(0.0);
-    let h = (500.0 * k).min(sh - 16.0).max(0.0);
+    let w = (800.0 * k).min(sw - 16.0).max(0.0);
+    let h = (600.0 * k).min(sh - 16.0).max(0.0);
     Rect::new((sw - w) / 2.0, (sh - h) / 2.0, w, h)
 }
 
@@ -179,21 +182,40 @@ fn total_rows(s: &Summary) -> [(&'static str, u32); 8] {
     ]
 }
 
+/// Whether the totals' two columns hold their label and number at the body size `s` in width `w`
+/// (the column's gap a third of the size).
+fn totals_fit(rows: &[(&str, u32)], w: f32, s: f32, face: Face) -> bool {
+    let col_w = w / 2.0;
+    with_original_face(face, || {
+        rows.iter().all(|(label, value)| measure_exact(label, s).width + measure_exact(&value.to_string(), s).width + s / 3.0 <= col_w)
+    })
+}
+
 /// The height the totals' table needs at the body size `s`: its heading (at the title size `h`,
 /// as drawn) and four rows.
 fn totals_need(s: f32, h: f32) -> f32 {
     h * 1.8 + 4.0 * s * 1.5
 }
 
-/// Wrapped lines of `sentences` at width `w` in `face` at size `s`.
-fn wrapped(sentences: &[String], w: f32, s: f32, face: Face) -> Vec<String> {
-    with_original_face(face, || sentences.iter().flat_map(|t| wrap(t, w, s)).collect())
+/// The line step of the body text at size `s`: the diary entry's (1.15 of the size, whole pixels).
+fn line_step(s: f32) -> f32 {
+    (s * 1.15).round()
+}
+
+/// One sentence's rows at width `w` in `face` at size `s`: wrapped as the diary's entry text is
+/// (`markup::wrap`), left aligned (`last`: a justified row would spread its words).
+fn body_rows(sentence: &str, w: f32, s: f32, face: Face) -> Vec<MarkupRow> {
+    with_original_face(face, || {
+        let width = |c: char| measure(c.encode_utf8(&mut [0; 4]), s).width;
+        razdor::dt::markup::wrap(sentence, w, width).into_iter().map(|r| MarkupRow { text: r.text, ink: Ink::Plain, align: Align::Justify, last: true }).collect()
+    })
 }
 
 /// The height the highlights need at size `s` in width `w`: their heading (at the title size `h`),
 /// their lines and the gaps between them.
 fn highlights_need(sentences: &[String], w: f32, s: f32, h: f32, face: Face) -> f32 {
-    h * 1.8 + wrapped(sentences, w, s, face).len() as f32 * s * 1.3 + sentences.len() as f32 * s * 0.6
+    let lines: usize = sentences.iter().map(|t| body_rows(t, w, s, face).len()).sum();
+    h * 1.8 + lines as f32 * line_step(s) + sentences.len() as f32 * s * 0.6
 }
 
 /// Draws the page and takes its input: its button, Enter, Esc or the window's cross leave it.
@@ -211,14 +233,17 @@ pub fn frame(view: &mut View, game: &Game, assets: &Assets) -> Option<Exit> {
 
     // The text: the body size of the diary's own entries (`diary_body_size`, the desktop's and the
     // phone's), the title of the map on top.
-    let ts = display::text_for(k, crate::ui::dialog::TEXT_REF);
+    // On the desktop the page's text base is the hero window's (`diary_scale`), so its text is the
+    // diary entry's at each resolution: the chronicle's entries are drawn in the message face at
+    // the entry's title size (`diary_title_size`), and so is the page's text.
+    let ts = if phone { display::text_for(k, crate::ui::dialog::TEXT_REF) } else { display::text_for(diary_scale(k), crate::ui::dialog::TEXT_REF) };
     // The phone's full-size body (the diary's reader, 100 % of the message size: the phone's list
     // is 0.8 of it, too small for a page that is read whole).
-    let body = if phone { diary_reader_body_size(ts) } else { diary_body_size(false, ts) };
-    // The body face: the diary's body on the desktop; on a phone the message face, whose native
-    // size is the full one (the bitmap body face draws a phone's text at about 13 sp).
-    let face = if phone { Face::Subtitle } else { Face::Body };
-    let heading = super::dt_font::sheet_size(Face::Title, ts);
+    let body = if phone { diary_reader_body_size(ts) } else { sheet_size(Face::Title, ts) };
+    // The body face: the message face, whose native size is the full one (the bitmap body face
+    // draws a phone's text at about 13 sp; the diary's entries' text is drawn in it too).
+    let face = Face::Subtitle;
+    let heading = sheet_size(Face::Title, ts);
     let pad = 8.0 * k;
     let button_h = 36.0 * k * display::button_grow();
     let upright = phone && window_layout::portrait();
@@ -228,7 +253,7 @@ pub fn frame(view: &mut View, game: &Game, assets: &Assets) -> Option<Exit> {
     let hl_reserve = if upright { highlights_need(&highlights, inner.w - 2.0 * pad, body, heading, face) } else { 0.0 };
     let page = layout(inner, upright, pad, button_h, (hl_reserve, totals_need(body, heading)));
     let size = fit_size(&[body, body * 0.92, body * 0.85], |s| {
-        highlights_need(&highlights, page.highlights.w, s, heading, face) <= page.highlights.h && totals_need(s, heading) <= page.totals.h
+        highlights_need(&highlights, page.highlights.w, s, heading, face) <= page.highlights.h && totals_need(s, heading) <= page.totals.h && totals_fit(&rows, page.totals.w, s, face)
     });
 
     // The map: the land explored, cropped (`view.cells`), letterboxed in the pane on the inset.
@@ -267,9 +292,9 @@ pub fn frame(view: &mut View, game: &Game, assets: &Assets) -> Option<Exit> {
 fn draw_wrapped(sentences: &[String], x: f32, y: f32, w: f32, s: f32, face: Face) {
     let mut y = y;
     for sentence in sentences {
-        for line in wrapped(std::slice::from_ref(sentence), w, s, face) {
-            with_original_face(face, || chrome::shadow_text(&line, x, y, s, INK));
-            y += s * 1.3;
+        for row in body_rows(sentence, w, s, face) {
+            draw_markup_row_face(&row, x, y + s * 0.85, w, s, face, Some(INK));
+            y += line_step(s);
         }
         y += s * 0.6;
     }
@@ -283,14 +308,14 @@ fn draw_totals(rows: &[(&str, u32)], x: f32, y: f32, w: f32, s: f32, face: Face)
     for (i, (label, value)) in rows.iter().enumerate() {
         let (c, n) = (i / per_column, i % per_column);
         let cx = x + c as f32 * col_w;
-        let cy = y + n as f32 * s * 1.5;
+        let cy = y + n as f32 * s * 1.5 + s * 0.85;
         let v = value.to_string();
-        with_original_face(face, || {
-            chrome::shadow_text(label, cx, cy, s, DIM);
-            let vw = measure(&v, s).width;
-            // The number sits a gap (a tenth of the column) short of the column's right edge.
-            chrome::shadow_text(&v, cx + col_w - vw - col_w * 0.1, cy, s, INK);
-        });
+        let vw = with_original_face(face, || measure(&v, s).width);
+        let label = MarkupRow { text: label.to_string(), ink: Ink::Plain, align: Align::Justify, last: true };
+        draw_markup_row_face(&label, cx, cy, col_w, s, face, Some(DIM));
+        // The number sits a gap (a tenth of the column) short of the column's right edge.
+        let number = MarkupRow { text: v, ink: Ink::Plain, align: Align::Justify, last: true };
+        draw_markup_row_face(&number, cx + col_w - vw - col_w * 0.1, cy, col_w, s, face, Some(INK));
     }
 }
 

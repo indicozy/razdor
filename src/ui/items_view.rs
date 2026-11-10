@@ -1478,6 +1478,12 @@ fn whole_list_enabled(rows_len: usize) -> bool {
 /// original's (632 px).
 const HERO_S: f32 = 586.0 / 632.0;
 
+/// The hero window's scale at the interface scale `k` (its diary's text base): the «Итоги» page
+/// takes it too, so its text is the diary entry's size.
+pub(super) fn diary_scale(k: f32) -> f32 {
+    HERO_S * k
+}
+
 /// The hero window's right column, top down: the artifact description box (`desc`), the quest
 /// list (`list`) and the diary entry (`entry`). `desc` is `None` when it is not drawn.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1874,19 +1880,31 @@ pub fn switched(view: &HeroView, tab: DiaryTab) -> HeroView {
     }
 }
 
-/// The desktop diary tabs' label size in a cell `cell` wide: the original's bold size, smaller only
-/// when the longest label would not fit (five tabs share the list's width).
-fn tab_label_size(cell: f32, s: f32) -> f32 {
+/// The desktop diary tabs' label size in a cell `cell` wide at the interface scale `k`: the
+/// original's bold size, smaller only when the longest label would not fit (five tabs share the
+/// list's width).
+fn tab_label_size(cell: f32, k: f32) -> f32 {
     use super::dt_font::{sheet_size, with_original_face, Face};
-    let base = sheet_size(Face::Bold, s);
-    let widest = DiaryTab::ALL.iter().map(|&t| with_original_face(Face::Bold, || measure(tr(diary_tab_label(t)), base).width)).fold(0.0, f32::max);
+    let base = sheet_size(Face::Bold, k);
+    let widest = DiaryTab::ALL.iter().map(|&t| with_original_face(Face::Bold, || measure_exact(tr(diary_tab_label(t)), base).width)).fold(0.0, f32::max);
     // A gap of 8 px between two neighbouring labels (the tabs' labels run close without it).
-    let room = cell - 8.0 * s;
+    let room = cell - 8.0 * k;
     if widest <= room {
         base
     } else {
         base * (room / widest).max(0.6)
     }
+}
+
+/// A diary tab's label at `size`, centred on `cx`, its top at `y`: drawn at the size it is given
+/// (`measure_exact`, `text_exact`), so a label shrunk to fit takes it, with the shadow of
+/// `chrome::shadow_text`.
+fn tab_label(label: &str, cx: f32, y: f32, size: f32, ink: Color) {
+    let x = cx - measure_exact(label, size).width / 2.0;
+    if !super::dt_font::draw_shadow(label, x, y, size, ink.a) {
+        text_exact(label, x + 1.0, y + 1.0, size, Color::new(0.0, 0.0, 0.0, 0.75 * ink.a));
+    }
+    text_exact(label, x, y, size, ink);
 }
 
 /// The phone's text size of the diary window, in dp at the text size 1 (`phone_diary`): the tabs,
@@ -2336,10 +2354,10 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
         // In the diary's bold face (the original's bitmap fonts come in one size each, and the
         // four titles do not fit in the title face).
         let label = tr(diary_tab_label(tab));
-        let size = tab_label_size(cell, s);
-        with_original_face(Face::Bold, || chrome::shadow_centered(label, r.x + r.w / 2.0, tabs_y - 7.0 * s, size, ink));
+        let size = tab_label_size(cell, k);
+        with_original_face(Face::Bold, || tab_label(label, r.x + r.w / 2.0, tabs_y - 7.0 * s, size, ink));
         if tab == view.tab {
-            let w = with_original_face(Face::Bold, || measure(label, size).width);
+            let w = with_original_face(Face::Bold, || measure_exact(label, size).width);
             draw_line(r.x + (r.w - w) / 2.0, tabs_y - 4.0 * s, r.x + (r.w + w) / 2.0, tabs_y - 4.0 * s, 1.0 * s, ACCENT);
         }
         if over && clicked() {
