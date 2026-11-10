@@ -916,7 +916,15 @@ window opened with) and the five groups (`main_menu::Group`) as tabs of one sett
 army list is `minimap::army_list`, drawn under the minimap window and clicked like its own
 centring (`view.look`); it takes the room above the bar and scrolls with the wheel.
 The world map's drawing resolution «Разрешение карты» (`map_render_scale`, 100%, 75%, 50%; `map_scale`, see
-`assets-and-drawing.md`, «The map's resolution») is always shown, right after the map zoom row.
+`assets-and-drawing.md`, «The map's resolution») is always shown, right after the map zoom row. «Ограничение FPS»
+(`frame_cap`, `Settings::frame_cap`: off, 30 or 60; `frame_cap::next`) follows it. `apply_options` pushes it into
+`frame_cap::set_setting`, and the loop (`main.rs`, right after the frame is presented) calls `Pacer::pace` with `frame_cap::current()`:
+the frames start no closer than 1/cap s apart, the sleep is the rest of the period less 1 ms and the last 1 ms is
+spun, yielding the thread, and a frame over the period is never slept. Snapshots and the trailer never sleep. The
+profiling switch is env `RAZDOR_FRAME_CAP=30|60` (desktop) or the files `profile-frame-cap-30` / `-60` (Android).
+On Android `set_setting` writes the cap to `frame-cap` in the app folder when it changes; the activity reads it
+(`razdorFrameCap` in `android/MainActivityInject.java`) and asks the window and the surface for the cap's rate
+(the lowest mode at least that fast) instead of the top one.
 The world map's 2.5D settings are in the same window, after «Имя предводителя»: «Вид карты»
 (`map_tilt`, always shown), and «Размер фигур» (`map_sprite_size`) and «Поворот двумя пальцами»
 (`map_twist`, `gestures::set_twist`) only with the 2.5D view on. `apply_options` pushes all three

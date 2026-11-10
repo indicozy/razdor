@@ -219,6 +219,8 @@ async fn main() {
     let quiet = ui::snapshot::quiet();
     let quit_after = quit_after();
     let mut frames = 0u64;
+    // The frame rate cap (`ui::frame_cap`): the frames start a period apart. Snapshots and the trailer never sleep.
+    let mut pacer = ui::frame_cap::Pacer::default();
     // Profiling (`diag::profiling`): frames over `diag::slow_frame_ms` (100 ms by default) are
     // logged with their screen, and the frame probe takes every frame.
     let profile = razdor::diag::profiling();
@@ -276,6 +278,7 @@ async fn main() {
         // The map frame's last GPU wait (profiling, Android): the frame's draws, cursor included.
         ui::gpu_probe::gpu_wait_ui();
         next_frame().await;
+        pacer.pace(ui::frame_cap::current(), snapshot.is_none() && !ui::trailer::active());
         if frames == 1 {
             razdor::diag::step("first frame shown");
         }

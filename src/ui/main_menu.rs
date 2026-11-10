@@ -1396,6 +1396,7 @@ pub fn apply_options(audio: &super::audio::Settings) {
     super::world_view::set_eyes(audio.map_eyes);
     super::world_view::set_sprite_size(audio.map_sprite_size);
     super::world_view::set_map_render_scale(audio.map_render_scale);
+    super::frame_cap::set_setting(audio.frame_cap);
     super::gestures::set_twist(audio.map_twist);
     chrome::set_option_override("ScrollSpeed", audio.scroll_speed.map(|v| (v.round() as i32).to_string()));
     chrome::set_option_override("OptValue8", audio.autosave.map(|on| if on { "1" } else { "0" }.to_string()));
@@ -1586,7 +1587,7 @@ impl Group {
     /// The rows the group shows, top to bottom. Every row is in exactly one group (a test checks it).
     pub fn rows(self) -> &'static [Row] {
         match self {
-            Group::Map => &[Row::MapZoom, Row::MapResolution, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
+            Group::Map => &[Row::MapZoom, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
             Group::Battle => &[Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
@@ -1600,6 +1601,7 @@ impl Group {
 pub enum Row {
     MapZoom,
     MapResolution,
+    FrameCap,
     MapView,
     SpriteSize,
     TwoFingerTurn,
@@ -1632,9 +1634,10 @@ pub enum Row {
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-    pub const ALL: [Row; 30] = [
+    pub const ALL: [Row; 31] = [
         Row::MapZoom,
         Row::MapResolution,
+        Row::FrameCap,
         Row::MapView,
         Row::SpriteSize,
         Row::TwoFingerTurn,
@@ -1981,6 +1984,16 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
             let value = super::map_scale::label(audio.map_render_scale);
             if labelled_row(c, geo, tr("Map resolution"), &value).0 {
                 audio.map_render_scale = super::map_scale::next(audio.map_render_scale);
+            }
+        }
+        Row::FrameCap => {
+            // Razdor's (the owner's request, 2026-11-10): a frame rate cap, to save heat and battery.
+            let value = match audio.frame_cap {
+                0 => tr("No cap").to_string(),
+                cap => cap.to_string(),
+            };
+            if labelled_row(c, geo, tr("Frame rate cap"), &value).0 {
+                audio.frame_cap = super::frame_cap::next(audio.frame_cap);
             }
         }
         Row::MapView => {

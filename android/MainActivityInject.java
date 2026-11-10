@@ -370,7 +370,13 @@ private void razdorPreferTopRefreshRate() {
             return;
         }
         Display.Mode current = display.getMode();
-        Display.Mode best = razdorTopMode(display);
+        // With a frame rate cap («Ограничение FPS», written to the app folder by src/ui/frame_cap.rs) the app
+        // asks for the cap's rate instead: the lowest mode at least that fast, else the top one.
+        int cap = razdorFrameCap();
+        Display.Mode best = cap > 0 ? razdorModeAtLeast(display, cap) : null;
+        if (best == null) {
+            best = razdorTopMode(display);
+        }
         if (best == null) {
             return;
         }
@@ -379,7 +385,7 @@ private void razdorPreferTopRefreshRate() {
             params.preferredDisplayModeId = best.getModeId();
             if (Build.VERSION.SDK_INT >= 30) {
                 // Some OEM ROMs read the rate itself, not the mode id.
-                params.preferredRefreshRate = best.getRefreshRate();
+                params.preferredRefreshRate = cap > 0 ? cap : best.getRefreshRate();
             }
             getWindow().setAttributes(params);
         }
@@ -403,6 +409,41 @@ private Display.Mode razdorTopMode(Display display) {
         }
     }
     return best;
+}
+
+// The frame rate cap the settings chose (30 or 60; 0 for none): the file src/ui/frame_cap.rs writes to the app
+// folder when the setting changes. Never fatal: a missing or unreadable file means no cap.
+private int razdorFrameCap() {
+    try {
+        java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.FileReader("/storage/emulated/0/Razdor/frame-cap"));
+        try {
+            int cap = Integer.parseInt(reader.readLine().trim());
+            return cap == 30 || cap == 60 ? cap : 0;
+        } finally {
+            reader.close();
+        }
+    } catch (Throwable t) {
+        return 0;
+    }
+}
+
+// The mode with the lowest refresh rate at least `cap` at the current resolution, or null.
+private Display.Mode razdorModeAtLeast(Display display, int cap) {
+    Display.Mode current = display.getMode();
+    Display.Mode found = null;
+    for (Display.Mode mode : display.getSupportedModes()) {
+        if (mode.getPhysicalWidth() != current.getPhysicalWidth()
+                || mode.getPhysicalHeight() != current.getPhysicalHeight()) {
+            continue;
+        }
+        if (mode.getRefreshRate() + 0.5f < cap) {
+            continue;
+        }
+        if (found == null || mode.getRefreshRate() < found.getRefreshRate()) {
+            found = mode;
+        }
+    }
+    return found;
 }
 
 // The surface vote (API 30+). miniquad draws into a SurfaceView, and the frame rate that counts
@@ -446,12 +487,15 @@ private void razdorVoteSurfaceFrameRate(Surface surface) {
     try {
         Display display = getDisplay();
         Display.Mode best = display == null ? null : razdorTopMode(display);
+        int cap = razdorFrameCap();
         if (best != null) {
+            // With a frame rate cap the surface asks for the cap's rate (the settings' «Ограничение FPS»).
+            float rate = cap > 0 ? cap : best.getRefreshRate();
             if (Build.VERSION.SDK_INT >= 31) {
-                surface.setFrameRate(best.getRefreshRate(), Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE,
+                surface.setFrameRate(rate, Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE,
                         Surface.CHANGE_FRAME_RATE_ALWAYS);
             } else {
-                surface.setFrameRate(best.getRefreshRate(), Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE);
+                surface.setFrameRate(rate, Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE);
             }
         }
     } catch (Throwable t) {
