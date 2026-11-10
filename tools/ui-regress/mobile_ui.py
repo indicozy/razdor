@@ -114,6 +114,8 @@ SCREENS = [
     ("settings", "settings:РК1-Начало пути", {}),
     # The Map window with the 2.5D view on: its «Размер фигур» and «Поворот двумя пальцами» rows.
     ("settings-25d", "settings:РК1-Начало пути:map", {"RAZDOR_CASE_AUDIO": '{"map_tilt": true, "map_twist": true}'}),
+    # The Map window in the first-person view (2026-11-10): its «Даль» and «Камера» rows show too.
+    ("settings-first-person", "settings:РК1-Начало пути:map", {"RAZDOR_CASE_AUDIO": '{"map_tilt": true, "map_first_person": true}'}),
     ("keys", "settings:РК1-Начало пути:keys", {}),
     ("help", "map:РК1-Начало пути", {"RAZDOR_SCENE_OPEN": "3:keys"}),
     ("save", "save:РК1-Начало пути", {}),

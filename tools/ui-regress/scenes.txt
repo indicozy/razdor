@@ -43,6 +43,7 @@ menu-1280 | menu:РК1-Начало пути | 1280x800 |
 settings-1280 | settings:РК1-Начало пути | 1280x800 |
 settings-map-1280 | settings:РК1-Начало пути:map | 1280x800 |
 settings-25d-map-1280 | settings:РК1-Начало пути:map | 1280x800 | RAZDOR_CASE_AUDIO={"map_tilt": true, "map_twist": true}
+settings-first-person-map-1280 | settings:РК1-Начало пути:map | 1280x800 | RAZDOR_CASE_AUDIO={"map_tilt": true, "map_first_person": true}
 keys-1280 | settings:РК1-Начало пути:keys | 1280x800 |
 # The F1 list on the map (its «Изменить клавиши…» button) and in battle (the line that says where the keys change)
 help-map-1280 | map:РК1-Начало пути | 1280x800 | RAZDOR_SCENE_OPEN=3:keys
