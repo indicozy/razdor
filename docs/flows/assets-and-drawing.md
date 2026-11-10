@@ -498,7 +498,9 @@ it every frame from `display::follow_settings`; `RAZDOR_LIVE_WATER=1` turns it o
   a hill or mountain (classes `HILLS` to `DARK_MOUNTAINS`), or from its first cell when the map has none. The field
   is built per map (`world_view::map_flow`, kept while the surface codes and the hills stay) and drawn as the `Flow`
   texture (`terrain::flow_texels`: rg = 128 + 127 · flow, so still water is exactly zero). The shader scrolls the
-  ripple and foam noise by `-flow · Clock · 0.35` on the water. A lake's rim cells flow inward (the same rule), so
+  ripple and foam noise along the flow on the water (two phases of 7 cells a 20 s cycle, `t0 = fract(Clock · 0.05)`
+  and `t0 + ½`, mixed by `|2·t0 − 1|`, so the scroll does not jump when `Clock` wraps at 1000 s). The ripple's and the
+  foam's sine terms of `Clock` itself still jump at that wrap (a known leftover; the mist's drift does too). A lake's rim cells flow inward (the same rule), so
   coasts drift toward the open water; that is part of the best guess.
 - **Wakes** (`world_view::draw_wakes`, `water::Wake`): per sailing army in motion (and the hero's galley), its last
   12 display positions, one every 0.12 s, drawn on the ground behind it as soft white ellipses (the glow's texture,

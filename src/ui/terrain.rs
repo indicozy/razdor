@@ -187,6 +187,11 @@ float vnoise(vec2 q) {
     return mix(mix(hash2(i), hash2(i + vec2(1.0, 0.0)), u.x), mix(hash2(i + vec2(0.0, 1.0)), hash2(i + vec2(1.0, 1.0)), u.x), u.y);
 }
 
+// The ripple's offset of the water at `q` (the water's uv distortion, in frame units).
+vec2 ripple(vec2 q) {
+    return vec2(sin(q.y * 2.1 + Clock * 1.3) + 0.5 * vnoise(q * 0.7 + Clock * 0.2), cos(q.x * 1.7 + Clock * 1.1));
+}
+
 // The atlas colour of a slot at `t` texels from the tile's corner. The tile repeats, so the offset is
 // wrapped inside the tile (the padded border is only for the filter): any offset of the relief's
 // samples reads the right neighbour texel.
@@ -251,10 +256,17 @@ void main() {
         if (LiveWater > 0.5) {
             vec2 cell_uv = (p + 0.5) / MapSize;
             sea = texture2D(WaterMask, cell_uv).r;
-            vec2 q = p - ((texture2D(Flow, cell_uv).rg * 255.0 - 128.0) / 127.0) * Clock * 0.35;
-            uvw += 0.015 * vec2(sin(q.y * 2.1 + Clock * 1.3) + 0.5 * vnoise(q * 0.7 + Clock * 0.2), cos(q.x * 1.7 + Clock * 1.1));
+            // The flow scroll: two phases half a cycle apart (a 20 s cycle, 7 cells of travel a cycle),
+            // each faded out at its own wrap, so the pattern never jumps when Clock wraps.
+            vec2 fl = (texture2D(Flow, cell_uv).rg * 255.0 - 128.0) / 127.0;
+            float t0 = fract(Clock * 0.05);
+            float t1 = fract(Clock * 0.05 + 0.5);
+            float wt = abs(2.0 * t0 - 1.0);
+            vec2 q0 = p - fl * t0 * 7.0;
+            vec2 q1 = p - fl * t1 * 7.0;
+            uvw += 0.015 * mix(ripple(q0), ripple(q1), wt);
             float band = smoothstep(0.45, 0.6, sea) * (1.0 - smoothstep(0.6, 0.85, sea));
-            band *= 0.6 + 0.4 * sin(Clock * 1.6 + vnoise(q * 1.3) * 6.0);
+            band *= 0.6 + 0.4 * sin(Clock * 1.6 + mix(vnoise(q0 * 1.3), vnoise(q1 * 1.3), wt) * 6.0);
             foam = vec3(0.85, 0.90, 0.92) * band * 0.35;
         }
         w = texture2D(Water, sharp_uv(uvw, WaterSize, WaterScale)).rgb;
