@@ -3382,11 +3382,15 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
         if waits {
             gpu_wait(Stage::GpuFog);
         }
-        for o in map.objects_in_rows(r0 - up, r1 + below) {
-            if seen(o) && hill(o) {
-                standing(cam, object_foot(o, cam), object_foot(o, cam), shade_of(object_foot(o, cam)), object_picture(o, art, cam), || draw_object(o, art, cam));
+        // One sharp session for the hills, as for the pass below: outside one, every sharp draw
+        // switches the material on and off, so each hill was its own draw call.
+        super::sharp::session(|| {
+            for o in map.objects_in_rows(r0 - up, r1 + below) {
+                if seen(o) && hill(o) {
+                    standing(cam, object_foot(o, cam), object_foot(o, cam), shade_of(object_foot(o, cam)), object_picture(o, art, cam), || draw_object(o, art, cam));
+                }
             }
-        }
+        });
     }
     // The standing scenery and the buildings share one pass over the cells, row by row and
     // left to right (0x4c8864's cell loop): each cell draws its massif object (+0), then its
