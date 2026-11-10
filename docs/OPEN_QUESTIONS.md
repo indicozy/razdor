@@ -8,6 +8,15 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **The living map's sails and flags are checked on a few sprites only** (2026-11-11, «Живая карта»). Known:
+  the smoke, the flags on the RK7 town's banners and the birds were checked by eye on the desktop (Xvfb), and off
+  the map is pixel-identical to the build before. Not checked: a real windmill. The detector's sails box on the
+  village mill (sprite `1092c38902aa05da`) covers its roof, so the disc turns the roof a little too; a wheel and frame
+  it took for sails (Trein estuary) turns its frame with it. Each flag's cloth moves only where its box is; the big
+  castle's boxes (`97df6728b52f5359`) sit on its blue-white banners, the owner's eye decides. Not measured: the phones'
+  frame cost with the smoke (4 puffs a chimney). The smoke takes the map's daylight tint through the map's own tint
+  only (the colour is `living::SMOKE_RGB`, a parameter, not yet hooked to any night colour).
+
 - **The depth model's cards are not checked by eye, and the phones are not measured** (2026-11-10,
   atmosphere part 2). Known: the engine's 266 px and 518 px cuts run (the parity run of part 1,
   and the end-to-end test on three base-game sprites give two-card cuts on two of them); a

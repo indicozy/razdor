@@ -852,6 +852,8 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
         crate::ui::water::set_prefs(false);
         // `RAZDOR_WEATHER=1` (the snapshots' weather; `RAZDOR_WEATHER_DAY=<n>` fixes its day).
         crate::ui::weather::set_pref(std::env::var("RAZDOR_WEATHER").is_ok_and(|v| v.trim() == "1"));
+        // `RAZDOR_LIVING=1` (the snapshots' living map); the setting is not read here.
+        crate::ui::living::set_prefs(false);
         return;
     }
     read_dp_once();
@@ -866,6 +868,7 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
     crate::ui::mist::set_pref(settings.map_mist);
     crate::ui::water::set_prefs(settings.map_live_water);
     crate::ui::weather::set_pref(settings.map_weather);
+    crate::ui::living::set_prefs(settings.map_living);
     follow(settings.display.for_device(dp_px().is_some()));
 }
 

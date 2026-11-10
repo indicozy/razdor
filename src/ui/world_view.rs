@@ -31,7 +31,8 @@ use super::building_view::BuildingView;
 use super::gestures::SwipeKind;
 use super::cursor::{self, BuildingHover, CellArmy, MapHover, Shape};
 use super::dialog::Dialog;
-use super::dt_art::{Atlas, DtArt};
+use super::dt_art::{Atlas, DtArt, Living};
+use super::living::{self, Batch};
 use super::daylight;
 use super::lights;
 use super::game_bar::{self, BarButton, Look, TimeButton};
@@ -2991,6 +2992,66 @@ fn card_building<'a>(l: &Location, art: Option<&'a DtArt>) -> Option<(&'a Atlas,
     Some((atlas, atlas.building(l.picture.0, l.picture.1)?, cards))
 }
 
+/// Whether the living map is drawn in this view (`living`): not in the bent views (the first-person
+/// view, hidden from players), whose sheet the living parts are not laid on.
+fn living_on(cam: &Camera) -> bool {
+    living::on() && cam.tilt.is_none_or(|t| t.cam.bend.is_none())
+}
+
+/// A building's living parts with its atlas, when the living map is on and the building has any
+/// (`dt_art::Living`: its chimneys and its moving parts).
+fn living_of<'a>(cam: &Camera, art: Option<&'a DtArt>, l: &Location) -> Option<(&'a Atlas, &'a Living)> {
+    if !living_on(cam) || l.kind.is_bridge() {
+        return None;
+    }
+    let atlas = art?.map_atlas()?;
+    Some((atlas, atlas.living(l.picture.0, l.picture.1)?))
+}
+
+/// Whether the card's outline holds the sprite point `p` (inside one of its triangles).
+fn card_holds(card: &Card, p: Vec2) -> bool {
+    card.tris.chunks_exact(3).any(|t| {
+        let [a, b, c] = [t[0], t[1], t[2]].map(|i| {
+            let (x, y) = card.verts[usize::from(i)];
+            vec2(x, y)
+        });
+        let side = |p1: Vec2, p2: Vec2| (p.x - p2.x) * (p1.y - p2.y) - (p1.x - p2.x) * (p.y - p2.y);
+        let sides = [side(a, b), side(b, c), side(c, a)];
+        !(sides.iter().any(|&d| d < 0.0) && sides.iter().any(|&d| d > 0.0))
+    })
+}
+
+/// The card that owns the sprite point `p`: the card whose outline holds it. A card pivots about its
+/// own foot, so a point drawn under another card's billboard would shift by the feet's distance
+/// times (size − 1): a moving part goes with its owner. The nearest foot when no outline holds it.
+fn owning_card(cards: &[Card], origin: Vec2, zoom: f32, p: Vec2) -> usize {
+    if let Some(i) = cards.iter().position(|c| card_holds(c, p)) {
+        return i;
+    }
+    let at = origin + p * zoom;
+    cards.iter().enumerate().min_by(|a, b| card_foot(origin, zoom, a.1).distance_squared(at).total_cmp(&card_foot(origin, zoom, b.1).distance_squared(at))).map_or(0, |(i, _)| i)
+}
+
+/// Draws the moving parts of a sprite (flags, sails: `living::part_mesh`) from the atlas, over the
+/// sprite's rectangle `r` at `at` in the 2D space. The caller's standing transform places them.
+fn draw_parts<'a>(parts: impl Iterator<Item = &'a living::Part>, atlas: &Atlas, r: Rect, at: Vec2, zoom: f32) {
+    let now = crate::ui::clock::now();
+    let size = vec2(atlas.texture.width(), atlas.texture.height());
+    let color = faded(WHITE);
+    for part in parts {
+        let (vertices, indices) = living::part_mesh(part, now, r, size, at, zoom, color);
+        super::sharp::draw_mesh_sharp(&Mesh { vertices, indices, texture: Some(atlas.texture.clone()) }, vec2(zoom, zoom));
+    }
+}
+
+/// A living building drawn flat (or as one billboard): its cleared copy, then its moving parts.
+fn draw_living_picture(ls: &Living, atlas: &Atlas, r: Rect, at: Vec2, zoom: f32) {
+    let Some(body) = ls.body() else { return };
+    let params = DrawTextureParams { dest_size: Some(vec2(r.w * zoom, r.h * zoom)), source: Some(Rect::new(0.0, 0.0, r.w, r.h)), ..Default::default() };
+    super::sharp::draw(body, at.x, at.y, faded(WHITE), params);
+    draw_parts(ls.parts.iter(), atlas, r, at, zoom);
+}
+
 /// A card's foot in the 2D space: its ground point in the building's sprite whose top-left is at
 /// `origin`, drawn `zoom` screen pixels to a sprite pixel.
 fn card_foot(origin: Vec2, zoom: f32, card: &Card) -> Vec2 {
@@ -3077,11 +3138,11 @@ fn card_mesh_form(cam: &Camera, card: &Card, origin_px: Vec2, zoom: f32, src: Re
     (vertices, card.tris.clone())
 }
 
-fn draw_card(cam: &Camera, card: &Card, origin: Vec2, zoom: f32, r: Rect, atlas: &Atlas, outlined: bool) {
-    let size = vec2(atlas.texture.width(), atlas.texture.height());
+fn draw_card(cam: &Camera, card: &Card, origin: Vec2, zoom: f32, src: Rect, tex: &Texture2D, outlined: bool) {
+    let size = vec2(tex.width(), tex.height());
     let mesh = |origin: Vec2, color: Color| {
-        let (vertices, indices) = card_mesh_form(cam, card, origin, zoom, r, size, color);
-        Mesh { vertices, indices, texture: Some(atlas.texture.clone()) }
+        let (vertices, indices) = card_mesh_form(cam, card, origin, zoom, src, size, color);
+        Mesh { vertices, indices, texture: Some(tex.clone()) }
     };
     if outlined {
         let d = (1.5 * zoom).max(1.0);
@@ -3218,7 +3279,10 @@ fn draw_building(l: &Location, art: Option<&DtArt>, cam: &Camera, outlined: bool
                 }
             });
         }
-        draw_picture_form(cam, atlas, r, at, vec2(r.w * zoom, r.h * zoom), faded(WHITE), zoom);
+        match living_of(cam, art, l).filter(|(_, ls)| ls.body().is_some()) {
+            Some((_, ls)) => draw_living_picture(ls, atlas, r, at, zoom),
+            None => draw_picture_form(cam, atlas, r, at, vec2(r.w * zoom, r.h * zoom), faded(WHITE), zoom),
+        }
     } else {
         let (w, h) = (l.size.0 as f32 * cam.scale, (l.size.1 as f32 * cam.cell_size().y).max(cam.scale * 0.8));
         let wall = match l.kind {
@@ -3854,6 +3918,9 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
         gpu_wait(Stage::GpuTerrain);
     }
     in_view(cam, |c| draw_world_in(game, assets, c, preview, spell, hover, waits, veil, sprite_relief));
+    if living_on(cam) {
+        draw_birds(game, cam);
+    }
 }
 
 /// The relief of a pass in its two frames, decided here for the ground and for the sprites alike. The
@@ -4117,11 +4184,21 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                     let origin = building_sprite_origin(l, r.w, r.h, cam);
                     let f = card_foot(origin, zoom, card);
                     let outlined = hover.is_some_and(|h| h.building == Some(*i));
+                    // Living (flags, sails): the cards draw the cleared copy, and each moving part goes
+                    // with the card whose outline holds its anchor (`owning_card`).
+                    let living = living_of(cam, art, l).filter(|(_, ls)| ls.body().is_some());
                     standing(cam, f, f, shade_of(f), Rect::new(origin.x, origin.y, r.w * zoom, r.h * zoom), || {
                         if *k == 0 {
                             frame_probe::sprite(r.w * zoom, r.h * zoom);
                         }
-                        draw_card(cam, card, origin, zoom, r, atlas, outlined);
+                        match living.and_then(|(_, ls)| ls.body()) {
+                            Some(body) => draw_card(cam, card, origin, zoom, Rect::new(0.0, 0.0, r.w, r.h), body, outlined),
+                            None => draw_card(cam, card, origin, zoom, r, &atlas.texture, outlined),
+                        }
+                        if let Some((_, ls)) = living {
+                            let mine = ls.parts.iter().filter(|p| owning_card(cards, origin, zoom, p.anchor()) == *k);
+                            draw_parts(mine, atlas, r, origin, zoom);
+                        }
                     });
                 }
                 Drawable::BankBand(k) => draw_banks(cam, &bank_bands[*k]),
@@ -4155,6 +4232,14 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
             }
         }
     });
+    // Razdor's «Живая карта»: the smoke of the visible chimneys, one batch over the sprites.
+    if living_on(cam) {
+        let mut smoke = Batch::default();
+        draw_smoke(game, art, cam, &shade_of, &location_seen, &mut smoke);
+        if !smoke.is_empty() {
+            smoke.draw(&living::puff_texture());
+        }
+    }
     NEAR_LIMIT.with(|l| l.set(f32::INFINITY));
     HERO_ON_WINDOW.with(|h| h.set(None));
     if waits {
@@ -6089,6 +6174,65 @@ fn draw_wakes(game: &Game, cam: &Camera) {
     });
 }
 
+/// Razdor's «Живая карта» smoke (`living`): the puffs of every visible building's chimneys, added to
+/// `batch` (one mesh a frame). A building takes its shade of the fog at its foot, as its sprite does.
+fn draw_smoke(game: &Game, art: Option<&DtArt>, cam: &Camera, shade_of: &dyn Fn(Vec2) -> f32, location_seen: &dyn Fn(&Location) -> bool, batch: &mut Batch) {
+    let smoke = living::Smoke { now: crate::ui::clock::now(), puffs: living::puffs_now(), cell: cam.cell_size().x };
+    let zoom = cam.scale / PX;
+    for l in game.world.locations.iter().filter(|l| location_seen(l)) {
+        let Some((atlas, ls)) = living_of(cam, art, l) else { continue };
+        if ls.chimneys.is_empty() {
+            continue;
+        }
+        let Some(r) = atlas.building(l.picture.0, l.picture.1) else { continue };
+        let origin = building_sprite_origin(l, r.w, r.h, cam);
+        // The smoke stands where the sprite does: the billboard of the building's foot.
+        let foot = building_foot(l, cam);
+        let space = match cam.tilt {
+            Some(t) => living::Space::standing(view25::billboard_model_about(cam.origin, foot, foot, cam.scale, t.cam.pitch_deg, t.cam.yaw_deg, sprite_size())),
+            None => living::Space::flat(),
+        };
+        let alpha = shade_of(foot);
+        let (ax, ay) = l.anchor;
+        let base = living::mix(((ax as u64) << 32) ^ (ay as u32 as u64));
+        for (k, c) in ls.chimneys.iter().enumerate() {
+            let top = origin + vec2((c[0] + c[2]) / 2.0, c[1]) * zoom;
+            living::push_chimney(batch, &space, top, base ^ living::mix(k as u64 + 1), alpha, &smoke);
+        }
+    }
+}
+
+/// The seed of the flocks (`living::flock_at`).
+const BIRD_SEED: u64 = 0xB12D_5EED;
+
+/// Razdor's «Живая карта» birds: a flock now and then crosses the map in the air (`living::flock_at`),
+/// each bird a small dark V over the explored cells only. Drawn in the screen space, after the world.
+fn draw_birds(game: &Game, cam: &Camera) {
+    let now = crate::ui::clock::now();
+    let map = &game.world.map;
+    // The flocks cross the part of the world in view (a flock's course is drawn in it).
+    let view = cam.world_rect();
+    let Some(flock) = living::flock_at(now, BIRD_SEED, [view.x, view.y, view.x + view.w, view.y + view.h]) else { return };
+    let fog = &game.fog;
+    let span = 0.22 * cam.cell_size().x;
+    let lift = 1.2 * cam.cell_size().x;
+    let col = Color::new(0.12, 0.12, 0.14, 0.85);
+    for (p, flap) in living::bird_points(&flock, now) {
+        if !fog.explored(map.tile_at(p)) {
+            continue;
+        }
+        let c = cam.screen_at(p) - vec2(0.0, lift);
+        if c.x < -1e4 {
+            continue;
+        }
+        // The wings' angle above level: up on a flap, down between.
+        let a = 0.2 + 0.5 * (0.5 + 0.5 * flap);
+        let (dx, dy) = (span * a.cos(), span * a.sin());
+        draw_line(c.x, c.y, c.x - dx, c.y - dy, 1.5, col);
+        draw_line(c.x, c.y, c.x + dx, c.y - dy, 1.5, col);
+    }
+}
+
 /// The crossed-swords mark of the battles on the map (Razdor's, «Битвы армий на карте»): the
 /// install's swords strip (the cursor's `Swords.ugs`), drawn over its cell above the map's
 /// objects and armies, fading out over [`CLASH_SECS`].
@@ -7579,5 +7723,28 @@ mod tilt_tests {
         assert_eq!((premultiplied.r, premultiplied.g, premultiplied.b, premultiplied.a), (0.25, 0.25, 0.25, 0.25), "premultiplied: all channels faded");
         assert_eq!(gone.a, 0.0, "invisible");
         assert_eq!((gone_premultiplied.r, gone_premultiplied.a), (0.0, 0.0), "invisible premultiplied");
+    }
+}
+
+#[cfg(test)]
+mod living_parts_tests {
+    use super::*;
+
+    /// A square card of the sprite between `x0` and `x1` (its foot in the middle, at the bottom).
+    fn square(x0: f32, x1: f32) -> Card {
+        Card { foot: ((x0 + x1) / 2.0, 10.0), verts: vec![(x0, 0.0), (x1, 0.0), (x1, 10.0), (x0, 10.0)], tris: vec![0, 1, 2, 0, 2, 3] }
+    }
+
+    /// A moving part goes with the card whose outline holds its anchor, not the nearest foot: a
+    /// card pivots about its own foot, so the part would shift by (size − 1) times the feet's distance.
+    #[test]
+    fn a_moving_part_goes_with_the_card_that_holds_it() {
+        let cards = [square(0.0, 10.0), square(10.0, 40.0)];
+        assert_eq!(owning_card(&cards, Vec2::ZERO, 1.0, vec2(3.0, 5.0)), 0);
+        assert_eq!(owning_card(&cards, Vec2::ZERO, 1.0, vec2(30.0, 5.0)), 1);
+        // The first card's foot is nearer to (12, 5) than the second's, but the second card holds it.
+        assert_eq!(owning_card(&cards, Vec2::ZERO, 1.0, vec2(12.0, 5.0)), 1, "held by the second card");
+        // No outline holds it: the nearest foot.
+        assert_eq!(owning_card(&cards, Vec2::ZERO, 1.0, vec2(60.0, 5.0)), 1);
     }
 }

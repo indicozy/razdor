@@ -587,6 +587,23 @@ warm light, not a distortion (no frame readback); the bent first-person and eyes
 from players); the cloud shadows darken the sprites too. The heat haze's shimmer rises over the hot ground and follows the
 sun (`sun_at`: the lighting's shown hour, else the game clock; none at night). Sand gusts run in a heavy spell on an
 8 s gate (on for a few seconds, then off): ochre streaks and drifting veils. Ash adds a faint dark haze.
+**Living map** (the setting «Живая карта», `Settings::map_living`, off by default; `living::set_prefs` takes it
+every frame from `display::follow_settings`; `RAZDOR_LIVING=1` for the snapshots). Style only, no rule reads it.
+The points are the offline detector's boxes (`dt::lights`, `data/lights/objects.json`, keyed by `cards::sprite_key`,
+see `tools/depth/README.md`). `dt_art::Atlas::living` gives each building sprite its chimneys and its moving parts: a
+flag (its pole on the box's edge nearer the sprite's centre) and sails (a disc about the box's centre, kept inside the
+sprite). **Smoke**: `living::push_chimney` makes stateless puffs from each chimney's top (`puff_fraction`: the puffs of
+one chimney spaced through `PUFF_LIFE`, 6 s; each rises 1.5 cells, grows and fades; `wind` is shared). All of a frame's
+puffs are one `living::Batch` drawn over the sprites (`draw_smoke`), each building's puffs placed by the billboard of its
+foot (`living::Space`, the sprite's own model); 7 a chimney on the desktop, 4 on the phones. **Moving parts**: a sprite
+with one is drawn from a copy with those areas cleared (`living::cleared`, made at atlas build; its texture is made on
+first use, `Living::body`), and each part is drawn over it (`living::part_mesh`): the sails' disc turns (`sail_angle`, a
+turn in 9 s), the flag's columns sway (`flag_sway`, the free end most). In the card path a part goes with the card whose
+outline holds its anchor (`owning_card`), not the nearest foot: a card pivots about its own foot, so a part drawn under
+another card's billboard would shift by (size − 1) times the feet's distance. **Birds**: `living::flock_at`, one chance a
+40 s slot (a flock 20 to 60 s after the last), 14 s trips across the visible world rectangle, 3 to 7 birds in a V
+(`bird_points`); drawn in screen space after the world (`draw_birds`), each bird skipped over unexplored cells. Not drawn
+in the bent (first-person) view. Off, the map is pixel-identical (checked against the commit before the feature).
 
 ## Sound and music
 

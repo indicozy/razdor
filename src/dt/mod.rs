@@ -14,6 +14,7 @@ pub mod gfx;
 pub mod ini;
 pub mod install;
 pub mod integrity;
+pub mod lights;
 pub mod map_import;
 pub mod markup;
 pub mod picture_cache;

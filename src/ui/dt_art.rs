@@ -13,12 +13,14 @@ use macroquad::prelude::*;
 use razdor::dt::gfx::{self, water_frame_file, Image, ObjectSprite, ObjectSprites, ITEM_ICONS, MAP_OBJECTS, TERRAIN_TEXTURES, TEXTURES_DIR, UNIT_FIGURES, UNIT_PORTRAITS, WATER_FRAMES};
 use razdor::depth::{self, queue::{self, Job, Overlay}};
 use razdor::dt::cards::{self, Card};
+use razdor::dt::lights::{self, Kind};
 use razdor::dt::preload;
 use razdor::dt::windows;
 use std::path::PathBuf;
 use razdor::dt::install::DtInstall;
 use razdor::dt::DtError;
 
+use super::living;
 use super::terrain::TerrainLayer;
 use super::world_view::surface_color;
 
@@ -56,6 +58,27 @@ pub struct Atlas {
     live: RefCell<Overlay>,
     /// The building sprites (positions in the object sprites) the model still has to cut, in order.
     pending: RefCell<VecDeque<usize>>,
+    /// The living map's parts of the building sprites that have light points (`dt::lights`), by the
+    /// same key: their chimneys and their moving parts (`living`).
+    living: HashMap<(u32, u32, u32), Living>,
+}
+
+/// A building sprite's living parts (Razdor's «Живая карта», `living`): its chimneys, the boxes
+/// the smoke rises from, and its moving parts (flags, sails). A sprite with moving parts is drawn
+/// from `body`, a copy with their areas cleared, whose texture is made on first use.
+pub struct Living {
+    /// Each chimney's box in sprite pixels.
+    pub chimneys: Vec<[f32; 4]>,
+    pub parts: Vec<living::Part>,
+    body: Option<Image>,
+    texture: OnceCell<Option<Texture2D>>,
+}
+
+impl Living {
+    /// The cleared copy's texture (the sprite's size), `None` for a sprite with no moving part.
+    pub fn body(&self) -> Option<&Texture2D> {
+        self.texture.get_or_init(|| self.body.as_ref().and_then(texture)).as_ref()
+    }
 }
 
 /// The atlas's rectangles as a dense table over the two sections and the 8-bit category and index
@@ -105,6 +128,11 @@ impl Atlas {
     pub fn building_cards(&self, picture_type: u8, variant: u8) -> Option<&[Card]> {
         let id = (ObjectSprite::BUILDINGS, picture_type.into(), variant.into());
         self.cards.get(&id).copied().or_else(|| self.live.borrow().get(id))
+    }
+
+    /// The living parts of a building's sprite (`None` for a picture with no light points).
+    pub fn living(&self, picture_type: u8, variant: u8) -> Option<&Living> {
+        self.living.get(&(ObjectSprite::BUILDINGS, picture_type.into(), variant.into()))
     }
 }
 
@@ -397,6 +425,7 @@ impl DtArt {
                 // cut now (no model needed), and the rest queue for the model (`depth_tick`).
                 let mut cards = HashMap::new();
                 let mut live = Overlay::default();
+                let mut living_map = HashMap::new();
                 let mut known = Vec::with_capacity(sprites.len());
                 for s in sprites.iter() {
                     let id = (s.section, s.cat, s.idx);
@@ -405,6 +434,17 @@ impl DtArt {
                     let entry = building.then(|| cards::builtin().get(&key).filter(|k| k.w == s.image.width && k.h == s.image.height)).flatten();
                     if let Some(k) = entry {
                         cards.insert(id, k.cards.as_slice());
+                    }
+                    // The light points (`dt::lights`) of a building: its chimneys and moving parts.
+                    let points = building.then(|| lights::builtin().get(&key).filter(|k| k.w == s.image.width && k.h == s.image.height)).flatten();
+                    if let Some(p) = points {
+                        let (w, h) = (s.image.width as f32, s.image.height as f32);
+                        let chimneys: Vec<[f32; 4]> = p.points.iter().filter(|p| p.kind == Kind::Chimney).map(|p| p.rect).collect();
+                        let parts: Vec<living::Part> = p.points.iter().enumerate().filter_map(|(i, p)| living::Part::of(p, w, h, i)).collect();
+                        if !chimneys.is_empty() || !parts.is_empty() {
+                            let body = (!parts.is_empty()).then(|| living::cleared(&s.image, &parts));
+                            living_map.insert(id, Living { chimneys, parts, body, texture: OnceCell::new() });
+                        }
                     }
                     // A one-card building is shipped as known too: it stands as one billboard.
                     let shipped = building && (entry.is_some() || cards::builtin_one_card().contains(&key));
@@ -419,7 +459,7 @@ impl DtArt {
                 }
                 let pending: VecDeque<usize> = queue::unknown(known).into();
                 depth::set_unknown(pending.len());
-                Some(Atlas { texture, rects, cards, live: RefCell::new(live), pending: RefCell::new(pending) })
+                Some(Atlas { texture, rects, cards, live: RefCell::new(live), pending: RefCell::new(pending), living: living_map })
             })
             .as_ref()
     }
