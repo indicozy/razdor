@@ -344,13 +344,11 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   `Settings::map_horizon` (`Row::FarGround`, shown only with the view): off «Вверх» (the far ground
   rolls up to top-down), on «Горизонт» (it curves down like a planet, the sky above). It is visual only: no rule
   reads it.
-  - **Hidden from players** (the owner's decision, 2026-11-10): the view is built and tested but does not show in
-    the settings. `world_view::first_person_visible()` is false with `RAZDOR_VIEW` unset, so «Вид карты» cycles
-    flat and 2.5D only, the «Даль» and «Камера» rows do not show, and a saved first-person choice (a settings file
-    with `map_first_person`, which loads as 2.5D) does nothing. Developer switch (dev-only):
-    `RAZDOR_VIEW=fp-chase` (the first-person view behind the hero) or `fp-eyes` (the eyes camera too) shows the rows
-    and lets the saved choices count; `RAZDOR_VIEW_HORIZON=down|up` sets «Даль» (`1` is `down`); the snapshot
-    names `RAZDOR_VIEW=first` and `eyes` force the view on as before.
+  - **In the settings** (the owner's decision, 2026-11-10: shown to players again): «Вид карты» cycles flat, 2.5D
+    and «От первого лица», and with the view its «Даль» and «Камера» rows show. Developer overrides in
+    `RAZDOR_VIEW`: `fp-chase` forces the view behind the hero (the saved camera choice does not count), `fp-eyes`
+    forces the eyes camera; `first` and `eyes` force them as in the snapshots. `RAZDOR_VIEW_HORIZON=down|up` (`1` is
+    `down`) overrides «Даль».
   - The camera: `view25::TiltCamera::first_person(look, scale, frame, yaw, horizon)`. Pitch `FP_PITCH` (12),
     field of view `FP_FOV` (55), fixed (PageUp and PageDown tilt the 2.5D view only). It looks at the view's
     centre (the hero when followed) from beyond it, so the centre stands at two thirds of the frame's height;
@@ -375,14 +373,22 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
     `a_click_on_the_hero_in_the_first_person_view...`.
   - The sky: `draw_sky` fills the frame dark (`SKY`) for 2.5D and «Вверх»; for «Горизонт» a gradient from light
     blue at the top to pale at the projected horizon line, which the ground covers below it.
-  - Near fade: `near_fade_limit` fades a standing sprite nearer the eye than `FP_NEAR_SHARE` (0.9) of the hero's
-    distance, back in fully at 1.35 of it (`NEAR_LIMIT`, set at the start of `draw_world_in` before any sprite,
-    the hills included). The hero never fades (`without_near_fade`). The trailer's near fade uses the same path.
+  - Near fade (the owner's report, 2026-11-10: with the old fade, every tree and building between the camera and the
+    hero vanished, the whole lower half of the view). Only a sprite that covers him fades. `draw_world_in` sets
+    `HERO_ON_WINDOW` (his drawn rectangle on the window and his depth along the view) before any sprite of the pass,
+    the hills included. `standing` projects the sprite's picture (its 2D rectangle under its billboard model,
+    `picture_on_screen`): if it overlaps his rectangle widened by `FP_HERO_MARGIN` (0.1 of his width) and stands in
+    front of him along the view (the depth `sprite_key` sorts by: a sprite drawn over him is one in front of him,
+    `covering_gap`), it fades out across `FP_NEAR_BAND` (0.01 of his distance from the eye, `first_person_fade`): gone
+    in front of him, whole behind him. Any other sprite stays whole. The depth, not the eye distance: in the bent
+    view a building can be nearer the camera on screen, drawn over him, and still farther by eye distance. The
+    pictures are the rectangles the draws use (`object_picture`, `building_picture`, `army_picture`, `hero_picture`,
+    `spell_picture`). `NEAR_LIMIT` is his distance from the eye (set at the start of `draw_world_in`). The hero never
+    fades (`without_near_fade`). The trailer's near fade keeps its distance fade (`near_fade`).
   - Fog, sprite fade by fog, the smooth reveal and the UI are as in 2.5D; the trailer's hide-UI (`trailer_clean`)
     is only with `RAZDOR_TRAILER_CAM`. Off the map (past its north and south edges) the ground is black, as in 2.5D.
   - **The eyes view** («Камера» = «Глазами героя», `audio::Settings::map_eyes`, pushed by `main_menu::apply_options`
-    into `world_view::set_eyes`; `RAZDOR_VIEW=eyes` for snapshots, `fp-eyes` for the developer switch; hidden from
-    players with the first-person view, see above).
+    into `world_view::set_eyes`; `RAZDOR_VIEW=eyes` for snapshots, `fp-eyes` for the developer override).
     `world_view::eyes_view()` says whether the camera stands at the eyes now: the setting, or a shot's `eye`.
     The camera is `view25::TiltCamera::eyes`: the eye `EYE_HEIGHT` (0.7 cell) above the ground under `target`
     (`eye_at`), looking `EYE_PITCH` (2°) down along the yaw, with no bend of its own; `eye_bend` adds the sheet

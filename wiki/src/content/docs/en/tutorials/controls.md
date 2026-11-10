@@ -44,7 +44,7 @@ Keys do nothing while you type text (the hero's name, a save name, the editor fi
 | F4 / F5 | F4 — wait without end; F5 — stop waiting |
 | M | Minimap |
 | P | Photo mode: the game stands still, the camera is free; see [Photo mode](/razdor/wiki/en/tutorials/photo/) |
-| Q / E (2.5D view) | Turn the map 45° left / right |
+| Q / E (2.5D or first-person view) | Turn the map 45° left / right |
 | Two fingers, twist (phone, with the "Two-finger turn" setting) | Turn the map 45° as the fingers turn (2.5D view) |
 | Tab | Centre the camera on the hero |
 | J / B / A | Hero's diary / Spell book / Hero and army |
