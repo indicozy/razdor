@@ -987,9 +987,9 @@ const TILT_STEP: f32 = 5.0;
 const SKY: Color = Color::new(0.06, 0.08, 0.11, 1.0);
 
 /// The view override, `RAZDOR_VIEW`: `25d` (the 2.5D view), `flat`, the snapshots' `first` and `eyes`
-/// (the first-person view forced on), or the developer switch `fp-chase` (the first-person view
-/// behind the hero) and `fp-eyes` (the eyes camera too). The switch is dev-only: the first-person view
-/// is hidden from players (the owner's decision, 2026-11-10). None for the settings.
+/// (the first-person view forced on, the eyes camera with `eyes`), or the developer overrides `fp-chase`
+/// (the first-person view behind the hero) and `fp-eyes` (the same with the eyes camera). None for the
+/// settings.
 fn view_env() -> Option<&'static str> {
     static ENV: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
     ENV.get_or_init(|| std::env::var("RAZDOR_VIEW").ok()).as_deref()
@@ -1015,24 +1015,16 @@ pub fn set_tilt_view(on: bool) {
 }
 
 /// Whether the tilted view is the first-person one («От первого лица», `view25::TiltCamera::first_person`):
-/// the setting (`audio::Settings::map_first_person`, pushed by [`set_first_person`]) within the tilted view,
-/// and only with the developer switch (`fp-chase`, `fp-eyes`, see [`first_person_visible`]): with the
-/// env unset, players never get it. `RAZDOR_VIEW=first` or `eyes` (a snapshot) forces it on; `25d` and
-/// `flat` do not.
+/// the setting (`audio::Settings::map_first_person`, pushed by [`set_first_person`]) within the tilted view.
+/// `RAZDOR_VIEW=first` or `eyes` (a snapshot) and `fp-chase` or `fp-eyes` (the developer overrides) force it
+/// on; `25d` and `flat` do not.
 pub fn first_person() -> bool {
     tilt_view()
         && match view_env() {
-            Some("first") | Some("eyes") => true,
-            Some("fp-chase") | Some("fp-eyes") => FIRST_PERSON.load(std::sync::atomic::Ordering::Relaxed),
-            _ => false,
+            Some("first") | Some("eyes") | Some("fp-chase") | Some("fp-eyes") => true,
+            Some(_) => false,
+            None => FIRST_PERSON.load(std::sync::atomic::Ordering::Relaxed),
         }
-}
-
-/// Whether the first-person view shows in the settings (its rows, and the map view's three values): only
-/// with the developer switch `RAZDOR_VIEW=fp-chase` or `fp-eyes`. Hidden from players by the owner's
-/// decision (2026-11-10); the saved fields stay in the settings file.
-pub fn first_person_visible() -> bool {
-    matches!(view_env(), Some("fp-chase") | Some("fp-eyes"))
 }
 
 /// Puts the first-person view on or off (from the settings, at once).
@@ -1043,13 +1035,13 @@ pub fn set_first_person(on: bool) {
 /// Whether the first-person view's far ground curves down to a horizon with the sky above
 /// («Горизонт»), rather than rolling up to top-down («Вверх»).
 pub fn horizon() -> bool {
-    // `RAZDOR_VIEW_HORIZON=down` (or `1`) makes it the horizon and `up` the roll, for the snapshots and the
-    // developer switch; unset, the setting counts only with the developer switch (`first_person_visible`).
+    // `RAZDOR_VIEW_HORIZON=down` (or `1`) makes it the horizon and `up` the roll, as a developer override
+    // and for the snapshots; unset, the setting.
     static ENV: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
     match ENV.get_or_init(|| std::env::var("RAZDOR_VIEW_HORIZON").ok()).as_deref().map(str::trim) {
         Some("down") | Some("1") => true,
         Some("up") => false,
-        _ => first_person_visible() && HORIZON.load(std::sync::atomic::Ordering::Relaxed),
+        _ => HORIZON.load(std::sync::atomic::Ordering::Relaxed),
     }
 }
 
@@ -1063,13 +1055,13 @@ pub fn set_horizon(on: bool) {
 /// view (`first_person`).
 static EYES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Whether the eyes setting is on: `RAZDOR_VIEW=eyes` (a snapshot) and `fp-eyes` (the developer switch)
-/// turn it on, `fp-chase` takes the setting, and with the env unset it is off (hidden from players).
+/// Whether the eyes setting is on: `RAZDOR_VIEW=eyes` (a snapshot) and `fp-eyes` (a developer override)
+/// turn it on, `fp-chase` and the other overrides turn it off, and with the env unset it is the setting.
 pub fn eyes_setting() -> bool {
     match view_env() {
         Some("eyes") | Some("fp-eyes") => true,
-        Some("fp-chase") => EYES.load(std::sync::atomic::Ordering::Relaxed),
-        _ => false,
+        Some(_) => false,
+        None => EYES.load(std::sync::atomic::Ordering::Relaxed),
     }
 }
 
@@ -1348,13 +1340,17 @@ fn with_pass(pass: Pass, f: impl FnOnce()) {
 /// runs twice, see [`Pass`].
 fn in_view(cam: &Camera, f: impl Fn(&Camera)) {
     let Some(tilt) = cam.tilt else { return f(cam) };
+    // The window's view of this camera: the sprites' screen rectangles project through it ([`screen_view`]).
+    let prev = SCREEN_VIEW.with(|v| v.replace(Some(cam.view)));
     if let Some(bend) = tilt.cam.bend.filter(|_| super::render_cache::target().is_none()) {
-        return bent_view(cam, &tilt, bend, &f);
+        bent_view(cam, &tilt, bend, &f);
+    } else {
+        let (w, h) = (screen_width(), screen_height());
+        set_camera(&View3d(view25::window_matrix(cam.view, w, h) * tilt.cam.view_proj(cam.view)));
+        f(&cam.tilted_space());
+        super::render_cache::back_to_2d();
     }
-    let (w, h) = (screen_width(), screen_height());
-    set_camera(&View3d(view25::window_matrix(cam.view, w, h) * tilt.cam.view_proj(cam.view)));
-    f(&cam.tilted_space());
-    super::render_cache::back_to_2d();
+    SCREEN_VIEW.with(|v| v.set(prev));
 }
 
 /// The bent view of [`in_view`] (`RAZDOR_TRAILER_CAM`, dev-only): the ground pass is drawn flat
@@ -1505,27 +1501,24 @@ fn sprite_visibility(dark: f32) -> f32 {
 /// (Adreno) each draw call's buffer upload then cost a copy and an orphaned buffer (91% of the
 /// frame in the render passes; the 2.5D frame 17.7 ms against 8.3 ms flat). With the transform
 /// on the CPU the sprites share their draw calls.
-fn standing(cam: &Camera, foot: Vec2, base: Vec2, vis: f32, draw: impl FnOnce()) {
+/// `picture` is the sprite's drawn rectangle in the 2D space of `cam` (see [`covering_gap`]).
+fn standing(cam: &Camera, foot: Vec2, base: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
     let Some(tilt) = cam.tilt else { return draw() };
     if vis <= 0.0 {
         return;
     }
-    let (pitch, yaw, size) = (tilt.cam.pitch_deg, tilt.cam.yaw_deg, sprite_size());
     let g = (foot + cam.origin) / cam.scale;
     // Past a down bend's horizon the sheet hides the ground, and what stands on it.
     if tilt.cam.bend.is_some_and(|b| b.hidden(g)) {
         return;
     }
-    let (model, on_ground) = match (PASS.with(std::cell::Cell::get), tilt.cam.bend) {
-        // The sheet holds the ground: no sprite in the ground run.
-        (Pass::Ground, _) => return,
-        // A sprite stands where its foot is on the sheet (the bend's point of its ground).
-        (Pass::Sprites, Some(bend)) => {
-            let at = bend.point(g);
-            (view25::billboard_model_about_at(foot, base, cam.scale, pitch, yaw, size, at), at)
-        }
-        _ => (view25::billboard_model_about(cam.origin, foot, base, cam.scale, pitch, yaw, size), vec3(g.x, 0.0, g.y)),
-    };
+    // The sheet holds the ground: no sprite in the ground run.
+    let pass = PASS.with(std::cell::Cell::get);
+    if pass == Pass::Ground {
+        return;
+    }
+    let (model, on_ground) = standing_model(cam, &tilt, foot, base, pass == Pass::Sprites);
+    let yaw = tilt.cam.yaw_deg;
     // The eyes view: a sprite behind the eye is not seen (its billboard stands at its foot's depth).
     if let Some(eye) = tilt.cam.eye_at {
         let f = view25::forward(yaw);
@@ -1534,8 +1527,9 @@ fn standing(cam: &Camera, foot: Vec2, base: Vec2, vis: f32, draw: impl FnOnce())
         }
     }
     // The trailer's camera (dev-only) and the first-person view: a sprite whose foot is nearer the
-    // eye than the near fade's distance fades out, and the blend band of its sharp draws follows
-    // the magnification of a nearer sprite. The 2.5D view is as before.
+    // eye than the near fade's distance fades out (the first-person view: only one that covers the
+    // hero, [`first_person_fade`]), and the blend band of its sharp draws follows the magnification
+    // of a nearer sprite. The 2.5D view is as before.
     let mut vis = vis;
     let mut magnify = 1.0;
     if trailer().is_some() || first_person() {
@@ -1543,9 +1537,16 @@ fn standing(cam: &Camera, foot: Vec2, base: Vec2, vis: f32, draw: impl FnOnce())
         magnify = tilt.cam.pivot_scale(cam.view) * tilt.cam.distance / (d * cam.scale);
         let limit = near_fade_limit(cam);
         if limit > 0.0 && NEAR_FADE.with(std::cell::Cell::get) {
-            // The eyes view's band is narrow (`EYE_FADE_BAND`): a tree stays translucent over the sky for
-            // half a cell, not for the band of the trailer's and 2.5D's fade.
-            vis *= if eyes_cam(cam) { smooth_band(d, limit, view25::EYE_FADE_BAND) } else { near_fade(d, limit) };
+            vis *= if eyes_cam(cam) {
+                // The eyes view's band is narrow (`EYE_FADE_BAND`): a tree stays translucent over the sky for
+                // half a cell, not for the band of the trailer's and 2.5D's fade.
+                smooth_band(d, limit, view25::EYE_FADE_BAND)
+            } else if trailer().is_some() {
+                near_fade(d, limit)
+            } else {
+                let depth = g.dot(view25::forward(yaw));
+                first_person_fade(covering_gap(cam, &tilt, model, picture, depth), FP_NEAR_BAND * limit)
+            };
         }
         if vis <= 0.0 {
             return;
@@ -1566,6 +1567,20 @@ local! {
     /// Whether the trailer's near fade applies to the standing sprite being drawn: off for the hero,
     /// who is the frame's point of interest (the trees in front of him fade instead).
     static NEAR_FADE: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+    /// The first-person view's hero as drawn this frame (`draw_world_in`): the sprites that cover him are
+    /// faded for him ([`covering_gap`]). None when he is not drawn.
+    static HERO_ON_WINDOW: std::cell::Cell<Option<HeroOnWindow>> = const { std::cell::Cell::new(None) };
+    /// The window's view of the tilted camera being drawn (`in_view`): the sprites' rectangles project
+    /// through it, as the GPU draws them ([`screen_view`]).
+    static SCREEN_VIEW: std::cell::Cell<Option<Rect>> = const { std::cell::Cell::new(None) };
+}
+
+/// The hero as drawn this frame: his rectangle on the window and his depth along the view (the draw order's
+/// depth, [`sprite_key`]).
+#[derive(Clone, Copy)]
+struct HeroOnWindow {
+    rect: Rect,
+    depth: f32,
 }
 
 /// Runs `draw` with the near fade off (the hero's figure).
@@ -1576,8 +1591,8 @@ fn without_near_fade(draw: impl FnOnce()) {
 }
 
 /// The distance inside which a standing sprite fades (world units; 0 is off): the trailer's `near`,
-/// and in the first-person view [`FP_NEAR_SHARE`] of the hero's distance from the eye (the trees
-/// between the eye and him fade, so they do not hide him; he never fades). Never past the hero.
+/// and in the first-person view the hero's distance from the eye (a sprite nearer than him fades only
+/// if it covers him, [`first_person_fade`]; he never fades). Never past the hero.
 fn near_fade_limit(cam: &Camera) -> f32 {
     // The eyes view: a fixed distance (the hero stands at the eye, so his distance would fade nothing).
     if eyes_cam(cam) {
@@ -1586,17 +1601,86 @@ fn near_fade_limit(cam: &Camera) -> f32 {
     let hero = NEAR_LIMIT.with(std::cell::Cell::get);
     match trailer() {
         Some(t) => t.near.min(hero),
-        // Only the first-person view fades by the hero's distance: a saved first-person setting
-        // (which players cannot change, `first_person_visible`) must not fade the 2.5D sprites.
-        None if hero.is_finite() && first_person() => FP_NEAR_SHARE * hero,
+        // Only the first-person view fades by the hero's distance: the 2.5D sprites never do.
+        None if hero.is_finite() && first_person() => hero,
         None => 0.0,
     }
 }
 
-/// The first-person view's near fade: a standing sprite nearer the eye than this share of the
-/// hero's distance is gone, and fully back at 1.35 of it. At 0.5 (the first try) a tree just in
-/// front of him, at 0.8 of his distance, still hid him at a quarter turn.
-const FP_NEAR_SHARE: f32 = 0.9;
+/// The first-person view's near fade of a standing sprite: a sprite drawn over the hero (`gap` is how far in
+/// front of him it stands along the view, [`covering_gap`]) is gone once it stands `ramp` in front of him,
+/// whole `ramp` behind him, and fades across his depth in between. Every other sprite stays whole, the trees
+/// and buildings between the eye and him included (the owner's report, 2026-11-10: the whole lower half of
+/// the view went when the fade keyed on his distance alone).
+fn first_person_fade(gap: Option<f32>, ramp: f32) -> f32 {
+    match gap {
+        Some(gap) => 1.0 - smooth_band(gap, -ramp, 2.0 * ramp),
+        None => 1.0,
+    }
+}
+
+/// The ramp across the hero's depth, as a share of his distance from the eye (see [`first_person_fade`]). A
+/// covering sprite that stands only a little in front of him (a building at his depth, 0.3 of a cell) still
+/// covered him at a wider ramp: the ramp is kept narrow, a sprite in front of him is gone.
+const FP_NEAR_BAND: f32 = 0.01;
+
+/// The margin, as a share of the hero's drawn width, that a sprite's picture must clear his by to stay
+/// whole (see [`covering_gap`]).
+const FP_HERO_MARGIN: f32 = 0.1;
+
+/// How far a standing sprite stands in front of the hero along the view when its picture covers his drawn
+/// rectangle on the window, else None: the picture (`picture`, in the 2D space of `cam`, under its billboard
+/// `model`) overlaps his widened by [`FP_HERO_MARGIN`], or has a corner behind the eye. The depth is the one
+/// the draw order sorts by ([`sprite_key`]), so a sprite that is drawn over him is one in front of him. None
+/// when he is not drawn this frame.
+fn covering_gap(cam: &Camera, tilt: &Tilt, model: Mat4, picture: Rect, depth: f32) -> Option<f32> {
+    let hero = HERO_ON_WINDOW.with(std::cell::Cell::get)?;
+    let covers = match picture_on_screen(tilt, screen_view(cam), model, picture) {
+        Some(r) => overlaps(r, hero.rect, FP_HERO_MARGIN * hero.rect.w),
+        None => true,
+    };
+    covers.then_some(hero.depth - depth)
+}
+
+/// Whether the rectangles `a` and `b` overlap, `b` widened by `margin` on every side.
+fn overlaps(a: Rect, b: Rect, margin: f32) -> bool {
+    a.x < b.x + b.w + margin && a.x + a.w > b.x - margin && a.y < b.y + b.h + margin && a.y + a.h > b.y - margin
+}
+
+/// The window's view of the tilted camera being drawn: the frame its projection maps to (set by
+/// [`in_view`]; the 2D space's own view is its cull, not the window's).
+fn screen_view(cam: &Camera) -> Rect {
+    SCREEN_VIEW.with(std::cell::Cell::get).unwrap_or(cam.view)
+}
+
+/// The screen rectangle of a standing sprite's `picture` (in the 2D space of its camera) under its billboard
+/// `model`: the picture's four corners projected through the window's view, and the box about them. None
+/// if a corner is behind the eye.
+fn picture_on_screen(tilt: &Tilt, view: Rect, model: Mat4, picture: Rect) -> Option<Rect> {
+    let (x0, y0, x1, y1) = (picture.x, picture.y, picture.x + picture.w, picture.y + picture.h);
+    let (mut lo, mut hi) = (vec2(f32::INFINITY, f32::INFINITY), vec2(f32::NEG_INFINITY, f32::NEG_INFINITY));
+    for (x, y) in [(x0, y0), (x1, y0), (x1, y1), (x0, y1)] {
+        let s = tilt.cam.project(model.transform_point3(vec3(x, y, 0.0)), view)?;
+        lo = lo.min(s);
+        hi = hi.max(s);
+    }
+    Some(Rect::new(lo.x, lo.y, hi.x - lo.x, hi.y - lo.y))
+}
+
+/// A standing sprite's billboard model and the point its foot stands on in space: about the bent sheet's
+/// point of the foot when `bent` (the sprites' run of a bent view), else the flat ground's.
+fn standing_model(cam: &Camera, tilt: &Tilt, foot: Vec2, base: Vec2, bent: bool) -> (Mat4, Vec3) {
+    let (pitch, yaw, size) = (tilt.cam.pitch_deg, tilt.cam.yaw_deg, sprite_size());
+    let g = (foot + cam.origin) / cam.scale;
+    match tilt.cam.bend {
+        // A sprite stands where its foot is on the sheet (the bend's point of its ground).
+        Some(bend) if bent => {
+            let at = bend.point(g);
+            (view25::billboard_model_about_at(foot, base, cam.scale, pitch, yaw, size, at), at)
+        }
+        _ => (view25::billboard_model_about(cam.origin, foot, base, cam.scale, pitch, yaw, size), vec3(g.x, 0.0, g.y)),
+    }
+}
 
 /// The fade of a standing sprite whose foot is `d` from the eye, for the near fade's distance
 /// ([`near_fade_limit`]): 0 at `near`, smoothly 1 at 1.5 `near` and beyond.
@@ -2833,6 +2917,89 @@ fn draw_hero(game: &Game, assets: &Assets, art: Option<&DtArt>, cam: &Camera) {
     }
 }
 
+/// The drawn rectangle of a massif object or plant (its atlas picture, or the rough box of the shapes drawn
+/// without one), in the 2D space of `cam`: the first-person view's near fade keys on it ([`covering_gap`]).
+fn object_picture(o: &Decoration, art: Option<&DtArt>, cam: &Camera) -> Rect {
+    if let Some(r) = art.and_then(|a| a.map_atlas()).and_then(|at| at.decoration(o.class, o.sprite)) {
+        let at = object_sprite_origin(o, r.w, r.h, cam);
+        let zoom = cam.scale / PX;
+        return Rect::new(at.x, at.y, r.w * zoom, r.h * zoom);
+    }
+    let base = cam.cell_centre(o.tile);
+    let s = cam.scale;
+    Rect::new(base.x - s, base.y - 2.0 * s, 2.0 * s, 2.0 * s)
+}
+
+/// The drawn rectangle of a building (its atlas picture, or the box of the shape drawn without one), in the
+/// 2D space of `cam`.
+fn building_picture(l: &Location, art: Option<&DtArt>, cam: &Camera) -> Rect {
+    if let Some(r) = art.and_then(|a| a.map_atlas()).and_then(|at| at.building(l.picture.0, l.picture.1)) {
+        let at = building_sprite_origin(l, r.w, r.h, cam);
+        let zoom = cam.scale / PX;
+        return Rect::new(at.x, at.y, r.w * zoom, r.h * zoom);
+    }
+    let base = cam.to_screen(footprint_base(cam.grid, l));
+    let (w, h) = (l.size.0 as f32 * cam.scale, (l.size.1 as f32 * cam.cell_size().y).max(cam.scale * 0.8));
+    Rect::new(base.x - w / 2.0, base.y - h - h * 0.5, w, h * 1.5)
+}
+
+/// The drawn rectangle of an army's figure (its ship at sea), in the 2D space of `cam`.
+fn army_picture(game: &Game, a: &Army, art: Option<&DtArt>, cam: &Camera) -> Rect {
+    let pos = game.army_display_pos(a);
+    let figure = if a.sails() { Some((ship_stem(a.ship), Stand::Afloat)) } else { FIGURES.get(a.figure as usize).map(|stem| (*stem, Stand::Feet)) };
+    figure.and_then(|(stem, stand)| figure_rect(art, stem, pos, cam, stand)).unwrap_or_else(|| {
+        let c = cam.to_screen(pos);
+        Rect::new(c.x - 13.0, c.y - 21.0, 26.0, 26.0)
+    })
+}
+
+/// The drawn rectangle of the hero's figure (his ship aboard), in the 2D space of `cam`.
+fn hero_picture(game: &Game, art: Option<&DtArt>, cam: &Camera) -> Rect {
+    let pos = game.display_pos();
+    let figure = if game.aboard() {
+        figure_rect(art, ship_stem(razdor::rules::ships::kind::HERO), pos, cam, Stand::Afloat)
+    } else {
+        figure_rect(art, figure_stem(game.hero_figure()), pos, cam, Stand::Feet)
+    };
+    figure.unwrap_or_else(|| {
+        let c = cam.to_screen(pos);
+        Rect::new(c.x - 15.0, c.y - 25.0, 30.0, 30.0)
+    })
+}
+
+/// The hero as drawn on the window this frame, for the first-person view's near fade ([`covering_gap`]). None
+/// when he is not drawn (the eyes view, inside a building, no tilt) or his picture has a corner behind the eye.
+fn hero_on_screen(game: &Game, art: Option<&DtArt>, cam: &Camera) -> Option<HeroOnWindow> {
+    let tilt = cam.tilt?;
+    if eyes_cam(cam) || game.hero_hidden() {
+        return None;
+    }
+    let f = cam.to_screen(game.display_pos());
+    let (model, _) = standing_model(cam, &tilt, f, f, PASS.with(std::cell::Cell::get) == Pass::Sprites);
+    let rect = picture_on_screen(&tilt, screen_view(cam), model, hero_picture(game, art, cam))?;
+    let depth = ((f + cam.origin) / cam.scale).dot(view25::forward(tilt.cam.yaw_deg));
+    Some(HeroOnWindow { rect, depth })
+}
+
+/// The drawn rectangle of a spell's layer `n` (the union of its quads), in the 2D space of `cam`; empty when
+/// it has none.
+fn spell_picture(show: &SpellShow, n: u8, cam: &Camera) -> Rect {
+    let c = cam.to_screen(show.at);
+    let zoom = cam.scale / PX;
+    show.layers
+        .iter()
+        .filter(|l| l.layer == n)
+        .map(|l| {
+            let q = l.quad();
+            Rect::new(c.x + q.x * zoom, c.y + q.y * zoom, q.w * zoom, q.h * zoom)
+        })
+        .reduce(|a, b| {
+            let (x, y) = (a.x.min(b.x), a.y.min(b.y));
+            Rect::new(x, y, (a.x + a.w).max(b.x + b.w) - x, (a.y + a.h).max(b.y + b.h) - y)
+        })
+        .unwrap_or(Rect::new(c.x, c.y, 0.0, 0.0))
+}
+
 /// A massif object's layer in a cell's turn of the pass (+0, classes 1–8), a plant's (+2,
 /// classes 9–12), the building's (+0xC) last (0x4c8864, 0x4c9b5b). Then a spell's layer 2,
 /// the cell's figures (armies, the ship, the hero: the drawn-occupant byte, 0x4c9dca), and a
@@ -3121,8 +3288,8 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // The 2.5D view's fog shade of each standing sprite (none in the flat view: 1 there).
     let shade = tilted.then_some(Shade { fog, veil });
     let shade_of = |foot: Vec2| shade.as_ref().map_or(1.0, |s| s.at(cam, foot));
-    // The trailer's near fade stops at the hero's distance, and the first-person view's is half of
-    // it (see `NEAR_LIMIT`): set before any sprite of the pass, the hills included.
+    // The trailer's near fade stops at the hero's distance, and the first-person view's covering sprites
+    // fade in front of him (see `NEAR_LIMIT`): set before any sprite of the pass, the hills included.
     // Reset first, so that no limit from an earlier pass that stopped early can reach this one.
     NEAR_LIMIT.with(|l| l.set(f32::INFINITY));
     if trailer().is_some() || first_person() {
@@ -3130,6 +3297,8 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
             NEAR_LIMIT.with(|l| l.set(d));
         }
     }
+    // The hero as drawn, before any sprite of the pass (the hills' too): the covering test needs him.
+    HERO_ON_WINDOW.with(|h| h.set(if first_person() { hero_on_screen(game, art, cam) } else { None }));
     // An object of the drawn columns and rows with a cell explored near the feather is seen, and
     // the hills are the classes 1-3 (`hill`).
     let seen = |o: &Decoration| o.tile.0 >= c0 - side && o.tile.0 < c1 + side && razdor::rules::map::object_cells(o).any(|t| fog.explored_near(t, minimap::FEATHER));
@@ -3143,7 +3312,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
         if seen(o) {
             if hill(o) {
                 if !tilted {
-                    standing(cam, object_foot(o, cam), object_foot(o, cam), shade_of(object_foot(o, cam)), || draw_object(o, art, cam));
+                    standing(cam, object_foot(o, cam), object_foot(o, cam), shade_of(object_foot(o, cam)), object_picture(o, art, cam), || draw_object(o, art, cam));
                 }
             } else {
                 items.push((sprite_key(cam, o.tile, object_foot(o, cam), object_layer(o.class)), Drawable::Object(*o)));
@@ -3207,7 +3376,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
         }
         for o in map.objects_in_rows(r0 - up, r1 + below) {
             if seen(o) && hill(o) {
-                standing(cam, object_foot(o, cam), object_foot(o, cam), shade_of(object_foot(o, cam)), || draw_object(o, art, cam));
+                standing(cam, object_foot(o, cam), object_foot(o, cam), shade_of(object_foot(o, cam)), object_picture(o, art, cam), || draw_object(o, art, cam));
             }
         }
     }
@@ -3253,7 +3422,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     super::sharp::session(|| {
         for d in items.iter().map(|(_, d)| d) {
             match d {
-                Drawable::Object(o) => standing(cam, object_foot(o, cam), object_foot(o, cam), shade_of(object_foot(o, cam)), || draw_object(o, art, cam)),
+                Drawable::Object(o) => standing(cam, object_foot(o, cam), object_foot(o, cam), shade_of(object_foot(o, cam)), object_picture(o, art, cam), || draw_object(o, art, cam)),
                 Drawable::Building(i) => {
                     let l = &game.world.locations[*i];
                     let outlined = hover.is_some_and(|h| h.building == Some(*i));
@@ -3261,19 +3430,20 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                         // A bridge lies on the ground (Razdor's), so it is drawn in the ground pass.
                         ground(cam, || draw_building(l, art, cam, outlined));
                     } else {
-                        standing(cam, building_foot(l, cam), building_foot(l, cam), shade_of(building_foot(l, cam)), || draw_building(l, art, cam, outlined));
+                        standing(cam, building_foot(l, cam), building_foot(l, cam), shade_of(building_foot(l, cam)), building_picture(l, art, cam), || draw_building(l, art, cam, outlined));
                     }
                 }
                 Drawable::Army(i) => {
                     let a = &game.world.armies[*i];
                     let f = cam.to_screen(game.army_display_pos(a));
-                    standing(cam, f, f, shade_of(f), || draw_army(game, a, assets, art, cam));
+                    standing(cam, f, f, shade_of(f), army_picture(game, a, art, cam), || draw_army(game, a, assets, art, cam));
                 }
                 Drawable::Ship => {
                     if let Some(ship) = game.ship {
                         let at = map.center(ship.tile);
                         let f = cam.to_screen(at);
-                        standing(cam, f, f, shade_of(f), || {
+                        let picture = figure_rect(art, ship_stem(razdor::rules::ships::kind::HERO), at, cam, Stand::Afloat).unwrap_or(Rect::new(f.x - 20.0, f.y - 20.0, 40.0, 40.0));
+                        standing(cam, f, f, shade_of(f), picture, || {
                             if !draw_figure(art, ship_stem(razdor::rules::ships::kind::HERO), at, None, 0, cam, Stand::Afloat) {
                                 draw_ship(cam, at, HERO_SAIL);
                             }
@@ -3282,18 +3452,19 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                 }
                 Drawable::Hero => {
                     let f = cam.to_screen(game.display_pos());
-                    without_near_fade(|| standing(cam, f, f, shade_of(f), || draw_hero(game, assets, art, cam)))
+                    without_near_fade(|| standing(cam, f, f, shade_of(f), hero_picture(game, art, cam), || draw_hero(game, assets, art, cam)))
                 }
                 Drawable::Spell(n) => {
                     if let Some(s) = spell {
                         let f = cam.to_screen(s.at);
-                        standing(cam, f, f, shade_of(f), || draw_spell_layer(s, *n, cam));
+                        standing(cam, f, f, shade_of(f), spell_picture(s, *n, cam), || draw_spell_layer(s, *n, cam));
                     }
                 }
             }
         }
     });
     NEAR_LIMIT.with(|l| l.set(f32::INFINITY));
+    HERO_ON_WINDOW.with(|h| h.set(None));
     if waits {
         gpu_wait(Stage::GpuSprites);
     }
@@ -5833,19 +6004,14 @@ mod tilt_tests {
         }
     }
 
-    /// A saved first-person setting (a settings file with `map_first_person`, `map_horizon` and `map_eyes`
-    /// on, as a test build wrote it) does nothing without the developer switch: the 2.5D view keeps every
-    /// standing sprite's near fade off at any yaw, even with the hero's distance set for the pass (the
-    /// owner's report, 2026-11-10: the sprites between the camera and the hero were gone when turned).
-    /// The tests run with `RAZDOR_VIEW` unset, as a player's game does.
+    /// The 2.5D view's sprites never fade by the hero's distance, even with it set for the pass, at any yaw
+    /// (only the first-person view keys on it). The tests run with `RAZDOR_VIEW` unset, as a player's game does.
     #[test]
-    fn the_saved_first_person_settings_leave_the_25d_sprites_whole() {
+    fn the_25d_sprites_do_not_fade_by_the_heros_distance() {
         let game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
         set_tilt_view(true);
-        set_first_person(true);
-        set_horizon(true);
-        set_eyes(true);
-        assert!(!first_person_visible() && !first_person() && !eyes_view() && !horizon());
+        set_first_person(false);
+        assert!(!first_person());
         // The pass's hero distance is set, as `draw_world_in` sets it in the first-person view.
         NEAR_LIMIT.with(|l| l.set(12.0));
         for yaw in [0.0, 90.0, 180.0, 270.0] {
@@ -5854,9 +6020,59 @@ mod tilt_tests {
         }
         NEAR_LIMIT.with(|l| l.set(f32::INFINITY));
         set_tilt_view(false);
-        set_first_person(false);
-        set_horizon(false);
-        set_eyes(false);
+    }
+
+    /// The first-person near fade (the owner's report, 2026-11-10: every tree and building between the camera
+    /// and the hero vanished): only a sprite that covers him, in front of him, fades. The rest stay whole; a
+    /// covering one is gone in front of him and whole behind him, fading across his depth in between.
+    #[test]
+    fn the_first_person_near_fade_takes_only_the_sprites_that_cover_the_hero() {
+        let ramp = 0.3;
+        assert_eq!(first_person_fade(None, ramp), 1.0, "a sprite that covers no part of him stays whole, however near");
+        assert_eq!(first_person_fade(Some(-1.0), ramp), 1.0, "a covering sprite behind him is whole");
+        let mid = first_person_fade(Some(0.0), ramp);
+        assert!(mid > 0.0 && mid < 1.0, "a covering sprite at his depth fades across it: {mid}");
+        assert_eq!(first_person_fade(Some(0.3), ramp), 0.0, "a covering sprite a ramp in front of him is gone");
+        assert_eq!(first_person_fade(Some(4.0), ramp), 0.0, "a covering sprite well in front of him is gone");
+    }
+
+    /// The window's overlap test: rectangles overlap when they share a pixel, and a margin widens the second
+    /// one on every side.
+    #[test]
+    fn two_screen_rectangles_overlap_with_a_margin_about_the_second() {
+        let hero = Rect::new(100.0, 100.0, 40.0, 60.0);
+        assert!(overlaps(Rect::new(120.0, 120.0, 10.0, 10.0), hero, 0.0), "inside");
+        assert!(overlaps(Rect::new(90.0, 90.0, 20.0, 20.0), hero, 0.0), "the corner");
+        assert!(!overlaps(Rect::new(0.0, 0.0, 50.0, 50.0), hero, 0.0));
+        assert!(!overlaps(Rect::new(141.0, 100.0, 10.0, 10.0), hero, 0.0), "beside him, one pixel clear");
+        assert!(overlaps(Rect::new(141.0, 100.0, 10.0, 10.0), hero, 4.0), "the margin reaches it");
+        assert!(!overlaps(Rect::new(100.0, 170.0, 10.0, 10.0), hero, 4.0), "below him, clear of the margin");
+    }
+
+    /// The covering test on the window, with the real projection: a sprite standing on the hero's cell covers
+    /// his drawn rectangle; one standing six cells east, clear of it, does not. Nothing covers him when he is
+    /// not drawn.
+    #[test]
+    fn a_sprite_on_the_heros_cell_covers_him_on_the_window_and_one_far_off_does_not() {
+        let game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        let m = &game.world.map;
+        let (cx, cy) = (m.w / 2, m.h / 2);
+        let cam = first_person_camera(&game, 0.0, false);
+        let tilt = cam.tilt.expect("the first-person tilt");
+        let hero_at = cam.screen_at(m.grid.center((cx, cy)));
+        let (fx, fy) = m.grid.center((cx + 6, cy));
+        let far_at = cam.screen_at((fx, fy));
+        assert!(cam.view.contains(hero_at) && cam.view.contains(far_at), "both in the frame: {hero_at:?} {far_at:?}");
+        // His drawn rectangle: 40 by 60 px, its foot at his cell.
+        HERO_ON_WINDOW.with(|h| h.set(Some(HeroOnWindow { rect: Rect::new(hero_at.x - 20.0, hero_at.y - 60.0, 40.0, 60.0), depth: 10.0 })));
+        // A picture of two world units about the ground point of a cell (a model that lays it on the ground).
+        let picture = Rect::new(-1.0, -1.0, 2.0, 2.0);
+        let on_hero = Mat4::from_translation(vec3(m.grid.center((cx, cy)).0, 0.0, m.grid.center((cx, cy)).1));
+        let on_far = Mat4::from_translation(vec3(fx, 0.0, fy));
+        assert_eq!(covering_gap(&cam, &tilt, on_hero, picture, 4.0), Some(6.0), "a sprite on his cell covers him, six in front of him");
+        assert_eq!(covering_gap(&cam, &tilt, on_far, picture, 4.0), None, "a sprite six cells east does not");
+        HERO_ON_WINDOW.with(|h| h.set(None));
+        assert_eq!(covering_gap(&cam, &tilt, on_hero, picture, 4.0), None, "nothing covers an undrawn hero");
     }
 
     /// The first-person camera over the middle of `game`'s map, built as [`Camera::looking_in`]
@@ -6226,7 +6442,7 @@ mod tilt_tests {
         let game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
         let flat = camera(&game, None);
         let mut got = None;
-        standing(&flat, vec2(10.0, 10.0), vec2(10.0, 10.0), 0.25, || got = Some(faded(WHITE)));
+        standing(&flat, vec2(10.0, 10.0), vec2(10.0, 10.0), 0.25, Rect::new(0.0, 0.0, 1.0, 1.0), || got = Some(faded(WHITE)));
         assert_eq!(got.map(|c| (c.r, c.g, c.b, c.a)), Some((1.0, 1.0, 1.0, 1.0)), "a flat sprite is never faded");
     }
 

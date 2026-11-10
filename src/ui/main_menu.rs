@@ -1687,9 +1687,8 @@ impl Row {
     fn shown(self, audio: &super::audio::Settings) -> bool {
         match self {
             Row::SpriteSize | Row::TwoFingerTurn => audio.map_tilt,
-            // The far ground's shape is the first-person view's only, and that view is hidden from
-            // players (the owner's decision, 2026-11-10): these rows show with the developer switch only.
-            Row::FarGround | Row::ViewCamera => super::world_view::first_person_visible() && audio.map_tilt && audio.map_first_person,
+            // The far ground's shape is the first-person view's only.
+            Row::FarGround | Row::ViewCamera => audio.map_tilt && audio.map_first_person,
             Row::Orientation => cfg!(target_os = "android"),
             // The bottom bar's size is a phone's (Razdor's; the desktop has no such row).
             Row::BottomBar => bottom_bar_row_shown(super::display::dp_px().is_some(), window_layout::portrait()),
@@ -1976,21 +1975,15 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
         }
         Row::MapView => {
             // Razdor's (the owner's decision, 2026-11-02): the world map's 2.5D view, and the
-            // first-person view within it (2026-11-10): flat, 2.5D, first person, flat. Hidden from
-            // players (the owner's decision, 2026-11-10): flat and 2.5D only; a saved first-person
-            // choice stays in the file, unused.
+            // first-person view within it (2026-11-10): flat, 2.5D, first person, flat.
             if labelled_row(c, geo, tr("Map view"), map_view_label(audio)).0 {
-                if super::world_view::first_person_visible() {
-                    let (tilt, first) = match (audio.map_tilt, audio.map_first_person) {
-                        (false, _) => (true, false),
-                        (true, false) => (true, true),
-                        (true, true) => (false, false),
-                    };
-                    audio.map_tilt = tilt;
-                    audio.map_first_person = first;
-                } else {
-                    audio.map_tilt = !audio.map_tilt;
-                }
+                let (tilt, first) = match (audio.map_tilt, audio.map_first_person) {
+                    (false, _) => (true, false),
+                    (true, false) => (true, true),
+                    (true, true) => (false, false),
+                };
+                audio.map_tilt = tilt;
+                audio.map_first_person = first;
             }
         }
         Row::FarGround => {
@@ -2463,7 +2456,7 @@ fn updates_label(mode: razdor::update::Mode, phone: bool) -> &'static str {
 
 /// The world map's view row: «Плоский», «2.5D» or «От первого лица».
 fn map_view_label(audio: &super::audio::Settings) -> &'static str {
-    match (audio.map_tilt, audio.map_first_person && super::world_view::first_person_visible()) {
+    match (audio.map_tilt, audio.map_first_person) {
         (false, _) => tr("Flat"),
         (true, false) => "2.5D",
         (true, true) => tr("First person"),
@@ -3350,20 +3343,22 @@ mod tests {
         assert_eq!(scroll_most(573.0, 573.0), 0.0);
     }
 
-    /// The first-person view is hidden from players (the owner's decision, 2026-11-10): its two rows do not
-    /// show and the map view row cycles flat and 2.5D only, whatever the saved first-person fields say (a
-    /// settings file with them loads as 2.5D). The tests run with `RAZDOR_VIEW` unset, as a player's game does.
+    /// The first-person view is in the settings for players (the owner's decision, 2026-11-10): with the
+    /// 2.5D view on and the first-person choice saved, the map view row reads «От первого лица» and the
+    /// two first-person rows («Даль», «Камера») show; flat and 2.5D hide them. The tests run with
+    /// `RAZDOR_VIEW` unset, as a player's game does.
     #[test]
-    fn the_first_person_rows_are_hidden_from_players() {
-        let saved = super::super::audio::Settings { map_tilt: true, map_first_person: true, map_horizon: true, map_eyes: true, ..Default::default() };
-        assert!(!super::super::world_view::first_person_visible());
-        assert!(!Row::FarGround.shown(&saved) && !Row::ViewCamera.shown(&saved));
-        assert_eq!(map_view_label(&saved), "2.5D");
-        assert_eq!(far_ground_label(&saved), tr("Up"));
-        assert_eq!(view_camera_label(&saved), tr("Behind the hero"));
-        assert!(Row::MapView.shown(&saved) && Row::SpriteSize.shown(&saved));
-        assert!(!super::super::world_view::first_person());
-        assert!(!super::super::world_view::eyes_view());
+    fn the_first_person_rows_show_in_the_map_group() {
+        let first = super::super::audio::Settings { map_tilt: true, map_first_person: true, ..Default::default() };
+        let tilted = super::super::audio::Settings { map_tilt: true, ..Default::default() };
+        let flat = super::super::audio::Settings::default();
+        assert!(Row::FarGround.shown(&first) && Row::ViewCamera.shown(&first));
+        assert!(!Row::FarGround.shown(&tilted) && !Row::ViewCamera.shown(&tilted));
+        assert!(!Row::FarGround.shown(&flat) && !Row::ViewCamera.shown(&flat));
+        assert_eq!(map_view_label(&flat), tr("Flat"));
+        assert_eq!(map_view_label(&tilted), "2.5D");
+        assert_eq!(map_view_label(&first), tr("First person"));
+        assert!(Row::MapView.shown(&first) && Row::SpriteSize.shown(&first));
     }
 
     /// Every setting row is in exactly one group, and the groups are the five the owner asked for.

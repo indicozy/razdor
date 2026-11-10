@@ -223,9 +223,7 @@ pub struct Settings {
     pub map_tilt: bool,
     /// Advanced, Razdor's: the first-person view («От первого лица»), within the tilted view
     /// (`map_tilt` on): the camera stands low behind the hero and the far ground bends with it.
-    /// Off (the default), the 2.5D view as before. Without `map_tilt` it has no effect. Hidden from
-    /// players (the owner's decision, 2026-11-10): the saved value does nothing unless the developer
-    /// switch `RAZDOR_VIEW=fp-chase` or `fp-eyes` is set (`world_view::first_person_visible`).
+    /// Off (the default), the 2.5D view as before. Without `map_tilt` it has no effect.
     pub map_first_person: bool,
     /// Advanced, Razdor's: the first-person view's far ground («Даль»): «Горизонт» on (the ground
     /// curves down like the earth's horizon, the sky above), «Вверх» off (the default: it rolls up
