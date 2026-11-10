@@ -25,6 +25,8 @@ import numpy as np
 from PIL import Image, ImageDraw
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import connected_components
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
 
 MODEL = "depth-anything/Depth-Anything-V2-Large-hf"
 ALPHA_OPAQUE = 204  # shadows are alpha 153..187 and are not part of any card
@@ -41,6 +43,19 @@ FNV_OFFSET = 0xCBF29CE484222325
 FNV_PRIME = 0x100000001B3
 MASK64 = (1 << 64) - 1
 OBJECTS = Path("Graphics") / "Objects" / "Objects.ugs"
+
+# Bends pass: a building sprite left with one region is cut at its structural bends.
+SECTION_BUILDING = 1  # the object-section of buildings (castles, towns)
+BENDS_MIN_OPAQUE = 2500
+BENDS_MIN_RANGE = 0.25  # p95 - p5 of the normalised opaque depth
+BENDS_SIGMA = 2.0  # Gaussian of the normalised convolution
+BENDS_K_MIN = 2
+BENDS_K_MAX = 5
+BENDS_MIN_CLUSTER_FRAC = 0.08  # of the opaque pixels: a smaller cluster rejects its K
+BENDS_SAMPLE = 3000  # silhouette sample
+BENDS_SEED = 0
+BENDS_MAX_REGIONS = 5
+BENDS_REACH = 4  # px, into the neighbours across a cut (a 9x9 square)
 
 
 # ----------------------------------------------------------------------------------------------
@@ -152,29 +167,30 @@ def predict_depth(torch, proc, model, rgba: np.ndarray, w: int, h: int) -> np.nd
 # ----------------------------------------------------------------------------------------------
 
 
-def find_regions(op: np.ndarray, D: np.ndarray) -> np.ndarray:
-    """Label the opaque pixels: 4-connected, neighbours joined when |d1 - d2| <= DEPTH_EDGE.
-
-    This is the union-find of the spec, computed as connected components of the same edges.
-    Returns an (h, w) int array, -1 outside the opaque pixels.
-    """
+def label_regions(op: np.ndarray, eh: np.ndarray, ev: np.ndarray) -> np.ndarray:
+    """4-connected components of the opaque pixels. eh (h, w-1) and ev (h-1, w) mark the
+    neighbour pairs that are joined. Returns an (h, w) int array, -1 outside the opaque pixels."""
     h, w = op.shape
     idx = np.arange(h * w).reshape(h, w)
-    ea, eb = [], []
-    m = op[:, :-1] & op[:, 1:] & (np.abs(D[:, :-1] - D[:, 1:]) <= DEPTH_EDGE)
-    ea.append(idx[:, :-1][m])
-    eb.append(idx[:, 1:][m])
-    m = op[:-1, :] & op[1:, :] & (np.abs(D[:-1, :] - D[1:, :]) <= DEPTH_EDGE)
-    ea.append(idx[:-1, :][m])
-    eb.append(idx[1:, :][m])
-    ea = np.concatenate(ea)
-    eb = np.concatenate(eb)
+    ea = np.concatenate([idx[:, :-1][eh], idx[:-1, :][ev]])
+    eb = np.concatenate([idx[:, 1:][eh], idx[1:, :][ev]])
     graph = csr_matrix((np.ones(len(ea), np.int8), (ea, eb)), shape=(h * w, h * w))
     _, comp = connected_components(graph, directed=False)
     lab = np.full((h, w), -1, np.int64)
     comp = comp.reshape(h, w)
     lab[op] = np.unique(comp[op], return_inverse=True)[1]
     return lab
+
+
+def find_regions(op: np.ndarray, D: np.ndarray) -> np.ndarray:
+    """Label the opaque pixels: 4-connected, neighbours joined when |d1 - d2| <= DEPTH_EDGE.
+
+    This is the union-find of the spec, computed as connected components of the same edges.
+    Returns an (h, w) int array, -1 outside the opaque pixels.
+    """
+    eh = op[:, :-1] & op[:, 1:] & (np.abs(D[:, :-1] - D[:, 1:]) <= DEPTH_EDGE)
+    ev = op[:-1, :] & op[1:, :] & (np.abs(D[:-1, :] - D[1:, :]) <= DEPTH_EDGE)
+    return label_regions(op, eh, ev)
 
 
 def compact(lab: np.ndarray):
@@ -212,8 +228,8 @@ def merge_into(lab, r, t):
     return compact(out)
 
 
-def merge_regions(lab, D, n_op):
-    """Merge small regions, then reduce to at most MAX_REGIONS. Returns (lab, K, fallbacks)."""
+def merge_regions(lab, D, n_op, max_regions=MAX_REGIONS):
+    """Merge small regions, then reduce to at most max_regions. Returns (lab, K, fallbacks)."""
     lab, K = compact(lab)
     thr = max(SMALL_MIN_PX, SMALL_FRAC * n_op)
     while K > 1:
@@ -230,7 +246,7 @@ def merge_regions(lab, D, n_op):
                     key=lambda q: (mx[q] - mx[r]) ** 2 + (my[q] - my[r]) ** 2)
         lab, K = merge_into(lab, r, t)
     fallbacks = 0
-    while K > MAX_REGIONS:
+    while K > max_regions:
         _, md, _, _ = region_stats(lab, D, K)
         pairs = adjacency(lab)
         if not pairs:
@@ -241,6 +257,58 @@ def merge_regions(lab, D, n_op):
         a, b = min(pairs, key=lambda p: abs(md[p[0]] - md[p[1]]))
         lab, K = merge_into(lab, b, a)
     return lab, K, fallbacks
+
+
+# ----------------------------------------------------------------------------------------------
+# Bends pass (castles: one region whose depth changes gradually)
+# ----------------------------------------------------------------------------------------------
+
+
+def smooth_depth(op: np.ndarray, D: np.ndarray) -> np.ndarray:
+    """Normalised convolution: Gaussian(D * mask) / Gaussian(mask), so only opaque pixels count."""
+    m = op.astype(np.float32)
+    num = cv2.GaussianBlur(D.astype(np.float32) * m, (0, 0), BENDS_SIGMA)
+    den = cv2.GaussianBlur(m, (0, 0), BENDS_SIGMA)
+    return num / np.maximum(den, 1e-6)
+
+
+def bends_regions(op: np.ndarray, D: np.ndarray, n_op: int):
+    """Cut a one-region sprite at its bends. Returns (lab, K, k) with k the chosen cluster count,
+    or None when no K in BENDS_K_MIN..BENDS_K_MAX is valid (the sprite keeps one region)."""
+    ds = smooth_depth(op, D)
+    gx = cv2.Sobel(ds, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(ds, cv2.CV_32F, 0, 1, ksize=3)
+    s = max(float(np.median(np.hypot(gx, gy)[op])), 1e-6)  # the median gradient, no division by 0
+    X = np.stack([2.0 * ds[op], gx[op] / s, gy[op] / s], axis=1).astype(np.float64)
+    sample = np.random.default_rng(BENDS_SEED).choice(n_op, min(BENDS_SAMPLE, n_op), replace=False)
+    best = None
+    for k in range(BENDS_K_MIN, BENDS_K_MAX + 1):
+        lbl = KMeans(n_clusters=k, n_init=10, random_state=0).fit(X).labels_
+        if np.bincount(lbl, minlength=k).min() < BENDS_MIN_CLUSTER_FRAC * n_op:
+            continue
+        ls = lbl[sample]
+        if len(np.unique(ls)) < 2:
+            continue
+        score = float(silhouette_score(X[sample], ls))
+        if best is None or score > best[0]:
+            best = (score, k, lbl)
+    if best is None:
+        return None
+    _, k, lbl = best
+    lc = np.full(op.shape, -1, np.int64)
+    lc[op] = lbl
+    eh = op[:, :-1] & op[:, 1:] & (lc[:, :-1] == lc[:, 1:])
+    ev = op[:-1, :] & op[1:, :] & (lc[:-1, :] == lc[1:, :])
+    lab = label_regions(op, eh, ev)  # 4-connected pieces of one cluster
+    lab, K, _ = merge_regions(lab, D, n_op, BENDS_MAX_REGIONS)
+    return lab, K, k
+
+
+def is_bends_candidate(section: int, n_op: int, D: np.ndarray, op: np.ndarray) -> bool:
+    if section != SECTION_BUILDING or n_op < BENDS_MIN_OPAQUE:
+        return False
+    p5, p95 = np.percentile(D[op], [5, 95])
+    return float(p95 - p5) >= BENDS_MIN_RANGE
 
 
 # ----------------------------------------------------------------------------------------------
@@ -289,9 +357,22 @@ def feet(lab, D, K):
     return out
 
 
-def region_card(mask: np.ndarray):
-    """Polygon and triangles of one region: (verts, tris) as flat int lists, or None."""
-    grown = cv2.dilate(mask.astype(np.uint8) * 255, np.ones((3, 3), np.uint8))
+def card_grown(mask: np.ndarray, op=None) -> np.ndarray:
+    """The card's area as a 0/255 mask. Plain regions: the region dilated by 1 px.
+    Bends regions (op given): dilated by BENDS_REACH px (a 9x9 square), clipped to the sprite's
+    silhouette (opaque dilated by 1 px), so a card overlaps its neighbour across a cut."""
+    m = mask.astype(np.uint8) * 255
+    if op is None:
+        return cv2.dilate(m, np.ones((3, 3), np.uint8))
+    side = 2 * BENDS_REACH + 1
+    reach = cv2.dilate(m, np.ones((side, side), np.uint8))
+    silhouette = cv2.dilate(op.astype(np.uint8) * 255, np.ones((3, 3), np.uint8))
+    return reach & silhouette
+
+
+def region_card(grown: np.ndarray):
+    """Polygon and triangles of one card area (a 0/255 mask): (verts, tris) as flat int lists,
+    or None."""
     contours, hier = cv2.findContours(grown, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
     if hier is None:
         return None
@@ -322,11 +403,12 @@ def region_card(mask: np.ndarray):
     return verts, tris
 
 
-def build_cards(lab, D, K):
-    """Cards sorted back to front (foot y ascending). Each: dict(foot, verts, tris, region)."""
+def build_cards(lab, D, K, op=None):
+    """Cards sorted back to front (foot y ascending). Each: dict(foot, verts, tris, region).
+    op given: the bends pass's overlapping card areas (see card_grown)."""
     cards = []
     for r, (fx, fy) in enumerate(feet(lab, D, K)):
-        got = region_card(lab == r)
+        got = region_card(card_grown(lab == r, op))
         if got is None:
             continue
         verts, tris = got
@@ -374,6 +456,17 @@ def draw_cards(img, cards, scale, ox=0.0, oy=0.0):
         d.line([(cx - 4, cy + 4), (cx + 4, cy - 4)], fill=(255, 0, 0), width=2)
 
 
+def tinted_composite(rgba, lab, K) -> np.ndarray:
+    """The sprite over grey, each region tinted with its own colour."""
+    comp = composite_rgb(rgba)
+    tinted = comp.copy()
+    cols = tints(K)
+    for r in range(K):
+        m = lab == r
+        tinted[m] = (0.45 * np.array(cols[r]) + 0.55 * comp[m]).astype(np.uint8)
+    return tinted
+
+
 def preview_sprite(path: Path, rgba, D, lab, K, cards) -> None:
     h, w = lab.shape
     scale = max(1, min(8, 240 // max(w, h)))
@@ -381,13 +474,7 @@ def preview_sprite(path: Path, rgba, D, lab, K, cards) -> None:
     op = rgba[..., 3] >= ALPHA_OPAQUE
     dg = np.where(op, np.clip(D * 255, 0, 255), GREY).astype(np.uint8)
     depth = Image.fromarray(np.stack([dg] * 3, -1)).resize((w * scale, h * scale), Image.Resampling.NEAREST)
-    comp = composite_rgb(rgba)
-    tinted = comp.copy()
-    cols = tints(K)
-    for r in range(K):
-        m = lab == r
-        tinted[m] = (0.45 * np.array(cols[r]) + 0.55 * comp[m]).astype(np.uint8)
-    regions = Image.fromarray(tinted).resize((w * scale, h * scale), Image.Resampling.NEAREST)
+    regions = Image.fromarray(tinted_composite(rgba, lab, K)).resize((w * scale, h * scale), Image.Resampling.NEAREST)
     draw_cards(regions, cards, scale)
     gap = 6
     sheet = Image.new("RGB", (3 * w * scale + 2 * gap, h * scale), (255, 255, 255))
@@ -398,12 +485,13 @@ def preview_sprite(path: Path, rgba, D, lab, K, cards) -> None:
 
 
 def contact_sheet(path: Path, items, cell=220, cols=12) -> None:
+    """items: (w, h, rgb tile as an (h, w, 3) uint8 array, cards)."""
     rows = max(1, math.ceil(len(items) / cols))
     sheet = Image.new("RGB", (cols * cell, rows * cell), (60, 60, 60))
-    for i, (w, h, rgba, cards) in enumerate(items):
+    for i, (w, h, rgb, cards) in enumerate(items):
         s = min(4.0, 200.0 / max(w, h))
         tw, th = max(1, round(w * s)), max(1, round(h * s))
-        tile = Image.fromarray(composite_rgb(rgba)).resize((tw, th), Image.Resampling.NEAREST)
+        tile = Image.fromarray(rgb).resize((tw, th), Image.Resampling.NEAREST)
         ox, oy = (cell - tw) // 2, (cell - th) // 2
         sheet.paste(tile, ((i % cols) * cell + ox, (i // cols) * cell + oy))
         draw_cards(sheet, cards, s, (i % cols) * cell + ox, (i // cols) * cell + oy)
@@ -434,6 +522,10 @@ def main() -> None:
     out = {}
     depth_run = skipped_small = one_region = fallback_sprites = 0
     histogram = Counter()
+    bends_eligible = bends_no_k = 0
+    bends_k = Counter()  # the K the silhouette chose
+    bends_histogram = Counter()  # cards per bends-cut sprite
+    bends_items = {}  # key -> (w, h, rgba, lab, K, cards), for the bends contact sheet
     if args.preview:
         args.preview.mkdir(parents=True, exist_ok=True)
 
@@ -456,10 +548,20 @@ def main() -> None:
         lab, K, fallbacks = merge_regions(lab0, D, n_op)
         if fallbacks:
             fallback_sprites += 1
+        bent = False
+        if K == 1 and is_bends_candidate(section, n_op, D, op):
+            bends_eligible += 1
+            got = bends_regions(op, D, n_op)
+            if got is None:
+                bends_no_k += 1
+            else:
+                lab, K, k = got
+                bends_k[k] += 1
+                bent = True
         if K < 2:
             one_region += 1
             continue
-        cards = build_cards(lab, D, K)
+        cards = build_cards(lab, D, K, op if bent else None)
         if len(cards) < 2:
             one_region += 1
             continue
@@ -469,16 +571,23 @@ def main() -> None:
             "h": h,
             "cards": [{"foot": c["foot"], "verts": c["verts"], "tris": c["tris"]} for c in cards],
         }
+        if bent:
+            bends_histogram[len(cards)] += 1
+            bends_items[key] = (w, h, rgba, lab, K, out[key]["cards"])
         if args.preview:
             preview_sprite(args.preview / f"{key}_n{len(cards)}.png", rgba, D, lab, K, cards)
 
     write_json(args.out, out)
     if args.preview:
-        buildings = [k for k in sorted(sprites) if sprites[k][0] == 1]
-        items = [(sprites[k][1], sprites[k][2], sprites[k][3], out[k]["cards"] if k in out else [])
-                 for k in buildings]
+        buildings = [k for k in sorted(sprites) if sprites[k][0] == SECTION_BUILDING]
+        items = [(sprites[k][1], sprites[k][2], composite_rgb(sprites[k][3]),
+                  out[k]["cards"] if k in out else []) for k in buildings]
         if items:
             contact_sheet(args.preview / "contact_sheet.png", items)
+        if bends_items:
+            items = [(w, h, tinted_composite(rgba, lab, K), cards)
+                     for w, h, rgba, lab, K, cards in bends_items.values()]
+            contact_sheet(args.preview / "bends_sheet.png", items)
 
     total_cards = sum(len(v["cards"]) for v in out.values())
     print(f"sprites processed (unique): {len(sprites)}")
@@ -489,6 +598,12 @@ def main() -> None:
     print(f"  sprites where a merge had to join non-touching regions: {fallback_sprites}")
     print("cards histogram (cards per sprite: sprites):",
           ", ".join(f"{k}: {v}" for k, v in sorted(histogram.items())))
+    print(f"bends pass: eligible {bends_eligible}, no valid K {bends_no_k}, "
+          f"cut {len(bends_items)} sprites")
+    print("  chosen K histogram (K: sprites):",
+          ", ".join(f"{k}: {v}" for k, v in sorted(bends_k.items())) or "none")
+    print("  cards histogram of the bends-cut sprites (cards: sprites):",
+          ", ".join(f"{k}: {v}" for k, v in sorted(bends_histogram.items())) or "none")
     size = args.out.stat().st_size
     print(f"data file: {args.out} ({size / 1024:.1f} KiB)")
     if args.preview:
