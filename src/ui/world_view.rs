@@ -1467,6 +1467,106 @@ fn draw_sheet(target: &RenderTarget, bend: &view25::Bend, region: Rect) {
     }
 }
 
+/// The mesh of a raised mist sheet `lift` cells above a bent sheet (the first-person view): the fog
+/// quad `dest` (its texels `src` of `tex`, as [`Camera::mist_rects`]) on a grid of 64 × 64 cells, each
+/// vertex lifted along the sheet's normal ([`view25::Bend::lift`]). Its colour's alpha is 0 past the
+/// horizon, so the mist does not float in the sky. Drawn in chunks of 8 rows (a draw takes 5000 indices).
+fn bent_mist_meshes(bend: &view25::Bend, origin: Vec2, scale: f32, dest: Rect, src: Option<Rect>, tex: &Texture2D, lift: f32) -> Vec<Mesh> {
+    const ACROSS: usize = 64;
+    const ALONG: usize = 64;
+    const ROWS_PER_DRAW: usize = 8;
+    let (tw, th) = (tex.width(), tex.height());
+    let s = src.unwrap_or(Rect::new(0.0, 0.0, tw, th));
+    let vertex = |i: usize, j: usize| {
+        let (fu, fv) = (i as f32 / ACROSS as f32, j as f32 / ALONG as f32);
+        let g = (vec2(dest.x + dest.w * fu, dest.y + dest.h * fv) + origin) / scale;
+        // Near the horizon the sheet's normal leans toward the far side, and a lifted point would rise above
+        // the horizon line: the lift and the alpha fade out over the last cells before it (none past it).
+        let fade = if bend.limit.is_finite() { ((bend.limit - (g - bend.pivot).dot(view25::forward(bend.yaw_deg))) / HORIZON_FADE).clamp(0.0, 1.0) } else { 1.0 };
+        let fade = fade * fade * (3.0 - 2.0 * fade);
+        let at = bend.lift(g, lift * fade);
+        let alpha = if bend.hidden(g) { 0.0 } else { fade };
+        macroquad::models::Vertex::new(at.x, at.y, at.z, (s.x + s.w * fu) / tw, (s.y + s.h * fv) / th, Color::new(1.0, 1.0, 1.0, alpha))
+    };
+    let mut meshes = Vec::new();
+    for j0 in (0..ALONG).step_by(ROWS_PER_DRAW) {
+        let rows = ROWS_PER_DRAW.min(ALONG - j0);
+        let mut vertices = Vec::with_capacity((ACROSS + 1) * (rows + 1));
+        for j in j0..=j0 + rows {
+            for i in 0..=ACROSS {
+                vertices.push(vertex(i, j));
+            }
+        }
+        let row = (ACROSS + 1) as u16;
+        let mut indices = Vec::with_capacity(rows * ACROSS * 6);
+        for j in 0..rows as u16 {
+            for i in 0..ACROSS as u16 {
+                let a = j * row + i;
+                indices.extend_from_slice(&[a, a + 1, a + row, a + 1, a + row + 1, a + row]);
+            }
+        }
+        meshes.push(Mesh { vertices, indices, texture: Some(tex.clone()) });
+    }
+    meshes
+}
+
+/// The width and height of a bank of mist in cells (its billboard stands up from the frontier).
+const BANK_WIDTH: f32 = 1.4;
+const BANK_HEIGHT: f32 = 1.5;
+/// The banks per frontier edge: spread along the edge at these offsets (cells), overlapping so that
+/// they read as one wall.
+const BANK_SAMPLES: [f32; 3] = [-0.45, 0.0, 0.45];
+/// The cells before a bent view's horizon over which a raised mist sheet sinks to the sheet.
+const HORIZON_FADE: f32 = 3.0;
+
+/// The banks of mist along the frontier (2.5D and first-person, `mist::frontier`): each frontier edge
+/// stands three banks on the line between its unexplored cell and the lit neighbour, sorted like a
+/// standing sprite on the unexplored cell. The nearest to the view's centre come first, up to
+/// `mist::banks_cap`. The unexplored side's shown darkness sets each bank's alpha.
+fn push_banks(cam: &Camera, game: &Game, cols: (i32, i32), rows: (i32, i32), items: &mut Vec<(i64, Drawable)>) {
+    let map = &game.world.map;
+    let fog = &game.fog;
+    let known = |t: (i32, i32)| (t.0 >= 0 && t.1 >= 0 && t.0 < map.w && t.1 < map.h).then(|| minimap::shown_darkness(fog, t));
+    let edges = mist::frontier(known, (cols.0 - 1, rows.0 - 1), (cols.1 + 1, rows.1 + 1));
+    if edges.is_empty() {
+        return;
+    }
+    let grid = cam.grid;
+    let centre = Vec2::from(cam.centre());
+    let mut edges: Vec<(f32, mist::Edge)> = edges.into_iter().map(|e| (Vec2::from(grid.center(e.cell)).distance_squared(centre), e)).collect();
+    edges.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let cap = mist::banks_cap();
+    let mut n = 0usize;
+    for (_, e) in edges {
+        // The wall stands on the frontier line, on the lit side's cell (`toward`): it rises from the explored
+        // land, where it shows against the land (over the unexplored mist it would be lost in it).
+        let (a, b) = (Vec2::from(grid.center(e.cell)), Vec2::from(grid.center(e.toward)));
+        let mid = (a + b) * 0.5;
+        // Along the edge: the perpendicular of the step to the lit cell, a cell long.
+        let d = b - a;
+        let along = vec2(-d.y, d.x).normalize_or_zero();
+        for t in BANK_SAMPLES {
+            if n >= cap {
+                return;
+            }
+            let at = mid + along * t;
+            let foot = cam.to_screen((at.x, at.y));
+            let seed = (n as f32 * 0.618_034 + e.cell.0 as f32 * 0.37 + e.cell.1 as f32 * 0.13).fract();
+            items.push((sprite_key(cam, e.toward, foot, LAYER_BANK), Drawable::Bank { foot, darkness: e.darkness, seed }));
+            n += 1;
+        }
+    }
+}
+
+/// Draws a bank of mist standing with its foot at `foot` (in the billboard [`standing`] makes of it):
+/// [`BANK_WIDTH`] × [`BANK_HEIGHT`] cells. `standing` grows the billboard by the sprites' size, so the
+/// rectangle is the cells over that size.
+fn draw_bank(cam: &Camera, foot: Vec2, darkness: f32, seed: f32) {
+    let k = cam.scale / sprite_size();
+    let (w, h) = (BANK_WIDTH * k, BANK_HEIGHT * k);
+    mist::bank(Rect::new(foot.x - w / 2.0, foot.y - h, w, h), darkness, seed);
+}
+
 /// Draws the ground pass: under a tilted camera, the 2D space laid flat on the ground
 /// ([`view25::ground_model`]); under a flat one, as drawn. In a bent view's sprite run it draws
 /// nothing (the sheet holds the ground), and in its ground run it draws flat into the picture.
@@ -2145,13 +2245,66 @@ impl Camera {
         (self.draw, Rect::new(r.x + 0.5, r.y / rh + 0.5, r.w, r.h / rh))
     }
 
-    /// The mist over the fog's texture (`ui::mist`, «Туман вместо черноты»), with the 2.5D tilt's parallax.
+    /// The mist over the fog's texture (`ui::mist`, «Туман вместо черноты»). The tilted views' ground is its
+    /// lowest sheet alone, and the others are raised ([`Camera::draw_raised_mist`]). The flat view draws every
+    /// sheet on the ground; with `RAZDOR_MIST_RAISED=0` the tilted views do too, with the 2.5D parallax.
     fn draw_mist(&self, tex: &Texture2D, dest: Rect, src: Option<Rect>) {
+        if self.tilt.is_some() && mist::raised_count() > 0 {
+            return mist::draw_ground(tex, dest, src);
+        }
         let parallax = match &self.tilt {
             Some(t) => mist::parallax(t.cam.yaw_deg, t.cam.pitch_deg),
             None => Vec2::ZERO,
         };
         mist::draw(tex, dest, src, parallax);
+    }
+
+    /// The mist's rectangles over the fog texture: where it is drawn (`dest`) and which texels (`src`, None
+    /// for all of it), as [`Camera::draw_fog_flat`] draws them.
+    fn mist_rects(&self, game: &Game) -> (Rect, Option<Rect>) {
+        if extend_edge() {
+            let (dest, src) = self.fog_texels();
+            (dest, Some(src))
+        } else {
+            let (tl, br) = self.fog_corners(game);
+            (Rect::new(tl.x, tl.y, br.x - tl.x, br.y - tl.y), None)
+        }
+    }
+
+    /// The raised sheets of the mist (`mist::raised_count`, «Туман вместо черноты» in the tilted views): each a
+    /// copy of the fog quad lifted off the ground. In 2.5D it is drawn on the ground's pass, lifted straight up
+    /// ([`view25::raised_ground_model`]). In a bent view the picture holds the ground, so the raised sheet is a
+    /// mesh of its own, lifted along the sheet's normal ([`bent_mist_meshes`]), in the sprites' run. Drawn over
+    /// the ground's mist and under the reveals, as the mist itself is.
+    fn draw_raised_mist(&self, game: &Game, shows: &[&Showing]) {
+        let Some(tilt) = self.tilt else { return };
+        let n = mist::raised_count();
+        if n == 0 || !mist::on() || trailer_nofog() {
+            return;
+        }
+        let settle = shows.iter().filter(|s| s.mask.is_some()).flat_map(|s| s.reveal_cells.iter().map(|&(i, _)| i));
+        let (held, origin) = (game.unshown_cells(), game.tile());
+        let Some(tex) = minimap::fog_layer(&game.fog, &held, origin, settle) else { return };
+        let (dest, src) = self.mist_rects(game);
+        let pass = PASS.with(std::cell::Cell::get);
+        for sheet in 1..=n {
+            let lift = mist::raised_height(sheet);
+            match (pass, tilt.cam.bend) {
+                // The ground's pass of a bent view draws the picture (no raised sheet in it).
+                (Pass::Ground, _) => {}
+                (Pass::Sprites, Some(bend)) => {
+                    let meshes = bent_mist_meshes(&bend, self.origin, self.scale, dest, src, &tex, lift);
+                    mist::raised(&tex, sheet, lift, || meshes.iter().for_each(macroquad::models::draw_mesh));
+                }
+                (Pass::Sprites, None) => {}
+                (Pass::Plain, _) => {
+                    push_model(view25::raised_ground_model(self.origin, self.scale, lift));
+                    let params = DrawTextureParams { dest_size: Some(dest.size()), source: src, ..Default::default() };
+                    mist::raised(&tex, sheet, lift, || draw_texture_ex(&tex, dest.x, dest.y, WHITE, params.clone()));
+                    pop_model();
+                }
+            }
+        }
     }
 
     fn draw_fog_flat(&self, game: &Game, shows: &[&Showing]) {
@@ -2515,6 +2668,9 @@ enum Drawable {
     Hero,
     /// Layer 2 or 3 of the spell being played ([`SpellShow`]).
     Spell(u8),
+    /// A bank of mist on the frontier (2.5D and first-person, [`push_banks`]): its foot, the unexplored side's
+    /// shown darkness and its noise seed.
+    Bank { foot: Vec2, darkness: f32, seed: f32 },
 }
 
 /// A spell's layers playing over the figure they landed on, for [`draw_world`].
@@ -3176,6 +3332,8 @@ const LAYER_BUILDING: i64 = 2;
 const LAYER_SPELL_BELOW: i64 = 3;
 const LAYER_FIGURE: i64 = 4;
 const LAYER_SPELL_ABOVE: i64 = 5;
+/// A bank of mist (drawn before the buildings of its cell, after the cell's ground marks).
+const LAYER_BANK: i64 = 1;
 
 fn object_layer(class: u8) -> i64 {
     i64::from(class >= object_class::TREES)
@@ -3571,10 +3729,10 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // hills follow, standing in that shade.
     if tilted {
         frame_probe::time(Stage::Fog, || {
-            ground(cam, || {
-                cam.draw_fog_flat(game, veil.shows);
-                cam.draw_showing_flat(game, veil.shows.to_vec(), veil.now);
-            })
+            ground(cam, || cam.draw_fog_flat(game, veil.shows));
+            // The raised sheets of the mist lie over the ground's mist and under the reveals, as the mist does.
+            cam.draw_raised_mist(game, veil.shows);
+            ground(cam, || cam.draw_showing_flat(game, veil.shows.to_vec(), veil.now));
         });
         if waits {
             gpu_wait(Stage::GpuFog);
@@ -3611,6 +3769,11 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                 items.push((sprite_key(cam, first_footprint_cell(l), building_foot(l, cam), LAYER_BUILDING), Drawable::Building(i)));
             }
         }
+    }
+    // 2.5D and first-person with the mist: the banks stand along the frontier of the unexplored land, sorted
+    // with the sprites (the figures and buildings in front of them draw over them).
+    if tilted && mist::on() && !trailer_nofog() && fog.enabled {
+        push_banks(cam, game, (c0, c1), (r0, r1), &mut items);
     }
     // The figures (armies, the waiting ship, the hero) are drawn in their cell's turn of the
     // pass, after the cell's scenery and buildings (0x4c9b5b, 0x4c9dca). The original keys a
@@ -3662,6 +3825,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                         draw_card(card, origin, zoom, r, atlas, outlined);
                     });
                 }
+                Drawable::Bank { foot, darkness, seed } => standing(cam, *foot, *foot, 1.0, || draw_bank(cam, *foot, *darkness, *seed)),
                 Drawable::Army(i) => {
                     let a = &game.world.armies[*i];
                     let f = cam.to_screen(game.army_display_pos(a));
