@@ -21,6 +21,7 @@ Razdor implements them.
 | Saving and loading, the load window, adding state that must survive a save | [saves.md](saves.md) |
 | Tests, real-data tests and difftests, offscreen screenshots, profiling a hitch, releases, updates, the editor | [testing-and-tools.md](testing-and-tools.md) |
 | Experimental scenario rules (the `...` button on the scenario screen), noncombatants, the Shift shortcuts | [experimental-rules.md](experimental-rules.md) |
+| A trailer shot (dev-only): the camera script, auto-answered events, the recorder and its sound | [trailer.md](trailer.md) (the format: `docs/trailer-shots.md`) |
 | A player's report | the `player-report` skill, then the flow of the area |
 
 ## Where the truth is
