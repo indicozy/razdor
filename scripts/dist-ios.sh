@@ -31,7 +31,7 @@ REMAP="$REMAP --remap-path-prefix=$ROOT=razdor"
 
 # iOS 14 is the oldest the build targets (MinimumOSVersion in the Info.plist below).
 export IPHONEOS_DEPLOYMENT_TARGET=14.0
-RUSTFLAGS="$REMAP" cargo build --release --target aarch64-apple-ios --no-default-features --features audio --bin razdor
+RUSTFLAGS="$REMAP" cargo build --release --target aarch64-apple-ios --no-default-features --features audio,depth-model --bin razdor
 
 VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
 # The staging folder is under the target folder, not in the repository.

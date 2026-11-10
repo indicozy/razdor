@@ -61,7 +61,7 @@ done
 REMAP="$REMAP --remap-path-prefix=$PWD=razdor"
 
 # The program only (`--bin razdor`, not the map translator), without gamepads (gilrs).
-BUILD="--release --no-default-features --features audio --bin razdor"
+BUILD="--release --no-default-features --features audio,depth-model --bin razdor"
 APK="${CARGO_TARGET_DIR:-target}/android-artifacts/release/apk/razdor.apk"
 
 if [ "${RAZDOR_ANDROID_UNSIGNED:-}" = 1 ]; then
