@@ -112,6 +112,27 @@ pub fn darkness_of(w: i32, h: i32, explored: impl Fn((i32, i32)) -> bool) -> Vec
     out
 }
 
+/// [`darkness_of`] at one cell `t` (0 outside the map), the same value the fog texture shows
+/// there, without the whole map: a sprite's foot in the 2.5D view asks for its own cell only.
+pub fn darkness_at(w: i32, h: i32, explored: impl Fn((i32, i32)) -> bool, t: (i32, i32)) -> u8 {
+    let (x, y) = t;
+    if x < 0 || y < 0 || x >= w || y >= h {
+        return 0;
+    }
+    let f = FEATHER;
+    let (x0, x1, y0, y1) = ((x - f).max(0), (x + f + 1).min(w), (y - f).max(0), (y + f + 1).min(h));
+    let dark = (y0..y1).flat_map(|ny| (x0..x1).map(move |nx| (nx, ny))).filter(|&n| !explored(n)).count();
+    let share = dark as f32 / ((x1 - x0) * (y1 - y0)) as f32;
+    let t = ((share - 0.2) / 0.5).clamp(0.0, 1.0);
+    let mut v = (t * t * (3.0 - 2.0 * t) * 255.0).round() as u8;
+    if explored((x, y)) {
+        let edge = (y - 1).max(0)..(y + 2).min(h);
+        let edge = edge.into_iter().any(|ny| ((x - 1).max(0)..(x + 2).min(w)).any(|nx| !explored((nx, ny))));
+        v = v.min(if edge { EDGE_DARK } else { 0 });
+    }
+    v
+}
+
 /// [`darkness`] with the cells `held` kept as they were before they were uncovered: their
 /// place is not shown yet, so they stay dark until its reveal plays (the original shows a
 /// place only when the camera arrives there, 0x4af83c). `held` is empty when nothing waits.
@@ -996,6 +1017,25 @@ mod tests {
         assert!(at(20, 10) >= 128 && at(20, 10) < 255, "dark edge cell mostly dark: {}", at(20, 10));
         assert!(at(17, 10) <= at(19, 10) && at(20, 10) <= at(22, 10), "darker outwards");
         assert!(darkness(&Fog::disabled(3, 3)).iter().all(|&a| a == 0));
+    }
+
+    /// [`darkness_at`] is the fog texture's value cell by cell, held cells and the map's
+    /// edges included, so a sprite is shaded by the dark its ground shows.
+    #[test]
+    fn darkness_at_is_the_texture_value_of_its_cell() {
+        let (w, h) = (23, 17);
+        let mut fog = Fog::new(w, h);
+        fog.reveal(6, 8, 5);
+        fog.reveal(20, 2, 2);
+        let held = [(7, 8), (6, 3)];
+        let explored = |t: (i32, i32)| fog.explored(t) && !held.contains(&t);
+        let table = darkness_of(w, h, explored);
+        for y in -1..=h {
+            for x in -1..=w {
+                let want = if x < 0 || y < 0 || x >= w || y >= h { 0 } else { table[(y * w + x) as usize] };
+                assert_eq!(darkness_at(w, h, explored, (x, y)), want, "cell ({x}, {y})");
+            }
+        }
     }
 
     /// A lantern opening far away leaves the rest of the fog as it is (0x49c8f0 merges only

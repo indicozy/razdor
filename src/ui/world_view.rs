@@ -590,6 +590,18 @@ impl Showing {
             None => 0.0,
         }
     }
+
+    /// The darkness the reveal still draws over cell `t` of a `w`-wide map at `now` (0 to 1), as
+    /// [`Camera::draw_showing_flat`] has it in its mask; None once the place is open or with no
+    /// mask.
+    fn alpha_at(&self, w: i32, t: Tile, now: f64) -> Option<f32> {
+        if self.mask.is_none() || self.progress(now) >= 1.0 {
+            return None;
+        }
+        let image = self.mask_image.as_ref()?.borrow();
+        let i = t.1 as usize * w as usize + t.0 as usize;
+        Some(image.bytes.get(i * 4 + 3).copied().unwrap_or(0) as f32 / 255.0)
+    }
 }
 
 impl MapView {
@@ -1117,22 +1129,58 @@ fn ground<R>(cam: &Camera, draw: impl FnOnce() -> R) -> R {
     r
 }
 
+thread_local! {
+    /// The fog's visibility of the standing sprite being drawn, 1 = plain ([`sprite_visibility`]).
+    /// Only [`standing`] sets it, and only in the 2.5D view: the flat view's sprites are always 1.
+    static SPRITE_VIS: std::cell::Cell<f32> = const { std::cell::Cell::new(1.0) };
+}
+
+/// A straight-alpha sprite colour `c` faded by the visibility of the standing sprite being drawn:
+/// the colour kept, the alpha times the visibility (white becomes (1, 1, 1, v)), so what is behind
+/// the sprite shows through it.
+fn faded(c: Color) -> Color {
+    let v = SPRITE_VIS.with(std::cell::Cell::get);
+    Color::new(c.r, c.g, c.b, c.a * v)
+}
+
+/// [`faded`] for a premultiplied sprite (the figures, `chrome::premultiplied`): every channel
+/// scaled by the visibility, so white becomes (v, v, v, v).
+fn faded_premultiplied(c: Color) -> Color {
+    let v = SPRITE_VIS.with(std::cell::Cell::get);
+    Color::new(c.r * v, c.g * v, c.b * v, c.a * v)
+}
+
+/// The visibility of a standing sprite on a cell: 1 less the darkest of the fog's darkness there
+/// (`fog`, 0 to 1, as the fog texture shows it) and the reveal still over it (`shown`), eased by a
+/// smoothstep from 0.15 to 0.85, so an edge sprite is not ghostly for long and a deep one is gone.
+fn sprite_visibility(fog: f32, shown: f32) -> f32 {
+    let x = (1.0 - fog.max(shown)).clamp(0.0, 1.0);
+    let t = ((x - 0.15) / 0.7).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 /// Draws a standing sprite whose foot is at `foot` (a point of the 2D space) as a billboard
 /// ([`view25::billboard_model_about`]); under a flat camera, as drawn. The sprite turns about
 /// `foot` and grows about `base` (its row on the ground: [`object_base`], [`building_base`]; the
-/// foot itself for the figures), so a grown picture keeps its base where it stands.
+/// foot itself for the figures), so a grown picture keeps its base where it stands. `vis` is its
+/// visibility ([`Shade::at`]): the sprite fades into the fog on its foot's cell (`faded`), and is
+/// not drawn at all at 0.
 ///
 /// The billboard is a CPU-side model transform (macroquad's `push_cpu_model_matrix`, a fork
 /// patch): a GPU model would start a new draw call per sprite, and on the owner's OnePlus 13
 /// (Adreno) each draw call's buffer upload then cost a copy and an orphaned buffer (91% of the
 /// frame in the render passes; the 2.5D frame 17.7 ms against 8.3 ms flat). With the transform
 /// on the CPU the sprites share their draw calls.
-fn standing<R>(cam: &Camera, foot: Vec2, base: Vec2, draw: impl FnOnce() -> R) -> R {
+fn standing(cam: &Camera, foot: Vec2, base: Vec2, vis: f32, draw: impl FnOnce()) {
     let Some(tilt) = cam.tilt else { return draw() };
+    if vis <= 0.0 {
+        return;
+    }
     push_cpu_model(view25::billboard_model_about(cam.origin, foot, base, cam.scale, tilt.cam.pitch_deg, tilt.cam.yaw_deg, sprite_size()));
-    let r = draw();
+    let prev = SPRITE_VIS.with(|s| s.replace(vis));
+    draw();
+    SPRITE_VIS.with(|s| s.set(prev));
     pop_cpu_model();
-    r
 }
 
 fn push_model(m: Mat4) {
@@ -1655,7 +1703,7 @@ fn draw_spell_layer(show: &SpellShow, n: u8, cam: &Camera) {
         let Some(f) = frames.get(i.min(frames.len().saturating_sub(1))) else { continue };
         let q = l.quad();
         let dest = Rect::new(c.x + q.x * zoom, c.y + q.y * zoom, q.w * zoom, q.h * zoom);
-        super::chrome::additive(|| super::chrome::tex(f, dest, l.tint));
+        super::chrome::additive(|| super::chrome::tex(f, dest, faded(l.tint)));
     }
 }
 
@@ -1752,7 +1800,8 @@ fn building_base(l: &Location, cam: &Camera) -> Vec2 {
 fn draw_leaning(texture: &Texture2D, src: Rect, at: Vec2, size: Vec2, lean: f32) {
     let (tw, th) = (texture.width(), texture.height());
     let (u0, v0, u1, v1) = (src.x / tw, src.y / th, (src.x + src.w) / tw, (src.y + src.h) / th);
-    let vertex = |x: f32, y: f32, u: f32, v: f32| Vertex::new(x, y, 0.0, u, v, WHITE);
+    let white = faded(WHITE);
+    let vertex = |x: f32, y: f32, u: f32, v: f32| Vertex::new(x, y, 0.0, u, v, white);
     // One quad mesh, reused by every swaying tree (its vertex buffer keeps its capacity).
     LEAN_MESH.with(|m| {
         let mut m = m.borrow_mut();
@@ -1791,7 +1840,7 @@ fn draw_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera) {
             return;
         }
         frame_probe::sprite(size.x, size.y);
-        super::sharp::draw(&atlas.texture, at.x, at.y, WHITE, DrawTextureParams { dest_size: Some(size), source: Some(r), ..Default::default() });
+        super::sharp::draw(&atlas.texture, at.x, at.y, faded(WHITE), DrawTextureParams { dest_size: Some(size), source: Some(r), ..Default::default() });
         return;
     }
     let s = cam.scale;
@@ -1835,11 +1884,11 @@ fn draw_building(l: &Location, art: Option<&DtArt>, cam: &Camera, outlined: bool
             let d = (1.5 * zoom).max(1.0);
             super::chrome::silhouette(|| {
                 for (dx, dy) in [(-d, 0.0), (d, 0.0), (0.0, -d), (0.0, d), (-d, -d), (d, -d), (-d, d), (d, d)] {
-                    super::sharp::draw(&atlas.texture, at.x + dx, at.y + dy, BUILDING_OUTLINE, params.clone());
+                    super::sharp::draw(&atlas.texture, at.x + dx, at.y + dy, faded(BUILDING_OUTLINE), params.clone());
                 }
             });
         }
-        super::sharp::draw(&atlas.texture, at.x, at.y, WHITE, params);
+        super::sharp::draw(&atlas.texture, at.x, at.y, faded(WHITE), params);
     } else {
         let (w, h) = (l.size.0 as f32 * cam.scale, (l.size.1 as f32 * cam.cell_size().y).max(cam.scale * 0.8));
         let wall = match l.kind {
@@ -1970,7 +2019,7 @@ fn draw_figure(art: Option<&DtArt>, stem: &str, pos: (f32, f32), next: Option<(f
             &sheet,
             dest.x,
             dest.y,
-            WHITE,
+            faded_premultiplied(WHITE),
             DrawTextureParams { dest_size: Some(vec2(size, size)), source: Some(Rect::new(frame * n, row * n, n, n)), ..Default::default() },
         )
     });
@@ -2256,7 +2305,69 @@ fn border_width(cells: f32, cam: &Camera) -> f32 {
 ///
 /// `waits`: the map frame itself, whose passes the frame probe's GPU waits follow (Android,
 /// probe on); a backdrop under a window or a battle does not wait.
-fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<MapHoverLook>, waits: bool) {
+/// The fog layers of a frame: the war fog, and the event reveals (`shows`, in the order drawn)
+/// at `now`. The flat view draws them after the world; the 2.5D view on the ground under the
+/// standing sprites ([`draw_world_in`]).
+#[derive(Clone, Copy)]
+struct Veil<'a> {
+    shows: &'a [&'a Showing],
+    now: f64,
+}
+
+/// No fog layers: a backdrop under a window (the fog is drawn by [`draw_world`] in the 2.5D
+/// view only), or any frame with none.
+const NO_VEIL: Veil<'static> = Veil { shows: &[], now: 0.0 };
+
+/// The fog shade of the standing sprites in the 2.5D view: the war fog's darkness on a cell (its
+/// texture's value there, the unshown cells dark as the texture has them) and the reveals' over
+/// it, the darker of the two.
+struct Shade<'a> {
+    fog: &'a razdor::rules::fog::Fog,
+    held: std::collections::HashSet<Tile>,
+    veil: Veil<'a>,
+}
+
+impl Shade<'_> {
+    /// The shade of a sprite whose foot is at `foot` (a point of the 2D space of `cam`), on the
+    /// cell under it.
+    fn at(&self, cam: &Camera, foot: Vec2) -> f32 {
+        let world = (foot + cam.origin) / cam.scale;
+        let t = cam.grid.tile_at((world.x, world.y));
+        let fog = self.fog;
+        // A disabled fog draws nothing (`minimap::draw_fog`), so it darkens nothing.
+        if !fog.enabled || fog.w <= 0 || fog.h <= 0 {
+            return 1.0;
+        }
+        // The cell whose fog the foot stands on. Past the map's edges the ground is black (the
+        // fog's rectangles), unless the map goes on past them («Продолжать карту за краем»): then
+        // the edge cell's fog, as the texture clamps there.
+        let inside = t.0 >= 0 && t.1 >= 0 && t.0 < fog.w && t.1 < fog.h;
+        let on = if inside {
+            Some(t)
+        } else if extend_edge() {
+            Some((t.0.clamp(0, fog.w - 1), t.1.clamp(0, fog.h - 1)))
+        } else {
+            None
+        };
+        let (dark, shown) = match on {
+            Some(c) => (
+                minimap::darkness_at(fog.w, fog.h, |n| fog.explored(n) && !self.held.contains(&n), c) as f32 / 255.0,
+                self.veil.shows.iter().filter_map(|s| s.alpha_at(fog.w, c, self.veil.now)).fold(0.0, f32::max),
+            ),
+            None => (1.0, 0.0),
+        };
+        sprite_visibility(dark, shown)
+    }
+}
+
+/// The world map: the flat view as it always was, or the 2.5D view (`tilt_view`), where the
+/// same passes are laid on the ground and stand up as billboards.
+///
+/// `waits`: the map frame itself, whose passes the frame probe's GPU waits follow (Android,
+/// probe on); a backdrop under a window or a battle does not wait. `veil`: the fog layers, drawn
+/// here only in the 2.5D view (the flat caller draws them after this).
+#[allow(clippy::too_many_arguments)]
+fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<MapHoverLook>, waits: bool, veil: Veil) {
     if cam.tilt.is_some() {
         draw_rectangle(cam.draw.x, cam.draw.y, cam.draw.w, cam.draw.h, SKY);
     }
@@ -2269,10 +2380,11 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
     if waits {
         gpu_wait(Stage::GpuTerrain);
     }
-    in_view(cam, |c| draw_world_in(game, assets, c, preview, spell, hover, waits));
+    in_view(cam, |c| draw_world_in(game, assets, c, preview, spell, hover, waits, veil));
 }
 
-fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<MapHoverLook>, waits: bool) {
+#[allow(clippy::too_many_arguments)]
+fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<MapHoverLook>, waits: bool, veil: Veil) {
     let art = assets.dt.as_ref();
     let map = &game.world.map;
     let ((c0, c1), (r0, r1)) = cam.visible(map);
@@ -2284,14 +2396,25 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     let mut items = WORLD_ITEMS.with(|c| std::mem::take(&mut *c.borrow_mut()));
     items.clear();
     let fog = &game.fog;
+    let tilted = cam.tilt.is_some();
+    // The 2.5D view's fog shade of each standing sprite (none in the flat view: 1 there).
+    let shade = tilted.then(|| Shade { fog, held: game.unshown_cells().into_iter().collect(), veil });
+    let shade_of = |foot: Vec2| shade.as_ref().map_or(1.0, |s| s.at(cam, foot));
+    // An object of the drawn columns and rows with a cell explored near the feather is seen, and
+    // the hills are the classes 1-3 (`hill`).
+    let seen = |o: &Decoration| o.tile.0 >= c0 - side && o.tile.0 < c1 + side && razdor::rules::map::object_cells(o).any(|t| fog.explored_near(t, minimap::FEATHER));
+    let hill = |o: &Decoration| (object_class::HILLS..=object_class::ROCKY_HILLS).contains(&o.class);
     // The original (0x4c8864) draws the hills of classes 1-3 in a pass of their own before
     // anything else, so they lie under every tree, mountain, building and army, the ones
     // above them included. Its test is `0x100 < class·256 + sprite < 0x401`: class 4's
     // sprites are 10 and up, so the yellow hills are drawn with the mountains, row by row.
+    // 2.5D: the hills are drawn after the fog, below (they stand in the fog's shade).
     for o in map.objects_in_rows(r0 - up, r1 + below) {
-        if o.tile.0 >= c0 - side && o.tile.0 < c1 + side && razdor::rules::map::object_cells(o).any(|t| fog.explored_near(t, minimap::FEATHER)) {
-            if (object_class::HILLS..=object_class::ROCKY_HILLS).contains(&o.class) {
-                standing(cam, object_foot(o, cam), object_base(o, cam), || draw_object(o, art, cam));
+        if seen(o) {
+            if hill(o) {
+                if !tilted {
+                    standing(cam, object_foot(o, cam), object_base(o, cam), shade_of(object_foot(o, cam)), || draw_object(o, art, cam));
+                }
             } else {
                 items.push((sprite_key(cam, o.tile, object_foot(o, cam), object_layer(o.class)), Drawable::Object(*o)));
             }
@@ -2328,12 +2451,32 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
         }
     });
     // 2.5D: the border lies on the ground, over the ground's marks and route and under every
-    // standing sprite; the fog (drawn after the world) darkens it where the ground is unexplored.
-    if cam.tilt.is_some() {
+    // standing sprite; the fog darkens it where the ground is unexplored.
+    if tilted {
         ground(cam, || draw_border(game, cam));
     }
     if waits {
         gpu_wait(Stage::GpuMarks);
+    }
+    // 2.5D: the war fog and the reveals lie on the ground now, over the border and under every
+    // standing sprite (the flat view draws them after the world): a building behind the fog
+    // keeps its upper part, and a sprite on a dark cell is darkened by it (`shade_of`). The
+    // hills follow, standing in that shade.
+    if tilted {
+        frame_probe::time(Stage::Fog, || {
+            ground(cam, || {
+                cam.draw_fog_flat(game);
+                cam.draw_showing_flat(game, veil.shows.to_vec(), veil.now);
+            })
+        });
+        if waits {
+            gpu_wait(Stage::GpuFog);
+        }
+        for o in map.objects_in_rows(r0 - up, r1 + below) {
+            if seen(o) && hill(o) {
+                standing(cam, object_foot(o, cam), object_base(o, cam), shade_of(object_foot(o, cam)), || draw_object(o, art, cam));
+            }
+        }
     }
     // The standing scenery and the buildings share one pass over the cells, row by row and
     // left to right (0x4c8864's cell loop): each cell draws its massif object (+0), then its
@@ -2377,7 +2520,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     super::sharp::session(|| {
         for d in items.iter().map(|(_, d)| d) {
             match d {
-                Drawable::Object(o) => standing(cam, object_foot(o, cam), object_base(o, cam), || draw_object(o, art, cam)),
+                Drawable::Object(o) => standing(cam, object_foot(o, cam), object_base(o, cam), shade_of(object_foot(o, cam)), || draw_object(o, art, cam)),
                 Drawable::Building(i) => {
                     let l = &game.world.locations[*i];
                     let outlined = hover.is_some_and(|h| h.building == Some(*i));
@@ -2385,19 +2528,19 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                         // A bridge lies on the ground (Razdor's), so it is drawn in the ground pass.
                         ground(cam, || draw_building(l, art, cam, outlined));
                     } else {
-                        standing(cam, building_foot(l, cam), building_base(l, cam), || draw_building(l, art, cam, outlined));
+                        standing(cam, building_foot(l, cam), building_base(l, cam), shade_of(building_foot(l, cam)), || draw_building(l, art, cam, outlined));
                     }
                 }
                 Drawable::Army(i) => {
                     let a = &game.world.armies[*i];
                     let f = cam.to_screen(game.army_display_pos(a));
-                    standing(cam, f, f, || draw_army(game, a, assets, art, cam));
+                    standing(cam, f, f, shade_of(f), || draw_army(game, a, assets, art, cam));
                 }
                 Drawable::Ship => {
                     if let Some(ship) = game.ship {
                         let at = map.center(ship.tile);
                         let f = cam.to_screen(at);
-                        standing(cam, f, f, || {
+                        standing(cam, f, f, shade_of(f), || {
                             if !draw_figure(art, ship_stem(razdor::rules::ships::kind::HERO), at, None, 0, cam, Stand::Afloat) {
                                 draw_ship(cam, at, HERO_SAIL);
                             }
@@ -2406,12 +2549,12 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                 }
                 Drawable::Hero => {
                     let f = cam.to_screen(game.display_pos());
-                    standing(cam, f, f, || draw_hero(game, assets, art, cam))
+                    standing(cam, f, f, shade_of(f), || draw_hero(game, assets, art, cam))
                 }
                 Drawable::Spell(n) => {
                     if let Some(s) = spell {
                         let f = cam.to_screen(s.at);
-                        standing(cam, f, f, || draw_spell_layer(s, *n, cam));
+                        standing(cam, f, f, shade_of(f), || draw_spell_layer(s, *n, cam));
                     }
                 }
             }
@@ -3251,8 +3394,10 @@ fn draw_map_backdrop(game: &Game, assets: &Assets) {
         clear_background(rgb(10, 12, 10));
         let full = map_area();
         let cam = backdrop_camera(game, full);
-        draw_world(game, assets, &cam, None, None, None, false);
-        cam.draw_fog(game);
+        draw_world(game, assets, &cam, None, None, None, false, NO_VEIL);
+        if cam.tilt.is_none() {
+            cam.draw_fog(game);
+        }
         draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.2));
     });
 }
@@ -3328,8 +3473,10 @@ fn window_backdrop_at_scale(game: &Game, assets: &Assets, lit: Option<BarButton>
         clear_background(rgb(10, 12, 10));
         let full = map_area();
         let cam = backdrop_camera(game, full);
-        draw_world(game, assets, &cam, None, None, None, false);
-        cam.draw_fog(game);
+        draw_world(game, assets, &cam, None, None, None, false, NO_VEIL);
+        if cam.tilt.is_none() {
+            cam.draw_fog(game);
+        }
         draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.2));
     });
     let idle = game.foe.is_none();
@@ -3821,11 +3968,19 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
             MapHoverLook { cell: t, ring, building: None }
         });
     }
-    frame_probe::time(Stage::World, || draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()), show.as_ref(), hover, true));
-    frame_probe::time(Stage::Fog, || cam.draw_fog(game));
-    gpu_wait(Stage::GpuFog);
+    // The fog layers: the 2.5D view draws them on the ground inside the world, under the standing
+    // sprites; the flat view draws them after the world, as before.
+    let shows: Vec<&Showing> = view.opening.iter().chain(&view.shows).collect();
+    let flat = cam.tilt.is_none();
+    frame_probe::time(Stage::World, || draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()), show.as_ref(), hover, true, Veil { shows: &shows, now: show_now }));
+    if flat {
+        frame_probe::time(Stage::Fog, || cam.draw_fog(game));
+        gpu_wait(Stage::GpuFog);
+    }
     draw_clash_marks(view, &cam, crate::ui::clock::now());
-    cam.draw_showing(game, view.opening.iter().chain(&view.shows), show_now);
+    if flat {
+        cam.draw_showing(game, view.opening.iter().chain(&view.shows), show_now);
+    }
     if let Some(s) = view.shows.front() {
         cam.draw_known_place(s, show_now);
     }
@@ -5046,5 +5201,65 @@ mod tilt_tests {
             }
         }
     }
-}
 
+    /// The visibility is 1 less the darker of the fog and the reveal, eased by a smoothstep from
+    /// 0.15 to 0.85 and clamped to 0 to 1.
+    #[test]
+    fn a_sprite_fades_with_the_darker_of_the_fog_and_the_reveal() {
+        assert_eq!(sprite_visibility(0.0, 0.0), 1.0, "clear ground: plain");
+        assert_eq!(sprite_visibility(1.0, 0.2), 0.0, "deep in the dark: gone");
+        assert_eq!(sprite_visibility(0.5, 0.0), 0.5, "half dark: half there");
+        assert_eq!(sprite_visibility(0.0, 0.5), 0.5, "the reveal's darkness counts too");
+        assert_eq!(sprite_visibility(0.1, 0.5), 0.5, "the darker one counts");
+        assert_eq!(sprite_visibility(0.2, 0.9), 0.0, "a dark reveal hides it");
+        assert!(sprite_visibility(0.25, 0.0) > sprite_visibility(0.4, 0.0), "darker, less visible");
+        assert_eq!(sprite_visibility(1.5, 0.0), 0.0, "clamped above");
+        assert_eq!(sprite_visibility(-0.5, -0.2), 1.0, "clamped below");
+    }
+
+    /// Plain unless the 2.5D view's standing sprite sets it: a flat camera's sprite is drawn as it is.
+    #[test]
+    fn the_flat_view_never_fades_a_sprite() {
+        assert_eq!(faded(WHITE).a, 1.0, "no sprite drawn: plain");
+        let game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        let flat = camera(&game, None);
+        let mut got = None;
+        standing(&flat, vec2(10.0, 10.0), vec2(10.0, 10.0), 0.25, || got = Some(faded(WHITE)));
+        assert_eq!(got.map(|c| (c.r, c.g, c.b, c.a)), Some((1.0, 1.0, 1.0, 1.0)), "a flat sprite is never faded");
+    }
+
+    /// A sprite's shade is read from the fog on its own cell: clear where it is explored, dark
+    /// where it is not, and dark where an event's reveal still holds its cell unshown.
+    #[test]
+    fn a_sprite_on_an_unexplored_cell_is_dark_and_one_on_an_explored_cell_is_not() {
+        let game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        let cam = camera(&game, Some((45.0, 0.0)));
+        let mut fog = razdor::rules::fog::Fog::new(40, 30);
+        fog.reveal(20, 15, 4);
+        let (lit, dark) = ((20, 15), (2, 2));
+        assert!(fog.explored(lit) && !fog.explored(dark), "the test fog: lit inside, dark far away");
+        let foot = |t: Tile| cam.cell_centre(t);
+        let shade = Shade { fog: &fog, held: Default::default(), veil: NO_VEIL };
+        assert_eq!(shade.at(&cam, foot(lit)), 1.0, "explored and clear");
+        assert_eq!(shade.at(&cam, foot(dark)), 0.0, "unexplored");
+        // A reveal's unshown block (its cells dark as the texture has them, the feather at its rim).
+        let block: std::collections::HashSet<Tile> = (17..=23).flat_map(|x| (12..=18).map(move |y| (x, y))).collect();
+        let held = Shade { fog: &fog, held: block, veil: NO_VEIL };
+        assert_eq!(held.at(&cam, foot(lit)), 0.0, "an unshown cell is dark even when explored");
+    }
+
+    /// Visibility 0 draws nothing: a straight-alpha sprite's alpha goes to 0, a premultiplied
+    /// one's every channel with it. At 0.25 the two scale as their blend needs.
+    #[test]
+    fn a_fading_sprite_scales_its_alpha_or_its_premultiplied_colour() {
+        SPRITE_VIS.with(|s| s.set(0.25));
+        let (straight, premultiplied) = (faded(WHITE), faded_premultiplied(WHITE));
+        SPRITE_VIS.with(|s| s.set(0.0));
+        let (gone, gone_premultiplied) = (faded(WHITE), faded_premultiplied(WHITE));
+        SPRITE_VIS.with(|s| s.set(1.0));
+        assert_eq!((straight.r, straight.g, straight.b, straight.a), (1.0, 1.0, 1.0, 0.25), "straight: colour kept, alpha faded");
+        assert_eq!((premultiplied.r, premultiplied.g, premultiplied.b, premultiplied.a), (0.25, 0.25, 0.25, 0.25), "premultiplied: all channels faded");
+        assert_eq!(gone.a, 0.0, "invisible");
+        assert_eq!((gone_premultiplied.r, gone_premultiplied.a), (0.0, 0.0), "invisible premultiplied");
+    }
+}

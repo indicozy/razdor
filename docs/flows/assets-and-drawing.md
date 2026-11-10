@@ -305,6 +305,19 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   map» above).
 - The settings rows: «Вид карты» always in the Map group; «Размер фигур» and «Поворот двумя
   пальцами» beneath it with the 2.5D view on (`main_menu::Row`, the Map group's rows, drawn by `group_pane` on both platforms).
+- **The fog under the sprites** (the owner's report: a castle or a church sliced by black). In the 2.5D view
+  the war fog and the event reveals (`draw_fog_flat`, `draw_showing_flat`) lie on the ground in `draw_world_in`
+  after the ground's marks, route and border and before the standing sprites, not after the world as in the flat
+  view (`MapView::draw` draws them there, flat only). The hills, drawn first in the flat view, come after them.
+  Each standing sprite (`standing`, its visibility from `Shade::at`) fades into the fog on its foot's cell, so
+  what is behind it shows through instead of a black silhouette: the visibility is `sprite_visibility`, a smoothstep
+  from 0.15 to 0.85 of 1 less the darker of the fog's darkness on that cell (`minimap::darkness_at`, the texture's
+  value, unshown cells dark) and the reveal's alpha there (`Showing::alpha_at`). A straight-alpha sprite keeps its
+  colour and scales its alpha (`faded`); a premultiplied one (the figures) scales every channel (`faded_premultiplied`).
+  At 0 it is not drawn. Off the map the ground is black (visibility 0) unless «Продолжать карту за краем» is on.
+  Razdor's visual only: the flat view is pixel-identical. Sprites' fallback drawings (no DT art: procedural
+  ships, units by `draw_unit`) are not faded.
+  ships, units by `draw_unit`) are not shaded.
 - Simplifications: the F3 overlay is off in 2.5D (its labels are placed on the flat map).
 
 ## Sound and music
