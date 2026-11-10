@@ -1,0 +1,861 @@
+//! The trailer's shot file (dev-only, for the trailer's footage): a text file that plays a
+//! scripted camera, hero walks, days and events on a map, and is recorded frame-exact
+//! (`ui::trailer`). This module is the pure part: the format's parser, the keyframe sampling
+//! and easing, and the frame clock. It has no window and no drawing.
+//!
+//! The format is line based (`docs/trailer-shots.md` has the reference and three examples).
+//! Every error names its line and field. Players never see any of this: nothing here is read
+//! unless `RAZDOR_TRAILER_SHOT` or `razdor --trailer` asks for it.
+
+use std::collections::BTreeMap;
+
+/// The camera's keyed values of one keyframe; each is optional (absent: the value of the
+/// nearest keyframe that sets it holds, see [`sample_values`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Values {
+    pub pitch: Option<f32>,
+    pub fov: Option<f32>,
+    pub dist: Option<f32>,
+    pub bend: Option<f32>,
+    pub flat: Option<f32>,
+    pub radius: Option<f32>,
+    pub width: Option<f32>,
+    pub ahead: Option<f32>,
+    pub behind: Option<f32>,
+    pub near: Option<f32>,
+    pub yaw: Option<f32>,
+    /// The eye's distance as a multiple of the fitted distance (see `view25::Trailer::fit`).
+    pub fit: Option<f32>,
+}
+
+/// Where the camera looks: a map cell, or the hero's cell plus an offset in cells.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Target {
+    Cell(f32, f32),
+    Hero(f32, f32),
+}
+
+/// The easing of a segment, named by the keyframe it ends at (`ease=`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Ease {
+    Linear,
+    In,
+    Out,
+    #[default]
+    InOut,
+}
+
+impl Ease {
+    /// The eased progress of `u` in `0..=1`.
+    pub fn apply(self, u: f32) -> f32 {
+        let u = u.clamp(0.0, 1.0);
+        match self {
+            Ease::Linear => u,
+            Ease::In => u * u * u,
+            Ease::Out => 1.0 - (1.0 - u).powi(3),
+            Ease::InOut => {
+                if u < 0.5 {
+                    4.0 * u * u * u
+                } else {
+                    1.0 - (-2.0 * u + 2.0).powi(3) / 2.0
+                }
+            }
+        }
+    }
+}
+
+/// One camera keyframe: its time, the values it sets, its target and the easing of the segment
+/// that ends at it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Key {
+    pub t: f64,
+    pub values: Values,
+    pub target: Option<Target>,
+    pub ease: Ease,
+}
+
+/// A world action on the timeline.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Action {
+    /// The hero walks the route, cell after cell, at play speed.
+    Walk { t: f64, route: Vec<(i32, i32)>, line: usize },
+    /// Time passes in real time, as the game's wait does: `hours` game hours, armies march.
+    Pass { t: f64, hours: u32, line: usize },
+    /// The cells within `radius` of `cell` are explored.
+    Reveal { t: f64, cell: (i32, i32), radius: i32, line: usize },
+}
+
+impl Action {
+    pub fn t(&self) -> f64 {
+        match self {
+            Action::Walk { t, .. } | Action::Pass { t, .. } | Action::Reveal { t, .. } => *t,
+        }
+    }
+}
+
+/// The map the shot plays on: an install's scenario by its file name, or a save file.
+#[derive(Clone, Debug, PartialEq)]
+pub enum MapRef {
+    Scenario(String),
+    Save(String),
+}
+
+/// A parsed shot file. Every field has its default (see [`Shot::default`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Shot {
+    pub map: Option<MapRef>,
+    /// The hero's class: `knight`, `archmage` or `ranger`.
+    pub hero: String,
+    /// The event generator's seed.
+    pub seed: u32,
+    pub width: u32,
+    pub height: u32,
+    pub fps: u32,
+    pub music: bool,
+    /// `true`: a battle is drawn on its screen (`battles show`); `false`: it is fought on the
+    /// map and the camera stays on it (`battles map`, the default).
+    pub battles_show: bool,
+    /// The choice of each event by its id: 0 is the first button (the default), 1 the second.
+    pub events: BTreeMap<u32, usize>,
+    pub keys: Vec<Key>,
+    pub actions: Vec<Action>,
+    /// The length in seconds: `duration`, else the last time any line names.
+    pub duration: f64,
+    /// Whether the file sets `duration` itself.
+    pub duration_set: bool,
+}
+
+impl Default for Shot {
+    fn default() -> Shot {
+        Shot {
+            map: None,
+            hero: "knight".into(),
+            seed: 0x5EED,
+            width: 1920,
+            height: 1080,
+            fps: 60,
+            music: true,
+            battles_show: false,
+            events: BTreeMap::new(),
+            keys: Vec::new(),
+            actions: Vec::new(),
+            duration: 0.0,
+            duration_set: false,
+        }
+    }
+}
+
+/// The parse errors, one per problem: `line N: field: what is wrong`.
+pub type Errors = Vec<String>;
+
+/// A field's error: the field's name and what is wrong with it.
+type FieldError = (&'static str, String);
+
+/// Parses a shot file. Errors are collected line by line, so one run shows every mistake.
+pub fn parse(text: &str) -> Result<Shot, Errors> {
+    let mut shot = Shot::default();
+    let mut errors = Vec::new();
+    for (i, raw) in text.lines().enumerate() {
+        let line_no = i + 1;
+        let body = raw.split('#').next().unwrap_or("").trim();
+        if body.is_empty() {
+            continue;
+        }
+        let mut words = body.split_whitespace();
+        let head = words.next().unwrap_or_default();
+        let rest: Vec<&str> = words.collect();
+        if let Err((field, what)) = apply_line(&mut shot, head, &rest, line_no) {
+            errors.push(format!("line {line_no}: {field}: {what}"));
+        }
+    }
+    if shot.map.is_none() {
+        errors.push("map: the shot names no map (`map <name>` or `save <file>`)".to_string());
+    }
+    let last_time = shot.keys.iter().map(|k| k.t).chain(shot.actions.iter().map(Action::t)).fold(0.0, f64::max);
+    if !shot.duration_set {
+        shot.duration = last_time;
+    } else if shot.duration < last_time {
+        errors.push(format!("duration: {}s ends before a line at {last_time}s", shot.duration));
+    }
+    if shot.duration <= 0.0 {
+        errors.push("duration: the shot has no time to play (give `duration <seconds>` or a timed line)".to_string());
+    }
+    shot.actions.sort_by(|a, b| a.t().total_cmp(&b.t()));
+    if errors.is_empty() {
+        Ok(shot)
+    } else {
+        Err(errors)
+    }
+}
+
+/// One line of the file, applied to the shot.
+fn apply_line(shot: &mut Shot, head: &str, rest: &[&str], line_no: usize) -> Result<(), FieldError> {
+    match head {
+        "map" => shot.map = Some(MapRef::Scenario(name(rest).map_err(|e| ("map", e))?.trim_end_matches(".DTm").to_string())),
+        "save" => shot.map = Some(MapRef::Save(name(rest).map_err(|e| ("save", e))?)),
+        "hero" => match one(rest).map_err(|e| ("hero", e))? {
+            c @ ("knight" | "archmage" | "ranger") => shot.hero = c.to_string(),
+            c => return Err(("hero", format!("`{c}`: knight, archmage or ranger"))),
+        },
+        "seed" => {
+            let v = one(rest).map_err(|e| ("seed", e))?;
+            shot.seed = v.parse::<u32>().map_err(|_| ("seed", format!("`{v}`: not a whole number from 0 to 4294967295")))?;
+        }
+        "size" => {
+            let (w, h) = parse_size(one(rest).map_err(|e| ("size", e))?)?;
+            shot.width = w;
+            shot.height = h;
+        }
+        "fps" => {
+            let v = one(rest).map_err(|e| ("fps", e))?;
+            let f: u32 = v.parse().map_err(|_| ("fps", format!("`{v}`: not a whole number")))?;
+            if !(1..=120).contains(&f) {
+                return Err(("fps", format!("{f}: from 1 to 120")));
+            }
+            shot.fps = f;
+        }
+        "music" => match one(rest).map_err(|e| ("music", e))? {
+            "on" => shot.music = true,
+            "off" => shot.music = false,
+            v => return Err(("music", format!("`{v}`: on or off"))),
+        },
+        "battles" => match one(rest).map_err(|e| ("battles", e))? {
+            "map" => shot.battles_show = false,
+            "show" => shot.battles_show = true,
+            v => return Err(("battles", format!("`{v}`: map or show"))),
+        },
+        "duration" => {
+            let v = one(rest).map_err(|e| ("duration", e))?;
+            let d = time_word(v).ok_or(("duration", format!("`{v}`: not a time (seconds, e.g. 16 or 16s)")))?;
+            if d <= 0.0 {
+                return Err(("duration", format!("{d}: must be above 0")));
+            }
+            shot.duration = d;
+            shot.duration_set = true;
+        }
+        "event" => match rest {
+            [id, choice] => match (id.parse::<u32>(), choice.parse::<usize>()) {
+                (Ok(id), Ok(c)) => {
+                    shot.events.insert(id, c);
+                }
+                _ => return Err(("event", format!("`event {}`: needs an event number and a choice number", rest.join(" ")))),
+            },
+            _ => return Err(("event", "needs two words: the event number and the choice (0 is the first button)".to_string())),
+        },
+        "at" => {
+            let key = parse_at(rest)?;
+            if shot.keys.last().is_some_and(|k| k.t == key.t) {
+                return Err(("at", format!("{}s: another keyframe has this time", key.t)));
+            }
+            if shot.keys.last().is_some_and(|k| k.t > key.t) {
+                return Err(("at", format!("{}s: keyframes must go in time order", key.t)));
+            }
+            shot.keys.push(key);
+        }
+        "walk" => {
+            let (t, route) = parse_walk(rest)?;
+            shot.actions.push(Action::Walk { t, route, line: line_no });
+        }
+        "pass" => {
+            let (t, hours) = parse_pass(rest)?;
+            shot.actions.push(Action::Pass { t, hours, line: line_no });
+        }
+        "reveal" => {
+            let (t, cell, radius) = parse_reveal(rest)?;
+            shot.actions.push(Action::Reveal { t, cell, radius, line: line_no });
+        }
+        other => {
+            return Err(("line", format!("`{other}`: no such line (map, save, hero, seed, size, fps, music, battles, duration, event, at, walk, pass, reveal)")));
+        }
+    }
+    Ok(())
+}
+
+/// A name that may hold spaces (`map Другой берег`): the words joined back.
+fn name(rest: &[&str]) -> Result<String, String> {
+    if rest.is_empty() {
+        return Err("no name given".to_string());
+    }
+    Ok(rest.join(" "))
+}
+
+fn one<'a>(rest: &[&'a str]) -> Result<&'a str, String> {
+    match rest {
+        [v] => Ok(v),
+        [] => Err("no value given".to_string()),
+        _ => Err(format!("one value only, got {}", rest.len())),
+    }
+}
+
+fn parse_size(v: &str) -> Result<(u32, u32), FieldError> {
+    let bad = || ("size", format!("`{v}`: write WIDTHxHEIGHT, e.g. 1920x1080"));
+    let (w, h) = v.split_once('x').ok_or_else(bad)?;
+    let (w, h): (u32, u32) = (w.parse().map_err(|_| bad())?, h.parse().map_err(|_| bad())?);
+    if !(16..=5120).contains(&w) || !(16..=2160).contains(&h) || w % 2 != 0 || h % 2 != 0 {
+        return Err(("size", format!("{w}x{h}: width 16 to 5120 and height 16 to 2160, both even")));
+    }
+    Ok((w, h))
+}
+
+/// `16`, `16s`, `1.5s`: seconds.
+fn time_word(v: &str) -> Option<f64> {
+    v.strip_suffix('s').unwrap_or(v).parse::<f64>().ok().filter(|t| t.is_finite() && *t >= 0.0)
+}
+
+/// `x,y` as two numbers.
+fn pair(v: &str) -> Option<(f32, f32)> {
+    let (x, y) = v.split_once(',')?;
+    Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
+}
+
+fn parse_target(v: &str) -> Result<Target, String> {
+    if let Some(off) = v.strip_prefix("hero") {
+        if off.is_empty() {
+            return Ok(Target::Hero(0.0, 0.0));
+        }
+        let body = off.strip_prefix('+').unwrap_or(off);
+        return pair(body).map(|(x, y)| Target::Hero(x, y)).ok_or_else(|| format!("`{v}`: write hero or hero+dx,dy"));
+    }
+    pair(v).map(|(x, y)| Target::Cell(x, y)).ok_or_else(|| format!("`{v}`: write a cell as x,y, or hero, or hero+dx,dy"))
+}
+
+/// The camera keys a keyframe may set.
+const CAMERA_KEYS: [&str; 12] = ["pitch", "fov", "dist", "fit", "bend", "flat", "radius", "width", "ahead", "behind", "near", "yaw"];
+
+fn parse_at(rest: &[&str]) -> Result<Key, FieldError> {
+    let Some((time, items)) = rest.split_first() else {
+        return Err(("at", "needs a time first, e.g. `at 16s pitch=12`".to_string()));
+    };
+    let t = time_word(time).ok_or(("at", format!("`{time}`: not a time (seconds, e.g. 16 or 16s)")))?;
+    let mut key = Key { t, values: Values::default(), target: None, ease: Ease::default() };
+    for item in items {
+        let (k, v) = item.split_once('=').ok_or(("at", format!("`{item}`: write key=value")))?;
+        match k {
+            "target" => key.target = Some(parse_target(v).map_err(|e| ("target", e))?),
+            "ease" => {
+                key.ease = match v {
+                    "linear" => Ease::Linear,
+                    "in" => Ease::In,
+                    "out" => Ease::Out,
+                    "inout" => Ease::InOut,
+                    _ => return Err(("ease", format!("`{v}`: linear, in, out or inout"))),
+                }
+            }
+            _ => {
+                let Some(&name) = CAMERA_KEYS.iter().find(|&&c| c == k) else {
+                    return Err(("at", format!("`{k}`: no such key (pitch, fov, dist, bend, flat, radius, width, ahead, behind, near, yaw, target, ease)")));
+                };
+                let n: f32 = v.parse().map_err(|_| (name, format!("`{v}` is not a number")))?;
+                check_range(name, n).map_err(|e| (name, e))?;
+                *slot(&mut key.values, name) = Some(n);
+            }
+        }
+    }
+    Ok(key)
+}
+
+fn slot<'a>(v: &'a mut Values, name: &str) -> &'a mut Option<f32> {
+    match name {
+        "pitch" => &mut v.pitch,
+        "fov" => &mut v.fov,
+        "dist" => &mut v.dist,
+        "fit" => &mut v.fit,
+        "bend" => &mut v.bend,
+        "flat" => &mut v.flat,
+        "radius" => &mut v.radius,
+        "width" => &mut v.width,
+        "ahead" => &mut v.ahead,
+        "behind" => &mut v.behind,
+        "near" => &mut v.near,
+        _ => &mut v.yaw,
+    }
+}
+
+/// The ranges the camera takes: the pitch past the player's limits, and 90 (the top-down view,
+/// rendered as 89.9, where `look_at` is degenerate).
+fn check_range(k: &str, n: f32) -> Result<(), String> {
+    let ok = match k {
+        "pitch" => (5.0..=90.0).contains(&n),
+        "fov" => (5.0..=120.0).contains(&n),
+        "dist" | "fit" | "radius" | "width" => n > 0.0,
+        "bend" => (0.0..=89.0).contains(&n),
+        "flat" | "ahead" | "behind" | "near" => n >= 0.0,
+        _ => n.is_finite(),
+    };
+    if ok {
+        return Ok(());
+    }
+    Err(match k {
+        "pitch" => format!("{n}: from 5 to 90 (90 is the top-down view)"),
+        "fov" => format!("{n}: from 5 to 120 degrees"),
+        "bend" => format!("{n}: from 0 to 89 degrees"),
+        "dist" | "fit" | "radius" | "width" => format!("{n}: must be above 0"),
+        _ => format!("{n}: must not be negative"),
+    })
+}
+
+fn parse_walk(rest: &[&str]) -> Result<(f64, Vec<(i32, i32)>), FieldError> {
+    let (time, cells) = rest.split_first().ok_or(("walk", "needs a time and a route of cells".to_string()))?;
+    let t = time_word(time).ok_or(("walk", format!("`{time}`: not a time")))?;
+    if cells.is_empty() {
+        return Err(("walk", "the route has no cell (write x,y x,y ...)".to_string()));
+    }
+    let mut route = Vec::new();
+    for c in cells {
+        let (x, y) = pair(c).ok_or(("walk", format!("`{c}`: a cell is x,y")))?;
+        route.push((x as i32, y as i32));
+    }
+    Ok((t, route))
+}
+
+fn parse_pass(rest: &[&str]) -> Result<(f64, u32), FieldError> {
+    let [time, span] = rest else {
+        return Err(("pass", "needs a time and a span, e.g. `pass 4s 3d` or `pass 4s 12h`".to_string()));
+    };
+    let t = time_word(time).ok_or(("pass", format!("`{time}`: not a time")))?;
+    let bad = || ("pass", format!("`{span}`: a span is a number of hours (h) or days (d), e.g. 3d"));
+    let (n, unit) = span.split_at(span.len().saturating_sub(1));
+    let n: u32 = n.parse().map_err(|_| bad())?;
+    let hours = match unit {
+        "h" => n,
+        "d" => n.saturating_mul(24),
+        _ => return Err(bad()),
+    };
+    if hours == 0 || hours > 24 * 365 {
+        return Err(("pass", format!("`{span}`: from 1 hour to 365 days")));
+    }
+    Ok((t, hours))
+}
+
+fn parse_reveal(rest: &[&str]) -> Result<(f64, (i32, i32), i32), FieldError> {
+    let [time, cell, radius] = rest else {
+        return Err(("reveal", "needs a time, a cell and a radius, e.g. `reveal 2s 12,30 3`".to_string()));
+    };
+    let t = time_word(time).ok_or(("reveal", format!("`{time}`: not a time")))?;
+    let (x, y) = pair(cell).ok_or(("reveal", format!("`{cell}`: a cell is x,y")))?;
+    let r: i32 = radius.parse().map_err(|_| ("reveal", format!("`{radius}`: a radius is a whole number of cells")))?;
+    if !(0..=40).contains(&r) {
+        return Err(("reveal", format!("{r}: a radius from 0 to 40 cells")));
+    }
+    Ok((t, (x as i32, y as i32), r))
+}
+
+impl Shot {
+    /// The number of frames the shot renders.
+    pub fn frame_count(&self) -> u64 {
+        frame_count(self.duration, self.fps)
+    }
+}
+
+/// The frames of a `duration` at `fps`: frame `i` is at time `i / fps`, for `i` below the count.
+pub fn frame_count(duration: f64, fps: u32) -> u64 {
+    (duration * fps as f64).round() as u64
+}
+
+/// The shot's time of frame `i`.
+pub fn frame_time(i: u64, fps: u32) -> f64 {
+    i as f64 / fps as f64
+}
+
+/// The camera's values at time `t`: each is interpolated between the two keyframes that set it,
+/// eased by the later one's `ease`; before the first and after the last keyframe that sets it,
+/// it holds. `yaw` takes the short way round.
+pub fn sample_values(keys: &[Key], t: f64) -> Values {
+    let mut out = Values::default();
+    let track = |name: &str| sample_scalar(keys.iter().filter_map(|k| slot_value(&k.values, name).map(|v| (k.t, v, k.ease))), t, name == "yaw");
+    out.pitch = track("pitch");
+    out.fov = track("fov");
+    out.dist = track("dist");
+    out.fit = track("fit");
+    out.bend = track("bend");
+    out.flat = track("flat");
+    out.radius = track("radius");
+    out.width = track("width");
+    out.ahead = track("ahead");
+    out.behind = track("behind");
+    out.near = track("near");
+    out.yaw = track("yaw");
+    out
+}
+
+fn slot_value(v: &Values, name: &str) -> Option<f32> {
+    let mut copy = *v;
+    *slot(&mut copy, name)
+}
+
+/// One scalar track: the samples `(time, value, ease of the segment that ends there)`.
+fn sample_scalar(samples: impl Iterator<Item = (f64, f32, Ease)>, t: f64, angle: bool) -> Option<f32> {
+    let s: Vec<(f64, f32, Ease)> = samples.collect();
+    let first = *s.first()?;
+    if t <= first.0 {
+        return Some(first.1);
+    }
+    let last = *s.last()?;
+    if t >= last.0 {
+        return Some(last.1);
+    }
+    let i = s.windows(2).position(|w| t >= w[0].0 && t < w[1].0)?;
+    let (a, b) = (s[i], s[i + 1]);
+    let u = ((t - a.0) / (b.0 - a.0)) as f32;
+    let e = b.2.apply(u);
+    Some(if angle { lerp_angle(a.1, b.1, e) } else { a.1 + (b.1 - a.1) * e })
+}
+
+/// Interpolation of an angle in degrees, the short way round (`e` is the eased progress).
+pub fn lerp_angle(a: f32, b: f32, e: f32) -> f32 {
+    let d = (b - a).rem_euclid(360.0);
+    let d = if d > 180.0 { d - 360.0 } else { d };
+    a + d * e
+}
+
+/// The camera's target at time `t`: the two targets of the segment it lies in and the eased
+/// progress from the first to the second. None before any keyframe sets a target; before the
+/// first and after the last, the target holds.
+pub fn sample_target(keys: &[Key], t: f64) -> Option<(Target, Target, f32)> {
+    let s: Vec<(f64, Target, Ease)> = keys.iter().filter_map(|k| k.target.map(|g| (k.t, g, k.ease))).collect();
+    let first = *s.first()?;
+    if t <= first.0 {
+        return Some((first.1, first.1, 0.0));
+    }
+    let last = *s.last()?;
+    if t >= last.0 {
+        return Some((last.1, last.1, 0.0));
+    }
+    let i = s.windows(2).position(|w| t >= w[0].0 && t < w[1].0)?;
+    let (a, b) = (s[i], s[i + 1]);
+    let u = ((t - a.0) / (b.0 - a.0)) as f32;
+    Some((a.1, b.1, b.2.apply(u)))
+}
+
+/// The real time a `pass` of `hours` takes, as the game's wait runs it: two wait ticks an hour
+/// of [`crate::rules::game::STEP_SECONDS`] each.
+pub fn pass_seconds(hours: u32) -> f64 {
+    hours as f64 * 2.0 * crate::rules::game::STEP_SECONDS as f64
+}
+
+/// One sound the game asked for during a render: a sound effect, or a music track that starts
+/// (its file name in `Sounds/`, as `_Sounds.ini` gives it).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SoundEvent {
+    Effect(String),
+    Music(String),
+}
+
+/// The sound log of a render: each event with the frame it starts on, in frame order.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SoundLog {
+    pub events: Vec<(u64, SoundEvent)>,
+}
+
+impl SoundLog {
+    pub fn push(&mut self, frame: u64, event: SoundEvent) {
+        self.events.push((frame, event));
+    }
+
+    /// The events as the mixer takes them: the start in seconds (`frame / fps`) and the file.
+    pub fn starts(&self, fps: u32) -> Vec<(f64, &SoundEvent)> {
+        self.events.iter().map(|(f, e)| (frame_time(*f, fps), e)).collect()
+    }
+}
+
+/// The mixer's rate and format: 48 kHz, stereo, 16-bit.
+pub const MIX_RATE: u32 = 48_000;
+
+/// A clip placed on the mix: its start in seconds, its samples, its gain, and how long it plays
+/// at most (`None`: to its end).
+pub struct Placed<'a> {
+    pub start: f64,
+    pub pcm: &'a crate::dt::sound::Pcm,
+    pub gain: f32,
+    pub max_secs: Option<f64>,
+}
+
+/// The clip's samples at [`MIX_RATE`], stereo, as left and right pairs.
+fn stereo(pcm: &crate::dt::sound::Pcm) -> Vec<[i32; 2]> {
+    let p = pcm.resampled(MIX_RATE);
+    let channels = p.channels.max(1) as usize;
+    let width = (p.bits.max(8) / 8) as usize;
+    let frame = channels * width;
+    let sample = |at: usize| -> i32 {
+        if width == 2 {
+            i16::from_le_bytes([p.data[at], p.data[at + 1]]) as i32
+        } else {
+            (p.data[at] as i32 - 128) << 8
+        }
+    };
+    let frames = p.data.len() / frame;
+    (0..frames)
+        .map(|i| {
+            let base = i * frame;
+            if channels == 1 {
+                let s = sample(base);
+                [s, s]
+            } else {
+                [sample(base), sample(base + width)]
+            }
+        })
+        .collect()
+}
+
+/// Mixes the clips into one WAV of `total` seconds (48 kHz, stereo, 16-bit): each clip added at
+/// its start, scaled by its gain, and the sum clipped to the 16-bit range.
+pub fn mix_wav(clips: &[Placed], total: f64) -> Vec<u8> {
+    let frames = (total.max(0.0) * MIX_RATE as f64).round() as usize;
+    let mut out = vec![0i32; frames * 2];
+    for c in clips {
+        let samples = stereo(c.pcm);
+        let at = (c.start.max(0.0) * MIX_RATE as f64).round() as usize;
+        let cap = c.max_secs.map_or(samples.len(), |s| ((s * MIX_RATE as f64).round() as usize).min(samples.len()));
+        for (i, s) in samples.iter().take(cap).enumerate() {
+            let j = at + i;
+            if j >= frames {
+                break;
+            }
+            out[j * 2] += (s[0] as f32 * c.gain) as i32;
+            out[j * 2 + 1] += (s[1] as f32 * c.gain) as i32;
+        }
+    }
+    let data_len = (out.len() * 2) as u32;
+    let mut wav = Vec::with_capacity(44 + out.len() * 2);
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + data_len).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&2u16.to_le_bytes());
+    wav.extend_from_slice(&MIX_RATE.to_le_bytes());
+    wav.extend_from_slice(&(MIX_RATE * 4).to_le_bytes());
+    wav.extend_from_slice(&4u16.to_le_bytes());
+    wav.extend_from_slice(&16u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&data_len.to_le_bytes());
+    for v in out {
+        wav.extend_from_slice(&(v.clamp(i16::MIN as i32, i16::MAX as i32) as i16).to_le_bytes());
+    }
+    wav
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ok(text: &str) -> Shot {
+        match parse(text) {
+            Ok(s) => s,
+            Err(e) => panic!("should parse, got {e:?}"),
+        }
+    }
+
+    fn errs(text: &str) -> Vec<String> {
+        parse(text).expect_err("should fail")
+    }
+
+    #[test]
+    fn the_defaults_are_the_documented_ones() {
+        let s = ok("map РК1-Замок\nat 4s pitch=12\n");
+        assert_eq!(s.hero, "knight");
+        assert_eq!(s.seed, 0x5EED);
+        assert_eq!((s.width, s.height, s.fps), (1920, 1080, 60));
+        assert!(s.music);
+        assert!(!s.battles_show);
+        assert!(s.events.is_empty());
+        assert_eq!(s.duration, 4.0, "the duration is the last timed line");
+        assert_eq!(s.keys[0].ease, Ease::InOut);
+        assert_eq!(s.map, Some(MapRef::Scenario("РК1-Замок".into())));
+    }
+
+    #[test]
+    fn a_map_name_drops_the_dtm_extension() {
+        let s = ok("map Другой берег.DTm\nat 1 pitch=12\n");
+        assert_eq!(s.map, Some(MapRef::Scenario("Другой берег".into())));
+    }
+
+    #[test]
+    fn every_error_names_its_line_and_field() {
+        let text = "map РК1\nat 2s pitch=95\nat 3s pitch=12\nat 1s fov=40\nwalk 3s 1,2 x\nfps 0\nhero wizard\nsize 1920x1081\nevent 8\nmusic maybe\nbogus 1";
+        let all = errs(text).join("\n");
+        assert!(all.contains("line 2: pitch: 95: from 5 to 90"), "{all}");
+        assert!(all.contains("line 4: at: 1s: keyframes must go in time order"), "{all}");
+        assert!(all.contains("line 5: walk"), "{all}");
+        assert!(all.contains("line 6: fps: 0: from 1 to 120"), "{all}");
+        assert!(all.contains("line 7: hero"), "{all}");
+        assert!(all.contains("line 8: size"), "{all}");
+        assert!(all.contains("line 9: event"), "{all}");
+        assert!(all.contains("line 10: music"), "{all}");
+        assert!(all.contains("line 11: line"), "{all}");
+    }
+
+    #[test]
+    fn an_unknown_camera_key_is_named() {
+        let all = errs("map РК1\nat 2s colour=3\n").join("\n");
+        assert!(all.contains("line 2: at: `colour`: no such key"), "{all}");
+    }
+
+    #[test]
+    fn a_shot_without_a_map_or_time_is_refused() {
+        let e = errs("fps 30\n");
+        assert!(e.iter().any(|m| m.starts_with("map:")), "{e:?}");
+        assert!(e.iter().any(|m| m.starts_with("duration:")), "{e:?}");
+    }
+
+    #[test]
+    fn the_duration_must_cover_the_timed_lines() {
+        let e = errs("map РК1\nduration 3\nat 5s pitch=20\n");
+        assert!(e.iter().any(|m| m.contains("ends before a line at 5s")), "{e:?}");
+    }
+
+    #[test]
+    fn targets_parse_as_cells_heroes_and_offsets() {
+        let s = ok("map РК1\nat 1s target=12,30\nat 2s target=hero\nat 3s target=hero+1,-2\n");
+        assert_eq!(s.keys[0].target, Some(Target::Cell(12.0, 30.0)));
+        assert_eq!(s.keys[1].target, Some(Target::Hero(0.0, 0.0)));
+        assert_eq!(s.keys[2].target, Some(Target::Hero(1.0, -2.0)));
+        let all = errs("map РК1\nat 1s target=here\n").join("\n");
+        assert!(all.contains("line 2: target"), "{all}");
+    }
+
+    #[test]
+    fn the_actions_are_sorted_and_parsed() {
+        let s = ok("map РК1\npass 9s 3d\nwalk 2s 10,10 11,10 12,11\nreveal 1s 10,10 2\nat 20s pitch=12\n");
+        assert_eq!(s.actions.iter().map(Action::t).collect::<Vec<_>>(), vec![1.0, 2.0, 9.0]);
+        assert_eq!(s.actions[2], Action::Pass { t: 9.0, hours: 72, line: 2 });
+        let Action::Walk { route, .. } = &s.actions[1] else { panic!("the walk") };
+        assert_eq!(route, &vec![(10, 10), (11, 10), (12, 11)]);
+    }
+
+    #[test]
+    fn comments_and_blank_lines_are_skipped() {
+        let s = ok("# the descent\n\nmap РК1 # the start map\n  at 1s pitch=12  # low\n");
+        assert_eq!(s.keys.len(), 1);
+    }
+
+    #[test]
+    fn the_frame_clock_counts_frames_of_the_fps() {
+        assert_eq!(frame_count(16.0, 60), 960);
+        assert_eq!(frame_count(16.0, 30), 480);
+        assert_eq!(frame_time(60, 60), 1.0);
+        assert!((frame_time(1, 25) - 0.04).abs() < 1e-12);
+    }
+
+    #[test]
+    fn easing_hits_both_ends_and_is_monotonic() {
+        for e in [Ease::Linear, Ease::In, Ease::Out, Ease::InOut] {
+            assert!(e.apply(0.0).abs() < 1e-6);
+            assert!((e.apply(1.0) - 1.0).abs() < 1e-6);
+            let mut prev = -1.0;
+            for i in 0..=100 {
+                let v = e.apply(i as f32 / 100.0);
+                assert!(v >= prev - 1e-6, "{e:?} goes back at {i}");
+                prev = v;
+            }
+        }
+        assert!(Ease::In.apply(0.5) < 0.5 && Ease::Out.apply(0.5) > 0.5);
+        assert!((Ease::InOut.apply(0.5) - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn values_interpolate_between_their_keys_and_hold_outside() {
+        let s = ok("map РК1\nat 0s pitch=90 bend=0\nat 16s pitch=12 bend=78 ease=linear\n");
+        let v = sample_values(&s.keys, 8.0);
+        assert!((v.pitch.unwrap() - 51.0).abs() < 1e-4);
+        assert!((v.bend.unwrap() - 39.0).abs() < 1e-4);
+        assert_eq!(sample_values(&s.keys, -1.0).pitch, Some(90.0));
+        assert_eq!(sample_values(&s.keys, 99.0).pitch, Some(12.0));
+        assert_eq!(sample_values(&s.keys, 8.0).fov, None, "a key nobody sets stays unset");
+    }
+
+    #[test]
+    fn a_value_holds_until_a_later_key_sets_it() {
+        let s = ok("map РК1\nat 0s dist=10\nat 2s pitch=20\nat 4s dist=30 ease=linear\n");
+        assert_eq!(sample_values(&s.keys, 1.0).dist, Some(10.0 + 20.0 * 0.25), "dist moves from 0s to 4s");
+        assert_eq!(sample_values(&s.keys, 3.0).pitch, Some(20.0));
+    }
+
+    #[test]
+    fn the_segment_ease_belongs_to_the_later_key() {
+        let s = ok("map РК1\nat 0s pitch=10\nat 2s pitch=20 ease=in\n");
+        let v = sample_values(&s.keys, 1.0).pitch.unwrap();
+        assert!((v - (10.0 + 10.0 * 0.125)).abs() < 1e-4, "cubic in at the middle is 1/8, got {v}");
+    }
+
+    #[test]
+    fn yaw_turns_the_short_way_round() {
+        let near_zero = |v: f32| v.rem_euclid(360.0).min(360.0 - v.rem_euclid(360.0)) < 1e-3;
+        assert!(near_zero(lerp_angle(350.0, 10.0, 0.5)), "350 to 10 passes 0");
+        assert!(near_zero(lerp_angle(10.0, 350.0, 0.5)), "10 to 350 goes back through 0");
+        assert!((lerp_angle(0.0, 90.0, 0.5) - 45.0).abs() < 1e-4);
+        assert!((lerp_angle(170.0, -170.0, 0.5) - 180.0).abs() < 1e-3, "170 to 190 is the short way");
+        let s = ok("map РК1\nat 0s yaw=350\nat 2s yaw=370 ease=linear\n");
+        let mid = sample_values(&s.keys, 1.0).yaw.unwrap().rem_euclid(360.0);
+        assert!(mid.min(360.0 - mid) < 1e-3, "350 to 370 passes 0, got {mid}");
+    }
+
+    #[test]
+    fn targets_blend_between_their_keys() {
+        let s = ok("map РК1\nat 0s target=hero\nat 4s target=10,10 ease=linear\n");
+        assert_eq!(sample_target(&s.keys, 1.0), Some((Target::Hero(0.0, 0.0), Target::Cell(10.0, 10.0), 0.25)));
+        assert_eq!(sample_target(&s.keys, 9.0), Some((Target::Cell(10.0, 10.0), Target::Cell(10.0, 10.0), 0.0)));
+        let none = ok("map РК1\nat 1s pitch=12\n");
+        assert_eq!(sample_target(&none.keys, 0.5), None);
+    }
+
+    fn mono16(samples: &[i16], rate: u32) -> crate::dt::sound::Pcm {
+        let data = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+        crate::dt::sound::Pcm { rate, channels: 1, bits: 16, data }
+    }
+
+    fn sample_at(wav: &[u8], frame: usize) -> (i16, i16) {
+        let at = 44 + frame * 4;
+        (i16::from_le_bytes([wav[at], wav[at + 1]]), i16::from_le_bytes([wav[at + 2], wav[at + 3]]))
+    }
+
+    #[test]
+    fn the_sound_log_keeps_frame_order_and_gives_seconds() {
+        let mut log = SoundLog::default();
+        log.push(0, SoundEvent::Music("a.ogg".into()));
+        log.push(90, SoundEvent::Effect("Battle-Fight.wav".into()));
+        let starts = log.starts(60);
+        assert_eq!(starts[1].0, 1.5);
+        assert_eq!(starts[1].1, &SoundEvent::Effect("Battle-Fight.wav".into()));
+    }
+
+    #[test]
+    fn a_clip_lands_at_its_start_and_is_scaled() {
+        let pcm = mono16(&[1000, 2000], MIX_RATE);
+        let wav = mix_wav(&[Placed { start: 0.5, pcm: &pcm, gain: 0.5, max_secs: None }], 1.0);
+        assert_eq!(wav.len(), 44 + MIX_RATE as usize * 4);
+        assert_eq!(sample_at(&wav, 0), (0, 0));
+        let at = MIX_RATE as usize / 2;
+        assert_eq!(sample_at(&wav, at), (500, 500));
+        assert_eq!(sample_at(&wav, at + 1), (1000, 1000));
+    }
+
+    #[test]
+    fn clips_add_and_clip_at_the_sixteen_bit_range() {
+        let loud = mono16(&[30000], MIX_RATE);
+        let wav = mix_wav(&[Placed { start: 0.0, pcm: &loud, gain: 1.0, max_secs: None }, Placed { start: 0.0, pcm: &loud, gain: 1.0, max_secs: None }], 0.001);
+        assert_eq!(sample_at(&wav, 0), (i16::MAX, i16::MAX), "30000 + 30000 is clipped");
+    }
+
+    #[test]
+    fn a_clip_can_be_cut_short() {
+        let pcm = mono16(&[100, 100, 100, 100], MIX_RATE);
+        let wav = mix_wav(&[Placed { start: 0.0, pcm: &pcm, gain: 1.0, max_secs: Some(2.0 / MIX_RATE as f64) }], 0.001);
+        assert_eq!(sample_at(&wav, 1), (100, 100));
+        assert_eq!(sample_at(&wav, 2), (0, 0), "cut after two frames");
+    }
+
+    #[test]
+    fn a_mono_clip_at_another_rate_is_resampled_to_the_mix() {
+        let pcm = mono16(&[1000, 1000, 1000, 1000], MIX_RATE / 2);
+        let wav = mix_wav(&[Placed { start: 0.0, pcm: &pcm, gain: 1.0, max_secs: None }], 0.001);
+        assert_eq!(wav.len(), 44 + 48 * 4, "one millisecond at 48 kHz");
+        assert_eq!(sample_at(&wav, 0).0, 1000);
+    }
+
+    #[test]
+    fn pass_spans_take_the_games_wait_pace() {
+        assert!((pass_seconds(1) - 0.3).abs() < 1e-6, "two wait ticks of 0.15 s");
+        assert!((pass_seconds(72) - 21.6).abs() < 1e-6);
+    }
+}

@@ -3,6 +3,7 @@ pub mod diag;
 pub mod frame_probe;
 pub mod local;
 pub mod difftest;
+pub mod trailer;
 pub mod i18n;
 #[cfg(target_os = "android")]
 pub mod jni;

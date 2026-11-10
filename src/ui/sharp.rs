@@ -14,6 +14,7 @@
 //! Blend modes (`chrome::additive` and the like) set their material with [`in_blend`]; a
 //! sharp draw inside it sets its uniforms on that material instead of replacing it.
 
+use razdor::local;
 use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation, PipelineParams};
 use macroquad::prelude::*;
 
@@ -54,7 +55,7 @@ pub fn draw_scale(tex_size: Vec2, params: &DrawTextureParams) -> Vec2 {
     dest.abs() / source * PERSPECTIVE.with(std::cell::Cell::get)
 }
 
-thread_local! {
+local! {
     /// The screen pixels per 2D pixel of a perspective draw (the dev-only trailer camera's standing
     /// sprites: a sprite nearer the eye than the pivot is magnified, and its blend band must follow
     /// the magnification, not the 2D size). 1 everywhere else.

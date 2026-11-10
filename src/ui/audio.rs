@@ -75,7 +75,7 @@ pub enum Cue {
 
 impl Cue {
     /// The `[SFX-Effects]` key.
-    fn key(self) -> String {
+    pub(crate) fn key(self) -> String {
         let key = match self {
             Cue::Button => "InterfaceButtonDown",
             Cue::Panel => "InterfacePanelDown",
@@ -596,6 +596,7 @@ impl Audio {
     /// or load, then the app's picks (`rotated`: crossfaded over the rotation's longer
     /// [`jukebox::ROTATION_FADE`]). A triumph still playing ends.
     pub fn set_map_track(&mut self, track: &'static str, rotated: bool) {
+        super::trailer::map_track(track);
         if let Some(b) = self.backend.as_mut() {
             b.jukebox.set_map_track(track);
             b.next_fade = if rotated { jukebox::ROTATION_FADE } else { jukebox::SCREEN_FADE };
@@ -670,6 +671,11 @@ impl Audio {
             cue(c);
         }
         let cues = take_cues();
+        // A trailer render logs the sounds it would play, frame by frame, and plays none (`ui::trailer`).
+        if super::trailer::records_sound() {
+            super::trailer::record_sound(mood, &cues);
+            return;
+        }
         // Written once the slider is let go, not on every frame of a drag.
         if self.settings != self.saved && !held {
             self.settings = self.settings.clone().clamped();

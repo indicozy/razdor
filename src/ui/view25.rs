@@ -533,11 +533,16 @@ pub struct Trailer {
     /// Standing sprites whose foot is nearer the eye than this fade out (world units; 0 is off):
     /// they are faded fully by the distance and back in over the half of it beyond.
     pub near: f32,
+    /// The view azimuth in degrees; None: the player's yaw. Dev-only (the trailer's shots set it per frame).
+    pub yaw: Option<f32>,
+    /// The eye's distance as a multiple of the distance the view fits to the zoom (dev-only, the
+    /// shots' `fit`: the same framing at any window size); `dist` wins when both are set.
+    pub fit: Option<f32>,
 }
 
 impl Default for Trailer {
     fn default() -> Trailer {
-        Trailer { pitch: None, fov: None, dist: None, bend: 0.0, flat: 3.0, radius: 8.0, width: 40.0, ahead: 90.0, behind: 8.0, near: 8.0 }
+        Trailer { pitch: None, fov: None, dist: None, bend: 0.0, flat: 3.0, radius: 8.0, width: 40.0, ahead: 90.0, behind: 8.0, near: 8.0, yaw: None, fit: None }
     }
 }
 
@@ -555,6 +560,7 @@ pub fn parse_trailer(text: &str) -> Result<Trailer, String> {
             "dist" => v > 0.0,
             "bend" => (0.0..=89.0).contains(&v),
             "flat" | "ahead" | "behind" | "near" => v >= 0.0,
+            "yaw" => v.is_finite(),
             "radius" | "width" => v > 0.0,
             _ => return Err(format!("`{key}`: no such key")),
         };
@@ -571,6 +577,7 @@ pub fn parse_trailer(text: &str) -> Result<Trailer, String> {
             "width" => t.width = v,
             "ahead" => t.ahead = v,
             "near" => t.near = v,
+            "yaw" => t.yaw = Some(v),
             _ => t.behind = v,
         }
     }

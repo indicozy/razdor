@@ -58,6 +58,11 @@ fn conf() -> Conf {
     if let Some(code) = razdor::hub::export_cli(&args) {
         std::process::exit(code);
     }
+    // `--trailer <shot> [--plan | --preview] [--out <mp4>] [--frames <dir>] [--hashes <file>]`: the
+    // trailer's shot, rendered frame-exact (dev-only, `ui::trailer`; `docs/trailer-shots.md`).
+    if let Some(code) = ui::trailer::configure(&args) {
+        std::process::exit(code);
+    }
     // The log of this start (`razdor.log`, see `razdor::diag`), before anything can fail.
     razdor::diag::init();
     // `RAZDOR_DT_DIR` and the other settings may come from a `.env` file.
@@ -65,7 +70,7 @@ fn conf() -> Conf {
     single_instance();
     // Updates: the program's file, and what an update left behind.
     razdor::update::init();
-    let (window_width, window_height) = ui::snapshot::size().unwrap_or((1280, 800));
+    let (window_width, window_height) = ui::trailer::window_size().map(|(w, h)| (w as i32, h as i32)).or_else(ui::snapshot::size).unwrap_or((1280, 800));
     razdor::diag::step(&format!("opening the window ({window_width}x{window_height}, OpenGL)"));
     // On Linux the WM_CLASS is how `ui::display` finds the game's own X11 window.
     #[cfg(target_os = "linux")]
@@ -229,6 +234,8 @@ async fn main() {
         // (`RAZDOR_TEXT_PROBE`, `RAZDOR_TOUCH_PROBE`, off otherwise).
         ui::text_probe::begin_frame();
         ui::touch_probe::begin_frame();
+        // A trailer run sets its camera and timed actions for this frame (`ui::trailer`).
+        ui::trailer::before_frame(&mut app);
         app.frame();
         // The FPS counter, the keyboard strip and the pointer stay where the screen is.
         ui::pan::end_frame();
@@ -237,7 +244,14 @@ async fn main() {
         // On mobile, the text being typed, over the frame (the keyboard covers its field).
         ui::widgets::draw_keyboard_strip();
         // The original draws its pointer last, over everything (0x474a81).
-        ui::cursor::draw();
+        // A trailer run has no pointer in its pictures.
+        if !ui::trailer::hides_ui() {
+            ui::cursor::draw();
+        }
+        // The frame is drawn: a trailer run records it, and ends when its last frame is written.
+        if ui::trailer::after_frame(&mut app) {
+            exit_now(&mut app);
+        }
         if quiet {
             app.dialogs.clear();
         }

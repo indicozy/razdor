@@ -635,6 +635,14 @@ impl BattleView {
     /// Nobody has acted yet: the battle's first moment, where Razdor's deploy screen stood
     /// before the parity pass. Its quick battle is offered there (Q or Enter, the button
     /// "Quick battle"); afterwards Q and "Finish automatically" play out the rest.
+    /// A trailer shot's `battles show`: the battle is played to its end by the battle AI on both
+    /// sides (`Battle::auto_play_to_end`, the quick battle's end), and its result is shown.
+    pub(crate) fn play_to_end_for_trailer(&mut self) {
+        self.fx = None;
+        self.battle.auto_play_to_end();
+        self.quick_played = true;
+    }
+
     fn untouched(&self) -> bool {
         Self::moment(&self.battle) == self.begun && self.fx.is_none() && self.battle.outcome() == Outcome::Ongoing
     }

@@ -57,6 +57,7 @@ pub mod typography;
 pub mod unit_drag;
 pub mod unit_sheet;
 pub mod update_view;
+pub mod trailer;
 pub mod view25;
 #[cfg(target_os = "android")]
 pub mod android;
@@ -1699,7 +1700,9 @@ impl App {
         if let Some(d) = self.dialogs.front().filter(|d| !held && !d.waiting(clock)) {
             // A message window takes the arrow (EventDialog_OpenModal 0x4ac427).
             cursor::set(cursor::Shape::Arrow);
-            if let Some(close) = dialog::draw(d, &self.assets, self.game.as_ref()) {
+            // A trailer run draws no window: its events are answered by the shot's choices (`ui::trailer`).
+            let close = if trailer::hides_ui() { trailer::auto_close(d) } else { dialog::draw(d, &self.assets, self.game.as_ref()) };
+            if let Some(close) = close {
                 let closed = self.dialogs.pop_front();
                 let offer = closed.as_ref().is_some_and(|d| d.offer);
                 let offer_result = closed.as_ref().is_some_and(|d| d.village_event && !d.offer);
@@ -1802,7 +1805,11 @@ impl App {
         // on the map once the step that brought it has played: the attacker is seen arriving.
         if next.is_none() && self.dialogs.is_empty() && matches!(self.screen, Screen::WorldMap | Screen::Building(_)) {
             if let Some(game) = self.game.as_mut().filter(|g| g.foe.is_some() && !(matches!(self.screen, Screen::WorldMap) && g.step_playing())) {
-                next = Some(saves::battle(game, (!self.test_play).then_some(&mut self.session)));
+                // A trailer shot fights its battle on the map (`battles map`), or hands it to the battle screen.
+                next = match trailer::battle_on_map(game, &mut self.message, &mut self.dialogs) {
+                    Some(screen) => Some(screen),
+                    None => Some(saves::battle(game, (!self.test_play).then_some(&mut self.session))),
+                };
             }
         }
         // A victory or defeat event ends the game once its window is read (not while a custom

@@ -69,6 +69,10 @@ fn map_scale_for(chosen: f32, fit: f32) -> f32 {
 /// Sail colour of the hero's own ship.
 const HERO_SAIL: Color = Color::new(0.35, 0.8, 0.45, 1.0);
 fn bar_h() -> f32 {
+    // A trailer run draws no bar: the map takes the whole window (`ui::trailer`).
+    if super::trailer::hides_ui() {
+        return 0.0;
+    }
     super::chrome::bar_top_height()
 }
 /// The map view: the window above the bottom bar.
@@ -991,6 +995,10 @@ fn view_env() -> Option<&'static str> {
 /// Whether the world map is drawn tilted (the 2.5D view or the first-person one): the setting,
 /// unless `RAZDOR_VIEW` says `25d` or `first` (on) or `flat` (off), which the debug snapshots use.
 pub fn tilt_view() -> bool {
+    // A trailer run is always 2.5D (`ui::trailer`).
+    if super::trailer::active() {
+        return true;
+    }
     match view_env() {
         Some("25d") | Some("first") => true,
         Some("flat") => false,
@@ -1032,24 +1040,27 @@ pub fn set_horizon(on: bool) {
 
 /// The trailer's camera from `RAZDOR_TRAILER_CAM` (dev-only, read once; see `view25::Trailer`).
 /// A value that does not parse is logged and ignored.
-fn trailer() -> Option<&'static view25::Trailer> {
+fn trailer() -> Option<view25::Trailer> {
+    // A trailer shot or fly mode gives its camera frame by frame (`ui::trailer`).
+    if let Some(t) = super::trailer::camera() {
+        return Some(t);
+    }
     static TRAILER: std::sync::OnceLock<Option<view25::Trailer>> = std::sync::OnceLock::new();
-    TRAILER
-        .get_or_init(|| {
-            let text = std::env::var("RAZDOR_TRAILER_CAM").ok()?;
-            Some(view25::parse_trailer(&text).unwrap_or_else(|e| {
-                razdor::diag!("RAZDOR_TRAILER_CAM: {e}");
-                view25::Trailer::default()
-            }))
-        })
-        .as_ref()
+    *TRAILER.get_or_init(|| {
+        let text = std::env::var("RAZDOR_TRAILER_CAM").ok()?;
+        Some(view25::parse_trailer(&text).unwrap_or_else(|e| {
+            razdor::diag!("RAZDOR_TRAILER_CAM: {e}");
+            view25::Trailer::default()
+        }))
+    })
 }
 
 /// `RAZDOR_TRAILER_NOFOG=1` (dev-only, the trailer's stills): no fog is drawn and every sprite is
 /// fully visible. Read once.
 fn trailer_nofog() -> bool {
     static NOFOG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *NOFOG.get_or_init(|| std::env::var("RAZDOR_TRAILER_NOFOG").is_ok_and(|v| v.trim() == "1"))
+    // A trailer shot or fly mode implies it: the fog is hidden there as the UI is.
+    super::trailer::hides_ui() || *NOFOG.get_or_init(|| std::env::var("RAZDOR_TRAILER_NOFOG").is_ok_and(|v| v.trim() == "1"))
 }
 
 /// The camera the trailer's keys give over the player's `pitch` and `yaw`, centred on `target`
@@ -1057,7 +1068,13 @@ fn trailer_nofog() -> bool {
 /// the region returned is the ground the sheet covers (`width`, `ahead` and `behind` about the
 /// target), which the cull and the plan take.
 fn trailer_camera(t: &view25::Trailer, target: Vec2, scale: f32, view: Rect, pitch: f32, yaw: f32) -> (TiltCamera, Option<Rect>) {
+    let yaw = t.yaw.unwrap_or(yaw);
     let mut cam = TiltCamera::free(target, scale, view, t.pitch.unwrap_or(pitch), yaw, t.fov.unwrap_or(view25::FOV_DEG));
+    // The distance the view fits to the zoom: a shot's distances start from it (`--plan` prints it).
+    super::trailer::note_fitted_distance(cam.distance);
+    if let Some(k) = t.fit {
+        cam.distance *= k;
+    }
     if let Some(d) = t.dist {
         cam.distance = d;
     }
@@ -1214,7 +1231,7 @@ enum Pass {
     Sprites,
 }
 
-thread_local! {
+local! {
     static PASS: std::cell::Cell<Pass> = const { std::cell::Cell::new(Pass::Plain) };
 }
 
@@ -1268,7 +1285,7 @@ const MAX_BENT_SIDE: f32 = 8192.0;
 /// The target of a bent view's picture of `w` × `h` pixels, kept by size: the views fill and draw
 /// their picture one after the other, so one target serves them all.
 fn bent_target(w: u32, h: u32) -> RenderTarget {
-    thread_local! {
+    local! {
         static TARGETS: std::cell::RefCell<Vec<((u32, u32), RenderTarget)>> = const { std::cell::RefCell::new(Vec::new()) };
     }
     // The size goes up to a multiple of 64 px, so the footprint's size, which moves with the turn,
@@ -1346,7 +1363,7 @@ fn ground(cam: &Camera, draw: impl FnOnce()) {
     }
 }
 
-thread_local! {
+local! {
     /// The fog's visibility of the standing sprite being drawn, 1 = plain ([`sprite_visibility`]).
     /// Only [`standing`] sets it, and only in the 2.5D view: the flat view's sprites are always 1.
     static SPRITE_VIS: std::cell::Cell<f32> = const { std::cell::Cell::new(1.0) };
@@ -1432,7 +1449,7 @@ fn standing(cam: &Camera, foot: Vec2, base: Vec2, vis: f32, draw: impl FnOnce())
     pop_cpu_model();
 }
 
-thread_local! {
+local! {
     /// The distance from the eye of the hero's foot this frame: the trailer's near fade never reaches
     /// past it, so the sprites between the camera and him fade and he stays in view (infinite off
     /// the sprite run).
@@ -1552,6 +1569,8 @@ impl Camera {
     }
 
     fn looking_in(game: &Game, zoom: f32, at: (f32, f32), view: Rect) -> Camera {
+        // A trailer shot's target (`ui::trailer`) replaces the centre the view looks at.
+        let at = super::trailer::target().unwrap_or(at);
         let map = &game.world.map;
         let scale = PX * zoom * map_scale();
         let rh = map.grid.row_height();
@@ -1583,7 +1602,7 @@ impl Camera {
             } else {
                 let (tilt, region) = match trailer() {
                     None => (TiltCamera::new(target, scale, view, tilt_pitch(), tilt_yaw()), None),
-                    Some(t) => trailer_camera(t, target, scale, view, tilt_pitch(), tilt_yaw()),
+                    Some(t) => trailer_camera(&t, target, scale, view, tilt_pitch(), tilt_yaw()),
                 };
                 cam.tilt = Some(match region {
                     Some(region) => Tilt { cam: tilt, plan: region, cull: region },
