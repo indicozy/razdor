@@ -40,6 +40,25 @@ pub const FP_RADIUS: f32 = 8.0;
 pub const FP_RADIUS_DOWN: f32 = 60.0;
 pub const FP_BEND_UP: f32 = 78.0;
 pub const FP_BEND_DOWN: f32 = -60.0;
+/// The eyes view («Глазами героя»): the eye's height above the ground (cells, the world units), its
+/// pitch (degrees below the horizontal, 0 to 5 by the design) and the distance inside which a
+/// standing sprite fades out (cells; `world_view::near_fade_limit`). Its ground's flat part ahead of
+/// the eye and the arc of the roll up («Вверх») or the curve down («Горизонт»).
+pub const EYE_HEIGHT: f32 = 0.7;
+pub const EYE_PITCH: f32 = 2.0;
+pub const EYE_NEAR: f32 = 2.5;
+/// The width of the eyes view's fade-out band beyond [`EYE_NEAR`] (cells): a sprite is translucent over it.
+pub const EYE_FADE_BAND: f32 = 0.5;
+pub const EYE_FLAT: f32 = 2.5;
+pub const EYE_RADIUS_UP: f32 = 8.0;
+pub const EYE_RADIUS_DOWN: f32 = 60.0;
+pub const EYE_BEND_UP: f32 = 78.0;
+pub const EYE_BEND_DOWN: f32 = -60.0;
+/// The near plane of the eyes camera (cells): the eye sees the ground under the eye's own sprites.
+const EYE_CLIP: f32 = 0.05;
+/// How far ahead of the eye the compass looks for north on the screen (cells): the point under
+/// the eye projects far below the frame.
+const EYE_COMPASS_LOOK: f32 = 3.0;
 
 /// The horizontal direction the camera looks in at `yaw_deg`, as a ground vector (world x, z):
 /// north `(0, -1)` at yaw 0, east `(-1, 0)` at 90.
@@ -58,7 +77,9 @@ pub fn right(yaw_deg: f32) -> Vec2 {
 /// screen pixels (y down), from the target to a point a step north of it (up at yaw 0, clockwise
 /// as the map turns). The compass needle's direction; None when the target is behind the eye.
 pub fn north_on_screen(cam: &TiltCamera, frame: Rect) -> Option<Vec2> {
-    let t = vec3(cam.target.x, 0.0, cam.target.y);
+    // The eyes camera's target is the ground under its eye: a point ahead of it stands in the frame.
+    let anchor = if cam.eye_at.is_some() { cam.target + forward(cam.yaw_deg) * EYE_COMPASS_LOOK } else { cam.target };
+    let t = vec3(anchor.x, 0.0, anchor.y);
     let here = cam.project(t, frame)?;
     let north = cam.project(t + vec3(0.0, 0.0, -1.0), frame)?;
     Some((north - here).normalize_or_zero())
@@ -82,6 +103,9 @@ pub struct TiltCamera {
     /// The bent ground of the trailer's camera (dev-only, `RAZDOR_TRAILER_CAM`); None for the
     /// player's flat ground.
     pub bend: Option<Bend>,
+    /// The eyes camera's eye (world units, y up): it stands here and looks along its pitch and yaw,
+    /// not at `target` (the ground under it). None for the cameras that look at the target.
+    pub eye_at: Option<Vec3>,
 }
 
 impl TiltCamera {
@@ -105,6 +129,7 @@ impl TiltCamera {
             yaw_deg,
             fov_deg,
             bend: None,
+            eye_at: None,
         }
     }
 
@@ -116,6 +141,9 @@ impl TiltCamera {
 
     /// The eye: behind the target as seen along [`forward`] (south of it at yaw 0), and above it.
     pub fn eye(&self) -> Vec3 {
+        if let Some(e) = self.eye_at {
+            return e;
+        }
         let (s, c) = self.pitch_deg.to_radians().sin_cos();
         let f = forward(self.yaw_deg);
         vec3(self.target.x - f.x * self.distance * c, self.distance * s, self.target.y - f.y * self.distance * c)
@@ -136,6 +164,10 @@ impl TiltCamera {
     /// across it, y up).
     pub fn view_proj(&self, frame: Rect) -> Mat4 {
         let aspect = frame.w / frame.h;
+        if let Some(eye) = self.eye_at {
+            let view = Mat4::look_at_rh(eye, eye + self.look_dir(), Vec3::Y);
+            return Mat4::perspective_rh_gl(self.fov_deg.to_radians(), aspect, EYE_CLIP, 4.0 * (self.distance + FAR)) * view;
+        }
         let (near, far) = (self.distance * 0.01, 4.0 * (self.distance + FAR));
         let eye = self.eye();
         let view = Mat4::look_at_rh(eye, vec3(self.target.x, 0.0, self.target.y), Vec3::Y);
@@ -203,12 +235,45 @@ impl TiltCamera {
         // The hero stands `off` short of the target along the view.
         let off = distance * cp - distance * sp / th;
         let target = look + forward(yaw_deg) * off;
-        let mut cam = TiltCamera { target, distance, pitch_deg: FP_PITCH, yaw_deg, fov_deg: FP_FOV, bend: None };
+        let mut cam = TiltCamera { target, distance, pitch_deg: FP_PITCH, yaw_deg, fov_deg: FP_FOV, bend: None, eye_at: None };
         // The sheet's pivot is the view's centre; its horizon (the down bend) is where the eye's
         // sight line grazes it.
         let (max_deg, radius) = if horizon { (FP_BEND_DOWN, FP_RADIUS_DOWN) } else { (FP_BEND_UP, FP_RADIUS) };
         cam.bend = Some(Bend::new(target, yaw_deg, FP_FLAT, radius, max_deg).with_horizon(cam.eye()));
         cam
+    }
+
+    /// The eyes camera («Глазами героя», the trailer's `eye`): the eye stands on the ground at `ground`,
+    /// `height` cells up, and looks along `pitch_deg` below the horizontal (0 to 89.9) and `yaw_deg`,
+    /// with the field of view `fov_deg`. It has no bend: the caller adds one with [`TiltCamera::eye_bend`].
+    /// Its distance is the flat view's at `scale`, a reference only (the bent picture's density and the
+    /// sprites' magnification, which do not depend on it).
+    pub fn eyes(ground: Vec2, height: f32, scale: f32, frame: Rect, pitch_deg: f32, yaw_deg: f32, fov_deg: f32) -> TiltCamera {
+        let fov_deg = fov_deg.clamp(5.0, 120.0);
+        let half_fov = (fov_deg / 2.0).to_radians();
+        TiltCamera {
+            target: ground,
+            distance: frame.h / 2.0 / (half_fov.tan() * scale),
+            pitch_deg: pitch_deg.clamp(0.0, FREE_PITCH_MAX),
+            yaw_deg,
+            fov_deg,
+            bend: None,
+            eye_at: Some(vec3(ground.x, height.max(0.0), ground.y)),
+        }
+    }
+
+    /// The bend of an eyes camera: the sheet starts `flat` cells ahead of the eye and rolls along an
+    /// arc of `radius` to the slope `max_deg` (negative: it curves down to the horizon, which
+    /// [`Bend::with_horizon`] finds from the eye).
+    pub fn eye_bend(&self, flat: f32, radius: f32, max_deg: f32) -> Bend {
+        Bend::new(self.target, self.yaw_deg, flat, radius, max_deg).with_horizon(self.eye())
+    }
+
+    /// The direction the eyes camera looks in (unit): along its pitch below the horizontal, at its yaw.
+    fn look_dir(&self) -> Vec3 {
+        let (s, c) = self.pitch_deg.to_radians().sin_cos();
+        let f = forward(self.yaw_deg);
+        vec3(f.x * c, -s, f.y * c)
     }
 
     /// The ground the pixels of `area` see, in world units, as the bounding box of the ground
@@ -538,11 +603,17 @@ pub struct Trailer {
     /// The eye's distance as a multiple of the distance the view fits to the zoom (dev-only, the
     /// shots' `fit`: the same framing at any window size); `dist` wins when both are set.
     pub fit: Option<f32>,
+    /// The eyes view (dev-only, the shots' `eye`): the camera stands on the target at `height` cells
+    /// and looks along its pitch and yaw; `horizon` curves the ground down (`bend` is its angle) instead
+    /// of rolling it up. See [`TiltCamera::eyes`].
+    pub eye: bool,
+    pub height: f32,
+    pub horizon: bool,
 }
 
 impl Default for Trailer {
     fn default() -> Trailer {
-        Trailer { pitch: None, fov: None, dist: None, bend: 0.0, flat: 3.0, radius: 8.0, width: 40.0, ahead: 90.0, behind: 8.0, near: 8.0, yaw: None, fit: None }
+        Trailer { pitch: None, fov: None, dist: None, bend: 0.0, flat: 3.0, radius: 8.0, width: 40.0, ahead: 90.0, behind: 8.0, near: 8.0, yaw: None, fit: None, eye: false, height: EYE_HEIGHT, horizon: false }
     }
 }
 
@@ -1133,6 +1204,45 @@ mod tests {
 
     /// Ground points on the bent sheet project through the camera and pick back within a tenth of
     /// a cell, at both bends and several yaws (the sky and the far side of the horizon excluded).
+    /// The eyes camera stands `EYE_HEIGHT` above the ground under its target and looks along its yaw
+    /// and pitch. Its bent sheet is picked back at both bends and several yaws (a point round trip
+    /// within 0.1 cell), and the down bend has a horizon while the up bend has none.
+
+    #[test]
+    fn the_eyes_camera_stands_at_its_height_and_picks_its_sheet_at_both_bends() {
+        let look = vec2(20.5, 13.25);
+        let cam = TiltCamera::eyes(look, EYE_HEIGHT, SCALE, FRAME, EYE_PITCH, 0.0, FP_FOV);
+        assert_eq!(cam.eye(), vec3(look.x, EYE_HEIGHT, look.y));
+        assert_eq!(cam.target, look);
+        let down = cam.eye_bend(EYE_FLAT, EYE_RADIUS_DOWN, EYE_BEND_DOWN);
+        assert!(down.limit.is_finite() && down.limit > EYE_FLAT, "the horizon at {}", down.limit);
+        assert!(!cam.eye_bend(EYE_FLAT, EYE_RADIUS_UP, EYE_BEND_UP).limit.is_finite());
+        let mut checked = 0;
+        for yaw in YAWS {
+            for (radius, max_deg) in [(EYE_RADIUS_UP, EYE_BEND_UP), (EYE_RADIUS_DOWN, EYE_BEND_DOWN)] {
+                let mut cam = TiltCamera::eyes(look, EYE_HEIGHT, SCALE, FRAME, EYE_PITCH, yaw, FP_FOV);
+                let bend = cam.eye_bend(EYE_FLAT, radius, max_deg);
+                cam.bend = Some(bend);
+                for s in [0.5, 1.5, 3.0, 5.0, 9.0, 14.0, 22.0, 30.0] {
+                    for l in [-6.0, -2.0, 0.0, 2.0, 6.0] {
+                        let g = bend.pivot + forward(yaw) * s + right(yaw) * l;
+                        if bend.hidden(g) {
+                            continue;
+                        }
+                        let Some(px) = cam.project(bend.point(g), FRAME) else { continue };
+                        if !FRAME.contains(px) {
+                            continue;
+                        }
+                        let back = cam.pick(px, FRAME).unwrap_or_else(|| panic!("yaw {yaw} max {max_deg}: no hit for {g:?}"));
+                        assert!(close(back, g, 0.1), "yaw {yaw} max {max_deg}: {g:?} came back as {back:?}");
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        assert!(checked > 100, "only {checked} points checked");
+    }
+
     #[test]
     fn pick_undoes_the_bent_sheet_at_both_bends_and_every_yaw() {
         let mut checked = 0;

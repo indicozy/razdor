@@ -1393,6 +1393,7 @@ pub fn apply_options(audio: &super::audio::Settings) {
     super::world_view::set_tilt_view(audio.map_tilt);
     super::world_view::set_first_person(audio.map_first_person);
     super::world_view::set_horizon(audio.map_horizon);
+    super::world_view::set_eyes(audio.map_eyes);
     super::world_view::set_sprite_size(audio.map_sprite_size);
     super::gestures::set_twist(audio.map_twist);
     chrome::set_option_override("ScrollSpeed", audio.scroll_speed.map(|v| (v.round() as i32).to_string()));
@@ -1584,7 +1585,7 @@ impl Group {
     /// The rows the group shows, top to bottom. Every row is in exactly one group (a test checks it).
     pub fn rows(self) -> &'static [Row] {
         match self {
-            Group::Map => &[Row::MapZoom, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::MapEdge, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
+            Group::Map => &[Row::MapZoom, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
             Group::Battle => &[Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
@@ -1601,6 +1602,7 @@ pub enum Row {
     SpriteSize,
     TwoFingerTurn,
     FarGround,
+    ViewCamera,
     MapEdge,
     MapBattles,
     ArmyList,
@@ -1628,12 +1630,13 @@ pub enum Row {
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-    pub const ALL: [Row; 28] = [
+    pub const ALL: [Row; 29] = [
         Row::MapZoom,
         Row::MapView,
         Row::SpriteSize,
         Row::TwoFingerTurn,
         Row::FarGround,
+        Row::ViewCamera,
         Row::MapEdge,
         Row::MapBattles,
         Row::ArmyList,
@@ -1664,6 +1667,7 @@ impl Row {
         match self {
             Row::MapZoom => Some(tr("The zoom the map plays at. The wheel steps away from it and the 0 key comes back to it; locked, the map always shows it.")),
             Row::FarGround => Some(tr("Up: the far ground rolls up to a top-down map. Horizon: the ground curves down like the earth's horizon, with the sky above it.")),
+            Row::ViewCamera => Some(tr("Behind the hero: the low camera behind him. Through the hero's eyes: the camera stands at his eyes and turns with his walk; Q and E turn it while he stands.")),
             Row::MapEdge => Some(tr("Off: past the map's edges is black, as in the original. On: a short stretch of ground goes on past the edges, then thickens into the same black fog as the unexplored map.")),
             Row::AiStrength => Some(tr("Maximum: before each move the enemy of your battles weighs every move and answer ahead and plays each out to the end of the battle.")),
             Row::ArmyArrangement => Some(tr("Clicks: the first click picks a unit or an item, the second places it. Dragging: a click only selects, and units and items are moved by dragging. Both: clicks and dragging at once.")),
@@ -1684,7 +1688,7 @@ impl Row {
         match self {
             Row::SpriteSize | Row::TwoFingerTurn => audio.map_tilt,
             // The far ground's shape is the first-person view's only.
-            Row::FarGround => audio.map_tilt && audio.map_first_person,
+            Row::FarGround | Row::ViewCamera => audio.map_tilt && audio.map_first_person,
             Row::Orientation => cfg!(target_os = "android"),
             // The bottom bar's size is a phone's (Razdor's; the desktop has no such row).
             Row::BottomBar => bottom_bar_row_shown(super::display::dp_px().is_some(), window_layout::portrait()),
@@ -1985,6 +1989,11 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
         Row::FarGround => {
             if labelled_row_help(c, geo, tr("Far ground"), far_ground_label(audio), Row::FarGround.help_text()).0 {
                 audio.map_horizon = !audio.map_horizon;
+            }
+        }
+        Row::ViewCamera => {
+            if labelled_row_help(c, geo, tr("Camera"), view_camera_label(audio), Row::ViewCamera.help_text()).0 {
+                audio.map_eyes = !audio.map_eyes;
             }
         }
         Row::SpriteSize => {
@@ -2457,6 +2466,11 @@ fn map_view_label(audio: &super::audio::Settings) -> &'static str {
 /// The far ground row's value: «Горизонт» or «Вверх» (the first-person view's only).
 fn far_ground_label(audio: &super::audio::Settings) -> &'static str {
     if audio.map_horizon { tr("Horizon") } else { tr("Up") }
+}
+
+/// The camera row's value: «Глазами героя» or «За героем» (the first-person view's only).
+fn view_camera_label(audio: &super::audio::Settings) -> &'static str {
+    if audio.map_eyes { tr("Through the hero's eyes") } else { tr("Behind the hero") }
 }
 
 /// The sprites' size as its row shows it: `1×`, `1.5×`, `2×`, or a stored value.
@@ -3347,7 +3361,7 @@ mod tests {
     #[test]
     fn the_long_hints_are_behind_a_question_mark() {
         let with: Vec<Row> = Row::ALL.into_iter().filter(|r| r.help_text().is_some()).collect();
-        assert_eq!(with, vec![Row::MapZoom, Row::FarGround, Row::MapEdge, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::Language, Row::Updates]);
+        assert_eq!(with, vec![Row::MapZoom, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::Language, Row::Updates]);
         scene_help("Experience");
         assert_eq!(HELP_PINNED.with(|p| p.get()), Row::Experience.help_text());
         HELP_PINNED.with(|p| p.set(None));

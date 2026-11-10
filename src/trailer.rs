@@ -26,6 +26,11 @@ pub struct Values {
     pub yaw: Option<f32>,
     /// The eye's distance as a multiple of the fitted distance (see `view25::Trailer::fit`).
     pub fit: Option<f32>,
+    /// The eyes view: `eye` (0 or 1, on from the middle of its segment), the eye's `height` in
+    /// cells, and `horizon` (0 or 1: the far ground curves down rather than rolling up).
+    pub eye: Option<f32>,
+    pub height: Option<f32>,
+    pub horizon: Option<f32>,
 }
 
 /// Where the camera looks: a map cell, or the hero's cell plus an offset in cells.
@@ -320,7 +325,7 @@ fn parse_target(v: &str) -> Result<Target, String> {
 }
 
 /// The camera keys a keyframe may set.
-const CAMERA_KEYS: [&str; 12] = ["pitch", "fov", "dist", "fit", "bend", "flat", "radius", "width", "ahead", "behind", "near", "yaw"];
+const CAMERA_KEYS: [&str; 15] = ["pitch", "fov", "dist", "fit", "bend", "flat", "radius", "width", "ahead", "behind", "near", "yaw", "eye", "height", "horizon"];
 
 fn parse_at(rest: &[&str]) -> Result<Key, FieldError> {
     let Some((time, items)) = rest.split_first() else {
@@ -343,7 +348,7 @@ fn parse_at(rest: &[&str]) -> Result<Key, FieldError> {
             }
             _ => {
                 let Some(&name) = CAMERA_KEYS.iter().find(|&&c| c == k) else {
-                    return Err(("at", format!("`{k}`: no such key (pitch, fov, dist, bend, flat, radius, width, ahead, behind, near, yaw, target, ease)")));
+                    return Err(("at", format!("`{k}`: no such key (pitch, fov, dist, fit, bend, flat, radius, width, ahead, behind, near, yaw, eye, height, horizon, target, ease)")));
                 };
                 let n: f32 = v.parse().map_err(|_| (name, format!("`{v}` is not a number")))?;
                 check_range(name, n).map_err(|e| (name, e))?;
@@ -367,6 +372,9 @@ fn slot<'a>(v: &'a mut Values, name: &str) -> &'a mut Option<f32> {
         "ahead" => &mut v.ahead,
         "behind" => &mut v.behind,
         "near" => &mut v.near,
+        "eye" => &mut v.eye,
+        "height" => &mut v.height,
+        "horizon" => &mut v.horizon,
         _ => &mut v.yaw,
     }
 }
@@ -375,20 +383,24 @@ fn slot<'a>(v: &'a mut Values, name: &str) -> &'a mut Option<f32> {
 /// rendered as 89.9, where `look_at` is degenerate).
 fn check_range(k: &str, n: f32) -> Result<(), String> {
     let ok = match k {
-        "pitch" => (5.0..=90.0).contains(&n),
+        "pitch" => (0.0..=90.0).contains(&n),
         "fov" => (5.0..=120.0).contains(&n),
         "dist" | "fit" | "radius" | "width" => n > 0.0,
         "bend" => (0.0..=89.0).contains(&n),
         "flat" | "ahead" | "behind" | "near" => n >= 0.0,
+        "eye" | "horizon" => (0.0..=1.0).contains(&n),
+        "height" => (0.1..=5.0).contains(&n),
         _ => n.is_finite(),
     };
     if ok {
         return Ok(());
     }
     Err(match k {
-        "pitch" => format!("{n}: from 5 to 90 (90 is the top-down view)"),
+        "pitch" => format!("{n}: from 0 to 90 (90 is the top-down view, 0 to 5 the eyes view)"),
         "fov" => format!("{n}: from 5 to 120 degrees"),
         "bend" => format!("{n}: from 0 to 89 degrees"),
+        "eye" | "horizon" => format!("{n}: 0 or 1"),
+        "height" => format!("{n}: from 0.1 to 5 cells"),
         "dist" | "fit" | "radius" | "width" => format!("{n}: must be above 0"),
         _ => format!("{n}: must not be negative"),
     })
@@ -475,6 +487,9 @@ pub fn sample_values(keys: &[Key], t: f64) -> Values {
     out.behind = track("behind");
     out.near = track("near");
     out.yaw = track("yaw");
+    out.eye = track("eye");
+    out.height = track("height");
+    out.horizon = track("horizon");
     out
 }
 
@@ -636,6 +651,25 @@ pub fn mix_wav(clips: &[Placed], total: f64) -> Vec<u8> {
 }
 
 #[cfg(test)]
+mod eyes_keys {
+    use super::*;
+
+    /// `eye`, `height` and `horizon` parse as the camera keys do: they sample between keyframes (a 0/1
+    /// key reads its middle as 0.5), and out-of-range values name their item.
+    #[test]
+    fn the_eye_keys_sample_between_keyframes_and_check_their_ranges() {
+        let s = parse("map M\nat 0s eye=0 height=0.7 horizon=0 target=hero\nat 2s eye=1 height=1.2 horizon=1 target=hero\nduration 2\n").expect("parses");
+        let v = sample_values(&s.keys, 1.0);
+        assert_eq!(v.eye, Some(0.5));
+        assert!((v.height.unwrap() - 0.95).abs() < 1e-4, "{v:?}");
+        assert_eq!(v.horizon, Some(0.5));
+        assert!(parse("map M\nat 0s eye=2\nduration 1\n").is_err());
+        assert!(parse("map M\nat 0s height=9\nduration 1\n").is_err());
+        assert!(parse("map M\nat 0s horizon=-1\nduration 1\n").is_err());
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -674,7 +708,7 @@ mod tests {
     fn every_error_names_its_line_and_field() {
         let text = "map РК1\nat 2s pitch=95\nat 3s pitch=12\nat 1s fov=40\nwalk 3s 1,2 x\nfps 0\nhero wizard\nsize 1920x1081\nevent 8\nmusic maybe\nbogus 1";
         let all = errs(text).join("\n");
-        assert!(all.contains("line 2: pitch: 95: from 5 to 90"), "{all}");
+        assert!(all.contains("line 2: pitch: 95: from 0 to 90"), "{all}");
         assert!(all.contains("line 4: at: 1s: keyframes must go in time order"), "{all}");
         assert!(all.contains("line 5: walk"), "{all}");
         assert!(all.contains("line 6: fps: 0: from 1 to 120"), "{all}");

@@ -486,6 +486,10 @@ fn camera_of(v: &Values) -> Trailer {
     t.behind = v.behind.unwrap_or(t.behind);
     t.near = v.near.unwrap_or(t.near);
     t.yaw = v.yaw;
+    // A 0/1 key is on from the middle of its segment (the sampled value's half).
+    t.eye = v.eye.is_some_and(|e| e >= 0.5);
+    t.horizon = v.horizon.is_some_and(|h| h >= 0.5);
+    t.height = v.height.unwrap_or(t.height);
     t
 }
 
@@ -804,7 +808,10 @@ impl Sinks {
         }
         if let Some(child) = self.child.as_mut() {
             if let Some(stdin) = child.stdin.as_mut() {
-                if stdin.write_all(&image.bytes).is_err() {
+                // The screen read comes bottom row first (macroquad's `export_png` flips it for the PNG
+                // frames): the encoder takes the top row first, so the rows go in reverse.
+                let stride = image.width as usize * 4;
+                if image.bytes.chunks_exact(stride).rev().any(|row| stdin.write_all(row).is_err()) {
                     warn(format!("the encoder stopped taking frames at frame {f}; the render ends"));
                     return false;
                 }

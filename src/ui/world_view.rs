@@ -1000,7 +1000,7 @@ pub fn tilt_view() -> bool {
         return true;
     }
     match view_env() {
-        Some("25d") | Some("first") => true,
+        Some("25d") | Some("first") | Some("eyes") => true,
         Some("flat") => false,
         _ => TILT_VIEW.load(std::sync::atomic::Ordering::Relaxed),
     }
@@ -1017,7 +1017,7 @@ pub fn set_tilt_view(on: bool) {
 pub fn first_person() -> bool {
     tilt_view()
         && match view_env() {
-            Some(v) => v == "first",
+            Some(v) => v == "first" || v == "eyes",
             None => FIRST_PERSON.load(std::sync::atomic::Ordering::Relaxed),
         }
 }
@@ -1030,12 +1030,47 @@ pub fn set_first_person(on: bool) {
 /// Whether the first-person view's far ground curves down to a horizon with the sky above
 /// («Горизонт»), rather than rolling up to top-down («Вверх»).
 pub fn horizon() -> bool {
-    HORIZON.load(std::sync::atomic::Ordering::Relaxed)
+    // `RAZDOR_VIEW_HORIZON=1` (a snapshot) makes it the horizon, as the settings do.
+    static ENV: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENV.get_or_init(|| std::env::var("RAZDOR_VIEW_HORIZON").is_ok_and(|v| v.trim() == "1")) || HORIZON.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Puts the far ground's shape on or off the horizon (from the settings, at once).
 pub fn set_horizon(on: bool) {
     HORIZON.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The eyes view («Глазами героя», `audio::Settings::map_eyes`, pushed by [`set_eyes`]): the camera
+/// stands at the hero's eyes and looks along his walk. Off by default; it is within the first-person
+/// view (`first_person`).
+static EYES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether the eyes setting is on; `RAZDOR_VIEW=eyes` (a snapshot) turns it on too.
+pub fn eyes_setting() -> bool {
+    match view_env() {
+        Some(v) => v == "eyes",
+        None => EYES.load(std::sync::atomic::Ordering::Relaxed),
+    }
+}
+
+/// Puts the eyes view on or off (from the settings, at once).
+pub fn set_eyes(on: bool) {
+    EYES.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether the map is drawn from the hero's eyes now: a trailer shot's `eye` in a run, else the
+/// setting within the first-person view.
+pub fn eyes_view() -> bool {
+    match trailer() {
+        Some(t) => t.eye,
+        None => first_person() && eyes_setting(),
+    }
+}
+
+/// Whether the camera stands at the eyes (`view25::TiltCamera::eyes`): the hero's figure and his mark
+/// are not drawn, a sprite behind the eye is not, and the near fade is the eyes' fixed one.
+fn eyes_cam(cam: &Camera) -> bool {
+    cam.tilt.is_some_and(|t| t.cam.eye_at.is_some())
 }
 
 /// The trailer's camera from `RAZDOR_TRAILER_CAM` (dev-only, read once; see `view25::Trailer`).
@@ -1091,6 +1126,30 @@ fn trailer_camera(t: &view25::Trailer, target: Vec2, scale: f32, view: Rect, pit
 /// footprint of the frame `view`, culled to the strip under the bar `draw` as the 2.5D one is.
 fn first_person_tilt(look: Vec2, scale: f32, view: Rect, draw: Rect, yaw: f32, horizon: bool) -> Tilt {
     let cam = TiltCamera::first_person(look, scale, view, yaw, horizon);
+    Tilt { cam, plan: cam.ground_footprint(view, view), cull: cam.ground_footprint(view, draw) }
+}
+
+/// The eyes view's tilt (`view25::TiltCamera::eyes`): the eye stands on `ground` (the hero's displayed
+/// place, or a shot's target in a run), looks along `yaw` (a shot's own yaw if it sets one) and has the
+/// far ground of `horizon`: curved down to the horizon, else rolled up. A shot sets its own pitch, field,
+/// height and bend. Its footprints are the frame `view` and the strip under the bar `draw`, as the
+/// first-person view's.
+fn eyes_tilt(ground: Vec2, scale: f32, view: Rect, draw: Rect, yaw: f32, horizon: bool, shot: Option<view25::Trailer>) -> Tilt {
+    let (pitch, fov, height, yaw, bend) = match shot {
+        Some(t) => (
+            t.pitch.unwrap_or(view25::EYE_PITCH),
+            t.fov.unwrap_or(view25::FP_FOV),
+            t.height,
+            t.yaw.unwrap_or(yaw),
+            (t.bend > 0.0).then_some((t.flat, t.radius, if t.horizon { -t.bend } else { t.bend })),
+        ),
+        None if horizon => (view25::EYE_PITCH, view25::FP_FOV, view25::EYE_HEIGHT, yaw, Some((view25::EYE_FLAT, view25::EYE_RADIUS_DOWN, view25::EYE_BEND_DOWN))),
+        None => (view25::EYE_PITCH, view25::FP_FOV, view25::EYE_HEIGHT, yaw, Some((view25::EYE_FLAT, view25::EYE_RADIUS_UP, view25::EYE_BEND_UP))),
+    };
+    let mut cam = TiltCamera::eyes(ground, height, scale, view, pitch, yaw, fov);
+    if let Some((flat, radius, max_deg)) = bend {
+        cam.bend = Some(cam.eye_bend(flat, radius, max_deg));
+    }
     Tilt { cam, plan: cam.ground_footprint(view, view), cull: cam.ground_footprint(view, draw) }
 }
 
@@ -1193,6 +1252,20 @@ fn ease_yaw(shown: f32, target: f32, dt_ms: i64) -> f32 {
 fn ease_tilt_yaw(dt_ms: i64) {
     let next = ease_yaw(tilt_yaw(), tilt_yaw_target(), dt_ms);
     TILT_YAW_SHOWN.store(next.to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The eyes view's yaw target while the hero walks: the direction of his next step, from where he is
+/// drawn, so the view turns with his walk (eased by [`ease_tilt_yaw`]). Standing, the target stays:
+/// Q, E, the two-finger twist and the compass turn it.
+fn follow_walk(game: &Game) {
+    let (px, py) = game.display_pos();
+    let Some((hx, hy)) = game.display_heading() else { return };
+    let (dx, dy) = (hx - px, hy - py);
+    if dx.hypot(dy) < 1e-3 {
+        return;
+    }
+    // The yaw whose forward is the step: `forward(yaw)` is (-sin yaw, -cos yaw).
+    TILT_YAW.store(wrap_yaw((-dx).atan2(-dy).to_degrees()).to_bits(), std::sync::atomic::Ordering::Relaxed);
 }
 
 /// Whether the compass button shows: the 2.5D view is turned away from the default angle, by the
@@ -1426,6 +1499,13 @@ fn standing(cam: &Camera, foot: Vec2, base: Vec2, vis: f32, draw: impl FnOnce())
         }
         _ => (view25::billboard_model_about(cam.origin, foot, base, cam.scale, pitch, yaw, size), vec3(g.x, 0.0, g.y)),
     };
+    // The eyes view: a sprite behind the eye is not seen (its billboard stands at its foot's depth).
+    if let Some(eye) = tilt.cam.eye_at {
+        let f = view25::forward(yaw);
+        if (on_ground.x - eye.x) * f.x + (on_ground.z - eye.z) * f.y <= 0.0 {
+            return;
+        }
+    }
     // The trailer's camera (dev-only) and the first-person view: a sprite whose foot is nearer the
     // eye than the near fade's distance fades out, and the blend band of its sharp draws follows
     // the magnification of a nearer sprite. The 2.5D view is as before.
@@ -1434,9 +1514,11 @@ fn standing(cam: &Camera, foot: Vec2, base: Vec2, vis: f32, draw: impl FnOnce())
     if trailer().is_some() || first_person() {
         let d = (on_ground - tilt.cam.eye()).length().max(1e-3);
         magnify = tilt.cam.pivot_scale(cam.view) * tilt.cam.distance / (d * cam.scale);
-        let limit = near_fade_limit();
+        let limit = near_fade_limit(cam);
         if limit > 0.0 && NEAR_FADE.with(std::cell::Cell::get) {
-            vis *= near_fade(d, limit);
+            // The eyes view's band is narrow (`EYE_FADE_BAND`): a tree stays translucent over the sky for
+            // half a cell, not for the band of the trailer's and 2.5D's fade.
+            vis *= if eyes_cam(cam) { smooth_band(d, limit, view25::EYE_FADE_BAND) } else { near_fade(d, limit) };
         }
         if vis <= 0.0 {
             return;
@@ -1469,7 +1551,11 @@ fn without_near_fade(draw: impl FnOnce()) {
 /// The distance inside which a standing sprite fades (world units; 0 is off): the trailer's `near`,
 /// and in the first-person view [`FP_NEAR_SHARE`] of the hero's distance from the eye (the trees
 /// between the eye and him fade, so they do not hide him; he never fades). Never past the hero.
-fn near_fade_limit() -> f32 {
+fn near_fade_limit(cam: &Camera) -> f32 {
+    // The eyes view: a fixed distance (the hero stands at the eye, so his distance would fade nothing).
+    if eyes_cam(cam) {
+        return view25::EYE_NEAR;
+    }
     let hero = NEAR_LIMIT.with(std::cell::Cell::get);
     match trailer() {
         Some(t) => t.near.min(hero),
@@ -1486,7 +1572,12 @@ const FP_NEAR_SHARE: f32 = 0.9;
 /// The fade of a standing sprite whose foot is `d` from the eye, for the near fade's distance
 /// ([`near_fade_limit`]): 0 at `near`, smoothly 1 at 1.5 `near` and beyond.
 fn near_fade(d: f32, near: f32) -> f32 {
-    let t = ((d - near) / (0.5 * near)).clamp(0.0, 1.0);
+    smooth_band(d, near, 0.5 * near)
+}
+
+/// The smoothstep from 0 at `near` to 1 at `near + band`.
+fn smooth_band(d: f32, near: f32, band: f32) -> f32 {
+    let t = ((d - near) / band).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
 
@@ -1597,7 +1688,12 @@ impl Camera {
         // A view with no height (a minimised window) has no perspective: it stays flat.
         if tilt_view() && view.w >= 1.0 && view.h >= 1.0 {
             let target = Vec2::from(cam.centre());
-            if trailer().is_none() && first_person() {
+            if eyes_view() {
+                // The eyes stand on the hero's displayed place (a shot's target in a run), not on the view's
+                // centre, which the map's edges move.
+                let ground = if super::trailer::active() { Vec2::from(at) } else { Vec2::from(game.display_pos()) };
+                cam.tilt = Some(eyes_tilt(ground, scale, view, draw, tilt_yaw(), horizon(), trailer()));
+            } else if trailer().is_none() && first_person() {
                 cam.tilt = Some(first_person_tilt(target, scale, view, draw, tilt_yaw(), horizon()));
             } else {
                 let (tilt, region) = match trailer() {
@@ -2504,6 +2600,10 @@ fn draw_army(game: &Game, a: &Army, assets: &Assets, art: Option<&DtArt>, cam: &
 }
 
 fn draw_hero(game: &Game, assets: &Assets, art: Option<&DtArt>, cam: &Camera) {
+    // The eyes view looks through his eyes: his figure is not drawn.
+    if eyes_cam(cam) {
+        return;
+    }
     // His figure is his army record's, not his current unit type's: an event that makes him
     // another unit leaves it (0x4ad4cc, 0x4ad5ac).
     let model = game.hero_figure();
@@ -2864,15 +2964,18 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
         if let Some((t, (texture, color))) = ring {
             draw_mark(cam, map.center(t), texture, color);
         }
-        if !game.aboard() {
+        if !game.aboard() && !eyes_cam(cam) {
             draw_mark(cam, game.display_pos(), "Selection-1", MARK_HERO);
         }
         // The route being walked, or the one a first click shows, lies on the ground under the
-        // figures (the original's second pass, over the hills).
-        if game.moving() {
-            draw_route(game, &game.path, cam);
-        } else if let Some(path) = preview {
-            draw_route(game, path, cam);
+        // figures (the original's second pass, over the hills). The eyes view drops it: its route
+        // starts under the camera, and its marks would fill the frame.
+        if !eyes_cam(cam) {
+            if game.moving() {
+                draw_route(game, &game.path, cam);
+            } else if let Some(path) = preview {
+                draw_route(game, path, cam);
+            }
         }
     });
     // 2.5D: the border lies on the ground, over the ground's marks and route and under every
@@ -3870,7 +3973,7 @@ fn battle_backdrop_key(game: &Game) -> u64 {
     zoom.to_bits().hash(&mut h);
     look.map(bits).hash(&mut h);
     bits(game.display_pos()).hash(&mut h);
-    (tilt_view(), first_person(), horizon(), tilt_pitch().to_bits(), tilt_yaw().to_bits(), extend_edge()).hash(&mut h);
+    (tilt_view(), first_person(), horizon(), eyes_setting(), tilt_pitch().to_bits(), tilt_yaw().to_bits(), extend_edge()).hash(&mut h);
     (game.fog.enabled, &game.fog.bits).hash(&mut h);
     game.unshown_cells().hash(&mut h);
     (game.aboard(), game.hero_hidden()).hash(&mut h);
@@ -4098,6 +4201,10 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     view.zoom = zoom_at(home, view.zoom_steps, locked, lo);
     // PageUp and PageDown tilt the 2.5D view, 5° a press; Q and E turn it 45° (the flat view
     // ignores them). The shown yaw eases toward its target every frame.
+    // The eyes view turns with the hero's walk first, so the easing carries it.
+    if eyes_view() {
+        follow_walk(game);
+    }
     if tilt_view() {
         ease_tilt_yaw(dt_ms);
     }
@@ -5540,6 +5647,51 @@ mod tilt_tests {
                 }
             }
         }
+    }
+
+    /// The eyes camera over the middle of `game`'s map at `yaw`, built as `looking_in` builds it.
+    fn eyes_camera(game: &Game, yaw: f32, horizon: bool) -> Camera {
+        let view = Rect::new(0.0, 0.0, 1280.0, 760.0);
+        let scale = PX;
+        let grid = game.world.map.grid;
+        let at = (game.world.map.w as f32 / 2.0, game.world.map.h as f32 / 2.0 * grid.row_height());
+        let origin = vec2(at.0 * scale, at.1 * scale) - vec2(view.w, view.h) / 2.0;
+        let mut cam = Camera { origin, view, draw: view, scale, grid, tilt: None };
+        cam.tilt = Some(eyes_tilt(vec2(at.0, at.1), scale, view, view, yaw, horizon, None));
+        cam
+    }
+
+    /// The cells about the eyes, on the flat ground and on the bent sheet, at both bends and several
+    /// yaws: each cell's centre is projected where it stands and the pixel picks that cell back.
+    #[test]
+    fn a_click_on_the_ground_in_the_eyes_view_picks_its_cell_at_both_bends() {
+        let game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        let m = &game.world.map;
+        let (cx, cy) = (m.w / 2, m.h / 2);
+        let mut checked = 0;
+        for horizon in [false, true] {
+            for yaw in [0.0, 45.0, 90.0, 180.0, -135.0] {
+                let cam = eyes_camera(&game, yaw, horizon);
+                let tilt = cam.tilt.expect("the eyes tilt");
+                let bend = tilt.cam.bend.expect("the eyes' bend");
+                for dc in -6..=6 {
+                    for dr in -6..=6 {
+                        let t = (cx + dc, cy + dr);
+                        let g = Vec2::from(m.grid.center(t));
+                        if bend.hidden(g) {
+                            continue;
+                        }
+                        let Some(px) = tilt.cam.project(bend.point(g), cam.view) else { continue };
+                        if !cam.view.contains(px) {
+                            continue;
+                        }
+                        assert_eq!(cam.tile_under_pixel(px), Some(t), "horizon {horizon} yaw {yaw}: the cell {t:?} at {px:?}");
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        assert!(checked > 50, "only {checked} cells checked");
     }
 
     /// The sprites' size is the setting: 1.5 by default, a value outside 0.5..=3 falls back to it,
