@@ -6,7 +6,9 @@ use razdor::dt::gfx::Image;
 /// black), so a shadow reads as shade on the grass. The shadow texture is white in its colour channels
 /// (`DtArt::shadow_texture`), so the picture's colour is this colour and its alpha the strength times
 /// the silhouette: the default pipeline's source-over blend darkens the ground toward `TINT`.
-pub const TINT: [f32; 3] = [0.42, 0.40, 0.45];
+/// The tone a shadow multiplies what it falls on toward (at full strength): a dark, slightly cool shade
+/// (about 45 % darker, with the blue a little higher), so grass in shadow stays green.
+pub const TINT: [f32; 3] = [0.55, 0.57, 0.68];
 
 /// The shadows' alpha is scaled by this (1: as drawn; the sun's shadow is 0.6 by day, `daylight::SUN_ALPHA`).
 pub const EASE: f32 = 1.0;
@@ -15,6 +17,45 @@ pub const EASE: f32 = 1.0;
 /// fog and water factors).
 pub fn strength_colour(strength: f32) -> Color {
     Color::new(TINT[0], TINT[1], TINT[2], strength * EASE)
+}
+
+/// The multiply pass of the shadows: each pixel of a shadow quad is multiplied by mix(1, tone, a), where a is
+/// the strength (the vertex alpha, [`strength_colour`]) times the silhouette (the texture's alpha). Drawn with the
+/// multiply blend (dst × src, no alpha-over), so a shadow darkens grass and keeps its colour.
+const MULTIPLY_MAIN: &str = r#"
+    vec4 s = texture2D(Texture, uv);
+    float a = clamp(color.a * s.a, 0.0, 1.0);
+    gl_FragColor = vec4(mix(vec3(1.0), color.rgb, a), 1.0);
+"#;
+
+razdor::local! {
+    static MULTIPLY_MATERIAL: std::cell::OnceCell<Option<macroquad::material::Material>> = const { std::cell::OnceCell::new() };
+}
+
+/// Draws a shadow quad (or card mesh) by the multiply pass ([`MULTIPLY_MAIN`]). Outside a session, with the
+/// default material otherwise. Without the material (it did not compile), the mesh is drawn as before.
+pub fn draw_multiply(mesh: &macroquad::models::Mesh) {
+    use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation, PipelineParams};
+    let material = MULTIPLY_MATERIAL.with(|m| {
+        m.get_or_init(|| {
+            let pipeline = PipelineParams {
+                color_blend: Some(BlendState::new(Equation::Add, BlendFactor::Zero, BlendFactor::Value(BlendValue::SourceColor))),
+                ..Default::default()
+            };
+            super::sharp::material_in(super::sharp::SHARP_VERTEX, &super::sharp::fragment("", MULTIPLY_MAIN), pipeline, Vec::new(), Vec::new())
+                .map_err(|e| razdor::diag!("shadow multiply material: {e}"))
+                .ok()
+        })
+        .clone()
+    });
+    match material {
+        Some(m) => {
+            macroquad::prelude::gl_use_material(&m);
+            macroquad::prelude::draw_mesh(mesh);
+            macroquad::prelude::gl_use_default_material();
+        }
+        None => macroquad::prelude::draw_mesh(mesh),
+    }
 }
 
 /// Blurs the alpha channel of an RGBA picture in place, `passes` times, by a separable [1 2 1] / 4 kernel

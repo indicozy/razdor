@@ -3154,10 +3154,10 @@ fn draw_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, sun: Option<dayl
         for c in casts_at(foot, owner) {
             let p = shadow::Projection { origin, zoom, foot_row, dir: vec2(c.dir[0], c.dir[1]), len: c.len };
             if let Some((vertices, indices)) = p.picture_mesh_ramp(src, size, |t| shadow::strength_colour(c.alpha * k * (1.0 - t))) {
-                draw_mesh(&Mesh { vertices, indices, texture: Some(texture.clone()) });
+                shadow::draw_multiply(&Mesh { vertices, indices, texture: Some(texture.clone()) });
             }
             if let Some((vertices, indices)) = p.picture_mesh_ramp(src, size, |t| shadow::strength_colour(c.alpha * k * t)) {
-                draw_mesh(&Mesh { vertices, indices, texture: Some(soft.clone()) });
+                shadow::draw_multiply(&Mesh { vertices, indices, texture: Some(soft.clone()) });
             }
         }
     };
@@ -3174,9 +3174,9 @@ fn draw_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, sun: Option<dayl
                     for c in casts_at(foot, Some(i)) {
                         let p = shadow::Projection { origin, zoom, foot_row: card.foot.1, dir: vec2(c.dir[0], c.dir[1]), len: c.len };
                         let (vertices, indices) = p.card_mesh_ramp(card, r, size, |t| shadow::strength_colour(c.alpha * k * (1.0 - t)));
-                        draw_mesh(&Mesh { vertices, indices, texture: Some(texture.clone()) });
+                        shadow::draw_multiply(&Mesh { vertices, indices, texture: Some(texture.clone()) });
                         let (vertices, indices) = p.card_mesh_ramp(card, r, size, |t| shadow::strength_colour(c.alpha * k * t));
-                        draw_mesh(&Mesh { vertices, indices, texture: Some(soft.clone()) });
+                        shadow::draw_multiply(&Mesh { vertices, indices, texture: Some(soft.clone()) });
                     }
                 }
             }
