@@ -16,6 +16,7 @@
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use macroquad::models::{Mesh, Vertex};
 use macroquad::prelude::*;
 use razdor::local;
 
@@ -108,47 +109,53 @@ fn env_banks() -> Option<usize> {
     *ENV.get_or_init(|| std::env::var("RAZDOR_MIST_BANKS").ok().and_then(|v| v.trim().parse::<usize>().ok()))
 }
 
-/// The most banks of mist drawn in a frame, the nearest to the view's centre first: 300 on the
-/// desktop, 120 on a phone, or `RAZDOR_MIST_BANKS` (0 has none).
+/// The most banks of mist drawn in a frame, the nearest to the view's centre first: 600 on the
+/// desktop, 240 on a phone (two a crossing of the contour, batched), or `RAZDOR_MIST_BANKS` (0 has none).
 pub fn banks_cap() -> usize {
     if let Some(n) = env_banks() {
         return n;
     }
     if crate::ui::display::dp_px().is_some() {
-        120
+        240
     } else {
-        300
+        600
     }
 }
 
 /// The shown darkness from which a cell is unexplored for the frontier (the mist's edge).
 pub const FRONTIER: f32 = 0.5;
 
-/// A frontier cell: a cell of the unexplored side (its shown darkness at least [`FRONTIER`]) with a
-/// lit neighbour (`toward`, below [`FRONTIER`]). `darkness` is the cell's own.
+/// A crossing of the shown darkness's contour at [`FRONTIER`], between the 4-neighbour cells `a` and `b`:
+/// at the fraction `t` from `a` to `b` (the linear interpolation of their darkness). `dark_is_a` says
+/// which of the two is unexplored (at least the contour); `darkness` is that cell's own.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Edge {
-    pub cell: (i32, i32),
-    pub toward: (i32, i32),
+pub struct Crossing {
+    pub a: (i32, i32),
+    pub b: (i32, i32),
+    pub t: f32,
+    pub dark_is_a: bool,
     pub darkness: f32,
 }
 
-/// The frontier cells of the cells `lo` (inclusive) to `hi` (exclusive): one [`Edge`] for each lit
-/// 4-neighbour of an unexplored cell. `known` gives a cell's shown darkness, None off the map (no
-/// frontier there: the edge fog is black, not mist).
-pub fn frontier(known: impl Fn((i32, i32)) -> Option<f32>, lo: (i32, i32), hi: (i32, i32)) -> Vec<Edge> {
-    const NEIGHBOURS: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+/// The contour's crossings between the cells `lo` (inclusive) and `hi` (exclusive) and their right and
+/// lower neighbours: marching squares on the cell centres, one crossing per edge where the darkness
+/// passes [`FRONTIER`]. `known` gives a cell's shown darkness, None off the map (no contour there: the
+/// edge fog is black, not mist).
+pub fn contour(known: impl Fn((i32, i32)) -> Option<f32>, lo: (i32, i32), hi: (i32, i32)) -> Vec<Crossing> {
+    const STEPS: [(i32, i32); 2] = [(1, 0), (0, 1)];
     let mut out = Vec::new();
     for y in lo.1..hi.1 {
         for x in lo.0..hi.0 {
-            let Some(d) = known((x, y)) else { continue };
-            if d < FRONTIER {
-                continue;
-            }
-            for (dx, dy) in NEIGHBOURS {
-                if known((x + dx, y + dy)).is_some_and(|n| n < FRONTIER) {
-                    out.push(Edge { cell: (x, y), toward: (x + dx, y + dy), darkness: d });
+            let Some(a) = known((x, y)) else { continue };
+            for (dx, dy) in STEPS {
+                let b_cell = (x + dx, y + dy);
+                let Some(b) = known(b_cell) else { continue };
+                let (dark_a, dark_b) = (a >= FRONTIER, b >= FRONTIER);
+                if dark_a == dark_b {
+                    continue;
                 }
+                let t = (FRONTIER - a) / (b - a);
+                out.push(Crossing { a: (x, y), b: b_cell, t, dark_is_a: dark_a, darkness: if dark_a { a } else { b } });
             }
         }
     }
@@ -333,8 +340,6 @@ precision highp float;
 varying highp vec2 uv;
 varying lowp vec4 vcolor;
 uniform float Clock;
-uniform float Darkness;
-uniform float Seed;
 uniform vec3 MistRgb;
 
 float hash2(vec2 q) {
@@ -355,19 +360,23 @@ float fbm3(vec2 q) {
 }
 
 void main() {
+    // Per bank, from its vertices' colour (`banks`): the unexplored side's darkness (red) and the noise seed (green).
+    float Darkness = vcolor.r;
+    float Seed = vcolor.g;
     // The domain: the column's width and height in lattice units; the clock rolls it up (y down).
     vec2 q = vec2(uv.x * 2.2 + Seed * 9.0, uv.y * 2.4 + Clock * 0.12 + Seed);
     vec2 w = 1.1 * vec2(fbm3(q + Clock * vec2(0.06, -0.04)), fbm3(q + vec2(5.2, 1.3) - Clock * vec2(0.05, 0.07)));
     float n = fbm3(q + w);
-    float edge = smoothstep(0.0, 0.22, uv.x) * smoothstep(1.0, 0.78, uv.x);
-    float top = smoothstep(0.0, 0.45, uv.y);
+    float edge = smoothstep(0.0, 0.14, uv.x) * smoothstep(1.0, 0.86, uv.x);
+    // The crest fades at the top, the foot into the ground's mist below: the lower third is clear at the
+    // foot, so the bank rises out of the sheet under it instead of standing on it.
+    float top = smoothstep(0.0, 0.45, uv.y) * smoothstep(0.0, 0.3, 1.0 - uv.y);
     float body = clamp((n - 0.2) * 2.4, 0.0, 1.0);
-    float a = clamp(Darkness * 1.1, 0.0, 1.0) * edge * top * body;
-    // Stronger billows than the sheets, so the wall reads over the mist as well as over the land: its
-    // crests lighter, its hollows darker, and the crest of the top a little brighter still.
-    float crest = smoothstep(0.45, 0.8, n) * (1.0 - uv.y);
-    float shade = clamp(0.6 + 0.9 * (n - 0.35) + 0.35 * crest, 0.5, 1.3);
-    gl_FragColor = vec4(MistRgb * shade, a * vcolor.a);
+    // The contour is at darkness 0.5 by definition: a bank there still reads as the wall (0.6), a deep one fully.
+    float a = clamp(Darkness * 1.4 - 0.1, 0.0, 1.0) * edge * top * body;
+    // The ground sheets' shade (0.65 to 1.15), so the bank matches the mist it rises from.
+    float shade = clamp(0.9 + 0.5 * (n - 0.5), 0.65, 1.15);
+    gl_FragColor = vec4(MistRgb * shade, a);
 }
 "#;
 
@@ -376,8 +385,6 @@ local! {
     static MATERIAL: RefCell<Option<Option<Material>>> = RefCell::new(None);
     /// The bank material (None when it does not compile: no banks then).
     static BANK_MATERIAL: RefCell<Option<Option<Material>>> = RefCell::new(None);
-    /// A 1×1 white texture: a bank's quad is drawn with it, its uv running 0..1 over the quad.
-    static WHITE_TEX: RefCell<Option<Texture2D>> = RefCell::new(None);
 }
 
 fn load() -> Option<Material> {
@@ -400,7 +407,7 @@ fn load() -> Option<Material> {
 }
 
 fn load_bank() -> Option<Material> {
-    let uniforms = [("Clock", UniformType::Float1), ("Darkness", UniformType::Float1), ("Seed", UniformType::Float1), ("MistRgb", UniformType::Float3)];
+    let uniforms = [("Clock", UniformType::Float1), ("MistRgb", UniformType::Float3)];
     let params = MaterialParams {
         uniforms: uniforms.iter().map(|(n, t)| UniformDesc::new(n, *t)).collect(),
         pipeline_params: crate::ui::sharp::alpha_pipeline(),
@@ -467,23 +474,22 @@ pub fn raised(tex: &Texture2D, sheet: usize, lift: f32, draw: impl FnOnce()) {
     });
 }
 
-fn white() -> Texture2D {
-    WHITE_TEX.with(|cell| cell.borrow_mut().get_or_insert_with(|| Texture2D::from_rgba8(1, 1, &[255, 255, 255, 255])).clone())
-}
-
-/// Draws one bank of mist in `rect` (2D pixels of the standing billboard it stands in: the caller's
-/// sprite pass). `darkness` is the unexplored side's shown darkness, `seed` the bank's own noise.
-/// Then back to the sprite session's material ([`sharp::leave_blend`]). Without the shader nothing is drawn.
-pub fn bank(rect: Rect, darkness: f32, seed: f32) {
+/// Draws a batch of banks of mist as one mesh under the bank material: `vertices` and `indices` in the 3D
+/// space the sprite pass draws in (each bank's quad already through its billboard). A vertex's colour
+/// carries its bank's unexplored darkness (red) and noise seed (green), so the batch takes no per-bank
+/// uniforms. Then back to the sprite session's material ([`sharp::leave_blend`]). Without the shader
+/// nothing is drawn.
+pub fn banks(vertices: Vec<Vertex>, indices: Vec<u16>) {
+    if indices.is_empty() {
+        return;
+    }
     BANK_MATERIAL.with(|cell| {
         let mut cell = cell.borrow_mut();
         let Some(m) = cell.get_or_insert_with(load_bank).as_ref() else { return };
         m.set_uniform("Clock", clock());
-        m.set_uniform("Darkness", darkness);
-        m.set_uniform("Seed", seed);
         m.set_uniform("MistRgb", vec3(MIST_RGB[0], MIST_RGB[1], MIST_RGB[2]));
         gl_use_material(m);
-        draw_texture_ex(&white(), rect.x, rect.y, WHITE, DrawTextureParams { dest_size: Some(rect.size()), ..Default::default() });
+        draw_mesh(&Mesh { vertices, indices, texture: None });
         crate::ui::sharp::leave_blend();
     });
 }
@@ -571,36 +577,41 @@ mod tests {
         assert_eq!(raised_height(0), raised_height(1), "sheet 0 is clamped to the first raised one");
     }
 
-    fn strip(lit_to: i32, lo: (i32, i32), hi: (i32, i32)) -> Vec<Edge> {
+    fn strip(lit_to: i32, lo: (i32, i32), hi: (i32, i32)) -> Vec<Crossing> {
         // Columns below `lit_to` are lit (0), the rest unexplored (1).
-        frontier(|(x, _)| Some(if x < lit_to { 0.0 } else { 1.0 }), lo, hi)
+        contour(|(x, _)| Some(if x < lit_to { 0.0 } else { 1.0 }), lo, hi)
     }
 
     #[test]
-    fn the_frontier_is_the_unexplored_column_next_to_the_lit_one() {
-        let edges = strip(2, (0, 0), (5, 3));
-        // Column 2 is the first unexplored one: one edge per cell, toward the lit column 1.
-        assert_eq!(edges.len(), 3, "{edges:?}");
-        assert!(edges.iter().all(|e| e.cell.0 == 2 && e.toward == (1, e.cell.1) && e.darkness == 1.0));
+    fn the_contour_crosses_between_the_lit_column_and_the_unexplored_one_halfway() {
+        let xs = strip(2, (0, 0), (5, 3));
+        // One crossing per row, between column 1 (lit) and column 2 (unexplored), halfway.
+        assert_eq!(xs.len(), 3, "{xs:?}");
+        assert!(xs.iter().all(|c| c.a == (1, c.a.1) && c.b == (2, c.a.1) && !c.dark_is_a && c.darkness == 1.0 && c.t == 0.5));
     }
 
     #[test]
-    fn no_frontier_where_all_is_lit_or_all_is_dark() {
-        assert!(frontier(|_| Some(0.0), (0, 0), (4, 4)).is_empty());
-        assert!(frontier(|_| Some(1.0), (0, 0), (4, 4)).is_empty());
-    }
-
-    #[test]
-    fn the_edge_is_the_darker_side_at_the_half_and_nothing_off_the_map() {
-        // A cell at 0.4 next to one at 0.9: the 0.9 cell is the frontier, toward the 0.4 one.
+    fn the_crossing_sits_where_the_darkness_passes_the_half_between_the_cells() {
+        // 0.4 (lit) then 0.9 (unexplored): the contour is 0.2 of the way from the first to the second.
         let d = |t: (i32, i32)| match t {
             (0, 0) => Some(0.4),
             (1, 0) => Some(0.9),
             _ => None,
         };
-        let edges = frontier(d, (0, 0), (2, 1));
-        assert_eq!(edges, vec![Edge { cell: (1, 0), toward: (0, 0), darkness: 0.9 }]);
-        // The map's edge (no cell past it) is no frontier.
-        assert!(frontier(|t| (t == (0, 0)).then_some(1.0), (0, 0), (1, 1)).is_empty());
+        let xs = contour(d, (0, 0), (1, 1));
+        assert_eq!(xs.len(), 1);
+        assert!((xs[0].t - 0.2).abs() < 1e-6 && !xs[0].dark_is_a && xs[0].darkness == 0.9, "{xs:?}");
+    }
+
+    #[test]
+    fn no_contour_where_all_is_lit_or_all_is_dark() {
+        assert!(contour(|_| Some(0.0), (0, 0), (4, 4)).is_empty());
+        assert!(contour(|_| Some(1.0), (0, 0), (4, 4)).is_empty());
+    }
+
+    #[test]
+    fn nothing_off_the_map() {
+        // A dark cell at the map's edge has no lit neighbour to cross to.
+        assert!(contour(|t| (t == (0, 0)).then_some(1.0), (0, 0), (1, 1)).is_empty());
     }
 }

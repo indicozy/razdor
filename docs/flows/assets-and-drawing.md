@@ -497,15 +497,22 @@ raised sheet's rim fades over the last two texels of the fog texture, so it does
 raised sheet is the ground's model lifted straight up (`view25::raised_ground_model`); in the bent view it is a mesh of its own on
 the sheet's normal (`bent_mist_meshes`, `view25::Bend::normal_at` and `lift`, lifted and faded out over the last three cells
 before the horizon, alpha 0 past it). The raised sheets are drawn over the ground's mist and under the reveals, as the mist is.
-- **Banks at the frontier** (2.5D and first-person): `mist::frontier` finds the cells whose shown darkness is at least 0.5 with a
-lit neighbour below it (`mist::FRONTIER`), and `world_view::push_banks` stands three banks on the line between each such pair,
-on the lit cell (`sprite_key`, `LAYER_BANK`), nearest the view's centre first, up to `mist::banks_cap` (300 on the desktop, 120 on
-a phone; `RAZDOR_MIST_BANKS` overrides). A bank is a `Drawable::Bank` in the standing pass: 1.4 × 1.5 cells, `draw_bank` through
-the sprite's billboard, its alpha the unexplored side's darkness, its noise rolling up on the Clock (`BANK_FRAGMENT`). It is not
-faded by its own cell (the fog would hide it there); it stands over the lit land, where it shows, and over the mist as a
-churning wall. A bank is drawn with its own material, and `sharp::leave_blend` puts the sprite session's back. The colour is the
-fork's `color0` attribute: raw bytes, so the shader divides it by 255 (the default shader does too); an undivided value clamps
-every fragment to opaque. The flat view is unchanged (pixel-identical with the mist on and off; the 2.5D view with it off too).
+- **Banks at the contour** (2.5D and first-person): `mist::contour` finds where the shown darkness crosses `mist::FRONTIER`
+  (0.5) between two 4-neighbour cells (marching squares on the cell centres: `Crossing`, its fraction `t`, which side is dark).
+  `world_view::push_banks` stands two banks a crossing, 0.8 cell (`BANK_OUT`) past the contour into the unexplored side, at
+  ±0.28 cell along it, so their soft sides overlap into one wall. Position, width (1.7 × 0.85..1.25) and height (1.5 × 0.8..1.25)
+  vary with `unit_hash` of the crossing's cells, so the wall does not move or step as the camera does. The banks are nearest-first
+  up to `mist::banks_cap` (600 on the desktop, 240 on a phone; `RAZDOR_MIST_BANKS` overrides), sorted like standing sprites on the
+  dark cell (`sprite_key`, `LAYER_BANK`) and cut into `BANK_BANDS` (4) runs: each run is one `Drawable::BankBand`, drawn at the
+  place of its farthest bank. `draw_banks` builds one batch per run: each bank's quad through its billboard (`standing_model`,
+  applied on the CPU to the corners) into one vertex buffer, under the bank material (`mist::banks`, one draw, then
+  `sharp::leave_blend`), with no per-bank material or uniform change. A vertex's colour carries the bank's darkness (red) and
+  seed (green). The contour is computed over the cull plus `MARGIN` (4 cells): cut at the cull's edge, the wall had gaps.
+  The bank's colour and shade are the ground sheets' (`MistRgb` × 0.65..1.15), and its foot fades in over the lower 30 % (the
+  shader's `top` factor), so it rises out of the mist beneath it, with the raised sheets over its lower half. The flat view is
+  unchanged (pixel-identical with the mist on and off; the 2.5D view with it off too). The colour is the
+  fork's `color0` attribute: raw bytes, so the shader divides it by 255 (the default shader does too); an undivided value clamps
+  every fragment to opaque.
 Known: a reveal's animation in the first-person view draws its raised sheets over the circle (the picture holds the reveal); in the
 down horizon the far raised mist shows above the horizon as a soft band (the unexplored land is there, beyond the bend).
 The black rectangles past the map stay black; the minimap keeps its black (`minimap::draw_fog` is not used

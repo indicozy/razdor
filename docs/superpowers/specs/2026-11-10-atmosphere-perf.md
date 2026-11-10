@@ -136,3 +136,23 @@ noise (flat work 0.6 ms either build). A single run once read 16 ms on the phone
 Not measured: the phone's GPU fill (no phone here; the owner's device is the test). If a phone run shows
 the raised sheets too costly, `RAZDOR_MIST_RAISED=1` keeps one (the sheet at 0.35 cells) and the banks
 alone carry the wall.
+
+## Banks in one batch (the contour and the outward wall)
+
+The frontier banks are now drawn as one batch per depth run (four runs a frame, `BANK_BANDS`), not one
+standing draw each, and they follow the contour of the shown darkness at 0.5. Same scene and method as above
+(Устье Трейна, 2.5D yaw 45, noon, median of the probe's `work_ms`, 200 frames per run):
+
+| configuration | work_ms, runs |
+|---|---|
+| before (per-bank standing draws), desktop | 3.56, 3.26 |
+| after (one batch per run), desktop | 1.06, 2.74, 1.62 |
+| after, banks off (same binary), desktop | 1.40, 1.36 |
+| before (per-bank), phone density | 2.33, 3.60 |
+| after, phone density | 1.03 |
+
+Reading: the banks cost about 0.2 to 0.3 ms of CPU build after (the difference to banks off), against about
+2 ms before; the target was under 0.5 ms. The runs still swing by about a millisecond between one build's
+runs, so the figures are medians of a few runs, not a timing to the tenth of a millisecond. Caps: 600 on the
+desktop and 240 on a phone (were 300 and 120): a batch costs little per bank, and the contour now has two
+banks a crossing. The raised-sheet cost is unchanged (see above).

@@ -1511,64 +1511,142 @@ fn bent_mist_meshes(bend: &view25::Bend, origin: Vec2, scale: f32, dest: Rect, s
 }
 
 /// The width and height of a bank of mist in cells (its billboard stands up from the frontier).
-const BANK_WIDTH: f32 = 1.4;
+const BANK_WIDTH: f32 = 1.7;
 const BANK_HEIGHT: f32 = 1.5;
-/// The banks per frontier edge: spread along the edge at these offsets (cells), overlapping so that
-/// they read as one wall.
-const BANK_SAMPLES: [f32; 3] = [-0.45, 0.0, 0.45];
 /// The cells before a bent view's horizon over which a raised mist sheet sinks to the sheet.
 const HORIZON_FADE: f32 = 3.0;
 
-/// The banks of mist along the frontier (2.5D and first-person, `mist::frontier`): each frontier edge
-/// stands three banks on the line between its unexplored cell and the lit neighbour, sorted like a
-/// standing sprite on the unexplored cell. The nearest to the view's centre come first, up to
-/// `mist::banks_cap`. The unexplored side's shown darkness sets each bank's alpha.
-fn push_banks(cam: &Camera, game: &Game, cols: (i32, i32), rows: (i32, i32), items: &mut Vec<(i64, Drawable)>) {
+/// The banks of mist along the contour of the fog's shown darkness at [`mist::FRONTIER`]
+/// (2.5D and first-person, `mist::contour`). Each crossing of the contour stands one bank on the lit
+/// side, a little toward it, along the contour; its position, width and height vary by a hash of the
+/// crossing's cells, so the wall rolls and does not step from cell to cell. The nearest to the view's
+/// centre come first, up to `mist::banks_cap`. The banks are sorted like standing sprites (on the lit
+/// cell) and grouped into [`BANK_BANDS`] runs in that order: each run is one batch, drawn at the place
+/// of its farthest bank, so the figures and buildings in front of the wall draw over it.
+fn push_banks(cam: &Camera, game: &Game, cols: (i32, i32), rows: (i32, i32), items: &mut Vec<(i64, Drawable)>, bands: &mut Vec<Vec<BankQuad>>) {
     let map = &game.world.map;
     let fog = &game.fog;
     let known = |t: (i32, i32)| (t.0 >= 0 && t.1 >= 0 && t.0 < map.w && t.1 < map.h).then(|| minimap::shown_darkness(fog, t));
-    let edges = mist::frontier(known, (cols.0 - 1, rows.0 - 1), (cols.1 + 1, rows.1 + 1));
-    if edges.is_empty() {
+    // A margin past the cull: the contour is cut where the cull ends otherwise (the GPU clips the rest).
+    const MARGIN: i32 = 4;
+    let crossings = mist::contour(known, (cols.0 - MARGIN, rows.0 - MARGIN), (cols.1 + MARGIN, rows.1 + MARGIN));
+    if crossings.is_empty() {
         return;
     }
     let grid = cam.grid;
     let centre = Vec2::from(cam.centre());
-    let mut edges: Vec<(f32, mist::Edge)> = edges.into_iter().map(|e| (Vec2::from(grid.center(e.cell)).distance_squared(centre), e)).collect();
-    edges.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let cap = mist::banks_cap();
-    let mut n = 0usize;
-    for (_, e) in edges {
-        // The wall stands on the frontier line, on the lit side's cell (`toward`): it rises from the explored
-        // land, where it shows against the land (over the unexplored mist it would be lost in it).
-        let (a, b) = (Vec2::from(grid.center(e.cell)), Vec2::from(grid.center(e.toward)));
-        let mid = (a + b) * 0.5;
-        // Along the edge: the perpendicular of the step to the lit cell, a cell long.
-        let d = b - a;
-        let along = vec2(-d.y, d.x).normalize_or_zero();
-        for t in BANK_SAMPLES {
-            if n >= cap {
-                return;
-            }
-            let at = mid + along * t;
-            let foot = cam.to_screen((at.x, at.y));
-            let seed = (n as f32 * 0.618_034 + e.cell.0 as f32 * 0.37 + e.cell.1 as f32 * 0.13).fract();
-            items.push((sprite_key(cam, e.toward, foot, LAYER_BANK), Drawable::Bank { foot, darkness: e.darkness, seed }));
-            n += 1;
-        }
+    let mut found: Vec<(f32, i64, BankQuad)> = crossings
+        .into_iter()
+        .flat_map(|c| {
+            let (ca, cb) = (Vec2::from(grid.center(c.a)), Vec2::from(grid.center(c.b)));
+            let at = ca.lerp(cb, c.t);
+            // The lit side's cell and the unexplored one's, by which of the pair is dark.
+            let (dark, dark_at, lit_at) = if c.dark_is_a { (c.a, ca, cb) } else { (c.b, cb, ca) };
+            // Out into the unexplored side: the bank stands in the fog, its foot a little past the contour.
+            let outward = (dark_at - lit_at).normalize_or_zero() * BANK_OUT;
+            // Stands a little toward the lit side, along the contour (a cell long edge: its perpendicular).
+            let along = {
+                let d = cb - ca;
+                vec2(-d.y, d.x).normalize_or_zero()
+            };
+            // Two banks a crossing, along the contour: their soft sides overlap into one wall.
+            BANK_PER_CROSSING.map(|step| {
+                let salt = if step < 0.0 { 0 } else { 8 };
+                let (h1, h2, h3, h4) = (unit_hash(c.a, c.b, 1 + salt), unit_hash(c.a, c.b, 2 + salt), unit_hash(c.a, c.b, 3 + salt), unit_hash(c.a, c.b, 4 + salt));
+                let world = at + outward + along * (step + (h1 - 0.5) * 0.2);
+                let foot = cam.to_screen((world.x, world.y));
+                let quad = BankQuad { foot, darkness: c.darkness, seed: h4, w: BANK_WIDTH * (0.85 + 0.4 * h2), h: BANK_HEIGHT * (0.8 + 0.45 * h3) };
+                (world.distance_squared(centre), sprite_key(cam, dark, foot, LAYER_BANK), quad)
+            })
+        })
+        .collect();
+    found.sort_by(|a, b| a.0.total_cmp(&b.0));
+    found.truncate(mist::banks_cap());
+    found.sort_by_key(|f| f.1);
+    let per_band = found.len().div_ceil(BANK_BANDS).max(1);
+    for chunk in found.chunks(per_band) {
+        let key = chunk.iter().map(|f| f.1).max().unwrap_or(0);
+        items.push((key, Drawable::BankBand(bands.len())));
+        bands.push(chunk.iter().map(|f| f.2).collect());
     }
 }
 
-/// Draws a bank of mist standing with its foot at `foot` (in the billboard [`standing`] makes of it):
-/// [`BANK_WIDTH`] × [`BANK_HEIGHT`] cells. `standing` grows the billboard by the sprites' size, so the
-/// rectangle is the cells over that size.
-fn draw_bank(cam: &Camera, foot: Vec2, darkness: f32, seed: f32) {
-    mist::bank(bank_rect(cam, foot), darkness, seed);
+/// A hash of a crossing's two cells and a salt, in [0, 1): the same crossing jitters the same way every frame.
+fn unit_hash(a: Tile, b: Tile, salt: u32) -> f32 {
+    let mut h = (a.0 as u32).wrapping_mul(0x9E37_79B1) ^ (a.1 as u32).wrapping_mul(0x85EB_CA77) ^ (b.0 as u32).wrapping_mul(0xC2B2_AE3D) ^ (b.1 as u32).wrapping_mul(0x27D4_EB2F) ^ salt.wrapping_mul(0x1656_67B1);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x2C1B_3C6D);
+    h ^= h >> 12;
+    (h >> 8) as f32 / (1u32 << 24) as f32
 }
 
-/// The rectangle a mist bank standing at `foot` is drawn in (the `picture` [`standing`] takes).
-fn bank_rect(cam: &Camera, foot: Vec2) -> Rect {
+/// One bank of mist: its foot (2D, in the camera's space), the unexplored side's shown darkness, its
+/// noise seed and its size in cells.
+#[derive(Clone, Copy)]
+struct BankQuad {
+    foot: Vec2,
+    darkness: f32,
+    seed: f32,
+    w: f32,
+    h: f32,
+}
+
+/// How far past the contour (into the unexplored side, cells) a bank's foot stands: its lower part is
+/// then in the fog, where the ground's mist is, and it rises out of it (`mist::banks`' fade).
+const BANK_OUT: f32 = 0.8;
+
+/// The offsets along the contour (cells) of the two banks a crossing stands.
+const BANK_PER_CROSSING: [f32; 2] = [-0.28, 0.28];
+
+/// The depth runs the banks are batched in (each one draw).
+const BANK_BANDS: usize = 4;
+
+/// Draws the banks of one run as one batch ([`mist::banks`]): each bank's quad through its billboard
+/// (the transform of [`standing`], applied here on the CPU), its corners in the 3D space of the pass.
+/// Not in a bent view's ground run, where a bank does not stand (as `standing`). A bank past a down
+/// bend's horizon or behind the eye is left out.
+fn draw_banks(cam: &Camera, quads: &[BankQuad]) {
+    let Some(tilt) = cam.tilt else { return };
+    let pass = PASS.with(std::cell::Cell::get);
+    if pass == Pass::Ground {
+        return;
+    }
+    let on_sheet = pass == Pass::Sprites;
+    let mut vertices = Vec::with_capacity(quads.len() * 4);
+    let mut indices: Vec<u16> = Vec::with_capacity(quads.len() * 6);
+    let f = view25::forward(tilt.cam.yaw_deg);
+    for q in quads {
+        let (model, on_ground) = standing_model(cam, &tilt, q.foot, q.foot, on_sheet);
+        if tilt.cam.bend.is_some_and(|b| b.hidden((q.foot + cam.origin) / cam.scale)) {
+            continue;
+        }
+        if let Some(eye) = tilt.cam.eye_at {
+            if (on_ground.x - eye.x) * f.x + (on_ground.z - eye.z) * f.y <= 0.0 {
+                continue;
+            }
+        }
+        let r = bank_rect(cam, q.foot, q.w, q.h);
+        // The colour carries the bank's darkness (red) and seed (green): `mist::banks`' shader reads them.
+        let colour = Color::new(q.darkness, q.seed, 0.0, 1.0);
+        let base = vertices.len() as u16;
+        let corner = |x: f32, y: f32, u: f32, v: f32| {
+            let p = model.transform_point3(vec3(x, y, 0.0));
+            macroquad::models::Vertex::new(p.x, p.y, p.z, u, v, colour)
+        };
+        vertices.push(corner(r.x, r.y, 0.0, 0.0));
+        vertices.push(corner(r.x + r.w, r.y, 1.0, 0.0));
+        vertices.push(corner(r.x + r.w, r.y + r.h, 1.0, 1.0));
+        vertices.push(corner(r.x, r.y + r.h, 0.0, 1.0));
+        indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+    mist::banks(vertices, indices);
+}
+
+/// The rectangle of a bank `w` × `h` cells standing with its foot at `foot`, in the billboard's own
+/// pixels: `standing` grows the billboard by the sprites' size, so the rectangle is the cells over that size.
+fn bank_rect(cam: &Camera, foot: Vec2, w: f32, h: f32) -> Rect {
     let k = cam.scale / sprite_size();
-    let (w, h) = (BANK_WIDTH * k, BANK_HEIGHT * k);
+    let (w, h) = (w * k, h * k);
     Rect::new(foot.x - w / 2.0, foot.y - h, w, h)
 }
 
@@ -2673,9 +2751,9 @@ enum Drawable {
     Hero,
     /// Layer 2 or 3 of the spell being played ([`SpellShow`]).
     Spell(u8),
-    /// A bank of mist on the frontier (2.5D and first-person, [`push_banks`]): its foot, the unexplored side's
-    /// shown darkness and its noise seed.
-    Bank { foot: Vec2, darkness: f32, seed: f32 },
+    /// One run of banks of mist on the contour (2.5D and first-person, [`push_banks`]), an index into the
+    /// frame's runs: drawn as one batch ([`draw_banks`]).
+    BankBand(usize),
 }
 
 /// A spell's layers playing over the figure they landed on, for [`draw_world`].
@@ -3629,6 +3707,8 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // The list is the thread's buffer taken for this frame (its capacity is kept).
     let mut items = WORLD_ITEMS.with(|c| std::mem::take(&mut *c.borrow_mut()));
     items.clear();
+    // The mist's banks of this frame, in the runs the items refer to (`Drawable::BankBand`).
+    let mut bank_bands: Vec<Vec<BankQuad>> = Vec::new();
     let fog = &game.fog;
     let tilted = cam.tilt.is_some();
     // The 2.5D view's fog shade of each standing sprite (none in the flat view: 1 there).
@@ -3778,7 +3858,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // 2.5D and first-person with the mist: the banks stand along the frontier of the unexplored land, sorted
     // with the sprites (the figures and buildings in front of them draw over them).
     if tilted && mist::on() && !trailer_nofog() && fog.enabled {
-        push_banks(cam, game, (c0, c1), (r0, r1), &mut items);
+        push_banks(cam, game, (c0, c1), (r0, r1), &mut items, &mut bank_bands);
     }
     // The figures (armies, the waiting ship, the hero) are drawn in their cell's turn of the
     // pass, after the cell's scenery and buildings (0x4c9b5b, 0x4c9dca). The original keys a
@@ -3830,7 +3910,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                         draw_card(card, origin, zoom, r, atlas, outlined);
                     });
                 }
-                Drawable::Bank { foot, darkness, seed } => standing(cam, *foot, *foot, 1.0, bank_rect(cam, *foot), || draw_bank(cam, *foot, *darkness, *seed)),
+                Drawable::BankBand(k) => draw_banks(cam, &bank_bands[*k]),
                 Drawable::Army(i) => {
                     let a = &game.world.armies[*i];
                     let f = cam.to_screen(game.army_display_pos(a));
