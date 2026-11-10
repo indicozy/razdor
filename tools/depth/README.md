@@ -155,45 +155,76 @@ weights in memory while loaded). The input is 1x3x266x266; the output is `[1, 26
 
 ## Light points: windows, doors, gates, chimneys, flags, mill sails (detect_points.py)
 
-An offline detector. It looks for these classes on every building sprite (section 1 of
+An offline detector (v2). It looks for these classes on every building sprite (section 1 of
 `Objects.ugs`, as cut_sprites.py) of each install and writes only numbers to
 `data/lights/objects.json`: boxes in sprite pixels, keyed by the same sprite hash. The engine
 puts a window glow or a torch at each box at night. Nothing else is written; previews go to a
 scratch folder.
 
-- Model: `google/owlv2-base-patch16-ensemble` (OWLv2, open vocabulary). Licence Apache-2.0
-  (its model card). Grounding DINO (`IDEA-Research/grounding-dino-base`) was tried second; its
-  best score on any class was 0.13, so it was dropped.
-- Input: the sprite composited over grey 128 (`cut_sprites.composite_rgb`), upscaled x4 with
-  bicubic before the detector. The detector pads to a square at the bottom and right, so its
-  boxes map back with the sprite's longer side.
-- Queries (one class each): "a window" (window), "a door" (door), "a castle gate" (gate),
-  "a chimney" (chimney), "a flag" (flag), "windmill sails" (sails).
-- Filters, per class: a raw box below score 0.02 is ignored; a box under 2 px on a side, a box
-  over 40 % of the sprite's area, or a box whose pixels are under 50 % opaque (alpha >= 204) is
-  dropped; then greedy NMS per class at IoU 0.5; then the score cut below.
-- Score cuts (chosen on the strict contact sheet, not on a benchmark): window 0.10, door 0.10,
-  gate 0.20, chimney 0.35, flag 0.35, sails 0.15. OWLv2 gives windows low scores on these sprites
-  (its best window box is 0.27), so the window and door cuts are low; chimneys and flags are noisy
-  below 0.35, and gates below 0.20 mark nearly every wall.
-- Output: `{"version":1,"model":"<id>","sprites":{"<key>":{"w":W,"h":H,"points":[{"kind":..,
-  "box":[x0,y0,x1,y1],"score":0.xx}, ...]}}}`; integers for boxes, sorted keys, one sprite per
-  line, only sprites with at least one point.
-- Previews (scratch only): `<key>.png` per sprite with points, and `contact_sheet.png` of all
-  building sprites at 2x, 8 per row, with a legend and per-class counts.
+### Pipeline (v2)
 
-Run it the same way as cut_sprites.py (CUDA index of an RTX card; the script needs CUDA):
+- Input: the sprite composited over grey 128 (`cut_sprites.composite_rgb`), upscaled x4 (bicubic).
+- Doors, gates, chimneys, flags, windmill sails: **Qwen3-VL-4B-Instruct** asked once per class for
+  JSON boxes (0-1000 coordinates, mapped to sprite pixels). Per-class rules: a chimney box must be
+  under 25 % of the sprite's height and centred in its upper 45 % (a chimney sits at the top of a
+  roof, not the whole roof); a box over 20 % of the sprite's area is dropped for every class;
+  boxes under 2 px a side are dropped.
+- Windows: **Florence-2-large** phrase grounding for "window" gives wall-sized boxes. A box over
+  30 % of the sprite is a wall and is dropped. A smaller box is a container: inside it, the pixels
+  darker than the box's opaque wall median by 35 (luminance) form blobs; a blob of 6 px or more, at
+  most 14 px a side, at least half filled, aspect 0.4 to 2.5, is one window. Florence's box is only
+  a container; the pane is the classical blob. Windows lit warm (bright, not dark) are not found yet.
+- Within a kind, a box overlapping a kept one by more than half its own area is dropped.
+- Output: `{"version":1,"model":"<pipeline>","sprites":{"<key>":{"w":W,"h":H,"points":[{"kind":..,
+  "box":[x0,y0,x1,y1],"score":1.0}, ...]}}}`. The score is 1.0 for every point: the models give no
+  calibrated score and the detector applies no score cut. Integers for boxes, sorted keys, one sprite
+  per line, only sprites with at least one point.
+- Previews (scratch only): `<key>.png` per sprite and `contact_sheet.png` of all building sprites at
+  2x, 8 per row, with a legend and per-class counts.
+
+### Why these models (the comparison on 20 sprites)
+
+The 20 sprites (villages, castles, churches, mills, towers) were picked from the building sheet by
+eye. Results were judged by eye on the boxed previews; no labelled ground truth exists, so the
+numbers below are counts, not precision or recall.
+
+| Pipeline | window | door | gate | chimney | flag | sails | Verdict |
+|---|---|---|---|---|---|---|---|
+| v1: OWLv2 (`google/owlv2-base-patch16-ensemble`) + score cuts | 5 | 3 | 1 | 16 | 0 | 2 | too few windows, chimneys cover roofs |
+| Florence-2-large alone | whole-wall boxes on most sprites | 1 per sprite | 1 per sprite | 1 per sprite | 1-3 | 1-3 | no score; every class fires on every sprite, boxes too big: dropped |
+| Qwen3-VL-4B alone | 0 | ok where present | ok on castle gates | ok on roofs | 0-8 | 0-3 | good doors, misses windows |
+| **v2: Qwen3-VL-4B + Florence containers + dark panes** | 14 | 22 | 4 | 11 | 11 | 3 | chosen |
+
+Full run, 183 sprites (129 with points): window 52 points on 15 sprites, door 129 on 93, gate 30
+on 25, chimney 109 on 83, flag 30 on 18, sails 20 on 12. v1 on the same set: window 9 on 5 sprites,
+gate 12 on 12, chimney 67 on 24.
+
+Known weak spots (v2): most castle and village windows are still missed (the dark-pane blobs need
+Florence to put a container on them, and Florence finds few); flags and banners sometimes land on
+building fronts; some doors are false positives on wall texture; chimney boxes are small but can
+sit on the wrong roof. The owner reviews the contact sheet before any light is built on these points.
+
+Not tried: Qwen2.5-VL (Qwen3-VL-4B was the newer Apache-2.0 model that fits the 16 GB card), Ollama
+vision models (none installed), a multi-scale or tiled VLM pass, and warm-lit window detection.
+
+### Licences and models
+
+- `Qwen/Qwen3-VL-4B-Instruct`: Apache-2.0 (its model card). Runs bf16 on the 16 GB card.
+- `microsoft/Florence-2-large`: MIT (its model card). Remote code, fp16. Its generation runs greedy
+  without the KV cache: beam search and the cache fail with transformers 4.57 (the remote code
+  reads `past_key_values` as a tensor). Its remote code also imports `timm` and `flash_attn`; the
+  script skips `flash_attn`. The scratch pylib needs `timm` (and `torchvision` matching torch 2.14).
+- Both run offline only; only the boxes ship.
+
+Run it the same way as cut_sprites.py (CUDA index of an RTX card; the script needs CUDA; about
+14 minutes for both installs on the RTX 5060 Ti):
 
 ```sh
-CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=1 HF_HOME=/mnt/ai_models/hf \
-PYTHONPATH=/home/indicozy/.cache/razdor-scratch/atmosphere/depth/pylib \
+CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=0 HF_HOME=/mnt/ai_models/hf \
+PYTHONPATH=/home/indicozy/.cache/razdor-scratch/atmosphere/depth/pylib:/home/indicozy/.cache/razdor-scratch/atmosphere/depth/pylib-tv \
 nice -n 19 taskset -c 8-19 /mnt/ai_models/venvs/qwen-tts/bin/python tools/depth/detect_points.py \
   --out data/lights/objects.json \
-  --preview /home/indicozy/.cache/razdor-scratch/atmo-detect/preview \
+  --preview /home/indicozy/.cache/razdor-scratch/atmo-detect/preview-v2 \
   "/home/indicozy/Games/Discord Times Community Update" \
   /mnt/ai_models/razdor-community/evolution/install
 ```
-
-Known weak spots: most castle windows and gates are missed or land on the wrong part of the
-sprite, and many chimney boxes cover a whole roof. The owner reviews the contact sheet before any
-light is built on these points.
