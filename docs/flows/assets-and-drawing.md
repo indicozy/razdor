@@ -258,6 +258,28 @@ with its offset `AiMind::idle_offset`. The offsets come from the loads
 also counts `idle_restarts`); `stamp_idle` stamps each army at the first frame drawn and again when
 its restart count changes, and `MapView::forget_shows` drops the stamps of the last game.
 
+**The map's resolution** (`src/ui/map_scale.rs`; the setting «Разрешение карты», `Settings::map_render_scale`,
+1.0, 0.75 or 0.5, cycled by `map_scale::next` in the Map group, always shown; pushed by `main_menu::apply_options`
+into `world_view::set_map_render_scale`). Below 100% for low-end phone GPUs, `map_scale::draw` draws the world
+(`draw_world` and the flat view's fog) into a target of `ceil(screen × scale)` physical pixels and lays it over the
+screen with the copy composite (`render_cache::blit_screen`, Linear filtering), then the frame draws the rest at
+native resolution: the bottom bar, the minimap, windows, tooltips (`draw_tooltip`), the cursor and text. The
+same goes for the photo mode's world, the map under a window (`backdrop_world`, both backdrops) and their dim; the
+window backdrops follow the setting too, as they are the same world drawing.
+- The target is the base of the camera: `render_cache::with_base` makes `back_to_2d` (and the end of every
+  `fill_space`) return to it, not to macroquad's default (screen) camera, so `in_view`, the 3D views (`View3d`, whose render
+  pass is `render_cache::draw_target`), `ground` and `standing` stay in it. A new camera reset during the world
+  drawing must go through `back_to_2d`, or it draws to the screen.
+- Screen maths stays in native screen coordinates (picking, `tile_under_pixel`, `Camera::screen_at`, the
+  tooltip); only the rasterisation is smaller. The sharp shader's `Scale` is multiplied by the target's pixels
+  per 2D unit (`sharp::set_raster`, set by `map_scale::draw`), so its band follows the pixels drawn. The ground
+  cache's composite reads `gl_FragCoord` against the base target's size (`render_cache::base_pixels`).
+- The target is kept by size (`map_scale::target_for`, made again when the physical size or the scale changes).
+  The world is not drawn scaled while the screen is panned (`ui::pan::shift` non-zero: the pan's offset camera
+  would land on the screen), past 8192 px, or at 100%, which is the old path with no target.
+- A profiling switch overrides the setting (`map_scale::in_use`, read once): env `RAZDOR_MAP_SCALE=0.75|0.5`
+  on the desktop, the file `profile-map-scale-75` / `profile-map-scale-50` in the app folder on Android.
+
 **The 2.5D view** (`src/ui/view25.rs`: the tilted camera's maths, pure and tested). The setting
 «Вид карты» (`audio::Settings::map_tilt`, off by default, pushed by `main_menu::apply_options` into
 `world_view::set_tilt_view`); the env `RAZDOR_VIEW=25d|flat` overrides it for snapshots, with

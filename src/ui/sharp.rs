@@ -54,7 +54,13 @@ fn sharp_uv_ref(uv: Vec2, tex_size: Vec2, scale: Vec2) -> Vec2 {
 pub fn draw_scale(tex_size: Vec2, params: &DrawTextureParams) -> Vec2 {
     let source = params.source.map(|r| r.size()).unwrap_or(tex_size);
     let dest = params.dest_size.unwrap_or(source);
-    dest.abs() / source * PERSPECTIVE.with(std::cell::Cell::get)
+    dest.abs() / source * PERSPECTIVE.with(std::cell::Cell::get) * RASTER.with(std::cell::Cell::get)
+}
+
+/// Sets the target's pixels per screen pixel while the world is drawn at a lower resolution
+/// (`map_scale`; 1 otherwise): the draws' `Scale` follows the pixels they land on.
+pub fn set_raster(f: f32) {
+    RASTER.with(|r| r.set(f));
 }
 
 local! {
@@ -62,6 +68,8 @@ local! {
     /// sprites: a sprite nearer the eye than the pivot is magnified, and its blend band must follow
     /// the magnification, not the 2D size). 1 everywhere else.
     static PERSPECTIVE: std::cell::Cell<f32> = const { std::cell::Cell::new(1.0) };
+    /// The target pixels per screen pixel of the map drawn at a lower resolution (`set_raster`). 1 elsewhere.
+    static RASTER: std::cell::Cell<f32> = const { std::cell::Cell::new(1.0) };
 }
 
 /// Runs `draw` with the perspective factor `k` (screen pixels per 2D pixel) for its sharp draws.
@@ -328,7 +336,7 @@ pub fn draw_mesh_sharp(mesh: &Mesh, scale: Vec2) {
         if let Some(tex) = mesh.texture.as_ref() {
             m.set_uniform("TexSize", texels(tex));
         }
-        m.set_uniform("Scale", scale.abs());
+        m.set_uniform("Scale", scale.abs() * RASTER.with(std::cell::Cell::get));
     };
     match blend_context() {
         Some(Some(m)) => {

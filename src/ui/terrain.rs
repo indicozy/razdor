@@ -660,7 +660,9 @@ impl TerrainLayer {
     /// The cache's copy: the filled ground, read at each pixel of `dest` by its window position.
     fn draw_cached(&self, dest: Rect) {
         let (Some(m), Some(rt)) = (self.composite.as_ref(), self.ground.borrow().target.clone()) else { return };
-        let (sw, sh) = macroquad::miniquad::window::screen_size();
+        // The composite reads the ground at its fragment's place on the target it draws into: the
+        // map's scaled target when one is set (`render_cache::with_base`), else the screen.
+        let (sw, sh) = super::render_cache::base_pixels().unwrap_or_else(macroquad::miniquad::window::screen_size);
         gl_use_material(m);
         m.set_texture("Ground", rt.texture.clone());
         m.set_uniform("ScreenSize", vec2(sw, sh));

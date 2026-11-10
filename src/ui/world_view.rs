@@ -33,6 +33,7 @@ use super::dialog::Dialog;
 use super::dt_art::DtArt;
 use super::game_bar::{self, BarButton, Look, TimeButton};
 use super::keymap::{self, Action};
+use super::map_scale;
 use super::minimap;
 use super::terrain;
 use super::saves::{self, Back, LoadView, SaveView};
@@ -1231,6 +1232,19 @@ pub fn next_sprite_size(f: f32) -> f32 {
     }
 }
 
+/// The world map's drawing resolution (`map_scale`, 1.0 = 100%): pushed by [`set_map_render_scale`].
+static MAP_SCALE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1.0f32.to_bits());
+
+/// Puts the map's drawing resolution from the settings (a value not in `map_scale::SCALES` is 100%).
+pub fn set_map_render_scale(f: f32) {
+    MAP_SCALE.store(super::map_scale::valid(f).to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The map's drawing resolution the settings set (`map_scale::in_use` applies the profiling switch).
+pub fn map_render_scale() -> f32 {
+    f32::from_bits(MAP_SCALE.load(std::sync::atomic::Ordering::Relaxed))
+}
+
 /// `deg` wrapped to (-180, 180].
 fn wrap_yaw(deg: f32) -> f32 {
     let w = deg.rem_euclid(360.0);
@@ -1312,8 +1326,8 @@ impl macroquad::camera::Camera for View3d {
         false
     }
     fn render_pass(&self) -> Option<RenderPass> {
-        // The screen, or the target of a cached picture being filled (`render_cache`).
-        super::render_cache::target().map(|rt| rt.render_pass)
+        // The screen, the target of a cached picture being filled, or the map's scaled target (`render_cache`).
+        super::render_cache::draw_target().map(|rt| rt.render_pass)
     }
     fn viewport(&self) -> Option<(i32, i32, i32, i32)> {
         None
@@ -1872,7 +1886,7 @@ fn photo_frame(game: &mut Game, assets: &Assets, view: &mut MapView, entering: b
     clear_background(rgb(10, 12, 10));
     let cam = Camera::looking_at(game, view.zoom, view.look.unwrap_or(game.display_pos()));
     let now = crate::ui::clock::now();
-    frame_probe::time(Stage::World, || draw_world(game, assets, &cam, None, None, None, true, Veil { shows: &[], now }));
+    frame_probe::time(Stage::World, || map_scale::draw(map_render_scale(), rgb(10, 12, 10), || draw_world(game, assets, &cam, None, None, None, true, Veil { shows: &[], now })));
     if shot {
         take_shot(view, now);
     }
@@ -4318,18 +4332,26 @@ pub fn backdrop_lit(game: &Game, assets: &Assets, lit: Option<BarButton>) {
     super::pan::cover_bar();
 }
 
-/// The map under a window: clear, drawn, fogged and dimmed (the bar is drawn by the caller).
-fn draw_map_backdrop(game: &Game, assets: &Assets) {
-    // The map stays where it is when the window over it is panned (`ui::pan`).
-    super::pan::unpanned(|| {
-        clear_background(rgb(10, 12, 10));
-        let full = map_area();
-        let cam = backdrop_camera(game, full);
+/// The map under a window: its world and fog drawn at the map's resolution (`map_scale`), then dimmed.
+/// The caller has cleared the screen and holds the pan's offset off (`ui::pan::unpanned`).
+fn backdrop_world(game: &Game, assets: &Assets) {
+    let full = map_area();
+    let cam = backdrop_camera(game, full);
+    map_scale::draw(map_render_scale(), rgb(10, 12, 10), || {
         draw_world(game, assets, &cam, None, None, None, false, NO_VEIL);
         if cam.tilt.is_none() {
             cam.draw_fog(game, &[]);
         }
         draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.2));
+    });
+}
+
+/// The map under a window: clear, drawn, fogged and dimmed (the bar is drawn by the caller).
+fn draw_map_backdrop(game: &Game, assets: &Assets) {
+    // The map stays where it is when the window over it is panned (`ui::pan`).
+    super::pan::unpanned(|| {
+        clear_background(rgb(10, 12, 10));
+        backdrop_world(game, assets);
     });
 }
 
@@ -4402,13 +4424,7 @@ fn window_backdrop_at_scale(game: &Game, assets: &Assets, lit: Option<BarButton>
     // The map stays where it is when the window over it is panned (`ui::pan`).
     super::pan::unpanned(|| {
         clear_background(rgb(10, 12, 10));
-        let full = map_area();
-        let cam = backdrop_camera(game, full);
-        draw_world(game, assets, &cam, None, None, None, false, NO_VEIL);
-        if cam.tilt.is_none() {
-            cam.draw_fog(game, &[]);
-        }
-        draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.2));
+        backdrop_world(game, assets);
     });
     let idle = game.foe.is_none();
     let modal = input_blocked();
@@ -4924,11 +4940,17 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
     let shows: Vec<&Showing> = view.opening.iter().chain(&view.shows).collect();
     let flat = cam.tilt.is_none();
     let hover = hover.filter(|_| !trailer_clean());
-    frame_probe::time(Stage::World, || draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()), show.as_ref(), hover, true, Veil { shows: &shows, now: show_now }));
-    if flat {
-        frame_probe::time(Stage::Fog, || cam.draw_fog(game, &shows));
-        gpu_wait(Stage::GpuFog);
-    }
+    // The world and the flat view's fog are drawn at the map's resolution (`map_scale`); what comes
+    // after them is drawn at native resolution.
+    frame_probe::time(Stage::World, || {
+        map_scale::draw(map_render_scale(), rgb(10, 12, 10), || {
+            draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()), show.as_ref(), hover, true, Veil { shows: &shows, now: show_now });
+            if flat {
+                frame_probe::time(Stage::Fog, || cam.draw_fog(game, &shows));
+                gpu_wait(Stage::GpuFog);
+            }
+        })
+    });
     if !trailer_clean() {
         draw_clash_marks(view, &cam, crate::ui::clock::now());
     }

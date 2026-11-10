@@ -915,6 +915,8 @@ window opened with) and the five groups (`main_menu::Group`) as tabs of one sett
 `world_view::map_frame` (`draw_clash_marks`, `clash_notice`, from `Game::take_clashes`); the
 army list is `minimap::army_list`, drawn under the minimap window and clicked like its own
 centring (`view.look`); it takes the room above the bar and scrolls with the wheel.
+The world map's drawing resolution «Разрешение карты» (`map_render_scale`, 100%, 75%, 50%; `map_scale`, see
+`assets-and-drawing.md`, «The map's resolution») is always shown, right after the map zoom row.
 The world map's 2.5D settings are in the same window, after «Имя предводителя»: «Вид карты»
 (`map_tilt`, always shown), and «Размер фигур» (`map_sprite_size`) and «Поворот двумя пальцами»
 (`map_twist`, `gestures::set_twist`) only with the 2.5D view on. `apply_options` pushes all three

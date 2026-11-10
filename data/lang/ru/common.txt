@@ -56,6 +56,7 @@ Battles on the map = Битвы армий на карте
 Minimap army list = Список у миникарты
 Leader's name = Имя предводителя
 Map view = Вид карты
+Map resolution = Разрешение карты
 Flat = Плоский
 First person = От первого лица
 Far ground = Даль

@@ -37,6 +37,10 @@ razdor::local! {
     static FILLING: std::cell::RefCell<Option<(RenderTarget, Rect)>> = const { std::cell::RefCell::new(None) };
     /// The copy composite's material, made once (`None` when the shader does not compile).
     static COPY: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
+    /// The map's base target while the world is drawn at a lower resolution (`map_scale`): the
+    /// screen's 2D space drawn into it. [`back_to_2d`] and the end of a fill return to it, not to
+    /// the screen, so every camera reset during the world drawing stays in the target.
+    static BASE: std::cell::RefCell<Option<(RenderTarget, Rect)>> = const { std::cell::RefCell::new(None) };
 }
 
 /// The copy material, made once.
@@ -59,18 +63,65 @@ fn copy_material() -> Option<Material> {
     })
 }
 
-/// The target the 3D views draw into (their render pass is its `render_pass`): the target while
-/// a picture is filled, else `None` (the screen).
+/// The target a picture is being filled into, else `None`.
 pub fn target() -> Option<RenderTarget> {
     FILLING.with(|f| f.borrow().as_ref().map(|(rt, _)| rt.clone()))
 }
 
-/// Back to the 2D space: the screen, or the target of the fill in progress.
+/// The target everything drawn now goes to: the fill in progress, else the map's base target,
+/// else `None` (the screen). The 3D views take their render pass from it.
+pub fn draw_target() -> Option<RenderTarget> {
+    target().or_else(|| BASE.with(|b| b.borrow().as_ref().map(|(rt, _)| rt.clone())))
+}
+
+/// Back to the 2D space: the target of the fill in progress, else the map's base target, else
+/// the screen.
 pub fn back_to_2d() {
     let filling = FILLING.with(|f| f.borrow().clone());
-    match filling {
+    if let Some((rt, space)) = filling {
+        set_camera(&target_camera(&rt, space));
+        return;
+    }
+    match BASE.with(|b| b.borrow().clone()) {
         Some((rt, space)) => set_camera(&target_camera(&rt, space)),
         None => set_default_camera(),
+    }
+}
+
+/// Runs `f` with the base target set to `rt` (its 2D space `space`, the screen's): every camera
+/// reset inside `f` draws into `rt`. The screen's camera is back after.
+pub fn with_base<R>(rt: &RenderTarget, space: Rect, f: impl FnOnce() -> R) -> R {
+    struct Done;
+    impl Drop for Done {
+        fn drop(&mut self) {
+            BASE.with(|b| b.borrow_mut().take());
+            set_default_camera();
+        }
+    }
+    BASE.with(|b| *b.borrow_mut() = Some((rt.clone(), space)));
+    let _done = Done;
+    back_to_2d();
+    f()
+}
+
+/// The pixel size of the map's base target (`with_base`), if one is set: what a screen-sized
+/// composite reads its `gl_FragCoord` against.
+pub fn base_pixels() -> Option<(f32, f32)> {
+    BASE.with(|b| b.borrow().as_ref().map(|(rt, _)| (rt.texture.width(), rt.texture.height())))
+}
+
+/// Draws `tex` over the whole screen, as it is (no blend: the copy composite), flipped as a
+/// render target's texture comes out (see the module's note).
+pub fn blit_screen(tex: &macroquad::texture::Texture2D) {
+    let (sw, sh) = (screen_width(), screen_height());
+    let params = DrawTextureParams { dest_size: Some(vec2(sw, sh)), flip_y: true, ..Default::default() };
+    match copy_material() {
+        Some(m) => {
+            gl_use_material(&m);
+            draw_texture_ex(tex, 0.0, 0.0, WHITE, params);
+            gl_use_default_material();
+        }
+        None => draw_texture_ex(tex, 0.0, 0.0, WHITE, params),
     }
 }
 
@@ -93,7 +144,8 @@ pub fn fill_space(rt: &RenderTarget, space: Rect, f: impl FnOnce()) {
     impl Drop for Done {
         fn drop(&mut self) {
             FILLING.with(|c| c.borrow_mut().take());
-            set_default_camera();
+            // The base target, if one is set (`with_base`), else the screen.
+            back_to_2d();
         }
     }
     FILLING.with(|c| *c.borrow_mut() = Some((rt.clone(), space)));
@@ -134,15 +186,6 @@ impl Cached {
             fill(&rt, draw);
             self.key = Some(key);
         }
-        let (sw, sh) = (screen_width(), screen_height());
-        let params = DrawTextureParams { dest_size: Some(vec2(sw, sh)), flip_y: true, ..Default::default() };
-        match copy_material() {
-            Some(m) => {
-                gl_use_material(&m);
-                draw_texture_ex(&rt.texture, 0.0, 0.0, WHITE, params);
-                gl_use_default_material();
-            }
-            None => draw_texture_ex(&rt.texture, 0.0, 0.0, WHITE, params),
-        }
+        blit_screen(&rt.texture);
     }
 }
