@@ -2141,7 +2141,13 @@ impl Camera {
             return;
         }
         let (tl, br) = self.fog_corners(game);
-        minimap::draw_fog(&game.fog, &held, origin, settle, tl, br);
+        // The 2.5D view (a tilted camera) draws only the fog's dark box (`minimap::draw_fog_boxed`);
+        // the flat map view draws the whole quad.
+        if self.tilt.is_some() {
+            minimap::draw_fog_boxed(&game.fog, &held, origin, settle, tl, br);
+        } else {
+            minimap::draw_fog(&game.fog, &held, origin, settle, tl, br);
+        }
         let v = self.draw;
         let (l, r) = (tl.x.clamp(v.x, v.x + v.w), br.x.clamp(v.x, v.x + v.w));
         let (t, b) = (tl.y.clamp(v.y, v.y + v.h), br.y.clamp(v.y, v.y + v.h));
@@ -3229,6 +3235,14 @@ fn draw_sky(cam: &Camera) {
         tilt.cam.project(b.point(g), cam.view)
     });
     let Some(h) = horizon else {
+        // A frame's whole target: the clear is the same picture, and cheaper. Every caller of
+        // `draw_world` clears the target just before it, with nothing drawn in between (`world_frame`
+        // and `photo_frame` clear, then the camera and the input only; `draw_map_backdrop` and
+        // `window_backdrop_at_scale` clear inside `unpanned`, then the camera). `clear_background`
+        // drops the draws queued so far, so the clear also leaves nothing of them behind.
+        if r.x <= 0.0 && r.y <= 0.0 && r.x + r.w >= screen_width() && r.y + r.h >= screen_height() {
+            return clear_background(SKY);
+        }
         return draw_rectangle(r.x, r.y, r.w, r.h, SKY);
     };
     let (y, bottom) = (h.y.clamp(r.y, r.y + r.h), r.y + r.h);

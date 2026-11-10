@@ -231,6 +231,9 @@ struct FogShown {
     /// The texture's RGBA (alpha = the rounded shown darkness) and the texture itself.
     rgba: Vec<u8>,
     tex: Option<Texture2D>,
+    /// The texels whose alpha is above 0 (x0, y0, x1, y1, exclusive), as the texture was last
+    /// uploaded; None when every texel is fully transparent (the whole map explored).
+    bbox: Option<[i32; 4]>,
     /// Cells that jump to their target now: the reveal cells of a showing, whose circle the
     /// mask draws (so they do not fade twice).
     settle: Vec<usize>,
@@ -255,6 +258,7 @@ impl FogShown {
         wait: Vec::new(),
         rgba: Vec::new(),
         tex: None,
+        bbox: None,
         settle: Vec::new(),
         last: None,
         moving: false,
@@ -397,6 +401,12 @@ pub fn shown_darkness(fog: &Fog, t: (i32, i32)) -> f32 {
 /// uploaded only when a texel changed. `settle`: the cells that jump to their target (see
 /// [`FogShown::settle`]). The map view and the minimap draw the same one.
 pub fn fog_texture(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>) -> Texture2D {
+    fog_texture_box(fog, held, origin, settle).0
+}
+
+/// [`fog_texture`] and the box of its texels that are not fully transparent (`FogShown::bbox`). The
+/// box is made when the texture is uploaded, not per frame.
+fn fog_texture_box(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>) -> (Texture2D, Option<[i32; 4]>) {
     let now = crate::ui::clock::now();
     SHOWN.with(|s| {
         let mut s = s.borrow_mut();
@@ -406,15 +416,38 @@ pub fn fog_texture(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: i
             let tex = Texture2D::from_rgba8(w as u16, h as u16, &s.rgba);
             tex.set_filter(FilterMode::Linear);
             s.tex = Some(tex);
+            s.bbox = alpha_box(&s.rgba, w, h);
             razdor::frame_probe::tex_rebuilt();
         } else if changed {
             if let Some(tex) = &s.tex {
                 tex.update_from_bytes(w as u32, h as u32, &s.rgba);
             }
+            s.bbox = alpha_box(&s.rgba, w, h);
             razdor::frame_probe::tex_rebuilt();
         }
-        s.tex.clone().unwrap_or_else(Texture2D::empty)
+        (s.tex.clone().unwrap_or_else(Texture2D::empty), s.bbox)
     })
+}
+
+/// The bounding box (x0, y0, x1, y1, exclusive) of the texels of a `w` × `h` RGBA image whose
+/// alpha is above 0; None when there are none. The fog's explored cells are alpha 0.
+fn alpha_box(rgba: &[u8], w: i32, h: i32) -> Option<[i32; 4]> {
+    let w = w.max(0) as usize;
+    if w == 0 || h <= 0 {
+        return None;
+    }
+    let mut bx: Option<[i32; 4]> = None;
+    for (i, px) in rgba.chunks_exact(4).enumerate() {
+        if px[3] == 0 {
+            continue;
+        }
+        let (x, y) = ((i % w) as i32, (i / w) as i32);
+        bx = Some(match bx {
+            None => [x, y, x + 1, y + 1],
+            Some([x0, y0, x1, y1]) => [x0.min(x), y0.min(y), x1.max(x + 1), y1.max(y + 1)],
+        });
+    }
+    bx
 }
 
 /// Draws the fog over the map. `tl` and `br` are the screen positions of world points
@@ -426,6 +459,25 @@ pub fn draw_fog(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl
     }
     let tex = fog_texture(fog, held, origin, settle);
     draw_texture_ex(&tex, tl.x, tl.y, WHITE, DrawTextureParams { dest_size: Some(br - tl), ..Default::default() });
+}
+
+/// [`draw_fog`] over the box of the texels that are not fully transparent only (the 2.5D view's
+/// fog, a player's report: the rest of the map is explored, alpha 0, and drawing it changes no
+/// pixel). The box is grown by one texel a side, so the bilinear sampling at its edge is the
+/// whole texture's; the texels at the same screen positions keep the same texture coordinates.
+/// Nothing is drawn when no texel is dark.
+pub fn draw_fog_boxed(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>, tl: Vec2, br: Vec2) {
+    if !fog.enabled || fog.w <= 0 || fog.h <= 0 {
+        return;
+    }
+    let (tex, bbox) = fog_texture_box(fog, held, origin, settle);
+    let Some(bx) = bbox else { return };
+    let (x0, y0) = ((bx[0] - 1).max(0), (bx[1] - 1).max(0));
+    let (x1, y1) = ((bx[2] + 1).min(fog.w), (bx[3] + 1).min(fog.h));
+    let cell = (br - tl) / vec2(fog.w as f32, fog.h as f32);
+    let (at, size) = (tl + vec2(x0 as f32, y0 as f32) * cell, vec2((x1 - x0) as f32, (y1 - y0) as f32) * cell);
+    let source = Rect::new(x0 as f32, y0 as f32, (x1 - x0) as f32, (y1 - y0) as f32);
+    draw_texture_ex(&tex, at.x, at.y, WHITE, DrawTextureParams { dest_size: Some(size), source: Some(source), ..Default::default() });
 }
 
 /// [`draw_fog`] past a map's edges («Продолжать карту за краем»): `dest` shows the fog's texels
@@ -1703,5 +1755,73 @@ mod fade_tests {
         let empty = Fog::new(0, 0);
         assert!(!s.track(&empty, &[], (0, 0), std::iter::empty(), 0.0));
         assert_eq!(shown_darkness(&empty, (0, 0)), 0.0);
+    }
+}
+
+#[cfg(test)]
+mod fog_box_tests {
+    use super::*;
+
+    /// A `w` × `h` RGBA image, transparent except the texels `opaque` (alpha 90).
+    fn image(w: usize, h: usize, opaque: &[(usize, usize)]) -> Vec<u8> {
+        let mut rgba = vec![0u8; w * h * 4];
+        for &(x, y) in opaque {
+            rgba[(y * w + x) * 4 + 3] = 90;
+        }
+        rgba
+    }
+
+    #[test]
+    fn the_box_is_the_texels_that_are_not_fully_transparent() {
+        assert_eq!(alpha_box(&image(4, 3, &[(1, 0), (2, 1)]), 4, 3), Some([1, 0, 3, 2]));
+        assert_eq!(alpha_box(&image(4, 3, &[(3, 2)]), 4, 3), Some([3, 2, 4, 3]), "one texel is its own box");
+    }
+
+    #[test]
+    fn a_fully_transparent_image_has_no_box() {
+        assert_eq!(alpha_box(&image(4, 3, &[]), 4, 3), None);
+        assert_eq!(alpha_box(&[], 0, 0), None);
+    }
+
+    #[test]
+    fn a_fully_opaque_image_is_its_whole_size() {
+        let all: Vec<(usize, usize)> = (0..3).flat_map(|y| (0..4).map(move |x| (x, y))).collect();
+        assert_eq!(alpha_box(&image(4, 3, &all), 4, 3), Some([0, 0, 4, 3]));
+    }
+
+    #[test]
+    fn the_box_of_the_shown_fog_keeps_every_dark_cell_and_drops_the_explored_border() {
+        // A 10 × 8 map explored everywhere but its bottom-right corner (2 × 2 dark cells). The
+        // fog's darkness is feathered (a box blur of the unexplored share), so the box is the
+        // dark corner grown by the feather, not the corner itself: every texel outside it is alpha 0.
+        let mut fog = Fog::new(10, 8);
+        for y in 0..8 {
+            for x in 0..10 {
+                if x < 8 || y < 6 {
+                    fog.reveal(x, y, 0);
+                }
+            }
+        }
+        let mut s = FogShown::EMPTY;
+        s.track(&fog, &[], (0, 0), std::iter::empty(), 0.0);
+        let bx = alpha_box(&s.rgba, fog.w, fog.h).expect("the dark corner is not transparent");
+        assert!(bx[0] <= 8 && bx[1] <= 6 && bx[2] >= 10 && bx[3] >= 8, "the box {bx:?} holds the dark corner");
+        assert!(bx != [0, 0, 10, 8], "and is smaller than the map");
+        for y in 0..8 {
+            for x in 0..10 {
+                let outside = x < bx[0] || y < bx[1] || x >= bx[2] || y >= bx[3];
+                assert!(!outside || s.rgba[((y * 10 + x) * 4 + 3) as usize] == 0, "texel ({x}, {y}) outside {bx:?} is transparent");
+            }
+        }
+        // All explored: no box, nothing drawn.
+        let mut all = Fog::new(10, 8);
+        for y in 0..8 {
+            for x in 0..10 {
+                all.reveal(x, y, 0);
+            }
+        }
+        let mut s = FogShown::EMPTY;
+        s.track(&all, &[], (0, 0), std::iter::empty(), 0.0);
+        assert_eq!(alpha_box(&s.rgba, all.w, all.h), None);
     }
 }

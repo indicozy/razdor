@@ -326,6 +326,9 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   At 0 it is not drawn. Off the map the ground is black (visibility 0) unless «Продолжать карту за краем» is on.
   Razdor's visual only: the flat view is pixel-identical. Sprites' fallback drawings (no DT art: procedural
   ships, units by `draw_unit`) are not faded.
+- **The 2.5D fog's box**: `draw_fog_flat` on a tilted camera draws `minimap::draw_fog_boxed`, only the sub-quad over the
+  texels that are not fully transparent (the box grown by one texel a side; nothing when none is dark). The same
+  pixels as the whole quad, fewer fragments. The flat map view and the minimap keep `minimap::draw_fog`.
 - **The fog fades** (the owner's request, 2026-11-10: a smooth reveal, not a pop). `minimap::FogShown` (per thread)
   keeps each cell's shown darkness (0..255, unrounded) and eases it toward its target (`darkness_into` of the fog
   with its held cells dark): an exponential approach with `FADE_TAU` (0.2 s), monotonic, snapped within half a
@@ -373,6 +376,8 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
     `a_click_on_the_hero_in_the_first_person_view...`.
   - The sky: `draw_sky` fills the frame dark (`SKY`) for 2.5D and «Вверх»; for «Горизонт» a gradient from light
     blue at the top to pale at the projected horizon line, which the ground covers below it.
+    Without a horizon, with the camera covering the whole target, the 2.5D sky is the frame's `clear_background(SKY)`
+    (the same picture): every caller of `draw_world` clears just before it, with nothing drawn between.
   - Near fade (the owner's report, 2026-11-10: with the old fade, every tree and building between the camera and the
     hero vanished, the whole lower half of the view). Only a sprite that covers him fades. `draw_world_in` sets
     `HERO_ON_WINDOW` (his drawn rectangle on the window and his depth along the view) before any sprite of the pass,
