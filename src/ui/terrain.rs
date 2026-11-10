@@ -35,6 +35,11 @@ use razdor::dt::gfx::{water_frame, Image, WATER_FRAMES};
 use razdor::rules::map::{is_water, Surface};
 use super::{daylight, sharp, water};
 
+/// The period of the `Clock` uniform (the water clock, seconds): 6400 = 64 × 100. Every drift in the
+/// shaders moves its noise by whole lattice periods (64 cells) over it, and every sine has a whole
+/// number of cycles in it, so the wrap is invisible. Keep the shader constants in step with the tests.
+pub const CLOCK_PERIOD: f32 = 6400.0;
+
 const VERTEX: &str = r#"#version 100
 attribute vec3 position;
 attribute vec2 texcoord;
@@ -83,11 +88,15 @@ float hash2(vec2 q) {
     return fract(sin(dot(q, vec2(127.1, 311.7))) * 43758.5453);
 }
 
+// The lattice repeats every 64 cells, so a drift that moves the noise by a whole number of periods
+// over CLOCK_PERIOD comes back to itself: the Clock's wrap is seamless (see the tests).
 float vnoise(vec2 q) {
     vec2 i = floor(q);
     vec2 f = fract(q);
     vec2 u = f * f * (3.0 - 2.0 * f);
-    return mix(mix(hash2(i), hash2(i + vec2(1.0, 0.0)), u.x), mix(hash2(i + vec2(0.0, 1.0)), hash2(i + vec2(1.0, 1.0)), u.x), u.y);
+    vec2 a = mod(i, 64.0);
+    vec2 b = mod(i + 1.0, 64.0);
+    return mix(mix(hash2(a), hash2(vec2(b.x, a.y)), u.x), mix(hash2(vec2(a.x, b.y)), hash2(b), u.x), u.y);
 }
 
 float code_at(vec2 c) {
@@ -180,16 +189,20 @@ float hash2(vec2 q) {
     return fract(sin(dot(q, vec2(127.1, 311.7))) * 43758.5453);
 }
 
+// The lattice repeats every 64 cells, so a drift that moves the noise by a whole number of periods
+// over CLOCK_PERIOD comes back to itself: the Clock's wrap is seamless (see the tests).
 float vnoise(vec2 q) {
     vec2 i = floor(q);
     vec2 f = fract(q);
     vec2 u = f * f * (3.0 - 2.0 * f);
-    return mix(mix(hash2(i), hash2(i + vec2(1.0, 0.0)), u.x), mix(hash2(i + vec2(0.0, 1.0)), hash2(i + vec2(1.0, 1.0)), u.x), u.y);
+    vec2 a = mod(i, 64.0);
+    vec2 b = mod(i + 1.0, 64.0);
+    return mix(mix(hash2(a), hash2(vec2(b.x, a.y)), u.x), mix(hash2(vec2(a.x, b.y)), hash2(b), u.x), u.y);
 }
 
 // The ripple's offset of the water at `q` (the water's uv distortion, in frame units).
 vec2 ripple(vec2 q) {
-    return vec2(sin(q.y * 2.1 + Clock * 1.3) + 0.5 * vnoise(q * 0.7 + Clock * 0.2), cos(q.x * 1.7 + Clock * 1.1));
+    return vec2(sin(q.y * 2.1 + Clock * 1.29983) + 0.5 * vnoise(q * 0.7 + Clock * 0.2), cos(q.x * 1.7 + Clock * 1.09956));
 }
 
 // The atlas colour of a slot at `t` texels from the tile's corner. The tile repeats, so the offset is
@@ -266,7 +279,7 @@ void main() {
             vec2 q1 = p - fl * t1 * 7.0;
             uvw += 0.015 * mix(ripple(q0), ripple(q1), wt);
             float band = smoothstep(0.45, 0.6, sea) * (1.0 - smoothstep(0.6, 0.85, sea));
-            band *= 0.6 + 0.4 * sin(Clock * 1.6 + mix(vnoise(q0 * 1.3), vnoise(q1 * 1.3), wt) * 6.0);
+            band *= 0.6 + 0.4 * sin(Clock * 1.60025 + mix(vnoise(q0 * 1.3), vnoise(q1 * 1.3), wt) * 6.0);
             foam = vec3(0.85, 0.90, 0.92) * band * 0.35;
         }
         w = texture2D(Water, sharp_uv(uvw, WaterSize, WaterScale)).rgb;
@@ -771,7 +784,7 @@ impl TerrainLayer {
         let fog = edge_fog_colour();
         m.set_uniform("Edge", vec4(if edge_on { 1.0 } else { 0.0 }, fog[0], fog[1], fog[2]));
         m.set_uniform("Ramp", vec2(EDGE_SOLID, EDGE_FULL));
-        m.set_uniform("Clock", water_ms.map_or(0.0, |ms| (ms as f32 / 1000.0) % 1000.0));
+        m.set_uniform("Clock", water_ms.map_or(0.0, |ms| (ms as f32 / 1000.0) % CLOCK_PERIOD));
         m.set_uniform("Overlay", if mode == Mode::Overlay { 1.0f32 } else { 0.0 });
         // Live water («Живая вода»): the water's draws only (the full pass and the overlay). The
         // sky's colour is the lighting's (the day's with the lighting off).
@@ -1024,5 +1037,28 @@ mod tests {
         assert_eq!(shader_codes(&tex, 3, 2, 0, 0), [1, 2, 4, 5]);
         assert_eq!(shader_codes(&tex, 3, 2, 2, 1), [6, 6, 6, 6]);
         assert_eq!(shader_codes(&tex, 3, 2, -1, -1), [1, 1, 1, 1], "the ring continues the corner");
+    }
+}
+
+#[cfg(test)]
+mod clock_wrap_tests {
+    use super::CLOCK_PERIOD;
+
+    /// The shaders' sine frequencies (rad/s): each a whole number of cycles in `CLOCK_PERIOD`.
+    #[test]
+    fn every_sine_has_a_whole_number_of_cycles_in_the_clock_period() {
+        for w in [1.29983f32, 1.09956, 1.60025] {
+            let cycles = w * CLOCK_PERIOD / std::f32::consts::TAU;
+            assert!((cycles - cycles.round()).abs() < 0.01, "{w} rad/s: {cycles} cycles");
+        }
+    }
+
+    /// The shaders' drifts (noise units per second, on the 64-cell lattice): whole periods per wrap.
+    #[test]
+    fn every_drift_moves_the_noise_a_whole_number_of_lattice_periods_per_wrap() {
+        for v in [0.05f32, 0.02, -0.08, 0.2, -0.03, 0.06, 0.07, -0.04, -0.09, -0.05] {
+            let periods = v * CLOCK_PERIOD / 64.0;
+            assert!((periods - periods.round()).abs() < 0.01, "drift {v}: {periods} periods");
+        }
     }
 }

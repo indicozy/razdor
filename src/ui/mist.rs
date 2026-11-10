@@ -61,7 +61,7 @@ fn sheets() -> f32 {
 /// The clock the mist drifts on: the terrain's own (its water clock, in seconds), so the edge fog
 /// and the mist move together.
 fn clock() -> f32 {
-    ((crate::ui::clock::now() * 1000.0) as i64 as f32 / 1000.0) % 1000.0
+    ((crate::ui::clock::now() * 1000.0) as i64 as f32 / 1000.0) % crate::ui::terrain::CLOCK_PERIOD
 }
 
 // The shader's vertex stage: the quad's uv, as the terrain's.
@@ -95,11 +95,14 @@ float hash2(vec2 q) {
     return fract(sin(dot(q, vec2(127.1, 311.7))) * 43758.5453);
 }
 
+// The lattice repeats every 64 cells: the drift returns to itself over the Clock's period (terrain.rs).
 float vnoise(vec2 q) {
     vec2 i = floor(q);
     vec2 f = fract(q);
     vec2 u = f * f * (3.0 - 2.0 * f);
-    return mix(mix(hash2(i), hash2(i + vec2(1.0, 0.0)), u.x), mix(hash2(i + vec2(0.0, 1.0)), hash2(i + vec2(1.0, 1.0)), u.x), u.y);
+    vec2 a = mod(i, 64.0);
+    vec2 b = mod(i + 1.0, 64.0);
+    return mix(mix(hash2(a), hash2(vec2(b.x, a.y)), u.x), mix(hash2(vec2(a.x, b.y)), hash2(b), u.x), u.y);
 }
 
 float sheet_scale(float i) { return i < 0.5 ? 0.18 : (i < 1.5 ? 0.33 : (i < 2.5 ? 0.6 : 1.1)); }
