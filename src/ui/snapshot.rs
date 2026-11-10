@@ -761,6 +761,12 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                 let t = (x.parse().map_err(|_| "bad x")?, y.parse().map_err(|_| "bad y")?);
                 game.pos = game.world.map.center(t);
             }
+            // `RAZDOR_TRAILER_TARGET=x,y` (dev-only, the trailer's stills): the camera looks at that
+            // cell rather than at the hero, so the hero stands in the lower part of the frame.
+            if let Some((x, y)) = std::env::var("RAZDOR_TRAILER_TARGET").ok().as_deref().and_then(|v| v.split_once(',')) {
+                let t: (i32, i32) = (x.trim().parse().map_err(|_| "bad target x")?, y.trim().parse().map_err(|_| "bad target y")?);
+                app.map_view.aim_at(game.world.map.center(t));
+            }
             // `RAZDOR_SCENE_EXPLORED=1`: the whole map explored, so the fog shows no more than the
             // ground (the map's edges, for the «Продолжать карту за краем» renders).
             if std::env::var("RAZDOR_SCENE_EXPLORED").is_ok_and(|v| v.trim() == "1") {

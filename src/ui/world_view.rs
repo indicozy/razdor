@@ -610,6 +610,15 @@ impl MapView {
         LAST_CAM.with(|c| c.set(None));
     }
 
+    /// The camera looks at `at` (world units) and stays there: the opening fog view, the event
+    /// views and the glide back to the hero are dropped. Only the trailer's stills
+    /// (`RAZDOR_TRAILER_TARGET`).
+    pub fn aim_at(&mut self, at: (f32, f32)) {
+        self.look = Some(at);
+        self.forget_shows();
+        self.centring = None;
+    }
+
     /// The map is left (a window, a battle): a right-button press under way ends with it, so
     /// the press is no right click (a stop) when the map comes back.
     pub fn drop_grab(&mut self) {
@@ -981,6 +990,45 @@ pub fn set_tilt_view(on: bool) {
     TILT_VIEW.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// The trailer's camera from `RAZDOR_TRAILER_CAM` (dev-only, read once; see `view25::Trailer`).
+/// A value that does not parse is logged and ignored.
+fn trailer() -> Option<&'static view25::Trailer> {
+    static TRAILER: std::sync::OnceLock<Option<view25::Trailer>> = std::sync::OnceLock::new();
+    TRAILER
+        .get_or_init(|| {
+            let text = std::env::var("RAZDOR_TRAILER_CAM").ok()?;
+            Some(view25::parse_trailer(&text).unwrap_or_else(|e| {
+                razdor::diag!("RAZDOR_TRAILER_CAM: {e}");
+                view25::Trailer::default()
+            }))
+        })
+        .as_ref()
+}
+
+/// `RAZDOR_TRAILER_NOFOG=1` (dev-only, the trailer's stills): no fog is drawn and every sprite is
+/// fully visible. Read once.
+fn trailer_nofog() -> bool {
+    static NOFOG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *NOFOG.get_or_init(|| std::env::var("RAZDOR_TRAILER_NOFOG").is_ok_and(|v| v.trim() == "1"))
+}
+
+/// The camera the trailer's keys give over the player's `pitch` and `yaw`, centred on `target`
+/// and fitted to `scale` in `view`. With a bend, the camera carries it (`TiltCamera::bend`), and
+/// the region returned is the ground the sheet covers (`width`, `ahead` and `behind` about the
+/// target), which the cull and the plan take.
+fn trailer_camera(t: &view25::Trailer, target: Vec2, scale: f32, view: Rect, pitch: f32, yaw: f32) -> (TiltCamera, Option<Rect>) {
+    let mut cam = TiltCamera::free(target, scale, view, t.pitch.unwrap_or(pitch), yaw, t.fov.unwrap_or(view25::FOV_DEG));
+    if let Some(d) = t.dist {
+        cam.distance = d;
+    }
+    if t.bend <= 0.0 {
+        return (cam, None);
+    }
+    let bend = view25::Bend::new(target, yaw, t.flat, t.radius, t.bend);
+    cam.bend = Some(bend);
+    (cam, Some(bend.region(t.width, t.ahead, t.behind)))
+}
+
 /// The tilt in degrees: the start's (`RAZDOR_VIEW_PITCH`, else the default) until PageUp or
 /// PageDown sets it.
 fn tilt_pitch() -> f32 {
@@ -1108,27 +1156,135 @@ impl macroquad::camera::Camera for View3d {
     }
 }
 
+/// Which part of a bent view's closure runs ([`bent_view`]): the closure runs once for the
+/// ground (drawn flat into the sheet's picture, `ground` draws, `standing` does not) and once for
+/// the sprites (`ground` does not draw, `standing` stands them on the sheet). Plain otherwise.
+#[derive(Clone, Copy, PartialEq)]
+enum Pass {
+    Plain,
+    Ground,
+    Sprites,
+}
+
+thread_local! {
+    static PASS: std::cell::Cell<Pass> = const { std::cell::Cell::new(Pass::Plain) };
+}
+
+/// Runs `f` with the pass `pass` set, the plain pass after.
+fn with_pass(pass: Pass, f: impl FnOnce()) {
+    PASS.with(|p| p.set(pass));
+    f();
+    PASS.with(|p| p.set(Pass::Plain));
+}
+
 /// Runs `f` on the 2D space of `cam`. A flat camera's is its own; a tilted one's is its cull
 /// footprint ([`Camera::tilted_space`]), drawn with the 3D view set, where [`ground`] and
-/// [`standing`] place each pass. The 2D camera is back after.
-fn in_view(cam: &Camera, f: impl FnOnce(&Camera)) {
+/// [`standing`] place each pass. The 2D camera is back after. With a bend ([`bent_view`]) `f`
+/// runs twice, see [`Pass`].
+fn in_view(cam: &Camera, f: impl Fn(&Camera)) {
     let Some(tilt) = cam.tilt else { return f(cam) };
+    if let Some(bend) = tilt.cam.bend.filter(|_| super::render_cache::target().is_none()) {
+        return bent_view(cam, &tilt, bend, &f);
+    }
     let (w, h) = (screen_width(), screen_height());
     set_camera(&View3d(view25::window_matrix(cam.view, w, h) * tilt.cam.view_proj(cam.view)));
     f(&cam.tilted_space());
     super::render_cache::back_to_2d();
 }
 
+/// The bent view of [`in_view`] (`RAZDOR_TRAILER_CAM`, dev-only): the ground pass is drawn flat
+/// into a picture of the cull's ground, the picture is laid on a grid that follows the bend
+/// ([`draw_sheet`]), and the sprites are stood on that sheet in a second run of `f`. The picture
+/// is at the screen's pixel density at the pivot (`k` pixels per world pixel), so the ground
+/// stays as sharp as the flat view's at the middle of the frame.
+fn bent_view(cam: &Camera, tilt: &Tilt, bend: view25::Bend, f: &impl Fn(&Camera)) {
+    let space = cam.tilted_space();
+    let (sw, sh) = (space.view.w, space.view.h);
+    // The picture's pixels per 2D pixel: the screen's at the pivot, shrunk to fit the largest
+    // target the GPU takes (`MAX_BENT_SIDE`).
+    let k = (tilt.cam.pivot_scale(cam.view) / cam.scale).max(0.05);
+    let k = k.min(MAX_BENT_SIDE / sw.max(sh).max(1.0));
+    let (pw, ph) = ((sw * k).ceil().max(1.0) as u32, (sh * k).ceil().max(1.0) as u32);
+    let target = bent_target(pw, ph);
+    super::render_cache::fill_space(&target, space.view, || with_pass(Pass::Ground, || f(&space)));
+    let (w, h) = (screen_width(), screen_height());
+    set_camera(&View3d(view25::window_matrix(cam.view, w, h) * tilt.cam.view_proj(cam.view)));
+    draw_sheet(&target, &bend, tilt.cull);
+    with_pass(Pass::Sprites, || f(&space));
+    super::render_cache::back_to_2d();
+}
+
+/// The largest side of a bent view's picture in pixels.
+const MAX_BENT_SIDE: f32 = 8192.0;
+
+/// The target of a bent view's picture of `w` × `h` pixels, kept by size: the views fill and draw
+/// their picture one after the other, so one target serves them all.
+fn bent_target(w: u32, h: u32) -> RenderTarget {
+    thread_local! {
+        static TARGETS: std::cell::RefCell<Vec<((u32, u32), RenderTarget)>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+    TARGETS.with(|t| {
+        let mut t = t.borrow_mut();
+        if let Some((_, rt)) = t.iter().find(|(size, _)| *size == (w, h)) {
+            return rt.clone();
+        }
+        let rt = render_target(w, h);
+        rt.texture.set_filter(FilterMode::Nearest);
+        t.push(((w, h), rt.clone()));
+        rt
+    })
+}
+
+/// Draws the picture `target` on the bent ground: a grid of `SHEET_ACROSS` × `SHEET_ALONG` cells
+/// over `region` (the ground in world units), each vertex lifted by [`view25::Bend::point`] and
+/// its texture coordinate the point's place in the region. The picture's rows come out upside
+/// down from its fill, so `v` runs the other way (as [`render_cache::Cached::show`] flips it).
+fn draw_sheet(target: &RenderTarget, bend: &view25::Bend, region: Rect) {
+    const ACROSS: usize = 64;
+    const ALONG: usize = 128;
+    // Macroquad clamps a draw to 5000 indices (10000 vertices): 8 rows of 64 cells are 3072.
+    const ROWS_PER_DRAW: usize = 8;
+    let vertex = |i: usize, j: usize| {
+        let (u, v) = (i as f32 / ACROSS as f32, j as f32 / ALONG as f32);
+        let p = bend.point(vec2(region.x + region.w * u, region.y + region.h * v));
+        macroquad::models::Vertex::new(p.x, p.y, p.z, u, 1.0 - v, WHITE)
+    };
+    for j0 in (0..ALONG).step_by(ROWS_PER_DRAW) {
+        let rows = ROWS_PER_DRAW.min(ALONG - j0);
+        let mut vertices = Vec::with_capacity((ACROSS + 1) * (rows + 1));
+        for j in j0..=j0 + rows {
+            for i in 0..=ACROSS {
+                vertices.push(vertex(i, j));
+            }
+        }
+        let row = (ACROSS + 1) as u16;
+        let mut indices = Vec::with_capacity(rows * ACROSS * 6);
+        for j in 0..rows as u16 {
+            for i in 0..ACROSS as u16 {
+                let a = j * row + i;
+                indices.extend_from_slice(&[a, a + 1, a + row, a + 1, a + row + 1, a + row]);
+            }
+        }
+        macroquad::models::draw_mesh(&macroquad::models::Mesh { vertices, indices, texture: Some(target.texture.clone()) });
+    }
+}
+
 /// Draws the ground pass: under a tilted camera, the 2D space laid flat on the ground
-/// ([`view25::ground_model`]); under a flat one, as drawn.
-fn ground<R>(cam: &Camera, draw: impl FnOnce() -> R) -> R {
+/// ([`view25::ground_model`]); under a flat one, as drawn. In a bent view's sprite run it draws
+/// nothing (the sheet holds the ground), and in its ground run it draws flat into the picture.
+fn ground(cam: &Camera, draw: impl FnOnce()) {
     if cam.tilt.is_none() {
         return draw();
     }
-    push_model(view25::ground_model(cam.origin, cam.scale));
-    let r = draw();
-    pop_model();
-    r
+    match PASS.with(std::cell::Cell::get) {
+        Pass::Plain => {
+            push_model(view25::ground_model(cam.origin, cam.scale));
+            draw();
+            pop_model();
+        }
+        Pass::Ground => draw(),
+        Pass::Sprites => {}
+    }
 }
 
 thread_local! {
@@ -1178,7 +1334,18 @@ fn standing(cam: &Camera, foot: Vec2, base: Vec2, vis: f32, draw: impl FnOnce())
     if vis <= 0.0 {
         return;
     }
-    push_cpu_model(view25::billboard_model_about(cam.origin, foot, base, cam.scale, tilt.cam.pitch_deg, tilt.cam.yaw_deg, sprite_size()));
+    let (pitch, yaw, size) = (tilt.cam.pitch_deg, tilt.cam.yaw_deg, sprite_size());
+    let model = match (PASS.with(std::cell::Cell::get), tilt.cam.bend) {
+        // The sheet holds the ground: no sprite in the ground run.
+        (Pass::Ground, _) => return,
+        // A sprite stands where its foot is on the sheet (the bend's point of its ground).
+        (Pass::Sprites, Some(bend)) => {
+            let ground = bend.point((foot + cam.origin) / cam.scale);
+            view25::billboard_model_about_at(foot, base, cam.scale, pitch, yaw, size, ground)
+        }
+        _ => view25::billboard_model_about(cam.origin, foot, base, cam.scale, pitch, yaw, size),
+    };
+    push_cpu_model(model);
     let prev = SPRITE_VIS.with(|s| s.replace(vis));
     draw();
     SPRITE_VIS.with(|s| s.set(prev));
@@ -1265,8 +1432,15 @@ impl Camera {
         let mut cam = Camera { origin: origin - pad, view, draw, scale, grid: map.grid, tilt: None };
         // A view with no height (a minimised window) has no perspective: it stays flat.
         if tilt_view() && view.w >= 1.0 && view.h >= 1.0 {
-            let tilt = TiltCamera::new(Vec2::from(cam.centre()), scale, view, tilt_pitch(), tilt_yaw());
-            cam.tilt = Some(Tilt { cam: tilt, plan: tilt.ground_footprint(view, view), cull: tilt.ground_footprint(view, draw) });
+            let target = Vec2::from(cam.centre());
+            let (tilt, region) = match trailer() {
+                None => (TiltCamera::new(target, scale, view, tilt_pitch(), tilt_yaw()), None),
+                Some(t) => trailer_camera(t, target, scale, view, tilt_pitch(), tilt_yaw()),
+            };
+            cam.tilt = Some(match region {
+                Some(region) => Tilt { cam: tilt, plan: region, cull: region },
+                None => Tilt { cam: tilt, plan: tilt.ground_footprint(view, view), cull: tilt.ground_footprint(view, draw) },
+            });
         }
         cam
     }
@@ -1395,6 +1569,9 @@ impl Camera {
     }
 
     fn draw_fog_flat(&self, game: &Game, shows: &[&Showing]) {
+        if trailer_nofog() {
+            return;
+        }
         // The reveal cells of the places being shown jump to their target: the mask draws their
         // circle, so the fog under it does not fade a second time (`minimap::fog_texture`).
         let settle = shows.iter().filter(|s| s.mask.is_some()).flat_map(|s| s.reveal_cells.iter().map(|&(i, _)| i));
@@ -1458,10 +1635,13 @@ impl Camera {
 
     fn draw_showing<'s>(&self, game: &Game, shows: impl IntoIterator<Item = &'s Showing>, now: f64) {
         let shows: Vec<&'s Showing> = shows.into_iter().collect();
-        in_view(self, |c| ground(c, || c.draw_showing_flat(game, shows, now)));
+        in_view(self, |c| ground(c, || c.draw_showing_flat(game, shows.clone(), now)));
     }
 
     fn draw_showing_flat(&self, game: &Game, shows: Vec<&Showing>, now: f64) {
+        if trailer_nofog() {
+            return;
+        }
         let (tl, br) = self.fog_corners(game);
         for s in shows {
             let Some(mask) = &s.mask else { continue };
@@ -1588,7 +1768,8 @@ fn terrain_quad(game: &Game, layer: &terrain::TerrainLayer, cam: &Camera, mode: 
             frame_probe::terrain(b.x - a.x, b.y - a.y);
         }
         let view = vec4(tl.x, tl.y / rh, br.x, br.y / rh);
-        layer.draw(map.surface_codes(), (map.w as u32, map.h as u32), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(PX, PX * rh), Some((crate::ui::clock::now() * 1000.0) as i64), extend, mode);
+        // The edge's mist is fog: the trailer's no-fog switch leaves the ground going on past the edge.
+        layer.draw(map.surface_codes(), (map.w as u32, map.h as u32), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(PX, PX * rh), Some((crate::ui::clock::now() * 1000.0) as i64), extend && !trailer_nofog(), mode);
     }
 }
 
@@ -1602,7 +1783,10 @@ fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool) {
         return in_view(cam, |c| ground(c, || draw_terrain(game, art, c)));
     };
     super::gpu_probe::timed(|| {
-        let cached = (waits && layer.cache_on() && super::render_cache::target().is_none()).then(|| layer.ground_target(ground_key(game, cam))).flatten();
+        // A bent view (dev-only) draws its ground into its own picture each frame; the cache's
+        // fill would nest inside it.
+        let plain = cam.tilt.is_none_or(|t| t.cam.bend.is_none());
+        let cached = (waits && layer.cache_on() && super::render_cache::target().is_none() && plain).then(|| layer.ground_target(ground_key(game, cam))).flatten();
         match cached {
             Some((rt, fill)) => {
                 if fill {
@@ -2352,8 +2536,9 @@ impl Shade<'_> {
         let world = (foot + cam.origin) / cam.scale;
         let t = cam.grid.tile_at((world.x, world.y));
         let fog = self.fog;
-        // A disabled fog draws nothing (`minimap::draw_fog`), so it darkens nothing.
-        if !fog.enabled || fog.w <= 0 || fog.h <= 0 {
+        // A disabled fog draws nothing (`minimap::draw_fog`), so it darkens nothing; nor does the
+        // trailer's no-fog switch.
+        if !fog.enabled || fog.w <= 0 || fog.h <= 0 || trailer_nofog() {
             return 1.0;
         }
         // The cell whose fog the foot stands on. Past the map's edges the ground is black (the

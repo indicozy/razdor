@@ -22,6 +22,10 @@ pub const FOV_DEG: f32 = 35.0;
 /// How far from the target the ground is looked for, in world units (the far limit of the
 /// footprint, and of the ground the view draws).
 pub const FAR: f32 = 240.0;
+/// The pitch range of a [`TiltCamera::free`] camera (the trailer's, dev-only): from a low chase
+/// view to the plain top-down one (at exactly 90 `look_at` with up = Y is degenerate).
+pub const FREE_PITCH_MIN: f32 = 5.0;
+pub const FREE_PITCH_MAX: f32 = 89.9;
 
 /// The horizontal direction the camera looks in at `yaw_deg`, as a ground vector (world x, z):
 /// north `(0, -1)` at yaw 0, east `(-1, 0)` at 90.
@@ -59,6 +63,11 @@ pub struct TiltCamera {
     /// The yaw in degrees: the turn of the eye around the target from the south (0), toward the
     /// east (positive). Any value; the maths is periodic.
     pub yaw_deg: f32,
+    /// The vertical field of view in degrees ([`FOV_DEG`] unless the camera was made with another).
+    pub fov_deg: f32,
+    /// The bent ground of the trailer's camera (dev-only, `RAZDOR_TRAILER_CAM`); None for the
+    /// player's flat ground.
+    pub bend: Option<Bend>,
 }
 
 impl TiltCamera {
@@ -66,8 +75,29 @@ impl TiltCamera {
     /// ground at the target is drawn `scale` pixels per world unit in x: the same size as the
     /// flat view's cells at that scale. `frame` is the view's rectangle in pixels.
     pub fn new(target: Vec2, scale: f32, frame: Rect, pitch_deg: f32, yaw_deg: f32) -> TiltCamera {
-        let half_fov = (FOV_DEG / 2.0).to_radians();
-        TiltCamera { target, distance: frame.h / 2.0 / (half_fov.tan() * scale), pitch_deg: pitch_deg.clamp(PITCH_MIN, PITCH_MAX), yaw_deg }
+        TiltCamera::free(target, scale, frame, pitch_deg.clamp(PITCH_MIN, PITCH_MAX), yaw_deg, FOV_DEG)
+    }
+
+    /// The camera at any pitch in [`FREE_PITCH_MIN`]..=[`FREE_PITCH_MAX`] (no player limit) and
+    /// the field of view `fov_deg`, fitted to `scale` as [`TiltCamera::new`] is. The trailer's
+    /// camera (`RAZDOR_TRAILER_CAM`, dev-only) is the only user.
+    pub fn free(target: Vec2, scale: f32, frame: Rect, pitch_deg: f32, yaw_deg: f32, fov_deg: f32) -> TiltCamera {
+        let fov_deg = fov_deg.clamp(5.0, 120.0);
+        let half_fov = (fov_deg / 2.0).to_radians();
+        TiltCamera {
+            target,
+            distance: frame.h / 2.0 / (half_fov.tan() * scale),
+            pitch_deg: pitch_deg.clamp(FREE_PITCH_MIN, FREE_PITCH_MAX),
+            yaw_deg,
+            fov_deg,
+            bend: None,
+        }
+    }
+
+    /// Screen pixels per world unit at the target: the scale the target's ground is drawn at for
+    /// this camera's distance (the flat view's `scale` at the fitted distance).
+    pub fn pivot_scale(&self, frame: Rect) -> f32 {
+        frame.h / 2.0 / ((self.fov_deg / 2.0).to_radians().tan() * self.distance)
     }
 
     /// The eye: behind the target as seen along [`forward`] (south of it at yaw 0), and above it.
@@ -95,7 +125,7 @@ impl TiltCamera {
         let (near, far) = (self.distance * 0.01, 4.0 * (self.distance + FAR));
         let eye = self.eye();
         let view = Mat4::look_at_rh(eye, vec3(self.target.x, 0.0, self.target.y), Vec3::Y);
-        Mat4::perspective_rh_gl(FOV_DEG.to_radians(), aspect, near, far) * view
+        Mat4::perspective_rh_gl(self.fov_deg.to_radians(), aspect, near, far) * view
     }
 
     /// The pixel of `p` in `frame`, or None behind the eye.
@@ -181,12 +211,19 @@ pub fn ground_model(origin: Vec2, scale: f32) -> Mat4 {
 /// -sin)`), each over `scale` pixels per world unit. A sprite is then drawn where its foot stands,
 /// upright, at its own size (`size` 1) or larger or smaller about the foot.
 pub fn billboard_model(origin: Vec2, foot: Vec2, scale: f32, pitch_deg: f32, yaw_deg: f32, size: f32) -> Mat4 {
+    let ground = vec3((foot.x + origin.x) / scale, 0.0, (foot.y + origin.y) / scale);
+    billboard_model_at(foot, scale, pitch_deg, yaw_deg, size, ground)
+}
+
+/// [`billboard_model`] with the foot's point given in space: `ground` is where the foot stands
+/// (the flat ground's point, or a point of a [`Bend`] sheet). The sprite keeps the camera's
+/// orientation, so it faces the eye wherever its foot is.
+pub fn billboard_model_at(foot: Vec2, scale: f32, pitch_deg: f32, yaw_deg: f32, size: f32, ground: Vec3) -> Mat4 {
     let (s, c) = pitch_deg.to_radians().sin_cos();
     let (f, r) = (forward(yaw_deg), right(yaw_deg));
     let up = vec3(f.x * s, c, f.y * s);
     let right3 = vec3(r.x, 0.0, r.y);
     let k = size / scale;
-    let ground = vec3((foot.x + origin.x) / scale, 0.0, (foot.y + origin.y) / scale);
     let at = ground - right3 * foot.x * k + up * foot.y * k;
     Mat4::from_cols(right3.extend(0.0) * k, (-up).extend(0.0) * k, Vec4::ZERO, at.extend(1.0))
 }
@@ -199,6 +236,140 @@ pub fn billboard_model(origin: Vec2, foot: Vec2, scale: f32, pitch_deg: f32, yaw
 pub fn billboard_model_about(origin: Vec2, foot: Vec2, base: Vec2, scale: f32, pitch_deg: f32, yaw_deg: f32, size: f32) -> Mat4 {
     let d = (base - foot) * (1.0 / size - 1.0);
     billboard_model(origin, foot, scale, pitch_deg, yaw_deg, size) * Mat4::from_translation(vec3(d.x, d.y, 0.0))
+}
+
+/// [`billboard_model_about`] with the foot's point given in space (see [`billboard_model_at`]).
+pub fn billboard_model_about_at(foot: Vec2, base: Vec2, scale: f32, pitch_deg: f32, yaw_deg: f32, size: f32, ground: Vec3) -> Mat4 {
+    let d = (base - foot) * (1.0 / size - 1.0);
+    billboard_model_at(foot, scale, pitch_deg, yaw_deg, size, ground) * Mat4::from_translation(vec3(d.x, d.y, 0.0))
+}
+
+/// The ground of the trailer's bent view (`RAZDOR_TRAILER_CAM`, dev-only): the flat ground up to
+/// `flat` ahead of the pivot, then a sheet that rolls up along an arc of `radius` until its slope
+/// is `max_deg`, and goes straight on at that slope. Arc length is kept: a step of ground is a
+/// step along the sheet. The pivot is the camera's target; `yaw_deg` turns the sheet with the
+/// camera.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Bend {
+    pub pivot: Vec2,
+    pub yaw_deg: f32,
+    pub flat: f32,
+    pub radius: f32,
+    pub max_deg: f32,
+}
+
+impl Bend {
+    /// The bend with `radius` at least 0.01 world units and `max_deg` within 0..=89.
+    pub fn new(pivot: Vec2, yaw_deg: f32, flat: f32, radius: f32, max_deg: f32) -> Bend {
+        Bend { pivot, yaw_deg, flat: flat.max(0.0), radius: radius.max(0.01), max_deg: max_deg.clamp(0.0, 89.0) }
+    }
+
+    /// The place of ground point `g` on the sheet (height 0 on the flat part).
+    pub fn point(&self, g: Vec2) -> Vec3 {
+        let d = g - self.pivot;
+        let (f, r) = (forward(self.yaw_deg), right(self.yaw_deg));
+        let (u, h) = self.profile(d.dot(f));
+        let l = d.dot(r);
+        vec3(self.pivot.x, 0.0, self.pivot.y) + vec3(f.x, 0.0, f.y) * u + vec3(r.x, 0.0, r.y) * l + Vec3::Y * h
+    }
+
+    /// The profile of the sheet: the distance along the forward direction and the height of the
+    /// point at ground distance `s` ahead of the pivot.
+    pub fn profile(&self, s: f32) -> (f32, f32) {
+        if s <= self.flat {
+            return (s, 0.0);
+        }
+        let (r, amax) = (self.radius, self.max_deg.to_radians());
+        let a = (s - self.flat) / r;
+        if a <= amax {
+            (self.flat + r * a.sin(), r * (1.0 - a.cos()))
+        } else {
+            let e = (a - amax) * r;
+            (self.flat + r * amax.sin() + e * amax.cos(), r * (1.0 - amax.cos()) + e * amax.sin())
+        }
+    }
+
+    /// The ground the sheet covers: the bounding box of the rectangle `width` either side of the
+    /// pivot, `ahead` in front of it and `behind` behind it (along the view's forward and right).
+    pub fn region(&self, width: f32, ahead: f32, behind: f32) -> Rect {
+        let (f, r) = (forward(self.yaw_deg), right(self.yaw_deg));
+        let mut lo = Vec2::splat(f32::MAX);
+        let mut hi = Vec2::splat(f32::MIN);
+        for s in [-behind, ahead] {
+            for l in [-width, width] {
+                let p = self.pivot + f * s + r * l;
+                lo = lo.min(p);
+                hi = hi.max(p);
+            }
+        }
+        Rect::new(lo.x, lo.y, hi.x - lo.x, hi.y - lo.y)
+    }
+}
+
+/// The trailer's camera, parsed from `RAZDOR_TRAILER_CAM` (dev-only, for the trailer's stills):
+/// `key=value` pairs, comma-separated, every key optional. `pitch`, `fov` and `dist` replace the
+/// player's camera; `bend` (degrees, 0 is no bend), `flat`, `radius`, `width`, `ahead` and
+/// `behind` shape the ground ([`Bend`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Trailer {
+    /// The view line below the horizontal, in degrees (5 to 89.9); None: the player's pitch.
+    pub pitch: Option<f32>,
+    /// The vertical field of view in degrees; None: [`FOV_DEG`].
+    pub fov: Option<f32>,
+    /// The eye's distance from the target in world units; None: fitted to the zoom.
+    pub dist: Option<f32>,
+    /// The arc's full angle in degrees; 0 is no bend.
+    pub bend: f32,
+    /// The ground ahead of the pivot that stays flat, in world units.
+    pub flat: f32,
+    /// The arc's radius in world units.
+    pub radius: f32,
+    /// The half-width of the ground drawn across the view, in world units.
+    pub width: f32,
+    /// The ground drawn ahead of the pivot, and behind it, in world units.
+    pub ahead: f32,
+    pub behind: f32,
+}
+
+impl Default for Trailer {
+    fn default() -> Trailer {
+        Trailer { pitch: None, fov: None, dist: None, bend: 0.0, flat: 3.0, radius: 8.0, width: 40.0, ahead: 90.0, behind: 8.0 }
+    }
+}
+
+/// Parses `RAZDOR_TRAILER_CAM` (see [`Trailer`]). An unknown key or a value out of its range is
+/// an error naming the item.
+pub fn parse_trailer(text: &str) -> Result<Trailer, String> {
+    let mut t = Trailer::default();
+    for item in text.split(',').map(str::trim).filter(|i| !i.is_empty()) {
+        let (key, value) = item.split_once('=').ok_or_else(|| format!("`{item}`: not key=value"))?;
+        let key = key.trim();
+        let v: f32 = value.trim().parse().map_err(|_| format!("`{item}`: not a number"))?;
+        let ok = match key {
+            "pitch" => (FREE_PITCH_MIN..=FREE_PITCH_MAX).contains(&v),
+            "fov" => (5.0..=120.0).contains(&v),
+            "dist" => v > 0.0,
+            "bend" => (0.0..=89.0).contains(&v),
+            "flat" | "ahead" | "behind" => v >= 0.0,
+            "radius" | "width" => v > 0.0,
+            _ => return Err(format!("`{key}`: no such key")),
+        };
+        if !ok {
+            return Err(format!("`{item}`: out of range"));
+        }
+        match key {
+            "pitch" => t.pitch = Some(v),
+            "fov" => t.fov = Some(v),
+            "dist" => t.dist = Some(v),
+            "bend" => t.bend = v,
+            "flat" => t.flat = v,
+            "radius" => t.radius = v,
+            "width" => t.width = v,
+            "ahead" => t.ahead = v,
+            _ => t.behind = v,
+        }
+    }
+    Ok(t)
 }
 
 #[cfg(test)]
@@ -532,6 +703,157 @@ mod tests {
             let same = billboard_model_about(origin, foot, foot, SCALE, 55.0, yaw, size);
             let plain = billboard_model(origin, foot, SCALE, 55.0, yaw, size);
             assert!(same.abs_diff_eq(plain, 1e-5), "yaw {yaw}: base == foot is the plain billboard");
+        }
+    }
+
+    fn bend(max_deg: f32) -> Bend {
+        Bend::new(vec2(20.5, 13.25), 0.0, 3.0, 8.0, max_deg)
+    }
+
+    #[test]
+    fn the_bend_is_the_identity_on_the_flat_part() {
+        let b = bend(78.0);
+        for s in [-30.0, -5.0, 0.0, 2.9, 3.0] {
+            let g = b.pivot + forward(0.0) * s + right(0.0) * 4.0;
+            let p = b.point(g);
+            assert!((p - vec3(g.x, 0.0, g.y)).length() < 1e-4, "s {s}: {p:?} vs {g:?}");
+        }
+    }
+
+    #[test]
+    fn the_bend_is_continuous_at_both_joins() {
+        let b = bend(78.0);
+        let eps = 1e-3;
+        let join_flat = b.flat;
+        let join_arc = b.flat + b.radius * 78f32.to_radians();
+        for join in [join_flat, join_arc] {
+            let (lo, hi) = (b.profile(join - eps), b.profile(join + eps));
+            assert!((lo.0 - hi.0).abs() < 0.01 && (lo.1 - hi.1).abs() < 0.01, "join at {join}: {lo:?} {hi:?}");
+        }
+    }
+
+    #[test]
+    fn the_slope_beyond_the_arc_is_the_maximum_angle() {
+        for max_deg in [30.0, 78.0] {
+            let b = bend(max_deg);
+            let (a, c) = (b.profile(60.0), b.profile(80.0));
+            let slope = (c.1 - a.1) / (c.0 - a.0);
+            assert!((slope - max_deg.to_radians().tan()).abs() < 1e-3, "max {max_deg}: slope {slope}");
+        }
+    }
+
+    #[test]
+    fn arc_length_is_kept_along_the_sheet() {
+        // A small ground step gives a sheet step of the same length, flat and on the arc.
+        let b = bend(78.0);
+        for s in [0.0, 5.0, 8.0, 12.0, 30.0] {
+            let step = 0.01;
+            let g = b.pivot + forward(0.0) * s;
+            let next = g + forward(0.0) * step;
+            let d = (b.point(next) - b.point(g)).length();
+            assert!((d - step).abs() < 1e-3, "at {s}: a step of {step} became {d}");
+        }
+    }
+
+    #[test]
+    fn at_zero_degrees_the_bend_is_the_flat_ground_everywhere() {
+        let b = bend(0.0);
+        for s in [-20.0, 0.0, 5.0, 40.0, 150.0] {
+            let g = b.pivot + forward(0.0) * s + right(0.0) * -7.0;
+            let p = b.point(g);
+            assert!((p - vec3(g.x, 0.0, g.y)).length() < 1e-3, "s {s}: {p:?} vs {g:?}");
+        }
+    }
+
+    #[test]
+    fn the_bend_turns_with_the_yaw_and_its_region_contains_the_pivot() {
+        let b = Bend::new(vec2(20.5, 13.25), 90.0, 3.0, 8.0, 78.0);
+        // Within the flat part ahead at yaw 90 (west) the sheet is the ground itself.
+        let g = b.pivot + forward(90.0) * 2.0 + right(90.0) * 3.0;
+        assert!((b.point(g) - vec3(g.x, 0.0, g.y)).length() < 1e-4);
+        // Past the flat part it rises: the point ahead on the arc is above the ground.
+        let far = b.pivot + forward(90.0) * 12.0;
+        assert!(b.point(far).y > 0.5, "{:?}", b.point(far));
+        let region = bend(78.0).region(40.0, 90.0, 8.0);
+        assert!(region.contains(vec2(20.5, 13.25)), "{region:?}");
+        assert!(region.contains(vec2(20.5, 13.25) + forward(0.0) * 89.0), "ahead is inside: {region:?}");
+        assert!(!region.contains(vec2(20.5, 13.25) + forward(0.0) * 95.0), "beyond ahead is outside");
+        // Turned by 90, the region is the same ground rotated: its width is the ahead length.
+        let turned = Bend::new(vec2(20.5, 13.25), 90.0, 3.0, 8.0, 78.0).region(40.0, 90.0, 8.0);
+        assert!((turned.w - 98.0).abs() < 1e-3 && (turned.h - 80.0).abs() < 1e-3, "{turned:?}");
+    }
+
+    #[test]
+    fn a_free_camera_keeps_its_pitch_within_the_free_range_and_its_fov() {
+        let wide = TiltCamera::free(vec2(20.5, 13.25), SCALE, FRAME, 12.0, 0.0, 55.0);
+        assert_eq!(wide.pitch_deg, 12.0, "below the player's limit");
+        assert_eq!(wide.fov_deg, 55.0);
+        assert_eq!(TiltCamera::free(vec2(0.0, 0.0), SCALE, FRAME, 2.0, 0.0, 35.0).pitch_deg, FREE_PITCH_MIN);
+        assert_eq!(TiltCamera::free(vec2(0.0, 0.0), SCALE, FRAME, 90.0, 0.0, 35.0).pitch_deg, FREE_PITCH_MAX);
+        // A wider lens is fitted from a nearer eye, and the player's camera is the 35° free one.
+        assert!(wide.distance < cam(55.0).distance);
+        assert_eq!(cam(55.0).fov_deg, FOV_DEG);
+    }
+
+    #[test]
+    fn the_free_camera_still_centres_its_target_and_pick_undoes_project() {
+        for (pitch, fov) in [(12.0, 55.0), (20.0, 70.0), (89.0, 35.0)] {
+            let c = TiltCamera::free(vec2(20.5, 13.25), SCALE, FRAME, pitch, 0.0, fov);
+            let px = c.project(vec3(c.target.x, 0.0, c.target.y), FRAME).unwrap();
+            assert!(close(px, vec2(640.0, 380.0), 1e-2), "pitch {pitch} fov {fov}: {px:?}");
+            let p = vec2(21.0, 12.0);
+            if let Some(px) = c.project(vec3(p.x, 0.0, p.y), FRAME) {
+                assert!(close(c.pick(px, FRAME).unwrap(), p, 1e-2), "pitch {pitch} fov {fov}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_trailer_keys_parse_and_the_bad_ones_are_named() {
+        let t = parse_trailer("pitch=12,fov=55,dist=14,flat=3,radius=8,bend=78,width=40,ahead=90,behind=8").unwrap();
+        assert_eq!((t.pitch, t.fov, t.dist, t.bend, t.flat, t.radius, t.width, t.ahead, t.behind), (Some(12.0), Some(55.0), Some(14.0), 78.0, 3.0, 8.0, 40.0, 90.0, 8.0));
+        let none = parse_trailer("").unwrap();
+        assert_eq!(none, Trailer::default());
+        assert_eq!(none.bend, 0.0);
+        assert!(parse_trailer("pitch=95").unwrap_err().contains("pitch=95"));
+        assert!(parse_trailer("colour=1").unwrap_err().contains("colour"));
+        assert!(parse_trailer("bend").unwrap_err().contains("key=value"));
+        assert!(parse_trailer("radius=x").unwrap_err().contains("number"));
+        assert!(parse_trailer("radius=0").is_err());
+    }
+
+    #[test]
+    fn a_sprite_on_the_sheet_stands_on_its_point_and_faces_the_eye() {
+        // The foot of a sprite standing on the arc is the sheet's point, and its plane still
+        // faces the eye (the same orientation as on the flat ground).
+        let b = bend(78.0);
+        let pitch = 12.0;
+        let g = b.pivot + forward(0.0) * 13.0;
+        let at = b.point(g);
+        let foot = vec2(0.0, 400.0);
+        let m = billboard_model_at(foot, SCALE, pitch, 0.0, 1.0, at);
+        let stood = m * vec4(foot.x, foot.y, 0.0, 1.0);
+        assert!((stood.truncate() - at).length() < 1e-4, "{stood:?} vs {at:?}");
+        let x = m * vec4(1.0, 0.0, 0.0, 0.0);
+        let up = m * vec4(0.0, -1.0, 0.0, 0.0);
+        let normal = x.truncate().cross(up.truncate()).normalize();
+        let eye = TiltCamera::free(b.pivot, SCALE, FRAME, pitch, 0.0, FOV_DEG).eye();
+        let to_eye = (eye - vec3(b.pivot.x, 0.0, b.pivot.y)).normalize();
+        assert!(normal.dot(to_eye).abs() > 0.999, "normal {normal:?}");
+        // On the flat ground, the same call is the plain billboard.
+        let flat_foot = vec3(foot.x / SCALE, 0.0, foot.y / SCALE);
+        let flat = billboard_model_at(foot, SCALE, pitch, 0.0, 1.0, flat_foot);
+        assert!(flat.abs_diff_eq(billboard_model(vec2(0.0, 0.0), foot, SCALE, pitch, 0.0, 1.0), 1e-5));
+    }
+
+    #[test]
+    fn the_about_at_billboard_is_the_about_billboard_on_the_flat_ground() {
+        let (origin, foot, base) = (vec2(10.0, -4.0), vec2(40.0, 300.0), vec2(40.0, 316.0));
+        for yaw in [0.0, 45.0, 180.0] {
+            let ground = vec3((foot.x + origin.x) / SCALE, 0.0, (foot.y + origin.y) / SCALE);
+            let a = billboard_model_about_at(foot, base, SCALE, 55.0, yaw, 1.5, ground);
+            let b = billboard_model_about(origin, foot, base, SCALE, 55.0, yaw, 1.5);
+            assert!(a.abs_diff_eq(b, 1e-5), "yaw {yaw}");
         }
     }
 }

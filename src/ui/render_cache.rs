@@ -32,8 +32,9 @@ void main() {
 }"#;
 
 razdor::local! {
-    /// The target the 2D space and the 3D views draw into while a picture is filled.
-    static FILLING: std::cell::RefCell<Option<RenderTarget>> = const { std::cell::RefCell::new(None) };
+    /// The target the 2D space and the 3D views draw into while a picture is filled, and the 2D
+    /// space it is filled in (the screen's, for [`fill`]).
+    static FILLING: std::cell::RefCell<Option<(RenderTarget, Rect)>> = const { std::cell::RefCell::new(None) };
     /// The copy composite's material, made once (`None` when the shader does not compile).
     static COPY: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
 }
@@ -61,29 +62,33 @@ fn copy_material() -> Option<Material> {
 /// The target the 3D views draw into (their render pass is its `render_pass`): the target while
 /// a picture is filled, else `None` (the screen).
 pub fn target() -> Option<RenderTarget> {
-    FILLING.with(|f| f.borrow().clone())
+    FILLING.with(|f| f.borrow().as_ref().map(|(rt, _)| rt.clone()))
 }
 
 /// Back to the 2D space: the screen, or the target of the fill in progress.
 pub fn back_to_2d() {
     let filling = FILLING.with(|f| f.borrow().clone());
     match filling {
-        Some(rt) => set_camera(&target_camera(&rt)),
+        Some((rt, space)) => set_camera(&target_camera(&rt, space)),
         None => set_default_camera(),
     }
 }
 
-/// The 2D camera of a target: the screen's own space, drawn into `rt`.
-fn target_camera(rt: &RenderTarget) -> Camera2D {
-    Camera2D {
-        render_target: Some(rt.clone()),
-        ..Camera2D::from_display_rect(Rect::new(0.0, 0.0, screen_width(), screen_height()))
-    }
+/// The 2D camera of a target: the 2D space `space` (the screen's, for a fill of the screen),
+/// drawn into `rt`.
+fn target_camera(rt: &RenderTarget, space: Rect) -> Camera2D {
+    Camera2D { render_target: Some(rt.clone()), ..Camera2D::from_display_rect(space) }
 }
 
 /// Runs `f` with every camera drawing into `rt`; the screen's camera is back after. Used by the
 /// terrain cache too (`terrain`).
 pub fn fill(rt: &RenderTarget, f: impl FnOnce()) {
+    fill_space(rt, Rect::new(0.0, 0.0, screen_width(), screen_height()), f);
+}
+
+/// [`fill`] for a picture of its own 2D space `space` (world pixels of the bent view's ground,
+/// in `rt` at whatever size it has): the 2D cameras map `space` onto the whole target.
+pub fn fill_space(rt: &RenderTarget, space: Rect, f: impl FnOnce()) {
     struct Done;
     impl Drop for Done {
         fn drop(&mut self) {
@@ -91,7 +96,7 @@ pub fn fill(rt: &RenderTarget, f: impl FnOnce()) {
             set_default_camera();
         }
     }
-    FILLING.with(|c| *c.borrow_mut() = Some(rt.clone()));
+    FILLING.with(|c| *c.borrow_mut() = Some((rt.clone(), space)));
     let _done = Done;
     back_to_2d();
     f();
