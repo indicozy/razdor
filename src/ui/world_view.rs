@@ -3831,7 +3831,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     if let Some(casts) = sun {
         let objects: Vec<&Decoration> = map.objects_in_rows(r0 - up, r1 + below).iter().filter(|o| seen(o)).collect();
         let locations: Vec<&Location> = game.world.locations.iter().filter(|l| location_seen(l) && !l.kind.is_bridge()).collect();
-        ground(cam, || shadow::darken(|| draw_sun_shadows(game, art, cam, casts, &objects, &locations)));
+        ground(cam, || draw_sun_shadows(game, art, cam, casts, &objects, &locations));
     }
     // The original (0x4c8864) draws the hills of classes 1-3 in a pass of their own before
     // anything else, so they lie under every tree, mountain, building and army, the ones

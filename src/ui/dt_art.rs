@@ -461,7 +461,8 @@ impl DtArt {
     fn build_shadow_texture(&self) -> Option<Texture2D> {
         let atlas = self.map_atlas()?;
         let (w, h) = (atlas.texture.width() as u32, atlas.texture.height() as u32);
-        let mut rgba = vec![0u8; (w * h * 4) as usize];
+        // White colour, alpha 0: the shadow's colour comes from the vertices (`shadow::strength_colour`).
+        let mut rgba: Vec<u8> = [255u8, 255, 255, 0].repeat((w * h) as usize);
         for s in &self.objects().sprites {
             let Some(r) = atlas.rect_of(s.section, s.cat, s.idx) else { continue };
             let mask = super::shadow::silhouette(&s.image);

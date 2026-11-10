@@ -163,6 +163,14 @@ fn sun_bearing(hour: f32) -> [f32; 2] {
     [a.cos(), a.sin()]
 }
 
+/// The shadow sun's elevation at `hour` (radians): a stylised arc, 12° at dawn and dusk (and the night),
+/// 40° at noon, so the shadows are long in the morning and afternoon and short at midday. Separate from
+/// the tint's curve (`sun_elevation`), which stays the relief's.
+fn shadow_elevation(hour: f32) -> f32 {
+    let day = (std::f32::consts::PI * (hour - 6.0) / 12.0).sin().max(0.0);
+    (12.0 + 28.0 * day).to_radians()
+}
+
 /// The shadow length per unit of height at an elevation: its cotangent, clamped to the cap.
 fn cast_len(elev: f32) -> f32 {
     (1.0 / elev.tan()).clamp(LEN_MIN, LEN_MAX)
@@ -183,7 +191,7 @@ pub fn casts_at(hour: f32) -> Casts {
     let toward = sun_bearing(hour);
     let sun_cast = Cast {
         dir: [-toward[0], -toward[1]],
-        len: cast_len(sun_elevation(e)),
+        len: cast_len(shadow_elevation(hour)),
         alpha: SUN_ALPHA * smoothstep(-0.12, 0.1, e),
     };
     let moon_cast = Cast {
@@ -201,7 +209,8 @@ pub fn sun_relief(hour: f32) -> Relief {
     let base = relief_at(hour);
     let (e, _, _) = sun(hour);
     let day = smoothstep(-0.5, 0.0, e);
-    let elev = lerp(MOON_ELEV, sun_elevation(e), day);
+    // The light's elevation is the shadows' (`shadow_elevation`), so the lit sprites agree with their shadows.
+    let elev = lerp(MOON_ELEV, shadow_elevation(hour), day);
     // The bearing turns from the moon's to the sun's the short way round (an angle, not a blend of the
     // two vectors: those pass near zero at the dawn's crossing and would jump).
     let (moon, toward) = (MOON_BEARING[1].atan2(MOON_BEARING[0]), sun_bearing(hour));
@@ -607,6 +616,18 @@ mod tests {
             assert!((LEN_MIN..=LEN_MAX).contains(&len), "hour {h}: length {len}");
         }
         assert!((casts_at(6.0).sun.len - LEN_MAX).abs() < 1e-5, "the dawn is capped at {LEN_MAX}");
+    }
+
+    #[test]
+    fn the_shadow_sun_is_stylised_12_degrees_at_dawn_and_40_at_noon() {
+        assert!((shadow_elevation(12.0).to_degrees() - 40.0).abs() < 1e-3, "noon {}", shadow_elevation(12.0).to_degrees());
+        assert!((shadow_elevation(6.0).to_degrees() - 12.0).abs() < 1e-3, "dawn");
+        assert!((shadow_elevation(18.0).to_degrees() - 12.0).abs() < 1e-3, "dusk");
+        // Lengths: 10:00 about 1.4, noon about 1.2, and the dawn and dusk hit the cap.
+        assert!((casts_at(10.0).sun.len - 1.36).abs() < 0.05, "10:00 length {}", casts_at(10.0).sun.len);
+        assert!((casts_at(12.0).sun.len - 1.19).abs() < 0.05, "noon length {}", casts_at(12.0).sun.len);
+        assert!((casts_at(7.0).sun.len - LEN_MAX).abs() < 1e-5, "7:00 length {}", casts_at(7.0).sun.len);
+        assert!((casts_at(17.0).sun.len - LEN_MAX).abs() < 1e-5, "17:00 length {}", casts_at(17.0).sun.len);
     }
 
     #[test]

@@ -486,15 +486,15 @@ the 2.5D ground is lit without the pitch's foreshortening.
 «Нарисованные» is the default and keeps the picture as above). «От солнца» (`ShadowMode::Sun`, `RAZDOR_SHADOWS=sun`
 for snapshots) removes the painted shadows (`ShadowK` 0 in the lit material) and casts real-time silhouettes instead:
 `daylight::casts_at(hour)` gives the sun's shadow (its bearing away from the sun, east at 6:00, south at noon, west at
-18:00; length `1/tan(elevation)` on the relief's curve, clamped to 0.25–2.6; alpha 0.45 by day, fading through the dusk)
-and the moon's (fixed in the south-west, alpha 0.12 from 20:00 to dawn). `daylight::sun_relief` lights the map in the
+18:00; length `1/tan(elevation)` on a stylised shadow elevation (`shadow_elevation`: 12° at dawn and dusk, 40° at noon, so the dawn and dusk shadows hit the 2.6 cap; the relief's light uses the same elevation), clamped to 0.25–2.6; alpha 0.6 by day, fading through the dusk)
+and the moon's (fixed in the south-west, alpha 0.15 from 20:00 to dawn). `daylight::sun_relief` lights the map in the
 world's axes (the ground keeps them; `world_view::lit_axes` turns the sprites' light back into the screen's). In
 `world_view::draw_world_in`, before the hills, `draw_sun_shadows` draws each caster in view on the ground: a building
 with cards casts one quad per card from the card's own foot, anything else one picture from its foot. `shadow::Projection::point`
 maps a picture pixel to the ground (its x stays, it moves along the bearing by its height above the foot times the length);
 the quad's texture is the picture's blurred silhouette in the shadow atlas (`DtArt::shadow_texture`, built on the first
-sun frame: the map atlas's layout, RGBA, the silhouette in alpha, since macroquad's public API has no R8). Each quad is black
-with the alpha `light · fog visibility of the foot's cell · (½ on water)`, drawn with the ground's fog and the standing
+sun frame: the map atlas's layout, RGBA, the silhouette in alpha, since macroquad's public API has no R8). Each quad is the cool
+colour `shadow::TINT` with the alpha `light · fog visibility of the foot's cell · (½ on water)`, drawn with the default pipeline (the texture's colour is white, the vertex colour carries the tint), drawn with the ground's fog and the standing
 sprites over it. Figures keep their painted shadows. Lighting off or Painted: nothing of this runs.
 **Mist** (the setting «Туман вместо черноты», `Settings::map_mist`, off by default; `display::follow_settings`
 pushes it with `mist::set_pref`, `RAZDOR_MIST=1` for snapshots): `world_view::draw_fog_flat` draws the same fog
