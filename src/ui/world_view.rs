@@ -1163,8 +1163,8 @@ fn sprite_visibility(dark: f32) -> f32 {
 
 /// Draws a standing sprite whose foot is at `foot` (a point of the 2D space) as a billboard
 /// ([`view25::billboard_model_about`]); under a flat camera, as drawn. The sprite turns about
-/// `foot` and grows about `base` (its row on the ground: [`object_base`], [`building_base`]; the
-/// foot itself for the figures), so a grown picture keeps its base where it stands. `vis` is its
+/// `foot` and grows about `base`, which is the foot for every standing sprite (decorations,
+/// buildings and figures alike: a grown picture keeps its ground centre where it stands). `vis` is its
 /// visibility ([`Shade::at`]): the sprite fades into the fog on its foot's cell (`faded`), and is
 /// not drawn at all at 0.
 ///
@@ -1753,53 +1753,63 @@ pub(super) fn bridge_offset(picture: (u8, u8)) -> (f32, f32) {
 /// loader 0x4ce30c puts the quad of classes 1–8 (hills, mountains, rocks) at `(48 − w, 33 − h)`
 /// from the cell's top-left, its bottom-right corner 16 px right of and 11 px below the cell's,
 /// and that of the plants at `(32 − w, 22 − h)`, less half a pixel; the renderer 0x4c8864 then
-/// moves the plants of classes 9–11 by their jitter ([`razdor::rules::rng::plant_offset`]).
+/// moves the plants of classes 9–11 by their jitter ([`plant_shift`]).
 fn object_sprite_origin(o: &Decoration, w: f32, h: f32, cam: &Camera) -> Vec2 {
     let (x, y) = cam.grid.center(o.tile);
     let corner = cam.to_screen((x + 0.5, y + cam.grid.row_height() / 2.0));
     let (dx, dy) = match o.class {
         1..=8 => (16.0, 11.0),
+        _ => plant_shift(o),
+    };
+    corner + vec2(dx - w - 0.5, dy - h - 0.5) * (cam.scale / PX)
+}
+
+/// The jitter of a plant's picture in pixels (classes 9–11, [`razdor::rules::rng::plant_offset`]),
+/// nothing for the other classes.
+fn plant_shift(o: &Decoration) -> (f32, f32) {
+    match o.class {
         object_class::TREES..=object_class::THICKET => {
             let (dx, dy) = razdor::rules::rng::plant_offset(o.tile.0, o.tile.1, u16::from(o.class) << 8 | u16::from(o.sprite));
             (dx as f32, dy as f32)
         }
         _ => (0.0, 0.0),
-    };
-    corner + vec2(dx - w - 0.5, dy - h - 0.5) * (cam.scale / PX)
+    }
 }
 
-/// The foot of a map object's sprite in the 2D space: the centre of its cell. A billboard turns
-/// about its foot, so the foot is the point the sprite stands on; a corner would make the picture
-/// swing across the ground when the view turns. The sort key uses it too ([`sprite_key`]).
+/// The foot of a map object's sprite in the 2D space: the centre of the ground it stands on. A
+/// billboard turns about its foot, so the foot must be the point the picture is on the ground at:
+/// a hill or mountain stands on the centre of the cells it covers (`object_cells`, `object_side`
+/// cells square up and left of its own; its picture is 32·(side + 1) px wide, centred on them); a
+/// plant on its cell's centre moved by its jitter, as its picture is ([`plant_shift`]); anything
+/// else on its cell's centre. The sort key uses it too ([`sprite_key`]).
 fn object_foot(o: &Decoration, cam: &Camera) -> Vec2 {
-    cam.cell_centre(o.tile)
-}
-
-/// The base a map object's sprite grows about: its foot's x on the bottom edge of its cell. A
-/// grown picture (the sprites' size) keeps its base on the cell's row, centred over the spot,
-/// instead of growing about the centre and sliding down past the cell.
-fn object_base(o: &Decoration, cam: &Camera) -> Vec2 {
-    let (x, y) = cam.grid.center(o.tile);
-    vec2(object_foot(o, cam).x, cam.to_screen((x, y + cam.grid.row_height() / 2.0)).y)
+    match o.class {
+        1..=8 => {
+            let (sum, n) = razdor::rules::map::object_cells(o).fold((Vec2::ZERO, 0u32), |(s, n), t| (s + cam.cell_centre(t), n + 1));
+            if n == 0 {
+                return cam.cell_centre(o.tile);
+            }
+            sum / n as f32
+        }
+        _ => {
+            let (dx, dy) = plant_shift(o);
+            cam.cell_centre(o.tile) + vec2(dx, dy) * (cam.scale / PX)
+        }
+    }
 }
 
 /// The foot of a building's sprite in the 2D space: the centre of its footprint (the mean of its
 /// cells' centres), the point it stands on. A billboard turns about its foot, so a corner would
 /// make a big building slide across the ground when the view turns; the sort key uses it too
-/// ([`sprite_key`]). Without cells (none in a real map) the anchor's centre.
+/// ([`sprite_key`]). Without cells (none in a real map) the anchor's centre. The picture's bottom
+/// edge lies half the footprint's height below this point, on the footprint's south edge, for
+/// every picture of the install (tested over all of them in `tilt_tests`).
 fn building_foot(l: &Location, cam: &Camera) -> Vec2 {
     let (sum, n) = l.cells().fold((Vec2::ZERO, 0u32), |(s, n), t| (s + cam.cell_centre(t), n + 1));
     if n == 0 {
         return cam.cell_centre(l.anchor);
     }
     sum / n as f32
-}
-
-/// The base a building's sprite grows about: its foot's x on the bottom edge of its anchor cell
-/// (the sprite's bottom-right cell), so a grown picture keeps its base on that row.
-fn building_base(l: &Location, cam: &Camera) -> Vec2 {
-    let (x, y) = cam.grid.center(l.anchor);
-    vec2(building_foot(l, cam).x, cam.to_screen((x, y + cam.grid.row_height() / 2.0)).y)
 }
 
 /// The part `src` of `texture` drawn at `at`, `size` big, its top edge moved `lean` px right.
@@ -2423,7 +2433,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
         if seen(o) {
             if hill(o) {
                 if !tilted {
-                    standing(cam, object_foot(o, cam), object_base(o, cam), shade_of(object_foot(o, cam)), || draw_object(o, art, cam));
+                    standing(cam, object_foot(o, cam), object_foot(o, cam), shade_of(object_foot(o, cam)), || draw_object(o, art, cam));
                 }
             } else {
                 items.push((sprite_key(cam, o.tile, object_foot(o, cam), object_layer(o.class)), Drawable::Object(*o)));
@@ -2484,7 +2494,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
         }
         for o in map.objects_in_rows(r0 - up, r1 + below) {
             if seen(o) && hill(o) {
-                standing(cam, object_foot(o, cam), object_base(o, cam), shade_of(object_foot(o, cam)), || draw_object(o, art, cam));
+                standing(cam, object_foot(o, cam), object_foot(o, cam), shade_of(object_foot(o, cam)), || draw_object(o, art, cam));
             }
         }
     }
@@ -2530,7 +2540,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     super::sharp::session(|| {
         for d in items.iter().map(|(_, d)| d) {
             match d {
-                Drawable::Object(o) => standing(cam, object_foot(o, cam), object_base(o, cam), shade_of(object_foot(o, cam)), || draw_object(o, art, cam)),
+                Drawable::Object(o) => standing(cam, object_foot(o, cam), object_foot(o, cam), shade_of(object_foot(o, cam)), || draw_object(o, art, cam)),
                 Drawable::Building(i) => {
                     let l = &game.world.locations[*i];
                     let outlined = hover.is_some_and(|h| h.building == Some(*i));
@@ -2538,7 +2548,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                         // A bridge lies on the ground (Razdor's), so it is drawn in the ground pass.
                         ground(cam, || draw_building(l, art, cam, outlined));
                     } else {
-                        standing(cam, building_foot(l, cam), building_base(l, cam), shade_of(building_foot(l, cam)), || draw_building(l, art, cam, outlined));
+                        standing(cam, building_foot(l, cam), building_foot(l, cam), shade_of(building_foot(l, cam)), || draw_building(l, art, cam, outlined));
                     }
                 }
                 Drawable::Army(i) => {
@@ -5169,16 +5179,139 @@ mod tilt_tests {
         }
     }
 
-    /// A decoration stands on its cell's centre, the point its sprite turns about.
+    /// A plant stands on its cell's centre moved by its jitter, as its picture is, and grows about
+    /// that foot (its base is its foot).
     #[test]
-    fn a_decoration_stands_on_its_cell_s_centre() {
+    fn a_plant_stands_on_its_cell_moved_by_its_jitter() {
         let game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
         let m = &game.world.map;
         let t = (m.w / 2 + 1, m.h / 2 - 1);
         let o = Decoration { tile: t, class: object_class::TREES, sprite: 0 };
+        let (dx, dy) = razdor::rules::rng::plant_offset(t.0, t.1, u16::from(o.class) << 8);
         for cam in [camera(&game, None), camera(&game, Some((55.0, 30.0)))] {
-            let want = cam.to_screen(m.grid.center(t));
-            assert!((object_foot(&o, &cam) - want).length() < 1e-3);
+            let k = cam.scale / PX;
+            let want = cam.to_screen(m.grid.center(t)) + vec2(dx as f32, dy as f32) * k;
+            assert!((object_foot(&o, &cam) - want).length() < 1e-3, "foot {:?} want {want:?}", object_foot(&o, &cam));
+        }
+    }
+
+    /// A hill or mountain stands on the centre of the cells it covers, `object_side` square up and
+    /// left of its own cell, not on that cell.
+    #[test]
+    fn a_hill_stands_on_the_centre_of_the_cells_it_covers() {
+        let game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        let m = &game.world.map;
+        let t = (m.w / 2, m.h / 2);
+        for (sprite, side) in [(10u8, 1.0f32), (20, 2.0), (50, 5.0)] {
+            let o = Decoration { tile: t, class: 1, sprite };
+            let cam = camera(&game, None);
+            let f = side as i32;
+            let cells: Vec<Vec2> = (0..f).flat_map(|j| (0..f).map(move |i| (t.0 - i, t.1 - j))).map(|c| cam.cell_centre(c)).collect();
+            let want = cells.iter().fold(Vec2::ZERO, |s, &c| s + c) / cells.len() as f32;
+            assert!((object_foot(&o, &cam) - want).length() < 1e-3, "side {side}: foot {:?} want {want:?}", object_foot(&o, &cam));
+        }
+    }
+
+    /// The turning drift of every standing sprite's ground centre, at every turn of the view, for
+    /// every decoration class and sprite and every building picture the install has (and synthetic
+    /// ones without an install: each class with sides 1–6, every footprint size up to 9×9). The
+    /// ground centre is a hill's covered cells, a plant's cell moved by its jitter, a building's
+    /// footprint centre, anything else its cell's centre. The picture's point there must stay on
+    /// that ground point (under 2 px) at yaws 0..315 by 45, with the foot and the base both there.
+    #[test]
+    fn every_standing_sprite_keeps_its_ground_centre_at_every_turn() {
+        let game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        let m = &game.world.map;
+        let (ax, ay) = (m.w / 2, m.h / 2);
+        let mut decos: Vec<Decoration> = Vec::new();
+        let mut pictures: Vec<(u8, u8)> = Vec::new();
+        if let Ok(install) = razdor::dt::install::DtInstall::from_env() {
+            if let Ok(objs) = install.map_objects() {
+                for s in &objs.sprites {
+                    if s.section == 0 {
+                        decos.push(Decoration { tile: (ax, ay), class: s.cat as u8, sprite: s.idx as u8 });
+                    } else if s.section == 1 && !matches!(s.cat, 13 | 14) {
+                        // Bridges lie on the ground (their own pass), not standing.
+                        pictures.push((s.cat as u8, s.idx as u8));
+                    }
+                }
+            }
+        } else {
+            eprintln!("RAZDOR_DT_DIR unset: the synthetic cases only");
+        }
+        for class in [0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] {
+            for side in 1..=6u8 {
+                decos.push(Decoration { tile: (ax, ay), class, sprite: side * 10 });
+            }
+            for sprite in [0u8, 1, 5, 9] {
+                decos.push(Decoration { tile: (ax, ay), class, sprite });
+            }
+        }
+        // Buildings: every footprint of up to 9×9 (wide ones too), for every picture.
+        let sizes: Vec<(i32, i32)> = (1..=9).flat_map(|w| (1..=9).map(move |h| (w, h))).collect();
+        let mut turns = 0;
+        let mut worst: std::collections::BTreeMap<String, f32> = Default::default();
+        let mut check = |kind: String, name: String, foot: Vec2, base: Vec2, truth: Vec2, cam: &Camera| {
+            let d = drift(cam, foot, base, truth);
+            assert!((foot - truth).length() < 1e-2, "{name}: foot {foot:?} is not its ground centre {truth:?}");
+            let w = worst.entry(kind).or_insert(0.0);
+            *w = w.max(d);
+            assert!(d < 2.0, "{name}: drift {d:.2} px at a turn");
+            turns += 1;
+        };
+        for o in &decos {
+            for i in 0..8 {
+                let cam = camera(&game, Some((view25::PITCH_DEFAULT, i as f32 * 45.0)));
+                let k = cam.scale / PX;
+                let truth = match o.class {
+                    1..=8 => {
+                        // A hill of side 0 (no such sprite in the data) stands on its own cell.
+                        let f = razdor::rules::map::object_side(o.class, o.sprite);
+                        let cells: Vec<Vec2> = (0..f).flat_map(|j| (0..f).map(move |i| (o.tile.0 - i, o.tile.1 - j))).map(|c| cam.cell_centre(c)).collect();
+                        if cells.is_empty() { cam.cell_centre(o.tile) } else { cells.iter().fold(Vec2::ZERO, |s, &c| s + c) / cells.len() as f32 }
+                    }
+                    9..=11 => {
+                        let (dx, dy) = razdor::rules::rng::plant_offset(o.tile.0, o.tile.1, u16::from(o.class) << 8 | u16::from(o.sprite));
+                        cam.cell_centre(o.tile) + vec2(dx as f32, dy as f32) * k
+                    }
+                    _ => cam.cell_centre(o.tile),
+                };
+                let kind = match o.class {
+                    1..=8 => format!("hill class {} side {}", o.class, razdor::rules::map::object_side(o.class, o.sprite)),
+                    _ => format!("decoration class {}", o.class),
+                };
+                check(kind, format!("decoration class {} sprite {} yaw {}", o.class, o.sprite, i * 45), object_foot(o, &cam), object_foot(o, &cam), truth, &cam);
+            }
+        }
+        for &(t, v) in &pictures {
+            for &(sx, sy) in &sizes {
+                let l = Location { anchor: (ax, ay), size: (sx, sy), picture: (t, v), ..game.world.locations[0].clone() };
+                for i in 0..8 {
+                    let cam = camera(&game, Some((view25::PITCH_DEFAULT, i as f32 * 45.0)));
+                    let rows = sy + i32::from(sx > sy);
+                    let cells: Vec<Vec2> = (0..rows).flat_map(|j| (0..sx).map(move |i| (ax - i, ay - j))).map(|c| cam.cell_centre(c)).collect();
+                    let truth = cells.iter().fold(Vec2::ZERO, |s, &c| s + c) / cells.len() as f32;
+                    check(format!("building picture {t}/{v}"), format!("building picture {t}/{v} size {sx}x{sy} yaw {}", i * 45), building_foot(&l, &cam), building_foot(&l, &cam), truth, &cam);
+                }
+            }
+        }
+        for (kind, d) in &worst {
+            eprintln!("DRIFT {kind}: worst {d:.3} px");
+        }
+        eprintln!("standing sprites: {turns} turns checked");
+    }
+
+    /// The drift in px of a standing sprite's ground point `point` (2D): the screen position of the
+    /// picture's point at `point` (grown at the sprites' size about `foot`, `base`) against the
+    /// screen position of the world ground under `point`.
+    fn drift(cam: &Camera, foot: Vec2, base: Vec2, point: Vec2) -> f32 {
+        let t = cam.tilt.expect("a 2.5D camera");
+        let m = view25::billboard_model_about(cam.origin, foot, base, cam.scale, t.cam.pitch_deg, t.cam.yaw_deg, DEFAULT_SPRITE_SIZE);
+        let on_picture = t.cam.project(m.transform_point3(vec3(point.x, point.y, 0.0)), cam.view);
+        let on_ground = t.cam.project(vec3((point.x + cam.origin.x) / cam.scale, 0.0, (point.y + cam.origin.y) / cam.scale), cam.view);
+        match (on_picture, on_ground) {
+            (Some(a), Some(b)) => (a - b).length(),
+            _ => f32::INFINITY,
         }
     }
 

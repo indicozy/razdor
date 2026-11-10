@@ -270,8 +270,15 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   view (`View3d`: depth off, no viewport) on the cull footprint (`tilted_space`). `ground` lays that
   space on the ground for the terrain, the hills, marks, the route, bridges and the fog;
   `standing` makes each sprite a billboard through its foot (`view25::billboard_model`). A sprite's
-  foot is its cell's centre (a building: the centre of its footprint), the point it turns about and
-  sorts by (`sprite_key`), not the cell's corner, where the picture hangs. With the
+  foot is the centre of the ground it stands on, the point it turns about and sorts by (`sprite_key`),
+  not the cell's corner, where the picture hangs: a building the centre of its footprint (`building_foot`);
+  a hill or mountain the centre of the cells it covers (`object_cells`: `object_side` cells square up
+  and left, `object_foot`); a plant its cell's centre moved by its jitter, as its picture is
+  (`plant_shift`); anything else its cell's centre. The sprite grows about that same foot (its base is
+  the foot), so a grown picture keeps its ground centre in place: at the sprites' size 1.5 a picture's
+  bottom edge moves down by half its footprint's offset from the foot (a grown castle's front comes lower
+  at yaw 0). Tests: `every_standing_sprite_keeps_its_ground_centre_at_every_turn` (every decoration class,
+  sprite and building picture of the install, drift under 2 px at 8 yaws). With the
   setting off, `in_view`, `ground` and `standing` only call their closures: the flat view is the same
   code path.
 - Picking: `map_pointer` is the ground under the pointer (NaN over the sky), `tile_under_pixel` the
