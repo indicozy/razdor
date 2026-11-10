@@ -1070,13 +1070,16 @@ fn ground(game: &Game, art: Option<&super::dt_art::DtArt>, surface_color: fn(u8)
     })
 }
 
-/// The map as the minimap shows it (its ground and its fog as they stand), drawn into `dest` with no
-/// frame and no symbols: the «Итоги» page's picture (`ui::summary`).
-pub fn picture(game: &Game, art: Option<&super::dt_art::DtArt>, surface_color: fn(u8) -> Color, dest: Rect) {
+/// The part of the map `cells` = (x0, y0, x1, y1), end exclusive, as the minimap shows it (its
+/// ground and its fog as they stand), drawn into `dest` with no frame and no symbols: the «Итоги»
+/// page's picture (`ui::summary`). `dest` is the crop's own size: the caller letterboxes it.
+pub fn picture(game: &Game, art: Option<&super::dt_art::DtArt>, surface_color: fn(u8) -> Color, dest: Rect, cells: (i32, i32, i32, i32)) {
+    let (x0, y0, x1, y1) = cells;
+    let src = Rect::new(x0 as f32, y0 as f32, (x1 - x0).max(1) as f32, (y1 - y0).max(1) as f32);
     let tex = ground(game, art, surface_color);
-    draw_texture_ex(&tex, dest.x, dest.y, WHITE, DrawTextureParams { dest_size: Some(vec2(dest.w, dest.h)), ..Default::default() });
+    draw_texture_ex(&tex, dest.x, dest.y, WHITE, DrawTextureParams { dest_size: Some(vec2(dest.w, dest.h)), source: Some(src), ..Default::default() });
     let dark = fog_texture(&game.fog, &game.unshown_cells(), game.tile(), std::iter::empty());
-    draw_texture_ex(&dark, dest.x, dest.y, WHITE, DrawTextureParams { dest_size: Some(vec2(dest.w, dest.h)), ..Default::default() });
+    draw_texture_ex(&dark, dest.x, dest.y, WHITE, DrawTextureParams { dest_size: Some(vec2(dest.w, dest.h)), source: Some(src), ..Default::default() });
 }
 
 /// Makes the minimap's pictures ahead, when the game starts ([`ground`], [`fog_texture`]): the

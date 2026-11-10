@@ -1,9 +1,9 @@
 //! The «Итоги» page (Razdor's, the chronicle's summary; `rules::chronicle::Summary`): the map as
-//! the hero explored it, his route on it (cool at the start, warm at the end), the battles and the
-//! captures marked where they happened, the highlights and the totals. It opens after a map ends
-//! (a victory, a defeat or the hero's fall, unless the setting «Итоги после карты» is off), before
-//! the next screen, and from the chronicle tab («Летопись», the whole story so far). Every part
-//! fits one screen at the desktop's sizes and on a phone held either way (`layout`, `fit_size`).
+//! the hero explored it, cropped to the land he knows, his route on it (cool at the start, warm at
+//! the end), the battles and captures marked where they happened, the highlights and the totals. It
+//! opens after a map ends (a victory, a defeat or the hero's fall, unless the setting «Итоги после
+//! карты» is off), before the next screen, and from the chronicle tab («Летопись», the whole story
+//! so far). It is a window in the game's own frame, centred; on a phone it fills the screen.
 
 use macroquad::prelude::*;
 
@@ -15,7 +15,8 @@ use razdor::rules::map::Tile;
 use super::assets::Assets;
 use super::chrome;
 use super::display;
-use super::items_view::HeroView;
+use super::dt_font::{with_original_face, Face};
+use super::items_view::{diary_body_size, diary_reader_body_size, HeroView};
 use super::minimap;
 use super::widgets::*;
 use super::window_layout;
@@ -32,11 +33,13 @@ pub enum After {
     Defeat,
 }
 
-/// The page on screen: what it shows and where it goes.
+/// The page on screen: what it shows, where it goes, and the map's cells it crops to (the land
+/// explored, see [`explored_box`]).
 #[derive(Debug)]
 pub struct View {
     pub after: After,
     pub summary: Summary,
+    pub cells: (i32, i32, i32, i32),
 }
 
 /// What a frame of the page leaves to the app.
@@ -51,7 +54,9 @@ pub enum Exit {
 pub fn open(game: &Game, after: After, died: bool) -> Option<Screen> {
     let summary = game.chronicle.summary(from_chapter(game, after), game.clock.total_minutes() as u64, died)?;
     minimap::snap_fog();
-    Some(Screen::Summary(Box::new(View { after, summary })))
+    let map = &game.world.map;
+    let cells = explored_box(map.w, map.h, |t| game.fog.explored(t), 3);
+    Some(Screen::Summary(Box::new(View { after, summary, cells })))
 }
 
 /// The first chapter the totals cover: the story so far from the chronicle tab, the map just played
@@ -63,49 +68,87 @@ fn from_chapter(game: &Game, after: After) -> usize {
     }
 }
 
-/// The page's boxes in screen px: the title, the map, the highlights and the totals beside or
-/// under it, and the button row at the foot.
+/// The box of the explored cells of a `w` × `h` map, `margin` cells wider on each side and kept
+/// inside the map (x0, y0, x1, y1, end exclusive). With no explored cell, the whole map.
+pub fn explored_box(w: i32, h: i32, explored: impl Fn(Tile) -> bool, margin: i32) -> (i32, i32, i32, i32) {
+    let (mut x0, mut y0, mut x1, mut y1) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+    for y in 0..h {
+        for x in 0..w {
+            if explored((x, y)) {
+                x0 = x0.min(x);
+                y0 = y0.min(y);
+                x1 = x1.max(x);
+                y1 = y1.max(y);
+            }
+        }
+    }
+    if x0 > x1 {
+        return (0, 0, w, h);
+    }
+    ((x0 - margin).max(0), (y0 - margin).max(0), (x1 + 1 + margin).min(w), (y1 + 1 + margin).min(h))
+}
+
+/// The window's box on a screen `sw` × `sh`: centred at the game window's proportions (about 4:3),
+/// the screen less a margin when it is smaller; a phone's is the whole screen less its safe area.
+pub fn window_rect(sw: f32, sh: f32, phone: bool, k: f32, safe: display::SafeArea) -> Rect {
+    if phone {
+        let m = 6.0 * display::dp_px().unwrap_or(1.0);
+        return Rect::new(safe.left + m, safe.top + m, (sw - safe.left - safe.right - 2.0 * m).max(0.0), (sh - safe.top - safe.bottom - 2.0 * m).max(0.0));
+    }
+    let w = (680.0 * k).min(sw - 16.0).max(0.0);
+    let h = (500.0 * k).min(sh - 16.0).max(0.0);
+    Rect::new((sw - w) / 2.0, (sh - h) / 2.0, w, h)
+}
+
+/// The page's parts inside the window's inner box: the map's pane (a square's box, the picture
+/// letterboxed in it), the highlights and the totals table, and the button at the foot.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Layout {
-    pub title: Rect,
-    pub map: Rect,
+pub struct Page {
+    pub pane: Rect,
     pub highlights: Rect,
     pub totals: Rect,
     pub button: Rect,
 }
 
-/// The page's layout on a screen `w` × `h` px, `k` px per unit: beside the map when held
-/// sideways (`upright` false), under it when upright. `reserve`: the heights the highlights and the
-/// totals need at the page's text size (upright only). Upright, the totals sit at the foot, the
-/// highlights above them, and the map (a square) takes what the text does not need. Sideways the
-/// map is a square at the left and the text is the column beside it.
-pub fn layout(w: f32, h: f32, upright: bool, k: f32, reserve: (f32, f32)) -> Layout {
-    let (highlights_h, totals_h) = reserve;
-    let m = 10.0 * k;
-    let title_h = 36.0 * k;
-    let button_h = 40.0 * k;
-    let top = m + title_h + 6.0 * k;
-    let bottom = h - m - button_h - m;
-    let button = Rect::new(w / 2.0 - 90.0 * k, h - m - button_h, 180.0 * k, button_h);
-    let title = Rect::new(m, m, w - 2.0 * m, title_h);
+/// The page's layout in the inner box `inner` at a pad `pad`. The button row is `button_h` tall at
+/// the foot. `reserve`: the heights the highlights and the totals need (the totals' table is always
+/// the foot of the text column; upright, the highlights' need takes its room under the map).
+pub fn layout(inner: Rect, upright: bool, pad: f32, button_h: f32, reserve: (f32, f32)) -> Page {
+    let (hl_h, tot_h) = reserve;
+    let button = Rect::new(inner.center().x - 80.0 * pad / 8.0, inner.bottom() - pad - button_h, 160.0 * pad / 8.0, button_h);
+    let body_top = inner.y + pad;
+    let body_bottom = button.y - pad;
+    let avail = (body_bottom - body_top).max(0.0);
     if upright {
-        let avail = (bottom - top).max(0.0);
-        let totals = Rect::new(m, bottom - totals_h, w - 2.0 * m, totals_h.min(avail));
-        let room = (avail - highlights_h - totals_h - 3.0 * m).max(avail * 0.3);
-        let side = (w - 2.0 * m).min(room).max(0.0);
-        let map = Rect::new((w - side) / 2.0, top, side, side);
-        let y = map.bottom() + m;
-        let highlights = Rect::new(m, y, w - 2.0 * m, (totals.y - m - y).max(0.0));
-        Layout { title, map, highlights, totals, button }
+        let room = (avail - hl_h - tot_h - 2.0 * pad).max(avail * 0.3);
+        let side = (inner.w - 2.0 * pad).min(room).max(0.0);
+        let pane = Rect::new(inner.center().x - side / 2.0, body_top, side, side);
+        let totals = Rect::new(inner.x + pad, body_bottom - tot_h, inner.w - 2.0 * pad, tot_h);
+        let highlights = Rect::new(inner.x + pad, pane.bottom() + pad, inner.w - 2.0 * pad, (totals.y - pad - (pane.bottom() + pad)).max(0.0));
+        Page { pane, highlights, totals, button }
     } else {
-        let side = (bottom - top).min(w * 0.5 - m).max(0.0);
-        let map = Rect::new(m, top, side, side);
-        let x = map.right() + m;
-        let col = (w - x - m).max(0.0);
-        let highlights = Rect::new(x, top, col, ((bottom - top) * 0.55).max(0.0));
-        let totals = Rect::new(x, highlights.bottom() + m, col, (bottom - highlights.bottom() - m).max(0.0));
-        Layout { title, map, highlights, totals, button }
+        // Sideways the map and the totals share the left column (the map square at its top, the
+        // table under it); the highlights take the whole right column.
+        let th = reserve.1;
+        let ph = (avail - th - pad).max(0.0);
+        let pane = Rect::new(inner.x + pad, body_top, ph, ph);
+        let totals = Rect::new(inner.x + pad, pane.bottom() + pad, pane.w.max(inner.w * 0.36), th);
+        let x = totals.right() + pad;
+        let col = (inner.right() - pad - x).max(0.0);
+        let highlights = Rect::new(x, body_top, col, avail);
+        Page { pane, highlights, totals, button }
     }
+}
+
+/// The largest square-proportioned box of `w`:`h` (the picture's aspect) fitting inside `pane`,
+/// centred.
+pub fn letterbox(pane: Rect, aspect_w: f32, aspect_h: f32) -> Rect {
+    if pane.w <= 0.0 || pane.h <= 0.0 || aspect_w <= 0.0 || aspect_h <= 0.0 {
+        return pane;
+    }
+    let a = aspect_w / aspect_h;
+    let (w, h) = if pane.w / pane.h > a { (pane.h * a, pane.h) } else { (pane.w, pane.w / a) };
+    Rect::new(pane.x + (pane.w - w) / 2.0, pane.y + (pane.h - h) / 2.0, w, h)
 }
 
 /// The first of `sizes` (largest first) at which `fits` holds; the smallest when none does.
@@ -119,25 +162,6 @@ pub fn route_colour(i: usize, n: usize) -> Color {
     let (cool, warm) = ([70.0, 160.0, 255.0], [255.0, 110.0, 40.0]);
     let c = |j: usize| (cool[j] + (warm[j] - cool[j]) * t) / 255.0;
     Color::new(c(0), c(1), c(2), 1.0)
-}
-
-/// The height the totals need at text size `s` in two columns (the phone's table), the heading too.
-fn totals_need(rows: usize, s: f32) -> f32 {
-    2.1 * s + (rows as f32 / 2.0).ceil() * s * 1.9
-}
-
-/// The totals' columns at text size `s` in a box `h` high: one column when the rows fit under the
-/// heading, else two (the phone held upright). None when even two do not fit.
-fn totals_columns(rows: usize, s: f32, h: f32) -> Option<usize> {
-    let line = s * 1.9;
-    let head = s * 2.1;
-    if head + rows as f32 * line <= h {
-        Some(1)
-    } else if head + (rows as f32 / 2.0).ceil() * line <= h {
-        Some(2)
-    } else {
-        None
-    }
 }
 
 /// The totals' rows: label and value, in the order the page lists them.
@@ -155,50 +179,81 @@ fn total_rows(s: &Summary) -> [(&'static str, u32); 8] {
     ]
 }
 
-/// Draws the page and takes its input: its button, Enter or Esc leave it. Returns where it goes.
+/// The height the totals' table needs at the body size `s`: its heading (at the title size `h`,
+/// as drawn) and four rows.
+fn totals_need(s: f32, h: f32) -> f32 {
+    h * 1.8 + 4.0 * s * 1.5
+}
+
+/// Wrapped lines of `sentences` at width `w` in `face` at size `s`.
+fn wrapped(sentences: &[String], w: f32, s: f32, face: Face) -> Vec<String> {
+    with_original_face(face, || sentences.iter().flat_map(|t| wrap(t, w, s)).collect())
+}
+
+/// The height the highlights need at size `s` in width `w`: their heading (at the title size `h`),
+/// their lines and the gaps between them.
+fn highlights_need(sentences: &[String], w: f32, s: f32, h: f32, face: Face) -> f32 {
+    h * 1.8 + wrapped(sentences, w, s, face).len() as f32 * s * 1.3 + sentences.len() as f32 * s * 0.6
+}
+
+/// Draws the page and takes its input: its button, Enter, Esc or the window's cross leave it.
+/// Returns where it goes.
 pub fn frame(view: &mut View, game: &Game, assets: &Assets) -> Option<Exit> {
     let dp = display::dp_px();
+    let phone = dp.is_some();
     let _scale = display::enter_window_scale(dp);
     clear_background(Color::from_rgba(20, 18, 16, 255));
     let k = chrome::k();
-    let g = display::button_grow();
     let (sw, sh) = (screen_width(), screen_height());
-    // The text (the highlights, then the totals in two columns, one size for both) and the layout
-    // that holds it: the totals' height is reserved at the page's size, the map takes the rest.
+    let win = window_rect(sw, sh, phone, k, display::safe_area());
+    let title = tr("Summary");
+    let (inner, closed) = chrome::window(win, title, chrome::Skin::Marble, true);
+
+    // The text: the body size of the diary's own entries (`diary_body_size`, the desktop's and the
+    // phone's), the title of the map on top.
+    let ts = display::text_for(k, crate::ui::dialog::TEXT_REF);
+    // The phone's full-size body (the diary's reader, 100 % of the message size: the phone's list
+    // is 0.8 of it, too small for a page that is read whole).
+    let body = if phone { diary_reader_body_size(ts) } else { diary_body_size(false, ts) };
+    // The body face: the diary's body on the desktop; on a phone the message face, whose native
+    // size is the full one (the bitmap body face draws a phone's text at about 13 sp).
+    let face = if phone { Face::Subtitle } else { Face::Body };
+    let heading = super::dt_font::sheet_size(Face::Title, ts);
+    let pad = 8.0 * k;
+    let button_h = 36.0 * k * display::button_grow();
+    let upright = phone && window_layout::portrait();
     let highlights = razdor::rules::chronicle_text::highlight_lines(game, &view.summary);
     let rows = total_rows(&view.summary);
-    let base = 14.0 * k * g;
-    let sizes = [base, base * 0.92, base * 0.85, base * 0.78];
-    let upright = dp.is_some() && window_layout::portrait();
-    let highlight_need = |s: f32, w: f32| {
-        let lines: usize = highlights.iter().map(|h| wrap(h, w, s).len()).sum();
-        lines as f32 * s * 1.3 + highlights.len() as f32 * s * 0.5 + s * 1.6
-    };
-    // Upright, the text at the page's size is reserved first (the map takes what is left).
-    let reserve = if upright { (highlight_need(base, sw - 20.0 * k), totals_need(rows.len(), base)) } else { (0.0, totals_need(rows.len(), base)) };
-    let lay = layout(sw, sh, upright, k, reserve);
-    let size = fit_size(&sizes, |s| highlight_need(s, lay.highlights.w) <= lay.highlights.h && totals_columns(rows.len(), s, lay.totals.h).is_some());
-    let columns = totals_columns(rows.len(), size, lay.totals.h).unwrap_or(2);
+    // Upright, the highlights' need is reserved under the map before the map takes the rest.
+    let hl_reserve = if upright { highlights_need(&highlights, inner.w - 2.0 * pad, body, heading, face) } else { 0.0 };
+    let page = layout(inner, upright, pad, button_h, (hl_reserve, totals_need(body, heading)));
+    let size = fit_size(&[body, body * 0.92, body * 0.85], |s| {
+        highlights_need(&highlights, page.highlights.w, s, heading, face) <= page.highlights.h && totals_need(s, heading) <= page.totals.h
+    });
 
-    let title = tr("Summary");
-    let subtitle = view.summary.title.clone();
-    let title_size = (18.0 * k * g).round();
-    chrome::shadow_centered(title, lay.title.x + lay.title.w / 2.0, lay.title.y + lay.title.h * 0.42, title_size, ACCENT);
-    if !subtitle.is_empty() {
-        text_centered(&subtitle, lay.title.x + lay.title.w / 2.0, lay.title.y + lay.title.h * 0.92, (13.0 * k * g).round(), DIM);
-    }
+    // The map: the land explored, cropped (`view.cells`), letterboxed in the pane on the inset.
+    let (x0, y0, x1, y1) = view.cells;
+    let (cw, ch) = ((x1 - x0).max(1) as f32, (y1 - y0).max(1) as f32);
+    let pic = letterbox(page.pane, cw, ch);
+    chrome::text_box_base(page.pane);
+    draw_map(game, assets, &view.summary, view.cells, pic, k);
+    chrome::silver_frame(page.pane, k.max(1.0));
 
-    draw_map(game, assets, &view.summary, lay.map, k);
-    draw_highlights(&highlights, lay.highlights, size, k);
-    draw_totals(&rows, lay.totals, size, columns);
+    // The highlights under a heading, then the totals table under its own.
+    let hl = page.highlights;
+    with_original_face(Face::Title, || chrome::shadow_text(tr("Highlights"), hl.x, hl.y + heading, heading, ACCENT));
+    draw_wrapped(&highlights, hl.x, hl.y + heading * 1.8, hl.w, size, face);
+    let tot = page.totals;
+    with_original_face(Face::Title, || chrome::shadow_text(tr("Totals"), tot.x, tot.y + heading, heading, ACCENT));
+    draw_totals(&rows, tot.x, tot.y + heading * 1.8, tot.w, size, face);
 
-    // The button: Close from the chronicle, Next after a map (the next map or the main menu).
     let label = match view.after {
         After::Diary(_) => tr("Close"),
         After::Victory | After::Defeat => tr("Next"),
     };
-    let pressed = button(lay.button.x, lay.button.y, lay.button.w, lay.button.h, label, true);
-    if !(pressed || key(KeyCode::Enter) || key(KeyCode::Escape)) {
+    let b = page.button;
+    let pressed = button(b.x, b.y, b.w, b.h, label, true);
+    if !(pressed || closed || key(KeyCode::Enter) || key(KeyCode::Escape)) {
         return None;
     }
     Some(match view.after {
@@ -208,103 +263,134 @@ pub fn frame(view: &mut View, game: &Game, assets: &Assets) -> Option<Exit> {
     })
 }
 
-/// The highlights: a heading, then each sentence wrapped to the box.
-fn draw_highlights(lines: &[String], r: Rect, size: f32, k: f32) {
-    chrome::shadow_text(tr("Highlights"), r.x, r.y + size, size * 1.1, ACCENT);
-    let mut y = r.y + size * 2.1;
-    for sentence in lines {
-        for line in wrap(sentence, r.w, size) {
-            text(&line, r.x, y, size, INK);
-            y += size * 1.3;
+/// The sentences as paragraphs of the body face at size `s`, one line each, from `y` down.
+fn draw_wrapped(sentences: &[String], x: f32, y: f32, w: f32, s: f32, face: Face) {
+    let mut y = y;
+    for sentence in sentences {
+        for line in wrapped(std::slice::from_ref(sentence), w, s, face) {
+            with_original_face(face, || chrome::shadow_text(&line, x, y, s, INK));
+            y += s * 1.3;
         }
-        y += size * 0.5 + k;
+        y += s * 0.6;
     }
 }
 
-/// The totals under a heading, in `columns` columns of label and value (the value at the column's
-/// right, with a gap before the next column).
-fn draw_totals(rows: &[(&str, u32)], r: Rect, size: f32, columns: usize) {
-    chrome::shadow_text(tr("Totals"), r.x, r.y + size, size * 1.1, ACCENT);
-    let per_column = rows.len().div_ceil(columns.max(1));
-    let col_w = r.w / columns.max(1) as f32;
+/// The totals as a two-column table on the text grid: each row's label at the left of its column,
+/// its number at the column's right, both in the body size.
+fn draw_totals(rows: &[(&str, u32)], x: f32, y: f32, w: f32, s: f32, face: Face) {
+    let per_column = rows.len().div_ceil(2);
+    let col_w = w / 2.0;
     for (i, (label, value)) in rows.iter().enumerate() {
         let (c, n) = (i / per_column, i % per_column);
-        let x = r.x + c as f32 * col_w;
-        let y = r.y + size * 2.1 + n as f32 * size * 1.9;
-        text(label, x, y, size, DIM);
+        let cx = x + c as f32 * col_w;
+        let cy = y + n as f32 * s * 1.5;
         let v = value.to_string();
-        let w = measure(&v, size).width;
-        text(&v, x + col_w - w - 16.0 * size / 14.0, y, size, INK);
+        with_original_face(face, || {
+            chrome::shadow_text(label, cx, cy, s, DIM);
+            let vw = measure(&v, s).width;
+            // The number sits a gap (a tenth of the column) short of the column's right edge.
+            chrome::shadow_text(&v, cx + col_w - vw - col_w * 0.1, cy, s, INK);
+        });
     }
 }
 
-/// The map: its picture (ground and fog as they stand), the route and the marks, in `r`.
-fn draw_map(game: &Game, assets: &Assets, s: &Summary, r: Rect, k: f32) {
-    if r.w <= 0.0 || r.h <= 0.0 {
+/// The map's cropped picture in `pic` (the letterboxed box), the route and the marks over it. A cell
+/// outside the crop is not drawn.
+fn draw_map(game: &Game, assets: &Assets, s: &Summary, cells: (i32, i32, i32, i32), pic: Rect, k: f32) {
+    if pic.w <= 0.0 || pic.h <= 0.0 {
         return;
     }
-    draw_rectangle(r.x, r.y, r.w, r.h, BLACK);
-    minimap::picture(game, assets.dt.as_ref(), super::world_view::surface_color, r);
-    let map = &game.world.map;
-    let (kx, ky) = (r.w / map.w.max(1) as f32, r.h / map.h.max(1) as f32);
-    let at = |t: Tile| vec2(r.x + (t.0 as f32 + 0.5) * kx, r.y + (t.1 as f32 + 0.5) * ky);
-    // A cell off the map is not drawn: the route and the marks stay inside the picture.
-    let on_map = |t: Tile| t.0 >= 0 && t.1 >= 0 && t.0 < map.w && t.1 < map.h;
+    let (x0, y0, x1, y1) = cells;
+    let (cw, ch) = ((x1 - x0).max(1) as f32, (y1 - y0).max(1) as f32);
+    draw_rectangle(pic.x, pic.y, pic.w, pic.h, BLACK);
+    minimap::picture(game, assets.dt.as_ref(), super::world_view::surface_color, pic, cells);
+    let (kx, ky) = (pic.w / cw, pic.h / ch);
+    let at = |t: Tile| vec2(pic.x + (t.0 - x0) as f32 * kx + kx / 2.0, pic.y + (t.1 - y0) as f32 * ky + ky / 2.0);
+    let inside = |t: Tile| t.0 >= x0 && t.1 >= y0 && t.0 < x1 && t.1 < y1;
     let n = s.route.len();
-    for (i, pair) in s.route.windows(2).enumerate().filter(|(_, p)| on_map(p[0]) && on_map(p[1])) {
+    let width = (2.5 * k).max(2.0);
+    for (i, pair) in s.route.windows(2).enumerate().filter(|(_, p)| inside(p[0]) && inside(p[1])) {
         let (a, b) = (at(pair[0]), at(pair[1]));
-        draw_line(a.x, a.y, b.x, b.y, 2.5 * k, route_colour(i, n));
+        draw_line(a.x, a.y, b.x, b.y, width, route_colour(i, n));
     }
-    let marks = s.marks.iter().filter(|m| !matches!(m, Mark::Battle { cell, .. } if !on_map(*cell)));
+    let marks = s.marks.iter().filter(|m| !matches!(m, Mark::Battle { cell, .. } if !inside(*cell)));
     for mark in marks {
         match *mark {
             Mark::Battle { cell, won } => {
                 let c = at(cell);
-                let (arm, col) = (6.0 * k, if won { Color::new(0.92, 0.92, 0.92, 1.0) } else { Color::new(0.92, 0.22, 0.18, 1.0) });
-                draw_line(c.x - arm, c.y - arm, c.x + arm, c.y + arm, 3.0 * k, BLACK);
-                draw_line(c.x + arm, c.y - arm, c.x - arm, c.y + arm, 3.0 * k, BLACK);
-                draw_line(c.x - arm, c.y - arm, c.x + arm, c.y + arm, 1.6 * k, col);
-                draw_line(c.x + arm, c.y - arm, c.x - arm, c.y + arm, 1.6 * k, col);
+                let arm = (kx.min(ky) * 1.1).max(7.0 * k);
+                let col = if won { Color::new(0.94, 0.94, 0.94, 1.0) } else { Color::new(0.92, 0.22, 0.18, 1.0) };
+                draw_line(c.x - arm, c.y - arm, c.x + arm, c.y + arm, 4.0 * k, BLACK);
+                draw_line(c.x + arm, c.y - arm, c.x - arm, c.y + arm, 4.0 * k, BLACK);
+                draw_line(c.x - arm, c.y - arm, c.x + arm, c.y + arm, 2.4 * k, col);
+                draw_line(c.x + arm, c.y - arm, c.x - arm, c.y + arm, 2.4 * k, col);
             }
             Mark::Capture { location } => {
                 let Some(l) = game.world.locations.iter().find(|l| l.id == location) else { continue };
+                if !inside(l.tile) {
+                    continue;
+                }
                 let c = at(l.tile);
                 let gold = Color::new(0.95, 0.75, 0.25, 1.0);
-                draw_line(c.x, c.y - 11.0 * k, c.x, c.y + 3.0 * k, 1.5 * k, BLACK);
-                draw_triangle(vec2(c.x, c.y - 11.0 * k), vec2(c.x + 9.0 * k, c.y - 8.0 * k), vec2(c.x, c.y - 5.0 * k), gold);
+                let h = (kx.min(ky) * 2.2).max(12.0 * k);
+                draw_line(c.x, c.y - h, c.x, c.y + h * 0.3, 2.0 * k, BLACK);
+                draw_triangle(vec2(c.x, c.y - h), vec2(c.x + h * 0.8, c.y - h * 0.7), vec2(c.x, c.y - h * 0.4), gold);
             }
         }
     }
     if s.died {
-        if let Some(&last) = s.route.last().filter(|&&t| on_map(t)) {
+        if let Some(&last) = s.route.last().filter(|&&t| inside(t)) {
             let c = at(last);
-            draw_circle(c.x, c.y, 6.5 * k, Color::new(0.94, 0.93, 0.9, 1.0));
-            draw_circle(c.x - 2.5 * k, c.y - 1.0 * k, 1.8 * k, BLACK);
-            draw_circle(c.x + 2.5 * k, c.y - 1.0 * k, 1.8 * k, BLACK);
-            draw_rectangle(c.x - 2.5 * k, c.y + 3.0 * k, 5.0 * k, 2.0 * k, BLACK);
+            let r = (kx.min(ky) * 1.1).max(7.0 * k);
+            draw_circle(c.x, c.y, r, Color::new(0.94, 0.93, 0.9, 1.0));
+            draw_circle(c.x - r * 0.4, c.y - r * 0.15, r * 0.25, BLACK);
+            draw_circle(c.x + r * 0.4, c.y - r * 0.15, r * 0.25, BLACK);
+            draw_rectangle(c.x - r * 0.4, c.y + r * 0.35, r * 0.8, r * 0.3, BLACK);
         }
     }
-    draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0 * k, Color::new(0.62, 0.64, 0.62, 1.0));
+    draw_rectangle_lines(pic.x, pic.y, pic.w, pic.h, 1.0 * k.max(1.0), Color::new(0.62, 0.64, 0.62, 1.0));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// The page's boxes never overlap and stay on the screen, at the desktop's sizes and on phones
-    /// held either way (the scale of each: the fit at 800×600 and 1280×800, a phone's dp).
+    /// The page's parts stay inside the window's inner box and do not overlap, at the desktop's sizes
+    /// and on phones held either way (the window's inner box at the scale of each).
     #[test]
-    fn the_page_fits_its_screen_at_every_size() {
-        for (w, h, upright, k) in [(800.0, 600.0, false, 0.8), (1280.0, 800.0, false, 1.0), (1920.0, 1080.0, false, 1.4), (393.0, 873.0, true, 1.0), (873.0, 393.0, false, 1.0)] {
-            let l = layout(w, h, upright, k, (60.0 * k, super::totals_need(8, 14.0 * k)));
-            for r in [l.title, l.map, l.highlights, l.totals, l.button] {
-                assert!(r.x >= 0.0 && r.y >= 0.0 && r.right() <= w + 0.01 && r.bottom() <= h + 0.01, "{r:?} leaves {w}x{h}");
+    fn the_page_fits_its_window_at_every_size() {
+        for (w, h, upright, k) in [(800.0f32, 600.0f32, false, 0.8f32), (1280.0, 800.0, false, 1.0), (1920.0, 1080.0, false, 1.4), (393.0, 873.0, true, 1.0), (873.0, 393.0, false, 1.0)] {
+            let win = window_rect(w, h, upright || w < h, k, display::SafeArea::default());
+            let inner = Rect::new(win.x + 10.0 * k, win.y + 30.0 * k, win.w - 20.0 * k, win.h - 40.0 * k);
+            let body = 14.0 * k;
+            let l = layout(inner, upright, 8.0 * k, 36.0 * k, (60.0 * k, totals_need(body, body * 1.3)));
+            for r in [l.pane, l.highlights, l.totals, l.button] {
+                assert!(r.x >= inner.x - 0.01 && r.y >= inner.y - 0.01 && r.right() <= inner.right() + 0.01 && r.bottom() <= inner.bottom() + 0.01, "{r:?} leaves {inner:?} at {w}x{h}");
             }
-            assert!(l.map.bottom() <= l.button.y + 0.01 || l.map.x >= l.button.right() || l.map.right() <= l.button.x, "the map runs into the button");
-            assert!(l.highlights.h > 40.0 * k, "{w}x{h}: the highlights get {}", l.highlights.h);
-            assert!(l.totals.h > 60.0 * k, "{w}x{h}: the totals get {}", l.totals.h);
             assert!(l.highlights.intersect(l.totals).is_none(), "the highlights and the totals overlap at {w}x{h}");
+            assert!(l.totals.h >= totals_need(body, body * 1.3) - 0.01, "the totals table gets its height at {w}x{h}");
         }
+    }
+
+    #[test]
+    fn the_map_is_cropped_to_the_explored_land_with_a_margin() {
+        // A 100 x 80 map with the land explored in 40..=49 x 20..=29.
+        let explored = |t: Tile| (40..=49).contains(&t.0) && (20..=29).contains(&t.1);
+        assert_eq!(explored_box(100, 80, explored, 3), (37, 17, 53, 33));
+        // At the map's edge the margin stops at the edge.
+        assert_eq!(explored_box(100, 80, |t| t == (0, 0), 3), (0, 0, 4, 4));
+        // Nothing explored: the whole map.
+        assert_eq!(explored_box(100, 80, |_| false, 3), (0, 0, 100, 80));
+    }
+
+    #[test]
+    fn the_picture_letterboxes_inside_its_pane_and_keeps_its_aspect() {
+        let pane = Rect::new(0.0, 0.0, 200.0, 100.0);
+        let wide = letterbox(pane, 40.0, 20.0);
+        assert!((wide.w / wide.h - 2.0).abs() < 1e-4 && wide.w <= 200.0 && wide.h <= 100.0);
+        assert!((wide.x - 0.0).abs() < 1e-4 && (wide.y - 0.0).abs() < 1e-4, "2:1 fills the 2:1 pane");
+        let tall = letterbox(pane, 10.0, 20.0);
+        assert!((tall.h - 100.0).abs() < 1e-4 && (tall.x - 75.0).abs() < 1e-4, "a tall crop is centred: {tall:?}");
     }
 
     #[test]

@@ -35,10 +35,11 @@ pub const KEYS: &[&str] = &[
     "unknown",
     "Yes",
     "No",
-    "Biggest battle, day {day}: {line}",
-    "Most hired at once, day {day}: {line}",
-    "Richest moment, day {day}: {line}",
-    "Longest walk in one day, day {day}: {steps} cells.",
+    "Biggest battle — day {day}: against {foe}, {result} (losses {own} : {theirs})",
+    "Biggest battle — day {day}: {result} (losses {own} : {theirs})",
+    "Most hired at once — {count} {unit} (day {day})",
+    "Richest moment — {gold} (day {day})",
+    "Longest walk — {steps} cells (day {day})",
     "Day {day}",
 ];
 
@@ -113,19 +114,30 @@ pub fn highlight_lines(game: &Game, s: &Summary) -> Vec<String> {
     let h = &s.highlights;
     let mut out = Vec::new();
     let day = |e: &Entry| game.chronicle.day_of(e.at_minutes);
-    let named = |e: &Entry| body(game, e).0;
     if let Some(e) = &h.biggest_battle {
-        out.push(trf!("Biggest battle, day {day}: {line}", day = day(e), line = line_of(e, &named(e))));
+        if let EntryKind::Battle { foe, won, own_losses, foe_losses, .. } = e.kind {
+            let result = if won { tr("won") } else { tr("lost") };
+            let (own, theirs, day) = (own_losses, foe_losses, day(e));
+            out.push(match foe.and_then(|f| foe_name(game, f)) {
+                Some(foe) => trf!("Biggest battle — day {day}: against {foe}, {result} (losses {own} : {theirs})", day = day, foe = foe, result = result, own = own, theirs = theirs),
+                None => trf!("Biggest battle — day {day}: {result} (losses {own} : {theirs})", day = day, result = result, own = own, theirs = theirs),
+            });
+        }
     }
     if let Some(e) = &h.most_hired {
-        out.push(trf!("Most hired at once, day {day}: {line}", day = day(e), line = line_of(e, &named(e))));
+        if let EntryKind::Hired { unit, count } = e.kind {
+            let (unit, count, day) = (unit_name(game, unit.0), count, day(e));
+            out.push(trf!("Most hired at once — {count} {unit} (day {day})", count = count, unit = unit, day = day));
+        }
     }
     if let Some(e) = &h.richest {
-        out.push(trf!("Richest moment, day {day}: {line}", day = day(e), line = line_of(e, &named(e))));
+        if let EntryKind::Noon { gold, .. } = e.kind {
+            out.push(trf!("Richest moment — {gold} (day {day})", gold = gold, day = day(e)));
+        }
     }
     if let Some((index, steps)) = h.longest_walk {
         let day = game.chronicle.day_of(index * MINUTES_PER_DAY);
-        out.push(trf!("Longest walk in one day, day {day}: {steps} cells.", day = day, steps = steps));
+        out.push(trf!("Longest walk — {steps} cells (day {day})", steps = steps, day = day));
     }
     out
 }
@@ -241,9 +253,9 @@ mod tests {
         let s = g.chronicle.summary(0, 10_000, false).expect("a chapter");
         let lines = highlight_lines(&g, &s);
         assert_eq!(lines.len(), 3, "{lines:?}");
-        assert!(lines[0].starts_with("Biggest battle, day 1: 02:00. Battle: won."), "{lines:?}");
-        assert!(lines[1].starts_with("Most hired at once, day 1: 06:00."), "{lines:?}");
-        assert!(lines[2].starts_with("Richest moment, day 1: 15:00."), "{lines:?}");
+        assert_eq!(lines[0], "Biggest battle — day 1: won (losses 3 : 5)", "{lines:?}");
+        assert!(lines[1].starts_with("Most hired at once — 3 ") && lines[1].ends_with(" (day 1)"), "{lines:?}");
+        assert_eq!(lines[2], "Richest moment — 900 (day 1)", "{lines:?}");
     }
 
     #[test]

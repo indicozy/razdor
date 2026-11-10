@@ -1680,7 +1680,7 @@ const DIARY_PHONE_BODY: f32 = 0.8;
 /// players' request: the phone's diary text is too small): there the body is
 /// `DIARY_PHONE_BODY` of the message windows' Benguiat text (`Face::Subtitle`,
 /// `dialog::event_layout`), so it grows with «Размер текста» like they do.
-fn diary_body_size(phone: bool, ts: f32) -> f32 {
+pub(super) fn diary_body_size(phone: bool, ts: f32) -> f32 {
     use super::dt_font::{sheet_size, Face};
     if phone {
         DIARY_PHONE_BODY * sheet_size(Face::Subtitle, ts)
@@ -1691,7 +1691,7 @@ fn diary_body_size(phone: bool, ts: f32) -> f32 {
 
 /// The phone's full-screen diary reader («Развернуть») keeps the message windows' size
 /// (`Face::Subtitle`), not the smaller hero-window body (`diary_body_size`).
-fn diary_reader_body_size(ts: f32) -> f32 {
+pub(super) fn diary_reader_body_size(ts: f32) -> f32 {
     use super::dt_font::{sheet_size, Face};
     sheet_size(Face::Subtitle, ts)
 }
