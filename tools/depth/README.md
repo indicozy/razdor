@@ -121,3 +121,32 @@ with this checkpoint.
 - `tris`: triangles over `verts` (indices into this card's vertices), flattened.
 - Cards are back to front (foot y ascending). Sprites with one region have no entry, unless the
   bends pass cuts them (its cards may overlap across a cut, see above).
+
+## The built-in model file (Depth Anything V2 Small)
+
+The engine's own model (`src/depth`, feature `depth-model`) is V2 Small, Apache-2.0 (the model
+card of the ONNX repo says so). The file the engine loads is made from the ONNX export, once, by
+`fix_onnx.py`; it is not in git. The steps, with the hashes that the release must match:
+
+1. The source: `onnx-community/depth-anything-v2-small` at commit
+   `4472b7362082ad9968fee890ca0f1e5aca36b93d`, file `onnx/model_fp16.onnx` (49,642,442 bytes,
+   sha256 `2df6223f206b5164e21f664ace61dabeb9bb6a49b8b5a3e00510b4807d0f5b04`):
+
+   ```sh
+   curl -L -o model_fp16.onnx https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/4472b7362082ad9968fee890ca0f1e5aca36b93d/onnx/model_fp16.onnx
+   sha256sum model_fp16.onnx
+   ```
+
+2. The shape fix (shape only: the weights stay fp16, the engine upcasts them when it loads the
+   file). Needs the `onnx` package (1.23.2 gave the hash below):
+
+   ```sh
+   python3 tools/depth/fix_onnx.py model_fp16.onnx depth-anything-v2-small-fp16-266.onnx --size 266
+   ```
+
+   Output: 49,562,985 bytes, sha256 `897f1b8788fdab97f0e75155e4fdc9a8e7605734f1cd31469a4ca6fb02ea8e74`.
+   Another `onnx` version may write other bytes; then the release's hash is the one to keep.
+
+The engine loads the file with tract 0.23 (rustc 1.91), in fp32 after the upcast (99 MB of
+weights in memory while loaded). The input is 1x3x266x266; the output is `[1, 266, 266]`, higher
+= closer.

@@ -182,3 +182,100 @@ numbers).
 - PyTorch reference and comparison: `razdor-scratch/atmo-model/spike/parity/ref.py` and
   `compare.py`.
 - Nothing from the game is in the repo. The sprites used are the spike's own scratch copies.
+
+## 9. Core landed (2026-11-10, `src/depth`, no UI, no download)
+
+The engine core is on branch `atmo-model`: the toolchain (commit `ece9ab2a`) and the depth module
+(`src/depth/`: `model.rs`, `cut.rs`, `cache.rs`, `parity.rs`; feature `depth-model`, in `default`).
+
+**Toolchain and crates.** `rust-toolchain.toml` and the release workflow's `rustup target add`
+lines pin rustc 1.91.1 (the latest 1.91 patch). Clippy on 1.91 flagged two lints in
+`rules/ai.rs` (allowed on the two loops, with the reason) and a doubled `#[allow]` in
+`ui/building_view.rs` (merged). New crates, all pure Rust:
+
+| crate | version | licence | use |
+|---|---|---|---|
+| `tract-onnx` | 0.23.10 (`default-features = false`) | MIT OR Apache-2.0 | the ONNX runtime |
+| `imageproc` | 0.27.0 (`default-features = false`, MSRV 1.87) | MIT | contours (Suzuki-Abe) and DP |
+| `earcutr` | 0.5.0 | ISC | triangulation (port of mapbox earcut) |
+| `image` | 0.25 (`default-features = false`) | MIT OR Apache-2.0 | CatmullRom resize, GrayImage (already in the tree through imageproc) |
+| `half` | 2.7 | MIT OR Apache-2.0 | fp16 to fp32 at load (already in the tree through tract) |
+
+`tract-data` 0.23.10 needs `parking_lot >=0.12.3, <0.14`; the resolver picked 0.13.0, whose
+rust-version is 1.95 (and it pulls `lock_api` 0.5, rust-version 1.95). `Cargo.lock` pins
+`parking_lot` to 0.12.5 (rust-version 1.71), so the tree builds on 1.91. The spike built on stable
+1.99 and did not see this.
+
+**Model file.** `tools/depth/fix_onnx.py` (shape only) makes the file; its output is byte-identical
+to the spike's `fp16_266.onnx`:
+`/home/indicozy/.cache/razdor-scratch/atmo-model/model/depth-anything-v2-small-fp16-266.onnx`,
+49,562,985 bytes, sha256 `897f1b8788fdab97f0e75155e4fdc9a8e7605734f1cd31469a4ca6fb02ea8e74`.
+The source is `onnx-community/depth-anything-v2-small` at commit `4472b736…`, `onnx/model_fp16.onnx`,
+sha256 `2df6223f…`. The steps are in `tools/depth/README.md`.
+
+**Correction to §2.** The upcast file (`fp16up_266.onnx`) is 98,984,953 bytes, not 49.6 MB: the
+spike's upcast stored fp32 weights in the file. The engine now keeps the file fp16 and upcasts the
+initializers, Constant values and Cast targets in memory when it loads it (`upcast_fp16` in
+`model.rs`, unit-tested), so the download is the 50 MB file. Runtime memory is the fp32 99 MB.
+
+**Port.** `cut.rs` follows `cut_sprites.py`'s plain pass: opaque at alpha >= 204, skip under 200,
+normalise, union-find at 0.06, the small-region merge, the 8-region cap with the non-touching
+fallback, feet with occlusion and the ground fit, outlines dilated 1 px, simplified (DP 1.0),
+triangulated with holes. Two deviations from the library, both found by the tests:
+- imageproc's `approximate_polygon_dp` treats its input as an open curve; a closed outline is split
+  at its farthest point first (OpenCV's way), and the outline is reduced to its corners first
+  (`CHAIN_APPROX_SIMPLE`, which the script uses for plain cards).
+- imageproc's tracer mislabels a foreground that touches the image edge (the outline comes out as a
+  hole with no parent, and the card is lost). The mask is traced with a 1 px background frame.
+Ties in the Python set walks are resolved by the smallest pair or region (the script's order is
+arbitrary).
+
+**Cache.** `cache.rs`: one `<key>.json` per sprite (the `objects.json` sprite shape plus
+`"model":"v2-small-266"`), written to a temp file and renamed; an empty card list is cached; a
+damaged card or another model or size is a miss.
+
+**Timings.** Desktop i7-12700K, one thread, release, the machine shared (load 10 to 14 at the
+run): model + cut per sprite over the five parity sprites, median 313 ms (min 301, max 460, n = 5) in
+the first run and 314 ms (min 298, max 335) after the final lock.
+The first run (page-in of the weights) is excluded. Model load not timed in this run (the spike
+measured 0.2 s for fp16 upcast).
+
+**Binary size** (release, not stripped; stripped in brackets):
+
+| build | bytes |
+|---|---|
+| base (rustc 1.91, no depth) | 17,634,496 (15,184,344) |
+| feature off, audio and gamepad as before | 17,634,248 (15,183,656): -248 bytes |
+| default (depth on) | 39,311,680 (32,772,800): +21.7 MB (+17.6 MB stripped, almost all tract) |
+
+Measured on the final `Cargo.lock` (`libc` kept at 0.2.189).
+
+**Parity** (`RAZDOR_DEPTH_MODEL=… cargo test --release --lib depth::parity -- --nocapture`). Five
+building sprites with shipped cards, spread through the list. The shipped side is Large at 4x; this
+engine is Small at 266 px. Reported, not asserted:
+
+| key | size | shipped (Large, 4x) | small (266 px) |
+|---|---|---|---|
+| 542e91744fd0e939 | 280x192 | 4: (163.6,53.0) (129.4,146.0) (174.2,170.0) (159.7,191.0) | none (one card) |
+| ef33663756a55b1e | 174x145 | 3: (52.2,85.0) (137.1,130.7) (83.1,143.0) | none (one card) |
+| f165984c4ec03d51 | 75x65 | 2: (27.7,20.0) (31.8,63.0) | 2: (47.9,58.0) (31.8,63.0) |
+| bf4a0204190092f4 | 109x94 | 6: (63.5,51.0) (36.8,59.0) (40.4,71.0) (56.8,78.0) (71.7,88.0) (67.1,93.0) | 5: (63.5,51.0) (36.8,59.0) (40.4,71.0) (56.8,78.0) (67.1,93.0) |
+| 26b562cbfbb09791 | 54x57 | 2: (34.0,41.0) (19.0,48.0) | 2: (34.0,41.0) (19.0,48.0) |
+
+Where the counts agree the feet agree (the 54x57 sprite exactly, the 109x94 one for five of six).
+The two sprites that Small leaves as one card are the open question for the visual check: Small at
+266 px with a squashed input is coarser than Large at 4x, and the shipped cut may not be the
+reference.
+
+**Checks.** `cargo clippy --all-targets -- -D warnings` (CI's command, debug) and the same with
+`--no-default-features` pass; `cargo clippy --release --all-targets` is clean. `cargo test --release`
+(full, real install and model set): 1566 passed, 10 ignored, 1 failed: `local::tests::no_std_thread_local_outside_this_module`, which
+finds a `thread_local!` in `src/ui/world_view.rs` (line 1136, added by `4ae863be` on the
+atmosphere line, not by this work). The depth tests: 20 pass (the parity test runs with the env vars).
+`cargo check --release --target aarch64-linux-android` passes (NDK 29, default features); its only
+warning is an unused `asset` in `src/update.rs`, which is not touched here.
+
+**Open for the next part.** The phone builds pass `--no-default-features --features audio`
+(`scripts/dist-android.sh`, `scripts/dist-ios.sh`), so the APK and the iOS build have no depth model
+until those flags change; that is a decision (cost: about 17 MB of tract per binary, and the phone
+timing is not measured). The download, its hash in the release, and the 2.5D switch are part 2.

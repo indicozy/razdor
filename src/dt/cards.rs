@@ -60,7 +60,7 @@ struct RawSprite {
 }
 
 #[derive(Deserialize)]
-struct RawCard {
+pub(crate) struct RawCard {
     foot: [f32; 2],
     verts: Vec<f32>,
     tris: Vec<u32>,
@@ -68,7 +68,7 @@ struct RawCard {
 
 /// A card as the file gives it, or `None` when its data cannot stand: an odd vertex list, no
 /// triangle or a triangle list not in threes, or an index past the vertices.
-fn checked(raw: RawCard) -> Option<Card> {
+pub(crate) fn checked(raw: RawCard) -> Option<Card> {
     if !raw.verts.len().is_multiple_of(2) || raw.tris.is_empty() || !raw.tris.len().is_multiple_of(3) {
         return None;
     }

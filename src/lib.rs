@@ -13,6 +13,7 @@ pub mod search;
 pub mod hub;
 pub mod translate;
 pub mod update;
+pub mod depth;
 pub mod dt;
 pub mod gdrive;
 pub mod editor;
