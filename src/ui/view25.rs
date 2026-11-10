@@ -26,6 +26,20 @@ pub const FAR: f32 = 240.0;
 /// view to the plain top-down one (at exactly 90 `look_at` with up = Y is degenerate).
 pub const FREE_PITCH_MIN: f32 = 5.0;
 pub const FREE_PITCH_MAX: f32 = 89.9;
+/// The first-person view («От первого лица», the player's): its camera's pitch and field of view,
+/// the ground's flat part ahead of the view's centre and the arc's radius, and the arc's angle
+/// for the far ground rolling up («Вверх», the trailer's look: the sheet square-on to the eye)
+/// or curving down like the earth's horizon («Горизонт», the sky above it).
+pub const FP_PITCH: f32 = 12.0;
+pub const FP_FOV: f32 = 55.0;
+pub const FP_FLAT: f32 = 3.0;
+/// The arc's radius of the roll up, and of the curve down: a tight roll (the trailer's) gives a
+/// horizon near the middle of the frame, the wide curve of a planet would put it near the top and
+/// the footprint would need the far ground to the horizon (about 170 units).
+pub const FP_RADIUS: f32 = 8.0;
+pub const FP_RADIUS_DOWN: f32 = 60.0;
+pub const FP_BEND_UP: f32 = 78.0;
+pub const FP_BEND_DOWN: f32 = -60.0;
 
 /// The horizontal direction the camera looks in at `yaw_deg`, as a ground vector (world x, z):
 /// north `(0, -1)` at yaw 0, east `(-1, 0)` at 90.
@@ -152,9 +166,13 @@ impl TiltCamera {
     }
 
     /// The ground point (world units) under the pixel `at` of `frame`: the ray's hit with
-    /// Y = 0. None when the ray does not reach the ground (above the horizon).
+    /// Y = 0, or with the bent sheet when the camera has one ([`TiltCamera::pick_bent`]). None
+    /// when the ray does not reach the ground (above the horizon).
     pub fn pick(&self, at: Vec2, frame: Rect) -> Option<Vec2> {
         let (origin, dir) = self.ray(at, frame);
+        if let Some(bend) = self.bend {
+            return pick_bent(&bend, origin, dir, self.distance);
+        }
         if dir.y >= -1e-6 {
             return None;
         }
@@ -166,11 +184,41 @@ impl TiltCamera {
         Some(vec2(p.x, p.z))
     }
 
+    /// The first-person camera (`RAZDOR_TRAILER_CAM` aside, the player's own): its pitch
+    /// [`FP_PITCH`], field of view [`FP_FOV`], and the bend [`fp_bend`] with its pivot where the
+    /// camera looks. It looks at `look` (the map view's centre, the hero's place) from beyond it,
+    /// so the hero stands in the lower third of `frame`: the eye is placed where the hero's ray
+    /// hits the ground at the depression that puts him at two thirds of the frame's height, and
+    /// the distance is fitted so the hero's ground is drawn `scale` pixels per world unit, as
+    /// the flat view draws it (the cells of the rest of the frame are smaller, as they are far).
+    pub fn first_person(look: Vec2, scale: f32, frame: Rect, yaw_deg: f32, horizon: bool) -> TiltCamera {
+        let (p, phi) = (FP_PITCH.to_radians(), (FP_FOV / 2.0).to_radians());
+        // The hero's ray below the horizontal: the view line plus the angle of a point a third of
+        // the half height below the centre (NDC y -1/3).
+        let hero_ray = p + (phi.tan() / 3.0).atan();
+        let (sp, cp, th) = (p.sin(), p.cos(), hero_ray.tan());
+        // The hero's depth along the view line: `distance · (sin p cos p / tan θ + sin² p)`.
+        let d0 = frame.h / 2.0 / (phi.tan() * scale);
+        let distance = d0 / (sp * cp / th + sp * sp);
+        // The hero stands `off` short of the target along the view.
+        let off = distance * cp - distance * sp / th;
+        let target = look + forward(yaw_deg) * off;
+        let mut cam = TiltCamera { target, distance, pitch_deg: FP_PITCH, yaw_deg, fov_deg: FP_FOV, bend: None };
+        // The sheet's pivot is the view's centre; its horizon (the down bend) is where the eye's
+        // sight line grazes it.
+        let (max_deg, radius) = if horizon { (FP_BEND_DOWN, FP_RADIUS_DOWN) } else { (FP_BEND_UP, FP_RADIUS) };
+        cam.bend = Some(Bend::new(target, yaw_deg, FP_FLAT, radius, max_deg).with_horizon(cam.eye()));
+        cam
+    }
+
     /// The ground the pixels of `area` see, in world units, as the bounding box of the ground
     /// under its corners. A corner that sees no ground takes the ground at [`FAR`] in its ray's
     /// direction, and every corner is kept within [`FAR`] of the target. `frame` is the view the
     /// camera maps (`area` may reach past it, under the bar).
     pub fn ground_footprint(&self, frame: Rect, area: Rect) -> Rect {
+        if self.bend.is_some() {
+            return self.bent_footprint(frame, area);
+        }
         let corners = [vec2(area.x, area.y), vec2(area.x + area.w, area.y), vec2(area.x + area.w, area.y + area.h), vec2(area.x, area.y + area.h)];
         let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
         for c in corners {
@@ -183,6 +231,82 @@ impl TiltCamera {
             hi = hi.max(p);
         }
         Rect::new(lo.x, lo.y, hi.x - lo.x, hi.y - lo.y)
+    }
+}
+
+impl TiltCamera {
+    /// [`TiltCamera::ground_footprint`] of a bent camera: the bounding box of the sheet the rays
+    /// through the edges of `area` meet (a ray that meets none adds nothing), each point kept
+    /// within [`FAR`] of the target. The sheet is not a rectangle of the screen, so the edges are
+    /// sampled, not only the corners.
+    fn bent_footprint(&self, frame: Rect, area: Rect) -> Rect {
+        let (x0, x1, y0, y1) = (area.x, area.x + area.w, area.y, area.y + area.h);
+        let edges = [(vec2(x0, y0), vec2(x1, y0)), (vec2(x1, y0), vec2(x1, y1)), (vec2(x1, y1), vec2(x0, y1)), (vec2(x0, y1), vec2(x0, y0))];
+        let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
+        let mut hit = false;
+        for (a, b) in edges {
+            for i in 0..=8 {
+                if let Some(p) = self.pick(a.lerp(b, i as f32 / 8.0), frame) {
+                    let p = self.target + (p - self.target).clamp_length_max(FAR);
+                    lo = lo.min(p);
+                    hi = hi.max(p);
+                    hit = true;
+                }
+            }
+        }
+        if !hit {
+            return Rect::new(self.target.x, self.target.y, 0.0, 0.0);
+        }
+        Rect::new(lo.x, lo.y, hi.x - lo.x, hi.y - lo.y)
+    }
+}
+
+/// The ground point (world units) where the ray `origin + t·dir` first meets the bent sheet `b`
+/// (a camera `distance` from its target). The sheet is the profile extruded along the view's
+/// right, so a ray meets it where its height is the profile's height at its forward distance:
+/// the ray is marched in steps of 0.1 world units, its first sign change bisected. None where
+/// the sheet is not seen: past the horizon, or no sheet ahead of the ray.
+fn pick_bent(b: &Bend, origin: Vec3, dir: Vec3, distance: f32) -> Option<Vec2> {
+    const MARCH_STEP: f32 = 0.1;
+    let (f, r) = (forward(b.yaw_deg), right(b.yaw_deg));
+    let o = vec2(origin.x, origin.z) - b.pivot;
+    let d = vec2(dir.x, dir.z);
+    let (w0, dw) = (o.dot(f), d.dot(f));
+    if dw <= 1e-6 {
+        return None;
+    }
+    // The farthest forward distance the sheet can be seen at: the horizon, else the footprint's far limit.
+    let w_end = if b.limit.is_finite() { b.profile(b.limit).0 } else { FAR + distance };
+    let t_end = (w_end - w0) / dw;
+    let above = |t: f32| origin.y + dir.y * t - b.height_at(w0 + dw * t);
+    if t_end <= 0.0 || above(0.0) <= 0.0 {
+        return None;
+    }
+    let mut t0 = 0.0;
+    loop {
+        let t1 = (t0 + MARCH_STEP).min(t_end);
+        if above(t1) <= 0.0 {
+            let (mut lo, mut hi) = (t0, t1);
+            for _ in 0..40 {
+                let mid = 0.5 * (lo + hi);
+                if above(mid) > 0.0 {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            let t = 0.5 * (lo + hi);
+            let s = b.s_of_u(w0 + dw * t);
+            if s > b.limit {
+                return None;
+            }
+            let l = (o + d * t).dot(r);
+            return Some(b.pivot + f * s + r * l);
+        }
+        if t1 >= t_end {
+            return None;
+        }
+        t0 = t1;
     }
 }
 
@@ -255,20 +379,71 @@ pub struct Bend {
     pub yaw_deg: f32,
     pub flat: f32,
     pub radius: f32,
+    /// The arc's angle and its slope beyond: positive rolls the far ground up (toward the eye's
+    /// top-down), negative curves it down like the earth's horizon.
     pub max_deg: f32,
+    /// The ground distance ahead of the pivot past which the sheet is hidden: the horizon of a
+    /// down bend ([`Bend::with_horizon`]). Infinite for an up bend, or until the eye is given.
+    pub limit: f32,
 }
 
 impl Bend {
-    /// The bend with `radius` at least 0.01 world units and `max_deg` within 0..=89.
+    /// The bend with `radius` at least 0.01 world units and `max_deg` within -89..=89.
     pub fn new(pivot: Vec2, yaw_deg: f32, flat: f32, radius: f32, max_deg: f32) -> Bend {
-        Bend { pivot, yaw_deg, flat: flat.max(0.0), radius: radius.max(0.01), max_deg: max_deg.clamp(0.0, 89.0) }
+        Bend { pivot, yaw_deg, flat: flat.max(0.0), radius: radius.max(0.01), max_deg: max_deg.clamp(-89.0, 89.0), limit: f32::INFINITY }
     }
 
-    /// The place of ground point `g` on the sheet (height 0 on the flat part).
+    /// The bend with its horizon for the eye at `eye`: a down bend's sheet is hidden past the
+    /// point where the eye's sight line grazes it (the planet's horizon), so past it the sheet
+    /// is not drawn, not picked, and its points stand on the horizon ([`Bend::point`]). An up
+    /// bend has none.
+    pub fn with_horizon(self, eye: Vec3) -> Bend {
+        if self.max_deg >= 0.0 {
+            return self;
+        }
+        let f = forward(self.yaw_deg);
+        let (eu, eh) = ((vec2(eye.x, eye.z) - self.pivot).dot(f), eye.y);
+        let amax = self.max_deg.abs().to_radians();
+        // Visible while the sight line is above the sheet's normal (upward): the sign of
+        // `(eye − point) · normal`, with the tangent `(cos a, −sin a)` of the down bend.
+        let visible = |s: f32| {
+            let a = if s <= self.flat { 0.0 } else { ((s - self.flat) / self.radius).min(amax) };
+            let (tu, th) = (a.cos(), -a.sin());
+            let (u, h) = self.profile(s);
+            (eu - u) * (-th) + (eh - h) * tu > 0.0
+        };
+        let step = self.radius / 16.0;
+        let (mut lo, mut s) = (self.flat, self.flat);
+        while s < self.flat + 4000.0 {
+            if !visible(s) {
+                let (mut lo_s, mut hi_s) = (lo, s);
+                for _ in 0..40 {
+                    let mid = 0.5 * (lo_s + hi_s);
+                    if visible(mid) {
+                        lo_s = mid;
+                    } else {
+                        hi_s = mid;
+                    }
+                }
+                return Bend { limit: 0.5 * (lo_s + hi_s), ..self };
+            }
+            lo = s;
+            s += step;
+        }
+        self
+    }
+
+    /// Whether ground point `g` is past the horizon (a down bend hides it).
+    pub fn hidden(&self, g: Vec2) -> bool {
+        (g - self.pivot).dot(forward(self.yaw_deg)) > self.limit
+    }
+
+    /// The place of ground point `g` on the sheet (height 0 on the flat part). Past the horizon
+    /// it stands on the horizon's line.
     pub fn point(&self, g: Vec2) -> Vec3 {
         let d = g - self.pivot;
         let (f, r) = (forward(self.yaw_deg), right(self.yaw_deg));
-        let (u, h) = self.profile(d.dot(f));
+        let (u, h) = self.profile(d.dot(f).min(self.limit));
         let l = d.dot(r);
         vec3(self.pivot.x, 0.0, self.pivot.y) + vec3(f.x, 0.0, f.y) * u + vec3(r.x, 0.0, r.y) * l + Vec3::Y * h
     }
@@ -279,14 +454,38 @@ impl Bend {
         if s <= self.flat {
             return (s, 0.0);
         }
-        let (r, amax) = (self.radius, self.max_deg.to_radians());
+        let (r, amax) = (self.radius, self.max_deg.abs().to_radians());
+        let sign = if self.max_deg < 0.0 { -1.0 } else { 1.0 };
         let a = (s - self.flat) / r;
         if a <= amax {
-            (self.flat + r * a.sin(), r * (1.0 - a.cos()))
+            (self.flat + r * a.sin(), sign * r * (1.0 - a.cos()))
         } else {
             let e = (a - amax) * r;
-            (self.flat + r * amax.sin() + e * amax.cos(), r * (1.0 - amax.cos()) + e * amax.sin())
+            (self.flat + r * amax.sin() + e * amax.cos(), sign * (r * (1.0 - amax.cos()) + e * amax.sin()))
         }
+    }
+
+    /// The ground distance `s` whose profile has forward distance `u` (the inverse of the
+    /// profile's first coordinate, which only grows with `s`).
+    fn s_of_u(&self, u: f32) -> f32 {
+        if u <= self.flat {
+            return u;
+        }
+        let (r, amax) = (self.radius, self.max_deg.abs().to_radians());
+        let ua = self.flat + r * amax.sin();
+        if u <= ua {
+            self.flat + r * ((u - self.flat) / r).clamp(-1.0, 1.0).asin()
+        } else {
+            self.flat + r * amax + (u - ua) / amax.cos()
+        }
+    }
+
+    /// The sheet's height above the pivot's ground at forward distance `u`.
+    fn height_at(&self, u: f32) -> f32 {
+        if u <= self.flat {
+            return 0.0;
+        }
+        self.profile(self.s_of_u(u)).1
     }
 
     /// The ground the sheet covers: the bounding box of the rectangle `width` either side of the
@@ -860,6 +1059,126 @@ mod tests {
             let a = billboard_model_about_at(foot, base, SCALE, 55.0, yaw, 1.5, ground);
             let b = billboard_model_about(origin, foot, base, SCALE, 55.0, yaw, 1.5);
             assert!(a.abs_diff_eq(b, 1e-5), "yaw {yaw}");
+        }
+    }
+
+    /// The down bend (the horizon's) is continuous at both joins, and keeps arc length like the up
+    /// one: a step along the ground is a step along the sheet, and it sinks below the flat ground.
+    #[test]
+    fn the_down_bend_is_continuous_at_both_joins_and_keeps_arc_length() {
+        let b = Bend::new(vec2(0.0, 0.0), 0.0, 3.0, 8.0, -60.0);
+        let amax = 60f32.to_radians();
+        let join = 3.0 + 8.0 * amax;
+        for s in [3.0, join] {
+            let (a, c) = (b.profile(s - 1e-3), b.profile(s + 1e-3));
+            assert!((a.0 - c.0).abs() < 0.01 && (a.1 - c.1).abs() < 0.01, "a join at {s}: {a:?} {c:?}");
+        }
+        assert!(b.profile(10.0).1 < 0.0, "down: the ground past the flat part sinks");
+        let mut len = 0.0;
+        let (mut prev, mut s) = (b.profile(0.0), 0.0);
+        while s < 40.0 {
+            s += 0.01;
+            let p = b.profile(s);
+            len += ((p.0 - prev.0).powi(2) + (p.1 - prev.1).powi(2)).sqrt();
+            prev = p;
+        }
+        assert!((len - 40.0).abs() < 0.05, "arc length {len} for 40 units of ground");
+        // The slope beyond the arc is the bend's angle, downward.
+        let (p, q) = (b.profile(join + 2.0), b.profile(join + 3.0));
+        assert!((((q.1 - p.1) / (q.0 - p.0)).atan().to_degrees() + 60.0).abs() < 1e-2);
+    }
+
+    /// The first-person camera puts the hero (the look point) at two thirds of the frame's height,
+    /// at the centre across, and fits his ground to the flat scale: his depth is the fitted one.
+    #[test]
+    fn the_first_person_camera_puts_the_hero_in_the_lower_third_at_the_flat_scale() {
+        for yaw in YAWS {
+            for horizon in [false, true] {
+                let look = vec2(20.5, 13.25);
+                let cam = TiltCamera::first_person(look, SCALE, FRAME, yaw, horizon);
+                let px = cam.project(vec3(look.x, 0.0, look.y), FRAME).expect("in front of the eye");
+                assert!((px.x - (FRAME.x + FRAME.w / 2.0)).abs() < 1.0, "yaw {yaw}: x {px:?}");
+                assert!((px.y - (FRAME.y + FRAME.h * 2.0 / 3.0)).abs() < 1.0, "yaw {yaw}: y {px:?}");
+                // The hero's depth along the view line is the flat fit's distance.
+                let dir = (vec3(cam.target.x, 0.0, cam.target.y) - cam.eye()).normalize();
+                let depth = (vec3(look.x, 0.0, look.y) - cam.eye()).dot(dir);
+                let d0 = FRAME.h / 2.0 / ((FP_FOV / 2.0).to_radians().tan() * SCALE);
+                assert!((depth / d0 - 1.0).abs() < 1e-3, "yaw {yaw} horizon {horizon}: depth {depth} against {d0}");
+            }
+        }
+    }
+
+    /// A pick at the hero's pixel is the hero's ground, in both bends and at every yaw.
+    #[test]
+    fn a_pick_at_the_heros_pixel_is_the_hero_at_both_bends_and_every_yaw() {
+        for yaw in YAWS {
+            for horizon in [false, true] {
+                let look = vec2(20.5, 13.25);
+                let cam = TiltCamera::first_person(look, SCALE, FRAME, yaw, horizon);
+                let px = cam.project(vec3(look.x, 0.0, look.y), FRAME).expect("the hero is in front of the eye");
+                let back = cam.pick(px, FRAME).expect("the hero's ground");
+                assert!(close(back, look, 0.1), "yaw {yaw} horizon {horizon}: {back:?}");
+            }
+        }
+    }
+
+    /// Ground points on the bent sheet project through the camera and pick back within a tenth of
+    /// a cell, at both bends and several yaws (the sky and the far side of the horizon excluded).
+    #[test]
+    fn pick_undoes_the_bent_sheet_at_both_bends_and_every_yaw() {
+        let mut checked = 0;
+        for yaw in YAWS {
+            for horizon in [false, true] {
+                let look = vec2(20.5, 13.25);
+                let cam = TiltCamera::first_person(look, SCALE, FRAME, yaw, horizon);
+                let bend = cam.bend.expect("the first-person bend");
+                for s in [-24.0, -12.0, -6.0, 0.0, 2.0, 5.0, 9.0, 14.0, 22.0, 30.0] {
+                    for l in [-9.0, -3.0, 0.0, 4.0, 9.0] {
+                        let g = bend.pivot + forward(yaw) * s + right(yaw) * l;
+                        if bend.hidden(g) {
+                            continue;
+                        }
+                        let p3 = bend.point(g);
+                        let Some(px) = cam.project(p3, FRAME) else { continue };
+                        if !FRAME.contains(px) {
+                            continue;
+                        }
+                        let back = cam.pick(px, FRAME).unwrap_or_else(|| panic!("yaw {yaw} horizon {horizon}: no hit for {g:?}"));
+                        assert!(close(back, g, 0.1), "yaw {yaw} horizon {horizon}: {g:?} came back as {back:?}");
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        assert!(checked > 200, "only {checked} points checked");
+    }
+
+    /// The down bend's horizon: the pixels above it see no ground (NaN in the map's pointer), those
+    /// just below it see the sheet; the up bend has no horizon, so its top pixels see ground.
+    #[test]
+    fn the_sky_above_the_horizon_of_a_down_bend_sees_no_ground() {
+        let look = vec2(20.5, 13.25);
+        let cam = TiltCamera::first_person(look, SCALE, FRAME, 0.0, true);
+        let bend = cam.bend.expect("the bend");
+        assert!(bend.limit.is_finite(), "a down bend has a horizon");
+        let line = cam.project(bend.point(bend.pivot + forward(0.0) * bend.limit), FRAME).expect("the horizon");
+        let x = FRAME.x + FRAME.w / 2.0;
+        assert!(cam.pick(vec2(x, line.y - 4.0), FRAME).is_none(), "the sky above the horizon");
+        assert!(cam.pick(vec2(x, line.y + 4.0), FRAME).is_some(), "the sheet below the horizon");
+        let up = TiltCamera::first_person(look, SCALE, FRAME, 0.0, false);
+        assert!(up.bend.expect("the bend").limit.is_infinite());
+        assert!(up.pick(vec2(x, FRAME.y + 2.0), FRAME).is_some(), "the up bend's top sees the sheet");
+    }
+
+    /// The bent footprint holds the target and the hero's ground, and is the frame's ground.
+    #[test]
+    fn the_bent_footprint_holds_the_hero_at_both_bends() {
+        for horizon in [false, true] {
+            let look = vec2(20.5, 13.25);
+            let cam = TiltCamera::first_person(look, SCALE, FRAME, 45.0, horizon);
+            let fp = cam.ground_footprint(FRAME, FRAME);
+            assert!(fp.contains(look), "horizon {horizon}: {fp:?}");
+            assert!(fp.w > 1.0 && fp.h > 1.0, "a footprint: {fp:?}");
         }
     }
 }
