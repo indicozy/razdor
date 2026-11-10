@@ -1,34 +1,30 @@
 ---
-title: Lighting, mist and water
-description: Three new Razdor map look settings (lighting by time of day, mist instead of black, moving water) and 2.5D buildings that stand on their ground.
+title: Light, mist, water and weather
+description: The map look settings Razdor adds to the original (lighting and shadows, mist instead of black, moving water, weather, the living map) and the 2.5D buildings that stand on their ground.
 sidebar:
   order: 2
 ---
 
-The **Map** tab of the settings window has three switches that the original does not have: **Lighting**, **Mist instead of black** and **Moving water**. All three are off by default, so a new install looks like Discord Times.
+The **Map** tab of the settings window has new rows that the original does not have: **Lighting**, **Mist instead of black**, **Moving water**, **Weather** and **Living map**. All of them are off by default, so a new install looks like Discord Times.
 
 These settings change only how the adventure map looks. The rules, what the player can see and do, movement, battles, the AI and saves work as in the original. Battles and full-screen windows keep the original look.
 
 :::note
-The settings apply only to the adventure map. Battles, windows and dialogues do not change.
+The settings apply to the adventure map. Battles, windows and dialogues do not change.
 :::
 
 ## Lighting
 
-The **Lighting** setting has four values:
+The **Lighting** row chooses how the light on the map changes:
 
-* **Off**: the map is lit as in the original.
-* **Game clock**: the light follows the game's time. The map brightens and darkens smoothly, and when the game's time stops, the light stops too.
-* **Real-time cycle**: one game day takes as many real minutes as set in **Day length**: 12, 24 or 48.
-* **Fixed hour**: the light stays at one hour, chosen in **Hour**, from 0:00 to 21:00 in steps of 3 hours. The default is 18:00.
+* **"Off"**: the map is lit as in the original.
+* **"Game clock"**: the light follows the game time. The map brightens and darkens smoothly, and when the game time stops, the light stops too.
+* **"Real-time cycle"**: the days pass on their own. The **"Day length"** row sets how many real minutes one game day lasts: 12, 24 or 48. The default is 24.
+* **"Fixed hour"**: the light does not change. The **"Hour"** row sets the hour, from 0:00 to 21:00 in steps of three hours. The default is 18:00.
 
-The light goes through dawn, day, dusk and night. At night the map is bluish, but it never gets darker than about 55–60 % of normal brightness, so no black areas remain. Towns and villages show warm lit windows. Every army on the map carries a torch, so armies are easy to find at night. The window glows and torches appear towards evening and go out by dawn.
+The light goes through morning, day, evening and night. At night the map is bluish and dimmed, but not black. In the morning and at sunset the light is warm: the low sun brings out the masonry, the roof tiles, the stones and the ground's relief, and the hollows darken.
 
-At dawn and dusk the low sun brings out the masonry, roof tiles and stones in the pictures, and the shadows painted into the pictures deepen towards evening and fade at night.
-
-![Dawn on the map](../../../../assets/shots/light-dawn.webp)
-
-Dawn, as the map wakes up.
+At night buildings glow from within: the windows of towns, castles and villages burn with warm light. The hero and the armies carry torches, so they can be seen in the dark, and the lights cast shadows.
 
 ![Day on the map](../../../../assets/shots/light-noon.webp)
 
@@ -36,62 +32,113 @@ Day: full light, as in the original.
 
 ![Dusk on the map](../../../../assets/shots/light-dusk.webp)
 
-Dusk: warm light, the lit windows of the towns and the armies' torches.
+Evening, 18:00: warm light, the lit windows and the armies' torches.
 
 ![Night on the map](../../../../assets/shots/light-night.webp)
 
-Night: blue light, and the map stays readable.
+Night: blue light, and the map is still easy to see.
+
+### Shadows and light quality
+
+These two rows appear when **"Lighting"** is on.
+
+* **"Shadows"**: **"Painted"** (the default) keeps the original's shadows. **"From the sun"** removes them, and every building, tree and rock casts its own shadow: it turns and lengthens with the hour.
+* **"Light quality"**: **"High"**, **"Medium"** or **"Low"**. High lights up to eight buildings and the figures' torches: their shadows, the relief and the glowing windows. Medium does up to four, with the relief only for the two nearest. Low keeps just the warm glow. The default is High on a computer and Medium on a phone.
+
+![Shadows from the sun on the map in 2.5D](../../../../assets/shots/shadows-sun.webp)
+
+"From the sun" shadows in 2.5D: each building casts its own shadow on the ground.
 
 :::tip
-To see the day and night pass without waiting, choose **Game clock** and play on, or **Real-time cycle** with a day length of 12 minutes.
+To see the day and night change without waiting, choose **"Game clock"** and play, or **"Real-time cycle"** with a day length of 12 minutes.
 :::
 
 ## Mist instead of black
 
-The **Mist instead of black** switch replaces the black of unexplored land with drifting mist. The mist hides exactly what the black hid: it opens where the black opened, and land you have explored never fogs over again. The mist takes its colour from the light: golden at dawn and dusk, blue at night, grey-white with the lighting off.
+The **"Mist instead of black"** switch replaces the black of unexplored land with drifting mist. The mist hides exactly what the black hid: it opens where the black opened, and explored land is no longer covered. The mist billows and slowly flows, like smoke.
+
+The mist opens gradually: when the hero walks, and when an event shows a place, the land comes out of the mist little by little, from the centre.
+
+In 2.5D and first-person views the mist rises as a wall at the edge of the explored land, like a bank above the ground.
 
 ![Mist instead of black](../../../../assets/shots/mist.webp)
 
-Mist over the unexplored part of the map. Explored land is fully visible.
+Mist over the unexplored part of the map. The explored land is fully visible.
 
 ## Moving water
 
-The **Moving water** switch brings the water on the map to life:
+The **"Moving water"** switch brings the water on the map to life:
 
 * the water ripples;
 * foam runs along the shores;
-* the water shows the colour of the sky: golden at dusk, moonlit at night;
+* the water reflects the colour of the sky: golden at sunset, moonlit at night;
 * rivers flow;
-* sailing ships and armies leave a wake behind them.
+* ships and armies on the move leave a wake behind them.
 
-A river's direction is a guess from the shape of the map: a river flows toward the sea or the lake it reaches. A few rivers may run the wrong way.
+The direction of a river's flow is worked out from the shape of the map: a river flows toward the sea or lake it runs into. In a few places a river may flow the wrong way.
 
 ![Moving water](../../../../assets/shots/water.webp)
 
-Ripples and shore foam on the water.
+Foam along the shore and ripples on the water.
 
-## 2.5D buildings
+## Weather
 
-This is not a setting. It is part of the **2.5D** view (the **Map** tab, the **Map view** line, off by default). In this view the buildings are cut into pieces: each house of a village and the walls and towers of a castle stand on their own ground, instead of hanging in the air as one picture. Their shadows lie on the ground.
+The **"Weather"** switch shows weather that depends on the land under it:
 
-Buildings of the base game and Community Update look like this now. A building with no cut data yet (for example one from a mod with its own pictures) still stands as one piece, as before.
+* snow over snowfields and ice;
+* rain over swamps and lowlands;
+* heat haze over deserts;
+* ash over fire lands;
+* cloud shadows across the whole map.
 
-![A village in the 2.5D view](../../../../assets/shots/village-25d.webp)
+The weather changes over time: each game day brings its own, and the land decides which one it will be. It is only a look.
 
-A village in the 2.5D view, the map turned by 45°. Turn it with Q and E.
+![Weather on the map](../../../../assets/shots/weather.webp)
+
+The weather over the map: here, the cloud shadows show.
+
+## Living map
+
+The **"Living map"** switch brings the buildings and the sky to life on the explored part of the map:
+
+* smoke rises from the chimneys;
+* flags wave on the castles;
+* now and then flocks of birds cross the map.
+
+The mill sails do not turn yet: the building pictures have no reliable place for them.
+
+![Living map](../../../../assets/shots/living.webp)
+
+Chimney smoke, waving flags and birds over the map.
+
+## Buildings in 2.5D
+
+This is part of the **2.5D** view (the **"Map"** tab, the **"Map view"** row, off by default), not a separate row. In this view the buildings are cut into parts: each house of a village and each wall and tower of a castle stands on its own ground, instead of hanging in the air as one picture. Their shadows lie on the ground.
+
+The buildings of the base game and of Community Update are cut this way.
+
+![A village in 2.5D](../../../../assets/shots/village-25d.webp)
+
+A village in 2.5D, the map turned by 45°. Turn it with Q and E.
+
+### Buildings from mods
+
+Buildings from mods that bring their own art can stand on their own ground too. For that, a depth model is needed: it is downloaded once, about 50 MB, and runs on your device. The model is Depth Anything V2 Small (Apache-2.0).
+
+The **"Depth model for mods"** row appears on the **"Map"** tab only in 2.5D, and only when the install has buildings without cut data. Press **"Download (50 MB)"**. Until the model is downloaded, such buildings stand as one piece, as before.
 
 ## How to turn it on
 
-1. Open the **Sound, graphics and gameplay settings** window and select the **Map** tab.
-2. Find the **Lighting**, **Mist instead of black** and **Moving water** lines.
-3. A click on **Lighting** steps through its values. **Mist instead of black** and **Moving water** switch between **Off** and **On**.
-4. In **Real-time cycle** mode a **Day length** line appears under **Lighting**; in **Fixed hour** mode, an **Hour** line appears.
-5. Press **Apply** to keep the changes.
+1. Open the **"Sound, graphics and gameplay settings"** window and choose the **"Map"** tab.
+2. Find the **"Lighting"**, **"Mist instead of black"**, **"Moving water"**, **"Weather"** and **"Living map"** rows.
+3. A click on **"Lighting"** cycles through its values. For the other switches the values are **"Off"** and **"On"**.
+4. For **"Real-time cycle"** the **"Day length"** row appears, and for **"Fixed hour"** the **"Hour"** row. Under **"Lighting"**, the **"Shadows"** and **"Light quality"** rows also appear.
+5. Press **"Apply"** to keep the changes.
 
-![The Map tab of the settings](../../../../assets/shots/settings-map.webp)
+![The Map tab in the settings](../../../../assets/shots/settings-map.webp)
 
-The **Map** tab with the new lines. All three are set to Off.
+The **"Map"** tab with the new rows. All of them are set to "Off".
 
 ## If the map is slow
 
-On a weak computer or a phone, switch all three off. With the settings off, the map is drawn as before.
+On a weak computer or a phone, turn off the switches you do not need: the light with its shadows (or set the quality to "Low"), the mist, the water, the weather and the living map. For a faster map there are also the **"Map resolution"** row and the **"Frame rate cap"** row on the same tab. With the settings off, the map is drawn as before.

@@ -63,7 +63,7 @@ In Portrait orientation: the "Barracks" and "Garrison" windows are taller. A pic
 When the phone is held vertically, windows span the width of the screen, and text and buttons are larger:
 
 * **Scenario Selection** — A list of maps covering the full screen. Tap a map to open its card with a picture, name, and description; **"Back"** and **"Next"** are at the bottom.
-* **Diary** — a window of its own with the **"Quests"**, **"Completed"**, **"Rumours"** and **"Messages"** tabs, the list of entries and the picked entry's text. The hero's stats and backpack are in the army window, the money on the bottom bar.
+* **Diary** — a window of its own with the **"Quests"**, **"Completed"**, **"Rumours"** and **"Messages"** and **"Chronicle"** tabs, the list of entries and the picked entry's text. The hero's stats and backpack are in the army window, the money on the bottom bar.
 * **Market** — Item description at the top, followed by section icons and a list of goods below.
 * **Save** — Three buttons in a single row at the bottom.
 * **Main Menu** — If a mod is installed, a wide bar saying **"Mod: <name>"** is displayed above the four tiles; tapping it allows you to select a different mod.

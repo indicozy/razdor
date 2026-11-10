@@ -26,7 +26,9 @@ Razdor plays the original game's scenarios using its original rules. Below is wh
 * **Armies:** reorder warriors by dragging; pursue a selected army until an encounter occurs; the path is shown on click, and a second click sends the hero on the journey.
 * **Clicking on the map** while walking stops the hero; **waiting** can be interrupted by a click or a keypress.
 * **Hero Speed:** the "Hero Movement Speed" slider goes up to 2× faster than the fastest speed in the original (the middle of the slider is the original maximum).
-* **Hero Log:** four tabs — "Quests", "Completed", "Rumors", "Messages", with entries marked by in-game date.
+* **Hero Log:** five tabs — "Quests", "Completed", "Rumors", "Messages", "Chronicle", with entries marked by in-game date.
+* **Chronicle:** the fifth tab of the diary writes down, day by day, what the player saw and did ([more](/razdor/wiki/en/differences/chronicle/)).
+* **Summary** after a map (and after the hero's fall): a page with the hero's route over the known land, the battles and the totals; turned off on the "Other" tab ([more](/razdor/wiki/en/differences/chronicle/)).
 * **Saves:** up to 50 manual saves and 30 autosaves instead of 12; pin important saves with a thumbtack; quick save `F5` and quick load `F9`.
 * **Folder:** the «Folder» button in the load window opens the folder with your saves and maps, on desktop, Android and iOS (Razdor's own, not the original's).
 * **Resuming a game:** if your phone clears the game from memory or the game crashes, upon the next launch, it will offer to resume from where you left off ([more details](/razdor/wiki/en/tutorials/saves/)).
@@ -43,7 +45,11 @@ Razdor plays the original game's scenarios using its original rules. Below is wh
 * **Minimap corner** in additional settings: the minimap can be placed in any corner, and the "Reset" button will return it to its default size and position.
 * **2.5D map view** in additional settings ("Map view", off by default): the map is tilted, and the figures stand on the ground, and the houses of villages and the walls of castles each stand on their own ground instead of hanging in the air. Q and E turn the map 45°; on a phone, the two-finger turn is switched on by the "Two-finger turn" setting. A compass button next to the bottom bar appears while the map is turned, and brings it back to north up. "Sprite size" (1×, 1.5× or 2×) is 1.5× by default.
 * **First-person map view** in the same "Map view" row: a low camera behind the hero or at his eyes, with the far ground rolling up or curving down to a horizon (the "Far ground" and "Camera" rows). More: [First-person view](/razdor/wiki/en/differences/first-person/).
-* **Lighting, mist and water** in additional settings (off by default): the light changes with the time of day, unexplored land is hidden by drifting mist instead of black, the water ripples and flows, and ships leave a wake. Only the view changes: rules stay as they are. More: [Lighting, mist and water](/razdor/wiki/en/differences/map-look/).
+* **Lighting** in additional settings (off by default): the light changes with the time of day, the windows glow at night and the armies carry torches; "From the sun" shadows are optional. Only the view changes: [more](/razdor/wiki/en/differences/map-look/).
+* **Mist instead of black** in additional settings (off by default): unexplored land is hidden by drifting mist, and in 2.5D the mist rises as a wall. Only the view changes.
+* **Moving water** in additional settings (off by default): the water ripples, foam runs along the shores, rivers flow and ships leave a wake. Only the view changes.
+* **Weather** in additional settings (off by default): snow over snowfields, rain over swamps, heat haze over deserts, ash over fire lands and cloud shadows. Only the view changes.
+* **Living map** in additional settings (off by default): smoke rises from the chimneys, flags wave and birds cross the map. Only the view changes.
 * **Extend the map past its edges** in additional settings (off, as in the original, where the area past the edges is black): a short stretch of ground goes on past the map's edges, then the same black fog as the unexplored map. Only the view changes: rules and paths stay as they are.
 * **Map resolution** on the "Map" tab (100%, 75% or 50%, 100% by default): the map is drawn at a lower resolution and stretched over the screen, so a weak phone draws it faster; the bottom bar, minimap, windows and text stay sharp.
 * **Frame rate cap** on the "Map" tab ("No cap", 30 or 60, "No cap" by default): the game draws no more than that many frames a second, for less heat and battery use.

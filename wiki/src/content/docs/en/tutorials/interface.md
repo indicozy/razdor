@@ -50,10 +50,11 @@ On a computer, when the bottom bar does not reach the screen's edges, the minima
 
 The hero and army window opens with the **"Hero and army"** button on the bar or the `A` key. The hero's diary opens with the flag on the bottom bar or the `J` key.
 
-The diary has four tabs:
+The diary has five tabs:
 
 1. **"Quests"** — current quests, as in the original.
 2. **"Done"**, **"Rumours"** and **"Messages"** — the Razdor history with the game date. New entries are on top, and the story messages of scripted events go to "Messages". This is a Razdor addition: the original's diary lists only the current quests.
+3. **"Chronicle"** — entries by day of what the player saw and did: events, battles, hiring, quests. The **"Summary"** button at the top of the list opens a page with the hero's route and the totals ([more](/razdor/wiki/en/differences/chronicle/)).
 
 To read an entry in full, select it.
 
