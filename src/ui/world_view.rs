@@ -5395,7 +5395,8 @@ fn draw_daylight(game: &Game, cam: &Camera, light: Option<daylight::Light>) {
             let vis = visible(a.tile(map));
             glow_at(cam.screen_at(game.army_display_pos(a)), 1.6 * cell_w, [1.0, 0.65, 0.30], 0.45 * light.glow * flicker * vis * vis);
         }
-        if !game.hero_hidden() && !game.aboard() {
+        // The eyes camera stands on the hero: his torch would float in front of the lens.
+        if !game.hero_hidden() && !game.aboard() && !eyes_cam(cam) {
             let flicker = 0.92 + 0.08 * (now * 9.0 + game.world.armies.len() as f64).sin() as f32;
             let vis = visible(game.tile());
             glow_at(cam.screen_at(game.display_pos()), 1.6 * cell_w, [1.0, 0.65, 0.30], 0.45 * light.glow * flicker * vis * vis);
