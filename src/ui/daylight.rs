@@ -411,8 +411,8 @@ mod tests {
         let r = relief_at(1.0);
         let moon = [0.62, 0.62, 0.6f32.tan()];
         let len = dot(moon, moon).sqrt();
-        for c in 0..3 {
-            assert!((r.light[c] - moon[c] / len).abs() < 1e-5, "night light {:?}", r.light);
+        for (c, m) in moon.iter().enumerate() {
+            assert!((r.light[c] - m / len).abs() < 1e-5, "night light {:?}", r.light);
         }
         assert!((r.strength - NIGHT_STRENGTH).abs() < 1e-5 && (r.cavity - 0.20).abs() < 1e-5);
     }
