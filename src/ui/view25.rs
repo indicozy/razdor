@@ -329,11 +329,14 @@ pub struct Trailer {
     /// The ground drawn ahead of the pivot, and behind it, in world units.
     pub ahead: f32,
     pub behind: f32,
+    /// Standing sprites whose foot is nearer the eye than this fade out (world units; 0 is off):
+    /// they are faded fully by the distance and back in over the half of it beyond.
+    pub near: f32,
 }
 
 impl Default for Trailer {
     fn default() -> Trailer {
-        Trailer { pitch: None, fov: None, dist: None, bend: 0.0, flat: 3.0, radius: 8.0, width: 40.0, ahead: 90.0, behind: 8.0 }
+        Trailer { pitch: None, fov: None, dist: None, bend: 0.0, flat: 3.0, radius: 8.0, width: 40.0, ahead: 90.0, behind: 8.0, near: 8.0 }
     }
 }
 
@@ -350,7 +353,7 @@ pub fn parse_trailer(text: &str) -> Result<Trailer, String> {
             "fov" => (5.0..=120.0).contains(&v),
             "dist" => v > 0.0,
             "bend" => (0.0..=89.0).contains(&v),
-            "flat" | "ahead" | "behind" => v >= 0.0,
+            "flat" | "ahead" | "behind" | "near" => v >= 0.0,
             "radius" | "width" => v > 0.0,
             _ => return Err(format!("`{key}`: no such key")),
         };
@@ -366,6 +369,7 @@ pub fn parse_trailer(text: &str) -> Result<Trailer, String> {
             "radius" => t.radius = v,
             "width" => t.width = v,
             "ahead" => t.ahead = v,
+            "near" => t.near = v,
             _ => t.behind = v,
         }
     }
@@ -820,6 +824,8 @@ mod tests {
         assert!(parse_trailer("bend").unwrap_err().contains("key=value"));
         assert!(parse_trailer("radius=x").unwrap_err().contains("number"));
         assert!(parse_trailer("radius=0").is_err());
+        assert_eq!(parse_trailer("near=6").unwrap().near, 6.0);
+        assert_eq!(Trailer::default().near, 8.0);
     }
 
     #[test]

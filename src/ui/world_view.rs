@@ -1335,21 +1335,62 @@ fn standing(cam: &Camera, foot: Vec2, base: Vec2, vis: f32, draw: impl FnOnce())
         return;
     }
     let (pitch, yaw, size) = (tilt.cam.pitch_deg, tilt.cam.yaw_deg, sprite_size());
-    let model = match (PASS.with(std::cell::Cell::get), tilt.cam.bend) {
+    let g = (foot + cam.origin) / cam.scale;
+    let (model, on_ground) = match (PASS.with(std::cell::Cell::get), tilt.cam.bend) {
         // The sheet holds the ground: no sprite in the ground run.
         (Pass::Ground, _) => return,
         // A sprite stands where its foot is on the sheet (the bend's point of its ground).
         (Pass::Sprites, Some(bend)) => {
-            let ground = bend.point((foot + cam.origin) / cam.scale);
-            view25::billboard_model_about_at(foot, base, cam.scale, pitch, yaw, size, ground)
+            let at = bend.point(g);
+            (view25::billboard_model_about_at(foot, base, cam.scale, pitch, yaw, size, at), at)
         }
-        _ => view25::billboard_model_about(cam.origin, foot, base, cam.scale, pitch, yaw, size),
+        _ => (view25::billboard_model_about(cam.origin, foot, base, cam.scale, pitch, yaw, size), vec3(g.x, 0.0, g.y)),
     };
+    // The trailer's camera (dev-only): a sprite whose foot is nearer the eye than its `near` fades
+    // out, and the blend band of its sharp draws follows the magnification of a nearer sprite.
+    let mut vis = vis;
+    let mut magnify = 1.0;
+    if let Some(t) = trailer() {
+        let d = (on_ground - tilt.cam.eye()).length().max(1e-3);
+        magnify = tilt.cam.pivot_scale(cam.view) * tilt.cam.distance / (d * cam.scale);
+        if t.near > 0.0 && NEAR_FADE.with(std::cell::Cell::get) {
+            vis *= near_fade(d, t.near);
+        }
+        if vis <= 0.0 {
+            return;
+        }
+    }
     push_cpu_model(model);
     let prev = SPRITE_VIS.with(|s| s.replace(vis));
-    draw();
+    super::sharp::with_perspective(magnify, draw);
     SPRITE_VIS.with(|s| s.set(prev));
     pop_cpu_model();
+}
+
+thread_local! {
+    /// Whether the trailer's near fade applies to the standing sprite being drawn: off for the hero,
+    /// who is the frame's point of interest (the trees in front of him fade instead).
+    static NEAR_FADE: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// Runs `draw` with the near fade off (the hero's figure).
+fn without_near_fade(draw: impl FnOnce()) {
+    let prev = NEAR_FADE.with(|f| f.replace(false));
+    draw();
+    NEAR_FADE.with(|f| f.set(prev));
+}
+
+/// The fade of a standing sprite whose foot is `d` from the eye, for the trailer's `near` (world
+/// units): 0 at `near`, smoothly 1 at 1.5 `near` and beyond.
+fn near_fade(d: f32, near: f32) -> f32 {
+    let t = ((d - near) / (0.5 * near)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// The trailer's stills (`RAZDOR_TRAILER_CAM`, dev-only) show the world alone: no bar, pointer,
+/// minimap, compass, hover outline, tooltips, messages, marks or debug overlay, and no border line.
+fn trailer_clean() -> bool {
+    trailer().is_some()
 }
 
 fn push_model(m: Mat4) {
@@ -2657,7 +2698,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     });
     // 2.5D: the border lies on the ground, over the ground's marks and route and under every
     // standing sprite; the fog darkens it where the ground is unexplored.
-    if tilted {
+    if tilted && !trailer_clean() {
         ground(cam, || draw_border(game, cam));
     }
     if waits {
@@ -2754,7 +2795,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                 }
                 Drawable::Hero => {
                     let f = cam.to_screen(game.display_pos());
-                    standing(cam, f, f, shade_of(f), || draw_hero(game, assets, art, cam))
+                    without_near_fade(|| standing(cam, f, f, shade_of(f), || draw_hero(game, assets, art, cam)))
                 }
                 Drawable::Spell(n) => {
                     if let Some(s) = spell {
@@ -4177,16 +4218,19 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     // sprites; the flat view draws them after the world, as before.
     let shows: Vec<&Showing> = view.opening.iter().chain(&view.shows).collect();
     let flat = cam.tilt.is_none();
+    let hover = hover.filter(|_| !trailer_clean());
     frame_probe::time(Stage::World, || draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()), show.as_ref(), hover, true, Veil { shows: &shows, now: show_now }));
     if flat {
         frame_probe::time(Stage::Fog, || cam.draw_fog(game, &shows));
         gpu_wait(Stage::GpuFog);
     }
-    draw_clash_marks(view, &cam, crate::ui::clock::now());
+    if !trailer_clean() {
+        draw_clash_marks(view, &cam, crate::ui::clock::now());
+    }
     if flat {
         cam.draw_showing(game, view.opening.iter().chain(&view.shows), show_now);
     }
-    if let Some(s) = view.shows.front() {
+    if let Some(s) = view.shows.front().filter(|_| !trailer_clean()) {
         cam.draw_known_place(s, show_now);
     }
     // A spell's effect over the army it landed on.
@@ -4237,7 +4281,7 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     if view.debug && cam.tilt.is_none() {
         draw_debug(game, &cam);
     }
-    let (bar, toggle_map, timed) = bottom_bar(game, message, view.minimap, time_buttons && !game.waiting());
+    let (bar, toggle_map, timed) = if trailer_clean() { (None, false, None) } else { bottom_bar(game, message, view.minimap, time_buttons && !game.waiting()) };
     next = next.or(bar);
     // A time button pressed (its sound played): a wait, or the view's glide back to the hero
     // (0x4b9448: 2 or 8 ticks, 0x4af96c).
@@ -4250,7 +4294,7 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     if toggle_map {
         view.minimap = !view.minimap;
     }
-    if view.minimap {
+    if view.minimap && !trailer_clean() {
         if let Some(at) = frame_probe::time(Stage::Minimap, || minimap::window(game, assets.dt.as_ref(), cam.view, cam.world_rect(), surface_color)) {
             view.look = Some(at);
         }
@@ -4262,7 +4306,7 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
             }
         }
     }
-    if let (Some(r), Some(t)) = (compass, cam.tilt) {
+    if let (Some(r), Some(t), false) = (compass, cam.tilt, trailer_clean()) {
         if let Some(d) = view25::north_on_screen(&t.cam, cam.view) {
             draw_compass(r, d);
         }
@@ -4278,7 +4322,13 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
             None => Shape::Arrow,
         };
     }
-    cursor::set(if input_blocked() { Shape::Arrow } else { view.pointer });
+    cursor::set(if trailer_clean() {
+        Shape::Hidden
+    } else if input_blocked() {
+        Shape::Arrow
+    } else {
+        view.pointer
+    });
     // The right button held (the left one up) shows the tooltip of the army or building
     // under it, as in the original (interface.md §7.4), unless it drags the map. The pointer
     // is not drawn meanwhile (0x4cc269, 0x474a81).
@@ -4288,7 +4338,7 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     // [`super::rest::REST_SECS`] with no button down shows it too. The tooltip is centred on the
     // pointer, so the pointer is hidden here as in the held case.
     let rest_tip = super::touchpad::enabled() && super::rest::rested() && !input_blocked() && !dragging;
-    if let Some(t) = hover_tooltip(game, &cam).filter(|_| idle && (right_held || rest_tip) && !on_minimap) {
+    if let Some(t) = hover_tooltip(game, &cam).filter(|_| idle && (right_held || rest_tip) && !on_minimap && !trailer_clean()) {
         draw_tooltip(game, assets, &t);
         cursor::set(Shape::Hidden);
     }
@@ -4305,7 +4355,9 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
             view.toasts.pop_front();
         }
     }
-    draw_toasts(&mut view.toasts, crate::ui::clock::now());
+    if !trailer_clean() {
+        draw_toasts(&mut view.toasts, crate::ui::clock::now());
+    }
     next
 }
 

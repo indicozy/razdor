@@ -51,7 +51,22 @@ fn sharp_uv_ref(uv: Vec2, tex_size: Vec2, scale: Vec2) -> Vec2 {
 pub fn draw_scale(tex_size: Vec2, params: &DrawTextureParams) -> Vec2 {
     let source = params.source.map(|r| r.size()).unwrap_or(tex_size);
     let dest = params.dest_size.unwrap_or(source);
-    dest.abs() / source
+    dest.abs() / source * PERSPECTIVE.with(std::cell::Cell::get)
+}
+
+thread_local! {
+    /// The screen pixels per 2D pixel of a perspective draw (the dev-only trailer camera's standing
+    /// sprites: a sprite nearer the eye than the pivot is magnified, and its blend band must follow
+    /// the magnification, not the 2D size). 1 everywhere else.
+    static PERSPECTIVE: std::cell::Cell<f32> = const { std::cell::Cell::new(1.0) };
+}
+
+/// Runs `draw` with the perspective factor `k` (screen pixels per 2D pixel) for its sharp draws.
+pub fn with_perspective<R>(k: f32, draw: impl FnOnce() -> R) -> R {
+    let prev = PERSPECTIVE.with(|p| p.replace(k));
+    let r = draw();
+    PERSPECTIVE.with(|p| p.set(prev));
+    r
 }
 
 /// The vertex stage of every sharp material: as `chrome`'s own, with a highp `uv`.
