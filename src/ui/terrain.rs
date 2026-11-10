@@ -489,6 +489,20 @@ struct MapTextures {
     mask: Texture2D,
     /// The rivers' flow (zero until the flow is built: a still river).
     flow: Texture2D,
+    /// Razdor's weather masks (`weather::mask_texels`): snow, swamp rain, heat and ash; the lowland rain.
+    weather: Texture2D,
+    lowland: Texture2D,
+    /// The map's weather seed (`weather::map_seed`).
+    weather_seed: u64,
+}
+
+/// The weather's masks of a map, from the cache (see [`TerrainLayer::weather_masks`]).
+pub struct WeatherMasks {
+    /// One texel per cell: red snow, green swamp rain, blue heat, alpha ash (nearest, clamped).
+    pub biome: Texture2D,
+    /// One texel per cell: red lowland rain (nearest, clamped).
+    pub lowland: Texture2D,
+    pub seed: u64,
 }
 
 /// A map's surface codes, their flow, their textures and their size, kept while they stay the same.
@@ -701,9 +715,23 @@ impl TerrainLayer {
             Texture2D::from_rgba8(1, 1, &[128, 128, 128, 255])
         };
         flow_tex.set_filter(FilterMode::Linear);
-        let tex = MapTextures { cells, neighbours, mask, flow: flow_tex };
+        let (biome_bytes, lowland_bytes) = super::weather::mask_texels(codes);
+        // Nearest: the shader blends the four cells itself (`weather::mask4`).
+        let weather = Texture2D::from_rgba8(w as u16, h as u16, &biome_bytes);
+        weather.set_filter(FilterMode::Nearest);
+        let lowland = Texture2D::from_rgba8(w as u16, h as u16, &lowland_bytes);
+        lowland.set_filter(FilterMode::Nearest);
+        let weather_seed = super::weather::map_seed(w, h, codes);
+        let tex = MapTextures { cells, neighbours, mask, flow: flow_tex, weather, lowland, weather_seed };
         *cache = Some(CellTextures { codes: codes.to_vec(), flow: flow.to_vec(), size: (w, h), tex: tex.clone() });
         tex
+    }
+
+    /// The weather's masks of a `w`×`h` map (kept with the cells: rebuilt only when the codes or the
+    /// flow change). `flow` as in [`TerrainLayer::draw`].
+    pub fn weather_masks(&self, codes: &[u8], (w, h): (u32, u32), flow: &[(f32, f32)]) -> WeatherMasks {
+        let maps = self.cells(codes, w, h, flow);
+        WeatherMasks { biome: maps.weather, lowland: maps.lowland, seed: maps.weather_seed }
     }
 
     /// The cache's target for `key` (option 2): the screen's size in physical pixels, made or

@@ -40,6 +40,7 @@ use super::minimap;
 use super::mist;
 use super::terrain;
 use super::water;
+use super::weather;
 use super::saves::{self, Back, LoadView, SaveView};
 use super::story;
 use super::widgets::*;
@@ -638,6 +639,7 @@ impl MapView {
     /// A game was loaded: the places the old one was about to show are dropped.
     pub fn forget_shows(&mut self) {
         IDLE.with(|m| m.borrow_mut().clear());
+        weather::forget();
         // A game was loaded or started: its fog is shown as it is, with no fade of the whole map.
         minimap::snap_fog();
         self.shows.clear();
@@ -5398,6 +5400,9 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
             if mist_light {
                 draw_daylight(game, &cam, light);
             }
+            // Razdor's «Погода» (off by default): the land's weather over the drawn map, after the fog and the
+            // light, over the explored ground only (`draw_weather`).
+            draw_weather(game, assets, &cam, light, &shows);
         })
     });
     if !trailer_clean() {
@@ -5651,6 +5656,55 @@ fn draw_daylight(game: &Game, cam: &Camera, light: Option<daylight::Light>) {
             glow_at(cam.screen_at(game.display_pos()), 1.6 * cell_w, [1.0, 0.65, 0.30], 0.45 * light.glow * flicker * vis * vis);
         }
     });
+}
+
+/// Razdor's «Погода» (`weather`, off by default): the weather of the land over the drawn map, in window
+/// space after the fog and the light. Each pixel's ground is the projection's (flat, or the ray's hit
+/// with the ground in 2.5D); the biome masks are the terrain's cached textures (`TerrainLayer::weather_masks`);
+/// the fog's shown darkness masks the weather to the explored ground. The fog texture is asked with the
+/// same arguments as the fog's draw (`draw_fog_flat`), so its fade is not moved twice. The square grid
+/// only. Style only: nothing is computed when the weather is off.
+fn draw_weather(game: &Game, assets: &Assets, cam: &Camera, light: Option<daylight::Light>, shows: &[&Showing]) {
+    if !weather::on() || cam.grid != Grid::Square8 {
+        return;
+    }
+    let Some(layer) = assets.dt.as_ref().and_then(|a| a.terrain_layer()) else {
+        return;
+    };
+    let map = &game.world.map;
+    let flow = map_flow(game);
+    let flow: &[(f32, f32)] = flow.as_deref().map_or(&[], |f| f.as_slice());
+    let masks = layer.weather_masks(map.surface_codes(), (map.w as u32, map.h as u32), flow);
+    let now = crate::ui::clock::now();
+    let schedule = weather::schedule_of(masks.seed);
+    let days = game.clock.total_minutes() / razdor::rules::clock::MINUTES_PER_DAY as f64;
+    let Some(levels) = weather::frame_levels(&schedule, days, now) else {
+        return;
+    };
+    let settle = shows.iter().filter(|s| s.mask.is_some()).flat_map(|s| s.reveal_cells.iter().map(|&(i, _)| i));
+    let (held, origin) = (game.unshown_cells(), game.tile());
+    let fog = minimap::fog_layer(&game.fog, &held, origin, settle);
+    let projection = match cam.tilt {
+        // The flat view's pixel at the cell `p` is `p * scale - origin + view` (`to_screen`).
+        None => weather::Projection::Flat { scale: cam.scale, offset: [(cam.origin.x - cam.view.x) / cam.scale, (cam.origin.y - cam.view.y) / cam.scale] },
+        Some(t) => weather::Projection::Tilted { inverse: t.cam.view_proj(cam.view).inverse().to_cols_array_2d(), view: [cam.view.x, cam.view.y, cam.view.w, cam.view.h] },
+    };
+    let light_tint = light.map_or([1.0; 3], |l| l.tint);
+    let pass = weather::Pass {
+        biome: &masks.biome,
+        lowland: &masks.lowland,
+        fog: fog.as_ref(),
+        map: [map.w as f32, map.h as f32],
+        draw: [cam.draw.x, cam.draw.y, cam.draw.w, cam.draw.h],
+        projection,
+        levels,
+        phase: (now % weather::PERIOD as f64) as f32,
+        clock: (now % super::terrain::CLOCK_PERIOD as f64) as f32,
+        tint: light_tint,
+        layers: if crate::ui::display::dp_px().is_some() { 1.0 } else { 2.0 },
+        row_height: cam.grid.row_height(),
+    };
+    weather::draw(&pass);
 }
 
 /// Razdor's «Живая вода» wakes (`water`, off by default): a sailing army in motion (and the hero's
