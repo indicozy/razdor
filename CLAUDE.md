@@ -94,7 +94,9 @@ mobile support; there is no roadmap and nothing else is started unless the owner
   a mod is packed as its difference from Community Update.
   Sprite cut data (the owner's decision, 2026-11-10): `data/cards/*.json`, numbers made offline from
   the install's sprites by `tools/depth/cut_sprites.py` (polygons, triangles, foot points keyed by a
-  pixel hash) may be committed; never the sprites, depth maps or previews.
+  pixel hash), and `data/lights/*.json`, the detector's per-sprite boxes of windows, doors, gates,
+  chimneys and flags (numbers keyed by the pixel hash, made offline by `tools/depth/detect_points.py`),
+  may be committed; never the sprites, depth maps or previews.
 - The repo is public: every push is published at once.
 - Player-facing text (README, changelog, release notes, site, PLAYTEST_NOTES) is in Russian.
   Developer text stays English: code, comments, commit messages, CLAUDE.md, skills,
