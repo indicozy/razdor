@@ -605,6 +605,10 @@ impl TerrainLayer {
             return;
         }
         let Some((m, new)) = self.ground_material() else { return };
+        // The trailer's stills (dev-only): the atlas is sampled nearest, so the grass is not streaked.
+        if super::world_view::trailer_active() {
+            self.atlas.set_filter(FilterMode::Nearest);
+        }
         let (cells, neighbours) = self.cells(codes, w, h);
         gl_use_material(m);
         if new {

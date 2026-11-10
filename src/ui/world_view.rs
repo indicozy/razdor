@@ -1353,8 +1353,9 @@ fn standing(cam: &Camera, foot: Vec2, base: Vec2, vis: f32, draw: impl FnOnce())
     if let Some(t) = trailer() {
         let d = (on_ground - tilt.cam.eye()).length().max(1e-3);
         magnify = tilt.cam.pivot_scale(cam.view) * tilt.cam.distance / (d * cam.scale);
-        if t.near > 0.0 && NEAR_FADE.with(std::cell::Cell::get) {
-            vis *= near_fade(d, t.near);
+        let limit = t.near.min(NEAR_LIMIT.with(std::cell::Cell::get));
+        if limit > 0.0 && NEAR_FADE.with(std::cell::Cell::get) {
+            vis *= near_fade(d, limit);
         }
         if vis <= 0.0 {
             return;
@@ -1368,6 +1369,10 @@ fn standing(cam: &Camera, foot: Vec2, base: Vec2, vis: f32, draw: impl FnOnce())
 }
 
 thread_local! {
+    /// The distance from the eye of the hero's foot this frame: the trailer's near fade never reaches
+    /// past it, so the sprites between the camera and him fade and he stays in view (infinite off
+    /// the sprite run).
+    static NEAR_LIMIT: std::cell::Cell<f32> = const { std::cell::Cell::new(f32::INFINITY) };
     /// Whether the trailer's near fade applies to the standing sprite being drawn: off for the hero,
     /// who is the frame's point of interest (the trees in front of him fade instead).
     static NEAR_FADE: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
@@ -1385,6 +1390,24 @@ fn without_near_fade(draw: impl FnOnce()) {
 fn near_fade(d: f32, near: f32) -> f32 {
     let t = ((d - near) / (0.5 * near)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+/// The distance from the eye to a standing sprite's foot (2D point `foot` of the tilted space): the
+/// bent sheet's point where it is, else the flat ground's.
+fn foot_distance(cam: &Camera, foot: Vec2) -> Option<f32> {
+    let tilt = cam.tilt?;
+    let g = (foot + cam.origin) / cam.scale;
+    let on_ground = match tilt.cam.bend {
+        Some(bend) => bend.point(g),
+        None => vec3(g.x, 0.0, g.y),
+    };
+    Some((on_ground - tilt.cam.eye()).length())
+}
+
+/// Whether the trailer's stills are on (`RAZDOR_TRAILER_CAM`, dev-only): the terrain is drawn with
+/// nearest sampling then, and the frame shows the world alone.
+pub fn trailer_active() -> bool {
+    trailer().is_some()
 }
 
 /// The trailer's stills (`RAZDOR_TRAILER_CAM`, dev-only) show the world alone: no bar, pointer,
@@ -2763,6 +2786,12 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // Stable: figures sharing a cell keep the order they were pushed in.
     items.sort_by_key(|a| a.0);
     // One sharp session for the pass: its art shares the material switch (see `sharp::session`).
+    // The trailer's near fade stops at the hero's distance (see `NEAR_LIMIT`).
+    if trailer().is_some() {
+        if let Some(d) = foot_distance(cam, cam.to_screen(game.display_pos())) {
+            NEAR_LIMIT.with(|l| l.set(d));
+        }
+    }
     super::sharp::session(|| {
         for d in items.iter().map(|(_, d)| d) {
             match d {
@@ -2806,6 +2835,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
             }
         }
     });
+    NEAR_LIMIT.with(|l| l.set(f32::INFINITY));
     if waits {
         gpu_wait(Stage::GpuSprites);
     }
