@@ -560,12 +560,13 @@ swamp rain 45 %, lowland rain 20 %, heat 80 %, ash 70 %, clouds 70 %), heavy on 
 blends each midnight over one game hour; `frame_levels` eases the shown levels in real time (`LEVEL_TAU`) and
 forgets them when the weather is off or the map is forgotten (`forget`). `world_view::draw_weather` runs once a
 frame after the flat fog and the daylight, before the clash marks and the UI: the projection maps each pixel to
-its ground cell (`Projection`: flat from the camera's scale; 2.5D by the ray through the pixel, `Tilted`), the
+its ground cell (`Projection::matrix`: a homography, flat from the camera's scale, 2.5D the ground plane's fit to
+`view25::ground_homography`, four corner picks by `TiltCamera::pick`), the
 fog's shown darkness masks the weather to explored ground, and `weather::draw` composes snow, rain, heat haze,
-ash and cloud shadows in one fragment pass (the layers at level 0 are skipped; one particle layer on a phone,
-`display::dp_px`). The cell coordinate is centred on whole numbers (cells span ±½), so a mask lookup is
+ash and cloud shadows in one fragment pass (the layers at level 0 are skipped; two particle depths on a phone,
+three on the desktop, `display::dp_px`; the flakes and streaks grow with the zoom). The cell coordinate is centred on whole numbers (cells span ±½), so a mask lookup is
 `(p + ½) / MapSize`, and the world's y is divided by the grid's row height first. Known: the heat haze is wavering
-warm light, not a distortion (no frame readback); the bent first-person and eyes views use the plane's hit (hidden
+warm light, not a distortion (no frame readback); the bent first-person and eyes views use the plane's fit (hidden
 from players); the cloud shadows darken the sprites too.
 
 ## Sound and music

@@ -1395,3 +1395,65 @@ mod tests {
         }
     }
 }
+
+/// The projective map from a window pixel to the ground (world units, x and z), fitted to the four
+/// corners of `frame` by `TiltCamera::pick`: the ground is a plane, so one 3 × 3 matrix (row-major,
+/// in homogeneous pixel coordinates) gives every pixel's ground point. None when a corner sees no
+/// ground (above the horizon) or the fit is singular.
+pub fn ground_homography(cam: &TiltCamera, frame: Rect) -> Option<[[f32; 3]; 3]> {
+    let src = [
+        vec2(frame.x, frame.y),
+        vec2(frame.x + frame.w, frame.y),
+        vec2(frame.x + frame.w, frame.y + frame.h),
+        vec2(frame.x, frame.y + frame.h),
+    ];
+    let mut dst = [Vec2::ZERO; 4];
+    for (d, s) in dst.iter_mut().zip(src) {
+        *d = cam.pick(s, frame)?;
+    }
+    // Solve for h (h8 = 1): X (h6 x + h7 y + 1) = h0 x + h1 y + h2, Y likewise. Eight equations.
+    let mut a = [[0.0f64; 9]; 8];
+    for i in 0..4 {
+        let (x, y) = (src[i].x as f64, src[i].y as f64);
+        let (bx, by) = (dst[i].x as f64, dst[i].y as f64);
+        a[2 * i] = [x, y, 1.0, 0.0, 0.0, 0.0, -bx * x, -bx * y, bx];
+        a[2 * i + 1] = [0.0, 0.0, 0.0, x, y, 1.0, -by * x, -by * y, by];
+    }
+    for col in 0..8 {
+        let piv = (col..8).max_by(|&r, &q| a[r][col].abs().total_cmp(&a[q][col].abs()))?;
+        if a[piv][col].abs() < 1e-12 {
+            return None;
+        }
+        a.swap(col, piv);
+        let pivot = a[col];
+        for (r, row) in a.iter_mut().enumerate() {
+            if r != col {
+                let f = row[col] / pivot[col];
+                for (x, p) in row.iter_mut().zip(pivot.iter()).skip(col) {
+                    *x -= f * p;
+                }
+            }
+        }
+    }
+    let h: Vec<f64> = (0..8).map(|i| a[i][8] / a[i][i]).collect();
+    Some([[h[0] as f32, h[1] as f32, h[2] as f32], [h[3] as f32, h[4] as f32, h[5] as f32], [h[6] as f32, h[7] as f32, 1.0]])
+}
+
+#[cfg(test)]
+mod homography_tests {
+    use super::*;
+
+    #[test]
+    fn the_homography_matches_pick_at_every_pixel_of_a_tilted_frame() {
+        let frame = Rect::new(0.0, 0.0, 1280.0, 711.0);
+        let cam = TiltCamera::new(vec2(100.0, 103.0), 33.0, frame, 50.0, 30.0);
+        let h = ground_homography(&cam, frame).expect("the corners see the ground");
+        for (x, y) in [(640.0, 355.0), (100.0, 600.0), (1200.0, 80.0), (300.0, 300.0)] {
+            let g = cam.pick(vec2(x, y), frame).expect("ground");
+            let w = h[2][0] * x + h[2][1] * y + h[2][2];
+            let px = (h[0][0] * x + h[0][1] * y + h[0][2]) / w;
+            let py = (h[1][0] * x + h[1][1] * y + h[1][2]) / w;
+            assert!((px - g.x).abs() < 0.01 && (py - g.y).abs() < 0.01, "({x},{y}): {px},{py} vs {g:?}");
+        }
+    }
+}

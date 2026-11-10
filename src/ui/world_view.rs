@@ -5687,7 +5687,11 @@ fn draw_weather(game: &Game, assets: &Assets, cam: &Camera, light: Option<daylig
     let projection = match cam.tilt {
         // The flat view's pixel at the cell `p` is `p * scale - origin + view` (`to_screen`).
         None => weather::Projection::Flat { scale: cam.scale, offset: [(cam.origin.x - cam.view.x) / cam.scale, (cam.origin.y - cam.view.y) / cam.scale] },
-        Some(t) => weather::Projection::Tilted { inverse: t.cam.view_proj(cam.view).inverse().to_cols_array_2d(), view: [cam.view.x, cam.view.y, cam.view.w, cam.view.h] },
+        // The ground plane's homography, fitted to the camera's picks (`view25::ground_homography`).
+        Some(t) => match view25::ground_homography(&t.cam, cam.view) {
+            Some(h) => weather::Projection::Tilted { h },
+            None => return,
+        },
     };
     let light_tint = light.map_or([1.0; 3], |l| l.tint);
     let pass = weather::Pass {
@@ -5701,7 +5705,8 @@ fn draw_weather(game: &Game, assets: &Assets, cam: &Camera, light: Option<daylig
         phase: (now % weather::PERIOD as f64) as f32,
         clock: (now % super::terrain::CLOCK_PERIOD as f64) as f32,
         tint: light_tint,
-        layers: if crate::ui::display::dp_px().is_some() { 1.0 } else { 2.0 },
+        layers: if crate::ui::display::dp_px().is_some() { 2.0 } else { 3.0 },
+        zoom: cam.scale / PX,
         row_height: cam.grid.row_height(),
     };
     weather::draw(&pass);

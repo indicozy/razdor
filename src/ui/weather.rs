@@ -281,12 +281,23 @@ pub fn schedule_of(seed: u64) -> Schedule {
 }
 
 /// The drawing's projection: how a window pixel lands on the ground (in cells, the terrain's world
-/// units). Flat: `pixel / scale + offset`. Tilted: the ray through the pixel meets the ground (Y = 0)
-/// (`inverse` is the inverse of the view's projection, `view` the frame it maps).
+/// units). Flat: `pixel / scale + offset`. Tilted: the ground plane's fit to the camera's picks
+/// (`view25::ground_homography`).
 #[derive(Clone, Copy, Debug)]
 pub enum Projection {
     Flat { scale: f32, offset: [f32; 2] },
-    Tilted { inverse: [[f32; 4]; 4], view: [f32; 4] },
+    Tilted { h: [[f32; 3]; 3] },
+}
+
+impl Projection {
+    /// The pixel-to-ground matrix (row-major, homogeneous): the flat view's `pixel / scale + offset`,
+    /// or the tilted camera's fitted plane.
+    pub fn matrix(&self) -> [[f32; 3]; 3] {
+        match *self {
+            Projection::Flat { scale, offset } => [[1.0 / scale, 0.0, offset[0]], [0.0, 1.0 / scale, offset[1]], [0.0, 0.0, 1.0]],
+            Projection::Tilted { h } => h,
+        }
+    }
 }
 
 /// What the weather pass draws this frame.
@@ -309,8 +320,10 @@ pub struct Pass<'a> {
     pub clock: f32,
     /// The daylight tint (white with the lighting off).
     pub tint: [f32; 3],
-    /// Particle layers: 2 on the desktop, 1 on a phone.
+    /// Particle depths: 3 on the desktop, 2 on a phone.
     pub layers: f32,
+    /// The map's zoom: the flakes and streaks grow with it (pixels per cell over 32).
+    pub zoom: f32,
     /// The grid's row height in world units (`Grid::row_height`): the world's y is rows of it.
     pub row_height: f32,
 }
@@ -345,11 +358,11 @@ uniform sampler2D Weather;
 uniform sampler2D LowlandMask;
 uniform sampler2D Fog;
 uniform vec2 MapSize;
-uniform float Tilted;
-uniform mat4 Inverse;
-uniform vec4 ViewRect;
-uniform float FlatScale;
-uniform vec2 FlatOffset;
+uniform vec3 HomRow0;
+uniform vec3 HomRow1;
+uniform vec3 HomRow2;
+uniform float RowHeight;
+uniform float Zoom;
 uniform float Snow;
 uniform float SwampLevel;
 uniform float LowlandLevel;
@@ -360,7 +373,6 @@ uniform float Phase;
 uniform float Clock;
 uniform vec3 Tint;
 uniform float Layers;
-uniform float RowHeight;
 
 // The loop's angular speed: one whole cycle in the period (32 s), and the multiples used below.
 const float W = 0.19634954;
@@ -373,31 +385,33 @@ vec2 hash22(vec2 p) {
     return vec2(hash12(p), hash12(p + vec2(41.3, 17.7)));
 }
 
-// The ground under a pixel: flat, the pixel's cell position; tilted, the ray's hit with the ground.
+// The ground under a pixel: the projection's homography (`Projection`: the flat view's scale and
+// offset, or the ground plane's fit to the tilted camera), applied to the pixel's position.
 vec2 ground(vec2 px, out bool ok) {
-    if (Tilted < 0.5) {
-        ok = true;
-        return px / FlatScale + FlatOffset;
-    }
-    vec2 ndc = vec2((px.x - ViewRect.x) / ViewRect.z * 2.0 - 1.0, 1.0 - (px.y - ViewRect.y) / ViewRect.w * 2.0);
-    vec4 n = Inverse * vec4(ndc, -1.0, 1.0);
-    vec4 f = Inverse * vec4(ndc, 1.0, 1.0);
-    n.xyz /= n.w;
-    f.xyz /= f.w;
-    vec3 d = f.xyz - n.xyz;
-    ok = d.y < -0.000001;
-    if (!ok) {
-        return vec2(0.0);
-    }
-    float t = -n.y / d.y;
-    ok = t >= 0.0;
-    vec3 g = n.xyz + d * t;
-    return g.xz;
+    vec3 w = vec3(px, 1.0);
+    vec3 r = vec3(dot(HomRow0, w), dot(HomRow1, w), dot(HomRow2, w));
+    ok = abs(r.z) > 0.000000001;
+    return ok ? r.xy / r.z : vec2(0.0);
 }
 
-// Falling specks in square cells of `size` px. The field drifts by `vel` px/s, and each cell holds
-// one speck with probability `density`, at a hashed place, wobbling by `wob` px. Coverage 0..1.
-float specks(vec2 px, float size, vec2 vel, float radius, float density, float seed, float wob) {
+// The mask's bilinear sample at the cell coordinate p (the texel of cell i is centred at i + ½):
+// four nearest taps, blended by the fraction, clamped to the map. The masks are nearest-filtered.
+vec4 mask4(sampler2D t, vec2 p) {
+    vec2 i0 = floor(p);
+    vec2 f = p - i0;
+    vec2 a = clamp(i0, vec2(0.0), MapSize - 1.0);
+    vec2 b = clamp(i0 + 1.0, vec2(0.0), MapSize - 1.0);
+    vec4 c00 = texture2D(t, (vec2(a.x, a.y) + 0.5) / MapSize);
+    vec4 c10 = texture2D(t, (vec2(b.x, a.y) + 0.5) / MapSize);
+    vec4 c01 = texture2D(t, (vec2(a.x, b.y) + 0.5) / MapSize);
+    vec4 c11 = texture2D(t, (vec2(b.x, b.y) + 0.5) / MapSize);
+    return mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
+}
+
+// Soft round flakes (or specks) in square cells of `size` px. The field drifts by `vel` px/s (vel times
+// the 32 s period is a whole number of cells, so the loop is seamless). Each cell holds one flake with
+// probability `density`, at a hashed place, swaying by `wob` px. Radius `radius` px (scaled by Zoom).
+float flakes(vec2 px, float size, vec2 vel, float radius, float density, float seed, float wob) {
     vec2 q = px - vel * Phase;
     vec2 c0 = floor(q / size);
     float acc = 0.0;
@@ -409,35 +423,62 @@ float specks(vec2 px, float size, vec2 vel, float radius, float density, float s
                 continue;
             }
             vec2 h2 = hash22(c + seed + 3.7);
-            vec2 centre = (c + 0.2 + 0.6 * h2) * size;
+            vec2 centre = (c + 0.15 + 0.7 * h2) * size;
             centre.x += sin(16.0 * W * Phase + h * 40.0) * wob;
-            float r = radius * (0.7 + 0.6 * fract(h * 7.31));
-            acc += 1.0 - smoothstep(r * 0.5, r, length(q - centre));
+            float r = radius * Zoom * (0.75 + 0.5 * fract(h * 7.31));
+            acc += 1.0 - smoothstep(r * 0.55, r, length(q - centre));
         }
     }
     return min(acc, 1.0);
 }
 
-// Rain streaks. A streak keeps its u = x + 0.3 y (its slant, down to the left), and its v = y falls
-// at `speed` px/s. Cells are 26 px across and 150 px down; speed · PERIOD is a whole number of cells.
-float streaks(vec2 px, float speed, float seed) {
-    float u = px.x + 0.3 * px.y;
+// Rain streaks, slanted about 15 degrees down to the left: u = x + 0.27 y is constant along a streak,
+// and v = y − speed·t falls. Cells are `across` px wide (u) and `down` px tall (v); speed · 32 is a
+// whole number of `down` cells. A streak is 'len' (base) + 'range' px long, 0.6 px wide.
+float streaks(vec2 px, float speed, float seed, float across, float down, float len, float range, float density) {
+    float u = px.x + 0.27 * px.y;
     float v = px.y - speed * Phase;
-    vec2 c0 = floor(vec2(u / 26.0, v / 150.0));
+    vec2 c0 = floor(vec2(u / across, v / down));
     float acc = 0.0;
     for (int j = -1; j <= 1; j++) {
         for (int i = -1; i <= 1; i++) {
             vec2 c = c0 + vec2(float(i), float(j));
             float h = hash12(c + seed);
-            if (h > 0.55) {
+            if (h > density) {
                 continue;
             }
-            float cu = (c.x + 0.15 + 0.7 * fract(h * 5.13)) * 26.0;
+            float cu = (c.x + 0.1 + 0.8 * fract(h * 5.13)) * across;
+            float cv = (c.y + 0.1 + 0.8 * fract(h * 9.71)) * down;
+            float l = (len + range * fract(h * 3.37)) * Zoom;
+            float w = 0.6 * Zoom;
+            float ac = 1.0 - smoothstep(w * 0.5, w + 0.5, abs(u - cu));
+            float along = smoothstep(cv - l, cv - l + 4.0, v) * (1.0 - smoothstep(cv - 1.0, cv + 1.0, v));
+            acc += ac * along;
+        }
+    }
+    return min(acc, 1.0);
+}
+
+// Sand blown sideways in gusts: streaks along x (u = y, v = x + speed·t, the wind to the left). Cells
+// are 14 px across (y) and 150 px along (x); speed · 32 is a whole number of 150 px cells.
+float gusts(vec2 px, float speed, float seed) {
+    float u = px.y;
+    float v = px.x + speed * Phase;
+    vec2 c0 = floor(vec2(u / 14.0, v / 150.0));
+    float acc = 0.0;
+    for (int j = -1; j <= 1; j++) {
+        for (int i = -1; i <= 1; i++) {
+            vec2 c = c0 + vec2(float(i), float(j));
+            float h = hash12(c + seed);
+            if (h > 0.2) {
+                continue;
+            }
+            float cu = (c.x + 0.2 + 0.6 * fract(h * 5.13)) * 14.0;
             float cv = (c.y + 0.1 + 0.8 * fract(h * 9.71)) * 150.0;
-            float len = 34.0 + 22.0 * fract(h * 3.37);
-            float across = 1.0 - smoothstep(0.5, 1.1, abs(u - cu));
-            float along = smoothstep(cv - len, cv - len + 8.0, v) * (1.0 - smoothstep(cv - 1.0, cv + 1.0, v));
-            acc += across * along;
+            float l = (30.0 + 30.0 * fract(h * 3.37)) * Zoom;
+            float ac = 1.0 - smoothstep(0.6, 1.5, abs(u - cu));
+            float along = smoothstep(cv, cv + 6.0, v) * (1.0 - smoothstep(cv + l - 6.0, cv + l, v));
+            acc += ac * along;
         }
     }
     return min(acc, 1.0);
@@ -457,20 +498,6 @@ float fbm2(vec2 q) {
     return (vnoise(q) * 0.5 + vnoise(q * 2.0 + vec2(1.7, 9.2)) * 0.25) / 0.75;
 }
 
-// The mask's bilinear sample at the cell coordinate p (the texel of cell i is centred at i + ½):
-// four nearest taps, blended by the fraction, clamped to the map. The masks are nearest-filtered.
-vec4 mask4(sampler2D t, vec2 p) {
-    vec2 i0 = floor(p);
-    vec2 f = p - i0;
-    vec2 a = clamp(i0, vec2(0.0), MapSize - 1.0);
-    vec2 b = clamp(i0 + 1.0, vec2(0.0), MapSize - 1.0);
-    vec4 c00 = texture2D(t, (vec2(a.x, a.y) + 0.5) / MapSize);
-    vec4 c10 = texture2D(t, (vec2(b.x, a.y) + 0.5) / MapSize);
-    vec4 c01 = texture2D(t, (vec2(a.x, b.y) + 0.5) / MapSize);
-    vec4 c11 = texture2D(t, (vec2(b.x, b.y) + 0.5) / MapSize);
-    return mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
-}
-
 void main() {
     bool ok;
     vec2 p = ground(pix, ok);
@@ -483,70 +510,86 @@ void main() {
     vec2 uv = (p + 0.5) / MapSize;
     vec4 bw = mask4(Weather, p);
     float lowl = mask4(LowlandMask, p).r;
-    // Only the explored ground: the fog's shown darkness (0 lit, 1 black) masks the weather.
+    // Only the explored ground: the fog's shown darkness (0 lit, 1 black) masks the weather. The fog
+    // texture is filtered linearly, so its edge is a smooth ramp, not a cell step.
     float vis = 1.0 - texture2D(Fog, uv).a;
     if (vis < 0.01) {
         gl_FragColor = vec4(0.0);
         return;
     }
+    // Everything is an overlay (premultiplied colour `ov`, alpha `oa`) except the darkening `dark`.
     float dark = 0.0;
     float oa = 0.0;
     vec3 ov = vec3(0.0);
 
-    // Cloud shadows: everywhere, drifting over the ground in its own coordinates.
+    // Cloud shadows: soft blobs of 2 to 5 cells, drifting slowly over the ground in its own coordinates.
+    // They are everywhere (no biome mask), a cool shade, feathered by a wide smoothstep.
     if (Clouds > 0.01) {
-        vec2 q = p * 0.035 + Clock * vec2(0.02, 0.01);
-        float cover = smoothstep(0.42, 0.7, fbm2(q));
-        dark += Clouds * cover * 0.34 * vis;
-    }
-
-    // Snow on snow and ice: soft flakes down and to the left, two depths.
-    if (Snow > 0.01 && bw.r > 0.01) {
-        float s = specks(pix, 32.0, vec2(-30.0, 45.0), 1.8, 0.5 * Snow, 0.0, 3.0);
-        if (Layers > 1.5) {
-            s = max(s, 0.8 * specks(pix, 16.0, vec2(-15.0, 22.5), 1.0, 0.5 * Snow, 11.0, 1.5));
-        }
-        float a = clamp(s * bw.r * vis * 0.95, 0.0, 1.0);
-        ov += vec3(0.97, 0.98, 1.0) * a;
+        vec2 q = p * 0.25 + Clock * vec2(0.02, 0.01);
+        float cover = smoothstep(0.42, 0.60, fbm2(q)) * Clouds * vis;
+        float a = cover * 0.34;
+        ov += vec3(0.36, 0.46, 0.62) * a;
         oa += a;
     }
 
-    // Rain over swamps and lowlands: slanted streaks, a little lighter than the ground, and the wet
-    // ground a little darker under a heavy spell.
+    // Snow: soft round flakes down and to the left, three depths (near is faster and bigger), swaying.
+    if (Snow > 0.01 && bw.r > 0.01) {
+        float s = flakes(pix, 48.0, vec2(-30.0, 45.0), 2.6, 0.50 * Snow, 0.0, 4.0);
+        if (Layers > 1.5) {
+            s += 0.9 * flakes(pix, 32.0, vec2(-20.0, 30.0), 1.7, 0.60 * Snow, 11.0, 3.0);
+        }
+        if (Layers > 2.5) {
+            s += 0.7 * flakes(pix, 16.0, vec2(-10.0, 15.0), 1.1, 0.60 * Snow, 23.0, 1.5);
+        }
+        float a = clamp(s * bw.r * vis, 0.0, 1.0);
+        ov += vec3(0.98, 0.99, 1.0) * a;
+        oa += a;
+        // A slight whitening of the snow under the flakes.
+        float h = 0.07 * Snow * bw.r * vis;
+        ov += vec3(0.95, 0.96, 1.0) * h;
+        oa += h;
+    }
+
+    // Rain over swamps and lowlands: slanted grey streaks in two depths, the wet ground about 10 %
+    // darker and a faint cool tint under a heavy spell.
     float rain = max(SwampLevel * bw.g, LowlandLevel * lowl);
     if (rain > 0.01) {
-        float s = streaks(pix, 900.0, 0.0);
-        if (Layers > 1.5) {
-            s = max(s, 0.7 * streaks(pix, 1200.0, 5.0));
+        float s = streaks(pix, 900.0, 0.0, 26.0, 96.0, 14.0, 12.0, 0.6);
+        if (Layers > 2.5) {
+            s = max(s, 0.8 * streaks(pix, 1200.0, 5.0, 20.0, 80.0, 10.0, 10.0, 0.5));
         }
-        float a = clamp(s * rain * vis * 0.3, 0.0, 1.0);
-        ov += vec3(0.72, 0.78, 0.86) * a;
+        float a = clamp(s * rain * vis * 0.45, 0.0, 1.0);
+        ov += vec3(0.80, 0.82, 0.85) * a;
         oa += a;
-        dark += rain * 0.05 * vis;
+        dark += rain * 0.10 * vis;
+        float c = 0.06 * rain * vis;
+        ov += vec3(0.50, 0.60, 0.75) * c;
+        oa += c;
     }
 
-    // Heat haze over deserts and dust (and half over fire lands): soft warm bands that waver, since
-    // reading the frame back to bend it would cost a readback each frame. A heavy spell adds sand.
+    // Heat haze over deserts and dust (and half over fire lands): a faint pale shimmer of bands that
+    // waver, since reading the frame back to bend it would cost a readback each frame. A heavy spell
+    // blows pale sand in gusts.
     if (Heat > 0.01 && bw.b > 0.01) {
-        float wv = pix.y * 0.11 + 2.0 * sin(pix.x * 0.023 + 2.0 * W * Phase) + 8.0 * W * Phase;
+        float wv = pix.y * 0.09 + 2.0 * sin(pix.x * 0.02 + 2.0 * W * Phase) + 8.0 * W * Phase;
         float band = 0.5 + 0.5 * sin(wv);
-        float a = band * bw.b * Heat * 0.14 * vis;
-        ov += vec3(1.0, 0.86, 0.6) * a;
+        float a = band * bw.b * Heat * 0.06 * vis;
+        ov += vec3(1.0, 0.94, 0.8) * a;
         oa += a;
         float gust = clamp((Heat - 0.9) * 10.0, 0.0, 1.0);
         if (gust > 0.0) {
-            float sand = specks(pix, 48.0, vec2(-96.0, 0.0), 1.6, 0.35, 37.0, 0.0);
-            float b = clamp(sand * bw.b * vis * 0.8 * gust, 0.0, 1.0);
-            ov += vec3(0.85, 0.7, 0.45) * b;
+            float sand = gusts(pix, 600.0, 3.0);
+            float b = clamp(sand * bw.b * vis * 0.5 * gust, 0.0, 1.0);
+            ov += vec3(0.86, 0.74, 0.46) * b;
             oa += b;
         }
     }
 
-    // Ash over fire lands: slow grey-orange specks rising a little.
+    // Ash over fire lands: few soft grey specks, floating and drifting up a little.
     if (Ash > 0.01 && bw.a > 0.01) {
-        float s = specks(pix, 32.0, vec2(6.0, -12.0), 2.0, 0.8 * Ash, 23.0, 2.0);
-        float a = clamp(s * bw.a * vis * 0.85, 0.0, 1.0);
-        ov += vec3(0.74, 0.66, 0.58) * a;
+        float s = flakes(pix, 32.0, vec2(4.0, -8.0), 2.0, 0.24 * Ash, 23.0, 2.0);
+        float a = clamp(s * bw.a * vis * 0.8, 0.0, 1.0);
+        ov += vec3(0.78, 0.74, 0.68) * a;
         oa += a;
     }
 
@@ -569,11 +612,9 @@ local! {
 fn load() -> Option<Material> {
     let uniforms = [
         ("MapSize", UniformType::Float2),
-        ("Tilted", UniformType::Float1),
-        ("Inverse", UniformType::Mat4),
-        ("ViewRect", UniformType::Float4),
-        ("FlatScale", UniformType::Float1),
-        ("FlatOffset", UniformType::Float2),
+        ("HomRow0", UniformType::Float3),
+        ("HomRow1", UniformType::Float3),
+        ("HomRow2", UniformType::Float3),
         ("Snow", UniformType::Float1),
         ("SwampLevel", UniformType::Float1),
         ("LowlandLevel", UniformType::Float1),
@@ -584,6 +625,7 @@ fn load() -> Option<Material> {
         ("Clock", UniformType::Float1),
         ("Tint", UniformType::Float3),
         ("Layers", UniformType::Float1),
+        ("Zoom", UniformType::Float1),
         ("RowHeight", UniformType::Float1),
     ];
     let params = MaterialParams {
@@ -613,15 +655,10 @@ pub fn draw(pass: &Pass) {
         m.set_texture("LowlandMask", pass.lowland.clone());
         m.set_texture("Fog", fog);
         m.set_uniform("MapSize", vec2(pass.map[0], pass.map[1]));
-        let (tilted, inverse, view, scale, offset) = match pass.projection {
-            Projection::Flat { scale, offset } => (0.0, Mat4::IDENTITY, [0.0; 4], scale, offset),
-            Projection::Tilted { inverse, view } => (1.0, Mat4::from_cols_array_2d(&inverse), view, 1.0, [0.0; 2]),
-        };
-        m.set_uniform("Tilted", tilted);
-        m.set_uniform("Inverse", inverse);
-        m.set_uniform("ViewRect", vec4(view[0], view[1], view[2], view[3]));
-        m.set_uniform("FlatScale", scale);
-        m.set_uniform("FlatOffset", vec2(offset[0], offset[1]));
+        let rows = pass.projection.matrix();
+        for (name, row) in [("HomRow0", rows[0]), ("HomRow1", rows[1]), ("HomRow2", rows[2])] {
+            m.set_uniform(name, vec3(row[0], row[1], row[2]));
+        }
         let l = pass.levels;
         m.set_uniform("Snow", l.snow);
         m.set_uniform("SwampLevel", l.swamp);
@@ -633,6 +670,7 @@ pub fn draw(pass: &Pass) {
         m.set_uniform("Clock", pass.clock);
         m.set_uniform("Tint", vec3(pass.tint[0], pass.tint[1], pass.tint[2]));
         m.set_uniform("Layers", pass.layers);
+        m.set_uniform("Zoom", pass.zoom);
         m.set_uniform("RowHeight", pass.row_height);
         let d = pass.draw;
         let one = ONE.with(|t| t.clone());
