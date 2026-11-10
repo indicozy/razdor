@@ -597,8 +597,11 @@ one chimney spaced through `PUFF_LIFE`, 6 s; each rises 1.5 cells, grows and fad
 puffs are one `living::Batch` drawn over the sprites (`draw_smoke`), each building's puffs placed by the billboard of its
 foot (`living::Space`, the sprite's own model); 7 a chimney on the desktop, 4 on the phones. **Moving parts**: a sprite
 with one is drawn from a copy with those areas cleared (`living::cleared`, made at atlas build; its texture is made on
-first use, `Living::body`), and each part is drawn over it (`living::part_mesh`): the sails' disc turns (`sail_angle`, a
-turn in 9 s), the flag's columns sway (`flag_sway`, the free end most). In the card path a part goes with the card whose
+first use, `Living::body`), and each part is drawn over it (`living::part_mesh`): a sails box turns only when its pixels look like
+sails (`living::moves`: under 55 % opaque, the quadrants about even, the hub near the centre: `sails_look`), and its
+disc turns (`sail_angle`, a turn in 9 s); a flag box sways only when it is not a solid blob (over 70 % opaque is a
+figure: `cloth_look`), its columns moving with `flag_sway`, the free end most. A windmill's sails box that holds its
+roof, or a solid castle banner, stays still. In the card path a part goes with the card whose
 outline holds its anchor (`owning_card`), not the nearest foot: a card pivots about its own foot, so a part drawn under
 another card's billboard would shift by (size − 1) times the feet's distance. **Birds**: `living::flock_at`, one chance a
 40 s slot (a flock 20 to 60 s after the last), 14 s trips across the visible world rectangle, 3 to 7 birds in a V

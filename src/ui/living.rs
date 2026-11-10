@@ -362,6 +362,83 @@ pub fn cleared(img: &Image, parts: &[Part]) -> Image {
     out
 }
 
+// ----- Telling the parts apart -----
+
+/// What a box of a sprite holds: its size, its opaque pixels (alpha 128 or more), those per quadrant
+/// about the box centre, and the centroid of the opaque pixels, in sprite pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BoxLook {
+    pub area: usize,
+    pub opaque: usize,
+    pub quadrants: [usize; 4],
+    pub centroid: (f32, f32),
+    pub centre: (f32, f32),
+    pub half: (f32, f32),
+}
+
+/// The look of the box `rect` of `img`, clamped to the sprite.
+pub fn box_look(img: &Image, rect: [f32; 4]) -> BoxLook {
+    let (w, h) = (img.width as usize, img.height as usize);
+    let x0 = rect[0].max(0.0).floor() as usize;
+    let y0 = rect[1].max(0.0).floor() as usize;
+    let x1 = (rect[2].ceil().max(0.0) as usize).min(w);
+    let y1 = (rect[3].ceil().max(0.0) as usize).min(h);
+    let centre = ((rect[0] + rect[2]) / 2.0, (rect[1] + rect[3]) / 2.0);
+    let half = ((rect[2] - rect[0]) / 2.0, (rect[3] - rect[1]) / 2.0);
+    let mut look = BoxLook { area: 0, opaque: 0, quadrants: [0; 4], centroid: (0.0, 0.0), centre, half };
+    let (mut sx, mut sy) = (0.0f64, 0.0f64);
+    for y in y0..y1 {
+        for x in x0..x1 {
+            look.area += 1;
+            if img.rgba[(y * w + x) * 4 + 3] < 128 {
+                continue;
+            }
+            look.opaque += 1;
+            let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+            let q = usize::from(px >= centre.0) + 2 * usize::from(py >= centre.1);
+            look.quadrants[q] += 1;
+            sx += f64::from(px);
+            sy += f64::from(py);
+        }
+    }
+    if look.opaque > 0 {
+        look.centroid = ((sx / look.opaque as f64) as f32, (sy / look.opaque as f64) as f32);
+    }
+    look
+}
+
+/// Whether a box's pixels look like sails: thin spokes or blades on the sprite's background, so
+/// under 55 % of the box is opaque, the opaque pixels are about evenly spread over the four quadrants
+/// (the weakest at least half the strongest), and their centroid lies near the box centre (within a
+/// quarter of its half-size: the hub). A windmill's roof or a wall fails the coverage test.
+pub fn sails_look(look: &BoxLook) -> bool {
+    if look.opaque == 0 || look.area == 0 {
+        return false;
+    }
+    let coverage = look.opaque as f32 / look.area as f32;
+    let (lo, hi) = (look.quadrants.iter().min().copied().unwrap_or(0), look.quadrants.iter().max().copied().unwrap_or(0));
+    let balanced = hi > 0 && lo * 2 >= hi;
+    let near_hub = (look.centroid.0 - look.centre.0).abs() <= 0.25 * look.half.0 && (look.centroid.1 - look.centre.1).abs() <= 0.25 * look.half.1;
+    coverage < 0.55 && balanced && near_hub
+}
+
+/// Whether a flag box's pixels look like cloth: not a figure-sized opaque blob, so at most 70 % of
+/// the box is opaque.
+pub fn cloth_look(look: &BoxLook) -> bool {
+    look.opaque > 0 && (look.opaque as f32 / look.area.max(1) as f32) <= 0.70
+}
+
+/// Whether a point's moving part is real: a sails box that looks like sails, a flag box that looks
+/// like cloth. Other kinds never move.
+pub fn moves(img: &Image, point: &Point) -> bool {
+    let look = box_look(img, point.rect);
+    match point.kind {
+        Kind::Sails => sails_look(&look),
+        Kind::Flag => cloth_look(&look),
+        _ => false,
+    }
+}
+
 // ----- Birds -----
 
 /// One chance of a flock per slot of this many seconds: a flock starts at a seeded time in the
@@ -606,6 +683,52 @@ mod tests {
         assert!(free > 12.0 - amp && free <= 12.0 + amp + 1e-4, "the free end swings within its amplitude: {free}");
         // The texture coordinates are the box's own texels (the atlas rectangle at the origin here).
         assert!(verts.iter().all(|v| (0.0..=20.0).contains(&(v.uv.x * 20.0))));
+    }
+
+    /// A sprite of `w` × `h` with the given opaque pixels (`true`), all of one colour.
+    fn painted(w: u32, h: u32, on: impl Fn(u32, u32) -> bool) -> Image {
+        let mut rgba = vec![0u8; (w * h * 4) as usize];
+        for y in 0..h {
+            for x in 0..w {
+                if on(x, y) {
+                    let i = ((y * w + x) * 4) as usize;
+                    rgba[i..i + 4].copy_from_slice(&[200, 150, 50, 255]);
+                }
+            }
+        }
+        Image { width: w, height: h, rgba }
+    }
+
+    #[test]
+    fn thin_spokes_about_the_hub_are_sails_and_a_blob_is_not() {
+        // A 20 x 20 box with a 1 px cross through its centre (the hub): 39 of 400 pixels.
+        let spokes = painted(40, 40, |x, y| (10..30).contains(&x) && (10..30).contains(&y) && (x == 19 || x == 20 || y == 19 || y == 20));
+        let look = box_look(&spokes, [10.0, 10.0, 30.0, 30.0]);
+        assert!(sails_look(&look), "spokes look like sails: {look:?}");
+        assert!(moves(&spokes, &Point { kind: Kind::Sails, rect: [10.0, 10.0, 30.0, 30.0] }));
+        // A solid block of the box: a roof or a wall, not sails.
+        let block = painted(40, 40, |x, y| (10..30).contains(&x) && (10..30).contains(&y));
+        assert!(!sails_look(&box_look(&block, [10.0, 10.0, 30.0, 30.0])), "a solid box is not sails");
+        // Sails crowded into one corner are not turning sails about a hub.
+        let corner = painted(40, 40, |x, y| (10..16).contains(&x) && (10..16).contains(&y));
+        assert!(!sails_look(&box_look(&corner, [10.0, 10.0, 30.0, 30.0])), "one quadrant is not symmetric");
+        // Nothing opaque at all: nothing to move.
+        assert!(!sails_look(&box_look(&painted(40, 40, |_, _| false), [10.0, 10.0, 30.0, 30.0])));
+    }
+
+    #[test]
+    fn a_flag_is_cloth_unless_it_is_a_figure_sized_blob() {
+        // Cloth: about half the box opaque.
+        let cloth = painted(30, 30, |x, y| (4..16).contains(&x) && (4..24).contains(&y) && (x + y) % 2 == 0);
+        assert!(cloth_look(&box_look(&cloth, [4.0, 4.0, 16.0, 24.0])));
+        assert!(moves(&cloth, &Point { kind: Kind::Flag, rect: [4.0, 4.0, 16.0, 24.0] }));
+        // A figure-sized opaque blob (over 70 % of the box): not a flag.
+        let figure = painted(30, 30, |x, y| (4..16).contains(&x) && (4..24).contains(&y));
+        assert!(!cloth_look(&box_look(&figure, [4.0, 4.0, 16.0, 24.0])), "a solid figure is no flag");
+        assert!(!moves(&figure, &Point { kind: Kind::Flag, rect: [4.0, 4.0, 16.0, 24.0] }));
+        // A box past the sprite's edge is clamped, not read out of the image.
+        let edge = box_look(&figure, [20.0, 20.0, 60.0, 60.0]);
+        assert_eq!(edge.area, 100, "clamped to the 30 x 30 sprite's corner");
     }
 
     #[test]

@@ -440,7 +440,9 @@ impl DtArt {
                     if let Some(p) = points {
                         let (w, h) = (s.image.width as f32, s.image.height as f32);
                         let chimneys: Vec<[f32; 4]> = p.points.iter().filter(|p| p.kind == Kind::Chimney).map(|p| p.rect).collect();
-                        let parts: Vec<living::Part> = p.points.iter().enumerate().filter_map(|(i, p)| living::Part::of(p, w, h, i)).collect();
+                        // Only a box whose pixels look like the part moves (sails spokes, cloth), so a
+                        // windmill's roof or a figure's blob stays still.
+                        let parts: Vec<living::Part> = p.points.iter().enumerate().filter(|(_, q)| living::moves(&s.image, q)).filter_map(|(i, q)| living::Part::of(q, w, h, i)).collect();
                         if !chimneys.is_empty() || !parts.is_empty() {
                             let body = (!parts.is_empty()).then(|| living::cleared(&s.image, &parts));
                             living_map.insert(id, Living { chimneys, parts, body, texture: OnceCell::new() });
