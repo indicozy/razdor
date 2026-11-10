@@ -7,9 +7,68 @@
 //! (`silhouette`), kept once in the shadow atlas (`DtArt::shadow_texture`, the map atlas's layout).
 //! The quad is drawn in black with the silhouette as its alpha, so it darkens what lies under it.
 
+use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation, PipelineParams};
 use macroquad::prelude::*;
 use razdor::dt::cards::Card;
 use razdor::dt::gfx::Image;
+
+use super::sharp::SHARP_VERTEX;
+
+/// The colour a shadow takes at full strength: the ground multiplied by this, a cool dark (not black),
+/// so a shadow reads as shade on the grass rather than as paint.
+pub const TINT: [f32; 3] = [0.35, 0.38, 0.48];
+
+/// The darkening fragment: each texel's silhouette alpha times the quad's strength (its vertex colour's
+/// red) mixes the ground toward `Tint`. Drawn with a multiply blend, so the ground keeps `1 - a(1 - Tint)`
+/// of its colour, in the flat view and in the 2.5D ground pass alike.
+const DARKEN_FRAGMENT: &str = r#"#version 100
+precision mediump float;
+varying highp vec2 uv;
+varying lowp vec4 color;
+uniform sampler2D Texture;
+uniform vec3 Tint;
+void main() {
+    float a = color.r * texture2D(Texture, uv).a;
+    gl_FragColor = vec4(mix(vec3(1.0), Tint, a), 1.0);
+}"#;
+
+razdor::local! {
+    static DARKEN: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
+}
+
+fn darken_material() -> Option<Material> {
+    DARKEN.with(|m| {
+        m.get_or_init(|| {
+            let params = MaterialParams {
+                uniforms: vec![UniformDesc::new("Tint", UniformType::Float3)],
+                pipeline_params: PipelineParams {
+                    color_blend: Some(BlendState::new(Equation::Add, BlendFactor::Zero, BlendFactor::Value(BlendValue::SourceColor))),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            load_material(ShaderSource::Glsl { vertex: SHARP_VERTEX, fragment: DARKEN_FRAGMENT }, params)
+                .map_err(|e| razdor::diag!("shadow material: {e}"))
+                .ok()
+        })
+        .clone()
+    })
+}
+
+/// Runs `draw` (the shadow quads, drawn with `darken_meshes`' colours) with the darkening material set;
+/// nothing is drawn without it.
+pub fn darken(draw: impl FnOnce()) {
+    let Some(m) = darken_material() else { return };
+    m.set_uniform("Tint", vec3(TINT[0], TINT[1], TINT[2]));
+    gl_use_material(&m);
+    draw();
+    gl_use_default_material();
+}
+
+/// The vertex colour of a shadow quad of `strength` (its alpha before the mask, 0 to 1).
+pub fn strength_colour(strength: f32) -> Color {
+    Color::new(strength, strength, strength, 1.0)
+}
 
 /// The alpha a picture's pixel needs to cast (0.8 of 255): the opaque body, not its soft edges.
 const CAST_MIN_ALPHA: u8 = 204;

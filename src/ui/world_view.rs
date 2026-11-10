@@ -3066,7 +3066,7 @@ fn draw_sun_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, casts: dayli
             return;
         }
         for (c, p) in projections(origin, foot_row) {
-            if let Some((vertices, indices)) = p.picture_mesh(src, size, Color::new(0.0, 0.0, 0.0, c.alpha * k)) {
+            if let Some((vertices, indices)) = p.picture_mesh(src, size, shadow::strength_colour(c.alpha * k)) {
                 draw_mesh(&Mesh { vertices, indices, texture: Some(texture.clone()) });
             }
         }
@@ -3081,7 +3081,7 @@ fn draw_sun_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, casts: dayli
                         continue;
                     }
                     for (c, p) in projections(origin, card.foot.1) {
-                        let (vertices, indices) = p.card_mesh(card, r, size, Color::new(0.0, 0.0, 0.0, c.alpha * k));
+                        let (vertices, indices) = p.card_mesh(card, r, size, shadow::strength_colour(c.alpha * k));
                         draw_mesh(&Mesh { vertices, indices, texture: Some(texture.clone()) });
                     }
                 }
@@ -3831,7 +3831,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     if let Some(casts) = sun {
         let objects: Vec<&Decoration> = map.objects_in_rows(r0 - up, r1 + below).iter().filter(|o| seen(o)).collect();
         let locations: Vec<&Location> = game.world.locations.iter().filter(|l| location_seen(l) && !l.kind.is_bridge()).collect();
-        ground(cam, || draw_sun_shadows(game, art, cam, casts, &objects, &locations));
+        ground(cam, || shadow::darken(|| draw_sun_shadows(game, art, cam, casts, &objects, &locations)));
     }
     // The original (0x4c8864) draws the hills of classes 1-3 in a pass of their own before
     // anything else, so they lie under every tree, mountain, building and army, the ones

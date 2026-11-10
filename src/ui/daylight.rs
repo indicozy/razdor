@@ -147,9 +147,9 @@ pub struct Casts {
 }
 
 /// The sun's shadow alpha at full light (by day), fading through the dusk.
-const SUN_ALPHA: f32 = 0.45;
+const SUN_ALPHA: f32 = 0.6;
 /// The moon's shadow alpha, from dusk to dawn.
-const MOON_ALPHA: f32 = 0.12;
+const MOON_ALPHA: f32 = 0.15;
 /// The shortest and the longest shadow per unit of height (the dawn's cap, `perf-analysis`).
 const LEN_MIN: f32 = 0.25;
 const LEN_MAX: f32 = 2.6;
@@ -625,7 +625,7 @@ mod tests {
         for h in [9.0, 12.0, 16.0, 18.0] {
             assert!(casts_at(h).moon.alpha < 1e-5, "{h}:00 the moon is not up");
         }
-        assert!(casts_at(19.5).moon.alpha < 0.12 && casts_at(19.5).moon.alpha > 0.0, "the moon comes up over the dusk");
+        assert!(casts_at(19.5).moon.alpha < MOON_ALPHA && casts_at(19.5).moon.alpha > 0.0, "the moon comes up over the dusk");
         assert!(casts_at(6.0).moon.alpha < 1e-5, "gone at dawn");
     }
 
