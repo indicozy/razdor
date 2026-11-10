@@ -220,19 +220,23 @@ enum ModFault {
     Play(String),
 }
 
-/// The worker's work of a mod switch: the choice `id` made (its damaged files restored first,
-/// `Hub::repair_mod`; its folder built, `use_mod`), then the install read again and its scenario
-/// list. A choice that does not build reads nothing.
+/// The worker's work of a mod switch: the choice `id` made (its folder built, `use_mod`; only
+/// when that fails are its damaged files restored, `Hub::repair_mod`, and the build tried again),
+/// then the install read again and its scenario list. A choice that does not build reads nothing.
 fn build_mod(local: &std::path::Path, base: &std::path::Path, id: Option<&str>) -> ModBuilt {
     let mut repaired = false;
-    if let Some(mod_id) = id {
+    let mut built = razdor::hub::use_mod(local, base, id).map(|_| ()).map_err(ModFault::Play);
+    if let (Some(mod_id), Err(_)) = (id, &built) {
         let hub = razdor::hub::Hub { source: razdor::hub::Source::from_env(), local: local.to_path_buf() };
         match hub.repair_mod(mod_id) {
-            Ok(restored) => repaired = restored,
+            Ok(true) => {
+                repaired = true;
+                built = razdor::hub::use_mod(local, base, id).map(|_| ()).map_err(ModFault::Play);
+            }
+            Ok(false) => {}
             Err(e) => return ModBuilt { built: Err(ModFault::Repair(e)), repaired: false, install: None, scenarios: Vec::new() },
         }
     }
-    let built = razdor::hub::use_mod(local, base, id).map(|_| ()).map_err(ModFault::Play);
     if built.is_err() {
         return ModBuilt { built, repaired: false, install: None, scenarios: Vec::new() };
     }
@@ -554,6 +558,7 @@ impl App {
     /// it is cheap), the list is the one it made, and the others' built folders go, as the
     /// game reads the new one now.
     fn apply_mod(&mut self, id: Option<String>, built: ModBuilt) {
+        let previous = self.active_mod.clone();
         let repaired = built.repaired;
         match built.built {
             Ok(()) => {}
@@ -580,7 +585,10 @@ impl App {
             self.message = Some(tr("The mod's damaged or missing files were restored.").into());
         }
         if let Some(local) = razdor::hub::local_dir() {
-            razdor::hub::keep_only_game_folder(&local, id.as_deref());
+            // With the base game chosen, the last mod's folder is kept too: one folder kept, the
+            // last mod's, so going back to it does not rebuild it (a full copy on a phone).
+            let keep = if id.is_some() { id.as_deref() } else { previous.as_deref() };
+            razdor::hub::keep_only_game_folder(&local, keep);
         }
     }
 

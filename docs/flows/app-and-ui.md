@@ -799,14 +799,13 @@ then each file of `files/` laid over the base file of the same path ignoring ASC
 keeping the base's spelling (`Data/Units.ini` replaced by `data/units.ini`); a file with no match is
 added. A link is removed before its file is replaced, so the base is never written. The build goes into
 `game.tmp/` and is renamed into place; `stamp.json` in the folder holds the base path, a digest of the
-base's names, sizes and times, the mod's version and the SHA-256 of each mod file, and a folder whose
+base's names, sizes and times, the mod's version and the SHA-256 of each mod file (the asked mod's digests come from its manifest, which `damaged_files` has just checked, so they are not hashed again; the requirements' are hashed), and a folder whose
 stamp differs is rebuilt (a reinstall, a changed base or file list). The stamp also holds a digest of the folder's own files (`game_fingerprint`: names and sizes), so a folder that lost a file (an antivirus) is built again from the mod's files. A stamp written before fingerprints (1.3.13 and older) matches in everything else: the folder is adopted and its fingerprint written, not rebuilt (a rebuild is a full copy on a phone, and it ran at each start). `hub::active_install_dir(base)`
 (called by `DtInstall::from_env` after `locate`, so the whole app reads it: assets, content, maps,
 language, `save::set_install`) returns the active mod's folder, else `base`; the choice is
 `<hub>/active.json` (`{"mod": "<id>"}`, none = the base). A choice whose mod is gone or does not build
-is cleared and the base played. Only the active mod's built folder is kept: `choose_mod` calls
-`hub::keep_only_game_folder` after the reload has landed on the new choice (never before, so the folder in
-use is not removed); a mod's `files/` stay, so playing it again rebuilds its folder. Each built folder is a
+is cleared and the base played. At most one mod's built folder is kept: `apply_mod` calls
+`hub::keep_only_game_folder` after the switch has landed (never before, so the folder in use is not removed). It keeps the active mod's folder, or, when the base is chosen, the last mod's, so going back to that mod is instant and does not rebuild it; a mod's `files/` stay, so playing it again rebuilds its folder. Each built folder is a
 full copy of the base where the hub is on another disk than the install (Windows: install on D:, app data on
 C:), which is why the others go. A mod's saves are not in its folder: `save::saves_dir_of(app saves root, game
 folder)` keys them by the game folder's path, beside the other installs' saves, and that path is the same
@@ -818,8 +817,7 @@ are not in the mod's folder.
 **Switching** (the new-game window, `new_game::scenario_select`): when a mod is installed, a «Мод» drop-down
 (`view_choice_at`, the extras row under the buttons (1458: `new_game::extra_top`, half the width beside «Добавить карту…», full alone; the hint is «Добавить карту…»'s tooltip); «Мод: нет» then
 «Мод: <title>» per installed mod) sets
-`MOD_REQUEST`; `App::choose_mod` starts `build_mod` on a worker (1441), which repairs the mod's damaged files first (`Hub::repair_mod`, the one network step; `ModBuilt::repaired` gives the notice «…restored», `ModFault::Repair` the failure message, and the choice stays), then `hub::use_mod` builds the folder and
-writes `active.json`, then `DtInstall::from_env` and the scenario list are made there too. `App::poll_mod_switch`
+`MOD_REQUEST`; `App::choose_mod` starts `build_mod` on a worker (1441), which builds the folder first (`hub::use_mod`, one hash pass over the mod's files). Only when that fails is the mod repaired (`Hub::repair_mod`, the one network step) and the build tried again (`ModBuilt::repaired` gives the notice «…restored», `ModFault::Repair` the failure message, and the choice stays); `use_mod` writes `active.json`, then `DtInstall::from_env` and the scenario list are made there too. `App::poll_mod_switch`
 (each frame) applies the result on the UI thread (`apply_mod`: `DtArt::load` → `Assets::adopt_install` → content →
 scenarios). While it runs the window's mod row reads «Готовлю мод…» and takes no choice, and Next, Enter and
 «Добавить карту…» wait (`new_game::start_allowed`): no game starts on a half-built folder.

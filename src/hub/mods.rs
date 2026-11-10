@@ -8,7 +8,7 @@
 //! is rebuilt when the base's files (names, sizes, times), the mod's version or its file list
 //! and contents change (`stamp.json` in the folder).
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -440,10 +440,22 @@ pub fn prepare_mod(local: &Path, base: &Path, id: &str) -> Result<PathBuf, Strin
     for lid in &order {
         let version = installed.entries[lid].version.clone();
         let files = list_mod_files(&mod_files_dir(local, lid))?;
+        // The asked mod's files were just checked against its manifest (`damaged_files` above),
+        // so their digests are the manifest's: no second hash pass. Requirements are hashed.
+        let manifest: HashMap<String, String> = match read_manifest(local, id).filter(|_| lid.as_str() == id) {
+            Some(manifest) => manifest.files.into_iter().map(|f| (f.path, f.sha256.to_lowercase())).collect(),
+            None => HashMap::new(),
+        };
         let mut digests = Vec::with_capacity(files.len());
         for (rel, path) in &files {
-            let bytes = std::fs::read(path).map_err(|e| format!("{lid}: {rel}: {e}"))?;
-            digests.push((rel.clone(), crate::update::sha256_hex(&bytes)));
+            let digest = match manifest.get(rel) {
+                Some(sum) => sum.clone(),
+                None => {
+                    let bytes = std::fs::read(path).map_err(|e| format!("{lid}: {rel}: {e}"))?;
+                    crate::update::sha256_hex(&bytes)
+                }
+            };
+            digests.push((rel.clone(), digest));
         }
         stamps.push(LayerStamp { id: lid.clone(), version, files: digests });
         layers.push(files);
@@ -817,6 +829,34 @@ mod tests {
         put(&base.join("Data/Added.ini"), "x");
         prepare_mod(&local, &base, "m1").unwrap();
         assert!(game.join("Data/Added.ini").exists(), "the base's own files reach the folder");
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    /// The stamp takes the asked mod's digests from its manifest (checked just before, no hash
+    /// pass of its own); they are the digests of the files as they are, so the stamp is the one
+    /// the hashing gave, and a switch to the same mod again reuses the folder.
+    #[test]
+    fn the_stamp_from_the_manifest_matches_the_hashed_one() {
+        let base = base_install("manifest-stamp");
+        let local = temp("manifest-stamp-hub");
+        install_mod(&local, "m1", "1.0", &[("Data/Units.ini", "mod units"), ("Pictures/b.lit", "mod picture")]);
+        write_manifest_now(&local, "m1");
+        let game = prepare_mod(&local, &base, "m1").unwrap();
+        let stamp = read_stamp(&game).unwrap();
+        let files_dir = mod_files_dir(&local, "m1");
+        let hashed: Vec<(String, String)> = ["Data/Units.ini", "Pictures/b.lit"]
+            .iter()
+            .map(|rel| (rel.to_string(), crate::update::sha256_hex(&std::fs::read(files_dir.join(rel)).unwrap())))
+            .collect();
+        assert_eq!(stamp.layers.last().unwrap().files, hashed, "the stamp holds the hashed digests");
+        // A stamp that is kept is not rewritten: its mtime stays where it is set.
+        let path = game.join(STAMP);
+        let past = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
+        std::fs::OpenOptions::new().write(true).open(&path).unwrap().set_modified(past).unwrap();
+        let again = prepare_mod(&local, &base, "m1").unwrap();
+        assert_eq!(again, game, "the same folder");
+        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), past, "the folder is reused, not built again");
         let _ = std::fs::remove_dir_all(&base);
         let _ = std::fs::remove_dir_all(&local);
     }
