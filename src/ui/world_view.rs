@@ -1079,6 +1079,13 @@ pub fn eyes_view() -> bool {
     }
 }
 
+/// Whether `cam` is the first-person view's camera: a bent tilt that is not the eyes camera (the eyes have
+/// their own fade). Photo mode's free camera has no bend, so it is not. With [`first_person`], the view's
+/// near fade applies to it.
+fn bent_first_person_cam(cam: &Camera) -> bool {
+    !eyes_cam(cam) && cam.tilt.is_some_and(|t| t.cam.bend.is_some())
+}
+
 /// Whether the camera stands at the eyes (`view25::TiltCamera::eyes`): the hero's figure and his mark
 /// are not drawn, a sprite behind the eye is not, and the near fade is the eyes' fixed one.
 fn eyes_cam(cam: &Camera) -> bool {
@@ -1602,7 +1609,7 @@ fn near_fade_limit(cam: &Camera) -> f32 {
     match trailer() {
         Some(t) => t.near.min(hero),
         // Only the first-person view fades by the hero's distance: the 2.5D sprites never do.
-        None if hero.is_finite() && first_person() => hero,
+        None if hero.is_finite() && first_person() && bent_first_person_cam(cam) => hero,
         None => 0.0,
     }
 }
@@ -3298,7 +3305,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
         }
     }
     // The hero as drawn, before any sprite of the pass (the hills' too): the covering test needs him.
-    HERO_ON_WINDOW.with(|h| h.set(if first_person() { hero_on_screen(game, art, cam) } else { None }));
+    HERO_ON_WINDOW.with(|h| h.set(if first_person() && bent_first_person_cam(cam) { hero_on_screen(game, art, cam) } else { None }));
     // An object of the drawn columns and rows with a cell explored near the feather is seen, and
     // the hills are the classes 1-3 (`hill`).
     let seen = |o: &Decoration| o.tile.0 >= c0 - side && o.tile.0 < c1 + side && razdor::rules::map::object_cells(o).any(|t| fog.explored_near(t, minimap::FEATHER));
@@ -6002,6 +6009,20 @@ mod tilt_tests {
                 }
             }
         }
+    }
+
+    /// The first-person near fade applies to the first-person camera only: the bent first-person tilt has it,
+    /// the eyes camera has its own, and photo mode's free camera (no bend) has none, whatever the view setting.
+    #[test]
+    fn only_the_bent_first_person_camera_takes_the_first_person_near_fade() {
+        let game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        let fp = first_person_camera(&game, 0.0, false);
+        assert!(bent_first_person_cam(&fp), "the first-person camera");
+        assert!(!bent_first_person_cam(&eyes_camera(&game, 0.0, false)), "the eyes camera has its own fade");
+        let view = Rect::new(0.0, 0.0, 1280.0, 760.0);
+        let mut photo = fp;
+        photo.tilt = Some(photo_tilt(Vec2::from(photo.centre()), PX, view, view, 30.0, 0.0));
+        assert!(!bent_first_person_cam(&photo), "photo mode's free camera has no bend");
     }
 
     /// The 2.5D view's sprites never fade by the hero's distance, even with it set for the pass, at any yaw
