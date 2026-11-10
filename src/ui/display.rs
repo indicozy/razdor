@@ -861,7 +861,8 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
     set_bar_size(settings.bottom_bar_size);
     crate::ui::world_view::set_zoom_prefs(settings.map_zoom, settings.zoom_locked);
     crate::ui::world_view::set_edge_pref(settings.map_extended);
-    crate::ui::daylight::set_prefs(settings.map_light, settings.map_light_cycle, settings.map_light_hour, settings.map_shadows);
+    let quality = settings.map_light_quality.unwrap_or_else(|| crate::ui::lights::default_quality(dp_px().is_some()));
+    crate::ui::daylight::set_prefs(settings.map_light, settings.map_light_cycle, settings.map_light_hour, settings.map_shadows, quality);
     crate::ui::mist::set_pref(settings.map_mist);
     crate::ui::water::set_prefs(settings.map_live_water);
     crate::ui::weather::set_pref(settings.map_weather);

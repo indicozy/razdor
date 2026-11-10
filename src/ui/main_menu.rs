@@ -1590,7 +1590,7 @@ impl Group {
     /// The rows the group shows, top to bottom. Every row is in exactly one group (a test checks it).
     pub fn rows(self) -> &'static [Row] {
         match self {
-            Group::Map => &[Row::MapZoom, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::Shadows, Row::Mist, Row::LiveWater, Row::Weather, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
+            Group::Map => &[Row::MapZoom, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
             Group::Battle => &[Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
@@ -1615,6 +1615,7 @@ pub enum Row {
     LightCycle,
     LightHour,
     Shadows,
+    LightQuality,
     Mist,
     LiveWater,
     Weather,
@@ -1646,7 +1647,7 @@ pub enum Row {
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 40] = [
+pub const ALL: [Row; 41] = [
         Row::MapZoom,
         Row::MapResolution,
         Row::FrameCap,
@@ -1660,6 +1661,7 @@ pub const ALL: [Row; 40] = [
         Row::LightCycle,
         Row::LightHour,
         Row::Shadows,
+        Row::LightQuality,
         Row::Mist,
         Row::LiveWater,
         Row::Weather,
@@ -1726,7 +1728,7 @@ pub const ALL: [Row; 40] = [
             Row::LightCycle => audio.map_light == LightMode::Cycle,
             Row::LightHour => audio.map_light == LightMode::Fixed,
             // The shadows are the light's: shown only with the light on.
-            Row::Shadows => audio.map_light != LightMode::Off,
+            Row::Shadows | Row::LightQuality => audio.map_light != LightMode::Off,
             // Razdor's (the owner's decision, 2026-11-10): the 2.5D view, while a building of the
             // install still has no cut (`depth`).
             Row::DepthModel => audio.map_tilt && depth::available() && depth::unknown() > 0,
@@ -2094,6 +2096,19 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
                     ShadowMode::Painted => ShadowMode::Sun,
                     ShadowMode::Sun => ShadowMode::Painted,
                 };
+            }
+        }
+        Row::LightQuality => {
+            // Razdor's, with the light: how many point lights light the map (`lights::Quality`); the
+            // device's level until the row is clicked.
+            let quality = audio.map_light_quality.unwrap_or_else(|| super::lights::default_quality(super::display::dp_px().is_some()));
+            let value = match quality {
+                super::lights::Quality::High => tr("High"),
+                super::lights::Quality::Medium => tr("Medium"),
+                super::lights::Quality::Low => tr("Low"),
+            };
+            if labelled_row(c, geo, tr("Light quality"), value).0 {
+                audio.map_light_quality = Some(quality.next());
             }
         }
         Row::Mist => {

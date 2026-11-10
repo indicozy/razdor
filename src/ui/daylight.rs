@@ -283,10 +283,13 @@ struct Prefs {
     /// The hour in `Fixed`.
     fixed_hour: u32,
     shadows: ShadowMode,
+    quality: super::lights::Quality,
 }
 
 local! {
-    static PREFS: Cell<Prefs> = Cell::new(Prefs { mode: LightMode::Off, cycle_minutes: 24, fixed_hour: 18, shadows: ShadowMode::Painted });
+    static PREFS: Cell<Prefs> = Cell::new(Prefs { mode: LightMode::Off, cycle_minutes: 24, fixed_hour: 18, shadows: ShadowMode::Painted, quality: super::lights::Quality::High });
+    /// `RAZDOR_LIGHT_QUALITY=high|medium|low` (a snapshot's quality, read once): it wins over the setting.
+    static ENV_QUALITY: Option<super::lights::Quality> = std::env::var("RAZDOR_LIGHT_QUALITY").ok().and_then(|s| super::lights::Quality::parse(&s));
     /// `RAZDOR_SHADOWS=sun|painted` (a snapshot's shadows, read once): it wins over the settings.
     static ENV_SHADOWS: Option<ShadowMode> = std::env::var("RAZDOR_SHADOWS").ok().and_then(|s| match s.trim() {
         "sun" => Some(ShadowMode::Sun),
@@ -299,9 +302,14 @@ local! {
     static ENV_HOUR: Option<f32> = std::env::var("RAZDOR_LIGHT_HOUR").ok().and_then(|s| s.trim().parse::<f32>().ok());
 }
 
-/// Takes the settings «Освещение» and «Тени» in (every frame).
-pub fn set_prefs(mode: LightMode, cycle_minutes: u32, fixed_hour: u32, shadows: ShadowMode) {
-    PREFS.set(Prefs { mode, cycle_minutes, fixed_hour, shadows });
+/// Takes the settings «Освещение», «Тени» and «Качество света» in (every frame).
+pub fn set_prefs(mode: LightMode, cycle_minutes: u32, fixed_hour: u32, shadows: ShadowMode, quality: super::lights::Quality) {
+    PREFS.set(Prefs { mode, cycle_minutes, fixed_hour, shadows, quality });
+}
+
+/// The point lights' quality in effect: `RAZDOR_LIGHT_QUALITY` when set, else the setting.
+pub fn quality() -> super::lights::Quality {
+    ENV_QUALITY.with(|e| *e).unwrap_or(PREFS.get().quality)
 }
 
 /// The shadows in effect: `RAZDOR_SHADOWS` when set, else the setting.
@@ -466,13 +474,13 @@ mod tests {
 
     #[test]
     fn the_sky_is_the_day_colour_with_the_light_off_and_the_light_s_hour_on() {
-        set_prefs(LightMode::Off, 24, 18, ShadowMode::Painted);
+        set_prefs(LightMode::Off, 24, 18, ShadowMode::Painted, crate::ui::lights::Quality::High);
         assert!(frame_light(12.0, 0.0, 0.016).is_none());
         assert_eq!(sky_rgb(), SKY_DAY, "lighting off: the day's colour");
-        set_prefs(LightMode::Fixed, 24, 1, ShadowMode::Painted);
+        set_prefs(LightMode::Fixed, 24, 1, ShadowMode::Painted, crate::ui::lights::Quality::High);
         frame_light(12.0, 0.0, 0.016);
         assert_eq!(sky_rgb(), sky_at(1.0), "the light's hour");
-        set_prefs(LightMode::Off, 24, 18, ShadowMode::Painted);
+        set_prefs(LightMode::Off, 24, 18, ShadowMode::Painted, crate::ui::lights::Quality::High);
         frame_light(12.0, 0.0, 0.016);
         assert_eq!(sky_rgb(), SKY_DAY);
     }
@@ -488,20 +496,20 @@ mod tests {
 
     #[test]
     fn off_draws_nothing_and_fixed_follows_the_setting() {
-        set_prefs(LightMode::Off, 24, 18, ShadowMode::Painted);
+        set_prefs(LightMode::Off, 24, 18, ShadowMode::Painted, crate::ui::lights::Quality::High);
         assert!(frame_light(12.0, 0.0, 0.016).is_none());
-        set_prefs(LightMode::Fixed, 24, 1, ShadowMode::Painted);
+        set_prefs(LightMode::Fixed, 24, 1, ShadowMode::Painted, crate::ui::lights::Quality::High);
         assert_eq!(frame_light(12.0, 0.0, 0.016), Some(light_at(1.0)));
-        set_prefs(LightMode::Off, 24, 18, ShadowMode::Painted);
+        set_prefs(LightMode::Off, 24, 18, ShadowMode::Painted, crate::ui::lights::Quality::High);
     }
 
     #[test]
     fn cycle_runs_one_day_per_cycle_minutes() {
-        set_prefs(LightMode::Cycle, 12, 18, ShadowMode::Painted);
+        set_prefs(LightMode::Cycle, 12, 18, ShadowMode::Painted, crate::ui::lights::Quality::High);
         // Half of a 12-minute day in: noon.
         let noon = frame_light(0.0, 6.0 * 60.0, 0.016).expect("cycle is on");
         assert_eq!(noon, light_at(12.0));
-        set_prefs(LightMode::Off, 24, 18, ShadowMode::Painted);
+        set_prefs(LightMode::Off, 24, 18, ShadowMode::Painted, crate::ui::lights::Quality::High);
     }
 
     fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
@@ -584,13 +592,13 @@ mod tests {
 
     #[test]
     fn the_frame_relief_follows_the_frame_light() {
-        set_prefs(LightMode::Off, 24, 18, ShadowMode::Painted);
+        set_prefs(LightMode::Off, 24, 18, ShadowMode::Painted, crate::ui::lights::Quality::High);
         frame_light(12.0, 0.0, 0.016);
         assert!(frame_relief().is_none(), "lighting off: no relief");
-        set_prefs(LightMode::Fixed, 24, 1, ShadowMode::Painted);
+        set_prefs(LightMode::Fixed, 24, 1, ShadowMode::Painted, crate::ui::lights::Quality::High);
         frame_light(12.0, 0.0, 0.016);
         assert_eq!(frame_relief(), Some(relief_at(1.0)));
-        set_prefs(LightMode::Off, 24, 18, ShadowMode::Painted);
+        set_prefs(LightMode::Off, 24, 18, ShadowMode::Painted, crate::ui::lights::Quality::High);
         frame_light(12.0, 0.0, 0.016);
         assert!(frame_relief().is_none());
     }
@@ -701,19 +709,19 @@ mod tests {
 
     #[test]
     fn the_sun_shadows_are_the_frame_s_only_in_the_sun_mode_with_the_light_on() {
-        set_prefs(LightMode::Fixed, 24, 10, ShadowMode::Painted);
+        set_prefs(LightMode::Fixed, 24, 10, ShadowMode::Painted, crate::ui::lights::Quality::High);
         frame_light(12.0, 0.0, 0.016);
         assert!(frame_casts().is_none() && !sun_shadows_on(), "painted: no sun shadows");
         assert_eq!(frame_relief(), Some(relief_at(10.0)), "painted: the painted relief");
-        set_prefs(LightMode::Fixed, 24, 10, ShadowMode::Sun);
+        set_prefs(LightMode::Fixed, 24, 10, ShadowMode::Sun, crate::ui::lights::Quality::High);
         frame_light(12.0, 0.0, 0.016);
         assert_eq!(frame_casts(), Some(casts_at(10.0)));
         assert!(sun_shadows_on());
         assert_eq!(frame_relief(), Some(sun_relief(10.0)), "sun: the sun's relief");
-        set_prefs(LightMode::Off, 24, 10, ShadowMode::Sun);
+        set_prefs(LightMode::Off, 24, 10, ShadowMode::Sun, crate::ui::lights::Quality::High);
         frame_light(12.0, 0.0, 0.016);
         assert!(frame_casts().is_none() && frame_relief().is_none(), "lighting off: nothing, shadows or not");
-        set_prefs(LightMode::Off, 24, 18, ShadowMode::Painted);
+        set_prefs(LightMode::Off, 24, 18, ShadowMode::Painted, crate::ui::lights::Quality::High);
     }
 
     #[test]

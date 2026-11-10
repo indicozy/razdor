@@ -52,6 +52,9 @@ pub struct Atlas {
     live: RefCell<Overlay>,
     /// The building sprites (positions in the object sprites) the model still has to cut, in order.
     pending: RefCell<VecDeque<usize>>,
+    /// The building band's share of the texture's height: every building picture lies above it, every
+    /// other sprite below (`gfx::pack_atlas_banded`). The lit shader reads an opening's glow from it.
+    band: f32,
 }
 
 /// The atlas's rectangles as a dense table over the two sections and the 8-bit category and index
@@ -81,6 +84,11 @@ impl RectTable {
 }
 
 impl Atlas {
+    /// The building band's share of the texture's height (texture v below it is a building picture).
+    pub fn building_band(&self) -> f32 {
+        self.band
+    }
+
     /// Sprite of a `.DTm` map object (class, sprite id).
     pub fn decoration(&self, class: u8, sprite: u8) -> Option<Rect> {
         self.rects.get(ObjectSprite::DECORATIONS, class.into(), sprite.into())
@@ -374,7 +382,9 @@ impl DtArt {
             .get_or_init(|| {
                 let sprites = &self.objects().sprites;
                 let images: Vec<&Image> = sprites.iter().map(|s| &s.image).collect();
-                let Some((image, pos)) = gfx::pack_atlas(&images, ATLAS_WIDTH) else {
+                // The building pictures are packed first, in their own band (the lit shader's openings).
+                let buildings: Vec<bool> = sprites.iter().map(|s| s.section == ObjectSprite::BUILDINGS).collect();
+                let Some((image, pos, band_px)) = gfx::pack_atlas_banded(&images, ATLAS_WIDTH, &buildings) else {
                     razdor::diag!("Discord Times art: map objects do not fit an atlas");
                     return None;
                 };
@@ -412,7 +422,8 @@ impl DtArt {
                 }
                 let pending: VecDeque<usize> = queue::unknown(known).into();
                 depth::set_unknown(pending.len());
-                Some(Atlas { texture, rects, cards, live: RefCell::new(live), pending: RefCell::new(pending) })
+                let band = band_px as f32 / image.height.max(1) as f32;
+                Some(Atlas { texture, rects, cards, live: RefCell::new(live), pending: RefCell::new(pending), band })
             })
             .as_ref()
     }

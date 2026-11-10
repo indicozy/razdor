@@ -33,6 +33,7 @@ use super::cursor::{self, BuildingHover, CellArmy, MapHover, Shape};
 use super::dialog::Dialog;
 use super::dt_art::{Atlas, DtArt};
 use super::daylight;
+use super::lights;
 use super::game_bar::{self, BarButton, Look, TimeButton};
 use super::keymap::{self, Action};
 use super::map_scale;
@@ -2611,8 +2612,10 @@ fn terrain_quad(game: &Game, layer: &terrain::TerrainLayer, cam: &Camera, mode: 
             frame_probe::terrain(b.x - a.x, b.y - a.y);
         }
         let view = vec4(tl.x, tl.y / rh, br.x, br.y / rh);
+        // The point lights of the ground (`lights`), in this pass's pixels: none with the light off.
+        let points = relief.and_then(|_| lights::with_frame(|f| f.map(|f| lights::uniforms(f, |w| cam.to_screen(w.into()), cam.scale, 0.0))));
         // The edge's mist is fog: the trailer's no-fog switch leaves the ground going on past the edge.
-        layer.draw(map.surface_codes(), (map.w as u32, map.h as u32), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(PX, PX * rh), Some((crate::ui::clock::now() * 1000.0) as i64), extend && !trailer_nofog(), mode, flow, relief);
+        layer.draw(map.surface_codes(), (map.w as u32, map.h as u32), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(PX, PX * rh), Some((crate::ui::clock::now() * 1000.0) as i64), extend && !trailer_nofog(), mode, flow, relief, points.as_ref());
     }
 }
 
@@ -2702,6 +2705,17 @@ fn ground_key(game: &Game, cam: &Camera, relief: Option<daylight::Relief>) -> u6
     if let Some(r) = relief {
         let q = |v: f32| (v * 256.0).round() as i32;
         [q(r.light[0]), q(r.light[1]), q(r.light[2]), q(r.strength), q(r.cavity)].hash(&mut h);
+        // The point lights light the ground's relief too: their places and reaches (to 1/16 cell) and the
+        // night's share take their part in the key. The torches' flicker is not in it (the relief does not read it).
+        lights::with_frame(|f| {
+            if let Some(f) = f {
+                for l in f.lit() {
+                    let q16 = |v: f32| (v * 16.0).round() as i32;
+                    [q16(l.at.x), q16(l.at.y), q16(l.radius), q(l.strength)].hash(&mut h);
+                }
+                f.quality.relief().hash(&mut h);
+            }
+        });
     }
     h.finish()
 }
@@ -3028,25 +3042,23 @@ fn draw_building_shadow(l: &Location, atlas: &Atlas, r: Rect, cam: &Camera, shad
     super::chrome::shadow_only(shadow_k, || super::sharp::draw(&atlas.texture, at.x, at.y, WHITE, params));
 }
 
-/// Razdor's «От солнца» (`daylight::frame_casts`, `shadow`): each caster in view lays its silhouette on
-/// the ground, sheared from its foot by each light (the sun, and the moon by night). A building with
-/// cards casts one quad per card from the card's own foot; anything else one picture from its foot.
-/// A quad is the silhouette (the shadow atlas) in black, its alpha the light's times the fog's
-/// visibility on the foot's cell, half on water: it darkens what lies under it. Style only.
-fn draw_sun_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, casts: daylight::Casts, objects: &[&Decoration], locations: &[&Location]) {
+/// Razdor's cast shadows, on the ground under the fog and every standing sprite: the sun's and the moon's
+/// (`daylight::frame_casts`, «От солнца») and each lit point light's (`lights::cast`, from dusk to dawn). Each
+/// caster in view lays its silhouette (the shadow atlas) from its foot by each light: a building with cards
+/// casts one quad per card from the card's own foot, anything else one picture from its foot. A quad is the
+/// silhouette in the cool colour `shadow::TINT`, its alpha the light's times the fog's visibility on the foot's
+/// cell, half on water: it darkens what lies under it. A light's own building casts nothing. Style only.
+fn draw_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, sun: Option<daylight::Casts>, lit: &[(lights::Light, Vec2, f32)], objects: &[&Decoration], locations: &[(usize, &Location)]) {
     let (Some(art), Some(atlas), Some(texture)) = (art, art.and_then(|a| a.map_atlas()), art.and_then(|a| a.shadow_texture())) else { return };
-    let lights: Vec<daylight::Cast> = [casts.sun, casts.moon].into_iter().filter(|c| c.alpha > 0.0).collect();
-    if lights.is_empty() {
-        return;
-    }
     let size = vec2(texture.width(), texture.height());
     let zoom = cam.scale / PX;
     let map = &game.world.map;
     let fog = &game.fog;
     // The darkness factor of a caster standing on `foot`: what the fog shows on its cell (the glows'
-    // rule, `draw_daylight`), nothing off the map, half on water.
+    // rule), nothing off the map, half on water.
     let shade = |foot: Vec2| -> f32 {
-        let world = (foot + cam.origin) / cam.scale;
+        // The pass's pixels back to the world: `to_screen` is world·scale − origin + view.
+        let world = (foot + cam.origin - vec2(cam.view.x, cam.view.y)) / cam.scale;
         let t = cam.grid.tile_at((world.x, world.y));
         if t.0 < 0 || t.1 < 0 || t.0 >= map.w || t.1 >= map.h {
             return 0.0;
@@ -3055,32 +3067,48 @@ fn draw_sun_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, casts: dayli
         let water = if razdor::rules::map::is_water(map.surface(t)) { 0.5 } else { 1.0 };
         seen * water
     };
-    // The projection of a picture's shadow under each light: its origin, its foot's row, the light's bearing.
-    let projections = |origin: Vec2, foot_row: f32| -> Vec<(daylight::Cast, shadow::Projection)> {
-        lights.iter().map(|c| (*c, shadow::Projection { origin, zoom, foot_row, dir: vec2(c.dir[0], c.dir[1]), len: c.len })).collect()
+    // The casts of a caster standing on `foot` (this pass's pixels): the sun's and the moon's, then each
+    // lit light's in reach, but never a light's own building (`owner`).
+    let casts_at = |foot: Vec2, owner: Option<usize>| -> Vec<daylight::Cast> {
+        let mut out = Vec::new();
+        if let Some(c) = sun {
+            out.extend([c.sun, c.moon].into_iter().filter(|k| k.alpha > 0.0));
+        }
+        for (light, at, radius) in lit {
+            if matches!(light.owner, lights::Owner::Building(b) if Some(b) == owner) {
+                continue;
+            }
+            if let Some(c) = lights::cast(*at, *radius, foot, light.strength) {
+                out.push(daylight::Cast { dir: [c.dir.x, c.dir.y], len: c.len, alpha: c.alpha });
+            }
+        }
+        out
     };
-    // One picture (`origin`, its rectangle `src`, the foot's row in it) under each light.
-    let picture = |origin: Vec2, src: Rect, foot_row: f32, foot: Vec2| {
+    // One picture (`origin`, its rectangle `src`, the foot's row in it) cast from `foot` by each light.
+    let picture = |origin: Vec2, src: Rect, foot_row: f32, foot: Vec2, owner: Option<usize>| {
         let k = shade(foot);
         if k <= 0.0 {
             return;
         }
-        for (c, p) in projections(origin, foot_row) {
+        for c in casts_at(foot, owner) {
+            let p = shadow::Projection { origin, zoom, foot_row, dir: vec2(c.dir[0], c.dir[1]), len: c.len };
             if let Some((vertices, indices)) = p.picture_mesh(src, size, shadow::strength_colour(c.alpha * k)) {
                 draw_mesh(&Mesh { vertices, indices, texture: Some(texture.clone()) });
             }
         }
     };
-    for l in locations {
+    for &(i, l) in locations {
         match card_building(l, Some(art)) {
             Some((_, r, cards)) => {
                 let origin = building_sprite_origin(l, r.w, r.h, cam);
                 for card in cards {
-                    let k = shade(card_foot(origin, zoom, card));
+                    let foot = card_foot(origin, zoom, card);
+                    let k = shade(foot);
                     if k <= 0.0 {
                         continue;
                     }
-                    for (c, p) in projections(origin, card.foot.1) {
+                    for c in casts_at(foot, Some(i)) {
+                        let p = shadow::Projection { origin, zoom, foot_row: card.foot.1, dir: vec2(c.dir[0], c.dir[1]), len: c.len };
                         let (vertices, indices) = p.card_mesh(card, r, size, shadow::strength_colour(c.alpha * k));
                         draw_mesh(&Mesh { vertices, indices, texture: Some(texture.clone()) });
                     }
@@ -3090,7 +3118,7 @@ fn draw_sun_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, casts: dayli
                 let Some(r) = atlas.building(l.picture.0, l.picture.1) else { continue };
                 let origin = building_sprite_origin(l, r.w, r.h, cam);
                 let foot = building_foot(l, cam);
-                picture(origin, r, (foot.y - origin.y) / zoom, foot);
+                picture(origin, r, (foot.y - origin.y) / zoom, foot, Some(i));
             }
         }
     }
@@ -3098,7 +3126,7 @@ fn draw_sun_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, casts: dayli
         let Some(r) = atlas.decoration(o.class, o.sprite) else { continue };
         let origin = object_sprite_origin(o, r.w, r.h, cam);
         let foot = object_foot(o, cam);
-        picture(origin, r, (foot.y - origin.y) / zoom, foot);
+        picture(origin, r, (foot.y - origin.y) / zoom, foot, None);
     }
 }
 
@@ -3828,10 +3856,17 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // Razdor's «От солнца» (`daylight::frame_casts`): every caster in view lays its silhouette on the
     // ground, under the hills, the marks, the fog and every standing sprite (flat and 2.5D alike).
     let sun = daylight::frame_casts();
-    if let Some(casts) = sun {
+    // The point lights in view (`lights`, the nearest by the quality), in this pass's pixels: their silhouettes
+    // lie on the ground with the sun's. None with the light off.
+    let lit: Vec<(lights::Light, Vec2, f32)> = if relief.is_some() {
+        lights::with_frame(|f| f.map_or(Vec::new(), |f| f.lit().iter().map(|l| (*l, cam.to_screen(l.at.into()), l.radius * cam.scale)).collect()))
+    } else {
+        Vec::new()
+    };
+    if sun.is_some() || !lit.is_empty() {
         let objects: Vec<&Decoration> = map.objects_in_rows(r0 - up, r1 + below).iter().filter(|o| seen(o)).collect();
-        let locations: Vec<&Location> = game.world.locations.iter().filter(|l| location_seen(l) && !l.kind.is_bridge()).collect();
-        ground(cam, || draw_sun_shadows(game, art, cam, casts, &objects, &locations));
+        let locations: Vec<(usize, &Location)> = game.world.locations.iter().enumerate().filter(|(_, l)| location_seen(l) && !l.kind.is_bridge()).collect();
+        ground(cam, || draw_shadows(game, art, cam, sun, &lit, &objects, &locations));
     }
     // The original (0x4c8864) draws the hills of classes 1-3 in a pass of their own before
     // anything else, so they lie under every tree, mountain, building and army, the ones
@@ -3980,7 +4015,10 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // Stable: figures sharing a cell keep the order they were pushed in.
     items.sort_by_key(|a| a.0);
     // One sharp session for the pass: its art shares the material switch (see `sharp::session`).
-    super::sharp::session_lit(relief, || {
+    // The point lights' relief, pool-free: the lit material's uniforms for this pass (`lights::uniforms`).
+    let band = art.and_then(|a| a.map_atlas()).map_or(0.0, |a| a.building_band());
+    let points = relief.and_then(|_| lights::with_frame(|f| f.map(|f| lights::uniforms(f, |w| cam.to_screen(w.into()), cam.scale, band))));
+    super::sharp::session_lit(relief, points.as_ref(), || {
         for d in items.iter().map(|(_, d)| d) {
             match d {
                 Drawable::Object(o) => standing(cam, object_foot(o, cam), object_foot(o, cam), shade_of(object_foot(o, cam)), object_picture(o, art, cam), || draw_object(o, art, cam)),
@@ -5480,6 +5518,7 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
     // The light is read once, before the world (its relief lights the sprites and the ground).
     let light = frame_light_of(game);
     let relief = light.and_then(|_| daylight::frame_relief());
+    lights::set_frame(light.map(|l| lights::Frame::new(point_lights(game, assets.dt.as_ref(), &cam, l.glow), Vec2::from(cam.centre()), l.glow, lights::quality())));
     frame_probe::time(Stage::World, || {
         map_scale::draw(map_render_scale(), rgb(10, 12, 10), || {
             draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()), show.as_ref(), hover, true, Veil { shows: &shows, now: show_now }, relief);
@@ -5690,9 +5729,71 @@ fn frame_light_of(game: &Game) -> Option<daylight::Light> {
     daylight::frame_light(hour, now, get_frame_time())
 }
 
-/// Razdor's «Освещение» (`daylight`, off by default): the map's tint over the drawn world, then the
-/// glows of the towns and of the armies (the hero's too), in screen space. Style only: nothing is
-/// drawn when it is off, and the rules never read it.
+/// The point lights of this frame (`lights`, unsorted: `lights::Frame::new` takes the nearest first): one per
+/// building explored near the feather, at its footprint's centre, its reach its sprite's size; a torch in the
+/// hand of the hero and of each army in view, its reach `TORCH_RADIUS` cells, about 0.4 of the figure's height
+/// from the head, along its heading (`lights::torch_offset`). Not the hero's in the eyes view, nor a ship's; a
+/// figure with no sprite of the install stands without one. `glow` is the night's factor. Style only.
+fn point_lights(game: &Game, art: Option<&DtArt>, cam: &Camera, glow: f32) -> Vec<lights::Light> {
+    let map = &game.world.map;
+    let fog = &game.fog;
+    let atlas = art.and_then(|a| a.map_atlas());
+    let zoom = cam.scale / PX;
+    // Whether a light of `reach` cells at `at` reaches the drawn frame.
+    let on_screen = |at: Vec2, reach: f32| {
+        let p = cam.screen_at((at.x, at.y));
+        let (r, m) = (cam.draw, reach * cam.scale);
+        p.x > r.x - m && p.x < r.x + r.w + m && p.y > r.y - m && p.y < r.y + r.h + m
+    };
+    // The heading of a figure on the screen (as `draw_figure` turns it): from its place to its next step.
+    let heading_of = |next: Option<(f32, f32)>, pos: (f32, f32)| cam.facing(next.map_or(Vec2::ZERO, |n| cam.to_screen(n) - cam.to_screen(pos)));
+    // A torch's ground point: its feet, moved by the torch's pixel offset (`torch_offset`) into world units.
+    let torch = |feet: (f32, f32), size_px: f32, heading: Vec2| vec2(feet.0, feet.1) + lights::torch_offset(heading, size_px) / cam.scale;
+    let figure_px = |stem: &str| art.and_then(|a| a.figure_sheet(stem)).map_or(cam.scale, |s| s.width() / 8.0 * zoom);
+    let mut out = Vec::new();
+    for (i, l) in game.world.locations.iter().enumerate() {
+        if l.kind.is_bridge() || !l.cells().any(|t| fog.explored_near(t, minimap::FEATHER)) {
+            continue;
+        }
+        let n = l.cells().count().max(1) as f32;
+        let (sx, sy) = l.cells().fold((0.0f32, 0.0f32), |(x, y), t| {
+            let (cx, cy) = map.center(t);
+            (x + cx, y + cy)
+        });
+        let at = vec2(sx / n, sy / n);
+        let sprite = atlas.and_then(|a| a.building(l.picture.0, l.picture.1)).map_or(l.size.0.max(1) as f32, |r| r.w.max(r.h) / PX);
+        let radius = sprite * lights::BUILDING_RADIUS;
+        if on_screen(at, radius) {
+            out.push(lights::Light { at, radius, strength: glow, owner: lights::Owner::Building(i) });
+        }
+    }
+    for a in game.world.armies.iter() {
+        if !fog.explored(a.tile(map)) || game.army_hidden(a) || a.sails() {
+            continue;
+        }
+        let Some(&stem) = FIGURES.get(a.figure as usize) else { continue };
+        let pos = game.army_display_pos(a);
+        let heading = heading_of(a.path.first().map(|&t| map.center(t)), pos);
+        let at = torch(pos, figure_px(stem), heading);
+        if on_screen(at, lights::TORCH_RADIUS) {
+            out.push(lights::Light { at, radius: lights::TORCH_RADIUS, strength: glow, owner: lights::Owner::Torch });
+        }
+    }
+    if !game.hero_hidden() && !game.aboard() && !eyes_view() {
+        let pos = game.display_pos();
+        let heading = heading_of(game.display_heading().or_else(|| game.standing_heading()), pos);
+        let at = torch(pos, figure_px(figure_stem(game.hero_figure())), heading);
+        if on_screen(at, lights::TORCH_RADIUS) {
+            out.push(lights::Light { at, radius: lights::TORCH_RADIUS, strength: glow, owner: lights::Owner::Torch });
+        }
+    }
+    out
+}
+
+/// Razdor's «Освещение» (`daylight`, off by default): the map's tint over the drawn world, then each point
+/// light's warm pool (`lights`, `point_lights`) on the ground and the sprites, in screen space: a building's
+/// over its footprint, a torch's flickering over its flame. Style only: nothing is drawn when it is off, and the
+/// rules never read it.
 fn draw_daylight(game: &Game, cam: &Camera, light: Option<daylight::Light>) {
     let Some(light) = light else {
         return;
@@ -5706,52 +5807,42 @@ fn draw_daylight(game: &Game, cam: &Camera, light: Option<daylight::Light>) {
     let tex = glow_tex();
     let map = &game.world.map;
     let fog = &game.fog;
-    let cell_w = cam.cell_size().x;
-    // What the fog shows on a cell this frame (1 lit, 0 black): a glow fades with it, as the
-    // 2.5D sprites do (`Shade::at`), since the fog is drawn inside the world there. A disabled fog
-    // darkens nothing. The glows fade with its square: a half-seen town must not spill a warm halo
-    // over the solid fog beside it.
-    let visible = |t: Tile| if !fog.enabled || fog.w <= 0 || fog.h <= 0 { 1.0 } else { 1.0 - minimap::shown_darkness(fog, t) };
+    // What the fog shows at a world point this frame (1 lit, 0 black, 0 off the map): a pool fades with it, as
+    // the 2.5D sprites do (`Shade::at`), since the fog is drawn inside the world there. A disabled fog darkens nothing.
+    let visible = |world: Vec2| -> f32 {
+        let t = cam.grid.tile_at((world.x, world.y));
+        if t.0 < 0 || t.1 < 0 || t.0 >= map.w || t.1 >= map.h {
+            return 0.0;
+        }
+        if !fog.enabled || fog.w <= 0 || fog.h <= 0 {
+            1.0
+        } else {
+            1.0 - minimap::shown_darkness(fog, t)
+        }
+    };
     let glow_at = |at: Vec2, size: f32, rgb: [f32; 3], alpha: f32| {
         let color = Color::new(rgb[0], rgb[1], rgb[2], alpha.clamp(0.0, 1.0));
         draw_texture_ex(&tex, at.x - size / 2.0, at.y - size / 2.0, color, DrawTextureParams { dest_size: Some(vec2(size, size)), ..Default::default() });
     };
-    super::chrome::additive(|| {
-        // The towns and the villages: a warm window glow over the middle of each footprint.
-        for l in game.world.locations.iter() {
-            let town = matches!(l.kind, LocationKind::Palace | LocationKind::Town | LocationKind::Village | LocationKind::Castle | LocationKind::Fort | LocationKind::Tavern | LocationKind::Church);
-            if !town {
-                continue;
+    lights::with_frame(|frame| {
+        let Some(frame) = frame else { return };
+        super::chrome::additive(|| {
+            for (i, l) in frame.lights.iter().enumerate() {
+                let vis = visible(l.at);
+                if vis < 0.01 {
+                    continue;
+                }
+                let reach = l.radius * cam.scale;
+                let (rgb, alpha) = match l.owner {
+                    lights::Owner::Building(_) => (lights::WARM, 0.7),
+                    lights::Owner::Torch => {
+                        let flicker = 0.92 + 0.08 * (now * 9.0 + i as f64).sin() as f32;
+                        ([1.0, 0.65, 0.30], 0.45 * flicker)
+                    }
+                };
+                glow_at(cam.screen_at((l.at.x, l.at.y)), 2.0 * reach, rgb, alpha * l.strength * vis);
             }
-            let (sum, n, seen) = l.cells().fold(((0.0f32, 0.0f32), 0u32, 0.0f32), |((x, y), n, v), t| {
-                let (cx, cy) = map.center(t);
-                ((x + cx, y + cy), n + 1, v + visible(t))
-            });
-            let (centre, vis) = if n == 0 {
-                (map.center(l.anchor), visible(l.anchor))
-            } else {
-                ((sum.0 / n as f32, sum.1 / n as f32), seen / n as f32)
-            };
-            if vis < 0.01 {
-                continue;
-            }
-            glow_at(cam.screen_at(centre), 2.2 * l.size.0.max(1) as f32 * cell_w, [1.0, 0.72, 0.38], 0.55 * light.glow * vis * vis);
-        }
-        // The armies on the map, the hero's among them: a torch glow, flickering a little.
-        for (i, a) in game.world.armies.iter().enumerate() {
-            if !fog.explored(a.tile(map)) || game.army_hidden(a) {
-                continue;
-            }
-            let flicker = 0.92 + 0.08 * (now * 9.0 + i as f64).sin() as f32;
-            let vis = visible(a.tile(map));
-            glow_at(cam.screen_at(game.army_display_pos(a)), 1.6 * cell_w, [1.0, 0.65, 0.30], 0.45 * light.glow * flicker * vis * vis);
-        }
-        // The eyes camera stands on the hero: his torch would float in front of the lens.
-        if !game.hero_hidden() && !game.aboard() && !eyes_cam(cam) {
-            let flicker = 0.92 + 0.08 * (now * 9.0 + game.world.armies.len() as f64).sin() as f32;
-            let vis = visible(game.tile());
-            glow_at(cam.screen_at(game.display_pos()), 1.6 * cell_w, [1.0, 0.65, 0.30], 0.45 * light.glow * flicker * vis * vis);
-        }
+        });
     });
 }
 
@@ -6754,14 +6845,14 @@ mod card_tests {
         assert_eq!(g, Some(r.turned(30.0)), "painted: the ground turns back into the map's axes");
         assert_eq!(s, Some(r), "painted: the sprites keep the screen's light");
         assert_eq!(lit_axes(None, 30.0), (None, None), "lighting off: no relief at all");
-        daylight::set_prefs(daylight::LightMode::Fixed, 24, 10, daylight::ShadowMode::Sun);
+        daylight::set_prefs(daylight::LightMode::Fixed, 24, 10, daylight::ShadowMode::Sun, lights::Quality::High);
         daylight::frame_light(12.0, 0.0, 0.016);
         let sun = daylight::sun_relief(10.0);
         let (g, s) = lit_axes(Some(sun), 30.0);
         assert_eq!(g, Some(sun), "sun: the ground keeps the map's axes");
         let (s, g) = (s.expect("sprites lit"), g.expect("ground lit"));
         assert!((s.turned(30.0).light[0] - g.light[0]).abs() < 1e-5 && (s.turned(30.0).light[1] - g.light[1]).abs() < 1e-5, "the sprites' light turned by the yaw is the ground's");
-        daylight::set_prefs(daylight::LightMode::Off, 24, 18, daylight::ShadowMode::Painted);
+        daylight::set_prefs(daylight::LightMode::Off, 24, 18, daylight::ShadowMode::Painted, lights::Quality::High);
     }
 
     fn close(a: Vec2, b: Vec2) -> bool {

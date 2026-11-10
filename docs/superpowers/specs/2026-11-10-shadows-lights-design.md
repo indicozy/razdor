@@ -77,6 +77,28 @@ crossing the explored sky/ground now and then). Carts on roads need new sprites:
 Measured per quality level on desktop and on the owner's OnePlus (the phone test is the owner's
 help). Budgets set from those numbers.
 
+Desktop, Xvfb (Mesa software GL, so GPU cost is not represented), РК1 at 21:00, the frame probe's
+idle frames after a 50-frame warm-up (`RAZDOR_PROFILE=1`, `RAZDOR_PROFILE_FRAMES`, 400 frames per run).
+The work column is the CPU time building the frame; the total column includes the present (vsync and
+the software GL flush). **Both are noisy here**: the box is shared with the owner's game, and the same
+configuration swings 2 to 4 times between passes (base lighting-off 2.5D work 5.0 ms in one pass, the
+new build's lighting-off 1.25 ms in another), so no ranking between the rows is reliable:
+
+| run | flat work (2 passes) | 2.5D work (2 passes) |
+|---|---|---|
+| base, lighting off | 0.62, 0.54 | 2.48 (earlier pass), 5.02 |
+| base, lighting on (old glows) | 0.37, 0.54 | 1.18, 8.96 |
+| new, lighting off | 0.32, 0.61 | 8.42 (loaded), 1.25 |
+| new, high | 0.40, 0.67 | 3.40, 1.26 |
+| new, medium | 0.45, 0.76 | 1.62, 0.81 |
+| new, low | 0.48, 0.47 | 1.16, 1.15 |
+
+Not measured: the owner's phone, the GPU time, and a quiet machine. The per-frame draws added by the
+lights are the light shadows (up to 8 lights times the casters in reach, one quad each, one batch per
+texture), the building pools (one textured quad a light) and the per-pass uniforms (one array set a pass).
+Budget for the phone (to be measured by the owner): medium should not cost more than 2 ms of CPU a frame
+over lighting off on the 2.5D view; high is the desktop's default and is off by default on phones.
+
 ## Later (ideas doc)
 
 Figure sun shadows; carts; weather by terrain (rain, snow, heat haze, cloud shadows); sounds by
