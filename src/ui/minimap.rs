@@ -450,6 +450,12 @@ fn alpha_box(rgba: &[u8], w: i32, h: i32) -> Option<[i32; 4]> {
     bx
 }
 
+/// The fog's texture for a material to draw (`ui::mist`), or None when the fog is off. The same
+/// texture [`draw_fog`] and [`draw_fog_extended`] draw.
+pub fn fog_layer(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>) -> Option<Texture2D> {
+    (fog.enabled && fog.w > 0 && fog.h > 0).then(|| fog_texture(fog, held, origin, settle))
+}
+
 /// Draws the fog over the map. `tl` and `br` are the screen positions of world points
 /// `(-0.5, -0.5·row)` and `(w − 0.5, (h − 0.5)·row)`: the outer corners of the edge cells,
 /// so texel centres fall on cell centres.

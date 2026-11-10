@@ -36,6 +36,7 @@ use super::game_bar::{self, BarButton, Look, TimeButton};
 use super::keymap::{self, Action};
 use super::map_scale;
 use super::minimap;
+use super::mist;
 use super::terrain;
 use super::saves::{self, Back, LoadView, SaveView};
 use super::story;
@@ -2141,6 +2142,15 @@ impl Camera {
         (self.draw, Rect::new(r.x + 0.5, r.y / rh + 0.5, r.w, r.h / rh))
     }
 
+    /// The mist over the fog's texture (`ui::mist`, «Туман вместо черноты»), with the 2.5D tilt's parallax.
+    fn draw_mist(&self, tex: &Texture2D, dest: Rect, src: Option<Rect>) {
+        let parallax = match &self.tilt {
+            Some(t) => mist::parallax(t.cam.yaw_deg, t.cam.pitch_deg),
+            None => Vec2::ZERO,
+        };
+        mist::draw(tex, dest, src, parallax);
+    }
+
     fn draw_fog_flat(&self, game: &Game, shows: &[&Showing]) {
         if trailer_nofog() {
             return;
@@ -2149,16 +2159,28 @@ impl Camera {
         // circle, so the fog under it does not fade a second time (`minimap::fog_texture`).
         let settle = shows.iter().filter(|s| s.mask.is_some()).flat_map(|s| s.reveal_cells.iter().map(|&(i, _)| i));
         let (held, origin) = (game.unshown_cells(), game.tile());
+        // The same texture, drawn as mist instead of black when the setting is on (the minimap's stays black).
+        let mist = mist::on();
         // «Продолжать карту за краем»: the fog goes on past the edges too (its texels clamp there).
         if extend_edge() {
             let (dest, src) = self.fog_texels();
-            minimap::draw_fog_extended(&game.fog, &held, origin, settle, dest, src);
+            if mist {
+                if let Some(tex) = minimap::fog_layer(&game.fog, &held, origin, settle) {
+                    self.draw_mist(&tex, dest, Some(src));
+                }
+            } else {
+                minimap::draw_fog_extended(&game.fog, &held, origin, settle, dest, src);
+            }
             return;
         }
         let (tl, br) = self.fog_corners(game);
-        // The 2.5D view (a tilted camera) draws only the fog's dark box (`minimap::draw_fog_boxed`);
-        // the flat map view draws the whole quad.
-        if self.tilt.is_some() {
+        if mist {
+            if let Some(tex) = minimap::fog_layer(&game.fog, &held, origin, settle) {
+                self.draw_mist(&tex, Rect::new(tl.x, tl.y, br.x - tl.x, br.y - tl.y), None);
+            }
+        } else if self.tilt.is_some() {
+            // The 2.5D view (a tilted camera) draws only the fog's dark box (`minimap::draw_fog_boxed`);
+            // the flat map view draws the whole quad.
             minimap::draw_fog_boxed(&game.fog, &held, origin, settle, tl, br);
         } else {
             minimap::draw_fog(&game.fog, &held, origin, settle, tl, br);
@@ -2395,7 +2417,7 @@ fn ground_key(game: &Game, cam: &Camera) -> u64 {
         (t.cam.pitch_deg.to_bits(), t.cam.yaw_deg.to_bits(), rect(t.plan), rect(t.cull)).hash(&mut h);
     }
     let map = &game.world.map;
-    (map.w, map.h, cam.grid.row_height().to_bits(), extend_edge(), map.surface_codes()).hash(&mut h);
+    (map.w, map.h, cam.grid.row_height().to_bits(), extend_edge(), mist::on(), map.surface_codes()).hash(&mut h);
     h.finish()
 }
 
@@ -4503,7 +4525,7 @@ fn battle_backdrop_key(game: &Game) -> u64 {
     zoom.to_bits().hash(&mut h);
     look.map(bits).hash(&mut h);
     bits(game.display_pos()).hash(&mut h);
-    (tilt_view(), first_person(), horizon(), eyes_setting(), tilt_pitch().to_bits(), tilt_yaw().to_bits(), extend_edge()).hash(&mut h);
+    (tilt_view(), first_person(), horizon(), eyes_setting(), tilt_pitch().to_bits(), tilt_yaw().to_bits(), extend_edge(), mist::on()).hash(&mut h);
     (game.fog.enabled, &game.fog.bits).hash(&mut h);
     game.unshown_cells().hash(&mut h);
     (game.aboard(), game.hero_hidden()).hash(&mut h);
@@ -5049,11 +5071,19 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
     frame_probe::time(Stage::World, || {
         map_scale::draw(map_render_scale(), rgb(10, 12, 10), || {
             draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()), show.as_ref(), hover, true, Veil { shows: &shows, now: show_now });
-            // Razdor's «Освещение» (off by default): the light over the world, before the flat fog.
-            draw_daylight(game, &cam);
+            // Razdor's «Освещение» (off by default): the light over the world, before the flat fog, so the
+            // fog's black stays black. With the mist on («Туман вместо черноты») the flat fog is a colour,
+            // so the light goes over it too (the mist takes the night's tint). Off, the order is as before.
+            let mist_light = flat && mist::on();
+            if !mist_light {
+                draw_daylight(game, &cam);
+            }
             if flat {
                 frame_probe::time(Stage::Fog, || cam.draw_fog(game, &shows));
                 gpu_wait(Stage::GpuFog);
+            }
+            if mist_light {
+                draw_daylight(game, &cam);
             }
         })
     });

@@ -210,7 +210,7 @@ original pixel on screen (0.9375 × `k`). Without the install the lines are plai
 off by default; `world_view::set_edge_pref` takes it every frame): off, the original's black.
 On, the ground goes on past each border, continuing the border's own row or column (the shader
 clamps the cell index, `code_at`). From the border, the fog takes the war fog's own colour
-(`minimap::FOG_RGB`, black, read by `terrain::edge_fog_colour`): thin, patchy wisps, darker and
+(`minimap::FOG_RGB`, black, read by `terrain::edge_fog_colour`; the mist's grey with «Туман вместо черноты», see «Mist»): thin, patchy wisps, darker and
 lighter with two soft value-noise layers of different scales drifting in different directions
 (`Clock`, the water clock), thickening into solid by `EDGE_SOLID` (5 cells) and solid at
 `EDGE_FULL` (7 cells), as `fog_opacity` (the shader's `smoothstep`, the noise at its brightest).
@@ -371,7 +371,6 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   update; it runs only when the fog or held cells change or a cell still eases, so an idle map does no per-cell
   work and uploads nothing (`fog_texture` uploads the texture when a texel changed, counted in the frame probe's
   rebuilds). The flat map, the minimap window and the 2.5D sprites all read the same values.
-<<<<<<< HEAD
 - **The first-person view** («Вид карты» = «От первого лица», the owner's decision, 2026-11-10). Its
   setting is `audio::Settings::map_first_person` within the tilted view (`map_tilt`), pushed by
   `main_menu::apply_options` into `world_view::set_first_person`; `world_view::first_person()` is the
@@ -439,15 +438,25 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
     eye camera's own inverse (`pick_bent`); tests `the_eyes_camera_stands_at_its_height_and_picks_its_sheet_at_both_bends`
     (view25) and `a_click_on_the_ground_in_the_eyes_view_picks_its_cell_at_both_bends` (world_view). Known: a partly
     faded tree over the bright sky looks translucent (the fade's band is 2.5 to 3.75 cells).
-=======
 **Lighting** (the setting «Освещение», `Settings::map_light`, off by default; `daylight::set_prefs` takes
 it every frame, from `display::follow_settings`): `daylight::light_at` maps the hour to a tint and a glow
 strength (a sine of the sun's elevation, a smooth step for the brightness, a bell for the dawn and dusk
 warmth, a night floor). The hour comes from the game clock (eased, `ease_hour`), a real-time cycle, or
 a fixed hour; `RAZDOR_LIGHT_HOUR` overrides it for snapshots. `world_view::draw_daylight` runs right after
-`draw_world` and before the flat `draw_fog`: a multiply tint over the map area, then additive glows in
+`draw_world` and before the flat `draw_fog` (after it with the mist on, see «Mist»): a multiply tint over the map area, then additive glows in
 screen space (`Camera::screen_at`) at the towns and the armies (the hero's too). Off, it draws nothing.
->>>>>>> 049827d4 (Lighting: the map's light follows the time of day (style only, off by default))
+**Mist** (the setting «Туман вместо черноты», `Settings::map_mist`, off by default; `display::follow_settings`
+pushes it with `mist::set_pref`, `RAZDOR_MIST=1` for snapshots): `world_view::draw_fog_flat` draws the same fog
+texture (`minimap::fog_layer`, the same quad and texels) through the material of `src/ui/mist.rs` instead of the
+plain black. Its alpha is `mist::mist_alpha(d, w)`: opaque where the shown darkness `d` is 1 (unexplored), clear
+where it is 0, and only in the opening's edge band the value noise `w` makes it patchy. Its colour is `MIST_RGB`
+(0.74, 0.77, 0.82) times 0.8 to 1.1 with the sheets' brightness. Four sheets of value noise (3 on the desktop, 2 on
+a phone, `Sheets`) at scales 0.18 to 1.1 drift at different speeds on the terrain's clock (`Clock`) and sit at
+heights 0.3 to 1.2; in the 2.5D view `Parallax` (`mist::parallax`, from the tilt) shifts the upper ones, flat it is
+zero. The black rectangles past the map stay black; the minimap keeps its black (`minimap::draw_fog` is not used
+for it). Past the map's edges the edge fog takes the mist's colour (`terrain::edge_fog_colour_for`), so they meet.
+With the mist on, the flat view draws `draw_daylight` after the flat fog, so the mist takes the night's tint; off,
+the order is as above. The ground cache (`ground_key`) and the battle backdrop key hold the setting.
 - Simplifications: the F3 overlay is off in 2.5D (its labels are placed on the flat map).
 
 ## Sound and music

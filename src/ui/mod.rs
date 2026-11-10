@@ -36,6 +36,7 @@ pub mod frame_cap;
 pub mod map_scale;
 pub mod memo;
 pub mod minimap;
+pub mod mist;
 pub mod new_game;
 pub mod pan;
 pub mod photo;

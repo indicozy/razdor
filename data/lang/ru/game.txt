@@ -526,6 +526,10 @@ Day length = Длина суток
 Hour = Час
 Razdor's: the map's light follows the time of day. Style only. = Освещение карты следует за временем суток. Только вид.
 
+# Advanced settings: the map's mist (Razdor's, off by default)
+Mist instead of black = Туман вместо черноты
+Razdor's: unexplored land is drifting mist instead of black. Style only. = Неразведанная земля скрыта плывущим туманом вместо черноты. Только вид.
+
 # Advanced settings: arranging the army outside battle
 Army arrangement = Расстановка армии
 Clicks = Щелчками

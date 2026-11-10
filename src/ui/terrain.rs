@@ -261,8 +261,17 @@ pub const EDGE_SOLID: f32 = 5.0;
 /// The fog is solid (the war fog's black) this many cells past the border, and beyond.
 pub const EDGE_FULL: f32 = 7.0;
 
-/// The edge fog's colour: the war fog's own (`minimap::FOG_RGB`), not a guess.
+/// The edge fog's colour: the war fog's own (`minimap::FOG_RGB`), not a guess; with the mist on
+/// («Туман вместо черноты»), the mist's, so the two meet with no seam.
 pub fn edge_fog_colour() -> [f32; 3] {
+    edge_fog_colour_for(crate::ui::mist::on())
+}
+
+/// [`edge_fog_colour`] for the mist setting `mist`.
+pub fn edge_fog_colour_for(mist: bool) -> [f32; 3] {
+    if mist {
+        return crate::ui::mist::MIST_RGB;
+    }
     let c = crate::ui::minimap::FOG_RGB;
     [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0]
 }
@@ -820,10 +829,16 @@ mod tests {
     #[test]
     fn the_edge_fog_is_the_war_fogs_own_black() {
         // The war fog is drawn in `minimap::FOG_RGB`; the edge fog takes the same colour.
-        let c = edge_fog_colour();
+        let c = edge_fog_colour_for(false);
         let w = crate::ui::minimap::FOG_RGB;
         assert_eq!(c, [w[0] as f32 / 255.0, w[1] as f32 / 255.0, w[2] as f32 / 255.0]);
         assert_eq!(c, [0.0, 0.0, 0.0], "the war fog is black");
+    }
+
+    #[test]
+    fn with_the_mist_the_edge_fog_is_the_mists_colour() {
+        // «Туман вместо черноты»: the edge fog takes the mist's colour, so it meets the mist with no seam.
+        assert_eq!(edge_fog_colour_for(true), crate::ui::mist::MIST_RGB);
     }
 
     #[test]
