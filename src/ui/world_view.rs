@@ -38,6 +38,7 @@ use super::map_scale;
 use super::minimap;
 use super::mist;
 use super::terrain;
+use super::water;
 use super::saves::{self, Back, LoadView, SaveView};
 use super::story;
 use super::widgets::*;
@@ -644,6 +645,7 @@ impl MapView {
         self.spell_fx.clear();
         self.preview = None;
         self.back_to = None;
+        WAKES.with_borrow_mut(|w| w.clear());
     }
 
     /// A map starts: the fog opens around the hero (0x4af83c), the places of the last game
@@ -3480,6 +3482,11 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
             }
         }
     });
+    // «Живая вода» (`water`): the wakes lie on the ground behind the sailing figures, over the
+    // marks and the route and under the border and every standing sprite.
+    if water::live() {
+        ground(cam, || draw_wakes(game, cam));
+    }
     // 2.5D: the border lies on the ground, over the ground's marks and route and under every
     // standing sprite; the fog darkens it where the ground is unexplored.
     if tilted && !trailer_clean() {
@@ -5240,6 +5247,13 @@ const CLASH_MAX: usize = 4;
 local! {
     /// The soft round light of a glow (white, its alpha falling to 0 at the rim), made on first use.
     static GLOW_TEX: std::cell::RefCell<Option<Texture2D>> = const { std::cell::RefCell::new(None) };
+    /// Razdor's «Живая вода» wakes of the sailing figures (`water`), per army index.
+    static WAKES: std::cell::RefCell<water::Wakes> = std::cell::RefCell::new(water::Wakes::default());
+}
+
+/// The glow's texture (`glow_texture`), made on first use.
+fn glow_tex() -> Texture2D {
+    GLOW_TEX.with_borrow_mut(|t| t.get_or_insert_with(glow_texture).clone())
 }
 
 /// A 64×64 white disc whose alpha falls off to 0 at its rim, linear-filtered.
@@ -5274,7 +5288,7 @@ fn draw_daylight(game: &Game, cam: &Camera) {
     if light.glow <= 0.01 {
         return;
     }
-    let tex = GLOW_TEX.with_borrow_mut(|t| t.get_or_insert_with(glow_texture).clone());
+    let tex = glow_tex();
     let map = &game.world.map;
     let fog = &game.fog;
     let cell_w = cam.cell_size().x;
@@ -5320,6 +5334,37 @@ fn draw_daylight(game: &Game, cam: &Camera) {
             let flicker = 0.92 + 0.08 * (now * 9.0 + game.world.armies.len() as f64).sin() as f32;
             glow_at(cam.screen_at(game.display_pos()), 1.6 * cell_w, [1.0, 0.65, 0.30], 0.45 * light.glow * flicker * visible(game.tile()));
         }
+    });
+}
+
+/// Razdor's «Живая вода» wakes (`water`, off by default): a sailing army in motion (and the hero's
+/// galley) leaves its last positions on the ground behind it, fading and growing (`water::wake_fade`).
+/// Only on explored cells. Style only: nothing is drawn when the water is not alive.
+fn draw_wakes(game: &Game, cam: &Camera) {
+    let now = crate::ui::clock::now();
+    let map = &game.world.map;
+    let fog = &game.fog;
+    WAKES.with_borrow_mut(|wakes| {
+        for (i, a) in game.world.armies.iter().enumerate() {
+            if a.sails() && !a.path.is_empty() && !game.army_hidden(a) && fog.explored(a.tile(map)) {
+                wakes.record(i, game.army_display_pos(a), now);
+            }
+        }
+        if game.aboard() && game.moving() && !game.hero_hidden() && fog.explored(game.tile()) {
+            wakes.record(water::HERO, game.display_pos(), now);
+        }
+        wakes.prune(now);
+        let tex = glow_tex();
+        let cell_w = cam.cell_size().x;
+        super::chrome::additive(|| {
+            for (_, wake) in wakes.iter() {
+                for (p, alpha, size) in wake.visible(now) {
+                    let c = cam.to_screen(p.at);
+                    let (w, h) = (size * cell_w, size * cell_w * 0.6);
+                    draw_texture_ex(&tex, c.x - w / 2.0, c.y - h / 2.0, Color::new(1.0, 1.0, 1.0, alpha), DrawTextureParams { dest_size: Some(vec2(w, h)), ..Default::default() });
+                }
+            }
+        });
     });
 }
 

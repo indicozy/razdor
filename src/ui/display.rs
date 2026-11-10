@@ -848,6 +848,8 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
         crate::ui::world_view::set_edge_pref(std::env::var("RAZDOR_MAP_EDGE").is_ok_and(|v| v.trim() == "1"));
         // `RAZDOR_MIST=1`: the unexplored land is drifting mist instead of black («Туман вместо черноты»).
         crate::ui::mist::set_pref(std::env::var("RAZDOR_MIST").is_ok_and(|v| v.trim() == "1"));
+        // `RAZDOR_LIVE_WATER=1` (the snapshots' moving water); the setting is not read here.
+        crate::ui::water::set_prefs(false);
         return;
     }
     read_dp_once();
@@ -859,6 +861,7 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
     crate::ui::world_view::set_edge_pref(settings.map_extended);
     crate::ui::daylight::set_prefs(settings.map_light, settings.map_light_cycle, settings.map_light_hour);
     crate::ui::mist::set_pref(settings.map_mist);
+    crate::ui::water::set_prefs(settings.map_live_water);
     follow(settings.display.for_device(dp_px().is_some()));
 }
 

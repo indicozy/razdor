@@ -459,6 +459,24 @@ With the mist on, the flat view draws `draw_daylight` after the flat fog, so the
 the order is as above. The ground cache (`ground_key`) and the battle backdrop key hold the setting.
 - Simplifications: the F3 overlay is off in 2.5D (its labels are placed on the flat map).
 
+**Moving water** (the setting «Живая вода», `Settings::map_live_water`, off by default; `water::set_prefs` takes
+it every frame from `display::follow_settings`; `RAZDOR_LIVE_WATER=1` turns it on). Style only. Over the original's
+32-frame water texture (kept, the ground pass multiplies it in as before):
+- **The water mask**: `terrain::water_mask_texels`, one texel per cell (red 255 on the water cells, `map::is_water`),
+  built with the surface-code textures (`TerrainLayer::cells`, rebuilt only when the codes change), linear, clamped.
+  Linear filtering gives the shore its soft edge: 1 deep, 0.5 on the shore line, 0 on land. The ground shader reads
+  it at the pixel's cell centre `(p + 0.5) / MapSize`, where `p` is the cell coordinate (the same one the edge fog uses).
+- **In the shader** (`NEW_FRAGMENT`, the `LiveWater` branch; the old four-fetch shader ignores it): on the water
+  pixels only, a ripple moves the water frame's uv by `0.015` of a frame (a few texels), the foam band
+  (`water::foam_band`, mirrored from the shader) is added as a pulse on the shore's water side, and the water takes
+  the sky's colour (`daylight::sky_rgb`: day, dusk and dawn warmth, moonlight at night; the day's with the lighting
+  off) by `0.18` of its mask. Only the full pass and the cache's overlay draw it (`Mode::Full`, `Mode::Overlay`);
+  the cached ground stays as it was. `Clock` is the water clock.
+- **Wakes** (`world_view::draw_wakes`, `water::Wake`): per sailing army in motion (and the hero's galley), its last
+  12 display positions, one every 0.12 s, drawn on the ground behind it as soft white ellipses (the glow's texture,
+  additive) fading from alpha 0.35 to 0 over 1.5 s and growing from 0.3 to 0.7 cell. Explored cells only. Recorded per
+  army index and cleared with `MapView::forget_shows`.
+
 ## Sound and music
 
 - `src/dt/sound.rs`: `SoundTable::from_ini` (`_Sounds.ini`: `[Backgrounds]` music keys,

@@ -70,6 +70,7 @@ pub mod android;
 #[cfg(target_os = "ios")]
 pub mod ios;
 pub mod mobile;
+pub mod water;
 pub mod widgets;
 pub mod window_layout;
 pub mod world_view;

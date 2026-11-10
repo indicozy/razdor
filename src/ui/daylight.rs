@@ -30,17 +30,55 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
 
-/// The light at `hour` (0..24, fractional; 0 is midnight, 12 noon).
-pub fn light_at(hour: f32) -> Light {
+/// The sun at `hour` (0..24, fractional; 0 is midnight, 12 noon): its elevation `e` (a sine of the
+/// hour), the brightness `s` (a smooth step of `e`) and the dawn and dusk warmth `w` (a bell).
+fn sun(hour: f32) -> (f32, f32, f32) {
     let e = (std::f32::consts::TAU * (hour - 6.0) / 24.0).sin();
     let s = smoothstep(-0.3, 1.0, e);
     let w = (-((e - 0.08) / 0.20).powi(2)).exp();
+    (e, s, w)
+}
+
+/// The light at `hour` (0..24, fractional; 0 is midnight, 12 noon).
+pub fn light_at(hour: f32) -> Light {
+    let (e, s, w) = sun(hour);
     let mut tint = [0.0; 3];
     for c in 0..3 {
         let base = lerp(NIGHT[c], 1.0, s);
         tint[c] = (base * lerp(1.0, WARM[c], w * 0.7)).clamp(0.0, 1.0);
     }
     Light { tint, glow: 1.0 - smoothstep(-0.15, 0.20, e) }
+}
+
+/// The sky's colour by day, at night (moonlight) and at dawn and dusk (per channel, at full warmth).
+const SKY_DAY: [f32; 3] = [0.55, 0.70, 0.85];
+const SKY_NIGHT: [f32; 3] = [0.45, 0.52, 0.70];
+const SKY_WARM: [f32; 3] = [0.95, 0.70, 0.45];
+
+/// The sky's colour at `hour`: the day's blended toward the night's by the sun's brightness, and
+/// toward the dawn and dusk warmth by the same bell as the light's tint.
+pub fn sky_at(hour: f32) -> [f32; 3] {
+    let (_, s, w) = sun(hour);
+    let mut sky = [0.0; 3];
+    for c in 0..3 {
+        let base = lerp(SKY_NIGHT[c], SKY_DAY[c], s);
+        sky[c] = lerp(base, SKY_WARM[c], w * 0.7);
+    }
+    sky
+}
+
+// The hour of the last frame that had the light on (`None` when it was off or not yet drawn).
+local! {
+    static LAST_HOUR: Cell<Option<f32>> = Cell::new(None);
+}
+
+/// The sky's colour for the water (`terrain`'s `Sky`): the light's hour when the light is on, the
+/// day's colour otherwise.
+pub fn sky_rgb() -> [f32; 3] {
+    match LAST_HOUR.get() {
+        Some(h) => sky_at(h),
+        None => SKY_DAY,
+    }
 }
 
 /// The hour in -12..12 that is the shortest way from `from` to `to` (on the 24 h circle).
@@ -108,11 +146,15 @@ pub fn set_prefs(mode: LightMode, cycle_minutes: u32, fixed_hour: u32) {
 /// `game_hour` is the game's hour of day, `real_secs` the wall clock, `dt` the frame's length.
 pub fn frame_light(game_hour: f32, real_secs: f64, dt: f32) -> Option<Light> {
     if let Some(h) = ENV_HOUR.with(|h| *h) {
+        LAST_HOUR.set(Some(h.rem_euclid(24.0)));
         return Some(light_at(h.rem_euclid(24.0)));
     }
     let prefs = PREFS.get();
     let hour = match prefs.mode {
-        LightMode::Off => return None,
+        LightMode::Off => {
+            LAST_HOUR.set(None);
+            return None;
+        }
         LightMode::GameClock => {
             let shown = match SHOWN_HOUR.get() {
                 Some(h) => ease_hour(h, game_hour, dt),
@@ -127,6 +169,7 @@ pub fn frame_light(game_hour: f32, real_secs: f64, dt: f32) -> Option<Light> {
         }
         LightMode::Fixed => (prefs.fixed_hour % 24) as f32,
     };
+    LAST_HOUR.set(Some(hour));
     Some(light_at(hour))
 }
 
@@ -211,6 +254,36 @@ mod tests {
             h = ease_hour(h, 12.0, 1.0 / 60.0);
         }
         assert!((h - 12.0).abs() < 1e-3, "converged to {h}");
+    }
+
+    #[test]
+    fn the_sky_is_the_day_colour_at_noon_and_blue_at_night() {
+        let noon = sky_at(12.0);
+        for (c, d) in noon.iter().zip(SKY_DAY) {
+            assert!((c - d).abs() < 1e-3, "noon sky {noon:?}");
+        }
+        let night = sky_at(1.0);
+        assert!(night[2] > night[0], "night sky {night:?}");
+    }
+
+    #[test]
+    fn the_dusk_sky_is_warmer_than_the_night_sky() {
+        let dusk = sky_at(18.0);
+        let night = sky_at(1.0);
+        assert!(dusk[0] / dusk[2] > night[0] / night[2] + 0.2, "dusk {dusk:?} night {night:?}");
+    }
+
+    #[test]
+    fn the_sky_is_the_day_colour_with_the_light_off_and_the_light_s_hour_on() {
+        set_prefs(LightMode::Off, 24, 18);
+        assert!(frame_light(12.0, 0.0, 0.016).is_none());
+        assert_eq!(sky_rgb(), SKY_DAY, "lighting off: the day's colour");
+        set_prefs(LightMode::Fixed, 24, 1);
+        frame_light(12.0, 0.0, 0.016);
+        assert_eq!(sky_rgb(), sky_at(1.0), "the light's hour");
+        set_prefs(LightMode::Off, 24, 18);
+        frame_light(12.0, 0.0, 0.016);
+        assert_eq!(sky_rgb(), SKY_DAY);
     }
 
     #[test]
