@@ -49,8 +49,17 @@ pub fn parallax(yaw_deg: f32, pitch_deg: f32) -> Vec2 {
     vec2(s, c) * (1.0 - pitch_deg / 90.0) * 0.6
 }
 
-/// The sheets drawn: 3 on the desktop, 2 on a phone (the fill rate).
+/// `RAZDOR_MIST_SHEETS=1..4` (read once): the sheets drawn, whatever the platform (measurements).
+fn env_sheets() -> Option<f32> {
+    static ENV: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
+    *ENV.get_or_init(|| std::env::var("RAZDOR_MIST_SHEETS").ok().and_then(|v| v.trim().parse::<u32>().ok()).map(|n| n.clamp(1, 4) as f32))
+}
+
+/// The sheets drawn: 3 on the desktop, 2 on a phone (the fill rate), or `RAZDOR_MIST_SHEETS`.
 fn sheets() -> f32 {
+    if let Some(n) = env_sheets() {
+        return n;
+    }
     if crate::ui::display::dp_px().is_some() {
         2.0
     } else {
