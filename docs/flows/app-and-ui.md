@@ -804,12 +804,17 @@ stamp differs is rebuilt (a reinstall, a changed base or file list). The stamp a
 (called by `DtInstall::from_env` after `locate`, so the whole app reads it: assets, content, maps,
 language, `save::set_install`) returns the active mod's folder, else `base`; the choice is
 `<hub>/active.json` (`{"mod": "<id>"}`, none = the base). A choice whose mod is gone or does not build
-is cleared and the base played. At most one mod's built folder is kept: `apply_mod` calls
-`hub::keep_only_game_folder` after the switch has landed (never before, so the folder in use is not removed). It keeps the active mod's folder, or, when the base is chosen, the last mod's, so going back to that mod is instant and does not rebuild it; a mod's `files/` stay, so playing it again rebuilds its folder. Each built folder is a
-full copy of the base where the hub is on another disk than the install (Windows: install on D:, app data on
-C:), which is why the others go. A mod's saves are not in its folder: `save::saves_dir_of(app saves root, game
+is cleared and the base played. At most two mods' built folders are kept (the owner's decision, 2026-11-10):
+`use_mod` writes an empty `mods/<id>/last_played` marker after a mod's folder builds (its modification time is
+the record of when it was played), and `apply_mod` calls `hub::keep_recent_game_folders(local, 2)` after the
+switch has landed (never before, so the folder in use is not removed). It keeps the two mods played most
+recently (a mod with no marker counts as the oldest; ties by id) and always the active mod's folder, even when
+it is not among them, so switching between two mods is instant; the base chosen keeps the two newest. A mod's
+`files/` stay, so playing it again rebuilds its folder. Each built folder is a full copy of the base where the
+hub is on another disk than the install (Windows: install on D:, app data on C:; a phone: about 128 MB), which
+is why no more than two are kept. A mod's saves are not in its folder: `save::saves_dir_of(app saves root, game
 folder)` keys them by the game folder's path, beside the other installs' saves, and that path is the same
-after a rebuild, so removing `game/` never deletes them (test `keeping_one_game_folder_removes_the_others_and_never_the_saves`). `install::base_dir()` is the base (the folder that imports write to:
+after a rebuild, so removing `game/` never deletes them (test `keeping_recent_game_folders_removes_the_others_and_never_the_saves`). `install::base_dir()` is the base (the folder that imports write to:
 the game's update, «Добавить карту…»). Saves: `save::games_dir` keys them by the install folder's path,
 so a mod's folder (`…/mods/<id>/game`, named `game`) has its own save folder beside the base's; they
 are not in the mod's folder.

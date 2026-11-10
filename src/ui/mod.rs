@@ -558,7 +558,6 @@ impl App {
     /// it is cheap), the list is the one it made, and the others' built folders go, as the
     /// game reads the new one now.
     fn apply_mod(&mut self, id: Option<String>, built: ModBuilt) {
-        let previous = self.active_mod.clone();
         let repaired = built.repaired;
         match built.built {
             Ok(()) => {}
@@ -585,10 +584,9 @@ impl App {
             self.message = Some(tr("The mod's damaged or missing files were restored.").into());
         }
         if let Some(local) = razdor::hub::local_dir() {
-            // With the base game chosen, the last mod's folder is kept too: one folder kept, the
-            // last mod's, so going back to it does not rebuild it (a full copy on a phone).
-            let keep = if id.is_some() { id.as_deref() } else { previous.as_deref() };
-            razdor::hub::keep_only_game_folder(&local, keep);
+            // The two mods played most recently keep their folders (the active one always), so
+            // switching between them is instant.
+            razdor::hub::keep_recent_game_folders(&local, 2);
         }
     }
 

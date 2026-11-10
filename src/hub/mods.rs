@@ -22,6 +22,9 @@ const ACTIVE: &str = "active.json";
 const STAMP: &str = "stamp.json";
 /// The mod's manifest, beside its `files/` (`mods/<id>/manifest.json`).
 const MANIFEST: &str = "manifest.json";
+/// The empty file a mod's folder gets each time the mod is played; its modification time is the
+/// record (`mods/<id>/last_played`).
+const LAST_PLAYED: &str = "last_played";
 /// The folder of the mod zips kept from its install (`mods/<id>/archives/<n>.zip`).
 const ARCHIVES: &str = "archives";
 
@@ -164,9 +167,17 @@ pub fn use_mod(local: &Path, base: &Path, id: Option<&str>) -> Result<PathBuf, S
         Some(id) => {
             let dir = prepare_mod(local, base, id)?;
             write_active(local, Some(id))?;
+            mark_played(local, id);
             Ok(dir)
         }
     }
+}
+
+/// Records that mod `id` was just played: its `last_played` marker's modification time orders the
+/// built folders kept (see [`keep_recent_game_folders`]). A failed write is ignored: it only
+/// decides which folder goes.
+fn mark_played(local: &Path, id: &str) {
+    let _ = std::fs::write(mod_dir(local, id).join(LAST_PLAYED), b"");
 }
 
 fn write_active(local: &Path, id: Option<&str>) -> Result<(), String> {
@@ -509,15 +520,30 @@ pub fn drop_game_folder(local: &Path, id: &str) {
     let _ = std::fs::remove_dir_all(mod_dir(local, id).join("game.tmp"));
 }
 
-/// Keeps only the built game folder of `keep` (`None`: the base game, so none): every other
-/// mod's game folder under `mods/` goes. Each is a full copy of the base where the hub is on
-/// another disk than the install, so only the one in use is kept.
-pub fn keep_only_game_folder(local: &Path, keep: Option<&str>) {
+/// Keeps the built game folders of the `keep` mods played most recently, and the active mod's
+/// even when it is not among them; every other mod's game folder under `mods/` goes. The rule is
+/// two (the owner's decision, 2026-11-10): switching between two mods is instant, and each folder
+/// is a full copy of the base where hard links fail (about 128 MB on a phone), so no more than
+/// two. Played order is the `last_played` marker's modification time; a mod without one is the
+/// oldest, and ties go by id. Saves and `files/` are never touched (see [`drop_game_folder`]).
+pub fn keep_recent_game_folders(local: &Path, keep: usize) {
     let Ok(read) = std::fs::read_dir(local.join("mods")) else { return };
-    for entry in read.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if Some(name.as_str()) != keep && entry.path().is_dir() {
-            drop_game_folder(local, &name);
+    let mut mods: Vec<(String, Option<std::time::SystemTime>)> = read
+        .flatten()
+        .filter(|entry| entry.path().is_dir())
+        .map(|entry| {
+            let id = entry.file_name().to_string_lossy().into_owned();
+            let played = std::fs::metadata(mod_dir(local, &id).join(LAST_PLAYED)).and_then(|m| m.modified()).ok();
+            (id, played)
+        })
+        .collect();
+    // Newest first (`None`, no marker, sorts last); ties by id.
+    mods.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let mut kept: HashSet<String> = mods.iter().take(keep).map(|(id, _)| id.clone()).collect();
+    kept.extend(active_mod(local));
+    for (id, _) in &mods {
+        if !kept.contains(id) {
+            drop_game_folder(local, id);
         }
     }
 }
@@ -1195,14 +1221,28 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// A time for a mod's `last_played` marker: `n` seconds after a fixed start, so the tests
+    /// order the markers without relying on the clock.
+    fn played_at(n: u64) -> std::time::SystemTime {
+        std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000 + n)
+    }
+
+    /// Sets mod `id`'s `last_played` marker to `at`.
+    fn set_played(local: &Path, id: &str, at: std::time::SystemTime) {
+        let path = mod_dir(local, id).join(LAST_PLAYED);
+        std::fs::OpenOptions::new().write(true).open(&path).unwrap().set_modified(at).unwrap();
+    }
+
     #[test]
-    fn keeping_one_game_folder_removes_the_others_and_never_the_saves() {
+    fn keeping_recent_game_folders_removes_the_others_and_never_the_saves() {
         let base = base_install("keep");
         let local = temp("keep-hub");
         install_mod(&local, "a", "1.0", &[("Data/Units.ini", "A units")]);
         install_mod(&local, "b", "1.0", &[("Data/Extra.ini", "B extra")]);
-        let game_a = prepare_mod(&local, &base, "a").unwrap();
-        let game_b = prepare_mod(&local, &base, "b").unwrap();
+        let game_a = use_mod(&local, &base, Some("a")).unwrap();
+        let game_b = use_mod(&local, &base, Some("b")).unwrap();
+        set_played(&local, "a", played_at(1));
+        set_played(&local, "b", played_at(2));
         // The saves of a's folder: the app's saves root, never inside a game folder.
         let saves_root = temp("keep-saves");
         let saves = crate::rules::save::saves_dir_of(&saves_root, &game_a);
@@ -1210,7 +1250,8 @@ mod tests {
         assert!(!saves.starts_with(&game_a), "saves are not inside the game folder");
         assert!(!saves.starts_with(mod_dir(&local, "a")), "nor inside the mod's folder");
 
-        keep_only_game_folder(&local, Some("b"));
+        // One kept: b was played last (and is the active mod).
+        keep_recent_game_folders(&local, 1);
         assert!(!game_a.exists(), "a's built folder goes");
         assert!(game_b.join("Data/Extra.ini").exists(), "b's built folder stays");
         assert!(mod_files_dir(&local, "a").join("Data/Units.ini").exists(), "a's files stay: a rebuilds on the next play");
@@ -1222,12 +1263,46 @@ mod tests {
         assert_eq!(again, game_a);
         assert_eq!(crate::rules::save::saves_dir_of(&saves_root, &again), saves, "the saves key is the same after a rebuild");
 
-        keep_only_game_folder(&local, None);
-        assert!(!game_a.exists() && !game_b.exists(), "the base game keeps no mod folder");
+        // The base game chosen: b, the last played, still stays; a stays gone.
+        use_mod(&local, &base, None).unwrap();
+        keep_recent_game_folders(&local, 1);
+        assert!(game_b.join("Data/Extra.ini").exists(), "b stays: the last played mod");
+        assert!(!game_a.exists(), "a's built folder stays gone");
         assert!(saves.join("slot1.rzsave").exists(), "saves still there");
         let _ = std::fs::remove_dir_all(&base);
         let _ = std::fs::remove_dir_all(&local);
         let _ = std::fs::remove_dir_all(&saves_root);
+    }
+
+    #[test]
+    fn the_two_last_played_mod_folders_are_kept() {
+        let base = base_install("two");
+        let local = temp("two-hub");
+        install_mod(&local, "a", "1.0", &[("Data/Units.ini", "A units")]);
+        install_mod(&local, "b", "1.0", &[("Data/Extra.ini", "B extra")]);
+        install_mod(&local, "c", "1.0", &[("Data/More.ini", "C more")]);
+        let game_a = use_mod(&local, &base, Some("a")).unwrap();
+        let game_b = use_mod(&local, &base, Some("b")).unwrap();
+        let game_c = use_mod(&local, &base, Some("c")).unwrap();
+        // The markers say the order a, b, c whatever the clock did.
+        set_played(&local, "a", played_at(1));
+        set_played(&local, "b", played_at(2));
+        set_played(&local, "c", played_at(3));
+
+        keep_recent_game_folders(&local, 2);
+        assert!(!game_a.exists(), "a was played first: its folder goes");
+        assert!(game_b.join("Data/Extra.ini").exists(), "b, played second, stays");
+        assert!(game_c.join("Data/More.ini").exists(), "c, played last and active, stays");
+        assert!(mod_files_dir(&local, "a").join("Data/Units.ini").exists(), "a's files stay: a rebuilds on the next play");
+
+        // The base game chosen: the two newest still stay.
+        use_mod(&local, &base, None).unwrap();
+        keep_recent_game_folders(&local, 2);
+        assert!(game_b.join("Data/Extra.ini").exists(), "b stays with the base chosen");
+        assert!(game_c.join("Data/More.ini").exists(), "c stays with the base chosen");
+        assert_eq!(std::fs::read_to_string(base.join("Data/Units.ini")).unwrap(), "base units", "the base is not touched");
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&local);
     }
 
     /// Writes mod `id`'s manifest from its files as they are now (what an install writes).
