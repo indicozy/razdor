@@ -1562,9 +1562,14 @@ fn push_banks(cam: &Camera, game: &Game, cols: (i32, i32), rows: (i32, i32), ite
 /// [`BANK_WIDTH`] × [`BANK_HEIGHT`] cells. `standing` grows the billboard by the sprites' size, so the
 /// rectangle is the cells over that size.
 fn draw_bank(cam: &Camera, foot: Vec2, darkness: f32, seed: f32) {
+    mist::bank(bank_rect(cam, foot), darkness, seed);
+}
+
+/// The rectangle a mist bank standing at `foot` is drawn in (the `picture` [`standing`] takes).
+fn bank_rect(cam: &Camera, foot: Vec2) -> Rect {
     let k = cam.scale / sprite_size();
     let (w, h) = (BANK_WIDTH * k, BANK_HEIGHT * k);
-    mist::bank(Rect::new(foot.x - w / 2.0, foot.y - h, w, h), darkness, seed);
+    Rect::new(foot.x - w / 2.0, foot.y - h, w, h)
 }
 
 /// Draws the ground pass: under a tilted camera, the 2D space laid flat on the ground
@@ -3825,7 +3830,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                         draw_card(card, origin, zoom, r, atlas, outlined);
                     });
                 }
-                Drawable::Bank { foot, darkness, seed } => standing(cam, *foot, *foot, 1.0, || draw_bank(cam, *foot, *darkness, *seed)),
+                Drawable::Bank { foot, darkness, seed } => standing(cam, *foot, *foot, 1.0, bank_rect(cam, *foot), || draw_bank(cam, *foot, *darkness, *seed)),
                 Drawable::Army(i) => {
                     let a = &game.world.armies[*i];
                     let f = cam.to_screen(game.army_display_pos(a));
