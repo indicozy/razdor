@@ -168,7 +168,13 @@ uniform float LiveWater;
 uniform sampler2D WaterMask;
 uniform sampler2D Flow;
 uniform vec3 Sky;
+// The relief («Освещение»): the light (in the ground's axes), its raking strength and the cavities'
+// darkening. Strength 0 is the lighting off: the land is then drawn as it always was.
+uniform vec3 Light;
+uniform float Strength;
+uniform float Cavity;
 // @SHARP_UV@
+// @RELIEF@
 
 float hash2(vec2 q) {
     return fract(sin(dot(q, vec2(127.1, 311.7))) * 43758.5453);
@@ -179,6 +185,14 @@ float vnoise(vec2 q) {
     vec2 f = fract(q);
     vec2 u = f * f * (3.0 - 2.0 * f);
     return mix(mix(hash2(i), hash2(i + vec2(1.0, 0.0)), u.x), mix(hash2(i + vec2(0.0, 1.0)), hash2(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+
+// The atlas colour of a slot at `t` texels from the tile's corner. The tile repeats, so the offset is
+// wrapped inside the tile (the padded border is only for the filter): any offset of the relief's
+// samples reads the right neighbour texel.
+@CP@ vec3 atlas_at(vec2 slot, vec2 t) {
+    vec2 tt = mod(t, Tile);
+    return texture2D(Atlas, sharp_uv((slot * Slot + (Slot - Tile) * 0.5 + tt) / AtlasSize, AtlasSize, AtlasScale)).rgb;
 }
 
 @CP@ vec3 ground(float code, vec2 px, @CP@ vec3 water, @CP@ float sea, @CP@ vec3 foam) {
@@ -192,6 +206,16 @@ float vnoise(vec2 q) {
         if (LiveWater > 0.5) {
             c = mix(c, Sky, 0.18 * sea) + foam;
         }
+    }
+    // The relief of the land (not the water: it has its own look). Each code is lit by its own texture.
+    if (Strength > 0.0 && code >= 2.5) {
+        @CP@ float h = luma(c);
+        @CP@ float xp = luma(atlas_at(slot, px + vec2(RELIEF_R, 0.0)));
+        @CP@ float xm = luma(atlas_at(slot, px - vec2(RELIEF_R, 0.0)));
+        @CP@ float yp = luma(atlas_at(slot, px + vec2(0.0, RELIEF_R)));
+        @CP@ float ym = luma(atlas_at(slot, px - vec2(0.0, RELIEF_R)));
+        @CP@ float deep = (luma(atlas_at(slot, px + vec2(3.0 * RELIEF_R, 0.0))) + luma(atlas_at(slot, px - vec2(3.0 * RELIEF_R, 0.0))) + luma(atlas_at(slot, px + vec2(0.0, 3.0 * RELIEF_R))) + luma(atlas_at(slot, px - vec2(0.0, 3.0 * RELIEF_R)))) * 0.25;
+        c = relief_shade(c, h, xp, xm, yp, ym, deep);
     }
     return c;
 }
@@ -267,7 +291,7 @@ void main() {
 "#;
 
 /// The uniforms every terrain shader declares (the old one leaves `Overlay` out of its code).
-const UNIFORMS: [(&str, UniformType); 16] = [
+const UNIFORMS: [(&str, UniformType); 19] = [
     ("View", UniformType::Float4),
     ("MapSize", UniformType::Float2),
     ("CellPx", UniformType::Float2),
@@ -284,6 +308,9 @@ const UNIFORMS: [(&str, UniformType); 16] = [
     ("Overlay", UniformType::Float1),
     ("LiveWater", UniformType::Float1),
     ("Sky", UniformType::Float3),
+    ("Light", UniformType::Float3),
+    ("Strength", UniformType::Float1),
+    ("Cavity", UniformType::Float1),
 ];
 
 /// Wrapped border around each atlas slot, in pixels.
@@ -563,7 +590,7 @@ fn make_material(fragment: &str, uniforms: &[(&str, UniformType)], textures: &[&
 
 /// The neighbours shader with the given colour precision (`highp` or `mediump`).
 fn new_fragment(precision: &str) -> String {
-    NEW_FRAGMENT.replace("@CP@", precision).replace("@SHARP_UV@", sharp::SHARP_UV_GLSL)
+    NEW_FRAGMENT.replace("@CP@", precision).replace("@SHARP_UV@", sharp::SHARP_UV_GLSL).replace("@RELIEF@", sharp::RELIEF_GLSL)
 }
 
 impl TerrainLayer {
@@ -684,9 +711,10 @@ impl TerrainLayer {
     /// (ms) that animates the water, `None` for still water. `edge`: the ground goes on past the
     /// map's edges: the ground continues, then the animated fog ([`fog_opacity`]); `view` may
     /// reach past the map then. The fog's clock is `water_ms`. `mode`: see [`Mode`]. `flow`: the
-    /// rivers' flow per cell (`rules::flow::flow_field`), empty for still water.
+    /// rivers' flow per cell (`rules::flow::flow_field`), empty for still water. `relief`: the light's
+    /// relief on the land (`daylight::relief_at`, turned to the ground), None with the lighting off.
     #[allow(clippy::too_many_arguments)]
-    pub fn draw(&self, codes: &[u8], (w, h): (u32, u32), dest: Rect, view: Vec4, cell_px: Vec2, water_ms: Option<i64>, edge: bool, mode: Mode, flow: &[(f32, f32)]) {
+    pub fn draw(&self, codes: &[u8], (w, h): (u32, u32), dest: Rect, view: Vec4, cell_px: Vec2, water_ms: Option<i64>, edge: bool, mode: Mode, flow: &[(f32, f32)], relief: Option<daylight::Relief>) {
         if w == 0 || h == 0 || w + 2 > u16::MAX as u32 || h + 2 > u16::MAX as u32 || codes.len() != (w * h) as usize {
             return;
         }
@@ -738,6 +766,11 @@ impl TerrainLayer {
         m.set_uniform("LiveWater", if water::live() && water_on { 1.0f32 } else { 0.0 });
         let sky = daylight::sky_rgb();
         m.set_uniform("Sky", vec3(sky[0], sky[1], sky[2]));
+        // The relief: Strength 0 (the lighting off) skips it in the shader.
+        let (light, strength, cavity) = relief.map_or(([0.0, 0.0, 1.0], 0.0, 0.0), |r| (r.light, r.strength, r.cavity));
+        m.set_uniform("Light", vec3(light[0], light[1], light[2]));
+        m.set_uniform("Strength", strength);
+        m.set_uniform("Cavity", cavity);
         // The ground draws (the whole terrain, the cache's ground) get the shading rate (option 3).
         let vrs = self.opts.vrs && matches!(mode, Mode::Full | Mode::Ground);
         if vrs {

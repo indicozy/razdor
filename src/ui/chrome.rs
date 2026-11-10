@@ -1103,7 +1103,8 @@ pub fn silhouette(draw: impl FnOnce()) {
     }
 }
 
-const SHADOW_ONLY_MAIN: &str = "vec4 c = sharp_tex(uv); gl_FragColor = c * color * (1.0 - step(0.76, c.a));";
+// The shadow's alpha is taken before `ShadowK` scales it, so the pixels kept stay the same.
+const SHADOW_ONLY_MAIN: &str = "vec4 c = sharp_tex(uv); float keep = 1.0 - step(0.76, c.a); c.a *= ShadowK; gl_FragColor = c * color * keep;";
 
 local! {
     static SHADOW_ONLY: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
@@ -1111,17 +1112,20 @@ local! {
 
 /// Runs `draw` with only a picture's shadow drawn: the pixels of alpha below 0.76, so a
 /// building's flat shadow (up to [`razdor::dt::gfx::BUILDING_SHADOW_ALPHA`], 0.733) and not its
-/// body or edges (from 0.8). Without the material, nothing is drawn.
-pub fn shadow_only(draw: impl FnOnce()) {
+/// body or edges (from 0.8). `shadow_k` scales the shadow's alpha (the relief's painted-shadow
+/// factor, `daylight::relief_at`; 1 leaves it as the picture has it). Without the material,
+/// nothing is drawn.
+pub fn shadow_only(shadow_k: f32, draw: impl FnOnce()) {
     let material = SHADOW_ONLY.with(|m| {
         m.get_or_init(|| {
-            sharp::material(&sharp::fragment("", SHADOW_ONLY_MAIN), sharp::alpha_pipeline(), Vec::new())
+            sharp::material(&sharp::fragment("uniform float ShadowK;", SHADOW_ONLY_MAIN), sharp::alpha_pipeline(), vec![UniformDesc::new("ShadowK", UniformType::Float1)])
                 .map_err(|e| razdor::diag!("shadow material: {e}"))
                 .ok()
         })
         .clone()
     });
     if let Some(m) = material {
+        m.set_uniform("ShadowK", shadow_k);
         with_material(Some(m), draw);
     }
 }

@@ -19,6 +19,7 @@ use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation, Pipelin
 use macroquad::prelude::*;
 
 use super::memo::Recent;
+use super::daylight;
 
 /// GLSL ES 1.00 source of `sharp_uv`, pasted into fragment shaders (the caller declares
 /// the precision and the `TexSize` / `Scale` uniforms). `uv` is the texture coordinate,
@@ -33,6 +34,27 @@ vec2 sharp_uv(vec2 uv, vec2 tex_size, vec2 scale) {
     vec2 f = texel - base;
     vec2 t = clamp((f - 0.5) * s + 0.5, 0.0, 1.0);
     return (base + t) / ts;
+}
+"#;
+
+/// GLSL ES 1.00 for the relief («Освещение», `daylight::relief_at`), pasted into a shader that
+/// declares the uniforms `Light` (vec3), `Strength` and `Cavity` (floats) before it. Each texture
+/// sample gives a height h (its luminance); the four neighbours at ±[`RELIEF_R`] texels give the
+/// slope, and the four at three times that give the cavities. `relief_shade` takes the samples and
+/// returns the lit colour. With `Strength` 0 the caller skips it: the colour is then unchanged.
+pub const RELIEF_GLSL: &str = r#"
+const float RELIEF_R = 1.5;
+const float RELIEF_K = 2.0;
+float luma(vec3 c) {
+    return dot(c, vec3(0.299, 0.587, 0.114));
+}
+// `rgb` lit by the slope from the heights `xp`, `xm` (at +x, -x), `yp`, `ym` (at +y, -y) around
+// the centre height `h`, and the cavity from `deep`, the mean height at ±3 R.
+vec3 relief_shade(vec3 rgb, float h, float xp, float xm, float yp, float ym, float deep) {
+    vec3 n = normalize(vec3(-(xp - xm) * RELIEF_K, -(yp - ym) * RELIEF_K, 1.0));
+    float f = dot(n, Light) / Light.z;
+    float cav = clamp(deep - h, 0.0, 0.25) * 4.0;
+    return clamp(rgb * mix(1.0, f, Strength) * (1.0 - Cavity * cav), 0.0, 1.0);
 }
 "#;
 
@@ -175,6 +197,24 @@ razdor::local! {
 /// lines) may draw: a plain textured draw would sample with the sharp uniforms. A blend
 /// context ends by going back to this material ([`leave_blend`]).
 pub fn session<R>(draw: impl FnOnce() -> R) -> R {
+    let Some(m) = draw_material() else { return draw() };
+    session_with(m, draw)
+}
+
+/// [`session`] with the relief of the frame («Освещение», `daylight::relief_at`): the pass's sharp
+/// draws use the lit material (the relief on the colour, the painted shadows' alpha). Its uniforms
+/// are set once here, not per draw, so the pass batches as [`session`]'s does. `None` (the light is
+/// off) is [`session`] itself, and so is a lit material that does not compile.
+pub fn session_lit<R>(relief: Option<daylight::Relief>, draw: impl FnOnce() -> R) -> R {
+    let (Some(r), Some(m)) = (relief, lit_material()) else { return session(draw) };
+    m.set_uniform("Light", vec3(r.light[0], r.light[1], r.light[2]));
+    m.set_uniform("Strength", r.strength);
+    m.set_uniform("Cavity", r.cavity);
+    m.set_uniform("ShadowK", r.shadow_k);
+    session_with(m, draw)
+}
+
+fn session_with<R>(m: Material, draw: impl FnOnce() -> R) -> R {
     struct End;
     impl Drop for End {
         fn drop(&mut self) {
@@ -184,7 +224,6 @@ pub fn session<R>(draw: impl FnOnce() -> R) -> R {
             gl_use_default_material();
         }
     }
-    let Some(m) = draw_material() else { return draw() };
     if in_session() {
         return draw();
     }
@@ -198,6 +237,65 @@ pub fn session<R>(draw: impl FnOnce() -> R) -> R {
 
 fn in_session() -> bool {
     BASE.with(|b| b.borrow().is_some())
+}
+
+/// The session's material (`None` outside a session): the lit one in a lit session.
+fn session_base() -> Option<Material> {
+    BASE.with(|b| b.borrow().clone())
+}
+
+/// The uniforms the lit material declares beyond the sharp draw's (set by [`session_lit`]).
+const LIT_UNIFORMS: [(&str, UniformType); 4] = [("Light", UniformType::Float3), ("Strength", UniformType::Float1), ("Cavity", UniformType::Float1), ("ShadowK", UniformType::Float1)];
+
+/// The lit sharp draw's main: the colour lit by its relief (the neighbours of a transparent pixel
+/// count as its own height, so a sprite's edge has no rim), then the painted shadows: a pixel of
+/// alpha 0 < a ≤ 0.76 (a building's shadow) has its alpha times `ShadowK`.
+const LIT_MAIN: &str = r#"
+    vec4 c = sharp_tex(uv);
+    float a = c.a;
+    vec3 rgb = c.rgb;
+    if (a > 0.0) {
+        vec2 ox = vec2(RELIEF_R, 0.0) / TexSize;
+        vec2 oy = vec2(0.0, RELIEF_R) / TexSize;
+        float h = luma(c.rgb);
+        vec4 sxp = sharp_tex(uv + ox);
+        vec4 sxm = sharp_tex(uv - ox);
+        vec4 syp = sharp_tex(uv + oy);
+        vec4 sym = sharp_tex(uv - oy);
+        float xp = sxp.a < 0.5 ? h : luma(sxp.rgb);
+        float xm = sxm.a < 0.5 ? h : luma(sxm.rgb);
+        float yp = syp.a < 0.5 ? h : luma(syp.rgb);
+        float ym = sym.a < 0.5 ? h : luma(sym.rgb);
+        vec2 ox3 = ox * 3.0;
+        vec2 oy3 = oy * 3.0;
+        vec4 fxp = sharp_tex(uv + ox3);
+        vec4 fxm = sharp_tex(uv - ox3);
+        vec4 fyp = sharp_tex(uv + oy3);
+        vec4 fym = sharp_tex(uv - oy3);
+        float deep = ((fxp.a < 0.5 ? h : luma(fxp.rgb)) + (fxm.a < 0.5 ? h : luma(fxm.rgb)) + (fyp.a < 0.5 ? h : luma(fyp.rgb)) + (fym.a < 0.5 ? h : luma(fym.rgb))) * 0.25;
+        rgb = relief_shade(rgb, h, xp, xm, yp, ym, deep);
+    }
+    if (a > 0.0 && a <= 0.76) {
+        a = min(a * ShadowK, 1.0);
+    }
+    gl_FragColor = color * vec4(rgb, a);
+"#;
+
+razdor::local! {
+    static LIT_MATERIAL: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
+}
+
+/// The lit sharp material, made once. `None` when it does not compile (then the pass is unlit).
+fn lit_material() -> Option<Material> {
+    LIT_MATERIAL.with(|m| {
+        m.get_or_init(|| {
+            let extra = format!("uniform vec3 Light;\nuniform float Strength;\nuniform float Cavity;\nuniform float ShadowK;\n{RELIEF_GLSL}");
+            material(&fragment(&extra, LIT_MAIN), alpha_pipeline(), LIT_UNIFORMS.iter().map(|(n, t)| UniformDesc::new(n, *t)).collect())
+                .map_err(|e| razdor::diag!("lit sharp material: {e}"))
+                .ok()
+        })
+        .clone()
+    })
 }
 
 /// Before a plain draw (text, a texture drawn without sharp sampling, or a helper's own
@@ -311,20 +409,22 @@ pub fn draw(tex: &Texture2D, x: f32, y: f32, color: Color, params: DrawTexturePa
             draw_texture_ex(tex, x, y, color, params);
         }
         Some(None) => draw_texture_ex(tex, x, y, color, params),
-        None => match draw_material() {
-            Some(m) if in_session() => {
+        None => match session_base() {
+            Some(m) => {
                 let tex_size = texels(tex);
                 set_cached(&m, tex_size, draw_scale(tex_size, &params));
                 session_material();
                 draw_texture_ex(tex, x, y, color, params);
             }
-            Some(m) => {
-                set_uniforms(&m, tex, &params);
-                gl_use_material(&m);
-                draw_texture_ex(tex, x, y, color, params);
-                gl_use_default_material();
-            }
-            None => draw_texture_ex(tex, x, y, color, params),
+            None => match draw_material() {
+                Some(m) => {
+                    set_uniforms(&m, tex, &params);
+                    gl_use_material(&m);
+                    draw_texture_ex(tex, x, y, color, params);
+                    gl_use_default_material();
+                }
+                None => draw_texture_ex(tex, x, y, color, params),
+            },
         },
     }
 }
@@ -344,20 +444,23 @@ pub fn draw_mesh_sharp(mesh: &Mesh, scale: Vec2) {
             draw_mesh(mesh);
         }
         Some(None) => draw_mesh(mesh),
-        None => match draw_material() {
-            Some(m) if mesh.texture.is_some() && in_session() => {
+        None => match session_base() {
+            Some(m) if mesh.texture.is_some() => {
                 let tex_size = mesh.texture.as_ref().map_or(Vec2::ONE, texels);
                 set_cached(&m, tex_size, scale.abs());
                 session_material();
                 draw_mesh(mesh);
             }
-            Some(m) if mesh.texture.is_some() => {
-                set(&m);
-                gl_use_material(&m);
-                draw_mesh(mesh);
-                gl_use_default_material();
-            }
-            _ => draw_mesh(mesh),
+            Some(_) => draw_mesh(mesh),
+            None => match draw_material() {
+                Some(m) if mesh.texture.is_some() => {
+                    set(&m);
+                    gl_use_material(&m);
+                    draw_mesh(mesh);
+                    gl_use_default_material();
+                }
+                _ => draw_mesh(mesh),
+            },
         },
     }
 }

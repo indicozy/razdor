@@ -310,7 +310,7 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   (`Atlas::building_cards`). In the tilted view only, a building with cards is drawn as one `Drawable::BuildingCard`
   per card, each on its own foot (`card_foot`, sorted like a sprite) and standing as a billboard, its mesh
   (`card_mesh`, the sprite's uvs in the atlas, `sharp` sampling). Its shadow lies on the ground under the fog
-  (`draw_building_shadow`, `chrome::shadow_only`: the sprite's shadow pixels only). A bridge, a picture with no
+  (`draw_building_shadow`, `chrome::shadow_only`: the sprite's shadow pixels only, with the relief's `ShadowK`). A bridge, a picture with no
   entry, and the flat view keep one billboard as before. The hover's gold outline goes under each card.
 - Picking: `map_pointer` is the ground under the pointer (NaN over the sky), `tile_under_pixel` the
   cell under a pixel at any turn (tested in `tilt_tests`). Overlays on the window (tooltip, battle
@@ -444,7 +444,27 @@ strength (a sine of the sun's elevation, a smooth step for the brightness, a bel
 warmth, a night floor). The hour comes from the game clock (eased, `ease_hour`), a real-time cycle, or
 a fixed hour; `RAZDOR_LIGHT_HOUR` overrides it for snapshots. `world_view::draw_daylight` runs right after
 `draw_world` and before the flat `draw_fog` (after it with the mist on, see «Mist»): a multiply tint over the map area, then additive glows in
-screen space (`Camera::screen_at`) at the towns and the armies (the hero's too). Off, it draws nothing.
+screen space (`Camera::screen_at`) at the towns and the armies (the hero's too). Off, it draws nothing. The frame's
+light is read once, before the world (`world_view::frame_light_of`), because the relief below needs it there too.
+**Relief** (part of «Освещение», no setting of its own; off with the light). `daylight::relief_at(hour)` gives a
+`Relief`: the light's direction on the screen (x right, y down, z toward the viewer; from the lower right, so it agrees
+with the painted shadows, and the elevation follows the hour), the raking strength (0.65 at dawn, 0.25 at noon), the
+cavities' darkening (0.35 by day, 0.2 at night) and the painted shadows' factor (`ShadowK`: 1.15 at low sun, 1.0 at
+noon, 0.55 at night). By night the moon (elevation 0.6, strength 0.3) lights it; the blend runs over the sun's sine from
+-0.5 to 0, so it does not jump at dawn or dusk. `daylight::frame_relief` reads it for the hour `frame_light` just set.
+No normal maps: each texel's height is its luminance, the slope comes from the four neighbours at ±1.5 texels
+(`RELIEF_R`) and the cavity from the four at ±4.5 texels (`sharp::RELIEF_GLSL`, whose relief_shade function does the shade). A pixel's shade is
+`mix(1, dot(N, L) / L.z, Strength) · (1 − Cavity · c)`, clamped; flat ground is exactly 1. The sprites: `draw_world_in`
+runs its pass in `sharp::session_lit` (the lit material, its uniforms set once a frame, so the pass batches as the
+plain one does; `None` is `sharp::session`). Every sprite of the pass is lit, and a transparent neighbour counts as the
+pixel's own height, so a sprite's edge has no rim. The painted shadows (alpha 0 < a ≤ 0.76) have their alpha times
+`ShadowK` there and in `chrome::shadow_only`. The ground: the land codes only, never the water (`ground()` in
+`NEW_FRAGMENT`); `Strength` 0 skips the maths, so the lighting off draws the old pixels. In 2.5D the ground's light is
+turned by `Relief::turned(yaw)` (the sun is fixed to the camera, the ground's axes turn with it). The ground cache's
+key holds the relief to 1/256, so a cycle refills the cache a few times a game hour. Not lit: the battle and window
+backdrops (`draw_world(…, None)`), the fog, the marks and the route. Known limits: an atlas sprite's neighbour can be
+a neighbouring sprite's edge copy (the atlas gutter is one clamped pixel), so an outermost pixel may pick up that edge;
+the 2.5D ground is lit without the pitch's foreshortening.
 **Mist** (the setting «Туман вместо черноты», `Settings::map_mist`, off by default; `display::follow_settings`
 pushes it with `mist::set_pref`, `RAZDOR_MIST=1` for snapshots): `world_view::draw_fog_flat` draws the same fog
 texture (`minimap::fog_layer`, the same quad and texels) through the material of `src/ui/mist.rs` instead of the

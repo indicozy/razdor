@@ -32,6 +32,7 @@ use super::gestures::SwipeKind;
 use super::cursor::{self, BuildingHover, CellArmy, MapHover, Shape};
 use super::dialog::Dialog;
 use super::dt_art::{Atlas, DtArt};
+use super::daylight;
 use super::game_bar::{self, BarButton, Look, TimeButton};
 use super::keymap::{self, Action};
 use super::map_scale;
@@ -1890,7 +1891,7 @@ fn photo_frame(game: &mut Game, assets: &Assets, view: &mut MapView, entering: b
     clear_background(rgb(10, 12, 10));
     let cam = Camera::looking_at(game, view.zoom, view.look.unwrap_or(game.display_pos()));
     let now = crate::ui::clock::now();
-    frame_probe::time(Stage::World, || map_scale::draw(map_render_scale(), rgb(10, 12, 10), || draw_world(game, assets, &cam, None, None, None, true, Veil { shows: &[], now })));
+    frame_probe::time(Stage::World, || map_scale::draw(map_render_scale(), rgb(10, 12, 10), || draw_world(game, assets, &cam, None, None, None, true, Veil { shows: &[], now }, None)));
     if shot {
         take_shot(view, now);
     }
@@ -2355,7 +2356,7 @@ pub(super) fn draw_wrapped(tex: &Texture2D, dest: Rect, src: Vec2, src_size: Vec
 
 /// The terrain of the map as the blended layer (`terrain::TerrainLayer`): the quad over the drawn
 /// ground, in `mode` (see [`terrain::Mode`]). `cam` is the 2D space ([`in_view`]).
-fn terrain_quad(game: &Game, layer: &terrain::TerrainLayer, cam: &Camera, mode: terrain::Mode, flow: &[(f32, f32)]) {
+fn terrain_quad(game: &Game, layer: &terrain::TerrainLayer, cam: &Camera, mode: terrain::Mode, flow: &[(f32, f32)], relief: Option<daylight::Relief>) {
     let map = &game.world.map;
     // The map area in view, in world units (cells span ±½ around their centres).
     let rh = cam.grid.row_height();
@@ -2371,8 +2372,10 @@ fn terrain_quad(game: &Game, layer: &terrain::TerrainLayer, cam: &Camera, mode: 
             frame_probe::terrain(b.x - a.x, b.y - a.y);
         }
         let view = vec4(tl.x, tl.y / rh, br.x, br.y / rh);
+        // The ground lies in the map's axes: the light (screen axes) turns with the camera's yaw.
+        let relief = relief.map(|r| r.turned(cam.tilt.map_or(0.0, |t| t.cam.yaw_deg)));
         // The edge's mist is fog: the trailer's no-fog switch leaves the ground going on past the edge.
-        layer.draw(map.surface_codes(), (map.w as u32, map.h as u32), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(PX, PX * rh), Some((crate::ui::clock::now() * 1000.0) as i64), extend && !trailer_nofog(), mode, flow);
+        layer.draw(map.surface_codes(), (map.w as u32, map.h as u32), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(PX, PX * rh), Some((crate::ui::clock::now() * 1000.0) as i64), extend && !trailer_nofog(), mode, flow, relief);
     }
 }
 
@@ -2381,7 +2384,7 @@ fn terrain_quad(game: &Game, layer: &terrain::TerrainLayer, cam: &Camera, mode: 
 /// backdrop, and not inside a picture being filled: the ground is drawn once into the cache when
 /// its key ([`ground_key`]) changes; then the cached ground is copied and the water and the
 /// border's fog drawn over it.
-fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool) {
+fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool, relief: Option<daylight::Relief>) {
     let Some(layer) = art.and_then(|a| a.terrain_layer()).filter(|_| cam.grid == Grid::Square8) else {
         return in_view(cam, |c| ground(c, || draw_terrain(game, art, c)));
     };
@@ -2392,16 +2395,16 @@ fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool) {
         // A bent view draws its ground in `draw_world`'s picture (`ground_in_bent`), never here;
         // the cache's fill would nest inside that picture, so a bent view is not cached.
         let plain = cam.tilt.is_none_or(|t| t.cam.bend.is_none());
-        let cached = (waits && layer.cache_on() && super::render_cache::target().is_none() && plain).then(|| layer.ground_target(ground_key(game, cam))).flatten();
+        let cached = (waits && layer.cache_on() && super::render_cache::target().is_none() && plain).then(|| layer.ground_target(ground_key(game, cam, relief))).flatten();
         match cached {
             Some((rt, fill)) => {
                 if fill {
-                    super::render_cache::fill(&rt, || in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Ground, flow))));
+                    super::render_cache::fill(&rt, || in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Ground, flow, relief))));
                 }
-                in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Cached, flow)));
-                in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow)));
+                in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Cached, flow, relief)));
+                in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow, relief)));
             }
-            None => in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Full, flow))),
+            None => in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Full, flow, relief))),
         }
     });
 }
@@ -2443,7 +2446,7 @@ fn map_flow(game: &Game) -> Option<std::rc::Rc<Vec<(f32, f32)>>> {
 /// The key of the cached ground: everything the ground pass reads (the screen, the camera and
 /// its 2.5D tilt, the map's size and surface codes, and the edge's mode). The clock and the water
 /// are not in it: they are drawn over the cache each frame.
-fn ground_key(game: &Game, cam: &Camera) -> u64 {
+fn ground_key(game: &Game, cam: &Camera, relief: Option<daylight::Relief>) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     let f = |v: f32| v.to_bits();
@@ -2457,6 +2460,12 @@ fn ground_key(game: &Game, cam: &Camera) -> u64 {
     }
     let map = &game.world.map;
     (map.w, map.h, cam.grid.row_height().to_bits(), extend_edge(), mist::on(), map.surface_codes()).hash(&mut h);
+    // The relief («Освещение») is in the ground: it moves with the hour, so the key takes it to
+    // 1/256 (a cycle's light refills the cache a few times a game hour, not every frame).
+    if let Some(r) = relief {
+        let q = |v: f32| (v * 256.0).round() as i32;
+        [q(r.light[0]), q(r.light[1]), q(r.light[2]), q(r.strength), q(r.cavity)].hash(&mut h);
+    }
     h.finish()
 }
 
@@ -2772,11 +2781,11 @@ fn draw_card(card: &Card, origin: Vec2, zoom: f32, r: Rect, atlas: &Atlas, outli
 /// A card building's shadow on the ground (2.5D): the whole sprite, placed as `draw_building`
 /// places it, with only its shadow pixels drawn (`chrome::shadow_only`). It is drawn in the ground
 /// pass before the fog, which then covers it where the ground is dark.
-fn draw_building_shadow(l: &Location, atlas: &Atlas, r: Rect, cam: &Camera) {
+fn draw_building_shadow(l: &Location, atlas: &Atlas, r: Rect, cam: &Camera, shadow_k: f32) {
     let zoom = cam.scale / PX;
     let at = building_sprite_origin(l, r.w, r.h, cam);
     let params = DrawTextureParams { dest_size: Some(vec2(r.w * zoom, r.h * zoom)), source: Some(r), ..Default::default() };
-    super::chrome::shadow_only(|| super::sharp::draw(&atlas.texture, at.x, at.y, WHITE, params));
+    super::chrome::shadow_only(shadow_k, || super::sharp::draw(&atlas.texture, at.x, at.y, WHITE, params));
 }
 
 fn draw_building(l: &Location, art: Option<&DtArt>, cam: &Camera, outlined: bool) {
@@ -3405,7 +3414,7 @@ fn draw_sky(cam: &Camera) {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<MapHoverLook>, waits: bool, veil: Veil) {
+fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<MapHoverLook>, waits: bool, veil: Veil, relief: Option<daylight::Relief>) {
     draw_sky(cam);
     if waits {
         gpu_wait(Stage::GpuSky);
@@ -3416,30 +3425,33 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
     if cam.tilt.is_some_and(|t| t.cam.bend.is_some()) {
         let art = assets.dt.as_ref();
         return in_view(cam, |c| {
-            ground_in_bent(game, art, c);
-            draw_world_in(game, assets, c, preview, spell, hover, waits, veil);
+            ground_in_bent(game, art, c, relief);
+            draw_world_in(game, assets, c, preview, spell, hover, waits, veil, relief);
         });
     }
     // The ground first: it sets its own camera (`in_view`), so the cache can fill through it.
-    frame_probe::time(Stage::Terrain, || draw_ground(game, assets.dt.as_ref(), cam, waits));
+    frame_probe::time(Stage::Terrain, || draw_ground(game, assets.dt.as_ref(), cam, waits, relief));
     if waits {
         gpu_wait(Stage::GpuTerrain);
     }
-    in_view(cam, |c| draw_world_in(game, assets, c, preview, spell, hover, waits, veil));
+    in_view(cam, |c| draw_world_in(game, assets, c, preview, spell, hover, waits, veil, relief));
 }
 
 /// The ground of a bent view ([`draw_world`]), drawn in its picture's 2D space `c` (the ground's
 /// pass of [`bent_view`]; the sprites' pass draws none of it): the terrain, as [`draw_ground`] draws
 /// it without the cache, which a bent view does not use.
-fn ground_in_bent(game: &Game, art: Option<&DtArt>, c: &Camera) {
+fn ground_in_bent(game: &Game, art: Option<&DtArt>, c: &Camera, relief: Option<daylight::Relief>) {
+    // «Живая вода»: the rivers' flow of the map, while the water is alive (else still).
+    let flow = map_flow(game);
+    let flow: &[(f32, f32)] = flow.as_deref().map_or(&[], |f| f.as_slice());
     match art.and_then(|a| a.terrain_layer()).filter(|_| c.grid == Grid::Square8) {
-        Some(layer) => ground(c, || terrain_quad(game, layer, c, terrain::Mode::Full)),
+        Some(layer) => ground(c, || terrain_quad(game, layer, c, terrain::Mode::Full, flow, relief)),
         None => ground(c, || draw_terrain(game, art, c)),
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<MapHoverLook>, waits: bool, veil: Veil) {
+fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<MapHoverLook>, waits: bool, veil: Veil, relief: Option<daylight::Relief>) {
     let art = assets.dt.as_ref();
     let map = &game.world.map;
     let ((c0, c1), (r0, r1)) = cam.visible(map);
@@ -3536,11 +3548,12 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
         l.cells().any(|t| fog.explored_near(t, minimap::FEATHER)) && ay >= r0 - up && ay < r1 + below && ax >= c0 - side && ax - l.size.0 < c1 + side
     };
     // 2.5D: a card building's shadow lies on the ground too, under the fog below.
+    let shadow_k = relief.map_or(1.0, |r| r.shadow_k);
     if tilted {
         ground(cam, || {
             for l in game.world.locations.iter().filter(|l| location_seen(l)) {
                 if let Some((atlas, r, _)) = card_building(l, art) {
-                    draw_building_shadow(l, atlas, r, cam);
+                    draw_building_shadow(l, atlas, r, cam, shadow_k);
                 }
             }
         });
@@ -3616,7 +3629,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // Stable: figures sharing a cell keep the order they were pushed in.
     items.sort_by_key(|a| a.0);
     // One sharp session for the pass: its art shares the material switch (see `sharp::session`).
-    super::sharp::session(|| {
+    super::sharp::session_lit(relief, || {
         for d in items.iter().map(|(_, d)| d) {
             match d {
                 Drawable::Object(o) => standing(cam, object_foot(o, cam), object_foot(o, cam), shade_of(object_foot(o, cam)), object_picture(o, art, cam), || draw_object(o, art, cam)),
@@ -4510,7 +4523,7 @@ fn backdrop_world(game: &Game, assets: &Assets) {
     let full = map_area();
     let cam = backdrop_camera(game, full);
     map_scale::draw(map_render_scale(), rgb(10, 12, 10), || {
-        draw_world(game, assets, &cam, None, None, None, false, NO_VEIL);
+        draw_world(game, assets, &cam, None, None, None, false, NO_VEIL, None);
         if cam.tilt.is_none() {
             cam.draw_fog(game, &[]);
         }
@@ -5112,22 +5125,25 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
     let shows: Vec<&Showing> = view.opening.iter().chain(&view.shows).collect();
     let flat = cam.tilt.is_none();
     let hover = hover.filter(|_| !trailer_clean());
+    // The light is read once, before the world (its relief lights the sprites and the ground).
+    let light = frame_light_of(game);
+    let relief = light.and_then(|_| daylight::frame_relief());
     frame_probe::time(Stage::World, || {
         map_scale::draw(map_render_scale(), rgb(10, 12, 10), || {
-            draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()), show.as_ref(), hover, true, Veil { shows: &shows, now: show_now });
+            draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()), show.as_ref(), hover, true, Veil { shows: &shows, now: show_now }, relief);
             // Razdor's «Освещение» (off by default): the light over the world, before the flat fog, so the
             // fog's black stays black. With the mist on («Туман вместо черноты») the flat fog is a colour,
             // so the light goes over it too (the mist takes the night's tint). Off, the order is as before.
             let mist_light = flat && mist::on();
             if !mist_light {
-                draw_daylight(game, &cam);
+                draw_daylight(game, &cam, light);
             }
             if flat {
                 frame_probe::time(Stage::Fog, || cam.draw_fog(game, &shows));
                 gpu_wait(Stage::GpuFog);
             }
             if mist_light {
-                draw_daylight(game, &cam);
+                draw_daylight(game, &cam, light);
             }
         })
     });
@@ -5311,15 +5327,22 @@ fn glow_texture() -> Texture2D {
     tex
 }
 
+/// The frame's light (`daylight::frame_light`) from the game's clock, once per map frame: before the
+/// world (its relief is read there, `daylight::frame_relief`) and the tint after it.
+fn frame_light_of(game: &Game) -> Option<daylight::Light> {
+    let hour = (game.clock.total_minutes() % razdor::rules::clock::MINUTES_PER_DAY as f64 / 60.0) as f32;
+    let now = crate::ui::clock::now();
+    daylight::frame_light(hour, now, get_frame_time())
+}
+
 /// Razdor's «Освещение» (`daylight`, off by default): the map's tint over the drawn world, then the
 /// glows of the towns and of the armies (the hero's too), in screen space. Style only: nothing is
 /// drawn when it is off, and the rules never read it.
-fn draw_daylight(game: &Game, cam: &Camera) {
-    let hour = (game.clock.total_minutes() % razdor::rules::clock::MINUTES_PER_DAY as f64 / 60.0) as f32;
-    let now = crate::ui::clock::now();
-    let Some(light) = super::daylight::frame_light(hour, now, get_frame_time()) else {
+fn draw_daylight(game: &Game, cam: &Camera, light: Option<daylight::Light>) {
+    let Some(light) = light else {
         return;
     };
+    let now = crate::ui::clock::now();
     let t = light.tint;
     super::chrome::multiply(|| draw_rectangle(cam.draw.x, cam.draw.y, cam.draw.w, cam.draw.h, Color::new(t[0], t[1], t[2], 1.0)));
     if light.glow <= 0.01 {
