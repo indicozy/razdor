@@ -1921,9 +1921,11 @@ fn screen_view(cam: &Camera) -> Rect {
 /// if a corner is behind the eye.
 fn picture_on_screen(tilt: &Tilt, view: Rect, model: Mat4, picture: Rect) -> Option<Rect> {
     let (x0, y0, x1, y1) = (picture.x, picture.y, picture.x + picture.w, picture.y + picture.h);
+    // The four corners share one view-projection (`TiltCamera::project` builds it per call: four matrices a sprite).
+    let view_proj = tilt.cam.view_proj(view);
     let (mut lo, mut hi) = (vec2(f32::INFINITY, f32::INFINITY), vec2(f32::NEG_INFINITY, f32::NEG_INFINITY));
     for (x, y) in [(x0, y0), (x1, y0), (x1, y1), (x0, y1)] {
-        let s = tilt.cam.project(model.transform_point3(vec3(x, y, 0.0)), view)?;
+        let s = view25::project_with(view_proj, model.transform_point3(vec3(x, y, 0.0)), view)?;
         lo = lo.min(s);
         hi = hi.max(s);
     }
@@ -2962,6 +2964,8 @@ fn draw_leaning(texture: &Texture2D, src: Rect, at: Vec2, size: Vec2, lean: f32)
 local! {
     /// The swaying trees' quad (`draw_leaning`): indices fixed, vertices and texture refilled.
     static LEAN_MESH: std::cell::RefCell<Mesh> = std::cell::RefCell::new(Mesh { vertices: Vec::new(), indices: vec![0, 1, 2, 0, 2, 3], texture: None });
+    /// The picture quad of [`draw_picture_form`]: indices fixed, vertices and texture refilled for each sprite.
+    static FORM_MESH: std::cell::RefCell<Mesh> = std::cell::RefCell::new(Mesh { vertices: Vec::new(), indices: vec![0, 1, 2, 0, 2, 3], texture: None });
     /// The map's painter's list (`draw_world`): cleared and refilled each frame.
     static WORLD_ITEMS: std::cell::RefCell<Vec<(i64, Drawable)>> = std::cell::RefCell::new(Vec::new());
 }
@@ -3113,56 +3117,73 @@ fn card_mesh(card: &Card, origin_px: Vec2, zoom: f32, src: Rect, atlas_size: Vec
 /// The colour of a point of a picture's face under the sun's form shading (`daylight::form_sun`): `p` in -1..1
 /// across the picture from its centre; the face turned away from the sun takes up to the shadow tone (the
 /// share `k`). None when the form is not shaded (the painted shadows, night, the light off).
-fn form_colour(cam: &Camera, p: Vec2, base: Color) -> Option<Color> {
+/// The sun's form light of a frame's camera (the inputs of `form_colour_in` that do not depend on the point): the
+/// darkening at the far edge and the normalised screen direction toward the sun. Made once per picture, not per corner.
+#[derive(Clone, Copy)]
+struct FormSun {
+    k: f32,
+    s: Vec2,
+}
+
+fn form_sun_of(cam: &Camera) -> Option<FormSun> {
     let (k, toward) = daylight::form_sun()?;
     let s = cam.facing(vec2(toward[0], toward[1]));
     if s.length_squared() < 1e-8 {
         return None;
     }
+    Some(FormSun { k, s: s.normalize() })
+}
+
+/// The colour of a point `p` of a picture (the screen's unit square about its centre) under the sun's form light `sun`
+/// ([`form_sun_of`]): the picture's colour, or the tone where the sun darkens it.
+fn form_colour_in(sun: FormSun, p: Vec2, base: Color) -> Option<Color> {
     // `k` is the darkening at the far edge (0.40 low sun, 0.20 noon): the colour moves toward the tone by the share
     // that darkens the red by k (the tone's red is 0.48, so the share is k / 0.52).
-    let away = (-p.dot(s.normalize())).clamp(0.0, 1.0);
-    let share = (k * away / (1.0 - shadow::TINT[0])).clamp(0.0, 1.0);
+    let away = (-p.dot(sun.s)).clamp(0.0, 1.0);
+    let share = (sun.k * away / (1.0 - shadow::TINT[0])).clamp(0.0, 1.0);
     let t = shadow::TINT;
     let mix = |c: f32, tc: f32| c * (1.0 - share + share * tc);
     Some(Color::new(mix(base.r, t[0]), mix(base.g, t[1]), mix(base.b, t[2]), base.a))
 }
 
 /// A picture's quad (its rectangle `src` of the atlas, drawn at `at` in `size`) with the sun's form shading at its
-/// four corners (`form_colour`; the colour is interpolated across the quad). Without the shading, `sharp::draw`.
+/// four corners (`form_colour_in`; the colour is interpolated across the quad). Without the shading, `sharp::draw`.
 fn draw_picture_form(cam: &Camera, atlas: &Atlas, src: Rect, at: Vec2, size: Vec2, base: Color, zoom: f32) {
     let corners = [(vec2(-1.0, -1.0), vec2(0.0, 0.0)), (vec2(1.0, -1.0), vec2(1.0, 0.0)), (vec2(1.0, 1.0), vec2(1.0, 1.0)), (vec2(-1.0, 1.0), vec2(0.0, 1.0))];
-    let colours: Vec<Option<Color>> = corners.iter().map(|(p, _)| form_colour(cam, *p, base)).collect();
+    let sun = form_sun_of(cam);
+    let colours: [Option<Color>; 4] = corners.map(|(p, _)| sun.and_then(|s| form_colour_in(s, p, base)));
     if colours.iter().any(Option::is_none) {
         super::sharp::draw(&atlas.texture, at.x, at.y, base, DrawTextureParams { dest_size: Some(size), source: Some(src), ..Default::default() });
         return;
     }
     let atlas_size = vec2(atlas.texture.width(), atlas.texture.height());
-    let vertices = corners
-        .iter()
-        .zip(&colours)
-        .map(|((_, uv), c)| {
+    // One quad mesh for every sprite, refilled in place (its vertex buffer keeps its capacity, as `LEAN_MESH`).
+    FORM_MESH.with(|m| {
+        let mut m = m.borrow_mut();
+        m.vertices.clear();
+        m.vertices.extend(corners.iter().zip(&colours).map(|((_, uv), c)| {
             let p = at + *uv * size;
             let t = (src.point() + *uv * src.size()) / atlas_size;
             let c = c.unwrap_or(base);
             Vertex::new(p.x, p.y, 0.0, t.x, t.y, c)
-        })
-        .collect();
-    let mesh = Mesh { vertices, indices: vec![0, 1, 2, 0, 2, 3], texture: Some(atlas.texture.clone()) };
-    super::sharp::draw_mesh_sharp(&mesh, vec2(zoom, zoom));
+        }));
+        m.texture = Some(atlas.texture.clone());
+        super::sharp::draw_mesh_sharp(&m, vec2(zoom, zoom));
+    });
 }
 
 /// A card's mesh with the sun's form shading at each vertex (the picture's own centre and half-size are the
 /// reference, so the cards of one building shade like its whole face). Without the shading, [`card_mesh`].
 fn card_mesh_form(cam: &Camera, card: &Card, origin_px: Vec2, zoom: f32, src: Rect, atlas_size: Vec2, base: Color) -> (Vec<Vertex>, Vec<u16>) {
     let half = vec2(src.w, src.h) * 0.5;
+    let sun = form_sun_of(cam);
     let vertices = card
         .verts
         .iter()
         .map(|&(x, y)| {
             let p = origin_px + vec2(x, y) * zoom;
             let uv = vec2(src.x + x, src.y + y) / atlas_size;
-            let c = form_colour(cam, (vec2(x, y) - half) / half, base).unwrap_or(base);
+            let c = sun.and_then(|s| form_colour_in(s, (vec2(x, y) - half) / half, base)).unwrap_or(base);
             Vertex::new(p.x, p.y, 0.0, uv.x, uv.y, c)
         })
         .collect();

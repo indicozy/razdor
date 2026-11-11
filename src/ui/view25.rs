@@ -367,12 +367,7 @@ impl TiltCamera {
 
     /// The pixel of `p` in `frame`, or None behind the eye.
     pub fn project(&self, p: Vec3, frame: Rect) -> Option<Vec2> {
-        let c = self.view_proj(frame) * p.extend(1.0);
-        if c.w <= 0.0 {
-            return None;
-        }
-        let (x, y) = (c.x / c.w, c.y / c.w);
-        Some(vec2(frame.x + (x + 1.0) * 0.5 * frame.w, frame.y + (1.0 - y) * 0.5 * frame.h))
+        project_with(self.view_proj(frame), p, frame)
     }
 
     /// The ray through the pixel `at` in `frame`: its start (on the near plane) and its unit
@@ -497,6 +492,17 @@ impl TiltCamera {
         }
         Rect::new(lo.x, lo.y, hi.x - lo.x, hi.y - lo.y)
     }
+}
+
+/// [`TiltCamera::project`] with the view-projection already built (`view_proj(frame)`): a caller that projects
+/// several points through one frame builds the matrix once.
+pub fn project_with(view_proj: Mat4, p: Vec3, frame: Rect) -> Option<Vec2> {
+    let c = view_proj * p.extend(1.0);
+    if c.w <= 0.0 {
+        return None;
+    }
+    let (x, y) = (c.x / c.w, c.y / c.w);
+    Some(vec2(frame.x + (x + 1.0) * 0.5 * frame.w, frame.y + (1.0 - y) * 0.5 * frame.h))
 }
 
 impl TiltCamera {
