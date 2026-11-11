@@ -1395,7 +1395,7 @@ pub fn impossible(audio: &super::audio::Settings) -> bool {
 pub fn apply_options(audio: &super::audio::Settings) {
     super::world_view::set_tilt_view(audio.map_tilt);
     super::world_view::set_first_person(audio.map_first_person);
-    super::world_view::set_horizon(audio.map_horizon);
+    super::world_view::set_far_ground(audio.far_ground());
     super::world_view::set_eyes(audio.map_eyes);
     super::world_view::set_sprite_size(audio.map_sprite_size);
     super::world_view::set_map_render_scale(audio.map_render_scale);
@@ -1697,7 +1697,7 @@ pub const ALL: [Row; 42] = [
     fn help_text(self) -> Option<&'static str> {
         match self {
             Row::MapZoom => Some(tr("The zoom the map plays at. The wheel steps away from it and the 0 key comes back to it; locked, the map always shows it.")),
-            Row::FarGround => Some(tr("Up: the far ground rolls up to a top-down map. Horizon: the ground curves down like the earth's horizon, with the sky above it.")),
+            Row::FarGround => Some(tr("Up: the far ground rolls up to a top-down map. Horizon: the ground curves down like the earth's horizon, with the sky above it. Globe: the ground curves away on every side, like a small planet.")),
             Row::ViewCamera => Some(tr("Behind the hero: the low camera behind him. Through the hero's eyes: the camera stands at his eyes and turns with his walk; Q and E turn it while he stands.")),
             Row::MapEdge => Some(tr("Off: past the map's edges is black, as in the original. On: a short stretch of ground goes on past the edges, then thickens into the same black fog as the unexplored map.")),
             Row::Lighting => Some(tr("Razdor's: the map's light follows the time of day. Style only.")),
@@ -2052,7 +2052,13 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
         }
         Row::FarGround => {
             if labelled_row_help(c, geo, tr("Far ground"), far_ground_label(audio), Row::FarGround.help_text()).0 {
-                audio.map_horizon = !audio.map_horizon;
+                // Up, Horizon, Globe, then Up. The horizon bit stays on for the globe, so a version that
+                // does not know «Шар» shows the horizon.
+                (audio.map_horizon, audio.map_globe) = match audio.far_ground() {
+                    super::view25::FarGround::Up => (true, false),
+                    super::view25::FarGround::Horizon => (true, true),
+                    super::view25::FarGround::Globe => (false, false),
+                };
             }
         }
         Row::ViewCamera => {
@@ -2624,9 +2630,13 @@ fn map_view_label(audio: &super::audio::Settings) -> &'static str {
     }
 }
 
-/// The far ground row's value: «Горизонт» or «Вверх» (the first-person view's only).
+/// The far ground row's value: «Вверх», «Горизонт» or «Шар» (the first-person view's only).
 fn far_ground_label(_audio: &super::audio::Settings) -> &'static str {
-    if super::world_view::horizon() { tr("Horizon") } else { tr("Up") }
+    match super::world_view::far_ground() {
+        super::view25::FarGround::Up => tr("Up"),
+        super::view25::FarGround::Horizon => tr("Horizon"),
+        super::view25::FarGround::Globe => tr("Globe"),
+    }
 }
 
 /// The camera row's value: «Глазами героя» or «За героем» (the first-person view's only). The value the
