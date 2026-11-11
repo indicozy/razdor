@@ -585,6 +585,10 @@ it every frame from `display::follow_settings`; `RAZDOR_LIVE_WATER=1` turns it o
   the sky's colour (`daylight::sky_rgb`: day, dusk and dawn warmth, moonlight at night; the day's with the lighting
   off) by `0.18` of its mask. Only the full pass and the cache's overlay draw it (`Mode::Full`, `Mode::Overlay`);
   the cached ground stays as it was. `Clock` is the water clock.
+- **The water's detail by zoom** (`water::lod_detail`, the uniform `Detail`): the map's on-screen cell over the zoom-1
+  cell (`cell_px.x`, the map's PX), 1 from zoom 0.7 up, 0 at 0.45 and below (the zoom's floor is 0.4), smooth between.
+  It scales the ripple and the foam's lapping (the line stands at its middle phase when 0); the texture, the colour and
+  the foam stay. The sparkle and the shore waves fade with it too.
 - **The water's noise** (`wnoise`, the ripple and the foam's lap and patches): one fetch of `Noise`, a wrapped 64×64
   texture of the hash lattice (`water::noise_texels`, uploaded by `terrain::noise_texture`, linear). A lookup at the
   lattice point's centre plus the smoothed fraction is the hash's value noise to within a byte (`water::wnoise_ref`,

@@ -174,6 +174,9 @@ uniform float Overlay;
 // river's drift speed; a = the water mask (255 on the water cells, 0 on land). See `flow_texels`.
 // Sky: the sky's colour, which the water takes by its share of the mask.
 uniform float LiveWater;
+// The water's detail by the map's zoom (`water::lod_detail`): 1 whole, 0 zoomed out. It scales the ripple and the
+// foam's lapping; zoomed out the water keeps its texture, colour and foam.
+uniform float Detail;
 uniform sampler2D Flow;
 uniform vec3 Sky;
 // The water's noise texture (`water::noise_texels`): a wrapped 64×64 table of the lattice's hashes.
@@ -241,8 +244,9 @@ vec4 shore_foam(float cov, vec2 p, vec2 fl) {
     float t1 = fract(Clock * 0.05 + 0.5);
     vec2 q0 = p - fl * t0 * 7.0;
     vec2 q1 = p - fl * t1 * 7.0;
-    float lap = 0.5 + 0.5 * sin(Clock * 0.98174770 + 6.0 * wnoise(q0 * 0.8));
-    float lap2 = 0.5 + 0.5 * sin(Clock * 0.98174770 + 2.5 + 6.0 * wnoise(q1 * 0.6));
+    // Zoomed out (Detail 0) the line stands at its middle phase: the lapping is the moving detail.
+    float lap = mix(0.5, 0.5 + 0.5 * sin(Clock * 0.98174770 + 6.0 * wnoise(q0 * 0.8)), Detail);
+    float lap2 = mix(0.5, 0.5 + 0.5 * sin(Clock * 0.98174770 + 2.5 + 6.0 * wnoise(q1 * 0.6)), Detail);
     float patch = smoothstep(0.38, 0.62, 0.6 * wnoise(q0 * 2.4 + Clock * vec2(0.01, 0.0)) + 0.4 * wnoise(q1 * 5.1 + Clock * vec2(0.0, -0.02)));
     float inner = 0.1 * lap;
     float line = smoothstep(inner - 0.015, inner + 0.015, s) * (1.0 - smoothstep(inner + 0.08, inner + 0.33, s));
@@ -293,7 +297,7 @@ void main() {
             float wt = abs(2.0 * t0 - 1.0);
             vec2 q0 = p - fl * t0 * 7.0;
             vec2 q1 = p - fl * t1 * 7.0;
-            uvw += 0.015 * mix(ripple(q0), ripple(q1), wt);
+            uvw += 0.015 * Detail * mix(ripple(q0), ripple(q1), wt);
         }
         w = texture2D(Water, sharp_uv(uvw, WaterSize, WaterScale)).rgb;
     }
@@ -535,7 +539,7 @@ const LEGACY_UNIFORMS: [(&str, UniformType); 19] = [
 ];
 
 /// The uniforms every terrain shader declares (the old one leaves `Overlay` out of its code).
-const UNIFORMS: [(&str, UniformType); 16] = [
+const UNIFORMS: [(&str, UniformType); 17] = [
     ("View", UniformType::Float4),
     ("MapSize", UniformType::Float2),
     ("CellPx", UniformType::Float2),
@@ -552,6 +556,7 @@ const UNIFORMS: [(&str, UniformType); 16] = [
     ("Overlay", UniformType::Float1),
     ("LiveWater", UniformType::Float1),
     ("Sky", UniformType::Float3),
+    ("Detail", UniformType::Float1),
 ];
 
 /// Wrapped border around each atlas slot, in pixels.
@@ -1130,6 +1135,10 @@ impl TerrainLayer {
         // Live water («Живая вода»): the water's draws only (the full pass and the overlay). The
         // sky's colour is the lighting's (the day's with the lighting off).
         m.set_uniform("LiveWater", if water::live() && water_on { 1.0f32 } else { 0.0 });
+        // The water's detail by the zoom: the on-screen cell over the zoom-1 cell (`cell_px`, the map's PX).
+        if !legacy {
+            m.set_uniform("Detail", water::lod_detail((dest.w / (view.z - view.x)) / cell_px.x));
+        }
         let sky = daylight::sky_rgb();
         m.set_uniform("Sky", vec3(sky[0], sky[1], sky[2]));
         // The ground draws (the whole terrain, the cache's ground) get the shading rate (option 3).

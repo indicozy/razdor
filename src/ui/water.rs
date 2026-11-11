@@ -261,6 +261,21 @@ pub fn scale() -> f32 {
     ENV_SCALE.with(|e| *e).unwrap_or_else(|| QUALITY.get().scale())
 }
 
+/// The zoom band of the water's detail (`lod_detail`): the map's zoom (1 at the default, 0.4 the furthest out).
+/// The ripple, the foam's lapping and the sparkle and shore waves fade out between these.
+pub const LOD_OUT: f32 = 0.45;
+/// See [`LOD_OUT`]: the detail is whole from this zoom up.
+pub const LOD_IN: f32 = 0.7;
+
+/// The water's detail at the map's `zoom`: 1 from `LOD_IN` up, 0 at `LOD_OUT` and below, and smooth between (no
+/// pop as the map zooms). Zoomed out, the water keeps its texture, colour and foam; the moving details go.
+pub fn lod_detail(zoom: f32) -> f32 {
+    if !zoom.is_finite() {
+        return 1.0;
+    }
+    smoothstep(LOD_OUT, LOD_IN, zoom)
+}
+
 /// Whether the water picture is redrawn this frame: `age` frames have passed since the picture it shows was
 /// drawn (0 on the frame it was drawn), and it is redrawn every `every` frames.
 pub fn redraw_due(age: u32, every: u32) -> bool {
@@ -552,6 +567,25 @@ mod tests {
         // No older picture (the first, or after a change of view), or a clock that did not go on: the newer.
         assert_eq!(picture_mix(10.2, None, 10.5), 1.0);
         assert_eq!(picture_mix(10.2, Some(10.5), 10.5), 1.0);
+    }
+
+    #[test]
+    fn the_water_detail_fades_out_over_the_zoom_band_without_a_pop() {
+        assert_eq!(lod_detail(1.0), 1.0, "the default zoom and in: the whole detail");
+        assert_eq!(lod_detail(LOD_IN), 1.0);
+        assert_eq!(lod_detail(0.4), 0.0, "the furthest zoom out: none of the moving detail");
+        assert_eq!(lod_detail(LOD_OUT), 0.0);
+        // Between the ends it only ever falls as the map zooms out, in small steps (no jump).
+        let mut last = 1.0f32;
+        let mut z = 1.0f32;
+        while z >= 0.4 {
+            let d = lod_detail(z);
+            assert!(d <= last + 1e-6, "rises at zoom {z}: {last} -> {d}");
+            assert!(last - d < 0.05, "a step of {} at zoom {z}", last - d);
+            last = d;
+            z -= 0.005;
+        }
+        assert!((lod_detail((LOD_OUT + LOD_IN) / 2.0) - 0.5).abs() < 1e-6, "halfway at the band's middle");
     }
 
     #[test]
