@@ -1384,6 +1384,21 @@ fn in_view(cam: &Camera, f: impl Fn(&Camera)) {
     SCREEN_VIEW.with(|v| v.set(prev));
 }
 
+/// The sprites' run of a bent view only (the second run of [`bent_view`]): for a pass that draws
+/// standing pictures over a bent view's ground already drawn (the lit windows, `draw_building_windows`).
+/// The sheet is not drawn again, and no ground pass runs: a second sheet drawn inside the pass would
+/// take the pass's material and sample its mask over the whole ground. Any other view: [`in_view`].
+fn in_view_sprites(cam: &Camera, f: impl Fn(&Camera)) {
+    let Some(tilt) = cam.tilt.filter(|t| t.cam.bend.is_some() && super::render_cache::target().is_none()) else { return in_view(cam, f) };
+    let prev = SCREEN_VIEW.with(|v| v.replace(Some(cam.view)));
+    let space = cam.tilted_space();
+    let (w, h) = (screen_width(), screen_height());
+    set_camera(&View3d(view25::window_matrix(cam.view, w, h) * tilt.cam.view_proj(cam.view)));
+    with_pass(Pass::Sprites, || f(&space));
+    super::render_cache::back_to_2d();
+    SCREEN_VIEW.with(|v| v.set(prev));
+}
+
 /// The bent view of [`in_view`] (`RAZDOR_TRAILER_CAM`, dev-only): the ground pass is drawn flat
 /// into a picture of the cull's ground, the picture is laid on a grid that follows the bend
 /// ([`draw_sheet`]), and the sprites are stood on that sheet in a second run of `f`. The picture
@@ -6054,7 +6069,7 @@ fn draw_building_windows(game: &Game, assets: &Assets, cam: &Camera) {
     }
     let map = &game.world.map;
     super::sharp::windows_pass(&mask, night, || {
-        in_view(cam, |c| {
+        in_view_sprites(cam, |c| {
             let zoom = c.scale / PX;
             for l in game.world.locations.iter() {
                 if l.kind.is_bridge() || !l.cells().any(|t| game.fog.explored_near(t, minimap::FEATHER)) {
@@ -6105,6 +6120,21 @@ fn draw_building_pools(game: &Game, cam: &Camera) {
     });
 }
 
+/// Where a world point's light lies in the window, for a light drawn over the frame (`draw_daylight`, outside the
+/// bent sheet). Flat and plain 2.5D: [`Camera::screen_at`]. A bent view: the point where the bent sheet puts the
+/// ground (`Bend::point`), projected; None past a down bend's horizon, which the sheet hides.
+fn light_screen(cam: &Camera, world: Vec2) -> Option<Vec2> {
+    match cam.tilt.and_then(|t| t.cam.bend.map(|b| (t, b))) {
+        Some((t, bend)) => {
+            if bend.hidden(world) {
+                return None;
+            }
+            t.cam.project(bend.point(world), cam.view)
+        }
+        None => Some(cam.screen_at((world.x, world.y))),
+    }
+}
+
 /// Razdor's «Освещение» (`daylight`, off by default): the map's tint over the drawn world, then each point
 /// light's warm pool (`lights`, `point_lights`) on the ground and the sprites, in screen space: a building's
 /// over its footprint, a torch's flickering over its flame. Style only: nothing is drawn when it is off, and the
@@ -6148,10 +6178,12 @@ fn draw_daylight(game: &Game, cam: &Camera, light: Option<daylight::Light>) {
                 if vis < 0.01 {
                     continue;
                 }
+                // A torch past a bent view's horizon is not seen, and one on the bent ground stands where the sheet puts it.
+                let Some(at) = light_screen(cam, l.at) else { continue };
                 let reach = l.radius * cam.scale;
                 let flicker = 0.92 + 0.08 * (now * 9.0 + i as f64).sin() as f32;
                 let (rgb, alpha) = ([1.0, 0.65, 0.30], 0.45 * flicker);
-                glow_at(cam.screen_at((l.at.x, l.at.y)), 2.0 * reach, rgb, alpha * l.strength * vis);
+                glow_at(at, 2.0 * reach, rgb, alpha * l.strength * vis);
             }
         });
     });
