@@ -168,3 +168,15 @@ the «Прочее» row's screenshots.
 - The battle view's controls and the watching screens: owner approval (phase 3 onwards).
 - Phase 2 must drive `Game::music_rotate` from its playback and append the player's actions itself;
   the UI does not record yet.
+
+## Phase results (added with the watching screen)
+
+- **Phase 3 (player): built.** Rules: a budgeted playback (`ReplayPlayer::pump`), seeks as states,
+  the battle handed to its view and given back, the events kept for the screen (`docs/flows/replays.md`,
+  "The player" and "The watching screen"). Screen: `ui/watch.rs`, the strip (desktop, phone upright
+  and sideways), the timeline with marks, the battle choice and watched battle, the messages, the drift
+  window, and «Смотреть запись» in «Итоги» and in the diary (desktop). The load window's «Запись» is open.
+- **Battle marks** are their start entries (a seek to a mark stops at its choice); **hero down** is the
+  army's fall (`Game::army_fallen`).
+- **Purchase path:** the scripted market visit (buy, sell, hire) records and plays back to the live end.
+- **Screens for the owner's approval:** not pushed (UI change); the shots are in `/mnt/ai_models/razdor-scratch/replays-ui/shots/`.

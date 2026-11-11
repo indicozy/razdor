@@ -1,11 +1,12 @@
-# Flow: replays (phase 1, rules only)
+# Flow: replays (the rules, the player and the watching screen)
 
 **Read this first** if you touch what a replay needs: the full-state snapshot, the input stream,
-the engine's and the player's records, the file, the replay header, a battle's start state, or
-the playback. The design and its measurements are `docs/superpowers/specs/2026-11-11-replays-design.md`.
-Everything is in `src/rules/recording/`, and nothing is attached by default: with no recorder and
-no playback the rules run exactly as before. The game records when its session is attached
-(`ui::recording::follow`, the setting «Записывать игру», on by default).
+the engine's and the player's records, the file, the replay header, a battle's start state, the
+playback, or the watching screen (`ui/watch.rs`, the last section). The design and its measurements
+are `docs/superpowers/specs/2026-11-11-replays-design.md`. The rules are in `src/rules/recording/`,
+and nothing is attached by default: with no recorder and no playback the rules run exactly as
+before. The game records when its session is attached (`ui::recording::follow`, the setting
+«Записывать игру», on by default).
 
 ## Snapshot is not a save
 
@@ -222,7 +223,7 @@ and plays its entries; a load's segment starts from the state the load gave.
 - A keyframe on the frame: 0.26 ms (РК1), 1.03 ms (ДС2); the packing on the writer thread: 4.4 and
   46 ms.
 
-## The player (`recording/watch.rs`, phase 3b, rules only)
+## The player (`recording/watch.rs`)
 
 `ReplayPlayer` opens a file (`open`, or `new` for a file already read): it reads the segments and
 builds the timeline's `marks` (one pass that restores each checkpoint: the days, the battles'
@@ -240,7 +241,20 @@ and the victory from the keyframes' states, so those last three are at keyframe 
 - The thread's playback is installed for each public call and taken away at its end
   (`arm`, `take_playback`), so several players on one thread do not meet, and a live game is not
   left with records.
-- Nothing is drawn here: the watching screen (phase 3b's UI) is not built.
+- Nothing is drawn here: the watching screen is `ui/watch.rs` (below).
+- A budgeted pump (`pump(budget, watch_battles)`): plays up to `budget` game seconds (any split gives
+  the same states), and stops at a battle's start when the caller watches battles: `Pump::Battle`, the
+  battle made and begun (`take_battle`). `take_battle_actions` hands the battle's recorded actions to
+  its view in order (the «Максимум» moves and patch globals are looked up by key, not played), and
+  `return_battle(battle, rest)` takes the view's battle back: the actions it did not play are played
+  from its state, then the battle is resolved (a battle that is not over at its resolve is a drift).
+  The engine's records in a battle are skipped by position (`battle_entry`).
+- Seeks are states: `begin_seek_day` / `begin_seek_place` restore the checkpoint before the target
+  (a seek its checkpoint already reaches is none), and the pumps play on until the target. The
+  marks of battles are their `StartBattle` entries, so a seek to one stops at its choice.
+- The events a step raises are kept (`take_events`): `apply_game_events` gives the window and
+  message events of the recorded actions, the frames' events are collected by `tick_toward`.
+- The last segment's end keeps the game (`game()` after the end is the final state).
 
 `Player` (`play.rs`) places each recorded entry: a player action or a check at the **end of its
 stretch** (the paused step is finished there, as the action does; the arrivals taken inside the
@@ -302,3 +316,52 @@ the check does not change the game.
   a new file from the game's state.
 - The `ui::recording` setting row and the frame hook are UI changes: the owner's approval of the
   «Прочее» screenshots is needed before a push to main.
+
+## The watching screen (`ui/watch.rs`, phase 3 UI)
+
+`Screen::Watch(WatchView)`. `WatchView` holds the `ReplayPlayer`, the camera (`MapView`), the mode
+(`Mode`: Playing, Seeking, Choosing, Battle, Ended, Drifted), the messages, the battle being watched
+and the screen «Выход» returns to. The state machine draws nothing: `tick(real_dt)` runs the
+playback at the speed (a seek at 60 game seconds a real second), `choose(Choice)` answers a battle's
+choice, `skip_battle`, `seek_day` and `seek_place` (the timeline), `watch_to_drift`. `frame` draws
+the map (`world_view::watch_map`: the world as the map is drawn, the camera on the hero while
+«Следить за героем» is on, the wheel and keys zoom, the arrows and a drag pan, the 2.5D keys turn it)
+over the area above the strip (`world_view::set_watch_area`), then the strip, the messages and the
+drift window.
+
+- The strip (`strip_layout`, pure): one row on the desktop (play, the speeds 1× to 16×, the day, the
+  timeline, «Следить за героем», «Выход»); stacked on a phone (the timeline on top, the play and the
+  speeds, then the day, the follow button and the exit). Under 1000 dp wide it stacks. Buttons are
+  44 dp or more.
+- The timeline: `fraction_of` / `day_at` map days to the bar; `mark_at` hits a mark within 9 px. A
+  mark's hover tooltip names a battle's two sides' units, a town taken, the hero's fall (the army's,
+  `Game::army_fallen`) or the victory. A click on a mark seeks to its place; a click elsewhere to its
+  day. While seeking the bar says «Перемотка…».
+- A battle: the playback stops at its start (`Pump::Battle`), the strip offers «Смотреть бой» and
+  «Пропустить бой»; after 3 s the default is taken (`default_choice`: skip at 4× and faster, watch
+  below). Watching builds `BattleView::replay` (both sides by the view's own turns; the player's
+  turns from the recorded queue, the enemy's «Максимум» moves from the records through
+  `ReplayPlayer::in_playback`; no search runs); its strip (pause, speed, «Пропустить») is the
+  screen's. «Пропустить» gives the rest of the battle to the rules at once.
+- Messages: a scenario's dialog (through `story::show`) and the events `describe` names close
+  themselves after 2 s at 1×, scaled by the speed, not under 0.6 s (`toast_secs`).
+- Drift: a mismatch stops the playback (`Mode::Drifted`): the window names the version that
+  recorded the record and offers «Смотреть до этого места» (the last good place, paused) and «Выход».
+- Entry points: «Смотреть запись» in «Итоги» (`summary::Exit::Watch`; the page is the back screen),
+  and in the diary's foot on the desktop (`items_view`, left of «Закрыть»; the phone's diary has no
+  place for it yet). `watch::open_record` saves the live file's day (`Session::save_point`) and opens
+  it. The load window's «Запись» is not built.
+- The snapshot scene `watch:<steps>` (`RAZDOR_WATCH=<.rzreplay>`; steps `play`, `battle`, `drift`,
+  `corrupt`, `watch-battle`, `skip-battle`, `day=<n>`, `speed=<i>`) renders the screen for the shots.
+  A sample record comes from the ignored test `write_a_sample_record_for_the_screenshots`
+  (`RAZDOR_SAMPLE_RECORD`).
+
+Tests: the pure layout and time functions (`ui::watch::tests`), and
+`the_screen_plays_a_record_through_its_states` (play, the choice, a watched battle skipped, a seek to a
+battle's mark, a seek by day, a drift and its window), which needs `RAZDOR_WATCH_RECORD`.
+
+## Open (the watching screen)
+
+- The load window's «Запись» button, the phone diary's place for «Смотреть запись», and the map
+  music during a replay (the watch plays no music yet).
+- The recorded battles' pacing is the battle view's; the enemy's turns animate as the battle view plays them.
