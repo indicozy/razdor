@@ -513,6 +513,71 @@ def region_card(grown: np.ndarray, side=None):
     return verts, tris
 
 
+# Ground or standing (the 2.5D fold). A region is ground when its depth lies on the sprite's ground
+# plane (the painted courtyards, paving, grass, fields and shadows the building sits on); it stands when
+# it rises above that plane (walls, towers, roofs). The ground plane is fitted to the sprite's ground
+# contacts (each column's lowest opaque pixel).
+GROUND_RISE = 0.06  # of the normalised depth: a region's median rise above the plane up to this is ground
+GROUND_RISE_SHADOWED = 0.12  # ... and up to this when the painted shadow lies around it
+SHADOW_LO, SHADOW_HI = 153, 187  # the painted shadows' alpha (never part of a card)
+SHADOW_SHARE = 0.25  # of the pixels around a region that are painted shadow
+ROOF_SAT = 0.45  # a region this saturated and red is a roof, standing whatever its depth
+ROOF_RED = 1.35  # its mean red over its mean green
+GROUND_MIN_PX = 60  # smaller regions keep the old behaviour (standing)
+
+
+def ground_plane(op: np.ndarray, D: np.ndarray):
+    """(a, b) of the ground plane: depth = a + b · row, least squares over the ground contacts (each column's
+    lowest opaque pixel), refitted without the worst fifth three times. (0, 0) with too few contacts."""
+    cols = np.nonzero(op.any(axis=0))[0]
+    if len(cols) < 3:
+        return 0.0, 0.0
+    ys = np.array([np.nonzero(op[:, x])[0].max() for x in cols], float)
+    ds = np.array([D[int(y), x] for y, x in zip(ys, cols)], float)
+    keep = np.ones(len(ys), bool)
+    a, b = 0.0, 0.0
+    for _ in range(3):
+        if keep.sum() < 3 or np.ptp(ys[keep]) == 0:
+            break
+        b, a = np.polyfit(ys[keep], ds[keep], 1)
+        res = np.abs(ds - (a + b * ys))
+        keep = res <= np.percentile(res[keep], 80) + 1e-9
+    return float(a), float(b)
+
+
+def classify_regions(lab: np.ndarray, K: int, D: np.ndarray, rgba: np.ndarray, op: np.ndarray) -> list:
+    """Per region: True when it is ground (see the notes above), else standing."""
+    h, w = lab.shape
+    a, b = ground_plane(op, D)
+    rows = np.arange(h, dtype=float)[:, None]
+    rise = D - (a + b * rows)
+    shadow = (rgba[..., 3] >= SHADOW_LO) & (rgba[..., 3] <= SHADOW_HI) & ~op
+    rgbf = rgba[..., :3].astype(float)
+    mx, mn = rgbf.max(axis=2), rgbf.min(axis=2)
+    sat = np.where(mx > 0, (mx - mn) / np.maximum(mx, 1), 0.0)
+    out, rises = [], []
+    for r in range(K):
+        m = lab == r
+        n = int(m.sum())
+        if n < GROUND_MIN_PX:
+            out.append(False)
+            rises.append(-np.inf)
+            continue
+        rise_med = float(np.median(rise[m]))
+        mean_rgb = rgbf[m].mean(axis=0)
+        roof = float(sat[m].mean()) > ROOF_SAT and mean_rgb[0] > ROOF_RED * mean_rgb[1] and rise_med > 0.0
+        ring = cv2.dilate(m.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool) & ~m
+        share = float(shadow[ring].mean()) if ring.any() else 0.0
+        limit = GROUND_RISE_SHADOWED if share >= SHADOW_SHARE else GROUND_RISE
+        out.append(bool(not roof and rise_med <= limit))
+        rises.append(rise_med)
+    # A building never lies wholly flat: when every piece reads as ground, the highest-rising one stands.
+    big = [r for r in range(K) if rises[r] > -np.inf]
+    if big and all(out[r] for r in big):
+        out[int(np.argmax(rises))] = False
+    return out
+
+
 def build_cards(lab, D, K, op=None):
     """Cards sorted back to front (foot y ascending). Each: dict(foot, verts, tris, region).
     op given: the bends pass's overlapping card areas (see card_grown)."""
@@ -538,7 +603,7 @@ def write_json(path: Path, sprites: dict, one_card=()) -> None:
     engine treats them as known, so a mod's buildings are the only ones it asks the model about."""
     path.parent.mkdir(parents=True, exist_ok=True)
     keys = sorted(sprites)
-    lines = [f'{{"version":1,"model":{json.dumps(MODEL)},"alpha_opaque":{ALPHA_OPAQUE},"one_card":{json.dumps(list(one_card))},"sprites":{{']
+    lines = [f'{{"version":2,"model":{json.dumps(MODEL)},"alpha_opaque":{ALPHA_OPAQUE},"one_card":{json.dumps(list(one_card))},"sprites":{{']
     for i, k in enumerate(keys):
         body = json.dumps(sprites[k], separators=(",", ":"))
         lines.append(f"{json.dumps(k)}:{body}" + ("," if i < len(keys) - 1 else ""))
@@ -651,6 +716,7 @@ def main() -> None:
     out = {}
     depth_run = skipped_small = one_region = fallback_sprites = 0
     histogram = Counter()
+    ground_histogram = Counter()  # ground cards per sprite
     bends_eligible = bends_no_k = 0
     bends_k = Counter()  # the K the silhouette chose
     bends_merges = Counter()  # post-merge pairs, by the rule that merged them
@@ -698,10 +764,13 @@ def main() -> None:
             one_region += 1
             continue
         histogram[len(cards)] += 1
+        ground = classify_regions(lab, K, D, rgba, op)
+        ground_cards = sum(ground[c["region"]] for c in cards)
+        ground_histogram[ground_cards] += 1
         out[key] = {
             "w": w,
             "h": h,
-            "cards": [{"foot": c["foot"], "verts": c["verts"], "tris": c["tris"]} for c in cards],
+            "cards": [{"foot": c["foot"], "verts": c["verts"], "tris": c["tris"], "ground": bool(ground[c["region"]])} for c in cards],
         }
         if bent:
             bends_histogram[len(cards)] += 1
@@ -731,6 +800,8 @@ def main() -> None:
     print(f"  sprites where a merge had to join non-touching regions: {fallback_sprites}")
     print("cards histogram (cards per sprite: sprites):",
           ", ".join(f"{k}: {v}" for k, v in sorted(histogram.items())))
+    print("ground cards histogram (ground cards per sprite: sprites):",
+          ", ".join(f"{k}: {v}" for k, v in sorted(ground_histogram.items())))
     print(f"bends pass: eligible {bends_eligible}, no valid K {bends_no_k}, "
           f"cut {len(bends_items)} sprites")
     print("  chosen K histogram (K: sprites):",
