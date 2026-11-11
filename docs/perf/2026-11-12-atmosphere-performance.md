@@ -67,3 +67,23 @@ building data adds ~360 KB (`data/cards`, `data/lights`). The picture cache on t
   batches while the camera is still, depth-sort reuse, the remaining per-sprite settings reads.
 - Correctness note: the off-screen software renderer (llvmpipe) shows artefacts the GPU doesn't
   (missing first-person sprites on РК3, a dark ring and a crosshatch in the fog) — judge looks on a GPU.
+
+## Final check: main `32993b2c` vs v1.4.1 vs the original (2026-11-12)
+
+Same setup as the earlier original-vs-Razdor run: РК3-Столица start, 1024×768, uncapped, the RTX 4060
+through VirtualGL under Xvfb, fresh settings (so main runs the «Оригинал» preset, effects off), 40 s runs
+with the first 5 s dropped, two runs each (harness `/mnt/ai_models/razdor-scratch/fps-final/run2.sh`).
+
+| View | v1.4.1 FPS (CPU ms) | main FPS (CPU ms) | Change |
+|---|---|---|---|
+| Flat | 626 (0.18) | 612 (0.21) | −2% FPS, +0.03 ms CPU |
+| 2.5D | 604 (0.26) | 539 (0.42) | −11% FPS, +0.16 ms CPU |
+
+- The flat view (the original's look) is within 2% of v1.4.1.
+- 2.5D close up costs +0.16 ms of CPU a frame: the world stage 0.16 → 0.31 ms, terrain 0.004 → 0.03 ms.
+  The likely cause is the folded building cards (more sprites per building), which are the fix for floating
+  buildings. Zoomed out, 2.5D is faster than v1.4.1 (see the tables above).
+- The original DiscordTimes.exe: the only figure is 176 FPS (2026-11-04, flat, same map and size). The
+  harness could not re-measure it (it reads a constant at `0x4c7488`, not a live counter). That run's
+  VirtualGL setup also gave v1.4.1 only 222 FPS against 626 here, so the two are not directly comparable.
+  On that day's setup v1.4.1 was 1.26× the original, and main's flat view is within 2% of v1.4.1.
