@@ -619,14 +619,14 @@ it every frame from `display::follow_settings`; `RAZDOR_LIVE_WATER=1` turns it o
   `wide_water`). The lake's rim flows inward (the same rule as a river), so coasts still drift toward the open water
   in the flow field; the drift speed keeps the wide water still.
 - **The redraw rate** («Частота анимации воды», `Settings::map_water_rate`, `water::FrameRate`: every frame, every
-  other, every third; every frame by default, the row shows with «Живая вода» on). On the flat map, below every frame,
-  the overlay's water (`TerrainLayer::draw_water_picture`) is drawn into a target of the screen's size when it is due
+  other, every third; every frame by default, the row shows with «Живая вода» on). Below every frame, the water
+  (`TerrainLayer::water_picture_prepare`, called by `world_view::draw_ground` before the overlay) is drawn into a target of the screen's size when it is due
   (`water::redraw_due`, the picture's age in frames), and every frame the two last drawings are blended in time over
   the cached ground (`water::picture_mix`: the frame shows the water one interval ago, moving on smoothly, 0 at a
   redraw, 1 one interval later). The target is cleared to alpha 0 and the discarded pixels stay transparent; the
-  composite is alpha-blended (`make_blended_material`: the default pipeline blends nothing). A new view, map or size
-  redraws at once and drops the older picture. The tilted views (2.5D, first person) draw the water every frame at
-  once: their 3D camera belongs to world_view, and a picture fill would reset it. The env `RAZDOR_WATER_EVERY=1|2|3`
+  composite is alpha-blended (`make_blended_material`: the default pipeline blends nothing). A new view, map, size or camera
+  (`ground_key`, the tilt included) redraws at once and drops the older picture. The fill runs under the same 3D camera
+  as the ground's cache (`render_cache::fill` around `in_view`), so the 2.5D and first-person views have the picture too. The env `RAZDOR_WATER_EVERY=1|2|3`
   overrides the setting in the snapshots.
 - **The water's size** («Качество воды», `Settings::map_water_quality`, `water::Quality`: high 1, medium 0.75, low 0.5
   of the screen in each direction; high by default; the same flat-map picture as the rate, the row shows with the

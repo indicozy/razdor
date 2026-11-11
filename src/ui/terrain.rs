@@ -760,8 +760,13 @@ pub struct WeatherMasks {
 
 /// A map's surface codes, their flow, their textures and their size, kept while they stay the same.
 struct CellTextures {
+    /// The codes and the flow the textures were made from, compared on each call (`gen` is `None`).
     codes: Vec<u8>,
     flow: Vec<(f32, f32)>,
+    /// The map's surface generation the textures were made for (`TileMap::surface_generation`), when the caller
+    /// keys them by it: no compare of the codes and the flow (the flow's length tells whether it is in use).
+    gen: Option<u64>,
+    flow_len: usize,
     size: (u32, u32),
     tex: MapTextures,
 }
@@ -799,6 +804,12 @@ pub fn bank_texels(bank: &[u32], wide: &[bool]) -> Vec<u8> {
         .collect()
 }
 
+/// Whether cell `i` (row by row) lies on the map's outer ring.
+fn is_map_edge(i: usize, w: u32, h: u32) -> bool {
+    let (x, y) = (i as u32 % w, i as u32 / w);
+    x == 0 || y == 0 || x + 1 == w || y + 1 == h
+}
+
 /// How a terrain draw is made.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -810,6 +821,8 @@ pub enum Mode {
     Cached,
     /// Water and the border's fog over the cached ground: the pixels with neither are discarded.
     Overlay,
+    /// The water's picture: the water drawn into its target at the picture's size (`water_picture_prepare`).
+    Picture,
 }
 
 /// The ground cache: the target the ground is drawn into and the key it was drawn for.
@@ -819,7 +832,7 @@ struct GroundCache {
     key: Option<u64>,
 }
 
-/// «Живая вода» as a picture (`draw_water_picture`): two drawings of the water, the newer being `cur`, with
+/// «Живая вода» as a picture (`water_picture_prepare`): two drawings of the water, the newer being `cur`, with
 /// their water times and the age of the newer one in frames, and the key of the view they were drawn for.
 #[derive(Default)]
 struct WaterPictures {
@@ -832,6 +845,11 @@ struct WaterPictures {
     age: u32,
     t_prev: f64,
     t_cur: f64,
+    /// The water time of this frame, and whether this frame uses the pictures (else the water is drawn at once).
+    t_now: f64,
+    active: bool,
+    /// The share of the screen the picture is drawn at.
+    scale: f32,
 }
 
 /// The water picture's composite: the two drawings blended by `Mix` (0 the older, 1 the newer), read at each
@@ -872,7 +890,7 @@ pub struct TerrainLayer {
     /// Surface codes and size of the map in `cells`, to rebuild it when the map changes.
     cells: RefCell<Option<CellTextures>>,
     ground: RefCell<GroundCache>,
-    /// The live water as a picture (`draw_water_picture`), and its composite (the neighbours shader's option only).
+    /// The live water as a picture (`water_picture_prepare`), and its composite (the neighbours shader's option only).
     pictures: RefCell<WaterPictures>,
     water_composite: Option<Material>,
 }
@@ -1033,10 +1051,18 @@ impl TerrainLayer {
 
     /// The textures of a `w`×`h` map (the codes, the neighbours, the water mask and the flow),
     /// rebuilt only when the codes or the flow change.
-    fn cells(&self, codes: &[u8], w: u32, h: u32, flow: &[(f32, f32)]) -> MapTextures {
+    /// `gen`: the surface generation of `codes` when the caller has one (the map's, which never changes after its
+    /// build: the textures are then reused without comparing the codes and the flow, which is O(cells) per call);
+    /// `None` compares them (the editor, which edits its codes in place). The flow is a function of the map (its
+    /// surface and hills), so the same generation means the same flow.
+    fn cells(&self, codes: &[u8], w: u32, h: u32, flow: &[(f32, f32)], gen: Option<u64>) -> MapTextures {
         let mut cache = self.cells.borrow_mut();
         if let Some(c) = cache.as_ref() {
-            if c.size == (w, h) && c.codes == codes && c.flow.as_slice() == flow {
+            let same = match gen {
+                Some(g) => c.gen == Some(g) && c.size == (w, h) && c.flow_len == flow.len(),
+                None => c.gen.is_none() && c.size == (w, h) && c.codes == codes && c.flow.as_slice() == flow,
+            };
+            if same {
                 return c.tex.clone();
             }
         }
@@ -1053,7 +1079,10 @@ impl TerrainLayer {
         flow_tex.set_filter(FilterMode::Linear);
         let bank = super::water::bank_distance(codes, (w, h));
         let wide = super::water::wide_water(&bank, (w, h));
-        let bank_tex = Texture2D::from_rgba8(w as u16, h as u16, &bank_texels(&bank, &wide));
+        // The map's edge is not a shore: the water on the border is not wide here, so no wave runs along it (the
+        // off-map land makes its bank distance, which the speed uses, but a wave there would be a seam).
+        let wide_shore: Vec<bool> = wide.iter().enumerate().map(|(i, &wd)| wd && !is_map_edge(i, w, h)).collect();
+        let bank_tex = Texture2D::from_rgba8(w as u16, h as u16, &bank_texels(&bank, &wide_shore));
         bank_tex.set_filter(FilterMode::Linear);
         let (biome_bytes, lowland_bytes) = super::weather::mask_texels(codes);
         // Nearest: the shader blends the four cells itself (`weather::mask4`).
@@ -1063,14 +1092,16 @@ impl TerrainLayer {
         lowland.set_filter(FilterMode::Nearest);
         let weather_seed = super::weather::map_seed(w, h, codes);
         let tex = MapTextures { cells, neighbours, flow: flow_tex, bank: bank_tex, weather, lowland, weather_seed };
-        *cache = Some(CellTextures { codes: codes.to_vec(), flow: flow.to_vec(), size: (w, h), tex: tex.clone() });
+        // The keyed entries hold no copy of the codes and the flow (nothing to compare then).
+        let (kept_codes, kept_flow) = if gen.is_some() { (Vec::new(), Vec::new()) } else { (codes.to_vec(), flow.to_vec()) };
+        *cache = Some(CellTextures { codes: kept_codes, flow: kept_flow, gen, flow_len: flow.len(), size: (w, h), tex: tex.clone() });
         tex
     }
 
     /// The weather's masks of a `w`×`h` map (kept with the cells: rebuilt only when the codes or the
     /// flow change). `flow` as in [`TerrainLayer::draw`].
-    pub fn weather_masks(&self, codes: &[u8], (w, h): (u32, u32), flow: &[(f32, f32)]) -> WeatherMasks {
-        let maps = self.cells(codes, w, h, flow);
+    pub fn weather_masks(&self, codes: &[u8], (w, h): (u32, u32), flow: &[(f32, f32)], gen: Option<u64>) -> WeatherMasks {
+        let maps = self.cells(codes, w, h, flow, gen);
         WeatherMasks { biome: maps.weather, lowland: maps.lowland, seed: maps.weather_seed }
     }
 
@@ -1106,7 +1137,7 @@ impl TerrainLayer {
     /// reach past the map then. The fog's clock is `water_ms`. `mode`: see [`Mode`]. `flow`: the
     /// rivers' flow per cell (`rules::flow::flow_field`), empty for still water.
     #[allow(clippy::too_many_arguments)]
-    pub fn draw(&self, codes: &[u8], (w, h): (u32, u32), dest: Rect, view: Vec4, cell_px: Vec2, water_ms: Option<i64>, edge: bool, mode: Mode, flow: &[(f32, f32)]) {
+    pub fn draw(&self, codes: &[u8], (w, h): (u32, u32), dest: Rect, view: Vec4, cell_px: Vec2, water_ms: Option<i64>, edge: bool, mode: Mode, flow: &[(f32, f32)], gen: Option<u64>) {
         if w == 0 || h == 0 || w + 2 > u16::MAX as u32 || h + 2 > u16::MAX as u32 || codes.len() != (w * h) as usize {
             return;
         }
@@ -1114,19 +1145,23 @@ impl TerrainLayer {
             self.draw_cached(dest);
             return;
         }
-        // «Живая вода» at a lower rate or size, on the flat map: the water is drawn as a picture (`draw_water_picture`).
-        // The tilted views draw it at once: their camera belongs to world_view, which a picture would reset.
-        if mode == Mode::Overlay && water::live() && (water::every() > 1 || water::scale() < 1.0) && !super::world_view::tilt_view() && self.draw_water_picture(codes, (w, h), dest, view, cell_px, water_ms, edge, flow) {
+        // «Живая вода» as a picture (`water_picture_prepare`): its target is drawn at the picture's size, and the overlay
+        // composites the pictures when this frame uses them.
+        if mode == Mode::Picture {
+            let scale = self.pictures.borrow().scale;
+            return self.draw_layer(codes, (w, h), dest, view, cell_px, water_ms, edge, Mode::Overlay, flow, scale, gen);
+        }
+        if mode == Mode::Overlay && self.pictures.borrow().active && self.draw_water_composite(dest) {
             return;
         }
-        self.draw_layer(codes, (w, h), dest, view, cell_px, water_ms, edge, mode, flow, 1.0);
+        self.draw_layer(codes, (w, h), dest, view, cell_px, water_ms, edge, mode, flow, 1.0, gen);
     }
 
     /// One draw of the layer: the material of the mode, its uniforms and the quad. `res` is the target's size
     /// relative to the screen (1 on the screen, the water picture's scale in its target), so the sampling's
     /// screen pixels per texel are the target's.
     #[allow(clippy::too_many_arguments)]
-    fn draw_layer(&self, codes: &[u8], (w, h): (u32, u32), dest: Rect, view: Vec4, cell_px: Vec2, water_ms: Option<i64>, edge: bool, mode: Mode, flow: &[(f32, f32)], res: f32) {
+    fn draw_layer(&self, codes: &[u8], (w, h): (u32, u32), dest: Rect, view: Vec4, cell_px: Vec2, water_ms: Option<i64>, edge: bool, mode: Mode, flow: &[(f32, f32)], res: f32, gen: Option<u64>) {
         // The unlit shader while the lighting and the live water are both off (the picture as it was before).
         let unlit = daylight::shown_hour().is_none() && !water::live();
         let Some((m, new, legacy)) = self.ground_material(unlit) else { return };
@@ -1140,7 +1175,7 @@ impl TerrainLayer {
         if super::world_view::trailer_active() {
             self.atlas.set_filter(FilterMode::Nearest);
         }
-        let maps = self.cells(codes, w, h, flow);
+        let maps = self.cells(codes, w, h, flow, gen);
         gl_use_material(m);
         if new {
             m.set_texture("Neighbours", maps.neighbours.clone());
@@ -1206,80 +1241,80 @@ impl TerrainLayer {
         gl_use_default_material();
     }
 
-    /// «Живая вода» as a picture (the flat map, a lower redraw rate or size): the overlay's water is drawn into a
-    /// target of `scale` × the screen when it is due (`water::redraw_due`); every frame the two last drawings are
-    /// blended in time (`water::picture_mix`) over the cached ground. Returns false when the picture cannot be
-    /// made (no composite material); the caller then draws the layer at once.
-    #[allow(clippy::too_many_arguments)]
-    fn draw_water_picture(&self, codes: &[u8], (w, h): (u32, u32), dest: Rect, view: Vec4, cell_px: Vec2, water_ms: Option<i64>, edge: bool, flow: &[(f32, f32)]) -> bool {
-        let Some(composite) = self.water_composite.as_ref() else { return false };
-        let maps = self.cells(codes, w, h, flow);
-        let (sw, sh) = super::render_cache::base_pixels().unwrap_or_else(macroquad::miniquad::window::screen_size);
+    /// «Живая вода» as a picture: this frame's bookkeeping, called by world_view before the overlay, under the camera's
+    /// key `camera_key` (what the picture is drawn for: the view, the tilt, the map). Returns the target to fill now
+    /// when a redraw is due: world_view fills it with the layer drawn as `Mode::Picture` under the same camera, and the
+    /// overlay then composites the two last drawings (`draw_water_composite`). None: the frame draws the water
+    /// directly (the default), or shows the pictures as they are.
+    pub fn water_picture_prepare(&self, codes: &[u8], (w, h): (u32, u32), flow: &[(f32, f32)], gen: Option<u64>, water_ms: Option<i64>, camera_key: u64) -> Option<RenderTarget> {
+        let want = water::live() && (water::every() > 1 || water::scale() < 1.0) && self.water_composite.is_some();
+        if !want {
+            self.pictures.borrow_mut().active = false;
+            return None;
+        }
+        let maps = self.cells(codes, w, h, flow, gen);
         let scale = water::scale();
+        let (sw, sh) = super::render_cache::base_pixels().unwrap_or_else(macroquad::miniquad::window::screen_size);
         let size = ((sw * scale).round().max(1.0) as u32, (sh * scale).round().max(1.0) as u32);
-        // The key: what the picture was drawn for (the view, the quad, the fog, the target's size, the map).
-        let fog = edge_fog_colour();
+        // The key: what the picture was drawn for (the camera's key, the target's size, the map, the flow).
         let key = {
             use std::hash::{Hash, Hasher};
             let mut h = std::collections::hash_map::DefaultHasher::new();
-            let f = |v: f32| v.to_bits();
-            [dest.x, dest.y, dest.w, dest.h, view.x, view.y, view.z, view.w, cell_px.x, cell_px.y, scale, fog[0], fog[1], fog[2]].map(f).hash(&mut h);
-            (edge, size, maps.weather_seed, flow.len()).hash(&mut h);
+            (camera_key, size, scale.to_bits(), maps.weather_seed, flow.len()).hash(&mut h);
             h.finish()
         };
-        {
-            let mut st = self.pictures.borrow_mut();
-            if st.size != size {
-                st.targets = [None, None];
-                st.size = size;
-                st.valid = false;
-            }
-            if st.key != key {
-                st.key = key;
-                st.valid = false;
-            }
-        }
         let now = water_ms.map_or(0.0, |ms| ms as f64 / 1000.0);
-        let (due, idx, was_valid) = {
-            let st = self.pictures.borrow();
-            (!st.valid || water::redraw_due(st.age, water::every()), if st.valid { 1 - st.cur } else { st.cur }, st.valid)
-        };
-        if due {
-            // A redraw goes into the target the older picture does not use (the same one when the view changed).
-            let target = {
-                let mut st = self.pictures.borrow_mut();
-                st.targets[idx]
-                    .get_or_insert_with(|| {
-                        let rt = macroquad::texture::render_target(size.0, size.1);
-                        rt.texture.set_filter(FilterMode::Linear);
-                        rt
-                    })
-                    .clone()
-            };
-            super::render_cache::fill_space(&target, Rect::new(0.0, 0.0, screen_width(), screen_height()), || {
-                clear_background(Color::new(0.0, 0.0, 0.0, 0.0));
-                self.draw_layer(codes, (w, h), dest, view, cell_px, water_ms, edge, Mode::Overlay, flow, scale);
-            });
-            let mut st = self.pictures.borrow_mut();
-            if was_valid {
-                st.t_prev = st.t_cur;
-                st.has_prev = true;
-            } else {
-                st.has_prev = false;
-            }
-            st.cur = idx;
-            st.t_cur = now;
-            st.valid = true;
-            st.age = 0;
-        } else {
-            self.pictures.borrow_mut().age += 1;
+        let mut st = self.pictures.borrow_mut();
+        st.active = true;
+        st.scale = scale;
+        st.t_now = now;
+        if st.size != size {
+            st.targets = [None, None];
+            st.size = size;
+            st.valid = false;
         }
+        if st.key != key {
+            st.key = key;
+            st.valid = false;
+        }
+        if st.valid && !water::redraw_due(st.age, water::every()) {
+            st.age += 1;
+            return None;
+        }
+        // A redraw goes into the target the older picture does not use (the same one when the view changed).
+        let was_valid = st.valid;
+        let idx = if was_valid { 1 - st.cur } else { st.cur };
+        let target = st.targets[idx]
+            .get_or_insert_with(|| {
+                let rt = macroquad::texture::render_target(size.0, size.1);
+                rt.texture.set_filter(FilterMode::Linear);
+                rt
+            })
+            .clone();
+        if was_valid {
+            st.t_prev = st.t_cur;
+            st.has_prev = true;
+        } else {
+            st.has_prev = false;
+        }
+        st.cur = idx;
+        st.t_cur = now;
+        st.valid = true;
+        st.age = 0;
+        Some(target)
+    }
+
+    /// The water picture's composite over the ground (after `water_picture_prepare`): the two drawings blended in
+    /// time (`water::picture_mix`), read at each pixel's window position as the ground's composite is. False when
+    /// there is nothing to show; the caller then draws the water at once.
+    fn draw_water_composite(&self, dest: Rect) -> bool {
+        let Some(composite) = self.water_composite.as_ref() else { return false };
         let st = self.pictures.borrow();
         let prev_idx = if st.has_prev { 1 - st.cur } else { st.cur };
-        let mix = water::picture_mix(now, st.has_prev.then_some(st.t_prev), st.t_cur);
+        let mix = water::picture_mix(st.t_now, st.has_prev.then_some(st.t_prev), st.t_cur);
         let (Some(prev), Some(cur)) = (st.targets[prev_idx].clone(), st.targets[st.cur].clone()) else { return false };
         drop(st);
-        // The composite reads each picture at its fragment's place, as the ground's composite does.
+        let (sw, sh) = super::render_cache::base_pixels().unwrap_or_else(macroquad::miniquad::window::screen_size);
         gl_use_material(composite);
         composite.set_texture("Prev", prev.texture.clone());
         composite.set_texture("Cur", cur.texture.clone());

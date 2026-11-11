@@ -570,6 +570,9 @@ pub struct TileMap {
     pub w: i32,
     pub h: i32,
     surface: Vec<u8>,
+    /// Identifies the surface codes: a new value for each map built from codes (clones keep it). The surface never
+    /// changes after the build, so a cache keyed by it needs no hash of the codes (`surface_generation`).
+    generation: u64,
     /// The original's LAND map: cost units of a step onto the cell on foot; 0 = impassable.
     land: Vec<u16>,
     /// Its SHIP map: cost units on water (shallows 2, coastal 1; building footprints road);
@@ -614,7 +617,7 @@ impl TileMap {
             row_start.push(i);
         }
         let n = codes.len();
-        let mut m = TileMap { grid, w, h, surface: codes.to_vec(), land: vec![0; n], water: vec![0; n], objects, row_start, markers: Vec::new() };
+        let mut m = TileMap { grid, w, h, surface: codes.to_vec(), generation: next_generation(), land: vec![0; n], water: vec![0; n], objects, row_start, markers: Vec::new() };
         let index = |t: Tile| (t.0 >= 0 && t.1 >= 0 && t.0 < w && t.1 < h).then(|| (t.1 * w + t.0) as usize);
         // Hills set the base of their square (later in the row-by-row scan over earlier).
         let mut v = vec![0i32; n];
@@ -710,6 +713,7 @@ impl TileMap {
             w: self.w,
             h: self.h,
             surface: Vec::new(),
+            generation: 0,
             land: Vec::new(),
             water: Vec::new(),
             objects: Vec::new(),
@@ -734,6 +738,11 @@ impl TileMap {
     /// Every cell's surface code, row by row.
     pub fn surface_codes(&self) -> &[u8] {
         &self.surface
+    }
+
+    /// The identity of the surface codes (`generation`): equal for a map and its clones, different for any other map.
+    pub fn surface_generation(&self) -> u64 {
+        self.generation
     }
 
     pub fn surface(&self, t: Tile) -> Surface {
@@ -1296,6 +1305,12 @@ impl TileMap {
 /// is charged `cost` units: `cost × speed`, ×1.5 diagonally (world.md §2).
 pub fn step_minutes(grid: Grid, a: Tile, b: Tile, cost: u16, speed: u32) -> f32 {
     cost as f32 * speed as f32 * grid.weight(a, b) as f32 / ORTHOGONAL_WEIGHT as f32
+}
+
+/// A new surface generation (`TileMap::surface_generation`): unique for the process.
+fn next_generation() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 #[cfg(test)]
