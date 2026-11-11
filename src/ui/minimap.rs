@@ -25,6 +25,7 @@ use razdor::rules::game::Game;
 use razdor::rules::map::TileMap;
 use razdor::rules::world::LocationKind;
 
+use super::view25::{self, TiltCamera};
 use super::widgets::*;
 
 /// Explored cells within this many cells of the dark are shaded (the feathered edge).
@@ -1089,10 +1090,154 @@ pub fn prebuild(game: &Game, art: Option<&super::dt_art::DtArt>, surface_color: 
     let _ = fog_texture(&game.fog, &game.unshown_cells(), game.tile(), std::iter::empty());
 }
 
+/// What a tilted view shows on the minimap: its camera, the frame the camera maps (the view above the
+/// bar) and the ground point the direction cue starts from (world units).
+#[derive(Clone, Copy)]
+pub struct Sight {
+    pub cam: TiltCamera,
+    pub frame: Rect,
+    pub from: Vec2,
+}
+
+/// The farthest ground a view shows, from the camera's target (world units): a ray that meets no ground
+/// (above the horizon) or meets it farther off stops here, as the view's own limit ([`view25::FAR`]).
+const SIGHT_REACH: f32 = view25::FAR;
+
+/// The unit ground vector a ray through pixel `at` of `frame` runs along (the bearing it looks at, even
+/// when it meets no ground).
+fn ray_bearing(cam: &TiltCamera, frame: Rect, at: Vec2) -> Vec2 {
+    let ndc = vec2((at.x - frame.x) / frame.w * 2.0 - 1.0, 1.0 - (at.y - frame.y) / frame.h * 2.0);
+    let inverse = cam.view_proj(frame).inverse();
+    let unproject = |z: f32| {
+        let v = inverse * vec4(ndc.x, ndc.y, z, 1.0);
+        v.truncate() / v.w
+    };
+    let d = unproject(1.0) - unproject(-1.0);
+    let b = vec2(d.x, d.z).normalize_or_zero();
+    if b == Vec2::ZERO {
+        view25::forward(cam.yaw_deg)
+    } else {
+        b
+    }
+}
+
+/// The ground under pixel `at` of `frame`, in world units, at most [`SIGHT_REACH`] from the target. A ray
+/// that meets no ground reaches the far ground in its bearing: the horizon of a down bend or a globe there
+/// (`Bend::horizon_at`), else the reach.
+fn sight_ground(cam: &TiltCamera, frame: Rect, at: Vec2) -> Vec2 {
+    let g = match cam.pick(at, frame) {
+        Some(p) => p,
+        None => {
+            let bearing = ray_bearing(cam, frame, at);
+            let (base, reach) = match cam.bend {
+                None => (cam.target, SIGHT_REACH),
+                Some(b) if b.globe => (b.pivot, b.horizon_at(b.pivot + bearing)),
+                Some(b) => {
+                    // A down bend's horizon is a distance along its forward: the ray's own distance is that over
+                    // the ray's share of the forward.
+                    let along = bearing.dot(view25::forward(b.yaw_deg));
+                    (b.pivot, if along > 1e-3 && b.limit.is_finite() { b.limit / along } else { SIGHT_REACH })
+                }
+            };
+            base + bearing * reach.min(SIGHT_REACH)
+        }
+    };
+    cam.target + (g - cam.target).clamp_length_max(SIGHT_REACH)
+}
+
+/// The ground the frame of a tilted view sees, as a closed polygon in world units: the ground under its
+/// edges, four points an edge (the corners and the edge midpoints among them), going round the frame.
+pub fn sight_footprint(cam: &TiltCamera, frame: Rect) -> Vec<Vec2> {
+    const PER_EDGE: usize = 4;
+    let corners = [vec2(frame.x, frame.y), vec2(frame.x + frame.w, frame.y), vec2(frame.x + frame.w, frame.y + frame.h), vec2(frame.x, frame.y + frame.h)];
+    let mut out = Vec::with_capacity(4 * PER_EDGE);
+    for e in 0..4 {
+        let (a, b) = (corners[e], corners[(e + 1) % 4]);
+        for i in 0..PER_EDGE {
+            out.push(sight_ground(cam, frame, a.lerp(b, i as f32 / PER_EDGE as f32)));
+        }
+    }
+    out
+}
+
+/// The point where segment `a`→`b` crosses the line `x = v` (`x_axis`) or `y = v`.
+fn cut(a: Vec2, b: Vec2, v: f32, x_axis: bool) -> Vec2 {
+    let (ca, cb) = if x_axis { (a.x, b.x) } else { (a.y, b.y) };
+    a + (b - a) * ((v - ca) / (cb - ca))
+}
+
+/// One Sutherland–Hodgman pass: `poly` cut to the half-plane `inside`, the crossings made by `at`.
+fn clip_half(poly: &[Vec2], inside: impl Fn(Vec2) -> bool, at: impl Fn(Vec2, Vec2) -> Vec2) -> Vec<Vec2> {
+    let mut out = Vec::with_capacity(poly.len() + 4);
+    for i in 0..poly.len() {
+        let (a, b) = (poly[i], poly[(i + 1) % poly.len()]);
+        match (inside(a), inside(b)) {
+            (true, true) => out.push(b),
+            (true, false) => out.push(at(a, b)),
+            (false, true) => {
+                out.push(at(a, b));
+                out.push(b);
+            }
+            (false, false) => {}
+        }
+    }
+    out
+}
+
+/// `poly` clipped to the rectangle `r` (empty when nothing of it lies inside).
+pub fn clip_to_rect(poly: &[Vec2], r: Rect) -> Vec<Vec2> {
+    let (x0, x1, y0, y1) = (r.x, r.x + r.w, r.y, r.y + r.h);
+    let p = clip_half(poly, |p| p.x >= x0, |a, b| cut(a, b, x0, true));
+    let p = clip_half(&p, |p| p.x <= x1, |a, b| cut(a, b, x1, true));
+    let p = clip_half(&p, |p| p.y >= y0, |a, b| cut(a, b, y0, false));
+    clip_half(&p, |p| p.y <= y1, |a, b| cut(a, b, y1, false))
+}
+
+/// Draws the ground a tilted view sees on the minimap (`r`): the flat view's box colours, a translucent
+/// fill and a light outline, clipped to the minimap; and a cone from the camera's ground point along its
+/// yaw, kept inside the minimap. `to_mini` maps world units to the minimap's pixels.
+fn draw_sight(s: &Sight, r: Rect, to_mini: &impl Fn((f32, f32)) -> Vec2, zoom: f32) {
+    let poly: Vec<Vec2> = sight_footprint(&s.cam, s.frame).into_iter().map(|p| to_mini((p.x, p.y))).collect();
+    let poly = clip_to_rect(&poly, r);
+    if poly.len() >= 3 {
+        let centre = poly.iter().fold(Vec2::ZERO, |a, &p| a + p) / poly.len() as f32;
+        let fill = Color::new(1.0, 1.0, 1.0, 0.18);
+        for i in 0..poly.len() {
+            draw_triangle(centre, poly[i], poly[(i + 1) % poly.len()], fill);
+        }
+        let outline = Color::new(0.85, 0.85, 0.85, 0.6);
+        for i in 0..poly.len() {
+            let (a, b) = (poly[i], poly[(i + 1) % poly.len()]);
+            draw_line(a.x, a.y, b.x, b.y, 1.0, outline);
+        }
+    }
+
+    // The cone: from the camera's ground point, along the yaw (its length and half-width in pixels).
+    let p0 = to_mini((s.from.x, s.from.y));
+    let ahead = s.from + view25::forward(s.cam.yaw_deg);
+    let dir = (to_mini((ahead.x, ahead.y)) - p0).normalize_or_zero();
+    if dir == Vec2::ZERO {
+        return;
+    }
+    let (len, half) = (16.0 * zoom, 6.0 * zoom);
+    let margin = len.min(r.w / 2.0).min(r.h / 2.0);
+    let at = p0.clamp(vec2(r.x + margin, r.y + margin), vec2(r.x + r.w - margin, r.y + r.h - margin));
+    let side = vec2(-dir.y, dir.x) * half;
+    let tip = at + dir * len;
+    let cone = [at, tip + side, tip - side];
+    draw_triangle(cone[0], cone[1], cone[2], Color::new(1.0, 1.0, 1.0, 0.7));
+    draw_line(cone[0].x, cone[0].y, cone[1].x, cone[1].y, 1.0, BLACK);
+    draw_line(cone[0].x, cone[0].y, cone[2].x, cone[2].y, 1.0, BLACK);
+    draw_line(cone[1].x, cone[1].y, cone[2].x, cone[2].y, 1.0, BLACK);
+    draw_circle(at.x, at.y, 3.0 * zoom.max(1.0), BLACK);
+    draw_circle(at.x, at.y, 2.0 * zoom.max(1.0), WHITE);
+}
+
 /// Draws the minimap window. `view_world` is the part of the world the map view shows (world
-/// units). Returns the look point (where the map's view goes, while the picture is held). The
+/// units); `sight` is the tilted view's camera (None for the flat view, which draws `view_world` as its
+/// box). Returns the look point (where the map's view goes, while the picture is held). The
 /// window closes from the bottom bar's map button (and Esc), not from a cross of its own.
-pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_world: Rect, surface_color: fn(u8) -> Color) -> Option<(f32, f32)> {
+pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_world: Rect, sight: Option<Sight>, surface_color: fn(u8) -> Color) -> Option<(f32, f32)> {
     let map = &game.world.map;
     let fog = &game.fog;
     let r = rect(map, view);
@@ -1185,14 +1330,20 @@ pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_
         }
     }
 
-    // The view: a light grey box, as the original's.
-    let a = to_mini((view_world.x, view_world.y));
-    let b = to_mini((view_world.x + view_world.w, view_world.y + view_world.h));
-    let (x0, y0) = (a.x.max(r.x), a.y.max(r.y));
-    let (x1, y1) = (b.x.min(r.x + r.w), b.y.min(r.y + r.h));
-    if x1 > x0 && y1 > y0 {
-        draw_rectangle(x0, y0, x1 - x0, y1 - y0, Color::new(1.0, 1.0, 1.0, 0.18));
-        draw_rectangle_lines(x0, y0, x1 - x0, y1 - y0, 1.0, Color::new(0.85, 0.85, 0.85, 0.6));
+    match sight {
+        // The view: a light grey box, as the original's.
+        None => {
+            let a = to_mini((view_world.x, view_world.y));
+            let b = to_mini((view_world.x + view_world.w, view_world.y + view_world.h));
+            let (x0, y0) = (a.x.max(r.x), a.y.max(r.y));
+            let (x1, y1) = (b.x.min(r.x + r.w), b.y.min(r.y + r.h));
+            if x1 > x0 && y1 > y0 {
+                draw_rectangle(x0, y0, x1 - x0, y1 - y0, Color::new(1.0, 1.0, 1.0, 0.18));
+                draw_rectangle_lines(x0, y0, x1 - x0, y1 - y0, 1.0, Color::new(0.85, 0.85, 0.85, 0.6));
+            }
+        }
+        // A tilted view (2.5D, first person): the ground its frame sees, and where the camera looks (Razdor's).
+        Some(s) => draw_sight(&s, r, &to_mini, zoom),
     }
 
     if let Some(t) = frame_art {
@@ -1841,5 +1992,99 @@ mod fog_box_tests {
         let mut s = FogShown::EMPTY;
         s.track(&all, &[], (0, 0), std::iter::empty(), 0.0);
         assert_eq!(alpha_box(&s.rgba, all.w, all.h), None);
+    }
+}
+
+#[cfg(test)]
+mod sight_tests {
+    use super::super::view25::FarGround;
+    use super::*;
+
+    const FRAME: Rect = Rect::new(0.0, 0.0, 1200.0, 700.0);
+    const SCALE: f32 = 40.0;
+
+    /// Whether `p` lies inside the polygon (even-odd crossings).
+    fn inside(poly: &[Vec2], p: Vec2) -> bool {
+        let mut inside = false;
+        for i in 0..poly.len() {
+            let (a, b) = (poly[i], poly[(i + 1) % poly.len()]);
+            if (a.y > p.y) != (b.y > p.y) && p.x < a.x + (p.y - a.y) * (b.x - a.x) / (b.y - a.y) {
+                inside = !inside;
+            }
+        }
+        inside
+    }
+
+    fn centroid(poly: &[Vec2]) -> Vec2 {
+        poly.iter().fold(Vec2::ZERO, |a, &p| a + p) / poly.len() as f32
+    }
+
+    #[test]
+    fn the_footprint_of_a_tilted_view_lies_ahead_of_the_camera_at_each_quarter_turn() {
+        let target = vec2(30.0, 40.0);
+        for yaw in [0.0, 90.0, 180.0, 270.0] {
+            let cam = TiltCamera::new(target, SCALE, FRAME, 55.0, yaw);
+            let poly = sight_footprint(&cam, FRAME);
+            assert_eq!(poly.len(), 16, "four points an edge");
+            let ahead = (centroid(&poly) - target).normalize();
+            let f = view25::forward(yaw);
+            assert!(ahead.dot(f) > 0.999, "yaw {yaw}: the ground lies ahead along the yaw, {ahead:?} vs {f:?}");
+            assert!(inside(&poly, target), "yaw {yaw}: the view's centre is in view");
+        }
+    }
+
+    #[test]
+    fn a_turned_view_is_the_same_footprint_turned_about_the_camera() {
+        let target = vec2(30.0, 40.0);
+        let dists = |yaw: f32| {
+            let cam = TiltCamera::new(target, SCALE, FRAME, 55.0, yaw);
+            let mut d: Vec<f32> = sight_footprint(&cam, FRAME).iter().map(|p| (*p - target).length()).collect();
+            d.sort_by(|a, b| a.total_cmp(b));
+            d
+        };
+        let base = dists(0.0);
+        for yaw in [90.0, 180.0, 270.0, 45.0] {
+            let turned = dists(yaw);
+            for (a, b) in base.iter().zip(&turned) {
+                assert!((a - b).abs() < 1e-2, "yaw {yaw}: the same distances from the camera, {a} vs {b}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_hero_stands_inside_the_first_person_footprint_at_every_turn() {
+        let look = vec2(30.0, 40.0);
+        for yaw in [0.0, 45.0, 90.0, 180.0, 270.0, 315.0] {
+            for far in [FarGround::Up, FarGround::Horizon, FarGround::Globe] {
+                let cam = TiltCamera::first_person(look, SCALE, FRAME, yaw, far);
+                let poly = sight_footprint(&cam, FRAME);
+                assert!(inside(&poly, look), "yaw {yaw}, {far:?}: the hero's cell is in view");
+            }
+        }
+    }
+
+    #[test]
+    fn no_ground_point_is_farther_than_the_reach() {
+        // The first-person view's top sees sky: its points stop at the reach.
+        let look = vec2(30.0, 40.0);
+        let cam = TiltCamera::first_person(look, SCALE, FRAME, 20.0, FarGround::Up);
+        for p in sight_footprint(&cam, FRAME) {
+            assert!((p - cam.target).length() <= SIGHT_REACH + 1e-3, "{p:?} is past the reach");
+        }
+    }
+
+    #[test]
+    fn a_polygon_is_clipped_to_the_minimap() {
+        let r = Rect::new(0.0, 0.0, 100.0, 100.0);
+        let square = [vec2(-50.0, -50.0), vec2(150.0, -50.0), vec2(150.0, 150.0), vec2(-50.0, 150.0)];
+        let clipped = clip_to_rect(&square, r);
+        assert_eq!(clipped.len(), 4);
+        assert!(clipped.iter().all(|p| (0.0..=100.0).contains(&p.x) && (0.0..=100.0).contains(&p.y)));
+        let outside = [vec2(200.0, 200.0), vec2(300.0, 200.0), vec2(300.0, 300.0)];
+        assert!(clip_to_rect(&outside, r).is_empty(), "nothing of it lies inside");
+        let inner = [vec2(10.0, 10.0), vec2(20.0, 10.0), vec2(20.0, 20.0)];
+        let same = clip_to_rect(&inner, r);
+        assert_eq!(same.len(), 3, "inside, unchanged");
+        assert!(inner.iter().all(|p| same.contains(p)), "the same corners, in the same order round");
     }
 }
