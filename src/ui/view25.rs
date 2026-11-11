@@ -514,6 +514,26 @@ impl Bend {
         (g - self.pivot).dot(forward(self.yaw_deg)) > self.limit
     }
 
+    /// Whether the point `height` world units above ground point `g` lies in the sky, above the ground's horizon:
+    /// the drawn ground's far edge `edge` (ground distance ahead of the pivot, where the drawn ground stops) or the
+    /// eye's horizon of a down bend, whichever comes first. Nothing on the sheet is higher in the eye's view than
+    /// that edge's point, so a raised sheet's point above it is in the sky. Infinite `edge` and an up bend: the
+    /// geometric horizon alone (none for an up bend).
+    pub fn above_horizon(&self, eye: Vec3, g: Vec2, height: f32, edge: f32) -> bool {
+        let s_edge = edge.min(self.limit);
+        if !s_edge.is_finite() {
+            return false;
+        }
+        let f = forward(self.yaw_deg);
+        let eu = (vec2(eye.x, eye.z) - self.pivot).dot(f);
+        // The elevation of a sheet point as the eye sees it: the angle of its sight line above the horizontal.
+        let elevation = |u: f32, h: f32| (h - eye.y).atan2(u - eu);
+        let p = self.point(g);
+        let u = (vec2(p.x, p.z) - self.pivot).dot(f);
+        let (lu, lh) = self.profile(s_edge);
+        elevation(u, p.y + height) > elevation(lu, lh)
+    }
+
     /// The place of ground point `g` on the sheet (height 0 on the flat part). Past the horizon
     /// it stands on the horizon's line.
     pub fn point(&self, g: Vec2) -> Vec3 {
@@ -1287,6 +1307,37 @@ mod tests {
             }
         }
         assert!(checked > 200, "only {checked} points checked");
+    }
+
+    #[test]
+    fn a_raised_point_above_a_down_horizon_is_in_the_sky_and_the_sheet_is_not() {
+        // The eye 6 cells up and a sheet dropping away at 89° (a drop that hides its own far part: a finite horizon).
+        let eye = vec3(0.0, 6.0, 0.0);
+        let b = Bend::new(Vec2::ZERO, 0.0, 1.0, 2.0, -89.0).with_horizon(eye);
+        assert!(b.limit.is_finite());
+        let inf = f32::INFINITY;
+        // A point of the sheet just before the horizon is below it; lifted high enough it is in the sky.
+        let near = vec2(0.0, -(b.limit - 1.0));
+        assert!(!b.above_horizon(eye, near, 0.0, inf), "the sheet itself is below the horizon");
+        assert!(b.above_horizon(eye, near, 1.2, inf), "a mist layer lifted 1.2 cells above the horizon's edge is in the sky");
+        // Past the horizon the sheet stands on the horizon line: lifted, it is in the sky; unlifted, it is on it.
+        let far = vec2(0.0, -(b.limit + 5.0));
+        assert!(!b.above_horizon(eye, far, 0.0, inf));
+        assert!(b.above_horizon(eye, far, 0.5, inf));
+        // Near the eye the ground is far below the horizon, even lifted a little.
+        assert!(!b.above_horizon(eye, vec2(0.0, -1.0), 0.5, inf));
+        // A drawn ground that ends short of the horizon (its edge nearer): the edge's point is the horizon there.
+        let edge = b.limit * 0.5;
+        let edge_point = vec2(0.0, -edge);
+        assert!(!b.above_horizon(eye, vec2(0.0, -(edge - 0.2)), 0.0, edge), "the drawn ground is below its edge");
+        assert!(b.above_horizon(eye, edge_point, 0.6, edge), "lifted above the drawn edge, the mist is in the sky");
+    }
+
+    #[test]
+    fn an_up_bend_has_no_horizon_to_clip_against() {
+        let eye = vec3(0.0, 6.0, 0.0);
+        let b = Bend::new(Vec2::ZERO, 0.0, 1.0, 2.0, 60.0).with_horizon(eye);
+        assert!(!b.above_horizon(eye, vec2(0.0, -30.0), 5.0, f32::INFINITY));
     }
 
     /// The down bend's horizon: the pixels above it see no ground (NaN in the map's pointer), those

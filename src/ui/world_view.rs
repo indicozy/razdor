@@ -1490,8 +1490,10 @@ fn draw_sheet(target: &RenderTarget, bend: &view25::Bend, region: Rect) {
 /// The mesh of a raised mist sheet `lift` cells above a bent sheet (the first-person view): the fog
 /// quad `dest` (its texels `src` of `tex`, as [`Camera::mist_rects`]) on a grid of 64 × 64 cells, each
 /// vertex lifted straight up ([`view25::Bend::lift`]). Its colour's alpha is 0 past the
-/// horizon, so the mist does not float in the sky. Drawn in chunks of 8 rows (a draw takes 5000 indices).
-fn bent_mist_meshes(bend: &view25::Bend, origin: Vec2, scale: f32, dest: Rect, src: Option<Rect>, tex: &Texture2D, lift: f32) -> Vec<Mesh> {
+/// horizon, so the mist does not float in the sky: nor does a lifted point that lies above the eye's horizon
+/// (`Bend::above_horizon`, the eye `eye`). Drawn in chunks of 8 rows (a draw takes 5000 indices).
+#[allow(clippy::too_many_arguments)]
+fn bent_mist_meshes(bend: &view25::Bend, eye: Vec3, edge: f32, origin: Vec2, scale: f32, dest: Rect, src: Option<Rect>, tex: &Texture2D, lift: f32) -> Vec<Mesh> {
     const ACROSS: usize = 64;
     const ALONG: usize = 64;
     const ROWS_PER_DRAW: usize = 8;
@@ -1505,7 +1507,9 @@ fn bent_mist_meshes(bend: &view25::Bend, origin: Vec2, scale: f32, dest: Rect, s
         let fade = if bend.limit.is_finite() { ((bend.limit - (g - bend.pivot).dot(view25::forward(bend.yaw_deg))) / HORIZON_FADE).clamp(0.0, 1.0) } else { 1.0 };
         let fade = fade * fade * (3.0 - 2.0 * fade);
         let at = bend.lift(g, lift * fade);
-        let alpha = if bend.hidden(g) { 0.0 } else { fade };
+        // Past the drawn ground's far edge (`edge`) there is no ground under the mist: it is out too.
+        let beyond = (g - bend.pivot).dot(view25::forward(bend.yaw_deg)) > edge;
+        let alpha = if bend.hidden(g) || beyond || bend.above_horizon(eye, g, lift * fade, edge) { 0.0 } else { fade };
         macroquad::models::Vertex::new(at.x, at.y, at.z, (s.x + s.w * fu) / tw, (s.y + s.h * fv) / th, Color::new(1.0, 1.0, 1.0, alpha))
     };
     let mut meshes = Vec::new();
@@ -2259,7 +2263,13 @@ impl Camera {
                 // The ground's pass of a bent view draws the picture (no raised sheet in it).
                 (Pass::Ground, _) => {}
                 (Pass::Sprites, Some(bend)) => {
-                    let meshes = bent_mist_meshes(&bend, self.origin, self.scale, dest, src, &tex, lift);
+                    // The drawn ground's far edge: the cull's far corners along the view's forward ground.
+                    let (f, c) = (view25::forward(bend.yaw_deg), tilt.cull);
+                    let edge = [vec2(c.x, c.y), vec2(c.x + c.w, c.y), vec2(c.x, c.y + c.h), vec2(c.x + c.w, c.y + c.h)]
+                        .into_iter()
+                        .map(|p| (p - bend.pivot).dot(f))
+                        .fold(f32::MIN, f32::max);
+                    let meshes = bent_mist_meshes(&bend, tilt.cam.eye(), edge, self.origin, self.scale, dest, src, &tex, lift);
                     mist::raised(&tex, sheet, lift, || meshes.iter().for_each(macroquad::models::draw_mesh));
                 }
                 (Pass::Sprites, None) => {}
