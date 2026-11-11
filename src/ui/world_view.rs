@@ -4003,8 +4003,12 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     } else {
         Vec::new()
     };
+    // Each drawn object's `seen` test, made once for the frame: it scans the fog around every object cell,
+    // and the passes below ask it again (the fog does not change while the world is drawn).
+    let rows = map.objects_in_rows(r0 - up, r1 + below);
+    let seen_row: Vec<bool> = rows.iter().map(&seen).collect();
     if sun.is_some() || !lit_lights.is_empty() {
-        let objects: Vec<&Decoration> = map.objects_in_rows(r0 - up, r1 + below).iter().filter(|o| seen(o)).collect();
+        let objects: Vec<&Decoration> = rows.iter().zip(&seen_row).filter(|(_, s)| **s).map(|(o, _)| o).collect();
         let locations: Vec<(usize, &Location)> = game.world.locations.iter().enumerate().filter(|(_, l)| location_seen(l) && !l.kind.is_bridge()).collect();
         ground(cam, || draw_shadows(game, art, cam, sun, &lit_lights, &objects, &locations));
     }
@@ -4019,8 +4023,8 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // above them included. Its test is `0x100 < class·256 + sprite < 0x401`: class 4's
     // sprites are 10 and up, so the yellow hills are drawn with the mountains, row by row.
     // 2.5D: the hills are drawn after the fog, below (they stand in the fog's shade).
-    for o in map.objects_in_rows(r0 - up, r1 + below) {
-        if seen(o) {
+    for (o, &seen_o) in rows.iter().zip(&seen_row) {
+        if seen_o {
             if hill(o) {
                 if !tilted {
                     standing(cam, object_foot(o, cam), object_foot(o, cam), shade_of(object_foot(o, cam)), object_picture(o, art, cam), || draw_object(o, art, cam));
@@ -4110,8 +4114,8 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
         // One sharp session for the hills, as for the pass below: outside one, every sharp draw
         // switches the material on and off, so each hill was its own draw call.
         super::sharp::session(|| {
-            for o in map.objects_in_rows(r0 - up, r1 + below) {
-                if seen(o) && hill(o) {
+            for (o, &seen_o) in rows.iter().zip(&seen_row) {
+                if seen_o && hill(o) {
                     standing(cam, object_foot(o, cam), object_foot(o, cam), shade_of(object_foot(o, cam)), object_picture(o, art, cam), || draw_object(o, art, cam));
                 }
             }
