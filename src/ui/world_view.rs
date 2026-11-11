@@ -2351,14 +2351,11 @@ impl Camera {
         Rect::new(o.x, o.y, self.view.w / self.scale, self.view.h / self.scale)
     }
 
-    /// What the minimap shows of a tilted view (`minimap::Sight`): the camera, the frame it maps and the ground
-    /// point the direction cue starts from. In the first-person view that is the hero's place `hero`; otherwise
-    /// the camera's own ground point. None for the flat view.
+    /// What the minimap shows of a tilted view (`minimap::Sight`): the camera, the frame it maps and the hero's
+    /// place `hero`, where the look marker stands. None for the flat view.
     fn minimap_sight(&self, hero: (f32, f32)) -> Option<minimap::Sight> {
         let t = self.tilt?;
-        let eye = t.cam.eye();
-        let from = if t.cam.eye_at.is_none() && trailer().is_none() && first_person() { hero } else { (eye.x, eye.z) };
-        Some(minimap::Sight { cam: t.cam, frame: self.view, from: vec2(from.0, from.1) })
+        Some(minimap::Sight { cam: t.cam, frame: self.view, from: vec2(hero.0, hero.1) })
     }
 
     /// The part of the world drawn, in world units (the view and the strip beside the bar).

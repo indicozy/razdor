@@ -1194,9 +1194,9 @@ pub fn clip_to_rect(poly: &[Vec2], r: Rect) -> Vec<Vec2> {
 }
 
 /// Draws the ground a tilted view sees on the minimap (`r`): the flat view's box colours, a translucent
-/// fill and a light outline, clipped to the minimap; and a cone from the camera's ground point along its
-/// yaw, kept inside the minimap. `to_mini` maps world units to the minimap's pixels.
-fn draw_sight(s: &Sight, r: Rect, to_mini: &impl Fn((f32, f32)) -> Vec2, zoom: f32) {
+/// fill and a light outline, clipped to the minimap; and the hero's marker, a small triangle on his place with
+/// its tip where the camera looks. `to_mini` maps world units to the minimap's pixels.
+fn draw_sight(s: &Sight, r: Rect, to_mini: &impl Fn((f32, f32)) -> Vec2, house: f32) {
     let poly: Vec<Vec2> = sight_footprint(&s.cam, s.frame).into_iter().map(|p| to_mini((p.x, p.y))).collect();
     let poly = clip_to_rect(&poly, r);
     if poly.len() >= 3 {
@@ -1212,25 +1212,41 @@ fn draw_sight(s: &Sight, r: Rect, to_mini: &impl Fn((f32, f32)) -> Vec2, zoom: f
         }
     }
 
-    // The cone: from the camera's ground point, along the yaw (its length and half-width in pixels).
+    // The hero's look marker, drawn last so it is on top: a solid isosceles triangle centred on his place, its tip
+    // where the camera looks. As long as a house icon (`house`, px), and 1.7 times as long as its base.
     let p0 = to_mini((s.from.x, s.from.y));
-    let ahead = s.from + view25::forward(s.cam.yaw_deg);
-    let dir = (to_mini((ahead.x, ahead.y)) - p0).normalize_or_zero();
+    let dir = look_direction(&s.cam, s.from, to_mini);
     if dir == Vec2::ZERO {
         return;
     }
-    let (len, half) = (16.0 * zoom, 6.0 * zoom);
-    let margin = len.min(r.w / 2.0).min(r.h / 2.0);
-    let at = p0.clamp(vec2(r.x + margin, r.y + margin), vec2(r.x + r.w - margin, r.y + r.h - margin));
-    let side = vec2(-dir.y, dir.x) * half;
-    let tip = at + dir * len;
-    let cone = [at, tip + side, tip - side];
-    draw_triangle(cone[0], cone[1], cone[2], Color::new(1.0, 1.0, 1.0, 0.7));
-    draw_line(cone[0].x, cone[0].y, cone[1].x, cone[1].y, 1.0, BLACK);
-    draw_line(cone[0].x, cone[0].y, cone[2].x, cone[2].y, 1.0, BLACK);
-    draw_line(cone[1].x, cone[1].y, cone[2].x, cone[2].y, 1.0, BLACK);
-    draw_circle(at.x, at.y, 3.0 * zoom.max(1.0), BLACK);
-    draw_circle(at.x, at.y, 2.0 * zoom.max(1.0), WHITE);
+    // A phone: at least 24 dp (about 4 mm), in its own px per dp (`display::dp_px`).
+    let len = match super::display::dp_px() {
+        Some(dp) => house.max(24.0 * dp),
+        None => house.max(10.0),
+    };
+    let width = len / 1.7;
+    let (tip, base) = hero_marker(p0, dir, len);
+    let n = vec2(-dir.y, dir.x);
+    let (left, right) = (base + n * width * 0.5, base - n * width * 0.5);
+    draw_triangle(tip, left, right, Color::new(0.97, 0.97, 0.97, 0.95));
+    for (a, b) in [(tip, left), (left, right), (right, tip)] {
+        draw_line(a.x, a.y, b.x, b.y, 1.0, BLACK);
+    }
+}
+
+/// The marker's tip and the middle of its base, for a marker `len` px long centred on `at` and turned to `dir`
+/// (a unit vector on the minimap): the tip is half its length ahead of `at`, the base half behind, so the marker's
+/// extent is centred on `at`.
+fn hero_marker(at: Vec2, dir: Vec2, len: f32) -> (Vec2, Vec2) {
+    (at + dir * len * 0.5, at - dir * len * 0.5)
+}
+
+/// The unit direction the camera looks in, on the minimap (pixels, y down): the ground's forward at the camera's
+/// yaw, from `from` a step ahead, projected by `to_mini`. Zero when the step vanishes.
+fn look_direction(cam: &TiltCamera, from: Vec2, to_mini: impl Fn((f32, f32)) -> Vec2) -> Vec2 {
+    let ahead = from + view25::forward(cam.yaw_deg);
+    let p0 = to_mini((from.x, from.y));
+    (to_mini((ahead.x, ahead.y)) - p0).normalize_or_zero()
 }
 
 /// Draws the minimap window. `view_world` is the part of the world the map view shows (world
@@ -1343,7 +1359,7 @@ pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_
             }
         }
         // A tilted view (2.5D, first person): the ground its frame sees, and where the camera looks (Razdor's).
-        Some(s) => draw_sight(&s, r, &to_mini, zoom),
+        Some(s) => draw_sight(&s, r, &to_mini, symbol_rect(Symbol::Grid(0, 2), size).w * zoom),
     }
 
     if let Some(t) = frame_art {
@@ -2086,5 +2102,55 @@ mod sight_tests {
         let same = clip_to_rect(&inner, r);
         assert_eq!(same.len(), 3, "inside, unchanged");
         assert!(inner.iter().all(|p| same.contains(p)), "the same corners, in the same order round");
+    }
+
+    #[test]
+    fn the_marker_points_along_the_yaw_on_the_map() {
+        // A plain projection with unequal axes, as the minimap's rows are shorter than its cells.
+        let px = |p: (f32, f32)| vec2(p.0 * 4.0, p.1 * 2.0);
+        let from = vec2(30.0, 40.0);
+        let dir = |yaw: f32| look_direction(&TiltCamera::new(from, SCALE, FRAME, 55.0, yaw), from, px);
+        let d0 = dir(0.0);
+        assert!(d0.y < -0.999 && d0.x.abs() < 1e-4, "yaw 0 points up the map (north): {d0:?}");
+        let d180 = dir(180.0);
+        assert!(d180.y > 0.999 && d180.x.abs() < 1e-4, "yaw 180 points down the map: {d180:?}");
+        // Yaw 90 looks along the world's `forward` (-x): on this map, left. The owner's «right» is the turn's
+        // sense; the view looks west (`view25::forward`, its east at 90 in that convention).
+        let d90 = dir(90.0);
+        assert!(d90.x < -0.999 && d90.y.abs() < 1e-4, "yaw 90 looks along -x, left on the map: {d90:?}");
+        let d270 = dir(270.0);
+        assert!(d270.x > 0.999 && d270.y.abs() < 1e-4, "yaw 270 looks along +x, right on the map: {d270:?}");
+        let d45 = dir(45.0);
+        assert!(d45.x < 0.0 && d45.y < 0.0, "yaw 45 points up-left: {d45:?}");
+    }
+
+    #[test]
+    fn the_visible_ground_lies_ahead_of_the_hero_at_every_turn() {
+        // The marker's tip points where the camera looks; the wedge is the ground the frame sees. With the
+        // camera on the hero (2.5D, third person) or the hero at the first-person look point, the wedge's centre
+        // lies in the forward half-plane through him: the marker's tip points into the wedge.
+        let hero = vec2(30.0, 40.0);
+        for step in 0..24 {
+            let yaw = step as f32 * 15.0;
+            let f = view25::forward(yaw);
+            let cams = [
+                ("2.5D", TiltCamera::new(hero, SCALE, FRAME, 55.0, yaw)),
+                ("first person", TiltCamera::first_person(hero, SCALE, FRAME, yaw, FarGround::Up)),
+            ];
+            for (name, cam) in cams {
+                let poly = sight_footprint(&cam, FRAME);
+                let ahead = centroid(&poly) - hero;
+                assert!(ahead.dot(f) > 0.0, "yaw {yaw}, {name}: the wedge's centre lies ahead of the hero, {ahead:?} vs {f:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_marker_is_centred_on_the_hero() {
+        let at = vec2(100.0, 80.0);
+        let (tip, back) = hero_marker(at, vec2(0.0, -1.0), 12.0);
+        assert_eq!(tip, vec2(100.0, 74.0), "half its length ahead of the hero");
+        assert_eq!(back, vec2(100.0, 86.0), "half its length behind");
+        assert_eq!((tip + back) / 2.0, at, "the marker's extent is centred on the hero");
     }
 }

@@ -244,8 +244,10 @@ the frame is the standing one), and the galley's the same; before any step it fa
 The minimap is `src/ui/minimap.rs`. Flat, its view is the light box of `world_rect`. Tilted (2.5D, first person,
 eyes), `Camera::minimap_sight` hands it the camera: the ground the frame sees is the picked ground under its edges
 (`minimap::sight_footprint`, four points an edge, a ray that meets no ground stops at `view25::FAR` or the bend's
-horizon), clipped to the minimap and drawn with the box's colours, and a cone from the camera's ground point (the
-hero, first person) along the yaw. Clicks still centre the map: the minimap is a plan, not turned.
+horizon), clipped to the minimap and drawn with the box's colours, and the hero's marker (`draw_sight`, a light
+triangle centred on his place, as long as a house icon (the `Grid(0, 2)` cell at the map's size) and 1.7 times as long
+as its base, at least 24 dp on a phone, its tip where the camera looks, `look_direction`).
+Clicks still centre the map: the minimap is a plan, not turned.
 
 The small trees and bushes (object class 9) sway: `draw_object` draws them through
 `draw_leaning`, the top corners moved by `rng::tree_sway` (a triangle wave of ±2.5 px over
