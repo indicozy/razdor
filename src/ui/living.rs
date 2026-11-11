@@ -226,6 +226,15 @@ pub fn flag_sway(s: f32, now: f64, phase: f32) -> f32 {
     amp * s * (t - 3.0 * s + phase).sin()
 }
 
+/// The share of a sway that shows at a map zoom `zoom` (`cam.scale / PX`): 1 from 0.7 up (the default
+/// zoom and the bigger ones keep the sway), 0 at 0.3 and under. Zoomed out, the few pixels the sway
+/// moves are not seen, so it fades out rather than popping off (the weather's snow sways by the same
+/// rule, `weather.rs`). A flag at 0 keeps its rest pose: it is still drawn.
+pub fn sway_fade(zoom: f32) -> f32 {
+    let t = ((zoom - 0.3) / 0.4).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 /// A moving part of a sprite: a flag's box (its pole on the edge nearer the sprite's centre), `phase`
 /// its own, from its box.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -271,7 +280,7 @@ pub fn part_mesh(part: &Part, now: f64, src: Rect, tex: Vec2, origin: Vec2, zoom
     for i in 0..=cols {
         let u = i as f32 / cols as f32;
         let s = if pole_right { 1.0 - u } else { u };
-        let dx = flag_sway(s, now, phase);
+        let dx = flag_sway(s, now, phase) * sway_fade(zoom);
         for j in 0..=1 {
             let v = j as f32;
             let p = at(x0 + u * w + dx, y0 + v * h);
@@ -570,6 +579,25 @@ mod tests {
         assert!(free > 12.0 - 3.0 && free <= 12.0 + 3.0 + 1e-4, "the free end swings within 3 px: {free}");
         // The texture coordinates are the box's own texels (the atlas rectangle at the origin here).
         assert!(verts.iter().all(|v| (0.0..=20.0).contains(&(v.uv.x * 20.0))));
+    }
+
+    #[test]
+    fn the_sway_keeps_at_the_default_zoom_and_fades_out_zoomed_out() {
+        assert_eq!(sway_fade(1.0), 1.0, "the default zoom keeps the sway as it was");
+        assert_eq!(sway_fade(2.0), 1.0);
+        assert_eq!(sway_fade(0.2), 0.0, "zoomed out the sway is gone: the flag keeps its rest pose");
+        let mid = sway_fade(0.5);
+        assert!(mid > 0.0 && mid < 1.0, "the sway fades between: {mid}");
+        // At 0.4 the free end moves at most 40% of the 3 px at the default zoom, and the rest pose holds.
+        let flag = Part::Flag { rect: [4.0, 2.0, 12.0, 8.0], pole_right: false, phase: 0.0 };
+        let (verts, _) = part_mesh(&flag, 1.3, Rect::new(0.0, 0.0, 20.0, 20.0), vec2(20.0, 20.0), vec2(0.0, 0.0), 0.4, WHITE);
+        // Vertex pairs run along the flag: column i (of 8) rests at x = 4 + 8 i / 8 (sprite pixels).
+        let moved = verts.iter().enumerate().map(|(k, v)| {
+            let u = (k / 2) as f32 / 8.0;
+            (v.position.x / 0.4 - (4.0 + 8.0 * u)).abs()
+        }).fold(0.0f32, f32::max);
+        assert!(moved <= 3.0 * sway_fade(0.4) + 1e-4, "the sway is scaled by the fade: {moved}");
+        assert!(moved > 0.0, "a zoomed-out flag still waves a little at 0.4");
     }
 
     /// A sprite with each pixel `rgb` where `f` says, opaque; a pixel `f` gives `[0, 0, 0]` at alpha

@@ -437,7 +437,8 @@ float flakes(vec2 px, float size, vec2 vel, float radius, float density, float s
             }
             vec2 h2 = hash22(c + seed + 3.7);
             vec2 centre = (c + 0.15 + 0.7 * h2) * size;
-            centre.x += sin(16.0 * W * Phase + h * 40.0) * wob;
+            // The sway fades out zoomed out, where its few pixels are not seen (`living::sway_fade`: 1 from zoom 0.7).
+            centre.x += sin(16.0 * W * Phase + h * 40.0) * wob * smoothstep(0.3, 0.7, Zoom);
             float r = radius * Zoom * (0.75 + 0.5 * fract(h * 7.31));
             acc += 1.0 - smoothstep(r * 0.55, r, length(q - centre));
         }
