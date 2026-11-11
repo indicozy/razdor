@@ -752,6 +752,32 @@ fn a_thirty_day_replay_is_small_and_its_keyframes_do_not_block_the_frame() {
     }
 }
 
+/// A session closed in the middle of a day (a quit, a return to the menu) writes the entries that
+/// were still pending and the game's end state, so nothing of the day is lost and the end is
+/// checked by the playback like the other keyframes.
+#[test]
+fn closing_a_session_keeps_its_pending_entries_and_its_end_state() {
+    let Some(dt) = base() else { return };
+    let c = Arc::new(Content::from_dt(&dt));
+    let map = map_named(&dt, "РК1");
+    let mut d = Driver::new(start(&c, &map, Some(71)), true);
+    let dir = scratch("close");
+    let sess = super::session::Session::start(&dir, &d.g, &header_for(&d.g, &dt)).unwrap();
+    d.g.replay = Some(sess.clone());
+    d.session = Some(sess.clone());
+    let mut f = Frames::new(DT_A, BUDGET_A);
+    let opening = d.g.drain_events();
+    d.settle(opening);
+    d.walk_to_nearest(&mut f);
+    let end = d.hash();
+    sess.close(Some(&mut d.g));
+    let file = super::file::read(&dir.join(sess.file_name())).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    let seg = &file.segments[0];
+    assert!(!seg.entries.is_empty(), "the pending entries are written at the close");
+    assert_eq!(seg.keyframes.last().map(|k| k.hash), Some(end), "the end state is the last keyframe");
+}
+
 /// A replay belongs to the game's saves: deleting one save keeps the file while another save
 /// points into it, and deleting the last one deletes the file.
 #[test]

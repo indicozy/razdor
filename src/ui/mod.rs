@@ -863,6 +863,8 @@ impl App {
     /// Before the process ends: the music stops and the settings are written.
     pub fn shutdown(&mut self) {
         let t0 = std::time::Instant::now();
+        // The game's replay is closed first: its last entries and end state are written.
+        recording::quit(&mut self.game);
         self.session.end();
         let t1 = std::time::Instant::now();
         self.audio.shutdown();

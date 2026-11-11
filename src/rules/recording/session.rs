@@ -131,13 +131,33 @@ impl Session {
         }
     }
 
-    /// Ends the session: the pending entries are written and the hook lets go of it.
-    pub fn finish(&self) {
+    /// Ends the session at the game's end (a return to the menu, a quit, a new game or a load):
+    /// the pending entries are written, and the game's state is written as a last keyframe when
+    /// it can be taken (the playback checks it as it checks the others: the step paused and the
+    /// snap due are finished first, as the screen does before a save). The file is synced and the
+    /// hook lets go of the session.
+    pub fn close(&self, mut game: Option<&mut Game>) {
         if let Ok(mut g) = self.inner.lock() {
+            // What the step and the snap record is part of the day's entries, so it comes first.
+            if let Some(game) = game.as_deref_mut() {
+                game.finish_pause();
+                game.armies_snap();
+            }
             g.flush();
+            if let Some(game) = game {
+                if let Ok((json, hash)) = capture(game) {
+                    let day = game.clock.day_index();
+                    g.writer.keyframe(false, game.stamp(), day, hash, json);
+                }
+            }
             g.writer.sync();
         }
         hook::take_recorder();
+    }
+
+    /// Ends the session without the game (the entries are written, the file synced).
+    pub fn finish(&self) {
+        self.close(None);
     }
 }
 
