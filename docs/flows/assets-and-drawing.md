@@ -372,6 +372,21 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   map takes no click under it.
 - **Sprites' size** «Размер фигур» (`Settings::map_sprite_size`, 1.5 by default, cycled 1×, 1.5×, 2×
   by `next_sprite_size`; `set_sprite_size` pushes it; `sprite_size()` is what `standing` scales by).
+- **Detail when the whole map is zoomed out** (the owner's request, 2026-11-11). `detail_visibility`
+  (physical px, the shorter side): an object under 2 px is not drawn, one under 3 px fades in (a
+  smoothstep; the flat view fades it through `SPRITE_VIS`, the 2.5D one through `standing`'s `vis`). At
+  1280×800 on the Discord Times map the whole-map zoom's objects are 3 px and up, so nothing is skipped there;
+  at 800×600 the 2–3 px ones fade. `zoom_lod(scale)` is the animations' shared level of detail (0 under 8 screen
+  px a cell, 1 from 16, linear between): at 0 the living map is off (`living_on`: the flags, the chimney smoke
+  and the birds), the birds and the ship's wakes fade with it, and the water's ripples and foam may use it too
+  (`water.rs` is its own agent's). `RAZDOR_MAP_FIT=1` (snapshots) zooms to the whole map's floor, which the
+  settings' zoom range cannot reach. Measured with `RAZDOR_PROFILE_FRAMES` (draws, verts) at 1280×800:
+  the flat whole-map frame is 1123 draws and 64,400 verts, the 2.5D one 193 and 76,251.
+- **Smaller map sprites** (`RAZDOR_SPRITE_LOD=1`, a developer switch, off by default): `DtArt::sprite_lod_atlas(d)`
+  packs every map sprite at `1/d` (box filter, `downscale`), `d` = 2 under 12 screen px a cell, 4 under 6
+  (`sprite_lod_divisor`); `draw_object` draws the decorations from it at the full sprite's place and size.
+  The buildings are not switched. Memory of the Discord Times map atlas (2048 px wide): the full atlas
+  2048×1684, 13.8 MB of RGBA; the quarter copy 512×480, 0.98 MB. Draw calls and verts do not change.
 - **The border** (`draw_border`): black lines on the ground before the sprites, a 0.15-cell line on the
   fog grid's edge and a 0.07-cell one 0.35 cell outside (at least 1.5 px). The fog, drawn after the
   world, darkens it where the ground is unexplored. Past the map's edges the ground is black (the

@@ -128,6 +128,27 @@ fn map_fit_env() -> bool {
     *ENV.get_or_init(|| std::env::var("RAZDOR_MAP_FIT").is_ok_and(|v| v.trim() == "1"))
 }
 
+/// `RAZDOR_SPRITE_LOD=1` (a developer switch, off by default): the map objects are drawn from the half-size
+/// atlas (divisor 2) at the whole map's zoom, and from the quarter one (4) below `SPRITE_LOD_QUARTER_CELL`
+/// screen pixels a cell. `None` with the switch off, or at a cell size where the full sprites are drawn.
+fn sprite_lod_divisor(scale: f32) -> Option<u32> {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ON.get_or_init(|| std::env::var("RAZDOR_SPRITE_LOD").is_ok_and(|v| v.trim() == "1")) {
+        return None;
+    }
+    if scale < SPRITE_LOD_QUARTER_CELL {
+        Some(4)
+    } else if scale < SPRITE_LOD_HALF_CELL {
+        Some(2)
+    } else {
+        None
+    }
+}
+
+/// The cell sizes (screen pixels) under which the switch's half and quarter sprites are drawn.
+const SPRITE_LOD_HALF_CELL: f32 = 12.0;
+const SPRITE_LOD_QUARTER_CELL: f32 = 6.0;
+
 /// The level of detail of the map's animations at its scale (`Camera::scale`: screen pixels a cell): 0 where
 /// a flag, a chimney's smoke, a bird or a wave is under a pixel and its motion cannot be seen, 1 where it is
 /// whole, a linear ramp between (the owner's request 2026-11-11: the whole map zoomed out). The shared
@@ -2835,8 +2856,8 @@ const DETAIL_FULL_PX: f32 = 3.0;
 /// The visibility of a map object of picture `picture` (2D units) at this size: 0 when it is too small to
 /// see, 1 when it is whole, a smoothstep between (the owner's request 2026-11-11: the grass tufts and small
 /// rocks of a map zoomed out are sub-pixel noise, and the sprite run pays for each one).
-fn detail_visibility(picture: Rect) -> f32 {
-    let side = picture.w.min(picture.h) * screen_dpi_scale();
+fn detail_visibility(picture: Rect, dpi: f32) -> f32 {
+    let side = picture.w.min(picture.h) * dpi;
     let t = ((side - DETAIL_HIDE_PX) / (DETAIL_FULL_PX - DETAIL_HIDE_PX)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
@@ -3022,16 +3043,21 @@ fn draw_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera) {
     if let Some((atlas, r)) = art.and_then(|a| a.map_atlas()).and_then(|at| Some((at, at.decoration(o.class, o.sprite)?))) {
         let at = object_sprite_origin(o, r.w, r.h, cam);
         let size = vec2(r.w * zoom, r.h * zoom);
+        // Zoomed out, the smaller copy of the sprite is drawn in the same place and size (`RAZDOR_SPRITE_LOD`).
+        let (atlas, src) = match sprite_lod_divisor(cam.scale).and_then(|d| art?.sprite_lod_atlas(d).map(|l| (l, d))) {
+            Some((lod, _)) => (lod, lod.decoration(o.class, o.sprite).unwrap_or(r)),
+            None => (atlas, r),
+        };
         if o.class == object_class::TREES {
             // The small trees and bushes sway: the quad's top corners move by the lean of
             // their phase, the bottom stays (0x4c99d0, engine.md §7).
             let (_, _, phase) = super::memo::plant_jitter_memo(o.tile.0, o.tile.1, u16::from(o.class) << 8 | u16::from(o.sprite));
             let lean = razdor::rules::rng::tree_sway(clock_ms(), phase) * zoom;
-            draw_leaning(&atlas.texture, r, at, size, lean);
+            draw_leaning(&atlas.texture, src, at, size, lean);
             return;
         }
         frame_probe::sprite(size.x, size.y);
-        draw_picture_form(cam, atlas, r, at, size, faded(WHITE), zoom);
+        draw_picture_form(cam, atlas, src, at, size, faded(WHITE), zoom);
         return;
     }
     let s = cam.scale;
@@ -4611,7 +4637,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                     // just above that fades out (`detail_visibility`); the flat view fades it through `SPRITE_VIS`.
                     let foot = object_foot(o, cam);
                     let picture = object_picture(o, art, cam);
-                    let detail = detail_visibility(picture);
+                    let detail = detail_visibility(picture, screen_dpi_scale());
                     if detail > 0.0 {
                         let vis = shade_of(foot) * detail;
                         standing(cam, foot, foot, vis, picture, || {
@@ -6986,6 +7012,27 @@ fn spell_entry(name: &str, l: &SpellLine, now: u64) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_map_animations_fade_out_zoomed_out_and_are_whole_at_the_default_zoom() {
+        assert_eq!(zoom_lod(PX * 0.16), 0.0, "the whole map: the flags and birds are under a pixel");
+        assert_eq!(zoom_lod(PX), 1.0, "the default zoom: whole");
+        let mid = zoom_lod(12.0);
+        assert!(mid > 0.0 && mid < 1.0, "{mid}");
+        assert!(zoom_lod(9.0) < zoom_lod(10.0) && zoom_lod(10.0) < zoom_lod(11.0), "a ramp, not a step");
+    }
+
+    #[test]
+    fn a_sprite_under_two_pixels_is_not_drawn_and_one_under_three_fades() {
+        let dot = |w: f32, h: f32| Rect::new(0.0, 0.0, w, h);
+        assert_eq!(detail_visibility(dot(1.5, 9.0), 1.0), 0.0, "the shorter side counts");
+        assert_eq!(detail_visibility(dot(9.0, 2.0), 1.0), 0.0);
+        assert_eq!(detail_visibility(dot(4.0, 4.0), 1.0), 1.0, "from three pixels, whole");
+        let fade = detail_visibility(dot(2.5, 9.0), 1.0);
+        assert!(fade > 0.0 && fade < 1.0, "{fade}");
+        assert_eq!(detail_visibility(dot(1.0, 1.0), 2.0), 0.0, "a 2x display counts physical pixels: 1 logical px is 2");
+        assert_eq!(detail_visibility(dot(1.5, 1.5), 2.0), 1.0, "3 physical px is whole");
+    }
+
     use razdor::rules::clock::duration_label;
     use razdor::rules::content::HeroClass;
     use razdor::rules::magic::SpellLine;
