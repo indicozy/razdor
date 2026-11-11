@@ -177,6 +177,8 @@ uniform float LiveWater;
 uniform sampler2D WaterMask;
 uniform sampler2D Flow;
 uniform vec3 Sky;
+// The water's noise texture (`water::noise_texels`): a wrapped 64×64 table of the lattice's hashes.
+uniform sampler2D Noise;
 // @SHARP_UV@
 
 float hash2(vec2 q) {
@@ -194,9 +196,18 @@ float vnoise(vec2 q) {
     return mix(mix(hash2(a), hash2(vec2(b.x, a.y)), u.x), mix(hash2(vec2(a.x, b.y)), hash2(b), u.x), u.y);
 }
 
+// The water's value noise: the same lattice as `vnoise`, one texture fetch. The lookup sits on the lattice
+// point's centre plus the smoothed fraction, so the hardware's bilinear step is the smooth interpolation.
+float wnoise(vec2 q) {
+    vec2 i = floor(q);
+    vec2 f = fract(q);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return texture2D(Noise, (mod(i, 64.0) + u + 0.5) / 64.0).r;
+}
+
 // The ripple's offset of the water at `q` (the water's uv distortion, in frame units).
 vec2 ripple(vec2 q) {
-    return vec2(sin(q.y * 2.1 + Clock * 1.29983) + 0.5 * vnoise(q * 0.7 + Clock * 0.2), cos(q.x * 1.7 + Clock * 1.09956));
+    return vec2(sin(q.y * 2.1 + Clock * 1.29983) + 0.5 * wnoise(q * 0.7 + Clock * 0.2), cos(q.x * 1.7 + Clock * 1.09956));
 }
 
 
@@ -231,9 +242,9 @@ vec4 shore_foam(float cov, vec2 p, vec2 fl) {
     float t1 = fract(Clock * 0.05 + 0.5);
     vec2 q0 = p - fl * t0 * 7.0;
     vec2 q1 = p - fl * t1 * 7.0;
-    float lap = 0.5 + 0.5 * sin(Clock * 0.98174770 + 6.0 * vnoise(q0 * 0.8));
-    float lap2 = 0.5 + 0.5 * sin(Clock * 0.98174770 + 2.5 + 6.0 * vnoise(q1 * 0.6));
-    float patch = smoothstep(0.38, 0.62, 0.6 * vnoise(q0 * 2.4 + Clock * vec2(0.01, 0.0)) + 0.4 * vnoise(q1 * 5.1 + Clock * vec2(0.0, -0.02)));
+    float lap = 0.5 + 0.5 * sin(Clock * 0.98174770 + 6.0 * wnoise(q0 * 0.8));
+    float lap2 = 0.5 + 0.5 * sin(Clock * 0.98174770 + 2.5 + 6.0 * wnoise(q1 * 0.6));
+    float patch = smoothstep(0.38, 0.62, 0.6 * wnoise(q0 * 2.4 + Clock * vec2(0.01, 0.0)) + 0.4 * wnoise(q1 * 5.1 + Clock * vec2(0.0, -0.02)));
     float inner = 0.1 * lap;
     float line = smoothstep(inner - 0.015, inner + 0.015, s) * (1.0 - smoothstep(inner + 0.08, inner + 0.33, s));
     float inner2 = 0.36 + 0.05 * lap2;
@@ -780,6 +791,8 @@ pub struct TerrainLayer {
     slot: Vec2,
     /// The water frames ([`WATER_FRAMES`] or none, then water is still).
     water: Vec<Texture2D>,
+    /// The live water's noise (`water::noise_texels`), read by the neighbours shader's `wnoise`.
+    noise: Texture2D,
     /// Surface codes and size of the map in `cells`, to rebuild it when the map changes.
     cells: RefCell<Option<CellTextures>>,
     ground: RefCell<GroundCache>,
@@ -825,6 +838,18 @@ fn water_texture(img: &Image) -> Texture2D {
     tex
 }
 
+/// The water's noise texture (`water::noise_texels`): wrapped and linear, so the shader's lookup is a
+/// smooth value noise with the lattice's period.
+fn noise_texture() -> Texture2D {
+    let n = water::NOISE_SIZE as u16;
+    let tex = Texture2D::from_rgba8(n, n, &water::noise_texels().iter().flat_map(|&v| [v, v, v, 255]).collect::<Vec<u8>>());
+    tex.set_filter(FilterMode::Linear);
+    // SAFETY: called on the main thread while macroquad runs, as every texture upload.
+    let gl = unsafe { get_internal_gl() };
+    gl.quad_context.texture_set_wrap(tex.raw_miniquad_id(), TextureWrap::Repeat, TextureWrap::Repeat);
+    tex
+}
+
 /// A material of `fragment` with the uniforms and textures it declares.
 fn make_material(fragment: &str, uniforms: &[(&str, UniformType)], textures: &[&str]) -> Result<Material, String> {
     let params = MaterialParams {
@@ -849,12 +874,12 @@ impl TerrainLayer {
         let mut opts = options();
         let (mut old, mut new_hp, mut new_mp, mut composite) = (None, None, None, None);
         if opts.new_shader {
-            let hp_ok = make_material(&new_fragment("highp"), &UNIFORMS, &["Neighbours", "Atlas", "Water", "WaterMask", "Flow"]);
+            let hp_ok = make_material(&new_fragment("highp"), &UNIFORMS, &["Neighbours", "Atlas", "Water", "WaterMask", "Flow", "Noise"]);
             match hp_ok {
                 Ok(m) => {
                     new_hp = Some(m);
                     // Both precisions are made at start; option 4 picks one.
-                    new_mp = make_material(&new_fragment("mediump"), &UNIFORMS, &["Neighbours", "Atlas", "Water", "WaterMask", "Flow"]).map_err(|e| razdor::diag!("terrain shader (mediump): {e}")).ok();
+                    new_mp = make_material(&new_fragment("mediump"), &UNIFORMS, &["Neighbours", "Atlas", "Water", "WaterMask", "Flow", "Noise"]).map_err(|e| razdor::diag!("terrain shader (mediump): {e}")).ok();
                 }
                 Err(e) => razdor::diag!("terrain shader: {e}"),
             }
@@ -891,6 +916,7 @@ impl TerrainLayer {
             tile: vec2(tw as f32, th as f32),
             slot: vec2((tw + 2 * PAD) as f32, (th + 2 * PAD) as f32),
             water,
+            noise: noise_texture(),
             cells: RefCell::new(None),
             ground: RefCell::new(GroundCache::default()),
         })
@@ -1002,6 +1028,10 @@ impl TerrainLayer {
             m.set_texture("Neighbours", maps.neighbours.clone());
             m.set_texture("WaterMask", maps.mask.clone());
             m.set_texture("Flow", maps.flow.clone());
+            // The unlit shader has no `Noise` sampler (it is not drawn with live water).
+            if !legacy {
+                m.set_texture("Noise", self.noise.clone());
+            }
         } else {
             m.set_texture("Cells", maps.cells.clone());
         }

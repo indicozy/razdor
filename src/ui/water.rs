@@ -26,6 +26,64 @@ pub fn live() -> bool {
     LIVE.get()
 }
 
+/// The side of the water's noise texture (`noise_texels`): the lattice repeats every this many cells, as
+/// the shaders' hash lattice did (`vnoise`), and a wrapped texture of this size keeps the same period.
+pub const NOISE_SIZE: u32 = 64;
+
+/// The hash the shaders' value noise uses at lattice point (x, y): `fract(sin(dot(q, (127.1, 311.7))) · 43758.5453)`,
+/// in f32 as GLSL computes it. Only the noise texture's bytes come from it (the shaders no longer hash).
+pub fn hash2_ref(x: f32, y: f32) -> f32 {
+    let d = x * 127.1 + y * 311.7;
+    // The shader's constant: the nearest f32 to 43758.5453 (clippy's shorter spelling of it).
+    let s = d.sin() * 43_758.547;
+    // GLSL's fract is x - floor(x) (Rust's `fract` keeps the sign).
+    s - s.floor()
+}
+
+/// The water's noise texture: `NOISE_SIZE`² bytes, row by row, the lattice's hash at each texel (0..255).
+/// Uploaded once with linear filtering and wrapping (`terrain::noise_texture`), so a lookup at the lattice
+/// point's centre plus the smoothed fraction gives the same smooth value noise as the hash did.
+pub fn noise_texels() -> Vec<u8> {
+    let n = NOISE_SIZE;
+    (0..n * n)
+        .map(|i| {
+            let (x, y) = ((i % n) as f32, (i / n) as f32);
+            (hash2_ref(x, y) * 255.0).round().clamp(0.0, 255.0) as u8
+        })
+        .collect()
+}
+
+/// The shaders' smooth value noise at `q`, as the hash computes it (`vnoise` in the mist and the unlit shader).
+#[cfg(test)]
+pub fn vnoise_ref(q: (f32, f32)) -> f32 {
+    let n = NOISE_SIZE as f32;
+    let (ix, iy) = (q.0.floor(), q.1.floor());
+    let (fx, fy) = (q.0 - ix, q.1 - iy);
+    let (ux, uy) = (fx * fx * (3.0 - 2.0 * fx), fy * fy * (3.0 - 2.0 * fy));
+    let (ax, ay) = (ix.rem_euclid(n), iy.rem_euclid(n));
+    let (bx, by) = ((ix + 1.0).rem_euclid(n), (iy + 1.0).rem_euclid(n));
+    let h = |x: f32, y: f32| hash2_ref(x, y);
+    let lo = h(ax, ay) + (h(bx, ay) - h(ax, ay)) * ux;
+    let hi = h(ax, by) + (h(bx, by) - h(ax, by)) * ux;
+    lo + (hi - lo) * uy
+}
+
+/// The water's noise as the shader reads it from the texture: the texel at the lattice point's centre
+/// plus the smoothed fraction, interpolated bilinearly with the texture's bytes (`noise_texels`) and wrapped.
+/// The shader's `wnoise` is this lookup; the tests pin it to `vnoise_ref` within the byte's rounding.
+#[cfg(test)]
+pub fn wnoise_ref(table: &[u8], q: (f32, f32)) -> f32 {
+    let n = NOISE_SIZE as i64;
+    let texel = |x: i64, y: i64| table[(y.rem_euclid(n) * n + x.rem_euclid(n)) as usize] as f32 / 255.0;
+    let (ix, iy) = (q.0.floor(), q.1.floor());
+    let (fx, fy) = (q.0 - ix, q.1 - iy);
+    let (ux, uy) = (fx * fx * (3.0 - 2.0 * fx), fy * fy * (3.0 - 2.0 * fy));
+    let (ax, ay) = (ix as i64, iy as i64);
+    let lo = texel(ax, ay) + (texel(ax + 1, ay) - texel(ax, ay)) * ux;
+    let hi = texel(ax, ay + 1) + (texel(ax + 1, ay + 1) - texel(ax, ay + 1)) * ux;
+    lo + (hi - lo) * uy
+}
+
 #[allow(dead_code)] // Used by `foam_edge` only, which the shader's formula mirrors and the tests pin.
 fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
     let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
@@ -213,6 +271,34 @@ mod tests {
         assert_eq!(keys, vec![HERO], "the army's point is 1.6 s old, gone at 1.5 s; the hero's is 0.1 s old");
         wakes.clear();
         assert_eq!(wakes.iter().count(), 0);
+    }
+
+    #[test]
+    fn the_noise_texture_is_the_lattice_hash_and_repeats_every_64_cells() {
+        let table = noise_texels();
+        assert_eq!(table.len(), (NOISE_SIZE * NOISE_SIZE) as usize);
+        let n = NOISE_SIZE as usize;
+        assert_eq!(table[3 * n + 5], (hash2_ref(5.0, 3.0) * 255.0).round() as u8, "texel (5, 3) holds the hash at (5, 3)");
+        // The shaders' noise has a period of 64 cells: a point and the one 64 cells on hold the same value.
+        for q in [(0.3, 1.7), (12.25, -4.5), (63.9, 40.1)] {
+            let a = vnoise_ref(q);
+            let b = vnoise_ref((q.0 + 64.0, q.1 - 64.0));
+            assert!((a - b).abs() < 1e-3, "period at {q:?}: {a} vs {b}");
+        }
+    }
+
+    #[test]
+    fn the_texture_lookup_gives_the_hash_value_noise_within_a_byte() {
+        // The GPU's bilinear step rounds each texel to a byte: the lookup stays within half a byte per
+        // texel of the hash's smooth noise, everywhere (across the wrap at 64 too).
+        let table = noise_texels();
+        let mut worst = 0.0f32;
+        for k in 0..400 {
+            let q = (k as f32 * 0.7311 - 40.0, (k * k) as f32 * 0.0137 - 30.0);
+            let d = (wnoise_ref(&table, q) - vnoise_ref(q)).abs();
+            worst = worst.max(d);
+        }
+        assert!(worst <= 1.0 / 255.0 + 1e-3, "the lookup differs by {worst}");
     }
 
     #[test]

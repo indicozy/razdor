@@ -581,6 +581,10 @@ it every frame from `display::follow_settings`; `RAZDOR_LIVE_WATER=1` turns it o
   the sky's colour (`daylight::sky_rgb`: day, dusk and dawn warmth, moonlight at night; the day's with the lighting
   off) by `0.18` of its mask. Only the full pass and the cache's overlay draw it (`Mode::Full`, `Mode::Overlay`);
   the cached ground stays as it was. `Clock` is the water clock.
+- **The water's noise** (`wnoise`, the ripple and the foam's lap and patches): one fetch of `Noise`, a wrapped 64×64
+  texture of the hash lattice (`water::noise_texels`, uploaded by `terrain::noise_texture`, linear). A lookup at the
+  lattice point's centre plus the smoothed fraction is the hash's value noise to within a byte (`water::wnoise_ref`,
+  tested). The mist and the unlit shader keep the hash `vnoise`, so the look with the water off does not move.
 - **Rivers flow** (`rules::flow::flow_field`, a best guess, pure): a water cell flows toward its neighbour with the
   smallest distance to the large water (the interior of a lake or the sea, or water on the map's border; the
   interior stands still). A piece of water with no large water in it (landlocked) flows away from its cell nearest
