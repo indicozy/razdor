@@ -106,14 +106,11 @@ budgets to the same states; recording changes no state and no normal save byte; 
 
 ## Open
 
-- **Split frames are not transparent (new, hole 9).** A budgeted frame that pauses a step gives
-  other states than unbudgeted ticks (the same session differs at stretch 16, an AI army one cell
-  behind, from day 1). Split runs with different budgets agree. The screen splits on slow machines,
-  so a replay recorded on a fast one may not play back on a slow one until this is fixed.
-  `diag_first_split_difference` (ignored, `recording/tests.rs`) shows it. Not the planner's
-  `settle_all` at pauses (tried, reverted).
-- **Frame times longer than a step (new, hole 10):** below about 6.7 fps (a step is 0.15 s) the
-  states differ by day 2 even unsplit (dt 0.2 s against 1/60 s). Not tested or fixed.
+- **Frame schedules (holes 9 and 10): closed in phase 1b.** Every frame schedule (2 to 240 fps,
+  whole frames and split budgets) gives the unbudgeted states at every day's end
+  (`every_frame_schedule_gives_the_same_states_day_by_day`). The causes were the decisions taken
+  from a half-played step, the event stamps, the undelivered-event queue, and two snapshot gaps
+  (`path_weights`, the army `Walk`); see `docs/flows/replays.md`.
 - **Floats (hole 7):** `plant_hash` truncates f64 `sin`/`cos` into a seed; platforms may differ in
   the last bit. Not measured elsewhere.
 - The file format (the `.rzreplay` container, the segments), the keyframe and checksum intervals:

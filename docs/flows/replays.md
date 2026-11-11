@@ -95,16 +95,31 @@ through `apply_max`, so a recorder sees the moves the screen played.
 8. Battle start: `BattleStart` includes the enemy's building defence of an army in a hostile
    building (the garrison defence of the building it stands in), which the spike's rebuild left out (armies 1 and 6 of the biggest map).
 
+## Frame schedules (holes 9 and 10: closed)
+
+Every frame schedule gives the states of the unbudgeted reference, day by day
+(`every_frame_schedule_gives_the_same_states_day_by_day`: 2 to 240 fps, whole frames and split
+budgets, РК1 and ДС2, 30 days). The causes found, each now fixed in the rules:
+
+- A paused step was observed by the decisions made at rest. `waiting()` and `moving()` read idle
+  while the last wait tick or the last walk's arrival is still paused, so a caller that began a
+  wait then began a second one. The action entry points now finish a paused step first (see
+  `map-step.md`, "A paused step").
+- An event hand-over stamped every event with the stretch count after the tick, so a finished
+  stretch's events were held while a later stretch was paused (`Game::stamp_last`, `Game::marks`).
+- A message left by a finished step did not stop the next tick (`Game::tick_inner`, the early
+  return for finished events that need reading).
+- The hash read an undelivered event twice over (in `finished_events` and in `held`); the snapshot
+  keeps the two lists as they are, and the hash reads them as one queue.
+- The snapshot did not carry what a step's cost and the hero's walk display read: the path's step
+  weights (`AiMind::path_weights`) and each army's `Walk` (`ArmyState`).
+
+Holes 9 and 10 were one bug seen twice: the decisions were taken from a state a frame had left
+half-played. The split run is the same as the unbudgeted one (the test), and so are the difftests
+and the smoke test. Frame times longer than a step (below about 6.7 fps) are now as the reference.
+
 ## Open (found while building phase 1)
 
-- **Split frames are not transparent.** A budgeted frame (`tick_shown_within`) that pauses a step
-  gives different states from unbudgeted ticks: the same session at the same frame times differs at
-  stretch 16 (an AI army one cell behind), from day 1. Split runs with different budgets agree with
-  each other, so the screen's result depends on whether a step was split. Replays cannot assume
-  split-independence until this is fixed. `diag_first_split_difference` (ignored) shows it.
-  `settle_all` at a pause end is not the cause (tried and reverted).
-- **Frame times longer than a step** (a step is 0.15 s, so below about 6.7 fps) change the states
-  by day 2 even unsplit (dt 0.2 s against dt 1/60 s). Not tested or fixed.
 - **Floats (hole 7)**: `rng::plant_hash` takes `trunc` of f64 `sin`/`cos`, which can differ in the
   last bit between platforms; that moves a plant's seed only when the value sits at an integer
   boundary. Not measured on another platform.
