@@ -3080,7 +3080,7 @@ fn layered_cards_at(pitch_deg: f32, yaw_deg: f32, cards: &[Card], group_y: f32) 
         .iter()
         .map(|c| {
             let o = layer_offset(pitch_deg, yaw_deg, group_y, c.foot.1);
-            Card { foot: (c.foot.0 + o.x, c.foot.1 + o.y), verts: c.verts.iter().map(|&(x, y)| (x + o.x, y + o.y)).collect(), tris: c.tris.clone() }
+            Card { foot: (c.foot.0 + o.x, c.foot.1 + o.y), verts: c.verts.iter().map(|&(x, y)| (x + o.x, y + o.y)).collect(), tris: c.tris.clone(), ground: c.ground }
         })
         .collect()
 }
@@ -3108,18 +3108,33 @@ fn draw_cards(cam: &Camera, cards: &[Card], origin: Vec2, zoom: f32, src: Rect, 
         let (vertices, indices) = card_mesh_form(cam, card, origin, zoom, src, size, color);
         Mesh { vertices, indices, texture: Some(tex.clone()) }
     };
+    // The ground pieces are not standing: they are drawn on the ground (`draw_building_ground`).
     if outlined {
         let d = (1.5 * zoom).max(1.0);
         super::chrome::silhouette(|| {
             for (dx, dy) in OUTLINE_STEPS {
-                for card in cards {
+                for card in cards.iter().filter(|c| !c.ground) {
                     super::sharp::draw_mesh_sharp(&mesh(card, origin + vec2(dx * d, dy * d), faded(BUILDING_OUTLINE)), vec2(zoom, zoom));
                 }
             }
         });
     }
-    for card in cards {
+    for card in cards.iter().filter(|c| !c.ground) {
         super::sharp::draw_mesh_sharp(&mesh(card, origin, faded(WHITE)), vec2(zoom, zoom));
+    }
+}
+
+/// A card building's ground pieces (2.5D, the fold): the courtyards, paving, grass and fields the building
+/// sits on, each drawn flat at its sprite place in the ground pass (`ground`), where the flat map has them.
+/// The ground pass is laid on the ground under a tilt and draped by the bent sheet in a bent view, so they
+/// lie where the map does; their standing neighbours rise from the fold ([`draw_building_group`]).
+fn draw_building_ground(cam: &Camera, atlas: &Atlas, r: Rect, cards: &[Card], origin: Vec2) {
+    let zoom = cam.scale / PX;
+    let size = vec2(atlas.texture.width(), atlas.texture.height());
+    for card in cards.iter().filter(|c| c.ground) {
+        let (vertices, indices) = card_mesh_form(cam, card, origin, zoom, r, size, faded(WHITE));
+        let mesh = Mesh { vertices, indices, texture: Some(atlas.texture.clone()) };
+        super::sharp::draw_mesh_sharp(&mesh, vec2(zoom, zoom));
     }
 }
 
@@ -3157,7 +3172,7 @@ fn sheet_layers(cards: &[Card], origin: Vec2, zoom: f32, group_y: f32, yaw_deg: 
         .iter()
         .map(|c| {
             let slide = layer_slide(yaw_deg, group_y, c.foot.1);
-            let slid = Card { foot: (c.foot.0 + slide, c.foot.1), verts: c.verts.iter().map(|&(x, y)| (x + slide, y)).collect(), tris: c.tris.clone() };
+            let slid = Card { foot: (c.foot.0 + slide, c.foot.1), verts: c.verts.iter().map(|&(x, y)| (x + slide, y)).collect(), tris: c.tris.clone(), ground: c.ground };
             (card_foot(origin, zoom, c), slid)
         })
         .collect()
@@ -3175,6 +3190,8 @@ fn draw_layers_on_sheet(cam: &Camera, atlas: &Atlas, r: Rect, cards: &[Card], or
     let size = vec2(atlas.texture.width(), atlas.texture.height());
     let picture = Rect::new(origin.x, origin.y, r.w * zoom, r.h * zoom);
     let layers = sheet_layers(cards, origin, zoom, group_y(foot, origin, zoom), cam.tilt.map_or(0.0, |t| t.cam.yaw_deg));
+    // The ground pieces are drawn on the ground (`draw_building_ground`): only the standing layers here.
+    let layers: Vec<(Vec2, Card)> = layers.into_iter().zip(cards).filter(|(_, c)| !c.ground).map(|(l, _)| l).collect();
     let mesh = |card: &Card, at: Vec2, color: Color| {
         let (vertices, indices) = card_mesh_form(cam, card, at, zoom, r, size, color);
         Mesh { vertices, indices, texture: Some(atlas.texture.clone()) }
@@ -3276,7 +3293,8 @@ fn draw_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, sun: Option<dayl
             Some((_, r, cards)) => {
                 let origin = building_sprite_origin(l, r.w, r.h, cam);
                 let layers = layered_cards(cam, cards, group_y(building_foot(l, cam), origin, zoom));
-                for card in &layers {
+                // The ground pieces cast nothing: their shadows are painted already (`draw_building_shadow`).
+                for card in layers.iter().filter(|c| !c.ground) {
                     let foot = card_foot(origin, zoom, card);
                     let k = shade(foot);
                     if k <= 0.0 {
@@ -4031,6 +4049,18 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // and the passes below ask it again (the fog does not change while the world is drawn).
     let rows = map.objects_in_rows(r0 - up, r1 + below);
     let seen_row: Vec<bool> = rows.iter().map(&seen).collect();
+    // 2.5D: a card building's ground pieces lie flat in the ground pass, before the shadows (which fall on them)
+    // and under every standing sprite (`draw_building_ground`).
+    if tilted {
+        ground(cam, || {
+            for l in game.world.locations.iter().filter(|l| location_seen(l)) {
+                if let Some((atlas, r, cards)) = card_building(l, art) {
+                    let origin = building_sprite_origin(l, r.w, r.h, cam);
+                    draw_building_ground(cam, atlas, r, cards, origin);
+                }
+            }
+        });
+    }
     if sun.is_some() || !lit_lights.is_empty() {
         let objects: Vec<&Decoration> = rows.iter().zip(&seen_row).filter(|(_, s)| **s).map(|(o, _)| o).collect();
         let locations: Vec<(usize, &Location)> = game.world.locations.iter().enumerate().filter(|(_, l)| location_seen(l) && !l.kind.is_bridge()).collect();
@@ -7204,7 +7234,7 @@ mod card_tests {
     fn card_mesh_places_a_triangle_on_its_sprite() {
         // A one-triangle card in a 10 × 10 sprite at (20, 30) of a 100 × 200 atlas, drawn at zoom 2
         // with the sprite's top-left at (100, 50).
-        let card = Card { foot: (0.0, 0.0), verts: vec![(0.0, 0.0), (10.0, 0.0), (0.0, 10.0)], tris: vec![0, 1, 2] };
+        let card = Card { foot: (0.0, 0.0), verts: vec![(0.0, 0.0), (10.0, 0.0), (0.0, 10.0)], tris: vec![0, 1, 2], ground: false };
         let (v, i) = card_mesh(&card, vec2(100.0, 50.0), 2.0, Rect::new(20.0, 30.0, 10.0, 10.0), vec2(100.0, 200.0), WHITE);
         assert_eq!(i, vec![0, 1, 2]);
         let pos: Vec<Vec2> = v.iter().map(|v| vec2(v.position.x, v.position.y)).collect();
@@ -7216,7 +7246,7 @@ mod card_tests {
 
     #[test]
     fn card_foot_is_on_the_sprite_at_its_zoom() {
-        let card = Card { foot: (4.0, 8.0), verts: vec![], tris: vec![] };
+        let card = Card { foot: (4.0, 8.0), verts: vec![], tris: vec![], ground: false };
         assert!(close(card_foot(vec2(10.0, 20.0), 0.5, &card), vec2(12.0, 24.0)));
     }
 }
@@ -7375,10 +7405,38 @@ mod tilt_tests {
     /// A building's layers on a bent sheet stand at their own ground feet: each layer's foot, as its billboard
     /// draws it, lies on `Bend::point` of the ground point the flat ground puts it at, in front of the group's
     /// foot as behind it, at both bends and several turns. A layer does not move up or down on the sheet.
+    /// The fold (2.5D): a standing piece's bottom edge meets its ground piece's top edge at the fold row. The
+    /// ground piece is drawn flat and unmoved, so the standing piece must keep its bottom row on that row at
+    /// every pitch and turn (its foot is the group's foot), and on a bent sheet its foot is the flat fold point.
+    #[test]
+    fn a_standing_piece_meets_its_ground_piece_at_the_fold() {
+        let square = |x0: f32, x1: f32, y0: f32, y1: f32, foot_y: f32, ground: bool| Card {
+            foot: ((x0 + x1) / 2.0, foot_y),
+            verts: vec![(x0, y0), (x1, y0), (x1, y1), (x0, y1)],
+            tris: vec![0, 1, 2, 0, 2, 3],
+            ground,
+        };
+        let standing = square(0.0, 20.0, 0.0, 20.0, 20.0, false);
+        let ground = square(0.0, 20.0, 20.0, 30.0, 30.0, true);
+        let bottom = |c: &Card| c.verts.iter().map(|v| v.1).fold(f32::MIN, f32::max);
+        let top = |c: &Card| c.verts.iter().map(|v| v.1).fold(f32::MAX, f32::min);
+        for pitch in [30.0, 55.0, 80.0] {
+            for yaw in [0.0, 25.0, 60.0] {
+                let layered = layered_cards_at(pitch, yaw, std::slice::from_ref(&standing), 20.0);
+                assert!((bottom(&layered[0]) - top(&ground)).abs() < 1e-4, "pitch {pitch} yaw {yaw}: the standing bottom at {} meets the ground top at {}", bottom(&layered[0]), top(&ground));
+            }
+        }
+        // The bent sheet: the standing piece stands at its own foot (`card_foot`), which is the flat fold point.
+        let (origin, zoom) = (vec2(100.0, 200.0), 1.5);
+        let placed = sheet_layers(std::slice::from_ref(&standing), origin, zoom, 20.0, 40.0);
+        assert!((placed[0].0.y - (origin.y + top(&ground) * zoom)).abs() < 1e-4, "the bent fold is the flat ground point");
+        assert!(placed[0].1.foot.1 <= top(&ground), "the standing piece stays above the fold");
+    }
+
     #[test]
     fn a_layer_stands_on_the_bent_sheet_at_its_own_ground_foot() {
         let game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
-        let card = |foot_y: f32| Card { foot: (10.0, foot_y), verts: vec![(0.0, foot_y - 4.0), (20.0, foot_y - 4.0), (10.0, foot_y)], tris: vec![0, 1, 2] };
+        let card = |foot_y: f32| Card { foot: (10.0, foot_y), verts: vec![(0.0, foot_y - 4.0), (20.0, foot_y - 4.0), (10.0, foot_y)], tris: vec![0, 1, 2], ground: false };
         let cards = [card(20.0), card(60.0), card(100.0)];
         let (origin, zoom, group_y) = (vec2(300.0, 200.0), 1.0, 60.0);
         let mut checked = 0;
@@ -7809,7 +7867,7 @@ mod living_parts_tests {
 
     /// A square card of the sprite between `x0` and `x1` (its foot in the middle, at the bottom).
     fn square(x0: f32, x1: f32) -> Card {
-        Card { foot: ((x0 + x1) / 2.0, 10.0), verts: vec![(x0, 0.0), (x1, 0.0), (x1, 10.0), (x0, 10.0)], tris: vec![0, 1, 2, 0, 2, 3] }
+        Card { foot: ((x0 + x1) / 2.0, 10.0), verts: vec![(x0, 0.0), (x1, 0.0), (x1, 10.0), (x0, 10.0)], tris: vec![0, 1, 2, 0, 2, 3], ground: false }
     }
 
     /// A moving part goes with the card whose outline holds its anchor, not the nearest foot: a
@@ -7831,7 +7889,7 @@ mod layer_tests {
     use super::*;
 
     fn card(foot_y: f32) -> Card {
-        Card { foot: (10.0, foot_y), verts: vec![(0.0, foot_y - 4.0), (20.0, foot_y - 4.0), (10.0, foot_y)], tris: vec![0, 1, 2] }
+        Card { foot: (10.0, foot_y), verts: vec![(0.0, foot_y - 4.0), (20.0, foot_y - 4.0), (10.0, foot_y)], tris: vec![0, 1, 2], ground: false }
     }
 
     #[test]

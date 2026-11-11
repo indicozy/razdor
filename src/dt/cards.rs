@@ -19,6 +19,10 @@ pub struct Card {
     pub verts: Vec<(f32, f32)>,
     /// Triangles over `verts` (indices into `verts`, three a triangle).
     pub tris: Vec<u16>,
+    /// Ground, not standing (the 2.5D fold): the piece lies flat on the map (courtyards, paving, grass, fields);
+    /// the tilted views draw it on the ground and leave it out of the standing layers. False for the cards
+    /// of the older data and of the in-game cut.
+    pub ground: bool,
 }
 
 /// A sprite's cards, back to front, with the size they were cut at.
@@ -68,6 +72,9 @@ pub(crate) struct RawCard {
     foot: [f32; 2],
     verts: Vec<f32>,
     tris: Vec<u32>,
+    /// Version 2 of the data: the piece is ground (see [`Card::ground`]); absent in version 1.
+    #[serde(default)]
+    ground: bool,
 }
 
 /// A card as the file gives it, or `None` when its data cannot stand: an odd vertex list, no
@@ -78,7 +85,7 @@ pub(crate) fn checked(raw: RawCard) -> Option<Card> {
     }
     let n = raw.verts.len() / 2;
     let tris = raw.tris.iter().map(|&i| usize::try_from(i).ok().filter(|&i| i < n).and_then(|i| u16::try_from(i).ok())).collect::<Option<Vec<u16>>>()?;
-    Some(Card { foot: (raw.foot[0], raw.foot[1]), verts: raw.verts.chunks_exact(2).map(|v| (v[0], v[1])).collect(), tris })
+    Some(Card { foot: (raw.foot[0], raw.foot[1]), verts: raw.verts.chunks_exact(2).map(|v| (v[0], v[1])).collect(), tris, ground: raw.ground })
 }
 
 /// The cards of every sprite in `json` (the format of `data/cards/objects.json`), keyed by the
@@ -181,6 +188,31 @@ mod tests {
         assert_eq!(keys, HashSet::from([7]));
         assert!(parse_one_card(r#"{"sprites":{}}"#).is_empty(), "the list is optional");
         assert!(builtin_one_card().len() >= 37, "the bundled list is there");
+    }
+
+    #[test]
+    fn the_ground_flag_is_read_and_defaults_to_standing() {
+        let json = r#"{"version":2,"sprites":{
+            "0000000000000001":{"w":4,"h":4,"cards":[
+                {"foot":[1.0,3.0],"verts":[0,0,4,0,0,4],"tris":[0,1,2],"ground":true},
+                {"foot":[2.0,3.0],"verts":[0,0,4,0,0,4],"tris":[0,1,2]}
+            ]}
+        }}"#;
+        let parsed = parse(json);
+        let cards = &parsed[&1].cards;
+        assert!(cards[0].ground, "a version 2 card reads its ground flag");
+        assert!(!cards[1].ground, "a card with no flag (the version 1 data) stands");
+    }
+
+    #[test]
+    fn bundled_buildings_stand_on_their_ground() {
+        // The fold (2.5D): every sprite keeps a standing piece, so a building never turns into a flat
+        // picture on the ground, and some buildings have ground pieces to lie flat.
+        let cards = builtin();
+        let mixed = cards.values().filter(|s| s.cards.iter().any(|c| c.ground)).count();
+        let all_ground = cards.values().filter(|s| s.cards.iter().all(|c| c.ground)).count();
+        assert!(mixed > 0, "some buildings have ground pieces");
+        assert_eq!(all_ground, 0, "no sprite is all ground");
     }
 
     #[test]

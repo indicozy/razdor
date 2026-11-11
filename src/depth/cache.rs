@@ -102,7 +102,7 @@ mod tests {
     }
 
     fn card(x: f32) -> Card {
-        Card { foot: (x, 3.5), verts: vec![(0.0, 0.0), (4.0, 0.0), (0.0, 4.0)], tris: vec![0, 1, 2] }
+        Card { foot: (x, 3.5), verts: vec![(0.0, 0.0), (4.0, 0.0), (0.0, 4.0)], tris: vec![0, 1, 2], ground: false }
     }
 
     #[test]

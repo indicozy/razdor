@@ -14,6 +14,7 @@ import argparse
 import colorsys
 import json
 import math
+import os
 import struct
 import time
 from collections import Counter
@@ -524,6 +525,11 @@ SHADOW_SHARE = 0.25  # of the pixels around a region that are painted shadow
 ROOF_SAT = 0.45  # a region this saturated and red is a roof, standing whatever its depth
 ROOF_RED = 1.35  # its mean red over its mean green
 GROUND_MIN_PX = 60  # smaller regions keep the old behaviour (standing)
+SPLIT_MIN_PX = 240  # a region holds both ground and standing pieces: split when each part is this big
+THATCH_SAT = 0.35  # yellow-brown thatch: saturation and brightness (of 0..1) at least these
+THATCH_VALUE = 0.35
+ROOF_TOP_STEP = 0.04  # a piece whose depth rises this much more toward its top edge is a roof
+STACK_SHARE = 0.2  # a piece with this share of standing pieces directly below it stands too
 
 
 def ground_plane(op: np.ndarray, D: np.ndarray):
@@ -545,37 +551,106 @@ def ground_plane(op: np.ndarray, D: np.ndarray):
     return float(a), float(b)
 
 
-def classify_regions(lab: np.ndarray, K: int, D: np.ndarray, rgba: np.ndarray, op: np.ndarray) -> list:
-    """Per region: True when it is ground (see the notes above), else standing."""
+def split_and_classify(lab: np.ndarray, K: int, D: np.ndarray, rgba: np.ndarray, op: np.ndarray):
+    """Ground or standing for every piece of the cut, splitting the regions that hold both.
+
+    Per pixel: a pixel is ground when its depth rises no more than GROUND_RISE above the ground plane
+    (painted shadows and the ground's own colours count as ground) and it is not a roof colour. A region
+    holding both kinds, each part at least SPLIT_MIN_PX, is split into one region per part (its
+    connected pieces), so a courtyard lies flat and the walls around it stand. Then per piece:
+    depth on the plane → ground; a roof (warm thatch, saturated red or slate-blue, or its depth rising
+    toward its top edge) → standing; a piece with a standing piece directly below it, and rising, stands
+    too (a roof on its wall). Returns (lab, K, ground) with ground[r] for each new region r.
+    """
     h, w = lab.shape
     a, b = ground_plane(op, D)
-    rows = np.arange(h, dtype=float)[:, None]
-    rise = D - (a + b * rows)
-    shadow = (rgba[..., 3] >= SHADOW_LO) & (rgba[..., 3] <= SHADOW_HI) & ~op
+    rise = D - (a + b * np.arange(h, dtype=float)[:, None])
+    alpha = rgba[..., 3]
+    shadow = (alpha >= SHADOW_LO) & (alpha <= SHADOW_HI) & ~op
     rgbf = rgba[..., :3].astype(float)
     mx, mn = rgbf.max(axis=2), rgbf.min(axis=2)
     sat = np.where(mx > 0, (mx - mn) / np.maximum(mx, 1), 0.0)
-    out, rises = [], []
+    # Thatch: yellow-brown (hue 30..55 degrees), saturated and bright. Red roofs: red-dominant and saturated.
+    rr, gg, bb = rgbf[..., 0], rgbf[..., 1], rgbf[..., 2]
+    span = np.maximum(mx - mn, 1e-6)
+    hue = np.where(mx == rr, 60.0 * ((gg - bb) / span % 6), np.where(mx == gg, 60.0 * ((bb - rr) / span + 2), 60.0 * ((rr - gg) / span + 4)))
+    hue = np.where(hue < 0, hue + 360.0, hue)
+    thatch = (hue >= 30) & (hue <= 55) & (sat >= THATCH_SAT) & (mx >= THATCH_VALUE * 255)
+    red_roof = (sat >= ROOF_SAT) & (rr > ROOF_RED * gg)
+    slate = (sat < 0.2) & (bb > rr) & (mx < 170) & (mx > 60)
+    roof_px = thatch | red_roof | slate
+    ground_px = op & (rise <= GROUND_RISE) & ~roof_px
+    ground_px |= shadow & (np.abs(rise) <= GROUND_RISE_SHADOWED)
+    ground_px = cv2.medianBlur(ground_px.astype(np.uint8) * 255, 5) > 0
+    ground_px &= op
+
+    # Split the regions that hold both kinds of pixel into their pieces.
+    new = np.full(lab.shape, -1, np.int32)
+    kind = []  # True for a ground piece
     for r in range(K):
         m = lab == r
+        gpart = m & ground_px
+        spart = m & ~ground_px
+        if gpart.sum() >= SPLIT_MIN_PX and spart.sum() >= SPLIT_MIN_PX:
+            parts = [(gpart, True), (spart, False)]
+        else:
+            parts = [(m, bool(ground_px[m].mean() >= 0.5) if m.any() else False)]
+        for mask, is_ground in parts:
+            if len(parts) == 1:
+                new[mask] = len(kind)
+                kind.append(is_ground)
+                continue
+            n_cc, cc = cv2.connectedComponents(mask.astype(np.uint8), connectivity=4)
+            for c in range(1, n_cc):
+                piece = cc == c
+                if piece.sum() < GROUND_MIN_PX:
+                    continue
+                new[piece] = len(kind)
+                kind.append(is_ground)
+    K2 = len(kind)
+    if K2 == 0:
+        return new, 0, []
+
+    ground = []
+    stand0 = []
+    for r in range(K2):
+        m = new == r
         n = int(m.sum())
         if n < GROUND_MIN_PX:
-            out.append(False)
-            rises.append(-np.inf)
+            ground.append(False)
+            stand0.append(True)
             continue
         rise_med = float(np.median(rise[m]))
-        mean_rgb = rgbf[m].mean(axis=0)
-        roof = float(sat[m].mean()) > ROOF_SAT and mean_rgb[0] > ROOF_RED * mean_rgb[1] and rise_med > 0.0
-        ring = cv2.dilate(m.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool) & ~m
-        share = float(shadow[ring].mean()) if ring.any() else 0.0
-        limit = GROUND_RISE_SHADOWED if share >= SHADOW_SHARE else GROUND_RISE
-        out.append(bool(not roof and rise_med <= limit))
-        rises.append(rise_med)
-    # A building never lies wholly flat: when every piece reads as ground, the highest-rising one stands.
-    big = [r for r in range(K) if rises[r] > -np.inf]
-    if big and all(out[r] for r in big):
-        out[int(np.argmax(rises))] = False
-    return out
+        rows = np.nonzero(m.any(axis=1))[0]
+        top, bottom = rows[0], rows[-1]
+        band = max(1, (bottom - top) // 5)
+        rise_top = float(np.median(rise[m & (np.arange(h)[:, None] <= top + band)])) if (m & (np.arange(h)[:, None] <= top + band)).any() else rise_med
+        rise_bot = float(np.median(rise[m & (np.arange(h)[:, None] >= bottom - band)])) if (m & (np.arange(h)[:, None] >= bottom - band)).any() else rise_med
+        on_plane = rise_med <= GROUND_RISE
+        roof = (
+            rise_top - rise_bot > ROOF_TOP_STEP and rise_top > GROUND_RISE
+            or float(roof_px[m].mean()) >= 0.5
+        )
+        ground.append(bool(on_plane and kind[r] and not roof))
+        stand0.append(not ground[-1])
+    # The second pass: a piece rising on a standing piece below it stands (a roof on its wall).
+    below_stand = np.zeros(K2, bool)
+    ld = np.full(lab.shape, -1, np.int32)
+    ld[:-1, :] = new[1:, :]
+    for r in range(K2):
+        if not ground[r]:
+            continue
+        m = new == r
+        nb = ld[m]
+        nb = nb[nb >= 0]
+        if nb.size and float(np.mean(np.array(stand0)[nb])) >= STACK_SHARE:
+            rise_med = float(np.median(rise[m]))
+            if rise_med > GROUND_RISE / 2:
+                below_stand[r] = True
+    for r in range(K2):
+        if below_stand[r]:
+            ground[r] = False
+    return new, K2, ground
 
 
 def build_cards(lab, D, K, op=None):
@@ -736,7 +811,15 @@ def main() -> None:
             skipped_small += 1
             continue
         depth_run += 1
-        dep = predict_depth(torch, proc, model, rgba, w, h)
+        cache = os.environ.get("CUT_DEPTH_CACHE")
+        cache_path = Path(cache) / f"{key}.npy" if cache else None
+        if cache_path is not None and cache_path.exists():
+            dep = np.load(cache_path)
+        else:
+            dep = predict_depth(torch, proc, model, rgba, w, h)
+            if cache_path is not None:
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                np.save(cache_path, dep)
         vals = dep[op]
         lo, hi = float(vals.min()), float(vals.max())
         D = (dep - lo) / (hi - lo) if hi > lo else np.zeros_like(dep)
@@ -759,12 +842,13 @@ def main() -> None:
         if K < 2:
             one_region += 1
             continue
+        lab, K, ground_flags = split_and_classify(lab, K, D, rgba, op)
         cards = build_cards(lab, D, K, op if bent else None)
         if len(cards) < 2:
             one_region += 1
             continue
         histogram[len(cards)] += 1
-        ground = classify_regions(lab, K, D, rgba, op)
+        ground = ground_flags
         ground_cards = sum(ground[c["region"]] for c in cards)
         ground_histogram[ground_cards] += 1
         out[key] = {
