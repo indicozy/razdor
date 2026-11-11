@@ -290,7 +290,13 @@ fn load_cloud() -> Option<Material> {
         textures: vec!["NoiseTex".to_string()],
         pipeline_params: crate::ui::sharp::alpha_pipeline(),
     };
-    let m = load_material(ShaderSource::Glsl { vertex: VERTEX, fragment: FRAGMENT_CLOUD }, params).ok()?;
+    let m = match load_material(ShaderSource::Glsl { vertex: VERTEX, fragment: FRAGMENT_CLOUD }, params) {
+        Ok(m) => m,
+        Err(e) => {
+            razdor::diag!("mist: the cloud shader does not load: {e:?}");
+            return None;
+        }
+    };
     m.set_texture("NoiseTex", noise_texture());
     Some(m)
 }
@@ -367,7 +373,13 @@ fn load_plain() -> Option<Material> {
         textures: Vec::new(),
         pipeline_params: crate::ui::sharp::alpha_pipeline(),
     };
-    load_material(ShaderSource::Glsl { vertex: VERTEX, fragment: FRAGMENT_PLAIN }, params).ok()
+    match load_material(ShaderSource::Glsl { vertex: VERTEX, fragment: FRAGMENT_PLAIN }, params) {
+        Ok(m) => Some(m),
+        Err(e) => {
+            razdor::diag!("mist: the plain shader does not load: {e:?}");
+            None
+        }
+    }
 }
 
 /// Draws the fog texture `tex` into `dest` (showing its texels `src`) as the plain look, lit by `light`.
