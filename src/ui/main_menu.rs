@@ -1599,7 +1599,7 @@ impl Group {
     /// The rows the group shows, top to bottom. Every row is in exactly one group (a test checks it).
     pub fn rows(self) -> &'static [Row] {
         match self {
-            Group::Map => &[Row::MapZoom, Row::ScrollSpeed, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::CurveReset, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::Mist, Row::LiveWater, Row::WaterRate, Row::WaterQuality, Row::Weather, Row::LivingMap, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
+            Group::Map => &[Row::GraphicsQuality, Row::MapZoom, Row::ScrollSpeed, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::CurveReset, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::Mist, Row::LiveWater, Row::WaterRate, Row::WaterQuality, Row::Weather, Row::LivingMap, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
             Group::Battle => &[Row::WalkSpeed, Row::AnimSpeed, Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience, Row::HitShake],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
@@ -1611,6 +1611,7 @@ impl Group {
 /// One setting's row in a settings pane (its label, its button or slider, its hint).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Row {
+    GraphicsQuality,
     MapZoom,
     ScrollSpeed,
     MapResolution,
@@ -1672,7 +1673,8 @@ pub enum Row {
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 57] = [
+pub const ALL: [Row; 58] = [
+        Row::GraphicsQuality,
         Row::MapZoom,
         Row::ScrollSpeed,
         Row::MapResolution,
@@ -1735,6 +1737,7 @@ pub const ALL: [Row; 57] = [
     /// The long hint a «?» pop-up shows (backlog 1508), for the rows whose hint runs past a line.
     fn help_text(self) -> Option<&'static str> {
         match self {
+            Row::GraphicsQuality => Some(tr("Sets the map's resolution, light, shadows, mist, water, weather and animation at once. Custom: when something was changed by hand.")),
             Row::MapZoom => Some(tr("The zoom the map plays at. The wheel steps away from it and the 0 key comes back to it; locked, the map always shows it.")),
             Row::FarGround => Some(tr("Up: the far ground rolls up to a top-down map. Horizon: the ground curves down like the earth's horizon, with the sky above it. Globe: the ground curves away on every side, like a small planet.")),
             Row::MapView => Some(tr("Third person: the camera behind the hero's back. First person: the view through the hero's eyes.")),
@@ -2075,6 +2078,15 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
         Row::ScrollSpeed => slider_draw(c, geo, audio, 2),
         Row::WalkSpeed => slider_draw(c, geo, audio, 3),
         Row::AnimSpeed => slider_draw(c, geo, audio, 4),
+        Row::GraphicsQuality => {
+            // Razdor's (the owner's decision, 2026-11-12): one row sets the map's look in one go («Своё» when a
+            // setting differs from every preset). A click steps low, medium, high.
+            let value = super::quality_preset::label(super::quality_preset::current(audio));
+            if labelled_row_help(c, geo, tr("Graphics quality"), value, Row::GraphicsQuality.help_text()).0 {
+                let next = super::quality_preset::next(audio);
+                super::quality_preset::set(audio, next);
+            }
+        }
         Row::MapResolution => {
             // Razdor's (the owner's request, 2026-11-10): the map's drawing resolution for low-end phones.
             let value = super::map_scale::label(audio.map_render_scale);
