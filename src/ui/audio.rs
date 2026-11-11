@@ -227,8 +227,15 @@ pub struct Settings {
     pub map_first_person: bool,
     /// Advanced, Razdor's: the first-person view's far ground («Даль»): «Горизонт» on (the ground
     /// curves down like the earth's horizon, the sky above), «Вверх» off (the default: it rolls up
-    /// to the top-down map). Only with `map_first_person`.
+    /// to the top-down map). Read with `map_globe` (see [`Settings::far_ground`]); only with
+    /// `map_first_person`.
     pub map_horizon: bool,
+    /// Advanced, Razdor's: the first-person view's far ground «Шар» on: the ground curves away on
+    /// every side from the hero, like a small planet, so the horizon is a circle. It wins over
+    /// `map_horizon`; off (the default) the far ground is «Горизонт» or «Вверх» as `map_horizon` says.
+    /// Only with `map_first_person`.
+    #[serde(default)]
+    pub map_globe: bool,
     /// Advanced, Razdor's: the first-person view's camera («Камера»): «Глазами героя» on, the camera
     /// stands at the hero's eyes and turns with his walk; «За героем» off (the default: the low
     /// camera behind him). Only with `map_first_person`.
@@ -366,7 +373,7 @@ pub fn must_request(asked: Option<i32>, want: i32) -> bool {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), bottom_bar_size: Default::default(), keep_xp_on_promotion: false, keep_formation: true, battle_marks: true, army_list: false, map_tilt: false, map_first_person: false, map_horizon: false, map_eyes: false, map_light: Default::default(), map_light_cycle: 24, map_light_hour: 18, map_shadows: Default::default(), map_light_quality: None, map_mist: false, map_sprite_size: super::world_view::DEFAULT_SPRITE_SIZE, map_render_scale: 1.0, frame_cap: 0, map_twist: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, map_extended: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new(), map_live_water: false, map_weather: false, map_living: false, chronicle_summary: true }
+        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), bottom_bar_size: Default::default(), keep_xp_on_promotion: false, keep_formation: true, battle_marks: true, army_list: false, map_tilt: false, map_first_person: false, map_horizon: false, map_globe: false, map_eyes: false, map_light: Default::default(), map_light_cycle: 24, map_light_hour: 18, map_shadows: Default::default(), map_light_quality: None, map_mist: false, map_sprite_size: super::world_view::DEFAULT_SPRITE_SIZE, map_render_scale: 1.0, frame_cap: 0, map_twist: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, map_extended: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new(), map_live_water: false, map_weather: false, map_living: false, chronicle_summary: true }
     }
 }
 
@@ -394,6 +401,18 @@ impl Default for Originals {
 }
 
 impl Settings {
+    /// The far ground's shape of the first-person view: «Шар» when `map_globe` is on, else «Горизонт» when
+    /// `map_horizon` is, else «Вверх». A file from before «Шар» has `map_globe` off, so it keeps its shape.
+    pub fn far_ground(&self) -> super::view25::FarGround {
+        if self.map_globe {
+            super::view25::FarGround::Globe
+        } else if self.map_horizon {
+            super::view25::FarGround::Horizon
+        } else {
+            super::view25::FarGround::Up
+        }
+    }
+
     /// The first gameplay setting that differs from the original's, by its catalog name (the
     /// reason of a grey mark, `rules::marks`), or `None` when none does. The one place that says
     /// what counts as gameplay (the owner's decisions, 1532). A setting counts when it changes
@@ -1240,6 +1259,25 @@ mod tests {
         assert!(fp.map_tilt && fp.map_first_person && fp.map_horizon);
         let back: Settings = serde_json::from_str(&serde_json::to_string(&fp).unwrap()).unwrap();
         assert_eq!((back.map_first_person, back.map_horizon), (true, true));
+    }
+
+    /// The far ground's shape: a file with only `map_horizon` reads as «Горизонт», `map_globe` as «Шар»
+    /// (which wins over `map_horizon`), and a file with neither as «Вверх»; `map_globe` round-trips.
+    #[test]
+    fn the_far_ground_reads_as_horizon_or_globe_from_the_settings_files() {
+        use super::super::view25::FarGround;
+        let old: Settings = serde_json::from_str(r#"{"map_tilt": true, "map_first_person": true, "map_horizon": true}"#).unwrap();
+        assert_eq!(old.far_ground(), FarGround::Horizon);
+        assert!(!old.map_globe, "a file from before «Шар» has no globe");
+        let globe: Settings = serde_json::from_str(r#"{"map_tilt": true, "map_first_person": true, "map_globe": true}"#).unwrap();
+        assert_eq!(globe.far_ground(), FarGround::Globe);
+        let both: Settings = serde_json::from_str(r#"{"map_first_person": true, "map_horizon": true, "map_globe": true}"#).unwrap();
+        assert_eq!(both.far_ground(), FarGround::Globe);
+        let up: Settings = serde_json::from_str(r#"{"map_first_person": true}"#).unwrap();
+        assert_eq!(up.far_ground(), FarGround::Up);
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&globe).unwrap()).unwrap();
+        assert!(back.map_globe && !back.map_horizon);
+        assert_eq!(back.far_ground(), FarGround::Globe);
     }
 
     #[test]

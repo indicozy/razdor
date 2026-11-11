@@ -392,15 +392,17 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   setting is `audio::Settings::map_first_person` within the tilted view (`map_tilt`), pushed by
   `main_menu::apply_options` into `world_view::set_first_person`; `world_view::first_person()` is the
   view, `tilt_view()` stays true for both tilted views. The far ground's shape «Даль» is
-  `Settings::map_horizon` (`Row::FarGround`, shown only with the view): off «Вверх» (the far ground
-  rolls up to top-down), on «Горизонт» (it curves down like a planet, the sky above). It is visual only: no rule
-  reads it.
+  `Settings::map_horizon` and `map_globe` (`Row::FarGround`, shown only with the view): `map_globe` on «Шар» (the
+  ground curves down in every direction from the hero, like a small planet: a circular horizon), else `map_horizon`
+  on «Горизонт» (it curves down like a planet, the sky above), else off «Вверх» (the far ground rolls up to
+  top-down). `Settings::far_ground` gives the shape as a `world_view::FarGround`; the row cycles Up, Horizon, Globe.
+  It is visual only: no rule reads it.
   - **In the settings** (the owner's decision, 2026-11-10: shown to players again): «Вид карты» cycles flat, 2.5D
     and «От первого лица», and with the view its «Даль» and «Камера» rows show. Developer overrides in
     `RAZDOR_VIEW`: `fp-chase` forces the view behind the hero (the saved camera choice does not count), `fp-eyes`
-    forces the eyes camera; `first` and `eyes` force them as in the snapshots. `RAZDOR_VIEW_HORIZON=down|up` (`1` is
-    `down`) overrides «Даль».
-  - The camera: `view25::TiltCamera::first_person(look, scale, frame, yaw, horizon)`. Pitch `FP_PITCH` (12),
+    forces the eyes camera; `first` and `eyes` force them as in the snapshots. `RAZDOR_VIEW_HORIZON=down|up|globe` (`1` is
+    `down`) overrides «Даль»; `RAZDOR_VIEW_GLOBE_RADIUS=<cells>` tunes the globe's radius for the snapshots.
+  - The camera: `view25::TiltCamera::first_person(look, scale, frame, yaw, far)` (`far` is the `FarGround`). Pitch `FP_PITCH` (12),
     field of view `FP_FOV` (55), fixed (PageUp and PageDown tilt the 2.5D view only). It looks at the view's
     centre (the hero when followed) from beyond it, so the centre stands at two thirds of the frame's height;
     the distance is fitted so the hero's ground is drawn at the flat map's scale (the depth
@@ -411,6 +413,20 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
     it the sheet is not drawn, not picked, and `Bend::point` stands a point on the horizon's line (`hidden`
     keeps a sprite there from showing). A tight radius puts the horizon near mid-frame; a wide planet's curve
     would lift it, and the footprint would need the ground to the horizon (about 170 units).
+    The globe (`Bend::globe`, `FP_RADIUS_GLOBE` 40, `RAZDOR_VIEW_GLOBE_RADIUS`) curves the sheet down in every
+    direction: its distance is radial (`reach`), and its horizon depends on the bearing (`horizon_at`): the eye
+    stands behind the pivot, so the sight line grazes the arc nearest straight ahead and farther out at the sides
+    (the closed form `A sin a + B cos a = R`). Past its bearing's horizon `point` clamps to that horizon's line, so
+    the silhouette is the true one at every side (a single forward limit would leave a hole of sky at the sides).
+    `Bend::limit` stays the horizon ahead, for the sky's line and the mist's fade. Its picking is `pick_globe`: the
+    ray is marched over the disc of the sheet's reach, the sheet at `globe_drop` high. The globe's pivot is the hero's
+    ground (`look`), not the camera's target, so the flat disk of `FP_FLAT` holds the hero and the land at his feet
+    stands at height 0 as in «Горизонт»; the sheet then falls away on every side. Its footprint is the square about the
+    pivot out to the farthest horizon (`TiltCamera::globe_footprint`): the frame's edges alone would miss the far rim
+    beside the middle, and the picture would leave its sprites floating in the sky. `screen_at` puts a globe's cells on
+    the sheet too (the flat projection is only right near the pivot). Radii: `FP_RADIUS_GLOBE` 40 (the default, the rim at
+    the flat view's horizon), `EYE_RADIUS_GLOBE` 150 (the eyes view's horizon about 14 cells away).
+
   - Drawing: `draw_world` gives a bent view one `in_view`: `ground_in_bent` (the terrain) and `draw_world_in`
     (the ground overlays, then the sprites) run in one picture, the sheet is drawn once, and the sprites stand
     on it. The picture covers `TiltCamera::ground_footprint`, which for a bent camera is the bounding box of the
@@ -419,7 +435,7 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
     pass and the sprites' pass): raw 2D draws inside it would land in the wrong space, so draw through `ground` or
     `standing` only.
   - Picking: `TiltCamera::pick` marches the ray against the sheet's height at its forward distance (`height_at`, a
-    closed-form inverse `s_of_u`) in steps of 0.1 and bisects the first crossing (`pick_bent`); past the horizon
+    closed-form inverse `s_of_u`) in steps of 0.1 and bisects the first crossing (`pick_bent`, `first_meet`); past the horizon
     there is none, so the sky sees no ground (NaN in `map_point_at`). Tests: `pick_undoes_the_bent_sheet...`,
     `a_click_on_the_hero_in_the_first_person_view...`.
   - The sky: `draw_sky` fills the frame dark (`SKY`) for 2.5D and «Вверх»; for «Горизонт» a gradient from light

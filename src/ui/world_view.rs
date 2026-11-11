@@ -13,6 +13,7 @@ use macroquad::prelude::*;
 use razdor::i18n::{n_, tr};
 use razdor::frame_probe::{self, Kind, Stage};
 use super::gpu_probe::gpu_wait;
+use super::view25::FarGround;
 use super::photo;
 use razdor::rules::ai::{Clash, Combatant};
 use razdor::rules::battle::Team;
@@ -983,9 +984,9 @@ pub(super) fn faction_color(faction: u8) -> Color {
 /// [`set_tilt_view`]) and the tilt in degrees (PageUp and PageDown change it).
 static TILT_VIEW: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// The first-person view within the tilted one (`audio::Settings::map_first_person`), and its far
-/// ground's horizon («Горизонт», `audio::Settings::map_horizon`); both off by default.
+/// ground's shape (`audio::Settings::far_ground`, pushed by [`set_far_ground`]); both off by default.
 static FIRST_PERSON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-static HORIZON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static FAR_GROUND: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(FarGround::Up as u8);
 /// The sky's colours in the first-person view with a horizon: light blue at the top, pale at the
 /// horizon.
 const SKY_TOP: Color = Color::new(0.30, 0.55, 0.80, 1.0);
@@ -1043,23 +1044,28 @@ pub fn set_first_person(on: bool) {
     FIRST_PERSON.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// Whether the first-person view's far ground curves down to a horizon with the sky above
-/// («Горизонт»), rather than rolling up to top-down («Вверх»).
-pub fn horizon() -> bool {
-    // `RAZDOR_VIEW_HORIZON=down` (or `1`) makes it the horizon and `up` the roll, as a developer override
-    // and for the snapshots; unset, the setting.
+/// The shape of the first-person view's far ground: the setting (`audio::Settings::far_ground`, pushed by
+/// [`set_far_ground`]). `RAZDOR_VIEW_HORIZON` is a developer override and the snapshots': `down` (or `1`)
+/// the horizon, `up` the roll, `globe` the globe; unset, the setting.
+pub fn far_ground() -> FarGround {
     static ENV: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
     match ENV.get_or_init(|| std::env::var("RAZDOR_VIEW_HORIZON").ok()).as_deref().map(str::trim) {
-        Some("down") | Some("1") => true,
-        Some("up") => false,
-        _ => HORIZON.load(std::sync::atomic::Ordering::Relaxed),
+        Some("down") | Some("1") => FarGround::Horizon,
+        Some("up") => FarGround::Up,
+        Some("globe") => FarGround::Globe,
+        _ => match FAR_GROUND.load(std::sync::atomic::Ordering::Relaxed) {
+            1 => FarGround::Horizon,
+            2 => FarGround::Globe,
+            _ => FarGround::Up,
+        },
     }
 }
 
-/// Puts the far ground's shape on or off the horizon (from the settings, at once).
-pub fn set_horizon(on: bool) {
-    HORIZON.store(on, std::sync::atomic::Ordering::Relaxed);
+/// Puts the far ground's shape on, from the settings, at once.
+pub fn set_far_ground(shape: FarGround) {
+    FAR_GROUND.store(shape as u8, std::sync::atomic::Ordering::Relaxed);
 }
+
 
 /// The eyes view («Глазами героя», `audio::Settings::map_eyes`, pushed by [`set_eyes`]): the camera
 /// stands at the hero's eyes and looks along his walk. Off by default; it is within the first-person
@@ -1161,17 +1167,17 @@ fn photo_tilt(target: Vec2, scale: f32, view: Rect, draw: Rect, pitch: f32, yaw:
 /// The first-person tilt of a view (`view25::TiltCamera::first_person`, the player's): the camera
 /// looks at `look` (the map view's centre, the hero's place) and its bent sheet's ground is the
 /// footprint of the frame `view`, culled to the strip under the bar `draw` as the 2.5D one is.
-fn first_person_tilt(look: Vec2, scale: f32, view: Rect, draw: Rect, yaw: f32, horizon: bool) -> Tilt {
-    let cam = TiltCamera::first_person(look, scale, view, yaw, horizon);
+fn first_person_tilt(look: Vec2, scale: f32, view: Rect, draw: Rect, yaw: f32, far: FarGround) -> Tilt {
+    let cam = TiltCamera::first_person(look, scale, view, yaw, far);
     Tilt { cam, plan: cam.ground_footprint(view, view), cull: cam.ground_footprint(view, draw) }
 }
 
 /// The eyes view's tilt (`view25::TiltCamera::eyes`): the eye stands on `ground` (the hero's displayed
 /// place, or a shot's target in a run), looks along `yaw` (a shot's own yaw if it sets one) and has the
-/// far ground of `horizon`: curved down to the horizon, else rolled up. A shot sets its own pitch, field,
+/// far ground `far`: rolled up, curved down to the horizon, or a globe. A shot sets its own pitch, field,
 /// height and bend. Its footprints are the frame `view` and the strip under the bar `draw`, as the
 /// first-person view's.
-fn eyes_tilt(ground: Vec2, scale: f32, view: Rect, draw: Rect, yaw: f32, horizon: bool, shot: Option<view25::Trailer>) -> Tilt {
+fn eyes_tilt(ground: Vec2, scale: f32, view: Rect, draw: Rect, yaw: f32, far: FarGround, shot: Option<view25::Trailer>) -> Tilt {
     let (pitch, fov, height, yaw, bend) = match shot {
         Some(t) => (
             t.pitch.unwrap_or(view25::EYE_PITCH),
@@ -1180,13 +1186,24 @@ fn eyes_tilt(ground: Vec2, scale: f32, view: Rect, draw: Rect, yaw: f32, horizon
             t.yaw.unwrap_or(yaw),
             (t.bend > 0.0).then_some((t.flat, t.radius, if t.horizon { -t.bend } else { t.bend })),
         ),
-        None if horizon => (view25::EYE_PITCH, view25::FP_FOV, view25::EYE_HEIGHT, yaw, Some((view25::EYE_FLAT, view25::EYE_RADIUS_DOWN, view25::EYE_BEND_DOWN))),
-        None => (view25::EYE_PITCH, view25::FP_FOV, view25::EYE_HEIGHT, yaw, Some((view25::EYE_FLAT, view25::EYE_RADIUS_UP, view25::EYE_BEND_UP))),
+        None => (
+            view25::EYE_PITCH,
+            view25::FP_FOV,
+            view25::EYE_HEIGHT,
+            yaw,
+            match far {
+                FarGround::Up => Some((view25::EYE_FLAT, view25::EYE_RADIUS_UP, view25::EYE_BEND_UP)),
+                FarGround::Horizon => Some((view25::EYE_FLAT, view25::EYE_RADIUS_DOWN, view25::EYE_BEND_DOWN)),
+                // The globe is built from the camera's eye (`TiltCamera::globe_bend`), below.
+                FarGround::Globe => None,
+            },
+        ),
     };
     let mut cam = TiltCamera::eyes(ground, height, scale, view, pitch, yaw, fov);
-    if let Some((flat, radius, max_deg)) = bend {
-        cam.bend = Some(cam.eye_bend(flat, radius, max_deg));
-    }
+    cam.bend = match (shot, far) {
+        (None, FarGround::Globe) => Some(cam.globe_bend(cam.target, view25::EYE_FLAT, view25::globe_radius(view25::EYE_RADIUS_GLOBE))),
+        _ => bend.map(|(flat, radius, max_deg)| cam.eye_bend(flat, radius, max_deg)),
+    };
     Tilt { cam, plan: cam.ground_footprint(view, view), cull: cam.ground_footprint(view, draw) }
 }
 
@@ -1487,7 +1504,8 @@ fn bent_mist_meshes(bend: &view25::Bend, origin: Vec2, scale: f32, dest: Rect, s
         let g = (vec2(dest.x + dest.w * fu, dest.y + dest.h * fv) + origin) / scale;
         // Near the horizon the sheet rolls over, and a lifted point would rise above
         // the horizon line: the lift and the alpha fade out over the last cells before it (none past it).
-        let fade = if bend.limit.is_finite() { ((bend.limit - (g - bend.pivot).dot(view25::forward(bend.yaw_deg))) / HORIZON_FADE).clamp(0.0, 1.0) } else { 1.0 };
+        let edge = bend.horizon_at(g);
+        let fade = if edge.is_finite() { ((edge - bend.reach(g)) / HORIZON_FADE).clamp(0.0, 1.0) } else { 1.0 };
         let fade = fade * fade * (3.0 - 2.0 * fade);
         let at = bend.lift(g, lift * fade);
         let alpha = if bend.hidden(g) { 0.0 } else { fade };
@@ -2215,9 +2233,9 @@ impl Camera {
                 // The eyes stand on the hero's displayed place (a shot's target in a run), not on the view's
                 // centre, which the map's edges move.
                 let ground = if super::trailer::active() { Vec2::from(at) } else { Vec2::from(game.display_pos()) };
-                cam.tilt = Some(eyes_tilt(ground, scale, view, draw, tilt_yaw(), horizon(), trailer()));
+                cam.tilt = Some(eyes_tilt(ground, scale, view, draw, tilt_yaw(), far_ground(), trailer()));
             } else if trailer().is_none() && first_person() {
-                cam.tilt = Some(first_person_tilt(target, scale, view, draw, tilt_yaw(), horizon()));
+                cam.tilt = Some(first_person_tilt(target, scale, view, draw, tilt_yaw(), far_ground()));
             } else {
                 let (tilt, region) = match trailer() {
                     None => (TiltCamera::new(target, scale, view, tilt_pitch(), tilt_yaw()), None),
@@ -2252,7 +2270,15 @@ impl Camera {
     fn screen_at(&self, p: (f32, f32)) -> Vec2 {
         match self.tilt {
             None => self.to_screen(p),
-            Some(t) => t.cam.project(vec3(p.0, 0.0, p.1), self.view).unwrap_or(vec2(-1e5, -1e5)),
+            Some(t) => {
+                // A globe's sheet drops below the flat ground around the pivot (the hero stands on it, see
+                // `standing`), so a globe's cell is placed on its sheet. The other bends keep the flat ground's point.
+                let at = match t.cam.bend {
+                    Some(b) if b.globe => b.point(vec2(p.0, p.1)),
+                    _ => vec3(p.0, 0.0, p.1),
+                };
+                t.cam.project(at, self.view).unwrap_or(vec2(-1e5, -1e5))
+            }
         }
     }
 
@@ -5148,7 +5174,7 @@ fn battle_backdrop_key(game: &Game) -> u64 {
     zoom.to_bits().hash(&mut h);
     look.map(bits).hash(&mut h);
     bits(game.display_pos()).hash(&mut h);
-    (tilt_view(), first_person(), horizon(), eyes_setting(), tilt_pitch().to_bits(), tilt_yaw().to_bits(), extend_edge(), mist::on()).hash(&mut h);
+    (tilt_view(), first_person(), far_ground(), eyes_setting(), tilt_pitch().to_bits(), tilt_yaw().to_bits(), extend_edge(), mist::on()).hash(&mut h);
     (game.fog.enabled, &game.fog.bits).hash(&mut h);
     game.unshown_cells().hash(&mut h);
     (game.aboard(), game.hero_hidden()).hash(&mut h);
@@ -7205,6 +7231,9 @@ mod tilt_tests {
     use razdor::rules::content::{Content, HeroClass};
     use std::sync::Arc;
 
+    /// Every shape of the far ground, for the tests that run at each.
+    const FAR_GROUNDS: [FarGround; 3] = [FarGround::Up, FarGround::Horizon, FarGround::Globe];
+
     /// A camera over the middle of `game`'s map, at `pitch` and `yaw` (tilted), or flat.
     fn camera(game: &Game, tilt: Option<(f32, f32)>) -> Camera {
         let view = Rect::new(0.0, 0.0, 1280.0, 760.0);
@@ -7254,9 +7283,9 @@ mod tilt_tests {
     #[test]
     fn only_the_bent_first_person_camera_takes_the_first_person_near_fade() {
         let game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
-        let fp = first_person_camera(&game, 0.0, false);
+        let fp = first_person_camera(&game, 0.0, FarGround::Up);
         assert!(bent_first_person_cam(&fp), "the first-person camera");
-        assert!(!bent_first_person_cam(&eyes_camera(&game, 0.0, false)), "the eyes camera has its own fade");
+        assert!(!bent_first_person_cam(&eyes_camera(&game, 0.0, FarGround::Up)), "the eyes camera has its own fade");
         let view = Rect::new(0.0, 0.0, 1280.0, 760.0);
         let mut photo = fp;
         photo.tilt = Some(photo_tilt(Vec2::from(photo.centre()), PX, view, view, 30.0, 0.0));
@@ -7316,7 +7345,7 @@ mod tilt_tests {
         let game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
         let m = &game.world.map;
         let (cx, cy) = (m.w / 2, m.h / 2);
-        let cam = first_person_camera(&game, 0.0, false);
+        let cam = first_person_camera(&game, 0.0, FarGround::Up);
         let tilt = cam.tilt.expect("the first-person tilt");
         let hero_at = cam.screen_at(m.grid.center((cx, cy)));
         let (fx, fy) = m.grid.center((cx + 6, cy));
@@ -7335,15 +7364,15 @@ mod tilt_tests {
     }
 
     /// The first-person camera over the middle of `game`'s map, built as [`Camera::looking_in`]
-    /// builds it (the bend and the footprints included), at `yaw`, with the far ground's horizon or not.
-    fn first_person_camera(game: &Game, yaw: f32, horizon: bool) -> Camera {
+    /// builds it (the bend and the footprints included), at `yaw`, with the far ground `far`.
+    fn first_person_camera(game: &Game, yaw: f32, far: FarGround) -> Camera {
         let view = Rect::new(0.0, 0.0, 1280.0, 760.0);
         let scale = PX;
         let grid = game.world.map.grid;
         let at = (game.world.map.w as f32 / 2.0, game.world.map.h as f32 / 2.0 * grid.row_height());
         let origin = vec2(at.0 * scale, at.1 * scale) - vec2(view.w, view.h) / 2.0;
         let mut cam = Camera { origin, view, draw: view, scale, grid, tilt: None };
-        cam.tilt = Some(first_person_tilt(Vec2::from(cam.centre()), scale, view, view, yaw, horizon));
+        cam.tilt = Some(first_person_tilt(Vec2::from(cam.centre()), scale, view, view, yaw, far));
         cam
     }
 
@@ -7355,20 +7384,20 @@ mod tilt_tests {
         let game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
         let m = &game.world.map;
         let (cx, cy) = (m.w / 2, m.h / 2);
-        for horizon in [false, true] {
+        for far in FAR_GROUNDS {
             for yaw in [0.0, 45.0, 90.0, 180.0, -135.0] {
-                let cam = first_person_camera(&game, yaw, horizon);
+                let cam = first_person_camera(&game, yaw, far);
                 let hero = (cx, cy);
                 let (x, y) = m.grid.center(hero);
                 let at = cam.screen_at((x, y));
-                assert!(at.is_finite() && cam.view.contains(at), "horizon {horizon} yaw {yaw}: the hero at {at:?}");
-                assert_eq!(cam.tile_under_pixel(at), Some(hero), "horizon {horizon} yaw {yaw}: the hero's pixel");
+                assert!(at.is_finite() && cam.view.contains(at), "far {far:?} yaw {yaw}: the hero at {at:?}");
+                assert_eq!(cam.tile_under_pixel(at), Some(hero), "far {far:?} yaw {yaw}: the hero's pixel");
                 for (dc, dr) in [(-1, 0), (0, -1), (1, 1), (0, 2)] {
                     let t = (cx + dc, cy + dr);
                     let (x, y) = m.grid.center(t);
                     let at = cam.screen_at((x, y));
                     if at.is_finite() && cam.view.contains(at) {
-                        assert_eq!(cam.tile_under_pixel(at), Some(t), "horizon {horizon} yaw {yaw}: the cell {t:?} at {at:?}");
+                        assert_eq!(cam.tile_under_pixel(at), Some(t), "far {far:?} yaw {yaw}: the cell {t:?} at {at:?}");
                     }
                 }
             }
@@ -7376,14 +7405,14 @@ mod tilt_tests {
     }
 
     /// The eyes camera over the middle of `game`'s map at `yaw`, built as `looking_in` builds it.
-    fn eyes_camera(game: &Game, yaw: f32, horizon: bool) -> Camera {
+    fn eyes_camera(game: &Game, yaw: f32, far: FarGround) -> Camera {
         let view = Rect::new(0.0, 0.0, 1280.0, 760.0);
         let scale = PX;
         let grid = game.world.map.grid;
         let at = (game.world.map.w as f32 / 2.0, game.world.map.h as f32 / 2.0 * grid.row_height());
         let origin = vec2(at.0 * scale, at.1 * scale) - vec2(view.w, view.h) / 2.0;
         let mut cam = Camera { origin, view, draw: view, scale, grid, tilt: None };
-        cam.tilt = Some(eyes_tilt(vec2(at.0, at.1), scale, view, view, yaw, horizon, None));
+        cam.tilt = Some(eyes_tilt(vec2(at.0, at.1), scale, view, view, yaw, far, None));
         cam
     }
 
@@ -7395,9 +7424,9 @@ mod tilt_tests {
         let m = &game.world.map;
         let (cx, cy) = (m.w / 2, m.h / 2);
         let mut checked = 0;
-        for horizon in [false, true] {
+        for far in FAR_GROUNDS {
             for yaw in [0.0, 45.0, 90.0, 180.0, -135.0] {
-                let cam = eyes_camera(&game, yaw, horizon);
+                let cam = eyes_camera(&game, yaw, far);
                 let tilt = cam.tilt.expect("the eyes tilt");
                 let bend = tilt.cam.bend.expect("the eyes' bend");
                 for dc in -6..=6 {
@@ -7411,7 +7440,7 @@ mod tilt_tests {
                         if !cam.view.contains(px) {
                             continue;
                         }
-                        assert_eq!(cam.tile_under_pixel(px), Some(t), "horizon {horizon} yaw {yaw}: the cell {t:?} at {px:?}");
+                        assert_eq!(cam.tile_under_pixel(px), Some(t), "far {far:?} yaw {yaw}: the cell {t:?} at {px:?}");
                         checked += 1;
                     }
                 }
