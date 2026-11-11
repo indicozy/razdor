@@ -2807,7 +2807,8 @@ fn detail_visibility(picture: Rect, dpi: f32) -> f32 {
 
 /// Something drawn in painter's order (by the bottom edge on screen).
 enum Drawable {
-    Object(Decoration),
+    /// A standing object and its foot (computed once, for the sort key and the draw).
+    Object(Decoration, Vec2),
     Building(usize),
     /// A building drawn as one group of cards (2.5D, [`card_building`]): location. The group sorts by the building's
     /// foot as one item, and stands as one billboard about that foot ([`draw_building_group`]).
@@ -2981,7 +2982,21 @@ local! {
     static WORLD_ITEMS: std::cell::RefCell<Vec<(i64, Drawable)>> = std::cell::RefCell::new(Vec::new());
 }
 
-fn draw_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera) {
+/// What the sprite pass reads once for the frame, instead of once per sprite (the thread-locals and the screen's
+/// settings do not change while the world pass draws): made at the start of [`draw_world_in`].
+#[derive(Clone, Copy)]
+struct FrameCtx {
+    /// The screen's DPI (`screen_dpi_scale`).
+    dpi: f32,
+    /// The map animation's time in ms (`clock_ms`).
+    clock: i64,
+    /// The map animation's level (`map_anim::level`).
+    anim: f32,
+    /// The sun's form light of the frame's camera (`form_sun_of`).
+    sun: Option<FormSun>,
+}
+
+fn draw_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera, ctx: &FrameCtx) {
     let c = cam.cell_centre(o.tile);
     let base = vec2(c.x, c.y + cam.cell_size().y / 2.0);
     let zoom = cam.scale / PX;
@@ -2998,12 +3013,12 @@ fn draw_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera) {
             // their phase, the bottom stays (0x4c99d0, engine.md §7).
             let (_, _, phase) = o.jitter;
             // «Анимация карты» scales the sway by its level (0 when the map is still, `map_anim::level`).
-            let lean = razdor::rules::rng::tree_sway(clock_ms(), phase) * zoom * super::map_anim::level();
+            let lean = razdor::rules::rng::tree_sway(ctx.clock, phase) * zoom * ctx.anim;
             draw_leaning(&atlas.texture, src, at, size, lean);
             return;
         }
         frame_probe::sprite(size.x, size.y);
-        draw_picture_form(cam, atlas, src, at, size, faded(WHITE), zoom);
+        draw_picture_form(cam, ctx.sun, atlas, src, at, size, faded(WHITE), zoom);
         return;
     }
     let s = cam.scale;
@@ -3160,9 +3175,8 @@ fn form_colour_in(sun: FormSun, p: Vec2, base: Color) -> Option<Color> {
 
 /// A picture's quad (its rectangle `src` of the atlas, drawn at `at` in `size`) with the sun's form shading at its
 /// four corners (`form_colour_in`; the colour is interpolated across the quad). Without the shading, `sharp::draw`.
-fn draw_picture_form(cam: &Camera, atlas: &Atlas, src: Rect, at: Vec2, size: Vec2, base: Color, zoom: f32) {
+fn draw_picture_form(cam: &Camera, sun: Option<FormSun>, atlas: &Atlas, src: Rect, at: Vec2, size: Vec2, base: Color, zoom: f32) {
     let corners = [(vec2(-1.0, -1.0), vec2(0.0, 0.0)), (vec2(1.0, -1.0), vec2(1.0, 0.0)), (vec2(1.0, 1.0), vec2(1.0, 1.0)), (vec2(-1.0, 1.0), vec2(0.0, 1.0))];
-    let sun = form_sun_of(cam);
     let colours: [Option<Color>; 4] = corners.map(|(p, _)| sun.and_then(|s| form_colour_in(s, p, base)));
     if colours.iter().any(Option::is_none) {
         super::sharp::draw(&atlas.texture, at.x, at.y, base, DrawTextureParams { dest_size: Some(size), source: Some(src), ..Default::default() });
@@ -3746,7 +3760,7 @@ fn draw_building(l: &Location, art: Option<&DtArt>, cam: &Camera, outlined: bool
         }
         match living_of(cam, art, l).filter(|(_, ls)| ls.body().is_some()) {
             Some((_, ls)) => draw_living_picture(ls, atlas, r, at, zoom),
-            None => draw_picture_form(cam, atlas, r, at, vec2(r.w * zoom, r.h * zoom), faded(WHITE), zoom),
+            None => draw_picture_form(cam, form_sun_of(cam), atlas, r, at, vec2(r.w * zoom, r.h * zoom), faded(WHITE), zoom),
         }
     } else {
         let (w, h) = (l.size.0 as f32 * cam.scale, (l.size.1 as f32 * cam.cell_size().y).max(cam.scale * 0.8));
@@ -4406,6 +4420,8 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     let art = assets.dt.as_ref();
     let map = &game.world.map;
     let ((c0, c1), (r0, r1)) = cam.visible(map);
+    // The settings and thread-locals the sprites read, read once for the pass (see `FrameCtx`).
+    let ctx = FrameCtx { dpi: screen_dpi_scale(), clock: clock_ms(), anim: super::map_anim::level(), sun: form_sun_of(cam) };
     // Sprites stand on their cell and reach up to ~8 cells above it. Turned, a sprite reaches any
     // way up the screen, so every side takes the larger margin.
     let (below, side) = (10, 8);
@@ -4489,10 +4505,11 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
         if seen_o {
             if hill(o) {
                 if !tilted {
-                    standing(cam, object_foot(o, cam), object_foot(o, cam), shade_of(object_foot(o, cam)), object_picture(o, art, cam), || draw_object(o, art, cam));
+                    standing(cam, object_foot(o, cam), object_foot(o, cam), shade_of(object_foot(o, cam)), object_picture(o, art, cam), || draw_object(o, art, cam, &ctx));
                 }
             } else {
-                items.push((sprite_key(cam, o.tile, object_foot(o, cam), object_layer(o.class)), Drawable::Object(*o)));
+                let foot = object_foot(o, cam);
+                items.push((sprite_key(cam, o.tile, foot, object_layer(o.class)), Drawable::Object(*o, foot)));
             }
         }
     }
@@ -4576,7 +4593,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
         super::sharp::session(|| {
             for (o, &seen_o) in rows.iter().zip(&seen_row) {
                 if seen_o && hill(o) {
-                    standing(cam, object_foot(o, cam), object_foot(o, cam), shade_of(object_foot(o, cam)), object_picture(o, art, cam), || draw_object(o, art, cam));
+                    standing(cam, object_foot(o, cam), object_foot(o, cam), shade_of(object_foot(o, cam)), object_picture(o, art, cam), || draw_object(o, art, cam, &ctx));
                 }
             }
         });
@@ -4622,26 +4639,24 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     items.sort_by_key(|a| a.0);
     // One sharp session for the pass: its art shares the material switch (see `sharp::session`). With the
     // light on, the lit material scales the painted shadows by the frame's factor (`sharp::session_lit`).
-    // The screen's DPI for the frame (read once, not per object).
-    let dpi = screen_dpi_scale();
     super::sharp::session_lit(lit, || {
         for d in items.iter().map(|(_, d)| d) {
             match d {
-                Drawable::Object(o) => {
+                Drawable::Object(o, foot) => {
                     // Razdor's (the owner's request, 2026-11-11): an object too small to see is not drawn, and one
                     // just above that fades out (`detail_visibility`); the flat view fades it through `SPRITE_VIS`.
-                    let foot = object_foot(o, cam);
+                    let foot = *foot;
                     let picture = object_picture(o, art, cam);
-                    let detail = detail_visibility(picture, dpi);
+                    let detail = detail_visibility(picture, ctx.dpi);
                     if detail > 0.0 {
                         let vis = shade_of(foot) * detail;
                         standing(cam, foot, foot, vis, picture, || {
                             if cam.tilt.is_none() && detail < 1.0 {
                                 let prev = SPRITE_VIS.with(|s| s.replace(detail));
-                                draw_object(o, art, cam);
+                                draw_object(o, art, cam, &ctx);
                                 SPRITE_VIS.with(|s| s.set(prev));
                             } else {
-                                draw_object(o, art, cam);
+                                draw_object(o, art, cam, &ctx);
                             }
                         });
                     }
