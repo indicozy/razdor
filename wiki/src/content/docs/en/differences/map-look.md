@@ -22,7 +22,7 @@ The **Lighting** row chooses how the light on the map changes:
 * **"Real-time cycle"**: the days pass on their own. The **"Day length"** row sets how many real minutes one game day lasts: 12, 24 or 48. The default is 24.
 * **"Fixed hour"**: the light does not change. The **"Hour"** row sets the hour, from 0:00 to 21:00 in steps of three hours. The default is 18:00.
 
-The light goes through morning, day, evening and night. At night the map is bluish and dimmed, but not black. In the morning and at sunset the light is warm: the low sun brings out the masonry, the roof tiles, the stones and the ground's relief, and the hollows darken.
+The light goes through morning, day, evening and night. At night the map is bluish and dimmed, but not black. In the morning and at sunset the light is warm: the low sun brings out the masonry, the roof tiles and the stones, and their shadows lie long.
 
 At night buildings glow from within: the windows of towns, castles and villages burn with warm light. The hero and the armies carry torches, so they can be seen in the dark, and the lights cast shadows.
 
@@ -43,7 +43,7 @@ Night: blue light, and the map is still easy to see.
 These two rows appear when **"Lighting"** is on.
 
 * **"Shadows"**: **"Painted"** (the default) keeps the original's shadows. **"From the sun"** removes them, and every building, tree and rock casts its own shadow: it turns and lengthens with the hour.
-* **"Light quality"**: **"High"**, **"Medium"** or **"Low"**. High lights up to eight buildings and the figures' torches: their shadows, the relief and the glowing windows. Medium does up to four, with the relief only for the two nearest. Low keeps just the warm glow. The default is High on a computer and Medium on a phone.
+* **"Light quality"**: **"High"**, **"Medium"** or **"Low"**. High lights up to eight buildings and the figures' torches: their shadows and the glowing windows. Medium does up to four. Low keeps just the warm glow. The default is High on a computer and Medium on a phone.
 
 ![Shadows from the sun on the map in 2.5D](../../../../assets/shots/shadows-sun.webp)
 

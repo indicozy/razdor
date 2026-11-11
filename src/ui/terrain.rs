@@ -33,7 +33,7 @@ use macroquad::prelude::*;
 use macroquad::miniquad::TextureWrap;
 use razdor::dt::gfx::{water_frame, Image, WATER_FRAMES};
 use razdor::rules::map::{is_water, Surface};
-use super::{daylight, lights, sharp, water};
+use super::{daylight, sharp, water};
 
 /// The period of the `Clock` uniform (the water clock, seconds): 6400 = 64 × 100. Every drift in the
 /// shaders moves its noise by whole lattice periods (64 cells) over it, and every sine has a whole
@@ -148,6 +148,188 @@ void main() {
 // `@SHARP_UV@` as above. Its result is the old shader's, pixel for pixel, with the same float
 // maths except where a pixel's four codes are equal (one ground call, no blend).
 const NEW_FRAGMENT: &str = r#"#version 100
+precision highp float;
+varying highp vec2 uv;
+uniform sampler2D Neighbours;
+uniform sampler2D Atlas;
+uniform sampler2D Water;
+uniform float WaterOn;
+uniform vec4 View;
+uniform vec2 MapSize;
+uniform vec2 CellPx;
+uniform vec2 Tile;
+uniform vec2 Slot;
+uniform vec2 AtlasSize;
+uniform vec2 AtlasScale;
+uniform vec2 WaterSize;
+uniform vec2 WaterScale;
+uniform vec4 Edge;
+uniform vec2 Ramp;
+uniform float Clock;
+// 1.0 in the cache's overlay pass: the pixels with no water and no border fog are discarded
+// (they keep the cached ground), the others are drawn as the full shader draws them.
+uniform float Overlay;
+// Live water («Живая вода», `water`): 1.0 when on. WaterMask: 255 on the water cells, 0 elsewhere
+// (linear, so the shore is a soft edge). Flow: each cell's flow as rg = (128 + 127 · flow) / 255, so
+// the still water (128) is exactly zero (see `flow_texels`).
+// Sky: the sky's colour, which the water takes by its share of the mask.
+uniform float LiveWater;
+uniform sampler2D WaterMask;
+uniform sampler2D Flow;
+uniform vec3 Sky;
+// @SHARP_UV@
+
+float hash2(vec2 q) {
+    return fract(sin(dot(q, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+// The lattice repeats every 64 cells, so a drift that moves the noise by a whole number of periods
+// over CLOCK_PERIOD comes back to itself: the Clock's wrap is seamless (see the tests).
+float vnoise(vec2 q) {
+    vec2 i = floor(q);
+    vec2 f = fract(q);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    vec2 a = mod(i, 64.0);
+    vec2 b = mod(i + 1.0, 64.0);
+    return mix(mix(hash2(a), hash2(vec2(b.x, a.y)), u.x), mix(hash2(vec2(a.x, b.y)), hash2(b), u.x), u.y);
+}
+
+// The ripple's offset of the water at `q` (the water's uv distortion, in frame units).
+vec2 ripple(vec2 q) {
+    return vec2(sin(q.y * 2.1 + Clock * 1.29983) + 0.5 * vnoise(q * 0.7 + Clock * 0.2), cos(q.x * 1.7 + Clock * 1.09956));
+}
+
+
+@CP@ vec3 ground(float code, vec2 px, @CP@ vec3 water, @CP@ float sea) {
+    vec2 slot = vec2(mod(code, 4.0), floor(code / 4.0));
+    vec2 t = mod(px, Tile);
+    vec2 atlas_uv = (slot * Slot + (Slot - Tile) * 0.5 + t) / AtlasSize;
+    @CP@ vec3 c = texture2D(Atlas, sharp_uv(atlas_uv, AtlasSize, AtlasScale)).rgb;
+    if (code < 2.5 && WaterOn > 0.5) {
+        c = min(c * water * 2.0, 1.0);
+        // Live water: the sky's colour lies on the water by its share of the mask (the foam is laid on the colour below).
+        if (LiveWater > 0.5) {
+            c = mix(c, Sky, 0.18 * sea);
+        }
+    }
+    return c;
+}
+
+// The shore foam at a water pixel: `cov` is the water's share of the pixel's four cells (0.5 on the waterline, 1
+// deep), `p` the cell coordinate and `fl` the flow there; s = cov - 0.5 is the distance into the water, in cells.
+// The main line is near-white at the waterline, full for a few hundredths of a cell and fading by a third of a cell into the water; its inner
+// edge laps between the waterline and a tenth of a cell out (a wave of about 6.4 s, its phase varying along the
+// shore), and a noise breaks it into patches. A fainter second line lies further out, on a wave of its own. A still
+// shore (a lake, the sea) foams at full strength, a river at 0.55. The periods fit CLOCK_PERIOD (6400 s): the wave is
+// 1000 cycles of it, and the drifts move the noise by whole lattice periods. Returns the foam's colour and alpha.
+vec4 shore_foam(float cov, vec2 p, vec2 fl) {
+    float s = cov - 0.5;
+    if (s <= 0.0) {
+        return vec4(0.0);
+    }
+    float t0 = fract(Clock * 0.05);
+    float t1 = fract(Clock * 0.05 + 0.5);
+    vec2 q0 = p - fl * t0 * 7.0;
+    vec2 q1 = p - fl * t1 * 7.0;
+    float lap = 0.5 + 0.5 * sin(Clock * 0.98174770 + 6.0 * vnoise(q0 * 0.8));
+    float lap2 = 0.5 + 0.5 * sin(Clock * 0.98174770 + 2.5 + 6.0 * vnoise(q1 * 0.6));
+    float patch = smoothstep(0.38, 0.62, 0.6 * vnoise(q0 * 2.4 + Clock * vec2(0.01, 0.0)) + 0.4 * vnoise(q1 * 5.1 + Clock * vec2(0.0, -0.02)));
+    float inner = 0.1 * lap;
+    float line = smoothstep(inner - 0.015, inner + 0.015, s) * (1.0 - smoothstep(inner + 0.08, inner + 0.33, s));
+    float inner2 = 0.36 + 0.05 * lap2;
+    float far = smoothstep(inner2 - 0.01, inner2 + 0.01, s) * (1.0 - smoothstep(inner2 + 0.03, inner2 + 0.07, s));
+    float still = 0.55 + 0.45 * (1.0 - smoothstep(0.2, 0.8, length(fl)));
+    float a1 = 0.85 * line * (0.3 + 0.7 * patch) * still;
+    float a2 = 0.3 * far * (0.2 + 0.8 * patch) * still;
+    return vec4(0.97, 0.98, 1.0, a1 + a2 - a1 * a2);
+}
+
+void main() {
+    vec2 p = mix(View.xy, View.zw, uv);
+    vec2 i = floor(p);
+    vec2 px = p * CellPx;
+    // Past the border (p in cell units, the border at -0.5 and MapSize - 0.5): the war fog.
+    vec2 gap = max(max(vec2(-0.5) - p, p - (MapSize - 0.5)), vec2(0.0));
+    float d = length(gap);
+    bool mist = Edge.x > 0.5 && d > 0.0;
+    // The four codes of the cell: code(i), code(i + (1, 0)), code(i + (0, 1)), code(i + (1, 1)),
+    // each clamped to the map as `code_at` does. The texel of cell i (clamped to one cell past
+    // the border, see `neighbour_texels`) holds them; its channels are code · 17 / 255.
+    vec4 k = floor(texture2D(Neighbours, (clamp(i, vec2(-1.0), MapSize) + 1.5) / (MapSize + 2.0)) * 15.0 + 0.5);
+    bool wet = WaterOn > 0.5 && any(lessThan(k, vec4(2.5)));
+    if (Overlay > 0.5 && !wet && !mist) {
+        discard;
+    }
+    vec2 f = p - i;
+    @CP@ float fx = f.x;
+    @CP@ float fy = f.y;
+    // The water stage's coordinates (as the old shader): read only where a code is water.
+    @CP@ vec3 w = vec3(1.0);
+    // Live water: this pixel's mask (1 deep, 0.5 on the shore line, 0 on land) and its ripple, the same for each
+    // of the four codes. The ripple reads the noise along the flow (a river drifts; zero flow stands still).
+    @CP@ float sea = 0.0;
+    if (wet) {
+        vec2 uvw = (p + 1.5) / 3.0;
+        if (LiveWater > 0.5) {
+            vec2 cell_uv = (p + 0.5) / MapSize;
+            sea = texture2D(WaterMask, cell_uv).r;
+            // The flow scroll: two phases half a cycle apart (a 20 s cycle, 7 cells of travel a cycle),
+            // each faded out at its own wrap, so the pattern never jumps when Clock wraps.
+            vec2 fl = (texture2D(Flow, cell_uv).rg * 255.0 - 128.0) / 127.0;
+            float t0 = fract(Clock * 0.05);
+            float t1 = fract(Clock * 0.05 + 0.5);
+            float wt = abs(2.0 * t0 - 1.0);
+            vec2 q0 = p - fl * t0 * 7.0;
+            vec2 q1 = p - fl * t1 * 7.0;
+            uvw += 0.015 * mix(ripple(q0), ripple(q1), wt);
+        }
+        w = texture2D(Water, sharp_uv(uvw, WaterSize, WaterScale)).rgb;
+    }
+    @CP@ vec3 col;
+    if (k.x == k.y && k.y == k.z && k.z == k.w) {
+        col = ground(k.x, px, w, sea);
+    } else {
+        @CP@ vec3 top = mix(ground(k.x, px, w, sea), ground(k.y, px, w, sea), fx);
+        @CP@ vec3 bottom = mix(ground(k.z, px, w, sea), ground(k.w, px, w, sea), fx);
+        col = mix(top, bottom, fy);
+    }
+    // The shore foam (live water, the water's pixels only): laid on the coast by the water's share of the four
+    // cells, with the weights the colour blend uses, so it sits on the visible shore and not on the mask's edge.
+    if (wet && LiveWater > 0.5) {
+        vec2 cell_uv = (p + 0.5) / MapSize;
+        vec2 fl = (texture2D(Flow, cell_uv).rg * 255.0 - 128.0) / 127.0;
+        float cov = (k.x < 2.5 ? 1.0 : 0.0) * (1.0 - fx) * (1.0 - fy) + (k.y < 2.5 ? 1.0 : 0.0) * fx * (1.0 - fy)
+            + (k.z < 2.5 ? 1.0 : 0.0) * (1.0 - fx) * fy + (k.w < 2.5 ? 1.0 : 0.0) * fx * fy;
+        vec4 fo = shore_foam(cov, p, fl);
+        col = mix(col, fo.rgb, fo.a);
+    }
+    if (mist) {
+        float n = 0.6 * vnoise(p * 0.11 + Clock * vec2(0.05, 0.02)) + 0.4 * vnoise(p * 0.27 + Clock * vec2(-0.08, 0.05));
+        float o = smoothstep(0.0, Ramp.y, d) * (0.35 + 0.65 * n);
+        o = mix(o, 1.0, smoothstep(Ramp.x, Ramp.y, d));
+        col = mix(col, Edge.yzw, clamp(o, 0.0, 1.0));
+    }
+    gl_FragColor = vec4(col, 1.0);
+}
+"#;
+
+/// The cache's composite: the cached ground at each pixel of the quad, read by the pixel's
+/// window position (`gl_FragCoord`), so the quad's own geometry decides the coverage, as the
+/// terrain's own draw does.
+const COMPOSITE_FRAGMENT: &str = r#"#version 100
+precision highp float;
+varying highp vec2 uv;
+uniform sampler2D Ground;
+uniform vec2 ScreenSize;
+void main() {
+    gl_FragColor = texture2D(Ground, gl_FragCoord.xy / ScreenSize);
+}
+"#;
+
+/// The unlit shader: byte for byte the text the lighting-off picture was made with (play-build), kept so that
+/// the picture with the lighting and the live water off is identical to before. Used only then (`legacy_material`);
+/// the relief code in it never runs, as its `Strength` is always 0 there. Do not edit it.
+const LEGACY_FRAGMENT: &str = r#"#version 100
 precision highp float;
 varying highp vec2 uv;
 uniform sampler2D Neighbours;
@@ -302,21 +484,25 @@ void main() {
 }
 "#;
 
-/// The cache's composite: the cached ground at each pixel of the quad, read by the pixel's
-/// window position (`gl_FragCoord`), so the quad's own geometry decides the coverage, as the
-/// terrain's own draw does.
-const COMPOSITE_FRAGMENT: &str = r#"#version 100
-precision highp float;
-varying highp vec2 uv;
-uniform sampler2D Ground;
-uniform vec2 ScreenSize;
-void main() {
-    gl_FragColor = texture2D(Ground, gl_FragCoord.xy / ScreenSize);
+/// The relief of the unlit shader (play-build's `sharp::RELIEF_GLSL`), for `LEGACY_FRAGMENT` only. Do not edit it.
+const LEGACY_RELIEF: &str = r#"
+const float RELIEF_R = 1.5;
+const float RELIEF_K = 2.0;
+float luma(vec3 c) {
+    return dot(c, vec3(0.299, 0.587, 0.114));
+}
+// `rgb` lit by the slope from the heights `xp`, `xm` (at +x, -x), `yp`, `ym` (at +y, -y) around
+// the centre height `h`, and the cavity from `deep`, the mean height at ±3 R.
+vec3 relief_shade(vec3 rgb, float h, float xp, float xm, float yp, float ym, float deep) {
+    vec3 n = normalize(vec3(-(xp - xm) * RELIEF_K, -(yp - ym) * RELIEF_K, 1.0));
+    float f = dot(n, Light) / Light.z;
+    float cav = clamp(deep - h, 0.0, 0.25) * 4.0;
+    return clamp(rgb * mix(1.0, f, Strength) * (1.0 - Cavity * cav), 0.0, 1.0);
 }
 "#;
 
-/// The uniforms every terrain shader declares (the old one leaves `Overlay` out of its code).
-const UNIFORMS: [(&str, UniformType); 19] = [
+/// The uniforms of `LEGACY_FRAGMENT` (play-build's list, with `Light`, `Strength` and `Cavity`).
+const LEGACY_UNIFORMS: [(&str, UniformType); 19] = [
     ("View", UniformType::Float4),
     ("MapSize", UniformType::Float2),
     ("CellPx", UniformType::Float2),
@@ -336,6 +522,26 @@ const UNIFORMS: [(&str, UniformType); 19] = [
     ("Light", UniformType::Float3),
     ("Strength", UniformType::Float1),
     ("Cavity", UniformType::Float1),
+];
+
+/// The uniforms every terrain shader declares (the old one leaves `Overlay` out of its code).
+const UNIFORMS: [(&str, UniformType); 16] = [
+    ("View", UniformType::Float4),
+    ("MapSize", UniformType::Float2),
+    ("CellPx", UniformType::Float2),
+    ("Tile", UniformType::Float2),
+    ("Slot", UniformType::Float2),
+    ("AtlasSize", UniformType::Float2),
+    ("WaterOn", UniformType::Float1),
+    ("AtlasScale", UniformType::Float2),
+    ("WaterSize", UniformType::Float2),
+    ("WaterScale", UniformType::Float2),
+    ("Edge", UniformType::Float4),
+    ("Ramp", UniformType::Float2),
+    ("Clock", UniformType::Float1),
+    ("Overlay", UniformType::Float1),
+    ("LiveWater", UniformType::Float1),
+    ("Sky", UniformType::Float3),
 ];
 
 /// Wrapped border around each atlas slot, in pixels.
@@ -563,8 +769,8 @@ pub struct TerrainLayer {
     /// The neighbours shader in highp, and in mediump (option 4), both made at start.
     new_hp: Option<Material>,
     new_mp: Option<Material>,
-    /// The lit variants of the neighbours shader (highp, mediump), made on the first lit draw.
-    lit: [std::cell::OnceCell<Option<Material>>; 2],
+    /// The unlit shader (`LEGACY_FRAGMENT`) in highp and in mediump, made on the first unlit draw.
+    legacy: [std::cell::OnceCell<Option<Material>>; 2],
     /// The cache's copy, when option 2 is on.
     composite: Option<Material>,
     /// The options in effect for this layer (a shader that fails to compile turns its options off).
@@ -631,39 +837,7 @@ fn make_material(fragment: &str, uniforms: &[(&str, UniformType)], textures: &[&
 
 /// The neighbours shader with the given colour precision (`highp` or `mediump`).
 fn new_fragment(precision: &str) -> String {
-    NEW_FRAGMENT.replace("@CP@", precision).replace("@SHARP_UV@", sharp::SHARP_UV_GLSL).replace("@RELIEF@", sharp::RELIEF_GLSL)
-}
-
-/// The neighbours shader with the point lights (the lit variant, used only with the light on): the base
-/// text plus `Dest`, `LightA`, `LightI` and the point code, the ground's place and its relief from the
-/// lights. Built from the base text by exact insertions, so the base shader itself is never changed.
-fn new_fragment_lit(precision: &str) -> String {
-    fn once(text: String, needle: &str, with: &str) -> String {
-        assert_eq!(text.matches(needle).count(), 1, "terrain lit shader: {needle:?}");
-        text.replacen(needle, with, 1)
-    }
-    let t = NEW_FRAGMENT.to_string();
-    let t = once(t, "uniform float Cavity;\n", "uniform float Cavity;\nuniform vec4 Dest;\nuniform vec4 LightA[8];\nuniform vec4 LightI;\n");
-    let t = once(t, "// @RELIEF@\n", "// @RELIEF@\n// @POINT@\n");
-    let t = once(t, "@CP@ vec3 ground(float code, vec2 px, @CP@ vec3 water, @CP@ float sea, @CP@ vec3 foam) {", "@CP@ vec3 ground(float code, vec2 px, vec2 spos, @CP@ vec3 water, @CP@ float sea, @CP@ vec3 foam) {");
-    let t = once(t, "        c = relief_shade(c, h, xp, xm, yp, ym, deep);\n    }", "        c = relief_shade(c, h, xp, xm, yp, ym, deep);\n        // The point lights rake the relief at night (LightI: the count, the relief's count, the night).\n        if (LightI.y > 0.0 && LightI.z > 0.0) {\n            c = clamp(c * point_shade(spos, normalize(vec3(-(xp - xm) * RELIEF_K, -(yp - ym) * RELIEF_K, 1.0))), 0.0, 1.0);\n        }\n    }");
-    let t = once(t, "    vec2 px = p * CellPx;\n", "    vec2 px = p * CellPx;\n    // The pixel's 2D point, for the point lights (the quad spans `Dest` in the draw's pixels).\n    vec2 spos = Dest.xy + uv * Dest.zw;\n");
-    let mut t = t;
-    for k in ["k.x", "k.y", "k.z", "k.w"] {
-        t = t.replace(&format!("ground({k}, px, w, sea, foam)"), &format!("ground({k}, px, spos, w, sea, foam)"));
-    }
-    t.replace("@CP@", precision).replace("@SHARP_UV@", sharp::SHARP_UV_GLSL).replace("@RELIEF@", sharp::RELIEF_GLSL).replace("@POINT@", sharp::POINT_GLSL)
-}
-
-/// The neighbours shader's material with the point lights: the terrain's uniforms, and `Dest`, `LightA`,
-/// `LightI` on top of them.
-fn make_lit_material(fragment: &str, textures: &[&str]) -> Result<Material, String> {
-    let mut uniforms: Vec<UniformDesc> = UNIFORMS.iter().map(|(n, t)| UniformDesc::new(n, *t)).collect();
-    uniforms.push(UniformDesc::new("Dest", UniformType::Float4));
-    uniforms.push(UniformDesc::new("LightA", UniformType::Float4).array(lights::SLOTS));
-    uniforms.push(UniformDesc::new("LightI", UniformType::Float4));
-    let params = MaterialParams { uniforms, textures: textures.iter().map(|t| t.to_string()).collect(), ..Default::default() };
-    load_material(ShaderSource::Glsl { vertex: VERTEX, fragment }, params).map_err(|e| e.to_string())
+    NEW_FRAGMENT.replace("@CP@", precision).replace("@SHARP_UV@", sharp::SHARP_UV_GLSL)
 }
 
 impl TerrainLayer {
@@ -710,7 +884,7 @@ impl TerrainLayer {
             old,
             new_hp,
             new_mp,
-            lit: Default::default(),
+            legacy: Default::default(),
             composite,
             opts,
             atlas,
@@ -799,10 +973,9 @@ impl TerrainLayer {
     /// (ms) that animates the water, `None` for still water. `edge`: the ground goes on past the
     /// map's edges: the ground continues, then the animated fog ([`fog_opacity`]); `view` may
     /// reach past the map then. The fog's clock is `water_ms`. `mode`: see [`Mode`]. `flow`: the
-    /// rivers' flow per cell (`rules::flow::flow_field`), empty for still water. `relief`: the light's
-    /// relief on the land (`daylight::relief_at`, turned to the ground), None with the lighting off.
+    /// rivers' flow per cell (`rules::flow::flow_field`), empty for still water.
     #[allow(clippy::too_many_arguments)]
-    pub fn draw(&self, codes: &[u8], (w, h): (u32, u32), dest: Rect, view: Vec4, cell_px: Vec2, water_ms: Option<i64>, edge: bool, mode: Mode, flow: &[(f32, f32)], relief: Option<daylight::Relief>, points: Option<&lights::Uniforms>) {
+    pub fn draw(&self, codes: &[u8], (w, h): (u32, u32), dest: Rect, view: Vec4, cell_px: Vec2, water_ms: Option<i64>, edge: bool, mode: Mode, flow: &[(f32, f32)]) {
         if w == 0 || h == 0 || w + 2 > u16::MAX as u32 || h + 2 > u16::MAX as u32 || codes.len() != (w * h) as usize {
             return;
         }
@@ -810,10 +983,15 @@ impl TerrainLayer {
             self.draw_cached(dest);
             return;
         }
-        let Some((base, new)) = self.ground_material() else { return };
-        // With the lights on, the neighbours shader's lit variant (its point lights); the base shader otherwise.
-        let lit = if new && points.is_some() { self.lit_material() } else { None };
-        let m = lit.unwrap_or(base);
+        // The unlit shader while the lighting and the live water are both off (the picture as it was before).
+        let unlit = daylight::shown_hour().is_none() && !water::live();
+        let Some((m, new, legacy)) = self.ground_material(unlit) else { return };
+        if legacy {
+            // The unlit shader's relief, off: `Strength` 0 leaves the colour as it is.
+            m.set_uniform("Light", vec3(0.0, 0.0, 1.0));
+            m.set_uniform("Strength", 0.0f32);
+            m.set_uniform("Cavity", 0.0f32);
+        }
         // The trailer's stills (dev-only): the atlas is sampled nearest, so the grass is not streaked.
         if super::world_view::trailer_active() {
             self.atlas.set_filter(FilterMode::Nearest);
@@ -857,17 +1035,6 @@ impl TerrainLayer {
         m.set_uniform("LiveWater", if water::live() && water_on { 1.0f32 } else { 0.0 });
         let sky = daylight::sky_rgb();
         m.set_uniform("Sky", vec3(sky[0], sky[1], sky[2]));
-        // The relief: Strength 0 (the lighting off) skips it in the shader.
-        let (light, strength, cavity) = relief.map_or(([0.0, 0.0, 1.0], 0.0, 0.0), |r| (r.light, r.strength, r.cavity));
-        m.set_uniform("Light", vec3(light[0], light[1], light[2]));
-        m.set_uniform("Strength", strength);
-        m.set_uniform("Cavity", cavity);
-        // The point lights (the lit variant only): the quad's place in the pass's pixels, and the lights.
-        if let (Some(_), Some(points)) = (lit, points) {
-            m.set_uniform("Dest", vec4(dest.x, dest.y, dest.w, dest.h));
-            m.set_uniform_array("LightA", &points.lights[..]);
-            m.set_uniform("LightI", points.info);
-        }
         // The ground draws (the whole terrain, the cache's ground) get the shading rate (option 3).
         let vrs = self.opts.vrs && matches!(mode, Mode::Full | Mode::Ground);
         if vrs {
@@ -894,26 +1061,33 @@ impl TerrainLayer {
         gl_use_default_material();
     }
 
-    /// The material of the ground draws, and whether it is the neighbours shader.
-    /// The lit variant of the neighbours shader at the current precision (None when it does not compile).
-    fn lit_material(&self) -> Option<&Material> {
+    /// The unlit shader at the current precision (None when it does not compile).
+    fn legacy_material(&self) -> Option<&Material> {
         let mediump = self.opts.mediump;
-        self.lit[usize::from(mediump)]
+        self.legacy[usize::from(mediump)]
             .get_or_init(|| {
                 let precision = if mediump { "mediump" } else { "highp" };
-                make_lit_material(&new_fragment_lit(precision), &["Neighbours", "Atlas", "Water", "WaterMask", "Flow"])
-                    .map_err(|e| razdor::diag!("terrain lit shader ({precision}): {e}"))
+                let text = LEGACY_FRAGMENT.replace("@CP@", precision).replace("@SHARP_UV@", sharp::SHARP_UV_GLSL).replace("@RELIEF@", LEGACY_RELIEF);
+                make_material(&text, &LEGACY_UNIFORMS, &["Neighbours", "Atlas", "Water", "WaterMask", "Flow"])
+                    .map_err(|e| razdor::diag!("terrain unlit shader ({precision}): {e}"))
                     .ok()
             })
             .as_ref()
     }
 
-    fn ground_material(&self) -> Option<(&Material, bool)> {
+    /// The material of the ground draws: the unlit shader when `unlit` (and it compiles), else the neighbours
+    /// shader. The flag says whether it is the neighbours shader (its textures) and whether it is the unlit one.
+    fn ground_material(&self, unlit: bool) -> Option<(&Material, bool, bool)> {
         if self.opts.new_shader {
+            if unlit {
+                if let Some(m) = self.legacy_material() {
+                    return Some((m, true, true));
+                }
+            }
             let m = if self.opts.mediump { self.new_mp.as_ref().or(self.new_hp.as_ref()) } else { self.new_hp.as_ref() };
-            m.map(|m| (m, true))
+            m.map(|m| (m, true, false))
         } else {
-            self.old.as_ref().map(|m| (m, false))
+            self.old.as_ref().map(|m| (m, false, false))
         }
     }
 }

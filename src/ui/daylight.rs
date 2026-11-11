@@ -67,61 +67,21 @@ pub fn sky_at(hour: f32) -> [f32; 3] {
     sky
 }
 
-/// The relief's light of one frame (`relief_at`): the light's direction in the screen's axes (x
-/// right, y down, z toward the viewer), the raking strength, the cavities' darkening, and the factor
-/// of the painted shadows' alpha. Style only; the map's sprites and ground read it in their shaders.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Relief {
-    pub light: [f32; 3],
-    pub strength: f32,
-    pub cavity: f32,
-    pub shadow_k: f32,
-}
-
-/// The sun's direction on the screen: lower right, so the original's painted shadows (which fall
-/// toward the upper left) agree with it. Only the elevation changes with the hour.
-const SUN_XY: [f32; 2] = [0.62, 0.62];
-/// The moon's elevation in radians, which lights the night (the sun's elevation by day).
+/// The moon's elevation in radians, which casts the night's shadow (`casts_at`).
 const MOON_ELEV: f32 = 0.6;
-/// The raking strength at night.
-const NIGHT_STRENGTH: f32 = 0.3;
 
-/// The sun's elevation in radians for the sine `e` of the hour: 0.20 at the horizon, 1.15 at noon.
-fn sun_elevation(e: f32) -> f32 {
-    lerp(0.20, 1.15, e.clamp(0.0, 1.0))
-}
-
-/// The relief's light at `hour` (0..24, fractional). By day the sun's direction, its strength and
-/// the painted shadows' factor follow `e` (a low sun rakes hard, a high one gently); at night the
-/// moon. The blend runs over the sun's sine from -0.5 to 0 (about 4:00 to 6:00), so nothing jumps
-/// at dawn or dusk.
-pub fn relief_at(hour: f32) -> Relief {
+/// The painted shadows' factor at `hour` (`ShadowK` in the lit pass): 0.55 at night, 1.15 at a low sun
+/// (dawn and dusk), 1.0 at a high one; it is the painted shadows that deepen toward dusk and fade at night.
+pub fn shadow_k_at(hour: f32) -> f32 {
     let (e, _, _) = sun(hour);
     let up = e.clamp(0.0, 1.0);
-    // 1 by day (the sun up), 0 at night (the moon).
+    // 1 by day (the sun up), 0 at night (the moon). The blend runs over the sun's sine from -0.5 to 0.
     let day = smoothstep(-0.5, 0.0, e);
-    let elev = lerp(MOON_ELEV, sun_elevation(e), day);
-    let (tan, [sx, sy]) = (elev.tan(), SUN_XY);
-    let len = (sx * sx + sy * sy + tan * tan).sqrt();
-    let strength = lerp(NIGHT_STRENGTH, lerp(0.65, 0.25, up), day);
-    let cavity = lerp(0.20, 0.35, day);
-    let shadow_k = lerp(0.55, lerp(1.15, 1.0, smoothstep(0.3, 1.0, up)), day);
-    Relief { light: [sx / len, sy / len, tan / len], strength, cavity, shadow_k }
-}
-
-impl Relief {
-    /// The same relief for a ground drawn turned by `yaw_deg` on the 2.5D view: the light's screen
-    /// direction is turned back into the ground's axes (screen = R(yaw) · ground, so ground =
-    /// R(−yaw) · screen). Yaw 0 is the identity.
-    pub fn turned(self, yaw_deg: f32) -> Relief {
-        let (s, c) = yaw_deg.to_radians().sin_cos();
-        let [x, y, z] = self.light;
-        Relief { light: [c * x + s * y, -s * x + c * y, z], ..self }
-    }
+    lerp(0.55, lerp(1.15, 1.0, smoothstep(0.3, 1.0, up)), day)
 }
 
 /// The shadows (`Settings::map_shadows`, «Тени»): the original's painted ones (the default), or
-/// cast by the sun in real time (`casts_at`, `sun_relief`; the sprites' painted shadows are removed).
+/// cast by the sun in real time (`casts_at`; the sprites' painted shadows are removed).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ShadowMode {
     #[default]
@@ -165,7 +125,7 @@ fn sun_bearing(hour: f32) -> [f32; 2] {
 
 /// The shadow sun's elevation at `hour` (radians): a stylised arc, 12° at dawn and dusk (and the night),
 /// 40° at noon, so the shadows are long in the morning and afternoon and short at midday. Separate from
-/// the tint's curve (`sun_elevation`), which stays the relief's.
+/// the tint's curve (`sun`).
 fn shadow_elevation(hour: f32) -> f32 {
     let day = (std::f32::consts::PI * (hour - 6.0) / 12.0).sin().max(0.0);
     (12.0 + 28.0 * day).to_radians()
@@ -184,7 +144,7 @@ fn night_weight(hour: f32) -> f32 {
 }
 
 /// The cast shadows at `hour` (0..24, fractional). The sun's: away from the sun's bearing, its length
-/// from its elevation (the relief's curve, `sun_elevation`), alpha by day and fading through the dusk
+/// from its elevation (`shadow_elevation`), alpha by day and fading through the dusk
 /// (`e` below 0.1 of the sine). The moon's: fixed in the south-west, alpha from dusk to dawn.
 pub fn casts_at(hour: f32) -> Casts {
     let (e, _, _) = sun(hour);
@@ -200,26 +160,6 @@ pub fn casts_at(hour: f32) -> Casts {
         alpha: MOON_ALPHA * night_weight(hour),
     };
     Casts { sun: sun_cast, moon: moon_cast }
-}
-
-/// The relief of `ShadowMode::Sun` at `hour`: the same strength, cavities and moon blend as
-/// `relief_at`, but the light is in the map's axes (the sun travels in the world; by night the moon
-/// in the south-west), and no painted shadow is kept (`shadow_k` 0).
-pub fn sun_relief(hour: f32) -> Relief {
-    let base = relief_at(hour);
-    let (e, _, _) = sun(hour);
-    let day = smoothstep(-0.5, 0.0, e);
-    // The light's elevation is the shadows' (`shadow_elevation`), so the lit sprites agree with their shadows.
-    let elev = lerp(MOON_ELEV, shadow_elevation(hour), day);
-    // The bearing turns from the moon's to the sun's the short way round (an angle, not a blend of the
-    // two vectors: those pass near zero at the dawn's crossing and would jump).
-    let (moon, toward) = (MOON_BEARING[1].atan2(MOON_BEARING[0]), sun_bearing(hour));
-    let gap = (toward[1].atan2(toward[0]) - moon).rem_euclid(std::f32::consts::TAU);
-    let gap = if gap > std::f32::consts::PI { gap - std::f32::consts::TAU } else { gap };
-    let phi = moon + gap * day;
-    let v = [phi.cos(), phi.sin(), elev.tan()];
-    let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
-    Relief { light: [v[0] / len, v[1] / len, v[2] / len], shadow_k: 0.0, ..base }
 }
 
 // The hour of the last frame that had the light on (`None` when it was off or not yet drawn).
@@ -241,14 +181,22 @@ fn signed_gap(from: f32, to: f32) -> f32 {
     (to - from + 12.0).rem_euclid(24.0) - 12.0
 }
 
-/// The shown hour moved a step toward `target`, the shortest way round the day: a fraction of the
-/// gap each second (`dt` in seconds). A gap over 6 h (a load, a long jump) snaps to the target.
+/// Hours a second the shown hour may move toward the game's over a jump (a gap over `FOLLOW_GAP`).
+const EASE_RATE: f32 = 24.0;
+/// A gap up to this many hours is followed at once. The game clock runs on in small steps while the army
+/// travels (a few hours a second in the snapshots), and a proportional ease trailed behind it by a fraction
+/// of an hour, so the light and the shadows came on late; the steps are followed as they come instead.
+const FOLLOW_GAP: f32 = 1.0;
+
+/// The shown hour moved toward `target`, the shortest way round the day (`dt` in seconds). A gap of up to
+/// `FOLLOW_GAP` is followed at once; a larger one (a jump) is moved toward at `EASE_RATE` hours a second, so
+/// dusk does not become night in one frame; a gap over 6 h (a load) snaps to the target.
 pub fn ease_hour(shown: f32, target: f32, dt: f32) -> f32 {
     let d = signed_gap(shown, target);
-    if d.abs() > 6.0 {
+    if d.abs() > 6.0 || d.abs() <= FOLLOW_GAP {
         return target.rem_euclid(24.0);
     }
-    (shown + d * (dt * 2.5).clamp(0.0, 1.0)).rem_euclid(24.0)
+    (shown + d.signum() * (EASE_RATE * dt.max(0.0)).min(d.abs())).rem_euclid(24.0)
 }
 
 /// The setting «Освещение» (`Settings::map_light`): off, the game's clock, a real-time day
@@ -353,16 +301,11 @@ pub fn shown_hour() -> Option<f32> {
     LAST_HOUR.get()
 }
 
-/// The relief of this frame: [`relief_at`] the hour `frame_light` just set (`sun_relief` with the sun
-/// shadows), None when the light is off. Call it after `frame_light` in the same frame.
-pub fn frame_relief() -> Option<Relief> {
+/// The painted shadows' factor of this frame (`shadow_k_at` the hour `frame_light` just set; 0 in Sun mode,
+/// where the sun casts them instead), None when the light is off. Call it after `frame_light` in the same frame.
+pub fn frame_shadow_k() -> Option<f32> {
     let hour = LAST_HOUR.get()?;
-    Some(if shadow_mode() == ShadowMode::Sun { sun_relief(hour) } else { relief_at(hour) })
-}
-
-/// Whether this frame's shadows are cast by the sun: the light is on and the shadows are «От солнца».
-pub fn sun_shadows_on() -> bool {
-    LAST_HOUR.get().is_some() && shadow_mode() == ShadowMode::Sun
+    Some(if shadow_mode() == ShadowMode::Sun { 0.0 } else { shadow_k_at(hour) })
 }
 
 /// The sun's form shading of this frame (Sun mode, in day): the share of a face turned away from the sun that
@@ -453,8 +396,41 @@ mod tests {
 
     #[test]
     fn ease_wraps_the_short_way() {
-        let eased = ease_hour(23.5, 0.5, 0.1);
-        assert!(eased > 23.5 && eased < 24.0, "eased to {eased}, not back round the day");
+        // A jump of 2 h across midnight: the first step is toward the target, not back round the day.
+        let eased = ease_hour(23.0, 1.0, 0.01);
+        assert!(eased > 23.0 && eased < 24.0, "eased to {eased}, not back round the day");
+    }
+
+    #[test]
+    fn ease_follows_the_clock_without_lag_and_moves_a_jump_over_a_few_frames() {
+        // A clock running 3 h a second (a travel): the shown hour is the game's at every frame.
+        let mut shown = 9.0;
+        for i in 1..=120 {
+            let game = 9.0 + 3.0 * i as f32 / 60.0;
+            shown = ease_hour(shown, game, 1.0 / 60.0);
+            assert!((shown - game).abs() < 1e-4, "frame {i}: shown {shown}, game {game}");
+        }
+        // A 4 h jump (not a load) is moved toward, not made in one frame, and it arrives within half a second.
+        let first = ease_hour(10.0, 14.0, 1.0 / 60.0);
+        assert!(first > 10.0 && first < 14.0, "one frame: {first}");
+        let mut h = 10.0;
+        for _ in 0..30 {
+            h = ease_hour(h, 14.0, 1.0 / 60.0);
+        }
+        assert!((h - 14.0).abs() < 1e-4, "after half a second: {h}");
+    }
+
+    #[test]
+    fn the_sun_shadows_follow_the_game_clock_frame_by_frame() {
+        set_prefs(LightMode::GameClock, 24, 18, ShadowMode::Sun, crate::ui::lights::Quality::High);
+        // The clock runs on from 9:00 to 11:00 in quarter-hour steps: each frame's shadows are the ones of that hour.
+        for i in 0..=40 {
+            let game = 9.0 + i as f32 * 0.05;
+            frame_light(game, 0.0, 1.0 / 60.0);
+            assert_eq!(frame_casts(), Some(casts_at(game)), "frame {i}: the shadows of {game} h");
+        }
+        assert_ne!(casts_at(9.0).sun.len, casts_at(11.0).sun.len, "the shadows change over the two hours");
+        set_prefs(LightMode::Off, 24, 18, ShadowMode::Painted, crate::ui::lights::Quality::High);
     }
 
     #[test]
@@ -529,95 +505,38 @@ mod tests {
         set_prefs(LightMode::Off, 24, 18, ShadowMode::Painted, crate::ui::lights::Quality::High);
     }
 
-    fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-        a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-    }
-
-    #[test]
-    fn a_flat_normal_is_lit_exactly_one_at_every_hour() {
-        // The shader's factor: dot(N, L) / L.z, with the flat normal N = (0, 0, 1).
-        for i in 0..96 {
-            let r = relief_at(i as f32 * 0.25);
-            let f = dot([0.0, 0.0, 1.0], r.light) / r.light[2];
-            assert!((f - 1.0).abs() < 1e-6, "hour {}: flat factor {f}", i as f32 * 0.25);
-        }
-    }
-
-    #[test]
-    fn the_light_comes_from_the_front_and_lower_right_of_the_screen() {
-        for i in 0..96 {
-            let l = relief_at(i as f32 * 0.25).light;
-            assert!(l[2] > 0.0, "hour {}: the light is in front of the ground", i as f32 * 0.25);
-            assert!(l[0] > 0.0 && l[1] > 0.0, "hour {}: lower right {l:?}", i as f32 * 0.25);
-            assert!((dot(l, l) - 1.0).abs() < 1e-5, "hour {}: unit length", i as f32 * 0.25);
-        }
-    }
-
-    #[test]
-    fn a_low_sun_rakes_harder_than_noon() {
-        let dawn = relief_at(7.0);
-        let noon = relief_at(12.0);
-        assert!(dawn.strength > noon.strength, "7:00 {} vs noon {}", dawn.strength, noon.strength);
-        assert!((noon.strength - 0.25).abs() < 1e-5 && (noon.cavity - 0.35).abs() < 1e-5);
-        assert!((noon.shadow_k - 1.0).abs() < 1e-5, "noon shadows are the painted ones");
-    }
-
     #[test]
     fn the_painted_shadows_deepen_at_low_sun_and_fade_at_night() {
-        assert!((relief_at(18.0).shadow_k - 1.15).abs() < 1e-5, "dusk {}", relief_at(18.0).shadow_k);
-        assert!((relief_at(1.0).shadow_k - 0.55).abs() < 1e-5, "night {}", relief_at(1.0).shadow_k);
+        assert!((shadow_k_at(18.0) - 1.15).abs() < 1e-5, "dusk {}", shadow_k_at(18.0));
+        assert!((shadow_k_at(1.0) - 0.55).abs() < 1e-5, "night {}", shadow_k_at(1.0));
+        assert!((shadow_k_at(12.0) - 1.0).abs() < 1e-5, "noon shadows are the painted ones");
     }
 
     #[test]
-    fn night_is_lit_by_the_moon_at_its_elevation() {
-        let r = relief_at(1.0);
-        let moon = [0.62, 0.62, 0.6f32.tan()];
-        let len = dot(moon, moon).sqrt();
-        for (c, m) in moon.iter().enumerate() {
-            assert!((r.light[c] - m / len).abs() < 1e-5, "night light {:?}", r.light);
-        }
-        assert!((r.strength - NIGHT_STRENGTH).abs() < 1e-5 && (r.cavity - 0.20).abs() < 1e-5);
-    }
-
-    #[test]
-    fn adjacent_quarter_hours_change_the_relief_little() {
-        let mut prev = relief_at(0.0);
+    fn adjacent_quarter_hours_change_the_shadow_factor_little() {
+        let mut prev = shadow_k_at(0.0);
         for i in 1..=96 {
             let h = i as f32 * 0.25;
-            let r = relief_at(h);
-            for c in 0..3 {
-                assert!((r.light[c] - prev.light[c]).abs() < 0.1, "hour {h}: light {c} jumps");
-            }
-            assert!((r.strength - prev.strength).abs() < 0.15, "hour {h}: strength jumps");
-            assert!((r.cavity - prev.cavity).abs() < 0.1, "hour {h}: cavity jumps");
-            assert!((r.shadow_k - prev.shadow_k).abs() < 0.15, "hour {h}: shadow factor jumps");
-            prev = r;
+            let k = shadow_k_at(h);
+            assert!((k - prev).abs() < 0.15, "hour {h}: shadow factor jumps");
+            prev = k;
         }
     }
 
     #[test]
-    fn turning_the_ground_turns_the_light_back_into_its_axes() {
-        let r = relief_at(12.0);
-        assert_eq!(r.turned(0.0), r, "yaw 0 is the identity");
-        // At yaw 90 the ground's north is the screen's right (view25): the light from the screen's
-        // right comes from the ground's north, (0, -1).
-        let east = Relief { light: [1.0, 0.0, 0.0], ..r }.turned(90.0);
-        assert!(east.light[0].abs() < 1e-5 && (east.light[1] + 1.0).abs() < 1e-5, "{:?}", east.light);
-        let turned = r.turned(37.0);
-        assert!((dot(turned.light, turned.light) - dot(r.light, r.light)).abs() < 1e-5, "a turn keeps the length");
-    }
-
-    #[test]
-    fn the_frame_relief_follows_the_frame_light() {
+    fn the_frame_shadow_factor_follows_the_frame_light() {
         set_prefs(LightMode::Off, 24, 18, ShadowMode::Painted, crate::ui::lights::Quality::High);
         frame_light(12.0, 0.0, 0.016);
-        assert!(frame_relief().is_none(), "lighting off: no relief");
+        assert!(frame_shadow_k().is_none(), "lighting off: none");
         set_prefs(LightMode::Fixed, 24, 1, ShadowMode::Painted, crate::ui::lights::Quality::High);
         frame_light(12.0, 0.0, 0.016);
-        assert_eq!(frame_relief(), Some(relief_at(1.0)));
+        assert_eq!(frame_shadow_k(), Some(shadow_k_at(1.0)));
+        set_prefs(LightMode::Fixed, 24, 1, ShadowMode::Sun, crate::ui::lights::Quality::High);
+        frame_light(12.0, 0.0, 0.016);
+        assert_eq!(frame_shadow_k(), Some(0.0), "sun: the sun casts the shadows, none painted");
         set_prefs(LightMode::Off, 24, 18, ShadowMode::Painted, crate::ui::lights::Quality::High);
         frame_light(12.0, 0.0, 0.016);
-        assert!(frame_relief().is_none());
+        assert!(frame_shadow_k().is_none());
     }
 
     fn approx(a: [f32; 2], b: [f32; 2]) -> bool {
@@ -695,50 +614,18 @@ mod tests {
     }
 
     #[test]
-    fn the_sun_relief_lights_from_the_sun_s_bearing_in_the_map_s_axes() {
-        // At 6:00 the sun is east, so the light comes from +x; at 18:00 from −x.
-        assert!(sun_relief(6.0).light[0] > 0.5 && sun_relief(6.0).light[2] > 0.0, "{:?}", sun_relief(6.0).light);
-        assert!(sun_relief(18.0).light[0] < -0.5, "{:?}", sun_relief(18.0).light);
-        for i in 0..96 {
-            let r = sun_relief(i as f32 * 0.25);
-            assert_eq!(r.shadow_k, 0.0, "no painted shadows in the sun mode");
-            assert!(r.light[2] > 0.0, "hour {}: the light is above the ground", i as f32 * 0.25);
-            assert!((dot(r.light, r.light) - 1.0).abs() < 1e-5, "unit length");
-        }
-        // A night by the moon: the light comes from the south-west (−x, +y).
-        let night = sun_relief(1.0).light;
-        assert!(night[0] < 0.0 && night[1] > 0.0, "{night:?}");
-    }
-
-    #[test]
-    fn the_sun_relief_changes_little_from_one_quarter_hour_to_the_next() {
-        let mut prev = sun_relief(0.0);
-        for i in 1..=96 {
-            let h = i as f32 * 0.25;
-            let r = sun_relief(h);
-            // The dawn's blend turns the light from the moon's bearing to the sun's over two hours (a
-            // 165-degree sweep, fastest in its middle): about 0.55 a component in a quarter hour at most.
-            for c in 0..3 {
-                assert!((r.light[c] - prev.light[c]).abs() < 0.6, "hour {h}: light {c} jumps");
-            }
-            prev = r;
-        }
-    }
-
-    #[test]
     fn the_sun_shadows_are_the_frame_s_only_in_the_sun_mode_with_the_light_on() {
         set_prefs(LightMode::Fixed, 24, 10, ShadowMode::Painted, crate::ui::lights::Quality::High);
         frame_light(12.0, 0.0, 0.016);
-        assert!(frame_casts().is_none() && !sun_shadows_on(), "painted: no sun shadows");
-        assert_eq!(frame_relief(), Some(relief_at(10.0)), "painted: the painted relief");
+        assert!(frame_casts().is_none(), "painted: no sun shadows");
+        assert_eq!(frame_shadow_k(), Some(shadow_k_at(10.0)), "painted: the painted shadows' factor");
         set_prefs(LightMode::Fixed, 24, 10, ShadowMode::Sun, crate::ui::lights::Quality::High);
         frame_light(12.0, 0.0, 0.016);
         assert_eq!(frame_casts(), Some(casts_at(10.0)));
-        assert!(sun_shadows_on());
-        assert_eq!(frame_relief(), Some(sun_relief(10.0)), "sun: the sun's relief");
+        assert_eq!(frame_shadow_k(), Some(0.0), "sun: no painted shadows");
         set_prefs(LightMode::Off, 24, 10, ShadowMode::Sun, crate::ui::lights::Quality::High);
         frame_light(12.0, 0.0, 0.016);
-        assert!(frame_casts().is_none() && frame_relief().is_none(), "lighting off: nothing, shadows or not");
+        assert!(frame_casts().is_none() && frame_shadow_k().is_none(), "lighting off: nothing, shadows or not");
         set_prefs(LightMode::Off, 24, 18, ShadowMode::Painted, crate::ui::lights::Quality::High);
     }
 

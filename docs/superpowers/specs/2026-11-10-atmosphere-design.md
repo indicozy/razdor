@@ -34,9 +34,9 @@ Settled with the owner in a grilling session, 2026-11-10. Source idea list:
   warm window glows; every army on the map (hero's and others') carries a small torch glow, so armies
   stay readable at night. Glows fade in from dusk, out at dawn. Additive light pools, no new sprites.
   No campfire (the trailer's 1:03 shot is reworded to torchlight around a resting army).
-- **Relief.** Per-pixel normals computed by Razdor at load and cached: brightness → blurred height →
-  Sobel → normals (the Laigter / SpriteIlluminator approach). Used on the flat map and in 2.5D
-  (grooves raked by a low sun). In 2.5D each card is also lit by its own facing (see §2).
+- **Relief.** Removed (2026-11-11, the owner: "it makes the look of the game too cooked"). It was never
+  normal maps at load: the shader took each texel's luminance as height. The state is in
+  `docs/flows/assets-and-drawing.md` («No relief»). Cards in 2.5D keep their own facing (see §2).
 
 ## 2. 2.5D: buildings stand on their ground (cards)
 

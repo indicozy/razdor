@@ -286,7 +286,7 @@ pub struct Settings {
     /// lengthening with the hour (`daylight::ShadowMode`, `shadow`). Style only.
     pub map_shadows: super::daylight::ShadowMode,
     /// Advanced, Razdor's, with the light: «Качество света» (`lights::Quality`): how many point lights
-    /// cast shadows and light the relief. `None` (the default) is the device's: high on the desktop,
+    /// cast shadows and make the windows glow. `None` (the default) is the device's: high on the desktop,
     /// medium on a phone (`lights::default_quality`).
     pub map_light_quality: Option<super::lights::Quality>,
     /// Advanced, Razdor's, off by default: «Туман вместо черноты». The unexplored land is drifting

@@ -854,6 +854,19 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
         crate::ui::weather::set_pref(std::env::var("RAZDOR_WEATHER").is_ok_and(|v| v.trim() == "1"));
         // `RAZDOR_LIVING=1` (the snapshots' living map); the setting is not read here.
         crate::ui::living::set_prefs(false);
+        // `RAZDOR_LIGHT_MODE=game|cycle` (the snapshots' light clock; the lighting is off otherwise): the game's
+        // clock (the hour moves while the army travels), or the real-time cycle of `RAZDOR_LIGHT_CYCLE` minutes a
+        // day (24 by default), which runs on the snapshot clock, so one run can show several hours.
+        if let Some(mode) = std::env::var("RAZDOR_LIGHT_MODE").ok().map(|m| m.trim().to_ascii_lowercase()) {
+            use crate::ui::daylight::{LightMode, ShadowMode};
+            let mode = match mode.as_str() {
+                "game" => LightMode::GameClock,
+                "cycle" => LightMode::Cycle,
+                _ => LightMode::Off,
+            };
+            let minutes = std::env::var("RAZDOR_LIGHT_CYCLE").ok().and_then(|s| s.trim().parse::<u32>().ok()).unwrap_or(24);
+            crate::ui::daylight::set_prefs(mode, minutes, 18, ShadowMode::Painted, crate::ui::lights::default_quality(false));
+        }
         return;
     }
     read_dp_once();

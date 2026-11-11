@@ -19,8 +19,6 @@ use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation, Pipelin
 use macroquad::prelude::*;
 
 use super::memo::Recent;
-use super::daylight;
-use super::lights::{self, SLOTS};
 
 /// GLSL ES 1.00 source of `sharp_uv`, pasted into fragment shaders (the caller declares
 /// the precision and the `TexSize` / `Scale` uniforms). `uv` is the texture coordinate,
@@ -35,69 +33,6 @@ vec2 sharp_uv(vec2 uv, vec2 tex_size, vec2 scale) {
     vec2 f = texel - base;
     vec2 t = clamp((f - 0.5) * s + 0.5, 0.0, 1.0);
     return (base + t) / ts;
-}
-"#;
-
-/// GLSL ES 1.00 for the relief («Освещение», `daylight::relief_at`), pasted into a shader that
-/// declares the uniforms `Light` (vec3), `Strength` and `Cavity` (floats) before it. Each texture
-/// sample gives a height h (its luminance); the four neighbours at ±[`RELIEF_R`] texels give the
-/// slope, and the four at three times that give the cavities. `relief_shade` takes the samples and
-/// returns the lit colour. With `Strength` 0 the caller skips it: the colour is then unchanged.
-pub const RELIEF_GLSL: &str = r#"
-const float RELIEF_R = 1.5;
-const float RELIEF_K = 2.0;
-float luma(vec3 c) {
-    return dot(c, vec3(0.299, 0.587, 0.114));
-}
-// `rgb` lit by the slope from the heights `xp`, `xm` (at +x, -x), `yp`, `ym` (at +y, -y) around
-// the centre height `h`, and the cavity from `deep`, the mean height at ±3 R.
-vec3 relief_shade(vec3 rgb, float h, float xp, float xm, float yp, float ym, float deep) {
-    vec3 n = normalize(vec3(-(xp - xm) * RELIEF_K, -(yp - ym) * RELIEF_K, 1.0));
-    float f = dot(n, Light) / Light.z;
-    float cav = clamp(deep - h, 0.0, 0.25) * 4.0;
-    return clamp(rgb * mix(1.0, f, Strength) * (1.0 - Cavity * cav), 0.0, 1.0);
-}
-"#;
-
-/// GLSL ES 1.00 for the point lights («Качество света», `lights`), pasted after [`RELIEF_GLSL`] into a
-/// shader that declares `uniform vec4 LightA[8]` (each light: x, y in the pass's 2D pixels, radius in
-/// pixels, strength), `uniform vec4 LightI` (the lights in use, the ones raking the relief, the night's
-/// factor; the fourth is unused) and `varying highp vec2 spos` (the
-/// pixel's 2D point, [`SHARP_VERTEX`]). A light's pool is the falloff to its radius; the relief is the
-/// difference of the light's direction from the flat one (zero on flat ground). Night 0 switches it all off.
-pub const POINT_GLSL: &str = r#"
-const float POINT_K = 0.6;
-const float EMIT_K = 0.45;
-const vec3 EMIT_WARM = vec3(1.0, 0.72, 0.40);
-float point_falloff(float d, float r) {
-    float x = d / r;
-    float t = max(1.0 - x * x, 0.0);
-    return t * t;
-}
-// The multiplier of the relief from the point lights at `at` with normal `n` (1 where none rakes it; the
-// faces turned away from a light keep their colour, so the grain of the stone never darkens).
-float point_shade(vec2 at, vec3 n) {
-    float s = 0.0;
-    for (int i = 0; i < 8; i++) {
-        if (float(i) >= LightI.y) break;
-        vec4 L = LightA[i];
-        float d = distance(at, L.xy);
-        if (d < L.z) {
-            vec3 l = normalize(vec3(L.xy - at, 0.5 * L.z));
-            s += point_falloff(d, L.z) * L.w * max(dot(n, l) - l.z, 0.0);
-        }
-    }
-    return clamp(1.0 + POINT_K * LightI.z * s, 0.0, 1.8);
-}
-// The night's glow of the lights at `at`, 0 to 1 (a building's openings take it).
-float glow_at(vec2 at) {
-    float e = 0.0;
-    for (int i = 0; i < 8; i++) {
-        if (float(i) >= LightI.x) break;
-        vec4 L = LightA[i];
-        e += point_falloff(distance(at, L.xy), L.z) * L.w;
-    }
-    return min(e, 1.0);
 }
 "#;
 
@@ -273,40 +208,13 @@ pub fn session<R>(draw: impl FnOnce() -> R) -> R {
     session_with(m, draw)
 }
 
-/// [`session`] with the relief of the frame («Освещение», `daylight::relief_at`): the pass's sharp
-/// draws use the lit material (the relief on the colour, the painted shadows' alpha, the point lights'
-/// relief and the glowing openings of the building mask, `mask`). Its uniforms are set once here, not
-/// per draw, so the pass batches as [`session`]'s does. `None` (the light is off) is [`session`] itself,
-/// and so is a lit material that does not compile. `points` None: no point light (Low, or no light).
-pub fn session_lit<R>(relief: Option<daylight::Relief>, points: Option<&lights::Uniforms>, mask: Option<&Texture2D>, draw: impl FnOnce() -> R) -> R {
-    // By day (no night: no point light, no glow) the base's lit material draws the pass, as it did before the lights.
-    let night = points.map_or(0.0, |p| p.info.z);
-    if night <= 0.0 {
-        let (Some(r), Some(m)) = (relief, day_lit_material()) else { return session(draw) };
-        m.set_uniform("Light", vec3(r.light[0], r.light[1], r.light[2]));
-        m.set_uniform("Strength", r.strength);
-        m.set_uniform("Cavity", r.cavity);
-        m.set_uniform("ShadowK", r.shadow_k);
-        return session_with(m, draw);
-    }
-    let (Some(r), Some(m)) = (relief, lit_material()) else { return session(draw) };
-    m.set_uniform("Light", vec3(r.light[0], r.light[1], r.light[2]));
-    m.set_uniform("Strength", r.strength);
-    m.set_uniform("Cavity", r.cavity);
-    m.set_uniform("ShadowK", r.shadow_k);
-    // The building mask (`DtArt::building_mask`) is bound once a pass; without it there are no openings to glow.
-    let points = match mask {
-        Some(t) => {
-            m.set_texture("BuildingMask", t.clone());
-            points.copied()
-        }
-        None => None,
-    };
-    let points = points.unwrap_or(lights::Uniforms { lights: [Vec4::ZERO; lights::SLOTS], info: Vec4::ZERO });
-    // The clock (`LightI.w`) drives the windows' flicker; the pass sets it once, like the rest.
-    let info = vec4(points.info.x, points.info.y, points.info.z, super::clock::now() as f32);
-    m.set_uniform_array("LightA", &points.lights[..]);
-    m.set_uniform("LightI", info);
+/// [`session`] with the painted shadows' factor of the frame («Освещение», `daylight::frame_shadow_k`): the
+/// pass's sharp draws use the lit material (a building's painted shadow times `shadow_k`). Its uniform is set
+/// once here, not per draw, so the pass batches as [`session`]'s does. `None` (the light is off) is [`session`]
+/// itself, and so is a lit material that does not compile.
+pub fn session_lit<R>(shadow_k: Option<f32>, draw: impl FnOnce() -> R) -> R {
+    let (Some(k), Some(m)) = (shadow_k, lit_material()) else { return session(draw) };
+    m.set_uniform("ShadowK", k);
     session_with(m, draw)
 }
 
@@ -341,113 +249,28 @@ fn session_base() -> Option<Material> {
 }
 
 
-/// The lit sharp draw's main: the colour lit by its relief (the neighbours of a transparent pixel
-/// count as its own height, so a sprite's edge has no rim), then the painted shadows: a pixel of
-/// alpha 0 < a ≤ 0.76 (a building's shadow) has its alpha times `ShadowK`.
+/// The lit sharp draw's main: the painted shadows (a building's, alpha 0 < a ≤ 0.76) have their alpha times
+/// `ShadowK` (`daylight::frame_shadow_k`); the colour is the picture's own. The ground and the sprites take no
+/// relief (the grooves looked overcooked, the owner's report), so this is the only thing the light changes here.
 const LIT_MAIN: &str = r#"
     vec4 c = sharp_tex(uv);
     float a = c.a;
-    vec3 rgb = c.rgb;
-    if (a > 0.0) {
-        vec2 ox = vec2(RELIEF_R, 0.0) / TexSize;
-        vec2 oy = vec2(0.0, RELIEF_R) / TexSize;
-        float h = luma(c.rgb);
-        vec4 sxp = sharp_tex(uv + ox);
-        vec4 sxm = sharp_tex(uv - ox);
-        vec4 syp = sharp_tex(uv + oy);
-        vec4 sym = sharp_tex(uv - oy);
-        float xp = sxp.a < 0.5 ? h : luma(sxp.rgb);
-        float xm = sxm.a < 0.5 ? h : luma(sxm.rgb);
-        float yp = syp.a < 0.5 ? h : luma(syp.rgb);
-        float ym = sym.a < 0.5 ? h : luma(sym.rgb);
-        vec2 ox3 = ox * 3.0;
-        vec2 oy3 = oy * 3.0;
-        vec4 fxp = sharp_tex(uv + ox3);
-        vec4 fxm = sharp_tex(uv - ox3);
-        vec4 fyp = sharp_tex(uv + oy3);
-        vec4 fym = sharp_tex(uv - oy3);
-        float deep = ((fxp.a < 0.5 ? h : luma(fxp.rgb)) + (fxm.a < 0.5 ? h : luma(fxm.rgb)) + (fyp.a < 0.5 ? h : luma(fyp.rgb)) + (fym.a < 0.5 ? h : luma(fym.rgb))) * 0.25;
-        rgb = relief_shade(rgb, h, xp, xm, yp, ym, deep);
-        // The point lights rake the relief at night (`LightI.y` of them, `LightI.z` the night).
-        if (LightI.y > 0.0 && LightI.z > 0.0 && texture2D(BuildingMask, uv).r < 0.5) {
-            rgb = clamp(rgb * point_shade(spos, normalize(vec3(-(xp - xm) * RELIEF_K, -(yp - ym) * RELIEF_K, 1.0))), 0.0, 1.0);
-        }
-    }
     if (a > 0.0 && a <= 0.76) {
         a = min(a * ShadowK, 1.0);
     }
-    gl_FragColor = color * vec4(rgb, a);
+    gl_FragColor = color * vec4(c.rgb, a);
 "#;
-
-/// The lit material of the day (no night, so no point light and no window glow): the base's own text, so the
-/// daytime frame with the light on draws what it drew before the lights (`DAY_LIT_MAIN` is the base's `LIT_MAIN`).
-const DAY_LIT_MAIN: &str = r#"
-    vec4 c = sharp_tex(uv);
-    float a = c.a;
-    vec3 rgb = c.rgb;
-    if (a > 0.0) {
-        vec2 ox = vec2(RELIEF_R, 0.0) / TexSize;
-        vec2 oy = vec2(0.0, RELIEF_R) / TexSize;
-        float h = luma(c.rgb);
-        vec4 sxp = sharp_tex(uv + ox);
-        vec4 sxm = sharp_tex(uv - ox);
-        vec4 syp = sharp_tex(uv + oy);
-        vec4 sym = sharp_tex(uv - oy);
-        float xp = sxp.a < 0.5 ? h : luma(sxp.rgb);
-        float xm = sxm.a < 0.5 ? h : luma(sxm.rgb);
-        float yp = syp.a < 0.5 ? h : luma(syp.rgb);
-        float ym = sym.a < 0.5 ? h : luma(sym.rgb);
-        vec2 ox3 = ox * 3.0;
-        vec2 oy3 = oy * 3.0;
-        vec4 fxp = sharp_tex(uv + ox3);
-        vec4 fxm = sharp_tex(uv - ox3);
-        vec4 fyp = sharp_tex(uv + oy3);
-        vec4 fym = sharp_tex(uv - oy3);
-        float deep = ((fxp.a < 0.5 ? h : luma(fxp.rgb)) + (fxm.a < 0.5 ? h : luma(fxm.rgb)) + (fyp.a < 0.5 ? h : luma(fyp.rgb)) + (fym.a < 0.5 ? h : luma(fym.rgb))) * 0.25;
-        rgb = relief_shade(rgb, h, xp, xm, yp, ym, deep);
-    }
-    if (a > 0.0 && a <= 0.76) {
-        a = min(a * ShadowK, 1.0);
-    }
-    gl_FragColor = color * vec4(rgb, a);
-"#;
-
 
 razdor::local! {
     static LIT_MATERIAL: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
-    static DAY_LIT_MATERIAL: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
 }
-
-/// The day's lit material (see [`DAY_LIT_MAIN`]), made once.
-fn day_lit_material() -> Option<Material> {
-    DAY_LIT_MATERIAL.with(|m| {
-        m.get_or_init(|| {
-            let extra = format!("uniform vec3 Light;\nuniform float Strength;\nuniform float Cavity;\nuniform float ShadowK;\n{RELIEF_GLSL}");
-            material(&fragment(&extra, DAY_LIT_MAIN), alpha_pipeline(), LIT_DAY_UNIFORMS.iter().map(|(n, t)| UniformDesc::new(n, *t)).collect())
-                .map_err(|e| razdor::diag!("day lit sharp material: {e}"))
-                .ok()
-        })
-        .clone()
-    })
-}
-
-/// The day's uniforms (the base's four).
-const LIT_DAY_UNIFORMS: [(&str, UniformType); 4] = [("Light", UniformType::Float3), ("Strength", UniformType::Float1), ("Cavity", UniformType::Float1), ("ShadowK", UniformType::Float1)];
 
 /// The lit sharp material, made once. `None` when it does not compile (then the pass is unlit).
 fn lit_material() -> Option<Material> {
     LIT_MATERIAL.with(|m| {
         m.get_or_init(|| {
-            let extra = format!("uniform vec3 Light;\nuniform float Strength;\nuniform float Cavity;\nuniform float ShadowK;\nuniform vec4 LightA[{SLOTS}];\nuniform vec4 LightI;\nuniform sampler2D BuildingMask;\nvarying highp vec2 spos;\n{RELIEF_GLSL}{POINT_GLSL}");
-            let uniforms = vec![
-                UniformDesc::new("Light", UniformType::Float3),
-                UniformDesc::new("Strength", UniformType::Float1),
-                UniformDesc::new("Cavity", UniformType::Float1),
-                UniformDesc::new("ShadowK", UniformType::Float1),
-                UniformDesc::new("LightA", UniformType::Float4).array(SLOTS),
-                UniformDesc::new("LightI", UniformType::Float4),
-            ];
-            material_in(SHARP_VERTEX_SPOS, &fragment(&extra, LIT_MAIN), alpha_pipeline(), uniforms, vec!["BuildingMask".to_string()])
+            let uniforms = vec![UniformDesc::new("ShadowK", UniformType::Float1)];
+            material(&fragment("uniform float ShadowK;", LIT_MAIN), alpha_pipeline(), uniforms)
                 .map_err(|e| razdor::diag!("lit sharp material: {e}"))
                 .ok()
         })
