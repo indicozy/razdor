@@ -241,7 +241,11 @@ other than a bridge, or crossing between building cells; gliding in from outside
 until the step ends). Its one-cell ring (`draw_mark`) stays, under the building picture. The
 hero's row is the last step's direction while he stands (`Game::standing_heading`, 0x75c050;
 the frame is the standing one), and the galley's the same; before any step it faces the viewer.
-The minimap is `src/ui/minimap.rs`.
+The minimap is `src/ui/minimap.rs`. Flat, its view is the light box of `world_rect`. Tilted (2.5D, first person,
+eyes), `Camera::minimap_sight` hands it the camera: the ground the frame sees is the picked ground under its edges
+(`minimap::sight_footprint`, four points an edge, a ray that meets no ground stops at `view25::FAR` or the bend's
+horizon), clipped to the minimap and drawn with the box's colours, and a cone from the camera's ground point (the
+hero, first person) along the yaw. Clicks still centre the map: the minimap is a plan, not turned.
 
 The small trees and bushes (object class 9) sway: `draw_object` draws them through
 `draw_leaning`, the top corners moved by `rng::tree_sway` (a triangle wave of ±2.5 px over
