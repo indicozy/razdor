@@ -119,7 +119,7 @@ pub fn strip_layout(sw: f32, sh: f32, unit: f32, portrait: bool) -> Strip {
     let m = 6.0 * u;
     let gap = 4.0 * u;
     let btn = 44.0 * u;
-    let play_w = 64.0 * u;
+    let play_w = 84.0 * u;
     let bar_h = 40.0 * u;
     // A screen narrower than 1000 dp (a phone, upright or sideways) stacks the strip: a one-row
     // timeline would be too short to read.
@@ -155,8 +155,8 @@ pub fn strip_layout(sw: f32, sh: f32, unit: f32, portrait: bool) -> Strip {
     }
     let after_speeds = m + play_w + gap + 5.0 * (speed_w + gap);
     let day_w = 96.0 * u;
-    let follow_w = 150.0 * u;
-    let exit_w = 96.0 * u;
+    let follow_w = 210.0 * u;
+    let exit_w = 130.0 * u;
     let day = Rect::new(after_speeds, y, day_w, btn);
     let bar_x = after_speeds + day_w + gap;
     let bar_w = (sw - m - follow_w - exit_w - 2.0 * gap - bar_x).max(40.0 * u);
@@ -486,35 +486,50 @@ impl WatchView {
         if button(s.play.x, s.play.y, s.play.w, s.play.h, if self.playing { tr("Pause") } else { tr("Play") }, true) || key(KeyCode::Space) {
             self.playing = !self.playing;
         }
-        for (i, r) in s.speeds.iter().enumerate() {
-            if toggle_button(r.x, r.y, r.w, r.h, &format!("{}×", SPEEDS[i]), self.speed == i) {
-                self.set_speed(i);
-            }
-        }
+        self.speed_tabs(s);
         let (first, last) = self.days();
         let day = self.game().map_or(first, |g| g.clock.day_index());
         chrome::shadow_centered(&trf!("Day {n}", n = day.saturating_sub(first) + 1), s.day.x + s.day.w / 2.0, s.day.y + s.day.h * 0.65, 20.0 * unit, CREAM);
         if toggle_button(s.follow.x, s.follow.y, s.follow.w, s.follow.h, tr("Follow the hero"), self.follow) {
             self.follow = !self.follow;
         }
-        if matches!(self.mode, Mode::Choosing { .. }) {
-            self.choice_buttons(s.bar);
-        } else if self.mode == Mode::Seeking {
+        if self.mode == Mode::Seeking {
             chrome::shadow_centered(tr("Seeking..."), s.bar.x + s.bar.w / 2.0, s.bar.y + s.bar.h * 0.7, 16.0 * unit, GOLD);
         } else {
             self.timeline(s.bar, first, last);
         }
+        if matches!(self.mode, Mode::Choosing { .. }) {
+            self.choice_panel(s.panel, unit);
+        }
         button(s.exit.x, s.exit.y, s.exit.w, s.exit.h, tr("Exit"), true).then_some(Exit::Close)
     }
 
-    /// The battle choice over the timeline: «Смотреть бой» and «Пропустить бой».
-    fn choice_buttons(&mut self, bar: Rect) {
-        let gap = 6.0;
-        let w = (bar.w - gap) / 2.0;
-        if button(bar.x, bar.y, w, bar.h, tr("Watch the battle"), true) {
+    /// The speeds as the game's tabs: the one in use is the pressed tab.
+    fn speed_tabs(&mut self, s: &Strip) {
+        let first = s.speeds[0];
+        let last = s.speeds[4];
+        let labels: Vec<String> = SPEEDS.iter().map(|n| format!("{n}×")).collect();
+        let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+        let th = 26.0 * super::display::button_grow();
+        let mut selected = self.speed;
+        super::widgets::tabs(first.x, first.y + (first.h - th) / 2.0, last.x + last.w - first.x, &labels, &mut selected);
+        self.set_speed(selected);
+    }
+
+    /// The battle choice: a small window above the strip (the timeline stays in view), with
+    /// «Смотреть бой» and «Пропустить бой».
+    fn choice_panel(&mut self, strip: Rect, unit: f32) {
+        let w = (460.0 * unit).min(strip.w - 16.0 * unit);
+        let h = 100.0 * unit;
+        let r = Rect::new((strip.w - w) / 2.0, strip.y - h - 8.0 * unit, w, h);
+        let (inner, _) = chrome::window(r, tr("Battle"), Skin::Marble, false);
+        let gap = 12.0 * unit;
+        let bw = (inner.w - 3.0 * gap) / 2.0;
+        let by = inner.y + inner.h - 52.0 * unit;
+        if button(inner.x + gap, by, bw, 40.0 * unit, tr("Watch the battle"), true) {
             self.choose(Choice::Watch);
         }
-        if button(bar.x + w + gap, bar.y, w, bar.h, tr("Skip the battle"), true) {
+        if button(inner.x + 2.0 * gap + bw, by, bw, 40.0 * unit, tr("Skip the battle"), true) {
             self.choose(Choice::Skip);
         }
     }
@@ -565,11 +580,7 @@ impl WatchView {
         if button(s.play.x, s.play.y, s.play.w, s.play.h, if self.battle_paused { tr("Play") } else { tr("Pause") }, true) || key(KeyCode::Space) {
             self.battle_paused = !self.battle_paused;
         }
-        for (i, r) in s.speeds.iter().enumerate() {
-            if toggle_button(r.x, r.y, r.w, r.h, &format!("{}×", SPEEDS[i]), self.speed == i) {
-                self.set_speed(i);
-            }
-        }
+        self.speed_tabs(s);
         if button(s.exit.x, s.exit.y, s.exit.w, s.exit.h, tr("Skip"), true) {
             self.skip_battle();
         }

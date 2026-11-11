@@ -1326,6 +1326,46 @@ fn a_scripted_market_visit_buys_sells_and_hires_and_plays_back() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The sample record of the screenshots: 30 game days on РК1. Each day the hero walks to the nearest
+/// explored town, every third day to the nearest army (the battle it meets is fought), and at a
+/// market he buys and sells one good; each day's end is recorded as a check.
+fn sample_record(dt: &DtInstall, c: &Arc<Content>) -> std::path::PathBuf {
+    let map = map_named(dt, "РК1");
+    let mut d = Driver::new(start(c, &map, Some(7)), true);
+    d.checks = true;
+    d.max = true;
+    d.g.max_ai = true;
+    d.g.gold = 5000;
+    let dir = scratch("sample-record");
+    let sess = super::session::Session::start(&dir, &d.g, &header_for(&d.g, dt)).unwrap();
+    d.g.replay = Some(sess.clone());
+    d.session = Some(sess.clone());
+    let mut f = Frames::new(DT_A, BUDGET_A);
+    let opening = d.g.drain_events();
+    d.settle(opening);
+    for day in 0..30u32 {
+        let here = d.g.tile();
+        let mut towns: Vec<_> = d.g.world.locations.iter().filter(|l| d.g.fog.explored(l.tile) && l.tile != here).map(|l| l.tile).collect();
+        towns.sort_by_key(|&t| (d.g.world.map.distance(t, here), t));
+        let _ = towns.into_iter().take(12).any(|t| d.walk_to(&mut f, t));
+        if day % 3 == 1 {
+            let here = d.g.tile();
+            let mut armies: Vec<_> = d.g.world.armies.iter().map(|a| a.tile(&d.g.world.map)).filter(|&t| d.g.fog.explored(t) && t != here).collect();
+            armies.sort_by_key(|&t| (d.g.world.map.distance(t, here), t));
+            let _ = armies.into_iter().take(8).any(|t| d.walk_to(&mut f, t));
+        }
+        if d.g.location.is_some() && d.g.market_here().is_some_and(|m| !m.is_empty()) {
+            if d.g.buy(0).is_ok() {
+                let _ = d.g.sell(0);
+            }
+            d.hash();
+        }
+        d.play_days(&mut f, 1);
+    }
+    sess.finish();
+    dir.join(sess.file_name())
+}
+
 /// Writes a sample record (a 25-day campaign with a battle) to `RAZDOR_SAMPLE_RECORD`, for the
 /// watching screen's screenshots (`snapshot::stage_watch`). Run by hand: `--ignored`.
 #[test]
@@ -1334,7 +1374,14 @@ fn write_a_sample_record_for_the_screenshots() {
     let Some(dt) = base() else { return };
     let Ok(out) = std::env::var("RAZDOR_SAMPLE_RECORD") else { return };
     let c = Arc::new(Content::from_dt(&dt));
-    let (path, _) = recorded_session(&dt, &c, "РК1", 25, "sample-record");
+    // RAZDOR_SAMPLE_SIMPLE: the 25-day campaign with one battle (plays back to its end).
+    let path = if std::env::var_os("RAZDOR_SAMPLE_SIMPLE").is_some() { recorded_session(&dt, &c, "РК1", 25, "sample-simple").0 } else { sample_record(&dt, &c) };
     std::fs::copy(&path, &out).unwrap();
+    let marks = super::watch::ReplayPlayer::open(&path, c.clone(), Some(&dt.dir)).unwrap().marks;
+    let battles = marks.iter().filter(|m| matches!(m.kind, super::watch::MarkKind::Battle { .. })).count();
+    let towns = marks.iter().filter(|m| matches!(m.kind, super::watch::MarkKind::Town { .. })).count();
+    eprintln!("SAMPLE marks {} battles {battles} towns {towns}", marks.len());
+    let mut whole = super::watch::ReplayPlayer::open(&path, c.clone(), Some(&dt.dir)).unwrap();
+    eprintln!("SAMPLE play_to_end {:?}", whole.play_to_end().map_err(|d| format!("{d:?}")));
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

@@ -280,6 +280,10 @@ fn stage_replay(app: &mut App, step: Option<&str>) -> Result<(), String> {
 /// its first mismatch).
 fn stage_watch(app: &mut App, arg: Option<&str>) -> Result<(), String> {
     use super::watch::{Mode, WatchView};
+    // `RAZDOR_SNAPSHOT_LANG=ru`: the player's language for the shots (the Russian catalog, no override).
+    if std::env::var("RAZDOR_SNAPSHOT_LANG").is_ok_and(|l| l == "ru") {
+        super::language::set(None);
+    }
     let path = std::env::var("RAZDOR_WATCH").map_err(|_| "RAZDOR_WATCH names no replay file")?;
     let content = app.dt_content.clone().ok_or("no install")?;
     let install = razdor::rules::save::install_dir();
@@ -298,7 +302,9 @@ fn stage_watch(app: &mut App, arg: Option<&str>) -> Result<(), String> {
     for step in arg.unwrap_or("").split(',').filter(|s| !s.is_empty()) {
         match step.split_once('=') {
             Some(("day", n)) => {
-                view.seek_day(n.parse::<u64>().map_err(|_| "bad day")?);
+                // The day counts from the record's first day, as the timeline does.
+                let (first, _) = view.days();
+                view.seek_day(first + n.parse::<u64>().map_err(|_| "bad day")?);
                 while view.mode() == Mode::Seeking {
                     view.tick(1.0 / 30.0);
                 }
