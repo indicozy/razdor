@@ -34,39 +34,62 @@ impl Player {
         Player { game, battle: None, music_pick: WORLD_THEME, dt, frames: 0 }
     }
 
-    /// The game at its recorded place: time runs (frames of `dt`) until the game stands at `target`
-    /// (the stretch and the asks it had at the action), at rest.
+    /// The game at its recorded place: time runs (frames of `dt`) until the game stands at the end
+    /// of the recorded stretch (`target.stretch`), with the events the screen holds for its glide
+    /// delivered (the screen decides only then, as the driver does). An action or a check is
+    /// recorded after its stretch's paused step is finished (`actions::scope`), so the place is the
+    /// stretch's end: the arrivals taken inside it are not compared, as a frame's budget only
+    /// changes how the stretch is split. A music change is the exception: it falls at its exact
+    /// arrival (the ask), and the time stops there to draw it.
     pub fn advance_to(&mut self, target: Stamp) -> Result<(), String> {
         loop {
-            self.draw_music();
-            // At the place, at rest, with the events the screen holds for its glide delivered
-            // (the screen decides only then, as the driver does).
-            if self.game.stamp() == target && !self.game.ai_pending() && self.game.held.is_empty() {
-                return Ok(());
+            if self.game.stretches == target.stretch && self.game.held.is_empty() {
+                // The paused step of the recorded stretch, if any, is finished: the action (or the
+                // check) does the same at its place.
+                self.game.replay_stop_before = Some(target.stretch + 1);
+                self.game.finish_pause();
+                self.game.replay_stop_before = None;
+                if self.game.stretches == target.stretch && !self.game.ai_pending() && self.game.held.is_empty() {
+                    return Ok(());
+                }
             }
-            if self.game.stretches > target.stretch {
-                return Err(format!("the game passed the recorded place {target:?} (now {:?})", self.game.stamp()));
-            }
-            self.frames += 1;
-            if self.frames > MAX_FRAMES {
-                return Err(format!("the game never reached {target:?}"));
-            }
-            // Stop before the stretch after the recorded one begins, and at the recorded ask.
-            self.game.replay_stop_before = Some(target.stretch + 1);
-            self.game.replay_stop = if target.ask > 0 && self.game.stretches == target.stretch { Some(target.ask) } else { None };
-            let _ = self.game.tick_shown_within(self.dt, &mut || true);
-            self.game.replay_stop = None;
-            self.game.replay_stop_before = None;
+            self.tick_toward(target.stretch, None)?;
         }
     }
 
-    /// The map music's changes recorded at this place are drawn here (the draw is the rules').
-    fn draw_music(&mut self) {
-        while let Some(pick) = hook::playback_music_due(self.game.stamp()) {
-            let (next, _) = self.game.music_rotate(self.music_pick);
-            debug_assert_eq!(next, pick, "the recorded track");
-            self.music_pick = next;
+    /// The game at a recorded arrival: time runs until the game has taken exactly `target.ask`
+    /// arrivals in the recorded stretch. A music change falls there, mid-step, as it did live
+    /// (`Game::music_rotate` records its stamp), so the time stops at the arrival and the change is
+    /// drawn by the caller.
+    pub fn advance_exact(&mut self, target: Stamp) -> Result<(), String> {
+        loop {
+            if self.game.stamp() == target && self.game.held.is_empty() {
+                return Ok(());
+            }
+            if self.game.stretches == target.stretch && self.game.asks > target.ask {
+                return Err(format!("the game passed the recorded place {target:?} (now {:?})", self.game.stamp()));
+            }
+            let ask = (self.game.stretches == target.stretch && target.ask > self.game.asks).then_some(target.ask);
+            self.tick_toward(target.stretch, ask)?;
         }
+    }
+
+    /// One frame of the game's time, stopped before the stretch after `stretch` begins and, when
+    /// given, at the arrival `ask` of the stretch.
+    fn tick_toward(&mut self, stretch: u64, ask: Option<u32>) -> Result<(), String> {
+        if self.game.stretches > stretch {
+            return Err(format!("the game passed the recorded stretch {stretch} (now {:?})", self.game.stamp()));
+        }
+        self.frames += 1;
+        if self.frames > MAX_FRAMES {
+            return Err(format!("the game never reached stretch {stretch} (now {:?})", self.game.stamp()));
+        }
+        self.game.replay_stop_before = Some(stretch + 1);
+        self.game.replay_stop = ask;
+        let _ = self.game.tick_shown_within(self.dt, &mut || true);
+        self.game.replay_stop = None;
+        self.game.replay_stop_before = None;
+        Ok(())
     }
 
     /// Applies one recorded entry (an engine record is consumed by the hooks, or is a check).
@@ -76,10 +99,23 @@ impl Player {
                 self.advance_to(e.at)?;
                 self.game.finish_pause();
                 self.game.armies_snap();
+                if let Some((b, _)) = self.battle.as_ref() {
+                    self.game.battle_write_back(b);
+                }
                 let got = super::snapshot::state_hash(&self.game);
                 if got != *hash {
                     return Err(format!("drift at {:?}: the state hashes {got:016x}, recorded {hash:016x}", e.at));
                 }
+                Ok(())
+            }
+            Input::Engine(EngineInput::Music { pick }) => {
+                // The change is drawn at its place in the stream (after the entries before it).
+                self.advance_exact(e.at)?;
+                let (next, _) = self.game.music_rotate(self.music_pick);
+                if next != *pick as usize {
+                    return Err(format!("the music track is {next}, recorded {pick}"));
+                }
+                self.music_pick = next;
                 Ok(())
             }
             Input::Engine(_) => Ok(()),
@@ -114,10 +150,14 @@ impl Player {
     /// player's turn or at the end.
     fn run_enemy(&mut self) -> Result<(), String> {
         let Some((b, thinker)) = self.battle.as_mut() else { return Ok(()) };
+        // Every action is written back into the armies (the screen does so each frame, the
+        // interface after each action: `Game::battle_write_back`).
+        self.game.battle_write_back(b);
         if b.outcome() == Outcome::Ongoing && b.active().is_none() {
             return Ok(());
         }
         for _ in 0..MAX_BATTLE_STEPS {
+            self.game.battle_write_back(b);
             if b.outcome() != Outcome::Ongoing {
                 return Ok(());
             }
@@ -159,9 +199,9 @@ pub fn play(game: Game, entries: &[Entry], dt: f32) -> Result<Game, String> {
     hook::install_playback(entries);
     let mut p = Player::new(game, dt);
     let mut result = Ok(());
-    for e in entries {
+    for (i, e) in entries.iter().enumerate() {
         if let Err(err) = p.apply(e) {
-            result = Err(err);
+            result = Err(format!("entry {i} ({:?}, {:?}): {err}", e.at, e.input));
             break;
         }
     }

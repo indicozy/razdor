@@ -101,6 +101,7 @@ impl Game {
     /// (0x4b8f63), so one those changes allow opens as the window closes, not at the next
     /// step.
     pub fn window_closed(&mut self) -> Vec<Event> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::MapWindowClosed);
         if !self.scan_on_close {
             return Vec::new();
         }

@@ -29,6 +29,11 @@ pub enum PlayerAction {
     Answer { yes: bool },
     WindowClosed,
     ReleaseUnshown { shown: bool },
+    /// The event chord a window opens with (`Game::event_chord`): one draw of the generator, made
+    /// by the screen as the window opens (a playback makes the same draw there).
+    Chord,
+    /// A window over the map was closed (`Game::window_closed`): the events its change allows are checked.
+    MapWindowClosed,
     ForceEvent { id: u16 },
     /// A hall's quest or rumour taken (`Game::take_hall_entry`), re-entering and entering a building.
     TakeHall { id: u16 },
@@ -113,14 +118,19 @@ impl Drop for Scope {
     }
 }
 
-/// The scope of a `Game` entry point: records `make()` (after the paused step, if any, is
-/// finished, so the stamp is the place the action came at) when it is the outermost action of an
-/// unpaused, non-engine call.
+/// The scope of a `Game` entry point: when it is the outermost action of a non-engine call, the
+/// paused step (if any) is finished first, whether or not a recorder is attached (an action never
+/// sees a half-played step, with or without recording: the recording changes nothing), and then
+/// `make()` is recorded at that place when recording is on.
 pub fn scope(g: &mut Game, make: impl FnOnce() -> PlayerAction) -> Scope {
-    if hook::enter_action() && hook::recording() && !hook::in_engine() {
+    if hook::enter_action() && !hook::in_engine() {
         g.finish_pause();
-        let at = g.stamp();
-        hook::record_input(Some(at), super::stream::Input::Player(make()));
+        // What the action records (its own engine records too) is at the place it came at.
+        hook::set_now(g.stamp());
+        if hook::recording() {
+            let at = g.stamp();
+            hook::record_input(Some(at), super::stream::Input::Player(make()));
+        }
     }
     Scope { _private: () }
 }
@@ -156,6 +166,12 @@ pub fn apply_game(g: &mut Game, a: &PlayerAction) {
         }
         PlayerAction::ReleaseUnshown { shown } => {
             g.release_unshown_window(*shown);
+        }
+        PlayerAction::Chord => {
+            g.event_chord();
+        }
+        PlayerAction::MapWindowClosed => {
+            g.window_closed();
         }
         PlayerAction::ForceEvent { id } => {
             g.force_event(*id);
@@ -434,6 +450,8 @@ pub fn put_action(out: &mut Vec<u8>, a: &PlayerAction) {
             u(out, 8);
             put_flag(out, *shown);
         }
+        Chord => u(out, 51),
+        MapWindowClosed => u(out, 52),
         ForceEvent { id } => {
             u(out, 9);
             put_u(out, *id as u64);
@@ -601,6 +619,8 @@ pub fn get_action(r: &mut Reader) -> Result<PlayerAction, String> {
         6 => Answer { yes: get_flag(r)? },
         7 => WindowClosed,
         8 => ReleaseUnshown { shown: get_flag(r)? },
+        51 => Chord,
+        52 => MapWindowClosed,
         9 => ForceEvent { id: r.u()? as u16 },
         10 => TakeHall { id: r.u()? as u16 },
         11 => Reenter,
@@ -669,14 +689,14 @@ pub fn get_action(r: &mut Reader) -> Result<PlayerAction, String> {
 const NOT_PLAYER_GAME: &[&str] = &[
     // Time and the frame loop: the engine's own, recorded as its stamps.
     "tick", "tick_shown", "tick_shown_within", "tick_within", "finish_pause", "wait", "pass_time", "begin_pass",
-    "take_music_wait", "music_rotate", "event_chord", "refresh_meeting_marks", "take_clashes", "drain_events",
+    "take_music_wait", "music_rotate", "refresh_meeting_marks", "take_clashes", "drain_events",
     
     // Setup and tools: a map or a game set up for play, the cheat console's own state, the UI snapshots.
     "set_origin", "set_map", "seed_events", "reveal_area", "reveal", "note_settings",
     "note_cheat", "keep_run_mark", "set_xp_correction", "set_simulation", "set_building_defence", "auto_arrange",
     "set_bench", "set_improved_ai", "set_bare_strengths", "set_strength_defence", "reseat_all",
     "apply_carry_over", "from_campaign", "restart",
-    "stop", "cut_walk", "cut_wait", "apply_max", "play_max_move", "max_step", "set_max_stakes", "window_closed",
+    "stop", "cut_walk", "cut_wait", "apply_max", "play_max_move", "max_step", "set_max_stakes",
     // The battle's engine, reached through the battle's own actions (recorded there).
     "battle_write_back", "skip_prediction",
     // The building window's and the events' engine.

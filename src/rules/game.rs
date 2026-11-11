@@ -504,8 +504,9 @@ pub struct Game {
     /// Stretches of time so far (a hero's step, a wait tick): which window an event came in.
     #[serde(skip)]
     pub(crate) stretches: u64,
-    /// The arrivals asked for so far in this stretch ([`Game::tick_within`]): with `stretches`,
-    /// the place of a music change for a replay (`rules::recording`). Not saved.
+    /// The arrivals taken so far in this stretch ([`Game::tick_within`]; a refused ask is not
+    /// counted): with `stretches`, the place of a music change for a replay (`rules::recording`).
+    /// Not saved.
     #[serde(skip)]
     pub(crate) asks: u32,
     /// A replay's driver stops the frame at this ask, so its music change falls there (`None`
@@ -1500,6 +1501,7 @@ impl Game {
     /// shipyard window plays as it opens: `Random(3)` of the game's generator (interface.md
     /// §14), so opening one shifts every later roll.
     pub fn event_chord(&mut self) -> usize {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::Chord);
         self.rng.random(3) as usize
     }
 
@@ -1764,13 +1766,15 @@ impl Game {
         let stop = self.replay_stop;
         let mut asks = self.asks;
         let events = {
-            // Every arrival asked for is counted (`asks`); a replay's stop returns false at its ask.
+            // Every arrival the tick takes is counted (`asks`): a refusal (the frame's budget, or a
+            // replay's stop at its recorded count) takes none, so the count is the same whatever the
+            // frames' budgets were, and a recorded place is the same place in playback.
             let mut counted = || {
-                asks += 1;
-                if Some(asks) == stop {
+                if Some(asks) == stop || !keep_going() {
                     return false;
                 }
-                keep_going()
+                asks += 1;
+                true
             };
             self.tick_inner(real_dt, &mut counted)
         };

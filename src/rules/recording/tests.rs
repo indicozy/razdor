@@ -167,6 +167,8 @@ impl Driver {
         b.begin();
         let mut thinker = MaxThinker::new(Team::Enemy);
         for _ in 0..AUTO_BATTLE_STEPS {
+            // Every action is written back into the armies, as the screen does each frame.
+            self.g.battle_write_back(&b);
             if b.outcome() != Outcome::Ongoing {
                 break;
             }
