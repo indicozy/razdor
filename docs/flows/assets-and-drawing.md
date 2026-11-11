@@ -251,7 +251,7 @@ Clicks still centre the map: the minimap is a plan, not turned.
 
 The small trees and bushes (object class 9) sway: `draw_object` draws them through
 `draw_leaning`, the top corners moved by `rng::tree_sway` (a triangle wave of ±2.5 px over
-3.57 s, 0x4c99d0) of the plant's phase, the third draw of its jitter (`rng::plant_jitter`).
+3.57 s, 0x4c99d0) of the plant's phase, and its jitter (`rng::plant_jitter`), made once when the object is built (`Decoration::new`), not per draw.
 
 Map figures (`draw_figure`) are drawn premultiplied (`chrome::premultiplied`): the sheets hold
 premultiplied colour, as the original's ONE / INVSRCALPHA blend reads them (0x4c9ef6); the
@@ -719,6 +719,15 @@ world rectangle, 3 to 7 birds in a V (`bird_points`); drawn in screen space afte
 skipped over unexplored cells. Not drawn in the bent (first-person) view. Off, the map is pixel-identical (checked
 against the commit before the feature). The mill sails do not turn: the depth cut gives no reliable sails card
 (`docs/OPEN_QUESTIONS.md`).
+- **Drawing cost** (the speed-up pass, 2026-11-12; the picture is the same). `TileMap::objects_in_rect` reads the
+  objects of a column and row rectangle from 16 x 16-cell chunks built with the map, so the world pass visits only the
+  drawn chunks, not every object. `draw_world_in` reads the screen's DPI, the map animation's time and level and the form
+  sun once into a `FrameCtx`, which `draw_object` and `draw_picture_form` take. A hill's flow key is the map's generation,
+  not a hash of every hill each frame. `Fog` has a change counter (`mark`, the only writer of the bits,
+  renews it; serde skips it and equality ignores it) that the battle backdrop, the minimap and the shadow map key on, in
+  place of hashing the explored set. The sharp draw refills one thread-local mesh per use (`SPRITE_MESH`, `SCALED_MESH`,
+  `sharp.rs`) and computes a rotation's sin and cos once per sprite.
+
 ## Sound and music
 
 - `src/dt/sound.rs`: `SoundTable::from_ini` (`_Sounds.ini`: `[Backgrounds]` music keys,

@@ -167,11 +167,11 @@ a scope are kept out by the engine scopes; the scripted sessions (`tests.rs`) ar
 
 `.rzreplay`: the magic `RZRP`, the format version (1), then blocks `[tag u8][length u32 LE][payload]`:
 the header (JSON `ReplayHeader`); a keyframe (tag 2: the state's hash and its packed snapshot,
-every 10 game days, a check in playback); a segment's start (tag 3: a keyframe that begins a new
+every 10 game days, a check in playback; a day keyframe waits for 30 s of wall time since the last one, a battle's is not held back); a segment's start (tag 3: a keyframe that begins a new
 segment, at a new game or a load); the entries of the day (tag 4, `stream::encode`); a battle's start
 (tag 5, `BattleStart` JSON, for a cut-out). A segment is its start and the entries after it. The
 frame serialises a keyframe (`snapshot::capture`: at rest, the JSON and the hash, 0.3 to 1 ms);
-the writer thread packs it (bzip2, 4 to 46 ms) and writes every block in order. The entries of a
+the writer thread packs it (bzip2 at level 2, `save::pack_with`; the `.rzsave` keeps its own level) and writes every block in order. The entries of a
 game day are written when the day changes (`Session::pump`, once a frame).
 
 The session (`Session`) is attached to the game (`Game::replay`) and to the thread's hook (its

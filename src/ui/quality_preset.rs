@@ -181,11 +181,12 @@ pub fn next(s: &Settings) -> Preset {
 /// The row's value: the preset's name, or «Своё».
 pub fn label(p: Option<Preset>) -> &'static str {
     match p {
-        Some(Preset::Original) => tr("Graphics preset original"),
-        Some(Preset::Low) => tr("Graphics preset low"),
-        Some(Preset::Medium) => tr("Graphics preset medium"),
-        Some(Preset::High) => tr("Graphics preset high"),
-        None => tr("Graphics preset custom"),
+        // The catalog keys are the English names (the English UI shows them as they are).
+        Some(Preset::Original) => tr("Original"),
+        Some(Preset::Low) => tr("Low"),
+        Some(Preset::Medium) => tr("Medium"),
+        Some(Preset::High) => tr("High"),
+        None => tr("Custom settings"),
     }
 }
 

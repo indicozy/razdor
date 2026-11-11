@@ -30,7 +30,7 @@ except what the screen value, the `App` fields and a few `thread_local!`s hold.
    `razdor::rules::save::warm_meta_cache` (see [saves.md](saves.md)).
 3. `App::new` (`src/ui/mod.rs`): the install's `Content` (`Content::from_dt`), every map of
    the install parsed into `ScenarioEntry`s, `Audio::new` (settings are loaded here).
-4. `ui::snapshot::stage` (only with `RAZDOR_SCENE`), then the loop: `App::frame`,
+4. `ui::snapshot::stage` (only with `RAZDOR_SCENE`), then the loop (each iteration first refreshes `ui::frame_state`, the window's size and DPI, which the windows and the map read instead of asking the window): `App::frame`,
    `App::draw_fps`, `ui::cursor::draw` (the pointer is drawn last, over everything), and
    `next_frame().await`. Quitting goes through `exit_now` (it skips C `atexit` handlers,
    which crashed on exit). Every quit (the main menu's «Выход», the game's «Выйти из игры»,
@@ -937,7 +937,7 @@ window opened with) and the five groups (`main_menu::Group`) as tabs of one sett
 army list is `minimap::army_list`, drawn under the minimap window and clicked like its own
 centring (`view.look`); it takes the room above the bar and scrolls with the wheel.
 The world map's drawing resolution «Разрешение карты» (`map_render_scale`, 100%, 75%, 50%; `map_scale`, see
-`assets-and-drawing.md`, «The map's resolution») is always shown, right after the map zoom row. «Ограничение FPS»
+`assets-and-drawing.md`, «The map's resolution») is always shown, right after the map zoom row. The first row of the Map group is «Качество графики» (`Row::GraphicsQuality`, `ui/quality_preset.rs`): a click steps Оригинал, Низкое, Среднее, Высокое and back to Оригинал (from «Своё», to Оригинал). `quality_preset::set` sets the resolution, the light and its quality, the shadows, the mist, the water (on, its rate and quality), the weather, the living map and the map animation at once. Nothing stores the choice: `quality_preset::current` gives the first preset whose values all hold in the settings, or «Своё» (`None`) when none does, so a hand change shows «Своё» and an install keeps its settings. A fresh install has `Settings::default()`, which is the «Оригинал» look (a test checks it). «Ограничение FPS»
 (`frame_cap`, `Settings::frame_cap`: off, 30 or 60; `frame_cap::next`) follows it. `apply_options` pushes it into
 `frame_cap::set_setting`, and the loop (`main.rs`, right after the frame is presented) calls `Pacer::pace` with `frame_cap::current()`:
 the frames start no closer than 1/cap s apart, the sleep is the rest of the period less 1 ms and the last 1 ms is

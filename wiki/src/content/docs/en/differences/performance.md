@@ -51,6 +51,27 @@ The **"Map animation"** setting (the "Map" tab, the row before "Mist instead of 
 
 The game rules do not change.
 
+## Graphics quality
+
+The **"Graphics quality"** row is the first one on the **"Map"** tab. A click steps through the presets: "Original", "Low", "Medium", "High", and back to "Original". One row sets all the settings below at once. The row shows "Custom settings" when one of them has been changed by hand. A new install starts on "Original", the original's look with no new effects. An installed game keeps its own settings.
+
+| Preset | Map resolution | Light | Shadows | Mist | Water | Weather and living map | Map animation |
+|---|---|---|---|---|---|---|---|
+| Original | 100% | off | "Painted" | "No" | off | off | "On" |
+| Low | 75% | off | "Painted" | "Simple" | off | off | "Near only" |
+| Medium | 100% | on, medium light quality | "From the sun" | "Simple" | on, every second frame, medium quality | on | "Near only" |
+| High | 100% | on, high light quality | "From the sun" | "Clouds" | on, every frame, high quality | on | "On" |
+
+On a weak phone, start with "Low". Changing any one of these settings by itself makes the row show "Custom settings".
+
+## Map drawing speed
+
+The map draws faster, especially in 2.5D and when zoomed out. The picture is the same and the game rules do not change. What has been sped up:
+
+*   The map's objects (trees, buildings, rocks, hills) are kept by areas: each frame draws only the areas on the screen, not every object on the map.
+*   What does not change from frame to frame is worked out once: the sway of trees and plants, the screen size, the turn of objects in 2.5D.
+*   The water does not recount every hill on the map each frame, the fog does not compare the whole map again, and the sprites are drawn without new memory for each sprite.
+
 ## Large Maps
 
 Before acceleration (Razdor 1.3.5). Synthetic tests on a single CPU core (time for one game tick, when AI moves armies and checks events):
