@@ -2056,7 +2056,7 @@ mod sight_tests {
         let look = vec2(30.0, 40.0);
         for yaw in [0.0, 45.0, 90.0, 180.0, 270.0, 315.0] {
             for far in [FarGround::Up, FarGround::Horizon, FarGround::Globe] {
-                let cam = TiltCamera::first_person(look, SCALE, FRAME, yaw, far);
+                let cam = TiltCamera::first_person(look, SCALE, FRAME, yaw, far, view25::THIRD_TUNE);
                 let poly = sight_footprint(&cam, FRAME);
                 assert!(inside(&poly, look), "yaw {yaw}, {far:?}: the hero's cell is in view");
             }
@@ -2067,7 +2067,7 @@ mod sight_tests {
     fn no_ground_point_is_farther_than_the_reach() {
         // The first-person view's top sees sky: its points stop at the reach.
         let look = vec2(30.0, 40.0);
-        let cam = TiltCamera::first_person(look, SCALE, FRAME, 20.0, FarGround::Up);
+        let cam = TiltCamera::first_person(look, SCALE, FRAME, 20.0, FarGround::Up, view25::THIRD_TUNE);
         for p in sight_footprint(&cam, FRAME) {
             assert!((p - cam.target).length() <= SIGHT_REACH + 1e-3, "{p:?} is past the reach");
         }
