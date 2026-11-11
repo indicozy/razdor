@@ -812,6 +812,12 @@ fn a_recorded_campaign_plays_to_its_end_and_seeks_to_any_day() {
         let open = || ReplayPlayer::open(&path, c.clone(), Some(&dt.dir)).unwrap();
         let mut whole = open();
         assert!(whole.marks.iter().any(|m| matches!(m.kind, MarkKind::Battle { .. })), "{prefix}: the battle is marked");
+        // A battle's mark is the place its start entry stands at: a seek there reaches the battle's choice.
+        let file = super::file::read(&path).unwrap();
+        for m in whole.marks.iter().filter(|m| matches!(m.kind, MarkKind::Battle { .. })) {
+            let entry = &file.segments[m.at.seg].entries[m.at.index];
+            assert!(matches!(entry.input, Input::Player(PlayerAction::StartBattle)), "{prefix}: the battle's mark is its start: {entry:?}");
+        }
         assert!(whole.marks.iter().filter(|m| m.kind == MarkKind::Day).count() >= 3, "{prefix}: the days are marked");
         whole.play_to_end().unwrap_or_else(|d| panic!("{prefix}: {d:?}"));
         assert!(whole.ended());
@@ -1272,8 +1278,6 @@ fn a_scripted_market_visit_buys_sells_and_hires_and_plays_back() {
     let mut f = Frames::new(DT_A, BUDGET_A);
     let opening = d.g.drain_events();
     d.settle(opening);
-    // The nearest building with goods the hero can walk to (a walk to an unreachable one begins
-    // nothing); its goods are the market's.
     // The planner keeps to the explored land: the hero walks to the nearest seen buildings until one
     // with goods is reached (each walk shows more of the land).
     let mut reached = false;
@@ -1320,4 +1324,17 @@ fn a_scripted_market_visit_buys_sells_and_hires_and_plays_back() {
     p.play_to_end().unwrap_or_else(|d| panic!("the visit plays back: {d:?}"));
     assert_eq!(state_hash(p.game().unwrap()), state_hash(&d.g), "the visit's end is the live game");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Writes a sample record (a 25-day campaign with a battle) to `RAZDOR_SAMPLE_RECORD`, for the
+/// watching screen's screenshots (`snapshot::stage_watch`). Run by hand: `--ignored`.
+#[test]
+#[ignore]
+fn write_a_sample_record_for_the_screenshots() {
+    let Some(dt) = base() else { return };
+    let Ok(out) = std::env::var("RAZDOR_SAMPLE_RECORD") else { return };
+    let c = Arc::new(Content::from_dt(&dt));
+    let (path, _) = recorded_session(&dt, &c, "РК1", 25, "sample-record");
+    std::fs::copy(&path, &out).unwrap();
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

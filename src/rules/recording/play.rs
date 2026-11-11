@@ -217,6 +217,9 @@ impl Player {
             self.run_enemy()?;
         }
         let (b, _) = self.battle.take().ok_or("a battle to resolve, none under way")?;
+        if b.outcome() == Outcome::Ongoing {
+            return Err("the battle is not over at its recorded end".into());
+        }
         self.game.resolve_battle(&b);
         Ok(())
     }

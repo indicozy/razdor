@@ -426,7 +426,8 @@ impl ReplayPlayer {
         let r = self.start_at(at, bytes);
         hook::take_playback();
         r?;
-        self.seek = Some(seek);
+        // A seek its checkpoint already reaches is no seek: the next pump plays from there, as any play.
+        self.seek = (!self.seek_reached(seek)).then_some(seek);
         Ok(())
     }
 
@@ -552,7 +553,8 @@ impl ReplayPlayer {
                     for loc in g.world.locations.iter().filter(|l| l.owned() && !owned.contains(&l.id)) {
                         marks.push(Mark { day, kind: MarkKind::Town { name: loc.name.clone() }, at });
                     }
-                    if !hero_down && !g.squad[0].alive() {
+                    // The hero's fall is the army's: no unit of his is left (the defeat, `Game::army_fallen`).
+                    if !hero_down && g.army_fallen() {
                         hero_down = true;
                         marks.push(Mark { day, kind: MarkKind::HeroDown, at });
                     }
@@ -564,8 +566,12 @@ impl ReplayPlayer {
                 owned = now_owned;
                 first = false;
             }
-            for (after, start) in &seg.battles {
-                marks.push(Mark { day: start.day, kind: battle_mark(start, &self.content), at: Place { seg: s, index: *after } });
+            // A battle's mark is its start's entry, the place a seek stops before the battle begins (the
+            // battles of a segment are in the order of its start entries).
+            let starts: Vec<usize> = seg.entries.iter().enumerate().filter(|(_, e)| matches!(e.input, Input::Player(PlayerAction::StartBattle))).map(|(i, _)| i).collect();
+            for (k, (after, start)) in seg.battles.iter().enumerate() {
+                let index = starts.get(k).copied().unwrap_or(*after);
+                marks.push(Mark { day: start.day, kind: battle_mark(start, &self.content), at: Place { seg: s, index } });
             }
         }
         marks.sort_by_key(|m| m.at);
