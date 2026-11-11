@@ -34,6 +34,10 @@ const TAG_BATTLE: u8 = 5;
 /// A keyframe's payload before its packed snapshot: the stamp (12), the game day (8), the hash (8).
 const KEYFRAME_HEAD: usize = 28;
 
+/// The bzip2 level of a keyframe's packed snapshot (1 to 9): keyframes are many, so a small block packs fast. The reader
+/// unpacks any level.
+const KEYFRAME_LEVEL: u32 = 2;
+
 /// A job for the writer thread.
 enum Job {
     /// A block with its payload as it is written.
@@ -138,7 +142,7 @@ impl Writer {
                             Some(out)
                         }
                         Job::Keyframe { tag, at, day, hash, json } => {
-                            let packed = match crate::rules::save::pack(&json) {
+                            let packed = match crate::rules::save::pack_with(&json, bzip2::Compression::new(KEYFRAME_LEVEL)) {
                                 Ok(p) => p,
                                 Err(_) => continue,
                             };

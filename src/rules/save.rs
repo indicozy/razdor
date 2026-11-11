@@ -446,7 +446,13 @@ fn embedded_map(game: &Game) -> Option<&[u8]> {
 
 /// The bytes of a save file holding `json` (bzip2-compressed).
 pub fn pack(json: &[u8]) -> Result<Vec<u8>, SaveError> {
-    let mut enc = bzip2::write::BzEncoder::new(Vec::new(), bzip2::Compression::default());
+    pack_with(json, bzip2::Compression::default())
+}
+
+/// [`pack`] at `level` (bzip2's block size, 1 to 9). Any level unpacks the same way; the replay's keyframes use a low one,
+/// as they are written often.
+pub fn pack_with(json: &[u8], level: bzip2::Compression) -> Result<Vec<u8>, SaveError> {
+    let mut enc = bzip2::write::BzEncoder::new(Vec::new(), level);
     enc.write_all(json)?;
     Ok(enc.finish()?)
 }

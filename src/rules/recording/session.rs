@@ -19,6 +19,14 @@ use crate::rules::game::Game;
 /// Game days between two keyframes.
 pub const KEYFRAME_DAYS: u64 = 10;
 
+/// The least wall-clock time between two day keyframes (a battle's request is not held back): the snapshot is taken on the
+/// game's thread, so a long game of many short days writes at most one a few seconds apart. Zero in the tests, which run
+/// their days fast.
+#[cfg(not(test))]
+const KEYFRAME_MIN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+#[cfg(test)]
+const KEYFRAME_MIN_INTERVAL: std::time::Duration = std::time::Duration::ZERO;
+
 struct Inner {
     writer: Writer,
     name: String,
@@ -27,6 +35,8 @@ struct Inner {
     day: u64,
     /// The day of the last keyframe (a segment's start counts).
     keyframe_day: u64,
+    /// When the last keyframe was written (a segment's start counts), for [`KEYFRAME_MIN_INTERVAL`].
+    last_keyframe: std::time::Instant,
 }
 
 impl Inner {
@@ -84,7 +94,7 @@ impl Session {
 
     fn begin(writer: Writer, name: String, game: &Game) -> Result<Session, String> {
         let day = game.clock.day_index();
-        let inner = Inner { writer, name, pending: Vec::new(), day, keyframe_day: day };
+        let inner = Inner { writer, name, pending: Vec::new(), day, keyframe_day: day, last_keyframe: std::time::Instant::now() };
         let (json, hash) = capture(game)?;
         inner.writer.keyframe(true, game.stamp(), day, hash, json);
         let inner = Arc::new(Mutex::new(inner));
@@ -118,18 +128,24 @@ impl Session {
         for start in hook::take_battle_starts() {
             g.writer.battle(&start);
         }
-        let due = day >= g.keyframe_day + KEYFRAME_DAYS;
+        let due = day >= g.keyframe_day + KEYFRAME_DAYS && g.last_keyframe.elapsed() >= KEYFRAME_MIN_INTERVAL;
         if due || hook::take_keyframe_request() {
             // A keyframe is a checkpoint: the playback compares it after the stop's snap (which
             // only runs when one is due), so it is taken when no snap is due, and the next frame
-            // asks again otherwise.
-            match capture(game) {
-                Ok((json, hash)) if !game.snap_due => {
-                    g.flush();
-                    g.writer.keyframe(false, game.stamp(), day, hash, json);
-                    g.keyframe_day = day;
+            // asks again otherwise. The check comes first: a capture is the whole state's JSON, and
+            // it is not taken while the snap waits.
+            if game.snap_due {
+                hook::request_keyframe();
+            } else {
+                match capture(game) {
+                    Ok((json, hash)) => {
+                        g.flush();
+                        g.writer.keyframe(false, game.stamp(), day, hash, json);
+                        g.keyframe_day = day;
+                        g.last_keyframe = std::time::Instant::now();
+                    }
+                    Err(_) => hook::request_keyframe(),
                 }
-                _ => hook::request_keyframe(),
             }
         }
     }
