@@ -17,7 +17,7 @@ The other tabs are Razdor's:
 | **Battle and army** | the hero's walking speed; the battle animation speed; "Hit shake" (the battle field shakes on a hit, view only; off by default); battle AI strength; unit battle participation; keeping the formation after battle; max guards casters; army arrangement; experience on promotion |
 | **Screen** | the screen (windowed or full); the interface scale; the bottom bar size (phone, held sideways only); the font; the text size; large message windows; screen orientation (Android); the language |
 | **Controls** | keyboard shortcuts (the **"Keys..."** button) |
-| **Other** | updates and the **"Check now"** button; updating the game from an archive; "Summary after a map" ([Chronicle](/razdor/wiki/en/differences/chronicle/)) |
+| **Other** | updates and the **"Check now"** button; updating the game from an archive; "Summary after a map" ([Chronicle](/razdor/wiki/en/differences/chronicle/)); "Battery saver" (when nothing moves on the map, frames are drawn 10 a second; off by default) |
 
 Short explanations stand under their rows. Long ones sit behind a **"?"** button at the end of the row: click it (on a computer, hovering is enough) and the explanation appears. A click elsewhere or Esc closes it.
 

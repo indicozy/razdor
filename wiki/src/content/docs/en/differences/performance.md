@@ -37,6 +37,10 @@ Measurements on an RTX 5060 Ti GPU (single CPU core, 1920x1080):
 
 The budget for a single frame at 60 FPS is 16.7 ms. Razdor uses only about 1-2% of this time on campaign maps. Screen resolution (1920x1080 vs 1024x768) has almost no impact on the load.
 
+## Battery saver
+
+The **"Battery saver"** setting (the "Other" tab, off by default). When nothing happens on the map — no windows are open, the hero neither walks nor waits, no armies are shown, the camera and the pointer stand still, and you press nothing — new frames are drawn 10 times a second instead of at full rate. As soon as something happens, the frames run at full rate again. The game rules do not change.
+
 ## Large Maps
 
 Before acceleration (Razdor 1.3.5). Synthetic tests on a single CPU core (time for one game tick, when AI moves armies and checks events):

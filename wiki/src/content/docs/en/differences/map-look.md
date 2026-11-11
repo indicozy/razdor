@@ -119,6 +119,8 @@ The mill sails do not turn yet: the building pictures have no reliable place for
 
 Chimney smoke, waving flags and birds over the map.
 
+**Far zoom.** When the map is zoomed all the way out, the flags, the smoke and the birds do not animate: at that scale they cannot be seen anyway. Very small objects are not drawn, slightly larger ones fade in smoothly.
+
 ## Buildings in 2.5D
 
 This is part of the **2.5D** view (the **"Map"** tab, the **"Map view"** row, off by default), not a separate row. In this view the buildings stand on the ground, not in the air. A building of several parts, such as a castle or a village, is drawn as one picture: when the map turns, the parts do not drift apart, and the far ones stand behind the near ones. A slight shift between the parts gives depth. The shadows lie on the ground.
