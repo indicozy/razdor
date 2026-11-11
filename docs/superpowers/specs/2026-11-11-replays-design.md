@@ -104,6 +104,23 @@ music changes at a wall clock and «Максимум» plays back from its recor
 budgets to the same states; recording changes no state and no normal save byte; a stream costs about
 6 bytes an action with its stamp.
 
+## Phase 2 (recorder and file): done
+
+- Player actions are recorded at the rules' entry points (their bodies open `actions::scope` /
+  `battle_scope`), with an engine scope around ticks, scripts and restores; a test checks that every
+  mutating public method is recorded or listed (`docs/flows/replays.md`, "Player actions").
+- The file `.rzreplay` (`recording/file.rs`): header, segments, keyframes every 10 game days and at
+  each battle's start, the battle's start block; the writer thread packs and writes.
+- The session (`recording/session.rs`): appended per game day, `save_point` for the saves,
+  `resume` on a load (cut at the save's place, a new segment from the loaded state).
+- Saves carry `SaveMeta::replay`; deleting the last save of a replay deletes the file.
+- The setting «Записывать игру» (on by default), in «Прочее»; off writes no file.
+- Measured: 30 game days, 32 KB (РК1) and 111 KB (ДС2); a keyframe costs the frame 0.3 to 1 ms.
+
+Not done: the difftest action lists recorded and played back; a session exit hook (the last day's
+entries are lost if the game closes mid-day with no save); the wiki page; the owner's approval of
+the «Прочее» row's screenshots.
+
 ## Open
 
 - **Frame schedules (holes 9 and 10): closed in phase 1b.** Every frame schedule (2 to 240 fps,

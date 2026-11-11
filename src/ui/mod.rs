@@ -4,6 +4,7 @@ pub mod audio;
 pub mod battle_view;
 pub mod building_view;
 pub mod chrome;
+pub mod recording;
 pub mod clock;
 pub mod console;
 pub mod cursor;
@@ -1368,6 +1369,7 @@ impl App {
 
     fn frame_content(&mut self) {
         display::follow_settings(&self.audio.settings);
+        recording::follow(&mut self.game, &self.audio.settings);
         // A minimap resized or moved by the player (or set in the settings) is kept, and written
         // to the settings file once the drag ends: a phone's app may be killed with no clean exit.
         let moving = minimap::resizing();
