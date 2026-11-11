@@ -3018,7 +3018,7 @@ fn draw_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera, ctx: &FrameCtx
             return;
         }
         frame_probe::sprite(size.x, size.y);
-        draw_picture_form(cam, ctx.sun, atlas, src, at, size, faded(WHITE), zoom);
+        draw_picture_form(ctx.sun, atlas, src, at, size, faded(WHITE), zoom);
         return;
     }
     let s = cam.scale;
@@ -3175,7 +3175,7 @@ fn form_colour_in(sun: FormSun, p: Vec2, base: Color) -> Option<Color> {
 
 /// A picture's quad (its rectangle `src` of the atlas, drawn at `at` in `size`) with the sun's form shading at its
 /// four corners (`form_colour_in`; the colour is interpolated across the quad). Without the shading, `sharp::draw`.
-fn draw_picture_form(cam: &Camera, sun: Option<FormSun>, atlas: &Atlas, src: Rect, at: Vec2, size: Vec2, base: Color, zoom: f32) {
+fn draw_picture_form(sun: Option<FormSun>, atlas: &Atlas, src: Rect, at: Vec2, size: Vec2, base: Color, zoom: f32) {
     let corners = [(vec2(-1.0, -1.0), vec2(0.0, 0.0)), (vec2(1.0, -1.0), vec2(1.0, 0.0)), (vec2(1.0, 1.0), vec2(1.0, 1.0)), (vec2(-1.0, 1.0), vec2(0.0, 1.0))];
     let colours: [Option<Color>; 4] = corners.map(|(p, _)| sun.and_then(|s| form_colour_in(s, p, base)));
     if colours.iter().any(Option::is_none) {
@@ -3760,7 +3760,7 @@ fn draw_building(l: &Location, art: Option<&DtArt>, cam: &Camera, outlined: bool
         }
         match living_of(cam, art, l).filter(|(_, ls)| ls.body().is_some()) {
             Some((_, ls)) => draw_living_picture(ls, atlas, r, at, zoom),
-            None => draw_picture_form(cam, form_sun_of(cam), atlas, r, at, vec2(r.w * zoom, r.h * zoom), faded(WHITE), zoom),
+            None => draw_picture_form(form_sun_of(cam), atlas, r, at, vec2(r.w * zoom, r.h * zoom), faded(WHITE), zoom),
         }
     } else {
         let (w, h) = (l.size.0 as f32 * cam.scale, (l.size.1 as f32 * cam.cell_size().y).max(cam.scale * 0.8));
