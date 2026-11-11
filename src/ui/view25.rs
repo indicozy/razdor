@@ -33,10 +33,12 @@ pub const FREE_PITCH_MAX: f32 = 89.9;
 pub const FP_PITCH: f32 = 12.0;
 pub const FP_FOV: f32 = 55.0;
 pub const FP_FLAT: f32 = 3.0;
-/// The arc's radius of the roll up, and of the curve down: a tight roll (the trailer's) gives a
-/// horizon near the middle of the frame, the wide curve of a planet would put it near the top and
-/// the footprint would need the far ground to the horizon (about 170 units).
-pub const FP_RADIUS: f32 = 8.0;
+/// The arc's radius of the roll up, and of the curve down. The roll up is wide (24 cells: a tight roll
+/// turned the far ground to square-on within about ten cells, too fast to follow; the trailer's 8 was
+/// that tight roll). A tight curve down (the trailer's) gives a horizon near the middle of the frame,
+/// the wide curve of a planet would put it near the top and the footprint would need the far ground to
+/// the horizon (about 170 units).
+pub const FP_RADIUS: f32 = 24.0;
 pub const FP_RADIUS_DOWN: f32 = 60.0;
 pub const FP_BEND_UP: f32 = 78.0;
 pub const FP_BEND_DOWN: f32 = -60.0;
@@ -50,7 +52,7 @@ pub const EYE_NEAR: f32 = 2.5;
 /// The width of the eyes view's fade-out band beyond [`EYE_NEAR`] (cells): a sprite is translucent over it.
 pub const EYE_FADE_BAND: f32 = 0.5;
 pub const EYE_FLAT: f32 = 2.5;
-pub const EYE_RADIUS_UP: f32 = 8.0;
+pub const EYE_RADIUS_UP: f32 = 24.0;
 pub const EYE_RADIUS_DOWN: f32 = 60.0;
 pub const EYE_BEND_UP: f32 = 78.0;
 pub const EYE_BEND_DOWN: f32 = -60.0;
@@ -539,28 +541,12 @@ impl Bend {
         }
     }
 
-    /// The sheet's unit normal at ground point `g`: up on the flat part, turned away from the slope
-    /// on the arc (toward the eye for both bends, since the profile's forward step is always positive).
-    pub fn normal_at(&self, g: Vec2) -> Vec3 {
-        let s = (g - self.pivot).dot(forward(self.yaw_deg)).min(self.limit);
-        // A small step along the profile: its tangent (du, dh) in the forward and up plane.
-        let step = 0.01;
-        let (u0, h0) = self.profile(s);
-        let (u1, h1) = self.profile(s + step);
-        let f = forward(self.yaw_deg);
-        // The normal of the tangent (du, dh) is (−dh, du) in (forward, up): at the flat part, up.
-        let n = vec3(f.x, 0.0, f.y) * -(h1 - h0) + Vec3::Y * (u1 - u0);
-        if n.length_squared() > 1e-12 {
-            n.normalize()
-        } else {
-            Vec3::Y
-        }
-    }
-
-    /// The point `height` world units above the sheet at ground point `g`, along the sheet's normal
-    /// ([`Bend::normal_at`]): a raised sheet over a bent view lies on this.
+    /// The point `height` world units straight up from the sheet at ground point `g`: a raised sheet
+    /// over a bent view lies on this, as the flat view's raised sheet lies straight up from the
+    /// ground ([`raised_ground_model`]). Along the normal instead, a steep part of the bend would
+    /// carry the far mist's texels over the explored ground nearer the eye (the first-person view).
     pub fn lift(&self, g: Vec2, height: f32) -> Vec3 {
-        self.point(g) + self.normal_at(g) * height
+        self.point(g) + Vec3::Y * height
     }
 
     /// The ground distance `s` whose profile has forward distance `u` (the inverse of the
@@ -1359,35 +1345,13 @@ mod tests {
     }
 
     #[test]
-    fn the_bend_s_normal_is_up_on_the_flat_part_and_turns_toward_the_eye_on_the_arc() {
-        for max_deg in [78.0f32, -60.0] {
-            let bend = bend(max_deg);
-            // On the flat part (and behind the pivot): straight up.
-            for g in [vec2(20.5, 13.25), vec2(20.5 - 2.0, 13.25)] {
-                assert!((bend.normal_at(g) - Vec3::Y).length() < 1e-4, "flat {g:?}: {:?}", bend.normal_at(g));
-            }
-            // On the arc: a unit normal, at most 90° from up, perpendicular to the sheet's tangent.
-            for k in 1..=20 {
-                let g = vec2(20.5, 13.25) + forward(0.0) * (3.0 + k as f32 * 0.25);
-                let n = bend.normal_at(g);
-                assert!((n.length() - 1.0).abs() < 1e-4 && n.y > 0.0, "arc {g:?}: {n:?}");
-                let (u0, h0) = bend.profile(3.0 + k as f32 * 0.25 - 0.01);
-                let (u1, h1) = bend.profile(3.0 + k as f32 * 0.25 + 0.01);
-                let tangent = vec3(0.0, h1 - h0, 0.0) + vec3(0.0, 0.0, 0.0) + vec3(forward(0.0).x, 0.0, forward(0.0).y) * (u1 - u0);
-                assert!(tangent.dot(n).abs() < 1e-3, "arc {g:?}: tangent {tangent:?} normal {n:?}");
-            }
-        }
-    }
-
-    #[test]
-    fn a_lift_is_the_height_along_the_normal_from_the_sheet() {
+    fn a_lift_is_straight_up_from_the_sheet_so_a_texel_stays_over_its_ground() {
         for max_deg in [78.0f32, -60.0] {
             let bend = bend(max_deg);
             for k in 0..=12 {
                 let g = vec2(20.5, 13.25) + forward(0.0) * (k as f32 * 0.8) + right(0.0) * 0.6;
                 let (p, lifted) = (bend.point(g), bend.lift(g, 0.75));
-                assert!(((lifted - p).length() - 0.75).abs() < 1e-4, "k {k}: {p:?} -> {lifted:?}");
-                assert!(lifted.y > p.y, "a raised point is higher, k {k}");
+                assert!((lifted - p - Vec3::Y * 0.75).length() < 1e-4, "k {k}: {p:?} -> {lifted:?}");
             }
             // Zero is the sheet itself.
             let g = vec2(21.0, 14.0);
@@ -1455,5 +1419,15 @@ mod homography_tests {
             let py = (h[1][0] * x + h[1][1] * y + h[1][2]) / w;
             assert!((px - g.x).abs() < 0.01 && (py - g.y).abs() < 0.01, "({x},{y}): {px},{py} vs {g:?}");
         }
+    }
+
+    #[test]
+    fn the_first_person_roll_up_rises_gently_from_the_flat_part() {
+        // Eight cells past the flat part the far ground is under 1.5 cells high: the tight roll of
+        // radius 8 was 3.7 there, so the horizon went from flat to square-on too fast.
+        let bend = Bend::new(Vec2::ZERO, 0.0, FP_FLAT, FP_RADIUS, FP_BEND_UP);
+        let (_, h) = bend.profile(FP_FLAT + 8.0);
+        assert!(h < 1.5, "the roll is {h} cells high 8 cells past its flat part");
+        assert!(bend.profile(FP_FLAT + 8.0).0 > FP_FLAT + 7.0, "the roll keeps the ground's distance");
     }
 }

@@ -414,8 +414,8 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
     centre (the hero when followed) from beyond it, so the centre stands at two thirds of the frame's height;
     the distance is fitted so the hero's ground is drawn at the flat map's scale (the depth
     `frame.h / 2 / (tan(fov/2) · scale)`). Yaw, Q and E, the two-finger twist and the compass are as in 2.5D.
-  - The bend: `view25::Bend` with a signed `max_deg`. Up (`FP_BEND_UP` 78°, radius `FP_RADIUS` 8) rolls the
-    sheet to square-on with the eye; down (`FP_BEND_DOWN` -60°, radius `FP_RADIUS_DOWN` 60) curves it away.
+  - The bend: `view25::Bend` with a signed `max_deg`. Up (`FP_BEND_UP` 78°, radius `FP_RADIUS` 24: a wide roll, the
+    tight radius 8 turned the far ground square-on within ten cells, too fast) rolls the sheet to square-on with the eye; down (`FP_BEND_DOWN` -60°, radius `FP_RADIUS_DOWN` 60) curves it away.
     The down bend's `limit` is its horizon, where the eye's sight line grazes it (`Bend::with_horizon`): past
     it the sheet is not drawn, not picked, and `Bend::point` stands a point on the horizon's line (`hidden`
     keeps a sprite there from showing). A tight radius puts the horizon near mid-frame; a wide planet's curve
@@ -521,8 +521,14 @@ the ground (`mist::draw_ground`, `Sheets` 1, no parallax: opaque where unexplore
 0.42 × the darkness, less the higher they stand, and only the billows above the mean show (`smoothstep(0.44, 0.72)`); a
 raised sheet's rim fades over the last two texels of the fog texture, so it does not end in a hard edge past the map. In 2.5D a
 raised sheet is the ground's model lifted straight up (`view25::raised_ground_model`); in the bent view it is a mesh of its own on
-the sheet's normal (`bent_mist_meshes`, `view25::Bend::normal_at` and `lift`, lifted and faded out over the last three cells
-before the horizon, alpha 0 past it). The raised sheets are drawn over the ground's mist and under the reveals, as the mist is.
+straight up from the sheet (`bent_mist_meshes`, `view25::Bend::lift`, the same lift as the flat sheet; lifted and faded out
+over the last three cells before the horizon, alpha 0 past it). Along the sheet's normal it was wrong: on a steep part of the
+roll the far mist's texels moved toward the eye and covered the explored ground there. The raised sheets are drawn over the ground's mist and under the reveals, as the mist is.
+- **Bent views and explored land** (the owner's report: the first-person view covered the explored land). In a bent view the
+  weather draws in the ground's picture (`draw_world_in`, under the sprites) with the flat projection of the sheet's own ground:
+  the screen-level homography is the flat plane's, which misplaces it on the roll. A bank that would stand in front of explored
+  ground (`bank_hides_explored`: the land 1 and 2 cells ahead along the view is explored) is left out in a bent view only.
+  The flat and 2.5D views are byte-identical to before.
 - **Banks at the contour** (2.5D and first-person): `mist::contour` finds where the shown darkness crosses `mist::FRONTIER`
   (0.5) between two 4-neighbour cells (marching squares on the cell centres: `Crossing`, its fraction `t`, which side is dark).
   `world_view::push_banks` stands two banks a crossing, 0.8 cell (`BANK_OUT`) past the contour into the unexplored side, at
