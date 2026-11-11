@@ -5143,16 +5143,31 @@ pub fn backdrop_lit(game: &Game, assets: &Assets, lit: Option<BarButton>) {
 fn backdrop_world(game: &Game, assets: &Assets) {
     let full = map_area();
     let cam = backdrop_camera(game, full);
+    // The frame's light and relief, read and set as `world_frame` does, so the map under a window keeps its hour.
+    let light = frame_light_of(game);
+    let relief = light.and_then(|_| daylight::frame_relief());
+    lights::set_frame(light.map(|l| lights::Frame::new(point_lights(game, assets.dt.as_ref(), &cam, l.glow), Vec2::from(cam.centre()), l.glow, lights::quality())));
     map_scale::draw(map_render_scale(), rgb(10, 12, 10), || {
-        draw_world(game, assets, &cam, None, None, None, false, NO_VEIL, None);
-        if cam.tilt.is_none() {
+        draw_world(game, assets, &cam, None, None, None, false, NO_VEIL, relief);
+        // The same order as `world_frame`: the light, the flat fog, the building windows, the weather.
+        let flat = cam.tilt.is_none();
+        let mist_light = flat && mist::on();
+        if !mist_light {
+            draw_daylight(game, &cam, light);
+        }
+        if flat {
             cam.draw_fog(game, &[]);
         }
+        if mist_light {
+            draw_daylight(game, &cam, light);
+        }
+        if light.is_some() {
+            draw_building_windows(game, assets, &cam);
+        }
         // The weather as over the map (`world_frame`), so it keeps falling behind the window; a bent view
-        // draws it in its ground's picture (`draw_world_in`), as the map does. No light is drawn here, so
-        // no tint.
+        // draws it in its ground's picture (`draw_world_in`), as the map does.
         if cam.tilt.is_none_or(|t| t.cam.bend.is_none()) {
-            draw_weather(game, assets, &cam, None, &[]);
+            draw_weather(game, assets, &cam, light, &[]);
         }
         draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.2));
     });
