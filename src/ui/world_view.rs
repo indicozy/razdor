@@ -1427,12 +1427,20 @@ fn bent_view(cam: &Camera, tilt: &Tilt, bend: view25::Bend, f: &impl Fn(&Camera)
     let space = cam.tilted_space();
     let (sw, sh) = (space.view.w, space.view.h);
     // The picture's pixels per 2D pixel: the screen's at the pivot, shrunk to fit the largest
-    // target the GPU takes (`MAX_BENT_SIDE`).
+    // target the GPU takes (`MAX_BENT_SIDE`), then to the picture's fraction (`bent_ground_scale`).
     let k = (tilt.cam.pivot_scale(cam.view) / cam.scale).max(0.05);
     let k = k.min(MAX_BENT_SIDE / sw.max(sh).max(1.0));
+    let ground = bent_ground_scale();
+    let k = k * ground;
     let (pw, ph) = ((sw * k).ceil().max(1.0) as u32, (sh * k).ceil().max(1.0) as u32);
     let target = bent_target(pw, ph);
+    // A smaller picture is stretched over the sheet: linear, so its texels blend (the full-size one stays
+    // nearest, as before). The ground's sharp draws take the picture's pixels per 2D pixel for their band.
+    target.texture.set_filter(if ground < 1.0 { FilterMode::Linear } else { FilterMode::Nearest });
+    let raster = super::sharp::raster();
+    super::sharp::set_raster(raster * ground);
     super::render_cache::fill_space(&target, space.view, || with_pass(Pass::Ground, || f(&space)));
+    super::sharp::set_raster(raster);
     let (w, h) = (screen_width(), screen_height());
     super::sharp::count_break();
     set_camera(&View3d(view25::window_matrix(cam.view, w, h) * tilt.cam.view_proj(cam.view)));
@@ -1443,6 +1451,16 @@ fn bent_view(cam: &Camera, tilt: &Tilt, bend: view25::Bend, f: &impl Fn(&Camera)
 
 /// The largest side of a bent view's picture in pixels.
 const MAX_BENT_SIDE: f32 = 8192.0;
+
+/// The default fraction of the bent views' ground picture (of the screen's pixel density at the pivot).
+const DEFAULT_BENT_GROUND: f32 = 1.0;
+
+/// The bent views' ground picture as a fraction of the screen's pixel density at the pivot, 0.5 to 1.0:
+/// `RAZDOR_BENT_GROUND` (a snapshot's or a profiling A/B's switch, read once), else [`DEFAULT_BENT_GROUND`].
+fn bent_ground_scale() -> f32 {
+    static SCALE: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *SCALE.get_or_init(|| std::env::var("RAZDOR_BENT_GROUND").ok().and_then(|v| v.trim().parse::<f32>().ok()).map_or(DEFAULT_BENT_GROUND, |f| f.clamp(0.5, 1.0)))
+}
 
 /// The target of a bent view's picture of `w` × `h` pixels, kept by size: the views fill and draw
 /// their picture one after the other, so one target serves them all.

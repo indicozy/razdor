@@ -77,6 +77,11 @@ pub fn draw_scale(tex_size: Vec2, params: &DrawTextureParams) -> Vec2 {
     dest.abs() / source * PERSPECTIVE.with(std::cell::Cell::get) * RASTER.with(std::cell::Cell::get)
 }
 
+/// The raster factor in effect (`set_raster`'s last value, 1 when none).
+pub fn raster() -> f32 {
+    RASTER.with(std::cell::Cell::get)
+}
+
 /// Sets the target's pixels per screen pixel while the world is drawn at a lower resolution
 /// (`map_scale`; 1 otherwise): the draws' `Scale` follows the pixels they land on.
 pub fn set_raster(f: f32) {
