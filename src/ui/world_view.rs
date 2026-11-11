@@ -5622,7 +5622,7 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
             }
             // The buildings' lit windows, after the night's tint (`draw_building_windows`).
             if light.is_some() {
-                draw_building_windows(game, assets, &cam);
+                draw_building_windows(game, assets, &cam, Veil { shows: &shows, now: show_now });
             }
             // Razdor's «Погода» (off by default): the land's weather over the drawn map, after the fog and the
             // light, over the explored ground only (`draw_weather`).
@@ -5898,7 +5898,7 @@ fn fog_visible(game: &Game, cam: &Camera, world: Vec2) -> f32 {
 /// The lit windows of the buildings in view (`sharp::windows_pass`): each building picture (each card of a
 /// cut building, in 2.5D) is drawn again over the map, after the night's tint, with only its emissive layer
 /// adding light. Visible cells only (`fog_visible`). Nothing is drawn at day or with the light off.
-fn draw_building_windows(game: &Game, assets: &Assets, cam: &Camera) {
+fn draw_building_windows(game: &Game, assets: &Assets, cam: &Camera, veil: Veil) {
     let Some(art) = assets.dt.as_ref() else { return };
     let (Some(atlas), Some(mask)) = (art.map_atlas(), art.building_emissive()) else { return };
     let night = lights::with_frame(|f| f.map_or(0.0, |f| f.night));
@@ -5906,6 +5906,9 @@ fn draw_building_windows(game: &Game, assets: &Assets, cam: &Camera) {
         return;
     }
     let map = &game.world.map;
+    // A building's windows are drawn with its picture's fog shade (`Shade::at` on its foot, as `shade_of` in
+    // `draw_world_in`): a window over the unexplored mist fades with the picture, not at full brightness.
+    let shade = |c: &Camera, foot: Vec2| -> f32 { Shade { fog: &game.fog, veil: Veil { shows: veil.shows, now: veil.now } }.at(c, foot) };
     super::sharp::windows_pass(&mask, night, || {
         in_view_sprites(cam, |c| {
             let zoom = c.scale / PX;
@@ -5921,15 +5924,19 @@ fn draw_building_windows(game: &Game, assets: &Assets, cam: &Camera) {
                 if fog_visible(game, c, vec2(sx / n, sy / n)) < 0.01 {
                     continue;
                 }
+                let foot = building_foot(l, c);
+                let vis = shade(c, foot);
+                // The flat view's sprites take no fade (`standing` draws them as they are): a window in the fade band is left out there.
+                if vis <= 0.0 || (c.tilt.is_none() && vis < 1.0) {
+                    continue;
+                }
                 if let Some((_, r, cards)) = card_building(l, Some(art)).filter(|_| c.tilt.is_some()) {
                     let origin = building_sprite_origin(l, r.w, r.h, c);
-                    let foot = building_foot(l, c);
-                    draw_building_group(c, atlas, r, cards, origin, zoom, foot, 1.0, None, false);
+                    draw_building_group(c, atlas, r, cards, origin, zoom, foot, vis, None, false);
                 } else if let Some(r) = atlas.building(l.picture.0, l.picture.1) {
-                    let base = building_foot(l, c);
                     let at = building_sprite_origin(l, r.w, r.h, c);
                     let params = DrawTextureParams { dest_size: Some(vec2(r.w * zoom, r.h * zoom)), source: Some(r), ..Default::default() };
-                    standing(c, base, base, 1.0, Rect::new(at.x, at.y, r.w * zoom, r.h * zoom), || super::sharp::draw(&atlas.texture, at.x, at.y, WHITE, params));
+                    standing(c, foot, foot, vis, Rect::new(at.x, at.y, r.w * zoom, r.h * zoom), || super::sharp::draw(&atlas.texture, at.x, at.y, WHITE, params));
                 }
             }
         });
