@@ -133,7 +133,7 @@ pub struct SaveMeta {
     pub battle_foe: Option<String>,
     /// The replay file the game was recording to and its length then (`recording::session`): a
     /// load resumes the file there. None for a save made with recording off, or in older versions.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "crate::rules::recording::file::replay_place")]
     pub replay: Option<crate::rules::recording::file::ReplayRef>,
 }
 
@@ -1102,7 +1102,8 @@ pub fn delete(path: &Path) -> std::io::Result<()> {
     std::fs::remove_file(path)?;
     set_pinned(path, false)?;
     if let Some(r) = replay {
-        if let Some(games) = path.parent().and_then(|d| d.parent()) {
+        // Checked again before the file is touched (the name is untrusted; see `file::replay_name_ok`).
+        if let Some(games) = path.parent().and_then(|d| d.parent()).filter(|_| crate::rules::recording::file::replay_name_ok(&r.file)) {
             if !replay_referenced(games, &r.file) {
                 let _ = std::fs::remove_file(crate::rules::recording::session::replays_dir(games).join(&r.file));
             }

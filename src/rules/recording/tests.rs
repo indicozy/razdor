@@ -781,3 +781,62 @@ fn deleting_the_last_save_of_a_replay_deletes_it() {
     assert!(!file.exists(), "the last save's replay goes with it");
     let _ = std::fs::remove_dir_all(&games);
 }
+
+/// The crafted names a shared save may carry: none is a name the game makes.
+const CRAFTED: &[&str] = &["../x", "../../x", "/etc/x", "a/b.rzreplay", "replay-1.rzreplay/..", "..\\x", "C:\\x", "replay-1.rzreplay/", "", "replay-.rzreplay", "replay-1x.rzreplay", "replay-1.rzreplay.bak"];
+
+/// A replay name is checked before any file is touched: a crafted name in a save loads the save
+/// with no replay, and a resume or a removal with it touches nothing outside the replays folder.
+#[test]
+fn replay_names_are_checked_before_any_file_is_touched() {
+    use super::file::{replay_name_ok, ReplayRef};
+    assert!(replay_name_ok("replay-1234.rzreplay"), "the names the game makes are accepted");
+    for name in CRAFTED {
+        assert!(!replay_name_ok(name), "{name:?} is refused");
+    }
+    let Some(dt) = base() else { return };
+    let c = Arc::new(Content::from_dt(&dt));
+    let map = map_named(&dt, "РК1");
+    let root = scratch("names");
+    let games = root.join("games");
+    let dir = super::session::replays_dir(&games);
+    std::fs::create_dir_all(&dir).unwrap();
+    let victim = root.join("victim.txt");
+    std::fs::write(&victim, "keep me").unwrap();
+    let d = Driver::new(start(&c, &map, Some(81)), true);
+    let header = header_for(&d.g, &dt);
+    // A save's meta with each crafted place: it loads with no replay.
+    let meta = save::meta_of(&d.g, SaveKind::Manual, "crafted").unwrap();
+    for name in CRAFTED {
+        let mut v = serde_json::to_value(&meta).unwrap();
+        v["replay"] = serde_json::json!({"file": name, "pos": 5});
+        let back: save::SaveMeta = serde_json::from_value(v).unwrap();
+        assert!(back.replay.is_none(), "{name:?} is dropped when the save is read");
+    }
+    // A resume with each crafted name starts a fresh file in the replays folder, cutting nothing.
+    for name in CRAFTED {
+        let sess = super::session::Session::resume(&dir, name, 5, &d.g, &header).unwrap();
+        sess.finish();
+        let made = sess.file_name();
+        assert!(super::file::replay_name_ok(&made), "the fresh file has a game's name");
+        assert!(dir.join(&made).starts_with(&dir));
+    }
+    assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep me", "nothing outside was truncated");
+    // A save whose place names a file outside: deleting it removes the save and nothing else.
+    let manual = games.join("manual");
+    std::fs::create_dir_all(&manual).unwrap();
+    let mut bad = save::meta_of(&d.g, SaveKind::Manual, "bad").unwrap();
+    bad.replay = Some(ReplayRef { file: "../../victim.txt".into(), pos: 0 });
+    let p = manual.join("bad.rzsave");
+    std::fs::write(&p, save::encode(&bad, &d.g).unwrap()).unwrap();
+    save::delete(&p).unwrap();
+    assert!(!p.exists(), "the save is deleted");
+    assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep me", "nothing outside was removed");
+    // A replay-named file that is not a replay is not cut either: a fresh file takes its place.
+    let impostor = dir.join("replay-7.rzreplay");
+    std::fs::write(&impostor, "hello, not a replay").unwrap();
+    let sess = super::session::Session::resume(&dir, "replay-7.rzreplay", 3, &d.g, &header).unwrap();
+    sess.finish();
+    assert_eq!(std::fs::read_to_string(&impostor).unwrap(), "hello, not a replay", "a non-replay file is not cut");
+    let _ = std::fs::remove_dir_all(&root);
+}

@@ -50,11 +50,27 @@ pub struct Writer {
     path: PathBuf,
 }
 
-/// Where a save's position in a replay file is: the file's name and its length then.
+/// Where a save's position in a replay file is: the file's name and its length then. The name is
+/// untrusted (a save is shared): only [`replay_name_ok`] names are ever opened, cut or removed.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ReplayRef {
     pub file: String,
     pub pos: u64,
+}
+
+/// Whether `name` is a replay file name the game makes: `replay-<digits>.rzreplay`, a bare name.
+/// Separators, `..`, absolute and drive paths, and anything else are refused, so a name read from
+/// a save can name nothing outside the replays folder.
+pub fn replay_name_ok(name: &str) -> bool {
+    let Some(digits) = name.strip_prefix("replay-").and_then(|r| r.strip_suffix(".rzreplay")) else { return false };
+    !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Deserializes a save's replay place: a place whose name the game could make; any other place
+/// is none, and the save loads with no replay.
+pub fn replay_place<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<ReplayRef>, D::Error> {
+    use serde::Deserialize;
+    Ok(Option::<ReplayRef>::deserialize(d)?.filter(|r| replay_name_ok(&r.file)))
 }
 
 fn put_block(out: &mut Vec<u8>, tag: u8, payload: &[u8]) {
@@ -73,6 +89,14 @@ impl Writer {
     /// new file gets its magic and header.
     pub fn open(path: &Path, header: &ReplayHeader, truncate_to: Option<u64>) -> Result<Writer, String> {
         let io = |e: std::io::Error| e.to_string();
+        // A file is cut only when it is a replay (its magic): anything else is not touched.
+        if truncate_to.is_some() {
+            let mut head = [0u8; 4];
+            let is_replay = File::open(path).and_then(|mut f| f.read_exact(&mut head)).is_ok() && &head == MAGIC;
+            if !is_replay {
+                return Err("not a replay file to resume".into());
+            }
+        }
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(io)?;
         }

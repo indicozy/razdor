@@ -9,7 +9,7 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use super::file::{ReplayRef, Writer};
+use super::file::{replay_name_ok, ReplayRef, Writer};
 use super::header::ReplayHeader;
 use super::hook::{self, Recorder};
 use super::snapshot::capture;
@@ -61,17 +61,28 @@ fn new_name() -> String {
 impl Session {
     /// A new file in `dir`, starting from `game`'s state (a segment's start).
     pub fn start(dir: &Path, game: &Game, header: &ReplayHeader) -> Result<Session, String> {
-        let name = new_name();
-        Session::open(dir, name, None, game, header)
+        Session::fresh(dir, game, header)
     }
 
     /// `file` cut at `pos` (a save's place in it), then a new segment from `game`'s state (a load).
+    /// The name is checked before any file is touched; a name the game does not make, a missing
+    /// file, or one that is not a replay starts a fresh file instead.
     pub fn resume(dir: &Path, file: &str, pos: u64, game: &Game, header: &ReplayHeader) -> Result<Session, String> {
-        Session::open(dir, file.to_string(), Some(pos), game, header)
+        if replay_name_ok(file) {
+            if let Ok(writer) = Writer::open(&dir.join(file), header, Some(pos)) {
+                return Session::begin(writer, file.to_string(), game);
+            }
+        }
+        Session::fresh(dir, game, header)
     }
 
-    fn open(dir: &Path, name: String, cut: Option<u64>, game: &Game, header: &ReplayHeader) -> Result<Session, String> {
-        let writer = Writer::open(&dir.join(&name), header, cut)?;
+    fn fresh(dir: &Path, game: &Game, header: &ReplayHeader) -> Result<Session, String> {
+        let name = new_name();
+        let writer = Writer::open(&dir.join(&name), header, None)?;
+        Session::begin(writer, name, game)
+    }
+
+    fn begin(writer: Writer, name: String, game: &Game) -> Result<Session, String> {
         let day = game.clock.day_index();
         let inner = Inner { writer, name, pending: Vec::new(), day, keyframe_day: day };
         let (json, hash) = capture(game)?;
