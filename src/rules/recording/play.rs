@@ -10,7 +10,7 @@
 //! runs out of budget is taken up again by the next call, at the same place (the states do not
 //! depend on how the time is split).
 
-use super::actions::{apply_battle, apply_game_events};
+use super::actions::{apply_battle, apply_game_events, BattleAct};
 use super::hook;
 use super::stream::{Entry, EngineInput, Input, PlayerAction, Stamp};
 use crate::rules::battle::{Battle, MaxPoll, MaxThinker, Outcome, Team};
@@ -205,16 +205,20 @@ impl Player {
         Ok(Some(self.start_battle()))
     }
 
-    /// The battle made by [`Player::start_battle_for_view`] comes back to the playback: when its
-    /// last entry is the battle's resolve (`at_resolve`), the battle is resolved here; otherwise
-    /// the rest of the battle is played from its state, as the stream plays it.
-    pub fn return_battle(&mut self, b: Battle, at_resolve: bool) -> Result<(), String> {
-        if at_resolve {
-            self.game.resolve_battle(&b);
-            return Ok(());
-        }
+    /// The battle made by [`Player::start_battle_for_view`] comes back to the playback, from the
+    /// view's state: the actions it did not play (`rest`, when the battle was skipped) are played
+    /// from there as the stream plays them, then the battle is resolved.
+    pub fn return_battle(&mut self, b: Battle, rest: &[BattleAct]) -> Result<(), String> {
         self.battle = Some((b, MaxThinker::new(Team::Enemy)));
-        self.run_enemy()
+        self.run_enemy()?;
+        for act in rest {
+            let (b, _) = self.battle.as_mut().ok_or("a battle to play on, none under way")?;
+            apply_battle(b, act);
+            self.run_enemy()?;
+        }
+        let (b, _) = self.battle.take().ok_or("a battle to resolve, none under way")?;
+        self.game.resolve_battle(&b);
+        Ok(())
     }
 
     /// The enemy's turns, as the screen plays them between the player's actions: «Максимум»'s

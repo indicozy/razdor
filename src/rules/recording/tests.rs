@@ -1133,9 +1133,10 @@ fn replay_names_are_checked_before_any_file_is_touched() {
 }
 
 /// The screen's view of a battle handed out by a pump: the player's turns are the recorded actions
-/// (`next_battle_act`, at most `actions` of them), the enemy's turns are the battle AI's or the
-/// recorded «Максимум» moves, as the battle view plays them. Returns the battle at its stop.
-fn view_battle(p: &mut super::watch::ReplayPlayer, mut b: crate::rules::battle::Battle, actions: usize) -> crate::rules::battle::Battle {
+/// (the queue `actions`, in order, at most `budget` of them), the enemy's turns are the battle AI's
+/// or the recorded «Максимум» moves, as the battle view plays them. Returns the battle at its stop
+/// and the actions it did not play.
+fn view_battle(p: &mut super::watch::ReplayPlayer, mut b: crate::rules::battle::Battle, mut actions: std::collections::VecDeque<super::actions::BattleAct>, budget: usize) -> (crate::rules::battle::Battle, Vec<super::actions::BattleAct>) {
     use crate::rules::battle::{MaxPoll, MaxThinker, Outcome, Team};
     let mut thinker = MaxThinker::new(Team::Enemy);
     let mut done = 0;
@@ -1144,12 +1145,12 @@ fn view_battle(p: &mut super::watch::ReplayPlayer, mut b: crate::rules::battle::
             g.battle_write_back(&b);
             b.outcome() != Outcome::Ongoing
         });
-        if over.unwrap_or(true) || done == actions {
-            return b;
+        if over.unwrap_or(true) || done == budget {
+            return (b, actions.into());
         }
-        let Some(id) = b.active() else { return b };
+        let Some(id) = b.active() else { return (b, actions.into()) };
         if b.fighters[id].team == Team::Player {
-            let act = p.next_battle_act().expect("the recorded action of the player's turn");
+            let act = actions.pop_front().expect("the recorded action of the player's turn");
             super::actions::apply_battle(&mut b, &act);
             done += 1;
         } else {
@@ -1209,8 +1210,9 @@ fn a_recorded_campaign_pumps_in_budgets_hands_out_its_battle_and_seeks_by_budget
             Pump::Battle => {
                 handed += 1;
                 let b = watched.take_battle().expect("the battle is handed out");
-                let b = view_battle(&mut watched, b, usize::MAX);
-                watched.return_battle(b).unwrap_or_else(|d| panic!("return: {d:?}"));
+                let queue = watched.take_battle_actions().into();
+                let (b, rest) = view_battle(&mut watched, b, queue, usize::MAX);
+                watched.return_battle(b, &rest).unwrap_or_else(|d| panic!("return: {d:?}"));
             }
         }
     }
@@ -1223,8 +1225,10 @@ fn a_recorded_campaign_pumps_in_budgets_hands_out_its_battle_and_seeks_by_budget
             Pump::Playing => {}
             Pump::Battle => {
                 let b = skipped.take_battle().expect("the battle is handed out");
-                let b = view_battle(&mut skipped, b, 1);
-                skipped.return_battle(b).unwrap_or_else(|d| panic!("skip: {d:?}"));
+                let queue = skipped.take_battle_actions().into();
+                let (b, rest) = view_battle(&mut skipped, b, queue, 1);
+                assert!(!rest.is_empty() || b.outcome() != crate::rules::battle::Outcome::Ongoing, "the skip leaves actions to play");
+                skipped.return_battle(b, &rest).unwrap_or_else(|d| panic!("skip: {d:?}"));
             }
         }
     }
@@ -1268,7 +1272,6 @@ fn a_scripted_market_visit_buys_sells_and_hires_and_plays_back() {
     let mut f = Frames::new(DT_A, BUDGET_A);
     let opening = d.g.drain_events();
     d.settle(opening);
-    let here = d.g.tile();
     // The nearest building with goods the hero can walk to (a walk to an unreachable one begins
     // nothing); its goods are the market's.
     // The planner keeps to the explored land: the hero walks to the nearest seen buildings until one

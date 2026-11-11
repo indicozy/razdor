@@ -462,13 +462,21 @@ impl ReplayPlayer {
 
     /// The next recorded action of the battle under way, when the entry at the place is one (the
     /// view applies it on the player's turn). None at the battle's resolve or the file's end.
-    pub fn next_battle_act(&mut self) -> Option<BattleAct> {
-        let (i, e) = self.battle_entry()?;
-        let Input::Player(PlayerAction::Battle(act)) = &e.input else { return None };
-        let act = act.clone();
-        self.idx = i + 1;
-        self.last_good = self.place();
-        Some(act)
+    pub fn take_battle_actions(&mut self) -> Vec<BattleAct> {
+        let mut out = Vec::new();
+        while let Some((i, e)) = self.battle_entry() {
+            let act = match &e.input {
+                Input::Player(PlayerAction::Battle(act)) => act.clone(),
+                _ => break,
+            };
+            out.push(act);
+            self.idx = i + 1;
+        }
+        // The place is the battle's resolve, which the view's return consumes.
+        if let Some((i, _)) = self.battle_entry() {
+            self.idx = i;
+        }
+        out
     }
 
     /// The first entry at or after the place that is not one of the battle's own engine records
@@ -489,24 +497,23 @@ impl ReplayPlayer {
     /// (skipped) at any point. At the battle's resolve it is resolved here; otherwise the rest of
     /// the battle is played from its state at once, as the stream plays it. A battle that ended
     /// before its recorded actions did is a drift.
-    pub fn return_battle(&mut self, b: Battle) -> Result<(), Drift> {
-        let at_resolve = self.battle_resolves_next();
-        let resolve_at = self.battle_entry().map(|(i, _)| i);
+    pub fn return_battle(&mut self, b: Battle, rest: &[BattleAct]) -> Result<(), Drift> {
         let here = self.place();
-        if !at_resolve && b.outcome() != Outcome::Ongoing {
+        let Some((resolve, _)) = self.battle_entry().filter(|(_, e)| matches!(e.input, Input::Player(PlayerAction::ResolveBattle))) else {
+            return Err(self.stop_at(here, "the battle's resolve is not at its place".into()));
+        };
+        if !rest.is_empty() && b.outcome() != Outcome::Ongoing {
             return Err(self.stop_at(here, "the battle ended before its recorded actions".into()));
         }
         self.arm();
         let r = match self.player.as_mut() {
-            Some(p) => p.return_battle(b, at_resolve),
+            Some(p) => p.return_battle(b, rest),
             None => Err("no game to give the battle back to".into()),
         };
         hook::take_playback();
         r.map_err(|reason| self.stop_at(here, reason))?;
-        if let (true, Some(i)) = (at_resolve, resolve_at) {
-            self.idx = i + 1;
-            self.last_good = self.place();
-        }
+        self.idx = resolve + 1;
+        self.last_good = self.place();
         Ok(())
     }
 
