@@ -271,11 +271,14 @@ file. A return to the menu has no game left to keyframe: it writes the entries o
 
 - `every_difftest_list_plays_back_from_its_recording` (`difftest/tests.rs`): each list of
   `tools/difftest` is recorded (a check after each action) and played back from the snapshot after
-  its new game. Four lists are known divergent (see `docs/OPEN_QUESTIONS.md`) and are held to failing.
+  its new game; all nine must end in the live state.
+- `a_recorded_campaign_plays_to_its_end_and_seeks_to_any_day` (РК1 and ДС2, 25 days with a battle):
+  plays to its end, seeks to days, and matches the straight playback at each place.
+- `a_random_session_of_sixty_days_plays_back_day_by_day`: seeded random play (walks to towns and to
+  armies, purchase attempts, days) for 60 game days on РК1 and ДС2, every day's end checked.
 - `closing_a_session_keeps_its_pending_entries_and_its_end_state`: a close mid-day keeps the entries.
 - `a_corrupted_checkpoint_stops_the_playback_with_the_version_message`: the drift stop and its place.
 - `a_replay_of_other_rules_still_plays`: a 3-day replay with another rules fingerprint plays to its end.
-- `a_recorded_campaign_plays_to_its_end_and_seeks_to_any_day`: ignored, see `docs/OPEN_QUESTIONS.md`.
 - `ram_while_recording_a_long_session`: ignored; prints the resident memory of 60 days with and without
   recording next to the file's size (RSS is allocator-dominated; the file is about 51 KB for 60 days).
 
@@ -283,7 +286,18 @@ file. A return to the menu has no game left to keyframe: it writes the entries o
 
 - The watching screen (phase 3b UI: the map view, the control strip, the battle choice, the entry
   points) and the battle export (phase 4): not built.
-- The divergences above (four difftest lists, the 25-day campaign).
+- The random session's purchase path and its ДС2 battles (see `docs/OPEN_QUESTIONS.md`).
+
+## What a checkpoint compares (and what the screen does at each)
+
+A checkpoint (a keyframe, a `Check` entry, a day end) is the hash of the state after the stop's
+paused step is finished and its snap is done (`finish_pause`, then `armies_snap`). A keyframe is
+written only when no snap is due (`Session::pump`), so the snap of the next compare is a no-op there
+and the keyframe equals it. The screen's card press is `Battle::act_with` (recorded as
+`BattleAct::ActWith`); the event queue is taken with `Game::drain_events` (recorded as
+`PlayerAction::DrainEvents` when events wait). A contact step is zero-time: `Game::zero_time_next`
+lets a stop before the next stretch pass it, and `Game::chase` reads the route a chase would set, so
+the check does not change the game.
 - A game restored from its save with recording off keeps no session; turning the setting on starts
   a new file from the game's state.
 - The `ui::recording` setting row and the frame hook are UI changes: the owner's approval of the

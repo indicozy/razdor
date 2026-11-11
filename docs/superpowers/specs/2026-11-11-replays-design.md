@@ -146,6 +146,9 @@ the «Прочее» row's screenshots.
 - Not met: a 25-day recorded campaign does not play to its end (drift at stretch 463; ignored test),
   so seeks on a long campaign are not tested. Playback to the end on the real files is only proven
   for 3-day sessions and the difftest lists that are not known divergent.
+  Update (determinism pass, 2026-11-11): all nine difftest lists, the 25-day campaign and a seeded
+  60-day random session on РК1 and ДС2 now play back to the end, every day's end checked; the causes
+  are in `docs/OPEN_QUESTIONS.md` (Settled).
 - Not built (owner's approval first, per the UI rule): the watching screen (the map view with the
   camera on the hero, the control strip, the timeline, the battle choice, «Выход»), the entry buttons
   in the journal, «Итоги» and the load window, the texts, the screenshots, the UI regression and the
