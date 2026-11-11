@@ -26,6 +26,23 @@ Off-screen: run it under Xvfb, with its own runtime folder and log, as
 uses the CPU instead. The shot's size must fit the Xvfb screen (`xvfb-run -s "-screen 0 5120x2160x24"`
 for 5K).
 
+**Frames on the RTX 4060 (no window on the desktop).** Under plain Xvfb the frames come from Mesa's
+llvmpipe, which draws artefacts the GPU does not. The run is therefore wrapped in VirtualGL, which
+draws the window's GL on the 4060's EGL device and reads the picture back to the Xvfb display:
+
+```sh
+# Xvfb on its own display (never :0), with the 5K screen; the 4060 is /dev/dri/card2
+# (PCI 0000:05:00.0: check with `ls -l /sys/class/drm/card*/device`, the GPU is the 4060 by name).
+XDG_RUNTIME_DIR=<scratch, mode 700> Xvfb :77 -screen 0 5120x2160x24 +extension GLX -nolisten tcp &
+DISPLAY=:77 VGL_DISPLAY=/dev/dri/card2 VGL_EGLLIB=/usr/lib64/libEGL.so.1 VGL_GLLIB=/usr/lib64/libGL.so.1 VGL_LOGO=0 \
+  CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=1 \
+  vglrun razdor --trailer shot.shot --out shot.mp4 --hashes shot.hashes
+```
+
+The log's `trailer: renderer:` line names the GPU that drew the frames (`NVIDIA GeForce RTX 4060`; a
+Mesa name means the frames came from the software renderer). `VGL_DISPLAY` must be the 4060's device file:
+the 5060 Ti is `/dev/dri/card3`. Two runs of one shot on the 4060 give the same `--hashes` file.
+
 Errors come out before anything starts, one per line, with the line and the field:
 
 ```

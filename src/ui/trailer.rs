@@ -563,7 +563,37 @@ fn start(app: &mut App, cfg: &Config) -> Result<(), String> {
     app.assets.set_content(game.content.clone());
     app.screen = Screen::WorldMap;
     app.game = Some(game);
+    razdor::diag!("trailer: renderer: {}", gl_renderer());
     Ok(())
+}
+
+/// The GL renderer's name (`GL_RENDERER`), for the run's log: the GPU that draws the frames (under
+/// VirtualGL, the EGL device it opened). Empty when the library cannot be read. Called once the
+/// context is current, at the first frame.
+fn gl_renderer() -> String {
+    type GlGetString = unsafe extern "C" fn(u32) -> *const std::ffi::c_char;
+    const GL_RENDERER: u32 = 0x1F01;
+    // SAFETY: the symbol is `glGetString` from the GL library miniquad has loaded (or loads here);
+    // it is called with a valid name while the context is current.
+    unsafe {
+        let mut lib = libc::dlopen(c"libGL.so.1".as_ptr(), libc::RTLD_NOW | libc::RTLD_NOLOAD);
+        if lib.is_null() {
+            lib = libc::dlopen(c"libGL.so.1".as_ptr(), libc::RTLD_NOW);
+        }
+        if lib.is_null() {
+            return String::new();
+        }
+        let sym = libc::dlsym(lib, c"glGetString".as_ptr());
+        if sym.is_null() {
+            return String::new();
+        }
+        let get: GlGetString = std::mem::transmute::<*mut libc::c_void, GlGetString>(sym);
+        let s = get(GL_RENDERER);
+        if s.is_null() {
+            return String::new();
+        }
+        std::ffi::CStr::from_ptr(s).to_string_lossy().into_owned()
+    }
 }
 
 /// The timed actions due at `t` start now (each once).

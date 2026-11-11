@@ -53,6 +53,10 @@ tests run with `cargo test --release --no-default-features --lib trailer::`.
 
 ## The render's outputs and the determinism check
 
+The run's GL renderer is logged at the first frame (`gl_renderer`, the `trailer: renderer:` line). The
+render on the RTX 4060 without a window is VirtualGL over Xvfb (`docs/trailer-shots.md`): the code draws
+the same frames there, so nothing in the flow depends on it.
+
 Frames are one per `1 / fps` of the frame count. Each frame's hash is the SHA-256 of its RGBA
 bytes (`Sinks::write`); two runs of one shot on one machine must give the same hash file. The
 known sources of difference are the ones the flow would add: a wall-clock read in the world, an
