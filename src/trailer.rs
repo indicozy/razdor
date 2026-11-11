@@ -157,6 +157,9 @@ pub struct Shot {
     /// The timed `battle_speed <t> <x>` lines, in time order; the pace ramps linearly between
     /// them and holds before the first and after the last.
     pub speed_keys: Vec<SpeedKey>,
+    /// `lang ru|en`: the interface and the data texts in that language for this run (as the
+    /// game's language choice sets both). `None`: the player's own language.
+    pub lang: Option<String>,
 }
 
 /// A battle's pace at a time: the header's or a timed line's, with the line it came from.
@@ -196,6 +199,7 @@ impl Default for Shot {
             battle: None,
             battle_speed: None,
             speed_keys: Vec::new(),
+            lang: None,
         }
     }
 }
@@ -377,6 +381,10 @@ fn apply_line(shot: &mut Shot, head: &str, rest: &[&str], line_no: usize) -> Res
             let (t, cell, radius) = parse_reveal(rest)?;
             shot.actions.push(Action::Reveal { t, cell, radius, line: line_no });
         }
+        "lang" => match one(rest).map_err(|e| ("lang", e))? {
+            v @ ("ru" | "en") => shot.lang = Some(v.to_string()),
+            v => return Err(("lang", format!("`{v}`: ru or en"))),
+        },
         "battle" => {
             let v = one(rest).map_err(|e| ("battle", e))?;
             let id: u32 = v.trim_start_matches('A').parse().map_err(|_| ("battle", format!("`{v}`: an army's id (the number --plan prints as A<id>)")))?;
@@ -401,7 +409,7 @@ fn apply_line(shot: &mut Shot, head: &str, rest: &[&str], line_no: usize) -> Res
             }
         }
         other => {
-            return Err(("line", format!("`{other}`: no such line (map, save, hero, seed, size, fps, music, battles, hour, clock, look, ui, fog, view, duration, event, at, walk, pass, reveal, battle, battle_speed)")));
+            return Err(("line", format!("`{other}`: no such line (map, save, hero, seed, size, fps, music, battles, hour, clock, look, ui, fog, view, duration, event, at, walk, pass, reveal, battle, battle_speed, lang)")));
         }
     }
     Ok(())
@@ -1250,5 +1258,16 @@ mod tests {
     fn an_army_target_is_sampled_between_its_keys_like_a_cell() {
         let s = ok("map РК1-Начало пути\nat 0s target=army:36\nat 4s target=army:36+2,0\nduration 4\n");
         assert_eq!(sample_target(&s.keys, 2.0), Some((Target::Army(36, 0.0, 0.0), Target::Army(36, 2.0, 0.0), 0.5)));
+    }
+
+    #[test]
+    fn the_language_line_is_ru_or_en_and_defaults_to_the_players() {
+        assert_eq!(ok("map РК1-Начало пути\nduration 2\n").lang, None);
+        assert_eq!(ok("map РК1-Начало пути\nlang en\nduration 2\n").lang.as_deref(), Some("en"));
+        assert_eq!(ok("map РК1-Начало пути\nlang ru\nduration 2\n").lang.as_deref(), Some("ru"));
+        let e = errs("map РК1-Начало пути\nlang de\nduration 2\n");
+        assert_eq!(e, vec!["line 2: lang: `de`: ru or en".to_string()]);
+        let e = errs("map РК1-Начало пути\nlang\nduration 2\n");
+        assert_eq!(e, vec!["line 2: lang: no value given".to_string()]);
     }
 }

@@ -622,6 +622,11 @@ fn start(app: &mut App, cfg: &Config) -> Result<(), String> {
             super::daylight::set_hold(Some(held));
             log(format!("clock hold at {held:.2} h"));
         }
+        if let Some(code) = &shot.lang {
+            // The game's own language choice, for this run: the interface and the data texts together.
+            super::language::set((code == "en").then(|| razdor::dt::english::ENGLISH.to_string()));
+            log(format!("lang: {code} (for this run only)"));
+        }
         apply_look(&mut app.audio.settings, &shot.look);
         if !shot.look.is_empty() {
             log(format!("look: {:?} (for this run only)", shot.look));

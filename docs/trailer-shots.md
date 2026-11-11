@@ -26,6 +26,8 @@ Off-screen: run it under Xvfb, with its own runtime folder and log, as
 uses the CPU instead. The shot's size must fit the Xvfb screen (`xvfb-run -s "-screen 0 5120x2160x24"`
 for 5K).
 
+**The install and a mod.** No shot line: the install is the environment's `RAZDOR_DT_DIR` (also from `.env`), read at start. A mod is its own install, so a mod run is `RAZDOR_DT_DIR="<the mod's install folder>" razdor --trailer shot.shot …`. A shot cannot change its install itself, so a mods beat takes one run per install.
+
 **Renders and the save folder.** A battle met on the map writes its autosave (and the session's) to the save
 folder, as in play. A render sets `RAZDOR_SAVE_DIR` to a scratch folder so that the player's saves stay untouched.
 
@@ -83,6 +85,7 @@ One item per line. `#` starts a comment. Every line is optional except `map` and
 | `battle <army id>` | The hero's army fights the army with this id (the number `--plan` prints as `A<id>`) at frame 0. With `battles show` its battle screen opens at once; with `battles map` the fight is resolved on the map at the first frame it is free. The ground is the hero's own cell, as in play (the rules have no ground). An unknown id is an error. | none |
 | `battle_speed <x>` | The pace of a battle on its screen, as a multiple of the game's animations (0.05 to 8; 1 is the game's pace). The AI plays both sides on the screen at that pace, to the battle's end. Needs `battles show`. | none: the battle ends at once |
 | `battle_speed <t> <x>` | A timed pace: it ramps linearly from the pace before to `x` at `t`, and holds before the first and after the last line. A timed line at `0` replaces the header's pace. Same rules. | — |
+| `lang ru\|en` | The interface and the data texts in that language for this run (the game's own language choice sets both). | the player's language |
 
 Cells are map cells, `x,y`, counted from the top-left of the map as the game counts them. Use
 `--plan` to check a cell: the planner prints where the hero stands.
