@@ -5074,17 +5074,26 @@ fn tip_box_w(u: f32) -> f32 {
     (TIP_W * u).min(screen_width() - 8.0)
 }
 
-fn draw_tooltip(game: &Game, assets: &Assets, t: &Tooltip) {
+/// Draws the map's hover card and returns the rectangle it drew into.
+fn draw_tooltip(game: &Game, assets: &Assets, t: &Tooltip) -> Rect {
     // The glyphs take the sizes asked for (`glyph`), not the interface scale's native ones,
     // unless the text is the original's own (`display::native_text`).
     if super::display::native_text() {
-        draw_tooltip_at(game, assets, t);
+        draw_tooltip_at(game, assets, t)
     } else {
-        super::dt_font::with_legacy_metrics(|| draw_tooltip_at(game, assets, t));
+        super::dt_font::with_legacy_metrics(|| draw_tooltip_at(game, assets, t))
     }
 }
 
-fn draw_tooltip_at(game: &Game, assets: &Assets, t: &Tooltip) {
+/// Whether the map's hover card hides the pointer: the right-button card always does, as the
+/// original (0x4cc269, 0x474a81: the pointer is frozen and not drawn); Razdor's touchpad rest
+/// card only when it covers the pointer (on a phone it is placed clear of the finger, so the
+/// pointer stays: a player's report, 2026-11-11).
+fn tip_hides_pointer(right_held: bool, card: Rect, at: Vec2) -> bool {
+    right_held || card.contains(at)
+}
+
+fn draw_tooltip_at(game: &Game, assets: &Assets, t: &Tooltip) -> Rect {
     use super::chrome::shadow_centered;
     use super::dt_font::{with_face, Face};
     let k = super::chrome::k();
@@ -5171,6 +5180,7 @@ fn draw_tooltip_at(game: &Game, assets: &Assets, t: &Tooltip) {
         with_face(face(ink), || shadow_centered(caption_text, x + w / 2.0, caption_y + tip_size(ink, tk), glyph(face(ink), tk), tip_color(t.style, ink)));
         formation_grid(game, assets, &t.troops, t.team, grid_x, grid_y, k);
     }
+    placed
 }
 
 /// What the mouse is over: an army, else a building.
@@ -6415,12 +6425,14 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
     let dragging = view.grab.is_some_and(|g| g.moved);
     let right_held = !input_blocked() && !dragging && is_mouse_button_down(MouseButton::Right) && !is_mouse_button_down(MouseButton::Left);
     // The touchpad mode (Razdor's, a player's suggestion): the cursor resting still for
-    // [`super::rest::REST_SECS`] with no button down shows it too. The tooltip is centred on the
-    // pointer, so the pointer is hidden here as in the held case.
+    // [`super::rest::REST_SECS`] with no button down shows it too. On a phone the card is placed
+    // clear of the finger, so the pointer stays drawn unless the card covers it.
     let rest_tip = super::touchpad::enabled() && super::rest::rested() && !input_blocked() && !dragging;
     if let Some(t) = hover_tooltip(game, &cam).filter(|_| idle && (right_held || rest_tip) && !on_minimap && !trailer_clean()) {
-        draw_tooltip(game, assets, &t);
-        cursor::set(Shape::Hidden);
+        let card = draw_tooltip(game, assets, &t);
+        if tip_hides_pointer(right_held, card, Vec2::from(crate::ui::widgets::pointer())) {
+            cursor::set(Shape::Hidden);
+        }
     }
     if let Some(spell) = aiming.filter(|_| !input_blocked()) {
         let aim = cam.tile_under_mouse().filter(|_| !on_minimap).and_then(|t| game.curse_aim(t));
@@ -7070,8 +7082,21 @@ fn spell_entry(name: &str, l: &SpellLine, now: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{boxed_rects, detail_visibility, zoom_lod, PX};
+    use super::{boxed_rects, detail_visibility, tip_hides_pointer, zoom_lod, PX};
     use macroquad::prelude::*;
+
+    #[test]
+    fn the_rest_card_clear_of_the_pointer_keeps_it() {
+        let clear = Rect::new(500.0, 0.0, 100.0, 100.0);
+        let covering = Rect::new(0.0, 0.0, 100.0, 100.0);
+        let at = vec2(10.0, 10.0);
+        // The right-button card always hides the pointer, as the original.
+        assert!(tip_hides_pointer(true, clear, at));
+        // The touchpad rest card placed clear of the pointer keeps it (a phone).
+        assert!(!tip_hides_pointer(false, clear, at));
+        // A rest card that covers the pointer hides it.
+        assert!(tip_hides_pointer(false, covering, at));
+    }
 
     #[test]
     fn the_dark_box_covers_its_dark_texels_on_screen() {
