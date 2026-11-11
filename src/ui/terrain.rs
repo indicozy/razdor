@@ -332,6 +332,14 @@ void main() {
         vec4 bk = texture2D(Bank, (p + 0.5) / MapSize);
         float wide = step(0.5, bk.g);
         float still = 1.0 - smoothstep(0.2, 0.8, length(fl));
+        // (c) The shore waves: soft lines rolling from the open water onto the beach, on the wide water only (a
+        // lake's or the sea's shore), fading into the foam at the waterline and out by 1.4 cells. A crest moves
+        // 1.1 cells a 4 s cycle toward the land (Clock · 0.25 wraps at a whole number of cycles, as CLOCK_PERIOD does).
+        float s = bk.r * 8.0 - 0.5;
+        float f = fract(s / 1.1 + Clock * 0.25 + 0.6 * sin(p.x * 0.9 + p.y * 0.5));
+        float crest = smoothstep(0.0, 0.15, f) * (1.0 - smoothstep(0.15, 0.4, f));
+        float near = smoothstep(0.1, 0.3, s) * (1.0 - smoothstep(0.9, 1.4, s));
+        col = mix(col, vec3(0.92, 0.96, 1.0), 0.3 * crest * near * wide * still * Detail);
         // (b) The glints: small points that twinkle and drift, brighter on the wide water than on a river. The drift
         // moves the noise by whole lattice periods per CLOCK_PERIOD (5760 and 2240 of 64), and the twinkle is 2000 cycles
         // of it (1.9634954 rad/s), so the wrap is invisible. The mist and the war fog cover them after.
