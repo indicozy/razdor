@@ -84,8 +84,6 @@ struct Driver {
     wall: f64,
     due: f64,
     pick: usize,
-    /// A diagnostic trace: each frame's stretch, the game's JSON and whether a step is paused.
-    trace: Option<Vec<(u64, String, bool)>>,
 }
 
 const AUTO_BATTLE_STEPS: usize = 3000;
@@ -93,7 +91,7 @@ const AUTO_BATTLE_STEPS: usize = 3000;
 impl Driver {
     fn new(g: Game, live: bool) -> Driver {
         let first = crate::rules::music::WORLD_THEME;
-        Driver { g, live, music: false, max: false, wall: 0.0, due: 0.0, pick: first, trace: None }
+        Driver { g, live, music: false, max: false, wall: 0.0, due: 0.0, pick: first }
     }
 
     /// One frame: the tick within its budget, then the music's due change (live) or the
@@ -113,9 +111,6 @@ impl Driver {
             asked < budget
         });
         self.g.replay_stop = None;
-        if let Some(t) = self.trace.as_mut() {
-            t.push((self.g.stretches, serde_json::to_string(&self.g).unwrap(), self.g.ai_pending()));
-        }
         if self.live {
             self.wall += dt as f64;
             if self.music && self.wall >= self.due {
@@ -191,26 +186,41 @@ impl Driver {
         outcome
     }
 
-    /// Walks to the building nearest the hero and waits there until the walk ends.
+    /// Walks to the building nearest the hero that has a way on foot (the first in order of
+    /// distance), and waits there until the walk ends. Nothing when none has one.
     fn walk_to_nearest(&mut self, frames: &mut Frames) {
         let here = self.g.tile();
-        let target = self.g.world.locations.iter().map(|l| l.tile).filter(|&t| t != here).min_by_key(|&t| self.g.world.map.distance(t, here)).unwrap();
-        assert!(self.g.set_destination(target));
+        let mut near: Vec<_> = self.g.world.locations.iter().map(|l| l.tile).filter(|&t| t != here).collect();
+        near.sort_by_key(|&t| (self.g.world.map.distance(t, here), t));
+        if !near.into_iter().any(|t| self.g.set_destination(t)) {
+            return;
+        }
         for _ in 0..200_000 {
             let ev = self.frame(frames);
             self.settle(ev);
             if !self.g.moving() && self.g.foe.is_none() && !self.g.waiting() {
-                break;
+                self.g.finish_pause();
+                let ev = self.g.tick_shown_within(0.0, &mut || true);
+                if !ev.is_empty() || !self.g.held.is_empty() {
+                    self.settle(ev);
+                    continue;
+                }
+                if !self.g.moving() && self.g.foe.is_none() && !self.g.waiting() {
+                    break;
+                }
             }
         }
     }
 
-    /// `days` game days: the hero waits 4 hours at a time, and fights whatever comes.
+    /// `days` game days: the hero waits 4 hours at a time, and fights whatever comes. The days
+    /// end at rest (not waiting, not walking), whatever the frame times, so the state at a day's
+    /// end is the same for every frame schedule.
     fn play_days(&mut self, frames: &mut Frames, days: u64) {
         let end = self.g.clock.total_minutes() + (days * MINUTES_PER_DAY) as f64;
         let mut calls = 0;
-        while self.g.clock.total_minutes() < end && calls < 200_000 {
+        loop {
             calls += 1;
+            assert!(calls < 400_000, "the days do not end");
             if self.g.pending_question().is_some() {
                 let next = self.g.answer_question(true);
                 self.settle(next);
@@ -220,17 +230,29 @@ impl Driver {
                 self.battle();
                 continue;
             }
-            if !self.g.moving() && !self.g.waiting() {
-                self.g.begin_wait(4);
+            if self.g.moving() || self.g.waiting() || !self.g.held.is_empty() {
+                let ev = self.frame(frames);
+                self.settle(ev);
+                continue;
             }
-            let ev = self.frame(frames);
-            self.settle(ev);
+            // At rest: the paused step (if any) finishes before the hero's next decision, and the
+            // events it raised reach the screen first (a zero-time frame hands them over).
+            self.g.finish_pause();
+            let ev = self.g.tick_shown_within(0.0, &mut || true);
+            if !ev.is_empty() || !self.g.held.is_empty() {
+                self.settle(ev);
+                continue;
+            }
+            if self.g.moving() || self.g.waiting() || self.g.foe.is_some() || self.g.pending_question().is_some() {
+                continue;
+            }
+            if self.g.clock.total_minutes() >= end {
+                break;
+            }
+            self.g.begin_wait(4);
         }
     }
 
-    /// The state's hash at a day's end: a paused step finished and a stop's snap done (the
-    /// snap's idle draws come at the next moving tick, so they are part of the state only once
-    /// they are made; a hash taken before them compares states at different points).
     fn hash(&mut self) -> u64 {
         self.g.finish_pause();
         self.g.armies_snap();
@@ -263,7 +285,6 @@ const DT_A: &[f32] = &[1.0 / 60.0, 1.0 / 30.0, 1.0 / 144.0, 1.0 / 20.0];
 const BUDGET_A: &[u32] = &[3, 1, 5, 2];
 const DT_B: &[f32] = &[1.0 / 30.0, 1.0 / 120.0, 1.0 / 45.0];
 const BUDGET_B: &[u32] = &[2, 7, 1];
-const BUDGET_C: &[u32] = &[u32::MAX];
 
 /// Install maps the tests play: the base's first campaign map and its second (ДС2).
 const MAPS: &[&str] = &["РК1", "ДС2"];
@@ -285,7 +306,7 @@ fn a_snapshot_continues_exactly_like_the_live_game() {
         live.g.finish_pause();
         let snap = Snapshot::take(&live.g).unwrap_or_else(|e| panic!("{prefix}: {e}"));
         let restored = snap.restore(c.clone(), Some(&install)).unwrap_or_else(|e| panic!("{prefix}: {e}"));
-        assert_eq!(state_hash(&restored), live.hash(), "{prefix}: the restored state hashes as the live one");
+        assert_eq!(state_hash(&restored), state_hash(&live.g), "{prefix}: the restored state hashes as the live one");
         let mut copy = Driver::new(restored, false);
         let mut frames_live = Frames::new(DT_A, BUDGET_A);
         let mut frames_copy = Frames::new(DT_A, BUDGET_A);
@@ -300,38 +321,66 @@ fn a_snapshot_continues_exactly_like_the_live_game() {
     }
 }
 
-/// Frame times and budgets. Whole frames (no budget) give the same states whatever their
-/// times, up to a step (the spike's finding, 60 to 20 fps here). Split frames give the same
-/// states as each other whatever their budgets; split and whole frames are NOT compared here:
-/// they differ (open hole 9, `docs/superpowers/specs/2026-11-11-replays-design.md`, shown by
-/// `diag_first_split_difference`).
+/// A session of `days` days on `map` with frames of `dt` and budgets `budget` (cycled): each
+/// day the hero walks to the building nearest him, every third day he fights an army (so there
+/// are walks, waits and battles), and the hash is taken at each day's end.
+fn long_session(dt: &DtInstall, c: &Arc<Content>, prefix: &str, dts: &'static [f32], budget: &'static [u32], days: u64) -> Vec<u64> {
+    let map = map_named(dt, prefix);
+    let mut d = Driver::new(start(c, &map, Some(7)), true);
+    let mut f = Frames::new(dts, budget);
+    let opening = d.g.drain_events();
+    d.settle(opening);
+    let armies = d.g.world.armies.len().max(1);
+    let mut out = Vec::new();
+    for day in 0..days {
+        d.walk_to_nearest(&mut f);
+        if day % 3 == 2 && d.g.foe.is_none() {
+            d.g.foe = Some(Foe::Army(((day / 3) as usize) % armies));
+            d.battle();
+        }
+        d.play_days(&mut f, 1);
+        out.push(d.hash());
+    }
+    out
+}
+
+/// The frame schedules the tests run: whole frames at 2 to 240 fps, and split frames (a budget
+/// of arrivals a frame may play: fixed, and pseudo-random cycles). A frame longer than a step
+/// (0.15 s, below about 6.7 fps) plays several steps at once.
+const SCHEDULE_DTS: &[&[f32]] = &[&[1.0 / 2.0], &[1.0 / 5.0], &[1.0 / 10.0], &[1.0 / 20.0], &[1.0 / 60.0], &[1.0 / 144.0], &[1.0 / 240.0], &[1.0 / 30.0, 1.0 / 7.0, 1.0 / 90.0]];
+const SCHEDULE_BUDGETS: &[&[u32]] = &[&[u32::MAX], &[1], &[2], &[3], &[7], &[4, 1, 9, 2, 6, 1, 3, 8, 2, 5, 1, 7], &[1, 2, 1, 3, 1]];
+
+/// Every frame schedule gives the reference's states, day by day, on РК1 and ДС2 for 30 days
+/// with walks, waits and battles (hole 9: a split step; hole 10: several steps in one frame).
+/// The reference is whole frames at 60 fps; every other schedule must match it at each day's end.
 #[test]
-fn the_state_hash_follows_the_rules_and_not_the_frames() {
+fn every_frame_schedule_gives_the_same_states_day_by_day() {
     let Some(dt) = base() else { return };
     let c = Arc::new(Content::from_dt(&dt));
-    let map = map_named(&dt, "РК1");
-    const WHOLE_MIXED: &[f32] = &[1.0 / 60.0, 1.0 / 30.0, 1.0 / 144.0, 1.0 / 20.0];
-    const WHOLE_20: &[f32] = &[1.0 / 20.0];
+    const DAYS: u64 = 30;
     const WHOLE_60: &[f32] = &[1.0 / 60.0];
-    let whole = |dts: &'static [f32]| {
-        let mut d = Driver::new(start(&c, &map, Some(7)), true);
-        let mut f = Frames::new(dts, BUDGET_C);
-        session(&mut d, &mut f, 2)
-    };
-    let mixed = whole(WHOLE_MIXED);
-    assert_eq!(whole(WHOLE_60), mixed, "whole frames at 60 fps give the same states");
-    assert_eq!(whole(WHOLE_20), mixed, "whole frames at 20 fps give the same states");
-    let split = |dts: &'static [f32], budget: &'static [u32]| {
-        let mut d = Driver::new(start(&c, &map, Some(7)), true);
-        let mut f = Frames::new(dts, budget);
-        session(&mut d, &mut f, 2)
-    };
-    assert_eq!(split(DT_B, BUDGET_B), split(DT_A, BUDGET_A), "split frames with other budgets give the same states");
-    // And the hash does see a rule: one draw of the main generator changes it.
-    let mut a = Driver::new(start(&c, &map, Some(7)), true);
-    let before = state_hash(&a.g);
-    a.g.rng.random(7);
-    assert_ne!(state_hash(&a.g), before);
+    const UNBUDGETED: &[u32] = &[u32::MAX];
+    let mut failed = Vec::new();
+    for prefix in MAPS {
+        let reference = long_session(&dt, &c, prefix, WHOLE_60, UNBUDGETED, DAYS);
+        let mut schedules: Vec<(&'static [f32], &'static [u32])> = Vec::new();
+        for dts in SCHEDULE_DTS {
+            schedules.push((dts, UNBUDGETED));
+        }
+        for budget in SCHEDULE_BUDGETS {
+            schedules.push((WHOLE_60, budget));
+            schedules.push((SCHEDULE_DTS[1], budget));
+            schedules.push((SCHEDULE_DTS[7], budget));
+        }
+        for (dts, budget) in schedules {
+            let got = long_session(&dt, &c, prefix, dts, budget, DAYS);
+            if got != reference {
+                let day = got.iter().zip(&reference).position(|(a, b)| a != b).unwrap_or(0);
+                failed.push(format!("{prefix}: frames {dts:?} budget {budget:?} first differs at day {day}"));
+            }
+        }
+    }
+    assert!(failed.is_empty(), "{} schedules differ from the reference:\n{}", failed.len(), failed.join("\n"));
 }
 
 /// The child process's part of the cross-process test: it plays the session and prints it.
@@ -487,38 +536,11 @@ fn the_engine_takes_its_seeds_from_a_playback_then_the_clock() {
 /// Frame-by-frame: the first frame where a split run and an unsplit run differ (when neither
 /// has a step paused), with the game's JSON around the first differing byte.
 #[test]
-#[ignore]
-fn diag_first_split_difference() {
+fn the_state_hash_follows_the_rules() {
     let Some(dt) = base() else { return };
     let c = Arc::new(Content::from_dt(&dt));
-    let map = map_named(&dt, "РК1");
-    let run = |budget: &'static [u32]| -> Vec<(u64, String, bool)> {
-        let mut d = Driver::new(start(&c, &map, Some(7)), true);
-        let mut f = Frames::new(DT_A, budget);
-        let opening = d.g.drain_events();
-        d.settle(opening);
-        d.walk_to_nearest(&mut f);
-        d.trace = Some(Vec::new());
-        d.play_days(&mut f, 1);
-        d.trace.take().unwrap()
-    };
-    let a = run(BUDGET_A);
-    let b = run(BUDGET_C);
-    println!("DIAG frames {} {}", a.len(), b.len());
-    let at_rest = |t: &[(u64, String, bool)]| -> std::collections::BTreeMap<u64, String> {
-        t.iter().filter(|x| !x.2).map(|x| (x.0, x.1.clone())).collect()
-    };
-    let (ra, rb) = (at_rest(&a), at_rest(&b));
-    for (k, x) in &ra {
-        if let Some(y) = rb.get(k) {
-            if x != y {
-                let at = x.bytes().zip(y.bytes()).position(|(p, q)| p != q).unwrap_or(0);
-                println!("DIAG first difference at stretch {k}");
-                println!("DIAG split : {}", &x[at.saturating_sub(400)..(at + 150).min(x.len())]);
-                println!("DIAG unsplit: {}", &y[at.saturating_sub(400)..(at + 150).min(y.len())]);
-                return;
-            }
-        }
-    }
-    println!("DIAG no difference while both at rest");
+    let mut a = Driver::new(start(&c, &map_named(&dt, "РК1"), Some(7)), true);
+    let before = state_hash(&a.g);
+    a.g.rng.random(7);
+    assert_ne!(state_hash(&a.g), before);
 }
