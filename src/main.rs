@@ -249,7 +249,7 @@ async fn main() {
         ui::widgets::draw_keyboard_strip();
         // The original draws its pointer last, over everything (0x474a81).
         // A trailer run has no pointer in its pictures.
-        if !ui::trailer::hides_ui() {
+        if !ui::trailer::active() {
             ui::cursor::draw();
         }
         // The frame is drawn: a trailer run records it, and ends when its last frame is written.

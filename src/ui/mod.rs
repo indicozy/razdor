@@ -1815,7 +1815,7 @@ impl App {
             // A message window takes the arrow (EventDialog_OpenModal 0x4ac427).
             cursor::set(cursor::Shape::Arrow);
             // A trailer run draws no window: its events are answered by the shot's choices (`ui::trailer`).
-            let close = if trailer::hides_ui() { trailer::auto_close(d) } else { dialog::draw(d, &self.assets, self.game.as_ref()) };
+            let close = if trailer::active() { trailer::auto_close(d) } else { dialog::draw(d, &self.assets, self.game.as_ref()) };
             if let Some(close) = close {
                 let closed = self.dialogs.pop_front();
                 let offer = closed.as_ref().is_some_and(|d| d.offer);

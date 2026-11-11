@@ -31,6 +31,8 @@ pub struct Values {
     pub eye: Option<f32>,
     pub height: Option<f32>,
     pub horizon: Option<f32>,
+    /// The flat view's zoom (`view flat` only): 1 is the classic map at any window size.
+    pub zoom: Option<f32>,
 }
 
 /// Where the camera looks: a map cell, or the hero's cell plus an offset in cells.
@@ -77,6 +79,8 @@ pub struct Key {
     pub values: Values,
     pub target: Option<Target>,
     pub ease: Ease,
+    /// The file's line of the keyframe (its errors name it).
+    pub line: usize,
 }
 
 /// A world action on the timeline.
@@ -135,6 +139,13 @@ pub struct Shot {
     /// The look settings the run takes over (`look key=value`, in file order; see [`LOOK_KEYS`]).
     /// They are never written to the settings file.
     pub look: Vec<(String, String)>,
+    /// `ui on`: the interface is drawn as a player sees it (bottom bar, minimap, the map's widgets).
+    /// Event windows are still answered, without being drawn.
+    pub ui: bool,
+    /// `fog on`: the fog of war (black, or the look's mist) is drawn.
+    pub fog: bool,
+    /// `view flat`: the classic flat map with its classic camera (`target` and `zoom` only).
+    pub flat: bool,
 }
 
 impl Default for Shot {
@@ -156,6 +167,9 @@ impl Default for Shot {
             hour: None,
             clock_hold: false,
             look: Vec::new(),
+            ui: false,
+            fog: false,
+            flat: false,
         }
     }
 }
@@ -212,6 +226,18 @@ pub fn parse(text: &str) -> Result<Shot, Errors> {
         errors.push("duration: the shot has no time to play (give `duration <seconds>` or a timed line)".to_string());
     }
     shot.actions.sort_by(|a, b| a.t().total_cmp(&b.t()));
+    for key in &shot.keys {
+        let flat_key = |name: &str| if shot.flat { "zoom" == name || "target" == name } else { name != "zoom" };
+        let named = [("zoom", key.values.zoom.is_some())].into_iter().chain(
+            [("pitch", key.values.pitch.is_some()), ("fov", key.values.fov.is_some()), ("dist", key.values.dist.is_some()), ("fit", key.values.fit.is_some()), ("bend", key.values.bend.is_some()), ("flat", key.values.flat.is_some()), ("radius", key.values.radius.is_some()), ("width", key.values.width.is_some()), ("ahead", key.values.ahead.is_some()), ("behind", key.values.behind.is_some()), ("near", key.values.near.is_some()), ("yaw", key.values.yaw.is_some()), ("eye", key.values.eye.is_some()), ("height", key.values.height.is_some()), ("horizon", key.values.horizon.is_some())],
+        );
+        for (name, set) in named {
+            if set && !flat_key(name) {
+                let why = if shot.flat { "`view flat` takes target and zoom only (`view 25d` for the others)" } else { "zoom is the flat view's (`view flat`); the 2.5D view takes fit" };
+                errors.push(format!("line {}: {name}: {why}", key.line));
+            }
+        }
+    }
     if errors.is_empty() {
         Ok(shot)
     } else {
@@ -255,6 +281,13 @@ fn apply_line(shot: &mut Shot, head: &str, rest: &[&str], line_no: usize) -> Res
             "show" => shot.battles_show = true,
             v => return Err(("battles", format!("`{v}`: map or show"))),
         },
+        "ui" => shot.ui = on_off(rest, "ui")?,
+        "fog" => shot.fog = on_off(rest, "fog")?,
+        "view" => match one(rest).map_err(|e| ("view", e))? {
+            "flat" => shot.flat = true,
+            "25d" => shot.flat = false,
+            v => return Err(("view", format!("`{v}`: flat or 25d"))),
+        },
         "hour" => {
             let v = one(rest).map_err(|e| ("hour", e))?;
             let h = v.parse::<f64>().ok().filter(|h| h.is_finite() && (0.0..24.0).contains(h));
@@ -292,7 +325,7 @@ fn apply_line(shot: &mut Shot, head: &str, rest: &[&str], line_no: usize) -> Res
             _ => return Err(("event", "needs two words: the event number and the choice (0 is the first button)".to_string())),
         },
         "at" => {
-            let key = parse_at(rest)?;
+            let key = parse_at(rest, line_no)?;
             if shot.keys.last().is_some_and(|k| k.t == key.t) {
                 return Err(("at", format!("{}s: another keyframe has this time", key.t)));
             }
@@ -314,10 +347,19 @@ fn apply_line(shot: &mut Shot, head: &str, rest: &[&str], line_no: usize) -> Res
             shot.actions.push(Action::Reveal { t, cell, radius, line: line_no });
         }
         other => {
-            return Err(("line", format!("`{other}`: no such line (map, save, hero, seed, size, fps, music, battles, hour, clock, look, duration, event, at, walk, pass, reveal)")));
+            return Err(("line", format!("`{other}`: no such line (map, save, hero, seed, size, fps, music, battles, hour, clock, look, ui, fog, view, duration, event, at, walk, pass, reveal)")));
         }
     }
     Ok(())
+}
+
+/// `on` or `off` for a line of one word.
+fn on_off(rest: &[&str], field: &'static str) -> Result<bool, FieldError> {
+    match one(rest).map_err(|e| (field, e))? {
+        "on" => Ok(true),
+        "off" => Ok(false),
+        v => Err((field, format!("`{v}`: on or off"))),
+    }
 }
 
 /// One `key=value` of a `look` line, checked against [`LOOK_KEYS`].
@@ -382,14 +424,14 @@ fn parse_target(v: &str) -> Result<Target, String> {
 }
 
 /// The camera keys a keyframe may set.
-const CAMERA_KEYS: [&str; 15] = ["pitch", "fov", "dist", "fit", "bend", "flat", "radius", "width", "ahead", "behind", "near", "yaw", "eye", "height", "horizon"];
+const CAMERA_KEYS: [&str; 16] = ["pitch", "fov", "dist", "fit", "bend", "flat", "radius", "width", "ahead", "behind", "near", "yaw", "eye", "height", "horizon", "zoom"];
 
-fn parse_at(rest: &[&str]) -> Result<Key, FieldError> {
+fn parse_at(rest: &[&str], line: usize) -> Result<Key, FieldError> {
     let Some((time, items)) = rest.split_first() else {
         return Err(("at", "needs a time first, e.g. `at 16s pitch=12`".to_string()));
     };
     let t = time_word(time).ok_or(("at", format!("`{time}`: not a time (seconds, e.g. 16 or 16s)")))?;
-    let mut key = Key { t, values: Values::default(), target: None, ease: Ease::default() };
+    let mut key = Key { t, values: Values::default(), target: None, ease: Ease::default(), line };
     for item in items {
         let (k, v) = item.split_once('=').ok_or(("at", format!("`{item}`: write key=value")))?;
         match k {
@@ -405,7 +447,7 @@ fn parse_at(rest: &[&str]) -> Result<Key, FieldError> {
             }
             _ => {
                 let Some(&name) = CAMERA_KEYS.iter().find(|&&c| c == k) else {
-                    return Err(("at", format!("`{k}`: no such key (pitch, fov, dist, fit, bend, flat, radius, width, ahead, behind, near, yaw, eye, height, horizon, target, ease)")));
+                    return Err(("at", format!("`{k}`: no such key (pitch, fov, dist, fit, bend, flat, radius, width, ahead, behind, near, yaw, eye, height, horizon, zoom, target, ease)")));
                 };
                 let n: f32 = v.parse().map_err(|_| (name, format!("`{v}` is not a number")))?;
                 check_range(name, n).map_err(|e| (name, e))?;
@@ -422,6 +464,7 @@ fn slot<'a>(v: &'a mut Values, name: &str) -> &'a mut Option<f32> {
         "fov" => &mut v.fov,
         "dist" => &mut v.dist,
         "fit" => &mut v.fit,
+        "zoom" => &mut v.zoom,
         "bend" => &mut v.bend,
         "flat" => &mut v.flat,
         "radius" => &mut v.radius,
@@ -443,6 +486,7 @@ fn check_range(k: &str, n: f32) -> Result<(), String> {
         "pitch" => (0.0..=90.0).contains(&n),
         "fov" => (5.0..=120.0).contains(&n),
         "dist" | "fit" | "radius" | "width" => n > 0.0,
+        "zoom" => (0.4..=2.0).contains(&n),
         "bend" => (0.0..=89.0).contains(&n),
         "flat" | "ahead" | "behind" | "near" => n >= 0.0,
         "eye" | "horizon" => (0.0..=1.0).contains(&n),
@@ -459,6 +503,7 @@ fn check_range(k: &str, n: f32) -> Result<(), String> {
         "eye" | "horizon" => format!("{n}: 0 or 1"),
         "height" => format!("{n}: from 0.1 to 5 cells"),
         "dist" | "fit" | "radius" | "width" => format!("{n}: must be above 0"),
+        "zoom" => format!("{n}: from 0.4 to 2 (1 is the classic map)"),
         _ => format!("{n}: must not be negative"),
     })
 }
@@ -547,6 +592,7 @@ pub fn sample_values(keys: &[Key], t: f64) -> Values {
     out.eye = track("eye");
     out.height = track("height");
     out.horizon = track("horizon");
+    out.zoom = track("zoom");
     out
 }
 
@@ -841,6 +887,35 @@ mod tests {
         assert!(all.contains("line 6: look: `lighting=maybe`: off, on, cycle, fixed"), "{all}");
         assert!(all.contains("line 7: look: `shadows`: write key=value"), "{all}");
         assert!(all.contains("line 8: look: needs at least one key=value"), "{all}");
+    }
+
+    #[test]
+    fn the_ui_fog_and_view_lines_default_to_hidden_and_the_2_5d_view() {
+        let s = ok("map РК1\nat 1s pitch=12\n");
+        assert_eq!((s.ui, s.fog, s.flat), (false, false, false));
+        let s = ok("map РК1\nui on\nfog on\nview flat\nat 0s target=hero zoom=1.25\nduration 1\n");
+        assert_eq!((s.ui, s.fog, s.flat), (true, true, true));
+        assert_eq!(s.keys[0].values.zoom, Some(1.25));
+        assert_eq!(s.keys[0].line, 5, "a key knows its line");
+        assert!(!ok("map РК1\nui off\nview 25d\nat 1s pitch=12\n").flat);
+    }
+
+    #[test]
+    fn a_bad_ui_fog_or_view_names_its_field() {
+        let all = errs("map РК1\nui maybe\nfog 1\nview wide\nat 1s pitch=12\n").join("\n");
+        assert!(all.contains("line 2: ui: `maybe`: on or off"), "{all}");
+        assert!(all.contains("line 3: fog: `1`: on or off"), "{all}");
+        assert!(all.contains("line 4: view: `wide`: flat or 25d"), "{all}");
+    }
+
+    #[test]
+    fn the_flat_view_takes_only_target_and_zoom() {
+        let all = errs("map РК1\nview flat\nat 0s pitch=12 target=hero\nat 1s zoom=1 fit=1\n").join("\n");
+        assert!(all.contains("line 3: pitch: `view flat` takes target and zoom only"), "{all}");
+        assert!(all.contains("line 4: fit: `view flat` takes target and zoom only"), "{all}");
+        let all = errs("map РК1\nat 0s zoom=1.2\n").join("\n");
+        assert!(all.contains("line 2: zoom: zoom is the flat view's"), "{all}");
+        assert!(parse("map РК1\nat 0s zoom=3\nview flat\n").is_err(), "the zoom's range is 0.4 to 2");
     }
 
     #[test]

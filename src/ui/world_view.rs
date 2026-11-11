@@ -1062,9 +1062,9 @@ fn view_env() -> Option<&'static str> {
 /// Whether the world map is drawn tilted (the 2.5D view or the first-person one): the setting,
 /// unless `RAZDOR_VIEW` says `25d` or `first` (on) or `flat` (off), which the debug snapshots use.
 pub fn tilt_view() -> bool {
-    // A trailer run is always 2.5D (`ui::trailer`).
+    // A trailer run is 2.5D (`ui::trailer`), unless its shot is `view flat`.
     if super::trailer::active() {
-        return true;
+        return !super::trailer::flat_view();
     }
     match view_env() {
         Some("25d") | Some("first") | Some("third") | Some("eyes") | Some("fp-chase") | Some("fp-eyes") => true,
@@ -1210,7 +1210,7 @@ fn trailer() -> Option<view25::Trailer> {
 fn trailer_nofog() -> bool {
     static NOFOG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     // A trailer shot or fly mode implies it: the fog is hidden there as the UI is.
-    super::trailer::hides_ui() || *NOFOG.get_or_init(|| std::env::var("RAZDOR_TRAILER_NOFOG").is_ok_and(|v| v.trim() == "1"))
+    super::trailer::hides_fog() || *NOFOG.get_or_init(|| std::env::var("RAZDOR_TRAILER_NOFOG").is_ok_and(|v| v.trim() == "1"))
 }
 
 /// The camera the trailer's keys give over the player's `pitch` and `yaw`, centred on `target`
@@ -2162,7 +2162,7 @@ fn photo_frame(game: &mut Game, assets: &Assets, view: &mut MapView, entering: b
 /// The trailer's stills (`RAZDOR_TRAILER_CAM`, dev-only) show the world alone: no bar, pointer,
 /// minimap, compass, hover outline, tooltips, messages, marks or debug overlay, and no border line.
 fn trailer_clean() -> bool {
-    trailer().is_some()
+    trailer().is_some() && (!super::trailer::active() || super::trailer::hides_ui())
 }
 
 fn push_model(m: Mat4) {

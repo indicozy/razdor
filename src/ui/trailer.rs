@@ -307,9 +307,19 @@ pub fn active() -> bool {
     config().is_some()
 }
 
-/// Whether the UI and the fog are hidden: every trailer run hides them.
+/// Whether the interface is hidden: every trailer run hides it, unless its shot says `ui on`.
 pub fn hides_ui() -> bool {
-    active()
+    active() && !config().and_then(|c| c.shot.as_ref()).is_some_and(|s| s.ui)
+}
+
+/// Whether the fog of war is hidden: every trailer run hides it, unless its shot says `fog on`.
+pub fn hides_fog() -> bool {
+    active() && !config().and_then(|c| c.shot.as_ref()).is_some_and(|s| s.fog)
+}
+
+/// Whether the shot is the classic flat map (`view flat`): its camera is the player's flat one.
+pub fn flat_view() -> bool {
+    config().and_then(|c| c.shot.as_ref()).is_some_and(|s| s.flat)
 }
 
 /// The window's size a run asks for (its shot's), if one does.
@@ -443,7 +453,7 @@ pub fn before_frame(app: &mut App) {
             }
         }
     }
-    super::world_view::set_tilt_view(true);
+    super::world_view::set_tilt_view(!flat_view());
     if cfg.mode == Mode::Fly {
         fly_frame(app);
         return;
@@ -454,13 +464,18 @@ pub fn before_frame(app: &mut App) {
     let values = shotfile::sample_values(&shot.keys, t);
     let target = shotfile::sample_target(&shot.keys, t);
     let cam = camera_of(&values);
+    if shot.flat {
+        // The classic flat map: the player's own camera, its zoom set by the shot (locked, as the zoom
+        // setting is when it is locked).
+        super::world_view::set_zoom_prefs(values.zoom.unwrap_or(1.0), true);
+    }
     let game_target = target.and_then(|(a, b, e)| {
         let game = app.game.as_ref()?;
         let (pa, pb) = (resolve(game, a)?, resolve(game, b)?);
         Some((pa.0 + (pb.0 - pa.0) * e, pa.1 + (pb.1 - pa.1) * e))
     });
     with(|r| {
-        r.cam = Some(cam);
+        r.cam = (!shot.flat).then_some(cam);
         r.target = game_target;
     });
     if cfg.mode == Mode::Plan {
