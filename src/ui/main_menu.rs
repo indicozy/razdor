@@ -1596,7 +1596,7 @@ impl Group {
     /// The rows the group shows, top to bottom. Every row is in exactly one group (a test checks it).
     pub fn rows(self) -> &'static [Row] {
         match self {
-            Group::Map => &[Row::MapZoom, Row::ScrollSpeed, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::CurveReset, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::WaterRate, Row::WaterQuality, Row::Weather, Row::LivingMap, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
+            Group::Map => &[Row::MapZoom, Row::ScrollSpeed, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::CurveReset, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::Mist, Row::LiveWater, Row::WaterRate, Row::WaterQuality, Row::Weather, Row::LivingMap, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
             Group::Battle => &[Row::WalkSpeed, Row::AnimSpeed, Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience, Row::HitShake],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
@@ -1629,6 +1629,7 @@ pub enum Row {
     LightHour,
     Shadows,
     LightQuality,
+    MapAnim,
     Mist,
     LiveWater,
     WaterRate,
@@ -1667,7 +1668,7 @@ pub enum Row {
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 55] = [
+pub const ALL: [Row; 56] = [
         Row::MapZoom,
         Row::ScrollSpeed,
         Row::MapResolution,
@@ -1689,6 +1690,7 @@ pub const ALL: [Row; 55] = [
         Row::LightHour,
         Row::Shadows,
         Row::LightQuality,
+        Row::MapAnim,
         Row::Mist,
         Row::LiveWater,
         Row::WaterRate,
@@ -1741,6 +1743,7 @@ pub const ALL: [Row; 55] = [
             Row::Lighting => Some(tr("Razdor's: the map's light follows the time of day. Style only.")),
             Row::Shadows => Some(tr("Razdor's: Painted keeps the original's shadows; From the sun removes them, and every building, tree and rock casts its own shadow that turns and lengthens with the hour.")),
             Row::LightQuality => Some(tr("Razdor's: high lights up to eight buildings and figures' torches: their shadows and the glowing windows; medium up to four; low keeps the warm glows only. The default is high on the desktop, medium on a phone.")),
+            Row::MapAnim => Some(tr("Map animation: On moves everything on the map. Near only: the movement stops when the map is zoomed out. Off: the map stays still, less load on the graphics card and the battery.")),
             Row::Mist => Some(tr("Razdor's: none is the original's black fog of war; Simple is a plain mist; Clouds drifts soft clouds over the unexplored land. Style only.")),
             Row::LiveWater => Some(tr("Razdor's: the water ripples, foam runs along the shores, rivers flow and ships leave a wake. Style only.")),
             Row::Weather => Some(tr("Razdor's: weather by the land: snow on snow and ice, rain on swamps and lowlands, heat haze over deserts, ash over fire lands, cloud shadows everywhere. Style only.")),
@@ -2215,6 +2218,17 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
             };
             if labelled_row(c, geo, tr("Light quality"), value).0 {
                 audio.map_light_quality = Some(quality.next());
+            }
+        }
+        Row::MapAnim => {
+            // Razdor's (the owner's decision 2026-11-11): the map's animations on, near only, or off (`map_anim`).
+            let value = match audio.map_anim {
+                super::map_anim::Mode::On => tr("Animation: all"),
+                super::map_anim::Mode::Near => tr("Animation: near only"),
+                super::map_anim::Mode::Off => tr("Animation: off"),
+            };
+            if labelled_row_help(c, geo, tr("Map animation"), value, Row::MapAnim.help_text()).0 {
+                audio.map_anim = audio.map_anim.next();
             }
         }
         Row::Mist => {
@@ -3766,7 +3780,7 @@ mod tests {
     #[test]
     fn the_long_hints_are_behind_a_question_mark() {
         let with: Vec<Row> = Row::ALL.into_iter().filter(|r| r.help_text().is_some()).collect();
-        assert_eq!(with, vec![Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::Language, Row::Updates, Row::ChronicleSummary, Row::BatterySaver]);
+        assert_eq!(with, vec![Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::Language, Row::Updates, Row::ChronicleSummary, Row::BatterySaver]);
         scene_help("Experience");
         assert_eq!(HELP_PINNED.with(|p| p.get()), Row::Experience.help_text());
         HELP_PINNED.with(|p| p.set(None));

@@ -259,7 +259,8 @@ struct IdleSprite {
 
 /// The frame clock the idle pass reads (0x4f1c34), in ms.
 fn clock_ms() -> i64 {
-    (crate::ui::clock::now() * 1000.0) as i64
+    // The map's animation time (`map_anim`): the sway and the idle frames stop with «Анимация карты».
+    (super::map_anim::now() * 1000.0) as i64
 }
 
 /// Stamps every army the first time the screen draws the map (a load stamps them all at
@@ -2643,7 +2644,7 @@ fn terrain_quad(game: &Game, layer: &terrain::TerrainLayer, cam: &Camera, mode: 
         }
         let view = vec4(tl.x, tl.y / rh, br.x, br.y / rh);
         // The edge's mist is fog: the trailer's no-fog switch leaves the ground going on past the edge.
-        layer.draw(map.surface_codes(), (map.w as u32, map.h as u32), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(PX, PX * rh), Some((crate::ui::clock::now() * 1000.0) as i64), extend && !trailer_nofog(), mode, flow, Some(map.surface_generation()));
+        layer.draw(map.surface_codes(), (map.w as u32, map.h as u32), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(PX, PX * rh), Some((super::map_anim::now() * 1000.0) as i64), extend && !trailer_nofog(), mode, flow, Some(map.surface_generation()));
     }
 }
 
@@ -2674,7 +2675,7 @@ fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool) {
                 // «Живая вода» at a lower rate or size: the water's picture is filled under this camera when it is due
                 // (2.5D and first person included: the fill keeps the 3D camera, as the ground's does), then composited.
                 let (map, codes) = (&game.world.map, game.world.map.surface_codes());
-                let water_ms = Some((crate::ui::clock::now() * 1000.0) as i64);
+                let water_ms = Some((super::map_anim::now() * 1000.0) as i64);
                 if let Some(target) = layer.water_picture_prepare(codes, (map.w as u32, map.h as u32), flow, Some(map.surface_generation()), water_ms, key) {
                     super::render_cache::fill(&target, || {
                         macroquad::prelude::clear_background(macroquad::prelude::Color::new(0.0, 0.0, 0.0, 0.0));
@@ -2982,8 +2983,8 @@ fn draw_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera) {
             // The small trees and bushes sway: the quad's top corners move by the lean of
             // their phase, the bottom stays (0x4c99d0, engine.md §7).
             let (_, _, phase) = super::memo::plant_jitter_memo(o.tile.0, o.tile.1, u16::from(o.class) << 8 | u16::from(o.sprite));
-            let lean = razdor::rules::rng::tree_sway(clock_ms(), phase) * zoom;
-            draw_leaning(&atlas.texture, src, at, size, lean);
+            // «Анимация карты» scales the sway by its level (0 when the map is still, `map_anim::level`).
+            let lean = razdor::rules::rng::tree_sway(clock_ms(), phase) * zoom * super::map_anim::level();            draw_leaning(&atlas.texture, src, at, size, lean);
             return;
         }
         frame_probe::sprite(size.x, size.y);
@@ -3034,7 +3035,7 @@ fn card_building<'a>(l: &Location, art: Option<&'a DtArt>) -> Option<(&'a Atlas,
 /// Whether the living map is drawn in this view (`living`): not in the bent views (the first-person
 /// view, hidden from players), whose sheet the living parts are not laid on.
 fn living_on(cam: &Camera) -> bool {
-    living::on() && cam.tilt.is_none_or(|t| t.cam.bend.is_none()) && zoom_lod(cam.scale) > 0.0
+    living::on() && cam.tilt.is_none_or(|t| t.cam.bend.is_none()) && zoom_lod(cam.scale) > 0.0 && super::map_anim::level() > 0.0
 }
 
 /// A building's living parts with its atlas, when the living map is on and the building has any
@@ -3061,7 +3062,7 @@ fn owning_card(cards: &[Card], origin: Vec2, zoom: f32, p: Vec2) -> usize {
 /// Draws the moving parts of a sprite (flags: `living::part_mesh`) from the atlas, over the
 /// sprite's rectangle `r` at `at` in the 2D space. The caller's standing transform places them.
 fn draw_parts<'a>(parts: impl Iterator<Item = &'a living::Part>, atlas: &Atlas, r: Rect, at: Vec2, zoom: f32) {
-    let now = crate::ui::clock::now();
+    let now = super::map_anim::now();
     let size = vec2(atlas.texture.width(), atlas.texture.height());
     let color = faded(WHITE);
     for part in parts {
@@ -6147,6 +6148,8 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
     let shows: Vec<&Showing> = view.opening.iter().chain(&view.shows).collect();
     let flat = cam.tilt.is_none();
     let hover = hover.filter(|_| !trailer_clean());
+    // The map's animation level and time for this frame (`map_anim`), before anything animated is drawn.
+    super::map_anim::begin(cam.scale);
     // The light is read once, before the world (its painted shadows' factor is read there).
     let light = frame_light_of(game);
     let lit = light.and_then(|_| daylight::frame_shadow_k());
@@ -6537,7 +6540,9 @@ fn draw_daylight(game: &Game, cam: &Camera, light: Option<daylight::Light>) {
     let Some(light) = light else {
         return;
     };
-    let now = crate::ui::clock::now();
+    // The torches flicker on the map's animation time, and hold steady as the level falls (`map_anim`).
+    let now = super::map_anim::now();
+    let level = super::map_anim::level();
     let t = light.tint;
     super::chrome::multiply(|| draw_rectangle(cam.draw.x, cam.draw.y, cam.draw.w, cam.draw.h, Color::new(t[0], t[1], t[2], 1.0)));
     if light.glow <= 0.01 {
@@ -6575,7 +6580,9 @@ fn draw_daylight(game: &Game, cam: &Camera, light: Option<daylight::Light>) {
                 // A torch past a bent view's horizon is not seen, and one on the bent ground stands where the sheet puts it.
                 let Some(at) = light_screen(cam, l.at) else { continue };
                 let reach = l.radius * cam.scale;
-                let flicker = 0.92 + 0.08 * (now * 9.0 + i as f64).sin() as f32;
+                // At level 1 the flicker is the sine; at 0 it is the middle of its range (0.96), steady.
+                let s = (now * 9.0 + i as f64).sin() as f32;
+                let flicker = 0.92 + 0.08 * (level * s + (1.0 - level) * 0.5);
                 let (rgb, alpha) = ([1.0, 0.65, 0.30], 0.45 * flicker);
                 glow_at(at, 2.0 * reach, rgb, alpha * l.strength * vis);
             }
@@ -6600,7 +6607,8 @@ fn draw_weather(game: &Game, assets: &Assets, cam: &Camera, light: Option<daylig
     let flow = map_flow(game);
     let flow: &[(f32, f32)] = flow.as_deref().map_or(&[], |f| f.as_slice());
     let masks = layer.weather_masks(map.surface_codes(), (map.w as u32, map.h as u32), flow, Some(map.surface_generation()));
-    let now = crate::ui::clock::now();
+    // The weather's motion on the map's animation time: frozen with «Анимация карты» off (`map_anim`).
+    let now = super::map_anim::now();
     let schedule = weather::schedule_of(masks.seed);
     let days = game.clock.total_minutes() / razdor::rules::clock::MINUTES_PER_DAY as f64;
     let Some(levels) = weather::frame_levels(&schedule, days, now) else {
@@ -6676,7 +6684,7 @@ fn draw_wakes(game: &Game, cam: &Camera) {
 /// Razdor's «Живая карта» smoke (`living`): the puffs of every visible building's chimneys, added to
 /// `batch` (one mesh a frame). A building takes its shade of the fog at its foot, as its sprite does.
 fn draw_smoke(game: &Game, art: Option<&DtArt>, cam: &Camera, shade_of: &dyn Fn(Vec2) -> f32, location_seen: &dyn Fn(&Location) -> bool, batch: &mut Batch) {
-    let smoke = living::Smoke { now: crate::ui::clock::now(), puffs: living::puffs_now(), cell: cam.cell_size().x };
+    let smoke = living::Smoke { now: super::map_anim::now(), puffs: living::puffs_now(), cell: cam.cell_size().x };
     let zoom = cam.scale / PX;
     for l in game.world.locations.iter().filter(|l| location_seen(l)) {
         let Some((atlas, ls)) = living_of(cam, art, l) else { continue };

@@ -414,6 +414,19 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
 - **The 2.5D fog's box**: `draw_fog_flat` on a tilted camera draws `minimap::draw_fog_boxed`, only the sub-quad over the
   texels that are not fully transparent (the box grown by one texel a side; nothing when none is dark). The same
   pixels as the whole quad, fewer fragments. The flat map view and the minimap keep `minimap::draw_fog`.
+- **«Анимация карты»** (the owner's decision 2026-11-11, `src/ui/map_anim.rs`, `Settings::map_anim`: `Mode` On, Near, Off;
+  the row «Анимация карты» in the Map group, cycled On → «Только вблизи» → Off; env `RAZDOR_MAP_ANIM=on|near|off` overrides it).
+  The map's animations are scaled by one level: 1 with On, 0 with Off, `world_view::zoom_lod` with Near (0 under 8 px a
+  cell, 1 from 16). `map_anim::begin(cam.scale)` sets it at the start of each map frame (`map_frame`, before anything
+  animated) and moves the animation time on: `map_anim::now()` is the frame clock less the time the level was under 1
+  (`LOST`), so the animations resume where they stopped, and with On it is the frame clock to the bit. Every animated
+  part reads that time, not the frame clock: the trees' sway (`clock_ms`, `draw_leaning`, scaled by the level), the
+  armies' idle frames (`idle_sprite_frame`), the water (`terrain.draw`'s water time, and `water::live()`, which is false
+  at level 0), the living map's flags and smoke (`living_on` needs level > 0), the mist's clouds (`mist::clock`), the
+  weather's motion (`draw_weather`) and the torches' flicker (`draw_daylight`: at level 0 the middle of its range, steady).
+  The wakes go with the water. The fog's reveal is instant under Off (`minimap` `track`: a fresh update when the
+  fog changes). Under Off the idle frames are paced as «Экономия батареи» does (`frame_cap::current`). Off is not a
+  rule: nothing a map or a mod sees changes.
 - **The fog fades** (the owner's request, 2026-11-10: a smooth reveal, not a pop). `minimap::FogShown` (per thread)
   keeps each cell's shown darkness (0..255, unrounded) and eases it toward its target (`darkness_into` of the fog
   with its held cells dark): an exponential approach with `FADE_TAU` (0.2 s), monotonic, snapped within half a
