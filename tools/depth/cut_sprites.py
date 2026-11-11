@@ -562,6 +562,8 @@ def split_and_classify(lab: np.ndarray, K: int, D: np.ndarray, rgba: np.ndarray,
     toward its top edge) → standing; a piece with a standing piece directly below it, and rising, stands
     too (a roof on its wall). Returns (lab, K, ground) with ground[r] for each new region r.
     """
+    if SAM_DIR:
+        return sam_split_and_classify(rgba, D, op)
     h, w = lab.shape
     a, b = ground_plane(op, D)
     rise = D - (a + b * np.arange(h, dtype=float)[:, None])
@@ -651,6 +653,157 @@ def split_and_classify(lab: np.ndarray, K: int, D: np.ndarray, rgba: np.ndarray,
         if below_stand[r]:
             ground[r] = False
     return new, K2, ground
+
+
+SAM_DIR = os.environ.get("CUT_SAM_DIR")  # the SAM checkpoint folder (facebook/sam-vit-base, Apache-2.0)
+SAM_POINTS_BATCH = 64
+RATIO_GROUND = (0.6, 1.6)  # a piece's y-slope over the sprite's ground y-slope: this band is ground
+RATIO_WALL = 0.25  # |ratio| below this is a wall (depth constant down the picture)
+GROUND_RESID = 0.03  # a ground piece's median residual to the ground plane (of the normalised depth)
+RANSAC_ITERS = 400
+RANSAC_TOL = 0.02
+_SAM = None
+
+
+def sam_pipeline():
+    global _SAM
+    if _SAM is None:
+        from transformers import pipeline
+
+        _SAM = pipeline("mask-generation", model=SAM_DIR, device=0)
+    return _SAM
+
+
+def sam_labels(rgba: np.ndarray, op: np.ndarray) -> np.ndarray:
+    """Pieces of the sprite from SAM's automatic masks (on the 4x upscaled sprite): each opaque pixel goes to
+    the smallest mask holding it; the opaque pixels no mask holds form their own connected pieces. An (h, w)
+    int array, -1 outside the opaque pixels."""
+    h, w = op.shape
+    img = Image.fromarray(composite_rgb(rgba)).resize((w * UPSCALE, h * UPSCALE), Image.Resampling.BICUBIC)
+    out = sam_pipeline()(img, points_per_batch=SAM_POINTS_BATCH, pred_iou_thresh=0.86, stability_score_thresh=0.92)
+    masks = []
+    for m in out["masks"]:
+        small = np.array(Image.fromarray(np.array(m).astype(np.uint8) * 255).resize((w, h), Image.Resampling.NEAREST)) > 0
+        masks.append(small & op)
+    order = sorted(range(len(masks)), key=lambda i: -int(masks[i].sum()))
+    lab = np.full((h, w), -1, np.int32)
+    for k, i in enumerate(order):
+        lab[masks[i]] = k
+    rest = op & (lab < 0)
+    n_rest, cc = cv2.connectedComponents(rest.astype(np.uint8), connectivity=4)
+    base = len(order)
+    for c in range(1, n_rest):
+        lab[cc == c] = base + c - 1
+    return lab
+
+
+def ground_plane_xy(rgba: np.ndarray, op: np.ndarray, D: np.ndarray):
+    """The sprite's own ground plane D = p·x + q·y + r, fitted robustly (RANSAC, then least squares on the inliers)
+    to the surely-ground pixels: the painted cast shadow and base (alpha 150..190 outside the opaque silhouette)
+    and each column's lowest opaque pixel (the ground contacts). Returns (p, q, r) or None."""
+    h, w = op.shape
+    alpha = rgba[..., 3]
+    shadow = (alpha >= SHADOW_LO) & (alpha <= SHADOW_HI) & ~op
+    contact = np.zeros_like(op)
+    cols = np.nonzero(op.any(axis=0))[0]
+    for x in cols:
+        contact[np.nonzero(op[:, x])[0].max(), x] = True
+    ys, xs = np.nonzero(shadow | contact)
+    if len(xs) < 8:
+        return None
+    vals = D[ys, xs]
+    rng = np.random.default_rng(0)
+    best = None
+    best_n = 0
+    for _ in range(RANSAC_ITERS):
+        pick = rng.choice(len(xs), 3, replace=False)
+        A = np.stack([xs[pick], ys[pick], np.ones(3)], axis=1).astype(float)
+        try:
+            p, q, r = np.linalg.solve(A, vals[pick])
+        except np.linalg.LinAlgError:
+            continue
+        inl = np.abs(p * xs + q * ys + r - vals) <= RANSAC_TOL
+        n = int(inl.sum())
+        if n > best_n:
+            best_n, best = n, inl
+    if best is None or best_n < 8:
+        return None
+    A = np.stack([xs[best], ys[best], np.ones(best_n)], axis=1).astype(float)
+    p, q, r = np.linalg.lstsq(A, vals[best], rcond=None)[0]
+    return float(p), float(q), float(r)
+
+
+def sam_split_and_classify(rgba: np.ndarray, D: np.ndarray, op: np.ndarray):
+    """Ground or standing for each SAM piece, by its own slope against the sprite's ground plane (scale-free):
+    a piece's depth gradient down the picture, over the ground's, in RATIO_GROUND, with the piece on the plane
+    (small median residual), is ground: a floor faces up. A piece with |ratio| under RATIO_WALL is a wall
+    (depth constant down the picture) and stands; anything between stands as a roof. Roofs keep their colour
+    and rise cues, and a ground-like piece with standing pieces mostly below it and rising stands too.
+    Returns (lab, K, ground) like `split_and_classify`."""
+    h, w = op.shape
+    lab = sam_labels(rgba, op)
+    ids = sorted(set(np.unique(lab).tolist()) - {-1})
+    remap = np.full(max(ids) + 2 if ids else 1, -1, np.int32)
+    for new_id, old_id in enumerate(ids):
+        remap[old_id] = new_id
+    lab = np.where(lab >= 0, remap[np.maximum(lab, 0)], -1).astype(np.int32)
+    K = len(ids)
+    plane = ground_plane_xy(rgba, op, D)
+    if plane is None:
+        return lab, K, [False] * K
+    p, q, r0 = plane
+    yy, xx = np.mgrid[0:h, 0:w].astype(float)
+    on_ground = p * xx + q * yy + r0
+    resid_all = np.abs(D - on_ground)
+    rgbf = rgba[..., :3].astype(float)
+    mx, mn = rgbf.max(axis=2), rgbf.min(axis=2)
+    sat = np.where(mx > 0, (mx - mn) / np.maximum(mx, 1), 0.0)
+    rr, gg, bb = rgbf[..., 0], rgbf[..., 1], rgbf[..., 2]
+    span = np.maximum(mx - mn, 1e-6)
+    hue = np.where(mx == rr, 60.0 * ((gg - bb) / span % 6), np.where(mx == gg, 60.0 * ((bb - rr) / span + 2), 60.0 * ((rr - gg) / span + 4)))
+    hue = np.where(hue < 0, hue + 360.0, hue)
+    thatch = (hue >= 30) & (hue <= 55) & (sat >= THATCH_SAT) & (mx >= THATCH_VALUE * 255)
+    red_roof = (sat >= ROOF_SAT) & (rr > ROOF_RED * gg)
+    slate = (sat < 0.2) & (bb > rr) & (mx < 170) & (mx > 60)
+    roof_px = thatch | red_roof | slate
+    rows_idx = np.arange(h)[:, None]
+    ground, stand0 = [], []
+    for k in range(K):
+        m = lab == k
+        n = int(m.sum())
+        if n < GROUND_MIN_PX:
+            ground.append(False)
+            stand0.append(True)
+            continue
+        ys, xs = np.nonzero(m)
+        A = np.stack([xs, ys, np.ones(n)], axis=1).astype(float)
+        qy = float(np.linalg.lstsq(A, D[ys, xs], rcond=None)[0][1])
+        ratio = qy / q if abs(q) > 1e-6 else 0.0
+        resid = float(np.median(resid_all[m]))
+        rows = np.nonzero(m.any(axis=1))[0]
+        top, bottom = rows[0], rows[-1]
+        band = max(1, (bottom - top) // 5)
+        rise = D - on_ground
+        top_band = m & (rows_idx <= top + band)
+        bot_band = m & (rows_idx >= bottom - band)
+        rise_top = float(np.median(rise[top_band])) if top_band.any() else 0.0
+        rise_bot = float(np.median(rise[bot_band])) if bot_band.any() else 0.0
+        on_plane = RATIO_GROUND[0] <= ratio <= RATIO_GROUND[1] and resid <= GROUND_RESID
+        roof = (rise_top - rise_bot > ROOF_TOP_STEP and rise_top > GROUND_RESID) or float(roof_px[m].mean()) >= 0.5
+        ground.append(bool(on_plane and not roof))
+        stand0.append(not ground[-1])
+    # A ground-like piece with standing pieces mostly below it, and rising, is a roof on its wall: it stands.
+    ld = np.full(lab.shape, -1, np.int32)
+    ld[:-1, :] = lab[1:, :]
+    for k in range(K):
+        if not ground[k]:
+            continue
+        m = lab == k
+        nb = ld[m]
+        nb = nb[nb >= 0]
+        if nb.size and float(np.mean(np.array(stand0)[nb])) >= STACK_SHARE and float(np.median(D[m] - on_ground[m])) > GROUND_RESID:
+            ground[k] = False
+    return lab, K, ground
 
 
 def build_cards(lab, D, K, op=None):
