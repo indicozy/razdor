@@ -1694,6 +1694,14 @@ fn standing_at(cam: &Camera, foot: Vec2, base: Vec2, at: Vec2, vis: f32, picture
             return;
         }
     }
+    // Off the window: a picture whose box lies past the window's edges, by more than the margin its sway and the
+    // sharp band reach, draws no pixel, so it is not drawn. `picture_on_screen` gives window pixels (the frame's units
+    // are the window's, see `view25::window_matrix`), and a corner behind the eye keeps the sprite.
+    if let Some(r) = picture_on_screen(&tilt, screen_view(cam), place, picture) {
+        if !overlaps(r, Rect::new(0.0, 0.0, screen_width(), screen_height()), OFF_WINDOW_MARGIN) {
+            return;
+        }
+    }
     // The trailer's camera (dev-only) and the first-person view: a sprite whose foot is nearer the
     // eye than the near fade's distance fades out (the first-person view: only one that covers the
     // hero, [`first_person_fade`]), and the blend band of its sharp draws follows the magnification
@@ -1809,6 +1817,10 @@ fn covering_gap(cam: &Camera, tilt: &Tilt, model: Mat4, picture: Rect, depth: f3
     };
     covers.then_some(hero.depth - depth)
 }
+
+/// How far past the window's edge a standing sprite's box may lie and still be drawn: the sway of the
+/// trees (2.5 px in their picture), the lean and the sharp band, with room to spare.
+const OFF_WINDOW_MARGIN: f32 = 16.0;
 
 /// Whether the rectangles `a` and `b` overlap, `b` widened by `margin` on every side.
 fn overlaps(a: Rect, b: Rect, margin: f32) -> bool {
