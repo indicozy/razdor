@@ -23,3 +23,7 @@ sidebar:
 ```sh
 RAZDOR_ASSETS=./assets-local cargo run --release
 ```
+
+## Постройки на карте
+
+Постройки на карте лежат не в PNG, а в `Graphics/Objects/Objects.ugs` папки игры. Как заменить их и как они выглядят в 2.5D, от первого и третьего лица и при освещении, написано в [Графике мода: постройки и свет](/razdor/wiki/mods/visual-modding/).

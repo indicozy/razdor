@@ -23,3 +23,7 @@ To make Razdor take the pictures from your folder, set the `RAZDOR_ASSETS` varia
 ```sh
 RAZDOR_ASSETS=./assets-local cargo run --release
 ```
+
+## Buildings on the map
+
+Buildings on the map are not PNG files: they are in `Graphics/Objects/Objects.ugs` in the game folder. How to replace them, and how they look in 2.5D, in first and third person and with lighting, is in [Mod art: buildings and light](/razdor/wiki/en/mods/visual-modding/).
