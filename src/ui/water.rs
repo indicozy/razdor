@@ -164,6 +164,25 @@ pub fn river_speed(codes: &[u8], size: (u32, u32), flow: &[(f32, f32)]) -> Vec<f
         .collect()
 }
 
+/// The sun's and moon's sparkle on the water (`Glint`, the RGB and the strength): the light's colour at `hour`
+/// (`daylight::light_at`: warm at dawn and dusk, bluish at night, and the moon's silver), its strength `0.5` at
+/// noon, up to `1` with the sun low, `0.55` at night.
+pub fn glint(hour: f32) -> [f32; 4] {
+    let e = (std::f32::consts::TAU * (hour - 6.0) / 24.0).sin();
+    let night = smoothstep(0.05, -0.15, e);
+    let low = 1.0 - smoothstep(0.0, 0.6, e);
+    let strength = (0.5 + 0.5 * low) * (1.0 - night) + 0.55 * night;
+    // The colour: white by day, the dawn and dusk warmth (the daylight's bell, its warm colour at 0.7), the moon's silver at night.
+    let warmth = (-((e - 0.08) / 0.20).powi(2)).exp();
+    const WARM: [f32; 3] = [1.0, 0.80, 0.58];
+    let silver = [0.9, 0.93, 1.0];
+    let rgb = [0, 1, 2].map(|c| {
+        let day = 1.0 + (WARM[c] - 1.0) * warmth * 0.7;
+        day + (silver[c] - day) * night
+    });
+    [rgb[0], rgb[1], rgb[2], strength]
+}
+
 /// The shaders' smooth value noise at `q`, as the hash computes it (`vnoise` in the mist and the unlit shader).
 #[cfg(test)]
 pub fn vnoise_ref(q: (f32, f32)) -> f32 {
@@ -640,6 +659,18 @@ mod tests {
         assert_eq!(speed[7 * 25 + 8], 0.0, "the lake does not drift");
         assert_eq!(speed[26], 0.0, "nor its rim");
         assert_eq!(speed[7 * 25 + 21], SPEED_NARROW, "the narrow river runs at full speed");
+    }
+
+    #[test]
+    fn the_glint_is_warm_at_dusk_silver_at_night_and_strongest_with_the_sun_low() {
+        let noon = glint(12.0);
+        let dusk = glint(18.0);
+        let night = glint(0.0);
+        assert!((noon[3] - 0.5).abs() < 1e-3, "noon: {}", noon[3]);
+        assert!(dusk[3] > noon[3] && dusk[3] > 0.9, "the sun low at dusk is stronger than at noon: {}", dusk[3]);
+        assert!((night[3] - 0.55).abs() < 1e-3, "the moon at night: {}", night[3]);
+        assert!(dusk[0] > dusk[2], "warm at dusk: {dusk:?}");
+        assert!(night[2] > night[0] && night[0] > 0.8, "silver at night: {night:?}");
     }
 
     #[test]

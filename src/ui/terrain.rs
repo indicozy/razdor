@@ -177,6 +177,11 @@ uniform float LiveWater;
 // The water's detail by the map's zoom (`water::lod_detail`): 1 whole, 0 zoomed out. It scales the ripple and the
 // foam's lapping; zoomed out the water keeps its texture, colour and foam.
 uniform float Detail;
+// The shore (`water::bank_distance`, `wide_water`): red the water's distance from the bank in steps / 8, green 1 on
+// the wide water (a lake, the sea), 0 on a river.
+uniform sampler2D Bank;
+// The sun's and the moon's glint (`water::glint`): rgb the light's colour, a the strength.
+uniform vec4 Glint;
 uniform sampler2D Flow;
 uniform vec3 Sky;
 // The water's noise texture (`water::noise_texels`): a wrapped 64×64 table of the lattice's hashes.
@@ -324,6 +329,16 @@ void main() {
             + (k.z < 2.5 ? 1.0 : 0.0) * (1.0 - fx) * fy + (k.w < 2.5 ? 1.0 : 0.0) * fx * fy;
         vec4 fo = shore_foam(cov, p, fl, dr);
         col = mix(col, fo.rgb, fo.a);
+        vec4 bk = texture2D(Bank, (p + 0.5) / MapSize);
+        float wide = step(0.5, bk.g);
+        float still = 1.0 - smoothstep(0.2, 0.8, length(fl));
+        // (b) The glints: small points that twinkle and drift, brighter on the wide water than on a river. The drift
+        // moves the noise by whole lattice periods per CLOCK_PERIOD (5760 and 2240 of 64), and the twinkle is 2000 cycles
+        // of it (1.9634954 rad/s), so the wrap is invisible. The mist and the war fog cover them after.
+        float g = wnoise(p * 6.0 + Clock * vec2(0.9, 0.35));
+        float tw = 0.5 + 0.5 * sin(Clock * 1.9634954 + 40.0 * g);
+        float glint = smoothstep(0.87, 0.95, g) * tw * (0.4 + 0.6 * wide) * still * Detail;
+        col = min(col + Glint.rgb * (glint * Glint.a * 0.7), vec3(1.0));
     }
     if (mist) {
         float n = 0.6 * vnoise(p * 0.11 + Clock * vec2(0.05, 0.02)) + 0.4 * vnoise(p * 0.27 + Clock * vec2(-0.08, 0.05));
@@ -547,7 +562,7 @@ const LEGACY_UNIFORMS: [(&str, UniformType); 19] = [
 ];
 
 /// The uniforms every terrain shader declares (the old one leaves `Overlay` out of its code).
-const UNIFORMS: [(&str, UniformType); 17] = [
+const UNIFORMS: [(&str, UniformType); 18] = [
     ("View", UniformType::Float4),
     ("MapSize", UniformType::Float2),
     ("CellPx", UniformType::Float2),
@@ -565,6 +580,7 @@ const UNIFORMS: [(&str, UniformType); 17] = [
     ("LiveWater", UniformType::Float1),
     ("Sky", UniformType::Float3),
     ("Detail", UniformType::Float1),
+    ("Glint", UniformType::Float4),
 ];
 
 /// Wrapped border around each atlas slot, in pixels.
@@ -716,6 +732,8 @@ struct MapTextures {
     neighbours: Texture2D,
     /// The live water's per-cell texture (`flow_texels`): flow, drift speed and the water mask.
     flow: Texture2D,
+    /// The live water's shore (`bank_texels`): the distance from the bank, and the wide water.
+    bank: Texture2D,
     /// Razdor's weather masks (`weather::mask_texels`): snow, swamp rain, heat and ash; the lowland rain.
     weather: Texture2D,
     lowland: Texture2D,
@@ -760,6 +778,16 @@ pub fn flow_texels(codes: &[u8], flow: &[(f32, f32)], speed: &[f32]) -> Vec<u8> 
             let wet = Surface::from_code(c).is_some_and(is_water);
             [flow_byte(x), flow_byte(y), (s.clamp(0.0, 1.0) * 255.0).round() as u8, if wet { 255 } else { 0 }]
         })
+        .collect()
+}
+
+/// The live water's shore as RGBA8 bytes, one texel per cell (row by row), baked once per map: red is the cell's
+/// distance from the bank in steps (`water::bank_distance`, up to 8: 255 is 8 or more), green 255 on the wide water
+/// (`water::wide_water`, a lake or the sea) and 0 elsewhere; linear, so the waves run soft.
+pub fn bank_texels(bank: &[u32], wide: &[bool]) -> Vec<u8> {
+    bank.iter()
+        .zip(wide)
+        .flat_map(|(&d, &w)| [((d.min(8) as f32) / 8.0 * 255.0).round() as u8, if w { 255 } else { 0 }, 0, 255])
         .collect()
 }
 
@@ -933,12 +961,12 @@ impl TerrainLayer {
         let mut opts = options();
         let (mut old, mut new_hp, mut new_mp, mut composite) = (None, None, None, None);
         if opts.new_shader {
-            let hp_ok = make_material(&new_fragment("highp"), &UNIFORMS, &["Neighbours", "Atlas", "Water", "Flow", "Noise"]);
+            let hp_ok = make_material(&new_fragment("highp"), &UNIFORMS, &["Neighbours", "Atlas", "Water", "Flow", "Noise", "Bank"]);
             match hp_ok {
                 Ok(m) => {
                     new_hp = Some(m);
                     // Both precisions are made at start; option 4 picks one.
-                    new_mp = make_material(&new_fragment("mediump"), &UNIFORMS, &["Neighbours", "Atlas", "Water", "Flow", "Noise"]).map_err(|e| razdor::diag!("terrain shader (mediump): {e}")).ok();
+                    new_mp = make_material(&new_fragment("mediump"), &UNIFORMS, &["Neighbours", "Atlas", "Water", "Flow", "Noise", "Bank"]).map_err(|e| razdor::diag!("terrain shader (mediump): {e}")).ok();
                 }
                 Err(e) => razdor::diag!("terrain shader: {e}"),
             }
@@ -1015,6 +1043,10 @@ impl TerrainLayer {
         let speed = if field.is_empty() { Vec::new() } else { super::water::river_speed(codes, (w, h), field) };
         let flow_tex = Texture2D::from_rgba8(w as u16, h as u16, &flow_texels(codes, field, &speed));
         flow_tex.set_filter(FilterMode::Linear);
+        let bank = super::water::bank_distance(codes, (w, h));
+        let wide = super::water::wide_water(&bank, (w, h));
+        let bank_tex = Texture2D::from_rgba8(w as u16, h as u16, &bank_texels(&bank, &wide));
+        bank_tex.set_filter(FilterMode::Linear);
         let (biome_bytes, lowland_bytes) = super::weather::mask_texels(codes);
         // Nearest: the shader blends the four cells itself (`weather::mask4`).
         let weather = Texture2D::from_rgba8(w as u16, h as u16, &biome_bytes);
@@ -1022,7 +1054,7 @@ impl TerrainLayer {
         let lowland = Texture2D::from_rgba8(w as u16, h as u16, &lowland_bytes);
         lowland.set_filter(FilterMode::Nearest);
         let weather_seed = super::weather::map_seed(w, h, codes);
-        let tex = MapTextures { cells, neighbours, flow: flow_tex, weather, lowland, weather_seed };
+        let tex = MapTextures { cells, neighbours, flow: flow_tex, bank: bank_tex, weather, lowland, weather_seed };
         *cache = Some(CellTextures { codes: codes.to_vec(), flow: flow.to_vec(), size: (w, h), tex: tex.clone() });
         tex
     }
@@ -1111,6 +1143,7 @@ impl TerrainLayer {
                 m.set_texture("WaterMask", maps.flow.clone());
             } else {
                 m.set_texture("Noise", self.noise.clone());
+                m.set_texture("Bank", maps.bank.clone());
             }
         } else {
             m.set_texture("Cells", maps.cells.clone());
@@ -1146,6 +1179,9 @@ impl TerrainLayer {
         // The water's detail by the zoom: the on-screen cell over the zoom-1 cell (`cell_px`, the map's PX).
         if !legacy {
             m.set_uniform("Detail", water::lod_detail((dest.w / (view.z - view.x)) / cell_px.x));
+            // The sparkle's colour and strength: the light's hour (noon when the lighting is off).
+            let glint = water::glint(daylight::shown_hour().unwrap_or(12.0));
+            m.set_uniform("Glint", vec4(glint[0], glint[1], glint[2], glint[3]));
         }
         let sky = daylight::sky_rgb();
         m.set_uniform("Sky", vec3(sky[0], sky[1], sky[2]));
