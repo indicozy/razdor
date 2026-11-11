@@ -227,6 +227,8 @@ async fn main() {
     // With RAZDOR_PROFILE, the frames after a window opens are logged whatever they take.
     let mut opened = 0u32;
     loop {
+        // The window's size and DPI for this frame, read once here (`ui::frame_state`).
+        ui::frame_state::refresh();
         let started = std::time::Instant::now();
         let before = app.screen_name();
         if ui::snapshot::open_later(&mut app, frames) {

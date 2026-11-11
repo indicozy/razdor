@@ -99,7 +99,7 @@ pub fn set_watch_area(area: Option<Rect>) {
 
 /// The map view: the window above the bottom bar (or the watching screen's, while it is set).
 fn map_area() -> Rect {
-    WATCH_AREA.with(|c| c.get()).unwrap_or_else(|| map_area_in(screen_width(), screen_height(), bar_h()))
+    WATCH_AREA.with(|c| c.get()).unwrap_or_else(|| map_area_in(super::frame_state::screen_w(), super::frame_state::screen_h(), bar_h()))
 }
 /// Never less than nothing: a minimized window on Windows is 1 pixel high, under the bar.
 fn map_area_in(w: f32, h: f32, bar: f32) -> Rect {
@@ -549,7 +549,7 @@ fn scroll(game: &Game, view: &mut MapView, dt_ms: i64, pad: (f32, f32)) {
     }
     dir += Vec2::from(pad);
     let (mx, my) = crate::ui::widgets::pointer();
-    let (w, h) = (screen_width(), screen_height());
+    let (w, h) = (super::frame_state::screen_w(), super::frame_state::screen_h());
     let edge = EDGE * map_scale();
     // The open minimap does not stop the edges (the original's minimap is always on screen
     // and its map still scrolls, 4cd0af); only the pointer on the minimap itself does, so it
@@ -1525,7 +1525,7 @@ fn in_view(cam: &Camera, f: impl Fn(&Camera)) {
     if let Some(bend) = tilt.cam.bend.filter(|_| super::render_cache::target().is_none()) {
         bent_view(cam, &tilt, bend, &f);
     } else {
-        let (w, h) = (screen_width(), screen_height());
+        let (w, h) = (super::frame_state::screen_w(), super::frame_state::screen_h());
         super::sharp::count_break();
         set_camera(&View3d(view25::window_matrix(cam.view, w, h) * tilt.cam.view_proj(cam.view)));
         f(&cam.tilted_space());
@@ -1542,7 +1542,7 @@ fn in_view_sprites(cam: &Camera, f: impl Fn(&Camera)) {
     let Some(tilt) = cam.tilt.filter(|t| t.cam.bend.is_some() && super::render_cache::target().is_none()) else { return in_view(cam, f) };
     let prev = SCREEN_VIEW.with(|v| v.replace(Some(cam.view)));
     let space = cam.tilted_space();
-    let (w, h) = (screen_width(), screen_height());
+    let (w, h) = (super::frame_state::screen_w(), super::frame_state::screen_h());
     super::sharp::count_break();
     set_camera(&View3d(view25::window_matrix(cam.view, w, h) * tilt.cam.view_proj(cam.view)));
     with_pass(Pass::Sprites, || f(&space));
@@ -1573,7 +1573,7 @@ fn bent_view(cam: &Camera, tilt: &Tilt, bend: view25::Bend, f: &impl Fn(&Camera)
     super::sharp::set_raster(raster * ground);
     super::render_cache::fill_space(&target, space.view, || with_pass(Pass::Ground, || f(&space)));
     super::sharp::set_raster(raster);
-    let (w, h) = (screen_width(), screen_height());
+    let (w, h) = (super::frame_state::screen_w(), super::frame_state::screen_h());
     super::sharp::count_break();
     set_camera(&View3d(view25::window_matrix(cam.view, w, h) * tilt.cam.view_proj(cam.view)));
     draw_sheet(&target, &bend, tilt.cull);
@@ -1793,7 +1793,7 @@ fn standing_at(cam: &Camera, foot: Vec2, base: Vec2, at: Vec2, vis: f32, picture
     // sharp band reach, draws no pixel, so it is not drawn. `picture_on_screen` gives window pixels (the frame's units
     // are the window's, see `view25::window_matrix`), and a corner behind the eye keeps the sprite.
     if let Some(r) = picture_on_screen(&tilt, screen_view(cam), place, picture) {
-        if !overlaps(r, Rect::new(0.0, 0.0, screen_width(), screen_height()), OFF_WINDOW_MARGIN) {
+        if !overlaps(r, Rect::new(0.0, 0.0, super::frame_state::screen_w(), super::frame_state::screen_h()), OFF_WINDOW_MARGIN) {
             return;
         }
     }
@@ -2047,7 +2047,7 @@ fn take_shot(view: &mut MapView, now: f64) {
 /// Leaving (the strip's «Выход», the photo key, Esc with the strip shown) gives the view back and returns
 /// `Left` before anything is drawn.
 fn photo_frame(game: &mut Game, assets: &Assets, view: &mut MapView, entering: bool) -> PhotoStep {
-    let (sw, sh) = (screen_width(), screen_height());
+    let (sw, sh) = (super::frame_state::screen_w(), super::frame_state::screen_h());
     let layout = photo::layout((sw, sh), super::display::dp_px(), super::chrome::k(), super::display::safe_area().bottom);
     let shown = photo::with(|p| p.strip).unwrap_or(true);
     let (pressed, held) = if shown { photo::strip_input(&layout) } else { ([false; 3], [false; 3]) };
@@ -2743,7 +2743,7 @@ fn ground_key(game: &Game, cam: &Camera) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     let f = |v: f32| v.to_bits();
     let rect = |r: Rect| [r.x, r.y, r.w, r.h].map(f);
-    [screen_width(), screen_height(), screen_dpi_scale()].map(f).hash(&mut h);
+    [super::frame_state::screen_w(), super::frame_state::screen_h(), super::frame_state::dpi()].map(f).hash(&mut h);
     [cam.origin.x, cam.origin.y, cam.scale].map(f).hash(&mut h);
     rect(cam.view).hash(&mut h);
     rect(cam.draw).hash(&mut h);
@@ -4212,10 +4212,10 @@ fn compass_rect(game: &Game, view: &MapView, cam: &Camera) -> Option<Rect> {
         let o = minimap::outer(&game.world.map, cam.view);
         avoid.push(o);
         if game.army_list {
-            avoid.extend(minimap::list_area(game, o, screen_height() - bar_h()));
+            avoid.extend(minimap::list_area(game, o, super::frame_state::screen_h() - bar_h()));
         }
     }
-    compass_place(vec2(screen_width(), screen_height()), game_bar::bar_rect(), compass_size(super::chrome::k()), &avoid)
+    compass_place(vec2(super::frame_state::screen_w(), super::frame_state::screen_h()), game_bar::bar_rect(), compass_size(super::chrome::k()), &avoid)
 }
 
 /// The compass: a dark disc with a silver ring, its needle red to north (the map's default up,
@@ -4348,7 +4348,7 @@ fn draw_sky(cam: &Camera) {
         // and `photo_frame` clear, then the camera and the input only; `draw_map_backdrop` and
         // `window_backdrop_at_scale` clear inside `unpanned`, then the camera). `clear_background`
         // drops the draws queued so far, so the clear also leaves nothing of them behind.
-        if r.x <= 0.0 && r.y <= 0.0 && r.x + r.w >= screen_width() && r.y + r.h >= screen_height() {
+        if r.x <= 0.0 && r.y <= 0.0 && r.x + r.w >= super::frame_state::screen_w() && r.y + r.h >= super::frame_state::screen_h() {
             return clear_background(SKY);
         }
         return draw_rectangle(r.x, r.y, r.w, r.h, SKY);
@@ -4421,7 +4421,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     let map = &game.world.map;
     let ((c0, c1), (r0, r1)) = cam.visible(map);
     // The settings and thread-locals the sprites read, read once for the pass (see `FrameCtx`).
-    let ctx = FrameCtx { dpi: screen_dpi_scale(), clock: clock_ms(), anim: super::map_anim::level(), sun: form_sun_of(cam) };
+    let ctx = FrameCtx { dpi: super::frame_state::dpi(), clock: clock_ms(), anim: super::map_anim::level(), sun: form_sun_of(cam) };
     // Sprites stand on their cell and reach up to ~8 cells above it. Turned, a sprite reaches any
     // way up the screen, so every side takes the larger margin.
     let (below, side) = (10, 8);
@@ -5108,7 +5108,7 @@ fn tip_lh(ink: Ink, s: f32) -> f32 {
 /// The tooltip's box width in px at the text scale `u`: the original's `TIP_W` at `u`, no wider
 /// than the screen less 8 px (Razdor's: a phone's text base makes the box grow with its text).
 fn tip_box_w(u: f32) -> f32 {
-    (TIP_W * u).min(screen_width() - 8.0)
+    (TIP_W * u).min(super::frame_state::screen_w() - 8.0)
 }
 
 /// Draws the map's hover card and returns the rectangle it drew into.
@@ -5164,7 +5164,7 @@ fn draw_tooltip_at(game: &Game, assets: &Assets, t: &Tooltip) -> Rect {
     let fits = |u: f32| {
         let text_h = text_h_of(&rows_at(u), u) / u;
         let raw = tip_height_raw(t.army, text_h, grid * k / u, caption(u));
-        (!t.army || text_h <= 353.0) && raw <= 512.0 && raw * u <= screen_height() - bar_h()
+        (!t.army || text_h <= 353.0) && raw <= 512.0 && raw * u <= super::frame_state::screen_h() - bar_h()
     };
     let tk = super::display::text_o_fitting(super::display::text_base(k, super::dialog::TEXT_REF), fits);
     let rows = rows_at(tk);
@@ -5173,13 +5173,13 @@ fn draw_tooltip_at(game: &Game, assets: &Assets, t: &Tooltip) -> Rect {
     // The cells' scale: a phone's army takes the text's (capped to what the box holds, see
     // `army_cells_scale`); the desktop and a garrison keep the interface scale.
     let cols = game.content.formation.display_cols() as usize;
-    let room = screen_height() - bar_h() - tip_height(true, text_h, 0.0, None) * tk;
+    let room = super::frame_state::screen_h() - bar_h() - tip_height(true, text_h, 0.0, None) * tk;
     let cs = army_cells_scale(t.army && super::display::dp_px().is_some(), k, tk, grid_h, tip_grid_w(cols), room, w);
     let h = tip_height(t.army, text_h, grid * cs / tk, caption(tk)) * tk;
     // Centred on the mouse and kept inside the map's view, above the bottom bar (interface.md
     // §7.4; 0x4ca8ac).
     let (mx, my) = crate::ui::widgets::pointer();
-    let desktop = Rect::new((mx - w / 2.0).min(screen_width() - w).max(0.0), (my - h / 2.0).min(screen_height() - bar_h() - h).max(0.0), w, h);
+    let desktop = Rect::new((mx - w / 2.0).min(super::frame_state::screen_w() - w).max(0.0), (my - h / 2.0).min(super::frame_state::screen_h() - bar_h() - h).max(0.0), w, h);
     // On a phone it goes above the finger, clear of it (`popup::placed`).
     let placed = super::popup::placed(desktop, (mx, my), (w, h));
     let (x, y) = (placed.x, placed.y);
@@ -5592,7 +5592,7 @@ fn backdrop_world(game: &Game, assets: &Assets) {
         if cam.tilt.is_none_or(|t| t.cam.bend.is_none()) {
             draw_weather(game, assets, &cam, light, &[]);
         }
-        draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.2));
+        draw_rectangle(0.0, 0.0, super::frame_state::screen_w(), super::frame_state::screen_h(), Color::new(0.0, 0.0, 0.0, 0.2));
     });
 }
 
@@ -5714,7 +5714,7 @@ fn battle_backdrop_key(game: &Game) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     let bits = |(x, y): (f32, f32)| (x.to_bits(), y.to_bits());
-    (screen_width().to_bits(), screen_height().to_bits(), screen_dpi_scale().to_bits()).hash(&mut h);
+    (super::frame_state::screen_w().to_bits(), super::frame_state::screen_h().to_bits(), super::frame_state::dpi().to_bits()).hash(&mut h);
     super::chrome::k().to_bits().hash(&mut h);
     super::display::dp_px().map(f32::to_bits).hash(&mut h);
     let area = map_area();
@@ -6097,7 +6097,7 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
         crate::ui::input::swipe_area(map_area(), SwipeKind::Pan);
         // Beside the bar the map is drawn down to the screen's edge: a swipe there pans it too.
         let bar = game_bar::bar_rect();
-        for side in [Rect::new(0.0, bar.y, bar.x, bar.h), Rect::new(bar.x + bar.w, bar.y, screen_width() - bar.x - bar.w, bar.h)] {
+        for side in [Rect::new(0.0, bar.y, bar.x, bar.h), Rect::new(bar.x + bar.w, bar.y, super::frame_state::screen_w() - bar.x - bar.w, bar.h)] {
             if side.w > 0.0 {
                 crate::ui::input::swipe_area(side, SwipeKind::Pan);
             }
@@ -6428,7 +6428,7 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
         // Razdor's army list under the minimap (advanced option): a click on a row goes there.
         if game.army_list && view.minimap {
             let o = minimap::outer(&game.world.map, cam.view);
-            if let Some(at) = minimap::army_list(game, o, screen_height() - bar_h(), &info("NoNameArmy", n_("Unknown army"))) {
+            if let Some(at) = minimap::army_list(game, o, super::frame_state::screen_h() - bar_h(), &info("NoNameArmy", n_("Unknown army"))) {
                 view.look = Some(at);
             }
         }
@@ -6485,7 +6485,7 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
         }
     }
     if !trailer_clean() {
-        draw_toasts(&mut view.toasts, crate::ui::clock::now(), screen_height() - bar_h() - 14.0 * super::chrome::k(), None);
+        draw_toasts(&mut view.toasts, crate::ui::clock::now(), super::frame_state::screen_h() - bar_h() - 14.0 * super::chrome::k(), None);
     }
     next
 }
@@ -6495,7 +6495,7 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
 fn on_minimap_pointer(game: &Game, view: &MapView, map_view: Rect) -> bool {
     view.minimap
         && (minimap::under_pointer(&game.world.map, map_view)
-            || (game.army_list && minimap::list_under_pointer(game, minimap::outer(&game.world.map, map_view), screen_height() - bar_h())))
+            || (game.army_list && minimap::list_under_pointer(game, minimap::outer(&game.world.map, map_view), super::frame_state::screen_h() - bar_h())))
 }
 
 /// Seconds a battle's mark stays on the map; it fades out over the last second.
@@ -6957,13 +6957,13 @@ fn draw_toasts(toasts: &mut VecDeque<(String, f64)>, now: f64, base: f32, size_o
         Some(s) => (s, (s * 1.6).max(30.0 * k), 6.0 * k),
         None => ((18.0 * k).max(14.0), (30.0 * k).max(24.0), 6.0 * k),
     };
-    let cx = screen_width() / 2.0;
+    let cx = super::frame_state::screen_w() / 2.0;
     // The newest is drawn at the base, the older ones stack above it.
     let mut y = base - h;
     for (m, at) in toasts.iter().rev() {
         let left = TOAST_SECONDS - (now - at);
         let a = (left / TOAST_FADE).clamp(0.0, 1.0) as f32;
-        let w = (measure(m, size).width + 40.0 * k).min(screen_width() - 16.0);
+        let w = (measure(m, size).width + 40.0 * k).min(super::frame_state::screen_w() - 16.0);
         draw_rectangle(cx - w / 2.0, y, w, h, Color { a: PANEL.a * a, ..PANEL });
         draw_rectangle_lines(cx - w / 2.0, y, w, h, 1.0, Color { a: 0.5 * a, ..super::chrome::SILVER });
         text_centered(m, cx, y + h * 0.5 + size * 0.36, size, Color { a, ..ACCENT });
