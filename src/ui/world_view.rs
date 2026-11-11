@@ -2814,6 +2814,20 @@ fn draw_terrain(game: &Game, art: Option<&DtArt>, cam: &Camera) {
     }
 }
 
+/// A map object's size on screen (physical pixels, its shorter side) below which it is not drawn at all,
+/// and above which it is drawn whole (`detail_visibility`'s band between them fades it out).
+const DETAIL_HIDE_PX: f32 = 2.0;
+const DETAIL_FULL_PX: f32 = 3.0;
+
+/// The visibility of a map object of picture `picture` (2D units) at this size: 0 when it is too small to
+/// see, 1 when it is whole, a smoothstep between (the owner's request 2026-11-11: the grass tufts and small
+/// rocks of a map zoomed out are sub-pixel noise, and the sprite run pays for each one).
+fn detail_visibility(picture: Rect) -> f32 {
+    let side = picture.w.min(picture.h) * screen_dpi_scale();
+    let t = ((side - DETAIL_HIDE_PX) / (DETAIL_FULL_PX - DETAIL_HIDE_PX)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 /// Something drawn in painter's order (by the bottom edge on screen).
 enum Drawable {
     Object(Decoration),
@@ -4579,7 +4593,25 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     super::sharp::session_lit(lit, || {
         for d in items.iter().map(|(_, d)| d) {
             match d {
-                Drawable::Object(o) => standing(cam, object_foot(o, cam), object_foot(o, cam), shade_of(object_foot(o, cam)), object_picture(o, art, cam), || draw_object(o, art, cam)),
+                Drawable::Object(o) => {
+                    // Razdor's (the owner's request, 2026-11-11): an object too small to see is not drawn, and one
+                    // just above that fades out (`detail_visibility`); the flat view fades it through `SPRITE_VIS`.
+                    let foot = object_foot(o, cam);
+                    let picture = object_picture(o, art, cam);
+                    let detail = detail_visibility(picture);
+                    if detail > 0.0 {
+                        let vis = shade_of(foot) * detail;
+                        standing(cam, foot, foot, vis, picture, || {
+                            if cam.tilt.is_none() && detail < 1.0 {
+                                let prev = SPRITE_VIS.with(|s| s.replace(detail));
+                                draw_object(o, art, cam);
+                                SPRITE_VIS.with(|s| s.set(prev));
+                            } else {
+                                draw_object(o, art, cam);
+                            }
+                        });
+                    }
+                }
                 Drawable::Building(i) => {
                     let l = &game.world.locations[*i];
                     let outlined = hover.is_some_and(|h| h.building == Some(*i));
