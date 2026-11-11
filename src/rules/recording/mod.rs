@@ -1,6 +1,6 @@
-//! Replays (rules only): the full-state snapshot a replay continues from, the engine's hooks that
-//! take real time's decisions out of the rules, and the input stream. The design is
-//! `docs/superpowers/specs/2026-11-11-replays-design.md`; the flow is `docs/flows/replays.md`.
+//! Replays, phase 1 (rules only): the recording of what a game's player did and what real time
+//! decided, and the full-state snapshot a replay continues from. Design:
+//! `docs/superpowers/specs/2026-11-11-replays-design.md`; the flow: `docs/flows/replays.md`.
 //!
 //! - [`snapshot`]: the exact state of a live game (`Snapshot`) and its hash (`state_hash`). A
 //!   save is not one: a load reseeds and resets (kept for saves).
@@ -9,6 +9,7 @@
 //!   back what real time decided (the event seed, the «Максимум» moves, the patch globals) and
 //!   the music's places. Nothing is attached by default: the rules then run as they always did.
 
+pub mod battle_start;
 pub mod header;
 pub mod hook;
 pub mod snapshot;
