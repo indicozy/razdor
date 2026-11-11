@@ -456,6 +456,9 @@ Experience on promotion: kept = Опыт при повышении: сохран
 Reset (original) = Сбрасывается (оригинал)
 Kept (Razdor) = Сохраняется (Раздор)
 As in the original, a unit's experience is dropped when it is promoted; Kept keeps it. Experience left over after a level is kept either way. = Как в оригинале, опыт юнита сбрасывается при повышении; «Сохраняется» оставляет его. Опыт, оставшийся после уровня, сохраняется в любом случае.
+# Advanced settings: the hit shake (Razdor's, off by default)
+Hit shake = Тряска от ударов
+Razdor's: a short shake of the battlefield when a unit takes a hit. Stronger on a heavy hit and when a unit dies. Style only. = Раздора: короткая тряска поля боя, когда отряд получает удар. Сильнее при сильном ударе и при гибели отряда. Только вид.
 Updates = Обновления
 Ask = Спрашивать
 Always = Всегда

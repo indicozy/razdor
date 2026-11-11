@@ -646,7 +646,9 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             app.open_custom();
             let Some(Screen::CustomBattle(mut view)) = app.custom_round() else { return Err("no custom battle".into()) };
             if parts.next() == Some("watch") {
-                view.watch_for_snapshot();
+                // `custom-battle:watch:<1|2|4>`: the watched pace (4× when not given).
+                let speed = parts.next().and_then(|s| s.trim().parse::<u8>().ok()).unwrap_or(4);
+                view.watch_for_snapshot(speed);
             }
             app.screen = Screen::CustomBattle(view);
             return Ok(());
