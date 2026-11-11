@@ -22,7 +22,7 @@ use super::chrome::{self, Fx};
 use super::keymap;
 use super::minimap;
 use super::window_layout;
-use super::view25::CameraTune;
+use super::view25::{CameraTune, FIRST_TUNE, THIRD_TUNE};
 use super::widgets::*;
 
 /// What the player picked.
@@ -1592,7 +1592,7 @@ impl Group {
     /// The rows the group shows, top to bottom. Every row is in exactly one group (a test checks it).
     pub fn rows(self) -> &'static [Row] {
         match self {
-            Group::Map => &[Row::MapZoom, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::CurveStart, Row::CurveStrength, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
+            Group::Map => &[Row::MapZoom, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::CurveReset, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
             Group::Battle => &[Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience, Row::HitShake],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
@@ -1613,6 +1613,10 @@ pub enum Row {
     FarGround,
     CurveStart,
     CurveStrength,
+    CameraHeight,
+    CameraPitch,
+    CameraFov,
+    CurveReset,
     MapEdge,
     Lighting,
     LightCycle,
@@ -1652,7 +1656,7 @@ pub enum Row {
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 44] = [
+pub const ALL: [Row; 48] = [
         Row::MapZoom,
         Row::MapResolution,
         Row::FrameCap,
@@ -1662,6 +1666,10 @@ pub const ALL: [Row; 44] = [
         Row::FarGround,
         Row::CurveStart,
         Row::CurveStrength,
+        Row::CameraHeight,
+        Row::CameraPitch,
+        Row::CameraFov,
+        Row::CurveReset,
         Row::MapEdge,
         Row::Lighting,
         Row::LightCycle,
@@ -1707,6 +1715,9 @@ pub const ALL: [Row; 44] = [
             Row::MapView => Some(tr("Third person: the camera behind the hero's back. First person: the view through the hero's eyes.")),
             Row::CurveStart => Some(tr("Curve start: how much ground in front of the hero stays flat before it starts to bend.")),
             Row::CurveStrength => Some(tr("Curve strength: how fast the ground bends up, down or around (the Globe).")),
+            Row::CameraHeight => Some(tr("Camera height: for the third person, how far and high the camera stands behind the hero (100% is as before); for the first person, the eyes' height above the ground in cells (0.70 is as before).")),
+            Row::CameraPitch => Some(tr("Camera tilt: the angle the view looks down at. Third person 5 to 60 degrees; first person -5 (up) to 30.")),
+            Row::CameraFov => Some(tr("Field of view: how much is seen across the frame's height, 35 to 90 degrees. Wider shows more ground, and the edges bend more.")),
             Row::MapEdge => Some(tr("Off: past the map's edges is black, as in the original. On: a short stretch of ground goes on past the edges, then thickens into the same black fog as the unexplored map.")),
             Row::Lighting => Some(tr("Razdor's: the map's light follows the time of day. Style only.")),
             Row::Shadows => Some(tr("Razdor's: Painted keeps the original's shadows; From the sun removes them, and every building, tree and rock casts its own shadow that turns and lengthens with the hour.")),
@@ -1737,7 +1748,9 @@ pub const ALL: [Row; 44] = [
         match self {
             Row::SpriteSize | Row::TwoFingerTurn => audio.map_tilt,
             // The far ground's shape is the first-person view's only.
-            Row::FarGround | Row::CurveStart | Row::CurveStrength => audio.map_tilt && audio.map_first_person,
+            Row::FarGround | Row::CurveStart | Row::CurveStrength | Row::CameraHeight | Row::CameraPitch | Row::CameraFov | Row::CurveReset => {
+                audio.map_tilt && audio.map_first_person
+            }
             Row::LightCycle => audio.map_light == LightMode::Cycle,
             Row::LightHour => audio.map_light == LightMode::Fixed,
             // The shadows are the light's: shown only with the light on.
@@ -2085,6 +2098,38 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
             let value = format!("{}%", (tune.strength * 100.0).round());
             if let Some(v) = tune_slider(c, geo, tr("Curve strength"), &value, CameraTune::strength_pos(tune.strength), Row::CurveStrength.help_text()) {
                 active_tune_mut(audio).strength = CameraTune::strength_at(v);
+            }
+        }
+        Row::CameraHeight => {
+            // Razdor's (the owner's request, 2026-11-11): the camera's height, per camera: the third person's
+            // distance from the hero as a share of the constants', the first person's eye height in cells.
+            let eyes = audio.map_view() == super::audio::MapView::First;
+            let tune = *active_tune_mut(audio);
+            let value = if eyes { format!("{:.2} {}", tune.height, tr("cells")) } else { format!("{}%", (tune.height * 100.0).round()) };
+            if let Some(v) = tune_slider(c, geo, tr("Camera height"), &value, CameraTune::height_pos(tune.height, eyes), Row::CameraHeight.help_text()) {
+                active_tune_mut(audio).height = CameraTune::height_at(v, eyes);
+            }
+        }
+        Row::CameraPitch => {
+            let eyes = audio.map_view() == super::audio::MapView::First;
+            let tune = *active_tune_mut(audio);
+            let value = format!("{}°", tune.pitch.round());
+            if let Some(v) = tune_slider(c, geo, tr("Camera tilt"), &value, CameraTune::pitch_pos(tune.pitch, eyes), Row::CameraPitch.help_text()) {
+                active_tune_mut(audio).pitch = CameraTune::pitch_at(v, eyes);
+            }
+        }
+        Row::CameraFov => {
+            let tune = *active_tune_mut(audio);
+            let value = format!("{}°", tune.fov.round());
+            if let Some(v) = tune_slider(c, geo, tr("Field of view"), &value, CameraTune::fov_pos(tune.fov), Row::CameraFov.help_text()) {
+                active_tune_mut(audio).fov = CameraTune::fov_at(v);
+            }
+        }
+        Row::CurveReset => {
+            // Razdor's: the view the settings show goes back to the constants (its curve and camera).
+            if labelled_row(c, geo, tr("Curve and camera"), tr("Defaults")).0 {
+                let eyes = audio.map_view() == super::audio::MapView::First;
+                *active_tune_mut(audio) = if eyes { FIRST_TUNE } else { THIRD_TUNE };
             }
         }
         Row::SpriteSize => {
@@ -3608,7 +3653,7 @@ mod tests {
     #[test]
     fn the_long_hints_are_behind_a_question_mark() {
         let with: Vec<Row> = Row::ALL.into_iter().filter(|r| r.help_text().is_some()).collect();
-        assert_eq!(with, vec![Row::MapZoom, Row::MapView, Row::FarGround, Row::CurveStart, Row::CurveStrength, Row::MapEdge, Row::Lighting, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::Language, Row::Updates, Row::ChronicleSummary]);
+        assert_eq!(with, vec![Row::MapZoom, Row::MapView, Row::FarGround, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::Language, Row::Updates, Row::ChronicleSummary]);
         scene_help("Experience");
         assert_eq!(HELP_PINNED.with(|p| p.get()), Row::Experience.help_text());
         HELP_PINNED.with(|p| p.set(None));

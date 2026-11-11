@@ -246,8 +246,10 @@ pub struct Settings {
     pub map_eyes: bool,
     /// Advanced, Razdor's: the third person's curve («Начало изгиба», «Сила изгиба», `view25::CameraTune`), for
     /// the far ground whichever it is. The defaults are today's constants.
+    #[serde(deserialize_with = "super::view25::third_tune_from")]
     pub map_third_tune: super::view25::CameraTune,
     /// Advanced, Razdor's: the first person's curve, as `map_third_tune`, for the eyes camera.
+    #[serde(deserialize_with = "super::view25::first_tune_from")]
     pub map_first_tune: super::view25::CameraTune,
     /// Advanced, Razdor's: the standing sprites' size in the 2.5D view, 1.5 by default (the owner's
     /// decision, 2026-11-05); `world_view::next_sprite_size` cycles it (1×, 1.5×, 2×).
@@ -557,8 +559,8 @@ impl Settings {
         } else {
             super::world_view::DEFAULT_SPRITE_SIZE
         };
-        let map_third_tune = self.map_third_tune.valid(super::view25::THIRD_TUNE);
-        let map_first_tune = self.map_first_tune.valid(super::view25::FIRST_TUNE);
+        let map_third_tune = self.map_third_tune.valid(super::view25::THIRD_TUNE, false);
+        let map_first_tune = self.map_first_tune.valid(super::view25::FIRST_TUNE, true);
         Settings { music_volume: fix(self.music_volume), sfx_volume: fix(self.sfx_volume), ui_scale, text_size, map_zoom, anim_speed, scroll_speed: pct(self.scroll_speed), walk_speed: walk(self.walk_speed), map_sprite_size, map_render_scale: super::map_scale::valid(self.map_render_scale), frame_cap: super::frame_cap::valid(self.frame_cap), map_third_tune, map_first_tune, ..self }
     }
 
@@ -1343,10 +1345,10 @@ mod tests {
         assert_eq!((old.map_third_tune, old.map_first_tune), (THIRD_TUNE, FIRST_TUNE));
         let wild: Settings = serde_json::from_str(r#"{"map_third_tune": {"flat": 99, "strength": 0}, "map_first_tune": {"flat": -3, "strength": 1e9}}"#).unwrap();
         let wild = wild.clamped();
-        assert_eq!(wild.map_third_tune, CameraTune { flat: 30.0, strength: 0.25 });
-        assert_eq!(wild.map_first_tune, CameraTune { flat: 0.0, strength: 4.0 });
+        assert_eq!(wild.map_third_tune, CameraTune { flat: 30.0, strength: 0.25, ..THIRD_TUNE });
+        assert_eq!(wild.map_first_tune, CameraTune { flat: 0.0, strength: 4.0, ..FIRST_TUNE });
         let partial: Settings = serde_json::from_str(r#"{"map_third_tune": {"flat": 6}}"#).unwrap();
-        assert_eq!(partial.clamped().map_third_tune, CameraTune { flat: 6.0, strength: 1.0 });
+        assert_eq!(partial.clamped().map_third_tune, CameraTune { flat: 6.0, ..THIRD_TUNE });
     }
 
     /// The map's view: a file's flags read as the four views (`map_first_person` with `map_eyes` on is

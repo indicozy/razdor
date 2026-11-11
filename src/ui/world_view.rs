@@ -1088,10 +1088,10 @@ pub fn first_tune() -> view25::CameraTune {
     TUNES.lock().map_or(view25::FIRST_TUNE, |t| t[1])
 }
 
-/// Both cameras' curves as bits, for the cached pictures' keys: a slider moves the picture.
-fn curve_bits() -> [u32; 4] {
+/// Both cameras' settings as bits, for the cached pictures' keys: a slider moves the picture.
+fn curve_bits() -> [u32; 10] {
     let (a, b) = (third_tune(), first_tune());
-    [a.flat, a.strength, b.flat, b.strength].map(f32::to_bits)
+    [a.flat, a.strength, a.height, a.pitch, a.fov, b.flat, b.strength, b.height, b.pitch, b.fov].map(f32::to_bits)
 }
 
 /// The eyes view («Глазами героя», `audio::Settings::map_eyes`, pushed by [`set_eyes`]): the camera
@@ -1215,9 +1215,9 @@ fn eyes_tilt(ground: Vec2, scale: f32, view: Rect, draw: Rect, yaw: f32, far: Fa
             (t.bend > 0.0).then_some((t.flat, t.radius, if t.horizon { -t.bend } else { t.bend })),
         ),
         None => (
-            view25::EYE_PITCH,
-            view25::FP_FOV,
-            view25::EYE_HEIGHT,
+            tune.pitch,
+            tune.fov,
+            tune.height,
             yaw,
             match far {
                 FarGround::Up => Some((tune.flat, tune.radius(view25::EYE_RADIUS_UP), view25::EYE_BEND_UP)),
@@ -7325,8 +7325,8 @@ mod tilt_tests {
     fn the_curves_reach_the_view_and_the_picture_keys() {
         use view25::{CameraTune, FIRST_TUNE, THIRD_TUNE};
         let before = curve_bits();
-        set_tunes(CameraTune { flat: 6.0, strength: 2.0 }, FIRST_TUNE);
-        assert_eq!(third_tune(), CameraTune { flat: 6.0, strength: 2.0 });
+        set_tunes(CameraTune { flat: 6.0, strength: 2.0, ..THIRD_TUNE }, FIRST_TUNE);
+        assert_eq!(third_tune(), CameraTune { flat: 6.0, strength: 2.0, ..THIRD_TUNE });
         assert_eq!(first_tune(), FIRST_TUNE);
         assert_ne!(curve_bits(), before, "a moved slider changes the key");
         set_tunes(THIRD_TUNE, FIRST_TUNE);

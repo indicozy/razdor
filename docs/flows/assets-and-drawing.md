@@ -427,8 +427,10 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
     Both curves are in the cached pictures' keys (`curve_bits`). At the gentlest strength a low pitch can see sky
     above the horizon at the frame's centre (the eyes look down 2 degrees): the planet's horizon, not a pick bug. `RAZDOR_VIEW_HORIZON=down|up|globe` (`1` is
     `down`) overrides «Даль»; `RAZDOR_VIEW_GLOBE_RADIUS=<cells>` tunes the globe's radius for the snapshots.
-  - The camera: `view25::TiltCamera::first_person(look, scale, frame, yaw, far)` (`far` is the `FarGround`). Pitch `FP_PITCH` (12),
-    field of view `FP_FOV` (55), fixed (PageUp and PageDown tilt the 2.5D view only). It looks at the view's
+  - The camera: `view25::TiltCamera::first_person(look, scale, frame, yaw, far, tune)` (`far` is the `FarGround`, `tune` the
+    third person's `CameraTune`). Its pitch and field of view are the settings («Наклон камеры», 5 to 60 degrees, default
+    `FP_PITCH` 12; «Угол обзора», 35 to 90, default `FP_FOV` 55); PageUp and PageDown tilt the 2.5D view only. `tune.height`
+    («Высота камеры», ×0.5 to ×2.5, default 1) multiplies the fitted distance, so the hero's ground stays where it is. It looks at the view's
     centre (the hero when followed) from beyond it, so the centre stands at two thirds of the frame's height;
     the distance is fitted so the hero's ground is drawn at the flat map's scale (the depth
     `frame.h / 2 / (tan(fov/2) · scale)`). Yaw, Q and E, the two-finger twist and the compass are as in 2.5D.
@@ -484,8 +486,9 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   - **The eyes view** («Камера» = «Глазами героя», `audio::Settings::map_eyes`, pushed by `main_menu::apply_options`
     into `world_view::set_eyes`; `RAZDOR_VIEW=eyes` for snapshots, `fp-eyes` for the developer override).
     `world_view::eyes_view()` says whether the camera stands at the eyes now: the setting, or a shot's `eye`.
-    The camera is `view25::TiltCamera::eyes`: the eye `EYE_HEIGHT` (0.7 cell) above the ground under `target`
-    (`eye_at`), looking `EYE_PITCH` (2°) down along the yaw, with no bend of its own; `eye_bend` adds the sheet
+    The camera is `view25::TiltCamera::eyes`: the eye `FIRST_TUNE.height` (0.7 cell, «Высота камеры», 0.3 to 3) above the
+    ground under `target` (`eye_at`), looking `FIRST_TUNE.pitch` (2°, «Наклон камеры», -5 up to 30) along the yaw, its
+    field of view `fov` («Угол обзора», default `FP_FOV` 55), with no bend of its own; `eye_bend` adds the sheet
     and its horizon. `world_view::eyes_tilt` builds it on the hero's displayed place (a shot's target in a run),
     so it glides with his walk. The yaw follows his next step (`follow_walk`, before `ease_tilt_yaw`); standing,
     Q, E, the twist and the compass turn it. The far ground: «Вверх» rolls up (`EYE_RADIUS_UP` 8, `EYE_BEND_UP` 78°,
