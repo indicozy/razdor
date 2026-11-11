@@ -58,6 +58,44 @@ pub fn draw_multiply(mesh: &macroquad::models::Mesh) {
     }
 }
 
+/// The coverage pass of the shadow map (`world_view`'s bake): a quad's alpha is its colour's alpha times the
+/// silhouette, and it is laid over what the map holds (the alpha over the alpha), so overlapping casters add up in
+/// the map's alpha. The colour is white and not read; only the alpha is kept for the multiply pass to sample.
+const COVERAGE_MAIN: &str = r#"
+    vec4 s = texture2D(Texture, uv);
+    gl_FragColor = vec4(1.0, 1.0, 1.0, clamp(color.a * s.a, 0.0, 1.0));
+"#;
+
+razdor::local! {
+    static COVERAGE_MATERIAL: std::cell::OnceCell<Option<macroquad::material::Material>> = const { std::cell::OnceCell::new() };
+}
+
+/// Draws a coverage mesh into the shadow map by the over pass ([`COVERAGE_MAIN`]); without the material, as drawn.
+pub fn draw_coverage(mesh: &macroquad::models::Mesh) {
+    use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation, PipelineParams};
+    let material = COVERAGE_MATERIAL.with(|m| {
+        m.get_or_init(|| {
+            let pipeline = PipelineParams {
+                color_blend: Some(BlendState::new(Equation::Add, BlendFactor::Value(BlendValue::SourceAlpha), BlendFactor::OneMinusValue(BlendValue::SourceAlpha))),
+                alpha_blend: Some(BlendState::new(Equation::Add, BlendFactor::One, BlendFactor::OneMinusValue(BlendValue::SourceAlpha))),
+                ..Default::default()
+            };
+            super::sharp::material_in(super::sharp::SHARP_VERTEX, &super::sharp::fragment("", COVERAGE_MAIN), pipeline, Vec::new(), Vec::new())
+                .map_err(|e| razdor::diag!("shadow coverage material: {e}"))
+                .ok()
+        })
+        .clone()
+    });
+    match material {
+        Some(m) => {
+            macroquad::prelude::gl_use_material(&m);
+            macroquad::prelude::draw_mesh(mesh);
+            macroquad::prelude::gl_use_default_material();
+        }
+        None => macroquad::prelude::draw_mesh(mesh),
+    }
+}
+
 /// The most vertices and indices of one batched draw: macroquad clamps a draw to 5000 indices.
 const BATCH_INDICES: usize = 4800;
 const BATCH_VERTICES: usize = 9600;
@@ -91,6 +129,13 @@ impl Batch {
     pub fn draw(self, texture: &macroquad::texture::Texture2D) {
         for (vertices, indices) in self.chunks {
             draw_multiply(&macroquad::models::Mesh { vertices, indices, texture: Some(texture.clone()) });
+        }
+    }
+
+    /// Draws every chunk into the shadow map by the coverage pass ([`draw_coverage`]), with `texture`.
+    pub fn draw_coverage(self, texture: &macroquad::texture::Texture2D) {
+        for (vertices, indices) in self.chunks {
+            draw_coverage(&macroquad::models::Mesh { vertices, indices, texture: Some(texture.clone()) });
         }
     }
 }

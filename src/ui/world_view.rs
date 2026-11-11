@@ -3211,53 +3211,184 @@ fn draw_building_shadow(l: &Location, atlas: &Atlas, r: Rect, cam: &Camera, shad
     super::chrome::shadow_only(shadow_k, || super::sharp::draw(&atlas.texture, at.x, at.y, WHITE, params));
 }
 
-/// Razdor's cast shadows, on the ground under the fog and every standing sprite: the sun's and the moon's
-/// (`daylight::frame_casts`, «От солнца») and each lit point light's (`lights::cast`, from dusk to dawn). Each
-/// caster in view lays its silhouette (the shadow atlas) from its foot by each light: a building with cards
-/// casts one quad per card from the card's own foot, anything else one picture from its foot. A quad is the
-/// silhouette in the cool colour `shadow::TINT`, its alpha the light's times the fog's visibility on the foot's
-/// cell, half on water: it darkens what lies under it. A light's own building casts nothing. Style only.
-fn draw_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, sun: Option<daylight::Casts>, lit: &[(lights::Light, Vec2, f32)], objects: &[&Decoration], locations: &[(usize, &Location)]) {
-    let (Some(art), Some(atlas), Some(texture), Some(soft)) = (art, art.and_then(|a| a.map_atlas()), art.and_then(|a| a.shadow_texture()), art.and_then(|a| a.shadow_soft_texture())) else { return };
-    let size = vec2(texture.width(), texture.height());
-    let zoom = cam.scale / PX;
+/// Texels per world unit of the shadow maps (a map cell is one unit across), and the largest side of a map in texels.
+const SHADOW_TEXELS: f32 = 8.0;
+const SHADOW_MAX_SIDE: f32 = 4096.0;
+
+/// The world-space shadow map of the static casters (`prepare_shadow_map`): the sun's and the moon's coverage over the
+/// whole map, each a target drawn by `draw_sun_map` as one quad a frame. `origin` is the map's corner in world units
+/// (cell (0, 0) is centred on the unit square's middle, so the map starts half a cell before it), `size` the map in
+/// world units, `texture` the targets' size in texels. A layer's key is its geometry (`shadow_key`); its alpha is per frame.
+struct ShadowMap {
+    origin: Vec2,
+    size: Vec2,
+    texels: f32,
+    texture: (u32, u32),
+    sun: Option<(u64, RenderTarget)>,
+    moon: Option<(u64, RenderTarget)>,
+}
+
+local! {
+    /// The frame's shadow map: None with the sun shadows off (nothing is kept), and until the first bake.
+    static SHADOW_MAP: std::cell::RefCell<Option<ShadowMap>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The key of a layer: the statics' hash and the cast's geometry (direction and length). The alpha is not in it (it is
+/// drawn per frame), so the sun's layer keeps its key all through an hour (`daylight::casts_stepped`), and the moon's
+/// keeps it for good.
+fn shadow_key(statics: u64, c: daylight::Cast) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (statics, c.dir[0].to_bits(), c.dir[1].to_bits(), c.len.to_bits()).hash(&mut h);
+    h.finish()
+}
+
+/// A hash of the static casters: the map's size and grid, every object's cell, class and sprite, every building's anchor,
+/// picture, size and whether it is a bridge. It changes when the map loads, an object is removed, or a building is
+/// captured, destroyed or changes its picture.
+fn statics_hash(map: (i32, i32, u8), objects: impl Iterator<Item = ((i32, i32), u8, u8)>, locations: impl Iterator<Item = ((i32, i32), (u8, u8), (i32, i32), bool)>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    map.hash(&mut h);
+    for o in objects {
+        o.hash(&mut h);
+    }
+    for l in locations {
+        l.hash(&mut h);
+    }
+    h.finish()
+}
+
+/// [`statics_hash`] of the game's map and buildings, with the map's surface codes (the water's half shade).
+fn statics_key(game: &Game) -> u64 {
+    use std::hash::{Hash, Hasher};
     let map = &game.world.map;
-    let fog = &game.fog;
-    // The darkness factor of a caster standing on `foot`: what the fog shows on its cell (the glows'
-    // rule), nothing off the map, half on water.
-    let shade = |foot: Vec2| -> f32 {
-        // The pass's pixels back to the world: `to_screen` is world·scale − origin + view.
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    statics_hash(
+        (map.w, map.h, map.grid as u8),
+        map.objects.iter().map(|o| (o.tile, o.class, o.sprite)),
+        game.world.locations.iter().map(|l| (l.anchor, l.picture, l.size, l.kind.is_bridge())),
+    )
+    .hash(&mut h);
+    map.surface_codes().hash(&mut h);
+    h.finish()
+}
+
+fn layer_target(texture: (u32, u32)) -> RenderTarget {
+    let rt = render_target(texture.0, texture.1);
+    rt.texture.set_filter(FilterMode::Linear);
+    rt
+}
+
+/// Bakes the static casters' shadows into the map's layers whose key changed: the sun's (at the shown hour's geometry)
+/// and the moon's. With the sun shadows off the map is dropped. Called by `draw_world` outside any fill (a bake fills its
+/// own target, and a fill cannot nest). A map that is not usable (no atlas) is left as it is.
+fn prepare_shadow_map(game: &Game, art: Option<&DtArt>, sun: Option<daylight::Casts>) {
+    let (Some(art), Some(sun)) = (art, sun) else {
+        SHADOW_MAP.with(|m| m.borrow_mut().take());
+        return;
+    };
+    if art.map_atlas().is_none() || art.shadow_texture().is_none() || art.shadow_soft_texture().is_none() {
+        return;
+    }
+    let map = &game.world.map;
+    let rh = map.grid.row_height();
+    let size = vec2(map.w as f32, map.h as f32 * rh);
+    let texels = SHADOW_TEXELS.min(SHADOW_MAX_SIDE / size.x.max(size.y).max(1.0));
+    let texture = ((size.x * texels).ceil().max(1.0) as u32, (size.y * texels).ceil().max(1.0) as u32);
+    let origin = vec2(-0.5, -0.5 * rh);
+    let statics = statics_key(game);
+    let geometry = (origin, size, texels, texture);
+    SHADOW_MAP.with(|m| {
+        let mut m = m.borrow_mut();
+        let fresh = m.as_ref().is_some_and(|s| (s.origin, s.size, s.texels, s.texture) == geometry);
+        if !fresh {
+            *m = Some(ShadowMap { origin, size, texels, texture, sun: None, moon: None });
+        }
+        let Some(sm) = m.as_mut() else { return };
+        let sun_key = shadow_key(statics, sun.sun);
+        if sm.sun.as_ref().is_none_or(|(k, _)| *k != sun_key) {
+            let rt = layer_target(texture);
+            bake_layer(game, art, geometry, sun.sun, &rt);
+            sm.sun = Some((sun_key, rt));
+        }
+        let moon_key = shadow_key(statics, sun.moon);
+        if sm.moon.as_ref().is_none_or(|(k, _)| *k != moon_key) {
+            let rt = layer_target(texture);
+            bake_layer(game, art, geometry, sun.moon, &rt);
+            sm.moon = Some((moon_key, rt));
+        }
+    });
+}
+
+/// Draws one cast's coverage of every static caster into `rt` (the map's frame): each caster's silhouette from its foot
+/// by `cast`, its alpha the penumbra times the water's half shade (no fog: the fog's own pass covers the unexplored), added
+/// by the over pass (`shadow::draw_coverage`).
+fn bake_layer(game: &Game, art: &DtArt, (origin, _, texels, texture): (Vec2, Vec2, f32, (u32, u32)), cast: daylight::Cast, rt: &RenderTarget) {
+    let (Some(sharp_tex), Some(soft_tex)) = (art.shadow_texture(), art.shadow_soft_texture()) else { return };
+    let map = &game.world.map;
+    let space = Rect::new(0.0, 0.0, texture.0 as f32, texture.1 as f32);
+    // The map's camera: texels per world unit, the map's corner at the top-left of the target.
+    let cam = Camera { origin: origin * texels, view: space, draw: space, scale: texels, grid: map.grid, tilt: None };
+    let water = |foot: Vec2| -> f32 {
         let world = (foot + cam.origin - vec2(cam.view.x, cam.view.y)) / cam.scale;
         let t = cam.grid.tile_at((world.x, world.y));
         if t.0 < 0 || t.1 < 0 || t.0 >= map.w || t.1 >= map.h {
-            return 0.0;
+            0.0
+        } else if razdor::rules::map::is_water(map.surface(t)) {
+            0.5
+        } else {
+            1.0
         }
-        let seen = if !fog.enabled || fog.w <= 0 || fog.h <= 0 { 1.0 } else { 1.0 - minimap::shown_darkness(fog, t) };
-        let water = if razdor::rules::map::is_water(map.surface(t)) { 0.5 } else { 1.0 };
-        seen * water
     };
-    // The casts of a caster standing on `foot` (this pass's pixels): the sun's and the moon's, then each
-    // lit light's in reach, but never a light's own building (`owner`).
-    let casts_at = |foot: Vec2, owner: Option<usize>| -> Vec<daylight::Cast> {
-        let mut out = Vec::new();
-        if let Some(c) = sun {
-            out.extend([c.sun, c.moon].into_iter().filter(|k| k.alpha > 0.0));
-        }
-        for (light, at, radius) in lit {
-            if matches!(light.owner, lights::Owner::Building(b) if Some(b) == owner) {
+    let objects: Vec<&Decoration> = map.objects.iter().collect();
+    let locations: Vec<(usize, &Location)> = game.world.locations.iter().enumerate().filter(|(_, l)| !l.kind.is_bridge()).collect();
+    let (sharp, soft) = cast_shadows(art, &cam, &objects, &locations, &water, &|_, _| vec![cast]);
+    super::render_cache::fill_space(rt, space, || {
+        clear_background(Color::new(0.0, 0.0, 0.0, 0.0));
+        sharp.draw_coverage(&sharp_tex);
+        soft.draw_coverage(&soft_tex);
+    });
+}
+
+/// Draws the sun's and the moon's shadows of the frame from the baked map: one quad a layer over the whole map, its alpha
+/// the hour's (`sun.sun.alpha`, `sun.moon.alpha`). A layer at alpha 0 (the sun at night, the moon by day) is not drawn.
+fn draw_sun_map(cam: &Camera, sun: daylight::Casts) {
+    SHADOW_MAP.with(|m| {
+        let m = m.borrow();
+        let Some(sm) = m.as_ref() else { return };
+        let corners = [sm.origin, sm.origin + vec2(sm.size.x, 0.0), sm.origin + sm.size, sm.origin + vec2(0.0, sm.size.y)];
+        // The target's rows come out flipped (as the bent sheet's), so the texel row of a world y runs the other way.
+        let uv = |p: Vec2| vec2((p.x - sm.origin.x) * sm.texels / sm.texture.0 as f32, 1.0 - (p.y - sm.origin.y) * sm.texels / sm.texture.1 as f32);
+        for (layer, c) in [(&sm.sun, sun.sun), (&sm.moon, sun.moon)] {
+            let Some((_, rt)) = layer else { continue };
+            if c.alpha <= 0.0 {
                 continue;
             }
-            if let Some(c) = lights::cast(*at, *radius, foot, light.strength) {
-                out.push(daylight::Cast { dir: [c.dir.x, c.dir.y], len: c.len, alpha: c.alpha });
-            }
+            let colour = shadow::strength_colour(c.alpha);
+            let vertices: Vec<macroquad::models::Vertex> = corners
+                .map(|p| {
+                    let s = cam.to_screen((p.x, p.y));
+                    let t = uv(p);
+                    macroquad::models::Vertex::new(s.x, s.y, 0.0, t.x, t.y, colour)
+                })
+                .to_vec();
+            shadow::draw_multiply(&Mesh { vertices, indices: vec![0, 1, 2, 0, 2, 3], texture: Some(rt.texture.clone()) });
         }
-        out
-    };
-    // One picture (`origin`, its rectangle `src`, the foot's row in it) cast from `foot` by each light. The
-    // penumbra: the sharp silhouette weighs (1 − t) and the soft one t, t the height above the foot (0 at
-    // the foot, 1 at the tip), so the shadow is crisp at its base and softer as it lengthens.
-    // The quads of the frame, batched per texture (`shadow::Batch`): the sharp silhouettes and the soft ones.
-    let mut out: (shadow::Batch, shadow::Batch) = Default::default();
+    });
+}
+
+/// The shadows of the casters in `objects` and `locations` (the buildings, not a light's own) by `casts_at`, split into the
+/// sharp silhouettes and the soft ones (the penumbra): each caster is a picture from its foot, a building with cards one
+/// quad per card from the card's own foot. `shade` is the caster's darkness at its foot. Returns the two batches, to draw
+/// with their textures.
+fn cast_shadows(art: &DtArt, cam: &Camera, objects: &[&Decoration], locations: &[(usize, &Location)], shade: &dyn Fn(Vec2) -> f32, casts_at: &dyn Fn(Vec2, Option<usize>) -> Vec<daylight::Cast>) -> (shadow::Batch, shadow::Batch) {
+    let mut out = (shadow::Batch::default(), shadow::Batch::default());
+    let (Some(atlas), Some(texture)) = (art.map_atlas(), art.shadow_texture()) else { return out };
+    let size = vec2(texture.width(), texture.height());
+    let zoom = cam.scale / PX;
+    // One picture (`origin`, its rectangle `src`, the foot's row in it) cast from `foot` by each cast. The penumbra: the
+    // sharp silhouette weighs (1 − t) and the soft one t, t the height above the foot (0 at the foot, 1 at the tip).
     let picture = |origin: Vec2, src: Rect, foot_row: f32, foot: Vec2, owner: Option<usize>, out: &mut (shadow::Batch, shadow::Batch)| {
         let k = shade(foot);
         if k <= 0.0 {
@@ -3307,8 +3438,82 @@ fn draw_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, sun: Option<dayl
         let foot = object_foot(o, cam);
         picture(origin, r, (foot.y - origin.y) / zoom, foot, None, &mut out);
     }
-    out.0.draw(&texture);
-    out.1.draw(&soft);
+    out
+}
+
+/// Razdor's point-light shadows on the ground, per frame, under the fog and every standing sprite (the sun's and the moon's
+/// are the baked map, `draw_sun_map`): each visible caster lays its silhouette from its foot by each lit light in reach
+/// (`lights::cast`, from dusk to dawn), but never a light's own building. Style only.
+fn draw_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, lit: &[(lights::Light, Vec2, f32)], objects: &[&Decoration], locations: &[(usize, &Location)]) {
+    let Some(art) = art else { return };
+    let (Some(texture), Some(soft)) = (art.shadow_texture(), art.shadow_soft_texture()) else { return };
+    let map = &game.world.map;
+    let fog = &game.fog;
+    // The darkness factor of a caster standing on `foot`: what the fog shows on its cell (the glows'
+    // rule), nothing off the map, half on water.
+    let shade = |foot: Vec2| -> f32 {
+        // The pass's pixels back to the world: `to_screen` is world·scale − origin + view.
+        let world = (foot + cam.origin - vec2(cam.view.x, cam.view.y)) / cam.scale;
+        let t = cam.grid.tile_at((world.x, world.y));
+        if t.0 < 0 || t.1 < 0 || t.0 >= map.w || t.1 >= map.h {
+            return 0.0;
+        }
+        let seen = if !fog.enabled || fog.w <= 0 || fog.h <= 0 { 1.0 } else { 1.0 - minimap::shown_darkness(fog, t) };
+        let water = if razdor::rules::map::is_water(map.surface(t)) { 0.5 } else { 1.0 };
+        seen * water
+    };
+    // The point lights' casts of a caster standing on `foot`, but never a light's own building (`owner`).
+    let casts_at = |foot: Vec2, owner: Option<usize>| -> Vec<daylight::Cast> {
+        let mut out = Vec::new();
+        for (light, at, radius) in lit {
+            if matches!(light.owner, lights::Owner::Building(b) if Some(b) == owner) {
+                continue;
+            }
+            if let Some(c) = lights::cast(*at, *radius, foot, light.strength) {
+                out.push(daylight::Cast { dir: [c.dir.x, c.dir.y], len: c.len, alpha: c.alpha });
+            }
+        }
+        out
+    };
+    let (sharp, soft_batch) = cast_shadows(art, cam, objects, locations, &shade, &casts_at);
+    sharp.draw(&texture);
+    soft_batch.draw(&soft);
+}
+
+#[cfg(test)]
+mod shadow_map_tests {
+    use super::*;
+
+    #[test]
+    fn the_sun_layer_keeps_its_key_all_through_an_hour_and_changes_at_the_next() {
+        let k = |h: f32| shadow_key(7, daylight::casts_stepped(h).sun);
+        assert_eq!(k(10.0), k(10.5));
+        assert_eq!(k(10.0), k(10.99));
+        assert_ne!(k(10.0), k(11.0), "the next hour is a new layer");
+    }
+
+    #[test]
+    fn the_moon_layer_does_not_change_with_the_hour() {
+        let m = |h: f32| shadow_key(7, daylight::casts_stepped(h).moon);
+        assert_eq!(m(10.0), m(11.0));
+        assert_eq!(m(22.0), m(3.0));
+    }
+
+    #[test]
+    fn the_statics_change_when_an_object_or_a_building_does_and_not_otherwise() {
+        let objs = [((1, 2), 3u8, 4u8), ((5, 6), 3, 7)];
+        let locs = [((9, 9), (1u8, 2u8), (2, 2), false)];
+        let base = statics_hash((20, 20, 0), objs.iter().copied(), locs.iter().copied());
+        assert_eq!(base, statics_hash((20, 20, 0), objs.iter().copied(), locs.iter().copied()), "the same statics, the same key");
+        let fewer = statics_hash((20, 20, 0), objs[..1].iter().copied(), locs.iter().copied());
+        assert_ne!(base, fewer, "an object removed");
+        let sprite = statics_hash((20, 20, 0), [((1, 2), 3u8, 4u8), ((5, 6), 3, 8)].into_iter(), locs.iter().copied());
+        assert_ne!(base, sprite, "an object's sprite changed");
+        let captured = statics_hash((20, 20, 0), objs.iter().copied(), [((9, 9), (1u8, 3u8), (2, 2), false)].into_iter());
+        assert_ne!(base, captured, "a building changed its picture");
+        let other_map = statics_hash((21, 20, 0), objs.iter().copied(), locs.iter().copied());
+        assert_ne!(base, other_map, "another map");
+    }
 }
 
 fn draw_building(l: &Location, art: Option<&DtArt>, cam: &Camera, outlined: bool) {
@@ -3945,6 +4150,10 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
     if let Some(art) = assets.dt.as_ref() {
         art.depth_tick(cam.tilt.is_some());
     }
+    // The shadow map is baked here, outside any fill (a backdrop drawn inside a fill keeps the map it has).
+    if super::render_cache::target().is_none() {
+        prepare_shadow_map(game, assets.dt.as_ref(), daylight::frame_casts());
+    }
     draw_sky(cam);
     if waits {
         gpu_wait(Stage::GpuSky);
@@ -4035,10 +4244,14 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // and the passes below ask it again (the fog does not change while the world is drawn).
     let rows = map.objects_in_rows(r0 - up, r1 + below);
     let seen_row: Vec<bool> = rows.iter().map(&seen).collect();
-    if sun.is_some() || !lit_lights.is_empty() {
+    // The sun's and the moon's shadows are the baked map (`prepare_shadow_map`): one quad each, whatever the casters.
+    if let Some(c) = sun {
+        ground(cam, || draw_sun_map(cam, c));
+    }
+    if !lit_lights.is_empty() {
         let objects: Vec<&Decoration> = rows.iter().zip(&seen_row).filter(|(_, s)| **s).map(|(o, _)| o).collect();
         let locations: Vec<(usize, &Location)> = game.world.locations.iter().enumerate().filter(|(_, l)| location_seen(l) && !l.kind.is_bridge()).collect();
-        ground(cam, || draw_shadows(game, art, cam, sun, &lit_lights, &objects, &locations));
+        ground(cam, || draw_shadows(game, art, cam, &lit_lights, &objects, &locations));
     }
     // The buildings' light lies on the ground around them, not on them: the pools are drawn here, in the
     // ground pass under every standing sprite, so a building's own picture covers its pool (the owner's
