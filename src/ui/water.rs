@@ -215,6 +215,24 @@ pub fn wnoise_ref(table: &[u8], q: (f32, f32)) -> f32 {
     lo + (hi - lo) * uy
 }
 
+/// The de-tiling's per-cell values, as the shader's `water_corner` computes them from the cell's byte `n` (the noise
+/// table's texel at the cell): the offset of the water frame there (fractions of the frame, 0..1) and whether the
+/// frame is mirrored on still water. The shader's maths, mirrored for the tests.
+#[allow(dead_code)] // The shader's formula in Rust, pinned by the tests.
+pub fn detile_corner(n: u8) -> ([f32; 2], bool) {
+    let n = n as f32;
+    let fract = |x: f32| x - x.floor();
+    ([fract(n * 0.618_034), fract(n * 0.754_878)], fract(n * 0.381_966) > 0.5)
+}
+
+/// The weights of the two neighbouring cell centres at `g` (0 at the lower centre, 1 at the upper), as the shader's
+/// `water_detiled` takes them: a smoothstep partition (the two sum to 1; each is 1 at its own centre).
+#[allow(dead_code)] // The shader's formula in Rust, pinned by the tests.
+pub fn detile_weights(g: f32) -> (f32, f32) {
+    let s = g * g * (3.0 - 2.0 * g);
+    (1.0 - s, s)
+}
+
 #[allow(dead_code)] // Used by `foam_edge` only, which the shader's formula mirrors and the tests pin.
 fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
     let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
@@ -691,6 +709,44 @@ mod tests {
             z -= 0.005;
         }
         assert!((lod_detail((LOD_OUT + LOD_IN) / 2.0) - 0.5).abs() < 1e-6, "halfway at the band's middle");
+    }
+
+    #[test]
+    fn the_de_tiling_offsets_spread_over_the_frame_and_neighbours_differ() {
+        let mut hist = [0u32; 8];
+        let mut mirrored = 0;
+        for n in 0..=255u8 {
+            let ([x, y], m) = detile_corner(n);
+            assert!((0.0..1.0).contains(&x) && (0.0..1.0).contains(&y), "offset in the frame: {x}, {y}");
+            hist[(x * 8.0) as usize] += 1;
+            mirrored += m as u32;
+        }
+        assert!(hist.iter().all(|&c| c > 0), "the offsets cover the frame: {hist:?}");
+        assert!((90..=166).contains(&mirrored), "about half the cells are mirrored: {mirrored}");
+        // Neighbouring cells (adjacent bytes) take offsets far apart: no two next to each other repeat the frame.
+        for n in 0..255u8 {
+            let (a, _) = detile_corner(n);
+            let (b, _) = detile_corner(n + 1);
+            let d = (a[0] - b[0]).abs().min(1.0 - (a[0] - b[0]).abs()) + (a[1] - b[1]).abs().min(1.0 - (a[1] - b[1]).abs());
+            assert!(d > 0.15, "bytes {n} and {} take near offsets: {a:?} {b:?}", n + 1);
+        }
+    }
+
+    #[test]
+    fn the_cell_weights_partition_the_pixel_and_meet_across_the_boundary() {
+        assert_eq!(detile_weights(0.0), (1.0, 0.0), "the lower centre takes the pixel at its centre");
+        assert_eq!(detile_weights(1.0), (0.0, 1.0), "and the upper one at its own");
+        for k in 0..=100 {
+            let g = k as f32 / 100.0;
+            let (a, b) = detile_weights(g);
+            assert!((a + b - 1.0).abs() < 1e-6, "the weights sum to 1 at {g}");
+            assert!(a >= 0.0 && b >= 0.0);
+        }
+        // Across the boundary the right cell's own weight (at its lower edge) is the left cell's upper weight (at its end):
+        // both are 0 and 1, so the blend is continuous.
+        assert_eq!(detile_weights(1.0).1, detile_weights(0.0).1 + 1.0);
+        // A pixel near its centre is almost all its own cell: the pattern stays sharp inside a cell.
+        assert!(detile_weights(0.1).0 > 0.97);
     }
 
     #[test]

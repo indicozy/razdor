@@ -217,6 +217,31 @@ vec2 ripple(vec2 q) {
     return vec2(sin(q.y * 2.1 + Clock * 1.29983) + 0.5 * wnoise(q * 0.7 + Clock * 0.2), cos(q.x * 1.7 + Clock * 1.09956));
 }
 
+// The cell's random byte (live water's de-tiling): the noise table's texel at the cell, wrapped, 0..255
+// (`water::hash2_ref` at the lattice point, as `water::detile_corner` reads it).
+float cell_byte(vec2 c) {
+    return floor(texture2D(Noise, (mod(c, 64.0) + 0.5) / 64.0).r * 255.0 + 0.5);
+}
+
+// One cell centre's share of the water frame at uv `uvp` (of the pixel, with its flow and ripple): the uv moved by
+// the cell's offset (a fraction of the frame, from the byte's golden-ratio steps), and mirrored on still water (a
+// mirror would reverse a river's drift, so a flowing cell keeps its direction). `w` is the cell's weight.
+vec3 water_corner(float n, float w, vec2 uvp, float still) {
+    vec2 off = fract(n * vec2(0.618034, 0.754878));
+    float mir = step(0.5, fract(n * 0.381966)) * step(0.5, still);
+    vec2 uvc = mix(uvp, -uvp, mir) + off;
+    return w * texture2D(Water, sharp_uv(uvc, WaterSize, WaterScale)).rgb;
+}
+
+// The water frame at uv `uvp`, de-tiled (live water, «Живая вода» only): four samples, one per cell centre round the
+// pixel, each with its own cell's offset, blended by the smooth partition `wgt` of the cells (the same centres as the
+// ground's blend). A cell's pattern fades into its neighbour's across the boundary, so no seam shows and the frame's
+// 3-cell tile does not repeat. `nb` holds the four cells' bytes (x: the cell at floor(p), y: +x, z: +y, w: +x+y).
+vec3 water_detiled(vec4 nb, vec4 wgt, vec2 uvp, float still) {
+    return water_corner(nb.x, wgt.x, uvp, still) + water_corner(nb.y, wgt.y, uvp, still)
+        + water_corner(nb.z, wgt.z, uvp, still) + water_corner(nb.w, wgt.w, uvp, still);
+}
+
 
 @CP@ vec3 ground(float code, vec2 px, @CP@ vec3 water, @CP@ float sea) {
     vec2 slot = vec2(mod(code, 4.0), floor(code / 4.0));
@@ -309,7 +334,20 @@ void main() {
             vec2 q1 = p - dr * t1 * 7.0;
             vec2 u0 = (p - dr * t0 * 6.0 + 1.5) / 3.0 + 0.015 * Detail * ripple(q0);
             vec2 u1 = (p - dr * t1 * 6.0 + 1.5) / 3.0 + 0.015 * Detail * ripple(q1);
-            w = mix(texture2D(Water, sharp_uv(u0, WaterSize, WaterScale)).rgb, texture2D(Water, sharp_uv(u1, WaterSize, WaterScale)).rgb, wt);
+            // De-tiled (`water_detiled`): the four cell centres round the pixel, each with its own offset, blended by
+            // the smooth partition of the cells (the ground's centres: whole numbers).
+            vec2 bc = floor(p);
+            vec2 g = p - bc;
+            vec2 sw = g * g * (3.0 - 2.0 * g);
+            vec4 wgt = vec4((1.0 - sw.x) * (1.0 - sw.y), sw.x * (1.0 - sw.y), (1.0 - sw.x) * sw.y, sw.x * sw.y);
+            vec4 nb = vec4(cell_byte(bc), cell_byte(bc + vec2(1.0, 0.0)), cell_byte(bc + vec2(0.0, 1.0)), cell_byte(bc + vec2(1.0, 1.0)));
+            float stillw = 1.0 - smoothstep(0.2, 0.8, length(fl));
+            w = mix(water_detiled(nb, wgt, u0, stillw), water_detiled(nb, wgt, u1, stillw), wt);
+            // The low-frequency variation: a slow large-scale noise (its drift whole lattice periods per CLOCK_PERIOD),
+            // a few per cent brighter or darker and a little warmer or cooler across the water.
+            float lf = wnoise(p * 0.04 + Clock * vec2(0.01, 0.02));
+            float lh = wnoise(p * 0.03 + vec2(31.0, 7.0) + Clock * vec2(-0.01, 0.01));
+            w *= vec3(1.0 + 0.10 * (lh - 0.5), 1.0 + 0.16 * (lf - 0.5), 1.0 - 0.10 * (lh - 0.5));
         } else {
             w = texture2D(Water, sharp_uv(uvw, WaterSize, WaterScale)).rgb;
         }

@@ -625,6 +625,16 @@ it every frame from `display::follow_settings`; `RAZDOR_LIVE_WATER=1` turns it o
   the sky's colour (`daylight::sky_rgb`: day, dusk and dawn warmth, moonlight at night; the day's with the lighting
   off) by `0.18` of its mask. Only the full pass and the cache's overlay draw it (`Mode::Full`, `Mode::Overlay`);
   the cached ground stays as it was. `Clock` is the water clock.
+- **The de-tiling** (`water_detiled`, `water_corner`, `cell_byte`; the frame's 3-cell tile showed as a grid when zoomed out):
+  the frame is sampled at the four cell centres round the pixel (the ground's centres, whole numbers), each with its
+  own cell's offset (`water::detile_corner`: a fraction of the frame from the cell's noise-table byte, 0..255) and, on
+  still water only, a mirror (a mirror would reverse a river's drift). The four are blended by the smooth partition
+  `water::detile_weights` (each is 1 at its own centre, so the pattern stays sharp inside a cell and fades into the
+  neighbour's across the boundary, no seam). The flow and the ripple are unchanged (they sit in the pixel's uv before the
+  offsets). Then a low-frequency noise (`wnoise` at 0.04 and 0.03 cell scale, drifting by whole lattice periods) moves the
+  water's brightness by ±8 % and its warmth by ±5 %. Costs about ten more texture fetches per water pixel (on Mesa's software GL, about +10 to +15 % frame time on the live
+  water). Off with the setting.
+  Not de-tiled yet: the foam's patch noise (periods of about 12 and 27 cells) and the glints (`wnoise` at 6×, near zoom only).
 - **The water's detail by zoom** (`water::lod_detail`, the uniform `Detail`): the map's on-screen cell over the zoom-1
   cell (`cell_px.x`, the map's PX), 1 from zoom 0.7 up, 0 at 0.45 and below (the zoom's floor is 0.4), smooth between.
   It scales the ripple and the foam's lapping (the line stands at its middle phase when 0); the texture, the colour and
