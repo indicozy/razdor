@@ -160,6 +160,12 @@ pub struct Shot {
     /// `lang ru|en`: the interface and the data texts in that language for this run (as the
     /// game's language choice sets both). `None`: the player's own language.
     pub lang: Option<String>,
+    /// `layout phone`: the phone's interface at the shot's size (upright or sideways by its shape),
+    /// with the phone's density and text size. `layout desktop` (the default): the desktop's.
+    pub phone: bool,
+    /// `fps_counter on`: the game's own frame counter («Показывать FPS») is drawn, counting the
+    /// run's frames in real time (the shot's clock would read the shot's fps).
+    pub fps_counter: bool,
 }
 
 /// A battle's pace at a time: the header's or a timed line's, with the line it came from.
@@ -200,6 +206,8 @@ impl Default for Shot {
             battle_speed: None,
             speed_keys: Vec::new(),
             lang: None,
+            phone: false,
+            fps_counter: false,
         }
     }
 }
@@ -381,6 +389,12 @@ fn apply_line(shot: &mut Shot, head: &str, rest: &[&str], line_no: usize) -> Res
             let (t, cell, radius) = parse_reveal(rest)?;
             shot.actions.push(Action::Reveal { t, cell, radius, line: line_no });
         }
+        "layout" => match one(rest).map_err(|e| ("layout", e))? {
+            "phone" => shot.phone = true,
+            "desktop" => shot.phone = false,
+            v => return Err(("layout", format!("`{v}`: phone or desktop"))),
+        },
+        "fps_counter" => shot.fps_counter = on_off(rest, "fps_counter")?,
         "lang" => match one(rest).map_err(|e| ("lang", e))? {
             v @ ("ru" | "en") => shot.lang = Some(v.to_string()),
             v => return Err(("lang", format!("`{v}`: ru or en"))),
@@ -409,7 +423,7 @@ fn apply_line(shot: &mut Shot, head: &str, rest: &[&str], line_no: usize) -> Res
             }
         }
         other => {
-            return Err(("line", format!("`{other}`: no such line (map, save, hero, seed, size, fps, music, battles, hour, clock, look, ui, fog, view, duration, event, at, walk, pass, reveal, battle, battle_speed, lang)")));
+            return Err(("line", format!("`{other}`: no such line (map, save, hero, seed, size, fps, music, battles, hour, clock, look, ui, fog, view, duration, event, at, walk, pass, reveal, battle, battle_speed, lang, layout, fps_counter)")));
         }
     }
     Ok(())
@@ -1269,5 +1283,23 @@ mod tests {
         assert_eq!(e, vec!["line 2: lang: `de`: ru or en".to_string()]);
         let e = errs("map РК1-Начало пути\nlang\nduration 2\n");
         assert_eq!(e, vec!["line 2: lang: no value given".to_string()]);
+    }
+
+    #[test]
+    fn the_layout_and_fps_counter_lines_default_to_the_desktop_and_no_counter() {
+        let s = ok("map РК1-Начало пути\nduration 2\n");
+        assert!(!s.phone);
+        assert!(!s.fps_counter);
+        let s = ok("map РК1-Начало пути\nlayout phone\nfps_counter on\nduration 2\n");
+        assert!(s.phone);
+        assert!(s.fps_counter);
+        assert!(!ok("map РК1-Начало пути\nlayout phone\nlayout desktop\nduration 2\n").phone);
+        assert!(!ok("map РК1-Начало пути\nfps_counter on\nfps_counter off\nduration 2\n").fps_counter);
+    }
+
+    #[test]
+    fn a_bad_layout_or_fps_counter_names_its_field() {
+        assert_eq!(errs("map РК1-Начало пути\nlayout tablet\nduration 2\n"), vec!["line 2: layout: `tablet`: phone or desktop".to_string()]);
+        assert_eq!(errs("map РК1-Начало пути\nfps_counter maybe\nduration 2\n"), vec!["line 2: fps_counter: `maybe`: on or off".to_string()]);
     }
 }

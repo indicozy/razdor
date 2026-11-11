@@ -873,9 +873,15 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
         return;
     }
     read_dp_once();
+    // A trailer shot's `layout phone`: the phone's density, text size and large windows, whatever the
+    // player's settings say (the same values the mobile check sets with its variables).
+    let phone = crate::ui::trailer::phone_layout();
+    if let Some(dp) = phone {
+        set_dp_px(Some(dp));
+    }
     set_scale(settings.ui_scale);
-    set_text_size(settings.text_size);
-    set_large_windows(settings.large_windows);
+    set_text_size(if phone.is_some() { 1.25 } else { settings.text_size });
+    set_large_windows(phone.is_some() || settings.large_windows);
     set_bar_size(settings.bottom_bar_size);
     crate::ui::world_view::set_zoom_prefs(settings.map_zoom, settings.zoom_locked);
     crate::ui::world_view::set_edge_pref(settings.map_extended);

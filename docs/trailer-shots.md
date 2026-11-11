@@ -86,6 +86,8 @@ One item per line. `#` starts a comment. Every line is optional except `map` and
 | `battle_speed <x>` | The pace of a battle on its screen, as a multiple of the game's animations (0.05 to 8; 1 is the game's pace). The AI plays both sides on the screen at that pace, to the battle's end. Needs `battles show`. | none: the battle ends at once |
 | `battle_speed <t> <x>` | A timed pace: it ramps linearly from the pace before to `x` at `t`, and holds before the first and after the last line. A timed line at `0` replaces the header's pace. Same rules. | — |
 | `lang ru\|en` | The interface and the data texts in that language for this run (the game's own language choice sets both). | the player's language |
+| `layout phone\|desktop` | `phone`: the phone's interface at the shot's size, upright or sideways by its shape (972×2008 upright, 1640×760 sideways, 656×1248 upright). The phone's density is the short side as 393 dp, its text size 1.25 and its large windows on, whatever the player's settings say (the mobile check's values). Use with `ui on`. | `desktop` |
+| `fps_counter on\|off` | The game's own frame counter («Показывать FPS»), top right, counting the run's real frames (the shot's clock would read the shot's fps). A run with it on is not deterministic: the counter's digits change. | `off` |
 
 Cells are map cells, `x,y`, counted from the top-left of the map as the game counts them. Use
 `--plan` to check a cell: the planner prints where the hero stands.

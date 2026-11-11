@@ -1149,7 +1149,8 @@ impl App {
             /// (frames so far, when counting began, the last rate shown)
             static COUNT: std::cell::Cell<(u32, f64, u32)> = const { std::cell::Cell::new((0, 0.0, 0)) };
         }
-        let now = crate::ui::clock::now();
+        // A run counts the real frames (the trailer's `fps_counter on`): the shot's clock is the frame count.
+        let now = if trailer::active() { trailer::wall_seconds() } else { crate::ui::clock::now() };
         let (mut n, mut since, mut shown) = COUNT.with(|c| c.get());
         n += 1;
         if now - since >= 0.5 {

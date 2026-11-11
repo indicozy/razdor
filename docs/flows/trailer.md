@@ -34,6 +34,10 @@ the rendering commands are for agents and the owner: `docs/trailer-shots.md`.
    screen at the pace of the frame (`Shot::battle_pace`), and `after_frame` logs `BattleView::state_line` once a
    second. A `battle <army>` line sets `Game::foe` at the start (`start`): on the screen the battle opens at
    frame 0 (`Game::start_battle`, without an autosave), on the map `battle_on_map` resolves it.
+   `layout phone` (`ui::trailer::phone_layout`, read each frame by `display::follow_settings`) sets the
+   phone's density (the short side as 393 dp), text size 1.25 and large windows over the player's settings.
+   `fps_counter on` turns the game's «Показывать FPS» on for the run; `ui::mod` `draw_fps` then counts real time
+   (`trailer::wall_seconds`), because the shot's clock is the frame count. `lang` goes through `ui::language::set`.
 6. **After the frame** (`main.rs`, after the cursor): `ui::trailer::after_frame` captures the
    picture (macroquad's screen read, made opaque), writes it to the sinks, and at the last frame
    finishes: closes ffmpeg, mixes the sound and muxes it into the MP4 (`finish`, `mux_sound`).

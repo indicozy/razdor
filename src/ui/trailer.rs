@@ -330,6 +330,22 @@ pub fn window_size() -> Option<(u32, u32)> {
     config().map(|c| c.size)
 }
 
+/// The phone layout a shot asks for (`layout phone`): the density in screen px per dp, with the
+/// shot's short side as 393 dp (the mobile check's small phone: 1080 px at 2.75 px per dp).
+pub fn phone_layout() -> Option<f32> {
+    let shot = config().and_then(|c| c.shot.as_ref())?;
+    shot.phone.then(|| shot.width.min(shot.height) as f32 / 393.0)
+}
+
+/// Seconds of real time since the first call: the frame counter of a run counts the real frames,
+/// since the shot's clock is the frame count (a counter on it would read the shot's fps).
+pub fn wall_seconds() -> f64 {
+    local! {
+        static START: std::time::Instant = std::time::Instant::now();
+    }
+    START.with(|s| s.elapsed().as_secs_f64())
+}
+
 /// Whether a battle is drawn on its screen (`battles show`).
 pub fn battles_show() -> bool {
     config().and_then(|c| c.shot.as_ref()).is_some_and(|s| s.battles_show)
@@ -621,6 +637,10 @@ fn start(app: &mut App, cfg: &Config) -> Result<(), String> {
             let held = clock_hour(&game);
             super::daylight::set_hold(Some(held));
             log(format!("clock hold at {held:.2} h"));
+        }
+        if shot.fps_counter {
+            app.audio.settings.show_fps = true;
+            log("fps_counter: on (the real frame rate, for this run only)".to_string());
         }
         if let Some(code) = &shot.lang {
             // The game's own language choice, for this run: the interface and the data texts together.
