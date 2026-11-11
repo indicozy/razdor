@@ -1521,8 +1521,8 @@ fn bent_mist_meshes(bend: &view25::Bend, eye: Vec3, edge: f32, origin: Vec2, sca
         let g = (vec2(dest.x + dest.w * fu, dest.y + dest.h * fv) + origin) / scale;
         // Near the horizon the sheet rolls over, and a lifted point would rise above
         // the horizon line: the lift and the alpha fade out over the last cells before it (none past it).
-        let edge = bend.horizon_at(g);
-        let fade = if edge.is_finite() { ((edge - bend.reach(g)) / HORIZON_FADE).clamp(0.0, 1.0) } else { 1.0 };
+        let horizon = bend.horizon_at(g);
+        let fade = if horizon.is_finite() { ((horizon - bend.reach(g)) / HORIZON_FADE).clamp(0.0, 1.0) } else { 1.0 };
         let fade = fade * fade * (3.0 - 2.0 * fade);
         let at = bend.lift(g, lift * fade);
         // Past the drawn ground's far edge (`edge`) there is no ground under the mist: it is out too.
@@ -5114,7 +5114,7 @@ fn backdrop_world(game: &Game, assets: &Assets) {
             draw_daylight(game, &cam, light);
         }
         if light.is_some() {
-            draw_building_windows(game, assets, &cam);
+            draw_building_windows(game, assets, &cam, NO_VEIL);
         }
         // The weather as over the map (`world_frame`), so it keeps falling behind the window; a bent view
         // draws it in its ground's picture (`draw_world_in`), as the map does.
@@ -7410,7 +7410,7 @@ mod tilt_tests {
         let cards = [card(20.0), card(60.0), card(100.0)];
         let (origin, zoom, group_y) = (vec2(300.0, 200.0), 1.0, 60.0);
         let mut checked = 0;
-        for horizon in [false, true] {
+        for horizon in [view25::FarGround::Up, view25::FarGround::Horizon, view25::FarGround::Globe] {
             for yaw in [0.0, 45.0, 90.0, 180.0, -135.0] {
                 let cam = first_person_camera(&game, yaw, horizon);
                 let tilt = cam.tilt.expect("the first-person view is tilted");
@@ -7425,8 +7425,8 @@ mod tilt_tests {
                     checked += 1;
                     let (model, at) = standing_model(&cam, &tilt, *foot, *foot, true);
                     let drawn = model.transform_point3(vec3(foot.x, foot.y, 0.0));
-                    assert!(drawn.distance(bend.point(g)) < 1e-3, "horizon {horizon} yaw {yaw} layer {k}: drawn at {drawn:?}, the sheet at {:?}", bend.point(g));
-                    assert!(at.distance(bend.point(g)) < 1e-3, "horizon {horizon} yaw {yaw} layer {k}: anchored at {at:?}");
+                    assert!(drawn.distance(bend.point(g)) < 1e-3, "horizon {horizon:?} yaw {yaw} layer {k}: drawn at {drawn:?}, the sheet at {:?}", bend.point(g));
+                    assert!(at.distance(bend.point(g)) < 1e-3, "horizon {horizon:?} yaw {yaw} layer {k}: anchored at {at:?}");
                 }
             }
         }
