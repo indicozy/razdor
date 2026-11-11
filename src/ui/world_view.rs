@@ -1475,6 +1475,28 @@ const TARGETS_KEPT: usize = 4;
 /// its texture coordinate the point's place in the region. The picture's rows come out upside
 /// down from its fill, so `v` runs the other way (as [`render_cache::Cached::show`] flips it).
 fn draw_sheet(target: &RenderTarget, bend: &view25::Bend, region: Rect) {
+    local! {
+        /// The sheet's chunks of the last draw, with the bend and region they were built for: the
+        /// vertices depend on nothing else (the picture's texture is set at each draw).
+        static SHEET: std::cell::RefCell<Option<(view25::Bend, Rect, Vec<Mesh>)>> = const { std::cell::RefCell::new(None) };
+    }
+    SHEET.with(|s| {
+        let mut s = s.borrow_mut();
+        if !s.as_ref().is_some_and(|(b, r, _)| b == bend && *r == region) {
+            *s = Some((*bend, region, sheet_meshes(bend, region)));
+        }
+        let Some((_, _, meshes)) = s.as_mut() else { return };
+        for mesh in meshes.iter_mut() {
+            mesh.texture = Some(target.texture.clone());
+            macroquad::models::draw_mesh(mesh);
+            mesh.texture = None;
+        }
+    });
+}
+
+/// The sheet's chunks for [`draw_sheet`] (no texture yet): a grid of `ACROSS` × `ALONG` cells over
+/// `region`, each vertex lifted by [`view25::Bend::point`], drawn in chunks of `ROWS_PER_DRAW` rows.
+fn sheet_meshes(bend: &view25::Bend, region: Rect) -> Vec<Mesh> {
     const ACROSS: usize = 64;
     const ALONG: usize = 128;
     // Macroquad clamps a draw to 5000 indices (10000 vertices): 8 rows of 64 cells are 3072.
@@ -1484,6 +1506,7 @@ fn draw_sheet(target: &RenderTarget, bend: &view25::Bend, region: Rect) {
         let p = bend.point(vec2(region.x + region.w * u, region.y + region.h * v));
         macroquad::models::Vertex::new(p.x, p.y, p.z, u, 1.0 - v, WHITE)
     };
+    let mut meshes = Vec::new();
     for j0 in (0..ALONG).step_by(ROWS_PER_DRAW) {
         let rows = ROWS_PER_DRAW.min(ALONG - j0);
         let mut vertices = Vec::with_capacity((ACROSS + 1) * (rows + 1));
@@ -1500,8 +1523,9 @@ fn draw_sheet(target: &RenderTarget, bend: &view25::Bend, region: Rect) {
                 indices.extend_from_slice(&[a, a + 1, a + row, a + 1, a + row + 1, a + row]);
             }
         }
-        macroquad::models::draw_mesh(&macroquad::models::Mesh { vertices, indices, texture: Some(target.texture.clone()) });
+        meshes.push(Mesh { vertices, indices, texture: None });
     }
+    meshes
 }
 
 /// The mesh of a raised mist sheet `lift` cells above a bent sheet (the first-person view): the fog
