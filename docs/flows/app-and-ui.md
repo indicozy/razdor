@@ -252,7 +252,7 @@ left, stats right; the band is the least height where the stats and the hero's b
 band's text size, which is never below the landscape column's; the picture is scaled to the band's height,
 its proportions kept and centred in the picture half (`unit_sheet::band_figure_rect`), the frame picture (`UnitFrame`) stretched over that same half (`unit_sheet::band_frame_rect`, `chrome::unit_parchment_framed`), so it is about two thirds of the landscape size; the window is 1092 design px tall, width-limited
 on a 1080x2376 phone),
-the right side (pack, formation) under it, and a «Закрыть» button under the formation (`army_close`). The
+the right side (pack, formation) under it, and a «Закрыть» button under the formation (`army_close`). On the band the unit's trait rows (its bonuses, state lines) that do not fit its place under the stats scroll (touch drag, wheel, the bar at its right; `unit_sheet::band_list_most`), as the landscape column's trait list does under the simultaneous bonuses rule; the description goes first, as before. The
 right side moves by the layout's shift (`window_layout::place`, used by `at`, `point` and the panel helpers),
 and the army seam is a 2 px line under the band (`window_layout::frame`, `window_layout::seam`). These windows are drawn inside
 `window_layout::scaled` (`display::with_window_scale`), so `chrome::k()` is the stacked window's own scale
