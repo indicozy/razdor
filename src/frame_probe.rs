@@ -13,6 +13,12 @@
 //! ([`csv_row`], header [`CSV_HEADER`]). Rows are buffered and appended at each summary and at
 //! [`flush`], never per frame. The file is truncated when the first rows are written.
 //!
+//! The CSV also has the draw calls estimated for each frame (`draws`, [`draw`]: the batches the map's
+//! sprite and ground draws make, see there) and their vertices (`verts`). With `RAZDOR_GPU_STAGES=1` on
+//! desktop, the map frames' GPU stages are timed per stage (`gpu_<stage>_ms`, [`GPU_STAGES`]): by GL
+//! timer queries read back a frame or two later, or by `glFinish` on GL 2 and GLES
+//! (`ui::gpu_probe::gpu_wait`). Those timers are off by default and cost nothing then.
+//!
 //! The stage times are CPU time spent building the frame. Macroquad batches draws and issues
 //! the GL calls in `next_frame`, so GL submission and the wait for vsync (`eglSwapBuffers`)
 //! land in "present" (total minus work). GPU time itself is not visible here, except for the
@@ -26,13 +32,23 @@
 
 use crate::local;
 use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 /// The per-frame CSV's columns (`RAZDOR_PROFILE_FRAMES`): the times in ms, `tick` the game's
-/// tick, `world` the map with `terrain` inside it, `rebuilds` the texture rebuilds.
-pub const CSV_HEADER: &str = "frame,kind,work_ms,total_ms,tick,terrain,world,fog,minimap,route,look,armies,script,day,snap,autosave,session,ai_move,ai_plan,rebuilds,backdrop,battle_window,effect,gpu_backdrop,gpu_window,view";
+/// tick, `world` the map with `terrain` inside it, `rebuilds` the texture rebuilds, `draws` the
+/// draw calls estimated for the frame and `verts` its vertices ([`draw`]), and the last columns the
+/// GPU time of each GPU stage (`GPU_STAGES`, empty when not timed, see `ui::gpu_probe`).
+pub const CSV_HEADER: &str = "frame,kind,work_ms,total_ms,tick,terrain,world,fog,minimap,route,look,armies,script,day,snap,autosave,session,ai_move,ai_plan,rebuilds,backdrop,battle_window,effect,gpu_backdrop,gpu_window,view,draws,verts,gpu_backdrop_ms,gpu_window_ms,gpu_sky_ms,gpu_terrain_ms,gpu_marks_ms,gpu_sprites_ms,gpu_fog_ms,gpu_ui_ms";
+
+/// The GPU stages timed per frame, in the CSV's column order (`gpu_<name>_ms`): each is the GPU's
+/// time between the marker before it and its own marker (`ui::gpu_probe::gpu_wait`).
+pub const GPU_STAGES: [Stage; 8] = [Stage::GpuBackdrop, Stage::GpuWindow, Stage::GpuSky, Stage::GpuTerrain, Stage::GpuMarks, Stage::GpuSprites, Stage::GpuFog, Stage::GpuUi];
+
+/// The longest batch of vertices macroquad issues as one draw call (`draw_call_vertex_capacity`).
+const MAX_BATCH_VERTS: u32 = 10000;
 
 /// The parts of a frame that are timed.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -148,6 +164,9 @@ pub struct Sample {
     pub sprite_px: f32,
     /// The terrain layer's summed draw area in pixels of the pass's 2D space.
     pub terrain_px: f32,
+    /// Draw calls estimated for the frame, and the vertices drawn ([`draw`]).
+    pub draws: u32,
+    pub verts: u32,
 }
 
 struct State {
@@ -165,8 +184,18 @@ struct State {
     since: Option<Instant>,
     /// Frames probed so far (the CSV's `frame` column counts from 1).
     frames: u64,
-    /// CSV rows not yet appended to the file (`RAZDOR_PROFILE_FRAMES`).
-    csv_rows: Vec<String>,
+    /// Draw calls estimated this frame ([`draw`]) and the vertices drawn.
+    draws: u32,
+    verts: u32,
+    /// The texture of the open batch ([`draw`]), its vertices, and whether a state change broke it
+    /// ([`batch_break`]) since its last draw.
+    batch_key: Option<u64>,
+    batch_verts: u32,
+    batch_dirty: bool,
+    /// The GPU time of each of [`GPU_STAGES`] by frame, as the frame's markers measured it.
+    gpu_frames: BTreeMap<u64, [f32; GPU_STAGES.len()]>,
+    /// CSV rows not yet appended to the file (`RAZDOR_PROFILE_FRAMES`): the frame and its sample.
+    csv_rows: Vec<(u64, Sample)>,
     /// The GPU times of the timed terrain draws (`ui::gpu_probe`), with the kind of their frame,
     /// since the last summary.
     gpu: Vec<(Kind, f32)>,
@@ -174,7 +203,26 @@ struct State {
 
 impl State {
     const fn new() -> State {
-        State { stage: [Duration::ZERO; Stage::COUNT], rebuilds: 0, sprites: 0, sprite_px: 0.0, terrain_px: 0.0, kind: Kind::Other, effect: false, samples: Vec::new(), since: None, frames: 0, csv_rows: Vec::new(), gpu: Vec::new() }
+        State {
+            stage: [Duration::ZERO; Stage::COUNT],
+            rebuilds: 0,
+            sprites: 0,
+            sprite_px: 0.0,
+            terrain_px: 0.0,
+            kind: Kind::Other,
+            effect: false,
+            samples: Vec::new(),
+            since: None,
+            frames: 0,
+            draws: 0,
+            verts: 0,
+            batch_key: None,
+            batch_verts: 0,
+            batch_dirty: false,
+            gpu_frames: BTreeMap::new(),
+            csv_rows: Vec::new(),
+            gpu: Vec::new(),
+        }
     }
 }
 
@@ -229,6 +277,51 @@ pub fn terrain(w: f32, h: f32) {
     }
 }
 
+/// A draw of `verts` vertices from the texture `key` (a hash of its id; 0 for none) was submitted
+/// this frame. The draw calls are estimated the way macroquad's batcher issues them: a draw call
+/// opens at a draw whose texture differs from the open batch's, after a [`batch_break`], or when the
+/// batch would pass its vertex capacity. Macroquad's own count is private, so this is the probe's
+/// estimate; it counts the draws the map's code makes (sprites, ground, sheets, shadows), not every
+/// draw of the frame. Off with the probe, it does nothing.
+pub fn draw(key: u64, verts: u32) {
+    if on() {
+        STATE.with_borrow_mut(|s| {
+            if s.batch_dirty || s.batch_key != Some(key) || s.batch_verts + verts > MAX_BATCH_VERTS {
+                s.draws += 1;
+                s.batch_verts = 0;
+            }
+            s.batch_key = Some(key);
+            s.batch_dirty = false;
+            s.batch_verts += verts;
+            s.verts += verts;
+        });
+    }
+}
+
+/// The batch is broken by a state change macroquad batches on: a material or uniform set, a camera
+/// or render pass change (see [`draw`]).
+pub fn batch_break() {
+    if on() {
+        STATE.with_borrow_mut(|s| s.batch_dirty = true);
+    }
+}
+
+/// The frame being drawn, counted from 1 as the CSV's `frame` column (for [`record_gpu_stage`]).
+pub fn current_frame() -> u64 {
+    STATE.with_borrow(|s| s.frames + 1)
+}
+
+/// The GPU time of `stage` (one of [`GPU_STAGES`]) in frame `frame`, in ms: the CSV fills in the
+/// frame's `gpu_<stage>_ms` column when its rows are written, so a result may come a frame or two
+/// late. Other stages are ignored.
+pub fn record_gpu_stage(frame: u64, stage: Stage, ms: f32) {
+    if let Some(i) = GPU_STAGES.iter().position(|&g| g == stage) {
+        if on() {
+            STATE.with_borrow_mut(|s| s.gpu_frames.entry(frame).or_insert([f32::NAN; GPU_STAGES.len()])[i] = ms);
+        }
+    }
+}
+
 /// This frame is a map frame (its kind is a map kind, see [`is_map`]) and the probe is on: the
 /// map's last GPU wait (`gpu-ui`) applies.
 pub fn map_frame_now() -> bool {
@@ -267,9 +360,11 @@ pub fn gpu_timers_on() -> bool {
 /// report), so a plain `profile` measures the frames as they are. Never on the desktop.
 pub fn gpu_waits_on() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    on() && *ON.get_or_init(|| {
-        cfg!(target_os = "android") && crate::platform::app_dir().is_some_and(|d| d.join("profile-gpu").is_file())
-    })
+    if !cfg!(target_os = "android") {
+        // Desktop: the stage markers of `RAZDOR_GPU_STAGES=1` (`gpu_timers_on`).
+        return gpu_timers_on();
+    }
+    on() && *ON.get_or_init(|| crate::platform::app_dir().is_some_and(|d| d.join("profile-gpu").is_file()))
 }
 
 /// A timed GPU draw of `ms` milliseconds, in a frame of `kind`: counted in its summary line.
@@ -328,7 +423,7 @@ pub fn end_frame(work: Duration, total: Duration) {
     }
     let now = Instant::now();
     let csv = csv_path().is_some();
-    let (due, rows) = STATE.with_borrow_mut(|s| {
+    let (due, rows, gpu) = STATE.with_borrow_mut(|s| {
         let since = *s.since.get_or_insert(now);
         let sample = Sample {
             kind: settled_kind(s.kind, s.effect),
@@ -339,10 +434,12 @@ pub fn end_frame(work: Duration, total: Duration) {
             sprites: s.sprites,
             sprite_px: s.sprite_px,
             terrain_px: s.terrain_px,
+            draws: s.draws,
+            verts: s.verts,
         };
         s.frames += 1;
         if csv {
-            s.csv_rows.push(csv_row(s.frames, &sample));
+            s.csv_rows.push((s.frames, sample));
         }
         s.samples.push(sample);
         s.stage = [Duration::ZERO; Stage::COUNT];
@@ -350,19 +447,34 @@ pub fn end_frame(work: Duration, total: Duration) {
         s.sprites = 0;
         s.sprite_px = 0.0;
         s.terrain_px = 0.0;
+        s.draws = 0;
+        s.verts = 0;
+        s.batch_key = None;
+        s.batch_verts = 0;
+        s.batch_dirty = false;
         s.kind = Kind::Other;
         s.effect = false;
         let elapsed = now.duration_since(since);
         if elapsed < PERIOD {
-            return (None, Vec::new());
+            return (None, Vec::new(), BTreeMap::new());
         }
         s.since = Some(now);
-        (Some((elapsed.as_secs_f32(), std::mem::take(&mut s.samples), std::mem::take(&mut s.gpu))), std::mem::take(&mut s.csv_rows))
+        let rows = std::mem::take(&mut s.csv_rows);
+        let gpu = take_gpu_frames(s, rows.last().map(|(f, _)| *f));
+        (Some((elapsed.as_secs_f32(), std::mem::take(&mut s.samples), std::mem::take(&mut s.gpu))), rows, gpu)
     });
-    write_csv(&rows);
+    write_csv(&rows, &gpu);
     if let Some((secs, samples, gpu)) = due {
         log_lines(secs, &samples, &gpu);
     }
+}
+
+/// The GPU results of the frames up to `last` (the rows about to be written), taken out of the state;
+/// later frames keep theirs for their own rows.
+fn take_gpu_frames(s: &mut State, last: Option<u64>) -> BTreeMap<u64, [f32; GPU_STAGES.len()]> {
+    let Some(last) = last else { return BTreeMap::new() };
+    let later = s.gpu_frames.split_off(&(last + 1));
+    std::mem::replace(&mut s.gpu_frames, later)
 }
 
 /// Logs the pending samples' summary now (at exit), and appends the pending CSV rows. Does
@@ -371,12 +483,14 @@ pub fn flush() {
     if !on() {
         return;
     }
-    let (secs, samples, rows, gpu) = STATE.with_borrow_mut(|s| {
+    let (secs, samples, rows, gpu, gpu_frames) = STATE.with_borrow_mut(|s| {
         let secs = s.since.map_or(0.0, |t| t.elapsed().as_secs_f32());
         s.since = None;
-        (secs, std::mem::take(&mut s.samples), std::mem::take(&mut s.csv_rows), std::mem::take(&mut s.gpu))
+        let rows = std::mem::take(&mut s.csv_rows);
+        let gpu_frames = take_gpu_frames(s, rows.last().map(|(f, _)| *f));
+        (secs, std::mem::take(&mut s.samples), rows, std::mem::take(&mut s.gpu), gpu_frames)
     });
-    write_csv(&rows);
+    write_csv(&rows, &gpu_frames);
     log_lines(secs, &samples, &gpu);
 }
 
@@ -429,14 +543,20 @@ fn summary_name(kind: Kind) -> String {
     }
 }
 
-/// One CSV row of frame `frame` (the probe's count, from 1). The kind's name is the CSV's
-/// (`walk-step`, `walk`, `idle`, `battle`, `battle-effect`, `other`); times in ms with 3
-/// decimals; the last column is the view of the map and battle kinds (`flat` or `25d`, empty
-/// otherwise).
+/// One CSV row of frame `frame` (the probe's count, from 1), without GPU times (see [`csv_row_gpu`]).
 pub fn csv_row(frame: u64, s: &Sample) -> String {
+    csv_row_gpu(frame, s, None)
+}
+
+/// One CSV row of frame `frame` with its GPU times in [`GPU_STAGES`] order (empty columns when `gpu`
+/// is None or a stage was not timed). The kind's name is the CSV's (`walk-step`, `walk`, `idle`,
+/// `battle`, `battle-effect`, `other`); times in ms with 3 decimals; the view of the map and battle
+/// kinds comes after the rebuilds and stages (`flat` or `25d`, empty otherwise), then the draws and
+/// vertices and the GPU columns.
+pub fn csv_row_gpu(frame: u64, s: &Sample, gpu: Option<&[f32; GPU_STAGES.len()]>) -> String {
     let stage = |st: Stage| s.stage_ms[st as usize];
-    format!(
-        "{frame},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{},{:.3},{:.3},{:.3},{:.3},{:.3},{}",
+    let mut row = format!(
+        "{frame},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{},{:.3},{:.3},{:.3},{:.3},{:.3},{},{},{}",
         kind_name(s.kind),
         s.work_ms,
         s.total_ms,
@@ -462,12 +582,21 @@ pub fn csv_row(frame: u64, s: &Sample) -> String {
         stage(Stage::GpuBackdrop),
         stage(Stage::GpuWindow),
         view_name(s.kind).unwrap_or(""),
-    )
+        s.draws,
+        s.verts,
+    );
+    for i in 0..GPU_STAGES.len() {
+        row.push(',');
+        if let Some(ms) = gpu.map(|g| g[i]).filter(|ms| !ms.is_nan()) {
+            row.push_str(&format!("{ms:.3}"));
+        }
+    }
+    row
 }
 
 /// Appends rows to the CSV file: the header first, the file truncated, on the first write of
-/// the run. Errors are logged, once per write.
-fn write_csv(rows: &[String]) {
+/// the run. Each row takes the GPU times its frame has in `gpu`. Errors are logged, once per write.
+fn write_csv(rows: &[(u64, Sample)], gpu: &BTreeMap<u64, [f32; GPU_STAGES.len()]>) {
     if rows.is_empty() {
         return;
     }
@@ -478,8 +607,8 @@ fn write_csv(rows: &[String]) {
         text.push_str(CSV_HEADER);
         text.push('\n');
     }
-    for row in rows {
-        text.push_str(row);
+    for (frame, sample) in rows {
+        text.push_str(&csv_row_gpu(*frame, sample, gpu.get(frame)));
         text.push('\n');
     }
     let result = if first {
@@ -664,7 +793,7 @@ mod tests {
     use super::*;
 
     fn sample(kind: Kind, work_ms: f32, total_ms: f32, stage_ms: [f32; Stage::COUNT]) -> Sample {
-        Sample { kind, work_ms, total_ms, stage_ms, rebuilds: 0, sprites: 0, sprite_px: 0.0, terrain_px: 0.0 }
+        Sample { kind, work_ms, total_ms, stage_ms, rebuilds: 0, sprites: 0, sprite_px: 0.0, terrain_px: 0.0, draws: 0, verts: 0 }
     }
 
     #[test]
@@ -741,9 +870,18 @@ mod tests {
             stages(&[(Stage::Tick, 1.0), (Stage::Terrain, 0.5), (Stage::World, 2.0), (Stage::Fog, 0.25), (Stage::Minimap, 0.125), (Stage::Route, 0.5), (Stage::Look, 0.25), (Stage::Armies, 0.75), (Stage::Autosave, 0.125), (Stage::Session, 0.25), (Stage::AiMove, 0.5), (Stage::AiPlan, 0.25)]),
         );
         step.rebuilds = 2;
+        step.draws = 5;
+        step.verts = 120;
         let row = csv_row(7, &step);
-        assert_eq!(row, "7,walk-step,3.000,4.250,1.000,0.500,2.000,0.250,0.125,0.500,0.250,0.750,0.000,0.000,0.000,0.125,0.250,0.500,0.250,2,0.000,0.000,0.000,0.000,0.000,flat");
+        assert_eq!(row, "7,walk-step,3.000,4.250,1.000,0.500,2.000,0.250,0.125,0.500,0.250,0.750,0.000,0.000,0.000,0.125,0.250,0.500,0.250,2,0.000,0.000,0.000,0.000,0.000,flat,5,120,,,,,,,,");
         assert_eq!(row.split(',').count(), CSV_HEADER.split(',').count());
+        // The GPU columns follow the stages' order and are filled when timed.
+        let mut gpu = [f32::NAN; GPU_STAGES.len()];
+        gpu[3] = 1.5;
+        gpu[7] = 0.25;
+        let timed = csv_row_gpu(7, &step, Some(&gpu));
+        assert!(timed.ends_with(",5,120,,,,1.500,,,,0.250"), "{timed}");
+        assert_eq!(timed.split(',').count(), CSV_HEADER.split(',').count());
         let other = sample(Kind::Other, 0.5, 1.0, [0.0; Stage::COUNT]);
         assert!(csv_row(1, &other).starts_with("1,other,0.500,1.000,0.000,"));
         assert!(csv_row(1, &other).ends_with(","));

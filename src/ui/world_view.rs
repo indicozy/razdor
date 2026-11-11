@@ -1394,6 +1394,7 @@ fn in_view(cam: &Camera, f: impl Fn(&Camera)) {
         bent_view(cam, &tilt, bend, &f);
     } else {
         let (w, h) = (screen_width(), screen_height());
+        super::sharp::count_break();
         set_camera(&View3d(view25::window_matrix(cam.view, w, h) * tilt.cam.view_proj(cam.view)));
         f(&cam.tilted_space());
         super::render_cache::back_to_2d();
@@ -1410,6 +1411,7 @@ fn in_view_sprites(cam: &Camera, f: impl Fn(&Camera)) {
     let prev = SCREEN_VIEW.with(|v| v.replace(Some(cam.view)));
     let space = cam.tilted_space();
     let (w, h) = (screen_width(), screen_height());
+    super::sharp::count_break();
     set_camera(&View3d(view25::window_matrix(cam.view, w, h) * tilt.cam.view_proj(cam.view)));
     with_pass(Pass::Sprites, || f(&space));
     super::render_cache::back_to_2d();
@@ -1425,13 +1427,22 @@ fn bent_view(cam: &Camera, tilt: &Tilt, bend: view25::Bend, f: &impl Fn(&Camera)
     let space = cam.tilted_space();
     let (sw, sh) = (space.view.w, space.view.h);
     // The picture's pixels per 2D pixel: the screen's at the pivot, shrunk to fit the largest
-    // target the GPU takes (`MAX_BENT_SIDE`).
+    // target the GPU takes (`MAX_BENT_SIDE`), then to the picture's fraction (`bent_ground_scale`).
     let k = (tilt.cam.pivot_scale(cam.view) / cam.scale).max(0.05);
     let k = k.min(MAX_BENT_SIDE / sw.max(sh).max(1.0));
+    let ground = bent_ground_scale();
+    let k = k * ground;
     let (pw, ph) = ((sw * k).ceil().max(1.0) as u32, (sh * k).ceil().max(1.0) as u32);
     let target = bent_target(pw, ph);
+    // A smaller picture is stretched over the sheet: linear, so its texels blend (the full-size one stays
+    // nearest, as before). The ground's sharp draws take the picture's pixels per 2D pixel for their band.
+    target.texture.set_filter(if ground < 1.0 { FilterMode::Linear } else { FilterMode::Nearest });
+    let raster = super::sharp::raster();
+    super::sharp::set_raster(raster * ground);
     super::render_cache::fill_space(&target, space.view, || with_pass(Pass::Ground, || f(&space)));
+    super::sharp::set_raster(raster);
     let (w, h) = (screen_width(), screen_height());
+    super::sharp::count_break();
     set_camera(&View3d(view25::window_matrix(cam.view, w, h) * tilt.cam.view_proj(cam.view)));
     draw_sheet(&target, &bend, tilt.cull);
     with_pass(Pass::Sprites, || f(&space));
@@ -1440,6 +1451,16 @@ fn bent_view(cam: &Camera, tilt: &Tilt, bend: view25::Bend, f: &impl Fn(&Camera)
 
 /// The largest side of a bent view's picture in pixels.
 const MAX_BENT_SIDE: f32 = 8192.0;
+
+/// The default fraction of the bent views' ground picture (of the screen's pixel density at the pivot).
+const DEFAULT_BENT_GROUND: f32 = 1.0;
+
+/// The bent views' ground picture as a fraction of the screen's pixel density at the pivot, 0.5 to 1.0:
+/// `RAZDOR_BENT_GROUND` (a snapshot's or a profiling A/B's switch, read once), else [`DEFAULT_BENT_GROUND`].
+fn bent_ground_scale() -> f32 {
+    static SCALE: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *SCALE.get_or_init(|| std::env::var("RAZDOR_BENT_GROUND").ok().and_then(|v| v.trim().parse::<f32>().ok()).map_or(DEFAULT_BENT_GROUND, |f| f.clamp(0.5, 1.0)))
+}
 
 /// The target of a bent view's picture of `w` × `h` pixels, kept by size: the views fill and draw
 /// their picture one after the other, so one target serves them all.
@@ -1488,6 +1509,7 @@ fn draw_sheet(target: &RenderTarget, bend: &view25::Bend, region: Rect) {
         let Some((_, _, meshes)) = s.as_mut() else { return };
         for mesh in meshes.iter_mut() {
             mesh.texture = Some(target.texture.clone());
+            super::sharp::count_draw(mesh.texture.as_ref(), mesh.vertices.len());
             macroquad::models::draw_mesh(mesh);
             mesh.texture = None;
         }
@@ -1672,6 +1694,14 @@ fn standing_at(cam: &Camera, foot: Vec2, base: Vec2, at: Vec2, vis: f32, picture
             return;
         }
     }
+    // Off the window: a picture whose box lies past the window's edges, by more than the margin its sway and the
+    // sharp band reach, draws no pixel, so it is not drawn. `picture_on_screen` gives window pixels (the frame's units
+    // are the window's, see `view25::window_matrix`), and a corner behind the eye keeps the sprite.
+    if let Some(r) = picture_on_screen(&tilt, screen_view(cam), place, picture) {
+        if !overlaps(r, Rect::new(0.0, 0.0, screen_width(), screen_height()), OFF_WINDOW_MARGIN) {
+            return;
+        }
+    }
     // The trailer's camera (dev-only) and the first-person view: a sprite whose foot is nearer the
     // eye than the near fade's distance fades out (the first-person view: only one that covers the
     // hero, [`first_person_fade`]), and the blend band of its sharp draws follows the magnification
@@ -1787,6 +1817,10 @@ fn covering_gap(cam: &Camera, tilt: &Tilt, model: Mat4, picture: Rect, depth: f3
     };
     covers.then_some(hero.depth - depth)
 }
+
+/// How far past the window's edge a standing sprite's box may lie and still be drawn: the sway of the
+/// trees (2.5 px in their picture), the lean and the sharp band, with room to spare.
+const OFF_WINDOW_MARGIN: f32 = 16.0;
 
 /// Whether the rectangles `a` and `b` overlap, `b` widened by `margin` on every side.
 fn overlaps(a: Rect, b: Rect, margin: f32) -> bool {
