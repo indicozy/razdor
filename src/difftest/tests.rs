@@ -1175,16 +1175,9 @@ fn every_difftest_list_plays_back_from_its_recording() {
     let mut paths: Vec<std::path::PathBuf> = lists.map(|e| e.unwrap().path()).filter(|p| p.extension().is_some_and(|x| x == "jsonl")).collect();
     paths.sort();
     assert!(!paths.is_empty(), "the difftest lists are in the repository");
-    // The lists whose recording does not play back yet: each starts a battle while the hero is on
-    // the last steps of a walk, and the playback's walk and the live one part there (see
-    // `docs/OPEN_QUESTIONS.md`). The test holds them to failing, so a fix shows up here.
-    const KNOWN_DIVERGENT: &[&str] = &["lake-gang", "rk1-church", "rk1-day1", "rk1-ruins-won"];
     let mut failures: Vec<String> = Vec::new();
-    let mut known_failing: Vec<String> = Vec::new();
     for list in paths {
         let name = list.display().to_string();
-        let stem = list.file_stem().unwrap().to_string_lossy().to_string();
-        let known = KNOWN_DIVERGENT.contains(&stem.as_str());
         let actions = read_action_list(&list, None, None).unwrap();
         // The recorded run, to its end.
         let rec = Rec::default();
@@ -1229,12 +1222,7 @@ fn every_difftest_list_plays_back_from_its_recording() {
                 // The entries before the failing one name the action (the error counts from the tail).
                 let at: usize = e.strip_prefix("entry ").and_then(|r| r.split(' ').next()).and_then(|n| n.parse().ok()).unwrap_or(0);
                 let before: Vec<String> = tail[at.saturating_sub(6)..=at.min(tail.len() - 1)].iter().map(|x| format!("    {:?} {:?}", x.at, x.input)).collect();
-                let line = format!("{name}: playback: {e}\n{}", before.join("\n"));
-                if known {
-                    known_failing.push(stem);
-                } else {
-                    failures.push(line);
-                }
+                failures.push(format!("{name}: playback: {e}\n{}", before.join("\n")));
                 continue;
             }
         };
@@ -1242,15 +1230,8 @@ fn every_difftest_list_plays_back_from_its_recording() {
         back.armies_snap();
         let got = state_hash(&back);
         if got != end {
-            if known {
-                known_failing.push(stem);
-            } else {
-                failures.push(format!("{name}: the recording plays back to a different final state ({got:016x}, live {end:016x})"));
-            }
-        } else if known {
-            failures.push(format!("{name}: plays back now; take it out of KNOWN_DIVERGENT"));
+            failures.push(format!("{name}: the recording plays back to a different final state ({got:016x}, live {end:016x})"));
         }
     }
     assert!(failures.is_empty(), "the difftest recordings that do not play back:\n{}", failures.join("\n"));
-    assert_eq!(known_failing.len(), KNOWN_DIVERGENT.len(), "the known divergent lists are the ones that fail: {known_failing:?}");
 }

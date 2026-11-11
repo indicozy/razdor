@@ -224,6 +224,29 @@ impl Driver {
         }
     }
 
+    /// Walks to `to` (a cell a route reaches), and waits there until the walk ends, as
+    /// [`Driver::walk_to_nearest`] does. A fight that the walk meets ends it at once.
+    fn walk_to(&mut self, frames: &mut Frames, to: crate::rules::map::Tile) {
+        if !self.g.set_destination(to) {
+            return;
+        }
+        for _ in 0..200_000 {
+            let ev = self.frame(frames);
+            self.settle(ev);
+            if !self.g.moving() && self.g.foe.is_none() && !self.g.waiting() {
+                self.g.finish_pause();
+                let ev = self.g.tick_shown_within(0.0, &mut || true);
+                if !ev.is_empty() || !self.g.held.is_empty() {
+                    self.settle(ev);
+                    continue;
+                }
+                if !self.g.moving() && self.g.foe.is_none() && !self.g.waiting() {
+                    break;
+                }
+            }
+        }
+    }
+
     /// `days` game days: the hero waits 4 hours at a time, and fights whatever comes. The days
     /// end at rest (not waiting, not walking), whatever the frame times, so the state at a day's
     /// end is the same for every frame schedule.
@@ -778,7 +801,6 @@ fn recorded_session(dt: &DtInstall, c: &Arc<Content>, prefix: &str, days: u64, t
 /// state), seeks to any day to the state the straight playback reaches at the same place, and
 /// marks its battle and days on the timeline. РК1 and ДС2.
 #[test]
-#[ignore = "open: a 25-day recorded campaign drifts at stretch 463 (see docs/OPEN_QUESTIONS.md, replay playback)"]
 fn a_recorded_campaign_plays_to_its_end_and_seeks_to_any_day() {
     use super::watch::{MarkKind, Place, ReplayPlayer};
     let Some(dt) = base() else { return };
@@ -849,6 +871,98 @@ fn a_replay_of_other_rules_still_plays() {
     let mut p = ReplayPlayer::new(file, c.clone(), Some(&dt.dir));
     assert!(!p.header.same_rules(), "other rules");
     p.play_to_end().unwrap_or_else(|d| panic!("the other rules still play: {d:?}"));
+}
+
+/// A recorded session of seeded random play for `days` game days on `prefix`'s map: each day the
+/// generator picks a walk to a random location (an army's cell among them, so fights come), a
+/// purchase at the building the hero stands in, or nothing; then the day runs out (waits, and the
+/// fights that come). Every day's end is checked. Returns the file, the day-end hashes, and how
+/// many battles were begun.
+fn random_session(dt: &DtInstall, c: &Arc<Content>, prefix: &str, days: u64, seed: u32, tag: &str) -> (std::path::PathBuf, Vec<u64>, usize) {
+    let map = map_named(dt, prefix);
+    let mut d = Driver::new(start(c, &map, Some(seed)), true);
+    d.checks = true;
+    d.max = true;
+    d.g.max_ai = true;
+    // A fight the game is set up for (part of its starting state, as in the other session tests).
+    d.g.foe = Some(Foe::Army(0));
+    let dir = scratch(tag);
+    let sess = super::session::Session::start(&dir, &d.g, &header_for(&d.g, dt)).unwrap();
+    d.g.replay = Some(sess.clone());
+    d.session = Some(sess.clone());
+    let mut f = Frames::new(DT_A, BUDGET_A);
+    let opening = d.g.drain_events();
+    d.settle(opening);
+    let mut rng = crate::rules::rng::Rng::new(seed ^ 0x5eed);
+    let mut hashes = vec![d.hash()];
+    for _ in 0..days {
+        match rng.random(4) {
+            0 => {
+                let k = rng.random(d.g.world.locations.len() as i32) as usize;
+                let to = d.g.world.locations[k].tile;
+                if to != d.g.tile() {
+                    d.walk_to(&mut f, to);
+                }
+            }
+            1 => {
+                // An army's cell: the walk meets it (a fight, or a stop by a friend on the road).
+                let n = d.g.world.armies.len();
+                if n > 0 {
+                    let k = rng.random(n as i32) as usize;
+                    let to = d.g.world.armies[k].tile(&d.g.world.map);
+                    if to != d.g.tile() {
+                        d.walk_to(&mut f, to);
+                    }
+                }
+            }
+            2 => {
+                if d.g.location.is_some() {
+                    let ev = d.g.reenter_building();
+                    d.settle(ev);
+                }
+                if d.g.location.is_some() {
+                    for _ in 0..3 {
+                        let slot = rng.random(4) as usize;
+                        let _ = d.g.buy(slot);
+                    }
+                }
+            }
+            _ => {}
+        }
+        d.play_days(&mut f, 1);
+        hashes.push(d.hash());
+    }
+    sess.finish();
+    let path = dir.join(sess.file_name());
+    let battles = super::file::read(&path).unwrap().segments.iter().flat_map(|s| s.entries.iter()).filter(|e| matches!(e.input, Input::Player(PlayerAction::StartBattle))).count();
+    (path, hashes, battles)
+}
+
+/// Seeded random play for 60 game days on РК1 and ДС2 (walks, purchases, waits, fights, «Максимум»),
+/// recorded, then played back from the file: every day's end is checked, and the last checkpoint is
+/// the live final state.
+#[test]
+fn a_random_session_of_sixty_days_plays_back_day_by_day() {
+    use super::watch::ReplayPlayer;
+    let Some(dt) = base() else { return };
+    let c = Arc::new(Content::from_dt(&dt));
+    for (prefix, seed) in [("РК1", 11u32), ("ДС2", 5u32)] {
+        let (path, hashes, battles) = random_session(&dt, &c, prefix, 60, seed, "random-60");
+        let file = super::file::read(&path).unwrap();
+        let buys = file.segments.iter().flat_map(|s| s.entries.iter()).filter(|e| matches!(e.input, Input::Player(PlayerAction::Buy { .. }))).count();
+        println!("RANDOM {prefix}: {} day ends, {battles} battles begun, {buys} purchases", hashes.len());
+        assert!(battles >= 1, "{prefix}: random play fought");
+        let checks = file.segments.iter().flat_map(|s| s.entries.iter()).filter(|e| matches!(e.input, Input::Engine(EngineInput::Check { .. }))).count();
+        assert!(checks >= hashes.len(), "{prefix}: every day's end is a checkpoint ({checks} for {})", hashes.len());
+        let mut p = ReplayPlayer::open(&path, c.clone(), Some(&dt.dir)).unwrap();
+        p.play_to_end().unwrap_or_else(|d| panic!("{prefix}: {d:?}"));
+        let last = file.segments.last().unwrap().entries.iter().rev().find_map(|e| match e.input {
+            Input::Engine(EngineInput::Check { hash }) => Some(hash),
+            _ => None,
+        });
+        assert_eq!(last, hashes.last().copied(), "{prefix}: the last checkpoint is the live final state");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
 }
 
 /// The process's resident memory in KiB (Linux; 0 elsewhere).
