@@ -50,7 +50,13 @@ impl Player {
                 self.game.finish_pause();
                 self.game.replay_stop_before = None;
                 if self.game.stretches == target.stretch && !self.game.ai_pending() && self.game.held.is_empty() {
-                    return Ok(());
+                    // A contact the walk reaches at this stretch's end is part of it (no time, so
+                    // it is not a stretch): it is played before the place.
+                    if !self.game.zero_time_next() {
+                        return Ok(());
+                    }
+                    self.tick_toward(target.stretch, None)?;
+                    continue;
                 }
             }
             self.tick_toward(target.stretch, None)?;

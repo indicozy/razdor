@@ -120,13 +120,16 @@ impl Session {
         }
         let due = day >= g.keyframe_day + KEYFRAME_DAYS;
         if due || hook::take_keyframe_request() {
+            // A keyframe is a checkpoint: the playback compares it after the stop's snap (which
+            // only runs when one is due), so it is taken when no snap is due, and the next frame
+            // asks again otherwise.
             match capture(game) {
-                Ok((json, hash)) => {
+                Ok((json, hash)) if !game.snap_due => {
                     g.flush();
                     g.writer.keyframe(false, game.stamp(), day, hash, json);
                     g.keyframe_day = day;
                 }
-                Err(_) => hook::request_keyframe(),
+                _ => hook::request_keyframe(),
             }
         }
     }

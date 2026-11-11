@@ -699,6 +699,18 @@ fn step_army(map: &TileMap, a: &mut Army, cost: &dyn Fn(Tile) -> Option<u16>, he
     }
 }
 
+/// What the chase does at a step ([`Game::chase`]).
+enum Chase {
+    /// The route stays.
+    Stay,
+    /// The army he chases is gone: the option is dropped, the route stays.
+    Lost,
+    /// The route to the army's cell `at`.
+    Route { path: Vec<Tile>, at: Tile },
+    /// No route to the army: the walk ends without time.
+    Ends,
+}
+
 /// What the cell ahead does to the hero's step ([`Game::step_contact`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum StepContact {
@@ -1253,31 +1265,46 @@ impl Game {
     /// planned again to its new cell; if that cell is closed or out of reach the pursuit
     /// ends and the hero stops where he is. Returns false when he stopped.
     fn follow_army(&mut self) -> bool {
-        let Some(uid) = self.talk_to else { return true };
-        // Without the option the route stays on the cell the army stood on (the chase at
-        // 0x4aedd1 reads the option first).
+        match self.chase() {
+            Chase::Stay => true,
+            Chase::Lost => {
+                self.talk_to = None;
+                true
+            }
+            Chase::Ends => {
+                self.talk_to = None;
+                self.path.clear();
+                self.goal = None;
+                false
+            }
+            Chase::Route { path, at } => {
+                self.path = path;
+                self.goal = Some(at);
+                true
+            }
+        }
+    }
+
+    /// What the chase does at this step (`follow_army`), read without changing the game. Without
+    /// the option (`pursue`) the route stays on the cell the army stood on (the chase at 0x4aedd1
+    /// reads the option first).
+    fn chase(&self) -> Chase {
+        let Some(uid) = self.talk_to else { return Chase::Stay };
         if !self.pursue {
-            return true;
+            return Chase::Stay;
         }
         let map = &self.world.map;
-        let Some(a) = self.world.armies.iter().find(|a| a.uid == uid) else {
-            self.talk_to = None;
-            return true;
-        };
+        let Some(a) = self.world.armies.iter().find(|a| a.uid == uid) else { return Chase::Lost };
         let at = a.tile(map);
         if !a.arrived || self.goal == Some(at) {
-            return true;
+            return Chase::Stay;
         }
         let path = self.plan_from(self.tile(), at, self.click_buildings, Some(uid), false);
         if path.is_empty() {
-            self.talk_to = None;
-            self.path.clear();
-            self.goal = None;
-            return false;
+            Chase::Ends
+        } else {
+            Chase::Route { path, at }
         }
-        self.path = path;
-        self.goal = Some(at);
-        true
     }
 
     /// The route a click on `to` would walk (world.md §1.3): the first click shows it.
@@ -1825,7 +1852,9 @@ impl Game {
                 if !(self.step_elapsed >= STEP_SECONDS && (self.moving() || self.wait_ticks > 0)) {
                     break;
                 }
-                if self.replay_stop_before == Some(self.stretches + 1) {
+                // A replay's stop before the next stretch holds back a timed step only: a contact
+                // (an army or a building the next cell holds) takes no time and begins no stretch.
+                if self.replay_stop_before == Some(self.stretches + 1) && !self.zero_time_next() {
                     break;
                 }
                 self.step_elapsed -= STEP_SECONDS;
@@ -1994,6 +2023,22 @@ impl Game {
     /// then the step's time begins ([`Game::begin_pass`]), and the rest of the step runs in
     /// [`Game::run_pause`] ([`Game::walk_tail`]). `Some(go)` when the walk ends without a
     /// step's time; `None` when the time is pending.
+    /// Whether the hero's next walk step takes no time: the chase ends his walk, or the next cell
+    /// engages an army or a garrison ([`Game::step_contact`]). Such a step begins no stretch
+    /// (`begin_walk`). A building taken on the way is not one (its step goes on in time). The
+    /// route is read as the chase would set it ([`Game::chase`]), without changing the game.
+    pub(crate) fn zero_time_next(&self) -> bool {
+        if !self.moving() {
+            return false;
+        }
+        let next = match self.chase() {
+            Chase::Ends => return true,
+            Chase::Stay | Chase::Lost => self.path.first().copied(),
+            Chase::Route { path, .. } => path.first().copied(),
+        };
+        next.is_some_and(|n| matches!(self.step_contact(n), Some(StepContact::Army(_) | StepContact::Garrison(_))))
+    }
+
     fn begin_walk(&mut self, it: &mut Vec<Event>) -> Option<bool> {
         if !frame_probe::time(Stage::Route, || self.follow_army()) {
             return Some(false);

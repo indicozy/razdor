@@ -2310,6 +2310,7 @@ impl Battle {
     /// The active fighter does `kind` to `target` (it must be the cell's action); costs one
     /// action. The case of that kind runs (48a5c4), then the Splash neighbour loop.
     pub fn act_with(&mut self, target: usize, kind: ActionKind) -> Result<Hit, ActionError> {
+        let _rec = crate::rules::recording::actions::battle_scope(|| crate::rules::recording::actions::BattleAct::ActWith { target: target as u32, kind: kind.code() });
         let id = self.active().ok_or(ActionError::NotYourTurn)?;
         if !self.options(id, target).contains(&kind) {
             return Err(ActionError::InvalidTarget);

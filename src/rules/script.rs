@@ -78,6 +78,12 @@ impl Game {
 
     /// Events that happened outside a tick or a wait (see [`Game::pending`]).
     pub fn drain_events(&mut self) -> Vec<Event> {
+        // Taking them is a change of the state (the hash holds them), so a drain of events is a
+        // recorded action; the screen's drains with nothing to take change nothing and are not.
+        if self.pending.is_empty() {
+            return Vec::new();
+        }
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::DrainEvents);
         std::mem::take(&mut self.pending)
     }
 

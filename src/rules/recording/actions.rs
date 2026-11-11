@@ -34,6 +34,9 @@ pub enum PlayerAction {
     Chord,
     /// A window over the map was closed (`Game::window_closed`): the events its change allows are checked.
     MapWindowClosed,
+    /// The events the engine produced outside a tick are taken (`Game::drain_events`, with events
+    /// waiting).
+    DrainEvents,
     ForceEvent { id: u16 },
     /// A hall's quest or rumour taken (`Game::take_hall_entry`), re-entering and entering a building.
     TakeHall { id: u16 },
@@ -95,6 +98,9 @@ pub enum BattleAct {
     MoveActive { to: Slot },
     Pass,
     Act { target: u32 },
+    /// The active unit does the action `kind` (an `ActionKind` code) to `target`
+    /// (`Battle::act_with`: the screen's card press).
+    ActWith { target: u32, kind: u8 },
     AutoStep,
     HeroAutoStep,
     HeroAutoPlay,
@@ -172,6 +178,9 @@ pub fn apply_game(g: &mut Game, a: &PlayerAction) {
         }
         PlayerAction::MapWindowClosed => {
             g.window_closed();
+        }
+        PlayerAction::DrainEvents => {
+            g.drain_events();
         }
         PlayerAction::ForceEvent { id } => {
             g.force_event(*id);
@@ -292,6 +301,11 @@ pub fn apply_battle(b: &mut Battle, a: &BattleAct) {
         BattleAct::Act { target } => {
             let _ = b.act(*target as usize);
         }
+        BattleAct::ActWith { target, kind } => {
+            if let Some(kind) = crate::rules::battle::ActionKind::from_code(*kind) {
+                let _ = b.act_with(*target as usize, kind);
+            }
+        }
         BattleAct::AutoStep => {
             b.auto_step();
         }
@@ -396,6 +410,11 @@ fn put_battle_act(out: &mut Vec<u8>, a: &BattleAct) {
             put_u(out, 4);
             put_u(out, *target as u64);
         }
+        BattleAct::ActWith { target, kind } => {
+            put_u(out, 11);
+            put_u(out, *target as u64);
+            put_u(out, *kind as u64);
+        }
         BattleAct::AutoStep => put_u(out, 5),
         BattleAct::HeroAutoStep => put_u(out, 6),
         BattleAct::HeroAutoPlay => put_u(out, 7),
@@ -414,6 +433,7 @@ fn get_battle_act(r: &mut Reader) -> Result<BattleAct, String> {
         2 => BattleAct::MoveActive { to: get_slot(r)? },
         3 => BattleAct::Pass,
         4 => BattleAct::Act { target: r.u()? as u32 },
+        11 => BattleAct::ActWith { target: r.u()? as u32, kind: r.u()? as u8 },
         5 => BattleAct::AutoStep,
         6 => BattleAct::HeroAutoStep,
         7 => BattleAct::HeroAutoPlay,
@@ -452,6 +472,7 @@ pub fn put_action(out: &mut Vec<u8>, a: &PlayerAction) {
         }
         Chord => u(out, 51),
         MapWindowClosed => u(out, 52),
+        DrainEvents => u(out, 53),
         ForceEvent { id } => {
             u(out, 9);
             put_u(out, *id as u64);
@@ -621,6 +642,7 @@ pub fn get_action(r: &mut Reader) -> Result<PlayerAction, String> {
         8 => ReleaseUnshown { shown: get_flag(r)? },
         51 => Chord,
         52 => MapWindowClosed,
+        53 => DrainEvents,
         9 => ForceEvent { id: r.u()? as u16 },
         10 => TakeHall { id: r.u()? as u16 },
         11 => Reenter,
@@ -689,7 +711,7 @@ pub fn get_action(r: &mut Reader) -> Result<PlayerAction, String> {
 const NOT_PLAYER_GAME: &[&str] = &[
     // Time and the frame loop: the engine's own, recorded as its stamps.
     "tick", "tick_shown", "tick_shown_within", "tick_within", "finish_pause", "wait", "pass_time", "begin_pass",
-    "take_music_wait", "music_rotate", "refresh_meeting_marks", "take_clashes", "drain_events",
+    "take_music_wait", "music_rotate", "refresh_meeting_marks", "take_clashes",
     
     // Setup and tools: a map or a game set up for play, the cheat console's own state, the UI snapshots.
     "set_origin", "set_map", "seed_events", "reveal_area", "reveal", "note_settings",
@@ -719,7 +741,7 @@ const NOT_PLAYER_GAME: &[&str] = &[
 const NOT_PLAYER_BATTLE: &[&str] = &[
     "begin", "ai_step", "auto_play_to_end", "set_max_ai", "set_max_guard", "set_bench", "set_xp_correction",
     "set_improved_ai", "set_building_defence", "set_bare_strengths", "auto_arrange", "set_simulation",
-    "skip", "skip_prediction", "set_max_stakes", "act_with", "max_choice_with", "max_choice",
+    "skip", "skip_prediction", "set_max_stakes", "max_choice_with", "max_choice",
     "max_step", "play_max_move", "apply_max",
     "fit_to_formation", "set_unit_battle_disabled", "set_strength_defence",
 ];
