@@ -318,7 +318,14 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   foot row minus the group's, so the flat look at pitch 90 is the picture); a turn slides a layer sideways by
   `LAYER_PARALLAX` (0.08) times `d·sin yaw`, at most `LAYER_PARALLAX_MAX` (4) sprite pixels. `layered_cards` applies
   it to the verts and the foot together, for the drawn mesh, the shadows and the windows; a flag moves with its card.
-  Tests: `layer_tests` (flat look, the ground line of back and front layers, the bounded slide).
+  **In a bent view** (first person) the vertical move would float the layers off the rolled sheet, so there
+  `draw_layers_on_sheet` stands each layer through `standing_at` at its own ground foot (`sheet_layers`: `card_foot`,
+  unslid), so `standing_model` puts it at `Bend::point` of that ground point; only the sideways slide stays. The
+  fade (`first_person_fade`) and the horizon are the building's, decided on its foot, so its layers fade and hide
+  together; a layer whose own point is past a down bend's horizon is skipped. The shadows, drawn on the flat ground
+  picture, use the cards as they are there.
+  Tests: `layer_tests` (flat look, the ground line of back and front layers, the bounded slide),
+  `tilt_tests::a_layer_stands_on_the_bent_sheet_at_its_own_ground_foot`.
  A bridge, a picture with no
   entry, and the flat view keep one billboard as before. The hover's gold outline goes under each card.
   The bundled `one_card` list (`data/cards/objects.json`) names the base buildings left with no entry (one region):
