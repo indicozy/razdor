@@ -50,6 +50,44 @@ const MARK_REACH: f32 = 9.0;
 const CLUSTER_GAP: f32 = 6.0;
 /// A battle tick's width in pixels (× the unit): a thin line, not a cross.
 const TICK_W: f32 = 3.0;
+/// A phone's texts of this screen, in dp (the owner's phone rule: ≥ 12 sp, the other phone screens at
+/// 14 sp; the mobile-ui check measures them. A size of 15 dp is about 14 sp).
+const PHONE_TEXT_DP: f32 = 15.0;
+/// A phone's button label, in dp (the strip's and the panel's buttons).
+const PHONE_BUTTON_TEXT: f32 = 14.0;
+/// A phone's speed tab, in dp (a target ≥ 40 dp; the owner's 44–48 dp).
+const PHONE_TAB_DP: f32 = 44.0;
+/// A phone's speed tab label, in dp (its size as drawn; see `phone_tab`).
+const PHONE_TAB_TEXT: f32 = 20.0;
+/// The edge of an unpressed tab.
+const DIM_TAB: Color = Color::new(0.45, 0.4, 0.3, 1.0);
+
+/// A phone's speed tab: the toggle look (pressed while `on`), its label at the phone's size (the
+/// label of the shared toggle is fixed by its height and comes out below the phone's 12 sp). True
+/// when clicked this frame.
+fn phone_tab(r: Rect, label: &str, on: bool, dp: f32) -> bool {
+    let (_, down, pressed) = button_state(r, true);
+    let bg = if on {
+        Color::new(0.55, 0.42, 0.18, 1.0)
+    } else if down {
+        Color::new(0.36, 0.28, 0.18, 1.0)
+    } else {
+        Color::new(0.22, 0.18, 0.12, 1.0)
+    };
+    draw_rectangle(r.x, r.y, r.w, r.h, bg);
+    draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.0, if on { GOLD } else { DIM_TAB });
+    let size = PHONE_TAB_TEXT * dp;
+    super::dt_font::legacy_metrics_if(true, || chrome::shadow_centered(label, r.x + r.w / 2.0, r.y + r.h / 2.0 + size * 0.35, size, CREAM));
+    if pressed {
+        super::audio::cue(super::audio::Cue::Button);
+    }
+    pressed
+}
+
+/// A text of this screen at `desktop` units of `unit` on the desktop, `PHONE_TEXT_DP` on a phone.
+fn text_size(desktop: f32, unit: f32) -> f32 {
+    if display::dp_px().is_some() { PHONE_TEXT_DP * unit } else { desktop * unit }
+}
 
 /// The battle marks grouped into clusters: `xs` are (mark index, x), and a mark closer than `gap` to
 /// the one before it (in x order) joins its cluster. Each cluster lists its mark indices.
@@ -145,20 +183,22 @@ pub fn strip_layout(sw: f32, sh: f32, unit: f32, portrait: bool) -> Strip {
     // A screen narrower than 1000 dp (a phone, upright or sideways) stacks the strip: a one-row
     // timeline would be too short to read.
     if portrait || sw < 1000.0 * u {
-        let h = m + bar_h + gap + btn + gap + btn + m;
+        // The rows are 8 dp apart (a 44 dp target next to another is crowded under 8 dp).
+        let row_gap = 8.0 * u;
+        let h = m + bar_h + row_gap + btn + row_gap + btn + m;
         let top = sh - h;
         let inner = sw - 2.0 * m;
         let bar = Rect::new(m, top + m, inner, bar_h);
-        let row_b = top + m + bar_h + gap;
+        let row_b = top + m + bar_h + row_gap;
         let play = Rect::new(m, row_b, play_w, btn);
         let speed_w = (inner - play_w - 5.0 * gap) / 5.0;
         let mut speeds = [Rect::new(0.0, 0.0, 0.0, 0.0); 5];
         for (i, s) in speeds.iter_mut().enumerate() {
             *s = Rect::new(m + play_w + gap + i as f32 * (speed_w + gap), row_b, speed_w, btn);
         }
-        let row_c = row_b + btn + gap;
-        let follow_w = 150.0 * u;
-        let exit_w = 110.0 * u;
+        let row_c = row_b + btn + row_gap;
+        let follow_w = 180.0 * u;
+        let exit_w = 100.0 * u;
         let day_w = inner - follow_w - exit_w - 2.0 * gap;
         let day = Rect::new(m, row_c, day_w, btn);
         let follow = Rect::new(m + day_w + gap, row_c, follow_w, btn);
@@ -491,8 +531,15 @@ impl WatchView {
         } else {
             clear_background(Color::from_rgba(10, 12, 10, 255));
         }
-        let mut exit = if self.mode == Mode::Battle { self.battle_strip(&strip) } else { self.strip(&strip, unit) };
-        self.draw_toasts(unit, sw);
+        // On a phone the strip's and the messages' texts are drawn at their own sizes (the native
+        // metrics of the original's font would fix them at its cap, too small for a phone's rule).
+        let legacy = dp.is_some();
+        let mut exit = if self.mode == Mode::Battle {
+            self.battle_strip(&strip)
+        } else {
+            super::dt_font::legacy_metrics_if(legacy, || self.strip(&strip, unit))
+        };
+        super::dt_font::legacy_metrics_if(legacy, || self.draw_toasts(unit, sw));
         if self.mode == Mode::Drifted {
             exit = exit.or(self.drift_window(sw, sh, unit));
         }
@@ -517,13 +564,13 @@ impl WatchView {
     /// battle choice over it), the follow button and «Выход».
     fn strip(&mut self, s: &Strip, unit: f32) -> Option<Exit> {
         surface_strip(s.panel);
-        if button(s.play.x, s.play.y, s.play.w, s.play.h, if self.playing { tr("Pause") } else { tr("Play") }, true) || key(KeyCode::Space) {
+        if pressed_button(s.play, if self.playing { tr("Pause") } else { tr("Play") }, false) || key(KeyCode::Space) {
             self.playing = !self.playing;
         }
         self.speed_tabs(s);
         let (first, last) = self.days();
         let day = self.game().map_or(first, |g| g.clock.day_index());
-        chrome::shadow_centered(&trf!("Day {n}", n = day.saturating_sub(first) + 1), s.day.x + s.day.w / 2.0, s.day.y + s.day.h * 0.65, 20.0 * unit, CREAM);
+        chrome::shadow_centered(&trf!("Day {n}", n = day.saturating_sub(first) + 1), s.day.x + s.day.w / 2.0, s.day.y + s.day.h * 0.65, text_size(20.0, unit), CREAM);
         if pressed_button(s.follow, tr("Follow the hero"), self.follow) {
             self.follow = !self.follow;
         }
@@ -535,7 +582,7 @@ impl WatchView {
         if matches!(self.mode, Mode::Choosing { .. }) {
             self.choice_panel(s.panel, unit);
         }
-        button(s.exit.x, s.exit.y, s.exit.w, s.exit.h, tr("Exit"), true).then_some(Exit::Close)
+        pressed_button(s.exit, tr("Exit"), false).then_some(Exit::Close)
     }
 
     /// The speeds as the game's tabs: the one in use is the pressed tab.
@@ -544,9 +591,24 @@ impl WatchView {
         let last = s.speeds[4];
         let labels: Vec<String> = SPEEDS.iter().map(|n| format!("{n}×")).collect();
         let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
-        let th = 26.0 * super::display::button_grow();
         let mut selected = self.speed;
-        super::widgets::tabs(first.x, first.y + (first.h - th) / 2.0, last.x + last.w - first.x, &labels, &mut selected);
+        match display::dp_px() {
+            Some(dp) => {
+                let th = PHONE_TAB_DP * dp;
+                let w = last.x + last.w - first.x;
+                let tw = w / labels.len() as f32;
+                let y = first.y + (first.h - th) / 2.0;
+                for (i, l) in labels.iter().enumerate() {
+                    if phone_tab(Rect::new(first.x + i as f32 * tw, y, tw - 2.0, th), l, selected == i, dp) {
+                        selected = i;
+                    }
+                }
+            }
+            None => {
+                let th = 26.0 * super::display::button_grow();
+                super::widgets::tabs(first.x, first.y + (first.h - th) / 2.0, last.x + last.w - first.x, &labels, &mut selected);
+            }
+        }
         self.set_speed(selected);
     }
 
@@ -556,14 +618,17 @@ impl WatchView {
         let w = (460.0 * unit).min(strip.w - 16.0 * unit);
         let h = 100.0 * unit;
         let r = Rect::new((strip.w - w) / 2.0, strip.y - h - 8.0 * unit, w, h);
-        let (inner, _) = chrome::window(r, tr("Battle"), Skin::Marble, false);
+        // A phone has no title: the window chrome draws its title at a fixed size below the phone's 12 sp, and the
+        // buttons say what the panel is.
+        let title = if display::dp_px().is_some() { "" } else { tr("Battle") };
+        let (inner, _) = chrome::window(r, title, Skin::Marble, false);
         let gap = 12.0 * unit;
         let bw = (inner.w - 3.0 * gap) / 2.0;
         let by = inner.y + inner.h - 52.0 * unit;
-        if button(inner.x + gap, by, bw, 40.0 * unit, tr("Watch the battle"), true) {
+        if pressed_button(Rect::new(inner.x + gap, by, bw, 40.0 * unit), tr("Watch the battle"), false) {
             self.choose(Choice::Watch);
         }
-        if button(inner.x + 2.0 * gap + bw, by, bw, 40.0 * unit, tr("Skip the battle"), true) {
+        if pressed_button(Rect::new(inner.x + 2.0 * gap + bw, by, bw, 40.0 * unit), tr("Skip the battle"), false) {
             self.choose(Choice::Skip);
         }
     }
@@ -589,7 +654,7 @@ impl WatchView {
             let x = centre(c);
             draw_rectangle(x - tick / 2.0, bar.y + inset, tick, bar.h - 2.0 * inset, RED_TEXT);
             if c.len() > 1 {
-                chrome::shadow_centered(&format!("×{}", c.len()), x + tick, bar.y + bar.h * 0.7, 13.0 * unit, RED_TEXT);
+                chrome::shadow_centered(&format!("×{}", c.len()), x + tick, bar.y + bar.h * 0.7, text_size(13.0, unit), RED_TEXT);
             }
         }
         // The other marks on top, as icons (the Day marks are not drawn).
@@ -636,11 +701,11 @@ impl WatchView {
     /// The battle's strip: play or pause, the speed and «Пропустить».
     fn battle_strip(&mut self, s: &Strip) -> Option<Exit> {
         surface_strip(s.panel);
-        if button(s.play.x, s.play.y, s.play.w, s.play.h, if self.battle_paused { tr("Play") } else { tr("Pause") }, true) || key(KeyCode::Space) {
+        if pressed_button(s.play, if self.battle_paused { tr("Play") } else { tr("Pause") }, false) || key(KeyCode::Space) {
             self.battle_paused = !self.battle_paused;
         }
         self.speed_tabs(s);
-        if button(s.exit.x, s.exit.y, s.exit.w, s.exit.h, tr("Skip"), true) {
+        if pressed_button(s.exit, tr("Skip"), false) {
             self.skip_battle();
         }
         None
@@ -650,7 +715,7 @@ impl WatchView {
     fn draw_toasts(&self, unit: f32, sw: f32) {
         let mut y = 8.0 * unit;
         for t in &self.toasts {
-            let size = 16.0 * unit;
+            let size = text_size(16.0, unit);
             let w = (measure(&t.text, size).width + 24.0 * unit).min(sw - 16.0 * unit);
             let h = size * 1.8;
             let x = (sw - w) / 2.0;
@@ -685,7 +750,11 @@ impl WatchView {
 /// on); true when clicked this frame.
 fn pressed_button(r: Rect, label: &str, on: bool) -> bool {
     let (_, down, pressed) = button_state(r, true);
-    super::chrome::marble_button(r, label, true, on || down);
+    match display::dp_px() {
+        // A phone's label at its own size (the marble's label is fixed by the button's height).
+        Some(dp) => super::chrome::marble_button_sized(r, label, true, on || down, PHONE_BUTTON_TEXT * dp),
+        None => super::chrome::marble_button(r, label, true, on || down),
+    }
     if pressed {
         super::audio::cue(super::audio::Cue::Button);
     }
