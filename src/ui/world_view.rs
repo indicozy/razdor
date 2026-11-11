@@ -122,6 +122,12 @@ fn extend_edge() -> bool {
     EXTEND_EDGE.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// `RAZDOR_MAP_FIT=1`: the map's zoom is the whole map's floor, as a developer snapshot's (read once).
+fn map_fit_env() -> bool {
+    static ENV: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENV.get_or_init(|| std::env::var("RAZDOR_MAP_FIT").is_ok_and(|v| v.trim() == "1"))
+}
+
 /// Takes the settings' map zoom and lock in (every frame).
 pub fn set_zoom_prefs(home: f32, locked: bool) {
     let home = if home.is_finite() { home.clamp(ZOOM_RANGE.0, ZOOM_RANGE.1) } else { 1.0 };
@@ -5785,6 +5791,11 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
         }
     }
     view.zoom = zoom_at(home, view.zoom_steps, locked, lo);
+    // `RAZDOR_MAP_FIT=1` (a snapshot's): the wheel's lowest zoom, the whole map in the view (the
+    // zoom the settings' range cannot reach).
+    if map_fit_env() {
+        view.zoom = lo;
+    }
     // PageUp and PageDown tilt the 2.5D view, 5° a press; Q and E turn it 45° (the flat view
     // ignores them). The shown yaw eases toward its target every frame.
     // The eyes view turns with the hero's walk first, so the easing carries it.
