@@ -2619,7 +2619,7 @@ pub(super) fn draw_wrapped(tex: &Texture2D, dest: Rect, src: Vec2, src_size: Vec
 
 /// The terrain of the map as the blended layer (`terrain::TerrainLayer`): the quad over the drawn
 /// ground, in `mode` (see [`terrain::Mode`]). `cam` is the 2D space ([`in_view`]).
-fn terrain_quad(game: &Game, layer: &terrain::TerrainLayer, cam: &Camera, mode: terrain::Mode, flow: &[(f32, f32)], relief: Option<daylight::Relief>) {
+fn terrain_quad(game: &Game, layer: &terrain::TerrainLayer, cam: &Camera, mode: terrain::Mode, flow: &[(f32, f32)]) {
     let map = &game.world.map;
     // The map area in view, in world units (cells span ±½ around their centres).
     let rh = cam.grid.row_height();
@@ -2635,11 +2635,8 @@ fn terrain_quad(game: &Game, layer: &terrain::TerrainLayer, cam: &Camera, mode: 
             frame_probe::terrain(b.x - a.x, b.y - a.y);
         }
         let view = vec4(tl.x, tl.y / rh, br.x, br.y / rh);
-        // The point lights of the ground (`lights`), in this pass's pixels: none with the light off.
-        let points = relief.and_then(|_| lights::with_frame(|f| f.map(|f| lights::uniforms(f, |w| cam.to_screen(w.into()), cam.scale))))
-            .filter(|u| u.info.z > 0.0);
         // The edge's mist is fog: the trailer's no-fog switch leaves the ground going on past the edge.
-        layer.draw(map.surface_codes(), (map.w as u32, map.h as u32), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(PX, PX * rh), Some((crate::ui::clock::now() * 1000.0) as i64), extend && !trailer_nofog(), mode, flow, relief, points.as_ref());
+        layer.draw(map.surface_codes(), (map.w as u32, map.h as u32), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(PX, PX * rh), Some((crate::ui::clock::now() * 1000.0) as i64), extend && !trailer_nofog(), mode, flow);
     }
 }
 
@@ -2648,7 +2645,7 @@ fn terrain_quad(game: &Game, layer: &terrain::TerrainLayer, cam: &Camera, mode: 
 /// backdrop, and not inside a picture being filled: the ground is drawn once into the cache when
 /// its key ([`ground_key`]) changes; then the cached ground is copied and the water and the
 /// border's fog drawn over it.
-fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool, relief: Option<daylight::Relief>) {
+fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool) {
     let Some(layer) = art.and_then(|a| a.terrain_layer()).filter(|_| cam.grid == Grid::Square8) else {
         return in_view(cam, |c| ground(c, || draw_terrain(game, art, c)));
     };
@@ -2659,16 +2656,16 @@ fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool, reli
         // A bent view draws its ground in `draw_world`'s picture (`ground_in_bent`), never here;
         // the cache's fill would nest inside that picture, so a bent view is not cached.
         let plain = cam.tilt.is_none_or(|t| t.cam.bend.is_none());
-        let cached = (waits && layer.cache_on() && super::render_cache::target().is_none() && plain).then(|| layer.ground_target(ground_key(game, cam, relief))).flatten();
+        let cached = (waits && layer.cache_on() && super::render_cache::target().is_none() && plain).then(|| layer.ground_target(ground_key(game, cam))).flatten();
         match cached {
             Some((rt, fill)) => {
                 if fill {
-                    super::render_cache::fill(&rt, || in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Ground, flow, relief))));
+                    super::render_cache::fill(&rt, || in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Ground, flow))));
                 }
-                in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Cached, flow, relief)));
-                in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow, relief)));
+                in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Cached, flow)));
+                in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow)));
             }
-            None => in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Full, flow, relief))),
+            None => in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Full, flow))),
         }
     });
 }
@@ -2710,7 +2707,7 @@ fn map_flow(game: &Game) -> Option<std::rc::Rc<Vec<(f32, f32)>>> {
 /// The key of the cached ground: everything the ground pass reads (the screen, the camera and
 /// its 2.5D tilt, the map's size and surface codes, and the edge's mode). The clock and the water
 /// are not in it: they are drawn over the cache each frame.
-fn ground_key(game: &Game, cam: &Camera, relief: Option<daylight::Relief>) -> u64 {
+fn ground_key(game: &Game, cam: &Camera) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     let f = |v: f32| v.to_bits();
@@ -2724,23 +2721,6 @@ fn ground_key(game: &Game, cam: &Camera, relief: Option<daylight::Relief>) -> u6
     }
     let map = &game.world.map;
     (map.w, map.h, cam.grid.row_height().to_bits(), extend_edge(), mist::on(), map.surface_codes()).hash(&mut h);
-    // The relief («Освещение») is in the ground: it moves with the hour, so the key takes it to
-    // 1/256 (a cycle's light refills the cache a few times a game hour, not every frame).
-    if let Some(r) = relief {
-        let q = |v: f32| (v * 256.0).round() as i32;
-        [q(r.light[0]), q(r.light[1]), q(r.light[2]), q(r.strength), q(r.cavity)].hash(&mut h);
-        // The point lights light the ground's relief too: their places and reaches (to 1/16 cell) and the
-        // night's share take their part in the key. The torches' flicker is not in it (the relief does not read it).
-        lights::with_frame(|f| {
-            if let Some(f) = f {
-                for l in f.lit() {
-                    let q16 = |v: f32| (v * 16.0).round() as i32;
-                    [q16(l.at.x), q16(l.at.y), q16(l.radius), q(l.strength)].hash(&mut h);
-                }
-                f.quality.relief().hash(&mut h);
-            }
-        });
-    }
     h.finish()
 }
 
@@ -3972,7 +3952,7 @@ fn draw_sky(cam: &Camera) {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<MapHoverLook>, waits: bool, veil: Veil, relief: Option<daylight::Relief>) {
+fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<MapHoverLook>, waits: bool, veil: Veil, lit: Option<f32>) {
     // The depth model's workers (2.5D, buildings with no cut): they run beside the frame.
     if let Some(art) = assets.dt.as_ref() {
         art.depth_tick(cam.tilt.is_some());
@@ -3982,56 +3962,41 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
         gpu_wait(Stage::GpuSky);
     }
     stamp_idle(game, clock_ms());
-    // The relief's two frames, decided once for the ground and for the sprites (`lit_axes`).
-    let (ground_relief, sprite_relief) = lit_axes(relief, cam.tilt.map_or(0.0, |t| t.cam.yaw_deg));
     // A bent view (the trailer's, the first-person one) draws its ground and the ground's overlays
     // into one picture, laid on one sheet, and the sprites stand on it: one `in_view` for both.
     if cam.tilt.is_some_and(|t| t.cam.bend.is_some()) {
         let art = assets.dt.as_ref();
         return in_view(cam, |c| {
-            ground_in_bent(game, art, c, ground_relief);
-            draw_world_in(game, assets, c, preview, spell, hover, waits, veil, sprite_relief);
+            ground_in_bent(game, art, c);
+            draw_world_in(game, assets, c, preview, spell, hover, waits, veil, lit);
         });
     }
     // The ground first: it sets its own camera (`in_view`), so the cache can fill through it.
-    frame_probe::time(Stage::Terrain, || draw_ground(game, assets.dt.as_ref(), cam, waits, ground_relief));
+    frame_probe::time(Stage::Terrain, || draw_ground(game, assets.dt.as_ref(), cam, waits));
     if waits {
         gpu_wait(Stage::GpuTerrain);
     }
-    in_view(cam, |c| draw_world_in(game, assets, c, preview, spell, hover, waits, veil, sprite_relief));
+    in_view(cam, |c| draw_world_in(game, assets, c, preview, spell, hover, waits, veil, lit));
     if living_on(cam) {
         draw_birds(game, cam);
-    }
-}
-
-/// The relief of a pass in its two frames, decided here for the ground and for the sprites alike. The
-/// painted shadows' light is fixed to the screen (`daylight::relief_at`): the ground's light turns back
-/// into the map's axes by the camera's yaw (`Relief::turned`), and the sprites keep the screen's. The
-/// sun's light is fixed in the world (`daylight::sun_relief`): the ground keeps the map's axes, and the
-/// sprites get the screen's by the inverse turn. Flat (yaw 0) both are the same frame.
-fn lit_axes(relief: Option<daylight::Relief>, yaw_deg: f32) -> (Option<daylight::Relief>, Option<daylight::Relief>) {
-    match relief {
-        None => (None, None),
-        Some(r) if daylight::sun_shadows_on() => (Some(r), Some(r.turned(-yaw_deg))),
-        Some(r) => (Some(r.turned(yaw_deg)), Some(r)),
     }
 }
 
 /// The ground of a bent view ([`draw_world`]), drawn in its picture's 2D space `c` (the ground's
 /// pass of [`bent_view`]; the sprites' pass draws none of it): the terrain, as [`draw_ground`] draws
 /// it without the cache, which a bent view does not use.
-fn ground_in_bent(game: &Game, art: Option<&DtArt>, c: &Camera, relief: Option<daylight::Relief>) {
+fn ground_in_bent(game: &Game, art: Option<&DtArt>, c: &Camera) {
     // «Живая вода»: the rivers' flow of the map, while the water is alive (else still).
     let flow = map_flow(game);
     let flow: &[(f32, f32)] = flow.as_deref().map_or(&[], |f| f.as_slice());
     match art.and_then(|a| a.terrain_layer()).filter(|_| c.grid == Grid::Square8) {
-        Some(layer) => ground(c, || terrain_quad(game, layer, c, terrain::Mode::Full, flow, relief)),
+        Some(layer) => ground(c, || terrain_quad(game, layer, c, terrain::Mode::Full, flow)),
         None => ground(c, || draw_terrain(game, art, c)),
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<MapHoverLook>, waits: bool, veil: Veil, relief: Option<daylight::Relief>) {
+fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<MapHoverLook>, waits: bool, veil: Veil, lit: Option<f32>) {
     let art = assets.dt.as_ref();
     let map = &game.world.map;
     let ((c0, c1), (r0, r1)) = cam.visible(map);
@@ -4075,20 +4040,20 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     let sun = daylight::frame_casts();
     // The point lights in view (`lights`, the nearest by the quality), in this pass's pixels: their silhouettes
     // lie on the ground with the sun's. None with the light off.
-    let lit: Vec<(lights::Light, Vec2, f32)> = if relief.is_some() && lights::with_frame(|f| f.map_or(0.0, |f| f.night)) > 0.0 {
+    let lit_lights: Vec<(lights::Light, Vec2, f32)> = if lit.is_some() && lights::with_frame(|f| f.map_or(0.0, |f| f.night)) > 0.0 {
         lights::with_frame(|f| f.map_or(Vec::new(), |f| f.lit().iter().map(|l| (*l, cam.to_screen(l.at.into()), l.radius * cam.scale)).collect()))
     } else {
         Vec::new()
     };
-    if sun.is_some() || !lit.is_empty() {
+    if sun.is_some() || !lit_lights.is_empty() {
         let objects: Vec<&Decoration> = map.objects_in_rows(r0 - up, r1 + below).iter().filter(|o| seen(o)).collect();
         let locations: Vec<(usize, &Location)> = game.world.locations.iter().enumerate().filter(|(_, l)| location_seen(l) && !l.kind.is_bridge()).collect();
-        ground(cam, || draw_shadows(game, art, cam, sun, &lit, &objects, &locations));
+        ground(cam, || draw_shadows(game, art, cam, sun, &lit_lights, &objects, &locations));
     }
     // The buildings' light lies on the ground around them, not on them: the pools are drawn here, in the
     // ground pass under every standing sprite, so a building's own picture covers its pool (the owner's
     // report: no blob on a building). Torches are drawn after the world (`draw_daylight`).
-    if relief.is_some() && lights::with_frame(|f| f.map_or(0.0, |f| f.night)) > 0.0 {
+    if lit.is_some() && lights::with_frame(|f| f.map_or(0.0, |f| f.night)) > 0.0 {
         ground(cam, || draw_building_pools(game, cam));
     }
     // The original (0x4c8864) draws the hills of classes 1-3 in a pass of their own before
@@ -4152,7 +4117,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     }
     // 2.5D: a card building's painted shadow lies on the ground too, under the fog below (not with
     // the sun's shadows: `draw_sun_shadows` replaces it).
-    let shadow_k = relief.map_or(1.0, |r| r.shadow_k);
+    let shadow_k = lit.unwrap_or(1.0);
     if tilted && sun.is_none() {
         ground(cam, || {
             for l in game.world.locations.iter().filter(|l| location_seen(l)) {
@@ -4238,13 +4203,9 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     }
     // Stable: figures sharing a cell keep the order they were pushed in.
     items.sort_by_key(|a| a.0);
-    // One sharp session for the pass: its art shares the material switch (see `sharp::session`).
-    // The point lights' relief, pool-free: the lit material's uniforms for this pass (`lights::uniforms`).
-    // The point lights only at night: by day the pass draws as it did before them (`sharp::session_lit`).
-    let points = relief.and_then(|_| lights::with_frame(|f| f.map(|f| lights::uniforms(f, |w| cam.to_screen(w.into()), cam.scale)))).filter(|u| u.info.z > 0.0);
-    // The building mask («Качество света»' openings) is built on the first lit frame, never with the light off.
-    let mask = relief.and(art).and_then(|a| a.building_mask());
-    super::sharp::session_lit(relief, points.as_ref(), mask.as_ref(), || {
+    // One sharp session for the pass: its art shares the material switch (see `sharp::session`). With the
+    // light on, the lit material scales the painted shadows by the frame's factor (`sharp::session_lit`).
+    super::sharp::session_lit(lit, || {
         for d in items.iter().map(|(_, d)| d) {
             match d {
                 Drawable::Object(o) => standing(cam, object_foot(o, cam), object_foot(o, cam), shade_of(object_foot(o, cam)), object_picture(o, art, cam), || draw_object(o, art, cam)),
@@ -5746,13 +5707,13 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
     let shows: Vec<&Showing> = view.opening.iter().chain(&view.shows).collect();
     let flat = cam.tilt.is_none();
     let hover = hover.filter(|_| !trailer_clean());
-    // The light is read once, before the world (its relief lights the sprites and the ground).
+    // The light is read once, before the world (its painted shadows' factor is read there).
     let light = frame_light_of(game);
-    let relief = light.and_then(|_| daylight::frame_relief());
+    let lit = light.and_then(|_| daylight::frame_shadow_k());
     lights::set_frame(light.map(|l| lights::Frame::new(point_lights(game, assets.dt.as_ref(), &cam, l.glow), Vec2::from(cam.centre()), l.glow, lights::quality())));
     frame_probe::time(Stage::World, || {
         map_scale::draw(map_render_scale(), rgb(10, 12, 10), || {
-            draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()), show.as_ref(), hover, true, Veil { shows: &shows, now: show_now }, relief);
+            draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()), show.as_ref(), hover, true, Veil { shows: &shows, now: show_now }, lit);
             // Razdor's «Освещение» (off by default): the light over the world, before the flat fog, so the
             // fog's black stays black. With the mist on («Туман вместо черноты») the flat fog is a colour,
             // so the light goes over it too (the mist takes the night's tint). Off, the order is as before.
@@ -5960,7 +5921,7 @@ fn glow_texture() -> Texture2D {
 }
 
 /// The frame's light (`daylight::frame_light`) from the game's clock, once per map frame: before the
-/// world (its relief is read there, `daylight::frame_relief`) and the tint after it.
+/// world (its painted shadows' factor is read there, `daylight::frame_shadow_k`) and the tint after it.
 fn frame_light_of(game: &Game) -> Option<daylight::Light> {
     let hour = (game.clock.total_minutes() % razdor::rules::clock::MINUTES_PER_DAY as f64 / 60.0) as f32;
     let now = crate::ui::clock::now();
@@ -7209,23 +7170,6 @@ mod tests {
 #[cfg(test)]
 mod card_tests {
     use super::*;
-
-    #[test]
-    fn the_painted_light_turns_the_ground_and_the_sun_light_turns_the_sprites() {
-        let r = daylight::relief_at(12.0);
-        let (g, s) = lit_axes(Some(r), 30.0);
-        assert_eq!(g, Some(r.turned(30.0)), "painted: the ground turns back into the map's axes");
-        assert_eq!(s, Some(r), "painted: the sprites keep the screen's light");
-        assert_eq!(lit_axes(None, 30.0), (None, None), "lighting off: no relief at all");
-        daylight::set_prefs(daylight::LightMode::Fixed, 24, 10, daylight::ShadowMode::Sun, lights::Quality::High);
-        daylight::frame_light(12.0, 0.0, 0.016);
-        let sun = daylight::sun_relief(10.0);
-        let (g, s) = lit_axes(Some(sun), 30.0);
-        assert_eq!(g, Some(sun), "sun: the ground keeps the map's axes");
-        let (s, g) = (s.expect("sprites lit"), g.expect("ground lit"));
-        assert!((s.turned(30.0).light[0] - g.light[0]).abs() < 1e-5 && (s.turned(30.0).light[1] - g.light[1]).abs() < 1e-5, "the sprites' light turned by the yaw is the ground's");
-        daylight::set_prefs(daylight::LightMode::Off, 24, 18, daylight::ShadowMode::Painted, lights::Quality::High);
-    }
 
     fn close(a: Vec2, b: Vec2) -> bool {
         (a - b).abs().max_element() < 1e-4

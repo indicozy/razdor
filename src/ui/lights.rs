@@ -5,8 +5,7 @@
 //! figure in view, a torch in the hand of the hero and of every army (about 0.4 of the figure's height
 //! from the head, forward along its facing, 60° above horizontal). Each light has a warm pool on the
 //! ground and the sprites (`world_view::draw_daylight`). The nearest few to the view's centre (by the
-//! quality) also light the relief of the sprites and the ground, lay their silhouettes on the ground
-//! (`world_view::draw_shadows`), and make a building's openings glow (`sharp`'s lit material).
+//! quality) also lay their silhouettes on the ground (`world_view::draw_shadows`).
 //!
 //! Positions are in world units (cells, `Camera::to_screen` divided by the scale) until a frame draws
 //! them: the 2D space of the drawing (`Camera::tilted_space`) is the world times the scale, so the
@@ -17,7 +16,7 @@ use razdor::local;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 
-/// «Качество света»: how many lights cast shadows, light the relief and make the openings glow.
+/// «Качество света»: how many lights cast shadows.
 /// High on the desktop, Medium on a phone (`default_quality`); Low keeps the warm pools only.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Quality {
@@ -37,20 +36,11 @@ impl Quality {
         }
     }
 
-    /// The lights that cast shadows, light the relief and make the openings glow: the nearest this many.
+    /// The lights that cast shadows: the nearest this many.
     pub fn lit(self) -> usize {
         match self {
             Quality::High => SLOTS,
             Quality::Medium => 4,
-            Quality::Low => 0,
-        }
-    }
-
-    /// The nearest lights that light the relief (a subset of `lit`): 2 on Medium.
-    pub fn relief(self) -> usize {
-        match self {
-            Quality::High => SLOTS,
-            Quality::Medium => 2,
             Quality::Low => 0,
         }
     }
@@ -75,7 +65,7 @@ pub fn default_quality(phone: bool) -> Quality {
     }
 }
 
-/// The lights a shader's arrays hold (`sharp`'s and `terrain`'s `LightA`).
+/// The most lights a frame keeps (High's count).
 pub const SLOTS: usize = 8;
 
 /// The warm colour of a light (its pool, its emission).
@@ -143,7 +133,7 @@ impl Frame {
         Frame { lights, night, quality }
     }
 
-    /// The lights that cast shadows, light the relief and glow (the nearest `quality.lit()`).
+    /// The lights that cast shadows (the nearest `quality.lit()`).
     pub fn lit(&self) -> &[Light] {
         &self.lights[..self.lights.len().min(self.quality.lit())]
     }
@@ -171,27 +161,6 @@ pub fn cast(at: Vec2, radius: f32, foot: Vec2, strength: f32) -> Option<Cast> {
     }
     let f = falloff(d, radius);
     Some(Cast { dir: (foot - at) / d, len: 0.4 + 1.0 * (1.0 - d / radius), alpha: CAST_ALPHA * f * strength })
-}
-
-/// The uniforms of the lit shaders for one pass: each light as (x, y, radius, strength) in the pass's 2D
-/// pixels, and the counts/factors (`info`: lights, relief lights, night; the fourth is unused).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Uniforms {
-    pub lights: [Vec4; SLOTS],
-    pub info: Vec4,
-}
-
-/// The shader uniforms for `frame`'s lit lights, the pass's 2D point of each light (`to_px`) and the scale
-/// of its pixels per cell.
-pub fn uniforms(frame: &Frame, to_px: impl Fn(Vec2) -> Vec2, scale: f32) -> Uniforms {
-    let mut lights = [Vec4::ZERO; SLOTS];
-    let lit = frame.lit();
-    for (slot, l) in lights.iter_mut().zip(lit) {
-        let p = to_px(l.at);
-        *slot = vec4(p.x, p.y, l.radius * scale, l.strength);
-    }
-    let relief = lit.len().min(frame.quality.relief());
-    Uniforms { lights, info: vec4(lit.len() as f32, relief as f32, frame.night, 0.0) }
 }
 
 local! {
@@ -224,10 +193,8 @@ mod tests {
     }
 
     #[test]
-    fn each_level_keeps_its_lights_and_the_relief_subset() {
-        assert_eq!((Quality::High.lit(), Quality::High.relief()), (8, 8));
-        assert_eq!((Quality::Medium.lit(), Quality::Medium.relief()), (4, 2));
-        assert_eq!((Quality::Low.lit(), Quality::Low.relief()), (0, 0));
+    fn each_level_keeps_its_lights() {
+        assert_eq!((Quality::High.lit(), Quality::Medium.lit(), Quality::Low.lit()), (8, 4, 0));
         assert_eq!(default_quality(false), Quality::High);
         assert_eq!(default_quality(true), Quality::Medium);
         assert_eq!(Quality::High.next(), Quality::Medium);
@@ -296,16 +263,5 @@ mod tests {
         assert!(cast(Vec2::ZERO, 2.0, Vec2::ZERO, 1.0).is_none(), "nothing at the light's own point");
         let dim = cast(Vec2::ZERO, 2.0, vec2(0.5, 0.0), 0.5).expect("inside");
         assert!((dim.alpha - near.alpha * 0.5).abs() < 1e-6, "the night's strength scales it");
-    }
-
-    #[test]
-    fn the_uniforms_hold_the_lit_lights_in_pixels_and_count_the_relief_ones() {
-        let lights: Vec<Light> = (0..10).map(|i| light(vec2(i as f32, 0.0), 0.5 + 0.01 * i as f32, Owner::Torch)).collect();
-        let f = Frame::new(lights, Vec2::ZERO, 0.8, Quality::Medium);
-        let u = uniforms(&f, |p| p * 32.0, 32.0);
-        assert_eq!(u.info, vec4(4.0, 2.0, 0.8, 0.0));
-        let first = u.lights[0];
-        assert!((first.x - 0.0).abs() < 1e-5 && (first.z - 2.0 * 32.0).abs() < 1e-3, "{first:?}");
-        assert_eq!(u.lights[4], Vec4::ZERO, "the slots past the lit lights stay empty");
     }
 }

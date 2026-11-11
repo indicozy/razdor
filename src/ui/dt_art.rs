@@ -161,8 +161,8 @@ pub struct DtArt {
     /// The shadow atlas of «От солнца» (`shadow`): the map atlas's layout, each sprite's blurred
     /// silhouette in its alpha. Made on the first frame that casts sun shadows.
     shadows: OnceCell<Option<(Texture2D, Texture2D)>>,
-    /// The building mask of the map atlas (`building_mask`), built on the first lit frame.
-    building_mask: OnceCell<Option<(Texture2D, Texture2D)>>,
+    /// The building mask of the map atlas (`building_emissive`), built on the first lit frame.
+    building_mask: OnceCell<Option<Texture2D>>,
 }
 
 fn or_log<T: Default>(what: &str, r: Result<T, DtError>) -> T {
@@ -518,24 +518,13 @@ impl DtArt {
         self.shadows.get_or_init(|| self.build_shadow_textures()).clone()
     }
 
-    /// The building mask of the map atlas: the atlas's layout, white (alpha 1) on every building
-    /// picture's rectangle and clear elsewhere, nearest-sampled. Only the lit sprite material reads it
-    /// (`sharp::session_lit`), so it is built on the first lit frame and costs nothing with the light off.
-    pub fn building_mask(&self) -> Option<Texture2D> {
-        self.mask_pair().map(|(nearest, _)| nearest)
-    }
-
-    /// The same mask sampled linearly, for the emissive layer (G) the windows pass draws: the windows' feathered
-    /// edges interpolate here, while the building flag (R, `building_mask`) stays exact for the lit pass.
+    /// The emissive layer of the map atlas for the lit windows (G, `draw_building_windows`): the building mask,
+    /// sampled linearly, so the windows' feathered edges interpolate. Built on the first lit frame.
     pub fn building_emissive(&self) -> Option<Texture2D> {
-        self.mask_pair().map(|(_, linear)| linear)
-    }
-
-    fn mask_pair(&self) -> Option<(Texture2D, Texture2D)> {
         self.building_mask.get_or_init(|| self.build_building_mask()).clone()
     }
 
-    fn build_building_mask(&self) -> Option<(Texture2D, Texture2D)> {
+    fn build_building_mask(&self) -> Option<Texture2D> {
         let atlas = self.map_atlas()?;
         let (w, h) = (atlas.texture.width() as u32, atlas.texture.height() as u32);
         // Each building picture's lit windows (`dt::windows`), computed once from its own pixels.
@@ -551,11 +540,7 @@ impl DtArt {
             })
             .collect();
         let img = Image { width: w, height: h, rgba: building_mask_pixels(w, h, &placed) };
-        // Two samplings of the same pixels: exact (R, the building flag, so the lit pass is unchanged by day) and
-        // linear (G, the feathered windows).
-        let nearest = texture(&img)?;
-        nearest.set_filter(FilterMode::Nearest);
-        Some((nearest, texture(&img)?))
+        texture(&img)
     }
 
     fn build_shadow_textures(&self) -> Option<(Texture2D, Texture2D)> {
@@ -639,7 +624,7 @@ mod rect_table_tests {
     }
 }
 
-/// The pixels of a building mask (`DtArt::building_mask`): `w` × `h` RGBA. Within each building's
+/// The pixels of a building mask (`DtArt::building_emissive`): `w` × `h` RGBA. Within each building's
 /// rectangle (`placed`: the rectangle and its emissive layer, one byte a pixel of the sprite), R is 255
 /// (a building) and G is the emission; elsewhere R and G are 0. A is 255 throughout.
 pub fn building_mask_pixels(w: u32, h: u32, placed: &[(Rect, Vec<u8>)]) -> Vec<u8> {

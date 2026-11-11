@@ -1112,8 +1112,8 @@ local! {
 
 /// Runs `draw` with only a picture's shadow drawn: the pixels of alpha below 0.76, so a
 /// building's flat shadow (up to [`razdor::dt::gfx::BUILDING_SHADOW_ALPHA`], 0.733) and not its
-/// body or edges (from 0.8). `shadow_k` scales the shadow's alpha (the relief's painted-shadow
-/// factor, `daylight::relief_at`; 1 leaves it as the picture has it). Without the material,
+/// body or edges (from 0.8). `shadow_k` scales the shadow's alpha (the painted-shadow factor of the
+/// light, `daylight::shadow_k_at`; 1 leaves it as the picture has it). Without the material,
 /// nothing is drawn.
 pub fn shadow_only(shadow_k: f32, draw: impl FnOnce()) {
     let material = SHADOW_ONLY.with(|m| {
