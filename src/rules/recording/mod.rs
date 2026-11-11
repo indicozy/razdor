@@ -9,6 +9,7 @@
 //!   back what real time decided (the event seed, the «Максимум» moves, the patch globals) and
 //!   the music's places. Nothing is attached by default: the rules then run as they always did.
 
+pub mod header;
 pub mod hook;
 pub mod snapshot;
 pub mod stream;
