@@ -6,13 +6,14 @@
 
 use std::cell::RefCell;
 
+use razdor::local;
 use razdor::rules::game::Game;
 use razdor::rules::recording::header::{install_hash, ReplayHeader};
 use razdor::rules::recording::session::{replays_dir, Session};
 
 use super::audio::Settings;
 
-thread_local! {
+local! {
     /// The session whose file is open: the current game's, or one a game left that is not closed yet.
     static LIVE: RefCell<Option<Session>> = const { RefCell::new(None) };
 }
