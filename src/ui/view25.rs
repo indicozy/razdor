@@ -12,6 +12,7 @@
 //! [`billboard_model`]).
 
 use macroquad::math::{vec2, vec3, vec4, Mat4, Rect, Vec2, Vec3, Vec4};
+use serde::{Deserialize, Serialize};
 
 /// The shape of the first-person view's far ground: rolled up to a top-down map («Вверх»), curved down
 /// along the view like the earth's horizon, with the sky above it («Горизонт»), or curved down in every
@@ -29,6 +30,72 @@ pub enum FarGround {
 pub fn globe_radius(default: f32) -> f32 {
     static ENV: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
     ENV.get_or_init(|| std::env::var("RAZDOR_VIEW_GLOBE_RADIUS").ok().and_then(|v| v.trim().parse::<f32>().ok()).filter(|r| *r > 0.0)).unwrap_or(default)
+}
+
+/// One camera's curve, as the settings keep it (per camera: third person and first person, Razdor's).
+/// `flat` is the level ground ahead of the pivot, in cells (`FLAT_RANGE`, a step of 0.5). `strength` is the
+/// curve's: a multiplier on the far ground's default arc radius (`radius`), 1 the constants' own, higher
+/// the tighter (`STRENGTH_RANGE`). Both defaults are the constants (`THIRD_TUNE`, `FIRST_TUNE`).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CameraTune {
+    pub flat: f32,
+    pub strength: f32,
+}
+
+/// The third person's curve (the behind-the-hero camera, `TiltCamera::first_person`): today's constants.
+pub const THIRD_TUNE: CameraTune = CameraTune { flat: FP_FLAT, strength: 1.0 };
+/// The first person's curve (the eyes camera, `TiltCamera::eyes`): today's constants.
+pub const FIRST_TUNE: CameraTune = CameraTune { flat: EYE_FLAT, strength: 1.0 };
+/// The flat part's range (cells) and the strength's (a multiplier; the slider is on its log2, so each
+/// step doubles or halves the same amount, and 1 is its middle).
+pub const FLAT_RANGE: (f32, f32) = (0.0, 30.0);
+pub const STRENGTH_RANGE: (f32, f32) = (0.25, 4.0);
+
+impl Default for CameraTune {
+    fn default() -> CameraTune {
+        THIRD_TUNE
+    }
+}
+
+impl CameraTune {
+    /// The arc radius for a far ground whose default radius is `default` (the constants above): divided by
+    /// the strength, so a strength of 1 is the default and a strength of 2 halves it. The developer override
+    /// of the globe's radius (`globe_radius`) is passed as `default` too.
+    pub fn radius(&self, default: f32) -> f32 {
+        default / self.strength
+    }
+
+    /// The flat part at the slider's position `pos` (0..1 across `FLAT_RANGE`), in steps of half a cell.
+    pub fn flat_at(pos: f32) -> f32 {
+        let (lo, hi) = FLAT_RANGE;
+        ((lo + pos.clamp(0.0, 1.0) * (hi - lo)) * 2.0).round() / 2.0
+    }
+
+    /// The slider's position (0..1) of a flat part.
+    pub fn flat_pos(flat: f32) -> f32 {
+        ((flat - FLAT_RANGE.0) / (FLAT_RANGE.1 - FLAT_RANGE.0)).clamp(0.0, 1.0)
+    }
+
+    /// The strength at the slider's position `pos`: on a log2 scale across `STRENGTH_RANGE`, in steps of a
+    /// tenth of an octave, so 1 is the middle of the track and each step changes the curve by the same amount.
+    pub fn strength_at(pos: f32) -> f32 {
+        let (lo, hi) = (STRENGTH_RANGE.0.log2(), STRENGTH_RANGE.1.log2());
+        let log2 = ((lo + pos.clamp(0.0, 1.0) * (hi - lo)) * 10.0).round() / 10.0;
+        2f32.powf(log2)
+    }
+
+    /// The slider's position (0..1) of a strength (the inverse of [`CameraTune::strength_at`]).
+    pub fn strength_pos(strength: f32) -> f32 {
+        let (lo, hi) = (STRENGTH_RANGE.0.log2(), STRENGTH_RANGE.1.log2());
+        ((strength.log2() - lo) / (hi - lo)).clamp(0.0, 1.0)
+    }
+
+    /// The tune with each value within its range; a value that is not finite takes `base` (a camera's default).
+    pub fn valid(self, base: CameraTune) -> CameraTune {
+        let fix = |v: f32, base: f32, (lo, hi): (f32, f32)| if v.is_finite() { v.clamp(lo, hi) } else { base };
+        CameraTune { flat: fix(self.flat, base.flat, FLAT_RANGE), strength: fix(self.strength, base.strength, STRENGTH_RANGE) }
+    }
 }
 
 /// The pitch range of the view, in degrees, and where it starts.
@@ -249,7 +316,7 @@ impl TiltCamera {
     /// hits the ground at the depression that puts him at two thirds of the frame's height, and
     /// the distance is fitted so the hero's ground is drawn `scale` pixels per world unit, as
     /// the flat view draws it (the cells of the rest of the frame are smaller, as they are far).
-    pub fn first_person(look: Vec2, scale: f32, frame: Rect, yaw_deg: f32, far: FarGround) -> TiltCamera {
+    pub fn first_person(look: Vec2, scale: f32, frame: Rect, yaw_deg: f32, far: FarGround, tune: CameraTune) -> TiltCamera {
         let (p, phi) = (FP_PITCH.to_radians(), (FP_FOV / 2.0).to_radians());
         // The hero's ray below the horizontal: the view line plus the angle of a point a third of
         // the half height below the centre (NDC y -1/3).
@@ -265,9 +332,9 @@ impl TiltCamera {
         // The sheet's pivot is the view's centre; its horizon (the down bend, the globe) is where the
         // eye's sight line grazes it.
         cam.bend = Some(match far {
-            FarGround::Up => Bend::new(target, yaw_deg, FP_FLAT, FP_RADIUS, FP_BEND_UP),
-            FarGround::Horizon => Bend::new(target, yaw_deg, FP_FLAT, FP_RADIUS_DOWN, FP_BEND_DOWN).with_horizon(cam.eye()),
-            FarGround::Globe => cam.globe_bend(look, FP_FLAT, globe_radius(FP_RADIUS_GLOBE)),
+            FarGround::Up => Bend::new(target, yaw_deg, tune.flat, tune.radius(FP_RADIUS), FP_BEND_UP),
+            FarGround::Horizon => Bend::new(target, yaw_deg, tune.flat, tune.radius(FP_RADIUS_DOWN), FP_BEND_DOWN).with_horizon(cam.eye()),
+            FarGround::Globe => cam.globe_bend(look, tune.flat, tune.radius(globe_radius(FP_RADIUS_GLOBE))),
         });
         cam
     }
@@ -1444,7 +1511,7 @@ mod tests {
     #[test]
     fn the_first_person_globe_has_a_finite_horizon_and_its_sky_above() {
         let look = vec2(20.5, 13.25);
-        let cam = TiltCamera::first_person(look, SCALE, FRAME, 0.0, FarGround::Globe);
+        let cam = TiltCamera::first_person(look, SCALE, FRAME, 0.0, FarGround::Globe, THIRD_TUNE);
         let bend = cam.bend.expect("the globe");
         assert!(bend.globe && bend.limit.is_finite() && bend.limit > FP_FLAT, "the horizon at {}", bend.limit);
         let line = cam.project(bend.point(bend.pivot + forward(0.0) * bend.limit), FRAME).expect("the horizon");
@@ -1489,7 +1556,7 @@ mod tests {
         for yaw in YAWS {
             for far in FAR_GROUNDS {
                 let look = vec2(20.5, 13.25);
-                let cam = TiltCamera::first_person(look, SCALE, FRAME, yaw, far);
+                let cam = TiltCamera::first_person(look, SCALE, FRAME, yaw, far, THIRD_TUNE);
                 let px = cam.project(vec3(look.x, 0.0, look.y), FRAME).expect("in front of the eye");
                 assert!((px.x - (FRAME.x + FRAME.w / 2.0)).abs() < 1.0, "yaw {yaw}: x {px:?}");
                 assert!((px.y - (FRAME.y + FRAME.h * 2.0 / 3.0)).abs() < 1.0, "yaw {yaw}: y {px:?}");
@@ -1503,12 +1570,103 @@ mod tests {
     }
 
     /// A pick at the hero's pixel is the hero's ground, in both bends and at every yaw.
+    /// The default curves are today's constants: the far ground built with them is the one the constants
+    /// build, at every far ground and yaw, and the eyes' radius is the constant too.
+    #[test]
+    fn the_default_curves_reproduce_the_constants() {
+        assert_eq!(THIRD_TUNE.radius(FP_RADIUS), FP_RADIUS);
+        assert_eq!(FIRST_TUNE.radius(EYE_RADIUS_DOWN), EYE_RADIUS_DOWN);
+        assert_eq!(FIRST_TUNE.flat, EYE_FLAT);
+        assert_eq!(THIRD_TUNE.flat, FP_FLAT);
+        let look = vec2(20.5, 13.25);
+        for yaw in YAWS {
+            for far in FAR_GROUNDS {
+                let cam = TiltCamera::first_person(look, SCALE, FRAME, yaw, far, THIRD_TUNE);
+                let expected = match far {
+                    FarGround::Up => Bend::new(cam.target, yaw, FP_FLAT, FP_RADIUS, FP_BEND_UP),
+                    FarGround::Horizon => Bend::new(cam.target, yaw, FP_FLAT, FP_RADIUS_DOWN, FP_BEND_DOWN).with_horizon(cam.eye()),
+                    FarGround::Globe => cam.globe_bend(look, FP_FLAT, globe_radius(FP_RADIUS_GLOBE)),
+                };
+                assert_eq!(cam.bend, Some(expected), "yaw {yaw} far {far:?}");
+            }
+        }
+    }
+
+    /// The curve's extremes (no flat part and 30 cells; a quarter and four times the radius) keep the picks:
+    /// the first person's centre picks ground, the hero's pixel picks back to him, and every point the frame
+    /// picks lies in the footprint, at every far ground and yaw. The eyes camera's centre may be sky (see below).
+    #[test]
+    fn the_curve_extremes_keep_the_picks_and_the_footprint() {
+        let look = vec2(20.5, 13.25);
+        let centre = vec2(FRAME.x + FRAME.w / 2.0, FRAME.y + FRAME.h / 2.0);
+        for flat in [0.0, 30.0] {
+            for strength in [0.25, 1.0, 4.0] {
+                let tune = CameraTune { flat, strength };
+                for yaw in YAWS {
+                    for far in FAR_GROUNDS {
+                        let cam = TiltCamera::first_person(look, SCALE, FRAME, yaw, far, tune);
+                        let ctx = format!("flat {flat} strength {strength} yaw {yaw} far {far:?}");
+                        // The centre is ground, or sky above a horizon: a gentle curve's horizon can lie above the
+                        // centre at a low pitch (the planet's horizon), which is why the eyes' centre may be sky too.
+                        let horizon = |c: &TiltCamera| c.bend.is_some_and(|b| b.limit.is_finite() || b.globe);
+                        assert!(cam.pick(centre, FRAME).is_some() || horizon(&cam), "the centre is ground or sky above a horizon, {ctx}");
+                        let on_sheet = cam.bend.map_or(vec3(look.x, 0.0, look.y), |b| b.point(look));
+                        let px = cam.project(on_sheet, FRAME).expect("the hero is in front of the eye");
+                        let back = cam.pick(px, FRAME).expect("the hero's ground");
+                        assert!(close(back, look, 0.1), "the hero picks back, {ctx}: {back:?}");
+                        // Every ground point the frame picks lies in the footprint (as kept within FAR of the target).
+                        let fp = cam.ground_footprint(FRAME, FRAME);
+                        for i in 0..=8 {
+                            for j in 0..=8 {
+                                let at = vec2(FRAME.x + FRAME.w * i as f32 / 8.0, FRAME.y + FRAME.h * j as f32 / 8.0);
+                                let Some(p) = cam.pick(at, FRAME) else { continue };
+                                let p = cam.target + (p - cam.target).clamp_length_max(FAR);
+                                let eps = 0.01;
+                                let inside = p.x >= fp.x - eps && p.x <= fp.x + fp.w + eps && p.y >= fp.y - eps && p.y <= fp.y + fp.h + eps;
+                                assert!(inside, "the pick {p:?} at {at:?} lies outside the footprint {fp:?}, {ctx}");
+                            }
+                        }
+                        // The eyes camera with the same curve, at its own far grounds.
+                        let mut eyes = TiltCamera::eyes(look, EYE_HEIGHT, SCALE, FRAME, EYE_PITCH, yaw, FP_FOV);
+                        eyes.bend = Some(match far {
+                            FarGround::Up => eyes.eye_bend(tune.flat, tune.radius(EYE_RADIUS_UP), EYE_BEND_UP),
+                            FarGround::Horizon => eyes.eye_bend(tune.flat, tune.radius(EYE_RADIUS_DOWN), EYE_BEND_DOWN),
+                            FarGround::Globe => eyes.globe_bend(eyes.target, tune.flat, tune.radius(EYE_RADIUS_GLOBE)),
+                        });
+                        // The eyes look down only 2 degrees: a gentle curve's horizon (the eye at its height) lies
+                        // below the centre, so the centre is sky, as the planet's is. Only that may leave it unpicked.
+                        assert!(eyes.pick(centre, FRAME).is_some() || horizon(&eyes), "the eyes' centre is ground or sky above a horizon, {ctx}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// The curve's sliders: the flat part in half cells across 0..30, the strength on a log2 scale across
+    /// 1/4..4 (1 at the middle, each tenth of an octave a step), each mapping back to its value.
+    #[test]
+    fn the_curve_sliders_map_to_their_ranges_and_back() {
+        assert_eq!(CameraTune::flat_at(0.0), 0.0);
+        assert_eq!(CameraTune::flat_at(1.0), 30.0);
+        assert_eq!(CameraTune::flat_at(CameraTune::flat_pos(3.0)), 3.0);
+        assert_eq!(CameraTune::flat_at(CameraTune::flat_pos(2.5)), 2.5);
+        assert_eq!(CameraTune::strength_at(0.0), 0.25);
+        assert_eq!(CameraTune::strength_at(0.5), 1.0);
+        assert_eq!(CameraTune::strength_at(1.0), 4.0);
+        assert_eq!(CameraTune::strength_pos(1.0), 0.5);
+        for s in [0.25, 0.5, 2.0, 4.0] {
+            let back = CameraTune::strength_at(CameraTune::strength_pos(s));
+            assert!((back / s - 1.0).abs() < 0.05, "{s} reads back as {back}");
+        }
+        assert_eq!(CameraTune { flat: 0.0, strength: 2.0 }.radius(FP_RADIUS), FP_RADIUS / 2.0);
+    }
+
     #[test]
     fn a_pick_at_the_heros_pixel_is_the_hero_at_both_bends_and_every_yaw() {
         for yaw in YAWS {
             for far in FAR_GROUNDS {
                 let look = vec2(20.5, 13.25);
-                let cam = TiltCamera::first_person(look, SCALE, FRAME, yaw, far);
+                let cam = TiltCamera::first_person(look, SCALE, FRAME, yaw, far, THIRD_TUNE);
                 // The hero stands on the sheet: behind the pivot a globe's sheet drops below the flat part,
                 // so his pixel is the sheet's point (the flat bends are flat there, as before).
                 let on_sheet = cam.bend.map_or(vec3(look.x, 0.0, look.y), |b| b.point(look));
@@ -1566,7 +1724,7 @@ mod tests {
         for yaw in YAWS {
             for far in FAR_GROUNDS {
                 let look = vec2(20.5, 13.25);
-                let cam = TiltCamera::first_person(look, SCALE, FRAME, yaw, far);
+                let cam = TiltCamera::first_person(look, SCALE, FRAME, yaw, far, THIRD_TUNE);
                 let bend = cam.bend.expect("the first-person bend");
                 for s in [-24.0, -12.0, -6.0, 0.0, 2.0, 5.0, 9.0, 14.0, 22.0, 30.0] {
                     for l in [-9.0, -3.0, 0.0, 4.0, 9.0] {
@@ -1625,14 +1783,14 @@ mod tests {
     #[test]
     fn the_sky_above_the_horizon_of_a_down_bend_sees_no_ground() {
         let look = vec2(20.5, 13.25);
-        let cam = TiltCamera::first_person(look, SCALE, FRAME, 0.0, FarGround::Horizon);
+        let cam = TiltCamera::first_person(look, SCALE, FRAME, 0.0, FarGround::Horizon, THIRD_TUNE);
         let bend = cam.bend.expect("the bend");
         assert!(bend.limit.is_finite(), "a down bend has a horizon");
         let line = cam.project(bend.point(bend.pivot + forward(0.0) * bend.limit), FRAME).expect("the horizon");
         let x = FRAME.x + FRAME.w / 2.0;
         assert!(cam.pick(vec2(x, line.y - 4.0), FRAME).is_none(), "the sky above the horizon");
         assert!(cam.pick(vec2(x, line.y + 4.0), FRAME).is_some(), "the sheet below the horizon");
-        let up = TiltCamera::first_person(look, SCALE, FRAME, 0.0, FarGround::Up);
+        let up = TiltCamera::first_person(look, SCALE, FRAME, 0.0, FarGround::Up, THIRD_TUNE);
         assert!(up.bend.expect("the bend").limit.is_infinite());
         assert!(up.pick(vec2(x, FRAME.y + 2.0), FRAME).is_some(), "the up bend's top sees the sheet");
     }
@@ -1642,7 +1800,7 @@ mod tests {
     #[test]
     fn a_pick_far_outside_the_frame_ends() {
         for far in FAR_GROUNDS {
-            let cam = TiltCamera::first_person(vec2(20.5, 13.25), SCALE, FRAME, 0.0, far);
+            let cam = TiltCamera::first_person(vec2(20.5, 13.25), SCALE, FRAME, 0.0, far, THIRD_TUNE);
             for p in [vec2(-1.0e5, 380.0), vec2(1.0e5, 380.0), vec2(640.0, -1.0e5), vec2(640.0, 1.0e5)] {
                 let _ = cam.pick(p, FRAME);
             }
@@ -1655,7 +1813,7 @@ mod tests {
     fn the_globe_footprint_covers_every_point_the_frame_sees() {
         for yaw in YAWS {
             let look = vec2(20.5, 13.25);
-            let cam = TiltCamera::first_person(look, SCALE, FRAME, yaw, FarGround::Globe);
+            let cam = TiltCamera::first_person(look, SCALE, FRAME, yaw, FarGround::Globe, THIRD_TUNE);
             let fp = cam.ground_footprint(FRAME, FRAME);
             let mut missed = Vec::new();
             for iy in 0..=40 {
@@ -1677,7 +1835,7 @@ mod tests {
     fn the_bent_footprint_holds_the_hero_at_both_bends() {
         for far in FAR_GROUNDS {
             let look = vec2(20.5, 13.25);
-            let cam = TiltCamera::first_person(look, SCALE, FRAME, 45.0, far);
+            let cam = TiltCamera::first_person(look, SCALE, FRAME, 45.0, far, THIRD_TUNE);
             let fp = cam.ground_footprint(FRAME, FRAME);
             assert!(fp.contains(look), "far {far:?}: {fp:?}");
             assert!(fp.w > 1.0 && fp.h > 1.0, "a footprint: {fp:?}");

@@ -22,6 +22,7 @@ use super::chrome::{self, Fx};
 use super::keymap;
 use super::minimap;
 use super::window_layout;
+use super::view25::CameraTune;
 use super::widgets::*;
 
 /// What the player picked.
@@ -1397,6 +1398,7 @@ pub fn apply_options(audio: &super::audio::Settings) {
     super::world_view::set_first_person(audio.map_first_person);
     super::world_view::set_far_ground(audio.far_ground());
     super::world_view::set_eyes(audio.map_eyes);
+    super::world_view::set_tunes(audio.map_third_tune, audio.map_first_tune);
     super::world_view::set_sprite_size(audio.map_sprite_size);
     super::world_view::set_map_render_scale(audio.map_render_scale);
     super::frame_cap::set_setting(audio.frame_cap);
@@ -1590,7 +1592,7 @@ impl Group {
     /// The rows the group shows, top to bottom. Every row is in exactly one group (a test checks it).
     pub fn rows(self) -> &'static [Row] {
         match self {
-            Group::Map => &[Row::MapZoom, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
+            Group::Map => &[Row::MapZoom, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::CurveStart, Row::CurveStrength, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
             Group::Battle => &[Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience, Row::HitShake],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
@@ -1609,6 +1611,8 @@ pub enum Row {
     SpriteSize,
     TwoFingerTurn,
     FarGround,
+    CurveStart,
+    CurveStrength,
     MapEdge,
     Lighting,
     LightCycle,
@@ -1648,7 +1652,7 @@ pub enum Row {
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 42] = [
+pub const ALL: [Row; 44] = [
         Row::MapZoom,
         Row::MapResolution,
         Row::FrameCap,
@@ -1656,6 +1660,8 @@ pub const ALL: [Row; 42] = [
         Row::SpriteSize,
         Row::TwoFingerTurn,
         Row::FarGround,
+        Row::CurveStart,
+        Row::CurveStrength,
         Row::MapEdge,
         Row::Lighting,
         Row::LightCycle,
@@ -1699,6 +1705,8 @@ pub const ALL: [Row; 42] = [
             Row::MapZoom => Some(tr("The zoom the map plays at. The wheel steps away from it and the 0 key comes back to it; locked, the map always shows it.")),
             Row::FarGround => Some(tr("Up: the far ground rolls up to a top-down map. Horizon: the ground curves down like the earth's horizon, with the sky above it. Globe: the ground curves away on every side, like a small planet.")),
             Row::MapView => Some(tr("Third person: the camera behind the hero's back. First person: the view through the hero's eyes.")),
+            Row::CurveStart => Some(tr("Curve start: how much ground in front of the hero stays flat before it starts to bend.")),
+            Row::CurveStrength => Some(tr("Curve strength: how fast the ground bends up, down or around (the Globe).")),
             Row::MapEdge => Some(tr("Off: past the map's edges is black, as in the original. On: a short stretch of ground goes on past the edges, then thickens into the same black fog as the unexplored map.")),
             Row::Lighting => Some(tr("Razdor's: the map's light follows the time of day. Style only.")),
             Row::Shadows => Some(tr("Razdor's: Painted keeps the original's shadows; From the sun removes them, and every building, tree and rock casts its own shadow that turns and lengthens with the hour.")),
@@ -1729,7 +1737,7 @@ pub const ALL: [Row; 42] = [
         match self {
             Row::SpriteSize | Row::TwoFingerTurn => audio.map_tilt,
             // The far ground's shape is the first-person view's only.
-            Row::FarGround => audio.map_tilt && audio.map_first_person,
+            Row::FarGround | Row::CurveStart | Row::CurveStrength => audio.map_tilt && audio.map_first_person,
             Row::LightCycle => audio.map_light == LightMode::Cycle,
             Row::LightHour => audio.map_light == LightMode::Fixed,
             // The shadows are the light's: shown only with the light on.
@@ -2060,6 +2068,23 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
                     super::view25::FarGround::Horizon => (true, true),
                     super::view25::FarGround::Globe => (false, false),
                 };
+            }
+        }
+        Row::CurveStart => {
+            // Razdor's (the owner's request, 2026-11-11): the curve's flat part, per camera (the active one).
+            let tune = *active_tune_mut(audio);
+            let value = format!("{} {}", tune.flat, tr("cells"));
+            if let Some(v) = tune_slider(c, geo, tr("Curve start"), &value, CameraTune::flat_pos(tune.flat), Row::CurveStart.help_text()) {
+                active_tune_mut(audio).flat = CameraTune::flat_at(v);
+            }
+        }
+        Row::CurveStrength => {
+            // The strength is a multiplier on the arc radius, on a log2 scale: each slider step doubles or halves
+            // the curve by the same amount, and 1 (100%) is its middle.
+            let tune = *active_tune_mut(audio);
+            let value = format!("{}%", (tune.strength * 100.0).round());
+            if let Some(v) = tune_slider(c, geo, tr("Curve strength"), &value, CameraTune::strength_pos(tune.strength), Row::CurveStrength.help_text()) {
+                active_tune_mut(audio).strength = CameraTune::strength_at(v);
             }
         }
         Row::SpriteSize => {
@@ -2632,6 +2657,37 @@ fn map_view_label(audio: &super::audio::Settings) -> &'static str {
         MapView::Third => tr("Third person"),
         MapView::First => tr("First person"),
     }
+}
+
+/// The curve and camera of the view the settings show: the first person's with that view on, else the third
+/// person's (the rows show with either first-person view).
+fn active_tune_mut(audio: &mut super::audio::Settings) -> &mut CameraTune {
+    if audio.map_view() == super::audio::MapView::First {
+        &mut audio.map_first_tune
+    } else {
+        &mut audio.map_third_tune
+    }
+}
+
+/// A curve slider row (the zoom row's pattern): its label and value on one line, and under it a track of
+/// the value's position `pos` (0..1). Returns the new position when the track is moved.
+fn tune_slider(c: &mut RowCol, geo: &RowGeo, label: &str, value: &str, pos: f32, help: Option<&'static str>) -> Option<f32> {
+    let help_w = if help.is_some() { help_size(geo) + geo.gap } else { 0.0 };
+    let base = c.y + geo.row_h / 2.0 + geo.size * 0.36;
+    chrome::shadow_text(label, c.x, base, geo.size, chrome::CREAM);
+    let vw = measure(value, geo.size).width;
+    chrome::shadow_text(value, c.x + c.w - help_w - vw, base, geo.size, chrome::GOLD);
+    if let Some(text) = help {
+        help_button(c, geo, c.y + (geo.row_h - help_size(geo)) / 2.0, text);
+    }
+    c.y += geo.row_h + geo.gap;
+    // A phone's track is a 40 dp touch target; the desktop's the zoom row's 32 px.
+    let track_h = if geo.btn_size.is_some() { 40.0 * geo.k } else { 32.0 * geo.k };
+    let track = Rect::new(c.x, c.y, c.w, track_h);
+    // On a phone a slider only partly in the scroll view is neither drawn nor moved (as the zoom row's).
+    let shown = geo.btn_size.is_none() || ADV_VIEW.with(|v| v.get()).is_none_or(|view| inside(track, view));
+    c.y += track_h + geo.gap;
+    shown.then(|| slider(track, pos)).flatten().filter(|_| in_adv_view(track))
 }
 
 /// The far ground row's value: «Вверх», «Горизонт» or «Шар» (the first-person view's only).
@@ -3552,7 +3608,7 @@ mod tests {
     #[test]
     fn the_long_hints_are_behind_a_question_mark() {
         let with: Vec<Row> = Row::ALL.into_iter().filter(|r| r.help_text().is_some()).collect();
-        assert_eq!(with, vec![Row::MapZoom, Row::MapView, Row::FarGround, Row::MapEdge, Row::Lighting, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::Language, Row::Updates, Row::ChronicleSummary]);
+        assert_eq!(with, vec![Row::MapZoom, Row::MapView, Row::FarGround, Row::CurveStart, Row::CurveStrength, Row::MapEdge, Row::Lighting, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::Language, Row::Updates, Row::ChronicleSummary]);
         scene_help("Experience");
         assert_eq!(HELP_PINNED.with(|p| p.get()), Row::Experience.help_text());
         HELP_PINNED.with(|p| p.set(None));

@@ -1067,6 +1067,33 @@ pub fn set_far_ground(shape: FarGround) {
 }
 
 
+/// Each camera's curve (`view25::CameraTune`): the third person's, then the first person's. Pushed from the
+/// settings by [`set_tunes`]; the defaults are the constants (`view25::THIRD_TUNE`, `FIRST_TUNE`).
+static TUNES: std::sync::Mutex<[view25::CameraTune; 2]> = std::sync::Mutex::new([view25::THIRD_TUNE, view25::FIRST_TUNE]);
+
+/// Puts the cameras' curves on, from the settings, at once.
+pub fn set_tunes(third: view25::CameraTune, first: view25::CameraTune) {
+    if let Ok(mut t) = TUNES.lock() {
+        *t = [third, first];
+    }
+}
+
+/// The third person's curve (the behind-the-hero camera).
+pub fn third_tune() -> view25::CameraTune {
+    TUNES.lock().map_or(view25::THIRD_TUNE, |t| t[0])
+}
+
+/// The first person's curve (the eyes camera).
+pub fn first_tune() -> view25::CameraTune {
+    TUNES.lock().map_or(view25::FIRST_TUNE, |t| t[1])
+}
+
+/// Both cameras' curves as bits, for the cached pictures' keys: a slider moves the picture.
+fn curve_bits() -> [u32; 4] {
+    let (a, b) = (third_tune(), first_tune());
+    [a.flat, a.strength, b.flat, b.strength].map(f32::to_bits)
+}
+
 /// The eyes view («Глазами героя», `audio::Settings::map_eyes`, pushed by [`set_eyes`]): the camera
 /// stands at the hero's eyes and looks along his walk. Off by default; it is within the first-person
 /// view (`first_person`).
@@ -1168,7 +1195,7 @@ fn photo_tilt(target: Vec2, scale: f32, view: Rect, draw: Rect, pitch: f32, yaw:
 /// looks at `look` (the map view's centre, the hero's place) and its bent sheet's ground is the
 /// footprint of the frame `view`, culled to the strip under the bar `draw` as the 2.5D one is.
 fn first_person_tilt(look: Vec2, scale: f32, view: Rect, draw: Rect, yaw: f32, far: FarGround) -> Tilt {
-    let cam = TiltCamera::first_person(look, scale, view, yaw, far);
+    let cam = TiltCamera::first_person(look, scale, view, yaw, far, third_tune());
     Tilt { cam, plan: cam.ground_footprint(view, view), cull: cam.ground_footprint(view, draw) }
 }
 
@@ -1178,6 +1205,7 @@ fn first_person_tilt(look: Vec2, scale: f32, view: Rect, draw: Rect, yaw: f32, f
 /// height and bend. Its footprints are the frame `view` and the strip under the bar `draw`, as the
 /// first-person view's.
 fn eyes_tilt(ground: Vec2, scale: f32, view: Rect, draw: Rect, yaw: f32, far: FarGround, shot: Option<view25::Trailer>) -> Tilt {
+    let tune = first_tune();
     let (pitch, fov, height, yaw, bend) = match shot {
         Some(t) => (
             t.pitch.unwrap_or(view25::EYE_PITCH),
@@ -1192,8 +1220,8 @@ fn eyes_tilt(ground: Vec2, scale: f32, view: Rect, draw: Rect, yaw: f32, far: Fa
             view25::EYE_HEIGHT,
             yaw,
             match far {
-                FarGround::Up => Some((view25::EYE_FLAT, view25::EYE_RADIUS_UP, view25::EYE_BEND_UP)),
-                FarGround::Horizon => Some((view25::EYE_FLAT, view25::EYE_RADIUS_DOWN, view25::EYE_BEND_DOWN)),
+                FarGround::Up => Some((tune.flat, tune.radius(view25::EYE_RADIUS_UP), view25::EYE_BEND_UP)),
+                FarGround::Horizon => Some((tune.flat, tune.radius(view25::EYE_RADIUS_DOWN), view25::EYE_BEND_DOWN)),
                 // The globe is built from the camera's eye (`TiltCamera::globe_bend`), below.
                 FarGround::Globe => None,
             },
@@ -1201,7 +1229,7 @@ fn eyes_tilt(ground: Vec2, scale: f32, view: Rect, draw: Rect, yaw: f32, far: Fa
     };
     let mut cam = TiltCamera::eyes(ground, height, scale, view, pitch, yaw, fov);
     cam.bend = match (shot, far) {
-        (None, FarGround::Globe) => Some(cam.globe_bend(cam.target, view25::EYE_FLAT, view25::globe_radius(view25::EYE_RADIUS_GLOBE))),
+        (None, FarGround::Globe) => Some(cam.globe_bend(cam.target, tune.flat, tune.radius(view25::globe_radius(view25::EYE_RADIUS_GLOBE)))),
         _ => bend.map(|(flat, radius, max_deg)| cam.eye_bend(flat, radius, max_deg)),
     };
     Tilt { cam, plan: cam.ground_footprint(view, view), cull: cam.ground_footprint(view, draw) }
@@ -2642,6 +2670,8 @@ fn ground_key(game: &Game, cam: &Camera) -> u64 {
     rect(cam.draw).hash(&mut h);
     if let Some(t) = cam.tilt {
         (t.cam.pitch_deg.to_bits(), t.cam.yaw_deg.to_bits(), rect(t.plan), rect(t.cull)).hash(&mut h);
+        // The bend itself: the curve's flat part and strength move the picture under the same footprint.
+        curve_bits().hash(&mut h);
     }
     let map = &game.world.map;
     (map.w, map.h, cam.grid.row_height().to_bits(), extend_edge(), mist::on(), map.surface_codes()).hash(&mut h);
@@ -5166,6 +5196,7 @@ fn battle_backdrop_key(game: &Game) -> u64 {
     look.map(bits).hash(&mut h);
     bits(game.display_pos()).hash(&mut h);
     (tilt_view(), first_person(), far_ground(), eyes_setting(), tilt_pitch().to_bits(), tilt_yaw().to_bits(), extend_edge(), mist::on()).hash(&mut h);
+    curve_bits().hash(&mut h);
     (game.fog.enabled, &game.fog.bits).hash(&mut h);
     game.unshown_cells().hash(&mut h);
     (game.aboard(), game.hero_hidden()).hash(&mut h);
@@ -7286,6 +7317,20 @@ mod tilt_tests {
         let mut photo = fp;
         photo.tilt = Some(photo_tilt(Vec2::from(photo.centre()), PX, view, view, 30.0, 0.0));
         assert!(!bent_first_person_cam(&photo), "photo mode's free camera has no bend");
+    }
+
+    /// The curves reach the view and the cached pictures' keys: a slider changes the key, and the
+    /// defaults are the constants again after it is put back.
+    #[test]
+    fn the_curves_reach_the_view_and_the_picture_keys() {
+        use view25::{CameraTune, FIRST_TUNE, THIRD_TUNE};
+        let before = curve_bits();
+        set_tunes(CameraTune { flat: 6.0, strength: 2.0 }, FIRST_TUNE);
+        assert_eq!(third_tune(), CameraTune { flat: 6.0, strength: 2.0 });
+        assert_eq!(first_tune(), FIRST_TUNE);
+        assert_ne!(curve_bits(), before, "a moved slider changes the key");
+        set_tunes(THIRD_TUNE, FIRST_TUNE);
+        assert_eq!(curve_bits(), before);
     }
 
     /// The 2.5D view's sprites never fade by the hero's distance, even with it set for the pass, at any yaw

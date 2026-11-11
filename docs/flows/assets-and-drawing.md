@@ -419,7 +419,13 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
     and `set_map_view` read and write the three flags (`map_tilt`, `map_first_person`, `map_eyes`), so an old file
     reads the same view and an older build still reads the file. Developer overrides in
     `RAZDOR_VIEW`: `fp-chase` forces the view behind the hero (the saved camera choice does not count), `fp-eyes`
-    forces the eyes camera; `first` (or its alias `third`) and `eyes` force them as in the snapshots. `RAZDOR_VIEW_HORIZON=down|up|globe` (`1` is
+    forces the eyes camera; `first` (or its alias `third`) and `eyes` force them as in the snapshots.
+    The curve («Начало изгиба», «Сила изгиба», shown with either first-person view): `view25::CameraTune` per camera,
+    `Settings::map_third_tune` and `map_first_tune` (pushed by `world_view::set_tunes`). Its `flat` is the bend's flat
+    part (cells, 0 to 30) and the arc's radius is the far ground's default divided by `strength` (`CameraTune::radius`;
+    ¼ to 4, a log2 slider). The defaults are the constants (`THIRD_TUNE`, `FIRST_TUNE`), so the default look is the same.
+    Both curves are in the cached pictures' keys (`curve_bits`). At the gentlest strength a low pitch can see sky
+    above the horizon at the frame's centre (the eyes look down 2 degrees): the planet's horizon, not a pick bug. `RAZDOR_VIEW_HORIZON=down|up|globe` (`1` is
     `down`) overrides «Даль»; `RAZDOR_VIEW_GLOBE_RADIUS=<cells>` tunes the globe's radius for the snapshots.
   - The camera: `view25::TiltCamera::first_person(look, scale, frame, yaw, far)` (`far` is the `FarGround`). Pitch `FP_PITCH` (12),
     field of view `FP_FOV` (55), fixed (PageUp and PageDown tilt the 2.5D view only). It looks at the view's
