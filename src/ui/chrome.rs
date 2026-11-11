@@ -1318,7 +1318,7 @@ pub fn k() -> f32 {
 
 /// The largest interface scale the window fits (the settings' "Auto").
 pub fn fit_k() -> f32 {
-    ((screen_width() / 1024.0).min(screen_height() / 768.0) / 0.9375).max(0.5)
+    ((super::frame_state::screen_w() / 1024.0).min(super::frame_state::screen_h() / 768.0) / 0.9375).max(0.5)
 }
 
 /// The scale of the bottom bar. On a phone it is the bar's own (`display::phone_bar_k`: its
