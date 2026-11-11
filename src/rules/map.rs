@@ -15,6 +15,7 @@
 //! objects on it ([`TileMap::from_codes`]).
 
 use crate::local;
+use super::rng::plant_jitter;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
@@ -562,6 +563,21 @@ pub struct Decoration {
     pub tile: Tile,
     pub class: u8,
     pub sprite: u8,
+    /// The plant's jitter ([`plant_jitter`]: the x and y offsets and the sway phase) for classes 9–11, zero for the
+    /// others. It is a pure function of the object, so it is made once here, not per draw.
+    pub jitter: (i32, i32, i32),
+}
+
+impl Decoration {
+    /// An object of `class` and `sprite` on `tile`.
+    pub fn new(tile: Tile, class: u8, sprite: u8) -> Decoration {
+        let jitter = if (object_class::TREES..=object_class::THICKET).contains(&class) {
+            plant_jitter(tile.0, tile.1, u16::from(class) << 8 | u16::from(sprite))
+        } else {
+            (0, 0, 0)
+        };
+        Decoration { tile, class, sprite, jitter }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -691,7 +707,7 @@ impl TileMap {
                 };
                 codes[y * w as usize + x] = surface as u8;
                 if let Some((class, sprite)) = object {
-                    objects.push(Decoration { tile, class, sprite });
+                    objects.push(Decoration::new(tile, class, sprite));
                 }
             }
         }
@@ -1573,7 +1589,7 @@ TTTTT
     }
 
     fn obj(x: i32, y: i32, class: u8, sprite: u8) -> Decoration {
-        Decoration { tile: (x, y), class, sprite }
+        Decoration::new((x, y), class, sprite)
     }
 
     #[test]

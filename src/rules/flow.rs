@@ -184,7 +184,7 @@ mod tests {
                 codes[(y * w + x) as usize] = code;
             }
         }
-        let objects = hills.iter().map(|&t| Decoration { tile: t, class: object_class::HILLS, sprite: 0 }).collect();
+        let objects = hills.iter().map(|&t| Decoration::new(t, object_class::HILLS, 0)).collect();
         TileMap::from_codes(Grid::Square8, w, h, &codes, objects)
     }
 

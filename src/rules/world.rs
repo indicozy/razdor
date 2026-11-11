@@ -1044,7 +1044,7 @@ impl World {
         let objects = s
             .objects
             .iter()
-            .map(|o| Decoration { tile: (o.x as i32, o.y as i32), class: o.class, sprite: o.sprite })
+            .map(|o| Decoration::new((o.x as i32, o.y as i32), o.class, o.sprite))
             .collect();
         let map = TileMap::from_codes(Grid::Square8, w, h, &s.terrain, objects);
         // The original's clock reads the start minute plus 1 (world.md §6.3, 0x4b42d8), a

@@ -2908,7 +2908,7 @@ fn object_sprite_origin(o: &Decoration, w: f32, h: f32, cam: &Camera) -> Vec2 {
 fn plant_shift(o: &Decoration) -> (f32, f32) {
     match o.class {
         object_class::TREES..=object_class::THICKET => {
-            let (dx, dy, _) = super::memo::plant_jitter_memo(o.tile.0, o.tile.1, u16::from(o.class) << 8 | u16::from(o.sprite));
+            let (dx, dy, _) = o.jitter;
             (dx as f32, dy as f32)
         }
         _ => (0.0, 0.0),
@@ -2997,7 +2997,7 @@ fn draw_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera) {
         if o.class == object_class::TREES {
             // The small trees and bushes sway: the quad's top corners move by the lean of
             // their phase, the bottom stays (0x4c99d0, engine.md §7).
-            let (_, _, phase) = super::memo::plant_jitter_memo(o.tile.0, o.tile.1, u16::from(o.class) << 8 | u16::from(o.sprite));
+            let (_, _, phase) = o.jitter;
             // «Анимация карты» scales the sway by its level (0 when the map is still, `map_anim::level`).
             let lean = razdor::rules::rng::tree_sway(clock_ms(), phase) * zoom * super::map_anim::level();
             draw_leaning(&atlas.texture, src, at, size, lean);
@@ -8318,7 +8318,7 @@ mod tilt_tests {
         let game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
         let m = &game.world.map;
         let t = (m.w / 2 + 1, m.h / 2 - 1);
-        let o = Decoration { tile: t, class: object_class::TREES, sprite: 0 };
+        let o = Decoration::new(t, object_class::TREES, 0);
         let (dx, dy) = razdor::rules::rng::plant_offset(t.0, t.1, u16::from(o.class) << 8);
         for cam in [camera(&game, None), camera(&game, Some((55.0, 30.0)))] {
             let k = cam.scale / PX;
@@ -8335,7 +8335,7 @@ mod tilt_tests {
         let m = &game.world.map;
         let t = (m.w / 2, m.h / 2);
         for (sprite, side) in [(10u8, 1.0f32), (20, 2.0), (50, 5.0)] {
-            let o = Decoration { tile: t, class: 1, sprite };
+            let o = Decoration::new(t, 1, sprite);
             let cam = camera(&game, None);
             let f = side as i32;
             let cells: Vec<Vec2> = (0..f).flat_map(|j| (0..f).map(move |i| (t.0 - i, t.1 - j))).map(|c| cam.cell_centre(c)).collect();
@@ -8361,7 +8361,7 @@ mod tilt_tests {
             if let Ok(objs) = install.map_objects() {
                 for s in &objs.sprites {
                     if s.section == 0 {
-                        decos.push(Decoration { tile: (ax, ay), class: s.cat as u8, sprite: s.idx as u8 });
+                        decos.push(Decoration::new((ax, ay), s.cat as u8, s.idx as u8));
                     } else if s.section == 1 && !matches!(s.cat, 13 | 14) {
                         // Bridges lie on the ground (their own pass), not standing.
                         pictures.push((s.cat as u8, s.idx as u8));
@@ -8373,10 +8373,10 @@ mod tilt_tests {
         }
         for class in [0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] {
             for side in 1..=6u8 {
-                decos.push(Decoration { tile: (ax, ay), class, sprite: side * 10 });
+                decos.push(Decoration::new((ax, ay), class, side * 10));
             }
             for sprite in [0u8, 1, 5, 9] {
-                decos.push(Decoration { tile: (ax, ay), class, sprite });
+                decos.push(Decoration::new((ax, ay), class, sprite));
             }
         }
         // Buildings: every footprint of up to 9×9 (wide ones too), for every picture.
@@ -8463,7 +8463,7 @@ mod tilt_tests {
             let cam = camera(&game, Some((55.0, yaw)));
             let building = sprite_key(&cam, first_footprint_cell(&l), building_foot(&l, &cam), LAYER_BUILDING);
             let tree = |tile: Tile| {
-                let o = Decoration { tile, class: object_class::TREES, sprite: 0 };
+                let o = Decoration::new(tile, object_class::TREES, 0);
                 sprite_key(&cam, o.tile, object_foot(&o, &cam), object_layer(o.class))
             };
             // The footprint is the rows ay-1 and ay (`Location::cells`): a tree in row ay-2 is
