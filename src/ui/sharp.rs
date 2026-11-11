@@ -396,9 +396,28 @@ fn set_tex_size(m: &Material, tex_size: Vec2) {
     }
 }
 
+local! {
+    /// The quad of each sharp draw ([`draw`]): indices fixed, vertices and texture refilled per sprite (no
+    /// allocation per sprite; the vertex buffer keeps its capacity).
+    static SPRITE_MESH: std::cell::RefCell<Mesh> = std::cell::RefCell::new(Mesh { vertices: Vec::new(), indices: vec![0, 1, 2, 0, 2, 3], texture: None });
+    /// The copy of a mesh with the sharp scale in its normals ([`draw_mesh_sharp`]), refilled per draw.
+    static SCALED_MESH: std::cell::RefCell<Mesh> = std::cell::RefCell::new(Mesh { vertices: Vec::new(), indices: Vec::new(), texture: None });
+}
+
+/// Draws the quad of a sharp draw ([`sprite_mesh`]'s vertices, in the shared [`SPRITE_MESH`]).
+fn draw_sprite_mesh(tex: &Texture2D, x: f32, y: f32, color: Color, params: &DrawTextureParams, scale: Vec2) {
+    SPRITE_MESH.with(|m| {
+        let mut m = m.borrow_mut();
+        fill_sprite_mesh(&mut m, tex, x, y, color, params, scale);
+        draw_mesh(&m);
+        m.texture = None;
+    });
+}
+
 /// The quad of a sharp draw: exactly [`draw_texture_ex`]'s vertices and indices (the same arithmetic, so the
-/// same picture), with `scale` in each vertex's normal slot for [`SHARP_VERTEX_SCALE`].
-fn sprite_mesh(tex: &Texture2D, x: f32, y: f32, color: Color, params: &DrawTextureParams, scale: Vec2) -> Mesh {
+/// same picture), with `scale` in each vertex's normal slot for [`SHARP_VERTEX_SCALE`]. Refills `mesh`
+/// (its indices are the quad's).
+fn fill_sprite_mesh(mesh: &mut Mesh, tex: &Texture2D, x: f32, y: f32, color: Color, params: &DrawTextureParams, scale: Vec2) {
     let [width, height] = tex.size().to_array();
     let Rect { x: sx, y: sy, w: sw, h: sh } = params.source.unwrap_or(Rect { x: 0., y: 0., w: width, h: height });
     let (mut w, mut h) = match params.dest_size {
@@ -416,26 +435,38 @@ fn sprite_mesh(tex: &Texture2D, x: f32, y: f32, color: Color, params: &DrawTextu
     }
     let pivot = params.pivot.unwrap_or(vec2(x + w / 2., y + h / 2.));
     let r = params.rotation;
+    // The sine and cosine of the rotation, made once for the four corners (the same values `r.cos()` and `r.sin()`).
+    let (sin_r, cos_r) = (r.sin(), r.cos());
     let corner = |px: f32, py: f32| {
         let p = vec2(px, py) - pivot;
-        vec2(p.x * r.cos() - p.y * r.sin(), p.x * r.sin() + p.y * r.cos()) + pivot
+        vec2(p.x * cos_r - p.y * sin_r, p.x * sin_r + p.y * cos_r) + pivot
     };
     let normal = vec4(scale.x, scale.y, 0.0, 0.0);
     let c: [u8; 4] = color.into();
     let vertex = |p: Vec2, u: f32, v: f32| Vertex { position: vec3(p.x, p.y, 0.0), uv: vec2(u, v), color: c, normal };
     let (u0, v0) = (sx / width, sy / height);
     let (u1, v1) = ((sx + sw) / width, (sy + sh) / height);
-    Mesh {
-        vertices: vec![vertex(corner(x, y), u0, v0), vertex(corner(x + w, y), u1, v0), vertex(corner(x + w, y + h), u1, v1), vertex(corner(x, y + h), u0, v1)],
-        indices: vec![0, 1, 2, 0, 2, 3],
-        texture: Some(tex.clone()),
-    }
+    mesh.vertices.clear();
+    mesh.vertices.extend([vertex(corner(x, y), u0, v0), vertex(corner(x + w, y), u1, v0), vertex(corner(x + w, y + h), u1, v1), vertex(corner(x, y + h), u0, v1)]);
+    mesh.indices.clear();
+    mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
+    mesh.texture = Some(tex.clone());
 }
 
-/// `mesh` with `scale` in every vertex's normal slot (see [`sprite_mesh`]).
-fn scaled_mesh(mesh: &Mesh, scale: Vec2) -> Mesh {
-    let normal = vec4(scale.x, scale.y, 0.0, 0.0);
-    Mesh { vertices: mesh.vertices.iter().map(|v| Vertex { normal, ..*v }).collect(), indices: mesh.indices.clone(), texture: mesh.texture.clone() }
+/// Draws `mesh` with `scale` in every vertex's normal slot (see [`fill_sprite_mesh`]), from the shared
+/// [`SCALED_MESH`] (no allocation per draw once it has grown).
+fn draw_scaled_mesh(mesh: &Mesh, scale: Vec2) {
+    SCALED_MESH.with(|m| {
+        let mut m = m.borrow_mut();
+        let normal = vec4(scale.x, scale.y, 0.0, 0.0);
+        m.vertices.clear();
+        m.vertices.extend(mesh.vertices.iter().map(|v| Vertex { normal, ..*v }));
+        m.indices.clear();
+        m.indices.extend_from_slice(&mesh.indices);
+        m.texture = mesh.texture.clone();
+        draw_mesh(&m);
+        m.texture = None;
+    });
 }
 
 local! {
@@ -512,7 +543,7 @@ pub fn draw(tex: &Texture2D, x: f32, y: f32, color: Color, params: DrawTexturePa
                 let tex_size = texels(tex);
                 set_tex_size(&m, tex_size);
                 session_material();
-                draw_mesh(&sprite_mesh(tex, x, y, color, &params, draw_scale(tex_size, &params)));
+                draw_sprite_mesh(tex, x, y, color, &params, draw_scale(tex_size, &params));
             }
             None => match draw_material() {
                 Some(m) => {
@@ -520,7 +551,7 @@ pub fn draw(tex: &Texture2D, x: f32, y: f32, color: Color, params: DrawTexturePa
                     count_break();
                     m.set_uniform("TexSize", tex_size);
                     gl_use_material(&m);
-                    draw_mesh(&sprite_mesh(tex, x, y, color, &params, draw_scale(tex_size, &params)));
+                    draw_sprite_mesh(tex, x, y, color, &params, draw_scale(tex_size, &params));
                     gl_use_default_material();
                 }
                 None => draw_texture_ex(tex, x, y, color, params),
@@ -547,7 +578,7 @@ pub fn draw_mesh_sharp(mesh: &Mesh, scale: Vec2) {
             Some(m) if mesh.texture.is_some() => {
                 set_tex_size(&m, mesh.texture.as_ref().map_or(Vec2::ONE, texels));
                 session_material();
-                draw_mesh(&scaled_mesh(mesh, scale.abs()));
+                draw_scaled_mesh(mesh, scale.abs());
             }
             Some(_) => draw_mesh(mesh),
             None => match draw_material() {
@@ -557,7 +588,7 @@ pub fn draw_mesh_sharp(mesh: &Mesh, scale: Vec2) {
                         m.set_uniform("TexSize", texels(tex));
                     }
                     gl_use_material(&m);
-                    draw_mesh(&scaled_mesh(mesh, scale.abs() * RASTER.with(std::cell::Cell::get)));
+                    draw_scaled_mesh(mesh, scale.abs() * RASTER.with(std::cell::Cell::get));
                     gl_use_default_material();
                 }
                 _ => draw_mesh(mesh),
