@@ -5769,7 +5769,48 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     if next.is_some() {
         end_targeting();
     }
+    note_idle_frame(game, view, dialogs);
     next
+}
+
+local! {
+    /// The map's state at the last frame (the camera, the tilt, the pointer), for [`note_idle_frame`].
+    static LAST_STATE: std::cell::Cell<Option<[u32; 9]>> = const { std::cell::Cell::new(None) };
+}
+
+/// «Экономия батареи» (the owner's request, 2026-11-11): tells the pacer whether this map frame changed
+/// nothing the player can act on. Idle: no dialog, no walk or wait, no showing, no glide or turn in progress,
+/// no toast or spell effect, no input this frame (a press, a key, the wheel, a pointer move) and the camera
+/// and the pointer where the last frame left them.
+fn note_idle_frame(game: &Game, view: &MapView, dialogs: &VecDeque<Dialog>) {
+    let (px, py) = crate::ui::input::mouse_position();
+    let look = view.look.unwrap_or((f32::NAN, f32::NAN));
+    let state = [
+        view.zoom.to_bits(),
+        view.zoom_steps as u32,
+        look.0.to_bits(),
+        look.1.to_bits(),
+        px.to_bits(),
+        py.to_bits(),
+        tilt_pitch().to_bits(),
+        tilt_yaw().to_bits(),
+        tilt_yaw_target().to_bits(),
+    ];
+    let prev = LAST_STATE.replace(Some(state));
+    let typed = !get_keys_pressed().is_empty() || crate::ui::input::any_press() || crate::ui::input::is_mouse_button_down(MouseButton::Left) || crate::ui::input::is_mouse_button_down(MouseButton::Right) || crate::ui::input::mouse_wheel() != (0.0, 0.0);
+    let idle = !typed
+        && prev == Some(state)
+        && dialogs.is_empty()
+        && !game.moving()
+        && !game.waiting()
+        && view.shows.is_empty()
+        && view.opening.is_none()
+        && view.returning.is_none()
+        && view.centring.is_none()
+        && view.toasts.is_empty()
+        && view.spell_fx.is_empty()
+        && !auto_turn_on();
+    super::frame_cap::note_idle(idle);
 }
 
 fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>, session: Option<&mut super::session::Keeper>) -> Option<Screen> {

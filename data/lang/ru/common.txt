@@ -58,6 +58,7 @@ Leader's name = Имя предводителя
 Map view = Вид карты
 Map resolution = Разрешение карты
 Frame rate cap = Ограничение FPS
+Battery saver = Экономия батареи
 No cap = Нет
 Flat = Плоский
 First person = От первого лица
