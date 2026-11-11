@@ -754,6 +754,56 @@ fn a_thirty_day_replay_is_small_and_its_keyframes_do_not_block_the_frame() {
     }
 }
 
+/// The process's resident memory in KiB (Linux; 0 elsewhere).
+fn rss_kb() -> u64 {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| s.lines().find(|l| l.starts_with("VmRSS:")).and_then(|l| l.split_whitespace().nth(1)).and_then(|n| n.parse().ok()))
+        .unwrap_or(0)
+}
+
+/// RAM while recording a long session (the replay's memory bound, about 1 MB beyond the game
+/// itself): the same 60 game days on РК1 with and without recording, the resident memory each
+/// adds, and the file's size. Ignored by default (about a minute): `cargo test --release --lib
+/// ram_while_recording -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn ram_while_recording_a_long_session() {
+    let Some(dt) = base() else { return };
+    let c = Arc::new(Content::from_dt(&dt));
+    let map = map_named(&dt, "РК1");
+    let play = |record: bool| -> (u64, u64) {
+        let mut d = Driver::new(start(&c, &map, Some(81)), true);
+        d.max = true;
+        d.g.max_ai = true;
+        d.g.foe = Some(Foe::Army(0));
+        // A session installs the thread's recorder when it starts, so the plain run has none at all.
+        let dir = scratch(if record { "ram-rec" } else { "ram-plain" });
+        let sess = record.then(|| {
+            let s = super::session::Session::start(&dir, &d.g, &header_for(&d.g, &dt)).unwrap();
+            d.g.replay = Some(s.clone());
+            d.session = Some(s.clone());
+            s
+        });
+        let mut f = Frames::new(DT_A, BUDGET_A);
+        let before = rss_kb();
+        let _ = session(&mut d, &mut f, 60);
+        let grew = rss_kb().saturating_sub(before);
+        if let Some(s) = sess {
+            s.finish();
+        }
+        let size = std::fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).map(|e| e.metadata().map_or(0, |m| m.len())).sum();
+        let _ = std::fs::remove_dir_all(&dir);
+        (grew, size)
+    };
+    // The first session pays the allocator's warm-up for the game's own memory: it is run once more
+    // before the measured ones, so both see the memory the process already holds.
+    let _ = play(false);
+    let (plain, _) = play(false);
+    let (recorded, size) = play(true);
+    println!("RAM: 60 days without recording grew {plain} KiB, with recording {recorded} KiB; the replay file {size} bytes");
+}
+
 /// A session closed in the middle of a day (a quit, a return to the menu) writes the entries that
 /// were still pending and the game's end state, so nothing of the day is lost and the end is
 /// checked by the playback like the other keyframes.
