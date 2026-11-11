@@ -14,11 +14,31 @@
 //! Blend modes (`chrome::additive` and the like) set their material with [`in_blend`]; a
 //! sharp draw inside it sets its uniforms on that material instead of replacing it.
 
+use razdor::frame_probe;
 use razdor::local;
 use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation, PipelineParams, TextureId};
 use macroquad::prelude::*;
 
 use super::memo::Recent;
+
+/// The probe's draw count for a draw of `verts` vertices from `tex` (`frame_probe::draw`; the texture
+/// is keyed by its id). Does nothing with the probe off.
+pub fn count_draw(tex: Option<&Texture2D>, verts: usize) {
+    if frame_probe::on() {
+        let key = tex.map_or(0, |t| {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            t.raw_miniquad_id().hash(&mut h);
+            h.finish()
+        });
+        frame_probe::draw(key, verts as u32);
+    }
+}
+
+/// The probe's batch break for a material or uniform change (`frame_probe::batch_break`).
+pub fn count_break() {
+    frame_probe::batch_break();
+}
 
 /// GLSL ES 1.00 source of `sharp_uv`, pasted into fragment shaders (the caller declares
 /// the precision and the `TexSize` / `Scale` uniforms). `uv` is the texture coordinate,
@@ -214,6 +234,7 @@ pub fn session<R>(draw: impl FnOnce() -> R) -> R {
 /// itself, and so is a lit material that does not compile.
 pub fn session_lit<R>(shadow_k: Option<f32>, draw: impl FnOnce() -> R) -> R {
     let (Some(k), Some(m)) = (shadow_k, lit_material()) else { return session(draw) };
+    count_break();
     m.set_uniform("ShadowK", k);
     session_with(m, draw)
 }
@@ -225,6 +246,7 @@ fn session_with<R>(m: Material, draw: impl FnOnce() -> R) -> R {
             BASE.with(|b| b.borrow_mut().take());
             LAST.with(|l| l.set(None));
             PLAIN.with(|p| p.set(false));
+            count_break();
             gl_use_default_material();
         }
     }
@@ -234,6 +256,7 @@ fn session_with<R>(m: Material, draw: impl FnOnce() -> R) -> R {
     BASE.with(|b| *b.borrow_mut() = Some(m.clone()));
     LAST.with(|l| l.set(None));
     PLAIN.with(|p| p.set(false));
+    count_break();
     gl_use_material(&m);
     let _end = End;
     draw()
@@ -289,6 +312,7 @@ pub fn plain_draw() {
         return;
     }
     if !PLAIN.with(|p| p.replace(true)) {
+        count_break();
         gl_use_default_material();
     }
 }
@@ -298,6 +322,7 @@ pub fn plain_draw() {
 fn session_material() {
     if PLAIN.with(|p| p.replace(false)) {
         if let Some(m) = BASE.with(|b| b.borrow().clone()) {
+            count_break();
             gl_use_material(&m);
         }
     }
@@ -306,6 +331,7 @@ fn session_material() {
 /// Ends a blend context: back to the session's material, or the default one outside a session.
 pub fn leave_blend() {
     PLAIN.with(|p| p.set(false));
+    count_break();
     match BASE.with(|b| b.borrow().clone()) {
         Some(m) => gl_use_material(&m),
         None => gl_use_default_material(),
@@ -316,6 +342,7 @@ pub fn leave_blend() {
 /// this session.
 fn set_cached(m: &Material, tex_size: Vec2, scale: Vec2) {
     if LAST.with(|l| l.get()) != Some((tex_size, scale)) {
+        count_break();
         m.set_uniform("TexSize", tex_size);
         m.set_uniform("Scale", scale);
         LAST.with(|l| l.set(Some((tex_size, scale))));
@@ -352,6 +379,7 @@ fn draw_material() -> Option<Material> {
 /// Sets `TexSize` (the texture's size in texels) and `Scale` (the draw's screen pixels per
 /// texel) on a material that includes [`SHARP_UV_GLSL`], for the draw `params` of `tex`.
 pub fn set_uniforms(m: &Material, tex: &Texture2D, params: &DrawTextureParams) {
+    count_break();
     let tex_size = texels(tex);
     m.set_uniform("TexSize", tex_size);
     m.set_uniform("Scale", draw_scale(tex_size, params));
@@ -383,6 +411,7 @@ fn blend_context() -> Option<Option<Material>> {
 /// `draw_texture_ex` with sharp sampling: the same placement and parameters, each original
 /// pixel drawn as a crisp square. Every call is its own draw (the uniforms change per draw).
 pub fn draw(tex: &Texture2D, x: f32, y: f32, color: Color, params: DrawTextureParams) {
+    count_draw(Some(tex), 4);
     match blend_context() {
         Some(Some(m)) => {
             set_uniforms(&m, tex, &params);
@@ -412,7 +441,9 @@ pub fn draw(tex: &Texture2D, x: f32, y: f32, color: Color, params: DrawTexturePa
 /// `draw_mesh` with sharp sampling, for a mesh whose texture is drawn at `scale` screen pixels
 /// per texel on each axis (the swaying trees: their atlas quad). Same blend rule as [`draw`].
 pub fn draw_mesh_sharp(mesh: &Mesh, scale: Vec2) {
+    count_draw(mesh.texture.as_ref(), mesh.vertices.len());
     let set = |m: &Material| {
+        count_break();
         if let Some(tex) = mesh.texture.as_ref() {
             m.set_uniform("TexSize", texels(tex));
         }
@@ -564,6 +595,7 @@ fn windows_material() -> Option<Material> {
 /// bound, after the map's tint (the glow must not be darkened by the night's colour). `night` is the frame's
 /// night factor; the sprites' own alpha fades them into the fog as usual.
 pub fn windows_pass<R>(mask: &Texture2D, night: f32, draw: impl FnOnce() -> R) -> R {
+    count_break();
     let Some(m) = windows_material() else { return draw() };
     m.set_texture("BuildingMask", mask.clone());
     m.set_uniform("Night", night);

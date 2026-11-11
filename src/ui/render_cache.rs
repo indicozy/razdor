@@ -77,6 +77,7 @@ pub fn draw_target() -> Option<RenderTarget> {
 /// Back to the 2D space: the target of the fill in progress, else the map's base target, else
 /// the screen.
 pub fn back_to_2d() {
+    super::sharp::count_break();
     let filling = FILLING.with(|f| f.borrow().clone());
     if let Some((rt, space)) = filling {
         set_camera(&target_camera(&rt, space));
@@ -115,6 +116,8 @@ pub fn base_pixels() -> Option<(f32, f32)> {
 pub fn blit_screen(tex: &macroquad::texture::Texture2D) {
     let (sw, sh) = (screen_width(), screen_height());
     let params = DrawTextureParams { dest_size: Some(vec2(sw, sh)), flip_y: true, ..Default::default() };
+    super::sharp::count_draw(Some(tex), 4);
+    super::sharp::count_break();
     match copy_material() {
         Some(m) => {
             gl_use_material(&m);

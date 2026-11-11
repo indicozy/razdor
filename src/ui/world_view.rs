@@ -1394,6 +1394,7 @@ fn in_view(cam: &Camera, f: impl Fn(&Camera)) {
         bent_view(cam, &tilt, bend, &f);
     } else {
         let (w, h) = (screen_width(), screen_height());
+        super::sharp::count_break();
         set_camera(&View3d(view25::window_matrix(cam.view, w, h) * tilt.cam.view_proj(cam.view)));
         f(&cam.tilted_space());
         super::render_cache::back_to_2d();
@@ -1410,6 +1411,7 @@ fn in_view_sprites(cam: &Camera, f: impl Fn(&Camera)) {
     let prev = SCREEN_VIEW.with(|v| v.replace(Some(cam.view)));
     let space = cam.tilted_space();
     let (w, h) = (screen_width(), screen_height());
+    super::sharp::count_break();
     set_camera(&View3d(view25::window_matrix(cam.view, w, h) * tilt.cam.view_proj(cam.view)));
     with_pass(Pass::Sprites, || f(&space));
     super::render_cache::back_to_2d();
@@ -1432,6 +1434,7 @@ fn bent_view(cam: &Camera, tilt: &Tilt, bend: view25::Bend, f: &impl Fn(&Camera)
     let target = bent_target(pw, ph);
     super::render_cache::fill_space(&target, space.view, || with_pass(Pass::Ground, || f(&space)));
     let (w, h) = (screen_width(), screen_height());
+    super::sharp::count_break();
     set_camera(&View3d(view25::window_matrix(cam.view, w, h) * tilt.cam.view_proj(cam.view)));
     draw_sheet(&target, &bend, tilt.cull);
     with_pass(Pass::Sprites, || f(&space));
@@ -1488,6 +1491,7 @@ fn draw_sheet(target: &RenderTarget, bend: &view25::Bend, region: Rect) {
         let Some((_, _, meshes)) = s.as_mut() else { return };
         for mesh in meshes.iter_mut() {
             mesh.texture = Some(target.texture.clone());
+            super::sharp::count_draw(mesh.texture.as_ref(), mesh.vertices.len());
             macroquad::models::draw_mesh(mesh);
             mesh.texture = None;
         }
