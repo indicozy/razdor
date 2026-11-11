@@ -791,7 +791,7 @@ impl BattleView {
         let t = self.max[side.index()].get_or_insert_with(|| MaxThinker::new(side));
         Some(match t.poll(&self.battle) {
             MaxPoll::Thinking => return None,
-            MaxPoll::Ready(r) => self.battle.play_max_move(r.choice),
+            MaxPoll::Ready(r) => self.battle.apply_max(r),
             MaxPoll::Failed => self.battle.hero_auto_step(),
         })
     }

@@ -300,7 +300,7 @@ pub enum CastTarget {
 }
 
 /// A spell being read on the map ([`Game::begin_cast`]).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Reading {
     pub spell: u32,
     pub target: CastTarget,

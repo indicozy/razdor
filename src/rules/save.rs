@@ -32,7 +32,7 @@ use super::content::Content;
 use super::events::EventEngine;
 use super::game::{Foe, Game};
 use super::map_refs::{self, Unknown};
-use super::rng::{self, EventRng, Rng};
+use super::rng::{self, Rng};
 use super::world::World;
 
 /// Bumped when the saved state changes shape. 2: the random generator is no longer saved
@@ -1155,7 +1155,7 @@ pub fn restore(meta: &SaveMeta, mut game: Game, demo: Arc<Content>, install: Opt
     let (rng, idle_offsets, music) = Rng::save_load_draws(game.world.map.w, &plants, armies);
     game.rng = rng;
     game.music_wait = Some(90_000 + music as u32);
-    game.event_rng = EventRng::from_clock();
+    game.event_rng = super::recording::hook::game_start(true);
     // The row width the game was saved with holds for it (0x4b771c), whatever the option
     // says now.
     let wide = super::formation::Formation::WIDE;

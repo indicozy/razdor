@@ -5,7 +5,7 @@ use crate::dt::dtm::Scenario;
 use crate::frame_probe::{self, Stage};
 
 use super::ai::{self, AiNews, AiStats, Beaten};
-use super::battle::{Battle, Outcome, Team};
+use super::battle::{patch_globals, set_patch_globals, Battle, Outcome, Team};
 use super::clock::{Clock, Tick};
 use super::content::{Content, HeroClass, ItemId, Source, Stat, UnitId, WageKind};
 use super::economy::VillageOffer;
@@ -19,6 +19,8 @@ use super::pack::Pack;
 use super::save::ScenarioRef;
 use super::ships::Ship;
 use super::map::{is_water, step_minutes, Tile, TileMap};
+use super::recording::hook;
+use super::recording::stream::{EngineInput, PatchRecord, Stamp};
 use super::rng::{EventRng, Rng, WORLD_MUSIC_DRAW};
 use super::units::{PromoteError, Unit};
 use super::world::{Army, LocationKind, Stationed, Troop, World, AI_BUDGET_CAP};
@@ -502,6 +504,14 @@ pub struct Game {
     /// Stretches of time so far (a hero's step, a wait tick): which window an event came in.
     #[serde(skip)]
     pub(crate) stretches: u64,
+    /// The arrivals asked for so far in this stretch ([`Game::tick_within`]): with `stretches`,
+    /// the place of a music change for a replay (`rules::recording`). Not saved.
+    #[serde(skip)]
+    pub(crate) asks: u32,
+    /// A replay's driver stops the frame at this ask, so its music change falls there (`None`
+    /// in play). Not saved.
+    #[serde(skip)]
+    pub(crate) replay_stop: Option<u32>,
     /// The events of a stretch whose window still plays on screen ([`Game::tick_shown`]).
     #[serde(skip)]
     pub(crate) held: Vec<(u64, Event)>,
@@ -526,10 +536,10 @@ pub struct Game {
     pause: Option<Pause>,
     /// The events of a step that [`Game::finish_pause`] completed, for the next tick.
     #[serde(skip)]
-    finished_events: Vec<Event>,
+    pub(crate) finished_events: Vec<Event>,
     /// Whether the tick under way walked and waited (`tick_within`'s snap at its end).
     #[serde(skip)]
-    walk_flags: (bool, bool),
+    pub(crate) walk_flags: (bool, bool),
     /// "Improved enemy AI in battle" (the original's `OptValue9`, "expert" in Razdor's
     /// settings): the player's choice, set by the interface, not part of the save.
     #[serde(skip)]
@@ -557,7 +567,7 @@ pub struct Game {
     /// `Battle::begin`'s start fix). Not saved: a save made during a battle reopens it, and
     /// `start_battle` takes them again from the same cells.
     #[serde(skip)]
-    formation_before_battle: Option<Vec<Slot>>,
+    pub(crate) formation_before_battle: Option<Vec<Slot>>,
     /// Global UI preference: when off, saved battle-disabled marks have no effect.
     #[serde(skip)]
     pub allow_unit_benching: bool,
@@ -744,7 +754,7 @@ impl Game {
             goal: None,
             start_day: clock.day_index(),
             rng: Rng::map_load(),
-            event_rng: EventRng::from_clock(),
+            event_rng: hook::game_start(false),
             music_wait: None,
             battles: 0,
             script: None,
@@ -804,6 +814,8 @@ impl Game {
             since_step: 0.0,
             hero_glide: None,
             stretches: 0,
+            asks: 0,
+            replay_stop: None,
             held: Vec::new(),
             held_shown: Vec::new(),
             stretch_minutes: 0.0,
@@ -1426,7 +1438,15 @@ impl Game {
     /// The map music's change when it is due, drawn from the game's generator as the
     /// original draws it (`rules::music::rotate`): the new pick and the ms to the next one.
     pub fn music_rotate(&mut self, last: usize) -> (usize, u32) {
-        super::music::rotate(last, &mut self.rng)
+        let (pick, ms) = super::music::rotate(last, &mut self.rng);
+        hook::record_at(Some(self.stamp()), EngineInput::Music { pick: pick as u8 });
+        (pick, ms)
+    }
+
+    /// Where the game is, as a replay's record names it: the stretch of time and the arrivals
+    /// asked for in it ([`Stamp`]).
+    pub(crate) fn stamp(&self) -> Stamp {
+        Stamp { stretch: self.stretches, ask: self.asks }
     }
 
     /// Which of the three `Global-Event` chords an event window, the village window or the
@@ -1683,6 +1703,26 @@ impl Game {
     /// unfinished ([`Game::ai_pending`]) the game is never saved, and the interface finishes it
     /// before a press acts on the game ([`Game::finish_pause`]).
     pub(crate) fn tick_within(&mut self, real_dt: f32, keep_going: &mut dyn FnMut() -> bool) -> Vec<Event> {
+        hook::set_now(self.stamp());
+        let stop = self.replay_stop;
+        let mut asks = self.asks;
+        let events = {
+            // Every arrival asked for is counted (`asks`); a replay's stop returns false at its ask.
+            let mut counted = || {
+                asks += 1;
+                if Some(asks) == stop {
+                    return false;
+                }
+                keep_going()
+            };
+            self.tick_inner(real_dt, &mut counted)
+        };
+        self.asks = asks;
+        events
+    }
+
+    /// The body of [`Game::tick_within`].
+    fn tick_inner(&mut self, real_dt: f32, keep_going: &mut dyn FnMut() -> bool) -> Vec<Event> {
         // The events of a step finished by `finish_pause` come with this tick.
         let mut events = std::mem::take(&mut self.finished_events);
         if self.pause.is_none() {
@@ -2306,6 +2346,7 @@ impl Game {
         self.stretch_minutes = minutes;
         self.since_step = 0.0;
         self.stretches += 1;
+        self.asks = 0;
         for a in &mut self.world.armies {
             a.walk.points.clear();
             a.walk.points.push(a.pos);
@@ -2602,7 +2643,15 @@ impl Game {
             && !(self.allow_unit_benching && u.battle_disabled)
             && (attacker != Team::Player || !u.unpaid))).collect();
         self.battles += 1;
+        let ordinal = self.battles as u32;
+        // The patch globals a battle starts with: a replay's recorded ones, else the live ones,
+        // which are reported to a recorder.
+        match hook::playback_patch(ordinal) {
+            Some(rec) => set_patch_globals(rec.globals()),
+            None => hook::record(EngineInput::Patch(PatchRecord::of(ordinal, patch_globals()))),
+        }
         let mut b = Battle::new(self.content.clone(), &player, &enemies, attacker);
+        b.ordinal = ordinal;
         // In battle every side names its units as 0x49747c does: the hero by his class and
         // name, a named character by his own name (an AI leader or a garrison's too).
         let np = player.len();

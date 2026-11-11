@@ -119,7 +119,7 @@ const FATE_INITIATIVE: i32 = 5;
 /// Undead Death casters' magic power floor is raised by this.
 const UNDEAD_DEATH_FLOOR: i32 = 25;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Team {
     Player,
     Enemy,
@@ -181,6 +181,32 @@ pub enum ActionKind {
 }
 
 impl ActionKind {
+    /// The kind's number in a replay's record ([`crate::rules::recording::stream::MaxCode`]).
+    pub(crate) fn code(self) -> u8 {
+        match self {
+            ActionKind::Melee => 0,
+            ActionKind::LongStrike => 1,
+            ActionKind::Shot => 2,
+            ActionKind::Strike => 3,
+            ActionKind::Curse => 4,
+            ActionKind::Heal => 5,
+            ActionKind::Bless => 6,
+        }
+    }
+
+    pub(crate) fn from_code(c: u8) -> Option<ActionKind> {
+        Some(match c {
+            0 => ActionKind::Melee,
+            1 => ActionKind::LongStrike,
+            2 => ActionKind::Shot,
+            3 => ActionKind::Strike,
+            4 => ActionKind::Curse,
+            5 => ActionKind::Heal,
+            6 => ActionKind::Bless,
+            _ => return None,
+        })
+    }
+
     pub fn is_physical(self) -> bool {
         matches!(self, ActionKind::Melee | ActionKind::LongStrike | ActionKind::Shot)
     }
@@ -538,7 +564,7 @@ struct Splash {
 /// The Community patch's globals that outlive a battle (`.mod`), shared by every battle, the
 /// AI's off-screen ones included. Nothing resets them between battles and saves do not hold
 /// them, as in the original.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct PatchGlobals {
     /// `Hunger`: the living count stored at each removal (c252e4) and the value the Hunger
     /// units last saw (c2525f). Both are 3 in the file.
@@ -704,6 +730,11 @@ pub struct Battle {
     /// The experimental «Максимум бережёт магов» (`Settings::max_guard`, [`Battle::set_max_guard`]):
     /// the rules never read it.
     max_guard: bool,
+    /// The battle's number in its game (`Game::battles`, 0 for a battle no game started) and
+    /// how many of the enemy's «Максимум» decisions were applied so far ([`Battle::apply_max`]):
+    /// what a replay's record names them by (`rules::recording`). Not part of the rules.
+    pub(crate) ordinal: u32,
+    pub(crate) decisions: u32,
     /// What the battle is fought for, as «Максимум» weighs it ([`MaxStakes`]; Razdor's rule,
     /// the owner's decision of 2026-10-19); the rules never read it.
     max_stakes: MaxStakes,
@@ -841,6 +872,8 @@ impl Battle {
             god: false,
             max_ai: false,
             max_guard: false,
+            ordinal: 0,
+            decisions: 0,
             max_stakes: MaxStakes::Campaign,
         };
         b.fit_to_formation();

@@ -130,6 +130,9 @@ impl Battle {
             bench,
             god,
             max_ai: _,
+            // A replay's bookkeeping, not the rules (`rules::recording`).
+            ordinal: _,
+            decisions: _,
             // The root's move filter only (`Search`'s root, never a table entry).
             max_guard: _,
             // One value for the whole battle, as the battle's tables are; the evaluations
