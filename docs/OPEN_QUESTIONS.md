@@ -8,6 +8,15 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **Replays: a battle begun on a walk's last steps does not play back** (2026-11-11, replays phase 3a). Four
+  difftest lists (`lake-gang`, `rk1-church`, `rk1-day1`, `rk1-ruins-won`) record and replay to a checkpoint
+  right after the battle starts (the walk's stretch 47 or 18): the live game still has the hero on his path and
+  the battle set, the playback has finished the walk (and has the battle set too, but the walk and the
+  hero's HP differ after it). The test `every_difftest_list_plays_back_from_its_recording` holds these four to
+  failing. Also: a 25-day recorded campaign (`a_recorded_campaign_plays_to_its_end_and_seeks_to_any_day`, ignored)
+  drifts at stretch 463 after its first battles, while a 3-day one plays. Suspect: the walk's arrival order
+  around a battle start (the stamp of the walk's own arrival vs the battle's start). Settle by a per-entry
+  dump of both sides (the `Game` JSON at the first mismatching check) and the walk code in `map-step.md`.
 - **Mill sails: no reliable sails card in the depth cut; later** (2026-11-11, «Живая карта»). The sails do not turn in
   this release. The cut gives a thin sails card to a few sprites (`21d57cc1cf16b388`, `a2e856d2522fe2c2`,
   `ab998a24a640b370`), but none of the windmills checked by eye had one; the card that turned on screen (`ab998…`,

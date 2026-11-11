@@ -18,6 +18,7 @@ pub mod session;
 pub mod hook;
 pub mod snapshot;
 pub mod stream;
+pub mod watch;
 
 #[cfg(test)]
 mod tests;

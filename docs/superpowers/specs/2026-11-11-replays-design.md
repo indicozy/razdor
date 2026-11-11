@@ -121,6 +121,36 @@ Not done: the difftest action lists recorded and played back; a session exit hoo
 entries are lost if the game closes mid-day with no save); the wiki page; the owner's approval of
 the «Прочее» row's screenshots.
 
+## Phase 3a (phase 2's gaps): done, with two open divergences
+
+- Battle start: `BattleStart` records `max_stakes` (serialised now) and the game day; `rebuild` sets both.
+- Session exit hook: the live session is closed at the game's end (menu, new game, load, setting off,
+  quit), writing the pending entries and the end state as a keyframe (`Session::close`, `ui::recording`).
+- The difftest lists: recorded and played back (`every_difftest_list_plays_back_from_its_recording`).
+  Playing them back found what the recorder missed: the event chord and the window closes (not
+  recorded), the arrival count (a refusal counted), the music draw order (by stamp, not stream order),
+  the battle write-back, and the stamp of an action's own engine records. Fixed; four lists still
+  diverge (battles begun on a walk's last steps: `docs/OPEN_QUESTIONS.md`), held to failing.
+- RAM while recording (`ram_while_recording_a_long_session`, ignored): RSS is allocator-dominated,
+  so it does not isolate the recorder (a first session grows the process by several MB by itself).
+  The file is about 51 KB for 60 days of РК1; the recorder holds the day's entries (a few dozen
+  bytes a day) and one keyframe in flight. The bound (about 1 MB) is by construction, not measured.
+
+## Phase 3b (player): rules done; the watching screen not built
+
+- `ReplayPlayer` (`recording/watch.rs`): opens a file, follows the segments across the loads,
+  checks every checkpoint, stops at a drift with the recording's version (tested: a corrupted
+  checkpoint), seeks to a day through the nearest keyframe, and builds the timeline's marks from the
+  file (days, battles with the two sides, towns taken, the hero's fall, the victory at keyframe
+  precision). A different rules fingerprint still plays (tested).
+- Not met: a 25-day recorded campaign does not play to its end (drift at stretch 463; ignored test),
+  so seeks on a long campaign are not tested. Playback to the end on the real files is only proven
+  for 3-day sessions and the difftest lists that are not known divergent.
+- Not built (owner's approval first, per the UI rule): the watching screen (the map view with the
+  camera on the hero, the control strip, the timeline, the battle choice, «Выход»), the entry buttons
+  in the journal, «Итоги» and the load window, the texts, the screenshots, the UI regression and the
+  mobile check. The changelog keeps the phase 2 line (it would claim a watch that does not exist yet).
+
 ## Open
 
 - **Frame schedules (holes 9 and 10): closed in phase 1b.** Every frame schedule (2 to 240 fps,

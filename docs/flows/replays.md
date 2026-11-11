@@ -196,8 +196,8 @@ the recorded one) and `Game::replay_stop` (the recorded ask inside a stretch). `
 one entry: a player action at its place by its own method; a battle's action on the battle under way,
 then the enemy's turns as the screen plays them (`run_enemy`: «Максимум»'s recorded moves, else the
 battle AI); a check compares the state hash (finish, snap, `state_hash`), and a difference is a drift
-with its place. Music changes are drawn at their recorded places (`draw_music`), and the start of a
-battle (`start_battle`) takes its recorded patch globals (the hook).
+with its place. A music change is drawn where its record is (`Player::apply`'s `Music` arm, see
+"The player" below), and the start of a battle (`start_battle`) takes its recorded patch globals (the hook).
 
 A file plays segment by segment: each starts from its own snapshot (`Snapshot::from_bytes(..).restore`)
 and plays its entries; a load's segment starts from the state the load gave.
@@ -222,12 +222,68 @@ and plays its entries; a load's segment starts from the state the load gave.
 - A keyframe on the frame: 0.26 ms (РК1), 1.03 ms (ДС2); the packing on the writer thread: 4.4 and
   46 ms.
 
+## The player (`recording/watch.rs`, phase 3b, rules only)
+
+`ReplayPlayer` opens a file (`open`, or `new` for a file already read): it reads the segments and
+builds the timeline's `marks` (one pass that restores each checkpoint: the days, the battles'
+starts with the two sides' unit names from the battle block, and the towns taken, the hero's fall
+and the victory from the keyframes' states, so those last three are at keyframe precision).
+
+- `advance()` plays the next entry: a segment starts from its own snapshot (its start hash is
+  checked), the entries go through `Player::apply`, a segment's end starts the next one (a load).
+  A checkpoint that does not match stops the playback: `Drift { day, version, at, reason }` with the
+  recording's Razdor version (the message «Запись сделана в версии {v} и дальше расходится») and
+  `last_good()`, the place the game stands at after the last matching entry.
+- `seek_day(day)`: the latest checkpoint (segment start or keyframe) at or before `day`, restored,
+  then played until the game's day is `day` or later; `seek_place(place)` goes to a place the same way.
+  Days are the game's clock days (`first_day()` is the file's first day).
+- The thread's playback is installed for each public call and taken away at its end
+  (`arm`, `take_playback`), so several players on one thread do not meet, and a live game is not
+  left with records.
+- Nothing is drawn here: the watching screen (phase 3b's UI) is not built.
+
+`Player` (`play.rs`) places each recorded entry: a player action or a check at the **end of its
+stretch** (the paused step is finished there, as the action does; the arrivals taken inside the
+stretch are not compared), a music change at its **exact arrival** (`advance_exact`: the time stops at
+that ask and the change is drawn, so it lands in stream order), and a battle's write-back into the
+armies after each enemy step and before each check (the screen does it each frame). An arrival counts
+when it is taken, not when it is asked for: a frame's refused ask is not a place, so the count is the
+same whatever the frame budgets were.
+
+## Recorded by the screen (found by playing the difftest lists back)
+
+Besides the entry points that changed the game already: `Game::event_chord` (one draw of the
+generator, made by the screen as a window opens: `PlayerAction::Chord`) and `Game::window_closed`
+(the events a closed window allows: `PlayerAction::MapWindowClosed`). Both were engine-only and
+drifted a playback. `actions::scope` finishes a paused step at each outermost action whether or not a
+recorder is attached, and sets the hook's stamp to the action's place, so an engine record made by
+the action (the battle's patch globals) carries the place it came at.
+
+## Closing a session (the exit hook)
+
+`ui::recording` holds the live session and closes it when the game ends: a return to the menu, a new
+game, a load (before the new file opens, as a resume truncates it), the setting turned off, and the
+app's quit (`App::shutdown`). `Session::close(game)` finishes the paused step and the snap, flushes
+the day's entries, writes the game's state as a last keyframe (when it can be taken), and syncs the
+file. A return to the menu has no game left to keyframe: it writes the entries only.
+
+## Tests and where they stand
+
+- `every_difftest_list_plays_back_from_its_recording` (`difftest/tests.rs`): each list of
+  `tools/difftest` is recorded (a check after each action) and played back from the snapshot after
+  its new game. Four lists are known divergent (see `docs/OPEN_QUESTIONS.md`) and are held to failing.
+- `closing_a_session_keeps_its_pending_entries_and_its_end_state`: a close mid-day keeps the entries.
+- `a_corrupted_checkpoint_stops_the_playback_with_the_version_message`: the drift stop and its place.
+- `a_replay_of_other_rules_still_plays`: a 3-day replay with another rules fingerprint plays to its end.
+- `a_recorded_campaign_plays_to_its_end_and_seeks_to_any_day`: ignored, see `docs/OPEN_QUESTIONS.md`.
+- `ram_while_recording_a_long_session`: ignored; prints the resident memory of 60 days with and without
+  recording next to the file's size (RSS is allocator-dominated; the file is about 51 KB for 60 days).
+
 ## Open
 
-- The replay watching (phase 3) and the battle view's controls: not built.
-- A save's place and the file are written when the day changes and at a save: the last day's
-  entries are lost if the game is closed without a save and the day has not ended (the session has
-  no exit hook yet).
+- The watching screen (phase 3b UI: the map view, the control strip, the battle choice, the entry
+  points) and the battle export (phase 4): not built.
+- The divergences above (four difftest lists, the 25-day campaign).
 - A game restored from its save with recording off keeps no session; turning the setting on starts
   a new file from the game's state.
 - The `ui::recording` setting row and the frame hook are UI changes: the owner's approval of the

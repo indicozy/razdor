@@ -214,7 +214,7 @@ impl Drop for Writer {
 
 /// A segment as it is read: its start (the packed snapshot), its entries (checks included), and
 /// the battles begun in it.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Segment {
     pub start_at: Stamp,
     pub start_day: u64,
@@ -242,7 +242,7 @@ pub struct Keyframe {
 }
 
 /// A replay file as it is read.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ReplayFile {
     pub header: ReplayHeader,
     pub segments: Vec<Segment>,
