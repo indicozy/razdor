@@ -5147,7 +5147,7 @@ pub fn watch_map(game: &Game, assets: &Assets, view: &mut MapView, follow: bool,
     }
     // The hero's place: his tile's centre when he stands (a restored game's display position is
     // not kept by a record), his glide while he walks.
-    let hero: (f32, f32) = if game.moving() { game.display_pos() } else { game.world.map.center(game.tile()).into() };
+    let hero: (f32, f32) = if game.moving() { game.display_pos() } else { game.world.map.center(game.tile()) };
     if follow {
         view.look = None;
     } else if view.look.is_none() {

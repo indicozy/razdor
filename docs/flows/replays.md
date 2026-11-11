@@ -312,6 +312,34 @@ and the keyframe equals it. The screen's card press is `Battle::act_with` (recor
 `PlayerAction::DrainEvents` when events wait). A contact step is zero-time: `Game::zero_time_next`
 lets a stop before the next stretch pass it, and `Game::chase` reads the route a chase would set, so
 the check does not change the game.
+
+A check is a look, so it does not play a zero-time contact either: the live driver can take a hash
+right after a walk is set (before its first step), and the state there still has the contact to
+come. `Player::apply` therefore stops a `Check` with `reach_stretch(.., contacts = false)`; an action
+plays the contact first (`contacts = true`), as the live hero's next frame does. Playing it before a
+check drifted the 30-day sample at day 14 (`a_thirty_day_scripted_session_plays_back_to_the_same_state_every_day`).
+
+### The state machines of the map step (drift hunt, 2026-11-11)
+
+Each machine, the variables its transitions touch, the input that triggers it, and whether playback
+reproduces it. "Stop" means the place a check or action stands at (stretch end, ask).
+
+| Machine | Transition | Variables | Trigger / record | Playback |
+|---|---|---|---|---|
+| Hero walk | idle → planned | `path`, `goal`, `talk_to`, `click_buildings`, `wait_ticks`, `endless_wait`, `reading` | `Walk` (`set_destination`) | the action, at its stretch |
+| | planned → stepping (paused mid-stretch) | `pause`, `step_elapsed`, `since_step` | frame budget only | frames; `finish_pause` at each stop |
+| | step → arrived / blocked / chase ends | `pos`, `path`, `goal`, `talk_to`, `step_flag` | frames (`begin_walk`, `follow_army`) | frames of the playback's own dt |
+| | zero-time contact (army or garrison ahead) | `foe`, `path`, `talk_to`, `point_zeroed` | none: a frame with no time | action: played before its place; check: not played (fixed) |
+| Events | queued → held → shown | `pending`, `finished_events`, `held`, `marks` | frames; screen glide | `held` must be empty at a stop |
+| | shown → answered / closed | `held`, `held_shown` | `answer_question`, `event_window_closed`, `DrainEvents` | the action, at its place |
+| Battle | pending (`foe` set) → started → fought → resolved → written back | `foe`, battle state, patch globals | `StartBattle`, `Battle(act)`, `Max`, `ResolveBattle`, `Patch` | the battle's own actions; enemy turns by record or AI |
+| Waiting | begin → tick per stretch → window ends it | `wait_ticks`, `endless_wait` | `Wait` | frames to the stretch |
+| AI armies | planning (`plans`) → arrivals (`ai_move_*`) → snap (idle draws) | `plans` (empty at rest), army fields, `rng`, `idle_*` | none; the snap at each stop | `armies_snap` at each check, as the driver's `hash` |
+| Clock | midnight / noon | `clock`, daily flags | time | frames |
+
+Every transition that changes a state the hash reads is either an input (recorded), a frame of the
+playback's own time, or a zero-time contact. The last kind is the only one a stop can split from the
+live order, which is why a check and an action place it differently.
 - A game restored from its save with recording off keeps no session; turning the setting on starts
   a new file from the game's state.
 - The `ui::recording` setting row and the frame hook are UI changes: the owner's approval of the

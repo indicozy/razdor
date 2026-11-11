@@ -49,7 +49,7 @@ impl Player {
     /// arrival (the ask), and the time stops there to draw it.
     pub fn advance_to(&mut self, target: Stamp) -> Result<(), String> {
         let mut left = f32::INFINITY;
-        self.reach_stretch(target, &mut left).map(|_| ())
+        self.reach_stretch(target, &mut left, true).map(|_| ())
     }
 
     /// The game at a recorded arrival: time runs until the game has taken exactly `target.ask`
@@ -63,7 +63,10 @@ impl Player {
 
     /// As [`Player::advance_to`], with `left` game seconds at most: `Ok(true)` when the game stands
     /// at `target`, `Ok(false)` when the budget ran out first.
-    fn reach_stretch(&mut self, target: Stamp, left: &mut f32) -> Result<bool, String> {
+    /// `contacts`: a zero-time contact the walk reaches at the place is played before it (an
+    /// action does so, as the live hero's next frame does). A check is a look at the state where
+    /// it was taken, and the live driver took it before that contact, so a check does not play it.
+    fn reach_stretch(&mut self, target: Stamp, left: &mut f32, contacts: bool) -> Result<bool, String> {
         loop {
             if self.game.stretches == target.stretch && self.game.held.is_empty() {
                 // The paused step of the recorded stretch, if any, is finished: the action (or the
@@ -74,7 +77,7 @@ impl Player {
                 if self.game.stretches == target.stretch && !self.game.ai_pending() && self.game.held.is_empty() {
                     // A contact the walk reaches at this stretch's end is part of it (no time, so
                     // it is not a stretch): it is played before the place.
-                    if !self.game.zero_time_next() {
+                    if !contacts || !self.game.zero_time_next() {
                         return Ok(true);
                     }
                 }
@@ -135,7 +138,7 @@ impl Player {
     pub fn apply_budget(&mut self, e: &Entry, left: &mut f32) -> Result<bool, String> {
         match &e.input {
             Input::Engine(EngineInput::Check { hash }) => {
-                if !self.reach_stretch(e.at, left)? {
+                if !self.reach_stretch(e.at, left, false)? {
                     return Ok(false);
                 }
                 self.game.finish_pause();
@@ -163,7 +166,7 @@ impl Player {
             }
             Input::Engine(_) => Ok(true),
             Input::Player(PlayerAction::StartBattle) => {
-                if !self.reach_stretch(e.at, left)? {
+                if !self.reach_stretch(e.at, left, true)? {
                     return Ok(false);
                 }
                 let b = self.start_battle();
@@ -172,7 +175,7 @@ impl Player {
                 Ok(true)
             }
             Input::Player(PlayerAction::ResolveBattle) => {
-                if !self.reach_stretch(e.at, left)? {
+                if !self.reach_stretch(e.at, left, true)? {
                     return Ok(false);
                 }
                 let (b, _) = self.battle.take().ok_or("a battle to resolve, none under way")?;
@@ -186,7 +189,7 @@ impl Player {
                 Ok(true)
             }
             Input::Player(a) => {
-                if !self.reach_stretch(e.at, left)? {
+                if !self.reach_stretch(e.at, left, true)? {
                     return Ok(false);
                 }
                 let raised = apply_game_events(&mut self.game, a);
@@ -199,7 +202,7 @@ impl Player {
     /// A battle's start at the entry's place: the battle is made and begun as the playback makes
     /// it, with no enemy turn played, for the caller's view to play. `left` as in `apply_budget`.
     pub fn start_battle_for_view(&mut self, e: &Entry, left: &mut f32) -> Result<Option<Battle>, String> {
-        if !self.reach_stretch(e.at, left)? {
+        if !self.reach_stretch(e.at, left, true)? {
             return Ok(None);
         }
         Ok(Some(self.start_battle()))

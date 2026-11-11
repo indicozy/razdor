@@ -1328,8 +1328,9 @@ fn a_scripted_market_visit_buys_sells_and_hires_and_plays_back() {
 
 /// The sample record of the screenshots: 30 game days on РК1. Each day the hero walks to the nearest
 /// explored town, every third day to the nearest army (the battle it meets is fought), and at a
-/// market he buys and sells one good; each day's end is recorded as a check.
-fn sample_record(dt: &DtInstall, c: &Arc<Content>) -> std::path::PathBuf {
+/// market he buys and sells one good; each day's end is recorded as a check. Returns the file and
+/// the states of the days' ends (the live hashes the playback must reach).
+fn sample_record(dt: &DtInstall, c: &Arc<Content>) -> (std::path::PathBuf, Vec<u64>) {
     let map = map_named(dt, "РК1");
     let mut d = Driver::new(start(c, &map, Some(7)), true);
     d.checks = true;
@@ -1343,6 +1344,7 @@ fn sample_record(dt: &DtInstall, c: &Arc<Content>) -> std::path::PathBuf {
     let mut f = Frames::new(DT_A, BUDGET_A);
     let opening = d.g.drain_events();
     d.settle(opening);
+    let mut hashes = Vec::new();
     for day in 0..30u32 {
         let here = d.g.tile();
         let mut towns: Vec<_> = d.g.world.locations.iter().filter(|l| d.g.fog.explored(l.tile) && l.tile != here).map(|l| l.tile).collect();
@@ -1361,9 +1363,10 @@ fn sample_record(dt: &DtInstall, c: &Arc<Content>) -> std::path::PathBuf {
             d.hash();
         }
         d.play_days(&mut f, 1);
+        hashes.push(d.hash());
     }
     sess.finish();
-    dir.join(sess.file_name())
+    (dir.join(sess.file_name()), hashes)
 }
 
 /// Writes a sample record (a 25-day campaign with a battle) to `RAZDOR_SAMPLE_RECORD`, for the
@@ -1375,7 +1378,7 @@ fn write_a_sample_record_for_the_screenshots() {
     let Ok(out) = std::env::var("RAZDOR_SAMPLE_RECORD") else { return };
     let c = Arc::new(Content::from_dt(&dt));
     // RAZDOR_SAMPLE_SIMPLE: the 25-day campaign with one battle (plays back to its end).
-    let path = if std::env::var_os("RAZDOR_SAMPLE_SIMPLE").is_some() { recorded_session(&dt, &c, "РК1", 25, "sample-simple").0 } else { sample_record(&dt, &c) };
+    let path = if std::env::var_os("RAZDOR_SAMPLE_SIMPLE").is_some() { recorded_session(&dt, &c, "РК1", 25, "sample-simple").0 } else { sample_record(&dt, &c).0 };
     std::fs::copy(&path, &out).unwrap();
     let marks = super::watch::ReplayPlayer::open(&path, c.clone(), Some(&dt.dir)).unwrap().marks;
     let battles = marks.iter().filter(|m| matches!(m.kind, super::watch::MarkKind::Battle { .. })).count();
@@ -1383,5 +1386,38 @@ fn write_a_sample_record_for_the_screenshots() {
     eprintln!("SAMPLE marks {} battles {battles} towns {towns}", marks.len());
     let mut whole = super::watch::ReplayPlayer::open(&path, c.clone(), Some(&dt.dir)).unwrap();
     eprintln!("SAMPLE play_to_end {:?}", whole.play_to_end().map_err(|d| format!("{d:?}")));
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+/// The 30-day scripted session (the watching screen's sample) plays back to the live state at every
+/// day's end and at each keyframe: a check that stops before a zero-time contact (a hash taken right
+/// after a walk is set, before its first step) must not play that contact. This session's keyframe
+/// on day 14 is such a check; playing the contact first drifted there. РК1.
+#[test]
+fn a_thirty_day_scripted_session_plays_back_to_the_same_state_every_day() {
+    use super::watch::ReplayPlayer;
+    let Some(dt) = base() else { return };
+    let c = Arc::new(Content::from_dt(&dt));
+    let (path, hashes) = sample_record(&dt, &c);
+    let file = super::file::read(&path).unwrap();
+    assert_eq!(hashes.len(), 30, "one state per game day");
+    let checks: Vec<u64> = file
+        .segments
+        .iter()
+        .flat_map(|s| s.entries.iter())
+        .filter_map(|e| match e.input {
+            Input::Engine(EngineInput::Check { hash }) => Some(hash),
+            _ => None,
+        })
+        .collect();
+    let mut at = 0;
+    for h in &hashes {
+        let found = checks[at..].iter().position(|c| c == h).unwrap_or_else(|| panic!("day end {h:016x} is not a check"));
+        at += found + 1;
+    }
+    let mut p = ReplayPlayer::open(&path, c.clone(), Some(&dt.dir)).unwrap();
+    p.play_to_end().unwrap_or_else(|d| panic!("the session drifts: {d:?}"));
+    assert!(p.ended());
+    assert_eq!(state_hash(p.game().unwrap()), *hashes.last().unwrap(), "the last day is the live final state");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
