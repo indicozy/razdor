@@ -664,6 +664,7 @@ The save «{name}» uses units or items that are not in your game ({ids}). It wa
 # rules::chronicle_text). Templates: the dry lines of the entries, {name} filled by the game.
 Summary = Итоги
 Summary after a map = Итоги после карты
+When nothing moves on the map, the game draws new frames rarely, to save the battery. = Когда на карте ничего не движется, игра почти не рисует новые кадры — меньше расход батареи.
 Chronicle = Летопись
 Nothing written down yet. = Пока ничего не записано.
 Day {day} = День {day}

@@ -946,6 +946,12 @@ profiling switch is env `RAZDOR_FRAME_CAP=30|60` (desktop) or the files `profile
 On Android `set_setting` writes the cap to `frame-cap` in the app folder when it changes; the activity reads it
 (`razdorFrameCap` in `android/MainActivityInject.java`) and asks the window and the surface for the cap's rate
 (the lowest mode at least that fast) instead of the top one.
+**Battery saver** («Экономия батареи», `Settings::battery_saver`, off by default, row in «Прочее»; `frame_cap::set_battery`
+from `apply_options`). `world_view::note_idle_frame` (after each map frame, from `frame`) sets the idle flag: no dialog,
+no walk or wait, no showing, glide, turn or toast, no press, key, wheel or pointer move this frame, and the camera and
+pointer where the last frame left them. `frame_cap::current()` then gives `battery_cap`: the idle frame rate
+`IDLE_FPS` (10) instead of the cap after an idle frame, so the map's animations tick slowly and the frames in between are
+not drawn. Other screens never set the flag, so they keep their cap. The ui-regression and the mobile checks show the row.
 The world map's 2.5D settings are in the same window, after «Имя предводителя»: «Вид карты»
 (`map_tilt`, always shown), and «Размер фигур» (`map_sprite_size`) and «Поворот двумя пальцами»
 (`map_twist`, `gestures::set_twist`) only with the 2.5D view on. `apply_options` pushes all three

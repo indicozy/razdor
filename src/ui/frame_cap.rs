@@ -75,10 +75,41 @@ pub fn set_setting(cap: u32) {
     }
 }
 
-/// The cap the loop paces to now: the profiling switch or the setting (0 = off).
+/// The cap the loop paces to now: the profiling switch or the setting (0 = off), or the idle rate after an
+/// idle map frame with «Экономия батареи» on (`battery_cap`). Called once a frame, by the pacer, which takes
+/// the idle flag the frame set.
 pub fn current() -> u32 {
     let setting = SETTING.load(std::sync::atomic::Ordering::Relaxed);
-    in_use(if setting == u32::MAX { 0 } else { setting })
+    let base = in_use(if setting == u32::MAX { 0 } else { setting });
+    battery_cap(base, BATTERY.load(std::sync::atomic::Ordering::Relaxed), IDLE.swap(false, std::sync::atomic::Ordering::Relaxed))
+}
+
+/// The idle frame rate of «Экономия батареи» (the owner's request 2026-11-11: 5 to 10 a second, so the map's
+/// animations still tick slowly).
+pub const IDLE_FPS: u32 = 10;
+
+/// The cap of a frame: `base`, but after an idle frame with the battery saver on, no more than [`IDLE_FPS`].
+pub fn battery_cap(base: u32, battery: bool, idle: bool) -> u32 {
+    if battery && idle && (base == 0 || base > IDLE_FPS) {
+        IDLE_FPS
+    } else {
+        base
+    }
+}
+
+/// «Экономия батареи» is on (`audio::Settings::battery_saver`, pushed by [`set_battery`]).
+static BATTERY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The map frame just drawn changed nothing the player can act on (`world_view::note_idle_frame`).
+static IDLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Puts the battery saver from the settings (called with the other settings).
+pub fn set_battery(on: bool) {
+    BATTERY.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Marks the frame just drawn as idle or not (the map frame sets it; the pacer reads it once).
+pub fn note_idle(idle: bool) {
+    IDLE.store(idle, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// The margin the sleep leaves to a spin: the OS sleep may wake late, so the last part of the wait is
@@ -133,6 +164,17 @@ mod tests {
         assert!((w.as_secs_f64() - (1.0 / 60.0 - 0.005)).abs() < 1e-6, "{w:?}");
         assert_eq!(wait_for(Duration::from_millis(20), 60), Duration::ZERO, "a frame over the period is never slept");
         assert_eq!(wait_for(Duration::ZERO, 30), Duration::from_secs_f64(1.0 / 30.0));
+    }
+
+    #[test]
+    fn the_battery_saver_caps_only_an_idle_frame_and_never_raises_the_cap() {
+        assert_eq!(battery_cap(0, true, true), IDLE_FPS, "no cap: the idle rate");
+        assert_eq!(battery_cap(60, true, true), IDLE_FPS, "a higher cap: the idle rate");
+        assert_eq!(battery_cap(30, true, true), IDLE_FPS);
+        assert_eq!(battery_cap(10, true, true), 10, "a cap at or under the idle rate stays");
+        assert_eq!(battery_cap(60, true, false), 60, "a busy frame keeps the cap");
+        assert_eq!(battery_cap(0, true, false), 0, "a busy frame with no cap is not paced");
+        assert_eq!(battery_cap(60, false, true), 60, "the saver off: no change");
     }
 
     #[test]

@@ -122,6 +122,46 @@ fn extend_edge() -> bool {
     EXTEND_EDGE.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// `RAZDOR_MAP_FIT=1`: the map's zoom is the whole map's floor, as a developer snapshot's (read once).
+fn map_fit_env() -> bool {
+    static ENV: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENV.get_or_init(|| std::env::var("RAZDOR_MAP_FIT").is_ok_and(|v| v.trim() == "1"))
+}
+
+/// `RAZDOR_SPRITE_LOD=1` (a developer switch, off by default): the map objects are drawn from the half-size
+/// atlas (divisor 2) at the whole map's zoom, and from the quarter one (4) below `SPRITE_LOD_QUARTER_CELL`
+/// screen pixels a cell. `None` with the switch off, or at a cell size where the full sprites are drawn.
+fn sprite_lod_divisor(scale: f32) -> Option<u32> {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ON.get_or_init(|| std::env::var("RAZDOR_SPRITE_LOD").is_ok_and(|v| v.trim() == "1")) {
+        return None;
+    }
+    if scale < SPRITE_LOD_QUARTER_CELL {
+        Some(4)
+    } else if scale < SPRITE_LOD_HALF_CELL {
+        Some(2)
+    } else {
+        None
+    }
+}
+
+/// The cell sizes (screen pixels) under which the switch's half and quarter sprites are drawn.
+const SPRITE_LOD_HALF_CELL: f32 = 12.0;
+const SPRITE_LOD_QUARTER_CELL: f32 = 6.0;
+
+/// The level of detail of the map's animations at its scale (`Camera::scale`: screen pixels a cell): 0 where
+/// a flag, a chimney's smoke, a bird or a wave is under a pixel and its motion cannot be seen, 1 where it is
+/// whole, a linear ramp between (the owner's request 2026-11-11: the whole map zoomed out). The shared
+/// helper of the animations: `living` (flags, smoke, birds) and the ship's wakes use it, and the water's
+/// ripples and foam (`water.rs`) may too.
+pub fn zoom_lod(scale: f32) -> f32 {
+    ((scale - LOD_HIDE_CELL) / (LOD_FULL_CELL - LOD_HIDE_CELL)).clamp(0.0, 1.0)
+}
+
+/// The cell size (screen pixels) where the animations are gone (`zoom_lod` 0) and where they are whole (1).
+const LOD_HIDE_CELL: f32 = 8.0;
+const LOD_FULL_CELL: f32 = 16.0;
+
 /// Takes the settings' map zoom and lock in (every frame).
 pub fn set_zoom_prefs(home: f32, locked: bool) {
     let home = if home.is_finite() { home.clamp(ZOOM_RANGE.0, ZOOM_RANGE.1) } else { 1.0 };
@@ -2727,6 +2767,20 @@ fn draw_terrain(game: &Game, art: Option<&DtArt>, cam: &Camera) {
     }
 }
 
+/// A map object's size on screen (physical pixels, its shorter side) below which it is not drawn at all,
+/// and above which it is drawn whole (`detail_visibility`'s band between them fades it out).
+const DETAIL_HIDE_PX: f32 = 2.0;
+const DETAIL_FULL_PX: f32 = 3.0;
+
+/// The visibility of a map object of picture `picture` (2D units) at this size: 0 when it is too small to
+/// see, 1 when it is whole, a smoothstep between (the owner's request 2026-11-11: the grass tufts and small
+/// rocks of a map zoomed out are sub-pixel noise, and the sprite run pays for each one).
+fn detail_visibility(picture: Rect, dpi: f32) -> f32 {
+    let side = picture.w.min(picture.h) * dpi;
+    let t = ((side - DETAIL_HIDE_PX) / (DETAIL_FULL_PX - DETAIL_HIDE_PX)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 /// Something drawn in painter's order (by the bottom edge on screen).
 enum Drawable {
     Object(Decoration),
@@ -2908,16 +2962,21 @@ fn draw_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera) {
     if let Some((atlas, r)) = art.and_then(|a| a.map_atlas()).and_then(|at| Some((at, at.decoration(o.class, o.sprite)?))) {
         let at = object_sprite_origin(o, r.w, r.h, cam);
         let size = vec2(r.w * zoom, r.h * zoom);
+        // Zoomed out, the smaller copy of the sprite is drawn in the same place and size (`RAZDOR_SPRITE_LOD`).
+        let (atlas, src) = match sprite_lod_divisor(cam.scale).and_then(|d| art?.sprite_lod_atlas(d).map(|l| (l, d))) {
+            Some((lod, _)) => (lod, lod.decoration(o.class, o.sprite).unwrap_or(r)),
+            None => (atlas, r),
+        };
         if o.class == object_class::TREES {
             // The small trees and bushes sway: the quad's top corners move by the lean of
             // their phase, the bottom stays (0x4c99d0, engine.md §7).
             let (_, _, phase) = super::memo::plant_jitter_memo(o.tile.0, o.tile.1, u16::from(o.class) << 8 | u16::from(o.sprite));
             let lean = razdor::rules::rng::tree_sway(clock_ms(), phase) * zoom;
-            draw_leaning(&atlas.texture, r, at, size, lean);
+            draw_leaning(&atlas.texture, src, at, size, lean);
             return;
         }
         frame_probe::sprite(size.x, size.y);
-        draw_picture_form(cam, atlas, r, at, size, faded(WHITE), zoom);
+        draw_picture_form(cam, atlas, src, at, size, faded(WHITE), zoom);
         return;
     }
     let s = cam.scale;
@@ -2964,7 +3023,7 @@ fn card_building<'a>(l: &Location, art: Option<&'a DtArt>) -> Option<(&'a Atlas,
 /// Whether the living map is drawn in this view (`living`): not in the bent views (the first-person
 /// view, hidden from players), whose sheet the living parts are not laid on.
 fn living_on(cam: &Camera) -> bool {
-    living::on() && cam.tilt.is_none_or(|t| t.cam.bend.is_none())
+    living::on() && cam.tilt.is_none_or(|t| t.cam.bend.is_none()) && zoom_lod(cam.scale) > 0.0
 }
 
 /// A building's living parts with its atlas, when the living map is on and the building has any
@@ -4490,7 +4549,25 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     super::sharp::session_lit(lit, || {
         for d in items.iter().map(|(_, d)| d) {
             match d {
-                Drawable::Object(o) => standing(cam, object_foot(o, cam), object_foot(o, cam), shade_of(object_foot(o, cam)), object_picture(o, art, cam), || draw_object(o, art, cam)),
+                Drawable::Object(o) => {
+                    // Razdor's (the owner's request, 2026-11-11): an object too small to see is not drawn, and one
+                    // just above that fades out (`detail_visibility`); the flat view fades it through `SPRITE_VIS`.
+                    let foot = object_foot(o, cam);
+                    let picture = object_picture(o, art, cam);
+                    let detail = detail_visibility(picture, screen_dpi_scale());
+                    if detail > 0.0 {
+                        let vis = shade_of(foot) * detail;
+                        standing(cam, foot, foot, vis, picture, || {
+                            if cam.tilt.is_none() && detail < 1.0 {
+                                let prev = SPRITE_VIS.with(|s| s.replace(detail));
+                                draw_object(o, art, cam);
+                                SPRITE_VIS.with(|s| s.set(prev));
+                            } else {
+                                draw_object(o, art, cam);
+                            }
+                        });
+                    }
+                }
                 Drawable::Building(i) => {
                     let l = &game.world.locations[*i];
                     let outlined = hover.is_some_and(|h| h.building == Some(*i));
@@ -5636,7 +5713,48 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     if next.is_some() {
         end_targeting();
     }
+    note_idle_frame(game, view, dialogs);
     next
+}
+
+local! {
+    /// The map's state at the last frame (the camera, the tilt, the pointer), for [`note_idle_frame`].
+    static LAST_STATE: std::cell::Cell<Option<[u32; 9]>> = const { std::cell::Cell::new(None) };
+}
+
+/// «Экономия батареи» (the owner's request, 2026-11-11): tells the pacer whether this map frame changed
+/// nothing the player can act on. Idle: no dialog, no walk or wait, no showing, no glide or turn in progress,
+/// no toast or spell effect, no input this frame (a press, a key, the wheel, a pointer move) and the camera
+/// and the pointer where the last frame left them.
+fn note_idle_frame(game: &Game, view: &MapView, dialogs: &VecDeque<Dialog>) {
+    let (px, py) = crate::ui::input::mouse_position();
+    let look = view.look.unwrap_or((f32::NAN, f32::NAN));
+    let state = [
+        view.zoom.to_bits(),
+        view.zoom_steps as u32,
+        look.0.to_bits(),
+        look.1.to_bits(),
+        px.to_bits(),
+        py.to_bits(),
+        tilt_pitch().to_bits(),
+        tilt_yaw().to_bits(),
+        tilt_yaw_target().to_bits(),
+    ];
+    let prev = LAST_STATE.replace(Some(state));
+    let typed = !get_keys_pressed().is_empty() || crate::ui::input::any_press() || crate::ui::input::is_mouse_button_down(MouseButton::Left) || crate::ui::input::is_mouse_button_down(MouseButton::Right) || crate::ui::input::mouse_wheel() != (0.0, 0.0);
+    let idle = !typed
+        && prev == Some(state)
+        && dialogs.is_empty()
+        && !game.moving()
+        && !game.waiting()
+        && view.shows.is_empty()
+        && view.opening.is_none()
+        && view.returning.is_none()
+        && view.centring.is_none()
+        && view.toasts.is_empty()
+        && view.spell_fx.is_empty()
+        && !auto_turn_on();
+    super::frame_cap::note_idle(idle);
 }
 
 fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>, session: Option<&mut super::session::Keeper>) -> Option<Screen> {
@@ -5703,6 +5821,11 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
         }
     }
     view.zoom = zoom_at(home, view.zoom_steps, locked, lo);
+    // `RAZDOR_MAP_FIT=1` (a snapshot's): the wheel's lowest zoom, the whole map in the view (the
+    // zoom the settings' range cannot reach).
+    if map_fit_env() {
+        view.zoom = lo;
+    }
     // PageUp and PageDown tilt the 2.5D view, 5° a press; Q and E turn it 45° (the flat view
     // ignores them). The shown yaw eases toward its target every frame.
     // The eyes view turns with the hero's walk first, so the easing carries it.
@@ -6526,12 +6649,13 @@ fn draw_wakes(game: &Game, cam: &Camera) {
         wakes.prune(now);
         let tex = glow_tex();
         let cell_w = cam.cell_size().x;
+        let lod = zoom_lod(cam.scale);
         super::chrome::additive(|| {
             for (_, wake) in wakes.iter() {
                 for (p, alpha, size) in wake.visible(now) {
                     let c = cam.to_screen(p.at);
                     let (w, h) = (size * cell_w, size * cell_w * 0.6);
-                    draw_texture_ex(&tex, c.x - w / 2.0, c.y - h / 2.0, Color::new(1.0, 1.0, 1.0, alpha), DrawTextureParams { dest_size: Some(vec2(w, h)), ..Default::default() });
+                    draw_texture_ex(&tex, c.x - w / 2.0, c.y - h / 2.0, Color::new(1.0, 1.0, 1.0, alpha * lod), DrawTextureParams { dest_size: Some(vec2(w, h)), ..Default::default() });
                 }
             }
         });
@@ -6580,7 +6704,7 @@ fn draw_birds(game: &Game, cam: &Camera) {
     let fog = &game.fog;
     let span = 0.22 * cam.cell_size().x;
     let lift = 1.2 * cam.cell_size().x;
-    let col = Color::new(0.12, 0.12, 0.14, 0.85);
+    let col = Color::new(0.12, 0.12, 0.14, 0.85 * zoom_lod(cam.scale));
     for (p, flap) in living::bird_points(&flock, now) {
         if !fog.explored(map.tile_at(p)) {
             continue;
@@ -6807,7 +6931,7 @@ fn spell_entry(name: &str, l: &SpellLine, now: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::boxed_rects;
+    use super::{boxed_rects, detail_visibility, zoom_lod, PX};
     use macroquad::prelude::*;
 
     #[test]
@@ -6835,6 +6959,28 @@ mod tests {
         assert_eq!((src.x, src.y, src.w, src.h), (0.0, 0.0, 10.0, 6.0));
         assert_eq!((dest.w, dest.h), (10.0, 6.0));
     }
+
+    #[test]
+    fn the_map_animations_fade_out_zoomed_out_and_are_whole_at_the_default_zoom() {
+        assert_eq!(zoom_lod(PX * 0.16), 0.0, "the whole map: the flags and birds are under a pixel");
+        assert_eq!(zoom_lod(PX), 1.0, "the default zoom: whole");
+        let mid = zoom_lod(12.0);
+        assert!(mid > 0.0 && mid < 1.0, "{mid}");
+        assert!(zoom_lod(9.0) < zoom_lod(10.0) && zoom_lod(10.0) < zoom_lod(11.0), "a ramp, not a step");
+    }
+
+    #[test]
+    fn a_sprite_under_two_pixels_is_not_drawn_and_one_under_three_fades() {
+        let dot = |w: f32, h: f32| Rect::new(0.0, 0.0, w, h);
+        assert_eq!(detail_visibility(dot(1.5, 9.0), 1.0), 0.0, "the shorter side counts");
+        assert_eq!(detail_visibility(dot(9.0, 2.0), 1.0), 0.0);
+        assert_eq!(detail_visibility(dot(4.0, 4.0), 1.0), 1.0, "from three pixels, whole");
+        let fade = detail_visibility(dot(2.5, 9.0), 1.0);
+        assert!(fade > 0.0 && fade < 1.0, "{fade}");
+        assert_eq!(detail_visibility(dot(1.0, 1.0), 2.0), 0.0, "a 2x display counts physical pixels: 1 logical px is 2");
+        assert_eq!(detail_visibility(dot(1.5, 1.5), 2.0), 1.0, "3 physical px is whole");
+    }
+
     use razdor::rules::clock::duration_label;
     use razdor::rules::content::HeroClass;
     use razdor::rules::magic::SpellLine;

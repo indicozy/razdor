@@ -1405,6 +1405,7 @@ pub fn apply_options(audio: &super::audio::Settings) {
     super::world_view::set_sprite_size(audio.map_sprite_size);
     super::world_view::set_map_render_scale(audio.map_render_scale);
     super::frame_cap::set_setting(audio.frame_cap);
+    super::frame_cap::set_battery(audio.battery_saver);
     super::gestures::set_twist(audio.map_twist);
     chrome::set_option_override("ScrollSpeed", audio.scroll_speed.map(|v| (v.round() as i32).to_string()));
     chrome::set_option_override("OptValue8", audio.autosave.map(|on| if on { "1" } else { "0" }.to_string()));
@@ -1599,7 +1600,7 @@ impl Group {
             Group::Battle => &[Row::WalkSpeed, Row::AnimSpeed, Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience, Row::HitShake],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
-            Group::Other => &[Row::Updates, Row::Import, Row::ChronicleSummary],
+            Group::Other => &[Row::Updates, Row::Import, Row::ChronicleSummary, Row::BatterySaver],
         }
     }
 }
@@ -1659,11 +1660,12 @@ pub enum Row {
     Updates,
     Import,
     ChronicleSummary,
+    BatterySaver,
 }
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 52] = [
+pub const ALL: [Row; 53] = [
         Row::MapZoom,
         Row::ScrollSpeed,
         Row::MapResolution,
@@ -1716,6 +1718,7 @@ pub const ALL: [Row; 52] = [
         Row::Updates,
         Row::Import,
         Row::ChronicleSummary,
+        Row::BatterySaver,
     ];
 
     /// The long hint a «?» pop-up shows (backlog 1508), for the rows whose hint runs past a line.
@@ -1745,6 +1748,7 @@ pub const ALL: [Row; 52] = [
             Row::HitShake => Some(tr("Razdor's: a short shake of the battlefield when a unit takes a hit. Stronger on a heavy hit and when a unit dies. Style only.")),
             Row::Language => Some(super::language::hint()),
             Row::ChronicleSummary => Some(tr("Razdor's: after a map ends or the hero falls, a page sums up the map: the route, battles, highlights and totals.")),
+            Row::BatterySaver => Some(tr("When nothing moves on the map, the game draws new frames rarely, to save the battery.")),
             Row::Updates => Some(if updates_phone() {
                 tr(UPDATES_PHONE_HINT)
             } else {
@@ -2290,6 +2294,12 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
         Row::ChronicleSummary => {
             if labelled_row(c, geo, tr("Summary after a map"), yes_no(audio.chronicle_summary)).0 {
                 audio.chronicle_summary = !audio.chronicle_summary;
+            }
+        }
+        Row::BatterySaver => {
+            // Razdor's (the owner's request, 2026-11-11): the map's idle frames are rarely drawn (`frame_cap`).
+            if labelled_row_help(c, geo, tr("Battery saver"), yes_no(audio.battery_saver), Row::BatterySaver.help_text()).0 {
+                audio.battery_saver = !audio.battery_saver;
             }
         }
         Row::MinimapCorner => {
@@ -3728,7 +3738,7 @@ mod tests {
     #[test]
     fn the_long_hints_are_behind_a_question_mark() {
         let with: Vec<Row> = Row::ALL.into_iter().filter(|r| r.help_text().is_some()).collect();
-        assert_eq!(with, vec![Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::Language, Row::Updates, Row::ChronicleSummary]);
+        assert_eq!(with, vec![Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::Language, Row::Updates, Row::ChronicleSummary, Row::BatterySaver]);
         scene_help("Experience");
         assert_eq!(HELP_PINNED.with(|p| p.get()), Row::Experience.help_text());
         HELP_PINNED.with(|p| p.set(None));

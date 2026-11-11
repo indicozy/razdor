@@ -148,6 +148,8 @@ pub struct DtArt {
     items: OnceCell<Vec<Image>>,
     objects: OnceCell<ObjectSprites>,
     atlas: OnceCell<Option<Atlas>>,
+    /// The map objects' smaller copies (`sprite_lod_atlas`): the half and the quarter atlases, made on first use.
+    sprite_lod: [OnceCell<Option<Atlas>>; 2],
     terrain_layer: OnceCell<Option<TerrainLayer>>,
     /// The terrain textures, for the minimap's colours.
     terrain_images: OnceCell<Vec<Option<Image>>>,
@@ -186,6 +188,46 @@ fn graphics_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// `img` at `1/k` of its size: each `k`×`k` block averaged (the alpha too), the edge blocks cut short.
+fn downscale(img: &Image, k: u32) -> Image {
+    let (w, h) = (img.width.div_ceil(k), img.height.div_ceil(k));
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            let mut acc = [0u32; 4];
+            let mut n = 0u32;
+            for sy in (y * k)..((y + 1) * k).min(img.height) {
+                for sx in (x * k)..((x + 1) * k).min(img.width) {
+                    let i = ((sy * img.width + sx) * 4) as usize;
+                    for (c, sum) in acc.iter_mut().enumerate() {
+                        *sum += u32::from(img.rgba[i + c]);
+                    }
+                    n += 1;
+                }
+            }
+            let o = ((y * w + x) * 4) as usize;
+            for (c, sum) in acc.iter().enumerate() {
+                rgba[o + c] = (sum / n.max(1)) as u8;
+            }
+        }
+    }
+    Image { width: w, height: h, rgba }
+}
+
+#[cfg(test)]
+mod downscale_tests {
+    use super::*;
+
+    #[test]
+    fn a_half_size_copy_averages_each_block_and_keeps_the_edge() {
+        let img = Image { width: 3, height: 2, rgba: vec![10, 20, 30, 255, 30, 40, 50, 255, 90, 90, 90, 0, 0, 0, 0, 0, 50, 50, 50, 255, 50, 50, 50, 255] };
+        let half = downscale(&img, 2);
+        assert_eq!((half.width, half.height), (2, 1));
+        assert_eq!(&half.rgba[0..4], &[22, 27, 32, 191], "the 2x2 block at the origin, alpha averaged too");
+        assert_eq!(&half.rgba[4..8], &[70, 70, 70, 127], "the edge block takes the two pixels that are there");
+    }
+}
+
 fn texture(img: &Image) -> Option<Texture2D> {
     let (w, h) = (u16::try_from(img.width).ok()?, u16::try_from(img.height).ok()?);
     let tex = Texture2D::from_rgba8(w, h, &img.rgba);
@@ -202,6 +244,7 @@ impl DtArt {
             items: OnceCell::new(),
             objects: OnceCell::new(),
             atlas: OnceCell::new(),
+            sprite_lod: [OnceCell::new(), OnceCell::new()],
             terrain_layer: OnceCell::new(),
             terrain_images: OnceCell::new(),
             textures: RefCell::new(HashMap::new()),
@@ -403,6 +446,46 @@ impl DtArt {
         self.cached(Key::Object(class, sprite), || texture(&self.objects().decoration(class, sprite)?.image))
     }
 
+    /// The map objects' and buildings' sprites at `1/divisor` of their size (2 or 4), packed into one smaller
+    /// texture with the same keys (Razdor's, `RAZDOR_SPRITE_LOD=1`: the whole map zoomed out draws them from it).
+    /// Each sprite is box-filtered; its rectangle is the full one divided by the divisor. `None` for a divisor
+    /// that is not 2 or 4, or when the sprites do not pack.
+    pub fn sprite_lod_atlas(&self, divisor: u32) -> Option<&Atlas> {
+        let slot = match divisor {
+            2 => 0,
+            4 => 1,
+            _ => return None,
+        };
+        self.sprite_lod[slot]
+            .get_or_init(|| {
+                let sprites = &self.objects().sprites;
+                let small: Vec<Image> = sprites.iter().map(|s| downscale(&s.image, divisor)).collect();
+                let images: Vec<&Image> = small.iter().collect();
+                let Some((image, pos)) = gfx::pack_atlas(&images, ATLAS_WIDTH / divisor) else {
+                    razdor::diag!("Discord Times art: the 1/{divisor} sprites do not fit an atlas");
+                    return None;
+                };
+                let texture = texture(&image)?;
+                razdor::diag!("sprite LOD 1/{divisor}: atlas {}x{} ({} bytes)", image.width, image.height, image.rgba.len());
+                let rects = RectTable::from_entries(
+                    sprites
+                        .iter()
+                        .zip(pos)
+                        .zip(&small)
+                        .map(|((s, (x, y)), m)| ((s.section, s.cat, s.idx), Rect::new(x as f32, y as f32, m.width as f32, m.height as f32))),
+                );
+                Some(Atlas { texture, rects, cards: HashMap::new(), live: RefCell::new(Overlay::default()), pending: RefCell::new(VecDeque::new()), living: HashMap::new() })
+            })
+            .as_ref()
+    }
+
+    /// The bytes of the map atlas's texture and of the smaller copies made so far (the memory the switch costs).
+    pub fn sprite_atlas_bytes(&self) -> [usize; 3] {
+        let full = self.atlas.get().and_then(|a| a.as_ref()).map_or(0, |a| a.texture.width() as usize * a.texture.height() as usize * 4);
+        let part = |slot: &OnceCell<Option<Atlas>>| slot.get().and_then(|a| a.as_ref()).map_or(0, |a| a.texture.width() as usize * a.texture.height() as usize * 4);
+        [full, part(&self.sprite_lod[0]), part(&self.sprite_lod[1])]
+    }
+
     /// All map objects and buildings packed into one texture.
     pub fn map_atlas(&self) -> Option<&Atlas> {
         self.atlas
@@ -414,6 +497,7 @@ impl DtArt {
                     return None;
                 };
                 let texture = texture(&image)?;
+                razdor::diag!("map atlas: {}x{} ({} bytes)", image.width, image.height, image.rgba.len());
                 let rects = RectTable::from_entries(
                     sprites
                         .iter()

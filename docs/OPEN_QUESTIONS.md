@@ -8,6 +8,15 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **Zoomed-out map: a cached static picture is not built** (2026-11-11, the owner's item 1 of the zoom-out
+  work). The design was a screen-sized cache of the statics (`render_cache::Cached`), with the armies, ship and hero
+  drawn over it. It is not exact: at the whole-map zoom of the Discord Times maps a dynamic sprite (the hero, an
+  army) overlaps a static one drawn after it in almost every frame (the tree in the cell to the south covers it),
+  and the redraw of that static over the dynamic one double-blends its partly transparent pixels (the painted
+  shadows). The measured fallback was 100% of the frames on РК1 and Устье Трейна (the cache never ran). The exact
+  route is to redraw the dynamic clusters with a GL scissor over the cached frame (each cluster: clear, ground,
+  the statics and dynamics that overlap its box, in the frame's order), so only the boxes are drawn in full. Not
+  built: the scissor and the cluster bookkeeping are a separate change with its own measurements.
 - **Mill sails: no reliable sails card in the depth cut; later** (2026-11-11, «Живая карта»). The sails do not turn in
   this release. The cut gives a thin sails card to a few sprites (`21d57cc1cf16b388`, `a2e856d2522fe2c2`,
   `ab998a24a640b370`), but none of the windmills checked by eye had one; the card that turned on screen (`ab998…`,
