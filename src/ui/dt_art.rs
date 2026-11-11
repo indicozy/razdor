@@ -199,15 +199,15 @@ fn downscale(img: &Image, k: u32) -> Image {
             for sy in (y * k)..((y + 1) * k).min(img.height) {
                 for sx in (x * k)..((x + 1) * k).min(img.width) {
                     let i = ((sy * img.width + sx) * 4) as usize;
-                    for c in 0..4 {
-                        acc[c] += u32::from(img.rgba[i + c]);
+                    for (c, sum) in acc.iter_mut().enumerate() {
+                        *sum += u32::from(img.rgba[i + c]);
                     }
                     n += 1;
                 }
             }
             let o = ((y * w + x) * 4) as usize;
-            for c in 0..4 {
-                rgba[o + c] = (acc[c] / n.max(1)) as u8;
+            for (c, sum) in acc.iter().enumerate() {
+                rgba[o + c] = (sum / n.max(1)) as u8;
             }
         }
     }
