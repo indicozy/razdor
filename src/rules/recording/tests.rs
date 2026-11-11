@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use super::hook;
 use super::snapshot::{state_hash, Snapshot};
+use crate::rules::save::Install;
 use super::stream::{Entry, EngineInput, Input, PatchRecord, PlayerAction, Stamp};
 use crate::dt::install::DtInstall;
 use crate::rules::battle::{MaxPoll, MaxThinker, Outcome, Team};
@@ -84,6 +85,10 @@ struct Driver {
     wall: f64,
     due: f64,
     pick: usize,
+    /// Each day-end hash is also recorded as a check (a recording's place to verify).
+    checks: bool,
+    /// The replay file the game records to, pumped after each frame.
+    session: Option<super::session::Session>,
 }
 
 const AUTO_BATTLE_STEPS: usize = 3000;
@@ -91,13 +96,16 @@ const AUTO_BATTLE_STEPS: usize = 3000;
 impl Driver {
     fn new(g: Game, live: bool) -> Driver {
         let first = crate::rules::music::WORLD_THEME;
-        Driver { g, live, music: false, max: false, wall: 0.0, due: 0.0, pick: first }
+        Driver { g, live, music: false, max: false, wall: 0.0, due: 0.0, pick: first, checks: false, session: None }
     }
 
     /// One frame: the tick within its budget, then the music's due change (live) or the
     /// recorded changes (playback), and the events it raised.
     fn frame(&mut self, frames: &mut Frames) -> Vec<Event> {
         let (dt, budget) = frames.next();
+        if let Some(s) = self.session.as_ref() {
+            s.pump(&self.g);
+        }
         if !self.live {
             // Playback stops the frame at the ask its record names, so the change lands there.
             self.g.replay_stop = match hook::playback_music_next() {
@@ -163,7 +171,9 @@ impl Driver {
                 break;
             }
             let Some(id) = b.active() else { break };
-            if b.max_ai() && b.fighters[id].team == Team::Enemy {
+            if b.fighters[id].team != Team::Enemy {
+                b.auto_step();
+            } else if b.max_ai() {
                 loop {
                     match thinker.poll(&b) {
                         MaxPoll::Ready(r) => {
@@ -178,7 +188,7 @@ impl Driver {
                     }
                 }
             } else {
-                b.auto_step();
+                b.ai_step();
             }
         }
         let outcome = b.outcome();
@@ -256,7 +266,11 @@ impl Driver {
     fn hash(&mut self) -> u64 {
         self.g.finish_pause();
         self.g.armies_snap();
-        state_hash(&self.g)
+        let h = state_hash(&self.g);
+        if self.checks {
+            hook::record_input(Some(self.g.stamp()), Input::Engine(EngineInput::Check { hash: h }));
+        }
+        h
     }
 }
 
@@ -270,8 +284,8 @@ fn session(d: &mut Driver, frames: &mut Frames, days: u64) -> Vec<u64> {
     d.settle(opening);
     d.walk_to_nearest(frames);
     out.push(d.hash());
-    if d.max {
-        d.g.foe = Some(Foe::Army(0));
+    if d.max && d.g.foe.is_some() {
+        // A battle the game was set up for (its foe is part of the starting state, see the test).
         d.battle();
     }
     for _ in 0..days {
@@ -472,6 +486,7 @@ fn a_recorded_session_plays_back_from_its_records_on_another_clock() {
     let mut live = Driver::new(start(&c, &map, None), true);
     live.music = true;
     live.max = true;
+    live.g.foe = Some(Foe::Army(0));
     let mut f = Frames::new(DT_A, BUDGET_A);
     let h_live = session(&mut live, &mut f, 2);
     hook::take_recorder();
@@ -487,6 +502,7 @@ fn a_recorded_session_plays_back_from_its_records_on_another_clock() {
     hook::install_playback(&entries);
     let mut back = Driver::new(start(&c, &map, None), false);
     back.max = true;
+    back.g.foe = Some(Foe::Army(0));
     let mut f = Frames::new(DT_B, BUDGET_B);
     let h_back = session(&mut back, &mut f, 2);
     assert!(hook::playback_music_next().is_none(), "every music change was made");
@@ -523,7 +539,7 @@ fn a_game_mid_step_has_no_snapshot() {
 fn the_engine_takes_its_seeds_from_a_playback_then_the_clock() {
     let entries = [
         Entry { at: Stamp::default(), input: Input::Engine(EngineInput::GameStart { load: false, seed: 11, patch: fresh_patch() }) },
-        Entry { at: Stamp::default(), input: Input::Player(PlayerAction::Ok) },
+        Entry { at: Stamp::default(), input: Input::Player(PlayerAction::WindowClosed) },
         Entry { at: Stamp::default(), input: Input::Engine(EngineInput::GameStart { load: true, seed: 22, patch: fresh_patch() }) },
     ];
     hook::install_playback(&entries);
@@ -543,4 +559,225 @@ fn the_state_hash_follows_the_rules() {
     let before = state_hash(&a.g);
     a.g.rng.random(7);
     assert_ne!(state_hash(&a.g), before);
+}
+
+/// A live session recorded through the entry points, from the game's state at its start, played
+/// back from the stream: every day's check (the state hash at the day's end) holds, and the
+/// final state is the live one. «Максимум» is on, so its decisions are recorded too.
+#[test]
+fn a_recorded_game_plays_back_to_the_same_states_each_day() {
+    let Some(dt) = base() else { return };
+    let c = Arc::new(Content::from_dt(&dt));
+    let map = map_named(&dt, "РК1");
+    let install = Install { dir: &dt.dir, content: c.clone() };
+    let mut live = Driver::new(start(&c, &map, Some(31)), true);
+    live.max = true;
+    live.checks = true;
+    live.g.max_ai = true;
+    live.g.foe = Some(Foe::Army(0));
+    let begin = Snapshot::take(&live.g).unwrap();
+    let shared = Shared::default();
+    hook::install_recorder(Box::new(shared.clone()));
+    let mut f = Frames::new(DT_A, BUDGET_A);
+    let hashes = session(&mut live, &mut f, 3);
+    hook::take_recorder();
+    let entries = shared.0.borrow().clone();
+    let count = |want: fn(&Input) -> bool| entries.iter().filter(|e| want(&e.input)).count();
+    assert_eq!(count(|i| matches!(i, Input::Engine(EngineInput::Check { .. }))), hashes.len(), "one check a day");
+    assert!(count(|i| matches!(i, Input::Player(PlayerAction::Walk { .. }))) >= 1, "the walk is recorded");
+    assert!(count(|i| matches!(i, Input::Player(PlayerAction::Battle(_)))) >= 1, "the battle's actions are recorded");
+    assert!(count(|i| matches!(i, Input::Player(PlayerAction::StartBattle))) >= 1, "the battle's start is recorded");
+    assert!(count(|i| matches!(i, Input::Engine(EngineInput::Max { .. }))) >= 1, "«Максимум» is recorded");
+
+    let g0 = begin.restore(c.clone(), Some(&install)).unwrap();
+    let mut back = super::play::play(g0, &entries, 1.0 / 30.0).unwrap_or_else(|e| panic!("playback: {e}"));
+    back.finish_pause();
+    back.armies_snap();
+    assert_eq!(state_hash(&back), *hashes.last().unwrap(), "the final state");
+}
+
+/// A scratch folder for the session tests (removed by each test at its end).
+fn scratch(name: &str) -> std::path::PathBuf {
+    let d = std::env::temp_dir().join(format!("razdor-replay-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+fn header_for(g: &Game, dt: &DtInstall) -> super::header::ReplayHeader {
+    super::header::ReplayHeader::of(g, super::header::install_hash(&dt.dir).unwrap())
+}
+
+/// Recording on and off: the same session gives the same states every day, the same game bytes
+/// in the save, and the replay's file exists only with recording on.
+#[test]
+fn recording_leaves_the_states_and_the_game_alone() {
+    let Some(dt) = base() else { return };
+    let c = Arc::new(Content::from_dt(&dt));
+    let map = map_named(&dt, "РК1");
+    let mut plain = Driver::new(start(&c, &map, Some(41)), true);
+    let mut f = Frames::new(DT_A, BUDGET_A);
+    let h_plain = session(&mut plain, &mut f, 3);
+    let game_plain = serde_json::to_vec(&plain.g).unwrap();
+
+    let dir = scratch("onoff");
+    let mut rec = Driver::new(start(&c, &map, Some(41)), true);
+    let sess = super::session::Session::start(&dir, &rec.g, &header_for(&rec.g, &dt)).unwrap();
+    rec.g.replay = Some(sess.clone());
+    rec.session = Some(sess);
+    let mut f = Frames::new(DT_A, BUDGET_A);
+    let h_rec = session(&mut rec, &mut f, 3);
+    let game_rec = serde_json::to_vec(&rec.g).unwrap();
+    rec.session.as_ref().unwrap().finish();
+    let file = super::file::read(&std::fs::read_dir(&dir).unwrap().next().unwrap().unwrap().path()).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert_eq!(h_rec, h_plain, "the same states every day with recording on");
+    assert_eq!(game_rec, game_plain, "the same game bytes in a save");
+    assert!(file.segments.len() == 1 && !file.segments[0].entries.is_empty(), "the session wrote its segment");
+}
+
+/// A save, a load of it, and the play on: the replay file is cut at the save's place, a new
+/// segment starts from the loaded game, and the file plays back to the live game's final state
+/// (segment by segment: the first to the save, the second from the load).
+#[test]
+fn a_load_truncates_the_replay_and_the_file_plays_back_across_it() {
+    let Some(dt) = base() else { return };
+    let c = Arc::new(Content::from_dt(&dt));
+    let map = map_named(&dt, "РК1");
+    let install = Install { dir: &dt.dir, content: c.clone() };
+    let dir = scratch("load");
+
+    let mut live = Driver::new(start(&c, &map, Some(53)), true);
+    live.checks = true;
+    let mut f = Frames::new(DT_A, BUDGET_A);
+    let opening = live.g.drain_events();
+    live.settle(opening);
+    let sess = super::session::Session::start(&dir, &live.g, &header_for(&live.g, &dt)).unwrap();
+    live.g.replay = Some(sess.clone());
+    live.session = Some(sess);
+    live.walk_to_nearest(&mut f);
+    live.play_days(&mut f, 2);
+    // Save (the day's entries are written; the save records its place).
+    live.g.finish_pause();
+    let meta = save::meta_of(&live.g, SaveKind::Manual, "save").unwrap();
+    let save_bytes = save::encode(&meta, &live.g).unwrap();
+    let save_stamp = live.g.stamp();
+    live.g.finish_pause();
+    live.g.armies_snap();
+    let saved_hash = state_hash(&live.g);
+    let place = meta.replay.clone().expect("the save points into the replay");
+    assert_eq!(place.pos, std::fs::metadata(dir.join(&place.file)).unwrap().len(), "the place is the file's length");
+    // Play on, then load the save: the file is cut there and a new segment begins.
+    live.play_days(&mut f, 2);
+    live.session.as_ref().unwrap().finish();
+    let (meta2, game_loaded) = save::decode(&save_bytes).unwrap();
+    let mut loaded = save::restore(&meta2, game_loaded, c.clone(), Some(&install)).unwrap();
+    assert_eq!(loaded.replay_resume.as_ref(), Some(&place), "the load resumes the save's place");
+    let resume = loaded.replay_resume.take().unwrap();
+    loaded.replay = Some(super::session::Session::resume(&dir, &resume.file, resume.pos, &loaded, &header_for(&loaded, &dt)).unwrap());
+    let mut back = Driver::new(loaded, false);
+    back.session = back.g.replay.clone();
+    back.checks = true;
+    let mut fb = Frames::new(DT_B, BUDGET_B);
+    for _ in 0..3 {
+        back.play_days(&mut fb, 1);
+        back.hash();
+    }
+    let final_hash = back.hash();
+    back.session.as_ref().unwrap().finish();
+
+    let file = super::file::read(&dir.join(&place.file)).unwrap();
+    assert_eq!(file.segments.len(), 2, "the load opened a second segment");
+    let seg1 = &file.segments[0];
+    let seg2 = &file.segments[1];
+    // Segment one, to the save: it plays to the saved state.
+    let g1 = super::snapshot::Snapshot::from_bytes(seg1.snapshot.clone()).restore(c.clone(), Some(&install)).unwrap();
+    let mut p1 = super::play::Player::new(g1, 1.0 / 30.0);
+    for e in &seg1.entries {
+        p1.apply(e).unwrap_or_else(|err| panic!("segment one: {err}"));
+    }
+    p1.advance_to(save_stamp).unwrap_or_else(|err| panic!("segment one to the save: {err}"));
+    p1.game.finish_pause();
+    p1.game.armies_snap();
+    assert_eq!(state_hash(&p1.game), saved_hash, "segment one plays to the save");
+    // Segment two, from the load: it plays to the live game's final state.
+    let g2 = super::snapshot::Snapshot::from_bytes(seg2.snapshot.clone()).restore(c.clone(), Some(&install)).unwrap();
+    let mut played2 = super::play::play(g2, &seg2.entries, 1.0 / 30.0).unwrap_or_else(|e| panic!("segment two: {e}"));
+    played2.finish_pause();
+    played2.armies_snap();
+    assert_eq!(state_hash(&played2), final_hash, "segment two plays to the live final state");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The sizes of a 30-day session on РК1 and ДС2 (with walks, waits and battles) and the time the
+/// frame spends on its pump (the keyframes are packed and written on the writer's thread).
+#[test]
+fn a_thirty_day_replay_is_small_and_its_keyframes_do_not_block_the_frame() {
+    let Some(dt) = base() else { return };
+    let c = Arc::new(Content::from_dt(&dt));
+    for prefix in MAPS {
+        let map = map_named(&dt, prefix);
+        let dir = scratch(&format!("size-{}", prefix.chars().count()));
+        let mut d = Driver::new(start(&c, &map, Some(61)), true);
+        d.checks = true;
+        d.max = true;
+        d.g.max_ai = true;
+        d.g.foe = Some(Foe::Army(0));
+        let sess = super::session::Session::start(&dir, &d.g, &header_for(&d.g, &dt)).unwrap();
+    d.g.replay = Some(sess.clone());
+    d.session = Some(sess);
+        let mut f = Frames::new(DT_A, BUDGET_A);
+        let t0 = std::time::Instant::now();
+        let _ = session(&mut d, &mut f, 30);
+        let secs = t0.elapsed().as_secs_f64();
+        d.session.as_ref().unwrap().finish();
+        let path = dir.join(d.session.as_ref().map_or(String::new(), |s| s.file_name()));
+        let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        let file = super::file::read(&path).unwrap();
+        let entries: usize = file.segments.iter().map(|s| s.entries.len()).sum();
+        println!("REPLAY {prefix}: 30 days, {} bytes, {} entries ({:.1} bytes an entry), {} segments, played in {secs:.1} s", len, entries, len as f64 / entries.max(1) as f64, file.segments.len());
+        // The frame's part of a keyframe (the state's JSON and hash) and the thread's (packing).
+        let t1 = std::time::Instant::now();
+        let (json, _) = super::snapshot::capture(&d.g).unwrap();
+        let capture_ms = t1.elapsed().as_secs_f64() * 1e3;
+        let t2 = std::time::Instant::now();
+        let packed = save::pack(&json).unwrap();
+        let pack_ms = t2.elapsed().as_secs_f64() * 1e3;
+        println!("KEYFRAME {prefix}: frame part {capture_ms:.2} ms, thread part {pack_ms:.2} ms, {} bytes packed", packed.len());
+        let battles: usize = file.segments.iter().map(|s| s.battles.len()).sum();
+        assert!(battles >= 1, "a battle's start is in the file (for a cut-out)");
+        assert!(len > 0 && entries > 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// A replay belongs to the game's saves: deleting one save keeps the file while another save
+/// points into it, and deleting the last one deletes the file.
+#[test]
+fn deleting_the_last_save_of_a_replay_deletes_it() {
+    let Some(dt) = base() else { return };
+    let c = Arc::new(Content::from_dt(&dt));
+    let map = map_named(&dt, "РК1");
+    let games = scratch("delete");
+    let dir = super::session::replays_dir(&games);
+    let mut d = Driver::new(start(&c, &map, Some(71)), true);
+    let sess = super::session::Session::start(&dir, &d.g, &header_for(&d.g, &dt)).unwrap();
+    d.g.replay = Some(sess.clone());
+    let manual = games.join("manual");
+    std::fs::create_dir_all(&manual).unwrap();
+    let meta1 = save::meta_of(&d.g, SaveKind::Manual, "one").unwrap();
+    let p1 = manual.join("one.rzsave");
+    std::fs::write(&p1, save::encode(&meta1, &d.g).unwrap()).unwrap();
+    let meta2 = save::meta_of(&d.g, SaveKind::Manual, "two").unwrap();
+    let p2 = manual.join("two.rzsave");
+    std::fs::write(&p2, save::encode(&meta2, &d.g).unwrap()).unwrap();
+    sess.finish();
+    let file = dir.join(sess.file_name());
+    assert!(file.exists(), "the replay exists");
+    save::delete(&p1).unwrap();
+    assert!(file.exists(), "another save still points into it");
+    save::delete(&p2).unwrap();
+    assert!(!file.exists(), "the last save's replay goes with it");
+    let _ = std::fs::remove_dir_all(&games);
 }

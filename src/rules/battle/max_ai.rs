@@ -436,6 +436,7 @@ impl Battle {
     /// really plays: it is reported to a recorder under the battle's number and the decision's
     /// (`rules::recording`), then played as [`Battle::play_max_move`] plays it.
     pub fn apply_max(&mut self, r: MaxReport) -> Option<Step> {
+        let _eng = crate::rules::recording::hook::engine_scope();
         hook::record(EngineInput::Max { battle: self.ordinal, decision: self.decisions, code: r.choice.code() });
         self.decisions += 1;
         self.play_max_move(r.choice)
@@ -444,6 +445,7 @@ impl Battle {
     /// Carries out a decision for the active unit; a refused action ends its turn, as the
     /// auto-battle's (`auto_step`).
     pub fn play_max_move(&mut self, m: MaxMove) -> Option<Step> {
+        let _eng = crate::rules::recording::hook::engine_scope();
         let actor = self.active()?;
         let step = m.0.and_then(|p| self.step_plan(p));
         step.or_else(|| {
@@ -466,6 +468,7 @@ impl Battle {
     /// step to the hero's auto-battle. With a fixed budget ([`MAX_QUICK_BUDGET`]) the same
     /// position always ends the same way. Returns the outcome.
     pub fn max_play_to_end(&mut self, budget: MaxBudget) -> Outcome {
+        let _rec = crate::rules::recording::actions::battle_scope(|| crate::rules::recording::actions::BattleAct::MaxPlay);
         self.begin();
         let tables = [MaxTables::default(), MaxTables::default()];
         for _ in 0..AUTO_PLAY_STEPS {

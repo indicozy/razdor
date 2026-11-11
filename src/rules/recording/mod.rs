@@ -11,6 +11,10 @@
 
 pub mod battle_start;
 pub mod header;
+pub mod actions;
+pub mod file;
+pub mod play;
+pub mod session;
 pub mod hook;
 pub mod snapshot;
 pub mod stream;

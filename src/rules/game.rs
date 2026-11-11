@@ -512,6 +512,18 @@ pub struct Game {
     /// in play). Not saved.
     #[serde(skip)]
     pub(crate) replay_stop: Option<u32>,
+    /// A replay's driver stops the time before this stretch begins (a recorded action came
+    /// when the stretch before it had ended). Not saved.
+    #[serde(skip)]
+    pub(crate) replay_stop_before: Option<u64>,
+    /// The replay file this game records to (`recording::session`), if recording is on. Not saved:
+    /// a save keeps its place in the file (`SaveMeta::replay`).
+    #[serde(skip)]
+    pub replay: Option<super::recording::session::Session>,
+    /// The file and length a loaded save has in its replay: the session resumes there
+    /// (`recording::session::Session::resume`). Set by `save::restore`, not saved.
+    #[serde(skip)]
+    pub replay_resume: Option<super::recording::file::ReplayRef>,
     /// The events of a stretch whose window still plays on screen ([`Game::tick_shown`]).
     #[serde(skip)]
     pub(crate) held: Vec<(u64, Event)>,
@@ -820,6 +832,9 @@ impl Game {
             stretches: 0,
             asks: 0,
             replay_stop: None,
+            replay_stop_before: None,
+            replay: None,
+            replay_resume: None,
             held: Vec::new(),
             held_shown: Vec::new(),
             stretch_minutes: 0.0,
@@ -984,6 +999,7 @@ impl Game {
 
     /// The army window opened (0x4d1814): it recounts his army.
     pub fn army_window_opened(&mut self) {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::ArmyWindowOpened);
         self.recount_hero();
     }
 
@@ -993,6 +1009,7 @@ impl Game {
 
     /// Does not change HP, wages, roster, formation, or scenario event records.
     pub fn set_unit_battle_disabled(&mut self, index: usize, disabled: bool) -> bool {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::SetBenched { index: index as u32, disabled });
         if !self.allow_unit_benching || index == 0 { return false; }
         let Some(unit) = self.squad.get_mut(index).filter(|u| u.alive()) else { return false };
         unit.battle_disabled = disabled;
@@ -1005,7 +1022,25 @@ impl Game {
     /// has them; a unit on a cell it lacks (the two edge cells of a 6-wide row going to 4) moves
     /// to a free cell, its own row first ([`Formation::free_slot`]). The garrisons and the
     /// armies are seated the same way ([`Game::reseat_all`]). Not during a battle.
+    /// The rule settings the game follows (the menu's, every frame: `ui::main_menu::follow_settings`).
+    /// A change is an action (recorded); the same values are nothing.
+    pub fn set_rule_settings(&mut self, s: super::recording::snapshot::Settings) {
+        if super::recording::snapshot::Settings::of(self) == s {
+            return;
+        }
+        let _rec = super::recording::actions::scope(self, || super::recording::actions::PlayerAction::Settings(s.clone()));
+        self.improved_ai = s.improved_ai;
+        self.max_ai = s.max_ai;
+        self.max_guard = s.max_guard;
+        self.keep_xp_on_promotion = s.keep_xp_on_promotion;
+        self.keep_formation = s.keep_formation;
+        self.allow_unit_benching = s.allow_unit_benching;
+        self.pursue = s.pursue;
+        self.walk_pace = s.walk_pace;
+    }
+
     pub fn set_formation(&mut self, formation: super::formation::Formation) {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::SetFormation { cols: formation.cols, reserve: formation.reserve });
         if self.content.formation == formation || self.foe.is_some() {
             return;
         }
@@ -1074,6 +1109,7 @@ impl Game {
 
     /// Names the hero (an empty name means his class's name).
     pub fn set_hero_name(&mut self, name: &str) {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::SetHeroName { name: name.to_string() });
         let n = name.trim();
         self.hero_name = (!n.is_empty()).then(|| n.to_string());
     }
@@ -1199,6 +1235,7 @@ impl Game {
     /// barracks, by dragging); a unit standing there takes its old cell, as at a battle's
     /// deployment. False if `slot` is not a cell of the formation.
     pub fn move_unit(&mut self, unit: usize, slot: Slot) -> bool {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::MoveUnit { unit: unit as u32, cell: slot });
         if unit >= self.squad.len() || !self.content.formation.slots().any(|s| s == slot) {
             return false;
         }
@@ -1285,6 +1322,7 @@ impl Game {
     /// Returns false if it can't be reached. Razdor fixes the original's bug (0x4cc99f): the
     /// walk to cell (0, 0) never started there, though its route was shown.
     pub fn set_destination(&mut self, to: Tile) -> bool {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::Walk { x: to.0, y: to.1 });
         // A paused step (`tick_within`'s budget) finishes before the action reads the world,
         // as the screen does on a press: an action never sees a half-played step.
         self.finish_pause();
@@ -1397,6 +1435,7 @@ impl Game {
 
     /// Reveals the hero's surroundings. Returns true if new ground came into view.
     pub fn look_around(&mut self) -> bool {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::LookAround);
         let r = self.sight_radius();
         self.fog.reveal(self.tile().0, self.tile().1, r)
     }
@@ -1467,6 +1506,7 @@ impl Game {
     /// Waits in real time (the UI's 1 h and 4 h): `hours × 2` wait ticks of
     /// [`WAIT_TICK_MINUTES`], one every [`STEP_SECONDS`], played by [`Game::tick`].
     pub fn begin_wait(&mut self, hours: u32) {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::Wait { hours });
         // A paused step (`tick_within`'s budget) finishes before the action reads the world,
         // as the screen does on a press: an action never sees a half-played step.
         self.finish_pause();
@@ -1484,6 +1524,7 @@ impl Game {
     /// started with its end test switched off (0xc27802), so the ticks go on until
     /// [`Game::end_endless_wait`]; an event's dialog opens without ending it (0xc2782b).
     pub fn begin_endless_wait(&mut self) {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::EndlessWait);
         if self.foe.is_some() {
             return;
         }
@@ -1497,6 +1538,7 @@ impl Game {
     /// minutes of the tick under way are dropped *(the original keeps the part already
     /// shown; Razdor counts game time per whole tick)*.
     pub fn end_endless_wait(&mut self) {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::EndEndlessWait);
         if let Some(done) = self.endless_wait.take() {
             if done >= 1 {
                 self.wait_ticks = 0;
@@ -1715,6 +1757,8 @@ impl Game {
     /// unfinished ([`Game::ai_pending`]) the game is never saved, and the interface finishes it
     /// before a press acts on the game ([`Game::finish_pause`]).
     pub(crate) fn tick_within(&mut self, real_dt: f32, keep_going: &mut dyn FnMut() -> bool) -> Vec<Event> {
+        // Time is the rules' own: nothing it does is a player's action (`recording::actions`).
+        let _engine = hook::engine_scope();
         hook::set_now(self.stamp());
         self.marks.clear();
         let stop = self.replay_stop;
@@ -1775,6 +1819,9 @@ impl Game {
                 }
             } else {
                 if !(self.step_elapsed >= STEP_SECONDS && (self.moving() || self.wait_ticks > 0)) {
+                    break;
+                }
+                if self.replay_stop_before == Some(self.stretches + 1) {
                     break;
                 }
                 self.step_elapsed -= STEP_SECONDS;
@@ -2134,6 +2181,7 @@ impl Game {
     /// at 0x4ed42c is entered, 0x4bbc84). The interface calls it when its last dialog closes;
     /// not while a fight is pending, nor when he no longer stands there.
     pub fn enter_waiting_building(&mut self) -> Vec<Event> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::EnterWaiting);
         let mut events = Vec::new();
         // A game that has ended is not continued: after a victory or defeat event's window
         // (events.md §11, 0x4bfb34) the building he walked into is never entered, and its
@@ -2160,6 +2208,7 @@ impl Game {
     /// A click on the building he stands in enters it again (0x4cd0aa → 0x4bbc84): a
     /// village rolls its offer and pays what has refilled since, as on arrival.
     pub fn reenter_building(&mut self) -> Vec<Event> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::Reenter);
         let mut events = Vec::new();
         // Not while the step's events are unread (see [`Game::enter_waiting_building`]).
         if self.events_unread() {
@@ -2574,6 +2623,7 @@ impl Game {
     /// Hire a unit type offered here, at its `Cost`, into the first free cell. The
     /// barracks stock goes down by one.
     pub fn hire(&mut self, kind: UnitId) -> Result<(), HireError> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::Hire { unit: kind.0 });
         if !self.recruits_here().contains(&kind) {
             return Err(HireError::NotOffered);
         }
@@ -2604,6 +2654,7 @@ impl Game {
     /// Promote squad member `unit` to class `to` of its upgrade tree; its worn items stay
     /// on ([`Unit::promote`]). The hero cannot be promoted.
     pub fn promote(&mut self, unit: usize, to: UnitId) -> Result<(), PromoteError> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::Promote { unit: unit as u32, to: to.0 });
         let c = self.content.clone();
         if unit == 0 {
             return Err(PromoteError::NotAvailable);
@@ -2657,6 +2708,7 @@ impl Game {
     /// makes the player the attacker (the building's extra defence helps the garrison); an
     /// army that catches the player attacks.
     pub fn start_battle(&mut self) -> Battle {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::StartBattle);
         // A paused step (`tick_within`'s budget) finishes before the action reads the world,
         // as the screen does on a press: an action never sees a half-played step.
         self.finish_pause();
@@ -2699,8 +2751,19 @@ impl Game {
             Some(rec) => set_patch_globals(rec.globals()),
             None => hook::record(EngineInput::Patch(PatchRecord::of(ordinal, patch_globals()))),
         }
+        let start = if hook::recording() {
+            let mut s = self.battle_start();
+            s.ordinal = ordinal;
+            Some(s)
+        } else {
+            None
+        };
         let mut b = Battle::new(self.content.clone(), &player, &enemies, attacker);
         b.ordinal = ordinal;
+        if let Some(start) = start {
+            hook::record_battle_start(start);
+        }
+        hook::request_keyframe();
         // In battle every side names its units as 0x49747c does: the hero by his class and
         // name, a named character by his own name (an AI leader or a garrison's too).
         let np = player.len();
@@ -2796,6 +2859,7 @@ impl Game {
     /// Then the scenario's events run (an army beaten); what they do waits in
     /// [`Game::drain_events`].
     pub fn resolve_battle(&mut self, battle: &Battle) -> BattleResult {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::ResolveBattle);
         crate::diag::play(&self.clock.label(), &format!("BATTLE log:\n  {}\nBATTLE ends: {:?} after {} turns", battle.log.join("\n  "), battle.outcome(), battle.round));
         let start = self.chronicle_battle_start();
         let result = self.settle_battle(battle);
@@ -3069,6 +3133,7 @@ impl Game {
     /// in the original (0x49a85c: lost when all 256 are taken), and its place in the market
     /// is emptied.
     pub fn buy(&mut self, stock_index: usize) -> Result<ItemId, TradeError> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::Buy { stock: stock_index as u32 });
         let item = *self.market_here().ok_or(TradeError::NoMarket)?.get(stock_index).ok_or(TradeError::NoSuchItem)?;
         let price = self.buy_price(item);
         if self.gold < price {
@@ -3087,6 +3152,7 @@ impl Game {
     /// Sells the item in pack cell `pack_index` for [`Game::sell_price`]. Returns the gold
     /// gained. The original takes the first cell holding that item (0x4b9e18 → 0x49a8a8).
     pub fn sell(&mut self, pack_index: usize) -> Result<i32, TradeError> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::Sell { pack: pack_index as u32 });
         self.market_here().ok_or(TradeError::NoMarket)?;
         let item = self.pack.get(pack_index).ok_or(TradeError::NoSuchItem)?;
         if !self.can_sell(item) {
@@ -3104,6 +3170,7 @@ impl Game {
     /// [`items::slot_for`]); the cell is left empty. The window's own presses are
     /// [`Game::press_pack`], [`Game::press_worn`] and [`Game::give_held`].
     pub fn equip(&mut self, unit: usize, pack_index: usize) -> Result<(), EquipError> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::Equip { unit: unit as u32, pack: pack_index as u32 });
         let item = self.pack.get(pack_index).ok_or(EquipError::NoSuchItem)?;
         let u = self.squad.get(unit).ok_or(EquipError::NoSuchItem)?;
         let c = self.content.clone();
@@ -3116,6 +3183,7 @@ impl Game {
     /// Squad member `unit` drinks the potion at `pack_index` ([`items::drink`]). Returns the
     /// HP gained.
     pub fn drink(&mut self, unit: usize, pack_index: usize) -> Result<i32, EquipError> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::Drink { unit: unit as u32, pack: pack_index as u32 });
         let before = self.alive_mask();
         let result = self.drink_potion(unit, pack_index);
         self.chronicle_fallen(&before);
@@ -3135,6 +3203,7 @@ impl Game {
     /// Moves item slot `slot` of squad member `unit` back into the pack (a dead unit's too);
     /// the unit is rebuilt.
     pub fn unequip(&mut self, unit: usize, slot: usize) -> Result<(), EquipError> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::Unequip { unit: unit as u32, slot: slot as u32 });
         if self.pack.is_full() {
             return Err(EquipError::PackFull);
         }

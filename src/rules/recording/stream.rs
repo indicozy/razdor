@@ -8,6 +8,9 @@
 
 use crate::rules::battle::PatchGlobals;
 
+pub use super::actions::PlayerAction;
+use super::actions::{get_action, put_action};
+
 /// The encoding's version (the first byte).
 pub const STREAM_VERSION: u8 = 1;
 
@@ -17,35 +20,6 @@ pub const STREAM_VERSION: u8 = 1;
 pub struct Stamp {
     pub stretch: u64,
     pub ask: u32,
-}
-
-/// What the player did, in the form the rules take it (not the interface's clicks).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PlayerAction {
-    /// A walk to map cell (x, y): the second click of the original.
-    ClickMap { x: i32, y: i32 },
-    /// A wait of 1 or 4 hours.
-    Wait { hours: u32 },
-    /// The answer to the question on screen.
-    Answer { yes: bool },
-    /// Closes the dialog on screen.
-    Ok,
-    /// In battle, a press on a card (`side` 1 the player's, 2 the enemy's; `row`, `col` as the grid).
-    BattleAct { side: u8, row: i32, col: i32 },
-    /// In battle, the space key.
-    BattlePass,
-    /// In battle, the auto-battle key.
-    BattleAuto,
-    /// Market, hire, heal, resurrect, learn, take and cast, equip: the row, unit or book entry.
-    Buy { slot: u32 },
-    Sell { slot: u32 },
-    Hire { slot: u32 },
-    Heal { unit: u32 },
-    Resurrect { unit: u32 },
-    Learn { slot: u32 },
-    Take { slot: u32 },
-    Cast { slot: u32, army: Option<i32> },
-    Equip { slot: u32, unit: u32 },
 }
 
 /// A «Максимум» decision as it is recorded: the plan's action, its target and kind (the
@@ -82,6 +56,8 @@ pub enum EngineInput {
     Max { battle: u32, decision: u32, code: MaxCode },
     /// The patch globals at the start of battle `battle`.
     Patch(PatchRecord),
+    /// The state's hash at this place (a keyframe or a checkpoint): playback checks it.
+    Check { hash: u64 },
 }
 
 impl PatchRecord {
@@ -108,14 +84,14 @@ impl PatchRecord {
 }
 
 /// One entry of the stream.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Input {
     Player(PlayerAction),
     Engine(EngineInput),
 }
 
 /// An input and the place it happened.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Entry {
     pub at: Stamp,
     pub input: Input,
@@ -169,10 +145,6 @@ impl<'a> Reader<'a> {
         u32::try_from(self.u()?).map_err(|_| "a number out of range".to_string())
     }
 
-    fn i32(&mut self) -> Result<i32, String> {
-        i32::try_from(self.i()?).map_err(|_| "a number out of range".to_string())
-    }
-
     fn u8(&mut self) -> Result<u8, String> {
         u8::try_from(self.u()?).map_err(|_| "a number out of range".to_string())
     }
@@ -185,6 +157,14 @@ impl<'a> Reader<'a> {
         }
     }
 
+    /// The next `n` bytes, as they are.
+    pub fn bytes(&mut self, n: usize) -> Result<Vec<u8>, String> {
+        let end = self.at.checked_add(n).filter(|&e| e <= self.bytes.len()).ok_or("the stream ends inside a name")?;
+        let out = self.bytes[self.at..end].to_vec();
+        self.at = end;
+        Ok(out)
+    }
+
     pub fn is_done(&self) -> bool {
         self.at == self.bytes.len()
     }
@@ -194,58 +174,6 @@ impl<'a> Reader<'a> {
 fn put_stamp(out: &mut Vec<u8>, prev: Stamp, at: Stamp) {
     put_i(out, at.stretch.wrapping_sub(prev.stretch) as i64);
     put_u(out, at.ask as u64);
-}
-
-fn put_player(out: &mut Vec<u8>, a: PlayerAction) {
-    match a {
-        PlayerAction::ClickMap { x, y } => {
-            put_u(out, 1);
-            put_i(out, x as i64);
-            put_i(out, y as i64);
-        }
-        PlayerAction::Wait { hours } => {
-            put_u(out, 2);
-            put_u(out, hours as u64);
-        }
-        PlayerAction::Answer { yes } => {
-            put_u(out, 3);
-            put_u(out, yes as u64);
-        }
-        PlayerAction::Ok => put_u(out, 4),
-        PlayerAction::BattleAct { side, row, col } => {
-            put_u(out, 5);
-            put_u(out, side as u64);
-            put_i(out, row as i64);
-            put_i(out, col as i64);
-        }
-        PlayerAction::BattlePass => put_u(out, 6),
-        PlayerAction::BattleAuto => put_u(out, 7),
-        PlayerAction::Buy { slot } => put_slot(out, 8, slot),
-        PlayerAction::Sell { slot } => put_slot(out, 9, slot),
-        PlayerAction::Hire { slot } => put_slot(out, 10, slot),
-        PlayerAction::Heal { unit } => put_slot(out, 11, unit),
-        PlayerAction::Resurrect { unit } => put_slot(out, 12, unit),
-        PlayerAction::Learn { slot } => put_slot(out, 13, slot),
-        PlayerAction::Take { slot } => put_slot(out, 14, slot),
-        PlayerAction::Cast { slot, army } => {
-            put_u(out, 15);
-            put_u(out, slot as u64);
-            put_u(out, army.is_some() as u64);
-            if let Some(a) = army {
-                put_i(out, a as i64);
-            }
-        }
-        PlayerAction::Equip { slot, unit } => {
-            put_u(out, 16);
-            put_u(out, slot as u64);
-            put_u(out, unit as u64);
-        }
-    }
-}
-
-fn put_slot(out: &mut Vec<u8>, tag: u64, slot: u32) {
-    put_u(out, tag);
-    put_u(out, slot as u64);
 }
 
 fn put_code(out: &mut Vec<u8>, c: MaxCode) {
@@ -307,6 +235,11 @@ fn put_engine(out: &mut Vec<u8>, e: EngineInput) {
             put_u(out, p.battle as u64);
             put_patch(out, p);
         }
+        EngineInput::Check { hash } => {
+            put_u(out, 36);
+            put_u(out, hash & 0xffff_ffff);
+            put_u(out, hash >> 32);
+        }
     }
 }
 
@@ -318,44 +251,18 @@ pub fn encode(entries: &[Entry]) -> Vec<u8> {
     for e in entries {
         put_stamp(&mut out, prev, e.at);
         prev = e.at;
-        match e.input {
+        match &e.input {
             Input::Player(a) => {
                 put_u(&mut out, 0);
-                put_player(&mut out, a);
+                put_action(&mut out, a);
             }
             Input::Engine(x) => {
                 put_u(&mut out, 1);
-                put_engine(&mut out, x);
+                put_engine(&mut out, *x);
             }
         }
     }
     out
-}
-
-fn get_player(r: &mut Reader) -> Result<PlayerAction, String> {
-    Ok(match r.u()? {
-        1 => PlayerAction::ClickMap { x: r.i32()?, y: r.i32()? },
-        2 => PlayerAction::Wait { hours: r.u32()? },
-        3 => PlayerAction::Answer { yes: r.bool()? },
-        4 => PlayerAction::Ok,
-        5 => PlayerAction::BattleAct { side: r.u8()?, row: r.i32()?, col: r.i32()? },
-        6 => PlayerAction::BattlePass,
-        7 => PlayerAction::BattleAuto,
-        8 => PlayerAction::Buy { slot: r.u32()? },
-        9 => PlayerAction::Sell { slot: r.u32()? },
-        10 => PlayerAction::Hire { slot: r.u32()? },
-        11 => PlayerAction::Heal { unit: r.u32()? },
-        12 => PlayerAction::Resurrect { unit: r.u32()? },
-        13 => PlayerAction::Learn { slot: r.u32()? },
-        14 => PlayerAction::Take { slot: r.u32()? },
-        15 => {
-            let slot = r.u32()?;
-            let army = if r.bool()? { Some(r.i32()?) } else { None };
-            PlayerAction::Cast { slot, army }
-        }
-        16 => PlayerAction::Equip { slot: r.u32()?, unit: r.u32()? },
-        t => return Err(format!("an unknown action {t}")),
-    })
 }
 
 fn get_code(r: &mut Reader) -> Result<MaxCode, String> {
@@ -377,6 +284,11 @@ fn get_engine(r: &mut Reader) -> Result<EngineInput, String> {
             let battle = r.u32()?;
             EngineInput::Patch(get_patch(r, battle)?)
         }
+        36 => {
+            let lo = r.u()?;
+            let hi = r.u()?;
+            EngineInput::Check { hash: lo | hi << 32 }
+        }
         t => return Err(format!("an unknown record {t}")),
     })
 }
@@ -395,7 +307,7 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<Entry>, String> {
         let at = Stamp { stretch, ask: r.u32()? };
         prev = at;
         let input = match r.u()? {
-            0 => Input::Player(get_player(&mut r)?),
+            0 => Input::Player(get_action(&mut r)?),
             1 => Input::Engine(get_engine(&mut r)?),
             t => return Err(format!("an unknown input kind {t}")),
         };
@@ -410,6 +322,9 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<Entry>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rules::formation::{Row, Slot};
+    use crate::rules::magic::CastTarget;
+    use crate::rules::recording::actions::BattleAct;
 
     fn fresh() -> PatchRecord {
         PatchRecord { battle: 0, hunger_counter: 3, hunger_seen: 3, screen_living: 0, side_blocks: [0, 0] }
@@ -419,25 +334,26 @@ mod tests {
         let at = |stretch, ask| Stamp { stretch, ask };
         vec![
             Entry { at: at(0, 0), input: Input::Engine(EngineInput::GameStart { load: false, seed: 0x9e37_79b9, patch: fresh() }) },
-            Entry { at: at(0, 0), input: Input::Player(PlayerAction::ClickMap { x: -3, y: 250 }) },
-            Entry { at: at(7, 0), input: Input::Engine(EngineInput::Music { pick: 5 }) },
-            Entry { at: at(7, 12), input: Input::Engine(EngineInput::Music { pick: 0 }) },
+            Entry { at: at(0, 0), input: Input::Player(PlayerAction::Walk { x: -3, y: 250 }) },
             Entry { at: at(u64::MAX, u32::MAX), input: Input::Player(PlayerAction::Wait { hours: 4 }) },
             Entry { at: at(9, 1), input: Input::Player(PlayerAction::Answer { yes: true }) },
-            Entry { at: at(9, 1), input: Input::Player(PlayerAction::Ok) },
-            Entry { at: at(9, 2), input: Input::Player(PlayerAction::BattleAct { side: 1, row: 2, col: -1 }) },
-            Entry { at: at(9, 2), input: Input::Player(PlayerAction::BattlePass) },
-            Entry { at: at(9, 2), input: Input::Player(PlayerAction::BattleAuto) },
-            Entry { at: at(10, 0), input: Input::Player(PlayerAction::Cast { slot: 3, army: None }) },
-            Entry { at: at(10, 0), input: Input::Player(PlayerAction::Cast { slot: 0, army: Some(-7) }) },
-            Entry { at: at(10, 0), input: Input::Player(PlayerAction::Equip { slot: 12, unit: 4 }) },
-            Entry { at: at(10, 0), input: Input::Player(PlayerAction::Take { slot: 1 }) },
-            Entry { at: at(10, 0), input: Input::Player(PlayerAction::Buy { slot: 2 }) },
-            Entry { at: at(10, 0), input: Input::Player(PlayerAction::Sell { slot: 2 }) },
-            Entry { at: at(10, 0), input: Input::Player(PlayerAction::Hire { slot: 2 }) },
+            Entry { at: at(9, 1), input: Input::Player(PlayerAction::WindowClosed) },
+            Entry { at: at(9, 2), input: Input::Player(PlayerAction::Battle(BattleAct::MoveCard { from: Slot::new(Row::Front, 2), to: Slot::new(Row::Reserve, 1) })) },
+            Entry { at: at(9, 2), input: Input::Player(PlayerAction::Battle(BattleAct::Pass)) },
+            Entry { at: at(9, 2), input: Input::Player(PlayerAction::Battle(BattleAct::ForceEnd { enemy_wins: true })) },
+            Entry { at: at(10, 0), input: Input::Player(PlayerAction::Cast { spell: 3, target: CastTarget::Own }) },
+            Entry { at: at(10, 0), input: Input::Player(PlayerAction::Cast { spell: 0, target: CastTarget::Army(7) }) },
+            Entry { at: at(10, 0), input: Input::Player(PlayerAction::Equip { unit: 4, pack: 12 }) },
+            Entry { at: at(10, 0), input: Input::Player(PlayerAction::TakeFromGarrison { j: 1, cell: Some(Slot::new(Row::Back, 3)), pay: true }) },
+            Entry { at: at(10, 0), input: Input::Player(PlayerAction::Buy { stock: 2 }) },
+            Entry { at: at(10, 0), input: Input::Player(PlayerAction::Sell { pack: 2 }) },
+            Entry { at: at(10, 0), input: Input::Player(PlayerAction::Hire { unit: 2 }) },
             Entry { at: at(10, 0), input: Input::Player(PlayerAction::Heal { unit: 2 }) },
             Entry { at: at(10, 0), input: Input::Player(PlayerAction::Resurrect { unit: 2 }) },
-            Entry { at: at(10, 0), input: Input::Player(PlayerAction::Learn { slot: 2 }) },
+            Entry { at: at(10, 0), input: Input::Player(PlayerAction::LearnSpell { id: 2 }) },
+            Entry { at: at(10, 0), input: Input::Player(PlayerAction::SetHeroName { name: "Рыцарь".into() }) },
+            Entry { at: at(10, 0), input: Input::Player(PlayerAction::SetFormation { cols: 6, reserve: true }) },
+            Entry { at: at(10, 0), input: Input::Player(PlayerAction::MoveUnit { unit: 3, cell: Slot::new(Row::Front, 1) }) },
             Entry { at: at(11, 0), input: Input::Engine(EngineInput::Max { battle: 3, decision: 0, code: MaxCode::Skip }) },
             Entry { at: at(11, 0), input: Input::Engine(EngineInput::Max { battle: 3, decision: 1, code: MaxCode::Act { target: 40, kind: 6 } }) },
             Entry { at: at(11, 0), input: Input::Engine(EngineInput::Max { battle: 3, decision: 2, code: MaxCode::Move { row: 2, col: 5 } }) },
@@ -479,7 +395,7 @@ mod tests {
     fn actions_take_a_few_bytes_each() {
         // A walk: a stamp and a cell near the start of a map, about 4 bytes each.
         let entries: Vec<Entry> = (0..1000)
-            .map(|i| Entry { at: Stamp { stretch: 40 + i / 3, ask: 0 }, input: Input::Player(PlayerAction::ClickMap { x: 12 + (i as i32 % 30), y: 40 - (i as i32 % 20) }) })
+            .map(|i| Entry { at: Stamp { stretch: 40 + i / 3, ask: 0 }, input: Input::Player(PlayerAction::Walk { x: 12 + (i as i32 % 30), y: 40 - (i as i32 % 20) }) })
             .collect();
         let bytes = encode(&entries);
         let per = bytes.len() as f64 / entries.len() as f64;
@@ -496,7 +412,7 @@ mod tests {
         let mut extra = bytes.clone();
         extra.push(0);
         assert!(decode(&extra).is_err(), "bytes after the last entry");
-        let mut bad = encode(&[Entry { at: Stamp::default(), input: Input::Player(PlayerAction::Ok) }]);
+        let mut bad = encode(&[Entry { at: Stamp::default(), input: Input::Player(PlayerAction::WindowClosed) }]);
         *bad.last_mut().unwrap() = 99;
         assert!(decode(&bad).is_err(), "an unknown action");
     }

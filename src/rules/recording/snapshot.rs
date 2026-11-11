@@ -343,6 +343,15 @@ fn unpack(bytes: &[u8]) -> Result<Vec<u8>, String> {
     Ok(json)
 }
 
+/// The state's snapshot JSON and its hash, at rest: a keyframe (the writer packs the JSON). The
+/// hash is [`state_hash`]'s.
+pub fn capture(g: &Game) -> Result<(Vec<u8>, u64), String> {
+    at_rest(g)?;
+    let json = body_json(g, true)?;
+    let hash = fnv1a(&body_json(g, false)?);
+    Ok((json, hash))
+}
+
 /// A stable hash of the game's rules state: the serialised game, the generators, the AI's
 /// fields, the settings, and the in-flight parts of a step; no timings, no UI. Two processes
 /// that play the same inputs get the same value.

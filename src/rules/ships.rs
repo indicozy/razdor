@@ -204,6 +204,7 @@ impl Game {
     /// the MIXED map, so from the shipyard he can route onto the water next to it. Stepping
     /// out onto the water puts him at sea; leaving the shipyard on land loses the purchase.
     pub fn rent_ship(&mut self) -> Result<(), ShipError> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::RentShip);
         self.shipyard_here().ok_or(ShipError::NoShipyard)?;
         let price = self.ship_price();
         if self.gold < price {

@@ -131,6 +131,10 @@ pub struct SaveMeta {
     /// only for the same foe ([`store_autosave`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub battle_foe: Option<String>,
+    /// The replay file the game was recording to and its length then (`recording::session`): a
+    /// load resumes the file there. None for a save made with recording off, or in older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay: Option<crate::rules::recording::file::ReplayRef>,
 }
 
 /// A hub mod a save was made with: its id and version as installed then.
@@ -272,6 +276,11 @@ pub fn set_install(dir: &Path) {
     *INSTALL.lock().unwrap_or_else(|e| e.into_inner()) = Some(dir.to_path_buf());
 }
 
+/// The install folder the game plays on (`set_install`).
+pub fn install_dir() -> Option<PathBuf> {
+    INSTALL.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
 /// The folder of the games' saves *(Razdor's)*: one per install in [`default_dir`], named
 /// by the install's folder and a hash of its path ("Discord Times-1a2b3c4d"), so a mod and
 /// the plain game installed side by side do not mix their saves. Without an install,
@@ -385,6 +394,7 @@ pub fn meta_of(game: &Game, kind: SaveKind, name: &str) -> Result<SaveMeta, Save
         cheats: game.cheats.used,
         played_mod: played_mod(),
         battle_foe: None,
+        replay: game.replay.as_ref().map(|s| s.save_point()),
     })
 }
 
@@ -1086,8 +1096,26 @@ pub fn set_pinned(path: &Path, on: bool) -> std::io::Result<()> {
 
 /// Deletes a save file, and its pin.
 pub fn delete(path: &Path) -> std::io::Result<()> {
+    // The replay the save points into goes with it when no other save of the game points into
+    // it (a replay belongs to the game's saves: kept while one of them exists).
+    let replay = read_meta(path).ok().and_then(|m| m.replay);
     std::fs::remove_file(path)?;
-    set_pinned(path, false)
+    set_pinned(path, false)?;
+    if let Some(r) = replay {
+        if let Some(games) = path.parent().and_then(|d| d.parent()) {
+            if !replay_referenced(games, &r.file) {
+                let _ = std::fs::remove_file(crate::rules::recording::session::replays_dir(games).join(&r.file));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Whether a save of the game in `games` points into replay `file`.
+fn replay_referenced(games: &Path, file: &str) -> bool {
+    [SaveKind::Manual, SaveKind::Auto].into_iter().any(|kind| {
+        files_of(games, kind).iter().any(|(p, _)| read_meta(p).ok().and_then(|m| m.replay).is_some_and(|r| r.file == file))
+    })
 }
 
 /// Where a map save finds its scenario: the install folder and its content.
@@ -1108,6 +1136,10 @@ pub fn load(path: &Path, demo: Arc<Content>, install: Option<&Install>) -> Resul
 /// the game was saved with, else the map's bytes the save carries, see [`map_bytes`]).
 pub fn restore(meta: &SaveMeta, mut game: Game, demo: Arc<Content>, install: Option<&Install>) -> Result<Game, SaveError> {
     check_version(meta)?;
+    // Rebuilding a save is the game's own, not a player's action (`recording::actions`), and the
+    // save's place in its replay is where a new session resumes (`recording::session`).
+    let _engine = crate::rules::recording::hook::engine_scope();
+    game.replay_resume = meta.replay.clone();
     let embedded = game.map_bytes.take();
     // What the load sequence draws from (`rng::Rng::save_load`): the plant layer and the
     // number of armies of the map file.

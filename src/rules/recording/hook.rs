@@ -14,6 +14,7 @@ use std::collections::{BTreeMap, VecDeque};
 
 use super::super::battle::{patch_globals, set_patch_globals};
 use super::super::rng::EventRng;
+use super::battle_start::BattleStart;
 use super::stream::{Entry, EngineInput, Input, MaxCode, PatchRecord, Stamp};
 use crate::local;
 
@@ -51,6 +52,7 @@ impl Playback {
                 Input::Engine(EngineInput::Patch(rec)) => {
                     p.patch.insert(rec.battle, rec);
                 }
+                Input::Engine(EngineInput::Check { .. }) => {}
                 Input::Player(_) => {}
             }
         }
@@ -63,10 +65,19 @@ struct Hook {
     playback: Option<Playback>,
     /// Where the rules are now (the stamp of the entries they report).
     now: Stamp,
+    /// How many player actions are on the stack (`actions::scope`): only the outermost records.
+    actions: u32,
+    /// How many engine scopes are on the stack (a tick, a script run, a restore): nothing they
+    /// do is a player's action.
+    engine: u32,
+    /// A keyframe was asked for (a battle started), for the recorder's next pump.
+    keyframe: bool,
+    /// The starts of the battles begun since the recorder's last pump (the cut-outs' state).
+    battle_starts: Vec<BattleStart>,
 }
 
 local! {
-    static HOOK: std::cell::RefCell<Hook> = const { std::cell::RefCell::new(Hook { recorder: None, playback: None, now: Stamp { stretch: 0, ask: 0 } }) };
+    static HOOK: std::cell::RefCell<Hook> = const { std::cell::RefCell::new(Hook { recorder: None, playback: None, now: Stamp { stretch: 0, ask: 0 }, actions: 0, engine: 0, keyframe: false, battle_starts: Vec::new() }) };
 }
 
 /// Attaches a recorder to this thread (replacing one).
@@ -107,6 +118,71 @@ pub(crate) fn set_now(at: Stamp) {
 /// The stamp the rules are at.
 pub fn now() -> Stamp {
     HOOK.with_borrow(|h| h.now)
+}
+
+/// Reports a player action or any other input at `at` (nothing without a recorder).
+pub(crate) fn record_input(at: Option<Stamp>, input: Input) {
+    HOOK.with_borrow_mut(|h| {
+        let at = at.unwrap_or(h.now);
+        if let Some(r) = h.recorder.as_mut() {
+            r.record(Entry { at, input });
+        }
+    });
+}
+
+/// Enters a player action; true when it is the outermost one on the stack.
+pub(crate) fn enter_action() -> bool {
+    HOOK.with_borrow_mut(|h| {
+        h.actions += 1;
+        h.actions == 1
+    })
+}
+
+/// Leaves a player action.
+pub(crate) fn leave_action() {
+    HOOK.with_borrow_mut(|h| h.actions = h.actions.saturating_sub(1));
+}
+
+/// Whether the rules run inside an engine scope (a tick, a script run, a restore).
+pub(crate) fn in_engine() -> bool {
+    HOOK.with_borrow(|h| h.engine > 0)
+}
+
+/// Enters an engine scope (undone by [`EngineScope`]'s drop).
+pub(crate) fn engine_scope() -> EngineScope {
+    HOOK.with_borrow_mut(|h| h.engine += 1);
+    EngineScope { _private: () }
+}
+
+/// An engine scope: while it lives, nothing the rules do counts as a player's action.
+pub(crate) struct EngineScope {
+    _private: (),
+}
+
+impl Drop for EngineScope {
+    fn drop(&mut self) {
+        HOOK.with_borrow_mut(|h| h.engine = h.engine.saturating_sub(1));
+    }
+}
+
+/// A battle began: its start state goes to the recorder at its next pump.
+pub(crate) fn record_battle_start(start: BattleStart) {
+    HOOK.with_borrow_mut(|h| h.battle_starts.push(start));
+}
+
+/// The battles begun since the last call, oldest first.
+pub fn take_battle_starts() -> Vec<BattleStart> {
+    HOOK.with_borrow_mut(|h| std::mem::take(&mut h.battle_starts))
+}
+
+/// Asks the recorder for a keyframe at its next pump (a battle started).
+pub(crate) fn request_keyframe() {
+    HOOK.with_borrow_mut(|h| h.keyframe = true);
+}
+
+/// Whether a keyframe was asked for since the last call (the recorder takes it).
+pub fn take_keyframe_request() -> bool {
+    HOOK.with_borrow_mut(|h| std::mem::take(&mut h.keyframe))
 }
 
 /// Reports an engine input at the current stamp (nothing without a recorder).

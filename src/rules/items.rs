@@ -511,6 +511,7 @@ impl super::game::Game {
     /// which is then held. Any cell takes an item: it stays where it was put (the original's
     /// 256 cells; Razdor's pack has no last one, a deviation, see `pack.rs`).
     pub fn press_pack(&mut self, i: usize) -> Press {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::PressPack { slot: i as u32 });
         match (self.held_item, self.pack.get(i)) {
             (None, Some(item)) => {
                 self.pack.take(i);
@@ -546,6 +547,7 @@ impl super::game::Game {
     /// returned. An occupied slot takes nothing in the original; Razdor's swaps the two, the
     /// held item under the wear test (a player's request, 2026-10-12).
     pub fn press_worn(&mut self, unit: usize, slot: usize) -> Result<Press, EquipError> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::PressWorn { unit: unit as u32, slot: slot as u32 });
         let Some(u) = self.squad.get(unit) else { return Ok(Press::Nothing) };
         let Some(&there) = u.items.get(slot) else { return Ok(Press::Nothing) };
         if there.is_some() && self.worn_locked(unit, slot) {
@@ -586,6 +588,7 @@ impl super::game::Game {
     /// panel's slots); on another unit's the wear test runs and the item goes to its lowest
     /// free slot. A refusal (a full pack too) leaves the item on the pointer.
     pub fn give_held(&mut self, to: usize) -> Result<Given, EquipError> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::GiveHeld { to: to as u32 });
         let item = self.held_item.ok_or(EquipError::NoSuchItem)?;
         if to >= self.squad.len() {
             return Err(EquipError::NoSuchItem);
@@ -637,6 +640,7 @@ impl super::game::Game {
     /// (0x4b8d28 → 0x49a85c). False when the pack was full: the item is lost, as the
     /// original's (it can only happen to an item taken off a unit with all 256 cells taken).
     pub fn drop_held(&mut self) -> bool {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::DropHeld);
         match self.held_item.take() {
             Some(item) => self.pack.add(item),
             None => true,

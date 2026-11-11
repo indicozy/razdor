@@ -84,6 +84,7 @@ impl Game {
     /// Runs the event engine once. Returns its outcomes, then what its effects caused (noon
     /// reports during a delay, a battle).
     pub(crate) fn run_script(&mut self) -> Vec<Event> {
+        let _engine = crate::rules::recording::hook::engine_scope();
         let Some(mut engine) = self.script.take() else { return Vec::new() };
         let out = engine.tick(self);
         self.script = Some(engine);
@@ -136,6 +137,7 @@ impl Game {
     /// The player's answer to the question waiting in the engine; then the events run on.
     /// Returns what followed.
     pub fn answer_question(&mut self, yes: bool) -> Vec<Event> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::Answer { yes });
         // A paused step (`tick_within`'s budget) finishes before the action reads the world,
         // as the screen does on a press: an action never sees a half-played step.
         self.finish_pause();
@@ -151,6 +153,7 @@ impl Game {
     /// Razdor's cheat `event N` ([`EventEngine::force`]): fires event `id` now, its conditions
     /// ignored; then the events run on. Returns what followed.
     pub fn force_event(&mut self, id: EventId) -> Vec<Event> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::ForceEvent { id });
         let Some(mut engine) = self.script.take() else { return Vec::new() };
         let out = engine.force(self, id);
         self.script = Some(engine);
@@ -161,6 +164,7 @@ impl Game {
     /// level-ups are effects of the world, not outcomes), then the events after it, which the
     /// original scans only now (0x4c206c → 0x4ab1ec → the chain or a new scan), run.
     pub fn event_window_closed(&mut self) -> Vec<Event> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::WindowClosed);
         // A paused step (`tick_within`'s budget) finishes before the action reads the world,
         // as the screen does on a press: an action never sees a half-played step.
         self.finish_pause();
@@ -175,6 +179,7 @@ impl Game {
     /// ([`Game::tick_shown`]): the scan goes on as if it had been closed (a safety net for an
     /// outcome the screen did not turn into a window).
     pub fn release_unshown_window(&mut self, shown: bool) -> Vec<Event> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::ReleaseUnshown { shown });
         if shown || !self.pending.is_empty() || !self.held.is_empty() || !self.script.as_ref().is_some_and(|s| s.holds_window()) {
             return Vec::new();
         }
@@ -210,6 +215,7 @@ impl Game {
     /// price: a rumour that costs something says so in its own event (a gold condition and a
     /// negative gold result), as the original's rumours do.
     pub fn take_hall_entry(&mut self, id: EventId) -> Result<Vec<Event>, ServiceError> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::TakeHall { id });
         if !self.hall_here().contains(&id) || self.pending_question().is_some() {
             return Err(ServiceError::NotHere);
         }
