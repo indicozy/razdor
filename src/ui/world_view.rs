@@ -998,7 +998,7 @@ const TILT_STEP: f32 = 5.0;
 /// The sky above the ground in the 2.5D view (the part of the view with no map).
 const SKY: Color = Color::new(0.06, 0.08, 0.11, 1.0);
 
-/// The view override, `RAZDOR_VIEW`: `25d` (the 2.5D view), `flat`, the snapshots' `first` and `eyes`
+/// The view override, `RAZDOR_VIEW`: `25d` (the 2.5D view), `flat`, the snapshots' `first` (or its alias `third`) and `eyes`
 /// (the first-person view forced on, the eyes camera with `eyes`), or the developer overrides `fp-chase`
 /// (the first-person view behind the hero) and `fp-eyes` (the same with the eyes camera). None for the
 /// settings.
@@ -1015,7 +1015,7 @@ pub fn tilt_view() -> bool {
         return true;
     }
     match view_env() {
-        Some("25d") | Some("first") | Some("eyes") | Some("fp-chase") | Some("fp-eyes") => true,
+        Some("25d") | Some("first") | Some("third") | Some("eyes") | Some("fp-chase") | Some("fp-eyes") => true,
         Some("flat") => false,
         _ => TILT_VIEW.load(std::sync::atomic::Ordering::Relaxed),
     }
@@ -1028,12 +1028,12 @@ pub fn set_tilt_view(on: bool) {
 
 /// Whether the tilted view is the first-person one («От первого лица», `view25::TiltCamera::first_person`):
 /// the setting (`audio::Settings::map_first_person`, pushed by [`set_first_person`]) within the tilted view.
-/// `RAZDOR_VIEW=first` or `eyes` (a snapshot) and `fp-chase` or `fp-eyes` (the developer overrides) force it
+/// `RAZDOR_VIEW=first` (or `third`) or `eyes` (a snapshot) and `fp-chase` or `fp-eyes` (the developer overrides) force it
 /// on; `25d` and `flat` do not.
 pub fn first_person() -> bool {
     tilt_view()
         && match view_env() {
-            Some("first") | Some("eyes") | Some("fp-chase") | Some("fp-eyes") => true,
+            Some("first") | Some("third") | Some("eyes") | Some("fp-chase") | Some("fp-eyes") => true,
             Some(_) => false,
             None => FIRST_PERSON.load(std::sync::atomic::Ordering::Relaxed),
         }
@@ -1066,6 +1066,33 @@ pub fn set_far_ground(shape: FarGround) {
     FAR_GROUND.store(shape as u8, std::sync::atomic::Ordering::Relaxed);
 }
 
+
+/// Each camera's curve (`view25::CameraTune`): the third person's, then the first person's. Pushed from the
+/// settings by [`set_tunes`]; the defaults are the constants (`view25::THIRD_TUNE`, `FIRST_TUNE`).
+static TUNES: std::sync::Mutex<[view25::CameraTune; 2]> = std::sync::Mutex::new([view25::THIRD_TUNE, view25::FIRST_TUNE]);
+
+/// Puts the cameras' curves on, from the settings, at once.
+pub fn set_tunes(third: view25::CameraTune, first: view25::CameraTune) {
+    if let Ok(mut t) = TUNES.lock() {
+        *t = [third, first];
+    }
+}
+
+/// The third person's curve (the behind-the-hero camera).
+pub fn third_tune() -> view25::CameraTune {
+    TUNES.lock().map_or(view25::THIRD_TUNE, |t| t[0])
+}
+
+/// The first person's curve (the eyes camera).
+pub fn first_tune() -> view25::CameraTune {
+    TUNES.lock().map_or(view25::FIRST_TUNE, |t| t[1])
+}
+
+/// Both cameras' settings as bits, for the cached pictures' keys: a slider moves the picture.
+fn curve_bits() -> [u32; 10] {
+    let (a, b) = (third_tune(), first_tune());
+    [a.flat, a.strength, a.height, a.pitch, a.fov, b.flat, b.strength, b.height, b.pitch, b.fov].map(f32::to_bits)
+}
 
 /// The eyes view («Глазами героя», `audio::Settings::map_eyes`, pushed by [`set_eyes`]): the camera
 /// stands at the hero's eyes and looks along his walk. Off by default; it is within the first-person
@@ -1168,7 +1195,7 @@ fn photo_tilt(target: Vec2, scale: f32, view: Rect, draw: Rect, pitch: f32, yaw:
 /// looks at `look` (the map view's centre, the hero's place) and its bent sheet's ground is the
 /// footprint of the frame `view`, culled to the strip under the bar `draw` as the 2.5D one is.
 fn first_person_tilt(look: Vec2, scale: f32, view: Rect, draw: Rect, yaw: f32, far: FarGround) -> Tilt {
-    let cam = TiltCamera::first_person(look, scale, view, yaw, far);
+    let cam = TiltCamera::first_person(look, scale, view, yaw, far, third_tune());
     Tilt { cam, plan: cam.ground_footprint(view, view), cull: cam.ground_footprint(view, draw) }
 }
 
@@ -1178,6 +1205,7 @@ fn first_person_tilt(look: Vec2, scale: f32, view: Rect, draw: Rect, yaw: f32, f
 /// height and bend. Its footprints are the frame `view` and the strip under the bar `draw`, as the
 /// first-person view's.
 fn eyes_tilt(ground: Vec2, scale: f32, view: Rect, draw: Rect, yaw: f32, far: FarGround, shot: Option<view25::Trailer>) -> Tilt {
+    let tune = first_tune();
     let (pitch, fov, height, yaw, bend) = match shot {
         Some(t) => (
             t.pitch.unwrap_or(view25::EYE_PITCH),
@@ -1187,13 +1215,13 @@ fn eyes_tilt(ground: Vec2, scale: f32, view: Rect, draw: Rect, yaw: f32, far: Fa
             (t.bend > 0.0).then_some((t.flat, t.radius, if t.horizon { -t.bend } else { t.bend })),
         ),
         None => (
-            view25::EYE_PITCH,
-            view25::FP_FOV,
-            view25::EYE_HEIGHT,
+            tune.pitch,
+            tune.fov,
+            tune.height,
             yaw,
             match far {
-                FarGround::Up => Some((view25::EYE_FLAT, view25::EYE_RADIUS_UP, view25::EYE_BEND_UP)),
-                FarGround::Horizon => Some((view25::EYE_FLAT, view25::EYE_RADIUS_DOWN, view25::EYE_BEND_DOWN)),
+                FarGround::Up => Some((tune.flat, tune.radius(view25::EYE_RADIUS_UP), view25::EYE_BEND_UP)),
+                FarGround::Horizon => Some((tune.flat, tune.radius(view25::EYE_RADIUS_DOWN), view25::EYE_BEND_DOWN)),
                 // The globe is built from the camera's eye (`TiltCamera::globe_bend`), below.
                 FarGround::Globe => None,
             },
@@ -1201,7 +1229,7 @@ fn eyes_tilt(ground: Vec2, scale: f32, view: Rect, draw: Rect, yaw: f32, far: Fa
     };
     let mut cam = TiltCamera::eyes(ground, height, scale, view, pitch, yaw, fov);
     cam.bend = match (shot, far) {
-        (None, FarGround::Globe) => Some(cam.globe_bend(cam.target, view25::EYE_FLAT, view25::globe_radius(view25::EYE_RADIUS_GLOBE))),
+        (None, FarGround::Globe) => Some(cam.globe_bend(cam.target, tune.flat, tune.radius(view25::globe_radius(view25::EYE_RADIUS_GLOBE)))),
         _ => bend.map(|(flat, radius, max_deg)| cam.eye_bend(flat, radius, max_deg)),
     };
     Tilt { cam, plan: cam.ground_footprint(view, view), cull: cam.ground_footprint(view, draw) }
@@ -1298,27 +1326,79 @@ fn tilt_yaw_target() -> f32 {
 /// Turns the yaw target by `deg` (wrapped).
 fn turn_tilt_yaw(deg: f32) {
     TILT_YAW.store(wrap_yaw(tilt_yaw_target() + deg).to_bits(), std::sync::atomic::Ordering::Relaxed);
+    AUTO_PAUSED.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// Turns the view back to the default angle (north up): the compass button's tap.
 fn reset_tilt_yaw() {
     TILT_YAW.store(0.0f32.to_bits(), std::sync::atomic::Ordering::Relaxed);
+    AUTO_PAUSED.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// The yaw after `dt_ms` of easing from `shown` toward `target`: the shortest way round, at a
-/// rate of 12 a second, and onto the target within 0.05°.
-fn ease_yaw(shown: f32, target: f32, dt_ms: i64) -> f32 {
+/// The ease's rate of the player's own turns, per second.
+const TILT_YAW_RATE: f32 = 12.0;
+/// The ease's rate of the third person's auto-turn, per second: a time constant of 0.2 s, so a turn is
+/// about settled after a second (a critically damped ease, without overshoot).
+const AUTO_TURN_RATE: f32 = 5.0;
+
+/// The yaw after `dt_ms` of easing from `shown` toward `target` at `rate` per second: the shortest way round,
+/// and onto the target within 0.05°. The step is exponential, so the yaw never passes the target, and the same
+/// time in two frames or in one gives the same yaw (the frame rate does not change the turn).
+fn ease_yaw_at(shown: f32, target: f32, dt_ms: i64, rate: f32) -> f32 {
     let d = wrap_yaw(target - shown);
     if d.abs() < 0.05 {
         return target;
     }
-    wrap_yaw(shown + d * (1.0 - (-(dt_ms as f32 / 1000.0) * 12.0).exp()))
+    wrap_yaw(shown + d * (1.0 - (-(dt_ms as f32 / 1000.0) * rate).exp()))
 }
 
-/// Eases the shown yaw toward its target over the frame's `dt_ms` ([`ease_yaw`]).
+/// Eases the shown yaw toward its target over the frame's `dt_ms` ([`ease_yaw_at`]): at the auto-turn's rate
+/// while the third person's camera follows the hero (`auto_turn_on`), else at the player's.
 fn ease_tilt_yaw(dt_ms: i64) {
-    let next = ease_yaw(tilt_yaw(), tilt_yaw_target(), dt_ms);
+    let rate = if auto_turn_on() { AUTO_TURN_RATE } else { TILT_YAW_RATE };
+    let next = ease_yaw_at(tilt_yaw(), tilt_yaw_target(), dt_ms, rate);
     TILT_YAW_SHOWN.store(next.to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether the third person's camera turns by itself toward the hero's walk (`audio::Settings::map_auto_turn`,
+/// pushed by [`set_auto_turn`]). Off by default.
+static AUTO_TURN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The auto-turn is paused by the player's own turn (Q, E, the twist, the compass) until the next walk starts.
+static AUTO_PAUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Whether the hero was walking last frame: a walk starts when he walks and was not.
+static WAS_WALKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Puts the third person's auto-turn on or off, from the settings, at once.
+pub fn set_auto_turn(on: bool) {
+    AUTO_TURN.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether the auto-turn setting is on (the third person's camera follows the hero's walk).
+pub fn auto_turn_setting() -> bool {
+    AUTO_TURN.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Whether the auto-turn acts now: the setting, with the third person's camera (not the eyes', not a flat map).
+fn auto_turn_on() -> bool {
+    auto_turn_setting() && tilt_view() && first_person() && !eyes_setting()
+}
+
+/// Whether the auto-turn stays paused after a frame: a walk that starts ends the pause, and otherwise it holds.
+fn auto_turn_paused(paused: bool, was_walking: bool, walking: bool) -> bool {
+    if walking && !was_walking { false } else { paused }
+}
+
+/// The auto-turn of a frame: while the hero walks and the player has not turned since his walk started, the
+/// yaw's target turns to the walk ([`follow_walk`]). Standing, the target stays where it is, so the camera does
+/// not turn; a reversal turns it the short way round, eased.
+fn auto_turn(game: &Game) {
+    let walking = game.moving();
+    let was = WAS_WALKING.swap(walking, std::sync::atomic::Ordering::Relaxed);
+    let paused = auto_turn_paused(AUTO_PAUSED.load(std::sync::atomic::Ordering::Relaxed), was, walking);
+    AUTO_PAUSED.store(paused, std::sync::atomic::Ordering::Relaxed);
+    if walking && !paused {
+        follow_walk(game);
+    }
 }
 
 /// The eyes view's yaw target while the hero walks: the direction of his next step, from where he is
@@ -2686,6 +2766,8 @@ fn ground_key(game: &Game, cam: &Camera) -> u64 {
     rect(cam.draw).hash(&mut h);
     if let Some(t) = cam.tilt {
         (t.cam.pitch_deg.to_bits(), t.cam.yaw_deg.to_bits(), rect(t.plan), rect(t.cull)).hash(&mut h);
+        // The bend itself: the curve's flat part and strength move the picture under the same footprint.
+        curve_bits().hash(&mut h);
     }
     let map = &game.world.map;
     (map.w, map.h, cam.grid.row_height().to_bits(), extend_edge(), mist::on(), map.surface_codes()).hash(&mut h);
@@ -5468,6 +5550,7 @@ fn battle_backdrop_key(game: &Game) -> u64 {
     look.map(bits).hash(&mut h);
     bits(game.display_pos()).hash(&mut h);
     (tilt_view(), first_person(), far_ground(), eyes_setting(), tilt_pitch().to_bits(), tilt_yaw().to_bits(), extend_edge(), mist::on()).hash(&mut h);
+    curve_bits().hash(&mut h);
     (game.fog.enabled, &game.fog.bits).hash(&mut h);
     game.unshown_cells().hash(&mut h);
     (game.aboard(), game.hero_hidden()).hash(&mut h);
@@ -5707,6 +5790,8 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
     // The eyes view turns with the hero's walk first, so the easing carries it.
     if eyes_view() {
         follow_walk(game);
+    } else if auto_turn_on() {
+        auto_turn(game);
     }
     if tilt_view() {
         ease_tilt_yaw(dt_ms);
@@ -7590,6 +7675,30 @@ mod tilt_tests {
         assert!(!bent_first_person_cam(&photo), "photo mode's free camera has no bend");
     }
 
+    /// The curves reach the view and the cached pictures' keys: a slider changes the key, and the
+    /// defaults are the constants again after it is put back.
+    #[test]
+    fn the_curves_reach_the_view_and_the_picture_keys() {
+        use view25::{CameraTune, FIRST_TUNE, THIRD_TUNE};
+        let before = curve_bits();
+        set_tunes(CameraTune { flat: 6.0, strength: 2.0, ..THIRD_TUNE }, FIRST_TUNE);
+        assert_eq!(third_tune(), CameraTune { flat: 6.0, strength: 2.0, ..THIRD_TUNE });
+        assert_eq!(first_tune(), FIRST_TUNE);
+        assert_ne!(curve_bits(), before, "a moved slider changes the key");
+        set_tunes(THIRD_TUNE, FIRST_TUNE);
+        assert_eq!(curve_bits(), before);
+    }
+
+    /// The auto-turn's pause: a walk that starts ends it; standing and walking on keep it, so a manual turn
+    /// stays until the next walk.
+    #[test]
+    fn the_auto_turn_stays_paused_until_the_next_walk() {
+        assert!(!auto_turn_paused(false, false, false));
+        assert!(auto_turn_paused(true, false, false), "standing keeps the pause");
+        assert!(auto_turn_paused(true, true, true), "walking on keeps the pause");
+        assert!(!auto_turn_paused(true, false, true), "a new walk ends it");
+    }
+
     /// The 2.5D view's sprites never fade by the hero's distance, even with it set for the pass, at any yaw
     /// (only the first-person view keys on it). The tests run with `RAZDOR_VIEW` unset, as a player's game does.
     #[test]
@@ -7801,18 +7910,38 @@ mod tilt_tests {
     /// stays put when no time passes or it is there already.
     #[test]
     fn the_view_eases_back_to_north_up_the_short_way() {
-        assert_eq!(ease_yaw(30.0, 30.0, 16), 30.0);
-        assert_eq!(ease_yaw(10.0, 0.0, 0), 10.0, "no time, no move");
+        assert_eq!(ease_yaw_at(30.0, 30.0, 16, TILT_YAW_RATE), 30.0);
+        // The auto-turn: never past the target, the same at any frame rate, a reversal eased (no step of a
+        // turn), and settled about a second on.
+        let (mut a, mut b) = (0.0f32, 0.0f32);
+        for _ in 0..100 {
+            let next = ease_yaw_at(a, 90.0, 10, AUTO_TURN_RATE);
+            assert!(next >= a - 1e-4 && next <= 90.0 + 1e-4, "no overshoot: {a} -> {next}");
+            a = next;
+        }
+        for _ in 0..50 {
+            b = ease_yaw_at(b, 90.0, 20, AUTO_TURN_RATE);
+        }
+        assert!((a - b).abs() < 0.01, "the frame rate does not change the turn: {a} and {b}");
+        assert!((a - 90.0).abs() < 1.0, "settled after a second: {a}");
+        let mut s = 0.0f32;
+        for _ in 0..60 {
+            let next = ease_yaw_at(s, 180.0, 16, AUTO_TURN_RATE);
+            assert!((next - s).abs() < 20.0, "a reversal eases through: {s} -> {next}");
+            s = next;
+        }
+        assert!(ease_yaw_at(170.0, -170.0, 16, AUTO_TURN_RATE) > 170.0, "the short way round, eased");
+        assert_eq!(ease_yaw_at(10.0, 0.0, 0, TILT_YAW_RATE), 10.0, "no time, no move");
         // From 170° to -170° is 20° the short way, through 180°: it goes up past 170°.
-        assert!(ease_yaw(170.0, -170.0, 16) > 170.0, "the short way round");
+        assert!(ease_yaw_at(170.0, -170.0, 16, TILT_YAW_RATE) > 170.0, "the short way round");
         let mut s = 90.0;
         for _ in 0..600 {
-            let next = ease_yaw(s, 0.0, 16);
+            let next = ease_yaw_at(s, 0.0, 16, TILT_YAW_RATE);
             assert!(wrap_yaw(next).abs() <= wrap_yaw(s).abs() + 1e-3, "it never turns away: {s} -> {next}");
             s = next;
         }
         assert_eq!(s, 0.0, "snapped onto north up");
-        assert_eq!(ease_yaw(0.01, 0.0, 16), 0.0, "within 0.05° it snaps");
+        assert_eq!(ease_yaw_at(0.01, 0.0, 16, TILT_YAW_RATE), 0.0, "within 0.05° it snaps");
     }
 
     /// The compass shows only in the 2.5D view, while the view is turned away from north up (by a

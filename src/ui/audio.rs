@@ -224,9 +224,10 @@ pub struct Settings {
     /// Advanced, Razdor's: the world map's 2.5D view (`world_view::tilt_view`): a tilted camera
     /// over the map, the standing sprites as billboards. Off (the default), the flat map as before.
     pub map_tilt: bool,
-    /// Advanced, Razdor's: the first-person view («От первого лица»), within the tilted view
-    /// (`map_tilt` on): the camera stands low behind the hero and the far ground bends with it.
-    /// Off (the default), the 2.5D view as before. Without `map_tilt` it has no effect.
+    /// Advanced, Razdor's: the first-person views («От третьего лица» and «От первого лица», see
+    /// `map_eyes`), within the tilted view (`map_tilt` on): the camera stands low behind the hero, or
+    /// at his eyes, and the far ground bends with it. Off (the default), the 2.5D view as before.
+    /// Without `map_tilt` it has no effect.
     pub map_first_person: bool,
     /// Advanced, Razdor's: the first-person view's far ground («Даль»): «Горизонт» on (the ground
     /// curves down like the earth's horizon, the sky above), «Вверх» off (the default: it rolls up
@@ -239,10 +240,20 @@ pub struct Settings {
     /// Only with `map_first_person`.
     #[serde(default)]
     pub map_globe: bool,
-    /// Advanced, Razdor's: the first-person view's camera («Камера»): «Глазами героя» on, the camera
-    /// stands at the hero's eyes and turns with his walk; «За героем» off (the default: the low
-    /// camera behind him). Only with `map_first_person`.
+    /// Advanced, Razdor's: the camera of the first-person view (the map view row, `MapView`): «От первого
+    /// лица» on, the camera stands at the hero's eyes and turns with his walk; «От третьего лица» off (the
+    /// default: the low camera behind him). Only with `map_first_person`.
     pub map_eyes: bool,
+    /// Advanced, Razdor's: the third person's curve («Начало изгиба», «Сила изгиба», `view25::CameraTune`), for
+    /// the far ground whichever it is. The defaults are today's constants.
+    #[serde(deserialize_with = "super::view25::third_tune_from")]
+    pub map_third_tune: super::view25::CameraTune,
+    /// Advanced, Razdor's: the third person's camera turns by itself toward the hero's walk («Камера
+    /// поворачивается за героем»). Off (the default), the camera turns only by the player's own turns.
+    pub map_auto_turn: bool,
+    /// Advanced, Razdor's: the first person's curve, as `map_third_tune`, for the eyes camera.
+    #[serde(deserialize_with = "super::view25::first_tune_from")]
+    pub map_first_tune: super::view25::CameraTune,
     /// Advanced, Razdor's: the standing sprites' size in the 2.5D view, 1.5 by default (the owner's
     /// decision, 2026-11-05); `world_view::next_sprite_size` cycles it (1×, 1.5×, 2×).
     pub map_sprite_size: f32,
@@ -376,7 +387,7 @@ pub fn must_request(asked: Option<i32>, want: i32) -> bool {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), bottom_bar_size: Default::default(), keep_xp_on_promotion: false, keep_formation: true, hit_shake: false, battle_marks: true, army_list: false, map_tilt: false, map_first_person: false, map_horizon: false, map_globe: false, map_eyes: false, map_light: Default::default(), map_light_cycle: 24, map_light_hour: 18, map_shadows: Default::default(), map_light_quality: None, map_mist: false, map_sprite_size: super::world_view::DEFAULT_SPRITE_SIZE, map_render_scale: 1.0, frame_cap: 0, map_twist: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, map_extended: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new(), map_live_water: false, map_weather: false, map_living: false, chronicle_summary: true }
+        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), bottom_bar_size: Default::default(), keep_xp_on_promotion: false, keep_formation: true, hit_shake: false, battle_marks: true, army_list: false, map_tilt: false, map_first_person: false, map_horizon: false, map_globe: false, map_eyes: false, map_third_tune: super::view25::THIRD_TUNE, map_first_tune: super::view25::FIRST_TUNE, map_auto_turn: false, map_light: Default::default(), map_light_cycle: 24, map_light_hour: 18, map_shadows: Default::default(), map_light_quality: None, map_mist: false, map_sprite_size: super::world_view::DEFAULT_SPRITE_SIZE, map_render_scale: 1.0, frame_cap: 0, map_twist: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, map_extended: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new(), map_live_water: false, map_weather: false, map_living: false, chronicle_summary: true }
     }
 }
 
@@ -403,6 +414,16 @@ impl Default for Originals {
     }
 }
 
+/// The world map's views, in the order the view row cycles them: flat, the 2.5D view, the first-person
+/// view from behind the hero («От третьего лица»), and from the hero's eyes («От первого лица»).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MapView {
+    Flat,
+    TwoAndHalfD,
+    Third,
+    First,
+}
+
 impl Settings {
     /// The far ground's shape of the first-person view: «Шар» when `map_globe` is on, else «Горизонт» when
     /// `map_horizon` is, else «Вверх». A file from before «Шар» has `map_globe` off, so it keeps its shape.
@@ -414,6 +435,29 @@ impl Settings {
         } else {
             super::view25::FarGround::Up
         }
+    }
+
+    /// The world map's view, as its row shows it. The three flags stay the storage (a file from before the
+    /// separate views reads the same): flat without `map_tilt`; the 2.5D view with `map_tilt` alone; the
+    /// first-person view's camera is `map_eyes` (on: «От первого лица», through the hero's eyes; off:
+    /// «От третьего лица», behind him). `map_eyes` is read only with `map_first_person`.
+    pub fn map_view(&self) -> MapView {
+        match (self.map_tilt, self.map_first_person, self.map_eyes) {
+            (false, _, _) => MapView::Flat,
+            (true, false, _) => MapView::TwoAndHalfD,
+            (true, true, false) => MapView::Third,
+            (true, true, true) => MapView::First,
+        }
+    }
+
+    /// Sets the map's view: the flags [`Settings::map_view`] reads back.
+    pub fn set_map_view(&mut self, view: MapView) {
+        (self.map_tilt, self.map_first_person, self.map_eyes) = match view {
+            MapView::Flat => (false, false, false),
+            MapView::TwoAndHalfD => (true, false, false),
+            MapView::Third => (true, true, false),
+            MapView::First => (true, true, true),
+        };
     }
 
     /// The first gameplay setting that differs from the original's, by its catalog name (the
@@ -518,7 +562,9 @@ impl Settings {
         } else {
             super::world_view::DEFAULT_SPRITE_SIZE
         };
-        Settings { music_volume: fix(self.music_volume), sfx_volume: fix(self.sfx_volume), ui_scale, text_size, map_zoom, anim_speed, scroll_speed: pct(self.scroll_speed), walk_speed: walk(self.walk_speed), map_sprite_size, map_render_scale: super::map_scale::valid(self.map_render_scale), frame_cap: super::frame_cap::valid(self.frame_cap), ..self }
+        let map_third_tune = self.map_third_tune.valid(super::view25::THIRD_TUNE, false);
+        let map_first_tune = self.map_first_tune.valid(super::view25::FIRST_TUNE, true);
+        Settings { music_volume: fix(self.music_volume), sfx_volume: fix(self.sfx_volume), ui_scale, text_size, map_zoom, anim_speed, scroll_speed: pct(self.scroll_speed), walk_speed: walk(self.walk_speed), map_sprite_size, map_render_scale: super::map_scale::valid(self.map_render_scale), frame_cap: super::frame_cap::valid(self.frame_cap), map_third_tune, map_first_tune, ..self }
     }
 
     fn save(&self) {
@@ -1291,6 +1337,42 @@ mod tests {
         let back: Settings = serde_json::from_str(&serde_json::to_string(&globe).unwrap()).unwrap();
         assert!(back.map_globe && !back.map_horizon);
         assert_eq!(back.far_ground(), FarGround::Globe);
+    }
+
+    /// A curve from a file is kept within its ranges, a missing one is its camera's default, and a file from
+    /// before the curves gets the constants.
+    #[test]
+    fn the_curves_are_kept_in_range_and_default_per_camera() {
+        use super::super::view25::{CameraTune, FIRST_TUNE, THIRD_TUNE};
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!((old.map_third_tune, old.map_first_tune), (THIRD_TUNE, FIRST_TUNE));
+        let wild: Settings = serde_json::from_str(r#"{"map_third_tune": {"flat": 99, "strength": 0}, "map_first_tune": {"flat": -3, "strength": 1e9}}"#).unwrap();
+        let wild = wild.clamped();
+        assert_eq!(wild.map_third_tune, CameraTune { flat: 30.0, strength: 0.25, ..THIRD_TUNE });
+        assert_eq!(wild.map_first_tune, CameraTune { flat: 0.0, strength: 4.0, ..FIRST_TUNE });
+        let partial: Settings = serde_json::from_str(r#"{"map_third_tune": {"flat": 6}}"#).unwrap();
+        assert_eq!(partial.clamped().map_third_tune, CameraTune { flat: 6.0, ..THIRD_TUNE });
+    }
+
+    /// The map's view: a file's flags read as the four views (`map_first_person` with `map_eyes` on is
+    /// «От первого лица», with it off «От третьего лица»; `map_eyes` alone does nothing), and each view
+    /// writes back the flags it reads from.
+    #[test]
+    fn the_map_view_reads_the_flags_of_a_file_as_one_of_the_four_views() {
+        use super::MapView;
+        let read = |json: &str| serde_json::from_str::<Settings>(json).unwrap().map_view();
+        assert_eq!(read("{}"), MapView::Flat);
+        assert_eq!(read(r#"{"map_tilt": true}"#), MapView::TwoAndHalfD);
+        assert_eq!(read(r#"{"map_tilt": true, "map_eyes": true}"#), MapView::TwoAndHalfD, "the eyes need the first-person flag");
+        assert_eq!(read(r#"{"map_tilt": true, "map_first_person": true, "map_eyes": false}"#), MapView::Third);
+        assert_eq!(read(r#"{"map_tilt": true, "map_first_person": true, "map_eyes": true}"#), MapView::First);
+        assert_eq!(read(r#"{"map_first_person": true, "map_eyes": true}"#), MapView::Flat, "no tilt, no view");
+        for view in [MapView::Flat, MapView::TwoAndHalfD, MapView::Third, MapView::First] {
+            let mut s = Settings::default();
+            s.set_map_view(view);
+            let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+            assert_eq!(back.map_view(), view);
+        }
     }
 
     #[test]
