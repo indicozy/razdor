@@ -952,6 +952,7 @@ no walk or wait, no showing, glide, turn or toast, no press, key, wheel or point
 pointer where the last frame left them. `frame_cap::current()` then gives `battery_cap`: the idle frame rate
 `IDLE_FPS` (10) instead of the cap after an idle frame, so the map's animations tick slowly and the frames in between are
 not drawn. Other screens never set the flag, so they keep their cap. The ui-regression and the mobile checks show the row.
+With «Анимация карты» Выкл (`map_anim::off()`) the same idle rate applies without the saver: a still map needs no more.
 The world map's 2.5D settings are in the same window, after «Имя предводителя»: «Вид карты»
 (`map_tilt`, always shown), and «Размер фигур» (`map_sprite_size`) and «Поворот двумя пальцами»
 (`map_twist`, `gestures::set_twist`) only with the 2.5D view on. `apply_options` pushes all three

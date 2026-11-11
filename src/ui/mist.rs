@@ -106,7 +106,8 @@ pub fn mist_alpha(d: f32, w: f32) -> f32 {
 /// The clock the mist drifts on: the terrain's own (its water clock, in seconds), so the edge fog
 /// and the mist move together.
 fn clock() -> f32 {
-    ((crate::ui::clock::now() * 1000.0) as i64 as f32 / 1000.0) % crate::ui::terrain::CLOCK_PERIOD
+    // The map's animation time (`map_anim`): the cloud stops with «Анимация карты» off.
+    ((super::map_anim::now() * 1000.0) as i64 as f32 / 1000.0) % crate::ui::terrain::CLOCK_PERIOD
 }
 
 // The shader's vertex stage: the quad's uv, as the terrain's, and its colour's alpha (a raised

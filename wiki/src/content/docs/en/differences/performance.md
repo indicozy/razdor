@@ -41,6 +41,16 @@ The budget for a single frame at 60 FPS is 16.7 ms. Razdor uses only about 1-2% 
 
 The **"Battery saver"** setting (the "Other" tab, off by default). When nothing happens on the map — no windows are open, the hero neither walks nor waits, no armies are shown, the camera and the pointer stand still, and you press nothing — new frames are drawn 10 times a second instead of at full rate. As soon as something happens, the frames run at full rate again. The game rules do not change.
 
+## Map animation
+
+The **"Map animation"** setting (the "Map" tab, the row before "Mist instead of black", "On" by default). A click on the row cycles through its values:
+
+- **"On"** — everything on the map moves, as usual: the trees, the armies, the water, the weather, the lights.
+- **"Near only"** — the movement stops when the map is zoomed out, and comes back as you zoom in.
+- **"Off"** — the map is still: the water, the living map and the ship wakes are off, and new frames are drawn less often, as with "Battery saver". Less load on the graphics card and the battery.
+
+The game rules do not change.
+
 ## Large Maps
 
 Before acceleration (Razdor 1.3.5). Synthetic tests on a single CPU core (time for one game tick, when AI moves armies and checks events):

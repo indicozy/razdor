@@ -300,7 +300,8 @@ impl FogShown {
             self.wait.clear();
             self.wait.resize(n, now);
         }
-        let fresh = resized || self.snap;
+        // «Анимация карты» Выкл (`map_anim`): the reveal is instant, as a snap.
+        let fresh = resized || self.snap || (key != self.key && super::map_anim::off());
         let recompute = fresh || key != self.key;
         if recompute {
             self.held.clear();
