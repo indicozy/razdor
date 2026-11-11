@@ -101,15 +101,61 @@ pub fn bank_distance(codes: &[u8], (w, h): (u32, u32)) -> Vec<u32> {
     dist
 }
 
-/// The drift speed of each cell's river (0..1, the `Flow` texture's blue channel): `SPEED_NARROW` next to a bank,
-/// easing toward `SPEED_WIDE` as the water widens (a cell `d` from the bank runs at 1.6 − 0.25 d, clamped). Cells
-/// with no flow (still water, land) are 0, so a lake and the sea do not drift.
+/// The bank distance (in steps) from which water is wide: a lake of about 13 cells across, or the sea. A river is
+/// narrower (the original's rivers are a few cells across), so it is not wide and it flows.
+pub const WIDE_BANK: u32 = 6;
+
+/// How far (in steps) from the wide interior the water still counts as wide: its shore, which lies that far from
+/// the middle of a lake of `WIDE_BANK` cells' reach. A river within it (a mouth) is wide as well.
+pub const WIDE_REACH: u32 = 6;
+
+/// Whether each water cell is in a wide body of water (a lake, the sea), not a river: within `WIDE_REACH` steps of
+/// water `WIDE_BANK` steps from the bank (the interior). Built once per map, with `bank_distance`; the waves and the
+/// sparkle go on the wide water only, and the wide water does not drift.
+pub fn wide_water(bank: &[u32], (w, h): (u32, u32)) -> Vec<bool> {
+    let (wu, hu) = (w as usize, h as usize);
+    let mut dist = vec![u32::MAX; bank.len()];
+    let mut queue = std::collections::VecDeque::new();
+    for (i, &b) in bank.iter().enumerate() {
+        if b >= WIDE_BANK {
+            dist[i] = 0;
+            queue.push_back(i);
+        }
+    }
+    while let Some(i) = queue.pop_front() {
+        let d = dist[i];
+        if d >= WIDE_REACH {
+            continue;
+        }
+        let (x, y) = ((i % wu) as i64, (i / wu) as i64);
+        for dy in -1i64..=1 {
+            for dx in -1i64..=1 {
+                let (nx, ny) = (x + dx, y + dy);
+                if nx < 0 || ny < 0 || nx >= wu as i64 || ny >= hu as i64 {
+                    continue;
+                }
+                let j = ny as usize * wu + nx as usize;
+                if dist[j] > d + 1 && bank[j] > 0 {
+                    dist[j] = d + 1;
+                    queue.push_back(j);
+                }
+            }
+        }
+    }
+    (0..bank.len()).map(|i| bank[i] > 0 && dist[i] <= WIDE_REACH).collect()
+}
+
+/// The drift speed of each cell's water (0..1, the `Flow` texture's blue channel): `SPEED_NARROW` next to a bank,
+/// easing toward `SPEED_WIDE` as a river widens (a cell `d` from the bank runs at 1.6 − 0.25 d, clamped). Cells with
+/// no flow (still water, land) and the wide water (a lake's or the sea's rim flows inward, but it does not drift)
+/// are 0.
 pub fn river_speed(codes: &[u8], size: (u32, u32), flow: &[(f32, f32)]) -> Vec<f32> {
     let bank = bank_distance(codes, size);
+    let wide = wide_water(&bank, size);
     (0..codes.len())
         .map(|i| {
             let moving = flow.get(i).is_some_and(|&(x, y)| x != 0.0 || y != 0.0);
-            if !moving {
+            if !moving || wide[i] {
                 return 0.0;
             }
             let d = bank[i].min(1 << 16) as f32;
@@ -567,6 +613,33 @@ mod tests {
         // No older picture (the first, or after a change of view), or a clock that did not go on: the newer.
         assert_eq!(picture_mix(10.2, None, 10.5), 1.0);
         assert_eq!(picture_mix(10.2, Some(10.5), 10.5), 1.0);
+    }
+
+    #[test]
+    fn a_lake_is_wide_water_and_a_narrow_river_is_not_and_only_the_river_drifts() {
+        // 25 × 15 of land, with a 15 × 13 lake (wide: its middle is 7 steps from the land) and a one-cell river in
+        // column 21 (narrow, out of the lake's reach: the window is 3 cells).
+        let (w, h) = (25u32, 15u32);
+        let mut codes = vec![5u8; 375];
+        for y in 1..14 {
+            for x in 1..16 {
+                codes[y * 25 + x] = 0;
+            }
+            codes[y * 25 + 21] = 0;
+        }
+        let bank = bank_distance(&codes, (w, h));
+        let wide = wide_water(&bank, (w, h));
+        assert!(wide[7 * 25 + 8], "the lake's middle is wide");
+        assert!(wide[26], "the lake's rim is wide water too");
+        assert!(!wide[7 * 25 + 21], "the one-cell river is not wide");
+        assert!(!wide[0], "land is not wide water");
+        // Flow on all the water (the lake's rim flows inward, the river runs down); the speed is zero on the
+        // lake only, and the narrow river runs at full speed.
+        let flow: Vec<(f32, f32)> = codes.iter().map(|&c| if c == 0 { (0.0, 1.0) } else { (0.0, 0.0) }).collect();
+        let speed = river_speed(&codes, (w, h), &flow);
+        assert_eq!(speed[7 * 25 + 8], 0.0, "the lake does not drift");
+        assert_eq!(speed[26], 0.0, "nor its rim");
+        assert_eq!(speed[7 * 25 + 21], SPEED_NARROW, "the narrow river runs at full speed");
     }
 
     #[test]

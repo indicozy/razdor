@@ -235,15 +235,15 @@ vec2 ripple(vec2 q) {
 // shore), and a noise breaks it into patches. A fainter second line lies further out, on a wave of its own. A still
 // shore (a lake, the sea) foams at full strength, a river at 0.55. The periods fit CLOCK_PERIOD (6400 s): the wave is
 // 1000 cycles of it, and the drifts move the noise by whole lattice periods. Returns the foam's colour and alpha.
-vec4 shore_foam(float cov, vec2 p, vec2 fl) {
+vec4 shore_foam(float cov, vec2 p, vec2 fl, vec2 dr) {
     float s = cov - 0.5;
     if (s <= 0.0) {
         return vec4(0.0);
     }
     float t0 = fract(Clock * 0.05);
     float t1 = fract(Clock * 0.05 + 0.5);
-    vec2 q0 = p - fl * t0 * 7.0;
-    vec2 q1 = p - fl * t1 * 7.0;
+    vec2 q0 = p - dr * t0 * 7.0;
+    vec2 q1 = p - dr * t1 * 7.0;
     // Zoomed out (Detail 0) the line stands at its middle phase: the lapping is the moving detail.
     float lap = mix(0.5, 0.5 + 0.5 * sin(Clock * 0.98174770 + 6.0 * wnoise(q0 * 0.8)), Detail);
     float lap2 = mix(0.5, 0.5 + 0.5 * sin(Clock * 0.98174770 + 2.5 + 6.0 * wnoise(q1 * 0.6)), Detail);
@@ -283,23 +283,31 @@ void main() {
     // of the four codes. The ripple reads the noise along the flow (a river drifts; zero flow stands still).
     @CP@ float sea = 0.0;
     vec2 fl = vec2(0.0);
+    vec2 dr = vec2(0.0);
     if (wet) {
         vec2 uvw = (p + 1.5) / 3.0;
         if (LiveWater > 0.5) {
             vec2 cell_uv = (p + 0.5) / MapSize;
             vec4 fd = texture2D(Flow, cell_uv);
             sea = fd.a;
-            // The flow scroll: two phases half a cycle apart (a 20 s cycle, 7 cells of travel a cycle),
-            // each faded out at its own wrap, so the pattern never jumps when Clock wraps.
+            // The flow: its direction (rg) and the water's speed (b: 1 next to a bank, slower as a river widens, 0 on a
+            // lake or the sea). The drift is the flow times the speed.
             fl = (fd.rg * 255.0 - 128.0) / 127.0;
+            dr = fl * fd.b;
+            // The flow scroll: two phases half a cycle apart (a 20 s cycle), each faded out at its own wrap, so the
+            // pattern never jumps when Clock wraps. The surface moves 6 cells a cycle at full speed (two of its 3-cell
+            // tiles, so the two phases show the same tile pattern and the crossfade does not ghost at full speed).
             float t0 = fract(Clock * 0.05);
             float t1 = fract(Clock * 0.05 + 0.5);
             float wt = abs(2.0 * t0 - 1.0);
-            vec2 q0 = p - fl * t0 * 7.0;
-            vec2 q1 = p - fl * t1 * 7.0;
-            uvw += 0.015 * Detail * mix(ripple(q0), ripple(q1), wt);
+            vec2 q0 = p - dr * t0 * 7.0;
+            vec2 q1 = p - dr * t1 * 7.0;
+            vec2 u0 = (p - dr * t0 * 6.0 + 1.5) / 3.0 + 0.015 * Detail * ripple(q0);
+            vec2 u1 = (p - dr * t1 * 6.0 + 1.5) / 3.0 + 0.015 * Detail * ripple(q1);
+            w = mix(texture2D(Water, sharp_uv(u0, WaterSize, WaterScale)).rgb, texture2D(Water, sharp_uv(u1, WaterSize, WaterScale)).rgb, wt);
+        } else {
+            w = texture2D(Water, sharp_uv(uvw, WaterSize, WaterScale)).rgb;
         }
-        w = texture2D(Water, sharp_uv(uvw, WaterSize, WaterScale)).rgb;
     }
     @CP@ vec3 col;
     if (k.x == k.y && k.y == k.z && k.z == k.w) {
@@ -314,7 +322,7 @@ void main() {
     if (wet && LiveWater > 0.5) {
         float cov = (k.x < 2.5 ? 1.0 : 0.0) * (1.0 - fx) * (1.0 - fy) + (k.y < 2.5 ? 1.0 : 0.0) * fx * (1.0 - fy)
             + (k.z < 2.5 ? 1.0 : 0.0) * (1.0 - fx) * fy + (k.w < 2.5 ? 1.0 : 0.0) * fx * fy;
-        vec4 fo = shore_foam(cov, p, fl);
+        vec4 fo = shore_foam(cov, p, fl, dr);
         col = mix(col, fo.rgb, fo.a);
     }
     if (mist) {
