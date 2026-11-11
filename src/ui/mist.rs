@@ -47,6 +47,13 @@ pub fn parse(v: &str) -> MistMode {
     }
 }
 
+/// The look `RAZDOR_MIST` forces (a dev switch, as the other `RAZDOR_` overrides: it wins over the saved
+/// setting, in the snapshots and the live game); None when it is not set.
+pub fn env_mode() -> Option<MistMode> {
+    static ENV: std::sync::OnceLock<Option<MistMode>> = std::sync::OnceLock::new();
+    *ENV.get_or_init(|| std::env::var("RAZDOR_MIST").ok().map(|v| parse(&v)))
+}
+
 /// The setting as a file holds it: the old bool (true is «Облака») or the mode's name.
 pub fn de_mode<'de, D: Deserializer<'de>>(d: D) -> Result<MistMode, D::Error> {
     #[derive(Deserialize)]
@@ -453,6 +460,7 @@ mod tests {
     fn the_setting_names_parse_and_the_default_is_the_original_black() {
         assert_eq!(parse("1"), MistMode::Clouds);
         assert_eq!(parse(" Flat "), MistMode::Flat);
+        assert_eq!(parse("off"), MistMode::Off, "RAZDOR_MIST=off forces the black over a saved mist");
         assert_eq!(parse("nope"), MistMode::Off);
         assert_eq!(MistMode::default(), MistMode::Off);
     }
