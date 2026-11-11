@@ -1590,7 +1590,7 @@ impl Group {
     /// The rows the group shows, top to bottom. Every row is in exactly one group (a test checks it).
     pub fn rows(self) -> &'static [Row] {
         match self {
-            Group::Map => &[Row::MapZoom, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
+            Group::Map => &[Row::MapZoom, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::WaterRate, Row::Weather, Row::LivingMap, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
             Group::Battle => &[Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience, Row::HitShake],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
@@ -1618,6 +1618,7 @@ pub enum Row {
     LightQuality,
     Mist,
     LiveWater,
+    WaterRate,
     Weather,
     LivingMap,
     DepthModel,
@@ -1649,7 +1650,7 @@ pub enum Row {
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 43] = [
+pub const ALL: [Row; 44] = [
         Row::MapZoom,
         Row::MapResolution,
         Row::FrameCap,
@@ -1666,6 +1667,7 @@ pub const ALL: [Row; 43] = [
         Row::LightQuality,
         Row::Mist,
         Row::LiveWater,
+        Row::WaterRate,
         Row::Weather,
         Row::LivingMap,
         Row::DepthModel,
@@ -1736,6 +1738,8 @@ pub const ALL: [Row; 43] = [
             Row::LightHour => audio.map_light == LightMode::Fixed,
             // The shadows are the light's: shown only with the light on.
             Row::Shadows | Row::LightQuality => audio.map_light != LightMode::Off,
+            // The water's rate and size are the moving water's: shown only with it on.
+            Row::WaterRate => audio.map_live_water,
             // Razdor's (the owner's decision, 2026-11-10): the 2.5D view, while a building of the
             // install still has no cut (`depth`).
             Row::DepthModel => audio.map_tilt && depth::available() && depth::unknown() > 0,
@@ -2164,6 +2168,17 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
             // Razdor's, off by default: the water moves (`water`), style only.
             if labelled_row_help(c, geo, tr("Moving water"), yes_no(audio.map_live_water), Row::LiveWater.help_text()).0 {
                 audio.map_live_water = !audio.map_live_water;
+            }
+        }
+        Row::WaterRate => {
+            // Razdor's, with the moving water: how often the water is redrawn (`water::FrameRate`).
+            let value = match audio.map_water_rate {
+                super::water::FrameRate::EveryFrame => tr("Every frame"),
+                super::water::FrameRate::EveryOther => tr("Every other frame"),
+                super::water::FrameRate::EveryThird => tr("Every third frame"),
+            };
+            if labelled_row(c, geo, tr("Water animation rate"), value).0 {
+                audio.map_water_rate = audio.map_water_rate.next();
             }
         }
         Row::Weather => {

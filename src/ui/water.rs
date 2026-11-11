@@ -7,6 +7,7 @@
 //! keeps the switch and the pure maths both sides share, so they are tested without a window.
 
 use razdor::local;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 
 local! {
@@ -171,6 +172,78 @@ pub fn foam_line(s: f32, lap: f32) -> f32 {
 pub fn foam_far(s: f32, lap: f32) -> f32 {
     let inner = 0.36 + 0.05 * lap;
     smoothstep(inner - 0.01, inner + 0.01, s) * (1.0 - smoothstep(inner + 0.03, inner + 0.07, s))
+}
+
+/// «Частота анимации воды» (`Settings::map_water_rate`): the moving water is redrawn every 1, 2 or 3 frames;
+/// the frames between show the last two drawings blended in time (`picture_mix`). Flat map only.
+// The variants name the row's choices («Каждый кадр», «Через кадр», «Каждый третий»).
+#[allow(clippy::enum_variant_names)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FrameRate {
+    #[default]
+    EveryFrame,
+    EveryOther,
+    EveryThird,
+}
+
+impl FrameRate {
+    /// The frames per redraw of the water picture.
+    pub fn frames(self) -> u32 {
+        match self {
+            FrameRate::EveryFrame => 1,
+            FrameRate::EveryOther => 2,
+            FrameRate::EveryThird => 3,
+        }
+    }
+
+    /// The next setting in the row: every frame, every other, every third, every frame.
+    pub fn next(self) -> FrameRate {
+        match self {
+            FrameRate::EveryFrame => FrameRate::EveryOther,
+            FrameRate::EveryOther => FrameRate::EveryThird,
+            FrameRate::EveryThird => FrameRate::EveryFrame,
+        }
+    }
+}
+
+local! {
+    /// The frame rate of the settings, taken in by `set_levels` (every frame, from `display`).
+    static RATE: std::cell::Cell<FrameRate> = std::cell::Cell::new(FrameRate::EveryFrame);
+    /// `RAZDOR_WATER_EVERY=1|2|3` overrides it (the snapshots and profiling).
+    static ENV_EVERY: Option<u32> = std::env::var("RAZDOR_WATER_EVERY").ok().and_then(|v| v.trim().parse::<u32>().ok()).filter(|n| (1..=3).contains(n));
+}
+
+/// Takes the frame rate in (from the settings; the snapshots keep the default).
+pub fn set_levels(rate: FrameRate) {
+    RATE.set(rate);
+}
+
+/// The redraw interval of the water picture, in frames (1 is every frame; the env overrides the setting).
+pub fn every() -> u32 {
+    ENV_EVERY.with(|e| *e).unwrap_or_else(|| RATE.get().frames())
+}
+
+/// The water picture's share of the screen in each direction: the screen's size (the picture path's
+/// resolution, lowered by the quality setting in its own step).
+pub fn scale() -> f32 {
+    1.0
+}
+
+/// Whether the water picture is redrawn this frame: `age` frames have passed since the picture it shows was
+/// drawn (0 on the frame it was drawn), and it is redrawn every `every` frames.
+pub fn redraw_due(age: u32, every: u32) -> bool {
+    every <= 1 || age + 1 >= every
+}
+
+/// The blend of the two water pictures on this frame, from the older (`prev`, drawn at that water time) to the
+/// newer (`cur`, drawn at `cur`), at water time `now`. The frame shows the water as it was one interval ago
+/// (the newer picture's own time is reached when the next one is due), so the motion is smooth between redraws:
+/// 0 at the redraw, 1 one interval on. Without an older picture, or when the clock did not go on, the newer.
+pub fn picture_mix(now: f64, prev: Option<f64>, cur: f64) -> f32 {
+    match prev {
+        Some(p) if cur > p => ((now - cur) / (cur - p)).clamp(0.0, 1.0) as f32,
+        _ => 1.0,
+    }
 }
 
 /// Seconds between two wake points.
@@ -405,6 +478,45 @@ mod tests {
         assert!(still.iter().all(|&s| s == 0.0));
         // Speeds stay within the band, however wide the water gets.
         assert!(speed.iter().all(|&s| (0.0..=SPEED_NARROW).contains(&s)));
+    }
+
+    /// The redraw flags of `frames` frames at `every`, as the picture's age runs (0 on a redraw, then up).
+    fn schedule(every: u32, frames: usize) -> Vec<bool> {
+        let mut age = 0u32;
+        let mut out = Vec::new();
+        for frame in 0..frames {
+            let due = frame == 0 || redraw_due(age, every);
+            if due {
+                age = 0;
+            } else {
+                age += 1;
+            }
+            out.push(due);
+        }
+        out
+    }
+
+    #[test]
+    fn the_water_is_redrawn_every_frame_every_other_or_every_third_frame() {
+        assert_eq!(schedule(1, 4), vec![true, true, true, true]);
+        assert_eq!(schedule(2, 6), vec![true, false, true, false, true, false]);
+        assert_eq!(schedule(3, 7), vec![true, false, false, true, false, false, true]);
+        // The rates in the settings row, and their cycle.
+        assert_eq!([FrameRate::EveryFrame, FrameRate::EveryOther, FrameRate::EveryThird].map(FrameRate::frames), [1, 2, 3]);
+        assert_eq!(FrameRate::EveryThird.next(), FrameRate::EveryFrame);
+    }
+
+    #[test]
+    fn the_blend_moves_from_the_older_picture_to_the_newer_one_over_an_interval() {
+        // Pictures drawn at water times 10.0 (older) and 10.5 (newer): the frame at the newer's time shows the
+        // older, one interval on it shows the newer, halfway between them the middle.
+        assert_eq!(picture_mix(10.5, Some(10.0), 10.5), 0.0);
+        assert!((picture_mix(10.75, Some(10.0), 10.5) - 0.5).abs() < 1e-6);
+        assert_eq!(picture_mix(11.0, Some(10.0), 10.5), 1.0);
+        assert_eq!(picture_mix(12.0, Some(10.0), 10.5), 1.0, "held past the interval, until the next redraw");
+        // No older picture (the first, or after a change of view), or a clock that did not go on: the newer.
+        assert_eq!(picture_mix(10.2, None, 10.5), 1.0);
+        assert_eq!(picture_mix(10.2, Some(10.5), 10.5), 1.0);
     }
 
     #[test]

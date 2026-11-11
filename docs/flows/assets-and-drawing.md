@@ -599,6 +599,16 @@ it every frame from `display::follow_settings`; `RAZDOR_LIVE_WATER=1` turns it o
   and `t0 + ½`, mixed by `|2·t0 − 1|`, so the scroll does not jump when `Clock` wraps at 1000 s). The ripple's and the
   foam's sine terms of `Clock` itself still jump at that wrap (a known leftover; the mist's drift does too). A lake's rim cells flow inward (the same rule), so
   coasts drift toward the open water; that is part of the best guess.
+- **The redraw rate** («Частота анимации воды», `Settings::map_water_rate`, `water::FrameRate`: every frame, every
+  other, every third; every frame by default, the row shows with «Живая вода» on). On the flat map, below every frame,
+  the overlay's water (`TerrainLayer::draw_water_picture`) is drawn into a target of the screen's size when it is due
+  (`water::redraw_due`, the picture's age in frames), and every frame the two last drawings are blended in time over
+  the cached ground (`water::picture_mix`: the frame shows the water one interval ago, moving on smoothly, 0 at a
+  redraw, 1 one interval later). The target is cleared to alpha 0 and the discarded pixels stay transparent; the
+  composite is alpha-blended (`make_blended_material`: the default pipeline blends nothing). A new view, map or size
+  redraws at once and drops the older picture. The tilted views (2.5D, first person) draw the water every frame at
+  once: their 3D camera belongs to world_view, and a picture fill would reset it. The env `RAZDOR_WATER_EVERY=1|2|3`
+  overrides the setting in the snapshots.
 - **Wakes** (`world_view::draw_wakes`, `water::Wake`): per sailing army in motion (and the hero's galley), its last
   12 display positions, one every 0.12 s, drawn on the ground behind it as soft white ellipses (the glow's texture,
   additive) fading from alpha 0.35 to 0 over 1.5 s and growing from 0.3 to 0.7 cell. Explored cells only. Recorded per

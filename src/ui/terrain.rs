@@ -30,7 +30,7 @@ use std::sync::OnceLock;
 
 use macroquad::prelude::*;
 
-use macroquad::miniquad::TextureWrap;
+use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation, PipelineParams, TextureWrap};
 use razdor::dt::gfx::{water_frame, Image, WATER_FRAMES};
 use razdor::rules::map::{is_water, Surface};
 use super::{daylight, sharp, water};
@@ -770,6 +770,36 @@ struct GroundCache {
     key: Option<u64>,
 }
 
+/// «Живая вода» as a picture (`draw_water_picture`): two drawings of the water, the newer being `cur`, with
+/// their water times and the age of the newer one in frames, and the key of the view they were drawn for.
+#[derive(Default)]
+struct WaterPictures {
+    targets: [Option<RenderTarget>; 2],
+    cur: usize,
+    size: (u32, u32),
+    key: u64,
+    valid: bool,
+    has_prev: bool,
+    age: u32,
+    t_prev: f64,
+    t_cur: f64,
+}
+
+/// The water picture's composite: the two drawings blended by `Mix` (0 the older, 1 the newer), read at each
+/// pixel's window position as the ground's composite is. The water's alpha is 1 where it is drawn, else 0.
+const WATER_COMPOSITE_FRAGMENT: &str = r#"#version 100
+precision highp float;
+varying highp vec2 uv;
+uniform sampler2D Prev;
+uniform sampler2D Cur;
+uniform vec2 ScreenSize;
+uniform float Mix;
+void main() {
+    vec2 at = gl_FragCoord.xy / ScreenSize;
+    gl_FragColor = mix(texture2D(Prev, at), texture2D(Cur, at), Mix);
+}
+"#;
+
 /// The blending shader, the terrain atlas and the current map's surface codes.
 pub struct TerrainLayer {
     /// The old shader, when option 1 is off.
@@ -793,6 +823,9 @@ pub struct TerrainLayer {
     /// Surface codes and size of the map in `cells`, to rebuild it when the map changes.
     cells: RefCell<Option<CellTextures>>,
     ground: RefCell<GroundCache>,
+    /// The live water as a picture (`draw_water_picture`), and its composite (the neighbours shader's option only).
+    pictures: RefCell<WaterPictures>,
+    water_composite: Option<Material>,
 }
 
 /// Packs the terrain textures (by surface code) into a 4×4 atlas of padded slots. Every
@@ -857,6 +890,22 @@ fn make_material(fragment: &str, uniforms: &[(&str, UniformType)], textures: &[&
     load_material(ShaderSource::Glsl { vertex: VERTEX, fragment }, params).map_err(|e| e.to_string())
 }
 
+/// A material of `fragment` drawn alpha-blended over what is under it. The default pipeline blends nothing, so the
+/// water picture's composite (its transparent pixels show the ground) needs this.
+fn make_blended_material(fragment: &str, uniforms: &[(&str, UniformType)], textures: &[&str]) -> Result<Material, String> {
+    let pipeline_params = PipelineParams {
+        color_blend: Some(BlendState::new(Equation::Add, BlendFactor::Value(BlendValue::SourceAlpha), BlendFactor::OneMinusValue(BlendValue::SourceAlpha))),
+        alpha_blend: Some(BlendState::new(Equation::Add, BlendFactor::One, BlendFactor::OneMinusValue(BlendValue::SourceAlpha))),
+        ..Default::default()
+    };
+    let params = MaterialParams {
+        uniforms: uniforms.iter().map(|(n, t)| UniformDesc::new(n, *t)).collect(),
+        textures: textures.iter().map(|t| t.to_string()).collect(),
+        pipeline_params,
+    };
+    load_material(ShaderSource::Glsl { vertex: VERTEX, fragment }, params).map_err(|e| e.to_string())
+}
+
 /// The neighbours shader with the given colour precision (`highp` or `mediump`).
 fn new_fragment(precision: &str) -> String {
     NEW_FRAGMENT.replace("@CP@", precision).replace("@SHARP_UV@", sharp::SHARP_UV_GLSL)
@@ -895,6 +944,13 @@ impl TerrainLayer {
             composite = make_material(COMPOSITE_FRAGMENT, &[("ScreenSize", UniformType::Float2)], &["Ground"]).map_err(|e| razdor::diag!("terrain cache copy: {e}")).ok();
             opts.cache = composite.is_some();
         }
+        let water_composite = if opts.new_shader {
+            make_blended_material(WATER_COMPOSITE_FRAGMENT, &[("ScreenSize", UniformType::Float2), ("Mix", UniformType::Float1)], &["Prev", "Cur"])
+                .map_err(|e| razdor::diag!("terrain water picture: {e}"))
+                .ok()
+        } else {
+            None
+        };
         let atlas = Texture2D::from_rgba8(image.width as u16, image.height as u16, &image.rgba);
         atlas.set_filter(FilterMode::Linear);
         let water = if water.len() == WATER_FRAMES && water.iter().all(|f| f.width > 0 && f.height > 0) {
@@ -916,6 +972,8 @@ impl TerrainLayer {
             noise: noise_texture(),
             cells: RefCell::new(None),
             ground: RefCell::new(GroundCache::default()),
+            pictures: RefCell::new(WaterPictures::default()),
+            water_composite,
         })
     }
 
@@ -1003,6 +1061,19 @@ impl TerrainLayer {
             self.draw_cached(dest);
             return;
         }
+        // «Живая вода» at a lower rate or size, on the flat map: the water is drawn as a picture (`draw_water_picture`).
+        // The tilted views draw it at once: their camera belongs to world_view, which a picture would reset.
+        if mode == Mode::Overlay && water::live() && (water::every() > 1 || water::scale() < 1.0) && !super::world_view::tilt_view() && self.draw_water_picture(codes, (w, h), dest, view, cell_px, water_ms, edge, flow) {
+            return;
+        }
+        self.draw_layer(codes, (w, h), dest, view, cell_px, water_ms, edge, mode, flow, 1.0);
+    }
+
+    /// One draw of the layer: the material of the mode, its uniforms and the quad. `res` is the target's size
+    /// relative to the screen (1 on the screen, the water picture's scale in its target), so the sampling's
+    /// screen pixels per texel are the target's.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_layer(&self, codes: &[u8], (w, h): (u32, u32), dest: Rect, view: Vec4, cell_px: Vec2, water_ms: Option<i64>, edge: bool, mode: Mode, flow: &[(f32, f32)], res: f32) {
         // The unlit shader while the lighting and the live water are both off (the picture as it was before).
         let unlit = daylight::shown_hour().is_none() && !water::live();
         let Some((m, new, legacy)) = self.ground_material(unlit) else { return };
@@ -1041,8 +1112,8 @@ impl TerrainLayer {
         // Screen pixels per texel: the quad spans `view` cells over `dest`; the atlas has
         // `cell_px` texels per cell, and the water frame 1/3 of its texture per cell.
         let (cells_w, cells_h) = (view.z - view.x, view.w - view.y);
-        m.set_uniform("AtlasScale", vec2(dest.w / (cells_w * cell_px.x), dest.h / (cells_h * cell_px.y)));
-        m.set_uniform("WaterScale", vec2(3.0 * dest.w / (cells_w * water.width()), 3.0 * dest.h / (cells_h * water.height())));
+        m.set_uniform("AtlasScale", vec2(res * dest.w / (cells_w * cell_px.x), res * dest.h / (cells_h * cell_px.y)));
+        m.set_uniform("WaterScale", vec2(3.0 * res * dest.w / (cells_w * water.width()), 3.0 * res * dest.h / (cells_h * water.height())));
         m.set_texture("Water", water);
         m.set_uniform("View", view);
         m.set_uniform("MapSize", vec2(w as f32, h as f32));
@@ -1072,6 +1143,90 @@ impl TerrainLayer {
             shading_rate::end();
         }
         gl_use_default_material();
+    }
+
+    /// «Живая вода» as a picture (the flat map, a lower redraw rate or size): the overlay's water is drawn into a
+    /// target of `scale` × the screen when it is due (`water::redraw_due`); every frame the two last drawings are
+    /// blended in time (`water::picture_mix`) over the cached ground. Returns false when the picture cannot be
+    /// made (no composite material); the caller then draws the layer at once.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_water_picture(&self, codes: &[u8], (w, h): (u32, u32), dest: Rect, view: Vec4, cell_px: Vec2, water_ms: Option<i64>, edge: bool, flow: &[(f32, f32)]) -> bool {
+        let Some(composite) = self.water_composite.as_ref() else { return false };
+        let maps = self.cells(codes, w, h, flow);
+        let (sw, sh) = super::render_cache::base_pixels().unwrap_or_else(macroquad::miniquad::window::screen_size);
+        let scale = water::scale();
+        let size = ((sw * scale).round().max(1.0) as u32, (sh * scale).round().max(1.0) as u32);
+        // The key: what the picture was drawn for (the view, the quad, the fog, the target's size, the map).
+        let fog = edge_fog_colour();
+        let key = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            let f = |v: f32| v.to_bits();
+            [dest.x, dest.y, dest.w, dest.h, view.x, view.y, view.z, view.w, cell_px.x, cell_px.y, scale, fog[0], fog[1], fog[2]].map(f).hash(&mut h);
+            (edge, size, maps.weather_seed, flow.len()).hash(&mut h);
+            h.finish()
+        };
+        {
+            let mut st = self.pictures.borrow_mut();
+            if st.size != size {
+                st.targets = [None, None];
+                st.size = size;
+                st.valid = false;
+            }
+            if st.key != key {
+                st.key = key;
+                st.valid = false;
+            }
+        }
+        let now = water_ms.map_or(0.0, |ms| ms as f64 / 1000.0);
+        let (due, idx, was_valid) = {
+            let st = self.pictures.borrow();
+            (!st.valid || water::redraw_due(st.age, water::every()), if st.valid { 1 - st.cur } else { st.cur }, st.valid)
+        };
+        if due {
+            // A redraw goes into the target the older picture does not use (the same one when the view changed).
+            let target = {
+                let mut st = self.pictures.borrow_mut();
+                st.targets[idx]
+                    .get_or_insert_with(|| {
+                        let rt = macroquad::texture::render_target(size.0, size.1);
+                        rt.texture.set_filter(FilterMode::Linear);
+                        rt
+                    })
+                    .clone()
+            };
+            super::render_cache::fill_space(&target, Rect::new(0.0, 0.0, screen_width(), screen_height()), || {
+                clear_background(Color::new(0.0, 0.0, 0.0, 0.0));
+                self.draw_layer(codes, (w, h), dest, view, cell_px, water_ms, edge, Mode::Overlay, flow, scale);
+            });
+            let mut st = self.pictures.borrow_mut();
+            if was_valid {
+                st.t_prev = st.t_cur;
+                st.has_prev = true;
+            } else {
+                st.has_prev = false;
+            }
+            st.cur = idx;
+            st.t_cur = now;
+            st.valid = true;
+            st.age = 0;
+        } else {
+            self.pictures.borrow_mut().age += 1;
+        }
+        let st = self.pictures.borrow();
+        let prev_idx = if st.has_prev { 1 - st.cur } else { st.cur };
+        let mix = water::picture_mix(now, st.has_prev.then_some(st.t_prev), st.t_cur);
+        let (Some(prev), Some(cur)) = (st.targets[prev_idx].clone(), st.targets[st.cur].clone()) else { return false };
+        drop(st);
+        // The composite reads each picture at its fragment's place, as the ground's composite does.
+        gl_use_material(composite);
+        composite.set_texture("Prev", prev.texture.clone());
+        composite.set_texture("Cur", cur.texture.clone());
+        composite.set_uniform("ScreenSize", vec2(sw, sh));
+        composite.set_uniform("Mix", mix);
+        draw_texture_ex(&cur.texture, dest.x, dest.y, WHITE, DrawTextureParams { dest_size: Some(dest.size()), ..Default::default() });
+        gl_use_default_material();
+        true
     }
 
     /// The cache's copy: the filled ground, read at each pixel of `dest` by its window position.
