@@ -192,3 +192,10 @@ photo-strip-rk1-1280 | map:РК1-Начало пути | 1280x800 | RAZDOR_SCENE
 photo-strip-rk3-1280 | map:РК3-Столица | 1280x800 | RAZDOR_SCENE_PHOTO=1;RAZDOR_SCENE_PHOTO_PITCH=20
 photo-hidden-rk1-1280 | map:РК1-Начало пути | 1280x800 | RAZDOR_SCENE_PHOTO=1;RAZDOR_SCENE_PHOTO_PITCH=20;RAZDOR_SCENE_PHOTO_STRIP=0
 photo-top-rk1-1280 | map:РК1-Начало пути | 1280x800 | RAZDOR_SCENE_PHOTO=1;RAZDOR_SCENE_PHOTO_PITCH=90
+
+# The watching screen (`ui::watch`) on the 30-day sample record (`@watch-sample`, outside git).
+watch-flat-1280 | watch:play,day=13 | 1280x800 | RAZDOR_WATCH=@watch-sample
+watch-25d-1280 | watch:play,day=13 | 1280x800 | RAZDOR_WATCH=@watch-sample;RAZDOR_VIEW=25d
+watch-battle-choice-1280 | watch:play,battle | 1280x800 | RAZDOR_WATCH=@watch-sample;RAZDOR_VIEW=25d
+watch-drift-1280 | watch:corrupt,drift | 1280x800 | RAZDOR_WATCH=@watch-sample
+watch-flat-1024 | watch:play,day=13 | 1024x768 | RAZDOR_WATCH=@watch-sample

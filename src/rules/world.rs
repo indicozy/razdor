@@ -615,7 +615,7 @@ pub type WalkStep = ((f32, f32), (f32, f32), f32);
 /// original plays them within that step's real time (world.md §2, 0x4a39d0): a step it could
 /// follow with another lasts its share `minutes / banked` of the window, the last one fills
 /// the rest, so every army walks at the same time as the hero.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Walk {
     /// Where it stood when the stretch began, then each cell it reached.
     pub points: Vec<(f32, f32)>,

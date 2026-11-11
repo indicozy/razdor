@@ -10,6 +10,7 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::Arc;
 
 use super::*;
+use crate::rules::recording::hook;
 
 /// The most a search runs before the battle needs its move (a ponder while the player
 /// thinks): it then waits with its answer.
@@ -135,6 +136,13 @@ impl MaxThinker {
     /// position is dropped and this one's started). The search ends [`MAX_AI_BUDGET`] after
     /// it began, or at once when it began that long ago.
     pub fn poll(&mut self, b: &Battle) -> MaxPoll {
+        // A replay's recorded decision for this position stands in for the search (its time
+        // is the machine's, so the search could choose another move there).
+        if b.active().is_some_and(|id| b.fighters[id].team == self.side) {
+            if let Some(m) = hook::playback_max(b.ordinal, b.decisions).and_then(MaxMove::from_code) {
+                return MaxPoll::Ready(MaxReport::recorded(m));
+            }
+        }
         let key = b.max_key(self.side);
         if self.job.as_ref().is_none_or(|j| j.key != key) {
             let mut root = b.clone();

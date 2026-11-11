@@ -166,6 +166,22 @@ marks and battle notices wait, and a press (`input::any_press`) finishes the ste
 (`Game::finish_pause`; its events come with the next tick). Headless callers (`Game::tick`,
 `wait`, `pass_time`, the replays, the difftests, the AI fingerprint) run it to its end at once.
 
+The frame schedule does not change the result: whole frames of any length (2 to 240 fps) and any
+split of the budget give the same state at every day's end (`every_frame_schedule_gives_the_same_states_day_by_day`,
+`rules/recording/tests.rs`, 30 days on РК1 and ДС2 with walks and battles). What keeps it so:
+
+- An action finishes a paused step before it reads the world: `set_destination`, `begin_wait`,
+  `start_battle`, `answer_question`, `event_window_closed` each call `finish_pause` first. The screen
+  does the same on a press, so for it nothing changes.
+- Every event carries the stretch it was made in: `tick_inner` marks each stretch's events
+  (`Game::marks`) and `stamp_last` gives them their stretch. The hold (`held`) releases an event
+  when a later stretch has begun or the step plays on no more, so a finished stretch's events do
+  not wait for a paused one.
+- A tick that starts with finished events that need reading hands them over and moves no time (a
+  message stops the time until it is read).
+- The screen holds an event until its step's glide has played (`step_playing`, real time): the
+  decisions of the driver wait for `held` to empty, as the screen's presses do.
+
 ## Traps (from past bugs)
 
 - *Window vs silent events.* Only window events stop a walk, a battle or a wait. Check

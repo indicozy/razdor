@@ -35,6 +35,8 @@ pub enum Place {
     Editor,
     /// The custom battle setup.
     Custom,
+    /// A replay being watched (`ui::watch`): its strip's keys, and Esc.
+    Watch,
 }
 
 /// A key that works across screens.
@@ -183,6 +185,7 @@ pub fn screen_keys(place: Place) -> Vec<(&'static str, &'static str)> {
         Place::Load => vec![(n_("Click"), n_("pick a save")), ("Enter", n_("load it")), ("Esc", n_("cancel"))],
         Place::End => vec![(n_("Click"), n_("the buttons")), ("{QuickLoad}", n_("load the quick save")), ("{LatestAutosave}", n_("load the latest autosave"))],
         Place::Editor => vec![],
+        Place::Watch => vec![(n_("Space"), n_("play or pause")), ("Esc", n_("exit the record")), (n_("Click the bar"), n_("seek to its day or mark"))],
         Place::Custom => vec![
             (n_("Click a unit type"), n_("add it to the army picked")),
             (n_("Click an army's name"), n_("pick that army")),
@@ -236,6 +239,7 @@ fn place_name(place: Place) -> &'static str {
         Place::End => tr("End of the game"),
         Place::Editor => tr("Map editor"),
         Place::Custom => tr("Custom battle"),
+        Place::Watch => tr("Watching a record"),
     }
 }
 

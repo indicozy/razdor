@@ -49,6 +49,8 @@ pub enum Exit {
     Back(Box<Screen>),
     Victory,
     Defeat,
+    /// «Смотреть запись»: the game's record, back to this page.
+    Watch,
 }
 
 /// The page for `after`: a map's summary (after a map, the chapter just played) or the story so
@@ -276,7 +278,18 @@ pub fn frame(view: &mut View, game: &Game, assets: &Assets) -> Option<Exit> {
         After::Diary(_) => tr("Close"),
         After::Victory | After::Defeat => tr("Next"),
     };
+    // A game that keeps its record offers the record beside the page's button.
     let b = page.button;
+    let (watch_r, b) = if game.replay.is_some() {
+        let g = 8.0 * k;
+        let w = (b.w - g) / 2.0;
+        (Some(Rect::new(page.button.x, page.button.y, w, page.button.h)), Rect::new(page.button.x + w + g, page.button.y, w, page.button.h))
+    } else {
+        (None, b)
+    };
+    if watch_r.is_some_and(|r| button(r.x, r.y, r.w, r.h, tr("Watch the record"), true)) {
+        return Some(Exit::Watch);
+    }
     let pressed = button(b.x, b.y, b.w, b.h, label, true);
     if !(pressed || closed || key(KeyCode::Enter) || key(KeyCode::Escape)) {
         return None;

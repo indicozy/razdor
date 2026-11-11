@@ -28,6 +28,7 @@ Razdor plays the original game's scenarios using its original rules. Below is wh
 * **Hero Speed:** the "Hero Movement Speed" slider goes up to 2× faster than the fastest speed in the original (the middle of the slider is the original maximum).
 * **Hero Log:** five tabs — "Quests", "Completed", "Rumors", "Messages", "Chronicle", with entries marked by in-game date.
 * **Chronicle:** the fifth tab of the diary writes down, day by day, what the player saw and did ([more](/razdor/wiki/en/differences/chronicle/)).
+* **Game recordings:** the game is recorded (the setting "Record the game" in "Other") and can be watched: "Watch the record" in the diary and on the "Summary" page, and "Record" in the load window; speeds up to 16×, battle marks on the timeline ([more](/razdor/wiki/en/tutorials/replays/)).
 * **Summary** after a map (and after the hero's fall): a page with the hero's route over the known land, the battles and the totals; turned off on the "Other" tab ([more](/razdor/wiki/en/differences/chronicle/)).
 * **Saves:** up to 50 manual saves and 30 autosaves instead of 12; pin important saves with a thumbtack; quick save `F5` and quick load `F9`.
 * **Folder:** the «Folder» button in the load window opens the folder with your saves and maps, on desktop, Android and iOS (Razdor's own, not the original's).
