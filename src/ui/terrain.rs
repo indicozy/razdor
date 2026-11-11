@@ -265,7 +265,15 @@ vec3 water_detiled(vec4 nb, vec4 wgt, vec2 uvp, float still) {
 // shore), and a noise breaks it into patches. A fainter second line lies further out, on a wave of its own. A still
 // shore (a lake, the sea) foams at full strength, a river at 0.55. The periods fit CLOCK_PERIOD (6400 s): the wave is
 // 1000 cycles of it, and the drifts move the noise by whole lattice periods. Returns the foam's colour and alpha.
-vec4 shore_foam(float cov, vec2 p, vec2 fl, vec2 dr) {
+// The foam patch's noise at one cell centre (`n` its byte, `w` its weight): the two octaves at the pixel's flow
+// coordinates, moved by the cell's offset in the noise (a cell's patches differ from its neighbour's, and the
+// partition blends them across the boundary, so no seam shows).
+float foam_patch_at(float n, float w, vec2 q0, vec2 q1) {
+    vec2 oc = fract(n * vec2(0.618034, 0.754878)) * 64.0;
+    return w * (0.6 * wnoise(q0 * 2.4 + Clock * vec2(0.01, 0.0) + oc) + 0.4 * wnoise(q1 * 5.1 + Clock * vec2(0.0, -0.02) + oc.yx));
+}
+
+vec4 shore_foam(float cov, vec2 p, vec2 fl, vec2 dr, vec4 nb, vec4 wgt) {
     float s = cov - 0.5;
     if (s <= 0.0) {
         return vec4(0.0);
@@ -277,7 +285,10 @@ vec4 shore_foam(float cov, vec2 p, vec2 fl, vec2 dr) {
     // Zoomed out (Detail 0) the line stands at its middle phase: the lapping is the moving detail.
     float lap = mix(0.5, 0.5 + 0.5 * sin(Clock * 0.98174770 + 6.0 * wnoise(q0 * 0.8)), Detail);
     float lap2 = mix(0.5, 0.5 + 0.5 * sin(Clock * 0.98174770 + 2.5 + 6.0 * wnoise(q1 * 0.6)), Detail);
-    float patch = smoothstep(0.38, 0.62, 0.6 * wnoise(q0 * 2.4 + Clock * vec2(0.01, 0.0)) + 0.4 * wnoise(q1 * 5.1 + Clock * vec2(0.0, -0.02)));
+    // De-tiled (live water): the patch noise is the four cells' own noise, blended by the cell weights, then the step.
+    float raw = foam_patch_at(nb.x, wgt.x, q0, q1) + foam_patch_at(nb.y, wgt.y, q0, q1)
+        + foam_patch_at(nb.z, wgt.z, q0, q1) + foam_patch_at(nb.w, wgt.w, q0, q1);
+    float patch = smoothstep(0.38, 0.62, raw);
     float inner = 0.1 * lap;
     float line = smoothstep(inner - 0.015, inner + 0.015, s) * (1.0 - smoothstep(inner + 0.08, inner + 0.33, s));
     float inner2 = 0.36 + 0.05 * lap2;
@@ -314,6 +325,9 @@ void main() {
     @CP@ float sea = 0.0;
     vec2 fl = vec2(0.0);
     vec2 dr = vec2(0.0);
+    // The four cell centres round the pixel and their weights (live water's de-tiling; set below, read by the foam).
+    vec4 nb = vec4(0.0);
+    vec4 wgt = vec4(0.0);
     if (wet) {
         vec2 uvw = (p + 1.5) / 3.0;
         if (LiveWater > 0.5) {
@@ -339,8 +353,8 @@ void main() {
             vec2 bc = floor(p);
             vec2 g = p - bc;
             vec2 sw = g * g * (3.0 - 2.0 * g);
-            vec4 wgt = vec4((1.0 - sw.x) * (1.0 - sw.y), sw.x * (1.0 - sw.y), (1.0 - sw.x) * sw.y, sw.x * sw.y);
-            vec4 nb = vec4(cell_byte(bc), cell_byte(bc + vec2(1.0, 0.0)), cell_byte(bc + vec2(0.0, 1.0)), cell_byte(bc + vec2(1.0, 1.0)));
+            wgt = vec4((1.0 - sw.x) * (1.0 - sw.y), sw.x * (1.0 - sw.y), (1.0 - sw.x) * sw.y, sw.x * sw.y);
+            nb = vec4(cell_byte(bc), cell_byte(bc + vec2(1.0, 0.0)), cell_byte(bc + vec2(0.0, 1.0)), cell_byte(bc + vec2(1.0, 1.0)));
             float stillw = 1.0 - smoothstep(0.2, 0.8, length(fl));
             w = mix(water_detiled(nb, wgt, u0, stillw), water_detiled(nb, wgt, u1, stillw), wt);
             // The low-frequency variation: a slow large-scale noise (its drift whole lattice periods per CLOCK_PERIOD),
@@ -365,7 +379,7 @@ void main() {
     if (wet && LiveWater > 0.5) {
         float cov = (k.x < 2.5 ? 1.0 : 0.0) * (1.0 - fx) * (1.0 - fy) + (k.y < 2.5 ? 1.0 : 0.0) * fx * (1.0 - fy)
             + (k.z < 2.5 ? 1.0 : 0.0) * (1.0 - fx) * fy + (k.w < 2.5 ? 1.0 : 0.0) * fx * fy;
-        vec4 fo = shore_foam(cov, p, fl, dr);
+        vec4 fo = shore_foam(cov, p, fl, dr, nb, wgt);
         col = mix(col, fo.rgb, fo.a);
         vec4 bk = texture2D(Bank, (p + 0.5) / MapSize);
         float wide = step(0.5, bk.g);
