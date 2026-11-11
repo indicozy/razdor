@@ -1617,13 +1617,20 @@ fn sprite_visibility(dark: f32) -> f32 {
 /// on the CPU the sprites share their draw calls.
 /// `picture` is the sprite's drawn rectangle in the 2D space of `cam` (see [`covering_gap`]).
 fn standing(cam: &Camera, foot: Vec2, base: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
+    standing_at(cam, foot, base, foot, vis, picture, draw);
+}
+
+/// [`standing`] for a sprite that stands at `at`, its own ground point, and is faded and hidden as the sprite at
+/// `foot`: a layer of a building on a bent sheet ([`draw_layers_on_sheet`]) stands on its own ground foot, while the
+/// building's fade is the group's, so its layers fade together. `base` is as in [`standing`].
+fn standing_at(cam: &Camera, foot: Vec2, base: Vec2, at: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
     let Some(tilt) = cam.tilt else { return draw() };
     if vis <= 0.0 {
         return;
     }
     let g = (foot + cam.origin) / cam.scale;
     // Past a down bend's horizon the sheet hides the ground, and what stands on it.
-    if tilt.cam.bend.is_some_and(|b| b.hidden(g)) {
+    if tilt.cam.bend.is_some_and(|b| b.hidden((at + cam.origin) / cam.scale)) {
         return;
     }
     // The sheet holds the ground: no sprite in the ground run.
@@ -1632,11 +1639,12 @@ fn standing(cam: &Camera, foot: Vec2, base: Vec2, vis: f32, picture: Rect, draw:
         return;
     }
     let (model, on_ground) = standing_model(cam, &tilt, foot, base, pass == Pass::Sprites);
+    let (place, placed) = if at == foot { (model, on_ground) } else { standing_model(cam, &tilt, at, base, pass == Pass::Sprites) };
     let yaw = tilt.cam.yaw_deg;
     // The eyes view: a sprite behind the eye is not seen (its billboard stands at its foot's depth).
     if let Some(eye) = tilt.cam.eye_at {
         let f = view25::forward(yaw);
-        if (on_ground.x - eye.x) * f.x + (on_ground.z - eye.z) * f.y <= 0.0 {
+        if (placed.x - eye.x) * f.x + (placed.z - eye.z) * f.y <= 0.0 {
             return;
         }
     }
@@ -1666,7 +1674,7 @@ fn standing(cam: &Camera, foot: Vec2, base: Vec2, vis: f32, picture: Rect, draw:
             return;
         }
     }
-    push_cpu_model(model);
+    push_cpu_model(place);
     let prev = SPRITE_VIS.with(|s| s.replace(vis));
     super::sharp::with_perspective(magnify, draw);
     SPRITE_VIS.with(|s| s.set(prev));
@@ -3050,8 +3058,15 @@ fn card_mesh_form(cam: &Camera, card: &Card, origin_px: Vec2, zoom: f32, src: Re
 fn layer_offset(pitch_deg: f32, yaw_deg: f32, group_y: f32, foot_y: f32) -> Vec2 {
     let d = foot_y - group_y;
     let sin_p = super::memo::sin_cos_deg(pitch_deg).0;
-    let side = (-LAYER_PARALLAX * d * yaw_deg.to_radians().sin()).clamp(-LAYER_PARALLAX_MAX, LAYER_PARALLAX_MAX);
-    vec2(side, d * (sin_p - 1.0))
+    vec2(layer_slide(yaw_deg, group_y, foot_y), d * (sin_p - 1.0))
+}
+
+/// The sideways parallax of a building's layer in sprite pixels (the x of [`layer_offset`]): a turn slides a layer
+/// `d` rows nearer the eye than the group's foot by `d · LAYER_PARALLAX · sin yaw`, at most `LAYER_PARALLAX_MAX`.
+/// A bent view's layers keep this slide too ([`draw_layers_on_sheet`]), without the vertical move.
+fn layer_slide(yaw_deg: f32, group_y: f32, foot_y: f32) -> f32 {
+    let d = foot_y - group_y;
+    (-LAYER_PARALLAX * d * yaw_deg.to_radians().sin()).clamp(-LAYER_PARALLAX_MAX, LAYER_PARALLAX_MAX)
 }
 
 /// The cards of a building group with their layer offsets applied (verts and foot together, topology kept), in
@@ -3067,10 +3082,12 @@ fn layered_cards_at(pitch_deg: f32, yaw_deg: f32, cards: &[Card], group_y: f32) 
 }
 
 /// [`layered_cards_at`] for the camera: the cards as they stand in the tilted view (the cards as they are in the flat).
+/// A bent view draws its layers on the sheet at their own ground feet ([`draw_layers_on_sheet`]) and its ground
+/// (the shadows) flat, so there the cards stay as they are.
 fn layered_cards(cam: &Camera, cards: &[Card], group_y: f32) -> Vec<Card> {
     match cam.tilt {
-        Some(t) => layered_cards_at(t.cam.pitch_deg, t.cam.yaw_deg, cards, group_y),
-        None => cards.to_vec(),
+        Some(t) if t.cam.bend.is_none() => layered_cards_at(t.cam.pitch_deg, t.cam.yaw_deg, cards, group_y),
+        _ => cards.to_vec(),
     }
 }
 
@@ -3107,6 +3124,11 @@ fn draw_cards(cam: &Camera, cards: &[Card], origin: Vec2, zoom: f32, src: Rect, 
 /// card that holds their anchor, moved by that card's layer offset.
 #[allow(clippy::too_many_arguments)]
 fn draw_building_group(cam: &Camera, atlas: &Atlas, r: Rect, cards: &[Card], origin: Vec2, zoom: f32, foot: Vec2, vis: f32, living: Option<&Living>, outlined: bool) {
+    if cam.tilt.is_some_and(|t| t.cam.bend.is_some()) {
+        // Living parts are off in a bent view (`living_on`), so the cleared copy and the flags never mix here.
+        debug_assert!(living.is_none(), "a bent view's buildings have no living parts");
+        return draw_layers_on_sheet(cam, atlas, r, cards, origin, zoom, foot, vis, outlined);
+    }
     let layers = layered_cards(cam, cards, group_y(foot, origin, zoom));
     standing(cam, foot, foot, vis, Rect::new(origin.x, origin.y, r.w * zoom, r.h * zoom), || {
         frame_probe::sprite(r.w * zoom, r.h * zoom);
@@ -3122,6 +3144,57 @@ fn draw_building_group(cam: &Camera, atlas: &Atlas, r: Rect, cards: &[Card], ori
             }
         }
     });
+}
+
+/// The layers of a building on a bent sheet ([`draw_layers_on_sheet`]): each card's foot on the flat ground (where it
+/// stands, [`card_foot`]), with its outline slid sideways by the turn ([`layer_slide`]); the foot does not slide.
+fn sheet_layers(cards: &[Card], origin: Vec2, zoom: f32, group_y: f32, yaw_deg: f32) -> Vec<(Vec2, Card)> {
+    cards
+        .iter()
+        .map(|c| {
+            let slide = layer_slide(yaw_deg, group_y, c.foot.1);
+            let slid = Card { foot: (c.foot.0 + slide, c.foot.1), verts: c.verts.iter().map(|&(x, y)| (x + slide, y)).collect(), tris: c.tris.clone() };
+            (card_foot(origin, zoom, c), slid)
+        })
+        .collect()
+}
+
+/// A building's layers in a bent view (the cards of [`draw_building_group`]): each layer stands on the bent sheet at
+/// its own ground foot, the point the flat ground puts it at ([`card_foot`]), through [`standing_at`] and
+/// `Bend::point` as a tree is placed. The layers are one camera-facing picture (no rotation). Each keeps the turn's
+/// sideways parallax ([`layer_slide`]) and no vertical move: the sheet carries the feet, so a layer behind the front
+/// one stays on the roll, the valley or the slope instead of floating above it or sinking into it. The building's
+/// fade and the gold outline of the whole group are its own (the layers fade together); a layer past a down bend's
+/// horizon is not drawn.
+#[allow(clippy::too_many_arguments)]
+fn draw_layers_on_sheet(cam: &Camera, atlas: &Atlas, r: Rect, cards: &[Card], origin: Vec2, zoom: f32, foot: Vec2, vis: f32, outlined: bool) {
+    let size = vec2(atlas.texture.width(), atlas.texture.height());
+    let picture = Rect::new(origin.x, origin.y, r.w * zoom, r.h * zoom);
+    let layers = sheet_layers(cards, origin, zoom, group_y(foot, origin, zoom), cam.tilt.map_or(0.0, |t| t.cam.yaw_deg));
+    let mesh = |card: &Card, at: Vec2, color: Color| {
+        let (vertices, indices) = card_mesh_form(cam, card, at, zoom, r, size, color);
+        Mesh { vertices, indices, texture: Some(atlas.texture.clone()) }
+    };
+    if outlined {
+        let d = (1.5 * zoom).max(1.0);
+        for (at, card) in &layers {
+            standing_at(cam, foot, *at, *at, vis, picture, || {
+                super::chrome::silhouette(|| {
+                    for (dx, dy) in OUTLINE_STEPS {
+                        super::sharp::draw_mesh_sharp(&mesh(card, origin + vec2(dx * d, dy * d), faded(BUILDING_OUTLINE)), vec2(zoom, zoom));
+                    }
+                });
+            });
+        }
+    }
+    for (k, (at, card)) in layers.iter().enumerate() {
+        standing_at(cam, foot, *at, *at, vis, picture, || {
+            if k == 0 {
+                frame_probe::sprite(r.w * zoom, r.h * zoom);
+            }
+            super::sharp::draw_mesh_sharp(&mesh(card, origin, faded(WHITE)), vec2(zoom, zoom));
+        });
+    }
 }
 
 /// A card building's shadow on the ground (2.5D): the whole sprite, placed as `draw_building`
@@ -7325,6 +7398,39 @@ mod tilt_tests {
         let mut cam = Camera { origin, view, draw: view, scale, grid, tilt: None };
         cam.tilt = Some(first_person_tilt(Vec2::from(cam.centre()), scale, view, view, yaw, far));
         cam
+    }
+
+    /// A building's layers on a bent sheet stand at their own ground feet: each layer's foot, as its billboard
+    /// draws it, lies on `Bend::point` of the ground point the flat ground puts it at, in front of the group's
+    /// foot as behind it, at both bends and several turns. A layer does not move up or down on the sheet.
+    #[test]
+    fn a_layer_stands_on_the_bent_sheet_at_its_own_ground_foot() {
+        let game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        let card = |foot_y: f32| Card { foot: (10.0, foot_y), verts: vec![(0.0, foot_y - 4.0), (20.0, foot_y - 4.0), (10.0, foot_y)], tris: vec![0, 1, 2] };
+        let cards = [card(20.0), card(60.0), card(100.0)];
+        let (origin, zoom, group_y) = (vec2(300.0, 200.0), 1.0, 60.0);
+        let mut checked = 0;
+        for horizon in [false, true] {
+            for yaw in [0.0, 45.0, 90.0, 180.0, -135.0] {
+                let cam = first_person_camera(&game, yaw, horizon);
+                let tilt = cam.tilt.expect("the first-person view is tilted");
+                let bend = tilt.cam.bend.expect("and bent");
+                for (k, (foot, layer)) in sheet_layers(&cards, origin, zoom, group_y, yaw).iter().enumerate() {
+                    assert_eq!(*foot, card_foot(origin, zoom, &cards[k]), "the layer's foot is its ground foot, not the group's");
+                    assert_eq!(layer.foot.1, cards[k].foot.1, "the layer does not move up or down on the sheet");
+                    let g = (*foot + cam.origin) / cam.scale;
+                    if bend.hidden(g) {
+                        continue;
+                    }
+                    checked += 1;
+                    let (model, at) = standing_model(&cam, &tilt, *foot, *foot, true);
+                    let drawn = model.transform_point3(vec3(foot.x, foot.y, 0.0));
+                    assert!(drawn.distance(bend.point(g)) < 1e-3, "horizon {horizon} yaw {yaw} layer {k}: drawn at {drawn:?}, the sheet at {:?}", bend.point(g));
+                    assert!(at.distance(bend.point(g)) < 1e-3, "horizon {horizon} yaw {yaw} layer {k}: anchored at {at:?}");
+                }
+            }
+        }
+        assert!(checked > 0, "some layers are on the sheet to check");
     }
 
     /// The hero's cell is the one under the pixel the hero is drawn at, in both bends and at every
