@@ -567,7 +567,7 @@ it every frame from `display::follow_settings`; `RAZDOR_LIVE_WATER=1` turns it o
 - **The per-cell water texture** (`terrain::flow_texels`, baked once per map in `TerrainLayer::cells`, rebuilt only when
   the codes or the flow change): one RGBA8 texel per cell, linear, clamped. Red and green are the river's flow
   (`128 + 127 · flow`, still water exactly 128); blue is its drift speed (`water::river_speed`: 1 next to a bank,
-  easing to 0.35 as the water widens by `bank_distance`, 0 on still water); alpha is the water mask (255 on the water
+  easing to 0.35 as the water widens by `bank_distance`, 0 on still water and on the wide water); alpha is the water mask (255 on the water
   cells, `map::is_water`, 0 on land). Linear filtering gives the shore its soft edge: 1 deep, 0.5 on the shore line,
   0 on land. The ground shader reads one texel at the pixel's cell centre `(p + 0.5) / MapSize`, where `p` is the
   cell coordinate (the same one the edge fog uses). The unlit shader (`LEGACY_FRAGMENT`) gets this texture for its
@@ -598,11 +598,26 @@ it every frame from `display::follow_settings`; `RAZDOR_LIVE_WATER=1` turns it o
   interior stands still). A piece of water with no large water in it (landlocked) flows away from its cell nearest
   a hill or mountain (classes `HILLS` to `DARK_MOUNTAINS`), or from its first cell when the map has none. The field
   is built per map (`world_view::map_flow`, kept while the surface codes and the hills stay) and drawn as the `Flow`
-  texture (`terrain::flow_texels`: rg = 128 + 127 · flow, so still water is exactly zero). The shader scrolls the
-  ripple and foam noise along the flow on the water (two phases of 7 cells a 20 s cycle, `t0 = fract(Clock · 0.05)`
-  and `t0 + ½`, mixed by `|2·t0 − 1|`, so the scroll does not jump when `Clock` wraps at 1000 s). The ripple's and the
-  foam's sine terms of `Clock` itself still jump at that wrap (a known leftover; the mist's drift does too). A lake's rim cells flow inward (the same rule), so
-  coasts drift toward the open water; that is part of the best guess.
+  texture (`terrain::flow_texels`: rg = 128 + 127 · flow, so still water is exactly zero; b = the drift speed).
+  **The drift** (flow map, two phases): the picture moves along the flow at the water's speed (`water::river_speed`:
+  1 next to a bank, easing to 0.35 as a river widens, 0 on the wide water: a lake or the sea, whose rim flows inward
+  but stands still, `water::wide_water`). Two phases half a 20 s cycle apart (`t0 = fract(Clock · 0.05)` and
+  `t0 + ½`, mixed by `|2·t0 − 1|`) move the surface 6 cells a cycle at full speed (two 3-cell tiles, so the two
+  phases show the same pattern and the crossfade does not ghost), and the ripple and the foam's noise drift with
+  it. The sine terms of `Clock` (the foam's lapping) keep the wrap they had (a known leftover; the mist's drift does
+  too).
+- **Sparkle** (`water::glint`, the uniform `Glint`, the terrain's `Bank` texture for the wide water): small points on
+  the still water, drawn where a noise of the lattice texture at 6 per cell peaks (a high threshold, 0.87–0.95),
+  twinkling at 2000 cycles of the clock period and drifting by whole lattice periods per wrap. Colour: white by day,
+  the dawn and dusk warmth, the moon's silver at night; strength 0.5 at noon, 1 with the sun low, 0.55 at night;
+  full on the wide water, 40 % on a river, faded by `Detail`. The mist and the war fog cover them.
+- **Shore waves** (the same `Bank` texture: red the distance from the bank in steps / 8, green the wide water): on the
+  wide water only, soft lines roll from the open water toward the land, a crest every 1.1 cells moving 1.1 cells a 4 s
+  cycle (`Clock · 0.25`), fading in from 0.1–0.3 cell out of the waterline and out by 1.4 cells, so they run into the
+  foam. Faded by `Detail`.
+- **The shore's baked data** (once per map, `TerrainLayer::cells`): `Flow` (above), `Bank` (`water::bank_distance`,
+  `wide_water`). The lake's rim flows inward (the same rule as a river), so coasts still drift toward the open water
+  in the flow field; the drift speed keeps the wide water still.
 - **The redraw rate** («Частота анимации воды», `Settings::map_water_rate`, `water::FrameRate`: every frame, every
   other, every third; every frame by default, the row shows with «Живая вода» on). On the flat map, below every frame,
   the overlay's water (`TerrainLayer::draw_water_picture`) is drawn into a target of the screen's size when it is due
