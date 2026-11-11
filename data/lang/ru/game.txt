@@ -540,7 +540,9 @@ Razdor's: Painted keeps the original's shadows; From the sun removes them, and e
 
 # Advanced settings: the map's mist (Razdor's, off by default)
 Mist instead of black = Туман вместо черноты
-Razdor's: unexplored land is drifting mist instead of black. Style only. = Неразведанная земля скрыта плывущим туманом вместо черноты. Только вид.
+Simple = Простой
+Clouds = Облака
+Razdor's: none is the original's black fog of war; Simple is a plain mist; Clouds drifts soft clouds over the unexplored land. Style only. = Razdor's: «Нет»: чёрный туман войны, как в оригинале. «Простой»: ровная дымка. «Облака»: плывущие облака. Только вид.
 
 # Advanced settings: moving water (Razdor's, off by default)
 Moving water = Живая вода

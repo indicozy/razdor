@@ -1630,56 +1630,19 @@ fn sheet_meshes(bend: &view25::Bend, region: Rect) -> Vec<Mesh> {
     meshes
 }
 
-/// The mesh of a raised mist sheet `lift` cells above a bent sheet (the first-person view): the fog
-/// quad `dest` (its texels `src` of `tex`, as [`Camera::mist_rects`]) on a grid of 64 × 64 cells, each
-/// vertex lifted straight up ([`view25::Bend::lift`]). Its colour's alpha is 0 past the
-/// horizon, so the mist does not float in the sky: nor does a lifted point that lies above the eye's horizon
-/// (`Bend::above_horizon`, the eye `eye`). Drawn in chunks of 8 rows (a draw takes 5000 indices).
-#[allow(clippy::too_many_arguments)]
-fn bent_mist_meshes(bend: &view25::Bend, eye: Vec3, edge: f32, origin: Vec2, scale: f32, dest: Rect, src: Option<Rect>, tex: &Texture2D, lift: f32) -> Vec<Mesh> {
-    const ACROSS: usize = 64;
-    const ALONG: usize = 64;
-    const ROWS_PER_DRAW: usize = 8;
-    let (tw, th) = (tex.width(), tex.height());
-    let s = src.unwrap_or(Rect::new(0.0, 0.0, tw, th));
-    let vertex = |i: usize, j: usize| {
-        let (fu, fv) = (i as f32 / ACROSS as f32, j as f32 / ALONG as f32);
-        let g = (vec2(dest.x + dest.w * fu, dest.y + dest.h * fv) + origin) / scale;
-        // Near the horizon the sheet rolls over, and a lifted point would rise above
-        // the horizon line: the lift and the alpha fade out over the last cells before it (none past it).
-        let horizon = bend.horizon_at(g);
-        let fade = if horizon.is_finite() { ((horizon - bend.reach(g)) / HORIZON_FADE).clamp(0.0, 1.0) } else { 1.0 };
-        let fade = fade * fade * (3.0 - 2.0 * fade);
-        let at = bend.lift(g, lift * fade);
-        // Past the drawn ground's far edge (`edge`) there is no ground under the mist: it is out too.
-        let beyond = (g - bend.pivot).dot(view25::forward(bend.yaw_deg)) > edge;
-        let alpha = if bend.hidden(g) || beyond || bend.above_horizon(eye, g, lift * fade, edge) { 0.0 } else { fade };
-        macroquad::models::Vertex::new(at.x, at.y, at.z, (s.x + s.w * fu) / tw, (s.y + s.h * fv) / th, Color::new(1.0, 1.0, 1.0, alpha))
-    };
-    let mut meshes = Vec::new();
-    for j0 in (0..ALONG).step_by(ROWS_PER_DRAW) {
-        let rows = ROWS_PER_DRAW.min(ALONG - j0);
-        let mut vertices = Vec::with_capacity((ACROSS + 1) * (rows + 1));
-        for j in j0..=j0 + rows {
-            for i in 0..=ACROSS {
-                vertices.push(vertex(i, j));
-            }
-        }
-        let row = (ACROSS + 1) as u16;
-        let mut indices = Vec::with_capacity(rows * ACROSS * 6);
-        for j in 0..rows as u16 {
-            for i in 0..ACROSS as u16 {
-                let a = j * row + i;
-                indices.extend_from_slice(&[a, a + 1, a + row, a + 1, a + row + 1, a + row]);
-            }
-        }
-        meshes.push(Mesh { vertices, indices, texture: Some(tex.clone()) });
-    }
-    meshes
+/// The rectangles of the dark box `bx` (x0, y0, x1, y1 texels, `minimap::fog_layer_box`) of a `w` × `h`
+/// fog texture whose full quad is `tl`..`br`: where the box is drawn, and its texels (`src`). The box is
+/// grown by a texel a side, so the bilinear sampling at its edge is the whole texture's (as
+/// `minimap::draw_fog_boxed`); the texels keep their screen positions.
+fn boxed_rects(tl: Vec2, br: Vec2, (w, h): (i32, i32), bx: [i32; 4]) -> (Rect, Option<Rect>) {
+    let (x0, y0) = ((bx[0] - 1).max(0), (bx[1] - 1).max(0));
+    let (x1, y1) = ((bx[2] + 1).min(w), (bx[3] + 1).min(h));
+    let cell = (br - tl) / vec2(w as f32, h as f32);
+    let at = tl + vec2(x0 as f32, y0 as f32) * cell;
+    let size = vec2((x1 - x0) as f32, (y1 - y0) as f32) * cell;
+    let src = Rect::new(x0 as f32, y0 as f32, (x1 - x0) as f32, (y1 - y0) as f32);
+    (Rect::new(at.x, at.y, size.x, size.y), Some(src))
 }
-
-/// The cells before a bent view's horizon over which a raised mist sheet sinks to the sheet.
-const HORIZON_FADE: f32 = 3.0;
 
 /// Draws the ground pass: under a tilted camera, the 2D space laid flat on the ground
 /// ([`view25::ground_model`]); under a flat one, as drawn. In a bent view's sprite run it draws
@@ -2394,71 +2357,27 @@ impl Camera {
         (self.draw, Rect::new(r.x + 0.5, r.y / rh + 0.5, r.w, r.h / rh))
     }
 
-    /// The mist over the fog's texture (`ui::mist`, «Туман вместо черноты»). The tilted views' ground is its
-    /// lowest sheet alone, and the others are raised ([`Camera::draw_raised_mist`]). The flat view draws every
-    /// sheet on the ground; with `RAZDOR_MIST_RAISED=0` the tilted views do too, with the 2.5D parallax.
+    /// The mist over the fog's texture (`ui::mist`, «Туман вместо черноты»). The flat view draws it on the
+    /// ground; the tilted views draw it on the ground too (the fog's own pass), and a bent view's sprite run
+    /// gets the frame's light here (the daylight comes after the world for the other views).
     fn draw_mist(&self, tex: &Texture2D, dest: Rect, src: Option<Rect>) {
-        if self.tilt.is_some() && mist::raised_count() > 0 {
-            return mist::draw_ground(tex, dest, src);
-        }
-        let parallax = match &self.tilt {
-            Some(t) => mist::parallax(t.cam.yaw_deg, t.cam.pitch_deg),
-            None => Vec2::ZERO,
-        };
-        mist::draw(tex, dest, src, parallax);
+        let light = if self.tilt.is_some_and(|t| t.cam.bend.is_some()) { mist::frame_tint() } else { [1.0; 3] };
+        mist::draw(tex, dest, src, light);
     }
 
     /// The mist's rectangles over the fog texture: where it is drawn (`dest`) and which texels (`src`, None
-    /// for all of it), as [`Camera::draw_fog_flat`] draws them.
-    fn mist_rects(&self, game: &Game) -> (Rect, Option<Rect>) {
+    /// for all of it), as [`Camera::draw_fog_flat`] draws them. The cloud looks draw only the box `dark` of
+    /// the texels that are dark (`minimap::fog_layer_box`); the rest is alpha 0 there.
+    fn mist_rects(&self, game: &Game, dark: Option<[i32; 4]>) -> (Rect, Option<Rect>) {
         if extend_edge() {
             let (dest, src) = self.fog_texels();
             (dest, Some(src))
+        } else if let Some(bx) = dark {
+            let (tl, br) = self.fog_corners(game);
+            boxed_rects(tl, br, (game.fog.w, game.fog.h), bx)
         } else {
             let (tl, br) = self.fog_corners(game);
             (Rect::new(tl.x, tl.y, br.x - tl.x, br.y - tl.y), None)
-        }
-    }
-
-    /// The raised sheets of the mist (`mist::raised_count`, «Туман вместо черноты» in the tilted views): each a
-    /// copy of the fog quad lifted off the ground. In 2.5D it is drawn on the ground's pass, lifted straight up
-    /// ([`view25::raised_ground_model`]). In a bent view the picture holds the ground, so the raised sheet is a
-    /// mesh of its own, lifted straight up ([`bent_mist_meshes`]), in the sprites' run. Drawn over
-    /// the ground's mist and under the reveals, as the mist itself is.
-    fn draw_raised_mist(&self, game: &Game, shows: &[&Showing]) {
-        let Some(tilt) = self.tilt else { return };
-        let n = mist::raised_count();
-        if n == 0 || !mist::on() || trailer_nofog() {
-            return;
-        }
-        let settle = shows.iter().filter(|s| s.mask.is_some()).flat_map(|s| s.reveal_cells.iter().map(|&(i, _)| i));
-        let (held, origin) = (game.unshown_cells(), game.tile());
-        let Some(tex) = minimap::fog_layer(&game.fog, &held, origin, settle) else { return };
-        let (dest, src) = self.mist_rects(game);
-        let pass = PASS.with(std::cell::Cell::get);
-        for sheet in 1..=n {
-            let lift = mist::raised_height(sheet);
-            match (pass, tilt.cam.bend) {
-                // The ground's pass of a bent view draws the picture (no raised sheet in it).
-                (Pass::Ground, _) => {}
-                (Pass::Sprites, Some(bend)) => {
-                    // The drawn ground's far edge: the cull's far corners along the view's forward ground.
-                    let (f, c) = (view25::forward(bend.yaw_deg), tilt.cull);
-                    let edge = [vec2(c.x, c.y), vec2(c.x + c.w, c.y), vec2(c.x, c.y + c.h), vec2(c.x + c.w, c.y + c.h)]
-                        .into_iter()
-                        .map(|p| (p - bend.pivot).dot(f))
-                        .fold(f32::MIN, f32::max);
-                    let meshes = bent_mist_meshes(&bend, tilt.cam.eye(), edge, self.origin, self.scale, dest, src, &tex, lift);
-                    mist::raised(&tex, sheet, lift, || meshes.iter().for_each(macroquad::models::draw_mesh));
-                }
-                (Pass::Sprites, None) => {}
-                (Pass::Plain, _) => {
-                    push_model(view25::raised_ground_model(self.origin, self.scale, lift));
-                    let params = DrawTextureParams { dest_size: Some(dest.size()), source: src, ..Default::default() };
-                    mist::raised(&tex, sheet, lift, || draw_texture_ex(&tex, dest.x, dest.y, WHITE, params.clone()));
-                    pop_model();
-                }
-            }
         }
     }
 
@@ -2486,8 +2405,11 @@ impl Camera {
         }
         let (tl, br) = self.fog_corners(game);
         if mist {
-            if let Some(tex) = minimap::fog_layer(&game.fog, &held, origin, settle) {
-                self.draw_mist(&tex, Rect::new(tl.x, tl.y, br.x - tl.x, br.y - tl.y), None);
+            if let Some((tex, dark)) = minimap::fog_layer_box(&game.fog, &held, origin, settle) {
+                if dark.is_some() {
+                    let (dest, src) = self.mist_rects(game, dark);
+                    self.draw_mist(&tex, dest, src);
+                }
             }
         } else if self.tilt.is_some() {
             // The 2.5D view (a tilted camera) draws only the fog's dark box (`minimap::draw_fog_boxed`);
@@ -4504,8 +4426,6 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     if tilted {
         frame_probe::time(Stage::Fog, || {
             ground(cam, || cam.draw_fog_flat(game, veil.shows));
-            // The raised sheets of the mist lie over the ground's mist and under the reveals, as the mist does.
-            cam.draw_raised_mist(game, veil.shows);
             ground(cam, || cam.draw_showing_flat(game, veil.shows.to_vec(), veil.now));
             // A bent view's weather lies in its picture, on the sheet's ground (`draw_weather`'s projection), under
             // the sprites; the other views draw it over the world (`draw_world`).
@@ -5468,6 +5388,7 @@ fn backdrop_world(game: &Game, assets: &Assets) {
     // The frame's light and its painted-shadow factor, read and set as `world_frame` does, so the map under a window keeps its hour.
     let light = frame_light_of(game);
     let lit = light.and_then(|_| daylight::frame_shadow_k());
+    mist::set_frame_tint(light.map_or([1.0; 3], |l| l.tint));
     lights::set_frame(light.map(|l| lights::Frame::new(point_lights(game, assets.dt.as_ref(), &cam, l.glow), Vec2::from(cam.centre()), l.glow, lights::quality())));
     map_scale::draw(map_render_scale(), rgb(10, 12, 10), || {
         draw_world(game, assets, &cam, None, None, None, false, NO_VEIL, lit);
@@ -6095,6 +6016,7 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
     // The light is read once, before the world (its painted shadows' factor is read there).
     let light = frame_light_of(game);
     let lit = light.and_then(|_| daylight::frame_shadow_k());
+    mist::set_frame_tint(light.map_or([1.0; 3], |l| l.tint));
     lights::set_frame(light.map(|l| lights::Frame::new(point_lights(game, assets.dt.as_ref(), &cam, l.glow), Vec2::from(cam.centre()), l.glow, lights::quality())));
     frame_probe::time(Stage::World, || {
         map_scale::draw(map_render_scale(), rgb(10, 12, 10), || {
@@ -6885,6 +6807,34 @@ fn spell_entry(name: &str, l: &SpellLine, now: u64) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::boxed_rects;
+    use macroquad::prelude::*;
+
+    #[test]
+    fn the_dark_box_covers_its_dark_texels_on_screen() {
+        // A 10 × 6 texture on a 100 × 60 screen quad (10 px a cell); the dark texels are x 3..5, y 2..3 (inclusive).
+        let (tl, br) = (vec2(20.0, 30.0), vec2(120.0, 90.0));
+        let (dest, src) = boxed_rects(tl, br, (10, 6), [3, 2, 6, 4]);
+        let src = src.expect("a box");
+        // Grown by a texel a side: texels 2..7 by 1..5.
+        assert_eq!((src.x, src.y, src.w, src.h), (2.0, 1.0, 5.0, 4.0));
+        assert_eq!((dest.x, dest.y), (40.0, 40.0));
+        assert_eq!((dest.w, dest.h), (50.0, 40.0));
+        // Every dark texel's screen cell lies inside the drawn rectangle.
+        for (x, y) in [(3.0f32, 2.0f32), (5.0, 3.0)] {
+            let cell = Rect::new(tl.x + x * 10.0, tl.y + y * 10.0, 10.0, 10.0);
+            assert!(dest.x <= cell.x && cell.x + cell.w <= dest.x + dest.w, "x {x}");
+            assert!(dest.y <= cell.y && cell.y + cell.h <= dest.y + dest.h, "y {y}");
+        }
+    }
+
+    #[test]
+    fn the_dark_box_is_clamped_to_the_texture() {
+        let (dest, src) = boxed_rects(vec2(0.0, 0.0), vec2(10.0, 6.0), (10, 6), [0, 0, 10, 6]);
+        let src = src.expect("a box");
+        assert_eq!((src.x, src.y, src.w, src.h), (0.0, 0.0, 10.0, 6.0));
+        assert_eq!((dest.w, dest.h), (10.0, 6.0));
+    }
     use razdor::rules::clock::duration_label;
     use razdor::rules::content::HeroClass;
     use razdor::rules::magic::SpellLine;

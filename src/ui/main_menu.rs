@@ -1734,7 +1734,7 @@ pub const ALL: [Row; 52] = [
             Row::Lighting => Some(tr("Razdor's: the map's light follows the time of day. Style only.")),
             Row::Shadows => Some(tr("Razdor's: Painted keeps the original's shadows; From the sun removes them, and every building, tree and rock casts its own shadow that turns and lengthens with the hour.")),
             Row::LightQuality => Some(tr("Razdor's: high lights up to eight buildings and figures' torches: their shadows and the glowing windows; medium up to four; low keeps the warm glows only. The default is high on the desktop, medium on a phone.")),
-            Row::Mist => Some(tr("Razdor's: unexplored land is drifting mist instead of black. Style only.")),
+            Row::Mist => Some(tr("Razdor's: none is the original's black fog of war; Simple is a plain mist; Clouds drifts soft clouds over the unexplored land. Style only.")),
             Row::LiveWater => Some(tr("Razdor's: the water ripples, foam runs along the shores, rivers flow and ships leave a wake. Style only.")),
             Row::Weather => Some(tr("Razdor's: weather by the land: snow on snow and ice, rain on swamps and lowlands, heat haze over deserts, ash over fire lands, cloud shadows everywhere. Style only.")),
             Row::LivingMap => Some(tr("Razdor's: smoke rises from chimneys, flags wave, birds cross the sky. Style only.")),
@@ -2208,9 +2208,20 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
             }
         }
         Row::Mist => {
-            // Razdor's, off by default: the unexplored land is mist instead of black (`mist`).
-            if labelled_row_help(c, geo, tr("Mist instead of black"), yes_no(audio.map_mist), Row::Mist.help_text()).0 {
-                audio.map_mist = !audio.map_mist;
+            // Razdor's, off by default: the unexplored land is the original's black, a plain mist or soft
+            // clouds (`mist`). A click takes the next one.
+            use super::mist::MistMode;
+            let value = match audio.map_mist {
+                MistMode::Off => tr("No"),
+                MistMode::Flat => tr("Simple"),
+                MistMode::Clouds => tr("Clouds"),
+            };
+            if labelled_row_help(c, geo, tr("Mist instead of black"), value, Row::Mist.help_text()).0 {
+                audio.map_mist = match audio.map_mist {
+                    MistMode::Off => MistMode::Flat,
+                    MistMode::Flat => MistMode::Clouds,
+                    MistMode::Clouds => MistMode::Off,
+                };
             }
         }
         Row::LightCycle => {
