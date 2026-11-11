@@ -224,9 +224,10 @@ pub struct Settings {
     /// Advanced, Razdor's: the world map's 2.5D view (`world_view::tilt_view`): a tilted camera
     /// over the map, the standing sprites as billboards. Off (the default), the flat map as before.
     pub map_tilt: bool,
-    /// Advanced, Razdor's: the first-person view («От первого лица»), within the tilted view
-    /// (`map_tilt` on): the camera stands low behind the hero and the far ground bends with it.
-    /// Off (the default), the 2.5D view as before. Without `map_tilt` it has no effect.
+    /// Advanced, Razdor's: the first-person views («От третьего лица» and «От первого лица», see
+    /// `map_eyes`), within the tilted view (`map_tilt` on): the camera stands low behind the hero, or
+    /// at his eyes, and the far ground bends with it. Off (the default), the 2.5D view as before.
+    /// Without `map_tilt` it has no effect.
     pub map_first_person: bool,
     /// Advanced, Razdor's: the first-person view's far ground («Даль»): «Горизонт» on (the ground
     /// curves down like the earth's horizon, the sky above), «Вверх» off (the default: it rolls up
@@ -239,9 +240,9 @@ pub struct Settings {
     /// Only with `map_first_person`.
     #[serde(default)]
     pub map_globe: bool,
-    /// Advanced, Razdor's: the first-person view's camera («Камера»): «Глазами героя» on, the camera
-    /// stands at the hero's eyes and turns with his walk; «За героем» off (the default: the low
-    /// camera behind him). Only with `map_first_person`.
+    /// Advanced, Razdor's: the camera of the first-person view (the map view row, `MapView`): «От первого
+    /// лица» on, the camera stands at the hero's eyes and turns with his walk; «От третьего лица» off (the
+    /// default: the low camera behind him). Only with `map_first_person`.
     pub map_eyes: bool,
     /// Advanced, Razdor's: the standing sprites' size in the 2.5D view, 1.5 by default (the owner's
     /// decision, 2026-11-05); `world_view::next_sprite_size` cycles it (1×, 1.5×, 2×).
@@ -403,6 +404,16 @@ impl Default for Originals {
     }
 }
 
+/// The world map's views, in the order the view row cycles them: flat, the 2.5D view, the first-person
+/// view from behind the hero («От третьего лица»), and from the hero's eyes («От первого лица»).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MapView {
+    Flat,
+    TwoAndHalfD,
+    Third,
+    First,
+}
+
 impl Settings {
     /// The far ground's shape of the first-person view: «Шар» when `map_globe` is on, else «Горизонт» when
     /// `map_horizon` is, else «Вверх». A file from before «Шар» has `map_globe` off, so it keeps its shape.
@@ -414,6 +425,29 @@ impl Settings {
         } else {
             super::view25::FarGround::Up
         }
+    }
+
+    /// The world map's view, as its row shows it. The three flags stay the storage (a file from before the
+    /// separate views reads the same): flat without `map_tilt`; the 2.5D view with `map_tilt` alone; the
+    /// first-person view's camera is `map_eyes` (on: «От первого лица», through the hero's eyes; off:
+    /// «От третьего лица», behind him). `map_eyes` is read only with `map_first_person`.
+    pub fn map_view(&self) -> MapView {
+        match (self.map_tilt, self.map_first_person, self.map_eyes) {
+            (false, _, _) => MapView::Flat,
+            (true, false, _) => MapView::TwoAndHalfD,
+            (true, true, false) => MapView::Third,
+            (true, true, true) => MapView::First,
+        }
+    }
+
+    /// Sets the map's view: the flags [`Settings::map_view`] reads back.
+    pub fn set_map_view(&mut self, view: MapView) {
+        (self.map_tilt, self.map_first_person, self.map_eyes) = match view {
+            MapView::Flat => (false, false, false),
+            MapView::TwoAndHalfD => (true, false, false),
+            MapView::Third => (true, true, false),
+            MapView::First => (true, true, true),
+        };
     }
 
     /// The first gameplay setting that differs from the original's, by its catalog name (the
@@ -1291,6 +1325,27 @@ mod tests {
         let back: Settings = serde_json::from_str(&serde_json::to_string(&globe).unwrap()).unwrap();
         assert!(back.map_globe && !back.map_horizon);
         assert_eq!(back.far_ground(), FarGround::Globe);
+    }
+
+    /// The map's view: a file's flags read as the four views (`map_first_person` with `map_eyes` on is
+    /// «От первого лица», with it off «От третьего лица»; `map_eyes` alone does nothing), and each view
+    /// writes back the flags it reads from.
+    #[test]
+    fn the_map_view_reads_the_flags_of_a_file_as_one_of_the_four_views() {
+        use super::MapView;
+        let read = |json: &str| serde_json::from_str::<Settings>(json).unwrap().map_view();
+        assert_eq!(read("{}"), MapView::Flat);
+        assert_eq!(read(r#"{"map_tilt": true}"#), MapView::TwoAndHalfD);
+        assert_eq!(read(r#"{"map_tilt": true, "map_eyes": true}"#), MapView::TwoAndHalfD, "the eyes need the first-person flag");
+        assert_eq!(read(r#"{"map_tilt": true, "map_first_person": true, "map_eyes": false}"#), MapView::Third);
+        assert_eq!(read(r#"{"map_tilt": true, "map_first_person": true, "map_eyes": true}"#), MapView::First);
+        assert_eq!(read(r#"{"map_first_person": true, "map_eyes": true}"#), MapView::Flat, "no tilt, no view");
+        for view in [MapView::Flat, MapView::TwoAndHalfD, MapView::Third, MapView::First] {
+            let mut s = Settings::default();
+            s.set_map_view(view);
+            let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+            assert_eq!(back.map_view(), view);
+        }
     }
 
     #[test]

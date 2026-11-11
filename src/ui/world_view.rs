@@ -998,7 +998,7 @@ const TILT_STEP: f32 = 5.0;
 /// The sky above the ground in the 2.5D view (the part of the view with no map).
 const SKY: Color = Color::new(0.06, 0.08, 0.11, 1.0);
 
-/// The view override, `RAZDOR_VIEW`: `25d` (the 2.5D view), `flat`, the snapshots' `first` and `eyes`
+/// The view override, `RAZDOR_VIEW`: `25d` (the 2.5D view), `flat`, the snapshots' `first` (or its alias `third`) and `eyes`
 /// (the first-person view forced on, the eyes camera with `eyes`), or the developer overrides `fp-chase`
 /// (the first-person view behind the hero) and `fp-eyes` (the same with the eyes camera). None for the
 /// settings.
@@ -1015,7 +1015,7 @@ pub fn tilt_view() -> bool {
         return true;
     }
     match view_env() {
-        Some("25d") | Some("first") | Some("eyes") | Some("fp-chase") | Some("fp-eyes") => true,
+        Some("25d") | Some("first") | Some("third") | Some("eyes") | Some("fp-chase") | Some("fp-eyes") => true,
         Some("flat") => false,
         _ => TILT_VIEW.load(std::sync::atomic::Ordering::Relaxed),
     }
@@ -1028,12 +1028,12 @@ pub fn set_tilt_view(on: bool) {
 
 /// Whether the tilted view is the first-person one («От первого лица», `view25::TiltCamera::first_person`):
 /// the setting (`audio::Settings::map_first_person`, pushed by [`set_first_person`]) within the tilted view.
-/// `RAZDOR_VIEW=first` or `eyes` (a snapshot) and `fp-chase` or `fp-eyes` (the developer overrides) force it
+/// `RAZDOR_VIEW=first` (or `third`) or `eyes` (a snapshot) and `fp-chase` or `fp-eyes` (the developer overrides) force it
 /// on; `25d` and `flat` do not.
 pub fn first_person() -> bool {
     tilt_view()
         && match view_env() {
-            Some("first") | Some("eyes") | Some("fp-chase") | Some("fp-eyes") => true,
+            Some("first") | Some("third") | Some("eyes") | Some("fp-chase") | Some("fp-eyes") => true,
             Some(_) => false,
             None => FIRST_PERSON.load(std::sync::atomic::Ordering::Relaxed),
         }

@@ -413,10 +413,13 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   on «Горизонт» (it curves down like a planet, the sky above), else off «Вверх» (the far ground rolls up to
   top-down). `Settings::far_ground` gives the shape as a `world_view::FarGround`; the row cycles Up, Horizon, Globe.
   It is visual only: no rule reads it.
-  - **In the settings** (the owner's decision, 2026-11-10: shown to players again): «Вид карты» cycles flat, 2.5D
-    and «От первого лица», and with the view its «Даль» and «Камера» rows show. Developer overrides in
+  - **In the settings** (the owner's decision, 2026-11-10: shown to players again): «Вид карты» cycles four views,
+    flat, 2.5D, «От третьего лица» (the camera behind the hero, `first_person`) and «От первого лица» (through the
+    hero's eyes, `eyes_setting`); the far ground «Даль» row shows for both first-person views. `Settings::map_view`
+    and `set_map_view` read and write the three flags (`map_tilt`, `map_first_person`, `map_eyes`), so an old file
+    reads the same view and an older build still reads the file. Developer overrides in
     `RAZDOR_VIEW`: `fp-chase` forces the view behind the hero (the saved camera choice does not count), `fp-eyes`
-    forces the eyes camera; `first` and `eyes` force them as in the snapshots. `RAZDOR_VIEW_HORIZON=down|up|globe` (`1` is
+    forces the eyes camera; `first` (or its alias `third`) and `eyes` force them as in the snapshots. `RAZDOR_VIEW_HORIZON=down|up|globe` (`1` is
     `down`) overrides «Даль»; `RAZDOR_VIEW_GLOBE_RADIUS=<cells>` tunes the globe's radius for the snapshots.
   - The camera: `view25::TiltCamera::first_person(look, scale, frame, yaw, far)` (`far` is the `FarGround`). Pitch `FP_PITCH` (12),
     field of view `FP_FOV` (55), fixed (PageUp and PageDown tilt the 2.5D view only). It looks at the view's

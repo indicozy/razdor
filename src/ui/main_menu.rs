@@ -1590,7 +1590,7 @@ impl Group {
     /// The rows the group shows, top to bottom. Every row is in exactly one group (a test checks it).
     pub fn rows(self) -> &'static [Row] {
         match self {
-            Group::Map => &[Row::MapZoom, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
+            Group::Map => &[Row::MapZoom, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
             Group::Battle => &[Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience, Row::HitShake],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
@@ -1609,7 +1609,6 @@ pub enum Row {
     SpriteSize,
     TwoFingerTurn,
     FarGround,
-    ViewCamera,
     MapEdge,
     Lighting,
     LightCycle,
@@ -1649,7 +1648,7 @@ pub enum Row {
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 43] = [
+pub const ALL: [Row; 42] = [
         Row::MapZoom,
         Row::MapResolution,
         Row::FrameCap,
@@ -1657,7 +1656,6 @@ pub const ALL: [Row; 43] = [
         Row::SpriteSize,
         Row::TwoFingerTurn,
         Row::FarGround,
-        Row::ViewCamera,
         Row::MapEdge,
         Row::Lighting,
         Row::LightCycle,
@@ -1700,7 +1698,7 @@ pub const ALL: [Row; 43] = [
         match self {
             Row::MapZoom => Some(tr("The zoom the map plays at. The wheel steps away from it and the 0 key comes back to it; locked, the map always shows it.")),
             Row::FarGround => Some(tr("Up: the far ground rolls up to a top-down map. Horizon: the ground curves down like the earth's horizon, with the sky above it. Globe: the ground curves away on every side, like a small planet.")),
-            Row::ViewCamera => Some(tr("Behind the hero: the low camera behind him. Through the hero's eyes: the camera stands at his eyes and turns with his walk; Q and E turn it while he stands.")),
+            Row::MapView => Some(tr("Third person: the camera behind the hero's back. First person: the view through the hero's eyes.")),
             Row::MapEdge => Some(tr("Off: past the map's edges is black, as in the original. On: a short stretch of ground goes on past the edges, then thickens into the same black fog as the unexplored map.")),
             Row::Lighting => Some(tr("Razdor's: the map's light follows the time of day. Style only.")),
             Row::Shadows => Some(tr("Razdor's: Painted keeps the original's shadows; From the sun removes them, and every building, tree and rock casts its own shadow that turns and lengthens with the hour.")),
@@ -1731,7 +1729,7 @@ pub const ALL: [Row; 43] = [
         match self {
             Row::SpriteSize | Row::TwoFingerTurn => audio.map_tilt,
             // The far ground's shape is the first-person view's only.
-            Row::FarGround | Row::ViewCamera => audio.map_tilt && audio.map_first_person,
+            Row::FarGround => audio.map_tilt && audio.map_first_person,
             Row::LightCycle => audio.map_light == LightMode::Cycle,
             Row::LightHour => audio.map_light == LightMode::Fixed,
             // The shadows are the light's: shown only with the light on.
@@ -2041,16 +2039,16 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
             }
         }
         Row::MapView => {
-            // Razdor's (the owner's decision, 2026-11-02): the world map's 2.5D view, and the
-            // first-person view within it (2026-11-10): flat, 2.5D, first person, flat.
-            if labelled_row(c, geo, tr("Map view"), map_view_label(audio)).0 {
-                let (tilt, first) = match (audio.map_tilt, audio.map_first_person) {
-                    (false, _) => (true, false),
-                    (true, false) => (true, true),
-                    (true, true) => (false, false),
-                };
-                audio.map_tilt = tilt;
-                audio.map_first_person = first;
+            // Razdor's (the owner's decision, 2026-11-02): the world map's 2.5D view, and the two
+            // first-person views within it (2026-11-10): flat, 2.5D, third person, first person, flat.
+            if labelled_row_help(c, geo, tr("Map view"), map_view_label(audio), Row::MapView.help_text()).0 {
+                use super::audio::MapView;
+                audio.set_map_view(match audio.map_view() {
+                    MapView::Flat => MapView::TwoAndHalfD,
+                    MapView::TwoAndHalfD => MapView::Third,
+                    MapView::Third => MapView::First,
+                    MapView::First => MapView::Flat,
+                });
             }
         }
         Row::FarGround => {
@@ -2062,11 +2060,6 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
                     super::view25::FarGround::Horizon => (true, true),
                     super::view25::FarGround::Globe => (false, false),
                 };
-            }
-        }
-        Row::ViewCamera => {
-            if labelled_row_help(c, geo, tr("Camera"), view_camera_label(audio), Row::ViewCamera.help_text()).0 {
-                audio.map_eyes = !audio.map_eyes;
             }
         }
         Row::SpriteSize => {
@@ -2630,12 +2623,14 @@ fn updates_label(mode: razdor::update::Mode, phone: bool) -> &'static str {
     }
 }
 
-/// The world map's view row: «Плоский», «2.5D» or «От первого лица».
+/// The world map's view row: «Плоский», «2.5D», «От третьего лица» or «От первого лица».
 fn map_view_label(audio: &super::audio::Settings) -> &'static str {
-    match (audio.map_tilt, audio.map_first_person) {
-        (false, _) => tr("Flat"),
-        (true, false) => "2.5D",
-        (true, true) => tr("First person"),
+    use super::audio::MapView;
+    match audio.map_view() {
+        MapView::Flat => tr("Flat"),
+        MapView::TwoAndHalfD => "2.5D",
+        MapView::Third => tr("Third person"),
+        MapView::First => tr("First person"),
     }
 }
 
@@ -2646,12 +2641,6 @@ fn far_ground_label(_audio: &super::audio::Settings) -> &'static str {
         super::view25::FarGround::Horizon => tr("Horizon"),
         super::view25::FarGround::Globe => tr("Globe"),
     }
-}
-
-/// The camera row's value: «Глазами героя» or «За героем» (the first-person view's only). The value the
-/// view uses now, so the developer switch `fp-eyes` shows the eyes camera it forces.
-fn view_camera_label(_audio: &super::audio::Settings) -> &'static str {
-    if super::world_view::eyes_setting() { tr("Through the hero's eyes") } else { tr("Behind the hero") }
 }
 
 /// The sprites' size as its row shows it: `1×`, `1.5×`, `2×`, or a stored value.
@@ -3532,12 +3521,15 @@ mod tests {
         let first = super::super::audio::Settings { map_tilt: true, map_first_person: true, ..Default::default() };
         let tilted = super::super::audio::Settings { map_tilt: true, ..Default::default() };
         let flat = super::super::audio::Settings::default();
-        assert!(Row::FarGround.shown(&first) && Row::ViewCamera.shown(&first));
-        assert!(!Row::FarGround.shown(&tilted) && !Row::ViewCamera.shown(&tilted));
-        assert!(!Row::FarGround.shown(&flat) && !Row::ViewCamera.shown(&flat));
+        assert!(Row::FarGround.shown(&first));
+        assert!(!Row::FarGround.shown(&tilted));
+        assert!(!Row::FarGround.shown(&flat));
         assert_eq!(map_view_label(&flat), tr("Flat"));
         assert_eq!(map_view_label(&tilted), "2.5D");
-        assert_eq!(map_view_label(&first), tr("First person"));
+        let third = super::super::audio::Settings { map_tilt: true, map_first_person: true, map_eyes: false, ..Default::default() };
+        let eyes = super::super::audio::Settings { map_eyes: true, ..first.clone() };
+        assert_eq!(map_view_label(&third), tr("Third person"));
+        assert_eq!(map_view_label(&eyes), tr("First person"));
         assert!(Row::MapView.shown(&first) && Row::SpriteSize.shown(&first));
     }
 
@@ -3560,7 +3552,7 @@ mod tests {
     #[test]
     fn the_long_hints_are_behind_a_question_mark() {
         let with: Vec<Row> = Row::ALL.into_iter().filter(|r| r.help_text().is_some()).collect();
-        assert_eq!(with, vec![Row::MapZoom, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::Lighting, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::Language, Row::Updates, Row::ChronicleSummary]);
+        assert_eq!(with, vec![Row::MapZoom, Row::MapView, Row::FarGround, Row::MapEdge, Row::Lighting, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::Language, Row::Updates, Row::ChronicleSummary]);
         scene_help("Experience");
         assert_eq!(HELP_PINNED.with(|p| p.get()), Row::Experience.help_text());
         HELP_PINNED.with(|p| p.set(None));
