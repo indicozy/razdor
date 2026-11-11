@@ -73,6 +73,9 @@ One item per line. `#` starts a comment. Every line is optional except `map` and
 | `reveal <t> <x>,<y> <radius>` | At `t`, the cells within `radius` of the cell are explored. | — |
 | `hour <h>` | The game clock's hour at the start (0 to 24, fractions allowed: `6.5`). No time passes: the armies stay and no event fires. | the map's own |
 | `clock run\|hold` | `hold` keeps the light at the hour of the start for the whole shot (the game's own time still runs); `run` follows the game's clock. | `run` |
+| `ui on\|off` | `on` draws the interface as a player sees it (bottom bar, minimap, the map's widgets); event windows are still answered, not drawn. | `off` |
+| `fog on\|off` | `on` keeps the fog of war (black, or the look's mist). | `off` |
+| `view flat\|25d` | `flat` is the classic flat map with the player's camera: only `target` and `zoom` may be set (the 2.5D keys are errors). `25d` is the tilted camera. | `25d` |
 | `look <key>=<value> ...` | The look settings for this run only, never written to the settings file. `preset` («Качество графики»: `original` or `оригинал`, `low`, `medium`, `high`) is applied first, then the keys: `lighting` (off, on, cycle, fixed), `shadows` (painted, sun), `water` (off, on), `water_rate` (every, other, third), `water_quality` (high, medium, low), `weather` (off, on), `living` (off, on), `mist` (off, flat, clouds), `anim` (on, near, off). | the run's settings |
 
 Cells are map cells, `x,y`, counted from the top-left of the map as the game counts them. Use
@@ -101,6 +104,7 @@ first keyframe that sets a value it holds, and after the last one it holds.
 | `ease` | The easing of the segment that **ends** at this keyframe: `linear`, `in`, `out` or `inout`. | — | `inout` |
 | `eye` | The eyes view («Глазами героя», the player's first-person camera from the hero's eyes): `1` stands the camera on the target's ground at `height`, looking along `pitch` and `yaw`; `0` is the chase camera. A 0/1 key switches at the middle of its segment. | 0 or 1 | `0` |
 | `height` | The eye's height above the ground, in cells (eyes view only). | 0.1 to 5 | `0.7` |
+| `zoom` | The flat view's zoom (`view flat` only; other shots use `fit`): 1 is the classic map, 0.4 to 2. Locked for the run, as the zoom setting is when locked. | 0.4 to 2 | `1` |
 | `horizon` | The eyes view's far ground: `1` curves it down to the horizon (a sky above it; give `bend=60 radius=60`), `0` rolls it up to the top-down map (`bend=78 radius=8`). A 0/1 key switches at the middle of its segment. | 0 or 1 | `0` |
 
 Notes:
@@ -147,7 +151,7 @@ Notes:
 
 | Option | Output |
 |---|---|
-| `--out <file.mp4>` | H.264 with NVENC (h264_nvenc, the 4060) or `--encoder libx264`. The sound is in the same file. |
+| `--out <file.mp4>` | H.264 with NVENC (h264_nvenc, the 4060), `--encoder hevc_nvenc` (the 4060's HEVC, up to 8K), or `--encoder libx264`. The sound is in the same file. |
 | `--frames <dir>` | One PNG per frame: `frame_000000.png` ... |
 | `--hashes <file>` | One line per frame: `frame sha256`. Two runs of one shot on one machine give the same lines. |
 | `--preview` | The picture at 640 px wide, every 10th frame (`--every <n>` changes it): a quick check of the composition. |
@@ -155,6 +159,19 @@ Notes:
 
 Frames come out exactly one per `1 / fps`, whatever the drawing takes: a slow frame costs real
 time, not frames.
+
+### 5K encoding: measured (item 7, 2026-11-12)
+
+The 2 s, 120-frame descent at 5120×2160, on the RTX 4060 through VirtualGL:
+
+| Output | Time a frame | Size of the 2 s |
+|---|---|---|
+| `--encoder hevc_nvenc --out` | 111 ms | 12.6 MB |
+| `--encoder libx264 --out` (the fallback, as H.264 is over 4096 px) | 157 ms | 46 MB |
+| `--frames` (PNG frames, no encoder) | 148 ms | 833 MB (about 7 MB a frame) |
+
+So for 5K, `--encoder hevc_nvenc` is the faster encoder and the smaller file. The PNG master costs more than the
+HEVC encode and takes about 70 times the disk; it is not used. The time is the run's own (its `render:` line).
 
 ## Fly mode (for finding the camera)
 
@@ -247,6 +264,12 @@ duration 18.5
 ```
 
 ## Limits (known, not bugs)
+
+- The flat view's camera keeps the map on the window: when the window is wider than the map from the target
+  (the 5120×2160 frame at zoom 1 on РК1), the map's left edge sits at the window's left edge, so the target is not
+  centred. The cell scale is the same at every size (PSNR 34.4 dB between the 4:3 frame and the matching part of
+  the 5K frame at the same scale). Open: whether a flat trailer run should centre the target (the edge rule would
+  need a run-only switch).
 
 - A timed hour (`hour <t> <h>`, a sweep from day to night in one shot) is not built: the shadows
   step once an hour (`daylight::casts_stepped`), so a sweep of a few seconds would show the steps.
