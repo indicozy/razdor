@@ -3256,7 +3256,9 @@ fn draw_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, sun: Option<dayl
     // One picture (`origin`, its rectangle `src`, the foot's row in it) cast from `foot` by each light. The
     // penumbra: the sharp silhouette weighs (1 − t) and the soft one t, t the height above the foot (0 at
     // the foot, 1 at the tip), so the shadow is crisp at its base and softer as it lengthens.
-    let picture = |origin: Vec2, src: Rect, foot_row: f32, foot: Vec2, owner: Option<usize>| {
+    // The quads of the frame, batched per texture (`shadow::Batch`): the sharp silhouettes and the soft ones.
+    let mut out: (shadow::Batch, shadow::Batch) = Default::default();
+    let picture = |origin: Vec2, src: Rect, foot_row: f32, foot: Vec2, owner: Option<usize>, out: &mut (shadow::Batch, shadow::Batch)| {
         let k = shade(foot);
         if k <= 0.0 {
             return;
@@ -3264,10 +3266,10 @@ fn draw_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, sun: Option<dayl
         for c in casts_at(foot, owner) {
             let p = shadow::Projection { origin, zoom, foot_row, dir: vec2(c.dir[0], c.dir[1]), len: c.len };
             if let Some((vertices, indices)) = p.picture_mesh_ramp(src, size, |t| shadow::strength_colour(c.alpha * k * (1.0 - t))) {
-                shadow::draw_multiply(&Mesh { vertices, indices, texture: Some(texture.clone()) });
+                out.0.push(&vertices, &indices);
             }
             if let Some((vertices, indices)) = p.picture_mesh_ramp(src, size, |t| shadow::strength_colour(c.alpha * k * t)) {
-                shadow::draw_multiply(&Mesh { vertices, indices, texture: Some(soft.clone()) });
+                out.1.push(&vertices, &indices);
             }
         }
     };
@@ -3285,9 +3287,9 @@ fn draw_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, sun: Option<dayl
                     for c in casts_at(foot, Some(i)) {
                         let p = shadow::Projection { origin, zoom, foot_row: card.foot.1, dir: vec2(c.dir[0], c.dir[1]), len: c.len };
                         let (vertices, indices) = p.card_mesh_ramp(card, r, size, |t| shadow::strength_colour(c.alpha * k * (1.0 - t)));
-                        shadow::draw_multiply(&Mesh { vertices, indices, texture: Some(texture.clone()) });
+                        out.0.push(&vertices, &indices);
                         let (vertices, indices) = p.card_mesh_ramp(card, r, size, |t| shadow::strength_colour(c.alpha * k * t));
-                        shadow::draw_multiply(&Mesh { vertices, indices, texture: Some(soft.clone()) });
+                        out.1.push(&vertices, &indices);
                     }
                 }
             }
@@ -3295,7 +3297,7 @@ fn draw_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, sun: Option<dayl
                 let Some(r) = atlas.building(l.picture.0, l.picture.1) else { continue };
                 let origin = building_sprite_origin(l, r.w, r.h, cam);
                 let foot = building_foot(l, cam);
-                picture(origin, r, (foot.y - origin.y) / zoom, foot, Some(i));
+                picture(origin, r, (foot.y - origin.y) / zoom, foot, Some(i), &mut out);
             }
         }
     }
@@ -3303,8 +3305,10 @@ fn draw_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, sun: Option<dayl
         let Some(r) = atlas.decoration(o.class, o.sprite) else { continue };
         let origin = object_sprite_origin(o, r.w, r.h, cam);
         let foot = object_foot(o, cam);
-        picture(origin, r, (foot.y - origin.y) / zoom, foot, None);
+        picture(origin, r, (foot.y - origin.y) / zoom, foot, None, &mut out);
     }
+    out.0.draw(&texture);
+    out.1.draw(&soft);
 }
 
 fn draw_building(l: &Location, art: Option<&DtArt>, cam: &Camera, outlined: bool) {

@@ -58,6 +58,43 @@ pub fn draw_multiply(mesh: &macroquad::models::Mesh) {
     }
 }
 
+/// The most vertices and indices of one batched draw: macroquad clamps a draw to 5000 indices.
+const BATCH_INDICES: usize = 4800;
+const BATCH_VERTICES: usize = 9600;
+
+/// The shadow quads of one texture for a frame, batched: each caster's mesh is appended to the chunk in hand
+/// (its indices shifted to the chunk's vertices), and a chunk is drawn in one call once full. So a frame
+/// costs a few draws instead of one per caster and light; the multiply pass is order-free, so the result is
+/// the same as drawing each mesh on its own.
+#[derive(Default)]
+pub struct Batch {
+    chunks: Vec<(Vec<macroquad::models::Vertex>, Vec<u16>)>,
+}
+
+impl Batch {
+    /// Appends one mesh (its vertices, and its indices into them).
+    pub fn push(&mut self, vertices: &[macroquad::models::Vertex], indices: &[u16]) {
+        if vertices.is_empty() || indices.is_empty() {
+            return;
+        }
+        let fits = self.chunks.last().is_some_and(|(v, i)| v.len() + vertices.len() <= BATCH_VERTICES && i.len() + indices.len() <= BATCH_INDICES);
+        if !fits {
+            self.chunks.push((Vec::new(), Vec::new()));
+        }
+        let Some((v, i)) = self.chunks.last_mut() else { return };
+        let base = v.len() as u16;
+        v.extend_from_slice(vertices);
+        i.extend(indices.iter().map(|&x| x + base));
+    }
+
+    /// Draws every chunk by the multiply pass, with `texture` (the silhouette the quads sample).
+    pub fn draw(self, texture: &macroquad::texture::Texture2D) {
+        for (vertices, indices) in self.chunks {
+            draw_multiply(&macroquad::models::Mesh { vertices, indices, texture: Some(texture.clone()) });
+        }
+    }
+}
+
 /// Blurs the alpha channel of an RGBA picture in place, `passes` times, by a separable [1 2 1] / 4 kernel
 /// (each pass about one pixel of softening). The colour channels are left alone (the shadow atlas is white).
 pub fn blur_alpha(rgba: &mut [u8], w: usize, h: usize, passes: usize) {
@@ -248,6 +285,32 @@ mod tests {
         // A foot below the picture (a hill's centre) covers the whole picture.
         let (tall, _) = on(40.0).picture_mesh_ramp(src, atlas, |_| WHITE).expect("covers the picture");
         assert!((tall[2].uv - vec2(26.0, 32.0) / atlas).length() < 1e-5);
+    }
+}
+
+#[cfg(test)]
+mod batch_tests {
+    use super::*;
+
+    fn quad(x: f32) -> [macroquad::models::Vertex; 4] {
+        [0.0, 1.0, 2.0, 3.0].map(|i| macroquad::models::Vertex::new(x + i, 0.0, 0.0, 0.0, 0.0, WHITE))
+    }
+
+    #[test]
+    fn a_batch_keeps_each_mesh_on_its_own_vertices_and_fills_chunks_up_to_the_limit() {
+        let mut b = Batch::default();
+        let idx = [0u16, 1, 2, 0, 2, 3];
+        for n in 0..3000 {
+            b.push(&quad(n as f32), &idx);
+        }
+        assert!(b.chunks.iter().all(|(v, i)| v.len() <= BATCH_VERTICES && i.len() <= BATCH_INDICES));
+        assert!(b.chunks.len() > 1, "3000 quads take more than one chunk");
+        let total: usize = b.chunks.iter().map(|(_, i)| i.len()).sum();
+        assert_eq!(total, 3000 * 6, "every index is kept");
+        // The second quad's indices point at its own four vertices (4..8 in the first chunk).
+        let (v, i) = &b.chunks[0];
+        assert_eq!(&i[6..12], &[4, 5, 6, 4, 6, 7]);
+        assert_eq!(v[4].position.x, 1.0, "the second quad's first vertex");
     }
 }
 
