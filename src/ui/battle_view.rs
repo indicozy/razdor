@@ -21,6 +21,7 @@ use razdor::rules::battle::{patch_globals, set_patch_globals, ActionKind, Battle
 use razdor::av::Echo;
 use razdor::rules::content::{HeroClass, ItemId, Stat};
 use razdor::rules::custom::{Control, Session};
+use razdor::rules::recording::actions::{apply_battle, BattleAct};
 use razdor::rules::formation::{Formation, Row, Slot};
 use razdor::rules::game::{BattleResult, Foe, Game};
 
@@ -416,6 +417,11 @@ pub struct BattleView {
     pondered: Option<(usize, Option<usize>, i32, u32)>,
     /// The map behind the battle, drawn once (`world_view::battle_backdrop`); dropped with the battle.
     backdrop: super::render_cache::Cached,
+    /// A replayed battle (`ui::watch`): the player's turns are the recorded actions, taken in
+    /// order from this queue, and the battle's own strip (pause, speed, skip) is the watching
+    /// screen's, so `paused` stops the battle's time there.
+    feed: Option<VecDeque<BattleAct>>,
+    pub paused: bool,
 }
 
 /// A card's curse and blessing signs.
@@ -583,7 +589,50 @@ impl BattleView {
             quick: None,
             pondered: None,
             backdrop: Default::default(),
+            feed: None,
+            paused: false,
         }
+    }
+
+    /// A battle the replay plays (`ui::watch`): both sides are the computer's (the enemy by its
+    /// recorded «Максимум» moves, the player's by `actions` in order), at the speed the screen
+    /// sets. The battle has begun (`Battle::begin` is idempotent).
+    pub fn replay(mut battle: Battle, actions: Vec<BattleAct>) -> Self {
+        battle.begin();
+        BattleView { watch: true, feed: Some(actions.into()), ..BattleView::new(battle) }
+    }
+
+    /// The replayed battle's pace: the screen's speed (1, 2, 4, 8 or 16 times the normal).
+    pub fn set_pace(&mut self, times: u8) {
+        self.speed = times;
+    }
+
+    /// The battle and the recorded actions the view did not play (the skip or the end), for the
+    /// playback to finish from there.
+    pub fn take_replay(self) -> (Battle, Vec<BattleAct>) {
+        (self.battle, self.feed.map(Vec::from).unwrap_or_default())
+    }
+
+    /// The replayed battle's frame: the window as the battle draws it, its turns played on. True
+    /// once the battle has ended and its last animation has played.
+    pub fn frame_replay(&mut self, game: &mut Game, assets: &Assets) -> bool {
+        let _window = window_layout::game_scale(stacked_video(self.battle.formation, self.custom));
+        let l = Layout::new(&self.battle, self.custom);
+        let (over, _) = self.advance(&l);
+        game.battle_write_back(&self.battle);
+        razdor::frame_probe::set_kind(razdor::frame_probe::Kind::Battle { tilt: world_view::tilt_view() });
+        super::display::with_window_scale(None, || world_view::battle_backdrop(game, assets, &mut self.backdrop));
+        super::sharp::session(|| {
+            self.draw(&l, &battle_title(game), game.clock.total_minutes() as u64, assets);
+        });
+        super::cursor::set(self.pointer());
+        over
+    }
+
+    /// Whether the replayed battle waits for a recorded action it does not have (the recording
+    /// and the rules disagree): the player's turn with nothing left to play.
+    pub fn replay_stuck(&self) -> bool {
+        self.feed.as_ref().is_some_and(VecDeque::is_empty) && self.battle.outcome() == Outcome::Ongoing && self.battle.active().is_some_and(|a| self.battle.fighters[a].team == Team::Player) && self.fx.is_none()
     }
 
     /// A custom battle (`rules::custom`), each side played as `control` says.
@@ -768,6 +817,10 @@ impl BattleView {
     /// or, while the player is to act, the one after his expected reply. The other side's
     /// thinker rests meanwhile (one search at a time).
     fn max_think_ahead(&mut self) {
+        // A replayed battle's «Максимум» moves are the recorded ones: no search runs.
+        if self.feed.is_some() {
+            return;
+        }
         let Some(side) = self.max_side().filter(|_| self.quick.is_none()) else {
             self.rest_max();
             return;
@@ -809,6 +862,9 @@ impl BattleView {
     /// animations run, the keys and the AI act. Returns whether the battle is over (its last
     /// animation played) and whether the ways out opened this frame.
     fn advance(&mut self, l: &Layout) -> (bool, bool) {
+        if self.paused {
+            return (self.end_shown(), false);
+        }
         let dt = crate::ui::clock::frame_dt() * self.pace();
         if let Some(fx) = &mut self.fx {
             let before = fx.t;
@@ -893,7 +949,9 @@ impl BattleView {
             self.next_speed();
         } else if self.fx.is_none() {
             if let Some(active) = self.battle.active() {
-                if self.human(self.battle.fighters[active].team) {
+                if self.feed.is_some() && self.battle.fighters[active].team == Team::Player {
+                    self.fx = self.replay_act(l, active);
+                } else if self.human(self.battle.fighters[active].team) {
                     self.player_input(l, active);
                 } else {
                     // The computer's unit acts as soon as the last animation ends: Battle_Step
@@ -1096,6 +1154,42 @@ impl BattleView {
         };
         let pausing = self.fx.as_ref().is_some_and(|f| matches!(f.kind, FxKind::Pass));
         super::cursor::battle_pointer(enemy, pausing, self.hold.is_some())
+    }
+
+    /// The next recorded action of a replayed battle, played on the player's unit `active` as the
+    /// screen plays a player's own (its strike or move animates, its sound and log follow). A
+    /// bulk action (the rest of the battle played at once) has no animation: None.
+    fn replay_act(&mut self, l: &Layout, active: usize) -> Option<Fx> {
+        let act = self.feed.as_mut()?.pop_front()?;
+        let before = self.battle.fighters.clone();
+        let from = self.battle.fighters[active].slot;
+        let team = self.battle.fighters[active].team;
+        let fx = match act {
+            BattleAct::ActWith { target, kind } => {
+                let kind = ActionKind::from_code(kind)?;
+                let hit = self.battle.act_with(target as usize, kind).ok()?;
+                let px = card_distance(l, &before, active, hit.target);
+                Some(Fx::act(&self.battle, active, hit, px, before))
+            }
+            BattleAct::MoveActive { to } => {
+                if self.battle.move_active(to).is_ok() {
+                    cue(Cue::CardMove);
+                    Some(Fx::card_move(l, active, team, from, to))
+                } else {
+                    None
+                }
+            }
+            BattleAct::Pass => {
+                self.battle.pass();
+                Some(Fx::plain(active, FxKind::Pass))
+            }
+            other => {
+                apply_battle(&mut self.battle, &other);
+                None
+            }
+        };
+        self.note_log();
+        fx
     }
 
     fn player_input(&mut self, l: &Layout, active: usize) {

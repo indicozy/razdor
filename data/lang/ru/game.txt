@@ -699,3 +699,24 @@ Richest moment — {gold} (day {day}) = Больше всего золота —
 Longest walk — {steps} cells (day {day}) = Самый долгий переход — {steps} клеток (день {day})
 Razdor's: after a map ends or the hero falls, a page sums up the map: the route, battles, highlights and totals. = Раздора: после карты или гибели героя открывается страница «Итоги»: путь героя, битвы, лучшее и цифры.
 Artefacts got = Артефактов получено
+
+# The replays: the watching screen (ui/watch.rs) and its entry points
+Watch the record = Смотреть запись
+Record = Запись
+Watch the battle = Смотреть бой
+Skip the battle = Пропустить бой
+Skip = Пропустить
+Day {n} = День {n}
+Follow the hero = Следить за героем
+Seeking... = Перемотка…
+The record was made in version {v} and diverges from here on = Запись сделана в версии {v} и дальше расходится
+Watch up to here = Смотреть до этого места
+Play = Играть
+Pause = Пауза
+Taken: {name} = Взято: {name}
+The hero fell = Герой пал
+Watching a record = Просмотр записи
+Click the bar = Щелчок по шкале
+seek to its day or mark = перейти к дню или отметке
+play or pause = играть или пауза
+exit the record = выйти из записи

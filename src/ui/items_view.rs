@@ -2177,6 +2177,16 @@ fn phone_diary(game: &mut Game, assets: &Assets, view: &mut HeroView, message: &
     });
 
     let pressed = button(a.close.x, a.close.y, a.close.w, a.close.h, tr("Close"), true);
+    // A game that keeps its record offers it on the diary's foot, left of the close button (the
+    // desktop's row; a phone's diary has no room there yet).
+    if game.replay.is_some() && super::display::dp_px().is_none() {
+        let r = Rect::new(a.close.x - a.close.w - 8.0 * k, a.close.y, a.close.w, a.close.h);
+        if button(r.x, r.y, r.w, r.h, tr("Watch the record"), true) {
+            if let Ok(screen) = super::watch::open_record(game, Screen::Hero(*view)) {
+                return Some(screen);
+            }
+        }
+    }
     // The item held is the pointer; closing the window puts it back in the pack (`App::frame`).
     draw_held(game, assets);
     if closed || pressed || key(KeyCode::Escape) || key(keymap::key(Action::Journal)) {

@@ -194,7 +194,7 @@ impl ActionKind {
         }
     }
 
-    pub(crate) fn from_code(c: u8) -> Option<ActionKind> {
+    pub fn from_code(c: u8) -> Option<ActionKind> {
         Some(match c {
             0 => ActionKind::Melee,
             1 => ActionKind::LongStrike,

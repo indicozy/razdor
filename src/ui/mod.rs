@@ -70,6 +70,7 @@ pub mod unit_sheet;
 pub mod update_view;
 pub mod trailer;
 pub mod view25;
+pub mod watch;
 #[cfg(target_os = "android")]
 pub mod android;
 #[cfg(target_os = "ios")]
@@ -141,6 +142,8 @@ pub enum Screen {
     Victory,
     /// The «Итоги» page of a map (`ui::summary`), after a map ends or from the chronicle tab.
     Summary(Box<summary::View>),
+    /// The replay's watching screen (`ui::watch`): «Выход» returns to the screen it was opened from.
+    Watch(Box<watch::WatchView>),
     /// The map editor (`ui::editor`).
     Editor,
     /// The custom battle setup over the main menu (`ui::custom_battle`).
@@ -1042,6 +1045,7 @@ impl App {
                 summary::After::Victory | summary::After::Defeat => Place::End,
             },
             Screen::Editor => Place::Editor,
+            Screen::Watch(_) => Place::Watch,
         }
     }
 
@@ -1197,6 +1201,7 @@ impl App {
             Screen::Load(_) => "load",
             Screen::Victory => "victory",
             Screen::Summary(_) => "summary",
+            Screen::Watch(_) => "watch",
             Screen::Editor => "editor",
             Screen::CustomSetup => "custom battle setup",
             Screen::CustomBattle(_) => "custom battle",
@@ -1655,6 +1660,7 @@ impl App {
                 None
             }
             (Screen::Summary(_), None) => Some(Screen::MainMenu),
+            (Screen::Watch(view), _) => view.frame(&self.assets, crate::ui::clock::frame_dt()).map(|watch::Exit::Close| view.close()),
             (Screen::Editor, _) => None,
             (Screen::CustomSetup, _) => {
                 let view = self.custom.get_or_insert_with(|| custom_battle::SetupView::new(&custom_content));
@@ -1720,6 +1726,15 @@ impl App {
             Some(summary::Exit::Defeat) => {
                 self.game = None;
                 next = next.or(Some(Screen::MainMenu));
+            }
+            // «Смотреть запись»: the page is the watching screen's back.
+            Some(summary::Exit::Watch) => {
+                let back = std::mem::replace(&mut self.screen, Screen::WorldMap);
+                match self.game.as_ref().map(|g| watch::open_record(g, back)) {
+                    Some(Ok(screen)) => next = next.or(Some(screen)),
+                    Some(Err(e)) => self.message = Some(e),
+                    None => {}
+                }
             }
             None => {}
         }

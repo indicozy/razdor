@@ -85,9 +85,20 @@ fn bar_h() -> f32 {
     }
     super::chrome::bar_top_height()
 }
-/// The map view: the window above the bottom bar.
+thread_local! {
+    /// The watching screen's map area (`ui::watch`): the window above its strip, while it is set.
+    static WATCH_AREA: std::cell::Cell<Option<Rect>> = const { std::cell::Cell::new(None) };
+}
+
+/// Sets the map area of the watching screen (`None` again when it is left: the map's own area is
+/// the window above the bottom bar).
+pub fn set_watch_area(area: Option<Rect>) {
+    WATCH_AREA.with(|c| c.set(area));
+}
+
+/// The map view: the window above the bottom bar (or the watching screen's, while it is set).
 fn map_area() -> Rect {
-    map_area_in(screen_width(), screen_height(), bar_h())
+    WATCH_AREA.with(|c| c.get()).unwrap_or_else(|| map_area_in(screen_width(), screen_height(), bar_h()))
 }
 /// Never less than nothing: a minimized window on Windows is 1 pixel high, under the bar.
 fn map_area_in(w: f32, h: f32, bar: f32) -> Rect {
@@ -4934,7 +4945,7 @@ fn play_event(game: &Game, event: &Event) {
     razdor::diag::play(&game.clock.label(), &line);
 }
 
-fn describe(event: &Event, game: &Game) -> Option<String> {
+pub(super) fn describe(event: &Event, game: &Game) -> Option<String> {
     match event {
         // An event's spell writes nothing: the original shows only its effect.
         Event::NewDay(_) | Event::Captured(_) | Event::Script(_) | Event::EventSpell { .. } => None,
@@ -5091,6 +5102,79 @@ pub fn settings_backdrop(game: &Game, assets: &Assets) -> bool {
 
 pub fn backdrop(game: &Game, assets: &Assets) {
     backdrop_lit(game, assets, None);
+}
+
+/// The map of the watching screen (`ui::watch`): the world drawn as the map is (its fog, light,
+/// weather and the 2.5D tilt), the camera on the hero while `follow` is on and where it was left
+/// otherwise. The game takes no input here: the camera does (the wheel and +/- zoom, the arrows,
+/// the edges and a drag pan, PageUp, PageDown, Q and E turn the 2.5D view as on the map).
+pub fn watch_map(game: &Game, assets: &Assets, view: &mut MapView, follow: bool, dt_ms: i64) {
+    clear_background(rgb(10, 12, 10));
+    let (home, locked) = (home_zoom(), ZOOM_LOCKED.load(std::sync::atomic::Ordering::Relaxed));
+    let lo = {
+        let map = &game.world.map;
+        let ms = map_scale();
+        zoom_floor(map.w as f32 * PX * ms, map.h as f32 * map.grid.row_height() * PX * ms, map_area())
+    };
+    if !locked {
+        view.zoom_steps = fit_steps(home, view.zoom_steps, lo);
+        let wheel = wheel();
+        if wheel != 0.0 {
+            view.zoom_steps = step_zoom(home, view.zoom_steps, if wheel > 0.0 { 1 } else { -1 }, lo);
+        }
+        if key(KeyCode::Equal) || key(KeyCode::KpAdd) {
+            view.zoom_steps = step_zoom(home, view.zoom_steps, 1, lo);
+        }
+        if key(KeyCode::Minus) || key(KeyCode::KpSubtract) {
+            view.zoom_steps = step_zoom(home, view.zoom_steps, -1, lo);
+        }
+    }
+    view.zoom = zoom_at(home, view.zoom_steps, locked, lo);
+    if tilt_view() {
+        ease_tilt_yaw(dt_ms);
+        if !first_person() && key(KeyCode::PageUp) {
+            set_tilt_pitch(tilt_pitch() - TILT_STEP);
+        }
+        if !first_person() && key(KeyCode::PageDown) {
+            set_tilt_pitch(tilt_pitch() + TILT_STEP);
+        }
+        if key(KeyCode::Q) {
+            turn_tilt_yaw(-TILT_YAW_STEP);
+        }
+        if key(KeyCode::E) {
+            turn_tilt_yaw(TILT_YAW_STEP);
+        }
+    }
+    if follow {
+        view.look = None;
+    } else if view.look.is_none() {
+        view.look = Some(game.display_pos());
+    }
+    scroll(game, view, dt_ms, crate::ui::input::map_scroll());
+    pan(game, view, crate::ui::input::map_pan());
+    let look = view.look.unwrap_or(game.display_pos());
+    let cam = Camera::looking_at(game, view.zoom, look);
+    let flat = cam.tilt.is_none();
+    let light = frame_light_of(game);
+    let relief = light.and_then(|_| daylight::frame_relief());
+    lights::set_frame(light.map(|l| lights::Frame::new(point_lights(game, assets.dt.as_ref(), &cam, l.glow), Vec2::from(cam.centre()), l.glow, lights::quality())));
+    map_scale::draw(map_render_scale(), rgb(10, 12, 10), || {
+        draw_world(game, assets, &cam, None, None, None, true, NO_VEIL, relief);
+        let mist_light = flat && mist::on();
+        if !mist_light {
+            draw_daylight(game, &cam, light);
+        }
+        if flat {
+            cam.draw_fog(game, &[]);
+        }
+        if mist_light {
+            draw_daylight(game, &cam, light);
+        }
+        if light.is_some() {
+            draw_building_windows(game, assets, &cam);
+        }
+        draw_weather(game, assets, &cam, light, &[]);
+    });
 }
 
 /// The map behind a battle (the window's backdrop), drawn once and shown again: the picture of
