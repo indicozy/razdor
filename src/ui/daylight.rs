@@ -248,6 +248,14 @@ local! {
     static SHOWN_HOUR: Cell<Option<f32>> = Cell::new(None);
     /// `RAZDOR_LIGHT_HOUR` (a snapshot's fixed hour, read once): it wins over the settings.
     static ENV_HOUR: Option<f32> = std::env::var("RAZDOR_LIGHT_HOUR").ok().and_then(|s| s.trim().parse::<f32>().ok());
+    /// The trailer's `clock hold` (`ui::trailer`): the game-clock mode keeps this hour for the whole shot.
+    static HOLD: Cell<Option<f32>> = Cell::new(None);
+}
+
+/// Holds the game-clock mode's hour at `hour` (a trailer run's `clock hold`), or `None` to let the clock run.
+/// Only the light reads it: the game's own time runs on.
+pub fn set_hold(hour: Option<f32>) {
+    HOLD.set(hour.map(|h| h.rem_euclid(24.0)));
 }
 
 /// Takes the settings «Освещение», «Тени» and «Качество света» in (every frame).
@@ -279,6 +287,7 @@ pub fn frame_light(game_hour: f32, real_secs: f64, dt: f32) -> Option<Light> {
             return None;
         }
         LightMode::GameClock => {
+            let game_hour = HOLD.get().unwrap_or(game_hour);
             let shown = match SHOWN_HOUR.get() {
                 Some(h) => ease_hour(h, game_hour, dt),
                 None => game_hour.rem_euclid(24.0),

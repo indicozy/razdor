@@ -128,6 +128,13 @@ pub struct Shot {
     pub duration: f64,
     /// Whether the file sets `duration` itself.
     pub duration_set: bool,
+    /// The clock's hour at the start (`hour`, 0 to 24, fractions allowed); `None`: the map's own.
+    pub hour: Option<f64>,
+    /// `clock hold`: the light keeps the hour of the start for the whole shot.
+    pub clock_hold: bool,
+    /// The look settings the run takes over (`look key=value`, in file order; see [`LOOK_KEYS`]).
+    /// They are never written to the settings file.
+    pub look: Vec<(String, String)>,
 }
 
 impl Default for Shot {
@@ -146,9 +153,28 @@ impl Default for Shot {
             actions: Vec::new(),
             duration: 0.0,
             duration_set: false,
+            hour: None,
+            clock_hold: false,
+            look: Vec::new(),
         }
     }
 }
+
+/// The look settings a shot may set (`look key=value`), each with the values it takes. `preset` is
+/// «Качество графики»'s presets (`original` or `оригинал`, `low`, `medium`, `high`), applied before
+/// the other keys. The values are read by `ui::trailer`.
+pub const LOOK_KEYS: [(&str, &[&str]); 10] = [
+    ("preset", &["original", "оригинал", "low", "medium", "high"]),
+    ("lighting", &["off", "on", "cycle", "fixed"]),
+    ("shadows", &["painted", "sun"]),
+    ("water", &["off", "on"]),
+    ("water_rate", &["every", "other", "third"]),
+    ("water_quality", &["high", "medium", "low"]),
+    ("weather", &["off", "on"]),
+    ("living", &["off", "on"]),
+    ("mist", &["off", "flat", "clouds"]),
+    ("anim", &["on", "near", "off"]),
+];
 
 /// The parse errors, one per problem: `line N: field: what is wrong`.
 pub type Errors = Vec<String>;
@@ -229,6 +255,24 @@ fn apply_line(shot: &mut Shot, head: &str, rest: &[&str], line_no: usize) -> Res
             "show" => shot.battles_show = true,
             v => return Err(("battles", format!("`{v}`: map or show"))),
         },
+        "hour" => {
+            let v = one(rest).map_err(|e| ("hour", e))?;
+            let h = v.parse::<f64>().ok().filter(|h| h.is_finite() && (0.0..24.0).contains(h));
+            shot.hour = Some(h.ok_or(("hour", format!("`{v}`: an hour from 0 to 23 (fractions allowed, e.g. 6.5)")))?);
+        }
+        "clock" => match one(rest).map_err(|e| ("clock", e))? {
+            "run" => shot.clock_hold = false,
+            "hold" => shot.clock_hold = true,
+            v => return Err(("clock", format!("`{v}`: run or hold"))),
+        },
+        "look" => {
+            if rest.is_empty() {
+                return Err(("look", "needs at least one key=value, e.g. `look lighting=on shadows=sun`".to_string()));
+            }
+            for item in rest {
+                shot.look.push(parse_look(item)?);
+            }
+        }
         "duration" => {
             let v = one(rest).map_err(|e| ("duration", e))?;
             let d = time_word(v).ok_or(("duration", format!("`{v}`: not a time (seconds, e.g. 16 or 16s)")))?;
@@ -270,10 +314,23 @@ fn apply_line(shot: &mut Shot, head: &str, rest: &[&str], line_no: usize) -> Res
             shot.actions.push(Action::Reveal { t, cell, radius, line: line_no });
         }
         other => {
-            return Err(("line", format!("`{other}`: no such line (map, save, hero, seed, size, fps, music, battles, duration, event, at, walk, pass, reveal)")));
+            return Err(("line", format!("`{other}`: no such line (map, save, hero, seed, size, fps, music, battles, hour, clock, look, duration, event, at, walk, pass, reveal)")));
         }
     }
     Ok(())
+}
+
+/// One `key=value` of a `look` line, checked against [`LOOK_KEYS`].
+fn parse_look(item: &str) -> Result<(String, String), FieldError> {
+    let (k, v) = item.split_once('=').ok_or(("look", format!("`{item}`: write key=value")))?;
+    let Some((_, values)) = LOOK_KEYS.iter().find(|(name, _)| *name == k) else {
+        let names: Vec<&str> = LOOK_KEYS.iter().map(|(n, _)| *n).collect();
+        return Err(("look", format!("`{k}`: no such key ({})", names.join(", "))));
+    };
+    if !values.contains(&v) {
+        return Err(("look", format!("`{k}={v}`: {}", values.join(", "))));
+    }
+    Ok((k.to_string(), v.to_string()))
 }
 
 /// A name that may hold spaces (`map Другой берег`): the words joined back.
@@ -761,6 +818,29 @@ mod tests {
     fn comments_and_blank_lines_are_skipped() {
         let s = ok("# the descent\n\nmap РК1 # the start map\n  at 1s pitch=12  # low\n");
         assert_eq!(s.keys.len(), 1);
+    }
+
+    #[test]
+    fn the_hour_clock_and_look_lines_parse_with_their_defaults() {
+        let s = ok("map РК1\nat 1s pitch=12\n");
+        assert_eq!((s.hour, s.clock_hold, s.look.len()), (None, false, 0), "the map's own hour, the clock runs, no look");
+        let s = ok("map РК1\nhour 6.5\nclock hold\nlook lighting=on shadows=sun\nlook preset=оригинал\nat 1s pitch=12\n");
+        assert_eq!(s.hour, Some(6.5));
+        assert!(s.clock_hold);
+        assert_eq!(s.look, vec![("lighting".to_string(), "on".to_string()), ("shadows".to_string(), "sun".to_string()), ("preset".to_string(), "оригинал".to_string())]);
+        assert!(!ok("map РК1\nclock run\nat 1s pitch=12\n").clock_hold);
+    }
+
+    #[test]
+    fn a_bad_hour_clock_or_look_names_its_line_and_field() {
+        let all = errs("map РК1\nhour 24\nhour soon\nclock maybe\nlook colour=3\nlook lighting=maybe\nlook shadows\nlook\nat 1s pitch=12\n").join("\n");
+        assert!(all.contains("line 2: hour: `24`: an hour from 0 to 23"), "{all}");
+        assert!(all.contains("line 3: hour: `soon`"), "{all}");
+        assert!(all.contains("line 4: clock: `maybe`: run or hold"), "{all}");
+        assert!(all.contains("line 5: look: `colour`: no such key"), "{all}");
+        assert!(all.contains("line 6: look: `lighting=maybe`: off, on, cycle, fixed"), "{all}");
+        assert!(all.contains("line 7: look: `shadows`: write key=value"), "{all}");
+        assert!(all.contains("line 8: look: needs at least one key=value"), "{all}");
     }
 
     #[test]

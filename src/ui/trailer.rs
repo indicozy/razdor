@@ -27,6 +27,7 @@ use razdor::rules::content::HeroClass;
 use razdor::rules::game::{BattleResult, Game};
 use razdor::trailer::{self as shotfile, Action, MapRef, Shot, Target, Values};
 
+use super::audio::Settings;
 use super::dialog::{Close, Dialog};
 use super::view25::{Trailer, FOV_DEG};
 use super::{App, Screen};
@@ -560,11 +561,84 @@ fn start(app: &mut App, cfg: &Config) -> Result<(), String> {
     } else {
         log(format!("start: map {map:?}, hero {hero}, seed {seed}"));
     }
+    if let Some(shot) = cfg.shot.as_ref().filter(|_| cfg.mode != Mode::Fly) {
+        if let Some(hour) = shot.hour {
+            set_start_hour(&mut game, hour);
+            log(format!("hour: {hour} (the clock {})", game.clock.label()));
+        }
+        if shot.clock_hold {
+            let held = clock_hour(&game);
+            super::daylight::set_hold(Some(held));
+            log(format!("clock hold at {held:.2} h"));
+        }
+        apply_look(&mut app.audio.settings, &shot.look);
+        if !shot.look.is_empty() {
+            log(format!("look: {:?} (for this run only)", shot.look));
+        }
+    }
     app.assets.set_content(game.content.clone());
     app.screen = Screen::WorldMap;
     app.game = Some(game);
     razdor::diag!("trailer: renderer: {}", gl_renderer());
     Ok(())
+}
+
+/// The shot's `hour`: the game's clock moves to that hour of its day. No time passes: the armies
+/// stay where they are and no event fires.
+fn set_start_hour(game: &mut Game, hour: f64) {
+    let day_start = (game.clock.total_minutes() / 1440.0).floor() * 1440.0;
+    game.clock = razdor::rules::clock::Clock::at_minutes((day_start + hour * 60.0).round() as u64);
+}
+
+/// The hour of the game's clock, fractions included.
+fn clock_hour(game: &Game) -> f32 {
+    (game.clock.total_minutes().rem_euclid(1440.0) / 60.0) as f32
+}
+
+/// The shot's `look` lines, taken over for this run: the settings of the run are changed in memory
+/// only, the settings file is never written. `preset` (the «Качество графики» presets) goes first,
+/// then the keys in file order.
+fn apply_look(s: &mut Settings, look: &[(String, String)]) {
+    use super::daylight::{LightMode, ShadowMode};
+    use super::map_anim::Mode as Anim;
+    use super::mist::MistMode;
+    use super::quality_preset::{self, Preset};
+    use super::water::{FrameRate, Quality};
+    if let Some((_, p)) = look.iter().rev().find(|(k, _)| k == "preset") {
+        let preset = match p.as_str() {
+            "original" | "оригинал" => Preset::Original,
+            "low" => Preset::Low,
+            "medium" => Preset::Medium,
+            _ => Preset::High,
+        };
+        quality_preset::set(s, preset);
+    }
+    for (k, v) in look {
+        match (k.as_str(), v.as_str()) {
+            ("lighting", "off") => s.map_light = LightMode::Off,
+            ("lighting", "on") => s.map_light = LightMode::GameClock,
+            ("lighting", "cycle") => s.map_light = LightMode::Cycle,
+            ("lighting", "fixed") => s.map_light = LightMode::Fixed,
+            ("shadows", "painted") => s.map_shadows = ShadowMode::Painted,
+            ("shadows", "sun") => s.map_shadows = ShadowMode::Sun,
+            ("water", on) => s.map_live_water = on == "on",
+            ("water_rate", "every") => s.map_water_rate = FrameRate::EveryFrame,
+            ("water_rate", "other") => s.map_water_rate = FrameRate::EveryOther,
+            ("water_rate", "third") => s.map_water_rate = FrameRate::EveryThird,
+            ("water_quality", "high") => s.map_water_quality = Quality::High,
+            ("water_quality", "medium") => s.map_water_quality = Quality::Medium,
+            ("water_quality", "low") => s.map_water_quality = Quality::Low,
+            ("weather", on) => s.map_weather = on == "on",
+            ("living", on) => s.map_living = on == "on",
+            ("mist", "off") => s.map_mist = MistMode::Off,
+            ("mist", "flat") => s.map_mist = MistMode::Flat,
+            ("mist", "clouds") => s.map_mist = MistMode::Clouds,
+            ("anim", "on") => s.map_anim = Anim::On,
+            ("anim", "near") => s.map_anim = Anim::Near,
+            ("anim", "off") => s.map_anim = Anim::Off,
+            _ => {}
+        }
+    }
 }
 
 /// The GL renderer's name (`GL_RENDERER`), for the run's log: the GPU that draws the frames (under

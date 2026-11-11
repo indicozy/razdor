@@ -71,6 +71,9 @@ One item per line. `#` starts a comment. Every line is optional except `map` and
 | `walk <t> <x>,<y> <x>,<y> ...` | At `t`, the hero walks to each cell in turn, at play speed (the game plans each leg). | — |
 | `pass <t> <n>h` or `<n>d` | At `t`, time passes as a wait does: armies march, days and events happen. Days are 24 h. | — |
 | `reveal <t> <x>,<y> <radius>` | At `t`, the cells within `radius` of the cell are explored. | — |
+| `hour <h>` | The game clock's hour at the start (0 to 24, fractions allowed: `6.5`). No time passes: the armies stay and no event fires. | the map's own |
+| `clock run\|hold` | `hold` keeps the light at the hour of the start for the whole shot (the game's own time still runs); `run` follows the game's clock. | `run` |
+| `look <key>=<value> ...` | The look settings for this run only, never written to the settings file. `preset` («Качество графики»: `original` or `оригинал`, `low`, `medium`, `high`) is applied first, then the keys: `lighting` (off, on, cycle, fixed), `shadows` (painted, sun), `water` (off, on), `water_rate` (every, other, third), `water_quality` (high, medium, low), `weather` (off, on), `living` (off, on), `mist` (off, flat, clouds), `anim` (on, near, off). | the run's settings |
 
 Cells are map cells, `x,y`, counted from the top-left of the map as the game counts them. Use
 `--plan` to check a cell: the planner prints where the hero stands.
@@ -244,6 +247,9 @@ duration 18.5
 ```
 
 ## Limits (known, not bugs)
+
+- A timed hour (`hour <t> <h>`, a sweep from day to night in one shot) is not built: the shadows
+  step once an hour (`daylight::casts_stepped`), so a sweep of a few seconds would show the steps.
 
 - The target is pushed inside the map near its edges (the view does not show past the map).
 - Battles on the map play no battle sound; `battles show` plays the battle screen's sounds.
