@@ -93,9 +93,21 @@ impl Settings {
     /// Writes the settings, keeping fields of the file this version does not know.
     pub fn save(&self) {
         let Some(path) = Settings::path() else { return };
-        let mut json = std::fs::read(&path)
-            .ok()
-            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+        let old = std::fs::read(&path).ok();
+        let json = self.merged_json(old.as_deref());
+        let written = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| {
+            std::fs::write(&path, serde_json::to_vec_pretty(&json).unwrap_or_default())
+        });
+        if let Err(e) = written {
+            razdor::diag!("{}: {e}", path.display());
+        }
+    }
+
+    /// The settings file as `save` writes it: the fields of `old` (the file's bytes, if any) that
+    /// this version does not know are kept, and every field this version knows is set.
+    fn merged_json(&self, old: Option<&[u8]>) -> serde_json::Value {
+        let mut json = old
+            .and_then(|b| serde_json::from_slice::<serde_json::Value>(b).ok())
             .filter(serde_json::Value::is_object)
             .unwrap_or_else(|| serde_json::json!({}));
         json["language"] = serde_json::Value::String(self.language.clone());
@@ -106,12 +118,9 @@ impl Settings {
         json["favourite_scenarios"] = serde_json::json!(self.favourite_scenarios);
         json["scenario_show"] = serde_json::json!(self.scenario_show);
         json["scenario_order"] = serde_json::json!(self.scenario_order);
-        let written = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| {
-            std::fs::write(&path, serde_json::to_vec_pretty(&json).unwrap_or_default())
-        });
-        if let Err(e) = written {
-            razdor::diag!("{}: {e}", path.display());
-        }
+        // Written, or the rules window's choice is lost at the next new game (a player's report).
+        json["experimental_rules"] = serde_json::json!(self.experimental_rules);
+        json
     }
 }
 
@@ -342,6 +351,19 @@ mod tests {
         let saved = serde_json::to_string(&Settings { experimental_rules: rules, ..Settings::default() }).unwrap();
         let back: Settings = serde_json::from_str(&saved).unwrap();
         assert_eq!(back.experimental_rules, rules);
+    }
+
+    #[test]
+    fn saving_the_settings_keeps_the_remembered_experimental_rules() {
+        let rules = razdor::rules::content::ExperimentalRules { fast_ai: true, six_cells: true, ..Default::default() };
+        let settings = Settings { language: "ru".into(), experimental_rules: rules, ..Settings::default() };
+        let old = br#"{"language":"ru","some_future_key":[1,2]}"#;
+        let json = settings.merged_json(Some(old));
+        let written = serde_json::to_vec_pretty(&json).unwrap();
+        let back: Settings = serde_json::from_slice(&written).unwrap();
+        assert_eq!(back.experimental_rules, rules, "the rules window's choice survives a save");
+        assert_eq!(json["some_future_key"], serde_json::json!([1, 2]), "a key this version does not know is kept");
+        assert_eq!(json["language"], "ru");
     }
 
     #[test]
