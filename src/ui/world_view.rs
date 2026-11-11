@@ -3493,7 +3493,7 @@ fn prepare_shadow_map(game: &Game, art: Option<&DtArt>, sun: Option<daylight::Ca
     let origin = vec2(-0.5, -0.5 * rh) - Vec2::splat(SHADOW_MARGIN);
     let layer = layer.map(|(p, y)| (quantize_angle(p), quantize_angle(y)));
     let base = base_key(statics_signature(game), texels, texture, origin, extent, layer);
-    let explored = game.fog.fingerprint();
+    let explored = game.fog.change_key();
     let now = super::clock::now();
     SHADOW_MAP.with(|m| {
         let mut m = m.borrow_mut();
@@ -5710,7 +5710,7 @@ fn battle_backdrop_key(game: &Game) -> u64 {
     bits(game.display_pos()).hash(&mut h);
     (tilt_view(), first_person(), far_ground(), eyes_setting(), tilt_pitch().to_bits(), tilt_yaw().to_bits(), extend_edge(), mist::on()).hash(&mut h);
     curve_bits().hash(&mut h);
-    (game.fog.enabled, &game.fog.bits).hash(&mut h);
+    (game.fog.enabled, game.fog.generation()).hash(&mut h);
     game.unshown_cells().hash(&mut h);
     (game.aboard(), game.hero_hidden()).hash(&mut h);
     if let Some(s) = game.ship {

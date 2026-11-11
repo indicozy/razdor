@@ -76,6 +76,27 @@ pub fn within(a: Tile, b: Tile, r: i32) -> bool {
     stamp(2 * r.max(0) as usize).contains(&off)
 }
 
+/// The change counter of a fog's bits (see [`Fog::generation`]): a process-unique id, renewed by every new explored
+/// cell. It is not part of the fog's value: any two counters are equal, so equality and the save file see the bits only.
+#[derive(Clone, Copy, Debug)]
+pub struct FogGeneration(u64);
+
+impl FogGeneration {
+    /// A counter no other fog has had.
+    fn fresh() -> FogGeneration {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        FogGeneration(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    }
+}
+
+impl PartialEq for FogGeneration {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for FogGeneration {}
+
 /// Explored cells of a `w × h` map, one bit per cell (row by row).
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Fog {
@@ -83,15 +104,18 @@ pub struct Fog {
     pub h: i32,
     /// Off: every cell counts as explored (the demo).
     pub enabled: bool,
-    /// Bit `y*w + x` is set once cell `(x, y)` has been seen.
+    /// Bit `y*w + x` is set once cell `(x, y)` has been seen. Written only by [`Fog::mark`], which renews `generation`.
     pub bits: Vec<u64>,
+    /// Renewed with every new explored cell (see [`Fog::generation`]); a loaded fog gets a fresh one.
+    #[serde(skip, default = "FogGeneration::fresh")]
+    generation: FogGeneration,
 }
 
 impl Fog {
     /// All dark.
     pub fn new(w: i32, h: i32) -> Fog {
         let n = (w.max(0) * h.max(0)) as usize;
-        Fog { w, h, enabled: true, bits: vec![0; n.div_ceil(64)] }
+        Fog { w, h, enabled: true, bits: vec![0; n.div_ceil(64)], generation: FogGeneration::fresh() }
     }
 
     /// No fog: everything counts as explored.
@@ -123,6 +147,9 @@ impl Fog {
         let (word, bit) = (i / 64, 1u64 << (i % 64));
         let new = self.bits[word] & bit == 0;
         self.bits[word] |= bit;
+        if new {
+            self.generation = FogGeneration::fresh();
+        }
         new && self.enabled
     }
 
@@ -144,6 +171,18 @@ impl Fog {
             return (self.w * self.h) as usize;
         }
         self.bits.iter().map(|b| b.count_ones() as usize).sum()
+    }
+
+    /// The explored set's change counter: it differs for two fogs unless they hold the same bits (every new explored cell
+    /// renews it). A cache keys on it instead of hashing `bits` every frame.
+    pub fn generation(&self) -> u64 {
+        self.generation.0
+    }
+
+    /// A cheap key of the explored set and the fog's flag (the caches' key, in place of [`Fog::fingerprint`]): the counter
+    /// with the flag folded in, so switching the fog off or on changes it too.
+    pub fn change_key(&self) -> u64 {
+        self.generation.0 ^ (u64::from(self.enabled) << 63)
     }
 
     /// A cheap fingerprint of the explored set, for caches that redraw when it changes.

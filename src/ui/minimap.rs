@@ -284,7 +284,7 @@ impl FogShown {
         let (w, h) = (fog.w.max(0), fog.h.max(0));
         let n = w as usize * h as usize;
         let resized = (self.w, self.h) != (w, h) || self.cur.len() != n;
-        let key = fog.fingerprint() ^ held_key(held);
+        let key = fog.change_key() ^ held_key(held);
         let prev = self.last.replace(now);
         self.settle.clear();
         self.settle.extend(settle);
