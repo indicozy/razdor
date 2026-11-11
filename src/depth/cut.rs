@@ -465,7 +465,7 @@ fn build_cards(lab: &[i32], w: usize, h: usize, k: usize, d: &[f32]) -> Vec<Card
         .enumerate()
         .filter_map(|(r, foot)| {
             let (verts, tris) = region_card(lab, w, h, r)?;
-            Some(Card { foot, verts, tris })
+            Some(Card { foot, verts, tris, ground: false })
         })
         .collect()
 }

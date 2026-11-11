@@ -96,7 +96,7 @@ mod tests {
     use super::*;
 
     fn card(x: f32) -> Card {
-        Card { foot: (x, 1.0), verts: vec![(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)], tris: vec![0, 1, 2] }
+        Card { foot: (x, 1.0), verts: vec![(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)], tris: vec![0, 1, 2], ground: false }
     }
 
     #[test]

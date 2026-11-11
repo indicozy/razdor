@@ -125,6 +125,8 @@ Chimney smoke, waving flags and birds over the map.
 
 This is part of the **2.5D** view (the **"Map"** tab, the **"Map view"** row, off by default), not a separate row. In this view the buildings stand on the ground, not in the air. A building of several parts, such as a castle or a village, is drawn as one picture: when the map turns, the parts do not drift apart, and the far ones stand behind the near ones. A slight shift between the parts gives depth. The shadows lie on the ground.
 
+The courtyards, yards, paved squares and fields a building sits on lie flat on the map, as in the flat view; its walls and houses stand up from them. The same holds in the "From the third person" and "From the first person" views.
+
 The buildings of the base game and of Community Update are cut this way.
 
 ![A village in 2.5D](../../../../assets/shots/village-25d.webp)
