@@ -128,6 +128,19 @@ fn map_fit_env() -> bool {
     *ENV.get_or_init(|| std::env::var("RAZDOR_MAP_FIT").is_ok_and(|v| v.trim() == "1"))
 }
 
+/// The level of detail of the map's animations at its scale (`Camera::scale`: screen pixels a cell): 0 where
+/// a flag, a chimney's smoke, a bird or a wave is under a pixel and its motion cannot be seen, 1 where it is
+/// whole, a linear ramp between (the owner's request 2026-11-11: the whole map zoomed out). The shared
+/// helper of the animations: `living` (flags, smoke, birds) and the ship's wakes use it, and the water's
+/// ripples and foam (`water.rs`) may too.
+pub fn zoom_lod(scale: f32) -> f32 {
+    ((scale - LOD_HIDE_CELL) / (LOD_FULL_CELL - LOD_HIDE_CELL)).clamp(0.0, 1.0)
+}
+
+/// The cell size (screen pixels) where the animations are gone (`zoom_lod` 0) and where they are whole (1).
+const LOD_HIDE_CELL: f32 = 8.0;
+const LOD_FULL_CELL: f32 = 16.0;
+
 /// Takes the settings' map zoom and lock in (every frame).
 pub fn set_zoom_prefs(home: f32, locked: bool) {
     let home = if home.is_finite() { home.clamp(ZOOM_RANGE.0, ZOOM_RANGE.1) } else { 1.0 };
@@ -3065,7 +3078,7 @@ fn card_building<'a>(l: &Location, art: Option<&'a DtArt>) -> Option<(&'a Atlas,
 /// Whether the living map is drawn in this view (`living`): not in the bent views (the first-person
 /// view, hidden from players), whose sheet the living parts are not laid on.
 fn living_on(cam: &Camera) -> bool {
-    living::on() && cam.tilt.is_none_or(|t| t.cam.bend.is_none())
+    living::on() && cam.tilt.is_none_or(|t| t.cam.bend.is_none()) && zoom_lod(cam.scale) > 0.0
 }
 
 /// A building's living parts with its atlas, when the living map is on and the building has any
@@ -6650,12 +6663,13 @@ fn draw_wakes(game: &Game, cam: &Camera) {
         wakes.prune(now);
         let tex = glow_tex();
         let cell_w = cam.cell_size().x;
+        let lod = zoom_lod(cam.scale);
         super::chrome::additive(|| {
             for (_, wake) in wakes.iter() {
                 for (p, alpha, size) in wake.visible(now) {
                     let c = cam.to_screen(p.at);
                     let (w, h) = (size * cell_w, size * cell_w * 0.6);
-                    draw_texture_ex(&tex, c.x - w / 2.0, c.y - h / 2.0, Color::new(1.0, 1.0, 1.0, alpha), DrawTextureParams { dest_size: Some(vec2(w, h)), ..Default::default() });
+                    draw_texture_ex(&tex, c.x - w / 2.0, c.y - h / 2.0, Color::new(1.0, 1.0, 1.0, alpha * lod), DrawTextureParams { dest_size: Some(vec2(w, h)), ..Default::default() });
                 }
             }
         });
@@ -6704,7 +6718,7 @@ fn draw_birds(game: &Game, cam: &Camera) {
     let fog = &game.fog;
     let span = 0.22 * cam.cell_size().x;
     let lift = 1.2 * cam.cell_size().x;
-    let col = Color::new(0.12, 0.12, 0.14, 0.85);
+    let col = Color::new(0.12, 0.12, 0.14, 0.85 * zoom_lod(cam.scale));
     for (p, flap) in living::bird_points(&flock, now) {
         if !fog.explored(map.tile_at(p)) {
             continue;
