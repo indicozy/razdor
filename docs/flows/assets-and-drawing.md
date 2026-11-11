@@ -609,6 +609,11 @@ it every frame from `display::follow_settings`; `RAZDOR_LIVE_WATER=1` turns it o
   redraws at once and drops the older picture. The tilted views (2.5D, first person) draw the water every frame at
   once: their 3D camera belongs to world_view, and a picture fill would reset it. The env `RAZDOR_WATER_EVERY=1|2|3`
   overrides the setting in the snapshots.
+- **The water's size** («Качество воды», `Settings::map_water_quality`, `water::Quality`: high 1, medium 0.75, low 0.5
+  of the screen in each direction; high by default; the same flat-map picture as the rate, the row shows with the
+  water on). The picture target is `scale` × the screen (`water::scale`, the env `RAZDOR_WATER_SCALE=<0.25..1>`
+  overrides it), the overlay is drawn in it with its sampling density scaled (`draw_layer`'s `res`), and the
+  composite upscales it linearly. At full size and every frame the overlay is drawn directly, as before.
 - **Wakes** (`world_view::draw_wakes`, `water::Wake`): per sailing army in motion (and the hero's galley), its last
   12 display positions, one every 0.12 s, drawn on the ground behind it as soft white ellipses (the glow's texture,
   additive) fading from alpha 0.35 to 0 over 1.5 s and growing from 0.3 to 0.7 cell. Explored cells only. Recorded per

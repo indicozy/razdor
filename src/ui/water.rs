@@ -206,16 +206,49 @@ impl FrameRate {
     }
 }
 
-local! {
-    /// The frame rate of the settings, taken in by `set_levels` (every frame, from `display`).
-    static RATE: std::cell::Cell<FrameRate> = std::cell::Cell::new(FrameRate::EveryFrame);
-    /// `RAZDOR_WATER_EVERY=1|2|3` overrides it (the snapshots and profiling).
-    static ENV_EVERY: Option<u32> = std::env::var("RAZDOR_WATER_EVERY").ok().and_then(|v| v.trim().parse::<u32>().ok()).filter(|n| (1..=3).contains(n));
+/// «Качество воды» (`Settings::map_water_quality`): the water picture's size as a share of the screen's, in each
+/// direction (1, 0.75, 0.5), upscaled linearly. Flat map only.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Quality {
+    #[default]
+    High,
+    Medium,
+    Low,
 }
 
-/// Takes the frame rate in (from the settings; the snapshots keep the default).
-pub fn set_levels(rate: FrameRate) {
+impl Quality {
+    /// The picture's share of the screen in each direction.
+    pub fn scale(self) -> f32 {
+        match self {
+            Quality::High => 1.0,
+            Quality::Medium => 0.75,
+            Quality::Low => 0.5,
+        }
+    }
+
+    /// The next setting in the row: High, Medium, Low, High.
+    pub fn next(self) -> Quality {
+        match self {
+            Quality::High => Quality::Medium,
+            Quality::Medium => Quality::Low,
+            Quality::Low => Quality::High,
+        }
+    }
+}
+
+local! {
+    /// The frame rate and quality of the settings, taken in by `set_levels` (every frame, from `display`).
+    static RATE: std::cell::Cell<FrameRate> = std::cell::Cell::new(FrameRate::EveryFrame);
+    static QUALITY: std::cell::Cell<Quality> = std::cell::Cell::new(Quality::High);
+    /// `RAZDOR_WATER_EVERY=1|2|3` and `RAZDOR_WATER_SCALE=<0.25..1>` override them (the snapshots and profiling).
+    static ENV_EVERY: Option<u32> = std::env::var("RAZDOR_WATER_EVERY").ok().and_then(|v| v.trim().parse::<u32>().ok()).filter(|n| (1..=3).contains(n));
+    static ENV_SCALE: Option<f32> = std::env::var("RAZDOR_WATER_SCALE").ok().and_then(|v| v.trim().parse::<f32>().ok()).filter(|s| (0.25..=1.0).contains(s));
+}
+
+/// Takes the frame rate and the quality in (from the settings; the snapshots keep the defaults).
+pub fn set_levels(rate: FrameRate, quality: Quality) {
     RATE.set(rate);
+    QUALITY.set(quality);
 }
 
 /// The redraw interval of the water picture, in frames (1 is every frame; the env overrides the setting).
@@ -223,10 +256,9 @@ pub fn every() -> u32 {
     ENV_EVERY.with(|e| *e).unwrap_or_else(|| RATE.get().frames())
 }
 
-/// The water picture's share of the screen in each direction: the screen's size (the picture path's
-/// resolution, lowered by the quality setting in its own step).
+/// The water picture's share of the screen in each direction (1 is the screen's size; the env overrides it).
 pub fn scale() -> f32 {
-    1.0
+    ENV_SCALE.with(|e| *e).unwrap_or_else(|| QUALITY.get().scale())
 }
 
 /// Whether the water picture is redrawn this frame: `age` frames have passed since the picture it shows was
@@ -504,6 +536,9 @@ mod tests {
         // The rates in the settings row, and their cycle.
         assert_eq!([FrameRate::EveryFrame, FrameRate::EveryOther, FrameRate::EveryThird].map(FrameRate::frames), [1, 2, 3]);
         assert_eq!(FrameRate::EveryThird.next(), FrameRate::EveryFrame);
+        assert_eq!(Quality::High.next(), Quality::Medium);
+        assert_eq!(Quality::Low.next(), Quality::High);
+        assert_eq!([Quality::High, Quality::Medium, Quality::Low].map(Quality::scale), [1.0, 0.75, 0.5]);
     }
 
     #[test]

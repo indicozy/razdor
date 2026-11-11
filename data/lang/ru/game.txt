@@ -549,6 +549,7 @@ Water animation rate = Частота анимации воды
 Every frame = Каждый кадр
 Every other frame = Через кадр
 Every third frame = Каждый третий
+Water quality = Качество воды
 # Advanced settings: the weather (Razdor's, off by default)
 Weather = Погода
 Razdor's: weather by the land: snow on snow and ice, rain on swamps and lowlands, heat haze over deserts, ash over fire lands, cloud shadows everywhere. Style only. = Раздора: погода по земле: снег над снегами и льдом, дождь над болотами и низинами, марево над пустынями, пепел над огненными землями, тени облаков везде. Только вид.
