@@ -2135,7 +2135,7 @@ mod sight_tests {
             let f = view25::forward(yaw);
             let cams = [
                 ("2.5D", TiltCamera::new(hero, SCALE, FRAME, 55.0, yaw)),
-                ("first person", TiltCamera::first_person(hero, SCALE, FRAME, yaw, FarGround::Up)),
+                ("first person", TiltCamera::first_person(hero, SCALE, FRAME, yaw, FarGround::Up, view25::THIRD_TUNE)),
             ];
             for (name, cam) in cams {
                 let poly = sight_footprint(&cam, FRAME);

@@ -42,6 +42,8 @@ In the settings, on the **"Map"** tab:
 * **"Minimap size and place"** with the **"Reset"** button returns its size and place to the default;
 * **"Minimap army list"** shows the list of armies beside the map.
 
+In the 2.5D, third-person and first-person views a translucent wedge replaces the light rectangle: it shows the ground the camera sees. A triangle on the hero's place shows where the camera looks.
+
 :::note
 On a computer, when the bottom bar does not reach the screen's edges, the minimap can stand in a free corner beside the bar, without touching it.
 :::

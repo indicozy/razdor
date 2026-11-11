@@ -26,6 +26,8 @@ The light goes through morning, day, evening and night. At night the map is blui
 
 At night buildings glow from within: the windows of towns, castles and villages burn with warm light. The hero and the armies carry torches, so they can be seen in the dark, and the lights cast shadows.
 
+When a window is open over the map, the map behind its edge keeps showing the light of its hour.
+
 ![Day on the map](../../../../assets/shots/light-noon.webp)
 
 Day: full light, as in the original.
@@ -42,7 +44,7 @@ Night: blue light, and the map is still easy to see.
 
 These two rows appear when **"Lighting"** is on.
 
-* **"Shadows"**: **"Painted"** (the default) keeps the original's shadows. **"From the sun"** removes them, and every building, tree and rock casts its own shadow: it turns and lengthens with the hour.
+* **"Shadows"**: **"Painted"** (the default) keeps the original's shadows. **"From the sun"** removes them, and every building, tree and rock casts its own shadow: it turns and lengthens, changing once per game hour.
 * **"Light quality"**: **"High"**, **"Medium"** or **"Low"**. High lights up to eight buildings and the figures' torches: their shadows and the glowing windows. Medium does up to four. Low keeps just the warm glow. The default is High on a computer and Medium on a phone.
 
 ![Shadows from the sun on the map in 2.5D](../../../../assets/shots/shadows-sun.webp)
@@ -59,7 +61,7 @@ The **"Mist instead of black"** switch replaces the black of unexplored land wit
 
 The mist opens gradually: when the hero walks, and when an event shows a place, the land comes out of the mist little by little, from the centre.
 
-In 2.5D and first-person views the mist lies on the ground and rises above it in drifting layers; there is no wall at the edge of the explored land.
+In the 2.5D, third-person and first-person views the mist lies on the ground and rises above it in drifting layers; there is no wall at the edge of the explored land.
 
 ![Mist instead of black](../../../../assets/shots/mist.webp)
 
@@ -91,7 +93,7 @@ The **"Weather"** switch shows weather that depends on the land under it:
 * ash over fire lands;
 * cloud shadows across the whole map.
 
-The weather changes over time: each game day brings its own, and the land decides which one it will be. It is only a look.
+The weather changes over time: each game day brings its own, and the land decides which one it will be. When a window is open over the map, the weather keeps falling behind its edge. It is only a look.
 
 ![Weather on the map](../../../../assets/shots/weather.webp)
 
@@ -113,7 +115,7 @@ Chimney smoke, waving flags and birds over the map.
 
 ## Buildings in 2.5D
 
-This is part of the **2.5D** view (the **"Map"** tab, the **"Map view"** row, off by default), not a separate row. In this view the buildings are cut into parts: each house of a village and each wall and tower of a castle stands on its own ground, instead of hanging in the air as one picture. Their shadows lie on the ground.
+This is part of the **2.5D** view (the **"Map"** tab, the **"Map view"** row, off by default), not a separate row. In this view the buildings stand on the ground, not in the air. A building of several parts, such as a castle or a village, is drawn as one picture: when the map turns, the parts do not drift apart, and the far ones stand behind the near ones. A slight shift between the parts gives depth. The shadows lie on the ground.
 
 The buildings of the base game and of Community Update are cut this way.
 

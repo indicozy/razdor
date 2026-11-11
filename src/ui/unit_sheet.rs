@@ -19,6 +19,14 @@ use super::widgets::{measure, measure_exact, mouse_in};
 
 local! {
     static TRAIT_SCROLL: std::cell::RefCell<std::collections::HashMap<String, f32>> = std::cell::RefCell::new(std::collections::HashMap::new());
+    /// A snapshot's scroll for the unit band's ability list (`RAZDOR_SCENE_TRAIT_SCROLL`), set once
+    /// the band is drawn.
+    static SCENE_TRAIT_SCROLL: std::cell::Cell<Option<f32>> = const { std::cell::Cell::new(None) };
+}
+
+/// `RAZDOR_SCENE_TRAIT_SCROLL=<px>`: the next band drawn starts its ability list that far down.
+pub fn scene_trait_scroll(px: f32) {
+    SCENE_TRAIT_SCROLL.with(|c| c.set(Some(px)));
 }
 
 /// The army's font tints from the original's startup palette (4dbb0c), applied only
@@ -281,6 +289,13 @@ const ABILITY_ROWS: usize = 8;
 /// scroll inside the region). Returns `(desc, traits)`.
 fn shown_rows(desc: usize, traits: usize, simultaneous: bool) -> (usize, usize) {
     (desc, if simultaneous { traits.min(ABILITY_ROWS) } else { traits })
+}
+
+/// How far the band's ability list scrolls, in px: the trait rows past the `avail` that fit its
+/// place (0 when all of them fit, or none does). The phone held upright scrolls them as the
+/// landscape column does (a player's report 1593).
+fn band_list_most(trait_rows: usize, avail: usize, row_h: f32) -> f32 {
+    if avail == 0 || trait_rows <= avail { 0.0 } else { (trait_rows - avail) as f32 * row_h }
 }
 
 /// A stat line: label, value, colour.
@@ -978,37 +993,59 @@ fn draw_band_in_face(assets: &Assets, content: &Content, band: Rect, s: &Sheet, 
     let avail = ((txt.bottom() - 16.0 * px - natural_end) / row_h).floor().max(0.0) as usize;
     let both = !desc_rows.is_empty() && !trait_rows.is_empty();
     let all = desc_rows.len() + usize::from(both) + trait_rows.len();
-    let mut rows: Vec<ListRow> = if all <= avail {
+    let fits_all = all <= avail;
+    let mut rows: Vec<ListRow> = if fits_all {
         let mut rows = desc_rows;
         if both {
             rows.push(ListRow { text: String::new(), ink: CREAM, icon: None });
         }
-        rows.extend(trait_rows);
+        rows.extend(trait_rows.iter().cloned());
         rows
     } else {
-        trait_rows
+        trait_rows.clone()
     };
-    if rows.len() > avail {
-        rows.truncate(avail);
-        if let Some(last) = rows.last_mut() {
-            last.text = format!("{}…", last.text.trim_end());
-        }
+    // The traits past the rows that fit the place scroll (touch drag and wheel), as the landscape
+    // column's do under the simultaneous bonuses rule, instead of being cut with «…» (a player's
+    // report 1593). The description is still dropped when the list does not fit as a whole.
+    let most = band_list_most(trait_rows.len(), avail, row_h);
+    let visible = if most > 0.0 { avail } else { rows.len().min(avail) };
+    if most == 0.0 {
+        rows.truncate(visible);
     }
     // The list sits at the half's bottom; the stat lines spread evenly from the level line down to it.
-    let list_top = txt.bottom() - 8.0 * px - rows.len() as f32 * row_h;
+    let list_top = txt.bottom() - 8.0 * px - visible as f32 * row_h;
     let pitch = if rows_n > 1 { ((list_top - 8.0 * px - stat_y) / rows_n as f32).max(row_h) } else { row_h };
     stat_block(s, stats, x0, x1, level_y, stat_y, size, bold, pitch, true);
-    let _clip = super::widgets::Clip::new(txt);
+    // The scrolling list's place: the `visible` rows at the half's bottom. Its scroll is kept per unit
+    // as the landscape column keeps its own (`TRAIT_SCROLL`), and its scrollbar sits in the 12 px past
+    // the text (the text ends 250 px in, the half is 262 px wide).
+    let region = Rect::new(txt.x, list_top, txt.w, visible as f32 * row_h);
+    let key = format!("band:{}:{}:{}:{}:{:?}:{:?}", band.x, band.y, s.kind.0, s.name, s.start.bonuses, s.items);
+    if let Some(start) = SCENE_TRAIT_SCROLL.with(|c| c.take()) {
+        TRAIT_SCROLL.with(|p| p.borrow_mut().insert(key.clone(), start));
+    }
+    let mut scroll = TRAIT_SCROLL.with(|p| p.borrow().get(&key).copied().unwrap_or(0.0));
+    if most > 0.0 {
+        super::widgets::swipe_rows(region, 42.0 * px);
+        if region.contains(super::widgets::pointer().into()) { scroll -= super::widgets::wheel() * 42.0 * px; }
+        scroll = scroll.clamp(0.0, most);
+        super::widgets::scrollbar_px(Rect::new(txt.right() - 12.0 * base, region.y, 12.0 * base, region.h), &mut scroll, most, region.h, row_h);
+        TRAIT_SCROLL.with(|p| { let mut p = p.borrow_mut(); if p.len() > 32 { p.clear(); } p.insert(key, scroll); });
+    } else {
+        scroll = 0.0;
+    }
+    let _clip = super::widgets::Clip::new(if most > 0.0 { region } else { txt });
     let line = |top: f32| top + cell_baseline(size);
+    let row_top = |i: usize| list_top + i as f32 * row_h - scroll;
     for (i, row) in rows.iter().enumerate() {
         if let Some(art) = &row.icon {
-            chrome::trait_icon(art, txt.x + 16.0 * base, list_top + i as f32 * row_h - 11.0 * px, 25.0 * base);
+            chrome::trait_icon(art, txt.x + 16.0 * base, row_top(i) - 11.0 * px, 25.0 * base);
         }
     }
     for (i, row) in rows.iter().enumerate() {
         if !row.text.trim().is_empty() {
             let x = txt.x + 12.0 * base + if row.icon.is_some() { shift } else { 0.0 };
-            shadow_text(&row.text, x, line(list_top + i as f32 * row_h), size, row.ink);
+            shadow_text(&row.text, x, line(row_top(i)), size, row.ink);
         }
     }
     clicked
@@ -1178,6 +1215,17 @@ mod tests {
         assert_eq!(frame, pic, "the frame is stretched over the picture half");
         assert!(frame.x == band.x && frame.y == band.y && frame.h == band.h, "{frame:?} at the band's left and top");
         assert!(frame.right() <= txt.x + 0.5, "{frame:?} stays off the text half {txt:?}");
+    }
+
+    /// The phone held upright: the ability rows that do not fit the band's place scroll (a player's
+    /// report 1593: the second ability was cut with «…»). Nothing scrolls when all of them fit or
+    /// there is no place for any.
+    #[test]
+    fn the_band_ability_list_scrolls_past_the_rows_that_fit() {
+        assert_eq!(band_list_most(3, 5, 14.0), 0.0, "all fit");
+        assert_eq!(band_list_most(5, 5, 14.0), 0.0, "exactly fit");
+        assert_eq!(band_list_most(7, 5, 14.0), 28.0, "two rows past the place");
+        assert_eq!(band_list_most(7, 0, 14.0), 0.0, "no place at all");
     }
 
     /// A band row's text starts after its icon: a narrow indent moves the text right so it clears

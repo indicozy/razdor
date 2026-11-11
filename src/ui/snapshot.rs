@@ -699,6 +699,10 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
     if std::env::var("RAZDOR_SCENE_BENCHING").is_ok_and(|v| v == "1") {
         app.audio.settings.allow_unit_benching = true;
     }
+    // `RAZDOR_SCENE_TRAIT_SCROLL=<px>`: the unit band's ability list starts that far down.
+    if let Some(px) = std::env::var("RAZDOR_SCENE_TRAIT_SCROLL").ok().and_then(|v| v.trim().parse::<f32>().ok()) {
+        super::unit_sheet::scene_trait_scroll(px);
+    }
     if std::env::var("RAZDOR_SCENE_BONUS_ITEMS").is_ok_and(|v| v == "1") {
         let c=game.content.clone();
         let mut seen=game.hero().stats(&c).bonuses;
