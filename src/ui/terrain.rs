@@ -30,7 +30,7 @@ use std::sync::OnceLock;
 
 use macroquad::prelude::*;
 
-use macroquad::miniquad::TextureWrap;
+use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation, PipelineParams, TextureWrap};
 use razdor::dt::gfx::{water_frame, Image, WATER_FRAMES};
 use razdor::rules::map::{is_water, Surface};
 use super::{daylight, sharp, water};
@@ -169,14 +169,23 @@ uniform float Clock;
 // 1.0 in the cache's overlay pass: the pixels with no water and no border fog are discarded
 // (they keep the cached ground), the others are drawn as the full shader draws them.
 uniform float Overlay;
-// Live water («Живая вода», `water`): 1.0 when on. WaterMask: 255 on the water cells, 0 elsewhere
-// (linear, so the shore is a soft edge). Flow: each cell's flow as rg = (128 + 127 · flow) / 255, so
-// the still water (128) is exactly zero (see `flow_texels`).
+// Live water («Живая вода», `water`): 1.0 when on. Flow, one texel per cell (linear, so the shore is a soft
+// edge): rg = the flow as (128 + 127 · flow) / 255, so the still water (128) is exactly zero; b = the
+// river's drift speed; a = the water mask (255 on the water cells, 0 on land). See `flow_texels`.
 // Sky: the sky's colour, which the water takes by its share of the mask.
 uniform float LiveWater;
-uniform sampler2D WaterMask;
+// The water's detail by the map's zoom (`water::lod_detail`): 1 whole, 0 zoomed out. It scales the ripple and the
+// foam's lapping; zoomed out the water keeps its texture, colour and foam.
+uniform float Detail;
+// The shore (`water::bank_distance`, `wide_water`): red the water's distance from the bank in steps / 8, green 1 on
+// the wide water (a lake, the sea), 0 on a river.
+uniform sampler2D Bank;
+// The sun's and the moon's glint (`water::glint`): rgb the light's colour, a the strength.
+uniform vec4 Glint;
 uniform sampler2D Flow;
 uniform vec3 Sky;
+// The water's noise texture (`water::noise_texels`): a wrapped 64×64 table of the lattice's hashes.
+uniform sampler2D Noise;
 // @SHARP_UV@
 
 float hash2(vec2 q) {
@@ -194,9 +203,18 @@ float vnoise(vec2 q) {
     return mix(mix(hash2(a), hash2(vec2(b.x, a.y)), u.x), mix(hash2(vec2(a.x, b.y)), hash2(b), u.x), u.y);
 }
 
+// The water's value noise: the same lattice as `vnoise`, one texture fetch. The lookup sits on the lattice
+// point's centre plus the smoothed fraction, so the hardware's bilinear step is the smooth interpolation.
+float wnoise(vec2 q) {
+    vec2 i = floor(q);
+    vec2 f = fract(q);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return texture2D(Noise, (mod(i, 64.0) + u + 0.5) / 64.0).r;
+}
+
 // The ripple's offset of the water at `q` (the water's uv distortion, in frame units).
 vec2 ripple(vec2 q) {
-    return vec2(sin(q.y * 2.1 + Clock * 1.29983) + 0.5 * vnoise(q * 0.7 + Clock * 0.2), cos(q.x * 1.7 + Clock * 1.09956));
+    return vec2(sin(q.y * 2.1 + Clock * 1.29983) + 0.5 * wnoise(q * 0.7 + Clock * 0.2), cos(q.x * 1.7 + Clock * 1.09956));
 }
 
 
@@ -222,18 +240,19 @@ vec2 ripple(vec2 q) {
 // shore), and a noise breaks it into patches. A fainter second line lies further out, on a wave of its own. A still
 // shore (a lake, the sea) foams at full strength, a river at 0.55. The periods fit CLOCK_PERIOD (6400 s): the wave is
 // 1000 cycles of it, and the drifts move the noise by whole lattice periods. Returns the foam's colour and alpha.
-vec4 shore_foam(float cov, vec2 p, vec2 fl) {
+vec4 shore_foam(float cov, vec2 p, vec2 fl, vec2 dr) {
     float s = cov - 0.5;
     if (s <= 0.0) {
         return vec4(0.0);
     }
     float t0 = fract(Clock * 0.05);
     float t1 = fract(Clock * 0.05 + 0.5);
-    vec2 q0 = p - fl * t0 * 7.0;
-    vec2 q1 = p - fl * t1 * 7.0;
-    float lap = 0.5 + 0.5 * sin(Clock * 0.98174770 + 6.0 * vnoise(q0 * 0.8));
-    float lap2 = 0.5 + 0.5 * sin(Clock * 0.98174770 + 2.5 + 6.0 * vnoise(q1 * 0.6));
-    float patch = smoothstep(0.38, 0.62, 0.6 * vnoise(q0 * 2.4 + Clock * vec2(0.01, 0.0)) + 0.4 * vnoise(q1 * 5.1 + Clock * vec2(0.0, -0.02)));
+    vec2 q0 = p - dr * t0 * 7.0;
+    vec2 q1 = p - dr * t1 * 7.0;
+    // Zoomed out (Detail 0) the line stands at its middle phase: the lapping is the moving detail.
+    float lap = mix(0.5, 0.5 + 0.5 * sin(Clock * 0.98174770 + 6.0 * wnoise(q0 * 0.8)), Detail);
+    float lap2 = mix(0.5, 0.5 + 0.5 * sin(Clock * 0.98174770 + 2.5 + 6.0 * wnoise(q1 * 0.6)), Detail);
+    float patch = smoothstep(0.38, 0.62, 0.6 * wnoise(q0 * 2.4 + Clock * vec2(0.01, 0.0)) + 0.4 * wnoise(q1 * 5.1 + Clock * vec2(0.0, -0.02)));
     float inner = 0.1 * lap;
     float line = smoothstep(inner - 0.015, inner + 0.015, s) * (1.0 - smoothstep(inner + 0.08, inner + 0.33, s));
     float inner2 = 0.36 + 0.05 * lap2;
@@ -268,22 +287,32 @@ void main() {
     // Live water: this pixel's mask (1 deep, 0.5 on the shore line, 0 on land) and its ripple, the same for each
     // of the four codes. The ripple reads the noise along the flow (a river drifts; zero flow stands still).
     @CP@ float sea = 0.0;
+    vec2 fl = vec2(0.0);
+    vec2 dr = vec2(0.0);
     if (wet) {
         vec2 uvw = (p + 1.5) / 3.0;
         if (LiveWater > 0.5) {
             vec2 cell_uv = (p + 0.5) / MapSize;
-            sea = texture2D(WaterMask, cell_uv).r;
-            // The flow scroll: two phases half a cycle apart (a 20 s cycle, 7 cells of travel a cycle),
-            // each faded out at its own wrap, so the pattern never jumps when Clock wraps.
-            vec2 fl = (texture2D(Flow, cell_uv).rg * 255.0 - 128.0) / 127.0;
+            vec4 fd = texture2D(Flow, cell_uv);
+            sea = fd.a;
+            // The flow: its direction (rg) and the water's speed (b: 1 next to a bank, slower as a river widens, 0 on a
+            // lake or the sea). The drift is the flow times the speed.
+            fl = (fd.rg * 255.0 - 128.0) / 127.0;
+            dr = fl * fd.b;
+            // The flow scroll: two phases half a cycle apart (a 20 s cycle), each faded out at its own wrap, so the
+            // pattern never jumps when Clock wraps. The surface moves 6 cells a cycle at full speed (two of its 3-cell
+            // tiles, so the two phases show the same tile pattern and the crossfade does not ghost at full speed).
             float t0 = fract(Clock * 0.05);
             float t1 = fract(Clock * 0.05 + 0.5);
             float wt = abs(2.0 * t0 - 1.0);
-            vec2 q0 = p - fl * t0 * 7.0;
-            vec2 q1 = p - fl * t1 * 7.0;
-            uvw += 0.015 * mix(ripple(q0), ripple(q1), wt);
+            vec2 q0 = p - dr * t0 * 7.0;
+            vec2 q1 = p - dr * t1 * 7.0;
+            vec2 u0 = (p - dr * t0 * 6.0 + 1.5) / 3.0 + 0.015 * Detail * ripple(q0);
+            vec2 u1 = (p - dr * t1 * 6.0 + 1.5) / 3.0 + 0.015 * Detail * ripple(q1);
+            w = mix(texture2D(Water, sharp_uv(u0, WaterSize, WaterScale)).rgb, texture2D(Water, sharp_uv(u1, WaterSize, WaterScale)).rgb, wt);
+        } else {
+            w = texture2D(Water, sharp_uv(uvw, WaterSize, WaterScale)).rgb;
         }
-        w = texture2D(Water, sharp_uv(uvw, WaterSize, WaterScale)).rgb;
     }
     @CP@ vec3 col;
     if (k.x == k.y && k.y == k.z && k.z == k.w) {
@@ -296,12 +325,28 @@ void main() {
     // The shore foam (live water, the water's pixels only): laid on the coast by the water's share of the four
     // cells, with the weights the colour blend uses, so it sits on the visible shore and not on the mask's edge.
     if (wet && LiveWater > 0.5) {
-        vec2 cell_uv = (p + 0.5) / MapSize;
-        vec2 fl = (texture2D(Flow, cell_uv).rg * 255.0 - 128.0) / 127.0;
         float cov = (k.x < 2.5 ? 1.0 : 0.0) * (1.0 - fx) * (1.0 - fy) + (k.y < 2.5 ? 1.0 : 0.0) * fx * (1.0 - fy)
             + (k.z < 2.5 ? 1.0 : 0.0) * (1.0 - fx) * fy + (k.w < 2.5 ? 1.0 : 0.0) * fx * fy;
-        vec4 fo = shore_foam(cov, p, fl);
+        vec4 fo = shore_foam(cov, p, fl, dr);
         col = mix(col, fo.rgb, fo.a);
+        vec4 bk = texture2D(Bank, (p + 0.5) / MapSize);
+        float wide = step(0.5, bk.g);
+        float still = 1.0 - smoothstep(0.2, 0.8, length(fl));
+        // (c) The shore waves: soft lines rolling from the open water onto the beach, on the wide water only (a
+        // lake's or the sea's shore), fading into the foam at the waterline and out by 1.4 cells. A crest moves
+        // 1.1 cells a 4 s cycle toward the land (Clock · 0.25 wraps at a whole number of cycles, as CLOCK_PERIOD does).
+        float s = bk.r * 8.0 - 0.5;
+        float f = fract(s / 1.1 + Clock * 0.25 + 0.6 * sin(p.x * 0.9 + p.y * 0.5));
+        float crest = smoothstep(0.0, 0.15, f) * (1.0 - smoothstep(0.15, 0.4, f));
+        float near = smoothstep(0.1, 0.3, s) * (1.0 - smoothstep(0.9, 1.4, s));
+        col = mix(col, vec3(0.92, 0.96, 1.0), 0.3 * crest * near * wide * still * Detail);
+        // (b) The glints: small points that twinkle and drift, brighter on the wide water than on a river. The drift
+        // moves the noise by whole lattice periods per CLOCK_PERIOD (5760 and 2240 of 64), and the twinkle is 2000 cycles
+        // of it (1.9634954 rad/s), so the wrap is invisible. The mist and the war fog cover them after.
+        float g = wnoise(p * 6.0 + Clock * vec2(0.9, 0.35));
+        float tw = 0.5 + 0.5 * sin(Clock * 1.9634954 + 40.0 * g);
+        float glint = smoothstep(0.87, 0.95, g) * tw * (0.4 + 0.6 * wide) * still * Detail;
+        col = min(col + Glint.rgb * (glint * Glint.a * 0.7), vec3(1.0));
     }
     if (mist) {
         float n = 0.6 * vnoise(p * 0.11 + Clock * vec2(0.05, 0.02)) + 0.4 * vnoise(p * 0.27 + Clock * vec2(-0.08, 0.05));
@@ -525,7 +570,7 @@ const LEGACY_UNIFORMS: [(&str, UniformType); 19] = [
 ];
 
 /// The uniforms every terrain shader declares (the old one leaves `Overlay` out of its code).
-const UNIFORMS: [(&str, UniformType); 16] = [
+const UNIFORMS: [(&str, UniformType); 18] = [
     ("View", UniformType::Float4),
     ("MapSize", UniformType::Float2),
     ("CellPx", UniformType::Float2),
@@ -542,6 +587,8 @@ const UNIFORMS: [(&str, UniformType); 16] = [
     ("Overlay", UniformType::Float1),
     ("LiveWater", UniformType::Float1),
     ("Sky", UniformType::Float3),
+    ("Detail", UniformType::Float1),
+    ("Glint", UniformType::Float4),
 ];
 
 /// Wrapped border around each atlas slot, in pixels.
@@ -691,10 +738,10 @@ pub fn neighbour_texels(codes: &[u8], w: u32, h: u32) -> Vec<u8> {
 struct MapTextures {
     cells: Texture2D,
     neighbours: Texture2D,
-    /// The live water's mask (`water_mask_texels`).
-    mask: Texture2D,
-    /// The rivers' flow (zero until the flow is built: a still river).
+    /// The live water's per-cell texture (`flow_texels`): flow, drift speed and the water mask.
     flow: Texture2D,
+    /// The live water's shore (`bank_texels`): the distance from the bank, and the wide water.
+    bank: Texture2D,
     /// Razdor's weather masks (`weather::mask_texels`): snow, swamp rain, heat and ash; the lowland rain.
     weather: Texture2D,
     lowland: Texture2D,
@@ -713,8 +760,13 @@ pub struct WeatherMasks {
 
 /// A map's surface codes, their flow, their textures and their size, kept while they stay the same.
 struct CellTextures {
+    /// The codes and the flow the textures were made from, compared on each call (`gen` is `None`).
     codes: Vec<u8>,
     flow: Vec<(f32, f32)>,
+    /// The map's surface generation the textures were made for (`TileMap::surface_generation`), when the caller
+    /// keys them by it: no compare of the codes and the flow (the flow's length tells whether it is in use).
+    gen: Option<u64>,
+    flow_len: usize,
     size: (u32, u32),
     tex: MapTextures,
 }
@@ -724,22 +776,38 @@ fn flow_byte(v: f32) -> u8 {
     (128.0 + 127.0 * v.clamp(-1.0, 1.0)).round() as u8
 }
 
-/// The rivers' flow as the `Flow` texture's RGBA8 bytes, one texel per cell (row by row): red and
-/// green are the flow's x and y as [`flow_byte`]; alpha 255.
-pub fn flow_texels(flow: &[(f32, f32)]) -> Vec<u8> {
-    flow.iter().flat_map(|&(x, y)| [flow_byte(x), flow_byte(y), 128, 255]).collect()
-}
-
-/// The live water's mask of a map's surface codes, as RGBA8 bytes, one texel per cell (row by row):
-/// red 255 where the cell is water (`map::is_water`), 0 otherwise.
-pub fn water_mask_texels(codes: &[u8]) -> Vec<u8> {
+/// The live water's per-cell texture as RGBA8 bytes, one texel per cell (row by row), baked once per map
+/// (`TerrainLayer::cells`): red and green are the rivers' flow as [`flow_byte`] (still water and land are
+/// 128, zero); blue is the river's drift speed (`water::river_speed`, 0 to 255); alpha is the water mask
+/// (255 on the water cells, `map::is_water`, 0 on land), linear so the shore is a soft edge. The flow and
+/// speed are zero where `flow` is empty (no field: still water everywhere).
+pub fn flow_texels(codes: &[u8], flow: &[(f32, f32)], speed: &[f32]) -> Vec<u8> {
     codes
         .iter()
-        .flat_map(|&c| {
+        .enumerate()
+        .flat_map(|(i, &c)| {
+            let (x, y) = flow.get(i).copied().unwrap_or((0.0, 0.0));
+            let s = speed.get(i).copied().unwrap_or(0.0);
             let wet = Surface::from_code(c).is_some_and(is_water);
-            [if wet { 255 } else { 0 }, 0, 0, 255]
+            [flow_byte(x), flow_byte(y), (s.clamp(0.0, 1.0) * 255.0).round() as u8, if wet { 255 } else { 0 }]
         })
         .collect()
+}
+
+/// The live water's shore as RGBA8 bytes, one texel per cell (row by row), baked once per map: red is the cell's
+/// distance from the bank in steps (`water::bank_distance`, up to 8: 255 is 8 or more), green 255 on the wide water
+/// (`water::wide_water`, a lake or the sea) and 0 elsewhere; linear, so the waves run soft.
+pub fn bank_texels(bank: &[u32], wide: &[bool]) -> Vec<u8> {
+    bank.iter()
+        .zip(wide)
+        .flat_map(|(&d, &w)| [((d.min(8) as f32) / 8.0 * 255.0).round() as u8, if w { 255 } else { 0 }, 0, 255])
+        .collect()
+}
+
+/// Whether cell `i` (row by row) lies on the map's outer ring.
+fn is_map_edge(i: usize, w: u32, h: u32) -> bool {
+    let (x, y) = (i as u32 % w, i as u32 / w);
+    x == 0 || y == 0 || x + 1 == w || y + 1 == h
 }
 
 /// How a terrain draw is made.
@@ -753,6 +821,8 @@ pub enum Mode {
     Cached,
     /// Water and the border's fog over the cached ground: the pixels with neither are discarded.
     Overlay,
+    /// The water's picture: the water drawn into its target at the picture's size (`water_picture_prepare`).
+    Picture,
 }
 
 /// The ground cache: the target the ground is drawn into and the key it was drawn for.
@@ -761,6 +831,41 @@ struct GroundCache {
     target: Option<RenderTarget>,
     key: Option<u64>,
 }
+
+/// «Живая вода» as a picture (`water_picture_prepare`): two drawings of the water, the newer being `cur`, with
+/// their water times and the age of the newer one in frames, and the key of the view they were drawn for.
+#[derive(Default)]
+struct WaterPictures {
+    targets: [Option<RenderTarget>; 2],
+    cur: usize,
+    size: (u32, u32),
+    key: u64,
+    valid: bool,
+    has_prev: bool,
+    age: u32,
+    t_prev: f64,
+    t_cur: f64,
+    /// The water time of this frame, and whether this frame uses the pictures (else the water is drawn at once).
+    t_now: f64,
+    active: bool,
+    /// The share of the screen the picture is drawn at.
+    scale: f32,
+}
+
+/// The water picture's composite: the two drawings blended by `Mix` (0 the older, 1 the newer), read at each
+/// pixel's window position as the ground's composite is. The water's alpha is 1 where it is drawn, else 0.
+const WATER_COMPOSITE_FRAGMENT: &str = r#"#version 100
+precision highp float;
+varying highp vec2 uv;
+uniform sampler2D Prev;
+uniform sampler2D Cur;
+uniform vec2 ScreenSize;
+uniform float Mix;
+void main() {
+    vec2 at = gl_FragCoord.xy / ScreenSize;
+    gl_FragColor = mix(texture2D(Prev, at), texture2D(Cur, at), Mix);
+}
+"#;
 
 /// The blending shader, the terrain atlas and the current map's surface codes.
 pub struct TerrainLayer {
@@ -780,9 +885,14 @@ pub struct TerrainLayer {
     slot: Vec2,
     /// The water frames ([`WATER_FRAMES`] or none, then water is still).
     water: Vec<Texture2D>,
+    /// The live water's noise (`water::noise_texels`), read by the neighbours shader's `wnoise`.
+    noise: Texture2D,
     /// Surface codes and size of the map in `cells`, to rebuild it when the map changes.
     cells: RefCell<Option<CellTextures>>,
     ground: RefCell<GroundCache>,
+    /// The live water as a picture (`water_picture_prepare`), and its composite (the neighbours shader's option only).
+    pictures: RefCell<WaterPictures>,
+    water_composite: Option<Material>,
 }
 
 /// Packs the terrain textures (by surface code) into a 4×4 atlas of padded slots. Every
@@ -825,12 +935,40 @@ fn water_texture(img: &Image) -> Texture2D {
     tex
 }
 
+/// The water's noise texture (`water::noise_texels`): wrapped and linear, so the shader's lookup is a
+/// smooth value noise with the lattice's period.
+fn noise_texture() -> Texture2D {
+    let n = water::NOISE_SIZE as u16;
+    let tex = Texture2D::from_rgba8(n, n, &water::noise_texels().iter().flat_map(|&v| [v, v, v, 255]).collect::<Vec<u8>>());
+    tex.set_filter(FilterMode::Linear);
+    // SAFETY: called on the main thread while macroquad runs, as every texture upload.
+    let gl = unsafe { get_internal_gl() };
+    gl.quad_context.texture_set_wrap(tex.raw_miniquad_id(), TextureWrap::Repeat, TextureWrap::Repeat);
+    tex
+}
+
 /// A material of `fragment` with the uniforms and textures it declares.
 fn make_material(fragment: &str, uniforms: &[(&str, UniformType)], textures: &[&str]) -> Result<Material, String> {
     let params = MaterialParams {
         uniforms: uniforms.iter().map(|(n, t)| UniformDesc::new(n, *t)).collect(),
         textures: textures.iter().map(|t| t.to_string()).collect(),
         ..Default::default()
+    };
+    load_material(ShaderSource::Glsl { vertex: VERTEX, fragment }, params).map_err(|e| e.to_string())
+}
+
+/// A material of `fragment` drawn alpha-blended over what is under it. The default pipeline blends nothing, so the
+/// water picture's composite (its transparent pixels show the ground) needs this.
+fn make_blended_material(fragment: &str, uniforms: &[(&str, UniformType)], textures: &[&str]) -> Result<Material, String> {
+    let pipeline_params = PipelineParams {
+        color_blend: Some(BlendState::new(Equation::Add, BlendFactor::Value(BlendValue::SourceAlpha), BlendFactor::OneMinusValue(BlendValue::SourceAlpha))),
+        alpha_blend: Some(BlendState::new(Equation::Add, BlendFactor::One, BlendFactor::OneMinusValue(BlendValue::SourceAlpha))),
+        ..Default::default()
+    };
+    let params = MaterialParams {
+        uniforms: uniforms.iter().map(|(n, t)| UniformDesc::new(n, *t)).collect(),
+        textures: textures.iter().map(|t| t.to_string()).collect(),
+        pipeline_params,
     };
     load_material(ShaderSource::Glsl { vertex: VERTEX, fragment }, params).map_err(|e| e.to_string())
 }
@@ -849,12 +987,12 @@ impl TerrainLayer {
         let mut opts = options();
         let (mut old, mut new_hp, mut new_mp, mut composite) = (None, None, None, None);
         if opts.new_shader {
-            let hp_ok = make_material(&new_fragment("highp"), &UNIFORMS, &["Neighbours", "Atlas", "Water", "WaterMask", "Flow"]);
+            let hp_ok = make_material(&new_fragment("highp"), &UNIFORMS, &["Neighbours", "Atlas", "Water", "Flow", "Noise", "Bank"]);
             match hp_ok {
                 Ok(m) => {
                     new_hp = Some(m);
                     // Both precisions are made at start; option 4 picks one.
-                    new_mp = make_material(&new_fragment("mediump"), &UNIFORMS, &["Neighbours", "Atlas", "Water", "WaterMask", "Flow"]).map_err(|e| razdor::diag!("terrain shader (mediump): {e}")).ok();
+                    new_mp = make_material(&new_fragment("mediump"), &UNIFORMS, &["Neighbours", "Atlas", "Water", "Flow", "Noise", "Bank"]).map_err(|e| razdor::diag!("terrain shader (mediump): {e}")).ok();
                 }
                 Err(e) => razdor::diag!("terrain shader: {e}"),
             }
@@ -873,6 +1011,13 @@ impl TerrainLayer {
             composite = make_material(COMPOSITE_FRAGMENT, &[("ScreenSize", UniformType::Float2)], &["Ground"]).map_err(|e| razdor::diag!("terrain cache copy: {e}")).ok();
             opts.cache = composite.is_some();
         }
+        let water_composite = if opts.new_shader {
+            make_blended_material(WATER_COMPOSITE_FRAGMENT, &[("ScreenSize", UniformType::Float2), ("Mix", UniformType::Float1)], &["Prev", "Cur"])
+                .map_err(|e| razdor::diag!("terrain water picture: {e}"))
+                .ok()
+        } else {
+            None
+        };
         let atlas = Texture2D::from_rgba8(image.width as u16, image.height as u16, &image.rgba);
         atlas.set_filter(FilterMode::Linear);
         let water = if water.len() == WATER_FRAMES && water.iter().all(|f| f.width > 0 && f.height > 0) {
@@ -891,8 +1036,11 @@ impl TerrainLayer {
             tile: vec2(tw as f32, th as f32),
             slot: vec2((tw + 2 * PAD) as f32, (th + 2 * PAD) as f32),
             water,
+            noise: noise_texture(),
             cells: RefCell::new(None),
             ground: RefCell::new(GroundCache::default()),
+            pictures: RefCell::new(WaterPictures::default()),
+            water_composite,
         })
     }
 
@@ -903,10 +1051,18 @@ impl TerrainLayer {
 
     /// The textures of a `w`×`h` map (the codes, the neighbours, the water mask and the flow),
     /// rebuilt only when the codes or the flow change.
-    fn cells(&self, codes: &[u8], w: u32, h: u32, flow: &[(f32, f32)]) -> MapTextures {
+    /// `gen`: the surface generation of `codes` when the caller has one (the map's, which never changes after its
+    /// build: the textures are then reused without comparing the codes and the flow, which is O(cells) per call);
+    /// `None` compares them (the editor, which edits its codes in place). The flow is a function of the map (its
+    /// surface and hills), so the same generation means the same flow.
+    fn cells(&self, codes: &[u8], w: u32, h: u32, flow: &[(f32, f32)], gen: Option<u64>) -> MapTextures {
         let mut cache = self.cells.borrow_mut();
         if let Some(c) = cache.as_ref() {
-            if c.size == (w, h) && c.codes == codes && c.flow.as_slice() == flow {
+            let same = match gen {
+                Some(g) => c.gen == Some(g) && c.size == (w, h) && c.flow_len == flow.len(),
+                None => c.gen.is_none() && c.size == (w, h) && c.codes == codes && c.flow.as_slice() == flow,
+            };
+            if same {
                 return c.tex.clone();
             }
         }
@@ -915,15 +1071,19 @@ impl TerrainLayer {
         cells.set_filter(FilterMode::Nearest);
         let neighbours = Texture2D::from_rgba8((w + 2) as u16, (h + 2) as u16, &neighbour_texels(codes, w, h));
         neighbours.set_filter(FilterMode::Nearest);
-        let mask = Texture2D::from_rgba8(w as u16, h as u16, &water_mask_texels(codes));
-        mask.set_filter(FilterMode::Linear);
-        // The flow: one texel per cell, or a single still texel without the field (rg = 128: zero).
-        let flow_tex = if flow.len() == codes.len() {
-            Texture2D::from_rgba8(w as u16, h as u16, &flow_texels(flow))
-        } else {
-            Texture2D::from_rgba8(1, 1, &[128, 128, 128, 255])
-        };
+        // The live water's per-cell texture: the flow (zero without the field: still water), the river's
+        // drift speed and the water mask, baked once per map (the shader reads one texel per cell).
+        let field = if flow.len() == codes.len() { flow } else { &[] };
+        let speed = if field.is_empty() { Vec::new() } else { super::water::river_speed(codes, (w, h), field) };
+        let flow_tex = Texture2D::from_rgba8(w as u16, h as u16, &flow_texels(codes, field, &speed));
         flow_tex.set_filter(FilterMode::Linear);
+        let bank = super::water::bank_distance(codes, (w, h));
+        let wide = super::water::wide_water(&bank, (w, h));
+        // The map's edge is not a shore: the water on the border is not wide here, so no wave runs along it (the
+        // off-map land makes its bank distance, which the speed uses, but a wave there would be a seam).
+        let wide_shore: Vec<bool> = wide.iter().enumerate().map(|(i, &wd)| wd && !is_map_edge(i, w, h)).collect();
+        let bank_tex = Texture2D::from_rgba8(w as u16, h as u16, &bank_texels(&bank, &wide_shore));
+        bank_tex.set_filter(FilterMode::Linear);
         let (biome_bytes, lowland_bytes) = super::weather::mask_texels(codes);
         // Nearest: the shader blends the four cells itself (`weather::mask4`).
         let weather = Texture2D::from_rgba8(w as u16, h as u16, &biome_bytes);
@@ -931,15 +1091,17 @@ impl TerrainLayer {
         let lowland = Texture2D::from_rgba8(w as u16, h as u16, &lowland_bytes);
         lowland.set_filter(FilterMode::Nearest);
         let weather_seed = super::weather::map_seed(w, h, codes);
-        let tex = MapTextures { cells, neighbours, mask, flow: flow_tex, weather, lowland, weather_seed };
-        *cache = Some(CellTextures { codes: codes.to_vec(), flow: flow.to_vec(), size: (w, h), tex: tex.clone() });
+        let tex = MapTextures { cells, neighbours, flow: flow_tex, bank: bank_tex, weather, lowland, weather_seed };
+        // The keyed entries hold no copy of the codes and the flow (nothing to compare then).
+        let (kept_codes, kept_flow) = if gen.is_some() { (Vec::new(), Vec::new()) } else { (codes.to_vec(), flow.to_vec()) };
+        *cache = Some(CellTextures { codes: kept_codes, flow: kept_flow, gen, flow_len: flow.len(), size: (w, h), tex: tex.clone() });
         tex
     }
 
     /// The weather's masks of a `w`×`h` map (kept with the cells: rebuilt only when the codes or the
     /// flow change). `flow` as in [`TerrainLayer::draw`].
-    pub fn weather_masks(&self, codes: &[u8], (w, h): (u32, u32), flow: &[(f32, f32)]) -> WeatherMasks {
-        let maps = self.cells(codes, w, h, flow);
+    pub fn weather_masks(&self, codes: &[u8], (w, h): (u32, u32), flow: &[(f32, f32)], gen: Option<u64>) -> WeatherMasks {
+        let maps = self.cells(codes, w, h, flow, gen);
         WeatherMasks { biome: maps.weather, lowland: maps.lowland, seed: maps.weather_seed }
     }
 
@@ -975,7 +1137,7 @@ impl TerrainLayer {
     /// reach past the map then. The fog's clock is `water_ms`. `mode`: see [`Mode`]. `flow`: the
     /// rivers' flow per cell (`rules::flow::flow_field`), empty for still water.
     #[allow(clippy::too_many_arguments)]
-    pub fn draw(&self, codes: &[u8], (w, h): (u32, u32), dest: Rect, view: Vec4, cell_px: Vec2, water_ms: Option<i64>, edge: bool, mode: Mode, flow: &[(f32, f32)]) {
+    pub fn draw(&self, codes: &[u8], (w, h): (u32, u32), dest: Rect, view: Vec4, cell_px: Vec2, water_ms: Option<i64>, edge: bool, mode: Mode, flow: &[(f32, f32)], gen: Option<u64>) {
         if w == 0 || h == 0 || w + 2 > u16::MAX as u32 || h + 2 > u16::MAX as u32 || codes.len() != (w * h) as usize {
             return;
         }
@@ -983,6 +1145,23 @@ impl TerrainLayer {
             self.draw_cached(dest);
             return;
         }
+        // «Живая вода» as a picture (`water_picture_prepare`): its target is drawn at the picture's size, and the overlay
+        // composites the pictures when this frame uses them.
+        if mode == Mode::Picture {
+            let scale = self.pictures.borrow().scale;
+            return self.draw_layer(codes, (w, h), dest, view, cell_px, water_ms, edge, Mode::Overlay, flow, scale, gen);
+        }
+        if mode == Mode::Overlay && self.pictures.borrow().active && self.draw_water_composite(dest) {
+            return;
+        }
+        self.draw_layer(codes, (w, h), dest, view, cell_px, water_ms, edge, mode, flow, 1.0, gen);
+    }
+
+    /// One draw of the layer: the material of the mode, its uniforms and the quad. `res` is the target's size
+    /// relative to the screen (1 on the screen, the water picture's scale in its target), so the sampling's
+    /// screen pixels per texel are the target's.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_layer(&self, codes: &[u8], (w, h): (u32, u32), dest: Rect, view: Vec4, cell_px: Vec2, water_ms: Option<i64>, edge: bool, mode: Mode, flow: &[(f32, f32)], res: f32, gen: Option<u64>) {
         // The unlit shader while the lighting and the live water are both off (the picture as it was before).
         let unlit = daylight::shown_hour().is_none() && !water::live();
         let Some((m, new, legacy)) = self.ground_material(unlit) else { return };
@@ -996,12 +1175,19 @@ impl TerrainLayer {
         if super::world_view::trailer_active() {
             self.atlas.set_filter(FilterMode::Nearest);
         }
-        let maps = self.cells(codes, w, h, flow);
+        let maps = self.cells(codes, w, h, flow, gen);
         gl_use_material(m);
         if new {
             m.set_texture("Neighbours", maps.neighbours.clone());
-            m.set_texture("WaterMask", maps.mask.clone());
             m.set_texture("Flow", maps.flow.clone());
+            if legacy {
+                // The unlit shader still declares its live water's mask (never sampled with the water off):
+                // it gets the per-cell texture, whose alpha is the same mask.
+                m.set_texture("WaterMask", maps.flow.clone());
+            } else {
+                m.set_texture("Noise", self.noise.clone());
+                m.set_texture("Bank", maps.bank.clone());
+            }
         } else {
             m.set_texture("Cells", maps.cells.clone());
         }
@@ -1015,8 +1201,8 @@ impl TerrainLayer {
         // Screen pixels per texel: the quad spans `view` cells over `dest`; the atlas has
         // `cell_px` texels per cell, and the water frame 1/3 of its texture per cell.
         let (cells_w, cells_h) = (view.z - view.x, view.w - view.y);
-        m.set_uniform("AtlasScale", vec2(dest.w / (cells_w * cell_px.x), dest.h / (cells_h * cell_px.y)));
-        m.set_uniform("WaterScale", vec2(3.0 * dest.w / (cells_w * water.width()), 3.0 * dest.h / (cells_h * water.height())));
+        m.set_uniform("AtlasScale", vec2(res * dest.w / (cells_w * cell_px.x), res * dest.h / (cells_h * cell_px.y)));
+        m.set_uniform("WaterScale", vec2(3.0 * res * dest.w / (cells_w * water.width()), 3.0 * res * dest.h / (cells_h * water.height())));
         m.set_texture("Water", water);
         m.set_uniform("View", view);
         m.set_uniform("MapSize", vec2(w as f32, h as f32));
@@ -1033,6 +1219,13 @@ impl TerrainLayer {
         // Live water («Живая вода»): the water's draws only (the full pass and the overlay). The
         // sky's colour is the lighting's (the day's with the lighting off).
         m.set_uniform("LiveWater", if water::live() && water_on { 1.0f32 } else { 0.0 });
+        // The water's detail by the zoom: the on-screen cell over the zoom-1 cell (`cell_px`, the map's PX).
+        if !legacy {
+            m.set_uniform("Detail", water::lod_detail((dest.w / (view.z - view.x)) / cell_px.x));
+            // The sparkle's colour and strength: the light's hour (noon when the lighting is off).
+            let glint = water::glint(daylight::shown_hour().unwrap_or(12.0));
+            m.set_uniform("Glint", vec4(glint[0], glint[1], glint[2], glint[3]));
+        }
         let sky = daylight::sky_rgb();
         m.set_uniform("Sky", vec3(sky[0], sky[1], sky[2]));
         // The ground draws (the whole terrain, the cache's ground) get the shading rate (option 3).
@@ -1046,6 +1239,90 @@ impl TerrainLayer {
             shading_rate::end();
         }
         gl_use_default_material();
+    }
+
+    /// «Живая вода» as a picture: this frame's bookkeeping, called by world_view before the overlay, under the camera's
+    /// key `camera_key` (what the picture is drawn for: the view, the tilt, the map). Returns the target to fill now
+    /// when a redraw is due: world_view fills it with the layer drawn as `Mode::Picture` under the same camera, and the
+    /// overlay then composites the two last drawings (`draw_water_composite`). None: the frame draws the water
+    /// directly (the default), or shows the pictures as they are.
+    pub fn water_picture_prepare(&self, codes: &[u8], (w, h): (u32, u32), flow: &[(f32, f32)], gen: Option<u64>, water_ms: Option<i64>, camera_key: u64) -> Option<RenderTarget> {
+        let want = water::live() && (water::every() > 1 || water::scale() < 1.0) && self.water_composite.is_some();
+        if !want {
+            self.pictures.borrow_mut().active = false;
+            return None;
+        }
+        let maps = self.cells(codes, w, h, flow, gen);
+        let scale = water::scale();
+        let (sw, sh) = super::render_cache::base_pixels().unwrap_or_else(macroquad::miniquad::window::screen_size);
+        let size = ((sw * scale).round().max(1.0) as u32, (sh * scale).round().max(1.0) as u32);
+        // The key: what the picture was drawn for (the camera's key, the target's size, the map, the flow).
+        let key = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            (camera_key, size, scale.to_bits(), maps.weather_seed, flow.len()).hash(&mut h);
+            h.finish()
+        };
+        let now = water_ms.map_or(0.0, |ms| ms as f64 / 1000.0);
+        let mut st = self.pictures.borrow_mut();
+        st.active = true;
+        st.scale = scale;
+        st.t_now = now;
+        if st.size != size {
+            st.targets = [None, None];
+            st.size = size;
+            st.valid = false;
+        }
+        if st.key != key {
+            st.key = key;
+            st.valid = false;
+        }
+        if st.valid && !water::redraw_due(st.age, water::every()) {
+            st.age += 1;
+            return None;
+        }
+        // A redraw goes into the target the older picture does not use (the same one when the view changed).
+        let was_valid = st.valid;
+        let idx = if was_valid { 1 - st.cur } else { st.cur };
+        let target = st.targets[idx]
+            .get_or_insert_with(|| {
+                let rt = macroquad::texture::render_target(size.0, size.1);
+                rt.texture.set_filter(FilterMode::Linear);
+                rt
+            })
+            .clone();
+        if was_valid {
+            st.t_prev = st.t_cur;
+            st.has_prev = true;
+        } else {
+            st.has_prev = false;
+        }
+        st.cur = idx;
+        st.t_cur = now;
+        st.valid = true;
+        st.age = 0;
+        Some(target)
+    }
+
+    /// The water picture's composite over the ground (after `water_picture_prepare`): the two drawings blended in
+    /// time (`water::picture_mix`), read at each pixel's window position as the ground's composite is. False when
+    /// there is nothing to show; the caller then draws the water at once.
+    fn draw_water_composite(&self, dest: Rect) -> bool {
+        let Some(composite) = self.water_composite.as_ref() else { return false };
+        let st = self.pictures.borrow();
+        let prev_idx = if st.has_prev { 1 - st.cur } else { st.cur };
+        let mix = water::picture_mix(st.t_now, st.has_prev.then_some(st.t_prev), st.t_cur);
+        let (Some(prev), Some(cur)) = (st.targets[prev_idx].clone(), st.targets[st.cur].clone()) else { return false };
+        drop(st);
+        let (sw, sh) = super::render_cache::base_pixels().unwrap_or_else(macroquad::miniquad::window::screen_size);
+        gl_use_material(composite);
+        composite.set_texture("Prev", prev.texture.clone());
+        composite.set_texture("Cur", cur.texture.clone());
+        composite.set_uniform("ScreenSize", vec2(sw, sh));
+        composite.set_uniform("Mix", mix);
+        draw_texture_ex(&cur.texture, dest.x, dest.y, WHITE, DrawTextureParams { dest_size: Some(dest.size()), ..Default::default() });
+        gl_use_default_material();
+        true
     }
 
     /// The cache's copy: the filled ground, read at each pixel of `dest` by its window position.
@@ -1245,7 +1522,10 @@ mod tests {
 
     #[test]
     fn the_flow_texels_keep_still_water_at_128_and_the_ends_at_the_bytes_0_and_255() {
-        assert_eq!(flow_texels(&[(0.0, 0.0), (1.0, -1.0)]), vec![128, 128, 128, 255, 255, 1, 128, 255]);
+        // Codes 0 (water), 5 (land): the flow in rg (still 128), the speed in b, the water mask in a.
+        let codes = [0u8, 5];
+        // Water at still: [128, 128, 0 speed, 255 mask]; land with the flow (1, -1) at full speed: [255, 1, 255, 0].
+        assert_eq!(flow_texels(&codes, &[(0.0, 0.0), (1.0, -1.0)], &[0.0, 1.0]), vec![128, 128, 0, 255, 255, 1, 255, 0]);
         // The shader's decode of a byte b is (b · 255 - 128) / 127 for b / 255: zero is exact.
         let back = |b: u8| (b as f32 / 255.0 * 255.0 - 128.0) / 127.0;
         assert_eq!(back(128), 0.0);
@@ -1253,10 +1533,13 @@ mod tests {
     }
 
     #[test]
-    fn the_water_mask_is_255_on_the_water_codes_only() {
+    fn the_flow_texel_mask_is_255_on_the_water_codes_only() {
         // Codes 0-2 are water (shallows and fords, coastal water, deep sea); 3 (lava) and 5 are land.
-        let texels = water_mask_texels(&[0, 3, 2, 5]);
-        assert_eq!(texels, vec![255, 0, 0, 255, 0, 0, 0, 255, 255, 0, 0, 255, 0, 0, 0, 255]);
+        let texels = flow_texels(&[0, 3, 2, 5], &[], &[]);
+        let alpha: Vec<u8> = texels.chunks(4).map(|t| t[3]).collect();
+        assert_eq!(alpha, vec![255, 0, 255, 0]);
+        // Still water without the field: flow 128, speed 0.
+        assert_eq!(&texels[0..3], &[128, 128, 0]);
     }
 
     #[test]

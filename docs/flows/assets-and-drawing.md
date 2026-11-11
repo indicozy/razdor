@@ -591,10 +591,14 @@ bilinear edge, and `mist::mist_alpha` is the formula the clouds pin.
 **Moving water** (the setting «Живая вода», `Settings::map_live_water`, off by default; `water::set_prefs` takes
 it every frame from `display::follow_settings`; `RAZDOR_LIVE_WATER=1` turns it on). Style only. Over the original's
 32-frame water texture (kept, the ground pass multiplies it in as before):
-- **The water mask**: `terrain::water_mask_texels`, one texel per cell (red 255 on the water cells, `map::is_water`),
-  built with the surface-code textures (`TerrainLayer::cells`, rebuilt only when the codes change), linear, clamped.
-  Linear filtering gives the shore its soft edge: 1 deep, 0.5 on the shore line, 0 on land. The ground shader reads
-  it at the pixel's cell centre `(p + 0.5) / MapSize`, where `p` is the cell coordinate (the same one the edge fog uses).
+- **The per-cell water texture** (`terrain::flow_texels`, baked once per map in `TerrainLayer::cells`, rebuilt only when
+  the codes or the flow change): one RGBA8 texel per cell, linear, clamped. Red and green are the river's flow
+  (`128 + 127 · flow`, still water exactly 128); blue is its drift speed (`water::river_speed`: 1 next to a bank,
+  easing to 0.35 as the water widens by `bank_distance`, 0 on still water and on the wide water); alpha is the water mask (255 on the water
+  cells, `map::is_water`, 0 on land). Linear filtering gives the shore its soft edge: 1 deep, 0.5 on the shore line,
+  0 on land. The ground shader reads one texel at the pixel's cell centre `(p + 0.5) / MapSize`, where `p` is the
+  cell coordinate (the same one the edge fog uses). The unlit shader (`LEGACY_FRAGMENT`) gets this texture for its
+  unused live-water mask.
 - **In the shader** (`NEW_FRAGMENT`, the `LiveWater` branch; the old four-fetch shader ignores it): on the water
   pixels only, a ripple moves the water frame's uv by `0.015` of a frame (a few texels), the shore foam
   (`shore_foam`, its band mirrored by `water::foam_edge`) is laid on the final colour (after the four cells are blended, so
@@ -608,16 +612,54 @@ it every frame from `display::follow_settings`; `RAZDOR_LIVE_WATER=1` turns it o
   the sky's colour (`daylight::sky_rgb`: day, dusk and dawn warmth, moonlight at night; the day's with the lighting
   off) by `0.18` of its mask. Only the full pass and the cache's overlay draw it (`Mode::Full`, `Mode::Overlay`);
   the cached ground stays as it was. `Clock` is the water clock.
+- **The water's detail by zoom** (`water::lod_detail`, the uniform `Detail`): the map's on-screen cell over the zoom-1
+  cell (`cell_px.x`, the map's PX), 1 from zoom 0.7 up, 0 at 0.45 and below (the zoom's floor is 0.4), smooth between.
+  It scales the ripple and the foam's lapping (the line stands at its middle phase when 0); the texture, the colour and
+  the foam stay. The sparkle and the shore waves fade with it too.
+- **The water's noise** (`wnoise`, the ripple and the foam's lap and patches): one fetch of `Noise`, a wrapped 64×64
+  texture of the hash lattice (`water::noise_texels`, uploaded by `terrain::noise_texture`, linear). A lookup at the
+  lattice point's centre plus the smoothed fraction is the hash's value noise to within a byte (`water::wnoise_ref`,
+  tested). The mist and the unlit shader keep the hash `vnoise`, so the look with the water off does not move.
 - **Rivers flow** (`rules::flow::flow_field`, a best guess, pure): a water cell flows toward its neighbour with the
   smallest distance to the large water (the interior of a lake or the sea, or water on the map's border; the
   interior stands still). A piece of water with no large water in it (landlocked) flows away from its cell nearest
   a hill or mountain (classes `HILLS` to `DARK_MOUNTAINS`), or from its first cell when the map has none. The field
   is built per map (`world_view::map_flow`, kept while the surface codes and the hills stay) and drawn as the `Flow`
-  texture (`terrain::flow_texels`: rg = 128 + 127 · flow, so still water is exactly zero). The shader scrolls the
-  ripple and foam noise along the flow on the water (two phases of 7 cells a 20 s cycle, `t0 = fract(Clock · 0.05)`
-  and `t0 + ½`, mixed by `|2·t0 − 1|`, so the scroll does not jump when `Clock` wraps at 1000 s). The ripple's and the
-  foam's sine terms of `Clock` itself still jump at that wrap (a known leftover; the mist's drift does too). A lake's rim cells flow inward (the same rule), so
-  coasts drift toward the open water; that is part of the best guess.
+  texture (`terrain::flow_texels`: rg = 128 + 127 · flow, so still water is exactly zero; b = the drift speed).
+  **The drift** (flow map, two phases): the picture moves along the flow at the water's speed (`water::river_speed`:
+  1 next to a bank, easing to 0.35 as a river widens, 0 on the wide water: a lake or the sea, whose rim flows inward
+  but stands still, `water::wide_water`). Two phases half a 20 s cycle apart (`t0 = fract(Clock · 0.05)` and
+  `t0 + ½`, mixed by `|2·t0 − 1|`) move the surface 6 cells a cycle at full speed (two 3-cell tiles, so the two
+  phases show the same pattern and the crossfade does not ghost), and the ripple and the foam's noise drift with
+  it. The sine terms of `Clock` (the foam's lapping) keep the wrap they had (a known leftover; the mist's drift does
+  too).
+- **Sparkle** (`water::glint`, the uniform `Glint`, the terrain's `Bank` texture for the wide water): small points on
+  the still water, drawn where a noise of the lattice texture at 6 per cell peaks (a high threshold, 0.87–0.95),
+  twinkling at 2000 cycles of the clock period and drifting by whole lattice periods per wrap. Colour: white by day,
+  the dawn and dusk warmth, the moon's silver at night; strength 0.5 at noon, 1 with the sun low, 0.55 at night;
+  full on the wide water, 40 % on a river, faded by `Detail`. The mist and the war fog cover them.
+- **Shore waves** (the same `Bank` texture: red the distance from the bank in steps / 8, green the wide water): on the
+  wide water only, soft lines roll from the open water toward the land, a crest every 1.1 cells moving 1.1 cells a 4 s
+  cycle (`Clock · 0.25`), fading in from 0.1–0.3 cell out of the waterline and out by 1.4 cells, so they run into the
+  foam. Faded by `Detail`.
+- **The shore's baked data** (once per map, `TerrainLayer::cells`): `Flow` (above), `Bank` (`water::bank_distance`,
+  `wide_water`). The lake's rim flows inward (the same rule as a river), so coasts still drift toward the open water
+  in the flow field; the drift speed keeps the wide water still.
+- **The redraw rate** («Частота анимации воды», `Settings::map_water_rate`, `water::FrameRate`: every frame, every
+  other, every third; every frame by default, the row shows with «Живая вода» on). Below every frame, the water
+  (`TerrainLayer::water_picture_prepare`, called by `world_view::draw_ground` before the overlay) is drawn into a target of the screen's size when it is due
+  (`water::redraw_due`, the picture's age in frames), and every frame the two last drawings are blended in time over
+  the cached ground (`water::picture_mix`: the frame shows the water one interval ago, moving on smoothly, 0 at a
+  redraw, 1 one interval later). The target is cleared to alpha 0 and the discarded pixels stay transparent; the
+  composite is alpha-blended (`make_blended_material`: the default pipeline blends nothing). A new view, map, size or camera
+  (`ground_key`, the tilt included) redraws at once and drops the older picture. The fill runs under the same 3D camera
+  as the ground's cache (`render_cache::fill` around `in_view`), so the 2.5D and first-person views have the picture too. The env `RAZDOR_WATER_EVERY=1|2|3`
+  overrides the setting in the snapshots.
+- **The water's size** («Качество воды», `Settings::map_water_quality`, `water::Quality`: high 1, medium 0.75, low 0.5
+  of the screen in each direction; high by default; the same flat-map picture as the rate, the row shows with the
+  water on). The picture target is `scale` × the screen (`water::scale`, the env `RAZDOR_WATER_SCALE=<0.25..1>`
+  overrides it), the overlay is drawn in it with its sampling density scaled (`draw_layer`'s `res`), and the
+  composite upscales it linearly. At full size and every frame the overlay is drawn directly, as before.
 - **Wakes** (`world_view::draw_wakes`, `water::Wake`): per sailing army in motion (and the hero's galley), its last
   12 display positions, one every 0.12 s, drawn on the ground behind it as soft white ellipses (the glow's texture,
   additive) fading from alpha 0.35 to 0 over 1.5 s and growing from 0.3 to 0.7 cell. Explored cells only. Recorded per

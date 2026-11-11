@@ -78,12 +78,19 @@ Clouds over the unexplored part of the map. The explored land is fully visible.
 The **"Moving water"** switch brings the water on the map to life:
 
 * the water ripples;
-* foam runs along the shores;
+* foam runs along the shores, and waves roll up the shores of lakes and the sea;
 * the water reflects the colour of the sky: golden at sunset, moonlit at night;
-* rivers flow;
-* ships and armies on the move leave a wake behind them.
+* glints of sun and moon shine on lakes and the sea, brighter at sunset and at night;
+* rivers flow with the current, faster through narrow places;
+* ships and armies on the move leave a wake behind them;
+* when the map is zoomed out, the ripples and waves calm down: far off, the water is quieter.
 
-The direction of a river's flow is worked out from the shape of the map: a river flows toward the sea or lake it runs into. In a few places a river may flow the wrong way.
+The direction of a river's flow is worked out from the shape of the map: a river flows toward the sea or lake it runs into. In a few places a river may flow the wrong way. Lakes and the sea stay still.
+
+Under **"Moving water"** there are two rows that appear only with it on:
+
+* **"Water animation rate"**: the water can be redrawn every frame, every second frame or every third frame. The motion stays smooth. Default: every frame.
+* **"Water quality"**: the water can be drawn at full size, three-quarters or half the screen; the water gets softer, but runs faster. Default: high.
 
 ![Moving water](../../../../assets/shots/water.webp)
 
@@ -142,7 +149,7 @@ The **"Depth model for mods"** row appears on the **"Map"** tab only in 2.5D, an
 ## How to turn it on
 
 1. Open the **"Sound, graphics and gameplay settings"** window and choose the **"Map"** tab.
-2. Find the **"Lighting"**, **"Mist instead of black"**, **"Moving water"**, **"Weather"** and **"Living map"** rows.
+2. Find the **"Lighting"**, **"Mist instead of black"**, **"Moving water"**, **"Weather"** and **"Living map"** rows. The **"Water animation rate"** and **"Water quality"** rows appear under **"Moving water"** when it is on.
 3. A click on **"Lighting"** cycles through its values. For the other switches the values are **"Off"** and **"On"**.
 4. For **"Real-time cycle"** the **"Day length"** row appears, and for **"Fixed hour"** the **"Hour"** row. Under **"Lighting"**, the **"Shadows"** and **"Light quality"** rows also appear.
 5. Press **"Apply"** to keep the changes.

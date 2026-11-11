@@ -128,6 +128,23 @@ pub fn target() -> Option<(String, u64)> {
     Some((path, frames))
 }
 
+/// `RAZDOR_SNAPSHOT_SERIES=<count>:<every>`: a picture every `every` frames from the snapshot's frame count, `count` of
+/// them, for the frames of a moving scene (the water's GIFs). None unless set.
+pub fn series() -> Option<(u64, u64)> {
+    let v = std::env::var("RAZDOR_SNAPSHOT_SERIES").ok()?;
+    let (count, every) = v.split_once(':')?;
+    let (count, every): (u64, u64) = (count.trim().parse().ok()?, every.trim().parse().ok()?);
+    (count > 0 && every > 0).then_some((count, every))
+}
+
+/// The file of picture `k` of a series: `path` with `-<k>` before its extension.
+pub fn series_path(path: &str, k: u64) -> String {
+    match path.rfind('.') {
+        Some(dot) => format!("{}-{k:03}{}", &path[..dot], &path[dot..]),
+        None => format!("{path}-{k:03}"),
+    }
+}
+
 /// The window size asked for by `RAZDOR_SIZE=<w>x<h>`.
 pub fn size() -> Option<(i32, i32)> {
     let s = std::env::var("RAZDOR_SIZE").ok()?;
