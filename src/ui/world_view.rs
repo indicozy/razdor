@@ -2716,12 +2716,11 @@ fn map_flow(game: &Game) -> Option<std::rc::Rc<Vec<(f32, f32)>>> {
     }
     use std::hash::{Hash, Hasher};
     let map = &game.world.map;
+    // The hills are the map's objects, which a map is built with (and its generation changes with it): no
+    // per-frame hash of them.
     let key = {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         (map.w, map.h, map.surface_generation()).hash(&mut h);
-        for o in map.objects.iter().filter(|o| (object_class::HILLS..=object_class::DARK_MOUNTAINS).contains(&o.class)) {
-            (o.tile, o.class).hash(&mut h);
-        }
         h.finish()
     };
     Some(FLOW.with_borrow_mut(|c| {
@@ -4623,6 +4622,8 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     items.sort_by_key(|a| a.0);
     // One sharp session for the pass: its art shares the material switch (see `sharp::session`). With the
     // light on, the lit material scales the painted shadows by the frame's factor (`sharp::session_lit`).
+    // The screen's DPI for the frame (read once, not per object).
+    let dpi = screen_dpi_scale();
     super::sharp::session_lit(lit, || {
         for d in items.iter().map(|(_, d)| d) {
             match d {
@@ -4631,7 +4632,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                     // just above that fades out (`detail_visibility`); the flat view fades it through `SPRITE_VIS`.
                     let foot = object_foot(o, cam);
                     let picture = object_picture(o, art, cam);
-                    let detail = detail_visibility(picture, screen_dpi_scale());
+                    let detail = detail_visibility(picture, dpi);
                     if detail > 0.0 {
                         let vis = shade_of(foot) * detail;
                         standing(cam, foot, foot, vis, picture, || {
