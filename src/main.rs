@@ -270,12 +270,29 @@ async fn main() {
         // The snapshot clock moves one frame on (live runs: no-op).
         ui::clock::tick();
         if let Some((path, n)) = &snapshot {
-            if frames >= *n {
+            // `RAZDOR_SNAPSHOT_SERIES=<count>:<every>`: a picture every `every` frames from `n` (numbered), and the
+            // run ends with the last of them. Without it, the one picture at `n`, as before.
+            let series = ui::snapshot::series();
+            let at = frames.saturating_sub(*n);
+            let save = match series {
+                None => frames >= *n,
+                Some((_, every)) => frames >= *n && at % every == 0,
+            };
+            if save {
                 ui::text_probe::write();
                 ui::touch_probe::write();
                 let mut shot = get_screen_data();
                 opaque_rgba(&mut shot.bytes);
-                shot.export_png(path);
+                match series {
+                    None => shot.export_png(path),
+                    Some(_) => shot.export_png(&ui::snapshot::series_path(path, at)),
+                }
+            }
+            let last = match series {
+                None => *n,
+                Some((count, every)) => *n + (count - 1) * every,
+            };
+            if frames >= last {
                 exit_now(&mut app);
             }
         }

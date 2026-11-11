@@ -2643,7 +2643,7 @@ fn terrain_quad(game: &Game, layer: &terrain::TerrainLayer, cam: &Camera, mode: 
         }
         let view = vec4(tl.x, tl.y / rh, br.x, br.y / rh);
         // The edge's mist is fog: the trailer's no-fog switch leaves the ground going on past the edge.
-        layer.draw(map.surface_codes(), (map.w as u32, map.h as u32), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(PX, PX * rh), Some((crate::ui::clock::now() * 1000.0) as i64), extend && !trailer_nofog(), mode, flow);
+        layer.draw(map.surface_codes(), (map.w as u32, map.h as u32), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(PX, PX * rh), Some((crate::ui::clock::now() * 1000.0) as i64), extend && !trailer_nofog(), mode, flow, Some(map.surface_generation()));
     }
 }
 
@@ -2663,13 +2663,24 @@ fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool) {
         // A bent view draws its ground in `draw_world`'s picture (`ground_in_bent`), never here;
         // the cache's fill would nest inside that picture, so a bent view is not cached.
         let plain = cam.tilt.is_none_or(|t| t.cam.bend.is_none());
-        let cached = (waits && layer.cache_on() && super::render_cache::target().is_none() && plain).then(|| layer.ground_target(ground_key(game, cam))).flatten();
+        let key = ground_key(game, cam);
+        let cached = (waits && layer.cache_on() && super::render_cache::target().is_none() && plain).then(|| layer.ground_target(key)).flatten();
         match cached {
             Some((rt, fill)) => {
                 if fill {
                     super::render_cache::fill(&rt, || in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Ground, flow))));
                 }
                 in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Cached, flow)));
+                // «Живая вода» at a lower rate or size: the water's picture is filled under this camera when it is due
+                // (2.5D and first person included: the fill keeps the 3D camera, as the ground's does), then composited.
+                let (map, codes) = (&game.world.map, game.world.map.surface_codes());
+                let water_ms = Some((crate::ui::clock::now() * 1000.0) as i64);
+                if let Some(target) = layer.water_picture_prepare(codes, (map.w as u32, map.h as u32), flow, Some(map.surface_generation()), water_ms, key) {
+                    super::render_cache::fill(&target, || {
+                        macroquad::prelude::clear_background(macroquad::prelude::Color::new(0.0, 0.0, 0.0, 0.0));
+                        in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Picture, flow)));
+                    });
+                }
                 in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow)));
             }
             None => in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Full, flow))),
@@ -2693,7 +2704,7 @@ fn map_flow(game: &Game) -> Option<std::rc::Rc<Vec<(f32, f32)>>> {
     let map = &game.world.map;
     let key = {
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (map.w, map.h, map.surface_codes()).hash(&mut h);
+        (map.w, map.h, map.surface_generation()).hash(&mut h);
         for o in map.objects.iter().filter(|o| (object_class::HILLS..=object_class::DARK_MOUNTAINS).contains(&o.class)) {
             (o.tile, o.class).hash(&mut h);
         }
@@ -2729,7 +2740,7 @@ fn ground_key(game: &Game, cam: &Camera) -> u64 {
         curve_bits().hash(&mut h);
     }
     let map = &game.world.map;
-    (map.w, map.h, cam.grid.row_height().to_bits(), extend_edge(), mist::on(), map.surface_codes()).hash(&mut h);
+    (map.w, map.h, cam.grid.row_height().to_bits(), extend_edge(), mist::on(), map.surface_generation()).hash(&mut h);
     h.finish()
 }
 
@@ -6588,7 +6599,7 @@ fn draw_weather(game: &Game, assets: &Assets, cam: &Camera, light: Option<daylig
     let map = &game.world.map;
     let flow = map_flow(game);
     let flow: &[(f32, f32)] = flow.as_deref().map_or(&[], |f| f.as_slice());
-    let masks = layer.weather_masks(map.surface_codes(), (map.w as u32, map.h as u32), flow);
+    let masks = layer.weather_masks(map.surface_codes(), (map.w as u32, map.h as u32), flow, Some(map.surface_generation()));
     let now = crate::ui::clock::now();
     let schedule = weather::schedule_of(masks.seed);
     let days = game.clock.total_minutes() / razdor::rules::clock::MINUTES_PER_DAY as f64;
