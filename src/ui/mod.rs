@@ -1451,6 +1451,7 @@ impl App {
             main_menu::follow_settings(&self.audio.settings, g);
         }
         battle_view::set_anim_speed(main_menu::anim_speed(&self.audio.settings));
+        battle_view::set_hit_shake(self.audio.settings.hit_shake);
         // The settings window's options the interface reads from the install's `[Options]`.
         main_menu::apply_options(&self.audio.settings);
         // The front row's width from the settings: the next new game uses it.

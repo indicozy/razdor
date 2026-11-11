@@ -1591,7 +1591,7 @@ impl Group {
     pub fn rows(self) -> &'static [Row] {
         match self {
             Group::Map => &[Row::MapZoom, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
-            Group::Battle => &[Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience],
+            Group::Battle => &[Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience, Row::HitShake],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
             Group::Other => &[Row::Updates, Row::Import, Row::ChronicleSummary],
@@ -1632,6 +1632,7 @@ pub enum Row {
     MaxGuard,
     ArmyArrangement,
     Experience,
+    HitShake,
     Screen,
     InterfaceScale,
     BottomBar,
@@ -1648,7 +1649,7 @@ pub enum Row {
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 42] = [
+pub const ALL: [Row; 43] = [
         Row::MapZoom,
         Row::MapResolution,
         Row::FrameCap,
@@ -1679,6 +1680,7 @@ pub const ALL: [Row; 42] = [
         Row::MaxGuard,
         Row::ArmyArrangement,
         Row::Experience,
+        Row::HitShake,
         Row::Screen,
         Row::InterfaceScale,
         Row::BottomBar,
@@ -1711,6 +1713,7 @@ pub const ALL: [Row; 42] = [
             Row::AiStrength => Some(tr("Maximum: before each move the enemy of your battles weighs every move and answer ahead and plays each out to the end of the battle.")),
             Row::ArmyArrangement => Some(tr("Clicks: the first click picks a unit or an item, the second places it. Dragging: a click only selects, and units and items are moved by dragging. Both: clicks and dragging at once.")),
             Row::Experience => Some(tr("As in the original, a unit's experience is dropped when it is promoted; Kept keeps it. Experience left over after a level is kept either way.")),
+            Row::HitShake => Some(tr("Razdor's: a short shake of the battlefield when a unit takes a hit. Stronger on a heavy hit and when a unit dies. Style only.")),
             Row::Language => Some(super::language::hint()),
             Row::ChronicleSummary => Some(tr("Razdor's: after a map ends or the hero falls, a page sums up the map: the route, battles, highlights and totals.")),
             Row::Updates => Some(if updates_phone() {
@@ -2255,6 +2258,12 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
             let label = if audio.keep_xp_on_promotion { tr("Kept (Razdor)") } else { tr("Reset (original)") };
             if labelled_row_help(c, geo, tr("Experience on promotion"), label, Row::Experience.help_text()).0 {
                 audio.keep_xp_on_promotion = !audio.keep_xp_on_promotion;
+            }
+        }
+        Row::HitShake => {
+            // Razdor's, off by default: the battle field shakes on a hit (`battle_view::Shake`), style only.
+            if labelled_row_help(c, geo, tr("Hit shake"), yes_no(audio.hit_shake), Row::HitShake.help_text()).0 {
+                audio.hit_shake = !audio.hit_shake;
             }
         }
         Row::Screen => {
@@ -3551,7 +3560,7 @@ mod tests {
     #[test]
     fn the_long_hints_are_behind_a_question_mark() {
         let with: Vec<Row> = Row::ALL.into_iter().filter(|r| r.help_text().is_some()).collect();
-        assert_eq!(with, vec![Row::MapZoom, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::Lighting, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::Language, Row::Updates, Row::ChronicleSummary]);
+        assert_eq!(with, vec![Row::MapZoom, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::Lighting, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::Language, Row::Updates, Row::ChronicleSummary]);
         scene_help("Experience");
         assert_eq!(HELP_PINNED.with(|p| p.get()), Row::Experience.help_text());
         HELP_PINNED.with(|p| p.set(None));

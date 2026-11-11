@@ -315,6 +315,130 @@ fn anim_speed() -> Option<f32> {
     ANIM_SPEED.with(|c| c.get())
 }
 
+local! {
+    /// The setting «Тряска от ударов» (`Settings::hit_shake`), taken in every frame (`set_hit_shake`).
+    static HIT_SHAKE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// `RAZDOR_HIT_SHAKE=1` turns the shake on whatever the setting says (read once).
+    static ENV_HIT_SHAKE: bool = std::env::var("RAZDOR_HIT_SHAKE").is_ok_and(|v| v.trim() == "1");
+}
+
+/// Takes the setting «Тряска от ударов» in, for the next hits.
+pub fn set_hit_shake(on: bool) {
+    HIT_SHAKE.with(|c| c.set(on));
+}
+
+/// Whether a hit shakes the field: the setting, or `RAZDOR_HIT_SHAKE=1`.
+fn hit_shake_on() -> bool {
+    HIT_SHAKE.with(|c| c.get()) || ENV_HIT_SHAKE.with(|e| *e)
+}
+
+/// «Тряска от ударов» (Razdor's, off by default; style only, no rule reads it). A hit's
+/// strength is its damage as a share of the target's max HP, `SHAKE_BASE` plus `SHAKE_SHARE`
+/// times that share, and a kill adds `SHAKE_KILL`; strengths of hits that land together add up,
+/// to `SHAKE_CAP` at most. At full strength the field moves `SHAKE_FRAC` of the screen's height
+/// (about 6 px at 1080p), so a small hit moves it a pixel or two.
+const SHAKE_BASE: f32 = 0.2;
+const SHAKE_SHARE: f32 = 0.8;
+const SHAKE_KILL: f32 = 0.25;
+const SHAKE_CAP: f32 = 1.0;
+const SHAKE_FRAC: f32 = 0.006;
+/// A shake lasts `SHAKE_SECS` at the normal effect length (`effect_secs`); a faster animation
+/// shortens it, to `SHAKE_MIN_SECS` at least.
+const SHAKE_SECS: f32 = 0.2;
+const SHAKE_MIN_SECS: f32 = 0.06;
+
+/// The shake's length for the animation speed `speed` (`SHAKE_SECS`, scaled with the effect).
+fn shake_secs(speed: Option<f32>) -> f32 {
+    (SHAKE_SECS * effect_secs(speed) / effect_secs(None)).clamp(SHAKE_MIN_SECS, SHAKE_SECS)
+}
+
+/// The strength of one hit of `damage` on a unit with `max_hp`, 0 when nothing is damaged.
+fn hit_strength(damage: i32, max_hp: i32, killed: bool) -> f32 {
+    if damage <= 0 {
+        return 0.0;
+    }
+    let share = (damage as f32 / max_hp.max(1) as f32).min(1.0);
+    let kill = if killed { SHAKE_KILL } else { 0.0 };
+    (SHAKE_BASE + SHAKE_SHARE * share + kill).min(SHAKE_CAP)
+}
+
+/// Whether an action of `kind` takes HP from its target (a blow, a shot, a strike), as opposed
+/// to a heal, a blessing or a curse.
+fn deals_damage(kind: ActionKind) -> bool {
+    matches!(kind, ActionKind::Melee | ActionKind::LongStrike | ActionKind::Shot | ActionKind::Strike)
+}
+
+/// The field's shake (`BattleView::shake`): each hit adds its strength to what still shakes and
+/// the shake starts over; the strength decays with the square of the time left, to nothing at
+/// `len`. The offset is two sines per axis at incommensurate rates, a smooth wobble rather than
+/// per-frame jitter, and it depends on the time only, so it is the same at any frame rate.
+#[derive(Clone, Copy, Debug, Default)]
+struct Shake {
+    /// The strength at the last hit, 0 to `SHAKE_CAP`.
+    amp: f32,
+    /// The shake's length and the seconds since the last hit, in seconds.
+    len: f32,
+    t: f32,
+}
+
+impl Shake {
+    /// A hit of `strength` lands: it adds to what still shakes, and the shake lasts `len` seconds.
+    fn hit(&mut self, strength: f32, len: f32) {
+        if strength <= 0.0 {
+            return;
+        }
+        self.amp = (self.strength() + strength).min(SHAKE_CAP);
+        self.len = len;
+        self.t = 0.0;
+    }
+
+    /// The strength now.
+    fn strength(&self) -> f32 {
+        if self.t >= self.len {
+            return 0.0;
+        }
+        let left = 1.0 - self.t / self.len;
+        self.amp * left * left
+    }
+
+    /// The clock moves on `dt` seconds (the battle's pace, as the animations').
+    fn step(&mut self, dt: f32) {
+        self.t = (self.t + dt).min(self.len);
+    }
+
+    /// The offset in pixels at full strength `max_px`; zero when nothing shakes.
+    fn offset(&self, max_px: f32) -> Vec2 {
+        let a = self.strength() * max_px;
+        if a <= 0.0 {
+            return Vec2::ZERO;
+        }
+        let (w, t) = (std::f32::consts::TAU, self.t);
+        let x = 0.5 * ((w * 13.0 * t).sin() + (w * 19.0 * t + 1.7).sin());
+        let y = 0.5 * ((w * 15.0 * t + 0.6).sin() + (w * 23.0 * t + 0.3).sin());
+        vec2(x, y) * a
+    }
+}
+
+/// Feeds the field's shake with what an action that has just landed does: the blow's damage on
+/// its target and on the Splash neighbours (`first`: the blow's effect has ended), the
+/// counterblow on the actor (`last`: the echo's effect has ended). Nothing with the setting off.
+fn feel(shake: &mut Shake, battle: &Battle, actor: usize, hit: &Hit, first: bool, last: bool, len: f32) {
+    if !hit_shake_on() {
+        return;
+    }
+    if first && deals_damage(hit.kind) {
+        let target = &battle.fighters[hit.target];
+        shake.hit(hit_strength(hit.amount, target.max_hp(), hit.killed), len);
+        for &(id, amount) in &hit.splash {
+            let f = &battle.fighters[id];
+            shake.hit(hit_strength(amount, f.max_hp(), !f.alive()), len);
+        }
+    }
+    if let Some(c) = hit.counter.filter(|_| last) {
+        shake.hit(hit_strength(c, battle.fighters[actor].max_hp(), hit.actor_died), len);
+    }
+}
+
 /// A slide's length over `px` of the original's pixels (0x4afbd8): 1.8 ms a pixel, at most
 /// `(100 − speed) × 5` ms with the Community patch (the vanilla cap is unknown).
 fn slide_secs(px: f32, speed: Option<f32>) -> f32 {
@@ -414,6 +538,8 @@ pub struct BattleView {
     quick: Option<std::sync::mpsc::Receiver<(Battle, PatchGlobals)>>,
     /// The battle's moment the last look ahead was for.
     pondered: Option<(usize, Option<usize>, i32, u32)>,
+    /// The field's shake from the hits that landed (`Shake`, «Тряска от ударов»).
+    shake: Shake,
     /// The map behind the battle, drawn once (`world_view::battle_backdrop`); dropped with the battle.
     backdrop: super::render_cache::Cached,
 }
@@ -582,6 +708,7 @@ impl BattleView {
             max: [None, None],
             quick: None,
             pondered: None,
+            shake: Shake::default(),
             backdrop: Default::default(),
         }
     }
@@ -614,10 +741,11 @@ impl BattleView {
         }
     }
 
-    /// The watched battle at 4× (the `custom-battle:watch` snapshot scene).
-    pub fn watch_for_snapshot(&mut self) {
+    /// The watched battle at `speed` times the pace, 4× by default (the `custom-battle:watch[:<speed>]`
+    /// snapshot scene; 1 for the pace of a shake's frames).
+    pub fn watch_for_snapshot(&mut self, speed: u8) {
         self.watch = true;
-        self.speed = 4;
+        self.speed = speed;
     }
 
     /// S: the next pace, 1× → 2× → 4× → 1×.
@@ -819,6 +947,8 @@ impl BattleView {
                 let ended = |end: f32| before < end && fx.t >= end;
                 let (first, _) = fx.marks();
                 let last = fx.duration();
+                // The blow shakes the field as it lands on its card (`feel`).
+                feel(&mut self.shake, &self.battle, fx.actor, hit, ended(first), ended(last), shake_secs(anim_speed()));
                 let mut marks = Vec::new();
                 if ended(first) {
                     marks.push((hit.target, hit.kind));
@@ -861,6 +991,7 @@ impl BattleView {
                 self.fx = None;
             }
         }
+        self.shake.step(dt);
         if let Some((_, t)) = &mut self.news {
             *t -= dt;
             if *t <= 0.0 {
@@ -1147,6 +1278,9 @@ impl BattleView {
         let hovered_cell = self.cell_under_mouse(l);
         // The highlights pulse with the clock (4cd2a2).
         let pulse_ms = (crate::ui::clock::now() * 1000.0) as u64;
+        // The field's offset this frame (zero with the setting off): the cells, the cards, the
+        // effects and their highlights take it; the strip, the panel and the window do not.
+        let shake = self.shake_offset(macroquad::window::screen_height() * SHAKE_FRAC);
 
         // The window: red marble, the title with both armies, the turn in the corner.
         // Its red close button asks to leave the battle, as Esc does (4daa80).
@@ -1161,7 +1295,7 @@ impl BattleView {
 
         // Empty cells, with the lit cells a step can go to.
         for (team, slot) in all_cells(b) {
-            let p = l.cell_pos(team, slot);
+            let p = l.cell_pos(team, slot) + shake;
             if self.shown_at(team, slot).is_some() {
                 continue;
             }
@@ -1207,6 +1341,7 @@ impl BattleView {
                     }
                 }
             }
+            let p = p + shake;
             let hovered = hovered_cell == Some((f.team, f.slot));
             // The original's highlight states (4c57bc): the actor "current" (also while its
             // action plays); on the player's turn its own side's cells it can act on "can act",
@@ -1244,13 +1379,13 @@ impl BattleView {
                 None => Some(team) == acting && moves.contains(&slot),
             };
             if !framed {
-                let sq = l.portrait(l.cell_pos(team, slot));
+                let sq = l.portrait(l.cell_pos(team, slot) + shake);
                 draw_rectangle_lines(sq.x, sq.y, sq.w, sq.h, 1.5 * k, HOVER_EDGE);
             }
         }
 
         if let Some(fx) = &self.fx {
-            self.draw_fx(l, fx);
+            self.draw_fx(l, fx, shake);
         }
         if let Some(xp) = &self.xp {
             // The experience cards of the won battle's hold (4b0684), for a unit that gained:
@@ -1260,7 +1395,7 @@ impl BattleView {
             let row = chrome::xp_strip_row((self.hold.unwrap_or(0.0) * 1000.0) as i64);
             for a in xp.iter().filter(|a| a.xp > 0) {
                 let f = &b.fighters[a.fighter];
-                let sq = l.portrait(l.cell_pos(f.team, f.slot));
+                let sq = l.portrait(l.cell_pos(f.team, f.slot) + shake);
                 let s = sq.w / 92.0;
                 if chrome::xp_veil(sq, row) {
                     let label = chrome::ui_text("Battle", "Expirience").filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr("Experience").to_string());
@@ -1466,14 +1601,14 @@ impl BattleView {
         }
     }
 
-    fn draw_fx(&self, l: &Layout, fx: &Fx) {
+    fn draw_fx(&self, l: &Layout, fx: &Fx, shake: Vec2) {
         let FxKind::Act { hit, echo, slide, effect, .. } = &fx.kind else { return };
         let (first, echo_at) = fx.marks();
         // Where the cards are shown (before the action): a back row that stepped forward stays
         // in its old cells until the effect ends.
         let card = |id: usize| {
             let f = self.fighter(id);
-            l.portrait(l.cell_pos(f.team, f.slot)).center()
+            l.portrait(l.cell_pos(f.team, f.slot) + shake).center()
         };
         // The slide (0x4afbd8): the action's sprite from one card's centre to the other's.
         let sprite = |from: usize, to: usize, s: f32| {
@@ -1497,7 +1632,7 @@ impl BattleView {
             // for a curse.
             let k = (fx.t - echo_at) / effect;
             let a = self.fighter(fx.actor);
-            let q = l.portrait(l.cell_pos(a.team, a.slot));
+            let q = l.portrait(l.cell_pos(a.team, a.slot) + shake);
             let n = match echo {
                 Some(Echo::Curse) => 2,
                 _ => effect_number(&self.battle, fx.actor, hit.kind),
@@ -1511,7 +1646,7 @@ impl BattleView {
         }
         let k = (fx.t - slide) / effect;
         let f = self.fighter(hit.target);
-        let sq = l.portrait(l.cell_pos(f.team, f.slot));
+        let sq = l.portrait(l.cell_pos(f.team, f.slot) + shake);
         let drawn = razdor::frame_probe::time(razdor::frame_probe::Stage::Effect, || draw_effect(self.battle.content(), effect_number(&self.battle, fx.actor, hit.kind), sq, k));
         let (flash, label, color) = match hit.kind {
             ActionKind::Heal => (Color::new(0.2, 1.0, 0.3, 0.4 * (1.0 - k)), format!("+{}", hit.amount), GREEN),
@@ -1526,6 +1661,15 @@ impl BattleView {
         }
         let y = sq.y + sq.h * 0.45 - 26.0 * l.k * k;
         shadow_centered(&label, sq.x + sq.w / 2.0, y, (22.0 * l.k).round(), color);
+    }
+
+    /// The field's offset this frame, in whole pixels (`Shake`); zero with the setting off.
+    /// `max_px` is the offset at full strength.
+    fn shake_offset(&self, max_px: f32) -> Vec2 {
+        if !hit_shake_on() {
+            return Vec2::ZERO;
+        }
+        self.shake.offset(max_px).round()
     }
 
     /// The hover box over a target (or the acting unit's own card, or a cell to step to):
@@ -2205,5 +2349,121 @@ mod tests {
         assert!(!sign_after(4, true, true), "a level gained in this battle keeps it hidden");
         assert!(!sign_after(1, true, false), "first level: no sign");
         assert!(!sign_after(3, false, false), "no next type: no sign");
+    }
+
+    /// A hit's strength grows with its share of the max HP, a kill adds more, and no damage
+    /// is no shake.
+    #[test]
+    fn a_hits_strength_grows_with_its_share_and_a_kill() {
+        assert_eq!(hit_strength(0, 10, true), 0.0, "no damage, no shake");
+        let small = hit_strength(1, 100, false);
+        let half = hit_strength(5, 10, false);
+        assert!(SHAKE_BASE < small && small < half, "{small} {half}");
+        assert!(hit_strength(3, 10, true) > hit_strength(3, 10, false), "a kill shakes more");
+        assert_eq!(hit_strength(50, 10, true), SHAKE_CAP, "capped");
+        assert_eq!(hit_strength(10, 0, false), hit_strength(10, 1, false), "a max HP of 0 counts as 1");
+    }
+
+    /// At 1080p a small hit moves the field a pixel or two, the strongest about six.
+    #[test]
+    fn the_strongest_shake_is_about_six_pixels_at_1080p() {
+        let max_px = 1080.0 * SHAKE_FRAC;
+        let mut small = Shake::default();
+        small.hit(hit_strength(2, 100, false), 0.2);
+        assert!(small.offset(max_px).abs().max_element() <= 2.0, "{}", small.offset(max_px));
+        let mut strong = Shake::default();
+        strong.hit(hit_strength(10, 10, true), 0.2);
+        let moved = strong.offset(max_px);
+        assert!(moved.abs().max_element() <= max_px + 1e-3, "{moved}");
+        assert!(moved.length() > 0.6 * max_px, "{moved}");
+    }
+
+    /// The shake decays to nothing over its length, and its offset depends on the time only:
+    /// the same at any frame rate.
+    #[test]
+    fn the_shake_decays_and_does_not_depend_on_the_frame_rate() {
+        let mut s = Shake::default();
+        s.hit(1.0, 0.2);
+        let start = s.strength();
+        s.step(0.1);
+        assert!(0.0 < s.strength() && s.strength() < start);
+        s.step(0.1);
+        assert_eq!(s.strength(), 0.0, "gone at its length");
+        assert_eq!(s.offset(6.0), Vec2::ZERO);
+        let (mut a, mut b) = (Shake::default(), Shake::default());
+        a.hit(0.7, 0.2);
+        b.hit(0.7, 0.2);
+        for _ in 0..3 {
+            a.step(0.05);
+        }
+        b.step(0.15);
+        assert!((a.offset(6.0) - b.offset(6.0)).length() < 1e-5);
+    }
+
+    /// Hits that land together add up, to the cap at most; a new hit starts the decay over.
+    #[test]
+    fn hits_together_add_up_and_are_capped() {
+        let mut s = Shake::default();
+        s.hit(0.6, 0.2);
+        s.hit(0.6, 0.2);
+        assert_eq!(s.strength(), SHAKE_CAP, "two hits together: capped");
+        let mut s = Shake::default();
+        s.hit(0.3, 0.2);
+        s.hit(0.3, 0.2);
+        assert!((s.strength() - 0.6).abs() < 1e-6);
+        s.step(0.1);
+        s.hit(0.1, 0.2);
+        assert!((s.strength() - 0.25).abs() < 1e-6, "{}", s.strength());
+    }
+
+    /// A faster animation shortens the shake, no shorter than its floor.
+    #[test]
+    fn a_faster_animation_shortens_the_shake() {
+        assert_eq!(shake_secs(None), SHAKE_SECS);
+        assert_eq!(shake_secs(Some(99.0)), SHAKE_MIN_SECS, "an effect of 3 ms: the floor");
+        assert!(SHAKE_MIN_SECS < shake_secs(Some(50.0)) && shake_secs(Some(50.0)) < SHAKE_SECS);
+    }
+
+    /// A blow shakes the field only with the setting on, a kill more than a hit that leaves its
+    /// target standing, and a heal, a blessing or a curse not at all.
+    #[test]
+    fn a_blow_shakes_the_field_only_with_the_setting_on() {
+        let mut view = bandit_camp();
+        let (actor, hit) = loop {
+            assert_eq!(view.battle.outcome(), Outcome::Ongoing, "no blow before the end");
+            if let Some(Step::Act { actor, hit }) = view.battle.auto_step() {
+                if hit.amount > 0 && deals_damage(hit.kind) {
+                    break (actor, hit);
+                }
+            }
+        };
+        let hit = Hit { counter: None, ..hit };
+        let mut shake = Shake::default();
+        set_hit_shake(false);
+        feel(&mut shake, &view.battle, actor, &hit, true, true, 0.2);
+        assert_eq!(shake.strength(), 0.0, "the setting is off");
+        set_hit_shake(true);
+        feel(&mut shake, &view.battle, actor, &hit, true, false, 0.2);
+        assert!(shake.strength() > 0.0, "the blow shakes");
+        let (mut calm, mut hard) = (Shake::default(), Shake::default());
+        feel(&mut calm, &view.battle, actor, &Hit { killed: false, ..hit.clone() }, true, false, 0.2);
+        feel(&mut hard, &view.battle, actor, &Hit { killed: true, ..hit.clone() }, true, false, 0.2);
+        assert!(hard.strength() >= calm.strength(), "a kill shakes more");
+        let mut none = Shake::default();
+        feel(&mut none, &view.battle, actor, &Hit { kind: ActionKind::Heal, ..hit.clone() }, true, false, 0.2);
+        assert_eq!(none.strength(), 0.0, "a heal does not shake");
+        set_hit_shake(false);
+    }
+
+    /// The field takes the offset only with the setting on; the strip and the window never do.
+    #[test]
+    fn the_field_takes_the_shake_only_with_the_setting_on() {
+        let mut view = bandit_camp();
+        view.shake.hit(1.0, 0.2);
+        set_hit_shake(false);
+        assert_eq!(view.shake_offset(6.0), Vec2::ZERO);
+        set_hit_shake(true);
+        assert_ne!(view.shake_offset(6.0), Vec2::ZERO);
+        set_hit_shake(false);
     }
 }

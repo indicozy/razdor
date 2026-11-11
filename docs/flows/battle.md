@@ -163,6 +163,16 @@ act_with(target, kind) / move_active(to) / pass() / own_cell() / skip()
    once (`close_lost`: the defeat report `Dialog::defeat` 250 ms later, its «Выйти в главное меню» to the
    main menu, or «Загрузить последнее сохранение» to the newest save); a draw shows `result_overlay`. All call `Game::resolve_battle`.
 
+The hit shake («Тряска от ударов», `Settings::hit_shake`, off by default; style only): where
+`advance` marks a card as its effect ends, `feel` adds each damaging hit's strength
+(`hit_strength`: the damage as a share of the target's max HP, a kill more, capped at 1; the
+splash neighbours and a counterblow on the actor too) to `BattleView::shake`, which decays over
+`shake_secs` (shorter with a fast animation). `draw` and `draw_fx` add its whole-pixel offset
+(`shake_offset`, `SHAKE_FRAC` of the screen height at full strength) to the cells, the cards,
+the XP cards, the effects and the hover outline. Hit tests keep the unshaken layout; the strip,
+the panel and the window never move. Heals, blessings and curses do not shake, and a quick
+battle (no effects) does not either. `RAZDOR_HIT_SHAKE=1` turns it on for snapshots.
+
 `player_input`: a click on a card → first entry of `options(active, t)` → `act_with`; a click
 on the active card with no option → `pass`; Space = own-cell action (`own_cell` semantics);
 a click on an own empty cell → `move_active`. The rules apply the action **first**; `Fx`
