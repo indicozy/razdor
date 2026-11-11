@@ -7,7 +7,7 @@
 use super::super::battle::{Battle, Team, MAX_QUICK_BUDGET};
 use super::super::content::UnitId;
 use super::super::formation::{Formation, Row, Slot};
-use super::super::game::Game;
+use super::super::game::{Event, Game};
 use super::super::magic::CastTarget;
 use super::snapshot::Settings;
 use super::hook;
@@ -151,8 +151,26 @@ pub fn battle_scope(make: impl FnOnce() -> BattleAct) -> Scope {
     Scope { _private: () }
 }
 
-/// Applies a recorded `Game` action by calling the entry point it came from. `StartBattle` and
-/// `ResolveBattle` and the battle's own actions are the caller's (they need the battle).
+/// Applies a recorded `Game` action by calling the entry point it came from, and gives the events
+/// it raised (the windows and messages a screen shows). `StartBattle` and `ResolveBattle` and the
+/// battle's own actions are the caller's (they need the battle).
+pub fn apply_game_events(g: &mut Game, a: &PlayerAction) -> Vec<Event> {
+    match a {
+        PlayerAction::Answer { yes } => g.answer_question(*yes),
+        PlayerAction::WindowClosed => g.event_window_closed(),
+        PlayerAction::ReleaseUnshown { shown } => g.release_unshown_window(*shown),
+        PlayerAction::MapWindowClosed => g.window_closed(),
+        PlayerAction::DrainEvents => g.drain_events(),
+        PlayerAction::ForceEvent { id } => g.force_event(*id),
+        PlayerAction::TakeHall { id } => g.take_hall_entry(*id).unwrap_or_default(),
+        _ => {
+            apply_game(g, a);
+            Vec::new()
+        }
+    }
+}
+
+/// Applies a recorded `Game` action that gives no events (see [`apply_game_events`]).
 pub fn apply_game(g: &mut Game, a: &PlayerAction) {
     match a {
         PlayerAction::Walk { x, y } => {
@@ -164,29 +182,17 @@ pub fn apply_game(g: &mut Game, a: &PlayerAction) {
         PlayerAction::LookAround => {
             g.look_around();
         }
-        PlayerAction::Answer { yes } => {
-            g.answer_question(*yes);
-        }
-        PlayerAction::WindowClosed => {
-            g.event_window_closed();
-        }
-        PlayerAction::ReleaseUnshown { shown } => {
-            g.release_unshown_window(*shown);
+        PlayerAction::Answer { .. }
+        | PlayerAction::WindowClosed
+        | PlayerAction::ReleaseUnshown { .. }
+        | PlayerAction::MapWindowClosed
+        | PlayerAction::DrainEvents
+        | PlayerAction::ForceEvent { .. }
+        | PlayerAction::TakeHall { .. } => {
+            let _ = apply_game_events(g, a);
         }
         PlayerAction::Chord => {
             g.event_chord();
-        }
-        PlayerAction::MapWindowClosed => {
-            g.window_closed();
-        }
-        PlayerAction::DrainEvents => {
-            g.drain_events();
-        }
-        PlayerAction::ForceEvent { id } => {
-            g.force_event(*id);
-        }
-        PlayerAction::TakeHall { id } => {
-            let _ = g.take_hall_entry(*id);
         }
         PlayerAction::Reenter => {
             g.reenter_building();

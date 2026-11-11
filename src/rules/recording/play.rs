@@ -1,16 +1,20 @@
 //! Playback of a recorded input stream: the game is taken to each recorded place in turn and the
-//! recorded action is applied there by the entry point it came from (`actions::apply_game`,
-//! `actions::apply_battle`). Between two places the rules run as the screen runs them: frames of
-//! `dt` seconds (any frame times give the same states, see `docs/flows/replays.md`), the map's
+//! recorded action is applied there by the entry point it came from (`actions::apply_battle`,
+//! `actions::apply_game_events`). Between two places the rules run as the screen runs them: frames
+//! of `dt` seconds (any frame times give the same states, see `docs/flows/replays.md`), the map's
 //! music changes at the recorded places, and a battle's enemy plays its turns by «Максимум»'s
 //! recorded moves or the battle AI. The caller installs the stream's engine records first
 //! ([`super::hook::install_playback`]).
+//!
+//! Each step takes a budget of game time, so a screen can play a replay in real time: a step that
+//! runs out of budget is taken up again by the next call, at the same place (the states do not
+//! depend on how the time is split).
 
-use super::actions::{apply_battle, apply_game};
+use super::actions::{apply_battle, apply_game_events};
 use super::hook;
 use super::stream::{Entry, EngineInput, Input, PlayerAction, Stamp};
 use crate::rules::battle::{Battle, MaxPoll, MaxThinker, Outcome, Team};
-use crate::rules::game::Game;
+use crate::rules::game::{Event, Game};
 use crate::rules::music::WORLD_THEME;
 
 /// Frames a playback may take to reach one place before it is a drift.
@@ -27,11 +31,13 @@ pub struct Player {
     dt: f32,
     /// How many frames were played (the drift guard counts them).
     frames: u64,
+    /// The events the frames and the recorded actions raised, taken by the screen (`take_events`).
+    events: Vec<Event>,
 }
 
 impl Player {
     pub fn new(game: Game, dt: f32) -> Player {
-        Player { game, battle: None, music_pick: WORLD_THEME, dt, frames: 0 }
+        Player { game, battle: None, music_pick: WORLD_THEME, dt, frames: 0, events: Vec::new() }
     }
 
     /// The game at its recorded place: time runs (frames of `dt`) until the game stands at the end
@@ -42,6 +48,22 @@ impl Player {
     /// changes how the stretch is split. A music change is the exception: it falls at its exact
     /// arrival (the ask), and the time stops there to draw it.
     pub fn advance_to(&mut self, target: Stamp) -> Result<(), String> {
+        let mut left = f32::INFINITY;
+        self.reach_stretch(target, &mut left).map(|_| ())
+    }
+
+    /// The game at a recorded arrival: time runs until the game has taken exactly `target.ask`
+    /// arrivals in the recorded stretch. A music change falls there, mid-step, as it did live
+    /// (`Game::music_rotate` records its stamp), so the time stops at the arrival and the change is
+    /// drawn by the caller.
+    pub fn advance_exact(&mut self, target: Stamp) -> Result<(), String> {
+        let mut left = f32::INFINITY;
+        self.reach_exact(target, &mut left).map(|_| ())
+    }
+
+    /// As [`Player::advance_to`], with `left` game seconds at most: `Ok(true)` when the game stands
+    /// at `target`, `Ok(false)` when the budget ran out first.
+    fn reach_stretch(&mut self, target: Stamp, left: &mut f32) -> Result<bool, String> {
         loop {
             if self.game.stretches == target.stretch && self.game.held.is_empty() {
                 // The paused step of the recorded stretch, if any, is finished: the action (or the
@@ -53,30 +75,33 @@ impl Player {
                     // A contact the walk reaches at this stretch's end is part of it (no time, so
                     // it is not a stretch): it is played before the place.
                     if !self.game.zero_time_next() {
-                        return Ok(());
+                        return Ok(true);
                     }
-                    self.tick_toward(target.stretch, None)?;
-                    continue;
                 }
             }
+            if *left <= 0.0 {
+                return Ok(false);
+            }
             self.tick_toward(target.stretch, None)?;
+            *left -= self.dt;
         }
     }
 
-    /// The game at a recorded arrival: time runs until the game has taken exactly `target.ask`
-    /// arrivals in the recorded stretch. A music change falls there, mid-step, as it did live
-    /// (`Game::music_rotate` records its stamp), so the time stops at the arrival and the change is
-    /// drawn by the caller.
-    pub fn advance_exact(&mut self, target: Stamp) -> Result<(), String> {
+    /// As [`Player::advance_exact`], with `left` game seconds at most.
+    fn reach_exact(&mut self, target: Stamp, left: &mut f32) -> Result<bool, String> {
         loop {
             if self.game.stamp() == target && self.game.held.is_empty() {
-                return Ok(());
+                return Ok(true);
             }
             if self.game.stretches == target.stretch && self.game.asks > target.ask {
                 return Err(format!("the game passed the recorded place {target:?} (now {:?})", self.game.stamp()));
             }
+            if *left <= 0.0 {
+                return Ok(false);
+            }
             let ask = (self.game.stretches == target.stretch && target.ask > self.game.asks).then_some(target.ask);
             self.tick_toward(target.stretch, ask)?;
+            *left -= self.dt;
         }
     }
 
@@ -92,7 +117,8 @@ impl Player {
         }
         self.game.replay_stop_before = Some(stretch + 1);
         self.game.replay_stop = ask;
-        let _ = self.game.tick_shown_within(self.dt, &mut || true);
+        let raised = self.game.tick_shown_within(self.dt, &mut || true);
+        self.events.extend(raised);
         self.game.replay_stop = None;
         self.game.replay_stop_before = None;
         Ok(())
@@ -100,9 +126,18 @@ impl Player {
 
     /// Applies one recorded entry (an engine record is consumed by the hooks, or is a check).
     pub fn apply(&mut self, e: &Entry) -> Result<(), String> {
+        let mut left = f32::INFINITY;
+        self.apply_budget(e, &mut left).map(|_| ())
+    }
+
+    /// Applies `e` with `left` game seconds at most: `Ok(true)` when it was applied, `Ok(false)` when
+    /// the budget ran out before its place (the same entry is taken up by the next call).
+    pub fn apply_budget(&mut self, e: &Entry, left: &mut f32) -> Result<bool, String> {
         match &e.input {
             Input::Engine(EngineInput::Check { hash }) => {
-                self.advance_to(e.at)?;
+                if !self.reach_stretch(e.at, left)? {
+                    return Ok(false);
+                }
                 self.game.finish_pause();
                 self.game.armies_snap();
                 if let Some((b, _)) = self.battle.as_ref() {
@@ -112,43 +147,74 @@ impl Player {
                 if got != *hash {
                     return Err(format!("drift at {:?}: the state hashes {got:016x}, recorded {hash:016x}", e.at));
                 }
-                Ok(())
+                Ok(true)
             }
             Input::Engine(EngineInput::Music { pick }) => {
                 // The change is drawn at its place in the stream (after the entries before it).
-                self.advance_exact(e.at)?;
+                if !self.reach_exact(e.at, left)? {
+                    return Ok(false);
+                }
                 let (next, _) = self.game.music_rotate(self.music_pick);
                 if next != *pick as usize {
                     return Err(format!("the music track is {next}, recorded {pick}"));
                 }
                 self.music_pick = next;
-                Ok(())
+                Ok(true)
             }
-            Input::Engine(_) => Ok(()),
+            Input::Engine(_) => Ok(true),
             Input::Player(PlayerAction::StartBattle) => {
-                self.advance_to(e.at)?;
-                let mut b = self.game.start_battle();
-                b.begin();
+                if !self.reach_stretch(e.at, left)? {
+                    return Ok(false);
+                }
+                let b = self.start_battle();
                 self.battle = Some((b, MaxThinker::new(Team::Enemy)));
-                self.run_enemy()
+                self.run_enemy()?;
+                Ok(true)
             }
             Input::Player(PlayerAction::ResolveBattle) => {
-                self.advance_to(e.at)?;
+                if !self.reach_stretch(e.at, left)? {
+                    return Ok(false);
+                }
                 let (b, _) = self.battle.take().ok_or("a battle to resolve, none under way")?;
                 self.game.resolve_battle(&b);
-                Ok(())
+                Ok(true)
             }
             Input::Player(PlayerAction::Battle(act)) => {
                 let (b, _) = self.battle.as_mut().ok_or("a battle's action, none under way")?;
                 apply_battle(b, act);
-                self.run_enemy()
+                self.run_enemy()?;
+                Ok(true)
             }
             Input::Player(a) => {
-                self.advance_to(e.at)?;
-                apply_game(&mut self.game, a);
-                Ok(())
+                if !self.reach_stretch(e.at, left)? {
+                    return Ok(false);
+                }
+                let raised = apply_game_events(&mut self.game, a);
+                self.events.extend(raised);
+                Ok(true)
             }
         }
+    }
+
+    /// A battle's start at the entry's place: the battle is made and begun as the playback makes
+    /// it, with no enemy turn played, for the caller's view to play. `left` as in `apply_budget`.
+    pub fn start_battle_for_view(&mut self, e: &Entry, left: &mut f32) -> Result<Option<Battle>, String> {
+        if !self.reach_stretch(e.at, left)? {
+            return Ok(None);
+        }
+        Ok(Some(self.start_battle()))
+    }
+
+    /// The battle made by [`Player::start_battle_for_view`] comes back to the playback: when its
+    /// last entry is the battle's resolve (`at_resolve`), the battle is resolved here; otherwise
+    /// the rest of the battle is played from its state, as the stream plays it.
+    pub fn return_battle(&mut self, b: Battle, at_resolve: bool) -> Result<(), String> {
+        if at_resolve {
+            self.game.resolve_battle(&b);
+            return Ok(());
+        }
+        self.battle = Some((b, MaxThinker::new(Team::Enemy)));
+        self.run_enemy()
     }
 
     /// The enemy's turns, as the screen plays them between the player's actions: «Максимум»'s
@@ -186,6 +252,18 @@ impl Player {
             }
         }
         Err("the battle does not end".into())
+    }
+
+    /// The battle as the playback starts it: made and begun (the battle's own start).
+    fn start_battle(&mut self) -> Battle {
+        let mut b = self.game.start_battle();
+        b.begin();
+        b
+    }
+
+    /// The events raised since the last call (the screen's windows and messages).
+    pub fn take_events(&mut self) -> Vec<Event> {
+        std::mem::take(&mut self.events)
     }
 
     /// The game as the playback left it (a battle still under way is dropped).

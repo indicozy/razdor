@@ -226,9 +226,10 @@ impl Driver {
 
     /// Walks to `to` (a cell a route reaches), and waits there until the walk ends, as
     /// [`Driver::walk_to_nearest`] does. A fight that the walk meets ends it at once.
-    fn walk_to(&mut self, frames: &mut Frames, to: crate::rules::map::Tile) {
+    /// Walks to `to` and waits there; false when no walk to it begins (it is not reachable).
+    fn walk_to(&mut self, frames: &mut Frames, to: crate::rules::map::Tile) -> bool {
         if !self.g.set_destination(to) {
-            return;
+            return false;
         }
         for _ in 0..200_000 {
             let ev = self.frame(frames);
@@ -245,6 +246,7 @@ impl Driver {
                 }
             }
         }
+        true
     }
 
     /// `days` game days: the hero waits 4 hours at a time, and fights whatever comes. The days
@@ -1128,4 +1130,191 @@ fn replay_names_are_checked_before_any_file_is_touched() {
     sess.finish();
     assert_eq!(std::fs::read_to_string(&impostor).unwrap(), "hello, not a replay", "a non-replay file is not cut");
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// The screen's view of a battle handed out by a pump: the player's turns are the recorded actions
+/// (`next_battle_act`, at most `actions` of them), the enemy's turns are the battle AI's or the
+/// recorded «Максимум» moves, as the battle view plays them. Returns the battle at its stop.
+fn view_battle(p: &mut super::watch::ReplayPlayer, mut b: crate::rules::battle::Battle, actions: usize) -> crate::rules::battle::Battle {
+    use crate::rules::battle::{MaxPoll, MaxThinker, Outcome, Team};
+    let mut thinker = MaxThinker::new(Team::Enemy);
+    let mut done = 0;
+    loop {
+        let over = p.in_playback(|g| {
+            g.battle_write_back(&b);
+            b.outcome() != Outcome::Ongoing
+        });
+        if over.unwrap_or(true) || done == actions {
+            return b;
+        }
+        let Some(id) = b.active() else { return b };
+        if b.fighters[id].team == Team::Player {
+            let act = p.next_battle_act().expect("the recorded action of the player's turn");
+            super::actions::apply_battle(&mut b, &act);
+            done += 1;
+        } else {
+            p.in_playback(|g| {
+                g.battle_write_back(&b);
+                if b.max_ai() {
+                    loop {
+                        match thinker.poll(&b) {
+                            MaxPoll::Ready(r) => {
+                                b.apply_max(r);
+                                break;
+                            }
+                            MaxPoll::Thinking => continue,
+                            MaxPoll::Failed => {
+                                b.ai_step();
+                                break;
+                            }
+                        }
+                    }
+                } else {
+                    b.ai_step();
+                }
+            });
+        }
+    }
+}
+
+/// A recorded campaign pumped in real time, at any budget per call, plays to the same final state
+/// as the straight playback; a battle handed out is played by the view and given back at its
+/// resolve, or skipped mid-way and played out at once, both to that same end; a seek by budget
+/// reaches the place the straight seek reaches. РК1, 25 days with a battle.
+#[test]
+fn a_recorded_campaign_pumps_in_budgets_hands_out_its_battle_and_seeks_by_budget() {
+    use super::watch::{Pump, ReplayPlayer};
+    let Some(dt) = base() else { return };
+    let c = Arc::new(Content::from_dt(&dt));
+    let (path, _hashes) = recorded_session(&dt, &c, "РК1", 25, "watch-pump");
+    let open = || ReplayPlayer::open(&path, c.clone(), Some(&dt.dir)).unwrap();
+    let mut straight = open();
+    straight.play_to_end().unwrap_or_else(|d| panic!("straight: {d:?}"));
+    let want = state_hash(straight.game().unwrap());
+    for budget in [1.0 / 30.0, 0.7, 5.0] {
+        let mut p = open();
+        let mut calls = 0u64;
+        while p.pump(budget, false).unwrap_or_else(|d| panic!("budget {budget}: {d:?}")) != Pump::Ended {
+            calls += 1;
+            assert!(calls < 5_000_000, "the pump ends");
+        }
+        assert_eq!(state_hash(p.game().unwrap()), want, "budget {budget}: the same end");
+    }
+    let mut watched = open();
+    let mut handed = 0;
+    loop {
+        match watched.pump(1.0 / 30.0, true).unwrap_or_else(|d| panic!("watched: {d:?}")) {
+            Pump::Ended => break,
+            Pump::Playing => {}
+            Pump::Battle => {
+                handed += 1;
+                let b = watched.take_battle().expect("the battle is handed out");
+                let b = view_battle(&mut watched, b, usize::MAX);
+                watched.return_battle(b).unwrap_or_else(|d| panic!("return: {d:?}"));
+            }
+        }
+    }
+    assert!(handed >= 1, "the battle is handed out to the view");
+    assert_eq!(state_hash(watched.game().unwrap()), want, "a watched battle ends as the straight playback");
+    let mut skipped = open();
+    loop {
+        match skipped.pump(1.0 / 30.0, true).unwrap_or_else(|d| panic!("skipped: {d:?}")) {
+            Pump::Ended => break,
+            Pump::Playing => {}
+            Pump::Battle => {
+                let b = skipped.take_battle().expect("the battle is handed out");
+                let b = view_battle(&mut skipped, b, 1);
+                skipped.return_battle(b).unwrap_or_else(|d| panic!("skip: {d:?}"));
+            }
+        }
+    }
+    assert_eq!(state_hash(skipped.game().unwrap()), want, "a skipped battle ends as the straight playback");
+    let first = open().first_day();
+    for days in [4u64, 13, 22] {
+        let day = first + days;
+        let mut seeked = open();
+        seeked.begin_seek_day(day).unwrap_or_else(|d| panic!("seek {day}: {d:?}"));
+        assert!(seeked.seeking());
+        let mut calls = 0u64;
+        while seeked.seeking() {
+            seeked.pump(0.25, false).unwrap_or_else(|d| panic!("seek {day}: {d:?}"));
+            calls += 1;
+            assert!(calls < 5_000_000, "the seek ends");
+        }
+        let mut straight = open();
+        let at = straight.seek_day(day).unwrap_or_else(|d| panic!("straight {day}: {d:?}"));
+        assert_eq!(state_hash(seeked.game().unwrap()), state_hash(straight.game().unwrap()), "day {day} at {at:?}");
+    }
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+/// A scripted visit to a market: the hero walks into the nearest town with goods, buys, sells what
+/// he bought and hires where a barracks offers a unit (the purchase path the random session never
+/// reached). Recorded with a check after each act, it plays back to the live final state.
+#[test]
+fn a_scripted_market_visit_buys_sells_and_hires_and_plays_back() {
+    use super::watch::ReplayPlayer;
+    let Some(dt) = base() else { return };
+    let c = Arc::new(Content::from_dt(&dt));
+    let map = map_named(&dt, "РК1");
+    let mut d = Driver::new(start(&c, &map, Some(23)), true);
+    d.checks = true;
+    // Gold is part of the starting state (set before the recording starts, as a scenario gives it).
+    d.g.gold = 5000;
+    let dir = scratch("market-visit");
+    let sess = super::session::Session::start(&dir, &d.g, &header_for(&d.g, &dt)).unwrap();
+    d.g.replay = Some(sess.clone());
+    d.session = Some(sess.clone());
+    let mut f = Frames::new(DT_A, BUDGET_A);
+    let opening = d.g.drain_events();
+    d.settle(opening);
+    let here = d.g.tile();
+    // The nearest building with goods the hero can walk to (a walk to an unreachable one begins
+    // nothing); its goods are the market's.
+    // The planner keeps to the explored land: the hero walks to the nearest seen buildings until one
+    // with goods is reached (each walk shows more of the land).
+    let mut reached = false;
+    for _ in 0..8 {
+        let here = d.g.tile();
+        let mut seen: Vec<_> = d.g.world.locations.iter().filter(|l| d.g.fog.explored(l.tile) && l.tile != here).map(|l| (l.shop.as_ref().is_some_and(|s| !s.goods().is_empty()), l.tile)).collect();
+        seen.sort_by_key(|&(shop, t)| (!shop, d.g.world.map.distance(t, here), t));
+        for (_, t) in seen.into_iter().take(40) {
+            if d.walk_to(&mut f, t) && d.g.market_here().is_some_and(|m| !m.is_empty()) {
+                reached = true;
+                break;
+            }
+        }
+        if reached {
+            break;
+        }
+    }
+    assert!(reached, "a building with goods the hero can walk to");
+    let goods = d.g.market_here().expect("a market here");
+    let bought = d.g.buy(0).expect("the first good is bought");
+    assert_eq!(goods[0], bought);
+    d.hash();
+    let slot = (0..d.g.pack.len()).find(|&i| d.g.pack.get(i) == Some(bought)).expect("the good is in the pack");
+    d.g.sell(slot).expect("the good is sold back");
+    d.hash();
+    d.play_days(&mut f, 1);
+    let barracks = d.g.world.locations.iter().filter(|l| l.hires(&c)).map(|l| l.tile).min_by_key(|&t| (d.g.world.map.distance(t, d.g.tile()), t));
+    if let Some(to) = barracks {
+        d.walk_to(&mut f, to);
+        if let Some(&unit) = d.g.recruits_here().first() {
+            d.g.hire(unit).expect("the unit is hired");
+            d.hash();
+        }
+    }
+    d.play_days(&mut f, 1);
+    d.hash();
+    sess.finish();
+    let path = dir.join(sess.file_name());
+    let file = super::file::read(&path).unwrap();
+    let entries = || file.segments.iter().flat_map(|s| s.entries.iter());
+    assert!(entries().any(|e| matches!(e.input, Input::Player(PlayerAction::Buy { .. }))), "a purchase is recorded");
+    assert!(entries().any(|e| matches!(e.input, Input::Player(PlayerAction::Sell { .. }))), "a sale is recorded");
+    let mut p = ReplayPlayer::open(&path, c.clone(), Some(&dt.dir)).unwrap();
+    p.play_to_end().unwrap_or_else(|d| panic!("the visit plays back: {d:?}"));
+    assert_eq!(state_hash(p.game().unwrap()), state_hash(&d.g), "the visit's end is the live game");
+    let _ = std::fs::remove_dir_all(&dir);
 }

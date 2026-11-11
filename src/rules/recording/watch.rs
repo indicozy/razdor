@@ -11,19 +11,53 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use super::actions::BattleAct;
 use super::battle_start::BattleStart;
 use super::file::{read, ReplayFile, Segment};
 use super::header::ReplayHeader;
 use super::hook;
 use super::play::Player;
 use super::snapshot::{state_hash, Snapshot};
-use crate::rules::battle::Team;
+use super::stream::{Entry, EngineInput, Input, PlayerAction};
+use crate::rules::battle::{Battle, Outcome, Team};
 use crate::rules::content::Content;
-use crate::rules::game::Game;
+use crate::rules::game::{Event, Game};
 use crate::rules::save::Install;
 
 /// The game time of one playback frame (the states do not depend on it, see `play`).
 const FRAME_DT: f32 = 1.0 / 30.0;
+
+/// What a [`ReplayPlayer::pump`] stopped at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pump {
+    /// The budget is spent, or a seek is under way and reached its place: call again.
+    Playing,
+    /// A battle begins at the place: the caller takes it (`take_battle`), plays its actions
+    /// (`next_battle_act`) and gives it back (`return_battle`).
+    Battle,
+    /// The file is played to its end.
+    Ended,
+}
+
+/// What one budgeted entry step came to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Step {
+    /// An entry was applied.
+    Applied,
+    /// The budget ran out before the entry's place.
+    Budget,
+    /// A battle begins and is handed to the view.
+    Battle,
+    /// The file has no entries left.
+    End,
+}
+
+/// A seek under way: the pumps play on until the game is in this day or at this place.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Seek {
+    Day(u64),
+    Place(Place),
+}
 
 /// A place in the file: a segment and how many of its entries come before it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -83,6 +117,10 @@ pub struct ReplayPlayer {
     last_good: Place,
     /// Set once a checkpoint did not match.
     pub drift: Option<Drift>,
+    /// The seek under way (`begin_seek_day`, `begin_seek_place`), if any.
+    seek: Option<Seek>,
+    /// A battle the pump reached and handed out (`take_battle`), not yet taken.
+    pending_battle: Option<Battle>,
 }
 
 impl ReplayPlayer {
@@ -105,6 +143,8 @@ impl ReplayPlayer {
             idx: 0,
             last_good: Place { seg: 0, index: 0 },
             drift: None,
+            seek: None,
+            pending_battle: None,
         };
         p.marks = p.build_marks();
         p
@@ -139,7 +179,7 @@ impl ReplayPlayer {
     /// checkpoint that does not match stops the playback (`drift`) and gives its [`Drift`].
     pub fn advance(&mut self) -> Result<bool, Drift> {
         self.arm();
-        let r = self.step();
+        let r = self.step_all();
         hook::take_playback();
         r
     }
@@ -188,7 +228,7 @@ impl ReplayPlayer {
             if self.player.as_ref().is_some_and(|p| p.game.clock.day_index() >= day) {
                 return Ok(self.place());
             }
-            if !self.step()? {
+            if !self.step_all()? {
                 return Ok(self.place());
             }
         }
@@ -198,7 +238,7 @@ impl ReplayPlayer {
         let (at, bytes) = self.checkpoint_before(target).ok_or_else(|| self.fail(target, "no checkpoint before the place".into()))?;
         self.start_at(at, &bytes)?;
         while self.place() < target {
-            if !self.step()? {
+            if !self.step_all()? {
                 break;
             }
         }
@@ -249,16 +289,17 @@ impl ReplayPlayer {
         Ok(())
     }
 
-    /// One step of the playback (see [`ReplayPlayer::advance`]).
-    fn step(&mut self) -> Result<bool, Drift> {
+    /// One budgeted step of the playback: the next entry, with `left` game seconds at most. A
+    /// battle's start is handed out instead of played when `watch` is set.
+    fn step(&mut self, left: &mut f32, watch: bool) -> Result<Step, Drift> {
         if let Some(d) = self.drift.clone() {
             return Err(d);
         }
         loop {
+            if self.seg >= self.segments.len() {
+                return Ok(Step::End);
+            }
             if self.player.is_none() {
-                if self.seg >= self.segments.len() {
-                    return Ok(false);
-                }
                 let at = Place { seg: self.seg, index: 0 };
                 let bytes = self.segments[self.seg].snapshot.clone();
                 let start_hash = self.segments[self.seg].start_hash;
@@ -269,6 +310,11 @@ impl ReplayPlayer {
                 }
             }
             if self.idx >= self.segments[self.seg].entries.len() {
+                if self.seg + 1 == self.segments.len() {
+                    // The file's last segment is played out: its game stays (the screen shows the end).
+                    self.seg += 1;
+                    return Ok(Step::End);
+                }
                 // A segment's end: the next segment starts from its own state (a load).
                 self.player = None;
                 self.seg += 1;
@@ -276,22 +322,197 @@ impl ReplayPlayer {
                 continue;
             }
             let here = self.place();
-            let entry = &self.segments[self.seg].entries[self.idx];
+            let entry = self.segments[self.seg].entries[self.idx].clone();
             let player = self.player.as_mut().expect("a started game");
-            match player.apply(entry) {
-                Ok(()) => {
+            if watch && matches!(entry.input, Input::Player(PlayerAction::StartBattle)) {
+                return match player.start_battle_for_view(&entry, left) {
+                    Ok(Some(b)) => {
+                        self.pending_battle = Some(b);
+                        self.idx += 1;
+                        self.last_good = self.place();
+                        Ok(Step::Battle)
+                    }
+                    Ok(None) => Ok(Step::Budget),
+                    Err(reason) => Err(self.stop_at(here, reason)),
+                };
+            }
+            match player.apply_budget(&entry, left) {
+                Ok(true) => {
                     self.idx += 1;
                     self.last_good = self.place();
-                    return Ok(true);
+                    return Ok(Step::Applied);
                 }
-                Err(reason) => {
-                    let day = player.game.clock.day_index();
-                    let d = Drift { day, version: self.header.razdor.clone(), at: here, reason };
-                    self.drift = Some(d.clone());
-                    return Err(d);
+                Ok(false) => return Ok(Step::Budget),
+                Err(reason) => return Err(self.stop_at(here, reason)),
+            }
+        }
+    }
+
+    /// The drift at `at` (the playback stops there, see [`ReplayPlayer::advance`]).
+    fn stop_at(&mut self, at: Place, reason: String) -> Drift {
+        let d = self.fail(at, reason);
+        self.drift = Some(d.clone());
+        d
+    }
+
+    /// Plays one step with no budget: a checkpoint that does not match is a drift.
+    fn step_all(&mut self) -> Result<bool, Drift> {
+        let mut left = f32::INFINITY;
+        self.arm();
+        let r = self.step(&mut left, false);
+        hook::take_playback();
+        match r? {
+            Step::Applied => Ok(true),
+            Step::End => Ok(false),
+            Step::Budget | Step::Battle => unreachable!("an unbudgeted step plays its entry"),
+        }
+    }
+
+    /// Plays the file on in real time: up to `budget` game seconds (the screen's frame times
+    /// times its speed), stopping at the budget's end, at a battle's start (when `watch_battles`
+    /// and no seek is under way: the battle is handed out, see [`ReplayPlayer::take_battle`]), or
+    /// at the file's end. A seek under way ([`ReplayPlayer::begin_seek_day`]) is played on the same
+    /// way and ends when its place is reached. A drift stops it with `Err`.
+    pub fn pump(&mut self, budget: f32, watch_battles: bool) -> Result<Pump, Drift> {
+        let mut left = budget;
+        loop {
+            if let Some(seek) = self.seek {
+                if self.seek_reached(seek) {
+                    self.seek = None;
+                    return Ok(Pump::Playing);
+                }
+            }
+            if left <= 0.0 {
+                return Ok(Pump::Playing);
+            }
+            self.arm();
+            let watch = watch_battles && self.seek.is_none();
+            let r = self.step(&mut left, watch);
+            hook::take_playback();
+            match r? {
+                Step::Applied => {}
+                Step::Budget => return Ok(Pump::Playing),
+                Step::Battle => return Ok(Pump::Battle),
+                Step::End => {
+                    self.seek = None;
+                    return Ok(Pump::Ended);
                 }
             }
         }
+    }
+
+    /// Whether a seek has reached its day or its place.
+    fn seek_reached(&self, seek: Seek) -> bool {
+        match seek {
+            Seek::Day(day) => self.player.as_ref().is_some_and(|p| p.game.clock.day_index() >= day),
+            Seek::Place(place) => self.place() >= place,
+        }
+    }
+
+    /// Starts a seek to `day` on the timeline: the game is restored from the checkpoint before it
+    /// (nothing plays yet), and [`ReplayPlayer::pump`] plays on to the day.
+    pub fn begin_seek_day(&mut self, day: u64) -> Result<(), Drift> {
+        let (at, bytes) = self.checkpoint_before_day(day).ok_or_else(|| self.fail(Place { seg: 0, index: 0 }, "no checkpoint".into()))?;
+        self.begin_seek(at, &bytes, Seek::Day(day))
+    }
+
+    /// Starts a seek to a place of the file (a mark's place): see [`ReplayPlayer::begin_seek_day`].
+    pub fn begin_seek_place(&mut self, target: Place) -> Result<(), Drift> {
+        let (at, bytes) = self.checkpoint_before(target).ok_or_else(|| self.fail(target, "no checkpoint before the place".into()))?;
+        self.begin_seek(at, &bytes, Seek::Place(target))
+    }
+
+    fn begin_seek(&mut self, at: Place, bytes: &[u8], seek: Seek) -> Result<(), Drift> {
+        let r = self.start_at(at, bytes);
+        hook::take_playback();
+        r?;
+        self.seek = Some(seek);
+        Ok(())
+    }
+
+    /// Whether a seek is under way (the screen shows «Перемотка…»).
+    pub fn seeking(&self) -> bool {
+        self.seek.is_some()
+    }
+
+    /// The game as the playback stands (none before the first seek or pump).
+    pub fn game_mut(&mut self) -> Option<&mut Game> {
+        self.player.as_mut().map(|p| &mut p.game)
+    }
+
+    /// Runs `f` on the game with the file's records installed for the call (a battle's view plays
+    /// its own enemy turns, and its «Максимум» moves come from the records). None before a start.
+    pub fn in_playback<R>(&mut self, f: impl FnOnce(&mut Game) -> R) -> Option<R> {
+        self.arm();
+        let r = self.player.as_mut().map(|p| f(&mut p.game));
+        hook::take_playback();
+        r
+    }
+
+    /// The events the playback raised since the last call (windows, messages, the day's report).
+    pub fn take_events(&mut self) -> Vec<Event> {
+        self.player.as_mut().map(Player::take_events).unwrap_or_default()
+    }
+
+    /// The battle a pump handed out (`Pump::Battle`), once. The view plays it: the battle is
+    /// begun by the view, and its actions come from [`ReplayPlayer::next_battle_act`].
+    pub fn take_battle(&mut self) -> Option<Battle> {
+        self.pending_battle.take()
+    }
+
+    /// The next recorded action of the battle under way, when the entry at the place is one (the
+    /// view applies it on the player's turn). None at the battle's resolve or the file's end.
+    pub fn next_battle_act(&mut self) -> Option<BattleAct> {
+        let (i, e) = self.battle_entry()?;
+        let Input::Player(PlayerAction::Battle(act)) = &e.input else { return None };
+        let act = act.clone();
+        self.idx = i + 1;
+        self.last_good = self.place();
+        Some(act)
+    }
+
+    /// The first entry at or after the place that is not one of the battle's own engine records
+    /// (the «Максимум» moves and the patch globals: the playback finds those by their key): its
+    /// index and the entry.
+    fn battle_entry(&self) -> Option<(usize, &Entry)> {
+        let entries = &self.segments.get(self.seg)?.entries;
+        let i = (self.idx..entries.len()).find(|&i| !matches!(entries[i].input, Input::Engine(EngineInput::Max { .. } | EngineInput::Patch(_))))?;
+        Some((i, &entries[i]))
+    }
+
+    /// Whether the battle under way has no more actions: its resolve is the next entry.
+    pub fn battle_resolves_next(&self) -> bool {
+        self.battle_entry().is_some_and(|(_, e)| matches!(e.input, Input::Player(PlayerAction::ResolveBattle)))
+    }
+
+    /// Gives a battle back: `b` is the view's battle, to the end of its actions or stopped
+    /// (skipped) at any point. At the battle's resolve it is resolved here; otherwise the rest of
+    /// the battle is played from its state at once, as the stream plays it. A battle that ended
+    /// before its recorded actions did is a drift.
+    pub fn return_battle(&mut self, b: Battle) -> Result<(), Drift> {
+        let at_resolve = self.battle_resolves_next();
+        let resolve_at = self.battle_entry().map(|(i, _)| i);
+        let here = self.place();
+        if !at_resolve && b.outcome() != Outcome::Ongoing {
+            return Err(self.stop_at(here, "the battle ended before its recorded actions".into()));
+        }
+        self.arm();
+        let r = match self.player.as_mut() {
+            Some(p) => p.return_battle(b, at_resolve),
+            None => Err("no game to give the battle back to".into()),
+        };
+        hook::take_playback();
+        r.map_err(|reason| self.stop_at(here, reason))?;
+        if let (true, Some(i)) = (at_resolve, resolve_at) {
+            self.idx = i + 1;
+            self.last_good = self.place();
+        }
+        Ok(())
+    }
+
+    /// The last day the marks show (the file's end on the timeline), or the first day when none.
+    pub fn last_day(&self) -> u64 {
+        self.marks.iter().map(|m| m.day).max().unwrap_or_else(|| self.first_day())
     }
 
     fn fail(&self, at: Place, reason: String) -> Drift {
