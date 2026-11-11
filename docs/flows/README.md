@@ -22,6 +22,7 @@ Razdor implements them.
 | Tests, real-data tests and difftests, offscreen screenshots, profiling a hitch, releases, updates, the editor | [testing-and-tools.md](testing-and-tools.md) |
 | Experimental scenario rules (the `...` button on the scenario screen), noncombatants, the Shift shortcuts | [experimental-rules.md](experimental-rules.md) |
 | A trailer shot (dev-only): the camera script, auto-answered events, the recorder and its sound | [trailer.md](trailer.md) (the format: `docs/trailer-shots.md`) |
+| The 2.5D cards: labelling the owner's ground flags, training and applying the ground classifier, the engine cut for mods | [ground-classifier.md](ground-classifier.md) |
 | A player's report | the `player-report` skill, then the flow of the area |
 
 ## Where the truth is
