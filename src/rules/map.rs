@@ -580,6 +580,9 @@ impl Decoration {
     }
 }
 
+/// The side of an object chunk, in cells (`TileMap::objects_in_rect`).
+const OBJECT_CHUNK: i32 = 16;
+
 #[derive(Clone, Debug)]
 pub struct TileMap {
     pub grid: Grid,
@@ -598,6 +601,10 @@ pub struct TileMap {
     pub objects: Vec<Decoration>,
     /// `objects[row_start[r]..row_start[r + 1]]` stand in row `r`.
     row_start: Vec<usize>,
+    /// The objects by chunk (`OBJECT_CHUNK` cells square, row-major, `chunk_cols` to a row): each object's index in
+    /// `objects`, once. Built with the map; `objects` is not changed after that.
+    chunks: Vec<Vec<u32>>,
+    chunk_cols: i32,
     /// Non-terrain characters of a text map (location markers) and where they are.
     pub markers: Vec<(char, Tile)>,
 }
@@ -632,8 +639,15 @@ impl TileMap {
             }
             row_start.push(i);
         }
+        let chunk_cols = (w.max(0) + OBJECT_CHUNK - 1) / OBJECT_CHUNK;
+        let chunk_rows = (h.max(0) + OBJECT_CHUNK - 1) / OBJECT_CHUNK;
+        let mut chunks: Vec<Vec<u32>> = vec![Vec::new(); (chunk_cols * chunk_rows) as usize];
+        for (i, o) in objects.iter().enumerate() {
+            let c = (o.tile.1 / OBJECT_CHUNK) * chunk_cols + o.tile.0 / OBJECT_CHUNK;
+            chunks[c as usize].push(i as u32);
+        }
         let n = codes.len();
-        let mut m = TileMap { grid, w, h, surface: codes.to_vec(), generation: next_generation(), land: vec![0; n], water: vec![0; n], objects, row_start, markers: Vec::new() };
+        let mut m = TileMap { grid, w, h, surface: codes.to_vec(), generation: next_generation(), land: vec![0; n], water: vec![0; n], objects, row_start, chunks, chunk_cols, markers: Vec::new() };
         let index = |t: Tile| (t.0 >= 0 && t.1 >= 0 && t.0 < w && t.1 < h).then(|| (t.1 * w + t.0) as usize);
         // Hills set the base of their square (later in the row-by-row scan over earlier).
         let mut v = vec![0i32; n];
@@ -734,6 +748,8 @@ impl TileMap {
             water: Vec::new(),
             objects: Vec::new(),
             row_start: Vec::new(),
+            chunks: Vec::new(),
+            chunk_cols: 0,
             markers: Vec::new(),
         }
     }
@@ -806,6 +822,31 @@ impl TileMap {
         if let Some(i) = self.index(t) {
             self.land[i] = cost.max(1);
         }
+    }
+
+    /// The objects whose tile lies in columns `c0..c1` and rows `r0..r1` (clipped to the map), in the map's order (row by
+    /// row): the chunks that overlap the rectangle, then the exact test. An object is in one chunk, so none comes twice.
+    pub fn objects_in_rect(&self, c0: i32, c1: i32, r0: i32, r1: i32) -> Vec<Decoration> {
+        let (c0, c1) = (c0.clamp(0, self.w), c1.clamp(0, self.w));
+        let (r0, r1) = (r0.clamp(0, self.h), r1.clamp(0, self.h));
+        if c0 >= c1 || r0 >= r1 {
+            return Vec::new();
+        }
+        let (cx0, cx1) = (c0 / OBJECT_CHUNK, (c1 - 1) / OBJECT_CHUNK);
+        let (cy0, cy1) = (r0 / OBJECT_CHUNK, (r1 - 1) / OBJECT_CHUNK);
+        let mut found: Vec<u32> = Vec::new();
+        for cy in cy0..=cy1 {
+            for cx in cx0..=cx1 {
+                found.extend_from_slice(&self.chunks[(cy * self.chunk_cols + cx) as usize]);
+            }
+        }
+        // The map's order is the objects' index order (they are sorted row by row when the map is built).
+        found.sort_unstable();
+        found
+            .into_iter()
+            .map(|i| self.objects[i as usize])
+            .filter(|o| (c0..c1).contains(&o.tile.0) && (r0..r1).contains(&o.tile.1))
+            .collect()
     }
 
     /// Objects standing in rows `r0..r1`.
@@ -1530,6 +1571,22 @@ TTTTT
         assert_eq!(m.minutes((1, 1)), None);
         assert_eq!(m.objects_in_rows(4, 5).len(), 5);
         assert!(m.objects_in_rows(0, 4).is_empty());
+    }
+
+    #[test]
+    fn objects_in_rect_is_the_rows_filtered_by_columns_in_the_same_order() {
+        // A 40 × 40 map with objects in every chunk, some on the chunk edges.
+        let mut objects = Vec::new();
+        for y in (0..40).step_by(3) {
+            for x in (0..40).step_by(5) {
+                objects.push(obj(x, y, 9, ((x + y) % 7) as u8));
+            }
+        }
+        let m = TileMap::from_codes(Grid::Square8, 40, 40, &vec![0u8; 1600], objects);
+        for &(c0, c1, r0, r1) in &[(0, 40, 0, 40), (15, 17, 0, 40), (-3, 16, 14, 33), (16, 32, 16, 32), (39, 40, 5, 6), (10, 10, 0, 40), (0, 40, 40, 50)] {
+            let want: Vec<Decoration> = m.objects_in_rows(r0, r1).iter().filter(|o| (c0..c1).contains(&o.tile.0)).copied().collect();
+            assert_eq!(m.objects_in_rect(c0, c1, r0, r1), want, "rect {c0}..{c1} x {r0}..{r1}");
+        }
     }
 
     #[test]

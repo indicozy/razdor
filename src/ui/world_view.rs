@@ -4467,7 +4467,8 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     };
     // Each drawn object's `seen` test, made once for the frame: it scans the fog around every object cell,
     // and the passes below ask it again (the fog does not change while the world is drawn).
-    let rows = map.objects_in_rows(r0 - up, r1 + below);
+    // The objects of the drawn columns and rows (the chunks overlapping them): `seen` tests the same columns.
+    let rows = map.objects_in_rect(c0 - side, c1 + side, r0 - up, r1 + below);
     let seen_row: Vec<bool> = rows.iter().map(&seen).collect();
     // 2.5D: a card building's ground pieces lie flat in the ground pass, before the shadows (which fall on them)
     // and under every standing sprite (`draw_building_ground`).
