@@ -1326,27 +1326,79 @@ fn tilt_yaw_target() -> f32 {
 /// Turns the yaw target by `deg` (wrapped).
 fn turn_tilt_yaw(deg: f32) {
     TILT_YAW.store(wrap_yaw(tilt_yaw_target() + deg).to_bits(), std::sync::atomic::Ordering::Relaxed);
+    AUTO_PAUSED.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// Turns the view back to the default angle (north up): the compass button's tap.
 fn reset_tilt_yaw() {
     TILT_YAW.store(0.0f32.to_bits(), std::sync::atomic::Ordering::Relaxed);
+    AUTO_PAUSED.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// The yaw after `dt_ms` of easing from `shown` toward `target`: the shortest way round, at a
-/// rate of 12 a second, and onto the target within 0.05°.
-fn ease_yaw(shown: f32, target: f32, dt_ms: i64) -> f32 {
+/// The ease's rate of the player's own turns, per second.
+const TILT_YAW_RATE: f32 = 12.0;
+/// The ease's rate of the third person's auto-turn, per second: a time constant of 0.2 s, so a turn is
+/// about settled after a second (a critically damped ease, without overshoot).
+const AUTO_TURN_RATE: f32 = 5.0;
+
+/// The yaw after `dt_ms` of easing from `shown` toward `target` at `rate` per second: the shortest way round,
+/// and onto the target within 0.05°. The step is exponential, so the yaw never passes the target, and the same
+/// time in two frames or in one gives the same yaw (the frame rate does not change the turn).
+fn ease_yaw_at(shown: f32, target: f32, dt_ms: i64, rate: f32) -> f32 {
     let d = wrap_yaw(target - shown);
     if d.abs() < 0.05 {
         return target;
     }
-    wrap_yaw(shown + d * (1.0 - (-(dt_ms as f32 / 1000.0) * 12.0).exp()))
+    wrap_yaw(shown + d * (1.0 - (-(dt_ms as f32 / 1000.0) * rate).exp()))
 }
 
-/// Eases the shown yaw toward its target over the frame's `dt_ms` ([`ease_yaw`]).
+/// Eases the shown yaw toward its target over the frame's `dt_ms` ([`ease_yaw_at`]): at the auto-turn's rate
+/// while the third person's camera follows the hero (`auto_turn_on`), else at the player's.
 fn ease_tilt_yaw(dt_ms: i64) {
-    let next = ease_yaw(tilt_yaw(), tilt_yaw_target(), dt_ms);
+    let rate = if auto_turn_on() { AUTO_TURN_RATE } else { TILT_YAW_RATE };
+    let next = ease_yaw_at(tilt_yaw(), tilt_yaw_target(), dt_ms, rate);
     TILT_YAW_SHOWN.store(next.to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether the third person's camera turns by itself toward the hero's walk (`audio::Settings::map_auto_turn`,
+/// pushed by [`set_auto_turn`]). Off by default.
+static AUTO_TURN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The auto-turn is paused by the player's own turn (Q, E, the twist, the compass) until the next walk starts.
+static AUTO_PAUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Whether the hero was walking last frame: a walk starts when he walks and was not.
+static WAS_WALKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Puts the third person's auto-turn on or off, from the settings, at once.
+pub fn set_auto_turn(on: bool) {
+    AUTO_TURN.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether the auto-turn setting is on (the third person's camera follows the hero's walk).
+pub fn auto_turn_setting() -> bool {
+    AUTO_TURN.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Whether the auto-turn acts now: the setting, with the third person's camera (not the eyes', not a flat map).
+fn auto_turn_on() -> bool {
+    auto_turn_setting() && tilt_view() && first_person() && !eyes_setting()
+}
+
+/// Whether the auto-turn stays paused after a frame: a walk that starts ends the pause, and otherwise it holds.
+fn auto_turn_paused(paused: bool, was_walking: bool, walking: bool) -> bool {
+    if walking && !was_walking { false } else { paused }
+}
+
+/// The auto-turn of a frame: while the hero walks and the player has not turned since his walk started, the
+/// yaw's target turns to the walk ([`follow_walk`]). Standing, the target stays where it is, so the camera does
+/// not turn; a reversal turns it the short way round, eased.
+fn auto_turn(game: &Game) {
+    let walking = game.moving();
+    let was = WAS_WALKING.swap(walking, std::sync::atomic::Ordering::Relaxed);
+    let paused = auto_turn_paused(AUTO_PAUSED.load(std::sync::atomic::Ordering::Relaxed), was, walking);
+    AUTO_PAUSED.store(paused, std::sync::atomic::Ordering::Relaxed);
+    if walking && !paused {
+        follow_walk(game);
+    }
 }
 
 /// The eyes view's yaw target while the hero walks: the direction of his next step, from where he is
@@ -5436,6 +5488,8 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
     // The eyes view turns with the hero's walk first, so the easing carries it.
     if eyes_view() {
         follow_walk(game);
+    } else if auto_turn_on() {
+        auto_turn(game);
     }
     if tilt_view() {
         ease_tilt_yaw(dt_ms);
@@ -7333,6 +7387,16 @@ mod tilt_tests {
         assert_eq!(curve_bits(), before);
     }
 
+    /// The auto-turn's pause: a walk that starts ends it; standing and walking on keep it, so a manual turn
+    /// stays until the next walk.
+    #[test]
+    fn the_auto_turn_stays_paused_until_the_next_walk() {
+        assert!(!auto_turn_paused(false, false, false));
+        assert!(auto_turn_paused(true, false, false), "standing keeps the pause");
+        assert!(auto_turn_paused(true, true, true), "walking on keeps the pause");
+        assert!(!auto_turn_paused(true, false, true), "a new walk ends it");
+    }
+
     /// The 2.5D view's sprites never fade by the hero's distance, even with it set for the pass, at any yaw
     /// (only the first-person view keys on it). The tests run with `RAZDOR_VIEW` unset, as a player's game does.
     #[test]
@@ -7544,18 +7608,38 @@ mod tilt_tests {
     /// stays put when no time passes or it is there already.
     #[test]
     fn the_view_eases_back_to_north_up_the_short_way() {
-        assert_eq!(ease_yaw(30.0, 30.0, 16), 30.0);
-        assert_eq!(ease_yaw(10.0, 0.0, 0), 10.0, "no time, no move");
+        assert_eq!(ease_yaw_at(30.0, 30.0, 16, TILT_YAW_RATE), 30.0);
+        // The auto-turn: never past the target, the same at any frame rate, a reversal eased (no step of a
+        // turn), and settled about a second on.
+        let (mut a, mut b) = (0.0f32, 0.0f32);
+        for _ in 0..100 {
+            let next = ease_yaw_at(a, 90.0, 10, AUTO_TURN_RATE);
+            assert!(next >= a - 1e-4 && next <= 90.0 + 1e-4, "no overshoot: {a} -> {next}");
+            a = next;
+        }
+        for _ in 0..50 {
+            b = ease_yaw_at(b, 90.0, 20, AUTO_TURN_RATE);
+        }
+        assert!((a - b).abs() < 0.01, "the frame rate does not change the turn: {a} and {b}");
+        assert!((a - 90.0).abs() < 1.0, "settled after a second: {a}");
+        let mut s = 0.0f32;
+        for _ in 0..60 {
+            let next = ease_yaw_at(s, 180.0, 16, AUTO_TURN_RATE);
+            assert!((next - s).abs() < 20.0, "a reversal eases through: {s} -> {next}");
+            s = next;
+        }
+        assert!(ease_yaw_at(170.0, -170.0, 16, AUTO_TURN_RATE) > 170.0, "the short way round, eased");
+        assert_eq!(ease_yaw_at(10.0, 0.0, 0, TILT_YAW_RATE), 10.0, "no time, no move");
         // From 170° to -170° is 20° the short way, through 180°: it goes up past 170°.
-        assert!(ease_yaw(170.0, -170.0, 16) > 170.0, "the short way round");
+        assert!(ease_yaw_at(170.0, -170.0, 16, TILT_YAW_RATE) > 170.0, "the short way round");
         let mut s = 90.0;
         for _ in 0..600 {
-            let next = ease_yaw(s, 0.0, 16);
+            let next = ease_yaw_at(s, 0.0, 16, TILT_YAW_RATE);
             assert!(wrap_yaw(next).abs() <= wrap_yaw(s).abs() + 1e-3, "it never turns away: {s} -> {next}");
             s = next;
         }
         assert_eq!(s, 0.0, "snapped onto north up");
-        assert_eq!(ease_yaw(0.01, 0.0, 16), 0.0, "within 0.05° it snaps");
+        assert_eq!(ease_yaw_at(0.01, 0.0, 16, TILT_YAW_RATE), 0.0, "within 0.05° it snaps");
     }
 
     /// The compass shows only in the 2.5D view, while the view is turned away from north up (by a

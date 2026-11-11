@@ -1399,6 +1399,7 @@ pub fn apply_options(audio: &super::audio::Settings) {
     super::world_view::set_far_ground(audio.far_ground());
     super::world_view::set_eyes(audio.map_eyes);
     super::world_view::set_tunes(audio.map_third_tune, audio.map_first_tune);
+    super::world_view::set_auto_turn(audio.map_auto_turn);
     super::world_view::set_sprite_size(audio.map_sprite_size);
     super::world_view::set_map_render_scale(audio.map_render_scale);
     super::frame_cap::set_setting(audio.frame_cap);
@@ -1592,7 +1593,7 @@ impl Group {
     /// The rows the group shows, top to bottom. Every row is in exactly one group (a test checks it).
     pub fn rows(self) -> &'static [Row] {
         match self {
-            Group::Map => &[Row::MapZoom, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::CurveReset, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
+            Group::Map => &[Row::MapZoom, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::CurveReset, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
             Group::Battle => &[Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience, Row::HitShake],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
@@ -1611,6 +1612,7 @@ pub enum Row {
     SpriteSize,
     TwoFingerTurn,
     FarGround,
+    AutoTurn,
     CurveStart,
     CurveStrength,
     CameraHeight,
@@ -1656,7 +1658,7 @@ pub enum Row {
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 48] = [
+pub const ALL: [Row; 49] = [
         Row::MapZoom,
         Row::MapResolution,
         Row::FrameCap,
@@ -1664,6 +1666,7 @@ pub const ALL: [Row; 48] = [
         Row::SpriteSize,
         Row::TwoFingerTurn,
         Row::FarGround,
+        Row::AutoTurn,
         Row::CurveStart,
         Row::CurveStrength,
         Row::CameraHeight,
@@ -1713,6 +1716,7 @@ pub const ALL: [Row; 48] = [
             Row::MapZoom => Some(tr("The zoom the map plays at. The wheel steps away from it and the 0 key comes back to it; locked, the map always shows it.")),
             Row::FarGround => Some(tr("Up: the far ground rolls up to a top-down map. Horizon: the ground curves down like the earth's horizon, with the sky above it. Globe: the ground curves away on every side, like a small planet.")),
             Row::MapView => Some(tr("Third person: the camera behind the hero's back. First person: the view through the hero's eyes.")),
+            Row::AutoTurn => Some(tr("Camera follows the hero: the camera turns by itself to where the hero walks.")),
             Row::CurveStart => Some(tr("Curve start: how much ground in front of the hero stays flat before it starts to bend.")),
             Row::CurveStrength => Some(tr("Curve strength: how fast the ground bends up, down or around (the Globe).")),
             Row::CameraHeight => Some(tr("Camera height: for the third person, how far and high the camera stands behind the hero (100% is as before); for the first person, the eyes' height above the ground in cells (0.70 is as before).")),
@@ -1751,6 +1755,8 @@ pub const ALL: [Row; 48] = [
             Row::FarGround | Row::CurveStart | Row::CurveStrength | Row::CameraHeight | Row::CameraPitch | Row::CameraFov | Row::CurveReset => {
                 audio.map_tilt && audio.map_first_person
             }
+            // The third person only: the eyes' camera is the hero's own.
+            Row::AutoTurn => audio.map_tilt && audio.map_first_person && !audio.map_eyes,
             Row::LightCycle => audio.map_light == LightMode::Cycle,
             Row::LightHour => audio.map_light == LightMode::Fixed,
             // The shadows are the light's: shown only with the light on.
@@ -2081,6 +2087,12 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
                     super::view25::FarGround::Horizon => (true, true),
                     super::view25::FarGround::Globe => (false, false),
                 };
+            }
+        }
+        Row::AutoTurn => {
+            // Razdor's (the owner's request, 2026-11-11): the third person's camera turns toward the hero's walk.
+            if labelled_row_help(c, geo, tr("Camera follows the hero"), yes_no(audio.map_auto_turn), Row::AutoTurn.help_text()).0 {
+                audio.map_auto_turn = !audio.map_auto_turn;
             }
         }
         Row::CurveStart => {
@@ -3622,7 +3634,9 @@ mod tests {
         let first = super::super::audio::Settings { map_tilt: true, map_first_person: true, ..Default::default() };
         let tilted = super::super::audio::Settings { map_tilt: true, ..Default::default() };
         let flat = super::super::audio::Settings::default();
-        assert!(Row::FarGround.shown(&first));
+        assert!(Row::FarGround.shown(&first) && Row::AutoTurn.shown(&first), "the third person has the auto-turn");
+        assert!(!Row::AutoTurn.shown(&super::super::audio::Settings { map_eyes: true, ..first.clone() }), "not the eyes");
+        assert!(!Row::AutoTurn.shown(&tilted));
         assert!(!Row::FarGround.shown(&tilted));
         assert!(!Row::FarGround.shown(&flat));
         assert_eq!(map_view_label(&flat), tr("Flat"));
@@ -3653,7 +3667,7 @@ mod tests {
     #[test]
     fn the_long_hints_are_behind_a_question_mark() {
         let with: Vec<Row> = Row::ALL.into_iter().filter(|r| r.help_text().is_some()).collect();
-        assert_eq!(with, vec![Row::MapZoom, Row::MapView, Row::FarGround, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::Language, Row::Updates, Row::ChronicleSummary]);
+        assert_eq!(with, vec![Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::Language, Row::Updates, Row::ChronicleSummary]);
         scene_help("Experience");
         assert_eq!(HELP_PINNED.with(|p| p.get()), Row::Experience.help_text());
         HELP_PINNED.with(|p| p.set(None));

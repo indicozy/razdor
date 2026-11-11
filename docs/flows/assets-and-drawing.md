@@ -424,7 +424,14 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
     `Settings::map_third_tune` and `map_first_tune` (pushed by `world_view::set_tunes`). Its `flat` is the bend's flat
     part (cells, 0 to 30) and the arc's radius is the far ground's default divided by `strength` (`CameraTune::radius`;
     ¼ to 4, a log2 slider). The defaults are the constants (`THIRD_TUNE`, `FIRST_TUNE`), so the default look is the same.
-    Both curves are in the cached pictures' keys (`curve_bits`). At the gentlest strength a low pitch can see sky
+    Both curves are in the cached pictures' keys (`curve_bits`). The camera's height, tilt and field of view
+    («Высота камеры», «Наклон камеры», «Угол обзора») are the same `CameraTune` (the eyes' pitch may be negative:
+    it looks up, with no bend above the sky's horizon), with «Изгиб и камера» back to the constants.
+    The third person's auto-turn («Камера поворачивается за героем», `Settings::map_auto_turn`, `world_view::set_auto_turn`):
+    while the hero walks (`Game::moving`) and the player has not turned since his walk started (Q, E, the twist or the
+    compass set `AUTO_PAUSED`; a new walk ends it), `follow_walk` sets the yaw's target to his walk. The shown yaw eases
+    at `AUTO_TURN_RATE` (5 a second, a time constant of 0.2 s, exponential so no overshoot and the same at any frame
+    rate); a reversal eases through the short way round. Standing, the target does not move. At the gentlest strength a low pitch can see sky
     above the horizon at the frame's centre (the eyes look down 2 degrees): the planet's horizon, not a pick bug. `RAZDOR_VIEW_HORIZON=down|up|globe` (`1` is
     `down`) overrides «Даль»; `RAZDOR_VIEW_GLOBE_RADIUS=<cells>` tunes the globe's radius for the snapshots.
   - The camera: `view25::TiltCamera::first_person(look, scale, frame, yaw, far, tune)` (`far` is the `FarGround`, `tune` the
