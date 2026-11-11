@@ -325,11 +325,23 @@ pub fn form_sun() -> Option<(f32, [f32; 2])> {
     Some((k, sun_bearing(hour)))
 }
 
-/// The cast shadows of this frame (`casts_at` the hour `frame_light` just set), None unless
+/// The cast shadows of this frame (`casts_stepped` the hour `frame_light` just set), None unless
 /// `sun_shadows_on`.
 pub fn frame_casts() -> Option<Casts> {
     let hour = LAST_HOUR.get()?;
-    (shadow_mode() == ShadowMode::Sun).then(|| casts_at(hour))
+    (shadow_mode() == ShadowMode::Sun).then(|| casts_stepped(hour))
+}
+
+/// The cast shadows at a shown hour with their geometry stepped to the whole hour: the direction and the
+/// length are those of `floor(hour)`, so the shadows move once an hour and are the same all through it.
+/// Only the alpha follows the hour (the sky's curve is continuous, `casts_at`).
+pub fn casts_stepped(hour: f32) -> Casts {
+    let now = casts_at(hour);
+    let step = casts_at(hour.floor());
+    Casts {
+        sun: Cast { dir: step.sun.dir, len: step.sun.len, alpha: now.sun.alpha },
+        moon: Cast { dir: step.moon.dir, len: step.moon.len, alpha: now.moon.alpha },
+    }
 }
 
 #[cfg(test)]
@@ -427,10 +439,26 @@ mod tests {
         for i in 0..=40 {
             let game = 9.0 + i as f32 * 0.05;
             frame_light(game, 0.0, 1.0 / 60.0);
-            assert_eq!(frame_casts(), Some(casts_at(game)), "frame {i}: the shadows of {game} h");
+            assert_eq!(frame_casts(), Some(casts_stepped(game)), "frame {i}: the shadows of {game} h");
         }
         assert_ne!(casts_at(9.0).sun.len, casts_at(11.0).sun.len, "the shadows change over the two hours");
         set_prefs(LightMode::Off, 24, 18, ShadowMode::Painted, crate::ui::lights::Quality::High);
+    }
+
+    #[test]
+    fn the_shadow_geometry_steps_once_an_hour_and_the_alpha_follows_the_hour() {
+        let base = casts_stepped(10.0);
+        for i in 0..10 {
+            let h = 10.0 + i as f32 * 0.099;
+            assert_eq!(casts_stepped(h).sun.dir, base.sun.dir, "{h} h: the direction holds through the hour");
+            assert_eq!(casts_stepped(h).sun.len, base.sun.len, "{h} h: the length holds through the hour");
+            assert_eq!(casts_stepped(h).moon.dir, base.moon.dir, "{h} h: the moon's direction holds too");
+        }
+        let next = casts_stepped(11.0);
+        assert!(next.sun.len != base.sun.len && next.sun.dir != base.sun.dir, "the next hour steps the geometry");
+        for h in [10.0, 10.5, 10.99] {
+            assert!((casts_stepped(h).sun.alpha - casts_at(h).sun.alpha).abs() < 1e-6, "{h} h: the alpha is the hour's own");
+        }
     }
 
     #[test]
