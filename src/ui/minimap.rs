@@ -456,6 +456,12 @@ pub fn fog_layer(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: imp
     (fog.enabled && fog.w > 0 && fog.h > 0).then(|| fog_texture(fog, held, origin, settle))
 }
 
+/// [`fog_layer`] and the box of its texels that are not fully transparent (`fog_texture_box`): None
+/// when the fog is off. The box is None when no texel is dark.
+pub fn fog_layer_box(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>) -> Option<(Texture2D, Option<[i32; 4]>)> {
+    (fog.enabled && fog.w > 0 && fog.h > 0).then(|| fog_texture_box(fog, held, origin, settle))
+}
+
 /// Draws the fog over the map. `tl` and `br` are the screen positions of world points
 /// `(-0.5, -0.5·row)` and `(w − 0.5, (h − 0.5)·row)`: the outer corners of the edge cells,
 /// so texel centres fall on cell centres.

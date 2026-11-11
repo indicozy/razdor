@@ -1579,6 +1579,20 @@ fn bent_mist_meshes(bend: &view25::Bend, eye: Vec3, edge: f32, origin: Vec2, sca
 /// The cells before a bent view's horizon over which a raised mist sheet sinks to the sheet.
 const HORIZON_FADE: f32 = 3.0;
 
+/// The rectangles of the dark box `bx` (x0, y0, x1, y1 texels, `minimap::fog_layer_box`) of a `w` × `h`
+/// fog texture whose full quad is `tl`..`br`: where the box is drawn, and its texels (`src`). The box is
+/// grown by a texel a side, so the bilinear sampling at its edge is the whole texture's (as
+/// `minimap::draw_fog_boxed`); the texels keep their screen positions.
+fn boxed_rects(tl: Vec2, br: Vec2, (w, h): (i32, i32), bx: [i32; 4]) -> (Rect, Option<Rect>) {
+    let (x0, y0) = ((bx[0] - 1).max(0), (bx[1] - 1).max(0));
+    let (x1, y1) = ((bx[2] + 1).min(w), (bx[3] + 1).min(h));
+    let cell = (br - tl) / vec2(w as f32, h as f32);
+    let at = tl + vec2(x0 as f32, y0 as f32) * cell;
+    let size = vec2((x1 - x0) as f32, (y1 - y0) as f32) * cell;
+    let src = Rect::new(x0 as f32, y0 as f32, (x1 - x0) as f32, (y1 - y0) as f32);
+    (Rect::new(at.x, at.y, size.x, size.y), Some(src))
+}
+
 /// Draws the ground pass: under a tilted camera, the 2D space laid flat on the ground
 /// ([`view25::ground_model`]); under a flat one, as drawn. In a bent view's sprite run it draws
 /// nothing (the sheet holds the ground), and in its ground run it draws flat into the picture.
@@ -2288,11 +2302,15 @@ impl Camera {
     }
 
     /// The mist's rectangles over the fog texture: where it is drawn (`dest`) and which texels (`src`, None
-    /// for all of it), as [`Camera::draw_fog_flat`] draws them.
-    fn mist_rects(&self, game: &Game) -> (Rect, Option<Rect>) {
+    /// for all of it), as [`Camera::draw_fog_flat`] draws them. The cloud looks draw only the box `dark` of
+    /// the texels that are dark (`minimap::fog_layer_box`); the rest is alpha 0 there.
+    fn mist_rects(&self, game: &Game, dark: Option<[i32; 4]>) -> (Rect, Option<Rect>) {
         if extend_edge() {
             let (dest, src) = self.fog_texels();
             (dest, Some(src))
+        } else if let (true, Some(bx)) = (mist::cloud(), dark) {
+            let (tl, br) = self.fog_corners(game);
+            boxed_rects(tl, br, (game.fog.w, game.fog.h), bx)
         } else {
             let (tl, br) = self.fog_corners(game);
             (Rect::new(tl.x, tl.y, br.x - tl.x, br.y - tl.y), None)
@@ -2312,8 +2330,11 @@ impl Camera {
         }
         let settle = shows.iter().filter(|s| s.mask.is_some()).flat_map(|s| s.reveal_cells.iter().map(|&(i, _)| i));
         let (held, origin) = (game.unshown_cells(), game.tile());
-        let Some(tex) = minimap::fog_layer(&game.fog, &held, origin, settle) else { return };
-        let (dest, src) = self.mist_rects(game);
+        let Some((tex, dark)) = minimap::fog_layer_box(&game.fog, &held, origin, settle) else { return };
+        if mist::cloud() && dark.is_none() {
+            return;
+        }
+        let (dest, src) = self.mist_rects(game, dark);
         let pass = PASS.with(std::cell::Cell::get);
         for sheet in 1..=n {
             let lift = mist::raised_height(sheet);
@@ -2365,8 +2386,11 @@ impl Camera {
         }
         let (tl, br) = self.fog_corners(game);
         if mist {
-            if let Some(tex) = minimap::fog_layer(&game.fog, &held, origin, settle) {
-                self.draw_mist(&tex, Rect::new(tl.x, tl.y, br.x - tl.x, br.y - tl.y), None);
+            if let Some((tex, dark)) = minimap::fog_layer_box(&game.fog, &held, origin, settle) {
+                if !mist::cloud() || dark.is_some() {
+                    let (dest, src) = self.mist_rects(game, dark);
+                    self.draw_mist(&tex, dest, src);
+                }
             }
         } else if self.tilt.is_some() {
             // The 2.5D view (a tilted camera) draws only the fog's dark box (`minimap::draw_fog_boxed`);
@@ -6501,6 +6525,34 @@ fn spell_entry(name: &str, l: &SpellLine, now: u64) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::boxed_rects;
+    use macroquad::prelude::*;
+
+    #[test]
+    fn the_dark_box_covers_its_dark_texels_on_screen() {
+        // A 10 × 6 texture on a 100 × 60 screen quad (10 px a cell); the dark texels are x 3..5, y 2..3 (inclusive).
+        let (tl, br) = (vec2(20.0, 30.0), vec2(120.0, 90.0));
+        let (dest, src) = boxed_rects(tl, br, (10, 6), [3, 2, 6, 4]);
+        let src = src.expect("a box");
+        // Grown by a texel a side: texels 2..7 by 1..5.
+        assert_eq!((src.x, src.y, src.w, src.h), (2.0, 1.0, 5.0, 4.0));
+        assert_eq!((dest.x, dest.y), (40.0, 40.0));
+        assert_eq!((dest.w, dest.h), (50.0, 40.0));
+        // Every dark texel's screen cell lies inside the drawn rectangle.
+        for (x, y) in [(3.0f32, 2.0f32), (5.0, 3.0)] {
+            let cell = Rect::new(tl.x + x * 10.0, tl.y + y * 10.0, 10.0, 10.0);
+            assert!(dest.x <= cell.x && cell.x + cell.w <= dest.x + dest.w, "x {x}");
+            assert!(dest.y <= cell.y && cell.y + cell.h <= dest.y + dest.h, "y {y}");
+        }
+    }
+
+    #[test]
+    fn the_dark_box_is_clamped_to_the_texture() {
+        let (dest, src) = boxed_rects(vec2(0.0, 0.0), vec2(10.0, 6.0), (10, 6), [0, 0, 10, 6]);
+        let src = src.expect("a box");
+        assert_eq!((src.x, src.y, src.w, src.h), (0.0, 0.0, 10.0, 6.0));
+        assert_eq!((dest.w, dest.h), (10.0, 6.0));
+    }
     use razdor::rules::clock::duration_label;
     use razdor::rules::content::HeroClass;
     use razdor::rules::magic::SpellLine;
