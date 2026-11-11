@@ -35,6 +35,7 @@ pub mod game_import;
 pub mod main_menu;
 pub mod map_import;
 pub mod frame_cap;
+pub mod map_anim;
 pub mod map_scale;
 pub mod memo;
 pub mod minimap;

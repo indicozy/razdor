@@ -22,9 +22,10 @@ pub fn set_prefs(on: bool) {
     LIVE.set(on || ENV_ON.with(|e| *e));
 }
 
-/// Whether the water is alive this frame (the setting, or `RAZDOR_LIVE_WATER=1`).
+/// Whether the water is alive this frame (the setting, or `RAZDOR_LIVE_WATER=1`), and the map's animations run
+/// at all this frame (`map_anim::level`: «Анимация карты» Выкл or zoomed out under «Только вблизи» stills it).
 pub fn live() -> bool {
-    LIVE.get()
+    LIVE.get() && super::map_anim::level() > 0.0
 }
 
 /// The side of the water's noise texture (`noise_texels`): the lattice repeats every this many cells, as
