@@ -26,18 +26,22 @@ pub fn live() -> bool {
     LIVE.get()
 }
 
-#[allow(dead_code)] // Used by `foam_band` only, which the shader's formula mirrors and the tests pin.
+#[allow(dead_code)] // Used by `foam_edge` only, which the shader's formula mirrors and the tests pin.
 fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
     let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
 
-/// The foam band of a water pixel with mask value `m` (the mask is 1 deep in the water, 0.5 on the
-/// shore line, 0 on land): zero on land and in the deep, peaking on the water side of the shore.
-/// The shader's formula, mirrored (its pulse is left out here).
+/// The shore foam's edge of a water pixel: `s` is its distance from the coast in cells (the water mask less
+/// 0.5, clamped to 0 to 0.5), `lap` the wave's phase from 0 (low, the inner edge on the coast) to 1 (high, the
+/// inner edge a little out). The band lies from the inner edge to an outer edge 0.14 to 0.2 cell further out,
+/// so it stays within a quarter cell of the coast. The shader's formula, mirrored without the noise and the
+/// still-shore weight, which the tests pin.
 #[allow(dead_code)] // The shader's formula in Rust, pinned by the tests.
-pub fn foam_band(m: f32) -> f32 {
-    smoothstep(0.45, 0.6, m) * (1.0 - smoothstep(0.6, 0.85, m))
+pub fn foam_edge(s: f32, lap: f32) -> f32 {
+    let inner = 0.02 + 0.07 * lap;
+    let outer = inner + 0.14 + 0.06 * (1.0 - lap);
+    smoothstep(inner - 0.02, inner + 0.02, s) * (1.0 - smoothstep(outer - 0.03, outer + 0.03, s))
 }
 
 /// Seconds between two wake points.
@@ -136,18 +140,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn foam_is_zero_on_land_and_deep_water_and_peaks_on_the_water_side() {
-        assert_eq!(foam_band(0.0), 0.0);
-        assert_eq!(foam_band(1.0), 0.0);
-        assert!((foam_band(0.6) - 1.0).abs() < 1e-6, "the peak at 0.6: {}", foam_band(0.6));
-        let shore = foam_band(0.5);
-        assert!(shore > 0.0 && shore < 1.0, "the shore line is a soft edge: {shore}");
-        let mut prev = 0.0;
-        for i in 0..=30 {
-            let b = foam_band(0.45 + i as f32 * 0.005);
-            assert!(b + 1e-6 >= prev, "rising to the peak");
-            prev = b;
+    fn the_foam_is_on_the_water_side_of_the_coast_and_within_a_quarter_cell() {
+        // On the land (s 0) and in the deep water (half a cell out) there is no foam, at every phase of the wave.
+        for k in 0..=10 {
+            let lap = k as f32 / 10.0;
+            assert!(foam_edge(0.0, lap) < 1e-6, "land at lap {lap}");
+            assert!(foam_edge(0.5, lap) < 1e-6, "deep water at lap {lap}");
+            assert!(foam_edge(0.3, lap) < 1e-6, "beyond a quarter cell at lap {lap}");
         }
+        // Mid-wave the band is full a little out from the coast, and soft at its edges.
+        assert!((foam_edge(0.12, 0.5) - 1.0).abs() < 1e-6, "the band's middle: {}", foam_edge(0.12, 0.5));
+        let edge = foam_edge(0.225, 0.5);
+        assert!(edge > 0.0 && edge < 1.0, "the outer edge is soft: {edge}");
+    }
+
+    #[test]
+    fn the_wave_moves_the_foam_toward_the_beach_and_back() {
+        // At the low point the foam reaches the coast; at the high point the coast is clear and the band sits out.
+        assert!(foam_edge(0.03, 0.0) > 0.8, "low wave on the coast: {}", foam_edge(0.03, 0.0));
+        assert!(foam_edge(0.03, 1.0) < 1e-3, "high wave: the coast is clear: {}", foam_edge(0.03, 1.0));
+        assert!(foam_edge(0.12, 1.0) > 0.9, "high wave: the band is out: {}", foam_edge(0.12, 1.0));
     }
 
     #[test]

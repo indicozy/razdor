@@ -200,19 +200,40 @@ vec2 ripple(vec2 q) {
 }
 
 
-@CP@ vec3 ground(float code, vec2 px, @CP@ vec3 water, @CP@ float sea, @CP@ vec3 foam) {
+@CP@ vec3 ground(float code, vec2 px, @CP@ vec3 water, @CP@ float sea) {
     vec2 slot = vec2(mod(code, 4.0), floor(code / 4.0));
     vec2 t = mod(px, Tile);
     vec2 atlas_uv = (slot * Slot + (Slot - Tile) * 0.5 + t) / AtlasSize;
     @CP@ vec3 c = texture2D(Atlas, sharp_uv(atlas_uv, AtlasSize, AtlasScale)).rgb;
     if (code < 2.5 && WaterOn > 0.5) {
         c = min(c * water * 2.0, 1.0);
-        // Live water: the sky's colour lies on the water by its share of the mask, and the foam on the shore.
+        // Live water: the sky's colour lies on the water by its share of the mask (the foam is laid on the colour below).
         if (LiveWater > 0.5) {
-            c = mix(c, Sky, 0.18 * sea) + foam;
+            c = mix(c, Sky, 0.18 * sea);
         }
     }
     return c;
+}
+
+// The shore foam at a water pixel: `cov` is the water's share of the pixel's four cells (0.5 on the coast, 1 deep
+// in the water), `p` the cell coordinate and `fl` the flow there. The band runs from the coast out to a quarter cell
+// at most, and laps: its inner edge swings between the coast and a little way out, the wave's phase varies along the
+// shore, a noise breaks the band into patches, and a still shore (a lake, the sea) foams more than a river. The
+// periods fit CLOCK_PERIOD (6400 s): the wave is 914 cycles of it (about 7 s), and the drifts move the noise by whole
+// lattice periods. Returns the foam's colour and its alpha.
+vec4 shore_foam(float cov, vec2 p, vec2 fl) {
+    float s = clamp(cov - 0.5, 0.0, 0.5);
+    float t0 = fract(Clock * 0.05);
+    float t1 = fract(Clock * 0.05 + 0.5);
+    vec2 q0 = p - fl * t0 * 7.0;
+    vec2 q1 = p - fl * t1 * 7.0;
+    float lap = 0.5 + 0.5 * sin(Clock * 0.89723614 + 6.0 * vnoise(q0 * 0.8));
+    float inner = 0.02 + 0.07 * lap;
+    float outer = inner + 0.14 + 0.06 * (1.0 - lap);
+    float edge = smoothstep(inner - 0.02, inner + 0.02, s) * (1.0 - smoothstep(outer - 0.03, outer + 0.03, s));
+    float grain = smoothstep(0.3, 0.7, 0.6 * vnoise(q0 * 2.4 + Clock * vec2(0.01, 0.0)) + 0.4 * vnoise(q1 * 5.1 + Clock * vec2(0.0, -0.02)));
+    float still = 1.0 - smoothstep(0.2, 0.8, length(fl));
+    return vec4(0.93, 0.96, 0.98, 0.9 * edge * grain * (0.55 + 0.45 * still));
 }
 
 void main() {
@@ -236,11 +257,9 @@ void main() {
     @CP@ float fy = f.y;
     // The water stage's coordinates (as the old shader): read only where a code is water.
     @CP@ vec3 w = vec3(1.0);
-    // Live water: this pixel's mask (1 deep, 0.5 on the shore line, 0 on land), its foam and its
-    // ripple, the same for each of the four codes. The ripple and the foam's pulse read the noise
-    // along the flow (a river drifts; zero flow stands still).
+    // Live water: this pixel's mask (1 deep, 0.5 on the shore line, 0 on land) and its ripple, the same for each
+    // of the four codes. The ripple reads the noise along the flow (a river drifts; zero flow stands still).
     @CP@ float sea = 0.0;
-    @CP@ vec3 foam = vec3(0.0);
     if (wet) {
         vec2 uvw = (p + 1.5) / 3.0;
         if (LiveWater > 0.5) {
@@ -255,19 +274,26 @@ void main() {
             vec2 q0 = p - fl * t0 * 7.0;
             vec2 q1 = p - fl * t1 * 7.0;
             uvw += 0.015 * mix(ripple(q0), ripple(q1), wt);
-            float band = smoothstep(0.45, 0.6, sea) * (1.0 - smoothstep(0.6, 0.85, sea));
-            band *= 0.6 + 0.4 * sin(Clock * 1.60025 + mix(vnoise(q0 * 1.3), vnoise(q1 * 1.3), wt) * 6.0);
-            foam = vec3(0.85, 0.90, 0.92) * band * 0.35;
         }
         w = texture2D(Water, sharp_uv(uvw, WaterSize, WaterScale)).rgb;
     }
     @CP@ vec3 col;
     if (k.x == k.y && k.y == k.z && k.z == k.w) {
-        col = ground(k.x, px, w, sea, foam);
+        col = ground(k.x, px, w, sea);
     } else {
-        @CP@ vec3 top = mix(ground(k.x, px, w, sea, foam), ground(k.y, px, w, sea, foam), fx);
-        @CP@ vec3 bottom = mix(ground(k.z, px, w, sea, foam), ground(k.w, px, w, sea, foam), fx);
+        @CP@ vec3 top = mix(ground(k.x, px, w, sea), ground(k.y, px, w, sea), fx);
+        @CP@ vec3 bottom = mix(ground(k.z, px, w, sea), ground(k.w, px, w, sea), fx);
         col = mix(top, bottom, fy);
+    }
+    // The shore foam (live water, the water's pixels only): laid on the coast by the water's share of the four
+    // cells, with the weights the colour blend uses, so it sits on the visible shore and not on the mask's edge.
+    if (wet && LiveWater > 0.5) {
+        vec2 cell_uv = (p + 0.5) / MapSize;
+        vec2 fl = (texture2D(Flow, cell_uv).rg * 255.0 - 128.0) / 127.0;
+        float cov = (k.x < 2.5 ? 1.0 : 0.0) * (1.0 - fx) * (1.0 - fy) + (k.y < 2.5 ? 1.0 : 0.0) * fx * (1.0 - fy)
+            + (k.z < 2.5 ? 1.0 : 0.0) * (1.0 - fx) * fy + (k.w < 2.5 ? 1.0 : 0.0) * fx * fy;
+        vec4 fo = shore_foam(cov, p, fl);
+        col = mix(col, fo.rgb, fo.a);
     }
     if (mist) {
         float n = 0.6 * vnoise(p * 0.11 + Clock * vec2(0.05, 0.02)) + 0.4 * vnoise(p * 0.27 + Clock * vec2(-0.08, 0.05));

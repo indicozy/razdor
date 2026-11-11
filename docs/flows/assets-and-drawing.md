@@ -556,8 +556,13 @@ it every frame from `display::follow_settings`; `RAZDOR_LIVE_WATER=1` turns it o
   Linear filtering gives the shore its soft edge: 1 deep, 0.5 on the shore line, 0 on land. The ground shader reads
   it at the pixel's cell centre `(p + 0.5) / MapSize`, where `p` is the cell coordinate (the same one the edge fog uses).
 - **In the shader** (`NEW_FRAGMENT`, the `LiveWater` branch; the old four-fetch shader ignores it): on the water
-  pixels only, a ripple moves the water frame's uv by `0.015` of a frame (a few texels), the foam band
-  (`water::foam_band`, mirrored from the shader) is added as a pulse on the shore's water side, and the water takes
+  pixels only, a ripple moves the water frame's uv by `0.015` of a frame (a few texels), the shore foam
+  (`shore_foam`, its band mirrored by `water::foam_edge`) is laid on the final colour (after the four cells are blended, so
+  it sits on the visible coast): the water's share of the four cells (`cov`, the colour blend's own weights, 0.5 on the coast,
+  1 deep) gives the distance `s` from the coast; the band runs from the coast out to a quarter cell at most, its inner edge
+  laps between the coast and 0.09 cell (`0.5 + 0.5 sin` of a 914-cycle wave, about 7 s, the phase varying along the shore),
+  a noise breaks it into patches, and still water (`Flow` zero: a lake, the sea) foams at full strength, a river at 0.55. The
+  foam is white-ish at alpha up to 0.9 and is drawn before the mist, so the unexplored land covers it. The water takes
   the sky's colour (`daylight::sky_rgb`: day, dusk and dawn warmth, moonlight at night; the day's with the lighting
   off) by `0.18` of its mask. Only the full pass and the cache's overlay draw it (`Mode::Full`, `Mode::Overlay`);
   the cached ground stays as it was. `Clock` is the water clock.
