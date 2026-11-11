@@ -42,25 +42,46 @@ def label_map(cards, flips, op):
     return lab
 
 
-def load_checked(flips_path):
-    raw = json.loads(Path(flips_path).read_text())
+def load_checked(flips_path, labels_json=None):
+    """The owner-checked sprites: {hash: set of flipped card indices}. A sprite is checked in the labels index
+    (labels.json, the click tool's server) or in the older flips file (flips.json, {hash: {flips, checked}})."""
     checked = {}
-    for key, entry in raw.items():
-        if isinstance(entry, dict) and entry.get("checked"):
-            checked[key] = set(entry.get("flips", []))
+    if flips_path:
+        raw = json.loads(Path(flips_path).read_text())
+        for key, entry in raw.items():
+            if isinstance(entry, dict) and entry.get("checked"):
+                checked[key] = set(entry.get("flips", []))
+    if labels_json and Path(labels_json).exists():
+        for key, ok in json.loads(Path(labels_json).read_text()).items():
+            if ok:
+                checked.setdefault(key, set())
     return checked
+
+
+def mask_labels(path, op):
+    """The owner's pixel labels from a saved mask (the click tool's PNG, label = the R channel: 1 ground, 2 standing,
+    0 none): 1 ground, 0 standing, -1 unlabelled; -1 outside the opaque pixels."""
+    from PIL import Image
+
+    r = np.asarray(Image.open(path).convert("RGBA"))[..., 0]
+    lab = np.full(op.shape, -1, np.int8)
+    lab[(r == 1) & op] = 1
+    lab[(r == 2) & op] = 0
+    return lab
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--flips", required=True, type=Path)
+    ap.add_argument("--flips", type=Path, default=None, help="the older flips.json (optional)")
     ap.add_argument("--data", required=True, type=Path)
     ap.add_argument("--sprites", required=True, type=Path)
     ap.add_argument("--onnx", required=True, type=Path)
+    ap.add_argument("--labels", type=Path, default=None, help="the click tool's labels folder (<hash>.png)")
+    ap.add_argument("--labels-json", type=Path, default=None, help="the click tool's labels.json (checked flags)")
     ap.add_argument("--out", required=True, type=Path)
     args = ap.parse_args()
     data = json.loads(args.data.read_text())["sprites"]
-    checked = load_checked(args.flips)
+    checked = load_checked(args.flips, args.labels_json)
     keys = sorted(k for k in checked if k in data)
     if not keys:
         raise SystemExit("no owner-checked sprites in the flips file")
@@ -70,7 +91,11 @@ def main():
         rgba = np.asarray(Image.open(args.sprites / f"{key}.png").convert("RGBA"))
         depth = gf.run_depth(session, rgba)
         feats, op = gf.features(rgba, depth)
-        lab = label_map(data[key]["cards"], checked[key], op)
+        mask = args.labels / f"{key}.png" if args.labels else None
+        if mask is not None and mask.exists():
+            lab = mask_labels(mask, op)
+        else:
+            lab = label_map(data[key]["cards"], checked[key], op)
         use = op & (lab >= 0)
         sets[key] = (feats[use], lab[use].astype(int))
         print(f"{key}: {int(use.sum())} labelled pixels, ground {int(lab[use].sum())}", flush=True)

@@ -14,38 +14,39 @@ No SAM, no normal model, no Marigold.
 
 ## The steps
 
-### 1. Label in the click tool
+### 1. Paint the labels in the click tool
 
-The tool is a static page: `/mnt/ai_models/razdor-scratch/folded/clicktool/` (local only, not in
-git). It lists every sprite with cards, largest first, and draws each card over the sprite:
-green is ground, red stands.
+The tool is a local page with a tiny server (`server.py` in the click tool's folder, stdlib only, not in
+git). It shows one sprite at a time, with a per-pixel overlay: green is ground (lies flat), red stands,
+no colour is transparent. The overlay starts from the current labels (the card flags of
+`data/cards/objects.json`).
 
 ```sh
 cd /mnt/ai_models/razdor-scratch/folded/clicktool
-python3 -m http.server 8765 --bind 127.0.0.1
+taskset -c 8-19 nice -n 19 python3 server.py    # serves on 127.0.0.1:8765
 # open http://127.0.0.1:8765/index.html
 ```
 
-- Click a card to flip it (ground to standing or back). A flip is stored per sprite.
-- «Проверено» marks a sprite as reviewed, with or without flips. Only reviewed sprites are used for
-  training. Label a sprite only when every card on it is right: an unchecked sprite is ignored,
-  a checked one is trusted.
-- ←/→ move to the previous or next unchecked sprite. «Сброс» clears one sprite.
+- Brushes: «Земля» (G, green) and «Стоит» (R, red); the brush size with the slider or `[` / `]`.
+- Eraser to the AI (E): restores the prefilled label under the brush. Fill (F): a connected area of the
+  same label. Undo/redo: Ctrl+Z / Ctrl+Shift+Z. Overlay toggle (H) and opacity slider.
+- Zoom: fit, 2× and 4× buttons; pan with space + drag or the middle mouse.
+- Only opaque sprite pixels take a label.
+- «Проверено» marks the sprite as reviewed. Only reviewed sprites are used for training. Check a
+  sprite only when every pixel on it is right: an unchecked sprite is ignored, a checked one is trusted.
+- ←/→ move to the previous or next sprite; Shift+←/→ to the next unchecked one.
+- The page saves each stroke by itself (debounced). Each sprite's mask is written to
+  `labels/<hash>.png` (the label in the R channel: 0 none, 1 ground, 2 standing), and
+  `labels.json` holds the checked flags. Both stay in the click tool's folder, never in git.
 
-### 2. Download `flips.json`
+The older label file, `flips.json` (per-card flips, `{hash: {flips, checked}}`), is still read by the
+trainer and the applier for the sprites that have no mask.
 
-«Скачать» saves `flips.json`, in the form
+### 2. Export the labels
 
-```json
-{
-  "3ba36b870a37ee0a": {"flips": [0, 3], "checked": true},
-  "ad4c6735da164222": {"flips": [], "checked": true}
-}
-```
-
-`flips` are card indices into the sprite's cards in `data/cards/objects.json`; a card's index is its
-position in that sprite's `cards` list. Keep the file as the training input (for example
-`/mnt/ai_models/razdor-scratch/folded/labels/flips.json`), not in git.
+The masks are the labels; nothing to download. The training input is the folder `labels/` and the file
+`labels.json` next to the server. Copy them somewhere safe if you want to keep them, for example
+`/mnt/ai_models/razdor-scratch/folded/labels-<date>/`.
 
 ### 3. Train
 
@@ -55,12 +56,16 @@ scratch environment; see step 0 below).
 
 ```sh
 PYTHONPATH=<scratch pylib> python3 tools/depth/train_ground.py \
-  --flips flips.json \
+  --labels /mnt/ai_models/razdor-scratch/folded/clicktool/labels \
+  --labels-json /mnt/ai_models/razdor-scratch/folded/clicktool/labels.json \
   --data data/cards/objects.json \
   --sprites /mnt/ai_models/razdor-scratch/folded/clicktool/sprites \
   --onnx /mnt/ai_models/razdor-scratch/folded/models/da2-small/depth-anything-v2-small-fp16-266.onnx \
   --out data/cards/ground_model.json
 ```
+
+`--labels` and `--labels-json` are the paint tool's; a checked sprite with a mask trains on its pixels.
+The older `--flips flips.json` is still accepted (for the sprites with no mask).
 
 Expected output (the two-sprite smoke test prints the same shape of lines):
 
@@ -98,7 +103,7 @@ PYTHONPATH=<scratch pylib> python3 tools/depth/apply_ground.py \
   --model data/cards/ground_model.json \
   --sprites /mnt/ai_models/razdor-scratch/folded/clicktool/sprites \
   --onnx <the same .onnx> \
-  --flips flips.json \
+  --labels-json /mnt/ai_models/razdor-scratch/folded/clicktool/labels.json \
   --out data/cards/objects.json
 ```
 
@@ -167,7 +172,7 @@ same budget (`RAZDOR_PERF_BUDGET_SCALE` is the test knob for the perf tests).
 | Trainer | `tools/depth/train_ground.py` | yes |
 | Applier | `tools/depth/apply_ground.py` | yes |
 | The trained weights | data/cards/ground_model.json | yes (numbers) |
-| The owner's labels | `flips.json` (from the click tool) | no (local) |
+| The owner's pixel labels | the click tool's `labels/<hash>.png` and `labels.json` (and the older `flips.json`) | no (local) |
 | The sprite PNGs | the click tool's `sprites/` | no (game art) |
 | The depth model | `fix_onnx.py` output, `…-266.onnx` | no (fetched by the engine) |
 | Engine cut for mods | `src/depth/cut.rs`, `model.rs`, `fetch.rs` | yes |

@@ -8,7 +8,7 @@ sprite (in the flips file) keeps the owner's labels. A card with no opaque pixel
 
 Usage:
   apply_ground.py --data data/cards/objects.json --model data/cards/ground_model.json \
-                  --sprites <dir of <hash>.png> --onnx <model.onnx> [--flips flips.json] --out <data.json>
+                  --sprites <dir of <hash>.png> --onnx <model.onnx> [--flips flips.json] [--labels-json labels.json] --out <data.json>
 """
 
 import argparse
@@ -39,13 +39,14 @@ def main():
     ap.add_argument("--sprites", required=True, type=Path)
     ap.add_argument("--onnx", required=True, type=Path)
     ap.add_argument("--flips", type=Path, default=None)
+    ap.add_argument("--labels-json", type=Path, default=None)
     ap.add_argument("--out", required=True, type=Path)
     args = ap.parse_args()
     data = json.loads(args.data.read_text())
     model = json.loads(args.model.read_text())
     if model["features"] != gf.FEATURE_NAMES:
         raise SystemExit("the model's feature list differs from ground_features.FEATURE_NAMES")
-    checked = tg.load_checked(args.flips) if args.flips else {}
+    checked = tg.load_checked(args.flips, args.labels_json)
     session = ort.InferenceSession(str(args.onnx), providers=["CPUExecutionProvider"])
     changed = kept = 0
     for key, sprite in data["sprites"].items():
