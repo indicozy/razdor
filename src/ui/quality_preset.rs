@@ -1,8 +1,8 @@
 //! Razdor's «Качество графики» (the owner's decision, 2026-11-12): one row of the map group sets the map's look in one
 //! go: its resolution, the light, the shadows, the mist, the moving water and its rate and quality, the weather, the
-//! living map and the map's animation. Nothing stores the choice. The row shows the first preset (low to high) whose
-//! values all hold in the settings, or «Своё» when none does, so a setting changed by hand shows «Своё» by itself, and
-//! an install that has its settings keeps them as they are.
+//! living map and the map's animation. Nothing stores the choice. The row shows the first preset whose values all hold
+//! in the settings, or «Своё» when none does, so a setting changed by hand shows «Своё» by itself, and an install that
+//! has its settings keeps them as they are. A new install's settings are the original's look («Оригинал»).
 
 use razdor::i18n::tr;
 
@@ -13,13 +13,18 @@ use super::map_anim::Mode as AnimMode;
 use super::mist::MistMode;
 use super::water::{FrameRate, Quality as WaterQuality};
 
-/// The three presets, low to high.
+/// The presets, in the row's order: «Оригинал» first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Preset {
+    /// The original's look, with no new effects; a new install's settings.
+    Original,
     Low,
     Medium,
     High,
 }
+
+/// The presets in the row's cycle order.
+const ORDER: [Preset; 4] = [Preset::Original, Preset::Low, Preset::Medium, Preset::High];
 
 /// A preset's values. `None` is a value the preset does not say: it is neither compared nor set.
 #[derive(Clone, Copy, Debug)]
@@ -38,9 +43,22 @@ struct Look {
     anim: Option<AnimMode>,
 }
 
-/// The values of each preset (the owner's decision, 2026-11-12).
+/// The values of each preset (the owner's decisions, 2026-11-12).
 fn look(p: Preset) -> Look {
     match p {
+        Preset::Original => Look {
+            render_scale: Some(1.0),
+            light_on: Some(false),
+            light_quality: None,
+            shadows: Some(ShadowMode::Painted),
+            mist: Some(MistMode::Off),
+            live_water: Some(false),
+            water_rate: None,
+            water_quality: None,
+            weather: Some(false),
+            living: Some(false),
+            anim: Some(AnimMode::On),
+        },
         Preset::Low => Look {
             render_scale: Some(0.75),
             light_on: Some(false),
@@ -103,7 +121,7 @@ impl Look {
 
 /// The preset the settings hold, `None` for «Своё».
 pub fn current(s: &Settings) -> Option<Preset> {
-    [Preset::Low, Preset::Medium, Preset::High].into_iter().find(|p| look(*p).holds(s))
+    ORDER.into_iter().find(|p| look(*p).holds(s))
 }
 
 /// Sets the settings to `p`'s values (the values the preset does not say are left as they are).
@@ -148,28 +166,22 @@ pub fn set(s: &mut Settings, p: Preset) {
     }
 }
 
-/// The preset a click on the row sets: low, medium, high, then low again; from «Своё», medium.
+/// The preset a click on the row sets: «Оригинал», «Низкое», «Среднее», «Высокое», then «Оригинал» again; from «Своё»,
+/// «Оригинал».
 pub fn next(s: &Settings) -> Preset {
     match current(s) {
+        Some(Preset::Original) => Preset::Low,
         Some(Preset::Low) => Preset::Medium,
         Some(Preset::Medium) => Preset::High,
-        Some(Preset::High) => Preset::Low,
-        None => Preset::Medium,
-    }
-}
-
-/// The preset a fresh install starts on: high on the desktop, medium on a phone.
-pub fn fresh_install() -> Preset {
-    if razdor::platform::MOBILE {
-        Preset::Medium
-    } else {
-        Preset::High
+        Some(Preset::High) => Preset::Original,
+        None => Preset::Original,
     }
 }
 
 /// The row's value: the preset's name, or «Своё».
 pub fn label(p: Option<Preset>) -> &'static str {
     match p {
+        Some(Preset::Original) => tr("Graphics preset original"),
         Some(Preset::Low) => tr("Graphics preset low"),
         Some(Preset::Medium) => tr("Graphics preset medium"),
         Some(Preset::High) => tr("Graphics preset high"),
@@ -183,7 +195,7 @@ mod tests {
 
     #[test]
     fn each_preset_is_the_value_its_own_settings_show() {
-        for p in [Preset::Low, Preset::Medium, Preset::High] {
+        for p in ORDER {
             let mut s = Settings::default();
             set(&mut s, p);
             assert_eq!(current(&s), Some(p), "{p:?}");
@@ -191,18 +203,29 @@ mod tests {
     }
 
     #[test]
-    fn a_setting_changed_by_hand_shows_custom_and_the_next_click_is_medium() {
+    fn a_new_install_is_the_original_look() {
+        // The default settings (no file) are «Оригинал»: a fresh install looks like the original game.
+        assert_eq!(current(&Settings::default()), Some(Preset::Original));
+    }
+
+    #[test]
+    fn a_setting_changed_by_hand_shows_custom_and_the_next_click_is_the_original() {
         let mut s = Settings::default();
         set(&mut s, Preset::High);
         s.map_weather = false;
         assert_eq!(current(&s), None);
-        assert_eq!(next(&s), Preset::Medium);
+        assert_eq!(next(&s), Preset::Original);
     }
 
     #[test]
-    fn a_fresh_install_shows_its_platforms_preset() {
+    fn the_row_cycles_original_low_medium_high() {
         let mut s = Settings::default();
-        set(&mut s, fresh_install());
-        assert_eq!(current(&s), Some(fresh_install()));
+        let mut seen = Vec::new();
+        for _ in 0..5 {
+            let p = next(&s);
+            set(&mut s, p);
+            seen.push(p);
+        }
+        assert_eq!(seen, vec![Preset::Low, Preset::Medium, Preset::High, Preset::Original, Preset::Low]);
     }
 }

@@ -1737,7 +1737,7 @@ pub const ALL: [Row; 58] = [
     /// The long hint a «?» pop-up shows (backlog 1508), for the rows whose hint runs past a line.
     fn help_text(self) -> Option<&'static str> {
         match self {
-            Row::GraphicsQuality => Some(tr("Sets the map's resolution, light, shadows, mist, water, weather and animation at once. Custom: when something was changed by hand.")),
+            Row::GraphicsQuality => Some(tr("Original: as the original game, with no new effects. Sets the map's resolution, light, shadows, mist, water, weather and animation at once. Custom: when something was changed by hand.")),
             Row::MapZoom => Some(tr("The zoom the map plays at. The wheel steps away from it and the 0 key comes back to it; locked, the map always shows it.")),
             Row::FarGround => Some(tr("Up: the far ground rolls up to a top-down map. Horizon: the ground curves down like the earth's horizon, with the sky above it. Globe: the ground curves away on every side, like a small planet.")),
             Row::MapView => Some(tr("Third person: the camera behind the hero's back. First person: the view through the hero's eyes.")),

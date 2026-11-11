@@ -540,14 +540,11 @@ impl Settings {
     /// is migrated once, and saved again so that it stays.
     pub fn load() -> Settings {
         let read = Settings::path().and_then(|p| std::fs::read(p).ok());
-        let parsed = read.and_then(|b| serde_json::from_slice::<Settings>(&b).ok());
-        // A fresh install starts on its platform's «Качество графики» preset; a saved one keeps its values.
-        let fresh = parsed.is_none();
-        let mut base = parsed.unwrap_or_default();
-        if fresh {
-            super::quality_preset::set(&mut base, super::quality_preset::fresh_install());
-        }
-        let (settings, migrated) = base.clamped().migrated();
+        let (settings, migrated) = read
+            .and_then(|b| serde_json::from_slice::<Settings>(&b).ok())
+            .unwrap_or_default()
+            .clamped()
+            .migrated();
         if migrated {
             settings.save();
         }
