@@ -1148,3 +1148,109 @@ fn tutorial_the_ghost_sent_away_does_not_strike_at_once() {
     read(&mut r, &mut seen);
     assert!(!seen.contains(&7), "the lightning of event 7 at once: {seen:?}");
 }
+
+/// The recorder's entries, shared with the test after the run.
+#[derive(Clone, Default)]
+struct Rec(std::rc::Rc<std::cell::RefCell<Vec<crate::rules::recording::stream::Entry>>>);
+
+impl crate::rules::recording::hook::Recorder for Rec {
+    fn record(&mut self, entry: crate::rules::recording::stream::Entry) {
+        self.0.borrow_mut().push(entry);
+    }
+}
+
+/// Every action list of `tools/difftest` (the original's own runs), played with the recorder on,
+/// then played back from its recording: the same final state. The playback starts from the
+/// snapshot of the game after the list's new game, with the seed the recording made (the
+/// recording's own start is the clock's, which a playback replaces). Needs the install.
+#[test]
+fn every_difftest_list_plays_back_from_its_recording() {
+    use crate::rules::recording::{hook, play, snapshot::Snapshot, snapshot::state_hash};
+    crate::dt::install::load_dotenv();
+    let Some(dir) = crate::dt::install::locate() else { return };
+    let dt = crate::dt::install::DtInstall::load(&dir).unwrap();
+    let content = Arc::new(Content::from_dt(&dt));
+    let install = crate::rules::save::Install { dir: &dt.dir, content: content.clone() };
+    let lists = std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/tools/difftest")).unwrap();
+    let mut paths: Vec<std::path::PathBuf> = lists.map(|e| e.unwrap().path()).filter(|p| p.extension().is_some_and(|x| x == "jsonl")).collect();
+    paths.sort();
+    assert!(!paths.is_empty(), "the difftest lists are in the repository");
+    // The lists whose recording does not play back yet: each starts a battle while the hero is on
+    // the last steps of a walk, and the playback's walk and the live one part there (see
+    // `docs/OPEN_QUESTIONS.md`). The test holds them to failing, so a fix shows up here.
+    const KNOWN_DIVERGENT: &[&str] = &["lake-gang", "rk1-church", "rk1-day1", "rk1-ruins-won"];
+    let mut failures: Vec<String> = Vec::new();
+    let mut known_failing: Vec<String> = Vec::new();
+    for list in paths {
+        let name = list.display().to_string();
+        let stem = list.file_stem().unwrap().to_string_lossy().to_string();
+        let known = KNOWN_DIVERGENT.contains(&stem.as_str());
+        let actions = read_action_list(&list, None, None).unwrap();
+        // The recorded run, to its end.
+        let rec = Rec::default();
+        hook::install_recorder(Box::new(rec.clone()));
+        let mut run = Runner::new(Source::Install(&dt));
+        for (i, a) in actions.iter().enumerate() {
+            run.apply(a).unwrap_or_else(|e| panic!("{name}: action {i}: {e}"));
+            // A check after each action: the playback names the first action whose state differs.
+            let g = run.game_mut().expect("a game");
+            g.finish_pause();
+            g.armies_snap();
+            let h = state_hash(g);
+            let at = g.stamp();
+            hook::record_input(Some(at), crate::rules::recording::stream::Input::Engine(crate::rules::recording::stream::EngineInput::Check { hash: h }));
+        }
+        let end = {
+            let g = run.game_mut().expect("a game at the end");
+            g.finish_pause();
+            g.armies_snap();
+            state_hash(g)
+        };
+        hook::take_recorder();
+        let entries = rec.0.borrow().clone();
+        // The start: the game after the new game alone, with the recorded seed.
+        hook::install_playback(&entries);
+        let mut first = Runner::new(Source::Install(&dt));
+        first.apply(&actions[0]).unwrap_or_else(|e| panic!("{name}: the new game: {e}"));
+        let start = Snapshot::take(first.game_mut().expect("the new game's game")).unwrap_or_else(|e| panic!("{name}: no snapshot at the start: {e}"));
+        hook::take_playback();
+        // The snapshot is the state after the new game with its own settling (the opening windows
+        // the new game's action closes are its entries too), so the playback starts after the
+        // first check, which the recording made at that place.
+        let first_check = entries
+            .iter()
+            .position(|e| matches!(e.input, crate::rules::recording::stream::Input::Engine(crate::rules::recording::stream::EngineInput::Check { .. })))
+            .expect("a check after the new game");
+        let game0 = start.restore(content.clone(), Some(&install)).unwrap();
+        let tail = &entries[first_check + 1..];
+        let mut back = match play::play(game0, tail, 1.0 / 30.0) {
+            Ok(g) => g,
+            Err(e) => {
+                // The entries before the failing one name the action (the error counts from the tail).
+                let at: usize = e.strip_prefix("entry ").and_then(|r| r.split(' ').next()).and_then(|n| n.parse().ok()).unwrap_or(0);
+                let before: Vec<String> = tail[at.saturating_sub(6)..=at.min(tail.len() - 1)].iter().map(|x| format!("    {:?} {:?}", x.at, x.input)).collect();
+                let line = format!("{name}: playback: {e}\n{}", before.join("\n"));
+                if known {
+                    known_failing.push(stem);
+                } else {
+                    failures.push(line);
+                }
+                continue;
+            }
+        };
+        back.finish_pause();
+        back.armies_snap();
+        let got = state_hash(&back);
+        if got != end {
+            if known {
+                known_failing.push(stem);
+            } else {
+                failures.push(format!("{name}: the recording plays back to a different final state ({got:016x}, live {end:016x})"));
+            }
+        } else if known {
+            failures.push(format!("{name}: plays back now; take it out of KNOWN_DIVERGENT"));
+        }
+    }
+    assert!(failures.is_empty(), "the difftest recordings that do not play back:\n{}", failures.join("\n"));
+    assert_eq!(known_failing.len(), KNOWN_DIVERGENT.len(), "the known divergent lists are the ones that fail: {known_failing:?}");
+}
