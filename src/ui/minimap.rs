@@ -1196,7 +1196,7 @@ pub fn clip_to_rect(poly: &[Vec2], r: Rect) -> Vec<Vec2> {
 /// Draws the ground a tilted view sees on the minimap (`r`): the flat view's box colours, a translucent
 /// fill and a light outline, clipped to the minimap; and the hero's marker, a small triangle on his place with
 /// its tip where the camera looks. `to_mini` maps world units to the minimap's pixels.
-fn draw_sight(s: &Sight, r: Rect, to_mini: &impl Fn((f32, f32)) -> Vec2) {
+fn draw_sight(s: &Sight, r: Rect, to_mini: &impl Fn((f32, f32)) -> Vec2, house: f32) {
     let poly: Vec<Vec2> = sight_footprint(&s.cam, s.frame).into_iter().map(|p| to_mini((p.x, p.y))).collect();
     let poly = clip_to_rect(&poly, r);
     if poly.len() >= 3 {
@@ -1212,66 +1212,33 @@ fn draw_sight(s: &Sight, r: Rect, to_mini: &impl Fn((f32, f32)) -> Vec2) {
         }
     }
 
-    // The look marker, drawn last so it is on top. Two styles, picked by `RAZDOR_MINIMAP_MARK` (a developer
-    // switch while the owner chooses): `triangle` (the default) is a small triangle on the hero's place with its
-    // tip where the camera looks; `arrow` is a longer arrow from the same point, 18% of the minimap's side.
+    // The hero's look marker, drawn last so it is on top: a solid isosceles triangle centred on his place, its tip
+    // where the camera looks. As long as a house icon (`house`, px), and 1.7 times as long as its base.
     let p0 = to_mini((s.from.x, s.from.y));
     let dir = look_direction(&s.cam, s.from, to_mini);
     if dir == Vec2::ZERO {
         return;
     }
-    let k = super::chrome::k();
-    let light = Color::new(0.97, 0.97, 0.97, 0.95);
-    if mark_is_arrow() {
-        let side = r.w.min(r.h);
-        let len = (0.18 * side).max(14.0 * k).min(0.45 * side);
-        // Kept inside the minimap, so an arrow from the hero at its edge still shows.
-        let at = p0.clamp(vec2(r.x + len, r.y + len), vec2(r.x + r.w - len, r.y + r.h - len));
-        draw_arrow(at, dir, len, light);
-    } else {
-        let size = (12.0 * k).max(10.0);
-        let (tip, back) = hero_marker(p0, dir, size);
-        let n = vec2(-dir.y, dir.x);
-        let (left, right) = (back + n * size * 0.42, back - n * size * 0.42);
-        draw_triangle(tip, left, right, light);
-        for (a, b) in [(tip, left), (left, right), (right, tip)] {
-            draw_line(a.x, a.y, b.x, b.y, 1.0, BLACK);
-        }
-    }
-}
-
-/// Whether the look marker is the arrow (`RAZDOR_MINIMAP_MARK=arrow`); the triangle otherwise.
-fn mark_is_arrow() -> bool {
-    static MARK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *MARK.get_or_init(|| std::env::var("RAZDOR_MINIMAP_MARK").is_ok_and(|v| v.trim() == "arrow"))
-}
-
-/// A solid arrow of `len` px from `at` along `dir` (unit, minimap pixels): a shaft and a head whose tip is `len`
-/// ahead. The outline runs round its seven corners.
-fn draw_arrow(at: Vec2, dir: Vec2, len: f32, fill: Color) {
+    // A phone: at least 24 dp (about 4 mm), in its own px per dp (`display::dp_px`).
+    let len = match super::display::dp_px() {
+        Some(dp) => house.max(24.0 * dp),
+        None => house.max(10.0),
+    };
+    let width = len / 1.7;
+    let (tip, base) = hero_marker(p0, dir, len);
     let n = vec2(-dir.y, dir.x);
-    let shaft = (0.09 * len).max(1.5);
-    let head_len = 0.38 * len;
-    let head = 0.22 * len;
-    let base = at + dir * (len - head_len);
-    let tip = at + dir * len;
-    let (a0, a1, b1, b0) = (at + n * shaft, base + n * shaft, base - n * shaft, at - n * shaft);
-    let (h0, h1) = (base + n * head, base - n * head);
-    draw_triangle(a0, a1, b1, fill);
-    draw_triangle(a0, b1, b0, fill);
-    draw_triangle(h0, tip, h1, fill);
-    let outline = [a0, a1, h0, tip, h1, b1, b0];
-    for i in 0..outline.len() {
-        let (a, b) = (outline[i], outline[(i + 1) % outline.len()]);
+    let (left, right) = (base + n * width * 0.5, base - n * width * 0.5);
+    draw_triangle(tip, left, right, Color::new(0.97, 0.97, 0.97, 0.95));
+    for (a, b) in [(tip, left), (left, right), (right, tip)] {
         draw_line(a.x, a.y, b.x, b.y, 1.0, BLACK);
     }
 }
 
-/// The hero's marker's tip and the middle of its base, for the marker of `size` px centred on `at` and turned to
-/// `dir` (a unit vector on the minimap): the tip is half its length ahead of `at`, the base half behind, so the
-/// marker's extent is centred on `at`.
-fn hero_marker(at: Vec2, dir: Vec2, size: f32) -> (Vec2, Vec2) {
-    (at + dir * size * 0.5, at - dir * size * 0.5)
+/// The marker's tip and the middle of its base, for a marker `len` px long centred on `at` and turned to `dir`
+/// (a unit vector on the minimap): the tip is half its length ahead of `at`, the base half behind, so the marker's
+/// extent is centred on `at`.
+fn hero_marker(at: Vec2, dir: Vec2, len: f32) -> (Vec2, Vec2) {
+    (at + dir * len * 0.5, at - dir * len * 0.5)
 }
 
 /// The unit direction the camera looks in, on the minimap (pixels, y down): the ground's forward at the camera's
@@ -1392,7 +1359,7 @@ pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_
             }
         }
         // A tilted view (2.5D, first person): the ground its frame sees, and where the camera looks (Razdor's).
-        Some(s) => draw_sight(&s, r, &to_mini),
+        Some(s) => draw_sight(&s, r, &to_mini, symbol_rect(Symbol::Grid(0, 2), size).w * zoom),
     }
 
     if let Some(t) = frame_art {
@@ -2155,6 +2122,27 @@ mod sight_tests {
         assert!(d270.x > 0.999 && d270.y.abs() < 1e-4, "yaw 270 looks along +x, right on the map: {d270:?}");
         let d45 = dir(45.0);
         assert!(d45.x < 0.0 && d45.y < 0.0, "yaw 45 points up-left: {d45:?}");
+    }
+
+    #[test]
+    fn the_visible_ground_lies_ahead_of_the_hero_at_every_turn() {
+        // The marker's tip points where the camera looks; the wedge is the ground the frame sees. With the
+        // camera on the hero (2.5D, third person) or the hero at the first-person look point, the wedge's centre
+        // lies in the forward half-plane through him: the marker's tip points into the wedge.
+        let hero = vec2(30.0, 40.0);
+        for step in 0..24 {
+            let yaw = step as f32 * 15.0;
+            let f = view25::forward(yaw);
+            let cams = [
+                ("2.5D", TiltCamera::new(hero, SCALE, FRAME, 55.0, yaw)),
+                ("first person", TiltCamera::first_person(hero, SCALE, FRAME, yaw, FarGround::Up)),
+            ];
+            for (name, cam) in cams {
+                let poly = sight_footprint(&cam, FRAME);
+                let ahead = centroid(&poly) - hero;
+                assert!(ahead.dot(f) > 0.0, "yaw {yaw}, {name}: the wedge's centre lies ahead of the hero, {ahead:?} vs {f:?}");
+            }
+        }
     }
 
     #[test]
