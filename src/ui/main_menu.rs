@@ -1236,7 +1236,9 @@ fn slider(r: Rect, value: f32) -> Option<f32> {
         None => draw_rectangle(x, r.y, knob_w, r.h, chrome::SILVER),
     }
     let (mx, my) = crate::ui::widgets::pointer();
-    let over = !input_blocked() && Rect::new(r.x, r.y - 4.0 * k, r.w, r.h + 8.0 * k).contains(vec2(mx, my));
+    // A phone's drag area is 40 dp high (the track is 17 dp; the mobile check's touch-target rule), centred on it.
+    let pad = super::display::dp_px().map_or(4.0 * k, |u| ((40.0 * u - r.h) / 2.0).max(4.0 * k));
+    let over = !input_blocked() && Rect::new(r.x, r.y - pad, r.w, r.h + 2.0 * pad).contains(vec2(mx, my));
     (over && is_mouse_button_down(MouseButton::Left)).then(|| ((mx - r.x - knob_w / 2.0) / (r.w - knob_w)).clamp(0.0, 1.0))
 }
 
@@ -1590,8 +1592,8 @@ impl Group {
     /// The rows the group shows, top to bottom. Every row is in exactly one group (a test checks it).
     pub fn rows(self) -> &'static [Row] {
         match self {
-            Group::Map => &[Row::MapZoom, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
-            Group::Battle => &[Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience],
+            Group::Map => &[Row::MapZoom, Row::ScrollSpeed, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::ViewCamera, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
+            Group::Battle => &[Row::WalkSpeed, Row::AnimSpeed, Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
             Group::Other => &[Row::Updates, Row::Import, Row::ChronicleSummary],
@@ -1603,6 +1605,7 @@ impl Group {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Row {
     MapZoom,
+    ScrollSpeed,
     MapResolution,
     FrameCap,
     MapView,
@@ -1626,6 +1629,8 @@ pub enum Row {
     LeaderName,
     MinimapCorner,
     MinimapReset,
+    WalkSpeed,
+    AnimSpeed,
     AiStrength,
     UnitBattle,
     KeepFormation,
@@ -1648,8 +1653,9 @@ pub enum Row {
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 42] = [
+pub const ALL: [Row; 45] = [
         Row::MapZoom,
+        Row::ScrollSpeed,
         Row::MapResolution,
         Row::FrameCap,
         Row::MapView,
@@ -1673,6 +1679,8 @@ pub const ALL: [Row; 42] = [
         Row::LeaderName,
         Row::MinimapCorner,
         Row::MinimapReset,
+        Row::WalkSpeed,
+        Row::AnimSpeed,
         Row::AiStrength,
         Row::UnitBattle,
         Row::KeepFormation,
@@ -2008,18 +2016,18 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
             if labelled_row_help(c, geo, tr("Map zoom"), lock, Row::MapZoom.help_text()).0 {
                 audio.zoom_locked = !audio.zoom_locked;
             }
+            // The zoom's slider is a row like the other sliders (the owner's request, backlog 1592): its
+            // value («×1.00») is its label, and the arrows step the zoom by 0.05, as the wheel does.
             let (lo, hi) = super::world_view::ZOOM_RANGE;
-            let value = format!("×{:.2}", audio.map_zoom);
-            let value_w = measure(&value, geo.size).width;
-            let track = Rect::new(c.x, c.y, (c.w - value_w - 12.0 * geo.k).max(60.0 * geo.k), 32.0 * geo.k);
-            chrome::shadow_text(&value, track.x + track.w + 8.0 * geo.k, track.y + 21.0 * geo.k, geo.size, chrome::GOLD);
-            // On a phone a slider only partly in the scroll view is neither drawn nor moved (as its buttons).
-            let shown = geo.btn_size.is_none() || ADV_VIEW.with(|v| v.get()).is_none_or(|view| inside(track, view));
-            if let Some(v) = shown.then(|| slider(track, (audio.map_zoom - lo) / (hi - lo))).flatten().filter(|_| in_adv_view(track)) {
+            let label = format!("×{:.2}", audio.map_zoom);
+            if let Some(v) = slider_row_at(c, geo, &label, (audio.map_zoom - lo) / (hi - lo), 0.05 / (hi - lo)) {
                 audio.map_zoom = ((lo + v * (hi - lo)) / 0.05).round() * 0.05;
             }
-            c.y += track.h + geo.gap;
         }
+        // The speed sliders moved here from the General tab (backlog 1591).
+        Row::ScrollSpeed => slider_draw(c, geo, audio, 2),
+        Row::WalkSpeed => slider_draw(c, geo, audio, 3),
+        Row::AnimSpeed => slider_draw(c, geo, audio, 4),
         Row::MapResolution => {
             // Razdor's (the owner's request, 2026-11-10): the map's drawing resolution for low-end phones.
             let value = super::map_scale::label(audio.map_render_scale);
@@ -2407,23 +2415,27 @@ fn group_pane(audio: &mut super::audio::Settings, over_map: bool, group: Group, 
     pane_end(top, c.y);
 }
 
-/// The five slider rows of the General tab, top to bottom: the label (the install's own name for
-/// it, as the original's window had) and the value (0..1).
-fn slider_rows(audio: &super::audio::Settings) -> [(String, f32); 5] {
+/// The slider row `i` of the settings (0..5): the label (the install's own name for it, as the
+/// original's window had) and the value (0..1). Rows 0 and 1, the volumes, are on the General tab;
+/// 2, the map's scroll speed, on «Карта»; 3, the hero's walking speed, and 4, the battle animation
+/// speed, on «Бой и армия» (the owner's request, backlog 1591).
+fn slider_row(audio: &super::audio::Settings, i: usize) -> (String, f32) {
     // The Evolution Mod has four slider rows, labelled `Option0`…`Option3` (its exe builds the key from
     // `Option` and the row number); the Community's five are `OptionSld0`…`OptionSld4`.
     let mod_rows = chrome::install_option("Option0").is_some() && chrome::install_option("OptionSld0").is_none();
     let slider_label = |n: usize, ours: &'static str| own("Options", &if mod_rows { format!("Option{n}") } else { format!("OptionSld{n}") }, ours);
-    // The Community's "Скорость анимаций в битве" (`AnimationSpeed`); the Evolution Mod's window has
-    // no such row, and Razdor shows it for every install under its own label (the owner, 2026-10-29).
-    let anim_label = if mod_rows { tr(n_("Battle animation speed")).to_string() } else { slider_label(4, n_("Battle animation speed")) };
-    [
-        (slider_label(0, n_("Background music volume")), audio.music_volume),
-        (slider_label(1, n_("Sound effects volume")), audio.sfx_volume),
-        (slider_label(2, n_("Map scroll speed")), scroll_speed(audio) / 100.0),
-        (slider_label(3, n_("Hero's walking speed")), walk_speed(audio) / razdor::rules::game::WALK_SPEED_MAX as f32),
-        (anim_label, anim_speed(audio).unwrap_or(0.0) / 99.0),
-    ]
+    match i {
+        0 => (slider_label(0, n_("Background music volume")), audio.music_volume),
+        1 => (slider_label(1, n_("Sound effects volume")), audio.sfx_volume),
+        2 => (slider_label(2, n_("Map scroll speed")), scroll_speed(audio) / 100.0),
+        3 => (slider_label(3, n_("Hero's walking speed")), walk_speed(audio) / razdor::rules::game::WALK_SPEED_MAX as f32),
+        // The Community's "Скорость анимаций в битве" (`AnimationSpeed`); the Evolution Mod's window has
+        // no such row, and Razdor shows it for every install under its own label (the owner, 2026-10-29).
+        _ => {
+            let label = if mod_rows { tr(n_("Battle animation speed")).to_string() } else { slider_label(4, n_("Battle animation speed")) };
+            (label, anim_speed(audio).unwrap_or(0.0) / 99.0)
+        }
+    }
 }
 
 /// A slider row of the General tab moved to `v` from `old`: the volumes step (1% each), the others
@@ -2443,6 +2455,26 @@ fn set_slider(audio: &mut super::audio::Settings, i: usize, old: f32, v: f32) {
         2 => audio.scroll_speed = Some((v * 100.0).round()),
         3 => audio.walk_speed = Some((v * razdor::rules::game::WALK_SPEED_MAX as f32).round()),
         _ => audio.anim_speed = Some((v * 99.0).round()),
+    }
+}
+
+/// A slider row at `c` in a settings pane, in the style of the General tab's sliders: the label on the
+/// left (`label`), ◀ track ▶ on the right, 30 px high on the desktop and 40 dp on a phone. Returns the
+/// new value (0..1) when moved, and moves `c` down past the row. `step` is what an arrow moves it.
+fn slider_row_at(c: &mut RowCol, geo: &RowGeo, label: &str, value: f32, step: f32) -> Option<f32> {
+    let (h, size) = if geo.btn_size.is_some() { (40.0 * geo.k, geo.size) } else { (30.0 * geo.k, 15.0 * geo.k) };
+    let r = Rect::new(c.x, c.y, c.w, h);
+    c.y += h + geo.gap;
+    // On a phone a row only partly in the scroll view is neither drawn nor moved (as its buttons).
+    let shown = geo.btn_size.is_none() || ADV_VIEW.with(|v| v.get()).is_none_or(|view| inside(r, view));
+    option_slider_step(r, label, value, size, step).filter(|_| shown && in_adv_view(r))
+}
+
+/// The settings slider `i` (see [`slider_row`]) as a row of a pane: moved, it sets its setting at once.
+fn slider_draw(c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Settings, i: usize) {
+    let (label, value) = slider_row(audio, i);
+    if let Some(v) = slider_row_at(c, geo, &label, value, 0.05) {
+        set_slider(audio, i, value, v);
     }
 }
 
@@ -2481,19 +2513,20 @@ fn toggle_check(audio: &mut super::audio::Settings, key: &str, on: bool) {
     }
 }
 
-/// The General tab on the desktop: the original's five slider rows and seven checkboxes at their
-/// places in `pane` (they fit it, so it does not scroll).
+/// The General tab on the desktop: the original's two volume rows and seven checkboxes at their
+/// places in `pane` (they fit it, so it does not scroll). The speed sliders are on their tabs now.
 fn general_desktop(audio: &mut super::audio::Settings, install_wide: bool, pane: Rect, k: f32) {
     let row = |i: usize| Rect::new(pane.x + 10.0 * k, pane.y + i as f32 * 37.5 * k, pane.w - 20.0 * k, 30.0 * k);
-    for (i, (label, value)) in slider_rows(audio).iter().enumerate() {
-        if let Some(v) = option_slider(row(i), label, *value) {
-            set_slider(audio, i, *value, v);
+    for i in 0..2 {
+        let (label, value) = slider_row(audio, i);
+        if let Some(v) = option_slider(row(i), &label, value) {
+            set_slider(audio, i, value, v);
         }
     }
     let cx = pane.x + 14.0 * k;
     // The gap sits before the battle group: its first checkbox, «Улучшенный интеллект противника в
     // битве» (`Option9`), is the fifth of the seven (index 4).
-    let cy = |i: usize| row(5).y + 4.0 * k + i as f32 * 27.0 * k + if i >= 4 { 11.0 * k } else { 0.0 };
+    let cy = |i: usize| row(2).y + 4.0 * k + i as f32 * 27.0 * k + if i >= 4 { 11.0 * k } else { 0.0 };
     for (i, (key, label, on, ink)) in general_checks(audio, install_wide).into_iter().enumerate() {
         if option_check(cx, cy(i), &label, on, ink) {
             toggle_check(audio, key, on);
@@ -2509,7 +2542,7 @@ fn general_phone(audio: &mut super::audio::Settings, install_wide: bool, view: R
     let x0 = view.x + 4.0 * u;
     let cw = view.w - 28.0 * list_k - 8.0 * u;
     let (slider_h, pitch) = (40.0 * u, 44.0 * u);
-    let rows = slider_rows(audio);
+    let rows: Vec<(String, f32)> = (0..2).map(|i| slider_row(audio, i)).collect();
     let checks = general_checks(audio, install_wide);
     let lines: Vec<Vec<String>> = checks.iter().map(|c| wrap_label(&c.1, cw - 34.0 * u, 14.0 * u)).collect();
     let check_h: Vec<f32> = lines.iter().map(|l| (10.0 + l.len() as f32 * 18.0).max(34.0) * u).collect();
@@ -2673,6 +2706,11 @@ fn option_slider(r: Rect, label: &str, value: f32) -> Option<f32> {
 
 /// [`option_slider`] with its label at `size` px (the phone's 14 sp).
 fn option_slider_sized(r: Rect, label: &str, value: f32, size: f32) -> Option<f32> {
+    option_slider_step(r, label, value, size, 0.05)
+}
+
+/// [`option_slider_sized`] whose ◀ ▶ arrows move the value by `step` (0..1) at a click.
+fn option_slider_step(r: Rect, label: &str, value: f32, size: f32, step: f32) -> Option<f32> {
     let k = chrome::k();
     draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.0, 0.0, 0.35));
     chrome::silver_frame(r, 1.0);
@@ -2703,12 +2741,24 @@ fn option_slider_sized(r: Rect, label: &str, value: f32, size: f32) -> Option<f3
             None => draw_rectangle(ar.x, ar.y, ar.w, ar.h, chrome::SILVER),
         }
     }
-    let over = |ar: Rect| ar.contains(crate::ui::widgets::pointer().into()) && !input_blocked();
+    // On a phone an arrow's hit area is a finger's 40 dp square around it, cut to the row (the drawing
+    // stays as it is; the mobile check's rule for touch targets). The desktop's is the arrow itself.
+    let over = |ar: Rect| {
+        let hit = match super::display::dp_px() {
+            Some(u) => {
+                let (cx, cy, s) = (ar.x + ar.w / 2.0, ar.y + ar.h / 2.0, 40.0 * u);
+                let (x0, y0) = ((cx - s / 2.0).max(r.x), (cy - s / 2.0).max(r.y));
+                Rect::new(x0, y0, (cx + s / 2.0).min(r.x + r.w) - x0, (cy + s / 2.0).min(r.y + r.h) - y0)
+            }
+            None => ar,
+        };
+        hit.contains(crate::ui::widgets::pointer().into()) && !input_blocked()
+    };
     if over(left) && clicked() {
-        return Some((value - 0.05).max(0.0));
+        return Some((value - step).max(0.0));
     }
     if over(right) && clicked() {
-        return Some((value + 0.05).min(1.0));
+        return Some((value + step).min(1.0));
     }
     slider(track, value)
 }
@@ -3584,6 +3634,18 @@ mod tests {
         assert!(short.iter().all(|r| r.h >= 40.0 - 1e-3), "{short:?}");
         let last = short[5];
         assert!(last.y + last.h <= 250.0 + 1e-3, "{short:?} runs out of its column");
+    }
+
+    /// The speed sliders are on their tabs (backlog 1591): the map's scroll speed on «Карта», the hero's
+    /// walking speed and the battle animation speed on «Бой и армия»; the General tab keeps the volumes.
+    #[test]
+    fn the_speed_sliders_are_on_the_map_and_battle_tabs() {
+        assert!(Group::Map.rows().contains(&Row::ScrollSpeed));
+        assert!(Group::Battle.rows().contains(&Row::WalkSpeed));
+        assert!(Group::Battle.rows().contains(&Row::AnimSpeed));
+        let audio = super::super::audio::Settings::default();
+        assert_eq!(slider_row(&audio, 0).1, audio.music_volume);
+        assert_eq!(slider_row(&audio, 1).1, audio.sfx_volume);
     }
 
     /// The bottom bar's size row shows on a phone held sideways only (a player's report).
