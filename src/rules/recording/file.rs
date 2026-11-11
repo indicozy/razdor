@@ -31,13 +31,16 @@ const TAG_KEYFRAME: u8 = 2;
 const TAG_SEGMENT: u8 = 3;
 const TAG_ENTRIES: u8 = 4;
 const TAG_BATTLE: u8 = 5;
+/// A keyframe's payload before its packed snapshot: the stamp (12), the game day (8), the hash (8).
+const KEYFRAME_HEAD: usize = 28;
 
 /// A job for the writer thread.
 enum Job {
     /// A block with its payload as it is written.
     Block(u8, Vec<u8>),
-    /// A keyframe: its stamp, the state's hash, and the state's JSON (packed by the thread).
-    Keyframe { tag: u8, at: Stamp, hash: u64, json: Vec<u8> },
+    /// A keyframe: its stamp, the game day, the state's hash, and the state's JSON (packed by
+    /// the thread).
+    Keyframe { tag: u8, at: Stamp, day: u64, hash: u64, json: Vec<u8> },
     /// Everything before is written; the file's length goes back.
     Sync,
 }
@@ -134,13 +137,14 @@ impl Writer {
                             put_block(&mut out, tag, &payload);
                             Some(out)
                         }
-                        Job::Keyframe { tag, at, hash, json } => {
+                        Job::Keyframe { tag, at, day, hash, json } => {
                             let packed = match crate::rules::save::pack(&json) {
                                 Ok(p) => p,
                                 Err(_) => continue,
                             };
-                            let mut payload = Vec::with_capacity(packed.len() + 24);
+                            let mut payload = Vec::with_capacity(packed.len() + KEYFRAME_HEAD);
                             put_stamp(&mut payload, at);
+                            payload.extend_from_slice(&day.to_le_bytes());
                             payload.extend_from_slice(&hash.to_le_bytes());
                             payload.extend_from_slice(&packed);
                             let mut out = Vec::new();
@@ -179,9 +183,9 @@ impl Writer {
     }
 
     /// A keyframe (`segment` for a segment's start), packed on the thread.
-    pub fn keyframe(&self, segment: bool, at: Stamp, hash: u64, json: Vec<u8>) {
+    pub fn keyframe(&self, segment: bool, at: Stamp, day: u64, hash: u64, json: Vec<u8>) {
         let tag = if segment { TAG_SEGMENT } else { TAG_KEYFRAME };
-        let _ = self.tx.send(Job::Keyframe { tag, at, hash, json });
+        let _ = self.tx.send(Job::Keyframe { tag, at, day, hash, json });
     }
 
     /// Waits until everything sent is written; the file's length then.
@@ -213,11 +217,28 @@ impl Drop for Writer {
 #[derive(Debug)]
 pub struct Segment {
     pub start_at: Stamp,
+    pub start_day: u64,
     pub start_hash: u64,
     /// The packed snapshot the segment starts from (`Snapshot::from_bytes`).
     pub snapshot: Vec<u8>,
     pub entries: Vec<Entry>,
-    pub battles: Vec<BattleStart>,
+    /// The battles begun in it, each with the number of entries before its start (`after`).
+    pub battles: Vec<(usize, BattleStart)>,
+    /// The checkpoints after the start, in order (each one's `after` counts the entries before it).
+    pub keyframes: Vec<Keyframe>,
+}
+
+/// A checkpoint inside a segment: the state (packed) at a place of the stream. Playback that
+/// starts from it applies `entries[after..]`.
+#[derive(Debug, Clone)]
+pub struct Keyframe {
+    pub at: Stamp,
+    /// The game day the state is in (`Clock::day_index`).
+    pub day: u64,
+    pub hash: u64,
+    pub after: usize,
+    /// The packed snapshot (`Snapshot::from_bytes`).
+    pub snapshot: Vec<u8>,
 }
 
 /// A replay file as it is read.
@@ -262,14 +283,28 @@ pub fn read(path: &Path) -> Result<ReplayFile, String> {
         match tag {
             TAG_HEADER => header = Some(serde_json::from_slice(payload).map_err(|e| e.to_string())?),
             TAG_SEGMENT | TAG_KEYFRAME => {
+                if payload.len() < KEYFRAME_HEAD {
+                    return Err("a keyframe without its head".into());
+                }
                 let at_stamp = get_stamp(payload)?;
-                let hash = u64::from_le_bytes(payload[12..20].try_into().map_err(|_| "a keyframe without its hash")?);
-                let snapshot = payload[20..].to_vec();
+                let day = u64::from_le_bytes(payload[12..20].try_into().unwrap());
+                let hash = u64::from_le_bytes(payload[20..28].try_into().unwrap());
+                let snapshot = payload[KEYFRAME_HEAD..].to_vec();
                 if tag == TAG_SEGMENT {
-                    segments.push(Segment { start_at: at_stamp, start_hash: hash, snapshot, entries: Vec::new(), battles: Vec::new() });
+                    segments.push(Segment {
+                        start_at: at_stamp,
+                        start_day: day,
+                        start_hash: hash,
+                        snapshot,
+                        entries: Vec::new(),
+                        battles: Vec::new(),
+                        keyframes: Vec::new(),
+                    });
                 } else {
                     let seg = segments.last_mut().ok_or("a checkpoint before any segment")?;
                     seg.entries.push(Entry { at: at_stamp, input: Input::Engine(EngineInput::Check { hash }) });
+                    let after = seg.entries.len();
+                    seg.keyframes.push(Keyframe { at: at_stamp, day, hash, after, snapshot });
                 }
             }
             TAG_ENTRIES => {
@@ -278,7 +313,8 @@ pub fn read(path: &Path) -> Result<ReplayFile, String> {
             }
             TAG_BATTLE => {
                 let seg = segments.last_mut().ok_or("a battle before any segment")?;
-                seg.battles.push(serde_json::from_slice(payload).map_err(|e| e.to_string())?);
+                let start: BattleStart = serde_json::from_slice(payload).map_err(|e| e.to_string())?;
+                seg.battles.push((seg.entries.len(), start));
             }
             _ => break,
         }

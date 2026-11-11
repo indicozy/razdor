@@ -107,7 +107,7 @@ const FORCED_PLY: i64 = 1 << 32;
 /// decision of 2026-10-19: "if it's just a quick fight and not the campaign, there's no need
 /// to avoid sacrificing units for the sake of a quicker finish, if 100% sure"). The same for
 /// both sides, so for the enemy and for the player's auto-battle (Q, W) alike.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum MaxStakes {
     /// A battle on the map (the default): the armies go on after it, so their units matter.
     /// Max's score already counts every unit kept and its HP, and a win is ranked by the

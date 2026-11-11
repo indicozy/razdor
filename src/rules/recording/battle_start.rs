@@ -10,7 +10,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::rules::ai;
-use crate::rules::battle::{patch_globals, set_patch_globals, Battle, PatchGlobals, Team};
+use crate::rules::battle::{patch_globals, set_patch_globals, Battle, MaxStakes, PatchGlobals, Team};
 use crate::rules::content::Content;
 use crate::rules::formation::Slot;
 use crate::rules::game::{troop_unit, Foe, Game};
@@ -39,6 +39,12 @@ pub struct BattleStart {
     pub building_defence: [i32; 2],
     /// The patch globals the battle starts with.
     pub patch: PatchGlobals,
+    /// What the battle is fought for (`Battle::set_max_stakes`): a map battle is `Campaign`.
+    #[serde(default)]
+    pub max_stakes: MaxStakes,
+    /// The game day the battle began in (`Clock::day_index`); none in a record made before it.
+    #[serde(default)]
+    pub day: u64,
 }
 
 impl Game {
@@ -89,6 +95,8 @@ impl Game {
             bare_enemy: matches!(self.foe, Some(Foe::Garrison(l)) if self.world.locations[l].strengths_bare),
             building_defence: [self.hero_building_defence(), defence.max(army_home)],
             patch: patch_globals(),
+            max_stakes: MaxStakes::Campaign,
+            day: self.clock.day_index(),
         }
     }
 }
@@ -108,6 +116,7 @@ impl BattleStart {
         b.set_improved_ai(self.improved_ai);
         b.set_max_ai(self.max_ai);
         b.set_max_guard(self.max_guard);
+        b.set_max_stakes(self.max_stakes);
         b.god = self.god;
         if self.building_defence[1] > 0 {
             b.set_building_defence(Team::Enemy, self.building_defence[1]);
@@ -259,6 +268,19 @@ mod tests {
         let text = serde_json::to_string(&start).unwrap();
         let back: BattleStart = serde_json::from_str(&text).unwrap();
         assert_eq!(back, start);
+        assert_eq!(start.day, g.clock.day_index(), "the battle records its day");
+        assert_eq!(start.max_stakes, MaxStakes::Campaign, "a map battle is fought for the campaign");
+        // A record from before the fields (no `day`, no `max_stakes`) still reads, as a map battle.
+        let mut old: serde_json::Value = serde_json::from_str(&text).unwrap();
+        old.as_object_mut().unwrap().remove("day");
+        old.as_object_mut().unwrap().remove("max_stakes");
+        let old: BattleStart = serde_json::from_value(old).unwrap();
+        assert_eq!((old.day, old.max_stakes), (0, MaxStakes::Campaign));
+        // A battle fought for a quick fight («Свой бой») gets its stakes back from the record.
+        let mut quick = start.clone();
+        quick.max_stakes = MaxStakes::Quick;
+        let quick_back: BattleStart = serde_json::from_str(&serde_json::to_string(&quick).unwrap()).unwrap();
+        assert_eq!(quick_back.rebuild(c.clone()).max_stakes(), MaxStakes::Quick);
         let (mut a, mut b) = (back.rebuild(c.clone()), start.rebuild(c.clone()));
         let (oa, ob) = (a.auto_play_to_end(), b.auto_play_to_end());
         assert_eq!(oa, ob);

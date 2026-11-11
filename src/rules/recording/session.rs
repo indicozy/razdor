@@ -86,7 +86,7 @@ impl Session {
         let day = game.clock.day_index();
         let inner = Inner { writer, name, pending: Vec::new(), day, keyframe_day: day };
         let (json, hash) = capture(game)?;
-        inner.writer.keyframe(true, game.stamp(), hash, json);
+        inner.writer.keyframe(true, game.stamp(), day, hash, json);
         let inner = Arc::new(Mutex::new(inner));
         hook::install_recorder(Box::new(SessionRecorder(inner.clone())));
         Ok(Session { inner })
@@ -123,7 +123,7 @@ impl Session {
             match capture(game) {
                 Ok((json, hash)) => {
                     g.flush();
-                    g.writer.keyframe(false, game.stamp(), hash, json);
+                    g.writer.keyframe(false, game.stamp(), day, hash, json);
                     g.keyframe_day = day;
                 }
                 Err(_) => hook::request_keyframe(),
