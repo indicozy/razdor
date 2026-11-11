@@ -243,6 +243,11 @@ impl EventRng {
         EventRng(state)
     }
 
+    /// The state (for a snapshot, a replay's record, and the state hash).
+    pub fn state(&self) -> u32 {
+        self.0
+    }
+
     /// Seeded from the clock, as the original does from the time-stamp counter.
     pub fn from_clock() -> Self {
         let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64);

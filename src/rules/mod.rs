@@ -26,6 +26,7 @@ pub mod map_refs;
 pub mod music;
 pub mod pack;
 pub mod pack_order;
+pub mod recording;
 pub mod rng;
 pub mod save;
 #[cfg(test)]
