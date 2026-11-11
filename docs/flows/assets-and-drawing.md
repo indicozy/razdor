@@ -310,7 +310,16 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   (`Atlas::building_cards`). In the tilted view only, a building with cards is drawn as one `Drawable::BuildingCard`
   per card, each on its own foot (`card_foot`, sorted like a sprite) and standing as a billboard, its mesh
   (`card_mesh`, the sprite's uvs in the atlas, `sharp` sampling). Its shadow lies on the ground under the fog
-  (`draw_building_shadow`, `chrome::shadow_only`: the sprite's shadow pixels only, with the relief's `ShadowK`). A bridge, a picture with no
+  (`draw_building_shadow`, `chrome::shadow_only`: the sprite's shadow pixels only, with the relief's `ShadowK`).
+  **Groups** (the owner's decision, 2026-11-11: no rotation of assets, everything faces the camera). A card building
+  is one group: `Drawable::BuildingGroup`, one item on the building's foot (`building_foot`), drawn as one billboard
+  (`standing`, `draw_building_group`) whose cards keep their yaw-0 picture layout. Each card's foot moves to where its
+  ground point is seen at the current pitch (`layer_offset`: vertical `d·(sin p − 1)` in sprite rows, `d` the card's
+  foot row minus the group's, so the flat look at pitch 90 is the picture); a turn slides a layer sideways by
+  `LAYER_PARALLAX` (0.08) times `d·sin yaw`, at most `LAYER_PARALLAX_MAX` (4) sprite pixels. `layered_cards` applies
+  it to the verts and the foot together, for the drawn mesh, the shadows and the windows; a flag moves with its card.
+  Tests: `layer_tests` (flat look, the ground line of back and front layers, the bounded slide).
+ A bridge, a picture with no
   entry, and the flat view keep one billboard as before. The hover's gold outline goes under each card.
   The bundled `one_card` list (`data/cards/objects.json`) names the base buildings left with no entry (one region):
   they count as shipped, one billboard, no model. **Buildings with no shipped cut** (mods, community maps: `depth`, feature `depth-model`). `DtArt::map_atlas`

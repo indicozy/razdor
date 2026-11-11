@@ -2760,8 +2760,9 @@ fn draw_terrain(game: &Game, art: Option<&DtArt>, cam: &Camera) {
 enum Drawable {
     Object(Decoration),
     Building(usize),
-    /// Card `k` of a building drawn as cards (2.5D, [`card_building`]): location, card.
-    BuildingCard(usize, usize),
+    /// A building drawn as one group of cards (2.5D, [`card_building`]): location. The group sorts by the building's
+    /// foot as one item, and stands as one billboard about that foot ([`draw_building_group`]).
+    BuildingGroup(usize),
     Army(usize),
     /// The hero's ship, waiting where he left it.
     Ship,
@@ -3039,6 +3040,11 @@ fn draw_living_picture(ls: &Living, atlas: &Atlas, r: Rect, at: Vec2, zoom: f32)
     draw_parts(ls.parts.iter(), atlas, r, at, zoom);
 }
 
+/// Layer parallax of a building group (see [`layer_offset`]): a fraction of a layer's depth offset per unit of the
+/// turn's sine, and the most it moves, in sprite pixels.
+const LAYER_PARALLAX: f32 = 0.08;
+const LAYER_PARALLAX_MAX: f32 = 4.0;
+
 /// A card's foot in the 2D space: its ground point in the building's sprite whose top-left is at
 /// `origin`, drawn `zoom` screen pixels to a sprite pixel.
 fn card_foot(origin: Vec2, zoom: f32, card: &Card) -> Vec2 {
@@ -3125,9 +3131,48 @@ fn card_mesh_form(cam: &Camera, card: &Card, origin_px: Vec2, zoom: f32, src: Re
     (vertices, card.tris.clone())
 }
 
-fn draw_card(cam: &Camera, card: &Card, origin: Vec2, zoom: f32, src: Rect, tex: &Texture2D, outlined: bool) {
+/// The parallax of a building's layers, in sprite pixels, for a camera of `pitch_deg` and `yaw_deg`. A layer's foot
+/// `d` sprite rows nearer the eye than the group's foot (`group_y`) stands on the ground at `d · sin p` rows below
+/// the group's foot at pitch p (the ground's foreshortening), where the picture put it at `d` (the flat look):
+/// its vertical move is `d (sin p − 1)`, zero at the flat look (p = 90). A turn slides it sideways by `d` times
+/// `LAYER_PARALLAX · sin yaw`, at most `LAYER_PARALLAX_MAX` px. Returns (x, y).
+fn layer_offset(pitch_deg: f32, yaw_deg: f32, group_y: f32, foot_y: f32) -> Vec2 {
+    let d = foot_y - group_y;
+    let sin_p = super::memo::sin_cos_deg(pitch_deg).0;
+    let side = (-LAYER_PARALLAX * d * yaw_deg.to_radians().sin()).clamp(-LAYER_PARALLAX_MAX, LAYER_PARALLAX_MAX);
+    vec2(side, d * (sin_p - 1.0))
+}
+
+/// The cards of a building group with their layer offsets applied (verts and foot together, topology kept), in
+/// the order given (back to front).
+fn layered_cards_at(pitch_deg: f32, yaw_deg: f32, cards: &[Card], group_y: f32) -> Vec<Card> {
+    cards
+        .iter()
+        .map(|c| {
+            let o = layer_offset(pitch_deg, yaw_deg, group_y, c.foot.1);
+            Card { foot: (c.foot.0 + o.x, c.foot.1 + o.y), verts: c.verts.iter().map(|&(x, y)| (x + o.x, y + o.y)).collect(), tris: c.tris.clone() }
+        })
+        .collect()
+}
+
+/// [`layered_cards_at`] for the camera: the cards as they stand in the tilted view (the cards as they are in the flat).
+fn layered_cards(cam: &Camera, cards: &[Card], group_y: f32) -> Vec<Card> {
+    match cam.tilt {
+        Some(t) => layered_cards_at(t.cam.pitch_deg, t.cam.yaw_deg, cards, group_y),
+        None => cards.to_vec(),
+    }
+}
+
+/// The row of a building group's foot in its sprite's pixels (the rows of the cards' feet).
+fn group_y(foot: Vec2, origin: Vec2, zoom: f32) -> f32 {
+    (foot.y - origin.y) / zoom
+}
+
+/// Draws a building's cards as one group: each card's mesh in the layers' places (`layered_cards`), back to front,
+/// with the gold outline of the whole group under it when outlined.
+fn draw_cards(cam: &Camera, cards: &[Card], origin: Vec2, zoom: f32, src: Rect, tex: &Texture2D, outlined: bool) {
     let size = vec2(tex.width(), tex.height());
-    let mesh = |origin: Vec2, color: Color| {
+    let mesh = |card: &Card, origin: Vec2, color: Color| {
         let (vertices, indices) = card_mesh_form(cam, card, origin, zoom, src, size, color);
         Mesh { vertices, indices, texture: Some(tex.clone()) }
     };
@@ -3135,11 +3180,37 @@ fn draw_card(cam: &Camera, card: &Card, origin: Vec2, zoom: f32, src: Rect, tex:
         let d = (1.5 * zoom).max(1.0);
         super::chrome::silhouette(|| {
             for (dx, dy) in OUTLINE_STEPS {
-                super::sharp::draw_mesh_sharp(&mesh(origin + vec2(dx * d, dy * d), faded(BUILDING_OUTLINE)), vec2(zoom, zoom));
+                for card in cards {
+                    super::sharp::draw_mesh_sharp(&mesh(card, origin + vec2(dx * d, dy * d), faded(BUILDING_OUTLINE)), vec2(zoom, zoom));
+                }
             }
         });
     }
-    super::sharp::draw_mesh_sharp(&mesh(origin, faded(WHITE)), vec2(zoom, zoom));
+    for card in cards {
+        super::sharp::draw_mesh_sharp(&mesh(card, origin, faded(WHITE)), vec2(zoom, zoom));
+    }
+}
+
+/// A building drawn as one group of layers in the tilted view ([`layered_cards`]): one billboard about its foot
+/// (`standing`), so the group turns as one picture, its cards in their layers. Its flags (`living`) draw with the
+/// card that holds their anchor, moved by that card's layer offset.
+#[allow(clippy::too_many_arguments)]
+fn draw_building_group(cam: &Camera, atlas: &Atlas, r: Rect, cards: &[Card], origin: Vec2, zoom: f32, foot: Vec2, vis: f32, living: Option<&Living>, outlined: bool) {
+    let layers = layered_cards(cam, cards, group_y(foot, origin, zoom));
+    standing(cam, foot, foot, vis, Rect::new(origin.x, origin.y, r.w * zoom, r.h * zoom), || {
+        frame_probe::sprite(r.w * zoom, r.h * zoom);
+        match living.and_then(|ls| ls.body()) {
+            Some(body) => draw_cards(cam, &layers, origin, zoom, Rect::new(0.0, 0.0, r.w, r.h), body, outlined),
+            None => draw_cards(cam, &layers, origin, zoom, r, &atlas.texture, outlined),
+        }
+        if let Some(ls) = living {
+            for (k, card) in cards.iter().enumerate() {
+                let off = vec2(layers[k].foot.0 - card.foot.0, layers[k].foot.1 - card.foot.1);
+                let mine = ls.parts.iter().filter(|p| owning_card(cards, origin, zoom, p.anchor()) == k);
+                draw_parts(mine, atlas, r, origin + off * zoom, zoom);
+            }
+        }
+    });
 }
 
 /// A card building's shadow on the ground (2.5D): the whole sprite, placed as `draw_building`
@@ -3216,7 +3287,8 @@ fn draw_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, sun: Option<dayl
         match card_building(l, Some(art)) {
             Some((_, r, cards)) => {
                 let origin = building_sprite_origin(l, r.w, r.h, cam);
-                for card in cards {
+                let layers = layered_cards(cam, cards, group_y(building_foot(l, cam), origin, zoom));
+                for card in &layers {
                     let foot = card_foot(origin, zoom, card);
                     let k = shade(foot);
                     if k <= 0.0 {
@@ -4106,13 +4178,9 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
         if location_seen(l) {
             if l.kind.is_bridge() {
                 items.push((i64::MIN / 2 + cell_pass_key(l.anchor, 0), Drawable::Building(i)));
-            } else if let Some((_, r, cards)) = tilted.then(|| card_building(l, art)).flatten() {
-                // 2.5D with cut data: each card goes in the pass on its own foot, back to front.
-                let origin = building_sprite_origin(l, r.w, r.h, cam);
-                let zoom = cam.scale / PX;
-                for (k, card) in cards.iter().enumerate() {
-                    items.push((sprite_key(cam, first_footprint_cell(l), card_foot(origin, zoom, card), LAYER_BUILDING), Drawable::BuildingCard(i, k)));
-                }
+            } else if tilted && card_building(l, art).is_some() {
+                // 2.5D with cut data: the building is one group of layers, sorted by its foot like a building.
+                items.push((sprite_key(cam, first_footprint_cell(l), building_foot(l, cam), LAYER_BUILDING), Drawable::BuildingGroup(i)));
             } else {
                 items.push((sprite_key(cam, first_footprint_cell(l), building_foot(l, cam), LAYER_BUILDING), Drawable::Building(i)));
             }
@@ -4163,30 +4231,17 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                         standing(cam, building_foot(l, cam), building_foot(l, cam), shade_of(building_foot(l, cam)), building_picture(l, art, cam), || draw_building(l, art, cam, outlined));
                     }
                 }
-                Drawable::BuildingCard(i, k) => {
+                Drawable::BuildingGroup(i) => {
                     let l = &game.world.locations[*i];
                     let Some((atlas, r, cards)) = card_building(l, art) else { continue };
-                    let card = &cards[*k];
                     let zoom = cam.scale / PX;
                     let origin = building_sprite_origin(l, r.w, r.h, cam);
-                    let f = card_foot(origin, zoom, card);
+                    let foot = building_foot(l, cam);
                     let outlined = hover.is_some_and(|h| h.building == Some(*i));
-                    // Living (flags): the cards draw the cleared copy, and each flag goes with the card
-                    // whose outline holds its anchor (`owning_card`).
+                    // Living (flags): the cards draw the cleared copy, and each flag moves with the card whose
+                    // outline holds its anchor (`owning_card`).
                     let living = living_of(cam, art, l).filter(|(_, ls)| ls.body().is_some());
-                    standing(cam, f, f, shade_of(f), Rect::new(origin.x, origin.y, r.w * zoom, r.h * zoom), || {
-                        if *k == 0 {
-                            frame_probe::sprite(r.w * zoom, r.h * zoom);
-                        }
-                        match living.and_then(|(_, ls)| ls.body()) {
-                            Some(body) => draw_card(cam, card, origin, zoom, Rect::new(0.0, 0.0, r.w, r.h), body, outlined),
-                            None => draw_card(cam, card, origin, zoom, r, &atlas.texture, outlined),
-                        }
-                        if let Some((_, ls)) = living {
-                            let mine = ls.parts.iter().filter(|p| owning_card(cards, origin, zoom, p.anchor()) == *k);
-                            draw_parts(mine, atlas, r, origin, zoom);
-                        }
-                    });
+                    draw_building_group(cam, atlas, r, cards, origin, zoom, foot, shade_of(foot), living.map(|(_, ls)| ls), outlined);
                 }
                 Drawable::BankBand(k) => draw_banks(cam, &bank_bands[*k]),
                 Drawable::Army(i) => {
@@ -5985,10 +6040,8 @@ fn draw_building_windows(game: &Game, assets: &Assets, cam: &Camera) {
                 }
                 if let Some((_, r, cards)) = card_building(l, Some(art)).filter(|_| c.tilt.is_some()) {
                     let origin = building_sprite_origin(l, r.w, r.h, c);
-                    for card in cards {
-                        let f = card_foot(origin, zoom, card);
-                        standing(c, f, f, 1.0, Rect::new(origin.x, origin.y, r.w * zoom, r.h * zoom), || draw_card(c, card, origin, zoom, r, &atlas.texture, false));
-                    }
+                    let foot = building_foot(l, c);
+                    draw_building_group(c, atlas, r, cards, origin, zoom, foot, 1.0, None, false);
                 } else if let Some(r) = atlas.building(l.picture.0, l.picture.1) {
                     let base = building_foot(l, c);
                     let at = building_sprite_origin(l, r.w, r.h, c);
@@ -7733,5 +7786,58 @@ mod living_parts_tests {
         assert_eq!(owning_card(&cards, Vec2::ZERO, 1.0, vec2(12.0, 5.0)), 1, "held by the second card");
         // No outline holds it: the nearest foot.
         assert_eq!(owning_card(&cards, Vec2::ZERO, 1.0, vec2(60.0, 5.0)), 1);
+    }
+}
+
+#[cfg(test)]
+mod layer_tests {
+    use super::*;
+
+    fn card(foot_y: f32) -> Card {
+        Card { foot: (10.0, foot_y), verts: vec![(0.0, foot_y - 4.0), (20.0, foot_y - 4.0), (10.0, foot_y)], tris: vec![0, 1, 2] }
+    }
+
+    #[test]
+    fn at_the_flat_look_the_layers_are_the_picture() {
+        let cards = [card(60.0), card(90.0)];
+        let flat = layered_cards_at(90.0, 0.0, &cards, 100.0);
+        for (a, b) in flat.iter().zip(&cards) {
+            assert_eq!(a, b, "pitch 90 and yaw 0: the cards stay where the picture has them");
+        }
+    }
+
+    #[test]
+    fn a_back_layer_stands_on_its_ground_line_at_the_pitch() {
+        let pitch = 55.0_f32;
+        let o = layer_offset(pitch, 0.0, 100.0, 60.0);
+        // Its ground is 40 rows behind the group's foot: seen at 40 · sin p rows above it.
+        let ground_line = 100.0 - 40.0 * pitch.to_radians().sin();
+        assert!((60.0 + o.y - ground_line).abs() < 1e-3, "{o:?}");
+        assert_eq!(o.x, 0.0, "no turn, no slide");
+    }
+
+    #[test]
+    fn a_front_layer_stands_on_its_ground_line_too() {
+        let pitch = 35.0_f32;
+        let o = layer_offset(pitch, 0.0, 100.0, 120.0);
+        let ground_line = 100.0 + 20.0 * pitch.to_radians().sin();
+        assert!((120.0 + o.y - ground_line).abs() < 1e-3, "{o:?}");
+    }
+
+    #[test]
+    fn a_turn_slides_layers_by_a_little_and_the_group_does_not_swing_apart() {
+        let cards = [card(40.0), card(70.0), card(100.0)];
+        for yaw in [45.0_f32, 90.0, 180.0, 270.0] {
+            let turned = layered_cards_at(55.0, yaw, &cards, 100.0);
+            let flat = layered_cards_at(55.0, 0.0, &cards, 100.0);
+            for k in 0..cards.len() {
+                let slide = turned[k].foot.0 - flat[k].foot.0;
+                assert!(slide.abs() <= LAYER_PARALLAX_MAX + 1e-4, "yaw {yaw}: {slide}");
+                assert!((turned[k].foot.1 - flat[k].foot.1).abs() < 1e-4, "a turn does not move a layer up or down");
+            }
+            // The relative offset of two layers changes by at most twice the clamp.
+            let rel = |v: &[Card]| v[2].foot.0 - v[0].foot.0;
+            assert!((rel(&turned) - rel(&flat)).abs() <= 2.0 * LAYER_PARALLAX_MAX + 1e-4);
+        }
     }
 }

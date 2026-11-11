@@ -256,6 +256,14 @@ async fn main() {
         }
         if quiet {
             app.dialogs.clear();
+            // `RAZDOR_SCENE_QUIET`: the map's opening windows are not shown. Each frame one that is open closes as
+            // its OK closes it (`event_window_closed`), so a window that opens a frame late does not stay.
+            if let Some(game) = app.game.as_mut() {
+                if game.event_window().is_some() {
+                    let _ = game.event_window_closed();
+                    game.drain_events();
+                }
+            }
         }
         let work = started.elapsed();
         frames += 1;
