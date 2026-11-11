@@ -78,6 +78,7 @@ Clouds over the unexplored part of the map. The explored land is fully visible.
 The **"Moving water"** switch brings the water on the map to life:
 
 * the water ripples;
+* the water's pattern and its foam do not repeat like tiles: each cell looks its own, and the water is unevenly lighter and darker;
 * foam runs along the shores, and waves roll up the shores of lakes and the sea;
 * the water reflects the colour of the sky: golden at sunset, moonlit at night;
 * glints of sun and moon shine on lakes and the sea, brighter at sunset and at night;

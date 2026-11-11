@@ -634,7 +634,8 @@ it every frame from `display::follow_settings`; `RAZDOR_LIVE_WATER=1` turns it o
   offsets). Then a low-frequency noise (`wnoise` at 0.04 and 0.03 cell scale, drifting by whole lattice periods) moves the
   water's brightness by ±8 % and its warmth by ±5 %. Costs about ten more texture fetches per water pixel (on Mesa's software GL, about +10 to +15 % frame time on the live
   water). Off with the setting.
-  Not de-tiled yet: the foam's patch noise (periods of about 12 and 27 cells) and the glints (`wnoise` at 6×, near zoom only).
+  The foam's patch noise (`foam_patch_at`, periods of about 12 and 27 cells) takes the same per-cell offsets and weights.
+  Not de-tiled yet: the glints (`wnoise` at 6×, near zoom only; period about 11 cells).
 - **The water's detail by zoom** (`water::lod_detail`, the uniform `Detail`): the map's on-screen cell over the zoom-1
   cell (`cell_px.x`, the map's PX), 1 from zoom 0.7 up, 0 at 0.45 and below (the zoom's floor is 0.4), smooth between.
   It scales the ripple and the foam's lapping (the line stands at its middle phase when 0); the texture, the colour and
