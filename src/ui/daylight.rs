@@ -181,14 +181,22 @@ fn signed_gap(from: f32, to: f32) -> f32 {
     (to - from + 12.0).rem_euclid(24.0) - 12.0
 }
 
-/// The shown hour moved a step toward `target`, the shortest way round the day: a fraction of the
-/// gap each second (`dt` in seconds). A gap over 6 h (a load, a long jump) snaps to the target.
+/// Hours a second the shown hour may move toward the game's over a jump (a gap over `FOLLOW_GAP`).
+const EASE_RATE: f32 = 24.0;
+/// A gap up to this many hours is followed at once. The game clock runs on in small steps while the army
+/// travels (a few hours a second in the snapshots), and a proportional ease trailed behind it by a fraction
+/// of an hour, so the light and the shadows came on late; the steps are followed as they come instead.
+const FOLLOW_GAP: f32 = 1.0;
+
+/// The shown hour moved toward `target`, the shortest way round the day (`dt` in seconds). A gap of up to
+/// `FOLLOW_GAP` is followed at once; a larger one (a jump) is moved toward at `EASE_RATE` hours a second, so
+/// dusk does not become night in one frame; a gap over 6 h (a load) snaps to the target.
 pub fn ease_hour(shown: f32, target: f32, dt: f32) -> f32 {
     let d = signed_gap(shown, target);
-    if d.abs() > 6.0 {
+    if d.abs() > 6.0 || d.abs() <= FOLLOW_GAP {
         return target.rem_euclid(24.0);
     }
-    (shown + d * (dt * 2.5).clamp(0.0, 1.0)).rem_euclid(24.0)
+    (shown + d.signum() * (EASE_RATE * dt.max(0.0)).min(d.abs())).rem_euclid(24.0)
 }
 
 /// The setting «Освещение» (`Settings::map_light`): off, the game's clock, a real-time day
@@ -388,8 +396,41 @@ mod tests {
 
     #[test]
     fn ease_wraps_the_short_way() {
-        let eased = ease_hour(23.5, 0.5, 0.1);
-        assert!(eased > 23.5 && eased < 24.0, "eased to {eased}, not back round the day");
+        // A jump of 2 h across midnight: the first step is toward the target, not back round the day.
+        let eased = ease_hour(23.0, 1.0, 0.01);
+        assert!(eased > 23.0 && eased < 24.0, "eased to {eased}, not back round the day");
+    }
+
+    #[test]
+    fn ease_follows_the_clock_without_lag_and_moves_a_jump_over_a_few_frames() {
+        // A clock running 3 h a second (a travel): the shown hour is the game's at every frame.
+        let mut shown = 9.0;
+        for i in 1..=120 {
+            let game = 9.0 + 3.0 * i as f32 / 60.0;
+            shown = ease_hour(shown, game, 1.0 / 60.0);
+            assert!((shown - game).abs() < 1e-4, "frame {i}: shown {shown}, game {game}");
+        }
+        // A 4 h jump (not a load) is moved toward, not made in one frame, and it arrives within half a second.
+        let first = ease_hour(10.0, 14.0, 1.0 / 60.0);
+        assert!(first > 10.0 && first < 14.0, "one frame: {first}");
+        let mut h = 10.0;
+        for _ in 0..30 {
+            h = ease_hour(h, 14.0, 1.0 / 60.0);
+        }
+        assert!((h - 14.0).abs() < 1e-4, "after half a second: {h}");
+    }
+
+    #[test]
+    fn the_sun_shadows_follow_the_game_clock_frame_by_frame() {
+        set_prefs(LightMode::GameClock, 24, 18, ShadowMode::Sun, crate::ui::lights::Quality::High);
+        // The clock runs on from 9:00 to 11:00 in quarter-hour steps: each frame's shadows are the ones of that hour.
+        for i in 0..=40 {
+            let game = 9.0 + i as f32 * 0.05;
+            frame_light(game, 0.0, 1.0 / 60.0);
+            assert_eq!(frame_casts(), Some(casts_at(game)), "frame {i}: the shadows of {game} h");
+        }
+        assert_ne!(casts_at(9.0).sun.len, casts_at(11.0).sun.len, "the shadows change over the two hours");
+        set_prefs(LightMode::Off, 24, 18, ShadowMode::Painted, crate::ui::lights::Quality::High);
     }
 
     #[test]

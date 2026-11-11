@@ -467,8 +467,9 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
 **Lighting** (the setting «Освещение», `Settings::map_light`, off by default; `daylight::set_prefs` takes
 it every frame, from `display::follow_settings`): `daylight::light_at` maps the hour to a tint and a glow
 strength (a sine of the sun's elevation, a smooth step for the brightness, a bell for the dawn and dusk
-warmth, a night floor). The hour comes from the game clock (eased, `ease_hour`), a real-time cycle, or
-a fixed hour; `RAZDOR_LIGHT_HOUR` overrides it for snapshots. `world_view::draw_daylight` runs right after
+warmth, a night floor). The hour comes from the game clock (`ease_hour`: the clock's own steps are followed at once, so the light and the shadows do not trail a
+travel; a jump of 1–6 h is moved toward at 24 h a second; a load snaps), a real-time cycle, or a fixed hour; `RAZDOR_LIGHT_HOUR` overrides it
+for snapshots, and `RAZDOR_LIGHT_MODE=game|cycle` (with `RAZDOR_LIGHT_CYCLE`, minutes a day) picks the clock of a snapshot run. `world_view::draw_daylight` runs right after
 `draw_world` and before the flat `draw_fog` (after it with the mist on, see «Mist»): a multiply tint over the map area, then the point lights' pools
 («Point lights» below) in screen space (`Camera::screen_at`). Off, it draws nothing. The frame's
 light is read once, before the world (`world_view::frame_light_of`), because the painted shadows' factor below needs it there too.
