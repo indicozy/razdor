@@ -564,10 +564,14 @@ the order is as above. The ground cache (`ground_key`) and the battle backdrop k
 **Moving water** (the setting «Живая вода», `Settings::map_live_water`, off by default; `water::set_prefs` takes
 it every frame from `display::follow_settings`; `RAZDOR_LIVE_WATER=1` turns it on). Style only. Over the original's
 32-frame water texture (kept, the ground pass multiplies it in as before):
-- **The water mask**: `terrain::water_mask_texels`, one texel per cell (red 255 on the water cells, `map::is_water`),
-  built with the surface-code textures (`TerrainLayer::cells`, rebuilt only when the codes change), linear, clamped.
-  Linear filtering gives the shore its soft edge: 1 deep, 0.5 on the shore line, 0 on land. The ground shader reads
-  it at the pixel's cell centre `(p + 0.5) / MapSize`, where `p` is the cell coordinate (the same one the edge fog uses).
+- **The per-cell water texture** (`terrain::flow_texels`, baked once per map in `TerrainLayer::cells`, rebuilt only when
+  the codes or the flow change): one RGBA8 texel per cell, linear, clamped. Red and green are the river's flow
+  (`128 + 127 · flow`, still water exactly 128); blue is its drift speed (`water::river_speed`: 1 next to a bank,
+  easing to 0.35 as the water widens by `bank_distance`, 0 on still water); alpha is the water mask (255 on the water
+  cells, `map::is_water`, 0 on land). Linear filtering gives the shore its soft edge: 1 deep, 0.5 on the shore line,
+  0 on land. The ground shader reads one texel at the pixel's cell centre `(p + 0.5) / MapSize`, where `p` is the
+  cell coordinate (the same one the edge fog uses). The unlit shader (`LEGACY_FRAGMENT`) gets this texture for its
+  unused live-water mask.
 - **In the shader** (`NEW_FRAGMENT`, the `LiveWater` branch; the old four-fetch shader ignores it): on the water
   pixels only, a ripple moves the water frame's uv by `0.015` of a frame (a few texels), the shore foam
   (`shore_foam`, its band mirrored by `water::foam_edge`) is laid on the final colour (after the four cells are blended, so

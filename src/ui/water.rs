@@ -53,6 +53,70 @@ pub fn noise_texels() -> Vec<u8> {
         .collect()
 }
 
+/// The drift speed of a river at its narrowest (a bank next to the water): the flow map's full speed.
+pub const SPEED_NARROW: f32 = 1.0;
+/// The slowest a wide river drifts (its banks far away), a share of the full speed.
+pub const SPEED_WIDE: f32 = 0.35;
+
+/// Chessboard distance, in cells, from each cell to the nearest land (a cell off the map counts as land, so
+/// water on the border has a bank). Land is 0; water reached by no land (none on the map) is `u32::MAX`.
+/// Built once per map, with the surface codes (`terrain::cells`).
+pub fn bank_distance(codes: &[u8], (w, h): (u32, u32)) -> Vec<u32> {
+    let (w, h) = (w as usize, h as usize);
+    let mut dist = vec![u32::MAX; codes.len()];
+    let mut queue = std::collections::VecDeque::new();
+    for (i, &c) in codes.iter().enumerate() {
+        let wet = razdor::rules::map::Surface::from_code(c).is_some_and(razdor::rules::map::is_water);
+        if !wet {
+            dist[i] = 0;
+            queue.push_back(i);
+        }
+    }
+    // Water on the border touches the off-map land: its own cells at the edge are one step from it.
+    for (i, d) in dist.iter_mut().enumerate() {
+        let (x, y) = (i % w, i / w);
+        if *d == u32::MAX && (x == 0 || y == 0 || x + 1 == w || y + 1 == h) {
+            *d = 1;
+            queue.push_back(i);
+        }
+    }
+    while let Some(i) = queue.pop_front() {
+        let (x, y) = ((i % w) as i64, (i / w) as i64);
+        let d = dist[i];
+        for dy in -1i64..=1 {
+            for dx in -1i64..=1 {
+                let (nx, ny) = (x + dx, y + dy);
+                if nx < 0 || ny < 0 || nx >= w as i64 || ny >= h as i64 {
+                    continue;
+                }
+                let j = ny as usize * w + nx as usize;
+                if dist[j] > d + 1 {
+                    dist[j] = d + 1;
+                    queue.push_back(j);
+                }
+            }
+        }
+    }
+    dist
+}
+
+/// The drift speed of each cell's river (0..1, the `Flow` texture's blue channel): `SPEED_NARROW` next to a bank,
+/// easing toward `SPEED_WIDE` as the water widens (a cell `d` from the bank runs at 1.6 − 0.25 d, clamped). Cells
+/// with no flow (still water, land) are 0, so a lake and the sea do not drift.
+pub fn river_speed(codes: &[u8], size: (u32, u32), flow: &[(f32, f32)]) -> Vec<f32> {
+    let bank = bank_distance(codes, size);
+    (0..codes.len())
+        .map(|i| {
+            let moving = flow.get(i).is_some_and(|&(x, y)| x != 0.0 || y != 0.0);
+            if !moving {
+                return 0.0;
+            }
+            let d = bank[i].min(1 << 16) as f32;
+            (1.6 - 0.25 * d).clamp(SPEED_WIDE, SPEED_NARROW)
+        })
+        .collect()
+}
+
 /// The shaders' smooth value noise at `q`, as the hash computes it (`vnoise` in the mist and the unlit shader).
 #[cfg(test)]
 pub fn vnoise_ref(q: (f32, f32)) -> f32 {
@@ -299,6 +363,48 @@ mod tests {
             worst = worst.max(d);
         }
         assert!(worst <= 1.0 / 255.0 + 1e-3, "the lookup differs by {worst}");
+    }
+
+    #[test]
+    fn the_bank_distance_counts_the_steps_to_the_nearest_land() {
+        // A 5 × 5 map of land (code 5) with a 3 × 3 block of water (code 0) in the middle.
+        let mut codes = vec![5u8; 25];
+        for y in 1..4 {
+            for x in 1..4 {
+                codes[y * 5 + x] = 0;
+            }
+        }
+        let d = bank_distance(&codes, (5, 5));
+        assert_eq!(d[0], 0, "land is 0");
+        assert_eq!(d[6], 1, "the block's corner is a step from the land");
+        assert_eq!(d[12], 2, "the block's centre is two steps from the land (chessboard)");
+    }
+
+    #[test]
+    fn a_narrow_river_runs_at_full_speed_a_wide_one_slower_and_still_water_not_at_all() {
+        // 9 × 9: land at x = 0 and x = 8, water between; the flow runs down the water (+y).
+        let mut codes = vec![5u8; 81];
+        for y in 0..9 {
+            for x in 1..8 {
+                codes[y * 9 + x] = 0;
+            }
+        }
+        let mut flow = vec![(0.0f32, 0.0f32); 81];
+        for y in 0..9 {
+            for x in 1..8 {
+                flow[y * 9 + x] = (0.0, 1.0);
+            }
+        }
+        let speed = river_speed(&codes, (9, 9), &flow);
+        assert_eq!(speed[4 * 9 + 1], SPEED_NARROW, "next to the bank: full speed");
+        // The centre column is 4 cells from either bank: 1.6 − 0.25 · 4 = 0.6.
+        assert!((speed[4 * 9 + 4] - 0.6).abs() < 1e-6, "wide water: {}", speed[4 * 9 + 4]);
+        assert_eq!(speed[4 * 9], 0.0, "land is not water");
+        // The same water with no flow (a lake's interior) stands still.
+        let still = river_speed(&codes, (9, 9), &vec![(0.0, 0.0); 81]);
+        assert!(still.iter().all(|&s| s == 0.0));
+        // Speeds stay within the band, however wide the water gets.
+        assert!(speed.iter().all(|&s| (0.0..=SPEED_NARROW).contains(&s)));
     }
 
     #[test]
