@@ -59,7 +59,7 @@ The **"Mist instead of black"** switch replaces the black of unexplored land wit
 
 The mist opens gradually: when the hero walks, and when an event shows a place, the land comes out of the mist little by little, from the centre.
 
-In 2.5D and first-person views the mist rises as a wall at the edge of the explored land, like a bank above the ground.
+In 2.5D and first-person views the mist lies on the ground and rises above it in drifting layers; there is no wall at the edge of the explored land.
 
 ![Mist instead of black](../../../../assets/shots/mist.webp)
 

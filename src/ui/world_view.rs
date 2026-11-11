@@ -1530,167 +1530,8 @@ fn bent_mist_meshes(bend: &view25::Bend, origin: Vec2, scale: f32, dest: Rect, s
     meshes
 }
 
-/// The width and height of a bank of mist in cells (its billboard stands up from the frontier).
-const BANK_WIDTH: f32 = 1.7;
-const BANK_HEIGHT: f32 = 1.5;
 /// The cells before a bent view's horizon over which a raised mist sheet sinks to the sheet.
 const HORIZON_FADE: f32 = 3.0;
-
-/// The banks of mist along the contour of the fog's shown darkness at [`mist::FRONTIER`]
-/// (2.5D and first-person, `mist::contour`). Each crossing of the contour stands one bank on the lit
-/// side, a little toward it, along the contour; its position, width and height vary by a hash of the
-/// crossing's cells, so the wall rolls and does not step from cell to cell. The nearest to the view's
-/// centre come first, up to `mist::banks_cap`. The banks are sorted like standing sprites (on the lit
-/// cell) and grouped into [`BANK_BANDS`] runs in that order: each run is one batch, drawn at the place
-/// of its farthest bank, so the figures and buildings in front of the wall draw over it.
-fn push_banks(cam: &Camera, game: &Game, cols: (i32, i32), rows: (i32, i32), items: &mut Vec<(i64, Drawable)>, bands: &mut Vec<Vec<BankQuad>>) {
-    let map = &game.world.map;
-    let fog = &game.fog;
-    let known = |t: (i32, i32)| (t.0 >= 0 && t.1 >= 0 && t.0 < map.w && t.1 < map.h).then(|| minimap::shown_darkness(fog, t));
-    // A margin past the cull: the contour is cut where the cull ends otherwise (the GPU clips the rest).
-    const MARGIN: i32 = 4;
-    let crossings = mist::contour(known, (cols.0 - MARGIN, rows.0 - MARGIN), (cols.1 + MARGIN, rows.1 + MARGIN));
-    if crossings.is_empty() {
-        return;
-    }
-    let grid = cam.grid;
-    let centre = Vec2::from(cam.centre());
-    // A bent view: a bank that stands in front of explored ground hides it from the eye (the banks are
-    // on the unexplored side, which can be nearer the eye than the land behind), so it is left out.
-    let bent_forward = cam.tilt.and_then(|t| t.cam.bend.map(|_| view25::forward(t.cam.yaw_deg)));
-    let mut found: Vec<(f32, i64, BankQuad)> = crossings
-        .into_iter()
-        .flat_map(|c| {
-            let (ca, cb) = (Vec2::from(grid.center(c.a)), Vec2::from(grid.center(c.b)));
-            let at = ca.lerp(cb, c.t);
-            // The lit side's cell and the unexplored one's, by which of the pair is dark.
-            let (dark, dark_at, lit_at) = if c.dark_is_a { (c.a, ca, cb) } else { (c.b, cb, ca) };
-            // Out into the unexplored side: the bank stands in the fog, its foot a little past the contour.
-            let outward = (dark_at - lit_at).normalize_or_zero() * BANK_OUT;
-            // Stands a little toward the lit side, along the contour (a cell long edge: its perpendicular).
-            let along = {
-                let d = cb - ca;
-                vec2(-d.y, d.x).normalize_or_zero()
-            };
-            // Two banks a crossing, along the contour: their soft sides overlap into one wall.
-            BANK_PER_CROSSING.map(|step| {
-                let salt = if step < 0.0 { 0 } else { 8 };
-                let (h1, h2, h3, h4) = (unit_hash(c.a, c.b, 1 + salt), unit_hash(c.a, c.b, 2 + salt), unit_hash(c.a, c.b, 3 + salt), unit_hash(c.a, c.b, 4 + salt));
-                let world = at + outward + along * (step + (h1 - 0.5) * 0.2);
-                if bent_forward.is_some_and(|f| bank_hides_explored(world, f, grid, known)) {
-                    return None;
-                }
-                let foot = cam.to_screen((world.x, world.y));
-                let quad = BankQuad { foot, darkness: c.darkness, seed: h4, w: BANK_WIDTH * (0.85 + 0.4 * h2), h: BANK_HEIGHT * (0.8 + 0.45 * h3) };
-                Some((world.distance_squared(centre), sprite_key(cam, dark, foot, LAYER_BANK), quad))
-            })
-            .into_iter()
-            .flatten()
-        })
-        .collect();
-    found.sort_by(|a, b| a.0.total_cmp(&b.0));
-    found.truncate(mist::banks_cap());
-    found.sort_by_key(|f| f.1);
-    let per_band = found.len().div_ceil(BANK_BANDS).max(1);
-    for chunk in found.chunks(per_band) {
-        let key = chunk.iter().map(|f| f.1).max().unwrap_or(0);
-        items.push((key, Drawable::BankBand(bands.len())));
-        bands.push(chunk.iter().map(|f| f.2).collect());
-    }
-}
-
-/// A hash of a crossing's two cells and a salt, in [0, 1): the same crossing jitters the same way every frame.
-fn unit_hash(a: Tile, b: Tile, salt: u32) -> f32 {
-    let mut h = (a.0 as u32).wrapping_mul(0x9E37_79B1) ^ (a.1 as u32).wrapping_mul(0x85EB_CA77) ^ (b.0 as u32).wrapping_mul(0xC2B2_AE3D) ^ (b.1 as u32).wrapping_mul(0x27D4_EB2F) ^ salt.wrapping_mul(0x1656_67B1);
-    h ^= h >> 15;
-    h = h.wrapping_mul(0x2C1B_3C6D);
-    h ^= h >> 12;
-    (h >> 8) as f32 / (1u32 << 24) as f32
-}
-
-/// One bank of mist: its foot (2D, in the camera's space), the unexplored side's shown darkness, its
-/// noise seed and its size in cells.
-#[derive(Clone, Copy)]
-struct BankQuad {
-    foot: Vec2,
-    darkness: f32,
-    seed: f32,
-    w: f32,
-    h: f32,
-}
-
-/// How far past the contour (into the unexplored side, cells) a bank's foot stands: its lower part is
-/// then in the fog, where the ground's mist is, and it rises out of it (`mist::banks`' fade).
-const BANK_OUT: f32 = 0.8;
-
-/// The offsets along the contour (cells) of the two banks a crossing stands.
-const BANK_PER_CROSSING: [f32; 2] = [-0.28, 0.28];
-
-/// In a bent view, how far (cells) past a bank along the view's forward ground the land is looked at:
-/// a bank with explored ground there is left out (see `bank_hides_explored`).
-const BANK_SHADOW_REACH: [f32; 2] = [1.0, 2.0];
-
-/// Whether a bank of mist standing at ground point `world` would hide explored ground in a bent view: the
-/// land `BANK_SHADOW_REACH` cells ahead along the view's forward ground `forward` is explored (its shown
-/// darkness below `mist::FRONTIER`). `known` gives a cell's shown darkness, None off the map.
-fn bank_hides_explored(world: Vec2, forward: Vec2, grid: Grid, known: impl Fn((i32, i32)) -> Option<f32>) -> bool {
-    BANK_SHADOW_REACH.iter().any(|&k| {
-        let p = world + forward * k;
-        known(grid.tile_at((p.x, p.y))).is_some_and(|d| d < mist::FRONTIER)
-    })
-}
-
-/// The depth runs the banks are batched in (each one draw).
-const BANK_BANDS: usize = 4;
-
-/// Draws the banks of one run as one batch ([`mist::banks`]): each bank's quad through its billboard
-/// (the transform of [`standing`], applied here on the CPU), its corners in the 3D space of the pass.
-/// Not in a bent view's ground run, where a bank does not stand (as `standing`). A bank past a down
-/// bend's horizon or behind the eye is left out.
-fn draw_banks(cam: &Camera, quads: &[BankQuad]) {
-    let Some(tilt) = cam.tilt else { return };
-    let pass = PASS.with(std::cell::Cell::get);
-    if pass == Pass::Ground {
-        return;
-    }
-    let on_sheet = pass == Pass::Sprites;
-    let mut vertices = Vec::with_capacity(quads.len() * 4);
-    let mut indices: Vec<u16> = Vec::with_capacity(quads.len() * 6);
-    let f = view25::forward(tilt.cam.yaw_deg);
-    for q in quads {
-        let (model, on_ground) = standing_model(cam, &tilt, q.foot, q.foot, on_sheet);
-        if tilt.cam.bend.is_some_and(|b| b.hidden((q.foot + cam.origin) / cam.scale)) {
-            continue;
-        }
-        if let Some(eye) = tilt.cam.eye_at {
-            if (on_ground.x - eye.x) * f.x + (on_ground.z - eye.z) * f.y <= 0.0 {
-                continue;
-            }
-        }
-        let r = bank_rect(cam, q.foot, q.w, q.h);
-        // The colour carries the bank's darkness (red) and seed (green): `mist::banks`' shader reads them.
-        let colour = Color::new(q.darkness, q.seed, 0.0, 1.0);
-        let base = vertices.len() as u16;
-        let corner = |x: f32, y: f32, u: f32, v: f32| {
-            let p = model.transform_point3(vec3(x, y, 0.0));
-            macroquad::models::Vertex::new(p.x, p.y, p.z, u, v, colour)
-        };
-        vertices.push(corner(r.x, r.y, 0.0, 0.0));
-        vertices.push(corner(r.x + r.w, r.y, 1.0, 0.0));
-        vertices.push(corner(r.x + r.w, r.y + r.h, 1.0, 1.0));
-        vertices.push(corner(r.x, r.y + r.h, 0.0, 1.0));
-        indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
-    }
-    mist::banks(vertices, indices);
-}
-
-/// The rectangle of a bank `w` × `h` cells standing with its foot at `foot`, in the billboard's own
-/// pixels: `standing` grows the billboard by the sprites' size, so the rectangle is the cells over that size.
-fn bank_rect(cam: &Camera, foot: Vec2, w: f32, h: f32) -> Rect {
-    let k = cam.scale / sprite_size();
-    let (w, h) = (w * k, h * k);
-    Rect::new(foot.x - w / 2.0, foot.y - h, w, h)
-}
 
 /// Draws the ground pass: under a tilted camera, the 2D space laid flat on the ground
 /// ([`view25::ground_model`]); under a flat one, as drawn. In a bent view's sprite run it draws
@@ -2806,9 +2647,6 @@ enum Drawable {
     Hero,
     /// Layer 2 or 3 of the spell being played ([`SpellShow`]).
     Spell(u8),
-    /// One run of banks of mist on the contour (2.5D and first-person, [`push_banks`]), an index into the
-    /// frame's runs: drawn as one batch ([`draw_banks`]).
-    BankBand(usize),
 }
 
 /// A spell's layers playing over the figure they landed on, for [`draw_world`].
@@ -3747,8 +3585,6 @@ const LAYER_BUILDING: i64 = 2;
 const LAYER_SPELL_BELOW: i64 = 3;
 const LAYER_FIGURE: i64 = 4;
 const LAYER_SPELL_ABOVE: i64 = 5;
-/// A bank of mist (drawn before the buildings of its cell, after the cell's ground marks).
-const LAYER_BANK: i64 = 1;
 
 fn object_layer(class: u8) -> i64 {
     i64::from(class >= object_class::TREES)
@@ -4057,8 +3893,6 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // The list is the thread's buffer taken for this frame (its capacity is kept).
     let mut items = WORLD_ITEMS.with(|c| std::mem::take(&mut *c.borrow_mut()));
     items.clear();
-    // The mist's banks of this frame, in the runs the items refer to (`Drawable::BankBand`).
-    let mut bank_bands: Vec<Vec<BankQuad>> = Vec::new();
     let fog = &game.fog;
     let tilted = cam.tilt.is_some();
     // The 2.5D view's fog shade of each standing sprite (none in the flat view: 1 there).
@@ -4228,11 +4062,6 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
             }
         }
     }
-    // 2.5D and first-person with the mist: the banks stand along the frontier of the unexplored land, sorted
-    // with the sprites (the figures and buildings in front of them draw over them).
-    if tilted && mist::on() && !trailer_nofog() && fog.enabled {
-        push_banks(cam, game, (c0, c1), (r0, r1), &mut items, &mut bank_bands);
-    }
     // The figures (armies, the waiting ship, the hero) are drawn in their cell's turn of the
     // pass, after the cell's scenery and buildings (0x4c9b5b, 0x4c9dca). The original keys a
     // figure by its drawn cell (cell +9), so a figure north of a building is covered by it
@@ -4285,7 +4114,6 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                     let living = living_of(cam, art, l).filter(|(_, ls)| ls.body().is_some());
                     draw_building_group(cam, atlas, r, cards, origin, zoom, foot, shade_of(foot), living.map(|(_, ls)| ls), outlined);
                 }
-                Drawable::BankBand(k) => draw_banks(cam, &bank_bands[*k]),
                 Drawable::Army(i) => {
                     let a = &game.world.armies[*i];
                     let f = cam.to_screen(game.army_display_pos(a));
@@ -7850,19 +7678,6 @@ mod living_parts_tests {
         assert_eq!(owning_card(&cards, Vec2::ZERO, 1.0, vec2(12.0, 5.0)), 1, "held by the second card");
         // No outline holds it: the nearest foot.
         assert_eq!(owning_card(&cards, Vec2::ZERO, 1.0, vec2(60.0, 5.0)), 1);
-    }
-
-    #[test]
-    fn a_bank_in_a_bent_view_is_left_out_when_explored_ground_lies_behind_it() {
-        // Cells x ≤ 4 are explored (darkness 0), x ≥ 5 unexplored (1), and x < 0 is off the map.
-        let known = |t: (i32, i32)| (t.0 >= 0).then(|| if t.0 <= 4 { 0.0 } else { 1.0 });
-        let forward = vec2(1.0, 0.0);
-        // A bank at x 2.0: the land one and two cells ahead (x 3 and 4) is explored.
-        assert!(bank_hides_explored(vec2(2.0, 5.0), forward, Grid::Square8, known));
-        // A bank at x 4.0: x 5 and 6 are unexplored, so nothing explored hides.
-        assert!(!bank_hides_explored(vec2(4.0, 5.0), forward, Grid::Square8, known));
-        // Off the map there is no explored land to hide.
-        assert!(!bank_hides_explored(vec2(-3.0, 5.0), vec2(-1.0, 0.0), Grid::Square8, known));
     }
 }
 
