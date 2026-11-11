@@ -708,6 +708,7 @@ Skip the battle = Пропустить бой
 Skip = Пропустить
 Day {n} = День {n}
 Follow the hero = Следить за героем
+Battles: {n} = Битвы: {n}
 Seeking... = Перемотка…
 The record was made in version {v} and diverges from here on = Запись сделана в версии {v} и дальше расходится
 Watch up to here = Смотреть до этого места

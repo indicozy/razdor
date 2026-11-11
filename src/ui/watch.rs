@@ -46,6 +46,27 @@ const TOAST_SECS: f32 = 2.0;
 const TOAST_FLOOR: f32 = 0.6;
 /// A mark is hit within this many pixels of its centre.
 const MARK_REACH: f32 = 9.0;
+/// Battle marks closer than this many pixels (× the interface unit) form one cluster.
+const CLUSTER_GAP: f32 = 6.0;
+/// A battle tick's width in pixels (× the unit): a thin line, not a cross.
+const TICK_W: f32 = 3.0;
+
+/// The battle marks grouped into clusters: `xs` are (mark index, x), and a mark closer than `gap` to
+/// the one before it (in x order) joins its cluster. Each cluster lists its mark indices.
+pub fn battle_clusters(xs: &[(usize, f32)], gap: f32) -> Vec<Vec<usize>> {
+    let mut sorted = xs.to_vec();
+    sorted.sort_by(|a, b| a.1.total_cmp(&b.1));
+    let mut out: Vec<Vec<usize>> = Vec::new();
+    let mut last = f32::NEG_INFINITY;
+    for (i, x) in sorted {
+        match out.last_mut() {
+            Some(c) if x - last < gap => c.push(i),
+            _ => out.push(vec![i]),
+        }
+        last = x;
+    }
+    out
+}
 
 /// The battle choice's two answers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -390,7 +411,7 @@ impl WatchView {
     /// Seeks to a day of the timeline («Перемотка…» while it runs).
     pub fn seek_day(&mut self, day: u64) {
         match self.player.begin_seek_day(day) {
-            Ok(()) => self.begin_seek(),
+            Ok(()) => self.begin_seek_or_stay(),
             Err(d) => self.stop_at_drift(d),
         }
     }
@@ -398,7 +419,7 @@ impl WatchView {
     /// Seeks to a mark's place.
     pub fn seek_place(&mut self, place: Place) {
         match self.player.begin_seek_place(place) {
-            Ok(()) => self.begin_seek(),
+            Ok(()) => self.begin_seek_or_stay(),
             Err(d) => self.stop_at_drift(d),
         }
     }
@@ -407,6 +428,18 @@ impl WatchView {
         self.toasts.clear();
         self.drift = None;
         self.mode = Mode::Seeking;
+    }
+
+    /// A seek whose checkpoint already is the place stays there, paused: nothing plays on past it
+    /// (a corrupted check at the place would otherwise be played as the next step).
+    fn begin_seek_or_stay(&mut self) {
+        if self.player.seeking() {
+            self.begin_seek();
+        } else {
+            self.toasts.clear();
+            self.drift = None;
+            self.mode = Mode::Playing;
+        }
     }
 
     /// The drift window's «Смотреть до этого места»: the place the game stood at before the
@@ -497,7 +530,7 @@ impl WatchView {
         if self.mode == Mode::Seeking {
             chrome::shadow_centered(tr("Seeking..."), s.bar.x + s.bar.w / 2.0, s.bar.y + s.bar.h * 0.7, 16.0 * unit, GOLD);
         } else {
-            self.timeline(s.bar, first, last);
+            self.timeline(s.bar, first, last, unit);
         }
         if matches!(self.mode, Mode::Choosing { .. }) {
             self.choice_panel(s.panel, unit);
@@ -537,34 +570,59 @@ impl WatchView {
 
     /// The timeline: the bar with its fill, the marks (a click on one seeks to its place, a click
     /// elsewhere on the bar to its day) and the hover's tooltip.
-    fn timeline(&mut self, bar: Rect, first: u64, last: u64) {
+    fn timeline(&mut self, bar: Rect, first: u64, last: u64, unit: f32) {
         draw_rectangle(bar.x, bar.y, bar.w, bar.h, Color::from_rgba(18, 14, 10, 255));
         let now = self.game().map_or(first, |g| g.clock.day_index());
         draw_rectangle(bar.x, bar.y, bar.w * fraction_of(now, first, last), bar.h, Color::from_rgba(120, 92, 40, 255));
         draw_rectangle_lines(bar.x, bar.y, bar.w, bar.h, 1.0, GOLD);
         let fractions: Vec<f32> = self.player.marks.iter().map(|m| fraction_of(m.day, first, last)).collect();
-        for (m, &fr) in self.player.marks.iter().zip(&fractions) {
+        // A mark at either end of the bar stays on it.
+        let x_of = |i: usize| mark_x(bar, fractions[i]).clamp(bar.x + bar.h * 0.35, bar.x + bar.w - bar.h * 0.35);
+        let is_battle = |i: usize| matches!(self.player.marks[i].kind, MarkKind::Battle { .. });
+        let battles: Vec<usize> = (0..self.player.marks.len()).filter(|&i| is_battle(i)).collect();
+        let clusters = battle_clusters(&battles.iter().map(|&i| (i, x_of(i))).collect::<Vec<_>>(), CLUSTER_GAP * unit);
+        let centre = |c: &[usize]| c.iter().map(|&i| x_of(i)).sum::<f32>() / c.len() as f32;
+        // The battles first: a thin tick each, a cluster's with its count.
+        let tick = TICK_W * unit;
+        let inset = 2.0 * unit;
+        for c in &clusters {
+            let x = centre(c);
+            draw_rectangle(x - tick / 2.0, bar.y + inset, tick, bar.h - 2.0 * inset, RED_TEXT);
+            if c.len() > 1 {
+                chrome::shadow_centered(&format!("×{}", c.len()), x + tick, bar.y + bar.h * 0.7, 13.0 * unit, RED_TEXT);
+            }
+        }
+        // The other marks on top, as icons (the Day marks are not drawn).
+        let others: Vec<usize> = (0..self.player.marks.len()).filter(|&i| !is_battle(i) && !matches!(self.player.marks[i].kind, MarkKind::Day)).collect();
+        for &i in &others {
+            let m = &self.player.marks[i];
             let color = match m.kind {
-                MarkKind::Day => continue,
-                MarkKind::Battle { .. } => RED_TEXT,
                 MarkKind::Town { .. } => GOLD,
                 MarkKind::HeroDown => Color::from_rgba(40, 40, 40, 255),
                 MarkKind::Victory => Color::from_rgba(120, 240, 130, 255),
+                _ => continue,
             };
-            // A mark at either end of the bar stays on it.
-            let x = mark_x(bar, fr).clamp(bar.x + bar.h * 0.35, bar.x + bar.w - bar.h * 0.35);
-            draw_mark(&m.kind, x, bar.y + bar.h / 2.0, bar.h * 0.35, color);
+            draw_mark(&m.kind, x_of(i), bar.y + bar.h / 2.0, bar.h * 0.35, color);
         }
         let (mx, my) = pointer();
         if !bar.contains(vec2(mx, my)) {
             return;
         }
-        match mark_at(bar, &fractions, mx) {
-            Some(i) => {
-                let m = self.player.marks[i].clone();
-                tooltip(&mark_lines(&m, first));
+        let other_fractions: Vec<f32> = others.iter().map(|&i| fractions[i]).collect();
+        if let Some(k) = mark_at(bar, &other_fractions, mx) {
+            let m = self.player.marks[others[k]].clone();
+            tooltip(&mark_lines(&m, first));
+            if clicked() {
+                self.seek_place(m.at);
+            }
+            return;
+        }
+        let near = clusters.iter().filter(|c| (centre(c) - mx).abs() <= MARK_REACH).min_by(|a, b| (centre(a) - mx).abs().total_cmp(&(centre(b) - mx).abs()));
+        match near {
+            Some(c) => {
+                tooltip(&cluster_lines(c.iter().map(|&i| &self.player.marks[i]), first));
                 if clicked() {
-                    self.seek_place(m.at);
+                    self.seek_place(self.player.marks[c[0]].at);
                 }
             }
             None => {
@@ -662,6 +720,21 @@ fn mark_lines(m: &Mark, first: u64) -> Vec<(String, Color)> {
     lines
 }
 
+/// The hover text of a cluster of battles: its count, then each battle's day and sides.
+fn cluster_lines<'a>(marks: impl Iterator<Item = &'a Mark>, first: u64) -> Vec<(String, Color)> {
+    let marks: Vec<&Mark> = marks.collect();
+    let mut lines = vec![(trf!("Battles: {n}", n = marks.len()), GOLD)];
+    for m in marks.iter().take(10) {
+        if let MarkKind::Battle { player, enemy, .. } = &m.kind {
+            lines.push((format!("{}: {} - {}", trf!("Day {n}", n = m.day.saturating_sub(first) + 1), player.join(", "), enemy.join(", ")), CREAM));
+        }
+    }
+    if marks.len() > 10 {
+        lines.push(("…".to_string(), CREAM));
+    }
+    lines
+}
+
 /// Draws a mark: a cross for a battle, a flag for a town, a dark bar for the hero's fall, a
 /// diamond for the victory.
 fn draw_mark(kind: &MarkKind, x: f32, y: f32, s: f32, color: Color) {
@@ -729,6 +802,14 @@ mod tests {
         }
         assert_eq!(day_at(2.0, 10, 110), 110, "past the bar is the last day");
         assert_eq!(fraction_of(5, 10, 10), 0.0, "a file of one day");
+    }
+
+    #[test]
+    fn battle_marks_closer_than_the_gap_form_one_cluster() {
+        let xs = [(0, 10.0), (1, 14.0), (2, 19.0), (3, 40.0), (4, 41.0)];
+        let clusters = battle_clusters(&xs, 6.0);
+        assert_eq!(clusters, vec![vec![0, 1, 2], vec![3, 4]]);
+        assert_eq!(battle_clusters(&[], 6.0), Vec::<Vec<usize>>::new());
     }
 
     #[test]
@@ -855,12 +936,18 @@ mod tests {
         assert_eq!(d.mode(), Mode::Drifted, "the mismatch stops the playback");
         assert!(d.drift.as_ref().is_some_and(|x| x.version == env!("CARGO_PKG_VERSION")), "the window names the recording's version");
         // «Смотреть до этого места»: back to the last good place, paused.
+        let good = d.player.last_good();
         d.watch_to_drift();
-        assert_eq!(d.mode(), Mode::Seeking);
-        while d.mode() == Mode::Seeking {
+        // The checkpoint before the place is the place's own (or the seek runs on to it): either way the
+        // game stands at the last good place, and nothing plays past it while paused.
+        for _ in 0..1000 {
+            if d.mode() != Mode::Seeking {
+                break;
+            }
             d.tick(1.0 / 30.0);
         }
-        assert_eq!(d.mode(), Mode::Playing);
+        assert_eq!(d.mode(), Mode::Playing, "the seek back: {:?}", d.drift);
+        assert_eq!(d.player.place(), good, "the game stands at the last good place");
         assert!(!d.playing, "paused where the record still matches");
         assert!(d.drift.is_none(), "the drift is left behind");
     }

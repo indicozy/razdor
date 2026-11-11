@@ -57,6 +57,14 @@ def install_dir():
     sys.exit("RAZDOR_DT_DIR is not set (set it, or put it in the repo's .env)")
 
 
+def resolve_placeholder(value):
+    """`@watch-sample`: the watching screen's sample record, kept outside git (`RAZDOR_WATCH_SAMPLE`,
+    else `watch-sample.rzreplay` in the goldens folder). Its goldens are the same kind as the others."""
+    if value == "@watch-sample":
+        return os.environ.get("RAZDOR_WATCH_SAMPLE", str(DEFAULT_GOLDENS / "watch-sample.rzreplay"))
+    return value
+
+
 def load_cases(only=None):
     cases = []
     for lineno, raw in enumerate(SCENES.read_text(encoding="utf-8").splitlines(), 1):
@@ -72,7 +80,7 @@ def load_cases(only=None):
             for pair in parts[3].split(";"):
                 if pair.strip():
                     k, _, v = pair.partition("=")
-                    extra[k.strip()] = v.strip()
+                    extra[k.strip()] = resolve_placeholder(v.strip())
         if only and only not in name:
             continue
         cases.append({"name": name, "scene": scene, "size": size, "extra": extra, "key": f"{name}@{size}"})

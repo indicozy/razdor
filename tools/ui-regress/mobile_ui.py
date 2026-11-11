@@ -75,6 +75,9 @@ EVENT_TEXT = ("Зайдя внутрь церкви, вы обнаружили �
               "отправятся на помощь ополчению. Заметив вас, он поднялся из-за аналоя и подошёл ближе. "
               "Дитя моё, возьми эти средства и помолись за нас. Вы поблагодарили его и приняли дар.")
 SCREENS = [
+    # The watching screen on the sample record (`@watch-sample`, see ui_regress.py).
+    ("watch", "watch:play,day=13", {"RAZDOR_WATCH": "@watch-sample"}),
+    ("watch-choice", "watch:play,battle", {"RAZDOR_WATCH": "@watch-sample"}),
     ("title", "title", {}),
     # The main menu without an install: the not-found block (the same env as scenes.txt).
     ("title-noinstall", "title", {"RAZDOR_DT_DIR": "/nonexistent-razdor-dt", "RAZDOR_CONFIG_DIR": "/nonexistent-razdor-config", "HOME": "/nonexistent-razdor-home"}),
@@ -172,6 +175,7 @@ def build_cases(only, out, text_size="1.25"):
         for orient in ORIENTATIONS:
             w, h = (pw, ph) if orient == "portrait" else (ph, pw)
             for sname, scene, extra in SCREENS:
+                extra = {k: ui_regress.resolve_placeholder(v) for k, v in extra.items()}
                 base = f"mobile-{pname}-{orient}-{sname}"
                 if only and only not in base:
                     continue
