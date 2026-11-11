@@ -846,8 +846,9 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
         }
         // `RAZDOR_MAP_EDGE=1`: the map's ground goes on past its edges («Продолжать карту за краем»).
         crate::ui::world_view::set_edge_pref(std::env::var("RAZDOR_MAP_EDGE").is_ok_and(|v| v.trim() == "1"));
-        // `RAZDOR_MIST=1`: the unexplored land is drifting mist instead of black («Туман вместо черноты»).
-        crate::ui::mist::set_pref(std::env::var("RAZDOR_MIST").is_ok_and(|v| v.trim() == "1"));
+        // `RAZDOR_MIST=1|flat`: the unexplored land is drifting clouds (or a plain mist) instead of black
+        // («Туман вместо черноты»).
+        crate::ui::mist::set_pref(std::env::var("RAZDOR_MIST").map(|v| crate::ui::mist::parse(&v)).unwrap_or_default());
         // `RAZDOR_LIVE_WATER=1` (the snapshots' moving water); the setting is not read here.
         crate::ui::water::set_prefs(false);
         // `RAZDOR_WEATHER=1` (the snapshots' weather; `RAZDOR_WEATHER_DAY=<n>` fixes its day).
