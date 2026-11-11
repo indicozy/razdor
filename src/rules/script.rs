@@ -136,6 +136,9 @@ impl Game {
     /// The player's answer to the question waiting in the engine; then the events run on.
     /// Returns what followed.
     pub fn answer_question(&mut self, yes: bool) -> Vec<Event> {
+        // A paused step (`tick_within`'s budget) finishes before the action reads the world,
+        // as the screen does on a press: an action never sees a half-played step.
+        self.finish_pause();
         if let Some(id) = self.pending_question() {
             self.chronicle_answer(id, yes);
         }
@@ -158,6 +161,9 @@ impl Game {
     /// level-ups are effects of the world, not outcomes), then the events after it, which the
     /// original scans only now (0x4c206c → 0x4ab1ec → the chain or a new scan), run.
     pub fn event_window_closed(&mut self) -> Vec<Event> {
+        // A paused step (`tick_within`'s budget) finishes before the action reads the world,
+        // as the screen does on a press: an action never sees a half-played step.
+        self.finish_pause();
         let Some(mut engine) = self.script.take() else { return Vec::new() };
         let out = engine.window_closed(self);
         self.script = Some(engine);

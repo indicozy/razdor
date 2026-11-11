@@ -50,6 +50,12 @@ pub struct ArmyState {
     pub idle_offset: i32,
     pub idle_restarts: u32,
     pub fallen: bool,
+    /// The steps the army took in the stretch under way: the screen's display, and what the
+    /// held events of a step wait for (`Game::step_playing`).
+    pub walk: crate::rules::world::Walk,
+    /// The path's step weights (`AiMind::path_weights`, not in a save): the cost of the step after
+    /// the next one.
+    pub path_weights: Vec<u8>,
 }
 
 /// What the rules keep outside the serialised game.
@@ -73,7 +79,7 @@ pub struct Rules {
     pub walk_flags: (bool, bool),
     pub held: Vec<(u64, Event)>,
     pub ai_events: Vec<Event>,
-    pub finished_events: Vec<Event>,
+    pub finished_events: Vec<(u64, Event)>,
     pub armies: Vec<ArmyState>,
     pub settings: Settings,
     /// The Community patch's globals, which outlive a battle (`battle::patch_globals`).
@@ -128,7 +134,7 @@ struct BodyIn {
 fn army_states(g: &Game) -> Vec<ArmyState> {
     let w = &g.world;
     let armies = w.armies.iter().chain(w.inactive.iter()).chain(w.respawns.iter().map(|r| &r.army));
-    armies.map(|a| ArmyState { idle_offset: a.mind.idle_offset, idle_restarts: a.mind.idle_restarts, fallen: a.mind.fallen }).collect()
+    armies.map(|a| ArmyState { idle_offset: a.mind.idle_offset, idle_restarts: a.mind.idle_restarts, fallen: a.mind.fallen, walk: a.walk.clone(), path_weights: a.mind.path_weights.clone() }).collect()
 }
 
 fn rules_of(g: &Game) -> Rules {
@@ -294,6 +300,8 @@ fn set_army_states(g: &mut Game, states: &[ArmyState]) -> Result<(), String> {
         a.mind.idle_offset = s.idle_offset;
         a.mind.idle_restarts = s.idle_restarts;
         a.mind.fallen = s.fallen;
+        a.walk = s.walk.clone();
+        a.mind.path_weights = s.path_weights.clone();
         n += 1;
     }
     if n != states.len() || n != g.world.armies.len() + g.world.inactive.len() + g.world.respawns.len() {
@@ -318,6 +326,10 @@ fn body_json(g: &Game, with_timing: bool) -> Result<Vec<u8>, String> {
     if !with_timing {
         // How many arrivals a frame asked for depends on the frames' budgets, not on the rules.
         rules.asks = 0;
+        // Events not yet delivered are one queue whichever frame produced them: an event a step
+        // left for the next tick (`finished_events`) and one a frame holds for its window (`held`)
+        // carry the stretch they were made in, so they are the same entries.
+        rules.held.append(&mut rules.finished_events);
     }
     let timing = timing_of(g);
     let body = BodyOut { version: SNAPSHOT_VERSION, game: g, rules: &rules, timing: with_timing.then_some(&timing) };

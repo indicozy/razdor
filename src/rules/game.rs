@@ -536,7 +536,11 @@ pub struct Game {
     pause: Option<Pause>,
     /// The events of a step that [`Game::finish_pause`] completed, for the next tick.
     #[serde(skip)]
-    pub(crate) finished_events: Vec<Event>,
+    pub(crate) finished_events: Vec<(u64, Event)>,
+    /// The stretch each event of the tick under way was made in: after each stretch's events,
+    /// the stretch and how many events the tick holds then (`stamp_last`). Not saved.
+    #[serde(skip)]
+    pub(crate) marks: Vec<(u64, usize)>,
     /// Whether the tick under way walked and waited (`tick_within`'s snap at its end).
     #[serde(skip)]
     pub(crate) walk_flags: (bool, bool),
@@ -823,6 +827,7 @@ impl Game {
             snapped: false,
             pause: None,
             finished_events: Vec::new(),
+            marks: Vec::new(),
             walk_flags: (false, false),
             improved_ai: false,
             max_ai: false,
@@ -1280,6 +1285,9 @@ impl Game {
     /// Returns false if it can't be reached. Razdor fixes the original's bug (0x4cc99f): the
     /// walk to cell (0, 0) never started there, though its route was shown.
     pub fn set_destination(&mut self, to: Tile) -> bool {
+        // A paused step (`tick_within`'s budget) finishes before the action reads the world,
+        // as the screen does on a press: an action never sees a half-played step.
+        self.finish_pause();
         let path = self.plan(to);
         if path.is_empty() {
             return false;
@@ -1459,6 +1467,9 @@ impl Game {
     /// Waits in real time (the UI's 1 h and 4 h): `hours × 2` wait ticks of
     /// [`WAIT_TICK_MINUTES`], one every [`STEP_SECONDS`], played by [`Game::tick`].
     pub fn begin_wait(&mut self, hours: u32) {
+        // A paused step (`tick_within`'s budget) finishes before the action reads the world,
+        // as the screen does on a press: an action never sees a half-played step.
+        self.finish_pause();
         if self.foe.is_some() {
             return;
         }
@@ -1626,8 +1637,9 @@ impl Game {
     pub fn tick_shown_within(&mut self, real_dt: f32, keep_going: &mut dyn FnMut() -> bool) -> Vec<Event> {
         let before = self.shown.len();
         let events = self.tick_within(real_dt, keep_going);
+        let stamped = self.stamp_last(events);
+        self.held.extend(stamped);
         let now = self.stretches;
-        self.held.extend(events.into_iter().map(|e| (now, e)));
         // A lantern or a shown army of the stretch waits too: its flight comes at its
         // event's OK (0x4ab1ec), so its window must be up first.
         let shown: Vec<Shown> = self.shown.drain(before..).collect();
@@ -1704,6 +1716,7 @@ impl Game {
     /// before a press acts on the game ([`Game::finish_pause`]).
     pub(crate) fn tick_within(&mut self, real_dt: f32, keep_going: &mut dyn FnMut() -> bool) -> Vec<Event> {
         hook::set_now(self.stamp());
+        self.marks.clear();
         let stop = self.replay_stop;
         let mut asks = self.asks;
         let events = {
@@ -1723,8 +1736,18 @@ impl Game {
 
     /// The body of [`Game::tick_within`].
     fn tick_inner(&mut self, real_dt: f32, keep_going: &mut dyn FnMut() -> bool) -> Vec<Event> {
-        // The events of a step finished by `finish_pause` come with this tick.
-        let mut events = std::mem::take(&mut self.finished_events);
+        // The events of a step finished by `finish_pause` come with this tick. A message among
+        // them stops the time until it is read, as the step's own events stop it (the step
+        // already stopped where it raised the message): the tick hands them over and moves on
+        // only after they are read.
+        let mut events: Vec<Event> = Vec::new();
+        for (stamp, e) in std::mem::take(&mut self.finished_events) {
+            events.push(e);
+            self.marks.push((stamp, events.len()));
+        }
+        if events.iter().any(Event::needs_reading) {
+            return events;
+        }
         if self.pause.is_none() {
             // "Скорость перемещения героя": a slower walk stretches every step and wait tick.
             let real_dt = real_dt * self.walk_pace;
@@ -1786,6 +1809,7 @@ impl Game {
             }
             let stop = !go || it.iter().any(Event::needs_reading);
             events.append(&mut it);
+            self.marks.push((self.stretches, events.len()));
             if stop {
                 // An event's window opened by the step's scan ends the walk on this cell
                 // (0x4aed41 → 0x4ae5d8), which counts as arriving on it again; the building
@@ -1825,9 +1849,31 @@ impl Game {
     /// meets the world as the step leaves it. The step's events come with the next tick.
     pub fn finish_pause(&mut self) {
         if self.pause.is_some() {
-            let mut events = self.tick_within(0.0, &mut || true);
-            self.finished_events.append(&mut events);
+            let events = self.tick_within(0.0, &mut || true);
+            let stamped = self.stamp_last(events);
+            self.finished_events.extend(stamped);
         }
+    }
+
+    /// The events of the tick just run, each with the stretch it was made in (`marks`): an
+    /// event belongs to the stretch of the first mark after it, or to the current one when no
+    /// mark follows. A tick that ends in the middle of a step (a frame's budget) stamps the
+    /// stretches it finished with their own number, so the events of a finished stretch are
+    /// handed over as they are when that stretch ends, whatever the frames are.
+    pub(crate) fn stamp_last(&mut self, events: Vec<Event>) -> Vec<(u64, Event)> {
+        let marks = std::mem::take(&mut self.marks);
+        let now = self.stretches;
+        let mut k = 0;
+        events
+            .into_iter()
+            .enumerate()
+            .map(|(i, e)| {
+                while k < marks.len() && marks[k].1 <= i {
+                    k += 1;
+                }
+                (marks.get(k).map_or(now, |m| m.0), e)
+            })
+            .collect()
     }
 
     /// Whether a step's AI moves are unfinished ([`Game::tick_within`]): the game is mid-tick
@@ -2611,6 +2657,9 @@ impl Game {
     /// makes the player the attacker (the building's extra defence helps the garrison); an
     /// army that catches the player attacks.
     pub fn start_battle(&mut self) -> Battle {
+        // A paused step (`tick_within`'s budget) finishes before the action reads the world,
+        // as the screen does on a press: an action never sees a half-played step.
+        self.finish_pause();
         // The cells the army stands in now, before `Battle::begin`'s start fix moves its back
         // row forward (4d2141); `settle_battle` returns the units to them when `keep_formation`.
         self.formation_before_battle = Some(self.squad.iter().map(|u| u.slot).collect());
