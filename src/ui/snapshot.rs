@@ -291,6 +291,60 @@ fn stage_replay(app: &mut App, step: Option<&str>) -> Result<(), String> {
     Ok(())
 }
 
+/// `RAZDOR_WATCH=<.rzreplay>` with the watching screen (`ui::watch`) at the step named by `arg`,
+/// comma-separated: `play` (the game runs), `battle` (the playback runs to a battle's choice),
+/// `day=<n>` (seek to that day), `speed=<index>`, `drift` (the drift window: the playback runs to
+/// its first mismatch).
+fn stage_watch(app: &mut App, arg: Option<&str>) -> Result<(), String> {
+    use super::watch::{Mode, WatchView};
+    let path = std::env::var("RAZDOR_WATCH").map_err(|_| "RAZDOR_WATCH names no replay file")?;
+    let content = app.dt_content.clone().ok_or("no install")?;
+    let install = razdor::rules::save::install_dir();
+    // `corrupt`: the second day-end check changed in memory, so the playback stops at a mismatch.
+    let player = if arg.is_some_and(|a| a.split(',').any(|s| s == "corrupt")) {
+        let mut file = razdor::rules::recording::file::read(std::path::Path::new(&path))?;
+        let k = file.segments[0].keyframes.get(1).ok_or("no second keyframe")?.after - 1;
+        if let razdor::rules::recording::stream::Input::Engine(razdor::rules::recording::stream::EngineInput::Check { hash }) = &mut file.segments[0].entries[k].input {
+            *hash ^= 1;
+        }
+        razdor::rules::recording::watch::ReplayPlayer::new(file, content.clone(), install.as_deref())
+    } else {
+        razdor::rules::recording::watch::ReplayPlayer::open(std::path::Path::new(&path), content.clone(), install.as_deref())?
+    };
+    let mut view = WatchView::with_player(player, Some(Screen::WorldMap))?;
+    for step in arg.unwrap_or("").split(',').filter(|s| !s.is_empty()) {
+        match step.split_once('=') {
+            Some(("day", n)) => {
+                // The day counts from the record's first day, as the timeline does.
+                let (first, _) = view.days();
+                view.seek_day(first + n.parse::<u64>().map_err(|_| "bad day")?);
+                while view.mode() == Mode::Seeking {
+                    view.tick(1.0 / 30.0);
+                }
+            }
+            Some(("speed", i)) => view.set_speed(i.parse::<usize>().map_err(|_| "bad speed")?),
+            _ => match step {
+                "play" => view.playing = true,
+                "corrupt" => {}
+                "watch-battle" => view.choose(super::watch::Choice::Watch),
+                "skip-battle" => view.choose(super::watch::Choice::Skip),
+                "battle" | "drift" => {
+                    view.playing = true;
+                    let done = |v: &WatchView| if step == "battle" { v.choosing() } else { v.mode() == Mode::Drifted };
+                    while !done(&view) && !matches!(view.mode(), Mode::Ended | Mode::Drifted) {
+                        view.tick(1.0 / 30.0);
+                    }
+                    view.playing = false;
+                }
+                other => return Err(format!("unknown watch step {other}")),
+            },
+        }
+    }
+    app.assets.set_content(content);
+    app.screen = Screen::Watch(Box::new(view));
+    Ok(())
+}
+
 /// `RAZDOR_SCENE_OPEN=<frame>:<window>[,<frame>:<window>…]`: at that frame the window
 /// opens over the scene, as its button opens it (`load`, `army`, `spells`, `journal`,
 /// `menu`, `keys` (the F1 list), `minimap`, `building:<n>`; `map` closes it), for the frame timer (`RAZDOR_PROFILE`) to time
@@ -367,6 +421,10 @@ fn hover_army_for_snapshot(app: &mut App) {
 
 /// Sets up the scene of `RAZDOR_SCENE`, if any; a scene that cannot be set up is reported.
 pub fn stage(app: &mut App) {
+    // `RAZDOR_SNAPSHOT_LANG=ru`: the player's language for the shots (the Russian catalog, no override).
+    if std::env::var("RAZDOR_SNAPSHOT_LANG").is_ok_and(|l| l == "ru") {
+        super::language::set(None);
+    }
     super::widgets::set_pointer(pointer());
     super::pan::force_for_snapshot(pan_offset());
     // `RAZDOR_MOUSE_RIGHT=1`: the right button held where `RAZDOR_MOUSE` stands (the map's
@@ -671,6 +729,7 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             return Ok(());
         }
         "replay" => return stage_replay(app, parts.next()),
+        "watch" => return stage_watch(app, parts.next()),
         _ => {}
     }
     let map = parts.next().ok_or("no map named")?;

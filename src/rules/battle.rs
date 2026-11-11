@@ -119,7 +119,7 @@ const FATE_INITIATIVE: i32 = 5;
 /// Undead Death casters' magic power floor is raised by this.
 const UNDEAD_DEATH_FLOOR: i32 = 25;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Team {
     Player,
     Enemy,
@@ -181,6 +181,32 @@ pub enum ActionKind {
 }
 
 impl ActionKind {
+    /// The kind's number in a replay's record ([`crate::rules::recording::stream::MaxCode`]).
+    pub(crate) fn code(self) -> u8 {
+        match self {
+            ActionKind::Melee => 0,
+            ActionKind::LongStrike => 1,
+            ActionKind::Shot => 2,
+            ActionKind::Strike => 3,
+            ActionKind::Curse => 4,
+            ActionKind::Heal => 5,
+            ActionKind::Bless => 6,
+        }
+    }
+
+    pub fn from_code(c: u8) -> Option<ActionKind> {
+        Some(match c {
+            0 => ActionKind::Melee,
+            1 => ActionKind::LongStrike,
+            2 => ActionKind::Shot,
+            3 => ActionKind::Strike,
+            4 => ActionKind::Curse,
+            5 => ActionKind::Heal,
+            6 => ActionKind::Bless,
+            _ => return None,
+        })
+    }
+
     pub fn is_physical(self) -> bool {
         matches!(self, ActionKind::Melee | ActionKind::LongStrike | ActionKind::Shot)
     }
@@ -538,7 +564,7 @@ struct Splash {
 /// The Community patch's globals that outlive a battle (`.mod`), shared by every battle, the
 /// AI's off-screen ones included. Nothing resets them between battles and saves do not hold
 /// them, as in the original.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct PatchGlobals {
     /// `Hunger`: the living count stored at each removal (c252e4) and the value the Hunger
     /// units last saw (c2525f). Both are 3 in the file.
@@ -704,6 +730,11 @@ pub struct Battle {
     /// The experimental «Максимум бережёт магов» (`Settings::max_guard`, [`Battle::set_max_guard`]):
     /// the rules never read it.
     max_guard: bool,
+    /// The battle's number in its game (`Game::battles`, 0 for a battle no game started) and
+    /// how many of the enemy's «Максимум» decisions were applied so far ([`Battle::apply_max`]):
+    /// what a replay's record names them by (`rules::recording`). Not part of the rules.
+    pub(crate) ordinal: u32,
+    pub(crate) decisions: u32,
     /// What the battle is fought for, as «Максимум» weighs it ([`MaxStakes`]; Razdor's rule,
     /// the owner's decision of 2026-10-19); the rules never read it.
     max_stakes: MaxStakes,
@@ -841,6 +872,8 @@ impl Battle {
             god: false,
             max_ai: false,
             max_guard: false,
+            ordinal: 0,
+            decisions: 0,
             max_stakes: MaxStakes::Campaign,
         };
         b.fit_to_formation();
@@ -1063,6 +1096,7 @@ impl Battle {
 
     /// Deploy phase: move a player card to `to`, swapping with whoever is there.
     pub fn move_card(&mut self, from: Slot, to: Slot) -> Result<(), ActionError> {
+        let _rec = crate::rules::recording::actions::battle_scope(|| crate::rules::recording::actions::BattleAct::MoveCard { from, to });
         if !self.deploying {
             return Err(ActionError::NotDeploying);
         }
@@ -1231,6 +1265,7 @@ impl Battle {
     /// the normal end follows (result box, experience, losses). A battle still deploying
     /// begins first.
     pub fn force_end(&mut self, winner: Team) {
+        let _rec = crate::rules::recording::actions::battle_scope(|| crate::rules::recording::actions::BattleAct::ForceEnd { enemy_wins: winner == Team::Enemy });
         self.begin();
         let loser = winner.other();
         for f in self.fighters.iter_mut().filter(|f| f.team == loser && f.listed()) {
@@ -2206,6 +2241,7 @@ impl Battle {
     /// Step the active fighter to an empty own cell; costs one action. Stepping into or out
     /// of the reserve uses up that unit's reserve move for the turn.
     pub fn move_active(&mut self, to: Slot) -> Result<(), ActionError> {
+        let _rec = crate::rules::recording::actions::battle_scope(|| crate::rules::recording::actions::BattleAct::MoveActive { to });
         let id = self.active().ok_or(ActionError::NotYourTurn)?;
         if !self.moves(id).contains(&to) {
             return Err(ActionError::InvalidTarget);
@@ -2226,6 +2262,7 @@ impl Battle {
 
     /// The active fighter passes one action (a click on its own cell).
     pub fn pass(&mut self) {
+        let _rec = crate::rules::recording::actions::battle_scope(|| crate::rules::recording::actions::BattleAct::Pass);
         if let Some(id) = self.active() {
             self.start_action(id);
             self.finish_action(id);
@@ -2235,6 +2272,7 @@ impl Battle {
     /// The original's own-cell action, of a click on the active unit's own card or the space
     /// key (4c4f8c): a self-cast when its cell offers one, else a pass. One action either way.
     pub fn own_cell(&mut self) -> Option<Hit> {
+        let _rec = crate::rules::recording::actions::battle_scope(|| crate::rules::recording::actions::BattleAct::OwnCell);
         let id = self.active()?;
         match self.options(id, id).first() {
             Some(&kind) => self.act_with(id, kind).ok(),
@@ -2263,6 +2301,7 @@ impl Battle {
 
     /// The active fighter's action on `target`; costs one action.
     pub fn act(&mut self, target: usize) -> Result<Hit, ActionError> {
+        let _rec = crate::rules::recording::actions::battle_scope(|| crate::rules::recording::actions::BattleAct::Act { target: target as u32 });
         let id = self.active().ok_or(ActionError::NotYourTurn)?;
         let kind = *self.options(id, target).first().ok_or(ActionError::InvalidTarget)?;
         self.act_with(target, kind)
@@ -2271,6 +2310,7 @@ impl Battle {
     /// The active fighter does `kind` to `target` (it must be the cell's action); costs one
     /// action. The case of that kind runs (48a5c4), then the Splash neighbour loop.
     pub fn act_with(&mut self, target: usize, kind: ActionKind) -> Result<Hit, ActionError> {
+        let _rec = crate::rules::recording::actions::battle_scope(|| crate::rules::recording::actions::BattleAct::ActWith { target: target as u32, kind: kind.code() });
         let id = self.active().ok_or(ActionError::NotYourTurn)?;
         if !self.options(id, target).contains(&kind) {
             return Err(ActionError::InvalidTarget);
@@ -3459,10 +3499,12 @@ impl Battle {
 
     /// Plays one action of the active fighter automatically.
     pub fn ai_step(&mut self) -> Option<Step> {
+        let _eng = crate::rules::recording::hook::engine_scope();
         self.step_by(false)
     }
 
     fn step_by(&mut self, hero: bool) -> Option<Step> {
+        let _eng = crate::rules::recording::hook::engine_scope();
         let plan = self.plan(hero)?;
         self.step_plan(plan)
     }
@@ -3495,6 +3537,7 @@ impl Battle {
     /// cards stand when still deploying. Deterministic; stops after [`AUTO_PLAY_STEPS`]
     /// steps at most (the turn limit ends every battle long before). Returns the outcome.
     pub fn auto_play_to_end(&mut self) -> Outcome {
+        let _eng = crate::rules::recording::hook::engine_scope();
         self.begin();
         for _ in 0..AUTO_PLAY_STEPS {
             if self.outcome() != Outcome::Ongoing {
@@ -3510,6 +3553,7 @@ impl Battle {
     /// watched quick battle plays these one by one on screen, so stopping to watch, or
     /// skipping to the end, ends as [`Battle::auto_play_to_end`] would have.
     pub fn auto_step(&mut self) -> Option<Step> {
+        let _rec = crate::rules::recording::actions::battle_scope(|| crate::rules::recording::actions::BattleAct::AutoStep);
         self.auto_step_by(false)
     }
 
@@ -3525,6 +3569,7 @@ impl Battle {
     /// [`Battle::auto_play_to_end`], but the player's units play by the hero's rules
     /// ([`Battle::hero_auto_step`]).
     pub fn hero_auto_play_to_end(&mut self) -> Outcome {
+        let _rec = crate::rules::recording::actions::battle_scope(|| crate::rules::recording::actions::BattleAct::HeroAutoPlay);
         self.begin();
         for _ in 0..AUTO_PLAY_STEPS {
             if self.outcome() != Outcome::Ongoing {
@@ -3542,6 +3587,7 @@ impl Battle {
     /// cast keeps its cell instead of moving. Nobody enters the reserve, as before; a unit
     /// in the reserve still comes out.
     pub fn hero_auto_step(&mut self) -> Option<Step> {
+        let _rec = crate::rules::recording::actions::battle_scope(|| crate::rules::recording::actions::BattleAct::HeroAutoStep);
         self.auto_step_by(true)
     }
 

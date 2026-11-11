@@ -187,6 +187,7 @@ impl Game {
     /// time passes (the exe uses `HealingTime` only for AI armies). The returned events are
     /// always empty; the signature keeps room for a timed service.
     pub fn heal(&mut self, i: usize) -> Result<Vec<Event>, ServiceError> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::Heal { unit: i as u32 });
         if !self.heals_here() {
             return Err(ServiceError::NotHere);
         }
@@ -209,6 +210,7 @@ impl Game {
     /// [`Game::resurrect_price`], with no time limit (`MaxTimeResurection` is the AI's). It
     /// comes back at once with full HP, marked paid (its last pay unchanged).
     pub fn resurrect(&mut self, i: usize) -> Result<Vec<Event>, ServiceError> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::Resurrect { unit: i as u32 });
         if !self.resurrects_here() {
             return Err(ServiceError::NotHere);
         }
@@ -250,6 +252,7 @@ impl Game {
     /// passed since its stamp (units placed at map load have none, so they are always paid).
     /// A unit put into the garrison during the visit keeps the mark it had in the army.
     pub fn open_garrison(&mut self) {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::OpenGarrison);
         let Some(l) = self.location.filter(|_| self.offers(Tab::Garrison)) else { return };
         let now = self.clock.total_minutes() as u64;
         for u in self.squad.iter_mut() {
@@ -278,6 +281,7 @@ impl Game {
     /// Razdor does not, at the players' request. The whole record moves, paid mark and last
     /// pay included; a garrison is never paid, and it heals `GarrisonAutoHeal`% every midnight.
     pub fn leave_in_garrison(&mut self, i: usize, cell: Option<Slot>) -> Result<(), ServiceError> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::LeaveInGarrison { unit: i as u32, cell });
         if !self.offers(Tab::Garrison) {
             return Err(ServiceError::NotHere);
         }
@@ -317,6 +321,7 @@ impl Game {
     /// record (0x4c50ec). Taking only: nothing goes in. Refused unless the switch is on, the
     /// building is his and the hero stands in it (`offers`, which the switch gates through `tabs`).
     pub fn take_from_store(&mut self, index: usize) -> Result<ItemId, ServiceError> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::TakeFromStore { index: index as u32 });
         if !self.offers(Tab::Store) {
             return Err(ServiceError::NotHere);
         }
@@ -343,6 +348,7 @@ impl Game {
     /// its last pay now; an unpaid one only with `pay`, for [`Game::garrison_price`], asked
     /// only when that is strictly below the gold, and it comes paid with its last pay now.
     pub fn take_from_garrison(&mut self, j: usize, cell: Option<Slot>, pay: bool) -> Result<(), ServiceError> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::TakeFromGarrison { j: j as u32, cell, pay });
         if !self.offers(Tab::Garrison) {
             return Err(ServiceError::NotHere);
         }
@@ -380,6 +386,7 @@ impl Game {
     /// selected first does it get its last pay now, and only if it is paid (the original's
     /// two click handlers differ).
     pub fn swap_with_garrison(&mut self, i: usize, j: usize, garrison_first: bool) -> Result<(), ServiceError> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::SwapWithGarrison { i: i as u32, j: j as u32, garrison_first });
         if !self.offers(Tab::Garrison) {
             return Err(ServiceError::NotHere);
         }
@@ -411,6 +418,7 @@ impl Game {
     /// Moves garrison unit `j` to `cell` of the garrison here, swapping with a unit there
     /// (only the formation changes).
     pub fn move_guard(&mut self, j: usize, cell: Slot) -> bool {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::MoveGuard { j: j as u32, cell });
         let Some(l) = self.location.filter(|_| self.offers(Tab::Garrison)) else { return false };
         let g = &mut self.world.locations[l].stationed;
         if j >= g.len() || !self.content.formation.slots().any(|s| s == cell) {
@@ -440,6 +448,7 @@ impl Game {
     /// Learns spell `id` in the sanctuary here for its `CostGold`; it goes into the hero's
     /// book, to be cast on the map (`rules::magic`).
     pub fn learn_spell(&mut self, id: u32) -> Result<(), ServiceError> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::LearnSpell { id });
         let spell = self.spells_here().into_iter().find(|s| s.id == id).ok_or(ServiceError::NotHere)?;
         // Exactly `CostGold`, a negative one too (it then pays the hero).
         let price = Price::gold(spell.cost_gold);
@@ -473,6 +482,7 @@ impl Game {
     /// refund, no cost, and its worn items are lost with it: the original's Army_RemoveUnit
     /// moves nothing to the pack.
     pub fn dismiss(&mut self, i: usize) -> Result<(), ServiceError> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::Dismiss { i: i as u32 });
         if i == 0 {
             return Err(ServiceError::Hero);
         }

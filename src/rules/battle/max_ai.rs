@@ -40,6 +40,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use super::*;
+use crate::rules::recording::hook;
+use crate::rules::recording::stream::{EngineInput, MaxCode};
 
 mod ponder;
 mod tables;
@@ -105,7 +107,7 @@ const FORCED_PLY: i64 = 1 << 32;
 /// decision of 2026-10-19: "if it's just a quick fight and not the campaign, there's no need
 /// to avoid sacrificing units for the sake of a quicker finish, if 100% sure"). The same for
 /// both sides, so for the enemy and for the player's auto-battle (Q, W) alike.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum MaxStakes {
     /// A battle on the map (the default): the armies go on after it, so their units matter.
     /// Max's score already counts every unit kept and its HP, and a win is ranked by the
@@ -186,6 +188,53 @@ impl MaxMove {
     /// The action, `None` for the skip of the unit's turn.
     pub(super) fn plan(self) -> Option<Plan> {
         self.0
+    }
+}
+
+impl MaxMove {
+    /// The decision as a replay's record holds it (`rules::recording`).
+    pub(crate) fn code(self) -> MaxCode {
+        match self.0 {
+            None => MaxCode::Skip,
+            Some(Plan::Act(target, kind)) => MaxCode::Act { target: target as u32, kind: kind.code() },
+            Some(Plan::Move(to)) => MaxCode::Move { row: row_code(to.row), col: to.col },
+            Some(Plan::Pass) => MaxCode::Pass,
+        }
+    }
+
+    /// The decision a record holds; `None` for a code this build does not know.
+    pub(crate) fn from_code(c: MaxCode) -> Option<MaxMove> {
+        Some(MaxMove(match c {
+            MaxCode::Skip => None,
+            MaxCode::Act { target, kind } => Some(Plan::Act(target as usize, ActionKind::from_code(kind)?)),
+            MaxCode::Move { row, col } => Some(Plan::Move(Slot::new(row_of_code(row)?, col))),
+            MaxCode::Pass => Some(Plan::Pass),
+        }))
+    }
+}
+
+fn row_code(row: Row) -> u8 {
+    match row {
+        Row::Front => 0,
+        Row::Back => 1,
+        Row::Reserve => 2,
+    }
+}
+
+fn row_of_code(c: u8) -> Option<Row> {
+    Some(match c {
+        0 => Row::Front,
+        1 => Row::Back,
+        2 => Row::Reserve,
+        _ => return None,
+    })
+}
+
+impl MaxReport {
+    /// The report of a decision a replay takes from its record: the search did not run, so
+    /// the scores and the depth are nothing.
+    pub(crate) fn recorded(choice: MaxMove) -> MaxReport {
+        MaxReport { choice, original: choice, value: 0, original_value: 0, depth: 0, settled: true, nodes: 0, rollouts: 0, tt_hits: 0, rollout_hits: 0, elapsed: Duration::ZERO }
     }
 }
 
@@ -383,9 +432,20 @@ impl Battle {
         self.auto_step();
     }
 
+    /// Carries out the enemy's «Максимум» decision `r` for the active unit, the one the battle
+    /// really plays: it is reported to a recorder under the battle's number and the decision's
+    /// (`rules::recording`), then played as [`Battle::play_max_move`] plays it.
+    pub fn apply_max(&mut self, r: MaxReport) -> Option<Step> {
+        let _eng = crate::rules::recording::hook::engine_scope();
+        hook::record(EngineInput::Max { battle: self.ordinal, decision: self.decisions, code: r.choice.code() });
+        self.decisions += 1;
+        self.play_max_move(r.choice)
+    }
+
     /// Carries out a decision for the active unit; a refused action ends its turn, as the
     /// auto-battle's (`auto_step`).
     pub fn play_max_move(&mut self, m: MaxMove) -> Option<Step> {
+        let _eng = crate::rules::recording::hook::engine_scope();
         let actor = self.active()?;
         let step = m.0.and_then(|p| self.step_plan(p));
         step.or_else(|| {
@@ -408,6 +468,7 @@ impl Battle {
     /// step to the hero's auto-battle. With a fixed budget ([`MAX_QUICK_BUDGET`]) the same
     /// position always ends the same way. Returns the outcome.
     pub fn max_play_to_end(&mut self, budget: MaxBudget) -> Outcome {
+        let _rec = crate::rules::recording::actions::battle_scope(|| crate::rules::recording::actions::BattleAct::MaxPlay);
         self.begin();
         let tables = [MaxTables::default(), MaxTables::default()];
         for _ in 0..AUTO_PLAY_STEPS {

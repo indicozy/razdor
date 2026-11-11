@@ -300,7 +300,7 @@ pub enum CastTarget {
 }
 
 /// A spell being read on the map ([`Game::begin_cast`]).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Reading {
     pub spell: u32,
     pub target: CastTarget,
@@ -469,6 +469,7 @@ impl Game {
     /// once, 0x4ae4e9–0x4ae4f0, while a silent one does not; an enemy reaching the hero loses
     /// the spell), then the spell lands ([`Game::end_reading`]'s rules).
     pub fn cast(&mut self, spell: u32, target: CastTarget) -> Result<Cast, CastError> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::Cast { spell, target });
         self.check_cast(spell, target)?;
         let cost = self.cast_cost(self.spell(spell).ok_or(CastError::NoSuchSpell)?);
         self.stop();
@@ -502,6 +503,7 @@ impl Game {
     /// rest, Space) drops it with no mana spent. A spell with no reading time lands at once
     /// (`Some`).
     pub fn begin_cast(&mut self, spell: u32, target: CastTarget) -> Result<Option<CastOutcome>, CastError> {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::BeginCast { spell, target });
         self.check_cast(spell, target)?;
         let cost = self.cast_cost(self.spell(spell).ok_or(CastError::NoSuchSpell)?);
         self.stop();

@@ -1925,9 +1925,11 @@ struct PhoneDiary {
     entry: Rect,
     entry_bar: Rect,
     close: Rect,
+    /// «Смотреть запись» (a game that keeps its record): beside «Закрыть».
+    record: Option<Rect>,
 }
 
-fn phone_diary_areas(inner: Rect, k: f32, g: f32, upright: bool) -> PhoneDiary {
+fn phone_diary_areas(inner: Rect, k: f32, g: f32, upright: bool, record: bool) -> PhoneDiary {
     let pad = 8.0 * k;
     let gap = 6.0 * k;
     // A tab and the close button are 44 dp tall (the owner's touch rule), grown with the text size.
@@ -1941,16 +1943,26 @@ fn phone_diary_areas(inner: Rect, k: f32, g: f32, upright: bool) -> PhoneDiary {
     let close_w = (140.0 * k).min(w);
     // Sideways «Закрыть» ends the tabs' row (the five tabs share the rest of it), and the lists run
     // down to the window's bottom pad.
-    let (cols, rows, tabs_w) = if upright { (3, 2, w) } else { (5, 1, w - close_w - gap) };
+    // The record's button takes a room beside «Закрыть» (at the foot held upright, in the row sideways).
+    let side_w = close_w + if record { close_w + gap } else { 0.0 };
+    let (cols, rows, tabs_w) = if upright { (3, 2, w) } else { (5, 1, w - side_w - gap) };
     let cell = ((tabs_w - (cols as f32 - 1.0) * gap) / cols as f32).max(0.0);
     let tabs = std::array::from_fn(|i| Rect::new(inner.x + pad + (i % cols) as f32 * (cell + gap), top_y + (i / cols) as f32 * (th + gap), cell, th));
     let tabs_h = rows as f32 * th + (rows as f32 - 1.0) * gap;
     let top = top_y + tabs_h + gap;
-    let (close, bottom) = if upright {
-        let close = Rect::new(inner.center().x - close_w / 2.0, inner.bottom() - pad - th, close_w, th);
-        (close, (close.y - gap).max(top))
+    let half = (w - gap) / 2.0;
+    let (close, bottom, rec_btn) = if upright {
+        let foot = inner.bottom() - pad - th;
+        let (close, rec_btn) = if record {
+            (Rect::new(inner.x + pad + half + gap, foot, half, th), Some(Rect::new(inner.x + pad, foot, half, th)))
+        } else {
+            (Rect::new(inner.center().x - close_w / 2.0, foot, close_w, th), None)
+        };
+        (close, (close.y - gap).max(top), rec_btn)
     } else {
-        (Rect::new(inner.right() - pad - close_w, top_y, close_w, th), (inner.bottom() - pad).max(top))
+        let close = Rect::new(inner.right() - pad - close_w, top_y, close_w, th);
+        let rec_btn = record.then(|| Rect::new(close.x - gap - close_w, top_y, close_w, th));
+        (close, (inner.bottom() - pad).max(top), rec_btn)
     };
     let (list, head, entry) = if upright {
         let list = Rect::new(inner.x + pad, top, w, ((bottom - top) * 0.4).floor());
@@ -1967,7 +1979,7 @@ fn phone_diary_areas(inner: Rect, k: f32, g: f32, upright: bool) -> PhoneDiary {
         (list, head, entry)
     };
     let bar_of = |r: Rect| Rect::new(r.right() - bar, r.y, bar, r.h);
-    PhoneDiary { tabs, list, list_bar: bar_of(list), head, entry, entry_bar: bar_of(entry), close }
+    PhoneDiary { tabs, list, list_bar: bar_of(list), head, entry, entry_bar: bar_of(entry), close, record: rec_btn }
 }
 
 /// A list row's title in at most two lines of `room` at `size` (in the font in use): a longer
@@ -2003,7 +2015,7 @@ fn phone_diary(game: &mut Game, assets: &Assets, view: &mut HeroView, message: &
     let ru = razdor::i18n::lang() == razdor::i18n::Lang::Ru;
     let (inner, closed) = chrome::window(win, tr(n_("Diary")), chrome::Skin::Marble, true);
     let text = DIARY_PHONE_TEXT * k * g;
-    let a = phone_diary_areas(inner, k, g, window_layout::portrait());
+    let a = phone_diary_areas(inner, k, g, window_layout::portrait(), game.replay.is_some());
 
     // The tabs: a marble button each, the picked one ringed in gold.
     let mut switch = None;
@@ -2177,6 +2189,23 @@ fn phone_diary(game: &mut Game, assets: &Assets, view: &mut HeroView, message: &
     });
 
     let pressed = button(a.close.x, a.close.y, a.close.w, a.close.h, tr("Close"), true);
+    if let Some(r) = a.record {
+        if button(r.x, r.y, r.w, r.h, tr("Watch the record"), true) {
+            if let Ok(screen) = super::watch::open_record(game, Screen::Hero(*view)) {
+                return Some(screen);
+            }
+        }
+    }
+    // A game that keeps its record offers it on the diary's foot, left of the close button (the
+    // desktop's row; a phone's diary has its own, `PhoneDiary::record`).
+    if game.replay.is_some() && super::display::dp_px().is_none() {
+        let r = Rect::new(a.close.x - a.close.w - 8.0 * k, a.close.y, a.close.w, a.close.h);
+        if button(r.x, r.y, r.w, r.h, tr("Watch the record"), true) {
+            if let Ok(screen) = super::watch::open_record(game, Screen::Hero(*view)) {
+                return Some(screen);
+            }
+        }
+    }
     // The item held is the pointer; closing the window puts it back in the pack (`App::frame`).
     draw_held(game, assets);
     if closed || pressed || key(KeyCode::Escape) || key(keymap::key(Action::Journal)) {
@@ -3046,11 +3075,11 @@ mod tests {
         // A phone's window at 2.75 px a dp: about 363 x 620 dp.
         let inner = Rect::new(10.0, 20.0, 1000.0, 1700.0);
         let k = 2.75;
-        let up = super::phone_diary_areas(inner, k, 1.0, true);
+        let up = super::phone_diary_areas(inner, k, 1.0, true, false);
         // The five tabs on top (three and two held upright), «Закрыть» 44 dp tall at the foot, all inside the frame.
         assert!(up.tabs[0].y == up.tabs[1].y && up.tabs[1].y == up.tabs[2].y && up.tabs[3].y == up.tabs[4].y && up.tabs[3].y > up.tabs[0].y);
         assert!(up.tabs.iter().all(|t| t.bottom() <= up.list.y));
-        let side_tabs = super::phone_diary_areas(inner, k, 1.0, false).tabs;
+        let side_tabs = super::phone_diary_areas(inner, k, 1.0, false, false).tabs;
         assert!(side_tabs.iter().all(|t| t.y == side_tabs[0].y));
         assert_eq!(up.close.h, 44.0 * k);
         assert!(up.close.bottom() <= inner.bottom() && up.close.y >= up.entry.bottom());
@@ -3060,7 +3089,7 @@ mod tests {
         let avail = up.close.y - 6.0 * k - up.list.y;
         assert!((up.list.h - 0.4 * avail).abs() <= 1.0);
         // Sideways: the list left, 40 % of the width, the entry right, both down to the window's pad.
-        let side = super::phone_diary_areas(inner, k, 1.0, false);
+        let side = super::phone_diary_areas(inner, k, 1.0, false, false);
         assert!(side.list.right() < side.entry.x);
         assert!((side.list.w - 0.4 * (inner.w - 22.0 * k)).abs() <= 1.0);
         assert_eq!(side.list.y, side.head.y);

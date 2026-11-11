@@ -172,6 +172,8 @@ impl Clone for Battle {
             god: false,
             max_ai: false,
             max_guard: false,
+            ordinal: 0,
+            decisions: 0,
             max_stakes: MaxStakes::Campaign,
         };
         b.clone_from(self);
@@ -218,6 +220,8 @@ impl Clone for Battle {
             god,
             max_ai,
             max_guard,
+            ordinal,
+            decisions,
             max_stakes,
         } = src;
         if !Arc::ptr_eq(&self.content, content) {
@@ -260,6 +264,8 @@ impl Clone for Battle {
         self.god = *god;
         self.max_ai = *max_ai;
         self.max_guard = *max_guard;
+        self.ordinal = *ordinal;
+        self.decisions = *decisions;
         self.max_stakes = *max_stakes;
     }
 }

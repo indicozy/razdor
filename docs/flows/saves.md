@@ -243,6 +243,15 @@ before it has no record: `save::restore` starts one at the load with an «earlie
 line (`Chronicle::begin_after_load`), and a save that has a record keeps it as it is. Its texts are
 references (scenario event ids, catalog keys), so it stays small (`SIZE_BUDGET_300_DAYS`).
 
+## The replay of a save (`recording/session.rs`)
+
+A game records to a replay file beside its saves (`replays/` in the games folder; the setting
+«Записывать игру»). A save made then carries its place in the file: `SaveMeta::replay` (`ReplayRef`:
+the file's name and its length). Loading the save resumes that file there (the file is cut at the
+place and a new segment starts from the loaded state; `save::restore` sets `Game::replay_resume`).
+Deleting the last save that points into a replay deletes the replay file (`save::delete`). The
+replay's format and what it records: `docs/flows/replays.md`.
+
 ## Compatibility rules when adding state
 
 - New fields on anything saved (`Game`, `World`, `Army`, units, the event engine …) get

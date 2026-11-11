@@ -411,6 +411,11 @@ impl<'a> Runner<'a> {
         self.game.as_ref()
     }
 
+    /// The game for a caller that finishes its paused step and takes its snapshot (the replay tests).
+    pub fn game_mut(&mut self) -> Option<&mut Game> {
+        self.game.as_mut()
+    }
+
     /// What the replay left on screen, for a picture of it (`RAZDOR_SCENE=replay`): the game,
     /// the battle if one is open, and whether a building window is open. The dialogs waiting
     /// to be read are not handed over.
@@ -540,6 +545,10 @@ impl<'a> Runner<'a> {
                     None => Game::from_scenario(content, &s, class),
                 };
                 g.improved_ai = dt.settings.expert_ai;
+                // The map's origin (its name and hash) as the new-game window sets it (`ui::screens`):
+                // a snapshot of this game restores its map from the install.
+                let (origin, bytes) = crate::rules::save::ScenarioRef::of_map(&m.path, &m.name).map_err(|e| format!("map {map}: {e}"))?;
+                g.set_map(origin, bytes);
                 self.map = format!("{}.DTm", m.name);
                 self.scenario = Some(s);
                 g

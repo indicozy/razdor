@@ -1307,14 +1307,17 @@ pub fn set_ai_strength(audio: &mut super::audio::Settings, s: AiStrength) {
 /// restored battle began with the defaults, the original's AI on its normal level: with
 /// «Максимум» chosen, its «Рестарт» was played by another AI than the battle itself.
 pub fn follow_settings(audio: &super::audio::Settings, g: &mut razdor::rules::game::Game) {
-    g.improved_ai = expert_ai(audio);
-    g.max_ai = ai_strength(audio) == AiStrength::Max;
-    g.max_guard = audio.max_guard;
-    g.pursue = pursue(audio);
-    g.walk_pace = walk_pace(audio);
-    g.keep_xp_on_promotion = audio.keep_xp_on_promotion;
-    g.keep_formation = audio.keep_formation;
-    g.allow_unit_benching = audio.allow_unit_benching;
+    // The rule settings go through the game (a change is an action, recorded: `Game::set_rule_settings`).
+    g.set_rule_settings(razdor::rules::recording::snapshot::Settings {
+        improved_ai: expert_ai(audio),
+        max_ai: ai_strength(audio) == AiStrength::Max,
+        max_guard: audio.max_guard,
+        keep_xp_on_promotion: audio.keep_xp_on_promotion,
+        keep_formation: audio.keep_formation,
+        allow_unit_benching: audio.allow_unit_benching,
+        pursue: pursue(audio),
+        walk_pace: walk_pace(audio),
+    });
     g.battle_marks = audio.battle_marks;
     g.army_list = audio.army_list;
     g.leader_caption = audio.leader_caption;
@@ -1600,7 +1603,7 @@ impl Group {
             Group::Battle => &[Row::WalkSpeed, Row::AnimSpeed, Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience, Row::HitShake],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
-            Group::Other => &[Row::Updates, Row::Import, Row::ChronicleSummary, Row::BatterySaver],
+            Group::Other => &[Row::Updates, Row::Import, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame],
         }
     }
 }
@@ -1663,11 +1666,12 @@ pub enum Row {
     Import,
     ChronicleSummary,
     BatterySaver,
+    RecordGame,
 }
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 55] = [
+pub const ALL: [Row; 56] = [
         Row::MapZoom,
         Row::ScrollSpeed,
         Row::MapResolution,
@@ -1723,6 +1727,7 @@ pub const ALL: [Row; 55] = [
         Row::Import,
         Row::ChronicleSummary,
         Row::BatterySaver,
+        Row::RecordGame,
     ];
 
     /// The long hint a «?» pop-up shows (backlog 1508), for the rows whose hint runs past a line.
@@ -1753,6 +1758,7 @@ pub const ALL: [Row; 55] = [
             Row::Language => Some(super::language::hint()),
             Row::ChronicleSummary => Some(tr("Razdor's: after a map ends or the hero falls, a page sums up the map: the route, battles, highlights and totals.")),
             Row::BatterySaver => Some(tr("When nothing moves on the map, the game draws new frames rarely, to save the battery.")),
+            Row::RecordGame => Some(tr("Records the game, so it can be watched later as a replay. Takes almost no space.")),
             Row::Updates => Some(if updates_phone() {
                 tr(UPDATES_PHONE_HINT)
             } else {
@@ -2328,6 +2334,11 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
             // Razdor's (the owner's request, 2026-11-11): the map's idle frames are rarely drawn (`frame_cap`).
             if labelled_row_help(c, geo, tr("Battery saver"), yes_no(audio.battery_saver), Row::BatterySaver.help_text()).0 {
                 audio.battery_saver = !audio.battery_saver;
+            }
+        }
+        Row::RecordGame => {
+            if labelled_row(c, geo, tr("Record the game"), yes_no(audio.record_game)).0 {
+                audio.record_game = !audio.record_game;
             }
         }
         Row::MinimapCorner => {
@@ -3766,7 +3777,7 @@ mod tests {
     #[test]
     fn the_long_hints_are_behind_a_question_mark() {
         let with: Vec<Row> = Row::ALL.into_iter().filter(|r| r.help_text().is_some()).collect();
-        assert_eq!(with, vec![Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::Language, Row::Updates, Row::ChronicleSummary, Row::BatterySaver]);
+        assert_eq!(with, vec![Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::Shadows, Row::LightQuality, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::Language, Row::Updates, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame]);
         scene_help("Experience");
         assert_eq!(HELP_PINNED.with(|p| p.get()), Row::Experience.help_text());
         HELP_PINNED.with(|p| p.set(None));

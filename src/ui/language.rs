@@ -256,7 +256,7 @@ pub fn data_prefix() -> Option<String> {
     state(|s| s.data.clone())
 }
 
-fn set(data: Option<String>) {
+pub fn set(data: Option<String>) {
     i18n::set_lang(interface_of(data.as_deref()));
     state(|s| s.data = data);
 }

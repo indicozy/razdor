@@ -61,6 +61,9 @@ impl Lang {
 static LANG: AtomicU8 = AtomicU8::new(0);
 
 pub fn lang() -> Lang {
+    if let Some(l) = OVERRIDE.with(std::cell::Cell::get) {
+        return l;
+    }
     match LANG.load(Ordering::Relaxed) {
         1 => Lang::Ru,
         _ => Lang::En,
@@ -160,12 +163,20 @@ pub const fn n_(en: &'static str) -> &'static str {
 }
 
 local! {
+    /// This thread's language while a replay plays (`recording::watch`): the texts the rules write
+    /// are the record's, whatever the player's interface language is.
+    static OVERRIDE: std::cell::Cell<Option<Lang>> = const { std::cell::Cell::new(None) };
     static SILENT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// While set on this thread, [`fill`] (and so `trf!`) gives empty texts: Razdor's battle
 /// search, whose positions' logs nobody reads, skips their formatting. Returns the setting
 /// it replaces.
+/// Sets this thread's language override (None: the player's own again); returns the one before.
+pub fn set_override(lang: Option<Lang>) -> Option<Lang> {
+    OVERRIDE.with(|o| o.replace(lang))
+}
+
 pub fn set_silent(on: bool) -> bool {
     SILENT.with(|s| s.replace(on))
 }
