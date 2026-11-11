@@ -215,25 +215,33 @@ vec2 ripple(vec2 q) {
     return c;
 }
 
-// The shore foam at a water pixel: `cov` is the water's share of the pixel's four cells (0.5 on the coast, 1 deep
-// in the water), `p` the cell coordinate and `fl` the flow there. The band runs from the coast out to a quarter cell
-// at most, and laps: its inner edge swings between the coast and a little way out, the wave's phase varies along the
-// shore, a noise breaks the band into patches, and a still shore (a lake, the sea) foams more than a river. The
-// periods fit CLOCK_PERIOD (6400 s): the wave is 914 cycles of it (about 7 s), and the drifts move the noise by whole
-// lattice periods. Returns the foam's colour and its alpha.
+// The shore foam at a water pixel: `cov` is the water's share of the pixel's four cells (0.5 on the waterline, 1
+// deep), `p` the cell coordinate and `fl` the flow there; s = cov - 0.5 is the distance into the water, in cells.
+// The main line is near-white at the waterline, full for a few hundredths of a cell and fading by a third of a cell into the water; its inner
+// edge laps between the waterline and a tenth of a cell out (a wave of about 6.4 s, its phase varying along the
+// shore), and a noise breaks it into patches. A fainter second line lies further out, on a wave of its own. A still
+// shore (a lake, the sea) foams at full strength, a river at 0.55. The periods fit CLOCK_PERIOD (6400 s): the wave is
+// 1000 cycles of it, and the drifts move the noise by whole lattice periods. Returns the foam's colour and alpha.
 vec4 shore_foam(float cov, vec2 p, vec2 fl) {
-    float s = clamp(cov - 0.5, 0.0, 0.5);
+    float s = cov - 0.5;
+    if (s <= 0.0) {
+        return vec4(0.0);
+    }
     float t0 = fract(Clock * 0.05);
     float t1 = fract(Clock * 0.05 + 0.5);
     vec2 q0 = p - fl * t0 * 7.0;
     vec2 q1 = p - fl * t1 * 7.0;
-    float lap = 0.5 + 0.5 * sin(Clock * 0.89723614 + 6.0 * vnoise(q0 * 0.8));
-    float inner = 0.02 + 0.07 * lap;
-    float outer = inner + 0.14 + 0.06 * (1.0 - lap);
-    float edge = smoothstep(inner - 0.02, inner + 0.02, s) * (1.0 - smoothstep(outer - 0.03, outer + 0.03, s));
-    float grain = smoothstep(0.3, 0.7, 0.6 * vnoise(q0 * 2.4 + Clock * vec2(0.01, 0.0)) + 0.4 * vnoise(q1 * 5.1 + Clock * vec2(0.0, -0.02)));
-    float still = 1.0 - smoothstep(0.2, 0.8, length(fl));
-    return vec4(0.93, 0.96, 0.98, 0.9 * edge * grain * (0.55 + 0.45 * still));
+    float lap = 0.5 + 0.5 * sin(Clock * 0.98174770 + 6.0 * vnoise(q0 * 0.8));
+    float lap2 = 0.5 + 0.5 * sin(Clock * 0.98174770 + 2.5 + 6.0 * vnoise(q1 * 0.6));
+    float patch = smoothstep(0.38, 0.62, 0.6 * vnoise(q0 * 2.4 + Clock * vec2(0.01, 0.0)) + 0.4 * vnoise(q1 * 5.1 + Clock * vec2(0.0, -0.02)));
+    float inner = 0.1 * lap;
+    float line = smoothstep(inner - 0.015, inner + 0.015, s) * (1.0 - smoothstep(inner + 0.08, inner + 0.33, s));
+    float inner2 = 0.36 + 0.05 * lap2;
+    float far = smoothstep(inner2 - 0.01, inner2 + 0.01, s) * (1.0 - smoothstep(inner2 + 0.03, inner2 + 0.07, s));
+    float still = 0.55 + 0.45 * (1.0 - smoothstep(0.2, 0.8, length(fl)));
+    float a1 = 0.85 * line * (0.3 + 0.7 * patch) * still;
+    float a2 = 0.3 * far * (0.2 + 0.8 * patch) * still;
+    return vec4(0.97, 0.98, 1.0, a1 + a2 - a1 * a2);
 }
 
 void main() {

@@ -559,10 +559,12 @@ it every frame from `display::follow_settings`; `RAZDOR_LIVE_WATER=1` turns it o
   pixels only, a ripple moves the water frame's uv by `0.015` of a frame (a few texels), the shore foam
   (`shore_foam`, its band mirrored by `water::foam_edge`) is laid on the final colour (after the four cells are blended, so
   it sits on the visible coast): the water's share of the four cells (`cov`, the colour blend's own weights, 0.5 on the coast,
-  1 deep) gives the distance `s` from the coast; the band runs from the coast out to a quarter cell at most, its inner edge
-  laps between the coast and 0.09 cell (`0.5 + 0.5 sin` of a 914-cycle wave, about 7 s, the phase varying along the shore),
-  a noise breaks it into patches, and still water (`Flow` zero: a lake, the sea) foams at full strength, a river at 0.55. The
-  foam is white-ish at alpha up to 0.9 and is drawn before the mist, so the unexplored land covers it. The water takes
+  1 deep) gives the distance `s` from the waterline. The main line is near-white (alpha up to 0.85), full for a few
+  hundredths of a cell at the waterline and faded out by a third of a cell into the water; its inner edge laps between the
+  waterline and 0.1 cell (`0.5 + 0.5 sin` of a 1000-cycle wave, 6.4 s, the phase varying along the shore); a noise breaks it
+  into patches; a fainter second line lies at 0.36–0.41 cell on a wave of its own. Still water (`Flow` zero: a lake, the sea)
+  foams at full strength, a river at 0.55. The foam is drawn after the four cells are blended, before the mist, so the
+  unexplored land covers it, and it is zero on the land side of the waterline. The water takes
   the sky's colour (`daylight::sky_rgb`: day, dusk and dawn warmth, moonlight at night; the day's with the lighting
   off) by `0.18` of its mask. Only the full pass and the cache's overlay draw it (`Mode::Full`, `Mode::Overlay`);
   the cached ground stays as it was. `Clock` is the water clock.

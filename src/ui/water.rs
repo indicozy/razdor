@@ -32,16 +32,23 @@ fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-/// The shore foam's edge of a water pixel: `s` is its distance from the coast in cells (the water mask less
-/// 0.5, clamped to 0 to 0.5), `lap` the wave's phase from 0 (low, the inner edge on the coast) to 1 (high, the
-/// inner edge a little out). The band lies from the inner edge to an outer edge 0.14 to 0.2 cell further out,
-/// so it stays within a quarter cell of the coast. The shader's formula, mirrored without the noise and the
-/// still-shore weight, which the tests pin.
+/// The main foam line's alpha at `s` (the water's distance from the waterline, in cells) for the wave's phase `lap`
+/// (0 low, 1 high): near-white on the waterline, fading over about a third of a cell, its inner edge laps between the
+/// waterline and a tenth of a cell out. The shader's formula, mirrored without the noise and the still-shore weight.
 #[allow(dead_code)] // The shader's formula in Rust, pinned by the tests.
-pub fn foam_edge(s: f32, lap: f32) -> f32 {
-    let inner = 0.02 + 0.07 * lap;
-    let outer = inner + 0.14 + 0.06 * (1.0 - lap);
-    smoothstep(inner - 0.02, inner + 0.02, s) * (1.0 - smoothstep(outer - 0.03, outer + 0.03, s))
+pub fn foam_line(s: f32, lap: f32) -> f32 {
+    if s <= 0.0 {
+        return 0.0;
+    }
+    let inner = 0.1 * lap;
+    smoothstep(inner - 0.015, inner + 0.015, s) * (1.0 - smoothstep(inner + 0.08, inner + 0.33, s))
+}
+
+/// The fainter second line's alpha at `s` for the wave's phase `lap`, a little further out (about 0.36 to 0.41 cell).
+#[allow(dead_code)] // The shader's formula in Rust, pinned by the tests.
+pub fn foam_far(s: f32, lap: f32) -> f32 {
+    let inner = 0.36 + 0.05 * lap;
+    smoothstep(inner - 0.01, inner + 0.01, s) * (1.0 - smoothstep(inner + 0.03, inner + 0.07, s))
 }
 
 /// Seconds between two wake points.
@@ -140,28 +147,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_foam_is_on_the_water_side_of_the_coast_and_within_a_quarter_cell() {
-        // On the land (s 0) and in the deep water (half a cell out) there is no foam, at every phase of the wave.
-        for k in 0..=10 {
-            let lap = k as f32 / 10.0;
-            assert!(foam_edge(0.0, lap) < 1e-6, "land at lap {lap}");
-            assert!(foam_edge(0.5, lap) < 1e-6, "deep water at lap {lap}");
-            assert!(foam_edge(0.3, lap) < 1e-6, "beyond a quarter cell at lap {lap}");
-        }
-        // Mid-wave the band is full a little out from the coast, and soft at its edges.
-        assert!((foam_edge(0.12, 0.5) - 1.0).abs() < 1e-6, "the band's middle: {}", foam_edge(0.12, 0.5));
-        let edge = foam_edge(0.225, 0.5);
-        assert!(edge > 0.0 && edge < 1.0, "the outer edge is soft: {edge}");
+    fn the_foam_line_starts_on_the_waterline_and_fades_into_the_water_by_a_third_of_a_cell() {
+        assert_eq!(foam_line(0.0, 0.0), 0.0, "no foam on the land side");
+        assert!(foam_line(0.02, 0.0) > 0.99, "full at the waterline: {}", foam_line(0.02, 0.0));
+        let mid = foam_line(0.2, 0.0);
+        assert!(mid > 0.0 && mid < 1.0, "fading: {mid}");
+        assert!(foam_line(0.34, 0.0) < 1e-3, "gone by a third of a cell");
     }
 
     #[test]
-    fn the_wave_moves_the_foam_toward_the_beach_and_back() {
-        // At the low point the foam reaches the coast; at the high point the coast is clear and the band sits out.
-        assert!(foam_edge(0.03, 0.0) > 0.8, "low wave on the coast: {}", foam_edge(0.03, 0.0));
-        assert!(foam_edge(0.03, 1.0) < 1e-3, "high wave: the coast is clear: {}", foam_edge(0.03, 1.0));
-        assert!(foam_edge(0.12, 1.0) > 0.9, "high wave: the band is out: {}", foam_edge(0.12, 1.0));
+    fn the_wave_moves_the_line_between_the_waterline_and_a_tenth_of_a_cell_out() {
+        // The high point of the wave clears the waterline: the line starts a tenth of a cell out.
+        assert!(foam_line(0.05, 1.0) < 1e-3, "the waterline is clear at the high point: {}", foam_line(0.05, 1.0));
+        assert!(foam_line(0.12, 1.0) > 0.99, "the line is out there at the high point: {}", foam_line(0.12, 1.0));
+        assert!(foam_line(0.02, 0.0) > foam_line(0.02, 1.0), "the low point reaches the waterline");
     }
 
+    #[test]
+    fn the_second_line_is_further_out_and_lies_within_the_water() {
+        assert!(foam_far(0.1, 0.5) < 1e-3, "not near the waterline");
+        assert!(foam_far(0.4, 0.5) > 0.9, "the second line: {}", foam_far(0.4, 0.5));
+        assert!(foam_far(0.5, 0.5) < 1e-3, "not in the deep water");
+    }
     #[test]
     fn a_wake_point_fades_from_035_to_nothing_and_grows() {
         let (a0, s0) = wake_fade(0.0).expect("fresh point");
