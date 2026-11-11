@@ -1194,9 +1194,9 @@ pub fn clip_to_rect(poly: &[Vec2], r: Rect) -> Vec<Vec2> {
 }
 
 /// Draws the ground a tilted view sees on the minimap (`r`): the flat view's box colours, a translucent
-/// fill and a light outline, clipped to the minimap; and a cone from the camera's ground point along its
-/// yaw, kept inside the minimap. `to_mini` maps world units to the minimap's pixels.
-fn draw_sight(s: &Sight, r: Rect, to_mini: &impl Fn((f32, f32)) -> Vec2, zoom: f32) {
+/// fill and a light outline, clipped to the minimap; and the hero's marker, a small triangle on his place with
+/// its tip where the camera looks. `to_mini` maps world units to the minimap's pixels.
+fn draw_sight(s: &Sight, r: Rect, to_mini: &impl Fn((f32, f32)) -> Vec2) {
     let poly: Vec<Vec2> = sight_footprint(&s.cam, s.frame).into_iter().map(|p| to_mini((p.x, p.y))).collect();
     let poly = clip_to_rect(&poly, r);
     if poly.len() >= 3 {
@@ -1212,25 +1212,74 @@ fn draw_sight(s: &Sight, r: Rect, to_mini: &impl Fn((f32, f32)) -> Vec2, zoom: f
         }
     }
 
-    // The cone: from the camera's ground point, along the yaw (its length and half-width in pixels).
+    // The look marker, drawn last so it is on top. Two styles, picked by `RAZDOR_MINIMAP_MARK` (a developer
+    // switch while the owner chooses): `triangle` (the default) is a small triangle on the hero's place with its
+    // tip where the camera looks; `arrow` is a longer arrow from the same point, 18% of the minimap's side.
     let p0 = to_mini((s.from.x, s.from.y));
-    let ahead = s.from + view25::forward(s.cam.yaw_deg);
-    let dir = (to_mini((ahead.x, ahead.y)) - p0).normalize_or_zero();
+    let dir = look_direction(&s.cam, s.from, to_mini);
     if dir == Vec2::ZERO {
         return;
     }
-    let (len, half) = (16.0 * zoom, 6.0 * zoom);
-    let margin = len.min(r.w / 2.0).min(r.h / 2.0);
-    let at = p0.clamp(vec2(r.x + margin, r.y + margin), vec2(r.x + r.w - margin, r.y + r.h - margin));
-    let side = vec2(-dir.y, dir.x) * half;
+    let k = super::chrome::k();
+    let light = Color::new(0.97, 0.97, 0.97, 0.95);
+    if mark_is_arrow() {
+        let side = r.w.min(r.h);
+        let len = (0.18 * side).max(14.0 * k).min(0.45 * side);
+        // Kept inside the minimap, so an arrow from the hero at its edge still shows.
+        let at = p0.clamp(vec2(r.x + len, r.y + len), vec2(r.x + r.w - len, r.y + r.h - len));
+        draw_arrow(at, dir, len, light);
+    } else {
+        let size = (12.0 * k).max(10.0);
+        let (tip, back) = hero_marker(p0, dir, size);
+        let n = vec2(-dir.y, dir.x);
+        let (left, right) = (back + n * size * 0.42, back - n * size * 0.42);
+        draw_triangle(tip, left, right, light);
+        for (a, b) in [(tip, left), (left, right), (right, tip)] {
+            draw_line(a.x, a.y, b.x, b.y, 1.0, BLACK);
+        }
+    }
+}
+
+/// Whether the look marker is the arrow (`RAZDOR_MINIMAP_MARK=arrow`); the triangle otherwise.
+fn mark_is_arrow() -> bool {
+    static MARK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *MARK.get_or_init(|| std::env::var("RAZDOR_MINIMAP_MARK").is_ok_and(|v| v.trim() == "arrow"))
+}
+
+/// A solid arrow of `len` px from `at` along `dir` (unit, minimap pixels): a shaft and a head whose tip is `len`
+/// ahead. The outline runs round its seven corners.
+fn draw_arrow(at: Vec2, dir: Vec2, len: f32, fill: Color) {
+    let n = vec2(-dir.y, dir.x);
+    let shaft = (0.09 * len).max(1.5);
+    let head_len = 0.38 * len;
+    let head = 0.22 * len;
+    let base = at + dir * (len - head_len);
     let tip = at + dir * len;
-    let cone = [at, tip + side, tip - side];
-    draw_triangle(cone[0], cone[1], cone[2], Color::new(1.0, 1.0, 1.0, 0.7));
-    draw_line(cone[0].x, cone[0].y, cone[1].x, cone[1].y, 1.0, BLACK);
-    draw_line(cone[0].x, cone[0].y, cone[2].x, cone[2].y, 1.0, BLACK);
-    draw_line(cone[1].x, cone[1].y, cone[2].x, cone[2].y, 1.0, BLACK);
-    draw_circle(at.x, at.y, 3.0 * zoom.max(1.0), BLACK);
-    draw_circle(at.x, at.y, 2.0 * zoom.max(1.0), WHITE);
+    let (a0, a1, b1, b0) = (at + n * shaft, base + n * shaft, base - n * shaft, at - n * shaft);
+    let (h0, h1) = (base + n * head, base - n * head);
+    draw_triangle(a0, a1, b1, fill);
+    draw_triangle(a0, b1, b0, fill);
+    draw_triangle(h0, tip, h1, fill);
+    let outline = [a0, a1, h0, tip, h1, b1, b0];
+    for i in 0..outline.len() {
+        let (a, b) = (outline[i], outline[(i + 1) % outline.len()]);
+        draw_line(a.x, a.y, b.x, b.y, 1.0, BLACK);
+    }
+}
+
+/// The hero's marker's tip and the middle of its base, for the marker of `size` px centred on `at` and turned to
+/// `dir` (a unit vector on the minimap): the tip is half its length ahead of `at`, the base half behind, so the
+/// marker's extent is centred on `at`.
+fn hero_marker(at: Vec2, dir: Vec2, size: f32) -> (Vec2, Vec2) {
+    (at + dir * size * 0.5, at - dir * size * 0.5)
+}
+
+/// The unit direction the camera looks in, on the minimap (pixels, y down): the ground's forward at the camera's
+/// yaw, from `from` a step ahead, projected by `to_mini`. Zero when the step vanishes.
+fn look_direction(cam: &TiltCamera, from: Vec2, to_mini: impl Fn((f32, f32)) -> Vec2) -> Vec2 {
+    let ahead = from + view25::forward(cam.yaw_deg);
+    let p0 = to_mini((from.x, from.y));
+    (to_mini((ahead.x, ahead.y)) - p0).normalize_or_zero()
 }
 
 /// Draws the minimap window. `view_world` is the part of the world the map view shows (world
@@ -1343,7 +1392,7 @@ pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_
             }
         }
         // A tilted view (2.5D, first person): the ground its frame sees, and where the camera looks (Razdor's).
-        Some(s) => draw_sight(&s, r, &to_mini, zoom),
+        Some(s) => draw_sight(&s, r, &to_mini),
     }
 
     if let Some(t) = frame_art {
@@ -2086,5 +2135,34 @@ mod sight_tests {
         let same = clip_to_rect(&inner, r);
         assert_eq!(same.len(), 3, "inside, unchanged");
         assert!(inner.iter().all(|p| same.contains(p)), "the same corners, in the same order round");
+    }
+
+    #[test]
+    fn the_marker_points_along_the_yaw_on_the_map() {
+        // A plain projection with unequal axes, as the minimap's rows are shorter than its cells.
+        let px = |p: (f32, f32)| vec2(p.0 * 4.0, p.1 * 2.0);
+        let from = vec2(30.0, 40.0);
+        let dir = |yaw: f32| look_direction(&TiltCamera::new(from, SCALE, FRAME, 55.0, yaw), from, px);
+        let d0 = dir(0.0);
+        assert!(d0.y < -0.999 && d0.x.abs() < 1e-4, "yaw 0 points up the map (north): {d0:?}");
+        let d180 = dir(180.0);
+        assert!(d180.y > 0.999 && d180.x.abs() < 1e-4, "yaw 180 points down the map: {d180:?}");
+        // Yaw 90 looks along the world's `forward` (-x): on this map, left. The owner's «right» is the turn's
+        // sense; the view looks west (`view25::forward`, its east at 90 in that convention).
+        let d90 = dir(90.0);
+        assert!(d90.x < -0.999 && d90.y.abs() < 1e-4, "yaw 90 looks along -x, left on the map: {d90:?}");
+        let d270 = dir(270.0);
+        assert!(d270.x > 0.999 && d270.y.abs() < 1e-4, "yaw 270 looks along +x, right on the map: {d270:?}");
+        let d45 = dir(45.0);
+        assert!(d45.x < 0.0 && d45.y < 0.0, "yaw 45 points up-left: {d45:?}");
+    }
+
+    #[test]
+    fn the_marker_is_centred_on_the_hero() {
+        let at = vec2(100.0, 80.0);
+        let (tip, back) = hero_marker(at, vec2(0.0, -1.0), 12.0);
+        assert_eq!(tip, vec2(100.0, 74.0), "half its length ahead of the hero");
+        assert_eq!(back, vec2(100.0, 86.0), "half its length behind");
+        assert_eq!((tip + back) / 2.0, at, "the marker's extent is centred on the hero");
     }
 }
