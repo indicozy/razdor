@@ -28,6 +28,7 @@ use razdor::rules::game::{BattleResult, Game};
 use razdor::trailer::{self as shotfile, Action, MapRef, Shot, Target, Values};
 
 use super::audio::Settings;
+use super::battle_view::BattleView;
 use super::dialog::{Close, Dialog};
 use super::view25::{Trailer, FOV_DEG};
 use super::{App, Screen};
@@ -97,6 +98,8 @@ struct Runtime {
     /// A `pass` under way: the game's total minutes it ends at. The game's wait stops at each
     /// day report (as it does for a player), so the wait is taken up again until the end.
     pass_until: Option<f64>,
+    /// The warning that a target's army is gone was given (once a run).
+    gone_warned: bool,
 }
 
 /// The sound of a render: the game's jukebox run as the game runs it (the screens' moods, the
@@ -461,6 +464,9 @@ pub fn before_frame(app: &mut App) {
     let Some(shot) = cfg.shot.as_ref() else { return };
     let f = super::clock::frame_index();
     let t = shotfile::frame_time(f, shot.fps);
+    if let (Screen::Battle(view), Some(pace)) = (&mut app.screen, shot.battle_pace(t)) {
+        view.set_trailer_pace(pace);
+    }
     let values = shotfile::sample_values(&shot.keys, t);
     let target = shotfile::sample_target(&shot.keys, t);
     let cam = camera_of(&values);
@@ -468,6 +474,16 @@ pub fn before_frame(app: &mut App) {
         // The classic flat map: the player's own camera, its zoom set by the shot (locked, as the zoom
         // setting is when it is locked).
         super::world_view::set_zoom_prefs(values.zoom.unwrap_or(1.0), true);
+    }
+    if let (Some((a, b, _)), Some(game)) = (target, app.game.as_ref()) {
+        for t in [a, b] {
+            if let Some(id) = gone_army(game, t) {
+                if !with(|r| r.gone_warned) {
+                    with(|r| r.gone_warned = true);
+                    warn(format!("target army A{id} is gone at {t:?}, {:.2}s: the camera has no target there", shotfile::frame_time(f, shot.fps)));
+                }
+            }
+        }
     }
     let game_target = target.and_then(|(a, b, e)| {
         let game = app.game.as_ref()?;
@@ -533,6 +549,25 @@ fn resolve(game: &Game, t: Target) -> Option<(f32, f32)> {
             let off = map.center((tile.0 + dx.round() as i32, tile.1 + dy.round() as i32));
             Some((here.0 + off.0 - base.0, here.1 + off.1 - base.1))
         }
+        // The army's displayed place (it glides between cells as it marches), its id as the file
+        // names it. None once the army is gone (`warn_gone_armies` says so).
+        Target::Army(id, dx, dy) => {
+            let a = game.world.armies.iter().find(|a| a.id == id)?;
+            let here = game.army_display_pos(a);
+            let tile = a.tile(map);
+            let base = map.center(tile);
+            let off = map.center((tile.0 + dx.round() as i32, tile.1 + dy.round() as i32));
+            Some((here.0 + off.0 - base.0, here.1 + off.1 - base.1))
+        }
+    }
+}
+
+/// The army a target names, when the map has no such army any more (a clash can remove one without
+/// a report).
+fn gone_army(game: &Game, t: Target) -> Option<u8> {
+    match t {
+        Target::Army(id, _, _) if !game.world.armies.iter().any(|a| a.id == id) => Some(id),
+        _ => None,
     }
 }
 
@@ -576,6 +611,7 @@ fn start(app: &mut App, cfg: &Config) -> Result<(), String> {
     } else {
         log(format!("start: map {map:?}, hero {hero}, seed {seed}"));
     }
+    let mut battle_screen = None;
     if let Some(shot) = cfg.shot.as_ref().filter(|_| cfg.mode != Mode::Fly) {
         if let Some(hour) = shot.hour {
             set_start_hour(&mut game, hour);
@@ -590,9 +626,23 @@ fn start(app: &mut App, cfg: &Config) -> Result<(), String> {
         if !shot.look.is_empty() {
             log(format!("look: {:?} (for this run only)", shot.look));
         }
+        if let Some(id) = shot.battle {
+            // The battle starts at frame 0: the hero's army against the army `battle` names. On the
+            // screen (`battles show`) it opens now, as a save of a fight does; on the map the fight
+            // is resolved by `battle_on_map` at the first frame the map is free.
+            let i = game.world.armies.iter().position(|a| u32::from(a.id) == id).ok_or_else(|| format!("battle: no army A{id} on the map"))?;
+            game.foe = Some(razdor::rules::game::Foe::Army(i));
+            log(format!("battle: A{id} against the hero at {:?}, {}", game.tile(), if shot.battles_show { "on its screen" } else { "on the map" }));
+            if shot.battles_show {
+                battle_screen = Some(BattleView::new(game.start_battle()));
+            }
+        }
     }
     app.assets.set_content(game.content.clone());
-    app.screen = Screen::WorldMap;
+    app.screen = match battle_screen {
+        Some(view) => Screen::Battle(Box::new(view)),
+        None => Screen::WorldMap,
+    };
     app.game = Some(game);
     razdor::diag!("trailer: renderer: {}", gl_renderer());
     Ok(())
@@ -777,6 +827,9 @@ fn report_keys(app: &App, shot: &Shot, t: f64) {
             line.push_str(&format!("\n    army A{} {side} at {:?}", a.id, a.tile(map)));
         }
         log(line);
+        if let Some(id) = key.target.and_then(|t| gone_army(game, t)) {
+            warn(format!("keyframe {:.2}s: target army A{id} is gone (no army with that id on the map)", key.t));
+        }
     }
 }
 
@@ -852,8 +905,11 @@ pub fn after_frame(app: &mut App) -> bool {
     if cfg.mode == Mode::Fly {
         return false;
     }
+    // A battle on its screen ends at once (the instant end, the default) unless the shot paces it
+    // (`battle_speed`): then the AI plays it on screen, frame by frame, to its own end.
+    let paced = cfg.shot.as_ref().is_some_and(Shot::battle_paced);
     if let Screen::Battle(view) = &mut app.screen {
-        if battles_show() && !with(|r| r.battle_played) {
+        if battles_show() && !paced && !with(|r| r.battle_played) {
             with(|r| r.battle_played = true);
             view.play_to_end_for_trailer();
         }
@@ -863,6 +919,12 @@ pub fn after_frame(app: &mut App) -> bool {
         with(|r| r.done = true);
     }
     let f = super::clock::frame_index();
+    // The battle's state once a second, for the proof that two sizes show the same fight.
+    if let (Screen::Battle(view), Some(shot)) = (&app.screen, cfg.shot.as_ref()) {
+        if f.is_multiple_of(u64::from(shot.fps)) {
+            log(format!("battle at {:.2}s: {}", shotfile::frame_time(f, shot.fps), view.state_line()));
+        }
+    }
     let shot_frames = cfg.shot.as_ref().map_or(0, Shot::frame_count);
     if cfg.mode == Mode::Plan && f.is_multiple_of(30) {
         let rss = std::fs::read_to_string("/proc/self/status").ok().and_then(|s| s.lines().find(|l| l.starts_with("VmRSS")).map(str::to_string));

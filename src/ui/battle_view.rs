@@ -548,6 +548,8 @@ pub struct BattleView {
     /// screen's, so `paused` stops the battle's time there.
     feed: Option<VecDeque<BattleAct>>,
     pub paused: bool,
+    /// A trailer shot's pace (`battle_speed`), times the game's animations; `None` outside a run.
+    trailer_pace: Option<f32>,
 }
 
 /// A card's curse and blessing signs.
@@ -718,6 +720,7 @@ impl BattleView {
             backdrop: Default::default(),
             feed: None,
             paused: false,
+            trailer_pace: None,
         }
     }
 
@@ -806,7 +809,24 @@ impl BattleView {
 
     /// How much faster than normal the AI's moves and their animations run.
     fn pace(&self) -> f32 {
-        if self.watching() { self.speed as f32 } else { 1.0 }
+        if self.watching() { self.trailer_pace.unwrap_or(self.speed as f32) } else { 1.0 }
+    }
+
+    /// A trailer shot's battle: the AI plays both sides on screen at `pace` times the game's
+    /// animations (`battle_speed`), until the battle ends. Dev-only: only `ui::trailer` calls it.
+    pub(crate) fn set_trailer_pace(&mut self, pace: f32) {
+        self.watch = true;
+        self.trailer_pace = Some(pace);
+    }
+
+    /// The battle's state as a trailer's log line: the round, the living units and their hit
+    /// points on each side, and the outcome. The same at the same time in every render.
+    pub(crate) fn state_line(&self) -> String {
+        let side = |team: Team| {
+            let living: Vec<&Fighter> = self.battle.fighters.iter().filter(|f| f.team == team && f.hp > 0).collect();
+            format!("{:?} {} alive, {} hp", team, living.len(), living.iter().map(|f| f.hp).sum::<i32>())
+        };
+        format!("round {}, {}, {}, {:?}", self.battle.round, side(Team::Player), side(Team::Enemy), self.battle.outcome())
     }
 
     /// Nobody has acted yet: the battle's first moment, where Razdor's deploy screen stood
@@ -2166,6 +2186,17 @@ mod tests {
         let mut g = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
         g.foe = Some(Foe::Garrison(g.world.index_of("Bandit camp")));
         BattleView::new(g.start_battle())
+    }
+
+    #[test]
+    fn a_trailer_pace_is_the_watched_pace_of_both_sides() {
+        let mut view = bandit_camp();
+        assert!(!view.watching(), "the player plays his side until a shot paces it");
+        assert_eq!(view.pace(), 1.0);
+        view.set_trailer_pace(0.25);
+        assert!(view.watching(), "the AI plays both sides on the trailer's screen");
+        assert_eq!(view.pace(), 0.25);
+        assert!(view.state_line().starts_with("round "), "{}", view.state_line());
     }
 
     #[test]

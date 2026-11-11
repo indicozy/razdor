@@ -29,7 +29,11 @@ the rendering commands are for agents and the owner: `docs/trailer-shots.md`.
    come from the game as in play (`handle_events`).
 5. **Battles** (`ui/mod.rs`, where a fight starts): `trailer::battle_on_map` fights it at once with
    `Battle::auto_play_to_end` and resolves it as `BattleView::close_won`/`close_lost` do. With
-   `battles show` the battle screen opens and `BattleView::play_to_end_for_trailer` plays it out.
+   `battles show` the battle screen opens and `BattleView::play_to_end_for_trailer` plays it out, at once, unless
+   the shot paces it (`battle_speed`): then `BattleView::set_trailer_pace` makes the AI play both sides on
+   screen at the pace of the frame (`Shot::battle_pace`), and `after_frame` logs `BattleView::state_line` once a
+   second. A `battle <army>` line sets `Game::foe` at the start (`start`): on the screen the battle opens at
+   frame 0 (`Game::start_battle`, without an autosave), on the map `battle_on_map` resolves it.
 6. **After the frame** (`main.rs`, after the cursor): `ui::trailer::after_frame` captures the
    picture (macroquad's screen read, made opaque), writes it to the sinks, and at the last frame
    finishes: closes ffmpeg, mixes the sound and muxes it into the MP4 (`finish`, `mux_sound`).

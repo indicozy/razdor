@@ -26,6 +26,9 @@ Off-screen: run it under Xvfb, with its own runtime folder and log, as
 uses the CPU instead. The shot's size must fit the Xvfb screen (`xvfb-run -s "-screen 0 5120x2160x24"`
 for 5K).
 
+**Renders and the save folder.** A battle met on the map writes its autosave (and the session's) to the save
+folder, as in play. A render sets `RAZDOR_SAVE_DIR` to a scratch folder so that the player's saves stay untouched.
+
 **Frames on the RTX 4060 (no window on the desktop).** Under plain Xvfb the frames come from Mesa's
 llvmpipe, which draws artefacts the GPU does not. The run is therefore wrapped in VirtualGL, which
 draws the window's GL on the 4060's EGL device and reads the picture back to the Xvfb display:
@@ -77,6 +80,9 @@ One item per line. `#` starts a comment. Every line is optional except `map` and
 | `fog on\|off` | `on` keeps the fog of war (black, or the look's mist). | `off` |
 | `view flat\|25d` | `flat` is the classic flat map with the player's camera: only `target` and `zoom` may be set (the 2.5D keys are errors). `25d` is the tilted camera. | `25d` |
 | `look <key>=<value> ...` | The look settings for this run only, never written to the settings file. `preset` («Качество графики»: `original` or `оригинал`, `low`, `medium`, `high`) is applied first, then the keys: `lighting` (off, on, cycle, fixed), `shadows` (painted, sun), `water` (off, on), `water_rate` (every, other, third), `water_quality` (high, medium, low), `weather` (off, on), `living` (off, on), `mist` (off, flat, clouds), `anim` (on, near, off). | the run's settings |
+| `battle <army id>` | The hero's army fights the army with this id (the number `--plan` prints as `A<id>`) at frame 0. With `battles show` its battle screen opens at once; with `battles map` the fight is resolved on the map at the first frame it is free. The ground is the hero's own cell, as in play (the rules have no ground). An unknown id is an error. | none |
+| `battle_speed <x>` | The pace of a battle on its screen, as a multiple of the game's animations (0.05 to 8; 1 is the game's pace). The AI plays both sides on the screen at that pace, to the battle's end. Needs `battles show`. | none: the battle ends at once |
+| `battle_speed <t> <x>` | A timed pace: it ramps linearly from the pace before to `x` at `t`, and holds before the first and after the last line. A timed line at `0` replaces the header's pace. Same rules. | — |
 
 Cells are map cells, `x,y`, counted from the top-left of the map as the game counts them. Use
 `--plan` to check a cell: the planner prints where the hero stands.
@@ -100,7 +106,7 @@ first keyframe that sets a value it holds, and after the last one it holds.
 | `behind` | Ground drawn behind the target. Needed for the bottom of the frame at low pitch. | 0 or more | 8 |
 | `near` | Standing sprites nearer the eye than this fade out (world units; 0 is off). | 0 or more | 8 |
 | `yaw` | The view's turn in degrees (0 looks north; 90 looks west). Interpolated the short way round. | any | the player's yaw |
-| `target` | What the camera looks at: a cell `x,y`, the hero `hero`, or the hero plus an offset in cells `hero+dx,dy`. | — | the map's centre |
+| `target` | What the camera looks at: a cell `x,y`, the hero `hero`, or the hero plus an offset in cells `hero+dx,dy`. An army: `army:<id>` (its id as `--plan` prints it, without the `A`; its displayed place, so the view follows it as it marches) or `army:<id>+dx,dy`. `--plan` and the render warn when the army is gone at a keyframe; the camera then has no target there. | — | the map's centre |
 | `ease` | The easing of the segment that **ends** at this keyframe: `linear`, `in`, `out` or `inout`. | — | `inout` |
 | `eye` | The eyes view («Глазами героя», the player's first-person camera from the hero's eyes): `1` stands the camera on the target's ground at `height`, looking along `pitch` and `yaw`; `0` is the chase camera. A 0/1 key switches at the middle of its segment. | 0 or 1 | `0` |
 | `height` | The eye's height above the ground, in cells (eyes view only). | 0.1 to 5 | `0.7` |
@@ -138,7 +144,9 @@ Notes:
 - **Battles** are fought to the end by the battle AI on both sides (the game's own quick-battle
   rules, with a fixed step limit, so the result is the same on every run). With `battles map` the
   camera stays on the map and the result is reported as the game reports it. With `battles show` the battle
-  screen is drawn and played to its end.
+  screen is drawn and played to its end: at once, unless the shot paces it (`battle_speed`), when the
+  AI plays it on the screen frame by frame at that pace (the same AI, the game's own animations). A run
+  logs the battle's state once a second (`battle at <t>s: round …`): two sizes of one shot give the same lines.
 - **The UI and the fog** are hidden in every run. The pointer is not drawn.
 - **Armies** move in every frame, as in play.
 - **Sound**: each sound effect the screens ask for, and each music track as the game's jukebox

@@ -35,11 +35,13 @@ pub struct Values {
     pub zoom: Option<f32>,
 }
 
-/// Where the camera looks: a map cell, or the hero's cell plus an offset in cells.
+/// Where the camera looks: a map cell, the hero's cell plus an offset in cells, or an army's
+/// displayed place (its id as `A<id>` names it) plus an offset in cells.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Target {
     Cell(f32, f32),
     Hero(f32, f32),
+    Army(u8, f32, f32),
 }
 
 /// The easing of a segment, named by the keyframe it ends at (`ease=`).
@@ -146,7 +148,28 @@ pub struct Shot {
     pub fog: bool,
     /// `view flat`: the classic flat map with its classic camera (`target` and `zoom` only).
     pub flat: bool,
+    /// `battle <army id>`: the hero's army fights the army with this id (`--plan` prints the
+    /// ids as `A<id>`) at frame 0. `None`: no battle is set up.
+    pub battle: Option<u32>,
+    /// The header's `battle_speed <x>`: the pace of a battle on its screen (1 is the pace of the
+    /// game's animations). `None` without a header line.
+    pub battle_speed: Option<SpeedKey>,
+    /// The timed `battle_speed <t> <x>` lines, in time order; the pace ramps linearly between
+    /// them and holds before the first and after the last.
+    pub speed_keys: Vec<SpeedKey>,
 }
+
+/// A battle's pace at a time: the header's or a timed line's, with the line it came from.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SpeedKey {
+    pub t: f64,
+    pub x: f32,
+    /// The file's line of the key (its errors name it).
+    pub line: usize,
+}
+
+/// The range a battle's pace may take: 1/20 to 8 times the game's animations.
+const PACE_RANGE: std::ops::RangeInclusive<f32> = 0.05..=8.0;
 
 impl Default for Shot {
     fn default() -> Shot {
@@ -170,6 +193,9 @@ impl Default for Shot {
             ui: false,
             fog: false,
             flat: false,
+            battle: None,
+            battle_speed: None,
+            speed_keys: Vec::new(),
         }
     }
 }
@@ -226,6 +252,11 @@ pub fn parse(text: &str) -> Result<Shot, Errors> {
         errors.push("duration: the shot has no time to play (give `duration <seconds>` or a timed line)".to_string());
     }
     shot.actions.sort_by(|a, b| a.t().total_cmp(&b.t()));
+    if let Some(first) = shot.battle_speed.iter().chain(shot.speed_keys.first()).next() {
+        if !shot.battles_show {
+            errors.push(format!("line {}: battle_speed: the pace is for a battle on its screen (`battles show`)", first.line));
+        }
+    }
     for key in &shot.keys {
         let flat_key = |name: &str| if shot.flat { "zoom" == name || "target" == name } else { name != "zoom" };
         let named = [("zoom", key.values.zoom.is_some())].into_iter().chain(
@@ -346,8 +377,31 @@ fn apply_line(shot: &mut Shot, head: &str, rest: &[&str], line_no: usize) -> Res
             let (t, cell, radius) = parse_reveal(rest)?;
             shot.actions.push(Action::Reveal { t, cell, radius, line: line_no });
         }
+        "battle" => {
+            let v = one(rest).map_err(|e| ("battle", e))?;
+            let id: u32 = v.trim_start_matches('A').parse().map_err(|_| ("battle", format!("`{v}`: an army's id (the number --plan prints as A<id>)")))?;
+            shot.battle = Some(id);
+        }
+        "battle_speed" => {
+            let key = match rest {
+                [x] => SpeedKey { t: 0.0, x: pace(x)?, line: line_no },
+                [t, x] => SpeedKey { t: time_word(t).ok_or(("battle_speed", format!("`{t}`: not a time (seconds, e.g. 2 or 2s)")))?, x: pace(x)?, line: line_no },
+                _ => return Err(("battle_speed", "write `battle_speed <x>` (the header) or `battle_speed <t> <x>` (a timed pace), e.g. `battle_speed 2s 0.25`".to_string())),
+            };
+            if rest.len() == 1 {
+                shot.battle_speed = Some(key);
+            } else {
+                if shot.speed_keys.last().is_some_and(|k| k.t == key.t) {
+                    return Err(("battle_speed", format!("{}s: another battle_speed line has this time", key.t)));
+                }
+                if shot.speed_keys.last().is_some_and(|k| k.t > key.t) {
+                    return Err(("battle_speed", format!("{}s: battle_speed lines must go in time order", key.t)));
+                }
+                shot.speed_keys.push(key);
+            }
+        }
         other => {
-            return Err(("line", format!("`{other}`: no such line (map, save, hero, seed, size, fps, music, battles, hour, clock, look, ui, fog, view, duration, event, at, walk, pass, reveal)")));
+            return Err(("line", format!("`{other}`: no such line (map, save, hero, seed, size, fps, music, battles, hour, clock, look, ui, fog, view, duration, event, at, walk, pass, reveal, battle, battle_speed)")));
         }
     }
     Ok(())
@@ -420,7 +474,16 @@ fn parse_target(v: &str) -> Result<Target, String> {
         let body = off.strip_prefix('+').unwrap_or(off);
         return pair(body).map(|(x, y)| Target::Hero(x, y)).ok_or_else(|| format!("`{v}`: write hero or hero+dx,dy"));
     }
-    pair(v).map(|(x, y)| Target::Cell(x, y)).ok_or_else(|| format!("`{v}`: write a cell as x,y, or hero, or hero+dx,dy"))
+    if let Some(army) = v.strip_prefix("army:") {
+        // `army:<id>` or `army:<id>+dx,dy` (a `-` offset is written as it is: `army:36-1,2`).
+        let digits = army.find(|c: char| !c.is_ascii_digit()).unwrap_or(army.len());
+        let (id, off) = army.split_at(digits);
+        let bad = || format!("`{v}`: write army:<id>, or army:<id>+dx,dy (the id as --plan prints it, without the A)");
+        let id: u8 = id.parse().map_err(|_| bad())?;
+        let off = off.strip_prefix('+').unwrap_or(off);
+        return if off.is_empty() { Ok(Target::Army(id, 0.0, 0.0)) } else { pair(off).map(|(x, y)| Target::Army(id, x, y)).ok_or_else(bad) };
+    }
+    pair(v).map(|(x, y)| Target::Cell(x, y)).ok_or_else(|| format!("`{v}`: write a cell as x,y, or hero, or hero+dx,dy, or army:<id>, or army:<id>+dx,dy"))
 }
 
 /// The camera keys a keyframe may set.
@@ -554,11 +617,55 @@ fn parse_reveal(rest: &[&str]) -> Result<(f64, (i32, i32), i32), FieldError> {
     Ok((t, (x as i32, y as i32), r))
 }
 
+/// A battle's pace (`battle_speed`), a number in [`PACE_RANGE`].
+fn pace(v: &str) -> Result<f32, FieldError> {
+    let x: f32 = v.parse().map_err(|_| ("battle_speed", format!("`{v}` is not a number")))?;
+    if !x.is_finite() || !PACE_RANGE.contains(&x) {
+        return Err(("battle_speed", format!("{x}: from {} to {} times the animations", PACE_RANGE.start(), PACE_RANGE.end())));
+    }
+    Ok(x)
+}
+
 impl Shot {
     /// The number of frames the shot renders.
     pub fn frame_count(&self) -> u64 {
         frame_count(self.duration, self.fps)
     }
+
+    /// Whether the shot paces its battle (a `battle_speed` line): its battle is then played on
+    /// its screen at that pace, not at once (`battles show` without a pace ends it at once).
+    pub fn battle_paced(&self) -> bool {
+        self.battle_speed.is_some() || !self.speed_keys.is_empty()
+    }
+
+    /// The battle's pace at shot time `t`: the header's `x` until a timed line, the timed
+    /// lines' ramp between them, the first (or last) pace held before (after) them. `None`
+    /// when the shot paces no battle.
+    pub fn battle_pace(&self, t: f64) -> Option<f32> {
+        let mut points: Vec<(f64, f32)> = self.battle_speed.iter().map(|k| (k.t, k.x)).collect();
+        // A timed line at 0 is the start's pace: it takes the header's place.
+        points.retain(|p| !self.speed_keys.iter().any(|k| k.t == p.0));
+        points.extend(self.speed_keys.iter().map(|k| (k.t, k.x)));
+        points.sort_by(|a, b| a.0.total_cmp(&b.0));
+        pace_at(&points, t)
+    }
+}
+
+/// The ramp of a battle's pace: linear between the points `(time, pace)` (sorted by time), the
+/// first pace held before the first point and the last after the last.
+pub fn pace_at(points: &[(f64, f32)], t: f64) -> Option<f32> {
+    let first = *points.first()?;
+    if t <= first.0 {
+        return Some(first.1);
+    }
+    let last = *points.last()?;
+    if t >= last.0 {
+        return Some(last.1);
+    }
+    let i = points.windows(2).position(|w| t >= w[0].0 && t < w[1].0)?;
+    let (a, b) = (points[i], points[i + 1]);
+    let u = ((t - a.0) / (b.0 - a.0)) as f32;
+    Some(a.1 + (b.1 - a.1) * u)
 }
 
 /// The frames of a `duration` at `fps`: frame `i` is at time `i / fps`, for `i` below the count.
@@ -1046,5 +1153,102 @@ mod tests {
     fn pass_spans_take_the_games_wait_pace() {
         assert!((pass_seconds(1) - 0.3).abs() < 1e-6, "two wait ticks of 0.15 s");
         assert!((pass_seconds(72) - 21.6).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_battle_lines_default_to_no_battle_and_the_instant_end() {
+        let s = ok("map РК1-Начало пути\nduration 4\n");
+        assert_eq!(s.battle, None);
+        assert_eq!(s.battle_speed, None);
+        assert!(s.speed_keys.is_empty());
+        assert!(!s.battle_paced());
+        assert_eq!(s.battle_pace(1.0), None, "no pace set: the battle is not paced");
+    }
+
+    #[test]
+    fn a_battle_line_names_the_army_and_a_bad_one_names_its_line() {
+        let s = ok("map РК1-Начало пути\nbattle A36\nbattles show\nduration 2\n");
+        assert_eq!(s.battle, Some(36));
+        assert_eq!(ok("map РК1-Начало пути\nbattle 7\nduration 2\n").battle, Some(7));
+        let e = errs("map РК1-Начало пути\nbattle lots\nduration 2\n");
+        assert_eq!(e, vec!["line 2: battle: `lots`: an army's id (the number --plan prints as A<id>)".to_string()]);
+        assert!(errs("map РК1-Начало пути\nbattle 1 2\nduration 2\n")[0].starts_with("line 2: battle: one value only"));
+    }
+
+    #[test]
+    fn a_header_pace_and_timed_paces_parse_with_their_lines() {
+        let s = ok("map РК1-Начало пути\nbattles show\nbattle_speed 1\nbattle_speed 2s 4\nbattle_speed 4 0.25\nduration 6\n");
+        assert_eq!(s.battle_speed.map(|k| (k.t, k.x, k.line)), Some((0.0, 1.0, 3)));
+        assert_eq!(s.speed_keys.iter().map(|k| (k.t, k.x, k.line)).collect::<Vec<_>>(), vec![(2.0, 4.0, 4), (4.0, 0.25, 5)]);
+        assert!(s.battle_paced());
+    }
+
+    #[test]
+    fn a_bad_pace_names_its_line_and_field() {
+        let e = errs("map РК1-Начало пути\nbattles show\nbattle_speed 9\nduration 2\n");
+        assert_eq!(e, vec!["line 3: battle_speed: 9: from 0.05 to 8 times the animations".to_string()]);
+        let e = errs("map РК1-Начало пути\nbattles show\nbattle_speed 1s fast\nduration 2\n");
+        assert_eq!(e, vec!["line 3: battle_speed: `fast` is not a number".to_string()]);
+        let e = errs("map РК1-Начало пути\nbattles show\nbattle_speed x 2\nduration 2\n");
+        assert_eq!(e, vec!["line 3: battle_speed: `x`: not a time (seconds, e.g. 2 or 2s)".to_string()]);
+        let e = errs("map РК1-Начало пути\nbattles show\nbattle_speed 2s 1\nbattle_speed 2s 2\nduration 4\n");
+        assert_eq!(e, vec!["line 4: battle_speed: 2s: another battle_speed line has this time".to_string()]);
+        let e = errs("map РК1-Начало пути\nbattles show\nbattle_speed 4s 1\nbattle_speed 2s 2\nduration 4\n");
+        assert_eq!(e, vec!["line 4: battle_speed: 2s: battle_speed lines must go in time order".to_string()]);
+    }
+
+    #[test]
+    fn a_paced_battle_needs_the_battles_show_line() {
+        let e = errs("map РК1-Начало пути\nbattle_speed 1\nduration 2\n");
+        assert_eq!(e, vec!["line 2: battle_speed: the pace is for a battle on its screen (`battles show`)".to_string()]);
+        // The order of the lines does not matter.
+        assert!(parse("map РК1-Начало пути\nbattle_speed 1\nbattles show\nduration 2\n").is_ok());
+    }
+
+    #[test]
+    fn the_pace_ramps_between_its_lines_and_holds_at_the_ends() {
+        let s = ok("map РК1-Начало пути\nbattles show\nbattle_speed 1\nbattle_speed 2s 4\nbattle_speed 4s 0.25\nduration 6\n");
+        assert_eq!(s.battle_pace(0.0), Some(1.0));
+        assert_eq!(s.battle_pace(1.0), Some(2.5), "halfway from 1 to 4");
+        assert_eq!(s.battle_pace(2.0), Some(4.0));
+        assert_eq!(s.battle_pace(3.0), Some(2.125));
+        assert_eq!(s.battle_pace(5.0), Some(0.25), "held after the last line");
+    }
+
+    #[test]
+    fn a_timed_pace_at_zero_takes_the_headers_place() {
+        let s = ok("map РК1-Начало пути\nbattles show\nbattle_speed 1\nbattle_speed 0s 0.5\nbattle_speed 2s 2\nduration 4\n");
+        assert_eq!(s.battle_pace(0.0), Some(0.5));
+        assert_eq!(s.battle_pace(1.0), Some(1.25));
+        let only_timed = ok("map РК1-Начало пути\nbattles show\nbattle_speed 2s 3\nduration 4\n");
+        assert_eq!(only_timed.battle_pace(0.0), Some(3.0), "held before the first line");
+        assert_eq!(only_timed.battle_pace(3.0), Some(3.0));
+    }
+
+    #[test]
+    fn a_battle_line_with_no_pace_is_not_paced() {
+        let s = ok("map РК1-Начало пути\nbattles show\nbattle %s\nduration 2\n".replace("%s", "A3").as_str());
+        assert_eq!(s.battle, Some(3));
+        assert!(!s.battle_paced(), "the instant end stays the default");
+    }
+
+    #[test]
+    fn a_target_can_follow_an_army_with_an_offset() {
+        let s = ok("map РК1-Начало пути\nat 0s target=army:36\nat 2s target=army:36+1,-2\nat 4s target=army:7-3,0\nduration 4\n");
+        assert_eq!(s.keys[0].target, Some(Target::Army(36, 0.0, 0.0)));
+        assert_eq!(s.keys[1].target, Some(Target::Army(36, 1.0, -2.0)));
+        assert_eq!(s.keys[2].target, Some(Target::Army(7, -3.0, 0.0)));
+        let e = errs("map РК1-Начало пути\nat 0s target=army:\nduration 2\n");
+        assert_eq!(e, vec!["line 2: target: `army:`: write army:<id>, or army:<id>+dx,dy (the id as --plan prints it, without the A)".to_string()]);
+        let e = errs("map РК1-Начало пути\nat 0s target=army:A36\nduration 2\n");
+        assert!(e[0].starts_with("line 2: target: `army:A36`"), "{e:?}");
+        let e = errs("map РК1-Начало пути\nat 0s target=army:300\nduration 2\n");
+        assert!(e[0].starts_with("line 2: target: `army:300`"), "{e:?}");
+    }
+
+    #[test]
+    fn an_army_target_is_sampled_between_its_keys_like_a_cell() {
+        let s = ok("map РК1-Начало пути\nat 0s target=army:36\nat 4s target=army:36+2,0\nduration 4\n");
+        assert_eq!(sample_target(&s.keys, 2.0), Some((Target::Army(36, 0.0, 0.0), Target::Army(36, 2.0, 0.0), 0.5)));
     }
 }
