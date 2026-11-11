@@ -5056,12 +5056,12 @@ pub fn backdrop_lit(game: &Game, assets: &Assets, lit: Option<BarButton>) {
 fn backdrop_world(game: &Game, assets: &Assets) {
     let full = map_area();
     let cam = backdrop_camera(game, full);
-    // The frame's light and relief, read and set as `world_frame` does, so the map under a window keeps its hour.
+    // The frame's light and its painted-shadow factor, read and set as `world_frame` does, so the map under a window keeps its hour.
     let light = frame_light_of(game);
-    let relief = light.and_then(|_| daylight::frame_relief());
+    let lit = light.and_then(|_| daylight::frame_shadow_k());
     lights::set_frame(light.map(|l| lights::Frame::new(point_lights(game, assets.dt.as_ref(), &cam, l.glow), Vec2::from(cam.centre()), l.glow, lights::quality())));
     map_scale::draw(map_render_scale(), rgb(10, 12, 10), || {
-        draw_world(game, assets, &cam, None, None, None, false, NO_VEIL, relief);
+        draw_world(game, assets, &cam, None, None, None, false, NO_VEIL, lit);
         // The same order as `world_frame`: the light, the flat fog, the building windows, the weather.
         let flat = cam.tilt.is_none();
         let mist_light = flat && mist::on();
