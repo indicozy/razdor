@@ -5148,6 +5148,12 @@ fn backdrop_world(game: &Game, assets: &Assets) {
         if cam.tilt.is_none() {
             cam.draw_fog(game, &[]);
         }
+        // The weather as over the map (`world_frame`), so it keeps falling behind the window; a bent view
+        // draws it in its ground's picture (`draw_world_in`), as the map does. No light is drawn here, so
+        // no tint.
+        if cam.tilt.is_none_or(|t| t.cam.bend.is_none()) {
+            draw_weather(game, assets, &cam, None, &[]);
+        }
         draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.2));
     });
 }
