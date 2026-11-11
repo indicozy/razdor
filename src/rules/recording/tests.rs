@@ -1330,15 +1330,14 @@ fn a_scripted_market_visit_buys_sells_and_hires_and_plays_back() {
 /// explored town, every third day to the nearest army (the battle it meets is fought), and at a
 /// market he buys and sells one good; each day's end is recorded as a check. Returns the file and
 /// the states of the days' ends (the live hashes the playback must reach).
-fn sample_record(dt: &DtInstall, c: &Arc<Content>) -> (std::path::PathBuf, Vec<u64>) {
+fn sample_record(dt: &DtInstall, c: &Arc<Content>, dir: &std::path::Path, saves: Option<&std::path::Path>) -> (std::path::PathBuf, Vec<u64>) {
     let map = map_named(dt, "РК1");
     let mut d = Driver::new(start(c, &map, Some(7)), true);
     d.checks = true;
     d.max = true;
     d.g.max_ai = true;
     d.g.gold = 5000;
-    let dir = scratch("sample-record");
-    let sess = super::session::Session::start(&dir, &d.g, &header_for(&d.g, dt)).unwrap();
+    let sess = super::session::Session::start(dir, &d.g, &header_for(&d.g, dt)).unwrap();
     d.g.replay = Some(sess.clone());
     d.session = Some(sess.clone());
     let mut f = Frames::new(DT_A, BUDGET_A);
@@ -1365,6 +1364,10 @@ fn sample_record(dt: &DtInstall, c: &Arc<Content>) -> (std::path::PathBuf, Vec<u
         d.play_days(&mut f, 1);
         hashes.push(d.hash());
     }
+    // A save of the game as it stands (its place in the record): the load window's sample.
+    if let Some(games) = saves {
+        save::write(games, SaveKind::Manual, "Запись", &d.g).unwrap();
+    }
     sess.finish();
     (dir.join(sess.file_name()), hashes)
 }
@@ -1377,8 +1380,11 @@ fn write_a_sample_record_for_the_screenshots() {
     let Some(dt) = base() else { return };
     let Ok(out) = std::env::var("RAZDOR_SAMPLE_RECORD") else { return };
     let c = Arc::new(Content::from_dt(&dt));
+    // The screenshots' record is made in Russian (its texts are the shots' language).
+    crate::i18n::set_override(Some(crate::i18n::Lang::Ru));
     // RAZDOR_SAMPLE_SIMPLE: the 25-day campaign with one battle (plays back to its end).
-    let path = if std::env::var_os("RAZDOR_SAMPLE_SIMPLE").is_some() { recorded_session(&dt, &c, "РК1", 25, "sample-simple").0 } else { sample_record(&dt, &c).0 };
+    let dir = scratch("sample-record");
+    let path = if std::env::var_os("RAZDOR_SAMPLE_SIMPLE").is_some() { recorded_session(&dt, &c, "РК1", 25, "sample-simple").0 } else { sample_record(&dt, &c, &dir, None).0 };
     std::fs::copy(&path, &out).unwrap();
     let marks = super::watch::ReplayPlayer::open(&path, c.clone(), Some(&dt.dir)).unwrap().marks;
     let battles = marks.iter().filter(|m| matches!(m.kind, super::watch::MarkKind::Battle { .. })).count();
@@ -1398,7 +1404,8 @@ fn a_thirty_day_scripted_session_plays_back_to_the_same_state_every_day() {
     use super::watch::ReplayPlayer;
     let Some(dt) = base() else { return };
     let c = Arc::new(Content::from_dt(&dt));
-    let (path, hashes) = sample_record(&dt, &c);
+    let dir = scratch("thirty-day");
+    let (path, hashes) = sample_record(&dt, &c, &dir, None);
     let file = super::file::read(&path).unwrap();
     assert_eq!(hashes.len(), 30, "one state per game day");
     let checks: Vec<u64> = file
@@ -1420,4 +1427,44 @@ fn a_thirty_day_scripted_session_plays_back_to_the_same_state_every_day() {
     assert!(p.ended());
     assert_eq!(state_hash(p.game().unwrap()), *hashes.last().unwrap(), "the last day is the live final state");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+/// Writes the 30-day sample as the saves folder's replay and a save that points into it, for the
+/// load window's «Запись» and the screen's shots (`RAZDOR_SAMPLE_SAVES=1`, run by hand, with the
+/// `RAZDOR_SAVE_DIR` the shots use).
+#[test]
+#[ignore]
+fn write_a_sample_save_for_the_load_window() {
+    let Some(dt) = base() else { return };
+    if std::env::var_os("RAZDOR_SAMPLE_SAVES").is_none() { return }
+    save::set_install(&dt.dir);
+    crate::i18n::set_override(Some(crate::i18n::Lang::Ru));
+    let games = save::games_dir().expect("a saves folder");
+    let replays = super::session::replays_dir(&games);
+    std::fs::create_dir_all(&replays).unwrap();
+    let c = Arc::new(Content::from_dt(&dt));
+    let (path, _) = sample_record(&dt, &c, &replays, Some(&games));
+    eprintln!("SAMPLE save in {}, replay {}", games.display(), path.display());
+}
+
+/// A record made with the interface in Russian plays back with the interface in English: the rules'
+/// texts (the journal's entries, made by the 30-day session's events) are the record's language, so
+/// the playback sets it on its thread (`ReplayHeader::language`). РК1.
+#[test]
+fn a_record_made_in_russian_plays_back_with_the_interface_in_english() {
+    use super::watch::ReplayPlayer;
+    let Some(dt) = base() else { return };
+    let c = Arc::new(Content::from_dt(&dt));
+    let dir = scratch("russian");
+    let before = crate::i18n::lang();
+    crate::i18n::set_override(Some(crate::i18n::Lang::Ru));
+    let (path, hashes) = sample_record(&dt, &c, &dir, None);
+    crate::i18n::set_override(None);
+    let file = super::file::read(&path).unwrap();
+    assert_eq!(file.header.language, "ru", "the record names its language");
+    let mut p = ReplayPlayer::open(&path, c.clone(), Some(&dt.dir)).unwrap();
+    p.play_to_end().unwrap_or_else(|d| panic!("the Russian record drifts in English: {d:?}"));
+    assert_eq!(state_hash(p.game().unwrap()), *hashes.last().unwrap(), "the last day is the live final state");
+    assert_eq!(crate::i18n::lang(), before, "the playback gives the interface its language back");
+    let _ = std::fs::remove_dir_all(&dir);
 }

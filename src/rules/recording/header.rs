@@ -32,6 +32,11 @@ pub struct ReplayHeader {
     pub platform: String,
     pub settings: Settings,
     pub experimental: ExperimentalRules,
+    /// The interface language the record was made in (`Lang::code`; empty for a record made before
+    /// this field). The rules write texts into the game (the journal's entries), so the playback
+    /// runs in this language: the states are the same whatever language the player watches in.
+    #[serde(default)]
+    pub language: String,
 }
 
 impl ReplayHeader {
@@ -51,6 +56,7 @@ impl ReplayHeader {
             platform: platform(),
             settings: Settings::of(g),
             experimental: g.experimental,
+            language: crate::i18n::lang().code().to_string(),
         }
     }
 
@@ -111,6 +117,7 @@ mod tests {
             platform: platform(),
             settings: Settings { improved_ai: true, max_ai: true, max_guard: false, keep_xp_on_promotion: false, keep_formation: true, allow_unit_benching: false, pursue: true, walk_pace: 1.25 },
             experimental: ExperimentalRules::default(),
+            language: "ru".into(),
         };
         let text = serde_json::to_string(&header).unwrap();
         let back: ReplayHeader = serde_json::from_str(&text).unwrap();

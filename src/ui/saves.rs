@@ -17,6 +17,7 @@ use razdor::rules::save::{self, ListedSave, MetaState, SaveKind};
 use super::assets::Assets;
 use super::battle_view::BattleView;
 use super::widgets::*;
+use super::watch::WatchView;
 use super::world_view;
 use super::Screen;
 
@@ -979,6 +980,18 @@ fn folder_slot(clear: (f32, f32), load_x: f32, grow: f32) -> (f32, f32) {
     (left + (right - left - w) / 2.0, w)
 }
 
+/// The replay file of a listed save that has one, when the file is there (its name checked as the
+/// game makes it: `replay_name_ok`).
+fn replay_file(e: &ListedSave) -> Option<PathBuf> {
+    let r = e.meta.as_ref()?.replay.as_ref()?;
+    if !razdor::rules::recording::file::replay_name_ok(&r.file) {
+        return None;
+    }
+    let games = e.path.parent()?.parent()?;
+    let file = razdor::rules::recording::session::replays_dir(games).join(&r.file);
+    file.is_file().then_some(file)
+}
+
 /// What «Папка» shows when the folder cannot be opened: the box's message, with the folder's
 /// path so the player can find it by hand. None when the system took the folder (or it was made
 /// ready). The folder is made first, so it exists.
@@ -1225,21 +1238,34 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
         view.refresh();
     }
     let clearable = view.entries.iter().any(|e| !e.pinned);
+    // «Запись» (Razdor's own): the chosen save's replay, when its file is there (`replay_file`).
+    let record_file = view.entries.get(view.selected).and_then(replay_file);
     // Razdor's own: the buttons grow with the text (`button_grow`): «Очистить всё» keeps its left end,
     // «Загрузить» and «Отмена» their right ends (587 and 7 units apart, as at Normal). A phone's row
     // is one row across the page (`phone_row`). «Папка» (Razdor's own, a player's request)
     // takes the room between «Очистить всё» and «Загрузить».
-    let (clear, folder, load, cancel) = match book.upright {
+    let (clear, folder, record, load, cancel) = match book.upright {
+        Some(u) if record_file.is_some() => {
+            let row = phone_row(&[0.25, 0.15, 0.19, 0.24, 0.17], u.units(6.0));
+            (row[0], row[1], Some(row[2]), row[3], row[4])
+        }
         Some(u) => {
             let row = phone_row(&[0.34, 0.2, 0.26, 0.2], u.units(6.0));
-            (row[0], row[1], row[2], row[3])
+            (row[0], row[1], None, row[2], row[3])
         }
         None => {
             let (cancel_w, load_w) = (95.0 * grow, 116.0 * grow);
             let cancel_x = 587.0 - cancel_w;
             let load_x = cancel_x - 7.0 - load_w;
             let clear = (17.0, 140.0 * grow);
-            (clear, folder_slot(clear, load_x, grow), (load_x, load_w), (cancel_x, cancel_w))
+            match record_file {
+                Some(_) => {
+                    let rec_w = 95.0 * grow;
+                    let rec_x = load_x - 7.0 - rec_w;
+                    (clear, folder_slot(clear, rec_x, grow), Some((rec_x, rec_w)), (load_x, load_w), (cancel_x, cancel_w))
+                }
+                None => (clear, folder_slot(clear, load_x, grow), None, (load_x, load_w), (cancel_x, cancel_w)),
+            }
         }
     };
     let (load_x, load_w) = load;
@@ -1250,6 +1276,16 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     }
     if book.button(folder.0, folder.1, tr("Folder"), true) && !asking {
         view.folder_error = open_folder_notice();
+    }
+    if let (Some((rx, rw)), Some(file)) = (record, record_file.as_ref()) {
+        if book.button(rx, rw, tr("Record"), true) && !asking {
+            // Back to this window (its own list and selection as they were).
+            let back = Screen::Load(std::mem::replace(view, LoadView::new(view.back)));
+            match WatchView::open(file, assets.content().clone(), razdor::rules::save::install_dir().as_deref(), Some(back)) {
+                Ok(watch) => return Some(Screen::Watch(Box::new(watch))),
+                Err(e) => *error = Some(e),
+            }
+        }
     }
     let chosen = view.entries.get(view.selected);
     if (book.button(load_x, load_w, &own("LoadGame", "Load", n_("Load")), chosen.is_some()) || key(KeyCode::Enter)) && !asking && chosen.is_some() {

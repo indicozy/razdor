@@ -121,6 +121,8 @@ pub struct ReplayPlayer {
     seek: Option<Seek>,
     /// A battle the pump reached and handed out (`take_battle`), not yet taken.
     pending_battle: Option<Battle>,
+    /// The thread's language override before the playback call (`arm`), back at `disarm`.
+    own_lang: std::cell::Cell<Option<Option<crate::i18n::Lang>>>,
 }
 
 impl ReplayPlayer {
@@ -145,6 +147,7 @@ impl ReplayPlayer {
             drift: None,
             seek: None,
             pending_battle: None,
+            own_lang: std::cell::Cell::new(None),
         };
         p.marks = p.build_marks();
         p
@@ -180,7 +183,7 @@ impl ReplayPlayer {
     pub fn advance(&mut self) -> Result<bool, Drift> {
         self.arm();
         let r = self.step_all();
-        hook::take_playback();
+        self.disarm();
         r
     }
 
@@ -196,6 +199,21 @@ impl ReplayPlayer {
         if self.player.is_some() && self.seg < self.segments.len() {
             hook::install_playback(&self.segments[self.seg].entries);
         }
+        // The rules write texts into the game in the record's language (see `ReplayHeader::language`),
+        // on this thread only.
+        // Nested calls (`advance` → `step_all`) keep the first one's saved language.
+        if let Some(lang) = crate::i18n::Lang::from_code(&self.header.language).filter(|_| self.own_lang.get().is_none()) {
+            self.own_lang.set(Some(crate::i18n::set_override(Some(lang))));
+        }
+    }
+
+    /// Ends a playback call: the hook's records are taken away and the player's own language is
+    /// back (see [`ReplayPlayer::arm`]).
+    fn disarm(&self) {
+        hook::take_playback();
+        if let Some(own) = self.own_lang.take() {
+            crate::i18n::set_override(own);
+        }
     }
 
     /// Plays to the file's end (the whole replay), or to its first drift.
@@ -209,7 +227,7 @@ impl ReplayPlayer {
     /// stops at (the file's end when `day` is past it).
     pub fn seek_day(&mut self, day: u64) -> Result<Place, Drift> {
         let r = self.seek_day_inner(day);
-        hook::take_playback();
+        self.disarm();
         r
     }
 
@@ -217,7 +235,7 @@ impl ReplayPlayer {
     /// checkpoint before it, played on to it.
     pub fn seek_place(&mut self, target: Place) -> Result<(), Drift> {
         let r = self.seek_place_inner(target);
-        hook::take_playback();
+        self.disarm();
         r
     }
 
@@ -360,7 +378,7 @@ impl ReplayPlayer {
         let mut left = f32::INFINITY;
         self.arm();
         let r = self.step(&mut left, false);
-        hook::take_playback();
+        self.disarm();
         match r? {
             Step::Applied => Ok(true),
             Step::End => Ok(false),
@@ -388,7 +406,7 @@ impl ReplayPlayer {
             self.arm();
             let watch = watch_battles && self.seek.is_none();
             let r = self.step(&mut left, watch);
-            hook::take_playback();
+            self.disarm();
             match r? {
                 Step::Applied => {}
                 Step::Budget => return Ok(Pump::Playing),
@@ -424,7 +442,7 @@ impl ReplayPlayer {
 
     fn begin_seek(&mut self, at: Place, bytes: &[u8], seek: Seek) -> Result<(), Drift> {
         let r = self.start_at(at, bytes);
-        hook::take_playback();
+        self.disarm();
         r?;
         // A seek its checkpoint already reaches is no seek: the next pump plays from there, as any play.
         self.seek = (!self.seek_reached(seek)).then_some(seek);
@@ -446,7 +464,7 @@ impl ReplayPlayer {
     pub fn in_playback<R>(&mut self, f: impl FnOnce(&mut Game) -> R) -> Option<R> {
         self.arm();
         let r = self.player.as_mut().map(|p| f(&mut p.game));
-        hook::take_playback();
+        self.disarm();
         r
     }
 
@@ -511,7 +529,7 @@ impl ReplayPlayer {
             Some(p) => p.return_battle(b, rest),
             None => Err("no game to give the battle back to".into()),
         };
-        hook::take_playback();
+        self.disarm();
         r.map_err(|reason| self.stop_at(here, reason))?;
         self.idx = resolve + 1;
         self.last_good = self.place();

@@ -393,3 +393,17 @@ battle's mark, a seek by day, a drift and its window), which needs `RAZDOR_WATCH
 - The load window's «Запись» button, the phone diary's place for «Смотреть запись», and the map
   music during a replay (the watch plays no music yet).
 - The recorded battles' pacing is the battle view's; the enemy's turns animate as the battle view plays them.
+
+## The interface language (found by the watching screen's drift, 2026-11-11)
+
+The rules write texts into the game (the journal's entries, `tr("Event")`), so the states depend on the
+interface language. The header records it (`ReplayHeader::language`) and a playback runs its rules calls
+in that language on its thread (`i18n::set_override`, set in `ReplayPlayer::arm`, restored in `disarm`;
+nested calls keep the first one's). A record made in Russian plays back with the interface in English
+(`a_record_made_in_russian_plays_back_with_the_interface_in_english`). Open: a language change during
+a session makes the later texts differ from the record's language; the record keeps the start's language.
+
+## Open (the watching screen)
+
+- «Смотреть до этого места» from a drift seeks back into the file and drifts again on the corrupted
+  sample (`ui::watch::tests::the_screen_plays_a_record_through_its_states`, run with `RAZDOR_WATCH_RECORD`).

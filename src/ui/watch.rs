@@ -335,6 +335,7 @@ impl WatchView {
     }
 
     fn stop_at_drift(&mut self, d: Drift) {
+        razdor::diag!("replay drift at {:?}, day {}: {}", d.at, d.day, d.reason);
         self.playing = false;
         self.drift = Some(d);
         self.mode = Mode::Drifted;
@@ -490,7 +491,7 @@ impl WatchView {
         let (first, last) = self.days();
         let day = self.game().map_or(first, |g| g.clock.day_index());
         chrome::shadow_centered(&trf!("Day {n}", n = day.saturating_sub(first) + 1), s.day.x + s.day.w / 2.0, s.day.y + s.day.h * 0.65, 20.0 * unit, CREAM);
-        if toggle_button(s.follow.x, s.follow.y, s.follow.w, s.follow.h, tr("Follow the hero"), self.follow) {
+        if pressed_button(s.follow, tr("Follow the hero"), self.follow) {
             self.follow = !self.follow;
         }
         if self.mode == Mode::Seeking {
@@ -622,6 +623,17 @@ impl WatchView {
 }
 
 /// A dialog's text as a message: its title and its lines.
+/// A strip button in the game's marble, drawn pressed (its Down art) while `on` (a toggle that is
+/// on); true when clicked this frame.
+fn pressed_button(r: Rect, label: &str, on: bool) -> bool {
+    let (_, down, pressed) = button_state(r, true);
+    super::chrome::marble_button(r, label, true, on || down);
+    if pressed {
+        super::audio::cue(super::audio::Cue::Button);
+    }
+    pressed
+}
+
 fn dialog_text(d: &Dialog) -> String {
     let body = d.text.join(" ");
     match (d.title.is_empty(), body.is_empty()) {

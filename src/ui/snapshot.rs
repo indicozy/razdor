@@ -280,10 +280,6 @@ fn stage_replay(app: &mut App, step: Option<&str>) -> Result<(), String> {
 /// its first mismatch).
 fn stage_watch(app: &mut App, arg: Option<&str>) -> Result<(), String> {
     use super::watch::{Mode, WatchView};
-    // `RAZDOR_SNAPSHOT_LANG=ru`: the player's language for the shots (the Russian catalog, no override).
-    if std::env::var("RAZDOR_SNAPSHOT_LANG").is_ok_and(|l| l == "ru") {
-        super::language::set(None);
-    }
     let path = std::env::var("RAZDOR_WATCH").map_err(|_| "RAZDOR_WATCH names no replay file")?;
     let content = app.dt_content.clone().ok_or("no install")?;
     let install = razdor::rules::save::install_dir();
@@ -408,6 +404,10 @@ fn hover_army_for_snapshot(app: &mut App) {
 
 /// Sets up the scene of `RAZDOR_SCENE`, if any; a scene that cannot be set up is reported.
 pub fn stage(app: &mut App) {
+    // `RAZDOR_SNAPSHOT_LANG=ru`: the player's language for the shots (the Russian catalog, no override).
+    if std::env::var("RAZDOR_SNAPSHOT_LANG").is_ok_and(|l| l == "ru") {
+        super::language::set(None);
+    }
     super::widgets::set_pointer(pointer());
     super::pan::force_for_snapshot(pan_offset());
     // `RAZDOR_MOUSE_RIGHT=1`: the right button held where `RAZDOR_MOUSE` stands (the map's
