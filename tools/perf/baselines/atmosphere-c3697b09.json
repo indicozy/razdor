@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "meta": {
+    "label": "atmosphere branch cpu-leaks c3697b09 (reference, not a release)",
+    "machine": "owner desktop: RTX 5060 Ti (the monitor's GPU), 2560x1440, vsync off, game on CPUs 8-19",
+    "build": "razdor-branch (cpu-leaks c3697b09)",
+    "commit": "c3697b09",
+    "backend": "display",
+    "display": ":0",
+    "size": "2560x1440",
+    "refresh": 180,
+    "workspace": null,
+    "runs": null,
+    "frames": null,
+    "skip": null,
+    "date": "2026-11-12",
+    "source": "docs/perf/2026-11-12-atmosphere-performance.md, the branch column (medians of 2-3 runs, not per-run values). ms = 1000 / FPS. Capped cells take their CPU ms from the table's parenthesis, null where the doc gives none. The doc's effects-off and effects-on are the same switches as tools/perf/bench.py (off = the game's defaults, on = the atmosphere env). RSS, VRAM and load are per build in the doc's memory table, so they are left null."
+  },
+  "scenes": {
+    "db-zoomout/flat/off": {"fps": 180.0, "ms": 5.55, "work": 1.5, "capped": true, "runs": 0, "ms_runs": [], "work_runs": []},
+    "db-zoomout/flat/on": {"fps": 180.0, "ms": 5.55, "work": 1.5, "capped": true, "runs": 0, "ms_runs": [], "work_runs": []},
+    "db-zoomout/25d/off": {"fps": 180.0, "ms": 5.55, "work": 3.2, "capped": true, "runs": 0, "ms_runs": [], "work_runs": []},
+    "db-zoomout/25d/on": {"fps": 180.0, "ms": 5.55, "work": 4.5, "capped": true, "runs": 0, "ms_runs": [], "work_runs": []},
+    "db-zoomout/third/off": {"fps": 151.0, "ms": 6.62, "work": null, "capped": false, "runs": 0, "ms_runs": [], "work_runs": []},
+    "db-zoomout/third/on": {"fps": 127.0, "ms": 7.87, "work": null, "capped": false, "runs": 0, "ms_runs": [], "work_runs": []},
+    "db-wholemap/flat/off": {"fps": 180.0, "ms": 5.55, "work": null, "capped": true, "runs": 0, "ms_runs": [], "work_runs": []},
+    "db-wholemap/flat/on": {"fps": 180.0, "ms": 5.55, "work": null, "capped": true, "runs": 0, "ms_runs": [], "work_runs": []},
+    "db-wholemap/25d/off": {"fps": 142.0, "ms": 7.04, "work": null, "capped": false, "runs": 0, "ms_runs": [], "work_runs": []},
+    "db-wholemap/25d/on": {"fps": 104.0, "ms": 9.62, "work": null, "capped": false, "runs": 0, "ms_runs": [], "work_runs": []},
+    "db-wholemap/third/off": {"fps": 83.0, "ms": 12.05, "work": null, "capped": false, "runs": 0, "ms_runs": [], "work_runs": []},
+    "db-wholemap/third/on": {"fps": 71.0, "ms": 14.08, "work": null, "capped": false, "runs": 0, "ms_runs": [], "work_runs": []}
+  },
+  "not_measured": [
+    "rk3-start (the doc gives only 'all at the 180 cap, CPU 1.0 ms' without a view)"
+  ]
+}

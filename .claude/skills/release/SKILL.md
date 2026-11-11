@@ -43,6 +43,23 @@ without an Android or iOS file gets no offer on that system.
    en, the `wiki` skill); write the missing ones before the release.
 3. Version: the last number by default; "minor version" bumps the middle (0.4.17 → 0.5.0).
    Set `version` in `Cargo.toml`, then `cargo build --release` (same prefix) so `Cargo.lock` follows.
+3a. Performance on the owner's GPU (the release bench; details and the baseline format in
+   `docs/flows/testing-and-tools.md`, «Performance check»). Only when the owner says so for this
+   release: it opens a fullscreen window on `:0` for about 20 minutes, so the owner must be at the desk
+   and not playing. Build the binary of step 3 (`target/release/razdor`), then
+   `nice -n 19 taskset -c 8-19 python3 -I tools/perf/bench.py --bin target/release/razdor --commit "$(git rev-parse --short HEAD)" --display :0 --workspace 6 --label X.Y.Z --machine "owner desktop: RTX 5060 Ti, 2560x1440" --out <scratch>/X.Y.Z.json --md <scratch>/X.Y.Z.md`
+   (`<scratch>`: a folder outside the repo, per `CLAUDE.local.md`). Then compare it with the last
+   release's baseline, `python3 -I tools/perf/compare.py <scratch>/X.Y.Z.json tools/perf/baselines/vPREV.json`:
+   - exit 0: no regression. Copy the result to `tools/perf/baselines/vX.Y.Z.json` (it goes into the release commit).
+   - exit 1 (a regression, or a cell that did not run): STOP the release. Give the owner the table
+     (the `.md` of compare.py) and wait for his decision: fix it on `main` and run this step again, or
+     accept it. Accepted: save the new baseline with the owner's reason in its `meta.accepted`.
+   - exit 2 (not comparable: another backend, size or refresh): the baseline is from another setup;
+     tell the owner, do not compare with `--force` on your own.
+   - The bench needs the install (`RAZDOR_DT_DIR`, from `.env`) and must not run while another heavy
+     job is on CPUs 8–19 (the table's «busy machine» warning means the numbers are suspect: rerun).
+   A missing bench (the owner away) does not stop the release by itself; say in the report that it
+   was not run.
 4. Changelog (layout in `changelog/README.md`): move `changelog/unreleased.md`'s content to
    `changelog/X.Y.Z.md` under the heading `## X.Y.Z — YYYY-MM-DD`, leave `unreleased.md` empty
    (its header only), and regenerate `CHANGELOG.md` with `scripts/changelog.sh`. Sections inside

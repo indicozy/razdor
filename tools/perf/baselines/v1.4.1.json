@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "meta": {
+    "label": "v1.4.1",
+    "machine": "owner desktop: RTX 5060 Ti (the monitor's GPU), 2560x1440, vsync off, game on CPUs 8-19",
+    "build": "razdor-1.4.1-linux (release download)",
+    "commit": "31a85c96",
+    "backend": "display",
+    "display": ":0",
+    "size": "2560x1440",
+    "refresh": 180,
+    "workspace": null,
+    "runs": null,
+    "frames": null,
+    "skip": null,
+    "date": "2026-11-12",
+    "source": "docs/perf/2026-11-12-atmosphere-performance.md, the v1.4.1 column (medians of 2-3 runs, not per-run values). ms = 1000 / FPS. Capped cells take their CPU ms from the table's parenthesis. Only the cells the doc measured for v1.4.1 are here; RSS, VRAM and load are per build in the doc's memory table, not per cell, so they are left null."
+  },
+  "scenes": {
+    "db-zoomout/flat/off": {"fps": 180.0, "ms": 5.55, "work": 1.2, "capped": true, "runs": 0, "ms_runs": [], "work_runs": []},
+    "db-zoomout/25d/off": {"fps": 150.0, "ms": 6.67, "work": null, "capped": false, "runs": 0, "ms_runs": [], "work_runs": []},
+    "db-zoomout/third/off": {"fps": 152.0, "ms": 6.58, "work": null, "capped": false, "runs": 0, "ms_runs": [], "work_runs": []}
+  },
+  "not_measured": [
+    "db-zoomout effects on (the doc has no v1.4.1 value)",
+    "db-wholemap (v1.4.1 has no whole-map measurement)",
+    "rk3-start (the doc gives only 'all at the 180 cap, CPU 1.0 ms' without a view)"
+  ]
+}

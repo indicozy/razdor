@@ -255,6 +255,60 @@ Other diagnostics: `razdor.log` in the data folder (`razdor::diag`, `RAZDOR_LOG=
   These paths are checked by `cargo check --target aarch64-linux-android` and
   `aarch64-apple-ios` only; the install itself was not run on a device.
 
+## Performance check (the release bench)
+
+`tools/perf/` measures a release binary over a fixed matrix and fails a release on a drop against
+the last release's baseline. It is manual: the `release` skill runs it on the owner's desktop
+(its step 2a), and `cargo test` does not (CI has no GPU). The matrix is the one of
+`docs/perf/2026-11-12-atmosphere-performance.md`:
+
+- scenes: `db-zoomout` (Другой берег, explored, zoomed out to v1.4.1's limit), `db-wholemap` (the
+  whole map on screen, `RAZDOR_MAP_FIT`), `rk3-start` (РК3-Столица at the start);
+- views: `flat`, `25d` (tilted), `third` (third person), in the saved settings;
+- effects: `off` (the game's defaults), `on` (sun shadows, clouds, live water, weather, the
+  living world, 23:00: the atmosphere's switches);
+- 3 runs of 400 frames per cell, the first 100 dropped; vsync off (`__GL_SYNC_TO_VBLANK=0`); the
+  game pinned to CPUs 8–19 at nice 19; a private save dir per run (the owner's saves are not read).
+
+Per run: frame ms (median `total_ms`), CPU work ms (median `work_ms`, the frame probe), p90, load
+time to the first frame, peak RSS, VRAM by PID (`nvidia-smi`, GPU runs), draws and verts. A cell
+whose frame rate is within 3% of the refresh rate (180 Hz on the owner's monitor) is **capped**: its
+frame time is the cap, so only CPU work is judged there.
+
+- `tools/perf/bench.py`: `--bin <razdor>`, one backend (`--display :0 [--workspace 6]` for the
+  owner's GPU, `--xvfb` for software GL, relative numbers only, `--egl-4060` is not available: Razdor
+  has no headless EGL device surface yet; the trailer work needs one, outside the repo),
+  `--commit` (the binary's source commit), `--out` (the result JSON), `--md` (the table). `--scenes`,
+  `--views`, `--effects`, `--runs`, `--frames`, `--skip` narrow it.
+- `tools/perf/compare.py <new.json> <baseline.json>`: exit 0 no regression, 1 a regression (or a
+  cell that was not measured), 2 not comparable (another backend, size or refresh; `--force`
+  overrides) or nothing in common. Rules: frame time and CPU work +5%; RSS, VRAM and load +10%
+  (load also +0.05 s, RSS and VRAM also +10 MB); a change counts only beyond twice the runs' spread
+  (the larger of the two sides' range); a cell with one run only is judged beyond 15%. Both capped:
+  CPU work only. A busy machine (1-minute load over 9) is reported.
+- `tools/perf/baselines/<version>.json`: the numbers a release is compared with. `v1.4.1.json` and
+  `atmosphere-c3697b09.json` are transcribed from the perf doc's tables (medians, no per-run values,
+  no RSS/VRAM per cell); the first owner run of the release bench replaces the transcription. The
+  2026-11-12 numbers came from the doc's own harness, so its «off» may differ in detail from the bench.
+
+Commands (the owner's desktop; the bench opens a fullscreen window on `:0` for about 20 minutes, so
+not while the owner plays; the release skill says when):
+
+```sh
+CARGO_BUILD_JOBS=12 nice -n 19 taskset -c 8-19 cargo build --release
+nice -n 19 taskset -c 8-19 python3 -I tools/perf/bench.py --bin target/release/razdor \
+  --commit "$(git rev-parse --short HEAD)" --display :0 --workspace 6 --label X.Y.Z \
+  --machine "owner desktop: RTX 5060 Ti, 2560x1440" --out <scratch>/X.Y.Z.json --md <scratch>/X.Y.Z.md
+python3 -I tools/perf/compare.py <scratch>/X.Y.Z.json tools/perf/baselines/vPREV.json
+cp <scratch>/X.Y.Z.json tools/perf/baselines/vX.Y.Z.json     # only after the release is accepted
+```
+
+`<scratch>` is a folder outside the repo for the results (the machine's scratch rule, `CLAUDE.local.md`). Run data (the
+per-run folders with frame CSVs and logs) goes to `target/perf-bench` unless `--work` says otherwise,
+and is deleted at the end unless `--keep`. Xvfb runs (`--xvfb`) are for checking the tools and for
+relative work only: llvmpipe's frame times do not match a GPU, and it draws some sprites and fog
+differently (the perf doc's «correctness note»).
+
 ## The map editor (briefly)
 
 `src/editor/` is the model (pure, tested): `doc` (the scenario document), `command`
