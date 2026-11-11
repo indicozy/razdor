@@ -3211,19 +3211,30 @@ fn draw_building_shadow(l: &Location, atlas: &Atlas, r: Rect, cam: &Camera, shad
     super::chrome::shadow_only(shadow_k, || super::sharp::draw(&atlas.texture, at.x, at.y, WHITE, params));
 }
 
-/// Texels per world unit of the shadow maps (a map cell is one unit across), and the largest side of a map in texels.
+/// Texels per world unit of the shadow maps (a map cell is one unit across), the largest side of a map in texels, and
+/// the margin in world units the maps keep past the map's edge (a shadow reaches past its caster).
 const SHADOW_TEXELS: f32 = 8.0;
 const SHADOW_MAX_SIDE: f32 = 4096.0;
+const SHADOW_MARGIN: f32 = 8.0;
+/// The least time between two bakes for the explored set alone (the hero's sight reveals cells every step).
+const SHADOW_EXPLORE_GAP: f64 = 0.5;
+/// The card layers' angles are kept to this step in a baked map (degrees).
+const SHADOW_LAYER_STEP: f32 = 2.0;
 
 /// The world-space shadow map of the static casters (`prepare_shadow_map`): the sun's and the moon's coverage over the
-/// whole map, each a target drawn by `draw_sun_map` as one quad a frame. `origin` is the map's corner in world units
-/// (cell (0, 0) is centred on the unit square's middle, so the map starts half a cell before it), `size` the map in
-/// world units, `texture` the targets' size in texels. A layer's key is its geometry (`shadow_key`); its alpha is per frame.
+/// map and its margin, each a target drawn by `draw_sun_map` as one quad a frame. `origin` is the map's corner in world
+/// units (cell (0, 0) is centred on the unit square's middle), `size` the extent in world units, `texture` the targets'
+/// size in texels. A layer's key is its geometry (`shadow_key`); its alpha is per frame.
 struct ShadowMap {
     origin: Vec2,
     size: Vec2,
     texels: f32,
     texture: (u32, u32),
+    /// The key of the statics, the card layers and the geometry of the map (`base_key`), the explored set's fingerprint
+    /// the last full bake was made for, and the time of the last bake.
+    base: u64,
+    explored: u64,
+    built_at: f64,
     sun: Option<(u64, RenderTarget)>,
     moon: Option<(u64, RenderTarget)>,
 }
@@ -3233,45 +3244,59 @@ local! {
     static SHADOW_MAP: std::cell::RefCell<Option<ShadowMap>> = const { std::cell::RefCell::new(None) };
 }
 
-/// The key of a layer: the statics' hash and the cast's geometry (direction and length). The alpha is not in it (it is
+/// The key of a layer: the map's base key and the cast's geometry (direction and length). The alpha is not in it (it is
 /// drawn per frame), so the sun's layer keeps its key all through an hour (`daylight::casts_stepped`), and the moon's
 /// keeps it for good.
-fn shadow_key(statics: u64, c: daylight::Cast) -> u64 {
+fn shadow_key(base: u64, c: daylight::Cast) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    (statics, c.dir[0].to_bits(), c.dir[1].to_bits(), c.len.to_bits()).hash(&mut h);
+    (base, c.dir[0].to_bits(), c.dir[1].to_bits(), c.len.to_bits()).hash(&mut h);
     h.finish()
 }
 
-/// A hash of the static casters: the map's size and grid, every object's cell, class and sprite, every building's anchor,
-/// picture, size and whether it is a bridge. It changes when the map loads, an object is removed, or a building is
-/// captured, destroyed or changes its picture.
-fn statics_hash(map: (i32, i32, u8), objects: impl Iterator<Item = ((i32, i32), u8, u8)>, locations: impl Iterator<Item = ((i32, i32), (u8, u8), (i32, i32), bool)>) -> u64 {
+/// The key of a map's base: the statics' signature, the map's geometry (texel size, texture, origin and extent) and the
+/// view's card layers (`card_layering`, quantized). A change in any of them is a new map, baked in full.
+fn base_key(signature: u64, texels: f32, texture: (u32, u32), origin: Vec2, extent: Vec2, layer: Option<(f32, f32)>) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    map.hash(&mut h);
-    for o in objects {
-        o.hash(&mut h);
-    }
-    for l in locations {
-        l.hash(&mut h);
-    }
+    (signature, texels.to_bits(), texture, origin.x.to_bits(), origin.y.to_bits(), extent.x.to_bits(), extent.y.to_bits()).hash(&mut h);
+    layer.map(|(p, y)| (p.to_bits(), y.to_bits())).hash(&mut h);
     h.finish()
 }
 
-/// [`statics_hash`] of the game's map and buildings, with the map's surface codes (the water's half shade).
-fn statics_key(game: &Game) -> u64 {
+/// The statics' signature: the map's size and grid, and the identity and length of its objects, its buildings and its
+/// surface codes. It changes when a map loads (new buffers) or an object or a building is added or removed (the lengths).
+/// A building's picture is set when the world is built, which is a new map, so no per-frame look at the lists is needed.
+fn statics_signature(game: &Game) -> u64 {
     use std::hash::{Hash, Hasher};
     let map = &game.world.map;
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    statics_hash(
-        (map.w, map.h, map.grid as u8),
-        map.objects.iter().map(|o| (o.tile, o.class, o.sprite)),
-        game.world.locations.iter().map(|l| (l.anchor, l.picture, l.size, l.kind.is_bridge())),
-    )
-    .hash(&mut h);
-    map.surface_codes().hash(&mut h);
+    (map.w, map.h, map.grid as u8).hash(&mut h);
+    (map.objects.len(), map.objects.as_ptr() as usize).hash(&mut h);
+    (game.world.locations.len(), game.world.locations.as_ptr() as usize).hash(&mut h);
+    (map.surface_codes().len(), map.surface_codes().as_ptr() as usize).hash(&mut h);
     h.finish()
+}
+
+/// The card layers a view draws its buildings with (`layered_cards`): the tilted view's pitch and yaw; none flat or bent.
+fn card_layering(cam: &Camera) -> Option<(f32, f32)> {
+    match cam.tilt {
+        Some(t) if t.cam.bend.is_none() => Some((t.cam.pitch_deg, t.cam.yaw_deg)),
+        _ => None,
+    }
+}
+
+/// The layers of a building's cards for a view's layering (`card_layering`): the cards as they are without one.
+fn card_layers(layer: Option<(f32, f32)>, cards: &[Card], group_y: f32) -> Vec<Card> {
+    match layer {
+        Some((pitch, yaw)) => layered_cards_at(pitch, yaw, cards, group_y),
+        None => cards.to_vec(),
+    }
+}
+
+/// An angle kept to the baked map's step (`SHADOW_LAYER_STEP`).
+fn quantize_angle(v: f32) -> f32 {
+    (v / SHADOW_LAYER_STEP).round() * SHADOW_LAYER_STEP
 }
 
 fn layer_target(texture: (u32, u32)) -> RenderTarget {
@@ -3280,10 +3305,11 @@ fn layer_target(texture: (u32, u32)) -> RenderTarget {
     rt
 }
 
-/// Bakes the static casters' shadows into the map's layers whose key changed: the sun's (at the shown hour's geometry)
-/// and the moon's. With the sun shadows off the map is dropped. Called by `draw_world` outside any fill (a bake fills its
-/// own target, and a fill cannot nest). A map that is not usable (no atlas) is left as it is.
-fn prepare_shadow_map(game: &Game, art: Option<&DtArt>, sun: Option<daylight::Casts>) {
+/// Bakes the static casters' shadows into the map's layers when they are due: all of them when the map's base changed
+/// (the statics, the card layers, the geometry), the sun's when its geometry changed (the hour step), and both when the
+/// explored set changed (at most every `SHADOW_EXPLORE_GAP` seconds). With the sun shadows off the map is dropped. Called
+/// by `draw_world` outside any fill (a bake fills its own target, and a fill cannot nest).
+fn prepare_shadow_map(game: &Game, art: Option<&DtArt>, sun: Option<daylight::Casts>, layer: Option<(f32, f32)>) {
     let (Some(art), Some(sun)) = (art, sun) else {
         SHADOW_MAP.with(|m| m.borrow_mut().take());
         return;
@@ -3294,39 +3320,53 @@ fn prepare_shadow_map(game: &Game, art: Option<&DtArt>, sun: Option<daylight::Ca
     let map = &game.world.map;
     let rh = map.grid.row_height();
     let size = vec2(map.w as f32, map.h as f32 * rh);
-    let texels = SHADOW_TEXELS.min(SHADOW_MAX_SIDE / size.x.max(size.y).max(1.0));
-    let texture = ((size.x * texels).ceil().max(1.0) as u32, (size.y * texels).ceil().max(1.0) as u32);
-    let origin = vec2(-0.5, -0.5 * rh);
-    let statics = statics_key(game);
-    let geometry = (origin, size, texels, texture);
+    let extent = size + Vec2::splat(2.0 * SHADOW_MARGIN);
+    let texels = SHADOW_TEXELS.min(SHADOW_MAX_SIDE / extent.x.max(extent.y).max(1.0));
+    let texture = ((extent.x * texels).ceil().max(1.0) as u32, (extent.y * texels).ceil().max(1.0) as u32);
+    let origin = vec2(-0.5, -0.5 * rh) - Vec2::splat(SHADOW_MARGIN);
+    let layer = layer.map(|(p, y)| (quantize_angle(p), quantize_angle(y)));
+    let base = base_key(statics_signature(game), texels, texture, origin, extent, layer);
+    let explored = game.fog.fingerprint();
+    let now = super::clock::now();
     SHADOW_MAP.with(|m| {
         let mut m = m.borrow_mut();
-        let fresh = m.as_ref().is_some_and(|s| (s.origin, s.size, s.texels, s.texture) == geometry);
-        if !fresh {
-            *m = Some(ShadowMap { origin, size, texels, texture, sun: None, moon: None });
+        let rebuilt = m.as_ref().is_none_or(|s| s.base != base);
+        if rebuilt {
+            *m = Some(ShadowMap { origin, size: extent, texels, texture, base, explored, built_at: f64::NEG_INFINITY, sun: None, moon: None });
         }
         let Some(sm) = m.as_mut() else { return };
-        let sun_key = shadow_key(statics, sun.sun);
-        if sm.sun.as_ref().is_none_or(|(k, _)| *k != sun_key) {
-            let rt = layer_target(texture);
-            bake_layer(game, art, geometry, sun.sun, &rt);
-            sm.sun = Some((sun_key, rt));
+        let all = rebuilt || (sm.explored != explored && now - sm.built_at >= SHADOW_EXPLORE_GAP);
+        if all {
+            sm.explored = explored;
         }
-        let moon_key = shadow_key(statics, sun.moon);
-        if sm.moon.as_ref().is_none_or(|(k, _)| *k != moon_key) {
+        let mut baked = false;
+        let sun_key = shadow_key(base, sun.sun);
+        if all || sm.sun.as_ref().is_none_or(|(k, _)| *k != sun_key) {
             let rt = layer_target(texture);
-            bake_layer(game, art, geometry, sun.moon, &rt);
+            bake_layer(game, art, (origin, texels, texture), sun.sun, &rt, layer);
+            sm.sun = Some((sun_key, rt));
+            baked = true;
+        }
+        let moon_key = shadow_key(base, sun.moon);
+        if all || sm.moon.as_ref().is_none_or(|(k, _)| *k != moon_key) {
+            let rt = layer_target(texture);
+            bake_layer(game, art, (origin, texels, texture), sun.moon, &rt, layer);
             sm.moon = Some((moon_key, rt));
+            baked = true;
+        }
+        if baked {
+            sm.built_at = now;
         }
     });
 }
 
-/// Draws one cast's coverage of every static caster into `rt` (the map's frame): each caster's silhouette from its foot
-/// by `cast`, its alpha the penumbra times the water's half shade (no fog: the fog's own pass covers the unexplored), added
-/// by the over pass (`shadow::draw_coverage`).
-fn bake_layer(game: &Game, art: &DtArt, (origin, _, texels, texture): (Vec2, Vec2, f32, (u32, u32)), cast: daylight::Cast, rt: &RenderTarget) {
+/// Draws one cast's coverage of the static casters the fog shows into `rt` (the map's frame): each caster's silhouette
+/// from its foot by `cast`, its alpha the penumbra times the water's half shade (the fog's own pass covers the rest),
+/// added by the over pass (`shadow::draw_coverage`). An unexplored caster casts nothing, as before (its `seen` test).
+fn bake_layer(game: &Game, art: &DtArt, (origin, texels, texture): (Vec2, f32, (u32, u32)), cast: daylight::Cast, rt: &RenderTarget, layer: Option<(f32, f32)>) {
     let (Some(sharp_tex), Some(soft_tex)) = (art.shadow_texture(), art.shadow_soft_texture()) else { return };
     let map = &game.world.map;
+    let fog = &game.fog;
     let space = Rect::new(0.0, 0.0, texture.0 as f32, texture.1 as f32);
     // The map's camera: texels per world unit, the map's corner at the top-left of the target.
     let cam = Camera { origin: origin * texels, view: space, draw: space, scale: texels, grid: map.grid, tilt: None };
@@ -3341,9 +3381,9 @@ fn bake_layer(game: &Game, art: &DtArt, (origin, _, texels, texture): (Vec2, Vec
             1.0
         }
     };
-    let objects: Vec<&Decoration> = map.objects.iter().collect();
-    let locations: Vec<(usize, &Location)> = game.world.locations.iter().enumerate().filter(|(_, l)| !l.kind.is_bridge()).collect();
-    let (sharp, soft) = cast_shadows(art, &cam, &objects, &locations, &water, &|_, _| vec![cast]);
+    let objects: Vec<&Decoration> = map.objects.iter().filter(|o| razdor::rules::map::object_cells(o).any(|t| fog.explored_near(t, minimap::FEATHER))).collect();
+    let locations: Vec<(usize, &Location)> = game.world.locations.iter().enumerate().filter(|(_, l)| !l.kind.is_bridge() && l.cells().any(|t| fog.explored_near(t, minimap::FEATHER))).collect();
+    let (sharp, soft) = cast_shadows(art, &cam, &objects, &locations, &water, &|_, _| vec![cast], layer);
     super::render_cache::fill_space(rt, space, || {
         clear_background(Color::new(0.0, 0.0, 0.0, 0.0));
         sharp.draw_coverage(&sharp_tex);
@@ -3351,8 +3391,9 @@ fn bake_layer(game: &Game, art: &DtArt, (origin, _, texels, texture): (Vec2, Vec
     });
 }
 
-/// Draws the sun's and the moon's shadows of the frame from the baked map: one quad a layer over the whole map, its alpha
-/// the hour's (`sun.sun.alpha`, `sun.moon.alpha`). A layer at alpha 0 (the sun at night, the moon by day) is not drawn.
+/// Draws the sun's and the moon's shadows of the frame from the baked map: one quad a layer over the whole map and its
+/// margin, its alpha the hour's (`sun.sun.alpha`, `sun.moon.alpha`). A layer at alpha 0 (the sun at night, the moon by day)
+/// is not drawn.
 fn draw_sun_map(cam: &Camera, sun: daylight::Casts) {
     SHADOW_MAP.with(|m| {
         let m = m.borrow();
@@ -3380,9 +3421,9 @@ fn draw_sun_map(cam: &Camera, sun: daylight::Casts) {
 
 /// The shadows of the casters in `objects` and `locations` (the buildings, not a light's own) by `casts_at`, split into the
 /// sharp silhouettes and the soft ones (the penumbra): each caster is a picture from its foot, a building with cards one
-/// quad per card from the card's own foot. `shade` is the caster's darkness at its foot. Returns the two batches, to draw
-/// with their textures.
-fn cast_shadows(art: &DtArt, cam: &Camera, objects: &[&Decoration], locations: &[(usize, &Location)], shade: &dyn Fn(Vec2) -> f32, casts_at: &dyn Fn(Vec2, Option<usize>) -> Vec<daylight::Cast>) -> (shadow::Batch, shadow::Batch) {
+/// quad per card from the card's own foot, its cards laid as the view lays them (`layer`). `shade` is the caster's darkness
+/// at its foot. Returns the two batches, to draw with their textures.
+fn cast_shadows(art: &DtArt, cam: &Camera, objects: &[&Decoration], locations: &[(usize, &Location)], shade: &dyn Fn(Vec2) -> f32, casts_at: &dyn Fn(Vec2, Option<usize>) -> Vec<daylight::Cast>, layer: Option<(f32, f32)>) -> (shadow::Batch, shadow::Batch) {
     let mut out = (shadow::Batch::default(), shadow::Batch::default());
     let (Some(atlas), Some(texture)) = (art.map_atlas(), art.shadow_texture()) else { return out };
     let size = vec2(texture.width(), texture.height());
@@ -3408,7 +3449,7 @@ fn cast_shadows(art: &DtArt, cam: &Camera, objects: &[&Decoration], locations: &
         match card_building(l, Some(art)) {
             Some((_, r, cards)) => {
                 let origin = building_sprite_origin(l, r.w, r.h, cam);
-                let layers = layered_cards(cam, cards, group_y(building_foot(l, cam), origin, zoom));
+                let layers = card_layers(layer, cards, group_y(building_foot(l, cam), origin, zoom));
                 for card in &layers {
                     let foot = card_foot(origin, zoom, card);
                     let k = shade(foot);
@@ -3475,7 +3516,7 @@ fn draw_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, lit: &[(lights::
         }
         out
     };
-    let (sharp, soft_batch) = cast_shadows(art, cam, objects, locations, &shade, &casts_at);
+    let (sharp, soft_batch) = cast_shadows(art, cam, objects, locations, &shade, &casts_at, card_layering(cam));
     sharp.draw(&texture);
     soft_batch.draw(&soft);
 }
@@ -3500,19 +3541,19 @@ mod shadow_map_tests {
     }
 
     #[test]
-    fn the_statics_change_when_an_object_or_a_building_does_and_not_otherwise() {
-        let objs = [((1, 2), 3u8, 4u8), ((5, 6), 3, 7)];
-        let locs = [((9, 9), (1u8, 2u8), (2, 2), false)];
-        let base = statics_hash((20, 20, 0), objs.iter().copied(), locs.iter().copied());
-        assert_eq!(base, statics_hash((20, 20, 0), objs.iter().copied(), locs.iter().copied()), "the same statics, the same key");
-        let fewer = statics_hash((20, 20, 0), objs[..1].iter().copied(), locs.iter().copied());
-        assert_ne!(base, fewer, "an object removed");
-        let sprite = statics_hash((20, 20, 0), [((1, 2), 3u8, 4u8), ((5, 6), 3, 8)].into_iter(), locs.iter().copied());
-        assert_ne!(base, sprite, "an object's sprite changed");
-        let captured = statics_hash((20, 20, 0), objs.iter().copied(), [((9, 9), (1u8, 3u8), (2, 2), false)].into_iter());
-        assert_ne!(base, captured, "a building changed its picture");
-        let other_map = statics_hash((21, 20, 0), objs.iter().copied(), locs.iter().copied());
-        assert_ne!(base, other_map, "another map");
+    fn a_new_statics_signature_geometry_or_layering_is_a_new_base() {
+        let base = |sig: u64, layer: Option<(f32, f32)>| base_key(sig, 8.0, (100, 80), vec2(-8.5, -8.5), vec2(116.0, 96.0), layer);
+        assert_eq!(base(1, None), base(1, None), "the same map, the same base");
+        assert_ne!(base(1, None), base(2, None), "the statics changed (a load or a removal)");
+        assert_ne!(base(1, None), base(1, Some((30.0, 10.0))), "the 2.5D view lays the cards: another base");
+        assert_ne!(base(1, Some((30.0, 10.0))), base(1, Some((30.0, 40.0))), "a yaw change is another base");
+    }
+
+    #[test]
+    fn the_card_layer_angles_are_kept_to_the_step() {
+        assert_eq!(quantize_angle(3.2), 4.0);
+        assert_eq!(quantize_angle(-0.9), 0.0);
+        assert_eq!(quantize_angle(30.0), 30.0);
     }
 }
 
@@ -4152,7 +4193,7 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
     }
     // The shadow map is baked here, outside any fill (a backdrop drawn inside a fill keeps the map it has).
     if super::render_cache::target().is_none() {
-        prepare_shadow_map(game, assets.dt.as_ref(), daylight::frame_casts());
+        prepare_shadow_map(game, assets.dt.as_ref(), daylight::frame_casts(), card_layering(cam));
     }
     draw_sky(cam);
     if waits {
