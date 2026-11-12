@@ -844,6 +844,7 @@ mod tests {
         assert!(crate::dt::install::DtInstall::load(&install).is_ok(), "the install loads without an exe");
     }
 
+    #[test]
     fn a_room_check_refuses_only_a_known_archive_that_does_not_fit() {
         let dir = Path::new("/cache");
         assert_eq!(check_room(Some(10), dir, &|_| Some(10 + SPACE_MARGIN)), Ok(()), "exactly enough");
