@@ -588,6 +588,110 @@ pub fn read_installed(local: &Path) -> Installed {
     std::fs::read(local.join("installed.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
+/// What an older release's hub folder added to the local hub ([`import_old`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OldHubImport {
+    /// The entries (maps, mods) copied in.
+    pub entries: usize,
+    /// The entries left out: the local hub has them already, a file is missing or collides with one
+    /// of the local hub's, or a path is not a plain relative one.
+    pub skipped: usize,
+}
+
+/// Whether `rel` is a plain relative path inside a folder: no root, no `..`, no empty part.
+fn plain_relative(rel: &str) -> bool {
+    !rel.is_empty() && !rel.starts_with(['/', '\\']) && rel.split(['/', '\\']).all(|p| !p.is_empty() && p != "." && p != "..")
+}
+
+/// Merges an older release's hub folder `src` into the hub folder `local` (Android's saves move, see
+/// `ui::saves_move`). Each entry of `src`'s `installed.json` is copied with the files it lists, and
+/// added to the local `installed.json` only when the local hub does not have that id yet (no
+/// duplicate entries). An entry is skipped when one of its files is missing from `src`, is not a
+/// plain relative path, or already exists in `local` (a local file is never overwritten).
+pub fn import_old(src: &Path, local: &Path) -> Result<OldHubImport, String> {
+    let old = read_installed(src);
+    let mut mine = read_installed(local);
+    let mut report = OldHubImport::default();
+    for (id, entry) in old.entries {
+        let usable = !mine.entries.contains_key(&id)
+            && entry.files.iter().all(|f| plain_relative(f) && src.join(f).is_file() && !local.join(f).exists());
+        if !usable {
+            report.skipped += 1;
+            continue;
+        }
+        for f in &entry.files {
+            let to = local.join(f);
+            if let Some(dir) = to.parent() {
+                std::fs::create_dir_all(dir).map_err(|e| format!("{f}: {e}"))?;
+            }
+            std::fs::copy(src.join(f), &to).map_err(|e| format!("{f}: {e}"))?;
+        }
+        mine.entries.insert(id, entry);
+        report.entries += 1;
+    }
+    if report.entries > 0 {
+        let json = serde_json::to_vec_pretty(&mine).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(local).map_err(|e| e.to_string())?;
+        crate::editor::files::write_atomically(&local.join("installed.json"), &json).map_err(|e| format!("installed.json: {e}"))?;
+    }
+    Ok(report)
+}
+
+#[cfg(test)]
+mod import_old_tests {
+    use super::*;
+
+    fn dir(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("razdor-hub-old-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn entry(files: &[&str]) -> InstalledEntry {
+        InstalledEntry { version: "1".into(), kind: Kind::Map, lang: "ru".into(), title: Text::default(), requires: vec![], files: files.iter().map(|f| f.to_string()).collect(), sources: vec![] }
+    }
+
+    fn write_installed(local: &Path, entries: &[(&str, InstalledEntry)]) {
+        let mut i = Installed::default();
+        for (id, e) in entries {
+            i.entries.insert(id.to_string(), e.clone());
+        }
+        std::fs::write(local.join("installed.json"), serde_json::to_vec(&i).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn old_maps_and_mods_come_in_once_and_keep_the_local_ones() {
+        let src = dir("src");
+        let local = dir("local");
+        std::fs::create_dir_all(src.join("maps")).unwrap();
+        std::fs::write(src.join("maps/a.dtm"), b"A").unwrap();
+        std::fs::write(src.join("maps/b.dtm"), b"B").unwrap();
+        std::fs::create_dir_all(src.join("maps/x")).unwrap();
+        std::fs::write(src.join("maps/x/kept.dtm"), b"local-version").unwrap();
+        write_installed(&src, &[("a", entry(&["maps/a.dtm"])), ("b", entry(&["maps/b.dtm"])), ("missing", entry(&["maps/none.dtm"])), ("clash", entry(&["maps/x/kept.dtm"])), ("bad", entry(&["../escape.dtm"]))]);
+        std::fs::create_dir_all(local.join("maps/x")).unwrap();
+        std::fs::write(local.join("maps/x/kept.dtm"), b"mine").unwrap();
+        write_installed(&local, &[("b", entry(&["maps/b.dtm"]))]);
+
+        let report = import_old(&src, &local).unwrap();
+        assert_eq!(report, OldHubImport { entries: 1, skipped: 4 }, "a, not b (already there), not missing, not the clash, not the escape");
+        assert_eq!(std::fs::read(local.join("maps/a.dtm")).unwrap(), b"A");
+        assert!(!local.join("maps/none.dtm").exists());
+        assert_eq!(std::fs::read(local.join("maps/x/kept.dtm")).unwrap(), b"mine", "a local file is never overwritten");
+        let installed = read_installed(&local);
+        assert_eq!(installed.entries.len(), 2, "one entry per id, no duplicate");
+        assert!(installed.entries.contains_key("a") && installed.entries.contains_key("b"));
+
+        // The same import again changes nothing: the copied entry is there now.
+        let again = import_old(&src, &local).unwrap();
+        assert_eq!(again.entries, 0);
+        assert_eq!(read_installed(&local).entries.len(), 2);
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&local);
+    }
+}
+
 /// What a repair of the hub's maps (`Hub::repair_maps`) did: the entries restored, and those that
 /// could not be, each with why.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

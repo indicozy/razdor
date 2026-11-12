@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::path::Path;
 
 use razdor::i18n::tr;
-use razdor::{local, platform, transfer, trf};
+use razdor::{hub, local, platform, transfer, trf};
 
 use super::audio::{cue, Cue};
 use super::chrome;
@@ -98,14 +98,21 @@ pub fn decide_at_start(cache: Option<&Path>) {
     write_decision(if had_files { "existing" } else { "fresh" });
 }
 
-/// Offers the popup once in this run, when the decision says an older install's saves are not moved.
+/// Whether the popup at start is due: only once a usable game install is loaded (never over the
+/// no-install screen or a download), and only for an older install (the decision says existing).
+/// `snapshot` is the snapshot's `RAZDOR_SCENE_SAVES_MOVE` fake, which stands in for the decision.
+fn due(loaded: bool, snapshot: bool, decision: Option<Decision>) -> bool {
+    loaded && (snapshot || decision == Some(Decision::Existing))
+}
+
+/// Offers the popup once in this run, when [`due`] says so (`loaded`: a usable install is loaded).
 /// The snapshot's `RAZDOR_SCENE_SAVES_MOVE` shows it (with `RAZDOR_SNAPSHOT`).
-pub fn offer_if_due() {
+pub fn offer_if_due(loaded: bool) {
     if SHOWN.get() || STATE.with_borrow(|s| !matches!(s, State::Hidden)) {
         return;
     }
     let snapshot = std::env::var_os("RAZDOR_SNAPSHOT").is_some() && std::env::var_os("RAZDOR_SCENE_SAVES_MOVE").is_some();
-    if snapshot || decision() == Some(Decision::Existing) {
+    if due(loaded, snapshot, decision()) {
         SHOWN.set(true);
         STATE.with_borrow_mut(|s| *s = State::Offer(true, None));
     }
@@ -175,22 +182,43 @@ pub fn tick() {
     STATE.with_borrow_mut(|s| *s = next);
 }
 
+/// The older release's hub folder in the copy (`hub`: its installed maps and mods) merged into the
+/// app's hub (`hub::import_old`). None when the copy has none or the import fails: the saves are
+/// already in, and a failure is only logged.
+fn copy_hub(copy: &std::path::Path) -> Option<hub::OldHubImport> {
+    let src = copy.join("hub");
+    if !src.is_dir() {
+        return None;
+    }
+    let local = hub::local_dir()?;
+    match hub::import_old(&src, &local) {
+        Ok(report) => Some(report),
+        Err(why) => {
+            razdor::diag::log(&format!("saves move: the hub's maps and mods are not moved: {why}"));
+            None
+        }
+    }
+}
+
 /// The copied folder (`old-saves` in the cache) imported into the app's saves folder; the copy is
 /// removed either way. A success records the move as done (the popup is gone for good).
 fn finish_copy(popup: bool) -> State {
     let copy = platform::cache_dir().map(|dir| dir.join("old-saves"));
     let root = platform::app_dir().map(|dir| dir.join("saves"));
     let result = match (&copy, root) {
-        (Some(copy), Some(root)) => transfer::import_folder(copy, &root),
+        (Some(copy), Some(root)) => transfer::import_folder(copy, &root).map(|imported| (imported, copy_hub(copy))),
         _ => Err(tr("The folder cannot be read.").to_string()),
     };
     if let Some(copy) = &copy {
         let _ = fs::remove_dir_all(copy);
     }
     match result {
-        Ok(imported) => {
+        Ok((imported, hub)) => {
             write_decision("done");
             let mut line = trf!("Saves moved: {n}.", n = imported.saves);
+            if let Some(hub) = hub {
+                line = format!("{line} {}", trf!("Maps and mods: {n}.", n = hub.entries));
+            }
             if imported.settings_kept {
                 line = format!("{line} {}", tr("Settings were not replaced: they are already there."));
             }
@@ -262,6 +290,19 @@ pub fn modal() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_popup_at_start_waits_for_a_loaded_game_and_an_older_install() {
+        // Never over the no-install screen or a download: only once a usable install is loaded.
+        assert!(!due(false, false, Some(Decision::Existing)));
+        assert!(!due(false, true, None), "the snapshot's fake needs a loaded game too");
+        // An older install's saves not yet moved: due, with the game loaded.
+        assert!(due(true, false, Some(Decision::Existing)));
+        // A fresh install, or a move already done, never sees it.
+        assert!(!due(true, false, Some(Decision::Fresh)));
+        assert!(!due(true, false, Some(Decision::Done)));
+        assert!(!due(true, false, None));
+    }
 
     #[test]
     fn the_marker_says_existing_fresh_or_done() {

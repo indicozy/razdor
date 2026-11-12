@@ -462,11 +462,23 @@ private String razdorCopyOldSaves(Uri tree) {
         razdorDeleteTree(dest);
         String root = android.provider.DocumentsContract.getTreeDocumentId(tree);
         String from = razdorChildNamed(tree, root, "saves");
+        String settings = razdorChildNamed(tree, root, "settings.json");
+        String hub = razdorChildNamed(tree, root, "hub");
         long[] budget = new long[] {RAZDOR_OLD_LIMIT};
         if (from != null) {
+            // The shared folder: its saves, its settings and its hub folder (the installed maps and mods).
             razdorCopyDocs(tree, from, dest, 0, budget);
-        } else if (razdorChildNamed(tree, root, "settings.json") != null || razdorChildNamed(tree, root, "manual") != null) {
+            if (settings != null) {
+                razdorCopyFile(tree, settings, "settings.json", dest, budget);
+            }
+            if (hub != null) {
+                razdorCopyDocs(tree, hub, new File(dest, "hub"), 0, budget);
+            }
+        } else if (settings != null || razdorChildNamed(tree, root, "manual") != null) {
+            // The saves folder itself (its hub folder comes with it, as a child).
             razdorCopyDocs(tree, root, dest, 0, budget);
+        } else if (hub != null) {
+            razdorCopyDocs(tree, hub, new File(dest, "hub"), 0, budget);
         } else {
             return "wrong";
         }
@@ -489,6 +501,28 @@ private String razdorChildNamed(Uri tree, String parent, String name) {
         }
     }
     return null;
+}
+
+// Copies the file document `id` (named `name` in `dest`) of `tree` into the folder `dest`, within the budget.
+private void razdorCopyFile(Uri tree, String id, String name, File dest, long[] budget) throws java.io.IOException {
+    if (!dest.isDirectory() && !dest.mkdirs()) {
+        throw new java.io.IOException("folder");
+    }
+    Uri uri = android.provider.DocumentsContract.buildDocumentUriUsingTree(tree, id);
+    try (InputStream in = getContentResolver().openInputStream(uri); OutputStream out = new FileOutputStream(new File(dest, name))) {
+        if (in == null) {
+            throw new java.io.IOException("no input");
+        }
+        byte[] buffer = new byte[65536];
+        int n;
+        while ((n = in.read(buffer)) > 0) {
+            budget[0] -= n;
+            if (budget[0] < 0) {
+                throw new java.io.IOException("too big");
+            }
+            out.write(buffer, 0, n);
+        }
+    }
 }
 
 // Copies the document `parent` (a folder of `tree`) into the folder `dest`, file by file. Folders

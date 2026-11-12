@@ -191,12 +191,14 @@ fn snapshot_offer() -> bool {
     std::env::var_os("RAZDOR_SNAPSHOT").is_some() && std::env::var_os("RAZDOR_SCENE_IMPORT").is_some()
 }
 
-/// Each frame: sets the folder an import writes to (`install` is the current install's folder),
-/// opens a requested picker, takes its answer and finishes a job. True when the install may have
-/// changed (the caller reloads it).
-pub fn tick(install: Option<&Path>) -> bool {
+/// Each frame: sets the folder an import writes to, opens a requested picker, takes its answer and
+/// finishes a job. True when the install may have changed (the caller reloads it).
+/// `install` is the base install's folder and `loaded` whether a usable install is loaded. Without
+/// a loaded install the folder an import writes to is the phones' unpack folder: a located folder
+/// that is not loaded (broken, unreadable) never blocks an import or the automatic download.
+pub fn tick(install: Option<&Path>, loaded: bool) -> bool {
     let unpack = platform::unpack_dir();
-    let target = import::target(install, unpack.as_deref());
+    let target = if loaded { import::target(install, unpack.as_deref()) } else { unpack.clone() };
     TARGET.with_borrow_mut(|t| *t = target);
     if REQUESTED.with(|r| r.replace(false)) && !busy() && offered() {
         start_picker();
@@ -217,7 +219,7 @@ pub fn tick(install: Option<&Path>) -> bool {
         }
     }
     let changed = finish_job();
-    auto_tick(install.is_some());
+    auto_tick(loaded);
     match poll_picker() {
         Poll::Nothing | Poll::Cancelled => {}
         #[cfg(target_os = "android")]
@@ -336,29 +338,49 @@ pub fn automatic() -> bool {
         || snapshot_unpacking().is_some()
 }
 
-/// The automatic start, each frame (`tick`): with no install, the hub's catalog is read once per
-/// launch on a thread, and a game it offers is downloaded and installed at once (`start_auto`).
-/// Anything else (no game in it, the catalog unreadable, the download or the import failing) leaves
-/// the no-install screen as it is, with the failure's one line where there is one.
-fn auto_tick(installed: bool) {
+/// Whether the automatic download has to run: no usable install is loaded (a folder that was located
+/// but did not load counts as none), and the start is allowed here (`auto_refusal`).
+pub fn should_auto(loaded: bool, allowed: bool) -> bool {
+    !loaded && allowed
+}
+
+/// The automatic start, each frame (`tick`): with no usable install loaded, the hub's catalog is read
+/// once per launch on a thread, and a game it offers is downloaded and installed at once
+/// (`start_auto`). Anything else (no game in it, the catalog unreadable, the download or the import
+/// failing) leaves the no-install screen as it is, with the failure's one line where there is one.
+/// Every branch is logged (`razdor::diag`), so a player's log says why the download did or did not start.
+fn auto_tick(loaded: bool) {
     let state = AUTO.with_borrow_mut(|a| std::mem::replace(a, Auto::Done));
     let next = match state {
         Auto::Done => Auto::Done,
-        _ if installed => Auto::Done,
+        _ if !should_auto(loaded, true) => {
+            razdor::diag!("game download: no start, a usable install is loaded");
+            Auto::Done
+        }
         Auto::Idle if snapshot_checking() => Auto::Checking(true),
-        Auto::Idle if !auto_allowed() => Auto::Done,
-        Auto::Idle => Auto::Checking(false),
+        Auto::Idle => match auto_refusal() {
+            Some(why) => {
+                razdor::diag!("game download: no start ({why})");
+                Auto::Done
+            }
+            None => {
+                razdor::diag!("game download: no usable install loaded, checking the hub's catalog");
+                Auto::Checking(false)
+            }
+        },
         Auto::Checking(true) => Auto::Checking(true),
         Auto::Checking(false) => match super::launch::catalog() {
             None => Auto::Checking(false),
             Some(Ok(catalog)) => {
-                if let Some(archive) = game_archive(catalog) {
-                    start_auto(archive);
+                razdor::diag!("game download: catalog read, game in it: {}", if catalog.game.is_some() { "yes" } else { "no" });
+                match game_archive(catalog) {
+                    Some(archive) => start_auto(archive),
+                    None => razdor::diag!("game download: no https game in the catalog, no download"),
                 }
                 Auto::Done
             }
             Some(Err(why)) => {
-                razdor::diag!("game catalog: {why}");
+                razdor::diag!("game download: catalog not read, no download: {why}");
                 Auto::Done
             }
         },
@@ -366,11 +388,20 @@ fn auto_tick(installed: bool) {
     AUTO.with_borrow_mut(|a| *a = next);
 }
 
-/// Whether the automatic start may run in this process: a download is offered here (not on iPhone),
-/// it is not a snapshot (its fakes stand in for the download), and no folder was set by hand
-/// (`RAZDOR_DT_DIR`: a folder that is not an install is the player's to fix, never written over).
-fn auto_allowed() -> bool {
-    download_available() && std::env::var_os("RAZDOR_SNAPSHOT").is_none() && std::env::var_os(razdor::dt::install::ENV_VAR).is_none_or(|v| v.is_empty())
+/// Why the automatic start may not run in this process, or None when it may: a download is offered
+/// here (not on iPhone), it is not a snapshot (its fakes stand in for the download), and no folder
+/// was set by hand (`RAZDOR_DT_DIR`: a folder that is not an install is the player's to fix, never
+/// written over).
+fn auto_refusal() -> Option<&'static str> {
+    if !download_available() {
+        Some("iPhone has no download")
+    } else if std::env::var_os("RAZDOR_SNAPSHOT").is_some() {
+        Some("a snapshot run")
+    } else if std::env::var_os(razdor::dt::install::ENV_VAR).is_some_and(|v| !v.is_empty()) {
+        Some("the folder is set by hand (RAZDOR_DT_DIR)")
+    } else {
+        None
+    }
 }
 
 /// The snapshot's frozen check (`RAZDOR_SCENE_CATALOG=checking`): the screen shows the check's text.
@@ -480,6 +511,15 @@ fn finish_job() -> bool {
     let Some(mut job) = JOB.with_borrow_mut(Option::take) else { return false };
     let downloading = job.progress.is_some();
     let result = job.handle.take().map(|h| h.join());
+    if job.auto {
+        let outcome = match &result {
+            Some(Ok(Ok(Done::Replaced))) => "installed".to_string(),
+            Some(Ok(Ok(Done::Patched(n)))) => format!("patched {n} files"),
+            Some(Ok(Err(e))) => error_text(e),
+            _ => "the thread stopped".to_string(),
+        };
+        razdor::diag!("game download: ended: {outcome}");
+    }
     if downloading {
         match result {
             Some(Ok(Ok(Done::Replaced))) if job.auto => {}
@@ -874,7 +914,18 @@ fn download_window(bytes: u64, all: u64, cancel: Option<&gdrive::Progress>, titl
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_picked_fd, remove_copies_in};
+    use super::{parse_picked_fd, remove_copies_in, should_auto};
+
+    #[test]
+    fn the_automatic_download_follows_the_loaded_install_only() {
+        // A located folder that did not load is not an install: the download runs (when allowed).
+        assert!(should_auto(false, true));
+        // A usable install is loaded: nothing is downloaded, whatever else is located.
+        assert!(!should_auto(true, true));
+        // Not allowed here (iPhone, a snapshot, a folder set by hand): no download.
+        assert!(!should_auto(false, false));
+        assert!(!should_auto(true, false));
+    }
 
     #[test]
     fn the_picker_answer_names_the_file_its_size_and_its_descriptor() {

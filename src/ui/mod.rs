@@ -1317,7 +1317,7 @@ impl App {
     /// (once in a run), the folder picker's answer is taken, and the flushed settings are written.
     fn saves_tick(&mut self) {
         if matches!(self.screen, Screen::MainMenu) {
-            saves_move::offer_if_due();
+            saves_move::offer_if_due(self.assets.dt.is_some());
         }
         audio::flush_deferred();
         saves_move::tick();
@@ -1555,8 +1555,12 @@ impl App {
         // «Обновить игру из архива…» (the settings' row): a picked game is examined and imported on a
         // thread; a finished import reloads the install.
         // The game is imported into the base install, never a mod's folder built over it.
+        // Only a loaded install counts as one: a located folder that did not load never blocks the
+        // automatic download (`game_import::tick`).
+        let loaded = self.assets.dt.is_some();
         let base = razdor::dt::install::base_dir();
-        if game_import::tick(base.as_deref().or(self.assets.dt.as_ref().map(|d| d.install.dir.as_path()))) {
+        let install = if loaded { base.as_deref().or(self.assets.dt.as_ref().map(|d| d.install.dir.as_path())) } else { None };
+        if game_import::tick(install, loaded) {
             self.reload_install();
         }
         widgets::set_input_blocked(!self.dialogs.is_empty() || self.help || held || self.map_view.back_to.is_some() || self.update_open || map_import::open() || game_import::busy() || saves_move::open() || widgets::popup_open() || bench::window_open());
