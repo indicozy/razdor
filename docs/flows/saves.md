@@ -21,7 +21,12 @@ All code is in `src/rules/save.rs`; the windows are `src/ui/saves.rs`.
 
 - Android: the saves folder is `platform::app_dir` (`<files>/Razdor/saves`, the app's own folder; no
   storage permission, see [app-and-ui.md](app-and-ui.md)). The saves of an older release come in
-  through the folder picker (`ui::saves_move`, `transfer::import_folder`). Export and import go through the system's documents
+  through the folder picker (`ui::saves_move`, `transfer::import_folder`). The picked folder is listed
+  (its files counted), then copied into the cache's `old-saves` file by file; the window «Перенос
+  сохранений» shows «N из M файлов» with a bar (`razdorOldSavesProgress`, the Java side writes the counts),
+  and while the count runs an animated ellipsis without a bar. The import then runs on a thread behind the
+  same window (the screen under it takes no input, the game's start waits), and the decision is written
+  on the main thread when it ends. Export and import go through the system's documents
   (`ui::transfer`, «Перенос…» in the Load window): one zip out, `.rzsave` or a zip in, nothing overwritten.
 
 ## Limits and pins

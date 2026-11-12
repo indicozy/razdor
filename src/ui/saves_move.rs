@@ -1,8 +1,10 @@
 //! The saves of an older release (Android). Razdor keeps its files in its own folder and asks for no
 //! storage permission, so the saves a player kept in the shared «Razdor» folder come in through the
 //! system's folder picker: the player picks that folder, the Java side copies its saves into the
-//! cache (`razdorPickOldSaves`, `razdorOldSavesOutcome`), and they are merged into the app's folder
-//! with the import's own rules (`transfer::import_folder`).
+//! cache (`razdorPickOldSaves`, `razdorOldSavesOutcome`, `razdorOldSavesProgress`), and they are
+//! merged into the app's folder with the import's own rules (`transfer::import_folder`). The copy
+//! shows its progress in a window («Moving the saves»); the import runs on a thread behind the same
+//! window, and the screen under it takes no input until the move ends.
 //!
 //! Who is offered the popup (an existing player): decided once, at the process's start, before
 //! anything writes to the cache ([`decide_at_start`]). A private cache that already holds files
@@ -16,6 +18,7 @@ use std::fs;
 use std::path::PathBuf;
 #[cfg(target_os = "android")]
 use std::path::Path;
+use std::thread::JoinHandle;
 
 use razdor::i18n::tr;
 use razdor::{hub, local, platform, transfer, trf};
@@ -38,6 +41,17 @@ enum Decision {
     Done,
 }
 
+/// The copy's progress from the picker's poll (`razdorOldSavesProgress`): the files copied so far,
+/// and the total once the folder is counted (None while it is being counted).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Progress {
+    done: u64,
+    total: Option<u64>,
+}
+
+/// The import's result: the counts of the saves and the hub, or the reason it failed.
+type Import = Result<(transfer::Imported, Option<hub::OldHubImport>), String>;
+
 /// Where the move stands.
 #[derive(Default)]
 enum State {
@@ -46,8 +60,12 @@ enum State {
     /// The popup (`true`: the one at start; `false`: the settings' window, which cancels to nothing),
     /// with a note from the last try, if any.
     Offer(bool, Option<String>),
-    /// The picker is open or its folder is being copied (the flag as in `Offer`).
+    /// The picker is open (the flag as in `Offer`).
     Picking(bool),
+    /// The picked folder is copied into the cache, with its progress so far (the flag as in `Offer`).
+    Copying(bool, Progress),
+    /// The copied folder is imported on a thread (the flag as in `Offer`); the copy is removed when it ends.
+    Importing(bool, JoinHandle<Import>),
     /// The result, one line, to OK.
     Done(String),
 }
@@ -102,14 +120,18 @@ fn due(loaded: bool, snapshot: bool, decision: Option<Decision>) -> bool {
     loaded && (snapshot || decision == Some(Decision::Existing))
 }
 
+/// The snapshot's popup fake: `RAZDOR_SCENE_SAVES_MOVE` with `RAZDOR_SNAPSHOT` (a copy's fake is
+/// another scene, see [`copy_fake`]).
+fn snapshot_popup() -> bool {
+    std::env::var_os("RAZDOR_SNAPSHOT").is_some() && std::env::var("RAZDOR_SCENE_SAVES_MOVE").is_ok_and(|scene| copy_fake(&scene).is_none())
+}
+
 /// Offers the popup once in this run, when [`due`] says so (`loaded`: a usable install is loaded).
-/// The snapshot's `RAZDOR_SCENE_SAVES_MOVE` shows it (with `RAZDOR_SNAPSHOT`).
 pub fn offer_if_due(loaded: bool) {
     if SHOWN.get() || STATE.with_borrow(|s| !matches!(s, State::Hidden)) {
         return;
     }
-    let snapshot = std::env::var_os("RAZDOR_SNAPSHOT").is_some() && std::env::var_os("RAZDOR_SCENE_SAVES_MOVE").is_some();
-    if due(loaded, snapshot, decision()) {
+    if due(loaded, snapshot_popup(), decision()) {
         SHOWN.set(true);
         STATE.with_borrow_mut(|s| *s = State::Offer(true, None));
     }
@@ -129,9 +151,9 @@ pub fn open() -> bool {
     STATE.with_borrow(|s| !matches!(s, State::Hidden))
 }
 
-/// Whether the picker is open or the folder is being copied: the game's start and load wait.
+/// Whether the picker is open, or the folder is being copied or imported: the game's start and load wait.
 pub fn busy() -> bool {
-    STATE.with_borrow(|s| matches!(s, State::Picking(_)))
+    STATE.with_borrow(|s| matches!(s, State::Picking(_) | State::Copying(..) | State::Importing(..)))
 }
 
 /// A game's start or load was asked while [`busy`]: nothing is started (the log says so).
@@ -159,36 +181,75 @@ fn pick_outcome() -> String {
     String::new()
 }
 
-/// Each frame: the picker's answer, when it has one. A copied folder is imported at once.
-pub fn tick() {
-    let popup = match STATE.with_borrow(|s| if let State::Picking(popup) = s { Some(*popup) } else { None }) {
-        Some(popup) => popup,
-        None => return,
-    };
-    let outcome = pick_outcome();
-    let next = match outcome.as_str() {
-        "" => return,
-        "cancel" => if popup { State::Offer(true, None) } else { State::Hidden },
+#[cfg(target_os = "android")]
+fn pick_progress() -> String {
+    super::android::old_saves_progress()
+}
+
+#[cfg(not(target_os = "android"))]
+fn pick_progress() -> String {
+    String::new()
+}
+
+/// The poll's progress text ("copied/total", total -1 while counted); None for "" (no copy yet) and
+/// anything else.
+fn parse_progress(text: &str) -> Option<Progress> {
+    let (done, total) = text.trim().split_once('/')?;
+    let total: i64 = total.parse().ok()?;
+    Some(Progress { done: done.parse().ok()?, total: u64::try_from(total).ok() })
+}
+
+/// One frame of the picker's poll, while the picker is open or the folder is copied. The outcome
+/// when it has one (`"copied"` goes to `copied`, which starts the import); else the copy's progress
+/// once the copy runs (`last` keeps it when the poll has none).
+fn poll(popup: bool, last: Option<Progress>, outcome: &str, progress: &str, copied: impl FnOnce(bool) -> State) -> State {
+    match outcome {
+        "" => match parse_progress(progress).or(last) {
+            Some(now) => State::Copying(popup, now),
+            None => State::Picking(popup),
+        },
+        "cancel" => {
+            if popup {
+                State::Offer(true, None)
+            } else {
+                State::Hidden
+            }
+        }
         "wrong" => State::Offer(popup, Some(tr("This folder holds no Razdor saves. Pick the Razdor folder in the device storage.").to_string())),
-        "copied" => finish_copy(popup),
+        "copied" => copied(popup),
         other => {
             razdor::diag::log(&format!("saves move: the folder cannot be read: {other}"));
             State::Offer(popup, Some(tr("The folder cannot be read.").to_string()))
         }
+    }
+}
+
+/// Each frame: the picker's answer and the copy's progress, and the import's end.
+pub fn tick() {
+    let next = match STATE.with_borrow_mut(std::mem::take) {
+        State::Picking(popup) => poll(popup, None, &pick_outcome(), &pick_progress(), start_import),
+        State::Copying(popup, last) => poll(popup, Some(last), &pick_outcome(), &pick_progress(), start_import),
+        State::Importing(popup, handle) => {
+            if handle.is_finished() {
+                finish_import(popup, handle.join())
+            } else {
+                State::Importing(popup, handle)
+            }
+        }
+        other => other,
     };
     STATE.with_borrow_mut(|s| *s = next);
 }
 
 /// The older release's hub folder in the copy (`hub`: its installed maps and mods) merged into the
-/// app's hub (`hub::import_old`). None when the copy has none or the import fails: the saves are
-/// already in, and a failure is only logged.
-fn copy_hub(copy: &std::path::Path) -> Option<hub::OldHubImport> {
+/// app's hub (`hub::import_old`, into `local`). None when the copy has none or the import fails: the
+/// saves are already in, and a failure is only logged.
+fn copy_hub(copy: &std::path::Path, local: Option<&std::path::Path>) -> Option<hub::OldHubImport> {
     let src = copy.join("hub");
     if !src.is_dir() {
         return None;
     }
-    let local = hub::local_dir()?;
-    match hub::import_old(&src, &local) {
+    match hub::import_old(&src, local?) {
         Ok(report) => Some(report),
         Err(why) => {
             razdor::diag::log(&format!("saves move: the hub's maps and mods are not moved: {why}"));
@@ -197,23 +258,39 @@ fn copy_hub(copy: &std::path::Path) -> Option<hub::OldHubImport> {
     }
 }
 
-/// The copied folder (`old-saves` in the cache) imported into the app's saves folder; the copy is
-/// removed either way. A success records the move as done (the popup is gone for good).
-fn finish_copy(popup: bool) -> State {
+/// The copied folder (`old-saves` in the cache) imported into the app's saves folder on a thread (the
+/// import only reads and writes files); the copy is removed when it ends, either way. The folders are
+/// taken here, on the main thread.
+fn start_import(popup: bool) -> State {
     let copy = platform::cache_dir().map(|dir| dir.join("old-saves"));
     let root = platform::app_dir().map(|dir| dir.join("saves"));
-    let result = match (&copy, root) {
-        (Some(copy), Some(root)) => transfer::import_folder(copy, &root).map(|imported| (imported, copy_hub(copy))),
-        _ => Err(tr("The folder cannot be read.").to_string()),
+    let (Some(copy), Some(root)) = (copy, root) else {
+        return State::Offer(popup, Some(tr("The folder cannot be read.").to_string()));
     };
-    if let Some(copy) = &copy {
-        let _ = fs::remove_dir_all(copy);
+    let local = hub::local_dir();
+    let cleanup = copy.clone();
+    let spawned = std::thread::Builder::new().name("saves-move".into()).spawn(move || {
+        let result = transfer::import_folder(&copy, &root).map(|imported| (imported, copy_hub(&copy, local.as_deref())));
+        let _ = fs::remove_dir_all(&copy);
+        result
+    });
+    match spawned {
+        Ok(handle) => State::Importing(popup, handle),
+        Err(_) => {
+            let _ = fs::remove_dir_all(&cleanup);
+            State::Offer(popup, Some(tr("The folder cannot be read.").to_string()))
+        }
     }
-    match result {
-        Ok((imported, hub)) => {
+}
+
+/// The import's end, on the main thread: a success records the move as done (the popup is gone for
+/// good); a failure is offered again with its reason.
+fn finish_import(popup: bool, joined: std::thread::Result<Import>) -> State {
+    match joined {
+        Ok(Ok((imported, old_hub))) => {
             write_decision("done");
             let mut line = trf!("Saves moved: {n}.", n = imported.saves);
-            if let Some(hub) = hub {
+            if let Some(hub) = old_hub {
                 line = format!("{line} {}", trf!("Maps and mods: {n}.", n = hub.entries));
             }
             if imported.settings_kept {
@@ -221,7 +298,50 @@ fn finish_copy(popup: bool) -> State {
             }
             State::Done(line)
         }
-        Err(why) => State::Offer(popup, Some(why)),
+        Ok(Err(why)) => State::Offer(popup, Some(why)),
+        Err(_) => {
+            razdor::diag::log("saves move: the import ended without a result");
+            State::Offer(popup, Some(tr("The folder cannot be read.").to_string()))
+        }
+    }
+}
+
+/// The snapshot's copy fake (`RAZDOR_SCENE_SAVES_MOVE`, with `RAZDOR_SNAPSHOT`): see [`copy_fake`].
+fn snapshot_copy() -> Option<Progress> {
+    std::env::var_os("RAZDOR_SNAPSHOT")?;
+    copy_fake(&std::env::var("RAZDOR_SCENE_SAVES_MOVE").ok()?)
+}
+
+/// The copy's fake for a snapshot: `copying:<percent>` (the bar at that share) or `copying` (no total:
+/// the animated line). None for any other scene.
+fn copy_fake(scene: &str) -> Option<Progress> {
+    let rest = scene.strip_prefix("copying")?;
+    match rest.strip_prefix(':') {
+        Some(percent) => Some(Progress { done: percent.parse::<u64>().ok()?.min(100), total: Some(100) }),
+        None if rest.is_empty() => Some(Progress { done: 0, total: None }),
+        None => None,
+    }
+}
+
+/// The window of the copy and of the import, «Moving the saves»: its line, and while the copy runs
+/// with a known total, the files so far («N of M files») with the bar. Without one (the files are
+/// being counted, and the import) an animated ellipsis and no bar. No buttons: the screen under it waits.
+fn moving_window(progress: Option<Progress>) {
+    let title = tr("Moving the saves");
+    let line = tr("Moving the saves, maps and mods…").to_string();
+    match progress.and_then(|p| p.total.map(|total| (p.done, total))) {
+        Some((done, total)) => {
+            let share = if total == 0 { 1.0 } else { (done as f32 / total as f32).min(1.0) };
+            let count = trf!("{done} of {total} files", done = done, total = total);
+            let (_, _, bar) = map_import::frame_bar(title, &[line, count], Some(share), false);
+            if let Some(bar) = bar {
+                map_import::draw_bar(bar, share);
+            }
+        }
+        None => {
+            let ellipsis = "…".repeat((get_time() * 2.0) as usize % 3 + 1);
+            map_import::frame_bar(title, &[line, ellipsis], None, false);
+        }
     }
 }
 
@@ -229,7 +349,12 @@ fn finish_copy(popup: bool) -> State {
 pub fn modal() {
     let state = STATE.with_borrow_mut(std::mem::take);
     let next = match state {
-        State::Hidden => State::Hidden,
+        State::Hidden => {
+            if let Some(progress) = snapshot_copy() {
+                moving_window(Some(progress));
+            }
+            State::Hidden
+        }
         State::Offer(popup, note) => {
             // The text is the owner's (2026-11-12): the literal here, where the catalog scan reads it.
             let mut lines = vec![tr("In version 1.5.0 Razdor keeps its files in the app's folder. To move the saves, maps and mods, pick the Razdor folder in the device storage.").to_string()];
@@ -274,6 +399,14 @@ pub fn modal() {
             }
         }
         State::Picking(popup) => State::Picking(popup),
+        State::Copying(popup, progress) => {
+            moving_window(Some(progress));
+            State::Copying(popup, progress)
+        }
+        State::Importing(popup, handle) => {
+            moving_window(None);
+            State::Importing(popup, handle)
+        }
         State::Done(line) => {
             if map_import::notice_window(tr("Saves from an older release"), std::slice::from_ref(&line)) {
                 State::Hidden
@@ -309,5 +442,43 @@ mod tests {
         assert_eq!(parse(" done "), Some(Decision::Done));
         assert_eq!(parse("moved by hand"), None, "anything else is no decision");
         assert_eq!(parse(""), None);
+    }
+
+    #[test]
+    fn the_copy_progress_is_done_over_total_or_counting() {
+        assert_eq!(parse_progress("2/10"), Some(Progress { done: 2, total: Some(10) }));
+        assert_eq!(parse_progress(" 0/-1 \n"), Some(Progress { done: 0, total: None }), "the folder is being counted");
+        assert_eq!(parse_progress(""), None, "the picker is still open: no copy yet");
+        assert_eq!(parse_progress("3"), None);
+        assert_eq!(parse_progress("x/3"), None);
+    }
+
+    #[test]
+    fn the_snapshot_copy_fake_gives_a_bar_or_none() {
+        assert_eq!(copy_fake("copying:40"), Some(Progress { done: 40, total: Some(100) }));
+        assert_eq!(copy_fake("copying:250"), Some(Progress { done: 100, total: Some(100) }));
+        assert_eq!(copy_fake("copying"), Some(Progress { done: 0, total: None }));
+        assert_eq!(copy_fake("copying:x"), None);
+        assert_eq!(copy_fake("1"), None, "the popup's fake is another scene");
+    }
+
+    #[test]
+    fn the_picker_poll_goes_from_the_picker_to_the_copy_and_the_import() {
+        let copied = |_: bool| State::Done("copied".to_string());
+        // The picker is open: nothing is copied yet.
+        assert!(matches!(poll(true, None, "", "", copied), State::Picking(true)));
+        // The copy has begun: its progress, while the folder is counted first.
+        assert!(matches!(poll(true, None, "", "0/-1", copied), State::Copying(true, Progress { done: 0, total: None })));
+        assert!(matches!(poll(true, None, "", "4/9", copied), State::Copying(true, Progress { done: 4, total: Some(9) })));
+        // A poll with no progress keeps the last one.
+        let last = Some(Progress { done: 4, total: Some(9) });
+        assert!(matches!(poll(false, last, "", "", copied), State::Copying(false, Progress { done: 4, total: Some(9) })));
+        // The copy's answer starts the import (`copied`), whatever the progress was.
+        assert!(matches!(poll(true, last, "copied", "9/9", copied), State::Done(_)));
+        // Cancel: the popup goes back; the settings' window closes.
+        assert!(matches!(poll(true, last, "cancel", "", copied), State::Offer(true, None)));
+        assert!(matches!(poll(false, None, "cancel", "", copied), State::Hidden));
+        // A folder without saves is offered again, with the reason.
+        assert!(matches!(poll(false, last, "wrong", "", copied), State::Offer(false, Some(_))));
     }
 }

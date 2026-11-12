@@ -769,6 +769,9 @@ This folder holds no Razdor saves. Pick the Razdor folder in the device storage.
 The folder cannot be read. = Папку не удалось прочитать.
 The folder picker did not open. = Выбор папки не открылся.
 Saves moved: {n}. = Перенесено сохранений: {n}.
+Moving the saves = Перенос сохранений
+Moving the saves, maps and mods… = Переносим сохранения, карты и моды…
+{done} of {total} files = {done} из {total} файлов
 Move saves from the old Razdor folder… = Перенести сохранения из старой папки Razdor…
 The folder holds no Razdor saves. = В папке нет сохранений Раздора.
 

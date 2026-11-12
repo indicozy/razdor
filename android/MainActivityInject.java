@@ -410,14 +410,21 @@ private String razdorCopyExport(String source, Uri uri) {
 // (`old-saves`, the same cache the game reads): the saves folder with its settings.json and its hub folder
 // (the installed maps and mods). Razdor reads the copy with its own rules (transfer::import_folder, hub::import_old). razdorOldSavesOutcome is the game's poll: "" while the
 // picker is open or the copy runs, "cancel", "wrong" (the folder holds no saves), "error: <code>", or
-// "copied" (the copy is in the cache, ready to import).
+// "copied" (the copy is in the cache, ready to import). razdorOldSavesProgress is the copy's progress for
+// the window: "" until a folder is picked, then "copied/total" (total -1 while the files are counted).
 private static final int RAZDOR_OLD_PICK_REQUEST = 7303;
 private static final long RAZDOR_OLD_LIMIT = 512L * 1024 * 1024;
 private volatile String razdorOldSavesResult = "";
+// The copy's progress (razdorOldSavesProgress): razdorOldCopying from the picked folder on; the copy
+// thread alone writes the counts, the files copied so far (razdorOldDone) and their total (razdorOldTotal).
+private volatile boolean razdorOldCopying = false;
+private volatile int razdorOldDone = 0;
+private volatile int razdorOldTotal = -1;
 
 // Opens the folder picker on the UI thread, at the shared «Razdor» folder. Its answer is the poll's.
 public String razdorPickOldSaves() {
     razdorOldSavesResult = "";
+    razdorOldCopying = false;
     runOnUiThread(new Runnable() {
         @Override
         public void run() {
@@ -439,6 +446,15 @@ public String razdorOldSavesOutcome() {
     return razdorOldSavesResult;
 }
 
+// The copy's progress, for the window of ui::saves_move: "" until a folder is picked, then "done/total"
+// (the files copied so far; the total is -1 while the folder is being counted).
+public String razdorOldSavesProgress() {
+    if (!razdorOldCopying) {
+        return "";
+    }
+    return razdorOldDone + "/" + razdorOldTotal;
+}
+
 // The folder the player picked: its saves are copied on a thread. A folder with a «saves» folder in it
 // is the shared Razdor folder; a folder with settings.json or manual in it is the saves folder itself.
 private void razdorOldAnswer(int resultCode, Intent data) {
@@ -447,6 +463,9 @@ private void razdorOldAnswer(int resultCode, Intent data) {
         return;
     }
     final Uri tree = data.getData();
+    razdorOldDone = 0;
+    razdorOldTotal = -1;
+    razdorOldCopying = true;
     new Thread(new Runnable() {
         @Override
         public void run() {
@@ -455,7 +474,19 @@ private void razdorOldAnswer(int resultCode, Intent data) {
     }).start();
 }
 
+// One file of the copy: its document id in the picked folder, and its place in the cache's old-saves.
+private static final class RazdorOldDoc {
+    final String id;
+    final File dest;
+
+    RazdorOldDoc(String id, File dest) {
+        this.id = id;
+        this.dest = dest;
+    }
+}
+
 // Copies the saves of the picked folder `tree` into the cache's old-saves; returns the poll's answer.
+// The files are listed first (so the window can show how many there are), then copied one by one.
 private String razdorCopyOldSaves(Uri tree) {
     try {
         File dest = new File(getCacheDir(), "old-saves");
@@ -465,22 +496,28 @@ private String razdorCopyOldSaves(Uri tree) {
         String settings = razdorChildNamed(tree, root, "settings.json");
         String hub = razdorChildNamed(tree, root, "hub");
         long[] budget = new long[] {RAZDOR_OLD_LIMIT};
+        java.util.ArrayList<RazdorOldDoc> docs = new java.util.ArrayList<>();
         if (from != null) {
             // The shared folder: its saves, its settings and its hub folder (the installed maps and mods).
-            razdorCopyDocs(tree, from, dest, 0, budget);
+            razdorListDocs(tree, from, dest, 0, budget, docs);
             if (settings != null) {
-                razdorCopyFile(tree, settings, "settings.json", dest, budget);
+                docs.add(new RazdorOldDoc(settings, new File(dest, "settings.json")));
             }
             if (hub != null) {
-                razdorCopyDocs(tree, hub, new File(dest, "hub"), 0, budget);
+                razdorListDocs(tree, hub, new File(dest, "hub"), 0, budget, docs);
             }
         } else if (settings != null || razdorChildNamed(tree, root, "manual") != null) {
             // The saves folder itself (its hub folder comes with it, as a child).
-            razdorCopyDocs(tree, root, dest, 0, budget);
+            razdorListDocs(tree, root, dest, 0, budget, docs);
         } else if (hub != null) {
-            razdorCopyDocs(tree, hub, new File(dest, "hub"), 0, budget);
+            razdorListDocs(tree, hub, new File(dest, "hub"), 0, budget, docs);
         } else {
             return "wrong";
+        }
+        razdorOldTotal = docs.size();
+        for (RazdorOldDoc doc : docs) {
+            razdorCopyDoc(tree, doc);
+            razdorOldDone++;
         }
         return "copied";
     } catch (java.io.IOException e) {
@@ -503,34 +540,10 @@ private String razdorChildNamed(Uri tree, String parent, String name) {
     return null;
 }
 
-// Copies the file document `id` (named `name` in `dest`) of `tree` into the folder `dest`, within the budget.
-private void razdorCopyFile(Uri tree, String id, String name, File dest, long[] budget) throws java.io.IOException {
-    if (!dest.isDirectory() && !dest.mkdirs()) {
-        throw new java.io.IOException("folder");
-    }
-    Uri uri = android.provider.DocumentsContract.buildDocumentUriUsingTree(tree, id);
-    try (InputStream in = getContentResolver().openInputStream(uri); OutputStream out = new FileOutputStream(new File(dest, name))) {
-        if (in == null) {
-            throw new java.io.IOException("no input");
-        }
-        byte[] buffer = new byte[65536];
-        int n;
-        while ((n = in.read(buffer)) > 0) {
-            budget[0] -= n;
-            if (budget[0] < 0) {
-                throw new java.io.IOException("too big");
-            }
-            out.write(buffer, 0, n);
-        }
-    }
-}
-
-// Copies the document `parent` (a folder of `tree`) into the folder `dest`, file by file. Folders
-// nest at most 6 deep; the files together stay within the budget (RAZDOR_OLD_LIMIT), else IOException.
-private void razdorCopyDocs(Uri tree, String parent, File dest, int depth, long[] budget) throws java.io.IOException {
-    if (!dest.isDirectory() && !dest.mkdirs()) {
-        throw new java.io.IOException("folder");
-    }
+// Lists the files of the document `parent` (a folder of `tree`) into `out`, each with its place under
+// `dest`. Folders nest at most 6 deep; the files' declared sizes together stay within the budget
+// (RAZDOR_OLD_LIMIT), else IOException.
+private void razdorListDocs(Uri tree, String parent, File dest, int depth, long[] budget, java.util.ArrayList<RazdorOldDoc> out) throws java.io.IOException {
     Uri children = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(tree, parent);
     String[] columns = {android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID, android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
             android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE, android.provider.DocumentsContract.Document.COLUMN_SIZE};
@@ -545,7 +558,7 @@ private void razdorCopyDocs(Uri tree, String parent, File dest, int depth, long[
             }
             if (android.provider.DocumentsContract.Document.MIME_TYPE_DIR.equals(mime)) {
                 if (depth < 6) {
-                    razdorCopyDocs(tree, id, new File(dest, name), depth + 1, budget);
+                    razdorListDocs(tree, id, new File(dest, name), depth + 1, budget, out);
                 }
                 continue;
             }
@@ -553,17 +566,26 @@ private void razdorCopyDocs(Uri tree, String parent, File dest, int depth, long[
             if (budget[0] < 0) {
                 throw new java.io.IOException("too big");
             }
-            Uri uri = android.provider.DocumentsContract.buildDocumentUriUsingTree(tree, id);
-            try (InputStream in = getContentResolver().openInputStream(uri); OutputStream out = new FileOutputStream(new File(dest, name))) {
-                if (in == null) {
-                    throw new java.io.IOException("no input");
-                }
-                byte[] buffer = new byte[65536];
-                int n;
-                while ((n = in.read(buffer)) > 0) {
-                    out.write(buffer, 0, n);
-                }
-            }
+            out.add(new RazdorOldDoc(id, new File(dest, name)));
+        }
+    }
+}
+
+// Copies the file `doc` of `tree` to its place in the cache; its folder is made first.
+private void razdorCopyDoc(Uri tree, RazdorOldDoc doc) throws java.io.IOException {
+    File folder = doc.dest.getParentFile();
+    if (folder != null && !folder.isDirectory() && !folder.mkdirs()) {
+        throw new java.io.IOException("folder");
+    }
+    Uri uri = android.provider.DocumentsContract.buildDocumentUriUsingTree(tree, doc.id);
+    try (InputStream in = getContentResolver().openInputStream(uri); OutputStream out = new FileOutputStream(doc.dest)) {
+        if (in == null) {
+            throw new java.io.IOException("no input");
+        }
+        byte[] buffer = new byte[65536];
+        int n;
+        while ((n = in.read(buffer)) > 0) {
+            out.write(buffer, 0, n);
         }
     }
 }

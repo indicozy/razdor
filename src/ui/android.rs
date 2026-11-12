@@ -210,6 +210,13 @@ pub fn old_saves_outcome() -> String {
     unsafe { text_call("razdorOldSavesOutcome") }.unwrap_or_default()
 }
 
+/// The copy's progress (`razdorOldSavesProgress`): "" until a folder is picked, then "copied/total"
+/// (total -1 while the folder is counted). See `ui::saves_move`.
+pub fn old_saves_progress() -> String {
+    // SAFETY: as in `text_call`.
+    unsafe { text_call("razdorOldSavesProgress") }.unwrap_or_default()
+}
+
 local! {
     /// The orientation last asked of the system (an `ORIENTATION_*`), none before the first call.
     static ORIENTATION: Cell<Option<i32>> = const { Cell::new(None) };

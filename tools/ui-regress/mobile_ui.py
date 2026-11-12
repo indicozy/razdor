@@ -81,6 +81,9 @@ SCREENS = [
     ("title", "title", {}),
     # The popup of an older install's saves (Android: `ui::saves_move`), over the main menu.
     ("saves-move", "title", {"RAZDOR_SCENE_SAVES_MOVE": "1"}),
+    # The window while the picked folder is copied: the bar at 40%, and while its files are counted (no bar).
+    ("saves-move-copying", "title", {"RAZDOR_SCENE_SAVES_MOVE": "copying:40", "LANG": "ru_RU.UTF-8"}),
+    ("saves-move-counting", "title", {"RAZDOR_SCENE_SAVES_MOVE": "copying", "LANG": "ru_RU.UTF-8"}),
     # The main menu without an install: the not-found block (the same env as scenes.txt).
     ("title-noinstall", "title", {"RAZDOR_DT_DIR": "/nonexistent-razdor-dt", "RAZDOR_CONFIG_DIR": "/nonexistent-razdor-config", "HOME": "/nonexistent-razdor-home"}),
     # The same, after a failed download: the one-line error and the manual path.
