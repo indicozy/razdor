@@ -390,6 +390,15 @@ pub fn menu_not_found(no_install: bool) {
     if !no_install {
         return;
     }
+    // The automatic start (`game_import::auto_tick`): the catalog is read, or the game it offers is
+    // downloaded in its window; the block waits for the answer.
+    if game_import::checking() {
+        checking_panel();
+        return;
+    }
+    if game_import::automatic() {
+        return;
+    }
     let sh = screen_height();
     let k = super::chrome::k();
     let (x, w, bottom) = super::main_menu::not_found_box(k);
@@ -440,6 +449,19 @@ pub fn menu_not_found(no_install: bool) {
             }
         }
     }
+}
+
+/// The automatic start's «Checking the catalog…», centred on the screen while the catalog is read.
+fn checking_panel() {
+    let k = super::chrome::k();
+    let label = tr("Checking the catalog…");
+    let size = 20.0 * k;
+    let w = measure(label, size).width + 40.0 * k;
+    let h = size + 28.0 * k;
+    let x = (screen_width() - w) / 2.0;
+    let y = (screen_height() - h) / 2.0;
+    draw_rectangle(x, y, w, h, Color::new(0.0, 0.0, 0.0, 0.6));
+    text(label, x + 20.0 * k, y + 14.0 * k + size, size, INK);
 }
 
 /// A line of the not-found block that is still wider than the column (a folder's path has no

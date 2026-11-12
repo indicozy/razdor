@@ -11,29 +11,66 @@
 //! too many downloads (a page, or 403/429); both are failures with a reason, and the screen then
 //! shows the manual path with the file's page.
 
+use std::borrow::Cow;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-/// The community's archive: its Drive id, its size and SHA-256, and the name the player sees.
-pub struct Archive {
-    pub id: &'static str,
-    pub size: u64,
-    pub sha256: &'static str,
-    pub name: &'static str,
+/// Where an archive is downloaded from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Link {
+    /// A Google Drive file's id (its warning pages are followed).
+    Drive(&'static str),
+    /// A direct https address: the hub catalog's `game` (`hub::GameRef`).
+    Url(Cow<'static, str>),
 }
 
-/// The community's game (the owner's constants; `scripts/check-game-link.sh` checks the link).
+/// An archive to download: where it is, its size and SHA-256, and the name the player sees.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Archive {
+    pub link: Link,
+    pub size: u64,
+    pub sha256: Cow<'static, str>,
+    pub name: Cow<'static, str>,
+}
+
+/// The community's game on Drive (the owner's constants; `scripts/check-game-link.sh` checks the link).
 pub const GAME: Archive = Archive {
-    id: "1xKIpVbDIuCWh7LFgtFn59D9t5RPkiH0y",
+    link: Link::Drive("1xKIpVbDIuCWh7LFgtFn59D9t5RPkiH0y"),
     size: 46_726_043,
-    sha256: "fce6d8aa22f8932cddf0dffaf02d3c013d15b298148fc2c50154306d24f9f37e",
-    name: "Discord Times Community Update (Unstable).zip",
+    sha256: Cow::Borrowed("fce6d8aa22f8932cddf0dffaf02d3c013d15b298148fc2c50154306d24f9f37e"),
+    name: Cow::Borrowed("Discord Times Community Update (Unstable).zip"),
 };
 
-/// The file's page in the browser (the manual path's link).
+impl Archive {
+    /// The game the hub's catalog offers, at its address (the values as the catalog checked them).
+    pub fn at_url(url: String, size: u64, sha256: String, name: String) -> Archive {
+        Archive { link: Link::Url(Cow::Owned(url)), size, sha256: Cow::Owned(sha256), name: Cow::Owned(name) }
+    }
+}
+
+/// The file's page in the browser (the manual path's link); a direct address is its own page.
 pub fn file_page(archive: &Archive) -> String {
-    format!("https://drive.google.com/file/d/{}/view", archive.id)
+    match &archive.link {
+        Link::Drive(id) => format!("https://drive.google.com/file/d/{id}/view"),
+        Link::Url(url) => url.to_string(),
+    }
+}
+
+/// The first address the download asks for.
+fn start_url(archive: &Archive) -> String {
+    match &archive.link {
+        Link::Drive(id) => file_url(id),
+        Link::Url(url) => url.to_string(),
+    }
+}
+
+/// Who serves the file, for the words of a failure.
+fn host(archive: &Archive) -> &'static str {
+    match archive.link {
+        Link::Drive(_) => "Google Drive",
+        Link::Url(_) => "the server",
+    }
 }
 
 /// The download URL for the file `id` (the confirm flag skips the scan warning where it can).
@@ -50,6 +87,14 @@ const SECONDS: u32 = 3600;
 const QUOTA: &str = "Google Drive limits downloads of this file for now: try again later or download it by hand";
 /// The file on Drive is not the one Razdor expects (its size or SHA-256 differ).
 const CHANGED: &str = "the archive on Drive changed";
+
+/// The same failure for an archive at a direct address.
+fn changed_text(archive: &Archive) -> String {
+    match archive.link {
+        Link::Drive(_) => CHANGED.into(),
+        Link::Url(_) => "the archive on the server changed".into(),
+    }
+}
 
 /// The network the download uses. A test gives a fake.
 pub trait Net {
@@ -166,7 +211,7 @@ pub fn download_game(net: &dyn Net, archive: &Archive, dest: &Path, progress: &P
                 let _ = fs::remove_file(&part);
                 crate::diag!("game download: {why}");
                 if !resumed {
-                    return Err(Failure::Failed(CHANGED.into()));
+                    return Err(Failure::Failed(changed_text(archive)));
                 }
                 // The partial copy was not this file: the whole file again, once.
                 from = 0;
@@ -179,7 +224,7 @@ pub fn download_game(net: &dyn Net, archive: &Archive, dest: &Path, progress: &P
 /// missing range restarts the file from its start once. `part` holds the body on success.
 fn fetch(net: &dyn Net, archive: &Archive, part: &Path, from: u64, progress: &Progress) -> Result<(), Failure> {
     let cancelled = || progress.cancelled();
-    let mut url = file_url(archive.id);
+    let mut url = start_url(archive);
     let mut from = from;
     let mut restarted = false;
     let mut pages = 0;
@@ -212,11 +257,15 @@ fn fetch(net: &dyn Net, archive: &Archive, part: &Path, from: u64, progress: &Pr
             }
             403 | 429 => {
                 let _ = fs::remove_file(part);
-                return Err(Failure::Failed(QUOTA.into()));
+                let why = match archive.link {
+                    Link::Drive(_) => QUOTA.to_string(),
+                    Link::Url(_) => format!("the server refused the file (HTTP {status})"),
+                };
+                return Err(Failure::Failed(why));
             }
             other => {
                 let _ = fs::remove_file(part);
-                return Err(Failure::Failed(format!("Google Drive answered HTTP {other}")));
+                return Err(Failure::Failed(format!("{} answered HTTP {other}", host(archive))));
             }
         }
         let len = fs::metadata(part).map(|m| m.len()).unwrap_or(0);
@@ -228,16 +277,16 @@ fn fetch(net: &dyn Net, archive: &Archive, part: &Path, from: u64, progress: &Pr
                 if let Some(next) = confirm_url(&page) {
                     pages += 1;
                     if pages > PAGES {
-                        return Err(Failure::Failed("Google Drive keeps asking to confirm the file".into()));
+                        return Err(Failure::Failed(format!("{} keeps asking to confirm the file", host(archive))));
                     }
                     url = next;
                     from = 0;
                     continue;
                 }
-                if is_quota(&page) {
+                if matches!(archive.link, Link::Drive(_)) && is_quota(&page) {
                     return Err(Failure::Failed(QUOTA.into()));
                 }
-                return Err(Failure::Failed("Google Drive did not give the file".into()));
+                return Err(Failure::Failed(format!("{} did not give the file", host(archive))));
             }
         }
         return Ok(());
@@ -352,10 +401,10 @@ mod tests {
 
     fn archive() -> Archive {
         Archive {
-            id: "F1",
+            link: Link::Drive("F1"),
             size: BODY.len() as u64,
-            sha256: Box::leak(crate::update::sha256_hex(BODY).into_boxed_str()),
-            name: "test.zip",
+            sha256: Cow::Owned(crate::update::sha256_hex(BODY)),
+            name: Cow::Borrowed("test.zip"),
         }
     }
 
@@ -589,7 +638,7 @@ mod tests {
         println!("e2e: {result:?}; bytes {}; seconds {:.1}", progress.bytes(), started.elapsed().as_secs_f64());
         assert!(result.is_ok(), "{result:?}");
         verify(&GAME, &dest).unwrap();
-        let found = crate::dt::game_import::examine(&dest, GAME.name).expect("the archive holds the game");
+        let found = crate::dt::game_import::examine(&dest, &GAME.name).expect("the archive holds the game");
         let target = dir.join("DiscordTimes");
         let done = crate::dt::game_import::import(&found, &target, &|_, _| {});
         println!("e2e: import {done:?}");
@@ -600,5 +649,23 @@ mod tests {
         let report = crate::dt::integrity::check(&target, &manifest, true);
         println!("e2e: integrity {report:?}");
         assert!(report.community && report.missing.is_empty() && report.changed.is_empty(), "{report:?}");
+    }
+
+    #[test]
+    fn a_direct_address_is_downloaded_from_itself_and_verified() {
+        let dest = scratch("direct").join("game-download.zip");
+        let url = "https://example.org/releases/game.zip";
+        let archive = Archive::at_url(url.into(), BODY.len() as u64, crate::update::sha256_hex(BODY), "game.zip".into());
+        let net = Fake::new(vec![Reply::Body(200, BODY.to_vec())]);
+        download_game(&net, &archive, &dest, &Progress::default()).unwrap();
+        assert_eq!(net.requests.borrow().as_slice(), &[(url.to_string(), 0)], "the first request is the address itself");
+        assert_eq!(fs::read(&dest).unwrap(), BODY);
+        assert_eq!(file_page(&archive), url);
+        // A file of another hash is refused with the server's words, and nothing is kept.
+        let other = Archive::at_url(url.into(), BODY.len() as u64, "0".repeat(64), "game.zip".into());
+        let net = Fake::new(vec![Reply::Body(200, BODY.to_vec())]);
+        let dest2 = scratch("direct-bad").join("game-download.zip");
+        assert_eq!(download_game(&net, &other, &dest2, &Progress::default()), Err(Failure::Failed("the archive on the server changed".into())));
+        assert!(!dest2.exists() && !part_path(&dest2).exists());
     }
 }

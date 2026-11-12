@@ -333,12 +333,28 @@ impl Entry {
     }
 }
 
+/// The game archive the hub offers (the catalog's `game`): a player with no game installed gets
+/// it downloaded and installed at start (`ui::game_import`). Optional, and an older client ignores it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GameRef {
+    /// An `https://` address, or a path inside the hub (relative to the catalog).
+    pub url: String,
+    /// The archive's size and SHA-256 (checked before anything is unpacked).
+    pub size: u64,
+    pub sha256: String,
+    /// The file's name, as the player sees it (a safe file name).
+    pub name: String,
+}
+
 /// The hub's `index.json`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Catalog {
     pub format: u32,
     #[serde(default)]
     pub entries: Vec<Entry>,
+    /// The game itself, when the hub has it (see [`GameRef`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game: Option<GameRef>,
 }
 
 impl Catalog {
@@ -383,6 +399,26 @@ impl Catalog {
                     }
                     p.sha256 = p.sha256.to_ascii_lowercase();
                 }
+            }
+        }
+        if let Some(g) = &mut c.game {
+            // The game's name is a file name, its address an https one (or a path in the hub), its size a
+            // sane archive's: the same limit as any download.
+            if !safe_name(&g.name) {
+                return Err(format!("index.json: game: bad file name {:?}", g.name));
+            }
+            if g.url.starts_with("http://") {
+                return Err("index.json: game: the address must be https".into());
+            }
+            if !safe_location(&g.url) {
+                return Err(format!("index.json: game: bad address {:?}", g.url));
+            }
+            if !safe_sha256(&g.sha256) {
+                return Err("index.json: game: the SHA-256 is not 64 hex digits".into());
+            }
+            g.sha256 = g.sha256.to_ascii_lowercase();
+            if g.size == 0 || g.size > MAX_ARCHIVE_DOWNLOAD {
+                return Err(format!("index.json: game: bad size {}", g.size));
             }
         }
         Ok(c)
@@ -1857,5 +1893,50 @@ mod tests {
         let (hub, _) = mock_hub("cache-mock");
         assert_eq!(hub.cached_catalog(), None);
         let _ = std::fs::remove_dir_all(&hub.local);
+    }
+
+    /// A catalog of format 1 with no entries, and the `game` object `game` (raw JSON).
+    fn catalog_with_game(game: &str) -> String {
+        format!(r#"{{"format":1,"entries":[],"game":{game}}}"#)
+    }
+
+    const GOOD_GAME: &str = r#"{"url":"https://example.org/discord-times-cu.zip","size":44619982,"sha256":"DFF554E22A0485F0ED06B3459D3E7E868224D49E264BBA0ECF40DB852514568D","name":"discord-times-cu.zip"}"#;
+
+    #[test]
+    fn a_catalog_without_a_game_parses_as_before() {
+        let c = Catalog::parse(br#"{"format":1,"entries":[]}"#).unwrap();
+        assert_eq!(c.game, None);
+        let c = Catalog::parse(catalog_with_game("null").as_bytes()).unwrap();
+        assert_eq!(c.game, None);
+    }
+
+    #[test]
+    fn a_catalog_with_a_game_reads_it_and_lowers_its_sha256() {
+        let c = Catalog::parse(catalog_with_game(GOOD_GAME).as_bytes()).unwrap();
+        let g = c.game.expect("the game is read");
+        assert_eq!(g.url, "https://example.org/discord-times-cu.zip");
+        assert_eq!(g.size, 44_619_982);
+        assert_eq!(g.sha256, "dff554e22a0485f0ed06b3459d3e7e868224d49e264bba0ecf40db852514568d");
+        assert_eq!(g.name, "discord-times-cu.zip");
+        // A path inside the hub is an address too (relative to the catalog).
+        let rel = GOOD_GAME.replace("https://example.org/discord-times-cu.zip", "game/discord-times-cu.zip");
+        assert!(Catalog::parse(catalog_with_game(&rel).as_bytes()).is_ok());
+    }
+
+    #[test]
+    fn a_game_with_a_bad_field_refuses_the_catalog() {
+        let bad = [
+            GOOD_GAME.replace("\"name\":\"discord-times-cu.zip\"", "\"name\":\"../x.zip\""),
+            GOOD_GAME.replace("\"name\":\"discord-times-cu.zip\"", "\"name\":\"\""),
+            GOOD_GAME.replace("https://example.org/discord-times-cu.zip", "http://example.org/discord-times-cu.zip"),
+            GOOD_GAME.replace("https://example.org/discord-times-cu.zip", "https://exa mple.org/x.zip"),
+            GOOD_GAME.replace("https://example.org/discord-times-cu.zip", "../../etc/x.zip"),
+            GOOD_GAME.replace("DFF554E22A0485F0ED06B3459D3E7E868224D49E264BBA0ECF40DB852514568D", "abc"),
+            GOOD_GAME.replace("44619982", "0"),
+            GOOD_GAME.replace("44619982", &(MAX_ARCHIVE_DOWNLOAD + 1).to_string()),
+        ];
+        for game in bad {
+            assert!(Catalog::parse(catalog_with_game(&game).as_bytes()).is_err(), "{game}");
+        }
     }
 }
