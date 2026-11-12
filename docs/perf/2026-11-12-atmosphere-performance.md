@@ -332,3 +332,22 @@ build was loaded for one case and is not quoted):
 Why it does not pay: the walk still visits every visible object each frame (the chunks only narrow the set), and the
 heap merge over the visible chunks costs more than the per-frame sort it replaced. Decision: dropped, per the rule that
 a step lands only with a measured gain. The commits are kept on the local branch `dropped/1605-steps-1-2`.
+
+### Correction to step 3a (2026-11-12): the earlier timing compared against the wrong baseline
+
+The step 3a section above compared 3a with a base built from `67c91112`. origin/main had moved on by then (the map
+sprite copies, `3fbd5109`, and others), so that comparison mixed in other changes. The pixel comparison was redone
+against `a220850b` (the commit 3a was built on): 96/96 byte-identical. The timings were redone interleaved against
+`a220850b`, on the 4060, two rounds (other sessions loaded the machine in round 2):
+
+| Case | base `a220850b` work (round 1 / 2) | 3a work (round 1 / 2) |
+|---|---|---|
+| «Другой берег» zoomed out, 2.5D | 2.74 / 2.64 | 2.47 / 2.83 |
+| «Другой берег» zoomed out, third person | 5.68 / 5.46 | 5.12 / 5.53 |
+| «Другой берег» whole map, 2.5D | 8.00 / 7.04 | 6.66 / 8.77 |
+| «Другой берег» whole map, third person | 11.58 / 11.56 | 10.98 / 13.17 |
+| РК3 close-up, 2.5D | 0.63 / 0.62 | 0.59 / 0.61 |
+
+Round 1 is faster by 6–12 %, round 2 is slower by up to 14 %. The rounds disagree, so there is no measured gain.
+Step 3a is dropped, not landed (the commit is on the local branch `dropped/1605-step-3a-viewproj-cache`). The earlier
+numbers in the section above are not a claim.
