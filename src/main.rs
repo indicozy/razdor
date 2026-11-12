@@ -202,7 +202,16 @@ async fn main() {
     ui::language::init();
     let content = Arc::new(Content::builtin());
     razdor::diag::step("loading the art and sounds");
-    let mut app = App::new(Assets::load(content.clone()).await, content);
+    let assets = Assets::load(content.clone()).await;
+    // With no install, the first screen's art is Razdor's own copy (`ui::menu_art`); an install
+    // replaces it when it is loaded (`ui::assets::announce_install`).
+    if assets.dt.is_none() {
+        if let Some(dir) = ui::menu_art::root_or_extract().await {
+            razdor::diag!("menu art: {}", dir.display());
+            ui::chrome::set_install(dir);
+        }
+    }
+    let mut app = App::new(assets, content);
     razdor::diag::step("started");
     // The session slot is written when the game is ended by a signal (the desktop) or when the
     // app goes to the background (iOS; Android's pause is a JNI call, `ui::android`).

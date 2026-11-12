@@ -39,6 +39,7 @@ pub mod lacking;
 pub mod language;
 pub mod game_import;
 pub mod main_menu;
+pub mod menu_art;
 pub mod map_import;
 pub mod frame_cap;
 pub mod map_anim;
