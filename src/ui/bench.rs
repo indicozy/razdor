@@ -873,11 +873,7 @@ mod tests {
 
     #[test]
     fn a_cell_takes_its_preset_and_view_and_the_run_switches() {
-        let mut s = Settings::default();
-        s.map_first_person = true;
-        s.frame_cap = 60;
-        s.battery_saver = true;
-        s.record_game = true;
+        let mut s = Settings { map_first_person: true, frame_cap: 60, battery_saver: true, record_game: true, ..Settings::default() };
         configure(&mut s, &Slot { config: ALL[4], pos: Pos::Near });
         assert!(!s.map_tilt, "the flat view");
         assert_eq!((s.frame_cap, s.battery_saver, s.record_game), (0, false, false));
@@ -888,10 +884,7 @@ mod tests {
 
     #[test]
     fn my_settings_keep_the_players_look() {
-        let mut s = Settings::default();
-        s.map_tilt = true;
-        s.map_first_person = true;
-        s.frame_cap = 30;
+        let mut s = Settings { map_tilt: true, map_first_person: true, frame_cap: 30, ..Settings::default() };
         configure(&mut s, &Slot { config: MINE, pos: Pos::Far });
         assert!(s.map_tilt && s.map_first_person, "the player's own view");
         assert_eq!(s.frame_cap, 0);
