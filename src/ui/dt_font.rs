@@ -339,6 +339,16 @@ pub fn with_native_metrics<R>(f: impl FnOnce() -> R) -> R {
     result
 }
 
+/// Runs `f` with the TrueType text of the modern font mode whatever the player's font setting is: the
+/// texts keep the face they had before the menu art (the no-install prompt on phones, whose buttons
+/// were cut in the bitmap face's wider letters). The setting is put back after `f`.
+pub fn with_plain_font<R>(f: impl FnOnce() -> R) -> R {
+    let before = MODE.with(|m| m.replace(FontMode::Modern));
+    let result = f();
+    MODE.with(|m| m.set(before));
+    result
+}
+
 /// Use the screen's established fallback metrics for a legacy layout that must not inherit
 /// the shared native font sizing (modal dialogs still use their own fixed spacing).
 pub fn with_legacy_metrics<R>(f: impl FnOnce() -> R) -> R {
@@ -479,6 +489,16 @@ mod tests {
             // The flag is restored after the closure.
             assert!(native_flag());
         });
+    }
+
+    #[test]
+    fn the_plain_font_is_the_modern_mode_only_inside_and_the_setting_comes_back() {
+        with_plain_font(|| {
+            assert_eq!(mode(), FontMode::Modern);
+            assert!(!native_metrics());
+        });
+        assert_eq!(mode(), FontMode::Original);
+        assert_eq!(with_plain_font(|| with_plain_font(mode)), FontMode::Modern);
     }
 
     #[test]
