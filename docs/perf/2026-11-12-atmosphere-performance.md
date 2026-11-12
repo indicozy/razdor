@@ -214,3 +214,40 @@ step order is the owner's; this section is the evidence for choosing between the
 
 Not measured here: the 96-PNG matrix, the invalidation tests, `tools/perf/check.sh`, and the Android split. No code
 was changed by step 0; the instrumented build was reverted before this commit.
+
+### Correction: the step 0 split ran on the RTX 5060 Ti (2026-11-12, after the reboot)
+
+The step 0 numbers above were measured with the hardcoded `/dev/dri/card2` in the run script. After the reboot
+(machine up since 13:04) `card2` is PCI 0000:01:00.0, the RTX 5060 Ti; the RTX 4060 is `card1`, PCI 0000:05:00.0
+(nvidia-smi index 1). So every number in the step 0 table was measured on the 5060 Ti, the monitor's card, not the
+4060. The CPU shares are still the same kind of measurement, but they are not the 4060's. The run script now finds
+the card by its PCI address and exits if the 4060 is not there.
+
+### Lazy PICKS measurement on the RTX 4060 (`card1`, backlog 1605, step 3 preparation)
+
+Each `standing_at` call's parts, medians of the probe's 5 s windows (ms of world work; the 4060 under load 8–12):
+
+| Case | work | whole `standing_at` | draw callback | `standing_model` | `picture_quad` | PICKS push | placement (whole − draw) |
+|---|---|---|---|---|---|---|---|
+| zoomed out, 2.5D | 5.6 | 3.4 | 1.3 | 0.4 | 0.7 | 0.0 | 2.1 |
+| zoomed out, third person | 6.6 | 3.35 | 0.8 | 0.5 | 0.6 | 0.0 | 2.55 |
+| whole map, 2.5D | 9.1 | 6.1 | 2.6 | 0.7 | 1.2 | 0.0 | 3.5 |
+| whole map, third person | 14.7 | 8.1 | 2.4 | 0.9 | 1.1 | 0.0 | 5.7 |
+
+(Third person has 1–2 summary windows only; the others 5.)
+
+What this says:
+
+- **The PICKS push costs nothing measurable** (0.0 ms). Lazy PICKS as first described (record the sprites and
+  build the quads on demand) would save about 0 ms: the quad is computed once and the push only copies it.
+- **The quad is needed by the cull**: `standing_at` projects the picture to decide whether the sprite is on the
+  window at all, and a sprite off the window is not drawn. So the quad is in the draw decision, not only in the pick.
+  Skipping it would need a cheaper conservative bound (the foot's projection and the picture's largest extent),
+  falling back to the exact quad only near the window's edges. That would be a change to the draw path, with its
+  own byte-identity proof. Its ceiling is the quad's share, 0.6–1.2 ms (about 10% of the world work); the
+  `standing_model` share (0.4–0.9 ms) would stay.
+- **Most placement is neither the quad nor the model** (2.1–5.7 ms minus 1.0–1.6 ms): `push_cpu_model` and the
+  magnification, the eye test, the fade's near band, `overlaps`, and the sharp perspective set-up. Not split further.
+
+Not done: no pick test, no matrix run for a lazy-PICKS change (there is no change: the measurement build was
+reverted). The cheaper-cull variant is a candidate for the coordinator's decision, not a landed change.
