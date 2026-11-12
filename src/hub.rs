@@ -346,6 +346,31 @@ pub struct GameRef {
     pub name: String,
 }
 
+/// The promo ad the hub offers (the catalog's `ad`, optional): the main menu's picture and its
+/// texts (`ui::ads`). Read on every launch: a copy of it on the player's disk that differs (id, version
+/// or picture) is downloaded and replaced. An older client ignores it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdRef {
+    /// The ad's folder name (letters, digits, `-` and `_`).
+    pub id: String,
+    pub version: u32,
+    /// The picture: an `https://` address, or a path in the hub (relative to the catalog).
+    pub image: String,
+    /// The picture's size and SHA-256 (checked before it is kept).
+    pub size: u64,
+    pub sha256: String,
+    /// Where the ad leads: the game's page (`http://` or `https://`).
+    pub url: String,
+    /// The caption under the picture, in Russian and in English (one line each).
+    pub caption_ru: String,
+    pub caption_en: String,
+}
+
+/// The largest promo picture (the shipped one is 135 KiB).
+pub const MAX_AD_BYTES: u64 = 2 << 20;
+/// The most a caption may be, in bytes.
+const MAX_CAPTION: usize = 200;
+
 /// The hub's `index.json`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Catalog {
@@ -355,6 +380,9 @@ pub struct Catalog {
     /// The game itself, when the hub has it (see [`GameRef`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub game: Option<GameRef>,
+    /// The promo ad of the main menu, when the hub has one (see [`AdRef`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ad: Option<AdRef>,
 }
 
 impl Catalog {
@@ -419,6 +447,31 @@ impl Catalog {
             g.sha256 = g.sha256.to_ascii_lowercase();
             if g.size == 0 || g.size > MAX_ARCHIVE_DOWNLOAD {
                 return Err(format!("index.json: game: bad size {}", g.size));
+            }
+        }
+        if let Some(a) = &mut c.ad {
+            // The ad's folder name, its picture (https or a path in the hub, a sane size), its
+            // link and its captions (one line each): what the menu and the ad's file take.
+            if !safe_id(&a.id) {
+                return Err(format!("index.json: ad: bad id {:?}", a.id));
+            }
+            if !safe_location(&a.image) || (a.image.starts_with("http://")) {
+                return Err(format!("index.json: ad: bad picture address {:?}", a.image));
+            }
+            if !safe_sha256(&a.sha256) {
+                return Err("index.json: ad: the SHA-256 is not 64 hex digits".into());
+            }
+            a.sha256 = a.sha256.to_ascii_lowercase();
+            if a.size == 0 || a.size > MAX_AD_BYTES {
+                return Err(format!("index.json: ad: bad size {}", a.size));
+            }
+            if !(a.url.starts_with("https://") || a.url.starts_with("http://")) || a.url.len() <= 8 || a.url.chars().any(|c| c.is_whitespace() || c.is_control()) {
+                return Err(format!("index.json: ad: bad link {:?}", a.url));
+            }
+            for (what, text) in [("caption_ru", &a.caption_ru), ("caption_en", &a.caption_en)] {
+                if text.len() > MAX_CAPTION || text.chars().any(|c| c == '\n' || c == '\r' || c.is_control()) {
+                    return Err(format!("index.json: ad: bad {what}"));
+                }
             }
         }
         Ok(c)
@@ -1320,7 +1373,7 @@ pub mod mock {
         for e in &mut o.entries {
             e.rating = votes.iter().find(|v| v.0 == e.id).map(|&(_, up, down)| Rating { up, down });
         }
-        let catalog = Catalog { format: 1, entries: o.entries, game: None };
+        let catalog = Catalog { format: 1, entries: o.entries, game: None, ad: None };
         let json = serde_json::to_vec_pretty(&catalog).expect("json");
         crate::editor::files::write_atomically(&dir.join(INDEX), &json)
     }
@@ -1937,6 +1990,41 @@ mod tests {
         ];
         for game in bad {
             assert!(Catalog::parse(catalog_with_game(&game).as_bytes()).is_err(), "{game}");
+        }
+    }
+
+    const GOOD_AD: &str = r#"{"id":"thorny-times","version":1,"image":"https://example.org/capsule.png","size":135584,"sha256":"3AA411F3AB65A986DD7FDE5ECFBBCB0D399458306678421D4DEFC6B899C550CA","url":"https://store.steampowered.com/app/2182610/","caption_ru":"Новая игра","caption_en":"A new game"}"#;
+
+    fn catalog_with_ad(ad: &str) -> String {
+        format!(r#"{{"format":1,"entries":[],"ad":{ad}}}"#)
+    }
+
+    #[test]
+    fn a_catalog_with_an_ad_reads_it_and_one_without_does_not() {
+        assert_eq!(Catalog::parse(br#"{"format":1,"entries":[]}"#).unwrap().ad, None);
+        assert_eq!(Catalog::parse(catalog_with_ad("null").as_bytes()).unwrap().ad, None);
+        let a = Catalog::parse(catalog_with_ad(GOOD_AD).as_bytes()).unwrap().ad.expect("the ad is read");
+        assert_eq!((a.id.as_str(), a.version, a.size), ("thorny-times", 1, 135_584));
+        assert_eq!(a.sha256, "3aa411f3ab65a986dd7fde5ecfbbcb0d399458306678421d4defc6b899c550ca");
+        assert_eq!(a.url, "https://store.steampowered.com/app/2182610/");
+        assert_eq!(a.caption_en, "A new game");
+    }
+
+    #[test]
+    fn a_bad_ad_refuses_the_catalog() {
+        let bad = [
+            GOOD_AD.replace("\"thorny-times\"", "\"../x\""),
+            GOOD_AD.replace("https://example.org/capsule.png", "http://example.org/capsule.png"),
+            GOOD_AD.replace("https://example.org/capsule.png", "https://exa mple.org/capsule.png"),
+            GOOD_AD.replace("3AA411F3AB65A986DD7FDE5ECFBBCB0D399458306678421D4DEFC6B899C550CA", "abc"),
+            GOOD_AD.replace("\"size\":135584", "\"size\":0"),
+            GOOD_AD.replace("\"size\":135584", &format!("\"size\":{}", MAX_AD_BYTES + 1)),
+            GOOD_AD.replace("https://store.steampowered.com/app/2182610/", "ftp://store.example.org/x"),
+            GOOD_AD.replace("\"caption_en\":\"A new game\"", "\"caption_en\":\"two\\nlines\""),
+            GOOD_AD.replace("\"caption_ru\":\"Новая игра\"", &format!("\"caption_ru\":\"{}\"", "я".repeat(120))),
+        ];
+        for ad in bad {
+            assert!(Catalog::parse(catalog_with_ad(&ad).as_bytes()).is_err(), "{ad}");
         }
     }
 }
