@@ -367,8 +367,13 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   `pointed_tile` turns it into a cell (`pick_cell`: the hero's or an army's cell, a location's centre cell or else its
   first footprint cell that can be targeted, so a click on a tower walks into the castle). The pointer shape, the hover
   ring and outline, the tooltip (`pick_tooltip`) and the click use it; a miss takes the ground cell as before. Flat, nothing
-  is recorded and `pointed_tile` is the ground cell. Quads are the picture's box, not its alpha: a transparent corner of a
-  picture counts as the picture.
+  is recorded and `pointed_tile` is the ground cell. A quad hits only where its texel is opaque (alpha at least 128):
+  `texel_uv` inverts the quad's bilinear map (Newton) to the texel in the sprite's source rectangle, and `opaque_hit`
+  reads the alpha from `sprite_alpha` (a CPU copy kept when the atlas and the figure sheets are made, `sprite_texture`,
+  never read from the GPU). A transparent texel falls through to the pick behind, then the ground. A sprite with no mask
+  (a texture made elsewhere, a procedural figure) hits as its quad. A figure's source is its sheet frame (`FIGURE_SRC`,
+  set by `draw_figure`); a building's is its atlas picture (`atlas_src`). Card layers share the group's picture, so
+  they share its source.
 - **Turning.** Q and E turn 45° (`TILT_YAW_STEP`); the shown yaw eases to its target (`ease_yaw`,
   12 a second, the short way round, snapped within 0.05°). Q and E cut a walk only on the flat map
   (`cuts_walk`). Screen moves (keys, edge, stick, drag, slide) go through `Camera::screen_to_world_delta`

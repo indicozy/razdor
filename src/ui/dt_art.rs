@@ -247,6 +247,14 @@ fn texture(img: &Image) -> Option<Texture2D> {
     Some(tex)
 }
 
+/// [`texture`] for a sprite the 2.5D pointer picks (a map atlas, a figure sheet): its alpha is kept on the CPU
+/// from the image, for the pointer's alpha test ([`super::sprite_alpha`]), so the pointer never reads the GPU.
+fn sprite_texture(img: &Image) -> Option<Texture2D> {
+    let tex = texture(img)?;
+    super::sprite_alpha::register(&tex, img);
+    Some(tex)
+}
+
 impl DtArt {
     pub fn load(install: DtInstall) -> DtArt {
         DtArt {
@@ -477,7 +485,7 @@ impl DtArt {
                     razdor::diag!("Discord Times art: the 1/{divisor} sprites do not fit an atlas");
                     return None;
                 };
-                let texture = texture(&image)?;
+                let texture = sprite_texture(&image)?;
                 razdor::diag!("sprite LOD 1/{divisor}: atlas {}x{} ({} bytes)", image.width, image.height, image.rgba.len());
                 let rects = RectTable::from_entries(
                     sprites
@@ -508,7 +516,7 @@ impl DtArt {
                     razdor::diag!("Discord Times art: map objects do not fit an atlas");
                     return None;
                 };
-                let texture = texture(&image)?;
+                let texture = sprite_texture(&image)?;
                 razdor::diag!("map atlas: {}x{} ({} bytes)", image.width, image.height, image.rgba.len());
                 let rects = RectTable::from_entries(
                     sprites
@@ -584,7 +592,7 @@ impl DtArt {
                         rgba[dst..dst + n * 4].copy_from_slice(&f.rgba[row * n * 4..(row + 1) * n * 4]);
                     }
                 }
-                texture(&Image { width: side as u32, height: side as u32, rgba })
+                sprite_texture(&Image { width: side as u32, height: side as u32, rgba })
             })
             .flatten();
         self.figures_sheets.borrow_mut().insert(stem.to_string(), t.clone());

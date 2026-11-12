@@ -1753,28 +1753,99 @@ enum Pick {
     Location(usize),
 }
 
-/// A pickable standing sprite drawn in the tilted view: the four corners of its picture on the window, in the
-/// order of the picture's corners (a convex quad), and what it is.
+/// The texture a pickable sprite is drawn from, and the source rectangle in its pixels: the alpha test reads
+/// the texels under the pointer through it ([`opaque_hit`]).
 #[derive(Clone, Copy)]
+struct PickSrc {
+    /// The key of its texture's alpha mask ([`sprite_alpha::key_of`]).
+    key: u64,
+    src: Rect,
+}
+
+impl PickSrc {
+    fn of(tex: &Texture2D, src: Rect) -> PickSrc {
+        PickSrc { key: super::sprite_alpha::key_of(tex), src }
+    }
+}
+
+/// The source of a building picture `r` of the map atlas (its texture, the picture's pixels).
+fn atlas_src(atlas: &Atlas, r: Rect) -> Option<PickSrc> {
+    Some(PickSrc::of(&atlas.texture, r))
+}
+
+/// A pickable standing sprite drawn in the tilted view: the four corners of its picture on the window, in the
+/// order of the picture's corners (a convex quad), what it is, and the texture it is drawn from (`None` for a
+/// sprite drawn without one: the quad alone counts).
+#[derive(Clone)]
 struct PickQuad {
     quad: [Vec2; 4],
     pick: Pick,
+    src: Option<PickSrc>,
 }
+
+/// The alpha a pick needs to hit: a texel at least this opaque.
+const PICK_ALPHA: u8 = 128;
 
 local! {
     /// The pickable sprites the tilted view drew this frame, in draw order (`draw_world_in` clears it, the
     /// sprites' pass records it). The pointer's test reads it the next frame, as the map's clicks do.
     static PICKS: std::cell::RefCell<Vec<PickQuad>> = const { std::cell::RefCell::new(Vec::new()) };
-    /// The identity of the standing sprite the next [`standing_at`] call draws. That call takes it at its start,
-    /// so a sprite drawn inside it records nothing.
-    static PICK_NEXT: std::cell::Cell<Option<Pick>> = const { std::cell::Cell::new(None) };
+    /// The identity of the standing sprite the next [`standing_at`] call draws (with the texture it is drawn from,
+    /// when known). That call takes it at its start, so a sprite drawn inside it records nothing.
+    static PICK_NEXT: std::cell::RefCell<Option<(Pick, Option<PickSrc>)>> = const { std::cell::RefCell::new(None) };
+    /// The sheet frame a figure drawn inside the current [`standing_at`] call came from ([`draw_figure`] sets it
+    /// and the call takes it after the draw).
+    static FIGURE_SRC: std::cell::RefCell<Option<PickSrc>> = const { std::cell::RefCell::new(None) };
 }
 
-/// [`standing`] for a sprite the pointer can pick (`pick`, none for one that is not picked): the tilted view
-/// records its drawn quad under that identity ([`PICKS`]); the flat view draws it as [`standing`] does.
-fn standing_picked(pick: Option<Pick>, cam: &Camera, foot: Vec2, base: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
-    PICK_NEXT.with(|p| p.set(pick));
+/// [`standing`] for a sprite the pointer can pick (`pick`, none for one that is not picked), drawn from `src` when
+/// it is known (a building's atlas picture; a figure's sheet frame comes from its draw): the tilted view records its
+/// drawn quad under that identity ([`PICKS`]); the flat view draws it as [`standing`] does.
+#[allow(clippy::too_many_arguments)]
+fn standing_picked(pick: Option<Pick>, src: Option<PickSrc>, cam: &Camera, foot: Vec2, base: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
+    PICK_NEXT.with_borrow_mut(|p| *p = pick.map(|pick| (pick, src)));
     standing(cam, foot, base, vis, picture, draw);
+}
+
+/// The texture coordinates `(u, v)` in `[0, 1]` of the point `m` in the quad `q` (its corners in the picture's
+/// order: top left, top right, bottom right, bottom left, so `u` runs along the top and `v` down). The inverse of the
+/// bilinear map of the corners, by Newton's method: the picture is a flat billboard, whose projection is a
+/// perspective map, so this is the bilinear one's close fit (exact for a quad that is not foreshortened). None when
+/// the quad is degenerate or the point is off it.
+fn texel_uv(q: &[Vec2; 4], m: Vec2) -> Option<(f32, f32)> {
+    let (a, b, c, d) = (q[0], q[1], q[2], q[3]);
+    let (e1, e2, e3) = (b - a, d - a, a - b + c - d);
+    let (mut u, mut v) = (0.5f32, 0.5f32);
+    for _ in 0..8 {
+        let p = a + e1 * u + e2 * v + e3 * (u * v) - m;
+        let ju = e1 + e3 * v;
+        let jv = e2 + e3 * u;
+        let det = ju.x * jv.y - ju.y * jv.x;
+        if det.abs() < 1e-9 {
+            return None;
+        }
+        // Solve J (du, dv) = -p.
+        let du = (-p.x * jv.y + p.y * jv.x) / det;
+        let dv = (-ju.x * p.y + ju.y * p.x) / det;
+        u += du;
+        v += dv;
+        if !u.is_finite() || !v.is_finite() {
+            return None;
+        }
+    }
+    let slack = 1e-3;
+    (u >= -slack && u <= 1.0 + slack && v >= -slack && v <= 1.0 + slack).then_some((u.clamp(0.0, 1.0), v.clamp(0.0, 1.0)))
+}
+
+/// Whether the pick `q` hits at the window's pixel `m`, given that its quad holds `m`: a sprite drawn from a texture
+/// hits only where its texel is opaque ([`PICK_ALPHA`]); one with no mask, or no texel to look at, hits as its quad.
+fn opaque_hit(q: &PickQuad, m: Vec2) -> bool {
+    let Some(s) = &q.src else { return true };
+    let Some(mask) = super::sprite_alpha::mask(s.key).filter(|k| k.w > 0 && k.h > 0) else { return true };
+    let Some((u, v)) = texel_uv(&q.quad, m) else { return true };
+    let x = (s.src.x + u * s.src.w).floor().clamp(0.0, (mask.w - 1) as f32) as usize;
+    let y = (s.src.y + v * s.src.h).floor().clamp(0.0, (mask.h - 1) as f32) as usize;
+    mask.a[y * mask.w + x] >= PICK_ALPHA
 }
 
 /// Whether `m` lies in the convex quad `q` (its corners in order, either way round). A degenerate quad holds nothing.
@@ -1794,12 +1865,13 @@ fn quad_holds(q: &[Vec2; 4], m: Vec2) -> bool {
     side != 0.0
 }
 
-/// The front-most of `quads` (in draw order) that holds `m`: the last one drawn.
+/// The front-most of `quads` (in draw order) that hits `m`: the last one drawn whose quad holds `m` and whose texel
+/// there is opaque ([`opaque_hit`]). A transparent hit falls through to the ones behind it.
 fn front_pick(quads: &[PickQuad], m: Vec2) -> Option<Pick> {
-    quads.iter().rev().find(|q| quad_holds(&q.quad, m)).map(|q| q.pick)
+    quads.iter().rev().find(|q| quad_holds(&q.quad, m) && opaque_hit(q, m)).map(|q| q.pick)
 }
 
-/// The standing sprite the tilted view drew under the window's pixel `m` last frame, the front-most one.
+/// The standing sprite the tilted view drew under the window's pixel `m` last frame, the front-most one that hits.
 fn sprite_under(m: Vec2) -> Option<Pick> {
     PICKS.with_borrow(|quads| front_pick(quads, m))
 }
@@ -1854,7 +1926,7 @@ fn standing(cam: &Camera, foot: Vec2, base: Vec2, vis: f32, picture: Rect, draw:
 /// `foot`: a layer of a building on a bent sheet ([`draw_layers_on_sheet`]) stands on its own ground foot, while the
 /// building's fade is the group's, so its layers fade together. `base` is as in [`standing`].
 fn standing_at(cam: &Camera, foot: Vec2, base: Vec2, at: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
-    let pick = PICK_NEXT.with(|p| p.take());
+    let pick = PICK_NEXT.with_borrow_mut(Option::take);
     let Some(tilt) = cam.tilt else { return draw() };
     if vis <= 0.0 {
         return;
@@ -1914,15 +1986,19 @@ fn standing_at(cam: &Camera, foot: Vec2, base: Vec2, at: Vec2, vis: f32, picture
             return;
         }
     }
-    // A pickable sprite that is drawn (not faded out or hidden above) is what the pointer finds this frame.
-    if let (Some(pick), Some(quad)) = (pick, quad) {
-        PICKS.with_borrow_mut(|quads| quads.push(PickQuad { quad, pick }));
-    }
     push_cpu_model(place);
     let prev = SPRITE_VIS.with(|s| s.replace(vis));
+    FIGURE_SRC.with_borrow_mut(|f| *f = None);
     super::sharp::with_perspective(magnify, draw);
+    let figure = FIGURE_SRC.with_borrow_mut(Option::take);
     SPRITE_VIS.with(|s| s.set(prev));
     pop_cpu_model();
+    // A pickable sprite that is drawn (not faded out or hidden above) is what the pointer finds this frame: from the
+    // texture the sprite was given, else the figure's sheet frame it drew.
+    if let (Some((pick, src)), Some(quad)) = (pick, quad) {
+        let src = src.or(figure);
+        PICKS.with_borrow_mut(|quads| quads.push(PickQuad { quad, pick, src }));
+    }
 }
 
 local! {
@@ -3420,7 +3496,7 @@ fn draw_building_group(cam: &Camera, atlas: &Atlas, r: Rect, cards: &[Card], ori
         return draw_layers_on_sheet(cam, atlas, r, cards, origin, zoom, foot, vis, outlined, pick);
     }
     let layers = layered_cards(cam, cards, group_y(foot, origin, zoom));
-    standing_picked(pick, cam, foot, foot, vis, Rect::new(origin.x, origin.y, r.w * zoom, r.h * zoom), || {
+    standing_picked(pick, atlas_src(atlas, r), cam, foot, foot, vis, Rect::new(origin.x, origin.y, r.w * zoom, r.h * zoom), || {
         frame_probe::sprite(r.w * zoom, r.h * zoom);
         match living.and_then(|ls| ls.body()) {
             Some(body) => draw_cards(cam, &layers, origin, zoom, Rect::new(0.0, 0.0, r.w, r.h), body, outlined),
@@ -3483,7 +3559,7 @@ fn draw_layers_on_sheet(cam: &Camera, atlas: &Atlas, r: Rect, cards: &[Card], or
     }
     for (k, (at, card)) in layers.iter().enumerate() {
         // Each layer is picked as the building (the outline pass above is not).
-        PICK_NEXT.with(|p| p.set(pick));
+        PICK_NEXT.with_borrow_mut(|p| *p = pick.map(|pick| (pick, atlas_src(atlas, r))));
         standing_at(cam, foot, *at, *at, vis, picture, || {
             if k == 0 {
                 frame_probe::sprite(r.w * zoom, r.h * zoom);
@@ -3995,6 +4071,9 @@ fn draw_figure(art: Option<&DtArt>, stem: &str, pos: (f32, f32), next: Option<(f
     let frame = frame.min(7) as f32;
     let (dest, size) = (vec2(rect.x, rect.y), rect.w);
     frame_probe::sprite(size, size);
+    // The frame drawn, for the pointer's alpha test of this figure ([`FIGURE_SRC`]).
+    let frame_src = Rect::new(frame * n, row * n, n, n);
+    FIGURE_SRC.with_borrow_mut(|f| *f = Some(PickSrc::of(&sheet, frame_src)));
     // The sheets hold premultiplied colour and the original draws every figure with
     // SRCBLEND ONE, DESTBLEND INVSRCALPHA (0x4c9ef6, 0x4ca0d9): the Ghost's light where its
     // alpha is 0 is added to the map, its glow.
@@ -4786,7 +4865,8 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                         // A bridge lies on the ground (Razdor's), so it is drawn in the ground pass.
                         ground(cam, || draw_building(l, art, cam, outlined));
                     } else {
-                        standing_picked(Some(Pick::Location(*i)), cam, building_foot(l, cam), building_foot(l, cam), shade_of(building_foot(l, cam)), building_picture(l, art, cam), || draw_building(l, art, cam, outlined));
+                        let src = art.and_then(|a| a.map_atlas()).and_then(|at| atlas_src(at, at.building(l.picture.0, l.picture.1)?));
+                        standing_picked(Some(Pick::Location(*i)), src, cam, building_foot(l, cam), building_foot(l, cam), shade_of(building_foot(l, cam)), building_picture(l, art, cam), || draw_building(l, art, cam, outlined));
                     }
                 }
                 Drawable::BuildingGroup(i) => {
@@ -4806,7 +4886,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                     let f = cam.to_screen(game.army_display_pos(a));
                     // A figure inside a building is not drawn (`draw_army`), so the pointer does not find it either.
                     let pick = (!game.army_hidden(a)).then_some(Pick::Army(*i));
-                    standing_picked(pick, cam, f, f, shade_of(f), army_picture(game, a, art, cam), || draw_army(game, a, assets, art, cam));
+                    standing_picked(pick, None, cam, f, f, shade_of(f), army_picture(game, a, art, cam), || draw_army(game, a, assets, art, cam));
                 }
                 Drawable::Ship => {
                     if let Some(ship) = game.ship {
@@ -4823,7 +4903,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                 Drawable::Hero => {
                     let f = cam.to_screen(game.display_pos());
                     let pick = (!game.hero_hidden()).then_some(Pick::Hero);
-                    without_near_fade(|| standing_picked(pick, cam, f, f, shade_of(f), hero_picture(game, art, cam), || draw_hero(game, assets, art, cam)))
+                    without_near_fade(|| standing_picked(pick, None, cam, f, f, shade_of(f), hero_picture(game, art, cam), || draw_hero(game, assets, art, cam)))
                 }
                 Drawable::Spell(n) => {
                     if let Some(s) = spell {
@@ -8726,18 +8806,31 @@ mod pick_tests {
         [vec2(x0, y0), vec2(x0 + side, y0), vec2(x0 + side, y0 + side), vec2(x0, y0 + side)]
     }
 
+    /// A 4×4 texture's mask under `key`, opaque where `opaque` says (the tests give it, no GPU texture).
+    fn masked(key: u64, opaque: impl Fn(usize, usize) -> bool) {
+        let (w, h) = (4usize, 4usize);
+        let a = (0..w * h).map(|i| if opaque(i % w, i / w) { 255 } else { 0 }).collect();
+        super::super::sprite_alpha::register_mask(key, super::super::sprite_alpha::AlphaMask { w, h, a });
+    }
+
+    /// A pick of the square at 0,0 of side 40, drawn from the 4×4 texture `key` (none: the quad alone).
+    fn pick_on_square(pick: Pick, key: Option<u64>) -> PickQuad {
+        let src = key.map(|key| PickSrc { key, src: Rect::new(0.0, 0.0, 4.0, 4.0) });
+        PickQuad { quad: square(0.0, 0.0, 40.0), pick, src }
+    }
+
     /// Overlapping quads pick the one drawn last (the front); a pointer in one only picks that; a pointer in none
     /// picks nothing (the caller then takes the ground's cell).
     #[test]
     fn the_pick_is_the_front_most_quad_that_holds_the_pointer() {
         let quads = [
-            PickQuad { quad: square(0.0, 0.0, 100.0), pick: Pick::Location(1) },
-            PickQuad { quad: square(40.0, 40.0, 20.0), pick: Pick::Army(0) },
+            PickQuad { quad: square(0.0, 0.0, 100.0), pick: Pick::Location(1), src: None },
+            PickQuad { quad: square(40.0, 40.0, 20.0), pick: Pick::Army(0), src: None },
         ];
         assert_eq!(front_pick(&quads, vec2(50.0, 50.0)), Some(Pick::Army(0)), "the army drawn over the castle");
         assert_eq!(front_pick(&quads, vec2(10.0, 10.0)), Some(Pick::Location(1)), "only the castle's quad holds it");
         assert_eq!(front_pick(&quads, vec2(200.0, 200.0)), None, "outside all: the ground decides");
-        let swapped = [quads[1], quads[0]];
+        let swapped = [quads[1].clone(), quads[0].clone()];
         assert_eq!(front_pick(&swapped, vec2(50.0, 50.0)), Some(Pick::Location(1)), "the later draw wins, whatever the army");
         assert_eq!(front_pick(&[], vec2(50.0, 50.0)), None);
     }
@@ -8773,11 +8866,48 @@ mod pick_tests {
         let cam = Camera { origin: vec2(0.0, 0.0), view, draw: view, scale: PX, grid: game.world.map.grid, tilt: None };
         PICKS.with_borrow_mut(|q| q.clear());
         let mut drawn = false;
-        standing_picked(Some(Pick::Hero), &cam, vec2(100.0, 100.0), vec2(100.0, 100.0), 1.0, Rect::new(90.0, 60.0, 20.0, 40.0), || drawn = true);
+        standing_picked(Some(Pick::Hero), None, &cam, vec2(100.0, 100.0), vec2(100.0, 100.0), 1.0, Rect::new(90.0, 60.0, 20.0, 40.0), || drawn = true);
         assert!(drawn, "the flat view draws the sprite");
         assert!(PICKS.with_borrow(|q| q.is_empty()), "nothing is recorded flat");
         assert_eq!(sprite_under(vec2(100.0, 80.0)), None);
-        assert_eq!(PICK_NEXT.with(|p| p.get()), None, "the pick is taken by the draw");
+        assert!(PICK_NEXT.with_borrow(Option::is_none), "the pick is taken by the draw");
+    }
+
+    /// A pointer inside the front sprite's quad on a transparent texel falls through to the sprite behind it; on an
+    /// opaque texel the front one takes it. The quads are the picture's box, the texels are the mask's.
+    #[test]
+    fn a_transparent_texel_falls_through_to_the_sprite_behind() {
+        masked(1, |x, y| !(x == 0 && y == 0));
+        masked(2, |_, _| true);
+        // The army is drawn last (the front); its texel at (0, 0) is transparent.
+        let quads = [pick_on_square(Pick::Location(1), Some(2)), pick_on_square(Pick::Army(0), Some(1))];
+        assert_eq!(front_pick(&quads, vec2(5.0, 5.0)), Some(Pick::Location(1)), "transparent: the castle behind");
+        assert_eq!(front_pick(&quads, vec2(25.0, 25.0)), Some(Pick::Army(0)), "opaque texel (2, 2): the army");
+    }
+
+    /// Transparent everywhere under the pointer, nothing is picked: the ground decides. A sprite with no texture
+    /// (or none to read) hits as its quad.
+    #[test]
+    fn a_transparent_texel_with_nothing_behind_is_the_ground_and_no_mask_is_the_quad() {
+        masked(3, |_, _| false);
+        let quads = [pick_on_square(Pick::Location(1), Some(3))];
+        assert_eq!(front_pick(&quads, vec2(5.0, 5.0)), None, "transparent with nothing behind: the ground");
+        let plain = [pick_on_square(Pick::Army(0), None)];
+        assert_eq!(front_pick(&plain, vec2(5.0, 5.0)), Some(Pick::Army(0)), "no texture: the quad holds");
+        let unread = [pick_on_square(Pick::Army(0), Some(99))];
+        assert_eq!(front_pick(&unread, vec2(5.0, 5.0)), Some(Pick::Army(0)), "no mask to read: the quad holds");
+    }
+
+    /// The texel under a point of a skewed quad: the inverse of the corners' bilinear map. The middle of the quad is
+    /// its texture's middle, and each corner its own corner.
+    #[test]
+    fn the_texel_under_a_point_of_a_skewed_quad_is_its_texture_coordinate() {
+        let q = [vec2(0.0, 0.0), vec2(20.0, 0.0), vec2(30.0, 20.0), vec2(10.0, 20.0)];
+        let (u, v) = texel_uv(&q, vec2(15.0, 10.0)).expect("inside");
+        assert!((u - 0.5).abs() < 1e-3 && (v - 0.5).abs() < 1e-3, "the middle: {u}, {v}");
+        let (u, v) = texel_uv(&q, vec2(30.0, 20.0)).expect("the corner");
+        assert!((u - 1.0).abs() < 1e-3 && (v - 1.0).abs() < 1e-3, "the far corner: {u}, {v}");
+        assert!(texel_uv(&q, vec2(-5.0, 10.0)).is_none(), "outside the quad");
     }
 }
 
