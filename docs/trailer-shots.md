@@ -2,7 +2,7 @@
 
 A **shot** is a text file that plays a scripted camera over a Razdor map, with the hero's walks,
 days passing, and the game's own events and battles answered automatically. The run renders
-every frame off-screen (the UI and the fog hidden, the armies moving) and writes an MP4 with the
+every frame off-screen (the UI and the fog hidden unless the shot turns them on, the armies moving) and writes an MP4 with the
 game's sound. Nothing here changes the game for players: every switch is dev-only and needs
 `razdor --trailer` (or its environment variable).
 
@@ -156,7 +156,13 @@ Notes:
   screen is drawn and played to its end: at once, unless the shot paces it (`battle_speed`), when the
   AI plays it on the screen frame by frame at that pace (the same AI, the game's own animations). A run
   logs the battle's state once a second (`battle at <t>s: round …`): two sizes of one shot give the same lines.
-- **The UI and the fog** are hidden in every run. The pointer is not drawn.
+  Checked on РК1 (`battle 9`, `battles show`, `battle_speed 1`, 6 s at 30 fps, one run per size, 1440x1080 to
+  3840x1080): the four runs log the same six `battle at` lines, the four MP4s carry the same audio stream (AAC
+  48 kHz stereo, identical MD5), and frame 90 (3.0 s) shows the same army on the battle screen at each size
+  (checked by eye on a contact sheet, not pixel-compared). The run's sound device was missing (the audio logged
+  «silent»), and the effects were still muxed: the log gives their count, not their names.
+- **The UI and the fog** are hidden by default (`ui off`, `fog off`). `ui on` draws the game's interface as a
+  player sees it, and `fog on` draws the fog of war, as in play. The pointer is never drawn.
 - **Armies** move in every frame, as in play.
 - **Sound**: each sound effect the screens ask for, and each music track as the game's jukebox
   would start it, is logged with its frame. After the frames, the sound is mixed (48 kHz stereo)
