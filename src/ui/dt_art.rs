@@ -882,13 +882,15 @@ mod cut_tests {
 
     #[test]
     fn the_mask_marks_a_building_in_red_and_its_windows_in_green_over_its_whole_sprite() {
-        // A 4×3 building whose window is its top-left texel, in an atlas 16 texels wide (the sprite at (0, 0)).
+        // A 4×3 building whose window is its top-left texel, in an atlas 16 texels wide. The sprite's pixel (0, 0)
+        // is its slot's base, one texel in from the atlas's border.
         let s = sprite(4, 3, |_, _| true);
         let (_, slots) = cut_pictures(&[&s], &[None], 16).expect("fits");
+        let (bx, by) = (slots[0].base.x as u32, slots[0].base.y as u32);
         let mut rgba = vec![0u8; 16 * 16 * 4];
         write_mask(&mut rgba, 16, &slots[0], &[200, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         let at = |x: u32, y: u32| {
-            let t = ((y * 16 + x) * 4) as usize;
+            let t = (((by + y) * 16 + bx + x) * 4) as usize;
             (rgba[t], rgba[t + 1])
         };
         assert_eq!(at(0, 0), (255, 200), "the window: building and lit");
