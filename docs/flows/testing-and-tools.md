@@ -275,7 +275,7 @@ Backends (`bench.py`, one of):
 
 - `--gpu-4060` (the release default; `--egl-4060` is an alias). A private Xvfb on a free display
   (`:90`–`:99`, never `:0`), the game drawn through VirtualGL on the 4060's EGL device
-  (`/dev/dri/card2`). The card is checked first: its PCI address must be `0000:05:00.0` and
+  (the `/dev/dri/cardN` whose PCI address is `0000:05:00.0`, looked up at each run: the number changes between boots). The card is checked first: its PCI address must be `0000:05:00.0` and
   nvidia-smi must name it RTX 4060, and the renderer must be NVIDIA (`glxinfo` through VirtualGL,
   and the game's own `window open` line per run). Otherwise the bench exits 3 and makes no run.
   Uncapped, 1024×768. Six cells (`GPU_MATRIX`): `rk3-start` flat and 25d (effects off), `db-zoomout`

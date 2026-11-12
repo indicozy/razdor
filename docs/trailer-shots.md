@@ -36,10 +36,12 @@ llvmpipe, which draws artefacts the GPU does not. The run is therefore wrapped i
 draws the window's GL on the 4060's EGL device and reads the picture back to the Xvfb display:
 
 ```sh
-# Xvfb on its own display (never :0), with the 5K screen; the 4060 is /dev/dri/card2
+# Xvfb on its own display (never :0), with the 5K screen. The 4060 is the card at PCI 0000:05:00.0; its cardN
+# number changes between boots, so look it up:
+CARD=$(for c in /sys/class/drm/card[0-9]*; do [ "$(basename "$(readlink -f "$c/device")")" = 0000:05:00.0 ] && echo /dev/dri/$(basename "$c"); done)
 # (PCI 0000:05:00.0: check with `ls -l /sys/class/drm/card*/device`, the GPU is the 4060 by name).
 XDG_RUNTIME_DIR=<scratch, mode 700> Xvfb :77 -screen 0 5120x2160x24 +extension GLX -nolisten tcp &
-DISPLAY=:77 VGL_DISPLAY=/dev/dri/card2 VGL_EGLLIB=/usr/lib64/libEGL.so.1 VGL_GLLIB=/usr/lib64/libGL.so.1 VGL_LOGO=0 \
+DISPLAY=:77 VGL_DISPLAY=$CARD VGL_EGLLIB=/usr/lib64/libEGL.so.1 VGL_GLLIB=/usr/lib64/libGL.so.1 VGL_LOGO=0 \
   CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=1 \
   vglrun razdor --trailer shot.shot --out shot.mp4 --hashes shot.hashes
 ```
