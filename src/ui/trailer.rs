@@ -489,6 +489,10 @@ pub fn before_frame(app: &mut App) {
     if let (Screen::Battle(view), Some(pace)) = (&mut app.screen, shot.battle_pace(t)) {
         view.set_trailer_pace(pace);
     }
+    // A timed hour (`hour <t> <h>`) holds the light's hour for this frame; it wins over `clock hold`.
+    if let Some(h) = shotfile::sample_hour(&shot.hour_keys, t) {
+        super::daylight::set_hold(Some(h as f32));
+    }
     let values = shotfile::sample_values(&shot.keys, t);
     let target = shotfile::sample_target(&shot.keys, t);
     let cam = camera_of(&values);
@@ -643,6 +647,10 @@ fn start(app: &mut App, cfg: &Config) -> Result<(), String> {
             let held = clock_hour(&game);
             super::daylight::set_hold(Some(held));
             log(format!("clock hold at {held:.2} h"));
+        }
+        if !shot.hour_keys.is_empty() {
+            super::daylight::set_sweep(true);
+            log(format!("hour: timed, {} keys (the light and the sun shadows follow them)", shot.hour_keys.len()));
         }
         if shot.fps_counter {
             app.audio.settings.show_fps = true;

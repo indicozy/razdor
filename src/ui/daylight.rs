@@ -250,6 +250,14 @@ local! {
     static ENV_HOUR: Option<f32> = std::env::var("RAZDOR_LIGHT_HOUR").ok().and_then(|s| s.trim().parse::<f32>().ok());
     /// The trailer's `clock hold` (`ui::trailer`): the game-clock mode keeps this hour for the whole shot.
     static HOLD: Cell<Option<f32>> = Cell::new(None);
+    /// A trailer run's timed hour (`set_sweep`): the held hour is shown at once and the casts follow it.
+    static SWEEP: Cell<bool> = Cell::new(false);
+}
+
+/// A trailer run's timed hour (`ui::trailer`): the held hour is shown at once (no easing) and the cast
+/// shadows follow the hour continuously (`casts_at`) instead of stepping once an hour. Never set in play.
+pub fn set_sweep(on: bool) {
+    SWEEP.set(on);
 }
 
 /// Holds the game-clock mode's hour at `hour` (a trailer run's `clock hold`), or `None` to let the clock run.
@@ -287,8 +295,10 @@ pub fn frame_light(game_hour: f32, real_secs: f64, dt: f32) -> Option<Light> {
             return None;
         }
         LightMode::GameClock => {
-            let game_hour = HOLD.get().unwrap_or(game_hour);
+            let held = HOLD.get();
+            let game_hour = held.unwrap_or(game_hour);
             let shown = match SHOWN_HOUR.get() {
+                _ if SWEEP.get() && held.is_some() => game_hour.rem_euclid(24.0),
                 Some(h) => ease_hour(h, game_hour, dt),
                 None => game_hour.rem_euclid(24.0),
             };
@@ -338,7 +348,7 @@ pub fn form_sun() -> Option<(f32, [f32; 2])> {
 /// `sun_shadows_on`.
 pub fn frame_casts() -> Option<Casts> {
     let hour = LAST_HOUR.get()?;
-    (shadow_mode() == ShadowMode::Sun).then(|| casts_stepped(hour))
+    (shadow_mode() == ShadowMode::Sun).then(|| if SWEEP.get() { casts_at(hour) } else { casts_stepped(hour) })
 }
 
 /// The cast shadows at a shown hour with their geometry stepped to the whole hour: the direction and the
@@ -663,6 +673,23 @@ mod tests {
         set_prefs(LightMode::Off, 24, 10, ShadowMode::Sun, crate::ui::lights::Quality::High);
         frame_light(12.0, 0.0, 0.016);
         assert!(frame_casts().is_none() && frame_shadow_k().is_none(), "lighting off: nothing, shadows or not");
+        set_prefs(LightMode::Off, 24, 18, ShadowMode::Painted, crate::ui::lights::Quality::High);
+    }
+
+    #[test]
+    fn a_timed_sweep_shows_the_held_hour_at_once_and_casts_the_shadows_at_it() {
+        set_prefs(LightMode::GameClock, 24, 18, ShadowMode::Sun, crate::ui::lights::Quality::High);
+        set_hold(Some(10.5));
+        frame_light(3.0, 0.0, 0.016);
+        frame_light(3.0, 0.0, 0.016);
+        assert_eq!(frame_casts(), Some(casts_stepped(10.5)), "without the sweep: the casts step once an hour");
+        set_sweep(true);
+        frame_light(3.0, 0.0, 0.016);
+        assert_eq!(shown_hour(), Some(10.5), "the sweep shows the held hour with no easing");
+        assert_eq!(frame_casts(), Some(casts_at(10.5)), "the sweep: the casts follow the hour");
+        assert_ne!(casts_at(10.5).sun.dir, casts_stepped(10.5).sun.dir, "the fraction matters");
+        set_sweep(false);
+        set_hold(None);
         set_prefs(LightMode::Off, 24, 18, ShadowMode::Painted, crate::ui::lights::Quality::High);
     }
 

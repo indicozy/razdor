@@ -16,8 +16,10 @@ the rendering commands are for agents and the owner: `docs/trailer-shots.md`.
    (`sound_for`). Each frame it samples the camera (`src/trailer.rs` `sample_values`,
    `sample_target`), stores it for the world (`Runtime::cam`, `target`), issues the timed
    actions (`start_due_actions`: walk, pass, reveal), and steps the walk (`continue_walk`) and
-   the pass (`continue_pass`, which takes the wait up again after a day report). Fly mode
-   (`fly_frame`) replaces the shot's camera with keys and mouse.
+   the pass (`continue_pass`, which takes the wait up again after a day report). A timed hour
+   (`hour <t> <h>`, `sample_hour`) sets `daylight::set_hold` each frame, so the light follows it; `start` sets
+   `daylight::set_sweep` only in a run that has timed hours, so the light skips its easing and the sun's
+   casts follow the hour continuously (`casts_at`). Fly mode (`fly_frame`) replaces the shot's camera with keys and mouse.
 3. **The frame**: `app.frame()` runs the game as in play, so events, walks and waits are the
    game's own rules. The camera reaches the world through four hooks in `ui/world_view.rs`:
    `trailer()` (the camera; a shot's camera overrides the phase-1 env camera), `Camera::looking_in`
@@ -102,6 +104,8 @@ unseeded random draw, a map-dependent cache that changes with the window's size.
   the mixer (placement, gain, clipping, cut clips, resampling).
 - `src/ui/trailer.rs` tests: the camera a shot's values give (the player's defaults, pitch 90
   clamped, yaw and bend carried).
+- The timed hour: the parser (`hour <t> <h>`, sorted, errors by line and field), `sample_hour` (held, eased,
+  midpoint), and `daylight` (`a_timed_sweep_shows_the_held_hour_at_once_and_casts_the_shadows_at_it`).
 - The phase-1 tests (`view25`, `tilt_tests`) pass unchanged.
 
 ## Recipes

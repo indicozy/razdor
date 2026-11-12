@@ -79,6 +79,7 @@ One item per line. `#` starts a comment. Every line is optional except `map` and
 | `pass <t> <n>h` or `<n>d` | At `t`, time passes as a wait does: armies march, days and events happen. Days are 24 h. | — |
 | `reveal <t> <x>,<y> <radius>` | At `t`, the cells within `radius` of the cell are explored. | — |
 | `hour <h>` | The game clock's hour at the start (0 to 24, fractions allowed: `6.5`). No time passes: the armies stay and no event fires. | the map's own |
+| `hour <t> <h>` | A timed hour at `t` seconds. The light follows the hour, eased between the timed lines (InOut), and holds before the first and after the last; it wins over `clock hold`. Needs `look lighting=on`. With `shadows=sun` the cast shadows follow the hour continuously (rebaked each frame), not once an hour. The game's own clock is not moved. No wrap past midnight: a sweep that crosses it (23.9 to 0) runs back through the day, so keep the timed hours on one side of midnight. | none |
 | `clock run\|hold` | `hold` keeps the light at the hour of the start for the whole shot (the game's own time still runs); `run` follows the game's clock. | `run` |
 | `ui on\|off` | `on` draws the interface as a player sees it (bottom bar, minimap, the map's widgets); event windows are still answered, not drawn. | `off` |
 | `fog on\|off` | `on` keeps the fog of war (black, or the look's mist). | `off` |
@@ -295,8 +296,13 @@ duration 18.5
   Open: `zoom 2` on the 5K flat run gave frames identical to `zoom 1` (every frame's hash the same), so the flat
   view's zoom is not applied in this run yet (not fixed here).
 
-- A timed hour (`hour <t> <h>`, a sweep from day to night in one shot) is not built: the shadows
-  step once an hour (`daylight::casts_stepped`), so a sweep of a few seconds would show the steps.
+- A timed hour (`hour <t> <h>`) is built: the light follows it, and with `shadows=sun` the cast shadows follow it
+  continuously (`daylight::set_sweep`; a run without a timed hour still steps them once an hour, `daylight::casts_stepped`).
+  Measured on РК1 (`hour 0s 15`, `hour 6s 23`, 6 s at 30 fps, 1280x720, on the RTX 4060): two runs give the same
+  hashes. Frame to frame (mean absolute difference), the sun-lit part (hour 15 to 19, frames 1 to 92) has median 0.22 and
+  max 1.46 at frame 74 (the broadest shadow change); max/median is 6.7 there. The isolated jumps are not shadow steps:
+  one small object's patch (about 30 px) and one-level steps of a single colour channel. Over the whole run the ratio
+  is inflated by the night (median 0.0015: after the sun sets, the frames barely change).
 
 - The target is pushed inside the map near its edges (the view does not show past the map).
 - Battles on the map play no battle sound; `battles show` plays the battle screen's sounds.

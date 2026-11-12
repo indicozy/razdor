@@ -136,6 +136,10 @@ pub struct Shot {
     pub duration_set: bool,
     /// The clock's hour at the start (`hour`, 0 to 24, fractions allowed); `None`: the map's own.
     pub hour: Option<f64>,
+    /// The timed hour lines `hour <t> <h>`: (time in seconds, hour), sorted by time. The light
+    /// follows them (`sample_hour`) and, in such a run, the sun's shadows follow them continuously.
+    /// Empty: no timed hour, and the run is as before.
+    pub hour_keys: Vec<(f64, f64)>,
     /// `clock hold`: the light keeps the hour of the start for the whole shot.
     pub clock_hold: bool,
     /// The look settings the run takes over (`look key=value`, in file order; see [`LOOK_KEYS`]).
@@ -199,6 +203,7 @@ impl Default for Shot {
             duration: 0.0,
             duration_set: false,
             hour: None,
+            hour_keys: Vec::new(),
             clock_hold: false,
             look: Vec::new(),
             ui: false,
@@ -257,7 +262,7 @@ pub fn parse(text: &str) -> Result<Shot, Errors> {
     if shot.map.is_none() {
         errors.push("map: the shot names no map (`map <name>` or `save <file>`)".to_string());
     }
-    let last_time = shot.keys.iter().map(|k| k.t).chain(shot.actions.iter().map(Action::t)).fold(0.0, f64::max);
+    let last_time = shot.keys.iter().map(|k| k.t).chain(shot.actions.iter().map(Action::t)).chain(shot.hour_keys.iter().map(|k| k.0)).fold(0.0, f64::max);
     if !shot.duration_set {
         shot.duration = last_time;
     } else if shot.duration < last_time {
@@ -267,6 +272,12 @@ pub fn parse(text: &str) -> Result<Shot, Errors> {
         errors.push("duration: the shot has no time to play (give `duration <seconds>` or a timed line)".to_string());
     }
     shot.actions.sort_by(|a, b| a.t().total_cmp(&b.t()));
+    shot.hour_keys.sort_by(|a, b| a.0.total_cmp(&b.0));
+    for pair in shot.hour_keys.windows(2) {
+        if pair[0].0 == pair[1].0 {
+            errors.push(format!("hour: two timed hour lines at {}s", pair[0].0));
+        }
+    }
     if let Some(first) = shot.battle_speed.iter().chain(shot.speed_keys.first()).next() {
         if !shot.battles_show {
             errors.push(format!("line {}: battle_speed: the pace is for a battle on its screen (`battles show`)", first.line));
@@ -334,11 +345,14 @@ fn apply_line(shot: &mut Shot, head: &str, rest: &[&str], line_no: usize) -> Res
             "25d" => shot.flat = false,
             v => return Err(("view", format!("`{v}`: flat or 25d"))),
         },
-        "hour" => {
-            let v = one(rest).map_err(|e| ("hour", e))?;
-            let h = v.parse::<f64>().ok().filter(|h| h.is_finite() && (0.0..24.0).contains(h));
-            shot.hour = Some(h.ok_or(("hour", format!("`{v}`: an hour from 0 to 23 (fractions allowed, e.g. 6.5)")))?);
-        }
+        "hour" => match rest {
+            [t, h] => {
+                let t = time_word(t).ok_or(("hour", format!("`{t}`: not a time (seconds, e.g. 2 or 2s)")))?;
+                shot.hour_keys.push((t, parse_hour(h)?));
+            }
+            [_, _, ..] => return Err(("hour", format!("{} values: write `hour <h>` (the start) or `hour <t> <h>` (a timed hour), e.g. `hour 6s 23`", rest.len()))),
+            _ => shot.hour = Some(parse_hour(one(rest).map_err(|e| ("hour", e))?)?),
+        },
         "edge" => match one(rest).map_err(|e| ("edge", e))? {
             "clamp" => shot.edge_free = false,
             "free" => shot.edge_free = true,
@@ -488,6 +502,31 @@ fn parse_size(v: &str) -> Result<(u32, u32), FieldError> {
 /// `16`, `16s`, `1.5s`: seconds.
 fn time_word(v: &str) -> Option<f64> {
     v.strip_suffix('s').unwrap_or(v).parse::<f64>().ok().filter(|t| t.is_finite() && *t >= 0.0)
+}
+
+/// An hour of the day, 0 to 24 (fractions allowed, 24 excluded).
+fn parse_hour(v: &str) -> Result<f64, FieldError> {
+    v.parse::<f64>().ok().filter(|h| h.is_finite() && (0.0..24.0).contains(h)).ok_or(("hour", format!("`{v}`: an hour from 0 to 23 (fractions allowed, e.g. 6.5)")))
+}
+
+/// The timed hour at shot time `t` (the `hour <t> <h>` lines, sorted by time): the first hour before
+/// the first line, the last after the last, and between two lines the hour eased from one to the next
+/// (`Ease::InOut`, linear in the hour value: there is no wrap across midnight, so a sweep that crosses it
+/// is not supported). None without timed lines.
+pub fn sample_hour(keys: &[(f64, f64)], t: f64) -> Option<f64> {
+    let first = *keys.first()?;
+    let last = *keys.last()?;
+    if t <= first.0 {
+        return Some(first.1);
+    }
+    if t >= last.0 {
+        return Some(last.1);
+    }
+    // keys[i - 1].0 <= t < keys[i].0 (the keys are sorted and t is strictly inside them).
+    let i = keys.partition_point(|k| k.0 <= t);
+    let (a, b) = (keys[i - 1], keys[i]);
+    let u = ((t - a.0) / (b.0 - a.0)) as f32;
+    Some(a.1 + (b.1 - a.1) * f64::from(Ease::InOut.apply(u)))
 }
 
 /// `x,y` as two numbers.
@@ -1323,5 +1362,47 @@ mod tests {
     fn a_bad_layout_or_fps_counter_names_its_field() {
         assert_eq!(errs("map РК1-Начало пути\nlayout tablet\nduration 2\n"), vec!["line 2: layout: `tablet`: phone or desktop".to_string()]);
         assert_eq!(errs("map РК1-Начало пути\nfps_counter maybe\nduration 2\n"), vec!["line 2: fps_counter: `maybe`: on or off".to_string()]);
+    }
+
+    #[test]
+    fn the_timed_hour_is_empty_by_default_and_one_value_keeps_the_start_hour() {
+        assert!(ok("map РК1-Замок\nat 4s pitch=12\n").hour_keys.is_empty());
+        let s = ok("map РК1-Замок\nhour 6.5\nat 4s pitch=12\n");
+        assert_eq!(s.hour, Some(6.5));
+        assert!(s.hour_keys.is_empty());
+    }
+
+    #[test]
+    fn timed_hours_parse_and_sort_by_time() {
+        let s = ok("map РК1-Замок\nhour 6s 23\nhour 0s 15\nduration 8\n");
+        assert_eq!(s.hour_keys, vec![(0.0, 15.0), (6.0, 23.0)]);
+        assert_eq!(s.hour, None);
+        // A timed hour counts as a timed line for the length, as the others do.
+        assert_eq!(ok("map РК1-Замок\nhour 2.5s 12\n").duration, 2.5);
+    }
+
+    #[test]
+    fn a_bad_hour_line_names_its_line_and_field() {
+        assert_eq!(errs("map РК1\nhour 2s 25\nduration 3\n"), vec!["line 2: hour: `25`: an hour from 0 to 23 (fractions allowed, e.g. 6.5)".to_string()]);
+        assert_eq!(errs("map РК1\nhour soon 5\nduration 3\n"), vec!["line 2: hour: `soon`: not a time (seconds, e.g. 2 or 2s)".to_string()]);
+        let all = errs("map РК1\nhour 1s 2 3\nduration 3\n");
+        assert_eq!(all.len(), 1);
+        assert!(all[0].starts_with("line 2: hour: 3 values"), "{all:?}");
+        assert_eq!(errs("map РК1\nhour 1s 5\nhour 1s 6\nduration 3\n"), vec!["hour: two timed hour lines at 1s".to_string()]);
+    }
+
+    #[test]
+    fn the_timed_hour_samples_hold_then_ease_between_the_lines() {
+        assert_eq!(sample_hour(&[], 1.0), None);
+        let keys = [(2.0, 10.0), (6.0, 20.0)];
+        assert_eq!(sample_hour(&keys, 0.0), Some(10.0), "before the first line: the first hour");
+        assert_eq!(sample_hour(&keys, 2.0), Some(10.0), "at the first line");
+        assert_eq!(sample_hour(&keys, 4.0), Some(15.0), "InOut at the middle is the midpoint");
+        assert_eq!(sample_hour(&keys, 6.0), Some(20.0), "at the last line");
+        assert_eq!(sample_hour(&keys, 9.0), Some(20.0), "after the last line: the last hour");
+        // Eased: a quarter of the way is not a quarter of the hour.
+        // u = 0.25: InOut is 4u^3 = 1/16 of the way, so 10 + 10 / 16.
+        let quarter = sample_hour(&keys, 3.0).unwrap();
+        assert!((quarter - 10.625).abs() < 1e-9, "{quarter}");
     }
 }
