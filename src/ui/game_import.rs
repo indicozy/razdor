@@ -289,7 +289,11 @@ pub fn checking() -> bool {
 
 /// Whether the automatic download runs: its window is what the no-install screen shows.
 pub fn automatic() -> bool {
-    checking() || JOB.with_borrow(|j| j.as_ref().is_some_and(|j| j.auto))
+    // The snapshot's bar and unpacking fakes stand in for the automatic start's windows.
+    checking()
+        || JOB.with_borrow(|j| j.as_ref().is_some_and(|j| j.auto))
+        || snapshot_download_bytes().is_some()
+        || snapshot_unpacking().is_some()
 }
 
 /// The automatic start, each frame (`tick`): with no install, the hub's catalog is read once per

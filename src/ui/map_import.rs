@@ -383,7 +383,14 @@ pub(super) fn frame_bar(title: &str, lines: &[String], share: Option<f32>, with_
     };
     let text_bottom = 34.0 * k * f + wrapped.len() as f32 * 20.0 * k * f;
     for (i, line) in wrapped.iter().enumerate() {
-        chrome::shadow_text(line, inner.x + 24.0 * k * f, inner.y + 34.0 * k * f + i as f32 * 20.0 * k * f, size, chrome::CREAM);
+        let (x, y) = (inner.x + 24.0 * k * f, inner.y + 34.0 * k * f + i as f32 * 20.0 * k * f);
+        if phone {
+            // A phone's line goes through the measured text (`text_probe`), at the phone's size; the
+            // desktop keeps its shadowed sheet text.
+            text(line, x, y, size, chrome::CREAM);
+        } else {
+            chrome::shadow_text(line, x, y, size, chrome::CREAM);
+        }
     }
     match share {
         Some(share) if phone => {
