@@ -395,6 +395,12 @@ pub fn menu_not_found(no_install: bool) {
     if game_import::checking() || game_import::automatic() {
         return;
     }
+    // A phone's block keeps Razdor's own text sizes (the phone rule), not the bitmap fonts' of the menu art.
+    super::dt_font::legacy_metrics_if(super::display::dp_px().is_some(), draw_not_found);
+}
+
+/// The block itself, drawn by [`menu_not_found`].
+fn draw_not_found() {
     let sh = screen_height();
     let k = super::chrome::k();
     let (x, w, bottom) = super::main_menu::not_found_box(k);

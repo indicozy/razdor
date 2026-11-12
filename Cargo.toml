@@ -120,6 +120,9 @@ fullscreen = true
 # The launcher icon: the mipmap PNGs of Razdor's own icon (data/icon/razdor.png, resized).
 icon = "@mipmap/ic_launcher"
 res = "android/res"
+# The first screen's art (src/ui/menu_art.rs): menu-art/ (from scripts/fetch-menu-art.sh) is packed into
+# the APK's assets; Razdor copies it to its cache at the first run without an install.
+assets = "menu-art"
 
 [package.metadata.android.application_attributes]
 # Android 10 (API 29): the old storage layout, for the install folder and the saves.

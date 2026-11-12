@@ -366,7 +366,8 @@ pub(super) fn frame_bar(title: &str, lines: &[String], share: Option<f32>, with_
     let w = (460.0 * k * f).min(screen_width() - 24.0 * k);
     let size = 14.0 * k * f;
     let text_w = w - 48.0 * k * f;
-    let wrapped: Vec<String> = lines.iter().flat_map(|l| wrap(l, text_w, size)).collect();
+    // A phone's text takes Razdor's own sizes (the phone rule), not the bitmap font's (`legacy_metrics_if`).
+    let wrapped: Vec<String> = super::dt_font::legacy_metrics_if(phone, || lines.iter().flat_map(|l| wrap(l, text_w, size)).collect());
     let button_area = if with_buttons { button_area(k, f) } else { 0.0 };
     // The bar's own space and the gap above the buttons (a phone's centred button sits under it).
     let bar_area = match super::display::dp_px() {
@@ -387,7 +388,7 @@ pub(super) fn frame_bar(title: &str, lines: &[String], share: Option<f32>, with_
         if phone {
             // A phone's line goes through the measured text (`text_probe`), at the phone's size; the
             // desktop keeps its shadowed sheet text.
-            text(line, x, y, size, chrome::CREAM);
+            super::dt_font::with_legacy_metrics(|| text(line, x, y, size, chrome::CREAM));
         } else {
             chrome::shadow_text(line, x, y, size, chrome::CREAM);
         }
@@ -456,7 +457,7 @@ pub(super) fn buttons(inner: Rect, labels: &[&str]) -> Option<usize> {
         let r = Rect::new(x, y, w, h);
         let (_, down, pressed) = button_state(r, true);
         if f > 1.0 {
-            chrome::marble_button_sized(r, label, true, down, 14.0 * k * f);
+            super::dt_font::with_legacy_metrics(|| chrome::marble_button_sized(r, label, true, down, 14.0 * k * f));
         } else {
             chrome::marble_button(r, label, true, down);
         }
