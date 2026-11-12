@@ -1,6 +1,6 @@
 ---
 title: Razdor on Android
-description: Installing Razdor on Android, moving saves, and gesture controls.
+description: Installing Razdor on Android, transferring saves, and gesture control.
 sidebar:
   order: 1
 ---
@@ -11,12 +11,11 @@ The Android version (**`razdor-<version>.apk`** file) is experimental. It requir
 
 ## Installation and Launch
 
-1. Install **razdor-<version>.apk**. Allow installation from this source in your Android settings.
-2. On the first launch, choose one of the following options on the title screen:
-   * "Download the game" — downloads the game archive (approx. 45 MB) from the community.
-   * "Choose the archive…" — select a game archive (.zip or .7z) that is already on your phone.
-3. If you played an older version, Razdor will offer at the start to pick the Razdor folder in the device storage: its saves move into the app's folder. You can also do it later: Settings → Other → "Move saves from the old Razdor folder…". The game is not installed by hand: Razdor downloads it itself. The old folders are not deleted.
-4. Razdor does not ask for all-files access and does not use it: everything is kept in the app's folder. To move the old saves, pick the Razdor folder in the system folder picker; any other folder moves nothing, and Razdor says so.
+1. Install **razdor-<version>.apk**. You must allow installation from this source in Android settings.
+2. On the first launch, the following occurs on the title screen: Razdor reads its directory and downloads the game into its own folder. This happens without requesting permissions. It then unpacks the game and opens the main menu.
+   If automatic download fails, buttons labeled "Download the game" or "Choose the archive…" will appear on the title screen. Clicking "Choose the archive…" immediately opens the system file picker.
+3. If you played in previous versions, after the game loads, a "Saves from an older release" window will appear. It contains a button "Pick the Razdor folder" which opens the system folder picker. Clicking "Not now" will repeat the request on the next launch. The transfer copies saves, settings, maps, and mods. This is also always available in "Settings → Other → Move saves from the old Razdor folder…". If the selected folder does not belong to Razdor, nothing will be transferred, and the window will notify you. Old folders are not deleted. You do not need to reinstall the game: Razdor downloads it itself.
+4. Razdor does not request access to all files, nor does it use it: everything is stored in the application folder. For old version saves to transfer, select the Razdor folder via the system folder picker; with a different folder, Razdor will transfer nothing and inform you.
 
 :::note
 Razdor does not request or use all-files access.
@@ -123,8 +122,11 @@ In the loading window, the "Transfer…" button opens three actions:
 * "Import a save" — allows you to select a .rzsave file or a .zip file containing saves. Old saves are not overwritten: if the file is identical, it is skipped; if it differs, a new copy with a new number is created. Settings already on the phone are not overwritten: the settings in the file are skipped for them.
 * "Export the log" — creates a game log file for submitting bug reports.
 
+"Send the log…" (Settings → Other) saves one file: the game log, the play log, and the last performance report. The file is saved via the system "Save As" window; it can be sent to developers. Debug mode (the same line in "Other") writes a performance log.
+
 :::caution
 When you uninstall the app, Android also deletes its data folder: saves, pins and settings. Always perform an "Export saves" before uninstalling. If Android asks whether to "Keep" app data during uninstallation, select "Keep": then the settings and saves remain.
 :::
 
 The image cache is stored in the app's own cache (Settings → Apps → Razdor → Storage) and does not exceed 256 MB. There is nothing critical in it: you can clear it using the "Clear cache" button; saves will not be lost, and images will simply take slightly longer to load upon the next launch.
+

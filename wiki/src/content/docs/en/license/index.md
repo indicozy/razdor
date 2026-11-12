@@ -15,7 +15,7 @@ Nothing changes for players: Razdor is free, you may download it, install it and
 
 On 12 November 2026 the developers of Discord Times (Aterdux Entertainment) allowed the game's assets and original maps to be included in Razdor's public build, for non-commercial use. The copyright and the licence of those files stay with the developers: the permission is given to Razdor's author to distribute them with Razdor, the files are not covered by the GPL, and forks or other builds do not get this permission.
 
-As thanks, the main menu's bottom-right corner links to the developers' new game, [Thorny Times](https://store.steampowered.com/app/2182610/).
+In the main menu, there is an image with a caption—a link to the developers' new game, [Thorny Times](https://store.steampowered.com/app/2182610/). On desktop, it is in the bottom right corner. On mobile, when held vertically, it is a line above the version string (image on the left, caption on the right); when held horizontally, it is on the left. Clicking it opens the game's page on Steam. The developers requested that this link be kept in the main menu as a condition for allowing Razdor to use their game files.
 
 ## For forks and builds
 
@@ -31,3 +31,4 @@ Full text: the [LICENSE](https://github.com/indicozy/razdor/blob/main/LICENSE) a
 ## For contributors
 
 For your code to be accepted into Razdor, you sign the contributor agreement ([CLA](https://github.com/indicozy/razdor/blob/main/CLA.md)) once: a bot asks for it on your first pull request. You keep the rights to your code; the agreement lets Razdor use your contribution.
+

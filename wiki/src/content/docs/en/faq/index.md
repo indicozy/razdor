@@ -6,7 +6,7 @@ sidebar:
 
 ## Razdor cannot find my game. What do I do?
 
-You need your own copy of *Discord Times* version 1.8 with Community Update 1.2. Razdor looks for it through `RAZDOR_DT_DIR`, next to its own program, in the remembered path, and in `~/Games`, `~/Downloads` and the home folder. The reason is written to `razdor.log`. See [Game installation](/razdor/wiki/en/start/install-game/).
+You need your own copy of *Discord Times* version 1.8 with Community Update 1.2. If the game is not there, Razdor downloads it itself when it starts: the "Loading the game" window appears. If that fails, the title screen shows the "Download the game" and "Pick the game archive…" buttons. Razdor looks for the game through `RAZDOR_DT_DIR`, next to its own program, in the remembered path, and in `~/Games`, `~/Downloads` and the home folder. The reason is written to `razdor.log`. See [Game installation](/razdor/wiki/en/start/install-game/).
 
 ## How do I install a mod?
 
@@ -18,7 +18,7 @@ On Windows: `%APPDATA%\razdor\saves`. On Linux: `~/.local/share/razdor/saves`. O
 
 ## Android cannot find the game. What should I do?
 
-Razdor on Android stores the game and saves in its own app folder and does not request "All files access." If the game is not found, tap "Download the game" or "Choose the archive…" on the title screen. Saves of an older version move through the folder picker: Razdor offers it at the start, or in Settings ("Other").
+Razdor on Android stores the game and saves in its own app folder and does not request "All files access." On the first start it downloads the game itself. If that did not happen, tap "Download the game" or "Choose the archive…" on the title screen. Saves of an older version move through the "Saves from an older release" window, which appears once the game has loaded, or through Settings → "Other" → "Move saves from the old Razdor folder…".
 
 [Razdor on Android](/razdor/wiki/en/phones/android/)
 
@@ -36,4 +36,10 @@ The language is changed by the language name in the corner of the main menu, by 
 
 ## How do I report a bug?
 
-Write to the [Discord](https://discord.gg/wmMksmWFDM) or open an issue on [GitHub](https://github.com/indicozy/razdor/issues).
+First collect the log:
+
+1. In Settings → "Other", turn on "Debug mode". A strip "Debug mode is on — FPS may drop" appears at the top of every screen.
+2. Repeat the problem.
+3. In Settings → "Other", press "Send the log…". On Android one file is saved through the system's "Save As" dialog; on a computer the log folder opens.
+
+Attach the file to your message. You can write to the [Discord](https://discord.gg/wmMksmWFDM) or open an issue on [GitHub](https://github.com/indicozy/razdor/issues).

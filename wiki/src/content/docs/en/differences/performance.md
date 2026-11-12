@@ -1,6 +1,6 @@
 ---
 title: Performance
-description: How much faster Razdor is compared to the original and how many armies and events large maps can handle.
+description: How much faster Razdor is than the original and how many armies and events large maps can handle.
 sidebar:
   order: 4
 ---
@@ -124,4 +124,9 @@ The results table shows FPS, the frame time (median and the 99th percentile) and
 Battles between armies were not tested.
 :::
 
-**Tip for map creators:** on maps larger than 200x200, keep the number of wandering armies low: they are the primary source of load. Guards and patrols were not tested in this measurement.
+**Tip for map creators:** on maps larger than 200x200, keep the wandering armies smaller: they are what cause the load. Guard posts and patrols were not checked in this measurement.
+
+## Debug mode
+
+In "Settings" → "Other", there is a "Debug mode" line. It is disabled by default. If you enable this mode, a performance log (slow frames and loads) will be recorded. A bar will appear at the top of every screen: "Debug mode enabled — FPS may decrease." This change takes effect immediately. To report a bug, enable the mode, reproduce the issue, and then use "Send the log…" on the same tab. On Android, one file will be saved via a save dialog; on the computer, a folder with the log will open.
+
