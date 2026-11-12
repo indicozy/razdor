@@ -163,3 +163,54 @@ The 2.5D close-up cost is gone: main matches v1.4.1 there, and zoomed out it is 
 +10 MB at the РК3 start. `tools/perf/baselines/v1.4.1.json` now holds these measured v1.4.1 numbers (it held numbers
 copied from this doc before). The 4060 headless check could not run: the card hung (Xid 119) while the bench
 polled `nvidia-smi` every second; the bench now reads VRAM once per run.
+
+## Sprite pass: profile split (backlog 1605, step 0; 2026-11-12)
+
+Question: where does the world pass's CPU go on the zoomed-out map, so that the next step targets it? Measured on
+`ade8f733`'s code plus `df9c305a` (HEAD, no pixel change), the RTX 4060 through VirtualGL under a private Xvfb, 1024×768,
+«Другой берег», 30 s per run, the frame probe's CSV (`work_ms`, `world`, `draws`, `verts`) and its 5 s summary lines.
+The machine was shared (load 8–12 on 20 CPUs), so the absolute numbers move between runs; the ratios inside one run
+are the usable part. Medians of the probe's per-window p50s; the first 100 CSV frames dropped.
+
+Whole-pass numbers (HEAD, unprobed, one run each):
+
+| Case | work ms | world ms (Stage::World) | draws | verts |
+|---|---|---|---|---|
+| zoomed out (`RAZDOR_MAP_ZOOM=0.05`), 2.5D | 5.68 | 5.19 | 180 | 16,348 |
+| zoomed out, third person (`RAZDOR_VIEW=first`) | 8.80 | 7.15 | 183 | 26,096 |
+| whole map (`RAZDOR_MAP_FIT=1`), 2.5D | 7.40 | 7.03 | 216 | 54,408 |
+| whole map, third person | 13.91 | 11.61 | 213 | 58,492 |
+
+Split of the world pass (temporary `frame_probe::time`-style stages, not committed; the timers are in the item build,
+`standing_at` and the item loop of `draw_world_in`):
+
+| Case (probe run 3) | work | items (seen tests, pushes, sort) | placement (`standing_at` before its draw) | sprite draws (its callback) | per-object prep (picture, detail, fog shade) | item loop, total | outside the loop (ground, fog, sky, the hills' pass) |
+|---|---|---|---|---|---|---|---|
+| zoomed out, 2.5D | 3.2 | 0.2 | 0.6 | 0.8 | 0.3 | 2.1 | ~1.1 |
+| zoomed out, third person | 7.2 | 0.6 | 1.1 | 0.8 | 0.6 | 3.7 | ~3.5 |
+| whole map, 2.5D | 8.3 | 0.5 | 1.9 | 2.6 | 0.6 | 6.0 | ~2.3 |
+| whole map, third person | 15.3 | 1.4 | 3.6 | 2.7 | 1.3 | 9.5 | ~5.8 |
+
+The first split run (before the timers were scoped to the item build) read 0.9 ms items and 4.8 ms placement for
+zoomed-out third person: the same order, noisier. The loop is not the sum of its parts: placement excludes the
+time of a sprite culled before its placement starts (the bend's horizon, the fade to zero), and the building and
+army branches' own lookups (`building_foot`, `atlas_src`) are not in any stage.
+
+What this says:
+
+- **The item build and the sort are small**: 0.2–1.4 ms of 3–15 ms of world work (5–10%). Step 1 (sorting once per
+  map and turn angle) therefore saves at most that share; its measured gain will be well under 1 ms zoomed out.
+- **Per-sprite placement is the largest cost** (`standing_at` → `standing_model`, `picture_quad`, the off-window
+  test, the eye test), 0.6 ms zoomed out 2.5D and up to 3.6 ms whole map third person; with the per-object prep
+  and the fog shade it is about half of the loop. Sprite draw callbacks come next (0.8–2.7 ms).
+- **Outside the loop** (the ground's overlays, the fog, the sun map, the hills' session): 1–6 ms, the rest of the pass
+  and not yet split.
+
+So the premise of the backlog plan (sorting is the main zoomed-out cost) does not hold on this measurement; the
+per-sprite placement and the draws do. Steps 1 and 2 (the cached order and the chunks) can remove only the item
+build and the sort, so their gain is at most about 1 ms of the zoomed-out third-person frame. Step 3 (GPU vertex
+buffers per chunk, the camera as uniforms) is the one that removes the placement, which is the cost to attack. The
+step order is the owner's; this section is the evidence for choosing between them.
+
+Not measured here: the 96-PNG matrix, the invalidation tests, `tools/perf/check.sh`, and the Android split. No code
+was changed by step 0; the instrumented build was reverted before this commit.
