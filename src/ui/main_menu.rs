@@ -888,6 +888,24 @@ fn desktop_promo(k: f32, bottom: f32, promo: &super::ads::Promo) {
     });
 }
 
+/// The upright promo's row (`upright_promo`): `width` wide from `left`, its bottom at `bottom`, as
+/// tall as the caption block (`block_h`) or the picture (`pic_w` × `pic_h`), whichever is taller.
+/// Returns the row and the picture, the picture at the row's left and centred in it.
+fn upright_row(left: f32, width: f32, bottom: f32, pic_w: f32, pic_h: f32, block_h: f32) -> (Rect, Rect) {
+    let row_h = block_h.max(pic_h);
+    let row = Rect::new(left, bottom - row_h, width, row_h);
+    (row, Rect::new(left, row.y + (row_h - pic_h) / 2.0, pic_w, pic_h))
+}
+
+/// The sideways promo's block (`sideways_promo`): the caption (`text_h` high), a `gap`, then the
+/// picture, all `pic_w` wide from `left` and centred on the screen's height `screen_h`. Returns
+/// the block and the picture.
+fn sideways_block(left: f32, screen_h: f32, pic_w: f32, pic_h: f32, text_h: f32, gap: f32) -> (Rect, Rect) {
+    let block_h = text_h + gap + pic_h;
+    let top = (screen_h - block_h) / 2.0;
+    (Rect::new(left, top, pic_w, block_h), Rect::new(left, top + text_h + gap, pic_w, pic_h))
+}
+
 /// The promo on a phone held upright: one row above `bottom`, the picture left, the caption right
 /// of it, the row's middle on the picture's. The whole row is the target.
 fn upright_promo(k: f32, dp: f32, bottom: f32, promo: &super::ads::Promo) {
@@ -910,12 +928,10 @@ fn upright_promo(k: f32, dp: f32, bottom: f32, promo: &super::ads::Promo) {
             .unwrap_or_else(|| (14.0 * dp, wrap_label(caption, cap_w, 14.0 * dp)));
         let pitch = size * 1.25;
         let block_h = lines.len() as f32 * pitch;
-        let row_h = block_h.max(pic_h);
-        let row = Rect::new(left, bottom - row_h, row_w, row_h);
-        let pic = Rect::new(left, row.y + (row_h - pic_h) / 2.0, pic_w, pic_h);
+        let (row, pic) = upright_row(left, row_w, bottom, pic_w, pic_h, block_h);
         let lit = promo_pointer(row, &promo.url);
         let ink = if lit { chrome::GOLD } else { PROMO_INK };
-        let cap_top = row.y + (row_h - block_h) / 2.0;
+        let cap_top = row.y + (row.h - block_h) / 2.0;
         for (i, line) in lines.iter().enumerate() {
             chrome::shadow_text(line, cap_x, cap_top + i as f32 * pitch + size * 0.85, size, ink);
         }
@@ -945,14 +961,13 @@ fn sideways_promo(k: f32, dp: f32, promo: &super::ads::Promo) {
             .unwrap_or_else(|| (15.0 * dp, wrap_label(caption, pic_w, 15.0 * dp)));
         let pitch = size * 1.25;
         let gap = 8.0 * k;
-        let block_h = lines.len() as f32 * pitch + gap + pic_h;
-        let top = (screen_height() - block_h) / 2.0;
-        let lit = promo_pointer(Rect::new(left, top, pic_w, block_h), &promo.url);
+        let (block, pic) = sideways_block(left, screen_height(), pic_w, pic_h, lines.len() as f32 * pitch, gap);
+        let lit = promo_pointer(block, &promo.url);
         let ink = if lit { chrome::GOLD } else { PROMO_INK };
         for (i, line) in lines.iter().enumerate() {
-            chrome::shadow_text(line, left, top + i as f32 * pitch + size * 0.85, size, ink);
+            chrome::shadow_text(line, left, block.y + i as f32 * pitch + size * 0.85, size, ink);
         }
-        promo_picture(promo, Rect::new(left, top + lines.len() as f32 * pitch + gap, pic_w, pic_h), k, lit);
+        promo_picture(promo, pic, k, lit);
     });
 }
 
@@ -3885,6 +3900,18 @@ mod tests {
         }
         assert!(m.buttons[4].y + m.buttons[4].h <= m.notice_y(0.75));
         assert!(m.chip_h >= TOUCH_DP * 2.0);
+    }
+
+    #[test]
+    fn the_promo_blocks_hold_their_picture_and_caption() {
+        // Upright: the row ends on `bottom`, holds the picture (its centre inside) and a 60-px caption.
+        let (row, pic) = upright_row(18.0, 1044.0, 2026.0, 412.5, 155.4, 60.0);
+        assert!(close(row.y + row.h, 2026.0) && row.h >= 155.4 && row.h >= 60.0, "{row:?}");
+        assert!(row.contains(pic.point()) && pic.x >= row.x && pic.x + pic.w <= row.x + row.w, "{pic:?} outside {row:?}");
+        // Sideways: the block is centred on the screen and the picture is its bottom.
+        let (block, pic) = sideways_block(24.0, 1080.0, 440.0, 165.0, 88.0, 8.0);
+        assert!(close(block.y + block.h / 2.0, 540.0), "{block:?}");
+        assert!(close(pic.y + pic.h, block.y + block.h) && block.contains(pic.point()), "{pic:?} outside {block:?}");
     }
 
     #[test]

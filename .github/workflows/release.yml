@@ -257,13 +257,16 @@ jobs:
           cp razdor-translate "razdor-translate-$V-linux"
           cp Razdor-translate.exe "Razdor-translate-$V.exe"
           cp razdor-translate-macos "razdor-translate-$V-macos"
+          # The promo ads (dist/ads, from dist.sh): read next to the desktop programs (src/ui/ads.rs).
+          # A release file is one file, so the folder goes as a zip the player unpacks beside them.
+          zip -qr "razdor-ads-$V.zip" ads
           ls -l
 
       - name: SHA-256 of all of them
         run: |
           (cd dist && sha256sum razdor Razdor.exe razdor-macos razdor-translate Razdor-translate.exe razdor-translate-macos razdor.apk razdor.ipa \
             "razdor-$V-linux" "Razdor-$V.exe" "razdor-$V-macos" "razdor-$V.apk" "razdor-$V.ipa" \
-            "razdor-translate-$V-linux" "Razdor-translate-$V.exe" "razdor-translate-$V-macos" > SHA256SUMS)
+            "razdor-translate-$V-linux" "Razdor-translate-$V.exe" "razdor-translate-$V-macos" "razdor-ads-$V.zip" > SHA256SUMS)
           cat dist/SHA256SUMS
 
       - name: The programs of a run by hand
@@ -288,6 +291,7 @@ jobs:
             dist/razdor-translate-${{ steps.versions.outputs.v }}-linux
             dist/Razdor-translate-${{ steps.versions.outputs.v }}.exe
             dist/razdor-translate-${{ steps.versions.outputs.v }}-macos
+            dist/razdor-ads-${{ steps.versions.outputs.v }}.zip
             dist/SHA256SUMS
 
       - name: Release notes from changelog/X.Y.Z.md
@@ -325,4 +329,4 @@ jobs:
             dist/Razdor.exe dist/razdor dist/razdor-macos dist/razdor.apk dist/razdor.ipa \
             dist/Razdor-translate.exe dist/razdor-translate dist/razdor-translate-macos \
             dist/Razdor-$V.exe dist/razdor-$V-linux dist/razdor-$V-macos dist/razdor-$V.apk dist/razdor-$V.ipa \
-            dist/Razdor-translate-$V.exe dist/razdor-translate-$V-linux dist/razdor-translate-$V-macos dist/SHA256SUMS
+            dist/Razdor-translate-$V.exe dist/razdor-translate-$V-linux dist/razdor-translate-$V-macos dist/razdor-ads-$V.zip dist/SHA256SUMS
