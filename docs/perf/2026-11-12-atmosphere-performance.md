@@ -269,3 +269,26 @@ gain figure is claimed here. Re-measure with `tools/perf/check.sh` on an idle ma
 
 Item 8 (background preparation at load) was tried and dropped: the first-frame bake and the textures moved to
 frames 2 and 3 as stalls of 65 and 109 ms, which the owner rejects. The load path is unchanged.
+
+## Map sprites cut to their boxes (item 6, the trim; 2026-11-12)
+
+Each map sprite's picture is drawn over the box of its opaque texels (plus one texel), not the whole sprite;
+the atlas keeps its layout, so every sampled texel is the one it sampled before. Trees, sun-shaded and night-lit
+pictures keep the whole sprite (their sway, form shading and lit windows read the sprite's full frame).
+
+Pictures: 48 shots (card1, «Другой берег», flat and 2.5D, sun and night, zoomed out and near), main against the trim:
+every shot within 2 levels, no pixel above 7, minimum PSNR 77.2 dB.
+
+Thirty-day test: `thirty_days_on_every_map` alone, `RAZDOR_PERF_BUDGET_SCALE=4`: passed (97.5 s).
+
+GPU (`RAZDOR_GPU_STAGES=1`, card1, interleaved main and trim, two rounds, 40 s each; the medians of the frame
+rows, per round):
+
+| scene | main gpu sum p50 | trim gpu sum p50 | sprites p50 (main / trim) | draws |
+|---|---|---|---|---|
+| flat, zoomed out (round 1 / 2) | 5.85 / 5.83 ms | 5.85 / 5.87 ms | 0.24 / 0.24 ms | 940 both |
+| 2.5D, zoomed out (round 1 / 2) | 4.29 / 4.31 ms | 4.29 / 4.43 ms | 0.49 / 0.51 ms | 216 both |
+
+No measurable GPU saving on the RTX 4060 for these scenes: the sprite pass is under 0.5 ms here, so the fill
+saving is inside the noise. (An earlier unpaired run showed large differences; it ran under load and is discarded.)
+The trim is kept for the weaker GPUs of phones, which this card does not stand in for; not measured there.
