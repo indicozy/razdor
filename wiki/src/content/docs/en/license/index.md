@@ -11,6 +11,12 @@ From version 1.3.0 Razdor's code is released under **GPL-3.0** (version 3 only) 
 
 Nothing changes for players: Razdor is free, you may download it, install it and share it. Community maps and mods are not affected. The files of Discord Times itself are not part of Razdor: it reads them from your own install.
 
+## The original game's files
+
+On 12 November 2026 the developers of Discord Times (Aterdux Entertainment) allowed the game's assets and original maps to be included in Razdor's public build, for non-commercial use. The copyright and the licence of those files stay with the developers: the permission is given to Razdor's author to distribute them with Razdor, the files are not covered by the GPL, and forks or other builds do not get this permission.
+
+As thanks, the main menu's bottom-right corner links to the developers' new game, [Thorny Times](https://store.steampowered.com/app/2182610/).
+
 ## For forks and builds
 
 You may change the code, build your own versions and publish them. The terms:

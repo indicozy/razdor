@@ -90,6 +90,12 @@ mobile support; there is no roadmap and nothing else is started unless the owner
   screenshots of the original) or anything personal (saves, logs, settings, tokens, home paths).
   The one exception (the owner's decision, 2026-10-15): Razdor's English translations of the
   data texts, `data/lang/en/game/Eng_*.ini` (made by `razdor-translate --data`).
+  The game's developers (Aterdux, 2026-11-12) allowed the original's assets and maps in Razdor's
+  public non-commercial build; their copyright and licence stay theirs, the permission is the
+  owner's to distribute with Razdor only (README, wiki license page). Its condition: the Thorny
+  Times Steam capsule and link (`ads/thorny-times/`, loaded at runtime, never baked into the
+  binary or the APK) stay on the main menu.
+  Bundling the files is a separate decision: until the owner starts it, this rule stands.
   One more, for the wiki only (the owner's decision, 2026-10-27): screenshots of Razdor (which show
   the original's art) as small WebP under `wiki/src/assets/shots/`. The wiki is about Razdor
   (installing, tutorials, differences from the original, mods, tools), never a copy of the

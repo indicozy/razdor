@@ -46,3 +46,15 @@ FONTS
 
 The fonts in data/fonts/ keep their own licenses (the *-OFL.txt and *-LICENSE.txt files next
 to them).
+
+
+DISCORD TIMES ASSETS
+
+The GPL-3.0 covers Razdor's own code only. The assets and maps of Discord Times
+(Времена раздора) stay the property of their developers, Aterdux Entertainment, under their
+own terms. On 2026-11-12 the developers allowed indicozy to share them in Razdor's public
+build, for non-commercial use only. That permission is indicozy's and is not passed on by
+this license: forks and other builds do not receive it.
+
+The Thorny Times picture in ads/thorny-times/ belongs to Aterdux Entertainment and is used with
+their permission, to link to their game.
