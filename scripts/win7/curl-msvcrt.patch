@@ -1,0 +1,195 @@
+--- a/lib/curlx/win32-fopen.c	2026-11-13 01:23:17.539494270 +0500
++++ b/lib/curlx/win32-fopen.c	2026-11-13 01:23:17.555513162 +0500
+@@ -25,6 +25,103 @@
+ 
+ #include "curlx/win32-fopen.h"
+ 
++/* Razdor's Windows 7 build (a local patch to curl 8.23.0, scripts/win7/curl-msvcrt.patch): the C11
++ * "_s" functions used below are not exported by every msvcrt.dll (Windows 7's is one of them), so
++ * these classic msvcrt functions stand in, with the same results and error codes. */
++#ifdef _WIN32
++#include <errno.h>
++static __inline errno_t razdor_mbstowcs_s(size_t *ret, wchar_t *dst, size_t dstsz,
++                                          const char *src, size_t len)
++{
++  size_t n;
++  if(!dst) {
++    n = mbstowcs(NULL, src, 0);
++    if(n == (size_t)-1)
++      return EILSEQ;
++    if(ret)
++      *ret = n + 1;
++    return 0;
++  }
++  if(!dstsz)
++    return EINVAL;
++  if(len >= dstsz)
++    len = dstsz - 1;
++  n = mbstowcs(dst, src, len);
++  if(n == (size_t)-1)
++    return EILSEQ;
++  dst[n] = 0;
++  if(ret)
++    *ret = n + 1;
++  return 0;
++}
++
++static __inline errno_t razdor_wcstombs_s(size_t *ret, char *dst, size_t dstsz,
++                                          const wchar_t *src, size_t len)
++{
++  size_t n;
++  if(!dst) {
++    n = wcstombs(NULL, src, 0);
++    if(n == (size_t)-1)
++      return EILSEQ;
++    if(ret)
++      *ret = n + 1;
++    return 0;
++  }
++  if(!dstsz)
++    return EINVAL;
++  if(len >= dstsz)
++    len = dstsz - 1;
++  n = wcstombs(dst, src, len);
++  if(n == (size_t)-1)
++    return EILSEQ;
++  dst[n] = 0;
++  if(ret)
++    *ret = n + 1;
++  return 0;
++}
++
++static __inline errno_t razdor_wcsncpy_s(wchar_t *dst, size_t dstsz, const wchar_t *src,
++                                         size_t count)
++{
++  size_t n = 0;
++  if(!dst || !dstsz)
++    return EINVAL;
++  while(n < count && src[n])
++    n++;
++  if(n >= dstsz)
++    return ERANGE;
++  memcpy(dst, src, n * sizeof(wchar_t));
++  dst[n] = 0;
++  return 0;
++}
++
++static __inline errno_t razdor_wcscpy_s(wchar_t *dst, size_t dstsz, const wchar_t *src)
++{
++  size_t n;
++  if(!dst || !dstsz)
++    return EINVAL;
++  n = wcslen(src);
++  if(n >= dstsz)
++    return ERANGE;
++  memcpy(dst, src, (n + 1) * sizeof(wchar_t));
++  return 0;
++}
++
++static __inline errno_t razdor_freopen_s(FILE **file, const char *filename, const char *mode,
++                                         FILE *stream)
++{
++  *file = freopen(filename, mode, stream);
++  return *file ? 0 : errno;
++}
++
++static __inline errno_t razdor_wfreopen_s(FILE **file, const wchar_t *filename,
++                                          const wchar_t *mode, FILE *stream)
++{
++  *file = _wfreopen(filename, mode, stream);
++  return *file ? 0 : errno;
++}
++#endif
++
+ int curlx_fseek(void *stream, curl_off_t offset, int whence)
+ {
+ #ifdef _WIN32
+@@ -127,14 +224,14 @@
+ 
+ #ifndef _UNICODE
+   /* convert multibyte input to unicode */
+-  if(mbstowcs_s(&needed, NULL, 0, in, 0))
++  if(razdor_mbstowcs_s(&needed, NULL, 0, in, 0))
+     goto cleanup;
+   if(!needed || needed >= max_path_len)
+     goto cleanup;
+   ibuf = CURLX_MALLOC(needed * sizeof(wchar_t));
+   if(!ibuf)
+     goto cleanup;
+-  if(mbstowcs_s(&count, ibuf, needed, in, needed - 1))
++  if(razdor_mbstowcs_s(&count, ibuf, needed, in, needed - 1))
+     goto cleanup;
+   if(count != needed)
+     goto cleanup;
+@@ -189,11 +286,11 @@
+       if(!temp)
+         goto cleanup;
+ 
+-      if(wcsncpy_s(temp, needed, L"\\\\?\\UNC\\", 8)) {
++      if(razdor_wcsncpy_s(temp, needed, L"\\\\?\\UNC\\", 8)) {
+         CURLX_FREE(temp);
+         goto cleanup;
+       }
+-      if(wcscpy_s(temp + 8, needed, fbuf + 2)) {
++      if(razdor_wcscpy_s(temp + 8, needed, fbuf + 2)) {
+         CURLX_FREE(temp);
+         goto cleanup;
+       }
+@@ -208,11 +305,11 @@
+       if(!temp)
+         goto cleanup;
+ 
+-      if(wcsncpy_s(temp, needed, L"\\\\?\\", 4)) {
++      if(razdor_wcsncpy_s(temp, needed, L"\\\\?\\", 4)) {
+         CURLX_FREE(temp);
+         goto cleanup;
+       }
+-      if(wcscpy_s(temp + 4, needed, fbuf)) {
++      if(razdor_wcscpy_s(temp + 4, needed, fbuf)) {
+         CURLX_FREE(temp);
+         goto cleanup;
+       }
+@@ -224,14 +321,14 @@
+ 
+ #ifndef _UNICODE
+   /* convert unicode full path to multibyte output */
+-  if(wcstombs_s(&needed, NULL, 0, fbuf, 0))
++  if(razdor_wcstombs_s(&needed, NULL, 0, fbuf, 0))
+     goto cleanup;
+   if(!needed || needed >= max_path_len)
+     goto cleanup;
+   obuf = CURLX_MALLOC(needed);
+   if(!obuf)
+     goto cleanup;
+-  if(wcstombs_s(&count, obuf, needed, fbuf, needed - 1))
++  if(razdor_wcstombs_s(&count, obuf, needed, fbuf, needed - 1))
+     goto cleanup;
+   if(count != needed)
+     goto cleanup;
+@@ -400,7 +497,7 @@
+ }
+ 
+ #if defined(__MINGW32__) && (__MINGW64_VERSION_MAJOR < 5)
+-_CRTIMP errno_t __cdecl freopen_s(FILE **file, const char *filename,
++_CRTIMP errno_t __cdecl razdor_freopen_s(FILE **file, const char *filename,
+                                   const char *mode, FILE *stream);
+ #endif
+ 
+@@ -418,7 +515,7 @@
+       target = fixed;
+     else
+       target = filename_w;
+-    errno = _wfreopen_s(&file, target, mode_w, fp);
++    errno = razdor_wfreopen_s(&file, target, mode_w, fp);
+   }
+   else
+     /* !checksrc! disable ERRNOVAR 1 */
+@@ -430,7 +527,7 @@
+     target = fixed;
+   else
+     target = filename;
+-  errno = freopen_s(&file, target, mode, fp);
++  errno = razdor_freopen_s(&file, target, mode, fp);
+ #endif
+ 
+   CURLX_FREE(fixed);

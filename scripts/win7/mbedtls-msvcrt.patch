@@ -1,0 +1,13 @@
+--- a/library/platform.c	2026-11-13 01:25:03.605617079 +0500
++++ b/library/platform.c	2026-11-13 01:25:03.608937110 +0500
+@@ -121,7 +121,9 @@
+         return -1;
+     }
+ 
+-#if defined(_TRUNCATE)
++/* Razdor's Windows 7 build (a local patch to mbedTLS 3.6.7): vsnprintf_s is not in every msvcrt.dll, so the
++   plain vsnprintf branch is always used. */
++#if 0
+     ret = vsnprintf_s(s, n, _TRUNCATE, fmt, arg);
+ #else
+     ret = vsnprintf(s, n, fmt, arg);
