@@ -36,6 +36,7 @@ Machines: "4060" = RTX 4060 headless through VirtualGL (find its `/dev/dri/cardN
 
 | Date | Idea | Scenes / machine | Result | Where | Why not |
 |---|---|---|---|---|---|
+| 2026-11-12 | 1605 step 5a-i: map decorations placed by a vertex shader (`RAZDOR_GPU_SPRITES=1`, off by default; 2.5D, anim off, no sun, no lit, no LOD copy, detail 1; per-run meshes, `sharp::SHARP_VERTEX_BILLBOARD`) | «Другой берег» zoom 0.05 2.5D (4,169 placed/frame), whole map 2.5D (0 placed: detail fade), РК3 2.5D (909 placed), 4060, two interleaved rounds, shared machine; controls swing 30–40 % | zoom 2.5D world 4.17/4.63 → 5.41/6.21 ms; draws 173 → 221; РК3 0.60/0.60 → 1.15/0.63 (noisy); whole map no change | branch `gpu-sprites` (`b1867e21`), parked | No gain: the run structure (short runs between buildings and figures) costs more draws than the placement math saves. Pictures: 88/96 explored identical (7 at max 2, one shot max 13 on 17 px of one sprite edge row, PSNR 72.8), 90/96 partly explored identical (rest max 2), reveal max 2; picks digests identical 90/90 per case. Kept off by default; the next stages need long runs (order by texture). [perf doc, step 5a-i] |
 | 2026-11-12 | 1605 step 3a: the window's view-projection built once per frame, not per sprite (`picture_quad`) | «Другой берег» zoomed out / whole map, 2.5D / third, 4060, interleaved vs `a220850b`, two rounds | Byte-identical 96/96; round 1 −6…−12 %, round 2 +0…+15 % on the same cases: no reliable gain | dropped, local branch `dropped/1605-step-3a-viewproj-cache` | Not landed: the rule needs a measured gain, and the rounds disagree. |
 | 2026-11-12 | 1605 steps 1+2: static order sorted once per map and turn, then 16×16 chunks with a heap merge | «Другой берег» zoomed out / whole map, 2.5D / third, 4060, interleaved | Byte-identical, but SLOWER: 2.90 → 3.32, 5.86 → 7.47, 9.28 → 10.33, 14.29 → 15.84 ms | local branch `dropped/1605-steps-1-2`; numbers `a220850b` | The merge per frame costs more than the one sort it replaces; the sort was only 5–10% of the pass. Step 1 alone: no change (2.96 → 2.98 …). |
 | 2026-11-12 | 1605: lazy pick quads (build the pointer's quads only when asked) | four cases, 4060 | ~0 ms: the PICKS push is free | `4e295fdc` (doc) | The picture quad is also the off-window cull; only a cheaper conservative cull could skip it (ceiling 0.6–1.2 ms, step 3). |
@@ -52,6 +53,5 @@ Machines: "4060" = RTX 4060 headless through VirtualGL (find its `/dev/dri/cardN
 
 | Since | Idea | Who / where | Expected |
 |---|---|---|---|
-| 2026-11-12 | 1605 step 3: conservative cull before the picture quad | sprite-pass agent | ≤0.6–1.2 ms zoomed out |
-| 2026-11-12 | 1605 step 5: GPU vertex buffers per chunk, the camera in the shader | after step 4 | removes most per-sprite placement (2–6 ms zoomed out) |
+| 2026-11-12 | 1605 step 3: conservative cull before the picture quad | not built (superseded by step 5; step 5 now parked) | ≤0.6–1.2 ms zoomed out |
 | 2026-11-12 | Art sheets and window pictures kept for the whole session (`DtArt`, `chrome::visual_images`) | not started | ~40–60 MB on phones (estimate) |
