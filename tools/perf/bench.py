@@ -458,7 +458,9 @@ def gpu_run_once(args, binary, dt_dir, scene, view, effect, run_dir, display, xd
         r = rss_mb(pids[0])
         if r is not None:
             rss = r if rss is None else max(rss, r)
-        if now - last_vram >= 1.0:  # nvidia-smi costs a little: once a second is enough
+        # VRAM once per run, half way through: polling nvidia-smi every second during uncapped runs hung the
+        # RTX 4060's GSP firmware (Xid 119, 2026-11-12), which then needed a reset.
+        if not seen_vram and first is not None and now - first >= args.seconds / 2 and last_vram == 0.0:
             last_vram = now
             v = vram_mb(pids[0], gpu_index)
             if v is not None:
