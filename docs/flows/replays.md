@@ -152,7 +152,7 @@ on the map (`begin_cast`, `cast`), `army_window_opened`, items (`press_pack`, `p
 `give_held`, `drop_held`, `drink`, `equip`, `unequip`), towns (`buy`, `sell`, `hire`, `heal`,
 `resurrect`, `learn_spell`, garrison moves, `dismiss`, offers, tribute, `rent_ship`), the squad
 (`set_unit_battle_disabled`, `set_formation`, `set_hero_name`, `move_unit`, `promote`), the battle
-(`start_battle`, `resolve_battle`, and the battle's `move_card`, `move_active`, `pass`, `act`,
+(`start_battle`, `resolve_battle`, «Отступить» (`retreat_battle`: the battle is dropped, the hero goes back), and the battle's `start_play` (`Begin`: the first action, before it only `move_card` plays: the deployment), `move_card`, `move_active`, `pass`, `act`,
 `own_cell`, `auto_step`, `hero_auto_step`, `hero_auto_play_to_end`, `max_play_to_end`, `force_end`),
 and the rule settings (`set_rule_settings`: a change, recorded once; `ui::main_menu::follow_settings`
 calls it every frame).

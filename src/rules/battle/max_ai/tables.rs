@@ -128,6 +128,9 @@ impl Battle {
             turn_lost,
             max_turn_lost,
             bench,
+            // The deployment's cells: set when the battle begins, so the search (which plans from
+            // begun battles) never sees them change.
+            deployed: _,
             god,
             max_ai: _,
             // A replay's bookkeeping, not the rules (`rules::recording`).

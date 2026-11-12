@@ -8,6 +8,12 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **How long a fled army leaves him alone** (2026-11-13, backlog 1607). «Отступить» (Razdor's, on by default) sets the
+  army's `ignore_until` to 120 minutes, the same figure as the withdrawal after a battle with no winner
+  (`resolve_battle`). Neither figure is checked against the original: the original has no retreat, and its own
+  withdrawal may not be the same rule. What would settle it: the original's `ignore_until` writers (ai.md) read against a
+  recording of an army that loses sight of the hero. Until then the 120 minutes stays Razdor's.
+
 - **Zoomed-out map: a cached static picture is not built** (2026-11-11, the owner's item 1 of the zoom-out
   work). The design was a screen-sized cache of the statics (`render_cache::Cached`), with the armies, ship and hero
   drawn over it. It is not exact: at the whole-map zoom of the Discord Times maps a dynamic sprite (the hero, an

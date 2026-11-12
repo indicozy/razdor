@@ -169,6 +169,7 @@ impl Clone for Battle {
             turn_lost: [0; 2],
             max_turn_lost: [0; 2],
             bench: Vec::new(),
+            deployed: Vec::new(),
             god: false,
             max_ai: false,
             max_guard: false,
@@ -217,6 +218,7 @@ impl Clone for Battle {
             turn_lost,
             max_turn_lost,
             bench,
+            deployed,
             god,
             max_ai,
             max_guard,
@@ -261,6 +263,7 @@ impl Clone for Battle {
         self.turn_lost = *turn_lost;
         self.max_turn_lost = *max_turn_lost;
         self.bench.clone_from(bench);
+        self.deployed.clone_from(deployed);
         self.god = *god;
         self.max_ai = *max_ai;
         self.max_guard = *max_guard;

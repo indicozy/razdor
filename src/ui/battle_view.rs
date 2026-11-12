@@ -29,6 +29,7 @@ use super::assets::Assets;
 use super::audio::{cue, Cue};
 use super::chrome::{self, shadow_centered, shadow_right, CellIcon, Skin, BLUE_TEXT, CREAM, GOLD, RED_TEXT};
 use super::dialog::Dialog;
+use super::unit_drag::{self, GridPress};
 use super::unit_sheet::{self, Sheet};
 use super::widgets::*;
 use super::window_layout;
@@ -77,6 +78,33 @@ struct Layout {
     formation: Formation,
     /// The stacked layout (a phone held upright).
     stacked: bool,
+    /// The deployment row («Перестроить армию», «Отступить») above the quick buttons, while the
+    /// battle is offered its deployment (`with_deploy`); it takes the panel's height, so the
+    /// quick buttons and everything below keep their places.
+    deploy: Option<Rect>,
+    /// The area's height in px (one row upright, two sideways): 40 dp at least per button on a phone.
+    deploy_h: f32,
+    /// The gap in px between the deployment's parts and the rows around it: 8 dp on a phone (the
+    /// mobile check's crowding limit), 3 px on the desktop.
+    gap: f32,
+}
+
+/// The deployment row's height in design px held upright: 68, about 44 dp (as the custom battle's
+/// quick buttons, `STACK_QUICK_H_CUSTOM`); the touch targets of the new buttons are 40 dp at least.
+const DEPLOY_STACK_H: f32 = 68.0;
+/// The deployment row's height on a phone held sideways, in dp.
+const DEPLOY_DP: f32 = 40.0;
+/// The gap around the deployment's buttons on a phone, in dp (8 dp: the crowding limit of the
+/// mobile check, for targets under 48 dp).
+const DEPLOY_GAP_DP: f32 = 8.0;
+/// The deployment's button labels on a phone, as a share of the button's own size: the sideways
+/// window's labels come out under 12 sp otherwise (the mobile check's text floor).
+const DEPLOY_LABEL_PHONE: f32 = 1.25;
+
+/// The gap around the deployment, in px at interface scale `k`: 8 dp on a phone (`dp` px per dp),
+/// else the quick buttons' 3 px.
+fn deploy_gap(k: f32, dp: Option<f32>) -> f32 {
+    dp.map_or(STACK_QUICK_GAP * k, |d| DEPLOY_GAP_DP * d)
 }
 
 /// The stacked battle window's design width: 590 px, as the other stacked windows.
@@ -131,7 +159,7 @@ impl Layout {
         let (f, k) = (battle.formation, chrome::k());
         let dp = super::display::dp_px();
         match (window_layout::game_rect(stacked_video(f, custom)), dp) {
-            (Some(win), Some(_)) => Layout::upright(k, win, f, custom),
+            (Some(win), Some(d)) => Layout::upright(k, win, f, custom, Some(d)),
             _ => {
                 let (sw, safe) = (screen_width(), super::display::safe_area());
                 Layout::landscape(k, (sw, screen_height()), chrome::fit_bar_height(), f, dp, safe.top)
@@ -161,13 +189,55 @@ impl Layout {
         let card = vec2(88.0 * c * k, 128.0 * c * k).round();
         let pitch = vec2(96.0 * c * k, 133.0 * c * k);
         let grid_w = f.display_cols() as f32 * pitch.x - 8.0 * c * k;
-        Layout { k, win, panel, quick, strip, card, pitch, grid_x: (rx + (rw - grid_w) / 2.0).round(), formation: f, stacked: false }
+        // Two buttons one above the other in the narrow column: two rows, each as tall as the quick ones
+        // (40 dp at least on a phone).
+        let row = quick.h.max(dp.map_or(0.0, |d| DEPLOY_DP * d));
+        let gap = deploy_gap(k, dp);
+        let deploy_h = 2.0 * row + gap;
+        Layout { k, win, panel, quick, strip, card, pitch, grid_x: (rx + (rw - grid_w) / 2.0).round(), formation: f, stacked: false, deploy: None, deploy_h, gap }
+    }
+
+    /// The layout with the deployment row on (`deploying`): the row sits between the unit's panel
+    /// and the quick buttons, and the panel (held upright: the band) gives up its height, so the
+    /// quick buttons, the grids and the window keep their places.
+    fn with_deploy(mut self, on: bool) -> Layout {
+        if !on {
+            return self;
+        }
+        let gap = self.gap;
+        let (x, w) = (self.quick.x, self.quick.w);
+        // The panel gives up the area and the two gaps around it, less the quick row's own gap (3 px),
+        // which the quick buttons already had: they keep their place.
+        self.panel.h -= self.deploy_h + 2.0 * gap - STACK_QUICK_GAP * self.k;
+        let deploy = Rect::new(x, self.panel.bottom() + gap, w, self.deploy_h);
+        self.quick.y = deploy.bottom() + gap;
+        self.deploy = Some(deploy);
+        self
+    }
+
+    /// The deployment's two buttons in its area: «Перестроить армию» and, when `retreat`,
+    /// «Отступить». Upright, where the row is wide, side by side (the arrangement wider); sideways,
+    /// in the narrow column, one above the other. Without the retreat the arrangement keeps its
+    /// place alone. `None` when the area is not shown.
+    fn deploy_buttons(&self, retreat: bool) -> Option<(Rect, Option<Rect>)> {
+        let a = self.deploy?;
+        let gap = self.gap;
+        if self.stacked {
+            if !retreat {
+                return Some((a, None));
+            }
+            let w = (a.w - gap) * 0.55;
+            Some((Rect::new(a.x, a.y, w, a.h), Some(Rect::new(a.x + w + gap, a.y, a.w - w - gap, a.h))))
+        } else {
+            let h = (a.h - gap) / 2.0;
+            Some((Rect::new(a.x, a.y, a.w, h), retreat.then(|| Rect::new(a.x, a.y + h + gap, a.w, a.h - h - gap))))
+        }
     }
 
     /// The stacked window (a phone held upright) at `k`, `win` as `window_layout::game_rect` fits
     /// it: the unit's band on top, the quick buttons under it, the enemy's grid, the strip, and the
     /// player's grid. Its title strip is the window's own (taller on a phone, growing upward).
-    fn upright(k: f32, win: Rect, f: Formation, custom: bool) -> Layout {
+    fn upright(k: f32, win: Rect, f: Formation, custom: bool, dp: Option<f32>) -> Layout {
         let c = card_scale(f);
         let (strip_y, _) = stacked_rows(f, custom);
         let band = Rect::new(win.x + 2.0 * k, win.y + STACK_BAND_Y * k, 586.0 * k, window_layout::BAND_H * k);
@@ -176,7 +246,7 @@ impl Layout {
         let card = vec2(88.0 * c * k, 128.0 * c * k).round();
         let pitch = vec2(96.0 * c * k, 133.0 * c * k);
         let grid_w = f.display_cols() as f32 * pitch.x - 8.0 * c * k;
-        Layout { k, win, panel: band, quick, strip, card, pitch, grid_x: (strip.x + (strip.w - grid_w) / 2.0).round(), formation: f, stacked: true }
+        Layout { k, win, panel: band, quick, strip, card, pitch, grid_x: (strip.x + (strip.w - grid_w) / 2.0).round(), formation: f, stacked: true, deploy: None, deploy_h: DEPLOY_STACK_H * k, gap: deploy_gap(k, dp) }
     }
 
     /// Whether the window is stacked (a phone held upright).
@@ -550,6 +620,17 @@ pub struct BattleView {
     pub paused: bool,
     /// A trailer shot's pace (`battle_speed`), times the game's animations; `None` outside a run.
     trailer_pace: Option<f32>,
+    /// The deployment is offered (`BattleView::deploying`): «Перестроить армию» and, with
+    /// `retreat`, «Отступить», until the battle's first action (the owner's decision of
+    /// 2026-11-13, backlog 1607).
+    offer: bool,
+    retreat: bool,
+    /// «Перестроить армию» is on: the player's cards move by clicks or drags.
+    rearranging: bool,
+    /// The card picked in the arrangement (a fighter index), as the army window's selection.
+    rearr_sel: Option<usize>,
+    /// «Отступить» was clicked this frame: the frame carries it out (`Game::retreat_battle`).
+    retreat_now: bool,
 }
 
 /// A card's curse and blessing signs.
@@ -700,6 +781,29 @@ impl BattleView {
     /// the one set in the army window beforehand (interface.md §12, 0x4daa80).
     pub fn new(mut battle: Battle) -> Self {
         battle.begin();
+        Self::unbegun(battle)
+    }
+
+    /// The battle the player may still arrange (the owner's decision of 2026-11-13, backlog 1607):
+    /// it does not begin until his first action (`Battle::start_play`), so nothing moves before it.
+    /// «Перестроить армию» is offered until then, and «Отступить» too when `retreat`
+    /// (`Game::can_retreat`).
+    pub fn deploying(battle: Battle, retreat: bool) -> Self {
+        BattleView { offer: true, retreat, ..Self::unbegun(battle) }
+    }
+
+    /// «Перестроить армию» on or off (the debug snapshot `RAZDOR_SCENE_DEPLOY=rearrange`).
+    pub fn set_rearranging(&mut self, on: bool) {
+        self.rearranging = on;
+    }
+
+    /// The card picked in «Перестроить армию» (the debug snapshot `RAZDOR_SCENE_DEPLOY=pick`).
+    pub fn set_rearr_pick(&mut self, fighter: Option<usize>) {
+        self.rearr_sel = fighter;
+    }
+
+    /// The view of a battle as it stands (begun or not): the screen's state at its start.
+    fn unbegun(battle: Battle) -> Self {
         let begun = Self::moment(&battle);
         BattleView {
             battle,
@@ -728,15 +832,20 @@ impl BattleView {
             feed: None,
             paused: false,
             trailer_pace: None,
+            offer: false,
+            retreat: false,
+            rearranging: false,
+            rearr_sel: None,
+            retreat_now: false,
         }
     }
 
     /// A battle the replay plays (`ui::watch`): both sides are the computer's (the enemy by its
     /// recorded «Максимум» moves, the player's by `actions` in order), at the speed the screen
     /// sets. The battle has begun (`Battle::begin` is idempotent).
-    pub fn replay(mut battle: Battle, actions: Vec<BattleAct>) -> Self {
-        battle.begin();
-        BattleView { watch: true, feed: Some(actions.into()), ..BattleView::new(battle) }
+    pub fn replay(battle: Battle, actions: Vec<BattleAct>) -> Self {
+        // Not begun here: the recorded deployment and its `Begin` play first (`replay_deploy`).
+        BattleView { watch: true, feed: Some(actions.into()), ..BattleView::unbegun(battle) }
     }
 
     /// The replayed battle's pace: the screen's speed (1, 2, 4, 8 or 16 times the normal).
@@ -790,6 +899,8 @@ impl BattleView {
     /// W: starts watching the AI play both sides, or stops and gives the player his side
     /// back (in a custom battle of AI against AI, the side below).
     fn toggle_watch(&mut self) {
+        // Watching is the battle's first action when it has not begun (the AI plays from there).
+        self.begin_play();
         if self.watching() {
             self.watch = false;
             if !self.control.contains(&Control::Player) {
@@ -893,6 +1004,7 @@ impl BattleView {
     fn quick_battle(&mut self) {
         self.fx = None;
         self.news = None;
+        self.end_rearrange();
         self.rest_max();
         if self.battle.max_ai() {
             let (mut b, globals) = (self.battle.clone(), patch_globals());
@@ -1089,6 +1201,21 @@ impl BattleView {
             return (false, false);
         }
         let ongoing = self.battle.outcome() == Outcome::Ongoing;
+        // The deployment (backlog 1607): the first click on a card or the space key begins the
+        // battle and plays as an action; while the player arranges, his presses move his cards.
+        if self.feed.is_some() && self.battle.is_deploying() {
+            self.replay_deploy();
+        }
+        if self.rearranging && !self.offering() {
+            self.end_rearrange();
+        }
+        if ongoing && !self.exiting && self.offering() {
+            if self.rearranging {
+                self.rearrange_press(l);
+            } else if key(KeyCode::Space) || (clicked() && self.cell_under_mouse(l).is_some()) {
+                self.begin_play();
+            }
+        }
         // Esc opens the ways out, also while a strike or spell plays. The window opens on the
         // next frame, so the Esc that opened it does not also close it.
         let mut just_opened = false;
@@ -1175,6 +1302,133 @@ impl BattleView {
         }
     }
 
+    /// The deployment is offered: the screen offers it and the battle has not begun (its first
+    /// action has not come).
+    fn offering(&self) -> bool {
+        self.offer && self.battle.is_deploying()
+    }
+
+    /// The player's first action of the battle: the deployment ends (`Battle::start_play`), and
+    /// «Перестроить армию» with it.
+    fn begin_play(&mut self) {
+        self.end_rearrange();
+        self.battle.start_play();
+    }
+
+    /// «Перестроить армию» is off; the grab of a card is let go.
+    fn end_rearrange(&mut self) {
+        self.rearranging = false;
+        self.rearr_sel = None;
+        unit_drag::cancel();
+    }
+
+    /// The buttons of the deployment row: «Перестроить армию» (while on, «Готово»), and
+    /// «Отступить» when the retreat is offered. Clicks only set the state; the frame carries out
+    /// the retreat (`retreat_now`).
+    fn deploy_controls(&mut self, l: &Layout) {
+        let Some((arrange, retreat)) = l.deploy_buttons(self.retreat) else { return };
+        let label = if self.rearranging { tr("Arrangement done") } else { tr("Rearrange the army") };
+        // The labels on a phone are larger than the window's own (`DEPLOY_LABEL_PHONE`), two lines
+        // where one would not fit the button (the sideways column is narrow).
+        let size = |h: f32| chrome::button_label_px(h) * if super::display::dp_px().is_some() { DEPLOY_LABEL_PHONE } else { 1.0 };
+        if button_sized_wrapped(arrange.x, arrange.y, arrange.w, arrange.h, label, true, size(arrange.h)) {
+            if self.rearranging {
+                self.end_rearrange();
+            } else {
+                self.rearranging = true;
+            }
+        }
+        if let Some(r) = retreat {
+            if button_sized_wrapped(r.x, r.y, r.w, r.h, tr("Retreat"), true, size(r.h)) {
+                self.retreat_now = true;
+            }
+        }
+    }
+
+    /// The player's formation cell under the pointer (`None` off the grid).
+    fn player_cell_under_mouse(&self, l: &Layout) -> Option<Slot> {
+        l.formation.slots().find(|&s| {
+            let p = l.cell_pos(Team::Player, s);
+            mouse_in(p.x, p.y, l.card.x, l.card.y)
+        })
+    }
+
+    /// A player's card moves in the deployment (`Battle::move_card`); a refused move changes nothing.
+    fn deploy_move(&mut self, from: Slot, to: Slot) {
+        if self.battle.move_card(from, to).is_ok() {
+            cue(Cue::CardMove);
+        }
+    }
+
+    /// A press in «Перестроить армию» (the owner's decision of 2026-11-13, backlog 1607): the army
+    /// window's grid press (`unit_drag::grid_press_in`, with the «Расстановка армии» setting). A unit
+    /// pressed is picked; a second press swaps it with the unit there, or moves it to a free cell
+    /// of the formation (a bench cell is refused). With dragging, a unit pressed may be dragged.
+    fn rearrange_press(&mut self, l: &Layout) {
+        if !clicked() {
+            return;
+        }
+        let Some(cell) = self.player_cell_under_mouse(l) else { return };
+        let pressed = self.battle.at(Team::Player, cell);
+        match unit_drag::grid_press_in(unit_drag::controls(), self.rearr_sel, pressed) {
+            GridPress::Swap { selected, .. } | GridPress::Slide(selected) => {
+                self.rearr_sel = None;
+                let from = self.battle.fighters[selected].slot;
+                self.deploy_move(from, cell);
+            }
+            GridPress::Select(p) => {
+                self.rearr_sel = Some(p);
+                if unit_drag::controls().drags() {
+                    let f = &self.battle.fighters[p];
+                    unit_drag::press(p, f.unit, (f.hp, f.stats.max_hp()), !f.alive());
+                }
+            }
+            GridPress::Deselect | GridPress::Nothing => self.rearr_sel = None,
+        }
+    }
+
+    /// The drag of a card in «Перестроить армию»: it follows the pointer (drawn here), and a
+    /// release over a formation cell moves it there.
+    fn rearrange_drop(&mut self, l: &Layout, assets: &Assets) {
+        let cells: Vec<(Slot, Rect)> = l.formation.slots().map(|s| {
+            let p = l.cell_pos(Team::Player, s);
+            (s, Rect::new(p.x, p.y, l.card.x, l.card.y))
+        }).collect();
+        if let Some((unit, to)) = unit_drag::update(assets, &cells, l.card) {
+            let from = self.battle.fighters[unit].slot;
+            self.deploy_move(from, to);
+            self.rearr_sel = None;
+        }
+    }
+
+    /// The picked card of «Перестроить армию» is outlined in gold.
+    fn rearrange_mark(&self, l: &Layout) {
+        let Some(i) = self.rearr_sel else { return };
+        let p = l.cell_pos(Team::Player, self.battle.fighters[i].slot);
+        let k = l.k;
+        draw_rectangle_lines(p.x - 2.0 * k, p.y - 2.0 * k, l.card.x + 4.0 * k, l.card.y + 4.0 * k, 3.0 * k, GOLD);
+    }
+
+    /// The replayed battle's deployment: its moves and its `Begin` play as the recording has them,
+    /// before any turn. A battle recorded before the deployment step has no `Begin`: its first
+    /// action began it, so the battle begins here.
+    fn replay_deploy(&mut self) {
+        while let Some(act) = self.feed.as_mut().and_then(|f| f.front().cloned()) {
+            match act {
+                BattleAct::MoveCard { .. } | BattleAct::Begin => {
+                    if let Some(f) = self.feed.as_mut() {
+                        f.pop_front();
+                    }
+                    apply_battle(&mut self.battle, &act);
+                }
+                _ => {
+                    self.battle.begin();
+                    break;
+                }
+            }
+        }
+    }
+
     /// The result box shows: the first time, a victory's triumph starts (it carries on over
     /// the map afterwards, a sting is not cut by the move to the map). True that first time.
     fn result_shown(&mut self) -> bool {
@@ -1191,7 +1445,7 @@ impl BattleView {
     pub fn frame(&mut self, game: &mut Game, assets: &Assets, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Option<Screen> {
         // A phone held upright stacks the window at its own scale (`window_layout::game_scale`).
         let _window = window_layout::game_scale(stacked_video(self.battle.formation, self.custom));
-        let l = Layout::new(&self.battle, self.custom);
+        let l = Layout::new(&self.battle, self.custom).with_deploy(self.offering());
         // Input the app holds back (the cheat console) stays held for the exit window too.
         let outer = input_blocked();
         let (over, just_opened) = self.advance(&l);
@@ -1211,6 +1465,13 @@ impl BattleView {
                 super::sharp::session(|| {
                     self.close_clicked |= self.draw(&l, &battle_title(game), game.clock.total_minutes() as u64, assets);
                     self.controls(&l, over);
+                    if self.offering() {
+                        self.deploy_controls(&l);
+                        if self.rearranging {
+                            self.rearrange_drop(&l, assets);
+                            self.rearrange_mark(&l);
+                        }
+                    }
                     if l.hint_after_buttons() {
                         self.hint(&l);
                     }
@@ -1218,6 +1479,11 @@ impl BattleView {
             }
         });
         gpu_wait(razdor::frame_probe::Stage::GpuWindow);
+        // «Отступить» (Razdor's, backlog 1607): the battle ends before its first action and the map
+        // shows at once; nothing of the battle is carried back (`Game::retreat_battle`).
+        if std::mem::take(&mut self.retreat_now) && game.retreat_battle(&self.battle) {
+            return Some(Screen::WorldMap);
+        }
         super::cursor::set(self.pointer());
         if over && !self.quick_played {
             self.result_shown();
@@ -1583,6 +1849,12 @@ impl BattleView {
         let b = &self.battle;
         if self.end_shown() {
             return (tr("The battle is over").into(), GOLD);
+        }
+        if self.offering() {
+            // Before the first action the strip shows the battle's own hint for the player's turn
+            // (the exit key); the deployment's buttons say what they do.
+            let own = (razdor::i18n::lang() == razdor::i18n::Lang::Ru).then(|| chrome::ui_text("Battle", "ExitHint")).flatten();
+            return (own.unwrap_or_else(|| tr("To leave the battle, press ESC").to_string()), EXIT_HINT_INK);
         }
         if let Some((line, _)) = &self.news {
             if !player_turn || self.fx.is_some() {
@@ -2024,7 +2296,7 @@ mod tests {
     /// The stacked window of a 1080×2400 phone at 2.75 px per dp, a 60 px top inset and a 90 px bar.
     fn upright(f: Formation) -> Layout {
         let (k, win) = window_layout::portrait_game((1080.0, 2400.0), Some(2.75), 60.0, 90.0, 1.125, stacked_video(f, false)).expect("held upright");
-        Layout::upright(k, win, f, false)
+        Layout::upright(k, win, f, false, None)
     }
 
     /// Every cell of both armies on `l`'s formation, with its team and rectangle.
@@ -2096,7 +2368,7 @@ mod tests {
     #[test]
     fn a_custom_battle_s_quick_buttons_are_44_dp_on_a_phone_and_the_battle_s_are_as_before() {
         let (k, win) = window_layout::portrait_game((1080.0, 2400.0), Some(2.75), 60.0, 90.0, 1.125, stacked_video(Formation::default(), true)).expect("held upright");
-        let custom = Layout::upright(k, win, Formation::default(), true);
+        let custom = Layout::upright(k, win, Formation::default(), true, Some(2.75));
         assert!(custom.quick.h >= 44.0 * 2.75 - 0.5, "{:?}", custom.quick);
         let battle = upright(Formation::default());
         assert!((battle.quick.h - STACK_QUICK_H * k).abs() <= 0.5, "{:?}", battle.quick);
@@ -2170,6 +2442,44 @@ mod tests {
         let view = BattleView::new(battle);
         assert!(!view.battle.is_deploying(), "no deployment step");
         assert!(view.battle.active().is_some(), "the first unit acts at once");
+    }
+
+    #[test]
+    fn a_deploying_battle_is_offered_its_arrangement_and_retreat_until_its_first_action() {
+        let mut g = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        g.foe = Some(Foe::Garrison(g.world.index_of("Bandit camp")));
+        let mut view = BattleView::deploying(g.start_battle(), true);
+        assert!(view.battle.is_deploying() && view.offering(), "no deployment step has run yet");
+        assert!(view.battle.active().is_none(), "nothing moves before the first action");
+        // Watching is the first action too (the AI plays from there).
+        view.toggle_watch();
+        assert!(!view.battle.is_deploying() && !view.offering());
+        // A deployed view ends its arrangement with the first action.
+        let mut view = BattleView::deploying(g.start_battle(), false);
+        view.set_rearranging(true);
+        view.begin_play();
+        assert!(!view.offering() && !view.rearranging, "the arrangement ends with the battle");
+    }
+
+    #[test]
+    fn the_deployment_row_takes_the_panel_height_and_leaves_the_quick_buttons_in_place() {
+        // Held upright: the row is 40 dp at least, the band gives up its height, the quick buttons stay.
+        let (k, win) = window_layout::portrait_game((1080.0, 2400.0), Some(2.75), 60.0, 90.0, 1.125, stacked_video(Formation::default(), false)).expect("held upright");
+        let plain = Layout::upright(k, win, Formation::default(), false, Some(2.75));
+        let on = plain.with_deploy(true);
+        let d = on.deploy.expect("the row");
+        assert!(d.h >= 40.0 * 2.75 - 0.5, "{d:?}");
+        assert!((on.quick.y - plain.quick.y).abs() < 0.5 && (on.quick.h - plain.quick.h).abs() < 0.5, "{:?} {:?}", on.quick, plain.quick);
+        assert!((on.panel.bottom() + on.gap - d.y).abs() < 0.5 && (d.bottom() + on.gap - on.quick.y).abs() < 0.5, "the row sits between the band and the quick buttons");
+        assert!(on.gap >= 8.0 * 2.75 - 0.5, "8 dp between the parts on a phone: {}", on.gap);
+        // Held sideways on a phone, and on the desktop: the same, with the row at least 40 dp tall on a phone.
+        let plain = Layout::landscape(1.0, (2400.0, 1080.0), 90.0, Formation::default(), Some(2.75), 0.0);
+        let on = plain.with_deploy(true);
+        assert!(on.deploy.expect("the row").h >= 40.0 * 2.75 - 0.5);
+        assert!((on.quick.y - plain.quick.y).abs() < 0.5 && (on.quick.h - plain.quick.h).abs() < 0.5);
+        let plain = Layout::landscape(1.0, (1280.0, 800.0), 80.0, Formation::default(), None, 0.0);
+        let on = plain.with_deploy(true);
+        assert!((on.quick.y - plain.quick.y).abs() < 0.5 && (on.panel.h + on.deploy.expect("the row").h + 3.0 - plain.panel.h).abs() < 0.5);
     }
 
     #[test]

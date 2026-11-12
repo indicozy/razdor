@@ -1271,11 +1271,24 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                 hero.wage_kind = razdor::rules::content::WageKind::Leader;
                 game.squad[0] = hero;
             }
-            let mut battle = game.start_battle();
-            if end {
-                battle.hero_auto_play_to_end();
+            // `RAZDOR_SCENE_DEPLOY=start|rearrange`: the battle before its first action, with its
+            // deployment row (`rearrange`: «Перестроить армию» on). The hero stands where he is, so
+            // «Отступить» is offered (backlog 1607).
+            if let Some(mode) = std::env::var("RAZDOR_SCENE_DEPLOY").ok().filter(|_| !end) {
+                game.back_to = Some(game.tile());
+                let retreat = game.can_retreat();
+                let mut view = BattleView::deploying(game.start_battle(), retreat);
+                view.set_rearranging(mode == "rearrange" || mode == "pick");
+                // `pick`: the army's second card is picked (its gold outline).
+                view.set_rearr_pick((mode == "pick").then_some(1));
+                Screen::Battle(Box::new(view))
+            } else {
+                let mut battle = game.start_battle();
+                if end {
+                    battle.hero_auto_play_to_end();
+                }
+                Screen::Battle(Box::new(BattleView::new(battle)))
             }
-            Screen::Battle(Box::new(BattleView::new(battle)))
         }
         _ => return Err(format!("unknown scene {kind}")),
     };

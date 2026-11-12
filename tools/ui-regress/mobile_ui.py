@@ -157,6 +157,10 @@ SCREENS = [
     ("hero", "hero:РК1-Начало пути:0", {}),
     ("spells", "spells:РК1-Начало пути", {}),
     ("battle", "battle:РК1-Начало пути:0", {}),
+    # The battle before its first action: «Перестроить армию» and «Отступить» (backlog 1607), and the
+    # arrangement with its «Готово» (a card picked).
+    ("battle-deploy", "battle:РК1-Начало пути:0", {"RAZDOR_SCENE_DEPLOY": "start"}),
+    ("battle-arrange", "battle:РК1-Начало пути:0", {"RAZDOR_SCENE_DEPLOY": "pick"}),
     ("classes", "classes:РК1-Начало пути", {}),
     # The hero window of a map with a save slot («Продолжить» left of «Начать», the date line), and
     # its «Начать» question (a map with a slot asks first).

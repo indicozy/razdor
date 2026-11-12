@@ -2528,6 +2528,19 @@ pub fn marble_button_sized(r: Rect, label: &str, enabled: bool, hover: bool, siz
     button_label_at(r, label, enabled, size);
 }
 
+/// [`marble_button_sized`] whose label goes on two lines when one line at `size` would not fit the
+/// button's width (the battle's deployment on a phone held sideways: a narrow column with a label that
+/// must stay at 12 sp). The words are not cut; a label that still does not fit is ellipsized.
+pub fn marble_button_sized_wrapped(r: Rect, label: &str, enabled: bool, hover: bool, size: f32) {
+    let width = r.w - 10.0;
+    let lines = wrap_label(label, width, size);
+    if lines.len() <= 2 && lines.iter().all(|l| measure(l, size).width <= width) {
+        marble_button_lines(r, &lines, enabled, hover, size);
+    } else {
+        marble_button_sized(r, label, enabled, hover, size);
+    }
+}
+
 /// A marble button whose label goes on two lines when one line would not fit its width (Razdor's, the
 /// phone's game menu row of six, where «Выйти из игры» was cut to «Выйти из и...»): the size is the
 /// button's own, cut so two lines fit its height, and the words are not cut. A label that still does not
@@ -2649,6 +2662,12 @@ fn label_size(h: f32, g: f32) -> f32 {
         size = size.min(label_size_original(h));
     }
     size
+}
+
+/// The size a marble button's label takes on a button `h` px tall (as [`button_label`] draws it),
+/// for a caller that sizes its own label (`widgets::button_sized`).
+pub fn button_label_px(h: f32) -> f32 {
+    label_size(h, super::display::button_grow())
 }
 
 /// The width `label` needs on a button `h` tall, drawn as [`button_label`] draws it (before the

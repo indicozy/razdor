@@ -85,6 +85,9 @@ pub enum PlayerAction {
     /// (`Game::resolve_battle`).
     StartBattle,
     ResolveBattle,
+    /// «Отступить» before the battle's first action (`Game::retreat_battle`): the battle is dropped
+    /// and the hero goes back to the cell he came from.
+    RetreatBattle,
     /// The rule settings the game follows (`Game::set_rule_settings`), changed in the game.
     Settings(Settings),
     /// A player's action in the battle under way.
@@ -110,6 +113,9 @@ pub enum BattleAct {
     ForceEnd { enemy_wins: bool },
     /// A click on the active unit's own card or the space key (`Battle::own_cell`).
     OwnCell,
+    /// The player's first action: the deployment ends (`Battle::start_play`). A battle recorded
+    /// before the deployment step had no such entry; its first action began it (`play.rs`).
+    Begin,
 }
 
 /// Records an action when it is the outermost one and recording is on; dropping it ends the
@@ -290,7 +296,8 @@ pub fn apply_game(g: &mut Game, a: &PlayerAction) {
             let _ = g.promote(*unit as usize, UnitId(*to));
         }
         PlayerAction::Settings(s) => g.set_rule_settings(s.clone()),
-        PlayerAction::StartBattle | PlayerAction::ResolveBattle | PlayerAction::Battle(_) => {}
+        // The playback drops the battle and calls `Game::retreat_battle` itself (it needs the battle).
+        PlayerAction::StartBattle | PlayerAction::ResolveBattle | PlayerAction::RetreatBattle | PlayerAction::Battle(_) => {}
     }
 }
 
@@ -328,6 +335,7 @@ pub fn apply_battle(b: &mut Battle, a: &BattleAct) {
         BattleAct::OwnCell => {
             b.own_cell();
         }
+        BattleAct::Begin => b.begin(),
     }
 }
 
@@ -430,6 +438,7 @@ fn put_battle_act(out: &mut Vec<u8>, a: &BattleAct) {
             put_flag(out, *enemy_wins);
         }
         BattleAct::OwnCell => put_u(out, 10),
+        BattleAct::Begin => put_u(out, 12),
     }
 }
 
@@ -446,6 +455,7 @@ fn get_battle_act(r: &mut Reader) -> Result<BattleAct, String> {
         8 => BattleAct::MaxPlay,
         9 => BattleAct::ForceEnd { enemy_wins: get_flag(r)? },
         10 => BattleAct::OwnCell,
+        12 => BattleAct::Begin,
         n => return Err(format!("a battle action of {n}")),
     })
 }
@@ -616,6 +626,7 @@ pub fn put_action(out: &mut Vec<u8>, a: &PlayerAction) {
         }
         StartBattle => u(out, 46),
         ResolveBattle => u(out, 47),
+        RetreatBattle => u(out, 54),
         Settings(s) => {
             u(out, 48);
             put_flag(out, s.improved_ai);
@@ -692,6 +703,7 @@ pub fn get_action(r: &mut Reader) -> Result<PlayerAction, String> {
         45 => Promote { unit: r.u()? as u32, to: r.u()? as u32 },
         46 => StartBattle,
         47 => ResolveBattle,
+        54 => RetreatBattle,
         48 => PlayerAction::Settings(super::snapshot::Settings {
             improved_ai: get_flag(r)?,
             max_ai: get_flag(r)?,
@@ -750,6 +762,8 @@ const NOT_PLAYER_BATTLE: &[&str] = &[
     "skip", "skip_prediction", "set_max_stakes", "max_choice_with", "max_choice",
     "max_step", "play_max_move", "apply_max",
     "fit_to_formation", "set_unit_battle_disabled", "set_strength_defence",
+    // The screen's language (`Content::retitled`): the names follow it, nothing the player did in the battle.
+    "retitle",
 ];
 
 /// The methods of `file` taking `&mut self` (`pub fn`), with whether their body records an action.

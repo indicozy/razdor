@@ -3732,3 +3732,37 @@ fn a_battle_on_screen_takes_a_language_change_in_its_names() {
     assert_eq!(bt.content().formation, formation);
     assert!(bt.fighters.iter().all(|f| f.alive()), "the fight itself is untouched");
 }
+
+// --- Razdor's deployment («Перестроить армию», backlog 1607) ---------------------------------
+
+#[test]
+fn a_deployment_records_the_cells_the_army_was_moved_to_before_the_first_action() {
+    let c = content_with(vec![], Formation::WIDE);
+    let mut bt = prepared(&c, &[(10, f(2)), (11, b(2))], &[(18, f(2))], Team::Player);
+    assert!(bt.deployed().is_empty(), "nothing recorded before the battle begins");
+    bt.move_card(b(2), f(2)).unwrap();
+    bt.begin();
+    assert_eq!(bt.deployed(), &[(0, b(2)), (1, f(2))], "the cells the cards were moved to");
+}
+
+#[test]
+fn a_deployment_refuses_a_cell_held_by_a_unit_that_sits_out() {
+    let c = content_with(vec![], Formation::WIDE);
+    let mut bt = prepared(&c, &[(10, f(2)), (11, b(2)), (11, b(3))], &[(18, f(2))], Team::Player);
+    bt.set_bench(vec![b(3)]);
+    assert_eq!(bt.move_card(f(2), b(3)), Err(ActionError::InvalidTarget), "the bench does not move");
+    assert_eq!(bt.fighters[0].slot, f(2), "the card did not move");
+    bt.move_card(f(2), f(3)).unwrap();
+    assert_eq!(bt.fighters[0].slot, f(3), "a free cell is fine");
+}
+
+#[test]
+fn the_first_action_begins_a_deployed_battle_once() {
+    let c = content_with(vec![], Formation::WIDE);
+    let mut bt = prepared(&c, &[(10, f(2))], &[(18, f(2))], Team::Player);
+    bt.start_play();
+    assert!(!bt.is_deploying());
+    bt.start_play();
+    assert!(!bt.is_deploying(), "a second action changes nothing");
+    assert_eq!(bt.move_card(f(2), f(3)), Err(ActionError::NotDeploying));
+}

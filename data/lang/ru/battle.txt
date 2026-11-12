@@ -298,6 +298,11 @@ Take over (W) = Управлять (W)
 The AI plays both sides (W: take over) = ИИ играет за обе стороны (W — управлять самому)
 The AI moves your army... = ИИ ведёт вашу армию...
 
+# Battle screen: the deployment before the first action (backlog 1607)
+Rearrange the army = Перестроить армию
+Arrangement done = Готово
+Retreat = Отступить
+
 # Custom battle: the setup window
 Custom battle = Свой бой
 Your army (below) = Ваша армия (внизу)

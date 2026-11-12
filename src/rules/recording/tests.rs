@@ -164,7 +164,8 @@ impl Driver {
     /// the battle AI.
     fn battle(&mut self) -> Outcome {
         let mut b = self.g.start_battle();
-        b.begin();
+        // The screen's first action (recorded as `BattleAct::Begin`): the playback begins there too.
+        b.start_play();
         let mut thinker = MaxThinker::new(Team::Enemy);
         for _ in 0..AUTO_BATTLE_STEPS {
             // Every action is written back into the armies, as the screen does each frame.

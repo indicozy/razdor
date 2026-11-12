@@ -34,7 +34,14 @@ open and the step animation has played, then calls `saves::battle` (`src/ui/save
 1. autosaves the moment **before** the fight (without `foe`, so loading it puts the hero next
    to the enemy, not into the battle);
 2. keeps an encoded copy with `foe` set as `BattleView::restart_state` (Razdor's «Рестарт»);
-3. calls `Game::start_battle` and wraps the result in `BattleView::new`.
+3. calls `Game::can_retreat` (read before the start moves the armies), then `Game::start_battle`, and wraps the
+   result in `BattleView::deploying`: the battle waits for the player's first action (§2).
+
+Where «Отступить» comes from (Razdor's deviation, backlog 1607, on by default): `Game::back_to` is the cell the hero
+goes back to, set with the foe. A step onto an army sets it to the cell he stands on (he has not moved; `begin_walk`);
+a step that ends next to an army sets it to the cell he stepped off (`begin_walk`, then `walk_tail`); a wait sets it to
+the cell he stands on (`wait_tail`). A scenario's battle (`script.rs` `start_battle`) and a garrison's clear it.
+`Game::can_retreat` is true for an army foe with `back_to` set and no building defence (his building, the army's own).
 
 `Game::start_battle` (`src/rules/game.rs`):
 - records the player's cells per squad index (`Game::formation_before_battle`) before anything else;
@@ -56,7 +63,14 @@ the armies had at the save, not from the battle's own state (there is no battle 
 
 `Battle::new` leaves the battle **deploying**: the player may rearrange cards
 (`Battle::move_card`, `is_deploying`). The first action, or `auto_play_to_end`, calls
-`Battle::begin`, which:
+`Battle::begin`; the screen's first action calls `Battle::start_play` instead, which begins it and records
+`BattleAct::Begin` (so a replay begins where the battle did). `BattleView::new` still begins at once (the custom
+battle, the replays of the watch screen, the snapshots); only `BattleView::deploying` keeps the battle waiting.
+`move_card` refuses a cell held by a unit that sits out (`set_bench`): those units do not move. `begin` first
+records the fighters' cells (`Battle::deployed`, by squad index), before its start fix: `settle_battle` returns the
+army to them with `keep_formation`, so the arrangement is the army's placement after the battle.
+
+`Battle::begin` then:
 - applies the window's formation fix: nobody in the player's front row → his back row moves
   forward (bench cells count as somebody, as the original's test reads the army formation);
 - snapshots `at_start`, works out each side's `SideStart` (strength, HP, count) for the XP pool;
@@ -188,6 +202,16 @@ actor (or the unit whose action plays) `Current`; on the player's turn every own
 the hovered one `Aimed`; the AI's target while its action plays `Aimed` or `OwnTarget`. They
 are drawn over the portrait under the card's signs and pulse with the real clock.
 
+Before the first action (`BattleView::offering`: the screen offered the deployment and `is_deploying`) a row of two
+buttons sits above the quick buttons (`Layout::with_deploy`, `deploy_buttons`; the unit's panel gives up the row and
+its gaps, so the quick buttons and the grids stay where they are; upright the two sit side by side, sideways one above
+the other, 40 dp at least, 8 dp apart on a phone). «Перестроить армию» (`rearranging`) picks a card with a click
+(`unit_drag::grid_press_in`, the «Расстановка армии» setting) or drags it (`unit_drag::press`/`update`), and moves it
+with `Battle::move_card`; «Готово» ends it. «Отступить» (`retreat_now`) is offered when `retreat` was (`deploying`'s
+argument): the frame calls `Game::retreat_battle` and returns to the map. A click on a card, the space key, Q (quick
+battle) and W (watch) begin the battle (`begin_play`, `Battle::start_play`), and the row goes. The strip keeps the
+battle's own exit hint.
+
 Esc (or the red X) opens the leave-battle window (`saves::battle_exit_dialog`, laid out as
 4d3620 in the original's pixels); the battle window is not drawn while it is open, as the
 original hides it. `RAZDOR_SCENE_BATTLE_EXIT=1` snapshots it over any battle scene.
@@ -197,6 +221,12 @@ original hides it. `RAZDOR_SCENE_BATTLE_EXIT=1` snapshots it over any battle sce
 `Battle::outcome` / `end_reason`; `end_check` handles wipe-out, surrender (a side left only
 with `Surrender > 0` units gives up while both stand; its values become the winner's mana,
 `surrender_mana`) and the turn limit.
+
+«Отступить» (`Game::retreat_battle(&battle)`, only while the battle is deploying) skips all of this: no
+`resolve_battle`, no XP, no loot, no events. The foe is cleared, the army stays on the map with `ignore_until` 120
+minutes ahead (as an army that withdrew), the hero's route ends, and he goes back to `back_to` when no army or building
+holds that cell (else he stays). The units' HP and cells are untouched: the deployment is dropped with the battle, the
+write-back before it was an identity. Open: the 120 minutes (`docs/OPEN_QUESTIONS.md`).
 
 `Game::resolve_battle` → `settle_battle` (`src/rules/game.rs`):
 - the formation is rebuilt from the battle grid (survivors keep their cells; the rest take
@@ -244,6 +274,11 @@ in `src/rules/ai.rs` (`fight`, `simulate`, cached) with `set_simulation`.
   rules.
 - The battle is written back after **every** action (`battle_write_back`); a crash or a load
   mid-battle depends on it. Enemy troops are matched by `battle_troops` order.
+- A deploying battle does not move before its first action: nothing calls `begin` for it but `start_play` (the
+  screen) or an auto-play (recorded). A replay does not begin a battle at its start: the recorded `Begin` does, and a
+  recording made before the deployment step begins it at its first action, after the enemy's turns (`recording/play.rs`
+  `battle_act`). The entry-point test (`every_entry_point_that_changes_the_game_records_or_is_listed`) keeps the
+  `Battle` and `Game` entries recorded.
 - Events decide whether a battle opens: only an event that stops on a window cancels it
   (6928d9d: a silent repeating event on РК4 swallowed every attack).
 - `Foe::Army(i)` is an **index**; removing armies must shift it (`take_army`, `ai.rs`).

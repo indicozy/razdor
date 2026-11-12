@@ -253,6 +253,12 @@ pub struct Game {
     #[serde(default)]
     pub bridge_stood_on: Option<usize>,
     pub foe: Option<Foe>,
+    /// The cell the hero goes back to if he retreats from the pending army battle (Razdor's
+    /// «Отступить», [`Game::retreat_battle`]): the cell he stepped off when the battle began by his
+    /// step, or the cell he stood on when an army attacked him. `None` for a garrison and for a
+    /// battle the scenario's events start. Kept with the foe, so a save made before the battle keeps it.
+    #[serde(default)]
+    pub back_to: Option<Tile>,
     /// Shared bag of unworn items: 256 cells with holes, each item where it was put
     /// (`rules::pack`, 0x68dce0).
     pub pack: Pack,
@@ -863,6 +869,7 @@ impl Game {
             keep_xp_on_promotion: false,
             keep_formation: false,
             formation_before_battle: None,
+            back_to: None,
             allow_unit_benching: false,
             pursue: true,
             walk_pace: 1.0,
@@ -2058,6 +2065,8 @@ impl Game {
                 self.talk_to = None;
                 // The original engages any army stepped onto, friend or foe (world.md §4.2).
                 self.foe = Some(Foe::Army(i));
+                // He has not moved yet: the cell he stands on is the one he goes back to.
+                self.back_to = Some(from);
                 // The scan of this contact reads no point (see `point_zeroed`).
                 self.point_zeroed = true;
                 self.engage(Event::Encounter(i), it);
@@ -2069,6 +2078,7 @@ impl Game {
                 self.goal = None;
                 self.talk_to = None;
                 self.foe = Some(Foe::Garrison(l));
+                self.back_to = None;
                 it.push(Event::Arrived(l));
                 return Some(false);
             }
@@ -2101,6 +2111,8 @@ impl Game {
         // and the hero waits drawn where he was.
         self.hero_glide = Some((was, self.world.map.center(next)));
         self.step_from = Some(from);
+        // An army that catches him after this step (`walk_tail`) is fought from the cell he left.
+        self.back_to = Some(from);
         self.begin_pass(StepKind::Walk, minutes, it);
         None
     }
@@ -2374,6 +2386,8 @@ impl Game {
     /// the stop snaps the armies, the events run with the army met, and a greeting stops the
     /// wait only when one of them fired. Returns false when the wait ends.
     fn wait_tail(&mut self, events: &mut Vec<Event>) -> bool {
+        // A wait is no step: an army that catches him while he waits is fought where he stands.
+        self.back_to = Some(self.tile());
         if let Some(e) = self.ai_contact() {
             let attack = matches!(e, Event::Encounter(_));
             if attack {
@@ -2841,7 +2855,7 @@ impl Game {
         // An enemy army attacked in a building of its own side (one hostile to the hero)
         // defends with that building's defence, as a garrison does.
         let army_home = match self.foe {
-            Some(Foe::Army(i)) => self.world.location_covering(self.world.armies[i].tile(&self.world.map)).map(|l| &self.world.locations[l]).filter(|l| l.hostile()).map_or(0, |l| l.garrison_defence),
+            Some(Foe::Army(i)) => self.army_home_defence(i),
             _ => 0,
         };
         if defence.max(army_home) > 0 {
@@ -2887,6 +2901,54 @@ impl Game {
             ));
         }
         crate::diag::play(&self.clock.label(), &text);
+    }
+
+    /// The defence of the building army `i` stands in when that building is hostile to the hero
+    /// (its garrison's defence): an army that fights in its own building (`start_battle`).
+    fn army_home_defence(&self, i: usize) -> i32 {
+        self.world.location_covering(self.world.armies[i].tile(&self.world.map)).map(|l| &self.world.locations[l]).filter(|l| l.hostile()).map_or(0, |l| l.garrison_defence)
+    }
+
+    /// Whether the player may «Отступить» from the pending battle (Razdor's deviation, the owner's
+    /// decision of 2026-11-13, backlog 1607; the screen offers it only before the battle's first
+    /// action). Offered for an army that stepped onto him, or caught him, in the open. Not for a
+    /// garrison (a siege, or his own building's defence), not for a fight in a building (his, or the
+    /// army's own), and not for a battle the scenario's events start (`back_to` is `None` there).
+    pub fn can_retreat(&self) -> bool {
+        let Some(Foe::Army(i)) = self.foe else { return false };
+        self.back_to.is_some() && i < self.world.armies.len() && self.hero_building_defence() == 0 && self.army_home_defence(i) == 0
+    }
+
+    /// «Отступить» (Razdor's, see [`Game::can_retreat`]): the battle ends before its first action,
+    /// with no losses, no experience, no loot and no change to either army; its victory and defeat
+    /// events do not run. The hero goes back to the cell he came from when no army or building
+    /// holds it now, else he stays where he is. The army he left stays on the map and does not
+    /// come at him for 120 minutes (the same as an army that withdrew, `resolve_battle`), and his
+    /// route ends here, so the same contact does not come again in this step. The units' cells stay
+    /// as the army had them before the battle, the deployment is dropped with the battle. Returns
+    /// false, and changes nothing, when the retreat is not offered or `battle` has begun.
+    pub fn retreat_battle(&mut self, battle: &Battle) -> bool {
+        let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::RetreatBattle);
+        if !battle.is_deploying() || !self.can_retreat() {
+            return false;
+        }
+        let (Some(Foe::Army(i)), Some(back)) = (self.foe, self.back_to.take()) else { return false };
+        self.foe = None;
+        self.battle_troops.clear();
+        self.formation_before_battle = None;
+        self.world.armies[i].ignore_until = self.clock.total_minutes() + 120.0;
+        self.path.clear();
+        self.goal = None;
+        self.talk_to = None;
+        let here = self.tile();
+        if back != here && self.step_contact(back).is_none() {
+            self.pos = self.world.map.center(back);
+            self.move_to_cell(here, back);
+            self.stand_on_bridge(back);
+            self.look_around();
+        }
+        crate::diag::play(&self.clock.label(), &format!("BATTLE retreat: the hero stands at {:?}", self.tile()));
+        true
     }
 
     /// Mana from the enemies' surrender: when every remaining enemy has `Surrender > 0`
@@ -3013,7 +3075,14 @@ impl Game {
         // request): every unit goes back to its cell from before the battle, the dead too; a
         // cell now outside the formation or taken falls back to the rule above. The original
         // keeps the cells rebuilt here (4988c0), after the start fix (4d2141) and the collapses (489f50).
-        if let Some(before) = self.formation_before_battle.take() {
+        if let Some(mut before) = self.formation_before_battle.take() {
+            // Razdor's deployment («Перестроить армию», backlog 1607): the cells the fighters were
+            // moved to before the first action are the ones they had before the battle.
+            for &(i, cell) in battle.deployed() {
+                if let Some(c) = before.get_mut(i) {
+                    *c = cell;
+                }
+            }
             if self.keep_formation && before.len() == self.squad.len() {
                 self.return_to_cells(&before);
             }
@@ -3836,6 +3905,87 @@ mod tests {
         g.keep_formation = keep;
         g.foe = Some(Foe::Garrison(g.world.index_of("Bandit camp")));
         g
+    }
+
+    #[test]
+    fn a_rearranged_army_is_settled_on_its_deployed_cells() {
+        use crate::rules::formation::Row;
+        let (front, back) = (|c| Slot::new(Row::Front, c), |c| Slot::new(Row::Back, c));
+        // Razdor's «Перестроить армию» (backlog 1607): before the first action the hero and the
+        // back-row spearman swap cells; the battle keeps the new cells after it (keep_formation on).
+        let mut g = formation_game(true);
+        let mut b = g.start_battle();
+        b.move_card(front(0), back(1)).unwrap();
+        b.begin();
+        wipe_enemies(&mut b);
+        g.settle_battle(&b);
+        assert_eq!((g.squad[0].slot, g.squad[2].slot), (back(1), front(0)));
+        assert_eq!(g.squad[1].slot, front(1));
+    }
+
+    /// A hero on his cell with a hostile army on a cell beside him, which caught him after his step
+    /// from the free cell `from` (the army is the foe). Returns the game and `from`.
+    fn caught_by_army() -> (Game, crate::rules::map::Tile) {
+        let mut g = quiet_game(HeroClass::Knight);
+        let here = g.tile();
+        let free = |g: &Game, t| g.world.map.passable(t) && g.world.location_at(t).is_none();
+        let from = g.world.map.grid.neighbours(here).find(|&n| free(&g, n)).unwrap();
+        let beside = g.world.map.grid.neighbours(here).find(|&n| n != from && free(&g, n)).unwrap();
+        let camp = g.world.index_of("Bandit camp");
+        g.world.spawn_gang(camp, beside);
+        g.foe = Some(Foe::Army(0));
+        g.back_to = Some(from);
+        (g, from)
+    }
+
+    #[test]
+    fn a_retreat_leaves_the_battle_as_it_was_and_puts_the_hero_back() {
+        let (mut g, from) = caught_by_army();
+        let squad: Vec<(i32, Slot)> = g.squad.iter().map(|u| (u.hp, u.slot)).collect();
+        let troops: Vec<i32> = g.world.armies[0].troops.iter().map(|t| t.hurt).collect();
+        let (gold, now) = (g.gold, g.clock.total_minutes());
+        let b = g.start_battle();
+        g.battle_write_back(&b);
+        assert!(g.can_retreat(), "an army caught him in the open");
+        assert!(g.retreat_battle(&b));
+        assert!(g.foe.is_none() && !g.can_retreat(), "the battle is over");
+        assert_eq!(g.tile(), from, "back on the cell he came from");
+        assert_eq!(g.squad.iter().map(|u| (u.hp, u.slot)).collect::<Vec<_>>(), squad, "no losses, the cells as they were");
+        assert_eq!(g.world.armies[0].troops.iter().map(|t| t.hurt).collect::<Vec<_>>(), troops, "the army as it was");
+        assert_eq!((g.gold, g.world.armies.len()), (gold, 1), "no loot, the army stays on the map");
+        assert!(g.world.armies[0].ignore_until >= now + 120.0, "it does not come at him again for a while");
+        assert!(g.path.is_empty(), "no route goes on after it");
+    }
+
+    #[test]
+    fn a_retreat_is_refused_once_the_battle_has_begun() {
+        let (mut g, from) = caught_by_army();
+        let mut b = g.start_battle();
+        b.begin();
+        let here = g.tile();
+        assert!(!g.retreat_battle(&b), "the first action has come");
+        assert_eq!((g.tile(), g.foe.is_some(), g.back_to), (here, true, Some(from)), "nothing changed");
+    }
+
+    #[test]
+    fn a_retreat_stays_put_when_the_cell_he_left_is_taken() {
+        let (mut g, from) = caught_by_army();
+        let camp = g.world.index_of("Bandit camp");
+        g.world.spawn_gang(camp, from);
+        let here = g.tile();
+        let b = g.start_battle();
+        assert!(g.retreat_battle(&b));
+        assert_eq!(g.tile(), here, "an army holds that cell now");
+    }
+
+    #[test]
+    fn a_garrison_or_a_scripted_battle_has_no_retreat() {
+        let (mut g, _) = caught_by_army();
+        g.foe = Some(Foe::Garrison(g.world.index_of("Bandit camp")));
+        assert!(!g.can_retreat(), "a garrison's battle is a siege or a defence");
+        g.foe = Some(Foe::Army(0));
+        g.back_to = None;
+        assert!(!g.can_retreat(), "the scenario's battle is forced");
     }
 
     #[test]

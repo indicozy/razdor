@@ -269,7 +269,11 @@ pub fn battle(game: &mut Game, session: Option<&mut super::session::Keeper>) -> 
     game.foe = foe;
     // The moment just before it, its foe pending, kept for «Рестарт» (this battle again).
     let state = save::meta_of(game, SaveKind::Auto, &name).ok().and_then(|m| save::encode(&m, game).ok().map(|b| (m, b)));
-    let mut view = BattleView::new(game.start_battle());
+    // Razdor's deployment (backlog 1607): the battle waits for the player's first action, with
+    // «Перестроить армию» and, where the game allows it, «Отступить». Read before the start, which
+    // may move the armies onto their cells.
+    let retreat = game.can_retreat();
+    let mut view = BattleView::deploying(game.start_battle(), retreat);
     view.restart_state = state;
     Screen::Battle(Box::new(view))
 }
