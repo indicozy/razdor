@@ -18,6 +18,30 @@
 
 ## 1.5.0 — 2026-11-13
 
+Коммит `26513afa` (тег `v1.5.0`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+edbb0e910881e6936eb3a5d8161e6cfe9255f0c020baad8d732f9d987fc8a00b  razdor
+ead4a4389b2f5421e9ac49c672f5b280c6c743396ac7c0a62af849c67926231a  Razdor.exe
+a03788674bf982f7f9be432226a7631ca0f7f0268e647431cdea012b3771de58  razdor-macos
+5d31f2484a1768cfa1114a5e85f71af108562575990915f70101aea05a57d192  razdor-translate
+9aec35075dd8b1a8284dfe5b540a14e85b92900ba90b4876c48bd611569ad0b9  Razdor-translate.exe
+eb5027ea1ade4a4b4ae0faad1a73c6e28dfefcb8c7cf25b044f4417e1cb11e4b  razdor-translate-macos
+082520cd1839ec06442b02a817fd7dc658f22194fcca8af31831f052376fcf87  razdor.apk
+4d6070977157f9b45ee100505b792ccc521b6e6ec1635e762af73c9bb55f41c7  razdor.ipa
+edbb0e910881e6936eb3a5d8161e6cfe9255f0c020baad8d732f9d987fc8a00b  razdor-1.5.0-linux
+ead4a4389b2f5421e9ac49c672f5b280c6c743396ac7c0a62af849c67926231a  Razdor-1.5.0.exe
+a03788674bf982f7f9be432226a7631ca0f7f0268e647431cdea012b3771de58  razdor-1.5.0-macos
+082520cd1839ec06442b02a817fd7dc658f22194fcca8af31831f052376fcf87  razdor-1.5.0.apk
+4d6070977157f9b45ee100505b792ccc521b6e6ec1635e762af73c9bb55f41c7  razdor-1.5.0.ipa
+5d31f2484a1768cfa1114a5e85f71af108562575990915f70101aea05a57d192  razdor-translate-1.5.0-linux
+9aec35075dd8b1a8284dfe5b540a14e85b92900ba90b4876c48bd611569ad0b9  Razdor-translate-1.5.0.exe
+eb5027ea1ade4a4b4ae0faad1a73c6e28dfefcb8c7cf25b044f4417e1cb11e4b  razdor-translate-1.5.0-macos
+2e2ae77988a0c2f122f687f7c80b2e538c26b5722d8b0176a0e2a73c6d01a12d  razdor-ads-1.5.0.zip
+```
+
 **Внимание, Android:** Раздор теперь хранит всё во внутренней памяти приложения. Когда игра попросит выбрать папку Razdor — согласитесь и выберите её, это всё: сохранения, карты и моды перенесутся сами.
 
 ### Добавлено
