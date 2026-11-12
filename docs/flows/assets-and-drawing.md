@@ -627,6 +627,15 @@ Not lit: the battle and window
 backdrops (`draw_world(…, None)`), the fog, the marks and the route. Known limits: an atlas sprite's neighbour can be
 a neighbouring sprite's edge copy (the atlas gutter is one clamped pixel), so an outermost pixel may pick up that edge;
 the 2.5D ground is lit without the pitch's foreshortening.
+**Steady brightness** (the setting «Ровная яркость», `Settings::map_steady`, on by default (a file without the key too), shown and acting only with the light on; `daylight::set_steady`
+every frame from `display::follow_settings`; `RAZDOR_STEADY=1|0` for snapshots): the light keeps its colour (blue at night, warm at dawn and
+dusk) and not its brightness. `daylight::lit` (in `frame_light`) passes the tint through `steady_light`, which rescales it to the luminance
+`STEADY_LUMA` (0.85, Rec. 709 weights) with the channel ratios kept; `steady_rgb` makes up on the other channels what a clipped one loses.
+0.85 is the highest target at which the night still reads blue (about 0.75, 0.87, 1.0); the day is then 15 % under the original's plain noon.
+The sky (`daylight::sky_rgb`, the water's) keeps the day's luminance (`steady_rgb(sky_at(h), luma(SKY_DAY))`), its hue only. Not held: the
+glows (the windows, the torches' pools and the point lights: a lit night still lifts the frame above 0.85, as intended), the painted shadows'
+factor (`shadow_k_at`, 0.55 at night and 1.15 at dusk: it sets the shadows' contrast, not the map's brightness) and the cast shadows (`casts_at`).
+Off, `light_at` and the frames are as before (the tests pin both).
 **Cast shadows** (the setting «Тени», `Settings::map_shadows`, `daylight::ShadowMode`, under «Освещение»;
 «Нарисованные» is the default and keeps the picture as above). «От солнца» (`ShadowMode::Sun`, `RAZDOR_SHADOWS=sun`
 for snapshots) removes the painted shadows (`ShadowK` 0 in the lit material) and casts real-time silhouettes instead:

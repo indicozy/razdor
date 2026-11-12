@@ -339,6 +339,10 @@ pub struct Settings {
     pub map_light_cycle: u32,
     /// The hour the fixed-hour mode shows (0..24, in steps of 3).
     pub map_light_hour: u32,
+    /// Advanced, Razdor's, on by default, under «Освещение»: «Ровная яркость». The light keeps its colour
+    /// (blue at night, warm at dawn and dusk) but its brightness is held at every hour (`daylight::steady_light`).
+    /// Only with the light on. Style only. A file without the key (`Settings`' `serde(default)`) gets the default.
+    pub map_steady: bool,
     /// Advanced, Razdor's, off by default with the light: «Тени». The painted shadows of the original
     /// (the default), or «От солнца»: every building, tree and rock casts its own, turning and
     /// lengthening with the hour (`daylight::ShadowMode`, `shadow`). Style only.
@@ -442,7 +446,7 @@ pub fn must_request(asked: Option<i32>, want: i32) -> bool {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), bottom_bar_size: Default::default(), keep_xp_on_promotion: false, keep_formation: true, hit_shake: false, battle_marks: true, army_list: false, map_tilt: false, map_first_person: false, map_horizon: false, map_globe: false, map_eyes: false, map_third_tune: super::view25::THIRD_TUNE, map_first_tune: super::view25::FIRST_TUNE, map_auto_turn: false, map_light: Default::default(), map_light_cycle: 24, map_light_hour: 18, map_shadows: Default::default(), map_light_quality: None, map_mist: Default::default(), map_sprite_size: super::world_view::DEFAULT_SPRITE_SIZE, map_render_scale: 1.0, frame_cap: 0, map_twist: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, map_extended: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new(), map_live_water: false, map_weather: false, map_living: false, chronicle_summary: true, battery_saver: false, map_anim: Default::default(), map_water_rate: Default::default(), map_water_quality: Default::default(), record_game: true, debug_mode: false }
+        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), bottom_bar_size: Default::default(), keep_xp_on_promotion: false, keep_formation: true, hit_shake: false, battle_marks: true, army_list: false, map_tilt: false, map_first_person: false, map_horizon: false, map_globe: false, map_eyes: false, map_third_tune: super::view25::THIRD_TUNE, map_first_tune: super::view25::FIRST_TUNE, map_auto_turn: false, map_light: Default::default(), map_light_cycle: 24, map_light_hour: 18, map_steady: true, map_shadows: Default::default(), map_light_quality: None, map_mist: Default::default(), map_sprite_size: super::world_view::DEFAULT_SPRITE_SIZE, map_render_scale: 1.0, frame_cap: 0, map_twist: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, map_extended: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new(), map_live_water: false, map_weather: false, map_living: false, chronicle_summary: true, battery_saver: false, map_anim: Default::default(), map_water_rate: Default::default(), map_water_quality: Default::default(), record_game: true, debug_mode: false }
     }
 }
 
@@ -1370,6 +1374,17 @@ mod tests {
         let low = Settings { map_light_quality: Some(Quality::Low), ..Settings::default() };
         let back: Settings = serde_json::from_str(&serde_json::to_string(&low).unwrap()).unwrap();
         assert_eq!(back.map_light_quality, Some(Quality::Low));
+    }
+
+    #[test]
+    fn map_steady_defaults_on_and_survives_serialization() {
+        // A file without the key (an older one included) gets the default: on.
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert!(old.map_steady, "an older file: the steady brightness is on");
+        assert!(Settings::default().map_steady);
+        let off = Settings { map_steady: false, ..Settings::default() };
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&off).unwrap()).unwrap();
+        assert!(!back.map_steady, "a player's «выключено» survives a save");
     }
 
     #[test]

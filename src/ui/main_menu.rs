@@ -1839,7 +1839,7 @@ impl Group {
     /// The rows the group shows, top to bottom. Every row is in exactly one group (a test checks it).
     pub fn rows(self) -> &'static [Row] {
         match self {
-            Group::Map => &[Row::GraphicsQuality, Row::MapZoom, Row::ScrollSpeed, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::CurveReset, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::Mist, Row::LiveWater, Row::WaterRate, Row::WaterQuality, Row::Weather, Row::LivingMap, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
+            Group::Map => &[Row::GraphicsQuality, Row::MapZoom, Row::ScrollSpeed, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::CurveReset, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::Mist, Row::LiveWater, Row::WaterRate, Row::WaterQuality, Row::Weather, Row::LivingMap, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
             Group::Battle => &[Row::WalkSpeed, Row::AnimSpeed, Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience, Row::HitShake],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
@@ -1869,6 +1869,7 @@ pub enum Row {
     CurveReset,
     MapEdge,
     Lighting,
+    SteadyBrightness,
     LightCycle,
     LightHour,
     Shadows,
@@ -1919,7 +1920,7 @@ pub enum Row {
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 62] = [
+pub const ALL: [Row; 63] = [
         Row::GraphicsQuality,
         Row::MapZoom,
         Row::ScrollSpeed,
@@ -1938,6 +1939,7 @@ pub const ALL: [Row; 62] = [
         Row::CurveReset,
         Row::MapEdge,
         Row::Lighting,
+        Row::SteadyBrightness,
         Row::LightCycle,
         Row::LightHour,
         Row::Shadows,
@@ -1999,6 +2001,7 @@ pub const ALL: [Row; 62] = [
             Row::CameraFov => Some(tr("Field of view: how much is seen across the frame's height, 35 to 90 degrees. Wider shows more ground, and the edges bend more.")),
             Row::MapEdge => Some(tr("Off: past the map's edges is black, as in the original. On: a short stretch of ground goes on past the edges, then thickens into the same black fog as the unexplored map.")),
             Row::Lighting => Some(tr("Razdor's: the map's light follows the time of day. Style only.")),
+            Row::SteadyBrightness => Some(tr("Razdor's: the time of day changes the light's colour, not the map's brightness: at night the map does not darken, at noon it does not glare. Style only.")),
             Row::Shadows => Some(tr("Razdor's: Painted keeps the original's shadows; From the sun removes them, and every building, tree and rock casts its own shadow that turns and lengthens with the hour.")),
             Row::LightQuality => Some(tr("Razdor's: high lights up to eight buildings and figures' torches: their shadows and the glowing windows; medium up to four; low keeps the warm glows only. The default is high on the desktop, medium on a phone.")),
             Row::MapAnim => Some(tr("Map animation: On moves everything on the map. Near only: the movement stops when the map is zoomed out. Off: the map stays still, less load on the graphics card and the battery.")),
@@ -2043,8 +2046,8 @@ pub const ALL: [Row; 62] = [
             // The log goes out on Android (the document creator) and opens its folder on the desktop; none on iPhone.
             Row::SendLog => !cfg!(target_os = "ios"),
             Row::LightHour => audio.map_light == LightMode::Fixed,
-            // The shadows are the light's: shown only with the light on.
-            Row::Shadows | Row::LightQuality => audio.map_light != LightMode::Off,
+            // The shadows and the steady brightness are the light's: shown only with the light on.
+            Row::SteadyBrightness | Row::Shadows | Row::LightQuality => audio.map_light != LightMode::Off,
             // The water's rate and size are the moving water's: shown only with it on.
             Row::WaterRate | Row::WaterQuality => audio.map_live_water,
             // Razdor's (the owner's decision, 2026-11-10): the 2.5D view, while a building of the
@@ -2467,6 +2470,12 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
             };
             if labelled_row_help(c, geo, tr("Lighting"), value, Row::Lighting.help_text()).0 {
                 audio.map_light = audio.map_light.next();
+            }
+        }
+        Row::SteadyBrightness => {
+            // Razdor's, off by default, under «Освещение»: the light's colour changes, its brightness does not.
+            if labelled_row_help(c, geo, tr("Steady brightness"), yes_no(audio.map_steady), Row::SteadyBrightness.help_text()).0 {
+                audio.map_steady = !audio.map_steady;
             }
         }
         Row::Shadows => {
@@ -4125,11 +4134,22 @@ mod tests {
         }
     }
 
+    /// «Ровная яркость» is shown only under «Освещение» (on), and its hint is behind the «?».
+    #[test]
+    fn the_steady_brightness_row_shows_with_the_light_only() {
+        use crate::ui::daylight::LightMode;
+        let mut audio = crate::ui::audio::Settings::default();
+        assert!(!Row::SteadyBrightness.shown(&audio), "the light off: no row");
+        audio.map_light = LightMode::GameClock;
+        assert!(Row::SteadyBrightness.shown(&audio), "the light on: the row");
+        assert!(Row::SteadyBrightness.help_text().is_some());
+    }
+
     /// The long hints sit behind a «?» (backlog 1508): the rows that have one, and no others.
     #[test]
     fn the_long_hints_are_behind_a_question_mark() {
         let with: Vec<Row> = Row::ALL.into_iter().filter(|r| r.help_text().is_some()).collect();
-        assert_eq!(with, vec![Row::GraphicsQuality, Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::Language, Row::Updates, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::SendLog]);
+        assert_eq!(with, vec![Row::GraphicsQuality, Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::Language, Row::Updates, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::SendLog]);
         scene_help("Experience");
         assert_eq!(HELP_PINNED.with(|p| p.get()), Row::Experience.help_text());
         HELP_PINNED.with(|p| p.set(None));

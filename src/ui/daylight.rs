@@ -50,6 +50,52 @@ pub fn light_at(hour: f32) -> Light {
     Light { tint, glow: 1.0 - smoothstep(-0.15, 0.20, e) }
 }
 
+/// «Ровная яркость» (`Settings::map_steady`): the tint's luminance is held at this at every hour. Above
+/// about 0.71 the night's blue channel must clip at 1 (its own ratios would push it past 1), so the night
+/// gives up some of its blue. At 0.85 it still reads blue (about 0.75, 0.87, 1.0), and the day is 15 %
+/// under the original's plain noon. Higher, the night turns grey; lower, the day is dim.
+pub const STEADY_LUMA: f32 = 0.85;
+
+/// The luminance weights of the tint (Rec. 709).
+const LUMA_W: [f32; 3] = [0.2126, 0.7152, 0.0722];
+
+/// The luminance of a colour (`LUMA_W`).
+fn luma(c: [f32; 3]) -> f32 {
+    LUMA_W[0] * c[0] + LUMA_W[1] * c[1] + LUMA_W[2] * c[2]
+}
+
+/// `rgb` rescaled so its luminance is `target`, its channel ratios (its hue) kept. A channel pushed past
+/// 1 is clamped, and the luminance it loses is made up on the channels that can still take it (an equal
+/// step each, up to three rounds). A black colour stays as it is.
+pub fn steady_rgb(rgb: [f32; 3], target: f32) -> [f32; 3] {
+    let l = luma(rgb);
+    if l <= 1e-6 {
+        return rgb;
+    }
+    let mut c = rgb.map(|x| x * target / l);
+    for _ in 0..3 {
+        c = c.map(|x| x.clamp(0.0, 1.0));
+        let residual = target - luma(c);
+        if residual.abs() < 1e-7 {
+            break;
+        }
+        let free: Vec<usize> = (0..3).filter(|&i| if residual > 0.0 { c[i] < 1.0 } else { c[i] > 0.0 }).collect();
+        let weight: f32 = free.iter().map(|&i| LUMA_W[i]).sum();
+        if free.is_empty() || weight <= 0.0 {
+            break;
+        }
+        for i in free {
+            c[i] += residual / weight;
+        }
+    }
+    c.map(|x| x.clamp(0.0, 1.0))
+}
+
+/// The light with its tint held at `STEADY_LUMA` (the glows are left as they are).
+pub fn steady_light(light: Light) -> Light {
+    Light { tint: steady_rgb(light.tint, STEADY_LUMA), glow: light.glow }
+}
+
 /// The sky's colour by day, at night (moonlight) and at dawn and dusk (per channel, at full warmth).
 const SKY_DAY: [f32; 3] = [0.55, 0.70, 0.85];
 const SKY_NIGHT: [f32; 3] = [0.45, 0.52, 0.70];
@@ -168,9 +214,11 @@ local! {
 }
 
 /// The sky's colour for the water (`terrain`'s `Sky`): the light's hour when the light is on, the
-/// day's colour otherwise.
+/// day's colour otherwise. With «Ровная яркость» the sky keeps the day's brightness and only its hue
+/// changes (the water it lies on does not flash either).
 pub fn sky_rgb() -> [f32; 3] {
     match LAST_HOUR.get() {
+        Some(h) if steady() => steady_rgb(sky_at(h), luma(SKY_DAY)),
         Some(h) => sky_at(h),
         None => SKY_DAY,
     }
@@ -244,6 +292,14 @@ local! {
         "painted" => Some(ShadowMode::Painted),
         _ => None,
     });
+    /// `RAZDOR_STEADY=1|0` (a snapshot's «Ровная яркость», read once): it wins over the setting.
+    static ENV_STEADY: Option<bool> = std::env::var("RAZDOR_STEADY").ok().and_then(|s| match s.trim() {
+        "1" => Some(true),
+        "0" => Some(false),
+        _ => None,
+    });
+    /// «Ровная яркость» (`Settings::map_steady`), taken in every frame by `set_steady`.
+    static STEADY: Cell<bool> = Cell::new(false);
     /// The hour the game-clock mode shows, eased toward the game's (`None` until the first frame).
     static SHOWN_HOUR: Cell<Option<f32>> = Cell::new(None);
     /// `RAZDOR_LIGHT_HOUR` (a snapshot's fixed hour, read once): it wins over the settings.
@@ -271,6 +327,22 @@ pub fn set_prefs(mode: LightMode, cycle_minutes: u32, fixed_hour: u32, shadows: 
     PREFS.set(Prefs { mode, cycle_minutes, fixed_hour, shadows, quality });
 }
 
+/// Takes the setting «Ровная яркость» in (every frame, next to `set_prefs`).
+pub fn set_steady(on: bool) {
+    STEADY.set(on);
+}
+
+/// Whether the light's brightness is held at every hour: `RAZDOR_STEADY` when set, else the setting.
+pub fn steady() -> bool {
+    ENV_STEADY.with(|e| *e).unwrap_or(STEADY.get())
+}
+
+/// The light at `hour` as the settings take it: with «Ровная яркость» its tint is held at `STEADY_LUMA`.
+fn lit(hour: f32) -> Light {
+    let light = light_at(hour);
+    if steady() { steady_light(light) } else { light }
+}
+
 /// The point lights' quality in effect: `RAZDOR_LIGHT_QUALITY` when set, else the setting.
 pub fn quality() -> super::lights::Quality {
     ENV_QUALITY.with(|e| *e).unwrap_or(PREFS.get().quality)
@@ -286,7 +358,7 @@ pub fn shadow_mode() -> ShadowMode {
 pub fn frame_light(game_hour: f32, real_secs: f64, dt: f32) -> Option<Light> {
     if let Some(h) = ENV_HOUR.with(|h| *h) {
         LAST_HOUR.set(Some(h.rem_euclid(24.0)));
-        return Some(light_at(h.rem_euclid(24.0)));
+        return Some(lit(h.rem_euclid(24.0)));
     }
     let prefs = PREFS.get();
     let hour = match prefs.mode {
@@ -312,7 +384,7 @@ pub fn frame_light(game_hour: f32, real_secs: f64, dt: f32) -> Option<Light> {
         LightMode::Fixed => (prefs.fixed_hour % 24) as f32,
     };
     LAST_HOUR.set(Some(hour));
-    Some(light_at(hour))
+    Some(lit(hour))
 }
 
 /// The hour the lighting shows this frame, when the lighting is on (`frame_light`); None otherwise.
@@ -698,5 +770,59 @@ mod tests {
         assert_eq!(ShadowMode::default(), ShadowMode::Painted);
         let back: ShadowMode = serde_json::from_str(&serde_json::to_string(&ShadowMode::Sun).unwrap()).unwrap();
         assert_eq!(back, ShadowMode::Sun);
+    }
+
+    #[test]
+    fn steady_rgb_hits_the_target_and_keeps_the_channels_in_range() {
+        // A blue that would clip: the luminance it loses is made up on the other channels.
+        for rgb in [[0.2, 0.2, 1.0], [0.5, 0.58, 0.82], [1.0, 0.8, 0.58], [0.55, 0.70, 0.85]] {
+            for target in [0.3, 0.6, 0.85] {
+                let s = steady_rgb(rgb, target);
+                assert!(s.iter().all(|c| (0.0..=1.0).contains(c)), "{rgb:?} at {target}: {s:?}");
+                assert!((luma(s) - target).abs() < 1e-4, "{rgb:?} at {target}: luminance {}", luma(s));
+            }
+        }
+        assert_eq!(steady_rgb([0.0; 3], 0.85), [0.0; 3], "black stays black");
+    }
+
+    #[test]
+    fn steady_light_holds_the_luminance_at_every_hour() {
+        for i in 0..96 {
+            let h = i as f32 * 0.25;
+            let l = steady_light(light_at(h));
+            assert!((luma(l.tint) - STEADY_LUMA).abs() <= 0.01, "hour {h}: luminance {}", luma(l.tint));
+            assert_eq!(l.glow, light_at(h).glow, "hour {h}: the glows stay as they are");
+        }
+    }
+
+    #[test]
+    fn steady_light_keeps_the_hue_of_night_and_noon() {
+        let night = steady_light(light_at(1.0)).tint;
+        let noon = steady_light(light_at(12.0)).tint;
+        // Noon is white at any brightness; the night stays blue (its red well under its blue).
+        assert!(noon[0] / noon[2] > 0.99, "noon {noon:?}");
+        assert!(night[0] / night[2] < 0.85, "night {night:?}");
+        let dusk = steady_light(light_at(18.0)).tint;
+        assert!(dusk[0] / dusk[2] > night[0] / night[2] + 0.1, "dusk {dusk:?} is warmer than the night {night:?}");
+    }
+
+    #[test]
+    fn steady_off_leaves_the_light_as_it_was_and_on_holds_it_in_frames() {
+        set_prefs(LightMode::Fixed, 24, 1, ShadowMode::Painted, crate::ui::lights::Quality::High);
+        set_steady(false);
+        assert_eq!(frame_light(12.0, 0.0, 0.016), Some(light_at(1.0)), "steady off: the light as before");
+        assert_eq!(sky_rgb(), sky_at(1.0), "steady off: the sky as before");
+        set_steady(true);
+        assert_eq!(frame_light(12.0, 0.0, 0.016), Some(steady_light(light_at(1.0))), "steady on: the held light");
+        // The sky keeps the day's brightness at every hour, only its hue moves. A 24-minute cycle puts the
+        // hour at `real_secs / 60` exactly (no easing).
+        set_prefs(LightMode::Cycle, 24, 18, ShadowMode::Painted, crate::ui::lights::Quality::High);
+        for h in [0.0, 5.0, 7.0, 12.0, 18.0, 20.0] {
+            frame_light(0.0, h * 60.0, 0.016);
+            let sky = sky_rgb();
+            assert!((luma(sky) - luma(SKY_DAY)).abs() < 1e-3, "hour {h}: the sky's luminance {}", luma(sky));
+        }
+        set_steady(false);
+        set_prefs(LightMode::Off, 24, 18, ShadowMode::Painted, crate::ui::lights::Quality::High);
     }
 }

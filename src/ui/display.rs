@@ -887,6 +887,7 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
     crate::ui::world_view::set_edge_pref(settings.map_extended);
     let quality = settings.map_light_quality.unwrap_or_else(|| crate::ui::lights::default_quality(dp_px().is_some()));
     crate::ui::daylight::set_prefs(settings.map_light, settings.map_light_cycle, settings.map_light_hour, settings.map_shadows, quality);
+    crate::ui::daylight::set_steady(settings.map_steady);
     // `RAZDOR_MIST` (a dev switch) wins over the saved setting, as the snapshots' does.
     crate::ui::mist::set_pref(crate::ui::mist::env_mode().unwrap_or(settings.map_mist));
     crate::ui::map_anim::set_pref(settings.map_anim);
