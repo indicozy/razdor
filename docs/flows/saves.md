@@ -229,7 +229,8 @@ saved with the run. It is brought up to date every frame from the settings
 (`Game::note_cheat`). A load or a battle's restart in the same run keeps the worse mark
 (`Game::keep_run_mark`); a new game, a campaign's next map and «Рестарт» of the map start a new run.
 A save from before the mark has no `run_mark`: its history is unknown, so it reads grey at most,
-except where the save itself shows a cheat (`cheats.used`) or an experimental rule.
+except where the save itself shows a cheat (`cheats.used`) or an experimental rule. A parity switch
+that the save lacks (inherited, `ExperimentalRules::inherited`) is on but does not make the run yellow.
 
 The player's best mark per map (and its date) is `marks.json` beside `settings.json`
 (`marks::Records`, keyed by the map's file name without the extension, as the favourites are). A

@@ -245,3 +245,11 @@ Any experimental rule on in the playthrough makes its run yellow, with the first
 order) as the reason (`ExperimentalRules::first_on`, read by `Game::note_settings`). The rules are fixed for
 a playthrough, so the mark comes from `Game::experimental`, not from the window's setting. A gameplay setting
 that differs from the original's is grey (`ui::audio::Settings::gameplay_differs_from_original`); see `saves.md`.
+
+Inherited switches (backlog 1601): a save from before the six `INHERITABLE` switches (the five parity
+switches and `building_store`) reads their missing keys ON, the rule that save had. Those switches are
+marked in `ExperimentalRules::inherited` (one bit each, fixed numbers), and `first_on` skips them, so
+an old run is not made yellow by a rule the player never chose. Rules play is the same. `RulesWire`
+writes the names in its `inherited` list, so a re-saved file still says they were inherited. A
+new switch whose missing key reads ON (it keeps a rule older saves had) gets an `INHERITABLE` bit; a
+switch whose missing key reads OFF needs nothing.

@@ -33,7 +33,7 @@ local! {
         simultaneous_bonuses: false, two_potions: false, six_cells: false, unlimited_items: false,
         free_units: false, auto_promotion: false, undying_units: false, fast_ai: false,
         bless_once: false, undead_poison_immune: false, unlimited_spells: false, merchant_item: false, rear_service_flat: false,
-        building_store: false, death_curse_counter: false, no_corpse_garrison: false,
+        building_store: false, death_curse_counter: false, no_corpse_garrison: false, inherited: 0,
     }) };
     static RULES_OPEN: Cell<bool> = const { Cell::new(false) };
     /// The rules window's scroll (px) on an upright phone, reset when it closes.

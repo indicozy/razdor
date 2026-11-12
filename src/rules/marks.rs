@@ -318,11 +318,33 @@ mod tests {
         let mut cheated: Game = serde_json::from_value(cheated).unwrap();
         cheated.note_settings(None);
         assert_eq!(cheated.run_mark(), mark(Level::Red, Reason::Cheat(String::new())));
-        let mut ruled = old;
+        let mut ruled = old.clone();
         ruled["experimental"]["six_cells"] = serde_json::json!(true);
         let mut ruled: Game = serde_json::from_value(ruled).unwrap();
         ruled.note_settings(None);
         assert_eq!(ruled.run_mark(), mark(Level::Yellow, Reason::Rule("Six equipment cells".into())));
+    }
+
+    /// A save from before the parity switches (backlog 1601): the six keys are missing, so Razdor's
+    /// old rules read ON as inherited, not chosen. The run stays unknown (grey), not yellow. A
+    /// switch the player chose (its key written as true) still makes the run yellow.
+    #[test]
+    fn switches_inherited_from_a_pre_switch_save_do_not_make_the_run_yellow() {
+        let plain = game(ExperimentalRules::default());
+        let mut old = serde_json::to_value(&plain).unwrap();
+        old.as_object_mut().unwrap().remove("run_mark");
+        for key in ["bless_once", "undead_poison_immune", "unlimited_spells", "merchant_item", "rear_service_flat", "building_store"] {
+            old["experimental"].as_object_mut().unwrap().remove(key);
+        }
+        let mut loaded: Game = serde_json::from_value(old.clone()).unwrap();
+        assert!(loaded.experimental.bless_once, "the old rule still plays");
+        loaded.note_settings(None);
+        assert_eq!(loaded.run_mark(), RunMark::unknown_history(), "an inherited switch is not the player's choice");
+        let mut chosen = old;
+        chosen["experimental"]["bless_once"] = serde_json::json!(true);
+        let mut chosen: Game = serde_json::from_value(chosen).unwrap();
+        chosen.note_settings(None);
+        assert_eq!(chosen.run_mark(), mark(Level::Yellow, Reason::Rule("Bless once a turn".into())));
     }
 
     #[test]

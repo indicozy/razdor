@@ -177,16 +177,51 @@ pub struct ExperimentalRules {
     /// (0x4c653c, 0x4c6f50 refuse only the hero and named units), where a corpse moves both ways and
     /// a corpse kept in a castle starts the plague. Razdor's deviation.
     pub no_corpse_garrison: bool,
+    /// The `INHERITABLE` switches that read ON only because the save predates them: Razdor's own
+    /// old rule, kept for that save, not chosen by the player. One bit per switch (fixed numbers).
+    /// Rules play is the same as for a chosen switch; the run's mark skips them (`first_on`).
+    /// Set by `RulesWire` for a missing key and for its `inherited` list; 0 in a new game.
+    pub inherited: u32,
 }
+
+/// The bits of `ExperimentalRules::inherited`: fixed numbers, never reordered or reused.
+const BLESS_ONCE: u32 = 1 << 0;
+const UNDEAD_POISON_IMMUNE: u32 = 1 << 1;
+const UNLIMITED_SPELLS: u32 = 1 << 2;
+const MERCHANT_ITEM: u32 = 1 << 3;
+const REAR_SERVICE_FLAT: u32 = 1 << 4;
+const BUILDING_STORE: u32 = 1 << 5;
+
+/// The switches whose missing key reads ON (they keep a rule older saves had): each one's bit in
+/// `ExperimentalRules::inherited` and its wire key. A new switch whose missing key reads ON (it
+/// keeps a rule older saves had) gets an `INHERITABLE` bit, so the run's mark doesn't count it; a
+/// switch whose missing key reads OFF needs nothing. Bits are fixed numbers: never reorder them.
+const INHERITABLE: [(u32, &str); 6] = [
+    (BLESS_ONCE, "bless_once"),
+    (UNDEAD_POISON_IMMUNE, "undead_poison_immune"),
+    (UNLIMITED_SPELLS, "unlimited_spells"),
+    (MERCHANT_ITEM, "merchant_item"),
+    (REAR_SERVICE_FLAT, "rear_service_flat"),
+    (BUILDING_STORE, "building_store"),
+];
 
 impl ExperimentalRules {
     pub fn for_new_game() -> Self { Self::default() }
 
     /// The rules of a save with no `experimental` block at all (before the rules were saved):
-    /// the five parity switches were Razdor's rules then, so they stay on; the eight others
-    /// were off.
+    /// the six inheritable switches were Razdor's rules then, so they stay on (and inherited); the
+    /// eight others were off.
     pub fn before_the_rules_were_saved() -> Self {
-        Self { bless_once: true, undead_poison_immune: true, unlimited_spells: true, merchant_item: true, rear_service_flat: true, building_store: true, ..Self::default() }
+        Self {
+            bless_once: true,
+            undead_poison_immune: true,
+            unlimited_spells: true,
+            merchant_item: true,
+            rear_service_flat: true,
+            building_store: true,
+            inherited: INHERITABLE.iter().fold(0, |bits, (bit, _)| bits | bit),
+            ..Self::default()
+        }
     }
 
     /// The «Правила Раздора» switches: the six that hold Razdor's own former rules (the set
@@ -224,35 +259,42 @@ impl ExperimentalRules {
     }
 
     /// The first rule that is on, by its catalog name (the one the scenario list's yellow mark
-    /// gives as its reason, `rules::marks`); `None` with the classic rules.
+    /// gives as its reason, `rules::marks`); `None` with the classic rules. A switch inherited from
+    /// an older save (`inherited`) is not counted: the player did not choose it. Each entry is
+    /// (on, its inherited bit or 0, name); only the six `INHERITABLE` switches have a bit.
     pub fn first_on(&self) -> Option<&'static str> {
         [
-            (self.simultaneous_bonuses, crate::i18n::n_("All special bonuses simultaneously")),
-            (self.unlimited_items, crate::i18n::n_("No item limits")),
-            (self.two_potions, crate::i18n::n_("At most two potions per character")),
-            (self.six_cells, crate::i18n::n_("Six equipment cells")),
-            (self.free_units, crate::i18n::n_("Free units")),
-            (self.auto_promotion, crate::i18n::n_("Automatic promotion")),
-            (self.undying_units, crate::i18n::n_("Units don't die")),
-            (self.fast_ai, crate::i18n::n_("Faster AI")),
-            (self.bless_once, crate::i18n::n_("Bless once a turn")),
-            (self.undead_poison_immune, crate::i18n::n_("Poison spares the Undead")),
-            (self.unlimited_spells, crate::i18n::n_("No spell book limit")),
-            (self.merchant_item, crate::i18n::n_("Merchant discount from an item")),
-            (self.rear_service_flat, crate::i18n::n_("Rear Service always −30%")),
-            (self.building_store, crate::i18n::n_("Store in your own buildings")),
-            (self.death_curse_counter, crate::i18n::n_("Death curse on counter blows")),
-            (self.no_corpse_garrison, crate::i18n::n_("No corpses in garrisons")),
+            (self.simultaneous_bonuses, 0, crate::i18n::n_("All special bonuses simultaneously")),
+            (self.unlimited_items, 0, crate::i18n::n_("No item limits")),
+            (self.two_potions, 0, crate::i18n::n_("At most two potions per character")),
+            (self.six_cells, 0, crate::i18n::n_("Six equipment cells")),
+            (self.free_units, 0, crate::i18n::n_("Free units")),
+            (self.auto_promotion, 0, crate::i18n::n_("Automatic promotion")),
+            (self.undying_units, 0, crate::i18n::n_("Units don't die")),
+            (self.fast_ai, 0, crate::i18n::n_("Faster AI")),
+            (self.bless_once, BLESS_ONCE, crate::i18n::n_("Bless once a turn")),
+            (self.undead_poison_immune, UNDEAD_POISON_IMMUNE, crate::i18n::n_("Poison spares the Undead")),
+            (self.unlimited_spells, UNLIMITED_SPELLS, crate::i18n::n_("No spell book limit")),
+            (self.merchant_item, MERCHANT_ITEM, crate::i18n::n_("Merchant discount from an item")),
+            (self.rear_service_flat, REAR_SERVICE_FLAT, crate::i18n::n_("Rear Service always −30%")),
+            (self.building_store, BUILDING_STORE, crate::i18n::n_("Store in your own buildings")),
+            (self.death_curse_counter, 0, crate::i18n::n_("Death curse on counter blows")),
+            (self.no_corpse_garrison, 0, crate::i18n::n_("No corpses in garrisons")),
         ]
         .into_iter()
-        .find(|(on, _)| *on)
-        .map(|(_, name)| name)
+        .find(|(on, bit, _)| *on && self.inherited & bit == 0)
+        .map(|(_, _, name)| name)
     }
 }
 
 /// The save's form of [`ExperimentalRules`]. Written: the current fields only. Read: also the
 /// four item switches of older builds (`skip_serializing`), which map to `unlimited_items`.
-#[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize)]
+///
+/// Inherited switches: a switch whose missing key reads ON keeps an old rule and is marked in
+/// `inherited` (`ExperimentalRules::inherited`), so the run's mark doesn't count it. A new switch
+/// whose missing key reads ON (it keeps a rule older saves had) gets an `INHERITABLE` bit, so the
+/// run's mark doesn't count it; a switch whose missing key reads OFF needs nothing.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 struct RulesWire {
     simultaneous_bonuses: bool,
@@ -283,6 +325,10 @@ struct RulesWire {
     /// must still play, see `recording/snapshot.rs`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     no_corpse_garrison: bool,
+    /// The wire keys of the `INHERITABLE` switches that are inherited (`ExperimentalRules::inherited`).
+    /// Written, so a save that was re-saved keeps saying so; unknown names are ignored.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    inherited: Vec<String>,
     /// Older switches, read only (see the `From` impl).
     #[serde(skip_serializing)]
     multiple_rings: bool,
@@ -312,6 +358,26 @@ impl From<RulesWire> for ExperimentalRules {
         // The four switches of older builds become the one: any of them on (the weapon or the
         // duplicate rule lifted, or a repeated ring or amulet) is the lifted rules now.
         let unlimited_items = w.unlimited_items || w.multiple_rings || w.multiple_amulets || w.multiple_weapons || old_duplicates_allowed;
+        // A missing inheritable key reads ON (the rule the save had) and is inherited, not chosen.
+        let mut inherited = 0;
+        let mut on = |key: Option<bool>, bit: u32| {
+            key.unwrap_or_else(|| {
+                inherited |= bit;
+                true
+            })
+        };
+        let bless_once = on(w.bless_once, BLESS_ONCE);
+        let undead_poison_immune = on(w.undead_poison_immune, UNDEAD_POISON_IMMUNE);
+        let unlimited_spells = on(w.unlimited_spells, UNLIMITED_SPELLS);
+        let merchant_item = on(w.merchant_item, MERCHANT_ITEM);
+        let rear_service_flat = on(w.rear_service_flat, REAR_SERVICE_FLAT);
+        let building_store = on(w.building_store, BUILDING_STORE);
+        // The names a re-saved file carries (unknown ones are ignored).
+        for (bit, key) in INHERITABLE {
+            if w.inherited.iter().any(|name| name.as_str() == key) {
+                inherited |= bit;
+            }
+        }
         Self {
             simultaneous_bonuses: w.simultaneous_bonuses,
             two_potions: w.two_potions,
@@ -321,14 +387,15 @@ impl From<RulesWire> for ExperimentalRules {
             auto_promotion: w.auto_promotion,
             undying_units: w.undying_units,
             fast_ai: w.fast_ai,
-            bless_once: w.bless_once.unwrap_or(true),
-            undead_poison_immune: w.undead_poison_immune.unwrap_or(true),
-            unlimited_spells: w.unlimited_spells.unwrap_or(true),
-            merchant_item: w.merchant_item.unwrap_or(true),
-            rear_service_flat: w.rear_service_flat.unwrap_or(true),
-            building_store: w.building_store.unwrap_or(true),
+            bless_once,
+            undead_poison_immune,
+            unlimited_spells,
+            merchant_item,
+            rear_service_flat,
+            building_store,
             death_curse_counter: w.death_curse_counter,
             no_corpse_garrison: w.no_corpse_garrison,
+            inherited,
         }
     }
 }
@@ -352,6 +419,7 @@ impl From<ExperimentalRules> for RulesWire {
             building_store: Some(r.building_store),
             death_curse_counter: r.death_curse_counter,
             no_corpse_garrison: r.no_corpse_garrison,
+            inherited: INHERITABLE.iter().filter(|(bit, _)| r.inherited & bit != 0).map(|(_, key)| key.to_string()).collect(),
             multiple_rings: false,
             multiple_amulets: false,
             multiple_weapons: false,
@@ -1034,7 +1102,7 @@ mod experimental_rules_save_tests {
         assert!(!rules.is_razdor_preset_on());
         rules.razdor_preset();
         assert!(rules.is_razdor_preset_on());
-        assert_eq!(rules, ExperimentalRules { fast_ai: true, free_units: true, death_curse_counter: true, no_corpse_garrison: true, ..ExperimentalRules::before_the_rules_were_saved() });
+        assert_eq!(rules, ExperimentalRules { fast_ai: true, free_units: true, death_curse_counter: true, no_corpse_garrison: true, inherited: 0, ..ExperimentalRules::before_the_rules_were_saved() });
         rules.set_razdor_preset(false);
         assert_eq!(rules, ExperimentalRules { fast_ai: true, free_units: true, ..Default::default() });
         assert!(!rules.is_razdor_preset_on());
@@ -1136,5 +1204,43 @@ mod experimental_rules_save_tests {
         assert!(rules.is_razdor_preset_on() && rules.no_corpse_garrison);
         rules.set_razdor_preset(false);
         assert!(!rules.no_corpse_garrison);
+    }
+
+    /// A save with the parity keys missing (before them): the six inheritable switches read ON
+    /// and carry their bits, so the run's mark does not count them; rules play is unchanged.
+    #[test]
+    fn a_save_without_the_parity_keys_inherits_its_six_switches() {
+        let loaded: ExperimentalRules = serde_json::from_str("{}").unwrap();
+        assert!(loaded.bless_once && loaded.undead_poison_immune && loaded.unlimited_spells && loaded.merchant_item && loaded.rear_service_flat && loaded.building_store);
+        assert_eq!(loaded.inherited, 0b11_1111);
+        assert_eq!(loaded.first_on(), None);
+        // Re-saved: every key is written, and the inherited names keep the bits (not chosen).
+        let json = serde_json::to_value(loaded).unwrap();
+        assert_eq!(json["bless_once"].as_bool(), Some(true));
+        assert_eq!(json["inherited"].as_array().map(Vec::len), Some(6));
+        let back: ExperimentalRules = serde_json::from_value(json).unwrap();
+        assert_eq!(back, loaded);
+        assert!(back.bless_once && back.building_store);
+        assert_eq!(back.inherited, 0b11_1111);
+        assert_eq!(back.first_on(), None);
+    }
+
+    /// An explicit `true` (a new-game choice, or a re-saved choice) is not inherited: it is counted.
+    #[test]
+    fn a_chosen_parity_switch_is_counted_and_unknown_inherited_names_are_ignored() {
+        let chosen: ExperimentalRules = serde_json::from_str(r#"{"bless_once": true, "unlimited_spells": false}"#).unwrap();
+        assert!(chosen.bless_once && !chosen.unlimited_spells);
+        // The four missing keys are inherited (undead poison, merchant, rear service, store); the
+        // chosen `bless_once` and the explicit `unlimited_spells: false` are not.
+        assert_eq!(chosen.inherited, 0b11_1010);
+        assert_eq!(chosen.first_on(), Some("Bless once a turn"));
+        // An unknown name in `inherited` is ignored; the six missing keys are still inherited.
+        let named: ExperimentalRules = serde_json::from_str(r#"{"inherited": ["no_such_switch"]}"#).unwrap();
+        assert_eq!(named.inherited, 0b11_1111);
+        assert_eq!(named.first_on(), None);
+        let mut new_game = ExperimentalRules::for_new_game();
+        assert_eq!(new_game.inherited, 0);
+        new_game.bless_once = true;
+        assert_eq!(new_game.first_on(), Some("Bless once a turn"));
     }
 }

@@ -1355,7 +1355,7 @@ pub(crate) mod tests {
     #[test]
     fn experimental_rules_survive_save_load_without_changing_install_defaults() {
         let install = demo();
-        let rules = super::super::content::ExperimentalRules { simultaneous_bonuses: true, unlimited_items: true, two_potions: true, six_cells: true, free_units: false, auto_promotion: false, undying_units: false, fast_ai: true, bless_once: true, undead_poison_immune: false, unlimited_spells: true, merchant_item: false, rear_service_flat: true, building_store: true, death_curse_counter: false, no_corpse_garrison: false };
+        let rules = super::super::content::ExperimentalRules { simultaneous_bonuses: true, unlimited_items: true, two_potions: true, six_cells: true, free_units: false, auto_promotion: false, undying_units: false, fast_ai: true, bless_once: true, undead_poison_immune: false, unlimited_spells: true, merchant_item: false, rear_service_flat: true, building_store: true, death_curse_counter: false, no_corpse_garrison: false, inherited: 0 };
         let mut g = Game::new(Arc::new(install.with_experimental(rules)), HeroClass::Knight);
         g.squad[0].potions_drunk = 2;
         g.squad[0].battle_disabled = true;
