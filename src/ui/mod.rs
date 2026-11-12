@@ -3,6 +3,7 @@ pub mod assets;
 pub mod audio;
 pub mod bench;
 pub mod bench_view;
+pub mod debug_banner;
 pub mod battle_view;
 pub mod building_view;
 mod ads;
@@ -1321,6 +1322,11 @@ impl App {
         }
         audio::flush_deferred();
         saves_move::tick();
+        // The log export started from Settings (`transfer::start_log_export`): its answer, for its note.
+        #[cfg(target_os = "android")]
+        {
+            transfer::settings_poll();
+        }
     }
 
     pub fn frame(&mut self) {
@@ -1557,6 +1563,8 @@ impl App {
         // The game is imported into the base install, never a mod's folder built over it.
         // Only a loaded install counts as one: a located folder that did not load never blocks the
         // automatic download (`game_import::tick`).
+        // The debug mode (Settings → «Прочее») takes effect at once: the profiling log follows it.
+        razdor::diag::set_debug(self.audio.settings.debug_mode);
         let loaded = self.assets.dt.is_some();
         let base = razdor::dt::install::base_dir();
         let install = if loaded { base.as_deref().or(self.assets.dt.as_ref().map(|d| d.install.dir.as_path())) } else { None };
@@ -1967,6 +1975,11 @@ impl App {
         game_import::modal();
         // The saves of an older release (`ui::saves_move`): its popup or its result, over the screen.
         saves_move::modal();
+        // The note of a transfer started from Settings («Прочее», «Отправить журнал…»).
+        #[cfg(target_os = "android")]
+        {
+            transfer::note_window();
+        }
         // The performance test's windows (`bench_view`): the choice, the run's progress, the results.
         bench_view::modal(self);
         // A fight decided on the map or in a building begins once the messages of that moment

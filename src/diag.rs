@@ -72,15 +72,31 @@ pub fn log(msg: &str) {
     }
 }
 
-/// Profiling is on: `RAZDOR_PROFILE` is set, or the app folder (`platform::app_dir`) has a `profile`
-/// file (how Android turns it on, where env vars cannot be set: `<app folder>/profile`).
-/// Slow frames and slow loads are logged, and the frame probe (`frame_probe`) summarises frames.
+/// The debug mode the player turns on in Settings («Режим отладки», `ui::audio::Settings::debug_mode`),
+/// set each frame by the app (`set_debug`). It can change at run time.
+static DEBUG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Sets the debug mode (see [`DEBUG`]); the app calls it each frame with the setting's value.
+pub fn set_debug(on: bool) {
+    DEBUG.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether the debug mode is on (the Settings' switch).
+pub fn debug_mode() -> bool {
+    DEBUG.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Profiling is on: the debug mode is on ([`set_debug`]), or `RAZDOR_PROFILE` is set, or the app
+/// folder (`platform::app_dir`) has a `profile` file (how Android turned it on before the setting
+/// existed, where env vars cannot be set: `<app folder>/profile`). Slow frames and slow loads are
+/// logged, and the frame probe (`frame_probe`) summarises frames.
 pub fn profiling() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| {
-        std::env::var_os("RAZDOR_PROFILE").is_some()
-            || crate::platform::app_dir().is_some_and(|d| d.join("profile").is_file())
-    })
+    static ENV: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    debug_mode()
+        || *ENV.get_or_init(|| {
+            std::env::var_os("RAZDOR_PROFILE").is_some()
+                || crate::platform::app_dir().is_some_and(|d| d.join("profile").is_file())
+        })
 }
 
 /// A frame over this many ms is logged as slow (with [`profiling`]): `RAZDOR_PROFILE=<ms>`,
@@ -301,6 +317,14 @@ fn redirect_output(file: &File) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{create_log_file, known_cause, threshold_from};
+
+    #[test]
+    fn the_debug_mode_turns_the_profiling_on_and_off_at_run_time() {
+        super::set_debug(true);
+        assert!(super::debug_mode() && super::profiling(), "the setting turns profiling on at once");
+        super::set_debug(false);
+        assert!(!super::debug_mode(), "and off again, without a restart");
+    }
 
     #[test]
     fn the_slow_frame_threshold_is_read_from_a_number_of_ms_of_two_or_more() {

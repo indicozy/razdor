@@ -31,7 +31,6 @@ use macroquad::prelude::*;
 const MARKER: &str = "saves-move";
 
 /// The popup's text: what changed, and what to pick.
-const OFFER: &str = "In version 1.5.0 Razdor keeps its saves in its own folder. To move the old saves, pick the Razdor folder in the device storage.";
 
 /// What the marker says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -234,7 +233,8 @@ pub fn modal() {
     let next = match state {
         State::Hidden => State::Hidden,
         State::Offer(popup, note) => {
-            let mut lines = vec![tr(OFFER).to_string()];
+            // The text is the owner's (2026-11-12): the literal here, where the catalog scan reads it.
+            let mut lines = vec![tr("In version 1.5.0 Razdor keeps its files in the app's folder. To move the saves, maps and mods, pick the Razdor folder in the device storage.").to_string()];
             lines.extend(note.clone());
             let k = chrome::k();
             let f = map_import::phone_factor();

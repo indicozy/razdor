@@ -54,6 +54,8 @@ local! {
     static MENU: Cell<bool> = const { Cell::new(false) };
     /// The picker's action under way (polled by [`poll`]).
     static STEP: RefCell<Step> = const { RefCell::new(Step::Idle) };
+    /// The result of a transfer started from Settings («Прочее»), for its note window (`note_window`).
+    static NOTE: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 /// The «Перенос…» button was pressed: the menu opens (the window draws it this frame).
@@ -159,7 +161,7 @@ fn prepare_export(log: bool) -> Result<(PathBuf, String, &'static str), Done> {
         let src = razdor::diag::log_path().ok_or_else(|| export_failed(tr("there is no log file")))?;
         let name = format!("razdor-log-{stamp}.txt");
         let temp = dir.join(&name);
-        fs::copy(&src, &temp).map_err(|e| io_failed(export_failed, e))?;
+        write_log_bundle(&src, &temp).map_err(|e| io_failed(export_failed, e))?;
         return Ok((temp, name, "text/plain"));
     }
     let root = platform::app_dir().map(|d| d.join("saves")).ok_or_else(|| export_failed(tr("the app has no folder")))?;
@@ -172,6 +174,61 @@ fn prepare_export(log: bool) -> Result<(PathBuf, String, &'static str), Done> {
             let _ = fs::remove_file(&temp);
             Err(export_failed(&why))
         }
+    }
+}
+
+/// The log export's file: `razdor.log`, then the play log and the newest performance report (`razdor-bench-*.txt`
+/// in the app's folder), when there are, each under a heading. One text file for the document creator.
+fn write_log_bundle(log: &Path, temp: &Path) -> std::io::Result<()> {
+    let mut text = fs::read(log)?;
+    let mut parts: Vec<PathBuf> = Vec::new();
+    parts.extend(razdor::diag::play_log_path().filter(|p| p.is_file()));
+    parts.extend(newest_bench_report());
+    for part in parts {
+        text.extend_from_slice(format!("\n\n===== {} =====\n", part.file_name().unwrap_or_default().to_string_lossy()).as_bytes());
+        text.extend(fs::read(&part)?);
+    }
+    fs::write(temp, text)
+}
+
+/// The newest performance report the app's folder holds (`bench::save`: `razdor-bench-<date>.txt`, the names sort by date).
+fn newest_bench_report() -> Option<PathBuf> {
+    let mut reports: Vec<PathBuf> = fs::read_dir(platform::app_dir()?)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("razdor-bench-") && n.ends_with(".txt")))
+        .collect();
+    reports.sort();
+    reports.pop()
+}
+
+/// Settings → «Прочее» → «Отправить журнал…» (Android): the log goes to the document creator, as the Load
+/// window's «Перенос…» does. A failure to start is kept for the note window (`note_window`); the answer
+/// comes through `poll` (called each frame by the app).
+pub fn start_log_export() {
+    if let Some(done) = start_export(true) {
+        set_note(done.message);
+    }
+}
+
+/// The note of the settings' transfer (`start_log_export`), until its OK.
+fn set_note(text: String) {
+    NOTE.with_borrow_mut(|n| *n = Some(text));
+}
+
+/// Takes the answer of a settings transfer that ended (`poll`), for the note window. Called each frame.
+pub fn settings_poll() {
+    if let Some(done) = poll() {
+        set_note(done.message);
+    }
+}
+
+/// The note of a settings transfer: a notice window over the settings, until its OK.
+pub fn note_window() {
+    let Some(text) = NOTE.with_borrow(|n| n.clone()) else { return };
+    if map_import::notice_window(tr("Transfer"), std::slice::from_ref(&text)) {
+        NOTE.with_borrow_mut(|n| *n = None);
     }
 }
 

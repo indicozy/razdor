@@ -1843,7 +1843,7 @@ impl Group {
             Group::Battle => &[Row::WalkSpeed, Row::AnimSpeed, Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience, Row::HitShake],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
-            Group::Other => &[Row::Updates, Row::Import, Row::OldSaves, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::Bench],
+            Group::Other => &[Row::Updates, Row::Import, Row::OldSaves, Row::SendLog, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::Bench],
         }
     }
 }
@@ -1911,11 +1911,15 @@ pub enum Row {
     BatterySaver,
     RecordGame,
     Bench,
+    /// Razdor's «Режим отладки» (`audio::Settings::debug_mode`): the performance log and the strip on every screen.
+    DebugMode,
+    /// Razdor's «Отправить журнал…» (Android: the log through the document creator; desktop: its folder).
+    SendLog,
 }
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 60] = [
+pub const ALL: [Row; 62] = [
         Row::GraphicsQuality,
         Row::MapZoom,
         Row::ScrollSpeed,
@@ -1976,6 +1980,8 @@ pub const ALL: [Row; 60] = [
         Row::BatterySaver,
         Row::RecordGame,
         Row::Bench,
+        Row::DebugMode,
+        Row::SendLog,
     ];
 
     /// The long hint a «?» pop-up shows (backlog 1508), for the rows whose hint runs past a line.
@@ -2009,6 +2015,8 @@ pub const ALL: [Row; 60] = [
             Row::ChronicleSummary => Some(tr("Razdor's: after a map ends or the hero falls, a page sums up the map: the route, battles, highlights and totals.")),
             Row::BatterySaver => Some(tr("When nothing moves on the map, the game draws new frames rarely, to save the battery.")),
             Row::RecordGame => Some(tr("Records the game, so it can be watched later as a replay. Takes almost no space.")),
+            Row::DebugMode => Some(tr("Writes the performance log (slow frames and loads) and shows a strip on every screen. Takes effect at once; the frame rate may drop.")),
+            Row::SendLog => Some(tr("The game's log, with the last play log and performance report, for a bug report.")),
             Row::Updates => Some(if updates_phone() {
                 tr(UPDATES_PHONE_HINT)
             } else {
@@ -2032,6 +2040,8 @@ pub const ALL: [Row; 60] = [
             Row::LightCycle => audio.map_light == LightMode::Cycle,
             // The picker is Android's (`ui::saves_move`).
             Row::OldSaves => cfg!(target_os = "android"),
+            // The log goes out on Android (the document creator) and opens its folder on the desktop; none on iPhone.
+            Row::SendLog => !cfg!(target_os = "ios"),
             Row::LightHour => audio.map_light == LightMode::Fixed,
             // The shadows are the light's: shown only with the light on.
             Row::Shadows | Row::LightQuality => audio.map_light != LightMode::Off,
@@ -2758,6 +2768,13 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
             }
         }
         Row::Bench => bench_row(c, geo, over_map),
+        Row::DebugMode => {
+            // Razdor's «Режим отладки»: the performance log and the strip, at once (`diag::set_debug`, each frame).
+            if labelled_row_help(c, geo, tr("Debug mode"), yes_no(audio.debug_mode), Row::DebugMode.help_text()).0 {
+                audio.debug_mode = !audio.debug_mode;
+            }
+        }
+        Row::SendLog => send_log_row(c, geo),
         Row::OldSaves => {
             // Razdor's (the owner's request, 2026-11-12): the saves of an older release come in through the picker.
             if labelled_row(c, geo, tr("Move saves from the old Razdor folder…"), tr("Choose")).0 {
@@ -2768,6 +2785,32 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
             // «Обновить игру из архива…» (Razdor's): the button, or why it is not offered.
             super::game_import::settings_row(Rect::new(c.x, c.y, c.w, geo.row_h), over_map);
             c.y += geo.row_h + geo.gap;
+        }
+    }
+}
+
+/// Razdor's «Отправить журнал…» (the owner's request, 2026-11-12): the log for a bug report. Android: the
+/// same export as the Load window's «Перенос…» (`transfer::start_log_export`: the log, the play log and
+/// the last performance report, through the document creator). Desktop: opens the folder with the log.
+fn send_log_row(c: &mut RowCol, geo: &RowGeo) {
+    #[cfg(target_os = "android")]
+    {
+        if labelled_row(c, geo, tr("Send the log…"), tr("Send")).0 {
+            super::transfer::start_log_export();
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        if labelled_row(c, geo, tr("Open the log folder"), tr("Open")).0 {
+            match razdor::diag::log_path().and_then(|p| p.parent().map(std::path::Path::to_path_buf)) {
+                Some(dir) => {
+                    let _ = std::fs::create_dir_all(&dir);
+                    if !open_folder(&dir) {
+                        razdor::diag!("log folder: could not open {}", dir.display());
+                    }
+                }
+                None => razdor::diag!("log folder: there is no log folder"),
+            }
         }
     }
 }
@@ -4086,7 +4129,7 @@ mod tests {
     #[test]
     fn the_long_hints_are_behind_a_question_mark() {
         let with: Vec<Row> = Row::ALL.into_iter().filter(|r| r.help_text().is_some()).collect();
-        assert_eq!(with, vec![Row::GraphicsQuality, Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::Language, Row::Updates, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame]);
+        assert_eq!(with, vec![Row::GraphicsQuality, Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::Language, Row::Updates, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::SendLog]);
         scene_help("Experience");
         assert_eq!(HELP_PINNED.with(|p| p.get()), Row::Experience.help_text());
         HELP_PINNED.with(|p| p.set(None));

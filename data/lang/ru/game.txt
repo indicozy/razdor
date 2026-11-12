@@ -761,7 +761,7 @@ play or pause = играть или пауза
 exit the record = выйти из записи
 
 # The saves of an older release (ui::saves_move, the folder picker on Android) and its settings row.
-In version 1.5.0 Razdor keeps its saves in its own folder. To move the old saves, pick the Razdor folder in the device storage. = В версии 1.5.0 Раздор хранит сохранения в своей папке. Чтобы перенести старые сохранения, выберите папку Razdor во внутренней памяти.
+In version 1.5.0 Razdor keeps its files in the app's folder. To move the saves, maps and mods, pick the Razdor folder in the device storage. = В версии 1.5.0 Раздор хранит свои файлы в папке приложения. Чтобы перенести сохранения, карты и моды, выберите папку Razdor во внутренней памяти.
 Saves from an older release = Сохранения старой версии
 Pick the Razdor folder = Выбрать папку Razdor
 Not now = Не сейчас
@@ -771,3 +771,15 @@ The folder picker did not open. = Выбор папки не открылся.
 Saves moved: {n}. = Перенесено сохранений: {n}.
 Move saves from the old Razdor folder… = Перенести сохранения из старой папки Razdor…
 The folder holds no Razdor saves. = В папке нет сохранений Раздора.
+
+# Settings: the debug mode, the log, the old folder's maps and mods (2026-11-12)
+Debug mode is on — FPS may drop = Включён режим отладки — FPS может снизиться
+Debug mode = Режим отладки
+Writes the performance log (slow frames and loads) and shows a strip on every screen. Takes effect at once; the frame rate may drop. = Пишет журнал производительности (медленные кадры и загрузки) и показывает полосу на каждом экране. Действует сразу; частота кадров может упасть.
+The game's log, with the last play log and performance report, for a bug report. = Журнал игры вместе с последним журналом партии и отчётом о производительности, для отчёта об ошибке.
+Send the log… = Отправить журнал…
+Send = Отправить
+Open the log folder = Открыть папку журнала
+Open = Открыть
+Maps and mods: {n}. = Карт и модов: {n}.
+Choose = Выбрать

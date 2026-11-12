@@ -242,7 +242,7 @@ async fn main() {
     let mut pacer = ui::frame_cap::Pacer::default();
     // Profiling (`diag::profiling`): frames over `diag::slow_frame_ms` (100 ms by default) are
     // logged with their screen, and the frame probe takes every frame.
-    let profile = razdor::diag::profiling();
+    // Read each frame (not once here): the debug mode's switch (Settings) turns it on and off at run time.
     // With RAZDOR_PROFILE, the frames after a window opens are logged whatever they take.
     let mut opened = 0u32;
     loop {
@@ -266,6 +266,8 @@ async fn main() {
         ui::snapshot::draw_overlay();
         // On mobile, the text being typed, over the frame (the keyboard covers its field).
         ui::widgets::draw_keyboard_strip();
+        // The debug mode's strip over every screen (Settings → «Прочее»); it takes no input.
+        ui::debug_banner::draw();
         // The original draws its pointer last, over everything (0x474a81).
         // A trailer run has no pointer in its pictures.
         if !ui::trailer::active() {
@@ -348,7 +350,7 @@ async fn main() {
         if frames == 1 {
             razdor::diag::step("first frame shown");
         }
-        if profile {
+        if razdor::diag::profiling() {
             // The whole frame: the game's work, then drawing and the GPU (textures and font
             // atlases go up there), vsync included (~16 ms). Over the threshold is a hitch.
             let total = started.elapsed();
