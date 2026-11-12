@@ -292,3 +292,21 @@ rows, per round):
 No measurable GPU saving on the RTX 4060 for these scenes: the sprite pass is under 0.5 ms here, so the fill
 saving is inside the noise. (An earlier unpaired run showed large differences; it ran under load and is discarded.)
 The trim is kept for the weaker GPUs of phones, which this card does not stand in for; not measured there.
+
+## Map sprite copies in the atlas (item 7, branch `sprite-lod`; 2026-11-12)
+
+The half and quarter copies of the map sprites sit under the full picture in the map atlas's texture; a decoration
+draws the copy below 12 (1/2) and 6 (1/4) screen pixels a cell. Not on main: the look changes at whole-map zoom.
+
+- Texture: «Другой берег» atlas 2048×1684 (13.8 MB RGBA) becomes 2048×2298 (18.8 MB): +5.0 MB (+36%) of VRAM.
+  The stacked texture is checked against `GL_MAX_TEXTURE_SIZE` (32768 on the 4060; a phone with 4096 fits it);
+  over the limit, the full atlas alone is used and the draws keep the full sprites.
+- Draw counts unchanged: 940 flat, 216 2.5D, before and after (`RAZDOR_GPU_STAGES=1`, card1, whole-map zoom).
+- GPU, sprite pass p50, interleaved, two rounds: flat 0.40 / 0.30 ms before, 0.14 / 0.14 ms after; 2.5D 0.76 / 0.51 ms
+  before, 0.39 / 0.39 ms after. The totals swung with the machine's load (12.9 to 28 ms per frame on the same
+  scene) and are not used. The Samsung lab run measures the real gain (the target is the phones' GPUs).
+- Look: at whole-map zoom the canopies and rocks are softer (PSNR about 28 dB against main on the flat and 2.5D
+  shots; the buildings and water change little). At 0.45 and 0.6 zoom the copies are not used (the cells are 12 px
+  or more) and the shots differ by at most 2 levels (the atlas's height changed the texel rounding).
+- Not done: an Android build (GLES2 has the same `GL_MAX_TEXTURE_SIZE` enum; the query runs once when the atlas is
+  made).
