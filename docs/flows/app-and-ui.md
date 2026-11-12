@@ -103,8 +103,9 @@ The popup «Сохранения старой версии» is offered once per
 usable install is loaded, never over the no-install screen or a download) while the
 decision says existing. `saves_move::decide_at_start` (in `main`, before the threads write to the cache) takes it: files
 in the private cache (`getCacheDir`, where older releases kept their picture cache and update files) mean an older
-install, an empty one a fresh install. The decision is kept in `<files>/Razdor/saves-move` ("existing", "fresh", "done").
-«Не сейчас» leaves the popup for the next start; a successful import writes "done", so it never comes back. The
+install, an empty one a fresh install. The decision is kept in `<files>/Razdor/saves-move` ("existing", "offered", "fresh", "done").
+Showing the popup writes "offered" at once, so the popup is shown only once: «Не сейчас», closing it, a cancelled picker
+or a wrong folder never bring it back at a start. A successful import writes "done". The
 settings' «Перенести сохранения из старой папки Razdor…» (Прочее, Android only, `Row::OldSaves`) is always there.
 Blind spot: an older install whose private cache was cleared (Android's «Clear cache», low storage) reads as fresh, so
 no popup; the settings row still works.
