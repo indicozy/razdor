@@ -147,12 +147,13 @@ pub fn set_bench_fit(on: bool) {
     BENCH_FIT.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// `RAZDOR_SPRITE_LOD=1` (a developer switch, off by default): the map objects are drawn from the half-size
-/// atlas (divisor 2) at the whole map's zoom, and from the quarter one (4) below `SPRITE_LOD_QUARTER_CELL`
-/// screen pixels a cell. `None` with the switch off, or at a cell size where the full sprites are drawn.
+/// The copy of a map object drawn at its cell size (`Camera::scale`, screen pixels a cell): the half-size copy (divisor 2)
+/// below `SPRITE_LOD_HALF_CELL`, the quarter one (4) below `SPRITE_LOD_QUARTER_CELL`, the full sprite above. The copies
+/// sit in the map atlas itself (`Atlas::decoration_lod`), so the choice never breaks the batch. `RAZDOR_SPRITE_LOD=0`
+/// turns them off (a developer switch; on by default).
 fn sprite_lod_divisor(scale: f32) -> Option<u32> {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if !*ON.get_or_init(|| std::env::var("RAZDOR_SPRITE_LOD").is_ok_and(|v| v.trim() == "1")) {
+    static OFF: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *OFF.get_or_init(|| std::env::var("RAZDOR_SPRITE_LOD").is_ok_and(|v| v.trim() == "0")) {
         return None;
     }
     if scale < SPRITE_LOD_QUARTER_CELL {
@@ -3198,7 +3199,7 @@ struct FrameCtx {
 /// whole sprite's (measured on card1: up to 46 levels at night with the boxes, 1 level whole). By day the box is exact.
 fn lit_whole(slot: Slot) -> Slot {
     if lights::with_frame(|f| f.is_some_and(|f| f.night > 0.0)) {
-        Slot { rect: Rect::new(slot.base.x, slot.base.y, slot.full.x, slot.full.y), off: Vec2::ZERO, size: slot.full, ..slot }
+        Slot { rect: Rect::new(slot.base.x, slot.base.y, slot.tex.x, slot.tex.y), off: Vec2::ZERO, size: slot.full, ..slot }
     } else {
         slot
     }
@@ -3211,11 +3212,8 @@ fn draw_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera, ctx: &FrameCtx
     if let Some((atlas, r)) = art.and_then(|a| a.map_atlas()).and_then(|at| Some((at, at.decoration(o.class, o.sprite)?))) {
         // The sprite is placed by its whole size; only its box is drawn (`Slot`).
         let origin = object_sprite_origin(o, r.full.x, r.full.y, cam);
-        // Zoomed out, the smaller copy of the sprite is drawn in the same place and size (`RAZDOR_SPRITE_LOD`).
-        let (atlas, r) = match sprite_lod_divisor(cam.scale).and_then(|d| art?.sprite_lod_atlas(d).map(|l| (l, d))) {
-            Some((lod, _)) => (lod, lod.decoration(o.class, o.sprite).unwrap_or(r)),
-            None => (atlas, r),
-        };
+        // Zoomed out, the smaller copy of the sprite is drawn in the same place and size, from the same texture.
+        let r = sprite_lod_divisor(cam.scale).and_then(|d| atlas.decoration_lod(o.class, o.sprite, d)).unwrap_or(r);
         let r = lit_whole(r);
         if o.class == object_class::TREES {
             // The small trees and bushes sway: the quad's top corners move by the lean of
@@ -3226,7 +3224,7 @@ fn draw_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera, ctx: &FrameCtx
             // The swaying quad is the whole sprite: its box's corners shear differently from the sprite's, and under
             // the sun's light that showed as isolated texels up to 114 levels apart (measured, card1). The trim saves
             // nothing on the sway's own fill beyond the box's transparent margin, so the sprite is drawn whole.
-            let whole = Slot { rect: Rect::new(r.base.x, r.base.y, r.full.x, r.full.y), off: Vec2::ZERO, size: r.full, ..r };
+            let whole = Slot { rect: Rect::new(r.base.x, r.base.y, r.tex.x, r.tex.y), off: Vec2::ZERO, size: r.full, ..r };
             draw_leaning(&atlas.texture, &whole, origin, zoom, lean);
             return;
         }
@@ -3395,7 +3393,7 @@ fn draw_picture_form(sun: Option<FormSun>, atlas: &Atlas, slot: &Slot, origin: V
     // Under the sun's shading the corners' colours are interpolated across the quad, and the shading clamps at the
     // sprite's far edge: a box's corners interpolate differently from the whole sprite's, so the shaded quad is the
     // whole sprite (the same texels; the trim saves the fill only where no sun shades the sprite). Measured on card1.
-    let whole = Slot { rect: Rect::new(slot.base.x, slot.base.y, slot.full.x, slot.full.y), off: Vec2::ZERO, size: slot.full, ..*slot };
+    let whole = Slot { rect: Rect::new(slot.base.x, slot.base.y, slot.tex.x, slot.tex.y), off: Vec2::ZERO, size: slot.full, ..*slot };
     let slot = if sun.is_some() { &whole } else { slot };
     let (src, at, size) = (slot.rect, origin + slot.off * zoom, slot.size * zoom);
     // The shading is the whole sprite's: its centre and half-size are the reference, as before the cut.

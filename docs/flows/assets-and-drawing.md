@@ -420,11 +420,14 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   box. The shadow boxes are exact (full-box shadows changed nothing). With these rules every shot is within 2 levels
   and has no pixel above 7 (PSNR at least 77 dB). The rest of the picture uses the box, so by day the difference is
   float rounding of the quad's corners.
-- **Smaller map sprites** (`RAZDOR_SPRITE_LOD=1`, a developer switch, off by default): `DtArt::sprite_lod_atlas(d)`
-  packs every map sprite at `1/d` (box filter, `downscale`), `d` = 2 under 12 screen px a cell, 4 under 6
-  (`sprite_lod_divisor`); `draw_object` draws the decorations from it at the full sprite's place and size.
-  The buildings are not switched. Memory of the Discord Times map atlas (2048 px wide): the full atlas
-  2048×1684, 13.8 MB of RGBA; the quarter copy 512×480, 0.98 MB. Draw calls and verts do not change.
+- **Smaller map sprites** (on by default; `RAZDOR_SPRITE_LOD=0` turns them off): `lod_copies` stacks the half and
+  quarter copies of every map sprite (box filter, `downscale`, cut like the full atlas) under the full picture in the
+  map atlas's own texture, so a switch of copy keeps the batch. `d` = 2 under 12 screen px a cell, 4 under 6
+  (`sprite_lod_divisor`); `draw_object` draws a decoration from `Atlas::decoration_lod(d)` at the full sprite's place
+  and size, with the copy's texels (`Slot::tex`). When the stacked texture passes `GL_MAX_TEXTURE_SIZE` (queried), the
+  atlas is the full one alone and the draws use the full sprites. The buildings are not switched. Memory on
+  «Другой берег»: the full atlas 2048×1684 (13.8 MB of RGBA) becomes 2048×2298 (18.8 MB) with the copies. Draw calls
+  and verts do not change.
 - **The border** (`draw_border`): black lines on the ground before the sprites, a 0.15-cell line on the
   fog grid's edge and a 0.07-cell one 0.35 cell outside (at least 1.5 px). The fog, drawn after the
   world, darkens it where the ground is unexplored. Past the map's edges the ground is black (the

@@ -50,6 +50,9 @@ pub struct Slot {
     pub base: Vec2,
     /// The whole sprite's size in sprite pixels.
     pub full: Vec2,
+    /// The whole sprite's size in texels: `full`, or the smaller copy's (`Atlas::decoration_lod`), where `full`
+    /// stays the sprite's own size (the draw keeps its place and size; only the texels are the copy's).
+    pub tex: Vec2,
 }
 
 impl Slot {
@@ -90,6 +93,9 @@ pub struct Atlas {
     live: RefCell<Overlay>,
     /// The building sprites (positions in the object sprites) the model still has to cut, in order.
     pending: RefCell<VecDeque<usize>>,
+    /// The half and the quarter copies of the map objects in this texture (`decoration_lod`), by the same key; `None`
+    /// when they do not fit the GL texture limit (`lod_copies`), and then the draws use the full sprites.
+    lod: Option<RectTable<[Slot; 2]>>,
     /// The living map's parts of the building sprites that have light points (`dt::lights`), by the
     /// same key: their chimneys and their moving parts (`living`).
     living: HashMap<(u32, u32, u32), Living>,
@@ -144,6 +150,17 @@ impl Atlas {
     /// Sprite of a `.DTm` map object (class, sprite id).
     pub fn decoration(&self, class: u8, sprite: u8) -> Option<Slot> {
         self.rects.get(ObjectSprite::DECORATIONS, class.into(), sprite.into())
+    }
+
+    /// The copy of a map object at `1/divisor` of its size (2 or 4): its slot in this texture, the full sprite's place
+    /// and size with the copy's texels. `None` for another divisor, or when the copies did not fit.
+    pub fn decoration_lod(&self, class: u8, sprite: u8, divisor: u32) -> Option<Slot> {
+        let i = match divisor {
+            2 => 0,
+            4 => 1,
+            _ => return None,
+        };
+        self.lod.as_ref()?.get(ObjectSprite::DECORATIONS, class.into(), sprite.into()).map(|c| c[i])
     }
 
     /// The slot of a sprite by its section, category and index (`ObjectSprite`).
@@ -202,8 +219,6 @@ pub struct DtArt {
     items: OnceCell<Vec<Image>>,
     objects: OnceCell<ObjectSprites>,
     atlas: OnceCell<Option<Atlas>>,
-    /// The map objects' smaller copies (`sprite_lod_atlas`): the half and the quarter atlases, made on first use.
-    sprite_lod: [OnceCell<Option<Atlas>>; 2],
     terrain_layer: OnceCell<Option<TerrainLayer>>,
     /// The terrain textures, for the minimap's colours.
     terrain_images: OnceCell<Vec<Option<Image>>>,
@@ -240,6 +255,57 @@ fn graphics_files(dir: &Path, out: &mut Vec<PathBuf>) {
             out.push(p);
         }
     }
+}
+
+/// The GL texture size limit (`GL_MAX_TEXTURE_SIZE`) of the context the game draws with.
+fn gl_max_texture_size() -> u32 {
+    let mut v: i32 = 0;
+    // SAFETY: the context is current on the thread that builds the map atlas (the draw thread); the call writes one int.
+    unsafe { macroquad::miniquad::gl::glGetIntegerv(macroquad::miniquad::gl::GL_MAX_TEXTURE_SIZE as _, &mut v) };
+    u32::try_from(v).unwrap_or(0).max(1)
+}
+
+/// The half and quarter copies of the map objects, cut like the full atlas ([`cut_pictures`]) and stacked under it in one
+/// texture: a draw that switches copies keeps the texture, so its batch does not break. Returns the stacked texture and,
+/// per sprite, its two copies' slots. When the stack passes the GL texture limit, the full texture alone and no copies:
+/// the draws then use the full sprites.
+fn lod_copies(sprites: &[ObjectSprite], full: &Image, slots: &[Slot]) -> (Image, Option<Vec<[Slot; 2]>>) {
+    let mut parts: Vec<(f32, Image, Vec<Slot>)> = Vec::with_capacity(2);
+    for k in [2u32, 4] {
+        let small: Vec<Image> = sprites.iter().map(|s| downscale(&s.image, k)).collect();
+        let refs: Vec<&Image> = small.iter().collect();
+        let Some((img, sl)) = cut_pictures(&refs, &vec![None; refs.len()], full.width) else {
+            razdor::diag!("sprite copies 1/{k} do not fit the atlas width; full sprites only");
+            return (full.clone(), None);
+        };
+        parts.push((k as f32, img, sl));
+    }
+    let height = full.height + parts.iter().map(|p| p.1.height).sum::<u32>();
+    let limit = gl_max_texture_size();
+    if full.width > limit || height > limit {
+        razdor::diag!("sprite copies: the stacked atlas {}x{} passes the GL limit {limit}; full sprites only", full.width, height);
+        return (full.clone(), None);
+    }
+    let width = full.width;
+    let mut rgba = full.rgba.clone();
+    let mut dy = full.height as f32;
+    let mut per: Vec<Vec<Slot>> = Vec::with_capacity(2);
+    for (k, img, sl) in &parts {
+        per.push(sl.iter().zip(slots).map(|(c, f)| copy_slot(c, *k, dy, f.full)).collect());
+        dy += img.height as f32;
+        rgba.extend_from_slice(&img.rgba);
+    }
+    let copies = (0..sprites.len()).map(|i| [per[0][i], per[1][i]]).collect();
+    razdor::diag!("map atlas copies 1/2 and 1/4 stacked: {width}x{height} (GL limit {limit})");
+    (Image { width, height, rgba }, Some(copies))
+}
+
+/// A copy's slot in the stacked texture: the copy's own texels moved down by `dy`, at the full sprite's size (`full`,
+/// its box at `k` times the copy's box), so a draw places it where the full sprite goes.
+fn copy_slot(copy: &Slot, k: f32, dy: f32, full: Vec2) -> Slot {
+    let base = vec2(copy.base.x, copy.base.y + dy);
+    let rect = Rect::new(base.x + copy.off.x, base.y + copy.off.y, copy.size.x, copy.size.y);
+    Slot { rect, off: copy.off * k, size: copy.size * k, base, full, tex: copy.full }
 }
 
 /// `img` at `1/k` of its size: each `k`×`k` block averaged (the alpha too), the edge blocks cut short.
@@ -306,7 +372,6 @@ impl DtArt {
             items: OnceCell::new(),
             objects: OnceCell::new(),
             atlas: OnceCell::new(),
-            sprite_lod: [OnceCell::new(), OnceCell::new()],
             terrain_layer: OnceCell::new(),
             terrain_images: OnceCell::new(),
             textures: RefCell::new(HashMap::new()),
@@ -508,48 +573,6 @@ impl DtArt {
         self.cached(Key::Object(class, sprite), || texture(&self.objects().decoration(class, sprite)?.image))
     }
 
-    /// The map objects' and buildings' sprites at `1/divisor` of their size (2 or 4), packed into one smaller
-    /// texture with the same keys (Razdor's, `RAZDOR_SPRITE_LOD=1`: the whole map zoomed out draws them from it).
-    /// Each sprite is box-filtered and cut to its box like the full atlas ([`cut_pictures`]); its slot is the full one's
-    /// divided by the divisor, so a draw places it where the full sprite goes. `None` for a divisor that is not 2 or 4,
-    /// or when the sprites do not pack.
-    pub fn sprite_lod_atlas(&self, divisor: u32) -> Option<&Atlas> {
-        let slot = match divisor {
-            2 => 0,
-            4 => 1,
-            _ => return None,
-        };
-        self.sprite_lod[slot]
-            .get_or_init(|| {
-                let sprites = &self.objects().sprites;
-                let small: Vec<Image> = sprites.iter().map(|s| downscale(&s.image, divisor)).collect();
-                let images: Vec<&Image> = small.iter().collect();
-                let emit = vec![None; images.len()];
-                let Some((image, slots)) = cut_pictures(&images, &emit, ATLAS_WIDTH / divisor) else {
-                    razdor::diag!("Discord Times art: the 1/{divisor} sprites do not fit an atlas");
-                    return None;
-                };
-                let texture = sprite_texture(&image)?;
-                razdor::diag!("sprite LOD 1/{divisor}: atlas {}x{} ({} bytes)", image.width, image.height, image.rgba.len());
-                let k = divisor as f32;
-                let rects = RectTable::from_entries(sprites.iter().zip(slots).map(|(s, mut sl)| {
-                    sl.off *= k;
-                    sl.size *= k;
-                    sl.full = vec2(s.image.width as f32, s.image.height as f32);
-                    ((s.section, s.cat, s.idx), sl)
-                }));
-                Some(Atlas { texture, rects, cards: HashMap::new(), live: RefCell::new(Overlay::default()), pending: RefCell::new(VecDeque::new()), living: HashMap::new() })
-            })
-            .as_ref()
-    }
-
-    /// The bytes of the map atlas's texture and of the smaller copies made so far (the memory the switch costs).
-    pub fn sprite_atlas_bytes(&self) -> [usize; 3] {
-        let full = self.atlas.get().and_then(|a| a.as_ref()).map_or(0, |a| a.texture.width() as usize * a.texture.height() as usize * 4);
-        let part = |slot: &OnceCell<Option<Atlas>>| slot.get().and_then(|a| a.as_ref()).map_or(0, |a| a.texture.width() as usize * a.texture.height() as usize * 4);
-        [full, part(&self.sprite_lod[0]), part(&self.sprite_lod[1])]
-    }
-
     /// All map objects and buildings packed into one texture.
     pub fn map_atlas(&self) -> Option<&Atlas> {
         self.atlas
@@ -565,8 +588,10 @@ impl DtArt {
                     razdor::diag!("Discord Times art: map objects do not fit an atlas");
                     return None;
                 };
+                let (image, copies) = lod_copies(sprites, &image, &slots);
                 let texture = sprite_texture(&image)?;
                 razdor::diag!("map atlas: {}x{} ({} bytes)", image.width, image.height, image.rgba.len());
+                let lod = copies.map(|c| RectTable::from_entries(sprites.iter().zip(c).map(|(s, c)| ((s.section, s.cat, s.idx), c))));
                 let rects = RectTable::from_entries(sprites.iter().zip(&slots).map(|(s, sl)| ((s.section, s.cat, s.idx), *sl)));
                 // The cut data is keyed by the sprite's pixels (`tools/depth`); a key whose size
                 // differs is no match. A building with no shipped cut takes its cached depth-model
@@ -612,7 +637,7 @@ impl DtArt {
                 }
                 let pending: VecDeque<usize> = queue::unknown(known).into();
                 depth::set_unknown(pending.len());
-                Some(Atlas { texture, rects, cards, live: RefCell::new(live), pending: RefCell::new(pending), living: living_map })
+                Some(Atlas { texture, rects, cards, live: RefCell::new(live), pending: RefCell::new(pending), living: living_map, lod })
             })
             .as_ref()
     }
@@ -818,7 +843,8 @@ pub fn write_mask(rgba: &mut [u8], w: u32, slot: &Slot, emissive: &[u8]) {
 fn slot_at(bx: atlas_cut::Bx, at: (u32, u32), full: (u32, u32)) -> Slot {
     let base = vec2(at.0 as f32, at.1 as f32);
     let (off, size) = (vec2(bx.x0 as f32, bx.y0 as f32), vec2(bx.w() as f32, bx.h() as f32));
-    Slot { rect: Rect::new(base.x + off.x, base.y + off.y, size.x, size.y), off, size, base, full: vec2(full.0 as f32, full.1 as f32) }
+    let full = vec2(full.0 as f32, full.1 as f32);
+    Slot { rect: Rect::new(base.x + off.x, base.y + off.y, size.x, size.y), off, size, base, full, tex: full }
 }
 
 /// A slot's box as texels-free sprite pixels (for [`atlas_cut::crop`]).
@@ -878,6 +904,17 @@ mod cut_tests {
         let past = (((slot.base.y + 5.0) as u32) * atlas.width + (slot.base.x + 12.0) as u32) as usize * 4;
         let edge = ((5 * 12 + 11) * 4) as usize;
         assert_eq!(&atlas.rgba[past..past + 4], &s.rgba[edge..edge + 4], "the replicated edge past the sprite");
+    }
+
+    #[test]
+    fn a_copy_slot_is_the_copy_texels_at_the_full_sprite_size() {
+        // A copy at 1/2: its box (2×1 texels at (1, 4) of its picture, the picture at (2, 1)) moved down by 100 texels.
+        let copy = Slot { rect: Rect::new(3.0, 5.0, 2.0, 1.0), off: vec2(1.0, 4.0), size: vec2(2.0, 1.0), base: vec2(2.0, 1.0), full: vec2(4.0, 3.0), tex: vec2(4.0, 3.0) };
+        let c = copy_slot(&copy, 2.0, 100.0, vec2(8.0, 6.0));
+        assert_eq!(c.base, vec2(2.0, 101.0));
+        assert_eq!(c.rect, Rect::new(3.0, 105.0, 2.0, 1.0), "the copy's texels");
+        assert_eq!((c.off, c.size), (vec2(2.0, 8.0), vec2(4.0, 2.0)), "the box at the full sprite's size");
+        assert_eq!((c.full, c.tex), (vec2(8.0, 6.0), vec2(4.0, 3.0)));
     }
 
     #[test]
