@@ -351,3 +351,46 @@ against `a220850b` (the commit 3a was built on): 96/96 byte-identical. The timin
 Round 1 is faster by 6–12 %, round 2 is slower by up to 14 %. The rounds disagree, so there is no measured gain.
 Step 3a is dropped, not landed (the commit is on the local branch `dropped/1605-step-3a-viewproj-cache`). The earlier
 numbers in the section above are not a claim.
+
+## Map sprite fog in the shader (backlog 1605, step 4)
+
+What changed: the fog and the reveals' visibility of the map sprites (decorations, buildings, hills) is no longer
+computed per sprite on the CPU. `ui/sprite_fog.rs` keeps one 16-bit visibility per map cell as a texture, read by the
+sharp shader at each sprite's foot cell (`sharp::FOG_GLSL`), and the CPU reads the same table for the cull and the
+pick. Armies, the hero, spells, the smoke and the lit windows keep the CPU shade. The table is made again only when
+the shown fog (`minimap::shown_stamp`) or the reveals move (every frame while a showing opens) and uploaded only when a
+value changed. Purpose: the sprites' vertices no longer depend on the fog, which step 5 (GPU vertex buffers) needs.
+
+Pictures (RTX 4060, VirtualGL, private Xvfb, 1024×768; base = `origin/main` `49e9540b`, built from `git archive`):
+
+- The 48-run matrix, explored map (`matrix.sh`), 96 PNGs: 96/96 byte-identical (max 0 per channel, PSNR inf).
+- The 48-run matrix, partly explored map (no `RAZDOR_SCENE_EXPLORED`, so the fog is in view), 96 PNGs: 96/96
+  byte-identical.
+- Fog reveal mid-run (`RAZDOR_SCENE_SHOW=40,40,6` on «Другой берег», partly explored; frame 90 is mid-reveal), 2.5D and
+  third person: identical. The first version of the table did not follow the reveal while it opened (max 255 on the
+  village that opened; PSNR 25 dB); the reveal is now made again every frame while a showing is live.
+
+Two things made the pictures identical and are worth keeping in mind: the shader truncates the table's visibility to 8
+bits, as the CPU's colour alpha did (without it, 3-level differences on the trees at the fog's edge: the old colour
+alpha is truncated, not rounded); and the table reads the unrounded shown darkness, as `Shade::at` did.
+
+Timing (world pass, the frame probe's `world` column, medians of frames after 100, two interleaved rounds, 30 s per
+run, RTX 4060 through VirtualGL; the machine shared with other agents, so only the pairs compare):
+
+| Case | base world ms | new world ms | base work ms | new work ms | draws (both) |
+|---|---|---|---|---|---|
+| «Другой берег», zoomed out (0.05), 2.5D | 2.163 | 2.167 | 2.329 | 2.343 | 173 |
+| «Другой берег», zoomed out (0.05), third person | 3.378 | 3.438 | 4.845 | 4.888 | 172 |
+| «Другой берег», whole map (fit), 2.5D | 7.256 | 7.045 | 7.472 | 7.270 | 215 |
+| «Другой берег», whole map (fit), third person | 10.188 | 10.325 | 12.689 | 12.787 | 212 |
+| РК3-Столица, 2.5D (close-up start) | 0.480 | 0.486 | 0.617 | 0.628 | 164 |
+
+No measurable gain: the change is within ±3% (the sign varies by case). It removes the per-sprite fog arithmetic, but
+placement and the draw calls, which dominate the pass (see the step 0 split above), are unchanged. It lands because
+step 5 needs the sprites' vertices to stay static while the fog changes, and it is not slower beyond that noise.
+
+Checks: `cargo clippy --release --all-targets -- -D warnings` clean; `cargo test --release` with the real install and
+`RAZDOR_PERF_BUDGET_SCALE=4` all green (1714 + 1050 tests; `thirty_days_on_every_map` passed); the Android cross-compile
+(`cargo check --release --target aarch64-linux-android --bin razdor`, NDK 29) passes; the UI regression check: 162 ok, 4
+changed, all the «title-noinstall» cases, whose only difference from the baseline is the binary's path printed on the
+no-install screen (the same four change against the goldens on `origin/main`).

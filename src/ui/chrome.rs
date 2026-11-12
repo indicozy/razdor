@@ -1089,7 +1089,7 @@ pub fn additive(draw: impl FnOnce()) {
     with_material(material, draw);
 }
 
-const SILHOUETTE_MAIN: &str = "gl_FragColor = vec4(color.rgb, color.a * step(0.77, sharp_tex(uv).a));";
+const SILHOUETTE_MAIN: &str = "gl_FragColor = vec4(color.rgb, color.a * fog_vis() * step(0.77, sharp_tex(uv).a));";
 
 local! {
     static SILHOUETTE: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
@@ -1102,13 +1102,15 @@ local! {
 pub fn silhouette(draw: impl FnOnce()) {
     let material = SILHOUETTE.with(|m| {
         m.get_or_init(|| {
-            sharp::material(&sharp::fragment("", SILHOUETTE_MAIN), sharp::alpha_pipeline(), Vec::new())
+            // The outline of a map building takes its foot cell's fog in the shader (`sharp::fragment_fog`).
+            sharp::material_fog(&sharp::fragment_fog("", SILHOUETTE_MAIN), sharp::alpha_pipeline(), Vec::new())
                 .map_err(|e| razdor::diag!("silhouette material: {e}"))
                 .ok()
         })
         .clone()
     });
     if let Some(m) = material {
+        sharp::bind_fog(&m);
         with_material(Some(m), draw);
     }
 }

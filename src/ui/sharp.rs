@@ -110,14 +110,18 @@ pub const SHARP_VERTEX: &str = r#"#version 100
 attribute vec3 position;
 attribute vec2 texcoord;
 attribute vec4 color0;
+// The fog cell of a map sprite in the normal's z and w (`sprite_fog`, 0 for none): see `FOG_GLSL`.
+attribute vec4 normal;
 varying highp vec2 uv;
 varying lowp vec4 color;
+varying highp vec2 FogAt;
 uniform mat4 Model;
 uniform mat4 Projection;
 void main() {
     gl_Position = Projection * Model * vec4(position, 1);
     color = color0 / 255.0;
     uv = texcoord;
+    FogAt = normal.zw;
 }"#;
 
 /// [`SHARP_VERTEX`] with the draw's scale in the vertex's normal slot (`normal.xy`, screen pixels per texel),
@@ -132,6 +136,7 @@ attribute vec4 normal;
 varying highp vec2 uv;
 varying lowp vec4 color;
 varying highp vec2 Scale;
+varying highp vec2 FogAt;
 uniform mat4 Model;
 uniform mat4 Projection;
 void main() {
@@ -139,6 +144,7 @@ void main() {
     color = color0 / 255.0;
     uv = texcoord;
     Scale = normal.xy;
+    FogAt = normal.zw;
 }"#;
 
 /// [`SHARP_VERTEX`] with the 2D point of each vertex (`spos`) for the lit material only: the other sharp
@@ -147,10 +153,12 @@ pub const SHARP_VERTEX_SPOS: &str = r#"#version 100
 attribute vec3 position;
 attribute vec2 texcoord;
 attribute vec4 color0;
+attribute vec4 normal;
 varying highp vec2 uv;
 varying lowp vec4 color;
 // The vertex's 2D point before the model and projection: the pass's own pixels, the space the lights are in.
 varying highp vec2 spos;
+varying highp vec2 FogAt;
 uniform mat4 Model;
 uniform mat4 Projection;
 void main() {
@@ -158,6 +166,7 @@ void main() {
     color = color0 / 255.0;
     uv = texcoord;
     spos = position.xy;
+    FogAt = normal.zw;
 }"#;
 
 /// A fragment shader with `sharp_uv` and the uniforms `TexSize` and `Scale` declared, then
@@ -170,10 +179,32 @@ pub fn fragment(extra: &str, main: &str) -> String {
     fragment_with(extra, main, "uniform vec2 Scale;")
 }
 
-/// [`fragment`] for a [`material_scaled`] material: `Scale` is the vertex stage's varying (the draw's
-/// screen pixels per texel, from [`SHARP_VERTEX_SCALE`]), not a uniform.
-pub fn fragment_scaled(extra: &str, main: &str) -> String {
-    fragment_with(extra, main, "varying highp vec2 Scale;")
+/// The fog of a map sprite, in the fragment stage (`sprite_fog`): the sampler `FogVis` (the table's texture, nearest)
+/// and `fog_vis()`, the visibility of the sprite's foot cell, 1 where no fog applies (`FogAt` is 0). The table
+/// holds 16 bits a cell, in the texel's red (high byte) and green (low byte) (`sprite_fog::decode`).
+pub const FOG_GLSL: &str = r#"
+uniform sampler2D FogVis;
+varying highp vec2 FogAt;
+float fog_vis() {
+    if (FogAt.x <= 0.0) {
+        return 1.0;
+    }
+    vec4 t = texture2D(FogVis, FogAt);
+    float v = (floor(t.r * 255.0 + 0.5) * 256.0 + floor(t.g * 255.0 + 0.5)) / 65535.0;
+    // Truncated to 8 bits, as the sprite's colour alpha was on the CPU (`faded`): the pictures keep their bytes.
+    return floor(v * 255.0) / 255.0;
+}
+"#;
+
+/// [`fragment`] with the map sprites' fog (`FOG_GLSL`): `main` may call `fog_vis()`. Its material binds `FogVis`
+/// ([`material_fog`] or [`bind_fog`]).
+pub fn fragment_fog(extra: &str, main: &str) -> String {
+    fragment_with(&format!("{FOG_GLSL}{extra}"), main, "uniform vec2 Scale;")
+}
+
+/// [`fragment_fog`] for a [`material_scaled_with`] material (`Scale` from the vertex stage).
+pub fn fragment_fog_scaled(extra: &str, main: &str) -> String {
+    fragment_with(&format!("{FOG_GLSL}{extra}"), main, "varying highp vec2 Scale;")
 }
 
 fn fragment_with(extra: &str, main: &str, scale: &str) -> String {
@@ -227,16 +258,28 @@ pub fn material_in(vertex: &str, fragment: &str, pipeline_params: PipelineParams
     Ok(m)
 }
 
-/// A sharp material whose `Scale` comes per vertex ([`SHARP_VERTEX_SCALE`], [`fragment_scaled`]): only the texture's
-/// `TexSize` is a uniform, so the draws of one texture batch together. `extra` are its own uniforms.
-pub fn material_scaled(fragment: &str, pipeline_params: PipelineParams, mut extra: Vec<UniformDesc>) -> Result<Material, macroquad::Error> {
+/// A sharp material whose `Scale` comes per vertex ([`SHARP_VERTEX_SCALE`], [`fragment_fog_scaled`]): only the texture's
+/// `TexSize` is a uniform, so the draws of one texture batch together. `extra` are its own uniforms; `textures` are
+/// their samplers' names, bound by the caller.
+pub fn material_scaled_with(fragment: &str, pipeline_params: PipelineParams, mut extra: Vec<UniformDesc>, textures: Vec<String>) -> Result<Material, macroquad::Error> {
     extra.push(UniformDesc::new("TexSize", UniformType::Float2));
     let m = load_material(
         ShaderSource::Glsl { vertex: SHARP_VERTEX_SCALE, fragment },
-        MaterialParams { uniforms: extra, textures: Vec::new(), pipeline_params },
+        MaterialParams { uniforms: extra, textures, pipeline_params },
     )?;
     m.set_uniform("TexSize", Vec2::ONE);
     Ok(m)
+}
+
+/// A sharp material with the map sprites' fog (`fragment_fog`, `FogVis` bound by [`bind_fog`]).
+pub fn material_fog(fragment: &str, pipeline_params: PipelineParams, extra: Vec<UniformDesc>) -> Result<Material, macroquad::Error> {
+    material_in(SHARP_VERTEX, fragment, pipeline_params, extra, vec!["FogVis".to_string()])
+}
+
+/// Binds the fog table's texture to a fog material (`FogVis`). The table's texture object changes with the map's size,
+/// so the materials are bound again whenever they are used for a sprite pass.
+pub fn bind_fog(m: &Material) {
+    m.set_texture("FogVis", super::sprite_fog::texture());
 }
 
 /// The colour blend of macroquad's own pipeline (source alpha over), for the draw material.
@@ -305,6 +348,7 @@ fn session_with<R>(m: Material, draw: impl FnOnce() -> R) -> R {
     LAST.with(|l| l.set(None));
     PLAIN.with(|p| p.set(false));
     count_break();
+    bind_fog(&m);
     gl_use_material(&m);
     let _end = End;
     draw()
@@ -329,7 +373,9 @@ const LIT_MAIN: &str = r#"
     if (a > 0.0 && a <= 0.76) {
         a = min(a * ShadowK, 1.0);
     }
-    gl_FragColor = color * vec4(c.rgb, a);
+    vec4 col = color;
+    col.a *= fog_vis();
+    gl_FragColor = col * vec4(c.rgb, a);
 "#;
 
 razdor::local! {
@@ -341,7 +387,7 @@ fn lit_material() -> Option<Material> {
     LIT_MATERIAL.with(|m| {
         m.get_or_init(|| {
             let uniforms = vec![UniformDesc::new("ShadowK", UniformType::Float1)];
-            material_scaled(&fragment_scaled("uniform float ShadowK;", LIT_MAIN), alpha_pipeline(), uniforms)
+            material_scaled_with(&fragment_fog_scaled("uniform float ShadowK;", LIT_MAIN), alpha_pipeline(), uniforms, vec!["FogVis".to_string()])
                 .map_err(|e| razdor::diag!("lit sharp material: {e}"))
                 .ok()
         })
@@ -404,6 +450,27 @@ local! {
     static SCALED_MESH: std::cell::RefCell<Mesh> = std::cell::RefCell::new(Mesh { vertices: Vec::new(), indices: Vec::new(), texture: None });
 }
 
+razdor::local! {
+    /// The fog cell of the map sprite being drawn: its table texture coordinate (`sprite_fog`), which the sharp draws
+    /// put in their vertices' normal slot (`fog_normal`). (0, 0) for a draw with no fog of its own (the default).
+    static FOG_CELL: std::cell::Cell<Vec2> = const { std::cell::Cell::new(Vec2::ZERO) };
+}
+
+/// Runs `draw` with the fog cell `cell` for its sharp draws (None: none). A map sprite's draws run in it, so the
+/// sprite's alpha takes the table's visibility in the shader; any other draw runs with none.
+pub fn with_fog_cell<R>(cell: Option<Vec2>, draw: impl FnOnce() -> R) -> R {
+    let prev = FOG_CELL.with(|f| f.replace(cell.unwrap_or(Vec2::ZERO)));
+    let r = draw();
+    FOG_CELL.with(|f| f.set(prev));
+    r
+}
+
+/// The vertices' normal slot for a draw: the scale in `xy` and the fog cell in `zw`.
+fn fog_normal(scale: Vec2) -> Vec4 {
+    let f = FOG_CELL.with(std::cell::Cell::get);
+    vec4(scale.x, scale.y, f.x, f.y)
+}
+
 /// Draws the quad of a sharp draw ([`sprite_mesh`]'s vertices, in the shared [`SPRITE_MESH`]).
 fn draw_sprite_mesh(tex: &Texture2D, x: f32, y: f32, color: Color, params: &DrawTextureParams, scale: Vec2) {
     SPRITE_MESH.with(|m| {
@@ -441,7 +508,7 @@ fn fill_sprite_mesh(mesh: &mut Mesh, tex: &Texture2D, x: f32, y: f32, color: Col
         let p = vec2(px, py) - pivot;
         vec2(p.x * cos_r - p.y * sin_r, p.x * sin_r + p.y * cos_r) + pivot
     };
-    let normal = vec4(scale.x, scale.y, 0.0, 0.0);
+    let normal = fog_normal(scale);
     let c: [u8; 4] = color.into();
     let vertex = |p: Vec2, u: f32, v: f32| Vertex { position: vec3(p.x, p.y, 0.0), uv: vec2(u, v), color: c, normal };
     let (u0, v0) = (sx / width, sy / height);
@@ -453,12 +520,36 @@ fn fill_sprite_mesh(mesh: &mut Mesh, tex: &Texture2D, x: f32, y: f32, color: Col
     mesh.texture = Some(tex.clone());
 }
 
+local! {
+    /// The copy of a mesh with the fog cell in its normals ([`draw_fogged`]), refilled per draw.
+    static FOGGED_MESH: std::cell::RefCell<Mesh> = std::cell::RefCell::new(Mesh { vertices: Vec::new(), indices: Vec::new(), texture: None });
+}
+
+/// Draws `mesh` (in a blend whose material takes the fog) with the fog cell of the sprite being drawn in its normals;
+/// the mesh as it is when no fog applies.
+fn draw_fogged(mesh: &Mesh) {
+    let f = FOG_CELL.with(std::cell::Cell::get);
+    if f == Vec2::ZERO {
+        return draw_mesh(mesh);
+    }
+    FOGGED_MESH.with(|m| {
+        let mut m = m.borrow_mut();
+        m.vertices.clear();
+        m.vertices.extend(mesh.vertices.iter().map(|v| Vertex { normal: vec4(v.normal.x, v.normal.y, f.x, f.y), ..*v }));
+        m.indices.clear();
+        m.indices.extend_from_slice(&mesh.indices);
+        m.texture = mesh.texture.clone();
+        draw_mesh(&m);
+        m.texture = None;
+    });
+}
+
 /// Draws `mesh` with `scale` in every vertex's normal slot (see [`fill_sprite_mesh`]), from the shared
 /// [`SCALED_MESH`] (no allocation per draw once it has grown).
 fn draw_scaled_mesh(mesh: &Mesh, scale: Vec2) {
     SCALED_MESH.with(|m| {
         let mut m = m.borrow_mut();
-        let normal = vec4(scale.x, scale.y, 0.0, 0.0);
+        let normal = fog_normal(scale);
         m.vertices.clear();
         m.vertices.extend(mesh.vertices.iter().map(|v| Vertex { normal, ..*v }));
         m.indices.clear();
@@ -485,10 +576,13 @@ pub fn texels(tex: &Texture2D) -> Vec2 {
 /// The sharp draw material, made once. `None` when the shader does not compile on this GPU
 /// or driver: the draws then fall back to plain `draw_texture_ex` (the look before this
 /// module), and the reason is logged once.
+/// The sharp draw's main: the colour with its alpha times the map sprite's fog (`fog_vis`, 1 for the others).
+const DRAW_MAIN: &str = "vec4 c = color; c.a *= fog_vis(); gl_FragColor = c * sharp_tex(uv);";
+
 fn draw_material() -> Option<Material> {
     DRAW_MATERIAL.with(|m| {
         m.get_or_init(|| {
-            material_scaled(&fragment_scaled("", "gl_FragColor = color * sharp_tex(uv);"), alpha_pipeline(), Vec::new())
+            material_scaled_with(&fragment_fog_scaled("", DRAW_MAIN), alpha_pipeline(), Vec::new(), vec!["FogVis".to_string()])
                 .map_err(|e| razdor::diag!("sharp material: {e}"))
                 .ok()
         })
@@ -535,7 +629,9 @@ pub fn draw(tex: &Texture2D, x: f32, y: f32, color: Color, params: DrawTexturePa
     match blend_context() {
         Some(Some(m)) => {
             set_uniforms(&m, tex, &params);
-            draw_texture_ex(tex, x, y, color, params);
+            // The same quad as `draw_texture_ex` (`fill_sprite_mesh`), with the fog cell in its vertices.
+            let scale = draw_scale(texels(tex), &params);
+            draw_sprite_mesh(tex, x, y, color, &params, scale);
         }
         Some(None) => draw_texture_ex(tex, x, y, color, params),
         None => match session_base() {
@@ -550,6 +646,7 @@ pub fn draw(tex: &Texture2D, x: f32, y: f32, color: Color, params: DrawTexturePa
                     let tex_size = texels(tex);
                     count_break();
                     m.set_uniform("TexSize", tex_size);
+                    bind_fog(&m);
                     gl_use_material(&m);
                     draw_sprite_mesh(tex, x, y, color, &params, draw_scale(tex_size, &params));
                     gl_use_default_material();
@@ -571,7 +668,7 @@ pub fn draw_mesh_sharp(mesh: &Mesh, scale: Vec2) {
                 m.set_uniform("TexSize", texels(tex));
             }
             m.set_uniform("Scale", scale.abs() * RASTER.with(std::cell::Cell::get));
-            draw_mesh(mesh);
+            draw_fogged(mesh);
         }
         Some(None) => draw_mesh(mesh),
         None => match session_base() {
@@ -587,6 +684,7 @@ pub fn draw_mesh_sharp(mesh: &Mesh, scale: Vec2) {
                     if let Some(tex) = mesh.texture.as_ref() {
                         m.set_uniform("TexSize", texels(tex));
                     }
+                    bind_fog(&m);
                     gl_use_material(&m);
                     draw_scaled_mesh(mesh, scale.abs() * RASTER.with(std::cell::Cell::get));
                     gl_use_default_material();
@@ -691,7 +789,7 @@ const WINDOWS_MAIN: &str = r#"
     vec3 core = mix(vec3(1.0, 0.70, 0.30), vec3(1.0, 0.78, 0.34), hsh);
     vec3 halo = vec3(0.9, 0.45, 0.15);
     vec3 col = mix(halo, core, smoothstep(0.35, 1.0, bm.g));
-    gl_FragColor = vec4(col * (bm.g * Night * flick * 1.2 * color.a), 1.0);
+    gl_FragColor = vec4(col * (bm.g * Night * flick * 1.2 * color.a * fog_vis()), 1.0);
 "#;
 
 /// The additive windows material, made once. `None` when it does not compile (no windows then).
@@ -704,7 +802,7 @@ fn windows_material() -> Option<Material> {
                 ..Default::default()
             };
             let uniforms = vec![UniformDesc::new("Night", UniformType::Float1), UniformDesc::new("Clock", UniformType::Float1)];
-            material_in(SHARP_VERTEX_SPOS, &fragment(extra, WINDOWS_MAIN), pipeline, uniforms, vec!["BuildingMask".to_string()])
+            material_in(SHARP_VERTEX_SPOS, &fragment_fog(extra, WINDOWS_MAIN), pipeline, uniforms, vec!["BuildingMask".to_string(), "FogVis".to_string()])
                 .map_err(|e| razdor::diag!("windows material: {e}"))
                 .ok()
         })
@@ -719,6 +817,7 @@ pub fn windows_pass<R>(mask: &Texture2D, night: f32, draw: impl FnOnce() -> R) -
     count_break();
     let Some(m) = windows_material() else { return draw() };
     m.set_texture("BuildingMask", mask.clone());
+    bind_fog(&m);
     m.set_uniform("Night", night);
     m.set_uniform("Clock", super::clock::now() as f32);
     struct End;

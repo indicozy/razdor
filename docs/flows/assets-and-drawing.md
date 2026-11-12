@@ -456,12 +456,21 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   the war fog and the event reveals (`draw_fog_flat`, `draw_showing_flat`) lie on the ground in `draw_world_in`
   after the ground's marks, route and border and before the standing sprites, not after the world as in the flat
   view (`MapView::draw` draws them there, flat only). The hills, drawn first in the flat view, come after them.
-  Each standing sprite (`standing`, its visibility from `Shade::at`) fades into the fog on its foot's cell, so
-  what is behind it shows through instead of a black silhouette: the visibility is `sprite_visibility`, a smoothstep
-  from 0.15 to 0.85 of 1 less the darkness the ground shows on that cell: the fog's shown darkness there
-  (`minimap::shown_darkness`) composed with the reveal's alpha there (`Showing::alpha_at`), as the GPU blends them.
-  Both are the values this frame's ground was drawn with (the fog and the mask are drawn before the sprites), so an
-  object opens as the reveal's circle passes it. A straight-alpha sprite keeps its
+  Each map sprite (a decoration, a building, a hill; `standing_map`, `standing_picked_map`, `draw_building_group`
+  with `Shading::Map`) fades into the fog on its foot's cell, so what is behind it shows through instead of a black
+  silhouette. Since backlog 1605 step 4 the fog is the shader's: `ui/sprite_fog.rs` keeps a table of one 16-bit visibility
+  per map cell (`Table::compose`: the visibility, `sprite_fog::visibility`, a smoothstep from 0.15 to 0.85 of 1 less
+  the darkness there, the shown darkness (`minimap::with_shown_darkness`, unrounded) composed with the reveals' alpha,
+  `1 − (1 − fog)(1 − reveal)`). The table is a texture (`sprite_fog::texture`, nearest, clamped, the red and green bytes
+  the high and low byte) bound as `FogVis` by the sharp materials (`sharp::FOG_GLSL`, `fog_vis()`, which truncates to 8
+  bits as the CPU alpha did). A map sprite's draws run in `sharp::with_fog_cell` with its foot cell's texture
+  coordinate, which the sharp draws put in the vertices' normal `zw` (`fog_normal`), so the vertices do not change when
+  the fog does. The CPU reads the same table for the cull: a hidden cell (or a foot past the edge with no edge fog) draws
+  and picks nothing. `sprite_fog::sync` runs in `draw_world_in` after the war fog's draw (`sync_sprite_fog`): the table is
+  made again only when the fog's stamp (`minimap::shown_stamp`, moved by every changed cell) or the reveals move; the
+  reveals are made again every frame while a showing is opening (its mask is rewritten each frame by
+  `draw_showing_flat`), and the texture is uploaded only when a value changed. Armies, the hero, spells, the smoke and
+  the lit windows keep the CPU shade (`Shading::Cpu`, `Shade::at`). A straight-alpha sprite keeps its
   colour and scales its alpha (`faded`); a premultiplied one (the figures) scales every channel (`faded_premultiplied`).
   At 0 it is not drawn. Off the map the ground is black (visibility 0) unless «Продолжать карту за краем» is on.
   Razdor's visual only: the flat view is pixel-identical. Sprites' fallback drawings (no DT art: procedural

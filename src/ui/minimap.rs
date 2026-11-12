@@ -244,6 +244,9 @@ struct FogShown {
     moving: bool,
     snap: bool,
     dirty: bool,
+    /// Counts every change of a texel's alpha (and every resize): the map sprites' fog table (`sprite_fog`) is
+    /// made again only when it moves.
+    stamp: u64,
 }
 
 impl FogShown {
@@ -265,11 +268,15 @@ impl FogShown {
         moving: false,
         snap: false,
         dirty: false,
+        stamp: 0,
     };
 
     /// Sets cell `i`'s shown darkness to `v`, flagging the texture when its rounded alpha changed.
     fn put(&mut self, i: usize, v: f32) {
-        self.cur[i] = v;
+        if self.cur[i] != v {
+            self.cur[i] = v;
+            self.stamp += 1;
+        }
         let q = v.round().clamp(0.0, 255.0) as u8;
         if self.rgba[i * 4 + 3] != q {
             self.rgba[i * 4 + 3] = q;
@@ -289,6 +296,7 @@ impl FogShown {
         self.settle.clear();
         self.settle.extend(settle);
         if resized {
+            self.stamp += 1;
             self.w = w;
             self.h = h;
             self.rgba.clear();
@@ -395,6 +403,25 @@ pub fn shown_darkness(fog: &Fog, t: (i32, i32)) -> f32 {
         match index_of(s.w.max(0) as usize, s.h.max(0) as usize, t) {
             Some(i) if (s.w, s.h) == (fog.w, fog.h) => s.cur[i] / 255.0,
             _ => 0.0,
+        }
+    })
+}
+
+/// The shown darkness's change counter: it moves whenever a cell's shown darkness changes (`sprite_fog` keys its
+/// table on it).
+pub fn shown_stamp() -> u64 {
+    SHOWN.with(|s| s.borrow().stamp)
+}
+
+/// The shown darkness of every cell of `fog` in 0..255 (unrounded: [`shown_darkness`] is this over 255), or an empty
+/// slice when the shown fog is not `fog`'s size (no darkness then).
+pub fn with_shown_darkness<R>(fog: &Fog, f: impl FnOnce(&[f32]) -> R) -> R {
+    SHOWN.with(|s| {
+        let s = s.borrow();
+        if (s.w, s.h) == (fog.w, fog.h) {
+            f(&s.cur)
+        } else {
+            f(&[])
         }
     })
 }

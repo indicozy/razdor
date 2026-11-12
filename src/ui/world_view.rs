@@ -1729,6 +1729,15 @@ local! {
     static SPRITE_VIS: std::cell::Cell<f32> = const { std::cell::Cell::new(1.0) };
 }
 
+/// How a standing sprite takes the fog's shade. `Cpu`: the CPU's shade (`Shade::at`) is part of its `vis` (the
+/// armies, the hero, the spells, the smoke, the lit windows). `Map`: a map sprite (a decoration, a building, a hill),
+/// whose fog is the shader's, from its foot cell (`sprite_fog`); its `vis` is only what else fades it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Shading {
+    Cpu,
+    Map,
+}
+
 /// A straight-alpha sprite colour `c` faded by the visibility of the standing sprite being drawn:
 /// the colour kept, the alpha times the visibility (white becomes (1, 1, 1, v)), so what is behind
 /// the sprite shows through it.
@@ -1742,15 +1751,6 @@ fn faded(c: Color) -> Color {
 fn faded_premultiplied(c: Color) -> Color {
     let v = SPRITE_VIS.with(std::cell::Cell::get);
     Color::new(c.r * v, c.g * v, c.b * v, c.a * v)
-}
-
-/// The visibility of a standing sprite on a cell: 1 less the darkness the ground shows there
-/// (`dark`, 0 to 1: the fog and the reveal composed), eased by a smoothstep from 0.15 to 0.85, so
-/// an edge sprite is not ghostly for long and a deep one is gone.
-fn sprite_visibility(dark: f32) -> f32 {
-    let x = (1.0 - dark).clamp(0.0, 1.0);
-    let t = ((x - 0.15) / 0.7).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
 }
 
 /// What a standing sprite of the tilted view is, for the pointer: the hero, an army (its index in
@@ -1933,8 +1933,61 @@ fn standing(cam: &Camera, foot: Vec2, base: Vec2, vis: f32, picture: Rect, draw:
 /// `foot`: a layer of a building on a bent sheet ([`draw_layers_on_sheet`]) stands on its own ground foot, while the
 /// building's fade is the group's, so its layers fade together. `base` is as in [`standing`].
 fn standing_at(cam: &Camera, foot: Vec2, base: Vec2, at: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
+    standing_core(Shading::Cpu, cam, foot, base, at, vis, picture, draw);
+}
+
+/// [`standing`] for a map sprite: its fog comes from its foot cell in the shader (`sprite_fog`), so `vis` is the
+/// sprite's own fade only (`detail`, 1 for none). A cell that hides the sprite draws nothing, as [`standing`] does.
+fn standing_map(cam: &Camera, foot: Vec2, base: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
+    standing_core(Shading::Map, cam, foot, base, foot, vis, picture, draw);
+}
+
+/// [`standing_picked`] for a map sprite ([`standing_map`]).
+#[allow(clippy::too_many_arguments)]
+fn standing_picked_map(pick: Option<Pick>, src: Option<PickSrc>, cam: &Camera, foot: Vec2, base: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
+    PICK_NEXT.with_borrow_mut(|p| *p = pick.map(|pick| (pick, src)));
+    standing_map(cam, foot, base, vis, picture, draw);
+}
+
+/// The fog of the map sprite whose foot is at `foot` in the table of the pass (`sprite_fog::at`), on the cell the CPU's
+/// shade (`Shade::at`) reads.
+fn map_fog(cam: &Camera, foot: Vec2) -> super::sprite_fog::Cell {
+    let world = (foot + cam.origin) / cam.scale;
+    super::sprite_fog::at(cam.grid.tile_at((world.x, world.y)), extend_edge())
+}
+
+/// The map sprites' fog table for the pass (`sprite_fog::sync`): the fog as drawn and the reveals of `veil`. The same
+/// switches as `Shade::at`: with no fog, or the trailer's no-fog, the table is none.
+fn sync_sprite_fog(game: &Game, veil: Veil) {
+    use std::hash::{Hash, Hasher};
+    let fog = &game.fog;
+    let active = fog.enabled && fog.w > 0 && fog.h > 0 && !trailer_nofog();
+    // The reveals change with the set of showings and with each one's opening (its progress reaching 1).
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for s in veil.shows {
+        (*s as *const Showing as usize).hash(&mut h);
+        (s.progress(veil.now) >= 1.0).hash(&mut h);
+    }
+    // A showing that is opening rewrites its mask each frame (`draw_showing_flat`), so the reveals change with the frame.
+    let live = veil.shows.iter().any(|s| s.progress(veil.now) > 0.0 && s.progress(veil.now) < 1.0);
+    let reveal = |t: Tile| veil.shows.iter().filter_map(|s| s.alpha_at(fog.w, t, veil.now)).fold(0.0, f32::max);
+    super::sprite_fog::sync(fog, active, h.finish(), live, &reveal);
+}
+
+/// The standing sprite's drawing, as [`standing_at`] does it; `shading` says where its fog comes from.
+#[allow(clippy::too_many_arguments)]
+fn standing_core(shading: Shading, cam: &Camera, foot: Vec2, base: Vec2, at: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
     let pick = PICK_NEXT.with_borrow_mut(Option::take);
     let Some(tilt) = cam.tilt else { return draw() };
+    // A map sprite's fog is the shader's, from its foot cell: a cell that hides the sprite draws nothing (as vis 0 does).
+    let fog = match shading {
+        Shading::Cpu => None,
+        Shading::Map => match map_fog(cam, foot) {
+            super::sprite_fog::Cell::Hidden => return,
+            super::sprite_fog::Cell::Clear => None,
+            super::sprite_fog::Cell::At(uv) => Some(uv),
+        },
+    };
     if vis <= 0.0 {
         return;
     }
@@ -1996,7 +2049,7 @@ fn standing_at(cam: &Camera, foot: Vec2, base: Vec2, at: Vec2, vis: f32, picture
     push_cpu_model(place);
     let prev = SPRITE_VIS.with(|s| s.replace(vis));
     FIGURE_SRC.with_borrow_mut(|f| *f = None);
-    super::sharp::with_perspective(magnify, draw);
+    super::sharp::with_fog_cell(fog, || super::sharp::with_perspective(magnify, draw));
     let figure = FIGURE_SRC.with_borrow_mut(Option::take);
     SPRITE_VIS.with(|s| s.set(prev));
     pop_cpu_model();
@@ -3526,15 +3579,17 @@ fn draw_building_ground(cam: &Camera, atlas: &Atlas, slot: &Slot, cards: &[Card]
 /// (`standing`), so the group turns as one picture, its cards in their layers. Its flags (`living`) draw with the
 /// card that holds their anchor, moved by that card's layer offset.
 #[allow(clippy::too_many_arguments)]
-fn draw_building_group(cam: &Camera, atlas: &Atlas, slot: &Slot, cards: &[Card], origin: Vec2, zoom: f32, foot: Vec2, vis: f32, living: Option<&Living>, outlined: bool, pick: Option<Pick>) {
+fn draw_building_group(cam: &Camera, atlas: &Atlas, slot: &Slot, cards: &[Card], origin: Vec2, zoom: f32, foot: Vec2, vis: f32, living: Option<&Living>, outlined: bool, pick: Option<Pick>, shading: Shading) {
     if cam.tilt.is_some_and(|t| t.cam.bend.is_some()) {
         // Living parts are off in a bent view (`living_on`), so the cleared copy and the flags never mix here.
         debug_assert!(living.is_none(), "a bent view's buildings have no living parts");
-        return draw_layers_on_sheet(cam, atlas, slot, cards, origin, zoom, foot, vis, outlined, pick);
+        return draw_layers_on_sheet(cam, atlas, slot, cards, origin, zoom, foot, vis, outlined, pick, shading);
     }
     let layers = layered_cards(cam, cards, group_y(foot, origin, zoom));
     let (at, size) = (origin + slot.off * zoom, slot.size * zoom);
-    standing_picked(pick, atlas_src(atlas, slot.rect), cam, foot, foot, vis, Rect::new(at.x, at.y, size.x, size.y), || {
+    let picture = Rect::new(at.x, at.y, size.x, size.y);
+    PICK_NEXT.with_borrow_mut(|p| *p = pick.map(|pick| (pick, atlas_src(atlas, slot.rect))));
+    standing_core(shading, cam, foot, foot, foot, vis, picture, || {
         frame_probe::sprite(size.x, size.y);
         match living.and_then(|ls| ls.body()) {
             // The cleared copy holds the box: its texels start at the box's offset.
@@ -3572,7 +3627,7 @@ fn sheet_layers(cards: &[Card], origin: Vec2, zoom: f32, group_y: f32, yaw_deg: 
 /// fade and the gold outline of the whole group are its own (the layers fade together); a layer past a down bend's
 /// horizon is not drawn.
 #[allow(clippy::too_many_arguments)]
-fn draw_layers_on_sheet(cam: &Camera, atlas: &Atlas, slot: &Slot, cards: &[Card], origin: Vec2, zoom: f32, foot: Vec2, vis: f32, outlined: bool, pick: Option<Pick>) {
+fn draw_layers_on_sheet(cam: &Camera, atlas: &Atlas, slot: &Slot, cards: &[Card], origin: Vec2, zoom: f32, foot: Vec2, vis: f32, outlined: bool, pick: Option<Pick>, shading: Shading) {
     let size = vec2(atlas.texture.width(), atlas.texture.height());
     let (at, box_size) = (origin + slot.off * zoom, slot.size * zoom);
     let picture = Rect::new(at.x, at.y, box_size.x, box_size.y);
@@ -3589,7 +3644,7 @@ fn draw_layers_on_sheet(cam: &Camera, atlas: &Atlas, slot: &Slot, cards: &[Card]
     if outlined {
         let d = (1.5 * zoom).max(1.0);
         for (at, card) in &layers {
-            standing_at(cam, foot, *at, *at, vis, picture, || {
+            standing_core(shading, cam, foot, *at, *at, vis, picture, || {
                 super::chrome::silhouette(|| {
                     for (dx, dy) in OUTLINE_STEPS {
                         super::sharp::draw_mesh_sharp(&mesh(card, origin + vec2(dx * d, dy * d), faded(BUILDING_OUTLINE)), vec2(zoom, zoom));
@@ -3601,7 +3656,7 @@ fn draw_layers_on_sheet(cam: &Camera, atlas: &Atlas, slot: &Slot, cards: &[Card]
     for (k, (at, card)) in layers.iter().enumerate() {
         // Each layer is picked as the building (the outline pass above is not).
         PICK_NEXT.with_borrow_mut(|p| *p = pick.map(|pick| (pick, atlas_src(atlas, slot.rect))));
-        standing_at(cam, foot, *at, *at, vis, picture, || {
+        standing_core(shading, cam, foot, *at, *at, vis, picture, || {
             if k == 0 {
                 frame_probe::sprite(box_size.x, box_size.y);
             }
@@ -4560,7 +4615,7 @@ impl Shade<'_> {
             }
             None => 1.0,
         };
-        sprite_visibility(dark)
+        super::sprite_fog::visibility(dark)
     }
 }
 
@@ -4752,7 +4807,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
         if seen_o {
             if hill(o) {
                 if !tilted {
-                    standing(cam, object_foot(o, cam), object_foot(o, cam), shade_of(object_foot(o, cam)), object_picture(o, art, cam), || draw_object(o, art, cam, &ctx));
+                    standing_map(cam, object_foot(o, cam), object_foot(o, cam), 1.0, object_picture(o, art, cam), || draw_object(o, art, cam, &ctx));
                 }
             } else {
                 let foot = object_foot(o, cam);
@@ -4835,12 +4890,13 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
         if waits {
             gpu_wait(Stage::GpuFog);
         }
+        sync_sprite_fog(game, veil);
         // One sharp session for the hills, as for the pass below: outside one, every sharp draw
         // switches the material on and off, so each hill was its own draw call.
         super::sharp::session(|| {
             for (o, &seen_o) in rows.iter().zip(&seen_row) {
                 if seen_o && hill(o) {
-                    standing(cam, object_foot(o, cam), object_foot(o, cam), shade_of(object_foot(o, cam)), object_picture(o, art, cam), || draw_object(o, art, cam, &ctx));
+                    standing_map(cam, object_foot(o, cam), object_foot(o, cam), 1.0, object_picture(o, art, cam), || draw_object(o, art, cam, &ctx));
                 }
             }
         });
@@ -4895,8 +4951,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                     let picture = object_picture(o, art, cam);
                     let detail = detail_visibility(picture, ctx.dpi);
                     if detail > 0.0 {
-                        let vis = shade_of(foot) * detail;
-                        standing(cam, foot, foot, vis, picture, || {
+                        standing_map(cam, foot, foot, detail, picture, || {
                             if cam.tilt.is_none() && detail < 1.0 {
                                 let prev = SPRITE_VIS.with(|s| s.replace(detail));
                                 draw_object(o, art, cam, &ctx);
@@ -4915,7 +4970,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                         ground(cam, || draw_building(l, art, cam, outlined));
                     } else {
                         let src = art.and_then(|a| a.map_atlas()).and_then(|at| atlas_src(at, at.building(l.picture.0, l.picture.1)?.rect));
-                        standing_picked(Some(Pick::Location(*i)), src, cam, building_foot(l, cam), building_foot(l, cam), shade_of(building_foot(l, cam)), building_picture(l, art, cam), || draw_building(l, art, cam, outlined));
+                        standing_picked_map(Some(Pick::Location(*i)), src, cam, building_foot(l, cam), building_foot(l, cam), 1.0, building_picture(l, art, cam), || draw_building(l, art, cam, outlined));
                     }
                 }
                 Drawable::BuildingGroup(i) => {
@@ -4928,7 +4983,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                     // Living (flags): the cards draw the cleared copy, and each flag moves with the card whose
                     // outline holds its anchor (`owning_card`).
                     let living = living_of(cam, art, l).filter(|(_, ls)| ls.body().is_some());
-                    draw_building_group(cam, atlas, &r, cards, origin, zoom, foot, shade_of(foot), living.map(|(_, ls)| ls), outlined, Some(Pick::Location(*i)));
+                    draw_building_group(cam, atlas, &r, cards, origin, zoom, foot, 1.0, living.map(|(_, ls)| ls), outlined, Some(Pick::Location(*i)), Shading::Map);
                 }
                 Drawable::Army(i) => {
                     let a = &game.world.armies[*i];
@@ -6973,7 +7028,7 @@ fn draw_building_windows(game: &Game, assets: &Assets, cam: &Camera, veil: Veil)
                 }
                 if let Some((_, r, cards)) = card_building(l, Some(art)).filter(|_| c.tilt.is_some()) {
                     let origin = building_sprite_origin(l, r.full.x, r.full.y, c);
-                    draw_building_group(c, atlas, &r, cards, origin, zoom, foot, vis, None, false, None);
+                    draw_building_group(c, atlas, &r, cards, origin, zoom, foot, vis, None, false, None, Shading::Cpu);
                 } else if let Some(r) = atlas.building(l.picture.0, l.picture.1).map(lit_whole) {
                     let at = building_sprite_origin(l, r.full.x, r.full.y, c) + r.off * zoom;
                     let size = r.size * zoom;
@@ -8819,12 +8874,13 @@ mod tilt_tests {
     /// 0.85 and clamped to 0 to 1.
     #[test]
     fn a_sprite_fades_with_the_darkness_of_its_ground() {
-        assert_eq!(sprite_visibility(0.0), 1.0, "clear ground: plain");
-        assert_eq!(sprite_visibility(1.0), 0.0, "deep in the dark: gone");
-        assert_eq!(sprite_visibility(0.5), 0.5, "half dark: half there");
-        assert!(sprite_visibility(0.25) > sprite_visibility(0.4), "darker, less visible");
-        assert_eq!(sprite_visibility(1.5), 0.0, "clamped above");
-        assert_eq!(sprite_visibility(-0.5), 1.0, "clamped below");
+        let vis = crate::ui::sprite_fog::visibility;
+        assert_eq!(vis(0.0), 1.0, "clear ground: plain");
+        assert_eq!(vis(1.0), 0.0, "deep in the dark: gone");
+        assert_eq!(vis(0.5), 0.5, "half dark: half there");
+        assert!(vis(0.25) > vis(0.4), "darker, less visible");
+        assert_eq!(vis(1.5), 0.0, "clamped above");
+        assert_eq!(vis(-0.5), 1.0, "clamped below");
     }
 
     /// Plain unless the 2.5D view's standing sprite sets it: a flat camera's sprite is drawn as it is.
