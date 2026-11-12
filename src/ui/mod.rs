@@ -1246,6 +1246,8 @@ impl App {
     /// audio is not rebuilt: the effects loaded at start stay until the next start.
     fn reload_install(&mut self) {
         razdor::dt::preload::forget_ready();
+        // The install's own `ads/` (the promo) is looked for again (`ads::forget`).
+        ads::forget();
         if let Some(dt) = dt_art::DtArt::from_env() {
             self.assets.adopt_install(dt);
             self.dt_content = dt_content_of(&self.assets, self.audio.settings.impossible);
@@ -1287,6 +1289,7 @@ impl App {
         }
         if let Some(dt) = dt_art::DtArt::from_env() {
             self.assets.adopt_install(dt);
+            ads::forget();
             // Android: the data folder (and so the log) is made once the install is loaded.
             razdor::diag::reopen_log();
             // The settings as they are now (nothing changed them on the title screen).

@@ -127,14 +127,43 @@ fn find_promo() -> Option<Promo> {
     })
 }
 
-local! {
-    /// The session's ad: looked for on the first call, then kept (None: there is none).
-    static PROMO: std::cell::RefCell<Option<Option<Rc<Promo>>>> = const { std::cell::RefCell::new(None) };
+/// The looked-up ad, kept until [`Slot::forget`]: a lookup that found nothing is kept too (the
+/// menu draws nothing then), so a later install is only seen after the forget.
+pub struct Slot<T> {
+    value: Option<Option<T>>,
 }
 
-/// The session's promo, or None when no ad is found (the menu draws nothing then).
+impl<T: Clone> Slot<T> {
+    pub const fn new() -> Slot<T> {
+        Slot { value: None }
+    }
+
+    /// The kept value, or the result of `load` when there is none yet.
+    pub fn get_or_load(&mut self, load: impl FnOnce() -> Option<T>) -> Option<T> {
+        self.value.get_or_insert_with(load).clone()
+    }
+
+    /// Drops the kept value: the next [`Slot::get_or_load`] looks again.
+    pub fn forget(&mut self) {
+        self.value = None;
+    }
+}
+
+local! {
+    static PROMO: std::cell::RefCell<Slot<Rc<Promo>>> = const { std::cell::RefCell::new(Slot::new()) };
+}
+
+/// The promo of the current install (or of the program's and Razdor's folders), or None when no ad
+/// is found (the menu draws nothing then).
 pub fn promo() -> Option<Rc<Promo>> {
-    PROMO.with(|slot| slot.borrow_mut().get_or_insert_with(|| find_promo().map(Rc::new)).clone())
+    PROMO.with(|slot| slot.borrow_mut().get_or_load(|| find_promo().map(Rc::new)))
+}
+
+/// The install was (re)loaded: the ad is looked for again on the next draw. The first draw of a run
+/// without an install keeps "none", so the game's own `ads/` (copied in by the import) is only seen
+/// after this.
+pub fn forget() {
+    PROMO.with(|slot| slot.borrow_mut().forget());
 }
 
 #[cfg(test)]
@@ -229,5 +258,20 @@ mod tests {
         assert!(ad.caption_ru.starts_with("Новая игра") && !ad.caption_en.is_empty());
         let bytes = std::fs::read(dir.join(&ad.image)).unwrap();
         assert!(Image::from_file_with_format(&bytes, None).is_ok(), "the shipped picture decodes");
+    }
+
+    #[test]
+    fn a_kept_none_is_seen_again_only_after_a_forget() {
+        // The menu's first draw has no install: "none" is kept, and the install that the game
+        // loads later (with its `ads/`) is found only once the slot is forgotten.
+        let mut slot: Slot<&str> = Slot::new();
+        let mut looks = 0;
+        assert_eq!(slot.get_or_load(|| { looks += 1; None }), None);
+        assert_eq!(slot.get_or_load(|| { looks += 1; Some("promo") }), None, "the kept none stands");
+        assert_eq!(looks, 1);
+        slot.forget();
+        assert_eq!(slot.get_or_load(|| { looks += 1; Some("promo") }), Some("promo"));
+        assert_eq!(slot.get_or_load(|| { looks += 1; None }), Some("promo"), "a found ad is kept");
+        assert_eq!(looks, 2);
     }
 }
