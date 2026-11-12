@@ -88,8 +88,20 @@ SCHEMA = 1
 
 # The headless RTX 4060 (--gpu-4060). The card is checked against its PCI address and name first.
 GPU_BACKEND = 'gpu-4060'
-GPU_DEVICE = '/dev/dri/card2'  # VirtualGL's EGL device; the 5060 Ti is card3 (never used here)
-GPU_PCI = '0000:05:00.0'
+GPU_PCI = '0000:05:00.0'  # the RTX 4060; the 5060 Ti (01:00.0) is never used here
+
+
+def _card_of(pci):
+    """The /dev/dri/cardN whose PCI address is `pci`: the numbering changes between boots (card2 was the 4060,
+    then the 5060 Ti after a reboot on 2026-11-12), so it is looked up, never hardcoded."""
+    import glob
+    for d in sorted(glob.glob('/sys/class/drm/card[0-9]*')):
+        if os.path.basename(os.path.realpath(os.path.join(d, 'device'))) == pci:
+            return '/dev/dri/' + os.path.basename(d)
+    return '/dev/dri/card-missing'
+
+
+GPU_DEVICE = _card_of(GPU_PCI)  # VirtualGL's EGL device
 GPU_NAME = 'RTX 4060'
 GPU_MATRIX = [  # the six cells of the release check (scene, view, effects)
     ('rk3-start', 'flat', 'off'), ('rk3-start', '25d', 'off'),
