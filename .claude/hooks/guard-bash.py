@@ -45,6 +45,21 @@ import subprocess
 import sys
 
 ALLOWED_CPUS = set(range(8, 20))
+
+
+def _full_pc_granted():
+    """The owner's "the PC is yours": `~/.config/razdor/full-pc-until` holds a Unix time; until then every
+    CPU may be used (the file is local, never in git, and it expires by itself)."""
+    import time
+    try:
+        with open(os.path.expanduser("~/.config/razdor/full-pc-until")) as f:
+            return time.time() < float(f.read().strip())
+    except (OSError, ValueError):
+        return False
+
+
+if _full_pc_granted():
+    ALLOWED_CPUS = set(range(0, 20))
 PIN_HINT = "CARGO_BUILD_JOBS=12 nice -n 19 taskset -c 8-19 cargo …"
 FROZEN = {"dt-feat", "dt-original"}
 GAME_EXT = re.compile(r"\.(lit|ugs|dtm|dtc|wav|ogg|mp3|bik|rzsave)$", re.I)
