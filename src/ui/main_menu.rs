@@ -1792,8 +1792,9 @@ pub const ALL: [Row; 58] = [
             // The water's rate and size are the moving water's: shown only with it on.
             Row::WaterRate | Row::WaterQuality => audio.map_live_water,
             // Razdor's (the owner's decision, 2026-11-10): the 2.5D view, while a building of the
-            // install still has no cut (`depth`).
-            Row::DepthModel => audio.map_tilt && depth::available() && depth::unknown() > 0,
+            // install still has no cut (`depth`). Hidden with the building cards off (the default, 2026-11-12):
+            // the model then does nothing (`dt_art::building_cards_on`).
+            Row::DepthModel => super::dt_art::building_cards_on() && audio.map_tilt && depth::available() && depth::unknown() > 0,
             Row::Orientation => cfg!(target_os = "android"),
             // The bottom bar's size is a phone's (Razdor's; the desktop has no such row).
             Row::BottomBar => bottom_bar_row_shown(super::display::dp_px().is_some(), window_layout::portrait()),
@@ -3809,8 +3810,8 @@ mod tests {
         HELP_PINNED.with(|p| p.set(None));
     }
 
-    /// The depth model's row shows only with the 2.5D view and while a building of the install
-    /// still waits for its cut (`depth::unknown`).
+    /// The depth model's row shows only with the 2.5D view, the building cards on, and while a building of the
+    /// install still waits for its cut (`depth::unknown`).
     #[test]
     fn the_depth_model_row_shows_in_2_5d_while_a_building_waits() {
         if !depth::available() {
@@ -3820,7 +3821,8 @@ mod tests {
         depth::set_unknown(0);
         assert!(!Row::DepthModel.shown(&tilted), "nothing waits");
         depth::set_unknown(3);
-        assert!(Row::DepthModel.shown(&tilted));
+        // With the building cards off (the default, 2026-11-12) the model does nothing, so its row stays hidden.
+        assert_eq!(Row::DepthModel.shown(&tilted), super::super::dt_art::building_cards_on());
         assert!(!Row::DepthModel.shown(&super::super::audio::Settings::default()), "the flat view");
         depth::set_unknown(0);
     }

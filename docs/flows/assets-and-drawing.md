@@ -310,7 +310,11 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   setting off, `in_view`, `ground` and `standing` only call their closures: the flat view is the same
   code path.
 - **Cards** (a building sprite cut into pieces, each on its own ground: the owner's report, a village's
-  houses floating in the air). `data/cards/objects.json` (numbers only, made offline by `tools/depth`) keys
+  houses floating in the air). **Off by default** (the owner's decision, 2026-11-12: a building stands as one whole
+  picture in every view, as in v1.4.1). `dt_art::building_cards_on` (`RAZDOR_BUILDING_CARDS=1`, dev-only) turns them on:
+  `Atlas::building_cards` returns None otherwise, so `card_building` is None and every path below is off, the depth
+  model's worker (`depth_tick`) does not start, and the settings row «Модель глубины для модов» is hidden
+  (`Row::DepthModel`). The text below describes the code with the switch on. `data/cards/objects.json` (numbers only, made offline by `tools/depth`) keys
   each sprite by its pixel hash (`dt::cards::sprite_key`, FNV-1a 64); `cards::builtin` parses it once and
   `DtArt::map_atlas` keeps the cards of each building sprite that has an entry of the same size
   (`Atlas::building_cards`). In the tilted view only, a building with cards is drawn as one `Drawable::BuildingCard`

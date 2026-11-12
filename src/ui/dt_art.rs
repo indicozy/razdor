@@ -126,6 +126,10 @@ impl Atlas {
     /// The 2.5D cards of a building's sprite, back to front: the shipped cut, else the depth
     /// model's. `None` for a picture with no cut data (it stands as one billboard).
     pub fn building_cards(&self, picture_type: u8, variant: u8) -> Option<&[Card]> {
+        // Off by default (`building_cards_on`): every building stands as one whole picture.
+        if !building_cards_on() {
+            return None;
+        }
         let id = (ObjectSprite::BUILDINGS, picture_type.into(), variant.into());
         self.cards.get(&id).copied().or_else(|| self.live.borrow().get(id))
     }
@@ -134,6 +138,14 @@ impl Atlas {
     pub fn living(&self, picture_type: u8, variant: u8) -> Option<&Living> {
         self.living.get(&(ObjectSprite::BUILDINGS, picture_type.into(), variant.into()))
     }
+}
+
+/// Whether the 2.5D view folds a building into its cut cards (and the depth model cuts the rest). Off by default: the
+/// owner's decision (2026-11-12) is that a building stands as one whole picture, as in v1.4.1. `RAZDOR_BUILDING_CARDS=1`
+/// turns the cards on for development only; with them off the depth model does not run and its setting row is hidden.
+pub fn building_cards_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("RAZDOR_BUILDING_CARDS").is_ok_and(|v| v.trim() == "1"))
 }
 
 /// Width of the map-object atlas in pixels.
@@ -653,7 +665,7 @@ impl DtArt {
     /// them as they have room; the cards that come back join the atlas. Does nothing flat, without
     /// the feature, in a snapshot run, or without a model file (the model is never fetched here).
     pub fn depth_tick(&self, tilted: bool) {
-        if !tilted || !depth::available() || std::env::var_os("RAZDOR_SNAPSHOT").is_some() {
+        if !building_cards_on() || !tilted || !depth::available() || std::env::var_os("RAZDOR_SNAPSHOT").is_some() {
             return;
         }
         let Some(atlas) = self.map_atlas() else { return };

@@ -4450,10 +4450,11 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     let seen = |o: &Decoration| o.tile.0 >= c0 - side && o.tile.0 < c1 + side && razdor::rules::map::object_cells(o).any(|t| fog.explored_near(t, minimap::FEATHER));
     let hill = |o: &Decoration| (object_class::HILLS..=object_class::ROCKY_HILLS).contains(&o.class);
     // A location is drawn when a cell of its footprint is explored near the feather and it lies in
-    // the drawn rows and columns.
+    // the drawn rows and columns. The rows and columns come first: most locations are off the view,
+    // and the fog scan of a location is the costly test (both tests are pure, so the order is free).
     let location_seen = |l: &Location| {
         let (ax, ay) = l.anchor;
-        l.cells().any(|t| fog.explored_near(t, minimap::FEATHER)) && ay >= r0 - up && ay < r1 + below && ax >= c0 - side && ax - l.size.0 < c1 + side
+        ay >= r0 - up && ay < r1 + below && ax >= c0 - side && ax - l.size.0 < c1 + side && l.cells().any(|t| fog.explored_near(t, minimap::FEATHER))
     };
     // Razdor's «От солнца» (`daylight::frame_casts`): every caster in view lays its silhouette on the
     // ground, under the hills, the marks, the fog and every standing sprite (flat and 2.5D alike).
@@ -4470,11 +4471,14 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // The objects of the drawn columns and rows (the chunks overlapping them): `seen` tests the same columns.
     let rows = map.objects_in_rect(c0 - side, c1 + side, r0 - up, r1 + below);
     let seen_row: Vec<bool> = rows.iter().map(&seen).collect();
+    // The locations drawn this frame, in the locations' order: the passes below share this one test
+    // (the 2.5D view makes three passes over them; each used to test every location again).
+    let seen_locs: Vec<usize> = game.world.locations.iter().enumerate().filter(|(_, l)| location_seen(l)).map(|(i, _)| i).collect();
     // 2.5D: a card building's ground pieces lie flat in the ground pass, before the shadows (which fall on them)
     // and under every standing sprite (`draw_building_ground`).
     if tilted {
         ground(cam, || {
-            for l in game.world.locations.iter().filter(|l| location_seen(l)) {
+            for l in seen_locs.iter().map(|&i| &game.world.locations[i]) {
                 if let Some((atlas, r, cards)) = card_building(l, art) {
                     let origin = building_sprite_origin(l, r.w, r.h, cam);
                     draw_building_ground(cam, atlas, r, cards, origin);
@@ -4488,7 +4492,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     }
     if !lit_lights.is_empty() {
         let objects: Vec<&Decoration> = rows.iter().zip(&seen_row).filter(|(_, s)| **s).map(|(o, _)| o).collect();
-        let locations: Vec<(usize, &Location)> = game.world.locations.iter().enumerate().filter(|(_, l)| location_seen(l) && !l.kind.is_bridge()).collect();
+        let locations: Vec<(usize, &Location)> = seen_locs.iter().map(|&i| (i, &game.world.locations[i])).filter(|(_, l)| !l.kind.is_bridge()).collect();
         ground(cam, || draw_shadows(game, art, cam, &lit_lights, &objects, &locations));
     }
     // The buildings' light lies on the ground around them, not on them: the pools are drawn here, in the
@@ -4562,7 +4566,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     let shadow_k = lit.unwrap_or(1.0);
     if tilted && sun.is_none() {
         ground(cam, || {
-            for l in game.world.locations.iter().filter(|l| location_seen(l)) {
+            for l in seen_locs.iter().map(|&i| &game.world.locations[i]) {
                 if let Some((atlas, r, _)) = card_building(l, art) {
                     draw_building_shadow(l, atlas, r, cam, shadow_k);
                 }
@@ -4606,16 +4610,15 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // is drawn at the first cell of its footprint in that order, its top row's left cell, and
     // every object after it in the scan (south of that row, or east in the same row) covers
     // it. Bridges stay on the ground, under everything (Razdor's).
-    for (i, l) in game.world.locations.iter().enumerate() {
-        if location_seen(l) {
-            if l.kind.is_bridge() {
-                items.push((i64::MIN / 2 + cell_pass_key(l.anchor, 0), Drawable::Building(i)));
-            } else if tilted && card_building(l, art).is_some() {
-                // 2.5D with cut data: the building is one group of layers, sorted by its foot like a building.
-                items.push((sprite_key(cam, first_footprint_cell(l), building_foot(l, cam), LAYER_BUILDING), Drawable::BuildingGroup(i)));
-            } else {
-                items.push((sprite_key(cam, first_footprint_cell(l), building_foot(l, cam), LAYER_BUILDING), Drawable::Building(i)));
-            }
+    for &i in &seen_locs {
+        let l = &game.world.locations[i];
+        if l.kind.is_bridge() {
+            items.push((i64::MIN / 2 + cell_pass_key(l.anchor, 0), Drawable::Building(i)));
+        } else if tilted && card_building(l, art).is_some() {
+            // 2.5D with cut data: the building is one group of layers, sorted by its foot like a building.
+            items.push((sprite_key(cam, first_footprint_cell(l), building_foot(l, cam), LAYER_BUILDING), Drawable::BuildingGroup(i)));
+        } else {
+            items.push((sprite_key(cam, first_footprint_cell(l), building_foot(l, cam), LAYER_BUILDING), Drawable::Building(i)));
         }
     }
     // The figures (armies, the waiting ship, the hero) are drawn in their cell's turn of the
@@ -4717,7 +4720,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // Razdor's «Живая карта»: the smoke of the visible chimneys, one batch over the sprites.
     if living_on(cam) {
         let mut smoke = Batch::default();
-        draw_smoke(game, art, cam, &shade_of, &location_seen, &mut smoke);
+        draw_smoke(game, art, cam, &shade_of, &seen_locs, &mut smoke);
         if !smoke.is_empty() {
             smoke.draw(&living::puff_texture());
         }
@@ -6862,10 +6865,10 @@ fn draw_wakes(game: &Game, cam: &Camera) {
 
 /// Razdor's «Живая карта» smoke (`living`): the puffs of every visible building's chimneys, added to
 /// `batch` (one mesh a frame). A building takes its shade of the fog at its foot, as its sprite does.
-fn draw_smoke(game: &Game, art: Option<&DtArt>, cam: &Camera, shade_of: &dyn Fn(Vec2) -> f32, location_seen: &dyn Fn(&Location) -> bool, batch: &mut Batch) {
+fn draw_smoke(game: &Game, art: Option<&DtArt>, cam: &Camera, shade_of: &dyn Fn(Vec2) -> f32, seen: &[usize], batch: &mut Batch) {
     let smoke = living::Smoke { now: super::map_anim::now(), puffs: living::puffs_now(), cell: cam.cell_size().x };
     let zoom = cam.scale / PX;
-    for l in game.world.locations.iter().filter(|l| location_seen(l)) {
+    for l in seen.iter().map(|&i| &game.world.locations[i]) {
         let Some((atlas, ls)) = living_of(cam, art, l) else { continue };
         if ls.chimneys.is_empty() {
             continue;

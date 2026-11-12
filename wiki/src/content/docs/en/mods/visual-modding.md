@@ -32,12 +32,14 @@ Open "Sound, graphics and gameplay settings" and the **"Map"** tab.
 
 - Set **"Graphics quality"** to **"Custom settings"**. "Original" turns off the light, the living map, the weather, the mist and the moving water all at once, so you cannot see the building with light.
 - **"Map view"** cycles through: "Flat" → "2.5D" → "Third person" → "First person" → "Flat" again.
-- In **2.5D** a building stands as pieces, each on its own ground. Check that no piece hangs in the air or sinks into the ground. Q and E turn the view by 45°: look at the building from every side.
+- In **2.5D** a building stands as one whole picture, as in the flat view. Check that it stands in its place and is not cut off. Q and E turn the view by 45°: look at the building from every side.
 - **Third person** puts the camera behind the hero's back. The rows "Camera tilt" (5° to 60°), "Camera height", "Field of view" and "Camera follows the hero" set the frame.
 - **First person** puts the camera at the hero's eyes. The rows "Camera height" (eye height, 0.70 by default), "Camera tilt" (−5° up to 30°), "Far ground", "Curve start" and "Curve strength" show in both first-person views.
 - Look at the building close up and far away: in the first-person views the ground curves, and the building can look different from 2.5D.
 
-## 4. Make the buildings stand on the ground
+## 4. Make the buildings stand on the ground (off for now)
+
+For now buildings are drawn as whole pictures: cutting them into pieces and standing them on the ground are off by default. This section describes the development path; the depth-model row is hidden in the settings unless the pieces are switched on with `RAZDOR_BUILDING_CARDS=1`.
 
 There are two routes. Players get route A. Route B is done by the project's maintainers.
 
@@ -45,7 +47,7 @@ There are two routes. Players get route A. Route B is done by the project's main
 
 This is how Razdor stands up the buildings of mods that have no shipped data.
 
-1. On the **"Map"** tab of the settings, the row **"Depth model for mods"** appears. It shows when the map view is 2.5D, third person or first person and the map has buildings without data. If the row is not there, your build has no such model, or all the buildings already have data.
+1. While the pieces are off (the default), the row is not there and the model does not run. When the pieces are on, the row **"Depth model for mods"** appears on the **"Map"** tab of the settings. It shows when the map view is 2.5D, third person or first person and the map has buildings without data.
 2. Click **"Download (50 MB)"**. The Depth Anything V2 Small model (Apache-2.0) is downloaded once and runs on your device. The row shows "Downloading N%". If the download fails, it shows "Download failed", and you can click it again.
 3. Razdor cuts the new buildings into pieces in the background, one at a time, and keeps the results in the cache folder. Until a building is cut, it stands as one whole picture, as before. Then it stands on the ground piece by piece.
 
@@ -103,7 +105,7 @@ For a quick night check, turn on "Lighting", choose "Fixed hour" and pick a nigh
 2. Open a map where your buildings stand: a new game or a campaign.
 3. For each building, check every view from step 3: 2.5D, third person and first person, from every side, close up and far away.
 4. Check with lighting off and on, both shadow modes, day and night.
-5. On a phone the depth model runs on the phone itself. New buildings stand as one whole picture at first and then stand on the ground as they are cut. Cut buildings are kept in the cache, so the next start does not cut them again.
+5. Right now buildings are drawn as whole pictures on every device. When the pieces are on, on a phone the depth model runs on the phone itself: new buildings stand as one whole picture at first, then on the ground as they are cut. Cut buildings are kept in the cache, so the next start does not cut them again.
 
 ## 7. Sharing the mod
 

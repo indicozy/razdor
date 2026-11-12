@@ -113,3 +113,34 @@ per item. The suspects, unranked:
 4. **Terrain +0.025 ms** in the cached branch of `draw_ground`: confirm with `perf` first.
 
 Next step: `perf record` on the 2.5D scene for both builds to get each function's share, then fix 1–3.
+
+## 2.5D close-up cost: profile and fix (2026-11-12, perf-fix)
+
+Profile (РК3-Столица start, 2.5D, RTX 4060 via VirtualGL): `perf record` works only as the parent with the
+`cpu-clock` software event (no hardware PMU, no call chains under this kernel policy), so the shares are self
+time, main thread (94% of the samples). In main (before): `Iterator::any` closure (the fog scan in
+`location_seen`) 8.0% in 2.5D against 3.9% flat; the remaining top entries are libc memmove and mutex unlock
+(GL/VirtualGL call overhead, the same in flat). Frame-timer counters (temporary, not committed): `location_seen`
+441 calls a frame in 2.5D (three passes over 147 locations) costing ~267 µs with the timers on; flat makes 147.
+Card work (`layered_cards`, `draw_building_ground`, `card_mesh_form`) was about 12 µs a frame: only one card
+building was in view.
+
+Fix: the location test checks the drawn rows and columns before the fog scan (both pure), and the 2.5D passes
+and the living smoke share one list of the locations seen this frame. Pixels: the eleven snapshots (flat, 2.5D,
+third and first person, effects off and on, zoomed out) were byte-identical before and after.
+
+Building cards off by default (owner, 2026-11-12): `RAZDOR_BUILDING_CARDS=1` turns them on (dev only). With
+cards off the card path, the depth worker and the settings row are inactive.
+
+Measured on a shared machine (other sessions' builds and game runs, load 5–17): the medians are not usable, so
+only the best run of each configuration is quoted, probe `work_ms`:
+
+| build | flat best | 2.5D best |
+|---|---|---|
+| v1.4.1 | 0.191 | 0.346 |
+| main before | 0.209 | 0.453 |
+| location fix (cards on) | 0.195 | 0.298 |
+
+Not re-measured on a quiet machine: the target (2.5D back near 0.27) is not confirmed. Terrain (+~0.025 ms):
+the cached terrain path draws the cache and then an overlay pass (needed on water cells), where v1.4.1 drew
+one quad; left as designed.
