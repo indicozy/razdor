@@ -163,6 +163,8 @@ Blood loss = Кровопотеря
 
 # Spell cards: Razdor's p-LifeLose entry, a deviation (ui/spell_badges.rs, rules/spell_hint.rs)
 Leader's max life = Макс. жизнь лидеру
+# The promo of the new game by the original developers, bottom right of the main menu (ui/main_menu.rs thorny_promo)
+A new game from the makers of Discord Times = Новая игра от разработчиков «Времён раздора»
 # Maps and mods: the hub's window over the main menu
 Maps and mods = Карты и моды
 No folder for the hub. = Нет папки для хаба.

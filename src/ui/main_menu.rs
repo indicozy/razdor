@@ -772,6 +772,7 @@ pub fn frame(no_install: bool, mods: &[(String, razdor::hub::Text)], active: Opt
         let vw = measure(&version, vsize).width;
         chrome::shadow_text(&version, screen_width() - 16.0 * k - vw, version_y, vsize, vcolour);
     });
+    thorny_promo(k, version_y - vsize - 6.0 * k);
     // An update put in place says so (an "Always" update has no window of its own).
     super::update_view::title_line();
     // Esc quits the game at once, without a question, as in the original (0x4c8059); a
@@ -782,6 +783,101 @@ pub fn frame(no_install: bool, mods: &[(String, razdor::hub::Text)], active: Opt
     }
     SIDE_TILES.with(|t| t.set(false));
     pick
+}
+
+/// The store page of Thorny Times, the new game of the original developers (Steam app 2182610).
+const THORNY_TIMES_URL: &str = "https://store.steampowered.com/app/2182610/";
+/// The store capsule (`data/promo/thorny-times.png`, 462 × 174 px): the developers' JPEG, converted
+/// to PNG because macroquad here decodes PNG only.
+const THORNY_PNG: &[u8] = include_bytes!("../../data/promo/thorny-times.png");
+
+local! {
+    /// The capsule's texture, decoded once on the first frame of the main menu.
+    static THORNY_TEXTURE: std::cell::RefCell<Option<Texture2D>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The capsule's size (px) at interface scale `k`: half the file on the desktop (231 × k), 160 dp
+/// on a phone, never wider than `room` (its height by the file's aspect).
+fn thorny_size(k: f32, phone_dp: Option<f32>, room: f32) -> Vec2 {
+    let wanted = match phone_dp {
+        Some(dp) => 160.0 * dp,
+        None => 231.0 * k,
+    };
+    let w = wanted.min(room).max(0.0);
+    Vec2::new(w, w * 174.0 / 462.0)
+}
+
+/// Razdor's own promo, not the original's: the new game of the original developers, Thorny Times,
+/// as its Steam capsule with a caption above it, bottom right, above the version line at `bottom`
+/// (its bottom edge). The developers' condition for sharing the game's assets (2026-11-12), so it
+/// shows on the main menu on every platform, with or without an install. A click opens the store
+/// page. It keeps clear of the oval buttons (the room left of them is what it gets), of the tile
+/// stack held sideways (the picture sits left of it), lifts above an installed update's notice, and
+/// on a phone respects the safe area's right inset.
+fn thorny_promo(k: f32, bottom: f32) {
+    let phone = super::display::dp_px();
+    let safe = super::display::safe_area();
+    let mut right = screen_width() - 16.0 * k - phone.map_or(0.0, |_| safe.right);
+    // Held sideways with the tile stack on the right edge, the picture sits left of the stack (the
+    // tiles keep their place): its right edge 12 × k short of the stack's left edge.
+    if SIDE_TILES.with(Cell::get) {
+        if let Some(m) = upright_menu() {
+            right = right.min(m.chips[0].x - 12.0 * k);
+        }
+    }
+    let bottom = if matches!(razdor::update::status(), razdor::update::Status::Installed(_)) {
+        bottom.min(notice_y(k) - 22.0 * k)
+    } else {
+        bottom
+    };
+    let caption_size = phone.map_or(13.0 * k, |dp| VERSION_PHONE_DP * dp);
+    let pitch = caption_size * 1.25;
+    // The band the promo may take (its largest height, three caption lines): the buttons in it set
+    // the room on its left.
+    let band_top = bottom - thorny_size(k, phone, f32::MAX).y - 3.0 * pitch;
+    let edge = (0..BUTTONS.len())
+        .map(oval_rect)
+        .filter(|r| r.y < bottom && r.y + r.h > band_top)
+        .map(|r| r.x + r.w)
+        .fold(f32::MIN, f32::max);
+    let left = (edge + 12.0 * k).max(16.0 * k);
+    let size = thorny_size(k, phone, right - left);
+    if size.x <= 0.0 {
+        return;
+    }
+    let pic = Rect::new(right - size.x, bottom - size.y, size.x, size.y);
+    super::dt_font::legacy_metrics_if(phone.is_some(), || {
+        let lines = wrap_label(tr("A new game from the makers of Discord Times"), size.x, caption_size);
+        let cap_top = pic.y - 6.0 * k - lines.len() as f32 * pitch;
+        let hit = Rect::new(pic.x, cap_top, pic.w, pic.y + pic.h - cap_top);
+        let (hover, down, pressed) = super::widgets::button_state(hit, true);
+        if pressed {
+            cue(Cue::Button);
+            open_link(THORNY_TIMES_URL);
+        }
+        let lit = hover || down;
+        let ink = if lit { chrome::GOLD } else { Color::new(0.95, 0.88, 0.72, 0.9) };
+        for (i, line) in lines.iter().enumerate() {
+            let w = measure(line, caption_size).width;
+            let base = pic.y - 6.0 * k - (lines.len() - 1 - i) as f32 * pitch;
+            chrome::shadow_text(line, right - w, base, caption_size, ink);
+        }
+        let texture = THORNY_TEXTURE.with(|slot| {
+            slot.borrow_mut()
+                .get_or_insert_with(|| {
+                    let t = Texture2D::from_file_with_format(THORNY_PNG, None);
+                    t.set_filter(FilterMode::Linear);
+                    t
+                })
+                .clone()
+        });
+        draw_texture_ex(&texture, pic.x, pic.y, WHITE, DrawTextureParams { dest_size: Some(vec2(pic.w, pic.h)), ..Default::default() });
+        if lit {
+            draw_rectangle_lines(pic.x + k, pic.y + k, pic.w - 2.0 * k, pic.h - 2.0 * k, 2.0 * k, chrome::GOLD);
+        } else {
+            draw_rectangle_lines(pic.x + 0.5 * k, pic.y + 0.5 * k, pic.w - k, pic.h - k, k, Color::new(0.08, 0.05, 0.03, 1.0));
+        }
+    });
 }
 
 /// The links in the landscape corners, over the original's version and copyright lines: the custom
@@ -3713,6 +3809,19 @@ mod tests {
         }
         assert!(m.buttons[4].y + m.buttons[4].h <= m.notice_y(0.75));
         assert!(m.chip_h >= TOUCH_DP * 2.0);
+    }
+
+    #[test]
+    fn the_thorny_promo_is_half_the_capsule_on_the_desktop_and_fits_the_room_on_a_phone() {
+        // The desktop: half the file (462 × 174), at scale 2 it is 1:1.
+        assert_eq!(thorny_size(2.0, None, 1000.0), Vec2::new(462.0, 174.0));
+        assert_eq!(thorny_size(1.0, None, 1000.0), Vec2::new(231.0, 87.0));
+        // A phone: 160 dp, unless the room is narrower; the height keeps the aspect.
+        let wide = thorny_size(1.0, Some(2.0), 1000.0);
+        assert!(close(wide.x, 320.0) && close(wide.y, 320.0 * 174.0 / 462.0), "{wide:?}");
+        let narrow = thorny_size(1.0, Some(2.0), 200.0);
+        assert!(close(narrow.x, 200.0) && close(narrow.y, 200.0 * 174.0 / 462.0), "{narrow:?}");
+        assert_eq!(thorny_size(1.0, Some(2.0), -5.0).x, 0.0, "no room, no picture");
     }
 
     #[test]
