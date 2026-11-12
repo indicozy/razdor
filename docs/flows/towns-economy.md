@@ -100,9 +100,10 @@ tab's place. With a unit selected, the hero's grid shows the card of the unit un
 Recruits have no tooltip.
 
 **Garrisons** (economy.md §2, ai.md §9.6). Only the player's castles and forts take one
-(`Location::takes_garrison`). The hero and named units are refused. Since f4f3a9f a dead unit is
-refused too (Razdor's rule; the original moves corpses both ways), but a corpse already there can
-still come back. Garrisons are never paid and heal `GarrisonAutoHeal`% at midnight.
+(`Location::takes_garrison`). The hero and named units are refused. A dead unit goes in and
+comes out too (the original's rule, 0x4c653c, 0x4c6f50), unless the experimental switch
+`no_corpse_garrison` is on: then it is refused both ways (Razdor's rule, from f4f3a9f; the
+experimental «Мёртвых не оставлять в гарнизоне»). A corpse already in a garrison can still come back. Garrisons are never paid and heal `GarrisonAutoHeal`% at midnight.
 `open_garrison` sets the paid marks, the only place they are set; an unpaid unit costs one day's
 wage to take back.
 

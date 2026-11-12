@@ -374,6 +374,7 @@ mod tests {
         assert!(!s.experimental_rules.bless_once && !s.experimental_rules.rear_service_flat);
         assert!(!s.experimental_rules.building_store);
         assert!(!s.experimental_rules.death_curse_counter, "the counter curse has no key: the original's rule");
+        assert!(!s.experimental_rules.no_corpse_garrison, "the garrison switch has no key: the original's rule");
     }
 
     #[test]

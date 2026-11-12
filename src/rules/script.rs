@@ -2603,7 +2603,7 @@ mod tests {
     fn experimental_rules_carry_to_next_map_and_restart() {
         let scenario = world(vec![]);
         let mut game = start(&scenario);
-        let rules = super::super::content::ExperimentalRules { simultaneous_bonuses: true, unlimited_items: true, two_potions: true, six_cells: false, free_units: false, auto_promotion: false, undying_units: false, fast_ai: false, bless_once: true, undead_poison_immune: false, unlimited_spells: false, merchant_item: true, rear_service_flat: false, building_store: false, death_curse_counter: false };
+        let rules = super::super::content::ExperimentalRules { simultaneous_bonuses: true, unlimited_items: true, two_potions: true, six_cells: false, free_units: false, auto_promotion: false, undying_units: false, fast_ai: false, bless_once: true, undead_poison_immune: false, unlimited_spells: false, merchant_item: true, rear_service_flat: false, building_store: false, death_curse_counter: false, no_corpse_garrison: false };
         game.experimental = rules;
         game.content = std::sync::Arc::new(game.content.with_experimental(rules));
         let next = game.hand_over("Road".into(), None);

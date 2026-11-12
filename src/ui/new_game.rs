@@ -33,7 +33,7 @@ local! {
         simultaneous_bonuses: false, two_potions: false, six_cells: false, unlimited_items: false,
         free_units: false, auto_promotion: false, undying_units: false, fast_ai: false,
         bless_once: false, undead_poison_immune: false, unlimited_spells: false, merchant_item: false, rear_service_flat: false,
-        building_store: false, death_curse_counter: false,
+        building_store: false, death_curse_counter: false, no_corpse_garrison: false,
     }) };
     static RULES_OPEN: Cell<bool> = const { Cell::new(false) };
     /// The rules window's scroll (px) on an upright phone, reset when it closes.
@@ -1567,7 +1567,7 @@ const OK_DP: f32 = 44.0;
 /// the screen (a phone's landscape takes two or three); the window then takes the screen's width.
 fn experimental_menu() {
     /// The switches in the window (one row each).
-    const ROWS: usize = 15;
+    const ROWS: usize = 16;
     let (sw, sh) = (screen_width(), screen_height());
     let k = chrome::k();
     let o = super::display::popup_o(k, 550.0, 410.0).min((sw - 12.0) / 550.0).min((sh - 12.0) / 410.0);
@@ -1624,6 +1624,7 @@ fn experimental_menu() {
         tr("Rear Service always −30%"),
         tr("Store in your own buildings"),
         tr("Death curse on counter blows"),
+        tr("No corpses in garrisons"),
     ];
     // An upright phone's window takes the screen less the safe area (cutouts) and 12 px each side.
     let safe = super::display::safe_area();
@@ -1743,6 +1744,7 @@ fn experimental_menu() {
     check(12, labels[12], &mut rules.rear_service_flat);
     check(13, labels[13], &mut rules.building_store);
     check(14, labels[14], &mut rules.death_curse_counter);
+    check(15, labels[15], &mut rules.no_corpse_garrison);
     EXPERIMENTAL.with(|p| p.set(rules));
     let hints_top = grid_top + per_col as f32 * row_h + (per_col as f32 - 1.0) * gap + 8.0 * big;
     for (i, line) in lines.iter().enumerate() {

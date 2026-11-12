@@ -277,9 +277,10 @@ impl Game {
 
     /// Leaves squad member `i` in the garrison of the castle or fort here, at `cell` (an empty
     /// one; `None`: its own or the first free). The hero and named units are refused
-    /// (0x4c6f50). A fallen unit is refused too: the original takes a corpse (economy.md §2),
-    /// Razdor does not, at the players' request. The whole record moves, paid mark and last
-    /// pay included; a garrison is never paid, and it heals `GarrisonAutoHeal`% every midnight.
+    /// (0x4c6f50). A fallen unit is taken too (the original's rule, economy.md §2), unless the
+    /// experimental «Мёртвых не оставлять в гарнизоне» (`no_corpse_garrison`) refuses it. The
+    /// whole record moves, paid mark and last pay included; a garrison is never paid, and it heals
+    /// `GarrisonAutoHeal`% every midnight (a corpse does not heal).
     pub fn leave_in_garrison(&mut self, i: usize, cell: Option<Slot>) -> Result<(), ServiceError> {
         let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::LeaveInGarrison { unit: i as u32, cell });
         if !self.offers(Tab::Garrison) {
@@ -292,7 +293,9 @@ impl Game {
         if u.named > 0 {
             return Err(ServiceError::Named);
         }
-        if !u.alive() {
+        // Original behaviour (0x4c6f50): a fallen unit goes into a garrison, corpses move both ways.
+        // Razdor's switch `no_corpse_garrison` (a player's report) refuses them.
+        if self.content.experimental.no_corpse_garrison && !u.alive() {
             return Err(ServiceError::Dead);
         }
         let l = self.location.ok_or(ServiceError::NotHere)?;
@@ -381,8 +384,9 @@ impl Game {
     /// Swaps squad member `i` with garrison unit `j` (0x4c653c, 0x4c6f50): the two records
     /// change places, each taking the other's cell, with no price and no question, so an
     /// unpaid garrison unit comes in unpaid; it is also the only way into a full army. The
-    /// army's unit must not be the hero, a named unit or (Razdor's rule, as for
-    /// [`Game::leave_in_garrison`]) a fallen one. Only when the garrison unit was
+    /// army's unit must not be the hero or a named unit. A fallen one is refused only behind the
+    /// experimental `no_corpse_garrison` (as for [`Game::leave_in_garrison`]; the original moves
+    /// corpses both ways, 0x4c653c). Only when the garrison unit was
     /// selected first does it get its last pay now, and only if it is paid (the original's
     /// two click handlers differ).
     pub fn swap_with_garrison(&mut self, i: usize, j: usize, garrison_first: bool) -> Result<(), ServiceError> {
@@ -398,7 +402,9 @@ impl Game {
         if u.named > 0 {
             return Err(ServiceError::Named);
         }
-        if !u.alive() {
+        // Original behaviour (0x4c653c, 0x4c6f50): corpses move both ways. Razdor's switch
+        // `no_corpse_garrison` refuses them.
+        if self.content.experimental.no_corpse_garrison && !u.alive() {
             return Err(ServiceError::Dead);
         }
         let g = &mut self.world.locations[l].stationed;
@@ -1685,12 +1691,38 @@ mod tests {
         assert_eq!(g.squad[1].last_paid, 7, "unpaid: not refreshed");
     }
 
-    /// Razdor's rule, at the players' request: a fallen unit of the army goes into no
-    /// garrison, neither left there nor swapped in (the original takes it, economy.md §2).
-    /// A corpse already in a garrison (an older save) still comes back, alone or by a swap.
+    /// The original's rule (0x4c653c, 0x4c6f50), with the experimental «Мёртвых не оставлять в
+    /// гарнизоне» (`no_corpse_garrison`) off, is the default: a fallen unit goes into a garrison and
+    /// comes out again, both ways, with nothing else changed (see the next test for the switch on).
     #[test]
-    fn a_fallen_unit_is_not_left_in_a_garrison() {
+    fn a_fallen_unit_goes_into_a_garrison_and_back_by_default() {
         let mut g = in_own_castle();
+        let army = g.squad.len();
+        let gold = g.gold;
+        g.squad[2].hp = 0;
+        let (corpse_slot, living_slot) = (g.squad[2].slot, g.squad[1].slot);
+        g.leave_in_garrison(2, None).unwrap();
+        assert_eq!((g.squad.len(), g.garrison_here().len()), (army - 1, 1));
+        assert!(!g.garrison_here()[0].unit.alive(), "the corpse is in the garrison");
+        assert_eq!(g.garrison_here()[0].unit.slot, corpse_slot, "its cell is the one it had");
+        // The living unit swaps with the corpse: the corpse comes out, the living unit goes in.
+        g.swap_with_garrison(1, 0, false).unwrap();
+        assert!(!g.squad[1].alive() && g.garrison_here()[0].unit.alive(), "the corpse is out");
+        // The corpse goes back in by a swap, the living unit comes out.
+        g.swap_with_garrison(1, 0, false).unwrap();
+        assert!(g.squad[1].alive() && !g.garrison_here()[0].unit.alive(), "the corpse swapped in");
+        assert_eq!((g.squad[1].slot, g.garrison_here()[0].unit.slot), (living_slot, corpse_slot), "each keeps its cell");
+        assert_eq!((g.squad.len(), g.gold), (army - 1, gold), "nothing else changed");
+    }
+
+    /// With the experimental «Мёртвых не оставлять в гарнизоне» on (`no_corpse_garrison`), the
+    /// fallen unit of the army goes into no garrison, neither left there nor swapped in (Razdor's
+    /// rule; the original takes it, 0x4c6f50). A corpse already in a garrison (an older save) still
+    /// comes back, alone or by a swap.
+    #[test]
+    fn a_fallen_unit_is_not_left_in_a_garrison_when_the_switch_is_on() {
+        let mut g = in_own_castle();
+        g.content = std::sync::Arc::new(g.content.with_experimental(crate::rules::content::ExperimentalRules { no_corpse_garrison: true, ..Default::default() }));
         g.squad[2].hp = 0;
         assert_eq!(g.leave_in_garrison(2, None), Err(ServiceError::Dead));
         assert_eq!((g.squad.len(), g.garrison_here().len()), (3, 0), "nothing moved");

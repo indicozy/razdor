@@ -171,6 +171,12 @@ pub struct ExperimentalRules {
     /// conditional curse, takes the striking unit with it, as a normal kill does (48a3f0). Off: the
     /// original's rule (48b49f, the counter path has no on-kill effects). Razdor's deviation.
     pub death_curse_counter: bool,
+    /// «Мёртвых не оставлять в гарнизоне» («No corpses in garrisons»; a player's report, the owner's
+    /// decision 2026-11-12): a fallen unit (hp 0) is refused by a castle's or fort's garrison, both
+    /// ways (`Game::leave_in_garrison`, `Game::swap_with_garrison`). Off: the original's rule
+    /// (0x4c653c, 0x4c6f50 refuse only the hero and named units), where a corpse moves both ways and
+    /// a corpse kept in a castle starts the plague. Razdor's deviation.
+    pub no_corpse_garrison: bool,
 }
 
 impl ExperimentalRules {
@@ -185,10 +191,10 @@ impl ExperimentalRules {
 
     /// The «Правила Раздора» switches: the six that hold Razdor's own former rules (the set
     /// `before_the_rules_were_saved` turns on) and Razdor's fixes of the original's gaps
-    /// (`death_curse_counter`). The owner's rule (2026-11-08): every Razdor QoL fix behind a
-    /// switch joins this preset. The rules window's «Правила Раздора» row sets them together;
-    /// the other switches are extra experiments and are left alone.
-    const RAZDOR_PRESET: [fn(&mut Self) -> &mut bool; 7] = [
+    /// (`death_curse_counter`, `no_corpse_garrison`). The owner's rule (2026-11-08): every Razdor QoL
+    /// fix behind a switch joins this preset. The rules window's «Правила Раздора» row sets them
+    /// together; the other switches are extra experiments and are left alone.
+    const RAZDOR_PRESET: [fn(&mut Self) -> &mut bool; 8] = [
         |r| &mut r.bless_once,
         |r| &mut r.undead_poison_immune,
         |r| &mut r.unlimited_spells,
@@ -196,6 +202,7 @@ impl ExperimentalRules {
         |r| &mut r.rear_service_flat,
         |r| &mut r.building_store,
         |r| &mut r.death_curse_counter,
+        |r| &mut r.no_corpse_garrison,
     ];
 
     /// Turns on the six «Правила Раздора» switches; the other switches stay as they are.
@@ -235,6 +242,7 @@ impl ExperimentalRules {
             (self.rear_service_flat, crate::i18n::n_("Rear Service always −30%")),
             (self.building_store, crate::i18n::n_("Store in your own buildings")),
             (self.death_curse_counter, crate::i18n::n_("Death curse on counter blows")),
+            (self.no_corpse_garrison, crate::i18n::n_("No corpses in garrisons")),
         ]
         .into_iter()
         .find(|(on, _)| *on)
@@ -269,6 +277,8 @@ struct RulesWire {
     building_store: Option<bool>,
     /// Missing (false) in saves from before the counter-blow curse switch: the original's rule.
     death_curse_counter: bool,
+    /// Missing (false) in saves from before the garrison switch: the original's rule (corpses move).
+    no_corpse_garrison: bool,
     /// Older switches, read only (see the `From` impl).
     #[serde(skip_serializing)]
     multiple_rings: bool,
@@ -314,6 +324,7 @@ impl From<RulesWire> for ExperimentalRules {
             rear_service_flat: w.rear_service_flat.unwrap_or(true),
             building_store: w.building_store.unwrap_or(true),
             death_curse_counter: w.death_curse_counter,
+            no_corpse_garrison: w.no_corpse_garrison,
         }
     }
 }
@@ -336,6 +347,7 @@ impl From<ExperimentalRules> for RulesWire {
             rear_service_flat: Some(r.rear_service_flat),
             building_store: Some(r.building_store),
             death_curse_counter: r.death_curse_counter,
+            no_corpse_garrison: r.no_corpse_garrison,
             multiple_rings: false,
             multiple_amulets: false,
             multiple_weapons: false,
@@ -1018,7 +1030,7 @@ mod experimental_rules_save_tests {
         assert!(!rules.is_razdor_preset_on());
         rules.razdor_preset();
         assert!(rules.is_razdor_preset_on());
-        assert_eq!(rules, ExperimentalRules { fast_ai: true, free_units: true, death_curse_counter: true, ..ExperimentalRules::before_the_rules_were_saved() });
+        assert_eq!(rules, ExperimentalRules { fast_ai: true, free_units: true, death_curse_counter: true, no_corpse_garrison: true, ..ExperimentalRules::before_the_rules_were_saved() });
         rules.set_razdor_preset(false);
         assert_eq!(rules, ExperimentalRules { fast_ai: true, free_units: true, ..Default::default() });
         assert!(!rules.is_razdor_preset_on());
@@ -1098,5 +1110,27 @@ mod experimental_rules_save_tests {
         assert!(rules.is_razdor_preset_on() && rules.death_curse_counter);
         rules.set_razdor_preset(false);
         assert!(!rules.death_curse_counter);
+    }
+
+    /// «Мёртвых не оставлять в гарнизоне» (`no_corpse_garrison`, a player's report): off in a new
+    /// game (the original's rule: a corpse goes into a garrison), before the rules were saved, and in
+    /// a save without its key. Written as its own key; its name is the rules window's and the
+    /// scenario mark's; the «Правила Раздора» preset includes it.
+    #[test]
+    fn the_corpse_garrison_switch_is_off_without_its_key() {
+        assert!(!ExperimentalRules::for_new_game().no_corpse_garrison);
+        assert!(!ExperimentalRules::before_the_rules_were_saved().no_corpse_garrison);
+        let old: ExperimentalRules = serde_json::from_str(r#"{"fast_ai": true, "death_curse_counter": true}"#).unwrap();
+        assert!(!old.no_corpse_garrison);
+        let on = ExperimentalRules { no_corpse_garrison: true, ..Default::default() };
+        let json = serde_json::to_value(on).unwrap();
+        assert_eq!(json["no_corpse_garrison"].as_bool(), Some(true));
+        assert_eq!(serde_json::from_value::<ExperimentalRules>(json).unwrap(), on);
+        assert_eq!(on.first_on(), Some("No corpses in garrisons"));
+        let mut rules = ExperimentalRules::default();
+        rules.set_razdor_preset(true);
+        assert!(rules.is_razdor_preset_on() && rules.no_corpse_garrison);
+        rules.set_razdor_preset(false);
+        assert!(!rules.no_corpse_garrison);
     }
 }
