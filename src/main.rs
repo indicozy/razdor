@@ -184,6 +184,10 @@ async fn main() {
     // The picture cache's folder on Android (the app's private cache, not the shared storage).
     #[cfg(target_os = "android")]
     razdor::platform::set_private_cache_dir(ui::android::private_cache_dir());
+    // Whether this install is an older one (its private cache holds files already), before the
+    // threads below write to the cache: the popup of the saves of an older release depends on it.
+    #[cfg(target_os = "android")]
+    ui::saves_move::decide_at_start(razdor::platform::cache_dir().as_deref());
     // The phones' folders are tidied off the main thread (the old picture cache goes, `.nomedia`).
     std::thread::spawn(razdor::platform::tidy_app_dir);
     // The picture cache's folders of other releases, its old flat files and stale temporary files

@@ -405,11 +405,155 @@ private String razdorCopyExport(String source, Uri uri) {
     }
 }
 
+// The folder picker for the saves of an older release (src/ui/saves_move.rs): the player picks the
+// shared «Razdor» folder (the picker opens at it), and its saves folder is copied into the app's cache
+// (`old-saves`, the same cache the game reads). Only the saves folder is copied: Razdor reads the copy
+// with its own rules (transfer::import_folder). razdorOldSavesOutcome is the game's poll: "" while the
+// picker is open or the copy runs, "cancel", "wrong" (the folder holds no saves), "error: <code>", or
+// "copied" (the copy is in the cache, ready to import).
+private static final int RAZDOR_OLD_PICK_REQUEST = 7303;
+private static final long RAZDOR_OLD_LIMIT = 512L * 1024 * 1024;
+private volatile String razdorOldSavesResult = "";
+
+// Opens the folder picker on the UI thread, at the shared «Razdor» folder. Its answer is the poll's.
+public String razdorPickOldSaves() {
+    razdorOldSavesResult = "";
+    runOnUiThread(new Runnable() {
+        @Override
+        public void run() {
+            try {
+                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+                intent.putExtra(android.provider.DocumentsContract.EXTRA_INITIAL_URI,
+                        android.provider.DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:Razdor"));
+                startActivityForResult(intent, RAZDOR_OLD_PICK_REQUEST);
+            } catch (Exception e) {
+                razdorOldSavesResult = "error: start";
+            }
+        }
+    });
+    return "";
+}
+
+// The poll of razdorPickOldSaves (see above). Taken as it is: the answer is kept until it is read.
+public String razdorOldSavesOutcome() {
+    return razdorOldSavesResult;
+}
+
+// The folder the player picked: its saves are copied on a thread. A folder with a «saves» folder in it
+// is the shared Razdor folder; a folder with settings.json or manual in it is the saves folder itself.
+private void razdorOldAnswer(int resultCode, Intent data) {
+    if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+        razdorOldSavesResult = "cancel";
+        return;
+    }
+    final Uri tree = data.getData();
+    new Thread(new Runnable() {
+        @Override
+        public void run() {
+            razdorOldSavesResult = razdorCopyOldSaves(tree);
+        }
+    }).start();
+}
+
+// Copies the saves of the picked folder `tree` into the cache's old-saves; returns the poll's answer.
+private String razdorCopyOldSaves(Uri tree) {
+    try {
+        File dest = new File(getCacheDir(), "old-saves");
+        razdorDeleteTree(dest);
+        String root = android.provider.DocumentsContract.getTreeDocumentId(tree);
+        String from = razdorChildNamed(tree, root, "saves");
+        long[] budget = new long[] {RAZDOR_OLD_LIMIT};
+        if (from != null) {
+            razdorCopyDocs(tree, from, dest, 0, budget);
+        } else if (razdorChildNamed(tree, root, "settings.json") != null || razdorChildNamed(tree, root, "manual") != null) {
+            razdorCopyDocs(tree, root, dest, 0, budget);
+        } else {
+            return "wrong";
+        }
+        return "copied";
+    } catch (java.io.IOException e) {
+        return "error: copy";
+    } catch (Exception e) {
+        return "error: picked";
+    }
+}
+
+// The id of the child of the document `parent` named `name`, or null.
+private String razdorChildNamed(Uri tree, String parent, String name) {
+    Uri children = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(tree, parent);
+    try (Cursor cursor = getContentResolver().query(children, new String[] {android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID, android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME}, null, null, null)) {
+        while (cursor != null && cursor.moveToNext()) {
+            if (name.equals(cursor.getString(1))) {
+                return cursor.getString(0);
+            }
+        }
+    }
+    return null;
+}
+
+// Copies the document `parent` (a folder of `tree`) into the folder `dest`, file by file. Folders
+// nest at most 6 deep; the files together stay within the budget (RAZDOR_OLD_LIMIT), else IOException.
+private void razdorCopyDocs(Uri tree, String parent, File dest, int depth, long[] budget) throws java.io.IOException {
+    if (!dest.isDirectory() && !dest.mkdirs()) {
+        throw new java.io.IOException("folder");
+    }
+    Uri children = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(tree, parent);
+    String[] columns = {android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID, android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE, android.provider.DocumentsContract.Document.COLUMN_SIZE};
+    try (Cursor cursor = getContentResolver().query(children, columns, null, null, null)) {
+        while (cursor != null && cursor.moveToNext()) {
+            String id = cursor.getString(0);
+            String name = cursor.getString(1);
+            String mime = cursor.getString(2);
+            long size = cursor.isNull(3) ? 0 : cursor.getLong(3);
+            if (name == null || name.isEmpty() || name.contains("/") || name.equals(".") || name.equals("..")) {
+                continue;
+            }
+            if (android.provider.DocumentsContract.Document.MIME_TYPE_DIR.equals(mime)) {
+                if (depth < 6) {
+                    razdorCopyDocs(tree, id, new File(dest, name), depth + 1, budget);
+                }
+                continue;
+            }
+            budget[0] -= size;
+            if (budget[0] < 0) {
+                throw new java.io.IOException("too big");
+            }
+            Uri uri = android.provider.DocumentsContract.buildDocumentUriUsingTree(tree, id);
+            try (InputStream in = getContentResolver().openInputStream(uri); OutputStream out = new FileOutputStream(new File(dest, name))) {
+                if (in == null) {
+                    throw new java.io.IOException("no input");
+                }
+                byte[] buffer = new byte[65536];
+                int n;
+                while ((n = in.read(buffer)) > 0) {
+                    out.write(buffer, 0, n);
+                }
+            }
+        }
+    }
+}
+
+// Deletes the folder `dir` and what is in it (a copy left by an earlier try).
+private void razdorDeleteTree(File dir) {
+    File[] children = dir.listFiles();
+    if (children != null) {
+        for (File child : children) {
+            razdorDeleteTree(child);
+        }
+    }
+    dir.delete();
+}
+
 // Called from miniquad's own onActivityResult (the MAIN_ACTIVITY_ON_ACTIVITY_RESULT section at
 // the end of this file): MainActivity already defines that method, so it can't be overridden here.
 private void razdorOnActivityResult(int requestCode, int resultCode, Intent data) {
     if (requestCode == RAZDOR_EXPORT_REQUEST) {
         razdorExportAnswer(resultCode, data);
+        return;
+    }
+    if (requestCode == RAZDOR_OLD_PICK_REQUEST) {
+        razdorOldAnswer(resultCode, data);
         return;
     }
     if (requestCode != RAZDOR_PICK_REQUEST) {

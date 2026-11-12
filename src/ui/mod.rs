@@ -88,7 +88,7 @@ pub mod android;
 pub mod transfer;
 #[cfg(target_os = "ios")]
 pub mod ios;
-pub mod migrate;
+pub mod saves_move;
 pub mod mobile;
 pub mod water;
 pub mod weather;
@@ -529,8 +529,8 @@ impl App {
             return;
         }
         // The mod's choice is written into the hub's folder, which is being moved (`migrate`).
-        if migrate::busy() {
-            migrate::refuse();
+        if saves_move::busy() {
+            saves_move::refuse();
             return;
         }
         let (Some(local), Some(base)) = (razdor::hub::local_dir(), razdor::dt::install::base_dir()) else { return };
@@ -1308,22 +1308,14 @@ impl App {
         }
     }
 
-    /// The move of the player's files into the app's folder (Android, `ui::migrate`): started on
-    /// the first frame, and its end applied here: the install is read from the new folder, the
-    /// log moves to it, and the player is told.
-    fn migration_tick(&mut self) {
-        migrate::start_if_needed();
-        audio::flush_deferred();
-        match migrate::tick() {
-            Some(migrate::Outcome::Moved { game_skipped, game_in_app }) => {
-                razdor::diag::switch_log();
-                self.reload_install();
-                migrate::notify(migrate::moved_message(game_skipped, game_in_app));
-            }
-            Some(migrate::Outcome::NoRoom { needed, free }) => migrate::notify(migrate::no_room_message(needed, free)),
-            Some(migrate::Outcome::Failed(why)) => razdor::diag::log(&format!("move: {why}; the next start tries again")),
-            None => {}
+    /// The saves of an older release (Android, `ui::saves_move`): the popup is offered on the main menu
+    /// (once in a run), the folder picker's answer is taken, and the flushed settings are written.
+    fn saves_tick(&mut self) {
+        if matches!(self.screen, Screen::MainMenu) {
+            saves_move::offer_if_due();
         }
+        audio::flush_deferred();
+        saves_move::tick();
     }
 
     pub fn frame(&mut self) {
@@ -1335,7 +1327,7 @@ impl App {
         mobile::refresh_safe_insets();
         #[cfg(target_os = "android")]
         mobile::refresh_keyboard_inset();
-        self.migration_tick();
+        self.saves_tick();
         self.mobile_install_poll();
         // The hub's promo ad is kept in the app folder once the launch's catalog has come (`ui::ads::sync_tick`).
         ads::sync_tick();
@@ -1500,7 +1492,7 @@ impl App {
         }
         // The launch after an unfinished session offers to continue it (once, at the first frame
         // the files are not being moved: a continued game is a load, see `migrate`).
-        if !self.session_checked && !migrate::busy() {
+        if !self.session_checked && !saves_move::busy() {
             self.session_checked = true;
             self.check_session();
         }
@@ -1598,8 +1590,8 @@ impl App {
                     new_game::open_list();
                     Some(Screen::ScenarioSelect)
                 }
-                Some(main_menu::Pick::Load) if migrate::busy() => {
-                    migrate::refuse();
+                Some(main_menu::Pick::Load) if saves_move::busy() => {
+                    saves_move::refuse();
                     None
                 }
                 Some(main_menu::Pick::Load) => Some(Screen::Load(saves::LoadView::new(saves::Back::Title))),
@@ -1964,6 +1956,8 @@ impl App {
         }
         // «Обновить игру из архива…»: its question, progress or notice, over the settings.
         game_import::modal();
+        // The saves of an older release (`ui::saves_move`): its popup or its result, over the screen.
+        saves_move::modal();
         // The performance test's windows (`bench_view`): the choice, the run's progress, the results.
         bench_view::modal(self);
         // A fight decided on the map or in a building begins once the messages of that moment

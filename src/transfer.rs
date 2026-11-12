@@ -333,7 +333,8 @@ fn import_archive_within(archive: &Path, root: &Path, limit: u64) -> Result<Impo
         return Err(tr("The file is not a Razdor save or saves archive.").to_string());
     }
     let mut undo = Undo::default();
-    match apply_archive(&mut zip, &plan, root, &mut undo) {
+    let mut read = |e: &Entry| read_entry(&mut zip, e);
+    match apply_plan(&plan, &mut read, root, &mut undo) {
         Ok(imported) => Ok(imported),
         Err(e) => {
             undo.rollback();
@@ -355,12 +356,12 @@ fn read_entry<R: Read + Seek>(zip: &mut zip::ZipArchive<R>, e: &Entry) -> Result
 
 /// The writing of an archive's plan: the saves and the root json first, then the pins, which name
 /// the saves by their final names.
-fn apply_archive<R: Read + Seek>(zip: &mut zip::ZipArchive<R>, plan: &[Entry], root: &Path, undo: &mut Undo) -> Result<Imported, String> {
+fn apply_plan(plan: &[Entry], read: &mut dyn FnMut(&Entry) -> Result<Vec<u8>, String>, root: &Path, undo: &mut Undo) -> Result<Imported, String> {
     let mut imported = Imported::default();
     // (folder joined by `/`, name in the archive) -> the name it has in the folder now.
     let mut finals: HashMap<(String, String), String> = HashMap::new();
     for e in plan.iter().filter(|e| e.kind != Kind::Pins) {
-        let data = read_entry(zip, e)?;
+        let data = read(e)?;
         match e.kind {
             Kind::Json => {
                 make_dirs(root, undo)?;
@@ -381,7 +382,7 @@ fn apply_archive<R: Read + Seek>(zip: &mut zip::ZipArchive<R>, plan: &[Entry], r
         }
     }
     for e in plan.iter().filter(|e| e.kind == Kind::Pins) {
-        let data = read_entry(zip, e)?;
+        let data = read(e)?;
         let text = String::from_utf8_lossy(&data);
         let names: Vec<String> = text
             .lines()
@@ -395,6 +396,43 @@ fn apply_archive<R: Read + Seek>(zip: &mut zip::ZipArchive<R>, plan: &[Entry], r
         }
     }
     Ok(imported)
+}
+
+/// Imports the saves folder `src` (the copy the picker made, see `ui::saves_move`) into the saves
+/// folder `root`, by the rules of [`import_archive`]. Only the files a saves folder holds are taken
+/// (the rest of `src` is ignored); a folder with none of them is refused, and nothing is written.
+pub fn import_folder(src: &Path, root: &Path) -> Result<Imported, String> {
+    import_folder_within(src, root, LIMIT)
+}
+
+fn import_folder_within(src: &Path, root: &Path, limit: u64) -> Result<Imported, String> {
+    let mut files: Vec<(String, PathBuf)> = Vec::new();
+    collect(src, &mut Vec::new(), &mut files);
+    if files.is_empty() {
+        return Err(tr("The folder holds no Razdor saves.").to_string());
+    }
+    let mut plan: Vec<Entry> = Vec::new();
+    let mut total = 0u64;
+    for (index, (name, path)) in files.iter().enumerate() {
+        let size = fs::metadata(path).map_err(|e| failed(tr("the save cannot be read"), e))?.len();
+        total += size;
+        if total > limit {
+            return Err(tr("The file is bigger than the limit of 512 MB.").to_string());
+        }
+        let parts = relative_parts(name)?;
+        let Some(kind) = classify(&parts) else { continue };
+        let (file, dir) = parts.split_last().expect("a file name has a part");
+        plan.push(Entry { index, dir: dir.iter().map(|p| p.to_string()).collect(), name: file.to_string(), kind, size });
+    }
+    let mut undo = Undo::default();
+    let mut read = |e: &Entry| fs::read(&files[e.index].1).map_err(|err| failed(tr("the save cannot be read"), err));
+    match apply_plan(&plan, &mut read, root, &mut undo) {
+        Ok(imported) => Ok(imported),
+        Err(e) => {
+            undo.rollback();
+            Err(e)
+        }
+    }
 }
 
 fn dir_path(root: &Path, parts: &[String]) -> PathBuf {
@@ -485,6 +523,28 @@ mod tests {
         // The same archive again: the same bytes are already there, nothing is added.
         assert_eq!(import_archive(&zip_path, &dst).unwrap(), Imported { saves: 0, already: 2, settings_kept: false });
         assert!(!manual.join("Start (2).rzsave").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_copied_saves_folder_imports_like_an_archive_and_ignores_the_rest() {
+        let dir = scratch("folder");
+        let (src, dst) = (dir.join("copy"), dir.join("dst"));
+        fake_saves(&src);
+        // Files the copy holds that a saves folder does not: skipped, not an error.
+        fs::write(src.join(INSTALL).join("manual").join("notes.txt"), b"not a save").unwrap();
+        assert_eq!(import_folder(&src, &dst).unwrap(), Imported { saves: 2, already: 0, settings_kept: false });
+        assert_eq!(fs::read(dst.join(INSTALL).join("manual").join("Start.rzsave")).unwrap(), b"save one");
+        assert_eq!(fs::read_to_string(dst.join(INSTALL).join("manual").join(PINS_FILE)).unwrap(), "Start.rzsave\n");
+        assert!(!dst.join(INSTALL).join("manual").join("notes.txt").exists());
+        // Again: the same bytes are there already.
+        assert_eq!(import_folder(&src, &dst).unwrap(), Imported { saves: 0, already: 2, settings_kept: false });
+        // A folder with no saves in it is refused, and nothing is written.
+        let empty = dir.join("empty");
+        fs::create_dir_all(&empty).unwrap();
+        fs::write(empty.join("stray.log"), b"log").unwrap();
+        assert!(import_folder(&empty, &dir.join("none")).is_err());
+        assert!(!dir.join("none").exists());
         let _ = fs::remove_dir_all(&dir);
     }
 

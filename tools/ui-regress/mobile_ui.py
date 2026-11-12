@@ -79,6 +79,8 @@ SCREENS = [
     ("watch", "watch:play,day=13", {"RAZDOR_WATCH": "@watch-sample"}),
     ("watch-choice", "watch:play,battle", {"RAZDOR_WATCH": "@watch-sample"}),
     ("title", "title", {}),
+    # The popup of an older install's saves (Android: `ui::saves_move`), over the main menu.
+    ("saves-move", "title", {"RAZDOR_SCENE_SAVES_MOVE": "1"}),
     # The main menu without an install: the not-found block (the same env as scenes.txt).
     ("title-noinstall", "title", {"RAZDOR_DT_DIR": "/nonexistent-razdor-dt", "RAZDOR_CONFIG_DIR": "/nonexistent-razdor-config", "HOME": "/nonexistent-razdor-home"}),
     # The same, after a failed download: the one-line error and the manual path.

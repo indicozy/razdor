@@ -101,10 +101,9 @@ test = false
 # Android (experimental): the APK of `scripts/dist-android.sh`, built by cargo-quad-apk
 # (https://github.com/not-fl3/cargo-quad-apk, pinned in the release workflow). The build uses
 # `--no-default-features --features audio` (no gamepads: gilrs is Linux and desktop only).
-# Storage: release N moves the player's files out of the shared storage once (`migration`), so the
-# storage permissions stay declared for that read: MANAGE_EXTERNAL_STORAGE on Android 11 and later,
-# READ/WRITE_EXTERNAL_STORAGE on Android 8 to 10. Razdor never requests them (no screen asks for
-# them); the release after drops the declarations.
+# Storage: Razdor on Android keeps everything in its own folder (`platform::app_dir`, the app's
+# `getExternalFilesDir`), so it declares no storage permission. Players' files from the old shared
+# folders come in through the system folder picker (`ui::migrate`), which needs none.
 # Updates (`update::phone`): INTERNET for the check and the APK's download; REQUEST_INSTALL_PACKAGES
 # for handing the downloaded APK to the system installer (the player confirms it there). No
 # FileProvider: cargo-quad-apk cannot declare a <provider>, and the installer session takes the
@@ -127,14 +126,12 @@ res = "android/res"
 assets = "menu-art"
 
 [package.metadata.android.application_attributes]
-# Android 10 (API 29): the old storage layout, for the install folder and the saves.
-"android:requestLegacyExternalStorage" = "true"
 # Razdor is a game to the system (API 26+): the adaptive refresh (OnePlus's ADFR and the like)
 # keeps the panel at its top rate for a game while no finger touches the screen. The surface
 # asks for the rate too (android/MainActivityInject.java, razdorWatchSurfaceFrameRate).
 "android:appCategory" = "game"
-# Android 10+ asks on uninstall whether to keep the app's data. New installs use the app's own
-# folder, and so do existing players after the move; until then their files stay in shared storage.
+# Android 10+ asks on uninstall whether to keep the app's data (the game and the saves live in the
+# app's own folder).
 "android:hasFragileUserData" = "true"
 
 [package.metadata.android.activity_attributes]
@@ -150,13 +147,3 @@ name = "android.permission.INTERNET"
 [[package.metadata.android.permission]]
 name = "android.permission.REQUEST_INSTALL_PACKAGES"
 
-[[package.metadata.android.permission]]
-name = "android.permission.MANAGE_EXTERNAL_STORAGE"
-
-[[package.metadata.android.permission]]
-name = "android.permission.READ_EXTERNAL_STORAGE"
-max_sdk_version = 32
-
-[[package.metadata.android.permission]]
-name = "android.permission.WRITE_EXTERNAL_STORAGE"
-max_sdk_version = 29

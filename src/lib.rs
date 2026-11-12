@@ -7,7 +7,6 @@ pub mod trailer;
 pub mod i18n;
 #[cfg(target_os = "android")]
 pub mod jni;
-pub mod migration;
 pub mod platform;
 pub mod transfer;
 pub mod rules;

@@ -1,0 +1,237 @@
+//! The saves of an older release (Android). Razdor keeps its files in its own folder and asks for no
+//! storage permission, so the saves a player kept in the shared «Razdor» folder come in through the
+//! system's folder picker: the player picks that folder, the Java side copies its saves into the
+//! cache (`razdorPickOldSaves`, `razdorOldSavesOutcome`), and they are merged into the app's folder
+//! with the import's own rules (`transfer::import_folder`).
+//!
+//! Who is offered the popup (an existing player): decided once, at the process's start, before
+//! anything writes to the cache ([`decide_at_start`]). A private cache that already holds files
+//! is an older install (older releases kept their picture cache and their update files there);
+//! an empty one is a fresh install, which never sees the popup. The decision is kept in the app's
+//! folder (`saves-move`: "existing", "fresh" or "done"). The popup comes back at each start until
+//! the import ends; the settings' «Перенести сохранения из старой папки Razdor…» is always there.
+
+use std::cell::{Cell, RefCell};
+use std::fs;
+use std::path::PathBuf;
+
+use razdor::i18n::tr;
+use razdor::{local, platform, transfer, trf};
+
+use super::map_import;
+
+/// The file in the app's folder that keeps the decision (see the module doc).
+const MARKER: &str = "saves-move";
+
+/// The popup's text: what changed, and what to pick.
+const OFFER: &str = "In version 1.5.0 Razdor keeps its saves in its own folder. To move the old saves, pick the Razdor folder in the device storage.";
+
+/// What the marker says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Decision {
+    Fresh,
+    Existing,
+    Done,
+}
+
+/// Where the move stands.
+#[derive(Default)]
+enum State {
+    #[default]
+    Hidden,
+    /// The popup (`true`: the one at start; `false`: the settings' window, which cancels to nothing),
+    /// with a note from the last try, if any.
+    Offer(bool, Option<String>),
+    /// The picker is open or its folder is being copied (the flag as in `Offer`).
+    Picking(bool),
+    /// The result, one line, to OK.
+    Done(String),
+}
+
+local! {
+    static STATE: RefCell<State> = const { RefCell::new(State::Hidden) };
+    /// The popup was offered in this run: it is not offered again until the next start.
+    static SHOWN: Cell<bool> = const { Cell::new(false) };
+}
+
+fn marker() -> Option<PathBuf> {
+    platform::app_dir().map(|dir| dir.join(MARKER))
+}
+
+/// The decision a marker's text says; None for anything else.
+fn parse(text: &str) -> Option<Decision> {
+    match text.trim() {
+        "existing" => Some(Decision::Existing),
+        "fresh" => Some(Decision::Fresh),
+        "done" => Some(Decision::Done),
+        _ => None,
+    }
+}
+
+fn decision() -> Option<Decision> {
+    parse(&fs::read_to_string(marker()?).ok()?)
+}
+
+fn write_decision(text: &str) {
+    let Some(path) = marker() else { return };
+    if let Some(dir) = path.parent() {
+        let _ = fs::create_dir_all(dir);
+    }
+    let _ = fs::write(path, text);
+}
+
+/// The start of the process, before anything writes to the cache (Android): records whether this
+/// is an older install (`cache` holds files) or a fresh one. A decision already made stands.
+#[cfg(target_os = "android")]
+pub fn decide_at_start(cache: Option<&Path>) {
+    if decision().is_some() {
+        return;
+    }
+    let had_files = cache.and_then(|dir| fs::read_dir(dir).ok()).is_some_and(|mut entries| entries.next().is_some());
+    write_decision(if had_files { "existing" } else { "fresh" });
+}
+
+/// Offers the popup once in this run, when the decision says an older install's saves are not moved.
+/// The snapshot's `RAZDOR_SCENE_SAVES_MOVE` shows it (with `RAZDOR_SNAPSHOT`).
+pub fn offer_if_due() {
+    if SHOWN.get() || STATE.with_borrow(|s| !matches!(s, State::Hidden)) {
+        return;
+    }
+    let snapshot = std::env::var_os("RAZDOR_SNAPSHOT").is_some() && std::env::var_os("RAZDOR_SCENE_SAVES_MOVE").is_some();
+    if snapshot || decision() == Some(Decision::Existing) {
+        SHOWN.set(true);
+        STATE.with_borrow_mut(|s| *s = State::Offer(true, None));
+    }
+}
+
+/// The settings' button: the window opens at once (it stays available after the popup's «Не сейчас»).
+pub fn open_from_settings() {
+    STATE.with_borrow_mut(|s| {
+        if matches!(s, State::Hidden) {
+            *s = State::Offer(false, None);
+        }
+    });
+}
+
+/// Whether the picker is open or the folder is being copied: the game's start and load wait.
+pub fn busy() -> bool {
+    STATE.with_borrow(|s| matches!(s, State::Picking(_)))
+}
+
+/// A game's start or load was asked while [`busy`]: nothing is started (the log says so).
+pub fn refuse() {
+    razdor::diag::log("saves move: the start waits until the folder is read");
+}
+
+#[cfg(target_os = "android")]
+fn pick_start() -> bool {
+    super::android::start_old_saves_pick()
+}
+
+#[cfg(not(target_os = "android"))]
+fn pick_start() -> bool {
+    false
+}
+
+#[cfg(target_os = "android")]
+fn pick_outcome() -> String {
+    super::android::old_saves_outcome()
+}
+
+#[cfg(not(target_os = "android"))]
+fn pick_outcome() -> String {
+    String::new()
+}
+
+/// Each frame: the picker's answer, when it has one. A copied folder is imported at once.
+pub fn tick() {
+    let popup = match STATE.with_borrow(|s| if let State::Picking(popup) = s { Some(*popup) } else { None }) {
+        Some(popup) => popup,
+        None => return,
+    };
+    let outcome = pick_outcome();
+    let next = match outcome.as_str() {
+        "" => return,
+        "cancel" => if popup { State::Offer(true, None) } else { State::Hidden },
+        "wrong" => State::Offer(popup, Some(tr("This folder holds no Razdor saves. Pick the Razdor folder in the device storage.").to_string())),
+        "copied" => finish_copy(popup),
+        other => {
+            razdor::diag::log(&format!("saves move: the folder cannot be read: {other}"));
+            State::Offer(popup, Some(tr("The folder cannot be read.").to_string()))
+        }
+    };
+    STATE.with_borrow_mut(|s| *s = next);
+}
+
+/// The copied folder (`old-saves` in the cache) imported into the app's saves folder; the copy is
+/// removed either way. A success records the move as done (the popup is gone for good).
+fn finish_copy(popup: bool) -> State {
+    let copy = platform::cache_dir().map(|dir| dir.join("old-saves"));
+    let root = platform::app_dir().map(|dir| dir.join("saves"));
+    let result = match (&copy, root) {
+        (Some(copy), Some(root)) => transfer::import_folder(copy, &root),
+        _ => Err(tr("The folder cannot be read.").to_string()),
+    };
+    if let Some(copy) = &copy {
+        let _ = fs::remove_dir_all(copy);
+    }
+    match result {
+        Ok(imported) => {
+            write_decision("done");
+            let mut line = trf!("Saves moved: {n}.", n = imported.saves);
+            if imported.settings_kept {
+                line = format!("{line} {}", tr("Settings were not replaced: they are already there."));
+            }
+            State::Done(line)
+        }
+        Err(why) => State::Offer(popup, Some(why)),
+    }
+}
+
+/// The window of this module, drawn over the screen (after the others, so it is on top).
+pub fn modal() {
+    let state = STATE.with_borrow_mut(std::mem::take);
+    let next = match state {
+        State::Hidden => State::Hidden,
+        State::Offer(popup, note) => {
+            let mut lines = vec![tr(OFFER).to_string()];
+            lines.extend(note.clone());
+            let (inner, closed) = map_import::frame(tr("Saves from an older release"), &lines, true);
+            match map_import::buttons(inner, &[tr("Pick the Razdor folder"), tr("Not now")]) {
+                Some(0) => {
+                    if pick_start() {
+                        State::Picking(popup)
+                    } else {
+                        State::Offer(popup, Some(tr("The folder picker did not open.").to_string()))
+                    }
+                }
+                Some(_) => State::Hidden,
+                None if closed => State::Hidden,
+                None => State::Offer(popup, note),
+            }
+        }
+        State::Picking(popup) => State::Picking(popup),
+        State::Done(line) => {
+            if map_import::notice_window(tr("Saves from an older release"), &[line.clone()]) {
+                State::Hidden
+            } else {
+                State::Done(line)
+            }
+        }
+    };
+    STATE.with_borrow_mut(|s| *s = next);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_marker_says_existing_fresh_or_done() {
+        assert_eq!(parse("existing\n"), Some(Decision::Existing));
+        assert_eq!(parse("fresh"), Some(Decision::Fresh));
+        assert_eq!(parse(" done "), Some(Decision::Done));
+        assert_eq!(parse("moved by hand"), None, "anything else is no decision");
+        assert_eq!(parse(""), None);
+    }
+}

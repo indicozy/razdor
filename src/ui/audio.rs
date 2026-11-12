@@ -123,7 +123,7 @@ fn write_file(bytes: &[u8]) {
 /// The settings kept back while the files were moved are written once the move has ended (in the
 /// app's folder when it moved). Nothing happens while the move runs, or when nothing waits.
 pub fn flush_deferred() {
-    if super::migrate::busy() {
+    if super::saves_move::busy() {
         return;
     }
     if let Some(bytes) = DEFERRED.with_borrow_mut(Option::take) {
@@ -623,7 +623,7 @@ impl Settings {
         }
         let bytes = serde_json::to_vec_pretty(self).unwrap_or_default();
         // While the files are moved (`ui::migrate`) the folder is being copied: the write waits.
-        if super::migrate::busy() {
+        if super::saves_move::busy() {
             DEFERRED.with_borrow_mut(|deferred| *deferred = Some(bytes));
             return;
         }

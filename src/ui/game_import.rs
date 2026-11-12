@@ -203,15 +203,15 @@ pub fn tick(install: Option<&Path>) -> bool {
     }
     // A download or a repair is not started while the files are moved (the move copies the game folder).
     if DOWNLOAD_REQUESTED.with(|r| r.replace(false)) && !busy() {
-        if super::migrate::busy() {
-            super::migrate::refuse();
+        if super::saves_move::busy() {
+            super::saves_move::refuse();
         } else {
             start_download();
         }
     }
     if REPAIR_REQUESTED.with(|r| r.replace(false)) && !busy() {
-        if super::migrate::busy() {
-            super::migrate::refuse();
+        if super::saves_move::busy() {
+            super::saves_move::refuse();
         } else {
             start_repair();
         }
@@ -262,8 +262,8 @@ fn picked_archive(picked: Picked) {
 /// Starts the import on a thread; its end is seen by [`finish_job`].
 fn start(pending: Pending) {
     // An import is not started while the files are moved: the pending archive is dropped (its cache copy with it).
-    if super::migrate::busy() {
-        super::migrate::refuse();
+    if super::saves_move::busy() {
+        super::saves_move::refuse();
         return;
     }
     let name = pending.found.name.clone();

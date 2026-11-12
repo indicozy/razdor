@@ -775,8 +775,6 @@ pub fn frame(no_install: bool, mods: &[(String, razdor::hub::Text)], active: Opt
     thorny_promo(k, version_y - vsize - 6.0 * k);
     // An update put in place says so (an "Always" update has no window of its own).
     super::update_view::title_line();
-    // The files being moved into the app's folder (Android; nothing else on the desktop).
-    super::migrate::title_line();
     // Esc quits the game at once, without a question, as in the original (0x4c8059); a
     // gamepad's Start, which is Esc elsewhere, does not (Razdor's: pressed to open a menu,
     // it would end the game).
@@ -1845,7 +1843,7 @@ impl Group {
             Group::Battle => &[Row::WalkSpeed, Row::AnimSpeed, Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience, Row::HitShake],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
-            Group::Other => &[Row::Updates, Row::Import, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::Bench],
+            Group::Other => &[Row::Updates, Row::Import, Row::OldSaves, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::Bench],
         }
     }
 }
@@ -1908,6 +1906,7 @@ pub enum Row {
     Keys,
     Updates,
     Import,
+    OldSaves,
     ChronicleSummary,
     BatterySaver,
     RecordGame,
@@ -1916,7 +1915,7 @@ pub enum Row {
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 59] = [
+pub const ALL: [Row; 60] = [
         Row::GraphicsQuality,
         Row::MapZoom,
         Row::ScrollSpeed,
@@ -1972,6 +1971,7 @@ pub const ALL: [Row; 59] = [
         Row::Keys,
         Row::Updates,
         Row::Import,
+        Row::OldSaves,
         Row::ChronicleSummary,
         Row::BatterySaver,
         Row::RecordGame,
@@ -2030,6 +2030,8 @@ pub const ALL: [Row; 59] = [
             // The third person only: the eyes' camera is the hero's own.
             Row::AutoTurn => audio.map_tilt && audio.map_first_person && !audio.map_eyes,
             Row::LightCycle => audio.map_light == LightMode::Cycle,
+            // The picker is Android's (`ui::saves_move`).
+            Row::OldSaves => cfg!(target_os = "android"),
             Row::LightHour => audio.map_light == LightMode::Fixed,
             // The shadows are the light's: shown only with the light on.
             Row::Shadows | Row::LightQuality => audio.map_light != LightMode::Off,
@@ -2756,6 +2758,12 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
             }
         }
         Row::Bench => bench_row(c, geo, over_map),
+        Row::OldSaves => {
+            // Razdor's (the owner's request, 2026-11-12): the saves of an older release come in through the picker.
+            if labelled_row(c, geo, tr("Move saves from the old Razdor folder…"), tr("Choose")).0 {
+                super::saves_move::open_from_settings();
+            }
+        }
         Row::Import => {
             // «Обновить игру из архива…» (Razdor's): the button, or why it is not offered.
             super::game_import::settings_row(Rect::new(c.x, c.y, c.w, geo.row_h), over_map);

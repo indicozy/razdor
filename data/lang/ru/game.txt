@@ -759,11 +759,15 @@ Click the bar = Щелчок по шкале
 seek to its day or mark = перейти к дню или отметке
 play or pause = играть или пауза
 exit the record = выйти из записи
-# The move of the files into the app's folder (Android, ui/migrate.rs)
-Moving files… {pct}% = Перенос файлов… {pct}%
-Moving the files = Перенос файлов
-The files are being moved: wait until it is done. = Файлы переносятся: дождитесь конца.
-Razdor's files were moved to the app's folder. The old Razdor and DiscordTimes folders can be deleted. = Файлы Раздора перенесены в папку приложения. Старые папки Razdor и DiscordTimes можно удалить.
-The game folder was not moved: there was not enough room. If the game is not found, pick its archive. = Папка игры не перенесена: не хватило места. Если игра не найдётся, выберите её архив.
-The game was not moved: the app's folder has a game already, and it is kept. The game in the old DiscordTimes folder stays there. = Игра не перенесена: в папке приложения уже есть игра, она остаётся. Игра в старой папке DiscordTimes тоже остаётся там.
-Not enough room to move the files: {need} MB needed, {free} MB free. = Недостаточно места для переноса файлов: нужно {need} МБ, свободно {free} МБ.
+
+# The saves of an older release (ui::saves_move, the folder picker on Android) and its settings row.
+In version 1.5.0 Razdor keeps its saves in its own folder. To move the old saves, pick the Razdor folder in the device storage. = В версии 1.5.0 Раздор хранит сохранения в своей папке. Чтобы перенести старые сохранения, выберите папку Razdor во внутренней памяти.
+Saves from an older release = Сохранения старой версии
+Pick the Razdor folder = Выбрать папку Razdor
+Not now = Не сейчас
+This folder holds no Razdor saves. Pick the Razdor folder in the device storage. = В этой папке нет сохранений Раздора. Выберите папку Razdor во внутренней памяти.
+The folder cannot be read. = Папку не удалось прочитать.
+The folder picker did not open. = Выбор папки не открылся.
+Saves moved: {n}. = Перенесено сохранений: {n}.
+Move saves from the old Razdor folder… = Перенести сохранения из старой папки Razdor…
+The folder holds no Razdor saves. = В папке нет сохранений Раздора.

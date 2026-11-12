@@ -2079,8 +2079,8 @@ pub fn class_select(game: &mut Option<Game>, demo: &Arc<Content>, scenario: Opti
         }
     }
     // The files are being moved (`migrate`): the start waits, and the player is told.
-    if start && super::migrate::busy() {
-        super::migrate::refuse();
+    if start && super::saves_move::busy() {
+        super::saves_move::refuse();
         start = false;
     }
     if start {
