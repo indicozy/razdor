@@ -169,6 +169,38 @@ void main() {
     FogAt = normal.zw;
 }"#;
 
+/// The vertex stage of the map sprites' GPU placement (backlog 1605, step 5a): each vertex is a corner of a sprite,
+/// placed by the billboard of the frame (`sprite_gpu::Billboard::point`) and projected by the frame's projection (the
+/// tilted view's, `view25::window_matrix` × its view-projection). The packing is `world_view::gpu_object`'s:
+/// `position` is the sprite's foot in world units (y 0), `normal.xy` the corner's offset from the foot in world units,
+/// `normal.zw` the sprite's fog cell (`FOG_GLSL`), `texcoord` the corner's texel, and `color0` the sprite's colour.
+/// The billboard's terms and the sprite size are uniforms (one set per frame); `ScaleU` is the draw's scale
+/// (screen pixels per texel, as the CPU's `Scale`), the same for every sprite of the run. GLSL ES 1.00.
+pub const SHARP_VERTEX_BILLBOARD: &str = r#"#version 100
+attribute vec3 position;
+attribute vec2 texcoord;
+attribute vec4 color0;
+attribute vec4 normal;
+varying highp vec2 uv;
+varying lowp vec4 color;
+varying highp vec2 Scale;
+varying highp vec2 FogAt;
+uniform mat4 Model;
+uniform mat4 Projection;
+uniform vec3 BillRight;
+uniform vec3 BillUp;
+uniform float BillSize;
+uniform vec2 ScaleU;
+void main() {
+    vec3 p = position + BillRight * (BillSize * normal.x) - BillUp * (BillSize * normal.y);
+    gl_Position = Projection * Model * vec4(p, 1.0);
+    uv = texcoord;
+    color = color0 / 255.0;
+    Scale = ScaleU;
+    FogAt = normal.zw;
+}
+"#;
+
 /// A fragment shader with `sharp_uv` and the uniforms `TexSize` and `Scale` declared, then
 /// `extra` (more declarations, e.g. `uniform float Rotation;`), then `main` as the body of
 /// `void main()`. In `main`: `uv` and `color` are the varyings, `sharp_tex(at)` samples
@@ -695,6 +727,60 @@ pub fn draw_mesh_sharp(mesh: &Mesh, scale: Vec2) {
     }
 }
 
+razdor::local! {
+    static BILLBOARD_MATERIAL: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
+}
+
+/// The GPU-placed sprites' material ([`SHARP_VERTEX_BILLBOARD`] with the draw's fragment, [`DRAW_MAIN`]), made once.
+/// `None` when it does not compile: the caller then keeps the CPU path ([`billboard_ready`]).
+fn billboard_material() -> Option<Material> {
+    BILLBOARD_MATERIAL.with(|m| {
+        m.get_or_init(|| {
+            let uniforms = vec![
+                UniformDesc::new("BillRight", UniformType::Float3),
+                UniformDesc::new("BillUp", UniformType::Float3),
+                UniformDesc::new("BillSize", UniformType::Float1),
+                UniformDesc::new("ScaleU", UniformType::Float2),
+                UniformDesc::new("TexSize", UniformType::Float2),
+            ];
+            let fragment = fragment_fog_scaled("", DRAW_MAIN);
+            load_material(
+                ShaderSource::Glsl { vertex: SHARP_VERTEX_BILLBOARD, fragment: &fragment },
+                MaterialParams { uniforms, textures: vec!["FogVis".to_string()], pipeline_params: alpha_pipeline() },
+            )
+            .map_err(|e| razdor::diag!("billboard sharp material: {e}"))
+            .ok()
+        })
+        .clone()
+    })
+}
+
+/// Whether a GPU-placed draw ([`draw_billboard_mesh`]) can be made now: inside a session (its material is the
+/// session's to restore) and outside any blend context, with the material compiled.
+pub fn billboard_ready() -> bool {
+    blend_context().is_none() && in_session() && billboard_material().is_some()
+}
+
+/// Draws `mesh` (its corners as [`SHARP_VERTEX_BILLBOARD`] places them: the billboard `right`, `up` and `size`, the
+/// sharp draw's `scale` in screen pixels per texel) inside the session, then makes the session's material current
+/// again. Only with [`billboard_ready`].
+pub fn draw_billboard_mesh(mesh: &Mesh, right: Vec3, up: Vec3, size: f32, scale: f32) {
+    let (Some(tex), Some(m), Some(base)) = (mesh.texture.as_ref(), billboard_material(), session_base()) else { return };
+    count_draw(Some(tex), mesh.vertices.len());
+    count_break();
+    m.set_uniform("TexSize", texels(tex));
+    m.set_uniform("BillRight", right);
+    m.set_uniform("BillUp", up);
+    m.set_uniform("BillSize", size);
+    m.set_uniform("ScaleU", Vec2::splat(scale) * RASTER.with(std::cell::Cell::get));
+    bind_fog(&m);
+    gl_use_material(&m);
+    draw_mesh(mesh);
+    gl_use_material(&base);
+    count_break();
+    PLAIN.with(|p| p.set(false));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -703,6 +789,18 @@ mod tests {
 
     fn close(a: Vec2, b: Vec2) -> bool {
         (a - b).abs().max_element() < EPS
+    }
+
+    #[test]
+    fn the_billboard_vertex_stage_is_gles2_glsl_and_reads_the_byte_colour_normalised() {
+        // GLES 2 (the Android build) takes GLSL ES 1.00 only: no `in`/`out`, no `texture(`, and the colour attribute is
+        // bytes that the shader divides by 255 (macroquad's `Byte4`, as every sharp vertex stage does).
+        let src = SHARP_VERTEX_BILLBOARD;
+        assert!(src.starts_with("#version 100"));
+        assert!(!src.contains("texture("));
+        assert!(!src.lines().any(|l| l.trim_start().starts_with("in ") || l.trim_start().starts_with("out ")));
+        assert!(src.contains("color = color0 / 255.0;"));
+        assert!(src.contains("FogAt = normal.zw;"));
     }
 
     #[test]

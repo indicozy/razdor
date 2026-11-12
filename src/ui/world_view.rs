@@ -3258,6 +3258,192 @@ fn lit_whole(slot: Slot) -> Slot {
     }
 }
 
+/// The world packing of a decoration, from the map alone (no camera): its foot and its whole picture's top-left corner
+/// relative to the foot, in world units (a sprite pixel is 1/PX). `full` is the sprite's size in pixels. The same
+/// places as `object_foot` and `object_sprite_origin`, which the GPU path ([`gpu_object`]) and its test compare.
+fn deco_packing(o: &Decoration, full: (f32, f32), grid: Grid) -> (Vec2, Vec2) {
+    let rh = grid.row_height();
+    let (x, y) = grid.center(o.tile);
+    let foot = match o.class {
+        1..=8 => {
+            let (sum, n) = razdor::rules::map::object_cells(o).fold((Vec2::ZERO, 0u32), |(s, n), t| {
+                let (cx, cy) = grid.center(t);
+                (s + vec2(cx, cy), n + 1)
+            });
+            if n == 0 {
+                vec2(x, y)
+            } else {
+                sum / n as f32
+            }
+        }
+        _ => {
+            let (dx, dy) = plant_shift(o);
+            vec2(x, y) + vec2(dx, dy) / PX
+        }
+    };
+    let (dx, dy) = match o.class {
+        1..=8 => (16.0, 11.0),
+        _ => plant_shift(o),
+    };
+    let corner = vec2(x + 0.5, y + rh / 2.0) + vec2(dx - full.0 - 0.5, dy - full.1 - 0.5) / PX;
+    (foot, corner - foot)
+}
+
+/// Backlog 1605, step 5a: the GPU placement of the plain map decorations (`RAZDOR_GPU_SPRITES=1`, off by default). The
+/// decorations of each run of consecutive ones in the sorted pass draw as one mesh whose vertices the shader places
+/// ([`sharp::SHARP_VERTEX_BILLBOARD`]); any other item flushes the run and draws as before, so the draw order is kept.
+/// Only the simple case is on the GPU: the tilted view (bent, trailer, first-person and eyes views keep the CPU), the
+/// animation off, no sun colour and no lit material, and per sprite a visibility of 1 with the whole picture or its
+/// box at 1:1 texels and no smaller LOD copy. Anything else keeps the CPU path.
+fn gpu_sprites_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("RAZDOR_GPU_SPRITES").is_ok_and(|v| v.trim() == "1"))
+}
+
+/// Largest number of sprites in one GPU mesh. Macroquad's batcher takes a geometry of at most its draw call's index
+/// capacity (5000 by default, `QuadGl::geometry` clamps a larger one and its indices then read past the vertices):
+/// 800 sprites are 4800 indices.
+const GPU_RUN_QUADS: usize = 800;
+
+/// The frame's terms of the GPU path: the billboard of the camera and the zoom (screen pixels per sprite pixel / PX).
+struct GpuFrame {
+    bb: super::sprite_gpu::Billboard,
+    zoom: f32,
+}
+
+/// The GPU path of this frame, or None when a sprite of it draws on the CPU (see [`gpu_sprites_on`] for the cases).
+/// Called inside the sharp session of the pass ([`sharp::billboard_ready`]).
+fn gpu_frame(cam: &Camera, ctx: &FrameCtx, lit: Option<f32>) -> Option<GpuFrame> {
+    if !gpu_sprites_on() {
+        return None;
+    }
+    let tilt = cam.tilt?;
+    if tilt.cam.bend.is_some() || trailer().is_some() || first_person() || eyes_cam(cam) {
+        return None;
+    }
+    if ctx.anim != 0.0 || ctx.sun.is_some() || lit.is_some() || !super::sharp::billboard_ready() {
+        return None;
+    }
+    Some(GpuFrame { bb: super::sprite_gpu::Billboard::new(tilt.cam.pitch_deg, tilt.cam.yaw_deg, sprite_size()), zoom: cam.scale / PX })
+}
+
+local! {
+    /// The GPU path's run of sprites ([`gpu_object`]): its vertices and indices, and its texture (the atlas).
+    static GPU_RUN: std::cell::RefCell<Mesh> = std::cell::RefCell::new(Mesh { vertices: Vec::new(), indices: Vec::new(), texture: None });
+}
+
+/// Draws the GPU path's run (if any) and empties it.
+fn gpu_flush_run(run: &mut Mesh, frame: &GpuFrame) {
+    if !run.vertices.is_empty() {
+        super::sharp::draw_billboard_mesh(run, frame.bb.right, frame.bb.up, frame.bb.size, frame.zoom);
+    }
+    run.vertices.clear();
+    run.indices.clear();
+    run.texture = None;
+}
+
+/// Ends the GPU path's run at an item the GPU does not place (the pass's next item, or its end).
+fn gpu_flush(frame: &GpuFrame) {
+    GPU_RUN.with(|run| gpu_flush_run(&mut run.borrow_mut(), frame));
+}
+
+/// A map decoration's GPU placement (see [`gpu_frame`]), appended to the run as its four corners in the picture's order
+/// (top left, top right, bottom right, bottom left). Packing (`sharp::SHARP_VERTEX_BILLBOARD`): `position` is the foot in
+/// world units with y 0; `normal` is (corner offset x, corner offset y, fog cell u, fog cell v), the offsets in world
+/// units from the foot; `uv` is the corner's texel; `color` is white (the sprite's full visibility). The size and the
+/// billboard are the frame's uniforms.
+/// True when the decoration is handled here: drawn into the run, or hidden as the CPU hides it. False: the CPU draws it
+/// (its fade, its LOD copy or its box not at 1:1 texels; the run is not touched).
+fn gpu_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera, ctx: &FrameCtx, frame: &GpuFrame) -> bool {
+    let Some(atlas) = art.and_then(|a| a.map_atlas()) else { return false };
+    let Some(r) = atlas.decoration(o.class, o.sprite) else { return false };
+    // The visibility of the whole sprite (`draw_world_in`): 0 is not drawn, 1 is whole; a fade is the CPU's.
+    let detail = detail_visibility(Rect::new(0.0, 0.0, r.full.x * frame.zoom, r.full.y * frame.zoom), ctx.dpi);
+    if detail <= 0.0 {
+        return true;
+    }
+    if detail < 1.0 {
+        return false;
+    }
+    // The smaller copy of the sprite (zoomed out) and the whole sprite at night are the CPU's.
+    if sprite_lod_divisor(cam.scale).and_then(|d| atlas.decoration_lod(o.class, o.sprite, d)).is_some() {
+        return false;
+    }
+    if lights::with_frame(|f| f.is_some_and(|f| f.night > 0.0)) {
+        return false;
+    }
+    // The trees draw the whole sprite (`draw_object`'s `whole`, which the lean shears); the others their box.
+    let slot = if o.class == object_class::TREES { Slot { rect: Rect::new(r.base.x, r.base.y, r.tex.x, r.tex.y), off: Vec2::ZERO, size: r.full, ..r } } else { r };
+    // The box's texels are its pixels, so the sharp scale of the CPU draw is the zoom (`draw_scale`).
+    if (slot.rect.w - slot.size.x).abs() > 1e-3 || (slot.rect.h - slot.size.y).abs() > 1e-3 {
+        return false;
+    }
+    let (foot, rel_tl) = deco_packing(o, (r.full.x, r.full.y), cam.grid);
+    // The fog cell of the foot: a cell that hides the sprite draws nothing. The cell is the CPU's (`map_fog` of the same
+    // 2D foot): a foot on a cell's edge must land in the same cell, and the packed foot's world point differs from the
+    // CPU's by float rounding, which would move such a foot across the edge (measured: whole trees hidden or shown).
+    let fog = match map_fog(cam, object_foot(o, cam)) {
+        super::sprite_fog::Cell::Hidden => return true,
+        super::sprite_fog::Cell::Clear => Vec2::ZERO,
+        super::sprite_fog::Cell::At(uv) => uv,
+    };
+    let t = super::sharp::texels(&atlas.texture);
+    let colour: [u8; 4] = WHITE.into();
+    let position = vec3(foot.x, 0.0, foot.y);
+    GPU_RUN.with(|run| {
+        let mut run = run.borrow_mut();
+        let other_texture = run.texture.as_ref().is_some_and(|tex| tex.raw_miniquad_id() != atlas.texture.raw_miniquad_id());
+        if other_texture || run.vertices.len() + 4 > 4 * GPU_RUN_QUADS {
+            gpu_flush_run(&mut run, frame);
+        }
+        if run.texture.is_none() {
+            run.texture = Some(atlas.texture.clone());
+        }
+        let first = run.vertices.len() as u16;
+        for (cx, cy) in [(0.0f32, 0.0f32), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)] {
+            let c = vec2(cx, cy);
+            let rel = rel_tl + (slot.off + c * slot.size) / PX;
+            let uv = vec2((slot.rect.x + c.x * slot.rect.w) / t.x, (slot.rect.y + c.y * slot.rect.h) / t.y);
+            run.vertices.push(Vertex { position, uv, color: colour, normal: vec4(rel.x, rel.y, fog.x, fog.y) });
+        }
+        run.indices.extend_from_slice(&[first, first + 1, first + 2, first, first + 2, first + 3]);
+    });
+    true
+}
+
+/// Developer check (`RAZDOR_PICK_DUMP=1`, backlog 1605 step 5a): after a tilted pass, a digest of the pickable sprites it
+/// recorded (`PICKS`: their picks and quads) and of what the pointer finds on a grid of the window, to stderr. Equal
+/// digests between two builds mean the pointer finds the same sprites.
+fn dump_picks(cam: &Camera) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if cam.tilt.is_none() || !*ON.get_or_init(|| std::env::var("RAZDOR_PICK_DUMP").is_ok_and(|v| v.trim() == "1")) {
+        return;
+    }
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    PICKS.with_borrow(|quads| {
+        quads.len().hash(&mut hasher);
+        for q in quads {
+            format!("{:?}", q.pick).hash(&mut hasher);
+            for p in q.quad {
+                p.x.to_bits().hash(&mut hasher);
+                p.y.to_bits().hash(&mut hasher);
+            }
+        }
+        let (w, h) = (super::frame_state::screen_w(), super::frame_state::screen_h());
+        let mut y = 0.0;
+        while y < h {
+            let mut x = 0.0;
+            while x < w {
+                front_pick(quads, vec2(x, y)).map(|p| format!("{p:?}")).hash(&mut hasher);
+                x += 4.0;
+            }
+            y += 4.0;
+        }
+        eprintln!("pick-dump: {} pickable quads, digest {:016x}", quads.len(), hasher.finish());
+    });
+}
+
 fn draw_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera, ctx: &FrameCtx) {
     let c = cam.cell_centre(o.tile);
     let base = vec2(c.x, c.y + cam.cell_size().y / 2.0);
@@ -4942,7 +5128,18 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // One sharp session for the pass: its art shares the material switch (see `sharp::session`). With the
     // light on, the lit material scales the painted shadows by the frame's factor (`sharp::session_lit`).
     super::sharp::session_lit(lit, || {
+        // The GPU path (`gpu_frame`): the decorations of each run of consecutive ones are placed by the shader, and any
+        // other item ends the run, so the draw order is the list's.
+        let gpu = gpu_frame(cam, &ctx, lit);
         for d in items.iter().map(|(_, d)| d) {
+            if let Some(g) = &gpu {
+                if let Drawable::Object(o, _) = d {
+                    if gpu_object(o, art, cam, &ctx, g) {
+                        continue;
+                    }
+                }
+                gpu_flush(g);
+            }
             match d {
                 Drawable::Object(o, foot) => {
                     // Razdor's (the owner's request, 2026-11-11): an object too small to see is not drawn, and one
@@ -5017,6 +5214,9 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                 }
             }
         }
+        if let Some(g) = &gpu {
+            gpu_flush(g);
+        }
     });
     // Razdor's «Живая карта»: the smoke of the visible chimneys, one batch over the sprites.
     if living_on(cam) {
@@ -5028,6 +5228,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     }
     NEAR_LIMIT.with(|l| l.set(f32::INFINITY));
     HERO_ON_WINDOW.with(|h| h.set(None));
+    dump_picks(cam);
     if waits {
         gpu_wait(Stage::GpuSprites);
     }

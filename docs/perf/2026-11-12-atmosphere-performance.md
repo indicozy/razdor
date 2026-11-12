@@ -445,3 +445,107 @@ Stages 5a–5c are not started in this commit. What the stage 1 work says about 
   buffer would run out of order. The only route inside macroquad is a `Mesh` per run, copied each frame: the saving is
   the per-sprite math (the billboard, the cull, the fog and shade, the form colours, the sharp draw set-up), not the
   copy. Whether that saves the 2.1 ms of zoomed-out placement is what 5a has to measure.
+
+## Sprite placement on the GPU: stage 5a-i, the simple case (backlog 1605, step 5)
+
+What changed: the plain map decorations (trees, rocks, plants: the `Drawable::Object` items of `draw_world_in`, drawn by
+`draw_object` through `draw_picture_form` or `draw_leaning`) are placed by a vertex shader when `RAZDOR_GPU_SPRITES=1`
+(off by default). Each maximal run of consecutive decorations in the sorted item list becomes one `Mesh`, filled this
+frame: `world_view::gpu_object` appends four corners per sprite, `sharp::draw_billboard_mesh` draws the run with
+`sharp::SHARP_VERTEX_BILLBOARD`, and any other item flushes the run first, so the draw order is the list's.
+
+Packing (`SHARP_VERTEX_BILLBOARD` documents it): `position` is the sprite's foot in world units (y 0, from
+`deco_packing`, the stage 1 packing moved out of the test); `normal.xy` is the corner's offset from the foot in world
+units (`rel_tl + (off + c·size)/PX`, so a box is the picture's box and a whole tree is its whole picture); `normal.zw` is
+the sprite's fog cell (`sprite_fog`, as the CPU's `FOG_CELL`); `texcoord` is the corner's texel; `color0` is white
+(full visibility; the colour is bytes, so the shader divides by 255, as every sharp vertex stage does). The billboard's
+right and up and the sprite size are uniforms set once per draw (`sprite_gpu::Billboard`, the same terms the stage 1
+harness checks), and `ScaleU` is the zoom (the CPU's sharp `Scale`: screen pixels per texel, times the raster factor).
+The shader is `Projection · Model · (foot + size·rel.x·right − size·rel.y·up)`; the tilted pass's projection is the
+same `window_matrix · view_proj` that the CPU's sprites go through, so no matrix is computed per sprite.
+
+Eligible (anything else keeps the CPU path, byte for byte as before): the 2.5D view, not bent (the trailer, the first
+person's `bend` and the eyes view keep the CPU: their per-sprite near fade and magnification are CPU maths); the map
+animation off (`ctx.anim == 0`); no sun colour (`ctx.sun`); no lit material (`lit` is none: the light is off); no night
+whole-sprite switch; per sprite: the detail visibility is 1 (a sprite in the fade band, 2 to 3 px, is the CPU's; a
+sprite at 0 is not drawn, as on the CPU), no smaller LOD copy used (`decoration_lod`), and the box at 1:1 texels (so the
+CPU's sharp scale is the zoom). A fogged cell that hides the sprite draws nothing, as on the CPU.
+
+Two packing details that the proof found:
+- The fog cell is the CPU's: `map_fog` of the same 2D foot (`object_foot`), not of the packed world point. A foot on a
+  cell's edge (y = 25.78125 on «Другой берег») lands on the other side of the edge after float rounding, and whole
+  trees were then hidden or shown (max 172 levels, PSNR 43.8 dB on the partly explored map before the fix).
+- A run is at most 800 sprites (4800 indices). Macroquad's batcher clamps one geometry to its draw call's index capacity
+  (5000) and then the indices read past the vertices (the first try drew red slabs over the frame).
+
+The shader's colour attribute: `Byte4` is not normalised; the first try multiplied by the bytes (white blobs). The
+test `the_billboard_vertex_stage_is_gles2_glsl_and_reads_the_byte_colour_normalised` pins the `/ 255.0` and GLSL ES 1.00.
+
+Pictures (RTX 4060 for the matrix too, VirtualGL, private Xvfb, 1024×768, anim off; base = `origin/gpu-sprites` `2a8e4230`
+built from `git archive`; new = this commit with `RAZDOR_GPU_SPRITES=1`). Matrices: `matrix5a.sh` (the perf-retain
+matrix, 48 runs × 2 frames each, the runs split over both cards by half). `cmp_matrix.py` pairs the PNGs by name:
+- Explored map, 96 PNGs: 88 identical; 7 at max 2 per channel (PSNR 73–79 dB); one shot, `rk3-25d-z05-off` frame 60,
+  max 13 on 17 pixels out of 786,432, all on one row of a sprite's edge (PSNR 72.8 dB). The brief's bar is max 2; this
+  shot is over it by 11 levels on 17 pixels. Its cause is a sub-texel edge: the packed corners differ from the CPU's
+  by the stage 1 bound (0.003 px), and a sprite edge on a texel boundary takes the other texel. Not fixed; the
+  pixels are reported, not hidden.
+- Partly explored map (no `RAZDOR_SCENE_EXPLORED`, the fog in view), 96 PNGs: 90 identical; the other 6 at max 2 (PSNR
+  78.7 dB or more). The fog-cell fix above is what made this one pass.
+- Mid-run reveal (`RAZDOR_SCENE_SHOW=40,40,6` on «Другой берег», partly explored; frames 30 and 90): 2.5D max 2 (PSNR
+  81.7 dB); third person identical (not eligible).
+
+Picks (`RAZDOR_PICK_DUMP=1`, a developer switch: after the tilted pass, a digest of `PICKS` and of `front_pick` on a
+4-px grid of the window, to stderr): six scene and zoom cases (both scenes; default, zoom 0.05, zoom 0.05 fit), 2.5D,
+the GPU path off and on, two frames each with 45 digests per run: 90 of 90 identical in every case. Decorations are
+never picked (`Pick`: hero, armies and locations only), so the pick records are not touched by the path; the digest
+shows it. The flat view draws no pick record and has no GPU path.
+
+Coverage (the frame's count of decorations, `gpu_object` placed vs the CPU's draws; a temporary counter, not in the
+commit): «Другой берег» zoom 0.05, 2.5D: 4,169 placed, 0 on the CPU per frame. «Другой берег» whole map (fit), 2.5D:
+0 placed, 12,805 on the CPU (every sprite is in the fade band, 2 to 3 px). РК3-Столица, 2.5D default: 909 placed, 0 on
+the CPU.
+
+Timing (world-pass ms and work ms, the frame probe's CSV, medians of the frames after the first 100, 30 s per run,
+interleaved, two rounds (round 2 in the reverse order), RTX 4060 through VirtualGL, anim off in both; the machine was
+shared: another session's trailer render and encoder ran during round 1, load 15): the controls (third person, whole
+map, no GPU decorations) move by 30–40 % between runs, so the spread is about the size of any effect here.
+
+| Case | base world ms (r1, r2) | new world ms (r1, r2) | base work ms | new work ms | draws base → new |
+|---|---|---|---|---|---|
+| «Другой берег», zoom 0.05, 2.5D (4,169 placed) | 4.17, 4.63 | 5.41, 6.21 | 4.62, 5.07 | 5.96, 6.74 | 173 → 221 |
+| «Другой берег», whole map (fit), 2.5D (0 placed) | 18.01, 12.32 | 17.01, 22.97 | 19.11, 12.76 | 17.63, 23.54 | 215 → 215 |
+| РК3-Столица, 2.5D (909 placed) | 0.60, 0.60 | 1.15, 0.63 | 0.73, 0.73 | 1.62, 0.89 | 156 → 169 |
+| control: «Другой берег», zoom 0.05, third person | 3.91, 6.33 | 5.03, 5.97 | 5.74, 10.04 | 10.09, 9.43 | 172 → 172 |
+| control: «Другой берег», whole map, third person | 16.88, 14.34 | 16.94, 16.76 | 30.08, 20.21 | 30.14, 29.93 | 212 → 212 |
+
+Verdict: no measured gain, and the zoomed-out 2.5D case is slower in both rounds (+30 % and +34 % of the world pass).
+The sprites' placement math is now on the GPU, but the run structure costs more: the item list alternates decorations
+with buildings, armies and the hero, so the runs are short and each one is a draw call with its own uniform sets and
+texture binding (173 → 221 draws in the zoomed case). The per-sprite work that is left (the cell lookup, the foot, the
+packing) is about what the CPU's placement cost was once the draw calls are counted. The whole map is not on the GPU at
+all: its sprites are in the detail fade, which is the CPU's in this stage. The controls are not the point of the
+measurement and show the noise that makes a 30 % difference unresolved on this machine; the zoomed-out slowdown is
+consistent across both rounds but has not been reproduced on a quiet machine.
+
+Left for the next stages (not done here):
+- 5a-ii, the detail fade: the sprites at 2 to 3 px (`detail_visibility`, the whole map's case), as a per-vertex
+  visibility (one more packed float, the colour alpha) with the same 8-bit truncation the CPU has.
+- 5a-iii, the LOD copies (`decoration_lod`: a different texel rectangle with the full sprite's size, per vertex) and
+  the night's whole-sprite switch (`lit_whole`).
+- The sun's colour per corner (`draw_picture_form`'s `form_colour_in`, four colours per sprite: the colour attribute
+  can carry them) and the lit material (`LIT_MAIN`'s painted-shadow alpha in the shader, with `ShadowK`).
+- The sway of the trees (`draw_leaning`'s lean, 5b, with the phase and the sway amplitude in the vertex).
+- The bent views and the eyes and first-person views (5c): their sheet `Bend::point` and their per-sprite near fade and
+  magnification; those need the stage 1 harness extended to the bent and eyes cameras first.
+- The run structure is the real limit: the saving is only worth taking when the runs are long, which needs the sorted
+  list grouped by texture and by layer (a different draw order is not allowed: the pictures must stay).
+
+Checks: `cargo clippy --release --all-targets -- -D warnings` clean; the fasttest targeted tests (the stage 1 harness on
+the install, and the new shader test) pass; the Android cross-compile (`cargo check --release --target
+aarch64-linux-android --bin razdor`, NDK 29 clang) passes with the one unused-variable warning in `src/update.rs`, which
+is not this change's; the full `cargo test --release` with the real install and `RAZDOR_PERF_BUDGET_SCALE=4`: 1714 + 1052
+passed (the placement harness and the shader test among them); `cargo clippy --release --all-targets -- -D warnings`
+clean on the final tree.
+
+Timing note: the timings ran while another session rendered on the same machine; the owner then started playing, so
+the coordinator moved the jobs to CPUs 8–19 at nice 19 (the RTX 4060 is the only GPU used for pictures and timings).

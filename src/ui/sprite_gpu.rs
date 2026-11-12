@@ -8,10 +8,12 @@
 //! base term. [`Billboard::point`] is the shader's arithmetic; the harness in `world_view`'s tests compares it with the
 //! CPU's quads for every sprite class.
 //!
-//! No macroquad here: this module is pure, and the test is the only user for now.
+//! No macroquad here: this module is pure. `world_view`'s `gpu_object` packs the vertices and `sharp`'s
+//! `SHARP_VERTEX_BILLBOARD` is the shader that runs [`Billboard::point`] (backlog 1605, step 5a).
 
-use macroquad::prelude::{vec2, vec3, Mat4, Vec2, Vec3};
-use macroquad::prelude::Rect;
+use macroquad::prelude::{vec3, Vec3};
+#[cfg(test)]
+use macroquad::prelude::{vec2, Mat4, Rect, Vec2};
 
 use super::view25;
 
@@ -37,6 +39,8 @@ impl Billboard {
     /// The world point of a sprite vertex: `foot` is the ground point the sprite stands on (world units, y 0 on the
     /// flat ground) and `rel` the vertex's offset from the foot in world units (the picture's corner, `quad_rel`).
     /// The billboard scales `rel` by the size: `foot + size·rel.x·right − size·rel.y·up`.
+    /// (The shader's arithmetic, `sharp::SHARP_VERTEX_BILLBOARD`: the live path has no CPU copy of it; the test does.)
+    #[cfg(test)]
     pub fn point(&self, foot: Vec3, rel: Vec2) -> Vec3 {
         foot + self.right * (self.size * rel.x) - self.up * (self.size * rel.y)
     }
@@ -45,6 +49,7 @@ impl Billboard {
 /// The corners of a picture relative to its foot, in world units: the picture's top-left corner `tl` (relative to the foot)
 /// and its size in pixels `size_px`, at `px_per_unit` pixels per world unit. The order is `picture_quad`'s: top left, top
 /// right, bottom right, bottom left.
+#[cfg(test)]
 pub fn quad_rel(tl: Vec2, size_px: Vec2, px_per_unit: f32) -> [Vec2; 4] {
     let d = size_px / px_per_unit;
     [tl, tl + vec2(d.x, 0.0), tl + d, tl + vec2(0.0, d.y)]
@@ -52,6 +57,7 @@ pub fn quad_rel(tl: Vec2, size_px: Vec2, px_per_unit: f32) -> [Vec2; 4] {
 
 /// The projection of a world point through a view-projection matrix into the window's pixels of `frame`, as
 /// `view25::project_with` (the GPU's `Projection`, then the window's mapping). None behind the eye.
+#[cfg(test)]
 pub fn project(view_proj: Mat4, p: Vec3, frame: Rect) -> Option<Vec2> {
     view25::project_with(view_proj, p, frame)
 }

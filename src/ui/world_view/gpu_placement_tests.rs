@@ -9,36 +9,6 @@ use razdor::dt::install::DtInstall;
 use razdor::rules::content::{Content, HeroClass};
 use std::sync::Arc;
 
-/// The world packing of a decoration, from the map alone (no camera): its foot and its picture's top-left corner
-/// relative to the foot, in world units. `sprite` is the picture's size in pixels.
-fn deco_packing(o: &Decoration, sprite: (f32, f32), grid: Grid) -> (Vec2, Vec2) {
-    let rh = grid.row_height();
-    let (x, y) = grid.center(o.tile);
-    let foot = match o.class {
-        1..=8 => {
-            let (sum, n) = razdor::rules::map::object_cells(o).fold((Vec2::ZERO, 0u32), |(s, n), t| {
-                let (cx, cy) = grid.center(t);
-                (s + vec2(cx, cy), n + 1)
-            });
-            if n == 0 {
-                vec2(x, y)
-            } else {
-                sum / n as f32
-            }
-        }
-        _ => {
-            let (dx, dy) = plant_shift(o);
-            vec2(x, y) + vec2(dx, dy) / PX
-        }
-    };
-    let (dx, dy) = match o.class {
-        1..=8 => (16.0, 11.0),
-        _ => plant_shift(o),
-    };
-    let corner = vec2(x + 0.5, y + rh / 2.0) + vec2(dx - sprite.0 - 0.5, dy - sprite.1 - 0.5) / PX;
-    (foot, corner - foot)
-}
-
 /// The world packing of a building, from the map alone (as `building_sprite_origin` and `building_foot` place it).
 fn building_packing(l: &Location, sprite: (f32, f32), grid: Grid) -> (Vec2, Vec2) {
     let rh = grid.row_height();
