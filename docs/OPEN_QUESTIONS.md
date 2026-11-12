@@ -849,6 +849,13 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   so the caster's turn ends. The god test runs under the default rule again. Still open: whether
   the original hangs the same way, and whether its exe has a guard that this one does not model.
 
+- **1.5.0 perf check: accepted slowdown and an unreproduced crash, re-check at the next release** (2026-11-13).
+  The release check on the RTX 4060 flagged rk3-start frame time +6% (+0.10 ms) and 2.5D map load +18%
+  (+0.07 s) against v1.4.1, at the noise threshold; the owner accepted it (baseline
+  `tools/perf/baselines/v1.5.0-gpu-4060.json`, `meta.accepted`). A first run had every db-zoomout run
+  exit 101 (a panic) that 9 reruns did not reproduce. Next release: compare with v1.5.0 and v1.4.1 with
+  `--keep`, profile the per-frame additions if the cost persists, run db-zoomout repeatedly to catch the panic.
+
 ## Settled
 
 - **Replays: the battle that starts on a walk's last steps, and the campaign drift at stretch 463** (2026-11-11;

@@ -11,7 +11,7 @@ fail() { echo "check-game-link: $1" >&2; exit "${2:-1}"; }
 
 code_rs="$root/src/gdrive.rs"
 # The GAME constant's fields: the first `    id:` and `    size:` at the constant's indent (the tests use deeper indents).
-id="$(sed -n 's/^    id: "\([^"]*\)",$/\1/p' "$code_rs" | head -n 1)"
+id="$(sed -n 's/^    link: Link::Drive("\([^"]*\)"),$/\1/p' "$code_rs" | head -n 1)"
 size="$(sed -n 's/^    size: \([0-9_]*\),$/\1/p' "$code_rs" | head -n 1 | tr -d _)"
 [ -n "$id" ] || fail "the archive id not found in src/gdrive.rs"
 [ -n "$size" ] || fail "the archive size not found in src/gdrive.rs"
