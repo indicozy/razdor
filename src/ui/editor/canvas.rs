@@ -213,8 +213,9 @@ pub fn draw_building_sprite(art: Option<&DtArt>, cam: &Cam, x: u16, y: u16, size
     let tint = Color::new(1.0, 1.0, 1.0, alpha);
     if let Some((atlas, r)) = art.and_then(|a| a.map_atlas()).and_then(|at| Some((at, at.building(picture.0, picture.1)?))) {
         let (dx, dy) = bridge_offset(picture);
-        let at = cam.to_screen(vec2(x as f32 + 1.0, y as f32 + 1.0)) + vec2(dx.round() - r.w, dy.round() - r.h) * cam.zoom;
-        draw_texture_ex(&atlas.texture, at.x, at.y, tint, DrawTextureParams { dest_size: Some(vec2(r.w * cam.zoom, r.h * cam.zoom)), source: Some(r), ..Default::default() });
+        // The whole sprite's place, and its box drawn within it.
+        let at = cam.to_screen(vec2(x as f32 + 1.0, y as f32 + 1.0)) + vec2(dx.round() - r.full.x, dy.round() - r.full.y) * cam.zoom + r.off * cam.zoom;
+        draw_texture_ex(&atlas.texture, at.x, at.y, tint, DrawTextureParams { dest_size: Some(r.size * cam.zoom), source: Some(r.rect), ..Default::default() });
         return;
     }
     let fr = cam.rect(Footprint::of(x as i32, y as i32, size.0, size.1).main);
@@ -285,8 +286,9 @@ pub fn draw_map(doc: &EditorDoc, art: Option<&DtArt>, cam: &Cam, overview: Optio
                 let base = cam.to_screen(vec2(o.x as f32 + 0.5, o.y as f32 + 1.0));
                 match atlas.and_then(|at| Some((at, at.decoration(o.class, o.sprite)?))) {
                     Some((at, r)) => {
-                        let (w, h) = (r.w * cam.zoom, r.h * cam.zoom);
-                        draw_texture_ex(&at.texture, base.x - w / 2.0, base.y - h, WHITE, DrawTextureParams { dest_size: Some(vec2(w, h)), source: Some(r), ..Default::default() });
+                        let (w, h) = (r.full.x * cam.zoom, r.full.y * cam.zoom);
+                        let at_px = vec2(base.x - w / 2.0, base.y - h) + r.off * cam.zoom;
+                        draw_texture_ex(&at.texture, at_px.x, at_px.y, WHITE, DrawTextureParams { dest_size: Some(r.size * cam.zoom), source: Some(r.rect), ..Default::default() });
                     }
                     None => placeholder_object(o.class, o.sprite, base, unit),
                 }

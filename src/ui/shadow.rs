@@ -234,13 +234,34 @@ impl Projection {
     /// vertex's colour from `colour_at(t)`, where `t` is its height above the foot as a share of the
     /// picture's (0 at the foot, 1 at the top): the penumbra's ramp, sharp near the base, soft at the tip.
     /// `None` when the foot is at the picture's top.
+    /// The whole picture's quad (the reference of [`Projection::picture_mesh_ramp_box`], which the shadows use).
+    #[cfg(test)]
     pub fn picture_mesh_ramp(&self, src: Rect, atlas: Vec2, colour_at: impl Fn(f32) -> Color) -> Option<(Vec<Vertex>, Vec<u16>)> {
         let bottom = self.foot_row.clamp(0.0, src.h);
         if bottom <= 0.0 {
             return None;
         }
         let corners = [vec2(0.0, 0.0), vec2(src.w, 0.0), vec2(src.w, bottom), vec2(0.0, bottom)];
-        let vertices = corners.map(|px| self.vertex(px, src, atlas, colour_at(1.0 - px.y / bottom))).to_vec();
+        let vertices = corners.map(|px| self.vertex(px, vec2(src.x, src.y), atlas, colour_at(1.0 - px.y / bottom))).to_vec();
+        Some((vertices, vec![0, 1, 2, 0, 2, 3]))
+    }
+
+    /// [`Projection::picture_mesh_ramp`] of a box of the sprite, not of the whole sprite: `full_h` is the sprite's height,
+    /// `boxed` the box in the sprite's pixels (from its top-left) and `base` the texel of the sprite's pixel (0, 0). The
+    /// penumbra's ramp is the whole sprite's (it runs from the sprite's top to its foot, `full_h` clamps the foot), so the
+    /// colours are those of the uncut quad at the same points; only the rows the box holds are cast.
+    pub fn picture_mesh_ramp_box(&self, full_h: f32, boxed: Rect, base: Vec2, atlas: Vec2, colour_at: impl Fn(f32) -> Color) -> Option<(Vec<Vertex>, Vec<u16>)> {
+        let bottom = self.foot_row.clamp(0.0, full_h);
+        if bottom <= 0.0 {
+            return None;
+        }
+        let (x0, x1) = (boxed.x, boxed.x + boxed.w);
+        let (y0, y1) = (boxed.y, (boxed.y + boxed.h).min(bottom));
+        if y1 <= y0 {
+            return None;
+        }
+        let corners = [vec2(x0, y0), vec2(x1, y0), vec2(x1, y1), vec2(x0, y1)];
+        let vertices = corners.map(|px| self.vertex(px, base, atlas, colour_at(1.0 - px.y / bottom))).to_vec();
         Some((vertices, vec![0, 1, 2, 0, 2, 3]))
     }
 
@@ -253,14 +274,15 @@ impl Projection {
         let vertices = card
             .verts
             .iter()
-            .map(|&(x, y)| by_card.vertex(vec2(x, y), src, atlas, colour_at((1.0 - y / foot).clamp(0.0, 1.0))))
+            .map(|&(x, y)| by_card.vertex(vec2(x, y), vec2(src.x, src.y), atlas, colour_at((1.0 - y / foot).clamp(0.0, 1.0))))
             .collect();
         (vertices, card.tris.clone())
     }
 
-    fn vertex(&self, px: Vec2, src: Rect, atlas: Vec2, color: Color) -> Vertex {
+    /// The vertex at the sprite's pixel `px`, its texel being `base + px` (`base`: the texel of the sprite's pixel (0, 0)).
+    fn vertex(&self, px: Vec2, base: Vec2, atlas: Vec2, color: Color) -> Vertex {
         let p = self.point(px);
-        let uv = vec2(src.x + px.x, src.y + px.y) / atlas;
+        let uv = (base + px) / atlas;
         Vertex::new(p.x, p.y, 0.0, uv.x, uv.y, color)
     }
 }
@@ -382,6 +404,25 @@ mod penumbra_tests {
         let mut twice = rgba.clone();
         blur_alpha(&mut twice, w, h, 2);
         assert!(a(&twice, 1, 2) > 0, "two passes spread the edge further");
+    }
+
+    #[test]
+    fn a_box_cut_of_a_picture_casts_the_colours_of_the_whole_picture_at_the_same_points() {
+        let p = Projection { origin: vec2(3.0, 5.0), zoom: 2.0, foot_row: 14.0, dir: vec2(-1.0, 0.0), len: 1.5 };
+        let colour = |t: f32| Color::new(t, 0.0, 0.0, 1.0);
+        let atlas = vec2(64.0, 64.0);
+        // A 20-row picture with its foot at row 14, and its box: rows 4 to 13 of columns 2 to 5 (the foot is inside it).
+        let (cut, _) = p.picture_mesh_ramp_box(20.0, Rect::new(2.0, 4.0, 4.0, 9.0), vec2(0.0, 0.0), atlas, colour).expect("a box above the foot");
+        assert_eq!(cut.len(), 4);
+        // Each corner is the sprite's pixel on the quad's mapping, and carries the whole picture's colour there
+        // (the ramp is 1 at the top of the sprite and 0 at its foot, whatever the box).
+        for (v, px) in cut.iter().zip([vec2(2.0, 4.0), vec2(6.0, 4.0), vec2(6.0, 13.0), vec2(2.0, 13.0)]) {
+            let pos = vec2(v.position.x, v.position.y);
+            assert!((pos - p.point(px)).length() < 1e-3, "{px:?} at {pos:?}");
+            let c = v.color[0] as f32 / 255.0;
+            assert!((c - (1.0 - px.y / 14.0)).abs() < 0.01, "the colour of row {} is the whole picture's", px.y);
+            assert!((v.uv - px / atlas).length() < 1e-4, "the texel of the sprite's pixel {px:?}");
+        }
     }
 
     #[test]

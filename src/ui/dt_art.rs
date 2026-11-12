@@ -20,6 +20,7 @@ use std::path::PathBuf;
 use razdor::dt::install::DtInstall;
 use razdor::dt::DtError;
 
+use super::atlas_cut;
 use super::living;
 use super::terrain::TerrainLayer;
 use super::world_view::surface_color;
@@ -33,6 +34,37 @@ enum Key {
     Terrain(u8),
     Object(u8, u8),
     Building(u8, u8),
+}
+
+/// Where a sprite's picture is in an atlas (Razdor's cut, `atlas_cut`): the box of its opaque texels, not the whole
+/// sprite, so a quad covers the box only. A draw places the box at the sprite's origin plus `off` (sprite pixels,
+/// scaled by the zoom) and takes `rect` as its source; the sprite's pixel `p` is texel `base + p` at full resolution.
+#[derive(Clone, Copy, Debug)]
+pub struct Slot {
+    /// The box in the texture's texels.
+    pub rect: Rect,
+    /// The box's top-left and size in sprite pixels (at full resolution).
+    pub off: Vec2,
+    pub size: Vec2,
+    /// The texel of the sprite's pixel (0, 0) at full resolution.
+    pub base: Vec2,
+    /// The whole sprite's size in sprite pixels.
+    pub full: Vec2,
+}
+
+impl Slot {
+    /// How the sprite's pixels lie on its texture ([`Frame`]).
+    pub fn frame(&self) -> Frame {
+        Frame { base: self.base, full: self.full }
+    }
+}
+
+/// How a sprite's pixels lie on a texture: its pixel `p` is texel `base + p` and the sprite is `full` pixels big. The
+/// meshes that cut a sprite into pieces (the cards, the moving parts) take their uvs and shading from it.
+#[derive(Clone, Copy, Debug)]
+pub struct Frame {
+    pub base: Vec2,
+    pub full: Vec2,
 }
 
 /// A texture [`DtArt::warm`] makes ahead, once its picture is decoded.
@@ -49,8 +81,8 @@ const SOFT_PASSES: usize = 3;
 
 pub struct Atlas {
     pub texture: Texture2D,
-    /// (section, category, index) → source rectangle in `texture`.
-    rects: RectTable,
+    /// (section, category, index) → the sprite's slot in `texture` ([`Slot`]).
+    rects: RectTable<Slot>,
     /// The 2.5D cards of the building sprites that have shipped cut data ([`cards`]), by the same key.
     cards: HashMap<(u32, u32, u32), &'static [Card]>,
     /// The cards the depth model cut, or the cache held, for the building sprites with no shipped
@@ -70,6 +102,7 @@ pub struct Living {
     /// Each chimney's box in sprite pixels.
     pub chimneys: Vec<[f32; 4]>,
     pub parts: Vec<living::Part>,
+    /// The cleared copy of the picture box only (the box of the sprite's [`Slot`]).
     body: Option<Image>,
     texture: OnceCell<Option<Texture2D>>,
 }
@@ -84,42 +117,42 @@ impl Living {
 /// The atlas's rectangles as a dense table over the two sections and the 8-bit category and index
 /// that [`Atlas::decoration`] and [`Atlas::building`] look up (a `HashMap` cost a hash per sprite a
 /// frame). A sprite key outside them can never be asked for, so it is not kept.
-struct RectTable(Vec<Option<Rect>>);
+struct RectTable<T: Copy>(Vec<Option<T>>);
 
-impl RectTable {
-    fn slot(section: u32, cat: u32, idx: u32) -> Option<usize> {
+impl<T: Copy> RectTable<T> {
+    fn index(section: u32, cat: u32, idx: u32) -> Option<usize> {
         (section < 2 && cat < 256 && idx < 256).then_some(((section << 16) | (cat << 8) | idx) as usize)
     }
 
     /// The table of `entries`; a later entry with the same key replaces an earlier one.
-    fn from_entries(entries: impl IntoIterator<Item = ((u32, u32, u32), Rect)>) -> RectTable {
+    fn from_entries(entries: impl IntoIterator<Item = ((u32, u32, u32), T)>) -> RectTable<T> {
         let mut table = vec![None; 2 << 16];
         for ((section, cat, idx), r) in entries {
-            if let Some(k) = Self::slot(section, cat, idx) {
+            if let Some(k) = Self::index(section, cat, idx) {
                 table[k] = Some(r);
             }
         }
         RectTable(table)
     }
 
-    fn get(&self, section: u32, cat: u32, idx: u32) -> Option<Rect> {
-        Self::slot(section, cat, idx).and_then(|k| self.0[k])
+    fn get(&self, section: u32, cat: u32, idx: u32) -> Option<T> {
+        Self::index(section, cat, idx).and_then(|k| self.0[k])
     }
 }
 
 impl Atlas {
     /// Sprite of a `.DTm` map object (class, sprite id).
-    pub fn decoration(&self, class: u8, sprite: u8) -> Option<Rect> {
+    pub fn decoration(&self, class: u8, sprite: u8) -> Option<Slot> {
         self.rects.get(ObjectSprite::DECORATIONS, class.into(), sprite.into())
     }
 
-    /// The atlas rectangle of a sprite by its section, category and index (`ObjectSprite`).
-    pub fn rect_of(&self, section: u32, cat: u32, idx: u32) -> Option<Rect> {
+    /// The slot of a sprite by its section, category and index (`ObjectSprite`).
+    pub fn slot_of(&self, section: u32, cat: u32, idx: u32) -> Option<Slot> {
         self.rects.get(section, cat, idx)
     }
 
     /// Sprite of a building by picture type and variant.
-    pub fn building(&self, picture_type: u8, variant: u8) -> Option<Rect> {
+    pub fn building(&self, picture_type: u8, variant: u8) -> Option<Slot> {
         self.rects.get(ObjectSprite::BUILDINGS, picture_type.into(), variant.into())
     }
 
@@ -138,6 +171,15 @@ impl Atlas {
     pub fn living(&self, picture_type: u8, variant: u8) -> Option<&Living> {
         self.living.get(&(ObjectSprite::BUILDINGS, picture_type.into(), variant.into()))
     }
+}
+
+/// The shadow textures of the map's sprites (`DtArt::shadow_layout`): the silhouette (`sharp`) and its blur (`soft`), in
+/// one layout. Each sprite's slot holds the box its shadow reaches; the texels in it are those the uncut atlas held
+/// (its blur spreads over the neighbours, so they are copied from it).
+pub struct ShadowAtlas {
+    sharp: Texture2D,
+    soft: Texture2D,
+    slots: RectTable<Slot>,
 }
 
 /// Whether the 2.5D view folds a building into its cut cards (and the depth model cuts the rest). Off by default: the
@@ -172,9 +214,9 @@ pub struct DtArt {
     warm: RefCell<VecDeque<(PathBuf, Warm)>>,
     /// The depth model's workers, once they are started ([`DtArt::depth_tick`]).
     depth: RefCell<Option<depth::Service>>,
-    /// The shadow atlas of «От солнца» (`shadow`): the map atlas's layout, each sprite's blurred
-    /// silhouette in its alpha. Made on the first frame that casts sun shadows.
-    shadows: OnceCell<Option<(Texture2D, Texture2D)>>,
+    /// The shadow atlas of «От солнца» (`shadow`): each sprite's silhouette and its blur, cut to the boxes
+    /// the shadows reach ([`ShadowAtlas`]). Made on the first frame that casts shadows.
+    shadows: OnceCell<Option<ShadowAtlas>>,
     /// The building mask of the map atlas (`building_emissive`), built on the first lit frame.
     building_mask: OnceCell<Option<Texture2D>>,
 }
@@ -468,8 +510,9 @@ impl DtArt {
 
     /// The map objects' and buildings' sprites at `1/divisor` of their size (2 or 4), packed into one smaller
     /// texture with the same keys (Razdor's, `RAZDOR_SPRITE_LOD=1`: the whole map zoomed out draws them from it).
-    /// Each sprite is box-filtered; its rectangle is the full one divided by the divisor. `None` for a divisor
-    /// that is not 2 or 4, or when the sprites do not pack.
+    /// Each sprite is box-filtered and cut to its box like the full atlas ([`cut_pictures`]); its slot is the full one's
+    /// divided by the divisor, so a draw places it where the full sprite goes. `None` for a divisor that is not 2 or 4,
+    /// or when the sprites do not pack.
     pub fn sprite_lod_atlas(&self, divisor: u32) -> Option<&Atlas> {
         let slot = match divisor {
             2 => 0,
@@ -481,19 +524,20 @@ impl DtArt {
                 let sprites = &self.objects().sprites;
                 let small: Vec<Image> = sprites.iter().map(|s| downscale(&s.image, divisor)).collect();
                 let images: Vec<&Image> = small.iter().collect();
-                let Some((image, pos)) = gfx::pack_atlas(&images, ATLAS_WIDTH / divisor) else {
+                let emit = vec![None; images.len()];
+                let Some((image, slots)) = cut_pictures(&images, &emit, ATLAS_WIDTH / divisor) else {
                     razdor::diag!("Discord Times art: the 1/{divisor} sprites do not fit an atlas");
                     return None;
                 };
                 let texture = sprite_texture(&image)?;
                 razdor::diag!("sprite LOD 1/{divisor}: atlas {}x{} ({} bytes)", image.width, image.height, image.rgba.len());
-                let rects = RectTable::from_entries(
-                    sprites
-                        .iter()
-                        .zip(pos)
-                        .zip(&small)
-                        .map(|((s, (x, y)), m)| ((s.section, s.cat, s.idx), Rect::new(x as f32, y as f32, m.width as f32, m.height as f32))),
-                );
+                let k = divisor as f32;
+                let rects = RectTable::from_entries(sprites.iter().zip(slots).map(|(s, mut sl)| {
+                    sl.off *= k;
+                    sl.size *= k;
+                    sl.full = vec2(s.image.width as f32, s.image.height as f32);
+                    ((s.section, s.cat, s.idx), sl)
+                }));
                 Some(Atlas { texture, rects, cards: HashMap::new(), live: RefCell::new(Overlay::default()), pending: RefCell::new(VecDeque::new()), living: HashMap::new() })
             })
             .as_ref()
@@ -512,18 +556,18 @@ impl DtArt {
             .get_or_init(|| {
                 let sprites = &self.objects().sprites;
                 let images: Vec<&Image> = sprites.iter().map(|s| &s.image).collect();
-                let Some((image, pos)) = gfx::pack_atlas(&images, ATLAS_WIDTH) else {
+                // The lit windows (`windows::emissive`) widen a building's box: their emission is drawn where the picture is.
+                let emit: Vec<Option<Vec<u8>>> = sprites
+                    .iter()
+                    .map(|s| (s.section == ObjectSprite::BUILDINGS).then(|| windows::emissive(&s.image, windows::boxes_of(cards::sprite_key(&s.image)))))
+                    .collect();
+                let Some((image, slots)) = cut_pictures(&images, &emit, ATLAS_WIDTH) else {
                     razdor::diag!("Discord Times art: map objects do not fit an atlas");
                     return None;
                 };
                 let texture = sprite_texture(&image)?;
                 razdor::diag!("map atlas: {}x{} ({} bytes)", image.width, image.height, image.rgba.len());
-                let rects = RectTable::from_entries(
-                    sprites
-                        .iter()
-                        .zip(pos)
-                        .map(|(s, (x, y))| ((s.section, s.cat, s.idx), Rect::new(x as f32, y as f32, s.image.width as f32, s.image.height as f32))),
-                );
+                let rects = RectTable::from_entries(sprites.iter().zip(&slots).map(|(s, sl)| ((s.section, s.cat, s.idx), *sl)));
                 // The cut data is keyed by the sprite's pixels (`tools/depth`); a key whose size
                 // differs is no match. A building with no shipped cut takes its cached depth-model
                 // cut now (no model needed), and the rest queue for the model (`depth_tick`).
@@ -531,7 +575,7 @@ impl DtArt {
                 let mut live = Overlay::default();
                 let mut living_map = HashMap::new();
                 let mut known = Vec::with_capacity(sprites.len());
-                for s in sprites.iter() {
+                for (i, s) in sprites.iter().enumerate() {
                     let id = (s.section, s.cat, s.idx);
                     let building = s.section == ObjectSprite::BUILDINGS;
                     let key = cards::sprite_key(&s.image);
@@ -549,7 +593,9 @@ impl DtArt {
                         // A flag waves when its box looks like cloth (`living::cloth_look`).
                         let parts: Vec<living::Part> = p.points.iter().enumerate().filter(|(_, q)| q.kind == Kind::Flag && living::cloth_look(&s.image, q.rect)).filter_map(|(i, q)| living::Part::of(q, w, i)).collect();
                         if !chimneys.is_empty() || !parts.is_empty() {
-                            let body = (!parts.is_empty()).then(|| living::cleared(&s.image, &parts));
+                            // The cleared copy holds the picture box only, as the atlas does.
+                            let bx = box_of(&slots[i]);
+                            let body = (!parts.is_empty()).then(|| atlas_cut::crop(&living::cleared(&s.image, &parts), bx));
                             living_map.insert(id, Living { chimneys, parts, body, texture: OnceCell::new() });
                         }
                     }
@@ -606,20 +652,30 @@ impl DtArt {
         })
     }
 
-    /// The shadow atlas (`shadow::silhouette` of every sprite, in the map atlas's rectangles; the
-    /// silhouette is the alpha, the colour black). `None` without the map atlas.
+    /// The shadow atlas (`shadow::silhouette` of every sprite; the silhouette is the alpha, the colour black), in its own
+    /// layout ([`DtArt::shadow_decoration`]). `None` without the map atlas.
     pub fn shadow_texture(&self) -> Option<Texture2D> {
-        self.shadow_pair().map(|(sharp, _)| sharp)
+        self.shadow_layout().map(|s| s.sharp.clone())
     }
 
     /// The soft copy of the shadow atlas (`shadow::blur_alpha`, [`SOFT_PASSES`] passes): the shadows' tips.
     /// Built with the sharp one, once.
     pub fn shadow_soft_texture(&self) -> Option<Texture2D> {
-        self.shadow_pair().map(|(_, soft)| soft)
+        self.shadow_layout().map(|s| s.soft.clone())
     }
 
-    fn shadow_pair(&self) -> Option<(Texture2D, Texture2D)> {
-        self.shadows.get_or_init(|| self.build_shadow_textures()).clone()
+    /// The shadow slot of a map object (class, sprite id); `None` for a sprite with no shadow.
+    pub fn shadow_decoration(&self, class: u8, sprite: u8) -> Option<Slot> {
+        self.shadow_layout()?.slots.get(ObjectSprite::DECORATIONS, class.into(), sprite.into())
+    }
+
+    /// The shadow slot of a building by picture type and variant; `None` for a sprite with no shadow.
+    pub fn shadow_building(&self, picture_type: u8, variant: u8) -> Option<Slot> {
+        self.shadow_layout()?.slots.get(ObjectSprite::BUILDINGS, picture_type.into(), variant.into())
+    }
+
+    fn shadow_layout(&self) -> Option<&ShadowAtlas> {
+        self.shadows.get_or_init(|| self.build_shadow_layout()).as_ref()
     }
 
     /// The emissive layer of the map atlas for the lit windows (G, `draw_building_windows`): the building mask,
@@ -631,41 +687,56 @@ impl DtArt {
     fn build_building_mask(&self) -> Option<Texture2D> {
         let atlas = self.map_atlas()?;
         let (w, h) = (atlas.texture.width() as u32, atlas.texture.height() as u32);
-        // Each building picture's lit windows (`dt::windows`), computed once from its own pixels.
-        let placed: Vec<(Rect, Vec<u8>)> = self
-            .objects()
-            .sprites
-            .iter()
-            .filter(|s| s.section == ObjectSprite::BUILDINGS)
-            .filter_map(|s| {
-                let rect = atlas.rect_of(s.section, s.cat, s.idx)?;
-                let boxes = windows::boxes_of(cards::sprite_key(&s.image));
-                Some((rect, windows::emissive(&s.image, boxes)))
-            })
-            .collect();
-        let img = Image { width: w, height: h, rgba: building_mask_pixels(w, h, &placed) };
-        texture(&img)
+        let mut rgba = vec![0u8; (w * h * 4) as usize];
+        for i in (3..rgba.len()).step_by(4) {
+            rgba[i] = 255;
+        }
+        // Each building picture's lit windows (`dt::windows`), computed once from its own pixels, over its region of the atlas.
+        for s in self.objects().sprites.iter().filter(|s| s.section == ObjectSprite::BUILDINGS) {
+            let Some(slot) = atlas.slot_of(s.section, s.cat, s.idx) else { continue };
+            let emissive = windows::emissive(&s.image, windows::boxes_of(cards::sprite_key(&s.image)));
+            write_mask(&mut rgba, w, &slot, &emissive);
+        }
+        texture(&Image { width: w, height: h, rgba })
     }
 
-    fn build_shadow_textures(&self) -> Option<(Texture2D, Texture2D)> {
-        let atlas = self.map_atlas()?;
-        let (w, h) = (atlas.texture.width() as u32, atlas.texture.height() as u32);
+    /// The shadow layout ([`ShadowAtlas`]). The shadows are first made in the uncut layout (`gfx::pack_atlas`, as they
+    /// always were): their blur spreads over the neighbouring sprites there, so each sprite's box is copied out of that
+    /// layout, texel for texel, and the box is the part of it the shadow reaches.
+    fn build_shadow_layout(&self) -> Option<ShadowAtlas> {
+        let sprites = &self.objects().sprites;
+        let images: Vec<&Image> = sprites.iter().map(|s| &s.image).collect();
+        let (old, pos) = gfx::pack_atlas(&images, ATLAS_WIDTH)?;
+        let (w, h) = (old.width, old.height);
         // White colour, alpha 0: the shadow's colour comes from the vertices (`shadow::strength_colour`).
-        let mut rgba: Vec<u8> = [255u8, 255, 255, 0].repeat((w * h) as usize);
-        for s in &self.objects().sprites {
-            let Some(r) = atlas.rect_of(s.section, s.cat, s.idx) else { continue };
+        let mut sharp: Vec<u8> = [255u8, 255, 255, 0].repeat((w * h) as usize);
+        for (s, &(x, y)) in sprites.iter().zip(&pos) {
             let mask = super::shadow::silhouette(&s.image);
-            for y in 0..s.image.height {
-                for x in 0..s.image.width {
-                    let alpha = mask[(y * s.image.width + x) as usize];
-                    let at = (((r.y as u32 + y) * w + r.x as u32 + x) * 4 + 3) as usize;
-                    rgba[at] = alpha;
+            for yy in 0..s.image.height {
+                for xx in 0..s.image.width {
+                    let alpha = mask[(yy * s.image.width + xx) as usize];
+                    sharp[(((y + yy) * w + x + xx) * 4 + 3) as usize] = alpha;
                 }
             }
         }
-        let mut soft = rgba.clone();
+        let mut soft = sharp.clone();
         super::shadow::blur_alpha(&mut soft, w as usize, h as usize, SOFT_PASSES);
-        Some((texture(&Image { width: w, height: h, rgba })?, texture(&Image { width: w, height: h, rgba: soft })?))
+        // Each sprite's shadow box: the texels of its rectangle that either texture holds (the sprite's own blur; the
+        // quad covers the box, the texels past it are clear in the sprite's rectangle).
+        let entries: Vec<((u32, u32, u32), Slot)> = sprites
+            .iter()
+            .zip(&pos)
+            .filter_map(|(s, &at)| {
+                let (sw, sh) = (s.image.width, s.image.height);
+                let bx = atlas_cut::Bx::union(atlas_cut::nonzero_in(&sharp, w, h, at, sw, sh), atlas_cut::nonzero_in(&soft, w, h, at, sw, sh))?;
+                Some(((s.section, s.cat, s.idx), slot_at(bx, at, (sw, sh))))
+            })
+            .collect();
+        Some(ShadowAtlas {
+            sharp: texture(&Image { width: w, height: h, rgba: sharp })?,
+            soft: texture(&Image { width: w, height: h, rgba: soft })?,
+            slots: RectTable::from_entries(entries),
+        })
     }
 
     /// Runs the built-in depth model for the 2.5D view, once a frame of the world map: when the
@@ -728,58 +799,100 @@ mod rect_table_tests {
     }
 }
 
-/// The pixels of a building mask (`DtArt::building_emissive`): `w` × `h` RGBA. Within each building's
-/// rectangle (`placed`: the rectangle and its emissive layer, one byte a pixel of the sprite), R is 255
-/// (a building) and G is the emission; elsewhere R and G are 0. A is 255 throughout.
-pub fn building_mask_pixels(w: u32, h: u32, placed: &[(Rect, Vec<u8>)]) -> Vec<u8> {
-    let mut rgba = vec![0u8; (w * h * 4) as usize];
-    for i in (3..rgba.len()).step_by(4) {
-        rgba[i] = 255;
-    }
-    for (r, emissive) in placed {
-        let (rw, rh) = (r.w.max(0.0) as u32, r.h.max(0.0) as u32);
-        if emissive.len() != (rw * rh) as usize {
-            continue;
-        }
-        let (x0, y0) = (r.x.max(0.0) as u32, r.y.max(0.0) as u32);
-        for dy in 0..rh {
-            for dx in 0..rw {
-                let (x, y) = (x0 + dx, y0 + dy);
-                if x >= w || y >= h {
-                    continue;
-                }
-                let i = ((y * w + x) * 4) as usize;
-                rgba[i] = 255;
-                rgba[i + 1] = emissive[(dy * rw + dx) as usize];
-            }
+/// Writes a building's lit-window mask (`DtArt::building_emissive`) into `rgba` (`w` texels wide, the atlas's layout)
+/// over the sprite's whole rectangle, as the mask always was: R is 255 (a building) and G its emission (`emissive`, one
+/// byte a pixel of the sprite). The rest of the texture stays as it is (R and G 0).
+pub fn write_mask(rgba: &mut [u8], w: u32, slot: &Slot, emissive: &[u8]) {
+    let (fw, fh) = (slot.full.x as u32, slot.full.y as u32);
+    let (bx, by) = (slot.base.x as u32, slot.base.y as u32);
+    for j in 0..fh {
+        for i in 0..fw {
+            let t = (((by + j) * w + bx + i) * 4) as usize;
+            rgba[t] = 255;
+            rgba[t + 1] = emissive.get((j * fw + i) as usize).copied().unwrap_or(0);
         }
     }
-    rgba
+}
+
+/// The slot of a picture box `bx` of a sprite of `full` pixels whose pixel (0, 0) is at texel `at`.
+fn slot_at(bx: atlas_cut::Bx, at: (u32, u32), full: (u32, u32)) -> Slot {
+    let base = vec2(at.0 as f32, at.1 as f32);
+    let (off, size) = (vec2(bx.x0 as f32, bx.y0 as f32), vec2(bx.w() as f32, bx.h() as f32));
+    Slot { rect: Rect::new(base.x + off.x, base.y + off.y, size.x, size.y), off, size, base, full: vec2(full.0 as f32, full.1 as f32) }
+}
+
+/// A slot's box as texels-free sprite pixels (for [`atlas_cut::crop`]).
+fn box_of(slot: &Slot) -> atlas_cut::Bx {
+    atlas_cut::Bx { x0: slot.off.x as u32, y0: slot.off.y as u32, x1: (slot.off.x + slot.size.x) as u32, y1: (slot.off.y + slot.size.y) as u32 }
+}
+
+/// The picture texture of `images` (`gfx::pack_atlas`, the layout the atlas always had) with each sprite's slot: its
+/// picture box ([`atlas_cut::picture_box`], `emit` the lit texels of each). `None` when a picture is wider than `width`.
+fn cut_pictures(images: &[&Image], emit: &[Option<Vec<u8>>], width: u32) -> Option<(Image, Vec<Slot>)> {
+    let (image, pos) = gfx::pack_atlas(images, width)?;
+    let slots = images
+        .iter()
+        .zip(emit)
+        .zip(&pos)
+        .map(|((img, e), &at)| slot_at(atlas_cut::picture_box(img, e.as_deref()), at, (img.width, img.height)))
+        .collect();
+    Some((image, slots))
 }
 
 #[cfg(test)]
-mod building_mask_tests {
+mod cut_tests {
     use super::*;
 
+    fn sprite(w: u32, h: u32, opaque: impl Fn(u32, u32) -> bool) -> Image {
+        let mut rgba = vec![0u8; (w * h * 4) as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let i = ((y * w + x) * 4) as usize;
+                rgba[i..i + 4].copy_from_slice(&[(x * 9) as u8, (y * 7) as u8, 33, if opaque(x, y) { 255 } else { 0 }]);
+            }
+        }
+        Image { width: w, height: h, rgba }
+    }
+
     #[test]
-    fn the_mask_marks_buildings_in_red_and_their_windows_in_green() {
-        // A 2×2 building at (2,1) whose window is its top-left pixel; a 2×1 building at (7,3), no window.
-        let placed = [(Rect::new(2.0, 1.0, 2.0, 2.0), vec![255, 0, 0, 0]), (Rect::new(7.0, 3.0, 2.0, 1.0), vec![0, 0])];
-        let px = building_mask_pixels(10, 5, &placed);
+    fn a_cut_picture_samples_the_same_texels_as_the_uncut_one() {
+        // A 12×10 sprite with an opaque block in its lower right: its box is the block grown by one.
+        let s = sprite(12, 10, |x, y| x >= 6 && y >= 4);
+        let (atlas, slots) = cut_pictures(&[&s], &[None], 64).expect("fits");
+        let slot = slots[0];
+        assert_eq!(slot.off, vec2(5.0, 3.0));
+        assert_eq!(slot.size, vec2(7.0, 7.0));
+        assert_eq!(slot.full, vec2(12.0, 10.0));
+        // Every texel of the box is the sprite's pixel at the same place: texel base + p (`base` may be negative: the
+        // region starts before the sprite's pixel (0, 0)).
+        for y in 3..10u32 {
+            for x in 5..12u32 {
+                let (tx, ty) = ((slot.base.x + x as f32) as u32, (slot.base.y + y as f32) as u32);
+                let t = ((ty * atlas.width + tx) * 4) as usize;
+                let p = ((y * 12 + x) * 4) as usize;
+                assert_eq!(&atlas.rgba[t..t + 4], &s.rgba[p..p + 4], "sprite pixel ({x}, {y})");
+            }
+        }
+        // Past the sprite's right edge the region repeats the nearest sprite pixel, as the uncut atlas's ring did:
+        // sprite (12, 5) is texel base + (12, 5), the copy of sprite (11, 5).
+        let past = (((slot.base.y + 5.0) as u32) * atlas.width + (slot.base.x + 12.0) as u32) as usize * 4;
+        let edge = ((5 * 12 + 11) * 4) as usize;
+        assert_eq!(&atlas.rgba[past..past + 4], &s.rgba[edge..edge + 4], "the replicated edge past the sprite");
+    }
+
+    #[test]
+    fn the_mask_marks_a_building_in_red_and_its_windows_in_green_over_its_whole_sprite() {
+        // A 4×3 building whose window is its top-left texel, in an atlas 16 texels wide (the sprite at (0, 0)).
+        let s = sprite(4, 3, |_, _| true);
+        let (_, slots) = cut_pictures(&[&s], &[None], 16).expect("fits");
+        let mut rgba = vec![0u8; 16 * 16 * 4];
+        write_mask(&mut rgba, 16, &slots[0], &[200, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         let at = |x: u32, y: u32| {
-            let i = ((y * 10 + x) * 4) as usize;
-            (px[i], px[i + 1], px[i + 3])
+            let t = ((y * 16 + x) * 4) as usize;
+            (rgba[t], rgba[t + 1])
         };
-        assert_eq!(at(2, 1), (255, 255, 255), "the window pixel: building and lit");
-        assert_eq!(at(3, 1), (255, 0, 255), "the building's stone: building, dark");
-        assert_eq!(at(5, 2), (0, 0, 255), "past the first building: neither");
-        assert_eq!(at(7, 3), (255, 0, 255), "the second building is a building too");
-        assert_eq!(at(0, 0), (0, 0, 255));
-        // A rectangle past the edge is clipped, not a panic; a wrong-sized emissive layer is skipped.
-        let edge = building_mask_pixels(4, 4, &[(Rect::new(3.0, 3.0, 2.0, 2.0), vec![1, 2, 3, 4])]);
-        assert_eq!(edge.len(), 4 * 4 * 4);
-        assert_eq!((edge[((3 * 4 + 3) * 4) as usize], edge[((3 * 4 + 3) * 4 + 1) as usize]), (255, 1));
-        let skipped = building_mask_pixels(4, 4, &[(Rect::new(0.0, 0.0, 2.0, 2.0), vec![9])]);
-        assert_eq!(skipped[0], 0, "a wrong size is no building");
+        assert_eq!(at(0, 0), (255, 200), "the window: building and lit");
+        assert_eq!(at(1, 0), (255, 0), "the stone: building, dark");
+        assert_eq!(at(4, 0), (0, 0), "past the building's right edge: neither");
     }
 }

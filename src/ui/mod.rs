@@ -15,6 +15,7 @@ pub mod dialog;
 pub mod display;
 pub mod frame_state;
 pub mod quality_preset;
+pub mod atlas_cut;
 pub mod dt_art;
 pub mod dt_font;
 pub mod daylight;

@@ -10,7 +10,7 @@ use razdor::i18n::{n_, tr};
 use razdor::trf;
 
 use crate::ui::display::button_grow;
-use crate::ui::dt_art::DtArt;
+use crate::ui::dt_art::{DtArt, Slot};
 use crate::ui::widgets::*;
 use crate::ui::world_view::{draw_wrapped, surface_color};
 
@@ -165,10 +165,13 @@ fn sprite_grid(r: Rect, count: usize, cell: f32, scroll: &mut usize, selected: O
 }
 
 /// Draws an atlas rectangle scaled to fit `cell`.
-fn thumb(atlas_tex: &Texture2D, src: Rect, cell: Rect) {
-    let k = ((cell.w - 4.0) / src.w).min((cell.h - 4.0) / src.h).min(1.5);
-    let (w, h) = (src.w * k, src.h * k);
-    draw_texture_ex(atlas_tex, cell.x + (cell.w - w) / 2.0, cell.y + (cell.h - h) / 2.0, WHITE, DrawTextureParams { dest_size: Some(vec2(w, h)), source: Some(src), ..Default::default() });
+/// The whole sprite of `slot` scaled into `cell` (its box drawn where the whole sprite's pixels are).
+fn thumb(atlas_tex: &Texture2D, slot: &Slot, cell: Rect) {
+    let full = slot.full;
+    let k = ((cell.w - 4.0) / full.x).min((cell.h - 4.0) / full.y).min(1.5);
+    let (w, h) = (full.x * k, full.y * k);
+    let at = vec2(cell.x + (cell.w - w) / 2.0, cell.y + (cell.h - h) / 2.0) + slot.off * k;
+    draw_texture_ex(atlas_tex, at.x, at.y, WHITE, DrawTextureParams { dest_size: Some(slot.size * k), source: Some(slot.rect), ..Default::default() });
 }
 
 /// The whole palette column; changes the tool in `tools`.
@@ -255,7 +258,7 @@ pub fn tool_panel(state: &mut PaletteState, tools: &mut ToolState, palette: &Pal
             let draw = |i: usize, cell: Rect| {
                 let o = sprites[i];
                 match atlas.and_then(|a| Some((a, a.decoration(o.class, o.sprite)?))) {
-                    Some((a, src)) => thumb(&a.texture, src, cell),
+                    Some((a, src)) => thumb(&a.texture, &src, cell),
                     None => text_centered(&o.sprite.to_string(), cell.center().x, cell.center().y + 6.0, 16.0, INK),
                 }
             };
@@ -302,7 +305,7 @@ pub fn tool_panel(state: &mut PaletteState, tools: &mut ToolState, palette: &Pal
             let draw = |i: usize, cell: Rect| {
                 let p = pics[i];
                 if let Some((a, src)) = atlas.and_then(|a| Some((a, a.building(p.picture_type, p.variant)?))) {
-                    thumb(&a.texture, src, cell);
+                    thumb(&a.texture, &src, cell);
                 }
                 text(&format!("{}x{}", p.size.0, p.size.1), cell.x + 3.0, cell.bottom() - 4.0, 14.0, INK);
             };

@@ -404,6 +404,16 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   (`water.rs` is its own agent's). `RAZDOR_MAP_FIT=1` (snapshots) zooms to the whole map's floor, which the
   settings' zoom range cannot reach. Measured with `RAZDOR_PROFILE_FRAMES` (draws, verts) at 1280×800:
   the flat whole-map frame is 1123 draws and 64,400 verts, the 2.5D one 193 and 76,251.
+- **The map atlas is cut to boxes** (`src/ui/atlas_cut.rs`, the perf plan's item 6). Each sprite keeps its place in
+  `gfx::pack_atlas`'s layout, so every texel is the one it was, but a picture is drawn only as its box: its opaque
+  texels grown by one, with the lit windows' emission counted (`atlas_cut::picture_box`). `DtArt::map_atlas` gives each
+  sprite a `Slot` (the box's texels `rect`, its offset `off` and `size` in sprite pixels, the texel of the sprite's
+  pixel (0, 0) `base`, and the sprite's `full` size). Placement still uses the whole sprite (`building_sprite_origin`,
+  `object_sprite_origin`, the foot); a draw places the box at `origin + off * zoom`. The shading centre, the lean and the
+  card and part meshes use `full` and `base` (a `Frame`), so they are the whole sprite's. The shadows have their own
+  slots in the same texels (`DtArt::shadow_decoration` / `shadow_building`: the box the blur reaches), and the lit mask
+  covers each sprite's whole rectangle as before. The living body is cropped to the box. Not byte-identical: the quad
+  corners move by float rounding, so one or two levels change in a few hundred texels per frame (accepted by the owner).
 - **Smaller map sprites** (`RAZDOR_SPRITE_LOD=1`, a developer switch, off by default): `DtArt::sprite_lod_atlas(d)`
   packs every map sprite at `1/d` (box filter, `downscale`), `d` = 2 under 12 screen px a cell, 4 under 6
   (`sprite_lod_divisor`); `draw_object` draws the decorations from it at the full sprite's place and size.
