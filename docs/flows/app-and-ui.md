@@ -175,7 +175,9 @@ puts it back); a patch's files are moved over the install's (`move_over`). Any f
 `<install>.new` and leaves the install as it was. The job runs on a thread (`Job`, the progress
 window); when it ends, `tick` returns true and `App::reload_install` reads the install again
 (`preload::forget_ready` first: the decode store is keyed by path alone, and its loads started
-before the call are not kept, the generation). The saves (`platform::app_dir`) are never beside
+before the call are not kept, the generation). The audio follows the install too (`Audio::set_install`,
+also after a mod switch in `apply_mod` and the phones' poll): a folder other than the one its sounds came
+from reads the effects and music again, the player's settings stay, and the menu's music starts on the next frame. The saves (`platform::app_dir`) are never beside
 the install, so they are not read or written. `dt::game_import::recover` (`main`, before the install
 is looked for) puts back an install an interrupted swap moved away. While the import's windows are up
 the settings under them are only drawn (`main_menu::backdrop`, `game_import::busy`). Snapshot fake:

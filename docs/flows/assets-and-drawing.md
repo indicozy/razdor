@@ -817,7 +817,9 @@ against the commit before the feature). The mill sails do not turn: the depth cu
   same stem as the named `.raw`/`.wav` is played in its place, so a mod's re-encoded sounds win
   over the base install's.
 - `src/ui/audio.rs`: screens call `audio::cue(Cue::…)` (a per-frame queue, de-duplicated);
-  `Audio::frame` plays them and drives the music. `audio::cue_on_release` repeats a cue on
+  `Audio::frame` plays them and drives the music. The effects are read when the install is known
+  (`Audio::new` at start, `Audio::set_install` when a game is downloaded, imported or a mod is switched:
+  `needs_load` decides, the same folder keeps its sounds). `audio::cue_on_release` repeats a cue on
   the mouse release, as the original's hire button does.
 - `src/ui/jukebox.rs`: which track plays for a `Mood` (menu, map rotation, battle,
   triumph, defeat), crossfades (`Fade`, `SCREEN_FADE`, `ROTATION_FADE`). The map

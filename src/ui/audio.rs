@@ -4,9 +4,10 @@
 //! - Screens ask for effects with [`cue`]: a small per-frame queue that [`Audio::frame`]
 //!   drains, so screens need no audio handle and the rules know nothing of sound.
 //! - Music follows the [`Mood`] the app derives from the current screen ([`super::jukebox`]).
-//!   Effects are loaded once at start; a music track is decoded when it starts and dropped
-//!   once it has faded out under the next one (a few MB each). Changes crossfade, as the
-//!   original's do ([`jukebox::Fade`]).
+//!   Effects are loaded when the install is known ([`Audio::new`], [`Audio::set_install`], so a
+//!   game downloaded while the program runs plays at once); a music track is decoded when it
+//!   starts and dropped once it has faded out under the next one (a few MB each). Changes
+//!   crossfade, as the original's do ([`jukebox::Fade`]).
 //! - Silent without an install, with `RAZDOR_NO_AUDIO=1`, when built without the `audio`
 //!   feature, or when no sound device opens. `RAZDOR_AUDIO_LOG=1` prints every sound played.
 //! - Volumes and mutes ([`Settings`]) are kept in `audio.json` in the save folder.
@@ -711,6 +712,16 @@ fn env_flag(name: &str) -> bool {
     std::env::var(name).is_ok_and(|v| !v.is_empty() && v != "0")
 }
 
+/// Whether the sounds must be read again for `install` (`None`: no install): `loaded` is the folder
+/// they came from (`None` when nothing is loaded). A folder loaded already is kept, its music going on;
+/// another folder, or no folder with sounds still loaded, is read anew.
+pub fn needs_load(loaded: Option<&Path>, install: Option<&Path>) -> bool {
+    match install {
+        Some(dir) => loaded != Some(dir),
+        None => loaded.is_some(),
+    }
+}
+
 /// A music track playing, with its fade.
 struct Track {
     track: &'static str,
@@ -778,9 +789,31 @@ impl Audio {
         Audio { backend: None, settings: settings.clone(), saved: settings, log: env_flag("RAZDOR_AUDIO_LOG") }
     }
 
-    /// Loads the effects of `install` (if any) and gets its music ready.
+    /// The audio of `install` (if any): its effects loaded and its music ready.
     pub fn new(install: Option<&DtInstall>) -> Audio {
         let mut audio = Audio::silent();
+        audio.backend = audio.load_for(install);
+        audio
+    }
+
+    /// The install the sounds come from changed (the game was downloaded or imported, a mod was
+    /// switched, a phone found the game): its effects and music files are read now, and the menu's
+    /// music starts on the next frame. The player's settings stay as they are. The same folder
+    /// loaded already keeps its effects and its music playing (`needs_load`).
+    pub fn set_install(&mut self, install: Option<&DtInstall>) {
+        let loaded = self.backend.as_ref().map(|b| b.dir.as_path());
+        if !needs_load(loaded, install.map(|d| d.dir.as_path())) {
+            return;
+        }
+        if let Some(old) = self.backend.as_mut() {
+            old.stop_music();
+        }
+        self.backend = self.load_for(install);
+    }
+
+    /// The sounds of `install`, read and loaded; `None` (the reason logged) with no install, no
+    /// sound device or no sound table.
+    fn load_for(&self, install: Option<&DtInstall>) -> Option<Backend> {
         let why = match install {
             _ if !cfg!(feature = "audio") => "built without the audio feature",
             _ if env_flag("RAZDOR_NO_AUDIO") => "RAZDOR_NO_AUDIO is set",
@@ -790,12 +823,9 @@ impl Audio {
             Some(_) if !device_ok() => "no sound device",
             Some(dt) => match (std::time::Instant::now(), Backend::load(&dt.dir)) {
                 (t0, Ok(b)) => {
-                    if audio.log {
-                        let (fx, tracks, ms) = (b.sfx.len(), b.table.backgrounds.len(), t0.elapsed().as_millis());
-                        razdor::diag!("audio: {fx} effects loaded in {ms} ms, {tracks} music tracks, raw music at {} Hz", b.raw_rate);
-                    }
-                    audio.backend = Some(b);
-                    return audio;
+                    let (fx, tracks, ms) = (b.sfx.len(), b.table.backgrounds.len(), t0.elapsed().as_millis());
+                    razdor::diag!("audio: {fx} effects loaded in {ms} ms from {}, {tracks} music tracks, raw music at {} Hz", dt.dir.display(), b.raw_rate);
+                    return Some(b);
                 }
                 (_, Err(e)) => {
                     razdor::diag!("{}: {e}; playing without sound", sound::SOUNDS_INI);
@@ -803,10 +833,10 @@ impl Audio {
                 }
             },
         };
-        if audio.log || why == "no sound device" {
+        if self.log || why == "no sound device" {
             razdor::diag!("audio: silent ({why})");
         }
-        audio
+        None
     }
 
     /// Writes the changed settings now (the minimap's placement, as its drag ends: the OS may
@@ -1070,6 +1100,17 @@ mod tests {
     fn a_bad_text_size_goes_to_the_default() {
         let (s, _) = read_back(r#"{"text_size": 0.3, "layout_version": 1}"#);
         assert_eq!(s.text_size, super::super::display::default_text_size());
+    }
+
+    #[test]
+    fn the_sounds_are_read_again_only_for_another_folder() {
+        let base = Path::new("/games/DiscordTimes");
+        let mod_folder = Path::new("/hub/mods/x/game");
+        assert!(needs_load(None, Some(base)), "an install found after the start is read");
+        assert!(!needs_load(Some(base), Some(base)), "the same folder keeps its music playing");
+        assert!(needs_load(Some(base), Some(mod_folder)), "a switched install is read");
+        assert!(needs_load(Some(base), None), "no install drops the sounds");
+        assert!(!needs_load(None, None), "no install and nothing loaded: nothing to do");
     }
 
     #[test]

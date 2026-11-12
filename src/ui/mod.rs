@@ -611,6 +611,7 @@ impl App {
         }
         if let Some(install) = built.install {
             self.assets.adopt_install(dt_art::DtArt::load(install));
+            self.audio.set_install(self.assets.dt.as_ref().map(|d| &d.install));
             self.dt_content = dt_content_of(&self.assets, self.audio.settings.impossible);
             self.scenarios = built.scenarios;
         }
@@ -1259,13 +1260,15 @@ impl App {
 
     /// The install's files were replaced by an import (`ui::game_import`): the decoded pictures of
     /// the old files are dropped, and the install, the content and the maps are read again. The
-    /// audio is not rebuilt: the effects loaded at start stay until the next start.
+    /// audio follows the install (`Audio::set_install`): its sounds are read again when the folder
+    /// is another one, and the menu's music starts.
     fn reload_install(&mut self) {
         razdor::dt::preload::forget_ready();
         // The install's own `ads/` (the promo) is looked for again (`ads::forget`).
         ads::forget();
         if let Some(dt) = dt_art::DtArt::from_env() {
             self.assets.adopt_install(dt);
+            self.audio.set_install(self.assets.dt.as_ref().map(|d| &d.install));
             self.dt_content = dt_content_of(&self.assets, self.audio.settings.impossible);
             self.scenarios = scenarios_of(self.assets.dt.as_ref().map(|d| &d.install));
         }
@@ -1305,8 +1308,8 @@ impl App {
             ads::forget();
             // Android: the data folder (and so the log) is made once the install is loaded.
             razdor::diag::reopen_log();
-            // The settings as they are now (nothing changed them on the title screen).
-            self.audio = Audio::new(self.assets.dt.as_ref().map(|d| &d.install));
+            // The player's settings stay as they are; the install's sounds come now (`Audio::set_install`).
+            self.audio.set_install(self.assets.dt.as_ref().map(|d| &d.install));
             self.dt_content = dt_content_of(&self.assets, self.audio.settings.impossible);
             self.scenarios = scenarios_of(self.assets.dt.as_ref().map(|d| &d.install));
             // The saves are the install's now: its session slot is looked for again.
