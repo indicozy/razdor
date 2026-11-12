@@ -1744,6 +1744,94 @@ fn sprite_visibility(dark: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
+/// What a standing sprite of the tilted view is, for the pointer: the hero, an army (its index in
+/// `world.armies`) or a location (its index in `world.locations`). Decorations are not picked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Pick {
+    Hero,
+    Army(usize),
+    Location(usize),
+}
+
+/// A pickable standing sprite drawn in the tilted view: the four corners of its picture on the window, in the
+/// order of the picture's corners (a convex quad), and what it is.
+#[derive(Clone, Copy)]
+struct PickQuad {
+    quad: [Vec2; 4],
+    pick: Pick,
+}
+
+local! {
+    /// The pickable sprites the tilted view drew this frame, in draw order (`draw_world_in` clears it, the
+    /// sprites' pass records it). The pointer's test reads it the next frame, as the map's clicks do.
+    static PICKS: std::cell::RefCell<Vec<PickQuad>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// The identity of the standing sprite the next [`standing_at`] call draws. That call takes it at its start,
+    /// so a sprite drawn inside it records nothing.
+    static PICK_NEXT: std::cell::Cell<Option<Pick>> = const { std::cell::Cell::new(None) };
+}
+
+/// [`standing`] for a sprite the pointer can pick (`pick`, none for one that is not picked): the tilted view
+/// records its drawn quad under that identity ([`PICKS`]); the flat view draws it as [`standing`] does.
+fn standing_picked(pick: Option<Pick>, cam: &Camera, foot: Vec2, base: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
+    PICK_NEXT.with(|p| p.set(pick));
+    standing(cam, foot, base, vis, picture, draw);
+}
+
+/// Whether `m` lies in the convex quad `q` (its corners in order, either way round). A degenerate quad holds nothing.
+fn quad_holds(q: &[Vec2; 4], m: Vec2) -> bool {
+    let mut side = 0.0f32;
+    for i in 0..4 {
+        let (a, b) = (q[i], q[(i + 1) % 4]);
+        let c = (b.x - a.x) * (m.y - a.y) - (b.y - a.y) * (m.x - a.x);
+        if c != 0.0 {
+            if side == 0.0 {
+                side = c.signum();
+            } else if side != c.signum() {
+                return false;
+            }
+        }
+    }
+    side != 0.0
+}
+
+/// The front-most of `quads` (in draw order) that holds `m`: the last one drawn.
+fn front_pick(quads: &[PickQuad], m: Vec2) -> Option<Pick> {
+    quads.iter().rev().find(|q| quad_holds(&q.quad, m)).map(|q| q.pick)
+}
+
+/// The standing sprite the tilted view drew under the window's pixel `m` last frame, the front-most one.
+fn sprite_under(m: Vec2) -> Option<Pick> {
+    PICKS.with_borrow(|quads| front_pick(quads, m))
+}
+
+/// The cell a picked sprite stands for, the one a click on it sets off to and the pointer marks: the hero's cell,
+/// an army's cell, and for a location its centre cell (else its first footprint cell) that can be targeted, so a
+/// click on a castle's tower walks into it as a click on its floor does. None when none of it can be targeted.
+fn pick_cell(game: &Game, p: Pick) -> Option<Tile> {
+    let w = &game.world;
+    match p {
+        Pick::Hero => Some(game.tile()),
+        Pick::Army(i) => w.armies.get(i).map(|a| a.tile(&w.map)),
+        Pick::Location(l) => {
+            let loc = w.locations.get(l)?;
+            std::iter::once(loc.centre()).chain(loc.cells()).find(|&t| game.can_target(t))
+        }
+    }
+}
+
+/// The cell under the window's pointer, for the map's pointer, hover and clicks. Tilted, a standing sprite drawn
+/// under it last frame (front-most) gives its cell ([`pick_cell`]); otherwise, and flat, the ground cell
+/// ([`Camera::tile_under_mouse`]). Over the minimap there is no pick: its window is not the map's sprites.
+fn pointed_tile(game: &Game, cam: &Camera, on_minimap: bool) -> Option<Tile> {
+    let m = Vec2::from(crate::ui::widgets::pointer());
+    if cam.tilt.is_some() && !on_minimap && cam.over_map(m) {
+        if let Some(t) = sprite_under(m).and_then(|p| pick_cell(game, p)) {
+            return Some(t);
+        }
+    }
+    cam.tile_under_mouse()
+}
+
 /// Draws a standing sprite whose foot is at `foot` (a point of the 2D space) as a billboard
 /// ([`view25::billboard_model_about`]); under a flat camera, as drawn. The sprite turns about
 /// `foot` and grows about `base`, which is the foot for every standing sprite (decorations,
@@ -1757,6 +1845,7 @@ fn sprite_visibility(dark: f32) -> f32 {
 /// frame in the render passes; the 2.5D frame 17.7 ms against 8.3 ms flat). With the transform
 /// on the CPU the sprites share their draw calls.
 /// `picture` is the sprite's drawn rectangle in the 2D space of `cam` (see [`covering_gap`]).
+/// What the pointer finds of a sprite is [`standing_picked`].
 fn standing(cam: &Camera, foot: Vec2, base: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
     standing_at(cam, foot, base, foot, vis, picture, draw);
 }
@@ -1765,6 +1854,7 @@ fn standing(cam: &Camera, foot: Vec2, base: Vec2, vis: f32, picture: Rect, draw:
 /// `foot`: a layer of a building on a bent sheet ([`draw_layers_on_sheet`]) stands on its own ground foot, while the
 /// building's fade is the group's, so its layers fade together. `base` is as in [`standing`].
 fn standing_at(cam: &Camera, foot: Vec2, base: Vec2, at: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
+    let pick = PICK_NEXT.with(|p| p.take());
     let Some(tilt) = cam.tilt else { return draw() };
     if vis <= 0.0 {
         return;
@@ -1792,8 +1882,9 @@ fn standing_at(cam: &Camera, foot: Vec2, base: Vec2, at: Vec2, vis: f32, picture
     // Off the window: a picture whose box lies past the window's edges, by more than the margin its sway and the
     // sharp band reach, draws no pixel, so it is not drawn. `picture_on_screen` gives window pixels (the frame's units
     // are the window's, see `view25::window_matrix`), and a corner behind the eye keeps the sprite.
-    if let Some(r) = picture_on_screen(&tilt, screen_view(cam), place, picture) {
-        if !overlaps(r, Rect::new(0.0, 0.0, super::frame_state::screen_w(), super::frame_state::screen_h()), OFF_WINDOW_MARGIN) {
+    let quad = picture_quad(&tilt, screen_view(cam), place, picture);
+    if let Some(q) = quad {
+        if !overlaps(quad_bounds(q), Rect::new(0.0, 0.0, super::frame_state::screen_w(), super::frame_state::screen_h()), OFF_WINDOW_MARGIN) {
             return;
         }
     }
@@ -1822,6 +1913,10 @@ fn standing_at(cam: &Camera, foot: Vec2, base: Vec2, at: Vec2, vis: f32, picture
         if vis <= 0.0 {
             return;
         }
+    }
+    // A pickable sprite that is drawn (not faded out or hidden above) is what the pointer finds this frame.
+    if let (Some(pick), Some(quad)) = (pick, quad) {
+        PICKS.with_borrow_mut(|quads| quads.push(PickQuad { quad, pick }));
     }
     push_cpu_model(place);
     let prev = SPRITE_VIS.with(|s| s.replace(vis));
@@ -1932,16 +2027,30 @@ fn screen_view(cam: &Camera) -> Rect {
 /// `model`: the picture's four corners projected through the window's view, and the box about them. None
 /// if a corner is behind the eye.
 fn picture_on_screen(tilt: &Tilt, view: Rect, model: Mat4, picture: Rect) -> Option<Rect> {
+    picture_quad(tilt, view, model, picture).map(quad_bounds)
+}
+
+/// The four corners of a standing sprite's `picture` on the window, in the order of the picture's corners (a convex
+/// quad): the billboard `model`'s projection. None if a corner is behind the eye.
+fn picture_quad(tilt: &Tilt, view: Rect, model: Mat4, picture: Rect) -> Option<[Vec2; 4]> {
     let (x0, y0, x1, y1) = (picture.x, picture.y, picture.x + picture.w, picture.y + picture.h);
     // The four corners share one view-projection (`TiltCamera::project` builds it per call: four matrices a sprite).
     let view_proj = tilt.cam.view_proj(view);
+    let mut quad = [Vec2::ZERO; 4];
+    for (k, (x, y)) in [(x0, y0), (x1, y0), (x1, y1), (x0, y1)].into_iter().enumerate() {
+        quad[k] = view25::project_with(view_proj, model.transform_point3(vec3(x, y, 0.0)), view)?;
+    }
+    Some(quad)
+}
+
+/// The box about a quad's corners.
+fn quad_bounds(q: [Vec2; 4]) -> Rect {
     let (mut lo, mut hi) = (vec2(f32::INFINITY, f32::INFINITY), vec2(f32::NEG_INFINITY, f32::NEG_INFINITY));
-    for (x, y) in [(x0, y0), (x1, y0), (x1, y1), (x0, y1)] {
-        let s = view25::project_with(view_proj, model.transform_point3(vec3(x, y, 0.0)), view)?;
+    for s in q {
         lo = lo.min(s);
         hi = hi.max(s);
     }
-    Some(Rect::new(lo.x, lo.y, hi.x - lo.x, hi.y - lo.y))
+    Rect::new(lo.x, lo.y, hi.x - lo.x, hi.y - lo.y)
 }
 
 /// A standing sprite's billboard model and the point its foot stands on in space: about the bent sheet's
@@ -3304,14 +3413,14 @@ fn draw_building_ground(cam: &Camera, atlas: &Atlas, r: Rect, cards: &[Card], or
 /// (`standing`), so the group turns as one picture, its cards in their layers. Its flags (`living`) draw with the
 /// card that holds their anchor, moved by that card's layer offset.
 #[allow(clippy::too_many_arguments)]
-fn draw_building_group(cam: &Camera, atlas: &Atlas, r: Rect, cards: &[Card], origin: Vec2, zoom: f32, foot: Vec2, vis: f32, living: Option<&Living>, outlined: bool) {
+fn draw_building_group(cam: &Camera, atlas: &Atlas, r: Rect, cards: &[Card], origin: Vec2, zoom: f32, foot: Vec2, vis: f32, living: Option<&Living>, outlined: bool, pick: Option<Pick>) {
     if cam.tilt.is_some_and(|t| t.cam.bend.is_some()) {
         // Living parts are off in a bent view (`living_on`), so the cleared copy and the flags never mix here.
         debug_assert!(living.is_none(), "a bent view's buildings have no living parts");
-        return draw_layers_on_sheet(cam, atlas, r, cards, origin, zoom, foot, vis, outlined);
+        return draw_layers_on_sheet(cam, atlas, r, cards, origin, zoom, foot, vis, outlined, pick);
     }
     let layers = layered_cards(cam, cards, group_y(foot, origin, zoom));
-    standing(cam, foot, foot, vis, Rect::new(origin.x, origin.y, r.w * zoom, r.h * zoom), || {
+    standing_picked(pick, cam, foot, foot, vis, Rect::new(origin.x, origin.y, r.w * zoom, r.h * zoom), || {
         frame_probe::sprite(r.w * zoom, r.h * zoom);
         match living.and_then(|ls| ls.body()) {
             Some(body) => draw_cards(cam, &layers, origin, zoom, Rect::new(0.0, 0.0, r.w, r.h), body, outlined),
@@ -3348,7 +3457,7 @@ fn sheet_layers(cards: &[Card], origin: Vec2, zoom: f32, group_y: f32, yaw_deg: 
 /// fade and the gold outline of the whole group are its own (the layers fade together); a layer past a down bend's
 /// horizon is not drawn.
 #[allow(clippy::too_many_arguments)]
-fn draw_layers_on_sheet(cam: &Camera, atlas: &Atlas, r: Rect, cards: &[Card], origin: Vec2, zoom: f32, foot: Vec2, vis: f32, outlined: bool) {
+fn draw_layers_on_sheet(cam: &Camera, atlas: &Atlas, r: Rect, cards: &[Card], origin: Vec2, zoom: f32, foot: Vec2, vis: f32, outlined: bool, pick: Option<Pick>) {
     let size = vec2(atlas.texture.width(), atlas.texture.height());
     let picture = Rect::new(origin.x, origin.y, r.w * zoom, r.h * zoom);
     // The ground pieces are drawn on the ground (`draw_building_ground`): only the standing layers here.
@@ -3373,6 +3482,8 @@ fn draw_layers_on_sheet(cam: &Camera, atlas: &Atlas, r: Rect, cards: &[Card], or
         }
     }
     for (k, (at, card)) in layers.iter().enumerate() {
+        // Each layer is picked as the building (the outline pass above is not).
+        PICK_NEXT.with(|p| p.set(pick));
         standing_at(cam, foot, *at, *at, vis, picture, || {
             if k == 0 {
                 frame_probe::sprite(r.w * zoom, r.h * zoom);
@@ -4429,6 +4540,9 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // The list is the thread's buffer taken for this frame (its capacity is kept).
     let mut items = WORLD_ITEMS.with(|c| std::mem::take(&mut *c.borrow_mut()));
     items.clear();
+    // The pointer's record of this frame's standing sprites (the tilted view's; see `PICKS`). The bent views run
+    // this pass twice, the ground's first, so the sprites' pass is the one that keeps its record.
+    PICKS.with_borrow_mut(|quads| quads.clear());
     let fog = &game.fog;
     let tilted = cam.tilt.is_some();
     // The 2.5D view's fog shade of each standing sprite (none in the flat view: 1 there).
@@ -4672,7 +4786,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                         // A bridge lies on the ground (Razdor's), so it is drawn in the ground pass.
                         ground(cam, || draw_building(l, art, cam, outlined));
                     } else {
-                        standing(cam, building_foot(l, cam), building_foot(l, cam), shade_of(building_foot(l, cam)), building_picture(l, art, cam), || draw_building(l, art, cam, outlined));
+                        standing_picked(Some(Pick::Location(*i)), cam, building_foot(l, cam), building_foot(l, cam), shade_of(building_foot(l, cam)), building_picture(l, art, cam), || draw_building(l, art, cam, outlined));
                     }
                 }
                 Drawable::BuildingGroup(i) => {
@@ -4685,12 +4799,14 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                     // Living (flags): the cards draw the cleared copy, and each flag moves with the card whose
                     // outline holds its anchor (`owning_card`).
                     let living = living_of(cam, art, l).filter(|(_, ls)| ls.body().is_some());
-                    draw_building_group(cam, atlas, r, cards, origin, zoom, foot, shade_of(foot), living.map(|(_, ls)| ls), outlined);
+                    draw_building_group(cam, atlas, r, cards, origin, zoom, foot, shade_of(foot), living.map(|(_, ls)| ls), outlined, Some(Pick::Location(*i)));
                 }
                 Drawable::Army(i) => {
                     let a = &game.world.armies[*i];
                     let f = cam.to_screen(game.army_display_pos(a));
-                    standing(cam, f, f, shade_of(f), army_picture(game, a, art, cam), || draw_army(game, a, assets, art, cam));
+                    // A figure inside a building is not drawn (`draw_army`), so the pointer does not find it either.
+                    let pick = (!game.army_hidden(a)).then_some(Pick::Army(*i));
+                    standing_picked(pick, cam, f, f, shade_of(f), army_picture(game, a, art, cam), || draw_army(game, a, assets, art, cam));
                 }
                 Drawable::Ship => {
                     if let Some(ship) = game.ship {
@@ -4706,7 +4822,8 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                 }
                 Drawable::Hero => {
                     let f = cam.to_screen(game.display_pos());
-                    without_near_fade(|| standing(cam, f, f, shade_of(f), hero_picture(game, art, cam), || draw_hero(game, assets, art, cam)))
+                    let pick = (!game.hero_hidden()).then_some(Pick::Hero);
+                    without_near_fade(|| standing_picked(pick, cam, f, f, shade_of(f), hero_picture(game, art, cam), || draw_hero(game, assets, art, cam)))
                 }
                 Drawable::Spell(n) => {
                     if let Some(s) = spell {
@@ -5239,6 +5356,13 @@ fn hover_tooltip(game: &Game, cam: &Camera) -> Option<Tooltip> {
     if !cam.over_map(m) {
         return None;
     }
+    // Tilted, the standing sprite drawn under the pointer (last frame, front-most) is what it is over: the hero, an
+    // army or a building by its picture. Only when nothing is picked does the ground's test below decide.
+    if cam.tilt.is_some() {
+        if let Some(tip) = sprite_under(m).and_then(|p| pick_tooltip(game, p)) {
+            return Some(tip);
+        }
+    }
     let near = 22.0 * (cam.scale / PX).max(0.6);
     let over = |pos: (f32, f32)| (cam.screen_at(pos) - vec2(0.0, 12.0 * cam.scale / PX) - m).length() < near;
     // Occupant code 1, the hero, is army 0 to the tooltip (0x4cbf20 → 0x4cc274).
@@ -5255,6 +5379,29 @@ fn hover_tooltip(game: &Game, cam: &Camera) -> Option<Tooltip> {
         return Some(army_tooltip(game, a));
     }
     Some(location_tooltip(game, &game.world.locations[l]))
+}
+
+/// The tooltip of a standing sprite the tilted view picked ([`sprite_under`]): the hero's, an army's (explored), or a
+/// building's (explored, its guard's army first, as the ground's test shows it). None when it is not shown.
+fn pick_tooltip(game: &Game, p: Pick) -> Option<Tooltip> {
+    let map = &game.world.map;
+    match p {
+        Pick::Hero => Some(hero_tooltip(game)),
+        Pick::Army(i) => {
+            let a = game.world.armies.get(i)?;
+            game.fog.explored(a.tile(map)).then(|| army_tooltip(game, a))
+        }
+        Pick::Location(l) => {
+            let loc = game.world.locations.get(l)?;
+            if !loc.cells().any(|t| game.fog.explored(t)) {
+                return None;
+            }
+            match tooltip_guard(game, l) {
+                Some(a) => Some(army_tooltip(game, a)),
+                None => Some(location_tooltip(game, loc)),
+            }
+        }
+    }
 }
 
 /// The pointer's place over army `i` for an off-screen snapshot (`RAZDOR_SCENE_ARMY_HOVER`):
@@ -5384,7 +5531,7 @@ fn update_pointer(game: &Game, view: &mut MapView, cam: &Camera, on_minimap: boo
         view.hover = None;
         return;
     }
-    let Some(t) = cam.tile_under_mouse() else {
+    let Some(t) = pointed_tile(game, cam, on_minimap) else {
         // Below the map the cell's ring stays (0x4cceeb restores nothing).
         view.pointer = Shape::Arrow;
         return;
@@ -6121,7 +6268,7 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
     }
     let clock = game_bar::time_panel();
     let on_clock = !input_blocked() && clock.contains(crate::ui::widgets::pointer().into());
-    let hovered = cam.tile_under_mouse().filter(|_| !on_minimap);
+    let hovered = pointed_tile(game, &cam, on_minimap).filter(|_| !on_minimap);
     let mut reopened = None;
     if !idle {
         // A left click or any key held while he walks cuts his route: he finishes the step
@@ -6295,11 +6442,11 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
     };
     // The hovered building is outlined only while the pointer is on it and the map takes
     // input; the cell's ring stays as the original leaves it.
-    let pointed = !input_blocked() && view.pointer != Shape::Clock && view.hover.is_some_and(|h| cam.tile_under_mouse() == Some(h.cell));
+    let pointed = !input_blocked() && view.pointer != Shape::Clock && view.hover.is_some_and(|h| pointed_tile(game, &cam, on_minimap) == Some(h.cell));
     let pointed_at = view.hover.and_then(|h| h.building.filter(|_| pointed));
     let taking = !input_blocked() && view.pointer != Shape::Clock;
     let now_s = crate::ui::clock::now();
-    let mouse_cell = cam.tile_under_mouse();
+    let mouse_cell = pointed_tile(game, &cam, on_minimap);
     let near = |b: usize| mouse_cell.is_some_and(|(x, y)| game.world.locations[b].cells().any(|(cx, cy)| (cx - x).abs() <= 1 && (cy - y).abs() <= 1));
     view.outlined = match (pointed_at, view.outlined) {
         (Some(b), _) => Some((b, now_s)),
@@ -6666,7 +6813,7 @@ fn draw_building_windows(game: &Game, assets: &Assets, cam: &Camera, veil: Veil)
                 }
                 if let Some((_, r, cards)) = card_building(l, Some(art)).filter(|_| c.tilt.is_some()) {
                     let origin = building_sprite_origin(l, r.w, r.h, c);
-                    draw_building_group(c, atlas, r, cards, origin, zoom, foot, vis, None, false);
+                    draw_building_group(c, atlas, r, cards, origin, zoom, foot, vis, None, false, None);
                 } else if let Some(r) = atlas.building(l.picture.0, l.picture.1) {
                     let at = building_sprite_origin(l, r.w, r.h, c);
                     let params = DrawTextureParams { dest_size: Some(vec2(r.w * zoom, r.h * zoom)), source: Some(r), ..Default::default() };
@@ -8566,6 +8713,71 @@ mod tilt_tests {
         assert_eq!((premultiplied.r, premultiplied.g, premultiplied.b, premultiplied.a), (0.25, 0.25, 0.25, 0.25), "premultiplied: all channels faded");
         assert_eq!(gone.a, 0.0, "invisible");
         assert_eq!((gone_premultiplied.r, gone_premultiplied.a), (0.0, 0.0), "invisible premultiplied");
+    }
+}
+
+#[cfg(test)]
+mod pick_tests {
+    use super::*;
+    use razdor::rules::content::{Content, HeroClass};
+    use std::sync::Arc;
+
+    fn square(x0: f32, y0: f32, side: f32) -> [Vec2; 4] {
+        [vec2(x0, y0), vec2(x0 + side, y0), vec2(x0 + side, y0 + side), vec2(x0, y0 + side)]
+    }
+
+    /// Overlapping quads pick the one drawn last (the front); a pointer in one only picks that; a pointer in none
+    /// picks nothing (the caller then takes the ground's cell).
+    #[test]
+    fn the_pick_is_the_front_most_quad_that_holds_the_pointer() {
+        let quads = [
+            PickQuad { quad: square(0.0, 0.0, 100.0), pick: Pick::Location(1) },
+            PickQuad { quad: square(40.0, 40.0, 20.0), pick: Pick::Army(0) },
+        ];
+        assert_eq!(front_pick(&quads, vec2(50.0, 50.0)), Some(Pick::Army(0)), "the army drawn over the castle");
+        assert_eq!(front_pick(&quads, vec2(10.0, 10.0)), Some(Pick::Location(1)), "only the castle's quad holds it");
+        assert_eq!(front_pick(&quads, vec2(200.0, 200.0)), None, "outside all: the ground decides");
+        let swapped = [quads[1], quads[0]];
+        assert_eq!(front_pick(&swapped, vec2(50.0, 50.0)), Some(Pick::Location(1)), "the later draw wins, whatever the army");
+        assert_eq!(front_pick(&[], vec2(50.0, 50.0)), None);
+    }
+
+    /// A convex quad holds the points inside it whichever way its corners run, and its edges count as inside;
+    /// a degenerate quad holds nothing.
+    #[test]
+    fn a_quad_holds_the_points_inside_it_in_either_winding() {
+        let ccw = square(0.0, 0.0, 10.0);
+        let mut cw = ccw;
+        cw.reverse();
+        for q in [ccw, cw] {
+            assert!(quad_holds(&q, vec2(5.0, 5.0)));
+            assert!(quad_holds(&q, vec2(0.0, 0.0)), "a corner");
+            assert!(!quad_holds(&q, vec2(-0.5, 5.0)));
+            assert!(!quad_holds(&q, vec2(5.0, 10.5)));
+        }
+        let flat = [vec2(3.0, 3.0); 4];
+        assert!(!quad_holds(&flat, vec2(3.0, 3.0)));
+        assert!(!quad_holds(&flat, vec2(4.0, 3.0)));
+        // A sheared, rotated quad (a billboard seen at an angle).
+        let skew = [vec2(0.0, 0.0), vec2(20.0, 4.0), vec2(16.0, 14.0), vec2(-4.0, 10.0)];
+        assert!(quad_holds(&skew, vec2(8.0, 7.0)));
+        assert!(!quad_holds(&skew, vec2(-4.0, 0.0)), "outside the sheared edge");
+    }
+
+    /// The flat view draws a standing sprite as before and records nothing for the pointer: its pick is
+    /// set and taken by the draw, and no quad is kept.
+    #[test]
+    fn the_flat_view_records_no_pick_and_draws_as_before() {
+        let game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        let view = Rect::new(0.0, 0.0, 1280.0, 760.0);
+        let cam = Camera { origin: vec2(0.0, 0.0), view, draw: view, scale: PX, grid: game.world.map.grid, tilt: None };
+        PICKS.with_borrow_mut(|q| q.clear());
+        let mut drawn = false;
+        standing_picked(Some(Pick::Hero), &cam, vec2(100.0, 100.0), vec2(100.0, 100.0), 1.0, Rect::new(90.0, 60.0, 20.0, 40.0), || drawn = true);
+        assert!(drawn, "the flat view draws the sprite");
+        assert!(PICKS.with_borrow(|q| q.is_empty()), "nothing is recorded flat");
+        assert_eq!(sprite_under(vec2(100.0, 80.0)), None);
+        assert_eq!(PICK_NEXT.with(|p| p.get()), None, "the pick is taken by the draw");
     }
 }
 

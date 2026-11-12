@@ -358,6 +358,17 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
 - Picking: `map_pointer` is the ground under the pointer (NaN over the sky), `tile_under_pixel` the
   cell under a pixel at any turn (tested in `tilt_tests`). Overlays on the window (tooltip, battle
   marks, effects, the travel time) use `Camera::screen_at`. A figure is picked by its cell.
+  **What the pointer is over, tilted** (the player's report, 2026-11-12: the ground under a house, a castle's
+  tower or an army's body was missed). The sprites' pass of `draw_world_in` records each pickable standing sprite
+  (the hero, an army not hidden in a building, a location's building or each of its card layers; decorations and hills
+  are not picked) as the four corners of its drawn picture: `picture_quad` in `standing_at`, the identity from
+  `standing_picked`, into `PICKS` (cleared each frame; the bent views' sprites' pass keeps it). `sprite_under` gives the
+  front-most quad that holds the pointer (the last drawn; the record of the last frame, as the clicks read it), and
+  `pointed_tile` turns it into a cell (`pick_cell`: the hero's or an army's cell, a location's centre cell or else its
+  first footprint cell that can be targeted, so a click on a tower walks into the castle). The pointer shape, the hover
+  ring and outline, the tooltip (`pick_tooltip`) and the click use it; a miss takes the ground cell as before. Flat, nothing
+  is recorded and `pointed_tile` is the ground cell. Quads are the picture's box, not its alpha: a transparent corner of a
+  picture counts as the picture.
 - **Turning.** Q and E turn 45° (`TILT_YAW_STEP`); the shown yaw eases to its target (`ease_yaw`,
   12 a second, the short way round, snapped within 0.05°). Q and E cut a walk only on the flat map
   (`cuts_walk`). Screen moves (keys, edge, stick, drag, slide) go through `Camera::screen_to_world_delta`
