@@ -1,0 +1,112 @@
+{
+ "schema": 1,
+ "meta": {
+  "label": "v1.4.1",
+  "machine": "owner desktop: RTX 4060 (/dev/dri/card2) via VirtualGL on a private Xvfb, CPUs 8-19 at nice 19",
+  "build": "razdor-1.4.1-linux (release download)",
+  "commit": "31a85c96",
+  "backend": "gpu-4060",
+  "display": "",
+  "size": "1024x768",
+  "refresh": 0,
+  "workspace": null,
+  "runs": 4,
+  "frames": null,
+  "skip": 5,
+  "date": "2026-11-12",
+  "source": "run2.sh runs (/mnt/ai_models/razdor-scratch/fps-final/runs2), 40 s each, first 5 s dropped, fresh settings (effects off). Two sessions, 2 runs each."
+ },
+ "scenes": {
+  "rk3-start/flat/off": {
+   "ms": 1.572,
+   "ms_runs": [
+    1.574,
+    1.567,
+    1.57,
+    1.575
+   ],
+   "work": 0.181,
+   "work_runs": [
+    0.18,
+    0.179,
+    0.182,
+    0.182
+   ],
+   "p90": 1.639,
+   "p90_runs": [
+    1.639,
+    1.63,
+    1.638,
+    1.64
+   ],
+   "load": 0.373,
+   "load_runs": [
+    0.501,
+    0.353,
+    0.377,
+    0.369
+   ],
+   "rss": null,
+   "rss_runs": [],
+   "vram": null,
+   "vram_runs": [],
+   "draws": null,
+   "draws_runs": [],
+   "verts": null,
+   "verts_runs": [],
+   "load1": null,
+   "load1_runs": [],
+   "fps": 636.1,
+   "capped": false,
+   "runs": 4,
+   "renderer": "OpenGl, 4.6.0 NVIDIA 615.78.08"
+  },
+  "rk3-start/25d/off": {
+   "ms": 1.632,
+   "ms_runs": [
+    1.632,
+    1.635,
+    1.63,
+    1.632
+   ],
+   "work": 0.265,
+   "work_runs": [
+    0.264,
+    0.265,
+    0.266,
+    0.265
+   ],
+   "p90": 1.703,
+   "p90_runs": [
+    1.697,
+    1.704,
+    1.701,
+    1.704
+   ],
+   "load": 0.365,
+   "load_runs": [
+    0.37,
+    0.364,
+    0.366,
+    0.355
+   ],
+   "rss": null,
+   "rss_runs": [],
+   "vram": null,
+   "vram_runs": [],
+   "draws": null,
+   "draws_runs": [],
+   "verts": null,
+   "verts_runs": [],
+   "load1": null,
+   "load1_runs": [],
+   "fps": 612.7,
+   "capped": false,
+   "runs": 4,
+   "renderer": "OpenGl, 4.6.0 NVIDIA 615.78.08"
+  }
+ },
+ "not_measured": [
+  "db-zoomout cells (run2 measured only the РК3 start); the next check.sh run on a release fills them"
+ ]
+}

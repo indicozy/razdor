@@ -1,0 +1,108 @@
+{
+ "schema": 1,
+ "meta": {
+  "label": "main 7dd62351",
+  "machine": "owner desktop: RTX 4060 (/dev/dri/card2) via VirtualGL on a private Xvfb, CPUs 8-19 at nice 19",
+  "build": "main before the 2.5D close-up fix",
+  "commit": "7dd62351",
+  "backend": "gpu-4060",
+  "display": "",
+  "size": "1024x768",
+  "refresh": 0,
+  "workspace": null,
+  "runs": 2,
+  "frames": null,
+  "skip": 5,
+  "date": "2026-11-12",
+  "source": "run2.sh runs (/mnt/ai_models/razdor-scratch/fps-final/runs2), 40 s each, first 5 s dropped, fresh settings (effects off). The reference for the 2.5D close-up fix (not a release)."
+ },
+ "scenes": {
+  "rk3-start/flat/off": {
+   "ms": 1.627,
+   "ms_runs": [
+    1.626,
+    1.627
+   ],
+   "work": 0.208,
+   "work_runs": [
+    0.208,
+    0.209
+   ],
+   "p90": 1.684,
+   "p90_runs": [
+    1.682,
+    1.686
+   ],
+   "load": 0.38,
+   "load_runs": [
+    0.377,
+    0.382
+   ],
+   "rss": null,
+   "rss_runs": [],
+   "vram": null,
+   "vram_runs": [],
+   "draws": 134.0,
+   "draws_runs": [
+    134.0,
+    134.0
+   ],
+   "verts": 696.0,
+   "verts_runs": [
+    696.0,
+    696.0
+   ],
+   "load1": null,
+   "load1_runs": [],
+   "fps": 614.6,
+   "capped": false,
+   "runs": 2,
+   "renderer": "OpenGl, 4.6.0 NVIDIA 615.78.08"
+  },
+  "rk3-start/25d/off": {
+   "ms": 1.816,
+   "ms_runs": [
+    1.814,
+    1.817
+   ],
+   "work": 0.423,
+   "work_runs": [
+    0.422,
+    0.424
+   ],
+   "p90": 1.889,
+   "p90_runs": [
+    1.881,
+    1.896
+   ],
+   "load": 0.386,
+   "load_runs": [
+    0.366,
+    0.405
+   ],
+   "rss": null,
+   "rss_runs": [],
+   "vram": null,
+   "vram_runs": [],
+   "draws": 139.0,
+   "draws_runs": [
+    139.0,
+    139.0
+   ],
+   "verts": 661.0,
+   "verts_runs": [
+    661.0,
+    661.0
+   ],
+   "load1": null,
+   "load1_runs": [],
+   "fps": 550.7,
+   "capped": false,
+   "runs": 2,
+   "renderer": "OpenGl, 4.6.0 NVIDIA 615.78.08"
+  }
+ },
+ "not_measured": [
+  "db-zoomout cells (run2 measured only the РК3 start); the next check.sh run on a release fills them"
+ ]
+}
