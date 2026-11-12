@@ -407,8 +407,8 @@ private String razdorCopyExport(String source, Uri uri) {
 
 // The folder picker for the saves of an older release (src/ui/saves_move.rs): the player picks the
 // shared «Razdor» folder (the picker opens at it), and its saves folder is copied into the app's cache
-// (`old-saves`, the same cache the game reads). Only the saves folder is copied: Razdor reads the copy
-// with its own rules (transfer::import_folder). razdorOldSavesOutcome is the game's poll: "" while the
+// (`old-saves`, the same cache the game reads): the saves folder with its settings.json and its hub folder
+// (the installed maps and mods). Razdor reads the copy with its own rules (transfer::import_folder, hub::import_old). razdorOldSavesOutcome is the game's poll: "" while the
 // picker is open or the copy runs, "cancel", "wrong" (the folder holds no saves), "error: <code>", or
 // "copied" (the copy is in the cache, ready to import).
 private static final int RAZDOR_OLD_PICK_REQUEST = 7303;

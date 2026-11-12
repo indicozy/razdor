@@ -101,6 +101,9 @@ SCREENS = [
     ("options-group-screen", "options:screen", {}),
     ("options-group-controls", "options:controls", {}),
     ("options-group-other", "options:other", {}),
+    # The debug mode's strip (Settings → «Прочее», «Режим отладки»): over the main menu and over a map.
+    ("title-debug", "title", {"RAZDOR_CASE_AUDIO": '{"debug_mode": true}'}),
+    ("map-debug", "map:РК1-Начало пути", {"RAZDOR_CASE_AUDIO": '{"debug_mode": true}', "RAZDOR_SCENE_QUIET": "1"}),
     ("scenarios", "scenarios:РК1-Начало пути", {}),
     # The scenario card (the owner's order of 2026-11-02): the picked map's picture, description and «Далее».
     ("scenarios-card", "scenarios:РК1-Начало пути", {"RAZDOR_SCENE_CARD": "1"}),
