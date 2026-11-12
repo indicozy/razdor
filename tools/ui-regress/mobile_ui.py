@@ -88,6 +88,9 @@ SCREENS = [
     ("title-noinstall-repair", "title", {"RAZDOR_DT_DIR": "/mnt/ai_models/razdor-scratch/game-download/copy-install", "RAZDOR_CONFIG_DIR": "/nonexistent-razdor-config", "HOME": "/nonexistent-razdor-home"}),
     # The same, while the game downloads (the progress window at 40%).
     ("title-noinstall-downloading", "title", {"RAZDOR_DT_DIR": "/nonexistent-razdor-dt", "RAZDOR_CONFIG_DIR": "/nonexistent-razdor-config", "HOME": "/nonexistent-razdor-home", "RAZDOR_SCENE_DOWNLOADING": "40"}),
+    # The automatic start: the check (the loading window's line) and the unpacking at 60%.
+    ("title-noinstall-checking", "title", {"RAZDOR_DT_DIR": "/nonexistent-razdor-dt", "RAZDOR_CONFIG_DIR": "/nonexistent-razdor-config", "HOME": "/nonexistent-razdor-home", "RAZDOR_SCENE_CATALOG": "checking"}),
+    ("title-noinstall-unpacking", "title", {"RAZDOR_DT_DIR": "/nonexistent-razdor-dt", "RAZDOR_CONFIG_DIR": "/nonexistent-razdor-config", "HOME": "/nonexistent-razdor-home", "RAZDOR_SCENE_UNPACKING": "60"}),
     ("options", "options", {}),
     # The settings group windows (backlog 1559): the Map window is the longest and scrolls; its rows are
     # measured in the view.

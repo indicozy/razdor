@@ -537,7 +537,9 @@ fn confirm_window(name: &str) -> Option<bool> {
 /// the download's bar without a job.
 fn progress_window() {
     let Some((done, total, progress, title, size)) = JOB.with_borrow(|j| j.as_ref().map(|j| (j.done.load(Ordering::Relaxed), j.total.load(Ordering::Relaxed), j.progress.clone(), j.title, j.size))) else {
-        if let Some(bytes) = snapshot_download_bytes() {
+        if checking() {
+            checking_window();
+        } else if let Some(bytes) = snapshot_download_bytes() {
             download_window(bytes, gdrive::GAME.size, None, tr("Loading the game"));
         } else if let Some(pct) = snapshot_unpacking() {
             unpack_window(pct, 100, tr("Loading the game"));
@@ -691,6 +693,15 @@ fn poll_picker() -> Poll {
     }
 }
 
+/// The automatic start's check, in the same window as the download and the unpacking («Loading the
+/// game»): the line «Checking the catalog…» over an empty bar, until the game's download starts.
+fn checking_window() {
+    let (_, _, bar) = map_import::frame_bar(tr("Loading the game"), &[tr("Checking the catalog…").to_string()], Some(0.0), true);
+    if let Some(bar) = bar {
+        map_import::draw_bar(bar, 0.0);
+    }
+}
+
 /// The game download's window: the megabytes of the archive, its percent and a bar, and Cancel (the
 /// close box too). A cancel keeps the partial copy for the next press; `cancel` is None in the snapshot.
 fn download_window(bytes: u64, all: u64, cancel: Option<&gdrive::Progress>, title: &str) {
@@ -698,7 +709,9 @@ fn download_window(bytes: u64, all: u64, cancel: Option<&gdrive::Progress>, titl
     let pct = if all == 0 { 0 } else { (bytes * 100 / all).min(100) };
     let text = trf!("Downloading the game: {mb} / {all} MB, {pct}%.", mb = mb(bytes), all = mb(all), pct = pct);
     let share = if all == 0 { 0.0 } else { (bytes as f32 / all as f32).min(1.0) };
-    let (inner, closed, bar) = map_import::frame_bar(title, &[text], Some(share), cancel.is_some());
+    // The button row is always reserved (the Cancel is always drawn, the snapshot's too), so the bar
+    // never runs under it.
+    let (inner, closed, bar) = map_import::frame_bar(title, &[text], Some(share), true);
     if let Some(bar) = bar {
         map_import::draw_bar(bar, share);
     }
