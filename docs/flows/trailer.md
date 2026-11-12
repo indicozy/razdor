@@ -57,7 +57,7 @@ until the next one). Decoding is `dt::sound::read_sound`.
 `src/trailer.rs` holds the format (`parse`, the errors per line and field), the keyframe sampling
 (`sample_values`, `sample_target`, `lerp_angle` for yaw), the easing (`Ease::apply`), the frame
 clock (`frame_count`, `frame_time`), the sound log (`SoundLog`) and the mixer (`mix_wav`). Its unit
-tests run with `cargo test --release --no-default-features --lib trailer::`.
+tests run with `cargo test --profile fasttest --no-default-features --lib trailer::`.
 
 ## The render's outputs and the determinism check
 

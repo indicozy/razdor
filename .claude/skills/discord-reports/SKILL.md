@@ -89,7 +89,7 @@ Rules:
 
 List from INDEX: everything open (not `released`/`verified` or closed: `as-original`, `declined`, `duplicate`, `cannot-reproduce`, `wontfix`) (open work,
 oldest first, `low` priority last), then `regressed` ones. For every `fixed`/`released`/`verified` report check that its test
-still exists (`grep -rn <test name> src/`) and passes (`cargo test --release <test name>`); a
+still exists (`grep -rn <test name> src/`) and passes (`cargo test --profile fasttest <test name>`); a
 report whose test is gone or failing is flagged. Give the owner the counts by status and the
 flagged list.
 

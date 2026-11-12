@@ -16,8 +16,9 @@ mobile support; there is no roadmap and nothing else is started unless the owner
 ## Commands
 
 - Build: `cargo build --release`. Silent build (no sound, no ALSA): `--no-default-features`.
-- Tests: `cargo test --release`. Tests on the real game files and the difftests skip unless
-  `RAZDOR_DT_DIR` is set; set it (from `.env`, without quotes) before calling a change tested.
+- Tests: day-to-day and agent test runs use `cargo test --profile fasttest` (same filters and env as
+  before); `cargo test --release` stays the gate (CI, the full run before a release). Tests on the real
+  game files and the difftests skip unless `RAZDOR_DT_DIR` is set; set it (from `.env`, without quotes).
 - Lint: `cargo clippy --release`.
 - Community map smoke test: `cargo test --release --lib community_maps_smoke` with
   `RAZDOR_COMMUNITY_DIR` set (the folder's path is in `CLAUDE.local.md`): every map of every

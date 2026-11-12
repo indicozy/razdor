@@ -27,9 +27,10 @@ is not part of `cargo test`.
 Commands (pin to the cores you are allowed to use; see `CLAUDE.local.md` if present):
 
 ```sh
-cargo test --release                     # everything
-cargo test --release --lib <name>        # one library test
-cargo test --release --bins              # the game binary's tests (src/ui)
+cargo test --profile fasttest            # everything: the edit-run loop (incremental, see Cargo.toml)
+cargo test --profile fasttest --lib <name>   # one library test
+cargo test --profile fasttest --bins     # the game binary's tests (src/ui)
+cargo test --release                     # the gate (CI, the full run before a release)
 cargo clippy --all-targets
 ```
 

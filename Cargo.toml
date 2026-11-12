@@ -64,6 +64,21 @@ debug = "line-tables-only"
 opt-level = 2
 debug = false
 
+# The test edit-run loop (`cargo test --profile fasttest`): incremental, 256 codegen units, so a
+# change rebuilds only its own units. Release still ships and CI still tests `--release`.
+# Measured (rustc 1.91.1, 12 jobs on CPUs 8-19; `--release` in the same worktree, same target dir):
+# a one-line body edit under src/rules/ rebuilds in 255 CPU-s (66 s wall) against 481 CPU-s (94 s);
+# a test run takes 268 CPU-s (2:03) against 674-732 CPU-s (2:56 to 3:17, each including a crate
+# recompile); the warm build (once) takes 1333 CPU-s (3:08) against 1273 CPU-s (4:45).
+[profile.fasttest]
+inherits = "release"
+incremental = true
+codegen-units = 256
+opt-level = 3
+
+[profile.fasttest.package."*"]
+opt-level = 3
+
 # macroquad 0.4.16 plus one patch (QuadGl::push_cpu_model_matrix: a CPU-side model transform
 # that does not split batches; see the fork's commit). The 2.5D view's billboards batch through
 # it: one draw call instead of one per sprite. Drop the patch once upstream releases it.

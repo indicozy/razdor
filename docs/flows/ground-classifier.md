@@ -112,7 +112,7 @@ Every sprite that is not checked gets its card flags from the model: a card is g
 least half of its opaque pixels have a ground probability of 0.5 or more. Polygons, feet and card
 order do not change. The checked sprites keep the owner's labels exactly.
 
-Then the usual checks: `cargo test --release --bin razdor`, `cargo test --release --lib cards`,
+Then the usual checks: `cargo test --profile fasttest --bin razdor`, `cargo test --profile fasttest --lib cards`,
 `cargo clippy --release --all-targets -- -D warnings`. Commit the data and `ground_model.json` (both
 are numbers), never the sprite PNGs, the depth model or the flips file (see `CLAUDE.md`, sprite cut data).
 
