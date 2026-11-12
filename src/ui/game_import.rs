@@ -539,6 +539,8 @@ fn progress_window() {
     let Some((done, total, progress, title, size)) = JOB.with_borrow(|j| j.as_ref().map(|j| (j.done.load(Ordering::Relaxed), j.total.load(Ordering::Relaxed), j.progress.clone(), j.title, j.size))) else {
         if let Some(bytes) = snapshot_download_bytes() {
             download_window(bytes, gdrive::GAME.size, None, tr("Loading the game"));
+        } else if let Some(pct) = snapshot_unpacking() {
+            unpack_window(pct, 100, tr("Loading the game"));
         }
         return;
     };
@@ -553,6 +555,13 @@ fn snapshot_download_bytes() -> Option<u64> {
     std::env::var_os("RAZDOR_SNAPSHOT")?;
     let pct: u64 = std::env::var("RAZDOR_SCENE_DOWNLOADING").ok()?.parse().ok()?;
     Some(gdrive::GAME.size * pct.min(100) / 100)
+}
+
+/// The snapshot's fake unpacking: `RAZDOR_SCENE_UNPACKING=<percent>` (with `RAZDOR_SNAPSHOT`).
+fn snapshot_unpacking() -> Option<u64> {
+    std::env::var_os("RAZDOR_SNAPSHOT")?;
+    let pct: u64 = std::env::var("RAZDOR_SCENE_UNPACKING").ok()?.parse().ok()?;
+    Some(pct.min(100))
 }
 
 /// The unpacking's percent and bar.

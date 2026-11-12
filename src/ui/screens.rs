@@ -455,7 +455,11 @@ pub fn menu_not_found(no_install: bool) {
 fn checking_panel() {
     let k = super::chrome::k();
     let label = tr("Checking the catalog…");
-    let size = 20.0 * k;
+    // A phone's text is the not-found block's body size (about 14 sp, `BLOCK_TEXT`); the desktop's is 20.
+    let size = match super::display::dp_px() {
+        Some(_) => 16.0 * k * BLOCK_TEXT,
+        None => 20.0 * k,
+    };
     let w = measure(label, size).width + 40.0 * k;
     let h = size + 28.0 * k;
     let x = (screen_width() - w) / 2.0;
