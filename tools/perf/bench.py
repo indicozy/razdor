@@ -83,7 +83,7 @@ BASE_SETTINGS = {
     'music_muted': True, 'sfx_muted': True, 'updates': 'off', 'expert_ai': True,
     'map_sprite_size': 1.5, 'map_render_scale': 1.0, 'map_extended': True, 'map_zoom': 1.0,
 }
-CAP_TOLERANCE = 0.97  # a cell at >= 97% of the refresh rate is capped
+CAP_TOLERANCE = 0.97  # a cell within 97%..103% of the refresh rate is capped (held by vsync)
 SCHEMA = 1
 
 # The headless RTX 4060 (--gpu-4060). The card is checked against its PCI address and name first.
@@ -495,7 +495,7 @@ def summarise(runs, refresh):
         cell[key] = round(statistics.median(vals), 3) if vals else None
         cell[key + '_runs'] = [round(v, 3) for v in vals]
     cell['fps'] = round(1000 / cell['ms'], 1)
-    cell['capped'] = bool(refresh) and cell['fps'] >= CAP_TOLERANCE * refresh
+    cell['capped'] = bool(refresh) and CAP_TOLERANCE * refresh <= cell['fps'] <= refresh / CAP_TOLERANCE
     cell['runs'] = len(runs)
     cell['renderer'] = next((r['renderer'] for r in runs if r.get('renderer')), None)
     return cell

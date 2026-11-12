@@ -144,3 +144,22 @@ only the best run of each configuration is quoted, probe `work_ms`:
 Not re-measured on a quiet machine: the target (2.5D back near 0.27) is not confirmed. Terrain (+~0.025 ms):
 the cached terrain path draws the cache and then an overlay pass (needed on water cells), where v1.4.1 drew
 one quad; left as designed.
+
+## After the fix: main `69212f33` vs v1.4.1 on the owner's monitor (2026-11-12)
+
+`69212f33` turns the folded building cards off (buildings whole, as in v1.4.1) and runs the fog check once per
+location per frame (it ran 441 times a frame in 2.5D). Measured with `tools/perf/bench.py --display :0`
+(RTX 5060 Ti, 2560×1440, vsync off, 3 runs each, effects off). Medians; CPU = the frame probe's `work_ms`.
+
+| Scene | v1.4.1 frame / CPU ms | main frame / CPU ms |
+|---|---|---|
+| РК3 start, flat | 0.42 / 0.16 | 0.43 / 0.16 |
+| РК3 start, 2.5D | 0.47 / 0.21 | 0.47 / 0.21 |
+| «Другой берег» zoomed out, flat | 7.65 / 1.29 | 2.07 / 1.03 |
+| «Другой берег» zoomed out, 2.5D | 7.22 / 6.95 | 2.58 / 2.25 |
+| «Другой берег» zoomed out, third person | 7.13 / 6.85 (v1.4.1 has no third person: 2.5D) | 5.58 / 5.26 |
+
+The 2.5D close-up cost is gone: main matches v1.4.1 there, and zoomed out it is 3× faster. RSS is +7% and VRAM
++10 MB at the РК3 start. `tools/perf/baselines/v1.4.1.json` now holds these measured v1.4.1 numbers (it held numbers
+copied from this doc before). The 4060 headless check could not run: the card hung (Xid 119) while the bench
+polled `nvidia-smi` every second; the bench now reads VRAM once per run.

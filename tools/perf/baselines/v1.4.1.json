@@ -1,29 +1,336 @@
 {
-  "schema": 1,
-  "meta": {
-    "label": "v1.4.1",
-    "machine": "owner desktop: RTX 5060 Ti (the monitor's GPU), 2560x1440, vsync off, game on CPUs 8-19",
-    "build": "razdor-1.4.1-linux (release download)",
-    "commit": "31a85c96",
-    "backend": "display",
-    "display": ":0",
-    "size": "2560x1440",
-    "refresh": 180,
-    "workspace": null,
-    "runs": null,
-    "frames": null,
-    "skip": null,
-    "date": "2026-11-12",
-    "source": "docs/perf/2026-11-12-atmosphere-performance.md, the v1.4.1 column (medians of 2-3 runs, not per-run values). ms = 1000 / FPS. Capped cells take their CPU ms from the table's parenthesis. Only the cells the doc measured for v1.4.1 are here; RSS, VRAM and load are per build in the doc's memory table, not per cell, so they are left null."
+ "schema": 1,
+ "meta": {
+  "label": "v1.4.1",
+  "machine": "owner desktop: RTX 5060 Ti, 2560x1440",
+  "build": "razdor-1.4.1-linux sha256:0f338d481f24",
+  "commit": "31a85c96",
+  "bench_tool": "ad129661",
+  "backend": "display",
+  "display": ":0",
+  "size": "2560x1440",
+  "refresh": 180,
+  "workspace": 6,
+  "runs": 3,
+  "frames": 400,
+  "skip": 100,
+  "host_cpu": "x86_64",
+  "date": "2026-11-12",
+  "atmosphere_switches": false
+ },
+ "scenes": {
+  "rk3-start/flat/off": {
+   "ms": 0.417,
+   "ms_runs": [
+    0.422,
+    0.411,
+    0.417
+   ],
+   "work": 0.162,
+   "work_runs": [
+    0.162,
+    0.161,
+    0.163
+   ],
+   "p90": 0.441,
+   "p90_runs": [
+    0.445,
+    0.44,
+    0.441
+   ],
+   "load": 0.324,
+   "load_runs": [
+    0.326,
+    0.294,
+    0.324
+   ],
+   "rss": 171.918,
+   "rss_runs": [
+    171.918,
+    171.988,
+    171.676
+   ],
+   "vram": 38,
+   "vram_runs": [
+    38,
+    38,
+    38
+   ],
+   "draws": null,
+   "draws_runs": [],
+   "verts": null,
+   "verts_runs": [],
+   "load1": 2.51,
+   "load1_runs": [
+    2.51,
+    2.51,
+    2.51
+   ],
+   "fps": 2398.1,
+   "capped": false,
+   "runs": 3,
+   "renderer": null
   },
-  "scenes": {
-    "db-zoomout/flat/off": {"fps": 180.0, "ms": 5.55, "work": 1.2, "capped": true, "runs": 0, "ms_runs": [], "work_runs": []},
-    "db-zoomout/25d/off": {"fps": 150.0, "ms": 6.67, "work": null, "capped": false, "runs": 0, "ms_runs": [], "work_runs": []},
-    "db-zoomout/third/off": {"fps": 152.0, "ms": 6.58, "work": null, "capped": false, "runs": 0, "ms_runs": [], "work_runs": []}
+  "rk3-start/25d/off": {
+   "ms": 0.465,
+   "ms_runs": [
+    0.455,
+    0.465,
+    0.467
+   ],
+   "work": 0.212,
+   "work_runs": [
+    0.206,
+    0.212,
+    0.214
+   ],
+   "p90": 0.503,
+   "p90_runs": [
+    0.497,
+    0.519,
+    0.503
+   ],
+   "load": 0.308,
+   "load_runs": [
+    0.306,
+    0.308,
+    0.315
+   ],
+   "rss": 171.902,
+   "rss_runs": [
+    171.668,
+    171.902,
+    171.965
+   ],
+   "vram": 38,
+   "vram_runs": [
+    38,
+    38,
+    38
+   ],
+   "draws": null,
+   "draws_runs": [],
+   "verts": null,
+   "verts_runs": [],
+   "load1": 2.51,
+   "load1_runs": [
+    2.51,
+    2.51,
+    2.51
+   ],
+   "fps": 2150.5,
+   "capped": false,
+   "runs": 3,
+   "renderer": null
   },
-  "not_measured": [
-    "db-zoomout effects on (the doc has no v1.4.1 value)",
-    "db-wholemap (v1.4.1 has no whole-map measurement)",
-    "rk3-start (the doc gives only 'all at the 180 cap, CPU 1.0 ms' without a view)"
-  ]
+  "rk3-start/third/off": {
+   "ms": 0.475,
+   "ms_runs": [
+    0.458,
+    0.476,
+    0.475
+   ],
+   "work": 0.212,
+   "work_runs": [
+    0.209,
+    0.212,
+    0.213
+   ],
+   "p90": 0.512,
+   "p90_runs": [
+    0.503,
+    0.525,
+    0.512
+   ],
+   "load": 0.31,
+   "load_runs": [
+    0.303,
+    0.314,
+    0.31
+   ],
+   "rss": 171.73,
+   "rss_runs": [
+    171.73,
+    171.625,
+    171.945
+   ],
+   "vram": 38,
+   "vram_runs": [
+    38,
+    38,
+    38
+   ],
+   "draws": null,
+   "draws_runs": [],
+   "verts": null,
+   "verts_runs": [],
+   "load1": 2.55,
+   "load1_runs": [
+    2.51,
+    2.55,
+    2.55
+   ],
+   "fps": 2105.3,
+   "capped": false,
+   "runs": 3,
+   "renderer": null
+  },
+  "db-zoomout/flat/off": {
+   "ms": 7.646,
+   "ms_runs": [
+    7.646,
+    8.03,
+    6.741
+   ],
+   "work": 1.292,
+   "work_runs": [
+    1.292,
+    1.337,
+    1.194
+   ],
+   "p90": 8.48,
+   "p90_runs": [
+    8.48,
+    21.206,
+    7.369
+   ],
+   "load": 0.376,
+   "load_runs": [
+    0.361,
+    0.608,
+    0.376
+   ],
+   "rss": 224.699,
+   "rss_runs": [
+    244.77,
+    224.699,
+    224.562
+   ],
+   "vram": 49,
+   "vram_runs": [
+    49,
+    49,
+    49
+   ],
+   "draws": null,
+   "draws_runs": [],
+   "verts": null,
+   "verts_runs": [],
+   "load1": 2.826,
+   "load1_runs": [
+    2.55,
+    2.826,
+    3.081
+   ],
+   "fps": 130.8,
+   "capped": false,
+   "runs": 3,
+   "renderer": null
+  },
+  "db-zoomout/25d/off": {
+   "ms": 7.224,
+   "ms_runs": [
+    7.189,
+    7.308,
+    7.224
+   ],
+   "work": 6.946,
+   "work_runs": [
+    6.914,
+    7.026,
+    6.946
+   ],
+   "p90": 7.715,
+   "p90_runs": [
+    7.644,
+    7.731,
+    7.715
+   ],
+   "load": 0.365,
+   "load_runs": [
+    0.363,
+    0.365,
+    0.379
+   ],
+   "rss": 227.918,
+   "rss_runs": [
+    228.094,
+    227.734,
+    227.918
+   ],
+   "vram": 51,
+   "vram_runs": [
+    51,
+    51,
+    51
+   ],
+   "draws": null,
+   "draws_runs": [],
+   "verts": null,
+   "verts_runs": [],
+   "load1": 2.994,
+   "load1_runs": [
+    2.994,
+    2.994,
+    2.834
+   ],
+   "fps": 138.4,
+   "capped": false,
+   "runs": 3,
+   "renderer": null
+  },
+  "db-zoomout/third/off": {
+   "ms": 7.132,
+   "ms_runs": [
+    7.132,
+    7.118,
+    7.218
+   ],
+   "work": 6.853,
+   "work_runs": [
+    6.853,
+    6.848,
+    6.944
+   ],
+   "p90": 7.727,
+   "p90_runs": [
+    7.574,
+    7.771,
+    7.727
+   ],
+   "load": 0.364,
+   "load_runs": [
+    0.354,
+    0.364,
+    0.365
+   ],
+   "rss": 228.465,
+   "rss_runs": [
+    228.578,
+    228.465,
+    228.18
+   ],
+   "vram": 51,
+   "vram_runs": [
+    51,
+    51,
+    51
+   ],
+   "draws": null,
+   "draws_runs": [],
+   "verts": null,
+   "verts_runs": [],
+   "load1": 2.687,
+   "load1_runs": [
+    2.687,
+    2.687,
+    2.552
+   ],
+   "fps": 140.2,
+   "capped": false,
+   "runs": 3,
+   "renderer": null
+  }
+ },
+ "errors": {}
 }
