@@ -212,6 +212,8 @@ async fn main() {
         }
     }
     let mut app = App::new(assets, content);
+    // The hub's catalog, read once for the launch (the promo ad and the game check; `ui::launch`).
+    ui::launch::start();
     razdor::diag::step("started");
     // The session slot is written when the game is ended by a signal (the desktop) or when the
     // app goes to the background (iOS; Android's pause is a JNI call, `ui::android`).

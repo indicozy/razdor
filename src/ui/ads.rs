@@ -9,8 +9,14 @@
 //! by name and the first one with a valid `ad.ini` and a picture that decodes is the ad. A missing
 //! folder means no promo, and no error.
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::mpsc::{Receiver, TryRecvError};
+
+use razdor::hub::{self, AdRef, Hub, Source};
+
+use super::launch;
 
 use macroquad::prelude::*;
 use razdor::i18n::{self, Lang};
@@ -95,22 +101,21 @@ pub fn select_ad<T>(folders: &[PathBuf], load_image: impl Fn(&Path) -> Option<T>
     })
 }
 
-/// The places to look in, in order (see the module doc).
-fn roots() -> Vec<PathBuf> {
-    if let Some(dir) = std::env::var_os("RAZDOR_ADS_DIR").filter(|d| !d.is_empty()) {
+/// The places to look in, in order (pure): `RAZDOR_ADS_DIR` alone when it names one; else the copy of
+/// the hub's ad in the app's folder (`app_dir/ads`, [`sync_tick`]), `ads/` next to the program, and the
+/// install's `ads/`.
+pub fn ad_roots(env: Option<&OsStr>, app_dir: Option<&Path>, exe_dir: Option<&Path>, install: Option<&Path>) -> Vec<PathBuf> {
+    if let Some(dir) = env.filter(|d| !d.is_empty()) {
         return vec![PathBuf::from(dir)];
     }
-    let mut out = Vec::new();
-    if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
-        out.push(dir.join(ADS_DIR));
-    }
-    if let Some(install) = razdor::dt::install::locate() {
-        out.push(install.join(ADS_DIR));
-    }
-    if let Some(dir) = razdor::platform::app_dir() {
-        out.push(dir.join(ADS_DIR));
-    }
-    out
+    app_dir.map(|d| d.join(ADS_DIR)).into_iter().chain(exe_dir.map(|d| d.join(ADS_DIR))).chain(install.map(|d| d.join(ADS_DIR))).collect()
+}
+
+/// The places to look in, in order (see [`ad_roots`]).
+fn roots() -> Vec<PathBuf> {
+    let exe_dir = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf));
+    let install = razdor::dt::install::locate();
+    ad_roots(std::env::var_os("RAZDOR_ADS_DIR").as_deref(), razdor::platform::app_dir().as_deref(), exe_dir.as_deref(), install.as_deref())
 }
 
 /// The first ad found in the places of `roots`, or None.
@@ -273,5 +278,100 @@ mod tests {
         assert_eq!(slot.get_or_load(|| { looks += 1; Some("promo") }), Some("promo"));
         assert_eq!(slot.get_or_load(|| { looks += 1; None }), Some("promo"), "a found ad is kept");
         assert_eq!(looks, 2);
+    }
+}
+
+/// The catalog's ad copy on disk, as the launch's catalog sets it ([`sync_tick`]).
+enum Sync {
+    /// The launch's catalog has not come yet.
+    Waiting,
+    /// The copy is being checked and, when it differs, downloaded (`Hub::install_ad`).
+    Installing(Receiver<Result<bool, String>>),
+    /// Decided for this launch.
+    Done,
+}
+
+local! {
+    static SYNC: std::cell::RefCell<Sync> = const { std::cell::RefCell::new(Sync::Waiting) };
+}
+
+/// Each frame: once the launch's catalog has come, its ad is kept in the app's folder
+/// (`app_dir/ads`, `Hub::install_ad`): a copy that differs (id, version, picture or text) is downloaded
+/// on a thread and then the menu looks for the ad again. Offline, a catalog without an ad or a failed
+/// download leave what is on disk as it is.
+pub fn sync_tick() {
+    let state = SYNC.with(|s| std::mem::replace(&mut *s.borrow_mut(), Sync::Done));
+    let next = match state {
+        Sync::Done => Sync::Done,
+        Sync::Waiting => match launch::catalog() {
+            None => Sync::Waiting,
+            Some(Err(why)) => {
+                razdor::diag!("ads: no catalog this launch: {why}");
+                Sync::Done
+            }
+            Some(Ok(catalog)) => match catalog.ad.clone() {
+                Some(ad) => start_install(ad),
+                None => Sync::Done,
+            },
+        },
+        Sync::Installing(rx) => match rx.try_recv() {
+            Err(TryRecvError::Empty) => Sync::Installing(rx),
+            Ok(Ok(true)) => {
+                razdor::diag!("ads: the promo is updated from the catalog");
+                forget();
+                Sync::Done
+            }
+            Ok(Ok(false)) => Sync::Done,
+            Ok(Err(why)) => {
+                razdor::diag!("ads: {why}");
+                Sync::Done
+            }
+            Err(TryRecvError::Disconnected) => Sync::Done,
+        },
+    };
+    SYNC.with(|s| *s.borrow_mut() = next);
+}
+
+/// Starts the copy's check on a thread: the hub's address and the app's `ads/` folder, or Done when
+/// there is no folder for them.
+fn start_install(ad: AdRef) -> Sync {
+    let (Some(local), Some(app)) = (hub::local_dir(), razdor::platform::app_dir()) else { return Sync::Done };
+    let hub = Hub { source: Source::from_env(), local };
+    let root = app.join(ADS_DIR);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new().name("ad-copy".into()).spawn(move || {
+        let _ = tx.send(hub.install_ad(&ad, &root));
+    });
+    match spawned {
+        Ok(_) => Sync::Installing(rx),
+        Err(e) => {
+            razdor::diag!("ads: the copy cannot start: {e}");
+            Sync::Done
+        }
+    }
+}
+
+#[cfg(test)]
+mod order_tests {
+    use super::*;
+
+    #[test]
+    fn the_app_copy_comes_before_the_program_folder_and_the_install() {
+        let app = Path::new("/home/me/.local/share/razdor");
+        let exe = Path::new("/opt/razdor");
+        let install = Path::new("/home/me/Games/Discord Times");
+        assert_eq!(
+            ad_roots(None, Some(app), Some(exe), Some(install)),
+            vec![app.join(ADS_DIR), exe.join(ADS_DIR), install.join(ADS_DIR)],
+        );
+        assert_eq!(ad_roots(None, None, None, None), Vec::<PathBuf>::new());
+        assert_eq!(ad_roots(None, Some(app), None, Some(install)), vec![app.join(ADS_DIR), install.join(ADS_DIR)]);
+    }
+
+    #[test]
+    fn the_environment_names_the_only_folder_when_set() {
+        let app = Path::new("/a");
+        assert_eq!(ad_roots(Some(OsStr::new("/dev/ads")), Some(app), Some(app), Some(app)), vec![PathBuf::from("/dev/ads")]);
+        assert_eq!(ad_roots(Some(OsStr::new("")), Some(app), None, None), vec![app.join(ADS_DIR)], "an empty value is no setting");
     }
 }

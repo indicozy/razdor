@@ -879,9 +879,8 @@ impl Hub {
         fs::create_dir_all(&folder).map_err(|e| format!("ads: {e}"))?;
         let part = folder.join(format!("{picture}.part"));
         let file = FileRef { path: a.image.clone(), name: picture.clone(), lang: None, size: a.size, sha256: a.sha256.clone(), archive: false };
-        self.download(&a.image, &part, MAX_AD_BYTES).and_then(|()| Hub::check_file(&part, &file)).map_err(|e| {
+        self.download(&a.image, &part, MAX_AD_BYTES).and_then(|()| Hub::check_file(&part, &file)).inspect_err(|_| {
             let _ = fs::remove_file(&part);
-            e
         })?;
         fs::rename(&part, folder.join(&picture)).map_err(|e| format!("ads: {e}"))?;
         if let Ok(entries) = fs::read_dir(ads_root) {

@@ -20,7 +20,7 @@ use macroquad::prelude::*;
 use razdor::dt::game_import::{self as import, Done, Error};
 use razdor::dt::unpack::{Found, Kind, UnpackError};
 use razdor::gdrive;
-use razdor::hub::{self, Hub, Source};
+use razdor::hub::{self, Source};
 use razdor::i18n::tr;
 use razdor::local;
 use razdor::platform;
@@ -93,8 +93,9 @@ struct Job {
 /// start is decided (a game downloads, or not: the no-install screen stays as it is).
 enum Auto {
     Idle,
-    /// The catalog is being read; `None` is the snapshot's frozen check (`RAZDOR_SCENE_CATALOG`).
-    Checking(Option<std::sync::mpsc::Receiver<Result<Option<gdrive::Archive>, String>>>),
+    /// The launch's catalog (`ui::launch`) is awaited; `true` is the snapshot's frozen check
+    /// (`RAZDOR_SCENE_CATALOG`), which never ends.
+    Checking(bool),
     Done,
 }
 
@@ -305,22 +306,22 @@ fn auto_tick(installed: bool) {
     let next = match state {
         Auto::Done => Auto::Done,
         _ if installed => Auto::Done,
-        Auto::Idle if snapshot_checking() => Auto::Checking(None),
+        Auto::Idle if snapshot_checking() => Auto::Checking(true),
         Auto::Idle if !auto_allowed() => Auto::Done,
-        Auto::Idle => start_check(),
-        Auto::Checking(None) => Auto::Checking(None),
-        Auto::Checking(Some(rx)) => match rx.try_recv() {
-            Err(std::sync::mpsc::TryRecvError::Empty) => Auto::Checking(Some(rx)),
-            Ok(Ok(Some(archive))) => {
-                start_auto(archive);
+        Auto::Idle => Auto::Checking(false),
+        Auto::Checking(true) => Auto::Checking(true),
+        Auto::Checking(false) => match super::launch::catalog() {
+            None => Auto::Checking(false),
+            Some(Ok(catalog)) => {
+                if let Some(archive) = game_archive(catalog) {
+                    start_auto(archive);
+                }
                 Auto::Done
             }
-            Ok(Ok(None)) => Auto::Done,
-            Ok(Err(why)) => {
+            Some(Err(why)) => {
                 razdor::diag!("game catalog: {why}");
                 Auto::Done
             }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => Auto::Done,
         },
     };
     AUTO.with_borrow_mut(|a| *a = next);
@@ -338,33 +339,14 @@ fn snapshot_checking() -> bool {
     std::env::var_os("RAZDOR_SNAPSHOT").is_some() && std::env::var("RAZDOR_SCENE_CATALOG").is_ok_and(|v| v == "checking")
 }
 
-/// Starts the check's thread: the catalog is read, and its game (if any) sent back.
-fn start_check() -> Auto {
-    let (tx, rx) = std::sync::mpsc::channel();
-    let spawned = std::thread::Builder::new().name("game-catalog".into()).spawn(move || {
-        let _ = tx.send(catalog_game());
-    });
-    match spawned {
-        Ok(_) => Auto::Checking(Some(rx)),
-        Err(e) => {
-            razdor::diag!("game catalog: the check cannot start: {e}");
-            Auto::Done
-        }
-    }
-}
-
-/// The game the hub's catalog offers, read as the hub window reads it (`Hub::fetch_catalog`, which
-/// keeps the catalog in the cache as the window does). None: no game in it, or no address to fetch
-/// it from (a folder or the mock hub). A game's path is resolved against the hub's address.
-fn catalog_game() -> Result<Option<gdrive::Archive>, String> {
+/// The game the hub's catalog offers, as an archive to download: its address resolved against the
+/// hub's (an `https://` one only; a folder or the mock hub offers none).
+fn game_archive(catalog: &hub::Catalog) -> Option<gdrive::Archive> {
     let source = Source::from_env();
-    let Source::Url(base) = &source else { return Ok(None) };
-    let local = hub::local_dir().ok_or("no folder for the hub")?;
-    let catalog = Hub { source: source.clone(), local }.fetch_catalog()?;
-    Ok(catalog.game.and_then(|g| {
-        let url = hub::resolve(base, &g.url);
-        url.starts_with("https://").then(|| gdrive::Archive::at_url(url, g.size, g.sha256, g.name))
-    }))
+    let Source::Url(base) = &source else { return None };
+    let game = catalog.game.as_ref()?;
+    let url = hub::resolve(base, &game.url);
+    url.starts_with("https://").then(|| gdrive::Archive::at_url(url, game.size, game.sha256.clone(), game.name.clone()))
 }
 
 /// Starts the game the catalog offered, when the target is there and nothing else runs.

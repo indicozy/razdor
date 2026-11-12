@@ -38,6 +38,7 @@ pub mod keymap;
 pub mod lacking;
 pub mod language;
 pub mod game_import;
+pub mod launch;
 pub mod main_menu;
 pub mod menu_art;
 pub mod map_import;
@@ -1312,6 +1313,8 @@ impl App {
         #[cfg(target_os = "android")]
         mobile::refresh_keyboard_inset();
         self.mobile_install_poll();
+        // The hub's promo ad is kept in the app folder once the launch's catalog has come (`ui::ads::sync_tick`).
+        ads::sync_tick();
         self.poll_mod_switch();
         self.poll_lacking();
         self.poll_map_repair();
