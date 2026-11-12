@@ -564,6 +564,13 @@ impl BattleView {
     pub fn battle_mut(&mut self) -> &mut Battle {
         &mut self.battle
     }
+
+    /// The interface language changed while the battle is on the screen: its names are the
+    /// install's in the data language `data` (as `Content::retitled`), the rest kept.
+    pub fn retitle(&mut self, dt: &razdor::dt::install::DtInstall, data: Option<&str>) {
+        let names = std::sync::Arc::new(self.battle.content().retitled(dt, data));
+        self.battle.retitle(names);
+    }
 }
 
 /// The experience card's promotion sign (4b0684): the unit's level after the award is past

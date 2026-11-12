@@ -704,6 +704,11 @@ impl App {
                 if let Some(g) = self.game.as_mut().filter(|_| !demo_game) {
                     g.content = Arc::new(g.content.retitled(&d.install, data));
                 }
+                // A battle on the screen holds its own copy of the content, its fighters' names
+                // copied at its start: it follows too (F2 during a fight; the trailer's `lang`).
+                if let (false, Screen::Battle(v)) = (demo_game, &mut self.screen) {
+                    v.retitle(&d.install, data);
+                }
             }
         }
     }

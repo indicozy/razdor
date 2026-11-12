@@ -1040,6 +1040,16 @@ impl Battle {
         &self.content
     }
 
+    /// The battle with `content` for its rules: the same content in another language's names
+    /// (`Content::retitled`). The fighters' names are copied at the battle's start, so they follow
+    /// it too: a language changed while the battle is on the screen (F2, the trailer's `lang`).
+    pub fn retitle(&mut self, content: Arc<Content>) {
+        for f in &mut self.fighters {
+            f.name = content.unit(f.unit).name.clone();
+        }
+        self.content = content;
+    }
+
     /// The stats of fighter `i` as the cards and the panel show them: its current stats with
     /// its side's building defence added to both defences, as the damage formula adds it,
     /// and, once the fighting has begun, the actions it has left this turn for its

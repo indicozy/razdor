@@ -953,7 +953,9 @@ the install's, so they show in the new-game list. Snapshot scene: `hub[:<tab>[:<
   English; the install's unit, item and spell names and descriptions are swapped in by
   Russian text, that language's first, English for the rest (`Content::from_dt_in`,
   `DtInstall::dictionary`; on a change `App::follow_language` retitles the content and the
-  game under way with `Content::retitled`). The Russian data is always loaded as it is:
+  game under way with `Content::retitled`, and a battle on the screen with
+  `BattleView::retitle` / `Battle::retitle`, since a battle copies its fighters' names at its
+  start). The Russian data is always loaded as it is:
   upgrades match units by their Russian name.
 - Fonts: the settings' «Шрифт» (`dt_font::FontMode`): the install's bitmap sheets by default,
   or the bundled TrueType faces (`widgets::load_font`); see `assets-and-drawing.md` §Fonts.

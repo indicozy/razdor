@@ -3714,3 +3714,21 @@ fn god_keeps_a_players_suicide_unit_alive() {
         assert_eq!((f0.alive(), f0.suicided), (god, !god), "god {god}");
     }
 }
+
+/// A language changed while a battle is on the screen: its fighters take the new names, and its
+/// content (the rules' copy, formation and all) keeps everything else.
+#[test]
+fn a_battle_on_screen_takes_a_language_change_in_its_names() {
+    let c = content_with(vec![], Formation::WIDE);
+    let mut bt = battle_in(&c, &[(10, f(0))], &[(11, b(0))]);
+    let formation = bt.content().formation;
+    let mut renamed = bt.content().clone();
+    for u in &mut renamed.units {
+        u.name = format!("{} (ru)", u.name);
+    }
+    bt.retitle(Arc::new(renamed));
+    assert!(bt.fighters.iter().all(|f| f.name.ends_with(" (ru)")), "the fighters' names follow");
+    assert!(bt.content().units.iter().all(|u| u.name.ends_with(" (ru)")));
+    assert_eq!(bt.content().formation, formation);
+    assert!(bt.fighters.iter().all(|f| f.alive()), "the fight itself is untouched");
+}
