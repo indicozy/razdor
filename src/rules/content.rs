@@ -278,6 +278,10 @@ struct RulesWire {
     /// Missing (false) in saves from before the counter-blow curse switch: the original's rule.
     death_curse_counter: bool,
     /// Missing (false) in saves from before the garrison switch: the original's rule (corpses move).
+    /// Written only when on: an off switch leaves the serialised rules, the game's JSON and so the
+    /// replays' state hashes exactly as they were before the switch existed (a record of 1.4.1
+    /// must still play, see `recording/snapshot.rs`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     no_corpse_garrison: bool,
     /// Older switches, read only (see the `From` impl).
     #[serde(skip_serializing)]

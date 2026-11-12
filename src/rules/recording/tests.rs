@@ -881,6 +881,31 @@ fn a_replay_of_other_rules_still_plays() {
     p.play_to_end().unwrap_or_else(|d| panic!("the other rules still play: {d:?}"));
 }
 
+/// A default-off experimental switch leaves the game's serialised state and its hash as they were
+/// before the switch existed: `no_corpse_garrison` is written only when on, so a record made before
+/// it still plays (`the_sample_record_plays_to_its_end`). A switch turned on is written, and the
+/// snapshot restores it.
+#[test]
+fn a_default_off_switch_leaves_the_snapshot_and_an_on_one_survives_it() {
+    use crate::rules::content::ExperimentalRules;
+    let Some(dt) = base() else { return };
+    let c = Arc::new(Content::from_dt(&dt));
+    let install = Install { dir: &dt.dir, content: c.clone() };
+    let map = map_named(&dt, "РК1");
+    let g = start(&c, &map, Some(7));
+    let (json, hash) = super::snapshot::capture(&g).unwrap();
+    assert!(!String::from_utf8_lossy(&json).contains("no_corpse_garrison"), "an off switch is not written");
+    assert_eq!(hash, state_hash(&g));
+    let mut on = start(&c, &map, Some(7));
+    on.experimental = ExperimentalRules { no_corpse_garrison: true, ..Default::default() };
+    on.content = Arc::new(on.content.with_experimental(on.experimental));
+    let (json_on, _) = super::snapshot::capture(&on).unwrap();
+    assert!(String::from_utf8_lossy(&json_on).contains("\"no_corpse_garrison\":true"), "an on switch is written");
+    let back = Snapshot::take(&on).unwrap().restore(c.clone(), Some(&install)).unwrap();
+    assert!(back.experimental.no_corpse_garrison, "the switch survives a snapshot");
+    assert_eq!(state_hash(&back), state_hash(&on));
+}
+
 /// A recorded session of seeded random play for `days` game days on `prefix`'s map: each day the
 /// generator picks a walk to a random location (an army's cell among them, so fights come), a
 /// purchase at the building the hero stands in, or nothing; then the day runs out (waits, and the
@@ -1467,4 +1492,18 @@ fn a_record_made_in_russian_plays_back_with_the_interface_in_english() {
     assert_eq!(state_hash(p.game().unwrap()), *hashes.last().unwrap(), "the last day is the live final state");
     assert_eq!(crate::i18n::lang(), before, "the playback gives the interface its language back");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The sample record of the watching screen (`RAZDOR_SAMPLE_REPLAY`, a `.rzreplay` outside git,
+/// made in 1.4.1): it must play to its end. Skips without the variable or the install.
+#[test]
+fn the_sample_record_plays_to_its_end() {
+    use super::watch::ReplayPlayer;
+    let Some(path) = std::env::var_os("RAZDOR_SAMPLE_REPLAY") else { return };
+    let Some(dt) = base() else { return };
+    let c = Arc::new(Content::from_dt(&dt));
+    let mut p = ReplayPlayer::open(Path::new(&path), c, Some(&dt.dir)).unwrap();
+    if let Err(d) = p.play_to_end() {
+        panic!("the sample record drifts at day {}: {}", d.day, d.reason);
+    }
 }
