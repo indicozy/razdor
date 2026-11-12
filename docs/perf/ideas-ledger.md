@@ -17,6 +17,7 @@ Machines: "4060" = RTX 4060 headless through VirtualGL (find its `/dev/dri/cardN
 
 | Date | Idea | Scenes / machine | Before → after | Commit | Notes |
 |---|---|---|---|---|---|
+| 2026-11-12 | 1605 step 4: map sprites' fog and reveals read from a cell texture in the sharp shader (`ui/sprite_fog.rs`) | «Другой берег» zoomed out / whole map, 2.5D and third person, РК3 start, 4060 (VirtualGL), interleaved | world pass 2.16 → 2.17, 3.38 → 3.44, 7.26 → 7.05, 10.19 → 10.33, 0.48 → 0.49 ms; draws unchanged; pictures byte-identical (192 PNGs, mid-run reveal too) | `741e3f8f` | No gain alone (within ±3%); kept because step 5 (static vertex buffers) needs the fog out of the vertices. The reveal table is made again every frame while a showing opens. [perf doc, step 4] |
 | 2026-11-12 | Map sprite copies (half, quarter) stacked in the atlas, used below 12 / 6 px a cell | «Другой берег» whole map, 4060 | sprite GPU flat 0.35 → 0.14 ms, 2.5D 0.64 → 0.39 ms; draws unchanged (940 / 216); VRAM +5 MB (atlas 13.8 → 18.8 MB) | `740b6cb1` | Look change at whole-map zoom (softer canopies, PSNR ~28 dB), owner approved. Falls back to the full atlas over `GL_MAX_TEXTURE_SIZE`. [atmosphere doc, item 7] |
 | 2026-11-12 | Trim map sprites to their opaque box (+1 px) | «Другой берег» zoomed out, 4060 | GPU sum 5.85 → 5.85 ms flat, 4.29 → 4.29–4.43 2.5D: no measurable gain on desktop | `78b7a99e` | Kept for phone GPUs (fill rate); ≤2-level float diffs, owner approved. First version cut sun/night shadows at the box (up to 114 levels): fixed by giving shadows the full rect. [item 6] |
 | 2026-11-12 | Phones: drop a decoded picture from the store once its texture exists | desktop with the phone path forced (Xvfb) | peak RSS title 269 → 270, map 317 → 321, battle 410 → 397 MiB: within noise (~15 MiB) | `daaf4791` | Not proven. To be measured on the Samsung budget phone (with vs without); revert before 1.5.0 if no clear saving. [next-optimizations, item 3] |
@@ -52,6 +53,5 @@ Machines: "4060" = RTX 4060 headless through VirtualGL (find its `/dev/dri/cardN
 | Since | Idea | Who / where | Expected |
 |---|---|---|---|
 | 2026-11-12 | 1605 step 3: conservative cull before the picture quad | sprite-pass agent | ≤0.6–1.2 ms zoomed out |
-| 2026-11-12 | 1605 step 4: fog and veil in the sprite shader (a cell texture) | sprite-fog agent | little alone; needed by step 5 |
 | 2026-11-12 | 1605 step 5: GPU vertex buffers per chunk, the camera in the shader | after step 4 | removes most per-sprite placement (2–6 ms zoomed out) |
 | 2026-11-12 | Art sheets and window pictures kept for the whole session (`DtArt`, `chrome::visual_images`) | not started | ~40–60 MB on phones (estimate) |
