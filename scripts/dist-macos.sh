@@ -37,6 +37,9 @@ lipo -info dist/razdor-translate-macos
 # The promo ads (`ads/`, read at run time next to the program, see src/ui/ads.rs).
 rm -rf dist/ads
 cp -R ads dist/ads
+# The first screen's art (src/ui/menu_art.rs), beside the program: menu-art.zip, pinned in
+# scripts/menu-art.env.
+sh scripts/fetch-menu-art.sh dist/menu-art
 
 touch dist/SHA256SUMS
 grep -v ' razdor-macos$\| razdor-translate-macos$' dist/SHA256SUMS > dist/SHA256SUMS.new || true

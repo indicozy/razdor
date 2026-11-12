@@ -62,6 +62,7 @@ jobs:
           path: |
             dist/razdor-macos
             dist/razdor-translate-macos
+            dist/menu-art
           if-no-files-found: error
 
   ios:
@@ -260,6 +261,9 @@ jobs:
           # The promo ads (dist/ads, from dist.sh): read next to the desktop programs (src/ui/ads.rs).
           # A release file is one file, so the folder goes as a zip the player unpacks beside them.
           zip -qr "razdor-ads-$V.zip" ads
+          # The first screen's art (dist/menu-art, from dist.sh and dist-macos.sh; src/ui/menu_art.rs): read
+          # beside the desktop programs when no game is installed; the player unpacks it there.
+          zip -qr "razdor-menu-art-$V.zip" menu-art
           ls -l
 
       - name: SHA-256 of all of them

@@ -7,6 +7,9 @@
 __pycache__/
 /.env
 /dist
+# the first screen's art (menu-art.zip, unpacked by scripts/fetch-menu-art.sh) and the zip's download cache
+/menu-art/
+/.cache/
 
 # raw reverse-engineering notes and decompiler output: local only
 docs/notes/

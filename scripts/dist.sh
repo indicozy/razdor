@@ -55,6 +55,9 @@ cp target/x86_64-pc-windows-gnullvm/release/razdor-translate.exe dist/Razdor-tra
 # The promo ads (`ads/`, read at run time next to the program, see src/ui/ads.rs); not in the APK.
 rm -rf dist/ads
 cp -R ads dist/ads
+# The first screen's art, read when no game is installed (src/ui/menu_art.rs): menu-art.zip, pinned
+# in scripts/menu-art.env, unpacked into dist/menu-art/.
+sh scripts/fetch-menu-art.sh dist/menu-art
 
 (cd dist && sha256sum razdor Razdor.exe razdor-translate Razdor-translate.exe > SHA256SUMS)
 ls -l dist

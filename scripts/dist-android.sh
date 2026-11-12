@@ -60,6 +60,10 @@ for src in "${RUSTUP_HOME:-$HOME/.rustup}"/toolchains/*/lib/rustlib/src/rust; do
 done
 REMAP="$REMAP --remap-path-prefix=$PWD=razdor"
 
+# The first screen's art (src/ui/menu_art.rs) for the APK's assets: menu-art.zip, pinned in
+# scripts/menu-art.env, unpacked into menu-art/ (`assets` in Cargo.toml packs that folder).
+sh scripts/fetch-menu-art.sh menu-art
+
 # The program only (`--bin razdor`, not the map translator), without gamepads (gilrs).
 BUILD="--release --no-default-features --features audio,depth-model --bin razdor"
 APK="${CARGO_TARGET_DIR:-target}/android-artifacts/release/apk/razdor.apk"
