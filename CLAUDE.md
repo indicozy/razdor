@@ -158,6 +158,7 @@ mobile support; there is no roadmap and nothing else is started unless the owner
 | A player-visible feature or change has its wiki page added or updated (ru and en) | review (`wiki` skill) |
 | A phone UI change: the mobile UI check run, no new text under 12 sp, no new touch target under 40 dp | review (`mobile-ui` skill) |
 | A change to «Максимум»: `max_bench` run, its numbers compared, the baseline updated only for an intended improvement | `max_bench_does_not_regress` + review |
+| Any performance idea that was tested (landed, dropped or no gain) has its row in `docs/perf/ideas-ledger.md` with its numbers (the owner, 2026-11-12) | review |
 | Unresolved questions are in `docs/OPEN_QUESTIONS.md`; settled ones moved to its Settled list | review |
 | The task's worktrees, branches, processes and scratch files are cleaned up | review |
 | The release has its commit id and SHA-256 in the changelog | review (`release` skill) |
