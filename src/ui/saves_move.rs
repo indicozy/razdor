@@ -14,6 +14,8 @@
 use std::cell::{Cell, RefCell};
 use std::fs;
 use std::path::PathBuf;
+#[cfg(target_os = "android")]
+use std::path::Path;
 
 use razdor::i18n::tr;
 use razdor::{local, platform, transfer, trf};
