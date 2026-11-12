@@ -34,6 +34,9 @@ lipo -create -output dist/razdor-translate-macos \
     target/aarch64-apple-darwin/release/razdor-translate \
     target/x86_64-apple-darwin/release/razdor-translate
 lipo -info dist/razdor-translate-macos
+# The promo ads (`ads/`, read at run time next to the program, see src/ui/ads.rs).
+rm -rf dist/ads
+cp -R ads dist/ads
 
 touch dist/SHA256SUMS
 grep -v ' razdor-macos$\| razdor-translate-macos$' dist/SHA256SUMS > dist/SHA256SUMS.new || true

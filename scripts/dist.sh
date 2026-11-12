@@ -52,6 +52,9 @@ AR_x86_64_pc_windows_gnullvm=llvm-ar \
     cargo build --release --target x86_64-pc-windows-gnullvm
 cp target/x86_64-pc-windows-gnullvm/release/razdor.exe dist/Razdor.exe
 cp target/x86_64-pc-windows-gnullvm/release/razdor-translate.exe dist/Razdor-translate.exe
+# The promo ads (`ads/`, read at run time next to the program, see src/ui/ads.rs); not in the APK.
+rm -rf dist/ads
+cp -R ads dist/ads
 
 (cd dist && sha256sum razdor Razdor.exe razdor-translate Razdor-translate.exe > SHA256SUMS)
 ls -l dist

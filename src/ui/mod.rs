@@ -5,6 +5,7 @@ pub mod bench;
 pub mod bench_view;
 pub mod battle_view;
 pub mod building_view;
+mod ads;
 pub mod chrome;
 pub mod recording;
 pub mod clock;

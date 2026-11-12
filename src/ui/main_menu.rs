@@ -785,98 +785,174 @@ pub fn frame(no_install: bool, mods: &[(String, razdor::hub::Text)], active: Opt
     pick
 }
 
-/// The store page of Thorny Times, the new game of the original developers (Steam app 2182610).
-const THORNY_TIMES_URL: &str = "https://store.steampowered.com/app/2182610/";
-/// The store capsule (`data/promo/thorny-times.png`, 462 × 174 px): the developers' JPEG, converted
-/// to PNG because macroquad here decodes PNG only.
-const THORNY_PNG: &[u8] = include_bytes!("../../data/promo/thorny-times.png");
+/// The promo's picture and caption colours: a warm cream, the gold when it is pointed at.
+const PROMO_INK: Color = Color::new(1.0, 0.93, 0.75, 1.0);
 
-local! {
-    /// The capsule's texture, decoded once on the first frame of the main menu.
-    static THORNY_TEXTURE: std::cell::RefCell<Option<Texture2D>> = const { std::cell::RefCell::new(None) };
-}
-
-/// The capsule's size (px) at interface scale `k`: half the file on the desktop (231 × k), 160 dp
-/// on a phone, never wider than `room` (its height by the file's aspect).
-fn thorny_size(k: f32, phone_dp: Option<f32>, room: f32) -> Vec2 {
-    let wanted = match phone_dp {
-        Some(dp) => 160.0 * dp,
-        None => 231.0 * k,
-    };
-    let w = wanted.min(room).max(0.0);
-    Vec2::new(w, w * 174.0 / 462.0)
-}
-
-/// Razdor's own promo, not the original's: the new game of the original developers, Thorny Times,
-/// as its Steam capsule with a caption above it, bottom right, above the version line at `bottom`
-/// (its bottom edge). The developers' condition for sharing the game's assets (2026-11-12), so it
-/// shows on the main menu on every platform, with or without an install. A click opens the store
-/// page. It keeps clear of the oval buttons (the room left of them is what it gets), of the tile
-/// stack held sideways (the picture sits left of it), lifts above an installed update's notice, and
-/// on a phone respects the safe area's right inset.
+/// Razdor's own promo, not the original's: an ad from the `ads/` folder (`ads::promo`, the
+/// developers' condition for sharing the game's assets, 2026-11-12), shown on the main menu on
+/// every platform, with or without an install. Its picture and caption are one block, a click
+/// anywhere on it opens the ad's link. Three layouts:
+/// - the desktop: the picture 231 × k wide bottom right above the version line (`bottom`), the
+///   caption one line above it right-aligned (two lines when it would reach the oval buttons);
+/// - a phone held upright: one row above the version line, the picture on the left (150 dp, less
+///   on a narrow screen) and the caption beside it (16 dp, three lines at most);
+/// - a phone held sideways: on the left, vertically centred, left of the oval buttons, the caption
+///   above the picture (160 dp).
+///
+/// An installed update's notice keeps above it (the upright and desktop layouts).
 fn thorny_promo(k: f32, bottom: f32) {
-    let phone = super::display::dp_px();
-    let safe = super::display::safe_area();
-    let mut right = screen_width() - 16.0 * k - phone.map_or(0.0, |_| safe.right);
-    // Held sideways with the tile stack on the right edge, the picture sits left of the stack (the
-    // tiles keep their place): its right edge 12 × k short of the stack's left edge.
-    if SIDE_TILES.with(Cell::get) {
-        if let Some(m) = upright_menu() {
-            right = right.min(m.chips[0].x - 12.0 * k);
-        }
+    let Some(promo) = super::ads::promo() else { return };
+    match super::display::dp_px() {
+        None => desktop_promo(k, bottom, &promo),
+        Some(dp) if screen_width() > screen_height() => sideways_promo(k, dp, &promo),
+        Some(dp) => upright_promo(k, dp, bottom, &promo),
     }
-    let bottom = if matches!(razdor::update::status(), razdor::update::Status::Installed(_)) {
+}
+
+/// The picture's height for its width `w` (the file's own aspect).
+fn picture_height(promo: &super::ads::Promo, w: f32) -> f32 {
+    w * promo.texture.height() / promo.texture.width()
+}
+
+/// The bottom edge the promo may use: `bottom`, lifted above an installed update's notice.
+fn promo_bottom(k: f32, bottom: f32) -> f32 {
+    if matches!(razdor::update::status(), razdor::update::Status::Installed(_)) {
         bottom.min(notice_y(k) - 22.0 * k)
     } else {
         bottom
-    };
-    let caption_size = phone.map_or(13.0 * k, |dp| VERSION_PHONE_DP * dp);
-    let pitch = caption_size * 1.25;
-    // The band the promo may take (its largest height, three caption lines): the buttons in it set
-    // the room on its left.
-    let band_top = bottom - thorny_size(k, phone, f32::MAX).y - 3.0 * pitch;
-    let edge = (0..BUTTONS.len())
+    }
+}
+
+/// The right-most edge of the ovals that reach into the band `top`..`bottom` (0 when none does).
+fn oval_edge(top: f32, bottom: f32) -> f32 {
+    (0..BUTTONS.len())
         .map(oval_rect)
-        .filter(|r| r.y < bottom && r.y + r.h > band_top)
+        .filter(|r| r.y < bottom && r.y + r.h > top)
         .map(|r| r.x + r.w)
-        .fold(f32::MIN, f32::max);
-    let left = (edge + 12.0 * k).max(16.0 * k);
-    let size = thorny_size(k, phone, right - left);
-    if size.x <= 0.0 {
+        .fold(0.0, f32::max)
+}
+
+/// The promo's hover and press over its whole block `hit`: a press opens the link. Returns whether
+/// the block is lit (hovered or pressed).
+fn promo_pointer(hit: Rect, url: &str) -> bool {
+    let (hover, down, pressed) = super::widgets::button_state(hit, true);
+    if pressed {
+        cue(Cue::Button);
+        open_link(url);
+    }
+    hover || down
+}
+
+/// The picture at `pic`: a dark edge, or the gold one when lit (`k` the interface scale).
+fn promo_picture(promo: &super::ads::Promo, pic: Rect, k: f32, lit: bool) {
+    draw_texture_ex(&promo.texture, pic.x, pic.y, WHITE, DrawTextureParams { dest_size: Some(vec2(pic.w, pic.h)), ..Default::default() });
+    if lit {
+        draw_rectangle_lines(pic.x + k, pic.y + k, pic.w - 2.0 * k, pic.h - 2.0 * k, 2.0 * k, chrome::GOLD);
+    } else {
+        draw_rectangle_lines(pic.x + 0.5 * k, pic.y + 0.5 * k, pic.w - k, pic.h - k, k, Color::new(0.08, 0.05, 0.03, 1.0));
+    }
+}
+
+/// The desktop's promo: the picture (231 × k, half the file) above `bottom`, right-aligned at the
+/// screen's margin, with the caption above it.
+fn desktop_promo(k: f32, bottom: f32, promo: &super::ads::Promo) {
+    let bottom = promo_bottom(k, bottom);
+    let right = screen_width() - 16.0 * k;
+    let pic_w = 231.0 * k;
+    let pic_h = picture_height(promo, pic_w);
+    let pic = Rect::new(right - pic_w, bottom - pic_h, pic_w, pic_h);
+    let size = 16.0 * k;
+    let pitch = size * 1.25;
+    let caption = promo.caption();
+    super::dt_font::legacy_metrics_if(false, || {
+        // The room left of the buttons in the caption's band (a 12 × k gap); one line when it fits.
+        let band_top = pic.y - 3.0 * pitch - 8.0 * k;
+        let left = (oval_edge(band_top, bottom) + 12.0 * k).max(16.0 * k);
+        let avail = right - left;
+        let lines = if measure(caption, size).width <= avail {
+            vec![caption.to_string()]
+        } else {
+            wrap_label(caption, avail, size)
+        };
+        let widest = lines.iter().map(|l| measure(l, size).width).fold(0.0, f32::max).max(pic_w);
+        let cap_top = pic.y - 6.0 * k - lines.len() as f32 * pitch;
+        let hit = Rect::new(right - widest, cap_top, widest, pic.y + pic.h - cap_top);
+        let lit = promo_pointer(hit, &promo.url);
+        let ink = if lit { chrome::GOLD } else { PROMO_INK };
+        for (i, line) in lines.iter().enumerate() {
+            let w = measure(line, size).width;
+            let base = pic.y - 6.0 * k - (lines.len() - 1 - i) as f32 * pitch;
+            chrome::shadow_text(line, right - w, base, size, ink);
+        }
+        promo_picture(promo, pic, k, lit);
+    });
+}
+
+/// The promo on a phone held upright: one row above `bottom`, the picture left, the caption right
+/// of it, the row's middle on the picture's. The whole row is the target.
+fn upright_promo(k: f32, dp: f32, bottom: f32, promo: &super::ads::Promo) {
+    let bottom = promo_bottom(k, bottom);
+    let safe = super::display::safe_area();
+    let left = safe.left + 16.0 * k;
+    let right = screen_width() - safe.right - 16.0 * k;
+    let row_w = right - left;
+    let pic_w = (150.0 * dp).min(row_w * 0.45);
+    let pic_h = picture_height(promo, pic_w);
+    let cap_x = left + pic_w + 10.0 * dp;
+    let cap_w = right - cap_x;
+    let caption = promo.caption();
+    super::dt_font::legacy_metrics_if(true, || {
+        // 16 dp, then 15, then 14: the largest size that keeps the caption to three lines.
+        let (size, lines) = [16.0, 15.0, 14.0]
+            .iter()
+            .map(|s| (s * dp, wrap_label(caption, cap_w, s * dp)))
+            .find(|(_, l)| l.len() <= 3)
+            .unwrap_or_else(|| (14.0 * dp, wrap_label(caption, cap_w, 14.0 * dp)));
+        let pitch = size * 1.25;
+        let block_h = lines.len() as f32 * pitch;
+        let row_h = block_h.max(pic_h);
+        let row = Rect::new(left, bottom - row_h, row_w, row_h);
+        let pic = Rect::new(left, row.y + (row_h - pic_h) / 2.0, pic_w, pic_h);
+        let lit = promo_pointer(row, &promo.url);
+        let ink = if lit { chrome::GOLD } else { PROMO_INK };
+        let cap_top = row.y + (row_h - block_h) / 2.0;
+        for (i, line) in lines.iter().enumerate() {
+            chrome::shadow_text(line, cap_x, cap_top + i as f32 * pitch + size * 0.85, size, ink);
+        }
+        promo_picture(promo, pic, k, lit);
+    });
+}
+
+/// The promo on a phone held sideways: on the left, vertically centred, left of the oval buttons
+/// (their left edge less a 16 × k gap); the caption above the picture, left-aligned to it.
+fn sideways_promo(k: f32, dp: f32, promo: &super::ads::Promo) {
+    let safe = super::display::safe_area();
+    let left = safe.left + 16.0 * k;
+    let oval_left = (0..BUTTONS.len()).map(|i| oval_rect(i).x).fold(f32::MAX, f32::min);
+    let room = oval_left - 16.0 * k - left;
+    let pic_w = (160.0 * dp).min(room);
+    if pic_w <= 0.0 {
         return;
     }
-    let pic = Rect::new(right - size.x, bottom - size.y, size.x, size.y);
-    super::dt_font::legacy_metrics_if(phone.is_some(), || {
-        let lines = wrap_label(tr("A new game from the makers of Discord Times"), size.x, caption_size);
-        let cap_top = pic.y - 6.0 * k - lines.len() as f32 * pitch;
-        let hit = Rect::new(pic.x, cap_top, pic.w, pic.y + pic.h - cap_top);
-        let (hover, down, pressed) = super::widgets::button_state(hit, true);
-        if pressed {
-            cue(Cue::Button);
-            open_link(THORNY_TIMES_URL);
-        }
-        let lit = hover || down;
-        let ink = if lit { chrome::GOLD } else { Color::new(0.95, 0.88, 0.72, 0.9) };
+    let pic_h = picture_height(promo, pic_w);
+    let caption = promo.caption();
+    super::dt_font::legacy_metrics_if(true, || {
+        // 16 dp, or 15 when the caption would take more than four lines.
+        let (size, lines) = [16.0, 15.0]
+            .iter()
+            .map(|s| (s * dp, wrap_label(caption, pic_w, s * dp)))
+            .find(|(_, l)| l.len() <= 4)
+            .unwrap_or_else(|| (15.0 * dp, wrap_label(caption, pic_w, 15.0 * dp)));
+        let pitch = size * 1.25;
+        let gap = 8.0 * k;
+        let block_h = lines.len() as f32 * pitch + gap + pic_h;
+        let top = (screen_height() - block_h) / 2.0;
+        let lit = promo_pointer(Rect::new(left, top, pic_w, block_h), &promo.url);
+        let ink = if lit { chrome::GOLD } else { PROMO_INK };
         for (i, line) in lines.iter().enumerate() {
-            let w = measure(line, caption_size).width;
-            let base = pic.y - 6.0 * k - (lines.len() - 1 - i) as f32 * pitch;
-            chrome::shadow_text(line, right - w, base, caption_size, ink);
+            chrome::shadow_text(line, left, top + i as f32 * pitch + size * 0.85, size, ink);
         }
-        let texture = THORNY_TEXTURE.with(|slot| {
-            slot.borrow_mut()
-                .get_or_insert_with(|| {
-                    let t = Texture2D::from_file_with_format(THORNY_PNG, None);
-                    t.set_filter(FilterMode::Linear);
-                    t
-                })
-                .clone()
-        });
-        draw_texture_ex(&texture, pic.x, pic.y, WHITE, DrawTextureParams { dest_size: Some(vec2(pic.w, pic.h)), ..Default::default() });
-        if lit {
-            draw_rectangle_lines(pic.x + k, pic.y + k, pic.w - 2.0 * k, pic.h - 2.0 * k, 2.0 * k, chrome::GOLD);
-        } else {
-            draw_rectangle_lines(pic.x + 0.5 * k, pic.y + 0.5 * k, pic.w - k, pic.h - k, k, Color::new(0.08, 0.05, 0.03, 1.0));
-        }
+        promo_picture(promo, Rect::new(left, top + lines.len() as f32 * pitch + gap, pic_w, pic_h), k, lit);
     });
 }
 
@@ -3809,19 +3885,6 @@ mod tests {
         }
         assert!(m.buttons[4].y + m.buttons[4].h <= m.notice_y(0.75));
         assert!(m.chip_h >= TOUCH_DP * 2.0);
-    }
-
-    #[test]
-    fn the_thorny_promo_is_half_the_capsule_on_the_desktop_and_fits_the_room_on_a_phone() {
-        // The desktop: half the file (462 × 174), at scale 2 it is 1:1.
-        assert_eq!(thorny_size(2.0, None, 1000.0), Vec2::new(462.0, 174.0));
-        assert_eq!(thorny_size(1.0, None, 1000.0), Vec2::new(231.0, 87.0));
-        // A phone: 160 dp, unless the room is narrower; the height keeps the aspect.
-        let wide = thorny_size(1.0, Some(2.0), 1000.0);
-        assert!(close(wide.x, 320.0) && close(wide.y, 320.0 * 174.0 / 462.0), "{wide:?}");
-        let narrow = thorny_size(1.0, Some(2.0), 200.0);
-        assert!(close(narrow.x, 200.0) && close(narrow.y, 200.0 * 174.0 / 462.0), "{narrow:?}");
-        assert_eq!(thorny_size(1.0, Some(2.0), -5.0).x, 0.0, "no room, no picture");
     }
 
     #[test]
