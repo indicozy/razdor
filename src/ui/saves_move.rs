@@ -18,7 +18,12 @@ use std::path::PathBuf;
 use razdor::i18n::tr;
 use razdor::{local, platform, transfer, trf};
 
+use super::audio::{cue, Cue};
+use super::chrome;
+use super::dt_font;
 use super::map_import;
+use super::widgets;
+use macroquad::prelude::*;
 
 /// The file in the app's folder that keeps the decision (see the module doc).
 const MARKER: &str = "saves-move";
@@ -113,6 +118,11 @@ pub fn open_from_settings() {
     });
 }
 
+/// Whether a window of this module is open: the screen under it takes no input.
+pub fn open() -> bool {
+    STATE.with_borrow(|s| !matches!(s, State::Hidden))
+}
+
 /// Whether the picker is open or the folder is being copied: the game's start and load wait.
 pub fn busy() -> bool {
     STATE.with_borrow(|s| matches!(s, State::Picking(_)))
@@ -196,8 +206,33 @@ pub fn modal() {
         State::Offer(popup, note) => {
             let mut lines = vec![tr(OFFER).to_string()];
             lines.extend(note.clone());
-            let (inner, closed) = map_import::frame(tr("Saves from an older release"), &lines, true);
-            match map_import::buttons(inner, &[tr("Pick the Razdor folder"), tr("Not now")]) {
+            let k = chrome::k();
+            let f = map_import::phone_factor();
+            // Two full-width buttons, one under the other: the frame reserves room for one row only, so
+            // blank lines make the room for the second (a blank line is one text line of the window).
+            let btn_h = super::display::dp_px().map_or(28.0 * k, |dp| 44.0 * dp);
+            let blank = ((2.0 * btn_h + 36.0 * k * f - 58.0 * k * f) / (20.0 * k * f)).ceil().max(0.0) as usize;
+            lines.extend(std::iter::repeat_n("\u{200B}".to_string(), blank));
+            let (inner, closed) = map_import::frame(tr("Saves from an older release"), &lines, false);
+            let x = inner.x + 24.0 * k * f;
+            let w = inner.w - 48.0 * k * f;
+            let second = Rect::new(x, inner.y + inner.h - 14.0 * k * f - btn_h, w, btn_h);
+            let first = Rect::new(x, second.y - 12.0 * k * f - btn_h, w, btn_h);
+            let labels = [tr("Pick the Razdor folder"), tr("Not now")];
+            let mut picked = None;
+            for (i, (r, label)) in [first, second].into_iter().zip(labels).enumerate() {
+                let (_, down, pressed) = widgets::button_state(r, true);
+                if f > 1.0 {
+                    dt_font::with_legacy_metrics(|| chrome::marble_button_sized(r, label, true, down, 14.0 * k * f));
+                } else {
+                    chrome::marble_button(r, label, true, down);
+                }
+                if pressed {
+                    cue(Cue::Button);
+                    picked = Some(i);
+                }
+            }
+            match picked {
                 Some(0) => {
                     if pick_start() {
                         State::Picking(popup)
@@ -212,7 +247,7 @@ pub fn modal() {
         }
         State::Picking(popup) => State::Picking(popup),
         State::Done(line) => {
-            if map_import::notice_window(tr("Saves from an older release"), &[line.clone()]) {
+            if map_import::notice_window(tr("Saves from an older release"), std::slice::from_ref(&line)) {
                 State::Hidden
             } else {
                 State::Done(line)

@@ -1554,7 +1554,7 @@ impl App {
         if game_import::tick(base.as_deref().or(self.assets.dt.as_ref().map(|d| d.install.dir.as_path()))) {
             self.reload_install();
         }
-        widgets::set_input_blocked(!self.dialogs.is_empty() || self.help || held || self.map_view.back_to.is_some() || self.update_open || map_import::open() || game_import::busy() || widgets::popup_open() || bench::window_open());
+        widgets::set_input_blocked(!self.dialogs.is_empty() || self.help || held || self.map_view.back_to.is_some() || self.update_open || map_import::open() || game_import::busy() || saves_move::open() || widgets::popup_open() || bench::window_open());
         let mut restart = false;
         let mut custom_round = false;
         let custom_content = self.custom_content();
