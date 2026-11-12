@@ -82,6 +82,8 @@ struct Drag {
     /// Its hits and maximum: the dragged portrait shows its wounds as its card does.
     hp: i32,
     max: i32,
+    /// Dead (`!alive()`): its portrait is all red under the army window's death veil.
+    dead: bool,
     start: Vec2,
     moved: bool,
 }
@@ -90,21 +92,21 @@ local! {
     static DRAG: Cell<Option<Drag>> = const { Cell::new(None) };
 }
 
-/// A press on squad member `unit`'s card (its type `kind`, its hits `hp` of `max`): it may be
-/// dragged from here.
-pub fn press(unit: usize, kind: UnitId, (hp, max): (i32, i32)) {
+/// A press on squad member `unit`'s card (its type `kind`, its hits `hp` of `max`, `dead` once
+/// its death): it may be dragged from here.
+pub fn press(unit: usize, kind: UnitId, (hp, max): (i32, i32), dead: bool) {
     if !controls().drags() {
         return cancel();
     }
-    DRAG.with(|d| d.set(Some(Drag { unit, guard: false, kind, hp, max, start: pointer().into(), moved: false })));
+    DRAG.with(|d| d.set(Some(Drag { unit, guard: false, kind, hp, max, dead, start: pointer().into(), moved: false })));
 }
 
 /// A press on garrison unit `unit`'s card (the garrison tab): it may be dragged from here.
-pub fn press_guard(unit: usize, kind: UnitId, (hp, max): (i32, i32)) {
+pub fn press_guard(unit: usize, kind: UnitId, (hp, max): (i32, i32), dead: bool) {
     if !controls().drags() {
         return cancel();
     }
-    DRAG.with(|d| d.set(Some(Drag { unit, guard: true, kind, hp, max, start: pointer().into(), moved: false })));
+    DRAG.with(|d| d.set(Some(Drag { unit, guard: true, kind, hp, max, dead, start: pointer().into(), moved: false })));
 }
 
 /// The squad member being dragged, once the mouse has moved (its card is drawn dimmed).
@@ -142,8 +144,12 @@ pub fn follow(assets: &Assets, size: Vec2) -> Option<(bool, usize)> {
         if d.moved {
             let r = Rect::new(m.x - size.x / 2.0, m.y - size.x / 2.0, size.x, size.x);
             assets.draw_portrait(d.kind, Team::Player, r);
-            // A wounded unit keeps its wounds on the portrait, as in its cell (chrome::wounds).
-            chrome::wounds(r, d.hp, d.max);
+            // A wounded unit keeps its wounds on the portrait, as in its cell (chrome::wounds); a
+            // dead one is all red under the army window's death veil (493a64), as in its cell.
+            chrome::wounds(r, if d.dead { 0 } else { d.hp }, d.max);
+            if d.dead {
+                chrome::death_veil(r);
+            }
             draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, super::chrome::GOLD);
         }
         DRAG.with(|c| c.set(Some(d)));
@@ -290,13 +296,16 @@ mod tests {
         // The pointer is pinned: no window in a test.
         super::super::widgets::set_pointer(Some((0.0, 0.0)));
         set_controls(Controls::Clicks);
-        press(2, UnitId(0), (10, 10));
+        press(2, UnitId(0), (10, 10), false);
         assert!(DRAG.with(|d| d.get()).is_none());
-        press_guard(1, UnitId(0), (10, 10));
+        press_guard(1, UnitId(0), (10, 10), false);
         assert!(DRAG.with(|d| d.get()).is_none());
         set_controls(Controls::Both);
-        press(2, UnitId(0), (10, 10));
+        press(2, UnitId(0), (10, 10), false);
         assert!(DRAG.with(|d| d.get()).is_some());
+        assert!(DRAG.with(|d| d.get()).is_some_and(|d| !d.dead));
+        press(2, UnitId(0), (10, 10), true);
+        assert!(DRAG.with(|d| d.get()).is_some_and(|d| d.dead));
         set_controls(Controls::default());
     }
 

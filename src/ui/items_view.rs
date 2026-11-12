@@ -464,7 +464,13 @@ fn tree_view(game: &Game, assets: &Assets, sel: usize, u: &Unit, r: Rect, promo:
     } else {
         assets.draw_portrait(u.def, Team::Player, cur);
     }
-    chrome::wounds(cur, u.hp, u.max_hp(&c));
+    // Razdor's (owner's decision 2026-11-12): the army window's death veil (493a64) wherever a
+    // corpse's portrait shows. A dead unit is judged by `alive()` (its death), and its wounds are all red.
+    let dead = !u.alive();
+    chrome::wounds(cur, if dead { 0 } else { u.hp }, u.max_hp(&c));
+    if dead {
+        chrome::death_veil(cur);
+    }
     draw_rectangle_lines(cur.x, cur.y, cur.w, cur.h, 1.0, Color::new(0.85, 0.85, 0.85, 0.8));
     if mouse_in(cur.x, cur.y, cur.w, cur.h) {
         pointed = Some(u.def);
@@ -931,7 +937,12 @@ pub fn squad(
         chrome::silver_frame(row, 1.0);
         let face = Rect::new(row.x + 4.0 * k, row.y + 4.0 * k, face_rect.h - 8.0 * k, face_rect.h - 8.0 * k);
         assets.draw_portrait(u.def, Team::Player, face);
-        chrome::wounds(face, u.hp, u.max_hp(&c));
+        // Razdor's (owner's decision 2026-11-12): the death veil on a corpse, as on its card (493a64).
+        let dead = !u.alive();
+        chrome::wounds(face, if dead { 0 } else { u.hp }, u.max_hp(&c));
+        if dead {
+            chrome::death_veil(face);
+        }
         let label = if u.alive() { own("Dismiss", n_("Dismiss")) } else { own("Bury", n_("Bury")) };
         let label = label.as_str();
         // The box is already grown (`row.h` holds the lift), so the button is its height less the margins.
@@ -1163,7 +1174,7 @@ pub fn squad(
             // Razdor's drag: a card pressed and moved while held goes to another cell.
             GridPress::Select(_) | GridPress::Deselect => {
                 if let Some(i) = on {
-                    super::unit_drag::press(i, game.squad[i].def, (game.squad[i].hp, game.squad[i].max_hp(&c)));
+                    super::unit_drag::press(i, game.squad[i].def, (game.squad[i].hp, game.squad[i].max_hp(&c)), !game.squad[i].alive());
                 }
             }
             GridPress::Nothing => {}

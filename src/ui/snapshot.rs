@@ -29,6 +29,7 @@
 //! cells; `RAZDOR_SCENE_HELD=<id>` puts an item on the pointer (hero and army windows); `RAZDOR_SCENE_PREVIEW=1` in `message:` (with `RAZDOR_MOUSE` on an item and `RAZDOR_MOUSE_RIGHT=1`) shows the first item's card at the pointer over the window;
 //! `RAZDOR_SCENE_WEAR=<id>,…` wears those items on the squad member of `army:<map>:<n>:<unit>`.
 //! `RAZDOR_SCENE_SIGN_OFF=1` switches that member's promotion sign off (`army:<map>:<n>:<unit>`).
+//! `RAZDOR_SCENE_DEAD=1` makes that member a corpse (`army:<map>:<n>`).
 //! `RAZDOR_SCENE_BENCHING=1` turns the unit battle participation setting on (the army window's switch).
 //! `RAZDOR_SCENE_SELECT=<n>` selects squad member n in the `building:` window (its card shows).
 //! `RAZDOR_SCENE_PAN=dx,dy` holds the interface's pan at that offset (windows larger than the screen).
@@ -1023,6 +1024,12 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                 // tree's «Не напоминать» lit).
                 if std::env::var_os("RAZDOR_SCENE_SIGN_OFF").is_some() {
                     game.squad[i].set_sign_off(true);
+                }
+                // `RAZDOR_SCENE_DEAD=1`: that member is a corpse (hp 0 and its death, as the rules
+                // leave it): its big portrait and its Bury row show the army window's death veil.
+                if std::env::var("RAZDOR_SCENE_DEAD").is_ok_and(|v| v == "1") {
+                    game.squad[i].hp = 0;
+                    game.squad[i].died_at = Some(0);
                 }
                 // `RAZDOR_SCENE_WEAR=<id>,<id>…`: those items worn by the squad member n.
                 if let Ok(v) = std::env::var("RAZDOR_SCENE_WEAR") {

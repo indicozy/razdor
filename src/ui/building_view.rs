@@ -1386,7 +1386,7 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
             // Razdor's drag starts from a press that does not swap.
             _ => {
                 if let Some(i) = on {
-                    super::unit_drag::press(i, game.squad[i].def, (game.squad[i].hp, game.squad[i].max_hp(&c)));
+                    super::unit_drag::press(i, game.squad[i].def, (game.squad[i].hp, game.squad[i].max_hp(&c)), !game.squad[i].alive());
                 }
             }
         }
@@ -1753,8 +1753,8 @@ fn garrison_click(controls: super::unit_drag::Controls, sel: Option<(bool, usize
 /// Razdor's drag from the garrison tab's card `s` (a garrison unit, its index).
 fn start_garrison_drag(guards: &[razdor::rules::world::Stationed], squad: &[Unit], s: (bool, usize), c: &razdor::rules::content::Content) {
     match s {
-        (true, j) => super::unit_drag::press_guard(j, guards[j].unit.def, (guards[j].unit.hp, guards[j].unit.max_hp(c))),
-        (false, i) => super::unit_drag::press(i, squad[i].def, (squad[i].hp, squad[i].max_hp(c))),
+        (true, j) => super::unit_drag::press_guard(j, guards[j].unit.def, (guards[j].unit.hp, guards[j].unit.max_hp(c)), !guards[j].unit.alive()),
+        (false, i) => super::unit_drag::press(i, squad[i].def, (squad[i].hp, squad[i].max_hp(c)), !squad[i].alive()),
     }
 }
 
