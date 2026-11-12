@@ -224,6 +224,19 @@ Other diagnostics: `razdor.log` in the data folder (`razdor::diag`, `RAZDOR_LOG=
   remapped so the SHA-256 is reproducible) and `razdor-macos` with
   `scripts/dist-macos.sh`, and publishes «Раздор X.Y.Z» with the version's changelog
   section and the SHA-256s. Run by hand it only builds artifacts.
+- The Windows 7 job (`windows7`, Ubuntu): `scripts/dist-win7.sh` builds `Razdor-win7.exe` and
+  the zip `razdor-<version>-windows7.zip` (that program, `curl.exe` from
+  `scripts/fetch-curl-win.sh`, pinned in `scripts/curl-win.env`, the ads and the menu art).
+  Target `x86_64-win7-windows-gnu` (Rust's tier-3 Windows 7 target): the pinned compiler with
+  `RUSTC_BOOTSTRAP=1` and `-Z build-std=std,panic_abort`; the crt objects `rsbegin.o`/`rsend.o`
+  come from the `x86_64-pc-windows-gnu` target; linked by clang with lld against mingw-w64's
+  msvcrt sysroot. Three patches in `scripts/win7/` (miniquad: IME and DPI looked up at run time;
+  dirs-sys and rfd: `CoTaskMemFree` from ole32, not combase) apply to copies of those crates
+  through cargo `--config` patches, and `Cargo.lock` is restored after the build. The build has
+  no gamepads (`gilrs` is off: its WinRT imports are Windows 8). Its updater asks for
+  `Razdor-win7.exe` (`update::asset_name`). Check the import table after a change
+  (`objdump -p`): no Windows 8+ API and no api-ms-win-crt or combase DLL. Locally, the same
+  script runs with the env variables of its header (clang, lld and a mingw sysroot).
 - The Android job (`android`, Ubuntu): `scripts/dist-android.sh` builds `razdor.apk` with
   cargo-quad-apk (pinned rev in the workflow and the script's header; master, since the
   crates.io 0.1.4 needs javac 1.7 and dx) on NDK 29 (pinned), signed with the release keystore

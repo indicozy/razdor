@@ -154,6 +154,8 @@ cargo test                                      # also checks the readers agains
 бутылки Wine или CrossOver); папка, запомненная с прошлого запуска; поиск в `~/Games`,
 `~/Downloads` и домашней папке. Сделано для Community Update 1.2 (игра 1.8.1).
 
+**Windows 7 и 8.** Для них есть отдельная сборка: `razdor-<версия>-windows7.zip` (в нём `Razdor-win7.exe`, `curl.exe` для загрузок, папки `ads` и `menu-art`). Распакуйте архив рядом с `DiscordTimes.exe` и запустите `Razdor-win7.exe`. Windows 10 и новее используют обычный `Razdor-<версия>.exe`. В сборке для Windows 7 нет поддержки геймпадов (мышь и клавиатура работают как обычно). `curl.exe` на Windows 7 запускается только с обновлением KB2999226 (Universal C Runtime).
+
 **Моды.** Поддерживается мод **Evolution** (проверен с версией 9.0 на Community Update: 161
 отряд, его дерево улучшений, предметы, заклинания и карты). Мод Discord Times — это изменённая
 установка (свои файлы `Rus_*.ini`, листы графики и карты), поэтому укажите в `RAZDOR_DT_DIR`

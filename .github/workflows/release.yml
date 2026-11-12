@@ -1,5 +1,6 @@
 # The release pipeline: pushing a tag vX.Y.Z builds razdor (Linux) and Razdor.exe (Windows)
-# with scripts/dist.sh, razdor-macos (macOS, universal) with scripts/dist-macos.sh on a Mac,
+# with scripts/dist.sh, Razdor-win7.exe and razdor-X.Y.Z-windows7.zip (Windows 7 and 8) with
+# scripts/dist-win7.sh on the windows7 job, razdor-macos (macOS, universal) with scripts/dist-macos.sh on a Mac,
 # razdor.apk (Android, experimental) with scripts/dist-android.sh on the android job (unsigned),
 # then signed in the android-sign job, which runs no repository code and gets the release
 # keystore only on tags; razdor.ipa (iOS, experimental, unsigned: the player signs it with AltStore
@@ -85,6 +86,34 @@ jobs:
         with:
           name: razdor-ios
           path: dist/razdor.ipa
+          if-no-files-found: error
+
+  windows7:
+    # Razdor for Windows 7 and 8 (scripts/dist-win7.sh): Rust's tier-3 target x86_64-win7-windows-gnu,
+    # with its standard library built for it, linked by lld against Ubuntu's mingw-w64 msvcrt sysroot.
+    # The zip carries curl.exe (scripts/fetch-curl-win.sh, pinned in scripts/curl-win.env).
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Clang, lld and mingw-w64 (the Windows 7 build)
+        run: sudo apt-get update && sudo apt-get install -y clang lld mingw-w64 libwinpthread-dev zip
+
+      - name: Rust (rust-toolchain.toml), its source and the crt objects of the Windows 7 target
+        run: |
+          rustup show active-toolchain
+          rustup component add rust-src
+          rustup target add x86_64-pc-windows-gnu
+
+      - name: Build Razdor-win7.exe and the Windows 7 zip
+        run: sh scripts/dist-win7.sh
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: razdor-win7
+          path: |
+            dist/Razdor-win7.exe
+            dist/razdor-*-windows7.zip
           if-no-files-found: error
 
   android:
@@ -186,7 +215,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [macos, android-sign, ios]
+    needs: [macos, android-sign, ios, windows7]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v5
@@ -238,6 +267,11 @@ jobs:
           name: razdor-ios
           path: dist
 
+      - uses: actions/download-artifact@v8
+        with:
+          name: razdor-win7
+          path: dist
+
       - name: Versioned copies of the release files
         id: versions
         run: |
@@ -270,7 +304,7 @@ jobs:
         run: |
           (cd dist && sha256sum razdor Razdor.exe razdor-macos razdor-translate Razdor-translate.exe razdor-translate-macos razdor.apk razdor.ipa \
             "razdor-$V-linux" "Razdor-$V.exe" "razdor-$V-macos" "razdor-$V.apk" "razdor-$V.ipa" \
-            "razdor-translate-$V-linux" "Razdor-translate-$V.exe" "razdor-translate-$V-macos" "razdor-ads-$V.zip" > SHA256SUMS)
+            "razdor-translate-$V-linux" "Razdor-translate-$V.exe" "razdor-translate-$V-macos" "razdor-ads-$V.zip" Razdor-win7.exe "razdor-$V-windows7.zip" > SHA256SUMS)
           cat dist/SHA256SUMS
 
       - name: The programs of a run by hand
@@ -296,6 +330,8 @@ jobs:
             dist/Razdor-translate-${{ steps.versions.outputs.v }}.exe
             dist/razdor-translate-${{ steps.versions.outputs.v }}-macos
             dist/razdor-ads-${{ steps.versions.outputs.v }}.zip
+            dist/Razdor-win7.exe
+            dist/razdor-${{ steps.versions.outputs.v }}-windows7.zip
             dist/SHA256SUMS
 
       - name: Release notes from changelog/X.Y.Z.md
@@ -312,6 +348,7 @@ jobs:
             echo "- **razdor-$V.ipa**: iPhone и iPad (iOS 14+), экспериментально. Файл не подписан: установите его через AltStore или Sideloadly со своим Apple ID (бесплатная подпись действует 7 дней, AltStore продлевает её сам). Папку игры скопируйте в «Файлы» → На iPhone → Раздор → DiscordTimes; см. README, «iOS»."
             echo "- **Razdor-translate-$V.exe**, **razdor-translate-$V-linux**, **razdor-translate-$V-macos**: переводчик карт и данных игры на английский языковой моделью (см. README, «Переводчик карт»); кладётся туда же. Сам он не обновляется."
             echo "- macOS: программа не подписана разработчиком; после загрузки выполните \`xattr -d com.apple.quarantine razdor-$V-macos\` (или правый щелчок → «Открыть») перед первым запуском."
+            echo "- **razdor-$V-windows7.zip** (или **Razdor-win7.exe**): Windows 7 и 8 (x86_64). Windows 10 и новее берут Razdor-$V.exe. В архиве рядом с программой лежат curl.exe (для загрузок игры и обновлений) и папки ads и menu-art; на Windows 7 curl.exe запускается только с обновлением KB2999226 (Universal C Runtime)."
             echo "- Файлы без номера версии (Razdor.exe, razdor, razdor-macos, razdor.apk, razdor.ipa и переводчики) — те же программы под старыми именами, для обновления старых версий Раздора."
             echo
             echo "## SHA-256"
@@ -333,4 +370,4 @@ jobs:
             dist/Razdor.exe dist/razdor dist/razdor-macos dist/razdor.apk dist/razdor.ipa \
             dist/Razdor-translate.exe dist/razdor-translate dist/razdor-translate-macos \
             dist/Razdor-$V.exe dist/razdor-$V-linux dist/razdor-$V-macos dist/razdor-$V.apk dist/razdor-$V.ipa \
-            dist/Razdor-translate-$V.exe dist/razdor-translate-$V-linux dist/razdor-translate-$V-macos dist/razdor-ads-$V.zip dist/SHA256SUMS
+            dist/Razdor-translate-$V.exe dist/razdor-translate-$V-linux dist/razdor-translate-$V-macos dist/razdor-ads-$V.zip dist/Razdor-win7.exe dist/razdor-$V-windows7.zip dist/SHA256SUMS

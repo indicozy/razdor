@@ -1,0 +1,142 @@
+diff --color -ru a/src/native/windows.rs b/src/native/windows.rs
+--- a/src/native/windows.rs	2026-11-10 01:07:23.312547652 +0500
++++ b/src/native/windows.rs	2026-11-13 00:24:29.089843403 +0500
+@@ -12,12 +12,12 @@
+         hidusage::{HID_USAGE_GENERIC_MOUSE, HID_USAGE_PAGE_GENERIC},
+         minwindef::{DWORD, HIWORD, LOWORD, LPARAM, LRESULT, MAX_PATH, TRUE, UINT, WPARAM},
+         ntdef::NULL,
+-        windef::{HBRUSH, HCURSOR, HDC, HICON, HWND, POINT, RECT},
++        windef::{HBRUSH, HCURSOR, HDC, HICON, HMONITOR, HWND, POINT, RECT},
+         windowsx::{GET_X_LPARAM, GET_Y_LPARAM},
+     },
+     um::{
+         imm::{HIMC, ImmGetContext, ImmReleaseContext},
+-        libloaderapi::{GetModuleHandleW, GetProcAddress},
++        libloaderapi::{GetModuleHandleW, GetProcAddress, LoadLibraryA},
+         shellapi::{DragAcceptFiles, DragQueryFileW, HDROP},
+         shellscalingapi::*,
+         wingdi::*,
+@@ -77,7 +77,6 @@
+ #[link(name = "imm32")]
+ extern "system" {
+     fn ImmGetCompositionStringW(himc: HIMC, index: DWORD, buf: *mut std::ffi::c_void, len: DWORD) -> i32;
+-    fn ImmAssociateContextEx(hwnd: HWND, himc: HIMC, flags: DWORD) -> i32;
+     fn ImmAssociateContext(hwnd: HWND, himc: HIMC) -> HIMC;
+     fn ImmCreateContext() -> HIMC;
+     fn ImmSetCompositionWindow(himc: HIMC, lpCompForm: *const COMPOSITIONFORM) -> i32;
+@@ -89,6 +88,83 @@
+ // IME Association flags
+ const IACE_CHILDREN: DWORD = 0x0001;
+ 
++// Razdor's Windows 7 build (x86_64-win7-windows-gnu): the Windows 8 and 8.1 functions below are looked
++// up when they are used instead of linked, so the program starts on Windows 7; each falls back to
++// what Windows 7 has. Not in miniquad upstream.
++
++// The window's IME context while IME is off on Windows 7 (ImmAssociateContextEx is not there).
++static IME_KEPT_CONTEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
++
++/// `ImmAssociateContextEx` (Windows 8 and later). On Windows 7 the same switch through
++/// `ImmAssociateContext`: flags 0 takes the window's context away and keeps it, IACE_DEFAULT gives it
++/// back, IACE_CHILDREN only takes it away (the helper window).
++unsafe fn imm_associate_context_ex(hwnd: HWND, himc: HIMC, flags: DWORD) -> i32 {
++    type Fun = unsafe extern "system" fn(HWND, HIMC, DWORD) -> i32;
++    static FUN: std::sync::OnceLock<Option<Fun>> = std::sync::OnceLock::new();
++    let fun = *FUN.get_or_init(|| {
++        let module = LoadLibraryA(b"imm32.dll\0".as_ptr() as *const i8);
++        if module.is_null() {
++            return None;
++        }
++        let proc = GetProcAddress(module, b"ImmAssociateContextEx\0".as_ptr() as *const i8);
++        if proc.is_null() {
++            None
++        } else {
++            Some(std::mem::transmute::<_, Fun>(proc))
++        }
++    });
++    match fun {
++        Some(fun) => fun(hwnd, himc, flags),
++        None if flags & IACE_CHILDREN != 0 => {
++            ImmAssociateContext(hwnd, std::ptr::null_mut());
++            1
++        }
++        None if flags & IACE_DEFAULT != 0 => {
++            let kept = IME_KEPT_CONTEXT.swap(0, std::sync::atomic::Ordering::Relaxed) as HIMC;
++            if !kept.is_null() {
++                ImmAssociateContext(hwnd, kept);
++            }
++            1
++        }
++        None => {
++            let prev = ImmAssociateContext(hwnd, std::ptr::null_mut());
++            if !prev.is_null() {
++                IME_KEPT_CONTEXT.store(prev as usize, std::sync::atomic::Ordering::Relaxed);
++            }
++            1
++        }
++    }
++}
++
++/// `GetDpiForMonitor` (Windows 8.1 and later). On Windows 7 the system's DPI, the same on every
++/// monitor there (LOGPIXELSX and LOGPIXELSY of the screen).
++unsafe fn get_dpi_for_monitor(monitor: HMONITOR, dpi_type: MONITOR_DPI_TYPE, x: *mut UINT, y: *mut UINT) -> i32 {
++    type Fun = unsafe extern "system" fn(HMONITOR, MONITOR_DPI_TYPE, *mut UINT, *mut UINT) -> i32;
++    static FUN: std::sync::OnceLock<Option<Fun>> = std::sync::OnceLock::new();
++    let fun = *FUN.get_or_init(|| {
++        let module = LoadLibraryA(b"shcore.dll\0".as_ptr() as *const i8);
++        if module.is_null() {
++            return None;
++        }
++        let proc = GetProcAddress(module, b"GetDpiForMonitor\0".as_ptr() as *const i8);
++        if proc.is_null() {
++            None
++        } else {
++            Some(std::mem::transmute::<_, Fun>(proc))
++        }
++    });
++    match fun {
++        Some(fun) => fun(monitor, dpi_type, x, y),
++        None => {
++            let dc = GetDC(std::ptr::null_mut());
++            *x = GetDeviceCaps(dc, LOGPIXELSX) as UINT;
++            *y = GetDeviceCaps(dc, LOGPIXELSY) as UINT;
++            ReleaseDC(std::ptr::null_mut(), dc);
++            0
++        }
++    }
++}
++
+ mod clipboard;
+ mod keycodes;
+ mod libopengl32;
+@@ -173,11 +249,11 @@
+             if enabled {
+                 IME_USER_DISABLED.store(false, std::sync::atomic::Ordering::Relaxed);
+                 // Re-associate IME context with the window
+-                ImmAssociateContextEx(self.wnd, std::ptr::null_mut(), IACE_DEFAULT);
++                imm_associate_context_ex(self.wnd, std::ptr::null_mut(), IACE_DEFAULT);
+             } else {
+                 IME_USER_DISABLED.store(true, std::sync::atomic::Ordering::Relaxed);
+                 // Disassociate IME context from the window
+-                ImmAssociateContextEx(self.wnd, std::ptr::null_mut(), 0);
++                imm_associate_context_ex(self.wnd, std::ptr::null_mut(), 0);
+             }
+         }
+     }
+@@ -1009,7 +1085,7 @@
+     );
+     
+     // Disable IME for message window to avoid interfering with main window
+-    ImmAssociateContextEx(msg_hwnd, std::ptr::null_mut(), IACE_CHILDREN);
++    imm_associate_context_ex(msg_hwnd, std::ptr::null_mut(), IACE_CHILDREN);
+     
+     ShowWindow(msg_hwnd, SW_HIDE);
+     let mut msg = std::mem::zeroed();
+@@ -1098,7 +1174,7 @@
+             let hm = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+             let mut dpix: UINT = 0;
+             let mut dpiy: UINT = 0;
+-            let hr = GetDpiForMonitor(
++            let hr = get_dpi_for_monitor(
+                 hm,
+                 MDT_EFFECTIVE_DPI,
+                 &mut dpix as *mut _ as _,
