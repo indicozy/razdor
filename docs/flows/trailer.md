@@ -81,7 +81,8 @@ unseeded random draw, a map-dependent cache that changes with the window's size.
   prints it at the plan's 64 px window, where it is about 6.8). An absolute `dist` therefore frames
   differently at 1080p and 5K. Shots use `fit`, a multiple of it.
 - **The view is clamped to the map** (`Camera::looking_in` clamps the origin): near a map edge the
-  target is pushed in. The descent's hero sits low in the frame for that reason on РК1.
+  target is pushed in. The descent's hero sits low in the frame for that reason on РК1. A shot's `edge free`
+  skips the clamp (`trailer::edge_free`, read by `looking_in`), so the target stays in the middle.
 - **A window that hides the bar** still reserves its height unless `bar_h` is zero in a run, so
   the bottom of the frame was black until `bar_h` changed. Keep the three hooks together.
 - **The game's wait stops at each day report**, as for a player: `pass` must be taken up again

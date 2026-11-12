@@ -2477,7 +2477,9 @@ impl Camera {
         let pad = vec2(0.5 * scale, 0.5 * rh * scale);
         let centre = Vec2::from(at) * scale + pad;
         let mut origin = centre - vec2(view.w, view.h) / 2.0;
-        if extend_edge() {
+        if super::trailer::edge_free() {
+            // A trailer shot's `edge free` (dev only): no clamp, the target stays in the middle.
+        } else if extend_edge() {
             // «Продолжать карту за краем»: the view may reach past each edge as far as the fog
             // goes (`terrain::EDGE_FULL`), and a map narrower than the view is centred, so the
             // extension shows on every side. Off, the view stays on the map as it always did.

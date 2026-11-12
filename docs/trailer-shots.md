@@ -83,6 +83,7 @@ One item per line. `#` starts a comment. Every line is optional except `map` and
 | `ui on\|off` | `on` draws the interface as a player sees it (bottom bar, minimap, the map's widgets); event windows are still answered, not drawn. | `off` |
 | `fog on\|off` | `on` keeps the fog of war (black, or the look's mist). | `off` |
 | `view flat\|25d` | `flat` is the classic flat map with the player's camera: only `target` and `zoom` may be set (the 2.5D keys are errors). `25d` is the tilted camera. | `25d` |
+| `edge clamp\|free` | With `view flat`: `clamp` keeps the map on the window (the target is pushed in near an edge, as the player's camera does). `free` does not clamp the view, so the target stays in the middle of the window, and the ground past the map is whatever the game draws there. Use it to match a 4:3 recording with a wide one (the target in the same place; see Limits for the scale). | `clamp` |
 | `look <key>=<value> ...` | The look settings for this run only, never written to the settings file. `preset` («Качество графики»: `original` or `оригинал`, `low`, `medium`, `high`) is applied first, then the keys: `lighting` (off, on, cycle, fixed), `shadows` (painted, sun), `water` (off, on), `water_rate` (every, other, third), `water_quality` (high, medium, low), `weather` (off, on), `living` (off, on), `mist` (off, flat, clouds), `anim` (on, near, off). | the run's settings |
 | `battle <army id>` | The hero's army fights the army with this id (the number `--plan` prints as `A<id>`) at frame 0. With `battles show` its battle screen opens at once; with `battles map` the fight is resolved on the map at the first frame it is free. The ground is the hero's own cell, as in play (the rules have no ground). An unknown id is an error. | none |
 | `battle_speed <x>` | The pace of a battle on its screen, as a multiple of the game's animations (0.05 to 8; 1 is the game's pace). The AI plays both sides on the screen at that pace, to the battle's end. Needs `battles show`. | none: the battle ends at once |
@@ -280,11 +281,19 @@ duration 18.5
 
 ## Limits (known, not bugs)
 
-- The flat view's camera keeps the map on the window: when the window is wider than the map from the target
-  (the 5120×2160 frame at zoom 1 on РК1), the map's left edge sits at the window's left edge, so the target is not
-  centred. The cell scale is the same at every size (PSNR 34.4 dB between the 4:3 frame and the matching part of
-  the 5K frame at the same scale). Open: whether a flat trailer run should centre the target (the edge rule would
-  need a run-only switch).
+- The flat view's camera keeps the map on the window (`edge clamp`, the default): when the window is wider than the
+  map from the target (the 5120×2160 frame at zoom 1 on РК1), the map's left edge sits at the window's left edge, so
+  the target is not centred. `edge free` centres the target. Measured on РК1 at frame 0 (`edge free`, `ui on`):
+  the 1440×1080 frame against the 5120×2160 frame's centre 2880×2160 scaled to 1440×1080 (Lanczos) is 42.1 dB over
+  the map above the bottom bar (the same as the 5K frame at zoom 2 scaled the same way, since the two are
+  identical). A 1:1 centre crop of the 5K frame is 12.2 dB, because the 5K frame's cells are twice the size: with
+  the interface scale on Auto, the map's scale follows the window's fit (`chrome::fit_k`), not the window's height alone, so
+  the same zoom gives another scale in another window. To match a 4:3 recording and a wide one at one scale, set
+  the same interface scale in both (a shot has no such key yet). The bottom bar differs: at 1440×1080 it is 121 px
+  high and spans the full width (the buttons, the time panel, the mana, gold, income and wages readouts); at
+  5120×2160 it is 242 px high and 2880 px wide, centred, with the same parts drawn twice as large.
+  Open: `zoom 2` on the 5K flat run gave frames identical to `zoom 1` (every frame's hash the same), so the flat
+  view's zoom is not applied in this run yet (not fixed here).
 
 - A timed hour (`hour <t> <h>`, a sweep from day to night in one shot) is not built: the shadows
   step once an hour (`daylight::casts_stepped`), so a sweep of a few seconds would show the steps.

@@ -148,6 +148,8 @@ pub struct Shot {
     pub fog: bool,
     /// `view flat`: the classic flat map with its classic camera (`target` and `zoom` only).
     pub flat: bool,
+    /// edge free: the view is not clamped to the map, so the target stays in the middle (trailer runs only).
+    pub edge_free: bool,
     /// `battle <army id>`: the hero's army fights the army with this id (`--plan` prints the
     /// ids as `A<id>`) at frame 0. `None`: no battle is set up.
     pub battle: Option<u32>,
@@ -202,6 +204,7 @@ impl Default for Shot {
             ui: false,
             fog: false,
             flat: false,
+            edge_free: false,
             battle: None,
             battle_speed: None,
             speed_keys: Vec::new(),
@@ -336,6 +339,11 @@ fn apply_line(shot: &mut Shot, head: &str, rest: &[&str], line_no: usize) -> Res
             let h = v.parse::<f64>().ok().filter(|h| h.is_finite() && (0.0..24.0).contains(h));
             shot.hour = Some(h.ok_or(("hour", format!("`{v}`: an hour from 0 to 23 (fractions allowed, e.g. 6.5)")))?);
         }
+        "edge" => match one(rest).map_err(|e| ("edge", e))? {
+            "clamp" => shot.edge_free = false,
+            "free" => shot.edge_free = true,
+            v => return Err(("edge", format!("`{v}`: clamp or free"))),
+        },
         "clock" => match one(rest).map_err(|e| ("clock", e))? {
             "run" => shot.clock_hold = false,
             "hold" => shot.clock_hold = true,
@@ -423,7 +431,7 @@ fn apply_line(shot: &mut Shot, head: &str, rest: &[&str], line_no: usize) -> Res
             }
         }
         other => {
-            return Err(("line", format!("`{other}`: no such line (map, save, hero, seed, size, fps, music, battles, hour, clock, look, ui, fog, view, duration, event, at, walk, pass, reveal, battle, battle_speed, lang, layout, fps_counter)")));
+            return Err(("line", format!("`{other}`: no such line (map, save, hero, seed, size, fps, music, battles, hour, clock, look, ui, fog, view, edge, duration, event, at, walk, pass, reveal, battle, battle_speed, lang, layout, fps_counter)")));
         }
     }
     Ok(())
@@ -1016,6 +1024,20 @@ mod tests {
         assert!(all.contains("line 6: look: `lighting=maybe`: off, on, cycle, fixed"), "{all}");
         assert!(all.contains("line 7: look: `shadows`: write key=value"), "{all}");
         assert!(all.contains("line 8: look: needs at least one key=value"), "{all}");
+    }
+
+    #[test]
+    fn the_edge_line_defaults_to_the_clamp() {
+        assert!(!ok("map РК1\nview flat\nat 0s target=hero zoom=1\nduration 1\n").edge_free, "the view is clamped by default");
+        assert!(ok("map РК1\nedge free\nview flat\nat 0s target=hero zoom=1\nduration 1\n").edge_free);
+        assert!(!ok("map РК1\nedge clamp\nview flat\nat 0s target=hero zoom=1\nduration 1\n").edge_free);
+    }
+
+    #[test]
+    fn a_bad_edge_line_names_its_line_and_field() {
+        let all = errs("map РК1\nedge sideways\nedge\nat 1s pitch=12\n").join("\n");
+        assert!(all.contains("line 2: edge: `sideways`: clamp or free"), "{all}");
+        assert!(all.contains("line 3: edge: no value given"), "{all}");
     }
 
     #[test]

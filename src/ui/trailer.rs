@@ -325,6 +325,12 @@ pub fn flat_view() -> bool {
     config().and_then(|c| c.shot.as_ref()).is_some_and(|s| s.flat)
 }
 
+/// Whether the shot says `edge free`: the flat view's origin is not clamped to the map, so the
+/// target stays in the middle. False when no trailer runs.
+pub fn edge_free() -> bool {
+    config().and_then(|c| c.shot.as_ref()).is_some_and(|s| s.edge_free)
+}
+
 /// The window's size a run asks for (its shot's), if one does.
 pub fn window_size() -> Option<(u32, u32)> {
     config().map(|c| c.size)
