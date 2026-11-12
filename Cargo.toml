@@ -65,16 +65,18 @@ opt-level = 2
 debug = false
 
 # The test edit-run loop (`cargo test --profile fasttest`): incremental, 256 codegen units, so a
-# change rebuilds only its own units. Release still ships and CI still tests `--release`.
+# change rebuilds only its own units; Razdor's own code at opt-level 2, dependencies at 3.
+# Release still ships and CI still tests `--release`.
 # Measured (rustc 1.91.1, 12 jobs on CPUs 8-19; `--release` in the same worktree, same target dir):
-# a one-line body edit under src/rules/ rebuilds in 255 CPU-s (66 s wall) against 481 CPU-s (94 s);
-# a test run takes 268 CPU-s (2:03) against 674-732 CPU-s (2:56 to 3:17, each including a crate
-# recompile); the warm build (once) takes 1333 CPU-s (3:08) against 1273 CPU-s (4:45).
+# a one-line body edit under src/rules/ rebuilds in 199 CPU-s (34 s wall) against 481 CPU-s (94 s)
+# (opt-level 3: 255 CPU-s, 66 s); the test run takes 297 CPU-s (2:01; opt-level 3: 268 CPU-s);
+# the warm build (once) takes 515 CPU-s (1:41) against 1273 CPU-s (4:45). Opt-level 1 broke the
+# time budget of rules::ai::real_maps::thirty_days_on_every_map.
 [profile.fasttest]
 inherits = "release"
 incremental = true
 codegen-units = 256
-opt-level = 3
+opt-level = 2
 
 [profile.fasttest.package."*"]
 opt-level = 3
