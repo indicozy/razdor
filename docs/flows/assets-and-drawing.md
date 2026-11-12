@@ -759,6 +759,11 @@ against the commit before the feature). The mill sails do not turn: the depth cu
   place of hashing the explored set. The sharp draw refills one thread-local mesh per use (`SPRITE_MESH`, `SCALED_MESH`,
   `sharp.rs`) and computes a rotation's sin and cos once per sprite.
 
+- **Atmosphere cost** (2026-11-12, `docs/perf/2026-11-12-atmosphere-performance.md`). Each location's fog test
+  (`location_explored`: a cell of its footprint explored near the feather) is kept per location until the fog's
+  change key moves. The locations' passes (the sprites, the windows of the lit buildings, the point lights) used to
+  scan the fog around every cell each frame; the answers do not change between cells revealed.
+
 ## Sound and music
 
 - `src/dt/sound.rs`: `SoundTable::from_ini` (`_Sounds.ini`: `[Backgrounds]` music keys,

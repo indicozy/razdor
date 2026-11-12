@@ -251,3 +251,21 @@ What this says:
 
 Not done: no pick test, no matrix run for a lazy-PICKS change (there is no change: the measurement build was
 reverted). The cheaper-cull variant is a candidate for the coordinator's decision, not a landed change.
+## Atmosphere effects: the fog test per location (item 4, 2026-11-12)
+
+What changed: the location fog test (a cell of the footprint explored near the feather) was scanned for every
+location in the point lights, the building windows and the drawn-locations test, every frame. It is now kept per
+location and rebuilt only when the fog's change key moves (`location_explored`). The answer is a pure function of
+the explored set, so the cache cannot change a picture.
+
+Pictures: 24 snapshot cells (РК3-Столица and «Другой берег», 2.5D, third person and flat, hours 6, 13, 19, 23,
+effects on, frames 30 and 90) rendered by `ade8f733` and by the fog cache: all 48 PNGs byte-identical.
+
+Timing: not measured on a quiet machine. The RTX 4060 box was shared (load average 13 to 15): interleaved runs of
+the same binary moved by a factor of 2 to 3 between rounds (`work_ms`, РК3 start, 2.5D, effects on: 0.41 to
+1.10 ms; the baseline's effects-off round read 0.84 ms in one round and 0.33 ms in another). The per-section timers
+that located the cost were run on the wrong card (see the reboot note in the session log) and are discarded, so no
+gain figure is claimed here. Re-measure with `tools/perf/check.sh` on an idle machine.
+
+Item 8 (background preparation at load) was tried and dropped: the first-frame bake and the textures moved to
+frames 2 and 3 as stalls of 65 and 109 ms, which the owner rejects. The load path is unchanged.

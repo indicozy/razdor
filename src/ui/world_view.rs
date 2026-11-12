@@ -4643,9 +4643,9 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // A location is drawn when a cell of its footprint is explored near the feather and it lies in
     // the drawn rows and columns. The rows and columns come first: most locations are off the view,
     // and the fog scan of a location is the costly test (both tests are pure, so the order is free).
-    let location_seen = |l: &Location| {
+    let location_seen = |i: usize, l: &Location| {
         let (ax, ay) = l.anchor;
-        ay >= r0 - up && ay < r1 + below && ax >= c0 - side && ax - l.size.0 < c1 + side && l.cells().any(|t| fog.explored_near(t, minimap::FEATHER))
+        ay >= r0 - up && ay < r1 + below && ax >= c0 - side && ax - l.size.0 < c1 + side && location_explored(game, i)
     };
     // Razdor's «От солнца» (`daylight::frame_casts`): every caster in view lays its silhouette on the
     // ground, under the hills, the marks, the fog and every standing sprite (flat and 2.5D alike).
@@ -4664,7 +4664,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     let seen_row: Vec<bool> = rows.iter().map(&seen).collect();
     // The locations drawn this frame, in the locations' order: the passes below share this one test
     // (the 2.5D view makes three passes over them; each used to test every location again).
-    let seen_locs: Vec<usize> = game.world.locations.iter().enumerate().filter(|(_, l)| location_seen(l)).map(|(i, _)| i).collect();
+    let seen_locs: Vec<usize> = game.world.locations.iter().enumerate().filter(|(i, l)| location_seen(*i, l)).map(|(i, _)| i).collect();
     // 2.5D: a card building's ground pieces lie flat in the ground pass, before the shadows (which fall on them)
     // and under every standing sprite (`draw_building_ground`).
     if tilted {
@@ -6802,7 +6802,7 @@ fn point_lights(game: &Game, art: Option<&DtArt>, cam: &Camera, glow: f32) -> Ve
     let figure_px = |stem: &str| art.and_then(|a| a.figure_sheet(stem)).map_or(cam.scale, |s| s.width() / 8.0 * zoom);
     let mut out = Vec::new();
     for (i, l) in game.world.locations.iter().enumerate() {
-        if l.kind.is_bridge() || !l.cells().any(|t| fog.explored_near(t, minimap::FEATHER)) {
+        if l.kind.is_bridge() || !location_explored(game, i) {
             continue;
         }
         let n = l.cells().count().max(1) as f32;
@@ -6840,6 +6840,37 @@ fn point_lights(game: &Game, art: Option<&DtArt>, cam: &Camera, glow: f32) -> Ve
     out
 }
 
+local! {
+    /// Each location's fog test (`location_explored`): the key it was made for (the fog's change key, the location list's
+    /// place and length), and per location 0 (not tested yet), 1 (unexplored) or 2 (explored).
+    static LOC_EXPLORED: std::cell::RefCell<(Option<(u64, usize, usize)>, Vec<u8>)> = const { std::cell::RefCell::new((None, Vec::new())) };
+}
+
+/// Whether a cell of location `i`'s footprint is explored near the feather (`minimap::FEATHER`): the fog test the
+/// location passes share. The explored set changes only with a new cell (`Fog::change_key` renews with each), so the
+/// answers are kept until then; the scan of a location's cells is what the per-frame passes used to repeat.
+fn location_explored(game: &Game, i: usize) -> bool {
+    let key = (game.fog.change_key(), game.world.locations.as_ptr() as usize, game.world.locations.len());
+    LOC_EXPLORED.with_borrow_mut(|(k, seen)| {
+        if *k != Some(key) {
+            *k = Some(key);
+            seen.clear();
+            seen.resize(game.world.locations.len(), 0);
+        }
+        match seen.get(i).copied() {
+            Some(2) => true,
+            Some(1) => false,
+            _ => {
+                let v = game.world.locations[i].cells().any(|t| game.fog.explored_near(t, minimap::FEATHER));
+                if let Some(slot) = seen.get_mut(i) {
+                    *slot = if v { 2 } else { 1 };
+                }
+                v
+            }
+        }
+    })
+}
+
 /// What the fog shows at a world point (1 lit, 0 black or off the map), as a pool fades with it.
 fn fog_visible(game: &Game, cam: &Camera, world: Vec2) -> f32 {
     let (map, fog) = (&game.world.map, &game.fog);
@@ -6871,8 +6902,8 @@ fn draw_building_windows(game: &Game, assets: &Assets, cam: &Camera, veil: Veil)
     super::sharp::windows_pass(&mask, night, || {
         in_view_sprites(cam, |c| {
             let zoom = c.scale / PX;
-            for l in game.world.locations.iter() {
-                if l.kind.is_bridge() || !l.cells().any(|t| game.fog.explored_near(t, minimap::FEATHER)) {
+            for (i, l) in game.world.locations.iter().enumerate() {
+                if l.kind.is_bridge() || !location_explored(game, i) {
                     continue;
                 }
                 let n = l.cells().count().max(1) as f32;
