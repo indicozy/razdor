@@ -46,6 +46,7 @@ use super::terrain;
 use super::water;
 use super::weather;
 use super::saves::{self, Back, LoadView, SaveView};
+use super::scatter;
 use super::story;
 use super::widgets::*;
 use super::view25::{self, TiltCamera};
@@ -4482,6 +4483,9 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
             }
         });
     }
+    // Razdor's «Трава и кусты» and «Тени у подножия» (`scatter`): on the ground, before the sun's shadows and every
+    // sprite. Nothing runs with both off.
+    draw_ground_effects(game, cam, &rows, &seen_row, &location_seen, sun.is_some());
     // The sun's and the moon's shadows are the baked map (`prepare_shadow_map`): one quad each, whatever the casters.
     if let Some(c) = sun {
         ground(cam, || draw_sun_map(cam, c));
@@ -6677,6 +6681,76 @@ fn draw_building_windows(game: &Game, assets: &Assets, cam: &Camera, veil: Veil)
 /// The warm pool of each building's light (`lights`, `point_lights`), on the ground in the ground pass
 /// (`ground`, the pass's 2D space): a disc of twice the light's reach, faded by the fog on its cell. The
 /// building's own picture is drawn over it, so the light shows around the building and on what stands near it.
+/// The cells an object or a building stands on: no grass there (`scatter`).
+fn blocked_cells(game: &Game) -> Vec<bool> {
+    let map = &game.world.map;
+    let mut blocked = vec![false; (map.w * map.h).max(0) as usize];
+    let mut mark = |(x, y): (i32, i32)| {
+        if x >= 0 && y >= 0 && x < map.w && y < map.h {
+            blocked[(y * map.w + x) as usize] = true;
+        }
+    };
+    for o in map.objects_in_rect(0, map.w, 0, map.h) {
+        razdor::rules::map::object_cells(&o).for_each(&mut mark);
+    }
+    for l in &game.world.locations {
+        l.cells().for_each(&mut mark);
+    }
+    blocked
+}
+
+/// Razdor's «Трава и кусты» and «Тени у подножия» (`scatter`, off by default) on the ground of a 2.5D frame: the
+/// scatter's visible chunks and the contact shadows of what is drawn, over the ground and under the sun's shadows
+/// and the sprites (the fog draws over both). A bent view's sheet has none. Nothing is read with both off.
+fn draw_ground_effects(game: &Game, cam: &Camera, rows: &[Decoration], seen_row: &[bool], location_seen: &dyn Fn(&Location) -> bool, sun: bool) {
+    let density = scatter::density();
+    let contact = scatter::contact_on();
+    let Some(tilt) = cam.tilt.filter(|t| t.cam.bend.is_none()) else { return };
+    if density == scatter::Density::Off && !contact {
+        return;
+    }
+    let map = &game.world.map;
+    let row_h = cam.grid.row_height();
+    if density != scatter::Density::Off {
+        let key = (map.surface_generation(), map.w, map.h, density);
+        let cells = cam.visible(map);
+        let right = super::view25::right(tilt.cam.yaw_deg);
+        scatter::draw(key, map, || blocked_cells(game), row_h, cells, right, super::map_anim::level(), cam.scale / PX, super::map_anim::now());
+    }
+    if contact {
+        let mut feet: Vec<scatter::Footprint> = Vec::new();
+        for (o, &seen) in rows.iter().zip(seen_row) {
+            if !seen {
+                continue;
+            }
+            let side = razdor::rules::map::object_side(o.class, o.sprite) as f32;
+            let (x, y) = map.grid.center(o.tile);
+            // A massif's footprint is its square, its bottom-right cell the object's own.
+            let centre = vec2(x - (side - 1.0) / 2.0, y - (side - 1.0) / 2.0 * row_h);
+            let half = if side > 1.0 { vec2(0.6 * side, 0.6 * side * row_h) } else { vec2(0.5, 0.5 * row_h) };
+            feet.push(scatter::Footprint { centre, half });
+        }
+        for l in game.world.locations.iter().filter(|l| location_seen(l) && !l.kind.is_bridge()) {
+            let cells: Vec<Tile> = l.cells().collect();
+            let n = cells.len().max(1) as f32;
+            let (sx, sy) = cells.iter().fold((0.0, 0.0), |(sx, sy), &t| {
+                let (x, y) = map.grid.center(t);
+                (sx + x, sy + y)
+            });
+            let half = vec2(0.5 * l.size.0 as f32 + 0.25, (0.5 * l.size.1 as f32 + 0.25) * row_h);
+            feet.push(scatter::Footprint { centre: vec2(sx / n, sy / n), half });
+        }
+        for a in game.world.armies.iter().filter(|a| game.fog.explored(a.tile(map)) && !a.sails()) {
+            let (x, y) = game.army_display_pos(a);
+            feet.push(scatter::Footprint { centre: vec2(x, y), half: vec2(0.4, 0.4 * row_h) });
+        }
+        let alpha = if sun { 0.22 } else { 0.32 };
+        if let Some(mesh) = scatter::contact_mesh(&feet, alpha) {
+            scatter::draw_contact(&mesh);
+        }
+    }
+}
+
 fn draw_building_pools(game: &Game, cam: &Camera) {
     let tex = glow_tex();
     lights::with_frame(|frame| {

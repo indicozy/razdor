@@ -11,6 +11,7 @@ use super::daylight::{LightMode, ShadowMode};
 use super::lights::Quality as LightQuality;
 use super::map_anim::Mode as AnimMode;
 use super::mist::MistMode;
+use super::scatter::Density;
 use super::water::{FrameRate, Quality as WaterQuality};
 
 /// The presets, in the row's order: «Оригинал» first.
@@ -41,6 +42,10 @@ struct Look {
     weather: Option<bool>,
     living: Option<bool>,
     anim: Option<AnimMode>,
+    /// «Трава и кусты» (`scatter`).
+    scatter: Option<Density>,
+    /// «Тени у подножия» (`scatter`).
+    contact: Option<bool>,
 }
 
 /// The values of each preset (the owner's decisions, 2026-11-12).
@@ -58,6 +63,8 @@ fn look(p: Preset) -> Look {
             weather: Some(false),
             living: Some(false),
             anim: Some(AnimMode::On),
+            scatter: Some(Density::Off),
+            contact: Some(false),
         },
         Preset::Low => Look {
             render_scale: Some(0.75),
@@ -71,6 +78,8 @@ fn look(p: Preset) -> Look {
             weather: Some(false),
             living: Some(false),
             anim: Some(AnimMode::Near),
+            scatter: Some(Density::Off),
+            contact: Some(false),
         },
         Preset::Medium => Look {
             render_scale: Some(1.0),
@@ -84,6 +93,8 @@ fn look(p: Preset) -> Look {
             weather: Some(true),
             living: Some(true),
             anim: Some(AnimMode::Near),
+            scatter: Some(Density::Few),
+            contact: Some(true),
         },
         Preset::High => Look {
             render_scale: Some(1.0),
@@ -97,6 +108,8 @@ fn look(p: Preset) -> Look {
             weather: Some(true),
             living: Some(true),
             anim: Some(AnimMode::On),
+            scatter: Some(Density::Many),
+            contact: Some(true),
         },
     }
 }
@@ -116,6 +129,8 @@ impl Look {
             && self.weather.is_none_or(|on| s.map_weather == on)
             && self.living.is_none_or(|on| s.map_living == on)
             && self.anim.is_none_or(|m| s.map_anim == m)
+            && self.scatter.is_none_or(|d| s.map_scatter == d)
+            && self.contact.is_none_or(|on| s.map_contact_shadows == on)
     }
 }
 
@@ -163,6 +178,12 @@ pub fn set(s: &mut Settings, p: Preset) {
     }
     if let Some(m) = l.anim {
         s.map_anim = m;
+    }
+    if let Some(d) = l.scatter {
+        s.map_scatter = d;
+    }
+    if let Some(on) = l.contact {
+        s.map_contact_shadows = on;
     }
 }
 

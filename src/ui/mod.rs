@@ -42,6 +42,7 @@ pub mod map_scale;
 pub mod memo;
 pub mod minimap;
 pub mod living;
+pub mod scatter;
 pub mod mist;
 pub mod new_game;
 pub mod pan;

@@ -129,6 +129,15 @@ Chimney smoke, waving flags and birds over the map.
 
 **Far zoom.** When the map is zoomed all the way out, the flags, the smoke and the birds do not animate: at that scale they cannot be seen anyway. Very small objects are not drawn, slightly larger ones fade in smoothly.
 
+## Grass and contact shadows
+
+Two rows of the **Map** tab add small details to the ground. They show only in the tilted (2.5D) view; the first-person and third-person views have none yet.
+
+* **"Grass and bushes"**: "None", "Few" or "Many". Grass tufts and low bushes on the grass, pebbles on dirt and sand, reeds in the swamps. Nothing grows under buildings, roads or the fog. Everything is drawn by code; no pictures from the game are used.
+* **"Contact shadows"**: a soft shadow under trees, rocks, buildings and armies, so they stand on the ground even when the sun's shadows are off.
+
+There is no wheat on the fields yet: the game has no reliable mark of a field.
+
 ## Buildings in 2.5D
 
 This is part of the **2.5D** view (the **"Map"** tab, the **"Map view"** row, off by default), not a separate row. In this view the buildings stand on the ground, not in the air. A building of several parts, such as a castle or a village, is drawn as one picture: when the map turns, the parts do not drift apart, and the far ones stand behind the near ones. A slight shift between the parts gives depth. The shadows lie on the ground.

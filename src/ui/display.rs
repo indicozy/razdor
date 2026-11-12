@@ -857,6 +857,9 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
         crate::ui::weather::set_pref(std::env::var("RAZDOR_WEATHER").is_ok_and(|v| v.trim() == "1"));
         // `RAZDOR_LIVING=1` (the snapshots' living map); the setting is not read here.
         crate::ui::living::set_prefs(false);
+        // `RAZDOR_SCATTER=off|few|many` and `RAZDOR_CONTACT_SHADOWS=1` (the snapshots' grass and contact shadows); the
+        // settings are not read here.
+        crate::ui::scatter::set_prefs(crate::ui::scatter::Density::Off, false);
         // `RAZDOR_LIGHT_MODE=game|cycle` (the snapshots' light clock; the lighting is off otherwise): the game's
         // clock (the hour moves while the army travels), or the real-time cycle of `RAZDOR_LIGHT_CYCLE` minutes a
         // day (24 by default), which runs on the snapshot clock, so one run can show several hours.
@@ -894,6 +897,7 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
     crate::ui::water::set_levels(settings.map_water_rate, settings.map_water_quality);
     crate::ui::weather::set_pref(settings.map_weather);
     crate::ui::living::set_prefs(settings.map_living);
+    crate::ui::scatter::set_prefs(settings.map_scatter, settings.map_contact_shadows);
     follow(settings.display.for_device(dp_px().is_some()));
 }
 

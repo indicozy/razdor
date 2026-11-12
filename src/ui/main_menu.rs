@@ -1599,7 +1599,7 @@ impl Group {
     /// The rows the group shows, top to bottom. Every row is in exactly one group (a test checks it).
     pub fn rows(self) -> &'static [Row] {
         match self {
-            Group::Map => &[Row::GraphicsQuality, Row::MapZoom, Row::ScrollSpeed, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::CurveReset, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::Mist, Row::LiveWater, Row::WaterRate, Row::WaterQuality, Row::Weather, Row::LivingMap, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
+            Group::Map => &[Row::GraphicsQuality, Row::MapZoom, Row::ScrollSpeed, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::CurveReset, Row::MapEdge, Row::Lighting, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::Mist, Row::LiveWater, Row::WaterRate, Row::WaterQuality, Row::Weather, Row::LivingMap, Row::GroundScatter, Row::ContactShadows, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
             Group::Battle => &[Row::WalkSpeed, Row::AnimSpeed, Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience, Row::HitShake],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
@@ -1640,6 +1640,8 @@ pub enum Row {
     WaterQuality,
     Weather,
     LivingMap,
+    GroundScatter,
+    ContactShadows,
     DepthModel,
     MapBattles,
     ArmyList,
@@ -1673,7 +1675,7 @@ pub enum Row {
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 58] = [
+pub const ALL: [Row; 60] = [
         Row::GraphicsQuality,
         Row::MapZoom,
         Row::ScrollSpeed,
@@ -1703,6 +1705,8 @@ pub const ALL: [Row; 58] = [
         Row::WaterQuality,
         Row::Weather,
         Row::LivingMap,
+        Row::GroundScatter,
+        Row::ContactShadows,
         Row::DepthModel,
         Row::MapBattles,
         Row::ArmyList,
@@ -1756,6 +1760,8 @@ pub const ALL: [Row; 58] = [
             Row::LiveWater => Some(tr("Razdor's: the water ripples, foam runs along the shores, rivers flow and ships leave a wake. Style only.")),
             Row::Weather => Some(tr("Razdor's: weather by the land: snow on snow and ice, rain on swamps and lowlands, heat haze over deserts, ash over fire lands, cloud shadows everywhere. Style only.")),
             Row::LivingMap => Some(tr("Razdor's: smoke rises from chimneys, flags wave, birds cross the sky. Style only.")),
+            Row::GroundScatter => Some(tr("Razdor's: grass tufts and low shrubs on grass, pebbles on dirt and sand, reeds in swamps, in the 2.5D views. Nothing under buildings, roads or the fog. Style only.")),
+            Row::ContactShadows => Some(tr("Razdor's: a soft shadow under each tree, rock, building and army in the 2.5D views, so they stand on the ground even with the sun's shadows off. Style only.")),
             Row::DepthModel => Some(tr("Razdor's: buildings from mods that bring their own art stand in 2.5D on their own ground too. The model (Depth Anything V2 Small, Apache-2.0) is downloaded once, about 50 MB, and runs on this device.")),
             Row::AiStrength => Some(tr("Maximum: before each move the enemy of your battles weighs every move and answer ahead and plays each out to the end of the battle.")),
             Row::ArmyArrangement => Some(tr("Clicks: the first click picks a unit or an item, the second places it. Dragging: a click only selects, and units and items are moved by dragging. Both: clicks and dragging at once.")),
@@ -2334,6 +2340,23 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
             // Razdor's, off by default: the map lives (`living`), style only.
             if labelled_row_help(c, geo, tr("Living map"), yes_no(audio.map_living), Row::LivingMap.help_text()).0 {
                 audio.map_living = !audio.map_living;
+            }
+        }
+        Row::GroundScatter => {
+            // Razdor's, off by default: the grass, shrubs, pebbles and reeds on the ground (`scatter`), style only.
+            let value = match audio.map_scatter {
+                super::scatter::Density::Off => tr("Grass: none"),
+                super::scatter::Density::Few => tr("Grass: few"),
+                super::scatter::Density::Many => tr("Grass: many"),
+            };
+            if labelled_row_help(c, geo, tr("Grass and bushes"), value, Row::GroundScatter.help_text()).0 {
+                audio.map_scatter = audio.map_scatter.next();
+            }
+        }
+        Row::ContactShadows => {
+            // Razdor's, off by default: a soft shadow under each object on the ground (`scatter`), style only.
+            if labelled_row_help(c, geo, tr("Contact shadows"), yes_no(audio.map_contact_shadows), Row::ContactShadows.help_text()).0 {
+                audio.map_contact_shadows = !audio.map_contact_shadows;
             }
         }
         Row::MapBattles => {
@@ -3803,7 +3826,7 @@ mod tests {
     #[test]
     fn the_long_hints_are_behind_a_question_mark() {
         let with: Vec<Row> = Row::ALL.into_iter().filter(|r| r.help_text().is_some()).collect();
-        assert_eq!(with, vec![Row::GraphicsQuality, Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::Language, Row::Updates, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame]);
+        assert_eq!(with, vec![Row::GraphicsQuality, Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::Mist, Row::LiveWater, Row::Weather, Row::LivingMap, Row::GroundScatter, Row::ContactShadows, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::Language, Row::Updates, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame]);
         scene_help("Experience");
         assert_eq!(HELP_PINNED.with(|p| p.get()), Row::Experience.help_text());
         HELP_PINNED.with(|p| p.set(None));

@@ -331,6 +331,14 @@ pub struct Settings {
     /// Advanced, Razdor's, off by default: «Живая карта». Smoke rises from the chimneys, the mill
     /// sails turn, the flags wave and birds cross the explored map (`living`). Style only.
     pub map_living: bool,
+    /// Advanced, Razdor's, off by default: «Трава и кусты» (grass tufts, shrubs, pebbles and reeds on the ground of
+    /// the 2.5D views, `scatter`). Style only.
+    #[serde(default)]
+    pub map_scatter: super::scatter::Density,
+    /// Advanced, Razdor's, off by default: «Тени у подножия», a soft shadow under each tree, rock, building and army
+    /// in the 2.5D views (`scatter`). Style only.
+    #[serde(default)]
+    pub map_contact_shadows: bool,
     /// Advanced, Razdor's: «Частота анимации воды» (every frame by default), with «Живая вода» on: the moving
     /// water is redrawn every frame, every other or every third (`water::FrameRate`). Style only; flat map.
     pub map_water_rate: super::water::FrameRate,
@@ -411,7 +419,7 @@ pub fn must_request(asked: Option<i32>, want: i32) -> bool {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), bottom_bar_size: Default::default(), keep_xp_on_promotion: false, keep_formation: true, hit_shake: false, battle_marks: true, army_list: false, map_tilt: false, map_first_person: false, map_horizon: false, map_globe: false, map_eyes: false, map_third_tune: super::view25::THIRD_TUNE, map_first_tune: super::view25::FIRST_TUNE, map_auto_turn: false, map_light: Default::default(), map_light_cycle: 24, map_light_hour: 18, map_shadows: Default::default(), map_light_quality: None, map_mist: Default::default(), map_sprite_size: super::world_view::DEFAULT_SPRITE_SIZE, map_render_scale: 1.0, frame_cap: 0, map_twist: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, map_extended: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new(), map_live_water: false, map_weather: false, map_living: false, chronicle_summary: true, battery_saver: false, map_anim: Default::default(), map_water_rate: Default::default(), map_water_quality: Default::default(), record_game: true }
+        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), bottom_bar_size: Default::default(), keep_xp_on_promotion: false, keep_formation: true, hit_shake: false, battle_marks: true, army_list: false, map_tilt: false, map_first_person: false, map_horizon: false, map_globe: false, map_eyes: false, map_third_tune: super::view25::THIRD_TUNE, map_first_tune: super::view25::FIRST_TUNE, map_auto_turn: false, map_light: Default::default(), map_light_cycle: 24, map_light_hour: 18, map_shadows: Default::default(), map_light_quality: None, map_mist: Default::default(), map_sprite_size: super::world_view::DEFAULT_SPRITE_SIZE, map_render_scale: 1.0, frame_cap: 0, map_twist: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, map_extended: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new(), map_live_water: false, map_weather: false, map_living: false, map_scatter: Default::default(), map_contact_shadows: false, chronicle_summary: true, battery_saver: false, map_anim: Default::default(), map_water_rate: Default::default(), map_water_quality: Default::default(), record_game: true }
     }
 }
 
@@ -1252,6 +1260,19 @@ mod tests {
         let on = Settings { map_weather: true, ..Settings::default() };
         let back: Settings = serde_json::from_str(&serde_json::to_string(&on).unwrap()).unwrap();
         assert!(back.map_weather);
+    }
+
+    #[test]
+    fn scatter_and_contact_shadows_default_off_and_survive_serialization() {
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.map_scatter, super::super::scatter::Density::Off, "an older file: no grass, as before");
+        assert!(!old.map_contact_shadows);
+        assert_eq!(Settings::default().map_scatter, super::super::scatter::Density::Off);
+        assert!(!Settings::default().map_contact_shadows);
+        let on = Settings { map_scatter: super::super::scatter::Density::Many, map_contact_shadows: true, ..Settings::default() };
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&on).unwrap()).unwrap();
+        assert_eq!(back.map_scatter, super::super::scatter::Density::Many);
+        assert!(back.map_contact_shadows);
     }
 
     #[test]
