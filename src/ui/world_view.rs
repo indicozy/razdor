@@ -1783,9 +1783,6 @@ struct PickQuad {
     src: Option<PickSrc>,
 }
 
-/// The alpha a pick needs to hit: a texel at least this opaque.
-const PICK_ALPHA: u8 = 128;
-
 local! {
     /// The pickable sprites the tilted view drew this frame, in draw order (`draw_world_in` clears it, the
     /// sprites' pass records it). The pointer's test reads it the next frame, as the map's clicks do.
@@ -1838,14 +1835,15 @@ fn texel_uv(q: &[Vec2; 4], m: Vec2) -> Option<(f32, f32)> {
 }
 
 /// Whether the pick `q` hits at the window's pixel `m`, given that its quad holds `m`: a sprite drawn from a texture
-/// hits only where its texel is opaque ([`PICK_ALPHA`]); one with no mask, or no texel to look at, hits as its quad.
+/// hits only where its texel is opaque ([`super::sprite_alpha::OPAQUE_ALPHA`]); one with no mask, or no texel to look
+/// at, hits as its quad.
 fn opaque_hit(q: &PickQuad, m: Vec2) -> bool {
     let Some(s) = &q.src else { return true };
-    let Some(mask) = super::sprite_alpha::mask(s.key).filter(|k| k.w > 0 && k.h > 0) else { return true };
+    let Some(mask) = super::sprite_alpha::mask(s.key).filter(|k| k.width() > 0 && k.height() > 0) else { return true };
     let Some((u, v)) = texel_uv(&q.quad, m) else { return true };
-    let x = (s.src.x + u * s.src.w).floor().clamp(0.0, (mask.w - 1) as f32) as usize;
-    let y = (s.src.y + v * s.src.h).floor().clamp(0.0, (mask.h - 1) as f32) as usize;
-    mask.a[y * mask.w + x] >= PICK_ALPHA
+    let x = (s.src.x + u * s.src.w).floor().clamp(0.0, (mask.width() - 1) as f32) as usize;
+    let y = (s.src.y + v * s.src.h).floor().clamp(0.0, (mask.height() - 1) as f32) as usize;
+    mask.opaque(x, y)
 }
 
 /// Whether `m` lies in the convex quad `q` (its corners in order, either way round). A degenerate quad holds nothing.
@@ -8809,8 +8807,9 @@ mod pick_tests {
     /// A 4×4 texture's mask under `key`, opaque where `opaque` says (the tests give it, no GPU texture).
     fn masked(key: u64, opaque: impl Fn(usize, usize) -> bool) {
         let (w, h) = (4usize, 4usize);
-        let a = (0..w * h).map(|i| if opaque(i % w, i / w) { 255 } else { 0 }).collect();
-        super::super::sprite_alpha::register_mask(key, super::super::sprite_alpha::AlphaMask { w, h, a });
+        let a = (0..w * h).map(|i| if opaque(i % w, i / w) { 255 } else { 0 });
+        let mask = super::super::sprite_alpha::AlphaMask::from_alpha(w, h, a).expect("4x4 alphas");
+        super::super::sprite_alpha::register_mask(key, mask);
     }
 
     /// A pick of the square at 0,0 of side 40, drawn from the 4×4 texture `key` (none: the quad alone).
