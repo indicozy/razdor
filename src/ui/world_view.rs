@@ -3194,6 +3194,16 @@ struct FrameCtx {
     sun: Option<FormSun>,
 }
 
+/// A picture drawn under the night's light is drawn whole: the lit draw samples a box's edge texels differently from the
+/// whole sprite's (measured on card1: up to 46 levels at night with the boxes, 1 level whole). By day the box is exact.
+fn lit_whole(slot: Slot) -> Slot {
+    if lights::with_frame(|f| f.is_some_and(|f| f.night > 0.0)) {
+        Slot { rect: Rect::new(slot.base.x, slot.base.y, slot.full.x, slot.full.y), off: Vec2::ZERO, size: slot.full, ..slot }
+    } else {
+        slot
+    }
+}
+
 fn draw_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera, ctx: &FrameCtx) {
     let c = cam.cell_centre(o.tile);
     let base = vec2(c.x, c.y + cam.cell_size().y / 2.0);
@@ -3206,13 +3216,18 @@ fn draw_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera, ctx: &FrameCtx
             Some((lod, _)) => (lod, lod.decoration(o.class, o.sprite).unwrap_or(r)),
             None => (atlas, r),
         };
+        let r = lit_whole(r);
         if o.class == object_class::TREES {
             // The small trees and bushes sway: the quad's top corners move by the lean of
             // their phase, the bottom stays (0x4c99d0, engine.md §7).
             let (_, _, phase) = o.jitter;
             // «Анимация карты» scales the sway by its level (0 when the map is still, `map_anim::level`).
             let lean = razdor::rules::rng::tree_sway(ctx.clock, phase) * zoom * ctx.anim;
-            draw_leaning(&atlas.texture, &r, origin, zoom, lean);
+            // The swaying quad is the whole sprite: its box's corners shear differently from the sprite's, and under
+            // the sun's light that showed as isolated texels up to 114 levels apart (measured, card1). The trim saves
+            // nothing on the sway's own fill beyond the box's transparent margin, so the sprite is drawn whole.
+            let whole = Slot { rect: Rect::new(r.base.x, r.base.y, r.full.x, r.full.y), off: Vec2::ZERO, size: r.full, ..r };
+            draw_leaning(&atlas.texture, &whole, origin, zoom, lean);
             return;
         }
         frame_probe::sprite(r.size.x * zoom, r.size.y * zoom);
@@ -3377,6 +3392,11 @@ fn form_colour_in(sun: FormSun, p: Vec2, base: Color) -> Option<Color> {
 /// A picture's quad (its rectangle `src` of the atlas, drawn at `at` in `size`) with the sun's form shading at its
 /// four corners (`form_colour_in`; the colour is interpolated across the quad). Without the shading, `sharp::draw`.
 fn draw_picture_form(sun: Option<FormSun>, atlas: &Atlas, slot: &Slot, origin: Vec2, base: Color, zoom: f32) {
+    // Under the sun's shading the corners' colours are interpolated across the quad, and the shading clamps at the
+    // sprite's far edge: a box's corners interpolate differently from the whole sprite's, so the shaded quad is the
+    // whole sprite (the same texels; the trim saves the fill only where no sun shades the sprite). Measured on card1.
+    let whole = Slot { rect: Rect::new(slot.base.x, slot.base.y, slot.full.x, slot.full.y), off: Vec2::ZERO, size: slot.full, ..*slot };
+    let slot = if sun.is_some() { &whole } else { slot };
     let (src, at, size) = (slot.rect, origin + slot.off * zoom, slot.size * zoom);
     // The shading is the whole sprite's: its centre and half-size are the reference, as before the cut.
     let half = slot.full * 0.5;
@@ -3961,6 +3981,7 @@ fn draw_building(l: &Location, art: Option<&DtArt>, cam: &Camera, outlined: bool
     // The original draws just the sprite (RenderWorld_BuildingAndRest 0x4c9b5b), its owner
     // shown only on the minimap.
     if let Some((atlas, r)) = sprite {
+        let r = lit_whole(r);
         let origin = building_sprite_origin(l, r.full.x, r.full.y, cam);
         let (at, size) = (origin + r.off * zoom, r.size * zoom);
         let params = DrawTextureParams { dest_size: Some(size), source: Some(r.rect), ..Default::default() };
@@ -6955,7 +6976,7 @@ fn draw_building_windows(game: &Game, assets: &Assets, cam: &Camera, veil: Veil)
                 if let Some((_, r, cards)) = card_building(l, Some(art)).filter(|_| c.tilt.is_some()) {
                     let origin = building_sprite_origin(l, r.full.x, r.full.y, c);
                     draw_building_group(c, atlas, &r, cards, origin, zoom, foot, vis, None, false, None);
-                } else if let Some(r) = atlas.building(l.picture.0, l.picture.1) {
+                } else if let Some(r) = atlas.building(l.picture.0, l.picture.1).map(lit_whole) {
                     let at = building_sprite_origin(l, r.full.x, r.full.y, c) + r.off * zoom;
                     let size = r.size * zoom;
                     let params = DrawTextureParams { dest_size: Some(size), source: Some(r.rect), ..Default::default() };

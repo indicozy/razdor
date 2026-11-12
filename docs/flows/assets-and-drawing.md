@@ -412,8 +412,14 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   `object_sprite_origin`, the foot); a draw places the box at `origin + off * zoom`. The shading centre, the lean and the
   card and part meshes use `full` and `base` (a `Frame`), so they are the whole sprite's. The shadows have their own
   slots in the same texels (`DtArt::shadow_decoration` / `shadow_building`: the box the blur reaches), and the lit mask
-  covers each sprite's whole rectangle as before. The living body is cropped to the box. Not byte-identical: the quad
-  corners move by float rounding, so one or two levels change in a few hundred texels per frame (accepted by the owner).
+  covers each sprite's whole rectangle as before. The living body is cropped to the box.
+  **Where the box is not exact** (measured on card1 against origin/main, 48 shots, `RAZDOR_SCENE` «Другой берег» and РК3,
+  flat / 2.5D / first / eyes, near and whole map, plain / sun / night): the swaying trees (`draw_leaning`), a picture drawn
+  with the sun's form shading (`draw_picture_form` with a sun), and a picture drawn at night (`lit_whole`, the lights'
+  night factor) take the whole sprite rectangle. Each of these drew up to 114 levels apart at isolated texels with the
+  box. The shadow boxes are exact (full-box shadows changed nothing). With these rules every shot is within 2 levels
+  and has no pixel above 7 (PSNR at least 77 dB). The rest of the picture uses the box, so by day the difference is
+  float rounding of the quad's corners.
 - **Smaller map sprites** (`RAZDOR_SPRITE_LOD=1`, a developer switch, off by default): `DtArt::sprite_lod_atlas(d)`
   packs every map sprite at `1/d` (box filter, `downscale`), `d` = 2 under 12 screen px a cell, 4 under 6
   (`sprite_lod_divisor`); `draw_object` draws the decorations from it at the full sprite's place and size.
