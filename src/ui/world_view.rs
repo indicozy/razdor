@@ -4844,9 +4844,18 @@ fn formation_grid(game: &Game, assets: &Assets, troops: &[Troop], team: Team, x:
                 Some(t) => {
                     let face = Rect::new(cx + cs, cy + cs, cell - 2.0 * cs, cell - 2.0 * cs);
                     assets.draw_portrait(t.unit, team, face);
-                    // Wounds left by world spells.
+                    // Wounds left by world spells. A dead troop is judged by its death (`died_at`,
+                    // as the army window's `!alive()`), not by its hurt: a battle's death leaves
+                    // the hurt it had.
                     let max = razdor::rules::units::Stats::of_level(&game.content, t.unit, t.level).max_hp();
-                    super::chrome::wounds(face, max - t.hurt, max);
+                    let dead = !t.alive();
+                    super::chrome::wounds(face, if dead { 0 } else { max - t.hurt }, max);
+                    // Razdor's (owner's decision 2026-11-12, a player's report): the original's card
+                    // (0x4ca9f0) shows a corpse as all red; Razdor adds the army window's death veil
+                    // (493a64) so it reads as dead.
+                    if dead {
+                        super::chrome::death_veil(face);
+                    }
                 }
             }
             // Portrait, wounds and frame only: the original writes no level (0x4ca9f0).

@@ -412,6 +412,19 @@ fn hover_army_for_snapshot(app: &mut App) {
     };
     let tile = game.world.armies[i].tile(&game.world.map);
     game.pos = game.world.map.center((tile.0 + 2, tile.1));
+    // `RAZDOR_SCENE_ARMY_DEAD=1`: troop 1 is a corpse with its hurt at the maximum (the report's
+    // case), troop 2 a battle's corpse whose hurt stays as it was (0): their cards show dead.
+    if std::env::var("RAZDOR_SCENE_ARMY_DEAD").is_ok_and(|v| v == "1") {
+        let content = game.content.clone();
+        let troops = &mut game.world.armies[i].troops;
+        if let Some(t) = troops.get_mut(1) {
+            t.hurt = razdor::rules::ai::troop_max_hp(&content, t);
+            t.died_at = Some(0);
+        }
+        if let Some(t) = troops.get_mut(2) {
+            t.died_at = Some(0);
+        }
+    }
     // The hero's sight opens the fog round him, so the army is explored (its tooltip needs it).
     game.look_around();
     if let Some(p) = super::world_view::army_pointer(game, i) {
