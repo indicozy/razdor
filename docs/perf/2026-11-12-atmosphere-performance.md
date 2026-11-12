@@ -310,3 +310,25 @@ draws the copy below 12 (1/2) and 6 (1/4) screen pixels a cell. Not on main: the
   or more) and the shots differ by at most 2 levels (the atlas's height changed the texel rounding).
 - Not done: an Android build (GLES2 has the same `GL_MAX_TEXTURE_SIZE` enum; the query runs once when the atlas is
   made).
+
+### Sprite pass, steps 1+2: the static order in 16×16 chunks (backlog 1605; 2026-11-12, DROPPED, not pushed)
+
+What it did: steps 1 and 2 together. Objects in 16×16-cell chunks, each sorted by (key, index), and locations sorted;
+a heap merges the visible chunks, then the locations, then the figures. Non-turned views only. Pixels: byte-identical,
+96/96 PNGs against origin/main (`67c91112`, rebased). Tests: the static order and the chunked rectangle walk equal the
+per-frame sort (flat and 2.5D at yaw 0, several visible sets and rectangles, across chunk borders and past the edge).
+
+Speed: slower. World pass CPU, card1 (RTX 4060), base and combined build interleaved (round 1; round 2 of the second
+build was loaded for one case and is not quoted):
+
+| Case | base work / world ms | steps 1+2 work / world ms |
+|---|---|---|
+| «Другой берег» zoomed out, 2.5D | 2.90 / 2.74 (round 2: 2.97 / 2.79) | 3.32 / 3.11 |
+| «Другой берег» zoomed out, third person | 5.86 / 4.70 (round 2: 6.02 / 4.81) | 7.47 / 6.22 |
+| «Другой берег» whole map, 2.5D | 9.28 / 9.08 (round 2: 9.46 / 9.21) | 10.33 / 10.01 (round 2: 10.26 / 9.97) |
+| «Другой берег» whole map, third person | 14.29 / 12.33 (round 2: 14.30 / 12.35) | 15.84 / 13.79 (round 2: 15.88 / 13.85) |
+| РК3 close-up, 2.5D | 0.65 / 0.51 (round 2: 1.88 / 1.36, loaded) | 0.71 / 0.55 (round 2: 1.93 / 1.39) |
+
+Why it does not pay: the walk still visits every visible object each frame (the chunks only narrow the set), and the
+heap merge over the visible chunks costs more than the per-frame sort it replaced. Decision: dropped, per the rule that
+a step lands only with a measured gain. The commits are kept on the local branch `dropped/1605-steps-1-2`.
