@@ -394,3 +394,54 @@ Checks: `cargo clippy --release --all-targets -- -D warnings` clean; `cargo test
 (`cargo check --release --target aarch64-linux-android --bin razdor`, NDK 29) passes; the UI regression check: 162 ok, 4
 changed, all the «title-noinstall» cases, whose only difference from the baseline is the binary's path printed on the
 no-install screen (the same four change against the goldens on `origin/main`).
+
+## Sprite placement on the GPU: stage 1, the harness (backlog 1605, step 5)
+
+Question: can the GPU place a map sprite the way the CPU does, to within the tolerance the pictures need? Stage 1
+answers it with a test, no shader yet. `ui/sprite_gpu.rs` is the pure port (no macroquad drawing): the billboard's
+terms (`Billboard`: the ground's right and the camera's up, and the size, the shader's uniforms) and the picture's
+corners as world offsets from the foot (`quad_rel`). `Billboard::point` is `foot + size·rel.x·right − size·rel.y·up`.
+
+Why it is that small. A map sprite's base is its foot (`standing_map`, `standing_picked_map`, and the objects'
+`standing_map(cam, foot, foot, …)`), so `billboard_model_about` has no base term. The CPU's model maps a picture pixel
+`p` to `ground + right·k·(p.x − foot.x) − up·k·(p.y − foot.y)` with `k = size/scale`; `p − foot` is `scale` times a
+world offset (the cell geometry plus `plant_shift / PX` and the sprite's own pixels over `PX`), so the scale and the
+origin cancel. The world offsets are the same for every zoom, and the zoom-dependent part is only the sprite's pixel
+size (`zoom = scale/PX`), which the GPU takes from the camera.
+
+Test: `ui/world_view/gpu_placement_tests.rs` (`the_gpu_placement_matches_the_cpu_on_every_sprite`, skipped without
+`RAZDOR_DT_DIR`). The packing (`deco_packing`, `building_packing`) reads the map and the sprite sizes only. For each of
+the first three maps of the install: every decoration and every building, under flat and under 2.5D (pitches 35, 55,
+75; yaws 0, 37, 90, 180, 271), at scales 1.6, 6.4, 16, 32 and 48 (zoom 0.05 to 1.5). The CPU's corners are
+`standing_model` + `picture_quad` on the tilted space, as the draw places them; the GPU's are the port's. The foot's
+packed world point is also checked against the CPU's foot.
+
+Result (fasttest, RAZDOR_DT_DIR, 2,646,000 sprite-camera pairs): worst corner error 0.0027 px (2.5D, scale 48, pitch 35, yaw 90,
+a class 5 decoration); no pair above the 0.01 px bar.
+
+Two things the test had to handle, both about the comparison, not the port:
+- A sprite near the eye's depth plane projects to millions of pixels (the first run: 316,302 px and 38,810 pairs over
+  0.01 px, all far off the window). There the CPU and GPU agree to f32 rounding amplified by 1/w, and their boxes do
+  not meet the window. The test counts a pair only when either box meets the window with the cull's 16 px margin
+  (`OFF_WINDOW_MARGIN`): only those can change a pixel. A pair that is on the window in one and not the other is
+  always an error.
+- The foot is compared in world units, scaled by the camera, so the 0.01 px bar is in the same pixels as the draw.
+
+What stage 1 does not cover: the shader itself (macroquad's vertex stage, `Projection` as `window_matrix · view_proj`),
+the sway, the bent views (`bend`: the sheet's `Bend::point`), the eyes view (`eye_at`), the first person's near fade
+and the trailer's magnification. Those are stages 5b and 5c.
+
+Stages 5a–5c are not started in this commit. What the stage 1 work says about them, for the next session:
+- The vertex data needed per corner in 5a is the foot (2 floats), the corner offset (2), the atlas uv (2), the sharp
+  scale per texel (2, unitless, times the zoom), the detail visibility (1), the sway weight (1), and the form shading's
+  corner index (2 bits); the fog cell is not needed as an attribute, because it is the foot cell's and the shader can
+  read it from the foot's world point. macroquad's `Vertex` has 3 + 2 floats, 4 bytes of colour and 4 floats of
+  `normal`, so these fit only with packing (the colour bytes for the small values).
+- The draw order is the risk, not the placement. Batching by chunk (one draw per chunk, in chunk order) can change the
+  order of overlapping sprites from different chunks (reasoned from the sort key `sprite_key`, not measured). The order
+  that keeps the pictures is the global sorted order, with a draw per run of consecutive decorations between two
+  non-decoration items (buildings, armies, the hero, spells, ships). Runs are short where buildings are dense.
+- macroquad queues its draw calls and submits them at the end of the frame, so a custom miniquad draw with a persistent
+  buffer would run out of order. The only route inside macroquad is a `Mesh` per run, copied each frame: the saving is
+  the per-sprite math (the billboard, the cull, the fog and shade, the form colours, the sharp draw set-up), not the
+  copy. Whether that saves the 2.1 ms of zoomed-out placement is what 5a has to measure.

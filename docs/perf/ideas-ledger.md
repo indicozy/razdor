@@ -53,5 +53,5 @@ Machines: "4060" = RTX 4060 headless through VirtualGL (find its `/dev/dri/cardN
 | Since | Idea | Who / where | Expected |
 |---|---|---|---|
 | 2026-11-12 | 1605 step 3: conservative cull before the picture quad | sprite-pass agent | ≤0.6–1.2 ms zoomed out |
-| 2026-11-12 | 1605 step 5: GPU vertex buffers per chunk, the camera in the shader | after step 4 | removes most per-sprite placement (2–6 ms zoomed out) |
+| 2026-11-12 | 1605 step 5: GPU placement of the map sprites, the camera in the shader. Stage 1 (the placement port, a test): landed, worst corner error 0.0027 px over 2.6 M sprite-camera pairs (perf doc, step 5 stage 1). Stages 5a (draw order and per-sprite vertex data), 5b (sway), 5c (bent views): not started | sprite-pass agent | removes most per-sprite placement (2.1 ms zoomed out, 3.5–5.7 ms whole map) |
 | 2026-11-12 | Art sheets and window pictures kept for the whole session (`DtArt`, `chrome::visual_images`) | not started | ~40–60 MB on phones (estimate) |

@@ -8280,6 +8280,9 @@ mod card_tests {
 }
 
 #[cfg(test)]
+mod gpu_placement_tests;
+
+#[cfg(test)]
 mod tilt_tests {
     use super::*;
     use razdor::rules::content::{Content, HeroClass};

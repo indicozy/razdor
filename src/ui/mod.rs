@@ -61,6 +61,8 @@ pub mod shadow;
 pub mod sharp;
 pub mod sprite_alpha;
 pub mod sprite_fog;
+#[cfg(test)]
+pub mod sprite_gpu;
 pub mod snapshot;
 pub mod spell_badges;
 pub mod spellbook;
