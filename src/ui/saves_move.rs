@@ -30,8 +30,6 @@ use macroquad::prelude::*;
 /// The file in the app's folder that keeps the decision (see the module doc).
 const MARKER: &str = "saves-move";
 
-/// The popup's text: what changed, and what to pick.
-
 /// What the marker says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Decision {
