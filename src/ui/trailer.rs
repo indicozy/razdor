@@ -748,6 +748,13 @@ fn apply_look(s: &mut Settings, look: &[(String, String)]) {
 /// The GL renderer's name (`GL_RENDERER`), for the run's log: the GPU that draws the frames (under
 /// VirtualGL, the EGL device it opened). Empty when the library cannot be read. Called once the
 /// context is current, at the first frame.
+#[cfg(not(unix))]
+fn gl_renderer() -> String {
+    // Razdor's Windows builds: libc has no dlopen there (the name only goes to the trailer's log).
+    String::new()
+}
+
+#[cfg(unix)]
 fn gl_renderer() -> String {
     type GlGetString = unsafe extern "C" fn(u32) -> *const std::ffi::c_char;
     const GL_RENDERER: u32 = 0x1F01;

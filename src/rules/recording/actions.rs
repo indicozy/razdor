@@ -750,6 +750,8 @@ const NOT_PLAYER_BATTLE: &[&str] = &[
     "skip", "skip_prediction", "set_max_stakes", "max_choice_with", "max_choice",
     "max_step", "play_max_move", "apply_max",
     "fit_to_formation", "set_unit_battle_disabled", "set_strength_defence",
+    // The names in another language (F2 during a battle): display only, no game state.
+    "retitle",
 ];
 
 /// The methods of `file` taking `&mut self` (`pub fn`), with whether their body records an action.
