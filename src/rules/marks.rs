@@ -16,9 +16,10 @@ use super::save;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Level {
-    /// No cheat, no experimental rule, every gameplay setting the original's.
+    /// No cheat, no experimental rule, every gameplay setting the original's. A run whose history
+    /// is unknown (a save from before the marks) is green too, unless its save shows otherwise.
     Green,
-    /// A gameplay setting that is not the original's (or a run whose history is unknown).
+    /// A gameplay setting that is not the original's.
     Grey,
     /// An experimental scenario rule is on.
     Yellow,
@@ -38,7 +39,8 @@ pub enum Reason {
     Rule(String),
     /// The gameplay setting's name, as the catalog has it («Unit battle participation»).
     Setting(String),
-    /// The run's history is unknown: a save from before the mark.
+    /// The run's history is unknown: a save from before the mark. Green (the owner's decision,
+    /// 2026-11-13: an old game counts as played fairly); the tooltip says the history is unknown.
     Unknown,
 }
 
@@ -55,9 +57,11 @@ impl RunMark {
         RunMark { level: Level::Green, reason: Reason::Honest }
     }
 
-    /// A save from before the mark: its history is unknown, so it reaches at most grey.
+    /// A save from before the mark: its history is unknown. The owner's decision (2026-11-13): it
+    /// is green, as a fair run; only what the run uses after that, or what its save shows (a cheat,
+    /// an experimental rule, a changed setting), lowers it.
     pub fn unknown_history() -> RunMark {
-        RunMark { level: Level::Grey, reason: Reason::Unknown }
+        RunMark { level: Level::Green, reason: Reason::Unknown }
     }
 
     /// Raises the mark to `level` for `reason` when that is worse than it is now. Sticky: a
@@ -132,9 +136,16 @@ impl Records {
         serde_json::to_string_pretty(self).unwrap_or_default()
     }
 
-    /// The records of a file's text; a damaged or missing file reads as none.
+    /// The records of a file's text; a damaged or missing file reads as none. A record of an unknown
+    /// history written grey (before the owner's decision of 2026-11-13) reads green, as it now is.
     pub fn from_json(text: &str) -> Records {
-        serde_json::from_str(text).unwrap_or_default()
+        let mut records: Records = serde_json::from_str(text).unwrap_or_default();
+        for record in records.maps.values_mut() {
+            if record.mark.reason == Reason::Unknown && record.mark.level == Level::Grey {
+                record.mark.level = Level::Green;
+            }
+        }
+        records
     }
 
     /// The file `marks.json` in the saves' folder (`save::default_dir`), if there is one.
@@ -229,11 +240,24 @@ mod tests {
     }
 
     #[test]
-    fn an_old_save_reaches_at_most_grey() {
+    fn an_old_save_is_green_until_the_run_uses_something() {
         let mut old = RunMark::unknown_history();
+        assert_eq!(old.level, Level::Green, "the owner's decision: unknown history is a fair run");
+        assert!(old.worsen(Level::Grey, Reason::Setting("Unit battle participation".into())));
         assert_eq!(old.level, Level::Grey);
         assert!(!old.worsen(Level::Green, Reason::Honest), "green is never reached again");
         assert_eq!(old.level, Level::Grey);
+    }
+
+    #[test]
+    fn a_grey_record_of_an_unknown_history_reads_green_from_the_file() {
+        let mut r = Records::default();
+        r.maps.insert("рк1-начало пути".into(), Record { mark: mark(Level::Grey, Reason::Unknown), date: "2026-11-01".into() });
+        let back = Records::from_json(&r.to_json());
+        assert_eq!(back.get("РК1-Начало пути").map(|r| r.mark.level), Some(Level::Green));
+        let mut kept = Records::default();
+        kept.record_victory("РК2-Дикие пустоши", &mark(Level::Grey, Reason::Setting("Unit battle participation".into())), "2026-11-02");
+        assert_eq!(Records::from_json(&kept.to_json()), kept, "other records are kept as they are");
     }
 
     #[test]
@@ -311,7 +335,10 @@ mod tests {
         assert!(loaded.run_mark.is_none());
         assert_eq!(loaded.run_mark(), RunMark::unknown_history());
         loaded.note_settings(None);
-        assert_eq!(loaded.run_mark().level, Level::Grey, "unknown history never reads green");
+        assert_eq!(loaded.run_mark().level, Level::Green, "unknown history alone is green");
+        let mut changed: Game = serde_json::from_value(old.clone()).unwrap();
+        changed.note_settings(Some("Unit battle participation"));
+        assert_eq!(changed.run_mark(), mark(Level::Grey, Reason::Setting("Unit battle participation".into())), "a changed setting still makes it grey");
         // A save that records a cheat or a rule keeps that, as its history is known.
         let mut cheated = old.clone();
         cheated["cheats"]["used"] = serde_json::json!(true);
@@ -323,6 +350,24 @@ mod tests {
         let mut ruled: Game = serde_json::from_value(ruled).unwrap();
         ruled.note_settings(None);
         assert_eq!(ruled.run_mark(), mark(Level::Yellow, Reason::Rule("Six equipment cells".into())));
+    }
+
+    /// The owner's decision (2026-11-13): an old save with nothing else is green; one that records a
+    /// cheat is red.
+    #[test]
+    fn an_old_save_with_nothing_else_is_green_and_a_recorded_cheat_is_red() {
+        let plain = game(ExperimentalRules::default());
+        let mut old = serde_json::to_value(&plain).unwrap();
+        old.as_object_mut().unwrap().remove("run_mark");
+        let mut clean: Game = serde_json::from_value(old.clone()).unwrap();
+        clean.note_settings(None);
+        assert_eq!(clean.run_mark(), RunMark::unknown_history());
+        assert_eq!(clean.run_mark().level, Level::Green);
+        let mut cheated = old;
+        cheated["cheats"]["used"] = serde_json::json!(true);
+        let mut cheated: Game = serde_json::from_value(cheated).unwrap();
+        cheated.note_settings(None);
+        assert_eq!(cheated.run_mark().level, Level::Red);
     }
 
     /// A save from before the parity switches (backlog 1601): the six keys are missing, so Razdor's

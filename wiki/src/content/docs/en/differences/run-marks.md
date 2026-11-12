@@ -18,7 +18,7 @@ Marks progress from worst to best:
 *   **Grey**: gameplay settings differ from the originals. The tooltip indicates the first modified setting.
 *   **Green**: "Completed honestly." No cheats, experimental rules, or setting changes were used.
 
-If you are playing from a save file created before the marks appeared, the completion history is unknown: the mark will be no higher than grey, unless the save itself contains cheats or experimental rules.
+If you are playing from a save file created before the marks appeared, the completion history is unknown. Such a game counts as completed honestly: the mark is green, unless the save itself contains cheats (red), experimental rules (yellow) or changed gameplay settings (grey). The tooltip then says that the game's history is unknown.
 
 :::note
 If you lose a card, no mark is placed.

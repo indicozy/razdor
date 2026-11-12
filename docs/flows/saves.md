@@ -234,8 +234,10 @@ saved with the run. It is brought up to date every frame from the settings
 `ui::audio::Settings::gameplay_differs_from_original`), on every load, and by the cheat console
 (`Game::note_cheat`). A load or a battle's restart in the same run keeps the worse mark
 (`Game::keep_run_mark`); a new game, a campaign's next map and «Рестарт» of the map start a new run.
-A save from before the mark has no `run_mark`: its history is unknown, so it reads grey at most,
-except where the save itself shows a cheat (`cheats.used`) or an experimental rule. A parity switch
+A save from before the mark has no `run_mark`: its history is unknown, and it reads green (the owner's
+decision, 2026-11-13: a fair run), except where the save itself shows a cheat (`cheats.used`, red), an
+experimental rule (yellow) or a changed setting (grey). Its tooltip still says the history is unknown
+(`new_game::mark_text_in`). Records written grey for an unknown history are read as green (`Records::from_json`). A parity switch
 that the save lacks (inherited, `ExperimentalRules::inherited`) is on but does not make the run yellow.
 
 The player's best mark per map (and its date) is `marks.json` beside `settings.json`
