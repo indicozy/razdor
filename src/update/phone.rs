@@ -114,9 +114,10 @@ mod android {
         }
     }
 
-    /// The body of `url`, through a file in the cache folder.
+    /// The body of `url`, through a file in the cache folder. Razdor's own: the file has a name of
+    /// its own (`update::fetch_temp_name`), so fetches at the same time never share it.
     pub fn get(url: &str, seconds: u32) -> Result<Vec<u8>, String> {
-        let path = cache_dir()?.join("razdor-fetch");
+        let path = cache_dir()?.join(crate::update::fetch_temp_name());
         let body = download(url, &path, seconds).and_then(|()| std::fs::read(&path).map_err(|e| e.to_string()));
         let _ = std::fs::remove_file(&path);
         body

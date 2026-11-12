@@ -27,6 +27,7 @@ mod phone;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
@@ -361,6 +362,16 @@ fn curl() -> Command {
     let mut c = curl_base();
     c.arg("-f");
     c
+}
+
+/// A temp file name for one phone fetch (`phone::get`), unique in this process: `razdor-fetch-<pid>-<n>`
+/// with `n` counting the calls. Razdor's own: on the phones the launch's catalog and the update check
+/// fetch at the same time, and a shared file name let one read the other's body (the catalog failed
+/// to parse, the check found no file, and the game was not downloaded by itself).
+#[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
+pub(crate) fn fetch_temp_name() -> String {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    format!("razdor-fetch-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed))
 }
 
 /// The body of `url`, or why not.
@@ -855,6 +866,16 @@ pub fn open_in_browser(url: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_phone_fetch_gets_its_own_temp_name() {
+        let threads: Vec<_> = (0..8).map(|_| std::thread::spawn(|| (0..50).map(|_| fetch_temp_name()).collect::<Vec<_>>())).collect();
+        let names: std::collections::HashSet<String> = threads.into_iter().flat_map(|t| t.join().unwrap()).collect();
+        assert_eq!(names.len(), 400, "no two fetches, on any thread, share a file");
+        let one = fetch_temp_name();
+        assert!(one.starts_with(&format!("razdor-fetch-{}-", std::process::id())), "{one}");
+        assert_ne!(one, fetch_temp_name());
+    }
 
     #[test]
     fn versions_parse_and_order_as_numbers() {
