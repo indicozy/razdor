@@ -130,7 +130,12 @@ pub fn version_folder() -> String {
 /// in the platform's data folder), or `None` where the cache is off (snapshot runs,
 /// `RAZDOR_NO_PICTURE_CACHE`) or there is no such folder.
 fn root_dir() -> Option<PathBuf> {
-    if std::env::var_os("RAZDOR_SNAPSHOT").is_some() || std::env::var_os("RAZDOR_NO_PICTURE_CACHE").is_some() {
+    if std::env::var_os("RAZDOR_NO_PICTURE_CACHE").is_some() {
+        return None;
+    }
+    // The phone path forced on the desktop (`RAZDOR_DROP_PICTURES=1`) needs the cache to drop
+    // pictures from the store, so its snapshot runs keep one too (the frames are the same).
+    if std::env::var_os("RAZDOR_SNAPSHOT").is_some() && std::env::var_os("RAZDOR_DROP_PICTURES").is_none() {
         return None;
     }
     crate::platform::cache_dir().map(|d| d.join("pictures"))

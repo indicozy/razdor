@@ -82,10 +82,18 @@ pub fn set_install(dir: PathBuf) {
         WINDOWS_AHEAD.iter().filter_map(|n| Some((find_path(&dir, &format!("Graphics/{n}")).ok()?, *n))).collect();
     // The decode store decodes them in order, in the background; the lit ones are uploaded
     // a few per frame ([`warm`]) so that their first use finds the texture made.
-    preload::preload(ahead.iter().map(|(p, _)| p.clone()).collect());
+    let paths: Vec<PathBuf> = ahead.iter().map(|(p, _)| p.clone()).collect();
     let mut warm: Vec<(PathBuf, String)> = ahead.into_iter().filter(|(_, n)| n.ends_with(".lit")).map(|(p, n)| (p, n.to_string())).collect();
     warm.extend(other_lit_windows(&dir));
-    WARM.with(|w| *w.borrow_mut() = warm.into());
+    // Each queued upload holds its picture until the texture is made ([`warm`]). Held before the
+    // decodes start, so that none of them can leave the store first.
+    let held: Vec<PathBuf> = warm.iter().map(|(p, _)| p.clone()).collect();
+    preload::hold(&held);
+    preload::preload(paths);
+    let old = WARM.with(|w| std::mem::replace(&mut *w.borrow_mut(), warm.into()));
+    for (path, _) in &old {
+        preload::release(path);
+    }
     CHROME.with(|c| {
         *c.borrow_mut() = Some(Chrome { dir, textures: HashMap::new(), visual_textures: HashMap::new(), visual_images: HashMap::new(), animations: HashMap::new(), texts: None, english_texts: None, english_fallback: None })
     });
@@ -254,8 +262,10 @@ pub fn warm(budget_ms: f64) -> f64 {
         preload::upload_within_budget(
             &mut queue,
             |(path, _)| preload::is_ready(path),
-            |(_, rel)| {
+            |(path, rel)| {
                 let _ = art(rel, Fx::Plain);
+                // The upload is made: its hold is given back ([`preload::hold`]).
+                preload::release(path);
             },
             || start.elapsed().as_secs_f64() * 1000.0,
             budget_ms,

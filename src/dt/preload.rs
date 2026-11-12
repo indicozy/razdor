@@ -7,14 +7,20 @@
 //!
 //! Only plain RGBA leaves this module. Textures are made on the main thread (macroquad), so
 //! callers upload what is ready there (see `chrome::warm`).
+//!
+//! On the phones (and with the `RAZDOR_DROP_PICTURES=1` test switch) a picture leaves the store
+//! once nothing holds it and its cache entry exists: its pixels are then in the GPU's shared
+//! memory, and a later need re-reads the cache ([`kept`], [`hold`], [`release`]). The desktop
+//! keeps every picture, as before.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, LazyLock, Mutex, MutexGuard};
 
 use super::gfx::{self, Image};
 use super::picture_cache;
 use super::DtError;
+use crate::platform;
 
 /// Most decoded picture bytes the queue keeps: the same caps as the disk cache (1 GiB on the
 /// desktop, 256 MiB on the phones, [`picture_cache::CAP_BYTES`]). A queued picture that would go
@@ -51,9 +57,25 @@ struct Store {
     queued_done: usize,
     /// The end of the queue is logged once per [`preload`] round.
     done_logged: bool,
+    /// Phones (or the test switch): a picture nothing holds leaves the store once its cache entry
+    /// exists ([`kept`]). Set once, from [`drops_by_default`].
+    drop_pictures: bool,
+    /// Pending builds per picture ([`hold`]): a held picture stays in the store.
+    holds: HashMap<PathBuf, usize>,
+    /// Pictures whose cache entry exists: read from it or written to it. Phones only.
+    cached: HashSet<PathBuf>,
+    /// Pictures that have left the store at least once: their next read is a re-read of the cache.
+    dropped: HashSet<PathBuf>,
 }
 
-static STORE: LazyLock<Mutex<Store>> = LazyLock::new(Default::default);
+/// Whether pictures leave the store once their cache entry exists: on the phones, or with
+/// `RAZDOR_DROP_PICTURES=1`, the switch that runs the phone path on the desktop (for tests and
+/// measurements).
+fn drops_by_default() -> bool {
+    platform::MOBILE || std::env::var_os("RAZDOR_DROP_PICTURES").is_some_and(|v| v.to_str() == Some("1"))
+}
+
+static STORE: LazyLock<Mutex<Store>> = LazyLock::new(|| Mutex::new(Store { drop_pictures: drops_by_default(), ..Default::default() }));
 /// Signalled when a picture becomes ready or a worker has work.
 static CHANGED: Condvar = Condvar::new();
 
@@ -69,12 +91,56 @@ pub fn is_ready(path: &Path) -> bool {
 /// Drops every decoded picture from the store: the install's files were replaced (a game import,
 /// `dt::game_import`), and the store is keyed by path alone. Pictures still being decoded are
 /// stored only if they were started after this call (the generation). The persistent cache keys
-/// on the files' modification times, so it misses for the new files on its own.
+/// on the files' modification times, so it misses for the new files on its own. The holds go
+/// too: the queues that made them belong to the old install.
 pub fn forget_ready() {
     let mut s = lock();
     s.ready.clear();
     s.ready_bytes = 0;
     s.generation += 1;
+    s.holds.clear();
+    s.cached.clear();
+    s.dropped.clear();
+}
+
+/// Whether a picture stays in the store: while a pending build holds it, or until its cache entry
+/// exists (then a later need re-reads the cache). Without the drop switch (the desktop), always.
+fn kept(s: &Store, path: &Path) -> bool {
+    !s.drop_pictures || s.holds.get(path).is_some_and(|n| *n > 0) || !s.cached.contains(path)
+}
+
+/// Takes `path` out of the store's ready pictures: its next need re-reads the cache.
+fn drop_ready(s: &mut Store, path: &Path) {
+    if let Some(old) = s.ready.remove(path) {
+        s.ready_bytes -= frames_bytes(&old);
+        s.dropped.insert(path.to_path_buf());
+    }
+}
+
+/// Marks each picture of `paths` as needed by one pending build (a queue's entry, say): while any
+/// hold stands, the picture stays in the store, even on the phones. Each hold is given back by one
+/// [`release`]. Holding does not decode: a picture not in the store yet is decoded when it is
+/// asked for or queued ([`preload`]).
+pub fn hold(paths: &[PathBuf]) {
+    let mut s = lock();
+    for p in paths {
+        *s.holds.entry(p.clone()).or_insert(0) += 1;
+    }
+}
+
+/// Gives back one [`hold`] of `path`, once the build that needed it has made its texture. On the
+/// phones the picture leaves the store now if nothing else holds it and its cache entry exists.
+pub fn release(path: &Path) {
+    let mut s = lock();
+    if let Some(n) = s.holds.get_mut(path) {
+        *n -= 1;
+        if *n == 0 {
+            s.holds.remove(path);
+        }
+    }
+    if !kept(&s, path) {
+        drop_ready(&mut s, path);
+    }
 }
 
 /// The ready pictures: how many, and their RGBA bytes (the decode store's memory).
@@ -114,8 +180,13 @@ pub fn decode_shared(path: &Path) -> Result<Arc<Vec<Image>>, DtError> {
         }
         s.pending.insert(path.to_path_buf(), State::Running);
         let generation = s.generation;
+        let reread = s.dropped.contains(path);
         drop(s);
+        let started = std::time::Instant::now();
         let loaded = load(path);
+        if reread && crate::diag::profiling() {
+            crate::diag!("slow load: re-read {} from the picture cache, {:.1} ms (dropped from the store)", path.display(), started.elapsed().as_secs_f64() * 1000.0);
+        }
         finish(path, loaded, generation, false)
     })
 }
@@ -201,36 +272,56 @@ fn worker() {
     }
 }
 
+/// Where a loaded picture's frames came from.
+enum Source {
+    /// The persistent cache had them: its entry exists.
+    Cache,
+    /// Decoded from the install, due to be written to this cache entry (folder, key), if the cache is on.
+    Decoded(Miss),
+}
+
 /// The frames of `path`: from the persistent cache if it has them, else decoded (and due to be
-/// written to the cache).
-fn load(path: &Path) -> Result<(Vec<Image>, Miss), DtError> {
+/// written to the cache). A later need of a dropped picture comes through here too: a re-read of
+/// its cache entry, no decode.
+fn load(path: &Path) -> Result<(Vec<Image>, Source), DtError> {
     let cache = picture_cache::cache_dir().zip(picture_cache::source_key(path));
     if let Some((dir, key)) = &cache {
         if let Some(frames) = picture_cache::read(dir, *key) {
-            return Ok((frames, None));
+            return Ok((frames, Source::Cache));
         }
     }
     let frames = gfx::decode_uncached(path)?;
-    Ok((frames, cache))
+    Ok((frames, Source::Decoded(cache)))
 }
 
-/// Stores a loaded picture as ready (unless [`forget_ready`] ran since `generation` was taken),
-/// wakes the waiters and writes a decoded one to the cache. A queued picture (`queued`) is not
-/// stored past [`default_cap`]: the queue is dropped then.
-fn finish(path: &Path, loaded: Result<(Vec<Image>, Miss), DtError>, generation: u64, queued: bool) -> Result<Arc<Vec<Image>>, DtError> {
+/// Stores a loaded picture as ready (unless [`forget_ready`] ran since `generation` was taken, or
+/// [`kept`] says nothing holds it on the phones), wakes the waiters and writes a decoded one to the
+/// cache. A queued picture (`queued`) is not stored past [`default_cap`]: the queue is dropped then.
+fn finish(path: &Path, loaded: Result<(Vec<Image>, Source), DtError>, generation: u64, queued: bool) -> Result<Arc<Vec<Image>>, DtError> {
     let mut s = lock();
     s.pending.remove(path);
     let current = s.generation == generation;
-    let out = loaded.map(|(frames, miss)| {
+    let out = loaded.map(|(frames, source)| {
         let bytes = frames_bytes(&frames);
         let a = Arc::new(frames);
-        if current && (!queued || fits(s.ready_bytes, bytes, default_cap())) {
-            if let Some(old) = s.ready.insert(path.to_path_buf(), a.clone()) {
-                s.ready_bytes -= frames_bytes(&old);
+        let mut to_write = None;
+        match source {
+            Source::Cache => {
+                if current && s.drop_pictures {
+                    s.cached.insert(path.to_path_buf());
+                }
             }
-            s.ready_bytes += bytes;
+            Source::Decoded(miss) => to_write = miss,
+        }
+        if current && (!queued || fits(s.ready_bytes, bytes, default_cap())) {
             if queued {
                 s.queued_done += 1;
+            }
+            if kept(&s, path) {
+                if let Some(old) = s.ready.insert(path.to_path_buf(), a.clone()) {
+                    s.ready_bytes -= frames_bytes(&old);
+                }
+                s.ready_bytes += bytes;
             }
         } else if current && queued {
             for p in std::mem::take(&mut s.queue) {
@@ -238,14 +329,35 @@ fn finish(path: &Path, loaded: Result<(Vec<Image>, Miss), DtError>, generation: 
             }
             crate::diag!("art ahead: the {} MiB cap is reached, the rest of the queue decodes on demand", default_cap() >> 20);
         }
-        if let Some((dir, key)) = miss {
+        if let Some((dir, key)) = to_write {
             let frames = a.clone();
-            let _ = std::thread::Builder::new().name("art cache".into()).spawn(move || picture_cache::write(&dir, key, &frames));
+            let mark = s.drop_pictures.then(|| path.to_path_buf());
+            let _ = std::thread::Builder::new().name("art cache".into()).spawn(move || {
+                picture_cache::write(&dir, key, &frames);
+                if let Some(path) = mark {
+                    if picture_cache::entry_path(&dir, key).is_file() {
+                        mark_cached(&path, generation);
+                    }
+                }
+            });
         }
         a
     });
     CHANGED.notify_all();
     out
+}
+
+/// The cache entry of `path` now exists (written in the background, see [`finish`]): on the phones a
+/// picture nothing holds leaves the store. Ignored after [`forget_ready`].
+fn mark_cached(path: &Path, generation: u64) {
+    let mut s = lock();
+    if s.generation != generation {
+        return;
+    }
+    s.cached.insert(path.to_path_buf());
+    if !kept(&s, path) {
+        drop_ready(&mut s, path);
+    }
 }
 
 #[cfg(test)]
@@ -254,6 +366,7 @@ mod tests {
 
     #[test]
     fn forgetting_drops_the_store_and_a_decode_started_before_is_not_kept() {
+        let _tests = store_test();
         let path = PathBuf::from("/razdor-test/forget-ready.lit");
         lock().ready.insert(path.clone(), Arc::new(Vec::new()));
         assert!(is_ready(&path));
@@ -262,12 +375,133 @@ mod tests {
         // A decode that started before the forget (a swap in between) is handed back, not stored.
         let before = lock().generation;
         forget_ready();
-        let _ = finish(&path, Ok((Vec::new(), None)), before, false);
+        let _ = finish(&path, Ok((Vec::new(), Source::Decoded(None))), before, false);
         assert!(!is_ready(&path));
         // One started after it is stored as usual.
         let after = lock().generation;
-        let _ = finish(&path, Ok((Vec::new(), None)), after, true);
+        let _ = finish(&path, Ok((Vec::new(), Source::Decoded(None))), after, true);
         assert!(is_ready(&path));
+        forget_ready();
+    }
+
+    /// The tests that look at the one store take this in turn: each one sets its mode and its pictures.
+    static STORE_TESTS: Mutex<()> = Mutex::new(());
+
+    fn store_test() -> MutexGuard<'static, ()> {
+        STORE_TESTS.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The store in the phones' mode, for one test: the mode is put back when the guard drops.
+    struct PhoneMode {
+        _tests: MutexGuard<'static, ()>,
+        was: bool,
+    }
+
+    impl PhoneMode {
+        fn on() -> PhoneMode {
+            let tests = store_test();
+            let was = std::mem::replace(&mut lock().drop_pictures, true);
+            PhoneMode { _tests: tests, was }
+        }
+    }
+
+    impl Drop for PhoneMode {
+        fn drop(&mut self) {
+            lock().drop_pictures = self.was;
+        }
+    }
+
+    fn frames_of(v: u8) -> Vec<Image> {
+        vec![Image { width: 2, height: 2, rgba: vec![v; 16] }]
+    }
+
+    /// The phones' rule: a picture is dropped once its last hold is released and its cache entry
+    /// exists; while a hold stands, or with no cache entry, it is kept.
+    #[test]
+    fn a_picture_is_dropped_after_its_last_build_and_kept_while_one_is_pending() {
+        let _mode = PhoneMode::on();
+        let path = PathBuf::from("/razdor-test/phone-rule.lit");
+        forget_ready();
+        // Two pending builds hold it: a decode from the install, written to the cache.
+        hold(&[path.clone(), path.clone()]);
+        let g = lock().generation;
+        let _ = finish(&path, Ok((frames_of(7), Source::Decoded(None))), g, false);
+        assert!(is_ready(&path), "held: kept, even with no cache entry");
+        // The cache entry appears (the writer's mark): still held, still kept.
+        mark_cached(&path, g);
+        assert!(is_ready(&path), "held: kept after the cache entry exists");
+        release(&path);
+        assert!(is_ready(&path), "one build still pending: kept");
+        release(&path);
+        assert!(!is_ready(&path), "the last build made its texture: dropped");
+        assert_eq!(stored().0, 0, "the bytes are given back");
+        // A later need re-reads the cache (here: a cache hit) and the picture is kept again.
+        let back = finish(&path, Ok((frames_of(7), Source::Cache)), g, false).expect("re-read");
+        assert_eq!(back[0].rgba, vec![7; 16], "the same bytes");
+        assert!(!is_ready(&path), "not held and cached: the store keeps no copy, the caller has it");
+        forget_ready();
+    }
+
+    /// A picture with no cache entry (cache off, or the folder full) is kept whatever holds it
+    /// leaves: nothing else could give it back.
+    #[test]
+    fn a_picture_with_no_cache_entry_is_kept_on_the_phones() {
+        let _mode = PhoneMode::on();
+        let path = PathBuf::from("/razdor-test/phone-no-cache.lit");
+        forget_ready();
+        let g = lock().generation;
+        let _ = finish(&path, Ok((frames_of(3), Source::Decoded(None))), g, false);
+        release(&path);
+        assert!(is_ready(&path));
+        forget_ready();
+    }
+
+    /// The desktop keeps every picture: no drop, whatever is released or cached.
+    #[test]
+    fn the_desktop_never_drops() {
+        let _tests = store_test();
+        let path = PathBuf::from("/razdor-test/desktop-keeps.lit");
+        let was = std::mem::replace(&mut lock().drop_pictures, false);
+        forget_ready();
+        let g = lock().generation;
+        hold(std::slice::from_ref(&path));
+        let _ = finish(&path, Ok((frames_of(5), Source::Cache)), g, false);
+        mark_cached(&path, g);
+        release(&path);
+        release(&path);
+        assert!(is_ready(&path), "the desktop keeps it");
+        assert!(!lock().dropped.contains(&path));
+        forget_ready();
+        lock().drop_pictures = was;
+    }
+
+    /// The pictures of the player's install: a picture dropped on the phones and read again from the
+    /// cache gives the same bytes as the on-demand decode, and the re-read is counted as one. Skipped
+    /// without `RAZDOR_DT_DIR`.
+    #[test]
+    fn a_dropped_picture_reads_back_the_same_bytes() {
+        let Some((_, paths)) = install_pictures() else { return };
+        let _mode = PhoneMode::on();
+        let Some(path) = paths.first() else { return };
+        forget_ready();
+        let on_demand = gfx::decode_uncached(path).expect("decodes");
+        // Its first decode writes the cache entry in the background: wait for it, then drop it.
+        let first = decode_shared(path).expect("decodes through the store");
+        assert!(*first == on_demand);
+        for _ in 0..200 {
+            if lock().cached.contains(path) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(lock().cached.contains(path), "the cache entry is written");
+        drop(first);
+        release(path);
+        assert!(!is_ready(path), "nothing holds it and it is cached: dropped");
+        let again = decode_shared(path).expect("re-read");
+        assert!(*again == on_demand, "the re-read is the same picture");
+        // Its cache entry is there now, so it is not kept again (a hit is handed back, not stored).
+        assert!(!is_ready(path));
         forget_ready();
     }
 
@@ -332,6 +566,7 @@ mod tests {
     /// and the disk cache returns the same pixels. Skipped without `RAZDOR_DT_DIR`.
     #[test]
     fn stored_pictures_are_the_on_demand_decode() {
+        let _tests = store_test();
         let Some((_, paths)) = install_pictures() else { return };
         assert!(!paths.is_empty());
         preload(paths.clone());

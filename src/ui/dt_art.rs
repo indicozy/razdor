@@ -478,7 +478,6 @@ impl DtArt {
         if let Ok(graphics) = self.install.file("Graphics") {
             graphics_files(&graphics, &mut paths);
         }
-        preload::preload(paths);
 
         let mut warm: VecDeque<(PathBuf, Warm)> = VecDeque::new();
         for code in 0..TERRAIN_TEXTURES.len() as u8 {
@@ -492,7 +491,15 @@ impl DtArt {
         if let Some(p) = file(ITEM_ICONS) {
             warm.extend(self.install.artefacts.iter().map(|a| (p.clone(), Warm::Item(a.id))));
         }
-        *self.warm.borrow_mut() = warm;
+        // Each queued upload holds its picture until the texture is made ([`DtArt::warm`]). Held
+        // before the decodes start, so that none of them can leave the store first.
+        let held: Vec<PathBuf> = warm.iter().map(|(p, _)| p.clone()).collect();
+        preload::hold(&held);
+        preload::preload(paths);
+        let old = std::mem::replace(&mut *self.warm.borrow_mut(), warm);
+        for (path, _) in &old {
+            preload::release(path);
+        }
     }
 
     /// Makes the textures [`DtArt::preload_all`] queued whose pictures the decode store has ready,
@@ -510,16 +517,20 @@ impl DtArt {
         preload::upload_within_budget(
             &mut queue,
             |(path, _)| preload::is_ready(path),
-            |(_, item)| match *item {
-                Warm::Terrain(code) => {
-                    self.terrain(code);
+            |(path, item)| {
+                match *item {
+                    Warm::Terrain(code) => {
+                        self.terrain(code);
+                    }
+                    Warm::Portrait(id) => {
+                        self.unit_portrait(id);
+                    }
+                    Warm::Item(id) => {
+                        self.item_icon(id);
+                    }
                 }
-                Warm::Portrait(id) => {
-                    self.unit_portrait(id);
-                }
-                Warm::Item(id) => {
-                    self.item_icon(id);
-                }
+                // The upload is made: its hold is given back ([`preload::hold`]).
+                preload::release(path);
             },
             || start.elapsed().as_secs_f64() * 1000.0,
             budget_ms,

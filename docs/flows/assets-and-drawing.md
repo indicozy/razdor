@@ -115,6 +115,22 @@ install file ──► src/dt/gfx.rs decode_file ──► gfx::Image (RGBA, not
   snapshot runs and with `RAZDOR_NO_PICTURE_CACHE=1`.
   Only data derived from the player's own install is in it: never write it into the install
   folder or the repo.
+- **What leaves the decode store (phones only):** on the desktop the store keeps every picture
+  (as above). On the phones (`platform::MOBILE`) the GPU shares the phone's RAM, so a picture
+  whose pixels are already in a texture would be held twice. There a picture leaves the store
+  once nothing holds it and its cache entry exists (`preload::kept`, `preload::release`,
+  `preload::mark_cached`). Its holds are the pending builds: each entry of the warm queues
+  (`chrome::WARM`, `DtArt::warm`) holds its picture from the moment it is queued until its
+  texture is made (`preload::hold` before the decodes start, `preload::release` after the
+  upload). Every other consumer (`gfx::decode_file` and its owned copies, `chrome::art` and each
+  `Fx`, the sheets, the terrain and figure caches, the map atlas, the building mask, the sharp
+  sessions) takes a copy or builds from a picture that is in the store only while its write to
+  the cache is pending, so nothing else needs a hold. The cache entry is marked when the
+  background write finishes (`mark_cached`, only if the file exists: a full or failed cache keeps
+  the picture). A later need of a dropped picture is a re-read of its `.rzpc` (no decode), logged
+  as `slow load: re-read … (dropped from the store)` with `RAZDOR_PROFILE=1`. `forget_ready`
+  clears the holds with the rest. The test switch `RAZDOR_DROP_PICTURES=1` runs this rule on the
+  desktop (and lets snapshot runs keep the picture cache, so their frames can be compared).
 - **Why a picture can be decoded twice (fixed):** the chrome cache is per path and per `Fx`,
   and decoding was per call, so a file used with two `Fx` (SteelLine) was decoded twice.
   The decode store is keyed by path alone, so each file is decoded once.
