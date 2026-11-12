@@ -87,3 +87,29 @@ with the first 5 s dropped, two runs each (harness `/mnt/ai_models/razdor-scratc
   harness could not re-measure it (it reads a constant at `0x4c7488`, not a live counter). That run's
   VirtualGL setup also gave v1.4.1 only 222 FPS against 626 here, so the two are not directly comparable.
   On that day's setup v1.4.1 was 1.26× the original, and main's flat view is within 2% of v1.4.1.
+
+### Re-run on main `7dd62351` (after the trailer work)
+
+| View | v1.4.1 FPS (CPU ms) | main FPS (CPU ms) |
+|---|---|---|
+| Flat | 626 (0.18) | 604 (0.21) |
+| 2.5D | 604 (0.27) | 536 (0.42) |
+
+The trailer work changed nothing measurable (it is dev-only).
+
+### Why 2.5D close up costs more (code reading, 2026-11-12; not yet measured per function)
+
+The extra time is in the `world` stage. Draw batches are about the same, so the cost is extra CPU work
+per item. The suspects, unranked:
+
+1. **Card meshes rebuilt every frame.** `layered_cards` / `card_mesh_form` (`src/ui/world_view.rs`)
+   clone each card's vertices and triangles and compute the sun per card. The ground cards (~378) are
+   also redrawn every frame. Fix: cache the meshes per building, keyed by camera, or bake the static
+   ground cards into the ground cache.
+2. **Three passes over all locations in 2.5D** (ground cards, shadows, main). Each pass repeats the fog
+   check and the card lookup. Fix: compute the seen locations once per frame.
+3. **The view-projection matrix rebuilt per sprite** in `picture_on_screen` → `view_proj`
+   (`src/ui/view25.rs`). Fix: compute it once per frame and keep it in `Tilt`.
+4. **Terrain +0.025 ms** in the cached branch of `draw_ground`: confirm with `perf` first.
+
+Next step: `perf record` on the 2.5D scene for both builds to get each function's share, then fix 1–3.
