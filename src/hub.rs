@@ -32,6 +32,7 @@ pub mod save_mod;
 pub use mods::*;
 
 use std::collections::BTreeMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -742,6 +743,22 @@ pub fn maps_dir(local: &Path) -> PathBuf {
     local.join("maps")
 }
 
+/// The ad's text file in its folder: the keys the menu reads (`ui::ads`), plus the copy's version and picture.
+pub const AD_INI: &str = "ad.ini";
+
+/// The picture's file name in the ad's folder: `picture` and the address's own extension (`png` when it
+/// has none that is a plain word).
+pub fn ad_picture_name(a: &AdRef) -> String {
+    let ext = a.image.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).filter(|e| !e.is_empty() && e.len() <= 4 && e.chars().all(|c| c.is_ascii_alphanumeric()));
+    format!("picture.{}", ext.unwrap_or_else(|| "png".into()))
+}
+
+/// The `ad.ini` of the catalog's ad `a`, its picture named `picture` (see [`ad_picture_name`]). Exactly
+/// this text is what the copy on disk must hold to be current ([`Hub::install_ad`]).
+pub fn ad_ini_text(a: &AdRef, picture: &str) -> String {
+    format!("url={}\nimage={picture}\ncaption_ru={}\ncaption_en={}\nversion={}\nsha256={}\n", a.url, a.caption_ru, a.caption_en, a.version, a.sha256)
+}
+
 /// The folder of the catalog cache.
 pub const CACHE_DIR: &str = "cache";
 
@@ -846,6 +863,37 @@ impl Hub {
                 Err(e)
             }
         }
+    }
+
+    /// Puts the catalog's promo ad on disk: `ads_root/<id>/` holds `ad.ini` and the picture, and the
+    /// other folders of `ads_root` are removed (that folder is the catalog's copy alone). Nothing is
+    /// written when the folder already holds this ad (`Ok(false)`). The picture is checked (size and
+    /// SHA-256) before it is kept, and `ad.ini` is written last, so an update that failed half way is
+    /// never read. Offline or a bad picture: an error, and the copy on disk stays.
+    pub fn install_ad(&self, a: &AdRef, ads_root: &Path) -> Result<bool, String> {
+        let folder = ads_root.join(&a.id);
+        let picture = ad_picture_name(a);
+        if fs::read_to_string(folder.join(AD_INI)).is_ok_and(|text| text == ad_ini_text(a, &picture)) {
+            return Ok(false);
+        }
+        fs::create_dir_all(&folder).map_err(|e| format!("ads: {e}"))?;
+        let part = folder.join(format!("{picture}.part"));
+        let file = FileRef { path: a.image.clone(), name: picture.clone(), lang: None, size: a.size, sha256: a.sha256.clone(), archive: false };
+        self.download(&a.image, &part, MAX_AD_BYTES).and_then(|()| Hub::check_file(&part, &file)).map_err(|e| {
+            let _ = fs::remove_file(&part);
+            e
+        })?;
+        fs::rename(&part, folder.join(&picture)).map_err(|e| format!("ads: {e}"))?;
+        if let Ok(entries) = fs::read_dir(ads_root) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path != folder && path.is_dir() {
+                    let _ = fs::remove_dir_all(&path);
+                }
+            }
+        }
+        crate::editor::files::write_atomically(&folder.join(AD_INI), ad_ini_text(a, &picture).as_bytes()).map_err(|e| format!("ads: {e}"))?;
+        Ok(true)
     }
 
     pub fn catalog(&self) -> Result<Catalog, String> {
@@ -2026,5 +2074,65 @@ mod tests {
         for ad in bad {
             assert!(Catalog::parse(catalog_with_ad(&ad).as_bytes()).is_err(), "{ad}");
         }
+    }
+
+    /// The Thorny Times ad as a test's catalog entry, its picture the given bytes.
+    fn sample_ad(picture: &[u8]) -> AdRef {
+        AdRef {
+            id: "thorny-times".into(),
+            version: 1,
+            image: "capsule.png".into(),
+            size: picture.len() as u64,
+            sha256: crate::update::sha256_hex(picture),
+            url: "https://store.steampowered.com/app/2182610/".into(),
+            caption_ru: "Новая игра".into(),
+            caption_en: "A new game".into(),
+        }
+    }
+
+    #[test]
+    fn the_ad_picture_keeps_its_extension_and_defaults_to_png() {
+        let mut a = sample_ad(b"x");
+        assert_eq!(ad_picture_name(&a), "picture.png");
+        a.image = "https://example.org/a/Capsule.JPG".into();
+        assert_eq!(ad_picture_name(&a), "picture.jpg");
+        a.image = "https://example.org/capsule".into();
+        assert_eq!(ad_picture_name(&a), "picture.png");
+        a.image = "https://example.org/a.b/c.we-ird".into();
+        assert_eq!(ad_picture_name(&a), "picture.png", "an extension that is not a plain word is none");
+    }
+
+    #[test]
+    fn an_ad_is_installed_once_and_replaced_when_it_changes() {
+        let root = std::env::temp_dir().join(format!("razdor-ad-install-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let src = root.join("hub");
+        fs::create_dir_all(&src).unwrap();
+        let picture = b"a small picture".to_vec();
+        fs::write(src.join("capsule.png"), &picture).unwrap();
+        let hub = Hub { source: Source::Dir(src), local: root.join("local") };
+        let ads = root.join("ads");
+        // Another ad's folder is the catalog copy's no more: it goes.
+        fs::create_dir_all(ads.join("old-ad")).unwrap();
+
+        let mut a = sample_ad(&picture);
+        assert_eq!(hub.install_ad(&a, &ads), Ok(true));
+        assert!(!ads.join("old-ad").exists(), "the other folders are removed");
+        assert_eq!(fs::read(ads.join("thorny-times").join("picture.png")).unwrap(), picture);
+        assert_eq!(fs::read_to_string(ads.join("thorny-times").join(AD_INI)).unwrap(), ad_ini_text(&a, "picture.png"));
+        assert_eq!(hub.install_ad(&a, &ads), Ok(false), "the same ad is not written again");
+
+        a.caption_en = "TEST".into();
+        assert_eq!(hub.install_ad(&a, &ads), Ok(true), "a new caption is a new copy");
+        assert!(fs::read_to_string(ads.join("thorny-times").join(AD_INI)).unwrap().contains("caption_en=TEST"));
+
+        // A picture that is not the catalog's is refused, and the copy on disk stays as it was.
+        let mut bad = sample_ad(b"another picture");
+        bad.version = 2;
+        bad.sha256 = "0".repeat(64);
+        assert!(hub.install_ad(&bad, &ads).is_err());
+        assert!(fs::read_to_string(ads.join("thorny-times").join(AD_INI)).unwrap().contains("caption_en=TEST"));
+        assert_eq!(fs::read(ads.join("thorny-times").join("picture.png")).unwrap(), picture);
+        let _ = fs::remove_dir_all(&root);
     }
 }
