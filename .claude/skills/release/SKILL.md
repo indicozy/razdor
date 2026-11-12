@@ -43,23 +43,34 @@ without an Android or iOS file gets no offer on that system.
    en, the `wiki` skill); write the missing ones before the release.
 3. Version: the last number by default; "minor version" bumps the middle (0.4.17 → 0.5.0).
    Set `version` in `Cargo.toml`, then `cargo build --release` (same prefix) so `Cargo.lock` follows.
-3a. Performance on the owner's GPU (the release bench; details and the baseline format in
-   `docs/flows/testing-and-tools.md`, «Performance check»). Only when the owner says so for this
-   release: it opens a fullscreen window on `:0` for about 20 minutes, so the owner must be at the desk
-   and not playing. Build the binary of step 3 (`target/release/razdor`), then
-   `nice -n 19 taskset -c 8-19 python3 -I tools/perf/bench.py --bin target/release/razdor --commit "$(git rev-parse --short HEAD)" --display :0 --workspace 6 --label X.Y.Z --machine "owner desktop: RTX 5060 Ti, 2560x1440" --out <scratch>/X.Y.Z.json --md <scratch>/X.Y.Z.md`
-   (`<scratch>`: a folder outside the repo, per `CLAUDE.local.md`). Then compare it with the last
-   release's baseline, `python3 -I tools/perf/compare.py <scratch>/X.Y.Z.json tools/perf/baselines/vPREV.json`:
-   - exit 0: no regression. Copy the result to `tools/perf/baselines/vX.Y.Z.json` (it goes into the release commit).
-   - exit 1 (a regression, or a cell that did not run): STOP the release. Give the owner the table
+3a. Performance check on the RTX 4060, headless (the release default; details and the baseline files
+   in `docs/flows/testing-and-tools.md`, «Performance check»). No window, no owner needed: a private Xvfb
+   and VirtualGL on the 4060, about 8 minutes. Build the binary of step 3 (`target/release/razdor`), then
+   run the one entry point `tools/perf/check.sh --bin target/release/razdor` (no arguments otherwise: it
+   builds, benches on the 4060 and compares with the newest baseline; `--against vPREV` names the previous
+   release explicitly). Its results go to the folder it prints (`result.json`, `compare.md`), outside the
+   repo. The bench first checks that `/dev/dri/card2` is the RTX 4060 (PCI 05:00.0) and that the renderer
+   is NVIDIA; if not, it exits 3 and makes no run: STOP the release and tell the owner. Its exit code is
+   compare's:
+   - exit 0: no regression. Copy the printed `result.json` to `tools/perf/baselines/vX.Y.Z-gpu-4060.json` (it goes into the release commit).
+   - exit 1 (a regression, or a cell or run that did not run): STOP the release. Give the owner the table
      (the `.md` of compare.py) and wait for his decision: fix it on `main` and run this step again, or
      accept it. Accepted: save the new baseline with the owner's reason in its `meta.accepted`.
-   - exit 2 (not comparable: another backend, size or refresh): the baseline is from another setup;
-     tell the owner, do not compare with `--force` on your own.
+   - exit 2 (not comparable: another backend, size or refresh; or the previous release's file is missing):
+     the baseline is from another setup or not recorded yet; tell the owner (the file is recorded from the
+     previous release's binary, see the docs), do not compare with `--force` on your own.
+   - exit 3: not the RTX 4060 or not NVIDIA: the bench made no run. STOP and tell the owner.
    - The bench needs the install (`RAZDOR_DT_DIR`, from `.env`) and must not run while another heavy
      job is on CPUs 8–19 (the table's «busy machine» warning means the numbers are suspect: rerun).
-   A missing bench (the owner away) does not stop the release by itself; say in the report that it
-   was not run.
+   - Optional, only when the owner asks for it and is at the desk and not playing: the owner's monitor
+     run, `--display :0 --workspace 6` (a fullscreen window on `:0`, 20 minutes), compared with
+     `tools/perf/baselines/vPREV.json` the same way.
+   Once per release, before the first 4060 comparison (the main session, not part of the release):
+   record the previous release's file from its Linux binary (its release download), with its commit:
+   `nice -n 19 taskset -c 8-19 python3 -I -B tools/perf/bench.py --bin <previous release binary> --gpu-4060 --commit <its short commit> --label vPREV --machine "RTX 4060 headless (VirtualGL, private Xvfb)" --out tools/perf/baselines/vPREV-gpu-4060.json`
+   (v1.4.1: its commit is `31a85c96`). Commit it with the release that uses it.
+   A missing bench (no 4060 on the machine, the owner away and the 4060 busy) does not stop the release by
+   itself: say in the report that it was not run.
 4. Changelog (layout in `changelog/README.md`): move `changelog/unreleased.md`'s content to
    `changelog/X.Y.Z.md` under the heading `## X.Y.Z — YYYY-MM-DD`, leave `unreleased.md` empty
    (its header only), and regenerate `CHANGELOG.md` with `scripts/changelog.sh`. Sections inside

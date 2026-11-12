@@ -9,7 +9,8 @@ comparable (another backend, size or refresh rate; `--force` compares anyway), o
 Rules (per cell `scene/view/effects`, present in both files):
   - Frame time (ms) and CPU work (ms, the frame probe) regress at +5%. When both cells are capped at
     the refresh rate, only CPU work counts (the frame time is pinned to the cap there). When a cell is
-    uncapped and the other is not, frame time is compared and CPU work too if both have it.
+    uncapped and the other is not, frame time is compared and CPU work too if both have it. The RTX 4060
+    backend (`gpu-4060`) is uncapped, so its cells are judged on frame ms and CPU work, both.
   - RSS and VRAM regress at +10%, load time at +10%.
   - Noise: a change counts only when its medians differ by more than the threshold, by more than the
     absolute floor (RSS 10 MB, VRAM 10 MB, load 0.05 s), and by more than twice the run-to-run spread
@@ -117,7 +118,8 @@ def main():
         return '–' if v is None else f'{v:.2f}'
     lines = [f"# Bench compare: {nm['label']} vs {bm['label']}", '',
              f"Backend {nm['backend']} ({nm.get('machine', '')}), size {nm['size']}, refresh "
-             f"{nm['refresh'] or 'uncapped'}; baseline {bm.get('build', '')} ({bm.get('machine', '')}).", '',
+             f"{nm['refresh'] or 'uncapped'}{'; renderer ' + nm['renderer'] if nm.get('renderer') else ''}; "
+             f"baseline {bm.get('build', '')} ({bm.get('machine', '')}).", '',
              '| cell | metric | baseline | new | change | verdict |', '|---|---|---:|---:|---:|---|']
     for key, label, bv, nv, change, verdict in rows:
         ch = '–' if change is None else f'{change:+.1f}%'

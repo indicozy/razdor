@@ -258,56 +258,84 @@ Other diagnostics: `razdor.log` in the data folder (`razdor::diag`, `RAZDOR_LOG=
 ## Performance check (the release bench)
 
 `tools/perf/` measures a release binary over a fixed matrix and fails a release on a drop against
-the last release's baseline. It is manual: the `release` skill runs it on the owner's desktop
-(its step 2a), and `cargo test` does not (CI has no GPU). The matrix is the one of
-`docs/perf/2026-11-12-atmosphere-performance.md`:
+the last release's baseline. It is manual (CI has no GPU, so `cargo test` does not run it). The
+release skill runs it at step 3a on the **RTX 4060, headless**: no window, no owner needed. The
+matrix is the one of `docs/perf/2026-11-12-atmosphere-performance.md`:
 
 - scenes: `db-zoomout` (Другой берег, explored, zoomed out to v1.4.1's limit), `db-wholemap` (the
   whole map on screen, `RAZDOR_MAP_FIT`), `rk3-start` (РК3-Столица at the start);
 - views: `flat`, `25d` (tilted), `third` (third person), in the saved settings;
-- effects: `off` (the game's defaults), `on` (sun shadows, clouds, live water, weather, the
-  living world, 23:00: the atmosphere's switches);
-- 3 runs of 400 frames per cell, the first 100 dropped; vsync off (`__GL_SYNC_TO_VBLANK=0`); the
-  game pinned to CPUs 8–19 at nice 19; a private save dir per run (the owner's saves are not read).
+- effects: `off` (the game's defaults), `on` (sun shadows, clouds, live water, weather, the living
+  world, 23:00: the atmosphere's switches);
+- the game's own environment is private: a save dir per run (the owner's saves are not read), the
+  RAZDOR_* switches are set per cell, vsync off (`__GL_SYNC_TO_VBLANK=0`), the game pinned to
+  CPUs 8–19 at nice 19.
 
-Per run: frame ms (median `total_ms`), CPU work ms (median `work_ms`, the frame probe), p90, load
-time to the first frame, peak RSS, VRAM by PID (`nvidia-smi`, GPU runs), draws and verts. A cell
-whose frame rate is within 3% of the refresh rate (180 Hz on the owner's monitor) is **capped**: its
-frame time is the cap, so only CPU work is judged there.
+Backends (`bench.py`, one of):
 
-- `tools/perf/bench.py`: `--bin <razdor>`, one backend (`--display :0 [--workspace 6]` for the
-  owner's GPU, `--xvfb` for software GL, relative numbers only, `--egl-4060` is not available: Razdor
-  has no headless EGL device surface yet; the trailer work needs one, outside the repo),
-  `--commit` (the binary's source commit), `--out` (the result JSON), `--md` (the table). `--scenes`,
-  `--views`, `--effects`, `--runs`, `--frames`, `--skip` narrow it.
-- `tools/perf/compare.py <new.json> <baseline.json>`: exit 0 no regression, 1 a regression (or a
-  cell that was not measured), 2 not comparable (another backend, size or refresh; `--force`
-  overrides) or nothing in common. Rules: frame time and CPU work +5%; RSS, VRAM and load +10%
-  (load also +0.05 s, RSS and VRAM also +10 MB); a change counts only beyond twice the runs' spread
-  (the larger of the two sides' range); a cell with one run only is judged beyond 15%. Both capped:
-  CPU work only. A busy machine (1-minute load over 9) is reported.
-- `tools/perf/baselines/<version>.json`: the numbers a release is compared with. `v1.4.1.json` and
-  `atmosphere-c3697b09.json` are transcribed from the perf doc's tables (medians, no per-run values,
-  no RSS/VRAM per cell); the first owner run of the release bench replaces the transcription. The
-  2026-11-12 numbers came from the doc's own harness, so its «off» may differ in detail from the bench.
+- `--gpu-4060` (the release default; `--egl-4060` is an alias). A private Xvfb on a free display
+  (`:90`–`:99`, never `:0`), the game drawn through VirtualGL on the 4060's EGL device
+  (`/dev/dri/card2`). The card is checked first: its PCI address must be `0000:05:00.0` and
+  nvidia-smi must name it RTX 4060, and the renderer must be NVIDIA (`glxinfo` through VirtualGL,
+  and the game's own `window open` line per run). Otherwise the bench exits 3 and makes no run.
+  Uncapped, 1024×768. Six cells (`GPU_MATRIX`): `rk3-start` flat and 25d (effects off), `db-zoomout`
+  25d and third, each with effects off and on. 3 runs per cell; a run lasts 25 s after its first
+  frame, and the first 5 s of frames are dropped. About 8 minutes for the whole matrix. The route is
+  the one of the perf doc's `run2.sh` (see `docs/trailer-shots.md` for VirtualGL).
+- `--display :0 [--workspace 6]`: the owner's monitor, an optional extra (the owner at the desk, not
+  playing). Capped at the monitor's 180 Hz, so close-up costs can hide under the cap.
+- `--xvfb`: software GL on an invisible display. Relative numbers only (llvmpipe's frame times do not
+  match a GPU, and it draws some sprites and fog differently: the perf doc's «correctness note»).
 
-Commands (the owner's desktop; the bench opens a fullscreen window on `:0` for about 20 minutes, so
-not while the owner plays; the release skill says when):
+Per run: frame ms (median `total_ms`), CPU work ms (median `work_ms`, the frame probe), p90, load time
+to the first frame, peak RSS, VRAM by PID (`nvidia-smi`, GPU runs), draws and verts when the probe has
+them. Per cell: the median and the runs' values. A cell whose frame rate is within 3% of the refresh
+rate is **capped**: its frame time is the cap, so only CPU work is judged there. The 4060 backend is
+uncapped, so its cells are judged on frame ms and CPU work.
+
+An older build without the atmosphere switches (v1.4.1 has none of `RAZDOR_SHADOWS`, `RAZDOR_LIVING`…)
+runs its «on» cells as «off»; the bench says so in the table's note.
+
+- `tools/perf/compare.py <new.json> <baseline.json>`: exit 0 no regression, 1 a regression (or a cell
+  that was not measured), 2 not comparable (another backend, size or refresh; `--force` overrides;
+  also a missing baseline file) or nothing in common. Rules: frame time and CPU work +5%; RSS, VRAM and
+  load +10% (load also +0.05 s, RSS and VRAM also +10 MB); a change counts only beyond twice the runs'
+  spread (the larger of the two sides' range); a cell with one run only is judged beyond 15%. Both
+  capped: CPU work only. A busy machine (1-minute load over 9) is reported.
+- `tools/perf/baselines/`: the numbers a release is compared with. Two kinds:
+  - `<version>-gpu-4060.json`: the 4060 backend, recorded by `bench.py --gpu-4060` from that release's
+    binary. The release skill compares with the previous release's file. Recording one (the main
+    session, once per release, after the release's binary exists):
+    `nice -n 19 taskset -c 8-19 python3 -I -B tools/perf/bench.py --bin <previous release binary> --gpu-4060 --commit <its short commit> --label <version> --machine "RTX 4060 headless (VirtualGL, private Xvfb)" --out tools/perf/baselines/<version>-gpu-4060.json`.
+  - `<version>.json`: the owner's display runs (`v1.4.1.json` and `atmosphere-c3697b09.json` are
+    transcribed from the perf doc's tables: medians, no per-run values, no RSS/VRAM per cell). They
+    are compared only with a `--display` run.
+  A baseline is written only for an intended change (a release's number, or a perf fix the owner accepts).
+
+**The one entry point: `tools/perf/check.sh`.** It runs any time, not only at a release, and needs
+no arguments: it builds this checkout's release (pinned, into a target dir under
+`/mnt/ai_models/razdor-scratch/perf-check/`, or `RAZDOR_PERF_SCRATCH`), runs `bench.py --gpu-4060`,
+compares with the newest `tools/perf/baselines/v*-gpu-4060.json` (or `--against <file|version>`),
+prints the table and exits with compare's code. `--bin <razdor>` skips the build; `--quick` runs one
+run per cell (about 3 minutes; compare judges single runs only beyond 15%). Nothing is written into
+the repo. Exit 3 means the GPU is not the 4060 (or not NVIDIA): no run was made. The release skill
+calls it at step 3a with the binary of step 3. Check the machine is quiet first (another agent's GPU or
+CPU jobs make the numbers wrong; compare warns only above a 1-minute load of 9).
+
+The same steps by hand (the release check; `<scratch>` is a folder outside the repo, per `CLAUDE.local.md`):
 
 ```sh
 CARGO_BUILD_JOBS=12 nice -n 19 taskset -c 8-19 cargo build --release
-nice -n 19 taskset -c 8-19 python3 -I tools/perf/bench.py --bin target/release/razdor \
-  --commit "$(git rev-parse --short HEAD)" --display :0 --workspace 6 --label X.Y.Z \
-  --machine "owner desktop: RTX 5060 Ti, 2560x1440" --out <scratch>/X.Y.Z.json --md <scratch>/X.Y.Z.md
-python3 -I tools/perf/compare.py <scratch>/X.Y.Z.json tools/perf/baselines/vPREV.json
-cp <scratch>/X.Y.Z.json tools/perf/baselines/vX.Y.Z.json     # only after the release is accepted
+nice -n 19 taskset -c 8-19 python3 -I tools/perf/bench.py --bin target/release/razdor --gpu-4060 \
+  --commit "$(git rev-parse --short HEAD)" --label X.Y.Z --machine "RTX 4060 headless (VirtualGL, private Xvfb)" \
+  --out <scratch>/X.Y.Z-gpu-4060.json --md <scratch>/X.Y.Z-gpu-4060.md
+python3 -I tools/perf/compare.py <scratch>/X.Y.Z-gpu-4060.json tools/perf/baselines/vPREV-gpu-4060.json
+cp <scratch>/X.Y.Z-gpu-4060.json tools/perf/baselines/vX.Y.Z-gpu-4060.json   # only after the release is accepted
 ```
 
-`<scratch>` is a folder outside the repo for the results (the machine's scratch rule, `CLAUDE.local.md`). Run data (the
-per-run folders with frame CSVs and logs) goes to `target/perf-bench` unless `--work` says otherwise,
-and is deleted at the end unless `--keep`. Xvfb runs (`--xvfb`) are for checking the tools and for
-relative work only: llvmpipe's frame times do not match a GPU, and it draws some sprites and fog
-differently (the perf doc's «correctness note»).
+Run data (the per-run folders with frame CSVs and logs) goes to `target/perf-bench` unless `--work`
+says otherwise (the release check passes a scratch folder), and is deleted at the end unless `--keep`.
+Tool checks (short runs, not baselines): `--runs 1 --seconds 10 --skip-seconds 2` on the 4060 backend.
 
 ## The map editor (briefly)
 
