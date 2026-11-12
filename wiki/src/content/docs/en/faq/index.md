@@ -18,7 +18,7 @@ On Windows: `%APPDATA%\razdor\saves`. On Linux: `~/.local/share/razdor/saves`. O
 
 ## Android cannot find the game. What should I do?
 
-Razdor on Android stores the game and saves in its own app folder and no longer requests "All files access." If the game is not found, tap "Download the game" or "Choose the archive…" on the title screen. On the first launch after an update, saves and settings from the old version will be transferred to the app folder automatically.
+Razdor on Android stores the game and saves in its own app folder and does not request "All files access." If the game is not found, tap "Download the game" or "Choose the archive…" on the title screen. Saves of an older version move through the folder picker: Razdor offers it at the start, or in Settings ("Other").
 
 [Razdor on Android](/razdor/wiki/en/phones/android/)
 

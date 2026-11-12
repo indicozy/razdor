@@ -78,37 +78,35 @@ see `[package.metadata.android]` in `Cargo.toml`). The launcher icon is `android
 (Razdor's own icon, `data/icon/razdor.png` resized to 48–192 px; `res` and `icon` in `Cargo.toml`).
 Per-platform paths live in one place:
 `src/platform.rs` (`app_dir` for saves, log, editor maps, translation jobs; `cache_dir` for the picture cache;
-`config_dir` for the remembered install; `install_roots` for the search). On Android they are in the app's own folder: `platform::android_paths` gives `<files>/Razdor` (saves,
-the log, `app_dir`) and `<files>/DiscordTimes` (the game, `unpack_dir`), where `files` is
-`getExternalFilesDir(null)` (`ui::android::files_dir`, `Android/data/io.github.indicozy.razdor/files`).
-Before the move they are the legacy `/storage/emulated/0/Razdor` and `/storage/emulated/0/DiscordTimes`
-(`platform::legacy_android_paths`). Desktop keeps the platform's data and config folders.
+`config_dir` for the remembered install; `install_roots` for the search). On Android they are all in the app's own
+folder and nowhere else: `platform::android_paths` gives `<files>/Razdor` (saves, the log, `app_dir`, the hub) and
+`<files>/DiscordTimes` (the game, `unpack_dir`), where `files` is `getExternalFilesDir(null)` (`ui::android::files_dir`,
+`Android/data/io.github.indicozy.razdor/files`). `set_android_files_dir` stores it once, in `main`. Desktop keeps the
+platform's data and config folders.
 
-The migration gate (release N): `platform::set_android_files_dir`, called in `main` after the CLI's early exits and just before `diag::init`, reads
-`platform::start_state` from the marker `<files>/Razdor/migrated-from-shared` (`migrated_marker`) and from
-the two legacy folders (`legacy_state`). With the marker the app's folders are in use (`android_migrated`).
-No legacy data (a fresh install) writes the marker with `fresh`. Legacy data leaves the legacy paths in use
-until the move. A legacy folder that cannot be read (no storage access) gives the app's folders for this run,
-with no marker, so the gate checks again at the next start (nothing is asked). `platform::android_current` takes the paths from this gate,
-so `app_dir`, `unpack_dir` and `install_roots` all follow it.
+No storage permission: the manifest declares none (`Cargo.toml`), and no screen asks for one. The game's downloads and
+imports (the automatic start, «Скачать игру», the picker, the repair) write to `unpack_dir()`, so they need nothing, and
+a fresh install goes straight from the menu art to «Проверяем каталог…», the download bar and the menu. (Before this
+release the automatic import wrote to the shared `DiscordTimes`, which needed the all-files grant.)
 
-The move (`migration::migrate`, its screen and thread in `ui::migrate`): `migrate::start_if_needed` starts it
-on the first frame. Each legacy folder is copied into `<dest>.part` and every name and size is compared; the
-absolute legacy paths in the copy's text files are rewritten (`rewrite_text`, on the copy only); the legacy
-trees are scanned again, and a change discards the copy (the move starts again at the next start). Then the copy
-is put in place, the marker is written, and `set_android_migrated` flips the paths. A game folder that does not
-fit (`SPACE_MARGIN`) stays where it was (`Moved::game_skipped`): the install is then asked for as an archive. A Razdor folder that does not fit (the saves) is not moved at all: `Failure::NoRoom` shows the room needed and the room free in MB (`migrate::no_room_message`), the files stay in the legacy folders, and the next start tries again.
-The legacy folders are only read, never written or deleted. While it runs, the title screen shows its percent
-(`migrate::title_line`) and `migrate::busy` holds a game's start, a load and a mod's choice; its end shows the
-notice that the old folders can be deleted (`migrate::moved_message`).
+The saves of an older release (Android, `ui::saves_move`, `transfer::import_folder`): older releases kept Razdor's folder
+in the shared storage, which the app cannot read now. The player picks that folder with the system's folder picker:
+`ui::android::start_old_saves_pick` opens `razdorPickOldSaves` (`ACTION_OPEN_DOCUMENT_TREE`, `EXTRA_INITIAL_URI` at
+`primary:Razdor`). The Java side copies the picked folder's `saves` folder (or the folder itself, when it holds
+`settings.json` or `manual`) into the cache's `old-saves` (`razdorCopyOldSaves`, at most 512 MB, depth 6; any other
+folder answers «wrong») and the poll `razdorOldSavesOutcome` says `copied`. Then `transfer::import_folder` merges the copy
+into the app's saves folder with the saves import's rules: an identical save is skipped, a differing one gets the next
+number, a settings file that is there is kept, pins are merged; files the saves folder does not hold are ignored.
+The popup «Сохранения старой версии» is offered once per run on the main menu (`saves_move::offer_if_due`) while the
+decision says existing. `saves_move::decide_at_start` (in `main`, before the threads write to the cache) takes it: files
+in the private cache (`getCacheDir`, where older releases kept their picture cache and update files) mean an older
+install, an empty one a fresh install. The decision is kept in `<files>/Razdor/saves-move` ("existing", "fresh", "done").
+«Не сейчас» leaves the popup for the next start; a successful import writes "done", so it never comes back. The
+settings' «Перенести сохранения из старой папки Razdor…» (Прочее, Android only, `Row::OldSaves`) is always there.
+Blind spot: an older install whose private cache was cleared (Android's «Clear cache», low storage) reads as fresh, so
+no popup; the settings row still works.
 
-Storage access: release N asks for none. The move reads the legacy folders, so a player who granted «All files
-access» in an earlier release keeps it until the next release drops the permission. `ui::android::storage_granted`
-and `request_storage` (the settings page on Android 11 and later, the runtime dialog on 8 to 10) are kept, unused,
-for that release. No settings page opens by itself. The game's downloads and imports (the automatic start, «Скачать игру»,
-the picker and the repair) write to `unpack_dir()`, the app's folder once the gate says migrated (a fresh install always
-is), so they need no grant and a fresh install never sees the all-files page. Before the app's folder, `unpack_dir()` was
-the shared `DiscordTimes`, where the automatic import failed without the grant. The scenario-select screen's not-found block
+The scenario-select screen's not-found block
 (`screens::android_not_found`, scaled to the screen) offers only «Проверить снова» and points to the main menu.
 The main menu shows its not-found block while no install is found (`screens::menu_not_found`, drawn by
 `main_menu::frame(no_install)`, whose buttons come from `screens::not_found_rows`: «Скачать игру», the archive picker
@@ -122,9 +120,9 @@ on desktop, `ui::android::open_url` (an `ACTION_VIEW` intent) on Android, `ui::m
 (`UIApplication openURL:`) on iOS. The two link buttons share a row when the stack does not fit the height.
 While it
 is shown, `App::mobile_install_poll` (`ui::mobile`; on the main menu and the scenario list; every 5 s, and on the button) loads a newly found install with `Assets::adopt_install` and the `ui/mod.rs` helpers
-`dt_content_of` / `scenarios_of`, without a restart. Its Discord link opens through `open_url` like the desktop's (see the main menu above). A log that could not be opened (the legacy folder before the move, without access) is opened again by the poll (`diag::reopen_log`).
+`dt_content_of` / `scenarios_of`, without a restart. Its Discord link opens through `open_url` like the desktop's (see the main menu above). A log that could not be opened is opened again by the poll (`diag::reopen_log`).
 Game archives on the not-found block (`dt::unpack`, `ui::mobile`, every platform): `look_for_archives`
-scans `platform::archive_dirs()` (the phones: the install folders, and while the legacy storage is readable (before the move) Download and the storage root; the desktop:
+scans `platform::archive_dirs()` (the phones: the app's game folder only; the desktop:
 the program's folder except on macOS, Downloads, the install folders) at once after «Check again» or the
 unpacking's end, else every 5 s. `unpack::find_archives` lists each `.7z` / `.zip` there without extracting:
 a game when the listing passes `install::listing_is_install` after dropping one top folder, a patch when it

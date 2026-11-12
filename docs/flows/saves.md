@@ -15,14 +15,13 @@ All code is in `src/rules/save.rs`; the windows are `src/ui/saves.rs`.
   `pinned.txt` lists live alongside.
 - `save::games_dir`: one sub-folder per install (folder name + hash of its path), so a mod
   and the plain game do not mix saves; `claim_old_saves` moved older saves in once. The key is
-  the install's path, so the one-time move (`migration::rekey_saves`) renames each install's folder
-  from its legacy path's key to the key of its new path (the game, each hub mod's game folder).
+  the install's path (on Android the app's own game folder).
 - `manual/` (player's saves and quick saves, `MANUAL_SAVES_KEPT`, `QUICK_SAVES_KEPT`) and
   `auto/` (autosaves, `AUTOSAVES_KEPT`).
 
-- Android: the saves folder is `platform::app_dir` (`<files>/Razdor/saves`, the app's own folder; the
-  legacy `/storage/emulated/0/Razdor` until the one-time move, `migration`, see
-  [app-and-ui.md](app-and-ui.md)). Export and import go through the system's documents
+- Android: the saves folder is `platform::app_dir` (`<files>/Razdor/saves`, the app's own folder; no
+  storage permission, see [app-and-ui.md](app-and-ui.md)). The saves of an older release come in
+  through the folder picker (`ui::saves_move`, `transfer::import_folder`). Export and import go through the system's documents
   (`ui::transfer`, «Перенос…» in the Load window): one zip out, `.rzsave` or a zip in, nothing overwritten.
 
 ## Limits and pins

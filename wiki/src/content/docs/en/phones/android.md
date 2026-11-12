@@ -15,11 +15,11 @@ The Android version (**`razdor-<version>.apk`** file) is experimental. It requir
 2. On the first launch, choose one of the following options on the title screen:
    * "Download the game" — downloads the game archive (approx. 45 MB) from the community.
    * "Choose the archive…" — select a game archive (.zip or .7z) that is already on your phone.
-3. If you played an older version, Razdor will automatically migrate saves, settings, and the game from the `Internal Storage/Razdor` and `Internal Storage/DiscordTimes` folders during the first launch. While the migration is in progress, the title screen will display "Moving files… N%", and the game cannot be launched. The old Razdor folders are not deleted: once the transfer is complete, a message will appear stating they can be safely removed.
-4. If there is not enough room even for the Razdor folder (saves and settings), nothing is moved: Razdor shows how many MB are needed and how many are free. The files stay in the old folders, and the move is tried again at the next start. If there is only not enough room for the game, the saves are moved and the game has to be picked as an archive. A message will appear on the screen: "The game folder was not moved: there was not enough room. If the game is not found, pick its archive."
+3. If you played an older version, Razdor will offer at the start to pick the Razdor folder in the device storage: its saves move into the app's folder. You can also do it later: Settings → Other → "Move saves from the old Razdor folder…". The game is not installed by hand: Razdor downloads it itself. The old folders are not deleted.
+4. Razdor does not ask for all-files access and does not use it: everything is kept in the app's folder. To move the old saves, pick the Razdor folder in the system folder picker; any other folder moves nothing, and Razdor says so.
 
 :::note
-If you granted the app "All Files Access" in a previous version, this permission will be preserved for the file transfer. In newer versions, file access is no longer requested.
+Razdor does not request or use all-files access.
 :::
 
 ## Controls
