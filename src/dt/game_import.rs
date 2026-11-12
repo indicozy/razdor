@@ -559,6 +559,47 @@ mod tests {
     }
 
     #[test]
+    fn a_flat_game_without_the_exe_is_a_game_and_imports() {
+        // The hub's game archive: its files at the root (no top folder), no DiscordTimes.exe.
+        let s = Scratch::new("flat");
+        let install = s.0.join("DiscordTimes");
+        let archive = s.0.join("discord-times-cu.zip");
+        make_zip(&archive, &[
+            ("Maps_Rus/", ""),
+            ("Maps_Rus/b.DTm", "map b"),
+            ("Rus_Units.ini", "units new"),
+            ("Rus_Spells.ini", "spells new"),
+            ("_Global.ini", "[Global]\r\n"),
+        ]);
+        let found = found_of(&archive);
+        assert_eq!(found.kind, Kind::Game);
+        assert_eq!(import(&found, &install, &|_, _| {}), Ok(Done::Replaced));
+        assert!(is_install(&install), "the install is readable without an exe");
+        assert_eq!(fs::read_to_string(install.join("Rus_Units.ini")).unwrap(), "units new");
+    }
+
+    /// The real game archive named by `RAZDOR_GAME_ZIP` (the hub's game, unpacked elsewhere): it is
+    /// examined, imported into a scratch folder, and the result is a whole Community Update build.
+    #[test]
+    fn the_real_game_archive_imports_as_a_whole_install() {
+        let Some(zip) = std::env::var_os("RAZDOR_GAME_ZIP") else { return };
+        let zip = PathBuf::from(zip);
+        let s = Scratch::new("real-zip");
+        let found = found_of(&zip);
+        assert_eq!(found.kind, Kind::Game);
+        let install = s.0.join("DiscordTimes");
+        assert_eq!(import(&found, &install, &|_, _| {}), Ok(Done::Replaced));
+        assert!(is_install(&install));
+        let manifest = crate::dt::integrity::builtin().unwrap();
+        let report = crate::dt::integrity::check(&install, &manifest, true);
+        println!("real zip: integrity {report:?}");
+        assert!(report.community, "the folder is a Community Update build: {report:?}");
+        assert!(report.missing.iter().all(|m| !crate::dt::integrity::needed_to_play(m)), "nothing Razdor reads is missing: {:?}", report.missing);
+        assert!(crate::dt::install::check_game_files(&install, &manifest).is_ok());
+        assert!(crate::dt::install::DtInstall::load(&install).is_ok(), "the install loads without an exe");
+    }
+
+    #[test]
     fn the_budget_names_an_archive_over_either_limit() {
         assert_eq!(over_budget("a.zip", MAX_ARCHIVE_BYTES, MAX_UNPACKED_BYTES), None);
         assert_eq!(over_budget("a.zip", MAX_ARCHIVE_BYTES + 1, 0), Some(Error::TooBig("a.zip".into())));

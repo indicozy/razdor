@@ -1320,7 +1320,7 @@ pub mod mock {
         for e in &mut o.entries {
             e.rating = votes.iter().find(|v| v.0 == e.id).map(|&(_, up, down)| Rating { up, down });
         }
-        let catalog = Catalog { format: 1, entries: o.entries };
+        let catalog = Catalog { format: 1, entries: o.entries, game: None };
         let json = serde_json::to_vec_pretty(&catalog).expect("json");
         crate::editor::files::write_atomically(&dir.join(INDEX), &json)
     }

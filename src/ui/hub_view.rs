@@ -1332,7 +1332,7 @@ mod tests {
         assert_eq!(keep_pick(Some(&other), &c), Some(other.clone()));
         assert_eq!(keep_pick(Some("gone"), &c), Some(first.clone()));
         assert_eq!(keep_pick(None, &c), Some(first.clone()));
-        assert_eq!(keep_pick(Some(&other), &Catalog { format: 1, entries: vec![] }), None);
+        assert_eq!(keep_pick(Some(&other), &Catalog { format: 1, entries: vec![], game: None }), None);
 
         // The same entries in another order, and one title changed: the pick is the same entry.
         let mut fresh = c.clone();
