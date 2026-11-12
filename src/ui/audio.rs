@@ -592,6 +592,10 @@ impl Settings {
     }
 
     fn save(&self) {
+        // The performance test plays with its own settings for the run: they are not written (`bench`).
+        if super::bench::running() {
+            return;
+        }
         let Some(path) = Settings::path() else { return };
         let written = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| {
             std::fs::write(&path, serde_json::to_vec_pretty(self).unwrap_or_default())

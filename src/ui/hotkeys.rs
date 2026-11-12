@@ -103,6 +103,10 @@ pub fn shortcuts_allowed(g: Guard) -> bool {
 
 /// Whether `key` may fire at `place`. The editor has its own keys (and F2).
 pub fn allowed(place: Place, key: Global, g: Guard) -> bool {
+    // The performance test plays its own game: no key of the player's (a quick save, the menu) acts while it runs.
+    if super::bench::running() {
+        return false;
+    }
     if !shortcuts_allowed(g) || (place == Place::Editor && key != Global::Language) {
         return false;
     }

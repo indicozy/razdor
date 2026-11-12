@@ -397,6 +397,7 @@ Phone placement (backlog 1449): every pop-up that follows the pointer goes throu
 
 `App::frame` in order:
 
+- a performance test's Esc (`bench::handle_escape`) returns at once, and its cell is set up before the screen draws (`bench::before_frame`); its windows are drawn last (`bench_view::modal`); see [testing-and-tools.md](testing-and-tools.md);
 - per-frame resets: `input::begin_frame`, `chrome::begin_frame`, `cursor::begin_frame`,
   `widgets::track_held_key` (the original's one held key: any key up clears it, and the
   system's repeats of the newest key still down hold it again, 0x475820); Alt+Enter display mode (`display::hotkey_pressed`);

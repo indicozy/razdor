@@ -252,6 +252,24 @@ async fn main() {
         if !ui::trailer::active() {
             ui::cursor::draw();
         }
+        // A performance test's mid-run picture (`RAZDOR_BENCH_MID=<png>`, `RAZDOR_BENCH_MID_CELL=<n>`): one frame of
+        // the cell being measured, then the run goes on.
+        if ui::bench::take_mid_shot() {
+            if let Ok(path) = std::env::var("RAZDOR_BENCH_MID") {
+                let mut shot = get_screen_data();
+                opaque_rgba(&mut shot.bytes);
+                shot.export_png(&path);
+            }
+        }
+        // A performance test's end picture (`RAZDOR_BENCH_END=<png>`, a lab's or a test's run): the results are drawn, then the process ends.
+        if ui::bench::take_end_shot() {
+            if let Ok(path) = std::env::var("RAZDOR_BENCH_END") {
+                let mut shot = get_screen_data();
+                opaque_rgba(&mut shot.bytes);
+                shot.export_png(&path);
+            }
+            exit_now(&mut app);
+        }
         // The frame is drawn: a trailer run records it, and ends when its last frame is written.
         if ui::trailer::after_frame(&mut app) {
             exit_now(&mut app);
@@ -306,6 +324,8 @@ async fn main() {
         ui::gpu_probe::gpu_wait_ui();
         next_frame().await;
         pacer.pace(ui::frame_cap::current(), snapshot.is_none() && !ui::trailer::active());
+        // The performance test's frame: its work and its whole time (`ui::bench`, a no-op when no test runs).
+        ui::bench::sample(&mut app, work, started.elapsed());
         if frames == 1 {
             razdor::diag::step("first frame shown");
         }

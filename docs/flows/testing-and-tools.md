@@ -410,6 +410,33 @@ install they run against (`razdor::dt::install::locate`), replacing older copies
   reasoning_effort/response_format once (LM Studio: no json_object) is not sent them again
   in the run (`PLAIN_SERVERS`), so a batch costs one request.
 
+## The player's performance test (Settings → Other)
+
+«Тест производительности» (`src/ui/bench.rs`, the windows in `src/ui/bench_view.rs`, the owner's request 2026-11-12)
+is a button of the title's settings (`main_menu::Row::Bench`, `bench_row`; over a game it is off, with its reason).
+It plays one map (`bench::MAPS`: «Другой берег», else «РК1-Начало пути», else the install's first) in cells: each
+configuration (`bench::MINE`, or `bench::ALL`: the four presets in 2.5D and «Оригинал» flat) near (the default zoom)
+and far (the whole map, `world_view::set_bench_fit`). A cell: a new game of the map with its fog explored
+(`before_frame` → `setup`), `SETTLE_SECS` = 3 s, then `MEASURE_SECS` = 12 s of frames (`sample`, called by the main
+loop after each frame with its work and total time). `stats` gives the FPS, the frame time's median, p90 and p99,
+the work's median, the slow frames (over 33 ms), the load and the RSS (`/proc`).
+
+- The run is the app's: `app.game`, `dialogs`, `message` and the settings are taken at `start` and put back by
+  `restore` (at the end, Esc, Cancel or a quit: `handle_escape`, `cancel`, `abort`). The settings of a cell are
+  `bench::configure`'s; its own switches (no frame cap, no battery saver, no game recording) are kept only for the run.
+- The screen stays awake for the run: on Android `ui::android::keep_awake` calls the activity's `razdorKeepAwake` (`FLAG_KEEP_SCREEN_ON`, set on the UI thread, `android/MainActivityInject.java`); the desktop has no switch here (`bench::keep_awake`).
+- No state is written meanwhile: `Settings::save` skips writes while `running()`; the session slot is not ticked and
+  the noon autosave is skipped; the hotkeys are off (`hotkeys::allowed`); the input is held (`window_open`).
+- The results go to the log and to logcat (Android tag `RazdorBench`) as `RazdorBench cell=… key=value…` lines, then
+  `RazdorBench DONE`; `tools/perf/phone_bench.py` reads them. The file («Сохранить») is `razdor-bench-<UTC>.txt` in
+  `platform::app_dir()`; its text also goes to the clipboard. The device (the GL renderer, read after the first
+  frame: `device` at the first measured cell) is in each line.
+- Env hooks for runs with no one to press a button: `RAZDOR_SCENE=bench:run:mine|all` starts a run from the title
+  (with `RAZDOR_BENCH_END=<png>` the results are shot and the process ends; `RAZDOR_BENCH_SAVE=1` saves the file);
+  `RAZDOR_SCENE=bench:choice|running|results` shows the windows with stand-in numbers.
+
+Trap: `bench::Slot` is a cell; `std::cell::Cell` is the bench's own too (its `local!` statics), so keep the names apart.
+
 ## Traps
 
 - A test that returns early without the install looks green: when a change touches maps,

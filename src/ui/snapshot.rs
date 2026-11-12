@@ -742,6 +742,22 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             app.screen = Screen::CustomBattle(view);
             return Ok(());
         }
+        // `bench:choice` (the default), `bench:running`, `bench:results`: the performance test's windows over the
+        // settings' «Прочее» tab, with stand-in numbers. `bench:run:mine|all`: a real run from that tab (the lab's
+        // run: pair it with `RAZDOR_BENCH_END=<png>`, and `RAZDOR_BENCH_SAVE=1` to save the file).
+        "bench" => {
+            app.screen = Screen::Options;
+            super::main_menu::open_group(super::main_menu::Group::Other);
+            match parts.next() {
+                Some("run") => {
+                    let choice = if parts.next() == Some("all") { super::bench::Choice::All } else { super::bench::Choice::Mine };
+                    super::bench::start(app, choice)?;
+                }
+                Some(which) => super::bench::snapshot_stage(which),
+                None => super::bench::snapshot_stage("choice"),
+            }
+            return Ok(());
+        }
         "replay" => return stage_replay(app, parts.next()),
         "watch" => return stage_watch(app, parts.next()),
         _ => {}

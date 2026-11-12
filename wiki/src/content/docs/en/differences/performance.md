@@ -103,6 +103,17 @@ Measurements of the time required by the AI for 2 game days with 100 wandering a
 *   When the map is static, even 800x800 delivers over 2000 FPS. The bottleneck is the AI, not the rendering.
 *   Real maps in the game do not exceed 200x200 and contain up to 60 armies (many of which are stationary), so current campaign and community maps are far from the limits.
 
+## Performance test
+
+In Settings → Other, the "Performance test" row has a **"Run"** button. The test measures how fast the game runs on this device, on the map "Другой берег" (Another Shore): near (the default zoom) and the whole map at once.
+
+- **"My settings"** (about 30 seconds): your settings and map view.
+- **"All presets"** (about 3 minutes): "Original", "Low", "Medium" and "High" in 2.5D, and "Original" on the flat map.
+
+During the test the game takes no clicks or taps; Esc stops it. Your settings do not change: the test applies its own values for the run only, then everything comes back. The FPS cap and the battery saver are off during the test; vertical sync stays as the device sets it.
+
+The results table shows FPS, the frame time (median and the 99th percentile) and the number of slow frames (longer than 33 ms). The **"Save"** button writes the results to a text file in the Razdor folder (next to the saves) and copies the text to the clipboard where that works. You can attach the file to a bug report.
+
 **Technical limits of the map format:**
 *   Up to 255 armies per map.
 *   Up to 65,535 events.

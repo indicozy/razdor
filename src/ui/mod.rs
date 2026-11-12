@@ -1,6 +1,8 @@
 //! macroquad presentation layer. Reads rules state and calls rules methods.
 pub mod assets;
 pub mod audio;
+pub mod bench;
+pub mod bench_view;
 pub mod battle_view;
 pub mod building_view;
 pub mod chrome;
@@ -869,6 +871,8 @@ impl App {
 
     /// Before the process ends: the music stops and the settings are written.
     pub fn shutdown(&mut self) {
+        // A performance test cut short by the quit: the player's settings come back before they are written.
+        bench::abort(self);
         let t0 = std::time::Instant::now();
         // The game's replay is closed first: its last entries and end state are written.
         recording::quit(&mut self.game);
@@ -1292,6 +1296,10 @@ impl App {
     }
 
     pub fn frame(&mut self) {
+        // Esc (or Back) closes the performance test's windows, or stops its run: the key is used here.
+        if bench::handle_escape(self) {
+            return;
+        }
         #[cfg(any(target_os = "android", target_os = "ios"))]
         mobile::refresh_safe_insets();
         #[cfg(target_os = "android")]
@@ -1303,6 +1311,8 @@ impl App {
         // The screen's orientation from the settings (Android; applied at start and on each change).
         #[cfg(target_os = "android")]
         android::follow_orientation(self.audio.settings.orientation);
+        // A performance test's cell is set up before the screen draws (`bench::before_frame`).
+        bench::before_frame(self);
         if matches!(self.screen, Screen::Editor) {
             self.frame_content();
         } else {
@@ -1517,7 +1527,7 @@ impl App {
         if game_import::tick(base.as_deref().or(self.assets.dt.as_ref().map(|d| d.install.dir.as_path()))) {
             self.reload_install();
         }
-        widgets::set_input_blocked(!self.dialogs.is_empty() || self.help || held || self.map_view.back_to.is_some() || self.update_open || map_import::open() || game_import::busy() || widgets::popup_open());
+        widgets::set_input_blocked(!self.dialogs.is_empty() || self.help || held || self.map_view.back_to.is_some() || self.update_open || map_import::open() || game_import::busy() || widgets::popup_open() || bench::window_open());
         let mut restart = false;
         let mut custom_round = false;
         let custom_content = self.custom_content();
@@ -1915,6 +1925,8 @@ impl App {
         }
         // «Обновить игру из архива…»: its question, progress or notice, over the settings.
         game_import::modal();
+        // The performance test's windows (`bench_view`): the choice, the run's progress, the results.
+        bench_view::modal(self);
         // A fight decided on the map or in a building begins once the messages of that moment
         // are read (the original shows a meeting's words over the map, then the battle), and
         // on the map once the step that brought it has played: the attacker is seen arriving.
@@ -1964,7 +1976,7 @@ impl App {
             }
         }
         // The noon report asks for an autosave, named by the date.
-        if let Some(g) = self.game.as_mut().filter(|g| !g.ai_pending()) {
+        if let Some(g) = self.game.as_mut().filter(|g| !g.ai_pending() && !bench::running()) {
             if let Some(name) = g.autosave_due.take() {
                 razdor::frame_probe::time(razdor::frame_probe::Stage::Autosave, || saves::autosave_at_noon(g, &name));
             }
@@ -1972,7 +1984,10 @@ impl App {
         // The session slot (`session`): kept fresh while the game is played; no game on screen
         // (the main menu, the editor) ends the session.
         let session_ok = quick_save_ok && !self.test_play && !matches!(self.screen, Screen::Battle(_) | Screen::CustomBattle(_) | Screen::Editor) && !self.game.as_ref().is_some_and(|g| g.ai_pending());
-        razdor::frame_probe::time(razdor::frame_probe::Stage::Session, || self.session.tick(self.game.as_ref(), session_ok, crate::ui::clock::now()));
+        // Not during a performance test: its game is not the player's, so the session slot keeps the player's.
+        if !bench::running() {
+            razdor::frame_probe::time(razdor::frame_probe::Stage::Session, || self.session.tick(self.game.as_ref(), session_ok, crate::ui::clock::now()));
+        }
         if let Some(path) = self.pending_load.take() {
             self.load(&path);
             return;

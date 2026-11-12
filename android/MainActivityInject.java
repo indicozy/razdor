@@ -563,6 +563,19 @@ private void razdorApplyImmersive(boolean on) {
 // src/main.rs). Called from the game's thread; the move is made on the UI thread. Without it the
 // window stays frozen on the screen until the process is gone, and the system removes it only
 // after it notices the death.
+public void razdorKeepAwake(final boolean on) {
+    runOnUiThread(new Runnable() {
+        @Override
+        public void run() {
+            if (on) {
+                getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            } else {
+                getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            }
+        }
+    });
+}
+
 public void razdorHideForExit() {
     runOnUiThread(new Runnable() {
         @Override

@@ -657,3 +657,20 @@ pub fn read_safe_insets() -> Option<(f32, f32, f32, f32)> {
 pub extern "C" fn Java_io_github_indicozy_razdor_MainActivity_razdorOnPause(_env: *mut sys::JNIEnv, _class: sys::jclass) {
     super::session::flush_now();
 }
+
+/// Keeps the screen awake (`FLAG_KEEP_SCREEN_ON` on the activity's window, set and cleared on its UI thread by
+/// `razdorKeepAwake`): the performance test holds it for its run, so the screen does not dim mid-measure.
+pub fn keep_awake(on: bool) {
+    // SAFETY: as in `set_immersive`; the activity exists once the frames run.
+    unsafe {
+        let env = attach_jni_env();
+        let keep = method(env, activity_class(env).obj, "razdorKeepAwake", "(Z)V", false);
+        if keep.is_null() || cleared(env) {
+            razdor::diag!("razdorKeepAwake is missing");
+            return;
+        }
+        // A jboolean is passed as an int through the variadic call (Rust does not take bool there).
+        ((**env).CallVoidMethod.unwrap())(env, ACTIVITY, keep, on as i32);
+        cleared(env);
+    }
+}

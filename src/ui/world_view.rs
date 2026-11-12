@@ -134,9 +134,17 @@ fn extend_edge() -> bool {
 }
 
 /// `RAZDOR_MAP_FIT=1`: the map's zoom is the whole map's floor, as a developer snapshot's (read once).
+/// The performance test's far cells set the same floor (`set_bench_fit`).
 fn map_fit_env() -> bool {
     static ENV: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ENV.get_or_init(|| std::env::var("RAZDOR_MAP_FIT").is_ok_and(|v| v.trim() == "1"))
+    *ENV.get_or_init(|| std::env::var("RAZDOR_MAP_FIT").is_ok_and(|v| v.trim() == "1")) || BENCH_FIT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The performance test's far cell: the whole map is in the view (`map_fit_env`). Set per cell, off after the test.
+static BENCH_FIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_bench_fit(on: bool) {
+    BENCH_FIT.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// `RAZDOR_SPRITE_LOD=1` (a developer switch, off by default): the map objects are drawn from the half-size

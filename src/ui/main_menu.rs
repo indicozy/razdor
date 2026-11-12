@@ -1603,7 +1603,7 @@ impl Group {
             Group::Battle => &[Row::WalkSpeed, Row::AnimSpeed, Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience, Row::HitShake],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
-            Group::Other => &[Row::Updates, Row::Import, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame],
+            Group::Other => &[Row::Updates, Row::Import, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::Bench],
         }
     }
 }
@@ -1669,11 +1669,12 @@ pub enum Row {
     ChronicleSummary,
     BatterySaver,
     RecordGame,
+    Bench,
 }
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 58] = [
+pub const ALL: [Row; 59] = [
         Row::GraphicsQuality,
         Row::MapZoom,
         Row::ScrollSpeed,
@@ -1732,6 +1733,7 @@ pub const ALL: [Row; 58] = [
         Row::ChronicleSummary,
         Row::BatterySaver,
         Row::RecordGame,
+        Row::Bench,
     ];
 
     /// The long hint a «?» pop-up shows (backlog 1508), for the rows whose hint runs past a line.
@@ -2511,12 +2513,30 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
                 super::update_view::check_by_hand();
             }
         }
+        Row::Bench => bench_row(c, geo, over_map),
         Row::Import => {
             // «Обновить игру из архива…» (Razdor's): the button, or why it is not offered.
             super::game_import::settings_row(Rect::new(c.x, c.y, c.w, geo.row_h), over_map);
             c.y += geo.row_h + geo.gap;
         }
     }
+}
+
+/// Razdor's «Тест производительности» (the owner's request, 2026-11-12): a button that opens the test's choice
+/// window (`bench::open_choice`). Over a game it is off, with the reason under it: the test starts from the main
+/// menu's settings only.
+fn bench_row(c: &mut RowCol, geo: &RowGeo, over_map: bool) {
+    if !over_map {
+        if labelled_row(c, geo, tr("Performance test"), tr("Run")).0 {
+            super::bench::open_choice();
+        }
+        return;
+    }
+    let bw = geo.min_w.max(120.0 * geo.k);
+    chrome::shadow_text(tr("Performance test"), c.x, c.y + geo.row_h * 0.5 + geo.size * 0.35, geo.size, chrome::CREAM);
+    chrome::marble_button(Rect::new(c.x + c.w - bw, c.y, bw, geo.row_h), tr("Run"), false, false);
+    chrome::shadow_text(tr("Available from the main menu"), c.x + 4.0 * geo.k, c.y + geo.row_h + geo.size, geo.size * 0.85, Color::new(0.93, 0.87, 0.75, 0.75));
+    c.y += geo.row_h + geo.lh + geo.gap;
 }
 
 /// Starts a settings pane's scroll view (`view`, screen px): the scroll the last frame settled
