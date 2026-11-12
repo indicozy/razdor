@@ -114,6 +114,8 @@ def run_case(case, index, out, dt_dir, binary):
         "RAZDOR_SIZE": case["size"],
         "RAZDOR_SCENE": case["scene"],
         "RAZDOR_SNAPSHOT": str(shot),
+        # The repo's promo ads (the main menu's corner picture, src/ui/ads.rs): the shipped ad.
+        "RAZDOR_ADS_DIR": str(REPO / "ads"),
     }
     env.update(case["extra"])
     # A case's own saved settings: `RAZDOR_CASE_AUDIO` (the JSON of `audio.json`) is this tool's key,

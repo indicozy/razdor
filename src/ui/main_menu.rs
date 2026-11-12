@@ -835,7 +835,9 @@ fn oval_edge(top: f32, bottom: f32) -> f32 {
 /// The promo's hover and press over its whole block `hit`: a press opens the link. Returns whether
 /// the block is lit (hovered or pressed).
 fn promo_pointer(hit: Rect, url: &str) -> bool {
-    let (hover, down, pressed) = super::widgets::button_state(hit, true);
+    // Under an open window the promo is not live (as the buttons under it are not): its target is
+    // disabled, so it neither lights nor opens the link.
+    let (hover, down, pressed) = super::widgets::button_state(hit, !super::widgets::input_blocked());
     if pressed {
         cue(Cue::Button);
         open_link(url);
@@ -897,6 +899,39 @@ fn upright_row(left: f32, width: f32, bottom: f32, pic_w: f32, pic_h: f32, block
     (row, Rect::new(left, row.y + (row_h - pic_h) / 2.0, pic_w, pic_h))
 }
 
+/// The upright promo beside the buttons, when they reach its row (`upright_promo`): in the column
+/// right of the buttons (12 dp from their right edge, to the margin), the picture at the bottom on
+/// `bottom` and the caption above it, left-aligned, 16 dp (15, 14 when it takes more than four lines).
+fn upright_beside(k: f32, dp: f32, bottom: f32, promo: &super::ads::Promo) {
+    let safe = super::display::safe_area();
+    let oval_right = (0..BUTTONS.len()).map(|i| oval_rect(i).x + oval_rect(i).w).fold(0.0, f32::max);
+    let left = oval_right + 12.0 * dp;
+    let width = screen_width() - safe.right - 12.0 * dp - left;
+    if width < 60.0 * dp {
+        return;
+    }
+    let pic_h = picture_height(promo, width);
+    let caption = promo.caption();
+    super::dt_font::legacy_metrics_if(true, || {
+        let (size, lines) = [16.0, 15.0, 14.0]
+            .iter()
+            .map(|s| (s * dp, wrap_label(caption, width, s * dp)))
+            .find(|(_, l)| l.len() <= 4)
+            .unwrap_or_else(|| (14.0 * dp, wrap_label(caption, width, 14.0 * dp)));
+        let pitch = size * 1.25;
+        let gap = 6.0 * k;
+        let block_h = lines.len() as f32 * pitch + gap + pic_h;
+        let block = Rect::new(left, bottom - block_h, width, block_h);
+        let pic = Rect::new(left, bottom - pic_h, width, pic_h);
+        let lit = promo_pointer(block, &promo.url);
+        let ink = if lit { chrome::GOLD } else { PROMO_INK };
+        for (i, line) in lines.iter().enumerate() {
+            chrome::shadow_text(line, left, block.y + i as f32 * pitch + size * 0.85, size, ink);
+        }
+        promo_picture(promo, pic, k, lit);
+    });
+}
+
 /// The sideways promo's block (`sideways_promo`): the caption (`text_h` high), a `gap`, then the
 /// picture, all `pic_w` wide from `left` and centred on the screen's height `screen_h`. Returns
 /// the block and the picture.
@@ -919,6 +954,15 @@ fn upright_promo(k: f32, dp: f32, bottom: f32, promo: &super::ads::Promo) {
     let cap_x = left + pic_w + 10.0 * dp;
     let cap_w = right - cap_x;
     let caption = promo.caption();
+    // The buttons reach the row's band (no install: the not-found block moves the column down):
+    // the promo goes beside them instead.
+    let band_top = bottom - pic_h.max(60.0 * dp);
+    if (0..BUTTONS.len()).any(|i| {
+        let r = oval_rect(i);
+        r.y < bottom && r.y + r.h > band_top
+    }) {
+        return upright_beside(k, dp, bottom, promo);
+    }
     super::dt_font::legacy_metrics_if(true, || {
         // 16 dp, then 15, then 14: the largest size that keeps the caption to three lines.
         let (size, lines) = [16.0, 15.0, 14.0]
@@ -940,12 +984,21 @@ fn upright_promo(k: f32, dp: f32, bottom: f32, promo: &super::ads::Promo) {
 }
 
 /// The promo on a phone held sideways: on the left, vertically centred, left of the oval buttons
-/// (their left edge less a 16 × k gap); the caption above the picture, left-aligned to it.
+/// (their left edge less a 16 × k gap); the caption above the picture, left-aligned to it. Without
+/// an install (the not-found block is on the left) it sits right of the buttons instead.
 fn sideways_promo(k: f32, dp: f32, promo: &super::ads::Promo) {
     let safe = super::display::safe_area();
-    let left = safe.left + 16.0 * k;
-    let oval_left = (0..BUTTONS.len()).map(|i| oval_rect(i).x).fold(f32::MAX, f32::min);
-    let room = oval_left - 16.0 * k - left;
+    // Without an install the not-found block takes the left (no tile stack on the right): the
+    // promo goes to the right of the buttons, in the free column there.
+    let (left, room) = if SIDE_TILES.with(Cell::get) {
+        let left = safe.left + 16.0 * k;
+        let oval_left = (0..BUTTONS.len()).map(|i| oval_rect(i).x).fold(f32::MAX, f32::min);
+        (left, oval_left - 16.0 * k - left)
+    } else {
+        let oval_right = (0..BUTTONS.len()).map(|i| oval_rect(i).x + oval_rect(i).w).fold(0.0, f32::max);
+        let left = oval_right + 16.0 * k;
+        (left, screen_width() - safe.right - 16.0 * k - left)
+    };
     let pic_w = (160.0 * dp).min(room);
     if pic_w <= 0.0 {
         return;
