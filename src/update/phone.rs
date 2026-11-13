@@ -99,17 +99,21 @@ mod android {
         }
     }
 
-    /// Asks the downloads under way to stop (`razdorDownloadCancel`): each returns "cancelled" at
-    /// once, closing its connection if it is waiting for a byte.
-    pub fn download_cancel() {
+    /// Asks the download of the file `path` to stop (`razdorDownloadCancelPath`): it returns
+    /// "cancelled" at once, closing its connection if it is waiting for a byte. The other downloads
+    /// under way (the pieces and hedges of a file) run on.
+    pub fn download_cancel(path: &Path) {
+        let Some(path) = path.to_str() else { return };
         // SAFETY: as in `cache_dir`.
         unsafe {
             let env = attach_jni_env();
-            let mid = method(env, activity_class(env).obj, "razdorDownloadCancel", "()V", false);
+            let sig = "(Ljava/lang/String;)V";
+            let mid = method(env, activity_class(env).obj, "razdorDownloadCancelPath", sig, false);
             if mid.is_null() || cleared(env) {
                 return;
             }
-            ((**env).CallVoidMethod.unwrap())(env, ACTIVITY, mid);
+            let path = string(env, path);
+            ((**env).CallVoidMethod.unwrap())(env, ACTIVITY, mid, path.obj);
             let _ = cleared(env);
         }
     }
@@ -182,7 +186,7 @@ pub use android::{cache_dir, download, download_cancel, download_range, get, ins
 /// iOS: a download is one `NSData` call that cannot be stopped in the middle (the caller's
 /// cancel is seen when it returns). Nothing to do.
 #[cfg(target_os = "ios")]
-pub fn download_cancel() {}
+pub fn download_cancel(_path: &std::path::Path) {}
 
 #[cfg(target_os = "ios")]
 pub fn get(url: &str, _seconds: u32) -> Result<Vec<u8>, String> {

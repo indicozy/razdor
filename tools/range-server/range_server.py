@@ -11,6 +11,8 @@ test needs:
                       bytes, with a matching Content-Length): a part that comes back short
   --fail-once START   the first request for bytes starting at START is answered 500
   --fail-always START every request for bytes starting at START is answered 500
+  --slow-start START  the requests for bytes starting at START (only those: one connection) are sent
+  --slow-rate N       at N bytes a second instead of --throttle (the slow tail of a download)
 
 Usage: range_server.py --root DIR [--port 8765] [--throttle N] ...
 Prints "ready <port>" on stdout once it listens. Stops on SIGTERM or Ctrl-C.
@@ -98,6 +100,10 @@ def make_handler(state, root):
             self.end_headers()
             if head:
                 return
+            # One connection can be slower than the rest (--slow-start): the tail of a download.
+            rate = args.throttle
+            if ranged and args.slow_start is not None and start == args.slow_start:
+                rate = args.slow_rate
             with open(path, "rb") as f:
                 f.seek(start)
                 left = length
@@ -111,8 +117,8 @@ def make_handler(state, root):
                         # The client gave up (a cancel, a retry): not an error of the server.
                         return
                     left -= len(chunk)
-                    if args.throttle:
-                        time.sleep(len(chunk) / float(args.throttle))
+                    if rate:
+                        time.sleep(len(chunk) / float(rate))
 
     return Handler
 
@@ -126,7 +132,11 @@ def main():
     p.add_argument("--cut-once", type=int, default=None)
     p.add_argument("--fail-once", type=int, default=None)
     p.add_argument("--fail-always", type=int, default=None)
+    p.add_argument("--slow-start", type=int, default=None)
+    p.add_argument("--slow-rate", type=int, default=0)
     args = p.parse_args()
+    if (args.slow_start is None) != (args.slow_rate <= 0):
+        p.error("--slow-start and --slow-rate go together (a rate above 0)")
     state = State(args)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(state, os.path.abspath(args.root)))
     server.daemon_threads = True

@@ -3,23 +3,37 @@
 //!
 //! The rule: a first request for byte 0 only (the probe) tells the size and whether ranges work.
 //! A 206 with a size over [`MIN_SIZE`] (and not over the cap) gets [`PIECES`] pieces at once, each
-//! ≥ [`MIN_PIECE`] (fewer for a smaller file). Each piece goes to its own file (`<dest>.piece<i>`)
-//! and must come back with its exact byte count; a piece that stalls, fails, comes back short or
-//! not as a 206 is tried again, [`TRIES`] times in all, and then the whole address fails. The
-//! pieces are joined into `dest` in order and the caller checks the whole file (size, SHA-256),
-//! as for a single stream. A 200 to the probe (no ranges), a probe that fails, or a small file
-//! gives [`Parted::Single`]: the caller takes its one stream as before.
+//! ≥ [`MIN_PIECE`] (fewer for a smaller file).
+//!
+//! A piece RESUMES. Its requests write their bytes into their own files; when one stalls, fails or
+//! comes back short, the bytes it has are kept and the next request asks for the rest of the range
+//! (a Range request from the first byte not yet had). A piece gets [`TRIES`] tries in all, a 429 or
+//! 503 waits first (see [`BACKOFF`]) and is not a try; then the whole address fails.
+//!
+//! Tail hedging: when every other piece is whole, a piece that is slow gets ONE more request, for
+//! the rest of its bytes (from the first byte its primary request has not yet had). The first of the
+//! two to make the piece whole wins; the other is cancelled. "Slow" is no new byte for
+//! [`Tuning::stall`], or a rate under the finished pieces' average divided by [`Tuning::slow_ratio`]
+//! once the piece is [`Tuning::min_age`] old ([`TUNING`] in the app).
+//!
+//! The pieces are joined into `dest` in order and the caller checks the whole file (size, SHA-256),
+//! as for a single stream. A 200 to the probe (no ranges), a probe that fails, or a small file gives
+//! [`Parted::Single`]: the caller takes its one stream as before.
+//!
+//! The network contract ([`RangeNet::range`]): a request writes its body into its file only when the
+//! reply is a 206; a request that breaks off inside the body leaves the bytes that came (a prefix of
+//! its range); any other reply leaves no file. That is what makes a partial file a resumable prefix.
 //!
 //! Nothing here needs macroquad or a platform: the network is a [`RangeNet`] (the desktop's
 //! `curl`, the phones' downloader, a test's fake). A cancel and the progress are watched by the
 //! thread that calls [`fetch`]; the pieces only see a stop flag.
 
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::Mutex;
-use std::time::Duration;
+use std::sync::{Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 /// The pieces a file is fetched in at once.
 pub const PIECES: u64 = 8;
@@ -38,8 +52,23 @@ pub const MIN_SIZE: u64 = 4 << 20;
 pub const TRIES: u32 = 3;
 /// The reason of a cancelled fetch (the caller reads its own cancel flag as well).
 pub const CANCELLED: &str = "cancelled";
-/// How often the thread that runs [`fetch`] reads the progress and the cancel.
+/// How often the thread that runs [`fetch`] reads the progress and the cancel, and how often a piece
+/// waits on its hedge.
 const POLL: Duration = Duration::from_millis(100);
+/// The reason a piece gives when it is stopped by another piece's failure or a cancel.
+const STOPPED: &str = "stopped";
+
+/// When a running piece is hedged (see the module's rule): a piece with no new byte for `stall`, or
+/// whose rate is under the finished pieces' average divided by `slow_ratio` once it is `min_age` old.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Tuning {
+    pub stall: Duration,
+    pub min_age: Duration,
+    pub slow_ratio: f64,
+}
+
+/// The app's hedging: a piece with no byte for 8 s, or 3 s old and at a third of the others' rate.
+pub const TUNING: Tuning = Tuning { stall: Duration::from_secs(8), min_age: Duration::from_secs(3), slow_ratio: 3.0 };
 
 /// The answer to one range request: its HTTP status (206 when the range was given, 200 when the
 /// server ignored it) and the file's whole size from `Content-Range`, when the server says it.
@@ -54,16 +83,17 @@ pub struct RangeReply {
 /// The network the pieces use. `Sync`: the pieces run on threads.
 pub trait RangeNet: Sync {
     /// Bytes `start..=end` of `url` into the file `path` (made new or replaced). A 206 writes the
-    /// range's body there; a 200 (the server ignored the range) writes nothing the caller needs.
-    /// `progress` gets the bytes of this request so far; `cancelled` is asked as it goes, and true
-    /// stops the request with an error.
+    /// range's body there, and a request that breaks off inside it leaves the bytes that came; any
+    /// other reply (a 200, a 429, a refused status) leaves no file. `progress` gets the bytes of this
+    /// request so far (written to the file); `cancelled` is asked as it goes, and true stops the
+    /// request with an error.
     fn range(&self, url: &str, path: &Path, start: u64, end: u64, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool) -> Result<RangeReply, String>;
     /// Waits `how_long` before the next try of a piece; returns early when `stopped` is true. A test
     /// gives a fake that records the wait instead.
     fn wait(&self, how_long: Duration, stopped: &dyn Fn() -> bool) {
-        let until = std::time::Instant::now() + how_long;
+        let until = Instant::now() + how_long;
         while !stopped() {
-            let now = std::time::Instant::now();
+            let now = Instant::now();
             if now >= until {
                 break;
             }
@@ -119,9 +149,158 @@ fn sibling(dest: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(name)
 }
 
-/// The file piece `i` of `dest` is fetched into.
-pub fn piece_path(dest: &Path, i: usize) -> PathBuf {
-    sibling(dest, &format!("piece{i}"))
+/// A new file of piece `piece` for one request (`what` says which). Each name is used once in the
+/// process, so a retry, a hedge or a later download never shares a file with another request.
+fn new_file(dest: &Path, piece: usize, what: &str) -> PathBuf {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    sibling(dest, &format!("piece{piece}.{what}{seq}"))
+}
+
+/// The size of the file at `path` (0 when there is none).
+fn file_len(path: &Path) -> u64 {
+    fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+}
+
+/// A piece's primary request in flight: its first byte, its file, the bytes it has so far.
+struct Req {
+    from: u64,
+    file: PathBuf,
+    got: u64,
+}
+
+/// The piece's hedge (at most one per piece): none yet, running (its first byte and its bytes so
+/// far; its file is in `made`), or done (won, failed or cancelled).
+#[derive(Default)]
+enum Hedge {
+    #[default]
+    None,
+    Running { from: u64, got: u64 },
+    Done,
+}
+
+/// A piece's state, under its lock: the threads of the piece and the coordinator read and write it.
+#[derive(Default)]
+struct Life {
+    /// The primary's first request started (the piece's clock for its rate).
+    started: Option<Instant>,
+    /// The piece became whole.
+    finished: Option<Instant>,
+    /// Whole: `segments` hold its bytes, in order.
+    won: bool,
+    /// The bytes of the primary's finished requests that count, in order from the piece's first byte:
+    /// each file and its bytes. They cover the piece up to the primary's next request.
+    kept: Vec<(PathBuf, u64)>,
+    /// The primary's request in flight.
+    cur: Option<Req>,
+    hedge: Hedge,
+    /// The files that make the piece whole, in order, each with the bytes that count.
+    segments: Vec<(PathBuf, u64)>,
+    /// Every file the piece made (removed when the fetch ends).
+    made: Vec<PathBuf>,
+}
+
+impl Life {
+    fn kept_bytes(&self) -> u64 {
+        self.kept.iter().map(|(_, n)| n).sum()
+    }
+
+    /// The bytes on hand from the piece's first byte: the kept ones with the primary's, or the
+    /// hedge's when that reaches further.
+    fn on_hand(&self, start: u64) -> u64 {
+        let mut have = self.kept_bytes() + self.cur.as_ref().map_or(0, |c| c.got);
+        if let Hedge::Running { from, got, .. } = self.hedge {
+            have = have.max(from - start + got);
+        }
+        have
+    }
+
+    /// The files that hold the piece's bytes from its first byte up to `to` (exclusive), in order,
+    /// each with the bytes that count; None when they do not reach `to`.
+    fn cover(&self, start: u64, to: u64) -> Option<Vec<(PathBuf, u64)>> {
+        let mut out = Vec::new();
+        let mut at = start;
+        for (file, n) in &self.kept {
+            if at >= to {
+                break;
+            }
+            let take = (*n).min(to - at);
+            out.push((file.clone(), take));
+            at += take;
+        }
+        if at < to {
+            let cur = self.cur.as_ref()?;
+            if cur.from != at || file_len(&cur.file) < to - at {
+                return None;
+            }
+            out.push((cur.file.clone(), to - at));
+            at = to;
+        }
+        (at == to).then_some(out)
+    }
+
+    /// The piece is whole, from these files.
+    fn win(&mut self, segments: Vec<(PathBuf, u64)>) {
+        self.segments = segments;
+        self.won = true;
+        self.cur = None;
+        self.finished = Some(Instant::now());
+    }
+}
+
+/// One piece: its byte range and its state.
+struct Piece {
+    start: u64,
+    end: u64,
+    life: Mutex<Life>,
+    /// Set when the hedge won: the primary's request is cancelled.
+    primary_stop: AtomicBool,
+    /// Set when the primary won: the hedge is cancelled.
+    hedge_stop: AtomicBool,
+}
+
+impl Piece {
+    fn new(start: u64, end: u64) -> Piece {
+        Piece { start, end, life: Mutex::new(Life::default()), primary_stop: AtomicBool::new(false), hedge_stop: AtomicBool::new(false) }
+    }
+
+    fn size(&self) -> u64 {
+        self.end - self.start + 1
+    }
+
+    fn lock(&self) -> MutexGuard<'_, Life> {
+        self.life.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn won(&self) -> bool {
+        self.lock().won
+    }
+}
+
+/// One fetch: the network, the address, the pieces, and the stop and the first failure they share.
+struct Ctx<'a> {
+    net: &'a dyn RangeNet,
+    url: &'a str,
+    dest: &'a Path,
+    pieces: Vec<Piece>,
+    /// Set by a cancel or a failed piece: every request stops.
+    stop: AtomicBool,
+    failure: Mutex<Option<String>>,
+}
+
+impl Ctx<'_> {
+    fn stopped(&self) -> bool {
+        self.stop.load(Ordering::SeqCst)
+    }
+
+    /// A piece failed for good: the first reason is the fetch's, and every other piece stops.
+    fn fail(&self, why: String) {
+        let mut first = self.failure.lock().unwrap_or_else(|e| e.into_inner());
+        if first.is_none() {
+            *first = Some(why);
+        }
+        self.stop.store(true, Ordering::SeqCst);
+    }
 }
 
 /// Fetches `url` into `dest` in pieces when the server allows it (see the module's rule). `cap` is
@@ -130,6 +309,28 @@ pub fn piece_path(dest: &Path, i: usize) -> PathBuf {
 /// Errors: a piece that failed all its tries (its reason), or [`CANCELLED`]. On an error, or a
 /// cancel, no piece is left and `dest` is not written.
 pub fn fetch(net: &dyn RangeNet, url: &str, dest: &Path, cap: u64, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool) -> Result<Parted, String> {
+    fetch_tuned(net, url, dest, cap, progress, cancelled, tuning())
+}
+
+/// The hedging the app uses. Tests turn it off for the baseline measurement (`HEDGE_OFF`).
+#[cfg(not(test))]
+fn tuning() -> Tuning {
+    TUNING
+}
+
+#[cfg(test)]
+static HEDGE_OFF: AtomicBool = AtomicBool::new(false);
+
+#[cfg(test)]
+fn tuning() -> Tuning {
+    if HEDGE_OFF.load(Ordering::SeqCst) {
+        return Tuning { stall: Duration::from_secs(1 << 40), min_age: Duration::from_secs(1 << 40), slow_ratio: 3.0 };
+    }
+    TUNING
+}
+
+/// [`fetch`] with the hedging given (the tests use shorter times).
+pub fn fetch_tuned(net: &dyn RangeNet, url: &str, dest: &Path, cap: u64, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool, tune: Tuning) -> Result<Parted, String> {
     let probe = sibling(dest, "probe");
     let answer = net.range(url, &probe, 0, 0, &|_| {}, cancelled);
     let _ = fs::remove_file(&probe);
@@ -145,117 +346,324 @@ pub fn fetch(net: &dyn RangeNet, url: &str, dest: &Path, cap: u64, progress: &dy
     if total <= MIN_SIZE || total > cap {
         return Ok(Parted::Single);
     }
-    let pieces = layout(total, pieces_for(url));
-    let paths: Vec<PathBuf> = (0..pieces.len()).map(|i| piece_path(dest, i)).collect();
-    let fetched = fetch_pieces(net, url, &pieces, &paths, progress, cancelled);
+    let ranges = layout(total, pieces_for(url));
+    let ctx = Ctx {
+        net,
+        url,
+        dest,
+        pieces: ranges.iter().map(|&(start, end)| Piece::new(start, end)).collect(),
+        stop: AtomicBool::new(false),
+        failure: Mutex::new(None),
+    };
+    let ran = run(&ctx, progress, cancelled, tune);
     // A cancel is the cancel, whichever piece's error was the first one given.
-    let result = if cancelled() { Err(CANCELLED.to_string()) } else { fetched.and_then(|()| join(dest, &paths, total)) };
-    for path in &paths {
-        let _ = fs::remove_file(path);
+    let result = if cancelled() {
+        Err(CANCELLED.to_string())
+    } else {
+        ran.and_then(|()| join(dest, &segments(&ctx), total))
+    };
+    for piece in &ctx.pieces {
+        for path in &piece.lock().made {
+            let _ = fs::remove_file(path);
+        }
     }
     result?;
     progress(total);
-    crate::diag!("download: {total} bytes in {} pieces from {url}", pieces.len());
+    crate::diag!("download: {total} bytes in {} pieces from {url}", ranges.len());
     Ok(Parted::Joined)
 }
 
-/// Every piece on its own thread; this thread reads the progress and the cancel. The first piece
-/// that fails all its tries stops the others and is the error.
-fn fetch_pieces(net: &dyn RangeNet, url: &str, pieces: &[(u64, u64)], paths: &[PathBuf], progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool) -> Result<(), String> {
-    for path in paths {
-        let _ = fs::remove_file(path);
-    }
-    let done: Vec<AtomicU64> = pieces.iter().map(|_| AtomicU64::new(0)).collect();
-    let stop = AtomicBool::new(false);
-    let running = AtomicUsize::new(pieces.len());
-    let failure: Mutex<Option<String>> = Mutex::new(None);
+/// Every piece's files that make it whole, in order.
+fn segments(ctx: &Ctx) -> Vec<(PathBuf, u64)> {
+    ctx.pieces.iter().flat_map(|p| p.lock().segments.clone()).collect()
+}
+
+/// Every piece on its own thread (the primary requests), and the coordinator here: it reads the
+/// progress and the cancel, and starts a hedge when a piece is slow and every other piece is whole.
+/// The first piece that fails for good stops the others and is the error.
+fn run(ctx: &Ctx, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool, tune: Tuning) -> Result<(), String> {
+    let n = ctx.pieces.len();
+    let running = AtomicUsize::new(n);
+    let begun = Instant::now();
+    let mut high = vec![0u64; n];
+    let mut seen = vec![0u64; n];
+    let mut changed = vec![begun; n];
     std::thread::scope(|s| {
-        for (i, &(start, end)) in pieces.iter().enumerate() {
-            let (done, stop, running, failure, path) = (&done[i], &stop, &running, &failure, &paths[i]);
+        for i in 0..n {
+            let running = &running;
             s.spawn(move || {
-                if let Err(why) = fetch_piece(net, url, path, i, start, end, done, stop) {
-                    let mut first = failure.lock().unwrap_or_else(|e| e.into_inner());
-                    if first.is_none() {
-                        *first = Some(why);
-                    }
-                    stop.store(true, Ordering::SeqCst);
+                if let Err(why) = primary(ctx, i) {
+                    ctx.fail(why);
                 }
                 running.fetch_sub(1, Ordering::SeqCst);
             });
         }
         while running.load(Ordering::SeqCst) > 0 {
             if cancelled() {
-                stop.store(true, Ordering::SeqCst);
+                ctx.stop.store(true, Ordering::SeqCst);
             }
-            progress(done.iter().map(|d| d.load(Ordering::SeqCst)).sum());
+            let now = Instant::now();
+            let mut sum = 0;
+            let mut ons = Vec::with_capacity(n);
+            for (i, p) in ctx.pieces.iter().enumerate() {
+                let on = p.lock().on_hand(p.start);
+                if on > seen[i] {
+                    seen[i] = on;
+                    changed[i] = now;
+                }
+                high[i] = high[i].max(on);
+                sum += high[i];
+                ons.push(on);
+            }
+            progress(sum);
+            if !ctx.stopped() {
+                let avg = average_rate(ctx);
+                for (i, &on) in ons.iter().enumerate() {
+                    if !hedge_due(ctx, i, now, changed[i], on, avg, tune) {
+                        continue;
+                    }
+                    if let Some((from, file)) = start_hedge(ctx, i) {
+                        running.fetch_add(1, Ordering::SeqCst);
+                        let running = &running;
+                        s.spawn(move || {
+                            hedge_run(ctx, i, from, &file);
+                            running.fetch_sub(1, Ordering::SeqCst);
+                        });
+                        crate::diag!("download piece {i}: a slow tail, hedged from byte {from}");
+                    }
+                }
+            }
             std::thread::sleep(POLL);
         }
     });
-    match failure.into_inner().unwrap_or_else(|e| e.into_inner()) {
-        Some(why) => Err(why),
-        None => Ok(()),
+    if let Some(why) = ctx.failure.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        return Err(why);
+    }
+    if ctx.pieces.iter().any(|p| !p.won()) {
+        return Err("a piece is not whole".into());
+    }
+    Ok(())
+}
+
+/// The average rate (bytes a second) of the whole pieces, each over its own time from its first
+/// request to its end; None while no piece is whole.
+fn average_rate(ctx: &Ctx) -> Option<f64> {
+    let rates: Vec<f64> = ctx
+        .pieces
+        .iter()
+        .filter_map(|p| {
+            let life = p.lock();
+            let (from, to) = (life.started?, life.finished?);
+            life.won.then(|| p.size() as f64 / to.duration_since(from).as_secs_f64().max(1e-3))
+        })
+        .collect();
+    (!rates.is_empty()).then(|| rates.iter().sum::<f64>() / rates.len() as f64)
+}
+
+/// Whether piece `i` should get its hedge now: it has none, it is not whole, every other piece is
+/// whole, and it is slow (see the module's rule). `on` is its bytes on hand, `changed` the last time
+/// they grew, `avg` the whole pieces' average rate.
+fn hedge_due(ctx: &Ctx, i: usize, now: Instant, changed: Instant, on: u64, avg: Option<f64>, tune: Tuning) -> bool {
+    let p = &ctx.pieces[i];
+    let started = {
+        let life = p.lock();
+        if life.won || !matches!(life.hedge, Hedge::None) {
+            return false;
+        }
+        match life.started {
+            Some(started) => started,
+            None => return false,
+        }
+    };
+    if !ctx.pieces.iter().enumerate().all(|(j, q)| j == i || q.won()) {
+        return false;
+    }
+    let quiet = now.duration_since(changed);
+    let elapsed = now.duration_since(started).as_secs_f64().max(1e-3);
+    let slow_rate = avg.is_some_and(|a| elapsed >= tune.min_age.as_secs_f64() && (on as f64 / elapsed) < a / tune.slow_ratio);
+    quiet >= tune.stall || slow_rate
+}
+
+/// Marks piece `i`'s hedge as running, from the first byte its primary has not yet had, with a new
+/// file. Returns that byte and the file; None when the piece is whole or the rest is empty.
+fn start_hedge(ctx: &Ctx, i: usize) -> Option<(u64, PathBuf)> {
+    let p = &ctx.pieces[i];
+    let mut life = p.lock();
+    if life.won || !matches!(life.hedge, Hedge::None) {
+        return None;
+    }
+    let from = match &life.cur {
+        Some(c) => c.from + c.got,
+        None => p.start + life.kept_bytes(),
+    };
+    if from > p.end {
+        return None;
+    }
+    let file = new_file(ctx.dest, i, "hedge");
+    life.made.push(file.clone());
+    life.hedge = Hedge::Running { from, got: 0 };
+    Some((from, file))
+}
+
+/// The hedge of piece `i`: the bytes `from..=end` into `file`, one request. It wins the piece when
+/// the primary's bytes before `from` are on hand (see [`Life::cover`]); the primary is then cancelled.
+fn hedge_run(ctx: &Ctx, i: usize, from: u64, file: &Path) {
+    let p = &ctx.pieces[i];
+    let want = p.end - from + 1;
+    let stopped = || ctx.stopped() || p.hedge_stop.load(Ordering::SeqCst);
+    let result = ctx.net.range(ctx.url, file, from, p.end, &|n| set_hedge_got(p, n), &stopped);
+    let whole = matches!(result, Ok(RangeReply { status: 206, .. })) && file_len(file) == want;
+    let mut life = p.lock();
+    life.hedge = Hedge::Done;
+    if !whole || life.won {
+        return;
+    }
+    match life.cover(p.start, from) {
+        Some(mut segments) => {
+            segments.push((file.to_path_buf(), want));
+            life.win(segments);
+            p.primary_stop.store(true, Ordering::SeqCst);
+            crate::diag!("download piece {i}: the hedge from byte {from} finished first");
+        }
+        None => crate::diag!("download piece {i}: the hedge cannot join the primary's bytes; dropped"),
     }
 }
 
-/// The reason a piece gives when it is stopped by another piece's failure or a cancel.
-const STOPPED: &str = "stopped";
+fn set_hedge_got(p: &Piece, n: u64) {
+    if let Hedge::Running { got, .. } = &mut p.lock().hedge {
+        *got = n;
+    }
+}
 
-/// One piece: up to [`TRIES`] tries, each request checked for its 206 and its exact byte count. A 429
-/// or 503 is not a try: the piece waits ([`BACKOFF`], or the server's `Retry-After`) and asks again,
-/// until the backoff is spent; then it counts as a failed try like any other.
-#[allow(clippy::too_many_arguments)]
-fn fetch_piece(net: &dyn RangeNet, url: &str, path: &Path, i: usize, start: u64, end: u64, done: &AtomicU64, stop: &AtomicBool) -> Result<(), String> {
-    let want = end - start + 1;
-    let stopped = || stop.load(Ordering::SeqCst);
+fn set_primary_got(p: &Piece, n: u64) {
+    if let Some(cur) = p.lock().cur.as_mut() {
+        cur.got = n;
+    }
+}
+
+/// The primary's request of a piece has ended without the piece: its bytes that count are kept (the
+/// next request resumes after them), or, when it brought none, its file goes. A piece that its kept
+/// bytes now make whole is whole.
+fn end_request(p: &Piece, file: &Path) {
+    let mut life = p.lock();
+    life.cur = None;
+    if life.won {
+        return;
+    }
+    let room = p.size() - life.kept_bytes();
+    let len = file_len(file).min(room);
+    if len > 0 {
+        life.kept.push((file.to_path_buf(), len));
+    } else {
+        let _ = fs::remove_file(file);
+    }
+    if life.kept_bytes() == p.size() {
+        let segments = life.kept.clone();
+        life.win(segments);
+        p.hedge_stop.store(true, Ordering::SeqCst);
+    }
+}
+
+/// The primary's request brought the piece's last bytes (`want`, in `file`): the piece is whole, and
+/// a hedge still running is cancelled. A piece that the hedge made whole first stays as it is.
+fn finish_primary(p: &Piece, file: &Path, want: u64) {
+    let mut life = p.lock();
+    if life.won {
+        return;
+    }
+    let mut segments = life.kept.clone();
+    segments.push((file.to_path_buf(), want));
+    life.win(segments);
+    p.hedge_stop.store(true, Ordering::SeqCst);
+}
+
+/// Waits while the piece's hedge is running (the primary is out of tries): the hedge may yet make
+/// the piece whole.
+fn wait_hedge(ctx: &Ctx, p: &Piece) {
+    loop {
+        {
+            let life = p.lock();
+            if life.won || ctx.stopped() || !matches!(life.hedge, Hedge::Running { .. }) {
+                return;
+            }
+        }
+        std::thread::sleep(POLL);
+    }
+}
+
+/// The primary of piece `i`: up to [`TRIES`] tries, each a request for the piece's bytes from the
+/// first byte not yet had, checked for its 206 and its exact byte count. A 429 or 503 is not a try:
+/// the piece waits ([`BACKOFF`], or the server's `Retry-After`) and asks again, until the backoff is
+/// spent; then it counts as a failed try like any other.
+fn primary(ctx: &Ctx, i: usize) -> Result<(), String> {
+    let p = &ctx.pieces[i];
+    let stopped = || ctx.stopped() || p.primary_stop.load(Ordering::SeqCst);
+    p.lock().started.get_or_insert_with(Instant::now);
     let mut tries = 0u32;
     let mut waits = 0usize;
     loop {
-        if stopped() {
+        if ctx.stopped() {
             return Err(STOPPED.into());
         }
-        done.store(0, Ordering::SeqCst);
-        let mut hold = None;
-        let last = match net.range(url, path, start, end, &|n| done.store(n, Ordering::SeqCst), &stopped) {
+        if p.won() {
+            return Ok(());
+        }
+        let (from, file) = {
+            let mut life = p.lock();
+            let from = p.start + life.kept_bytes();
+            let file = new_file(ctx.dest, i, "try");
+            life.made.push(file.clone());
+            life.cur = Some(Req { from, file: file.clone(), got: 0 });
+            (from, file)
+        };
+        let want = p.end - from + 1;
+        let result = ctx.net.range(ctx.url, &file, from, p.end, &|n| set_primary_got(p, n), &stopped);
+        let last = match result {
             Ok(RangeReply { status: 206, .. }) => {
-                let len = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+                let len = file_len(&file);
                 if len == want {
-                    done.store(want, Ordering::SeqCst);
+                    finish_primary(p, &file, want);
                     return Ok(());
                 }
                 format!("piece {i} came back with {len} bytes, not {want}")
             }
             Ok(RangeReply { status, retry_after, .. }) => {
                 if throttled(status) && waits < BACKOFF.len() {
-                    hold = Some(retry_after.map_or(BACKOFF[waits], |s| Duration::from_secs(s.min(MAX_RETRY_AFTER))));
+                    let how_long = retry_after.map_or(BACKOFF[waits], |s| Duration::from_secs(s.min(MAX_RETRY_AFTER)));
                     waits += 1;
+                    end_request(p, &file);
+                    crate::diag!("download piece {i}: the server is busy, waiting {} s", how_long.as_secs_f64());
+                    ctx.net.wait(how_long, &stopped);
+                    continue;
                 }
                 format!("the server answered HTTP {status} to a range request")
             }
             Err(why) => why,
         };
-        if stopped() {
+        end_request(p, &file);
+        if ctx.stopped() {
             return Err(last);
         }
-        if let Some(how_long) = hold {
-            crate::diag!("download piece {i}: the server is busy, waiting {} s", how_long.as_secs_f64());
-            net.wait(how_long, &stopped);
-            continue;
+        if p.won() {
+            return Ok(());
         }
         tries += 1;
         crate::diag!("download piece {i}, try {tries} of {TRIES}: {last}");
         if tries == TRIES {
-            return Err(last);
+            wait_hedge(ctx, p);
+            return if p.won() { Ok(()) } else { Err(last) };
         }
     }
 }
 
-/// The pieces, in order, into `dest`. The result holds exactly `total` bytes or it is an error.
-fn join(dest: &Path, paths: &[PathBuf], total: u64) -> Result<(), String> {
+/// The pieces, in order, into `dest`: each segment's first bytes (`len`). The result holds exactly
+/// `total` bytes or it is an error.
+fn join(dest: &Path, segments: &[(PathBuf, u64)], total: u64) -> Result<(), String> {
     let mut out = fs::File::create(dest).map_err(|e| format!("{}: {e}", dest.display()))?;
     let mut copied = 0u64;
-    for path in paths {
-        let mut piece = fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        copied += io::copy(&mut piece, &mut out).map_err(|e| format!("{}: {e}", dest.display()))?;
+    for (path, len) in segments {
+        let piece = fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        copied += io::copy(&mut piece.take(*len), &mut out).map_err(|e| format!("{}: {e}", dest.display()))?;
     }
     out.flush().map_err(|e| format!("{}: {e}", dest.display()))?;
     if copied != total {
@@ -272,11 +680,17 @@ mod tests {
     use std::sync::Arc;
 
     const MIB: u64 = 1 << 20;
+    /// The longest a fake hang waits for its cancel before it gives up (a test that would hang fails).
+    const HANG_LIMIT: Duration = Duration::from_secs(10);
 
     /// The test's file: `n` bytes of a pattern that differs from byte to byte.
     fn body(n: usize) -> Vec<u8> {
         (0..n).map(|i| ((i as u64).wrapping_mul(2654435761) >> 13) as u8).collect()
     }
+
+    /// The hedging of the tests: no piece is slow for the fetch's own timing, a slow piece is hedged
+    /// after 300 ms of its own clock.
+    const QUICK: Tuning = Tuning { stall: Duration::from_secs(60), min_age: Duration::from_millis(300), slow_ratio: 3.0 };
 
     /// What the fake does with one request.
     #[derive(Clone, Debug)]
@@ -285,20 +699,28 @@ mod tests {
         Good,
         /// Half of the range, with a matching Content-Length: a piece that comes back short.
         Short,
-        /// A transfer error (its reason).
+        /// A transfer error before any byte (its reason).
         Fail(&'static str),
         /// An HTTP status with no body.
         Status(u16),
         /// A 429 with a `Retry-After` (seconds), no body.
         Throttle(Option<u64>),
+        /// The first `n` bytes of the range, then a transfer error (a stall that breaks off).
+        Stall(usize),
+        /// The range, a chunk at a time with this many milliseconds between chunks (a slow connection).
+        Slow(u64),
+        /// No byte: the request waits until it is cancelled (a connection that stalls for good).
+        Hang,
     }
 
     /// A fake range server. `ranges` false: every request is answered 200 with nothing written.
-    /// `script` gives the actions of the requests for one start byte, in order (then `Good`).
+    /// `script` gives the actions of the requests for one start byte, in order; then `rules` (every
+    /// request whose start is in the rule's range, each time); then `Good`.
     struct Fake {
         body: Vec<u8>,
         ranges: bool,
         script: Mutex<Vec<(u64, VecDeque<Act>)>>,
+        rules: Vec<(u64, u64, Act)>,
         /// (start, end) of every request, in order.
         log: Mutex<Vec<(u64, u64)>>,
         /// The bytes a request sends per poll of its cancel (small, so a cancel lands mid-piece).
@@ -314,7 +736,17 @@ mod tests {
 
     impl Fake {
         fn new(body: Vec<u8>) -> Fake {
-            Fake { body, ranges: true, script: Mutex::new(Vec::new()), log: Mutex::new(Vec::new()), chunk: 64 << 10, written: AtomicU64::new(0), cancel_after: None, waits: Mutex::new(Vec::new()) }
+            Fake {
+                body,
+                ranges: true,
+                script: Mutex::new(Vec::new()),
+                rules: Vec::new(),
+                log: Mutex::new(Vec::new()),
+                chunk: 64 << 10,
+                waits: Mutex::new(Vec::new()),
+                written: AtomicU64::new(0),
+                cancel_after: None,
+            }
         }
 
         fn with(mut self, start: u64, acts: Vec<Act>) -> Fake {
@@ -322,16 +754,34 @@ mod tests {
             self
         }
 
+        fn rule(mut self, lo: u64, hi: u64, act: Act) -> Fake {
+            self.rules.push((lo, hi, act));
+            self
+        }
+
         fn requests_for(&self, start: u64) -> usize {
             self.log.lock().unwrap().iter().filter(|(s, _)| *s == start).count()
         }
 
+        /// The requests that start after `piece_start` and no later than `piece_end`: the hedges.
+        fn hedges_in(&self, piece_start: u64, piece_end: u64) -> Vec<(u64, u64)> {
+            self.log.lock().unwrap().iter().filter(|(s, _)| *s > piece_start && *s <= piece_end).copied().collect()
+        }
+
+        /// The requests that start in `lo..=hi`: a piece's first request and its hedge (the hedge may
+        /// start at the piece's first byte when the primary had no byte yet).
+        fn requests_within(&self, lo: u64, hi: u64) -> usize {
+            self.log.lock().unwrap().iter().filter(|(s, _)| (lo..=hi).contains(s)).count()
+        }
+
         fn act(&self, start: u64) -> Act {
             let mut script = self.script.lock().unwrap();
-            match script.iter_mut().find(|(s, _)| *s == start) {
-                Some((_, acts)) => acts.pop_front().unwrap_or(Act::Good),
-                None => Act::Good,
+            if let Some((_, acts)) = script.iter_mut().find(|(s, _)| *s == start) {
+                if let Some(act) = acts.pop_front() {
+                    return act;
+                }
             }
+            self.rules.iter().find(|(lo, hi, _)| (*lo..=*hi).contains(&start)).map_or(Act::Good, |(_, _, act)| act.clone())
         }
     }
 
@@ -343,32 +793,53 @@ mod tests {
                 return Ok(RangeReply { status: 200, total: None, retry_after: None });
             }
             let act = self.act(start);
+            let began = Instant::now();
             let end = end.min(total - 1);
-            let mut bytes = self.body[start as usize..=end as usize].to_vec();
+            let body = &self.body[start as usize..=end as usize];
             match act {
                 Act::Fail(why) => return Err(why.to_string()),
                 Act::Status(code) => return Ok(RangeReply { status: code, total: Some(total), retry_after: None }),
                 Act::Throttle(after) => return Ok(RangeReply { status: 429, total: Some(total), retry_after: after }),
-                Act::Short => bytes.truncate(bytes.len() / 2),
-                Act::Good => {}
-            }
-            let mut out = Vec::new();
-            for piece in bytes.chunks(self.chunk) {
-                if cancelled() {
-                    fs::write(path, &out).map_err(|e| e.to_string())?;
+                Act::Hang => {
+                    while !cancelled() {
+                        if began.elapsed() > HANG_LIMIT {
+                            return Err("hung: no cancel came".into());
+                        }
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
                     return Err("cancelled".into());
                 }
-                out.extend_from_slice(piece);
-                std::thread::sleep(Duration::from_millis(1));
+                _ => {}
+            }
+            let limit = match act {
+                Act::Short => body.len() / 2,
+                Act::Stall(n) => n.min(body.len()),
+                _ => body.len(),
+            };
+            let mut file = fs::File::create(path).map_err(|e| e.to_string())?;
+            let mut out = 0usize;
+            for piece in body[..limit].chunks(self.chunk) {
+                if cancelled() {
+                    return Err("cancelled".into());
+                }
+                file.write_all(piece).map_err(|e| e.to_string())?;
+                out += piece.len();
+                let pause = match act {
+                    Act::Slow(ms) => Duration::from_millis(ms),
+                    _ => Duration::from_millis(1),
+                };
+                std::thread::sleep(pause);
                 let written = self.written.fetch_add(piece.len() as u64, Ordering::SeqCst) + piece.len() as u64;
                 if let Some((flag, at)) = &self.cancel_after {
                     if written >= *at {
                         flag.store(true, Ordering::SeqCst);
                     }
                 }
-                progress(out.len() as u64);
+                progress(out as u64);
             }
-            fs::write(path, &out).map_err(|e| e.to_string())?;
+            if let Act::Stall(_) = act {
+                return Err("stalled".into());
+            }
             Ok(RangeReply { status: 206, total: Some(total), retry_after: None })
         }
 
@@ -386,6 +857,11 @@ mod tests {
 
     fn no_cancel() -> bool {
         false
+    }
+
+    /// No file of the pieces is left in `dir`.
+    fn no_piece_left(dir: &Path) -> bool {
+        !dir.read_dir().unwrap().any(|e| e.unwrap().file_name().to_string_lossy().contains("piece"))
     }
 
     const URL: &str = "https://example.org/releases/big.zip";
@@ -422,20 +898,39 @@ mod tests {
         let log = net.log.lock().unwrap().clone();
         assert_eq!(log[0], (0, 0), "the first request is the probe");
         assert_eq!(log.len(), 9, "the probe and eight pieces");
-        assert!(!dir.read_dir().unwrap().any(|e| e.unwrap().file_name().to_string_lossy().contains("piece")), "no piece is left");
+        assert!(no_piece_left(&dir), "no piece is left");
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn a_short_piece_is_tried_again_and_the_second_try_is_good() {
+    fn a_short_piece_resumes_from_the_bytes_that_came() {
         let dir = scratch("short");
         let dest = dir.join("big.zip");
         let data = body(10 * MIB as usize);
-        let piece3 = layout(10 * MIB, PIECES)[3].0;
-        let net = Fake::new(data.clone()).with(piece3, vec![Act::Short]);
+        let (s3, e3) = layout(10 * MIB, PIECES)[3];
+        let net = Fake::new(data.clone()).with(s3, vec![Act::Short]);
         assert_eq!(fetch(&net, URL, &dest, u64::MAX, &|_| {}, &no_cancel), Ok(Parted::Joined));
-        assert_eq!(fs::read(&dest).unwrap(), data, "the short piece was replaced by a whole one");
-        assert_eq!(net.requests_for(piece3), 2);
+        assert_eq!(fs::read(&dest).unwrap(), data, "the short piece was completed, not replaced");
+        let len = e3 - s3 + 1;
+        assert!(net.log.lock().unwrap().contains(&(s3 + len / 2, e3)), "the next request asks for the rest");
+        assert_eq!(net.requests_for(s3), 1);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_piece_that_stalls_resumes_from_its_offset_and_the_data_is_whole() {
+        let dir = scratch("stall");
+        let dest = dir.join("big.zip");
+        let data = body(10 * MIB as usize);
+        let (s1, e1) = layout(10 * MIB, PIECES)[1];
+        let net = Fake::new(data.clone()).with(s1, vec![Act::Stall(300_000)]);
+        assert_eq!(fetch(&net, URL, &dest, u64::MAX, &|_| {}, &no_cancel), Ok(Parted::Joined));
+        assert_eq!(fs::read(&dest).unwrap(), data);
+        assert_eq!(net.requests_for(s1), 1, "the stalled request was not started again from the piece's first byte");
+        let log = net.log.lock().unwrap().clone();
+        assert!(log.contains(&(s1 + 300_000, e1)), "the resumed request starts where the bytes ran out: {log:?}");
+        assert_eq!(log.len(), 10, "the probe, eight pieces and the one resumed request");
+        assert!(no_piece_left(&dir));
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -448,7 +943,7 @@ mod tests {
         assert_eq!(fetch(&net, URL, &dest, u64::MAX, &|_| {}, &no_cancel), Err("piece 5 came back with 655360 bytes, not 1310720".to_string()));
         assert_eq!(net.requests_for(piece5), 3, "three tries in all");
         assert!(!dest.exists());
-        assert!(!dir.read_dir().unwrap().any(|e| e.unwrap().file_name().to_string_lossy().contains("piece")), "no piece is left");
+        assert!(no_piece_left(&dir), "no piece is left");
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -508,7 +1003,10 @@ mod tests {
         let dir = scratch("progress");
         let dest = dir.join("big.zip");
         let size = 10 * MIB;
-        let net = Fake::new(body(size as usize));
+        // A stall and a short piece on the way: the progress still never goes back.
+        let (s2, _) = layout(size, PIECES)[2];
+        let (s6, _) = layout(size, PIECES)[6];
+        let net = Fake::new(body(size as usize)).with(s2, vec![Act::Stall(100_000)]).with(s6, vec![Act::Short]);
         let seen = Mutex::new(Vec::new());
         assert_eq!(fetch(&net, URL, &dest, u64::MAX, &|n| seen.lock().unwrap().push(n), &no_cancel), Ok(Parted::Joined));
         let seen = seen.into_inner().unwrap();
@@ -529,7 +1027,7 @@ mod tests {
         let result = fetch(&net, URL, &dest, u64::MAX, &|_| {}, &|| cancel.load(Ordering::SeqCst));
         assert_eq!(result, Err(CANCELLED.to_string()));
         assert!(!dest.exists());
-        assert!(!dir.read_dir().unwrap().any(|e| e.unwrap().file_name().to_string_lossy().contains("piece")), "no piece is left");
+        assert!(no_piece_left(&dir), "no piece is left");
         // The cancel reached the pieces: none went on to a retry (the probe and at most eight pieces).
         assert!(net.log.lock().unwrap().len() <= 9, "no piece is tried again after a cancel");
         let _ = fs::remove_dir_all(&dir);
@@ -605,6 +1103,81 @@ mod tests {
     }
 
     #[test]
+    fn a_slow_tail_piece_is_hedged_and_the_faster_copy_wins() {
+        let dir = scratch("hedge");
+        let dest = dir.join("big.zip");
+        let data = body(10 * MIB as usize);
+        let (s3, e3) = layout(10 * MIB, PIECES)[3];
+        // The piece's own request is slow (100 ms a chunk, about 2 s in all); the hedge is not.
+        let net = Fake::new(data.clone()).with(s3, vec![Act::Slow(100)]);
+        let started = Instant::now();
+        assert_eq!(fetch_tuned(&net, URL, &dest, u64::MAX, &|_| {}, &no_cancel, QUICK), Ok(Parted::Joined));
+        let secs = started.elapsed().as_secs_f64();
+        assert_eq!(fs::read(&dest).unwrap(), data);
+        let hedges = net.hedges_in(s3, e3);
+        assert_eq!(hedges.len(), 1, "one hedge, at most one per piece: {hedges:?}");
+        assert_eq!(hedges[0].1, e3, "the hedge asks for the piece's rest");
+        assert_eq!(net.requests_for(s3), 1, "the slow request is not tried again");
+        assert!(secs < 1.5, "the slow request alone takes about 2 s; the hedge finished the piece in {secs:.2} s");
+        assert!(no_piece_left(&dir));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_piece_with_no_byte_for_the_stall_time_is_hedged() {
+        let dir = scratch("hedge-stall");
+        let dest = dir.join("big.zip");
+        let data = body(10 * MIB as usize);
+        let (s5, e5) = layout(10 * MIB, PIECES)[5];
+        // The piece's first request hangs (no byte) until cancelled; its hedge, from the same byte, is fast.
+        let net = Fake::new(data.clone()).with(s5, vec![Act::Hang]);
+        let tune = Tuning { stall: Duration::from_millis(200), min_age: Duration::from_secs(3600), slow_ratio: 3.0 };
+        let started = Instant::now();
+        assert_eq!(fetch_tuned(&net, URL, &dest, u64::MAX, &|_| {}, &no_cancel, tune), Ok(Parted::Joined));
+        assert!(started.elapsed().as_secs_f64() < 3.0, "the hedge, not the hang, finished the piece");
+        assert_eq!(fs::read(&dest).unwrap(), data);
+        assert_eq!(net.requests_within(s5, e5), 2, "the hanging request and its hedge");
+        assert!(no_piece_left(&dir));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_copy_that_finishes_first_wins_and_the_other_is_cancelled() {
+        let dir = scratch("hedge-loser");
+        let dest = dir.join("big.zip");
+        let data = body(10 * MIB as usize);
+        let (s3, e3) = layout(10 * MIB, PIECES)[3];
+        // The piece's own request finishes (about 2 s); its hedge hangs until cancelled.
+        let net = Fake::new(data.clone()).with(s3, vec![Act::Slow(100)]).rule(s3 + 1, e3, Act::Hang);
+        let started = Instant::now();
+        assert_eq!(fetch_tuned(&net, URL, &dest, u64::MAX, &|_| {}, &no_cancel, QUICK), Ok(Parted::Joined));
+        let secs = started.elapsed().as_secs_f64();
+        assert_eq!(fs::read(&dest).unwrap(), data);
+        assert_eq!(net.hedges_in(s3, e3).len(), 1);
+        assert!((1.5..6.0).contains(&secs), "the primary finished in {secs:.2} s, and the hedge was cancelled (not waited for)");
+        assert!(no_piece_left(&dir));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_cancel_while_a_piece_is_hedged_stops_everything_and_leaves_nothing() {
+        let dir = scratch("hedge-cancel");
+        let dest = dir.join("big.zip");
+        let (s3, e3) = layout(10 * MIB, PIECES)[3];
+        // The piece and its hedge both hang; the fetch is cancelled a second in.
+        let net = Fake::new(body(10 * MIB as usize)).rule(s3, e3, Act::Hang);
+        let tune = Tuning { stall: Duration::from_millis(100), min_age: Duration::from_secs(3600), slow_ratio: 3.0 };
+        let began = Instant::now();
+        let result = fetch_tuned(&net, URL, &dest, u64::MAX, &|_| {}, &|| began.elapsed() >= Duration::from_secs(1), tune);
+        assert_eq!(result, Err(CANCELLED.to_string()));
+        assert!(began.elapsed() < Duration::from_secs(5), "the hangs ended with the cancel");
+        assert!(!dest.exists());
+        assert!(no_piece_left(&dir), "no piece or hedge file is left");
+        assert_eq!(net.requests_within(s3, e3), 2, "the piece's request and its hedge both started before the cancel");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn gitverse_gets_four_pieces_and_other_hosts_eight() {
         assert_eq!(pieces_for("https://gitverse.ru/api/attachments/x"), PIECES_GITVERSE);
         assert_eq!(pieces_for("https://GitVerse.ru:443/x"), PIECES_GITVERSE);
@@ -670,7 +1243,7 @@ mod tests {
         let data = body(size as usize);
         fs::write(dir.join("blob.bin"), &data).unwrap();
         let mut options: Vec<String> = Vec::new();
-        if let Some(rate) = std::env::var("RAZDOR_RANGE_E2E_THROTTLE").ok() {
+        if let Ok(rate) = std::env::var("RAZDOR_RANGE_E2E_THROTTLE") {
             options.extend(["--throttle".to_string(), rate]);
         }
         if std::env::var_os("RAZDOR_RANGE_E2E_NO_RANGE").is_some() {
@@ -685,7 +1258,7 @@ mod tests {
 
         // 1. The hub and the updates' path: `download_to`.
         let first = dir.join("first.bin");
-        let started = std::time::Instant::now();
+        let started = Instant::now();
         crate::update::download_to(&url, &first, 60, u64::MAX).expect("the download");
         let secs = started.elapsed().as_secs_f64();
         assert_eq!(fs::read(&first).unwrap(), data, "the joined file is the file");
@@ -694,7 +1267,7 @@ mod tests {
         // 2. The game's path: `download_watched` with the progress, to the end.
         let second = dir.join("second.bin");
         let last = AtomicU64::new(0);
-        let started = std::time::Instant::now();
+        let started = Instant::now();
         let code = crate::update::download_watched(&url, &second, 0, 60, &|n| last.store(n, Ordering::SeqCst), &|| false).expect("the download");
         let secs = started.elapsed().as_secs_f64();
         assert_eq!(code, 200);
@@ -708,12 +1281,49 @@ mod tests {
         let url = format!("http://127.0.0.1:{}/blob.bin", slow.1);
         let third = dir.join("third.bin");
         let seen = AtomicU64::new(0);
-        let started = std::time::Instant::now();
+        let started = Instant::now();
         let result = crate::update::download_watched(&url, &third, 0, 60, &|n| seen.store(n, Ordering::SeqCst), &|| seen.load(Ordering::SeqCst) >= 2 * MIB);
         println!("e2e: cancel after {:.2} s: {result:?}", started.elapsed().as_secs_f64());
         assert!(result.is_err());
         assert!(!third.exists());
-        assert!(!dir.read_dir().unwrap().any(|e| e.unwrap().file_name().to_string_lossy().contains("piece")));
+        assert!(no_piece_left(&dir));
+        drop(server);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The slow tail on the desktop (the measurement of the hedge): 12 MiB from the local server at
+    /// `RAZDOR_RANGE_E2E_THROTTLE` bytes a second per connection, and the connection of the last piece
+    /// at `RAZDOR_RANGE_E2E_SLOW_TAIL` bytes a second. `RAZDOR_RANGE_E2E_NO_HEDGE=1` turns the hedge
+    /// off (the baseline: the same code without hedging). Prints the seconds and the checks.
+    /// `RAZDOR_RANGE_E2E_DIR=<empty dir> RAZDOR_RANGE_E2E_THROTTLE=300000 RAZDOR_RANGE_E2E_SLOW_TAIL=40000
+    /// cargo test --profile fasttest --lib parts::tests::slow_tail_end_to_end -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "a manual measurement against the local Python range server"]
+    fn slow_tail_end_to_end() {
+        let Some(dir) = std::env::var_os("RAZDOR_RANGE_E2E_DIR") else { return };
+        let dir = PathBuf::from(dir);
+        fs::create_dir_all(&dir).unwrap();
+        let size: u64 = 12 * MIB;
+        let data = body(size as usize);
+        fs::write(dir.join("blob.bin"), &data).unwrap();
+        let mut options: Vec<String> = Vec::new();
+        if let Ok(rate) = std::env::var("RAZDOR_RANGE_E2E_THROTTLE") {
+            options.extend(["--throttle".to_string(), rate]);
+        }
+        if let Ok(rate) = std::env::var("RAZDOR_RANGE_E2E_SLOW_TAIL") {
+            // The last piece starts at 7/8 of the file (the pieces are equal: 12 MiB / 8).
+            options.extend(["--slow-start".to_string(), (7 * size / PIECES).to_string(), "--slow-rate".to_string(), rate]);
+        }
+        HEDGE_OFF.store(std::env::var_os("RAZDOR_RANGE_E2E_NO_HEDGE").is_some(), Ordering::SeqCst);
+        let server = Server::start(&dir, &options);
+        let url = format!("http://127.0.0.1:{}/blob.bin", server.1);
+        let out = dir.join("out.bin");
+        let started = Instant::now();
+        crate::update::download_to(&url, &out, 120, u64::MAX).expect("the download");
+        let secs = started.elapsed().as_secs_f64();
+        assert_eq!(fs::read(&out).unwrap(), data, "the joined file is the file");
+        println!("e2e: slow tail, hedge {}: {size} bytes in {secs:.2} s", if HEDGE_OFF.load(Ordering::SeqCst) { "off" } else { "on" });
+        HEDGE_OFF.store(false, Ordering::SeqCst);
         drop(server);
         let _ = fs::remove_dir_all(&dir);
     }

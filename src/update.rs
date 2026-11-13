@@ -677,7 +677,13 @@ fn range_request(url: &str, path: &Path, start: u64, end: u64, seconds: u32, pro
         .arg(path)
         .arg(url);
     let (status, out, err) = run_watched(cmd, path, progress, cancelled)?;
-    match parse_range_reply(&out) {
+    let reply = parse_range_reply(&out);
+    // Only a 206's body is the piece's bytes (a piece resumes after them, see `parts`): any other
+    // reply leaves no file, so a 429's or a 200's body is never taken for the file's.
+    if reply.is_none_or(|r| r.status != 206) {
+        let _ = std::fs::remove_file(path);
+    }
+    match reply {
         Some(reply) if status.success() || (status.code() == Some(63) && reply.status == 200) => Ok(reply),
         _ => Err(curl_why(status, &err)),
     }
@@ -789,9 +795,9 @@ fn stream_watched(url: &str, path: &Path, from: u64, seconds: u32, progress: &dy
 }
 
 /// A phone's blocking download into `path`, watched: `work` runs on a helper thread while this one
-/// polls the size of `path` as progress, and asks the transfer to stop (`phone::download_cancel`)
-/// while `cancelled` is true; a cancelled transfer is `Err("cancelled")`. Every piece of a download
-/// uses it, so one cancel stops them all (the Java side stops every connection of the downloads).
+/// polls the size of `path` as progress, and asks the transfer of `path` to stop
+/// (`phone::download_cancel`) while `cancelled` is true; a cancelled transfer is `Err("cancelled")`.
+/// Each piece and each hedge of a download has its own file, so a cancel stops that one transfer.
 #[cfg(any(target_os = "android", target_os = "ios"))]
 fn watched<R: Send>(path: &Path, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool, work: impl FnOnce() -> Result<R, String> + Send) -> Result<R, String> {
     if cancelled() {
@@ -801,7 +807,7 @@ fn watched<R: Send>(path: &Path, progress: &dyn Fn(u64), cancelled: &dyn Fn() ->
         let worker = s.spawn(work);
         while !worker.is_finished() {
             if cancelled() {
-                phone::download_cancel();
+                phone::download_cancel(path);
             }
             progress(file_size(path));
             std::thread::sleep(std::time::Duration::from_millis(150));
