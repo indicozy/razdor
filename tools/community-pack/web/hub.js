@@ -138,7 +138,8 @@
   };
 
   var LANG_KEY = 'razdor-hub-lang';
-  var CATALOG_URL = 'index.json';
+  // The zipped catalog first (a map is a zip of its file); the bare one of the same folder when it is missing.
+  var CATALOG_URLS = ['index-v2.json', 'index.json'];
   var GITHUB_CATALOG = 'https://github.com/indicozy/razdor-community/releases/latest';
   var KINDS = ['map', 'campaign', 'mod'];
   var KIND_KEY = { map: 'kindMap', campaign: 'kindCampaign', mod: 'kindMod' };
@@ -562,9 +563,11 @@
       var li = el('li', 'file-line');
       var a = el('a', 'btn');
       a.href = resolve(f.path);
-      a.setAttribute('download', baseName(f.name));
+      // A zipped file (`wrapped`) downloads as its zip: the button says so, and the saved name is the zip's.
+      var zipped = f.wrapped === 'zip';
+      a.setAttribute('download', baseName(f.name) + (zipped ? '.zip' : ''));
       a.appendChild(el('span', null, t('download')));
-      a.appendChild(el('span', null, baseName(f.name)));
+      a.appendChild(el('span', null, baseName(f.name) + (zipped ? ' (.zip)' : '')));
       a.appendChild(el('span', 'size', sizeText(f.size)));
       li.appendChild(a);
       var notes = [];
@@ -647,19 +650,22 @@
     $('app').hidden = true;
     lastError = null;
     byId = new Map();
-    return fetch(CATALOG_URL, { cache: 'no-cache' })
-      .then(function (res) {
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        return res.text();
+    // One catalog file: its text, parsed (a host's "not found" page comes back as HTML with status 200).
+    function readCatalog(url) {
+      return fetch(url, { cache: 'no-cache' })
+        .then(function (res) {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.text();
+        })
+        .then(function (body) {
+          return JSON.parse(body);
+        });
+    }
+    return readCatalog(CATALOG_URLS[0])
+      .catch(function () {
+        return readCatalog(CATALOG_URLS[1]);
       })
-      .then(function (body) {
-        var data;
-        try {
-          data = JSON.parse(body);
-        } catch (e) {
-          // A host's "not found" page comes back as HTML with status 200.
-          return showError('errNotJson');
-        }
+      .then(function (data) {
         var problem = checkCatalog(data);
         if (problem) return showError(problem);
         catalog = data;
@@ -670,8 +676,9 @@
         renderTabs();
         route();
       })
-      .catch(function () {
-        showError('errFetch');
+      .catch(function (e) {
+        // Neither file parses: the bare one's text says so; no connection (or no file) is errFetch.
+        showError(e instanceof SyntaxError ? 'errNotJson' : 'errFetch');
       });
   }
 

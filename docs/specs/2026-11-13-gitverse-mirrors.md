@@ -37,8 +37,8 @@ Lands after the download fix (30 s stall limit, progress and cancel on phones), 
 |---|---|
 | App release X.Y.Z | release `vX.Y.Z` on `razdor`: `razdor-X.Y.Z.apk`, `Razdor-X.Y.Z-windows.zip` (Razdor.exe, Razdor-translate.exe), `razdor-X.Y.Z-linux.zip` (razdor, razdor-translate; the updater sets the executable bit itself, so only zip is needed), `SHA256SUMS.txt` (the archives and the programs inside) |
 | Update feed | `https://indicozy.gitverse.site/razdor-community/releases.json` (Pages of `razdor-community`, with the hub's other static files; the `razdor` Pages stay the website's) |
-| Hub catalog | `https://indicozy.gitverse.site/razdor-community/index.json` + previews + the web hub page (Pages of `razdor-community`) |
-| Hub files (maps, mods, campaigns) | release `catalog-YYYY-MM-DD` on `razdor-community`; the GitVerse `index.json` names them by their full attachment address |
+| Hub catalog | `https://indicozy.gitverse.site/razdor-community/index-v2.json` (the zipped layout; the bare `index.json` is not written there) + previews + the web hub page (Pages of `razdor-community`). Pages holds only this front end: the pictures, the catalog and the page |
+| Hub files (maps, campaigns, mods) | release `catalog-YYYY-MM-DD` on `razdor-community`, every file on it compressed: a map or campaign `.dtm` is uploaded as a `.zip` (`<name>.zip`) that holds that one file under its catalog name; a mod is already a zip. The `index-v2.json` names each by its full attachment address; a wrapped file says so (`wrapped`, `member`, `archive_size`, `archive_sha256`) |
 | Game archive | release `game-cu-1.2` on `razdor-community` (uploaded: `https://gitverse.ru/api/attachments/36c22adf-f3f3-4286-a474-9b6a00a5abc5`, SHA-256 `dff554e2…`) |
 
 Old GitVerse releases are deleted by the publish scripts to stay under 4 GB: keep the newest two
@@ -59,7 +59,7 @@ app releases and the newest two catalogs; never the game archive.
    read (same `sha256`).
 3. **Catalog format.** `GameRef` gains `mirrors: Vec<String>` (`#[serde(default)]`, each an
    `https://` address; a bad one is dropped with a log line, not a refused catalog). Check that the
-   parser does not refuse unknown fields, so older clients keep working.
+   parser does not refuse unknown fields, so older clients keep working. A hub file may be wrapped in a zip (`FileRef.wrapped` = `"zip"`, with `member`, `archive_size` and `archive_sha256`; `size` and `sha256` stay the file's): the zip is downloaded and checked, its member taken out (`archive::member`, the updater's helper too) and the file checked against `size` and `sha256`. The catalog is read as `index-v2.json` first, the bare `index.json` of the same source when that is missing or not a catalog.
 4. **Update feed.** `releases.json` is the GitHub API's release list shape, so `parse_releases`
    reads it as it is: `[{tag_name, html_url, draft, prerelease, body, assets: [{name,
    browser_download_url}]}]`. An asset may carry `"archive": "zip"` and `"member":
@@ -67,12 +67,12 @@ app releases and the newest two catalogs; never the game archive.
    against `SHA256SUMS.txt` (the `sums` asset may be named `SHA256SUMS` or `SHA256SUMS.txt`). The
    APK is not packed.
 5. **Multi-connection download** for big files (the game, hub archives, app updates): when the file
-   is over ~4 MB and the server answers a Range request with 206, it is fetched in 8 parts at once,
+   is over ~4 MB and the server answers a Range request with 206, it is fetched in 8 parts at once (4 for a gitverse.ru address, `parts::pieces_for`; a 429 or 503 waits 1, 2, 4 s or the server's `Retry-After` first, and is not a try until those are spent),
    each checked for its exact size and retried up to 3 times, each with the 30 s stall limit; the
    parts are joined and the whole file checked (size, SHA-256). A server without Range (200) gets
    the single stream. Desktop: one curl per part. Android: `razdorDownload` takes a byte range
    (start, end; -1 for none) and the parts run on helper threads. Progress is the sum of the parts.
-6. **Errors.** When every address fails: one Russian message (no internet / try a VPN / install
+6. **Errors.** The hub's catalog, when no address answers: «Каталог не читается ни с одного адреса (GitVerse, GitHub). Проверьте интернет.» (`hub::NO_ADDRESS`; each address's reason is in the log).  When every address fails: one Russian message (no internet / try a VPN / install
    from an archive by hand); the reasons go to the log.
 
 Tests: unit tests with a fake network for the order and every fallback reason, the HTML-200 page,
@@ -86,10 +86,12 @@ end against a local server (Range, a stall, a short part); the APK on the emulat
     archives above), writes `SHA256SUMS.txt`, creates the release (the tag on the pushed release
     commit), uploads with retries, verifies each upload by an anonymous download, updates
     `releases.json` on the `razdor-community` Pages, deletes old releases past the keep count.
-  - `publish_hub.py <catalog dir>`: uploads the catalog's files to a `catalog-YYYY-MM-DD` release,
-    writes the GitVerse `index.json` (relative paths → attachment addresses; previews stay
-    relative on Pages), pushes `index.json`, previews and `tools/community-pack/web/` to the
-    `razdor-community` Pages.
+  - `publish_hub.py <catalog dir>`: zips every map and other file (one zip each, `<name>.zip`, a fixed zip date)
+    into a `catalog-YYYY-MM-DD` release (an accepted archive, a mod's zip, goes as it is), writes the GitVerse
+    `index-v2.json` (attachment addresses, the wrapped fields; previews stay relative under `previews/`), pushes
+    `index-v2.json`, the pictures and `tools/community-pack/web/` to the `razdor-community` Pages, deletes old
+    catalogs. Pages gets no map and no bare `index.json`.
+
 - The `release` skill runs `publish_release.py` after the GitHub pipeline has built the files (and
   pushes the release commit and tag to GitVerse too); the `community-pack` skill runs `publish_hub.py`.
 - The website (site + wiki) on the `razdor` Pages: pushed from this machine by the `wiki` /

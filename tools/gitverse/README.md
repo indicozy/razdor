@@ -9,7 +9,7 @@ The design is in `docs/specs/2026-11-13-gitverse-mirrors.md`.
 | `gitverse.py` | The shared client: the token, the API calls (releases, assets), retries, anonymous ranged downloads with the size and SHA-256 check, the name rule, the registry of the releases these scripts made. Not run directly. |
 | `pages.py` | The Pages push for `razdor-community`: a fresh clone of the repo, the `docs/` folder changed, a commit as the owner, a push to `main`, and a wait until the anonymous URLs serve exactly the new bytes. Not run directly. |
 | `publish_release.py` | An app release: packs the files GitVerse refuses, writes `SHA256SUMS.txt`, creates the release, uploads, verifies, updates the update feed (`releases.json`), deletes old releases. Also `--push-source` (the release commit and tag to GitVerse) and `--unpublish`. |
-| `publish_hub.py` | The hub catalog: routes each file by extension (archives to a `catalog-YYYY-MM-DD` release, the rest to Pages), writes the GitVerse `index.json`, pushes the site (the Pages files, `index.json`, `previews/`, the hub page) to Pages, deletes old catalogs. |
+| `publish_hub.py` | The hub catalog: zips each map and other file (one zip each) into a `catalog-YYYY-MM-DD` release, writes the GitVerse `index-v2.json`, pushes the site (`index-v2.json`, the pictures under `previews/`, the hub page) to Pages, deletes old catalogs. |
 | `test_*.py` | Unit tests (no network; a local HTTP server and a local bare git repo stand in for GitVerse). |
 
 ## Usage
@@ -52,19 +52,21 @@ Token: `GITVERSE_TOKEN` in the environment, else the repo's `.env` (in a worktre
   `"archive": "zip"` and `"member"`; the APK and `SHA256SUMS` / `SHA256SUMS.txt` directly.
 - Pre-releases never touch the feed and never trigger the cleanup.
 
-The hub: routed by extension (`publish_hub.py`, `destination()`):
+The hub (the owner's decision, 2026-11-13; `publish_hub.py`, `destination()`):
 
-- **Release** `catalog-YYYY-MM-DD` on `razdor-community`: the entries' archives (`.zip`, `.gz`, `.tgz`,
-  `.7z`, `.apk`, the mods). The GitVerse `index.json` names each by its attachment address.
-- **Pages** (`docs/` of `razdor-community`, the site): everything else. A map (`.dtm`) is a file at its
-  catalog path, relative in the index and unchanged (`docs/<name>`); every picture (previews, map
-  pictures, the ad's picture) is under `docs/previews/`, relative. Pages refuses `.zip`, `.exe` and `.py`.
-- A file with no place (an archive that is not an accepted asset type, a `.zip` picture, `.exe`, a name
-  with a space, a name the site uses itself) **stops the run** before anything is created, listed.
-- The site must stay under 500 MB: above 400 MB the run warns, at 500 MB it stops. The catalog's
-  current size (the owner's figures, 2026-11-13): 516 `.dtm` (20.7 MB), 241 `.png` (small), the mods
-  (340 MB, as release assets). Each push replaces the site's catalog files (a file of an older catalog
-  is removed); `releases.json`, the update feed, is never touched by the hub.
+- **Release** `catalog-YYYY-MM-DD` on `razdor-community`: every map, campaign and other file of an entry is
+  zipped alone (`<name>.zip`, the zip holds the file under its catalog name, a fixed zip date so the bytes
+  repeat). A mod's zip (an accepted archive) goes as it is. The `index-v2.json` names each release asset by its
+  attachment address; a zipped file has `wrapped: "zip"`, `member` (its name in the zip), `archive_size` and
+  `archive_sha256` (the zip's), and keeps its own `size` and `sha256`.
+- **Pages** (`docs/` of `razdor-community`): `index-v2.json`, the pictures (previews, map pictures, the ad's
+  picture) under `previews/`, and the hub page. Nothing else: the bare `index.json` is not written there, and
+  a Pages file that is not in the new catalog is removed. Pages refuses `.zip`, `.exe` and `.py`; a picture that
+  is one of them stops the run.
+- A file with no place (a name GitVerse refuses for its zip, a picture Pages refuses) **stops the run** before
+  anything is created, listed.
+- The Pages site must stay under 500 MB: above 400 MB the run warns, at 500 MB it stops. The
+  `releases.json`, the update feed, is never touched by the hub.
 
 The game keeps `https://gitverse.ru/api/attachments/36c22adf-…` (the release `game-cu-1.2`, not uploaded
 again) with the GitHub address in `mirrors`.
@@ -79,8 +81,8 @@ generic Content-Type alike: the extension decides):
   `lit`, `ogg`, `wav`, `mp3`, `webp`, `ttf`, `cfg`, `dll`, `xml`, `ipa`, and names without an extension.
   The publish scripts check this list before creating anything (`gitverse.GV_EXT_OK`).
 - **Pages**, for the hub: Pages refuses only `.zip`, `.exe` and `.py` (the spec's measurement; the `.dtm`
-  files were not uploaded to Pages in a test, so the first real push is the check). The catalog's maps
-  go there because the release refuses `.dtm`.
+  files were not uploaded to Pages in a test, so the first real push is the check). Since 2026-11-13 the maps
+  are not on Pages: each is zipped on the release (the release refuses `.dtm`).
 - Upload: `POST …/releases/{id}/assets?name=`, multipart field `attachment`. The response's
   `browser_download_url` is `https://gitverse.ru/api/attachments/<uuid>`; the same assets in a release
   GET carry another URL (`…/releases/download/…`) that answers 404. Store the upload's address.
@@ -126,8 +128,8 @@ python3 -I -m unittest discover -s tools/gitverse
 
 Covered: the packing (names, modes 0755, the programs' inner names), `SHA256SUMS.txt`, the feed's shape
 (names, `archive`/`member`, the old names, the newest two non-pre-releases), the cleanup selection, the
-hub routing by extension (archives to the release, the rest to Pages, the stop list), the hub index rewrite
-(attachment addresses for archives, the `.dtm` path unchanged, previews under `previews/`, the game's mirrors),
+hub zipping (each map zipped alone, a mod's zip as it is, the zip's fixed bytes), the hub index-v2 rewrite
+(attachment addresses, the wrapped fields, previews under `previews/`, the game's mirrors, the wrapped-field checks),
 the Pages size verdicts (warn above 400 MB, stop at 500 MB), the Pages site sync (old catalog files removed,
 the feed kept), the name rule,
 the multipart body (streamed and whole), retries (429, 5xx, connection errors, not 404), ranged downloads

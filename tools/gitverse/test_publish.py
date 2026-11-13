@@ -2,6 +2,8 @@
 local bare repository: the feed pushed, the older release deleted, a pre-release leaving the feed alone."""
 
 import argparse
+import hashlib
+import io
 import json
 import os
 import subprocess
@@ -9,6 +11,7 @@ import sys
 import tempfile
 import unittest
 import unittest.mock
+import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -24,6 +27,7 @@ class FakeClient:
 
     releases = {}
     calls = []
+    uploaded = []   # (asset name, bytes) of every upload
     counter = [500]
 
     def __init__(self, token=None, api=None):
@@ -41,6 +45,8 @@ class FakeClient:
 
     def upload_asset(self, owner, repo, rid, name, path):
         FakeClient.calls.append(("upload", repo, name))
+        with open(path, "rb") as f:
+            FakeClient.uploaded.append((name, f.read()))
         return {"browser_download_url": f"https://gitverse.ru/api/attachments/{rid}-{name}", "id": 1}
 
     def delete_release(self, owner, repo, rid):
@@ -211,6 +217,7 @@ class HubFlowTests(unittest.TestCase):
             json.dump(index, f)
         FakeClient.releases = {}
         FakeClient.calls = []
+        FakeClient.uploaded = []
         import gitverse as g
         reg = {"releases": []}
         for tag, created in (("catalog-2026-11-01", "2026-11-01T00:00:00"),
@@ -249,13 +256,28 @@ class HubFlowTests(unittest.TestCase):
             return subprocess.run(["git", "--git-dir", self.bare, "show", "main:" + path],
                                   capture_output=True, check=True).stdout
 
-        idx = json.loads(show("docs/index.json"))
-        # the map is a Pages file at its catalog path; the mod's zip is a release asset
-        self.assertEqual(idx["entries"][0]["files"][0]["path"], "0123456789abcdef.dtm")
-        self.assertEqual(show("docs/0123456789abcdef.dtm"), b"map dtm")
+        idx = json.loads(show("docs/index-v2.json"))
+        # the map is zipped on the release (its zip holds the map under its name); the mod's zip is a release
+        # asset as it is; Pages holds no map and no bare index
+        m = idx["entries"][0]["files"][0]
+        self.assertTrue(m["path"].startswith("https://gitverse.ru/api/attachments/"))
+        self.assertEqual((m["wrapped"], m["member"]), ("zip", "0123456789abcdef.dtm"))
+        self.assertEqual(m["size"], len(b"map dtm"))
+        self.assertEqual(m["sha256"], hashlib.sha256(b"map dtm").hexdigest())
+        zip_bytes = next(data for name, data in FakeClient.uploaded if name == "0123456789abcdef.dtm.zip")
+        self.assertEqual(m["archive_size"], len(zip_bytes))
+        self.assertEqual(m["archive_sha256"], hashlib.sha256(zip_bytes).hexdigest())
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
+            self.assertEqual(z.namelist(), ["0123456789abcdef.dtm"])
+            self.assertEqual(z.read("0123456789abcdef.dtm"), b"map dtm")
         self.assertTrue(idx["entries"][1]["files"][0]["path"].startswith("https://gitverse.ru/api/attachments/"))
+        self.assertNotIn("wrapped", idx["entries"][1]["files"][0])
+        with self.assertRaises(subprocess.CalledProcessError):
+            show("docs/0123456789abcdef.dtm")
+        with self.assertRaises(subprocess.CalledProcessError):
+            show("docs/index.json")
         uploads = [c[2] for c in FakeClient.calls if c[0] == "upload"]
-        self.assertEqual(uploads, ["fedcba9876543210.zip"])
+        self.assertEqual(uploads, ["fedcba9876543210.zip", "0123456789abcdef.dtm.zip"])
         self.assertEqual(idx["entries"][0]["preview"]["path"], "previews/aaaaaaaaaaaaaaaa.png")
         self.assertEqual(idx["game"]["url"], ph.GAME_URL)
         self.assertEqual(idx["game"]["mirrors"], ["https://github.com/x/game.zip"])
@@ -267,11 +289,10 @@ class HubFlowTests(unittest.TestCase):
 
     def test_a_file_with_no_place_stops_before_any_release_is_made(self):
         import publish_hub as ph
-        with open(os.path.join(self.cat, "setup.exe"), "wb") as f:
-            f.write(b"x")
+        # a picture Pages refuses (a zip): nothing has a place, so nothing is created
         with open(os.path.join(self.cat, "index.json"), encoding="utf-8") as f:
             idx = json.load(f)
-        idx["entries"][1]["files"][0]["path"] = "setup.exe"
+        idx["entries"][0]["preview"]["path"] = "aaaaaaaaaaaaaaaa.zip"
         with open(os.path.join(self.cat, "index.json"), "w", encoding="utf-8") as f:
             json.dump(idx, f)
         FakeClient.calls = []
