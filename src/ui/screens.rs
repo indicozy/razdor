@@ -689,7 +689,7 @@ mod not_found_tests {
         let page = gdrive::file_page(&gdrive::game());
         assert_eq!(recorded(|f| open_link_with(f)), std::slice::from_ref(&page));
         assert_eq!(recorded(|f| copy_link_with(f)), std::slice::from_ref(&page));
-        assert_eq!(page, "https://github.com/indicozy/razdor-community/releases/download/game-cu-1.2/discord-times-cu.zip");
+        assert_eq!(page, "https://gitverse.ru/api/attachments/36c22adf-f3f3-4286-a474-9b6a00a5abc5");
     }
 
     #[test]
