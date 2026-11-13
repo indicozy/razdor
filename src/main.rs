@@ -198,6 +198,8 @@ async fn main() {
         let gl = unsafe { get_internal_gl() };
         let info = gl.quad_context.info();
         razdor::diag::step(&format!("window open: {:?}, {}", info.backend, info.gl_version_string));
+        // The device, the GL driver and the display, for a player's report (`ui::perf_log`).
+        ui::perf_log::startup();
     }
     // One black frame before the loading: the loading below runs inside a single frame and
     // handles none of the system's messages, so without it the window just shown would wait
@@ -262,6 +264,10 @@ async fn main() {
         // A trailer run sets its camera and timed actions for this frame (`ui::trailer`).
         ui::trailer::before_frame(&mut app);
         app.frame();
+        // The performance log: a game's world map opening and a settings window closing (against the screen the
+        // frame began on), and the debug mode's thermal line every 60 s (`ui::perf_log`).
+        ui::perf_log::after_frame(&app, before);
+        ui::perf_log::tick();
         // The FPS counter, the keyboard strip and the pointer stay where the screen is.
         ui::pan::end_frame();
         app.draw_fps();

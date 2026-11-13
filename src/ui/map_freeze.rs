@@ -116,6 +116,7 @@ pub fn capture(key: u64, size: (u32, u32)) {
     let released = LEASE.with(|l| l.borrow_mut().take());
     drop(released);
     let rt = render_target(size.0, size.1);
+    razdor::mem_probe::set_texture("map freeze copy", razdor::mem_probe::texture_bytes(size.0, size.1, 4));
     rt.texture.set_filter(FilterMode::Nearest);
     // The frame's pending draws reach the screen before it is read (macroquad's `get_screen_data` does this too).
     unsafe { get_internal_gl().flush() };

@@ -195,6 +195,34 @@ pub fn pick_outcome() -> String {
     unsafe { text_call("razdorPickOutcome") }.unwrap_or_default()
 }
 
+/// The phone's device line for the performance log (`razdorDeviceInfo`, `android/MainActivityInject.java`):
+/// the model, the SoC, Android's version and the memory. None when the call fails.
+pub fn device_info() -> Option<String> {
+    // SAFETY: as in `text_call`; called from the game's thread, as the other calls here.
+    unsafe { text_call("razdorDeviceInfo") }
+}
+
+/// The display's line for the performance log (`razdorDisplayInfo`): the current mode, the top mode, the
+/// refresh rates, the window's preference and the frame cap. None when the call fails.
+pub fn display_info() -> Option<String> {
+    // SAFETY: as in `device_info`.
+    unsafe { text_call("razdorDisplayInfo") }
+}
+
+/// The activity's heap and memory for the performance log's `mem:` line (`razdorMemInfo`): the Java heap, the
+/// native heap, the available memory and the low-memory flag. None when the call fails.
+pub fn mem_info() -> Option<String> {
+    // SAFETY: as in `device_info`.
+    unsafe { text_call("razdorMemInfo") }
+}
+
+/// The phone's heat for the performance log (`razdorThermalInfo`): the thermal status and headroom, the
+/// battery's temperature and the power save mode. None when the call fails.
+pub fn thermal_info() -> Option<String> {
+    // SAFETY: as in `device_info`.
+    unsafe { text_call("razdorThermalInfo") }
+}
+
 /// Opens the system's folder picker at the shared «Razdor» folder of an older release
 /// (`razdorPickOldSaves`, see `ui::saves_move`). False when the call is missing or refused; the
 /// answer comes through [`old_saves_outcome`].
@@ -262,6 +290,8 @@ pub fn orientation_stale() {
 pub fn follow_orientation(setting: Option<super::audio::Orientation>) {
     if resumed_since_last() {
         orientation_stale();
+        // The display may have changed while the app was away: the performance log writes it again.
+        super::perf_log::on_resume();
     }
     let want = super::audio::requested_orientation(setting);
     if !super::audio::must_request(ORIENTATION.with(|o| o.get()), want) {

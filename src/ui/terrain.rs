@@ -1071,6 +1071,7 @@ impl TerrainLayer {
             None
         };
         let atlas = Texture2D::from_rgba8(image.width as u16, image.height as u16, &image.rgba);
+        razdor::mem_probe::set_texture("map atlas", razdor::mem_probe::texture_bytes(image.width, image.height, 4));
         atlas.set_filter(FilterMode::Linear);
         let water = if water.len() == WATER_FRAMES && water.iter().all(|f| f.width > 0 && f.height > 0) {
             water.iter().map(water_texture).collect()
@@ -1142,6 +1143,7 @@ impl TerrainLayer {
         weather.set_filter(FilterMode::Nearest);
         let lowland = Texture2D::from_rgba8(w as u16, h as u16, &lowland_bytes);
         lowland.set_filter(FilterMode::Nearest);
+        razdor::mem_probe::set_texture("terrain layers", 5 * razdor::mem_probe::texture_bytes(w, h, 4) + razdor::mem_probe::texture_bytes(w + 2, h + 2, 4));
         let weather_seed = super::weather::map_seed(w, h, codes);
         let tex = MapTextures { cells, neighbours, flow: flow_tex, bank: bank_tex, weather, lowland, weather_seed };
         // The keyed entries hold no copy of the codes and the flow (nothing to compare then).
@@ -1170,6 +1172,7 @@ impl TerrainLayer {
         let sized = g.target.as_ref().is_some_and(|t| t.texture.width() as u32 == pw && t.texture.height() as u32 == ph);
         if !sized {
             let rt = render_target(pw, ph);
+            razdor::mem_probe::set_texture("ground cache", razdor::mem_probe::texture_bytes(pw, ph, 4));
             rt.texture.set_filter(FilterMode::Nearest);
             g.target = Some(rt);
             g.key = None;
@@ -1339,6 +1342,7 @@ impl TerrainLayer {
         let target = st.targets[idx]
             .get_or_insert_with(|| {
                 let rt = macroquad::texture::render_target(size.0, size.1);
+                razdor::mem_probe::set_texture("water pictures", 2 * razdor::mem_probe::texture_bytes(size.0, size.1, 4));
                 rt.texture.set_filter(FilterMode::Linear);
                 rt
             })

@@ -79,11 +79,24 @@ pub fn set_setting(cap: u32) {
 /// idle map frame with «Экономия батареи» on (`battery_cap`). Called once a frame, by the pacer, which takes
 /// the idle flag the frame set.
 pub fn current() -> u32 {
+    let (base, saver) = cap_inputs();
+    battery_cap(base, saver, IDLE.swap(false, std::sync::atomic::Ordering::Relaxed))
+}
+
+/// The cap [`current`] gives now, read without taking the idle flag (the performance log reads it; the
+/// pacer keeps the flag).
+pub fn peek() -> u32 {
+    let (base, saver) = cap_inputs();
+    battery_cap(base, saver, IDLE.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// The cap in use and whether the battery saver (or «Анимация карты» Выкл) paces the idle frames.
+fn cap_inputs() -> (u32, bool) {
     let setting = SETTING.load(std::sync::atomic::Ordering::Relaxed);
     let base = in_use(if setting == u32::MAX { 0 } else { setting });
     // «Анимация карты» Выкл (`map_anim`) paces the idle map frames as the battery saver does: a still map needs no more.
     let saver = BATTERY.load(std::sync::atomic::Ordering::Relaxed) || super::map_anim::off();
-    battery_cap(base, saver, IDLE.swap(false, std::sync::atomic::Ordering::Relaxed))
+    (base, saver)
 }
 
 /// The idle frame rate of «Экономия батареи» (the owner's request 2026-11-11: 5 to 10 a second, so the map's

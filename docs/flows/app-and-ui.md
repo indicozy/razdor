@@ -198,6 +198,24 @@ starts the same export as the Load window's «Перенос…» (`transfer::st
 `razdor.log`, then `razdor-play.log` and the newest `razdor-bench-*.txt`, each under a heading) goes to the document creator; the
 answer comes back through `transfer::settings_poll` and a note window. On the desktop it opens the log's folder (`open_folder`).
 
+The performance log's lines (`ui/perf_log.rs`; logging only, nothing drawn differently): `device:` (OS, CPUs and on Android the activity's
+`razdorDeviceInfo`: manufacturer, model, device, hardware, SoC, Android version, RAM, low-memory flags, no serial or id), `gl:` (vendor,
+renderer, version, GLSL, the largest texture) and `display:` (the screen and DPI; on Android `razdorDisplayInfo`: the current mode, the top
+mode, the refresh rates, the window's preference after the vote, the frame cap read, the density) once the window is open, and `display:`
+again when the activity resumes. When a game's world map opens (from the menu, a loaded save, the next campaign map, a restart, the editor's
+test play, or the run's first map): `map:` (file, title, the mod played, cells, objects, buildings, armies, the hero's cell), `view:` (window,
+DPI, the drawn map size with `map_render_scale`, zoom, flat / 2.5D / first-person, the frame cap now, the terrain options), `gpu-textures:`
+(the biggest texture estimates by name, `mem_probe`) and `settings:` (the graphics settings as values and the quality preset they match).
+A settings window closing logs `settings:` again only when one of those changed. In the debug mode only: `mem:` every 5 s (the process's RSS
+from `/proc`, the texture estimate, and on Android `razdorMemInfo`: the Java heap, the native heap, the available memory), and `thermal:` every
+60 s on Android (`razdorThermalInfo`: the thermal status and headroom, the battery's temperature, power save).
+
+The frame probe's GPU samples (debug mode, phones and desktop): one frame in every 10 s runs its GPU waits (`frame_probe::gpu_sampled_now`,
+`ui::gpu_probe::gpu_wait`: flush and wait for the GL queue, timed as the stage). Those frames are summarised apart as `gpu-sample` lines, so
+the other lines are the frames as they are. The map's effects have a CPU stage and a GPU stage each (water, mist, light, sun-shadow,
+weather, ground-cache, freeze, and the minimap's GPU wait), and the map lines carry the draws and vertices the probe estimates. The
+`profile-gpu` file on Android still waits every frame, and on the desktop `RAZDOR_GPU_STAGES=1` keeps its timer queries for the frames.
+
 Thread locals: `local!` (`src/local.rs`), never std's `thread_local!`: std takes one TLS key per static
 on Android, where a process has about 128, and the army window aborted with «out of TLS keys»; one
 test fails if `thread_local!` comes back in `src/`. Touch (phones and tablets,

@@ -6,17 +6,24 @@
 
 use razdor::frame_probe::Stage;
 
-/// Flushes the batch and waits for the GL queue, timed as `stage`. The flush keeps the camera
-/// and the material state, so the draws after it are as before.
-#[cfg(target_os = "android")]
-pub fn gpu_wait(stage: Stage) {
-    if !razdor::frame_probe::gpu_waits_on() {
-        return;
-    }
+/// Flushes the batch and waits for the GL queue, timed as `stage` (the GPU's work since the previous wait, as
+/// the queue is empty after it). The flush keeps the camera and the material state, so the draws after it are
+/// as before.
+fn finish_wait(stage: Stage) {
     razdor::frame_probe::time(stage, || unsafe {
         macroquad::window::get_internal_gl().flush();
         macroquad::miniquad::gl::glFinish();
     });
+}
+
+/// A GPU wait of the map's stages on Android: the `profile-gpu` file's waits (every frame), or the debug mode's
+/// sampled frame (`frame_probe::gpu_sampled_now`).
+#[cfg(target_os = "android")]
+pub fn gpu_wait(stage: Stage) {
+    if !(razdor::frame_probe::gpu_sampled_now() || razdor::frame_probe::gpu_waits_on()) {
+        return;
+    }
+    finish_wait(stage);
 }
 
 /// Desktop (`RAZDOR_GPU_STAGES=1` with the probe): a stage marker. The batch is flushed, so the GPU
@@ -26,6 +33,12 @@ pub fn gpu_wait(stage: Stage) {
 /// is what the frame waits for). Either way the result goes to the probe's `gpu_<stage>_ms` column.
 #[cfg(not(target_os = "android"))]
 pub fn gpu_wait(stage: Stage) {
+    // A debug-mode sample (`frame_probe::gpu_sampled_now`) waits the GL queue as Android does, so its stage times
+    // land in the frame's summary (`gpu-sample` lines); the timer path below is the frames' own.
+    if razdor::frame_probe::gpu_sampled_now() {
+        finish_wait(stage);
+        return;
+    }
     if !razdor::frame_probe::gpu_timers_on() {
         return;
     }

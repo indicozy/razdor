@@ -19,6 +19,16 @@
 //! timer queries read back a frame or two later, or by `glFinish` on GL 2 and GLES
 //! (`ui::gpu_probe::gpu_wait`). Those timers are off by default and cost nothing then.
 //!
+//! Debug mode, GPU samples (phones and desktop): while «Режим отладки» is on, one frame in every
+//! [`GPU_SAMPLE_EVERY`] runs its GPU waits (`ui::gpu_probe::gpu_wait`: flush and wait for the GL queue, the
+//! time as its stage). Those frames are slower by design, so they are summarised apart, as `gpu-sample`
+//! lines, and the other lines stay the frames as they are. The `profile-gpu` file on Android still waits
+//! every frame.
+//!
+//! The map's effects have a CPU stage each (`water`, `mist`, `light`, `sun-shadow`, `weather`, `ground-cache`,
+//! `freeze`: [`EFFECT_STAGES`]) and a GPU stage each (`gpu-water` … `gpu-minimap`: [`GPU_STAGES`]). The summary
+//! of a map kind also has the draw calls and vertices estimated for its frames ([`draw`]).
+//!
 //! The stage times are CPU time spent building the frame. Macroquad batches draws and issues
 //! the GL calls in `next_frame`, so GL submission and the wait for vsync (`eglSwapBuffers`)
 //! land in "present" (total minus work). GPU time itself is not visible here, except for the
@@ -41,11 +51,34 @@ use std::time::{Duration, Instant};
 /// tick, `world` the map with `terrain` inside it, `rebuilds` the texture rebuilds, `draws` the
 /// draw calls estimated for the frame and `verts` its vertices ([`draw`]), and the last columns the
 /// GPU time of each GPU stage (`GPU_STAGES`, empty when not timed, see `ui::gpu_probe`).
-pub const CSV_HEADER: &str = "frame,kind,work_ms,total_ms,tick,terrain,world,fog,minimap,route,look,armies,script,day,snap,autosave,session,ai_move,ai_plan,rebuilds,backdrop,battle_window,effect,gpu_backdrop,gpu_window,view,draws,verts,gpu_backdrop_ms,gpu_window_ms,gpu_sky_ms,gpu_terrain_ms,gpu_marks_ms,gpu_sprites_ms,gpu_fog_ms,gpu_ui_ms";
+pub const CSV_HEADER: &str = "frame,kind,work_ms,total_ms,tick,terrain,world,fog,minimap,route,look,armies,script,day,snap,autosave,session,ai_move,ai_plan,rebuilds,backdrop,battle_window,effect,gpu_backdrop,gpu_window,view,draws,verts,water,mist,light,sun_shadow,weather,ground_cache,freeze,gpu_backdrop_ms,gpu_window_ms,gpu_sky_ms,gpu_terrain_ms,gpu_marks_ms,gpu_sprites_ms,gpu_fog_ms,gpu_ui_ms,gpu_water_ms,gpu_mist_ms,gpu_light_ms,gpu_sun_shadow_ms,gpu_weather_ms,gpu_ground_cache_ms,gpu_freeze_ms,gpu_minimap_ms";
 
 /// The GPU stages timed per frame, in the CSV's column order (`gpu_<name>_ms`): each is the GPU's
 /// time between the marker before it and its own marker (`ui::gpu_probe::gpu_wait`).
-pub const GPU_STAGES: [Stage; 8] = [Stage::GpuBackdrop, Stage::GpuWindow, Stage::GpuSky, Stage::GpuTerrain, Stage::GpuMarks, Stage::GpuSprites, Stage::GpuFog, Stage::GpuUi];
+pub const GPU_STAGES: [Stage; 16] = [
+    Stage::GpuBackdrop,
+    Stage::GpuWindow,
+    Stage::GpuSky,
+    Stage::GpuTerrain,
+    Stage::GpuMarks,
+    Stage::GpuSprites,
+    Stage::GpuFog,
+    Stage::GpuUi,
+    Stage::GpuWater,
+    Stage::GpuMist,
+    Stage::GpuLight,
+    Stage::GpuSunShadow,
+    Stage::GpuWeather,
+    Stage::GpuGroundCache,
+    Stage::GpuFreeze,
+    Stage::GpuMinimap,
+];
+
+/// The map's effects' CPU stages, in the CSV's column order (after `verts`).
+pub const EFFECT_STAGES: [Stage; 7] = [Stage::Water, Stage::Mist, Stage::Light, Stage::SunShadow, Stage::Weather, Stage::GroundCache, Stage::Freeze];
+
+/// The period of the debug mode's GPU samples: one frame in this many seconds runs its GPU waits.
+pub const GPU_SAMPLE_EVERY: Duration = Duration::from_secs(10);
 
 /// The longest batch of vertices macroquad issues as one draw call (`draw_call_vertex_capacity`).
 const MAX_BATCH_VERTS: u32 = 10000;
@@ -112,10 +145,34 @@ pub enum Stage {
     /// Android only, map frames: after everything else the frame draws (the minimap, the bar,
     /// the windows and the cursor), at the frame's end.
     GpuUi,
+    /// The map's live water: the ship wakes and the water's picture (CPU).
+    Water,
+    /// The mist over the unexplored land (CPU).
+    Mist,
+    /// The lights: the night's light over the world, the lit windows, the light pools and their shadows (CPU).
+    Light,
+    /// The sun's shadows, the baked map (CPU).
+    SunShadow,
+    /// The weather: rain, snow, haze and cloud shadows (CPU).
+    Weather,
+    /// The ground cache: its rebuild and its blit (CPU).
+    GroundCache,
+    /// The map under a window (`map_freeze`): the copy shown in place of the world (CPU).
+    Freeze,
+    /// GPU waits after the effects above, and the minimap window (`gpu-water` … `gpu-minimap`): the GPU
+    /// time of the draws since the previous wait (`ui::gpu_probe::gpu_wait`).
+    GpuWater,
+    GpuMist,
+    GpuLight,
+    GpuSunShadow,
+    GpuWeather,
+    GpuGroundCache,
+    GpuFreeze,
+    GpuMinimap,
 }
 
 impl Stage {
-    pub const COUNT: usize = 26;
+    pub const COUNT: usize = 41;
 }
 
 /// What the frame was: the map with the hero walking, or not, or a battle (`tilt`: drawn in
@@ -167,6 +224,8 @@ pub struct Sample {
     /// Draw calls estimated for the frame, and the vertices drawn ([`draw`]).
     pub draws: u32,
     pub verts: u32,
+    /// The frame ran its GPU waits as a debug-mode sample ([`GPU_SAMPLE_EVERY`]): summarised apart.
+    pub gpu_sampled: bool,
 }
 
 struct State {
@@ -199,6 +258,10 @@ struct State {
     /// The GPU times of the timed terrain draws (`ui::gpu_probe`), with the kind of their frame,
     /// since the last summary.
     gpu: Vec<(Kind, f32)>,
+    /// This frame runs its GPU waits as a debug-mode sample ([`gpu_sampled_now`]), and when the last
+    /// sample began.
+    gpu_sampling: bool,
+    sample_last: Option<Instant>,
 }
 
 impl State {
@@ -222,6 +285,8 @@ impl State {
             gpu_frames: BTreeMap::new(),
             csv_rows: Vec::new(),
             gpu: Vec::new(),
+            gpu_sampling: false,
+            sample_last: None,
         }
     }
 }
@@ -367,6 +432,17 @@ pub fn gpu_waits_on() -> bool {
     on() && *ON.get_or_init(|| crate::platform::app_dir().is_some_and(|d| d.join("profile-gpu").is_file()))
 }
 
+/// This frame is a debug-mode GPU sample: its GPU waits run (`ui::gpu_probe::gpu_wait`). Set at the end of the
+/// previous frame ([`end_frame`]), once per [`GPU_SAMPLE_EVERY`] while the debug mode is on.
+pub fn gpu_sampled_now() -> bool {
+    on() && STATE.with_borrow(|s| s.gpu_sampling)
+}
+
+/// Whether an event that comes every `every` is due at `now`, given its last time (`None`: never yet).
+pub fn due(last: Option<Instant>, now: Instant, every: Duration) -> bool {
+    last.is_none_or(|t| now.saturating_duration_since(t) >= every)
+}
+
 /// A timed GPU draw of `ms` milliseconds, in a frame of `kind`: counted in its summary line.
 pub fn record_gpu(kind: Kind, ms: f32) {
     if on() {
@@ -436,6 +512,7 @@ pub fn end_frame(work: Duration, total: Duration) {
             terrain_px: s.terrain_px,
             draws: s.draws,
             verts: s.verts,
+            gpu_sampled: s.gpu_sampling,
         };
         s.frames += 1;
         if csv {
@@ -454,6 +531,12 @@ pub fn end_frame(work: Duration, total: Duration) {
         s.batch_dirty = false;
         s.kind = Kind::Other;
         s.effect = false;
+        // The next frame is a GPU sample once the period has passed (debug mode only: the flag is set on
+        // every platform, the waits themselves are the GPU waits of `ui::gpu_probe`).
+        s.gpu_sampling = crate::diag::debug_mode() && due(s.sample_last, now, GPU_SAMPLE_EVERY);
+        if s.gpu_sampling {
+            s.sample_last = Some(now);
+        }
         let elapsed = now.duration_since(since);
         if elapsed < PERIOD {
             return (None, Vec::new(), BTreeMap::new());
@@ -585,6 +668,9 @@ pub fn csv_row_gpu(frame: u64, s: &Sample, gpu: Option<&[f32; GPU_STAGES.len()]>
         s.draws,
         s.verts,
     );
+    for st in EFFECT_STAGES {
+        row.push_str(&format!(",{:.3}", stage(st)));
+    }
     for i in 0..GPU_STAGES.len() {
         row.push(',');
         if let Some(ms) = gpu.map(|g| g[i]).filter(|ms| !ms.is_nan()) {
@@ -629,18 +715,22 @@ fn ms(d: Duration) -> f32 {
 /// The summary of `samples`, taken over `secs` seconds: one line per kind that has frames, in
 /// the order of [`KINDS`]. Empty when there are no frames.
 pub fn summary_lines(secs: f32, samples: &[Sample], gpu: &[(Kind, f32)]) -> Vec<String> {
-    KINDS
+    // The frames as they are, then the debug mode's GPU samples under their own label (`gpu-sample`), so their
+    // waits do not change the frames' numbers.
+    [(false, ""), (true, "gpu-sample ")]
         .into_iter()
-        .filter_map(|kind| {
-            let of: Vec<&Sample> = samples.iter().filter(|s| s.kind == kind).collect();
-            let times: Vec<f32> = gpu.iter().filter(|(k, _)| *k == kind).map(|(_, ms)| *ms).collect();
-            (!of.is_empty()).then(|| kind_line(secs, kind, &of, &times))
+        .flat_map(|(sampled, group)| {
+            KINDS.into_iter().filter_map(move |kind| {
+                let of: Vec<&Sample> = samples.iter().filter(|s| s.gpu_sampled == sampled && s.kind == kind).collect();
+                let times: Vec<f32> = if sampled { Vec::new() } else { gpu.iter().filter(|(k, _)| *k == kind).map(|(_, ms)| *ms).collect() };
+                (!of.is_empty()).then(|| kind_line(secs, kind, &of, &times, group))
+            })
         })
         .collect()
 }
 
-fn kind_line(secs: f32, kind: Kind, of: &[&Sample], gpu_terrain: &[f32]) -> String {
-    let name = summary_name(kind);
+fn kind_line(secs: f32, kind: Kind, of: &[&Sample], gpu_terrain: &[f32], group: &str) -> String {
+    let name = format!("{group}{}", summary_name(kind));
     let rebuilds: u32 = of.iter().map(|s| s.rebuilds).sum();
     let stage = |st: Stage| dist(of.iter().map(|s| s.stage_ms[st as usize])).narrow();
     // The battle kinds split their window's time: the backdrop, the window, its effects and the
@@ -662,7 +752,29 @@ fn kind_line(secs: f32, kind: Kind, of: &[&Sample], gpu_terrain: &[f32]) -> Stri
     let map = if is_map(kind) {
         let mean = |f: fn(&Sample) -> f32| of.iter().map(|s| f(s)).sum::<f32>() / of.len() as f32;
         let max = |f: fn(&Sample) -> f32| of.iter().map(|s| f(s)).fold(0.0, f32::max);
-        format!(
+        // The effects' means (CPU and GPU), and the draws the frames made: one value each, with the frames' mean.
+        let avg = |st: Stage| of.iter().map(|s| s.stage_ms[st as usize]).sum::<f32>() / of.len() as f32;
+        let effects = format!(
+            "water {:.2} | mist {:.2} | light {:.2} | sun-shadow {:.2} | weather {:.2} | ground-cache {:.2} | freeze {:.2} | gpu-water {} | gpu-mist {} | gpu-light {} | gpu-sun-shadow {} | gpu-weather {} | gpu-ground-cache {} | gpu-freeze {} | gpu-minimap {} | draws {:.0} verts {:.0} | ",
+            avg(Stage::Water),
+            avg(Stage::Mist),
+            avg(Stage::Light),
+            avg(Stage::SunShadow),
+            avg(Stage::Weather),
+            avg(Stage::GroundCache),
+            avg(Stage::Freeze),
+            stage(Stage::GpuWater),
+            stage(Stage::GpuMist),
+            stage(Stage::GpuLight),
+            stage(Stage::GpuSunShadow),
+            stage(Stage::GpuWeather),
+            stage(Stage::GpuGroundCache),
+            stage(Stage::GpuFreeze),
+            stage(Stage::GpuMinimap),
+            mean(|s| s.draws as f32),
+            mean(|s| s.verts as f32),
+        );
+        let base = format!(
             "gpu-sky {} | gpu-terrain {} | gpu-marks {} | gpu-sprites {} | gpu-fog {} | gpu-ui {} | terrain-gpu {} | sprites n={:.0} area={:.2}Mpx (max {:.2}Mpx) | terrain area={:.2}Mpx | ",
             stage(Stage::GpuSky),
             stage(Stage::GpuTerrain),
@@ -676,7 +788,8 @@ fn kind_line(secs: f32, kind: Kind, of: &[&Sample], gpu_terrain: &[f32]) -> Stri
             mean(|s| s.sprite_px) / 1e6,
             max(|s| s.sprite_px) / 1e6,
             mean(|s| s.terrain_px) / 1e6,
-        )
+        );
+        format!("{base}{effects}")
     } else {
         String::new()
     };
@@ -713,7 +826,22 @@ fn present_ms(s: &Sample) -> f32 {
 /// The map's objects (sprites, markers): the world minus its terrain and the GPU waits inside
 /// the world (sky, terrain, marks, sprites).
 fn objects_ms(s: &Sample) -> f32 {
-    let inside = [Stage::Terrain, Stage::GpuSky, Stage::GpuTerrain, Stage::GpuMarks, Stage::GpuSprites];
+    let inside = [
+            Stage::Terrain,
+            Stage::GpuSky,
+            Stage::GpuTerrain,
+            Stage::GpuMarks,
+            Stage::GpuSprites,
+            Stage::Water,
+            Stage::Mist,
+            Stage::Light,
+            Stage::SunShadow,
+            Stage::Weather,
+            Stage::GpuMist,
+            Stage::GpuLight,
+            Stage::GpuSunShadow,
+        Stage::GpuWeather,
+    ];
     let waits: f32 = inside.iter().map(|st| s.stage_ms[*st as usize]).sum();
     (s.stage_ms[Stage::World as usize] - waits).max(0.0)
 }
@@ -793,7 +921,28 @@ mod tests {
     use super::*;
 
     fn sample(kind: Kind, work_ms: f32, total_ms: f32, stage_ms: [f32; Stage::COUNT]) -> Sample {
-        Sample { kind, work_ms, total_ms, stage_ms, rebuilds: 0, sprites: 0, sprite_px: 0.0, terrain_px: 0.0, draws: 0, verts: 0 }
+        Sample { kind, work_ms, total_ms, stage_ms, rebuilds: 0, sprites: 0, sprite_px: 0.0, terrain_px: 0.0, draws: 0, verts: 0, gpu_sampled: false }
+    }
+
+    #[test]
+    fn the_gpu_sample_is_due_at_first_then_every_ten_seconds() {
+        let t0 = Instant::now();
+        assert!(due(None, t0, GPU_SAMPLE_EVERY), "the first sample at once");
+        assert!(!due(Some(t0), t0 + Duration::from_secs(9), GPU_SAMPLE_EVERY));
+        assert!(due(Some(t0), t0 + Duration::from_secs(10), GPU_SAMPLE_EVERY));
+    }
+
+    #[test]
+    fn the_gpu_samples_are_summarised_apart_from_the_frames() {
+        let plain = sample(Kind::Idle { tilt: false }, 3.0, 4.0, [0.0; Stage::COUNT]);
+        let mut sampled = sample(Kind::Idle { tilt: false }, 3.0, 40.0, [0.0; Stage::COUNT]);
+        sampled.gpu_sampled = true;
+        let lines = summary_lines(5.0, &[plain, sampled], &[]);
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(lines[0].starts_with("frame probe 5.0 s idle[flat] n=1 "), "{}", lines[0]);
+        assert!(lines[1].starts_with("frame probe 5.0 s gpu-sample idle[flat] n=1 "), "{}", lines[1]);
+        assert!(lines[0].contains(" | water 0.00 | mist 0.00 | "), "{}", lines[0]);
+        assert!(lines[0].contains(" | gpu-minimap p50 0.0 p99 0.0 max 0.0 | draws 0 verts 0 | "), "{}", lines[0]);
     }
 
     #[test]
@@ -873,14 +1022,16 @@ mod tests {
         step.draws = 5;
         step.verts = 120;
         let row = csv_row(7, &step);
-        assert_eq!(row, "7,walk-step,3.000,4.250,1.000,0.500,2.000,0.250,0.125,0.500,0.250,0.750,0.000,0.000,0.000,0.125,0.250,0.500,0.250,2,0.000,0.000,0.000,0.000,0.000,flat,5,120,,,,,,,,");
+        assert!(row.starts_with("7,walk-step,3.000,4.250,1.000,0.500,2.000,0.250,0.125,0.500,0.250,0.750,0.000,0.000,0.000,0.125,0.250,0.500,0.250,2,0.000,0.000,0.000,0.000,0.000,flat,5,120,"), "{row}");
+        // The effects' CPU columns (zero here), then the GPU columns, all empty when not timed.
+        assert!(row.contains(",flat,5,120,0.000,0.000,0.000,0.000,0.000,0.000,0.000,,,,"), "{row}");
         assert_eq!(row.split(',').count(), CSV_HEADER.split(',').count());
         // The GPU columns follow the stages' order and are filled when timed.
         let mut gpu = [f32::NAN; GPU_STAGES.len()];
         gpu[3] = 1.5;
         gpu[7] = 0.25;
         let timed = csv_row_gpu(7, &step, Some(&gpu));
-        assert!(timed.ends_with(",5,120,,,,1.500,,,,0.250"), "{timed}");
+        assert!(timed.ends_with(",120,0.000,0.000,0.000,0.000,0.000,0.000,0.000,,,,1.500,,,,0.250,,,,,,,,"), "{timed}");
         assert_eq!(timed.split(',').count(), CSV_HEADER.split(',').count());
         let other = sample(Kind::Other, 0.5, 1.0, [0.0; Stage::COUNT]);
         assert!(csv_row(1, &other).starts_with("1,other,0.500,1.000,0.000,"));

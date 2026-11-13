@@ -1,6 +1,7 @@
 pub mod av;
 pub mod diag;
 pub mod frame_probe;
+pub mod mem_probe;
 pub mod local;
 pub mod difftest;
 pub mod trailer;

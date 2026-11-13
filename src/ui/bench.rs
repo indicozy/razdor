@@ -218,7 +218,7 @@ pub struct CellResult {
 }
 
 /// A quoted text value of a log line (its quotes become apostrophes).
-fn quoted(s: &str) -> String {
+pub fn quoted(s: &str) -> String {
     format!("\"{}\"", s.replace('"', "'"))
 }
 
@@ -265,6 +265,9 @@ pub struct Report {
     pub copied: bool,
     /// Why the file was not saved, when it was not.
     pub error: Option<String>,
+    /// The header lines after the vertical sync: the device, the display, the render size and the settings
+    /// (`perf_log::bench_header`).
+    pub setup: Vec<String>,
 }
 
 /// The text of a saved report: a readable summary, then the log lines (what `phone_bench.py` reads).
@@ -276,7 +279,12 @@ pub fn report_text(r: &Report) -> String {
     out.push_str(&format!("Renderer: {}\n", r.device.gpu));
     out.push_str(&format!("Screen: {}x{}\n", r.device.screen.0, r.device.screen.1));
     out.push_str(&format!("Razdor {}; OS: {}\n", r.device.version, r.device.os));
-    out.push_str(&format!("Vertical sync: {}\n\n", r.device.vsync));
+    out.push_str(&format!("Vertical sync: {}\n", r.device.vsync));
+    for line in &r.setup {
+        out.push_str(line);
+        out.push('\n');
+    }
+    out.push('\n');
     out.push_str("Cell | FPS | frame ms median | frame ms p99 | slow frames\n");
     for c in &r.cells {
         out.push_str(&format!("{} | {:.1} | {:.1} | {:.1} | {}\n", c.name, c.stats.fps, c.stats.frame_med, c.stats.frame_p99, c.stats.slow));
@@ -463,17 +471,11 @@ fn ms(d: Duration) -> f32 {
 
 /// The GL renderer's string (after the first frame is shown), or `unknown`.
 pub fn gpu_renderer() -> String {
-    // SAFETY: called on the main thread once the context exists (the title screen has drawn).
-    let p = unsafe { macroquad::miniquad::gl::glGetString(0x1F01) };
-    if p.is_null() {
-        return "unknown".into();
-    }
-    // SAFETY: GL returns a NUL-terminated string that lives as long as the context.
-    unsafe { std::ffi::CStr::from_ptr(p as *const std::ffi::c_char) }.to_string_lossy().into_owned()
+    super::perf_log::gl_string(super::perf_log::GL_RENDERER)
 }
 
 /// The operating system's name: the release's pretty name on Linux, else the target's.
-fn os_name() -> String {
+pub fn os_name() -> String {
     if let Ok(text) = std::fs::read_to_string("/etc/os-release") {
         for line in text.lines() {
             if let Some(v) = line.strip_prefix("PRETTY_NAME=") {
@@ -701,6 +703,7 @@ pub fn sample(app: &mut App, work: Duration, total: Duration) {
         file: None,
         copied: false,
         error: None,
+        setup: super::perf_log::bench_header(&app.audio.settings),
     };
     // `RAZDOR_BENCH_SAVE` (a lab's or a test's run, with no one to press Save): the file is saved at once.
     if std::env::var_os("RAZDOR_BENCH_SAVE").is_some() {
@@ -849,6 +852,7 @@ pub fn snapshot_stage(which: &str) {
                 file: None,
                 copied: false,
                 error: None,
+                setup: Vec::new(),
             };
             PHASE.with_borrow_mut(|p| *p = Phase::Done(Box::new(report)));
         }
@@ -946,9 +950,23 @@ mod tests {
             file: None,
             copied: false,
             error: None,
+            setup: Vec::new(),
         };
         let text = report_text(&r);
         assert!(text.contains("\nRazdorBench cell=mine.near "));
         assert!(text.ends_with("RazdorBench DONE\n"));
+    }
+
+    #[test]
+    fn the_report_header_carries_the_device_display_render_and_settings_lines() {
+        let dev = Device { version: "1.5.0".into(), screen: (1, 2), gpu: "g".into(), os: "o".into(), vsync: "device".into() };
+        let setup = vec!["Device: os=android model=\"moto g32\"".to_string(), "Settings: quality=none".to_string()];
+        let r = Report { choice: Choice::Mine, device: dev, map: "m".into(), cells: Vec::new(), file: None, copied: false, error: None, setup };
+        let text = report_text(&r);
+        let vsync = text.find("Vertical sync: device\n").expect("the vertical sync line");
+        let device = text.find("\nDevice: os=android model=\"moto g32\"\n").expect("the device line in the header");
+        let settings = text.find("\nSettings: quality=none\n").expect("the settings line in the header");
+        assert!(vsync < device && device < settings, "the setup lines follow the vertical sync line");
+        assert!(text.contains("\n\nCell | FPS"), "a blank line still ends the header");
     }
 }

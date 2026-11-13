@@ -1620,6 +1620,7 @@ fn bent_target(w: u32, h: u32) -> RenderTarget {
             return rt.clone();
         }
         let rt = render_target(size.0, size.1);
+        razdor::mem_probe::set_texture("bent view target", razdor::mem_probe::texture_bytes(size.0, size.1, 4));
         rt.texture.set_filter(FilterMode::Nearest);
         if t.len() >= TARGETS_KEPT {
             t.remove(0);
@@ -2666,7 +2667,8 @@ impl Camera {
     /// gets the frame's light here (the daylight comes after the world for the other views).
     fn draw_mist(&self, tex: &Texture2D, dest: Rect, src: Option<Rect>) {
         let light = if self.tilt.is_some_and(|t| t.cam.bend.is_some()) { mist::frame_tint() } else { [1.0; 3] };
-        mist::draw(tex, dest, src, light);
+        frame_probe::time(Stage::Mist, || mist::draw(tex, dest, src, light));
+        gpu_wait(Stage::GpuMist);
     }
 
     /// The mist's rectangles over the fog texture: where it is drawn (`dest`) and which texels (`src`, None
@@ -2931,19 +2933,30 @@ fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool) {
         let cached = (waits && layer.cache_on() && super::render_cache::target().is_none() && plain).then(|| layer.ground_target(key)).flatten();
         match cached {
             Some((rt, fill)) => {
-                if fill {
-                    super::render_cache::fill(&rt, || in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Ground, flow))));
+                // The cache's rebuild (when it is due) and its blit: the ground cache's own stage.
+                frame_probe::time(Stage::GroundCache, || {
+                    if fill {
+                        super::render_cache::fill(&rt, || in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Ground, flow))));
+                    }
+                    in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Cached, flow)));
+                });
+                if waits {
+                    gpu_wait(Stage::GpuGroundCache);
                 }
-                in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Cached, flow)));
                 // «Живая вода» at a lower rate or size: the water's picture is filled under this camera when it is due
                 // (2.5D and first person included: the fill keeps the 3D camera, as the ground's does), then composited.
                 let (map, codes) = (&game.world.map, game.world.map.surface_codes());
                 let water_ms = Some((super::map_anim::now() * 1000.0) as i64);
                 if let Some(target) = layer.water_picture_prepare(codes, (map.w as u32, map.h as u32), flow, Some(map.surface_generation()), water_ms, key) {
-                    super::render_cache::fill(&target, || {
-                        macroquad::prelude::clear_background(macroquad::prelude::Color::new(0.0, 0.0, 0.0, 0.0));
-                        in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Picture, flow)));
+                    frame_probe::time(Stage::Water, || {
+                        super::render_cache::fill(&target, || {
+                            macroquad::prelude::clear_background(macroquad::prelude::Color::new(0.0, 0.0, 0.0, 0.0));
+                            in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Picture, flow)));
+                        });
                     });
+                    if waits {
+                        gpu_wait(Stage::GpuWater);
+                    }
                 }
                 in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow)));
             }
@@ -4790,18 +4803,24 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     }
     // The sun's and the moon's shadows are the baked map (`prepare_shadow_map`): one quad each, whatever the casters.
     if let Some(c) = sun {
-        ground(cam, || draw_sun_map(cam, c));
+        frame_probe::time(Stage::SunShadow, || ground(cam, || draw_sun_map(cam, c)));
+        if waits {
+            gpu_wait(Stage::GpuSunShadow);
+        }
     }
     if !lit_lights.is_empty() {
         let objects: Vec<&Decoration> = rows.iter().zip(&seen_row).filter(|(_, s)| **s).map(|(o, _)| o).collect();
         let locations: Vec<(usize, &Location)> = seen_locs.iter().map(|&i| (i, &game.world.locations[i])).filter(|(_, l)| !l.kind.is_bridge()).collect();
-        ground(cam, || draw_shadows(game, art, cam, &lit_lights, &objects, &locations));
+        frame_probe::time(Stage::Light, || ground(cam, || draw_shadows(game, art, cam, &lit_lights, &objects, &locations)));
     }
     // The buildings' light lies on the ground around them, not on them: the pools are drawn here, in the
     // ground pass under every standing sprite, so a building's own picture covers its pool (the owner's
     // report: no blob on a building). Torches are drawn after the world (`draw_daylight`).
     if lit.is_some() && lights::with_frame(|f| f.map_or(0.0, |f| f.night)) > 0.0 {
-        ground(cam, || draw_building_pools(game, cam));
+        frame_probe::time(Stage::Light, || ground(cam, || draw_building_pools(game, cam)));
+        if waits {
+            gpu_wait(Stage::GpuLight);
+        }
     }
     // The original (0x4c8864) draws the hills of classes 1-3 in a pass of their own before
     // anything else, so they lie under every tree, mountain, building and army, the ones
@@ -4856,7 +4875,10 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // «Живая вода» (`water`): the wakes lie on the ground behind the sailing figures, over the
     // marks and the route and under the border and every standing sprite.
     if water::live() {
-        ground(cam, || draw_wakes(game, cam));
+        frame_probe::time(Stage::Water, || ground(cam, || draw_wakes(game, cam)));
+        if waits {
+            gpu_wait(Stage::GpuWater);
+        }
     }
     // 2.5D: the border lies on the ground, over the ground's marks and route and under every
     // standing sprite; the fog darkens it where the ground is unexplored.
@@ -4889,7 +4911,10 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
             // A bent view's weather lies in its picture, on the sheet's ground (`draw_weather`'s projection), under
             // the sprites; the other views draw it over the world (`draw_world`).
             if cam.tilt.is_some_and(|t| t.cam.bend.is_some()) {
-                ground(cam, || draw_weather(game, assets, cam, frame_light_of(game), veil.shows));
+                frame_probe::time(Stage::Weather, || ground(cam, || draw_weather(game, assets, cam, frame_light_of(game), veil.shows)));
+                if waits {
+                    gpu_wait(Stage::GpuWeather);
+                }
             }
         });
         if waits {
@@ -5969,7 +5994,8 @@ fn draw_map_backdrop(game: &Game, assets: &Assets) {
         match map_freeze::frozen(key, size) {
             Some(rt) => {
                 backdrop_frame(game, assets);
-                map_freeze::show(&rt);
+                frame_probe::time(Stage::Freeze, || map_freeze::show(&rt));
+                gpu_wait(Stage::GpuFreeze);
             }
             None => {
                 backdrop_world(game, assets);
@@ -6739,24 +6765,24 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
             // so the light goes over it too (the mist takes the night's tint). Off, the order is as before.
             let mist_light = flat && mist::on();
             if !mist_light {
-                draw_daylight(game, &cam, light);
+                staged(Stage::Light, Stage::GpuLight, || draw_daylight(game, &cam, light));
             }
             if flat {
                 frame_probe::time(Stage::Fog, || cam.draw_fog(game, &shows));
                 gpu_wait(Stage::GpuFog);
             }
             if mist_light {
-                draw_daylight(game, &cam, light);
+                staged(Stage::Light, Stage::GpuLight, || draw_daylight(game, &cam, light));
             }
             // The buildings' lit windows, after the night's tint (`draw_building_windows`).
             if light.is_some() {
-                draw_building_windows(game, assets, &cam, Veil { shows: &shows, now: show_now });
+                staged(Stage::Light, Stage::GpuLight, || draw_building_windows(game, assets, &cam, Veil { shows: &shows, now: show_now }));
             }
             // Razdor's «Погода» (off by default): the land's weather over the drawn map, after the fog and the
             // light, over the explored ground only (`draw_weather`).
             // A bent view draws it in its ground's picture (in `draw_world_in`), not here.
             if cam.tilt.is_none_or(|t| t.cam.bend.is_none()) {
-                draw_weather(game, assets, &cam, light, &shows);
+                staged(Stage::Weather, Stage::GpuWeather, || draw_weather(game, assets, &cam, light, &shows));
             }
         })
     });
@@ -6831,7 +6857,9 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
         view.minimap = !view.minimap;
     }
     if view.minimap && !trailer_clean() {
-        if let Some(at) = frame_probe::time(Stage::Minimap, || minimap::window(game, assets.dt.as_ref(), cam.view, cam.world_rect(), cam.minimap_sight(game.display_pos()), surface_color)) {
+        let minimap_at = frame_probe::time(Stage::Minimap, || minimap::window(game, assets.dt.as_ref(), cam.view, cam.world_rect(), cam.minimap_sight(game.display_pos()), surface_color));
+        gpu_wait(Stage::GpuMinimap);
+        if let Some(at) = minimap_at {
             view.look = Some(at);
         }
         // Razdor's army list under the minimap (advanced option): a click on a row goes there.
@@ -7059,6 +7087,13 @@ fn fog_visible(game: &Game, cam: &Camera, world: Vec2) -> f32 {
 /// The lit windows of the buildings in view (`sharp::windows_pass`): each building picture (each card of a
 /// cut building, in 2.5D) is drawn again over the map, after the night's tint, with only its emissive layer
 /// adding light. Visible cells only (`fog_visible`). Nothing is drawn at day or with the light off.
+/// Runs `f` timed as `stage` on the CPU, then waits for the GPU as `gpu` (the effect's GPU marker,
+/// `ui::gpu_probe::gpu_wait`): the map frame's flat passes use it.
+fn staged(stage: Stage, gpu: Stage, f: impl FnOnce()) {
+    frame_probe::time(stage, f);
+    gpu_wait(gpu);
+}
+
 fn draw_building_windows(game: &Game, assets: &Assets, cam: &Camera, veil: Veil) {
     let Some(art) = assets.dt.as_ref() else { return };
     let (Some(atlas), Some(mask)) = (art.map_atlas(), art.building_emissive()) else { return };

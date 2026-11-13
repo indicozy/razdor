@@ -86,6 +86,7 @@ fn target_for(w: u32, h: u32) -> RenderTarget {
             return rt.clone();
         }
         let rt = render_target(w, h);
+        razdor::mem_probe::set_texture("map scale target", razdor::mem_probe::texture_bytes(w, h, 4));
         rt.texture.set_filter(FilterMode::Linear);
         *t = Some(rt.clone());
         rt

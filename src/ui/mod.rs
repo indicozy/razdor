@@ -16,6 +16,7 @@ pub mod custom_battle;
 pub mod dialog;
 pub mod display;
 pub mod frame_state;
+pub mod perf_log;
 pub mod quality_preset;
 pub mod atlas_cut;
 pub mod dt_art;

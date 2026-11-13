@@ -10,6 +10,7 @@
 
 //% IMPORTS
 
+import android.app.ActivityManager;
 import android.app.PendingIntent;
 import android.content.Intent;
 import android.database.Cursor;
@@ -22,6 +23,9 @@ import android.content.BroadcastReceiver;
 import android.content.IntentFilter;
 import android.content.pm.PackageInstaller;
 import android.media.AudioManager;
+import android.os.BatteryManager;
+import android.os.Debug;
+import android.os.PowerManager;
 import android.view.KeyEvent;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
@@ -139,6 +143,191 @@ public String razdorFilesDir() {
         dir = getFilesDir();
     }
     return dir.getAbsolutePath();
+}
+
+// The performance log's lines (src/ui/perf_log.rs): key=value pairs, a text value quoted with its quotes
+// made apostrophes. Each part is guarded on its own, so a part the system refuses is left out.
+private static void razdorPut(StringBuilder b, String key, String value) {
+    if (b.length() > 0) {
+        b.append(' ');
+    }
+    b.append(key).append('=').append(value);
+}
+
+private static String razdorText(String text) {
+    return "\"" + (text == null ? "" : text.replace('"', '\'')) + "\"";
+}
+
+private static String razdorMode(Display.Mode mode) {
+    return mode.getPhysicalWidth() + "x" + mode.getPhysicalHeight() + "@" + mode.getRefreshRate();
+}
+
+// The device's line: the model, the SoC, Android's version and the memory. No serial number or id is read.
+public String razdorDeviceInfo() {
+    StringBuilder b = new StringBuilder();
+    try {
+        razdorPut(b, "manufacturer", razdorText(Build.MANUFACTURER));
+    } catch (Throwable t) {
+    }
+    try {
+        razdorPut(b, "model", razdorText(Build.MODEL));
+    } catch (Throwable t) {
+    }
+    try {
+        razdorPut(b, "device", razdorText(Build.DEVICE));
+    } catch (Throwable t) {
+    }
+    try {
+        razdorPut(b, "hardware", razdorText(Build.HARDWARE));
+    } catch (Throwable t) {
+    }
+    try {
+        if (Build.VERSION.SDK_INT >= 31) {
+            razdorPut(b, "soc", razdorText(Build.SOC_MANUFACTURER + " " + Build.SOC_MODEL));
+        }
+    } catch (Throwable t) {
+    }
+    try {
+        razdorPut(b, "android", razdorText(Build.VERSION.RELEASE));
+        razdorPut(b, "sdk", String.valueOf(Build.VERSION.SDK_INT));
+    } catch (Throwable t) {
+    }
+    try {
+        ActivityManager am = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+        ActivityManager.MemoryInfo info = new ActivityManager.MemoryInfo();
+        am.getMemoryInfo(info);
+        razdorPut(b, "ram_mb", String.valueOf(info.totalMem / (1024L * 1024L)));
+        razdorPut(b, "low_memory", String.valueOf(info.lowMemory));
+        razdorPut(b, "low_ram_device", String.valueOf(am.isLowRamDevice()));
+    } catch (Throwable t) {
+    }
+    return b.toString();
+}
+
+// The display's line: the current mode, the top mode at this resolution, the refresh rates it offers, the
+// window's preference after the vote (razdorPreferTopRefreshRate), the frame cap the activity read and the density.
+public String razdorDisplayInfo() {
+    StringBuilder b = new StringBuilder();
+    Display display = null;
+    try {
+        display = Build.VERSION.SDK_INT >= 30 ? getDisplay() : getWindowManager().getDefaultDisplay();
+    } catch (Throwable t) {
+    }
+    if (display != null) {
+        try {
+            razdorPut(b, "mode", razdorMode(display.getMode()));
+        } catch (Throwable t) {
+        }
+        try {
+            Display.Mode top = razdorTopMode(display);
+            if (top != null) {
+                razdorPut(b, "top", razdorMode(top));
+            }
+        } catch (Throwable t) {
+        }
+        try {
+            Display.Mode current = display.getMode();
+            java.util.TreeSet<Float> rates = new java.util.TreeSet<Float>();
+            for (Display.Mode mode : display.getSupportedModes()) {
+                if (mode.getPhysicalWidth() == current.getPhysicalWidth()
+                        && mode.getPhysicalHeight() == current.getPhysicalHeight()) {
+                    rates.add(mode.getRefreshRate());
+                }
+            }
+            StringBuilder list = new StringBuilder();
+            for (Float rate : rates) {
+                if (list.length() > 0) {
+                    list.append(',');
+                }
+                list.append(rate);
+            }
+            razdorPut(b, "rates", list.toString());
+        } catch (Throwable t) {
+        }
+    }
+    try {
+        WindowManager.LayoutParams params = getWindow().getAttributes();
+        razdorPut(b, "pref_mode", String.valueOf(params.preferredDisplayModeId));
+        if (Build.VERSION.SDK_INT >= 30) {
+            razdorPut(b, "pref_rate", String.valueOf(params.preferredRefreshRate));
+        }
+    } catch (Throwable t) {
+    }
+    try {
+        razdorPut(b, "frame_cap", String.valueOf(razdorFrameCap()));
+    } catch (Throwable t) {
+    }
+    try {
+        razdorPut(b, "density", String.valueOf(getResources().getDisplayMetrics().density));
+    } catch (Throwable t) {
+    }
+    return b.toString();
+}
+
+// The memory for the performance log's `mem:` line, at most every 5 s in the debug mode: the Java heap in use
+// and its limit, the native heap in use (android.os.Debug), the memory the system has available and its
+// low-memory threshold, and whether the system is low on memory. Each part guarded on its own.
+public String razdorMemInfo() {
+    StringBuilder b = new StringBuilder();
+    try {
+        Runtime rt = Runtime.getRuntime();
+        razdorPut(b, "java_used_mb", String.valueOf((rt.totalMemory() - rt.freeMemory()) / (1024L * 1024L)));
+        razdorPut(b, "java_max_mb", String.valueOf(rt.maxMemory() / (1024L * 1024L)));
+    } catch (Throwable t) {
+    }
+    try {
+        razdorPut(b, "native_heap_mb", String.valueOf(Debug.getNativeHeapAllocatedSize() / (1024L * 1024L)));
+    } catch (Throwable t) {
+    }
+    try {
+        ActivityManager am = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+        ActivityManager.MemoryInfo info = new ActivityManager.MemoryInfo();
+        am.getMemoryInfo(info);
+        razdorPut(b, "avail_mb", String.valueOf(info.availMem / (1024L * 1024L)));
+        razdorPut(b, "threshold_mb", String.valueOf(info.threshold / (1024L * 1024L)));
+        razdorPut(b, "low_memory", String.valueOf(info.lowMemory));
+    } catch (Throwable t) {
+    }
+    return b.toString();
+}
+
+// The phone's heat, every 60 s in the debug mode: the thermal status (API 29+), the thermal headroom in 10 s
+// (API 30+; NaN where the phone does not forecast it), the battery's temperature in degrees C and whether the
+// power save mode is on.
+public String razdorThermalInfo() {
+    StringBuilder b = new StringBuilder();
+    PowerManager power = null;
+    try {
+        power = (PowerManager) getSystemService(POWER_SERVICE);
+    } catch (Throwable t) {
+    }
+    if (power != null) {
+        try {
+            if (Build.VERSION.SDK_INT >= 29) {
+                razdorPut(b, "status", String.valueOf(power.getCurrentThermalStatus()));
+            }
+        } catch (Throwable t) {
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= 30) {
+                razdorPut(b, "headroom", String.valueOf(power.getThermalHeadroom(10)));
+            }
+        } catch (Throwable t) {
+        }
+        try {
+            razdorPut(b, "power_save", String.valueOf(power.isPowerSaveMode()));
+        } catch (Throwable t) {
+        }
+    }
+    try {
+        Intent battery = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+        if (battery != null) {
+            int tenths = battery.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1);
+            razdorPut(b, "battery_c", tenths < 0 ? "na" : String.valueOf(tenths / 10.0));
+        }
+    } catch (Throwable t) {
+    }
+    return b.toString();
 }
 
 // The phone's safe area in physical px (src/ui/display.rs reads it): "left,top,right,bottom,bl,br,tl,tr",
