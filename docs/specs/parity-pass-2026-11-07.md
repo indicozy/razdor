@@ -47,6 +47,7 @@ the community map smoke test green, a changelog line, the wiki pages updated.
 - Chain depth cap 32.
 - Battle autosave per foe (saves-data §14, backlog 1561): the original reuses the autosave by name only; Razdor reuses it only for the same foe (`battle_foe`), the owner's decision 2026-11-08. The name shown is unchanged.
 - Caster discount: the original's global flag is a bug; Razdor's "the hero's army has a Caster" stays.
+- Spell hit labels (the owner, 2026-11-13): each hit entry labelled by its own sign, so a negative percentage reads «Уменьшает жизнь», not «Лечит» (the original's 0x49b63c quirk; interface.md row 52a). Text only, no toggle.
 - Market lists sorted cheapest first.
 - Every original bug fix in the spec tables (battle, community patches, economy, AI, experience, magic and items, events, world, saves).
 - Managed armies skipping the revival (G8): no visible effect, left.

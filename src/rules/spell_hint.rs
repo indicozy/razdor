@@ -82,8 +82,11 @@ pub fn on_own_army(spell: &SpellDef) -> bool {
 /// A spell's effect text (49b63c): "label value " entries, "+" before a positive value,
 /// "%" after the percentages, zero values left out. `label` gives the `[Skills]` texts.
 ///
-/// Original behaviour kept: `DeltaPercentHits` takes its label from the sign of
-/// `DeltaFixedHits` (a spell with only a negative percentage reads as a heal); equal melee
+/// Razdor's fix of an original quirk (the owner's decision, 2026-11-13): each hit entry
+/// (`DeltaFixedHits`, `DeltaPercentHits`) takes its label from its own sign, `CurseHit` when
+/// negative, `CureHit` otherwise. The original labels `DeltaPercentHits` by the sign of
+/// `DeltaFixedHits` (0x49b63c), so a spell with only a negative percentage read as a heal
+/// there. Original behaviour kept: equal melee
 /// and ranged values merge into one `SPhysicalAttack` / `SPhysicalDefence` entry (both 0
 /// merge to nothing); the protections merge into `SProtectAllMagic` only when all three are
 /// equal and not 0, else they come as Life, Elemental, Death.
@@ -106,10 +109,16 @@ pub struct EffectEntry {
 /// attack and defence, magic power, the magic protections, regeneration (negative is
 /// poison), vampirism, initiative and actions. Mana cost and casting time are not effect
 /// entries. So an entry is good exactly when its value is positive, whatever its label says
-/// (the original's «Лечит (+хиты) -15%» quirk is bad) and whoever cast it (a curse on an
-/// enemy is bad for that enemy).
+/// (a label is no longer a guide: the original's «Лечит (+хиты) -15%» was bad too) and
+/// whoever cast it (a curse on an enemy is bad for that enemy).
 pub fn good_for_holder(value: i32) -> bool {
     value > 0
+}
+
+/// The label of a hit entry of `value` (the owner's decision 2026-11-13, see [`effect_text`]):
+/// `CurseHit` for a negative value, else `CureHit`.
+fn hit_key(value: i32) -> &'static str {
+    if value < 0 { "CurseHit" } else { "CureHit" }
 }
 
 /// The entries of [`effect_text`], in its order.
@@ -122,9 +131,9 @@ pub fn effect_entries(spell: &SpellDef, label: &dyn Fn(&'static str) -> String) 
         }
     };
     let fixed = spell.delta_fixed_hits.unwrap_or(0);
-    let heal_key = if fixed < 0 { "CurseHit" } else { "CureHit" };
-    entry(fixed, heal_key, "");
-    entry(spell.delta_percent_hits.unwrap_or(0), heal_key, "%");
+    let percent = spell.delta_percent_hits.unwrap_or(0);
+    entry(fixed, hit_key(fixed), "");
+    entry(percent, hit_key(percent), "%");
     for (mods, suffix) in [(&spell.add, ""), (&spell.percent, "%")] {
         let v = |s: Stat| mods.get(&s).copied().unwrap_or(0);
         entry(v(Stat::Hits), "SHit", suffix);
@@ -259,16 +268,36 @@ mod tests {
         s.percent.insert(Stat::ProtectElemental, 20);
         assert_eq!(effect_text(&s, &key), "CurseHit -20 CurseHit -10% SAttackBlow -3 SInitiative -2 SProtectAllMagic +20% SPoison -15% ");
 
-        // Only a negative percentage: labelled as a heal (the label follows DeltaFixedHits).
+        // Only a negative percentage: «Жертва Крови», a loss of hits (its own sign, 2026-11-13).
         let mut s = testkit::spell(3, 10);
         s.delta_fixed_hits = None;
         s.delta_percent_hits = Some(-25);
         s.percent.insert(Stat::ProtectLife, 10);
         s.percent.insert(Stat::ProtectDeath, 30);
-        assert_eq!(effect_text(&s, &key), "CureHit -25% SProtectLife +10% SProtectDeath +30% ");
+        assert_eq!(effect_text(&s, &key), "CurseHit -25% SProtectLife +10% SProtectDeath +30% ");
         assert!(on_own_army(&s));
         s.target = Some(SpellTarget::Enemy);
         assert!(!on_own_army(&s));
+    }
+
+    /// The owner's decision (2026-11-13): each hit entry is labelled by its own sign, so a
+    /// heal and a loss of the same spell read apart; a lone positive percentage is a heal.
+    #[test]
+    fn hit_entries_are_labelled_by_their_own_sign() {
+        let mut s = testkit::spell(1, 10);
+        // Positive fixed, negative percentage.
+        s.delta_fixed_hits = Some(20);
+        s.delta_percent_hits = Some(-10);
+        assert_eq!(effect_text(&s, &key), "CureHit +20 CurseHit -10% ");
+        // Negative fixed, positive percentage.
+        s.delta_fixed_hits = Some(-20);
+        s.delta_percent_hits = Some(10);
+        assert_eq!(effect_text(&s, &key), "CurseHit -20 CureHit +10% ");
+        // Only a positive percentage.
+        s.delta_fixed_hits = None;
+        s.delta_percent_hits = Some(10);
+        assert_eq!(effect_text(&s, &key), "CureHit +10% ");
+        assert_eq!(effect_entries(&s, &key), [EffectEntry { text: "CureHit +10%".to_string(), good: true }]);
     }
 
     /// Razdor's deviation (the owner's decision, 2026-10-20): a p-LifeLose spell, which the
@@ -302,7 +331,7 @@ mod tests {
         s.delta_percent_hits = Some(-15);
         s.percent.insert(Stat::Vampirizm, 35);
         assert!(on_own_army(&s));
-        assert_eq!(goods(&s), [("CureHit -15%".to_string(), false), ("SVampirizm +35%".to_string(), true)]);
+        assert_eq!(goods(&s), [("CurseHit -15%".to_string(), false), ("SVampirizm +35%".to_string(), true)]);
         // A curse on the enemy: its lowered values are bad for the enemy holding it, poison too.
         let mut s = testkit::spell(2, 10);
         s.target = Some(SpellTarget::Enemy);
