@@ -132,6 +132,10 @@ generic Content-Type alike: the extension decides):
   push is in the repo, and the check can be repeated by hand against
   `https://indicozy.gitverse.site/razdor-community/`.
 - A name GitVerse refuses stops the run before any release is created.
+- An upload answered 400 `VALIDATION_ERROR` is tried twice more (after 2 s and 4 s); other statuses are not.
+- A picture the catalog names by an https address (the ad's, on GitHub) is downloaded during publishing and
+  checked against the catalog's size and SHA-256, then staged under `previews/`. Before anything is pushed,
+  every relative path in `index-v2.json` must be a staged file, else the run stops.
 
 ## Tests
 

@@ -248,5 +248,50 @@ class DownloadTests(unittest.TestCase):
             gv.fetch_exact(s.base + "/file", 0, hashlib.sha256(b"").hexdigest())
 
 
+class UploadRetryTests(unittest.TestCase):
+    """An upload answered 400 VALIDATION_ERROR is tried again twice (2 s, 4 s), and no other status is."""
+
+    def client(self, answers):
+        client = gv.Client(token="t", api="http://127.0.0.1:9")
+        calls = []
+        waits = []
+
+        def _json(method, path, **kw):
+            calls.append(path)
+            answer = answers[len(calls) - 1]
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        client._json = _json
+        client.sleep = lambda s: waits.append(s)
+        return client, calls, waits
+
+    def test_a_400_twice_then_the_upload_goes_through(self):
+        bad = gv.ApiError(400, '{"error": {"code": "VALIDATION_ERROR"}}')
+        ok = {"id": 9, "browser_download_url": "https://gitverse.ru/api/attachments/x"}
+        client, calls, waits = self.client([bad, bad, ok])
+        self.assertEqual(client.upload_asset("o", "r", 7, "razdor-test.zip", "/nonexistent"), ok)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(waits, [2, 4])
+
+    def test_a_third_400_fails_the_upload(self):
+        bad = gv.ApiError(400, "VALIDATION_ERROR")
+        client, calls, waits = self.client([bad, bad, bad])
+        with self.assertRaises(gv.ApiError) as cm:
+            client.upload_asset("o", "r", 7, "razdor-test.zip", "/nonexistent")
+        self.assertEqual(cm.exception.status, 400)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(waits, [2, 4])
+
+    def test_other_statuses_are_not_retried_by_the_upload(self):
+        for status in (404, 429, 500):
+            client, calls, waits = self.client([gv.ApiError(status, "x")])
+            with self.assertRaises(gv.ApiError):
+                client.upload_asset("o", "r", 7, "razdor-test.zip", "/nonexistent")
+            self.assertEqual(len(calls), 1, f"HTTP {status} is not retried here")
+            self.assertEqual(waits, [])
+
+
 if __name__ == "__main__":
     unittest.main()

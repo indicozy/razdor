@@ -53,6 +53,9 @@ TIMEOUT = 300   # an upload or a whole small reply
 STALL = 60      # a download read that gets no bytes for this long is a failure
 TRIES = 5
 RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
+# An upload that GitVerse answers 400 VALIDATION_ERROR to is tried again this many times, after these
+# waits (seen once in 2026-11-13's run after 525 uploads; an immediate retry went through).
+UPLOAD_400_WAITS = (2, 4)
 CHUNK = 64 * 1024
 # The extensions GitVerse took in the measurement of 2026-11-13 (upload tests on a throwaway release,
 # with the right and with a generic Content-Type alike: the extension decides). Anything else is refused
@@ -320,9 +323,10 @@ def asset_content_type(name):
 # ---------------------------------------------------------------- the API client
 
 class Client:
-    def __init__(self, token=None, api=API):
+    def __init__(self, token=None, api=API, sleep=time.sleep):
         self.token = token or load_token()
         self.api = api.rstrip("/")
+        self.sleep = sleep   # the upload's 400 waits (a test gives a fake that records them)
 
     def _open(self, req):
         try:
@@ -400,8 +404,16 @@ class Client:
         def body():
             return Multipart([("attachment", name, asset_content_type(name), path)])
 
-        return self._json("POST", f"/repos/{owner}/{repo}/releases/{int(release_id)}/assets",
-                          query={"name": name}, body=body)
+        route = f"/repos/{owner}/{repo}/releases/{int(release_id)}/assets"
+        for attempt in range(len(UPLOAD_400_WAITS) + 1):
+            try:
+                return self._json("POST", route, query={"name": name}, body=body)
+            except ApiError as e:
+                if e.status != 400 or attempt >= len(UPLOAD_400_WAITS):
+                    raise
+                # A 400 is not retried anywhere else; only an upload gets these short retries.
+                note(f"upload {name}: {e}; retry {attempt + 1}/{len(UPLOAD_400_WAITS)} in {UPLOAD_400_WAITS[attempt]} s")
+                self.sleep(UPLOAD_400_WAITS[attempt])
 
     def delete_asset(self, owner, repo, release_id, asset_id):
         self.request("DELETE", f"/repos/{owner}/{repo}/releases/{int(release_id)}/assets/{int(asset_id)}")

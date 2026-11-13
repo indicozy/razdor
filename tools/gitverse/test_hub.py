@@ -285,5 +285,100 @@ class WebTests(unittest.TestCase):
         self.assertIn("(.zip)", js, "a zipped file's button says it comes zipped")
 
 
+AD_URL = "https://github.com/indicozy/razdor-community/releases/download/ad-thorny-times-1/capsule.png"
+
+
+def remote_ad_catalog(data):
+    """The catalog with the ad's picture named by its GitHub address (the real catalog's shape)."""
+    cat = catalog()
+    cat["ad"] = dict(cat["ad"], image=AD_URL, size=len(data), sha256=gv.sha256_bytes(data))
+    return cat
+
+
+class RemotePictureTests(unittest.TestCase):
+    def setUp(self):
+        self.data = b"\x89PNG-capsule-picture"
+        self.cat = remote_ad_catalog(self.data)
+        self.saved = gv.fetch_bytes
+        self.fetched = []
+
+        def fake_fetch(url, tries=gv.TRIES):
+            self.fetched.append(url)
+            return self.data if url == AD_URL else b""
+
+        gv.fetch_bytes = fake_fetch
+
+    def tearDown(self):
+        gv.fetch_bytes = self.saved
+
+    def test_the_ad_picture_by_address_is_named_by_its_file_name(self):
+        recs = ph.remote_pictures(self.cat)
+        self.assertEqual([(r["name"], r["size"]) for r in recs], [("capsule.png", len(self.data))])
+        self.assertEqual(ph.remote_pictures(catalog()), [], "a local picture is not a remote one")
+
+    def test_the_index_points_the_ad_at_the_staged_picture_and_the_stage_is_checked(self):
+        idx = ph.gitverse_index(self.cat, links_for(self.cat))
+        self.assertEqual(idx["ad"]["image"], "previews/capsule.png")
+        with tempfile.TemporaryDirectory() as d:
+            for name in ("cccccccccccccccc.png", "dddddddddddddddd.png", "aaaaaaaaaaaaaaaa.png"):
+                with open(os.path.join(d, name), "wb") as f:
+                    f.write(b"x" + name.encode())
+            site = dict(ph.plan(self.cat)["pages"])
+            remote = ph.fetch_remote_pictures(d, self.cat, site)
+            self.assertEqual(remote, {"previews/capsule.png": "remote-pictures/capsule.png"})
+            site.update(remote)
+            stage = ph.write_stage(d, idx, site)
+            self.assertIn("previews/capsule.png", ph.stage_files(stage))
+            self.assertIn("previews/capsule.png", ph.check_stage(stage, idx))
+            os.remove(os.path.join(stage, "previews", "capsule.png"))
+            with self.assertRaises(ph.HubError) as cm:
+                ph.check_stage(stage, idx)
+            self.assertIn("previews/capsule.png", str(cm.exception))
+
+    def test_a_fetched_picture_is_kept_when_it_matches_and_refetched_when_not(self):
+        with tempfile.TemporaryDirectory() as d:
+            ph.fetch_remote_pictures(d, self.cat, {})
+            ph.fetch_remote_pictures(d, self.cat, {})
+            self.assertEqual(self.fetched, [AD_URL], "a copy that matches is not downloaded again")
+            with open(os.path.join(d, "remote-pictures", "capsule.png"), "wb") as f:
+                f.write(b"damaged")
+            ph.fetch_remote_pictures(d, self.cat, {})
+            self.assertEqual(self.fetched, [AD_URL, AD_URL])
+
+    def test_a_picture_that_does_not_match_the_catalog_stops_the_run(self):
+        with tempfile.TemporaryDirectory() as d:
+            bad_sum = remote_ad_catalog(self.data)
+            bad_sum["ad"]["sha256"] = "00" * 32
+            with self.assertRaises(ph.HubError):
+                ph.fetch_remote_pictures(d, bad_sum, {})
+            bad_size = remote_ad_catalog(self.data)
+            bad_size["ad"]["size"] = len(self.data) + 1
+            with self.assertRaises(ph.HubError):
+                ph.fetch_remote_pictures(d, bad_size, {})
+            self.assertFalse(os.path.exists(os.path.join(d, "remote-pictures", "capsule.png")))
+
+    def test_a_remote_name_that_a_local_picture_has_stops_the_run(self):
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(ph.HubError):
+                ph.fetch_remote_pictures(d, self.cat, {"previews/capsule.png": "x.png"})
+
+    def test_a_remote_picture_pages_refuses_or_without_a_sum_stops_the_run(self):
+        cat = remote_ad_catalog(self.data)
+        cat["ad"]["image"] = "https://github.com/x/y/releases/download/t/bundle.zip"
+        with self.assertRaises(ph.HubError):
+            ph.remote_pictures(cat)
+        cat = remote_ad_catalog(self.data)
+        del cat["ad"]["sha256"]
+        with self.assertRaises(ph.HubError):
+            ph.remote_pictures(cat)
+
+    def test_relative_paths_are_the_path_and_image_values_that_are_not_addresses(self):
+        cat = catalog()
+        idx = ph.gitverse_index(cat, links_for(cat))
+        self.assertEqual(sorted(ph.relative_paths(idx)),
+                         ["previews/aaaaaaaaaaaaaaaa.png", "previews/cccccccccccccccc.png",
+                          "previews/dddddddddddddddd.png"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -14,7 +14,10 @@ The zipped layout (the owner's decision, 2026-11-13; apps from 1.5.2 read it):
   - an archive file that is accepted as it is (a mod's `.zip`, `.gz`, `.tgz`, `.7z`, `.apk`) is a release
     asset as it is;
   - the pictures (previews, map pictures, the ad's picture) are the only files on the Pages site, under
-    previews/ (GitVerse's Pages refuses .zip, .exe and .py; a picture is none of them);
+    previews/ (GitVerse's Pages refuses .zip, .exe and .py; a picture is none of them). A picture the catalog
+    names by an https address (the ad's picture on GitHub) is downloaded first, checked against the catalog's
+    size and SHA-256, and staged under previews/ like the others; the index never names a file that is not
+    staged (checked before anything is pushed);
   - the GitVerse catalog is `index-v2.json` on the Pages site (the hub page reads it first; the bare
     `index.json` is not written there). Each file names its release asset by its attachment address; a
     wrapped file has `wrapped: "zip"`, `member` (its name in the zip), and the zip's `archive_size` and
@@ -41,6 +44,7 @@ import json
 import os
 import shutil
 import sys
+import urllib.parse
 import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -54,6 +58,7 @@ PREVIEWS = "previews/"
 STATE = "gitverse-state.json"
 STAGE = "gitverse"
 ZIPS = "gitverse-zips"
+REMOTE = "remote-pictures"   # the https pictures the index rewrites, fetched here during publishing
 INDEX_V2 = "index-v2.json"
 ARCHIVE_EXT = frozenset({"zip", "gz", "tgz", "7z", "apk"})   # release assets as they are (GitVerse takes these)
 PAGES_REFUSED_EXT = frozenset({"zip", "exe", "py"})          # Pages refuses these
@@ -206,6 +211,90 @@ def build_zips(folder, names):
     return out
 
 
+def remote_pictures(cat):
+    """The pictures the catalog names by an https address (the ad's picture, a preview or a picture given as
+    an address): [{'url', 'name', 'size', 'sha256'}], one per address. The index rewrites each one under
+    previews/<name>, so its bytes are fetched and checked during publishing."""
+    out = {}
+
+    def add(url, size, sha, where):
+        if not isinstance(url, str) or not url.startswith("https://"):
+            return
+        name = urllib.parse.urlsplit(url).path.rpartition("/")[2]
+        problem = pages_problem(name)
+        if problem:
+            raise HubError(f"{where}: {url}: {problem} (the index rewrites it under {PREVIEWS})")
+        if not isinstance(size, int) or size < 0 or not str(sha or "").strip():
+            raise HubError(f"{where}: {url}: the catalog gives no size or SHA-256 for it")
+        rec = {"url": url, "name": name, "size": size, "sha256": str(sha).lower()}
+        if url in out:
+            if out[url] != rec:
+                raise HubError(f"{url}: named twice with different sizes or sums")
+            return
+        for other in out.values():
+            if other["name"] == name:
+                raise HubError(f"{url} and {other['url']}: both would be {PREVIEWS}{name}")
+        out[url] = rec
+
+    for e in cat["entries"]:
+        for key in ("preview", "picture"):
+            ref = e.get(key)
+            if isinstance(ref, dict):
+                add(ref.get("path"), ref.get("size"), ref.get("sha256"), f"entry {e.get('id')}")
+    ad = cat.get("ad")
+    if isinstance(ad, dict):
+        add(ad.get("image"), ad.get("size"), ad.get("sha256"), "the ad")
+    return sorted(out.values(), key=lambda r: r["name"])
+
+
+def fetch_remote_pictures(folder, cat, local_site):
+    """Downloads the https pictures into DIR/remote-pictures/ (a copy that already matches is kept) and checks
+    each against the catalog's size and SHA-256. Returns {site path: DIR-relative name} for the Pages site.
+    A name that a local picture of the site also has is a stop."""
+    got = {}
+    for rec in remote_pictures(cat):
+        site_path = PREVIEWS + rec["name"]
+        if site_path in local_site:
+            raise HubError(f"{rec['url']}: its name {rec['name']} is also a local picture")
+        dst = os.path.join(folder, REMOTE, rec["name"])
+        if not (os.path.isfile(dst) and os.path.getsize(dst) == rec["size"] and gv.sha256_file(dst) == rec["sha256"]):
+            data = gv.fetch_bytes(rec["url"])
+            if len(data) != rec["size"]:
+                raise HubError(f"{rec['url']}: {len(data)} bytes, the catalog says {rec['size']}")
+            if gv.sha256_bytes(data) != rec["sha256"]:
+                raise HubError(f"{rec['url']}: SHA-256 differs from the catalog's")
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            with open(dst + ".tmp", "wb") as f:
+                f.write(data)
+            os.replace(dst + ".tmp", dst)
+        got[site_path] = REMOTE + "/" + rec["name"]
+        print(f"picture {rec['url']}: {rec['size']} bytes, SHA-256 as the catalog says")
+    return got
+
+
+def relative_paths(node):
+    """Every relative path the index names: a `path` or `image` value that is not an address."""
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k in ("path", "image") and isinstance(v, str):
+                if not v.startswith(("https://", "http://")):
+                    yield v
+            else:
+                yield from relative_paths(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from relative_paths(v)
+
+
+def check_stage(stage, idx):
+    """Stops (HubError) unless every relative path the index names is a file of the staged site."""
+    named = sorted(set(relative_paths(idx)))
+    missing = [p for p in named if ".." in p.split("/") or not os.path.isfile(os.path.join(stage, *p.split("/")))]
+    if missing:
+        raise HubError(f"index-v2.json names {', '.join(missing)}, not in the staged site: nothing is pushed")
+    return named
+
+
 def gitverse_index(cat, links):
     """The GitVerse copy of the catalog (index-v2.json). links: catalog name -> {'url', 'size', 'sha256'} of
     the release asset that carries it (the zip of a wrapped file, the file itself for an archive). A
@@ -322,7 +411,8 @@ def publish(args):
         print("STOP: these files have no place (neither a release asset nor the Pages site); "
               "nothing was created. The catalog's files must be changed first (not done here).")
         return 2
-    release, wrap, site = pl["release"], pl["wrap"], pl["pages"]
+    release, wrap, site = pl["release"], pl["wrap"], dict(pl["pages"])
+    site.update(fetch_remote_pictures(folder, cat, site))
     cache = {}
 
     def sha_of(path):
@@ -365,7 +455,8 @@ def publish(args):
         links = {a["catalog"]: {"url": "https://gitverse.ru/api/attachments/DRY-RUN", "size": a["size"],
                                 "sha256": a["sha256"]} for a in assets}
         idx = gitverse_index(cat, links)
-        write_stage(folder, idx, site)
+        stage = write_stage(folder, idx, site)
+        check_stage(stage, idx)
         print("dry run: nothing sent; the GitVerse index is in", os.path.join(folder, STAGE, INDEX_V2))
         return 0
 
@@ -412,6 +503,7 @@ def publish(args):
     links = {a["catalog"]: {"url": done[a["name"]]["url"], "size": a["size"], "sha256": a["sha256"]} for a in assets}
     idx = gitverse_index(cat, links)
     stage = write_stage(folder, idx, site)
+    check_stage(stage, idx)
     with open(os.path.join(stage, INDEX_V2), "rb") as f:
         index_bytes = f.read()
     print(f"GitVerse index: {os.path.join(stage, INDEX_V2)}")
@@ -426,7 +518,8 @@ def publish(args):
         pushed = pg.commit_push(f"Catalog {tag}")
         print(f"Pages: {'pushed ' + pushed if pushed else 'unchanged'}")
         expected = {"docs/" + INDEX_V2: index_bytes}
-        for rel in sorted(site)[:1]:
+        fetched = [rel for rel in sorted(site) if site[rel].startswith(REMOTE + "/")]
+        for rel in sorted(site)[:1] + fetched:
             expected["docs/" + rel] = site_files[rel]
         waited = pg.wait_served(expected, wait=args.wait)
         print(f"Pages serves the new catalog (waited {waited:.0f} s)")
@@ -474,7 +567,8 @@ def main(argv):
     ap.add_argument("--replace", action="store_true", help="delete the existing release of the tag first")
     ap.add_argument("--keep", type=int, default=2, help="catalog releases kept (default 2)")
     ap.add_argument("--wait", type=int, default=pages.WAIT_DEFAULT, help="seconds to wait for Pages")
-    ap.add_argument("--dry-run", action="store_true", help="check, zip, route and write the GitVerse index; no network")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="check, zip, route and write the GitVerse index; nothing sent (the https pictures are read)")
     args = ap.parse_args(argv)
     try:
         if args.unpublish:
