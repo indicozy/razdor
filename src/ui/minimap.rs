@@ -106,9 +106,7 @@ fn darkness_into(out: &mut Vec<u8>, sum: &mut Vec<u32>, w: i32, h: i32, explored
             // Outside the map counts as neither: the window shrinks at the map's edges.
             let (x0, x1, y0, y1) = (x.saturating_sub(f), (x + f + 1).min(w), y.saturating_sub(f), (y + f + 1).min(h));
             let dark = sum[y1 * (w + 1) + x1] + sum[y0 * (w + 1) + x0] - sum[y0 * (w + 1) + x1] - sum[y1 * (w + 1) + x0];
-            let share = dark as f32 / ((x1 - x0) * (y1 - y0)) as f32;
-            let t = ((share - 0.2) / 0.5).clamp(0.0, 1.0);
-            let mut v = (t * t * (3.0 - 2.0 * t) * 255.0).round() as u8;
+            let mut v = shade(dark, ((x1 - x0) * (y1 - y0)) as u32);
             if explored((x as i32, y as i32)) {
                 // An explored cell is at least a third lit (world.md §3: the explored mask
                 // takes cells whose half-cells add up to over a third of full brightness),
@@ -119,6 +117,63 @@ fn darkness_into(out: &mut Vec<u8>, sum: &mut Vec<u32>, w: i32, h: i32, explored
             out[y * w + x] = v;
         }
     }
+}
+
+/// The darkness of a window of `dark` unexplored cells out of `area`: the smoothstep of its share (0.2 to 0.7 of it).
+/// [`darkness_into`] and [`darkness_from_bits`] both take it, so one cell's value is the same whichever measures it.
+fn shade(dark: u32, area: u32) -> u8 {
+    let share = dark as f32 / area as f32;
+    let t = ((share - 0.2) / 0.5).clamp(0.0, 1.0);
+    (t * t * (3.0 - 2.0 * t) * 255.0).round() as u8
+}
+
+/// [`darkness_into`]'s value at cell `(x, y)` of a `w` × `h` map, read from the explored bits (`eff`, one bit a cell,
+/// row by row, the fog's layout). Only the cells near a change of the bits can differ from their value before it.
+fn darkness_from_bits(eff: &[u64], w: usize, h: usize, x: usize, y: usize) -> u8 {
+    let explored = |nx: usize, ny: usize| {
+        let i = ny * w + nx;
+        eff[i / 64] & (1u64 << (i % 64)) != 0
+    };
+    let f = FEATHER as usize;
+    let (x0, x1, y0, y1) = (x.saturating_sub(f), (x + f + 1).min(w), y.saturating_sub(f), (y + f + 1).min(h));
+    let mut dark = 0u32;
+    for ny in y0..y1 {
+        for nx in x0..x1 {
+            dark += (!explored(nx, ny)) as u32;
+        }
+    }
+    let mut v = shade(dark, ((x1 - x0) * (y1 - y0)) as u32);
+    if explored(x, y) {
+        // As in `darkness_into`: an explored cell next to the dark is at most EDGE_DARK.
+        let edge = (y.saturating_sub(1)..(y + 2).min(h)).any(|ny| (x.saturating_sub(1)..(x + 2).min(w)).any(|nx| !explored(nx, ny)));
+        v = v.min(if edge { EDGE_DARK } else { 0 });
+    }
+    v
+}
+
+/// The box (x0, y0, x1, y1, exclusive, on the map) of the cells whose explored bit differs between `old` and `new`,
+/// grown by the feather and one cell (the reach of a cell's darkness); None when no bit differs. Bits past the
+/// map's last cell are not cells and are skipped.
+fn changed_box(old: &[u64], new: &[u64], w: usize, h: usize) -> Option<[usize; 4]> {
+    let n = w * h;
+    let mut bx: Option<[usize; 4]> = None;
+    for (k, (a, b)) in old.iter().zip(new).enumerate() {
+        let mut d = a ^ b;
+        while d != 0 {
+            let i = k * 64 + d.trailing_zeros() as usize;
+            d &= d - 1;
+            if i >= n {
+                continue;
+            }
+            let (x, y) = (i % w, i / w);
+            bx = Some(match bx {
+                None => [x, y, x + 1, y + 1],
+                Some([x0, y0, x1, y1]) => [x0.min(x), y0.min(y), x1.max(x + 1), y1.max(y + 1)],
+            });
+        }
+    }
+    let r = FEATHER as usize + 1;
+    bx.map(|[x0, y0, x1, y1]| [x0.saturating_sub(r), y0.saturating_sub(r), (x1 + r).min(w), (y1 + r).min(h)])
 }
 
 /// [`darkness_of`] at one cell `t` (0 outside the map), the same value the fog texture shows
@@ -223,9 +278,15 @@ struct FogShown {
     /// The target darkness, and the next one being measured.
     target: Vec<u8>,
     next: Vec<u8>,
-    /// Scratch: the summed-area table, and the held cells as a mask of the map.
+    /// Scratch: the summed-area table.
     sum: Vec<u32>,
-    held: Vec<bool>,
+    /// The held cells, one bit a cell in the fog's layout (`held_bits`), and the explored cells that count (the
+    /// fog's, minus the held ones) as the target was measured (`eff`; `eff_next` is the one being measured). `eff_ok`:
+    /// `eff` measures the fog (not while the fog is off).
+    held_bits: Vec<u64>,
+    eff: Vec<u64>,
+    eff_next: Vec<u64>,
+    eff_ok: bool,
     /// The shown darkness, and the clock (s) from which each cell's ease may run.
     cur: Vec<f32>,
     wait: Vec<f64>,
@@ -257,7 +318,10 @@ impl FogShown {
         target: Vec::new(),
         next: Vec::new(),
         sum: Vec::new(),
-        held: Vec::new(),
+        held_bits: Vec::new(),
+        eff: Vec::new(),
+        eff_next: Vec::new(),
+        eff_ok: false,
         cur: Vec::new(),
         wait: Vec::new(),
         rgba: Vec::new(),
@@ -312,39 +376,77 @@ impl FogShown {
         let fresh = resized || self.snap || (key != self.key && super::map_anim::off());
         let recompute = fresh || key != self.key;
         if recompute {
-            self.held.clear();
-            self.held.resize(n, false);
-            for &t in held {
-                if let Some(i) = index_of(w as usize, h as usize, t) {
-                    self.held[i] = true;
-                }
-            }
-            let held_mask = &self.held;
             let (wu, hu) = (w as usize, h as usize);
-            darkness_into(&mut self.next, &mut self.sum, w, h, |t| fog.explored(t) && index_of(wu, hu, t).is_none_or(|i| !held_mask[i]));
-            if fresh {
-                std::mem::swap(&mut self.target, &mut self.next);
-                for i in 0..n {
-                    self.wait[i] = now;
-                    let t = self.target[i] as f32;
-                    self.put(i, t);
+            // The held cells as bits, and the explored cells that count: the fog's bits minus the held ones.
+            self.held_bits.clear();
+            self.held_bits.resize(fog.bits.len(), 0);
+            for &t in held {
+                if let Some(i) = index_of(wu, hu, t) {
+                    self.held_bits[i / 64] |= 1u64 << (i % 64);
                 }
-                self.snap = false;
-            } else {
-                for i in 0..n {
-                    let (old, new) = (self.target[i], self.next[i]);
-                    if new != old {
-                        // An opening waits by the cell's distance from the hero; a closing goes at once.
-                        self.wait[i] = if new < old {
-                            let (x, y) = ((i % wu) as f64 - origin.0 as f64, (i / wu) as f64 - origin.1 as f64);
-                            now + WALK_DELAY * (x * x + y * y).sqrt()
-                        } else {
-                            now
-                        };
-                    }
-                }
-                std::mem::swap(&mut self.target, &mut self.next);
             }
+            self.eff_next.clear();
+            self.eff_next.extend(fog.bits.iter().zip(&self.held_bits).map(|(b, hb)| b & !hb));
+            // A cell's darkness reads the explored cells within the feather and its neighbours, so a change of the
+            // explored bits moves the darkness only near those cells: a small change measures its box again, and the
+            // rest keeps its target (the same value the whole measure gives it). A big box, a new fog or a fog that is
+            // off takes the whole measure.
+            let mut measured = false;
+            if !fresh && fog.enabled && self.eff_ok && self.eff.len() == self.eff_next.len() {
+                match changed_box(&self.eff, &self.eff_next, wu, hu) {
+                    None => measured = true,
+                    Some([x0, y0, x1, y1]) if (x1 - x0) * (y1 - y0) * 4 <= n => {
+                        for y in y0..y1 {
+                            for x in x0..x1 {
+                                let i = y * wu + x;
+                                let v = darkness_from_bits(&self.eff_next, wu, hu, x, y);
+                                let old = self.target[i];
+                                if v != old {
+                                    // An opening waits by the cell's distance from the hero; a closing goes at once.
+                                    self.wait[i] = if v < old {
+                                        let (dx, dy) = (x as f64 - origin.0 as f64, y as f64 - origin.1 as f64);
+                                        now + WALK_DELAY * (dx * dx + dy * dy).sqrt()
+                                    } else {
+                                        now
+                                    };
+                                    self.target[i] = v;
+                                }
+                            }
+                        }
+                        measured = true;
+                    }
+                    Some(_) => {}
+                }
+            }
+            if !measured {
+                let held_bits = &self.held_bits;
+                darkness_into(&mut self.next, &mut self.sum, w, h, |t| fog.explored(t) && index_of(wu, hu, t).is_none_or(|i| held_bits[i / 64] & (1u64 << (i % 64)) == 0));
+                if fresh {
+                    std::mem::swap(&mut self.target, &mut self.next);
+                    for i in 0..n {
+                        self.wait[i] = now;
+                        let t = self.target[i] as f32;
+                        self.put(i, t);
+                    }
+                    self.snap = false;
+                } else {
+                    for i in 0..n {
+                        let (old, new) = (self.target[i], self.next[i]);
+                        if new != old {
+                            // An opening waits by the cell's distance from the hero; a closing goes at once.
+                            self.wait[i] = if new < old {
+                                let (x, y) = ((i % wu) as f64 - origin.0 as f64, (i / wu) as f64 - origin.1 as f64);
+                                now + WALK_DELAY * (x * x + y * y).sqrt()
+                            } else {
+                                now
+                            };
+                        }
+                    }
+                    std::mem::swap(&mut self.target, &mut self.next);
+                }
+            }
+            std::mem::swap(&mut self.eff, &mut self.eff_next);
+            self.eff_ok = fog.enabled;
             self.key = key;
         }
         for k in 0..self.settle.len() {
@@ -1488,6 +1590,85 @@ pub fn army_list(game: &Game, o: Rect, bottom: f32, unnamed: &str) -> Option<(f3
         }
     }
     click
+}
+
+#[cfg(test)]
+mod incremental_fog_tests {
+    use super::*;
+
+    /// A small LCG for the cases (no test RNG in the crate).
+    fn lcg(state: &mut u64) -> u64 {
+        *state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        *state >> 33
+    }
+
+    #[test]
+    fn the_darkness_read_from_the_bits_is_the_darkness_of_each_cell() {
+        // Every cell of a random fog (edges and corners included) gets the value `darkness_at` gives it.
+        let (w, h) = (23, 17);
+        let mut state = 7u64;
+        let cells: Vec<bool> = (0..w * h).map(|_| !lcg(&mut state).is_multiple_of(3)).collect();
+        let mut bits = vec![0u64; ((w * h) as usize).div_ceil(64)];
+        for (i, &e) in cells.iter().enumerate() {
+            if e {
+                bits[i / 64] |= 1u64 << (i % 64);
+            }
+        }
+        let explored = |t: (i32, i32)| cells[t.1 as usize * w as usize + t.0 as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let want = darkness_at(w, h, explored, (x, y));
+                let got = darkness_from_bits(&bits, w as usize, h as usize, x as usize, y as usize);
+                assert_eq!(got, want, "cell ({x}, {y})");
+            }
+        }
+    }
+
+    #[test]
+    fn the_shown_targets_stay_the_full_darkness_through_walks_reveals_and_held_cells() {
+        // A hero walks and reveals discs, a showing holds cells dark and lets them go, big reveals and the fog's
+        // switch come now and then. After every update the targets are the full darkness of the fog
+        // (`darkness_held`), so the part measured again is always enough.
+        let (w, h) = (60, 40);
+        let mut fog = Fog::new(w, h);
+        let mut s = FogShown::EMPTY;
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut hero = (30, 20);
+        let mut held: Vec<(i32, i32)> = Vec::new();
+        let mut now = 0.0;
+        for step in 0..600 {
+            now += 0.1;
+            match lcg(&mut state) % 20 {
+                0 => held = (0..lcg(&mut state) % 6).map(|_| ((lcg(&mut state) as i32) % w, (lcg(&mut state) as i32) % h)).collect(),
+                1 => held.clear(),
+                2 => fog.enabled = !fog.enabled,
+                3 => {
+                    // A big reveal: a rectangle at once (the measure of the whole map).
+                    let (x0, y0) = ((lcg(&mut state) as i32) % w, (lcg(&mut state) as i32) % h);
+                    for y in y0..(y0 + 12).min(h) {
+                        for x in x0..(x0 + 20).min(w) {
+                            fog.mark((x, y));
+                        }
+                    }
+                }
+                _ => {
+                    // The hero steps and explores a disc around him.
+                    let (dx, dy) = ((lcg(&mut state) % 3) as i32 - 1, (lcg(&mut state) % 3) as i32 - 1);
+                    hero = ((hero.0 + dx).clamp(0, w - 1), (hero.1 + dy).clamp(0, h - 1));
+                    let r = 1 + (lcg(&mut state) % 4) as i32;
+                    for dy in -r..=r {
+                        for dx in -r..=r {
+                            if dx * dx + dy * dy <= r * r {
+                                fog.mark((hero.0 + dx, hero.1 + dy));
+                            }
+                        }
+                    }
+                }
+            }
+            s.track(&fog, &held, hero, std::iter::empty::<usize>(), now);
+            assert!(s.target == darkness_held(&fog, &held), "step {step}: the shown targets differ from the full darkness");
+        }
+    }
 }
 
 #[cfg(test)]

@@ -515,7 +515,11 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   `forget_shows` (a game loaded or started, the map's opening) snaps everything (`snap_fog`). `track` does the
   update; it runs only when the fog or held cells change or a cell still eases, so an idle map does no per-cell
   work and uploads nothing (`fog_texture` uploads the texture when a texel changed, counted in the frame probe's
-  rebuilds). The flat map, the minimap window and the 2.5D sprites all read the same values.
+  rebuilds). The flat map, the minimap window and the 2.5D sprites all read the same values. When the explored bits
+  change (a walk's reveal), `track` measures again only the box of the changed cells grown by the feather and one cell
+  (`changed_box`, `darkness_from_bits`), the same values the whole measure gives; a new fog, a fog that is off or a box
+  over a quarter of the map takes the whole measure (`darkness_into`). The unit test
+  `the_shown_targets_stay_the_full_darkness_through_walks_reveals_and_held_cells` pins it.
 - **The first-person view** («Вид карты» = «От первого лица», the owner's decision, 2026-11-10). Its
   setting is `audio::Settings::map_first_person` within the tilted view (`map_tilt`), pushed by
   `main_menu::apply_options` into `world_view::set_first_person`; `world_view::first_person()` is the
