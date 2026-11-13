@@ -347,6 +347,26 @@ fn stage_watch(app: &mut App, arg: Option<&str>) -> Result<(), String> {
     Ok(())
 }
 
+/// `RAZDOR_SCENE_PRESET=<frame>:<preset>`: at that frame the settings take the quality preset (`original`, `low`,
+/// `medium` or `high`), as the settings window's row sets it: a snapshot of the change over an open window (the
+/// frozen map's copy follows it, `map_freeze`).
+pub fn preset_later(app: &mut App, frame: u64) {
+    let Ok(spec) = std::env::var("RAZDOR_SCENE_PRESET") else { return };
+    let Some((at, name)) = spec.split_once(':') else { return };
+    if at.trim().parse::<u64>().ok() != Some(frame) {
+        return;
+    }
+    use super::quality_preset::{set, Preset};
+    let preset = match name.trim() {
+        "original" => Preset::Original,
+        "low" => Preset::Low,
+        "medium" => Preset::Medium,
+        "high" => Preset::High,
+        _ => return,
+    };
+    set(&mut app.audio.settings, preset);
+}
+
 /// `RAZDOR_SCENE_OPEN=<frame>:<window>[,<frame>:<window>…]`: at that frame the window
 /// opens over the scene, as its button opens it (`load`, `army`, `spells`, `journal`,
 /// `menu`, `keys` (the F1 list), `minimap`, `building:<n>`; `map` closes it), for the frame timer (`RAZDOR_PROFILE`) to time

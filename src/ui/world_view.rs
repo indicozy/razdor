@@ -38,6 +38,7 @@ use super::daylight;
 use super::lights;
 use super::game_bar::{self, BarButton, Look, TimeButton};
 use super::keymap::{self, Action};
+use super::map_freeze;
 use super::map_scale;
 use super::minimap;
 use super::mist;
@@ -5912,13 +5913,7 @@ pub fn backdrop_lit(game: &Game, assets: &Assets, lit: Option<BarButton>) {
 /// The map under a window: its world and fog drawn at the map's resolution (`map_scale`), then dimmed.
 /// The caller has cleared the screen and holds the pan's offset off (`ui::pan::unpanned`).
 fn backdrop_world(game: &Game, assets: &Assets) {
-    let full = map_area();
-    let cam = backdrop_camera(game, full);
-    // The frame's light and its painted-shadow factor, read and set as `world_frame` does, so the map under a window keeps its hour.
-    let light = frame_light_of(game);
-    let lit = light.and_then(|_| daylight::frame_shadow_k());
-    mist::set_frame_tint(light.map_or([1.0; 3], |l| l.tint));
-    lights::set_frame(light.map(|l| lights::Frame::new(point_lights(game, assets.dt.as_ref(), &cam, l.glow), Vec2::from(cam.centre()), l.glow, lights::quality())));
+    let (cam, light, lit) = backdrop_frame(game, assets);
     map_scale::draw(map_render_scale(), rgb(10, 12, 10), || {
         draw_world(game, assets, &cam, None, None, None, false, NO_VEIL, lit);
         // The same order as `world_frame`: the light, the flat fog, the building windows, the weather.
@@ -5945,8 +5940,48 @@ fn backdrop_world(game: &Game, assets: &Assets) {
     });
 }
 
-/// The map under a window: clear, drawn, fogged and dimmed (the bar is drawn by the caller).
+/// The frame's state of the map under a window, set as `world_frame` sets it, so the map under a window keeps
+/// its hour: the camera, the light and its painted-shadow factor, the mist's tint and the point lights. A frozen
+/// picture ([`draw_map_backdrop`]) is shown after it, so the state follows the frame whichever is drawn.
+fn backdrop_frame(game: &Game, assets: &Assets) -> (Camera, Option<daylight::Light>, Option<f32>) {
+    let cam = backdrop_camera(game, map_area());
+    let light = frame_light_of(game);
+    let lit = light.and_then(|_| daylight::frame_shadow_k());
+    mist::set_frame_tint(light.map_or([1.0; 3], |l| l.tint));
+    lights::set_frame(light.map(|l| lights::Frame::new(point_lights(game, assets.dt.as_ref(), &cam, l.glow), Vec2::from(cam.centre()), l.glow, lights::quality())));
+    (cam, light, lit)
+}
+
+/// The map under a window: clear, drawn, fogged and dimmed (the bar is drawn by the caller). Frozen
+/// (`map_freeze`): the frame a window opens over the map draws it and keeps a copy of the screen, and the
+/// frames after show that copy while its key holds (the look, the towns, the fog, the armies, the screen's
+/// size); a changed key copies once more. A screen too large to copy is drawn live.
 fn draw_map_backdrop(game: &Game, assets: &Assets) {
+    // The map stays where it is when the window over it is panned (`ui::pan`).
+    super::pan::unpanned(|| {
+        clear_background(rgb(10, 12, 10));
+        let Some(size) = map_freeze::pixels() else {
+            map_freeze::release();
+            backdrop_world(game, assets);
+            return;
+        };
+        let key = freeze_key(game);
+        match map_freeze::frozen(key, size) {
+            Some(rt) => {
+                backdrop_frame(game, assets);
+                map_freeze::show(&rt);
+            }
+            None => {
+                backdrop_world(game, assets);
+                map_freeze::capture(key, size);
+            }
+        }
+    });
+}
+
+/// The map under a window, drawn live and not kept: the battle's backdrop, which keeps its own picture
+/// (`battle_backdrop`).
+fn draw_map_backdrop_live(game: &Game, assets: &Assets) {
     // The map stays where it is when the window over it is panned (`ui::pan`).
     super::pan::unpanned(|| {
         clear_background(rgb(10, 12, 10));
@@ -6049,7 +6084,7 @@ pub fn watch_map(game: &Game, assets: &Assets, view: &mut MapView, follow: bool,
 /// live over it, as [`backdrop`] does. The animations behind the battle (trees, water, marks,
 /// idle figures) stand still while the picture is kept: that is the battle's by design.
 pub fn battle_backdrop(game: &Game, assets: &Assets, cache: &mut super::render_cache::Cached) {
-    cache.show(battle_backdrop_key(game), || draw_map_backdrop(game, assets));
+    cache.show(battle_backdrop_key(game), || draw_map_backdrop_live(game, assets));
     game_bar::draw(game, |_| Look::Grey);
     super::pan::cover_bar();
 }
@@ -6088,6 +6123,35 @@ fn battle_backdrop_key(game: &Game) -> u64 {
     h.finish()
 }
 
+/// The key of the map under a window (`map_freeze`): what the map picture reads except the animations, as
+/// [`battle_backdrop_key`] (the screen, the camera, the fog, the armies and the hero), and the towns (their
+/// kind, picture, owner, cleared ruins, living garrison), the game clock (the light), the render scale and
+/// the settings' look. A window's own actions change one of these (a purchase, a moved army, a load), so the
+/// picture is copied again; nothing else moves it while a window is open (the game does not tick).
+fn freeze_key(game: &Game) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    battle_backdrop_key(game).hash(&mut h);
+    map_render_scale().to_bits().hash(&mut h);
+    super::map_freeze::look_key().hash(&mut h);
+    game.clock.total_minutes().to_bits().hash(&mut h);
+    game.hero_figure().hash(&mut h);
+    towns_key(game).hash(&mut h);
+    h.finish()
+}
+
+/// The towns' part of [`freeze_key`]: each town's kind, picture, footprint, owner, faction, attitude, whether its
+/// ruins are cleared and how many of its garrison live (what the map draws of it, and what a town window changes).
+fn towns_key(game: &Game) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for l in &game.world.locations {
+        (l.id, l.tile, l.anchor, l.size, l.kind, l.picture, l.owner, l.faction, l.cleared, l.attitude).hash(&mut h);
+        l.garrison.iter().filter(|t| t.alive()).count().hash(&mut h);
+    }
+    h.finish()
+}
+
 /// The map under a window the bar stays live for (army, spell book, journal, a building),
 /// as in the original: its buttons are blue, the window's own one green; one pressed gives
 /// the screen it opens (the lit one, or the map button, closes the window).
@@ -6097,11 +6161,7 @@ pub fn window_backdrop(game: &Game, assets: &Assets, lit: Option<BarButton>) -> 
 }
 
 fn window_backdrop_at_scale(game: &Game, assets: &Assets, lit: Option<BarButton>) -> Option<Screen> {
-    // The map stays where it is when the window over it is panned (`ui::pan`).
-    super::pan::unpanned(|| {
-        clear_background(rgb(10, 12, 10));
-        backdrop_world(game, assets);
-    });
+    draw_map_backdrop(game, assets);
     let idle = game.foe.is_none();
     let modal = input_blocked();
     let pressed = game_bar::draw(game, |b| match b {
@@ -9138,5 +9198,28 @@ mod layer_tests {
             let rel = |v: &[Card]| v[2].foot.0 - v[0].foot.0;
             assert!((rel(&turned) - rel(&flat)).abs() <= 2.0 * LAYER_PARALLAX_MAX + 1e-4);
         }
+    }
+}
+
+#[cfg(test)]
+mod freeze_tests {
+    use super::*;
+    use razdor::rules::content::{Content, HeroClass};
+    use razdor::rules::world::Owner;
+    use std::sync::Arc;
+
+    #[test]
+    fn a_town_changed_by_a_window_changes_the_frozen_map() {
+        // `freeze_key` itself reads the window's state (a live window thread), so the towns' part is tested.
+        let mut g = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        let k = towns_key(&g);
+        assert_eq!(towns_key(&g), k, "the same towns, the same key");
+        let l = &mut g.world.locations[0];
+        l.owner = if l.owner == Owner::Player { Owner::Neutral } else { Owner::Player };
+        assert_ne!(towns_key(&g), k, "a town's owner is the picture's");
+        let k = towns_key(&g);
+        let l = &mut g.world.locations[0];
+        l.cleared = !l.cleared;
+        assert_ne!(towns_key(&g), k, "cleared ruins are the picture's");
     }
 }

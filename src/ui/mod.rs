@@ -45,6 +45,7 @@ pub mod menu_art;
 pub mod map_import;
 pub mod frame_cap;
 pub mod map_anim;
+pub mod map_freeze;
 pub mod map_scale;
 pub mod memo;
 pub mod minimap;
@@ -1337,6 +1338,9 @@ impl App {
     }
 
     pub fn frame(&mut self) {
+        // The map under a windows' copy (`map_freeze`) lives while a window over the map is drawn: a frame
+        // with none releases it at the next frame's start.
+        map_freeze::begin_frame();
         // Esc (or Back) closes the performance test's windows, or stops its run: the key is used here.
         if bench::handle_escape(self) {
             return;
@@ -1435,6 +1439,8 @@ impl App {
 
     fn frame_content(&mut self) {
         display::follow_settings(&self.audio.settings);
+        // The settings' look, for the frozen map under a window (`map_freeze::look_key`).
+        map_freeze::note_settings(&self.audio.settings);
         recording::follow(&mut self.game, &self.audio.settings);
         // A minimap resized or moved by the player (or set in the settings) is kept, and written
         // to the settings file once the drag ends: a phone's app may be killed with no clean exit.

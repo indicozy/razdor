@@ -288,6 +288,20 @@ screen with the copy composite (`render_cache::blit_screen`, Linear filtering), 
 native resolution: the bottom bar, the minimap, windows, tooltips (`draw_tooltip`), the cursor and text. The
 same goes for the photo mode's world, the map under a window (`backdrop_world`, both backdrops) and their dim; the
 window backdrops follow the setting too, as they are the same world drawing.
+- The map under a window is frozen (`ui::map_freeze`, the owner's decision 2026-11-13; a weak phone GPU drew
+  the whole map each frame under the settings window, 8 FPS). Every window's backdrop goes through
+  `world_view::draw_map_backdrop` (`backdrop_lit`, `settings_backdrop`, `backdrop`, `window_backdrop`). The frame a
+  window opens over the map draws the map live, then copies the screen into a screen-sized target
+  (macroquad's `Texture2D::grab_screen`, a GPU copy, before the bar is drawn). The frames after show that copy
+  (`render_cache::blit_screen`) while its key holds: `world_view::freeze_key` is the battle's key without the
+  animation clock, plus the render scale, the towns (kind, picture, owner, cleared ruins, living garrison), the
+  game clock and the settings' look (`map_freeze::look_of`: the whole `Settings` but the volumes and the
+  speed sliders). A changed key or screen size copies once more, on the frame after the change. The copy is
+  released a frame after the last frame with a window over the map (`map_freeze::begin_frame`, at the start of
+  `App::frame`), so a frame with no backdrop releases it. A screen above 8192 px a side is drawn live. Not
+  frozen: the battle's backdrop (`battle_backdrop`, its own cache) and the watching screen. Why a copy of the
+  screen and not a draw into the map's own target: `render_cache::fill` and `map_scale::draw` do not nest (the
+  inner `with_base` ends by sending the camera back to the screen, and inside a fill the map's scale is dropped).
 - The target is the base of the camera: `render_cache::with_base` makes `back_to_2d` (and the end of every
   `fill_space`) return to it, not to macroquad's default (screen) camera, so `in_view`, the 3D views (`View3d`, whose render
   pass is `render_cache::draw_target`), `ground` and `standing` stay in it. A new camera reset during the world

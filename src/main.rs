@@ -254,6 +254,7 @@ async fn main() {
         if ui::snapshot::open_later(&mut app, frames) {
             opened = 6;
         }
+        ui::snapshot::preset_later(&mut app, frames);
         // The text-size and touch probes list the texts and the touch targets of this frame
         // (`RAZDOR_TEXT_PROBE`, `RAZDOR_TOUCH_PROBE`, off otherwise).
         ui::text_probe::begin_frame();

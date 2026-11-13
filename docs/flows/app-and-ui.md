@@ -491,7 +491,9 @@ in the window's own function (the function does not know it is the first frame).
 under them with `world_view::window_backdrop` / `world_view::backdrop_lit` (the bottom bar
 stays live and lights the window's button). The settings window uses `world_view::settings_backdrop`:
 only its own bar button is live, and a second press on it closes the window with its changes kept
-(`main_menu::close_options_kept`, as «Принять»; the player's report, 2026-10-30). The bar's flag (`BarButton::Hero`) opens the
+(`main_menu::close_options_kept`, as «Принять»; the player's report, 2026-10-30). All of these draw the map under
+them frozen (`ui::map_freeze`, see `assets-and-drawing.md`, the map under a window): the map is copied once and shown
+again while the window is open. The bar's flag (`BarButton::Hero`) opens the
 original's hero window (`Screen::Hero`, `items_view::hero_window`: the hero's panel, the pack,
 the item description, the four resource lines and the diary); J opens the same window. The
 diary keeps the original's look; in place of its list title it has five tabs (asked for by the

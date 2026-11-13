@@ -234,7 +234,7 @@ impl LocationKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Owner {
     Player,
     /// An army of the scenario, by its 1-based id.
