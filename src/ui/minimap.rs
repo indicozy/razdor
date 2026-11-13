@@ -614,13 +614,46 @@ pub fn draw_fog_boxed(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle
         return;
     }
     let (tex, bbox) = fog_texture_box(fog, held, origin, settle);
+    draw_fog_box(&tex, bbox, fog.w, fog.h, tl, br - tl);
+}
+
+/// The source rectangle (x0, y0, x1, y1, end exclusive) of a fog box `bx` in a `w` × `h` texture: the
+/// box grown by one texel a side and clamped to the texture. The texels past the box are alpha 0
+/// and the bilinear sampling at its edge reads one of them, so the grown box keeps that half-texel
+/// fade whole.
+fn grown_box(bx: [i32; 4], w: i32, h: i32) -> [i32; 4] {
+    [(bx[0] - 1).max(0), (bx[1] - 1).max(0), (bx[2] + 1).min(w), (bx[3] + 1).min(h)]
+}
+
+/// Draws the `w` × `h` fog texture `tex` over the screen rectangle at `tl` of size `size`, only its
+/// texels in the grown box of `bbox` ([`grown_box`]): the texels at the same screen positions keep the
+/// same texture coordinates. Nothing is drawn when `bbox` is None (no texel is dark).
+fn draw_fog_box(tex: &Texture2D, bbox: Option<[i32; 4]>, w: i32, h: i32, tl: Vec2, size: Vec2) {
     let Some(bx) = bbox else { return };
-    let (x0, y0) = ((bx[0] - 1).max(0), (bx[1] - 1).max(0));
-    let (x1, y1) = ((bx[2] + 1).min(fog.w), (bx[3] + 1).min(fog.h));
-    let cell = (br - tl) / vec2(fog.w as f32, fog.h as f32);
-    let (at, size) = (tl + vec2(x0 as f32, y0 as f32) * cell, vec2((x1 - x0) as f32, (y1 - y0) as f32) * cell);
+    let [x0, y0, x1, y1] = grown_box(bx, w, h);
+    let cell = size / vec2(w as f32, h as f32);
+    let (at, dest) = (tl + vec2(x0 as f32, y0 as f32) * cell, vec2((x1 - x0) as f32, (y1 - y0) as f32) * cell);
     let source = Rect::new(x0 as f32, y0 as f32, (x1 - x0) as f32, (y1 - y0) as f32);
-    draw_texture_ex(&tex, at.x, at.y, WHITE, DrawTextureParams { dest_size: Some(size), source: Some(source), ..Default::default() });
+    draw_texture_ex(tex, at.x, at.y, WHITE, DrawTextureParams { dest_size: Some(dest), source: Some(source), ..Default::default() });
+}
+
+/// The parts of the window `o` outside the ground `r` (the minimap's rect in it), as top, bottom,
+/// left and right rectangles; an empty one has zero width or height. `r` is clipped to `o` first,
+/// and the shared edges are `r`'s own, so the four tile `o` minus `r`. Used only where the ground is
+/// opaque ([`ground`]): under it the window's black is not seen.
+fn outside_ground(o: Rect, r: Rect) -> [Rect; 4] {
+    let (x0, y0) = (o.x.max(r.x), o.y.max(r.y));
+    let (x1, y1) = ((o.x + o.w).min(r.x + r.w), (o.y + o.h).min(r.y + r.h));
+    let none = Rect::new(0.0, 0.0, 0.0, 0.0);
+    if x1 <= x0 || y1 <= y0 {
+        return [o, none, none, none];
+    }
+    [
+        Rect::new(o.x, o.y, o.w, y0 - o.y),
+        Rect::new(o.x, y1, o.w, o.y + o.h - y1),
+        Rect::new(o.x, y0, x0 - o.x, y1 - y0),
+        Rect::new(x1, y0, o.x + o.w - x1, y1 - y0),
+    ]
 }
 
 /// [`draw_fog`] past a map's edges («Продолжать карту за краем»): `dest` shows the fog's texels
@@ -1198,6 +1231,7 @@ fn ground(game: &Game, art: Option<&super::dt_art::DtArt>, surface_color: fn(u8)
                 }
             }
         }
+        // Every texel is opaque (alpha 255): [`window`] draws its black only outside the ground.
         let mut rgba = Vec::with_capacity(w * h * 4);
         for c in rgb.iter() {
             rgba.extend(c);
@@ -1397,15 +1431,22 @@ pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_
     // The window: black behind the map, the original's silver frame over it (or a stone-grey
     // one).
     let frame_art = super::chrome::win_fx("MiniMap_Frame_400x400", super::chrome::Fx::KeyBlack);
-    draw_rectangle(o.x, o.y, o.w, o.h, BLACK);
+    // The black only where the ground does not cover: every texel of [`ground`] is opaque, so
+    // the black under it is never seen (the same pixels, a fraction of the fill).
+    for s in outside_ground(o, r) {
+        if s.w > 0.0 && s.h > 0.0 {
+            draw_rectangle(s.x, s.y, s.w, s.h, BLACK);
+        }
+    }
     if frame_art.is_none() {
         draw_rectangle_lines(o.x + 1.0, o.y + 1.0, o.w - 2.0, o.h - 2.0, 2.0, Color::new(0.62, 0.64, 0.62, 1.0));
     }
     let tex = ground(game, art, surface_color);
     draw_texture_ex(&tex, r.x, r.y, WHITE, DrawTextureParams { dest_size: Some(vec2(r.w, r.h)), ..Default::default() });
-    // The dark over the ground: the same fog texture the main view draws, over the minimap's rect.
-    let dark = fog_texture(fog, &game.unshown_cells(), game.tile(), std::iter::empty());
-    draw_texture_ex(&dark, r.x, r.y, WHITE, DrawTextureParams { dest_size: Some(vec2(r.w, r.h)), ..Default::default() });
+    // The dark over the ground: the same fog texture the main view draws, over the minimap's rect,
+    // only its dark box (the rest is alpha 0).
+    let (dark, bbox) = fog_texture_box(fog, &game.unshown_cells(), game.tile(), std::iter::empty());
+    draw_fog_box(&dark, bbox, fog.w, fog.h, vec2(r.x, r.y), vec2(r.w, r.h));
 
     // Cells → minimap pixels (world units: rows are `row_height` apart).
     let rh = map.grid.row_height();
@@ -2169,6 +2210,42 @@ mod fog_box_tests {
             rgba[(y * w + x) * 4 + 3] = 90;
         }
         rgba
+    }
+
+    #[test]
+    fn the_black_is_the_window_outside_the_ground_and_nothing_inside_it() {
+        let o = Rect::new(10.0, 20.0, 100.0, 80.0);
+        let r = Rect::new(20.0, 30.0, 50.0, 40.0);
+        let strips = outside_ground(o, r);
+        assert_eq!(strips[0], Rect::new(10.0, 20.0, 100.0, 10.0), "top");
+        assert_eq!(strips[1], Rect::new(10.0, 70.0, 100.0, 30.0), "bottom");
+        assert_eq!(strips[2], Rect::new(10.0, 30.0, 10.0, 40.0), "left");
+        assert_eq!(strips[3], Rect::new(70.0, 30.0, 40.0, 40.0), "right");
+        // Every pixel centre of the window is in exactly one strip when it lies outside the ground,
+        // and in none when it lies inside.
+        for y in 20..100 {
+            for x in 10..110 {
+                let p = (x as f32 + 0.5, y as f32 + 0.5);
+                let hits = strips.iter().filter(|s| s.w > 0.0 && s.h > 0.0 && p.0 >= s.x && p.0 < s.x + s.w && p.1 >= s.y && p.1 < s.y + s.h).count();
+                let inside = p.0 >= r.x && p.0 < r.x + r.w && p.1 >= r.y && p.1 < r.y + r.h;
+                assert_eq!(hits, usize::from(!inside), "pixel ({x}, {y})");
+            }
+        }
+        // A ground that reaches the window's edge leaves no strip there.
+        let edge = outside_ground(o, Rect::new(10.0, 20.0, 100.0, 80.0));
+        assert!(edge.iter().all(|s| s.w <= 0.0 || s.h <= 0.0), "no black under a full ground");
+        // A ground outside the window leaves the window whole.
+        let away = outside_ground(o, Rect::new(200.0, 200.0, 10.0, 10.0));
+        assert_eq!(away[0], o);
+        assert!(away[1..].iter().all(|s| s.w <= 0.0 || s.h <= 0.0));
+    }
+
+    #[test]
+    fn the_fog_box_is_grown_by_a_texel_and_clamped_to_the_texture() {
+        assert_eq!(grown_box([2, 2, 5, 6], 10, 10), [1, 1, 6, 7], "one texel each side");
+        assert_eq!(grown_box([0, 0, 3, 3], 10, 10), [0, 0, 4, 4], "clamped at the top left");
+        assert_eq!(grown_box([5, 6, 10, 10], 10, 10), [4, 5, 10, 10], "clamped at the bottom right");
+        assert_eq!(grown_box([0, 0, 1, 1], 1, 1), [0, 0, 1, 1], "a one-texel texture stays one texel");
     }
 
     #[test]
