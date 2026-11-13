@@ -224,7 +224,7 @@ fn write_pref(path: &Path, to: Host) {
 static STATE: Mutex<Option<Option<Host>>> = Mutex::new(None);
 
 #[cfg(test)]
-thread_local! {
+crate::local! {
     /// The tests' primary: per thread (each test has its own), never the file.
     static TEST_PRIMARY: std::cell::Cell<Option<Host>> = const { std::cell::Cell::new(None) };
 }
