@@ -184,6 +184,14 @@ mobile support; there is no roadmap and nothing else is started unless the owner
 - Releases are weekly (the owner's decision, 2026-10-28): a fix is done once it is on `main`
   with status `fixed` and its line in `changelog/unreleased.md` (the next release's candidate);
   never cut or offer a release after a fix. The owner releases the week's pile when they say so.
+- GitVerse mirror (the owner's decision, 2026-11-13): every release and every download link players get
+  (app releases, the game archive, the hub) is also on GitVerse (`gitverse.ru/indicozy/razdor`,
+  `gitverse.ru/indicozy/razdor-community`; API `api.gitverse.ru`, token `GITVERSE_TOKEN` in `.env`) as the
+  mirror for Russia. Its release files are `https://gitverse.ru/api/attachments/<uuid>` (Range works; about
+  4 GB of release files per account, ~140–500 KB/s per connection). GitVerse Pages is only for the
+  website (site + wiki, `indicozy.gitverse.site/razdor`); the hub and the game stay on releases.
+  From 1.5.2 on, the app tries GitVerse first and GitHub as the fallback for app updates, the hub
+  and the game download.
 - "release" / "make a release": the `release` skill. The Discord release post goes out together with
   the release's start (right after the tag is pushed), without waiting for the release pipeline to
   finish (the owner's decision, 2026-10-27).
