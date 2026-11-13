@@ -13,7 +13,8 @@ The design is in `docs/specs/2026-11-13-gitverse-mirrors.md`.
 | `publish_hub.py` | The hub catalog: zips each map and other file (one zip each) into a `catalog-YYYY-MM-DD` release, writes the GitVerse `index-v2.json`, pushes the site (`index-v2.json`, the pictures under `previews/`, the hub page) to Pages, deletes old catalogs. |
 | `publish_site.py` | The website on GitVerse Pages (`https://indicozy.gitverse.site/razdor/`): builds the committed wiki (`npm ci && npm run build`, pinned to CPUs 8-19) and assembles it with the gh-pages site and `config.json` as pages.yml does, pushes the `site` branch of `razdor` (the folder `site/` and `.github/workflows/gitverse-pages.yaml` from `site-pages.yaml`; force, that branch only), waits for its workflow run and for the bytes, then checks the live pages and their assets. `--assemble-only`, `--check-only`. |
 | `site-pages.yaml` | The workflow file pushed with the site (`actions/upload-pages-artifact@v1.0.0` on `site/`, `actions/deploy-pages@v1.0.0`, `ubuntu-latest`). |
-| `test_*.py` | Unit tests (no network; a local HTTP server and a local bare git repo stand in for GitVerse). |
+| `testkit.py` | The hermetic base every test class uses, and its guards (see Tests). |
+| `test_*.py` | Unit tests (no network, no real token, no real registry or clone; a local HTTP server and a local bare git repo stand in for GitVerse). `test_hermetic.py` proves the guards. |
 
 ## Usage
 
@@ -142,6 +143,24 @@ generic Content-Type alike: the extension decides):
 ```sh
 python3 -I -m unittest discover -s tools/gitverse
 ```
+
+The tests are hermetic: they never reach GitVerse or GitHub, never read the token, and never touch the
+real registry, the real Pages clones or the release work folder. Every test class derives from
+`testkit.HermeticTestCase`, which for each test:
+
+- gives it its own temp root (`tempfile` points into it, the working folder is in it, removed after the test);
+  `HOME`, `XDG_STATE_HOME`, the registry folder (`RAZDOR_GITVERSE_STATE`), the scratch and work folders are in it;
+- removes `GITVERSE_TOKEN` from the environment; `gv.load_token` raises instead of reading the environment or `.env`;
+- refuses a TCP connection to any address but loopback, a `urllib` request to any host but loopback, any
+  program but `git`, a `git` command with a URL or `git@` address or outside the temp root, `os.system`, a
+  registry file outside the temp root and a Pages clone outside it (each raises `HermeticViolation`, an `AssertionError`);
+- keeps the output the scripts print during a test (the fake GitVerse calls), and shows it only if the test fails.
+
+Loopback stays open for the local HTTP server and local bare repositories that stand in for GitVerse.
+Fakes are injected per test (`gv.Client`, `gv.fetch_bytes`, `pages.Pages(remote=...)`). `test_hermetic.py`
+checks that each guard refuses what it should. To check from a shell that nothing can leave the machine,
+run the suite in a network namespace with only loopback up:
+`unshare -rn sh -c 'ip link set lo up; exec python3 -I -m unittest discover -s tools/gitverse'`.
 
 Covered: the packing (names, modes 0755, the programs' inner names), `SHA256SUMS.txt`, the feed's shape
 (names, `archive`/`member`, the old names, the newest two non-pre-releases), the cleanup selection, the

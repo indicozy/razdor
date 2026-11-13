@@ -17,6 +17,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import gitverse as gv  # noqa: E402
+from testkit import HermeticTestCase  # noqa: E402
 import pages  # noqa: E402
 import publish_release as pr  # noqa: E402
 from test_release import PAYLOAD  # noqa: E402
@@ -68,8 +69,9 @@ def old_feed():
     return [entry("v1.5.1"), entry("v1.5.0")]
 
 
-class PublishFlowTests(unittest.TestCase):
+class PublishFlowTests(HermeticTestCase):
     def setUp(self):
+        super().setUp()
         self._tmp = tempfile.TemporaryDirectory()
         root = self._tmp.name
         self.bare = os.path.join(root, "remote.git")
@@ -171,11 +173,12 @@ class PublishFlowTests(unittest.TestCase):
             pr.publish(self.args("v1.5.2-rc1"))
 
 
-class HubFlowTests(unittest.TestCase):
+class HubFlowTests(HermeticTestCase):
     """publish_hub.publish() with the same fakes: the Pages site (index, previews, the hub page) is
     pushed, and the catalog releases beyond the newest two are deleted."""
 
     def setUp(self):
+        super().setUp()
         self._tmp = tempfile.TemporaryDirectory()
         root = self._tmp.name
         self.bare = os.path.join(root, "remote.git")

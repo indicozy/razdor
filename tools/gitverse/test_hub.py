@@ -13,6 +13,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import gitverse as gv  # noqa: E402
+from testkit import HermeticTestCase  # noqa: E402
 import pages  # noqa: E402
 import publish_hub as ph  # noqa: E402
 
@@ -61,7 +62,7 @@ def links_for(cat):
     return out
 
 
-class RoutingTests(unittest.TestCase):
+class RoutingTests(HermeticTestCase):
     def test_archives_are_release_assets_as_they_are_and_other_files_are_zipped(self):
         self.assertEqual(ph.destination("x.zip", "file"), ("release", None))
         self.assertEqual(ph.destination("x.tgz", "file"), ("release", None))
@@ -117,7 +118,7 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(ph.pages_size_verdict(500 * ph.MB), "stop")
 
 
-class ZipTests(unittest.TestCase):
+class ZipTests(HermeticTestCase):
     def test_a_wrapped_file_is_a_zip_of_that_one_file_under_its_catalog_name(self):
         with tempfile.TemporaryDirectory() as d:
             src = os.path.join(d, "00313a966d837cbb.dtm")
@@ -136,7 +137,7 @@ class ZipTests(unittest.TestCase):
         self.assertIsNone(gv.name_problem("00313a966d837cbb.dtm.zip"))
 
 
-class IndexTests(unittest.TestCase):
+class IndexTests(HermeticTestCase):
     def test_wrapped_file_names_its_zip_and_keeps_its_own_size_and_sum(self):
         cat = catalog()
         idx = ph.gitverse_index(cat, links_for(cat))
@@ -198,7 +199,7 @@ class IndexTests(unittest.TestCase):
             ph.refs(cat)
 
 
-class StageTests(unittest.TestCase):
+class StageTests(HermeticTestCase):
     def test_stage_is_the_site_layout_index_v2_and_the_pictures(self):
         with tempfile.TemporaryDirectory() as d:
             cat = catalog()
@@ -225,7 +226,7 @@ class StageTests(unittest.TestCase):
         self.assertEqual(gone, ["catalog-2026-11-01"])
 
 
-class SyncTests(unittest.TestCase):
+class SyncTests(HermeticTestCase):
     def test_sync_site_removes_old_catalog_files_and_keeps_the_feed(self):
         import subprocess
         with tempfile.TemporaryDirectory() as d:
@@ -254,7 +255,7 @@ class SyncTests(unittest.TestCase):
             self.assertEqual(pg.read("docs/index-v2.json"), b"{}")
 
 
-class WebTests(unittest.TestCase):
+class WebTests(HermeticTestCase):
     def test_web_files_are_the_hub_page_without_a_files_base(self):
         files = pages.web_files()
         self.assertEqual(sorted(files), ["hub.css", "hub.js", "index.html"])
@@ -295,8 +296,9 @@ def remote_ad_catalog(data):
     return cat
 
 
-class RemotePictureTests(unittest.TestCase):
+class RemotePictureTests(HermeticTestCase):
     def setUp(self):
+        super().setUp()
         self.data = b"\x89PNG-capsule-picture"
         self.cat = remote_ad_catalog(self.data)
         self.saved = gv.fetch_bytes

@@ -12,6 +12,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import gitverse as gv  # noqa: E402
+from testkit import HermeticTestCase  # noqa: E402
 import publish_release as pr  # noqa: E402
 
 V = "1.5.2"
@@ -41,8 +42,9 @@ def sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
-class ReleaseCase(unittest.TestCase):
+class ReleaseCase(HermeticTestCase):
     def setUp(self):
+        super().setUp()
         self._tmp = tempfile.TemporaryDirectory()
         self.dir = self._tmp.name
         self.paths = []
@@ -198,7 +200,7 @@ class FeedTests(ReleaseCase):
         self.assertEqual(set(data[0]), {"tag_name", "name", "html_url", "draft", "prerelease", "body", "assets"})
 
 
-class CleanupTests(unittest.TestCase):
+class CleanupTests(HermeticTestCase):
     def test_prune_keeps_newest_two_app_releases_by_version(self):
         reg = [
             {"repo": "razdor", "tag": "v1.5.2", "kind": "app", "prerelease": False, "id": 3},

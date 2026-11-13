@@ -14,6 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import gitverse as gv  # noqa: E402
+from testkit import HermeticTestCase  # noqa: E402
 import pages  # noqa: E402
 
 
@@ -22,8 +23,9 @@ def git(*args, cwd):
                    cwd=cwd, check=True, capture_output=True)
 
 
-class PagesRepoTests(unittest.TestCase):
+class PagesRepoTests(HermeticTestCase):
     def setUp(self):
+        super().setUp()
         self._tmp = tempfile.TemporaryDirectory()
         root = self._tmp.name
         self.bare = os.path.join(root, "remote.git")
@@ -92,8 +94,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-class WaitTests(unittest.TestCase):
+class WaitTests(HermeticTestCase):
     def setUp(self):
+        super().setUp()
         self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.base = f"http://127.0.0.1:{self.httpd.server_address[1]}/"
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()

@@ -15,6 +15,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import gitverse as gv  # noqa: E402
+from testkit import HermeticTestCase  # noqa: E402
 
 
 class FakeHost(http.server.BaseHTTPRequestHandler):
@@ -87,7 +88,7 @@ def no_sleep(_):
     return None
 
 
-class MultipartTests(unittest.TestCase):
+class MultipartTests(HermeticTestCase):
     def test_body_has_the_attachment_field_and_streams_like_bytes(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "razdor-1.0.0.apk")
@@ -139,7 +140,7 @@ class MultipartTests(unittest.TestCase):
             self.assertEqual(gv.env_value("X", os.path.join(d, "nope")), "")
 
 
-class RetryTests(unittest.TestCase):
+class RetryTests(HermeticTestCase):
     def test_retries_429_and_5xx_then_succeeds(self):
         calls = []
 
@@ -176,7 +177,7 @@ class RetryTests(unittest.TestCase):
         self.assertEqual(gv.retrying("t", fn, sleep=no_sleep), 1)
 
 
-class ClientTests(unittest.TestCase):
+class ClientTests(HermeticTestCase):
     def test_upload_sends_token_accept_and_the_multipart_body(self):
         FakeHost.seen = []
         with tempfile.TemporaryDirectory() as d, Server() as s:
@@ -208,7 +209,7 @@ class ClientTests(unittest.TestCase):
             c.upload_asset("o", "r", 1, "Razdor.exe", __file__)
 
 
-class DownloadTests(unittest.TestCase):
+class DownloadTests(HermeticTestCase):
     def test_fetch_exact_in_parts_checks_sha(self):
         data = os.urandom(3 * gv.PART_MIN + 17)
         FakeHost.data = data
@@ -248,7 +249,7 @@ class DownloadTests(unittest.TestCase):
             gv.fetch_exact(s.base + "/file", 0, hashlib.sha256(b"").hexdigest())
 
 
-class UploadRetryTests(unittest.TestCase):
+class UploadRetryTests(HermeticTestCase):
     """An upload answered 400 VALIDATION_ERROR is tried again twice (2 s, 4 s), and no other status is."""
 
     def client(self, answers):

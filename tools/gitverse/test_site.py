@@ -15,6 +15,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import gitverse as gv  # noqa: E402
+from testkit import HermeticTestCase  # noqa: E402
 import publish_site as ps  # noqa: E402
 
 PUBLIC = ps.PUBLIC
@@ -66,8 +67,9 @@ def run_of(sha, status, run_id=7):
     return {"id": run_id, "status": status, "commit_sha": sha, "ref": "refs/heads/site"}
 
 
-class AssembleTests(unittest.TestCase):
+class AssembleTests(HermeticTestCase):
     def setUp(self):
+        super().setUp()
         self._tmp = tempfile.TemporaryDirectory()
         self.root = self._tmp.name
         self.site = os.path.join(self.root, "site")
@@ -114,8 +116,9 @@ class AssembleTests(unittest.TestCase):
             ps.assemble(self.site, self.wiki_dist, self.config, hand_made=tar_of({"a.txt": b"x"}))
 
 
-class PushTests(unittest.TestCase):
+class PushTests(HermeticTestCase):
     def setUp(self):
+        super().setUp()
         self._tmp = tempfile.TemporaryDirectory()
         root = self._tmp.name
         self.scratch = os.path.join(root, "scratch")
@@ -177,7 +180,7 @@ class PushTests(unittest.TestCase):
         self.assertEqual(self._tree("site", ps.WORKFLOW_DEST), ps.read(self.workflow))
 
 
-class WaitTests(unittest.TestCase):
+class WaitTests(HermeticTestCase):
     def test_waits_for_the_new_bytes_past_a_not_found_page(self):
         page = "<html>Страница не найдена</html>".encode("utf-8")  # GitVerse's 200 not-found page
         served = [page, page, b"new"]
@@ -229,8 +232,9 @@ class WaitTests(unittest.TestCase):
             ps.wait_workflow(client, "b" * 40, wait=-1, interval=0, sleep=lambda s: None)
 
 
-class LiveCheckTests(unittest.TestCase):
+class LiveCheckTests(HermeticTestCase):
     def setUp(self):
+        super().setUp()
         self._tmp = tempfile.TemporaryDirectory()
         self.site = os.path.join(self._tmp.name, "site")
         self.files = {
@@ -309,8 +313,9 @@ class LiveCheckTests(unittest.TestCase):
         self.assertEqual(marks["config.json"], b"{}\n")
 
 
-class WorkflowTemplateTests(unittest.TestCase):
+class WorkflowTemplateTests(HermeticTestCase):
     def setUp(self):
+        super().setUp()
         with open(ps.WORKFLOW_SRC, encoding="utf-8") as f:
             self.text = f.read()
 
@@ -327,7 +332,7 @@ class WorkflowTemplateTests(unittest.TestCase):
         self.assertIn("workflow_dispatch", self.text)
 
 
-class MiscTests(unittest.TestCase):
+class MiscTests(HermeticTestCase):
     def test_the_build_is_pinned_to_the_free_cpus(self):
         if shutil.which("taskset") and shutil.which("nice"):
             self.assertEqual(ps.pinned(["npm", "ci"]), ps.HEAVY + ["npm", "ci"])

@@ -13,6 +13,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import gitverse as gv  # noqa: E402
+from testkit import HermeticTestCase  # noqa: E402
 import pages  # noqa: E402
 import publish_config  # noqa: E402
 
@@ -36,7 +37,7 @@ def raw_of(cfg):
     return json.dumps(cfg).encode("utf-8")
 
 
-class CheckTests(unittest.TestCase):
+class CheckTests(HermeticTestCase):
     def test_the_shipped_config_passes(self):
         cfg = publish_config.check(pages.config_bytes())
         self.assertEqual(cfg["schema"], 1)
@@ -75,8 +76,9 @@ class CheckTests(unittest.TestCase):
         self.assertEqual(publish_config.check(raw_of(cfg))["schema"], 1)
 
 
-class PagesConfigTests(unittest.TestCase):
+class PagesConfigTests(HermeticTestCase):
     def setUp(self):
+        super().setUp()
         self._tmp = tempfile.TemporaryDirectory()
         root = self._tmp.name
         self.bare = os.path.join(root, "remote.git")
