@@ -2958,8 +2958,21 @@ fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool) {
                         gpu_wait(Stage::GpuWater);
                     }
                 }
-                in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow)));
+                // The overlay draws the live water (`Mode::Overlay`, the `LiveWater` uniform: only while `water::live()`)
+                // and the border's fog over the cached ground. With the water alive it is timed as `water` (the fog of the
+                // border, when the map goes on past its edges, is drawn in the same pass and counted there too); with the
+                // water off it is only that fog, which stays in `terrain`.
+                if water::live() {
+                    frame_probe::time(Stage::Water, || in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow))));
+                    if waits {
+                        gpu_wait(Stage::GpuWater);
+                    }
+                } else {
+                    in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow)));
+                }
             }
+            // No cache (`RAZDOR_TERRAIN_NOCACHE`, a bent view, a picture being filled): `Mode::Full` draws the live water
+            // inside the terrain's own time, not as `water` (see the frame probe's module comment).
             None => in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Full, flow))),
         }
     });

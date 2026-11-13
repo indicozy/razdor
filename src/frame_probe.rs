@@ -29,6 +29,11 @@
 //! `freeze`: [`EFFECT_STAGES`]) and a GPU stage each (`gpu-water` … `gpu-minimap`: [`GPU_STAGES`]). The summary
 //! of a map kind also has the draw calls and vertices estimated for its frames ([`draw`]).
 //!
+//! The live water is timed as `water` only where the ground cache draws it: the water's picture and the overlay
+//! (`world_view::draw_ground`, the cache's branch, with the overlay timed only while the water is alive). Its
+//! other path, the ground with no cache (`draw_ground`'s `None` branch, `Mode::Full`), draws the water inside the
+//! terrain's own time, so `water` reads zero there (a limit of the stage split, not a missing timer).
+//!
 //! The stage times are CPU time spent building the frame. Macroquad batches draws and issues
 //! the GL calls in `next_frame`, so GL submission and the wait for vsync (`eglSwapBuffers`)
 //! land in "present" (total minus work). GPU time itself is not visible here, except for the
@@ -382,9 +387,18 @@ pub fn current_frame() -> u64 {
 pub fn record_gpu_stage(frame: u64, stage: Stage, ms: f32) {
     if let Some(i) = GPU_STAGES.iter().position(|&g| g == stage) {
         if on() {
-            STATE.with_borrow_mut(|s| s.gpu_frames.entry(frame).or_insert([f32::NAN; GPU_STAGES.len()])[i] = ms);
+            STATE.with_borrow_mut(|s| {
+                let slot = &mut s.gpu_frames.entry(frame).or_insert([f32::NAN; GPU_STAGES.len()])[i];
+                *slot = merge_gpu_ms(*slot, ms);
+            });
         }
     }
+}
+
+/// A GPU stage's time in a frame after another mark of it: the first mark sets it (`NAN` before), a second adds
+/// to it, as the CPU stages do (the water's picture, then its overlay, are one stage in one frame).
+fn merge_gpu_ms(slot: f32, ms: f32) -> f32 {
+    if slot.is_nan() { ms } else { slot + ms }
 }
 
 /// This frame is a map frame (its kind is a map kind, see [`is_map`]) and the probe is on: the
@@ -733,6 +747,8 @@ fn kind_line(secs: f32, kind: Kind, of: &[&Sample], gpu_terrain: &[f32], group: 
     let name = format!("{group}{}", summary_name(kind));
     let rebuilds: u32 = of.iter().map(|s| s.rebuilds).sum();
     let stage = |st: Stage| dist(of.iter().map(|s| s.stage_ms[st as usize])).narrow();
+    // The effects' GPU stages, to two decimals (see `Dist::narrow2`).
+    let stage2 = |st: Stage| dist(of.iter().map(|s| s.stage_ms[st as usize])).narrow2();
     // The battle kinds split their window's time: the backdrop, the window, its effects and the
     // GPU waits (Android; zero elsewhere).
     let battle = if matches!(kind, Kind::Battle { .. } | Kind::BattleEffect { .. }) {
@@ -763,14 +779,14 @@ fn kind_line(secs: f32, kind: Kind, of: &[&Sample], gpu_terrain: &[f32], group: 
             avg(Stage::Weather),
             avg(Stage::GroundCache),
             avg(Stage::Freeze),
-            stage(Stage::GpuWater),
-            stage(Stage::GpuMist),
-            stage(Stage::GpuLight),
-            stage(Stage::GpuSunShadow),
-            stage(Stage::GpuWeather),
-            stage(Stage::GpuGroundCache),
-            stage(Stage::GpuFreeze),
-            stage(Stage::GpuMinimap),
+            stage2(Stage::GpuWater),
+            stage2(Stage::GpuMist),
+            stage2(Stage::GpuLight),
+            stage2(Stage::GpuSunShadow),
+            stage2(Stage::GpuWeather),
+            stage2(Stage::GpuGroundCache),
+            stage2(Stage::GpuFreeze),
+            stage2(Stage::GpuMinimap),
             mean(|s| s.draws as f32),
             mean(|s| s.verts as f32),
         );
@@ -905,6 +921,12 @@ impl Dist {
     fn narrow(&self) -> String {
         format!("p50 {:.1} p99 {:.1} max {:.1}", self.p50, self.p99, self.max)
     }
+
+    /// "p50 a p99 b max c" to two decimals: the effects' GPU waits are a few hundredths of a ms, which one
+    /// decimal shows as 0.0.
+    fn narrow2(&self) -> String {
+        format!("p50 {:.2} p99 {:.2} max {:.2}", self.p50, self.p99, self.max)
+    }
 }
 
 /// The nearest-rank percentile `p` (0 to 100) of `sorted` (ascending); 0 when it is empty.
@@ -942,7 +964,13 @@ mod tests {
         assert!(lines[0].starts_with("frame probe 5.0 s idle[flat] n=1 "), "{}", lines[0]);
         assert!(lines[1].starts_with("frame probe 5.0 s gpu-sample idle[flat] n=1 "), "{}", lines[1]);
         assert!(lines[0].contains(" | water 0.00 | mist 0.00 | "), "{}", lines[0]);
-        assert!(lines[0].contains(" | gpu-minimap p50 0.0 p99 0.0 max 0.0 | draws 0 verts 0 | "), "{}", lines[0]);
+        assert!(lines[0].contains(" | gpu-minimap p50 0.00 p99 0.00 max 0.00 | draws 0 verts 0 | "), "{}", lines[0]);
+    }
+
+    #[test]
+    fn a_gpu_stage_marked_twice_in_a_frame_adds_up() {
+        assert_eq!(merge_gpu_ms(f32::NAN, 1.5), 1.5, "the first mark sets the stage");
+        assert_eq!(merge_gpu_ms(1.5, 2.0), 3.5, "the second mark adds to it");
     }
 
     #[test]
