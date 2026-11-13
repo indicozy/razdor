@@ -67,12 +67,14 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   `src/rules/game.rs`) and its figure index (0x71c430 + figure·0x2c00) in Ghidra, then make both paths
   agree.
 
-- **The hero is the unit of kind Leader** (2026-11-08). `Unit::is_hero` (`WageKind::Leader`) is what
-  keeps the hero from promotion and the «+». The original's hero is the first unit of the army (experience.md
-  §4). An event that takes a unit from an AI army (`add_unit` with `from_army`, `script.rs`) copies that
-  unit's kind, so an AI army leader who joins the player's squad would be taken for the hero. Not seen in
-  a map yet. Settle: check the original's behaviour for such a join (what the first unit is after it) and,
-  if it differs, make the hero a position or a flag instead of the kind.
+- **The hero is the unit of kind Leader** (2026-11-08; promotion part fixed 2026-11-13, report 1631). The
+  promotion and the «+» now take the hero as the first unit of the army (squad index 0, experience.md §4); the
+  kind no longer decides it. A named unit that joins from an AI army keeps kind 0 (`add_unit` with `from_army`,
+  `script.rs`), and the report's save shows it happened. Still open: (1) the crown check in `items.rs`
+  `slot_for` still reads the kind (`wage_kind != Leader`), so such a unit may wear the crown; settle with the
+  original's crown rule (Ghidra: the item check, by kind or by position). (2) That a join appends the unit
+  after the hero in the original (Razdor appends, `script.rs`), which the first-unit rule relies on: check in
+  Ghidra.
 
 - **The editor's event window reads "на 24 часов", but the game plays a 24 h window as 1,440 hours** (2026-11-05, the editor-guide screenshot pass, docs/reference/editor-guide.md, chapters 5 and 6). The unit is settled (see Settled): the editor stores hours × 60 and the game reads the stored number as hours, so the label and the played length differ by a factor of 60. Razdor plays the game's length (`src/rules/events.rs:625`). Every event duration in the 24 base-install maps is a multiple of 60 (values 0, 720, 780, 1440, 1500, 1860, 2160, 2400), so the shipped data was made under this rule, and the guide's 24 h recipes (6.4, 6.5, 6.18) play 60 days. Known difference in the editor's label and stored unit, not in the rule. Owner's call: relabel the editor's control (the value shown, or its unit), or keep it and document it in the editor help. Settled by that decision.
 

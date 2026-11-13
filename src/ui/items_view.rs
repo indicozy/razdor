@@ -399,7 +399,7 @@ fn tree_view(game: &Game, assets: &Assets, sel: usize, u: &Unit, r: Rect, promo:
     let mut pointed = None;
     let c = game.content.clone();
     let k = chrome::k();
-    let tree = u.upgrade_tree(&c);
+    let tree = u.upgrade_tree(&c, sel == 0);
     let locked = !tree.iter().any(|&(_, _, ok)| ok);
     if let Some(t) = chrome::win_fx("UpgradeTree", chrome::Fx::KeyBlack) {
         chrome::tex(&t, r, WHITE);
@@ -907,7 +907,7 @@ pub fn squad(
         if shown.is_some() {
             // The hint line (0x4c39d8): `[Army]` line 4 when it lacks the level, 5 to choose,
             // 6 when it has no further class.
-            let tree = tu.upgrade_tree(&c);
+            let tree = tu.upgrade_tree(&c, t == 0);
             let n = if tree.is_empty() { 6 } else if tu.level <= 1 { 4 } else { 5 };
             let who = game.squad_label(t);
             tree_hint = chrome::ui_line("Army", n).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).map(|line| line.replace("#NAME1", &format!("\"{who}\"")));
@@ -980,7 +980,7 @@ pub fn squad(
     // check box rows of the same size, «Не участвует в боях» (Razdor's, the owner's decision) above
     // «Не напоминать». It grows upward when both do not fit (`check_rows`).
     if let Some(t) = tree_of {
-        let promotable = game.squad[t].promotion_ready(&c);
+        let promotable = game.squad[t].promotion_ready(&c, t == 0);
         let bench = game.allow_unit_benching && t > 0 && game.squad[t].alive();
         // A phone's label is 12.5 px per dp (its capital about 12.5 sp, the check's floor of 12
         // sp; a fixed px size would shrink on a denser phone); the desktop keeps the army
@@ -1077,7 +1077,7 @@ pub fn squad(
         // The original's signs from the top left (493a64): the promotion, then a drunk potion.
         // Razdor's deviation (the owner's decision): no helmet sign on the hero's card, which has
         // its own coloured field; Razdor drew the helmet here, not the original.
-        let upgrade = i > 0 && v.promotion_sign(&c);
+        let upgrade = v.promotion_sign(&c, i == 0);
         chrome::card_signs(sq, true, &[(upgrade, "Sign-Upgrade", GREEN), (!v.potions.is_empty(), "sign-potion", GREEN)]);
         super::spell_badges::draw(sq, &v.spells, v.drain, game.clock.total_minutes() as u64, &c);
         if let Some(fx) = CARD_FX.with(|f| f.get()).filter(|fx| fx.unit == i) {

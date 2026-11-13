@@ -2709,7 +2709,8 @@ impl Game {
             return Err(PromoteError::NotAvailable);
         }
         let keep = self.keep_xp_on_promotion;
-        self.squad.get_mut(unit).ok_or(PromoteError::NotAvailable)?.promote(&c, to, keep)
+        // The hero (unit 0) is refused above; every other squad member is an ordinary unit.
+        self.squad.get_mut(unit).ok_or(PromoteError::NotAvailable)?.promote(&c, to, keep, false)
     }
 
     /// Razdor's «Автоматическая прокачка» (`ExperimentalRules::auto_promotion`), for every
@@ -2733,12 +2734,13 @@ impl Game {
             return;
         }
         for _ in 0..CAP {
-            let options = self.squad[k].promotions(&self.content);
+            // `k` is never the hero (the first unit, refused above).
+            let options = self.squad[k].promotions(&self.content, false);
             if options.is_empty() {
                 break;
             }
             let to = options[self.rng.range(0, options.len() as i32 - 1) as usize];
-            if self.squad[k].promote(&self.content, to, self.keep_xp_on_promotion).is_err() {
+            if self.squad[k].promote(&self.content, to, self.keep_xp_on_promotion, false).is_err() {
                 break;
             }
         }
@@ -4573,6 +4575,48 @@ mod tests {
         assert_eq!(events.last(), Some(&Event::Arrived(0)));
     }
 
+    /// Player's report 1631: «Большой Билли», a named unit that joined from an AI army (his leader
+    /// kind 0 kept), reached level 2 and was neither promoted with «Автоматическая прокачка» on
+    /// nor offered by hand: the rules took him for the hero (`is_hero` read the kind). The first
+    /// unit is the hero, not the kind (experience.md §4, «The player»). The save is the player's
+    /// file, so the test reads it from `RAZDOR_REPORT_SAVE` with its Evolution install in
+    /// `RAZDOR_REPORT_DIR`; unset, it is skipped.
+    #[test]
+    fn report_1631_a_named_unit_from_an_army_is_not_the_hero() {
+        use crate::dt::install::DtInstall;
+        use crate::rules::content::{ExperimentalRules, UnitId};
+        let (Some(save), Some(dir)) = (std::env::var_os("RAZDOR_REPORT_SAVE"), std::env::var_os("RAZDOR_REPORT_DIR")) else { return };
+        let dt = DtInstall::load(std::path::Path::new(&dir)).unwrap();
+        let content = Arc::new(Content::from_dt(&dt));
+        let install = crate::rules::save::Install { dir: std::path::Path::new(&dir), content: content.clone() };
+        let load = || crate::rules::save::load(std::path::Path::new(&save), content.clone(), Some(&install)).unwrap();
+        let g = load();
+        let k = g.squad.iter().position(|u| u.named == 6).expect("Большой Билли is in the army");
+        assert!(k > 0 && g.squad[0].promotions(&g.content, true).is_empty(), "the first unit is the hero");
+        assert_eq!(g.squad[k].def, UnitId(68), "a Мародёр");
+        // The battle's 143 XP: level 2 with 49 XP, as the player's window showed.
+        let at2 = || {
+            let mut g = load();
+            let c = g.content.clone();
+            g.squad[k].gain_xp(&c, 143);
+            g
+        };
+        let mut at2_now = at2();
+        let c = at2_now.content.clone();
+        assert_eq!((at2_now.squad[k].level, at2_now.squad[k].xp), (2, 49));
+        assert_eq!(at2_now.squad[k].promotions(&c, false), vec![UnitId(158)], "one next form, Лиходей");
+        assert!(at2_now.squad[k].promotion_sign(&c, false), "the «+» shows");
+        // By hand (auto off, the save's other switches kept): the option is taken.
+        at2_now.content = Arc::new(c.with_experimental(ExperimentalRules { auto_promotion: false, ..c.experimental }));
+        assert!(at2_now.promote(k, UnitId(158)).is_ok(), "the player can pick the promotion");
+        // Automatic (the save's switch on): taken at once, the hero is not.
+        let mut auto = at2();
+        auto.auto_promote_squad();
+        let at2 = auto;
+        assert_eq!((at2.squad[k].def, at2.squad[k].level), (UnitId(158), 1), "auto takes the open option");
+        assert_eq!(at2.squad[0].def, UnitId(2), "the hero stays");
+    }
+
     /// «Автоматическая прокачка» (`auto_promotion`): a player's unit at level 2 takes an open
     /// option of its tree at once, the hero never; off, the promotion waits for the player.
     #[test]
@@ -4593,7 +4637,7 @@ mod tests {
         g.squad.push(Unit::new(&base, UnitId(1), Slot::new(Row::Front, 3)));
         g.squad[1].gain_xp(&base, 60);
         assert_eq!(g.squad[1].level, 2);
-        assert!(g.squad[1].promotion_ready(&base));
+        assert!(g.squad[1].promotion_ready(&base, false));
         // Off: the option waits for the player.
         g.auto_promote_squad();
         assert_eq!(g.squad[1].def, UnitId(1), "the classic rules wait for the player");
@@ -4629,7 +4673,7 @@ mod tests {
         s.header.heroes[0] = hero(2, 2, 200, &[troop(4, 1, 1)]);
         let g = Game::from_scenario(base.clone(), &s, HeroClass::Knight);
         assert_eq!((g.squad[1].def, g.squad[1].level), (UnitId(4), 2), "off: the option waits for the player");
-        assert!(g.squad[1].promotion_ready(&base));
+        assert!(g.squad[1].promotion_ready(&base, false));
         let on = Arc::new(base.with_experimental(ExperimentalRules { auto_promotion: true, ..Default::default() }));
         let g = Game::from_scenario(on, &s, HeroClass::Knight);
         assert_eq!((g.squad[1].def, g.squad[1].level), (UnitId(5), 1), "on: promoted at once, the level restarts");

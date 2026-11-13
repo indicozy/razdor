@@ -1995,7 +1995,8 @@ mod tests {
             let next = prev.hand_over("next".into(), None);
             let mut fresh = Game::from_scenario(c, &s, HeroClass::Knight);
             fresh.apply_carry_over(&next);
-            let u = fresh.squad.iter().find(|u| !u.is_hero()).unwrap();
+            // The carried unit is the first after the hero (the first unit is the hero, not its kind).
+            let u = &fresh.squad[1];
             assert_eq!((u.def, u.level), expect, "auto promotion {on}");
         }
     }

@@ -427,9 +427,10 @@ impl Unit {
     }
 
     /// The upgrade tree: every `NextUnitN` option of this class, with its required level
-    /// and whether it can be taken now.
-    pub fn upgrade_tree(&self, content: &Content) -> Vec<(UnitId, i32, bool)> {
-        let ready = self.can_promote();
+    /// and whether it can be taken now. `hero` says whether this is the player's first unit
+    /// (the caller knows its squad index; see [`Unit::can_promote`]).
+    pub fn upgrade_tree(&self, content: &Content, hero: bool) -> Vec<(UnitId, i32, bool)> {
+        let ready = self.can_promote(hero);
         content
             .unit(self.def)
             .upgrades
@@ -443,31 +444,29 @@ impl Unit {
     /// The original lets the player promote any unit that has gained a level (level 2 here,
     /// its level 1), whatever `NextUnitNLevel` says; the hero never: experience.md §4, «The
     /// player» («any unit except the hero (the first unit)»; the army screen's 4c3d38 → 4b1a04).
-    fn can_promote(&self) -> bool {
-        self.level >= 2 && !self.is_hero()
+    /// The hero is the player's first unit, so the caller says it (`hero`): not the wage kind.
+    /// A unit that joined from an AI army keeps that army's leader kind ([`WageKind::Leader`],
+    /// as the original's record does), and it is an ordinary unit (the player's report 1631:
+    /// a named unit that joined from an army was taken for the hero and could never be promoted).
+    fn can_promote(&self, hero: bool) -> bool {
+        self.level >= 2 && !hero
     }
 
-    /// The hero (the player's first unit) is the one of [`WageKind::Leader`]: it draws no
-    /// wage and has no promotion, no «+» and no «Не напоминать» switch.
-    pub fn is_hero(&self) -> bool {
-        self.wage_kind == WageKind::Leader
+    /// Classes this unit may be promoted to now (`hero`: see [`Unit::upgrade_tree`]).
+    pub fn promotions(&self, content: &Content, hero: bool) -> Vec<UnitId> {
+        self.upgrade_tree(content, hero).into_iter().filter(|&(_, _, ok)| ok).map(|(id, _, _)| id).collect()
     }
 
-    /// Classes this unit may be promoted to now.
-    pub fn promotions(&self, content: &Content) -> Vec<UnitId> {
-        self.upgrade_tree(content).into_iter().filter(|&(_, _, ok)| ok).map(|(id, _, _)| id).collect()
-    }
-
-    /// Whether an option of its upgrade tree is open now.
-    pub fn promotion_ready(&self, content: &Content) -> bool {
-        self.upgrade_tree(content).iter().any(|&(_, _, ok)| ok)
+    /// Whether an option of its upgrade tree is open now (`hero`: see [`Unit::upgrade_tree`]).
+    pub fn promotion_ready(&self, content: &Content, hero: bool) -> bool {
+        self.upgrade_tree(content, hero).iter().any(|&(_, _, ok)| ok)
     }
 
     /// The green «+» on its card: it can be promoted now, and the player has not switched
     /// the sign off ([`Unit::set_sign_off`]). The promotion itself is not affected: the tree
-    /// still offers it.
-    pub fn promotion_sign(&self, content: &Content) -> bool {
-        self.promotion_ready(content) && !self.sign_off()
+    /// still offers it. The hero has no «+» and no «Не напоминать» switch.
+    pub fn promotion_sign(&self, content: &Content, hero: bool) -> bool {
+        self.promotion_ready(content, hero) && !self.sign_off()
     }
 
     /// The «+» is switched off for this unit (until the player switches it on again).
@@ -486,8 +485,8 @@ impl Unit {
     /// banked into the new class by the gain rule, as the hero keeps what is left over a level.
     /// Its worn items stay worn, whether the new class could put them on or not (the original
     /// never checks), and the stat rebuild after it rescales a wounded unit's HP to the new maximum.
-    pub fn promote(&mut self, content: &Content, to: UnitId, keep_xp: bool) -> Result<(), PromoteError> {
-        if !self.promotions(content).contains(&to) {
+    pub fn promote(&mut self, content: &Content, to: UnitId, keep_xp: bool, hero: bool) -> Result<(), PromoteError> {
+        if !self.promotions(content, hero).contains(&to) {
             return Err(PromoteError::NotAvailable);
         }
         let before = self.max_hp(content);
@@ -572,15 +571,15 @@ mod tests {
     fn promotion_through_the_upgrade_tree() {
         let c = content(vec![militia(), warrior(2, 30, 8)], vec![]);
         let mut u = Unit::new(&c, UnitId(1), slot());
-        assert_eq!(u.upgrade_tree(&c), vec![(UnitId(2), 3, false)]);
-        assert!(u.promotions(&c).is_empty(), "needs a level");
-        assert_eq!(u.promote(&c, UnitId(2), false), Err(PromoteError::NotAvailable));
+        assert_eq!(u.upgrade_tree(&c, false), vec![(UnitId(2), 3, false)]);
+        assert!(u.promotions(&c, false).is_empty(), "needs a level");
+        assert_eq!(u.promote(&c, UnitId(2), false, false), Err(PromoteError::NotAvailable));
         u.gain_xp(&c, 60);
         assert_eq!(u.level, 2);
-        assert_eq!(u.promotions(&c), vec![UnitId(2)], "NextUnitNLevel is not checked for the player");
+        assert_eq!(u.promotions(&c, false), vec![UnitId(2)], "NextUnitNLevel is not checked for the player");
         u.gain_xp(&c, 20);
         u.hp = 30; // of 55
-        assert_eq!(u.promote(&c, UnitId(2), false), Ok(()));
+        assert_eq!(u.promote(&c, UnitId(2), false, false), Ok(()));
         // The guard's maximum is 50 against the militia's 55: 50 × 30 / 55 = 27.27.
         assert_eq!((u.def, u.level, u.xp, u.hp), (UnitId(2), 1, 0, 27), "level 1, XP dropped as the original does, HP rescaled");
         assert!((u.carry.0 - 0.272_727).abs() < 1e-4, "{}", u.carry.0);
@@ -595,9 +594,9 @@ mod tests {
         reset.gain_xp(&c, 20);
         assert_eq!((reset.level, reset.xp), (2, 20));
         let mut kept = reset.clone();
-        assert_eq!(reset.promote(&c, UnitId(2), false), Ok(()));
+        assert_eq!(reset.promote(&c, UnitId(2), false, false), Ok(()));
         assert_eq!((reset.def, reset.level, reset.xp), (UnitId(2), 1, 0), "the default drops the XP");
-        assert_eq!(kept.promote(&c, UnitId(2), true), Ok(()));
+        assert_eq!(kept.promote(&c, UnitId(2), true, false), Ok(()));
         assert_eq!((kept.def, kept.level, kept.xp), (UnitId(2), 1, 20), "the option keeps it");
     }
 
@@ -610,18 +609,25 @@ mod tests {
         let mut hero = Unit::new(&c, UnitId(1), slot());
         hero.wage_kind = WageKind::Leader;
         hero.gain_xp(&c, 1_000);
-        assert!(hero.level >= 3 && hero.is_hero());
-        assert!(!hero.promotion_sign(&c), "the hero shows no «+»");
-        assert!(!hero.promotion_ready(&c), "the hero has no open option");
-        assert!(hero.promotions(&c).is_empty());
-        assert!(hero.upgrade_tree(&c).iter().all(|&(_, _, ok)| !ok), "the tree is shown locked");
-        assert_eq!(hero.clone().promote(&c, UnitId(2), false), Err(PromoteError::NotAvailable));
+        assert!(hero.level >= 3);
+        assert!(!hero.promotion_sign(&c, true), "the hero shows no «+»");
+        assert!(!hero.promotion_ready(&c, true), "the hero has no open option");
+        assert!(hero.promotions(&c, true).is_empty());
+        assert!(hero.upgrade_tree(&c, true).iter().all(|&(_, _, ok)| !ok), "the tree is shown locked");
+        assert_eq!(hero.clone().promote(&c, UnitId(2), false, true), Err(PromoteError::NotAvailable));
 
         let mut ordinary = Unit::new(&c, UnitId(1), slot());
         ordinary.gain_xp(&c, 60);
-        assert!(!ordinary.is_hero());
-        assert!(ordinary.promotion_sign(&c), "an ordinary unit at level 2 shows the sign");
-        assert_eq!(ordinary.promotions(&c), vec![UnitId(2)]);
+        assert!(ordinary.promotion_sign(&c, false), "an ordinary unit at level 2 shows the sign");
+        assert_eq!(ordinary.promotions(&c, false), vec![UnitId(2)]);
+
+        // Report 1631: a named unit that joined from an AI army keeps that army's leader kind (0),
+        // yet is not the hero: the first unit is. Its promotion is offered like any unit's.
+        let mut joined = Unit::new(&c, UnitId(1), slot());
+        joined.wage_kind = WageKind::Leader;
+        joined.gain_xp(&c, 60);
+        assert!(joined.promotion_sign(&c, false), "a leader-kind unit that is not the first unit shows the sign");
+        assert_eq!(joined.promotions(&c, false), vec![UnitId(2)]);
     }
 
     #[test]
@@ -629,15 +635,15 @@ mod tests {
         let c = content(vec![militia(), warrior(2, 30, 8)], vec![]);
         let mut u = Unit::new(&c, UnitId(1), slot());
         u.gain_xp(&c, 60);
-        assert!(u.promotion_sign(&c), "a level 2 unit with an open option shows the sign");
+        assert!(u.promotion_sign(&c, false), "a level 2 unit with an open option shows the sign");
         u.set_sign_off(true);
-        assert!(!u.promotion_sign(&c), "switched off: no sign");
-        assert!(u.promotion_ready(&c) && u.sign_off(), "the tree still offers the promotion");
-        assert_eq!(u.promotions(&c), vec![UnitId(2)], "promotion stays possible while hidden");
+        assert!(!u.promotion_sign(&c, false), "switched off: no sign");
+        assert!(u.promotion_ready(&c, false) && u.sign_off(), "the tree still offers the promotion");
+        assert_eq!(u.promotions(&c, false), vec![UnitId(2)], "promotion stays possible while hidden");
         u.gain_xp(&c, 0);
-        assert!(!u.promotion_sign(&c), "a gain of nothing keeps it off");
+        assert!(!u.promotion_sign(&c, false), "a gain of nothing keeps it off");
         u.set_sign_off(false);
-        assert!(u.promotion_sign(&c), "switched back on");
+        assert!(u.promotion_sign(&c, false), "switched back on");
     }
 
     #[test]
@@ -650,10 +656,10 @@ mod tests {
         u.gain_xp(&c, 1_000);
         assert!(u.level > 2, "the unit gains a level");
         assert!(u.sign_off(), "the switch survives the level-up");
-        assert!(!u.promotion_sign(&c), "no sign at the new level either");
-        assert!(u.promotion_ready(&c), "the promotion is still offered");
+        assert!(!u.promotion_sign(&c, false), "no sign at the new level either");
+        assert!(u.promotion_ready(&c, false), "the promotion is still offered");
         u.gain_xp(&c, 1_000);
-        assert!(!u.promotion_sign(&c), "and at the level after");
+        assert!(!u.promotion_sign(&c, false), "and at the level after");
     }
 
     #[test]
@@ -663,10 +669,10 @@ mod tests {
         let mut u = Unit::new(&c, UnitId(1), slot());
         u.gain_xp(&c, 60);
         u.set_sign_off(true);
-        assert_eq!(u.promote(&c, UnitId(2), false), Ok(()));
+        assert_eq!(u.promote(&c, UnitId(2), false, false), Ok(()));
         assert_eq!(u.def, UnitId(2));
         assert!(u.sign_off(), "the promoted unit keeps the switch");
-        assert!(!u.promotion_sign(&c), "and its «+» stays hidden");
+        assert!(!u.promotion_sign(&c, false), "and its «+» stays hidden");
         u.set_sign_off(false);
         assert!(!u.sign_off());
     }
@@ -724,7 +730,7 @@ mod tests {
         let mut u = Unit::new(&c, UnitId(1), slot());
         u.items[0] = Some(ItemId(1));
         u.level = 2;
-        u.promote(&c, UnitId(2), false).unwrap();
+        u.promote(&c, UnitId(2), false, false).unwrap();
         assert!(items::slot_for(&c, &u, ItemId(1)).is_err());
         assert_eq!(u.items[0], Some(ItemId(1)), "the original never takes an item off");
     }

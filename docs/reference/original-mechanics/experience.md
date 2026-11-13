@@ -393,7 +393,7 @@ and `ui/items_view.rs`) as read on 2026-10-01, rows brought in line on 2026-10-0
 | AI XP | AI-vs-AI only, ×AI% div 100, when end strength > 0, survivors only (the dead draw no promotion roll); the player's units left in a building gain and roll with its garrison; "beaten" and the loot pool by end strength (`ai_battle`) | the same (the player's units are in the garrison record) | Matches |
 | Level-up HP | proportional rescale with the fractional carry after the gain (`Unit::gain_xp`, `troop_gain_xp`) | proportional rescale with a fractional carry at the next stat rebuild | Matches |
 | Percent stats | gap to 100 closes by `d`% per level in 32-bit floats, max 99 | the same | none |
-| Player promotion | any unit with a level, not the hero; level 1, XP 0; items stay worn; HP rescaled | the same rules; items stay worn; HP rescaled | Matches |
+| Player promotion | any unit with a level, not the first unit of the army (squad index 0, not the wage kind: a named unit that joined from an AI army keeps kind 0 and is an ordinary unit, report 1631); level 1, XP 0; items stay worn; HP rescaled | the same rules; items stay worn; HP rescaled | Matches |
 | AI promotion | Militia/Infantry fixed picks, others random filled slot; `NextUnitNLevel ≤ L`, from the game LCG (`rules/rng.rs`); worn items to the loot pool | the same with the game LCG; worn items to the loot pool | none |
 | Upgrade slots | normalised at load (`dt::data::normalise_upgrade_slots`) | normalised (lone → 2, pair → 1+3) | Matches |
 | Event XP | the hero, as it is; a new level shows on the map | the same | none |
