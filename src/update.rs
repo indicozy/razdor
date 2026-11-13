@@ -959,7 +959,7 @@ fn install_now(r: &Release) -> Result<bool, String> {
 /// try reuses it) and is removed once the installer reports success (`forget_installed`).
 #[cfg(target_os = "android")]
 fn install_now(r: &Release) -> Result<bool, String> {
-    let asset = asset_name().ok_or("no release for this system")?;
+    asset_name().ok_or("no release for this system")?;
     if r.member.is_some() {
         // The phones' releases are plain files (the APK); an archive is not unpacked here.
         return Err(format!("{} is an archive: the phone takes the APK itself", r.asset));

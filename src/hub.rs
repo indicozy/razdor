@@ -2007,8 +2007,8 @@ mod tests {
             format!(r#","wrapped":"zip","member":"../a.dtm","archive_size":1,"archive_sha256":"{sum}""#),
             format!(r#","wrapped":"zip","archive_size":1,"archive_sha256":"{sum}""#),
             format!(r#","wrapped":"zip","member":"a.dtm","archive_size":0,"archive_sha256":"{sum}""#),
-            format!(r#","wrapped":"zip","member":"a.dtm","archive_size":1,"archive_sha256":"xyz""#),
-            format!(r#","wrapped":"zip","member":"a.dtm","archive_size":1"#),
+            r#","wrapped":"zip","member":"a.dtm","archive_size":1,"archive_sha256":"xyz""#.to_string(),
+            r#","wrapped":"zip","member":"a.dtm","archive_size":1"#.to_string(),
             format!(r#","wrapped":"zip","member":"a.dtm","archive_size":1,"archive_sha256":"{sum}","archive":true"#),
             format!(r#","member":"a.dtm","archive_size":1,"archive_sha256":"{sum}""#),
         ];
@@ -2070,7 +2070,8 @@ mod tests {
         let file_sum = crate::update::sha256_hex(b"the map bytes");
         let _ = std::fs::remove_dir_all(&probe);
         let _ = std::fs::remove_dir_all(&probe_local);
-        let cases: [(&str, Box<dyn Fn(String) -> String>, &str); 3] = [
+        type Tamper = Box<dyn Fn(String) -> String>;
+        let cases: [(&str, Tamper, &str); 3] = [
             ("wrap-zipsum", Box::new(move |t: String| t.replace(&zip_sum, &"0".repeat(64))), "does not match the catalog"),
             ("wrap-member", Box::new(|t: String| t.replace("00313a966d837cbb.dtm\"", "other.dtm\"")), "has no"),
             ("wrap-filesum", Box::new(move |t: String| t.replace(&file_sum, &"0".repeat(64))), "in the archive does not match"),

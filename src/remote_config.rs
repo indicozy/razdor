@@ -344,8 +344,13 @@ mod tests {
         assert_eq!(c, Config::builtin(), "the shipped config matches the built-in one until it is changed on purpose");
     }
 
+    /// A fake network's answer: the bytes, or why not.
+    type Reply = Result<Vec<u8>, String>;
+    /// The addresses a fake network was asked, in order.
+    type Asked = std::rc::Rc<RefCell<Vec<String>>>;
+
     /// A fake network: each address gives its reply (or why not), and the addresses asked are kept.
-    fn net(replies: Vec<(&'static str, Result<Vec<u8>, String>)>) -> (impl FnMut(&str) -> Result<Vec<u8>, String>, std::rc::Rc<RefCell<Vec<String>>>) {
+    fn net(replies: Vec<(&'static str, Reply)>) -> (impl FnMut(&str) -> Reply, Asked) {
         let asked = std::rc::Rc::new(RefCell::new(Vec::new()));
         let seen = asked.clone();
         let fetch = move |url: &str| {
