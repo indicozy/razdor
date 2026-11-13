@@ -839,6 +839,22 @@ against the commit before the feature). The mill sails do not turn: the depth cu
   is retried after a wait of 5 s doubling to 60 s (`Jukebox::retry_later`, Razdor's own);
   a malformed file or one that cannot be played is dropped for the run (`Jukebox::failed`).
 - `RAZDOR_NO_AUDIO=1` silences; `RAZDOR_AUDIO_LOG=1` logs every sound.
+- The output (`src/ui/audio/output.rs`): macroquad's everywhere but Windows. On Windows macroquad's
+  audio context is private and quad-snd opens the default device once, when its context is made,
+  so Razdor opens its own quad-snd context there (`output::open`, the WASAPI backend of the
+  `quad-snd` crate). Sounds belong to the context they were loaded in: a `Sound` is deleted from
+  its own output only, so a sound that outlived its output does nothing.
+- Following the default output (Windows; `src/ui/audio/follow.rs`): a watcher thread reads the
+  default render endpoint's id (MMDevice `GetDefaultAudioEndpoint`, `GetId`) every 2 s
+  (`output::current`). `Audio::frame` calls `follow_output` first: `Follow::wants` says yes once
+  for each changed id (never for the same id again). Then the backend is retired (its sounds
+  stopped and deleted, `Backend::retire`), the output reopened (`output::open`) and the sounds
+  reloaded (`Backend::load_dir`). The music starts again from its beginning; the settings stay.
+  A failed move waits 2 s, then 4 s, and gives up after 3 tries for that id (a new default
+  restarts the count). Known limits: quad-snd has no way to stop its old output thread, so each
+  switch leaves one idle thread that plays nothing; the watcher cannot see a stream error inside
+  quad-snd, so a stream that dies without a default change is not re-opened. Not tested on a
+  Windows machine with two outputs (the logic is unit-tested in `follow::tests`).
 
 ## Fonts
 

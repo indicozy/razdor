@@ -11,13 +11,18 @@
 //! - Silent without an install, with `RAZDOR_NO_AUDIO=1`, when built without the `audio`
 //!   feature, or when no sound device opens. `RAZDOR_AUDIO_LOG=1` prints every sound played.
 //! - Volumes and mutes ([`Settings`]) are kept in `audio.json` in the save folder.
+//! - On Windows the output follows the system's default output device: when it changes, the
+//!   sounds move to the new one ([`output`], [`follow`]), at once and without a restart.
+
+mod follow;
+mod output;
 
 use razdor::local;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use macroquad::audio::{load_sound_from_bytes, play_sound, set_sound_volume, stop_sound, PlaySoundParams, Sound};
+use output::{play_sound, set_sound_volume, stop_sound, PlaySoundParams, Sound};
 use serde::{Deserialize, Serialize};
 
 use razdor::dt::data::ArtefactType;
@@ -663,15 +668,7 @@ const OUTPUT_RATE: u32 = 44100;
 /// Loads a sound from WAV bytes. On native targets macroquad's loader never waits, so one
 /// poll finishes it; a decoder panic is caught and gives `None`.
 fn load_now(wav: &[u8]) -> Option<Sound> {
-    use std::future::Future;
-    use std::task::{Context, Poll, Waker};
-    let run = std::panic::AssertUnwindSafe(|| {
-        let mut f = std::pin::pin!(load_sound_from_bytes(wav));
-        match f.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
-            Poll::Ready(r) => r.ok(),
-            Poll::Pending => None,
-        }
-    });
+    let run = std::panic::AssertUnwindSafe(|| output::load(wav));
     razdor::diag::quiet(|| std::panic::catch_unwind(run)).ok().flatten()
 }
 
@@ -770,6 +767,8 @@ struct Backend {
 
 pub struct Audio {
     backend: Option<Backend>,
+    /// The install's folder and the output's state, for following the default output (Windows).
+    follow: Option<follow::DeviceFollow>,
     pub settings: Settings,
     saved: Settings,
     log: bool,
@@ -790,7 +789,7 @@ impl Audio {
     /// No sound at all.
     pub fn silent() -> Audio {
         let settings = Settings::load();
-        Audio { backend: None, settings: settings.clone(), saved: settings, log: env_flag("RAZDOR_AUDIO_LOG") }
+        Audio { backend: None, follow: None, settings: settings.clone(), saved: settings, log: env_flag("RAZDOR_AUDIO_LOG") }
     }
 
     /// The audio of `install` (if any): its effects loaded and its music ready.
@@ -809,15 +808,17 @@ impl Audio {
         if !needs_load(loaded, install.map(|d| d.dir.as_path())) {
             return;
         }
-        if let Some(old) = self.backend.as_mut() {
-            old.stop_music();
+        // The old sounds are deleted from their output before it is replaced (`retire`).
+        if let Some(old) = self.backend.take() {
+            old.retire();
         }
         self.backend = self.load_for(install);
     }
 
     /// The sounds of `install`, read and loaded; `None` (the reason logged) with no install, no
-    /// sound device or no sound table.
-    fn load_for(&self, install: Option<&DtInstall>) -> Option<Backend> {
+    /// sound device or no sound table. The output is opened first (on Windows, the default one).
+    fn load_for(&mut self, install: Option<&DtInstall>) -> Option<Backend> {
+        self.follow = None;
         let why = match install {
             _ if !cfg!(feature = "audio") => "built without the audio feature",
             _ if env_flag("RAZDOR_NO_AUDIO") => "RAZDOR_NO_AUDIO is set",
@@ -825,17 +826,17 @@ impl Audio {
             // The original's «Не загружать музыку и звуки» (`OptValue4`) is removed (the owner's
             // decision, 2026-11-10): sound always loads; volume 0 silences it.
             Some(_) if !device_ok() => "no sound device",
-            Some(dt) => match (std::time::Instant::now(), Backend::load(&dt.dir)) {
-                (t0, Ok(b)) => {
-                    let (fx, tracks, ms) = (b.sfx.len(), b.table.backgrounds.len(), t0.elapsed().as_millis());
-                    razdor::diag!("audio: {fx} effects loaded in {ms} ms from {}, {tracks} music tracks, raw music at {} Hz", dt.dir.display(), b.raw_rate);
+            Some(dt) => {
+                let opened = output::open();
+                self.follow = Some(follow::DeviceFollow::new(dt.dir.clone(), output::opened_on()));
+                if !opened {
+                    "no sound device"
+                } else if let Some(b) = Backend::load_dir(&dt.dir) {
                     return Some(b);
-                }
-                (_, Err(e)) => {
-                    razdor::diag!("{}: {e}; playing without sound", sound::SOUNDS_INI);
+                } else {
                     "no sound table"
                 }
-            },
+            }
         };
         if self.log || why == "no sound device" {
             razdor::diag!("audio: silent ({why})");
@@ -867,8 +868,32 @@ impl Audio {
         }
     }
 
+    /// The system's default output changed (Windows): the sounds move to the new output, once for
+    /// each change (`follow`). The music starts again from its beginning; the settings stay.
+    fn follow_output(&mut self) {
+        let now = std::time::Instant::now();
+        let Some(f) = self.follow.as_ref() else { return };
+        let current = output::current();
+        if !f.state.wants(now, current.as_deref()) {
+            return;
+        }
+        let Some(id) = current else { return };
+        let dir = f.dir.clone();
+        if let Some(old) = self.backend.take() {
+            old.retire();
+        }
+        let opened = output::open();
+        self.backend = if opened { Backend::load_dir(&dir) } else { None };
+        let ok = self.backend.is_some();
+        if let Some(f) = self.follow.as_mut() {
+            f.state.reopened(now, &id, ok);
+        }
+        razdor::diag!("audio: the default output is now {id}: {}", if ok { "the sounds moved to it" } else { "silent; tried again later" });
+    }
+
     /// Plays this frame's cues and keeps the music of `mood` going.
     pub fn frame(&mut self, mood: Mood) {
+        self.follow_output();
         let held = crate::ui::input::is_mouse_button_down(macroquad::input::MouseButton::Left);
         if let Some(c) = ON_RELEASE.with(|r| released_cue(&mut r.borrow_mut(), held)) {
             cue(c);
@@ -908,6 +933,32 @@ impl Audio {
 }
 
 impl Backend {
+    /// The sounds of `dir` read and loaded into the open output, with the time it took; `None`
+    /// (the reason logged) when the sound table cannot be read.
+    fn load_dir(dir: &Path) -> Option<Backend> {
+        let t0 = std::time::Instant::now();
+        match Backend::load(dir) {
+            Ok(b) => {
+                let (fx, tracks, ms) = (b.sfx.len(), b.table.backgrounds.len(), t0.elapsed().as_millis());
+                razdor::diag!("audio: {fx} effects loaded in {ms} ms from {}, {tracks} music tracks, raw music at {} Hz", dir.display(), b.raw_rate);
+                Some(b)
+            }
+            Err(e) => {
+                razdor::diag!("{}: {e}; playing without sound", sound::SOUNDS_INI);
+                None
+            }
+        }
+    }
+
+    /// Stops the sounds and drops the backend: its sounds are deleted from their output, so that
+    /// output can be replaced.
+    fn retire(mut self) {
+        self.stop_music();
+        for s in self.sfx.values() {
+            stop_sound(s);
+        }
+    }
+
     fn load(dir: &Path) -> Result<Backend, razdor::dt::DtError> {
         let table = sound::read_table(dir)?;
         let raw_rate = sound::raw_rate_from_env();

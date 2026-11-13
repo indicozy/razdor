@@ -44,6 +44,7 @@ For complete silence, you can use the variable `RAZDOR_NO_AUDIO=1`. If you need 
 
 ## System Features
 
+* **Windows:** Razdor follows the default output device. If you change it in Settings → Sound, the sound switches to the new device at once, without a restart; the music starts again.
 * **Linux:** sound works via ALSA.
 * **macOS:** uses Core Audio.
 * **Build:** if you build the engine using the command `cargo build --no-default-features --features gamepad`, sound will be disabled.

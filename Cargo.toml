@@ -43,6 +43,13 @@ sevenz-rust2 = { version = "0.20.2", default-features = false, features = ["comp
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
 
+# Windows: Razdor's own audio output (`ui::audio::output`), so the sounds can follow the system's
+# default output device. quad-snd is macroquad's backend (the same crate and version); winapi is
+# quad-snd's too, with the MMDevice calls that read the default output.
+[target.'cfg(windows)'.dependencies]
+quad-snd = "0.2.8"
+winapi = { version = "0.3.9", features = ["combaseapi", "mmdeviceapi", "objbase", "unknwnbase"] }
+
 [features]
 default = ["audio", "gamepad", "depth-model"]
 # The built-in depth model (`depth`): the 2.5D cards of sprites that have no shipped cut data

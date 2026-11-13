@@ -1448,6 +1448,7 @@ dependencies = [
  "libc",
  "macroquad",
  "png",
+ "quad-snd",
  "rfd",
  "rustybuzz",
  "serde",
@@ -1456,6 +1457,7 @@ dependencies = [
  "sha2",
  "sys-locale",
  "tract-onnx",
+ "winapi",
  "zip",
 ]
 
