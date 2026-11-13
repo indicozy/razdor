@@ -319,8 +319,8 @@ The title menu held upright (`main_menu::portrait_menu`, pure, with unit tests):
 landscape size in one column, its middle at the middle of the area between the top safe inset and the foot lines
 (the owner's OnePlus, 1080×2376 at 2.75 px per dp: the column's top moved from ~1001 px to ~561 px, its middle
 from ~1570 to ~1110); the logo sits 24 px above the
-column, never above the safe inset (the column moves down if it must); the links (custom battle, maps and mods, Discord, language) are chips
-in one row at the bottom, touch targets of 48 dp; the version and copyright lines and an installed update's
+column, never above the safe inset (the column moves down if it must); the links (custom battle, maps and mods, Discord, Mods) are chips
+in one row at the bottom, touch targets of 48 dp; the version line and an installed update's
 notice sit just above the chips; the not-found block (no install) sits above the logo. Sideways on a phone with
 an install (`main_menu::landscape_menu`, pure, with unit tests): the five ovals keep the original's column
 (`landscape_buttons`, unchanged size), the logo and the foot lines stay where they were, and the four links are
@@ -329,7 +329,7 @@ tiles stacked down the right edge, half the room right of the logo and the colum
 (`label_lines`; the icon shrinks to 22 dp when a label takes two lines). The tile layout is drawn only by `main_menu::frame` (`SIDE_TILES`), so the
 other screens' backdrops keep the corner links. Landscape without an install and the desktop keep the original
 column and the corner links (`corner_links`).
-With a mod installed the title shows the mod played (the owner's request, 2026-11-02): a «Мод: <title>» link between «Карты и моды» and Discord (desktop), or a full-width tile above the four chips (upright, which lifts the foot lines and the column by its height and gap, `portrait_menu`'s `mod_row`). A click opens the same «Мод» list as the new-game window (`new_game::mod_choice`, `request_mod`, key `razdor:menu-mod`); the app plays the pick (`take_mod_request` after `main_menu::frame`). Without a mod nothing changes.
+The Mods link (2026-11-13: it replaced the language link, which is in Settings only) shows the mod played («Мод: <title>», the owner's request of 2026-11-02) or «Моды» with no mod installed. On the desktop it is the right corner link; on a phone it is the fourth chip (sideways, the last of the stack). A click opens the same «Мод» list as the new-game window (`new_game::mod_choice`, `request_mod`, key `razdor:menu-mod`); the app plays the pick (`take_mod_request` after `main_menu::frame`). With no mod installed its tap opens «Карты и моды» on the Mods tab (`Pick::HubMods`, `hub_view::HubView::on_mods`). The copyright line is no longer drawn (2026-11-13).
 Title windows held upright (the owner's request, 1080×2376: the scenario list and the new-hero window, the load
 window, the settings window and its «Ещё…» page, the keys window over it, the authors window and the custom battle
 setup): `window_layout::portrait_title` (pure, with unit tests) gives the window's own scale and rectangle: the

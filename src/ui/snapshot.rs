@@ -15,7 +15,7 @@
 //! (army screen, market); `RAZDOR_SCENE_QUIET=1` drops
 //! the scenario's messages every frame, to see the screen under them; `RAZDOR_MOUSE=x,y`
 //! puts the pointer there (`RAZDOR_MOUSE_RIGHT=1` also holds the right button there: the map's tooltips); `RAZDOR_SCENE_SPELLS=<id>,…` puts those spells on every unit; `RAZDOR_SCENE_TARGET=<id>` starts the targeting of that enemy spell on the map; `RAZDOR_SCENE_MANA=<n>` sets the hero's mana in the `spells` scene; `RAZDOR_SCENE_PREVIEW=1` shows the first spell's card at the pointer in the `learnt` scene; `RAZDOR_SCENE_POTION=1` gives every unit of the army a
-//! drunk potion. `RAZDOR_SCENE_LANGUAGE=1` opens the language list (`title`, `options:<group>`, `settings:<map>:<group>`). `replay:<step>` with `RAZDOR_REPLAY=<actions.jsonl>`: the diff
+//! drunk potion. `RAZDOR_SCENE_LANGUAGE=1` opens the language list (`options:<group>`, `settings:<map>:<group>`). `replay:<step>` with `RAZDOR_REPLAY=<actions.jsonl>`: the diff
 //! `RAZDOR_SCENE_EXPERIMENTAL=bonuses,items,potions,cells,free,auto,undying,fast,bless,poison,spells,merchant,rear,store,counter,corpse` enables selected playthrough rules;
 //! `RAZDOR_SCENE_RULES=1` opens their menu over `scenarios`. `RAZDOR_SCENE_CARD=1` opens the picked map's card
 //! in the `scenarios:<map>` scene on a phone held upright (its list view otherwise). `RAZDOR_SCENE_BONUS_ITEMS=1`
@@ -204,7 +204,7 @@ pub fn mod_busy() -> bool {
     std::env::var("RAZDOR_SCENE_MOD_BUSY").is_ok_and(|v| v == "1")
 }
 
-/// `RAZDOR_SCENE_LANGUAGE=1`: the first language button drawn (the main menu's, the advanced
+/// `RAZDOR_SCENE_LANGUAGE=1`: the first language button drawn (the advanced
 /// settings') opens its list, once.
 pub fn open_language_list() -> bool {
     if LANGUAGE_OPENED.with(|o| o.get()) || !std::env::var("RAZDOR_SCENE_LANGUAGE").is_ok_and(|v| v == "1") {

@@ -65,7 +65,7 @@ When the phone is held vertically, windows span the width of the screen, and tex
 * **Diary** — a window of its own with the **"Quests"**, **"Completed"**, **"Rumours"** and **"Messages"** and **"Chronicle"** tabs, the list of entries and the picked entry's text. The hero's stats and backpack are in the army window, the money on the bottom bar.
 * **Market** — Item description at the top, followed by section icons and a list of goods below.
 * **Save** — Three buttons in a single row at the bottom.
-* **Main Menu** — If a mod is installed, a wide bar saying **"Mod: <name>"** is displayed above the four tiles; tapping it allows you to select a different mod.
+* **Main Menu** — the **"Mods"** tile in the bottom row: with a mod installed it says **"Mod: <name>"**, and tapping it allows you to select a different mod. Without mods it opens "Maps and Mods" on its "Mods" tab.
 * **Spellbook** — A **"Close"** button and an enlarged filter button are located at the bottom.
 * **City** — Section buttons remain in place when switching between them.
 * **Events and Dialogues** — The image is at the top, and the text occupies the full width of the screen.
@@ -74,7 +74,7 @@ When the phone is held horizontally, the windows are the same as on a PC (the jo
 
 ## Landscape Screen
 
-On the main menu lying sideways, the five buttons stay on the left, as before, and the four links ("Custom battle", "Maps and mods", Discord and the language) are big tiles stacked down the right edge. If a mod is installed, its "Mod: <name>" tile comes first.
+On the main menu lying sideways, the five buttons stay on the left, as before, and the four links ("Custom battle", "Maps and mods", Discord and "Mods") are big tiles stacked down the right edge. With a mod installed, the "Mods" tile says "Mod: <name>".
 
 The map's bottom bar has a size setting: **"Bottom bar size"** on the **"Screen"** tab of the settings window (held sideways only), with the values **"Normal"**, **"Medium"** and **"Large"**. The default is **"Large"**. With the large bar, the buttons are bigger and easier to press, the time slider is easier to press too, and the date on the bar is shown in full.
 

@@ -7,10 +7,9 @@ sidebar:
 
 ## Language
 
-You can select a language in three ways:
-1. Click on the language name in the corner of the main menu.
-2. Click the "Language" button on the "Screen" tab of the settings.
-3. Use the **F2** key on any screen to quickly cycle to the next language in the list.
+You can select a language in two ways:
+1. Click the "Language" button on the "Screen" tab of the settings.
+2. Use the **F2** key on any screen to quickly cycle to the next language in the list.
 
 The following are available in the list:
 * **Russian** (the default game language).

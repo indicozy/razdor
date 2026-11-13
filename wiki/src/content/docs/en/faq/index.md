@@ -32,7 +32,7 @@ The program is not signed by a developer. Run `xattr -d com.apple.quarantine raz
 
 ## How do I change the language or the font?
 
-The language is changed by the language name in the corner of the main menu, by the "Language" button on the "Screen" tab, or with the F2 key. The font is chosen in the "Sound, graphics and gameplay settings" window. See [Language and fonts](/razdor/wiki/en/start/language-fonts/).
+The language is changed by the "Language" button on the "Screen" tab of the settings window, or with the F2 key. The font is chosen in the "Sound, graphics and gameplay settings" window. See [Language and fonts](/razdor/wiki/en/start/language-fonts/).
 
 ## How do I report a bug?
 

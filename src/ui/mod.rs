@@ -1620,6 +1620,7 @@ impl App {
                     Some(Screen::CustomSetup)
                 }
                 Some(main_menu::Pick::Hub) => Some(Screen::Hub(Box::default())),
+                Some(main_menu::Pick::HubMods) => Some(Screen::Hub(Box::new(hub_view::HubView::on_mods()))),
                 Some(main_menu::Pick::Exit) => {
                     self.quit = true;
                     None

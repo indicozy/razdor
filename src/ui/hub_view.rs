@@ -27,6 +27,9 @@ use super::widgets::*;
 
 const GREEN_TEXT: Color = Color::new(0.55, 0.88, 0.45, 1.0);
 
+/// The Mods tab (the fourth of the tabs: all, maps, campaigns, mods).
+const MODS_TAB: usize = 3;
+
 /// The search field's key (`widgets::text_field`).
 const SEARCH_KEY: &str = "hub-search";
 
@@ -169,6 +172,11 @@ impl HubView {
         };
         v.reload();
         v
+    }
+
+    /// The window on its Mods tab: the main menu's Mods tile or link, with no mod installed.
+    pub fn on_mods() -> HubView {
+        HubView { tab: MODS_TAB, ..HubView::new() }
     }
 
     /// A snapshot's setup (`ui::snapshot`): the tab and the picked entry.
@@ -324,7 +332,7 @@ pub fn keep_pick(picked: Option<&str>, c: &Catalog) -> Option<String> {
 
 /// The tab's entries that match the search, best rated first (`hub::by_rating`).
 fn shown<'a>(c: &'a Catalog, tab: usize, query: &str) -> Vec<&'a Entry> {
-    let want = [None, Some(Kind::Map), Some(Kind::Campaign), Some(Kind::Mod)][tab.min(3)];
+    let want = [None, Some(Kind::Map), Some(Kind::Campaign), Some(Kind::Mod)][tab.min(MODS_TAB)];
     let mut list: Vec<&Entry> = c.entries.iter().filter(|e| want.is_none_or(|k| e.kind == k)).filter(|e| matches(c, e, query)).collect();
     list.sort_by(|a, b| hub::by_rating(a, b));
     list

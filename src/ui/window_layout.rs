@@ -370,7 +370,7 @@ pub fn scaled<R>(st: Stack, f: impl FnOnce() -> R) -> R {
 /// on each side).
 const TITLE_MARGIN: f32 = 8.0;
 /// The title windows' bottom sits this many px (at the interface scale) above the footer's
-/// baseline, so the version and copyright lines stay clear of it.
+/// baseline, so the version line stays clear of it.
 const TITLE_FOOT_GAP: f32 = 16.0;
 
 /// The window scale of a title window of `video` size on a phone held sideways (a phone choice, not in
