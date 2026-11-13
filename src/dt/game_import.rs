@@ -46,6 +46,8 @@ pub enum Error {
     NoSpace { needed: u64, free: u64 },
     /// The game folder's download failed (`gdrive`): the reason.
     Download(String),
+    /// Every address of the game failed (`gdrive::Failure::NoAddress`); the reasons are in the log.
+    NoAddress,
     /// The game folder's download was cancelled (its files kept for a retry).
     Cancelled,
 }
@@ -63,6 +65,7 @@ impl std::fmt::Display for Error {
             Error::Io(why) => write!(f, "{why}"),
             Error::NoSpace { needed, free } => write!(f, "{needed} bytes are needed and {free} are free"),
             Error::Download(why) => write!(f, "the download failed: {why}"),
+            Error::NoAddress => f.write_str("the download failed from every address"),
             Error::Cancelled => f.write_str("the download was cancelled"),
         }
     }

@@ -74,6 +74,7 @@ pub fn stage_offer() {
         page: "https://github.com/indicozy/razdor/releases".into(),
         program_url: String::new(),
         asset: String::new(),
+        member: None,
         sums_url: String::new(),
         notes: vec![
             Note::Release(update::Version(9, 9, 9)),

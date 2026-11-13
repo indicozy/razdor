@@ -17,4 +17,5 @@ pub mod update;
 pub mod depth;
 pub mod dt;
 pub mod gdrive;
+pub mod mirror;
 pub mod editor;

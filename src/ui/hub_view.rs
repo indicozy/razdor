@@ -278,7 +278,7 @@ impl HubView {
             }
             Done::Installed(Err(e)) | Done::Removed(Err(e)) => {
                 refresh(self);
-                self.note = Some((e, true));
+                self.note = Some((download_text(e), true));
             }
         }
     }
@@ -292,6 +292,16 @@ impl HubView {
 impl Default for HubView {
     fn default() -> Self {
         HubView::new()
+    }
+}
+
+/// A hub download's failure as the player reads it: a stall gets the game window's own sentence
+/// (`ui::game_import`, «Загрузка остановилась…», the same catalog text); any other reason is shown as it is.
+fn download_text(why: String) -> String {
+    if why == razdor::update::STALLED {
+        trf!("The download stopped: no data for {seconds} seconds. Check the internet or try a VPN, or install the game from the archive by hand.", seconds = razdor::update::STALL_SECONDS)
+    } else {
+        why
     }
 }
 
@@ -1368,6 +1378,13 @@ mod tests {
         assert!(!v.offline, "a fetch that works clears it");
     }
 
+    #[test]
+    fn a_stalled_hub_download_gets_the_sentence_of_the_game_window() {
+        let text = super::download_text(razdor::update::STALLED.into());
+        assert!(text.contains("no data for 30 seconds"), "{text}");
+        assert_eq!(super::download_text("curl: (6) could not resolve".into()), "curl: (6) could not resolve");
+    }
+
     /// A failed fetch with no list on the screen shows the error in the list, as before the cache.
     #[test]
     fn a_failed_fetch_with_no_list_shows_the_error() {
@@ -1388,7 +1405,10 @@ mod tests {
 
         let mut v = window(Some(mine.clone()), None, None);
         v.show_cache(&mine);
-        assert_eq!(v.catalog, Some(Ok(c.clone())));
+        // The cache of an address reads back with its paths made absolute (`hub::rebase`).
+        let mut absolute = c.clone();
+        hub::rebase(&mut absolute, URL);
+        assert_eq!(v.catalog, Some(Ok(absolute)));
         assert_eq!(v.picked.as_deref(), Some(first.as_str()), "the first entry is picked");
 
         let other = Hub { source: Source::Url("https://example.org/other".into()), local: mine.local.clone() };

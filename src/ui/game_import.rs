@@ -412,11 +412,13 @@ fn snapshot_checking() -> bool {
 /// The game the hub's catalog offers, as an archive to download: its address resolved against the
 /// hub's (an `https://` one only; a folder or the mock hub offers none).
 fn game_archive(catalog: &hub::Catalog) -> Option<gdrive::Archive> {
-    let source = Source::from_env();
-    let Source::Url(base) = &source else { return None };
+    // A folder or the mock hub offers no download; the catalog's addresses are absolute (`hub::rebase`).
+    if matches!(Source::from_env(), Source::Dir(_) | Source::Mock) {
+        return None;
+    }
     let game = catalog.game.as_ref()?;
-    let url = hub::resolve(base, &game.url);
-    url.starts_with("https://").then(|| gdrive::Archive::at_url(url, game.size, game.sha256.clone(), game.name.clone()))
+    let links: Vec<String> = std::iter::once(game.url.clone()).chain(game.mirrors.iter().cloned()).collect();
+    links.iter().all(|l| l.starts_with("https://")).then(|| gdrive::Archive::at_urls(links, game.size, game.sha256.clone(), game.name.clone()))
 }
 
 /// Starts the game the catalog offered, when the target is there and nothing else runs.
@@ -474,6 +476,7 @@ fn repair_from_archive(base: &Path, dest: &Path, progress: &gdrive::Progress, do
     gdrive::download_game(&gdrive::Http, &gdrive::GAME, dest, progress).map_err(|f| match f {
         gdrive::Failure::Cancelled => Error::Cancelled,
         gdrive::Failure::Failed(why) => Error::Download(why),
+        gdrive::Failure::NoAddress(_) => Error::NoAddress,
     })?;
     progress.set_downloaded();
     let result = razdor::dt::integrity::repair(base, &manifest, dest, &missing).map(Done::Patched).map_err(Error::Io);
@@ -488,6 +491,7 @@ fn download_and_import(archive: &gdrive::Archive, dest: &Path, target: &Path, pr
     gdrive::download_game(&gdrive::Http, archive, dest, progress).map_err(|f| match f {
         gdrive::Failure::Cancelled => Error::Cancelled,
         gdrive::Failure::Failed(why) => Error::Download(why),
+        gdrive::Failure::NoAddress(_) => Error::NoAddress,
     })?;
     progress.set_downloaded();
     let result = import::examine(dest, &archive.name).and_then(|found| {
@@ -563,6 +567,7 @@ fn error_text(e: &Error) -> String {
             trf!("The download stopped: no data for {seconds} seconds. Check the internet or try a VPN, or install the game from the archive by hand.", seconds = razdor::update::STALL_SECONDS)
         }
         Error::Download(why) => trf!("Download failed: {why}.", why = why.clone()),
+        Error::NoAddress => tr("The game could not be downloaded from any address. Check the internet or try a VPN, or install the game from an archive by hand.").to_string(),
         Error::Cancelled => tr("The download was cancelled.").to_string(),
     }
 }
@@ -951,6 +956,12 @@ mod tests {
         assert!(stalled.contains("no data for 30 seconds"), "{stalled}");
         let other = super::error_text(&razdor::dt::game_import::Error::Download("curl: timeout".into()));
         assert_eq!(other, "Download failed: curl: timeout.");
+    }
+
+    #[test]
+    fn every_address_failing_says_so_and_names_the_way_out() {
+        let text = super::error_text(&razdor::dt::game_import::Error::NoAddress);
+        assert!(text.contains("any address") && text.contains("VPN") && text.contains("by hand"), "{text}");
     }
 
     #[test]

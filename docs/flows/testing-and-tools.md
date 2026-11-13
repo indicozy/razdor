@@ -232,9 +232,14 @@ Other diagnostics: `razdor.log` in the data folder (`razdor::diag`, `RAZDOR_LOG=
   script with `ANDROID_HOME` and the NDK; `RAZDOR_ANDROID_KEYSTORE*` for the release signature.
 - The procedure (version bump, changelog files, tag, follow-up commit with the SHA-256)
   is the `release` skill.
-- `src/update.rs`: the game checks GitHub releases on a background thread
-  (`update::Mode`: Ask / Always / Off), downloads through the system `curl`, accepts a file
-  only if its SHA-256 matches `SHA256SUMS`, and replaces itself by rename. Each program is
+- `src/update.rs`: the game checks the release feeds on a background thread
+  (`update::Mode`: Ask / Always / Off): GitVerse's `releases.json` first, the GitHub API after
+  it (`mirror::UPDATE_FEED`, `update::feed_from`: a reply that is not a release list, e.g. an
+  HTML page with HTTP 200, is the next address's). It downloads through the system `curl`, accepts a file
+  only if its SHA-256 matches `SHA256SUMS` (or `SHA256SUMS.txt`), and replaces itself by rename.
+  A GitVerse asset may be a zip (`archive: "zip"`, its `member` the program inside): the member is
+  taken out (`update::zip_member`, a name with `..` or a drive is refused) and the member is checked
+  against the sums. Each program is
   published under a versioned name (`razdor-X.Y.Z-linux`, `Razdor-X.Y.Z.exe`, `razdor-X.Y.Z.apk`, ...)
   and its old fixed name. The newest release's versioned name is taken when it has one
   (`update::versioned_asset`, `Release.asset`); the fixed name is the fallback for old releases. A `cargo`

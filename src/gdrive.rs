@@ -1,7 +1,7 @@
-//! The community's game archive on GitHub («Скачать игру» on the no-install screen; the hub's
+//! The community's game archive, on GitVerse first and GitHub as the fallback («Скачать игру» on the no-install screen; the hub's
 //! catalog offers the same kind of address to the automatic start). The owner's decision
 //! (2026-11-07): the DT authors allowed the Discord server's moderators to share the game, and it
-//! is published as one public .zip file in Razdor's community releases on GitHub. Razdor downloads
+//! is published as one public .zip file in Razdor's community releases (both hosts). Razdor downloads
 //! that file into the cache, checks its size and SHA-256, and hands it to the archive import
 //! (`dt::game_import::import`, the same install check and swap as «Обновить игру из архива…»).
 //! Razdor hosts none of it. Nothing here needs macroquad.
@@ -16,42 +16,38 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-/// Where an archive is downloaded from.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Link {
-    /// A direct https address: the community's GitHub release file, or the hub catalog's `game`
-    /// (`hub::GameRef`).
-    Url(Cow<'static, str>),
-}
+use crate::mirror;
 
-/// An archive to download: where it is, its size and SHA-256, and the name the player sees.
+/// An archive to download: its addresses, in the order they are tried, its size and SHA-256, and
+/// the name the player sees. Every address is the same file: the first one that gives it verified wins.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Archive {
-    pub link: Link,
+    pub links: Cow<'static, [Cow<'static, str>]>,
     pub size: u64,
     pub sha256: Cow<'static, str>,
     pub name: Cow<'static, str>,
 }
 
-/// The community's game on GitHub (the owner's constants; `scripts/check-game-link.sh` checks the link).
+/// The community's game (the owner's constants; `scripts/check-game-link.sh` checks the links): the
+/// GitVerse mirror first, the GitHub release file after it (`mirror::GAME`).
 pub const GAME: Archive = Archive {
-    link: Link::Url(Cow::Borrowed("https://github.com/indicozy/razdor-community/releases/download/game-cu-1.2/discord-times-cu.zip")),
+    links: Cow::Borrowed(&[Cow::Borrowed(mirror::GAME[0]), Cow::Borrowed(mirror::GAME[1])]),
     size: 44_619_982,
     sha256: Cow::Borrowed("dff554e22a0485f0ed06b3459d3e7e868224d49e264bba0ecf40db852514568d"),
     name: Cow::Borrowed("discord-times-cu.zip"),
 };
 
 impl Archive {
-    /// The game the hub's catalog offers, at its address (the values as the catalog checked them).
-    pub fn at_url(url: String, size: u64, sha256: String, name: String) -> Archive {
-        Archive { link: Link::Url(Cow::Owned(url)), size, sha256: Cow::Owned(sha256), name: Cow::Owned(name) }
+    /// The game the hub's catalog offers, at its addresses (the values as the catalog checked them;
+    /// the first is the catalog's `url`, then its `mirrors`).
+    pub fn at_urls(urls: Vec<String>, size: u64, sha256: String, name: String) -> Archive {
+        Archive { links: Cow::Owned(urls.into_iter().map(Cow::Owned).collect()), size, sha256: Cow::Owned(sha256), name: Cow::Owned(name) }
     }
 }
 
-/// The file's address in the browser (the manual path's link): the archive's own address.
+/// The file's address in the browser (the manual path's link): the archive's first address.
 pub fn file_page(archive: &Archive) -> String {
-    let Link::Url(url) = &archive.link;
-    url.to_string()
+    archive.links.first().map(|l| l.to_string()).unwrap_or_default()
 }
 
 /// A download this small that is HTML is a web page, not the file.
@@ -124,7 +120,10 @@ impl Progress {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Failure {
     Cancelled,
+    /// A local file trouble (the verified copy cannot be put in place).
     Failed(String),
+    /// Every address failed (each reason is in the log): the last one.
+    NoAddress(String),
 }
 
 /// The partial copy of `dest`: `<name>.part` beside it.
@@ -148,9 +147,10 @@ pub fn verify(archive: &Archive, path: &Path) -> Result<(), String> {
 }
 
 /// Downloads `archive` into `dest`, verified. A `dest` that verifies already is kept (no download).
-/// A partial copy is continued when the network can (a resume); if the result does not verify
-/// after a resume, it is downloaded again from the start once. A result that does not verify is
-/// refused ([`CHANGED`]) and removed. Progress and cancel as in [`Progress`].
+/// The addresses are tried in order ([`Archive::links`]): an address that fails (a connection, an
+/// HTTP error, a stall, a web page, a file that does not verify) gives way to the next one, and the
+/// partial copy stays for it to continue (the same file on every address). When every address
+/// fails, the result is [`Failure::NoAddress`]. Progress and cancel as in [`Progress`].
 pub fn download_game(net: &dyn Net, archive: &Archive, dest: &Path, progress: &Progress) -> Result<(), Failure> {
     progress.bytes.store(0, Ordering::Relaxed);
     if dest.is_file() && verify(archive, dest).is_ok() {
@@ -159,22 +159,41 @@ pub fn download_game(net: &dyn Net, archive: &Archive, dest: &Path, progress: &P
     }
     let _ = fs::remove_file(dest);
     let part = part_path(dest);
-    let mut from = if net.resumes() { fs::metadata(&part).map(|m| m.len()).unwrap_or(0) } else { 0 };
-    if from == 0 {
-        let _ = fs::remove_file(&part);
-    }
-    loop {
-        let resumed = from > 0;
-        fetch(net, archive, &part, from, progress)?;
-        match verify(archive, &part) {
+    let mut last = String::from("no address");
+    for link in archive.links.iter() {
+        match download_from(net, link, archive, &part, progress) {
             Ok(()) => {
+                crate::diag!("game download: from {link}");
                 fs::rename(&part, dest).map_err(|e| Failure::Failed(e.to_string()))?;
                 progress.bytes.store(archive.size, Ordering::Relaxed);
                 return Ok(());
             }
+            Err(Failure::Cancelled) => return Err(Failure::Cancelled),
+            Err(Failure::Failed(why) | Failure::NoAddress(why)) => {
+                crate::diag!("game download: {link}: {why}");
+                last = why;
+            }
+        }
+    }
+    Err(Failure::NoAddress(last))
+}
+
+/// The file from one address into `part`, verified: a partial copy is continued when the network
+/// can (a resume); if the result does not verify after a resume, it is downloaded again from the
+/// start once. A result that does not verify is removed and reported ([`CHANGED`]).
+fn download_from(net: &dyn Net, url: &str, archive: &Archive, part: &Path, progress: &Progress) -> Result<(), Failure> {
+    let mut from = if net.resumes() { fs::metadata(part).map(|m| m.len()).unwrap_or(0) } else { 0 };
+    if from == 0 {
+        let _ = fs::remove_file(part);
+    }
+    loop {
+        let resumed = from > 0;
+        fetch(net, url, part, from, progress)?;
+        match verify(archive, part) {
+            Ok(()) => return Ok(()),
             Err(why) => {
-                let _ = fs::remove_file(&part);
-                crate::diag!("game download: {why}");
+                let _ = fs::remove_file(part);
+                crate::diag!("game download: {url}: {why}");
                 if !resumed {
                     return Err(Failure::Failed(CHANGED.into()));
                 }
@@ -185,18 +204,17 @@ pub fn download_game(net: &dyn Net, archive: &Archive, dest: &Path, progress: &P
     }
 }
 
-/// The file into `part`, from byte `from`: a refusal or a missing range restarts the file from its
-/// start once. `part` holds the body on success.
-fn fetch(net: &dyn Net, archive: &Archive, part: &Path, from: u64, progress: &Progress) -> Result<(), Failure> {
+/// The file from `url` into `part`, from byte `from`: a refusal or a missing range restarts the file
+/// from its start once. `part` holds the body on success.
+fn fetch(net: &dyn Net, url: &str, part: &Path, from: u64, progress: &Progress) -> Result<(), Failure> {
     let cancelled = || progress.cancelled();
-    let url = file_page(archive);
     let mut from = from;
     let mut restarted = false;
     loop {
         if cancelled() {
             return Err(Failure::Cancelled);
         }
-        let status = match net.get(&url, part, from, &|n| progress.bytes.store(n, Ordering::Relaxed), &cancelled) {
+        let status = match net.get(url, part, from, &|n| progress.bytes.store(n, Ordering::Relaxed), &cancelled) {
             Ok(status) => status,
             Err(why) => {
                 if cancelled() {
@@ -256,13 +274,21 @@ mod tests {
     const BODY: &[u8] = b"PK\x03\x04 a small stand-in archive for the tests";
     const URL: &str = "https://example.org/releases/test.zip";
 
+    /// The first of two addresses of the test archive (the second one is `URL`).
+    const FIRST: &str = "https://first.example.org/releases/test.zip";
+
     fn archive() -> Archive {
         Archive {
-            link: Link::Url(Cow::Borrowed(URL)),
+            links: Cow::Borrowed(&[Cow::Borrowed(URL)]),
             size: BODY.len() as u64,
             sha256: Cow::Owned(crate::update::sha256_hex(BODY)),
             name: Cow::Borrowed("test.zip"),
         }
+    }
+
+    /// The test archive with two addresses: `FIRST`, then `URL`.
+    fn two_links() -> Archive {
+        Archive { links: Cow::Owned(vec![Cow::Borrowed(FIRST), Cow::Borrowed(URL)]), ..archive() }
     }
 
     /// A web page answered in place of the file (a proxy's or an error page).
@@ -322,8 +348,11 @@ mod tests {
     }
 
     #[test]
-    fn the_game_is_the_github_archive() {
-        assert_eq!(file_page(&GAME), "https://github.com/indicozy/razdor-community/releases/download/game-cu-1.2/discord-times-cu.zip");
+    fn the_game_is_the_gitverse_archive_then_the_github_one() {
+        assert_eq!(file_page(&GAME), "https://gitverse.ru/api/attachments/36c22adf-f3f3-4286-a474-9b6a00a5abc5");
+        let links: Vec<String> = GAME.links.iter().map(|l| l.to_string()).collect();
+        assert_eq!(links, vec![mirror::GAME[0].to_string(), mirror::GAME[1].to_string()]);
+        assert!(links[1].ends_with("/game-cu-1.2/discord-times-cu.zip"));
         assert_eq!(GAME.size, 44_619_982);
         assert_eq!(GAME.name, "discord-times-cu.zip");
         assert_eq!(GAME.sha256, "dff554e22a0485f0ed06b3459d3e7e868224d49e264bba0ecf40db852514568d");
@@ -385,13 +414,13 @@ mod tests {
         let dir = scratch("changed");
         let dest = dir.join("game.zip");
         let other_size = Fake::new(vec![Reply::Body(200, b"a shorter file".to_vec())]);
-        assert_eq!(download_game(&other_size, &archive(), &dest, &Progress::default()), Err(Failure::Failed(CHANGED.into())));
+        assert_eq!(download_game(&other_size, &archive(), &dest, &Progress::default()), Err(Failure::NoAddress(CHANGED.into())));
         assert!(!dest.exists() && !part_path(&dest).exists());
 
         let mut other_bytes = BODY.to_vec();
         other_bytes[0] = b'Q';
         let other_hash = Fake::new(vec![Reply::Body(200, other_bytes)]);
-        assert_eq!(download_game(&other_hash, &archive(), &dest, &Progress::default()), Err(Failure::Failed(CHANGED.into())));
+        assert_eq!(download_game(&other_hash, &archive(), &dest, &Progress::default()), Err(Failure::NoAddress(CHANGED.into())));
         assert!(!dest.exists() && !part_path(&dest).exists());
         let _ = fs::remove_dir_all(&dir);
     }
@@ -401,7 +430,7 @@ mod tests {
         let dir = scratch("page");
         let dest = dir.join("game.zip");
         let net = Fake::new(vec![Reply::Body(200, PAGE.as_bytes().to_vec())]);
-        assert_eq!(download_game(&net, &archive(), &dest, &Progress::default()), Err(Failure::Failed("the server did not give the file".into())));
+        assert_eq!(download_game(&net, &archive(), &dest, &Progress::default()), Err(Failure::NoAddress("the server did not give the file".into())));
         assert!(!dest.exists() && !part_path(&dest).exists());
         let _ = fs::remove_dir_all(&dir);
     }
@@ -411,9 +440,9 @@ mod tests {
         let dir = scratch("status");
         let dest = dir.join("game.zip");
         let net = Fake::new(vec![Reply::Body(429, b"busy".to_vec())]);
-        assert_eq!(download_game(&net, &archive(), &dest, &Progress::default()), Err(Failure::Failed("the server refused the file (HTTP 429)".into())));
+        assert_eq!(download_game(&net, &archive(), &dest, &Progress::default()), Err(Failure::NoAddress("the server refused the file (HTTP 429)".into())));
         let net = Fake::new(vec![Reply::Body(500, b"oops".to_vec())]);
-        assert_eq!(download_game(&net, &archive(), &dest, &Progress::default()), Err(Failure::Failed("the server answered HTTP 500".into())));
+        assert_eq!(download_game(&net, &archive(), &dest, &Progress::default()), Err(Failure::NoAddress("the server answered HTTP 500".into())));
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -422,7 +451,7 @@ mod tests {
         let dir = scratch("network");
         let dest = dir.join("game.zip");
         let net = Fake::new(vec![Reply::Fail("curl: timeout")]);
-        assert_eq!(download_game(&net, &archive(), &dest, &Progress::default()), Err(Failure::Failed("curl: timeout".into())));
+        assert_eq!(download_game(&net, &archive(), &dest, &Progress::default()), Err(Failure::NoAddress("curl: timeout".into())));
         assert!(!dest.exists());
         let _ = fs::remove_dir_all(&dir);
     }
@@ -432,7 +461,7 @@ mod tests {
         let dir = scratch("stall");
         let dest = dir.join("game.zip");
         let net = Fake::new(vec![Reply::Fail(crate::update::STALLED)]);
-        assert_eq!(download_game(&net, &archive(), &dest, &Progress::default()), Err(Failure::Failed("stalled".into())));
+        assert_eq!(download_game(&net, &archive(), &dest, &Progress::default()), Err(Failure::NoAddress("stalled".into())));
         assert_eq!(net.requests.borrow().len(), 1, "a stall is not retried by itself");
         let _ = fs::remove_dir_all(&dir);
     }
@@ -444,7 +473,7 @@ mod tests {
         let half = BODY.len() / 2;
         fs::write(part_path(&dest), &BODY[..half]).unwrap();
         let net = Fake::new(vec![Reply::Fail(crate::update::STALLED)]);
-        assert_eq!(download_game(&net, &archive(), &dest, &Progress::default()), Err(Failure::Failed("stalled".into())));
+        assert_eq!(download_game(&net, &archive(), &dest, &Progress::default()), Err(Failure::NoAddress("stalled".into())));
         assert_eq!(net.requests.borrow().len(), 1, "no restart from the start after a stall");
         assert_eq!(fs::read(part_path(&dest)).unwrap(), &BODY[..half], "the partial copy is kept");
         let _ = fs::remove_dir_all(&dir);
@@ -459,6 +488,66 @@ mod tests {
         let net = Fake::new(vec![]);
         assert_eq!(download_game(&net, &archive(), &dest, &progress), Err(Failure::Cancelled));
         assert!(net.requests.borrow().is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_stalled_first_address_gives_way_to_the_next_and_keeps_the_partial_copy() {
+        let dir = scratch("stall-next");
+        let dest = dir.join("game.zip");
+        let half = BODY.len() / 2;
+        fs::write(part_path(&dest), &BODY[..half]).unwrap();
+        let net = Fake::new(vec![Reply::Fail(crate::update::STALLED), Reply::Body(206, BODY[half..].to_vec())]);
+        download_game(&net, &two_links(), &dest, &Progress::default()).unwrap();
+        assert_eq!(net.requests.borrow().as_slice(), &[(FIRST.to_string(), half as u64), (URL.to_string(), half as u64)]);
+        assert_eq!(fs::read(&dest).unwrap(), BODY);
+        assert!(!part_path(&dest).exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_file_that_does_not_verify_from_the_first_address_is_taken_from_the_next() {
+        let dir = scratch("changed-next");
+        let dest = dir.join("game.zip");
+        let mut other = BODY.to_vec();
+        other[0] = b'Q';
+        let net = Fake::new(vec![Reply::Body(200, other), Reply::Body(200, BODY.to_vec())]);
+        download_game(&net, &two_links(), &dest, &Progress::default()).unwrap();
+        assert_eq!(net.requests.borrow().as_slice(), &[(FIRST.to_string(), 0), (URL.to_string(), 0)]);
+        assert_eq!(fs::read(&dest).unwrap(), BODY);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_web_page_from_the_first_address_gives_way_to_the_next() {
+        let dir = scratch("page-next");
+        let dest = dir.join("game.zip");
+        let net = Fake::new(vec![Reply::Body(200, PAGE.as_bytes().to_vec()), Reply::Body(200, BODY.to_vec())]);
+        download_game(&net, &two_links(), &dest, &Progress::default()).unwrap();
+        assert_eq!(net.requests.borrow().len(), 2);
+        assert_eq!(fs::read(&dest).unwrap(), BODY);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn when_every_address_fails_the_last_reason_is_reported_and_nothing_is_kept() {
+        let dir = scratch("all-fail");
+        let dest = dir.join("game.zip");
+        let net = Fake::new(vec![Reply::Fail("curl: (6) could not resolve"), Reply::Body(404, b"gone".to_vec())]);
+        let result = download_game(&net, &two_links(), &dest, &Progress::default());
+        assert_eq!(result, Err(Failure::NoAddress("the server answered HTTP 404".into())));
+        assert_eq!(net.requests.borrow().len(), 2, "both addresses are tried");
+        assert!(!dest.exists() && !part_path(&dest).exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_verified_first_address_is_the_only_request() {
+        let dir = scratch("first-ok");
+        let dest = dir.join("game.zip");
+        let net = Fake::new(vec![Reply::Body(200, BODY.to_vec())]);
+        download_game(&net, &two_links(), &dest, &Progress::default()).unwrap();
+        assert_eq!(net.requests.borrow().as_slice(), &[(FIRST.to_string(), 0)]);
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -502,17 +591,17 @@ mod tests {
     fn a_direct_address_is_downloaded_from_itself_and_verified() {
         let dest = scratch("direct").join("game-download.zip");
         let url = "https://example.org/releases/game.zip";
-        let archive = Archive::at_url(url.into(), BODY.len() as u64, crate::update::sha256_hex(BODY), "game.zip".into());
+        let archive = Archive::at_urls(vec![url.into()], BODY.len() as u64, crate::update::sha256_hex(BODY), "game.zip".into());
         let net = Fake::new(vec![Reply::Body(200, BODY.to_vec())]);
         download_game(&net, &archive, &dest, &Progress::default()).unwrap();
         assert_eq!(net.requests.borrow().as_slice(), &[(url.to_string(), 0)], "the first request is the address itself");
         assert_eq!(fs::read(&dest).unwrap(), BODY);
         assert_eq!(file_page(&archive), url);
         // A file of another hash is refused with the server's words, and nothing is kept.
-        let other = Archive::at_url(url.into(), BODY.len() as u64, "0".repeat(64), "game.zip".into());
+        let other = Archive::at_urls(vec![url.into()], BODY.len() as u64, "0".repeat(64), "game.zip".into());
         let net = Fake::new(vec![Reply::Body(200, BODY.to_vec())]);
         let dest2 = scratch("direct-bad").join("game-download.zip");
-        assert_eq!(download_game(&net, &other, &dest2, &Progress::default()), Err(Failure::Failed("the archive on the server changed".into())));
+        assert_eq!(download_game(&net, &other, &dest2, &Progress::default()), Err(Failure::NoAddress("the archive on the server changed".into())));
         assert!(!dest2.exists() && !part_path(&dest2).exists());
     }
 }

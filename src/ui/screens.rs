@@ -504,7 +504,7 @@ fn download_lines() -> Vec<String> {
     }
     let failure = game_import::download_failure();
     if !manual_block(failure.as_deref(), game_import::download_available()) {
-        return vec![tr("Press «Download the game»: Razdor downloads the game archive (43 MB) from GitHub (Razdor's community releases) and installs it.").to_string()];
+        return vec![tr("Press «Download the game»: Razdor downloads the game archive (43 MB) from GitVerse or GitHub (Razdor's community releases) and installs it.").to_string()];
     }
     let mut lines: Vec<String> = failure.into_iter().collect();
     lines.push(tr("Download it by hand:").to_string());

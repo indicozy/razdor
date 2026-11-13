@@ -32,8 +32,7 @@ use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
-/// The newest releases on GitHub, as the API lists them (newest first).
-const RELEASES: &str = "https://api.github.com/repos/indicozy/razdor/releases?per_page=30";
+use crate::mirror;
 
 /// How long a download may go without a byte (or a connection) before it stops: every download
 /// here, the game's, the hub's and the updates', fails with [`STALLED`] instead of waiting out its
@@ -96,12 +95,14 @@ pub struct Release {
     pub version: Version,
     /// The release's page (its notes).
     pub page: String,
-    /// This platform's program.
+    /// This platform's program: its file, or an archive (`member` set) that holds it.
     pub program_url: String,
     /// The name of that file in the release: its versioned name when the release has one
-    /// (see [`versioned_asset`]), else the old fixed name.
+    /// (see [`versioned_asset`]), else the old fixed name. For an archive, the archive's own name.
     pub asset: String,
-    /// `SHA256SUMS`.
+    /// The program's name inside the archive (`program_url` is then a zip); `None` for a file.
+    pub member: Option<String>,
+    /// `SHA256SUMS` (or `SHA256SUMS.txt`).
     pub sums_url: String,
     /// What changed: the notes of every release newer than this program, newest first.
     pub notes: Vec<Note>,
@@ -446,6 +447,12 @@ struct ApiRelease {
 struct ApiAsset {
     name: String,
     browser_download_url: String,
+    /// `"zip"` for an archive (GitVerse's mirror packs the programs that its file names refuse).
+    #[serde(default)]
+    archive: Option<String>,
+    /// The file inside a zip archive that is the program.
+    #[serde(default)]
+    member: Option<String>,
 }
 
 /// A release's notes as lines: its CHANGELOG section, up to the pipeline's own part (the
@@ -495,18 +502,38 @@ pub fn parse_releases(json: &[u8], current: Version, asset: &str) -> Result<Opti
         .collect();
     newer.sort_by(|a, b| b.0.cmp(&a.0));
     let Some((version, newest)) = newer.first() else { return Ok(None) };
-    let url = |name: &str| newest.assets.iter().find(|a| a.name == name).map(|a| a.browser_download_url.clone());
+    let find = |name: &str| newest.assets.iter().find(|a| a.name == name);
     // Copies on old updaters know only the fixed name; new releases also carry the versioned one.
-    let (name, program_url) = versioned_asset(asset, *version)
-        .and_then(|n| url(&n).map(|u| (n, u)))
-        .or_else(|| url(asset).map(|u| (asset.to_string(), u)))
+    // A zip (the GitVerse mirror's) is found by the program's fixed name, which it holds as `member`.
+    let file = |name: &str| find(name).map(|a| (name.to_string(), a.browser_download_url.clone(), None));
+    let zip = || {
+        newest
+            .assets
+            .iter()
+            .find(|a| a.archive.as_deref() == Some("zip") && a.member.as_deref() == Some(asset))
+            .map(|a| (a.name.clone(), a.browser_download_url.clone(), Some(asset.to_string())))
+    };
+    let (name, program_url, member) = versioned_asset(asset, *version)
+        .and_then(|n| file(&n))
+        .or_else(|| file(asset))
+        .or_else(zip)
         .ok_or_else(|| format!("{} has no {asset}", newest.tag_name))?;
-    let sums_url = url("SHA256SUMS").ok_or_else(|| format!("{} has no SHA256SUMS", newest.tag_name))?;
+    let sums_url = ["SHA256SUMS", "SHA256SUMS.txt"]
+        .iter()
+        .find_map(|n| find(n))
+        .map(|a| a.browser_download_url.clone())
+        .ok_or_else(|| format!("{} has no SHA256SUMS", newest.tag_name))?;
     let notes = newer
         .iter()
         .flat_map(|(v, r)| std::iter::once(Note::Release(*v)).chain(parse_notes(r.body.as_deref().unwrap_or_default())))
         .collect();
-    Ok(Some(Release { version: *version, page: newest.html_url.clone(), program_url, asset: name, sums_url, notes }))
+    Ok(Some(Release { version: *version, page: newest.html_url.clone(), program_url, asset: name, member, sums_url, notes }))
+}
+
+/// The update feed as `addresses` give it (see [`mirror::UPDATE_FEED`]): the first one that reads
+/// as a release list answers (`parse_releases`); a reply that does not read is the next address's.
+pub fn feed_from(addresses: &[&str], mut get: impl FnMut(&str) -> Result<Vec<u8>, String>, current: Version, asset: &str) -> Result<Option<Release>, String> {
+    mirror::first_ok("update feed", addresses, |url| get(url).and_then(|json| parse_releases(&json, current, asset)))
 }
 
 /// Asks GitHub for the latest release on a background thread (nothing when a check or a
@@ -516,7 +543,7 @@ pub fn check() {
     let Some(asset) = asset_name().filter(|_| !busy) else { return };
     set(Status::Checking);
     let spawned = std::thread::Builder::new().name("update check".into()).spawn(move || {
-        let found = fetch(RELEASES, 20).and_then(|json| parse_releases(&json, current(), asset));
+        let found = feed_from(&mirror::UPDATE_FEED, |url| fetch(url, 20), current(), asset);
         let next = match found {
             Ok(Some(r)) => {
                 crate::diag!("update: {} is out (this is {})", r.version, current());
@@ -786,26 +813,55 @@ fn install_now(r: &Release) -> Result<bool, String> {
     let asset = asset_name().ok_or("no release for this system")?;
     let program = program().ok_or("the program's file is unknown")?;
     let sums = fetch(&r.sums_url, 60)?;
-    let want = expected_sum(&sums, &r.asset)?;
+    // The sum is the program's: for an archive, the file inside it (its member), else the file itself.
+    let want = expected_sum(&sums, r.member.as_deref().unwrap_or(&r.asset))?;
     let part = part_path(&program, asset);
-    let out = curl()
-        .args(["--max-time", "900", "-o"])
-        .arg(&part)
-        .arg(&r.program_url)
-        .output()
-        .map_err(|e| format!("curl: {e}"))?;
-    let checked = if !out.status.success() {
-        Err(curl_why(out.status, &String::from_utf8_lossy(&out.stderr)))
-    } else {
-        std::fs::read(&part)
-            .map_err(|e| format!("{}: {e}", part.display()))
-            .and_then(|bytes| check_sum(&bytes, &want))
-            .and_then(|()| swap(&part, &program).map_err(|e| format!("{}: {e}", program.display())))
+    let bytes = match &r.member {
+        None => download_to(&r.program_url, &part, 900, MAX_MEMBER).and_then(|()| std::fs::read(&part).map_err(|e| format!("{}: {e}", part.display()))),
+        Some(member) => {
+            // The archive is kept beside the program only while its member is taken out of it.
+            let zip = program.with_file_name(format!(".{asset}.zip.update"));
+            let got = download_to(&r.program_url, &zip, 900, MAX_MEMBER).and_then(|()| zip_member(&zip, member));
+            let _ = std::fs::remove_file(&zip);
+            got
+        }
     };
+    // Unix: `swap` makes the new file executable (0755) before it takes the program's place.
+    let checked = bytes.and_then(|bytes| check_sum(&bytes, &want).map(|()| bytes)).and_then(|bytes| {
+        std::fs::write(&part, &bytes).map_err(|e| format!("{}: {e}", part.display()))?;
+        swap(&part, &program).map_err(|e| format!("{}: {e}", program.display()))
+    });
     if checked.is_err() {
         let _ = std::fs::remove_file(&part);
     }
     checked.map(|()| false)
+}
+
+/// The bytes of `member`, a file of the zip archive at `zip`. A name that is not a plain relative
+/// path (an absolute one, or one with `..` or a drive) is refused, as is a member over
+/// [`MAX_MEMBER`].
+pub fn zip_member(zip: &Path, member: &str) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    if !plain_member(member) {
+        return Err(format!("the archive's file {member:?} is not a plain name"));
+    }
+    let file = std::fs::File::open(zip).map_err(|e| format!("{}: {e}", zip.display()))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("the archive cannot be read: {e}"))?;
+    let entry = archive.by_name(member).map_err(|e| format!("the archive has no {member}: {e}"))?;
+    let mut bytes = Vec::new();
+    entry.take(MAX_MEMBER + 1).read_to_end(&mut bytes).map_err(|e| format!("{member}: {e}"))?;
+    if bytes.len() as u64 > MAX_MEMBER {
+        return Err(format!("{member} is bigger than {MAX_MEMBER} bytes"));
+    }
+    Ok(bytes)
+}
+
+/// The most a program inside an archive may be.
+const MAX_MEMBER: u64 = 256 << 20;
+
+/// A file name inside an archive: relative, `/`-separated, none empty, `.` or `..`, no drive letter.
+fn plain_member(member: &str) -> bool {
+    !member.is_empty() && !member.contains(['\\', ':']) && !member.starts_with('/') && member.split('/').all(|p| !p.is_empty() && p != "." && p != "..")
 }
 
 /// Android: the APK of `r` is kept in the downloads folder as `razdor-<X.Y.Z>.apk`. A file
@@ -816,6 +872,10 @@ fn install_now(r: &Release) -> Result<bool, String> {
 #[cfg(target_os = "android")]
 fn install_now(r: &Release) -> Result<bool, String> {
     let asset = asset_name().ok_or("no release for this system")?;
+    if r.member.is_some() {
+        // The phones' releases are plain files (the APK); an archive is not unpacked here.
+        return Err(format!("{} is an archive: the phone takes the APK itself", r.asset));
+    }
     let sums = fetch(&r.sums_url, 60)?;
     let want = expected_sum(&sums, &r.asset)?;
     let dir = phone::cache_dir()?;
@@ -1098,6 +1158,7 @@ mod tests {
             page: String::new(),
             program_url: String::new(),
             asset: String::new(),
+            member: None,
             sums_url: String::new(),
             notes: Vec::new(),
         }
@@ -1240,6 +1301,120 @@ mod tests {
         assert!(reuse_download(Some(&want), &want));
         assert!(!reuse_download(Some(&sha256_hex(b"apk bytes!")), &want));
         assert!(!reuse_download(None, &want));
+    }
+
+    const ZIP_FEED: &str = r#"[
+        {"tag_name":"v1.5.2","html_url":"https://x/v1.5.2","draft":false,"prerelease":false,"body":"\n### Added\n- A mirror.",
+         "assets":[{"name":"Razdor-1.5.2-windows.zip","browser_download_url":"https://g/win.zip","archive":"zip","member":"Razdor.exe"},
+                   {"name":"razdor-1.5.2-linux.zip","browser_download_url":"https://g/linux.zip","archive":"zip","member":"razdor"},
+                   {"name":"SHA256SUMS.txt","browser_download_url":"https://g/SHA256SUMS.txt"}]}
+    ]"#;
+
+    #[test]
+    fn an_archive_asset_gives_its_member_and_the_txt_sums() {
+        let r = parse_releases(ZIP_FEED.as_bytes(), Version(1, 5, 1), "Razdor.exe").unwrap().unwrap();
+        assert_eq!(r.program_url, "https://g/win.zip");
+        assert_eq!(r.asset, "Razdor-1.5.2-windows.zip");
+        assert_eq!(r.member.as_deref(), Some("Razdor.exe"));
+        assert_eq!(r.sums_url, "https://g/SHA256SUMS.txt");
+        let linux = parse_releases(ZIP_FEED.as_bytes(), Version(1, 5, 1), "razdor").unwrap().unwrap();
+        assert_eq!(linux.program_url, "https://g/linux.zip");
+        assert_eq!(linux.member.as_deref(), Some("razdor"));
+        // A plain release keeps no member, and its sums may be named SHA256SUMS.txt.
+        let plain = parse_releases(REPLY.replace("SHA256SUMS", "SHA256SUMS.txt").as_bytes(), Version(0, 3, 13), "Razdor.exe").unwrap().unwrap();
+        assert_eq!(plain.member, None);
+        assert_eq!(plain.sums_url, "https://x/SHA256SUMS.txt");
+    }
+
+    #[test]
+    fn a_zip_member_is_taken_out_and_its_own_sum_checked() {
+        let dir = std::env::temp_dir().join(format!("razdor-zip-member-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let zip_path = dir.join("pack.zip");
+        let program = b"#!/bin/sh\necho razdor\n";
+        {
+            let file = std::fs::File::create(&zip_path).unwrap();
+            let mut w = zip::ZipWriter::new(file);
+            let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+            w.start_file("razdor", opts).unwrap();
+            std::io::Write::write_all(&mut w, program).unwrap();
+            w.start_file("razdor-translate", opts).unwrap();
+            std::io::Write::write_all(&mut w, b"the translator").unwrap();
+            w.finish().unwrap();
+        }
+        let bytes = zip_member(&zip_path, "razdor").unwrap();
+        assert_eq!(bytes, program);
+        // The sums name the member, as the release's SHA256SUMS.txt lists the programs inside.
+        let sums = format!("{}  razdor\n{}  razdor-translate\n", sha256_hex(program), sha256_hex(b"the translator"));
+        let want = expected_sum(sums.as_bytes(), "razdor").unwrap();
+        assert!(check_sum(&bytes, &want).is_ok());
+        assert!(check_sum(b"tampered", &want).is_err());
+        assert!(zip_member(&zip_path, "missing").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_member_name_that_leaves_the_folder_is_refused_before_the_archive_is_opened() {
+        for bad in ["../razdor", "/etc/razdor", "bin/../../razdor", "C:razdor", "..\\razdor", "", "./", "a//b"] {
+            assert!(!plain_member(bad), "{bad:?}");
+            let err = zip_member(Path::new("/nonexistent/pack.zip"), bad).unwrap_err();
+            assert!(err.contains("not a plain name"), "{err}");
+        }
+        assert!(plain_member("razdor") && plain_member("bin/razdor") && plain_member("Razdor-1.5.2.exe"));
+    }
+
+    #[test]
+    fn an_html_page_is_no_feed_and_the_next_address_answers() {
+        let html = b"<html><body>Page not found</body></html>".to_vec();
+        let asked = std::cell::RefCell::new(Vec::<String>::new());
+        let got = feed_from(
+            &["https://gitverse.example/releases.json", "https://api.example/releases"],
+            |url| {
+                asked.borrow_mut().push(url.to_string());
+                Ok(if url.starts_with("https://gitverse") { html.clone() } else { REPLY.as_bytes().to_vec() })
+            },
+            Version(0, 3, 13),
+            "Razdor.exe",
+        );
+        assert_eq!(*asked.borrow(), ["https://gitverse.example/releases.json", "https://api.example/releases"]);
+        assert_eq!(got.unwrap().unwrap().version, Version(0, 4, 0));
+    }
+
+    #[test]
+    fn a_feed_that_is_unreachable_or_does_not_check_out_moves_on_and_its_reason_is_the_error() {
+        let asked = std::cell::RefCell::new(0usize);
+        let got = feed_from(
+            &["a", "b", "c"],
+            |url| {
+                *asked.borrow_mut() += 1;
+                match url {
+                    "a" => Err("stalled".into()),
+                    // A list without this platform's program does not check out.
+                    _ => Ok(REPLY.as_bytes().to_vec()),
+                }
+            },
+            Version(0, 3, 0),
+            "razdor-macos",
+        );
+        assert_eq!(*asked.borrow(), 3, "a stall, then a list without the program, then the last address");
+        assert!(got.unwrap_err().contains("has no razdor-macos"), "the last reason is the error");
+    }
+
+    #[test]
+    fn the_first_feed_that_reads_answers_even_when_nothing_is_newer() {
+        let asked = std::cell::RefCell::new(Vec::<String>::new());
+        let got = feed_from(
+            &["gitverse", "github"],
+            |url| {
+                asked.borrow_mut().push(url.to_string());
+                Ok(REPLY.as_bytes().to_vec())
+            },
+            Version(0, 4, 0),
+            "Razdor.exe",
+        );
+        assert_eq!(got, Ok(None));
+        assert_eq!(*asked.borrow(), ["gitverse"]);
     }
 
     #[test]

@@ -5,8 +5,9 @@
 //!   map, a campaign (its chapters in order, linked by their next-map names) or a mod, with
 //!   its titles and descriptions in Russian and English, the languages its maps come in
 //!   (Russian as written, English from the import's translation) and the mods it needs.
-//! - **Source** ([`Source`]): `RAZDOR_HUB` names an `https://` address or a folder; unset, a
-//!   mock hub is written once under the hub folder ([`mock::build`]) and read from there.
+//! - **Source** ([`Source`]): `RAZDOR_HUB` names an `https://` address or a folder; unset, the
+//!   mirrors of [`mirror::HUB`] (GitVerse, then GitHub) are tried in order; a snapshot or `RAZDOR_HUB=mock`
+//!   reads a mock hub written once under the hub folder ([`mock::build`]).
 //! - **Cache** ([`read_cache`], [`write_cache`]): from an address, the catalog last fetched is kept
 //!   with its address, and the window shows it at once while the current one is read.
 //! - **Install**: a map or campaign needs its mods first ([`plan_install`] orders them,
@@ -38,6 +39,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::i18n::Lang;
+use crate::mirror;
 
 /// Environment variable naming the hub: an `https://` address or a folder.
 pub const SOURCE_ENV: &str = "RAZDOR_HUB";
@@ -45,8 +47,8 @@ pub const SOURCE_ENV: &str = "RAZDOR_HUB";
 pub const DIR_ENV: &str = "RAZDOR_HUB_DIR";
 /// The catalog's file name at the hub's root.
 pub const INDEX: &str = "index.json";
-/// The default hub: the latest release of the community repository (its assets are the
-/// catalog and the files it names).
+/// The hub on GitHub, the default's fallback after GitVerse (`mirror::HUB`): the latest release of the
+/// community repository (its assets are the catalog and the files it names).
 pub const DEFAULT_SOURCE: &str = "https://github.com/indicozy/razdor-community/releases/latest/download";
 /// The most a downloaded archive may be (the desktop's curl stops there).
 pub const MAX_ARCHIVE_DOWNLOAD: u64 = 256 << 20;
@@ -340,6 +342,10 @@ impl Entry {
 pub struct GameRef {
     /// An `https://` address, or a path inside the hub (relative to the catalog).
     pub url: String,
+    /// Other `https://` addresses of the same file, tried in order after `url` (a mirror). A bad one
+    /// is dropped with a log line; an older client ignores them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mirrors: Vec<String>,
     /// The archive's size and SHA-256 (checked before anything is unpacked).
     pub size: u64,
     pub sha256: String,
@@ -442,6 +448,14 @@ impl Catalog {
             if !safe_location(&g.url) {
                 return Err(format!("index.json: game: bad address {:?}", g.url));
             }
+            // A mirror is an https address and nothing else; one that is not is dropped, the catalog stays.
+            g.mirrors.retain(|m| {
+                let ok = m.starts_with("https://") && safe_location(m);
+                if !ok {
+                    crate::diag!("index.json: game: mirror {m:?} is dropped (not an https address)");
+                }
+                ok
+            });
             if !safe_sha256(&g.sha256) {
                 return Err("index.json: game: the SHA-256 is not 64 hex digits".into());
             }
@@ -788,11 +802,17 @@ pub fn needed_by(catalog: &Catalog, installed: &Installed, id: &str) -> Vec<Stri
 /// Where the hub is read from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Source {
+    /// One address (`RAZDOR_HUB`).
     Url(String),
+    /// The default: the mirrors of the hub in order (`mirror::HUB`, GitVerse first).
+    Mirrors,
     Dir(PathBuf),
     /// The mock hub, written under the hub folder on first use.
     Mock,
 }
+
+/// The cache key of the default source (its catalog is the first mirror's or the next's).
+const MIRRORS_KEY: &str = "mirrors";
 
 impl Source {
     /// `RAZDOR_HUB`, read with [`Source::from_setting`]; snapshot runs render offline.
@@ -809,15 +829,16 @@ impl Source {
             Some(s) if s.starts_with("https://") => Source::Url(s.trim_end_matches('/').to_string()),
             Some(s) => Source::Dir(PathBuf::from(s)),
             None if snapshot => Source::Mock,
-            None => Source::Url(DEFAULT_SOURCE.to_string()),
+            None => Source::Mirrors,
         }
     }
 
-    /// The address a catalog cache is kept for: an `https://` source only (a folder or the mock
-    /// is read in place, instantly).
+    /// The address a catalog cache is kept for: an `https://` source (or the mirrors) only (a folder
+    /// or the mock is read in place, instantly).
     pub fn cache_key(&self) -> Option<&str> {
         match self {
             Source::Url(u) => Some(u),
+            Source::Mirrors => Some(MIRRORS_KEY),
             Source::Dir(_) | Source::Mock => None,
         }
     }
@@ -826,10 +847,44 @@ impl Source {
     pub fn label(&self) -> String {
         match self {
             Source::Url(u) => u.clone(),
+            Source::Mirrors => mirror::HUB[0].to_string(),
             Source::Dir(d) => d.display().to_string(),
             Source::Mock => "mock".into(),
         }
     }
+}
+
+/// Makes every address in `c` absolute against `base`, the folder that gave the catalog: a catalog
+/// names its files relative to itself, so each file is fetched from the host that gave the catalog.
+pub fn rebase(c: &mut Catalog, base: &str) {
+    fn abs(path: &mut String, base: &str) {
+        *path = resolve(base, path.as_str());
+    }
+    for e in &mut c.entries {
+        for f in &mut e.files {
+            abs(&mut f.path, base);
+        }
+        for p in [&mut e.preview, &mut e.picture].into_iter().flatten() {
+            abs(&mut p.path, base);
+        }
+    }
+    if let Some(g) = &mut c.game {
+        abs(&mut g.url, base);
+    }
+    if let Some(a) = &mut c.ad {
+        abs(&mut a.image, base);
+    }
+}
+
+/// The catalog of the default hub: the first of `mirror::HUB` whose `index.json` reads as a catalog
+/// (`get` gives the bytes of an address, or why not; a web page instead of JSON is no catalog). Its
+/// files are made absolute against that folder ([`rebase`]). When none reads, the last reason.
+pub fn catalog_from_mirrors(bases: &[&str], mut get: impl FnMut(&str) -> Result<Vec<u8>, String>) -> Result<Catalog, String> {
+    mirror::first_ok("hub catalog", bases, |base| {
+        let mut c = Catalog::parse(&get(&resolve(base, INDEX))?)?;
+        rebase(&mut c, base);
+        Ok(c)
+    })
 }
 
 /// The local hub folder: `RAZDOR_HUB_DIR`, else `hub` in the app's folder ([`crate::platform::app_dir`]:
@@ -893,7 +948,12 @@ pub fn read_cache(local: &Path, source: &str) -> Option<Catalog> {
     if read.source != source {
         return None;
     }
-    Catalog::checked(read.catalog).ok()
+    let mut c = Catalog::checked(read.catalog).ok()?;
+    // A cache from an address keeps the catalog's own paths: made absolute as the catalog was read.
+    if source.starts_with("https://") {
+        rebase(&mut c, source);
+    }
+    Some(c)
 }
 
 /// A hub and the local folder it installs into.
@@ -907,6 +967,8 @@ impl Hub {
     fn root(&self) -> Result<Root, String> {
         match &self.source {
             Source::Url(u) => Ok(Root::Url(u.clone())),
+            // Only addresses are fetched from the mirrors' catalog (its files are made absolute, see `rebase`).
+            Source::Mirrors => Ok(Root::Url(mirror::HUB[0].to_string())),
             Source::Dir(d) => Ok(Root::Dir(d.clone())),
             Source::Mock => {
                 let dir = self.local.join("mock-hub");
@@ -999,8 +1061,18 @@ impl Hub {
         Ok(true)
     }
 
+    /// The hub's catalog: the default source tries its mirrors in order (`catalog_from_mirrors`); an
+    /// address's files are made absolute against it (`rebase`); a folder or the mock is read as it is.
     pub fn catalog(&self) -> Result<Catalog, String> {
-        Catalog::parse(&self.fetch(INDEX)?)
+        match &self.source {
+            Source::Mirrors => catalog_from_mirrors(&mirror::HUB, |url| crate::update::fetch(url, 60)),
+            Source::Url(base) => {
+                let mut c = Catalog::parse(&self.fetch(INDEX)?)?;
+                rebase(&mut c, base);
+                Ok(c)
+            }
+            Source::Dir(_) | Source::Mock => Catalog::parse(&self.fetch(INDEX)?),
+        }
     }
 
     /// The catalog the cache holds for this hub's address (see [`read_cache`]); None for a
@@ -1732,9 +1804,11 @@ mod tests {
     }
 
     #[test]
-    fn the_default_source_is_the_release_and_the_mock_only_when_asked() {
-        assert_eq!(Source::from_setting(None, false), Source::Url(DEFAULT_SOURCE.to_string()));
-        assert_eq!(Source::from_setting(Some("  "), false), Source::Url(DEFAULT_SOURCE.to_string()));
+    fn the_default_source_is_the_mirrors_and_the_mock_only_when_asked() {
+        assert_eq!(Source::from_setting(None, false), Source::Mirrors);
+        assert_eq!(Source::from_setting(Some("  "), false), Source::Mirrors);
+        assert_eq!(Source::Mirrors.cache_key(), Some("mirrors"));
+        assert_eq!(Source::Mirrors.label(), mirror::HUB[0]);
         assert_eq!(Source::from_setting(Some("mock"), false), Source::Mock);
         assert_eq!(Source::from_setting(None, true), Source::Mock, "a snapshot renders offline");
         assert_eq!(Source::from_setting(Some("https://example.org/hub/"), false), Source::Url("https://example.org/hub".into()));
@@ -2046,7 +2120,11 @@ mod tests {
         }
         write_cache(&local, URL, &c).unwrap();
         assert!(cache_path_of(&local).is_file());
-        assert_eq!(read_cache(&local, URL), Some(c.clone()));
+        // A cache of an address reads back made absolute, as the catalog was read (an older cache
+        // may still hold relative paths).
+        let mut absolute = c.clone();
+        rebase(&mut absolute, URL);
+        assert_eq!(read_cache(&local, URL), Some(absolute));
         let _ = std::fs::remove_dir_all(&local);
     }
 
@@ -2142,6 +2220,73 @@ mod tests {
         for game in bad {
             assert!(Catalog::parse(catalog_with_game(&game).as_bytes()).is_err(), "{game}");
         }
+    }
+
+    #[test]
+    fn a_game_mirror_is_read_when_https_and_a_bad_one_is_dropped_alone() {
+        let with = GOOD_GAME.replace(r#""size""#, r#""mirrors":["https://gitverse.example/game.zip","http://plain.example/game.zip","https://exa mple.org/x.zip","../rel.zip"],"size""#);
+        let g = Catalog::parse(catalog_with_game(&with).as_bytes()).unwrap().game.unwrap();
+        assert_eq!(g.mirrors, vec!["https://gitverse.example/game.zip".to_string()], "the bad ones are dropped, the catalog is kept");
+        assert_eq!(g.url, "https://example.org/discord-times-cu.zip");
+        let none = Catalog::parse(catalog_with_game(GOOD_GAME).as_bytes()).unwrap().game.unwrap();
+        assert!(none.mirrors.is_empty(), "absent: none");
+    }
+
+    #[test]
+    fn an_older_catalog_reads_without_mirrors_and_a_newer_one_with_fields_he_does_not_know() {
+        // An old client's catalog (no mirrors, no unknown fields) reads as it always did.
+        let old = catalog_with_game(GOOD_GAME);
+        assert!(Catalog::parse(old.as_bytes()).unwrap().game.unwrap().mirrors.is_empty());
+        // A newer catalog: a field this build does not know, at the top, in an entry and in the game.
+        let newer = format!(
+            r#"{{"format":1,"future":{{"x":1}},"entries":[{{"id":"m","kind":"mod","title":{{"ru":"x"}},"author":"a","version":"1","files":[],"tags":["new"]}}],"game":{}}}"#,
+            GOOD_GAME.replace(r#""size""#, r#""sizes_by_host":{"a":1},"size""#)
+        );
+        let c = Catalog::parse(newer.as_bytes()).expect("unknown fields are not refused");
+        assert_eq!(c.entries.len(), 1);
+        assert_eq!(c.game.unwrap().size, 44_619_982);
+    }
+
+    /// The default hub's catalog, as the mirror gives it: the GitVerse one names its files by
+    /// address, the GitHub one by a relative path (its files are on the same release).
+    #[test]
+    fn the_default_catalog_comes_from_the_first_mirror_that_reads_and_its_files_stay_with_it() {
+        let gitverse_html = b"<!doctype html><html><body>Page not found</body></html>".to_vec();
+        let github_json = format!(
+            r#"{{"format":1,"entries":[{{"id":"m","kind":"mod","title":{{"ru":"x"}},"author":"a","version":"1","files":[{{"path":"mods/m/a.ini","name":"a.ini","size":1,"sha256":"{s}"}}],"preview":{{"path":"previews/p.png","name":"p.png","size":1,"sha256":"{s}"}}}}],"game":{{"url":"game/discord-times-cu.zip","mirrors":["https://gitverse.ru/api/attachments/x"],"size":44619982,"sha256":"{s}","name":"discord-times-cu.zip"}}}}"#,
+            s = "ab".repeat(32)
+        );
+        let mut asked = Vec::new();
+        let c = catalog_from_mirrors(&mirror::HUB, |url| {
+            asked.push(url.to_string());
+            if url.starts_with("https://indicozy.gitverse") { Ok(gitverse_html.clone()) } else { Ok(github_json.clone().into_bytes()) }
+        })
+        .unwrap();
+        assert_eq!(asked, vec![format!("{}/index.json", mirror::HUB[0]), format!("{}/index.json", mirror::HUB[1])]);
+        let e = &c.entries[0];
+        assert_eq!(e.files[0].path, format!("{DEFAULT_SOURCE}/mods/m/a.ini"), "resolved against the GitHub folder that gave it");
+        assert_eq!(e.preview.as_ref().unwrap().path, format!("{DEFAULT_SOURCE}/previews/p.png"));
+        assert_eq!(c.game.as_ref().unwrap().url, format!("{DEFAULT_SOURCE}/game/discord-times-cu.zip"));
+        assert_eq!(c.game.as_ref().unwrap().mirrors, vec!["https://gitverse.ru/api/attachments/x".to_string()]);
+    }
+
+    #[test]
+    fn a_gitverse_catalog_keeps_its_own_absolute_addresses() {
+        let body = format!(r#"{{"format":1,"entries":[],"ad":{{"id":"a","version":1,"image":"https://example.org/capsule.png","size":1,"sha256":"{s}","url":"https://example.org/","caption_ru":"","caption_en":""}}}}"#, s = "cd".repeat(32));
+        let c = catalog_from_mirrors(&["https://indicozy.gitverse.site/razdor-community"], |_| Ok(body.clone().into_bytes())).unwrap();
+        assert_eq!(c.ad.unwrap().image, "https://example.org/capsule.png");
+    }
+
+    #[test]
+    fn when_no_mirror_reads_the_last_reason_is_the_error() {
+        let asked = std::cell::Cell::new(0usize);
+        let err = catalog_from_mirrors(&mirror::HUB, |url| {
+            asked.set(asked.get() + 1);
+            if url.contains("gitverse") { Err("stalled".into()) } else { Ok(b"<html>nope</html>".to_vec()) }
+        })
+        .unwrap_err();
+        assert_eq!(asked.get(), 2, "both mirrors are tried");
+        assert!(err.starts_with("index.json:"), "the last one is a web page, not a catalog: {err}");
     }
 
     const GOOD_AD: &str = r#"{"id":"thorny-times","version":1,"image":"https://example.org/capsule.png","size":135584,"sha256":"3AA411F3AB65A986DD7FDE5ECFBBCB0D399458306678421D4DEFC6B899C550CA","url":"https://store.steampowered.com/app/2182610/","caption_ru":"Новая игра","caption_en":"A new game"}"#;
