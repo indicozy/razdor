@@ -25,7 +25,9 @@ mobile support; there is no roadmap and nothing else is started unless the owner
   runs only the tests of the modules it changed (`cargo test --profile fasttest <module>::`, e.g.
   `rules::marks::`; `--bins ui::<module>::` for `src/ui`) plus clippy, never the whole suite. The full
   suite runs once, on the merged `main`, before a release push. Put this rule in every agent brief.
-- Lint: `cargo clippy --release`.
+- Lint: `cargo clippy --all-targets -- -D warnings`, what CI runs (test code included; a plain
+  `cargo clippy --release` misses the test code's lints and broke CI on 2026-11-13). Put this
+  command in every agent brief.
 - Community map smoke test: `cargo test --release --lib community_maps_smoke` with
   `RAZDOR_COMMUNITY_DIR` set (the folder's path is in `CLAUDE.local.md`): every map of every
   install there (mods are installs) loads and plays 30 days without a panic or a softlock.
