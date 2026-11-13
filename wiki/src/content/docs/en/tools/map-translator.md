@@ -7,6 +7,10 @@ sidebar:
 
 `razdor-translate` is a standalone program for creating localized versions of your cards and game data using Large Language Models (LLM).
 
+:::tip
+Step-by-step instructions with commands for Windows and Linux: [How to translate a map](/razdor/wiki/en/tutorials/translate-map/).
+:::
+
 ## Key Features
 
 The program allows you to create copies of cards (e.g., from `Name.DTm` to `Name_en.DTm`) and translate game data.
