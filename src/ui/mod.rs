@@ -1194,6 +1194,8 @@ impl App {
         let w = widgets::measure(&label, size).width;
         // Inside the safe area (zeros on desktop): the rounded corner and the cutout stay clear.
         let (_, top, right, _) = razdor::platform::safe_insets();
+        // With the debug mode on, the label goes under its strip (`debug_banner::bottom`, 0 otherwise).
+        let top = top.max(debug_banner::bottom());
         chrome::shadow_text(&label, macroquad::prelude::screen_width() - right - w - 8.0 * k, top + 8.0 * k + size, size, chrome::GOLD);
     }
 

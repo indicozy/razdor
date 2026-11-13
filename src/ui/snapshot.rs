@@ -42,6 +42,7 @@
 //! `RAZDOR_DP=<f32>` is a phone's density (screen px per dp): the phone layout of the pop-ups and
 //! the event window (their size in dp, the window's width following the screen), on the desktop.
 //! `RAZDOR_TOUCHPAD=1` turns the touchpad mode on (also off the phone: `touchpad::allow_offscreen`), so its cursor shows in a snapshot.
+//! `RAZDOR_SNAPSHOT_FPS=1` and `RAZDOR_SNAPSHOT_DEBUG=1` turn the FPS counter and the debug mode's strip on, whatever the scene.
 //! `RAZDOR_KEYBOARD=<px>` is the on-screen keyboard's height (physical px) a phone reports: the
 //! windows with a name field (`classes:<map>`, `save:<map>`) move above it.
 //!
@@ -462,6 +463,15 @@ pub fn stage(app: &mut App) {
     }
     super::widgets::set_pointer(pointer());
     super::pan::force_for_snapshot(pan_offset());
+    // `RAZDOR_SNAPSHOT_FPS=1` / `RAZDOR_SNAPSHOT_DEBUG=1`: the FPS counter and the debug mode (its strip)
+    // on, whatever the scene. They only turn them on: a settings file (`audio.json`) left in the save
+    // folder by an earlier run still sets them, so a debug-off shot needs a clean save folder.
+    if std::env::var("RAZDOR_SNAPSHOT_FPS").is_ok_and(|v| v == "1") {
+        app.audio.settings.show_fps = true;
+    }
+    if std::env::var("RAZDOR_SNAPSHOT_DEBUG").is_ok_and(|v| v == "1") {
+        app.audio.settings.debug_mode = true;
+    }
     // `RAZDOR_MOUSE_RIGHT=1`: the right button held where `RAZDOR_MOUSE` stands (the map's
     // tooltips, as the original shows them while it is held).
     super::input::hold_right_for_snapshot(std::env::var("RAZDOR_MOUSE_RIGHT").is_ok_and(|v| v == "1"));
