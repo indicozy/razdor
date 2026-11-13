@@ -1,0 +1,390 @@
+{
+  "schema": 1,
+  "meta": {
+    "label": "check-2b464bdd-dirty",
+    "machine": "RTX 4060 headless (VirtualGL, private Xvfb)",
+    "build": "razdor sha256:7514fdedc37d",
+    "commit": "2b464bdd-dirty",
+    "bench_tool": "2b464bdd",
+    "backend": "gpu-4060",
+    "display": ":90",
+    "size": "1024x768",
+    "refresh": 0,
+    "workspace": null,
+    "runs": 3,
+    "frames": null,
+    "skip": null,
+    "host_cpu": "x86_64",
+    "date": "2026-11-13",
+    "seconds": 25.0,
+    "skip_seconds": 5.0,
+    "device": "/dev/dri/card2",
+    "gpu": "NVIDIA GeForce RTX 4060",
+    "gpu_pci": "0000:05:00.0",
+    "renderer": "NVIDIA GeForce RTX 4060/PCIe/SSE2",
+    "atmosphere_switches": true
+  },
+  "scenes": {
+    "rk3-start/flat/off": {
+      "ms": 1.704,
+      "ms_runs": [
+        1.704,
+        1.732,
+        1.686
+      ],
+      "work": 0.193,
+      "work_runs": [
+        0.193,
+        0.195,
+        0.184
+      ],
+      "p90": 2.321,
+      "p90_runs": [
+        2.835,
+        2.321,
+        1.812
+      ],
+      "load": 0.452,
+      "load_runs": [
+        0.708,
+        0.452,
+        0.431
+      ],
+      "rss": 461.961,
+      "rss_runs": [
+        502.316,
+        461.961,
+        461.41
+      ],
+      "vram": 132,
+      "vram_runs": [
+        132,
+        132,
+        132
+      ],
+      "draws": 146.0,
+      "draws_runs": [
+        146.0,
+        146.0,
+        146.0
+      ],
+      "verts": 744.0,
+      "verts_runs": [
+        744.0,
+        744.0,
+        744.0
+      ],
+      "load1": 9.337,
+      "load1_runs": [
+        12.049,
+        9.337,
+        7.203
+      ],
+      "fps": 586.9,
+      "capped": false,
+      "runs": 3,
+      "renderer": "OpenGl, 4.6.0 NVIDIA 615.78.08"
+    },
+    "rk3-start/25d/off": {
+      "ms": 1.755,
+      "ms_runs": [
+        1.767,
+        1.755,
+        1.744
+      ],
+      "work": 0.284,
+      "work_runs": [
+        0.286,
+        0.284,
+        0.28
+      ],
+      "p90": 1.881,
+      "p90_runs": [
+        2.078,
+        1.881,
+        1.842
+      ],
+      "load": 0.435,
+      "load_runs": [
+        0.444,
+        0.435,
+        0.43
+      ],
+      "rss": 461.391,
+      "rss_runs": [
+        461.391,
+        461.52,
+        461.273
+      ],
+      "vram": 132,
+      "vram_runs": [
+        132,
+        132,
+        132
+      ],
+      "draws": 146.0,
+      "draws_runs": [
+        146.0,
+        146.0,
+        146.0
+      ],
+      "verts": 668.0,
+      "verts_runs": [
+        668.0,
+        668.0,
+        668.0
+      ],
+      "load1": 5.152,
+      "load1_runs": [
+        5.875,
+        5.152,
+        5.115
+      ],
+      "fps": 569.8,
+      "capped": false,
+      "runs": 3,
+      "renderer": "OpenGl, 4.6.0 NVIDIA 615.78.08"
+    },
+    "db-zoomout/25d/off": {
+      "ms": 5.828,
+      "ms_runs": [
+        5.905,
+        5.828,
+        5.806
+      ],
+      "work": 2.779,
+      "work_runs": [
+        2.822,
+        2.779,
+        2.764
+      ],
+      "p90": 6.277,
+      "p90_runs": [
+        6.414,
+        6.277,
+        5.962
+      ],
+      "load": 0.444,
+      "load_runs": [
+        0.44,
+        0.449,
+        0.444
+      ],
+      "rss": 460.367,
+      "rss_runs": [
+        464.848,
+        460.086,
+        460.367
+      ],
+      "vram": 141,
+      "vram_runs": [
+        141,
+        141,
+        141
+      ],
+      "draws": 192.0,
+      "draws_runs": [
+        192.0,
+        192.0,
+        192.0
+      ],
+      "verts": 16396.0,
+      "verts_runs": [
+        16396.0,
+        16396.0,
+        16396.0
+      ],
+      "load1": 2.935,
+      "load1_runs": [
+        3.857,
+        2.935,
+        2.772
+      ],
+      "fps": 171.6,
+      "capped": false,
+      "runs": 3,
+      "renderer": "OpenGl, 4.6.0 NVIDIA 615.78.08"
+    },
+    "db-zoomout/25d/on": {
+      "ms": 6.404,
+      "ms_runs": [
+        6.419,
+        6.404,
+        6.402
+      ],
+      "work": 3.369,
+      "work_runs": [
+        3.369,
+        3.376,
+        3.359
+      ],
+      "p90": 6.745,
+      "p90_runs": [
+        6.764,
+        6.736,
+        6.745
+      ],
+      "load": 0.59,
+      "load_runs": [
+        0.59,
+        0.601,
+        0.57
+      ],
+      "rss": 524.449,
+      "rss_runs": [
+        524.645,
+        524.449,
+        524.438
+      ],
+      "vram": 221,
+      "vram_runs": [
+        221,
+        221,
+        221
+      ],
+      "draws": 231.0,
+      "draws_runs": [
+        231.0,
+        231.0,
+        231.0
+      ],
+      "verts": 16648.0,
+      "verts_runs": [
+        16648.0,
+        16648.0,
+        16648.0
+      ],
+      "load1": 1.941,
+      "load1_runs": [
+        2.43,
+        1.941,
+        1.687
+      ],
+      "fps": 156.2,
+      "capped": false,
+      "runs": 3,
+      "renderer": "OpenGl, 4.6.0 NVIDIA 615.78.08"
+    },
+    "db-zoomout/third/off": {
+      "ms": 9.027,
+      "ms_runs": [
+        9.056,
+        9.027,
+        9.009
+      ],
+      "work": 5.454,
+      "work_runs": [
+        5.478,
+        5.454,
+        5.44
+      ],
+      "p90": 9.285,
+      "p90_runs": [
+        9.324,
+        9.285,
+        9.23
+      ],
+      "load": 0.48,
+      "load_runs": [
+        0.48,
+        0.489,
+        0.462
+      ],
+      "rss": 467.863,
+      "rss_runs": [
+        478.695,
+        467.863,
+        460.996
+      ],
+      "vram": 143,
+      "vram_runs": [
+        143,
+        143,
+        143
+      ],
+      "draws": 195.0,
+      "draws_runs": [
+        195.0,
+        195.0,
+        195.0
+      ],
+      "verts": 26144.0,
+      "verts_runs": [
+        26144.0,
+        26144.0,
+        26144.0
+      ],
+      "load1": 1.317,
+      "load1_runs": [
+        1.483,
+        1.317,
+        1.208
+      ],
+      "fps": 110.8,
+      "capped": false,
+      "runs": 3,
+      "renderer": "OpenGl, 4.6.0 NVIDIA 615.78.08"
+    },
+    "db-zoomout/third/on": {
+      "ms": 9.64,
+      "ms_runs": [
+        9.67,
+        9.632,
+        9.64
+      ],
+      "work": 6.296,
+      "work_runs": [
+        6.311,
+        6.296,
+        6.289
+      ],
+      "p90": 10.005,
+      "p90_runs": [
+        10.017,
+        9.971,
+        10.005
+      ],
+      "load": 0.58,
+      "load_runs": [
+        0.578,
+        0.602,
+        0.58
+      ],
+      "rss": 524.871,
+      "rss_runs": [
+        525.609,
+        524.453,
+        524.871
+      ],
+      "vram": 221,
+      "vram_runs": [
+        221,
+        221,
+        221
+      ],
+      "draws": 280.0,
+      "draws_runs": [
+        280.0,
+        280.0,
+        280.0
+      ],
+      "verts": 26484.0,
+      "verts_runs": [
+        26484.0,
+        26484.0,
+        26484.0
+      ],
+      "load1": 1.216,
+      "load1_runs": [
+        1.216,
+        1.21,
+        1.407
+      ],
+      "fps": 103.7,
+      "capped": false,
+      "runs": 3,
+      "renderer": "OpenGl, 4.6.0 NVIDIA 615.78.08"
+    }
+  },
+  "errors": {}
+}
