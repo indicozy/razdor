@@ -7,20 +7,24 @@
 
 DIR holds index.json (tools/community-pack/build.py's output) and the flat files it names.
 
-What it does:
-  - checks every file of the catalog (its size and SHA-256 against index.json); a file whose name
-    GitVerse refuses (.exe, .bin, no extension, a name over 255 characters) stops the run, listed;
-  - creates the release `catalog-YYYY-MM-DD` on razdor-community and uploads the entries' files and
-    the ad's picture as release assets (resumable: DIR/gitverse-state.json keeps name -> address),
-    each verified anonymously by parts and SHA-256;
-  - writes the GitVerse index.json into DIR/gitverse/: each uploaded file's path becomes its attachment
-    address; previews and map pictures stay relative and move to previews/ (served from Pages next to
-    index.json); the game keeps its GitVerse address with the GitHub address as a mirror;
-  - pushes index.json, previews/ and the hub page (tools/community-pack/web/) to the razdor-community
-    Pages (the docs/ folder; `--no-pages` skips it), waits until Pages serves the new index.json;
-  - deletes the catalog releases older than the newest two (after the Pages push).
+Where each file goes (by its extension; the catalog's names are `<sha256 first 16>.<ext>`):
+  - an archive (.zip, .gz, .tgz, .7z, .apk) that is a file of an entry (a mod's zip, an archive map):
+    a release asset on `razdor-community` (GitVerse takes these); the index names it by its address;
+  - anything else (.dtm maps and campaigns, every picture: previews, map pictures, the ad's picture)
+    goes to the Pages site: a file at its catalog path (relative, unchanged in the index), a picture
+    under previews/. GitVerse refuses .dtm as a release asset; Pages refuses only .zip, .exe and .py;
+  - a file that neither can take (a refused name, an archive on Pages, a clash with the site's own
+    files) stops the run before anything is created: the list is printed.
 
-The game archive is not uploaded: it is the release `game-cu-1.2` already on GitVerse.
+The Pages site (the docs/ folder of razdor-community) must stay well under GitHub's and GitVerse's
+500 MB: above 400 MB this warns, at 500 MB it stops. The run also writes the GitVerse index.json into
+DIR/gitverse/ (the site's layout, so the push copies it), pushes it with the hub page
+(tools/community-pack/web/) and waits until Pages serves it, then deletes the catalog releases older
+than the newest two. The game archive is not uploaded: it is the release `game-cu-1.2` already there;
+the game keeps its GitVerse address and the GitHub one is its mirror.
+
+Resumable: DIR/gitverse-state.json keeps each uploaded file's address; a run that stopped midway goes
+on with the same command.
 """
 
 import argparse
@@ -41,6 +45,12 @@ GAME_URL = "https://gitverse.ru/api/attachments/36c22adf-f3f3-4286-a474-9b6a00a5
 PREVIEWS = "previews/"
 STATE = "gitverse-state.json"
 STAGE = "gitverse"
+ARCHIVE_EXT = frozenset({"zip", "gz", "tgz", "7z", "apk"})   # release assets (GitVerse takes these)
+PAGES_REFUSED_EXT = frozenset({"zip", "exe", "py"})          # Pages refuses these
+RESERVED_SITE = frozenset({"index.json", "releases.json", "index.html", "hub.js", "hub.css", ".nojekyll"})
+MB = 1024 * 1024
+PAGES_WARN = 400 * MB
+PAGES_LIMIT = 500 * MB
 
 
 class HubError(gv.GitVerseError):
@@ -56,29 +66,78 @@ def load_catalog(folder):
     return cat
 
 
-def refs(cat):
-    """(uploads, pictures): {file name: relative path} for the files that go to the release (the entries'
-    files and the ad's picture) and for the previews and map pictures (served from Pages)."""
-    uploads, pictures = {}, {}
+def ext_of(name):
+    return name.rpartition(".")[2].lower() if "." in name else ""
 
-    def add(store, rel):
+
+def refs(cat):
+    """[(name, role)] of the catalog's files: role "file" (an entry's file) or "picture" (a preview, a map
+    picture, the ad's picture). Remote addresses are not files."""
+    out = set()
+
+    def add(rel, role):
         if not isinstance(rel, str) or not rel or rel.startswith("https://"):
             return
         if "/" in rel or "\\" in rel or rel.startswith("."):
             raise HubError(f"{rel}: the catalog's files are flat (a plain name)")
-        store.setdefault(rel, rel)
+        out.add((rel, role))
 
     for e in cat["entries"]:
         for f in e.get("files") or []:
-            add(uploads, f.get("path"))
+            add(f.get("path"), "file")
         for key in ("preview", "picture"):
             ref = e.get(key)
             if isinstance(ref, dict):
-                add(pictures, ref.get("path"))
+                add(ref.get("path"), "picture")
     ad = cat.get("ad")
     if isinstance(ad, dict):
-        add(uploads, ad.get("image"))
-    return uploads, pictures
+        add(ad.get("image"), "picture")
+    return sorted(out)
+
+
+def pages_problem(name):
+    """Why Pages (as measured: refuses .zip, .exe, .py) cannot take this file, or None."""
+    if not gv.NAME_RE.match(name):
+        return "letters, digits, _, - and . only, at most 255 characters"
+    ext = ext_of(name)
+    if not ext:
+        return "no extension"
+    if ext in PAGES_REFUSED_EXT:
+        return f"Pages refuses .{ext} files"
+    if name in RESERVED_SITE:
+        return "the name is the site's own file"
+    return None
+
+
+def destination(name, role):
+    """('release' or 'pages', problem or None) for a catalog file of this role."""
+    if role == "file" and ext_of(name) in ARCHIVE_EXT:
+        return "release", gv.name_problem(name)
+    return "pages", pages_problem(name)
+
+
+def plan(cat):
+    """{'release': [names], 'pages': {site path: name}, 'problems': [(name, why)]}. A picture's site path is
+    under previews/, a file's is its name at the site root."""
+    release, site, problems = [], {}, []
+    for name, role in refs(cat):
+        dest, problem = destination(name, role)
+        if problem:
+            problems.append((name, problem))
+        elif dest == "release":
+            release.append(name)
+        else:
+            site[name if role == "file" else PREVIEWS + name] = name
+    return {"release": sorted(set(release)), "pages": site, "problems": problems}
+
+
+def pages_size_verdict(total):
+    """'ok', 'warn' (above 400 MB) or 'stop' (500 MB or more) for the Pages site's total bytes."""
+    if total >= PAGES_LIMIT:
+        return "stop"
+    if total > PAGES_WARN:
+        return "warn"
+    return "ok"
 
 
 def check_local(folder, cat, names, sha_of):
@@ -100,29 +159,33 @@ def check_local(folder, cat, names, sha_of):
             raise HubError(f"{name}: {os.path.getsize(path)} bytes, index.json says {size}")
         if digest and sha_of(path) != str(digest).lower():
             raise HubError(f"{name}: SHA-256 differs from index.json")
-        gv.check_size(path)
+        if os.path.getsize(path) > gv.ASSET_LIMIT and ext_of(name) in ARCHIVE_EXT:
+            raise HubError(f"{name}: over 100 MB, GitVerse's limit for a release asset")
 
 
 def gitverse_index(cat, urls):
-    """The GitVerse copy of the catalog: attachment addresses for the uploaded files, previews/ for the
-    pictures, the game's GitVerse address with the GitHub one as a mirror."""
+    """The GitVerse copy of the catalog: an archive file's attachment address (urls: name -> address), a
+    Pages file's path unchanged (relative to index.json), pictures under previews/, the game's GitVerse
+    address with the GitHub one as a mirror."""
     out = copy.deepcopy(cat)
 
-    def address(rel):
+    def file_path(rel):
         if isinstance(rel, str) and rel.startswith("https://"):
             return rel
-        return urls[rel]
+        if ext_of(rel) in ARCHIVE_EXT:
+            return urls[rel]
+        return rel
 
     for e in out["entries"]:
         for f in e.get("files") or []:
-            f["path"] = address(f["path"])
+            f["path"] = file_path(f["path"])
         for key in ("preview", "picture"):
             ref = e.get(key)
             if isinstance(ref, dict):
                 ref["path"] = PREVIEWS + os.path.basename(ref["path"])
     ad = out.get("ad")
     if isinstance(ad, dict):
-        ad["image"] = address(ad["image"])
+        ad["image"] = PREVIEWS + os.path.basename(ad["image"])
     game = out.get("game")
     if isinstance(game, dict):
         mirrors = []
@@ -139,27 +202,51 @@ def gitverse_index(cat, urls):
 
 
 def check_index(idx):
+    """A file is an address when it is an archive (a release asset), else a plain name at the site root;
+    a picture is under previews/."""
     for e in idx["entries"]:
         for f in e.get("files") or []:
-            if not f["path"].startswith("https://"):
-                raise HubError(f"entry {e.get('id')}: a file path is not an address: {f['path']}")
+            p = f["path"]
+            if p.startswith("https://"):
+                continue
+            if ext_of(p) in ARCHIVE_EXT or "/" in p:
+                raise HubError(f"entry {e.get('id')}: {p} must be an address (an archive) or a plain site name")
         for key in ("preview", "picture"):
             ref = e.get(key)
             if isinstance(ref, dict) and not ref["path"].startswith(PREVIEWS):
                 raise HubError(f"entry {e.get('id')}: {key} is not under {PREVIEWS}")
+    ad = idx.get("ad")
+    if isinstance(ad, dict) and not ad["image"].startswith(PREVIEWS):
+        raise HubError(f"the ad's picture is not under {PREVIEWS}")
 
 
-def write_stage(folder, idx, pictures):
+def write_stage(folder, idx, site):
+    """DIR/gitverse/ in the site's own layout: index.json, the Pages files at their paths, the pictures in
+    previews/. Returns the folder."""
     stage = os.path.join(folder, STAGE)
     if os.path.exists(stage):
         shutil.rmtree(stage)
-    os.makedirs(os.path.join(stage, "previews"))
+    os.makedirs(stage)
     with open(os.path.join(stage, "index.json"), "w", encoding="utf-8") as f:
         json.dump(idx, f, ensure_ascii=False, indent=2)
         f.write("\n")
-    for name in pictures:
-        shutil.copyfile(os.path.join(folder, name), os.path.join(stage, "previews", name))
+    for rel, name in sorted(site.items()):
+        dst = os.path.join(stage, rel)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copyfile(os.path.join(folder, name), dst)
     return stage
+
+
+def stage_files(stage):
+    """{site path: bytes} of every file the stage holds."""
+    out = {}
+    for root, _, names in os.walk(stage):
+        for n in names:
+            full = os.path.join(root, n)
+            rel = os.path.relpath(full, stage).replace(os.sep, "/")
+            with open(full, "rb") as f:
+                out[rel] = f.read()
+    return out
 
 
 def load_state(folder):
@@ -179,13 +266,14 @@ def publish(args):
     cat = load_catalog(folder)
     state = load_state(folder)
     tag = args.tag or state.get("tag") or "catalog-" + datetime.date.today().isoformat()
-    uploads, pictures = refs(cat)
-    refused = [(n, gv.name_problem(n)) for n in sorted(uploads) if gv.name_problem(n)]
-    if refused:
-        for n, why in refused:
-            print(f"refused name: {n}: {why}")
-        print("STOP: GitVerse refuses these names; the catalog's files must be renamed (not done here)")
+    pl = plan(cat)
+    if pl["problems"]:
+        for name, why in pl["problems"]:
+            print(f"refused: {name}: {why}")
+        print("STOP: these files have no place (neither a release asset nor the Pages site); "
+              "nothing was created. The catalog's files must be changed first (not done here).")
         return 2
+    uploads, site = pl["release"], pl["pages"]
     cache = {}
 
     def sha_of(path):
@@ -193,14 +281,26 @@ def publish(args):
             cache[path] = gv.sha256_file(path)
         return cache[path]
 
-    check_local(folder, cat, set(uploads) | set(pictures), sha_of)
-    total = sum(os.path.getsize(os.path.join(folder, n)) for n in uploads)
-    print(f"{tag}: {len(uploads)} files to upload ({total / 1024 ** 2:.1f} MB), "
-          f"{len(pictures)} pictures for Pages, {len(cat['entries'])} entries")
+    check_local(folder, cat, set(uploads) | set(site.values()), sha_of)
+    release_bytes = sum(os.path.getsize(os.path.join(folder, n)) for n in uploads)
+    # the Pages site: the files once each, the hub page, and the index (the source's size stands in for
+    # the GitVerse copy, which differs only in its addresses)
+    site_bytes = sum(os.path.getsize(os.path.join(folder, n)) for n in set(site.values()))
+    site_bytes += sum(len(data) for data in pages.web_files().values())
+    site_bytes += os.path.getsize(os.path.join(folder, "index.json"))
+    verdict = pages_size_verdict(site_bytes)
+    print(f"{tag}: {len(uploads)} release assets ({release_bytes / MB:.1f} MB), "
+          f"{len(site)} Pages files ({site_bytes / MB:.1f} MB), {len(cat['entries'])} entries")
+    if verdict == "stop":
+        print(f"STOP: the Pages site would be {site_bytes / MB:.0f} MB (the limit is 500 MB)")
+        return 2
+    if verdict == "warn":
+        print(f"WARNING: the Pages site is {site_bytes / MB:.0f} MB (above 400 MB; the limit is 500 MB)")
+
     if args.dry_run:
         urls = {n: "https://gitverse.ru/api/attachments/DRY-RUN" for n in uploads}
         idx = gitverse_index(cat, urls)
-        write_stage(folder, idx, pictures)
+        write_stage(folder, idx, site)
         print("dry run: nothing sent; the GitVerse index is in", os.path.join(folder, STAGE, "index.json"))
         return 0
 
@@ -222,20 +322,21 @@ def publish(args):
         rid = rel["id"]
         state = {"tag": tag, "release_id": rid, "uploaded": {}}
         save_state(folder, state)
-        gv.register(reg, gv.HUB_REPO, tag, rid, "catalog", False, total)
+        gv.register(reg, gv.HUB_REPO, tag, rid, "catalog", False, release_bytes)
         gv.save_registry(reg)
         print(f"created the release {tag} (id {rid})")
 
     done = state.setdefault("uploaded", {})
-    for name in sorted(uploads):
+    for name in uploads:
         if name in done:
             continue
-        asset = client.upload_asset(gv.OWNER, gv.HUB_REPO, rid, name, os.path.join(folder, name))
-        done[name] = {"url": asset["browser_download_url"], "size": os.path.getsize(os.path.join(folder, name)),
-                      "sha256": sha_of(os.path.join(folder, name))}
+        path = os.path.join(folder, name)
+        asset = client.upload_asset(gv.OWNER, gv.HUB_REPO, rid, name, path)
+        done[name] = {"url": asset["browser_download_url"], "size": os.path.getsize(path),
+                      "sha256": sha_of(path)}
         save_state(folder, state)
         print(f"uploaded {name}")
-    for name in sorted(uploads):
+    for name in uploads:
         rec = done[name]
         if not rec.get("verified"):
             gv.fetch_exact(rec["url"], rec["size"], rec["sha256"])
@@ -245,7 +346,7 @@ def publish(args):
 
     urls = {n: done[n]["url"] for n in uploads}
     idx = gitverse_index(cat, urls)
-    stage = write_stage(folder, idx, pictures)
+    stage = write_stage(folder, idx, site)
     with open(os.path.join(stage, "index.json"), "rb") as f:
         index_bytes = f.read()
     print(f"GitVerse index: {os.path.join(stage, 'index.json')}")
@@ -253,21 +354,16 @@ def publish(args):
         print("Pages not pushed (--no-pages); the catalog's release is up")
         return 0
 
+    site_files = stage_files(stage)
+    site_files.update(pages.web_files())
     with pages.Pages(gv.HUB_REPO) as pg:
-        pg.clear("docs/previews")
-        pg.write("docs/index.json", index_bytes)
-        for name in pictures:
-            with open(os.path.join(stage, "previews", name), "rb") as f:
-                pg.write("docs/previews/" + name, f.read())
-        for name, data in pages.web_files().items():
-            pg.write("docs/" + name, data)
+        pg.sync_site(site_files)
         pushed = pg.commit_push(f"Catalog {tag}")
         print(f"Pages: {'pushed ' + pushed if pushed else 'unchanged'}")
+        sample = sorted(p for p in site if p in site_files)[:1]
         expected = {"docs/index.json": index_bytes}
-        if pictures:
-            sample = sorted(pictures)[0]
-            with open(os.path.join(stage, "previews", sample), "rb") as f:
-                expected["docs/previews/" + sample] = f.read()
+        for rel in sample:
+            expected["docs/" + rel] = site_files[rel]
         waited = pg.wait_served(expected, wait=args.wait)
         print(f"Pages serves the new catalog (waited {waited:.0f} s)")
 
@@ -283,7 +379,7 @@ def publish(args):
         gv.unregister(reg, gv.HUB_REPO, entry["tag"])
         print(f"deleted the older catalog release {entry['tag']}")
     gv.save_registry(reg)
-    total_mb = sum(r.get("bytes", 0) for r in reg["releases"]) / 1024 ** 2
+    total_mb = sum(r.get("bytes", 0) for r in reg["releases"]) / MB
     print(f"release files this script made: {total_mb:.0f} MB (budget 4 GB for both repos)")
     print(f"published {tag}: https://gitverse.ru/{gv.OWNER}/{gv.HUB_REPO}/releases")
     return 0
@@ -314,7 +410,7 @@ def main(argv):
     ap.add_argument("--replace", action="store_true", help="delete the existing release of the tag first")
     ap.add_argument("--keep", type=int, default=2, help="catalog releases kept (default 2)")
     ap.add_argument("--wait", type=int, default=pages.WAIT_DEFAULT, help="seconds to wait for Pages")
-    ap.add_argument("--dry-run", action="store_true", help="check and write the GitVerse index; no network")
+    ap.add_argument("--dry-run", action="store_true", help="check, route and write the GitVerse index; no network")
     args = ap.parse_args(argv)
     try:
         if args.unpublish:

@@ -49,16 +49,23 @@ Downloaded mods and maps are untrusted: never run them, and run any Python that 
 6a. **GitVerse mirror** (the owner's decision, 2026-11-13; with the same yes as step 6): the same
    catalog, under the same tag as the GitHub release (`docs/specs/2026-11-13-gitverse-mirrors.md`):
    `python3 -I tools/gitverse/publish_hub.py --catalog-dir <out> --tag catalog-YYYY-MM-DD`
-   (the tag of step 6, with its `-2` if there was one). It uploads the catalog's files to a release on
-   `razdor-community` on GitVerse, writes the GitVerse `index.json` into `<out>/gitverse/` (the game keeps
-   its GitVerse address; the GitHub one becomes its mirror), pushes the site (`index.json`, `previews/`,
-   the hub page) to the razdor-community Pages, and deletes the catalogs older than the newest two.
-   - **It stops, before anything is created, when a file's name is one GitVerse refuses** (it accepts
-     `apk, zip, gz, tgz, 7z, AppImage, png, jpg, jpeg, pdf, md, txt, csv`; the maps are `.dtm`, which it
-     refuses). It lists them; the mirror is then not made, and the owner decides (the GitHub catalog
-     stays the default source, so players are not affected). Do not rename files on your own.
+   (the tag of step 6, with its `-2` if there was one). Files are routed by extension: the entries'
+   archives (`.zip`, the mods) become release assets on `razdor-community` on GitVerse; the maps (`.dtm`)
+   and every picture go to the Pages site of `razdor-community` (`docs/`: the maps at their catalog
+   paths, the pictures under `previews/`, `index.json`, the hub page). The GitVerse `index.json` is written
+   into `<out>/gitverse/` (the game keeps its GitVerse address; the GitHub one becomes its mirror); the
+   catalogs older than the newest two are deleted.
+   - **Check the routing first**: `--dry-run` prints the counts and the Pages size and writes the
+     GitVerse index without sending anything. The Pages site must stay under 500 MB (it warns above
+     400 MB; the current catalog is about 21 MB of maps plus the pictures).
+   - **It stops, before anything is created, when a file has no place** (a refused archive type, a
+     `.zip` that would go to Pages, a `.exe`/`.py`, a name with a space, a clash with the site's own
+     files). It lists them; the mirror is then not made, and the owner decides (the GitHub catalog stays
+     the default source, so players are not affected). Do not rename files on your own.
+   - The Pages push replaces the site's catalog files: a map of an older catalog that is not in the new
+     one is removed. The update feed (`releases.json`) is never touched here.
    - A run that stops midway resumes with the same command (`<out>/gitverse-state.json`).
    - Never run it against a catalog nobody has checked: it writes the public Pages site.
-   - Report the result (the tag, the files, the Pages line, the deleted releases) to the owner.
+   - Report the result (the tag, the release assets, the Pages files and size, the deleted releases) to the owner.
 7. **Afterwards**: the app reads the new catalog at its next start; no code change is needed.
    Keep the `out/` folder and the scratch data (they are the next run's inputs).

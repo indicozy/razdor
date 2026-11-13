@@ -187,7 +187,7 @@ class HubFlowTests(unittest.TestCase):
         os.makedirs(self.state)
         self.cat = os.path.join(root, "cat")
         os.makedirs(self.cat)
-        self.payloads = {"0123456789abcdef.zip": b"map zip", "fedcba9876543210.zip": b"mod zip",
+        self.payloads = {"0123456789abcdef.dtm": b"map dtm", "fedcba9876543210.zip": b"mod zip",
                          "aaaaaaaaaaaaaaaa.png": b"\x89PNG one", "bbbbbbbbbbbbbbbb.png": b"\x89PNG two"}
         for name, data in self.payloads.items():
             with open(os.path.join(self.cat, name), "wb") as f:
@@ -203,7 +203,7 @@ class HubFlowTests(unittest.TestCase):
         index = {"format": 1,
                  "game": {"url": "https://github.com/x/game.zip", "size": 1, "sha256": "11" * 32, "name": "g.zip"},
                  "entries": [{"id": "map-1", "kind": "map", "title": {"ru": "Т"}, "author": "a", "version": "1",
-                              "files": [ref("0123456789abcdef.zip", {"name": "m.DTm", "archive": False})],
+                              "files": [ref("0123456789abcdef.dtm", {"name": "m.DTm", "archive": False})],
                               "preview": ref("aaaaaaaaaaaaaaaa.png", {"name": "preview.png", "archive": False})},
                              {"id": "mod-1", "kind": "mod", "title": {"ru": "М"}, "author": "a", "version": "1",
                               "files": [ref("fedcba9876543210.zip", {"name": "mod.zip", "archive": True})]}]}
@@ -250,7 +250,12 @@ class HubFlowTests(unittest.TestCase):
                                   capture_output=True, check=True).stdout
 
         idx = json.loads(show("docs/index.json"))
-        self.assertTrue(idx["entries"][0]["files"][0]["path"].startswith("https://gitverse.ru/api/attachments/"))
+        # the map is a Pages file at its catalog path; the mod's zip is a release asset
+        self.assertEqual(idx["entries"][0]["files"][0]["path"], "0123456789abcdef.dtm")
+        self.assertEqual(show("docs/0123456789abcdef.dtm"), b"map dtm")
+        self.assertTrue(idx["entries"][1]["files"][0]["path"].startswith("https://gitverse.ru/api/attachments/"))
+        uploads = [c[2] for c in FakeClient.calls if c[0] == "upload"]
+        self.assertEqual(uploads, ["fedcba9876543210.zip"])
         self.assertEqual(idx["entries"][0]["preview"]["path"], "previews/aaaaaaaaaaaaaaaa.png")
         self.assertEqual(idx["game"]["url"], ph.GAME_URL)
         self.assertEqual(idx["game"]["mirrors"], ["https://github.com/x/game.zip"])
@@ -259,6 +264,21 @@ class HubFlowTests(unittest.TestCase):
         self.assertEqual(show("docs/releases.json"), b"[]\n")  # the app feed is not touched by a catalog
         deleted = [c for c in FakeClient.calls if c[0] in ("delete", "delete-tag")]
         self.assertEqual(deleted, [("delete", "razdor-community", 20)])
+
+    def test_a_file_with_no_place_stops_before_any_release_is_made(self):
+        import publish_hub as ph
+        with open(os.path.join(self.cat, "setup.exe"), "wb") as f:
+            f.write(b"x")
+        with open(os.path.join(self.cat, "index.json"), encoding="utf-8") as f:
+            idx = json.load(f)
+        idx["entries"][1]["files"][0]["path"] = "setup.exe"
+        with open(os.path.join(self.cat, "index.json"), "w", encoding="utf-8") as f:
+            json.dump(idx, f)
+        FakeClient.calls = []
+        args = argparse.Namespace(catalog_dir=self.cat, tag="catalog-2026-11-14", no_pages=False, replace=False,
+                                  keep=2, wait=0, dry_run=False, unpublish=None)
+        self.assertEqual(ph.publish(args), 2)
+        self.assertFalse([c for c in FakeClient.calls if c[0] in ("create", "upload")])
 
 
 if __name__ == "__main__":

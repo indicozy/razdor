@@ -9,7 +9,7 @@ The design is in `docs/specs/2026-11-13-gitverse-mirrors.md`.
 | `gitverse.py` | The shared client: the token, the API calls (releases, assets), retries, anonymous ranged downloads with the size and SHA-256 check, the name rule, the registry of the releases these scripts made. Not run directly. |
 | `pages.py` | The Pages push for `razdor-community`: a fresh clone of the repo, the `docs/` folder changed, a commit as the owner, a push to `main`, and a wait until the anonymous URLs serve exactly the new bytes. Not run directly. |
 | `publish_release.py` | An app release: packs the files GitVerse refuses, writes `SHA256SUMS.txt`, creates the release, uploads, verifies, updates the update feed (`releases.json`), deletes old releases. Also `--push-source` (the release commit and tag to GitVerse) and `--unpublish`. |
-| `publish_hub.py` | The hub catalog: uploads the catalog's files to a `catalog-YYYY-MM-DD` release, writes the GitVerse `index.json`, pushes the site (`index.json`, `previews/`, the hub page) to Pages, deletes old catalogs. |
+| `publish_hub.py` | The hub catalog: routes each file by extension (archives to a `catalog-YYYY-MM-DD` release, the rest to Pages), writes the GitVerse `index.json`, pushes the site (the Pages files, `index.json`, `previews/`, the hub page) to Pages, deletes old catalogs. |
 | `test_*.py` | Unit tests (no network; a local HTTP server and a local bare git repo stand in for GitVerse). |
 
 ## Usage
@@ -52,10 +52,22 @@ Token: `GITVERSE_TOKEN` in the environment, else the repo's `.env` (in a worktre
   `"archive": "zip"` and `"member"`; the APK and `SHA256SUMS` / `SHA256SUMS.txt` directly.
 - Pre-releases never touch the feed and never trigger the cleanup.
 
-The hub: release `catalog-YYYY-MM-DD` on `razdor-community`, the catalog's files as assets. The GitVerse
-`index.json` names each file by its attachment address; previews and map pictures stay relative and
-live in `docs/previews/` next to it; the game keeps `https://gitverse.ru/api/attachments/36c22adf-…`
-(the release `game-cu-1.2`, not uploaded again) with the GitHub address in `mirrors`.
+The hub: routed by extension (`publish_hub.py`, `destination()`):
+
+- **Release** `catalog-YYYY-MM-DD` on `razdor-community`: the entries' archives (`.zip`, `.gz`, `.tgz`,
+  `.7z`, `.apk`, the mods). The GitVerse `index.json` names each by its attachment address.
+- **Pages** (`docs/` of `razdor-community`, the site): everything else. A map (`.dtm`) is a file at its
+  catalog path, relative in the index and unchanged (`docs/<name>`); every picture (previews, map
+  pictures, the ad's picture) is under `docs/previews/`, relative. Pages refuses `.zip`, `.exe` and `.py`.
+- A file with no place (an archive that is not an accepted asset type, a `.zip` picture, `.exe`, a name
+  with a space, a name the site uses itself) **stops the run** before anything is created, listed.
+- The site must stay under 500 MB: above 400 MB the run warns, at 500 MB it stops. The catalog's
+  current size (the owner's figures, 2026-11-13): 516 `.dtm` (20.7 MB), 241 `.png` (small), the mods
+  (340 MB, as release assets). Each push replaces the site's catalog files (a file of an older catalog
+  is removed); `releases.json`, the update feed, is never touched by the hub.
+
+The game keeps `https://gitverse.ru/api/attachments/36c22adf-…` (the release `game-cu-1.2`, not uploaded
+again) with the GitHub address in `mirrors`.
 
 ## GitVerse rules found
 
@@ -66,8 +78,9 @@ generic Content-Type alike: the extension decides):
   `txt`, `csv`. **Refused (HTTP 400, `VALIDATION_ERROR`)**: `exe`, `bin`, `dtm`, `DTm`, `json`, `ini`,
   `lit`, `ogg`, `wav`, `mp3`, `webp`, `ttf`, `cfg`, `dll`, `xml`, `ipa`, and names without an extension.
   The publish scripts check this list before creating anything (`gitverse.GV_EXT_OK`).
-- **Consequence for the hub**: the catalog's maps are `.dtm` files and most of its entries use them.
-  `publish_hub.py` stops and lists them. Mirroring the catalog needs a decision first (see the report).
+- **Pages**, for the hub: Pages refuses only `.zip`, `.exe` and `.py` (the spec's measurement; the `.dtm`
+  files were not uploaded to Pages in a test, so the first real push is the check). The catalog's maps
+  go there because the release refuses `.dtm`.
 - Upload: `POST …/releases/{id}/assets?name=`, multipart field `attachment`. The response's
   `browser_download_url` is `https://gitverse.ru/api/attachments/<uuid>`; the same assets in a release
   GET carry another URL (`…/releases/download/…`) that answers 404. Store the upload's address.
@@ -113,7 +126,10 @@ python3 -I -m unittest discover -s tools/gitverse
 
 Covered: the packing (names, modes 0755, the programs' inner names), `SHA256SUMS.txt`, the feed's shape
 (names, `archive`/`member`, the old names, the newest two non-pre-releases), the cleanup selection, the
-hub index rewrite (attachment addresses, previews under `previews/`, the game's mirrors), the name rule,
+hub routing by extension (archives to the release, the rest to Pages, the stop list), the hub index rewrite
+(attachment addresses for archives, the `.dtm` path unchanged, previews under `previews/`, the game's mirrors),
+the Pages size verdicts (warn above 400 MB, stop at 500 MB), the Pages site sync (old catalog files removed,
+the feed kept), the name rule,
 the multipart body (streamed and whole), retries (429, 5xx, connection errors, not 404), ranged downloads
 with a short part and a server that ignores `Range`, the Pages commit, the no-op, the push and the wait
 for the new bytes (a local bare repository and a local server stand in for GitVerse).

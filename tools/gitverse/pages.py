@@ -31,6 +31,7 @@ PAGES_BASE = "https://indicozy.gitverse.site/" + gv.HUB_REPO + "/"
 AUTHOR = ("indicozy", "indicozy@gmail.com")
 WAIT_DEFAULT = 900
 WEB_FILES = ("index.html", "hub.js", "hub.css")
+KEEP_IN_DOCS = (".nojekyll", "releases.json")  # never removed by a site sync (the feed is the release script's)
 META_FILES_BASE = re.compile(r"<meta\s+name=[\"']razdor-files-base[\"'][^>]*>", re.IGNORECASE)
 COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 
@@ -118,6 +119,19 @@ class Pages:
         path = os.path.join(self.dir, rel_dir)
         if os.path.isdir(path):
             shutil.rmtree(path)
+
+    def sync_site(self, files):
+        """Makes docs/ hold exactly `files` ({docs-relative path: bytes}): files of an older catalog that
+        are not in it are removed. The update feed (releases.json) and .nojekyll are kept."""
+        docs = os.path.join(self.dir, "docs")
+        if os.path.isdir(docs):
+            for root, _, names in os.walk(docs):
+                for n in names:
+                    rel = os.path.relpath(os.path.join(root, n), docs).replace(os.sep, "/")
+                    if rel not in files and rel not in KEEP_IN_DOCS:
+                        os.remove(os.path.join(root, n))
+        for rel, data in files.items():
+            self.write("docs/" + rel, data)
 
     def ensure_nojekyll(self):
         path = os.path.join(self.dir, "docs", ".nojekyll")
