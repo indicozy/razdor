@@ -41,24 +41,50 @@ mod android {
         }
     }
 
-    /// Downloads `url` into the file `path` (at most `seconds` without an answer).
+    /// Downloads `url` into the file `path`: it stops after `STALL_SECONDS` without a byte (a
+    /// stall fails with `STALLED`, its reason in the log) and after `seconds` in all. Blocks; a
+    /// cancel from another thread (`download_cancel`) makes it return "cancelled".
     pub fn download(url: &str, path: &Path, seconds: u32) -> Result<(), String> {
         secure(url)?;
         let path = path.to_str().ok_or("the file's path is not text")?;
         // SAFETY: as in `cache_dir`.
         unsafe {
             let env = attach_jni_env();
-            let sig = "(Ljava/lang/String;Ljava/lang/String;I)Ljava/lang/String;";
+            let sig = "(Ljava/lang/String;Ljava/lang/String;II)Ljava/lang/String;";
             let mid = method(env, activity_class(env).obj, "razdorDownload", sig, false);
             if mid.is_null() || cleared(env) {
                 return Err("razdorDownload is missing".into());
             }
             let (url, path) = (string(env, url), string(env, path));
-            let reply = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, ACTIVITY, mid, url.obj, path.obj, seconds as i32));
+            let stall = crate::update::STALL_SECONDS as i32;
+            let reply = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, ACTIVITY, mid, url.obj, path.obj, stall, seconds as i32));
             if cleared(env) {
                 return Err("the download failed".into());
             }
-            reply_or_error(env, reply.obj)
+            match to_text(env, reply.obj) {
+                Some(text) if text.is_empty() => Ok(()),
+                Some(text) if text.starts_with("stalled") => {
+                    crate::diag!("download: {text}");
+                    Err(crate::update::STALLED.into())
+                }
+                Some(text) => Err(text),
+                None => Err("no reply".into()),
+            }
+        }
+    }
+
+    /// Asks the download under way to stop (`razdorDownloadCancel`): it returns "cancelled" at once,
+    /// closing its connection if it is waiting for a byte.
+    pub fn download_cancel() {
+        // SAFETY: as in `cache_dir`.
+        unsafe {
+            let env = attach_jni_env();
+            let mid = method(env, activity_class(env).obj, "razdorDownloadCancel", "()V", false);
+            if mid.is_null() || cleared(env) {
+                return;
+            }
+            ((**env).CallVoidMethod.unwrap())(env, ACTIVITY, mid);
+            let _ = cleared(env);
         }
     }
 
@@ -125,10 +151,17 @@ mod android {
 }
 
 #[cfg(target_os = "android")]
-pub use android::{cache_dir, download, get, install, installer_outcome};
+pub use android::{cache_dir, download, download_cancel, get, install, installer_outcome};
+
+/// iOS: a download is one `NSData` call that cannot be stopped in the middle (the caller's
+/// cancel is seen when it returns). Nothing to do.
+#[cfg(target_os = "ios")]
+pub fn download_cancel() {}
 
 #[cfg(target_os = "ios")]
 pub fn get(url: &str, _seconds: u32) -> Result<Vec<u8>, String> {
+    // No stall limit here: `NSData dataWithContentsOfURL:` has no timeout to set (the stall
+    // limit of `update::STALL_SECONDS` is a desktop curl option and the Android read timeout).
     use macroquad::miniquad::native::apple::frameworks::{class, msg_send, nil, sel, sel_impl, ObjcId};
     use std::ffi::{c_void, CString};
     secure(url)?;

@@ -192,29 +192,58 @@ private int razdorCornerRadius(WindowInsets insets, int position) {
     }
 }
 
-// Downloads `url` into the file `path`, giving up after `seconds` without an answer.
-public String razdorDownload(String url, String path, int seconds) {
+// Set by razdorDownloadCancel: the download under way stops and returns "cancelled". Each download
+// clears it when it starts (a cancel asked before that is asked again by the caller, which polls).
+private static volatile boolean razdorDownloadCancelled = false;
+// The connection of the download under way: a cancel closes it, so a read that waits for a byte
+// ends at once instead of at the stall limit.
+private static volatile HttpURLConnection razdorDownloadConnection = null;
+
+// Stops the download under way (razdorDownload returns "cancelled").
+public void razdorDownloadCancel() {
+    razdorDownloadCancelled = true;
+    HttpURLConnection connection = razdorDownloadConnection;
+    if (connection != null) {
+        connection.disconnect();
+    }
+}
+
+// Downloads `url` into the file `path`. `stallSeconds` is how long the link may go without an
+// answer or a byte (the connect and read timeouts); `totalSeconds` caps the whole download. Returns
+// "" when the file is in, "HTTP <code>" for a refused status, "stalled: <why>" for a stall,
+// "cancelled", "timeout: ..." at the cap, or the error.
+public String razdorDownload(String url, String path, int stallSeconds, int totalSeconds) {
+    razdorDownloadCancelled = false;
+    long deadline = System.currentTimeMillis() + totalSeconds * 1000L;
     HttpURLConnection connection = null;
     try {
         connection = (HttpURLConnection) new URL(url).openConnection();
-        connection.setConnectTimeout(seconds * 1000);
-        connection.setReadTimeout(seconds * 1000);
+        razdorDownloadConnection = connection;
+        connection.setConnectTimeout(stallSeconds * 1000);
+        connection.setReadTimeout(stallSeconds * 1000);
         connection.setRequestProperty("User-Agent", "razdor");
         int code = connection.getResponseCode();
         if (code / 100 != 2) {
             return "HTTP " + code;
         }
+        int n = 1;
         try (InputStream in = connection.getInputStream(); FileOutputStream out = new FileOutputStream(path)) {
             byte[] buffer = new byte[65536];
-            int n;
-            while ((n = in.read(buffer)) > 0) {
+            while (!razdorDownloadCancelled && System.currentTimeMillis() < deadline && (n = in.read(buffer)) > 0) {
                 out.write(buffer, 0, n);
             }
         }
-        return "";
+        if (razdorDownloadCancelled) {
+            return "cancelled";
+        }
+        // The loop ended at the cap with the last read still running (n > 0), not at the end.
+        return n > 0 ? "timeout: the download took longer than " + totalSeconds + " s" : "";
+    } catch (java.net.SocketTimeoutException e) {
+        return razdorDownloadCancelled ? "cancelled" : "stalled: " + e;
     } catch (Exception e) {
-        return e.toString();
+        return razdorDownloadCancelled ? "cancelled" : e.toString();
     } finally {
+        razdorDownloadConnection = null;
         if (connection != null) {
             connection.disconnect();
         }

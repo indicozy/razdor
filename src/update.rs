@@ -35,6 +35,15 @@ use serde::{Deserialize, Serialize};
 /// The newest releases on GitHub, as the API lists them (newest first).
 const RELEASES: &str = "https://api.github.com/repos/indicozy/razdor/releases?per_page=30";
 
+/// How long a download may go without a byte (or a connection) before it stops: every download
+/// here, the game's, the hub's and the updates', fails with [`STALLED`] instead of waiting out its
+/// whole cap. Curl's `--connect-timeout` and `--speed-*` options and the phones' read timeout.
+pub const STALL_SECONDS: u32 = 30;
+
+/// The reason of a download that stalled. The technical reason goes to the log; the game's window
+/// reads this one as a text of its own (`ui::game_import`).
+pub const STALLED: &str = "stalled";
+
 /// What the settings let Razdor do about updates.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -347,6 +356,7 @@ fn part_path(program: &Path, asset: &str) -> PathBuf {
 fn curl_base() -> Command {
     let mut c = Command::new("curl");
     c.args(["-sSL", "--proto", "=https", "-A", concat!("razdor/", env!("CARGO_PKG_VERSION"))]);
+    c.args(stall_args());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -362,6 +372,31 @@ fn curl() -> Command {
     let mut c = curl_base();
     c.arg("-f");
     c
+}
+
+/// The options that stop a stalled transfer: no connection within [`STALL_SECONDS`], and fewer
+/// than one byte a second for [`STALL_SECONDS`]. Curl then exits with code 28 ([`curl_why`]).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn stall_args() -> Vec<String> {
+    let s = STALL_SECONDS.to_string();
+    ["--connect-timeout", &s, "--speed-limit", "1", "--speed-time", &s].iter().map(|a| a.to_string()).collect()
+}
+
+/// Why a `curl` run failed: a stall (exit code 28: a timeout or a transfer too slow) is
+/// [`STALLED`], with curl's own words in the log; anything else is curl's text, else its status.
+/// (The whole-transfer cap `--max-time` also exits 28: a download that long has stalled as well.)
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn curl_why(status: std::process::ExitStatus, stderr: &str) -> String {
+    let why = stderr.trim();
+    if status.code() == Some(28) {
+        crate::diag!("download stalled: {why}");
+        return STALLED.into();
+    }
+    if why.is_empty() {
+        format!("curl: {status}")
+    } else {
+        why.to_string()
+    }
 }
 
 /// A temp file name for one phone fetch (`phone::get`), unique in this process: `razdor-fetch-<pid>-<n>`
@@ -388,8 +423,7 @@ pub(crate) fn fetch(url: &str, seconds: u32) -> Result<Vec<u8>, String> {
         .output()
         .map_err(|e| format!("curl: {e}"))?;
     if !out.status.success() {
-        let why = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        return Err(if why.is_empty() { format!("curl: {}", out.status) } else { why });
+        return Err(curl_why(out.status, &String::from_utf8_lossy(&out.stderr)));
     }
     Ok(out.stdout)
 }
@@ -547,8 +581,7 @@ pub(crate) fn download_to(url: &str, path: &Path, seconds: u32, max_bytes: u64) 
     if out.status.success() {
         return Ok(());
     }
-    let why = String::from_utf8_lossy(&out.stderr).trim().to_string();
-    Err(if why.is_empty() { format!("curl: {}", out.status) } else { why })
+    Err(curl_why(out.status, &String::from_utf8_lossy(&out.stderr)))
 }
 
 /// Downloads `url` into `path` for the game's download (`gdrive`), from byte `from` on (`from` > 0
@@ -584,8 +617,7 @@ pub(crate) fn download_watched(url: &str, path: &Path, from: u64, seconds: u32, 
                 let _ = e.read_to_string(&mut err);
             }
             if !status.success() {
-                let why = err.trim();
-                return Err(if why.is_empty() { format!("curl: {status}") } else { why.to_string() });
+                return Err(curl_why(status, &err));
             }
             return Ok(out.trim().parse().unwrap_or(0));
         }
@@ -599,7 +631,10 @@ pub(crate) fn download_watched(url: &str, path: &Path, from: u64, seconds: u32, 
     }
 }
 
-/// See the desktop's `download_watched`: the system downloader, checked before and after.
+/// See the desktop's `download_watched`. The phones' downloader blocks until the file is in, so it
+/// runs on a helper thread while this one polls every fraction of a second: the file's size goes
+/// to `progress`, and a cancel asks the Java transfer to stop (`phone::download_cancel`). Its
+/// result is then `Err("cancelled")`. iOS keeps the same flow (its download is one blocking call).
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub(crate) fn download_watched(url: &str, path: &Path, from: u64, seconds: u32, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool) -> Result<u16, String> {
     if from > 0 {
@@ -608,14 +643,27 @@ pub(crate) fn download_watched(url: &str, path: &Path, from: u64, seconds: u32, 
     if cancelled() {
         return Err("cancelled".into());
     }
-    if let Err(e) = download_to(url, path, seconds, u64::MAX) {
-        return match e.strip_prefix("HTTP ").and_then(|code| code.trim().parse().ok()) {
+    let size = || std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    let result = std::thread::scope(|s| {
+        let worker = s.spawn(|| download_to(url, path, seconds, u64::MAX));
+        while !worker.is_finished() {
+            if cancelled() {
+                phone::download_cancel();
+            }
+            progress(size());
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
+        worker.join().unwrap_or_else(|_| Err("the download thread failed".into()))
+    });
+    progress(size());
+    match result {
+        Ok(()) => Ok(200),
+        Err(_) if cancelled() => Err("cancelled".into()),
+        Err(e) => match e.strip_prefix("HTTP ").and_then(|code| code.trim().parse().ok()) {
             Some(code) => Ok(code),
             None => Err(e),
-        };
+        },
     }
-    progress(std::fs::metadata(path).map(|m| m.len()).unwrap_or(0));
-    Ok(200)
 }
 
 /// Downloads `url` into the file `path` through the system's downloader (Android).
@@ -747,7 +795,7 @@ fn install_now(r: &Release) -> Result<bool, String> {
         .output()
         .map_err(|e| format!("curl: {e}"))?;
     let checked = if !out.status.success() {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+        Err(curl_why(out.status, &String::from_utf8_lossy(&out.stderr)))
     } else {
         std::fs::read(&part)
             .map_err(|e| format!("{}: {e}", part.display()))
@@ -866,6 +914,28 @@ pub fn open_in_browser(url: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[test]
+    fn every_curl_stops_a_stalled_transfer() {
+        let args: Vec<String> = curl().get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        let s = STALL_SECONDS.to_string();
+        for (flag, value) in [("--connect-timeout", s.as_str()), ("--speed-limit", "1"), ("--speed-time", s.as_str())] {
+            let at = args.iter().position(|a| a == flag).unwrap_or_else(|| panic!("{flag} is missing: {args:?}"));
+            assert_eq!(args[at + 1], value, "{flag}");
+        }
+    }
+
+    #[cfg(all(unix, not(any(target_os = "android", target_os = "ios"))))]
+    #[test]
+    fn curl_exit_28_is_a_stall_and_other_failures_keep_curls_words() {
+        use std::os::unix::process::ExitStatusExt;
+        let stalled = std::process::ExitStatus::from_raw(28 << 8);
+        assert_eq!(curl_why(stalled, "curl: (28) Operation too slow. Less than 1 bytes/sec\n"), STALLED);
+        let refused = std::process::ExitStatus::from_raw(6 << 8);
+        assert_eq!(curl_why(refused, "curl: (6) Could not resolve host\n"), "curl: (6) Could not resolve host");
+        assert_eq!(curl_why(refused, " "), format!("curl: {refused}"));
+    }
 
     #[test]
     fn each_phone_fetch_gets_its_own_temp_name() {

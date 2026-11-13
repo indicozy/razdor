@@ -559,6 +559,9 @@ fn error_text(e: &Error) -> String {
         Error::Io(why) => trf!("The update failed: {why}.", why = why.clone()),
         Error::NoSpace { needed, free } => trf!("Not enough free space: the game needs room for {need} MB (with a reserve), {free} MB are free.", need = needed.div_ceil(1 << 20), free = free / (1 << 20)),
         Error::NotArchive => tr("That is not a 7z or zip archive.").to_string(),
+        Error::Download(why) if why == razdor::update::STALLED => {
+            trf!("The download stopped: no data for {seconds} seconds. Check the internet or try a VPN, or install the game from the archive by hand.", seconds = razdor::update::STALL_SECONDS)
+        }
         Error::Download(why) => trf!("Download failed: {why}.", why = why.clone()),
         Error::Cancelled => tr("The download was cancelled.").to_string(),
     }
@@ -940,6 +943,14 @@ mod tests {
         assert_eq!(parse_picked_fd("game.7z\nx\n42"), Err(Some(42)), "a descriptor that can be closed");
         assert_eq!(parse_picked_fd("game.7z\n42"), Err(Some(42)), "no size line: the descriptor is still there");
         assert_eq!(parse_picked_fd("game.7z"), Err(None));
+    }
+
+    #[test]
+    fn a_stalled_download_gets_its_own_text_and_other_failures_keep_theirs() {
+        let stalled = super::error_text(&razdor::dt::game_import::Error::Download(razdor::update::STALLED.into()));
+        assert!(stalled.contains("no data for 30 seconds"), "{stalled}");
+        let other = super::error_text(&razdor::dt::game_import::Error::Download("curl: timeout".into()));
+        assert_eq!(other, "Download failed: curl: timeout.");
     }
 
     #[test]

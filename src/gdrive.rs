@@ -56,6 +56,7 @@ pub fn file_page(archive: &Archive) -> String {
 
 /// A download this small that is HTML is a web page, not the file.
 const MAX_PAGE: u64 = 1 << 20;
+/// The whole download's cap. A stall stops it sooner ([`crate::update::STALL_SECONDS`]).
 const SECONDS: u32 = 3600;
 /// The file is not the one Razdor expects (its size or SHA-256 differ).
 const CHANGED: &str = "the archive on the server changed";
@@ -201,7 +202,9 @@ fn fetch(net: &dyn Net, archive: &Archive, part: &Path, from: u64, progress: &Pr
                 if cancelled() {
                     return Err(Failure::Cancelled);
                 }
-                if from > 0 && !restarted {
+                // A stalled link says nothing about the partial copy: it is kept, for the retry
+                // to continue (the restart is for a copy that is not the file).
+                if from > 0 && !restarted && why != crate::update::STALLED {
                     let _ = fs::remove_file(part);
                     from = 0;
                     restarted = true;
@@ -421,6 +424,29 @@ mod tests {
         let net = Fake::new(vec![Reply::Fail("curl: timeout")]);
         assert_eq!(download_game(&net, &archive(), &dest, &Progress::default()), Err(Failure::Failed("curl: timeout".into())));
         assert!(!dest.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_stalled_download_is_a_failure_with_the_stall_reason() {
+        let dir = scratch("stall");
+        let dest = dir.join("game.zip");
+        let net = Fake::new(vec![Reply::Fail(crate::update::STALLED)]);
+        assert_eq!(download_game(&net, &archive(), &dest, &Progress::default()), Err(Failure::Failed("stalled".into())));
+        assert_eq!(net.requests.borrow().len(), 1, "a stall is not retried by itself");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_stall_on_a_resume_keeps_the_partial_copy_for_the_retry() {
+        let dir = scratch("stall-resume");
+        let dest = dir.join("game.zip");
+        let half = BODY.len() / 2;
+        fs::write(part_path(&dest), &BODY[..half]).unwrap();
+        let net = Fake::new(vec![Reply::Fail(crate::update::STALLED)]);
+        assert_eq!(download_game(&net, &archive(), &dest, &Progress::default()), Err(Failure::Failed("stalled".into())));
+        assert_eq!(net.requests.borrow().len(), 1, "no restart from the start after a stall");
+        assert_eq!(fs::read(part_path(&dest)).unwrap(), &BODY[..half], "the partial copy is kept");
         let _ = fs::remove_dir_all(&dir);
     }
 

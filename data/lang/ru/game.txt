@@ -22,6 +22,7 @@ Download it by hand: = Скачайте её вручную:
 The file: {link} = Файл: {link}
 Download failed: {why}. = Не удалось скачать: {why}.
 The download was cancelled. = Скачивание отменено.
+The download stopped: no data for {seconds} seconds. Check the internet or try a VPN, or install the game from the archive by hand. = Загрузка остановилась: нет данных {seconds} секунд. Проверьте интернет или попробуйте VPN, либо установите игру из архива вручную.
 The download stopped unexpectedly. = Скачивание неожиданно прервалось.
 The download cannot start: {e}. = Скачивание не начинается: {e}.
 Downloading the game: {mb} / {all} MB, {pct}%. = Скачивается игра: {mb} / {all} МБ, {pct}%.
