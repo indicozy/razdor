@@ -46,5 +46,19 @@ Downloaded mods and maps are untrusted: never run them, and run any Python that 
    ```
    List the assets explicitly, or pick them with `find <out> -maxdepth 1 -type f ! -name report.md`.
    `report.md` holds local paths: never upload it. Check the release with `gh release view`.
+6a. **GitVerse mirror** (the owner's decision, 2026-11-13; with the same yes as step 6): the same
+   catalog, under the same tag as the GitHub release (`docs/specs/2026-11-13-gitverse-mirrors.md`):
+   `python3 -I tools/gitverse/publish_hub.py --catalog-dir <out> --tag catalog-YYYY-MM-DD`
+   (the tag of step 6, with its `-2` if there was one). It uploads the catalog's files to a release on
+   `razdor-community` on GitVerse, writes the GitVerse `index.json` into `<out>/gitverse/` (the game keeps
+   its GitVerse address; the GitHub one becomes its mirror), pushes the site (`index.json`, `previews/`,
+   the hub page) to the razdor-community Pages, and deletes the catalogs older than the newest two.
+   - **It stops, before anything is created, when a file's name is one GitVerse refuses** (it accepts
+     `apk, zip, gz, tgz, 7z, AppImage, png, jpg, jpeg, pdf, md, txt, csv`; the maps are `.dtm`, which it
+     refuses). It lists them; the mirror is then not made, and the owner decides (the GitHub catalog
+     stays the default source, so players are not affected). Do not rename files on your own.
+   - A run that stops midway resumes with the same command (`<out>/gitverse-state.json`).
+   - Never run it against a catalog nobody has checked: it writes the public Pages site.
+   - Report the result (the tag, the files, the Pages line, the deleted releases) to the owner.
 7. **Afterwards**: the app reads the new catalog at its next start; no code change is needed.
    Keep the `out/` folder and the scratch data (they are the next run's inputs).

@@ -79,6 +79,22 @@ without an Android or iOS file gets no offer on that system.
 5. Commit `Razdor X.Y.Z`, push `main`, then `git tag vX.Y.Z` and push the tag.
 6. Watch the run (`gh run list`, `gh run watch <id> --exit-status`). If it fails, fix on main,
    move the tag only after disabling the release workflow, and tell the owner.
+6a. GitVerse mirror (the owner's decision, 2026-11-13: GitHub is slow or blocked for many players;
+   `docs/specs/2026-11-13-gitverse-mirrors.md`). Once the pipeline is green:
+   - the commit and the tag go to GitVerse: `python3 -I tools/gitverse/publish_release.py --push-source vX.Y.Z`
+     (the token comes from `.env`, it is never printed; it pushes `main` and the tag);
+   - the files and the notes come from the published release, into a scratch folder of your own:
+     `mkdir -p /mnt/ai_models/razdor-scratch/gitverse-dl/vX.Y.Z` (or `~/.cache/razdor-scratch/...` when the
+     big disk is full), then `GH_TOKEN=$(gh auth token -u indicozy) gh release download vX.Y.Z --repo indicozy/razdor --dir <that folder>`
+     (every file, the SHA256SUMS too) and `GH_TOKEN=$(gh auth token -u indicozy) gh release view vX.Y.Z --repo indicozy/razdor --json body --jq .body > <that folder>.notes.md`;
+   - `python3 -I tools/gitverse/publish_release.py --tag vX.Y.Z --notes <that folder>.notes.md <that folder>/*`
+     (it packs the Windows, Linux and macOS programs into zips, writes SHA256SUMS.txt, uploads, verifies by
+     an anonymous download, and updates the update feed on the razdor-community Pages; the last two
+     releases are kept). It refuses a release that already exists on GitVerse (`--replace` only when the
+     owner says so). Its last lines say `published vX.Y.Z`;
+   - then delete the scratch folder and the notes file. A GitVerse failure does not undo the GitHub
+     release: report it to the owner with the error, and the owner decides whether to rerun.
+   A release with an iOS file: the `.ipa` is left out of GitVerse (it refuses it), with a warning.
 7. Follow-up commit: take the SHA-256 from the **published release** (`gh release view vX.Y.Z`),
    never from a local build (the build embeds the git id). Under the version heading in
    `changelog/X.Y.Z.md` add:
@@ -98,7 +114,8 @@ without an Android or iOS file gets no offer on that system.
    does), set the footer's version, and update anything the release changed on the page (the
    platforms, the requirements, the install steps, the video when the owner gives a new one).
    Commit `Site: X.Y.Z …`, push as a fast-forward to `gh-pages` (never force), remove the worktree.
-8. Tell the owner: the version, the release link, what is in it (plain words), test results.
+8. Tell the owner: the version, the release link, what is in it (plain words), test results, and the
+   GitVerse mirror's result (step 6a: pushed, published, or the error).
    Add the download statistics: run `python3 -I tools/stats/downloads.py` (it appends a live
    snapshot to the private CSV; the default path needs no argument, or see `CLAUDE.local.md`)
    and paste its summary into the report to the owner (`tools/stats/README.md`). The numbers are
