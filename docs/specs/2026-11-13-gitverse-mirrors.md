@@ -35,8 +35,8 @@ Lands after the download fix (30 s stall limit, progress and cancel on phones), 
 
 | What | Where |
 |---|---|
-| App release X.Y.Z | release `vX.Y.Z` on `razdor`: `razdor-X.Y.Z.apk`, `Razdor-X.Y.Z-windows.zip` (Razdor.exe, Razdor-translate.exe), `razdor-X.Y.Z-linux.tar.gz` (razdor, razdor-translate, executable), `SHA256SUMS.txt` (the archives and the programs inside) |
-| Update feed | `https://indicozy.gitverse.site/razdor/releases.json` (Pages of `razdor`, next to the website) |
+| App release X.Y.Z | release `vX.Y.Z` on `razdor`: `razdor-X.Y.Z.apk`, `Razdor-X.Y.Z-windows.zip` (Razdor.exe, Razdor-translate.exe), `razdor-X.Y.Z-linux.zip` (razdor, razdor-translate; the updater sets the executable bit itself, so only zip is needed), `SHA256SUMS.txt` (the archives and the programs inside) |
+| Update feed | `https://indicozy.gitverse.site/razdor-community/releases.json` (Pages of `razdor-community`, with the hub's other static files; the `razdor` Pages stay the website's) |
 | Hub catalog | `https://indicozy.gitverse.site/razdor-community/index.json` + previews + the web hub page (Pages of `razdor-community`) |
 | Hub files (maps, mods, campaigns) | release `catalog-YYYY-MM-DD` on `razdor-community`; the GitVerse `index.json` names them by their full attachment address |
 | Game archive | release `game-cu-1.2` on `razdor-community` (uploaded: `https://gitverse.ru/api/attachments/36c22adf-f3f3-4286-a474-9b6a00a5abc5`, SHA-256 `dff554e2…`) |
@@ -62,7 +62,7 @@ app releases and the newest two catalogs; never the game archive.
    parser does not refuse unknown fields, so older clients keep working.
 4. **Update feed.** `releases.json` is the GitHub API's release list shape, so `parse_releases`
    reads it as it is: `[{tag_name, html_url, draft, prerelease, body, assets: [{name,
-   browser_download_url}]}]`. An asset may carry `"archive": "zip" | "tar.gz"` and `"member":
+   browser_download_url}]}]`. An asset may carry `"archive": "zip"` and `"member":
    "<name inside>"`: the updater downloads the archive, takes the member out, and checks the member
    against `SHA256SUMS.txt` (the `sums` asset may be named `SHA256SUMS` or `SHA256SUMS.txt`). The
    APK is not packed.
@@ -82,10 +82,10 @@ end against a local server (Range, a stall, a short part); the APK on the emulat
 ## Publishing
 
 - `tools/gitverse/` (Python, stdlib only, token from `.env`):
-  - `publish_release.py <tag> <files…>`: packs what GitVerse refuses (`.exe`/no extension → the
+  - `publish_release.py <tag> <files…>`: packs what GitVerse refuses (`.exe`/no extension → the zip
     archives above), writes `SHA256SUMS.txt`, creates the release (the tag on the pushed release
     commit), uploads with retries, verifies each upload by an anonymous download, updates
-    `releases.json` on the `razdor` Pages, deletes old releases past the keep count.
+    `releases.json` on the `razdor-community` Pages, deletes old releases past the keep count.
   - `publish_hub.py <catalog dir>`: uploads the catalog's files to a `catalog-YYYY-MM-DD` release,
     writes the GitVerse `index.json` (relative paths → attachment addresses; previews stay
     relative on Pages), pushes `index.json`, previews and `tools/community-pack/web/` to the
