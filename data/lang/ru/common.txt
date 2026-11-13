@@ -183,6 +183,7 @@ Mods = Моды
 Reading the hub… = Читаю хаб…
 No connection: showing the saved list. = Нет связи: показан сохранённый список
 The hub can't be read: {e} = Хаб не прочитать: {e}
+The catalog can't be read from any address (GitVerse, GitHub). Check the internet. = Каталог не читается ни с одного адреса (GitVerse, GitHub). Проверьте интернет.
 Nothing here yet. = Здесь пока пусто.
 Nothing matches the search. = Ничего не подходит к поиску.
 Search… = Поиск…

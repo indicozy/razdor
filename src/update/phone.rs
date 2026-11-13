@@ -58,10 +58,10 @@ mod android {
     pub fn download_range(url: &str, path: &Path, start: u64, end: u64, seconds: u32) -> Result<RangeReply, String> {
         let text = java_download(url, path, seconds, start as i64, end as i64)?;
         if text == "200" {
-            return Ok(RangeReply { status: 200, total: None });
+            return Ok(RangeReply { status: 200, total: None, retry_after: None });
         }
         match text.strip_prefix("206 ") {
-            Some(total) => Ok(RangeReply { status: 206, total: total.trim().parse::<i64>().ok().filter(|t| *t >= 0).map(|t| t as u64) }),
+            Some(total) => Ok(RangeReply { status: 206, total: total.trim().parse::<i64>().ok().filter(|t| *t >= 0).map(|t| t as u64), retry_after: None }),
             None => Err(failure(&text)),
         }
     }

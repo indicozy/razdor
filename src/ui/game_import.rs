@@ -371,16 +371,16 @@ fn auto_tick(loaded: bool) {
         Auto::Checking(true) => Auto::Checking(true),
         Auto::Checking(false) => match super::launch::catalog() {
             None => Auto::Checking(false),
-            Some(Ok(catalog)) => {
-                razdor::diag!("game download: catalog read, game in it: {}", if catalog.game.is_some() { "yes" } else { "no" });
-                match game_archive(catalog) {
-                    Some(archive) => start_auto(archive),
-                    None => razdor::diag!("game download: no https game in the catalog, no download"),
+            Some(read) => {
+                match read {
+                    Ok(catalog) => razdor::diag!("game download: catalog read, game in it: {}", if catalog.game.is_some() { "yes" } else { "no" }),
+                    Err(why) => razdor::diag!("game download: catalog not read ({why})"),
                 }
-                Auto::Done
-            }
-            Some(Err(why)) => {
-                razdor::diag!("game download: catalog not read, no download: {why}");
+                let folder = matches!(Source::from_env(), Source::Dir(_) | Source::Mock);
+                match auto_archive(folder, read) {
+                    Some(archive) => start_auto(archive),
+                    None => razdor::diag!("game download: a folder hub offers no download"),
+                }
                 Auto::Done
             }
         },
@@ -409,16 +409,18 @@ fn snapshot_checking() -> bool {
     std::env::var_os("RAZDOR_SNAPSHOT").is_some() && std::env::var("RAZDOR_SCENE_CATALOG").is_ok_and(|v| v == "checking")
 }
 
-/// The game the hub's catalog offers, as an archive to download: its address resolved against the
-/// hub's (an `https://` one only; a folder or the mock hub offers none).
-fn game_archive(catalog: &hub::Catalog) -> Option<gdrive::Archive> {
-    // A folder or the mock hub offers no download; the catalog's addresses are absolute (`hub::rebase`).
-    if matches!(Source::from_env(), Source::Dir(_) | Source::Mock) {
+/// The archive the automatic start downloads (`auto_tick`'s decision). A folder or the mock hub offers
+/// none. Otherwise the catalog's game, when the catalog is read and offers one at https addresses;
+/// else the built-in game (`gdrive::GAME`), which is also what an unreadable catalog leads to.
+fn auto_archive(folder_hub: bool, catalog: &Result<hub::Catalog, String>) -> Option<gdrive::Archive> {
+    if folder_hub {
         return None;
     }
-    let game = catalog.game.as_ref()?;
-    let links: Vec<String> = std::iter::once(game.url.clone()).chain(game.mirrors.iter().cloned()).collect();
-    links.iter().all(|l| l.starts_with("https://")).then(|| gdrive::Archive::at_urls(links, game.size, game.sha256.clone(), game.name.clone()))
+    let offered = catalog.as_ref().ok().and_then(|c| c.game.as_ref()).and_then(|game| {
+        let links: Vec<String> = std::iter::once(game.url.clone()).chain(game.mirrors.iter().cloned()).collect();
+        links.iter().all(|l| l.starts_with("https://")).then(|| gdrive::Archive::at_urls(links, game.size, game.sha256.clone(), game.name.clone()))
+    });
+    Some(offered.unwrap_or(gdrive::GAME))
 }
 
 /// Starts the game the catalog offered, when the target is there and nothing else runs.
@@ -922,7 +924,8 @@ fn download_window(bytes: u64, all: u64, cancel: Option<&gdrive::Progress>, titl
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_picked_fd, remove_copies_in, should_auto};
+    use super::{auto_archive, parse_picked_fd, remove_copies_in, should_auto};
+    use razdor::hub::{Catalog, GameRef};
 
     #[test]
     fn the_automatic_download_follows_the_loaded_install_only() {
@@ -933,6 +936,24 @@ mod tests {
         // Not allowed here (iPhone, a snapshot, a folder set by hand): no download.
         assert!(!should_auto(false, false));
         assert!(!should_auto(true, false));
+    }
+
+    #[test]
+    fn the_automatic_download_offers_the_catalogs_game_or_the_built_in_one() {
+        let game = |url: &str, mirrors: Vec<&str>| GameRef { url: url.into(), mirrors: mirrors.into_iter().map(String::from).collect(), size: 9, sha256: "ab".repeat(32), name: "g.zip".into() };
+        let catalog = |game: Option<GameRef>| Catalog { format: 1, entries: vec![], game, ad: None };
+        // A read catalog that offers an https game: its own.
+        let offered = auto_archive(false, &Ok(catalog(Some(game("https://gitverse.ru/x", vec!["https://github.com/y"]))))).unwrap();
+        assert_eq!(offered.name, "g.zip");
+        assert_eq!(offered.links.len(), 2);
+        // A read catalog with no game, or a game at a plain address: the built-in one.
+        assert_eq!(auto_archive(false, &Ok(catalog(None))).unwrap(), super::gdrive::GAME);
+        assert_eq!(auto_archive(false, &Ok(catalog(Some(game("http://plain.example/x", vec![]))))).unwrap(), super::gdrive::GAME);
+        // No catalog could be read (every hub source failed): the built-in one.
+        assert_eq!(auto_archive(false, &Err(razdor::hub::NO_ADDRESS.into())).unwrap(), super::gdrive::GAME);
+        // A folder or the mock hub offers no download, read or not.
+        assert!(auto_archive(true, &Err("x".into())).is_none());
+        assert!(auto_archive(true, &Ok(catalog(None))).is_none());
     }
 
     #[test]

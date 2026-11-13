@@ -23,6 +23,13 @@ use std::time::Duration;
 
 /// The pieces a file is fetched in at once.
 pub const PIECES: u64 = 8;
+/// The pieces at once for a gitverse.ru address: GitVerse answers 429 (rate limit) to eight.
+pub const PIECES_GITVERSE: u64 = 4;
+/// The waits before a piece is tried again after a 429 or 503 (not counted as a failed try until they
+/// are spent): 1 s, 2 s, 4 s, or the server's `Retry-After` (capped at [`MAX_RETRY_AFTER`]).
+pub const BACKOFF: [Duration; 3] = [Duration::from_secs(1), Duration::from_secs(2), Duration::from_secs(4)];
+/// The longest wait a `Retry-After` may ask for, in seconds.
+pub const MAX_RETRY_AFTER: u64 = 60;
 /// The smallest piece: a file splits into fewer pieces when it is smaller than [`PIECES`] of these.
 pub const MIN_PIECE: u64 = 512 << 10;
 /// A file this small (or smaller) is one stream: no pieces.
@@ -40,6 +47,8 @@ const POLL: Duration = Duration::from_millis(100);
 pub struct RangeReply {
     pub status: u16,
     pub total: Option<u64>,
+    /// The server's `Retry-After` in seconds, when it gave one as a number (a 429 or 503).
+    pub retry_after: Option<u64>,
 }
 
 /// The network the pieces use. `Sync`: the pieces run on threads.
@@ -49,6 +58,33 @@ pub trait RangeNet: Sync {
     /// `progress` gets the bytes of this request so far; `cancelled` is asked as it goes, and true
     /// stops the request with an error.
     fn range(&self, url: &str, path: &Path, start: u64, end: u64, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool) -> Result<RangeReply, String>;
+    /// Waits `how_long` before the next try of a piece; returns early when `stopped` is true. A test
+    /// gives a fake that records the wait instead.
+    fn wait(&self, how_long: Duration, stopped: &dyn Fn() -> bool) {
+        let until = std::time::Instant::now() + how_long;
+        while !stopped() {
+            let now = std::time::Instant::now();
+            if now >= until {
+                break;
+            }
+            std::thread::sleep((until - now).min(POLL));
+        }
+    }
+}
+
+/// The pieces a file from `url` is fetched in at once: [`PIECES_GITVERSE`] for a gitverse.ru
+/// address, else [`PIECES`].
+pub fn pieces_for(url: &str) -> u64 {
+    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://")).unwrap_or(url);
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = host.rsplit_once('@').map_or(host, |(_, h)| h);
+    let host = host.split(':').next().unwrap_or("").to_ascii_lowercase();
+    if host == "gitverse.ru" || host.ends_with(".gitverse.ru") { PIECES_GITVERSE } else { PIECES }
+}
+
+/// A status that asks to wait and try again (rate limit, or the server busy).
+fn throttled(status: u16) -> bool {
+    matches!(status, 429 | 503)
 }
 
 /// What [`fetch`] did: the file is in `dest` (pieces), or the caller takes one stream.
@@ -58,13 +94,13 @@ pub enum Parted {
     Single,
 }
 
-/// The byte ranges (first, last: inclusive) of a file of `size` bytes, in order: at most
-/// [`PIECES`] of at least [`MIN_PIECE`] each, the last one taking the rest.
-pub fn layout(size: u64) -> Vec<(u64, u64)> {
+/// The byte ranges (first, last: inclusive) of a file of `size` bytes, in order: at most `most`
+/// pieces of at least [`MIN_PIECE`] each, the last one taking the rest.
+pub fn layout(size: u64, most: u64) -> Vec<(u64, u64)> {
     if size == 0 {
         return Vec::new();
     }
-    let n = (size / MIN_PIECE).clamp(1, PIECES);
+    let n = (size / MIN_PIECE).clamp(1, most.max(1));
     let each = size / n;
     (0..n)
         .map(|i| {
@@ -98,7 +134,7 @@ pub fn fetch(net: &dyn RangeNet, url: &str, dest: &Path, cap: u64, progress: &dy
     let answer = net.range(url, &probe, 0, 0, &|_| {}, cancelled);
     let _ = fs::remove_file(&probe);
     let total = match answer {
-        Ok(RangeReply { status: 206, total: Some(total) }) => total,
+        Ok(RangeReply { status: 206, total: Some(total), .. }) => total,
         Ok(_) => return Ok(Parted::Single),
         Err(why) if cancelled() => return Err(why),
         Err(why) => {
@@ -109,7 +145,7 @@ pub fn fetch(net: &dyn RangeNet, url: &str, dest: &Path, cap: u64, progress: &dy
     if total <= MIN_SIZE || total > cap {
         return Ok(Parted::Single);
     }
-    let pieces = layout(total);
+    let pieces = layout(total, pieces_for(url));
     let paths: Vec<PathBuf> = (0..pieces.len()).map(|i| piece_path(dest, i)).collect();
     let fetched = fetch_pieces(net, url, &pieces, &paths, progress, cancelled);
     // A cancel is the cancel, whichever piece's error was the first one given.
@@ -164,17 +200,22 @@ fn fetch_pieces(net: &dyn RangeNet, url: &str, pieces: &[(u64, u64)], paths: &[P
 /// The reason a piece gives when it is stopped by another piece's failure or a cancel.
 const STOPPED: &str = "stopped";
 
-/// One piece: up to [`TRIES`] requests, each checked for its 206 and its exact byte count.
+/// One piece: up to [`TRIES`] tries, each request checked for its 206 and its exact byte count. A 429
+/// or 503 is not a try: the piece waits ([`BACKOFF`], or the server's `Retry-After`) and asks again,
+/// until the backoff is spent; then it counts as a failed try like any other.
 #[allow(clippy::too_many_arguments)]
 fn fetch_piece(net: &dyn RangeNet, url: &str, path: &Path, i: usize, start: u64, end: u64, done: &AtomicU64, stop: &AtomicBool) -> Result<(), String> {
     let want = end - start + 1;
-    let mut last = String::from(STOPPED);
-    for attempt in 1..=TRIES {
-        if stop.load(Ordering::SeqCst) {
+    let stopped = || stop.load(Ordering::SeqCst);
+    let mut tries = 0u32;
+    let mut waits = 0usize;
+    loop {
+        if stopped() {
             return Err(STOPPED.into());
         }
         done.store(0, Ordering::SeqCst);
-        last = match net.range(url, path, start, end, &|n| done.store(n, Ordering::SeqCst), &|| stop.load(Ordering::SeqCst)) {
+        let mut hold = None;
+        let last = match net.range(url, path, start, end, &|n| done.store(n, Ordering::SeqCst), &stopped) {
             Ok(RangeReply { status: 206, .. }) => {
                 let len = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
                 if len == want {
@@ -183,15 +224,29 @@ fn fetch_piece(net: &dyn RangeNet, url: &str, path: &Path, i: usize, start: u64,
                 }
                 format!("piece {i} came back with {len} bytes, not {want}")
             }
-            Ok(RangeReply { status, .. }) => format!("the server answered HTTP {status} to a range request"),
+            Ok(RangeReply { status, retry_after, .. }) => {
+                if throttled(status) && waits < BACKOFF.len() {
+                    hold = Some(retry_after.map_or(BACKOFF[waits], |s| Duration::from_secs(s.min(MAX_RETRY_AFTER))));
+                    waits += 1;
+                }
+                format!("the server answered HTTP {status} to a range request")
+            }
             Err(why) => why,
         };
-        if stop.load(Ordering::SeqCst) {
+        if stopped() {
             return Err(last);
         }
-        crate::diag!("download piece {i}, try {attempt} of {TRIES}: {last}");
+        if let Some(how_long) = hold {
+            crate::diag!("download piece {i}: the server is busy, waiting {} s", how_long.as_secs_f64());
+            net.wait(how_long, &stopped);
+            continue;
+        }
+        tries += 1;
+        crate::diag!("download piece {i}, try {tries} of {TRIES}: {last}");
+        if tries == TRIES {
+            return Err(last);
+        }
     }
-    Err(last)
 }
 
 /// The pieces, in order, into `dest`. The result holds exactly `total` bytes or it is an error.
@@ -234,6 +289,8 @@ mod tests {
         Fail(&'static str),
         /// An HTTP status with no body.
         Status(u16),
+        /// A 429 with a `Retry-After` (seconds), no body.
+        Throttle(Option<u64>),
     }
 
     /// A fake range server. `ranges` false: every request is answered 200 with nothing written.
@@ -246,6 +303,8 @@ mod tests {
         log: Mutex<Vec<(u64, u64)>>,
         /// The bytes a request sends per poll of its cancel (small, so a cancel lands mid-piece).
         chunk: usize,
+        /// The waits asked of the network (`RangeNet::wait`), in order; none is slept.
+        waits: Mutex<Vec<Duration>>,
         /// Bytes written by all requests so far.
         written: AtomicU64,
         /// The test's cancel flag and the byte count at which the fake sets it (a cancel asked
@@ -255,7 +314,7 @@ mod tests {
 
     impl Fake {
         fn new(body: Vec<u8>) -> Fake {
-            Fake { body, ranges: true, script: Mutex::new(Vec::new()), log: Mutex::new(Vec::new()), chunk: 64 << 10, written: AtomicU64::new(0), cancel_after: None }
+            Fake { body, ranges: true, script: Mutex::new(Vec::new()), log: Mutex::new(Vec::new()), chunk: 64 << 10, written: AtomicU64::new(0), cancel_after: None, waits: Mutex::new(Vec::new()) }
         }
 
         fn with(mut self, start: u64, acts: Vec<Act>) -> Fake {
@@ -281,14 +340,15 @@ mod tests {
             self.log.lock().unwrap().push((start, end));
             let total = self.body.len() as u64;
             if !self.ranges {
-                return Ok(RangeReply { status: 200, total: None });
+                return Ok(RangeReply { status: 200, total: None, retry_after: None });
             }
             let act = self.act(start);
             let end = end.min(total - 1);
             let mut bytes = self.body[start as usize..=end as usize].to_vec();
             match act {
                 Act::Fail(why) => return Err(why.to_string()),
-                Act::Status(code) => return Ok(RangeReply { status: code, total: Some(total) }),
+                Act::Status(code) => return Ok(RangeReply { status: code, total: Some(total), retry_after: None }),
+                Act::Throttle(after) => return Ok(RangeReply { status: 429, total: Some(total), retry_after: after }),
                 Act::Short => bytes.truncate(bytes.len() / 2),
                 Act::Good => {}
             }
@@ -309,7 +369,11 @@ mod tests {
                 progress(out.len() as u64);
             }
             fs::write(path, &out).map_err(|e| e.to_string())?;
-            Ok(RangeReply { status: 206, total: Some(total) })
+            Ok(RangeReply { status: 206, total: Some(total), retry_after: None })
+        }
+
+        fn wait(&self, how_long: Duration, _stopped: &dyn Fn() -> bool) {
+            self.waits.lock().unwrap().push(how_long);
         }
     }
 
@@ -328,8 +392,8 @@ mod tests {
 
     #[test]
     fn the_file_is_cut_into_at_most_eight_pieces_of_at_least_512_kib() {
-        assert_eq!(layout(0), Vec::<(u64, u64)>::new());
-        let big = layout(10 * MIB);
+        assert_eq!(layout(0, PIECES), Vec::<(u64, u64)>::new());
+        let big = layout(10 * MIB, PIECES);
         assert_eq!(big.len(), 8);
         assert_eq!(big.first().unwrap().0, 0);
         assert_eq!(big.last().unwrap().1, 10 * MIB - 1);
@@ -338,11 +402,12 @@ mod tests {
         }
         assert!(big.iter().all(|(s, e)| e - s + 1 >= MIN_PIECE));
         // Fewer pieces for a smaller file: 2 MiB is four pieces of 512 KiB.
-        let small = layout(2 * MIB);
+        let small = layout(2 * MIB, PIECES);
         assert_eq!(small.len(), 4);
         assert!(small.iter().all(|(s, e)| e - s + 1 == 512 << 10));
         // The sizes add up exactly, also when the size does not divide.
-        let odd = layout(9 * MIB + 7);
+        let odd = layout(9 * MIB + 7, PIECES);
+        assert!(layout(10 * MIB, PIECES_GITVERSE).len() == 4, "at most four for GitVerse");
         assert_eq!(odd.iter().map(|(s, e)| e - s + 1).sum::<u64>(), 9 * MIB + 7);
     }
 
@@ -366,7 +431,7 @@ mod tests {
         let dir = scratch("short");
         let dest = dir.join("big.zip");
         let data = body(10 * MIB as usize);
-        let piece3 = layout(10 * MIB)[3].0;
+        let piece3 = layout(10 * MIB, PIECES)[3].0;
         let net = Fake::new(data.clone()).with(piece3, vec![Act::Short]);
         assert_eq!(fetch(&net, URL, &dest, u64::MAX, &|_| {}, &no_cancel), Ok(Parted::Joined));
         assert_eq!(fs::read(&dest).unwrap(), data, "the short piece was replaced by a whole one");
@@ -378,7 +443,7 @@ mod tests {
     fn a_piece_that_fails_three_times_fails_the_address_and_leaves_nothing() {
         let dir = scratch("fails");
         let dest = dir.join("big.zip");
-        let piece5 = layout(10 * MIB)[5].0;
+        let piece5 = layout(10 * MIB, PIECES)[5].0;
         let net = Fake::new(body(10 * MIB as usize)).with(piece5, vec![Act::Fail("stalled"), Act::Status(500), Act::Short]);
         assert_eq!(fetch(&net, URL, &dest, u64::MAX, &|_| {}, &no_cancel), Err("piece 5 came back with 655360 bytes, not 1310720".to_string()));
         assert_eq!(net.requests_for(piece5), 3, "three tries in all");
@@ -393,7 +458,7 @@ mod tests {
         let dest = dir.join("big.zip");
         let data = body(10 * MIB as usize);
         // Piece 1 (not piece 0: its start is the probe's, which is asked first).
-        let piece1 = layout(10 * MIB)[1].0;
+        let piece1 = layout(10 * MIB, PIECES)[1].0;
         let net = Fake::new(data.clone()).with(piece1, vec![Act::Fail("curl: (56) reset")]);
         assert_eq!(fetch(&net, URL, &dest, u64::MAX, &|_| {}, &no_cancel), Ok(Parted::Joined));
         assert_eq!(fs::read(&dest).unwrap(), data);
@@ -486,11 +551,73 @@ mod tests {
         let dir = scratch("status");
         let dest = dir.join("big.zip");
         let data = body(10 * MIB as usize);
-        let piece1 = layout(10 * MIB)[1].0;
+        let piece1 = layout(10 * MIB, PIECES)[1].0;
         let net = Fake::new(data.clone()).with(piece1, vec![Act::Status(200)]);
         assert_eq!(fetch(&net, URL, &dest, u64::MAX, &|_| {}, &no_cancel), Ok(Parted::Joined));
         assert_eq!(fs::read(&dest).unwrap(), data);
         assert_eq!(net.requests_for(piece1), 2);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_429_waits_one_second_and_the_retry_is_not_a_failed_try() {
+        let dir = scratch("throttle-once");
+        let dest = dir.join("big.zip");
+        let data = body(10 * MIB as usize);
+        let piece1 = layout(10 * MIB, PIECES)[1].0;
+        let net = Fake::new(data.clone()).with(piece1, vec![Act::Status(429)]);
+        assert_eq!(fetch(&net, URL, &dest, u64::MAX, &|_| {}, &no_cancel), Ok(Parted::Joined));
+        assert_eq!(fs::read(&dest).unwrap(), data);
+        assert_eq!(net.requests_for(piece1), 2);
+        assert_eq!(net.waits.lock().unwrap().clone(), vec![Duration::from_secs(1)]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_429_backs_off_one_two_four_seconds_then_counts_as_failed_tries() {
+        let dir = scratch("throttle-spent");
+        let dest = dir.join("big.zip");
+        let piece1 = layout(10 * MIB, PIECES)[1].0;
+        // Three waits, then three tries that all fail: six requests in all.
+        let net = Fake::new(body(10 * MIB as usize)).with(piece1, vec![Act::Status(429); 6]);
+        let result = fetch(&net, URL, &dest, u64::MAX, &|_| {}, &no_cancel);
+        assert_eq!(result, Err("the server answered HTTP 429 to a range request".to_string()));
+        assert_eq!(net.requests_for(piece1), 6);
+        assert_eq!(net.waits.lock().unwrap().clone(), vec![Duration::from_secs(1), Duration::from_secs(2), Duration::from_secs(4)]);
+        assert!(!dest.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_503_waits_like_a_429_and_retry_after_is_honoured_and_capped() {
+        let dir = scratch("throttle-after");
+        let dest = dir.join("big.zip");
+        let data = body(10 * MIB as usize);
+        let piece1 = layout(10 * MIB, PIECES)[1].0;
+        let net = Fake::new(data.clone()).with(piece1, vec![Act::Throttle(Some(7))]);
+        assert_eq!(fetch(&net, URL, &dest, u64::MAX, &|_| {}, &no_cancel), Ok(Parted::Joined));
+        assert_eq!(net.waits.lock().unwrap().clone(), vec![Duration::from_secs(7)]);
+        let piece2 = layout(10 * MIB, PIECES)[2].0;
+        let net = Fake::new(data.clone()).with(piece2, vec![Act::Status(503), Act::Throttle(Some(999))]);
+        assert_eq!(fetch(&net, URL, &dest, u64::MAX, &|_| {}, &no_cancel), Ok(Parted::Joined));
+        assert_eq!(net.waits.lock().unwrap().clone(), vec![Duration::from_secs(1), Duration::from_secs(MAX_RETRY_AFTER)]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn gitverse_gets_four_pieces_and_other_hosts_eight() {
+        assert_eq!(pieces_for("https://gitverse.ru/api/attachments/x"), PIECES_GITVERSE);
+        assert_eq!(pieces_for("https://GitVerse.ru:443/x"), PIECES_GITVERSE);
+        assert_eq!(pieces_for("https://api.gitverse.ru/x"), PIECES_GITVERSE);
+        assert_eq!(pieces_for("https://github.com/indicozy/razdor-community/releases/x"), PIECES);
+        assert_eq!(pieces_for("https://indicozy.gitverse.site/razdor-community/index.json"), PIECES);
+        assert_eq!(pieces_for("https://gitverse.ru.example.org/x"), PIECES);
+        assert_eq!(pieces_for("https://evil.example/gitverse.ru/x"), PIECES);
+        let dir = scratch("gitverse-pieces");
+        let dest = dir.join("big.zip");
+        let net = Fake::new(body(10 * MIB as usize));
+        assert_eq!(fetch(&net, "https://gitverse.ru/api/attachments/x", &dest, u64::MAX, &|_| {}, &no_cancel), Ok(Parted::Joined));
+        assert_eq!(net.log.lock().unwrap().len(), 5, "the probe and four pieces");
         let _ = fs::remove_dir_all(&dir);
     }
 

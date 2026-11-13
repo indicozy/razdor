@@ -685,7 +685,13 @@ pub fn frame(view: &mut HubView) -> bool {
         None if !detail => chrome::shadow_text(tr("Reading the hub…"), lx + 12.0 * k, list.y + 26.0 * k, size, CREAM),
         None => {}
         Some(Err(e)) if !detail => {
-            for (i, l) in wrap(&trf!("The hub can't be read: {e}", e), lw - 24.0 * k, size).iter().enumerate() {
+            // No address of the catalog answered: say so (each address's reason is in the log).
+            let text = if e == hub::NO_ADDRESS {
+                tr("The catalog can't be read from any address (GitVerse, GitHub). Check the internet.").to_string()
+            } else {
+                trf!("The hub can't be read: {e}", e)
+            };
+            for (i, l) in wrap(&text, lw - 24.0 * k, size).iter().enumerate() {
                 chrome::shadow_text(l, lx + 12.0 * k, list.y + 26.0 * k + i as f32 * 20.0 * k, size, RED_TEXT);
             }
         }

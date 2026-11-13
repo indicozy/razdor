@@ -32,6 +32,8 @@ use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use crate::archive;
 use crate::mirror;
 use crate::parts;
 
@@ -670,7 +672,7 @@ impl parts::RangeNet for Ranged {
 fn range_request(url: &str, path: &Path, start: u64, end: u64, seconds: u32, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool) -> Result<parts::RangeReply, String> {
     let mut cmd = curl_base();
     cmd.args(["--max-time", &seconds.to_string(), "--max-filesize", &(end - start + 1).to_string()])
-        .args(["-r", &format!("{start}-{end}"), "-w", "%{http_code} %header{content-range}", "-o"])
+        .args(["-r", &format!("{start}-{end}"), "-w", "%{http_code} %header{content-range}|%header{retry-after}", "-o"])
         .arg(path)
         .arg(url);
     let (status, out, err) = run_watched(cmd, path, progress, cancelled)?;
@@ -681,13 +683,17 @@ fn range_request(url: &str, path: &Path, start: u64, end: u64, seconds: u32, pro
 }
 
 /// The status and the file's size from curl's write-out (`%{http_code} %header{content-range}`,
-/// e.g. `206 bytes 0-0/44619982`; the size is None when the header is not there or is `*`).
+/// e.g. `206 bytes 0-0/44619982`; the size is None when the header is not there or is `*`), and the
+/// `Retry-After` in seconds after the bar (None when it is not a number).
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn parse_range_reply(out: &str) -> Option<parts::RangeReply> {
-    let mut words = out.trim().splitn(2, ' ');
+    // `<code> <content-range>|<retry-after>`: the bar keeps the two headers' words apart.
+    let (head, retry) = out.trim().split_once('|').unwrap_or((out.trim(), ""));
+    let mut words = head.splitn(2, ' ');
     let status = words.next()?.parse().ok()?;
     let total = words.next().and_then(|range| range.rsplit_once('/')).and_then(|(_, size)| size.trim().parse().ok());
-    Some(parts::RangeReply { status, total })
+    let retry_after = retry.trim().parse().ok();
+    Some(parts::RangeReply { status, total, retry_after })
 }
 
 /// The phone's range request: the system's downloader, watched (`watched`).
@@ -919,11 +925,11 @@ fn install_now(r: &Release) -> Result<bool, String> {
     let want = expected_sum(&sums, r.member.as_deref().unwrap_or(&r.asset))?;
     let part = part_path(&program, asset);
     let bytes = match &r.member {
-        None => download_to(&r.program_url, &part, 900, MAX_MEMBER).and_then(|()| std::fs::read(&part).map_err(|e| format!("{}: {e}", part.display()))),
+        None => download_to(&r.program_url, &part, 900, archive::MAX_MEMBER).and_then(|()| std::fs::read(&part).map_err(|e| format!("{}: {e}", part.display()))),
         Some(member) => {
             // The archive is kept beside the program only while its member is taken out of it.
             let zip = program.with_file_name(format!(".{asset}.zip.update"));
-            let got = download_to(&r.program_url, &zip, 900, MAX_MEMBER).and_then(|()| zip_member(&zip, member));
+            let got = download_to(&r.program_url, &zip, 900, archive::MAX_MEMBER).and_then(|()| archive::member(&zip, member));
             let _ = std::fs::remove_file(&zip);
             got
         }
@@ -937,33 +943,6 @@ fn install_now(r: &Release) -> Result<bool, String> {
         let _ = std::fs::remove_file(&part);
     }
     checked.map(|()| false)
-}
-
-/// The bytes of `member`, a file of the zip archive at `zip`. A name that is not a plain relative
-/// path (an absolute one, or one with `..` or a drive) is refused, as is a member over
-/// [`MAX_MEMBER`].
-pub fn zip_member(zip: &Path, member: &str) -> Result<Vec<u8>, String> {
-    use std::io::Read;
-    if !plain_member(member) {
-        return Err(format!("the archive's file {member:?} is not a plain name"));
-    }
-    let file = std::fs::File::open(zip).map_err(|e| format!("{}: {e}", zip.display()))?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("the archive cannot be read: {e}"))?;
-    let entry = archive.by_name(member).map_err(|e| format!("the archive has no {member}: {e}"))?;
-    let mut bytes = Vec::new();
-    entry.take(MAX_MEMBER + 1).read_to_end(&mut bytes).map_err(|e| format!("{member}: {e}"))?;
-    if bytes.len() as u64 > MAX_MEMBER {
-        return Err(format!("{member} is bigger than {MAX_MEMBER} bytes"));
-    }
-    Ok(bytes)
-}
-
-/// The most a program inside an archive may be.
-const MAX_MEMBER: u64 = 256 << 20;
-
-/// A file name inside an archive: relative, `/`-separated, none empty, `.` or `..`, no drive letter.
-fn plain_member(member: &str) -> bool {
-    !member.is_empty() && !member.contains(['\\', ':']) && !member.starts_with('/') && member.split('/').all(|p| !p.is_empty() && p != "." && p != "..")
 }
 
 /// Android: the APK of `r` is kept in the downloads folder as `razdor-<X.Y.Z>.apk`. A file
@@ -1240,10 +1219,13 @@ mod tests {
     #[test]
     fn a_range_reply_gives_its_status_and_the_files_size() {
         let got = parse_range_reply("206 bytes 0-0/44619982").unwrap();
-        assert_eq!(got, parts::RangeReply { status: 206, total: Some(44619982) });
+        assert_eq!(got, parts::RangeReply { status: 206, total: Some(44619982), retry_after: None });
         // No Content-Range header (curl writes nothing after the code), or a size of "*".
-        assert_eq!(parse_range_reply("200 ").unwrap(), parts::RangeReply { status: 200, total: None });
-        assert_eq!(parse_range_reply("206 bytes 5-9/*").unwrap(), parts::RangeReply { status: 206, total: None });
+        assert_eq!(parse_range_reply("200 ").unwrap(), parts::RangeReply { status: 200, total: None, retry_after: None });
+        assert_eq!(parse_range_reply("206 bytes 5-9/*").unwrap(), parts::RangeReply { status: 206, total: None, retry_after: None });
+        // A 429 with its Retry-After (seconds); a date, which is not a number, is no wait.
+        assert_eq!(parse_range_reply("429 |120").unwrap(), parts::RangeReply { status: 429, total: None, retry_after: Some(120) });
+        assert_eq!(parse_range_reply("503 |Wed, 21 Oct 2026 07:28:00 GMT").unwrap().retry_after, None);
         // curl failed before any answer: its code is 000, which is no status a range can have.
         assert_eq!(parse_range_reply("000 ").unwrap().status, 0);
         assert_eq!(parse_range_reply(""), None);
@@ -1458,25 +1440,15 @@ mod tests {
             std::io::Write::write_all(&mut w, b"the translator").unwrap();
             w.finish().unwrap();
         }
-        let bytes = zip_member(&zip_path, "razdor").unwrap();
+        let bytes = archive::member(&zip_path, "razdor").unwrap();
         assert_eq!(bytes, program);
         // The sums name the member, as the release's SHA256SUMS.txt lists the programs inside.
         let sums = format!("{}  razdor\n{}  razdor-translate\n", sha256_hex(program), sha256_hex(b"the translator"));
         let want = expected_sum(sums.as_bytes(), "razdor").unwrap();
         assert!(check_sum(&bytes, &want).is_ok());
         assert!(check_sum(b"tampered", &want).is_err());
-        assert!(zip_member(&zip_path, "missing").is_err());
+        assert!(archive::member(&zip_path, "missing").is_err());
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_member_name_that_leaves_the_folder_is_refused_before_the_archive_is_opened() {
-        for bad in ["../razdor", "/etc/razdor", "bin/../../razdor", "C:razdor", "..\\razdor", "", "./", "a//b"] {
-            assert!(!plain_member(bad), "{bad:?}");
-            let err = zip_member(Path::new("/nonexistent/pack.zip"), bad).unwrap_err();
-            assert!(err.contains("not a plain name"), "{err}");
-        }
-        assert!(plain_member("razdor") && plain_member("bin/razdor") && plain_member("Razdor-1.5.2.exe"));
     }
 
     #[test]

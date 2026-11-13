@@ -39,14 +39,22 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::i18n::Lang;
+use crate::archive;
 use crate::mirror;
 
 /// Environment variable naming the hub: an `https://` address or a folder.
 pub const SOURCE_ENV: &str = "RAZDOR_HUB";
 /// Environment variable naming the local hub folder.
 pub const DIR_ENV: &str = "RAZDOR_HUB_DIR";
-/// The catalog's file name at the hub's root.
+/// The catalog's file name at the hub's root: the bare layout (its files are beside it), for the
+/// apps before 1.5.2 and for a source that has no zipped catalog yet.
 pub const INDEX: &str = "index.json";
+/// The zipped catalog's file name (the layout of GitVerse's Pages from 1.5.2 on: a map is a zip of
+/// its file, `FileRef::wrapped`). Read first; `INDEX` of the same source is the fallback.
+pub const INDEX_V2: &str = "index-v2.json";
+/// The error of a catalog that no address of its source list gave (`catalog_from_mirrors`): the
+/// window says so; each address's reason is in the log.
+pub const NO_ADDRESS: &str = "no address answered for the catalog";
 /// The hub on GitHub, the default's fallback after GitVerse (`mirror::HUB`): the latest release of the
 /// community repository (its assets are the catalog and the files it names).
 pub const DEFAULT_SOURCE: &str = "https://github.com/indicozy/razdor-community/releases/latest/download";
@@ -237,6 +245,21 @@ pub struct FileRef {
     /// unpacked under the mod's folder at their own paths.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub archive: bool,
+    /// The file is wrapped in a zip archive (`"zip"`, the only kind): `path` is then the archive's
+    /// address, `member` the file inside it, and `archive_size` / `archive_sha256` the zip's own
+    /// (checked before it is opened). `size` and `sha256` stay the file's. A map goes this way on
+    /// GitVerse, whose releases take no `.dtm`. Absent: the file is as it is (the bare layout).
+    /// Named `wrapped`, not `archive`: `archive` is the mods' zip flag above.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wrapped: Option<String>,
+    /// The file's name inside the wrapping archive (a safe file name).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member: Option<String>,
+    /// The wrapping archive's size, and its SHA-256 (lower or upper case).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archive_size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archive_sha256: Option<String>,
 }
 
 /// Likes and dislikes (👍/👎) on an entry's Discord post.
@@ -423,6 +446,7 @@ impl Catalog {
                 if f.archive && e.kind != Kind::Mod {
                     return Err(format!("index.json: {}: only a mod may be an archive", e.id));
                 }
+                check_wrapped(&e.id, f)?;
             }
             for (what, slot) in [("preview", &mut e.preview), ("picture", &mut e.picture)] {
                 if let Some(p) = slot {
@@ -494,6 +518,39 @@ impl Catalog {
 
     pub fn entry(&self, id: &str) -> Option<&Entry> {
         self.entries.iter().find(|e| e.id == id)
+    }
+}
+
+/// A file wrapped in a zip (`FileRef::wrapped`): the kind is `zip`, the file is no mod's archive, its
+/// member a safe file name, the archive's size a sane one and its SHA-256 well formed. The archive
+/// fields without `wrapped` are refused (a half-written record). Lower-cases the archive's SHA-256.
+fn check_wrapped(id: &str, f: &mut FileRef) -> Result<(), String> {
+    let bad = |what: &str| format!("index.json: {id}: {}: {what}", f.name);
+    let Some(kind) = f.wrapped.clone() else {
+        if f.member.is_some() || f.archive_size.is_some() || f.archive_sha256.is_some() {
+            return Err(bad("the archive's fields need \"wrapped\""));
+        }
+        return Ok(());
+    };
+    if kind != "zip" {
+        return Err(bad(&format!("the archive {kind:?} is not a zip")));
+    }
+    if f.archive {
+        return Err(bad("a mod's zip is not wrapped again"));
+    }
+    if !f.member.as_deref().is_some_and(safe_name) {
+        return Err(bad("the file's name in the archive is not a safe file name"));
+    }
+    match f.archive_size {
+        Some(size) if size > 0 && size <= MAX_ARCHIVE_DOWNLOAD => {}
+        _ => return Err(bad("the archive's size is missing or too big")),
+    }
+    match f.archive_sha256.clone() {
+        Some(sum) if safe_sha256(&sum) => {
+            f.archive_sha256 = Some(sum.to_ascii_lowercase());
+            Ok(())
+        }
+        _ => Err(bad("the archive's SHA-256 is not 64 hex digits")),
     }
 }
 
@@ -881,10 +938,25 @@ pub fn rebase(c: &mut Catalog, base: &str) {
 /// files are made absolute against that folder ([`rebase`]). When none reads, the last reason.
 pub fn catalog_from_mirrors(bases: &[&str], mut get: impl FnMut(&str) -> Result<Vec<u8>, String>) -> Result<Catalog, String> {
     mirror::first_ok("hub catalog", bases, |base| {
-        let mut c = Catalog::parse(&get(&resolve(base, INDEX))?)?;
+        let mut c = read_index(&mut |rel| get(&resolve(base, rel)))?;
         rebase(&mut c, base);
         Ok(c)
     })
+    // Every address failed: each reason is in the log (`first_ok`); the window says that none answered.
+    .map_err(|_| NO_ADDRESS.to_string())
+}
+
+/// One source's catalog: `get(rel)` gives its file `rel`. The zipped catalog (`INDEX_V2`) is read
+/// first; the bare one (`INDEX`) of the same source when that is missing or not a valid catalog. An
+/// error is the bare one's (the zipped one's reason goes to the log).
+pub fn read_index(get: &mut dyn FnMut(&str) -> Result<Vec<u8>, String>) -> Result<Catalog, String> {
+    match get(INDEX_V2).and_then(|bytes| Catalog::parse(&bytes)) {
+        Ok(c) => Ok(c),
+        Err(why) => {
+            crate::diag!("hub: {INDEX_V2} is not used ({why}), reading {INDEX}");
+            Catalog::parse(&get(INDEX)?)
+        }
+    }
 }
 
 /// The local hub folder: `RAZDOR_HUB_DIR`, else `hub` in the app's folder ([`crate::platform::app_dir`]:
@@ -999,12 +1071,7 @@ impl Hub {
 
     /// The file `f` is as the catalog says (its size and SHA-256), at `path`.
     fn check_file(path: &Path, f: &FileRef) -> Result<(), String> {
-        let len = std::fs::metadata(path).map(|m| m.len()).map_err(|e| format!("{}: {e}", f.path))?;
-        let sum = crate::update::sha256_file(path).map_err(|e| format!("{}: {e}", f.path))?;
-        if len != f.size || sum != f.sha256.to_lowercase() {
-            return Err(format!("{}: the file does not match the catalog", f.path));
-        }
-        Ok(())
+        check_sum(path, f.size, &f.sha256, &f.path)
     }
 
     /// The cached picture of an entry (`<hub>/previews/<sha256>.png`), downloaded when it is
@@ -1044,7 +1111,7 @@ impl Hub {
         }
         fs::create_dir_all(&folder).map_err(|e| format!("ads: {e}"))?;
         let part = folder.join(format!("{picture}.part"));
-        let file = FileRef { path: a.image.clone(), name: picture.clone(), lang: None, size: a.size, sha256: a.sha256.clone(), archive: false };
+        let file = FileRef { path: a.image.clone(), name: picture.clone(), lang: None, size: a.size, sha256: a.sha256.clone(), archive: false, wrapped: None, member: None, archive_size: None, archive_sha256: None };
         self.download(&a.image, &part, MAX_AD_BYTES).and_then(|()| Hub::check_file(&part, &file)).inspect_err(|_| {
             let _ = fs::remove_file(&part);
         })?;
@@ -1067,11 +1134,11 @@ impl Hub {
         match &self.source {
             Source::Mirrors => catalog_from_mirrors(&mirror::HUB, |url| crate::update::fetch(url, 60)),
             Source::Url(base) => {
-                let mut c = Catalog::parse(&self.fetch(INDEX)?)?;
+                let mut c = read_index(&mut |rel| self.fetch(rel))?;
                 rebase(&mut c, base);
                 Ok(c)
             }
-            Source::Dir(_) | Source::Mock => Catalog::parse(&self.fetch(INDEX)?),
+            Source::Dir(_) | Source::Mock => read_index(&mut |rel| self.fetch(rel)),
         }
     }
 
@@ -1172,6 +1239,9 @@ impl Hub {
                 self.download(&f.path, &part, MAX_ARCHIVE_DOWNLOAD)?;
                 Hub::check_file(&part, f)?;
                 got.push((f, Got::Zip(part)));
+            } else if f.wrapped.is_some() {
+                let bytes = self.fetch_wrapped(id, f, n, downloads)?;
+                got.push((f, Got::Bytes(bytes)));
             } else {
                 let bytes = self.fetch(&f.path)?;
                 if bytes.len() as u64 != f.size || crate::update::sha256_hex(&bytes) != f.sha256.to_lowercase() {
@@ -1181,6 +1251,24 @@ impl Hub {
             }
         }
         Ok(got)
+    }
+
+    /// A file wrapped in a zip (`FileRef::wrapped`): the archive is downloaded into `downloads`, checked
+    /// against `archive_size` and `archive_sha256`, its member taken out and the file checked against
+    /// `size` and `sha256`. The bytes, or why not. The archive is removed either way.
+    fn fetch_wrapped(&self, id: &str, f: &FileRef, n: usize, downloads: &Path) -> Result<Vec<u8>, String> {
+        std::fs::create_dir_all(downloads).map_err(|err| format!("downloads: {err}"))?;
+        let zip = downloads.join(format!("{id}-{n}.wrapped.zip"));
+        let result = self.download(&f.path, &zip, MAX_ARCHIVE_DOWNLOAD).and_then(|()| check_archive(&zip, f)).and_then(|()| {
+            let member = f.member.as_deref().unwrap_or_default();
+            archive::member(&zip, member).map_err(|e| format!("{}: {e}", f.path))
+        });
+        let _ = std::fs::remove_file(&zip);
+        let bytes = result?;
+        if bytes.len() as u64 != f.size || crate::update::sha256_hex(&bytes) != f.sha256.to_lowercase() {
+            return Err(format!("{}: the file in the archive does not match the catalog", f.path));
+        }
+        Ok(bytes)
     }
 
     /// Writes a mod's files: the files it ships and its archives' entries, built in
@@ -1358,6 +1446,24 @@ enum Got {
     Zip(PathBuf),
 }
 
+/// The file at `path` has this size and SHA-256 (`what` names it in the error).
+fn check_sum(path: &Path, size: u64, sha256: &str, what: &str) -> Result<(), String> {
+    let len = std::fs::metadata(path).map(|m| m.len()).map_err(|e| format!("{what}: {e}"))?;
+    let sum = crate::update::sha256_file(path).map_err(|e| format!("{what}: {e}"))?;
+    if len != size || sum != sha256.to_lowercase() {
+        return Err(format!("{what}: the file does not match the catalog"));
+    }
+    Ok(())
+}
+
+/// The wrapping zip of a wrapped file is the catalog's (`archive_size`, `archive_sha256`).
+fn check_archive(path: &Path, f: &FileRef) -> Result<(), String> {
+    match (f.archive_size, f.archive_sha256.as_deref()) {
+        (Some(size), Some(sum)) => check_sum(path, size, sum, &f.path),
+        _ => Err(format!("{}: the archive's size and SHA-256 are not in the catalog", f.path)),
+    }
+}
+
 /// The mock hub: small empty maps made here (nothing from the game), with catalog texts of our
 /// own, covering each case the window shows: maps in one or two languages, campaigns, mods,
 /// a map needing a mod, a campaign needing a mod that needs another, and a map needing a mod
@@ -1396,7 +1502,7 @@ pub mod mock {
     impl Out<'_> {
         fn file(&self, path: String, name: &str, lang: Option<&str>, bytes: &[u8]) -> std::io::Result<FileRef> {
             crate::editor::files::write_atomically(&self.dir.join(&path), bytes)?;
-            Ok(FileRef { path, name: name.into(), lang: lang.map(Into::into), size: bytes.len() as u64, sha256: crate::update::sha256_hex(bytes), archive: false })
+            Ok(FileRef { path, name: name.into(), lang: lang.map(Into::into), size: bytes.len() as u64, sha256: crate::update::sha256_hex(bytes), archive: false, wrapped: None, member: None, archive_size: None, archive_sha256: None })
         }
 
         /// A map or campaign: its chapters in `langs`, linked by their next-map names.
@@ -1835,6 +1941,167 @@ mod tests {
 
     /// A folder hub with one mod, `pack`, whose files are a zip: returns the hub and the zip's
     /// size and SHA-256.
+    /// A catalog with one map whose file is `extra` (JSON fields added to a wrapped file's record).
+    fn wrapped_catalog(extra: &str) -> String {
+        let sum = "ab".repeat(32);
+        format!(
+            r#"{{"format":1,"entries":[{{"id":"hub-map","kind":"map","title":{{"ru":"Карта"}},"author":"a","version":"1","files":[{{"path":"https://gitverse.ru/api/attachments/x","name":"Hub_Map.DTm","size":3,"sha256":"{sum}"{extra}}}]}}]}}"#
+        )
+    }
+
+    const GOOD_WRAP: &str = r#","wrapped":"zip","member":"00313a966d837cbb.dtm","archive_size":120,"archive_sha256":"CD""#;
+
+    #[test]
+    fn a_wrapped_file_with_its_archive_fields_reads_and_its_sums_are_lower_cased() {
+        let good = wrapped_catalog(&GOOD_WRAP.replace(r#""CD""#, &format!("\"{}\"", "CD".repeat(32))));
+        let c = Catalog::parse(good.as_bytes()).unwrap();
+        let f = &c.entries[0].files[0];
+        assert_eq!(f.wrapped.as_deref(), Some("zip"));
+        assert_eq!(f.member.as_deref(), Some("00313a966d837cbb.dtm"));
+        assert_eq!(f.archive_size, Some(120));
+        assert_eq!(f.archive_sha256.as_deref(), Some("cd".repeat(32).as_str()));
+    }
+
+    #[test]
+    fn a_bad_wrapped_record_refuses_the_whole_catalog() {
+        let sum = "cd".repeat(32);
+        let bad = [
+            format!(r#","wrapped":"rar","member":"a.dtm","archive_size":1,"archive_sha256":"{sum}""#),
+            format!(r#","wrapped":"zip","member":"../a.dtm","archive_size":1,"archive_sha256":"{sum}""#),
+            format!(r#","wrapped":"zip","archive_size":1,"archive_sha256":"{sum}""#),
+            format!(r#","wrapped":"zip","member":"a.dtm","archive_size":0,"archive_sha256":"{sum}""#),
+            format!(r#","wrapped":"zip","member":"a.dtm","archive_size":1,"archive_sha256":"xyz""#),
+            format!(r#","wrapped":"zip","member":"a.dtm","archive_size":1"#),
+            format!(r#","wrapped":"zip","member":"a.dtm","archive_size":1,"archive_sha256":"{sum}","archive":true"#),
+            format!(r#","member":"a.dtm","archive_size":1,"archive_sha256":"{sum}""#),
+        ];
+        for extra in bad {
+            assert!(Catalog::parse(wrapped_catalog(&extra).as_bytes()).is_err(), "{extra}");
+        }
+    }
+
+    #[test]
+    fn a_catalog_without_the_wrap_fields_is_as_before() {
+        let plain = wrapped_catalog("");
+        let c = Catalog::parse(plain.as_bytes()).unwrap();
+        let f = &c.entries[0].files[0];
+        assert!(f.wrapped.is_none() && f.member.is_none() && f.archive_size.is_none() && f.archive_sha256.is_none());
+        let back = serde_json::to_string(&c).unwrap();
+        assert!(!back.contains("wrapped") && !back.contains("archive_size"), "the old shape is written as before");
+    }
+
+    /// A folder hub whose map is wrapped in a zip (`FileRef::wrapped`) in its zipped catalog.
+    /// `tamper` changes the catalog's text before it is written (a wrong sum, member or name).
+    fn wrapped_hub(tag: &str, tamper: &dyn Fn(String) -> String) -> (PathBuf, PathBuf, Vec<u8>) {
+        use std::io::Write;
+        let root = temp(&format!("{tag}-root"));
+        let local = temp(&format!("{tag}-local"));
+        std::fs::create_dir_all(&root).unwrap();
+        let map = b"the map bytes".to_vec();
+        let mut w = zip::ZipWriter::new(std::fs::File::create(root.join("00313a966d837cbb.dtm.zip")).unwrap());
+        w.start_file("00313a966d837cbb.dtm", zip::write::SimpleFileOptions::default()).unwrap();
+        w.write_all(&map).unwrap();
+        w.finish().unwrap();
+        let zip_bytes = std::fs::read(root.join("00313a966d837cbb.dtm.zip")).unwrap();
+        let json = serde_json::json!({"format": 1, "entries": [{
+            "id": "hub-map", "kind": "map", "title": {"ru": "Карта"}, "author": "a", "version": "1",
+            "files": [{"path": "00313a966d837cbb.dtm.zip", "name": "Hub_Map.DTm", "size": map.len(),
+                       "sha256": crate::update::sha256_hex(&map), "wrapped": "zip", "member": "00313a966d837cbb.dtm",
+                       "archive_size": zip_bytes.len(), "archive_sha256": crate::update::sha256_hex(&zip_bytes)}]
+        }]});
+        std::fs::write(root.join(INDEX_V2), tamper(json.to_string())).unwrap();
+        (root, local, map)
+    }
+
+    #[test]
+    fn a_wrapped_map_installs_its_member_from_a_zipped_catalog() {
+        let (root, local, map) = wrapped_hub("wrap-install", &|t| t);
+        let hub = Hub { source: Source::Dir(root.clone()), local: local.clone() };
+        let catalog = hub.catalog().unwrap();
+        assert_eq!(hub.install(&catalog, "hub-map", Lang::Ru).unwrap(), ["hub-map"]);
+        assert_eq!(std::fs::read(local.join("maps/Hub_Map.DTm")).unwrap(), map);
+        assert!(!local.join("downloads").exists(), "the archive is removed after the install");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    #[test]
+    fn a_wrapped_map_that_fails_a_check_writes_nothing() {
+        // The archive's and the file's SHA-256 as the catalog gives them, to tamper with the text.
+        let (probe, probe_local, _) = wrapped_hub("wrap-probe", &|t| t);
+        let zip_sum = crate::update::sha256_hex(&std::fs::read(probe.join("00313a966d837cbb.dtm.zip")).unwrap());
+        let file_sum = crate::update::sha256_hex(b"the map bytes");
+        let _ = std::fs::remove_dir_all(&probe);
+        let _ = std::fs::remove_dir_all(&probe_local);
+        let cases: [(&str, Box<dyn Fn(String) -> String>, &str); 3] = [
+            ("wrap-zipsum", Box::new(move |t: String| t.replace(&zip_sum, &"0".repeat(64))), "does not match the catalog"),
+            ("wrap-member", Box::new(|t: String| t.replace("00313a966d837cbb.dtm\"", "other.dtm\"")), "has no"),
+            ("wrap-filesum", Box::new(move |t: String| t.replace(&file_sum, &"0".repeat(64))), "in the archive does not match"),
+        ];
+        for (tag, tamper, want) in cases {
+            let (root, local, _) = wrapped_hub(tag, &*tamper);
+            let hub = Hub { source: Source::Dir(root.clone()), local: local.clone() };
+            let err = hub.install(&hub.catalog().unwrap(), "hub-map", Lang::Ru).unwrap_err();
+            assert!(err.contains(want), "{tag}: {err}");
+            assert!(!local.join("maps/Hub_Map.DTm").exists(), "{tag}: nothing is written");
+            let _ = std::fs::remove_dir_all(&root);
+            let _ = std::fs::remove_dir_all(&local);
+        }
+    }
+
+    #[test]
+    fn index_v2_is_read_first_and_index_json_of_the_same_source_is_the_fallback() {
+        let root = temp("v2-order");
+        std::fs::create_dir_all(&root).unwrap();
+        let bare = wrapped_catalog("").replace("hub-map", "bare");
+        let v2 = wrapped_catalog("").replace("hub-map", "zipped");
+        std::fs::write(root.join(INDEX), &bare).unwrap();
+        std::fs::write(root.join(INDEX_V2), &v2).unwrap();
+        let local = temp("v2-order-local");
+        let hub = Hub { source: Source::Dir(root.clone()), local: local.clone() };
+        assert_eq!(hub.catalog().unwrap().entries[0].id, "zipped", "index-v2.json first");
+        // Missing, or not a valid catalog: the bare one of the same source.
+        std::fs::remove_file(root.join(INDEX_V2)).unwrap();
+        assert_eq!(hub.catalog().unwrap().entries[0].id, "bare");
+        std::fs::write(root.join(INDEX_V2), b"<html>not a catalog</html>").unwrap();
+        assert_eq!(hub.catalog().unwrap().entries[0].id, "bare");
+        // Neither: an error.
+        std::fs::remove_file(root.join(INDEX)).unwrap();
+        assert!(hub.catalog().is_err());
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    #[test]
+    fn a_gitverse_source_without_index_v2_falls_back_to_index_json_and_an_address_list_keeps_its_order() {
+        let mut asked = Vec::new();
+        let c = catalog_from_mirrors(&["https://gitverse.example/cat", "https://github.example/cat"], |url| {
+            asked.push(url.to_string());
+            if url.starts_with("https://gitverse.example") && url.ends_with(INDEX) {
+                Ok(wrapped_catalog("").replace("hub-map", "bare-gv").into_bytes())
+            } else if url.ends_with(INDEX_V2) {
+                Err("HTTP 404".into())
+            } else {
+                Err("stalled".into())
+            }
+        })
+        .unwrap();
+        assert_eq!(c.entries[0].id, "bare-gv");
+        assert_eq!(asked, ["https://gitverse.example/cat/index-v2.json", "https://gitverse.example/cat/index.json"]);
+    }
+
+    #[test]
+    fn when_no_address_answers_the_catalog_says_so_and_the_reasons_stay_in_the_log() {
+        let asked = std::cell::Cell::new(0usize);
+        let err = catalog_from_mirrors(&mirror::HUB, |url| {
+            asked.set(asked.get() + 1);
+            if url.contains("gitverse") { Err("stalled".into()) } else { Ok(b"<html>nope</html>".to_vec()) }
+        })
+        .unwrap_err();
+        assert_eq!(err, NO_ADDRESS);
+        assert_eq!(asked.get(), 4, "each address is tried for both files");
+    }
+
     fn zip_hub(tag: &str) -> (PathBuf, PathBuf, u64, String) {
         use std::io::Write;
         let root = temp(&format!("{tag}-root"));
@@ -2033,6 +2300,10 @@ mod tests {
             size: 1,
             sha256: "0".repeat(64),
             archive: false,
+            wrapped: None,
+            member: None,
+            archive_size: None,
+            archive_sha256: None,
         });
         std::fs::write(hub.local.join("installed.json"), serde_json::to_vec(&installed).unwrap()).unwrap();
         std::fs::remove_file(hub.local.join("maps/Hub_Merc1.DTm")).unwrap();
@@ -2093,7 +2364,7 @@ mod tests {
         std::fs::create_dir_all(root.join("previews")).unwrap();
         let png = mock::preview_png(320, 180);
         std::fs::write(root.join("previews/p.png"), &png).unwrap();
-        let f = FileRef { path: "previews/p.png".into(), name: "p.png".into(), lang: None, size: png.len() as u64, sha256: crate::update::sha256_hex(&png), archive: false };
+        let f = FileRef { path: "previews/p.png".into(), name: "p.png".into(), lang: None, size: png.len() as u64, sha256: crate::update::sha256_hex(&png), archive: false, wrapped: None, member: None, archive_size: None, archive_sha256: None };
         let hub = Hub { source: Source::Dir(root.clone()), local: local.clone() };
         let path = hub.cache_preview(&f).unwrap();
         assert_eq!(path, preview_path(&local, &f));
@@ -2112,7 +2383,7 @@ mod tests {
         let local = hub.local.clone();
         // Fields the mock leaves out: a preview, a rating, an archive, a status note.
         let e = &mut c.entries[0];
-        e.preview = Some(FileRef { path: "previews/x.png".into(), name: "x.png".into(), lang: None, size: 9, sha256: "ab".repeat(32), archive: false });
+        e.preview = Some(FileRef { path: "previews/x.png".into(), name: "x.png".into(), lang: None, size: 9, sha256: "ab".repeat(32), archive: false, wrapped: None, member: None, archive_size: None, archive_sha256: None });
         e.rating = Some(Rating { up: 3, down: 1 });
         e.status_note = Text { ru: "Примечание".into(), en: "A note".into() };
         if let Some(m) = c.entries.iter_mut().find(|e| e.kind == Kind::Mod) {
@@ -2262,7 +2533,8 @@ mod tests {
             if url.starts_with("https://indicozy.gitverse") { Ok(gitverse_html.clone()) } else { Ok(github_json.clone().into_bytes()) }
         })
         .unwrap();
-        assert_eq!(asked, vec![format!("{}/index.json", mirror::HUB[0]), format!("{}/index.json", mirror::HUB[1])]);
+        // GitVerse's zipped catalog and its bare one answer the page; GitHub's zipped one answers the JSON.
+        assert_eq!(asked, vec![format!("{}/index-v2.json", mirror::HUB[0]), format!("{}/index.json", mirror::HUB[0]), format!("{}/index-v2.json", mirror::HUB[1])]);
         let e = &c.entries[0];
         assert_eq!(e.files[0].path, format!("{DEFAULT_SOURCE}/mods/m/a.ini"), "resolved against the GitHub folder that gave it");
         assert_eq!(e.preview.as_ref().unwrap().path, format!("{DEFAULT_SOURCE}/previews/p.png"));
@@ -2285,8 +2557,8 @@ mod tests {
             if url.contains("gitverse") { Err("stalled".into()) } else { Ok(b"<html>nope</html>".to_vec()) }
         })
         .unwrap_err();
-        assert_eq!(asked.get(), 2, "both mirrors are tried");
-        assert!(err.starts_with("index.json:"), "the last one is a web page, not a catalog: {err}");
+        assert_eq!(asked.get(), 4, "both mirrors are tried, each for both files");
+        assert_eq!(err, NO_ADDRESS);
     }
 
     const GOOD_AD: &str = r#"{"id":"thorny-times","version":1,"image":"https://example.org/capsule.png","size":135584,"sha256":"3AA411F3AB65A986DD7FDE5ECFBBCB0D399458306678421D4DEFC6B899C550CA","url":"https://store.steampowered.com/app/2182610/","caption_ru":"Новая игра","caption_en":"A new game"}"#;
