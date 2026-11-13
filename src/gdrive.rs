@@ -7,7 +7,9 @@
 //! Razdor hosts none of it. Nothing here needs macroquad.
 //!
 //! A download can resume: the file is written to `<name>.part` and renamed once it verifies, so a
-//! cancelled or interrupted download is continued by the next press (a Range request). A refusal
+//! cancelled or interrupted download is continued by the next press (a Range request). A download
+//! that the server answers with ranges comes in pieces instead (`parts`): those are dropped on a
+//! cancel or a failure, and the next press starts them again. A refusal
 //! (403 / 429), any other failed status, or a web page instead of the file is a failure with a
 //! reason; the screen then shows the manual path with the file's address.
 

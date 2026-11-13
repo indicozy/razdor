@@ -192,59 +192,92 @@ private int razdorCornerRadius(WindowInsets insets, int position) {
     }
 }
 
-// Set by razdorDownloadCancel: the download under way stops and returns "cancelled". Each download
-// clears it when it starts (a cancel asked before that is asked again by the caller, which polls).
-private static volatile boolean razdorDownloadCancelled = false;
-// The connection of the download under way: a cancel closes it, so a read that waits for a byte
-// ends at once instead of at the stall limit.
-private static volatile HttpURLConnection razdorDownloadConnection = null;
+// The downloads under way, each one's connection: a cancel closes them all, so the pieces of a
+// download (several at once) stop together. The generation counts the cancels: a download takes the
+// generation it starts with, and stops when it has changed (a download started after a cancel runs).
+private static final java.util.Set<HttpURLConnection> razdorDownloads = java.util.concurrent.ConcurrentHashMap.newKeySet();
+private static final java.util.concurrent.atomic.AtomicLong razdorDownloadGeneration = new java.util.concurrent.atomic.AtomicLong();
 
-// Stops the download under way (razdorDownload returns "cancelled").
+// Stops the downloads under way (each razdorDownload returns "cancelled").
 public void razdorDownloadCancel() {
-    razdorDownloadCancelled = true;
-    HttpURLConnection connection = razdorDownloadConnection;
-    if (connection != null) {
+    razdorDownloadGeneration.incrementAndGet();
+    for (HttpURLConnection connection : razdorDownloads) {
         connection.disconnect();
     }
 }
 
+// Whether a cancel came after the download with this generation started.
+private static boolean razdorDownloadCancelled(long generation) {
+    return razdorDownloadGeneration.get() != generation;
+}
+
+// The file's size from a Content-Range header ("bytes 0-0/44619982"), -1 when it is not there.
+private static long contentRangeTotal(String header) {
+    if (header == null) {
+        return -1;
+    }
+    int slash = header.lastIndexOf('/');
+    if (slash < 0) {
+        return -1;
+    }
+    try {
+        return Long.parseLong(header.substring(slash + 1).trim());
+    } catch (NumberFormatException e) {
+        return -1;
+    }
+}
+
 // Downloads `url` into the file `path`. `stallSeconds` is how long the link may go without an
-// answer or a byte (the connect and read timeouts); `totalSeconds` caps the whole download. Returns
-// "" when the file is in, "HTTP <code>" for a refused status, "stalled: <why>" for a stall,
-// "cancelled", "timeout: ..." at the cap, or the error.
-public String razdorDownload(String url, String path, int stallSeconds, int totalSeconds) {
-    razdorDownloadCancelled = false;
+// answer or a byte (the connect and read timeouts); `totalSeconds` caps the whole download.
+// `rangeStart` and `rangeEnd` (inclusive) ask for those bytes only, with a Range request (-1 for
+// the whole file; `rangeEnd` -1 is the file's end). Returns "" when the whole file is in, "206 <size>"
+// when the range is in (<size> is the file's size, -1 when the server does not say), "200" when the
+// server ignored the range (nothing is written), "HTTP <code>" for a refused status, "stalled: <why>"
+// for a stall, "cancelled", "timeout: ..." at the cap, or the error.
+public String razdorDownload(String url, String path, int stallSeconds, int totalSeconds, long rangeStart, long rangeEnd) {
+    final long generation = razdorDownloadGeneration.get();
     long deadline = System.currentTimeMillis() + totalSeconds * 1000L;
+    boolean ranged = rangeStart >= 0;
     HttpURLConnection connection = null;
     try {
         connection = (HttpURLConnection) new URL(url).openConnection();
-        razdorDownloadConnection = connection;
+        razdorDownloads.add(connection);
         connection.setConnectTimeout(stallSeconds * 1000);
         connection.setReadTimeout(stallSeconds * 1000);
         connection.setRequestProperty("User-Agent", "razdor");
+        if (ranged) {
+            connection.setRequestProperty("Range", "bytes=" + rangeStart + "-" + (rangeEnd >= 0 ? String.valueOf(rangeEnd) : ""));
+        }
         int code = connection.getResponseCode();
-        if (code / 100 != 2) {
+        if (ranged && code == 200) {
+            return "200";
+        }
+        if (code / 100 != 2 || (ranged && code != 206)) {
             return "HTTP " + code;
         }
+        long total = ranged ? contentRangeTotal(connection.getHeaderField("Content-Range")) : 0;
         int n = 1;
         try (InputStream in = connection.getInputStream(); FileOutputStream out = new FileOutputStream(path)) {
             byte[] buffer = new byte[65536];
-            while (!razdorDownloadCancelled && System.currentTimeMillis() < deadline && (n = in.read(buffer)) > 0) {
+            while (!razdorDownloadCancelled(generation) && System.currentTimeMillis() < deadline && (n = in.read(buffer)) > 0) {
                 out.write(buffer, 0, n);
             }
         }
-        if (razdorDownloadCancelled) {
+        if (razdorDownloadCancelled(generation)) {
             return "cancelled";
         }
         // The loop ended at the cap with the last read still running (n > 0), not at the end.
-        return n > 0 ? "timeout: the download took longer than " + totalSeconds + " s" : "";
+        if (n > 0) {
+            return "timeout: the download took longer than " + totalSeconds + " s";
+        }
+        return ranged ? "206 " + total : "";
     } catch (java.net.SocketTimeoutException e) {
-        return razdorDownloadCancelled ? "cancelled" : "stalled: " + e;
+        return razdorDownloadCancelled(generation) ? "cancelled" : "stalled: " + e;
     } catch (Exception e) {
-        return razdorDownloadCancelled ? "cancelled" : e.toString();
+        return razdorDownloadCancelled(generation) ? "cancelled" : e.toString();
     } finally {
-        razdorDownloadConnection = null;
         if (connection != null) {
+            razdorDownloads.remove(connection);
             connection.disconnect();
         }
     }

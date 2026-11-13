@@ -33,6 +33,7 @@ use std::sync::{Mutex, OnceLock};
 use serde::{Deserialize, Serialize};
 
 use crate::mirror;
+use crate::parts;
 
 /// How long a download may go without a byte (or a connection) before it stops: every download
 /// here, the game's, the hub's and the updates', fails with [`STALLED`] instead of waiting out its
@@ -356,7 +357,9 @@ fn part_path(program: &Path, asset: &str) -> PathBuf {
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn curl_base() -> Command {
     let mut c = Command::new("curl");
-    c.args(["-sSL", "--proto", "=https", "-A", concat!("razdor/", env!("CARGO_PKG_VERSION"))]);
+    // The tests' range server is plain HTTP on 127.0.0.1; the app asks https only.
+    let proto = if cfg!(test) { "=http,https" } else { "=https" };
+    c.args(["-sSL", "--proto", proto, "-A", concat!("razdor/", env!("CARGO_PKG_VERSION"))]);
     c.args(stall_args());
     #[cfg(windows)]
     {
@@ -595,12 +598,19 @@ pub fn sha256_file(path: &Path) -> std::io::Result<String> {
     Ok(hash.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
-/// Downloads `url` into the file `path`, streamed, following redirects. On the desktop at
-/// most `max_bytes` (curl stops there); the phones take what the system's downloader gives.
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+/// Downloads `url` into the file `path`, streamed, following redirects: in pieces when the server
+/// answers ranges (`parts`), else as one stream of at most `max_bytes` (curl stops there on the
+/// desktop; the phones take what the system's downloader gives).
 pub(crate) fn download_to(url: &str, path: &Path, seconds: u32, max_bytes: u64) -> Result<(), String> {
+    download_parted(url, path, seconds, max_bytes, &|_: u64| {}, &|| false, || download_one(url, path, seconds, max_bytes).map(|()| 200)).map(|_| ())
+}
+
+/// One stream into `path`, the whole file: `curl` on the desktop (a failed status is its error).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn download_one(url: &str, path: &Path, seconds: u32, max_bytes: u64) -> Result<(), String> {
     let out = curl()
-        .args(["--max-time", &seconds.to_string(), "--max-filesize", &max_bytes.to_string(), "-o"])
+        // curl's size limit is a signed 64-bit number.
+        .args(["--max-time", &seconds.to_string(), "--max-filesize", &max_bytes.min(i64::MAX as u64).to_string(), "-o"])
         .arg(path)
         .arg(url)
         .output()
@@ -611,30 +621,113 @@ pub(crate) fn download_to(url: &str, path: &Path, seconds: u32, max_bytes: u64) 
     Err(curl_why(out.status, &String::from_utf8_lossy(&out.stderr)))
 }
 
-/// Downloads `url` into `path` for the game's download (`gdrive`), from byte `from` on (`from` > 0
-/// continues a partial file with a Range request; the phones cannot, so they only take 0).
-/// `progress` gets the file's size so far, and `cancelled` is asked every fraction of a second;
-/// true stops the transfer at once (an error, the file kept). Returns the HTTP status (the body is
-/// written whatever it is: the caller checks it). Desktop: `curl` is watched. The phones take the
-/// system downloader's file, which cannot be stopped in the middle (checked before and after it),
-/// and report a failed status as `HTTP <code>`.
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub(crate) fn download_watched(url: &str, path: &Path, from: u64, seconds: u32, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool) -> Result<u16, String> {
-    use std::io::Read;
-    let mut cmd = curl_base();
-    cmd.args(["--retry", "2", "--max-time", &seconds.to_string(), "-w", "%{http_code}", "-o"]).arg(path);
-    if from > 0 {
-        cmd.args(["-C", &from.to_string()]);
+/// Android: the system's downloader (a refused status is `HTTP <code>`).
+#[cfg(target_os = "android")]
+fn download_one(url: &str, path: &Path, seconds: u32, _max_bytes: u64) -> Result<(), String> {
+    phone::download(url, path, seconds)
+}
+
+/// iOS: the body (`NSData`), then written.
+#[cfg(target_os = "ios")]
+fn download_one(url: &str, path: &Path, seconds: u32, _max_bytes: u64) -> Result<(), String> {
+    let body = phone::get(url, seconds)?;
+    std::fs::write(path, body).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// The pieces of `url` into `path` when the server answers ranges (see `parts`): `Ok(200)` when
+/// they are joined, else `single` (one stream, with its own status). A failed piece is the error.
+#[cfg(not(target_os = "ios"))]
+fn download_parted(url: &str, path: &Path, seconds: u32, cap: u64, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool, single: impl FnOnce() -> Result<u16, String>) -> Result<u16, String> {
+    match parts::fetch(&Ranged { seconds }, url, path, cap, progress, cancelled)? {
+        parts::Parted::Joined => Ok(200),
+        parts::Parted::Single => single(),
     }
+}
+
+/// iOS takes one stream: its download is one `NSData` call, with no range to ask for.
+#[cfg(target_os = "ios")]
+fn download_parted(_: &str, _: &Path, _: u32, _: u64, _: &dyn Fn(u64), _: &dyn Fn() -> bool, single: impl FnOnce() -> Result<u16, String>) -> Result<u16, String> {
+    single()
+}
+
+/// The desktop's and the Android's range requests for `parts` (iOS has none: see `download_parted`).
+#[cfg(not(target_os = "ios"))]
+struct Ranged {
+    seconds: u32,
+}
+
+#[cfg(not(target_os = "ios"))]
+impl parts::RangeNet for Ranged {
+    fn range(&self, url: &str, path: &Path, start: u64, end: u64, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool) -> Result<parts::RangeReply, String> {
+        range_request(url, path, start, end, self.seconds, progress, cancelled)
+    }
+}
+
+/// One range request (`parts::RangeNet::range`): `curl -r` on the desktop, watched. The status and
+/// the file's size come from curl's write-out. A 200 is an answer, not an error: the server ignored
+/// the range, and curl stops at `--max-filesize` (exit 63) before it takes the whole file.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn range_request(url: &str, path: &Path, start: u64, end: u64, seconds: u32, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool) -> Result<parts::RangeReply, String> {
+    let mut cmd = curl_base();
+    cmd.args(["--max-time", &seconds.to_string(), "--max-filesize", &(end - start + 1).to_string()])
+        .args(["-r", &format!("{start}-{end}"), "-w", "%{http_code} %header{content-range}", "-o"])
+        .arg(path)
+        .arg(url);
+    let (status, out, err) = run_watched(cmd, path, progress, cancelled)?;
+    match parse_range_reply(&out) {
+        Some(reply) if status.success() || (status.code() == Some(63) && reply.status == 200) => Ok(reply),
+        _ => Err(curl_why(status, &err)),
+    }
+}
+
+/// The status and the file's size from curl's write-out (`%{http_code} %header{content-range}`,
+/// e.g. `206 bytes 0-0/44619982`; the size is None when the header is not there or is `*`).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn parse_range_reply(out: &str) -> Option<parts::RangeReply> {
+    let mut words = out.trim().splitn(2, ' ');
+    let status = words.next()?.parse().ok()?;
+    let total = words.next().and_then(|range| range.rsplit_once('/')).and_then(|(_, size)| size.trim().parse().ok());
+    Some(parts::RangeReply { status, total })
+}
+
+/// The phone's range request: the system's downloader, watched (`watched`).
+#[cfg(target_os = "android")]
+fn range_request(url: &str, path: &Path, start: u64, end: u64, seconds: u32, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool) -> Result<parts::RangeReply, String> {
+    watched(path, progress, cancelled, || phone::download_range(url, path, start, end, seconds))
+}
+
+/// Downloads `url` into `path` for the game's download (`gdrive`), from byte `from` on (`from` > 0
+/// continues a partial file with a Range request; the phones cannot, so they only take 0). From 0
+/// the download is in pieces when the server answers ranges (`parts`), else one stream.
+/// `progress` gets the file's size so far (the sum of the pieces), and `cancelled` is asked every
+/// fraction of a second; true stops the transfer at once (an error, the file kept). Returns the HTTP
+/// status (the body is written whatever it is: the caller checks it; a pieced file is 200).
+pub(crate) fn download_watched(url: &str, path: &Path, from: u64, seconds: u32, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool) -> Result<u16, String> {
+    if from > 0 {
+        return stream_watched(url, path, from, seconds, progress, cancelled);
+    }
+    download_parted(url, path, seconds, u64::MAX, progress, cancelled, || stream_watched(url, path, 0, seconds, progress, cancelled))
+}
+
+/// The size of the file at `path` (0 when there is none yet).
+fn file_size(path: &Path) -> u64 {
+    std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+}
+
+/// Runs `cmd` (a curl) to its end, watched: `progress` gets the size of `path` every fraction of a
+/// second, and `cancelled` kills the run (`Err("cancelled")`). Returns the exit status and the
+/// stdout and stderr of the run.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn run_watched(mut cmd: Command, path: &Path, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool) -> Result<(std::process::ExitStatus, String, String), String> {
+    use std::io::Read;
     let mut child = cmd
-        .arg(url)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| format!("curl: {e}"))?;
     loop {
         if let Ok(Some(status)) = child.try_wait() {
-            progress(std::fs::metadata(path).map(|m| m.len()).unwrap_or(0));
+            progress(file_size(path));
             let mut out = String::new();
             let mut err = String::new();
             if let Some(mut o) = child.stdout.take() {
@@ -643,49 +736,44 @@ pub(crate) fn download_watched(url: &str, path: &Path, from: u64, seconds: u32, 
             if let Some(mut e) = child.stderr.take() {
                 let _ = e.read_to_string(&mut err);
             }
-            if !status.success() {
-                return Err(curl_why(status, &err));
-            }
-            return Ok(out.trim().parse().unwrap_or(0));
+            return Ok((status, out, err));
         }
         if cancelled() {
             let _ = child.kill();
             let _ = child.wait();
             return Err("cancelled".into());
         }
-        progress(std::fs::metadata(path).map(|m| m.len()).unwrap_or(0));
+        progress(file_size(path));
         std::thread::sleep(std::time::Duration::from_millis(150));
     }
 }
 
-/// See the desktop's `download_watched`. The phones' downloader blocks until the file is in, so it
-/// runs on a helper thread while this one polls every fraction of a second: the file's size goes
-/// to `progress`, and a cancel asks the Java transfer to stop (`phone::download_cancel`). Its
-/// result is then `Err("cancelled")`. iOS keeps the same flow (its download is one blocking call).
+/// One stream of `url` into `path` from byte `from` (desktop: `curl`, watched; a partial file is
+/// continued with `-C`). Returns the HTTP status (see `download_watched`).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn stream_watched(url: &str, path: &Path, from: u64, seconds: u32, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool) -> Result<u16, String> {
+    let mut cmd = curl_base();
+    cmd.args(["--retry", "2", "--max-time", &seconds.to_string(), "-w", "%{http_code}", "-o"]).arg(path);
+    if from > 0 {
+        cmd.args(["-C", &from.to_string()]);
+    }
+    cmd.arg(url);
+    let (status, out, err) = run_watched(cmd, path, progress, cancelled)?;
+    if !status.success() {
+        return Err(curl_why(status, &err));
+    }
+    Ok(out.trim().parse().unwrap_or(0))
+}
+
+/// One stream of `url` into `path` (phones and iOS): the system's downloader cannot continue a file,
+/// so only from 0. A refused status comes back as its code (see `watched`).
 #[cfg(any(target_os = "android", target_os = "ios"))]
-pub(crate) fn download_watched(url: &str, path: &Path, from: u64, seconds: u32, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool) -> Result<u16, String> {
+fn stream_watched(url: &str, path: &Path, from: u64, seconds: u32, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool) -> Result<u16, String> {
     if from > 0 {
         return Err("the phone's downloader cannot continue a file".into());
     }
-    if cancelled() {
-        return Err("cancelled".into());
-    }
-    let size = || std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-    let result = std::thread::scope(|s| {
-        let worker = s.spawn(|| download_to(url, path, seconds, u64::MAX));
-        while !worker.is_finished() {
-            if cancelled() {
-                phone::download_cancel();
-            }
-            progress(size());
-            std::thread::sleep(std::time::Duration::from_millis(150));
-        }
-        worker.join().unwrap_or_else(|_| Err("the download thread failed".into()))
-    });
-    progress(size());
-    match result {
-        Ok(()) => Ok(200),
-        Err(_) if cancelled() => Err("cancelled".into()),
+    match watched(path, progress, cancelled, || download_one(url, path, seconds, u64::MAX).map(|()| 200)) {
+        Ok(code) => Ok(code),
         Err(e) => match e.strip_prefix("HTTP ").and_then(|code| code.trim().parse().ok()) {
             Some(code) => Ok(code),
             None => Err(e),
@@ -693,17 +781,31 @@ pub(crate) fn download_watched(url: &str, path: &Path, from: u64, seconds: u32, 
     }
 }
 
-/// Downloads `url` into the file `path` through the system's downloader (Android).
-#[cfg(target_os = "android")]
-pub(crate) fn download_to(url: &str, path: &Path, seconds: u32, _max_bytes: u64) -> Result<(), String> {
-    phone::download(url, path, seconds)
-}
-
-/// Downloads `url` into the file `path` (iOS: the body, then written).
-#[cfg(target_os = "ios")]
-pub(crate) fn download_to(url: &str, path: &Path, seconds: u32, _max_bytes: u64) -> Result<(), String> {
-    let body = phone::get(url, seconds)?;
-    std::fs::write(path, body).map_err(|e| format!("{}: {e}", path.display()))
+/// A phone's blocking download into `path`, watched: `work` runs on a helper thread while this one
+/// polls the size of `path` as progress, and asks the transfer to stop (`phone::download_cancel`)
+/// while `cancelled` is true; a cancelled transfer is `Err("cancelled")`. Every piece of a download
+/// uses it, so one cancel stops them all (the Java side stops every connection of the downloads).
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn watched<R: Send>(path: &Path, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool, work: impl FnOnce() -> Result<R, String> + Send) -> Result<R, String> {
+    if cancelled() {
+        return Err("cancelled".into());
+    }
+    let result = std::thread::scope(|s| {
+        let worker = s.spawn(work);
+        while !worker.is_finished() {
+            if cancelled() {
+                phone::download_cancel();
+            }
+            progress(file_size(path));
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
+        worker.join().unwrap_or_else(|_| Err("the download thread failed".into()))
+    });
+    progress(file_size(path));
+    match result {
+        Err(_) if cancelled() => Err("cancelled".into()),
+        other => other,
+    }
 }
 
 /// Puts file `new` in place of `program`: a rename over it on Unix (made executable first);
@@ -1132,6 +1234,19 @@ mod tests {
         assert_eq!(versioned_asset("razdor.apk", v).as_deref(), Some("razdor-1.4.1.apk"));
         assert_eq!(versioned_asset("razdor.ipa", v).as_deref(), Some("razdor-1.4.1.ipa"));
         assert_eq!(versioned_asset("razdor-translate", v), None);
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[test]
+    fn a_range_reply_gives_its_status_and_the_files_size() {
+        let got = parse_range_reply("206 bytes 0-0/44619982").unwrap();
+        assert_eq!(got, parts::RangeReply { status: 206, total: Some(44619982) });
+        // No Content-Range header (curl writes nothing after the code), or a size of "*".
+        assert_eq!(parse_range_reply("200 ").unwrap(), parts::RangeReply { status: 200, total: None });
+        assert_eq!(parse_range_reply("206 bytes 5-9/*").unwrap(), parts::RangeReply { status: 206, total: None });
+        // curl failed before any answer: its code is 000, which is no status a range can have.
+        assert_eq!(parse_range_reply("000 ").unwrap().status, 0);
+        assert_eq!(parse_range_reply(""), None);
     }
 
     #[test]

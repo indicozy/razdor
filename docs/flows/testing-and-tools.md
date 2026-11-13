@@ -237,6 +237,8 @@ Other diagnostics: `razdor.log` in the data folder (`razdor::diag`, `RAZDOR_LOG=
   it (`mirror::UPDATE_FEED`, `update::feed_from`: a reply that is not a release list, e.g. an
   HTML page with HTTP 200, is the next address's). It downloads through the system `curl`, accepts a file
   only if its SHA-256 matches `SHA256SUMS` (or `SHA256SUMS.txt`), and replaces itself by rename.
+  A big download (over 4 MiB, a server that answers Range requests) comes in 8 pieces at once, each
+  checked and retried (`src/parts.rs`, the game flow in `app-and-ui.md`); the update's `download_to` takes that path too.
   A GitVerse asset may be a zip (`archive: "zip"`, its `member` the program inside): the member is
   taken out (`update::zip_member`, a name with `..` or a drive is refused) and the member is checked
   against the sums. Each program is

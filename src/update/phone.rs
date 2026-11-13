@@ -22,6 +22,7 @@ mod android {
     use std::path::{Path, PathBuf};
 
     use crate::jni::{activity_class, cleared, method, string, to_text, Local};
+    use crate::parts::RangeReply;
     use macroquad::miniquad::native::android::{attach_jni_env, ndk_sys as sys, ACTIVITY};
 
     /// The app's own folder for files that are not kept (`getCacheDir`).
@@ -45,36 +46,61 @@ mod android {
     /// stall fails with `STALLED`, its reason in the log) and after `seconds` in all. Blocks; a
     /// cancel from another thread (`download_cancel`) makes it return "cancelled".
     pub fn download(url: &str, path: &Path, seconds: u32) -> Result<(), String> {
+        match java_download(url, path, seconds, -1, -1)?.as_str() {
+            "" => Ok(()),
+            text => Err(failure(text)),
+        }
+    }
+
+    /// Downloads bytes `start..=end` of `url` into the file `path` (a piece of a download, see
+    /// `parts`). Blocks like `download`. The server's answer: a 206 with the file's size, or a 200
+    /// (the range was ignored: nothing was written).
+    pub fn download_range(url: &str, path: &Path, start: u64, end: u64, seconds: u32) -> Result<RangeReply, String> {
+        let text = java_download(url, path, seconds, start as i64, end as i64)?;
+        if text == "200" {
+            return Ok(RangeReply { status: 200, total: None });
+        }
+        match text.strip_prefix("206 ") {
+            Some(total) => Ok(RangeReply { status: 206, total: total.trim().parse::<i64>().ok().filter(|t| *t >= 0).map(|t| t as u64) }),
+            None => Err(failure(&text)),
+        }
+    }
+
+    /// The reason of a download that failed with the Java side's reply `text`: a stall is
+    /// `STALLED` (its own words go to the log), anything else is the text itself.
+    fn failure(text: &str) -> String {
+        if text.starts_with("stalled") {
+            crate::diag!("download: {text}");
+            return crate::update::STALLED.into();
+        }
+        if text.is_empty() { "no reply".into() } else { text.to_string() }
+    }
+
+    /// The Java side's `razdorDownload` for `url` into `path`, the whole file (`start` and `end`
+    /// -1) or the bytes `start..=end`. Its reply text, as the Java side gives it (see there).
+    fn java_download(url: &str, path: &Path, seconds: u32, start: i64, end: i64) -> Result<String, String> {
         secure(url)?;
         let path = path.to_str().ok_or("the file's path is not text")?;
         // SAFETY: as in `cache_dir`.
         unsafe {
             let env = attach_jni_env();
-            let sig = "(Ljava/lang/String;Ljava/lang/String;II)Ljava/lang/String;";
+            let sig = "(Ljava/lang/String;Ljava/lang/String;IIJJ)Ljava/lang/String;";
             let mid = method(env, activity_class(env).obj, "razdorDownload", sig, false);
             if mid.is_null() || cleared(env) {
                 return Err("razdorDownload is missing".into());
             }
             let (url, path) = (string(env, url), string(env, path));
             let stall = crate::update::STALL_SECONDS as i32;
-            let reply = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, ACTIVITY, mid, url.obj, path.obj, stall, seconds as i32));
+            let reply = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, ACTIVITY, mid, url.obj, path.obj, stall, seconds as i32, start, end));
             if cleared(env) {
                 return Err("the download failed".into());
             }
-            match to_text(env, reply.obj) {
-                Some(text) if text.is_empty() => Ok(()),
-                Some(text) if text.starts_with("stalled") => {
-                    crate::diag!("download: {text}");
-                    Err(crate::update::STALLED.into())
-                }
-                Some(text) => Err(text),
-                None => Err("no reply".into()),
-            }
+            to_text(env, reply.obj).ok_or_else(|| "no reply".into())
         }
     }
 
-    /// Asks the download under way to stop (`razdorDownloadCancel`): it returns "cancelled" at once,
-    /// closing its connection if it is waiting for a byte.
+    /// Asks the downloads under way to stop (`razdorDownloadCancel`): each returns "cancelled" at
+    /// once, closing its connection if it is waiting for a byte.
     pub fn download_cancel() {
         // SAFETY: as in `cache_dir`.
         unsafe {
@@ -151,7 +177,7 @@ mod android {
 }
 
 #[cfg(target_os = "android")]
-pub use android::{cache_dir, download, download_cancel, get, install, installer_outcome};
+pub use android::{cache_dir, download, download_cancel, download_range, get, install, installer_outcome};
 
 /// iOS: a download is one `NSData` call that cannot be stopped in the middle (the caller's
 /// cancel is seen when it returns). Nothing to do.

@@ -13,7 +13,7 @@ When the game is not present, the main screen and the download window display ac
 
 In the "Loading the game" window, the stages are shown sequentially: first "Checking the catalog...", then a progress bar with the text "Downloading the game: {MB} / {all} MB, {pct}%", followed by "Unpacking… {pct}%". When the game is in place, the window closes and the main menu opens.
 
-"Cancel" stops the download. The already downloaded part is saved, and it can be resumed using the "Download the game" button.
+"Cancel" stops the download. The game is downloaded in several parallel parts, and a cancelled download starts again from the beginning: the next press of "Download the game" downloads the archive from the start.
 
 ## If Automatic Download Fails
 

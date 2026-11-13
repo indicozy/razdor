@@ -18,4 +18,5 @@ pub mod depth;
 pub mod dt;
 pub mod gdrive;
 pub mod mirror;
+pub mod parts;
 pub mod editor;

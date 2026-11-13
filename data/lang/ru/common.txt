@@ -166,6 +166,7 @@ Leader's max life = Макс. жизнь лидеру
 # Maps and mods: the hub's window over the main menu
 Maps and mods = Карты и моды
 No folder for the hub. = Нет папки для хаба.
+The hub's download stopped: no data for {seconds} seconds. Check the internet or try again later. = Загрузка остановилась: нет данных {seconds} секунд. Проверьте интернет или попробуйте позже.
 Installed: {names} = Установлено: {names}
 Removed: {names} = Удалено: {names}
 Campaign = Кампания

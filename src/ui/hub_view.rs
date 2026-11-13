@@ -299,7 +299,7 @@ impl Default for HubView {
 /// (`ui::game_import`, «Загрузка остановилась…», the same catalog text); any other reason is shown as it is.
 fn download_text(why: String) -> String {
     if why == razdor::update::STALLED {
-        trf!("The download stopped: no data for {seconds} seconds. Check the internet or try a VPN, or install the game from the archive by hand.", seconds = razdor::update::STALL_SECONDS)
+        trf!("The hub's download stopped: no data for {seconds} seconds. Check the internet or try again later.", seconds = razdor::update::STALL_SECONDS)
     } else {
         why
     }
