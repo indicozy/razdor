@@ -82,3 +82,5 @@ are written in the language the game was in when it was made.
 
 Clear "Record the game" in "Other". The game stops writing moves from then on; recordings already made
 stay where they are and can still be watched.
+
+To film a recording, see [How to record a video](/razdor/wiki/en/tutorials/video/).

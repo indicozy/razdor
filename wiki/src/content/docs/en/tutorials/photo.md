@@ -79,3 +79,5 @@ On Android, shots do not appear in the phone's gallery straight away. Find them 
 The original "Discord Times" has no photo mode. Razdor adds it.
 
 Nothing in the game changes: the mode does not let the hero move, does not change saves and does not change the rules.
+
+For a video with a camera and the hero's walks, see [How to record a video](/razdor/wiki/en/tutorials/video/).
