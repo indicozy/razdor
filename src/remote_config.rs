@@ -6,7 +6,7 @@
 //! `docs/specs/2026-11-13-gitverse-mirrors.md` (Remote config). Nothing here needs macroquad.
 
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{mpsc, Arc, Mutex};
 
 use serde::Deserialize;
 
@@ -68,12 +68,17 @@ struct RawGame {
 }
 
 /// A config that was picked, its source for the log and, when it was fetched, its bytes (to keep).
+/// `from` is the address the fresh config came from (the first start's race names the primary host).
 #[derive(Debug)]
 pub struct Pick {
     pub config: Config,
     pub source: String,
     pub fresh: Option<Vec<u8>>,
+    pub from: Option<String>,
 }
+
+/// The fetch the first-start race runs on each address at once (`update::fetch` in the app).
+pub type Fetch = Arc<dyn Fn(&str) -> Result<Vec<u8>, String> + Send + Sync>;
 
 impl Config {
     /// The built-in config: today's addresses (`mirror`).
@@ -152,20 +157,58 @@ fn game(g: RawGame) -> Result<Game, String> {
     Ok(Game { links, size: g.size, sha256: g.sha256.to_ascii_lowercase(), name: g.name })
 }
 
-/// Picks the config: the first of `addresses` whose fetched bytes parse (`fetch` gives the bytes of
-/// one address or why not; a failure is logged and the next address is tried). When none does, the
-/// `cached` config (the last good one) if it parses, else the built-in config.
+/// Picks the config: the first of `addresses` (ordered by the primary host, `mirror::first_ok`) whose
+/// fetched bytes parse (`fetch` gives the bytes of one address or why not; a failure is logged and the
+/// next address is tried). When none does, the `cached` config (the last good one) if it parses, else
+/// the built-in config.
 pub fn resolve(addresses: &[&str], mut fetch: impl FnMut(&str) -> Result<Vec<u8>, String>, cached: Option<&[u8]>) -> Pick {
     let got = mirror::first_ok("remote config", addresses, |url| {
         let bytes = fetch(url)?;
         let config = Config::parse(&bytes)?;
         Ok((url.to_string(), config, bytes))
     });
+    pick_from(got, cached)
+}
+
+/// The first start's pick (no primary host yet): every address is fetched at once, and the first one
+/// whose bytes parse wins (an HTML page loses to a slower valid config). The others finish on their
+/// own threads and their replies are dropped. Otherwise as [`resolve`].
+pub fn resolve_race(addresses: &[&str], fetch: Fetch, cached: Option<&[u8]>) -> Pick {
+    let (tx, rx) = mpsc::channel();
+    for url in addresses {
+        let (tx, fetch, url) = (tx.clone(), fetch.clone(), url.to_string());
+        let spawned = std::thread::Builder::new().name("remote config race".into()).spawn(move || {
+            let got = fetch(&url).and_then(|bytes| Config::parse(&bytes).map(|config| (config, bytes)));
+            let _ = tx.send((url, got));
+        });
+        if let Err(e) = spawned {
+            crate::diag!("remote config: a race fetch does not start: {e}");
+        }
+    }
+    drop(tx);
+    let mut last = String::from("no address");
+    for (url, got) in rx {
+        match got {
+            Ok((config, bytes)) => {
+                crate::diag!("remote config: from {url}");
+                return pick_from(Ok((url, config, bytes)), cached);
+            }
+            Err(why) => {
+                crate::diag!("remote config: {url}: {why}");
+                last = why;
+            }
+        }
+    }
+    pick_from(Err(last), cached)
+}
+
+/// The pick for an answer of the fetch (the fresh config and its address) or the reason none came.
+fn pick_from(got: Result<(String, Config, Vec<u8>), String>, cached: Option<&[u8]>) -> Pick {
     match got {
-        Ok((url, config, bytes)) => Pick { config, source: format!("fresh from {url}"), fresh: Some(bytes) },
+        Ok((url, config, bytes)) => Pick { config, source: format!("fresh from {url}"), fresh: Some(bytes), from: Some(url) },
         Err(why) => match cached.map(Config::parse) {
-            Some(Ok(config)) => Pick { config, source: format!("cached (no fresh config: {why})"), fresh: None },
-            _ => Pick { config: Config::builtin(), source: format!("built-in (no config: {why})"), fresh: None },
+            Some(Ok(config)) => Pick { config, source: format!("cached (no fresh config: {why})"), fresh: None, from: None },
+            _ => Pick { config: Config::builtin(), source: format!("built-in (no config: {why})"), fresh: None, from: None },
         },
     }
 }
@@ -223,16 +266,27 @@ fn write_cache(bytes: &[u8]) {
 }
 
 /// Start-up: the cached config is used at once when it parses; a thread then fetches the fresh one
-/// from [`ADDRESSES`] and keeps it. Nothing waits for the network.
+/// from [`ADDRESSES`] and keeps it. Nothing waits for the network. With no learned primary host (the
+/// first start) the addresses are raced and the first valid config's host becomes the primary; with
+/// one, its addresses are tried in its order (`resolve`).
 pub fn start() {
     let cached = read_cache();
     if let Some(Ok(config)) = cached.as_deref().map(Config::parse) {
-        install(Pick { config, source: "cached config (the last start's)".into(), fresh: None });
+        install(Pick { config, source: "cached config (the last start's)".into(), fresh: None, from: None });
     }
     let spawned = std::thread::Builder::new().name("remote config".into()).spawn(move || {
-        let pick = resolve(&ADDRESSES, |url| crate::update::fetch(url, SECONDS), cached.as_deref());
+        let first_start = mirror::current().is_none();
+        let pick = if first_start {
+            let shared: Fetch = Arc::new(|url: &str| crate::update::fetch(url, SECONDS));
+            resolve_race(&ADDRESSES, shared, cached.as_deref())
+        } else {
+            resolve(&ADDRESSES, |url| crate::update::fetch(url, SECONDS), cached.as_deref())
+        };
         if let Some(bytes) = &pick.fresh {
             write_cache(bytes);
+        }
+        if let (true, Some(url)) = (first_start, &pick.from) {
+            mirror::learn_from(url, "the first start: its config came first");
         }
         install(pick);
     });
@@ -421,6 +475,60 @@ mod tests {
         assert_eq!(archive.links.iter().map(|l| l.to_string()).collect::<Vec<_>>(), c.game.links);
         assert_eq!(archive.size, 1234);
         assert_eq!(refs(&c.update_feed), vec!["https://feed.example/releases.json", "https://api.example/releases"]);
+    }
+
+    /// A fake network that answers each address after its own delay (the race's test): the reply
+    /// bytes, or why not, after `millis`.
+    fn timed(replies: Vec<(&'static str, u64, Reply)>) -> Fetch {
+        Arc::new(move |url: &str| {
+            let (_, millis, reply) = replies.iter().find(|(u, _, _)| *u == url).cloned().unwrap_or(("", 0, Err("no route".into())));
+            std::thread::sleep(std::time::Duration::from_millis(millis));
+            reply
+        })
+    }
+
+    #[test]
+    fn the_race_takes_the_faster_valid_config_and_its_address() {
+        let fast = GOOD.replace("game.zip", "fast.zip");
+        let slow = GOOD.replace("game.zip", "slow.zip");
+        let fetch = timed(vec![(A, 300, Ok(slow.into_bytes())), (B, 0, Ok(fast.into_bytes()))]);
+        let pick = resolve_race(&[A, B], fetch, None);
+        assert_eq!(pick.config.game.name, "fast.zip");
+        assert_eq!(pick.from.as_deref(), Some(B), "the winner's address is the primary's");
+        assert!(pick.fresh.is_some());
+    }
+
+    #[test]
+    fn an_html_page_loses_to_a_slower_valid_config() {
+        let page = b"<!doctype html><html>Page not found</html>".to_vec();
+        let fetch = timed(vec![(A, 0, Ok(page)), (B, 100, Ok(GOOD.as_bytes().to_vec()))]);
+        let pick = resolve_race(&[A, B], fetch, None);
+        assert_eq!(pick.from.as_deref(), Some(B));
+        assert_eq!(pick.config, good());
+    }
+
+    #[test]
+    fn a_race_with_no_valid_config_uses_the_cache_and_names_no_primary() {
+        let cached = GOOD.replace("game.zip", "old.zip");
+        let fetch = timed(vec![(A, 0, Err("stalled".into())), (B, 0, Ok(b"<html>".to_vec()))]);
+        let pick = resolve_race(&[A, B], fetch, Some(cached.as_bytes()));
+        assert_eq!(pick.config.game.name, "old.zip");
+        assert_eq!(pick.from, None, "nothing fresh, so no host is learned");
+        let fetch = timed(vec![]);
+        let none = resolve_race(&[A, B], fetch, None);
+        assert_eq!(none.config, Config::builtin());
+    }
+
+    #[test]
+    fn the_consumer_lists_go_primary_first_within_their_order() {
+        let c = Config::builtin();
+        let gh = Some(mirror::Host::GitHub);
+        assert!(mirror::ordered_by(gh, &c.update_feed)[0].starts_with("https://api.github.com/"));
+        assert!(mirror::ordered_by(gh, &c.hub)[0].starts_with("https://github.com/"));
+        assert!(mirror::ordered_by(gh, &c.game.links)[0].starts_with("https://github.com/"));
+        let gv = Some(mirror::Host::GitVerse);
+        assert_eq!(mirror::ordered_by(gv, &c.update_feed), refs(&c.update_feed), "GitVerse first is the config's own order");
+        assert_eq!(mirror::ordered_by(None, &c.hub), refs(&c.hub), "no primary: the config's order");
     }
 
     #[test]

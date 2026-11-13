@@ -949,6 +949,9 @@ fn install_now(r: &Release) -> Result<bool, String> {
     if checked.is_err() {
         let _ = std::fs::remove_file(&part);
     }
+    if checked.is_ok() {
+        mirror::learn_from(&r.program_url, "the update came from it");
+    }
     checked.map(|()| false)
 }
 
@@ -983,6 +986,7 @@ fn install_now(r: &Release) -> Result<bool, String> {
             let _ = std::fs::remove_file(&part);
             return Err(e);
         }
+        mirror::learn_from(&r.program_url, "the update came from it");
     }
     phone::install(&apk).map(|()| true)
 }

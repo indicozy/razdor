@@ -95,8 +95,10 @@ The service info the app needs (the update feed's addresses, the hub's folders, 
   and pushes only it to GitVerse, then waits until the anonymous address serves those bytes.
 - **The app** (`src/remote_config.rs`, no macroquad): `remote_config::start()` at start installs the cached config
   at once (`remote-config.json` in the cache folder, the last good one) and a thread fetches `ADDRESSES`
-  (GitVerse first, GitHub after; the stall limit as the update feed's). The first address whose reply parses
-  as a config wins (an unknown path answers HTML on GitVerse: a web page is no config) and is kept as the cache.
+  (GitVerse first, GitHub after; the stall limit as the update feed's). Without a learned primary host (the first
+  start) all addresses are fetched at once and the first reply that parses as a config wins (an unknown path
+  answers HTML on GitVerse: a web page is no config) and is kept as the cache; with one, the addresses are tried
+  in the primary's order (see «Learned primary»).
   With none, the cache is used, else the built-in lists (`mirror.rs`, today's addresses). The log says which
   one was used (`remote config: using the …`).
 - **Checks**: schema 1 only (another schema: the whole file is ignored); every address is https, with no
@@ -108,6 +110,38 @@ The service info the app needs (the update feed's addresses, the hub's folders, 
   it fails with no cache, they read the built-in lists.
 - **Changing it**: edit `data/remote/config.json` and push to `main`; then run `publish_config.py` (`--dry-run`
   checks only). An app that reads an older schema ignores a newer file, so a schema change needs an app release.
+
+## Learned primary (2026-11-13)
+
+The owner's decision: the host that works for a player becomes that player's primary ("where they
+download from becomes primary"). The same binary is on both hosts, so the app learns it (`src/mirror.rs`,
+no macroquad):
+
+- **First start** (no saved primary): `remote_config::start` fetches `config.json` from both Pages hosts
+  at once (`resolve_race`). The first reply that parses as a config wins; an HTML page (GitVerse answers an
+  unknown path with HTTP 200) loses to a slower valid config. The winner's host is saved as the primary.
+- **Ordering**: every list is ordered with the primary host's addresses first (`mirror::ordered_by`), each
+  part in the list's own order. Without a primary, the list as it is. The lists: the update feed (`update::check`,
+  through `mirror::first_ok`), the hub catalog (`catalog_from_mirrors`, through `first_ok`) and the hub's files
+  (they come from the catalog that was read), the game archive's links (`gdrive::download_game`), and the
+  updater's file (its release comes from the feed that answered, so the feed's order decides it).
+- **Adapt**: a request's fallback chain (`mirror::Chain`) moves the primary only when the primary host failed
+  in it (an error, the stall limit, an HTML page, a file that does not verify) and then another known host
+  answered. One success on the primary keeps it; a failure on the other host alone changes nothing.
+- **The updater**: the host a new version's file was downloaded from becomes the primary (`mirror::learn_from`,
+  after the file checks out).
+- **Saved** in the cache folder as `mirror-pref.json` (`{"host": "gitverse" | "github", "since": <unix s>}`);
+  a file that does not read is no primary. Every change is logged (`mirror: the primary host is … (was …): why`).
+- **Hosts**: GitVerse = `gitverse.ru` and `*.gitverse.site`; GitHub = `github.com`, `api.github.com`,
+  `*.github.io`, `objects.githubusercontent.com`, `release-assets.githubusercontent.com`. Any other host is in
+  neither group and keeps its place.
+- **`RAZDOR_HUB`** names one explicit source (an address or a folder) and is never reordered: it does not go
+  through the mirror lists at all.
+- **Limit**: the updater takes one address per release (the feed's own), so a failed program download does not
+  try the other host's copy of the same version in the same run; the next check's feed order decides it.
+- **Tests** (no network, fake fetches): the first-start race (the faster valid config wins; an HTML page loses),
+  the ordering of each list, a chain that moves on a primary failure and stays otherwise, the updater's host,
+  the game download's switch, a garbage file ignored, and `RAZDOR_HUB` not reordered.
 
 ## Publishing
 

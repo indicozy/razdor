@@ -233,9 +233,10 @@ Other diagnostics: `razdor.log` in the data folder (`razdor::diag`, `RAZDOR_LOG=
 - The procedure (version bump, changelog files, tag, follow-up commit with the SHA-256)
   is the `release` skill.
 - `src/update.rs`: the game checks the release feeds on a background thread
-  (`update::Mode`: Ask / Always / Off): GitVerse's `releases.json` first, the GitHub API after
-  it (`remote_config::update_feed()`, the remote config's list; `mirror::UPDATE_FEED` is the built-in one; `update::feed_from`: a reply that is not a release list, e.g. an
-  HTML page with HTTP 200, is the next address's). It downloads through the system `curl`, accepts a file
+  (`update::Mode`: Ask / Always / Off): the learned primary host's feed first (GitVerse's `releases.json`
+  until one is learned, the GitHub API after it; `mirror::first_ok`, `docs/specs/2026-11-13-gitverse-mirrors.md` «Learned primary»)
+  (`remote_config::update_feed()`, the remote config's list; `mirror::UPDATE_FEED` is the built-in one; `update::feed_from`: a reply that is not a release list, e.g. an
+  HTML page with HTTP 200, is the next address's). It downloads through the system `curl` (the host the new file came from becomes the learned primary: `mirror::learn_from`), accepts a file
   only if its SHA-256 matches `SHA256SUMS` (or `SHA256SUMS.txt`), and replaces itself by rename.
   A big download (over 4 MiB, a server that answers Range requests) comes in 8 pieces at once (4 for
   gitverse.ru), each checked (`src/parts.rs`, the game flow in `app-and-ui.md`); the update's `download_to`

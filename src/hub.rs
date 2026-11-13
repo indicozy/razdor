@@ -6,7 +6,8 @@
 //!   its titles and descriptions in Russian and English, the languages its maps come in
 //!   (Russian as written, English from the import's translation) and the mods it needs.
 //! - **Source** ([`Source`]): `RAZDOR_HUB` names an `https://` address or a folder; unset, the
-//!   mirrors of [`mirror::HUB`] (GitVerse, then GitHub) are tried in order; a snapshot or `RAZDOR_HUB=mock`
+//!   mirrors of [`mirror::HUB`] are tried, the learned primary host's first (GitVerse, then GitHub
+//!   until one is learned; see `mirror`); a snapshot or `RAZDOR_HUB=mock`
 //!   reads a mock hub written once under the hub folder ([`mock::build`]).
 //! - **Cache** ([`read_cache`], [`write_cache`]): from an address, the catalog last fetched is kept
 //!   with its address, and the window shows it at once while the current one is read.
@@ -905,6 +906,12 @@ pub enum Source {
 /// The cache key of the default source (its catalog is the first mirror's or the next's).
 const MIRRORS_KEY: &str = "mirrors";
 
+/// The default source's folder that comes first now: the learned primary host's (`mirror::ordered_owned`
+/// over the config's hub list). The catalog itself is read by `catalog_from_mirrors`, which orders too.
+fn mirrors_primary() -> String {
+    mirror::ordered_owned(&crate::remote_config::hub()).into_iter().next().unwrap_or_default()
+}
+
 impl Source {
     /// `RAZDOR_HUB`, read with [`Source::from_setting`]; snapshot runs render offline.
     pub fn from_env() -> Source {
@@ -938,7 +945,7 @@ impl Source {
     pub fn label(&self) -> String {
         match self {
             Source::Url(u) => u.clone(),
-            Source::Mirrors => crate::remote_config::hub()[0].clone(),
+            Source::Mirrors => mirrors_primary(),
             Source::Dir(d) => d.display().to_string(),
             Source::Mock => "mock".into(),
         }
@@ -1074,7 +1081,7 @@ impl Hub {
         match &self.source {
             Source::Url(u) => Ok(Root::Url(u.clone())),
             // Only addresses are fetched from the mirrors' catalog (its files are made absolute, see `rebase`).
-            Source::Mirrors => Ok(Root::Url(crate::remote_config::hub()[0].clone())),
+            Source::Mirrors => Ok(Root::Url(mirrors_primary())),
             Source::Dir(d) => Ok(Root::Dir(d.clone())),
             Source::Mock => {
                 let dir = self.local.join("mock-hub");
