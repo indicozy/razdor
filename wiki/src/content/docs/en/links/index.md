@@ -11,7 +11,7 @@ This wiki is about Razdor. Other sites cover the game itself, its units, items a
 
 - [Razdor's site](https://indicozy.github.io/razdor/en.html): download, installation, what's new.
 - [Razdor on GitHub](https://github.com/indicozy/razdor): source code, releases, bug reports.
-- [Razdor video](https://www.youtube.com/watch?v=p7g0yvwtEeM).
+- [Razdor video](https://www.youtube.com/watch?v=kHvM7Yv-2_4).
 
 ## Game wikis and references
 

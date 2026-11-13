@@ -6,7 +6,7 @@
 
 **Все права на оригинальный код и графику «Времён раздора» принадлежат их авторам — Николаю и Денису (Aterdux Entertainment).**
 
-**Сайт:** [indicozy.github.io/razdor](https://indicozy.github.io/razdor/) · **Трейлер:** [youtu.be/p7g0yvwtEeM](https://youtu.be/p7g0yvwtEeM)
+**Сайт:** [indicozy.github.io/razdor](https://indicozy.github.io/razdor/) · **Трейлер:** [youtu.be/kHvM7Yv-2_4](https://youtu.be/kHvM7Yv-2_4)
 
 ```sh
 cargo run --release

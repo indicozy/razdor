@@ -11,7 +11,7 @@ sidebar:
 
 - [Сайт Razdor](https://indicozy.github.io/razdor/): скачать, как установить, что нового.
 - [Razdor на GitHub](https://github.com/indicozy/razdor): исходный код, выпуски, сообщения об ошибках.
-- [Видео о Razdor](https://www.youtube.com/watch?v=p7g0yvwtEeM).
+- [Видео о Razdor](https://www.youtube.com/watch?v=kHvM7Yv-2_4).
 
 ## Вики и справочники по игре
 
