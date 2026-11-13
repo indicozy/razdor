@@ -20,6 +20,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
+use crate::hub;
 use crate::i18n::tr;
 use crate::rules::save::{self, AUTO_DIR, MANUAL_DIR, MAPS_DIR, PINS_FILE};
 
@@ -435,6 +436,71 @@ fn import_folder_within(src: &Path, root: &Path, limit: u64) -> Result<Imported,
     }
 }
 
+/// What the move of an older release brought in ([`move_old_release`]): the saves' import (`imported`),
+/// the saves placed in the game's folder (`placed`), those the folder already had (`duplicates`), those
+/// still waiting for another map or mod (`left`), and the hub's maps and mods (`hub`; None when the copy
+/// has no hub folder or it did not come in).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct OldRelease {
+    pub imported: Imported,
+    pub placed: usize,
+    pub duplicates: usize,
+    pub left: usize,
+    pub hub: Option<hub::OldHubImport>,
+}
+
+/// The move of an older release's copy (`copy`: the saves folder with its hub folder, see `ui::saves_move`)
+/// into the saves root `root`, its hub into `hub_local`, for the game that plays `install`.
+///
+/// The copy's saves come in by [`import_folder`], each under its old install's folder (the names of the
+/// old install folders are kept: the game's folder is named by the install's path, which an older release
+/// did not share). The folders are listed as waiting ([`save::WAITING_FILE`]), and the saves of this game's
+/// maps are placed in its own folder right away ([`save::adopt_moved`]), where its load window lists them;
+/// the others wait for the game that plays their map or mod. The hub's installed maps and mods come in
+/// with their records ([`hub::import_old`]); a failure there is logged and the saves stay.
+pub fn move_old_release(copy: &Path, root: &Path, hub_local: Option<&Path>, install: Option<&Path>) -> Result<OldRelease, String> {
+    let imported = import_folder(copy, root)?;
+    let own = install.map(|dir| save::saves_dir_of(root, dir));
+    let own_name = own.as_ref().and_then(|dir| dir.file_name()).map(|n| n.to_string_lossy().into_owned());
+    let mut waiting: Vec<String> = Vec::new();
+    for entry in fs::read_dir(copy).into_iter().flatten().flatten() {
+        if !entry.path().is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name == MANUAL_DIR || name == AUTO_DIR {
+            waiting.push(String::new());
+        } else if save::is_install_folder(&name) && own_name.as_deref() != Some(name.as_str()) {
+            waiting.push(name);
+        }
+    }
+    if let Err(why) = save::add_waiting(root, &waiting) {
+        crate::diag!("transfer: the saves of the older release are not listed as waiting: {why}");
+    }
+    let adopted = match (&own, install) {
+        (Some(own), Some(install)) => save::adopt_moved(root, own, install),
+        _ => save::Adopted::default(),
+    };
+    let hub = copy_hub(copy, hub_local);
+    Ok(OldRelease { imported, placed: adopted.placed, duplicates: adopted.duplicates, left: adopted.left, hub })
+}
+
+/// The older release's hub folder in the copy (`hub`) merged into the local hub ([`hub::import_old`]).
+/// None when the copy has none or the merge fails (logged).
+fn copy_hub(copy: &Path, local: Option<&Path>) -> Option<hub::OldHubImport> {
+    let src = copy.join("hub");
+    if !src.is_dir() {
+        return None;
+    }
+    match hub::import_old(&src, local?) {
+        Ok(report) => Some(report),
+        Err(why) => {
+            crate::diag!("transfer: the hub's maps and mods are not moved: {why}");
+            None
+        }
+    }
+}
+
 fn dir_path(root: &Path, parts: &[String]) -> PathBuf {
     parts.iter().fold(root.to_path_buf(), |p, part| p.join(part))
 }
@@ -716,6 +782,95 @@ mod tests {
         fs::write(&src, [0u8; 64]).unwrap();
         assert!(import_save_within(&src, "big.rzsave", &dir.join("manual"), 32).is_err());
         assert!(import_save_within(&src, "big.rzsave", &dir.join("manual"), 64).is_ok());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The copy of a 1.4 shared folder, as the picker makes it: a saves folder under the old install's name
+    /// (a save of this game's map with a pin, an autosave, a mod's save of another map), a flat save of this
+    /// game's map, and the hub with an installed mod (its files, manifest and merged game folder) and a map.
+    fn old_release_copy(copy: &Path) {
+        use crate::rules::content::{Content, HeroClass};
+        use crate::rules::game::Game;
+        use crate::rules::save::{fnv1a, set_pinned, write, ScenarioRef, SaveKind};
+        let game = |map: &[u8], file: &str| {
+            let mut g = Game::new(std::sync::Arc::new(Content::builtin()), HeroClass::Knight);
+            g.origin = Some(ScenarioRef::Map { file: file.into(), hash: fnv1a(map) });
+            g
+        };
+        let old = copy.join("Discord Times-1a2b3c4d");
+        let start = write(&old, SaveKind::Manual, "Start", &game(b"our map", "Ours")).unwrap();
+        set_pinned(&start, true).unwrap();
+        write(&old, SaveKind::Auto, "Battle - Foe", &game(b"our map", "Ours")).unwrap();
+        write(&copy.join("game-9f8e7d6c"), SaveKind::Manual, "the mod's", &game(b"a mod's map", "Mod")).unwrap();
+        write(copy, SaveKind::Manual, "Flat", &game(b"our map", "Ours")).unwrap();
+        let put = |path: PathBuf, bytes: &[u8]| {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, bytes).unwrap();
+        };
+        let hub = copy.join("hub");
+        put(hub.join("installed.json"), br#"{"entries":{"pack":{"version":"1.0","kind":"mod","files":["mods/pack/files/data/units.ini"]},"ours":{"version":"1","kind":"map","files":["maps/Ours.DTm"]}}}"#);
+        put(hub.join("mods/pack/files/data/units.ini"), b"[units]");
+        put(hub.join("mods/pack/manifest.json"), b"{}");
+        put(hub.join("mods/pack/game/DiscordTimes.exe"), b"a copy of the whole game");
+        put(hub.join("mods/pack/archives/0.zip"), b"a kept archive");
+        put(hub.join("maps/Ours.DTm"), b"our map");
+    }
+
+    /// Copies a folder's tree (the test's second copy, as the same files would be picked again).
+    fn copy_tree(from: &Path, to: &Path) {
+        fs::create_dir_all(to).unwrap();
+        for entry in fs::read_dir(from).unwrap().flatten() {
+            let (src, dst) = (entry.path(), to.join(entry.file_name()));
+            if src.is_dir() {
+                copy_tree(&src, &dst);
+            } else {
+                fs::copy(&src, &dst).unwrap();
+            }
+        }
+    }
+
+    /// The names (sorted, with the pinned flag) of the saves of `kind` in `dir`.
+    fn saves_named(dir: &Path, kind: crate::rules::save::SaveKind) -> Vec<(String, bool)> {
+        let mut v: Vec<(String, bool)> = crate::rules::save::list(dir, kind).into_iter().map(|e| (e.meta.name, e.pinned)).collect();
+        v.sort();
+        v
+    }
+
+    /// An older release's saves and mods come in for the game that plays them (1621, 1622): the saves
+    /// are listed by the game of their map (the install's own folder), its mod is installed and its maps
+    /// are in the hub, the mod's other save waits for its own game, and a second move adds nothing.
+    #[test]
+    fn an_older_releases_saves_and_mods_come_in_for_the_game_that_plays_them() {
+        use crate::rules::save::{saves_dir_of, waiting_folders, SaveKind};
+        let dir = scratch("old-release");
+        let (copy, again) = (dir.join("copy"), dir.join("again"));
+        let (root, hub_local) = (dir.join("app/saves"), dir.join("app/hub"));
+        let install = dir.join("files/DiscordTimes");
+        fs::create_dir_all(install.join(crate::dt::install::MAPS_DIR)).unwrap();
+        fs::write(install.join(crate::dt::install::MAPS_DIR).join("Ours.DTm"), b"our map").unwrap();
+        old_release_copy(&copy);
+        copy_tree(&copy, &again);
+
+        let first = move_old_release(&copy, &root, Some(&hub_local), Some(&install)).unwrap();
+        let own = saves_dir_of(&root, &install);
+        assert_eq!((first.placed, first.duplicates, first.left), (3, 0, 1), "Start, Battle and Flat are this game's; the mod's save waits");
+        assert_eq!(saves_named(&own, SaveKind::Manual), [("Flat".to_string(), false), ("Start".to_string(), true)]);
+        assert_eq!(saves_named(&own, SaveKind::Auto), [("Battle - Foe".to_string(), false)]);
+        assert_eq!(first.hub, Some(hub::OldHubImport { entries: 2, skipped: 0 }));
+        let mods: Vec<String> = hub::installed_mods(&hub_local).into_iter().map(|(id, _)| id).collect();
+        assert_eq!(mods, ["pack".to_string()], "the mod is installed: the mod button's source");
+        assert!(hub_local.join("mods/pack/files/data/units.ini").is_file() && hub_local.join("mods/pack/manifest.json").is_file());
+        assert!(!hub_local.join("mods/pack/game").exists(), "the merged game folder is built again, not copied");
+        assert!(hub_local.join("maps/Ours.DTm").is_file(), "the hub's map is in the hub");
+        assert_eq!(waiting_folders(&root), ["game-9f8e7d6c".to_string()], "only the mod's folder still holds a save");
+
+        // The same files picked again: nothing is listed twice, nothing new comes in.
+        let second = move_old_release(&again, &root, Some(&hub_local), Some(&install)).unwrap();
+        assert_eq!((second.placed, second.duplicates, second.left), (0, 3, 1));
+        assert_eq!(second.hub, Some(hub::OldHubImport { entries: 0, skipped: 2 }));
+        assert_eq!(saves_named(&own, SaveKind::Manual), [("Flat".to_string(), false), ("Start".to_string(), true)]);
+        assert_eq!(saves_named(&own, SaveKind::Auto), [("Battle - Foe".to_string(), false)]);
+        assert_eq!(hub::installed_mods(&hub_local).len(), 1);
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -566,13 +566,13 @@ private String razdorCopyOldSaves(Uri tree) {
                 docs.add(new RazdorOldDoc(settings, new File(dest, "settings.json")));
             }
             if (hub != null) {
-                razdorListDocs(tree, hub, new File(dest, "hub"), 0, budget, docs);
+                razdorListDocs(tree, hub, new File(dest, "hub"), "", 0, budget, docs);
             }
         } else if (settings != null || razdorChildNamed(tree, root, "manual") != null) {
             // The saves folder itself (its hub folder comes with it, as a child).
             razdorListDocs(tree, root, dest, 0, budget, docs);
         } else if (hub != null) {
-            razdorListDocs(tree, hub, new File(dest, "hub"), 0, budget, docs);
+            razdorListDocs(tree, hub, new File(dest, "hub"), "", 0, budget, docs);
         } else {
             return "wrong";
         }
@@ -606,6 +606,12 @@ private String razdorChildNamed(Uri tree, String parent, String name) {
 // `dest`. Folders nest at most 6 deep; the files' declared sizes together stay within the budget
 // (RAZDOR_OLD_LIMIT), else IOException.
 private void razdorListDocs(Uri tree, String parent, File dest, int depth, long[] budget, java.util.ArrayList<RazdorOldDoc> out) throws java.io.IOException {
+    razdorListDocs(tree, parent, dest, null, depth, budget, out);
+}
+
+// The same, with `rel` the folder's path inside the hub (the hub's own is ""), or null where no folder is
+// left out (the saves). The hub's folders that razdorHubSkip names are not taken.
+private void razdorListDocs(Uri tree, String parent, File dest, String rel, int depth, long[] budget, java.util.ArrayList<RazdorOldDoc> out) throws java.io.IOException {
     Uri children = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(tree, parent);
     String[] columns = {android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID, android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
             android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE, android.provider.DocumentsContract.Document.COLUMN_SIZE};
@@ -619,8 +625,9 @@ private void razdorListDocs(Uri tree, String parent, File dest, int depth, long[
                 continue;
             }
             if (android.provider.DocumentsContract.Document.MIME_TYPE_DIR.equals(mime)) {
-                if (depth < 6) {
-                    razdorListDocs(tree, id, new File(dest, name), depth + 1, budget, out);
+                String childRel = rel == null ? null : (rel.isEmpty() ? name : rel + "/" + name);
+                if (depth < 6 && (childRel == null || !razdorHubSkip(childRel))) {
+                    razdorListDocs(tree, id, new File(dest, name), childRel, depth + 1, budget, out);
                 }
                 continue;
             }
@@ -650,6 +657,18 @@ private void razdorCopyDoc(Uri tree, RazdorOldDoc doc) throws java.io.IOExceptio
             out.write(buffer, 0, n);
         }
     }
+}
+
+// The hub's folders the move leaves out (`rel` is the folder's path inside the hub): the catalog's cache and
+// the downloads (the hub fetches them again), and a mod's merged game folder (a copy of the whole game,
+// built again from the base install) with its archives and build leftovers. Their copies would fill the
+// move's budget (RAZDOR_OLD_LIMIT) for nothing; the mod's files, manifest and records are taken.
+private static boolean razdorHubSkip(String rel) {
+    if (rel.equals("cache") || rel.equals("downloads")) {
+        return true;
+    }
+    String[] parts = rel.split("/");
+    return parts.length == 3 && parts[0].equals("mods") && (parts[2].equals("game") || parts[2].equals("archives") || parts[2].equals("archives.tmp") || parts[2].equals("files.tmp"));
 }
 
 // Deletes the folder `dir` and what is in it (a copy left by an earlier try).

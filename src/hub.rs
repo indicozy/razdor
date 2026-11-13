@@ -684,7 +684,8 @@ pub fn import_old(src: &Path, local: &Path) -> Result<OldHubImport, String> {
     let mut mine = read_installed(local);
     let mut report = OldHubImport::default();
     for (id, entry) in old.entries {
-        let usable = !mine.entries.contains_key(&id)
+        let usable = safe_id(&id)
+            && !mine.entries.contains_key(&id)
             && entry.files.iter().all(|f| plain_relative(f) && src.join(f).is_file() && !local.join(f).exists());
         if !usable {
             report.skipped += 1;
@@ -696,6 +697,18 @@ pub fn import_old(src: &Path, local: &Path) -> Result<OldHubImport, String> {
                 std::fs::create_dir_all(dir).map_err(|e| format!("{f}: {e}"))?;
             }
             std::fs::copy(src.join(f), &to).map_err(|e| format!("{f}: {e}"))?;
+        }
+        // A mod's manifest (what its files should be, `mods::read_manifest`) comes with it, so a
+        // damaged file is found and restored as before; without one the mod's files are trusted.
+        if entry.kind == Kind::Mod {
+            let manifest = format!("mods/{id}/manifest.json");
+            if src.join(&manifest).is_file() && !local.join(&manifest).exists() {
+                let to = local.join(&manifest);
+                if let Some(dir) = to.parent() {
+                    std::fs::create_dir_all(dir).map_err(|e| format!("{manifest}: {e}"))?;
+                }
+                std::fs::copy(src.join(&manifest), &to).map_err(|e| format!("{manifest}: {e}"))?;
+            }
         }
         mine.entries.insert(id, entry);
         report.entries += 1;
@@ -758,6 +771,27 @@ mod import_old_tests {
         let again = import_old(&src, &local).unwrap();
         assert_eq!(again.entries, 0);
         assert_eq!(read_installed(&local).entries.len(), 2);
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    #[test]
+    fn an_old_mods_manifest_comes_with_it_and_an_unsafe_id_is_skipped() {
+        let src = dir("mod-src");
+        let local = dir("mod-local");
+        std::fs::create_dir_all(src.join("mods/pack/files/data")).unwrap();
+        std::fs::write(src.join("mods/pack/files/data/units.ini"), b"[units]").unwrap();
+        std::fs::write(src.join("mods/pack/manifest.json"), b"{}").unwrap();
+        let mut mod_entry = entry(&["mods/pack/files/data/units.ini"]);
+        mod_entry.kind = Kind::Mod;
+        let mut escaping = entry(&["mods/pack/files/data/units.ini"]);
+        escaping.kind = Kind::Mod;
+        write_installed(&src, &[("pack", mod_entry), ("../evil", escaping)]);
+
+        let report = import_old(&src, &local).unwrap();
+        assert_eq!(report, OldHubImport { entries: 1, skipped: 1 }, "the id that climbs out of the hub is not taken");
+        assert!(local.join("mods/pack/manifest.json").is_file(), "the manifest comes with the mod");
+        assert_eq!(read_installed(&local).entries.keys().collect::<Vec<_>>(), [&"pack".to_string()]);
         let _ = std::fs::remove_dir_all(&src);
         let _ = std::fs::remove_dir_all(&local);
     }

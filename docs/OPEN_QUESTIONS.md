@@ -8,6 +8,17 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **Moved saves of maps no installed game plays wait in their folder** (2026-11-13, reports 1621, 1622). An older
+  release's save of a map that no install has (a removed hub map, or a mod's map before its mod is installed) stays
+  in its old folder under `saves/` (listed in `saves/moved.txt`, `save::adopt_moved`) and shows in no game's «Загрузить»
+  until its map or mod is played. The move's result line says how many wait. Not built: a list of their own, or a
+  choice to drop them. The old `maps/` map slots of an older release are not moved either. Settled by the owner's
+  call on the waiting saves.
+- **The mod row after a move without the move** (2026-11-13, report 1621). The hub's mod list on Android is the app
+  folder's `installed.json`, which only the move fills (the old shared folder needs all-files access, which Razdor
+  no longer asks for). A player who never ran the move, or dismissed the start popup, sees no mod row until he moves
+  the saves from the settings («Перенести сохранения из старой папки Razdor…»). Which path the reporter took is not
+  known: ask him.
 - **Zoomed-out map: a cached static picture is not built** (2026-11-11, the owner's item 1 of the zoom-out
   work). The design was a screen-sized cache of the statics (`render_cache::Cached`), with the armies, ship and hero
   drawn over it. It is not exact: at the whole-map zoom of the Discord Times maps a dynamic sprite (the hero, an

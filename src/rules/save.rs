@@ -297,6 +297,7 @@ pub fn games_dir() -> Option<PathBuf> {
     if !own.exists() {
         claim_old_saves(&root, &own, &install);
     }
+    adopt_moved_once(&root, &own, &install);
     Some(own)
 }
 
@@ -327,27 +328,204 @@ fn install_key(dir: &Path) -> String {
 /// `install` is played, its folder `own` takes those whose map it has, the same bytes, and
 /// the demo's, with their pins. The others wait for their own install.
 fn claim_old_saves(root: &Path, own: &Path, install: &Path) {
-    let maps: Vec<(String, u64)> = crate::dt::install::list_maps(install)
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|m| Some((m.name, fnv1a(&std::fs::read(&m.path).ok()?))))
-        .collect();
-    let ours = |s: &ScenarioRef| match s {
-        ScenarioRef::Demo => true,
-        ScenarioRef::Map { file, hash } => maps.iter().any(|(f, h)| f == file && h == hash),
-    };
+    let maps = install_maps(install);
     for kind in [SaveKind::Manual, SaveKind::Auto] {
         let (from, to) = (kind_dir(root, kind), kind_dir(own, kind));
         if std::fs::create_dir_all(&to).is_err() {
             continue;
         }
         let pinned = pins(&from);
-        for e in by_time(root, kind).into_iter().filter(|e| ours(&e.meta.scenario)) {
+        for e in by_time(root, kind).into_iter().filter(|e| plays(&maps, &e.meta.scenario)) {
             let Some(name) = file_name(&e.path) else { continue };
             if std::fs::rename(&e.path, to.join(&name)).is_ok() && pinned.contains(&name) {
                 let _ = set_pinned(&to.join(&name), true);
             }
         }
+    }
+}
+
+/// The maps of `install` as the saves name them: each map's file name without the extension and
+/// the FNV-1a hash of its bytes.
+fn install_maps(install: &Path) -> Vec<(String, u64)> {
+    crate::dt::install::list_maps(install)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|m| Some((m.name, fnv1a(&std::fs::read(&m.path).ok()?))))
+        .collect()
+}
+
+/// Whether a save of scenario `scenario` is played by an install with `maps` (see [`install_maps`]):
+/// the demo always is, a map when the install has its bytes.
+fn plays(maps: &[(String, u64)], scenario: &ScenarioRef) -> bool {
+    match scenario {
+        ScenarioRef::Demo => true,
+        ScenarioRef::Map { file, hash } => maps.iter().any(|(f, h)| f == file && h == hash),
+    }
+}
+
+/// The file in the saves root that names the folders an older release's move brought in, whose saves
+/// are not all in a game's folder yet: one name per line, relative to the root (`""`, an empty line, is
+/// the root's own `manual` and `auto`, an older release's flat saves). Written by the move only
+/// ([`add_waiting`]); [`adopt_moved`] takes its saves out and drops the names whose folders are empty.
+pub const WAITING_FILE: &str = "moved.txt";
+
+/// The folders the older release's move brought in and that still wait ([`WAITING_FILE`]).
+pub fn waiting_folders(root: &Path) -> Vec<String> {
+    std::fs::read_to_string(root.join(WAITING_FILE)).map(|text| text.lines().map(str::to_string).collect()).unwrap_or_default()
+}
+
+/// Adds `names` to the waiting folders (no duplicates). Errors are returned for the caller to log.
+pub fn add_waiting(root: &Path, names: &[String]) -> std::io::Result<()> {
+    let mut all = waiting_folders(root);
+    for name in names {
+        if !all.contains(name) {
+            all.push(name.clone());
+        }
+    }
+    write_waiting(root, &all)
+}
+
+/// Writes the waiting list, or removes the file when nothing waits.
+fn write_waiting(root: &Path, names: &[String]) -> std::io::Result<()> {
+    let path = root.join(WAITING_FILE);
+    if names.is_empty() {
+        return match std::fs::remove_file(&path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        };
+    }
+    std::fs::create_dir_all(root)?;
+    std::fs::write(path, names.join("\n") + "\n")
+}
+
+/// The installs whose waiting saves were adopted in this run (their own folders): the games' lists
+/// look again only when a move put more in, so a game is not asked for its maps at every call.
+static ADOPTED: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+/// [`adopt_moved`] for the games' folder, once per run (`games_dir` calls it on every look).
+fn adopt_moved_once(root: &Path, own: &Path, install: &Path) {
+    if !root.join(WAITING_FILE).is_file() {
+        return;
+    }
+    if ADOPTED.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|p| p == own) {
+        return;
+    }
+    adopt_moved(root, own, install);
+}
+
+/// What [`adopt_moved`] did: the saves placed in the game's folder, the ones the folder already had
+/// (the same bytes: the waiting copy is dropped), and those still waiting for another map or mod
+/// (or unreadable).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Adopted {
+    pub placed: usize,
+    pub duplicates: usize,
+    pub left: usize,
+}
+
+/// Where a save of a waiting folder went.
+enum Moved {
+    /// Placed under this file name in the game's folder.
+    Placed(String),
+    /// The game's folder has the same bytes already under that name (the waiting copy is removed).
+    Same,
+}
+
+/// Places a waiting save `path` in the game's kind folder `to`: under its own name, or the next free
+/// number when another save of that name has other bytes (never overwritten, never dropped). None when
+/// the file cannot be read or moved; the save then stays where it is.
+fn place_moved(path: &Path, to: &Path, name: &str) -> Option<Moved> {
+    let data = std::fs::read(path).ok()?;
+    std::fs::create_dir_all(to).ok()?;
+    let mut n = 1u32;
+    loop {
+        let file = crate::transfer::numbered_name(name, n);
+        let target = to.join(&file);
+        match std::fs::read(&target) {
+            Ok(existing) if existing == data => {
+                std::fs::remove_file(path).ok()?;
+                return Some(Moved::Same);
+            }
+            Ok(_) => n += 1,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::rename(path, &target).ok()?;
+                return Some(Moved::Placed(file));
+            }
+            Err(_) => return None,
+        }
+    }
+}
+
+/// Takes the saves of the waiting folders (see [`WAITING_FILE`]) that install `install` plays into its
+/// folder `own`, keeping their pins. A waiting folder with no saves left goes; the names of the others
+/// stay on the list, and the saves in them wait for their own map or mod. Marks `own` as adopted for
+/// this run. Nothing is deleted except a waiting copy whose game folder has the same bytes.
+pub fn adopt_moved(root: &Path, own: &Path, install: &Path) -> Adopted {
+    {
+        let mut done = ADOPTED.lock().unwrap_or_else(|e| e.into_inner());
+        if !done.iter().any(|p| p == own) {
+            done.push(own.to_path_buf());
+        }
+    }
+    let mut out = Adopted::default();
+    let names = waiting_folders(root);
+    if names.is_empty() {
+        return out;
+    }
+    let maps = install_maps(install);
+    let mut kept = Vec::new();
+    for name in names {
+        let folder = if name.is_empty() { root.to_path_buf() } else { root.join(&name) };
+        if folder == own {
+            kept.push(name);
+            continue;
+        }
+        for kind in [SaveKind::Manual, SaveKind::Auto] {
+            let from = kind_dir(&folder, kind);
+            let pinned = pins(&from);
+            for (path, _) in files_of(&folder, kind) {
+                let Some(file) = file_name(&path) else { continue };
+                if !matches!(read_meta(&path), Ok(meta) if plays(&maps, &meta.scenario)) {
+                    continue;
+                }
+                match place_moved(&path, &kind_dir(own, kind), &file) {
+                    Some(Moved::Placed(new)) => {
+                        out.placed += 1;
+                        if pinned.contains(&file) {
+                            let _ = set_pinned(&kind_dir(own, kind).join(&new), true);
+                        }
+                    }
+                    Some(Moved::Same) => out.duplicates += 1,
+                    None => {}
+                }
+            }
+        }
+        if remaining(&folder) > 0 {
+            kept.push(name);
+        } else {
+            retire_folder(&folder, &name);
+        }
+    }
+    out.left = kept.iter().map(|name| remaining(&if name.is_empty() { root.to_path_buf() } else { root.join(name) })).sum();
+    let _ = write_waiting(root, &kept);
+    out
+}
+
+/// The saves still in a waiting folder's `manual` and `auto`.
+fn remaining(folder: &Path) -> usize {
+    [SaveKind::Manual, SaveKind::Auto].iter().map(|&k| files_of(folder, k).len()).sum()
+}
+
+/// Removes an emptied waiting folder: its pinned lists and its `manual` and `auto` folders (only when
+/// they are empty by now), and the folder itself unless it is the root (the empty name).
+fn retire_folder(folder: &Path, name: &str) {
+    for kind in [SaveKind::Manual, SaveKind::Auto] {
+        let dir = kind_dir(folder, kind);
+        let _ = std::fs::remove_file(dir.join(PINS_FILE));
+        let _ = std::fs::remove_dir(&dir);
+    }
+    if !name.is_empty() {
+        let _ = std::fs::remove_dir(folder);
     }
 }
 
@@ -1673,6 +1851,75 @@ pub(crate) mod tests {
         assert_eq!(names(&own, SaveKind::Auto), [("ours".to_string(), false)]);
         assert_eq!(names(&root, SaveKind::Manual), [("the mod's".to_string(), false)], "another map's bytes: left for its install");
         assert!(install_key(&install).starts_with("razdor-test-"), "{}", install_key(&install));
+        let _ = (std::fs::remove_dir_all(&root), std::fs::remove_dir_all(&install));
+    }
+
+    /// A game on the map `map` (its file name and bytes), or the demo when None.
+    fn game_of(map: Option<(&str, &[u8])>) -> Game {
+        let mut g = Game::new(demo(), HeroClass::Knight);
+        if let Some((file, bytes)) = map {
+            g.origin = Some(ScenarioRef::Map { file: file.into(), hash: fnv1a(bytes) });
+        }
+        g
+    }
+
+    /// A fake install with one map, `Ours.DTm` (the bytes `our map`), in a folder of its own (`name`:
+    /// `temp_dir` names by the millisecond, so two tests must not share a name).
+    fn install_with_ours(name: &str) -> PathBuf {
+        let install = temp_dir(name);
+        std::fs::create_dir_all(install.join(crate::dt::install::MAPS_DIR)).unwrap();
+        std::fs::write(install.join(crate::dt::install::MAPS_DIR).join("Ours.DTm"), b"our map").unwrap();
+        install
+    }
+
+    /// `(name, pinned)` of the saves of one kind in `dir`, sorted by name.
+    fn named(dir: &Path, kind: SaveKind) -> Vec<(String, bool)> {
+        let mut v: Vec<(String, bool)> = list(dir, kind).into_iter().map(|e| (e.meta.name, e.pinned)).collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn a_moved_save_is_placed_for_the_game_that_plays_its_map_and_the_rest_wait() {
+        let (root, install) = (temp_dir("adopt-root"), install_with_ours("adopt-install-placed"));
+        let old = root.join("Discord Times-1a2b3c4d");
+        let pinned = write(&old, SaveKind::Manual, "Start", &game_of(Some(("Ours", b"our map")))).unwrap();
+        set_pinned(&pinned, true).unwrap();
+        write(&old, SaveKind::Auto, "Battle - Foe", &game_of(Some(("Ours", b"our map")))).unwrap();
+        write(&old, SaveKind::Manual, "the mod's", &game_of(Some(("Mod", b"a mod's map")))).unwrap();
+        add_waiting(&root, &["Discord Times-1a2b3c4d".to_string()]).unwrap();
+        let own = root.join(install_key(&install));
+
+        assert_eq!(adopt_moved(&root, &own, &install), Adopted { placed: 2, duplicates: 0, left: 1 });
+        assert_eq!(named(&own, SaveKind::Manual), [("Start".to_string(), true)], "the pin comes with the save");
+        assert_eq!(named(&own, SaveKind::Auto), [("Battle - Foe".to_string(), false)]);
+        assert_eq!(named(&old, SaveKind::Manual), [("the mod's".to_string(), false)], "another map's save waits in its folder");
+        assert_eq!(waiting_folders(&root), ["Discord Times-1a2b3c4d".to_string()], "the folder still holds a save");
+        // Another look changes nothing: the waiting save is still not this game's.
+        assert_eq!(adopt_moved(&root, &own, &install), Adopted { placed: 0, duplicates: 0, left: 1 });
+        let _ = (std::fs::remove_dir_all(&root), std::fs::remove_dir_all(&install));
+    }
+
+    #[test]
+    fn a_clashing_name_gets_the_next_number_and_the_same_bytes_are_one_save() {
+        let (root, install) = (temp_dir("adopt-clash"), install_with_ours("adopt-install-clash"));
+        let own = root.join(install_key(&install));
+        // The game's folder has a save named like one of the moved ones, with other bytes: it stays.
+        std::fs::create_dir_all(own.join(MANUAL_DIR)).unwrap();
+        std::fs::write(own.join(MANUAL_DIR).join("Start.rzsave"), b"my own game").unwrap();
+        // And one with the same bytes as a moved one: the moved copy is not written twice.
+        let old = root.join("Discord Times-1a2b3c4d");
+        write(&old, SaveKind::Manual, "Same", &game_of(Some(("Ours", b"our map")))).unwrap();
+        std::fs::copy(old.join(MANUAL_DIR).join("Same.rzsave"), own.join(MANUAL_DIR).join("Same.rzsave")).unwrap();
+        write(&old, SaveKind::Manual, "Start", &game_of(Some(("Ours", b"our map")))).unwrap();
+        let moved = std::fs::read(old.join(MANUAL_DIR).join("Start.rzsave")).unwrap();
+        add_waiting(&root, &["Discord Times-1a2b3c4d".to_string()]).unwrap();
+
+        assert_eq!(adopt_moved(&root, &own, &install), Adopted { placed: 1, duplicates: 1, left: 0 });
+        assert_eq!(std::fs::read(own.join(MANUAL_DIR).join("Start.rzsave")).unwrap(), b"my own game", "never overwritten");
+        assert_eq!(std::fs::read(own.join(MANUAL_DIR).join("Start (2).rzsave")).unwrap(), moved, "the moved save keeps its bytes under the next number");
+        assert!(!old.exists(), "the emptied waiting folder goes");
+        assert!(waiting_folders(&root).is_empty() && !root.join(WAITING_FILE).exists(), "and leaves the list");
         let _ = (std::fs::remove_dir_all(&root), std::fs::remove_dir_all(&install));
     }
 

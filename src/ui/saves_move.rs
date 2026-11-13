@@ -23,6 +23,7 @@ use std::path::Path;
 use std::thread::JoinHandle;
 
 use razdor::i18n::tr;
+use razdor::rules::save;
 use razdor::{hub, local, platform, transfer, trf};
 
 use super::audio::{cue, Cue};
@@ -55,8 +56,8 @@ struct Progress {
     total: Option<u64>,
 }
 
-/// The import's result: the counts of the saves and the hub, or the reason it failed.
-type Import = Result<(transfer::Imported, Option<hub::OldHubImport>), String>;
+/// The move's result: what came in (`transfer::move_old_release`), or the reason it failed.
+type Import = Result<transfer::OldRelease, String>;
 
 /// Where the move stands.
 #[derive(Default)]
@@ -80,6 +81,8 @@ local! {
     static STATE: RefCell<State> = const { RefCell::new(State::Hidden) };
     /// The popup was offered in this run: it is not offered again until the next start.
     static SHOWN: Cell<bool> = const { Cell::new(false) };
+    /// A move ended with its saves and hub in place, not yet read by the App ([`take_finished`]).
+    static FINISHED: Cell<bool> = const { Cell::new(false) };
 }
 
 fn marker() -> Option<PathBuf> {
@@ -254,26 +257,9 @@ pub fn tick() {
     STATE.with_borrow_mut(|s| *s = next);
 }
 
-/// The older release's hub folder in the copy (`hub`: its installed maps and mods) merged into the
-/// app's hub (`hub::import_old`, into `local`). None when the copy has none or the import fails: the
-/// saves are already in, and a failure is only logged.
-fn copy_hub(copy: &std::path::Path, local: Option<&std::path::Path>) -> Option<hub::OldHubImport> {
-    let src = copy.join("hub");
-    if !src.is_dir() {
-        return None;
-    }
-    match hub::import_old(&src, local?) {
-        Ok(report) => Some(report),
-        Err(why) => {
-            razdor::diag::log(&format!("saves move: the hub's maps and mods are not moved: {why}"));
-            None
-        }
-    }
-}
-
-/// The copied folder (`old-saves` in the cache) imported into the app's saves folder on a thread (the
-/// import only reads and writes files); the copy is removed when it ends, either way. The folders are
-/// taken here, on the main thread.
+/// The copied folder (`old-saves` in the cache) moved into the app's saves folder on a thread (the
+/// move only reads and writes files, see `transfer::move_old_release`); the copy is removed when it
+/// ends, either way. The folders and the install are taken here, on the main thread.
 fn start_import(popup: bool) -> State {
     let copy = platform::cache_dir().map(|dir| dir.join("old-saves"));
     let root = platform::app_dir().map(|dir| dir.join("saves"));
@@ -281,9 +267,10 @@ fn start_import(popup: bool) -> State {
         return State::Offer(popup, Some(tr("The folder cannot be read.").to_string()));
     };
     let local = hub::local_dir();
+    let install = save::install_dir();
     let cleanup = copy.clone();
     let spawned = std::thread::Builder::new().name("saves-move".into()).spawn(move || {
-        let result = transfer::import_folder(&copy, &root).map(|imported| (imported, copy_hub(&copy, local.as_deref())));
+        let result = transfer::move_old_release(&copy, &root, local.as_deref(), install.as_deref());
         let _ = fs::remove_dir_all(&copy);
         result
     });
@@ -300,16 +287,10 @@ fn start_import(popup: bool) -> State {
 /// good); a failure is offered again with its reason.
 fn finish_import(popup: bool, joined: std::thread::Result<Import>) -> State {
     match joined {
-        Ok(Ok((imported, old_hub))) => {
+        Ok(Ok(release)) => {
             write_decision("done");
-            let mut line = trf!("Saves moved: {n}.", n = imported.saves);
-            if let Some(hub) = old_hub {
-                line = format!("{line} {}", trf!("Maps and mods: {n}.", n = hub.entries));
-            }
-            if imported.settings_kept {
-                line = format!("{line} {}", tr("Settings were not replaced: they are already there."));
-            }
-            State::Done(line)
+            FINISHED.set(true);
+            State::Done(outcome_text(&release))
         }
         Ok(Err(why)) => State::Offer(popup, Some(why)),
         Err(_) => {
@@ -319,7 +300,39 @@ fn finish_import(popup: bool, joined: std::thread::Result<Import>) -> State {
     }
 }
 
-/// The snapshot's copy fake (`RAZDOR_SCENE_SAVES_MOVE`, with `RAZDOR_SNAPSHOT`): see [`copy_fake`].
+/// The move's result as the player reads it: what came into this game, what this game already had,
+/// what waits for another map or mod (it shows when that game is played), the hub's maps and mods,
+/// and the settings kept. Never «moved» for a save that is not there.
+fn outcome_text(release: &transfer::OldRelease) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if release.placed > 0 {
+        parts.push(trf!("Saves moved: {n}.", n = release.placed));
+    }
+    if release.duplicates > 0 {
+        parts.push(trf!("Saves already in this game: {n}.", n = release.duplicates));
+    }
+    if release.left > 0 {
+        parts.push(trf!("Saves of other maps and mods, they show when their game is played: {n}.", n = release.left));
+    }
+    if parts.is_empty() {
+        parts.push(tr("No saves of this game were found in the folder.").to_string());
+    }
+    if let Some(hub) = &release.hub {
+        parts.push(trf!("Maps and mods: {n}.", n = hub.entries));
+    }
+    if release.imported.settings_kept {
+        parts.push(tr("Settings were not replaced: they are already there.").to_string());
+    }
+    parts.join(" ")
+}
+
+/// Whether a move ended since the last look: the App reads the hub's maps and mods again then (the
+/// mod choice and the new-game list), since a move brings them in while the game runs.
+pub fn take_finished() -> bool {
+    FINISHED.replace(false)
+}
+
+/// The snapshot's copy fake (`RAZDOR_SNAPSHOT`, `RAZDOR_SCENE_SAVES_MOVE`): see [`copy_fake`].
 fn snapshot_copy() -> Option<Progress> {
     std::env::var_os("RAZDOR_SNAPSHOT")?;
     copy_fake(&std::env::var("RAZDOR_SCENE_SAVES_MOVE").ok()?)
@@ -517,5 +530,22 @@ mod tests {
         assert!(matches!(poll(false, None, "cancel", "", copied), State::Hidden));
         // A folder without saves is offered again, with the reason.
         assert!(matches!(poll(false, last, "wrong", "", copied), State::Offer(false, Some(_))));
+    }
+
+    #[test]
+    fn the_move_says_what_is_in_this_game_and_never_moved_for_a_save_that_is_not_there() {
+        let release = |placed, duplicates, left| transfer::OldRelease { placed, duplicates, left, ..Default::default() };
+        // Saves that came into this game: «moved».
+        assert_eq!(outcome_text(&release(2, 0, 0)), trf!("Saves moved: {n}.", n = 2));
+        // The game already had them: not «moved», and not a «0 moved» line.
+        assert_eq!(outcome_text(&release(0, 3, 0)), trf!("Saves already in this game: {n}.", n = 3));
+        // Saves of other maps and mods wait for their game, said plainly.
+        let waiting = trf!("Saves of other maps and mods, they show when their game is played: {n}.", n = 1);
+        assert_eq!(outcome_text(&release(2, 0, 1)), format!("{} {waiting}", trf!("Saves moved: {n}.", n = 2)));
+        // Nothing for this game at all: said so.
+        assert_eq!(outcome_text(&release(0, 0, 0)), tr("No saves of this game were found in the folder."));
+        // A failed hub merge is not in the line; a merged hub is.
+        let with_hub = transfer::OldRelease { hub: Some(hub::OldHubImport { entries: 4, skipped: 0 }), ..release(1, 0, 0) };
+        assert!(outcome_text(&with_hub).ends_with(&trf!("Maps and mods: {n}.", n = 4)));
     }
 }

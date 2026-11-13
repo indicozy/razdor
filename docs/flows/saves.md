@@ -21,13 +21,34 @@ All code is in `src/rules/save.rs`; the windows are `src/ui/saves.rs`.
 
 - Android: the saves folder is `platform::app_dir` (`<files>/Razdor/saves`, the app's own folder; no
   storage permission, see [app-and-ui.md](app-and-ui.md)). The saves of an older release come in
-  through the folder picker (`ui::saves_move`, `transfer::import_folder`). The picked folder is listed
+  through the folder picker (`ui::saves_move`, `transfer::move_old_release`). The picked folder is listed
   (its files counted), then copied into the cache's `old-saves` file by file; the window «Перенос
   сохранений» shows «N из M файлов» with a bar (`razdorOldSavesProgress`, the Java side writes the counts),
   and while the count runs an animated ellipsis without a bar. The import then runs on a thread behind the
   same window (the screen under it takes no input, the game's start waits), and the decision is written
-  on the main thread when it ends. Export and import go through the system's documents
+  on the main thread when it ends (the decision is `done`; the App then reads the hub again, see below).
+  Export and import go through the system's documents
   (`ui::transfer`, «Перенос…» in the Load window): one zip out, `.rzsave` or a zip in, nothing overwritten.
+
+## Moving an older release (`transfer::move_old_release`)
+
+- The old install's folder under the copy is named by the old install's path hash, so the new
+  install's folder (`saves_dir_of`, the new path) never matches it: the moved saves were invisible
+  (1622). The move therefore lists each old install folder (and a flat `manual`/`auto` at the
+  copy's root, as the name `""`) in `saves/moved.txt` (`save::WAITING_FILE`, `save::add_waiting`).
+- `save::adopt_moved(root, own, install)` places the waiting saves whose map the install plays into
+  its own folder: the same map bytes rule as `claim_old_saves` (the demo's saves too), pins kept, a
+  name taken by other bytes gets the next number (`transfer::numbered_name`), the same bytes are one
+  save (`Adopted::duplicates`, the waiting copy goes). The rest stay in their folders and the names
+  stay on the list; `save::games_dir` adopts for each install once per run (`adopt_moved_once`, a
+  game's own folder is not created by it). A waiting folder with no saves left is removed.
+- Maps and mods: `hub::import_old` copies each listed entry with its files (a mod's manifest too; the
+  copy leaves out a mod's merged `game` and `archives`, and the hub's `cache` and `downloads`:
+  `razdorHubSkip` in `android/MainActivityInject.java`). The move's end sets `saves_move::take_finished`,
+  and the App's `saves_tick` runs `reload_hub_maps`: the mod choice (`App::mods`, read once at start
+  before) and the new-game list show them without a restart (1621).
+- The result line (`saves_move::outcome_text`) says what came into this game, what it already had and
+  what waits for another map or mod; it never says «moved» for a save that is not in the folder.
 
 ## Limits and pins
 

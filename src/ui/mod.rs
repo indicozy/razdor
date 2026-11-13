@@ -1325,6 +1325,10 @@ impl App {
         }
         audio::flush_deferred();
         saves_move::tick();
+        // A move brought in maps and mods: the new-game list and the mod choice are read again.
+        if saves_move::take_finished() {
+            self.reload_hub_maps();
+        }
         // The log export started from Settings (`transfer::start_log_export`): its answer, for its note.
         #[cfg(target_os = "android")]
         {
