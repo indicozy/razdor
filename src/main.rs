@@ -189,6 +189,7 @@ async fn main() {
     #[cfg(target_os = "android")]
     ui::saves_move::decide_at_start(razdor::platform::cache_dir().as_deref());
     // The phones' folders are tidied off the main thread (the old picture cache goes, `.nomedia`).
+    razdor::remote_config::start();
     std::thread::spawn(razdor::platform::tidy_app_dir);
     // The picture cache's folders of other releases, its old flat files and stale temporary files
     // go too (off the main thread; the current folder's entries are never touched).

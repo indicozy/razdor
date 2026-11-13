@@ -18,6 +18,7 @@ pub mod depth;
 pub mod dt;
 pub mod gdrive;
 pub mod mirror;
+pub mod remote_config;
 pub mod archive;
 pub mod parts;
 pub mod editor;

@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "update_feed": [
+    "https://indicozy.gitverse.site/razdor-community/releases.json",
+    "https://api.github.com/repos/indicozy/razdor/releases?per_page=30"
+  ],
+  "hub": [
+    "https://indicozy.gitverse.site/razdor-community",
+    "https://github.com/indicozy/razdor-community/releases/latest/download"
+  ],
+  "game": {
+    "links": [
+      "https://gitverse.ru/api/attachments/36c22adf-f3f3-4286-a474-9b6a00a5abc5",
+      "https://github.com/indicozy/razdor-community/releases/download/game-cu-1.2/discord-times-cu.zip"
+    ],
+    "size": 44619982,
+    "sha256": "dff554e22a0485f0ed06b3459d3e7e868224d49e264bba0ecf40db852514568d",
+    "name": "discord-times-cu.zip"
+  }
+}

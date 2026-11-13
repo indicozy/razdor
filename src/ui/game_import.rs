@@ -292,9 +292,9 @@ fn start(pending: Pending) {
     }
 }
 
-/// «Скачать игру»: the game on GitHub (`gdrive::GAME`) is downloaded and imported (`start_archive`).
+/// «Скачать игру»: the game on GitHub (`gdrive::game()`) is downloaded and imported (`start_archive`).
 fn start_download() {
-    start_archive(gdrive::GAME, false);
+    start_archive(gdrive::game(), false);
 }
 
 /// The game archive `archive` is downloaded into the cache folder (`gdrive`), verified, examined and
@@ -411,7 +411,7 @@ fn snapshot_checking() -> bool {
 
 /// The archive the automatic start downloads (`auto_tick`'s decision). A folder or the mock hub offers
 /// none. Otherwise the catalog's game, when the catalog is read and offers one at https addresses;
-/// else the built-in game (`gdrive::GAME`), which is also what an unreadable catalog leads to.
+/// else the built-in game (`gdrive::game()`), which is also what an unreadable catalog leads to.
 fn auto_archive(folder_hub: bool, catalog: &Result<hub::Catalog, String>) -> Option<gdrive::Archive> {
     if folder_hub {
         return None;
@@ -420,7 +420,7 @@ fn auto_archive(folder_hub: bool, catalog: &Result<hub::Catalog, String>) -> Opt
         let links: Vec<String> = std::iter::once(game.url.clone()).chain(game.mirrors.iter().cloned()).collect();
         links.iter().all(|l| l.starts_with("https://")).then(|| gdrive::Archive::at_urls(links, game.size, game.sha256.clone(), game.name.clone()))
     });
-    Some(offered.unwrap_or(gdrive::GAME))
+    Some(offered.unwrap_or(gdrive::game()))
 }
 
 /// Starts the game the catalog offered, when the target is there and nothing else runs.
@@ -460,7 +460,7 @@ fn start_repair() {
     let spawned = std::thread::Builder::new().name("game-repair".into()).spawn(move || repair_from_archive(&base, &dest, &p, &d, &t));
     match spawned {
         Ok(handle) => JOB.with_borrow_mut(|j| {
-            *j = Some(Job { name: "Discord Times".into(), handle: Some(handle), done, total, progress: Some(progress), title: tr("Restoring the game files"), auto: false, size: gdrive::GAME.size })
+            *j = Some(Job { name: "Discord Times".into(), handle: Some(handle), done, total, progress: Some(progress), title: tr("Restoring the game files"), auto: false, size: gdrive::game().size })
         }),
         Err(e) => DOWNLOAD_FAILURE.with_borrow_mut(|f| *f = Some(trf!("The download cannot start: {e}.", e = e))),
     }
@@ -475,7 +475,7 @@ fn repair_from_archive(base: &Path, dest: &Path, progress: &gdrive::Progress, do
         return Ok(Done::Patched(0));
     }
     total.store(missing.len() as u64, Ordering::Relaxed);
-    gdrive::download_game(&gdrive::Http, &gdrive::GAME, dest, progress).map_err(|f| match f {
+    gdrive::download_game(&gdrive::Http, &gdrive::game(), dest, progress).map_err(|f| match f {
         gdrive::Failure::Cancelled => Error::Cancelled,
         gdrive::Failure::Failed(why) => Error::Download(why),
         gdrive::Failure::NoAddress(_) => Error::NoAddress,
@@ -614,7 +614,7 @@ fn progress_window() {
         if checking() {
             checking_window();
         } else if let Some(bytes) = snapshot_download_bytes() {
-            download_window(bytes, gdrive::GAME.size, None, tr("Loading the game"));
+            download_window(bytes, gdrive::game().size, None, tr("Loading the game"));
         } else if let Some(pct) = snapshot_unpacking() {
             unpack_window(pct, 100, tr("Loading the game"));
         }
@@ -630,7 +630,7 @@ fn progress_window() {
 fn snapshot_download_bytes() -> Option<u64> {
     std::env::var_os("RAZDOR_SNAPSHOT")?;
     let pct: u64 = std::env::var("RAZDOR_SCENE_DOWNLOADING").ok()?.parse().ok()?;
-    Some(gdrive::GAME.size * pct.min(100) / 100)
+    Some(gdrive::game().size * pct.min(100) / 100)
 }
 
 /// The snapshot's fake unpacking: `RAZDOR_SCENE_UNPACKING=<percent>` (with `RAZDOR_SNAPSHOT`).
@@ -947,10 +947,10 @@ mod tests {
         assert_eq!(offered.name, "g.zip");
         assert_eq!(offered.links.len(), 2);
         // A read catalog with no game, or a game at a plain address: the built-in one.
-        assert_eq!(auto_archive(false, &Ok(catalog(None))).unwrap(), super::gdrive::GAME);
-        assert_eq!(auto_archive(false, &Ok(catalog(Some(game("http://plain.example/x", vec![]))))).unwrap(), super::gdrive::GAME);
+        assert_eq!(auto_archive(false, &Ok(catalog(None))).unwrap(), super::gdrive::game());
+        assert_eq!(auto_archive(false, &Ok(catalog(Some(game("http://plain.example/x", vec![]))))).unwrap(), super::gdrive::game());
         // No catalog could be read (every hub source failed): the built-in one.
-        assert_eq!(auto_archive(false, &Err(razdor::hub::NO_ADDRESS.into())).unwrap(), super::gdrive::GAME);
+        assert_eq!(auto_archive(false, &Err(razdor::hub::NO_ADDRESS.into())).unwrap(), super::gdrive::game());
         // A folder or the mock hub offers no download, read or not.
         assert!(auto_archive(true, &Err("x".into())).is_none());
         assert!(auto_archive(true, &Ok(catalog(None))).is_none());

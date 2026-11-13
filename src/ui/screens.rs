@@ -508,7 +508,7 @@ fn download_lines() -> Vec<String> {
     }
     let mut lines: Vec<String> = failure.into_iter().collect();
     lines.push(tr("Download it by hand:").to_string());
-    lines.push(trf!("The file: {link}", link = gdrive::file_page(&gdrive::GAME)));
+    lines.push(trf!("The file: {link}", link = gdrive::file_page(&gdrive::game())));
     lines.extend(manual_steps());
     lines
 }
@@ -661,7 +661,7 @@ fn open_folder_link() {
 
 /// The open button's action: the file's page, through `open`.
 fn open_link_with(open: &dyn Fn(&str)) {
-    open(&gdrive::file_page(&gdrive::GAME));
+    open(&gdrive::file_page(&gdrive::game()));
 }
 
 /// «Копировать ссылку»: the file's page on the clipboard (Razdor's clipboard, as the battle code's).
@@ -671,7 +671,7 @@ fn copy_folder_link() {
 
 /// The copy button's action: the file's page, through `set`.
 fn copy_link_with(set: &dyn Fn(&str)) {
-    set(&gdrive::file_page(&gdrive::GAME));
+    set(&gdrive::file_page(&gdrive::game()));
 }
 
 #[cfg(test)]
@@ -686,7 +686,7 @@ mod not_found_tests {
 
     #[test]
     fn the_open_and_copy_buttons_use_the_file_page() {
-        let page = gdrive::file_page(&gdrive::GAME);
+        let page = gdrive::file_page(&gdrive::game());
         assert_eq!(recorded(|f| open_link_with(f)), std::slice::from_ref(&page));
         assert_eq!(recorded(|f| copy_link_with(f)), std::slice::from_ref(&page));
         assert_eq!(page, "https://github.com/indicozy/razdor-community/releases/download/game-cu-1.2/discord-times-cu.zip");

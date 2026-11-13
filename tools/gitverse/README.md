@@ -7,7 +7,8 @@ The design is in `docs/specs/2026-11-13-gitverse-mirrors.md`.
 | Script | What it does |
 |---|---|
 | `gitverse.py` | The shared client: the token, the API calls (releases, assets), retries, anonymous ranged downloads with the size and SHA-256 check, the name rule, the registry of the releases these scripts made. Not run directly. |
-| `pages.py` | The Pages push for `razdor-community`: a fresh clone of the repo, the `docs/` folder changed, a commit as the owner, a push to `main`, and a wait until the anonymous URLs serve exactly the new bytes. Not run directly. |
+| `pages.py` | The Pages push for `razdor-community`: a fresh clone of the repo, the `docs/` folder changed, a commit as the owner, a push to `main`, and a wait until the anonymous URLs serve exactly the new bytes. Every push writes `docs/config.json` from `data/remote/config.json`. Not run directly. |
+| `publish_config.py` | The remote config only: checks `data/remote/config.json` as the app reads it, pushes `docs/config.json` to the `razdor-community` Pages, waits until it is served. `--dry-run` checks only. |
 | `publish_release.py` | An app release: packs the files GitVerse refuses, writes `SHA256SUMS.txt`, creates the release, uploads, verifies, updates the update feed (`releases.json`), deletes old releases. Also `--push-source` (the release commit and tag to GitVerse) and `--unpublish`. |
 | `publish_hub.py` | The hub catalog: zips each map and other file (one zip each) into a `catalog-YYYY-MM-DD` release, writes the GitVerse `index-v2.json`, pushes the site (`index-v2.json`, the pictures under `previews/`, the hub page) to Pages, deletes old catalogs. |
 | `test_*.py` | Unit tests (no network; a local HTTP server and a local bare git repo stand in for GitVerse). |
@@ -22,6 +23,10 @@ python3 -I tools/gitverse/publish_release.py --dry-run --tag v1.5.2 --notes NOTE
 python3 -I tools/gitverse/publish_release.py --push-source v1.5.2     # the release commit to main, and the tag
 python3 -I tools/gitverse/publish_release.py --tag v0.0.1-x --prerelease --target main <files> # a test (no feed)
 python3 -I tools/gitverse/publish_release.py --unpublish v0.0.1-x --git-tag                    # remove a test
+
+# the remote config (data/remote/config.json; the app reads it from both sites)
+python3 -I tools/gitverse/publish_config.py --dry-run     # check the file only
+python3 -I tools/gitverse/publish_config.py               # push to GitVerse, wait until served
 
 # the catalog (after the GitHub catalog is up; see the community-pack skill)
 python3 -I tools/gitverse/publish_hub.py --catalog-dir <out> --tag catalog-2026-11-20

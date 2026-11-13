@@ -904,7 +904,7 @@ impl Source {
     pub fn label(&self) -> String {
         match self {
             Source::Url(u) => u.clone(),
-            Source::Mirrors => mirror::HUB[0].to_string(),
+            Source::Mirrors => crate::remote_config::hub()[0].clone(),
             Source::Dir(d) => d.display().to_string(),
             Source::Mock => "mock".into(),
         }
@@ -1040,7 +1040,7 @@ impl Hub {
         match &self.source {
             Source::Url(u) => Ok(Root::Url(u.clone())),
             // Only addresses are fetched from the mirrors' catalog (its files are made absolute, see `rebase`).
-            Source::Mirrors => Ok(Root::Url(mirror::HUB[0].to_string())),
+            Source::Mirrors => Ok(Root::Url(crate::remote_config::hub()[0].clone())),
             Source::Dir(d) => Ok(Root::Dir(d.clone())),
             Source::Mock => {
                 let dir = self.local.join("mock-hub");
@@ -1132,7 +1132,10 @@ impl Hub {
     /// address's files are made absolute against it (`rebase`); a folder or the mock is read as it is.
     pub fn catalog(&self) -> Result<Catalog, String> {
         match &self.source {
-            Source::Mirrors => catalog_from_mirrors(&mirror::HUB, |url| crate::update::fetch(url, 60)),
+            Source::Mirrors => {
+                let bases = crate::remote_config::hub();
+                catalog_from_mirrors(&crate::remote_config::refs(&bases), |url| crate::update::fetch(url, 60))
+            }
             Source::Url(base) => {
                 let mut c = read_index(&mut |rel| self.fetch(rel))?;
                 rebase(&mut c, base);

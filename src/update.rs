@@ -548,7 +548,8 @@ pub fn check() {
     let Some(asset) = asset_name().filter(|_| !busy) else { return };
     set(Status::Checking);
     let spawned = std::thread::Builder::new().name("update check".into()).spawn(move || {
-        let found = feed_from(&mirror::UPDATE_FEED, |url| fetch(url, 20), current(), asset);
+        let feed = crate::remote_config::update_feed();
+        let found = feed_from(&crate::remote_config::refs(&feed), |url| fetch(url, 20), current(), asset);
         let next = match found {
             Ok(Some(r)) => {
                 crate::diag!("update: {} is out (this is {})", r.version, current());

@@ -10,6 +10,7 @@ on:
     branches: [main]
     paths:
       - "wiki/**"
+      - "data/remote/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -48,6 +49,11 @@ jobs:
         run: |
           rm -rf site/.git site/.github
           rsync -a --delete wiki/dist/ site/wiki/
+
+      # The remote config the app reads (https://indicozy.github.io/razdor/config.json): the same file
+      # as GitVerse's (tools/gitverse/publish_config.py). Source: data/remote/config.json.
+      - name: Put the remote config into the site
+        run: cp data/remote/config.json site/config.json
 
       - uses: actions/upload-pages-artifact@v3
         with:

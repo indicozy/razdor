@@ -1,19 +1,22 @@
-//! The addresses Razdor reads and downloads from, each list in the order it is tried: GitVerse
-//! first (players in Russia reach it), GitHub as the fallback. See
-//! `docs/specs/2026-11-13-gitverse-mirrors.md`. Nothing here needs macroquad.
+//! The built-in addresses Razdor reads and downloads from, each list in the order it is tried:
+//! GitVerse first (players in Russia reach it), GitHub as the fallback. They are the defaults of the
+//! remote config (`remote_config::Config::builtin`): the lists in use are the config's, which the
+//! app takes from `config.json` (see `remote_config`). See `docs/specs/2026-11-13-gitverse-mirrors.md`.
+//! Nothing here needs macroquad.
 
-/// The update feed: the release list in the GitHub API's shape. GitVerse's copy is a static file
-/// on the community's Pages; GitHub's is the API.
+/// The built-in update feed: the release list in the GitHub API's shape. GitVerse's copy is a static
+/// file on the community's Pages; GitHub's is the API.
 pub const UPDATE_FEED: [&str; 2] = [
     "https://indicozy.gitverse.site/razdor-community/releases.json",
     "https://api.github.com/repos/indicozy/razdor/releases?per_page=30",
 ];
 
-/// The hub catalog's folder: its `index.json` names the files, resolved against the folder that
-/// gave the catalog. GitHub's is `hub::DEFAULT_SOURCE`.
+/// The built-in hub folders: the catalog's `index.json` names the files, resolved against the folder
+/// that gave the catalog. GitHub's is `hub::DEFAULT_SOURCE`.
 pub const HUB: [&str; 2] = ["https://indicozy.gitverse.site/razdor-community", crate::hub::DEFAULT_SOURCE];
 
-/// The game archive (`gdrive::GAME`): GitVerse's attachment, then GitHub's release file.
+/// The built-in game archive (`gdrive::game` gives the one in use): GitVerse's attachment, then
+/// GitHub's release file.
 pub const GAME: [&str; 2] = [
     "https://gitverse.ru/api/attachments/36c22adf-f3f3-4286-a474-9b6a00a5abc5",
     "https://github.com/indicozy/razdor-community/releases/download/game-cu-1.2/discord-times-cu.zip",

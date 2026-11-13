@@ -18,8 +18,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use crate::mirror;
-
 /// An archive to download: its addresses, in the order they are tried, its size and SHA-256, and
 /// the name the player sees. Every address is the same file: the first one that gives it verified wins.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -30,14 +28,17 @@ pub struct Archive {
     pub name: Cow<'static, str>,
 }
 
-/// The community's game (the owner's constants; `scripts/check-game-link.sh` checks the links): the
-/// GitVerse mirror first, the GitHub release file after it (`mirror::GAME`).
-pub const GAME: Archive = Archive {
-    links: Cow::Borrowed(&[Cow::Borrowed(mirror::GAME[0]), Cow::Borrowed(mirror::GAME[1])]),
-    size: 44_619_982,
-    sha256: Cow::Borrowed("dff554e22a0485f0ed06b3459d3e7e868224d49e264bba0ecf40db852514568d"),
-    name: Cow::Borrowed("discord-times-cu.zip"),
-};
+/// The community's game as the remote config gives it (`remote_config::game_info`; the built-in one
+/// until the config arrives: `scripts/check-game-link.sh` checks the built-in links). The GitVerse
+/// mirror first, the GitHub release file after it.
+pub fn game() -> Archive {
+    archive_from(&crate::remote_config::game_info())
+}
+
+/// The archive the config's game names: its links in order, its size, SHA-256 and file name.
+pub fn archive_from(g: &crate::remote_config::Game) -> Archive {
+    Archive::at_urls(g.links.clone(), g.size, g.sha256.clone(), g.name.clone())
+}
 
 impl Archive {
     /// The game the hub's catalog offers, at its addresses (the values as the catalog checked them;
@@ -351,13 +352,13 @@ mod tests {
 
     #[test]
     fn the_game_is_the_gitverse_archive_then_the_github_one() {
-        assert_eq!(file_page(&GAME), "https://gitverse.ru/api/attachments/36c22adf-f3f3-4286-a474-9b6a00a5abc5");
-        let links: Vec<String> = GAME.links.iter().map(|l| l.to_string()).collect();
-        assert_eq!(links, vec![mirror::GAME[0].to_string(), mirror::GAME[1].to_string()]);
+        assert_eq!(file_page(&game()), "https://gitverse.ru/api/attachments/36c22adf-f3f3-4286-a474-9b6a00a5abc5");
+        let links: Vec<String> = game().links.iter().map(|l| l.to_string()).collect();
+        assert_eq!(links, crate::remote_config::Config::builtin().game.links);
         assert!(links[1].ends_with("/game-cu-1.2/discord-times-cu.zip"));
-        assert_eq!(GAME.size, 44_619_982);
-        assert_eq!(GAME.name, "discord-times-cu.zip");
-        assert_eq!(GAME.sha256, "dff554e22a0485f0ed06b3459d3e7e868224d49e264bba0ecf40db852514568d");
+        assert_eq!(game().size, 44_619_982);
+        assert_eq!(game().name, "discord-times-cu.zip");
+        assert_eq!(game().sha256, "dff554e22a0485f0ed06b3459d3e7e868224d49e264bba0ecf40db852514568d");
     }
 
     #[test]
@@ -572,11 +573,11 @@ mod tests {
         let dest = dir.join("game.zip");
         let progress = Progress::default();
         let started = std::time::Instant::now();
-        let result = download_game(&Http, &GAME, &dest, &progress);
+        let result = download_game(&Http, &game(), &dest, &progress);
         println!("e2e: {result:?}; bytes {}; seconds {:.1}", progress.bytes(), started.elapsed().as_secs_f64());
         assert!(result.is_ok(), "{result:?}");
-        verify(&GAME, &dest).unwrap();
-        let found = crate::dt::game_import::examine(&dest, &GAME.name).expect("the archive holds the game");
+        verify(&game(), &dest).unwrap();
+        let found = crate::dt::game_import::examine(&dest, &game().name).expect("the archive holds the game");
         let target = dir.join("DiscordTimes");
         let done = crate::dt::game_import::import(&found, &target, &|_, _| {});
         println!("e2e: import {done:?}");

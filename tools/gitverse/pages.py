@@ -31,7 +31,8 @@ PAGES_BASE = "https://indicozy.gitverse.site/" + gv.HUB_REPO + "/"
 AUTHOR = ("indicozy", "indicozy@gmail.com")
 WAIT_DEFAULT = 900
 WEB_FILES = ("index.html", "hub.js", "hub.css")
-KEEP_IN_DOCS = (".nojekyll", "releases.json")  # never removed by a site sync (the feed is the release script's)
+KEEP_IN_DOCS = (".nojekyll", "releases.json", "config.json")  # never removed by a site sync (the feed is the release script's; the config is written on every push)
+CONFIG_SRC = os.path.join(REPO_ROOT, "data", "remote", "config.json")  # the remote config the app reads (the same bytes as GitHub's)
 META_FILES_BASE = re.compile(r"<meta\s+name=[\"']razdor-files-base[\"'][^>]*>", re.IGNORECASE)
 COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 
@@ -54,6 +55,12 @@ def web_files():
                 raise PagesError("tools/community-pack/web/index.html sets razdor-files-base: unset it for GitVerse")
         out[name] = data
     return out
+
+
+def config_bytes():
+    """The remote config (`data/remote/config.json`) as the bytes the site serves."""
+    with open(CONFIG_SRC, "rb") as f:
+        return f.read()
 
 
 def _git(args, cwd, token=None):
@@ -140,7 +147,9 @@ class Pages:
 
     def commit_push(self, message):
         """Commits what changed (nothing: no commit, no push) and pushes to main. Returns the new
-        short id, or None when nothing changed."""
+        short id, or None when nothing changed. Every push writes docs/config.json from
+        data/remote/config.json first (`config_bytes`)."""
+        self.write("docs/config.json", config_bytes())
         self.ensure_nojekyll()
         _git(["add", "-A"], cwd=self.dir)
         if not _git(["status", "--porcelain"], cwd=self.dir).strip():

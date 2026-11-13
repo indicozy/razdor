@@ -28,8 +28,9 @@ Lands after the download fix (30 s stall limit, progress and cancel on phones), 
   (a part cut off): every part needs a size check and a retry.
 - Pages: `https://indicozy.gitverse.site/<repo>/`, ≤ 500 MB a site, `.zip`/`.exe`/`.py` refused.
   An unknown path answers **HTTP 200 with an HTML "Страница не найдена" page**: a reply counts only
-  when it parses (JSON) and checks out. Publishing through a workflow (`gitverse/upload-pages-artifact`,
-  `gitverse/deploy-pages`) did not run yet as of 2026-11-13 (open).
+  when it parses (JSON) and checks out. Pages are live since 2026-11-13. The scripts push them (`pages.py`).
+  A workflow publish works too, with `actions/upload-pages-artifact@v1.0.0` and `actions/deploy-pages@v1.0.0`
+  on gitverse.ru (the `gitverse/...` names in earlier notes are private).
 
 ## Layout on GitVerse
 
@@ -79,6 +80,34 @@ Tests: unit tests with a fake network for the order and every fallback reason, t
 the parts' size check and retry, the archive member and its sum, `mirrors` parsing; desktop end to
 end against a local server (Range, a stall, a short part); the APK on the emulator (headless).
 
+## Remote config
+
+The service info the app needs (the update feed's addresses, the hub's folders, the game archive) is a
+`config.json` on both Pages sites, so a change needs no app release.
+
+- **Source**: `data/remote/config.json` (schema 1): `update_feed` (addresses, in order), `hub` (folders,
+  in order), `game` (`links`, `size`, `sha256`, `name`). Unknown fields are ignored.
+- **Served at** `https://indicozy.gitverse.site/razdor-community/config.json` and
+  `https://indicozy.github.io/razdor/config.json`. Both are the same bytes: `pages.py` writes `docs/config.json`
+  on every Pages push; `.github/workflows/pages.yml` copies the file into the site root (it runs on a push to
+  `main` that touches `data/remote/**`). `tools/gitverse/publish_config.py` checks the file (the app's rules)
+  and pushes only it to GitVerse, then waits until the anonymous address serves those bytes.
+- **The app** (`src/remote_config.rs`, no macroquad): `remote_config::start()` at start installs the cached config
+  at once (`remote-config.json` in the cache folder, the last good one) and a thread fetches `ADDRESSES`
+  (GitVerse first, GitHub after; the stall limit as the update feed's). The first address whose reply parses
+  as a config wins (an unknown path answers HTML on GitVerse: a web page is no config) and is kept as the cache.
+  With none, the cache is used, else the built-in lists (`mirror.rs`, today's addresses). The log says which
+  one was used (`remote config: using the …`).
+- **Checks**: schema 1 only (another schema: the whole file is ignored); every address is https, with no
+  spaces, control characters or backslashes (a bad one is dropped with a log line; a list left with none is
+  the built-in one); the game needs a file name, a 64-digit SHA-256 (kept lower case) and a size up to
+  `hub::MAX_ARCHIVE_DOWNLOAD`, else the built-in game is used.
+- **Consumers** read the lists through `remote_config::update_feed()` (`update::check`), `hub()` (`hub::Source::Mirrors`,
+  `catalog`) and `game_info()` (`gdrive::game()`, the download and its window). Before the first fetch, and when
+  it fails with no cache, they read the built-in lists.
+- **Changing it**: edit `data/remote/config.json` and push to `main`; then run `publish_config.py` (`--dry-run`
+  checks only). An app that reads an older schema ignores a newer file, so a schema change needs an app release.
+
 ## Publishing
 
 - `tools/gitverse/` (Python, stdlib only, token from `.env`):
@@ -99,7 +128,6 @@ end against a local server (Range, a stall, a short part); the APK on the emulat
 
 ## Open
 
-- GitVerse Pages publishing through a workflow did not happen on 2026-11-13 (both `.github` and
-  `.gitverse/workflows/gitverse-pages.yaml`, on `pages` and `main`); the owner checks the CI/CD tab or
-  switches the source to the branch (`main`, `/docs`, with `.nojekyll`).
+- GitVerse Pages are live (the owner, 2026-11-13). The sites are pushed by the scripts to `docs/` of `main`
+  (with `.nojekyll`), not by a workflow; the workflow route above is kept for the record only.
 - Pages speed per connection: not measured yet.
