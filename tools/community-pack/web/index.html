@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Карты и моды · Раздор</title>
+  <meta name="description" content="Каталог карт, кампаний и модов сообщества для Раздора: найдите нужное и скачайте файлы.">
+  <!--
+    Optional: where the catalog's files and previews live when they are not next to this page.
+    Relative paths in index.json resolve against this address; https:// paths are used as they are.
+    Unset (the default), they resolve against this page's own folder. See README.md.
+    <meta name="razdor-files-base" content="https://github.com/indicozy/razdor-community/releases/latest/download/">
+  -->
+  <link rel="stylesheet" href="hub.css">
+</head>
+<body>
+  <header class="top">
+    <h1 class="site-title" data-i18n="title">Карты и моды</h1>
+    <button id="lang-switch" class="lang" type="button" data-i18n="switchLang">English</button>
+  </header>
+
+  <p id="loading" class="status" data-i18n="loading">Читаю каталог…</p>
+
+  <section id="error" class="error" hidden>
+    <h2 class="error-title" data-i18n="errorTitle">Каталог не открылся</h2>
+    <p id="error-text" class="error-text"></p>
+    <p class="error-link">
+      <span data-i18n="errorGithelp">Открыть каталог на GitHub:</span>
+      <a id="github-link" href="https://github.com/indicozy/razdor-community/releases/latest" rel="noopener" data-i18n="githubLink">Каталог на GitHub</a>
+    </p>
+    <button id="retry" class="btn" type="button" data-i18n="retry">Повторить</button>
+  </section>
+
+  <main id="app" class="app" data-view="list" hidden>
+    <section class="list-pane" aria-labelledby="list-heading">
+      <h2 id="list-heading" class="visually-hidden" data-i18n="listHeading">Список</h2>
+      <div class="tabs" role="tablist" id="tabs"></div>
+      <input id="search" class="search" type="search" autocomplete="off" data-i18n-placeholder="search" placeholder="Поиск…">
+      <ol id="rows" class="rows"></ol>
+      <p id="empty" class="empty" hidden></p>
+    </section>
+
+    <section class="detail-pane" id="detail" aria-live="polite">
+      <div class="detail-nav">
+        <button id="back" class="btn back" type="button" data-i18n="backToList">Назад к списку</button>
+      </div>
+      <p id="notice" class="notice" hidden></p>
+      <div id="detail-body"></div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p data-i18n="footer">Страница читает index.json из своей папки. Без сторонних скриптов и слежения.</p>
+  </footer>
+
+  <script src="hub.js" defer></script>
+</body>
+</html>
