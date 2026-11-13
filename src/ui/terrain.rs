@@ -24,6 +24,9 @@
 //! rate (desktop: a no-op); 4 mediump colour maths: on by default on Android (phone GPUs run
 //! mediump at up to twice the rate; `profile-terrain-highp` turns it OFF there), off on the desktop
 //! (`RAZDOR_TERRAIN_MEDIUMP=1` turns it on). The map lines of the frame probe name the active set (`opt=1+2`).
+//! A/B builds: a build with `RAZDOR_TERRAIN_AB=A|B|C|D` set at compile time fixes the set
+//! ([`ab_options`]) and ignores the switches above (option 3 stays off): A = 1+2+4 (today's Android
+//! default), B = 1+2, C = 1+4, D = none (the 1.4.1 path). Unset, nothing changes.
 
 use std::cell::RefCell;
 use std::sync::OnceLock;
@@ -739,23 +742,45 @@ fn switch(file: &str, env: &str) -> bool {
     }
 }
 
+/// The option set of an A/B build (`RAZDOR_TERRAIN_AB`, see the module doc), or `None` for any
+/// other letter. Option 3 (VRS) stays off.
+pub fn ab_options(v: &str) -> Option<Options> {
+    let (new_shader, cache, mediump) = match v {
+        "A" => (true, true, true),
+        "B" => (true, true, false),
+        "C" => (true, false, true),
+        "D" => (false, false, false),
+        _ => return None,
+    };
+    Some(Options { new_shader, cache, vrs: false, mediump })
+}
+
 /// The terrain options, read once. Sets the frame probe's label and logs the set.
 pub fn options() -> Options {
     static OPTS: OnceLock<Options> = OnceLock::new();
     *OPTS.get_or_init(|| {
-        let new_shader = !switch("profile-terrain-old", "RAZDOR_TERRAIN_OLD");
-        let o = Options {
-            new_shader,
-            cache: new_shader && !switch("profile-terrain-nocache", "RAZDOR_TERRAIN_NOCACHE"),
-            vrs: switch("profile-terrain-vrs", "RAZDOR_TERRAIN_VRS"),
-            // Android: on unless `profile-terrain-highp`; the desktop: off unless `RAZDOR_TERRAIN_MEDIUMP=1`.
-            mediump: new_shader
-                && if cfg!(target_os = "android") { !switch("profile-terrain-highp", "") } else { switch("", "RAZDOR_TERRAIN_MEDIUMP") },
-        };
+        // A/B build: the variant wins over the file switches (compile-time, see the module doc).
+        let ab = option_env!("RAZDOR_TERRAIN_AB");
+        let o = ab.and_then(ab_options).unwrap_or_else(|| {
+            let new_shader = !switch("profile-terrain-old", "RAZDOR_TERRAIN_OLD");
+            Options {
+                new_shader,
+                cache: new_shader && !switch("profile-terrain-nocache", "RAZDOR_TERRAIN_NOCACHE"),
+                vrs: switch("profile-terrain-vrs", "RAZDOR_TERRAIN_VRS"),
+                // Android: on unless `profile-terrain-highp`; the desktop: off unless `RAZDOR_TERRAIN_MEDIUMP=1`.
+                mediump: new_shader
+                    && if cfg!(target_os = "android") { !switch("profile-terrain-highp", "") } else { switch("", "RAZDOR_TERRAIN_MEDIUMP") },
+            }
+        });
         let label = o.label();
         razdor::frame_probe::set_map_options(&label);
         let vrs_note = if o.vrs && !cfg!(target_os = "android") { " (VRS: Android only, no-op here)" } else { "" };
-        razdor::diag::log(&format!("terrain options: {label}{vrs_note}"));
+        let ab_note = match ab {
+            Some(v) if ab_options(v).is_some() => format!(" (A/B build {v})"),
+            Some(v) => format!(" (RAZDOR_TERRAIN_AB={v} is not A, B, C or D: ignored)"),
+            None => String::new(),
+        };
+        razdor::diag::log(&format!("terrain options: {label}{vrs_note}{ab_note}"));
         o
     })
 }
@@ -1506,6 +1531,18 @@ mod shading_rate {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ab_variants_map_to_their_option_sets() {
+        let label = |v| ab_options(v).unwrap().label();
+        assert_eq!(label("A"), "opt=1+2+4");
+        assert_eq!(label("B"), "opt=1+2");
+        assert_eq!(label("C"), "opt=1+4");
+        assert_eq!(label("D"), "opt=none");
+        assert_eq!(ab_options("E"), None);
+        assert_eq!(ab_options("a"), None);
+        assert_eq!(ab_options(""), None);
+    }
 
     #[test]
     fn atlas_slots_hold_wrapped_textures_and_fills() {
