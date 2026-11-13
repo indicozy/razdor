@@ -11,6 +11,8 @@ The design is in `docs/specs/2026-11-13-gitverse-mirrors.md`.
 | `publish_config.py` | The remote config only: checks `data/remote/config.json` as the app reads it, pushes `docs/config.json` to the `razdor-community` Pages, waits until it is served. `--dry-run` checks only. |
 | `publish_release.py` | An app release: packs the files GitVerse refuses, writes `SHA256SUMS.txt`, creates the release, uploads, verifies, updates the update feed (`releases.json`), deletes old releases. Also `--push-source` (the release commit and tag to GitVerse) and `--unpublish`. |
 | `publish_hub.py` | The hub catalog: zips each map and other file (one zip each) into a `catalog-YYYY-MM-DD` release, writes the GitVerse `index-v2.json`, pushes the site (`index-v2.json`, the pictures under `previews/`, the hub page) to Pages, deletes old catalogs. |
+| `publish_site.py` | The website on GitVerse Pages (`https://indicozy.gitverse.site/razdor/`): builds the committed wiki (`npm ci && npm run build`, pinned to CPUs 8-19) and assembles it with the gh-pages site and `config.json` as pages.yml does, pushes the `site` branch of `razdor` (the folder `site/` and `.github/workflows/gitverse-pages.yaml` from `site-pages.yaml`; force, that branch only), waits for its workflow run and for the bytes, then checks the live pages and their assets. `--assemble-only`, `--check-only`. |
+| `site-pages.yaml` | The workflow file pushed with the site (`actions/upload-pages-artifact@v1.0.0` on `site/`, `actions/deploy-pages@v1.0.0`, `ubuntu-latest`). |
 | `test_*.py` | Unit tests (no network; a local HTTP server and a local bare git repo stand in for GitVerse). |
 
 ## Usage
@@ -27,6 +29,12 @@ python3 -I tools/gitverse/publish_release.py --unpublish v0.0.1-x --git-tag     
 # the remote config (data/remote/config.json; the app reads it from both sites)
 python3 -I tools/gitverse/publish_config.py --dry-run     # check the file only
 python3 -I tools/gitverse/publish_config.py               # push to GitVerse, wait until served
+
+# the website (https://indicozy.gitverse.site/razdor/: the gh-pages site, the wiki, config.json; the wiki and
+# release skills run it after a push)
+python3 -I tools/gitverse/publish_site.py                 # build, push the site branch, wait, check
+python3 -I tools/gitverse/publish_site.py --assemble-only # build and assemble in scratch; no push
+python3 -I tools/gitverse/publish_site.py --check-only    # check the live site against the scratch site
 
 # the catalog (after the GitHub catalog is up; see the community-pack skill)
 python3 -I tools/gitverse/publish_hub.py --catalog-dir <out> --tag catalog-2026-11-20

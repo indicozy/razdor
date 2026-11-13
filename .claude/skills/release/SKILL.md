@@ -114,6 +114,10 @@ without an Android or iOS file gets no offer on that system.
    does), set the footer's version, and update anything the release changed on the page (the
    platforms, the requirements, the install steps, the video when the owner gives a new one).
    Commit `Site: X.Y.Z …`, push as a fast-forward to `gh-pages` (never force), remove the worktree.
+   Then the GitVerse copy of the site (https://indicozy.gitverse.site/razdor/, the same bytes as
+   GitHub's): `python3 -I tools/gitverse/publish_site.py` (builds the committed wiki and the gh-pages site,
+   pushes the `site` branch of `razdor` on GitVerse, waits for its workflow and the bytes). Its result is
+   the step-8 line for the site.
 8. Tell the owner: the version, the release link, what is in it (plain words), test results, and the
    GitVerse mirror's result (step 6a: pushed, published, or the error).
    Add the download statistics: run `python3 -I tools/stats/downloads.py` (it appends a live

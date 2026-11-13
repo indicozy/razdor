@@ -1,0 +1,25 @@
+# Deploys the Razdor website to GitVerse Pages (https://indicozy.gitverse.site/razdor/). The file is
+# written into the `site` branch of indicozy/razdor by tools/gitverse/publish_site.py, next to the built
+# site in the folder `site/` (the Pages root). `main` stays the code mirror and is not touched.
+# GitVerse's action names are the public ones (actions/..., as in razdor-community's workflow).
+name: build-and-deploy-pages
+
+on:
+  push:
+    branches: [site]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-pages-artifact@v1.0.0
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/deploy-pages@v1.0.0
