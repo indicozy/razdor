@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Writes data/game-manifest.json from the community's game archive (the Drive .zip).
+"""Writes data/game-manifest.json from the community's game archive (the GitHub .zip, `discord-times-cu.zip`).
 
 The manifest holds only what the integrity check needs: the archive's name, size and SHA-256, its
 top folder, and for every file under that folder its path, size and SHA-256. No file content is

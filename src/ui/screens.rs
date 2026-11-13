@@ -378,7 +378,7 @@ pub fn upright_reserve(k: f32) -> f32 {
 /// column left of the menu's buttons (the left half of the screen, in landscape and portrait),
 /// over a dark panel. It says that Razdor plays the player's own copy of the game, gives the
 /// steps to put it in place: a short numbered tutorial (download the game archive from the
-/// community's Google Drive folder, then import it with the platform's importer button, which is
+/// community's GitHub release, then import it with the platform's importer button, which is
 /// on the block too), and «How to install» (the install guide on the website) and «Help on Discord»
 /// (the players' server, a secondary link). The phones also have their access button or «Check
 /// again» (their steps' texts). The buttons stack; the two links share a row when the stack does
@@ -504,7 +504,7 @@ fn download_lines() -> Vec<String> {
     }
     let failure = game_import::download_failure();
     if !manual_block(failure.as_deref(), game_import::download_available()) {
-        return vec![tr("Press «Download the game»: Razdor downloads the game archive (45 MB) from the server's moderators' Google Drive and installs it.").to_string()];
+        return vec![tr("Press «Download the game»: Razdor downloads the game archive (43 MB) from GitHub (Razdor's community releases) and installs it.").to_string()];
     }
     let mut lines: Vec<String> = failure.into_iter().collect();
     lines.push(tr("Download it by hand:").to_string());
@@ -654,7 +654,7 @@ fn help_action(open: &dyn Fn(&str)) {
     open(super::main_menu::DISCORD_INVITE);
 }
 
-/// «Открыть ссылку»: the community's game archive's page on Google Drive, in the browser.
+/// «Открыть ссылку»: the community's game archive's page on GitHub, in the browser.
 fn open_folder_link() {
     open_link_with(&super::main_menu::open_link);
 }
@@ -689,7 +689,7 @@ mod not_found_tests {
         let page = gdrive::file_page(&gdrive::GAME);
         assert_eq!(recorded(|f| open_link_with(f)), std::slice::from_ref(&page));
         assert_eq!(recorded(|f| copy_link_with(f)), std::slice::from_ref(&page));
-        assert_eq!(page, "https://drive.google.com/file/d/1xKIpVbDIuCWh7LFgtFn59D9t5RPkiH0y/view");
+        assert_eq!(page, "https://github.com/indicozy/razdor-community/releases/download/game-cu-1.2/discord-times-cu.zip");
     }
 
     #[test]

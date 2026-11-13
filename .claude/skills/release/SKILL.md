@@ -27,11 +27,11 @@ without an Android or iOS file gets no offer on that system.
    If the previous release's `changelog/X.Y.Z.md` has no SHA-256 lines (the machine was shut
    down right after its tag, `CLAUDE.local.md`), do its follow-up (step 7) first.
 1a. The game link is alive: `bash scripts/check-game-link.sh` (network only, light; it reads the
-   file id and size from `src/gdrive.rs` (`GAME`), and asks Google for the first 1 KiB of the
-   archive as a range request: 206, the total size, and a `PK` start). It is blocking, here and in
+   address and size from `src/gdrive.rs` (`GAME`, the GitHub release file), and asks for the first 1 KiB
+   of the archive as a range request, redirects followed: 206, the total size, and a `PK` start). It is blocking, here and in
    `release.yml` (its step "The game download's link is alive"): exit 0 goes on; exit 1 means the
    link is dead, refused, or the archive changed: STOP the release and tell the owner, so he can
-   get a new link from the server's «ИГРУ КАЧАТЬ ЗДЕСЬ» thread, and the file id, size and SHA-256
+   put a new file on the GitHub release (or name a new link from the server's «ИГРУ КАЧАТЬ ЗДЕСЬ» thread), and the address, size and SHA-256
    in `src/gdrive.rs` and `data/game-manifest.json` are changed (a new commit, then this step again). Exit 2 is a network error on
    this machine: rerun it; if it persists, report it and do not skip the check.
 2. Run the full suite with the install: `RAZDOR_DT_DIR=… cargo test --release` (with the core pinning prefix from `CLAUDE.local.md`, if present, and `RAZDOR_PERF_BUDGET_SCALE` on slow cores; lib and bins;

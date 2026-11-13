@@ -1,15 +1,15 @@
-//! The community's game archive on Google Drive («Скачать игру» on the no-install screen). The
-//! owner's decision (2026-11-07): the DT authors allowed the Discord server's moderators to share
-//! the game, and a moderator uploaded it as one public .zip file. Razdor downloads that file into
-//! the cache, checks its size and SHA-256, and hands it to the archive import
+//! The community's game archive on GitHub («Скачать игру» on the no-install screen; the hub's
+//! catalog offers the same kind of address to the automatic start). The owner's decision
+//! (2026-11-07): the DT authors allowed the Discord server's moderators to share the game, and it
+//! is published as one public .zip file in Razdor's community releases on GitHub. Razdor downloads
+//! that file into the cache, checks its size and SHA-256, and hands it to the archive import
 //! (`dt::game_import::import`, the same install check and swap as «Обновить игру из архива…»).
 //! Razdor hosts none of it. Nothing here needs macroquad.
 //!
 //! A download can resume: the file is written to `<name>.part` and renamed once it verifies, so a
-//! cancelled or interrupted download is continued by the next press (a Range request). Google may
-//! answer a big file with its warning page (an HTML form, followed a few times) or refuse it for
-//! too many downloads (a page, or 403/429); both are failures with a reason, and the screen then
-//! shows the manual path with the file's page.
+//! cancelled or interrupted download is continued by the next press (a Range request). A refusal
+//! (403 / 429), any other failed status, or a web page instead of the file is a failure with a
+//! reason; the screen then shows the manual path with the file's address.
 
 use std::borrow::Cow;
 use std::fs;
@@ -19,9 +19,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 /// Where an archive is downloaded from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Link {
-    /// A Google Drive file's id (its warning pages are followed).
-    Drive(&'static str),
-    /// A direct https address: the hub catalog's `game` (`hub::GameRef`).
+    /// A direct https address: the community's GitHub release file, or the hub catalog's `game`
+    /// (`hub::GameRef`).
     Url(Cow<'static, str>),
 }
 
@@ -34,12 +33,12 @@ pub struct Archive {
     pub name: Cow<'static, str>,
 }
 
-/// The community's game on Drive (the owner's constants; `scripts/check-game-link.sh` checks the link).
+/// The community's game on GitHub (the owner's constants; `scripts/check-game-link.sh` checks the link).
 pub const GAME: Archive = Archive {
-    link: Link::Drive("1xKIpVbDIuCWh7LFgtFn59D9t5RPkiH0y"),
-    size: 46_726_043,
-    sha256: Cow::Borrowed("fce6d8aa22f8932cddf0dffaf02d3c013d15b298148fc2c50154306d24f9f37e"),
-    name: Cow::Borrowed("Discord Times Community Update (Unstable).zip"),
+    link: Link::Url(Cow::Borrowed("https://github.com/indicozy/razdor-community/releases/download/game-cu-1.2/discord-times-cu.zip")),
+    size: 44_619_982,
+    sha256: Cow::Borrowed("dff554e22a0485f0ed06b3459d3e7e868224d49e264bba0ecf40db852514568d"),
+    name: Cow::Borrowed("discord-times-cu.zip"),
 };
 
 impl Archive {
@@ -49,52 +48,17 @@ impl Archive {
     }
 }
 
-/// The file's page in the browser (the manual path's link); a direct address is its own page.
+/// The file's address in the browser (the manual path's link): the archive's own address.
 pub fn file_page(archive: &Archive) -> String {
-    match &archive.link {
-        Link::Drive(id) => format!("https://drive.google.com/file/d/{id}/view"),
-        Link::Url(url) => url.to_string(),
-    }
+    let Link::Url(url) = &archive.link;
+    url.to_string()
 }
 
-/// The first address the download asks for.
-fn start_url(archive: &Archive) -> String {
-    match &archive.link {
-        Link::Drive(id) => file_url(id),
-        Link::Url(url) => url.to_string(),
-    }
-}
-
-/// Who serves the file, for the words of a failure.
-fn host(archive: &Archive) -> &'static str {
-    match archive.link {
-        Link::Drive(_) => "Google Drive",
-        Link::Url(_) => "the server",
-    }
-}
-
-/// The download URL for the file `id` (the confirm flag skips the scan warning where it can).
-pub fn file_url(id: &str) -> String {
-    format!("https://drive.usercontent.google.com/download?id={id}&export=download&confirm=t")
-}
-
-/// A download this small that is HTML is Google's page, not the file.
+/// A download this small that is HTML is a web page, not the file.
 const MAX_PAGE: u64 = 1 << 20;
-/// How many warning pages are followed for one download.
-const PAGES: usize = 3;
 const SECONDS: u32 = 3600;
-/// Google's refusal for too many downloads of one file (a page, or 403 / 429).
-const QUOTA: &str = "Google Drive limits downloads of this file for now: try again later or download it by hand";
-/// The file on Drive is not the one Razdor expects (its size or SHA-256 differ).
-const CHANGED: &str = "the archive on Drive changed";
-
-/// The same failure for an archive at a direct address.
-fn changed_text(archive: &Archive) -> String {
-    match archive.link {
-        Link::Drive(_) => CHANGED.into(),
-        Link::Url(_) => "the archive on the server changed".into(),
-    }
-}
+/// The file is not the one Razdor expects (its size or SHA-256 differ).
+const CHANGED: &str = "the archive on the server changed";
 
 /// The network the download uses. A test gives a fake.
 pub trait Net {
@@ -211,7 +175,7 @@ pub fn download_game(net: &dyn Net, archive: &Archive, dest: &Path, progress: &P
                 let _ = fs::remove_file(&part);
                 crate::diag!("game download: {why}");
                 if !resumed {
-                    return Err(Failure::Failed(changed_text(archive)));
+                    return Err(Failure::Failed(CHANGED.into()));
                 }
                 // The partial copy was not this file: the whole file again, once.
                 from = 0;
@@ -220,14 +184,13 @@ pub fn download_game(net: &dyn Net, archive: &Archive, dest: &Path, progress: &P
     }
 }
 
-/// The file into `part`, from byte `from`: the warning pages are followed, and a refusal or a
-/// missing range restarts the file from its start once. `part` holds the body on success.
+/// The file into `part`, from byte `from`: a refusal or a missing range restarts the file from its
+/// start once. `part` holds the body on success.
 fn fetch(net: &dyn Net, archive: &Archive, part: &Path, from: u64, progress: &Progress) -> Result<(), Failure> {
     let cancelled = || progress.cancelled();
-    let mut url = start_url(archive);
+    let url = file_page(archive);
     let mut from = from;
     let mut restarted = false;
-    let mut pages = 0;
     loop {
         if cancelled() {
             return Err(Failure::Cancelled);
@@ -257,15 +220,11 @@ fn fetch(net: &dyn Net, archive: &Archive, part: &Path, from: u64, progress: &Pr
             }
             403 | 429 => {
                 let _ = fs::remove_file(part);
-                let why = match archive.link {
-                    Link::Drive(_) => QUOTA.to_string(),
-                    Link::Url(_) => format!("the server refused the file (HTTP {status})"),
-                };
-                return Err(Failure::Failed(why));
+                return Err(Failure::Failed(format!("the server refused the file (HTTP {status})")));
             }
             other => {
                 let _ = fs::remove_file(part);
-                return Err(Failure::Failed(format!("{} answered HTTP {other}", host(archive))));
+                return Err(Failure::Failed(format!("the server answered HTTP {other}")));
             }
         }
         let len = fs::metadata(part).map(|m| m.len()).unwrap_or(0);
@@ -273,122 +232,16 @@ fn fetch(net: &dyn Net, archive: &Archive, part: &Path, from: u64, progress: &Pr
             let body = fs::read(part).map_err(|e| Failure::Failed(e.to_string()))?;
             if is_html(&body) {
                 let _ = fs::remove_file(part);
-                let page = String::from_utf8_lossy(&body);
-                if let Some(next) = confirm_url(&page) {
-                    pages += 1;
-                    if pages > PAGES {
-                        return Err(Failure::Failed(format!("{} keeps asking to confirm the file", host(archive))));
-                    }
-                    url = next;
-                    from = 0;
-                    continue;
-                }
-                if matches!(archive.link, Link::Drive(_)) && is_quota(&page) {
-                    return Err(Failure::Failed(QUOTA.into()));
-                }
-                return Err(Failure::Failed(format!("{} did not give the file", host(archive))));
+                return Err(Failure::Failed("the server did not give the file".into()));
             }
         }
         return Ok(());
     }
 }
 
-/// True when the page is Google's refusal for too many downloads.
-pub fn is_quota(page: &str) -> bool {
-    let page = page.to_lowercase();
-    page.contains("too many users") || page.contains("quota") || page.contains("try accessing the file again later")
-}
-
 /// True when the body is HTML (its first character is `<`), not a file's bytes.
 pub fn is_html(body: &[u8]) -> bool {
     body.iter().find(|b| !b.is_ascii_whitespace()) == Some(&b'<')
-}
-
-/// The next download URL of Google's warning page: its form's action with the form's hidden
-/// fields as the query. None when the page has no form.
-pub fn confirm_url(page: &str) -> Option<String> {
-    let form = page.find("<form")?;
-    let body = &page[form..];
-    let body = &body[..body.find("</form>").unwrap_or(body.len())];
-    let action = attr(&body[..body.find('>')?], "action")?;
-    let action = if action.starts_with('/') { format!("https://drive.usercontent.google.com{action}") } else { action };
-    if !action.starts_with("https://") {
-        return None;
-    }
-    let mut query = Vec::new();
-    for tag in body.split("<input").skip(1) {
-        let tag = &tag[..tag.find('>').unwrap_or(tag.len())];
-        if let (Some(name), Some(value)) = (attr(tag, "name"), attr(tag, "value")) {
-            query.push(format!("{}={}", encode(&name), encode(&value)));
-        }
-    }
-    if query.is_empty() {
-        return None;
-    }
-    let sep = if action.contains('?') { "&" } else { "?" };
-    Some(format!("{action}{sep}{}", query.join("&")))
-}
-
-/// The value of attribute `key` in an HTML tag (`key="value"`), unescaped.
-fn attr(tag: &str, key: &str) -> Option<String> {
-    let pat = format!(" {key}=\"");
-    let start = tag.find(&pat)? + pat.len();
-    let end = tag[start..].find('"')?;
-    Some(unescape(&tag[start..start + end]))
-}
-
-/// The HTML character references a warning page uses in its values (the common ones and numbers).
-fn unescape(text: &str) -> String {
-    let mut out = String::new();
-    let mut rest = text;
-    while let Some(i) = rest.find('&') {
-        out.push_str(&rest[..i]);
-        rest = &rest[i..];
-        let Some(semi) = rest.find(';').filter(|&s| s <= 12) else {
-            out.push('&');
-            rest = &rest[1..];
-            continue;
-        };
-        let entity = &rest[1..semi];
-        let ch = match entity {
-            "amp" => Some('&'),
-            "lt" => Some('<'),
-            "gt" => Some('>'),
-            "quot" => Some('"'),
-            "apos" => Some('\''),
-            _ => entity
-                .strip_prefix("#x")
-                .or_else(|| entity.strip_prefix("#X"))
-                .and_then(|h| u32::from_str_radix(h, 16).ok())
-                .or_else(|| entity.strip_prefix('#').and_then(|d| d.parse().ok()))
-                .and_then(char::from_u32),
-        };
-        match ch {
-            Some(c) => {
-                out.push(c);
-                rest = &rest[semi + 1..];
-            }
-            None => {
-                out.push('&');
-                rest = &rest[1..];
-            }
-        }
-    }
-    out.push_str(rest);
-    out
-}
-
-/// Percent-encoding of a query value.
-fn encode(text: &str) -> String {
-    let mut out = String::new();
-    for b in text.bytes() {
-        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
-            out.push(b as char);
-        } else {
-            out.push_str(&format!("%{b:02X}"));
-        }
-    }
-    out
 }
 
 #[cfg(test)]
@@ -398,27 +251,19 @@ mod tests {
 
     /// A small stand-in for the game archive: its bytes and their size and SHA-256.
     const BODY: &[u8] = b"PK\x03\x04 a small stand-in archive for the tests";
+    const URL: &str = "https://example.org/releases/test.zip";
 
     fn archive() -> Archive {
         Archive {
-            link: Link::Drive("F1"),
+            link: Link::Url(Cow::Borrowed(URL)),
             size: BODY.len() as u64,
             sha256: Cow::Owned(crate::update::sha256_hex(BODY)),
             name: Cow::Borrowed("test.zip"),
         }
     }
 
-    /// Google's warning page for a big file: a form whose hidden fields make the next URL.
-    const WARNING: &str = concat!(
-        "<html><body><form id=\"download-form\" action=\"https://drive.usercontent.google.com/download\" method=\"get\">",
-        "<input type=\"hidden\" name=\"id\" value=\"F1\">",
-        "<input type=\"hidden\" name=\"export\" value=\"download\">",
-        "<input type=\"hidden\" name=\"confirm\" value=\"t\">",
-        "<input type=\"hidden\" name=\"uuid\" value=\"ab c\">",
-        "<button>Download anyway</button></form></body></html>",
-    );
-
-    const QUOTA_PAGE: &str = "<html><body>Too many users have viewed or downloaded this file recently. Please try accessing the file again later.</body></html>";
+    /// A web page answered in place of the file (a proxy's or an error page).
+    const PAGE: &str = "<html><body>Something else is served here.</body></html>";
 
     /// One scripted answer of the fake network.
     #[derive(Clone)]
@@ -474,10 +319,11 @@ mod tests {
     }
 
     #[test]
-    fn the_constants_build_the_urls() {
-        assert_eq!(file_url("F1"), "https://drive.usercontent.google.com/download?id=F1&export=download&confirm=t");
-        assert_eq!(file_page(&GAME), "https://drive.google.com/file/d/1xKIpVbDIuCWh7LFgtFn59D9t5RPkiH0y/view");
-        assert_eq!(GAME.size, 46_726_043);
+    fn the_game_is_the_github_archive() {
+        assert_eq!(file_page(&GAME), "https://github.com/indicozy/razdor-community/releases/download/game-cu-1.2/discord-times-cu.zip");
+        assert_eq!(GAME.size, 44_619_982);
+        assert_eq!(GAME.name, "discord-times-cu.zip");
+        assert_eq!(GAME.sha256, "dff554e22a0485f0ed06b3459d3e7e868224d49e264bba0ecf40db852514568d");
     }
 
     #[test]
@@ -490,7 +336,7 @@ mod tests {
         assert_eq!(fs::read(&dest).unwrap(), BODY);
         assert!(!part_path(&dest).exists());
         assert_eq!(progress.bytes(), BODY.len() as u64);
-        assert_eq!(net.requests.borrow().as_slice(), &[(file_url("F1"), 0)]);
+        assert_eq!(net.requests.borrow().as_slice(), &[(URL.to_string(), 0)]);
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -502,19 +348,6 @@ mod tests {
         let net = Fake::new(vec![]);
         download_game(&net, &archive(), &dest, &Progress::default()).unwrap();
         assert!(net.requests.borrow().is_empty());
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn the_warning_page_is_followed_to_the_file() {
-        let dir = scratch("warning");
-        let dest = dir.join("game.zip");
-        let confirm = "https://drive.usercontent.google.com/download?id=F1&export=download&confirm=t&uuid=ab%20c";
-        let net = Fake::new(vec![Reply::Body(200, WARNING.as_bytes().to_vec()), Reply::Body(200, BODY.to_vec())]);
-        download_game(&net, &archive(), &dest, &Progress::default()).unwrap();
-        assert_eq!(fs::read(&dest).unwrap(), BODY);
-        let requests = net.requests.borrow();
-        assert_eq!(requests[1], (confirm.to_string(), 0), "the form's URL is asked next: {requests:?}");
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -561,24 +394,23 @@ mod tests {
     }
 
     #[test]
-    fn a_quota_page_is_an_error_with_the_reason() {
-        let dir = scratch("quota-page");
+    fn a_web_page_instead_of_the_file_is_an_error_and_nothing_is_kept() {
+        let dir = scratch("page");
         let dest = dir.join("game.zip");
-        let net = Fake::new(vec![Reply::Body(200, QUOTA_PAGE.as_bytes().to_vec())]);
-        let err = download_game(&net, &archive(), &dest, &Progress::default()).unwrap_err();
-        assert!(matches!(err, Failure::Failed(ref why) if why.contains("try again later") && why.contains("by hand")), "{err:?}");
-        assert!(!dest.exists());
+        let net = Fake::new(vec![Reply::Body(200, PAGE.as_bytes().to_vec())]);
+        assert_eq!(download_game(&net, &archive(), &dest, &Progress::default()), Err(Failure::Failed("the server did not give the file".into())));
+        assert!(!dest.exists() && !part_path(&dest).exists());
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn a_refusal_status_is_the_same_quota_error_and_other_statuses_name_the_code() {
-        let dir = scratch("quota-status");
+    fn a_refusal_status_and_other_statuses_name_the_server_and_the_code() {
+        let dir = scratch("status");
         let dest = dir.join("game.zip");
         let net = Fake::new(vec![Reply::Body(429, b"busy".to_vec())]);
-        assert_eq!(download_game(&net, &archive(), &dest, &Progress::default()), Err(Failure::Failed(QUOTA.into())));
+        assert_eq!(download_game(&net, &archive(), &dest, &Progress::default()), Err(Failure::Failed("the server refused the file (HTTP 429)".into())));
         let net = Fake::new(vec![Reply::Body(500, b"oops".to_vec())]);
-        assert_eq!(download_game(&net, &archive(), &dest, &Progress::default()), Err(Failure::Failed("Google Drive answered HTTP 500".into())));
+        assert_eq!(download_game(&net, &archive(), &dest, &Progress::default()), Err(Failure::Failed("the server answered HTTP 500".into())));
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -605,21 +437,10 @@ mod tests {
     }
 
     #[test]
-    fn the_warning_page_gives_the_next_url_from_its_form() {
-        assert_eq!(
-            confirm_url(WARNING).as_deref(),
-            Some("https://drive.usercontent.google.com/download?id=F1&export=download&confirm=t&uuid=ab%20c")
-        );
-        assert_eq!(confirm_url("<html>no form</html>"), None);
-    }
-
-    #[test]
-    fn html_is_told_from_a_file_and_a_quota_page_from_a_warning() {
+    fn html_is_told_from_a_file() {
         assert!(is_html(b"  \n<!DOCTYPE html><html>"));
         assert!(!is_html(b"PK\x03\x04"));
         assert!(!is_html(b""));
-        assert!(is_quota(QUOTA_PAGE));
-        assert!(!is_quota(WARNING));
     }
 
     /// The real download of the community's archive: a manual run, never part of the test runs
@@ -627,7 +448,7 @@ mod tests {
     /// size and SHA-256, and unpacks it into a fresh install folder with the archive import.
     /// `RAZDOR_GDRIVE_E2E_DIR=<empty dir> cargo test --release --lib manual_download -- --ignored --nocapture`
     #[test]
-    #[ignore = "downloads the real game archive (46 MB): a manual run only"]
+    #[ignore = "downloads the real game archive (43 MB): a manual run only"]
     fn manual_download_of_the_community_archive() {
         let Some(dir) = std::env::var_os("RAZDOR_GDRIVE_E2E_DIR") else { return };
         let dir = PathBuf::from(dir);

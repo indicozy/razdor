@@ -292,7 +292,7 @@ fn start(pending: Pending) {
     }
 }
 
-/// «Скачать игру»: the game on Drive (`gdrive::GAME`) is downloaded and imported (`start_archive`).
+/// «Скачать игру»: the game on GitHub (`gdrive::GAME`) is downloaded and imported (`start_archive`).
 fn start_download() {
     start_archive(gdrive::GAME, false);
 }

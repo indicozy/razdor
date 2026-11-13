@@ -24,7 +24,7 @@ If the download fails (no network, directory unresponsive, or archive fails veri
 
 Manual Method:
 
-1. Open the [file page](https://drive.google.com/file/d/1xKIpVbDIuCWh7LFgtFn59D9t5RPkiH0y/view) ("Open the link" or "Copy the link") and download the file: one `.zip` archive.
+1. Open the [file on GitHub](https://github.com/indicozy/razdor-community/releases/download/game-cu-1.2/discord-times-cu.zip) ("Open the link" or "Copy the link") and download it: one `.zip` archive.
 2. Do not unzip the archive: Razdor reads the `.zip` itself.
 3. On a computer, click "Pick the game archive…" and choose the `.zip`. On Android, click "Choose the archive…" on the title screen and choose `.zip` or `.7z`. On iPhone, click "Unpack the game archive": Razdor will find the `.zip` in the "Files" app (the "On iPhone" folder > Razdor or other app folders).
 
