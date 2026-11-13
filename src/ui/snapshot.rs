@@ -41,6 +41,7 @@
 //! `RAZDOR_SCENE_SCROLL=<px>` starts a scrolled list (the phone's options, the F1 list) that far down.
 //! `RAZDOR_DP=<f32>` is a phone's density (screen px per dp): the phone layout of the pop-ups and
 //! the event window (their size in dp, the window's width following the screen), on the desktop.
+//! `RAZDOR_TOUCHPAD=1` turns the touchpad mode on (also off the phone: `touchpad::allow_offscreen`), so its cursor shows in a snapshot.
 //! `RAZDOR_KEYBOARD=<px>` is the on-screen keyboard's height (physical px) a phone reports: the
 //! windows with a name field (`classes:<map>`, `save:<map>`) move above it.
 //!
@@ -805,6 +806,12 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
     // window). It is the setting, not the game's flag: the game takes the settings every frame.
     if std::env::var("RAZDOR_SCENE_BENCHING").is_ok_and(|v| v == "1") {
         app.audio.settings.allow_unit_benching = true;
+    }
+    // `RAZDOR_TOUCHPAD=1`: the touchpad mode on (a phone's, `ui::touchpad`), also off the phone: its
+    // cursor is drawn at the middle of the screen until a `RAZDOR_MOUSE` says otherwise.
+    if std::env::var("RAZDOR_TOUCHPAD").is_ok_and(|v| v == "1") {
+        super::touchpad::allow_offscreen(true);
+        app.audio.settings.touchpad = Some(true);
     }
     // `RAZDOR_SCENE_TRAIT_SCROLL=<px>`: the unit band's ability list starts that far down.
     if let Some(px) = std::env::var("RAZDOR_SCENE_TRAIT_SCROLL").ok().and_then(|v| v.trim().parse::<f32>().ok()) {

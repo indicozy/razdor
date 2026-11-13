@@ -853,14 +853,25 @@ pub fn hint_alpha(ms: f64, full: f32) -> f32 {
     ((ms / 300.0).clamp(0.0, 1.0) as f32) * full
 }
 
+/// How long a hint box may go undrawn (ms) and still count as the same hover: a slow frame on
+/// a phone is no closing, so its fade does not start over (a player's report of blinking
+/// hints). A real close lasts longer than this.
+const HINT_GAP_MS: f64 = 500.0;
+
+/// Whether a hint box's fade starts over: its text changed, or it was not drawn for longer than
+/// [`HINT_GAP_MS`] (it closed in between). Pure.
+fn fade_restarts(text_changed: bool, gap_ms: f64) -> bool {
+    text_changed || gap_ms > HINT_GAP_MS
+}
+
 /// The opacity of the hint box with these lines now: its fade restarts when its text changes or
-/// when it was not drawn for a moment (it closed in between).
+/// when it was not drawn for a moment (it closed in between, [`fade_restarts`]).
 fn hint_fade(lines: &[(String, Color)], full: f32) -> f32 {
     let text: String = lines.iter().map(|(s, _)| s.as_str()).collect::<Vec<_>>().join("\n");
     let now = crate::ui::clock::now() * 1000.0;
     let start = HINT_SHOWN.with(|h| {
         let mut h = h.borrow_mut();
-        if h.0 != text || now - h.2 > 100.0 {
+        if fade_restarts(h.0 != text, now - h.2) {
             *h = (text, now, now);
         } else {
             h.2 = now;
@@ -2702,6 +2713,16 @@ mod tests {
 
     /// The hint box fades in over 300 ms (49ee4b–49ef0d): to 160/255 for an ordinary hint, to
     /// full for a pushed one, and stays there.
+    #[test]
+    fn a_slow_frame_does_not_restart_a_hint_fade() {
+        // A 120 ms frame while the hover holds: the fade goes on (it blinked before, at 100 ms).
+        assert!(!fade_restarts(false, 120.0));
+        assert!(!fade_restarts(false, HINT_GAP_MS));
+        // A close of longer than the gap, or a new text, starts it over.
+        assert!(fade_restarts(false, HINT_GAP_MS + 1.0));
+        assert!(fade_restarts(true, 16.0));
+    }
+
     #[test]
     fn a_hint_box_fades_in_over_300_ms() {
         let ordinary = 160.0 / 255.0;

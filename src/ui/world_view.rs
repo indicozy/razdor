@@ -2398,7 +2398,9 @@ fn photo_frame(game: &mut Game, assets: &Assets, view: &mut MapView, entering: b
     // shows so a click has a target (the owner's request, 2026-11-10); the shot never has one
     // (it is read before the pointer is drawn).
     let over_button = shown && layout.buttons.iter().any(|r| r.contains(vec2(at.0, at.1)));
-    cursor::set(if over_button { Shape::Arrow } else { Shape::Hidden });
+    // The touchpad mode's cursor is the phone's only pointer: it stays drawn off the buttons too
+    // (a player's report: it could not be found on the screen; the touchpad is `ui::touchpad`).
+    cursor::set(if over_button || super::touchpad::enabled() { Shape::Arrow } else { Shape::Hidden });
     let base = if strip { layout.panel.y - 8.0 * super::chrome::k() } else { sh - 14.0 * super::chrome::k() };
     draw_toasts(&mut view.toasts, now, base, super::display::dp_px().map(|d| 16.0 * d));
     PhotoStep::Drawn
@@ -5442,8 +5444,9 @@ fn draw_tooltip(game: &Game, assets: &Assets, t: &Tooltip) -> Rect {
 /// original (0x4cc269, 0x474a81: the pointer is frozen and not drawn); Razdor's touchpad rest
 /// card only when it covers the pointer (on a phone it is placed clear of the finger, so the
 /// pointer stays: a player's report, 2026-11-11).
-fn tip_hides_pointer(right_held: bool, card: Rect, at: Vec2) -> bool {
-    right_held || card.contains(at)
+fn tip_hides_pointer(right_held: bool, card: Rect, at: Vec2, touchpad: bool) -> bool {
+    // The touchpad's cursor is drawn last, over the card: it never hides for a rest card.
+    right_held || (!touchpad && card.contains(at))
 }
 
 fn draw_tooltip_at(game: &Game, assets: &Assets, t: &Tooltip) -> Rect {
@@ -6813,7 +6816,7 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
     let rest_tip = super::touchpad::enabled() && super::rest::rested() && !input_blocked() && !dragging;
     if let Some(t) = hover_tooltip(game, &cam).filter(|_| idle && (right_held || rest_tip) && !on_minimap && !trailer_clean()) {
         let card = draw_tooltip(game, assets, &t);
-        if tip_hides_pointer(right_held, card, Vec2::from(crate::ui::widgets::pointer())) {
+        if tip_hides_pointer(right_held, card, Vec2::from(crate::ui::widgets::pointer()), super::touchpad::enabled()) {
             cursor::set(Shape::Hidden);
         }
     }
@@ -7506,11 +7509,21 @@ mod tests {
         let covering = Rect::new(0.0, 0.0, 100.0, 100.0);
         let at = vec2(10.0, 10.0);
         // The right-button card always hides the pointer, as the original.
-        assert!(tip_hides_pointer(true, clear, at));
+        assert!(tip_hides_pointer(true, clear, at, false));
         // The touchpad rest card placed clear of the pointer keeps it (a phone).
-        assert!(!tip_hides_pointer(false, clear, at));
+        assert!(!tip_hides_pointer(false, clear, at, false));
         // A rest card that covers the pointer hides it.
-        assert!(tip_hides_pointer(false, covering, at));
+        assert!(tip_hides_pointer(false, covering, at, false));
+    }
+
+    #[test]
+    fn the_touchpad_cursor_is_never_hidden_by_a_rest_card() {
+        let covering = Rect::new(0.0, 0.0, 100.0, 100.0);
+        let at = vec2(10.0, 10.0);
+        // Touchpad mode: the cursor is drawn last, over the card, so the card hides nothing.
+        assert!(!tip_hides_pointer(false, covering, at, true));
+        // The right button still freezes the pointer, as the original does.
+        assert!(tip_hides_pointer(true, covering, at, true));
     }
 
     #[test]

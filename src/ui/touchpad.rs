@@ -20,6 +20,8 @@ pub use razdor::platform::MOBILE;
 local! {
     /// The setting (`Settings::touchpad`), pushed in by `main_menu::apply_options`.
     static SETTING: Cell<Option<bool>> = const { Cell::new(None) };
+    /// Debug snapshots only: the mode runs off the phone too (`RAZDOR_TOUCHPAD=1`, `ui::snapshot`).
+    static OFFSCREEN: Cell<bool> = const { Cell::new(false) };
 }
 
 /// The setting as the player chose it (`None`: not chosen yet, which is off).
@@ -27,9 +29,15 @@ pub fn set_setting(on: Option<bool>) {
     SETTING.with(|s| s.set(on));
 }
 
+/// Debug snapshots only: lets the touchpad mode run on the desktop, so its pointer can be
+/// drawn off-screen (`RAZDOR_TOUCHPAD=1`). Never set by the game.
+pub fn allow_offscreen(on: bool) {
+    OFFSCREEN.with(|s| s.set(on));
+}
+
 /// The touchpad mode is on: on mobile, when the player turned it on (off by default).
 pub fn enabled() -> bool {
-    MOBILE && SETTING.with(|s| s.get()) == Some(true)
+    (MOBILE || OFFSCREEN.with(|s| s.get())) && SETTING.with(|s| s.get()) == Some(true)
 }
 
 /// A touch's phase, as macroquad reports it: down, then still or moved, then up once.
