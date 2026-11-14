@@ -522,15 +522,16 @@ void main() {
         return;
     }
     vec2 uv = (p + 0.5) / MapSize;
-    vec4 bw = mask4(Weather, p);
-    float lowl = mask4(LowlandMask, p).r;
     // Only the explored ground: the fog's shown darkness (0 lit, 1 black) masks the weather. The fog
-    // texture is filtered linearly, so its edge is a smooth ramp, not a cell step.
+    // texture is filtered linearly, so its edge is a smooth ramp, not a cell step. Tested before the
+    // masks, so an unexplored pixel takes no mask tap.
     float vis = 1.0 - texture2D(Fog, uv).a;
     if (vis < 0.01) {
         gl_FragColor = vec4(0.0);
         return;
     }
+    vec4 bw = mask4(Weather, p);
+    float lowl = mask4(LowlandMask, p).r;
     // Everything is an overlay (premultiplied colour `ov`, alpha `oa`) except the darkening `dark`.
     float dark = 0.0;
     float oa = 0.0;
