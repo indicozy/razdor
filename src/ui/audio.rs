@@ -1459,6 +1459,9 @@ mod tests {
         assert_eq!(back.map_mist, MistMode::Clouds);
         let flat: Settings = serde_json::from_str(r#"{"map_mist": "Flat"}"#).unwrap();
         assert_eq!(flat.map_mist, MistMode::Flat);
+        let billows = Settings { map_mist: MistMode::Billows, ..Settings::default() };
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&billows).unwrap()).unwrap();
+        assert_eq!(back.map_mist, MistMode::Billows, "«Клубы» saves and loads");
     }
 
     #[test]

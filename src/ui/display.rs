@@ -846,7 +846,7 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
         }
         // `RAZDOR_MAP_EDGE=1`: the map's ground goes on past its edges («Продолжать карту за краем»).
         crate::ui::world_view::set_edge_pref(std::env::var("RAZDOR_MAP_EDGE").is_ok_and(|v| v.trim() == "1"));
-        // `RAZDOR_MIST=1|flat|off`: the unexplored land is drifting clouds, a plain mist or the black (`mist::env_mode`)
+        // `RAZDOR_MIST=1|flat|billows|off`: the unexplored land is drifting clouds, a plain mist, the billows or the black (`mist::env_mode`)
         // («Туман вместо черноты»).
         crate::ui::mist::set_pref(crate::ui::mist::env_mode().unwrap_or_default());
         // `RAZDOR_LIVE_WATER=1` (the snapshots' moving water); the setting is not read here.

@@ -8,6 +8,10 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **The billows' frontier banks stay out** (2026-11-14, the owner's call). The old «Туман» look of 9f0eebd9 had
+  frontier banks, which the owner removed on purpose. «Клубы» (`MistMode::Billows`) has its raised sheets back in
+  the tilted views, but not the banks. Whether the banks ever come back is the owner's call.
+
 - **Moved saves of maps no installed game plays wait in their folder** (2026-11-13, reports 1621, 1622). An older
   release's save of a map that no install has (a removed hub map, or a mod's map before its mod is installed) stays
   in its old folder under `saves/` (listed in `saves/moved.txt`, `save::adopt_moved`) and shows in no game's «Загрузить»

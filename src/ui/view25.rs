@@ -717,6 +717,13 @@ pub fn billboard_model_about_at(foot: Vec2, base: Vec2, scale: f32, pitch_deg: f
     billboard_model_at(foot, scale, pitch_deg, yaw_deg, size, ground) * Mat4::from_translation(vec3(d.x, d.y, 0.0))
 }
 
+/// The model matrix of a raised mist sheet: the ground pass's ([`ground_model`]) lifted `height`
+/// world units up, so the sheet's 2D point `p` lies on the plane `height` above the ground at
+/// `(p + origin) / scale`. The tilted camera projects it as it does the ground (higher on screen).
+pub fn raised_ground_model(origin: Vec2, scale: f32, height: f32) -> Mat4 {
+    Mat4::from_translation(Vec3::Y * height) * ground_model(origin, scale)
+}
+
 /// The ground of the bent views: the trailer's (`RAZDOR_TRAILER_CAM`, dev-only) and the first-person
 /// view's far ground. Each is flat up to `flat` ahead of the pivot, then:
 /// - an up bend rolls the sheet up along an arc of `radius` until its slope is `max_deg`, and goes
@@ -842,6 +849,26 @@ impl Bend {
         self.reach(g) > self.horizon_at(g)
     }
 
+    /// Whether the point `height` world units above ground point `g` lies in the sky, above the ground's horizon:
+    /// the drawn ground's far edge `edge` (ground distance ahead of the pivot, where the drawn ground stops) or the
+    /// eye's horizon of a down bend, whichever comes first. Nothing on the sheet is higher in the eye's view than
+    /// that edge's point, so a raised sheet's point above it is in the sky. Infinite `edge` and an up bend: the
+    /// geometric horizon alone (none for an up bend).
+    pub fn above_horizon(&self, eye: Vec3, g: Vec2, height: f32, edge: f32) -> bool {
+        let s_edge = edge.min(self.limit);
+        if !s_edge.is_finite() {
+            return false;
+        }
+        let f = forward(self.yaw_deg);
+        let eu = (vec2(eye.x, eye.z) - self.pivot).dot(f);
+        // The elevation of a sheet point as the eye sees it: the angle of its sight line above the horizontal.
+        let elevation = |u: f32, h: f32| (h - eye.y).atan2(u - eu);
+        let p = self.point(g);
+        let u = (vec2(p.x, p.z) - self.pivot).dot(f);
+        let (lu, lh) = self.profile(s_edge);
+        elevation(u, p.y + height) > elevation(lu, lh)
+    }
+
     /// The place of ground point `g` on the sheet (height 0 on the flat part). Past the horizon
     /// it stands on the horizon's line.
     pub fn point(&self, g: Vec2) -> Vec3 {
@@ -874,6 +901,14 @@ impl Bend {
             let e = (a - amax) * r;
             (self.flat + r * amax.sin() + e * amax.cos(), sign * (r * (1.0 - amax.cos()) + e * amax.sin()))
         }
+    }
+
+    /// The point `height` world units straight up from the sheet at ground point `g`: a raised sheet
+    /// over a bent view lies on this, as the flat view's raised sheet lies straight up from the
+    /// ground ([`raised_ground_model`]). Along the normal instead, a steep part of the bend would
+    /// carry the far mist's texels over the explored ground nearer the eye (the first-person view).
+    pub fn lift(&self, g: Vec2, height: f32) -> Vec3 {
+        self.point(g) + Vec3::Y * height
     }
 
     /// The ground distance `s` whose profile has forward distance `u` (the inverse of the
@@ -1863,6 +1898,37 @@ mod tests {
         assert!(checked > 200, "only {checked} points checked");
     }
 
+    #[test]
+    fn a_raised_point_above_a_down_horizon_is_in_the_sky_and_the_sheet_is_not() {
+        // The eye 6 cells up and a sheet dropping away at 89° (a drop that hides its own far part: a finite horizon).
+        let eye = vec3(0.0, 6.0, 0.0);
+        let b = Bend::new(Vec2::ZERO, 0.0, 1.0, 2.0, -89.0).with_horizon(eye);
+        assert!(b.limit.is_finite());
+        let inf = f32::INFINITY;
+        // A point of the sheet just before the horizon is below it; lifted high enough it is in the sky.
+        let near = vec2(0.0, -(b.limit - 1.0));
+        assert!(!b.above_horizon(eye, near, 0.0, inf), "the sheet itself is below the horizon");
+        assert!(b.above_horizon(eye, near, 1.2, inf), "a mist layer lifted 1.2 cells above the horizon's edge is in the sky");
+        // Past the horizon the sheet stands on the horizon line: lifted, it is in the sky; unlifted, it is on it.
+        let far = vec2(0.0, -(b.limit + 5.0));
+        assert!(!b.above_horizon(eye, far, 0.0, inf));
+        assert!(b.above_horizon(eye, far, 0.5, inf));
+        // Near the eye the ground is far below the horizon, even lifted a little.
+        assert!(!b.above_horizon(eye, vec2(0.0, -1.0), 0.5, inf));
+        // A drawn ground that ends short of the horizon (its edge nearer): the edge's point is the horizon there.
+        let edge = b.limit * 0.5;
+        let edge_point = vec2(0.0, -edge);
+        assert!(!b.above_horizon(eye, vec2(0.0, -(edge - 0.2)), 0.0, edge), "the drawn ground is below its edge");
+        assert!(b.above_horizon(eye, edge_point, 0.6, edge), "lifted above the drawn edge, the mist is in the sky");
+    }
+
+    #[test]
+    fn an_up_bend_has_no_horizon_to_clip_against() {
+        let eye = vec3(0.0, 6.0, 0.0);
+        let b = Bend::new(Vec2::ZERO, 0.0, 1.0, 2.0, 60.0).with_horizon(eye);
+        assert!(!b.above_horizon(eye, vec2(0.0, -30.0), 5.0, f32::INFINITY));
+    }
+
     /// The down bend's horizon: the pixels above it see no ground (NaN in the map's pointer), those
     /// just below it see the sheet; the up bend has no horizon, so its top pixels see ground.
     #[test]
@@ -1924,6 +1990,35 @@ mod tests {
             let fp = cam.ground_footprint(FRAME, FRAME);
             assert!(fp.contains(look), "far {far:?}: {fp:?}");
             assert!(fp.w > 1.0 && fp.h > 1.0, "a footprint: {fp:?}");
+        }
+    }
+
+    #[test]
+    fn a_raised_sheet_is_the_ground_model_lifted_straight_up() {
+        let (origin, scale) = (vec2(130.0, -40.0), 48.0);
+        for h in [0.0f32, 0.35, 1.2] {
+            let raised = raised_ground_model(origin, scale, h);
+            let ground = ground_model(origin, scale);
+            for p in [vec2(0.0, 0.0), vec2(100.0, 37.0), vec2(-512.0, 900.0)] {
+                let a = ground.transform_point3(vec3(p.x, 0.0, p.y));
+                let b = raised.transform_point3(vec3(p.x, 0.0, p.y));
+                assert!((b - (a + Vec3::Y * h)).length() < 1e-4, "h {h}, p {p:?}: {a:?} -> {b:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_lift_is_straight_up_from_the_sheet_so_a_texel_stays_over_its_ground() {
+        for max_deg in [78.0f32, -60.0] {
+            let bend = bend(max_deg);
+            for k in 0..=12 {
+                let g = vec2(20.5, 13.25) + forward(0.0) * (k as f32 * 0.8) + right(0.0) * 0.6;
+                let (p, lifted) = (bend.point(g), bend.lift(g, 0.75));
+                assert!((lifted - p - Vec3::Y * 0.75).length() < 1e-4, "k {k}: {p:?} -> {lifted:?}");
+            }
+            // Zero is the sheet itself.
+            let g = vec2(21.0, 14.0);
+            assert!((bend.lift(g, 0.0) - bend.point(g)).length() < 1e-6);
         }
     }
 }

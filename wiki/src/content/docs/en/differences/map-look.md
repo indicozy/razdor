@@ -57,17 +57,18 @@ To see the day and night change without waiting, choose **"Game clock"** and pla
 
 ## Mist instead of black
 
-The **"Mist instead of black"** setting replaces the black of unexplored land and has three looks:
+The **"Mist instead of black"** setting replaces the black of unexplored land and has four looks:
 
 - **"No"**: the war fog's black, as in the original (the default).
 - **"Simple"**: an even haze of the same colour with a soft edge. The lightest look, for a phone.
 - **"Clouds"**: soft clouds drift over the unexplored land; the edge of the explored land runs straight into them.
+- **"Billows"**: a rolling mist curls over the unexplored land, as in earlier versions. Heavier on weak devices.
 
 The mist hides exactly what the black hid: it opens where the black opened, and explored land stays fully visible.
 
 The mist opens gradually: when the hero walks, and when an event shows a place, the land comes out of the mist little by little, from the centre.
 
-In every view of the map the mist lies on the ground itself, with no layers; there is no wall at the edge of the explored land.
+In every view of the map the mist lies on the ground itself, with no layers; there is no wall at the edge of the explored land. Past the edges of the map the mist goes on too, instead of black.
 
 ![Mist instead of black: clouds](../../../../assets/shots/mist-clouds.webp)
 

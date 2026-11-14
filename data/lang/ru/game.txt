@@ -570,7 +570,8 @@ Razdor's: Painted keeps the original's shadows; From the sun removes them, and e
 Mist instead of black = Туман вместо черноты
 Simple = Простой
 Clouds = Облака
-Razdor's: none is the original's black fog of war; Simple is a plain mist; Clouds drifts soft clouds over the unexplored land. Style only. = Razdor's: «Нет»: чёрный туман войны, как в оригинале. «Простой»: ровная дымка. «Облака»: плывущие облака. Только вид.
+Billows = Клубы
+Razdor's: none is the original's black fog of war; Simple is a plain mist; Clouds drifts soft clouds over the unexplored land; Billows is a rolling mist, heavier on weak devices. Style only. = Razdor's: «Нет»: чёрный туман войны, как в оригинале. «Простой»: ровная дымка. «Облака»: плывущие облака. «Клубы»: клубящийся туман, тяжелее для слабых устройств. Только вид.
 
 # Advanced settings: moving water (Razdor's, off by default)
 Moving water = Живая вода
