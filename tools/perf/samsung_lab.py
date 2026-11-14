@@ -10,7 +10,8 @@ Usage (the phone is the lab's, connected through its Remote Debug Bridge on this
 
 For each build X in A, B, C, D (`razdor-ab-X.apk` in --apks, checked against SHA256SUMS there). `main` (or
 `--only MAIN`) is the normal app, no A/B switch: `razdor-main.apk` in the same folder, the same steps; its log
-must name no A/B build.
+must name no A/B build. Any other label L (`--only a5`) is `razdor-<L>.apk` in --apks, the same steps, with no
+terrain check; its log is checked for `sprite retain: on` when that line is in the log (a warning when it is not).
 
 For each build X:
 
@@ -66,6 +67,7 @@ VARIANTS = ["A", "B", "C", "D", "MAIN"]
 # The terrain option set each build fixes (ui/terrain.rs `ab_options`, the module doc's table); MAIN is the
 # normal app, whose set comes from its defaults.
 LABELS = {"A": "opt=1+2+4", "B": "opt=1+2", "C": "opt=1+4", "D": "opt=none", "MAIN": "main, no A/B switch"}
+SPRITE_RETAIN_RE = re.compile(r"sprite retain: on")
 MAP_DEFAULT = "Другой берег"
 TERRAIN_RE = re.compile(r"terrain options: (opt=\S+).*?\(A/B build (\w)\)")
 TERRAIN_LINE_RE = re.compile(r"terrain options: (opt=\S+)([^\n]*)")
@@ -183,8 +185,29 @@ def sha256_of(path):
     return h.hexdigest()
 
 
+def label_text(letter):
+    return LABELS.get(letter, "no A/B switch")
+
+
+def canon_label(token):
+    """A `--only` token as a build key: A-D and MAIN for the terrain builds and the normal app, otherwise the
+    lower-case label (its APK is razdor-<label>.apk). None when the token is not a usable label."""
+    t = token.strip()
+    if t.lower() == "main":
+        return "MAIN"
+    if t.upper() in ("A", "B", "C", "D"):
+        return t.upper()
+    if re.fullmatch(r"[a-z0-9][a-z0-9-]{0,15}", t.lower()):
+        return t.lower()
+    return None
+
+
 def apk_name(letter):
-    return "razdor-main.apk" if letter == "MAIN" else f"razdor-ab-{letter}.apk"
+    if letter == "MAIN":
+        return "razdor-main.apk"
+    if letter in VARIANTS:
+        return f"razdor-ab-{letter}.apk"
+    return f"razdor-{letter}.apk"
 
 
 def check_apk(apks, letter, dry_run):
@@ -341,6 +364,12 @@ def check_build(out_dir, letter):
         raise LabError("razdor.log was not pulled: cannot check which build ran", EXIT_BUILD)
     with open(path, encoding="utf-8", errors="replace") as f:
         text = f.read()
+    if letter not in VARIANTS:
+        if SPRITE_RETAIN_RE.search(text):
+            say(f"  build check: `sprite retain: on` in the log (build {letter})")
+        else:
+            say(f"  WARNING: no `sprite retain: on` line in the log of build {letter} (it may not be the sprite build)")
+        return
     if letter == "MAIN":
         lines = TERRAIN_LINE_RE.findall(text)
         if not lines:
@@ -478,7 +507,7 @@ def compare(out_dir, letters):
     for letter in results:
         cells, done, _, path = results[letter]
         pairs = next(iter(cells.values()), {})
-        lines.append(f"- {letter} ({LABELS[letter]}): {'finished' if done else 'NOT finished'}, "
+        lines.append(f"- {letter} ({label_text(letter)}): {'finished' if done else 'NOT finished'}, "
                      f"screen {pairs.get('screen', '?')}, {os.path.basename(path)}")
     lines += ["", *head, *rows, ""]
     lines += stage_medians(results, letters, names, order)
@@ -493,7 +522,7 @@ def compare(out_dir, letters):
 
 def run_variant(lab, args, letter, out_dir):
     apk = check_apk(args.apks, letter, lab.dry_run)
-    say(f"== build {letter} ({LABELS[letter]}): {apk}")
+    say(f"== build {letter} ({label_text(letter)}): {apk}")
     if not lab.dry_run:
         os.makedirs(out_dir, exist_ok=True)
     install(lab, apk)
@@ -517,7 +546,7 @@ def main(argv):
     ap.add_argument("--serial", help="the phone's adb serial (localhost:<port> through the lab's rdb)")
     ap.add_argument("--apks", default="/mnt/ai_models/razdor-ab-1637/v2", help="the folder with razdor-ab-{A,B,C,D}.apk (and razdor-main.apk for MAIN)")
     ap.add_argument("--out", required=True, help="the results folder (device.txt, <X>/, compare.md)")
-    ap.add_argument("--only", default="A,B,C,D", help="the builds to run, e.g. A,C or MAIN (the normal app)")
+    ap.add_argument("--only", default="A,B,C,D", help="the builds to run, e.g. A,C, main (the normal app), a5 (razdor-a5.apk)")
     ap.add_argument("--choice", default="all", choices=["all", "mine"], help="the test's choice (default: all presets)")
     ap.add_argument("--map", default=MAP_DEFAULT, help=f"the map's file name in the game (default: {MAP_DEFAULT})")
     ap.add_argument("--stages", action="store_true", help="the run profiles itself: each cell logs its stage breakdown (RazdorBenchStages)")
@@ -526,9 +555,9 @@ def main(argv):
     ap.add_argument("--dry-run", action="store_true", help="print the adb commands; touch no phone")
     ap.add_argument("--compare-only", action="store_true", help="rebuild compare.md from the folders under --out")
     args = ap.parse_args(argv)
-    letters = [x.strip().upper() for x in args.only.split(",") if x.strip()]
-    if not letters or any(x not in VARIANTS for x in letters):
-        say("samsung_lab: --only takes letters from A, B, C, D, or main")
+    letters = [canon_label(x) for x in args.only.split(",") if x.strip()]
+    if not letters or None in letters or len(set(letters)) != len(letters):
+        say("samsung_lab: --only takes labels: A, B, C, D, main, or a label L for razdor-L.apk (e.g. a5), each once")
         return EXIT_ARG
     if args.compare_only:
         say(f"compare: {compare(args.out, letters)}")
