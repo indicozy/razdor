@@ -5,7 +5,8 @@ Usage (the phone is the lab's, connected through its Remote Debug Bridge on this
 
     python3 -I tools/perf/samsung_lab.py --serial localhost:<port> --out <dir> \\
         [--apks /mnt/ai_models/razdor-ab-1637/v2] [--only A,C] [--choice all|mine] [--map «Другой берег»] \\
-        [--stages] [--timeout-min 40] [--install-timeout-min 20] [--dry-run]
+        [--stages] [--lab-flags replay-floor,gpu-finish,swap-interval0,clear-targets] \\
+        [--timeout-min 40] [--install-timeout-min 20] [--dry-run]
     python3 -I tools/perf/samsung_lab.py --out <dir> --compare-only      # rebuild compare.md from <dir>/<X>/
 
 For each build X in A, B, C, D (`razdor-ab-X.apk` in --apks, checked against SHA256SUMS there). `main` (or
@@ -26,7 +27,11 @@ For each build X:
    the app's Razdor folder, and the app starts again: the app runs the performance test by itself
    (`ui/bench_autorun.rs`). `--stages` turns the run's profiling on: each cell then also logs its stage breakdown
    (`RazdorBenchStages`), and the debug mode's GPU samples run. Its frames are slower, so use it for the stage
-   numbers, not for the frame numbers of a plain run;
+   numbers, not for the frame numbers of a plain run. `--lab-flags` (needs --stages) adds the lab switches of the
+   run's trigger file, one line each: `replay-floor`, `gpu-finish`, `swap-interval0` (`swap-interval 0`, the
+   phone's frame pacing), `swap-interval1`, `clear-targets` (see docs/flows/testing-and-tools.md). The builds
+   must know the lines: an APK older than the switches refuses the trigger file (exit 4, its own error file);
+   compare.md names the flags of each build;
 6. the script waits for `RazdorBench DONE` (logcat) or the `bench-autorun.finished` file, up to --timeout-min;
 7. <out>/<X>/ gets the results file (`razdor-bench-*.txt`), razdor.log, the trigger file and the full logcat;
    razdor.log's `terrain options:` line must name build X (else the script stops with exit 5);
@@ -302,13 +307,14 @@ def wait_install(lab, minutes):
         time.sleep(POLL_SECS)
 
 
-def push_trigger(lab, out_dir, choice, map_name, stages=False):
+def push_trigger(lab, out_dir, choice, map_name, stages=False, lab_flags=()):
     """Writes the trigger file in the variant's folder and pushes it into the app's Razdor folder. `stages` adds the
-    `profile` line (the run profiles itself: the stage lines and the GPU samples)."""
+    `profile` line (the run profiles itself: the stage lines and the GPU samples); `lab_flags` (names of LAB_FLAGS)
+    add their lines."""
     trigger = os.path.join(out_dir, "bench-autorun.txt")
     if not lab.dry_run:
         with open(trigger, "w", encoding="utf-8") as f:
-            f.write(f"{choice}\nmap={map_name}\n" + ("profile\n" if stages else ""))
+            f.write(f"{choice}\nmap={map_name}\n" + ("profile\n" if stages else "") + "".join(LAB_FLAGS[n] + "\n" for n in lab_flags))
     lab.shell("rm", "-f", f"{APP_DIR}/bench-autorun.txt", f"{APP_DIR}/bench-autorun.done", f"{APP_DIR}/bench-autorun.finished", f"{APP_DIR}/bench-autorun.error")
     rc, out = lab.adb("push", trigger, f"{APP_DIR}/bench-autorun.txt", timeout=120)
     if rc != 0 and not lab.dry_run:
@@ -420,9 +426,24 @@ def fmt_ms(value):
         return value
 
 
+# The lab switches of the bench's trigger file: the command-line name -> its line (`ui/bench_autorun.rs`).
+LAB_FLAGS = {
+    "replay-floor": "replay-floor",
+    "gpu-finish": "gpu-finish",
+    "swap-interval0": "swap-interval 0",
+    "swap-interval1": "swap-interval 1",
+    "clear-targets": "clear-targets",
+}
+
 # The main stages of the stage medians (the stage key, its column title); the nesting is in phone_bench's note.
 # (A run's frames are summarised as other: no tick, no GPU ui, so those stages are not in the table.)
 MAIN_STAGES = [
+    ("flush", "Flush (world)"),
+    ("submit", "Submit (frame end)"),
+    ("finish", "GPU finish wait"),
+    ("replay", "Replay"),
+    ("gl_draws", "GL draws"),
+    ("gl_bytes", "GL bytes"),
     ("world", "World"),
     ("terrain", "Terrain"),
     ("fog", "Fog"),
@@ -459,6 +480,17 @@ def stage_medians(results, letters, names, order):
             "sample, the GPU stages over the sampled frames (`GPU frames`). Stages nest (route and look sit inside tick; "
             "the map's parts inside world), so compare a column with the same column.")
     return ["", "## Stage medians (p50, ms)", "", *head, *rows, "", note]
+
+
+def lab_note(out_dir, letter):
+    """The lab switches of a build's run, read from its trigger file (", lab: …"), or "" for none."""
+    path = os.path.join(out_dir, letter, "bench-autorun.txt")
+    if not os.path.isfile(path):
+        return ""
+    with open(path, encoding="utf-8") as f:
+        flags = [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
+    names = [k for k, v in LAB_FLAGS.items() if v in flags]
+    return f", lab: {', '.join(names)}" if names else ""
 
 
 def compare(out_dir, letters):
@@ -508,7 +540,7 @@ def compare(out_dir, letters):
         cells, done, _, path = results[letter]
         pairs = next(iter(cells.values()), {})
         lines.append(f"- {letter} ({label_text(letter)}): {'finished' if done else 'NOT finished'}, "
-                     f"screen {pairs.get('screen', '?')}, {os.path.basename(path)}")
+                     f"screen {pairs.get('screen', '?')}, {os.path.basename(path)}{lab_note(out_dir, letter)}")
     lines += ["", *head, *rows, ""]
     lines += stage_medians(results, letters, names, order)
     for letter in letters:
@@ -529,7 +561,7 @@ def run_variant(lab, args, letter, out_dir):
     wake_and_start(lab)
     wait_install(lab, args.install_timeout_min)
     force_stop(lab)
-    push_trigger(lab, out_dir, args.choice, args.map, args.stages)
+    push_trigger(lab, out_dir, args.choice, args.map, args.stages, args.lab_flags)
     lab.adb("logcat", "-c")
     wake_and_start(lab)
     try:
@@ -550,11 +582,19 @@ def main(argv):
     ap.add_argument("--choice", default="all", choices=["all", "mine"], help="the test's choice (default: all presets)")
     ap.add_argument("--map", default=MAP_DEFAULT, help=f"the map's file name in the game (default: {MAP_DEFAULT})")
     ap.add_argument("--stages", action="store_true", help="the run profiles itself: each cell logs its stage breakdown (RazdorBenchStages)")
+    ap.add_argument("--lab-flags", default="", help="the lab switches of the run, comma-separated: " + ", ".join(LAB_FLAGS) + " (needs --stages)")
     ap.add_argument("--timeout-min", type=float, default=40, help="the test's time limit per build, in minutes")
     ap.add_argument("--install-timeout-min", type=float, default=20, help="the game's install time limit, in minutes")
     ap.add_argument("--dry-run", action="store_true", help="print the adb commands; touch no phone")
     ap.add_argument("--compare-only", action="store_true", help="rebuild compare.md from the folders under --out")
     args = ap.parse_args(argv)
+    args.lab_flags = [x.strip() for x in args.lab_flags.split(",") if x.strip()]
+    if any(x not in LAB_FLAGS for x in args.lab_flags) or len(args.lab_flags) != len(set(args.lab_flags)):
+        say("samsung_lab: --lab-flags takes each of " + ", ".join(LAB_FLAGS) + " once")
+        return EXIT_ARG
+    if args.lab_flags and not args.stages:
+        say("samsung_lab: --lab-flags needs --stages (the flags' numbers are in the stage lines)")
+        return EXIT_ARG
     letters = [canon_label(x) for x in args.only.split(",") if x.strip()]
     if not letters or None in letters or len(set(letters)) != len(letters):
         say("samsung_lab: --only takes labels: A, B, C, D, main, or a label L for razdor-L.apk (e.g. a5), each once")

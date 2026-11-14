@@ -81,8 +81,14 @@ def stage_titles(stages):
     return keys
 
 
+# Per-frame counts, not times (the lab's GL counters: draw calls and bytes uploaded), with their titles.
+COUNT_TITLES = {"gl_draws": "GL draws (calls per frame)", "gl_bytes": "GL bytes (uploaded per frame)"}
+
+
 def title(key):
     """A stage key's column title: the key with spaces (ai move), the GPU ones as GPU (GPU sky)."""
+    if key in COUNT_TITLES:
+        return COUNT_TITLES[key]
     if key.startswith("gpu_"):
         return "GPU " + key[4:].replace("_", " ")
     text = key.replace("_", " ")
@@ -95,18 +101,19 @@ def stage_table(cells, stages):
     if not keys:
         return []
     titles = [title(k) for k in keys]
-    head = ["| Cell | Frames | GPU frames | " + " | ".join(titles) + " |", "|" + "---|" * (3 + len(keys))]
+    head = ["| Cell | Frames | GPU frames | Replayed | " + " | ".join(titles) + " |", "|" + "---|" * (4 + len(keys))]
     ids = list(cells) + [cid for cid in stages if cid not in cells]
     body = []
     for cid in ids:
         pairs = stages.get(cid, {})
         name = cells.get(cid, {}).get("name", cid)
-        row = [name, pairs.get("frames", "–"), pairs.get("gpu_frames", "–")]
+        row = [name, pairs.get("frames", "–"), pairs.get("gpu_frames", "–"), pairs.get("replayed", "–")]
         for key in keys:
             p50, p90 = pairs.get(key + "_p50"), pairs.get(key + "_p90")
             row.append(f"{float(p50):.2f} / {float(p90):.2f}" if p50 is not None and p90 is not None else "–")
         body.append("| " + " | ".join(str(c) for c in row) + " |")
-    note = ("Stage times in ms per frame, p50 / p90: the CPU stages over the frames with no GPU sample, the GPU "
+    note = ("Stage times in ms per frame, p50 / p90 (the GL draws and bytes are per frame counts; `Replayed` counts the "
+            "frames the lab's replay floor issued again, see docs/flows/testing-and-tools.md): the CPU stages over the frames with no GPU sample, the GPU "
             "stages over the sampled frames only (`gpu_frames`). The stages nest: `route`, `look` and `armies` are "
             "inside `tick`, `terrain` and the others inside `world`, so read a row as parts, not a sum.")
     return ["", "## Where the frame time goes (stages)", "", *head, *body, "", note]

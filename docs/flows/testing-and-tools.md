@@ -486,7 +486,38 @@ the work's median, the slow frames (over 33 ms), the load and the RSS (`/proc`).
   the map-only fields (effects, GPU stages, sprites). The stage lines are the per-cell breakdown.
 - `tools/perf/phone_bench.py` reads both tags: `RazdorBench` gives the first table, `RazdorBenchStages` a second one
   («Where the frame time goes»). `tools/perf/samsung_lab.py --stages` writes the `profile` line and adds the main
-  stages' p50 per build and cell to `compare.md`.
+  stages' p50 per build and cell to `compare.md`. `--lab-flags replay-floor,gpu-finish,swap-interval0,clear-targets`
+  writes the switches' lines too (the table at the top of the script; each build's flags are named in `compare.md`).
+
+- The stage line's GL and replay keys (added with the lab switches): `flush` (the batch submissions up to the end
+  of the world view: macroquad's `draw` calls, timed in the fork, nested in the world's own stages), `submit` (the
+  submissions after the world, to the frame's end), `finish` (the `gpu-finish` switch's wait, below), `replay` (the
+  replay floor's issue, below), and the counts `gl_draws` (draw calls per frame) and `gl_bytes` (bytes uploaded per
+  frame: vertices and indices). `replayed=<n>` in the line's head counts the CPU frames the replay floor replayed.
+  `phone_bench.py` titles the two counts as counts; `samsung_lab.py`'s compare.md shows them with the stage medians.
+  The desktop's per-frame CSV (`RAZDOR_PROFILE_FRAMES`) has the same columns at its end.
+
+### The lab's switches (dev only, all off by default)
+
+Each switch is a measurement, not a setting: no look change, and nothing in the player's build reads them unless
+the environment or the trigger file asks (`razdor::lab`). On desktop, `RAZDOR_<NAME>=1` turns one on for the whole
+process; on Android (no env vars) the bench's trigger file turns them on for its run, one line each, and the run's
+end puts the environment's back. Every switch needs the profile line too when its numbers are the stages (`samsung_lab.py
+--lab-flags` implies `--stages`).
+
+| Switch | Env (desktop) | Trigger line | What it does, and what to read |
+|---|---|---|---|
+| Replay floor | `RAZDOR_REPLAY_FLOOR=1` | `replay-floor` | On a still frame (hero not moving, the same view as the last drawn frame) the world's sprite pass is not run: the batch that frame drew for the sprites is issued again (the macroquad fork's batch replay: copies of its draw calls and vertices). The `replay` stage is the issue; the sprite pass's own time is gone, so the frame reads macroquad's submission and the driver's cost alone. The pictures are the last drawn frame's (stale but identical on a still frame); picks are not recorded on a replayed frame. Read `replayed=` to see how many frames replayed: a cell with none is not a floor. Code: `ui/replay_floor.rs`, wrapped around the sprite pass in `world_view::draw_world_in`. |
+| GPU finish | `RAZDOR_GPU_FINISH=1` | `gpu-finish` | Before the swap every frame: the batch is submitted and `glFinish` waited for, timed as `finish`. That is the frame's GPU time (plus its submission); `present` minus `finish` is the vsync wait and the swap. It serialises the GPU, so its frames are slower: read it for the split, not for the frame ms. Code: `ui/gpu_probe::finish_before_swap`. |
+| Swap interval | `RAZDOR_SWAP_INTERVAL=0` or `1` | `swap-interval 0` or `swap-interval 1` | Android: the EGL swap interval of the window's surface (`miniquad::window::set_swap_interval`; miniquad's fork applies it at the next frame, and to a surface Android recreates). 0 swaps as soon as a frame is drawn; 1 (the default, the driver's) waits for the refresh. **Trade-off:** with 0 a 20 ms frame can show at about 50 fps instead of 30, but the frame spacing is uneven (frames land on no fixed grid, so the motion judders where the old pace was smooth). Desktop: no effect (the window's own interval is not changed). Restored to 1 at the run's end. |
+| Clear targets | `RAZDOR_CLEAR_TARGETS=1` | `clear-targets` | Each whole-target fill (`render_cache::Cached::show`, `fill_cleared`) starts from a cleared target. A tiler (the phone's GPU) then does not load the target's old tiles at the switch. Only the whole-target fills are cleared: the ground's partial refills keep their pixels. Proof: `docs/perf/ideas-ledger.md`, the desktop snapshot set with the switch on against off (byte-identical). Not the default until the phone says so. |
+
+Read the switches with the stage lines: the `RazdorBenchStages` numbers of a run with a switch against the same run
+without it, the same build (`samsung_lab.py --only main --stages --lab-flags replay-floor` and a run without it).
+On desktop, the same runs are `XDG_DATA_HOME=<scratch>/xdg` with the trigger file in `<scratch>/xdg/razdor/`
+(`bench-autorun.txt`), under an Xvfb of its own (never the owner's display): the app writes `bench-autorun.finished`
+and the results file there. A build that does not know a line refuses the whole trigger file (`unknown line`,
+`bench-autorun.error`), so an old APK is never run with the wrong switches.
 
 Trap: `bench::Slot` is a cell; `std::cell::Cell` is the bench's own too (its `local!` statics), so keep the names apart.
 

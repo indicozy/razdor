@@ -1065,6 +1065,23 @@ The original finds a unit's and an ability's pictures as follows, and Razdor doe
    [testing-and-tools.md](testing-and-tools.md)); a decoder change gets a unit test on
    synthetic bytes plus a real-file test gated on `RAZDOR_DT_DIR`.
 
+## Pacing, submission and clears (the lab's switches)
+
+Macroquad batches the draws and submits the batch at each camera change (`set_camera`, `back_to_2d`), at a
+render-pass change and at the frame's end (`next_frame`): each submission is one `QuadGl::draw` (a fork counter,
+`take_submit_stats`: its calls, bytes and time, read by `ui::gpu_probe::take_submit` into the `flush` and `submit`
+stages). A tiler GPU loads and stores the target's tiles at every target switch, so a fill that starts from the old
+pixels pays for them; `render_cache::fill_cleared` clears the whole-target fills when `RAZDOR_CLEAR_TARGETS` (or the
+trigger line `clear-targets`) asks for it. Partial refills (the ground's scroll cache) never clear.
+
+The swap interval is 1 on Android by default (EGL's default; miniquad never sets it there). `RAZDOR_SWAP_INTERVAL=0`
+(or `swap-interval 0`) asks for 0 through `miniquad::window::set_swap_interval`, applied to the surface at the next
+frame. With 0 the frame is shown as soon as it is drawn: a late frame is shown late rather than one vsync later, so
+the frame spacing is uneven (a 20 ms frame can show at 50 fps, but the spacing alternates). That trade is the
+owner's call: it is a look-and-feel choice, measured on the phone before any default changes. The `gpu-finish` switch
+is the other half of the split: `finish` is the GPU's time before the swap, `present` minus `finish` the vsync wait.
+Details and the replay floor: `docs/flows/testing-and-tools.md`, «The lab's switches».
+
 ## Traps
 
 - Never commit decoded output, screenshots of original art, or install files.
