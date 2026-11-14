@@ -281,16 +281,22 @@ fn or_log<T: Default>(what: &str, r: Result<T, DtError>) -> T {
     })
 }
 
-/// The picture files under `dir`, in path order: `.lit`, `.ugs`, `.spi` and `.bmp`.
+/// The picture files under `dir`, in path order: `.lit`, `.ugs`, `.spi` and `.bmp`. A picture
+/// stored compressed is given by its `<name>.lz4` path, once ([`razdor::dt::stored::list`]).
 fn graphics_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
-    let mut entries: Vec<PathBuf> = entries.filter_map(|e| Some(e.ok()?.path())).collect();
-    entries.sort();
-    for p in entries {
-        if p.is_dir() {
-            graphics_files(&p, out);
-        } else if matches!(p.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).as_deref(), Some("lit" | "ugs" | "spi" | "bmp")) {
-            out.push(p);
+    // Folders and pictures (by logical path, with the stored file they are read from), in path order.
+    let mut items: Vec<(PathBuf, Option<PathBuf>)> = entries.filter_map(|e| Some(e.ok()?.path())).filter(|p| p.is_dir()).map(|p| (p, None)).collect();
+    items.extend(razdor::dt::stored::list(dir).into_iter().map(|(name, s)| (dir.join(name), Some(s.path))));
+    items.sort();
+    for (logical, stored) in items {
+        match stored {
+            None => graphics_files(&logical, out),
+            Some(path) => {
+                if matches!(logical.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).as_deref(), Some("lit" | "ugs" | "spi" | "bmp")) {
+                    out.push(path);
+                }
+            }
         }
     }
 }
@@ -502,11 +508,9 @@ impl DtArt {
         let mut paths: Vec<PathBuf> = TERRAIN_TEXTURES.iter().filter_map(|name| file(&format!("{TEXTURES_DIR}/{name}"))).collect();
         paths.extend((0..WATER_FRAMES).filter_map(|i| file(&water_frame_file(i))));
         if let Ok(units) = self.install.file("Graphics/Units") {
-            if let Ok(entries) = std::fs::read_dir(units) {
-                let mut figures: Vec<PathBuf> = entries.filter_map(|e| Some(e.ok()?.path())).filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("ugs"))).collect();
-                figures.sort();
-                paths.extend(figures);
-            }
+            // Stored figures by their stored path (`.lz4` when compressed), in name order.
+            let figures = razdor::dt::stored::list(&units).into_iter().filter(|(name, _)| name.to_ascii_lowercase().ends_with(".ugs")).map(|(_, s)| s.path);
+            paths.extend(figures);
         }
         paths.extend(file(MAP_OBJECTS));
         paths.extend(file("Graphics/Windows/MM_Icons.ugs"));

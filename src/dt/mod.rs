@@ -20,6 +20,7 @@ pub mod markup;
 pub mod picture_cache;
 pub mod preload;
 pub mod sound;
+pub mod stored;
 pub mod text;
 pub mod unpack;
 pub mod windows;

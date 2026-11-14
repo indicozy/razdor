@@ -154,7 +154,7 @@ mod tests {
         let (Some(model), Some(dt)) = (std::env::var_os(super::super::fetch::ENV_VAR), std::env::var_os(DT_ENV)) else {
             return;
         };
-        let bytes = std::fs::read(Path::new(&dt).join(MAP_OBJECTS)).expect("Objects.ugs is readable");
+        let bytes = crate::dt::stored::find_path(Path::new(&dt), MAP_OBJECTS).expect("Objects.ugs is there").read().expect("Objects.ugs is readable");
         let sprites = decode_objects_ugs(&bytes).expect("Objects.ugs decodes");
         // Buildings whose shipped cut has two cards or more, so the model has something to find.
         let buildings: Vec<&ObjectSprite> = sprites

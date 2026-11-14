@@ -98,19 +98,15 @@ pub fn check(dir: &Path, m: &Manifest, full: bool) -> Report {
     let mut report = Report::default();
     let mut same_size = 0usize;
     for f in &m.files {
-        let path = dir.join(&f.path);
-        match fs::metadata(&path) {
-            Ok(meta) if meta.is_file() => {
-                if meta.len() != f.size {
+        match logical_len(dir, &f.path) {
+            None => report.missing.push(f.path.clone()),
+            Some(len) if len != f.size => report.changed.push(f.path.clone()),
+            Some(_) => {
+                same_size += 1;
+                if full && logical_sha(dir, &f.path).is_some_and(|sha| sha != f.sha256) {
                     report.changed.push(f.path.clone());
-                } else {
-                    same_size += 1;
-                    if full && file_sha(&path).is_some_and(|sha| sha != f.sha256) {
-                        report.changed.push(f.path.clone());
-                    }
                 }
             }
-            _ => report.missing.push(f.path.clone()),
         }
     }
     report.community = exe_matches || same_size * 2 > m.files.len();
@@ -203,6 +199,33 @@ pub fn repair(dir: &Path, m: &Manifest, zip_path: &Path, rels: &[String]) -> Res
 /// The SHA-256 of a file, or None when it cannot be read.
 fn file_sha(path: &Path) -> Option<String> {
     crate::update::sha256_file(path).ok()
+}
+
+/// The stored form of the manifest file `rel` under `dir`, if it is a file: a picture
+/// (`.ugs`/`.lit`) as the loader finds it, plain or `<name>.lz4` ([`super::stored`]); any other
+/// file as it is named.
+fn stored_file(dir: &Path, rel: &str) -> Option<super::stored::Stored> {
+    let name = rel.rsplit('/').next().unwrap_or_default();
+    let stored = if super::stored::is_compressible(name) {
+        super::stored::find_path(dir, rel).ok()?
+    } else {
+        super::stored::Stored { path: dir.join(rel), compressed: false }
+    };
+    stored.path.is_file().then_some(stored)
+}
+
+/// The length of the file `rel` as the game reads it (decompressed for a stored picture).
+fn logical_len(dir: &Path, rel: &str) -> Option<u64> {
+    stored_file(dir, rel)?.logical_len().ok()
+}
+
+/// The SHA-256 of the file `rel` as the game reads it (of the decompressed bytes for a stored picture).
+fn logical_sha(dir: &Path, rel: &str) -> Option<String> {
+    let stored = stored_file(dir, rel)?;
+    if !stored.compressed {
+        return file_sha(&stored.path);
+    }
+    Some(crate::update::sha256_hex(&stored.read().ok()?))
 }
 
 /// The folder's files as the manifest names them, for a test (a helper: the bytes are read whole).

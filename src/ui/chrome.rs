@@ -19,6 +19,7 @@ use razdor::dt::gfx::{self, Image};
 use razdor::dt::ini::Ini;
 use razdor::dt::preload;
 use razdor::dt::install::{find_path, SETTINGS_FILE};
+use razdor::dt::stored::{self, find_file};
 
 use super::sharp;
 use super::widgets::{measure, text};
@@ -79,7 +80,7 @@ local! {
 /// Use the art of the install in `dir` from now on.
 pub fn set_install(dir: PathBuf) {
     let ahead: Vec<(PathBuf, &'static str)> =
-        WINDOWS_AHEAD.iter().filter_map(|n| Some((find_path(&dir, &format!("Graphics/{n}")).ok()?, *n))).collect();
+        WINDOWS_AHEAD.iter().filter_map(|n| Some((find_file(&dir, &format!("Graphics/{n}")).ok()?, *n))).collect();
     // The decode store decodes them in order, in the background; the lit ones are uploaded
     // a few per frame ([`warm`]) so that their first use finds the texture made.
     let paths: Vec<PathBuf> = ahead.iter().map(|(p, _)| p.clone()).collect();
@@ -227,16 +228,17 @@ const WINDOWS_AHEAD: &[&str] = &[
 /// building windows and the other screens draw some of them, so [`warm`] makes them too, after
 /// the ones of [`WINDOWS_AHEAD`]. The path and the name as [`art`] takes it.
 fn other_lit_windows(dir: &Path) -> Vec<(PathBuf, String)> {
-    let Ok(folder) = find_path(dir, "Graphics/Windows") else { return Vec::new() };
-    let Ok(entries) = std::fs::read_dir(folder) else { return Vec::new() };
-    let mut rels: Vec<String> = entries
-        .filter_map(|e| Some(e.ok()?.file_name().to_string_lossy().into_owned()))
+    let Ok(folder) = find_file(dir, "Graphics/Windows") else { return Vec::new() };
+    // The logical names: a stored `<name>.lit.lz4` is listed as `<name>.lit`, once.
+    let mut rels: Vec<String> = stored::list(&folder)
+        .into_iter()
+        .map(|(n, _)| n)
         .filter(|n| n.to_ascii_lowercase().ends_with(".lit"))
         .map(|n| format!("Windows/{n}"))
         .filter(|rel| !WINDOWS_AHEAD.contains(&rel.as_str()))
         .collect();
     rels.sort();
-    rels.into_iter().filter_map(|rel| Some((find_path(dir, &format!("Graphics/{rel}")).ok()?, rel))).collect()
+    rels.into_iter().filter_map(|rel| Some((find_file(dir, &format!("Graphics/{rel}")).ok()?, rel))).collect()
 }
 
 // Lit pictures whose textures [`warm`] makes ahead: the path and the name as [`art`] takes it.
@@ -494,7 +496,7 @@ fn to_texture(img: &Image) -> Option<Texture2D> {
 /// The decoded first frame of `Graphics/<rel>`, without an install `None`.
 pub fn image(rel: &str) -> Option<Image> {
     let dir = CHROME.with(|c| c.borrow().as_ref().map(|c| c.dir.clone()))?;
-    find_path(&dir, &format!("Graphics/{rel}"))
+    find_file(&dir, &format!("Graphics/{rel}"))
         .and_then(|p| preload::decode_shared(&p))
         .map_err(|e| razdor::diag!("Discord Times art: {rel}: {e}"))
         .ok()
@@ -510,7 +512,7 @@ pub fn art(rel: &str, fx: Fx) -> Option<Texture2D> {
         if let Some(t) = c.textures.get(rel).and_then(|v| v[fx as usize].as_ref()) {
             return t.clone();
         }
-        let t = find_path(&c.dir, &format!("Graphics/{rel}"))
+        let t = find_file(&c.dir, &format!("Graphics/{rel}"))
             .and_then(|p| preload::decode_shared(&p))
             .map_err(|e| razdor::diag!("Discord Times art: {rel}: {e}"))
             .ok()
@@ -556,7 +558,7 @@ fn spell_layer(name: &str, minus: [i32; 3]) -> Option<Texture2D> {
         if let Some(t) = c.textures.get(&key).and_then(|v| v[Fx::Glow as usize].as_ref()) {
             return t.clone();
         }
-        let t = find_path(&c.dir, &format!("Graphics/{rel}"))
+        let t = find_file(&c.dir, &format!("Graphics/{rel}"))
             .and_then(|p| preload::decode_shared(&p))
             .map_err(|e| razdor::diag!("Discord Times art: {rel}: {e}"))
             .ok()
@@ -588,7 +590,7 @@ pub fn win_adjusted(name: &str, tag: &str, adjust: impl FnOnce(&mut Image)) -> O
         if let Some(t) = c.textures.get(&key).and_then(|v| v[Fx::Plain as usize].as_ref()) {
             return t.clone();
         }
-        let t = find_path(&c.dir, &format!("Graphics/{rel}"))
+        let t = find_file(&c.dir, &format!("Graphics/{rel}"))
             .and_then(|p| preload::decode_shared(&p))
             .map_err(|e| razdor::diag!("Discord Times art: {rel}: {e}"))
             .ok()
@@ -777,7 +779,7 @@ pub fn win_masked(name: &str, mask: &str) -> Option<Texture2D> {
         if let Some(t) = c.animations.get(&key) {
             return t.as_ref().and_then(|v| v.first().cloned());
         }
-        let load = |n: &str| find_path(&c.dir, &format!("Graphics/Windows/{n}.lit")).and_then(|p| gfx::decode_file(&p)).ok().and_then(|f| f.into_iter().next());
+        let load = |n: &str| find_file(&c.dir, &format!("Graphics/Windows/{n}.lit")).and_then(|p| gfx::decode_file(&p)).ok().and_then(|f| f.into_iter().next());
         let t = match (load(name), load(mask)) {
             (Some(mut img), Some(m)) if (img.width, img.height) == (m.width, m.height) => {
                 for (p, q) in img.rgba.chunks_exact_mut(4).zip(m.rgba.chunks_exact(4)) {
@@ -805,7 +807,7 @@ pub fn battle_effect(e: &razdor::dt::data::BattleEffect) -> Option<Vec<Texture2D
         if let Some(t) = c.animations.get(&key) {
             return t.clone();
         }
-        let t = find_path(&c.dir, &format!("Graphics/Battle/{}.ugs", e.file.trim()))
+        let t = find_file(&c.dir, &format!("Graphics/Battle/{}.ugs", e.file.trim()))
             .and_then(|p| gfx::decode_file(&p))
             .map_err(|err| razdor::diag!("Discord Times art: {}: {err}", e.file))
             .ok()
@@ -836,7 +838,7 @@ pub fn animation(rel: &str) -> Option<Vec<Texture2D>> {
         if let Some(t) = c.animations.get(rel) {
             return t.clone();
         }
-        let t = find_path(&c.dir, &format!("Graphics/{rel}"))
+        let t = find_file(&c.dir, &format!("Graphics/{rel}"))
             .and_then(|p| gfx::decode_file(&p))
             .map_err(|e| razdor::diag!("Discord Times art: {rel}: {e}"))
             .ok()

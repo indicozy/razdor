@@ -28,7 +28,7 @@ fn small_model_cards_against_the_shipped_ones() {
     let (Some(model_path), Some(dt_dir)) = (std::env::var_os("RAZDOR_DEPTH_MODEL"), std::env::var_os(ENV_VAR)) else {
         return;
     };
-    let bytes = std::fs::read(Path::new(&dt_dir).join(MAP_OBJECTS)).expect("Objects.ugs is readable");
+    let bytes = crate::dt::stored::find_path(Path::new(&dt_dir), MAP_OBJECTS).expect("Objects.ugs is there").read().expect("Objects.ugs is readable");
     let sprites = decode_objects_ugs(&bytes).expect("Objects.ugs decodes");
     let model = DepthModel::load(Path::new(&model_path)).expect("the model file loads");
 

@@ -26,6 +26,22 @@ install file ──► src/dt/gfx.rs decode_file ──► gfx::Image (RGBA, not
   (the original's text marks), `src/dt/dtm.rs` (maps, `Scenario`), `src/dt/container.rs`
   (the `AIpf` container), `src/dt/data.rs` (units/items/spells/battle effects).
 
+## Stored files (`src/dt/stored.rs`)
+
+Game pictures (`.ugs`, `.lit`) may be stored compressed as `<name>.lz4` (an LZ4 frame whose
+header holds the content size), per `docs/specs/appdata-compression.md`. Every reader of a
+game file goes through `dt::stored`: `find`/`find_path` (the plain file if there is one,
+ignoring case, else `<name>.lz4`), `list` (a folder by logical names, `.lz4` stripped, each
+once, sorted), `Stored::read` (decompressed bytes, checked against the frame's content size)
+and `Stored::logical_len`. `DtInstall::file`/`read`, the picture listings in `chrome.rs` and
+`dt_art.rs`, `integrity::check` and `gfx::decode_uncached` (dispatch on the logical name) use it.
+A picture's cache key (`picture_cache::source_key`) is its logical path and length with the
+stored file's mtime, so a conversion costs at most one cache rebuild. Plain wins, and only
+`.ugs`/`.lit` are ever compressible (`stored::is_compressible`). Step 1 writes nothing:
+`stored::compress_file` (crash-safe: `.part`, fsync, verify, rename, then delete the plain
+file) is for the gate test and the converter of the next step. Ini, maps, sounds and the exe
+are not stored compressed and keep using `install::find_path`.
+
 ## Image formats (`src/dt/gfx.rs`)
 
 - **LIT** (`decode_lit`): a DCT image — header, then Y, Cb, Cr[, A] planes, each with a

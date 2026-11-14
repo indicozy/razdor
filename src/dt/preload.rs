@@ -558,7 +558,7 @@ mod tests {
         let dir = PathBuf::from(std::env::var_os(crate::dt::install::ENV_VAR)?);
         let mut rels = vec!["Graphics/Windows/Win-paper.lit".to_string(), "Graphics/Windows/Castle.lit".to_string()];
         rels.push(format!("{}/{}", gfx::TEXTURES_DIR, gfx::TERRAIN_TEXTURES[0]));
-        let paths = rels.iter().filter_map(|rel| crate::dt::install::find_path(&dir, rel).ok()).collect();
+        let paths = rels.iter().filter_map(|rel| crate::dt::stored::find_file(&dir, rel).ok()).collect();
         Some((dir, paths))
     }
 
@@ -591,7 +591,7 @@ mod tests {
         let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR).map(PathBuf::from) else { return };
         let dir_tmp = std::env::temp_dir().join(format!("razdor-pc-time-{}", std::process::id()));
         for rel in ["Graphics/Windows/Win-paper.lit", "Graphics/Windows/Castle.lit", "Graphics/Textures/Ice.lit", "Graphics/Objects/Persones.ugs"] {
-            let Ok(path) = crate::dt::install::find_path(&dir, rel) else { continue };
+            let Ok(path) = crate::dt::stored::find_file(&dir, rel) else { continue };
             let t = std::time::Instant::now();
             let frames = gfx::decode_uncached(&path).expect("decodes");
             let decode = t.elapsed().as_secs_f64() * 1000.0;

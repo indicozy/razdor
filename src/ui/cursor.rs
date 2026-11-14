@@ -439,7 +439,7 @@ mod tests {
                 Art::Still(name) => format!("Graphics/Windows/{name}.lit"),
                 Art::Strip(name, _) => format!("Graphics/Windows/{name}"),
             };
-            let frames = gfx::decode_file(&install::find_path(dir, &rel).unwrap()).unwrap();
+            let frames = gfx::decode_file(&razdor::dt::stored::find_file(dir, &rel).unwrap()).unwrap();
             let first = &frames[0];
             match what {
                 Art::Still(_) => assert!(first.width <= 48 && first.height <= 48, "{rel}: within the arrow's 48 px record"),

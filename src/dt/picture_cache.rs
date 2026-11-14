@@ -60,10 +60,20 @@ fn text_hash(text: &str) -> u64 {
 
 /// The key of an install file: its path, size and modification time (nanoseconds), the format
 /// and Razdor's version. `None` if the file cannot be looked at.
+///
+/// A stored picture (`<name>.lz4`, [`super::stored`]) is keyed by its logical path and the logical
+/// length, with the stored file's modification time: the same picture keeps its path and size
+/// through a conversion, so a conversion costs at most one rebuild (the mtime changes). A plain
+/// file keys exactly as before.
 pub fn source_key(path: &Path) -> Option<u64> {
+    let stored = super::stored::Stored::at(path);
     let meta = std::fs::metadata(path).ok()?;
     let mtime = meta.modified().ok()?.duration_since(UNIX_EPOCH).ok()?.as_nanos();
-    Some(key_for(&path.display().to_string(), meta.len(), mtime))
+    if !stored.compressed {
+        return Some(key_for(&path.display().to_string(), meta.len(), mtime));
+    }
+    let logical = path.with_file_name(stored.logical_name());
+    Some(key_for(&logical.display().to_string(), stored.logical_len().ok()?, mtime))
 }
 
 /// The key for a path with the given size and modification time (nanoseconds).

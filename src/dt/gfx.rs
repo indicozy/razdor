@@ -4,7 +4,7 @@
 //! Pure: no macroquad. Nothing decoded here is ever written back into the repo; the images come
 //! from the player's install at runtime (see the `DtInstall` helpers at the end).
 
-use super::install::{find_path, DtInstall};
+use super::install::DtInstall;
 use super::DtError;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -570,9 +570,13 @@ pub fn decode_file(path: &Path) -> Result<Vec<Image>, DtError> {
 /// Decodes the file at `path` without any cache: the decode store's miss path
 /// ([`super::preload`]).
 pub(crate) fn decode_uncached(path: &Path) -> Result<Vec<Image>, DtError> {
-    let d = std::fs::read(path).map_err(|source| DtError::Io { path: path.to_path_buf(), source })?;
-    let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-    let name = path.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    // The file may be stored compressed (`<name>.lz4`): decode the logical bytes and dispatch on the
+    // logical name, so the same picture decodes the same from either form.
+    let stored = super::stored::Stored::at(path);
+    let d = stored.read().map_err(|source| DtError::Io { path: path.to_path_buf(), source })?;
+    let logical = stored.logical_name();
+    let ext = Path::new(&logical).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    let name = logical.to_ascii_lowercase();
     match ext.as_str() {
         "lit" => Ok(vec![decode_lit(&d)?]),
         "spi" => Ok(vec![decode_spi(&d)?]),
@@ -720,14 +724,16 @@ impl ObjectSprites {
 }
 
 impl DtInstall {
-    /// A file under the install, `/`-separated, matching each component ignoring case.
+    /// A file under the install, `/`-separated, matching each component ignoring case. A picture
+    /// may be stored compressed: this is then its `<name>.lz4` path ([`super::stored`]).
     pub fn file(&self, rel: &str) -> Result<PathBuf, DtError> {
-        find_path(&self.dir, rel)
+        super::stored::find_file(&self.dir, rel)
     }
 
+    /// The decompressed bytes of a file under the install ([`super::stored`]).
     fn read(&self, rel: &str) -> Result<Vec<u8>, DtError> {
-        let path = self.file(rel)?;
-        std::fs::read(&path).map_err(|source| DtError::Io { path, source })
+        let stored = super::stored::find_path(&self.dir, rel)?;
+        stored.read().map_err(|source| DtError::Io { path: stored.path, source })
     }
 
     /// All unit busts, in file order; a type's frame is [`DtInstall::unit_picture_frame`].
@@ -1149,16 +1155,18 @@ mod tests {
         Some(DtInstall::load(Path::new(&dir)).expect("install loads"))
     }
 
+    /// The pictures under `dir` by their stored path (a `<name>.lz4` when compressed).
     fn graphics_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        for (name, s) in super::super::stored::list(dir) {
+            let name = name.to_ascii_lowercase();
+            if [".ugs", ".lit", ".spi"].iter().any(|ext| name.ends_with(ext)) {
+                out.push(s.path);
+            }
+        }
         for e in std::fs::read_dir(dir).unwrap() {
             let p = e.unwrap().path();
             if p.is_dir() {
                 graphics_files(&p, out);
-            } else if p.extension().is_some_and(|e| {
-                let e = e.to_string_lossy().to_ascii_lowercase();
-                e == "ugs" || e == "lit" || e == "spi"
-            }) {
-                out.push(p);
             }
         }
     }
@@ -1185,7 +1193,7 @@ mod tests {
             let imgs = decode_file(f).unwrap_or_else(|e| panic!("{}: {e}", f.display()));
             assert!(!imgs.is_empty());
             frames += imgs.len();
-            let name = f.file_name().unwrap().to_string_lossy().into_owned();
+            let name = super::super::stored::Stored::at(f).logical_name();
             let spell_fx = f.parent().is_some_and(|p| p.ends_with("Spells")) && name.ends_with(".ugs");
             if spell_fx || name == "--PAR.ugs" || name == "--RAYS.ugs" {
                 assert!(is_additive(&imgs), "{name} should be additive");
