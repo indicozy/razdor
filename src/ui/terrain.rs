@@ -477,6 +477,8 @@ struct GroundCache {
     target: Option<RenderTarget>,
     key: Option<u64>,
     last: Option<u64>,
+    /// The water frame the cache's overlay was drawn for (`None`: no overlay in the cache).
+    wkey: Option<usize>,
 }
 
 /// What the ground draw does this frame (`TerrainLayer::ground_target`).
@@ -487,6 +489,9 @@ pub enum GroundStep {
     Moving,
     /// The camera stopped: the cache is filled with the ground for this camera (the first still frame).
     Fill,
+    /// The cache holds the ground for this camera, and the water's frame changed: the overlay (the water) is drawn again
+    /// into the cache over the ground (the dry pixels keep it), then copied. Ten times a second, not every frame.
+    Refresh,
     /// The cache holds the ground for this camera: it is copied.
     Copy,
 }
@@ -819,9 +824,10 @@ impl TerrainLayer {
 
     /// The cache's target for `key` (option 2): the screen's size in physical pixels, made or
     /// resized as needed. Returns it with what this frame does (`GroundStep`): while the key changes the
-    /// ground is drawn live, and the cache is filled once the key holds for a frame.
+    /// ground is drawn live, and the cache is filled once the key holds for a frame. `water`: the water frame when
+    /// the overlay may be kept in the cache (the water still, the border's fog off), else `None`.
     /// `None` when the screen has no usable size (then the terrain is drawn live).
-    pub fn ground_target(&self, key: u64) -> Option<(RenderTarget, GroundStep)> {
+    pub fn ground_target(&self, key: u64, water: Option<usize>) -> Option<(RenderTarget, GroundStep)> {
         let (w, h) = macroquad::miniquad::window::screen_size();
         if !(w >= 1.0 && h >= 1.0 && w <= 8192.0 && h <= 8192.0) {
             return None;
@@ -835,14 +841,22 @@ impl TerrainLayer {
             rt.texture.set_filter(FilterMode::Nearest);
             g.target = Some(rt);
             g.key = None;
+            g.wkey = None;
         }
         let step = if g.last != Some(key) {
             g.last = Some(key);
             GroundStep::Moving
         } else if g.key != Some(key) {
             g.key = Some(key);
+            g.wkey = water;
             GroundStep::Fill
+        } else if water.is_some() && g.wkey != water {
+            g.wkey = water;
+            GroundStep::Refresh
         } else {
+            if water.is_none() {
+                g.wkey = None;
+            }
             GroundStep::Copy
         };
         g.target.clone().map(|rt| (rt, step))

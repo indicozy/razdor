@@ -3170,16 +3170,29 @@ fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool) {
         // the cache's fill would nest inside that picture, so a bent view is not cached.
         let plain = cam.tilt.is_none_or(|t| t.cam.bend.is_none());
         let key = ground_key(game, cam);
-        let cached = (waits && layer.cache_on() && super::render_cache::target().is_none() && plain).then(|| layer.ground_target(key)).flatten();
+        // With the water still and the border's fog off, the overlay depends on the water frame alone: the cache keeps it
+        // and it is drawn again only when the frame changes (`GroundStep::Refresh`).
+        let wf = (!water::live() && !(extend_edge() && !trailer_nofog())).then(|| razdor::dt::gfx::water_frame((super::map_anim::now() * 1000.0) as i64));
+        let cached = (waits && layer.cache_on() && super::render_cache::target().is_none() && plain).then(|| layer.ground_target(key, wf)).flatten();
         match cached {
             // A camera that moved this frame draws the ground once, live (below); the cache is refilled on the first
             // still frame. Live water is then drawn at the full rate and size on those frames (no picture).
             Some((_, terrain::GroundStep::Moving)) | None => in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Full, flow))),
             Some((rt, step)) => {
                 // The cache's rebuild (when it is due) and its blit: the ground cache's own stage.
+                // The overlay goes into the cache when the cache keeps it (`wf`): on a fill, the ground and then the overlay;
+                // on a refresh, the overlay alone (the ground stays under the dry pixels).
+                let into_cache = wf.is_some();
                 frame_probe::time(Stage::GroundCache, || {
-                    if step == terrain::GroundStep::Fill {
-                        super::render_cache::fill(&rt, || in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Ground, flow))));
+                    if matches!(step, terrain::GroundStep::Fill | terrain::GroundStep::Refresh) {
+                        super::render_cache::fill(&rt, || {
+                            if step == terrain::GroundStep::Fill {
+                                in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Ground, flow)));
+                            }
+                            if into_cache {
+                                in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow)));
+                            }
+                        });
                     }
                     in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Cached, flow)));
                 });
@@ -3210,7 +3223,7 @@ fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool) {
                     if waits {
                         gpu_wait(Stage::GpuWater);
                     }
-                } else {
+                } else if !into_cache {
                     in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow)));
                 }
             }
