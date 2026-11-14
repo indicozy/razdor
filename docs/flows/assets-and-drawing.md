@@ -286,6 +286,17 @@ with live water off it is this source with the live block out, and its relief bl
 differs from the last frame's (`draw_ground` then draws `Mode::Full` straight to the screen and leaves the cache alone),
 `Fill` on the first still frame (the cache is filled once), `Copy` while the key holds. A walking frame is one ground pass.
 
+**The scroll cache (backlog 1618, E1).** A flat camera's origin is snapped to whole physical pixels (`snap_origin` in
+`looking_in`; `frame_state::dpi` gives the pixels per unit), and the ground key leaves it out (`ground_key`; a tilted camera
+keeps it). `ground_target` takes the whole-pixel origin (`scroll_origin`) and keeps two screen-sized targets (`GroundCache::targets`,
+`cur`) with the origin the cache holds (`at`). A move by whole pixels with the same key returns `GroundStep::Scroll`: the cache is
+copied to the other target shifted by the move (`copy_ground`, flipped as a render target's texture is), and only the strips
+the copy leaves (`exposed_strips`) are drawn, under a scissor, with the overlay on them unless the water's frame changed too
+(then the whole screen gets it). A move that cannot scroll (a jump, a changed key) is `Moving` while the camera moves and `Fill`
+when it stops, as before. Tilted views never scroll. `RAZDOR_SCROLL_CHECK=1` (a diagnostic, slow) draws a fresh fill after each
+scroll and logs the pixels that differ in the view: the scrolled cache differs from a fresh fill by shader rounding only (up to
+2 levels, a fraction of a per cent of the pixels); it logs each frame's step too.
+
 **The water in the cache (backlog 1618, B3 timing).** With the water still and the border's fog off, the overlay depends
 on the water frame alone, so the cache keeps it: a fill draws the ground then the overlay, and `GroundStep::Refresh` draws
 the overlay alone when the water frame changes (every 100 ms). A still frame between changes is a copy. Live water and the

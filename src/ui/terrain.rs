@@ -489,13 +489,17 @@ pub enum Mode {
     Picture,
 }
 
-/// The ground cache: the target the ground is drawn into, the key it was filled for, and the key of the last frame
-/// (a camera that moved since then draws the ground without the cache: `GroundStep::Moving`).
+/// The ground cache: two screen-sized targets (a scroll copies the cached ground from one to the other), which of them
+/// holds the ground (`cur`), the key of the view it was drawn for (without the camera's origin), the whole-pixel origin
+/// (physical pixels) it was drawn at, and the key and origin of the last frame. A camera that moved and cannot scroll
+/// the cache draws the ground without it (`GroundStep::Moving`).
 #[derive(Default)]
 struct GroundCache {
-    target: Option<RenderTarget>,
+    targets: [Option<RenderTarget>; 2],
+    cur: usize,
     key: Option<u64>,
-    last: Option<u64>,
+    at: (i32, i32),
+    last: Option<(u64, Option<(i32, i32)>)>,
     /// The water frame the cache's overlay was drawn for (`None`: no overlay in the cache).
     wkey: Option<usize>,
     /// Whether the cached ground was drawn with the cheap ground (`cheap_path`): a change of «Смешивание земли» redraws it.
@@ -505,8 +509,8 @@ struct GroundCache {
 /// What the ground draw does this frame (`TerrainLayer::ground_target`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GroundStep {
-    /// The camera moved since the last frame: the ground is drawn once, straight to the screen (`Mode::Full`), and the
-    /// cache is left alone. Three passes of a moving frame (fill, copy, overlay) become one.
+    /// The camera moved since the last frame and the cache cannot follow it: the ground is drawn once, straight to the
+    /// screen (`Mode::Full`), and the cache is left alone. Three passes of a moving frame (fill, copy, overlay) become one.
     Moving,
     /// The camera stopped: the cache is filled with the ground for this camera (the first still frame).
     Fill,
@@ -515,6 +519,28 @@ pub enum GroundStep {
     Refresh,
     /// The cache holds the ground for this camera: it is copied.
     Copy,
+    /// The camera moved by whole pixels: the cache is copied to the new target shifted by `shift` (physical pixels, from
+    /// `GroundFrame::prev`), and only the `strips` it leaves uncovered (x, y, w, h in physical pixels) are drawn.
+    /// `refresh`: the water's frame changed too, so the overlay is drawn over the whole screen after the strips.
+    Scroll { shift: (i32, i32), strips: [Option<[i32; 4]>; 4], refresh: bool },
+}
+
+/// The frame's ground cache from `TerrainLayer::ground_target`: the target to draw into, the target to copy from
+/// (`Scroll` only) and what the frame does.
+pub struct GroundFrame {
+    pub target: RenderTarget,
+    pub prev: Option<RenderTarget>,
+    pub step: GroundStep,
+}
+
+/// The strips a `w`×`h` screen (physical pixels) leaves uncovered when its content moves by `shift`: the copy of the
+/// old screen lands at `shift`, and the left, right, top and bottom parts outside it are returned as `[x, y, w, h]`,
+/// None where empty. A shift no smaller than the screen copies nothing.
+pub fn exposed_strips((sx, sy): (i32, i32), (w, h): (i32, i32)) -> [Option<[i32; 4]>; 4] {
+    let (cx0, cx1) = (sx.clamp(0, w), (w + sx).clamp(0, w));
+    let (cy0, cy1) = (sy.clamp(0, h), (h + sy).clamp(0, h));
+    let rect = |x: i32, y: i32, rw: i32, rh: i32| (rw > 0 && rh > 0).then_some([x, y, rw, rh]);
+    [rect(0, 0, cx0, h), rect(cx1, 0, w - cx1, h), rect(cx0, 0, cx1 - cx0, cy0), rect(cx0, cy1, cx1 - cx0, h - cy1)]
 }
 
 /// «Живая вода» as a picture (`water_picture_prepare`): two drawings of the water, the newer being `cur`, with
@@ -843,24 +869,29 @@ impl TerrainLayer {
         WeatherMasks { biome: maps.weather, lowland: maps.lowland, boxes: maps.weather_boxes, seed: maps.weather_seed }
     }
 
-    /// The cache's target for `key` (option 2): the screen's size in physical pixels, made or
-    /// resized as needed. Returns it with what this frame does (`GroundStep`): while the key changes the
-    /// ground is drawn live, and the cache is filled once the key holds for a frame. `water`: the water frame when
-    /// the overlay may be kept in the cache (the water still, the border's fog off), else `None`.
-    /// `None` when the screen has no usable size (then the terrain is drawn live).
-    pub fn ground_target(&self, key: u64, water: Option<usize>) -> Option<(RenderTarget, GroundStep)> {
+    /// The cache's targets for `key` (option 2): the screen's size in physical pixels, made or resized as needed.
+    /// Returns the frame's target and what it does (`GroundStep`). `origin`: the camera's whole-pixel origin (physical
+    /// pixels) when the camera is a flat one (it moves in whole pixels, so the cache can follow it); `None` otherwise,
+    /// and then any change of the camera is a change of the key. While the key changes the ground is drawn live, and
+    /// the cache is filled once the key holds for a frame; a whole-pixel move of the camera scrolls the cache.
+    /// `water`: the water frame when the overlay may be kept in the cache (the water still, the border's fog off), else
+    /// `None`. `None` when the screen has no usable size (then the terrain is drawn live).
+    pub fn ground_target(&self, key: u64, origin: Option<(i32, i32)>, water: Option<usize>) -> Option<GroundFrame> {
         let (w, h) = macroquad::miniquad::window::screen_size();
         if !(w >= 1.0 && h >= 1.0 && w <= 8192.0 && h <= 8192.0) {
             return None;
         }
         let (pw, ph) = (w as u32, h as u32);
         let mut g = self.ground.borrow_mut();
-        let sized = g.target.as_ref().is_some_and(|t| t.texture.width() as u32 == pw && t.texture.height() as u32 == ph);
+        let sized = g.targets[0].as_ref().is_some_and(|t| t.texture.width() as u32 == pw && t.texture.height() as u32 == ph);
         if !sized {
-            let rt = render_target(pw, ph);
-            razdor::mem_probe::set_texture("ground cache", razdor::mem_probe::texture_bytes(pw, ph, 4));
-            rt.texture.set_filter(FilterMode::Nearest);
-            g.target = Some(rt);
+            g.targets = [0, 1].map(|_| {
+                let rt = render_target(pw, ph);
+                rt.texture.set_filter(FilterMode::Nearest);
+                Some(rt)
+            });
+            razdor::mem_probe::set_texture("ground cache", 2 * razdor::mem_probe::texture_bytes(pw, ph, 4));
+            g.cur = 0;
             g.key = None;
             g.wkey = None;
         }
@@ -872,23 +903,53 @@ impl TerrainLayer {
             g.wkey = None;
             *self.pictures.borrow_mut() = WaterPictures::default();
         }
-        let step = if g.last != Some(key) {
-            g.last = Some(key);
-            GroundStep::Moving
-        } else if g.key != Some(key) {
-            g.key = Some(key);
+        let moved = g.last != Some((key, origin));
+        g.last = Some((key, origin));
+        let (cur, targets, here) = (g.cur, g.targets.clone(), g.key == Some(key));
+        let at = origin.unwrap_or((0, 0));
+        let frame = if here && at == g.at {
+            // The view the cache holds: copied, the overlay redrawn when the water's frame changed.
+            let step = if water.is_some() && g.wkey != water {
+                g.wkey = water;
+                GroundStep::Refresh
+            } else {
+                if water.is_none() {
+                    g.wkey = None;
+                }
+                GroundStep::Copy
+            };
+            GroundFrame { target: targets[cur].clone()?, prev: None, step }
+        } else if let Some(o) = origin.filter(|_| here && (at.0 - g.at.0).abs() < pw as i32 && (at.1 - g.at.1).abs() < ph as i32) {
+            // A whole-pixel move: the cache's ground shifts to the other target, and only the strips are drawn.
+            let shift = (g.at.0 - o.0, g.at.1 - o.1);
+            let refresh = water.is_some() && g.wkey != water;
+            let new = 1 - cur;
+            g.cur = new;
+            g.at = o;
             g.wkey = water;
-            GroundStep::Fill
-        } else if water.is_some() && g.wkey != water {
-            g.wkey = water;
-            GroundStep::Refresh
+            let step = GroundStep::Scroll { shift, strips: exposed_strips(shift, (pw as i32, ph as i32)), refresh };
+            GroundFrame { target: targets[new].clone()?, prev: targets[cur].clone(), step }
+        } else if moved {
+            GroundFrame { target: targets[cur].clone()?, prev: None, step: GroundStep::Moving }
         } else {
-            if water.is_none() {
-                g.wkey = None;
-            }
-            GroundStep::Copy
+            // The camera stopped on a view the cache does not hold: it is filled for this view.
+            g.key = Some(key);
+            g.at = at;
+            g.wkey = water;
+            GroundFrame { target: targets[cur].clone()?, prev: None, step: GroundStep::Fill }
         };
-        g.target.clone().map(|rt| (rt, step))
+        Some(frame)
+    }
+
+    /// Copies the cached ground `from` to `to` shifted by `shift` (physical pixels, `exposed_strips`): texel for texel,
+    /// so the pixels the shift keeps are the ones the cache holds. The strips the shift leaves are not written.
+    pub fn copy_ground(&self, to: &RenderTarget, from: &RenderTarget, shift: (i32, i32)) {
+        let (w, h) = (to.texture.width(), to.texture.height());
+        super::render_cache::fill_space(to, Rect::new(0.0, 0.0, w, h), || {
+            // A render target's texture is stored in GL row order (the composite reads it at `gl_FragCoord`), so a copy into
+            // another target flips it, as `render_cache::blit_screen` does for the screen.
+            draw_texture_ex(&from.texture, shift.0 as f32, shift.1 as f32, WHITE, DrawTextureParams { dest_size: Some(vec2(w, h)), flip_y: true, ..Default::default() });
+        });
     }
 
     /// Draws the terrain of a `w`×`h` map (`codes` row by row) into screen rectangle `dest`,
@@ -1082,7 +1143,7 @@ impl TerrainLayer {
 
     /// The cache's copy: the filled ground, read at each pixel of `dest` by its window position.
     fn draw_cached(&self, dest: Rect) {
-        let (Some(m), Some(rt)) = (self.composite.as_ref(), self.ground.borrow().target.clone()) else { return };
+        let (Some(m), Some(rt)) = (self.composite.as_ref(), { let g = self.ground.borrow(); g.targets[g.cur].clone() }) else { return };
         // The composite reads the ground at its fragment's place on the target it draws into: the
         // map's scaled target when one is set (`render_cache::with_base`), else the screen.
         let (sw, sh) = super::render_cache::base_pixels().unwrap_or_else(macroquad::miniquad::window::screen_size);
@@ -1241,6 +1302,33 @@ mod tests {
         assert_eq!(ab_options("E"), None);
         assert_eq!(ab_options("a"), None);
         assert_eq!(ab_options(""), None);
+    }
+
+    #[test]
+    fn a_scrolled_cache_copies_and_strips_tile_the_screen_exactly() {
+        // The copied rectangle (the old screen moved by the shift) and the strips partition the screen: every pixel is
+        // either copied or drawn afresh, once. Checked for shifts inside, at and past the screen's size.
+        let (w, h) = (17, 9);
+        for sx in -20..=20 {
+            for sy in -12..=12 {
+                let mut hit = vec![0u32; (w * h) as usize];
+                let (cx0, cx1, cy0, cy1) = (sx.clamp(0, w), (w + sx).clamp(0, w), sy.clamp(0, h), (h + sy).clamp(0, h));
+                for y in cy0..cy1 {
+                    for x in cx0..cx1 {
+                        hit[(y * w + x) as usize] += 1;
+                    }
+                }
+                for [x, y, rw, rh] in exposed_strips((sx, sy), (w, h)).into_iter().flatten() {
+                    assert!(rw > 0 && rh > 0 && x >= 0 && y >= 0 && x + rw <= w && y + rh <= h, "strip out of the screen at {sx},{sy}");
+                    for yy in y..y + rh {
+                        for xx in x..x + rw {
+                            hit[(yy * w + xx) as usize] += 1;
+                        }
+                    }
+                }
+                assert!(hit.iter().all(|&n| n == 1), "shift {sx},{sy}: a pixel is copied and drawn twice or not at all");
+            }
+        }
     }
 
     #[test]

@@ -2709,6 +2709,11 @@ impl Camera {
                 });
             }
         }
+        // A flat camera's origin goes on whole physical pixels, so every frame's shift of the map is a whole number of
+        // pixels and the ground cache can move its content (`scroll_origin`). Tilted views keep their origin.
+        if cam.tilt.is_none() {
+            cam.origin = snap_origin(cam.origin);
+        }
         cam
     }
 
@@ -3144,7 +3149,7 @@ fn terrain_quad(game: &Game, layer: &terrain::TerrainLayer, cam: &Camera, mode: 
     let (tl, br) = if extend { (w.point(), w.point() + w.size()) } else { (map_tl.max(w.point()), map_br.min(w.point() + w.size())) };
     if tl.x < br.x && tl.y < br.y {
         let (a, b) = (cam.to_screen(tl.into()), cam.to_screen(br.into()));
-        if matches!(mode, terrain::Mode::Full | terrain::Mode::Ground) {
+        if matches!(mode, terrain::Mode::Full | terrain::Mode::Ground) && !SCROLL_STRIP.with(|s| s.get()) {
             frame_probe::terrain(b.x - a.x, b.y - a.y);
         }
         let view = vec4(tl.x, tl.y / rh, br.x, br.y / rh);
@@ -3170,29 +3175,66 @@ fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool) {
         // the cache's fill would nest inside that picture, so a bent view is not cached.
         let plain = cam.tilt.is_none_or(|t| t.cam.bend.is_none());
         let key = ground_key(game, cam);
+        let origin = scroll_origin(cam);
         // With the water still and the border's fog off, the overlay depends on the water frame alone: the cache keeps it
         // and it is drawn again only when the frame changes (`GroundStep::Refresh`).
         let wf = (!water::live() && (!extend_edge() || trailer_nofog())).then(|| razdor::dt::gfx::water_frame((super::map_anim::now() * 1000.0) as i64));
-        let cached = (waits && layer.cache_on() && super::render_cache::target().is_none() && plain).then(|| layer.ground_target(key, wf)).flatten();
+        let cached = (waits && layer.cache_on() && super::render_cache::target().is_none() && plain).then(|| layer.ground_target(key, origin, wf)).flatten();
+        if std::env::var_os("RAZDOR_SCROLL_CHECK").is_some() {
+            razdor::diag!("ground step {:?} origin {origin:?}", cached.as_ref().map(|f| f.step));
+        }
         match cached {
-            // A camera that moved this frame draws the ground once, live (below); the cache is refilled on the first
-            // still frame. Live water is then drawn at the full rate and size on those frames (no picture).
-            Some((_, terrain::GroundStep::Moving)) | None => in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Full, flow))),
-            Some((rt, step)) => {
+            // A camera that moved this frame and cannot scroll the cache draws the ground once, live (below); the cache is
+            // refilled on the first still frame. Live water is then drawn at the full rate and size on those frames (no picture).
+            None => in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Full, flow))),
+            Some(terrain::GroundFrame { step: terrain::GroundStep::Moving, .. }) => in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Full, flow))),
+            Some(terrain::GroundFrame { target: rt, prev, step }) => {
                 // The cache's rebuild (when it is due) and its blit: the ground cache's own stage.
                 // The overlay goes into the cache when the cache keeps it (`wf`): on a fill, the ground and then the overlay;
                 // on a refresh, the overlay alone (the ground stays under the dry pixels).
                 let into_cache = wf.is_some();
                 frame_probe::time(Stage::GroundCache, || {
-                    if matches!(step, terrain::GroundStep::Fill | terrain::GroundStep::Refresh) {
-                        super::render_cache::fill(&rt, || {
-                            if step == terrain::GroundStep::Fill {
-                                in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Ground, flow)));
-                            }
+                    match step {
+                        terrain::GroundStep::Fill => super::render_cache::fill(&rt, || {
+                            in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Ground, flow)));
                             if into_cache {
                                 in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow)));
                             }
-                        });
+                        }),
+                        terrain::GroundStep::Refresh => super::render_cache::fill(&rt, || {
+                            in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow)));
+                        }),
+                        terrain::GroundStep::Scroll { shift, strips, refresh } => {
+                            // The cache moves by whole pixels into the other target; the strips it leaves are drawn under a
+                            // scissor (the quad clips to them), the overlay with them unless the water's frame changed too.
+                            if let Some(prev) = prev.as_ref() {
+                                layer.copy_ground(&rt, prev, shift);
+                            }
+                            let dpi = super::frame_state::dpi();
+                            super::render_cache::fill(&rt, || {
+                                for [x, y, w, h] in strips.into_iter().flatten() {
+                                    // The same call the pan and the widgets use for their clips (macroquad's main thread).
+                                    unsafe { get_internal_gl() }.quad_gl.scissor(Some((x, y, w, h)));
+                                    SCROLL_STRIP.with(|s| s.set(true));
+                                    frame_probe::terrain(w as f32 / dpi, h as f32 / dpi);
+                                    in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Ground, flow)));
+                                    if into_cache && !refresh {
+                                        in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow)));
+                                    }
+                                    SCROLL_STRIP.with(|s| s.set(false));
+                                }
+                                super::pan::restore_scissor();
+                            });
+                            if refresh && into_cache {
+                                super::render_cache::fill(&rt, || {
+                                    in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow)));
+                                });
+                            }
+                            if std::env::var_os("RAZDOR_SCROLL_CHECK").is_some() {
+                                scroll_check(game, layer, cam, flow, &rt, into_cache);
+                            }
+                        }
+                        terrain::GroundStep::Copy | terrain::GroundStep::Moving => {}
                     }
                     in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Cached, flow)));
                 });
@@ -3203,7 +3245,9 @@ fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool) {
                 // (2.5D and first person included: the fill keeps the 3D camera, as the ground's does), then composited.
                 let (map, codes) = (&game.world.map, game.world.map.surface_codes());
                 let water_ms = Some((super::map_anim::now() * 1000.0) as i64);
-                if let Some(target) = layer.water_picture_prepare(codes, (map.w as u32, map.h as u32), flow, Some(map.surface_generation()), water_ms, key) {
+                // The water picture is drawn for the camera's whole view, its origin included (the cache's key leaves it out).
+                let view_key = origin.map_or(key, |(x, y)| key ^ ((u64::from(x as u32) << 32) | u64::from(y as u32)).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+                if let Some(target) = layer.water_picture_prepare(codes, (map.w as u32, map.h as u32), flow, Some(map.surface_generation()), water_ms, view_key) {
                     frame_probe::time(Stage::Water, || {
                         super::render_cache::fill(&target, || {
                             macroquad::prelude::clear_background(macroquad::prelude::Color::new(0.0, 0.0, 0.0, 0.0));
@@ -3264,6 +3308,60 @@ fn map_flow(game: &Game) -> Option<std::rc::Rc<Vec<(f32, f32)>>> {
     }))
 }
 
+/// The flat view's origin on whole physical pixels (`frame_state::dpi` is the physical pixels per logical unit).
+fn snap_origin(o: Vec2) -> Vec2 {
+    let k = super::frame_state::dpi();
+    if k > 0.0 && k.is_finite() {
+        (o * k).round() / k
+    } else {
+        o
+    }
+}
+
+/// The origin the ground cache follows: a flat camera's origin in physical pixels (whole, after `snap_origin`); None for
+/// a tilted camera, whose ground cannot be moved by a shift.
+fn scroll_origin(cam: &Camera) -> Option<(i32, i32)> {
+    let k = super::frame_state::dpi();
+    cam.tilt.is_none().then(|| ((cam.origin.x * k).round() as i32, (cam.origin.y * k).round() as i32))
+}
+
+local! {
+    /// Set while the scrolled cache's strips are drawn: their area is counted by the strip, not by the whole quad.
+    static SCROLL_STRIP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// `RAZDOR_SCROLL_CHECK` (a diagnostic, read back from the GPU): a scrolled cache must hold what a full fill at the same
+/// camera draws, over the view's pixels. Logs the count of pixels that differ.
+fn scroll_check(game: &Game, layer: &terrain::TerrainLayer, cam: &Camera, flow: &[(f32, f32)], rt: &RenderTarget, into_cache: bool) {
+    let (w, h) = (rt.texture.width() as u32, rt.texture.height() as u32);
+    let fresh = macroquad::texture::render_target(w, h);
+    fresh.texture.set_filter(FilterMode::Nearest);
+    super::render_cache::fill(&fresh, || {
+        in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Ground, flow)));
+        if into_cache {
+            in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow)));
+        }
+    });
+    let (a, b) = (rt.texture.get_texture_data(), fresh.texture.get_texture_data());
+    let k = super::frame_state::dpi();
+    let (x0, y0) = (((cam.draw.x * k).floor().max(0.0)) as usize, ((cam.draw.y * k).floor().max(0.0)) as usize);
+    let (x1, y1) = ((((cam.draw.x + cam.draw.w) * k).ceil() as usize).min(w as usize), (((cam.draw.y + cam.draw.h) * k).ceil() as usize).min(h as usize));
+    let stride = w as usize * 4;
+    let (mut differ, mut worst, mut over1) = (0usize, 0i32, 0usize);
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let i = y * stride + x * 4;
+            if a.bytes.get(i..i + 4) != b.bytes.get(i..i + 4) {
+                differ += 1;
+                let d = (0..3).map(|c| (i32::from(a.bytes[i + c]) - i32::from(b.bytes[i + c])).abs()).max().unwrap_or(0);
+                worst = worst.max(d);
+                over1 += usize::from(d > 1);
+            }
+        }
+    }
+    razdor::diag!("scroll check: origin {:?} {differ} px differ in the view (worst level {worst}, {over1} by more than 1)", scroll_origin(cam));
+}
+
 /// The key of the cached ground: everything the ground pass reads (the screen, the camera and
 /// its 2.5D tilt, the map's size and surface codes, and the edge's mode). The clock and the water
 /// are not in it: they are drawn over the cache each frame.
@@ -3273,7 +3371,13 @@ fn ground_key(game: &Game, cam: &Camera) -> u64 {
     let f = |v: f32| v.to_bits();
     let rect = |r: Rect| [r.x, r.y, r.w, r.h].map(f);
     [super::frame_state::screen_w(), super::frame_state::screen_h(), super::frame_state::dpi()].map(f).hash(&mut h);
-    [cam.origin.x, cam.origin.y, cam.scale].map(f).hash(&mut h);
+    // A flat camera's origin is not in the key: it moves in whole pixels and the cache follows it (`scroll_origin`).
+    // A tilted one moves freely, so its origin is.
+    if cam.tilt.is_some() {
+        [cam.origin.x, cam.origin.y, cam.scale].map(f).hash(&mut h);
+    } else {
+        [cam.scale].map(f).hash(&mut h);
+    }
     rect(cam.view).hash(&mut h);
     rect(cam.draw).hash(&mut h);
     if let Some(t) = cam.tilt {
