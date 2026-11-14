@@ -1422,7 +1422,7 @@ pub fn clip_to_rect(poly: &[Vec2], r: Rect) -> Vec<Vec2> {
 /// Draws the ground a tilted view sees on the minimap (`r`): the flat view's box colours, a translucent
 /// fill and a light outline, clipped to the minimap; and the hero's marker, a small triangle on his place with
 /// its tip where the camera looks. `to_mini` maps world units to the minimap's pixels.
-fn draw_sight(s: &Sight, r: Rect, to_mini: &impl Fn((f32, f32)) -> Vec2, house: f32) {
+fn draw_sight(s: &Sight, r: Rect, to_mini: &impl Fn((f32, f32)) -> Vec2, house_area: f32) {
     let poly: Vec<Vec2> = sight_footprint(&s.cam, s.frame).into_iter().map(|p| to_mini((p.x, p.y))).collect();
     let poly = clip_to_rect(&poly, r);
     if poly.len() >= 3 {
@@ -1439,18 +1439,14 @@ fn draw_sight(s: &Sight, r: Rect, to_mini: &impl Fn((f32, f32)) -> Vec2, house: 
     }
 
     // The hero's look marker, drawn last so it is on top: a solid isosceles triangle centred on his place, its tip
-    // where the camera looks. As long as a house icon (`house`, px), and 1.7 times as long as its base.
+    // where the camera looks. Its area is 1.3 times a house icon's visible area (`house_area`, px²).
     let p0 = to_mini((s.from.x, s.from.y));
     let dir = look_direction(&s.cam, s.from, to_mini);
     if dir == Vec2::ZERO {
         return;
     }
-    // A phone: at least 24 dp (about 4 mm), in its own px per dp (`display::dp_px`).
-    let len = match super::display::dp_px() {
-        Some(dp) => house.max(24.0 * dp),
-        None => house.max(10.0),
-    };
-    let width = len / 1.7;
+    let len = hero_marker_len(house_area);
+    let width = len / MARKER_SHAPE;
     let (tip, base) = hero_marker(p0, dir, len);
     let n = vec2(-dir.y, dir.x);
     let (left, right) = (base + n * width * 0.5, base - n * width * 0.5);
@@ -1458,6 +1454,59 @@ fn draw_sight(s: &Sight, r: Rect, to_mini: &impl Fn((f32, f32)) -> Vec2, house: 
     for (a, b) in [(tip, left), (left, right), (right, tip)] {
         draw_line(a.x, a.y, b.x, b.y, 1.0, BLACK);
     }
+}
+
+/// The hero's look marker is an isosceles triangle 1.7 times as long as its base (`MARKER_SHAPE`).
+const MARKER_SHAPE: f32 = 1.7;
+/// Its area, in units of a house icon's visible area: the owner's 1.3 (backlog 1641).
+const MARKER_AREA: f32 = 1.3;
+
+/// The length (px) of the hero's look marker whose area is `MARKER_AREA` times `house_area` (px²): the
+/// triangle's area is `len * (len / MARKER_SHAPE) / 2`, so `len = sqrt(2 * MARKER_SHAPE * MARKER_AREA * house_area)`.
+fn hero_marker_len(house_area: f32) -> f32 {
+    (2.0 * MARKER_SHAPE * MARKER_AREA * house_area).sqrt()
+}
+
+/// The area (px²) of the look marker `len` px long (the check of `hero_marker_len`).
+#[cfg(test)]
+fn hero_marker_area(len: f32) -> f32 {
+    len * (len / MARKER_SHAPE) / 2.0
+}
+
+/// The visible (opaque) area of a house icon (`Symbol::Grid(0, 2)` at `size`) as drawn at `zoom`, in px²: the
+/// alpha > 0 texels of its cell in the icons texture, counted once per size and cached. Falls back to the whole
+/// cell while the texture or its pixels are not there.
+fn house_visible_area(icons: Option<&Texture2D>, size: usize, zoom: f32) -> f32 {
+    thread_local! {
+        static COUNTED: std::cell::Cell<[Option<f32>; 3]> = const { std::cell::Cell::new([None; 3]) };
+    }
+    let cell = symbol_rect(Symbol::Grid(0, 2), size);
+    let texels = COUNTED.with(|c| {
+        if let Some(n) = c.get()[size] {
+            return Some(n);
+        }
+        let img = icons?.get_texture_data();
+        let (w, h) = (img.width as usize, img.height as usize);
+        if w == 0 || h == 0 || img.bytes.len() < w * h * 4 {
+            return None;
+        }
+        let (x0, y0) = (cell.x as usize, cell.y as usize);
+        let (x1, y1) = (((cell.x + cell.w) as usize).min(w), ((cell.y + cell.h) as usize).min(h));
+        let mut n = 0usize;
+        for y in y0..y1 {
+            for x in x0..x1 {
+                if img.bytes[(y * w + x) * 4 + 3] > 0 {
+                    n += 1;
+                }
+            }
+        }
+        let n = n as f32;
+        let mut all = c.get();
+        all[size] = Some(n);
+        c.set(all);
+        Some(n)
+    });
+    texels.unwrap_or(cell.w * cell.h) * zoom * zoom
 }
 
 /// The marker's tip and the middle of its base, for a marker `len` px long centred on `at` and turned to `dir`
@@ -1592,7 +1641,7 @@ pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_
             }
         }
         // A tilted view (2.5D, first person): the ground its frame sees, and where the camera looks (Razdor's).
-        Some(s) => draw_sight(&s, r, &to_mini, symbol_rect(Symbol::Grid(0, 2), size).w * zoom),
+        Some(s) => draw_sight(&s, r, &to_mini, house_visible_area(icons.as_ref(), size, zoom)),
     }
 
     if let Some(t) = frame_art {
@@ -2525,5 +2574,14 @@ mod sight_tests {
         assert_eq!(tip, vec2(100.0, 74.0), "half its length ahead of the hero");
         assert_eq!(back, vec2(100.0, 86.0), "half its length behind");
         assert_eq!((tip + back) / 2.0, at, "the marker's extent is centred on the hero");
+    }
+
+    #[test]
+    fn the_marker_is_1_3_times_a_house_icon_in_area() {
+        for house in [1.0f32, 37.5, 144.0, 210.0, 576.0, 1400.0] {
+            let len = hero_marker_len(house);
+            let ratio = hero_marker_area(len) / house;
+            assert!((ratio - 1.3).abs() < 1e-3, "house {house} px²: the marker's area is {ratio} times it");
+        }
     }
 }

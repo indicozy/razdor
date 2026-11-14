@@ -261,8 +261,9 @@ The minimap is `src/ui/minimap.rs`. Flat, its view is the light box of `world_re
 eyes), `Camera::minimap_sight` hands it the camera: the ground the frame sees is the picked ground under its edges
 (`minimap::sight_footprint`, four points an edge, a ray that meets no ground stops at `view25::FAR` or the bend's
 horizon), clipped to the minimap and drawn with the box's colours, and the hero's marker (`draw_sight`, a light
-triangle centred on his place, as long as a house icon (the `Grid(0, 2)` cell at the map's size) and 1.7 times as long
-as its base, at least 24 dp on a phone, its tip where the camera looks, `look_direction`).
+triangle centred on his place, 1.7 times as long as its base, with an area of 1.3 times the visible (opaque) pixels of
+a house icon (the `Grid(0, 2)` cell at the map's size, counted once from the icons texture by `house_visible_area`;
+`hero_marker_len`), its tip where the camera looks, `look_direction`; no minimum size, backlog 1641).
 Clicks still centre the map: the minimap is a plan, not turned.
 
 The small trees and bushes (object class 9) sway: `draw_object` draws them through
