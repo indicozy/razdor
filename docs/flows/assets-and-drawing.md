@@ -286,6 +286,14 @@ with live water off it is this source with the live block out, and its relief bl
 differs from the last frame's (`draw_ground` then draws `Mode::Full` straight to the screen and leaves the cache alone),
 `Fill` on the first still frame (the cache is filled once), `Copy` while the key holds. A walking frame is one ground pass.
 
+**The water in the cache (backlog 1618, B3 timing).** With the water still and the border's fog off, the overlay depends
+on the water frame alone, so the cache keeps it: a fill draws the ground then the overlay, and `GroundStep::Refresh` draws
+the overlay alone when the water frame changes (every 100 ms). A still frame between changes is a copy. Live water and the
+border's fog keep the overlay on the screen, every frame.
+
+**The cheap ground (option 5, `RAZDOR_TERRAIN_CHEAP=1`, off by default, in no preset).** The ground pass takes the nearest
+cell's code (one atlas fetch) instead of blending the four. A look change: hard cell edges. Not in «Низкое» yet (owner's call).
+
 `src/ui/world_view.rs`: `draw_world` draws only the visible cells — `draw_terrain`
 (`TerrainLayer::draw` in `src/ui/terrain.rs`: one shader quad mixing the four nearest cell
 textures from a 4×4 atlas, water frames multiplied in; with the ground cache, option 2, the cache's overlay pass for the
