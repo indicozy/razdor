@@ -9,6 +9,14 @@
 //! The base install is never written: a link is removed before a file replaces it. A folder
 //! is rebuilt when the base's files (names, sizes, times), the mod's version or its file list
 //! and contents change (`stamp.json` in the folder).
+//!
+//! Pictures (`.ugs`, `.lit`) are kept compressed (`<name>.lz4`, `dt::stored`; backlog 1609 part 2,
+//! step 3, `docs/specs/appdata-compression.md`): a mod's files are compressed after an unpack
+//! ([`compress_pictures`], in `Hub::write_mod`) and, for an installed mod, at its next play
+//! ([`prepare_mod`]). The manifest and the stamp name each file by its logical path (`Pictures/A.lit`,
+//! the zip's own path) and its digest is of the decoded bytes, so the file is valid in either form.
+//! The merged folder lays the stored file (`Pictures/A.lit.lz4`) and removes every other stored form
+//! of the same name in it ([`drop_other_stored_form`]). The zips a mod was unpacked from are not kept.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::Read;
@@ -17,6 +25,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::{read_installed, safe_id, safe_rel_name, FileRef, Installed, Kind, Text};
+use crate::dt::stored::{self, Stored};
 
 /// The file naming the active mod, under the hub folder.
 const ACTIVE: &str = "active.json";
@@ -27,7 +36,8 @@ const MANIFEST: &str = "manifest.json";
 /// The empty file a mod's folder gets each time the mod is played; its modification time is the
 /// record (`mods/<id>/last_played`).
 const LAST_PLAYED: &str = "last_played";
-/// The folder of the mod zips kept from its install (`mods/<id>/archives/<n>.zip`).
+/// The folder the mod zips of older installs were kept in (`mods/<id>/archives/<n>.zip`). Not written
+/// any more; [`prepare_mod`] removes it.
 const ARCHIVES: &str = "archives";
 
 /// The mod's folder: `<hub>/mods/<id>/`, with `files/` (what was installed) and `game/` (the
@@ -63,11 +73,6 @@ pub struct ManifestFile {
     pub sha256: String,
 }
 
-/// The zip a mod's archive source `n` was unpacked from, kept for a repair.
-pub fn archive_path(local: &Path, id: &str, n: usize) -> PathBuf {
-    mod_dir(local, id).join(ARCHIVES).join(format!("{n}.zip"))
-}
-
 /// The manifest of mod `id`; None when it has none or it does not read.
 pub fn read_manifest(local: &Path, id: &str) -> Option<Manifest> {
     serde_json::from_slice(&std::fs::read(mod_dir(local, id).join(MANIFEST)).ok()?).ok()
@@ -79,14 +84,20 @@ pub fn write_manifest(local: &Path, id: &str, manifest: &Manifest) -> Result<(),
     crate::editor::files::write_atomically(&mod_dir(local, id).join(MANIFEST), &json).map_err(|e| format!("{MANIFEST}: {e}"))
 }
 
-/// The files under `files_dir` as a manifest lists them: path, size and SHA-256 of each.
+/// The files under `files_dir` as a manifest lists them: the logical path, size and SHA-256 of the
+/// decoded bytes of each (a compressed picture is listed as its plain name, see [`mod_files`]).
 pub fn file_entries(files_dir: &Path) -> Result<Vec<ManifestFile>, String> {
-    list_mod_files(files_dir)?
+    mod_files(files_dir)?
         .into_iter()
-        .map(|(path, file)| {
-            let size = std::fs::metadata(&file).map_err(|e| format!("{path}: {e}"))?.len();
-            let sha256 = crate::update::sha256_file(&file).map_err(|e| format!("{path}: {e}"))?;
-            Ok(ManifestFile { path, size, sha256 })
+        .map(|f| {
+            let stored = f.stored();
+            let size = stored.logical_len().map_err(|e| format!("{}: {e}", f.path))?;
+            let sha256 = if f.compressed {
+                crate::update::sha256_hex(&stored.read().map_err(|e| format!("{}: {e}", f.path))?)
+            } else {
+                crate::update::sha256_file(&f.file).map_err(|e| format!("{}: {e}", f.path))?
+            };
+            Ok(ManifestFile { path: f.path, size, sha256 })
         })
         .collect()
 }
@@ -99,9 +110,10 @@ pub fn damaged_files(local: &Path, id: &str) -> Result<Vec<String>, String> {
     let dir = mod_files_dir(local, id);
     let Some(manifest) = read_manifest(local, id) else {
         let mut bad = Vec::new();
-        for (rel, file) in list_mod_files(&dir)? {
-            if std::fs::File::open(&file).and_then(|mut f| std::io::copy(&mut f, &mut std::io::sink())).is_err() {
-                bad.push(rel);
+        for f in mod_files(&dir)? {
+            let readable = if f.compressed { f.stored().read().is_ok() } else { std::fs::File::open(&f.file).and_then(|mut file| std::io::copy(&mut file, &mut std::io::sink())).is_ok() };
+            if !readable {
+                bad.push(f.path);
             }
         }
         return Ok(bad);
@@ -109,13 +121,86 @@ pub fn damaged_files(local: &Path, id: &str) -> Result<Vec<String>, String> {
     Ok(manifest.files.iter().filter(|f| !matches_entry(&dir, f)).map(|f| f.path.clone()).collect())
 }
 
-/// Whether the file `f` names under `dir` is there with its size and SHA-256.
+/// Whether the file `f` names under `dir` is there with its size and SHA-256 of the decoded bytes,
+/// in whichever stored form it is (`stored::find`: a plain file, or its `.lz4`).
 fn matches_entry(dir: &Path, f: &ManifestFile) -> bool {
     if !safe_rel_name(&f.path) {
         return false;
     }
-    let file = dir.join(&f.path);
-    std::fs::metadata(&file).is_ok_and(|m| m.is_file() && m.len() == f.size) && crate::update::sha256_file(&file).is_ok_and(|sum| sum == f.sha256.to_lowercase())
+    let (folder, name) = match f.path.rsplit_once('/') {
+        Some((folder, name)) => (dir.join(folder), name),
+        None => (dir.to_path_buf(), f.path.as_str()),
+    };
+    let Some(stored) = stored::find(&folder, name).filter(|s| s.path.is_file()) else { return false };
+    if stored.logical_len().ok() != Some(f.size) {
+        return false;
+    }
+    let sum = if stored.compressed { stored.read().ok().map(|bytes| crate::update::sha256_hex(&bytes)) } else { crate::update::sha256_file(&stored.path).ok() };
+    sum.is_some_and(|sum| sum == f.sha256.to_lowercase())
+}
+
+/// The logical path of a file of a mod's `files/` as it is stored: `Pictures/A.lit.lz4` is
+/// `Pictures/A.lit`; any other path is itself.
+fn logical_rel(rel: &str) -> String {
+    let (dir, name) = match rel.rfind('/') {
+        Some(at) => (&rel[..=at], &rel[at + 1..]),
+        None => ("", rel),
+    };
+    match stored::logical_name_of(name) {
+        Some(logical) => format!("{dir}{logical}"),
+        None => rel.to_string(),
+    }
+}
+
+/// Whether the file path `rel` of a mod is a stored (compressed) form: its name is `<logical>.lz4`.
+fn is_stored_rel(rel: &str) -> bool {
+    stored::logical_name_of(rel.rsplit('/').next().unwrap_or(rel)).is_some()
+}
+
+/// A file of a mod as it is laid: its logical path in the mod (the manifest's), its stored path
+/// (`…lz4` when compressed) and the file.
+struct ModFile {
+    path: String,
+    rel: String,
+    file: PathBuf,
+    compressed: bool,
+}
+
+impl ModFile {
+    fn stored(&self) -> Stored {
+        Stored { path: self.file.clone(), compressed: self.compressed }
+    }
+}
+
+/// The files of a mod's `files/` folder, by logical path, sorted. A compressed picture is listed
+/// once, under its logical name; a plain file wins over a stored form of the same name (what an
+/// interrupted conversion leaves). Names that differ only in case are all listed (a layer refuses
+/// them, [`build`]).
+fn mod_files(files_dir: &Path) -> Result<Vec<ModFile>, String> {
+    let listed = list_mod_files(files_dir)?;
+    let plain: HashSet<String> = listed.iter().filter(|(rel, _)| !is_stored_rel(rel)).map(|(rel, _)| rel.to_ascii_lowercase()).collect();
+    let mut out = Vec::with_capacity(listed.len());
+    for (rel, file) in listed {
+        let compressed = is_stored_rel(&rel);
+        let path = logical_rel(&rel);
+        if compressed && plain.contains(&path.to_ascii_lowercase()) {
+            continue;
+        }
+        out.push(ModFile { path, rel, file, compressed });
+    }
+    Ok(out)
+}
+
+/// Compresses the plain pictures in a mod's `files/` folder (`dt::stored::compress_folder`). A
+/// failure is logged and the plain files stay: they read the same and the manifest names them the
+/// same way, so nothing else is needed.
+pub fn compress_pictures(files_dir: &Path) {
+    if !files_dir.is_dir() {
+        return;
+    }
+    if let Err(e) = stored::compress_folder(files_dir) {
+        crate::diag!("hub: {}: the pictures are not compressed: {e}", files_dir.display());
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -142,20 +227,17 @@ pub fn installed_mods(local: &Path) -> Vec<(String, Text)> {
 /// nothing.
 pub fn layer_bytes(local: &Path, base: &Path, chain: &[String], name: &str) -> Option<Vec<u8>> {
     for lid in chain.iter().rev() {
-        if let Some(path) = top_file(&mod_files_dir(local, lid), name) {
-            return std::fs::read(path).ok();
+        if let Some(file) = top_file(&mod_files_dir(local, lid), name) {
+            return file.read().ok();
         }
     }
-    top_file(base, name).and_then(|path| std::fs::read(path).ok())
+    top_file(base, name).and_then(|file| file.read().ok())
 }
 
-/// The file `name` at the top of `dir`, matched without case.
-fn top_file(dir: &Path, name: &str) -> Option<PathBuf> {
-    let exact = dir.join(name);
-    if exact.is_file() {
-        return Some(exact);
-    }
-    std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).find(|p| p.is_file() && p.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(name)))
+/// The file `name` at the top of `dir`, matched without case, in its stored form (a plain file or
+/// `<name>.lz4`, `stored::find`); its decoded bytes are what the game reads.
+fn top_file(dir: &Path, name: &str) -> Option<Stored> {
+    stored::find(dir, name).filter(|s| s.path.is_file())
 }
 
 /// Makes `id` the mod the game plays from now on (`None`: the base game), after its folder is
@@ -457,30 +539,41 @@ pub fn prepare_mod(local: &Path, base: &Path, id: &str) -> Result<PathBuf, Strin
     }
     let installed = read_installed(local);
     let order = layer_chain(&installed, id)?;
+    // Mods installed before compression: their plain pictures are compressed now (a plain file is
+    // kept until its `.lz4` is verified, and the manifests name files by their logical path, so
+    // nothing else changes). The kept zips of older installs go too (`ARCHIVES`).
+    for lid in &order {
+        let _ = std::fs::remove_dir_all(mod_dir(local, lid).join(ARCHIVES));
+        compress_pictures(&mod_files_dir(local, lid));
+    }
     let mut layers = Vec::with_capacity(order.len());
     let mut stamps = Vec::with_capacity(order.len());
     for lid in &order {
         let version = installed.entries[lid].version.clone();
-        let files = list_mod_files(&mod_files_dir(local, lid))?;
+        let files = mod_files(&mod_files_dir(local, lid))?;
         // The asked mod's files were just checked against its manifest (`damaged_files` above),
         // so their digests are the manifest's: no second hash pass. Requirements are hashed.
         let manifest: HashMap<String, String> = match read_manifest(local, id).filter(|_| lid.as_str() == id) {
             Some(manifest) => manifest.files.into_iter().map(|f| (f.path, f.sha256.to_lowercase())).collect(),
             None => HashMap::new(),
         };
+        // The stamp keeps the stored names (what the merged folder lays): a form change rebuilds the
+        // folder once, after the conversion above.
         let mut digests = Vec::with_capacity(files.len());
-        for (rel, path) in &files {
-            let digest = match manifest.get(rel) {
+        let mut laid = Vec::with_capacity(files.len());
+        for f in &files {
+            let digest = match manifest.get(&f.path) {
                 Some(sum) => sum.clone(),
                 None => {
-                    let bytes = std::fs::read(path).map_err(|e| format!("{lid}: {rel}: {e}"))?;
+                    let bytes = f.stored().read().map_err(|e| format!("{lid}: {}: {e}", f.path))?;
                     crate::update::sha256_hex(&bytes)
                 }
             };
-            digests.push((rel.clone(), digest));
+            digests.push((f.rel.clone(), digest));
+            laid.push((f.rel.clone(), f.file.clone()));
         }
         stamps.push(LayerStamp { id: lid.clone(), version, files: digests });
-        layers.push(files);
+        layers.push(laid);
     }
     let stamp = Stamp { base: base.display().to_string(), base_files: base_fingerprint(base)?, layers: stamps, game: String::new(), layout: LAYOUT };
     // Every lookup that misses in the merged folder reads the base (the base's files are not
@@ -523,6 +616,15 @@ pub fn prepare_mod(local: &Path, base: &Path, id: &str) -> Result<PathBuf, Strin
     let _ = std::fs::remove_dir_all(&game);
     std::fs::rename(&tmp, &game).map_err(|e| format!("{}: {e}", game.display()))?;
     Ok(game)
+}
+
+/// Removes the zips older installs kept under every installed mod's `archives/` (`prepare_mod` does it for
+/// the mods it lays; this covers the mods never played). Called once at each launch, off the UI thread.
+pub fn drop_all_kept_archives(local: &Path) {
+    let Ok(read) = std::fs::read_dir(local.join("mods")) else { return };
+    for entry in read.flatten() {
+        let _ = std::fs::remove_dir_all(entry.path().join(ARCHIVES));
+    }
 }
 
 /// Removes mod `id`'s built game folder (and a half-built one). Its `files/` stay, so playing
@@ -574,9 +676,10 @@ fn write_fresh(path: &Path, bytes: &[u8]) -> Result<(), String> {
     std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// Builds the merged folder `tmp` from `base` and the layers: each layer's files (`(path in the
-/// mod, source)`) laid in turn, a later layer's file replacing an earlier one at the same path
-/// (ignoring case).
+/// Builds the merged folder `tmp` from `base` and the layers: each layer's files (`(stored path in
+/// the mod, source)`, see [`mod_files`]) laid in turn, a later layer's file replacing an earlier one
+/// of the same logical name (ignoring case): the other stored form of it goes
+/// ([`drop_other_stored_form`]).
 fn build(base: &Path, layers: &[Vec<(String, PathBuf)>], tmp: &Path) -> Result<(), String> {
     // Lower-cased path → the path as it is in the merged folder (the base's spelling where the
     // base has the folder or file).
@@ -603,8 +706,9 @@ fn build(base: &Path, layers: &[Vec<(String, PathBuf)>], tmp: &Path) -> Result<(
     for mod_files in layers {
         let mut seen = HashSet::new();
         for (rel, src) in mod_files {
-            if !seen.insert(rel.to_ascii_lowercase()) {
-                return Err(format!("{rel}: two files of one mod differ only in case"));
+            let logical = logical_rel(rel);
+            if !seen.insert(logical.to_ascii_lowercase()) {
+                return Err(format!("{logical}: two files of one mod differ only in case"));
             }
             let target = resolve(&mut known, rel);
             let dst = tmp.join(&target);
@@ -613,10 +717,10 @@ fn build(base: &Path, layers: &[Vec<(String, PathBuf)>], tmp: &Path) -> Result<(
             }
             // Breaks the link to the base's file (or an earlier layer's copy) first; the base keeps its own.
             let _ = std::fs::remove_file(&dst);
-            // The base's other stored form of this name (a converted `<name>.lz4`) goes too, so the mod's
-            // plain file is the only one (backlog 1609 part 2, rule 6). Its key leaves `known` with it.
+            // The other stored form of this name goes too (the base's plain link or its `.lz4`, an
+            // earlier layer's copy), so the mod's file is the only one (backlog 1609 part 2, rule 6).
             drop_other_stored_form(&dst);
-            known.remove(&format!("{}.{}", target.to_ascii_lowercase(), crate::dt::stored::LZ4_EXT));
+            forget_other_form(&mut known, &target);
             std::fs::copy(src, &dst).map_err(|e| format!("{target}: {e}"))?;
         }
     }
@@ -640,20 +744,40 @@ fn links_refused() -> bool {
     false
 }
 
-/// Removes the `<name>.lz4` of the picture `dst` (any case) from its folder of the merged folder: a
-/// mod's plain `A.lit` replaces the base's stored `a.lit.lz4`, so the folder holds one form of the name.
-/// Only the link (or the copy) in the merged folder goes; the base's file stays. Other names: nothing.
+/// Removes the other stored form of the picture `dst` from its folder of the merged folder, any case:
+/// a mod's plain `A.lit` replaces the base's stored `a.lit.lz4`, and a mod's `A.lit.lz4` replaces the
+/// base's plain `a.lit` (a hard link), so the folder holds one form of the name, and a plain file
+/// there always wins over the stored one. Only the link (or the copy) in the merged folder goes; the
+/// base's file stays. Names that may not be stored compressed: nothing.
 fn drop_other_stored_form(dst: &Path) {
     let (Some(dir), Some(name)) = (dst.parent(), dst.file_name()) else { return };
     let name = name.to_string_lossy();
-    if !crate::dt::stored::is_compressible(&name) {
+    let logical = stored::logical_name_of(&name).unwrap_or(&name);
+    if !stored::is_compressible(logical) {
         return;
     }
-    let other = format!("{name}.{}", crate::dt::stored::LZ4_EXT);
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
-        if entry.file_name().to_string_lossy().eq_ignore_ascii_case(&other) && entry.path().is_file() {
+        let other = entry.file_name().to_string_lossy().into_owned();
+        let other_logical = stored::logical_name_of(&other).unwrap_or(&other);
+        if other_logical.eq_ignore_ascii_case(logical) && entry.path().is_file() {
             let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// Forgets, in `known`, the other stored form of the picture at `target` (its spelling is gone from
+/// the merged folder with the file, see [`drop_other_stored_form`]). `target`'s own key stays.
+fn forget_other_form(known: &mut BTreeMap<String, String>, target: &str) {
+    let logical = logical_rel(target);
+    if !stored::is_compressible(&logical) {
+        return;
+    }
+    let own = target.to_ascii_lowercase();
+    let plain = logical.to_ascii_lowercase();
+    for key in [plain.clone(), format!("{plain}.{}", stored::LZ4_EXT)] {
+        if key != own {
+            known.remove(&key);
         }
     }
 }
@@ -698,8 +822,9 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf, bool)>) -> Resu
     Ok(())
 }
 
-/// The mod's files under `files_dir`, as (path in the mod, file), sorted. A name that is not
-/// safe is an error; a folder with no files is an empty mod.
+/// The mod's files under `files_dir`, as (stored path in the mod, file), sorted: a plain file or a
+/// `<name>.lz4`. A name that is not safe is an error; a folder with no files is an empty mod. The
+/// leftover `<name>.lz4.part` of an interrupted conversion is not a file of the mod.
 fn list_mod_files(files_dir: &Path) -> Result<Vec<(String, PathBuf)>, String> {
     if !files_dir.is_dir() {
         return Ok(Vec::new());
@@ -708,7 +833,7 @@ fn list_mod_files(files_dir: &Path) -> Result<Vec<(String, PathBuf)>, String> {
     walk(files_dir, files_dir, &mut all)?;
     let mut files: Vec<(String, PathBuf)> = Vec::new();
     for (rel, path, is_dir) in all {
-        if is_dir {
+        if is_dir || rel.to_ascii_lowercase().ends_with(&format!(".{}.{}", stored::LZ4_EXT, stored::PART_SUFFIX)) {
             continue;
         }
         if !safe_rel_name(&rel) {
@@ -927,12 +1052,10 @@ mod tests {
         write_manifest_now(&local, "m1");
         let game = prepare_mod(&local, &base, "m1").unwrap();
         let stamp = read_stamp(&game).unwrap();
-        let files_dir = mod_files_dir(&local, "m1");
-        let hashed: Vec<(String, String)> = ["Data/Units.ini", "Pictures/b.lit"]
-            .iter()
-            .map(|rel| (rel.to_string(), crate::update::sha256_hex(&std::fs::read(files_dir.join(rel)).unwrap())))
-            .collect();
-        assert_eq!(stamp.layers.last().unwrap().files, hashed, "the stamp holds the hashed digests");
+        // The picture is compressed (`prepare_mod`): the stamp names it as laid, and its digest is the
+        // one of the decoded bytes, as the manifest's and the hashing's are.
+        let hashed: Vec<(String, String)> = vec![("Data/Units.ini".into(), crate::update::sha256_hex(b"mod units")), ("Pictures/b.lit.lz4".into(), crate::update::sha256_hex(b"mod picture"))];
+        assert_eq!(stamp.layers.last().unwrap().files, hashed, "the stamp holds the digests of the decoded bytes");
         // A stamp that is kept is not rewritten: its mtime stays where it is set.
         let path = game.join(STAMP);
         let past = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
@@ -1182,7 +1305,7 @@ mod tests {
         install_mod_on(&local, "b", "1.0", &["a"], &[("data/units.ini", "B units"), ("Scripts/b.txt", "b")]);
         let game = prepare_mod(&local, &base, "b").unwrap();
         assert_eq!(std::fs::read_to_string(game.join("Data/Units.ini")).unwrap(), "B units", "B's file overrides A's, keeping the base's spelling");
-        assert_eq!(std::fs::read_to_string(game.join("Pictures/a.lit")).unwrap(), "A-pic", "A's file overrides the base's, B has none");
+        assert_eq!(read_logical(&game, "Pictures/a.lit"), "A-pic", "A's file overrides the base's, B has none");
         assert_eq!(std::fs::read_to_string(game.join("Scripts/a.txt")).unwrap(), "a", "A's own file is there");
         assert_eq!(std::fs::read_to_string(game.join("Scripts/b.txt")).unwrap(), "b", "B's own file is there");
         assert_eq!(std::fs::read_to_string(base.join("Data/Units.ini")).unwrap(), "base units", "the base is not written");
@@ -1191,7 +1314,7 @@ mod tests {
         install_mod(&local, "a", "1.1", &[("Data/Units.ini", "A units"), ("Pictures/a.lit", "A-pic-2"), ("Scripts/a.txt", "a2")]);
         let game = prepare_mod(&local, &base, "b").unwrap();
         assert!(!game.join("marker.txt").exists(), "a change in A rebuilds B's folder");
-        assert_eq!(std::fs::read_to_string(game.join("Pictures/a.lit")).unwrap(), "A-pic-2");
+        assert_eq!(read_logical(&game, "Pictures/a.lit"), "A-pic-2");
         assert_eq!(std::fs::read_to_string(game.join("Scripts/a.txt")).unwrap(), "a2");
         assert_eq!(std::fs::read_to_string(game.join("Data/Units.ini")).unwrap(), "B units");
         let _ = std::fs::remove_dir_all(&base);
@@ -1368,10 +1491,35 @@ mod tests {
         write_manifest(local, id, &Manifest { files, sources: Vec::new() }).unwrap();
     }
 
+    /// The decoded bytes of the logical file `rel` in the merged folder `game` (a plain or a stored one).
+    fn read_logical(game: &Path, rel: &str) -> String {
+        String::from_utf8(crate::dt::stored::find_path(game, rel).unwrap().read().unwrap()).unwrap()
+    }
+
+    /// The names in `dir`, sorted.
+    fn names_in(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        names
+    }
+
+    /// Writes the compressed picture `rel` of mod `id`'s files (a real `.lz4` frame, as the converter
+    /// writes it) holding `text`.
+    fn install_stored_picture(local: &Path, id: &str, rel: &str, text: &str) {
+        let src = temp("stored-src");
+        put(&src.join("picture.lit"), text);
+        let lz4 = crate::dt::stored::compress_file(&src.join("picture.lit")).unwrap();
+        let dst = mod_files_dir(local, id).join(rel);
+        std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
+        std::fs::rename(&lz4, &dst).unwrap();
+        let _ = std::fs::remove_dir_all(&src);
+    }
+
     /// Backlog 1609 part 2 (rule 6): a mod's plain `A.lit` replaces the base's stored `a.lit.lz4` in the
     /// merged folder (ignoring case), so the folder holds one form of the picture. The base keeps its file.
+    /// The mod's picture is compressed at its play, so the folder holds the mod's `.lz4`.
     #[test]
-    fn a_mods_plain_picture_replaces_the_bases_stored_one() {
+    fn a_mods_picture_replaces_the_bases_stored_one() {
         let base = temp("stored-base");
         put(&base.join("Pictures/a.lit"), "picture");
         crate::dt::stored::compress_file(&base.join("Pictures/a.lit")).unwrap();
@@ -1379,17 +1527,91 @@ mod tests {
         let local = temp("stored-hub");
         install_mod(&local, "m1", "1.0", &[("Pictures/A.lit", "mod picture")]);
         let game = prepare_mod(&local, &base, "m1").unwrap();
-        let names = |dir: &Path| {
-            let mut names: Vec<String> = std::fs::read_dir(dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
-            names.sort();
-            names
-        };
-        assert_eq!(names(&game.join("Pictures")), vec!["A.lit".to_string()], "the mod's plain picture is the only form");
-        assert_eq!(std::fs::read_to_string(game.join("Pictures/A.lit")).unwrap(), "mod picture");
+        // The base's spelling of the name is kept (as for every file), and the folder holds one form.
+        assert_eq!(names_in(&game.join("Pictures")), vec!["a.lit.lz4".to_string()], "the mod's stored picture is the only form");
+        assert_eq!(read_logical(&game, "Pictures/a.lit"), "mod picture");
         // A second start keeps the folder as it is.
         prepare_mod(&local, &base, "m1").unwrap();
-        assert_eq!(names(&game.join("Pictures")), vec!["A.lit".to_string()]);
+        assert_eq!(names_in(&game.join("Pictures")), vec!["a.lit.lz4".to_string()]);
         assert!(base.join("Pictures/a.lit.lz4").is_file(), "the base keeps its stored file");
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    /// The other way round: a mod's stored `A.lit.lz4` replaces the base's plain picture, which is a hard
+    /// link in the merged folder. The folder holds the mod's form only, and a lookup reads the mod's bytes.
+    #[test]
+    fn a_mods_stored_picture_replaces_the_bases_plain_one() {
+        let base = base_install("stored-over-plain");
+        let local = temp("stored-over-plain-hub");
+        install_mod(&local, "m1", "1.0", &[("Data/Units.ini", "mod units")]);
+        install_stored_picture(&local, "m1", "Pictures/A.lit.lz4", "mod picture");
+        let game = prepare_mod(&local, &base, "m1").unwrap();
+        assert_eq!(names_in(&game.join("Pictures")), vec!["A.lit.lz4".to_string()], "the base's plain link is gone");
+        assert_eq!(read_logical(&game, "Pictures/a.lit"), "mod picture");
+        assert_eq!(std::fs::read_to_string(base.join("Pictures/a.lit")).unwrap(), "picture", "the base keeps its file");
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    /// Without hard links (the read-through layout) the same rule holds: the base's picture is not in the
+    /// merged folder, and the lookup of the name reads the mod's stored picture, not the base's.
+    #[test]
+    fn without_hard_links_a_mods_stored_picture_is_the_one_read() {
+        let base = base_install("stored-nolinks");
+        let local = temp("stored-nolinks-hub");
+        install_mod(&local, "m1", "1.0", &[("Data/Units.ini", "mod units")]);
+        install_stored_picture(&local, "m1", "Pictures/A.lit.lz4", "mod picture");
+        NO_LINKS.with(|n| n.set(true));
+        let built = prepare_mod(&local, &base, "m1");
+        NO_LINKS.with(|n| n.set(false));
+        let game = built.unwrap();
+        assert_eq!(names_in(&game.join("Pictures")), vec!["A.lit.lz4".to_string()]);
+        let found = crate::dt::stored::find_path(&game, "Pictures/a.lit").unwrap();
+        assert!(found.compressed && found.path.starts_with(&game), "the mod's stored picture, not the base's: {}", found.path.display());
+        assert_eq!(found.read().unwrap(), b"mod picture");
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    /// A mod installed before compression (plain pictures, a manifest of the plain files) is compressed at
+    /// its first play: its folder is built once more, with the stored name, and its manifest still matches.
+    /// Its next play keeps the folder. The kept zips of the older install are removed.
+    #[test]
+    fn a_plain_picture_of_an_older_install_is_compressed_at_its_play() {
+        let base = base_install("convert");
+        let local = temp("convert-hub");
+        install_mod(&local, "m1", "1.0", &[("Data/Units.ini", "mod units"), ("Pictures/b.lit", "mod picture")]);
+        write_manifest_now(&local, "m1");
+        put(&mod_dir(&local, "m1").join("archives/0.zip"), "an old kept zip");
+        let game = prepare_mod(&local, &base, "m1").unwrap();
+        let files = mod_files_dir(&local, "m1");
+        assert!(!files.join("Pictures/b.lit").exists() && files.join("Pictures/b.lit.lz4").is_file(), "compressed in the mod's folder");
+        assert_eq!(read_logical(&game, "Pictures/b.lit"), "mod picture");
+        assert!(damaged_files(&local, "m1").unwrap().is_empty(), "the manifest's logical names and digests still match");
+        assert!(!mod_dir(&local, "m1").join("archives").exists(), "the kept zip of the older install goes");
+        // The stamp was rebuilt once for the stored names; the next play keeps the folder.
+        let path = game.join(STAMP);
+        std::fs::OpenOptions::new().write(true).open(&path).unwrap().set_modified(played_at(7)).unwrap();
+        prepare_mod(&local, &base, "m1").unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), played_at(7), "the folder is kept");
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    /// A stored picture that does not decode is damage: it is listed, and no folder is built from the mod.
+    #[test]
+    fn a_stored_picture_that_does_not_decode_is_damaged() {
+        let base = base_install("stored-damaged");
+        let local = temp("stored-damaged-hub");
+        install_mod(&local, "m1", "1.0", &[("Pictures/b.lit", "mod picture")]);
+        write_manifest_now(&local, "m1");
+        prepare_mod(&local, &base, "m1").unwrap();
+        std::fs::write(mod_files_dir(&local, "m1").join("Pictures/b.lit.lz4"), b"not a frame").unwrap();
+        assert_eq!(damaged_files(&local, "m1").unwrap(), ["Pictures/b.lit"]);
+        std::fs::remove_dir_all(mod_game_dir(&local, "m1")).unwrap();
+        assert!(prepare_mod(&local, &base, "m1").is_err());
+        assert!(!mod_game_dir(&local, "m1").exists(), "no folder is built from a damaged mod");
         let _ = std::fs::remove_dir_all(&base);
         let _ = std::fs::remove_dir_all(&local);
     }

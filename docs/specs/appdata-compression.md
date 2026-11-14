@@ -51,13 +51,15 @@ Rust: `lz4_flex::frame`. Python (build.py): `lz4.frame.compress(…, store_size=
 5. **Conversion** runs once per owned folder before the install loads, crash-safe: write `<name>.lz4.part`, fsync,
    verify by decoding and comparing the length/hash, rename to `<name>.lz4`, then delete the plain file. Leftover
    `.part` files are deleted at start. A progress notice on phones is a UI change (owner's screenshots).
-6. **Mods** (`hub/mods.rs`): the overlay matches layers by logical name and removes the other stored form of a name it
-   replaces (else a base's plain file beats a mod's `.lz4`). Mod manifests keep recording the stored bytes (what the
-   hub sent). `layer_bytes`/`top_file` go through the resolver.
-7. **Hub files are stored verbatim**, never recompressed (Python's and Rust's LZ4 encoders give different bytes):
-   build.py ships `.ugs`/`.lit` as `.lz4` assets, the catalog's size/sha256 are the `.lz4`'s. Released clients that
-   cannot read `.lz4` must not get such a catalog: a new index name (checked against what 1.5.1 reads), the owner's
-   yes before publishing, and the GitVerse quota checked.
+6. **Mods** (`hub/mods.rs`, the design of step 3): the overlay matches layers by logical name and removes the other stored
+   form of a name it replaces, both ways (a base's plain link beats nothing once a mod's `.lz4` is laid; a base's
+   `.lz4` goes for a mod's plain file). A mod's manifest and stamp name each file by its logical path, and its digest
+   is of the decoded bytes, so either form matches. `layer_bytes`/`top_file` go through the resolver.
+7. **Hub files are stored verbatim**, never recompressed (Python's and Rust's LZ4 encoders give different bytes) when the
+   hub ships them compressed. Step 3 does not do that: the catalog, its SHAs and the index name are unchanged; Razdor
+   compresses a mod's pictures itself after unpacking (see step 3). A catalog of `.lz4` assets (build.py) is still a
+   later decision: released clients that cannot read `.lz4` must not get such a catalog (a new index name, the owner's
+   yes before publishing, and the GitVerse quota checked).
 8. **Picture cache**: its key is path + length + mtime; key compressed files on the logical path and the decoded
    length so a conversion does not force a rebuild (or accept one rebuild, said in the changelog).
 
@@ -70,7 +72,33 @@ Rust: `lz4_flex::frame`. Python (build.py): `lz4.frame.compress(…, store_size=
 2. Ownership marker, the converter (rule 5) at start, unpack/import/download writing `.lz4` in owned folders,
    integrity on logical files. Separate fix, its own backlog entry: the repair has no ownership check today
    (`ui/game_import.rs` `start_repair`) and can write into a player's own install.
-3. Mods overlay by logical names; build.py `.lz4` assets; new index name; publish after the owner's yes.
+3. **Mods, client side (done, backlog 1609)**. No catalog change: the catalog and its SHAs are the hub's as they are, and
+   nothing is published.
+   - A mod's zip (deflate) or plain file is unpacked into `files.tmp/` (`Hub::write_mod`); then every `.ugs`/`.lit` in it is
+     compressed (`mods::compress_pictures` → `stored::compress_folder`, the converter's rules: `<name>.lz4.part`,
+     verified, renamed, the plain file removed; a failure is logged and the plain file stays). The manifest is written
+     from the files: `file_entries` lists the logical path (`Pictures/A.lit`), the size of the decoded bytes
+     (`logical_len`) and their SHA-256. The downloaded zip is removed after it is unpacked; no zip is kept
+     (`keep_archives` is gone; `repair_mod` downloads and checks again).
+   - Checks read a file in either form: `damaged_files`/`matches_entry` find the entry with `stored::find` and compare the
+     decoded length and SHA-256 (a plain file is still streamed, as before).
+   - **Installed mods** (`prepare_mod`, at each play, for every layer of the chain): after the asked mod's damage check
+     passes, the plain pictures of each layer are compressed in place, and that layer's `archives/` (the zips kept by
+     older installs) is removed. A plain file is kept until its `.lz4` is verified; the manifest still matches (logical
+     names and digests), so nothing is re-downloaded.
+   - **Stamp**: the stamp keeps the names as they are laid (the stored ones, `Pictures/A.lit.lz4`) with the logical
+     digests. So an installed mod whose pictures were converted gets its merged folder built once more (its `game/` then
+     holds the `.lz4` copies, not the plain ones); after that the stamp is stable and the folder is reused at each play.
+     A mod with no pictures is not rebuilt by this (its stamp names do not change).
+   - **Layering** (`build`): a layer's file is laid under its stored name, and every other stored form of the same logical
+     name in the merged folder goes first (`drop_other_stored_form`, both ways, ignoring case). A `.lz4` of a name the base
+     has as a plain hard link therefore replaces the link; with no hard links (the read-through layout) the lookup finds the
+     mod's `.lz4` before the base's file.
+   - Mod records in `installed.json` keep the logical names (what the mod ships), as before.
+   - Open: the merged folder holds full copies of the mod's own files (`fs::copy`, not links), so the saving on the
+     mod's pictures reaches `game/` once it is built again (the first play after the update), not before. How much
+     `game/` costs on a phone is still to be measured (the Open note at the end, and `docs/flows/app-and-ui.md`).
+   - Not in step 3: a catalog that ships `.lz4` assets (build.py), which would save the download too; see rule 7.
 
-Open: how a hub mod's bytes sit on Android (`mods/<id>/game/` is hard links, or full copies where links fail; the kept
-`archives/*.zip`): measure on a phone; if `game/` is copied there, that copy is the real cost, not the diff files.
+Open: how a hub mod's bytes sit on Android (`mods/<id>/game/` is hard links, or full copies where links fail): measure on a
+phone; if `game/` is copied there, that copy is the real cost, not the diff files.

@@ -32,5 +32,7 @@ pub fn catalog() -> Option<&'static Result<Catalog, String>> {
 
 fn fetch() -> Result<Catalog, String> {
     let local = hub::local_dir().ok_or("no folder for the hub")?;
+    // The zips older installs kept for their mods are not kept any more (backlog 1609 part 2, step 3).
+    hub::drop_all_kept_archives(&local);
     Hub { source: Source::from_env(), local }.fetch_catalog()
 }

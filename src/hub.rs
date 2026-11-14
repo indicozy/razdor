@@ -1263,9 +1263,8 @@ impl Hub {
     }
 
     /// The files of one entry, fetched and checked before anything is written (`files` in
-    /// their catalog order). An archive is taken from its kept zip (`mods::archive_path`, its
-    /// index is its place in `files`) when that still matches the catalog, else downloaded to
-    /// `downloads`; the rest are fetched.
+    /// their catalog order). An archive is downloaded to `downloads` (its zip is unpacked and
+    /// removed by [`Hub::build_mod_files`]; no zip is kept), the rest are fetched.
     fn fetch_files<'a>(&self, id: &str, files: &[&'a FileRef], downloads: &Path) -> Result<Vec<(&'a FileRef, Got)>, String> {
         let mut got = Vec::with_capacity(files.len());
         for (n, &f) in files.iter().enumerate() {
@@ -1274,11 +1273,6 @@ impl Hub {
                 return Err(format!("{}: not a file name the hub may use", f.name));
             }
             if f.archive {
-                let kept = mods::archive_path(&self.local, id, n);
-                if kept.is_file() && Hub::check_file(&kept, f).is_ok() {
-                    got.push((f, Got::Zip(kept)));
-                    continue;
-                }
                 std::fs::create_dir_all(downloads).map_err(|err| format!("downloads: {err}"))?;
                 let part = downloads.join(format!("{id}-{n}.zip"));
                 self.download(&f.path, &part, MAX_ARCHIVE_DOWNLOAD)?;
@@ -1318,12 +1312,16 @@ impl Hub {
 
     /// Writes a mod's files: the files it ships and its archives' entries, built in
     /// `files.tmp/` and put in place of the old `files/` in one rename (a reinstall replaces
-    /// them all, and a file the new version dropped goes too). Then the archives are kept and
-    /// the manifest written (`mods::Manifest`). Returns the records' paths.
+    /// them all, and a file the new version dropped goes too). The pictures are compressed in
+    /// `files.tmp/` first (`mods::compress_pictures`), then the manifest is written from the files
+    /// (`mods::Manifest`, logical paths). Returns the records' paths.
     fn write_mod(&self, id: &str, got: &[(&FileRef, Got)]) -> Result<Vec<String>, String> {
         let tmp = mod_dir(&self.local, id).join("files.tmp");
         let _ = std::fs::remove_dir_all(&tmp);
-        let built = self.build_mod_files(&tmp, got).and_then(|names| mods::file_entries(&tmp).map(|entries| (names, entries)));
+        let built = self.build_mod_files(&tmp, got).and_then(|names| {
+            mods::compress_pictures(&tmp);
+            mods::file_entries(&tmp).map(|entries| (names, entries))
+        });
         let (names, entries) = match built {
             Ok(built) => built,
             Err(e) => {
@@ -1334,38 +1332,15 @@ impl Hub {
         let files = mod_files_dir(&self.local, id);
         let _ = std::fs::remove_dir_all(&files);
         std::fs::rename(&tmp, &files).map_err(|e| format!("{}: {e}", files.display()))?;
-        self.keep_archives(id, got)?;
         let manifest = mods::Manifest { files: entries, sources: got.iter().map(|(f, _)| (*f).clone()).collect() };
         mods::write_manifest(&self.local, id, &manifest)?;
         Ok(names.into_iter().map(|n| format!("mods/{id}/files/{n}")).collect())
     }
 
-    /// Keeps the zips of `got`'s archives under `mods/<id>/archives/<n>.zip` (`n`: the place in
-    /// `got`), replacing the kept ones. Without archives, none is kept.
-    fn keep_archives(&self, id: &str, got: &[(&FileRef, Got)]) -> Result<(), String> {
-        let dir = mod_dir(&self.local, id);
-        let kept = dir.join("archives");
-        let fresh = dir.join("archives.tmp");
-        let _ = std::fs::remove_dir_all(&fresh);
-        if !got.iter().any(|(_, g)| matches!(g, Got::Zip(_))) {
-            let _ = std::fs::remove_dir_all(&kept);
-            return Ok(());
-        }
-        std::fs::create_dir_all(&fresh).map_err(|e| format!("{}: {e}", fresh.display()))?;
-        for (n, (_, g)) in got.iter().enumerate() {
-            if let Got::Zip(path) = g {
-                let to = fresh.join(format!("{n}.zip"));
-                std::fs::rename(path, &to).or_else(|_| std::fs::copy(path, &to).map(|_| ())).map_err(|e| format!("{n}.zip: {e}"))?;
-            }
-        }
-        let _ = std::fs::remove_dir_all(&kept);
-        std::fs::rename(&fresh, &kept).map_err(|e| format!("{}: {e}", kept.display()))
-    }
-
     /// Restores mod `id`'s files that are missing or changed (an antivirus may have quarantined
-    /// them): the whole mod is written again from its sources, the kept zips where they still
-    /// match and the rest downloaded and checked as an install checks them, and its merged folder
-    /// is dropped to be built again. Returns whether anything was damaged. A mod with no manifest
+    /// them): the whole mod is written again from its sources, each archive downloaded and checked
+    /// as an install checks it (no zip is kept), and its merged folder is dropped to be built again.
+    /// Returns whether anything was damaged. A mod with no manifest
     /// takes its sources from the catalog, which must hold the installed version.
     pub fn repair_mod(&self, id: &str) -> Result<bool, String> {
         let damaged = mods::damaged_files(&self.local, id)?;
@@ -1452,7 +1427,11 @@ impl Hub {
                     crate::editor::files::write_atomically(&tmp.join(&f.name), bytes).map_err(|e| format!("{}: {e}", f.name))?;
                     names.push(f.name.clone());
                 }
-                Got::Zip(path) => names.extend(unpack_zip(path, tmp)?),
+                Got::Zip(path) => {
+                    names.extend(unpack_zip(path, tmp)?);
+                    // No zip is kept: the unpacked files are what the mod keeps.
+                    let _ = std::fs::remove_file(path);
+                }
             }
         }
         Ok(names)
@@ -2176,7 +2155,10 @@ mod tests {
         let catalog = hub.catalog().unwrap();
         assert_eq!(hub.install(&catalog, "pack", Lang::Ru).unwrap(), ["pack"]);
         assert_eq!(std::fs::read(local.join("mods/pack/files/data/units.ini")).unwrap(), b"units");
-        assert_eq!(std::fs::read(local.join("mods/pack/files/Pictures/a.lit")).unwrap(), b"pic");
+        // The picture is stored compressed: its decoded bytes are the zip's member.
+        assert!(!local.join("mods/pack/files/Pictures/a.lit").exists());
+        assert_eq!(crate::dt::stored::find_path(&local.join("mods/pack/files"), "Pictures/a.lit").unwrap().read().unwrap(), b"pic");
+        assert!(!local.join("mods/pack/archives").exists(), "no zip is kept");
         assert!(hub.installed().entries["pack"].files.contains(&"mods/pack/files/data/units.ini".to_string()));
         assert!(!local.join("downloads").exists(), "the download is removed after the install");
         assert!(!local.join("mods/pack/files.tmp").exists());
@@ -2211,29 +2193,28 @@ mod tests {
     }
 
     #[test]
-    fn an_install_keeps_the_zip_and_writes_a_manifest() {
+    fn an_install_writes_a_logical_manifest_and_keeps_no_zip() {
         let (_hub, root, local) = installed_pack("manifest");
         let manifest = mods::read_manifest(&local, "pack").expect("the install writes a manifest");
         let paths: Vec<&str> = manifest.files.iter().map(|f| f.path.as_str()).collect();
-        assert_eq!(paths, ["Pictures/a.lit", "data/units.ini"]);
+        assert_eq!(paths, ["Pictures/a.lit", "data/units.ini"], "the logical names, not the stored ones");
+        assert_eq!(manifest.files[0].sha256, crate::update::sha256_hex(b"pic"), "the digest of the decoded bytes");
         assert_eq!(manifest.sources.len(), 1);
-        assert_eq!(std::fs::read(mods::archive_path(&local, "pack", 0)).unwrap(), std::fs::read(root.join("mods/pack/pack.zip")).unwrap());
+        assert!(!local.join("mods/pack/archives").exists());
         assert!(mods::damaged_files(&local, "pack").unwrap().is_empty());
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&local);
     }
 
     #[test]
-    fn a_missing_and_a_changed_mod_file_are_restored_from_the_kept_zip() {
+    fn a_missing_and_a_changed_mod_file_are_restored_from_the_catalog_zip() {
         let (hub, root, local) = installed_pack("restore");
         std::fs::remove_file(local.join("mods/pack/files/data/units.ini")).unwrap();
-        std::fs::write(local.join("mods/pack/files/Pictures/a.lit"), b"changed").unwrap();
-        // The catalog's zip is gone: the kept one is what restores the files.
-        std::fs::remove_file(root.join("mods/pack/pack.zip")).unwrap();
+        std::fs::write(local.join("mods/pack/files/Pictures/a.lit.lz4"), b"changed").unwrap();
         assert_eq!(mods::damaged_files(&local, "pack").unwrap().len(), 2);
         assert!(hub.repair_mod("pack").unwrap());
         assert_eq!(std::fs::read(local.join("mods/pack/files/data/units.ini")).unwrap(), b"units");
-        assert_eq!(std::fs::read(local.join("mods/pack/files/Pictures/a.lit")).unwrap(), b"pic");
+        assert_eq!(crate::dt::stored::find_path(&local.join("mods/pack/files"), "Pictures/a.lit").unwrap().read().unwrap(), b"pic");
         assert!(mods::damaged_files(&local, "pack").unwrap().is_empty());
         assert!(!hub.repair_mod("pack").unwrap(), "an intact mod is not written again");
         let _ = std::fs::remove_dir_all(&root);
@@ -2241,13 +2222,12 @@ mod tests {
     }
 
     #[test]
-    fn a_repair_without_the_kept_zip_downloads_it_again_and_checks_it() {
+    fn a_repair_downloads_the_zip_again_and_checks_it() {
         let (hub, root, local) = installed_pack("download");
-        std::fs::remove_dir_all(local.join("mods/pack/archives")).unwrap();
         std::fs::remove_file(local.join("mods/pack/files/data/units.ini")).unwrap();
         assert!(hub.repair_mod("pack").unwrap());
         assert_eq!(std::fs::read(local.join("mods/pack/files/data/units.ini")).unwrap(), b"units");
-        assert!(mods::archive_path(&local, "pack", 0).is_file(), "the zip is kept again");
+        assert!(!local.join("mods/pack/archives").exists(), "no zip is kept");
         assert!(!local.join("downloads").exists());
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&local);
@@ -2257,7 +2237,6 @@ mod tests {
     fn a_mod_that_cannot_be_restored_says_why_and_stays_damaged() {
         let (hub, root, local) = installed_pack("unrestorable");
         std::fs::remove_file(local.join("mods/pack/files/data/units.ini")).unwrap();
-        std::fs::remove_dir_all(local.join("mods/pack/archives")).unwrap();
         std::fs::remove_file(root.join("mods/pack/pack.zip")).unwrap();
         let err = hub.repair_mod("pack").unwrap_err();
         assert!(err.starts_with("pack:"), "{err}");

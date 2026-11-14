@@ -44,6 +44,12 @@ pub fn is_compressible(name: &str) -> bool {
     lower.len() > 4 && (lower.ends_with(".ugs") || lower.ends_with(".lit"))
 }
 
+/// The logical name of the stored file `name` (`Knight.ugs.lz4` → `Knight.ugs`), or None when `name` is
+/// not a stored form (no `.lz4`, or a `.lz4` of a name that may not be stored compressed).
+pub fn logical_name_of(name: &str) -> Option<&str> {
+    strip_lz4(name).filter(|logical| is_compressible(logical))
+}
+
 /// `name` without a trailing `.lz4` (any case), or None.
 fn strip_lz4(name: &str) -> Option<&str> {
     let at = name.len().checked_sub(LZ4_EXT.len() + 1)?;
@@ -371,6 +377,21 @@ pub fn compress_owned_in_background(dir: &Path) {
 }
 
 #[cfg(test)]
+mod logical_name_tests {
+    use super::*;
+
+    /// Only a `.lz4` of a name that may be stored compressed is a stored form; any case.
+    #[test]
+    fn a_stored_name_is_the_compressible_name_with_lz4() {
+        assert_eq!(logical_name_of("Knight.ugs.lz4"), Some("Knight.ugs"));
+        assert_eq!(logical_name_of("a.LIT.LZ4"), Some("a.LIT"));
+        assert_eq!(logical_name_of("Knight.ugs"), None, "a plain name is not a stored form");
+        assert_eq!(logical_name_of("notes.txt.lz4"), None, "a name that may not be compressed");
+        assert_eq!(logical_name_of("x.lz4"), None);
+    }
+}
+
+#[cfg(test)]
 mod background_tests {
     use super::*;
 
@@ -389,6 +410,13 @@ mod background_tests {
         assert_eq!(found.logical_len().unwrap(), 18);
         let _ = fs::remove_dir_all(&dir);
     }
+}
+
+/// [`convert_tree`] for a folder Razdor wrote itself and owns by construction: a hub mod's files
+/// (`hub/mods.rs`), whose plain pictures are compressed after an unpack, an import or a start. No
+/// ownership check; the same rules as [`convert_owned`] (leftover parts removed, plain wins).
+pub fn compress_folder(dir: &Path) -> io::Result<Summary> {
+    convert_tree(dir)
 }
 
 /// [`convert_owned`] for a folder already known to be owned (the walk, the rules of the converter).
