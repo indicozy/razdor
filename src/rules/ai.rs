@@ -46,7 +46,7 @@ struct PlanFlood {
 }
 
 use crate::dt::dtm::Army as DtArmy;
-use crate::frame_probe::{self, Stage};
+use crate::frame_probe::{self, Counter, Stage};
 
 use super::battle::{Battle, Outcome, Team, RECORDS};
 use super::clock::MINUTES_PER_DAY;
@@ -1005,12 +1005,14 @@ impl SimCache {
             for k in 0..2 {
                 self.records[k][..counts[k]].copy_from_slice(&left[k][..counts[k]]);
             }
+            frame_probe::count(Counter::FightHits);
             return r;
         }
         if self.entries >= SIM_CACHE_SIZE {
             self.played.clear();
             self.entries = 0;
         }
+        frame_probe::count(Counter::Fights);
         let bt = fight(c, a, b, false, records);
         let r = sim_result(&bt);
         let left = bt.side_records();
@@ -2035,28 +2037,31 @@ impl Game {
         let here = self.world.armies[i].tile(&self.world.map);
         let grid = self.world.map.grid;
         let reach = self.content.options.ai_get_path_distance;
-        let mut dist: Vec<(Party, i32)> = Vec::new();
-        let mut replan = self.world.armies[i].mind.countdown < 1;
-        for p in self.parties() {
-            if p == Party::Army(i) {
-                continue;
-            }
-            let d = grid.octile(here, self.cell_of(p, hero));
-            if 0 < d && d <= reach {
-                replan = true;
-            }
-            if d > 0 {
-                let key = self.key_of(p);
-                let a = &mut self.world.armies[i];
-                if key == HERO {
-                    a.talk = a.talk.saturating_add(1);
-                } else {
-                    let c = a.mind.talk.entry(key).or_insert(0);
-                    *c = c.saturating_add(1);
+        let (dist, replan) = frame_probe::time(Stage::AiScan, || {
+            let mut dist: Vec<(Party, i32)> = Vec::new();
+            let mut replan = self.world.armies[i].mind.countdown < 1;
+            for p in self.parties() {
+                if p == Party::Army(i) {
+                    continue;
                 }
+                let d = grid.octile(here, self.cell_of(p, hero));
+                if 0 < d && d <= reach {
+                    replan = true;
+                }
+                if d > 0 {
+                    let key = self.key_of(p);
+                    let a = &mut self.world.armies[i];
+                    if key == HERO {
+                        a.talk = a.talk.saturating_add(1);
+                    } else {
+                        let c = a.mind.talk.entry(key).or_insert(0);
+                        *c = c.saturating_add(1);
+                    }
+                }
+                dist.push((p, d));
             }
-            dist.push((p, d));
-        }
+            (dist, replan)
+        });
         // A plan's result sets the facing when it is written (`apply_plan`).
         let planned = replan && frame_probe::time(Stage::AiPlan, || self.ai_plan(i, &dist, hero));
         if !planned {
@@ -2067,7 +2072,7 @@ impl Game {
             a.mind.facing_none = a.path.is_empty();
             a.mind.stand_facing = a.path.first().map(|t| (t.0 - here.0, t.1 - here.1));
         }
-        if let Some(c) = self.ai_arrive(uid, hero) {
+        if let Some(c) = frame_probe::time(Stage::AiRules, || self.ai_arrive(uid, hero)) {
             if let Some(i) = self.army_by_uid(uid) {
                 self.world.armies[i].mind.contact = Some(c);
             }
@@ -2108,12 +2113,16 @@ impl Game {
             (a.ai.style, a.ai.model, a.uid)
         };
         let range = target_range(o, style);
-        for &(p, d) in dist {
-            let key = self.key_of(p);
-            if 0 < d && d <= range && !self.world.armies[i].mind.clean.contains(&key) {
-                self.rescore_pair(i, p);
+        frame_probe::time(Stage::AiRescore, || {
+            for &(p, d) in dist {
+                let key = self.key_of(p);
+                if 0 < d && d <= range && !self.world.armies[i].mind.clean.contains(&key) {
+                    frame_probe::count(Counter::Rescores);
+                    self.rescore_pair(i, p);
+                }
             }
-        }
+        });
+        frame_probe::count(Counter::Plans);
         self.ai_stats.paths += 1;
         let pr = Priorities::of(o, model);
         let (w, h) = (self.world.map.w, self.world.map.h);
@@ -2255,21 +2264,22 @@ impl Game {
         self.settle(uid);
         while self.plans.list.len() >= max_in_flight() {
             if let Some((u, ticket)) = self.plans.list.pop_front() {
-                self.apply_plan(u, ticket.wait());
+                self.apply_plan(u, await_plan(ticket));
             }
         }
         let map = &self.world.map;
         let cells = (map.w.max(0) * map.h.max(0)) as usize;
+        frame_probe::count(Counter::Floods);
         if flood_pool::offloads(cells) {
             let cost = if sails { map.water_costs() } else { map.land_costs() }.to_vec();
             let input = PlanInput { geom: map.geometry(), cost, mult, seeds, from, erase, reach, search };
-            match flood_pool::dispatch(input) {
+            match frame_probe::time(Stage::AiFlood, || flood_pool::dispatch(input)) {
                 Ticket::Ready(out) => self.apply_plan(uid, *out),
                 ticket => self.plans.list.push_back((uid, ticket)),
             }
         } else {
             let cost = if sails { map.water_costs() } else { map.land_costs() };
-            let out = flood_pool::compute_with(map, cost, &mult, &seeds, from, &erase, reach, search);
+            let out = frame_probe::time(Stage::AiFlood, || flood_pool::compute_with(map, cost, &mult, &seeds, from, &erase, reach, search));
             self.apply_plan(uid, out);
         }
     }
@@ -2303,7 +2313,7 @@ impl Game {
     pub(crate) fn settle(&mut self, uid: u32) {
         if let Some(k) = self.plans.list.iter().position(|(u, _)| *u == uid) {
             if let Some((u, ticket)) = self.plans.list.remove(k) {
-                self.apply_plan(u, ticket.wait());
+                self.apply_plan(u, await_plan(ticket));
             }
         }
     }
@@ -2317,10 +2327,18 @@ impl Game {
 
     /// Writes every pending plan, in the order they were made.
     pub(crate) fn settle_all(&mut self) {
-        while let Some((u, ticket)) = self.plans.list.pop_front() {
-            self.apply_plan(u, ticket.wait());
-        }
+        frame_probe::time(Stage::AiSettle, || {
+            while let Some((u, ticket)) = self.plans.list.pop_front() {
+                self.apply_plan(u, await_plan(ticket));
+            }
+        });
     }
+}
+
+/// A flood's result on the main thread: the wait for a worker is timed as [`Stage::AiFloodWait`]
+/// (the probe's clock only; the result is the ticket's own).
+fn await_plan(ticket: Ticket) -> PlanOutput {
+    frame_probe::time(Stage::AiFloodWait, || ticket.wait())
 }
 
 /// The search a plan makes under the experimental rules. «Ускоренный ИИ» (`fast_ai`) turns on both:

@@ -56,7 +56,7 @@ use std::time::{Duration, Instant};
 /// tick, `world` the map with `terrain` inside it, `rebuilds` the texture rebuilds, `draws` the
 /// draw calls estimated for the frame and `verts` its vertices ([`draw`]), and the last columns the
 /// GPU time of each GPU stage (`GPU_STAGES`, empty when not timed, see `ui::gpu_probe`).
-pub const CSV_HEADER: &str = "frame,kind,work_ms,total_ms,tick,terrain,world,fog,minimap,route,look,armies,script,day,snap,autosave,session,ai_move,ai_plan,rebuilds,backdrop,battle_window,effect,gpu_backdrop,gpu_window,view,draws,verts,water,mist,light,sun_shadow,weather,ground_cache,freeze,gpu_backdrop_ms,gpu_window_ms,gpu_sky_ms,gpu_terrain_ms,gpu_marks_ms,gpu_sprites_ms,gpu_fog_ms,gpu_ui_ms,gpu_water_ms,gpu_mist_ms,gpu_light_ms,gpu_sun_shadow_ms,gpu_weather_ms,gpu_ground_cache_ms,gpu_freeze_ms,gpu_minimap_ms";
+pub const CSV_HEADER: &str = "frame,kind,work_ms,total_ms,tick,terrain,world,fog,minimap,route,look,armies,script,day,snap,autosave,session,ai_move,ai_plan,rebuilds,backdrop,battle_window,effect,gpu_backdrop,gpu_window,view,draws,verts,water,mist,light,sun_shadow,weather,ground_cache,freeze,gpu_backdrop_ms,gpu_window_ms,gpu_sky_ms,gpu_terrain_ms,gpu_marks_ms,gpu_sprites_ms,gpu_fog_ms,gpu_ui_ms,gpu_water_ms,gpu_mist_ms,gpu_light_ms,gpu_sun_shadow_ms,gpu_weather_ms,gpu_ground_cache_ms,gpu_freeze_ms,gpu_minimap_ms,ai_scan_ms,ai_rescore_ms,ai_flood_ms,ai_flood_wait_ms,ai_settle_ms,ai_rules_ms,plans,rescores,floods,fights,fight_hits";
 
 /// The GPU stages timed per frame, in the CSV's column order (`gpu_<name>_ms`): each is the GPU's
 /// time between the marker before it and its own marker (`ui::gpu_probe::gpu_wait`).
@@ -81,6 +81,13 @@ pub const GPU_STAGES: [Stage; 16] = [
 
 /// The map's effects' CPU stages, in the CSV's column order (after `verts`).
 pub const EFFECT_STAGES: [Stage; 7] = [Stage::Water, Stage::Mist, Stage::Light, Stage::SunShadow, Stage::Weather, Stage::GroundCache, Stage::Freeze];
+
+/// The AI tick's sub-stages, in the CSV's column order (after the GPU columns). They are inside
+/// [`Stage::AiMove`] and [`Stage::AiPlan`], see there.
+pub const AI_STAGES: [Stage; 6] = [Stage::AiScan, Stage::AiRescore, Stage::AiFlood, Stage::AiFloodWait, Stage::AiSettle, Stage::AiRules];
+
+/// The AI's per-frame counts ([`count`]), in the CSV's column order after [`AI_STAGES`].
+pub const COUNTERS: [Counter; 5] = [Counter::Plans, Counter::Rescores, Counter::Floods, Counter::Fights, Counter::FightHits];
 
 /// The period of the debug mode's GPU samples: one frame in this many seconds runs its GPU waits.
 pub const GPU_SAMPLE_EVERY: Duration = Duration::from_secs(10);
@@ -127,8 +134,26 @@ pub enum Stage {
     /// The AI armies' moves and plans (`ai_move_run`, inside [`Stage::Armies`]). Includes
     /// [`Stage::AiPlan`].
     AiMove,
-    /// The AI's plans of the armies that replanned (`ai_plan`, inside [`Stage::AiMove`]).
+    /// The AI's plans of the armies that replanned (`ai_plan`, inside [`Stage::AiMove`]). Includes
+    /// [`Stage::AiRescore`], [`Stage::AiFlood`] and the [`Stage::AiFloodWait`] made in it.
     AiPlan,
+    /// The AI arrival's distance scan: the octile distance to every party, the talk counters and the
+    /// re-plan test (`ai_arrival`, inside [`Stage::AiMove`]).
+    AiScan,
+    /// The dirty pairs rescored by simulated fights (`ai_plan`'s loop, inside [`Stage::AiPlan`]; the
+    /// fights are counted in [`Counter::Fights`]).
+    AiRescore,
+    /// The flood's hand-off on the main thread: its dispatch to a worker, or its run inline (inside
+    /// [`Stage::AiPlan`]; a worker's own time is not on this thread).
+    AiFlood,
+    /// The main thread waiting for a flood's result (`Ticket::wait`), in a plan or at the settle
+    /// (inside [`Stage::AiPlan`] or [`Stage::AiSettle`]).
+    AiFloodWait,
+    /// The slice's join: every pending plan written before the frame goes on (`settle_all`, inside
+    /// [`Stage::AiMove`]). Includes its waits ([`Stage::AiFloodWait`]).
+    AiSettle,
+    /// The arrival rules (`ai_arrive`, inside [`Stage::AiMove`]).
+    AiRules,
     /// The battle's map backdrop (`world_view::backdrop`, behind the battle window).
     Backdrop,
     /// The battle's own window: the cards, the bar, the effects (`BattleView::draw`). Includes
@@ -181,7 +206,7 @@ pub enum Stage {
 }
 
 impl Stage {
-    pub const COUNT: usize = 41;
+    pub const COUNT: usize = 47;
 
     /// Every stage, in the enum's order (`ALL[st as usize] == st`, a test pins it).
     pub const ALL: [Stage; Stage::COUNT] = [
@@ -200,6 +225,12 @@ impl Stage {
         Stage::Session,
         Stage::AiMove,
         Stage::AiPlan,
+        Stage::AiScan,
+        Stage::AiRescore,
+        Stage::AiFlood,
+        Stage::AiFloodWait,
+        Stage::AiSettle,
+        Stage::AiRules,
         Stage::Backdrop,
         Stage::BattleWindow,
         Stage::Effect,
@@ -247,6 +278,12 @@ impl Stage {
             Stage::Session => "session",
             Stage::AiMove => "ai_move",
             Stage::AiPlan => "ai_plan",
+            Stage::AiScan => "ai_scan",
+            Stage::AiRescore => "ai_rescore",
+            Stage::AiFlood => "ai_flood",
+            Stage::AiFloodWait => "ai_flood_wait",
+            Stage::AiSettle => "ai_settle",
+            Stage::AiRules => "ai_rules",
             Stage::Backdrop => "backdrop",
             Stage::BattleWindow => "battle_window",
             Stage::Effect => "effect",
@@ -280,6 +317,22 @@ impl Stage {
     pub fn is_gpu(self) -> bool {
         self.name().starts_with("gpu_")
     }
+}
+
+/// A count the AI makes, per frame ([`count`]). The summary line gives the mean per frame of the kind
+/// (per hero step on the walk-step kind).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Counter {
+    /// The plans made (`ai_plan`).
+    Plans,
+    /// The dirty pairs rescored (`ai_plan`'s loop).
+    Rescores,
+    /// The floods made, on a worker or inline (`plan_flood`).
+    Floods,
+    /// The simulated fights played by the AI's scoring (the cache's misses, `SimCache::get`).
+    Fights,
+    /// The scores the simulated-fight cache gave without a fight (`SimCache::get`'s hits).
+    FightHits,
 }
 
 /// What the frame was: the map with the hero walking, or not, or a battle (`tilt`: drawn in
@@ -333,6 +386,8 @@ pub struct Sample {
     pub verts: u32,
     /// The frame ran its GPU waits as a debug-mode sample ([`GPU_SAMPLE_EVERY`]): summarised apart.
     pub gpu_sampled: bool,
+    /// The AI's counts this frame ([`count`]), in [`COUNTERS`] order.
+    pub counts: [u32; COUNTERS.len()],
 }
 
 struct State {
@@ -358,6 +413,8 @@ struct State {
     batch_key: Option<u64>,
     batch_verts: u32,
     batch_dirty: bool,
+    /// The AI's counts this frame ([`count`]), in [`COUNTERS`] order.
+    counts: [u32; COUNTERS.len()],
     /// The GPU time of each of [`GPU_STAGES`] by frame, as the frame's markers measured it.
     gpu_frames: BTreeMap<u64, [f32; GPU_STAGES.len()]>,
     /// CSV rows not yet appended to the file (`RAZDOR_PROFILE_FRAMES`): the frame and its sample.
@@ -391,6 +448,7 @@ impl State {
             batch_key: None,
             batch_verts: 0,
             batch_dirty: false,
+            counts: [0; COUNTERS.len()],
             gpu_frames: BTreeMap::new(),
             csv_rows: Vec::new(),
             gpu: Vec::new(),
@@ -425,6 +483,13 @@ pub fn time<T>(stage: Stage, f: impl FnOnce() -> T) -> T {
     let spent = started.elapsed();
     STATE.with_borrow_mut(|s| s.stage[stage as usize] += spent);
     r
+}
+
+/// The AI made one count of `c` this frame ([`Counter`]). Off with the probe, it does nothing.
+pub fn count(c: Counter) {
+    if on() {
+        STATE.with_borrow_mut(|s| s.counts[c as usize] += 1);
+    }
 }
 
 /// A texture was rebuilt this frame (the minimap's and the fog's caches).
@@ -632,6 +697,7 @@ pub fn end_frame(work: Duration, total: Duration) {
             draws: s.draws,
             verts: s.verts,
             gpu_sampled: s.gpu_sampling,
+            counts: s.counts,
         };
         s.frames += 1;
         if csv {
@@ -648,6 +714,7 @@ pub fn end_frame(work: Duration, total: Duration) {
         s.terrain_px = 0.0;
         s.draws = 0;
         s.verts = 0;
+        s.counts = [0; COUNTERS.len()];
         s.batch_key = None;
         s.batch_verts = 0;
         s.batch_dirty = false;
@@ -836,6 +903,12 @@ pub fn csv_row_gpu(frame: u64, s: &Sample, gpu: Option<&[f32; GPU_STAGES.len()]>
             row.push_str(&format!("{ms:.3}"));
         }
     }
+    for st in AI_STAGES {
+        row.push_str(&format!(",{:.3}", stage(st)));
+    }
+    for c in COUNTERS {
+        row.push_str(&format!(",{}", s.counts[c as usize]));
+    }
     row
 }
 
@@ -954,8 +1027,24 @@ fn kind_line(secs: f32, kind: Kind, of: &[&Sample], gpu_terrain: &[f32], group: 
     } else {
         String::new()
     };
+    // The AI's sub-stages and counts (per frame of the kind: per hero step on the walk-step kind).
+    let per = |c: Counter| of.iter().map(|s| s.counts[c as usize] as f32).sum::<f32>() / of.len() as f32;
+    let ai = format!(
+        "ai-scan {} | ai-rescore {} | ai-flood {} | ai-flood-wait {} | ai-settle {} | ai-rules {} | plans {:.2} | rescores {:.2} | floods {:.2} | fights {:.2} (cache hits {:.2}) | ",
+        stage(Stage::AiScan),
+        stage(Stage::AiRescore),
+        stage(Stage::AiFlood),
+        stage(Stage::AiFloodWait),
+        stage(Stage::AiSettle),
+        stage(Stage::AiRules),
+        per(Counter::Plans),
+        per(Counter::Rescores),
+        per(Counter::Floods),
+        per(Counter::Fights),
+        per(Counter::FightHits),
+    );
     format!(
-        "frame probe {secs:.1} s {name} n={} | total {} | work {} | present {} | tick {} | route {} | look {} | armies {} | ai-move {} | ai-plan {} | script {} | day {} | snap {} | tick-rest {} | terrain {} | objects {} | fog {} | minimap {} | autosave {} | rest {} | {battle}{map}tex rebuilds {rebuilds}",
+        "frame probe {secs:.1} s {name} n={} | total {} | work {} | present {} | tick {} | route {} | look {} | armies {} | ai-move {} | ai-plan {} | {ai}script {} | day {} | snap {} | tick-rest {} | terrain {} | objects {} | fog {} | minimap {} | autosave {} | rest {} | {battle}{map}tex rebuilds {rebuilds}",
         of.len(),
         dist(of.iter().map(|s| s.total_ms)).wide(),
         dist(of.iter().map(|s| s.work_ms)).wide(),
@@ -1088,7 +1177,7 @@ mod tests {
     use super::*;
 
     fn sample(kind: Kind, work_ms: f32, total_ms: f32, stage_ms: [f32; Stage::COUNT]) -> Sample {
-        Sample { kind, work_ms, total_ms, stage_ms, rebuilds: 0, sprites: 0, sprite_px: 0.0, terrain_px: 0.0, draws: 0, verts: 0, gpu_sampled: false }
+        Sample { kind, work_ms, total_ms, stage_ms, rebuilds: 0, sprites: 0, sprite_px: 0.0, terrain_px: 0.0, draws: 0, verts: 0, gpu_sampled: false, counts: [0; COUNTERS.len()] }
     }
 
     #[test]
@@ -1110,6 +1199,17 @@ mod tests {
         assert!(lines[1].starts_with("frame probe 5.0 s gpu-sample idle[flat] n=1 "), "{}", lines[1]);
         assert!(lines[0].contains(" | water 0.00 | mist 0.00 | "), "{}", lines[0]);
         assert!(lines[0].contains(" | gpu-minimap p50 0.00 p99 0.00 max 0.00 | draws 0 verts 0 | "), "{}", lines[0]);
+    }
+
+    #[test]
+    fn the_ai_counts_are_per_frame_in_the_walk_step_line() {
+        let mut step = sample(Kind::WalkStep { tilt: false }, 3.0, 4.0, stages(&[(Stage::AiPlan, 0.5), (Stage::AiRescore, 0.25)]));
+        step.counts = [7, 3, 7, 2, 4];
+        let lines = summary_lines(5.0, &[step], &[]);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].contains(" | ai-plan p50 0.5 p99 0.5 max 0.5 | ai-scan p50 0.0 "), "{}", lines[0]);
+        assert!(lines[0].contains(" | ai-rescore p50 0.2 p99 0.2 max 0.2 | ai-flood "), "{}", lines[0]);
+        assert!(lines[0].contains(" | plans 7.00 | rescores 3.00 | floods 7.00 | fights 2.00 (cache hits 4.00) | script p50 0.0 "), "{}", lines[0]);
     }
 
     #[test]
@@ -1204,11 +1304,17 @@ mod tests {
         gpu[3] = 1.5;
         gpu[7] = 0.25;
         let timed = csv_row_gpu(7, &step, Some(&gpu));
-        assert!(timed.ends_with(",120,0.000,0.000,0.000,0.000,0.000,0.000,0.000,,,,1.500,,,,0.250,,,,,,,,"), "{timed}");
         assert_eq!(timed.split(',').count(), CSV_HEADER.split(',').count());
+        let f: Vec<&str> = timed.split(',').collect();
+        let n = f.len();
+        // The GPU block is the 16 fields before the AI columns: terrain (index 3) and ui (index 7) timed.
+        let gpu0 = n - 11 - GPU_STAGES.len();
+        assert_eq!((f[gpu0 + 3], f[gpu0 + 7]), ("1.500", "0.250"), "{timed}");
+        // The AI sub-stages (zero here) and the AI counts come last, in their order.
+        assert_eq!(&f[n - 11..], &["0.000", "0.000", "0.000", "0.000", "0.000", "0.000", "0", "0", "0", "0", "0"], "{timed}");
         let other = sample(Kind::Other, 0.5, 1.0, [0.0; Stage::COUNT]);
         assert!(csv_row(1, &other).starts_with("1,other,0.500,1.000,0.000,"));
-        assert!(csv_row(1, &other).ends_with(","));
+        assert!(csv_row(1, &other).ends_with(",0,0,0,0,0"));
     }
 
     #[test]
