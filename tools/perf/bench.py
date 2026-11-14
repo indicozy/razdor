@@ -28,6 +28,18 @@ Matrix (the same scenes as docs/perf/2026-11-12-atmosphere-performance.md):
           are kept). The other backends run each cell --runs (3) times for --frames (400) frames, the
           first --skip (100) dropped.
 
+  # gameplay cells: a JSON file of named cells ({name: {RAZDOR_* switches}}), run on their own, e.g. a
+  # hero walking (`walk:<map>:dx,dy`) with the terrain switches; --views flat --effects off keeps them
+  # at the game's defaults. Walk cells must step (a walk-step frame) or the run fails.
+  python3 -I tools/perf/bench.py --bin <razdor> --gpu-4060 --cells tools/perf/cells/terrain-ab.json \
+    --views flat --effects off --scenes tryn-walk-A,tryn-walk-Adesk --size 2400x1080 --out <r.json>
+  # --cpus 16-19 pins the bench and the game (default 8-19); CPUs 0-7 are refused.
+
+Per frame kind (walk scenes): the frames by the probe's kind (`idle`, `walk`: moving without a step,
+`walk-step`: the hero changed cell), each with its count, frame ms and p90, and CPU work ms. The terrain
+options the game logged (`terrain options: opt=…`) and the lighting flags of its frames are recorded
+per cell, so a variant's switch is shown to have taken effect.
+
 Per run: frame ms (median of total_ms), CPU work ms (median of work_ms, the frame probe), p90 ms, load
 time (to the first frame), peak RSS, VRAM by PID (nvidia-smi, GPU runs), draws and verts when the probe
 has them, and the renderer (GPU runs: the game's own `window open` line). Per cell: the median over the
@@ -59,7 +71,8 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-PIN = ['nice', '-n', '19', 'taskset', '-c', '8-19']  # the desktop keeps CPUs 0-7 (CLAUDE.local.md)
+PIN = ['nice', '-n', '19', 'taskset', '-c', '8-19']  # the desktop keeps CPUs 0-7 (CLAUDE.local.md); --cpus narrows it
+FLAG_COLUMNS = ('water', 'mist', 'light', 'sun_shadow', 'weather', 'ground_cache')  # the probe's lighting flags
 
 SCENES = {
     'db-zoomout': {'RAZDOR_SCENE': 'map:Другой берег', 'RAZDOR_SCENE_EXPLORED': '1', 'RAZDOR_MAP_ZOOM': '0.05'},
@@ -296,7 +309,45 @@ def frame_result(rows, load1, rss, vram, log_text):
         m = re.match(r'\[\s*([\d.]+)\] -- first frame shown', line)
         if m:
             result['load'] = float(m.group(1))
+    result['kinds'] = kinds_of(rows)
+    result['stages'] = stages_of(rows)
+    m = re.search(r'terrain options: ([^\n(]*)', log_text)
+    result['terrain'] = m.group(1).strip() if m else None  # None: a build with no terrain switches
     return result
+
+
+def kinds_of(rows):
+    """Per frame kind (idle, walk, walk-step): the frame count, and the median and p90 of total_ms and the
+    median of work_ms."""
+    out = {}
+    for kind in sorted({r['kind'] for r in rows if r.get('kind')}):
+        part = [r for r in rows if r.get('kind') == kind]
+        totals = sorted(float(r['total_ms']) for r in part)
+        out[kind] = {
+            'n': len(part),
+            'ms': statistics.median(totals),
+            'p90': totals[min(len(totals) - 1, int(0.9 * (len(totals) - 1) + 0.5))],
+            'work': statistics.median(float(r['work_ms']) for r in part),
+        }
+    return out
+
+
+def stages_of(rows):
+    """The median ms the probe spent on each lighting stage (water, mist, light, sun-shadow, weather, the ground
+    cache): 0 means the stage did not run. Empty on a build that has no such columns."""
+    out = {}
+    for k in FLAG_COLUMNS:
+        vals = [float(r[k]) for r in rows if r.get(k) not in (None, '')]
+        if vals:
+            out[k] = round(statistics.median(vals), 3)
+    return out
+
+
+def check_walk(scene, all_rows):
+    """A walk cell must really walk: the probe counts the hero's cell changes (`walk-step` frames). Without
+    any, the run did not walk and its numbers are not gameplay: the run fails."""
+    if SCENES[scene].get('RAZDOR_SCENE', '').startswith('walk:') and not any(r.get('kind') == 'walk-step' for r in all_rows):
+        raise RuntimeError('the hero did not step (no walk-step frames): the walk did not happen')
 
 
 def run_once(args, binary, dt_dir, scene, view, effect, rep, run_dir):
@@ -340,7 +391,9 @@ def run_once(args, binary, dt_dir, scene, view, effect, rep, run_dir):
                 moved = True
     if proc.returncode not in (0, None):
         raise RuntimeError(f'exit code {proc.returncode}')
-    rows = [r for r in read_rows(csv_path) if int(r['frame']) > args.skip]
+    all_rows = read_rows(csv_path)
+    check_walk(scene, all_rows)
+    rows = [r for r in all_rows if int(r['frame']) > args.skip]
     if not rows:
         raise RuntimeError('no frame rows (the game did not run the frames)')
     return frame_result(rows, load1, rss, vram if seen_vram else None, read_text(log_path))
@@ -488,6 +541,7 @@ def gpu_run_once(args, binary, dt_dir, scene, view, effect, run_dir, display, xd
     if 'NVIDIA' not in window:
         raise RuntimeError(f'the game drew on {window or "no window"}, not the NVIDIA GPU')
     rows = read_rows(csv_path)
+    check_walk(scene, rows)
     kept, acc = [], 0.0
     for r in rows:  # the first --skip-seconds of frames go (by frame time, not by frame count)
         if acc >= args.skip_seconds * 1000.0:
@@ -510,6 +564,13 @@ def summarise(runs, refresh):
     cell['capped'] = bool(refresh) and CAP_TOLERANCE * refresh <= cell['fps'] <= refresh / CAP_TOLERANCE
     cell['runs'] = len(runs)
     cell['renderer'] = next((r['renderer'] for r in runs if r.get('renderer')), None)
+    cell['kinds'] = {}
+    for kind in sorted({k for r in runs for k in (r.get('kinds') or {})}):
+        vals = [r['kinds'][kind] for r in runs if kind in (r.get('kinds') or {})]
+        cell['kinds'][kind] = {m: round(statistics.median(v[m] for v in vals), 3) for m in ('n', 'ms', 'p90', 'work')}
+        cell['kinds'][kind]['ms_runs'] = [round(v['ms'], 3) for v in vals]
+    cell['terrain'] = ' | '.join(sorted({r.get('terrain') or 'none' for r in runs}))
+    cell['stages'] = next((r['stages'] for r in runs if r.get('stages')), {})
     return cell
 
 
@@ -531,37 +592,50 @@ def markdown(result):
                      'ran as «off» and say nothing about the effects.')
     lines += [
         '',
-        '| scene | view | effects | FPS | frame ms | CPU ms | p90 ms | load s | RSS MB | VRAM MB | draws | capped |',
-        '|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|:---:|',
+        '| scene | view | effects | terrain | FPS | frame ms | CPU ms | p90 ms | load s | RSS MB | VRAM MB | draws | capped |',
+        '|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|:---:|',
     ]
 
     def f(v, nd=2):
         return '–' if v is None else f'{v:.{nd}f}'
     for key, c in result['scenes'].items():
         scene, view, effect = key.split('/')
-        lines.append(f"| {scene} | {view} | {effect} | {f(c['fps'], 0)} | {f(c['ms'])} | {f(c['work'])} | "
-                     f"{f(c['p90'])} | {f(c['load'])} | {f(c['rss'], 0)} | {f(c['vram'], 0)} | "
+        lines.append(f"| {scene} | {view} | {effect} | {c.get('terrain', '')} | {f(c['fps'], 0)} | {f(c['ms'])} | "
+                     f"{f(c['work'])} | {f(c['p90'])} | {f(c['load'])} | {f(c['rss'], 0)} | {f(c['vram'], 0)} | "
                      f"{f(c['draws'], 0)} | {'yes' if c['capped'] else ''} |")
+    kind_rows = [(key, kind, k) for key, c in result['scenes'].items() for kind, k in c.get('kinds', {}).items()]
+    if kind_rows:
+        lines += ['', '| scene | kind | frames | FPS | frame ms | p90 ms | CPU ms | lighting stage ms (median) |',
+                  '|---|---|---:|---:|---:|---:|---:|---|']
+        for key, kind, k in kind_rows:
+            stages = result['scenes'][key].get('stages') or {}
+            lines.append(f"| {key} | {kind} | {f(k['n'], 0)} | {f(1000 / k['ms'] if k['ms'] else None, 1)} | "
+                         f"{f(k['ms'])} | {f(k['p90'])} | {f(k['work'])} | "
+                         f"{' '.join(f'{a}={b}' for a, b in stages.items())} |")
     for key, err in result.get('errors', {}).items():
         lines.append(f'\nFAILED {key}: {err}')
     return '\n'.join(lines) + '\n'
 
 
 def run_cells(args, cells, base, result, once):
-    """Runs every cell `args.runs` times with `once(scene, view, effect, rep, run_dir)` and records it."""
-    for scene, view, effect in cells:
-        key = f'{scene}/{view}/{effect}'
-        runs = []
-        for rep in range(args.runs):
+    """Runs every cell `args.runs` times with `once(scene, view, effect, rep, run_dir)` and records it.
+    The repetitions go round the cells, the order reversed on every other repetition, so a drift in the
+    machine's load (other work on the same CPUs) reaches every cell alike, not the last ones only."""
+    runs = {f'{s}/{v}/{e}': [] for s, v, e in cells}
+    for rep in range(args.runs):
+        order = cells if rep % 2 == 0 else cells[::-1]
+        for scene, view, effect in order:
+            key = f'{scene}/{view}/{effect}'
             run_dir = os.path.join(base, f'{scene}-{view}-{effect}-{rep}')
             log(f'bench: {key} run {rep + 1}/{args.runs}')
             try:
-                runs.append(once(scene, view, effect, rep, run_dir))
+                runs[key].append(once(scene, view, effect, rep, run_dir))
             except RuntimeError as e:
                 result['errors'][f'{key}#{rep}'] = str(e)
                 log(f'bench: {key} run {rep + 1} failed: {e}')
-        if runs:
-            result['scenes'][key] = summarise(runs, args.refresh)
+    for key, got in runs.items():
+        if got:
+            result['scenes'][key] = summarise(got, args.refresh)
             c = result['scenes'][key]
             log(f"bench: {key}: {c['fps']} fps, {c['ms']} ms, work {c['work']} ms")
 
@@ -593,9 +667,42 @@ def run_gpu_matrix(args, binary, dt_dir, cells, base, result):
             stop_group(xvfb)
 
 
+def cpu_list_ok(spec):
+    """A CPU list like `16-19` or `8-11,16-19`: every CPU 8 or above (CPUs 0-7 are the desktop's)."""
+    cpus = set()
+    for part in spec.split(','):
+        a, _, b = part.partition('-')
+        if not a.isdigit() or (b and not b.isdigit()):
+            return False
+        cpus.update(range(int(a), int(b or a) + 1))
+    return bool(cpus) and min(cpus) >= 8
+
+
+def load_cells(path):
+    """Named cells from a JSON object {name: {RAZDOR_* switches}}, added to SCENES (a cell is a scene whose
+    environment is these switches). A name that is already a built-in scene is refused."""
+    with open(path, encoding='utf-8') as f:
+        cells = json.load(f)
+    if not isinstance(cells, dict) or not cells:
+        die(f'{path}: not a non-empty JSON object of cells')
+    for name, env in cells.items():
+        if name in SCENES:
+            die(f'{path}: cell {name!r} is a built-in scene name')
+        if not isinstance(env, dict) or not env or not all(
+                isinstance(k, str) and k.startswith('RAZDOR_') and isinstance(v, str) for k, v in env.items()):
+            die(f'{path}: cell {name!r} must map RAZDOR_* switches to strings')
+        if 'RAZDOR_SCENE' not in env:
+            die(f'{path}: cell {name!r} has no RAZDOR_SCENE')
+        SCENES[name] = env
+    return list(cells)
+
+
 def main():
+    global PIN
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('--bin', required=True, help='the razdor binary to measure')
+    ap.add_argument('--cells', metavar='FILE', help='a JSON object of named cells (gameplay scenes, terrain switches)')
+    ap.add_argument('--cpus', default='8-19', help='the CPUs the bench and the game run on (default 8-19; 0-7 refused)')
     back = ap.add_mutually_exclusive_group(required=True)
     back.add_argument('--display', metavar=':N', help='run on this display (the owner: :0)')
     back.add_argument('--xvfb', action='store_true', help='software GL on an invisible Xvfb (relative numbers)')
@@ -611,7 +718,7 @@ def main():
     ap.add_argument('--dt-dir', help='the install (default: RAZDOR_DT_DIR)')
     ap.add_argument('--size', help='render size (default: 2560x1440 on a display, 1280x800 on Xvfb, 1024x768 on the 4060)')
     ap.add_argument('--refresh', type=int, help='the monitor rate for the cap check (default 180 on a display, 0 otherwise)')
-    ap.add_argument('--scenes', default=','.join(SCENES), help='comma list, default all')
+    ap.add_argument('--scenes', help='comma list of scenes (or cells); default all built-in scenes, or all cells of --cells')
     ap.add_argument('--views', default=','.join(VIEWS), help='comma list, default all')
     ap.add_argument('--effects', default=','.join(EFFECTS), help='comma list, default off,on')
     ap.add_argument('--runs', type=int, default=3)
@@ -650,14 +757,18 @@ def main():
     dt_dir = dt_dir_from(args)
     if not os.path.isdir(dt_dir):
         die(f'the install is not a folder: {dt_dir}')
-    scenes = [s for s in args.scenes.split(',') if s]
+    if not cpu_list_ok(args.cpus):
+        die(f'--cpus {args.cpus!r}: CPUs 0-7 are the desktop\'s; give CPUs 8 and up, e.g. 16-19')
+    PIN = ['nice', '-n', '19', 'taskset', '-c', args.cpus]
+    named = load_cells(args.cells) if args.cells else []
+    scenes = [s for s in (args.scenes or ','.join(named or SCENES)).split(',') if s]
     views = [v for v in args.views.split(',') if v]
     effects = [e for e in args.effects.split(',') if e]
     for name, allowed in (('scene', (scenes, SCENES)), ('view', (views, VIEWS)), ('effect', (effects, EFFECTS))):
         for x in allowed[0]:
             if x not in allowed[1]:
                 die(f'unknown {name}: {x} (one of {", ".join(allowed[1])})')
-    if args.gpu:
+    if args.gpu and not named:
         cells = [c for c in GPU_MATRIX if c[0] in scenes and c[1] in views and c[2] in effects]
     else:
         cells = [(s, v, e) for s in scenes for v in views for e in effects]
@@ -678,6 +789,8 @@ def main():
         'workspace': args.workspace, 'runs': args.runs, 'frames': None if args.gpu else args.frames,
         'skip': None if args.gpu else args.skip,
         'host_cpu': platform.machine(), 'date': datetime.date.today().isoformat(),
+        'cpus': args.cpus, 'cells': os.path.basename(args.cells) if args.cells else None,
+        'size_arg': args.size,
     }
     if args.gpu:
         meta.update({'seconds': args.seconds, 'skip_seconds': args.skip_seconds, 'device': GPU_DEVICE,

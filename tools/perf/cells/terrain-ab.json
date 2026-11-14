@@ -1,0 +1,22 @@
+{
+  "tryn-walk-A": {"RAZDOR_SCENE": "walk:Устье Трейна:0,-12", "RAZDOR_TERRAIN_MEDIUMP": "1"},
+  "tryn-walk-Adesk": {"RAZDOR_SCENE": "walk:Устье Трейна:0,-12"},
+  "tryn-walk-C": {"RAZDOR_SCENE": "walk:Устье Трейна:0,-12", "RAZDOR_TERRAIN_NOCACHE": "1", "RAZDOR_TERRAIN_MEDIUMP": "1"},
+  "tryn-walk-D": {"RAZDOR_SCENE": "walk:Устье Трейна:0,-12", "RAZDOR_TERRAIN_OLD": "1"},
+  "tryn-walk-v141": {"RAZDOR_SCENE": "walk:Устье Трейна:0,-12"},
+  "db-walkS-A": {"RAZDOR_SCENE": "walk:Другой берег:0,20", "RAZDOR_TERRAIN_MEDIUMP": "1"},
+  "db-walkS-Adesk": {"RAZDOR_SCENE": "walk:Другой берег:0,20"},
+  "db-walkS-C": {"RAZDOR_SCENE": "walk:Другой берег:0,20", "RAZDOR_TERRAIN_NOCACHE": "1", "RAZDOR_TERRAIN_MEDIUMP": "1"},
+  "db-walkS-D": {"RAZDOR_SCENE": "walk:Другой берег:0,20", "RAZDOR_TERRAIN_OLD": "1"},
+  "db-walkS-v141": {"RAZDOR_SCENE": "walk:Другой берег:0,20"},
+  "db-walkW-A": {"RAZDOR_SCENE": "walk:Другой берег:-20,0", "RAZDOR_TERRAIN_MEDIUMP": "1"},
+  "db-walkW-Adesk": {"RAZDOR_SCENE": "walk:Другой берег:-20,0"},
+  "db-walkW-C": {"RAZDOR_SCENE": "walk:Другой берег:-20,0", "RAZDOR_TERRAIN_NOCACHE": "1", "RAZDOR_TERRAIN_MEDIUMP": "1"},
+  "db-walkW-D": {"RAZDOR_SCENE": "walk:Другой берег:-20,0", "RAZDOR_TERRAIN_OLD": "1"},
+  "db-walkW-v141": {"RAZDOR_SCENE": "walk:Другой берег:-20,0"},
+  "tryn-idle-A": {"RAZDOR_SCENE": "map:Устье Трейна", "RAZDOR_TERRAIN_MEDIUMP": "1"},
+  "tryn-idle-Adesk": {"RAZDOR_SCENE": "map:Устье Трейна"},
+  "tryn-idle-C": {"RAZDOR_SCENE": "map:Устье Трейна", "RAZDOR_TERRAIN_NOCACHE": "1", "RAZDOR_TERRAIN_MEDIUMP": "1"},
+  "tryn-idle-D": {"RAZDOR_SCENE": "map:Устье Трейна", "RAZDOR_TERRAIN_OLD": "1"},
+  "tryn-idle-v141": {"RAZDOR_SCENE": "map:Устье Трейна"}
+}
