@@ -9,6 +9,15 @@ sidebar:
 
 ![The battle window](../../../../assets/shots/battle.webp)
 
+## Restart and Retreat
+
+A Razdor addition. While nobody has moved yet, the battle window has two more buttons:
+
+* **"Restart"**: rearrange your units before the fight, by clicking or dragging, as in the army window.
+* **"Retreat"**: leave without losses: no experience and no loot, the army is unchanged, the hero goes back to the cell he came from, and the enemy army does not attack for two game hours.
+
+The buttons are not offered in a battle for a building (siege or defence) or in a battle started by a scenario event. On a phone the four battle-start buttons form a 2×2 grid.
+
 ## Quick battle
 
 A Razdor addition, like auto-battle in other strategy games. When a battle has opened and nobody has moved yet, **"Quick battle (Q)"** (`Q` or `Enter`) plays it out for both sides with the battle AI. If the battle is already under way, **"Finish automatically (Q)"** (`Q`) plays out the rest.

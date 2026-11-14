@@ -128,5 +128,5 @@ In the loading window, the "Transfer…" button opens three actions:
 When you uninstall the app, Android also deletes its data folder: saves, pins and settings. Always perform an "Export saves" before uninstalling. If Android asks whether to "Keep" app data during uninstallation, select "Keep": then the settings and saves remain.
 :::
 
-The image cache is stored in the app's own cache (Settings → Apps → Razdor → Storage) and does not exceed 256 MB. There is nothing critical in it: you can clear it using the "Clear cache" button; saves will not be lost, and images will simply take slightly longer to load upon the next launch.
+The image cache is stored in the app's own cache (Settings → Apps → Razdor → Storage) and does not exceed 256 MB; it is kept compressed, usually about 60 MB. The downloaded game takes less space too: its pictures are stored compressed (about 130 → 60 MB, done in the background at the first start after the update). Mods from "Maps and mods" keep neither a copy of the game nor the downloaded archive, only their own files. There is nothing critical in it: you can clear it using the "Clear cache" button; saves will not be lost, and images will simply take slightly longer to load upon the next launch.
 

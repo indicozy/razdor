@@ -24,7 +24,7 @@ The **Lighting** row chooses how the light on the map changes:
 
 The light goes through morning, day, evening and night. At night the map is bluish and dimmed, but not black. In the morning and at sunset the light is warm: the low sun brings out the masonry, the roof tiles and the stones, and their shadows lie long.
 
-At night buildings glow from within: the windows of towns, castles and villages burn with warm light. The hero and the armies carry torches, so they can be seen in the dark, and the lights cast shadows.
+At night buildings glow from within: the windows of villages and other buildings burn with warm light, while castles, forts, towns and palaces light up only when someone is inside (a garrison, your stationed units, an army or the hero); an empty castle stays dark. The hero and the armies carry torches, so they can be seen in the dark, and the lights cast shadows.
 
 When a window is open over the map, the map behind its edge keeps showing the light of its hour.
 
@@ -44,7 +44,7 @@ Night: blue light, and the map is still easy to see.
 
 These two rows appear when **"Lighting"** is on.
 
-* **"Shadows"**: **"Painted"** (the default) keeps the original's shadows. **"From the sun"** removes them, and every building, tree and rock casts its own shadow: it turns and lengthens, changing once per game hour.
+* **"Shadows"**: **"Painted"** (the default) keeps the original's shadows. **"From the sun"** removes them, and every building, tree and rock casts its own shadow: it turns and lengthens, changing once per game hour. Armies and the hero on the map cast the same soft sun shadow too (the painted spot at their feet stays).
 * **"Light quality"**: **"High"**, **"Medium"** or **"Low"**. High lights up to eight buildings and the figures' torches: their shadows and the glowing windows. Medium does up to four. Low keeps just the warm glow. The default is High on a computer and Medium on a phone.
 
 ![Shadows from the sun on the map in 2.5D](../../../../assets/shots/shadows-sun.webp)
