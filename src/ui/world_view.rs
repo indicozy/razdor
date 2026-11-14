@@ -3652,6 +3652,29 @@ local! {
     static FORM_MESH: std::cell::RefCell<Mesh> = std::cell::RefCell::new(Mesh { vertices: Vec::new(), indices: vec![0, 1, 2, 0, 2, 3], texture: None });
     /// The map's painter's list (`draw_world`): cleared and refilled each frame.
     static WORLD_ITEMS: std::cell::RefCell<Vec<(i64, Drawable)>> = std::cell::RefCell::new(Vec::new());
+    /// The flat view's object list of the last frame (`draw_world_in`), kept while its key holds.
+    static OBJ_MEMO: std::cell::RefCell<Option<ObjMemo>> = std::cell::RefCell::new(None);
+}
+
+/// What the object list of `draw_world_in` reads besides the map's objects: the drawn rectangle, the fog (its
+/// generation renews with every newly explored cell) and the camera's window and scale (the objects' feet and sort keys).
+#[derive(PartialEq)]
+struct ObjKey {
+    map: usize,
+    objects: usize,
+    grid: Grid,
+    fog: (u64, bool, i32, i32),
+    range: [i32; 7],
+    cam: [u32; 11],
+}
+
+/// The flat view's object list of one frame: the objects of the drawn rectangle (`rows`, indices into the map's objects),
+/// their `seen` flags, and the sort entries of the standing ones (not the hills), in the painter's pushes' order.
+struct ObjMemo {
+    key: ObjKey,
+    rows: Vec<u32>,
+    seen_row: Vec<bool>,
+    entries: Vec<(i64, u32, Vec2)>,
 }
 
 /// What the sprite pass reads once, instead of once per sprite: the thread-locals and the screen's settings do not
@@ -5570,8 +5593,23 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // Each drawn object's `seen` test, made once for the frame: it scans the fog around every object cell,
     // and the passes below ask it again (the fog does not change while the world is drawn).
     // The objects of the drawn columns and rows (the chunks overlapping them): `seen` tests the same columns.
-    let rows = map.objects_in_rect(c0 - side, c1 + side, r0 - up, r1 + below);
-    let seen_row: Vec<bool> = rows.iter().map(|&i| seen(&map.objects[i as usize])).collect();
+    // The flat view keeps them (`OBJ_MEMO`): a frame with the same key (the window, the camera's scale, the rectangle,
+    // the fog's generation) takes the last frame's rows, flags and sort entries, which it would compute again the same.
+    let key = ObjKey {
+        map: std::ptr::from_ref(map) as usize,
+        objects: map.objects.len(),
+        grid: cam.grid,
+        fog: (fog.generation(), fog.enabled, fog.w, fog.h),
+        range: [c0, c1, r0, r1, side, up, below],
+        cam: [cam.origin.x.to_bits(), cam.origin.y.to_bits(), cam.scale.to_bits(), cam.view.x.to_bits(), cam.view.y.to_bits(), cam.view.w.to_bits(), cam.view.h.to_bits(), cam.draw.x.to_bits(), cam.draw.y.to_bits(), cam.draw.w.to_bits(), cam.draw.h.to_bits()],
+    };
+    let hit = if tilted { None } else { OBJ_MEMO.with_borrow_mut(Option::take).filter(|m| m.key == key) };
+    let reused = hit.is_some();
+    let ObjMemo { key, rows, seen_row, mut entries } = hit.unwrap_or_else(|| {
+        let rows = map.objects_in_rect(c0 - side, c1 + side, r0 - up, r1 + below);
+        let seen_row: Vec<bool> = rows.iter().map(|&i| seen(&map.objects[i as usize])).collect();
+        ObjMemo { key, rows, seen_row, entries: Vec::new() }
+    });
     // The locations drawn this frame, in the locations' order: the passes below share this one test
     // (the 2.5D view makes three passes over them; each used to test every location again).
     let seen_locs: Vec<usize> = game.world.locations.iter().enumerate().filter(|(i, l)| location_seen(*i, l)).map(|(i, _)| i).collect();
@@ -5624,6 +5662,10 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // above them included. Its test is `0x100 < class·256 + sprite < 0x401`: class 4's
     // sprites are 10 and up, so the yellow hills are drawn with the mountains, row by row.
     // 2.5D: the hills are drawn after the fog, below (they stand in the fog's shade).
+    // The standing objects' entries of a kept list: pushed as the pass would push them (the hills push nothing).
+    if reused {
+        items.extend(entries.iter().map(|&(k, i, foot)| (k, Drawable::Object(i, foot))));
+    }
     let mut pass = || {
         for (&i, &seen_o) in rows.iter().zip(&seen_row) {
             if seen_o {
@@ -5632,9 +5674,13 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                     if !tilted {
                         standing_map(cam, &ctx, object_foot(o, cam), object_fog(o, cam), object_foot(o, cam), 1.0, object_picture(o, art, cam), || draw_object(o, art, cam, &ctx));
                     }
-                } else {
+                } else if !reused {
                     let foot = object_foot(o, cam);
-                    items.push((sprite_key(cam, o.tile, foot, object_layer(o.class)), Drawable::Object(i, foot)));
+                    let k = sprite_key(cam, o.tile, foot, object_layer(o.class));
+                    items.push((k, Drawable::Object(i, foot)));
+                    if !tilted {
+                        entries.push((k, i, foot));
+                    }
                 }
             }
         }
@@ -5779,6 +5825,10 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     if let Some(s) = spell {
         items.push((sprite_key(cam, s.cell, cam.to_screen(s.at), LAYER_SPELL_BELOW), Drawable::Spell(2)));
         items.push((sprite_key(cam, s.cell, cam.to_screen(s.at), LAYER_SPELL_ABOVE), Drawable::Spell(3)));
+    }
+    // The flat view's object list is kept for the next frame (`OBJ_MEMO`); nothing below reads the rows.
+    if !tilted {
+        OBJ_MEMO.with_borrow_mut(|m| *m = Some(ObjMemo { key, rows, seen_row, entries }));
     }
     // Stable: figures sharing a cell keep the order they were pushed in.
     items.sort_by_key(|a| a.0);
