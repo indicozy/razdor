@@ -679,6 +679,26 @@ pub fn edge_cell(c: i32, n: i32) -> i32 {
     }
 }
 
+/// Whether the cache's overlay pass can draw anything over `view` (cell units, as [`TerrainLayer::draw`]). The
+/// overlay's shader keeps a pixel only when it is wet (its cell or the next one to the east or south is water,
+/// codes 0–2, clamped to the map as the shader's neighbours are) or in the border's mist (`edge`); every other
+/// pixel is discarded. So with no water in the cells the view shows (one cell each side, the border's clamped
+/// codes included) and no mist, the pass writes nothing and is skipped. Byte-identical output (backlog 1618).
+pub fn overlay_can_draw(codes: &[u8], (w, h): (u32, u32), view: Vec4, edge: bool) -> bool {
+    if edge {
+        return true;
+    }
+    if !view.is_finite() || w == 0 || h == 0 || codes.len() != (w * h) as usize {
+        return true;
+    }
+    let (wi, hi) = (w as i32, h as i32);
+    let x0 = edge_cell(view.x.floor() as i32 - 1, wi);
+    let x1 = edge_cell(view.z.ceil() as i32 + 1, wi);
+    let y0 = edge_cell(view.y.floor() as i32 - 1, hi);
+    let y1 = edge_cell(view.w.ceil() as i32 + 1, hi);
+    (y0..=y1).any(|y| (x0..=x1).any(|x| (codes[(y * wi + x) as usize] & 15) < 3))
+}
+
 /// The fog's opacity at `d` cells past the border, without the wisps (the noise at its brightest):
 /// the shader's `smoothstep` from the border to `EDGE_FULL`, solid (1) from `EDGE_SOLID` on, so it
 /// is continuous at the thickening and at the full distance.
@@ -1234,6 +1254,10 @@ impl TerrainLayer {
         if mode == Mode::Overlay && self.pictures.borrow().active && self.draw_water_composite(dest) {
             return;
         }
+        // Nothing wet and no mist in view: the overlay would discard every pixel, so it is not drawn.
+        if mode == Mode::Overlay && !overlay_can_draw(codes, (w, h), view, edge) {
+            return;
+        }
         self.draw_layer(codes, (w, h), dest, view, cell_px, water_ms, edge, mode, flow, 1.0, gen);
     }
 
@@ -1531,6 +1555,36 @@ mod shading_rate {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_overlay_is_skipped_only_with_no_water_in_view_and_no_mist() {
+        let (w, h) = (6u32, 5u32);
+        let land = vec![20u8; (w * h) as usize];
+        // The view covers cells x 1..3, y 1..3: the cells one each side, and the cell past the east edge of
+        // the view (x 4), are read by its pixels; x 5 is not.
+        let view = vec4(1.0, 1.0, 3.0, 3.0);
+        assert!(!overlay_can_draw(&land, (w, h), view, false));
+        let mut codes = land.clone();
+        codes[2 * 6 + 4] = 1;
+        assert!(overlay_can_draw(&codes, (w, h), view, false));
+        let mut codes = land.clone();
+        codes[2 * 6 + 5] = 0;
+        assert!(!overlay_can_draw(&codes, (w, h), view, false));
+        // Codes compare on their low nibble (the shader's `code & 15`): 17 is water code 1, 19 is land (code 3).
+        let mut codes = land.clone();
+        codes[2 * 6 + 2] = 17;
+        assert!(overlay_can_draw(&codes, (w, h), view, false));
+        let mut codes = land.clone();
+        codes[2 * 6 + 2] = 19;
+        assert!(!overlay_can_draw(&codes, (w, h), view, false));
+        // Past the east border the pixels read the border column (clamped): water there counts.
+        let mut codes = land.clone();
+        codes[2 * 6 + 5] = 2;
+        assert!(overlay_can_draw(&codes, (w, h), vec4(10.0, 1.0, 12.0, 3.0), false));
+        // The border's mist (`edge`) and a view that is not finite always draw.
+        assert!(overlay_can_draw(&land, (w, h), view, true));
+        assert!(overlay_can_draw(&land, (w, h), vec4(f32::NAN, 1.0, 3.0, 3.0), false));
+    }
 
     #[test]
     fn ab_variants_map_to_their_option_sets() {

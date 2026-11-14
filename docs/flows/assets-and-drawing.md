@@ -268,7 +268,8 @@ or AI change. Hex maps (the built-in demo) keep black.
 
 `src/ui/world_view.rs`: `draw_world` draws only the visible cells — `draw_terrain`
 (`TerrainLayer::draw` in `src/ui/terrain.rs`: one shader quad mixing the four nearest cell
-textures from a 4×4 atlas, water frames multiplied in), then decorations
+textures from a 4×4 atlas, water frames multiplied in; with the ground cache, option 2, the cache's overlay pass for the
+water and the border's mist is skipped when no water code or mist is in the cells the view shows, `terrain::overlay_can_draw`), then decorations
 (`draw_object`) and buildings (`draw_building`) in one pass over the cells as the original's
 (0x4c8864, 0x4c9b5b: row by row, left to right; in a cell its massif object, its plant, then
 the building whose footprint covers it if not drawn yet, so a building comes at its top row's
