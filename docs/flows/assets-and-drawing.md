@@ -703,6 +703,12 @@ bilinear edge, and `mist::mist_alpha` is the formula the clouds pin.
   area beyond the edges is unexplored, so the mist covers it, flat and tilted, up to the visible ground. The
   black rectangles around the map are not drawn then. The minimap keeps its black. With the mist «Нет» nothing
   changes (byte-identical to main).
+- The reveals under the mist (backlog 1628): a place being shown (`Showing`, `draw_showing_flat`) draws its radial mask as
+  black only with the mist off. With a mist look on, `world_view::reveal_darkness` takes each open reveal's darkness per cell
+  (the mask's value, `Showing::reveal_value`, the same the mask draws and the sprites' table reads), and `mist_layer` draws
+  the fog texture composed with it (`minimap::fog_layer_over`: `1 − (1 − fog)(1 − reveal)`, `over_reveal`) on the flat ground,
+  the tilted ground and the raised sheets alike. So the circle fades from the mist to the land and is never black; a settled
+  place is the plain fog texture again. The mask's own update stays (the sprites' fade reads it). Mist «Нет» is untouched.
 - The edge: past the map's edges the edge fog takes the mist's colour (`terrain::edge_fog_colour_for`), so they meet.
 - Off, nothing changes: the snapshots with the mist off are byte-identical to the build before the mist's work.
 - Simplifications: the F3 overlay is off in 2.5D (its labels are placed on the flat map).

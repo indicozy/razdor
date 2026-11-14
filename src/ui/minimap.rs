@@ -296,6 +296,10 @@ struct FogShown {
     /// The texels whose alpha is above 0 (x0, y0, x1, y1, exclusive), as the texture was last
     /// uploaded; None when every texel is fully transparent (the whole map explored).
     bbox: Option<[i32; 4]>,
+    /// The mist layer over the reveals (`fog_layer_over`): its RGBA, and its texture (made again
+    /// only when the map's size changes).
+    over_rgba: Vec<u8>,
+    over_tex: Option<Texture2D>,
     /// Cells that jump to their target now: the reveal cells of a showing, whose circle the
     /// mask draws (so they do not fade twice).
     settle: Vec<usize>,
@@ -327,6 +331,8 @@ impl FogShown {
         rgba: Vec::new(),
         tex: None,
         bbox: None,
+        over_rgba: Vec::new(),
+        over_tex: None,
         settle: Vec::new(),
         last: None,
         moving: false,
@@ -591,6 +597,56 @@ pub fn fog_layer(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: imp
 /// when the fog is off. The box is None when no texel is dark.
 pub fn fog_layer_box(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>) -> Option<(Texture2D, Option<[i32; 4]>)> {
     (fog.enabled && fog.w > 0 && fog.h > 0).then(|| fog_texture_box(fog, held, origin, settle))
+}
+
+/// The darkness of a cell that the fog shows `fog` (0..1) and a reveal keeps `reveal` (0..1) over it: the two
+/// composed as alpha over alpha, `1 − (1 − fog)(1 − reveal)`. The same value the map sprites' table takes
+/// (`sprite_fog::Table::compose`).
+pub fn over_reveal(fog: f32, reveal: f32) -> f32 {
+    1.0 - (1.0 - fog) * (1.0 - reveal)
+}
+
+/// The mist layer's RGBA for the cells' shown darkness `shown` (0..255, row by row, unrounded) with the reveals
+/// `reveal` (0..1, missing cells count as 0) composed over it ([`over_reveal`]): the alpha is the composed
+/// darkness, rounded. `out` is cleared and filled.
+pub fn composed_rgba(shown: &[f32], reveal: &[f32], out: &mut Vec<u8>) {
+    out.clear();
+    for (i, &c) in shown.iter().enumerate() {
+        let a = over_reveal(c / 255.0, reveal.get(i).copied().unwrap_or(0.0));
+        out.extend_from_slice(&[FOG_RGB[0], FOG_RGB[1], FOG_RGB[2], (a * 255.0).round().clamp(0.0, 255.0) as u8]);
+    }
+}
+
+/// [`fog_layer_box`] with the reveals' darkness (`reveal`, 0..1 per cell, row by row) composed over the shown fog.
+/// The mist draws this one while a place is being shown: the reveal's circle is the darkness the mist keeps
+/// there, so it fades from the mist to the land and never shows the black of the reveal's own mask (backlog
+/// 1628). Made at each call (only while a place opens). None when the fog is off.
+pub fn fog_layer_over(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>, reveal: &[f32]) -> Option<(Texture2D, Option<[i32; 4]>)> {
+    if !(fog.enabled && fog.w > 0 && fog.h > 0) {
+        return None;
+    }
+    let now = crate::ui::clock::now();
+    SHOWN.with(|s| {
+        let mut s = s.borrow_mut();
+        let s = &mut *s;
+        // `track` reports (and clears) a changed texel; the plain texture (`fog_texture_box`) still has to upload it
+        // when the mist goes back to it, so the flag is kept for that upload.
+        let changed = s.track(fog, held, origin, settle, now);
+        s.dirty |= changed;
+        let (w, h) = (s.w, s.h);
+        composed_rgba(&s.cur, reveal, &mut s.over_rgba);
+        let bbox = alpha_box(&s.over_rgba, w, h);
+        match s.over_tex.as_ref() {
+            Some(tex) if tex.width() == w as f32 && tex.height() == h as f32 => tex.update_from_bytes(w as u32, h as u32, &s.over_rgba),
+            _ => {
+                let tex = Texture2D::from_rgba8(w as u16, h as u16, &s.over_rgba);
+                tex.set_filter(FilterMode::Linear);
+                s.over_tex = Some(tex);
+            }
+        }
+        razdor::frame_probe::tex_rebuilt();
+        s.over_tex.clone().map(|t| (t, bbox))
+    })
 }
 
 /// Draws the fog over the map. `tl` and `br` are the screen positions of world points
@@ -1761,6 +1817,31 @@ mod tests {
                 let want = if x < 0 || y < 0 || x >= w || y >= h { 0 } else { table[(y * w + x) as usize] };
                 assert_eq!(darkness_at(w, h, explored, (x, y)), want, "cell ({x}, {y})");
             }
+        }
+    }
+
+    /// Under the mist the reveal's darkness is the mist's: a cell the fog shows lit (0) with a reveal of `r`
+    /// is the mist at `r`, not clear and not black (backlog 1628). A cell the reveal keeps dark stays the
+    /// mist, and no reveal leaves the shown fog as it is (the sprite table's composition, `over_reveal`).
+    #[test]
+    fn under_the_mist_a_reveal_is_the_mists_composed_darkness() {
+        let shown = [0.0f32, 255.0, 0.0, 128.0];
+        let reveal = [0.0f32, 0.0, 1.0, 0.5];
+        let mut out = Vec::new();
+        composed_rgba(&shown, &reveal, &mut out);
+        let alpha: Vec<u8> = out.chunks_exact(4).map(|px| px[3]).collect();
+        assert_eq!(alpha[0], 0, "lit, no reveal: clear");
+        assert_eq!(alpha[1], 255, "fog dark, no reveal: the mist");
+        assert_eq!(alpha[2], 255, "lit, reveal of full darkness: the mist opens onto a full cover, never a clear hole");
+        let half = over_reveal(128.0 / 255.0, 0.5);
+        assert_eq!(alpha[3], (half * 255.0).round() as u8, "fog half, reveal half: the composed darkness");
+        assert!(out.chunks_exact(4).all(|px| px[..3] == FOG_RGB), "the mist's texels are the fog's colour");
+        // The sprite table's composition, to the 8-bit step, on every value of the shown darkness.
+        for fog in 0..=255u32 {
+            let want = over_reveal(fog as f32 / 255.0, 0.3);
+            let mut one = Vec::new();
+            composed_rgba(&[fog as f32], &[0.3], &mut one);
+            assert!((one[3] as f32 / 255.0 - want).abs() <= 0.5 / 255.0 + 1e-6, "fog {fog}");
         }
     }
 
