@@ -164,7 +164,8 @@ impl Driver {
     /// the battle AI.
     fn battle(&mut self) -> Outcome {
         let mut b = self.g.start_battle();
-        b.begin();
+        // The screen's first action (recorded as `BattleAct::Begin`): the playback begins there too.
+        b.start_play();
         let mut thinker = MaxThinker::new(Team::Enemy);
         for _ in 0..AUTO_BATTLE_STEPS {
             // Every action is written back into the armies, as the screen does each frame.
@@ -586,6 +587,20 @@ fn the_state_hash_follows_the_rules() {
     let before = state_hash(&a.g);
     a.g.rng.random(7);
     assert_ne!(state_hash(&a.g), before);
+}
+
+/// Razdor's retreat cell (`Game::back_to`, backlog 1607) is not in the state hash: a record made
+/// before the field existed hashes its states as it did, whatever the cell now holds.
+#[test]
+fn the_retreat_cell_is_not_in_the_state_hash() {
+    let Some(dt) = base() else { return };
+    let c = Arc::new(Content::from_dt(&dt));
+    let mut a = Driver::new(start(&c, &map_named(&dt, "РК1"), Some(7)), true);
+    let before = state_hash(&a.g);
+    a.g.back_to = Some(a.g.tile());
+    assert_eq!(state_hash(&a.g), before, "the hash leaves the cell out");
+    let json = serde_json::to_string(&a.g).expect("a game serialises");
+    assert!(json.contains("back_to"), "a save keeps it");
 }
 
 /// A live session recorded through the entry points, from the game's state at its start, played

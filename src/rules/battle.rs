@@ -721,6 +721,10 @@ pub struct Battle {
     /// Cells of the player's army formation held by units that do not fight (the dead, and
     /// the unpaid when he attacks): the original's start fix sees them (4d2141).
     bench: Vec<Slot>,
+    /// The player's fighters' cells as the deployment left them (squad index, cell), taken when
+    /// the battle begins before the start fix ([`Battle::deployed`]): what `Game::settle_battle`
+    /// returns the army to with `keep_formation`, so a rearrangement before the first action counts.
+    deployed: Vec<(usize, Slot)>,
     /// The cheat console's `god` (`rules::cheats`): the player's units take no damage. Off
     /// in the pre-simulation.
     pub god: bool,
@@ -869,6 +873,7 @@ impl Battle {
             turn_lost: [0; 2],
             max_turn_lost: [0; 2],
             bench: Vec::new(),
+            deployed: Vec::new(),
             god: false,
             max_ai: false,
             max_guard: false,
@@ -1104,13 +1109,14 @@ impl Battle {
         self.fighters.iter().position(|f| f.listed() && f.team == team && f.slot == slot)
     }
 
-    /// Deploy phase: move a player card to `to`, swapping with whoever is there.
+    /// Deploy phase: move a player card to `to`, swapping with whoever is there. A cell held by a
+    /// unit that does not fight ([`Battle::set_bench`]) is no target: those units do not move.
     pub fn move_card(&mut self, from: Slot, to: Slot) -> Result<(), ActionError> {
         let _rec = crate::rules::recording::actions::battle_scope(|| crate::rules::recording::actions::BattleAct::MoveCard { from, to });
         if !self.deploying {
             return Err(ActionError::NotDeploying);
         }
-        if !self.formation.contains(to) {
+        if !self.formation.contains(to) || self.bench.contains(&to) {
             return Err(ActionError::InvalidTarget);
         }
         let a = self.at(Team::Player, from).ok_or(ActionError::InvalidTarget)?;
@@ -1121,12 +1127,30 @@ impl Battle {
         Ok(())
     }
 
+    /// The player's first action of the battle (a click on a card, the space key, watching):
+    /// the deployment ends, as [`Battle::begin`] does, and the battle records that it began, so a
+    /// replay begins where the battle did (`BattleAct::Begin`). Does nothing once begun.
+    pub fn start_play(&mut self) {
+        if self.deploying {
+            let _rec = crate::rules::recording::actions::battle_scope(|| crate::rules::recording::actions::BattleAct::Begin);
+            self.begin();
+        }
+    }
+
+    /// The player's fighters' cells as the deployment left them, by squad index, taken when the
+    /// battle began (empty before). `Game::settle_battle` returns them to these with `keep_formation`.
+    pub fn deployed(&self) -> &[(usize, Slot)] {
+        &self.deployed
+    }
+
     /// End deployment and start turn 1.
     pub fn begin(&mut self) {
         if !self.deploying {
             return;
         }
         self.deploying = false;
+        // The cells the deployment left, before the fix below moves a back row forward.
+        self.deployed = self.fighters.iter().filter(|f| f.team == Team::Player).filter_map(|f| f.squad_index.map(|i| (i, f.slot))).collect();
         // The battle window's fix of the player's formation (4d2141): with nobody in front,
         // his back row moves into the front row, same columns, and stays there after the
         // battle. The reserve does not move, and the enemy needs no fix. There is no other

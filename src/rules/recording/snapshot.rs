@@ -321,6 +321,18 @@ fn install_map(dir: &std::path::Path, file: &str, hash: u64) -> Result<Vec<u8>, 
     Ok(bytes)
 }
 
+thread_local! {
+    /// Set while the state hash's body is serialised (`body_json` without timing).
+    static HASHING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether `Game::back_to` (Razdor's «Отступить», backlog 1607) is left out of a serialised game:
+/// always in the state hash, so a record made before the field existed hashes as it did (its
+/// keyframes keep it, with `serde(default)` for the old ones).
+pub(crate) fn skip_back_to(back: &Option<Tile>) -> bool {
+    back.is_none() || HASHING.with(|h| h.get())
+}
+
 fn body_json(g: &Game, with_timing: bool) -> Result<Vec<u8>, String> {
     let mut rules = rules_of(g);
     if !with_timing {
@@ -333,7 +345,13 @@ fn body_json(g: &Game, with_timing: bool) -> Result<Vec<u8>, String> {
     }
     let timing = timing_of(g);
     let body = BodyOut { version: SNAPSHOT_VERSION, game: g, rules: &rules, timing: with_timing.then_some(&timing) };
-    serde_json::to_vec(&body).map_err(|e| e.to_string())
+    if with_timing {
+        return serde_json::to_vec(&body).map_err(|e| e.to_string());
+    }
+    HASHING.with(|h| h.set(true));
+    let out = serde_json::to_vec(&body).map_err(|e| e.to_string());
+    HASHING.with(|h| h.set(false));
+    out
 }
 
 fn unpack(bytes: &[u8]) -> Result<Vec<u8>, String> {

@@ -860,6 +860,8 @@ impl EventWorld for Game {
         if let Some(i) = self.activate(army) {
             self.path.clear();
             self.foe = Some(Foe::Army(i));
+            // A scripted battle is forced: no retreat (`Game::can_retreat`).
+            self.back_to = None;
             self.effect_events.push(Event::Encounter(i));
         }
     }

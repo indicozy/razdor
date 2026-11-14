@@ -2530,6 +2530,13 @@ pub fn marble_button_sized(r: Rect, label: &str, enabled: bool, hover: bool, siz
     button_label_at(r, label, enabled, size);
 }
 
+/// A marble button whose label is drawn at `size` px in the lines [`wrap_label`] breaks it into for the
+/// button's width (one line, or two of whole words, as [`shared_button_label_lines_px`] sized it).
+pub fn marble_button_wrapped_sized(r: Rect, label: &str, enabled: bool, hover: bool, size: f32) {
+    let lines = wrap_label(label, r.w - 10.0, size);
+    marble_button_lines(r, &lines, enabled, hover, size);
+}
+
 /// A marble button whose label goes on two lines when one line would not fit its width (Razdor's, the
 /// phone's game menu row of six, where «Выйти из игры» was cut to «Выйти из и...»): the size is the
 /// button's own, cut so two lines fit its height, and the words are not cut. A label that still does not
@@ -2549,25 +2556,27 @@ pub fn marble_button_wrapped(r: Rect, label: &str, enabled: bool, hover: bool) {
 /// A button label broken into lines that each fit `width` px at `size`, measured as
 /// [`marble_button_lines`] draws them (so no line runs past the button). Words are not cut.
 pub fn wrap_label(label: &str, width: f32, size: f32) -> Vec<String> {
-    super::typography::Role::Button.with(|| {
-        super::dt_font::legacy_metrics_if(true, || {
-            let mut lines = Vec::new();
-            let mut cur = String::new();
-            for word in label.split_whitespace() {
-                let cand = if cur.is_empty() { word.to_string() } else { format!("{cur} {word}") };
-                if cur.is_empty() || measure(&cand, size).width <= width {
-                    cur = cand;
-                } else {
-                    lines.push(std::mem::take(&mut cur));
-                    cur = word.to_string();
-                }
-            }
-            if !cur.is_empty() {
-                lines.push(cur);
-            }
-            lines
-        })
-    })
+    super::typography::Role::Button.with(|| super::dt_font::legacy_metrics_if(true, || wrap_words(label, width, |s| measure(s, size).width)))
+}
+
+/// [`wrap_label`] with the widths of `measure_w` (a line's width in px): the greedy break of the words,
+/// no word cut. Pure, so the layout tests can run it without a font.
+pub fn wrap_words(label: &str, width: f32, measure_w: impl Fn(&str) -> f32) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut cur = String::new();
+    for word in label.split_whitespace() {
+        let cand = if cur.is_empty() { word.to_string() } else { format!("{cur} {word}") };
+        if cur.is_empty() || measure_w(&cand) <= width {
+            cur = cand;
+        } else {
+            lines.push(std::mem::take(&mut cur));
+            cur = word.to_string();
+        }
+    }
+    if !cur.is_empty() {
+        lines.push(cur);
+    }
+    lines
 }
 
 /// A marble button whose label is drawn at `size` px on the given `lines` (one or two, each already
@@ -2649,6 +2658,53 @@ fn label_size(h: f32, g: f32) -> f32 {
     // labels run edge to edge on large screens.
     if super::dt_font::mode() == super::dt_font::FontMode::Original {
         size = size.min(label_size_original(h));
+    }
+    size
+}
+
+/// The size a marble button's label takes on a button `h` px tall (as [`button_label`] draws it),
+/// for a caller that sizes its own label (`widgets::button_sized`).
+pub fn button_label_px(h: f32) -> f32 {
+    label_size(h, super::display::button_grow())
+}
+
+/// The one size for a row of buttons `h` px tall whose labels must all show in full: the size a
+/// marble button label takes (`button_label_px`), cut step by step until every label fits its own
+/// button's width, as `button_label_at` measures it (`buttons`: each label and its button's width).
+/// Not below 12 px. The row's labels then share one size (the battle's deployment and quick buttons).
+pub fn shared_button_label_px(h: f32, buttons: &[(&str, f32)]) -> f32 {
+    let fits = |size: f32| {
+        buttons.iter().all(|&(label, w)| {
+            super::typography::Role::Button.with(|| super::dt_font::legacy_metrics_if(true, || measure(label, size).width <= w - 10.0))
+        })
+    };
+    let mut size = button_label_px(h);
+    while size > 12.0 && !fits(size) {
+        size -= 1.0;
+    }
+    size
+}
+
+/// The one size for a phone's deployment grid (backlog 1607): the largest at which every label fits its
+/// own button, in one line or in two lines of whole words ([`wrap_label`]) that fit the button's height
+/// less `pad_v` above and below. Starts where [`shared_button_label_px`] starts, but not above `cap` px,
+/// and steps down by a pixel, not below 12 px. Two lines never make a size smaller than one line does,
+/// so a label that fits in one line keeps its size.
+pub fn shared_button_label_lines_px(h: f32, pad_v: f32, cap: f32, buttons: &[(&str, f32)]) -> f32 {
+    shared_lines_size(h, pad_v, buttons, button_label_px(h).min(cap), |s, size| super::typography::Role::Button.with(|| super::dt_font::legacy_metrics_if(true, || measure(s, size).width)))
+}
+
+/// [`shared_button_label_lines_px`] from `start` px down, with the widths of `width_of(text, size)`.
+pub fn shared_lines_size(h: f32, pad_v: f32, buttons: &[(&str, f32)], start: f32, width_of: impl Fn(&str, f32) -> f32) -> f32 {
+    let fits = |size: f32| {
+        buttons.iter().all(|&(label, w)| {
+            let lines = wrap_words(label, w - 10.0, |s| width_of(s, size));
+            lines.len() <= 2 && lines.len() as f32 * size * 1.25 <= h - 2.0 * pad_v && lines.iter().all(|line| width_of(line, size) <= w - 10.0)
+        })
+    };
+    let mut size = start;
+    while size > 12.0 && !fits(size) {
+        size -= 1.0;
     }
     size
 }

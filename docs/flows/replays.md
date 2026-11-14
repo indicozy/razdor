@@ -32,7 +32,9 @@ no draw. Timings (`step_elapsed`, `since_step`, `stretch_minutes`, `snap_due`, `
 `hero_glide`) are kept in the file and left out of the hash.
 
 `state_hash` (`recording/snapshot.rs`) is FNV-1a over the JSON body without the timings and
-without `asks` (a frame's budget changes how many arrivals it asks, not the rules). Callers hash
+without `asks` (a frame's budget changes how many arrivals it asks, not the rules) and without
+`Game::back_to` (Razdor's «Отступить» cell, backlog 1607: a record made before it existed must hash
+the same; `snapshot::skip_back_to` leaves it out while the hash body is built). Callers hash
 at a day's end with the step finished and any stop's snap done (`finish_pause`, then
 `armies_snap`): the snap's idle draws come at the next moving tick, so a hash taken before them
 compares states at different points.
@@ -152,7 +154,7 @@ on the map (`begin_cast`, `cast`), `army_window_opened`, items (`press_pack`, `p
 `give_held`, `drop_held`, `drink`, `equip`, `unequip`), towns (`buy`, `sell`, `hire`, `heal`,
 `resurrect`, `learn_spell`, garrison moves, `dismiss`, offers, tribute, `rent_ship`), the squad
 (`set_unit_battle_disabled`, `set_formation`, `set_hero_name`, `move_unit`, `promote`), the battle
-(`start_battle`, `resolve_battle`, and the battle's `move_card`, `move_active`, `pass`, `act`,
+(`start_battle`, `resolve_battle`, «Отступить» (`retreat_battle`: the battle is dropped, the hero goes back), and the battle's `start_play` (`Begin`: the first action, before it only `move_card` plays: the deployment), `move_card`, `move_active`, `pass`, `act`,
 `own_cell`, `auto_step`, `hero_auto_step`, `hero_auto_play_to_end`, `max_play_to_end`, `force_end`),
 and the rule settings (`set_rule_settings`: a change, recorded once; `ui::main_menu::follow_settings`
 calls it every frame).

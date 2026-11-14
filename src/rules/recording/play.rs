@@ -183,9 +183,17 @@ impl Player {
                 Ok(true)
             }
             Input::Player(PlayerAction::Battle(act)) => {
-                let (b, _) = self.battle.as_mut().ok_or("a battle's action, none under way")?;
-                apply_battle(b, act);
-                self.run_enemy()?;
+                self.battle_act(act)?;
+                Ok(true)
+            }
+            Input::Player(PlayerAction::RetreatBattle) => {
+                if !self.reach_stretch(e.at, left, true)? {
+                    return Ok(false);
+                }
+                let (b, _) = self.battle.take().ok_or("a retreat, none under way")?;
+                if !self.game.retreat_battle(&b) {
+                    return Err("the retreat the recording made is not offered".into());
+                }
                 Ok(true)
             }
             Input::Player(a) => {
@@ -215,9 +223,7 @@ impl Player {
         self.battle = Some((b, MaxThinker::new(Team::Enemy)));
         self.run_enemy()?;
         for act in rest {
-            let (b, _) = self.battle.as_mut().ok_or("a battle to play on, none under way")?;
-            apply_battle(b, act);
-            self.run_enemy()?;
+            self.battle_act(act)?;
         }
         let (b, _) = self.battle.take().ok_or("a battle to resolve, none under way")?;
         if b.outcome() == Outcome::Ongoing {
@@ -225,6 +231,22 @@ impl Player {
         }
         self.game.resolve_battle(&b);
         Ok(())
+    }
+
+    /// One recorded action of the player's battle, then the enemy's turns. A battle recorded before
+    /// the deployment step has no `Begin`: its first action began it, after the enemy's turns that
+    /// came before it (the old start, `run_enemy` first).
+    fn battle_act(&mut self, act: &BattleAct) -> Result<(), String> {
+        let legacy = self.battle.as_ref().is_some_and(|(b, _)| b.is_deploying() && !matches!(act, BattleAct::Begin | BattleAct::MoveCard { .. }));
+        if legacy {
+            if let Some((b, _)) = self.battle.as_mut() {
+                b.begin();
+            }
+            self.run_enemy()?;
+        }
+        let (b, _) = self.battle.as_mut().ok_or("a battle's action, none under way")?;
+        apply_battle(b, act);
+        self.run_enemy()
     }
 
     /// The enemy's turns, as the screen plays them between the player's actions: «Максимум»'s
@@ -264,11 +286,10 @@ impl Player {
         Err("the battle does not end".into())
     }
 
-    /// The battle as the playback starts it: made and begun (the battle's own start).
+    /// The battle as the playback starts it: made, not begun. Its `Begin` (or its first action)
+    /// begins it, as on the screen, after the player's deployment.
     fn start_battle(&mut self) -> Battle {
-        let mut b = self.game.start_battle();
-        b.begin();
-        b
+        self.game.start_battle()
     }
 
     /// The events raised since the last call (the screen's windows and messages).
