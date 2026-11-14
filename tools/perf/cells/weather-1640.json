@@ -1,0 +1,10 @@
+{
+  "tryn-off": {"RAZDOR_SCENE": "map:Устье Трейна"},
+  "tryn-none": {"RAZDOR_SCENE": "map:Устье Трейна", "RAZDOR_WEATHER": "1", "RAZDOR_WEATHER_DAY": "41"},
+  "tryn-clouds": {"RAZDOR_SCENE": "map:Устье Трейна", "RAZDOR_WEATHER": "1", "RAZDOR_WEATHER_DAY": "27"},
+  "tryn-rain": {"RAZDOR_SCENE": "map:Устье Трейна", "RAZDOR_WEATHER": "1", "RAZDOR_WEATHER_DAY": "329"},
+  "tryn-heat": {"RAZDOR_SCENE": "map:Устье Трейна", "RAZDOR_WEATHER": "1", "RAZDOR_WEATHER_DAY": "44"},
+  "tryn-ash": {"RAZDOR_SCENE": "map:Устье Трейна", "RAZDOR_WEATHER": "1", "RAZDOR_WEATHER_DAY": "250"},
+  "tryn-water": {"RAZDOR_SCENE": "map:Устье Трейна", "RAZDOR_LIVE_WATER": "1"},
+  "tryn-walk-off": {"RAZDOR_SCENE": "walk:Устье Трейна:0,-12"}
+}
