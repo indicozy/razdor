@@ -209,10 +209,22 @@ def install(lab, apk):
     raise LabError(f"install failed: {out.strip() or rc}")
 
 
+def prepare_phone(lab):
+    """Settings that keep a lab run going without dropping the Remote Debug Bridge (2026-11-14, Galaxy A04/A05).
+
+    The lab drops the RDB link when the phone's power or display state changes: `svc power stayon`,
+    `input keyevent KEYCODE_WAKEUP` and every screen rotation (the game is landscape, the home screen portrait)
+    each cut it. Plain `settings put` writes held: the rotation is locked to landscape (one rotation now, none
+    later) and the screen timeout is raised to 30 min, since a dozing screen pauses the game mid-test. Never send
+    a wake or stay-on command; if the screen sleeps, tap it in the lab page."""
+    lab.shell("settings", "put", "system", "screen_off_timeout", "1800000")
+    lab.shell("settings", "put", "system", "accelerometer_rotation", "0")
+    lab.shell("settings", "put", "system", "user_rotation", "1")
+    lab.shell("wm", "set-ignore-orientation-request", "true")
+
+
 def wake_and_start(lab):
-    # The screen stays on while the script works (the lab phone sleeps otherwise, and a download waits on it).
-    lab.shell("svc", "power", "stayon", "true")
-    lab.shell("input", "keyevent", "KEYCODE_WAKEUP")
+    # No wake or stay-on command here: they drop the lab's link (see `prepare_phone`).
     lab.shell("monkey", "-p", PACKAGE, "-c", "android.intent.category.LAUNCHER", "1")
 
 
@@ -461,6 +473,7 @@ def main(argv):
         os.makedirs(args.out, exist_ok=True)
     try:
         check_device(lab, serial)
+        prepare_phone(lab)
         info = device_info(lab)
         if not args.dry_run:
             say(f"phone: {info.get('brand', '?')} {info.get('model', '?')}, Android {info.get('android', '?')}, GL {info.get('gl', '?')}")
