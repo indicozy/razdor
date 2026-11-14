@@ -2289,12 +2289,33 @@ fn picture_on_screen(tilt: &Tilt, view: Rect, model: Mat4, picture: Rect) -> Opt
     picture_quad(tilt, view, model, picture).map(quad_bounds)
 }
 
+local! {
+    /// The last view-projection [`view_proj_cached`] built: the camera and the window it was built for.
+    static VIEW_PROJ: std::cell::RefCell<Option<(view25::TiltCamera, Rect, Mat4)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// `tilt.cam.view_proj(view)`, kept while the camera and the window are the same, so a frame's sprites share one
+/// build (1605 step 3a; the sprites were 13k a frame on the whole map, each building its own matrix). The key is the
+/// camera's value (`==`): the same inputs give the same matrix, so every corner is the same as before.
+fn view_proj_cached(tilt: &Tilt, view: Rect) -> Mat4 {
+    VIEW_PROJ.with_borrow_mut(|cached| {
+        if let Some((cam, v, m)) = cached {
+            if *cam == tilt.cam && *v == view {
+                return *m;
+            }
+        }
+        let m = tilt.cam.view_proj(view);
+        *cached = Some((tilt.cam, view, m));
+        m
+    })
+}
+
 /// The four corners of a standing sprite's `picture` on the window, in the order of the picture's corners (a convex
 /// quad): the billboard `model`'s projection. None if a corner is behind the eye.
 fn picture_quad(tilt: &Tilt, view: Rect, model: Mat4, picture: Rect) -> Option<[Vec2; 4]> {
     let (x0, y0, x1, y1) = (picture.x, picture.y, picture.x + picture.w, picture.y + picture.h);
-    // The four corners share one view-projection (`TiltCamera::project` builds it per call: four matrices a sprite).
-    let view_proj = tilt.cam.view_proj(view);
+    // The four corners share one view-projection, kept while the camera and the window stay the same (`view_proj_cached`).
+    let view_proj = view_proj_cached(tilt, view);
     let mut quad = [Vec2::ZERO; 4];
     for (k, (x, y)) in [(x0, y0), (x1, y0), (x1, y1), (x0, y1)].into_iter().enumerate() {
         quad[k] = view25::project_with(view_proj, model.transform_point3(vec3(x, y, 0.0)), view)?;
@@ -5355,17 +5376,29 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // above them included. Its test is `0x100 < class·256 + sprite < 0x401`: class 4's
     // sprites are 10 and up, so the yellow hills are drawn with the mountains, row by row.
     // 2.5D: the hills are drawn after the fog, below (they stand in the fog's shade).
-    for (o, &seen_o) in rows.iter().zip(&seen_row) {
-        if seen_o {
-            if hill(o) {
-                if !tilted {
-                    standing_map(cam, object_foot(o, cam), object_foot(o, cam), 1.0, object_picture(o, art, cam), || draw_object(o, art, cam, &ctx));
+    let mut pass = || {
+        for (o, &seen_o) in rows.iter().zip(&seen_row) {
+            if seen_o {
+                if hill(o) {
+                    if !tilted {
+                        standing_map(cam, object_foot(o, cam), object_foot(o, cam), 1.0, object_picture(o, art, cam), || draw_object(o, art, cam, &ctx));
+                    }
+                } else {
+                    let foot = object_foot(o, cam);
+                    items.push((sprite_key(cam, o.tile, foot, object_layer(o.class)), Drawable::Object(*o, foot)));
                 }
-            } else {
-                let foot = object_foot(o, cam);
-                items.push((sprite_key(cam, o.tile, foot, object_layer(o.class)), Drawable::Object(*o, foot)));
             }
         }
+    };
+    // The flat view's hills share one sharp session, as the 2.5D pass below does: outside one, `sharp::draw` switches
+    // the material round every hill, and macroquad opens a draw call per switch (1605 A1: the whole map's flat hills
+    // were 724 of its 834 draw calls). The pushes draw nothing. A session takes the mesh scale without the raster
+    // factor (`sharp::draw_mesh_sharp`), so it is used only at factor 1 (100% map resolution), where both paths agree
+    // exactly; below that the hills keep their own path, as before.
+    if !tilted && super::sharp::raster() == 1.0 {
+        super::sharp::session(pass);
+    } else {
+        pass();
     }
     // A spell's layer 1 lies on the ground over the hills, under the marks and every
     // standing sprite (0x4c935b: the cell loop before the marks' 0x4c9459).
