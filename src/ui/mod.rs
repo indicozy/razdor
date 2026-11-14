@@ -2,6 +2,7 @@
 pub mod assets;
 pub mod audio;
 pub mod bench;
+pub mod bench_autorun;
 pub mod bench_view;
 pub mod debug_banner;
 pub mod battle_view;
@@ -1354,6 +1355,8 @@ impl App {
         mobile::refresh_keyboard_inset();
         self.saves_tick();
         self.mobile_install_poll();
+        // A performance test started from the trigger file, once the install is up and the menu is quiet (`bench_autorun`).
+        bench_autorun::tick(self);
         // The hub's promo ad is kept in the app folder once the launch's catalog has come (`ui::ads::sync_tick`).
         ads::sync_tick();
         self.poll_mod_switch();

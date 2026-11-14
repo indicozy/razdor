@@ -545,11 +545,18 @@ fn logcat(_line: &str) {}
 /// Starts a run of `choice` from the settings: the player's state is kept, and the first cell is
 /// set up on the next frame. Errors (no install, no map) are returned for the choice window.
 pub fn start(app: &mut App, choice: Choice) -> Result<(), String> {
+    start_on(app, choice, None)
+}
+
+/// [`start`] on the named map (its file name in the game: `bench_autorun`'s `map=` line), or on the
+/// default one when None.
+pub fn start_on(app: &mut App, choice: Choice, map: Option<&str>) -> Result<(), String> {
     let Some(_) = app.dt_content.clone() else {
         return Err(tr("The test needs the game: the Discord Times folder.").to_string());
     };
-    let Some(map_index) = map_index(app) else {
-        return Err(tr("No map of the game was found.").to_string());
+    let map_index = match map {
+        Some(name) => app.scenarios.iter().position(|e| e.file == name).ok_or_else(|| format!("no map {name} in the game"))?,
+        None => map_index(app).ok_or_else(|| tr("No map of the game was found.").to_string())?,
     };
     let cells = plan(choice);
     let map = app.scenarios[map_index].file.clone();
@@ -706,13 +713,22 @@ pub fn sample(app: &mut App, work: Duration, total: Duration) {
         setup: super::perf_log::bench_header(&app.audio.settings),
     };
     // `RAZDOR_BENCH_SAVE` (a lab's or a test's run, with no one to press Save): the file is saved at once.
-    if std::env::var_os("RAZDOR_BENCH_SAVE").is_some() {
+    // A run from the trigger file (`bench_autorun`) is saved too, and its end is written there (`finished`).
+    let from_file = super::bench_autorun::from_file();
+    if from_file || std::env::var_os("RAZDOR_BENCH_SAVE").is_some() {
         let file = save(&report);
         report.copied = false;
         match file {
             Ok(path) => report.file = Some(path),
             Err(e) => report.error = Some(e),
         }
+    }
+    if from_file {
+        let result = match (&report.file, &report.error) {
+            (Some(path), _) => Ok(path.clone()),
+            (None, error) => Err(error.clone().unwrap_or_else(|| "the results were not saved".to_string())),
+        };
+        super::bench_autorun::finished(result);
     }
     PHASE.with_borrow_mut(|p| *p = Phase::Done(Box::new(report)));
 }
@@ -732,6 +748,7 @@ pub fn cancel(app: &mut App) {
     if let Some(mut run) = take_run() {
         log_line("RazdorBench CANCELLED");
         restore(app, run.saved.take());
+        super::bench_autorun::finished(Err("the run was cancelled".to_string()));
     }
     PHASE.with_borrow_mut(|p| *p = Phase::Closed);
 }
