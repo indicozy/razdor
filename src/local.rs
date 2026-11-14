@@ -23,6 +23,12 @@ thread_local! {
 /// The ids handed out so far (0 is "no id yet").
 static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
 
+/// The address of the value of slot `id` in `slots`, if the slot is made and holds a `T` (None otherwise).
+fn value_in<T: 'static>(slots: &[Option<Box<dyn Any>>], id: usize) -> Option<*const T> {
+    let boxed = slots.get(id)?.as_ref()?;
+    boxed.downcast_ref::<T>().map(|value| value as *const T)
+}
+
 /// One per-thread value of type `T`, made by `init` on the thread's first use. Declare it with
 /// [`local!`]; the value lives in the thread's table until the thread ends, and is dropped then.
 pub struct Local<T: 'static> {
@@ -54,25 +60,22 @@ impl<T: 'static> Local<T> {
     /// never moved or freed before the thread ends, so the address stays valid.
     fn slot(&self) -> *const T {
         let id = self.id();
-        let present = SLOTS.with(|slots| slots.borrow().get(id).is_some_and(Option::is_some));
-        if !present {
-            // Made outside the table's borrow: `init` may use other locals.
-            let made: Box<dyn Any> = Box::new((self.init)());
-            SLOTS.with(|slots| {
-                let mut slots = slots.borrow_mut();
-                if slots.len() <= id {
-                    slots.resize_with(id + 1, || None);
-                }
-                if slots[id].is_none() {
-                    slots[id] = Some(made);
-                }
-            });
+        // The hit path (every access after the first on this thread) takes the table once.
+        if let Some(value) = SLOTS.with(|slots| value_in(&slots.borrow(), id)) {
+            return value;
         }
+        // Made outside the table's borrow: `init` may use other locals.
+        let made: Box<dyn Any> = Box::new((self.init)());
         SLOTS.with(|slots| {
-            let slots = slots.borrow();
-            let boxed = slots[id].as_ref().expect("the slot was made above");
-            boxed.downcast_ref::<T>().expect("a slot holds its own local's type") as *const T
-        })
+            let mut slots = slots.borrow_mut();
+            if slots.len() <= id {
+                slots.resize_with(id + 1, || None);
+            }
+            if slots[id].is_none() {
+                slots[id] = Some(made);
+            }
+        });
+        SLOTS.with(|slots| value_in(&slots.borrow(), id)).expect("a slot holds its own local's type")
     }
 
     /// Runs `f` on this thread's value. Nested calls on other locals (or this one) are fine:
