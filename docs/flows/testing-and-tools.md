@@ -450,7 +450,7 @@ the work's median, the slow frames (over 33 ms), the load and the RSS (`/proc`).
 - Env hooks for runs with no one to press a button: `RAZDOR_SCENE=bench:run:mine|all` starts a run from the title
   (with `RAZDOR_BENCH_END=<png>` the results are shot and the process ends; `RAZDOR_BENCH_SAVE=1` saves the file);
   `RAZDOR_SCENE=bench:choice|running|results` shows the windows with stand-in numbers.
-- A run with no one at the screen (the lab's adb runs: the script in tools/perf): a file `bench-autorun.txt` in
+- A run with no one at the screen (the lab's adb runs: `tools/perf/samsung_lab.py`): a file `bench-autorun.txt` in
   `platform::app_dir()` (its first line `all` or `mine`, an optional `map=<name>`). `bench_autorun::tick` (in `App::frame`)
   reads it once the install is loaded and the main menu is quiet, renames it `bench-autorun.done`, and starts the run
   with `bench::start_on`. The run is saved at its end, and `bench-autorun.finished` (the results file's name) or
