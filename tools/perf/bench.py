@@ -253,6 +253,11 @@ def game_env(args, dt_dir, scene, effect, run_dir, snapshot):
         'RAZDOR_SIZE': args.size, 'RAZDOR_PROFILE': '1',
         'RAZDOR_PROFILE_FRAMES': csv_path, 'RAZDOR_SCENE_QUIET': '1', 'RAZDOR_NO_AUDIO': '1',
     })
+    # Razdor allows one copy per XDG_RUNTIME_DIR (razdor.lock): every run gets its own folder, mode 700,
+    # removed by run_cells after the run. A shared folder makes the later runs exit at once with no frames.
+    xdg = os.path.join(run_dir, 'xdg')
+    os.makedirs(xdg, mode=0o700, exist_ok=True)
+    env['XDG_RUNTIME_DIR'] = xdg
     if snapshot:
         env.update({'RAZDOR_SNAPSHOT': os.path.join(run_dir, 'shot.png'),
                     'RAZDOR_SNAPSHOT_FRAMES': str(args.frames)})
@@ -496,7 +501,9 @@ def gpu_run_once(args, binary, dt_dir, scene, view, effect, run_dir, display, xd
     load1 = os.getloadavg()[0]
     prepare_run_dir(run_dir, view)
     env, csv_path, log_path = game_env(args, dt_dir, scene, effect, run_dir, snapshot=False)
+    run_xdg = env['XDG_RUNTIME_DIR']  # the run's own folder (game_env), not the Xvfb run's shared one
     env.update(gpu_env_base(display, xdg))
+    env['XDG_RUNTIME_DIR'] = run_xdg
     proc = subprocess.Popen(PIN + ['vglrun', '-d', GPU_DEVICE, binary], env=env,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     rss = vram = None  # None until the game's process is seen (no RSS is not 0 MB)
@@ -633,6 +640,8 @@ def run_cells(args, cells, base, result, once):
             except RuntimeError as e:
                 result['errors'][f'{key}#{rep}'] = str(e)
                 log(f'bench: {key} run {rep + 1} failed: {e}')
+            finally:
+                shutil.rmtree(os.path.join(run_dir, 'xdg'), ignore_errors=True)  # the run's private folder
     for key, got in runs.items():
         if got:
             result['scenes'][key] = summarise(got, args.refresh)
