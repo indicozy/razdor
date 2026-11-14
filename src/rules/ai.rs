@@ -825,7 +825,7 @@ pub struct SimResult {
 
 /// One side of a battle between AI sides: its units (their spells in their slots) and its
 /// building defence.
-#[derive(Debug)]
+#[derive(PartialEq)]
 pub struct Side {
     pub units: Vec<Unit>,
     pub defence: i32,
@@ -2128,7 +2128,7 @@ impl Game {
                     let side = side.get_or_insert_with(|| self.army_side(i, true).0);
                     // Checked in tests: the reused side is the one a fresh build gives.
                     #[cfg(test)]
-                    assert_eq!(format!("{side:?}"), format!("{:?}", self.army_side(i, true).0), "army {i}: the side counted once is not the fresh one");
+                    assert!(*side == self.army_side(i, true).0, "army {i}: the side counted once is not the fresh one");
                     self.rescore_pair(i, p, side);
                 }
             }
