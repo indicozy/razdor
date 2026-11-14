@@ -3903,15 +3903,95 @@ const SHADOW_EXPLORE_GAP: f64 = 0.5;
 /// The card layers' angles are kept to this step in a baked map (degrees).
 const SHADOW_LAYER_STEP: f32 = 2.0;
 
-/// The world-space shadow map of the static casters (`prepare_shadow_map`): the sun's and the moon's coverage over the
-/// map and its margin, each a target drawn by `draw_sun_map` as one quad a frame. `origin` is the map's corner in world
-/// units (cell (0, 0) is centred on the unit square's middle), `size` the extent in world units, `texture` the targets'
-/// size in texels. A layer's key is its geometry (`shadow_key`); its alpha is per frame.
-struct ShadowMap {
+/// A shadow target's place on the map: its corner and extent in world units (cell (0, 0) is centred on the unit square's
+/// middle), its texels per world unit and its texture's size. The statics' map layers and the figures' targets are both
+/// of this kind, so one function composites either on the screen (`draw`) and one bakes either (`bake_camera`).
+#[derive(Clone, Copy, Debug)]
+struct ShadowSpace {
     origin: Vec2,
     size: Vec2,
     texels: f32,
     texture: (u32, u32),
+}
+
+impl ShadowSpace {
+    /// The target over `size` world units from `origin`, at `texels` texels a unit.
+    fn over(origin: Vec2, size: Vec2, texels: f32) -> Self {
+        let texture = ((size.x * texels).ceil().max(1.0) as u32, (size.y * texels).ceil().max(1.0) as u32);
+        Self { origin, size, texels, texture }
+    }
+
+    /// The statics' target of a map: the map and its margin, at the map's texel density (`map_texels`).
+    fn of_map(map: &TileMap) -> Self {
+        let rh = map.grid.row_height();
+        let size = vec2(map.w as f32, map.h as f32 * rh);
+        let extent = size + Vec2::splat(2.0 * SHADOW_MARGIN);
+        Self::over(vec2(-0.5, -0.5 * rh) - Vec2::splat(SHADOW_MARGIN), extent, map_texels(extent))
+    }
+
+    /// The target's extent in world units.
+    fn world_rect(&self) -> Rect {
+        Rect::new(self.origin.x, self.origin.y, self.size.x, self.size.y)
+    }
+
+    /// The target's frame in its own pixels.
+    fn frame(&self) -> Rect {
+        Rect::new(0.0, 0.0, self.texture.0 as f32, self.texture.1 as f32)
+    }
+
+    /// The camera a target is baked with: its texels per world unit, its corner at the top-left of the target.
+    fn bake_camera(&self, grid: Grid) -> Camera {
+        let space = self.frame();
+        Camera { origin: self.origin * self.texels, view: space, draw: space, scale: self.texels, grid, tilt: None }
+    }
+
+    /// Composites `rt`, a target of this space, on the screen as one quad over its extent, at the strength `alpha` (the
+    /// hour's layer alpha). `cam` is the 2D space the quad is drawn in (the ground's, under its model).
+    fn draw(&self, cam: &Camera, rt: &RenderTarget, alpha: f32) {
+        let o = self.origin;
+        let corners = [o, o + vec2(self.size.x, 0.0), o + self.size, o + vec2(0.0, self.size.y)];
+        // The target's rows come out flipped (as the bent sheet's), so the texel row of a world y runs the other way.
+        let uv = |p: Vec2| vec2((p.x - o.x) * self.texels / self.texture.0 as f32, 1.0 - (p.y - o.y) * self.texels / self.texture.1 as f32);
+        let colour = shadow::strength_colour(alpha);
+        let vertices: Vec<macroquad::models::Vertex> = corners
+            .map(|p| {
+                let s = cam.to_screen((p.x, p.y));
+                let t = uv(p);
+                macroquad::models::Vertex::new(s.x, s.y, 0.0, t.x, t.y, colour)
+            })
+            .to_vec();
+        shadow::draw_multiply(&Mesh { vertices, indices: vec![0, 1, 2, 0, 2, 3], texture: Some(rt.texture.clone()) });
+    }
+}
+
+/// The texel density of a map's shadow target (`ShadowSpace::of_map`): `SHADOW_TEXELS`, lower for a map whose largest side
+/// (margin included) would need more than `SHADOW_MAX_SIDE` texels.
+fn map_texels(extent: Vec2) -> f32 {
+    SHADOW_TEXELS.min(SHADOW_MAX_SIDE / extent.x.max(extent.y).max(1.0))
+}
+
+/// The figures' shadow target for a view (`cam_world_rect`, world units): the view with the shadow margin, cut to the
+/// map's shadow target, at that target's texel density (the statics' one for the same map). None off the map.
+fn figure_window(view: Rect, map: &ShadowSpace) -> Option<ShadowSpace> {
+    let m = map.world_rect();
+    let (x0, y0) = ((view.x - SHADOW_MARGIN).max(m.x), (view.y - SHADOW_MARGIN).max(m.y));
+    let (x1, y1) = ((view.x + view.w + SHADOW_MARGIN).min(m.x + m.w), (view.y + view.h + SHADOW_MARGIN).min(m.y + m.h));
+    (x1 > x0 && y1 > y0).then(|| ShadowSpace::over(vec2(x0, y0), vec2(x1 - x0, y1 - y0), map.texels))
+}
+
+/// The part of the world a view's 2D space covers, in world units: the tilted view's cull, else the flat view's frame.
+fn cam_world_rect(cam: &Camera) -> Rect {
+    match cam.tilt {
+        Some(t) => t.cull,
+        None => Rect::new(cam.origin.x / cam.scale, cam.origin.y / cam.scale, cam.view.w / cam.scale, cam.view.h / cam.scale),
+    }
+}
+
+/// The world-space shadow map of the static casters (`prepare_shadow_map`): the sun's and the moon's coverage over the
+/// map and its margin (`space`), each a target drawn by `draw_sun_map` as one quad a frame. A layer's key is its geometry
+/// (`shadow_key`); its alpha is per frame.
+struct ShadowMap {
+    space: ShadowSpace,
     /// The key of the statics, the card layers and the geometry of the map (`base_key`), the explored set's fingerprint
     /// the last full bake was made for, and the time of the last bake.
     base: u64,
@@ -3999,22 +4079,16 @@ fn prepare_shadow_map(game: &Game, art: Option<&DtArt>, sun: Option<daylight::Ca
     if art.map_atlas().is_none() || art.shadow_texture().is_none() || art.shadow_soft_texture().is_none() {
         return;
     }
-    let map = &game.world.map;
-    let rh = map.grid.row_height();
-    let size = vec2(map.w as f32, map.h as f32 * rh);
-    let extent = size + Vec2::splat(2.0 * SHADOW_MARGIN);
-    let texels = SHADOW_TEXELS.min(SHADOW_MAX_SIDE / extent.x.max(extent.y).max(1.0));
-    let texture = ((extent.x * texels).ceil().max(1.0) as u32, (extent.y * texels).ceil().max(1.0) as u32);
-    let origin = vec2(-0.5, -0.5 * rh) - Vec2::splat(SHADOW_MARGIN);
+    let space = ShadowSpace::of_map(&game.world.map);
     let layer = layer.map(|(p, y)| (quantize_angle(p), quantize_angle(y)));
-    let base = base_key(statics_signature(game), texels, texture, origin, extent, layer);
+    let base = base_key(statics_signature(game), space.texels, space.texture, space.origin, space.size, layer);
     let explored = game.fog.change_key();
     let now = super::clock::now();
     SHADOW_MAP.with(|m| {
         let mut m = m.borrow_mut();
         let rebuilt = m.as_ref().is_none_or(|s| s.base != base);
         if rebuilt {
-            *m = Some(ShadowMap { origin, size: extent, texels, texture, base, explored, built_at: f64::NEG_INFINITY, sun: None, moon: None });
+            *m = Some(ShadowMap { space, base, explored, built_at: f64::NEG_INFINITY, sun: None, moon: None });
         }
         let Some(sm) = m.as_mut() else { return };
         let all = rebuilt || (sm.explored != explored && now - sm.built_at >= SHADOW_EXPLORE_GAP);
@@ -4024,15 +4098,15 @@ fn prepare_shadow_map(game: &Game, art: Option<&DtArt>, sun: Option<daylight::Ca
         let mut baked = false;
         let sun_key = shadow_key(base, sun.sun);
         if all || sm.sun.as_ref().is_none_or(|(k, _)| *k != sun_key) {
-            let rt = layer_target(texture);
-            bake_layer(game, art, (origin, texels, texture), sun.sun, &rt, layer);
+            let rt = layer_target(sm.space.texture);
+            bake_layer(game, art, &sm.space, sun.sun, &rt, layer);
             sm.sun = Some((sun_key, rt));
             baked = true;
         }
         let moon_key = shadow_key(base, sun.moon);
         if all || sm.moon.as_ref().is_none_or(|(k, _)| *k != moon_key) {
-            let rt = layer_target(texture);
-            bake_layer(game, art, (origin, texels, texture), sun.moon, &rt, layer);
+            let rt = layer_target(sm.space.texture);
+            bake_layer(game, art, &sm.space, sun.moon, &rt, layer);
             sm.moon = Some((moon_key, rt));
             baked = true;
         }
@@ -4045,13 +4119,12 @@ fn prepare_shadow_map(game: &Game, art: Option<&DtArt>, sun: Option<daylight::Ca
 /// Draws one cast's coverage of the static casters the fog shows into `rt` (the map's frame): each caster's silhouette
 /// from its foot by `cast`, its alpha the penumbra times the water's half shade (the fog's own pass covers the rest),
 /// added by the over pass (`shadow::draw_coverage`). An unexplored caster casts nothing, as before (its `seen` test).
-fn bake_layer(game: &Game, art: &DtArt, (origin, texels, texture): (Vec2, f32, (u32, u32)), cast: daylight::Cast, rt: &RenderTarget, layer: Option<(f32, f32)>) {
+fn bake_layer(game: &Game, art: &DtArt, space: &ShadowSpace, cast: daylight::Cast, rt: &RenderTarget, layer: Option<(f32, f32)>) {
     let (Some(sharp_tex), Some(soft_tex)) = (art.shadow_texture(), art.shadow_soft_texture()) else { return };
     let map = &game.world.map;
     let fog = &game.fog;
-    let space = Rect::new(0.0, 0.0, texture.0 as f32, texture.1 as f32);
     // The map's camera: texels per world unit, the map's corner at the top-left of the target.
-    let cam = Camera { origin: origin * texels, view: space, draw: space, scale: texels, grid: map.grid, tilt: None };
+    let cam = space.bake_camera(map.grid);
     let water = |foot: Vec2| -> f32 {
         let world = (foot + cam.origin - vec2(cam.view.x, cam.view.y)) / cam.scale;
         let t = cam.grid.tile_at((world.x, world.y));
@@ -4066,7 +4139,7 @@ fn bake_layer(game: &Game, art: &DtArt, (origin, texels, texture): (Vec2, f32, (
     let objects: Vec<&Decoration> = map.objects.iter().filter(|o| razdor::rules::map::object_cells(o).any(|t| fog.explored_near(t, minimap::FEATHER))).collect();
     let locations: Vec<(usize, &Location)> = game.world.locations.iter().enumerate().filter(|(_, l)| !l.kind.is_bridge() && l.cells().any(|t| fog.explored_near(t, minimap::FEATHER))).collect();
     let (sharp, soft) = cast_shadows(art, &cam, &objects, &locations, &water, &|_, _| vec![cast], layer);
-    super::render_cache::fill_space(rt, space, || {
+    super::render_cache::fill_space(rt, space.frame(), || {
         clear_background(Color::new(0.0, 0.0, 0.0, 0.0));
         sharp.draw_coverage(&sharp_tex);
         soft.draw_coverage(&soft_tex);
@@ -4080,23 +4153,12 @@ fn draw_sun_map(cam: &Camera, sun: daylight::Casts) {
     SHADOW_MAP.with(|m| {
         let m = m.borrow();
         let Some(sm) = m.as_ref() else { return };
-        let corners = [sm.origin, sm.origin + vec2(sm.size.x, 0.0), sm.origin + sm.size, sm.origin + vec2(0.0, sm.size.y)];
-        // The target's rows come out flipped (as the bent sheet's), so the texel row of a world y runs the other way.
-        let uv = |p: Vec2| vec2((p.x - sm.origin.x) * sm.texels / sm.texture.0 as f32, 1.0 - (p.y - sm.origin.y) * sm.texels / sm.texture.1 as f32);
         for (layer, c) in [(&sm.sun, sun.sun), (&sm.moon, sun.moon)] {
             let Some((_, rt)) = layer else { continue };
             if c.alpha <= 0.0 {
                 continue;
             }
-            let colour = shadow::strength_colour(c.alpha);
-            let vertices: Vec<macroquad::models::Vertex> = corners
-                .map(|p| {
-                    let s = cam.to_screen((p.x, p.y));
-                    let t = uv(p);
-                    macroquad::models::Vertex::new(s.x, s.y, 0.0, t.x, t.y, colour)
-                })
-                .to_vec();
-            shadow::draw_multiply(&Mesh { vertices, indices: vec![0, 1, 2, 0, 2, 3], texture: Some(rt.texture.clone()) });
+            sm.space.draw(cam, rt, c.alpha);
         }
     });
 }
@@ -4250,11 +4312,67 @@ fn figure_casts_list(game: &Game, cam: &Camera) -> Vec<FigureCast> {
     out
 }
 
-/// The figures' cast shadows (Sun mode, `daylight::frame_casts`): every figure on the ground in view casts its current frame's
-/// silhouette from its feet by the frame's casts (`figure_casts`), so armies and the hero move with the sun as the statics do.
-/// One picture a figure (no cards), its strength the statics' (the coverage times the layer's alpha, `bake_layer`), its
-/// penumbra the statics' split (`cast_shadows`), the fog and the water as `foot_shade`. Drawn in the ground pass with the
-/// statics' sun shadows, so the sprites stand over it. A figure in a building or in the fog casts nothing.
+/// One sheet's figure shadows of one cast (`figure_groups`): the sharp silhouettes and the soft penumbra, each drawn with
+/// the sheet's own texture.
+struct FigureGroup {
+    stem: &'static str,
+    sharp: shadow::Batch,
+    soft: shadow::Batch,
+    sheet: FigureShadow,
+}
+
+/// The figures' silhouettes of one cast, in the space of `space` (the view's 2D camera, or a shadow target's bake camera)
+/// and the figures' places in `real` (the view's camera, whose facing is the screen's). A figure's picture is its frame
+/// from its feet (`figure_rect`, the feet at 0.8 of the frame), its penumbra the statics' split (`cast_shadows`), its
+/// darkness `shade` at its foot. The strength is the cast's alpha times `gain`: the direct pass lays the alpha twice (the
+/// baked layer's colour alpha is drawn at the composite, `draw_sun_map`), a target takes it once and gets its alpha there.
+/// Only the figures whose picture or reach meets `view` are kept.
+#[allow(clippy::too_many_arguments)]
+fn figure_groups(art: &DtArt, real: &Camera, space: &Camera, list: &[FigureCast], c: daylight::Cast, gain: f32, shade: &dyn Fn(Vec2) -> f32, view: Rect) -> Vec<FigureGroup> {
+    let zoom = space.scale / PX;
+    let mut groups: Vec<FigureGroup> = Vec::new();
+    for f in list {
+        let Some(rect) = figure_rect(Some(art), f.stem, f.pos, space, Stand::Feet) else { continue };
+        // The shadow's tip reaches `len` sprite heights from the foot: a figure whose reach meets the view may cast into it.
+        if !overlaps(rect, view, rect.h * c.len) {
+            continue;
+        }
+        let Some(fs) = art.figure_shadow(f.stem) else { continue };
+        let feet = space.to_screen(f.pos);
+        let k = shade(feet);
+        if k <= 0.0 {
+            continue;
+        }
+        let origin = vec2(rect.x, rect.y);
+        let foot_row = (feet.y - origin.y) / zoom;
+        let heading = real.facing(f.next.map_or(Vec2::ZERO, |n| real.to_screen(n) - real.to_screen(f.pos)));
+        let n = fs.frame;
+        let base = vec2(f.frame.min(7) as f32 * n, facing_row(heading) * n);
+        let atlas = vec2(fs.sharp.width(), fs.sharp.height());
+        let boxed = Rect::new(0.0, 0.0, n, n);
+        let at = match groups.iter().position(|g| g.stem == f.stem) {
+            Some(i) => i,
+            None => {
+                groups.push(FigureGroup { stem: f.stem, sharp: shadow::Batch::default(), soft: shadow::Batch::default(), sheet: fs.clone() });
+                groups.len() - 1
+            }
+        };
+        let group = &mut groups[at];
+        let p = shadow::Projection { origin, zoom, foot_row, dir: vec2(c.dir[0], c.dir[1]), len: c.len };
+        if let Some((vertices, indices)) = p.picture_mesh_ramp_box(n, boxed, base, atlas, |t| shadow::strength_colour(c.alpha * gain * k * (1.0 - t))) {
+            group.sharp.push(&vertices, &indices);
+        }
+        if let Some((vertices, indices)) = p.picture_mesh_ramp_box(n, boxed, base, atlas, |t| shadow::strength_colour(c.alpha * gain * k * t)) {
+            group.soft.push(&vertices, &indices);
+        }
+    }
+    groups
+}
+
+/// The figures' cast shadows, drawn straight on the screen (the direct pass, used where a target cannot be baked: inside a
+/// fill, `draw_world_in`). Sun mode, `daylight::frame_casts`: every figure on the ground in view casts its current frame's
+/// silhouette from its feet by the frame's casts (`figure_casts`), the fog and the water as `foot_shade`. Drawn in the
+/// ground pass with the statics' sun shadows, so the sprites stand over it. A figure in a building or in the fog casts nothing.
 fn draw_figure_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, sun: daylight::Casts) {
     let Some(art) = art else { return };
     let casts = figure_casts(Some(sun));
@@ -4262,52 +4380,81 @@ fn draw_figure_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, sun: dayl
         return;
     }
     let shade = foot_shade(game, cam);
+    let list = figure_casts_list(game, cam);
     let view = screen_view(cam);
-    let zoom = cam.scale / PX;
-    // One batch pair a sheet: the sharp silhouettes and the soft penumbra, each drawn with its sheet's texture.
-    let mut groups: Vec<(&'static str, shadow::Batch, shadow::Batch, FigureShadow)> = Vec::new();
-    for f in figure_casts_list(game, cam) {
-        let Some(rect) = figure_rect(Some(art), f.stem, f.pos, cam, Stand::Feet) else { continue };
-        if !overlaps(rect, view, 0.0) {
-            continue;
-        }
-        let Some(fs) = art.figure_shadow(f.stem) else { continue };
-        let k = shade(cam.to_screen(f.pos));
-        if k <= 0.0 {
-            continue;
-        }
-        // The sprite's origin and feet as `figure_rect` and `draw_figure` place them: the feet at 0.8 of the frame.
-        let feet = cam.to_screen(f.pos);
-        let origin = vec2(rect.x, rect.y);
-        let foot_row = (feet.y - origin.y) / zoom;
-        let heading = cam.facing(f.next.map_or(Vec2::ZERO, |n| cam.to_screen(n) - feet));
-        let n = fs.frame;
-        let base = vec2(f.frame.min(7) as f32 * n, facing_row(heading) * n);
-        let atlas = vec2(fs.sharp.width(), fs.sharp.height());
-        let boxed = Rect::new(0.0, 0.0, n, n);
-        let at = match groups.iter().position(|g| g.0 == f.stem) {
-            Some(i) => i,
-            None => {
-                groups.push((f.stem, shadow::Batch::default(), shadow::Batch::default(), fs.clone()));
-                groups.len() - 1
-            }
-        };
-        let group = &mut groups[at];
-        for c in &casts {
-            let p = shadow::Projection { origin, zoom, foot_row, dir: vec2(c.dir[0], c.dir[1]), len: c.len };
-            // The baked layer's two factors: the coverage (the cast's alpha) and the layer's colour alpha (`draw_sun_map`).
-            if let Some((vertices, indices)) = p.picture_mesh_ramp_box(n, boxed, base, atlas, |t| shadow::strength_colour(c.alpha * c.alpha * k * (1.0 - t))) {
-                group.1.push(&vertices, &indices);
-            }
-            if let Some((vertices, indices)) = p.picture_mesh_ramp_box(n, boxed, base, atlas, |t| shadow::strength_colour(c.alpha * c.alpha * k * t)) {
-                group.2.push(&vertices, &indices);
-            }
+    for c in casts {
+        for g in figure_groups(art, cam, cam, &list, c, c.alpha, &shade, view) {
+            g.sharp.draw(&g.sheet.sharp);
+            g.soft.draw(&g.sheet.soft);
         }
     }
-    for (_, sharp, soft, fs) in groups {
-        sharp.draw(&fs.sharp);
-        soft.draw(&fs.soft);
+}
+
+/// The figures' shadow targets of the frame (Sun mode): one per cast (`figure_casts`), each the figures' coverage over the
+/// view (`figure_window`), baked by `prepare_figure_map` and composited by `draw_figure_map` as the statics' layers are.
+struct FigureMap {
+    space: ShadowSpace,
+    casts: Vec<daylight::Cast>,
+    targets: Vec<RenderTarget>,
+}
+
+local! {
+    /// The frame's figure shadow targets: None with the sun shadows off (nothing is kept), and until the first bake.
+    static FIGURE_MAP: std::cell::RefCell<Option<FigureMap>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Bakes the figures' cast shadows of the frame into their targets, outside any fill like the statics (`prepare_shadow_map`,
+/// called by `draw_world`). Every figure on the ground in view casts its frame's silhouette into the target's own pixels
+/// (`figure_groups` on the target's bake camera), so a figure's edge is as sharp or as soft as a building's at the same
+/// texel density. The targets are kept between frames and made again only when their size changes.
+fn prepare_figure_map(game: &Game, art: Option<&DtArt>, cam: &Camera, sun: Option<daylight::Casts>) {
+    let casts = sun.map_or_else(Vec::new, |s| figure_casts(Some(s)));
+    let window = art.filter(|_| !casts.is_empty()).and_then(|_| figure_window(cam_world_rect(cam), &ShadowSpace::of_map(&game.world.map)));
+    let (Some(art), Some(space)) = (art, window) else {
+        FIGURE_MAP.with(|m| m.borrow_mut().take());
+        return;
+    };
+    let mut fm = FIGURE_MAP.with(|m| m.borrow_mut().take()).unwrap_or(FigureMap { space, casts: Vec::new(), targets: Vec::new() });
+    // The targets are kept while their size holds; a new size makes them all again.
+    let fits = |rt: &RenderTarget| rt.texture.width() as u32 == space.texture.0 && rt.texture.height() as u32 == space.texture.1;
+    if !fm.targets.iter().all(fits) {
+        fm.targets.clear();
     }
+    fm.targets.truncate(casts.len());
+    while fm.targets.len() < casts.len() {
+        fm.targets.push(layer_target(space.texture));
+    }
+    let bake = space.bake_camera(game.world.map.grid);
+    let shade = foot_shade(game, &bake);
+    let list = figure_casts_list(game, cam);
+    let frame = space.frame();
+    for (rt, c) in fm.targets.iter().zip(&casts) {
+        let groups = figure_groups(art, cam, &bake, &list, *c, 1.0, &shade, frame);
+        super::render_cache::fill_space(rt, frame, || {
+            clear_background(Color::new(0.0, 0.0, 0.0, 0.0));
+            for g in groups {
+                g.sharp.draw_coverage(&g.sheet.sharp);
+                g.soft.draw_coverage(&g.sheet.soft);
+            }
+        });
+    }
+    fm.space = space;
+    fm.casts = casts;
+    FIGURE_MAP.with(|m| *m.borrow_mut() = Some(fm));
+}
+
+/// Composites the figures' shadow targets over the map (`ShadowSpace::draw`, as the statics' layers): each at its cast's
+/// alpha. Nothing is drawn with no target baked this frame.
+fn draw_figure_map(cam: &Camera) {
+    FIGURE_MAP.with(|m| {
+        let m = m.borrow();
+        let Some(fm) = m.as_ref() else { return };
+        for (rt, c) in fm.targets.iter().zip(&fm.casts) {
+            if c.alpha > 0.0 {
+                fm.space.draw(cam, rt, c.alpha);
+            }
+        }
+    });
 }
 
 #[cfg(test)]
@@ -4370,6 +4517,49 @@ mod shadow_map_tests {
         assert_eq!(quantize_angle(3.2), 4.0);
         assert_eq!(quantize_angle(-0.9), 0.0);
         assert_eq!(quantize_angle(30.0), 30.0);
+    }
+}
+
+#[cfg(test)]
+mod figure_map_tests {
+    use super::*;
+
+    /// The statics' target of a 14 by 12 cell map.
+    fn statics() -> ShadowSpace {
+        ShadowSpace::of_map(&TileMap::from_codes(Grid::Square8, 14, 12, &[0; 14 * 12], Vec::new()))
+    }
+
+    #[test]
+    fn the_figures_target_has_the_statics_texel_density() {
+        let map = statics();
+        let fig = figure_window(Rect::new(2.0, 2.0, 6.0, 4.0), &map).expect("a view on the map");
+        assert_eq!(fig.texels, map.texels, "the same density as the statics' layer of this map");
+        assert_eq!(fig.texels, SHADOW_TEXELS);
+    }
+
+    #[test]
+    fn the_figures_target_covers_the_view_and_the_margin() {
+        let view = Rect::new(2.0, 2.0, 6.0, 4.0);
+        let w = figure_window(view, &statics()).expect("a view on the map").world_rect();
+        assert!(w.x <= view.x - SHADOW_MARGIN && w.y <= view.y - SHADOW_MARGIN, "the margin past the view's top-left");
+        assert!(w.x + w.w >= view.x + view.w + SHADOW_MARGIN && w.y + w.h >= view.y + view.h + SHADOW_MARGIN, "the margin past its bottom-right");
+    }
+
+    #[test]
+    fn the_figures_target_is_cut_to_the_map() {
+        let map = statics();
+        let w = figure_window(Rect::new(-8.0, -8.0, 2.0, 2.0), &map).expect("a view at the map's corner").world_rect();
+        assert_eq!(w.x, map.origin.x, "no target past the statics' own extent");
+        assert_eq!(w.y, map.origin.y);
+        assert!(figure_window(Rect::new(500.0, 500.0, 10.0, 10.0), &map).is_none(), "a view off the map has no target");
+    }
+
+    #[test]
+    fn a_big_map_lowers_the_density_within_the_side_cap() {
+        assert_eq!(map_texels(vec2(100.0, 100.0)), SHADOW_TEXELS);
+        let big = vec2(4000.0, 100.0);
+        assert!(map_texels(big) < SHADOW_TEXELS);
+        assert!(map_texels(big) * big.x <= SHADOW_MAX_SIDE + 1e-3, "the largest side stays within the cap");
     }
 }
 
@@ -5016,6 +5206,7 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
     // The shadow map is baked here, outside any fill (a backdrop drawn inside a fill keeps the map it has).
     if super::render_cache::target().is_none() {
         prepare_shadow_map(game, assets.dt.as_ref(), daylight::frame_casts(), card_layering(cam));
+        prepare_figure_map(game, assets.dt.as_ref(), cam, daylight::frame_casts());
     }
     draw_sky(cam);
     if waits {
@@ -5131,11 +5322,16 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     }
     // The sun's and the moon's shadows are the baked map (`prepare_shadow_map`): one quad each, whatever the casters.
     if let Some(c) = sun {
-        // The figures' shadows lie with the statics' (Sun mode only: `figure_casts` is empty otherwise).
+        // The figures' shadows lie with the statics' (Sun mode only: `figure_casts` is empty otherwise). Inside a fill
+        // no target can be baked (a fill does not nest), so the figures are drawn straight on the picture then.
         frame_probe::time(Stage::SunShadow, || {
             ground(cam, || {
                 draw_sun_map(cam, c);
-                draw_figure_shadows(game, art, cam, c);
+                if super::render_cache::target().is_some() {
+                    draw_figure_shadows(game, art, cam, c);
+                } else {
+                    draw_figure_map(cam);
+                }
             })
         });
         if waits {
