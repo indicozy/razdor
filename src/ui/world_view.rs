@@ -3172,7 +3172,7 @@ fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool) {
         let key = ground_key(game, cam);
         // With the water still and the border's fog off, the overlay depends on the water frame alone: the cache keeps it
         // and it is drawn again only when the frame changes (`GroundStep::Refresh`).
-        let wf = (!water::live() && !(extend_edge() && !trailer_nofog())).then(|| razdor::dt::gfx::water_frame((super::map_anim::now() * 1000.0) as i64));
+        let wf = (!water::live() && (!extend_edge() || trailer_nofog())).then(|| razdor::dt::gfx::water_frame((super::map_anim::now() * 1000.0) as i64));
         let cached = (waits && layer.cache_on() && super::render_cache::target().is_none() && plain).then(|| layer.ground_target(key, wf)).flatten();
         match cached {
             // A camera that moved this frame draws the ground once, live (below); the cache is refilled on the first
