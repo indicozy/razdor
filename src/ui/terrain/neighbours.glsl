@@ -252,6 +252,10 @@ void main() {
     const float sea = 0.0;
 #endif
     @CP@ vec3 col;
+#if CHEAP_GROUND
+    // Cheap ground (option 5, `RAZDOR_TERRAIN_CHEAP`): the nearest cell's code, one atlas fetch, no blend between the four.
+    col = ground(mix(mix(k.x, k.y, step(0.5, fx)), mix(k.z, k.w, step(0.5, fx)), step(0.5, fy)), px, w, sea);
+#else
     if (k.x == k.y && k.y == k.z && k.z == k.w) {
         col = ground(k.x, px, w, sea);
     } else {
@@ -259,6 +263,7 @@ void main() {
         @CP@ vec3 bottom = mix(ground(k.z, px, w, sea), ground(k.w, px, w, sea), fx);
         col = mix(top, bottom, fy);
     }
+#endif
 #if LIVE_WATER
     // The shore foam (live water, the water's pixels only): laid on the coast by the water's share of the four
     // cells, with the weights the colour blend uses, so it sits on the visible shore and not on the mask's edge.

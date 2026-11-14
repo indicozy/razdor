@@ -265,6 +265,8 @@ pub struct Options {
     pub vrs: bool,
     /// Option 4: mediump colour maths (only with the new shader).
     pub mediump: bool,
+    /// Option 5: the cheap ground, the nearest cell's code (`RAZDOR_TERRAIN_CHEAP=1`; only with the new shader).
+    pub cheap: bool,
 }
 
 impl Options {
@@ -282,6 +284,9 @@ impl Options {
         }
         if self.mediump {
             on.push("4");
+        }
+        if self.cheap {
+            on.push("5");
         }
         if on.is_empty() {
             "opt=none".into()
@@ -310,7 +315,7 @@ pub fn ab_options(v: &str) -> Option<Options> {
         "D" => (false, false, false),
         _ => return None,
     };
-    Some(Options { new_shader, cache, vrs: false, mediump })
+    Some(Options { new_shader, cache, vrs: false, mediump, cheap: false })
 }
 
 /// The terrain options, read once. Sets the frame probe's label and logs the set.
@@ -326,6 +331,7 @@ pub fn options() -> Options {
                 cache: new_shader && !switch("profile-terrain-nocache", "RAZDOR_TERRAIN_NOCACHE"),
                 vrs: switch("profile-terrain-vrs", "RAZDOR_TERRAIN_VRS"),
                 // Android: on unless `profile-terrain-highp`; the desktop: off unless `RAZDOR_TERRAIN_MEDIUMP=1`.
+                cheap: new_shader && switch("profile-terrain-cheap", "RAZDOR_TERRAIN_CHEAP"),
                 mediump: new_shader
                     && if cfg!(target_os = "android") { !switch("profile-terrain-highp", "") } else { switch("", "RAZDOR_TERRAIN_MEDIUMP") },
             }
@@ -643,12 +649,14 @@ struct Variant {
     overlay: bool,
     /// The border's fog («Продолжать карту за краем»).
     mist: bool,
+    /// Option 5 (`RAZDOR_TERRAIN_CHEAP`): the nearest cell's code, no blend between the four.
+    cheap: bool,
 }
 
 impl Variant {
     /// The variant's index in the layer's list: one bit per flag.
     fn key(self) -> u8 {
-        u8::from(self.mediump) | u8::from(self.live) << 1 | u8::from(self.water) << 2 | u8::from(self.overlay) << 3 | u8::from(self.mist) << 4
+        u8::from(self.mediump) | u8::from(self.live) << 1 | u8::from(self.water) << 2 | u8::from(self.overlay) << 3 | u8::from(self.mist) << 4 | u8::from(self.cheap) << 5
     }
 }
 
@@ -656,11 +664,12 @@ impl Variant {
 /// and the sharp sampling filled in.
 fn variant_text(v: Variant) -> String {
     let defines = format!(
-        "#define LIVE_WATER {}\n#define WATER_CODE {}\n#define OVERLAY_PASS {}\n#define EDGE_MIST {}\n",
+        "#define LIVE_WATER {}\n#define WATER_CODE {}\n#define OVERLAY_PASS {}\n#define EDGE_MIST {}\n#define CHEAP_GROUND {}\n",
         u8::from(v.live),
         u8::from(v.water),
         u8::from(v.overlay),
-        u8::from(v.mist)
+        u8::from(v.mist),
+        u8::from(v.cheap)
     );
     let precision = if v.mediump { "mediump" } else { "highp" };
     NEW_FRAGMENT
@@ -686,7 +695,7 @@ impl TerrainLayer {
         if opts.new_shader {
             // The full variant (every block) is made at start: it proves the shader compiles (else the old one is used).
             // Its mediump twin proves option 4's text; the other variants are made on their first draw (`material`).
-            let full = Variant { mediump: false, live: true, water: true, overlay: true, mist: true };
+            let full = Variant { mediump: false, live: true, water: true, overlay: true, mist: true, cheap: false };
             match make_variant(full) {
                 Ok(m) => variants.push((full.key(), Some(m))),
                 Err(e) => razdor::diag!("terrain shader: {e}"),
@@ -880,7 +889,7 @@ impl TerrainLayer {
         let water_on = matches!(mode, Mode::Full | Mode::Overlay);
         let edge_on = water_on && edge;
         // The variant holds the blocks this draw uses and no others (`Variant`); live water is drawn on the water's draws.
-        let variant = Variant { mediump: self.opts.mediump, live: water_on && water::live(), water: water_on, overlay: mode == Mode::Overlay, mist: edge_on };
+        let variant = Variant { mediump: self.opts.mediump, live: water_on && water::live(), water: water_on, overlay: mode == Mode::Overlay, mist: edge_on, cheap: self.opts.cheap };
         let Some(m) = self.material(variant) else { return };
         let new = self.opts.new_shader;
         // The trailer's stills (dev-only): the atlas is sampled nearest, so the grass is not streaked.
@@ -1373,8 +1382,8 @@ mod variant_tests {
         out
     }
 
-    const GROUND: Variant = Variant { mediump: false, live: false, water: false, overlay: false, mist: false };
-    const OVERLAY_LIVE_MIST: Variant = Variant { mediump: false, live: true, water: true, overlay: true, mist: true };
+    const GROUND: Variant = Variant { mediump: false, live: false, water: false, overlay: false, mist: false, cheap: false };
+    const OVERLAY_LIVE_MIST: Variant = Variant { mediump: false, live: true, water: true, overlay: true, mist: true, cheap: false };
 
     #[test]
     fn the_ground_pass_holds_the_land_only() {
@@ -1396,7 +1405,7 @@ mod variant_tests {
 
     #[test]
     fn the_full_pass_without_live_water_has_no_live_code_and_no_discard() {
-        let full = Variant { mediump: false, live: false, water: true, overlay: false, mist: false };
+        let full = Variant { mediump: false, live: false, water: true, overlay: false, mist: false, cheap: false };
         let t = preprocess(&variant_text(full));
         assert!(t.contains("texture2D(Water"), "the water stage is drawn");
         for gone in ["discard;", "texture2D(Noise", "texture2D(Flow", "shore_foam(", "wnoise(", "vnoise(", "Edge.x"] {
@@ -1406,8 +1415,8 @@ mod variant_tests {
 
     #[test]
     fn every_variant_text_is_fully_assembled() {
-        for bits in 0u8..32 {
-            let v = Variant { mediump: bits & 1 != 0, live: bits & 2 != 0, water: bits & 4 != 0, overlay: bits & 8 != 0, mist: bits & 16 != 0 };
+        for bits in 0u8..64 {
+            let v = Variant { mediump: bits & 1 != 0, live: bits & 2 != 0, water: bits & 4 != 0, overlay: bits & 8 != 0, mist: bits & 16 != 0, cheap: bits & 32 != 0 };
             let v = Variant { water: v.water || v.live || v.overlay, ..v };
             let t = variant_text(v);
             assert!(!t.contains("@CP@") && !t.contains("@SHARP_UV@"), "{v:?}: a placeholder is left");
@@ -1419,8 +1428,8 @@ mod variant_tests {
     #[test]
     fn variant_keys_are_distinct() {
         let mut seen = std::collections::HashSet::new();
-        for bits in 0u8..32 {
-            let v = Variant { mediump: bits & 1 != 0, live: bits & 2 != 0, water: bits & 4 != 0, overlay: bits & 8 != 0, mist: bits & 16 != 0 };
+        for bits in 0u8..64 {
+            let v = Variant { mediump: bits & 1 != 0, live: bits & 2 != 0, water: bits & 4 != 0, overlay: bits & 8 != 0, mist: bits & 16 != 0, cheap: bits & 32 != 0 };
             assert!(seen.insert(v.key()), "{v:?}: a key repeats");
         }
     }
