@@ -824,9 +824,10 @@ impl TileMap {
         }
     }
 
-    /// The objects whose tile lies in columns `c0..c1` and rows `r0..r1` (clipped to the map), in the map's order (row by
-    /// row): the chunks that overlap the rectangle, then the exact test. An object is in one chunk, so none comes twice.
-    pub fn objects_in_rect(&self, c0: i32, c1: i32, r0: i32, r1: i32) -> Vec<Decoration> {
+    /// The indices (into [`TileMap::objects`]) of the objects whose tile lies in columns `c0..c1` and rows `r0..r1`
+    /// (clipped to the map), in the map's order (row by row): the chunks that overlap the rectangle, then the exact
+    /// test. An object is in one chunk, so none comes twice. Indices, not copies: the drawing reads the objects in place.
+    pub fn objects_in_rect(&self, c0: i32, c1: i32, r0: i32, r1: i32) -> Vec<u32> {
         let (c0, c1) = (c0.clamp(0, self.w), c1.clamp(0, self.w));
         let (r0, r1) = (r0.clamp(0, self.h), r1.clamp(0, self.h));
         if c0 >= c1 || r0 >= r1 {
@@ -842,11 +843,11 @@ impl TileMap {
         }
         // The map's order is the objects' index order (they are sorted row by row when the map is built).
         found.sort_unstable();
+        found.retain(|&i| {
+            let o = &self.objects[i as usize];
+            (c0..c1).contains(&o.tile.0) && (r0..r1).contains(&o.tile.1)
+        });
         found
-            .into_iter()
-            .map(|i| self.objects[i as usize])
-            .filter(|o| (c0..c1).contains(&o.tile.0) && (r0..r1).contains(&o.tile.1))
-            .collect()
     }
 
     /// Objects standing in rows `r0..r1`.
@@ -1584,7 +1585,13 @@ TTTTT
         }
         let m = TileMap::from_codes(Grid::Square8, 40, 40, &vec![0u8; 1600], objects);
         for &(c0, c1, r0, r1) in &[(0, 40, 0, 40), (15, 17, 0, 40), (-3, 16, 14, 33), (16, 32, 16, 32), (39, 40, 5, 6), (10, 10, 0, 40), (0, 40, 40, 50)] {
-            let want: Vec<Decoration> = m.objects_in_rows(r0, r1).iter().filter(|o| (c0..c1).contains(&o.tile.0)).copied().collect();
+            let want: Vec<u32> = m
+                .objects
+                .iter()
+                .enumerate()
+                .filter(|(_, o)| (r0..r1).contains(&o.tile.1) && (c0..c1).contains(&o.tile.0))
+                .map(|(i, _)| i as u32)
+                .collect();
             assert_eq!(m.objects_in_rect(c0, c1, r0, r1), want, "rect {c0}..{c1} x {r0}..{r1}");
         }
     }

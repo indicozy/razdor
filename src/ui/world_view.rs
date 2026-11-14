@@ -3472,8 +3472,8 @@ fn detail_visibility(picture: Rect, dpi: f32) -> f32 {
 
 /// Something drawn in painter's order (by the bottom edge on screen).
 enum Drawable {
-    /// A standing object and its foot (computed once, for the sort key and the draw).
-    Object(Decoration, Vec2),
+    /// A standing object (its index in the map's objects) and its foot (computed once, for the sort key and the draw).
+    Object(u32, Vec2),
     Building(usize),
     /// A building drawn as one group of cards (2.5D, [`card_building`]): location. The group sorts by the building's
     /// foot as one item, and stands as one billboard about that foot ([`draw_building_group`]).
@@ -5571,7 +5571,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // and the passes below ask it again (the fog does not change while the world is drawn).
     // The objects of the drawn columns and rows (the chunks overlapping them): `seen` tests the same columns.
     let rows = map.objects_in_rect(c0 - side, c1 + side, r0 - up, r1 + below);
-    let seen_row: Vec<bool> = rows.iter().map(&seen).collect();
+    let seen_row: Vec<bool> = rows.iter().map(|&i| seen(&map.objects[i as usize])).collect();
     // The locations drawn this frame, in the locations' order: the passes below share this one test
     // (the 2.5D view makes three passes over them; each used to test every location again).
     let seen_locs: Vec<usize> = game.world.locations.iter().enumerate().filter(|(i, l)| location_seen(*i, l)).map(|(i, _)| i).collect();
@@ -5606,7 +5606,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
         }
     }
     if !lit_lights.is_empty() {
-        let objects: Vec<&Decoration> = rows.iter().zip(&seen_row).filter(|(_, s)| **s).map(|(o, _)| o).collect();
+        let objects: Vec<&Decoration> = rows.iter().zip(&seen_row).filter(|(_, s)| **s).map(|(&i, _)| &map.objects[i as usize]).collect();
         let locations: Vec<(usize, &Location)> = seen_locs.iter().map(|&i| (i, &game.world.locations[i])).filter(|(_, l)| !l.kind.is_bridge()).collect();
         frame_probe::time(Stage::Light, || ground(cam, || draw_shadows(game, art, cam, &lit_lights, &objects, &locations)));
     }
@@ -5625,15 +5625,16 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // sprites are 10 and up, so the yellow hills are drawn with the mountains, row by row.
     // 2.5D: the hills are drawn after the fog, below (they stand in the fog's shade).
     let mut pass = || {
-        for (o, &seen_o) in rows.iter().zip(&seen_row) {
+        for (&i, &seen_o) in rows.iter().zip(&seen_row) {
             if seen_o {
+                let o = &map.objects[i as usize];
                 if hill(o) {
                     if !tilted {
                         standing_map(cam, &ctx, object_foot(o, cam), object_fog(o, cam), object_foot(o, cam), 1.0, object_picture(o, art, cam), || draw_object(o, art, cam, &ctx));
                     }
                 } else {
                     let foot = object_foot(o, cam);
-                    items.push((sprite_key(cam, o.tile, foot, object_layer(o.class)), Drawable::Object(*o, foot)));
+                    items.push((sprite_key(cam, o.tile, foot, object_layer(o.class)), Drawable::Object(i, foot)));
                 }
             }
         }
@@ -5735,7 +5736,8 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
         // One sharp session for the hills, as for the pass below: outside one, every sharp draw
         // switches the material on and off, so each hill was its own draw call.
         super::sharp::session(|| {
-            for (o, &seen_o) in rows.iter().zip(&seen_row) {
+            for (&i, &seen_o) in rows.iter().zip(&seen_row) {
+                let o = &map.objects[i as usize];
                 if seen_o && hill(o) {
                     standing_map(cam, &ctx, object_foot(o, cam), object_fog(o, cam), object_foot(o, cam), 1.0, object_picture(o, art, cam), || draw_object(o, art, cam, &ctx));
                 }
@@ -5785,9 +5787,10 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     super::sharp::session_pass(!tilted, lit, || {
         for d in items.iter().map(|(_, d)| d) {
             match d {
-                Drawable::Object(o, foot) => {
+                Drawable::Object(i, foot) => {
                     // Razdor's (the owner's request, 2026-11-11): an object too small to see is not drawn, and one
                     // just above that fades out (`detail_visibility`); the flat view fades it through `SPRITE_VIS`.
+                    let o = &map.objects[*i as usize];
                     let foot = *foot;
                     let picture = object_picture(o, art, cam);
                     let detail = detail_visibility(picture, ctx.dpi);
