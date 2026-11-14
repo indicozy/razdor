@@ -7861,7 +7861,13 @@ fn draw_weather(game: &Game, assets: &Assets, cam: &Camera, light: Option<daylig
     };
     let settle = shows.iter().filter(|s| s.mask.is_some()).flat_map(|s| s.reveal_cells.iter().map(|&(i, _)| i));
     let (held, origin) = (game.unshown_cells(), game.tile());
-    let fog = minimap::fog_layer(&game.fog, &held, origin, settle);
+    let fog = minimap::fog_layer_lit(&game.fog, &held, origin, settle);
+    // The explored texels bound the pass (`weather::reach`): the whole map with no fog to cut it, nothing when no
+    // texel is lit. The fog's texture is one texel per cell only when its size is the map's.
+    let explored = match &fog {
+        Some((_, lit)) if game.fog.w == map.w && game.fog.h == map.h => lit.unwrap_or([0; 4]),
+        _ => [0, 0, map.w, map.h],
+    };
     let projection = match cam.tilt {
         // The flat view's pixel at the cell `p` is `p * scale - origin + view` (`to_screen`).
         None => weather::Projection::Flat { scale: cam.scale, offset: [(cam.origin.x - cam.view.x) / cam.scale, (cam.origin.y - cam.view.y) / cam.scale] },
@@ -7877,7 +7883,9 @@ fn draw_weather(game: &Game, assets: &Assets, cam: &Camera, light: Option<daylig
     let pass = weather::Pass {
         biome: &masks.biome,
         lowland: &masks.lowland,
-        fog: fog.as_ref(),
+        fog: fog.as_ref().map(|(tex, _)| tex),
+        explored,
+        boxes: masks.boxes,
         map: [map.w as f32, map.h as f32],
         draw: [cam.draw.x, cam.draw.y, cam.draw.w, cam.draw.h],
         projection,

@@ -195,6 +195,140 @@ pub fn mask_texels(codes: &[u8]) -> (Vec<u8>, Vec<u8>) {
     (weather, lowland)
 }
 
+/// The cell boxes (x0, y0, x1, y1, exclusive) of what each effect's mask can drive: the cells whose byte is 2 or
+/// more (the shader's gates are above 0.01, so a byte of 1 never opens one). Per effect: snow (red), swamp rain
+/// (green), heat (blue), ash (alpha), and the lowland rain. None when no cell has it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Boxes {
+    pub snow: Option<[i32; 4]>,
+    pub swamp: Option<[i32; 4]>,
+    pub heat: Option<[i32; 4]>,
+    pub ash: Option<[i32; 4]>,
+    pub lowland: Option<[i32; 4]>,
+}
+
+/// The boxes of a map's two mask textures (`mask_texels`, `w` cells a row), see [`Boxes`].
+pub fn mask_boxes(weather: &[u8], lowland: &[u8], w: usize) -> Boxes {
+    let mut b = Boxes::default();
+    if w == 0 {
+        return b;
+    }
+    let cell = |i: usize| Some([(i % w) as i32, (i / w) as i32, (i % w) as i32 + 1, (i / w) as i32 + 1]);
+    for (i, t) in weather.chunks_exact(4).enumerate() {
+        let lo = lowland.get(4 * i).copied().unwrap_or(0);
+        if t[0] >= 2 {
+            b.snow = join(b.snow, cell(i));
+        }
+        if t[1] >= 2 {
+            b.swamp = join(b.swamp, cell(i));
+        }
+        if t[2] >= 2 {
+            b.heat = join(b.heat, cell(i));
+        }
+        if t[3] >= 2 {
+            b.ash = join(b.ash, cell(i));
+        }
+        if lo >= 2 {
+            b.lowland = join(b.lowland, cell(i));
+        }
+    }
+    b
+}
+
+/// The bounding box of two optional boxes (None is nothing).
+fn join(a: Option<[i32; 4]>, b: Option<[i32; 4]>) -> Option<[i32; 4]> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some([a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]),
+        (a, None) => a,
+        (None, b) => b,
+    }
+}
+
+/// Whether a box holds no cell.
+fn empty(b: [i32; 4]) -> bool {
+    b[2] <= b[0] || b[3] <= b[1]
+}
+
+/// The cells the pass can colour at all (x0, y0, x1, y1, exclusive, inside the map of `map` cells): the explored
+/// cells (`explored`, the fog's texels that are not fully dark) and, unless the clouds (which cover everything)
+/// are on, the boxes of the effects whose level is on. Each is grown by two cells, the bilinear footprint and the
+/// mask's four taps, so every pixel outside the result is zero in the whole pass. None when nothing can show: the
+/// pass is then not drawn.
+pub fn reach(levels: &Levels, explored: [i32; 4], boxes: &Boxes, map: [i32; 2]) -> Option<[i32; 4]> {
+    let biome = if levels.clouds > 0.01 {
+        [0, 0, map[0], map[1]]
+    } else {
+        // The shader's gates: snow (`Snow`), swamp (`SwampLevel` times the green), lowland (`LowlandLevel`), heat
+        // (`Heat`, and the gusts and haze under it) and ash (`Ash`).
+        [
+            (levels.snow, boxes.snow),
+            (levels.swamp, boxes.swamp),
+            (levels.lowland, boxes.lowland),
+            (levels.heat, boxes.heat),
+            (levels.ash, boxes.ash),
+        ]
+        .into_iter()
+        .filter(|(level, _)| *level > 0.01)
+        .fold(None, |u, (_, b)| join(u, b))?
+    };
+    if empty(explored) || empty(biome) {
+        return None;
+    }
+    let grow = |b: [i32; 4]| [b[0] - 2, b[1] - 2, b[2] + 2, b[3] + 2];
+    let (a, c) = (grow(explored), grow(biome));
+    let r = [a[0].max(c[0]).max(0), a[1].max(c[1]).max(0), a[2].min(c[2]).min(map[0]), a[3].min(c[3]).min(map[1])];
+    (!empty(r)).then_some(r)
+}
+
+/// The scissor box (x, y, w, h, top-left origin) of the window rectangle `r` (logical pixels) at the screen's pixel
+/// ratio `dpi`: every physical pixel the rectangle touches (as `pan` and `widgets` cut their clips).
+fn scissor_of(r: [f32; 4], dpi: f32) -> (i32, i32, i32, i32) {
+    let (x0, y0) = ((r[0] * dpi).floor(), (r[1] * dpi).floor());
+    let (x1, y1) = (((r[0] + r[2]) * dpi).ceil(), ((r[1] + r[3]) * dpi).ceil());
+    (x0 as i32, y0 as i32, (x1 - x0).max(0.0) as i32, (y1 - y0).max(0.0) as i32)
+}
+
+/// The inverse of a 3×3 matrix (row-major), None when it is singular.
+fn inverse3(m: [[f32; 3]; 3]) -> Option<[[f32; 3]; 3]> {
+    let [[a, b, c], [d, e, f], [g, h, i]] = m;
+    let det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+    if !det.is_finite() || det == 0.0 {
+        return None;
+    }
+    let k = 1.0 / det;
+    Some([
+        [(e * i - f * h) * k, (c * h - b * i) * k, (b * f - c * e) * k],
+        [(f * g - d * i) * k, (a * i - c * g) * k, (c * d - a * f) * k],
+        [(d * h - e * g) * k, (b * g - a * h) * k, (a * e - b * d) * k],
+    ])
+}
+
+/// The window rectangle (x, y, w, h) that covers the cell box `cells` (see [`reach`]) on the ground: the corners
+/// of its cell edges, in the shader's ground (rows of `row_height`), mapped back to window pixels by the
+/// projection's inverse, their box grown by a pixel and cut to `draw`. None when the corners do not all lie on one
+/// side of the camera's horizon (the picture of the box is then no rectangle): the caller draws `draw` whole.
+fn pixel_rect(projection: &Projection, row_height: f32, cells: [i32; 4], draw: [f32; 4]) -> Option<[f32; 4]> {
+    let inv = inverse3(projection.matrix())?;
+    // Cells [x0, x1) span the ground from x0 - ½ to x1 - ½ (the cells' centres are whole numbers).
+    let [x0, y0, x1, y1] = cells.map(|v| v as f32 - 0.5);
+    let (mut lo, mut hi) = ([f32::INFINITY; 2], [f32::NEG_INFINITY; 2]);
+    let mut side = 0.0f32;
+    for (x, y) in [(x0, y0), (x1, y0), (x0, y1), (x1, y1)] {
+        let g = [x, y * row_height, 1.0];
+        let r = [0, 1, 2].map(|i| inv[i][0] * g[0] + inv[i][1] * g[1] + inv[i][2] * g[2]);
+        if r[2].abs() < 1e-9 || (side != 0.0 && side != r[2].signum()) {
+            return None;
+        }
+        side = r[2].signum();
+        let (px, py) = (r[0] / r[2], r[1] / r[2]);
+        lo = [lo[0].min(px), lo[1].min(py)];
+        hi = [hi[0].max(px), hi[1].max(py)];
+    }
+    let (ax, ay) = ((lo[0] - 1.0).max(draw[0]), (lo[1] - 1.0).max(draw[1]));
+    let (bx, by) = ((hi[0] + 1.0).min(draw[0] + draw[2]), (hi[1] + 1.0).min(draw[1] + draw[3]));
+    Some([ax, ay, (bx - ax).max(0.0), (by - ay).max(0.0)])
+}
+
 /// The sun's strength at an hour of the day: 0 at night, rising from 7 to 11, full from 11 to 16, and
 /// falling to 0 by 19. The heat haze shows with it.
 pub fn sun_at(hour: f32) -> f32 {
@@ -338,6 +472,11 @@ pub struct Pass<'a> {
     pub sun: f32,
     /// The grid's row height in world units (`Grid::row_height`): the world's y is rows of it.
     pub row_height: f32,
+    /// The explored texels (x0, y0, x1, y1, exclusive): the fog's texels that are not fully dark, or the whole map
+    /// with no fog to cut it. Empty when nothing is explored.
+    pub explored: [i32; 4],
+    /// The masks' boxes (`mask_boxes`).
+    pub boxes: Boxes,
 }
 
 /// The loop of every particle, in seconds: each speed times it is a whole number of cells, and the
@@ -685,6 +824,11 @@ fn load() -> Option<Material> {
 /// Draws the weather of `pass` over its rectangle (window pixels), after the map. Without the shader
 /// it draws nothing.
 pub fn draw(pass: &Pass) {
+    // Only the cells that can show (`reach`): every pixel outside them is zero in the whole pass. The quad is the
+    // whole pass's (the same vertices, so a drawn pixel gets the same ground), cut by a scissor to their window box.
+    let map = [pass.map[0] as i32, pass.map[1] as i32];
+    let Some(cells) = reach(&pass.levels, pass.explored, &pass.boxes, map) else { return };
+    let cut = pixel_rect(&pass.projection, pass.row_height, cells, pass.draw).map(|r| scissor_of(r, screen_dpi_scale()));
     let fog = pass.fog.cloned().unwrap_or_else(|| NO_FOG.with(|t| t.clone()));
     MATERIAL.with(|cell| {
         let mut cell = cell.borrow_mut();
@@ -712,9 +856,17 @@ pub fn draw(pass: &Pass) {
         m.set_uniform("Sun", pass.sun);
         m.set_uniform("Zoom", pass.zoom);
         m.set_uniform("RowHeight", pass.row_height);
-        let d = pass.draw;
         let one = ONE.with(|t| t.clone());
+        let d = pass.draw;
+        if let Some(c) = cut {
+            // The same call the pan and the widgets use for their clips (macroquad's main thread).
+            unsafe { get_internal_gl() }.quad_gl.scissor(Some(c));
+        }
         draw_texture_ex(&one, d[0], d[1], WHITE, DrawTextureParams { dest_size: Some(vec2(d[2], d[3])), ..Default::default() });
+        if cut.is_some() {
+            // The frame's own clip again (the pan's cut above the bar, or none).
+            super::pan::restore_scissor();
+        }
         gl_use_default_material();
     });
 }
@@ -899,5 +1051,74 @@ mod tests {
         assert!(frame_levels(&Schedule { seed: 1, day: Some(day) }, day as f64 + 0.5, 0.0).is_none());
         set_pref(false);
         assert!(frame_levels(&schedule(1), 0.5, 0.0).is_none(), "off: nothing");
+    }
+
+    fn lv(snow: f32, swamp: f32, lowland: f32, heat: f32, ash: f32, clouds: f32) -> Levels {
+        Levels { snow, swamp, lowland, heat, ash, clouds }
+    }
+
+    #[test]
+    fn the_boxes_hold_the_cells_whose_byte_a_gate_can_see() {
+        // A 3 × 2 map: snow at (0, 0), swamp (byte 2) at (2, 1), a lowland byte of 1 at (1, 0) (too small to open a gate).
+        let mut w = vec![0u8; 3 * 2 * 4];
+        w[0] = 255;
+        w[(2 + 3) * 4 + 1] = 2;
+        let mut l = vec![0u8; 3 * 2 * 4];
+        l[4] = 1;
+        let b = mask_boxes(&w, &l, 3);
+        assert_eq!(b.snow, Some([0, 0, 1, 1]));
+        assert_eq!(b.swamp, Some([2, 1, 3, 2]), "a byte of 2 counts (the gates are above 0.01)");
+        assert_eq!(b.lowland, None, "a byte of 1 never opens the rain");
+        assert_eq!((b.heat, b.ash), (None, None));
+    }
+
+    #[test]
+    fn the_reach_is_the_explored_box_cut_to_the_levels_on_and_grown_by_two_cells() {
+        let map = [10, 8];
+        let boxes = Boxes { snow: Some([4, 4, 6, 5]), swamp: Some([0, 0, 1, 1]), ..Boxes::default() };
+        let explored = [0, 0, 10, 8];
+        // Only snow on: its box, grown by two, cut to the map.
+        assert_eq!(reach(&lv(1.0, 0.0, 0.0, 0.0, 0.0, 0.0), explored, &boxes, map), Some([2, 2, 8, 7]));
+        // Swamp at the gate (0.01, not above it): nothing to show, so no pass.
+        assert_eq!(reach(&lv(0.0, 0.01, 0.0, 0.0, 0.0, 0.0), explored, &boxes, map), None);
+        // Clouds everywhere: the explored box alone.
+        assert_eq!(reach(&lv(0.0, 0.0, 0.0, 0.0, 0.0, 1.0), explored, &boxes, map), Some([0, 0, 10, 8]));
+        // The explored box cuts the biome box: explored x < 5 grown to 7.
+        assert_eq!(reach(&lv(1.0, 0.0, 0.0, 0.0, 0.0, 0.0), [0, 0, 5, 8], &boxes, map), Some([2, 2, 7, 7]));
+        // Nothing explored, or no effect's box on the map: no pass.
+        assert_eq!(reach(&lv(1.0, 0.0, 0.0, 0.0, 0.0, 0.0), [0; 4], &boxes, map), None);
+        assert_eq!(reach(&lv(0.0, 0.0, 0.0, 1.0, 0.0, 0.0), explored, &boxes, map), None, "heat has no cells here");
+    }
+
+    #[test]
+    fn the_pixel_rect_covers_the_cells_on_the_screen_and_is_cut_to_the_window() {
+        // Flat, 2 pixels a cell, the view's origin at cell (0, 0): cells [3, 6) × [4, 7) span x in [2.5, 5.5] and
+        // y in [3.5, 6.5], which is pixels [5, 11] × [7, 13] (the rows are one unit each here).
+        let flat = Projection::Flat { scale: 2.0, offset: [0.0, 0.0] };
+        let r = pixel_rect(&flat, 1.0, [3, 4, 6, 7], [0.0, 0.0, 100.0, 100.0]).expect("flat is invertible");
+        assert_eq!(r, [4.0, 6.0, 8.0, 8.0], "a pixel of margin each side");
+        // Cut to the window: the box runs past its right edge.
+        let cut = pixel_rect(&flat, 1.0, [10, 0, 60, 2], [0.0, 0.0, 50.0, 50.0]).expect("flat");
+        assert_eq!(cut[0] + cut[2], 50.0);
+        // The rows are scaled as the shader scales them: row 2.5 at 2 units a row is ground 5, pixel 10 (less the margin).
+        let rows = pixel_rect(&flat, 2.0, [0, 3, 1, 4], [0.0, 0.0, 100.0, 100.0]).expect("flat");
+        assert_eq!(rows[1], 9.0);
+    }
+
+    #[test]
+    fn the_pixel_rect_gives_up_when_the_corners_are_on_both_sides_of_the_horizon() {
+        // The ground's x = 1 is the horizon: pixels' w is (x - 1) / 5, so a box across x = 1 has corners of both signs.
+        let tilted = Projection::Tilted { h: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 0.0, -5.0]] };
+        assert_eq!(pixel_rect(&tilted, 1.0, [0, 0, 10, 2], [0.0, 0.0, 100.0, 100.0]), None);
+        assert!(pixel_rect(&tilted, 1.0, [2, 0, 5, 2], [0.0, 0.0, 100.0, 100.0]).is_some(), "one side: a rectangle");
+    }
+
+    #[test]
+    fn the_scissor_box_is_every_physical_pixel_the_rectangle_touches() {
+        assert_eq!(scissor_of([10.0, 3.0, 4.0, 5.0], 1.0), (10, 3, 4, 5));
+        // At 2 pixels a point: x from 10.5 to 14.5 is 21 to 29 physical, y from 3 to 8 is 6 to 16.
+        assert_eq!(scissor_of([10.5, 3.0, 4.0, 5.0], 2.0), (21, 6, 8, 10));
+        // A fraction of a physical pixel still counts as a pixel.
+        assert_eq!(scissor_of([0.2, 0.2, 0.3, 0.3], 1.0), (0, 0, 1, 1));
     }
 }

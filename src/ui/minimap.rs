@@ -296,6 +296,9 @@ struct FogShown {
     /// The texels whose alpha is above 0 (x0, y0, x1, y1, exclusive), as the texture was last
     /// uploaded; None when every texel is fully transparent (the whole map explored).
     bbox: Option<[i32; 4]>,
+    /// The texels whose alpha is below 255 (the explored ones, and the edge of the fog): the ground the
+    /// weather can show on (`fog_layer_lit`). None when every texel is fully dark.
+    lit: Option<[i32; 4]>,
     /// The mist layer over the reveals (`fog_layer_over`): its RGBA, and its texture (made again
     /// only when the map's size changes).
     over_rgba: Vec<u8>,
@@ -331,6 +334,7 @@ impl FogShown {
         rgba: Vec::new(),
         tex: None,
         bbox: None,
+        lit: None,
         over_rgba: Vec::new(),
         over_tex: None,
         settle: Vec::new(),
@@ -544,6 +548,23 @@ pub fn fog_texture(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: i
 /// [`fog_texture`] and the box of its texels that are not fully transparent (`FogShown::bbox`). The
 /// box is made when the texture is uploaded, not per frame.
 fn fog_texture_box(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>) -> (Texture2D, Option<[i32; 4]>) {
+    let (tex, bbox, _) = fog_texture_boxes(fog, held, origin, settle);
+    (tex, bbox)
+}
+
+/// The fog's texture (`fog_texture`) and the box of its texels that are not fully dark (`FogShown::lit`, the explored
+/// ground): None
+/// when the fog is off. The box is None when every texel is fully dark (nothing explored).
+pub fn fog_layer_lit(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>) -> Option<(Texture2D, Option<[i32; 4]>)> {
+    (fog.enabled && fog.w > 0 && fog.h > 0).then(|| {
+        let (tex, _, lit) = fog_texture_boxes(fog, held, origin, settle);
+        (tex, lit)
+    })
+}
+
+/// [`fog_texture`] and the boxes of its texels that are not fully transparent (`FogShown::bbox`) and not fully
+/// dark (`FogShown::lit`). The boxes are made when the texture is uploaded, not per frame.
+fn fog_texture_boxes(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>) -> (Texture2D, Option<[i32; 4]>, Option<[i32; 4]>) {
     let now = crate::ui::clock::now();
     SHOWN.with(|s| {
         let mut s = s.borrow_mut();
@@ -554,28 +575,36 @@ fn fog_texture_box(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: i
             tex.set_filter(FilterMode::Linear);
             s.tex = Some(tex);
             s.bbox = alpha_box(&s.rgba, w, h);
+            s.lit = texel_box(&s.rgba, w, h, |a| a < 255);
             razdor::frame_probe::tex_rebuilt();
         } else if changed {
             if let Some(tex) = &s.tex {
                 tex.update_from_bytes(w as u32, h as u32, &s.rgba);
             }
             s.bbox = alpha_box(&s.rgba, w, h);
+            s.lit = texel_box(&s.rgba, w, h, |a| a < 255);
             razdor::frame_probe::tex_rebuilt();
         }
-        (s.tex.clone().unwrap_or_else(Texture2D::empty), s.bbox)
+        (s.tex.clone().unwrap_or_else(Texture2D::empty), s.bbox, s.lit)
     })
 }
 
 /// The bounding box (x0, y0, x1, y1, exclusive) of the texels of a `w` × `h` RGBA image whose
 /// alpha is above 0; None when there are none. The fog's explored cells are alpha 0.
 fn alpha_box(rgba: &[u8], w: i32, h: i32) -> Option<[i32; 4]> {
+    texel_box(rgba, w, h, |a| a > 0)
+}
+
+/// The bounding box (x0, y0, x1, y1, exclusive) of the texels of a `w` × `h` RGBA image whose alpha `keep`
+/// accepts; None when there are none.
+fn texel_box(rgba: &[u8], w: i32, h: i32, keep: impl Fn(u8) -> bool) -> Option<[i32; 4]> {
     let w = w.max(0) as usize;
     if w == 0 || h <= 0 {
         return None;
     }
     let mut bx: Option<[i32; 4]> = None;
     for (i, px) in rgba.chunks_exact(4).enumerate() {
-        if px[3] == 0 {
+        if !keep(px[3]) {
             continue;
         }
         let (x, y) = ((i % w) as i32, (i / w) as i32);
@@ -587,13 +616,7 @@ fn alpha_box(rgba: &[u8], w: i32, h: i32) -> Option<[i32; 4]> {
     bx
 }
 
-/// The fog's texture for a material to draw (`ui::mist`), or None when the fog is off. The same
-/// texture [`draw_fog_boxed`] and [`draw_fog_extended`] draw.
-pub fn fog_layer(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>) -> Option<Texture2D> {
-    (fog.enabled && fog.w > 0 && fog.h > 0).then(|| fog_texture(fog, held, origin, settle))
-}
-
-/// [`fog_layer`] and the box of its texels that are not fully transparent (`fog_texture_box`): None
+/// The fog's texture (`fog_texture`) and the box of its texels that are not fully transparent (`fog_texture_box`): None
 /// when the fog is off. The box is None when no texel is dark.
 pub fn fog_layer_box(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>) -> Option<(Texture2D, Option<[i32; 4]>)> {
     (fog.enabled && fog.w > 0 && fog.h > 0).then(|| fog_texture_box(fog, held, origin, settle))

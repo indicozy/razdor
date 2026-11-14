@@ -842,6 +842,8 @@ struct MapTextures {
     /// Razdor's weather masks (`weather::mask_texels`): snow, swamp rain, heat and ash; the lowland rain.
     weather: Texture2D,
     lowland: Texture2D,
+    /// The masks' boxes per effect (`weather::mask_boxes`), made with the textures.
+    weather_boxes: super::weather::Boxes,
     /// The map's weather seed (`weather::map_seed`).
     weather_seed: u64,
 }
@@ -852,6 +854,8 @@ pub struct WeatherMasks {
     pub biome: Texture2D,
     /// One texel per cell: red lowland rain (nearest, clamped).
     pub lowland: Texture2D,
+    /// The cells each effect's mask can drive (`weather::mask_boxes`).
+    pub boxes: super::weather::Boxes,
     pub seed: u64,
 }
 
@@ -1188,9 +1192,10 @@ impl TerrainLayer {
         weather.set_filter(FilterMode::Nearest);
         let lowland = Texture2D::from_rgba8(w as u16, h as u16, &lowland_bytes);
         lowland.set_filter(FilterMode::Nearest);
+        let weather_boxes = super::weather::mask_boxes(&biome_bytes, &lowland_bytes, w as usize);
         razdor::mem_probe::set_texture("terrain layers", 5 * razdor::mem_probe::texture_bytes(w, h, 4) + razdor::mem_probe::texture_bytes(w + 2, h + 2, 4));
         let weather_seed = super::weather::map_seed(w, h, codes);
-        let tex = MapTextures { cells, neighbours, flow: flow_tex, bank: bank_tex, weather, lowland, weather_seed };
+        let tex = MapTextures { cells, neighbours, flow: flow_tex, bank: bank_tex, weather, lowland, weather_boxes, weather_seed };
         // The keyed entries hold no copy of the codes and the flow (nothing to compare then).
         let (kept_codes, kept_flow) = if gen.is_some() { (Vec::new(), Vec::new()) } else { (codes.to_vec(), flow.to_vec()) };
         *cache = Some(CellTextures { codes: kept_codes, flow: kept_flow, gen, flow_len: flow.len(), size: (w, h), tex: tex.clone() });
@@ -1201,7 +1206,7 @@ impl TerrainLayer {
     /// flow change). `flow` as in [`TerrainLayer::draw`].
     pub fn weather_masks(&self, codes: &[u8], (w, h): (u32, u32), flow: &[(f32, f32)], gen: Option<u64>) -> WeatherMasks {
         let maps = self.cells(codes, w, h, flow, gen);
-        WeatherMasks { biome: maps.weather, lowland: maps.lowland, seed: maps.weather_seed }
+        WeatherMasks { biome: maps.weather, lowland: maps.lowland, boxes: maps.weather_boxes, seed: maps.weather_seed }
     }
 
     /// The cache's target for `key` (option 2): the screen's size in physical pixels, made or
