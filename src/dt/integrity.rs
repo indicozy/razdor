@@ -459,4 +459,46 @@ mod tests {
         let err = repair(&f.dir, &f.manifest, &f.zip, &["nope.ini".to_string()]).unwrap_err();
         assert!(err.contains("not in the game manifest"), "{err}");
     }
+
+    /// A folder whose picture is stored compressed checks like the plain folder: the same missing and
+    /// changed files, judged on the decompressed bytes (backlog 1609 part 2, rule 4).
+    #[test]
+    fn a_converted_folder_checks_like_the_plain_one() {
+        let dir = std::env::temp_dir().join(format!("razdor-integrity-stored-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("Pictures")).unwrap();
+        let pic = b"a picture the game reads".repeat(40);
+        let ini = b"[Units]\n";
+        fs::write(dir.join("Pictures").join("a.lit"), &pic).unwrap();
+        fs::write(dir.join("Data.ini"), ini).unwrap();
+        // Three files: a folder is a Community Update build when most of its files match the sizes.
+        let units = b"[Units] 1\n";
+        fs::create_dir_all(dir.join("Data")).unwrap();
+        fs::write(dir.join("Data").join("Units.ini"), units).unwrap();
+        let entry = |path: &str, bytes: &[u8]| FileEntry { path: path.into(), size: bytes.len() as u64, sha256: crate::update::sha256_hex(bytes) };
+        let manifest = Manifest {
+            archive: ArchiveInfo { name: "x.zip".into(), size: 0, sha256: String::new(), top: "Game".into() },
+            files: vec![entry("Pictures/a.lit", &pic), entry("Data.ini", ini), entry("Data/Units.ini", units)],
+        };
+        let plain = check(&dir, &manifest, true);
+        assert!(plain.community && plain.missing.is_empty() && plain.changed.is_empty());
+        crate::dt::stored::set_test_owned(Some(dir.clone()));
+        crate::dt::stored::convert_owned(&dir).unwrap();
+        crate::dt::stored::set_test_owned(None);
+        assert!(!dir.join("Pictures").join("a.lit").exists(), "the picture is stored");
+        let stored = crate::dt::stored::find_path(&dir, "Pictures/a.lit").unwrap();
+        assert_eq!(stored.read().unwrap(), pic, "the stored picture reads back");
+        assert_eq!(check(&dir, &manifest, true), plain, "the stored folder checks the same");
+        // A stored picture whose decompressed bytes differ is changed under a full check, not by size.
+        let mut wrong = manifest.clone();
+        wrong.files[0].sha256 = crate::update::sha256_hex(b"other");
+        assert_eq!(check(&dir, &wrong, false).changed, Vec::<String>::new());
+        assert_eq!(check(&dir, &wrong, true).changed, vec!["Pictures/a.lit".to_string()]);
+        // A missing stored picture is missing.
+        fs::remove_file(dir.join("Pictures").join("a.lit.lz4")).unwrap();
+        let gone = check(&dir, &manifest, true);
+        assert!(gone.community);
+        assert_eq!(gone.missing, vec!["Pictures/a.lit".to_string()]);
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

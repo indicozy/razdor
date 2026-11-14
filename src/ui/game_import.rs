@@ -493,6 +493,10 @@ fn repair_from_archive(base: &Path, dest: &Path, progress: &gdrive::Progress, do
     })?;
     progress.set_downloaded();
     let result = razdor::dt::integrity::repair(base, &manifest, dest, &missing).map(Done::Patched).map_err(Error::Io);
+    // The repaired files are plain: an owned folder compresses them again (plain wins over any old `.lz4`).
+    if result.is_ok() {
+        razdor::dt::stored::compress_owned(base);
+    }
     done.store(missing.len() as u64, Ordering::Relaxed);
     let _ = std::fs::remove_file(dest);
     result

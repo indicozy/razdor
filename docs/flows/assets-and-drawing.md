@@ -37,10 +37,20 @@ and `Stored::logical_len`. `DtInstall::file`/`read`, the picture listings in `ch
 `dt_art.rs`, `integrity::check` and `gfx::decode_uncached` (dispatch on the logical name) use it.
 A picture's cache key (`picture_cache::source_key`) is its logical path and length with the
 stored file's mtime, so a conversion costs at most one cache rebuild. Plain wins, and only
-`.ugs`/`.lit` are ever compressible (`stored::is_compressible`). Step 1 writes nothing:
-`stored::compress_file` (crash-safe: `.part`, fsync, verify, rename, then delete the plain
-file) is for the gate test and the converter of the next step. Ini, maps, sounds and the exe
-are not stored compressed and keep using `install::find_path`.
+`.ugs`/`.lit` are ever compressible (`stored::is_compressible`). `stored::compress_file` is
+crash-safe (`.part`, fsync, verify, rename, then delete the plain file).
+
+**Writing** (step 2): only in an owned folder, `stored::owned` (the phones' unpack folder; on the
+desktop that folder with the `.razdor-owned` marker, written by a whole-game import or unpack into
+it, `stored::mark_owned`). A player's own copy, `RAZDOR_DT_DIR` and any other install are never
+written. `stored::convert_owned` (`convert_tree`, the walk does not follow links): deletes leftover
+`.lz4.part`, then for each plain `.ugs`/`.lit` drops any `.lz4` of its name (any case) and compresses
+the plain file, which is the truth. Crash at any point leaves a readable folder, and a second run
+changes nothing. `stored::compress_owned` is the logged call: `DtInstall::from_env` (before the game
+files are checked), and after an unpack (`ui/mobile.rs`), an import or patch (`game_import::stage_and_apply`),
+and a repair (`ui/game_import.rs` `repair_from_archive`). Mods: `hub::mods` `build` removes the
+base's `<name>.lz4` when a mod lays its plain file over it (`drop_other_stored_form`). Ini, maps,
+sounds and the exe are not stored compressed and keep using `install::find_path`.
 
 ## Image formats (`src/dt/gfx.rs`)
 

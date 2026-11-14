@@ -217,6 +217,11 @@ fn stage_and_apply(
     // After a swap the staging folder is the install (renamed away); after a patch it is empty;
     // after a failure it holds the unpacked files. Whatever is left goes.
     let _ = fs::remove_dir_all(&staging);
+    // A folder Razdor owns gets its new plain pictures compressed here, on the import's thread
+    // (`stored::compress_owned`; a failure leaves them plain, which reads the same).
+    if result.is_ok() {
+        stored::compress_owned(target);
+    }
     result
 }
 

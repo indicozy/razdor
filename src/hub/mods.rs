@@ -595,10 +595,32 @@ fn build(base: &Path, layers: &[Vec<(String, PathBuf)>], tmp: &Path) -> Result<(
             }
             // Breaks the link to the base's file (or an earlier layer's copy) first; the base keeps its own.
             let _ = std::fs::remove_file(&dst);
+            // The base's other stored form of this name (a converted `<name>.lz4`) goes too, so the mod's
+            // plain file is the only one (backlog 1609 part 2, rule 6). Its key leaves `known` with it.
+            drop_other_stored_form(&dst);
+            known.remove(&format!("{}.{}", target.to_ascii_lowercase(), crate::dt::stored::LZ4_EXT));
             std::fs::copy(src, &dst).map_err(|e| format!("{target}: {e}"))?;
         }
     }
     Ok(())
+}
+
+/// Removes the `<name>.lz4` of the picture `dst` (any case) from its folder of the merged folder: a
+/// mod's plain `A.lit` replaces the base's stored `a.lit.lz4`, so the folder holds one form of the name.
+/// Only the link (or the copy) in the merged folder goes; the base's file stays. Other names: nothing.
+fn drop_other_stored_form(dst: &Path) {
+    let (Some(dir), Some(name)) = (dst.parent(), dst.file_name()) else { return };
+    let name = name.to_string_lossy();
+    if !crate::dt::stored::is_compressible(&name) {
+        return;
+    }
+    let other = format!("{name}.{}", crate::dt::stored::LZ4_EXT);
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        if entry.file_name().to_string_lossy().eq_ignore_ascii_case(&other) && entry.path().is_file() {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 /// The spelling a mod's path takes in the merged folder: each folder and file the base has
@@ -1309,6 +1331,32 @@ mod tests {
     fn write_manifest_now(local: &Path, id: &str) {
         let files = file_entries(&mod_files_dir(local, id)).unwrap();
         write_manifest(local, id, &Manifest { files, sources: Vec::new() }).unwrap();
+    }
+
+    /// Backlog 1609 part 2 (rule 6): a mod's plain `A.lit` replaces the base's stored `a.lit.lz4` in the
+    /// merged folder (ignoring case), so the folder holds one form of the picture. The base keeps its file.
+    #[test]
+    fn a_mods_plain_picture_replaces_the_bases_stored_one() {
+        let base = temp("stored-base");
+        put(&base.join("Pictures/a.lit"), "picture");
+        crate::dt::stored::compress_file(&base.join("Pictures/a.lit")).unwrap();
+        assert!(base.join("Pictures/a.lit.lz4").is_file());
+        let local = temp("stored-hub");
+        install_mod(&local, "m1", "1.0", &[("Pictures/A.lit", "mod picture")]);
+        let game = prepare_mod(&local, &base, "m1").unwrap();
+        let names = |dir: &Path| {
+            let mut names: Vec<String> = std::fs::read_dir(dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+            names.sort();
+            names
+        };
+        assert_eq!(names(&game.join("Pictures")), vec!["A.lit".to_string()], "the mod's plain picture is the only form");
+        assert_eq!(std::fs::read_to_string(game.join("Pictures/A.lit")).unwrap(), "mod picture");
+        // A second start keeps the folder as it is.
+        prepare_mod(&local, &base, "m1").unwrap();
+        assert_eq!(names(&game.join("Pictures")), vec!["A.lit".to_string()]);
+        assert!(base.join("Pictures/a.lit.lz4").is_file(), "the base keeps its stored file");
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&local);
     }
 
     #[test]

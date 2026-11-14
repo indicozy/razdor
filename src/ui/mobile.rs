@@ -202,10 +202,18 @@ pub fn start_unpack() {
             let total = Arc::new(AtomicU64::new(0));
             let (d, t) = (done.clone(), total.clone());
             let spawned = std::thread::Builder::new().name("unpack".into()).spawn(move || {
-                unpack::unpack(&archives, &dest, &|bytes, all| {
+                let result = unpack::unpack(&archives, &dest, &|bytes, all| {
                     d.store(bytes, Ordering::Relaxed);
                     t.store(all, Ordering::Relaxed);
-                })
+                });
+                // Razdor's own folder: marked, and its pictures compressed, on this thread (`dt::stored`).
+                if result.is_ok() {
+                    if let Err(e) = razdor::dt::stored::mark_owned(&dest) {
+                        razdor::diag!("unpack: the owned marker is not written: {e}");
+                    }
+                    razdor::dt::stored::compress_owned(&dest);
+                }
+                result
             });
             match spawned {
                 Ok(handle) => Unpack::Running(Job { handle: Some(handle), done, total }),

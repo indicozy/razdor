@@ -216,6 +216,9 @@ impl DtInstall {
             return Err(DtError::NoInstallDir);
         };
         *BASE.lock().unwrap_or_else(|e| e.into_inner()) = Some(base.clone());
+        // Razdor's own game folder gets its plain pictures compressed first (`dt::stored`, once; a
+        // folder that is not Razdor's is never written). Then the folder is checked before anything is read.
+        super::stored::compress_owned(&base);
         // The game's own folder is checked before anything is read: a missing file is damage the
         // screen repairs from the archive, never a crash (`dt::integrity`).
         if let Err(files) = guard_game_files(&base) {

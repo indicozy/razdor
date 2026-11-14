@@ -4,8 +4,9 @@
 //! forms exist the plain file is the truth. Only `.ugs` and `.lit` are ever stored compressed
 //! ([`is_compressible`]); everything else is read as before.
 //!
-//! No macroquad. Step 1 only reads: Razdor writes `.lz4` files only through [`compress_file`],
-//! which the tests and the next step use.
+//! No macroquad. Razdor writes `.lz4` files only through [`compress_file`], and only in a folder it
+//! owns ([`owned`]): [`convert_owned`] converts the plain pictures there, after an unpack, an import,
+//! a patch or a repair, and at the start of a load.
 
 use super::install;
 use super::DtError;
@@ -268,6 +269,100 @@ fn write_part(part: &Path, data: &[u8]) -> io::Result<()> {
     file.sync_all()
 }
 
+/// What a conversion of a folder did (see [`convert_owned`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Summary {
+    /// Plain pictures compressed into `<name>.lz4` (the plain file removed).
+    pub converted: usize,
+    /// Of those, the plain file was the truth over an older `.lz4` of the same name, which was replaced.
+    pub replaced: usize,
+    /// Leftover `.lz4.part` files of an interrupted conversion, removed.
+    pub parts_removed: usize,
+    /// The bytes of the plain pictures that were converted.
+    pub plain_bytes: u64,
+    /// The bytes of the `.lz4` files they became.
+    pub stored_bytes: u64,
+}
+
+/// Converts the plain pictures of the game folder `dir` to `<name>.lz4`, when Razdor owns the folder
+/// ([`owned`]); any other folder is left exactly as it is (`Summary::default()`). Crash-safe at every
+/// step: a leftover `.lz4.part` is deleted first; a plain file with an older `.lz4` of its name (any
+/// case) drops that one before it is compressed from the plain file (plain wins); the plain file goes
+/// last ([`compress_file`]). A second run finds nothing to do.
+pub fn convert_owned(dir: &Path) -> io::Result<Summary> {
+    if !owned(dir) {
+        return Ok(Summary::default());
+    }
+    convert_tree(dir)
+}
+
+/// [`convert_owned`] for the callers that write game files (an unpack, an import, a patch, a repair,
+/// the start of a load): the summary is logged when anything changed, and a failure is logged too.
+/// The plain files stay readable, so nothing else is needed on a failure.
+pub fn compress_owned(dir: &Path) {
+    match convert_owned(dir) {
+        Ok(s) if s != Summary::default() => crate::diag!(
+            "stored: {}: {} pictures compressed ({} plain bytes to {} stored), {} replaced, {} leftover parts removed",
+            dir.display(),
+            s.converted,
+            s.plain_bytes,
+            s.stored_bytes,
+            s.replaced,
+            s.parts_removed
+        ),
+        Ok(_) => {}
+        Err(e) => crate::diag!("stored: {}: the pictures are not compressed: {e}", dir.display()),
+    }
+}
+
+/// [`convert_owned`] for a folder already known to be owned (the walk, the rules of the converter).
+fn convert_tree(dir: &Path) -> io::Result<Summary> {
+    let mut sum = Summary::default();
+    let mut folders = vec![dir.to_path_buf()];
+    while let Some(folder) = folders.pop() {
+        // This folder's plain pictures, and its stored pictures by their logical name.
+        let mut plain: Vec<PathBuf> = Vec::new();
+        let mut stored: Vec<(String, PathBuf)> = Vec::new();
+        for entry in fs::read_dir(&folder)? {
+            let entry = entry?;
+            // Never follow a link out of the folder: only real folders and files are walked.
+            let kind = entry.file_type()?;
+            let path = entry.path();
+            if kind.is_dir() {
+                folders.push(path);
+                continue;
+            }
+            if !kind.is_file() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.to_ascii_lowercase().ends_with(&format!(".{LZ4_EXT}.{PART_SUFFIX}")) {
+                fs::remove_file(&path)?;
+                sum.parts_removed += 1;
+            } else if let Some(logical) = strip_lz4(&name).filter(|l| is_compressible(l)) {
+                stored.push((logical.to_string(), path));
+            } else if is_compressible(&name) {
+                plain.push(path);
+            }
+        }
+        for path in plain {
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let mut replaced_any = false;
+            for (_, old) in stored.iter().filter(|(logical, _)| logical.eq_ignore_ascii_case(&name)) {
+                fs::remove_file(old)?;
+                replaced_any = true;
+            }
+            let plain_len = fs::metadata(&path)?.len();
+            let target = compress_file(&path)?;
+            sum.converted += 1;
+            sum.replaced += usize::from(replaced_any);
+            sum.plain_bytes += plain_len;
+            sum.stored_bytes += fs::metadata(&target)?.len();
+        }
+    }
+    Ok(sum)
+}
+
 /// The file Razdor writes into a game folder it unpacks or downloads into `platform::unpack_dir`.
 /// Only a folder with it (on the desktop) is Razdor's own copy: see [`owned`].
 pub const OWNED_MARKER: &str = ".razdor-owned";
@@ -490,6 +585,73 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    /// The sorted file names of `dir`.
+    fn names_in(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn convert_owned_leaves_an_unowned_folder_alone() {
+        let dir = scratch("convert-unowned");
+        fs::write(dir.join("Pic.lit"), sample()).unwrap();
+        fs::write(dir.join("Pic.lit.lz4.part"), b"half").unwrap();
+        set_test_owned(None);
+        assert_eq!(convert_owned(&dir).unwrap(), Summary::default());
+        assert_eq!(names_in(&dir), vec!["Pic.lit", "Pic.lit.lz4.part"], "a player's own copy is never touched");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn convert_owned_compresses_pictures_and_keeps_other_files() {
+        let dir = scratch("convert-owned");
+        fs::create_dir_all(dir.join("Graphics")).unwrap();
+        let data = sample();
+        fs::write(dir.join("Graphics").join("Knight.ugs"), &data).unwrap();
+        fs::write(dir.join("Pic.lit"), &data).unwrap();
+        fs::write(dir.join("Maps.DTm"), b"map").unwrap();
+        fs::write(dir.join("sound.raw"), b"sound").unwrap();
+        set_test_owned(Some(dir.clone()));
+        let sum = convert_owned(&dir).unwrap();
+        set_test_owned(None);
+        assert_eq!(sum.converted, 2);
+        assert_eq!(sum.replaced, 0);
+        assert_eq!(sum.parts_removed, 0);
+        assert_eq!(sum.plain_bytes, 2 * data.len() as u64);
+        assert!(sum.stored_bytes > 0 && sum.stored_bytes < sum.plain_bytes, "the pictures shrink");
+        assert_eq!(names_in(&dir), vec!["Graphics", "Maps.DTm", "Pic.lit.lz4", "sound.raw"]);
+        assert_eq!(find(&dir, "Pic.lit").unwrap().read().unwrap(), data);
+        assert_eq!(find(&dir.join("Graphics"), "Knight.ugs").unwrap().read().unwrap(), data);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn convert_owned_is_crash_safe_and_plain_wins_over_a_stale_lz4() {
+        let dir = scratch("convert-crash");
+        let fresh = sample();
+        // A crash after the plain file was written and before a rename: a stale `.lz4` of the same
+        // name (another case) and a `.part` of an interrupted conversion.
+        fs::write(dir.join("pic.lit"), &fresh).unwrap();
+        write_frame(&dir, "PIC.LIT.LZ4", b"stale picture", true);
+        fs::write(dir.join("Knight.ugs.lz4.part"), b"half a frame").unwrap();
+        fs::write(dir.join("Knight.ugs"), &fresh).unwrap();
+        set_test_owned(Some(dir.clone()));
+        let sum = convert_owned(&dir).unwrap();
+        assert_eq!(sum.parts_removed, 1);
+        assert_eq!(sum.converted, 2);
+        assert_eq!(sum.replaced, 1, "the stale form is replaced by the plain file's");
+        assert_eq!(names_in(&dir), vec!["Knight.ugs.lz4", "pic.lit.lz4"]);
+        assert_eq!(find(&dir, "pic.lit").unwrap().read().unwrap(), fresh, "the plain file was the truth");
+        assert_eq!(find(&dir, "Knight.ugs").unwrap().read().unwrap(), fresh);
+        // The second run, after any crash point, changes nothing.
+        let before = names_in(&dir);
+        assert_eq!(convert_owned(&dir).unwrap(), Summary::default());
+        assert_eq!(names_in(&dir), before);
+        set_test_owned(None);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn find_path_resolves_each_component_and_only_the_last_may_be_lz4() {
         let dir = scratch("path");
@@ -582,6 +744,67 @@ mod tests {
         }
         eprintln!("gate: {decoded} pictures decode the same in the copy");
         assert!(decoded > 0 && verified > 0 && converted > 0, "the gate ran on something");
+    }
+
+    /// Gate of step 2 (`docs/specs/appdata-compression.md`): a scratch copy of the real install, marked
+    /// as owned for the test, converted by [`convert_owned`]: the timing and sizes are printed, the
+    /// copy loads (`DtInstall::load`), its integrity report equals the plain install's (nothing
+    /// missing), and a second run changes nothing. Needs `RAZDOR_DT_DIR` and `RAZDOR_COMPRESS_SCRATCH`
+    /// (a folder outside the install; the copy is `<scratch>/copy` and is left there for a look).
+    #[test]
+    fn gate_convert_owned_copy_loads_checks_and_is_idempotent() {
+        let (Some(src), Some(scratch_root)) = (std::env::var_os(install::ENV_VAR), std::env::var_os("RAZDOR_COMPRESS_SCRATCH")) else { return };
+        let src = fs::canonicalize(PathBuf::from(src)).unwrap();
+        fs::create_dir_all(&scratch_root).unwrap();
+        let scratch_root = fs::canonicalize(&scratch_root).unwrap();
+        let copy = scratch_root.join("copy");
+        assert!(!copy.starts_with(&src) && !src.starts_with(&scratch_root), "the scratch copy must not be the install or inside it");
+        let _ = fs::remove_dir_all(&copy);
+        copy_tree(&src, &copy).unwrap();
+        set_test_owned(Some(copy.clone()));
+
+        let mut plain = Vec::new();
+        collect_files(&copy, &mut plain);
+        let plain_total: u64 = plain.iter().map(|p| fs::metadata(p).unwrap().len()).sum();
+        let started = std::time::Instant::now();
+        let first = convert_owned(&copy).unwrap();
+        let seconds = started.elapsed().as_secs_f64();
+        let mut all = Vec::new();
+        collect_files(&copy, &mut all);
+        let copy_total: u64 = all.iter().map(|p| fs::metadata(p).unwrap().len()).sum();
+        eprintln!(
+            "gate: convert_owned: {} pictures ({} parts removed, {} replaced) in {seconds:.2} s: {} plain bytes -> {} stored bytes; the folder {plain_total} -> {copy_total} bytes",
+            first.converted, first.parts_removed, first.replaced, first.plain_bytes, first.stored_bytes
+        );
+        assert!(first.converted > 0, "the install has pictures");
+        assert!(all.iter().all(|p| !is_compressible(&p.file_name().unwrap().to_string_lossy())), "no plain picture is left");
+
+        // The copy loads, and checks like the plain install: nothing missing, the same changed files.
+        let manifest = crate::dt::integrity::builtin().expect("the built-in manifest parses");
+        let report = crate::dt::integrity::check(&copy, &manifest, true);
+        let plain_report = crate::dt::integrity::check(&src, &manifest, true);
+        assert!(report.community && plain_report.community);
+        assert!(report.missing.is_empty(), "nothing is missing: {:?}", report.missing);
+        assert_eq!((&report.missing, &report.changed), (&plain_report.missing, &plain_report.changed), "the copy checks like the plain install");
+        install::DtInstall::load(&copy).expect("the converted copy loads");
+
+        // The second run finds nothing to convert and changes nothing.
+        let listing = |dir: &Path| {
+            let mut files = Vec::new();
+            collect_files(dir, &mut files);
+            let mut rows: Vec<(PathBuf, u64)> = files.into_iter().map(|p| {
+                let len = fs::metadata(&p).unwrap().len();
+                (p, len)
+            }).collect();
+            rows.sort();
+            rows
+        };
+        let before = listing(&copy);
+        let again = convert_owned(&copy).unwrap();
+        assert_eq!(again, Summary::default(), "a second run converts nothing");
+        assert_eq!(listing(&copy), before, "a second run changes nothing");
+        set_test_owned(None);
+        eprintln!("gate: the converted copy loads, checks like the plain install, and a second run changes nothing");
     }
 
     /// Every file under `dir`, recursively.
