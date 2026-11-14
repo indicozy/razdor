@@ -97,7 +97,7 @@ The direction of a river's flow is worked out from the shape of the map: a river
 
 Under **"Moving water"** there are two rows that appear only with it on:
 
-* **"Water animation rate"**: the water can be redrawn every frame, every second frame or every third frame. The motion stays smooth. Default: every frame.
+* **"Water animation rate"**: the water can be redrawn every frame, every second frame or every third frame. The motion stays smooth. Default: every second frame on phones, every frame on computers.
 * **"Water quality"**: the water can be drawn at full size, three-quarters or half the screen; the water gets softer, but runs faster. Default: high.
 
 ![Moving water](../../../../assets/shots/water.webp)

@@ -290,6 +290,17 @@ impl FrameRate {
     }
 }
 
+/// The rate a settings file gets when it has no choice of its own: every other frame on a phone (the
+/// owner's decision, 2026-11-14: a barely visible change, the picture 53.2 dB against every frame in the
+/// backlog 1618 close-up, and cheaper), every frame elsewhere. `audio::Settings::default` uses it.
+pub fn default_rate(phone: bool) -> FrameRate {
+    if phone {
+        FrameRate::EveryOther
+    } else {
+        FrameRate::EveryFrame
+    }
+}
+
 /// «Качество воды» (`Settings::map_water_quality`): the water picture's size as a share of the screen's, in each
 /// direction (1, 0.75, 0.5), upscaled linearly. Flat map only.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

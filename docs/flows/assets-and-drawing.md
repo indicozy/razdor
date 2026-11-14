@@ -848,7 +848,7 @@ it every frame from `display::follow_settings`; `RAZDOR_LIVE_WATER=1` turns it o
   `wide_water`). The lake's rim flows inward (the same rule as a river), so coasts still drift toward the open water
   in the flow field; the drift speed keeps the wide water still.
 - **The redraw rate** («Частота анимации воды», `Settings::map_water_rate`, `water::FrameRate`: every frame, every
-  other, every third; every frame by default, the row shows with «Живая вода» on). Below every frame, the water
+  other, every third; every other frame on a phone and every frame elsewhere by default (`water::default_rate`; the row shows with «Живая вода» on). Below every frame, the water
   (`TerrainLayer::water_picture_prepare`, called by `world_view::draw_ground` before the overlay) is drawn into a target of the screen's size when it is due
   (`water::redraw_due`, the picture's age in frames), and every frame the two last drawings are blended in time over
   the cached ground (`water::picture_mix`: the frame shows the water one interval ago, moving on smoothly, 0 at a
