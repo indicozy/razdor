@@ -97,8 +97,9 @@ install file ──► src/dt/gfx.rs decode_file ──► gfx::Image (RGBA, not
   fades» below), so a step of the hero only changes the dark and the texture is uploaded when a texel changed.
   Snapshot runs make no early textures.
 - **The persistent picture cache** (`src/dt/picture_cache.rs`): a decoded picture's frames
-  (raw RGBA with their sizes) are kept in `platform::cache_dir()` + `pictures` + one subfolder
-  per release and format, `pictures/<version>-f<format>` (e.g. `pictures/1.1.3-f1`): desktop
+  (RGBA with their sizes, each frame one LZ4 block: format 2, `lz4_flex`, backlog 1609) are kept
+  in `platform::cache_dir()` + `pictures` + one subfolder
+  per release and format, `pictures/<version>-f<format>` (e.g. `pictures/1.5.1-f2`): desktop
   `<data>/razdor/cache/pictures/…` (`%APPDATA%\razdor` on Windows, `~/.local/share/razdor` on Linux);
   Android the app's private cache (`Context.getCacheDir()`, not the shared storage, so the Files
   app's Recent tab does not list them); iOS `Library/Caches/Razdor`. One `.rzpc` file per
@@ -110,7 +111,7 @@ install file ──► src/dt/gfx.rs decode_file ──► gfx::Image (RGBA, not
   written by a background thread (temp file, then rename). Writes reserve their bytes from a
   process-wide budget (`Budget`, counted from the folder on first use) before writing, so
   parallel writers cannot overshoot the cap; a failed write gives them back. A truncated,
-  corrupt or stale entry is ignored and rewritten. The folder is capped (1 GiB on the desktop,
+  corrupt or stale entry is ignored and rewritten. The folder's stored (compressed) bytes are capped (1 GiB on the desktop,
   256 MiB on the phones: past it nothing new is written); clearing it resets everything. Off in
   snapshot runs and with `RAZDOR_NO_PICTURE_CACHE=1`.
   Only data derived from the player's own install is in it: never write it into the install
