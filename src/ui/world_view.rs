@@ -3172,10 +3172,13 @@ fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool) {
         let key = ground_key(game, cam);
         let cached = (waits && layer.cache_on() && super::render_cache::target().is_none() && plain).then(|| layer.ground_target(key)).flatten();
         match cached {
-            Some((rt, fill)) => {
+            // A camera that moved this frame draws the ground once, live (below); the cache is refilled on the first
+            // still frame. Live water is then drawn at the full rate and size on those frames (no picture).
+            Some((_, terrain::GroundStep::Moving)) | None => in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Full, flow))),
+            Some((rt, step)) => {
                 // The cache's rebuild (when it is due) and its blit: the ground cache's own stage.
                 frame_probe::time(Stage::GroundCache, || {
-                    if fill {
+                    if step == terrain::GroundStep::Fill {
                         super::render_cache::fill(&rt, || in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Ground, flow))));
                     }
                     in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Cached, flow)));
@@ -3211,9 +3214,6 @@ fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool) {
                     in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow)));
                 }
             }
-            // No cache (`RAZDOR_TERRAIN_NOCACHE`, a bent view, a picture being filled): `Mode::Full` draws the live water
-            // inside the terrain's own time, not as `water` (see the frame probe's module comment).
-            None => in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Full, flow))),
         }
     });
 }

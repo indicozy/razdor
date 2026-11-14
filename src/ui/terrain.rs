@@ -464,11 +464,25 @@ pub enum Mode {
     Picture,
 }
 
-/// The ground cache: the target the ground is drawn into and the key it was drawn for.
+/// The ground cache: the target the ground is drawn into, the key it was filled for, and the key of the last frame
+/// (a camera that moved since then draws the ground without the cache: `GroundStep::Moving`).
 #[derive(Default)]
 struct GroundCache {
     target: Option<RenderTarget>,
     key: Option<u64>,
+    last: Option<u64>,
+}
+
+/// What the ground draw does this frame (`TerrainLayer::ground_target`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GroundStep {
+    /// The camera moved since the last frame: the ground is drawn once, straight to the screen (`Mode::Full`), and the
+    /// cache is left alone. Three passes of a moving frame (fill, copy, overlay) become one.
+    Moving,
+    /// The camera stopped: the cache is filled with the ground for this camera (the first still frame).
+    Fill,
+    /// The cache holds the ground for this camera: it is copied.
+    Copy,
 }
 
 /// «Живая вода» as a picture (`water_picture_prepare`): two drawings of the water, the newer being `cur`, with
@@ -795,9 +809,10 @@ impl TerrainLayer {
     }
 
     /// The cache's target for `key` (option 2): the screen's size in physical pixels, made or
-    /// resized as needed. Returns it with whether it must be filled now (the key changed).
+    /// resized as needed. Returns it with what this frame does (`GroundStep`): while the key changes the
+    /// ground is drawn live, and the cache is filled once the key holds for a frame.
     /// `None` when the screen has no usable size (then the terrain is drawn live).
-    pub fn ground_target(&self, key: u64) -> Option<(RenderTarget, bool)> {
+    pub fn ground_target(&self, key: u64) -> Option<(RenderTarget, GroundStep)> {
         let (w, h) = macroquad::miniquad::window::screen_size();
         if !(w >= 1.0 && h >= 1.0 && w <= 8192.0 && h <= 8192.0) {
             return None;
@@ -812,11 +827,16 @@ impl TerrainLayer {
             g.target = Some(rt);
             g.key = None;
         }
-        let fill = g.key != Some(key);
-        if fill {
+        let step = if g.last != Some(key) {
+            g.last = Some(key);
+            GroundStep::Moving
+        } else if g.key != Some(key) {
             g.key = Some(key);
-        }
-        g.target.clone().map(|rt| (rt, fill))
+            GroundStep::Fill
+        } else {
+            GroundStep::Copy
+        };
+        g.target.clone().map(|rt| (rt, step))
     }
 
     /// Draws the terrain of a `w`×`h` map (`codes` row by row) into screen rectangle `dest`,
