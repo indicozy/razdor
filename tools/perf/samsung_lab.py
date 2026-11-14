@@ -5,7 +5,7 @@ Usage (the phone is the lab's, connected through its Remote Debug Bridge on this
 
     python3 -I tools/perf/samsung_lab.py --serial localhost:<port> --out <dir> \\
         [--apks /mnt/ai_models/razdor-ab-1637/v2] [--only A,C] [--choice all|mine] [--map «Другой берег»] \\
-        [--timeout-min 40] [--install-timeout-min 20] [--dry-run]
+        [--stages] [--timeout-min 40] [--install-timeout-min 20] [--dry-run]
     python3 -I tools/perf/samsung_lab.py --out <dir> --compare-only      # rebuild compare.md from <dir>/<X>/
 
 For each build X in A, B, C, D (`razdor-ab-X.apk` in --apks, checked against SHA256SUMS there):
@@ -17,8 +17,11 @@ For each build X in A, B, C, D (`razdor-ab-X.apk` in --apks, checked against SHA
    uninstalled first (its data goes: once, on a fresh phone);
 4. the app starts and the script waits for the game's install to load (`install loaded:` in razdor.log;
    the first run downloads the game from the Hub: up to --install-timeout-min, with progress);
-5. the app is force-stopped, `bench-autorun.txt` (`all` and `map=…`) is pushed into the app's Razdor
-   folder, and the app starts again: the app runs the performance test by itself (`ui/bench_autorun.rs`);
+5. the app is force-stopped, `bench-autorun.txt` (`all`, `map=…` and, with --stages, `profile`) is pushed into
+   the app's Razdor folder, and the app starts again: the app runs the performance test by itself
+   (`ui/bench_autorun.rs`). `--stages` turns the run's profiling on: each cell then also logs its stage breakdown
+   (`RazdorBenchStages`), and the debug mode's GPU samples run. Its frames are slower, so use it for the stage
+   numbers, not for the frame numbers of a plain run;
 6. the script waits for `RazdorBench DONE` (logcat) or the `bench-autorun.finished` file, up to --timeout-min;
 7. <out>/<X>/ gets the results file (`razdor-bench-*.txt`), razdor.log, the trigger file and the full logcat;
    razdor.log's `terrain options:` line must name build X (else the script stops with exit 5);
@@ -26,7 +29,8 @@ For each build X in A, B, C, D (`razdor-ab-X.apk` in --apks, checked against SHA
 
 Between builds the game files are kept (`install -r` over the same signature keeps the app's data).
 At the end, phone_bench.py's table is written per build (<out>/<X>/table.md) and <out>/compare.md: the cells as rows,
-the builds as columns (frame ms median and CPU ms median), with the device line.
+the builds as columns (frame ms median and CPU ms median), with the device line. A run with --stages adds the stage
+medians (p50 ms, per build and cell) for the main stages to compare.md.
 
 Limitation: the app's folder is `/sdcard/Android/data/io.github.indicozy.razdor/files/Razdor/`. Android 11 and later
 may refuse adb access to another app's folder under /sdcard/Android/data. The script reads razdor.log and pushes the
@@ -265,12 +269,13 @@ def wait_install(lab, minutes):
         time.sleep(POLL_SECS)
 
 
-def push_trigger(lab, out_dir, choice, map_name):
-    """Writes the trigger file in the variant's folder and pushes it into the app's Razdor folder."""
+def push_trigger(lab, out_dir, choice, map_name, stages=False):
+    """Writes the trigger file in the variant's folder and pushes it into the app's Razdor folder. `stages` adds the
+    `profile` line (the run profiles itself: the stage lines and the GPU samples)."""
     trigger = os.path.join(out_dir, "bench-autorun.txt")
     if not lab.dry_run:
         with open(trigger, "w", encoding="utf-8") as f:
-            f.write(f"{choice}\nmap={map_name}\n")
+            f.write(f"{choice}\nmap={map_name}\n" + ("profile\n" if stages else ""))
     lab.shell("rm", "-f", f"{APP_DIR}/bench-autorun.txt", f"{APP_DIR}/bench-autorun.done", f"{APP_DIR}/bench-autorun.finished", f"{APP_DIR}/bench-autorun.error")
     rc, out = lab.adb("push", trigger, f"{APP_DIR}/bench-autorun.txt", timeout=120)
     if rc != 0 and not lab.dry_run:
@@ -335,17 +340,18 @@ def check_build(out_dir, letter):
 
 
 def load_cells(path):
-    """The cells of a results file (or a logcat dump): ({cell id: pairs}, done)."""
-    cells, done = {}, False
+    """The cells of a results file (or a logcat dump): ({cell id: pairs}, done, {cell id: stage pairs})."""
+    cells, stages, done = {}, {}, False
     with open(path, encoding="utf-8", errors="replace") as f:
-        for payload in phone_bench.read_lines(f):
-            if payload == "DONE":
+        for kind, payload in phone_bench.read_records(f):
+            if kind == "DONE":
                 done = True
                 continue
             pairs = phone_bench.parse_pairs(payload)
-            if "cell" in pairs:
-                cells[pairs["cell"]] = pairs
-    return cells, done
+            if "cell" not in pairs:
+                continue
+            (stages if kind == "stages" else cells)[pairs["cell"]] = pairs
+    return cells, done, stages
 
 
 def variant_results(out_dir, letter):
@@ -365,6 +371,47 @@ def fmt_ms(value):
         return value
 
 
+# The main stages of the stage medians (the stage key, its column title); the nesting is in phone_bench's note.
+# (A run's frames are summarised as other: no tick, no GPU ui, so those stages are not in the table.)
+MAIN_STAGES = [
+    ("world", "World"),
+    ("terrain", "Terrain"),
+    ("fog", "Fog"),
+    ("water", "Water"),
+    ("light", "Light"),
+    ("sun_shadow", "Sun shadow"),
+    ("weather", "Weather"),
+    ("ground_cache", "Ground cache"),
+    ("gpu_sky", "GPU sky"),
+    ("gpu_terrain", "GPU terrain"),
+    ("gpu_sprites", "GPU sprites"),
+    ("gpu_fog", "GPU fog"),
+]
+
+
+def stage_medians(results, letters, names, order):
+    """The stage medians (p50, ms) per cell and build, as markdown lines; empty when no run had stage lines."""
+    if not any(stages for _, _, stages, _ in results.values()):
+        return []
+    head = ["| Cell | Build | " + " | ".join(title for _, title in MAIN_STAGES) + " | GPU frames |", "|---|---|" + "---|" * (len(MAIN_STAGES) + 1)]
+    rows = []
+    for cid in order:
+        for letter in letters:
+            if letter not in results:
+                continue
+            stages = results[letter][2].get(cid)
+            if not stages:
+                continue
+            cols = [fmt_ms(stages[key + "_p50"]) if key + "_p50" in stages else "–" for key, _ in MAIN_STAGES]
+            rows.append(f"| {names[cid]} | {letter} | " + " | ".join(cols) + f" | {stages.get('gpu_frames', '–')} |")
+    if not rows:
+        return []
+    note = ("Stage medians (p50, ms per frame) of the frames the run timed: the CPU stages over the frames with no GPU "
+            "sample, the GPU stages over the sampled frames (`GPU frames`). Stages nest (route and look sit inside tick; "
+            "the map's parts inside world), so compare a column with the same column.")
+    return ["", "## Stage medians (p50, ms)", "", *head, *rows, "", note]
+
+
 def compare(out_dir, letters):
     """Writes <out>/<X>/table.md per build and <out>/compare.md (cells as rows; frame and CPU medians as columns)."""
     results = {}
@@ -374,8 +421,8 @@ def compare(out_dir, letters):
             continue
         table_path = os.path.join(out_dir, letter, "table.md")
         phone_bench.main([path, "-o", table_path])
-        cells, done = load_cells(path)
-        results[letter] = (cells, done, path)
+        cells, done, stages = load_cells(path)
+        results[letter] = (cells, done, stages, path)
     if not results:
         raise LabError(f"no results under {out_dir}", EXIT_RUN)
     order = []
@@ -409,11 +456,12 @@ def compare(out_dir, letters):
         lines.append(f"Phone: {device.get('brand', '?')} {device.get('model', '?')}, Android {device.get('android', '?')}, "
                      f"SoC {device.get('soc', '?')}, GL: {device.get('gl', '?')}")
     for letter in results:
-        cells, done, path = results[letter]
+        cells, done, _, path = results[letter]
         pairs = next(iter(cells.values()), {})
         lines.append(f"- {letter} ({LABELS[letter]}): {'finished' if done else 'NOT finished'}, "
                      f"screen {pairs.get('screen', '?')}, {os.path.basename(path)}")
     lines += ["", *head, *rows, ""]
+    lines += stage_medians(results, letters, names, order)
     for letter in letters:
         if letter not in results:
             lines.append(f"Build {letter}: no results.")
@@ -432,7 +480,7 @@ def run_variant(lab, args, letter, out_dir):
     wake_and_start(lab)
     wait_install(lab, args.install_timeout_min)
     force_stop(lab)
-    push_trigger(lab, out_dir, args.choice, args.map)
+    push_trigger(lab, out_dir, args.choice, args.map, args.stages)
     lab.adb("logcat", "-c")
     wake_and_start(lab)
     try:
@@ -452,6 +500,7 @@ def main(argv):
     ap.add_argument("--only", default="A,B,C,D", help="the builds to run, e.g. A,C")
     ap.add_argument("--choice", default="all", choices=["all", "mine"], help="the test's choice (default: all presets)")
     ap.add_argument("--map", default=MAP_DEFAULT, help=f"the map's file name in the game (default: {MAP_DEFAULT})")
+    ap.add_argument("--stages", action="store_true", help="the run profiles itself: each cell logs its stage breakdown (RazdorBenchStages)")
     ap.add_argument("--timeout-min", type=float, default=40, help="the test's time limit per build, in minutes")
     ap.add_argument("--install-timeout-min", type=float, default=20, help="the game's install time limit, in minutes")
     ap.add_argument("--dry-run", action="store_true", help="print the adb commands; touch no phone")

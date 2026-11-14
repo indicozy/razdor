@@ -85,6 +85,10 @@ pub const EFFECT_STAGES: [Stage; 7] = [Stage::Water, Stage::Mist, Stage::Light, 
 /// The period of the debug mode's GPU samples: one frame in this many seconds runs its GPU waits.
 pub const GPU_SAMPLE_EVERY: Duration = Duration::from_secs(10);
 
+/// The period of the GPU samples in a run that asked for profiling itself (the performance test's `profile`
+/// line, [`crate::diag::forced_profile`]): a 12 s measured cell then has about a dozen sampled frames, not one.
+pub const GPU_SAMPLE_EVERY_RUN: Duration = Duration::from_secs(1);
+
 /// The longest batch of vertices macroquad issues as one draw call (`draw_call_vertex_capacity`).
 const MAX_BATCH_VERTS: u32 = 10000;
 
@@ -178,6 +182,104 @@ pub enum Stage {
 
 impl Stage {
     pub const COUNT: usize = 41;
+
+    /// Every stage, in the enum's order (`ALL[st as usize] == st`, a test pins it).
+    pub const ALL: [Stage; Stage::COUNT] = [
+        Stage::Tick,
+        Stage::Terrain,
+        Stage::World,
+        Stage::Fog,
+        Stage::Minimap,
+        Stage::Route,
+        Stage::Look,
+        Stage::Armies,
+        Stage::Script,
+        Stage::Day,
+        Stage::Snap,
+        Stage::Autosave,
+        Stage::Session,
+        Stage::AiMove,
+        Stage::AiPlan,
+        Stage::Backdrop,
+        Stage::BattleWindow,
+        Stage::Effect,
+        Stage::GpuBackdrop,
+        Stage::GpuWindow,
+        Stage::GpuSky,
+        Stage::GpuTerrain,
+        Stage::GpuMarks,
+        Stage::GpuSprites,
+        Stage::GpuFog,
+        Stage::GpuUi,
+        Stage::Water,
+        Stage::Mist,
+        Stage::Light,
+        Stage::SunShadow,
+        Stage::Weather,
+        Stage::GroundCache,
+        Stage::Freeze,
+        Stage::GpuWater,
+        Stage::GpuMist,
+        Stage::GpuLight,
+        Stage::GpuSunShadow,
+        Stage::GpuWeather,
+        Stage::GpuGroundCache,
+        Stage::GpuFreeze,
+        Stage::GpuMinimap,
+    ];
+
+    /// The stage's key in the bench's stage line: `snake_case`, the GPU stages with the `gpu_` prefix
+    /// (`sun_shadow`, `gpu_sky`).
+    pub fn name(self) -> &'static str {
+        match self {
+            Stage::Tick => "tick",
+            Stage::Terrain => "terrain",
+            Stage::World => "world",
+            Stage::Fog => "fog",
+            Stage::Minimap => "minimap",
+            Stage::Route => "route",
+            Stage::Look => "look",
+            Stage::Armies => "armies",
+            Stage::Script => "script",
+            Stage::Day => "day",
+            Stage::Snap => "snap",
+            Stage::Autosave => "autosave",
+            Stage::Session => "session",
+            Stage::AiMove => "ai_move",
+            Stage::AiPlan => "ai_plan",
+            Stage::Backdrop => "backdrop",
+            Stage::BattleWindow => "battle_window",
+            Stage::Effect => "effect",
+            Stage::GpuBackdrop => "gpu_backdrop",
+            Stage::GpuWindow => "gpu_window",
+            Stage::GpuSky => "gpu_sky",
+            Stage::GpuTerrain => "gpu_terrain",
+            Stage::GpuMarks => "gpu_marks",
+            Stage::GpuSprites => "gpu_sprites",
+            Stage::GpuFog => "gpu_fog",
+            Stage::GpuUi => "gpu_ui",
+            Stage::Water => "water",
+            Stage::Mist => "mist",
+            Stage::Light => "light",
+            Stage::SunShadow => "sun_shadow",
+            Stage::Weather => "weather",
+            Stage::GroundCache => "ground_cache",
+            Stage::Freeze => "freeze",
+            Stage::GpuWater => "gpu_water",
+            Stage::GpuMist => "gpu_mist",
+            Stage::GpuLight => "gpu_light",
+            Stage::GpuSunShadow => "gpu_sun_shadow",
+            Stage::GpuWeather => "gpu_weather",
+            Stage::GpuGroundCache => "gpu_ground_cache",
+            Stage::GpuFreeze => "gpu_freeze",
+            Stage::GpuMinimap => "gpu_minimap",
+        }
+    }
+
+    /// A GPU stage (its time comes from the debug mode's GPU samples only, see [`gpu_sampled_now`]).
+    pub fn is_gpu(self) -> bool {
+        self.name().starts_with("gpu_")
+    }
 }
 
 /// What the frame was: the map with the hero walking, or not, or a battle (`tilt`: drawn in
@@ -267,6 +369,8 @@ struct State {
     /// sample began.
     gpu_sampling: bool,
     sample_last: Option<Instant>,
+    /// The samples of the performance test's cell being measured ([`cell_begin`]), None outside a cell.
+    cell: Option<Vec<Sample>>,
 }
 
 impl State {
@@ -292,6 +396,7 @@ impl State {
             gpu: Vec::new(),
             gpu_sampling: false,
             sample_last: None,
+            cell: None,
         }
     }
 }
@@ -532,6 +637,9 @@ pub fn end_frame(work: Duration, total: Duration) {
         if csv {
             s.csv_rows.push((s.frames, sample));
         }
+        if let Some(cell) = s.cell.as_mut() {
+            cell.push(sample);
+        }
         s.samples.push(sample);
         s.stage = [Duration::ZERO; Stage::COUNT];
         s.rebuilds = 0;
@@ -547,7 +655,8 @@ pub fn end_frame(work: Duration, total: Duration) {
         s.effect = false;
         // The next frame is a GPU sample once the period has passed (debug mode only: the flag is set on
         // every platform, the waits themselves are the GPU waits of `ui::gpu_probe`).
-        s.gpu_sampling = crate::diag::debug_mode() && due(s.sample_last, now, GPU_SAMPLE_EVERY);
+        let (asked, every) = if crate::diag::forced_profile() { (true, GPU_SAMPLE_EVERY_RUN) } else { (false, GPU_SAMPLE_EVERY) };
+        s.gpu_sampling = (crate::diag::debug_mode() || asked) && due(s.sample_last, now, every);
         if s.gpu_sampling {
             s.sample_last = Some(now);
         }
@@ -572,6 +681,42 @@ fn take_gpu_frames(s: &mut State, last: Option<u64>) -> BTreeMap<u64, [f32; GPU_
     let Some(last) = last else { return BTreeMap::new() };
     let later = s.gpu_frames.split_off(&(last + 1));
     std::mem::replace(&mut s.gpu_frames, later)
+}
+
+/// A performance test's cell starts: from now the probe keeps every frame's sample for [`cell_end`] (a no-op with
+/// the probe off). The frame that is ending as the cell starts counts too, so the samples cover the cell's
+/// measure to within a frame at each edge.
+pub fn cell_begin() {
+    if on() {
+        STATE.with_borrow_mut(|s| s.cell = Some(Vec::new()));
+    }
+}
+
+/// The cell ends: the samples kept since [`cell_begin`], in frame order (empty when the probe was off).
+pub fn cell_end() -> Vec<Sample> {
+    STATE.with_borrow_mut(|s| s.cell.take().unwrap_or_default())
+}
+
+/// A cell's stage line payload (`cell=<id> frames=<n> gpu_frames=<m> <stage>_p50=<ms> <stage>_p90=<ms> …`, the
+/// bench's `RazdorBenchStages` line without its tag). The CPU stages are summarised over the frames that ran no
+/// GPU sample (their GPU waits would count inside the stages around them), the GPU stages over the sampled
+/// frames only. A stage is listed when some frame of its group timed it; the stages keep [`Stage::ALL`]'s order.
+/// Times in ms with 2 decimals; nearest-rank percentiles, as the summaries.
+pub fn stages_payload(cell: &str, samples: &[Sample]) -> String {
+    let cpu: Vec<&Sample> = samples.iter().filter(|s| !s.gpu_sampled).collect();
+    let gpu: Vec<&Sample> = samples.iter().filter(|s| s.gpu_sampled).collect();
+    let mut out = format!("cell={cell} frames={} gpu_frames={}", cpu.len(), gpu.len());
+    for st in Stage::ALL {
+        let group = if st.is_gpu() { &gpu } else { &cpu };
+        let mut values: Vec<f32> = group.iter().map(|s| s.stage_ms[st as usize]).collect();
+        if values.iter().all(|&v| v == 0.0) {
+            continue;
+        }
+        values.sort_by(f32::total_cmp);
+        let key = st.name();
+        out.push_str(&format!(" {key}_p50={:.2} {key}_p90={:.2}", percentile(&values, 50.0), percentile(&values, 90.0)));
+    }
+    out
 }
 
 /// Logs the pending samples' summary now (at exit), and appends the pending CSV rows. Does
@@ -1094,6 +1239,55 @@ mod tests {
         // The window's time less its backdrop and GPU waits is the rest.
         let rest = sample(Kind::Battle { tilt: true }, 9.0, 10.0, stages(&[(Stage::Backdrop, 2.0), (Stage::BattleWindow, 5.0), (Stage::GpuWindow, 1.0)]));
         assert_eq!(rest_ms(&rest), 1.0);
+    }
+
+    #[test]
+    fn the_stage_list_is_in_the_enum_order_with_unique_keys() {
+        for (i, st) in Stage::ALL.iter().enumerate() {
+            assert_eq!(*st as usize, i, "{st:?} is at its index");
+        }
+        let mut names: Vec<&str> = Stage::ALL.iter().map(|st| st.name()).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), Stage::COUNT);
+        assert!(Stage::ALL.iter().all(|st| st.is_gpu() == st.name().starts_with("gpu_")));
+    }
+
+    #[test]
+    fn the_stage_line_summarises_the_cpu_frames_and_the_sampled_gpu_frames_apart() {
+        let a = sample(Kind::Other, 5.0, 6.0, stages(&[(Stage::World, 4.0), (Stage::Water, 1.0)]));
+        let b = sample(Kind::Other, 6.0, 7.0, stages(&[(Stage::World, 2.0)]));
+        let mut gpu = sample(Kind::Other, 9.0, 40.0, stages(&[(Stage::World, 30.0), (Stage::GpuSky, 3.5)]));
+        gpu.gpu_sampled = true;
+        // The sampled frame's CPU stages (its GPU wait sits inside World) are not summarised.
+        let line = stages_payload("mine.near", &[a, b, gpu]);
+        assert!(line.starts_with("cell=mine.near frames=2 gpu_frames=1 "), "{line}");
+        assert!(line.contains(" world_p50=2.00 world_p90=4.00"), "{line}");
+        assert!(line.contains(" water_p50=0.00 water_p90=1.00"), "{line}");
+        assert!(line.contains(" gpu_sky_p50=3.50 gpu_sky_p90=3.50"), "{line}");
+        // A stage no frame timed is not listed; the stages keep the enum's order (the GPU stages sit among the CPU ones).
+        assert!(!line.contains("tick_"), "{line}");
+        assert!(line.find("world_p50").unwrap() < line.find("gpu_sky_p50").unwrap());
+        assert!(line.find("gpu_sky_p50").unwrap() < line.find("water_p50").unwrap());
+        // No sampled frame: no GPU stage at all.
+        let cpu_only = stages_payload("x", &[a, b]);
+        assert!(!cpu_only.split(' ').any(|w| w.starts_with("gpu_") && w.contains("_p")), "{cpu_only}");
+        assert!(cpu_only.starts_with("cell=x frames=2 gpu_frames=0"), "{cpu_only}");
+    }
+
+    #[test]
+    fn a_cell_keeps_its_frames_samples_only_while_it_runs() {
+        let _ = cell_end();
+        crate::diag::set_forced_profile(true);
+        cell_begin();
+        end_frame(Duration::from_millis(2), Duration::from_millis(3));
+        end_frame(Duration::from_millis(4), Duration::from_millis(5));
+        let got = cell_end();
+        crate::diag::set_forced_profile(false);
+        assert_eq!(got.len(), 2, "two frames kept");
+        assert!((got[1].work_ms - 4.0).abs() < 1e-3);
+        end_frame(Duration::from_millis(1), Duration::from_millis(1));
+        assert!(cell_end().is_empty(), "nothing is kept after the cell");
     }
 
     #[test]

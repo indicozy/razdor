@@ -163,7 +163,7 @@ placeholder `0.0.0` (`update_view::shown_version`), so a version bump changes no
    file `profile` in the app folder turns it on, and its content (optional) is the threshold
    in ms: on Android that is `<files>/Razdor/profile` (the app's folder, `platform::app_dir`).
    The frame probe (`razdor::frame_probe`) takes every frame and every 5 s logs one
-   `frame probe` line per kind: `walk-step` (the hero moved to another cell), `walk` (the hero
+   `frame probe` line per kind (a performance test's frames are summarised as `other`, see that section): `walk-step` (the hero moved to another cell), `walk` (the hero
    walking, no step), `idle` (the map, the hero still), `other` (any other screen, and any
    map frame whose tick did not run: a window open or events held over it). Each line
    has the percentiles of total, work and present, and p50/p99/max of each stage (tick,
@@ -467,10 +467,26 @@ the work's median, the slow frames (over 33 ms), the load and the RSS (`/proc`).
   (with `RAZDOR_BENCH_END=<png>` the results are shot and the process ends; `RAZDOR_BENCH_SAVE=1` saves the file);
   `RAZDOR_SCENE=bench:choice|running|results` shows the windows with stand-in numbers.
 - A run with no one at the screen (the lab's adb runs: `tools/perf/samsung_lab.py`): a file `bench-autorun.txt` in
-  `platform::app_dir()` (its first line `all` or `mine`, an optional `map=<name>`). `bench_autorun::tick` (in `App::frame`)
+  `platform::app_dir()` (its first line `all` or `mine`, an optional `map=<name>`, an optional `profile` line). `bench_autorun::tick` (in `App::frame`)
   reads it once the install is loaded and the main menu is quiet, renames it `bench-autorun.done`, and starts the run
-  with `bench::start_on`. The run is saved at its end, and `bench-autorun.finished` (the results file's name) or
+  with `bench::start_run` (`start_on` without profiling). The run is saved at its end, and `bench-autorun.finished` (the results file's name) or
   `bench-autorun.error` (why it did not start or was cancelled) is written beside it.
+- Profiling a run (the `profile` line; `debug` is the same): the run turns profiling on for itself
+  (`diag::set_forced_profile`, cleared by `restore` at every end, so the player's debug setting and its strip are
+  untouched). The frame probe then keeps each measured frame's sample (`frame_probe::cell_begin` at the measure's start,
+  `cell_end` at its end, to within a frame at each edge), and the debug mode's GPU samples run once a second
+  (`GPU_SAMPLE_EVERY_RUN`, 10 s otherwise). Each cell then logs, after its `RazdorBench` line, a
+  `RazdorBenchStages cell=<id> frames=<n> gpu_frames=<m> <stage>_p50=… <stage>_p90=…` line (`bench::stages_line`,
+  `frame_probe::stages_payload`, in the saved file too): the CPU stages over the frames with no GPU sample, the GPU
+  stages over the sampled frames, a stage listed only when some frame timed it, in `Stage::ALL`'s order (ms, 2
+  decimals). The sampled frames stall the GPU, so a profile run's frame numbers are not the plain run's: read the
+  stage lines for where the time goes, the plain run for the frame ms.
+- Why a run's probe summaries look thin: during a run the input is held (`widgets::set_input_blocked`), so the world
+  does not tick and the frames are summarised as `other`; the `other` summary line has the stage times but none of
+  the map-only fields (effects, GPU stages, sprites). The stage lines are the per-cell breakdown.
+- `tools/perf/phone_bench.py` reads both tags: `RazdorBench` gives the first table, `RazdorBenchStages` a second one
+  («Where the frame time goes»). `tools/perf/samsung_lab.py --stages` writes the `profile` line and adds the main
+  stages' p50 per build and cell to `compare.md`.
 
 Trap: `bench::Slot` is a cell; `std::cell::Cell` is the bench's own too (its `local!` statics), so keep the names apart.
 

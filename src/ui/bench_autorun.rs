@@ -6,8 +6,11 @@
 //! choice (`mine` or `all`, the windows' «Мои настройки» and «Все пресеты»); an optional `map=<name>`
 //! line names the map (default: `bench::MAPS`). Lines starting with `#` are notes.
 //!
+//! A `profile` line (or `debug`, the same) turns profiling on for that run only: each cell then logs its
+//! stage breakdown (`RazdorBenchStages`), and the debug mode's GPU samples run (`diag::set_forced_profile`).
+//!
 //! The file is renamed to `bench-autorun.done` at once, so a crash does not start the run again. The run
-//! itself is `bench::start_on`, the button's own. Its end writes `bench-autorun.finished` (the saved
+//! itself is `bench::start_run`, the button's own (`bench::start_on` without profiling). Its end writes `bench-autorun.finished` (the saved
 //! `razdor-bench-*.txt`'s name) or, when it cannot start or the run is cancelled, `bench-autorun.error`
 //! (why). Both files go in the same folder, and the log gets `bench autorun: …` lines.
 
@@ -34,9 +37,11 @@ pub struct Trigger {
     pub choice: Choice,
     /// The map's file name in the game (`map=<name>`), or None for the default.
     pub map: Option<String>,
+    /// The run profiles itself (a `profile` or `debug` line).
+    pub profile: bool,
 }
 
-/// Reads a trigger file's text: the choice on the first line, then optional `map=<name>` lines.
+/// Reads a trigger file's text: the choice on the first line, then optional `map=<name>` and `profile` lines.
 /// An empty or unknown line is an error (the run would not be the one the file asks for).
 pub fn parse(text: &str) -> Result<Trigger, String> {
     let text = text.trim_start_matches('\u{feff}');
@@ -48,7 +53,12 @@ pub fn parse(text: &str) -> Result<Trigger, String> {
         other => return Err(format!("the choice {other:?} is not all or mine")),
     };
     let mut map = None;
+    let mut profile = false;
     for line in lines {
+        if line == "profile" || line == "debug" {
+            profile = true;
+            continue;
+        }
         let Some(name) = line.strip_prefix("map=") else {
             return Err(format!("unknown line {line:?}"));
         };
@@ -57,7 +67,7 @@ pub fn parse(text: &str) -> Result<Trigger, String> {
             map = Some(name.to_string());
         }
     }
-    Ok(Trigger { choice, map })
+    Ok(Trigger { choice, map, profile })
 }
 
 local! {
@@ -109,8 +119,9 @@ fn start_from(app: &mut App, dir: &Path, path: &Path) {
     };
     let choice = if trigger.choice == Choice::Mine { "mine" } else { "all" };
     let map = trigger.map.as_deref().map(|m| format!(" map={m}")).unwrap_or_default();
-    razdor::diag::log(&format!("bench autorun: {choice}{map}"));
-    match bench::start_on(app, trigger.choice, trigger.map.as_deref()) {
+    let profile = if trigger.profile { " profile" } else { "" };
+    razdor::diag::log(&format!("bench autorun: {choice}{map}{profile}"));
+    match bench::start_run(app, trigger.choice, trigger.map.as_deref(), trigger.profile) {
         Ok(()) => FROM_FILE.with(|f| f.set(true)),
         Err(e) => refuse(dir, &e),
     }
@@ -159,21 +170,32 @@ mod tests {
 
     #[test]
     fn the_choice_is_the_first_line() {
-        assert_eq!(parse("all\n").unwrap(), Trigger { choice: Choice::All, map: None });
-        assert_eq!(parse("mine").unwrap(), Trigger { choice: Choice::Mine, map: None });
+        assert_eq!(parse("all\n").unwrap(), Trigger { choice: Choice::All, map: None, profile: false });
+        assert_eq!(parse("mine").unwrap(), Trigger { choice: Choice::Mine, map: None, profile: false });
     }
 
     #[test]
     fn a_map_line_names_the_map_and_crlf_is_fine() {
         let t = parse("all\r\nmap=Другой берег\r\n").unwrap();
-        assert_eq!(t, Trigger { choice: Choice::All, map: Some("Другой берег".into()) });
+        assert_eq!(t, Trigger { choice: Choice::All, map: Some("Другой берег".into()), profile: false });
         assert_eq!(parse("mine\nmap=  \n").unwrap().map, None);
     }
 
     #[test]
     fn a_byte_order_mark_and_notes_are_skipped() {
         let t = parse("\u{feff}# the lab's run\n\nall\n# twice\nmap=РК1-Начало пути\n").unwrap();
-        assert_eq!(t, Trigger { choice: Choice::All, map: Some("РК1-Начало пути".into()) });
+        assert_eq!(t, Trigger { choice: Choice::All, map: Some("РК1-Начало пути".into()), profile: false });
+    }
+
+    #[test]
+    fn a_profile_line_turns_the_profiling_on_for_the_run_in_any_place() {
+        let t = parse("all\nprofile\nmap=Другой берег\n").unwrap();
+        assert_eq!(t, Trigger { choice: Choice::All, map: Some("Другой берег".into()), profile: true });
+        // `debug` is the same line; the order of the lines does not matter.
+        assert_eq!(parse("mine\ndebug").unwrap(), Trigger { choice: Choice::Mine, map: None, profile: true });
+        assert!(parse("# the lab's run, with stages\n\nall\r\nprofile \r\n").unwrap().profile, "a note, a blank line and spaces are fine");
+        assert!(!parse("all\nmap=X").unwrap().profile, "no profile line: no profiling");
+        assert!(parse("all\nprofile=1\n").is_err(), "the line is `profile`, with no value");
     }
 
     #[test]

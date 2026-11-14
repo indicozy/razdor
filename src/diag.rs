@@ -86,13 +86,29 @@ pub fn debug_mode() -> bool {
     DEBUG.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// Profiling is on: the debug mode is on ([`set_debug`]), or `RAZDOR_PROFILE` is set, or the app
-/// folder (`platform::app_dir`) has a `profile` file (how Android turned it on before the setting
-/// existed, where env vars cannot be set: `<app folder>/profile`). Slow frames and slow loads are
-/// logged, and the frame probe (`frame_probe`) summarises frames.
+/// A run asked for profiling for itself (the performance test's `profile` line in its trigger file,
+/// `ui::bench`): set for that run only, and cleared when it ends. Unlike the debug mode it shows no strip
+/// and writes no setting; it turns profiling and the frame probe's debug-mode GPU samples on.
+static FORCED_PROFILE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Sets the run-scoped profiling switch (see [`FORCED_PROFILE`]).
+pub fn set_forced_profile(on: bool) {
+    FORCED_PROFILE.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The run-scoped profiling switch is on (see [`set_forced_profile`]).
+pub fn forced_profile() -> bool {
+    FORCED_PROFILE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Profiling is on: the debug mode is on ([`set_debug`]), or a run asked for it ([`set_forced_profile`]),
+/// or `RAZDOR_PROFILE` is set, or the app folder (`platform::app_dir`) has a `profile` file (how Android
+/// turned it on before the setting existed, where env vars cannot be set: `<app folder>/profile`). Slow
+/// frames and slow loads are logged, and the frame probe (`frame_probe`) summarises frames.
 pub fn profiling() -> bool {
     static ENV: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     debug_mode()
+        || forced_profile()
         || *ENV.get_or_init(|| {
             std::env::var_os("RAZDOR_PROFILE").is_some()
                 || crate::platform::app_dir().is_some_and(|d| d.join("profile").is_file())
@@ -324,6 +340,14 @@ mod tests {
         assert!(super::debug_mode() && super::profiling(), "the setting turns profiling on at once");
         super::set_debug(false);
         assert!(!super::debug_mode(), "and off again, without a restart");
+    }
+
+    #[test]
+    fn a_run_profiles_itself_without_the_debug_mode() {
+        super::set_forced_profile(true);
+        assert!(super::forced_profile() && super::profiling(), "a run's switch turns profiling on");
+        super::set_forced_profile(false);
+        assert!(!super::forced_profile(), "the run's switch ends with the run");
     }
 
     #[test]

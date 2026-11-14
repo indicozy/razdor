@@ -215,6 +215,8 @@ pub struct CellResult {
     /// The view the cell ran in (`25d` or `flat`).
     pub view: &'static str,
     pub stats: Stats,
+    /// The cell's stage breakdown (`frame_probe::stages_payload`), when the run had profiling on.
+    pub stages: Option<String>,
 }
 
 /// A quoted text value of a log line (its quotes become apostrophes).
@@ -249,6 +251,12 @@ pub fn result_line(r: &CellResult, dev: &Device) -> String {
         quoted(&dev.os),
         dev.version,
     )
+}
+
+/// The log line of one cell's stage breakdown (`RazdorBenchStages cell=… <stage>_p50=…`), or None when the cell
+/// ran without profiling. It is a second tag beside `RazdorBench`, so the cell line's format stays as it was.
+pub fn stages_line(r: &CellResult) -> Option<String> {
+    r.stages.as_ref().map(|payload| format!("RazdorBenchStages {payload}"))
 }
 
 /// What a finished run shows and saves.
@@ -293,6 +301,10 @@ pub fn report_text(r: &Report) -> String {
     for c in &r.cells {
         out.push_str(&result_line(c, &r.device));
         out.push('\n');
+        if let Some(line) = stages_line(c) {
+            out.push_str(&line);
+            out.push('\n');
+        }
     }
     out.push_str("RazdorBench DONE\n");
     out
@@ -370,6 +382,8 @@ struct Run {
     load_ms: f32,
     saved: Option<Saved>,
     fake: bool,
+    /// The run profiles itself (`frame_probe`'s cells, the stage lines): the trigger file's `profile` line.
+    profile: bool,
 }
 
 enum Phase {
@@ -551,6 +565,12 @@ pub fn start(app: &mut App, choice: Choice) -> Result<(), String> {
 /// [`start`] on the named map (its file name in the game: `bench_autorun`'s `map=` line), or on the
 /// default one when None.
 pub fn start_on(app: &mut App, choice: Choice, map: Option<&str>) -> Result<(), String> {
+    start_run(app, choice, map, false)
+}
+
+/// [`start_on`] with the run's profiling: `profile` turns profiling on for this run only (its frames' stage
+/// lines, `RazdorBenchStages`, and the debug mode's GPU samples), as the trigger file's `profile` line asks.
+pub fn start_run(app: &mut App, choice: Choice, map: Option<&str>, profile: bool) -> Result<(), String> {
     let Some(_) = app.dt_content.clone() else {
         return Err(tr("The test needs the game: the Discord Times folder.").to_string());
     };
@@ -567,7 +587,9 @@ pub fn start_on(app: &mut App, choice: Choice, map: Option<&str>) -> Result<(), 
         message: app.message.take(),
     };
     keep_awake(true);
-    log_line(&format!("RazdorBench START choice={} cells={} map={}", if choice == Choice::Mine { "mine" } else { "all" }, cells.len(), quoted(&map)));
+    razdor::diag::set_forced_profile(profile);
+    let profiled = if profile { " profile" } else { "" };
+    log_line(&format!("RazdorBench START choice={} cells={} map={}{profiled}", if choice == Choice::Mine { "mine" } else { "all" }, cells.len(), quoted(&map)));
     let run = Run {
         choice,
         cells,
@@ -580,6 +602,7 @@ pub fn start_on(app: &mut App, choice: Choice, map: Option<&str>) -> Result<(), 
         load_ms: 0.0,
         saved: Some(saved),
         fake: false,
+        profile,
     };
     PHASE.with_borrow_mut(|p| *p = Phase::Running(Box::new(run)));
     Ok(())
@@ -599,6 +622,9 @@ fn keep_awake(on: bool) {
 fn restore(app: &mut App, saved: Option<Saved>) {
     super::world_view::set_bench_fit(false);
     keep_awake(false);
+    razdor::diag::set_forced_profile(false);
+    // A cell cut short (Esc, Cancel, a quit) keeps no samples: its probe cell ends here (a no-op after a whole run).
+    let _ = razdor::frame_probe::cell_end();
     if let Some(s) = saved {
         app.audio.settings = s.settings;
         app.game = s.game;
@@ -676,7 +702,11 @@ pub fn sample(app: &mut App, work: Duration, total: Duration) {
         }
     };
     if let Some(stage) = next {
+        let measuring = matches!(stage, Stage::Measure { .. });
         run.stage = stage;
+        if measuring && run.profile {
+            razdor::frame_probe::cell_begin();
+        }
     }
     let measure_done = match &run.stage {
         Stage::Measure { start, .. } => now.duration_since(*start).as_secs_f64() >= MEASURE_SECS,
@@ -690,9 +720,15 @@ pub fn sample(app: &mut App, work: Duration, total: Duration) {
     let secs = start.elapsed().as_secs_f64();
     let cell = run.cells[run.index];
     let st = stats(&frames, secs, run.load_ms, rss_mb());
-    let result = CellResult { id: cell.id(), name: cell.name(), view: view_name(&app.audio.settings), stats: st };
+    // The probe's samples of the cell (empty when the run is not profiled): the stage breakdown of its frames.
+    let samples = if run.profile { razdor::frame_probe::cell_end() } else { Vec::new() };
+    let stages = (!samples.is_empty()).then(|| razdor::frame_probe::stages_payload(&cell.id(), &samples));
+    let result = CellResult { id: cell.id(), name: cell.name(), view: view_name(&app.audio.settings), stats: st, stages };
     let dev = run.device.get_or_insert_with(device);
     log_line(&result_line(&result, dev));
+    if let Some(line) = stages_line(&result) {
+        log_line(&line);
+    }
     run.results.push(result);
     run.index += 1;
     if run.index < run.cells.len() {
@@ -845,6 +881,7 @@ pub fn snapshot_stage(which: &str) {
                 load_ms: 0.0,
                 saved: None,
                 fake: true,
+                profile: false,
             };
             PHASE.with_borrow_mut(|p| *p = Phase::Running(Box::new(run)));
         }
@@ -858,7 +895,7 @@ pub fn snapshot_stage(which: &str) {
                         let t = 14.0 + ((f * 7 + i * 3) % 13) as f32 * 0.4;
                         (t * 0.4, t)
                     }).collect();
-                    CellResult { id: c.id(), name: c.name(), view: if c.config.tilt == Some(false) { "flat" } else { "25d" }, stats: stats(&frames, MEASURE_SECS, 1200.0 + i as f32 * 90.0, Some(540.0)) }
+                    CellResult { id: c.id(), name: c.name(), view: if c.config.tilt == Some(false) { "flat" } else { "25d" }, stats: stats(&frames, MEASURE_SECS, 1200.0 + i as f32 * 90.0, Some(540.0)), stages: None }
                 })
                 .collect();
             let report = Report {
@@ -941,7 +978,7 @@ mod tests {
     fn the_result_line_is_one_key_value_line_with_the_device() {
         let dev = Device { version: "1.5.0".into(), screen: (1920, 1080), gpu: "NVIDIA \"X\"".into(), os: "Fedora".into(), vsync: "device".into() };
         let s = stats(&[(4.0, 16.0), (4.0, 17.0)], 12.0, 900.0, None);
-        let line = result_line(&CellResult { id: "mine.far".into(), name: "Мои настройки · вся карта".into(), view: "25d", stats: s }, &dev);
+        let line = result_line(&CellResult { id: "mine.far".into(), name: "Мои настройки · вся карта".into(), view: "25d", stats: s, stages: None }, &dev);
         assert!(line.starts_with("RazdorBench cell=mine.far name=\"Мои настройки · вся карта\" view=25d pos=far "), "{line}");
         assert!(line.contains(" rss_mb=na "));
         assert!(line.contains(" gpu=\"NVIDIA 'X'\" "), "quotes become apostrophes: {line}");
@@ -963,7 +1000,7 @@ mod tests {
             choice: Choice::Mine,
             device: dev,
             map: "Другой берег".into(),
-            cells: vec![CellResult { id: "mine.near".into(), name: "n".into(), view: "flat", stats: stats(&[(1.0, 16.0)], 1.0, 1.0, None) }],
+            cells: vec![CellResult { id: "mine.near".into(), name: "n".into(), view: "flat", stats: stats(&[(1.0, 16.0)], 1.0, 1.0, None), stages: None }],
             file: None,
             copied: false,
             error: None,
@@ -971,6 +1008,36 @@ mod tests {
         };
         let text = report_text(&r);
         assert!(text.contains("\nRazdorBench cell=mine.near "));
+        assert!(text.ends_with("RazdorBench DONE\n"));
+    }
+
+    #[test]
+    fn a_profiled_cell_has_its_stage_line_after_its_cell_line_and_others_have_none() {
+        let dev = Device { version: "1.5.0".into(), screen: (1, 2), gpu: "g".into(), os: "o".into(), vsync: "device".into() };
+        let cell = |id: &str, stages: Option<&str>| CellResult {
+            id: id.into(),
+            name: "n".into(),
+            view: "flat",
+            stats: stats(&[(1.0, 16.0)], 1.0, 1.0, None),
+            stages: stages.map(str::to_string),
+        };
+        assert_eq!(stages_line(&cell("mine.near", None)), None);
+        let r = Report {
+            choice: Choice::Mine,
+            device: dev,
+            map: "m".into(),
+            cells: vec![cell("mine.near", Some("cell=mine.near frames=1 gpu_frames=0 tick_p50=0.10 tick_p90=0.20")), cell("mine.far", None)],
+            file: None,
+            copied: false,
+            error: None,
+            setup: Vec::new(),
+        };
+        let text = report_text(&r);
+        let cell_line = text.find("\nRazdorBench cell=mine.near ").expect("the cell line");
+        let stage_line = text.find("\nRazdorBenchStages cell=mine.near frames=1 gpu_frames=0 tick_p50=0.10 tick_p90=0.20\n").expect("the stage line");
+        let far = text.find("\nRazdorBench cell=mine.far ").expect("the next cell");
+        assert!(cell_line < stage_line && stage_line < far, "the stage line follows its cell's line");
+        assert_eq!(text.matches("RazdorBenchStages").count(), 1, "only the profiled cell has one");
         assert!(text.ends_with("RazdorBench DONE\n"));
     }
 
