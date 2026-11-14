@@ -1663,6 +1663,21 @@ impl Game {
         self.world.hides_figure(from, to)
     }
 
+    /// Per location: whether someone is inside it, the hero (`location`) or an army standing in it
+    /// (army +0x3788, `mind.standing`). Built once a frame for the living map's windows
+    /// (`Location::windows_lit`); a list the length of `world.locations`.
+    pub fn occupied_locations(&self) -> Vec<bool> {
+        let mut occupied = vec![false; self.world.locations.len()];
+        let hero = self.location.into_iter();
+        let armies = self.world.armies.iter().filter_map(|a| a.mind.standing);
+        for l in hero.chain(armies) {
+            if let Some(o) = occupied.get_mut(l) {
+                *o = true;
+            }
+        }
+        occupied
+    }
+
     /// The armies the player sees, as indices into `world.armies` (Razdor's army list under
     /// the minimap): each on explored ground and outside a building, the test the minimap's
     /// army marks use (0x49e381 draws them; the fog hides the unexplored ones). The hero is
@@ -3526,6 +3541,26 @@ mod tests {
     fn wipe_all_but_hero(b: &mut Battle) {
         for f in b.fighters.iter_mut().filter(|f| !f.is_hero) {
             f.hp = 0;
+        }
+    }
+
+    #[test]
+    fn occupied_locations_marks_the_hero_s_and_each_army_s_building() {
+        // The living map's occupancy (`Game::occupied_locations`): the hero's building and every army
+        // standing in one (+0x3788), nothing else.
+        let mut g = new_game(HeroClass::Knight, 1);
+        g.location = None;
+        g.world.armies.iter_mut().for_each(|a| a.mind.standing = None);
+        assert!(g.occupied_locations().iter().all(|&o| !o), "nobody inside");
+        let n = g.world.locations.len();
+        assert_eq!(g.occupied_locations().len(), n);
+        g.location = Some(0);
+        let occupied = g.occupied_locations();
+        assert!(occupied[0] && occupied.iter().skip(1).all(|&o| !o), "the hero alone marks his building");
+        if let (Some(a), Some(last)) = (g.world.armies.first_mut(), n.checked_sub(1)) {
+            a.mind.standing = Some(last);
+            let occupied = g.occupied_locations();
+            assert!(occupied[0] && occupied[last], "an army in a building marks it too");
         }
     }
 

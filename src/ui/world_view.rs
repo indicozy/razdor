@@ -7201,8 +7201,10 @@ fn point_lights(game: &Game, art: Option<&DtArt>, cam: &Camera, glow: f32) -> Ve
     let torch = |feet: (f32, f32), size_px: f32, heading: Vec2| vec2(feet.0, feet.1) + lights::torch_offset(heading, size_px) / cam.scale;
     let figure_px = |stem: &str| art.and_then(|a| a.figure_sheet(stem)).map_or(cam.scale, |s| s.width() / 8.0 * zoom);
     let mut out = Vec::new();
+    // Whom each building holds (`Location::windows_lit`): a dark castle throws no light of its own.
+    let occupied = game.occupied_locations();
     for (i, l) in game.world.locations.iter().enumerate() {
-        if l.kind.is_bridge() || !location_explored(game, i) {
+        if l.kind.is_bridge() || !location_explored(game, i) || !l.windows_lit(occupied[i]) {
             continue;
         }
         let n = l.cells().count().max(1) as f32;
@@ -7306,11 +7308,13 @@ fn draw_building_windows(game: &Game, assets: &Assets, cam: &Camera, veil: Veil)
     // A building's windows are drawn with its picture's fog shade (`Shade::at` on its foot, as `shade_of` in
     // `draw_world_in`): a window over the unexplored mist fades with the picture, not at full brightness.
     let shade = |c: &Camera, foot: Vec2| -> f32 { Shade { fog: &game.fog, veil: Veil { shows: veil.shows, now: veil.now } }.at(c, foot) };
+    // The living map's rule (`Location::windows_lit`): a garrisoned building's openings are dark unless someone is inside.
+    let occupied = game.occupied_locations();
     super::sharp::windows_pass(&mask, night, || {
         in_view_sprites(cam, |c| {
             let zoom = c.scale / PX;
             for (i, l) in game.world.locations.iter().enumerate() {
-                if l.kind.is_bridge() || !location_explored(game, i) {
+                if l.kind.is_bridge() || !location_explored(game, i) || !l.windows_lit(occupied[i]) {
                     continue;
                 }
                 let n = l.cells().count().max(1) as f32;

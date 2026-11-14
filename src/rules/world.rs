@@ -210,6 +210,13 @@ impl LocationKind {
         matches!(self, LocationKind::Castle | LocationKind::Fort | LocationKind::Ruins | LocationKind::Camp)
     }
 
+    /// Kinds that hold a garrison of their own (palaces, towns, castles, forts): the living map lights
+    /// their windows at night only while someone is inside ([`Location::windows_lit`]). Every other
+    /// building keeps its windows lit.
+    pub fn holds_garrison(self) -> bool {
+        matches!(self, LocationKind::Palace | LocationKind::Town | LocationKind::Castle | LocationKind::Fort)
+    }
+
     pub fn label(self) -> &'static str {
         use LocationKind::*;
         match self {
@@ -578,6 +585,15 @@ impl Location {
     /// Not the player's and ill-disposed towards him.
     pub fn hostile(&self) -> bool {
         !self.owned() && self.attitude < HOSTILE_BELOW
+    }
+
+    /// Whether the building's windows and doors are lit at night (the living map's rule, the owner's,
+    /// 2026-11-14; Razdor's own look, not the original's). A building that holds a garrison
+    /// (`LocationKind::holds_garrison`) is lit only when someone is inside: its garrison has troops,
+    /// the player's units are stationed in it, or `occupied` (the hero or an army stands in it, see
+    /// `Game::occupied_locations`). Any other building is always lit.
+    pub fn windows_lit(&self, occupied: bool) -> bool {
+        !self.kind.holds_garrison() || occupied || !self.garrison.is_empty() || !self.stationed.is_empty()
     }
 
     /// A garrison that fights the player when he steps in.
@@ -1676,6 +1692,33 @@ mod tests {
         assert_eq!(shown_object_name("Призрак #2"), "Призрак");
         assert_eq!(shown_object_name("Банда Хромого"), "Банда Хромого");
         assert_eq!(shown_object_name("#3"), "");
+    }
+
+    #[test]
+    fn a_garrisoned_building_s_windows_burn_only_with_someone_inside() {
+        // The living map's rule (`Location::windows_lit`, 2026-11-14): castles, forts, towns and palaces
+        // are lit only when a garrison, stationed units or an occupant (hero or army) is in them.
+        let empty = Location::new(LocationKind::Castle, "Замок", Tile::default());
+        assert!(!empty.windows_lit(false), "an empty castle is dark");
+        assert!(empty.windows_lit(true), "a castle with someone inside is lit");
+        let mut garrisoned = empty.clone();
+        garrisoned.garrison.push(Troop::new(UnitId(4), 0, Slot { row: Row::Front, col: 0 }));
+        assert!(garrisoned.windows_lit(false), "a garrison lights it");
+        let mut stationed = Location::new(LocationKind::Fort, "Крепость", Tile::default());
+        assert!(!stationed.windows_lit(false));
+        stationed.stationed.push(Stationed { unit: Unit::new(&Content::builtin(), UnitId(4), Slot { row: Row::Front, col: 0 }) });
+        assert!(stationed.windows_lit(false), "the player's stationed units light it");
+        for kind in [LocationKind::Town, LocationKind::Palace] {
+            assert!(!Location::new(kind, "Город", Tile::default()).windows_lit(false), "{kind:?} with no one inside is dark");
+        }
+    }
+
+    #[test]
+    fn other_buildings_keep_their_windows_lit() {
+        for kind in [LocationKind::Village, LocationKind::Tavern, LocationKind::Market, LocationKind::Church, LocationKind::Ruins] {
+            assert!(Location::new(kind, "Здание", Tile::default()).windows_lit(false), "{kind:?} is always lit");
+        }
+        assert!(LocationKind::Castle.holds_garrison() && !LocationKind::Village.holds_garrison());
     }
 
     #[test]
