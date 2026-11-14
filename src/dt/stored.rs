@@ -268,6 +268,68 @@ fn write_part(part: &Path, data: &[u8]) -> io::Result<()> {
     file.sync_all()
 }
 
+/// The file Razdor writes into a game folder it unpacks or downloads into `platform::unpack_dir`.
+/// Only a folder with it (on the desktop) is Razdor's own copy: see [`owned`].
+pub const OWNED_MARKER: &str = ".razdor-owned";
+
+/// Whether Razdor owns the game folder `dir`: the phones' unpack folder, or on the desktop that
+/// folder with [`OWNED_MARKER`]. A player's own copy (a `DiscordTimes` folder next to the exe
+/// without the marker), `RAZDOR_DT_DIR` and any other install are never owned. Only an owned
+/// folder is converted and written as stored pictures (`docs/specs/appdata-compression.md`).
+pub fn owned(dir: &Path) -> bool {
+    owned_in(dir, crate::platform::unpack_dir().as_deref())
+}
+
+/// [`owned`] with the unpack folder given (`unpack`, None when the platform has none).
+pub fn owned_in(dir: &Path, unpack: Option<&Path>) -> bool {
+    if test_owned(dir) {
+        return true;
+    }
+    let mobile = cfg!(any(target_os = "android", target_os = "ios"));
+    unpack.is_some_and(|u| same_dir(dir, u)) && (mobile || dir.join(OWNED_MARKER).is_file())
+}
+
+/// Whether `dir` is the unpack folder on this platform (`platform::unpack_dir`): where an import
+/// writes the game Razdor owns.
+pub fn in_unpack_dir(dir: &Path) -> bool {
+    crate::platform::unpack_dir().is_some_and(|u| same_dir(dir, &u))
+}
+
+/// Writes [`OWNED_MARKER`] into `dir`. The caller decides that `dir` is Razdor's to mark.
+pub fn mark_owned(dir: &Path) -> io::Result<()> {
+    fs::write(dir.join(OWNED_MARKER), "Razdor's game folder: written by Razdor when it unpacks or downloads the game.\n")
+}
+
+/// Two paths name one folder (canonical when both exist, else as written).
+fn same_dir(a: &Path, b: &Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// A test's folder that counts as owned (the gate's copy of the install; see [`set_test_owned`]).
+    static TEST_OWNED: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Marks `dir` as owned on this thread, for a test (None: back to the real rule).
+#[cfg(test)]
+pub fn set_test_owned(dir: Option<PathBuf>) {
+    TEST_OWNED.with(|t| *t.borrow_mut() = dir);
+}
+
+#[cfg(test)]
+fn test_owned(dir: &Path) -> bool {
+    TEST_OWNED.with(|t| t.borrow().as_deref().is_some_and(|p| same_dir(dir, p)))
+}
+
+#[cfg(not(test))]
+fn test_owned(_dir: &Path) -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -395,6 +457,37 @@ mod tests {
         assert!(find(&dir, "p.ugs").is_none());
         assert!(list(&dir).is_empty());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn owned_is_the_unpack_folder_with_the_marker_on_the_desktop() {
+        let root = scratch("owned");
+        let unpack = root.join("DiscordTimes");
+        let other = root.join("Games").join("DiscordTimes");
+        fs::create_dir_all(&unpack).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        // The unpack folder without the marker is a player's own copy until Razdor marks it.
+        let mobile = cfg!(any(target_os = "android", target_os = "ios"));
+        assert_eq!(owned_in(&unpack, Some(&unpack)), mobile);
+        mark_owned(&unpack).unwrap();
+        assert!(owned_in(&unpack, Some(&unpack)));
+        // Any other folder is never owned, marker or not (a RAZDOR_DT_DIR install, a Steam folder).
+        mark_owned(&other).unwrap();
+        assert!(!owned_in(&other, Some(&unpack)));
+        // No unpack folder on this platform: nothing is owned.
+        assert!(!owned_in(&unpack, None));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn owned_on_the_phones_needs_no_marker() {
+        // The phones' rule, as the platform switch of `owned_in` decides it (checked as a pure rule).
+        let root = scratch("owned-mobile");
+        let unpack = root.join("DiscordTimes");
+        fs::create_dir_all(&unpack).unwrap();
+        let mobile = cfg!(any(target_os = "android", target_os = "ios"));
+        assert_eq!(owned_in(&unpack, Some(&unpack)), mobile || unpack.join(OWNED_MARKER).is_file());
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

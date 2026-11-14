@@ -569,7 +569,11 @@ fn not_found_rows(manual: bool) -> Vec<Vec<NotFoundButton>> {
     // A folder with missing game files is repaired from the archive (the offer), not downloaded over.
     let damaged = matches!(razdor::dt::install::problem(), Some(Problem::Missing { .. }));
     if damaged {
-        rows.push(vec![(restore_label(), game_import::request_repair as fn())]);
+        // Razdor's guard (backlog 1642): only Razdor's own game folder is repaired; another install shows
+        // the explanation alone (no download either, as before).
+        if game_import::repair_offered() {
+            rows.push(vec![(restore_label(), game_import::request_repair as fn())]);
+        }
     } else if game_import::download_available() {
         rows.push(vec![(tr("Download the game"), game_import::request_download as fn())]);
     }

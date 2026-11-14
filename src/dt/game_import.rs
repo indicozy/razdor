@@ -11,6 +11,7 @@
 //! copy elsewhere is never replaced.
 
 use super::install::is_install;
+use super::stored;
 use super::unpack::{self, Found, Kind, UnpackError, MAX_UNPACKED_BYTES};
 use std::fs::{self, File};
 use std::io::{self, Seek, SeekFrom};
@@ -222,9 +223,27 @@ fn stage_and_apply(
 /// The unpacked `staging` folder put in place: a whole game replaces `target`, a patch goes over it.
 fn apply(found: &Found, target: &Path, staging: &Path) -> Result<Done, Error> {
     match found.kind {
-        Kind::Game => import_folder(staging, target),
+        Kind::Game => {
+            // The game unpacked or downloaded into Razdor's own folder is marked before the swap, so the
+            // marker moves into the install (`stored::owned`). A patch never marks; an unmarked folder
+            // still plays, it is just not converted.
+            if stored::in_unpack_dir(target) {
+                if let Err(e) = stored::mark_owned(staging) {
+                    crate::diag!("game import: the owned marker is not written: {e}");
+                }
+            }
+            import_folder(staging, target)
+        }
         Kind::Patch => move_over(staging, target).map(Done::Patched).map_err(|e| Error::Io(e.to_string())),
     }
+}
+
+/// Whether the repair from the archive may write into the install folder `base` (backlog 1642, Razdor's
+/// guard, `ui/game_import.rs` `start_repair`): only a folder Razdor owns (`stored::owned_in`: the marker
+/// on the desktop) that is also the folder an import writes to ([`target`]). A player's own copy, a
+/// `RAZDOR_DT_DIR` install or any other folder keeps its files; the screen then only explains what is missing.
+pub fn repair_allowed(base: &Path, unpack: Option<&Path>) -> bool {
+    target(Some(base), unpack).is_some() && stored::owned_in(base, unpack)
 }
 
 /// [`check_room`] for an import into `target`: the room of the disk the staging folder goes to.
@@ -896,5 +915,27 @@ mod tests {
         assert_eq!(over_budget("a.zip", MAX_ARCHIVE_BYTES, MAX_UNPACKED_BYTES), None);
         assert_eq!(over_budget("a.zip", MAX_ARCHIVE_BYTES + 1, 0), Some(Error::TooBig("a.zip".into())));
         assert_eq!(over_budget("a.zip", 0, MAX_UNPACKED_BYTES + 1), Some(Error::TooBig("a.zip".into())));
+    }
+
+    /// Backlog 1642: the repair writes only into a game folder Razdor owns (the marker on the desktop,
+    /// the phones' unpack folder there). A player's own copy next to the exe, or another install, is never written.
+    #[test]
+    fn the_repair_writes_only_into_an_owned_game_folder() {
+        let s = Scratch::new("repair-guard");
+        let unpack = s.0.join("DiscordTimes");
+        let other = s.0.join("Games").join("DiscordTimes");
+        fs::create_dir_all(&unpack).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        let mobile = cfg!(any(target_os = "android", target_os = "ios"));
+        let u = Some(unpack.as_path());
+        // A folder with no marker: the player's own copy on the desktop, owned on the phones.
+        assert_eq!(repair_allowed(&unpack, u), mobile);
+        stored::mark_owned(&unpack).unwrap();
+        assert!(repair_allowed(&unpack, u), "Razdor's own folder is repaired");
+        // Another folder is never repaired, marker or not (RAZDOR_DT_DIR, a Steam or GOG copy).
+        stored::mark_owned(&other).unwrap();
+        assert!(!repair_allowed(&other, u));
+        // No unpack folder on this platform: nothing is repaired.
+        assert!(!repair_allowed(&unpack, None));
     }
 }

@@ -162,6 +162,12 @@ pub(super) fn request_repair() {
     REPAIR_REQUESTED.with(|r| r.set(true));
 }
 
+/// Whether the repair of missing game files is offered and may run (backlog 1642): the install is
+/// one Razdor owns (`game_import::repair_allowed`). Otherwise the screen only says what is missing.
+pub fn repair_offered() -> bool {
+    razdor::dt::install::base_dir().is_some_and(|base| import::repair_allowed(&base, platform::unpack_dir().as_deref()))
+}
+
 /// The last game download's failure, in one line, while the screen shows the manual steps.
 pub fn download_failure() -> Option<String> {
     // The snapshot's `RAZDOR_SCENE_DOWNLOAD_FAILED` shows the manual path after a failed download.
@@ -446,6 +452,11 @@ fn archive_file() -> Option<PathBuf> {
 /// (`dt::integrity::repair`). Changed files are never overwritten here. Same job and progress
 /// as the download; the install is loaded again afterwards.
 fn start_repair() {
+    // Razdor's guard (backlog 1642): the archive writes only into a game folder Razdor owns. The button
+    // is not offered for another install either (`repair_offered`); this is the same check at the start.
+    if !repair_offered() {
+        return;
+    }
     let Some(base) = razdor::dt::install::base_dir() else {
         DOWNLOAD_FAILURE.with_borrow_mut(|f| *f = Some(trf!("The download cannot start: {e}.", e = "no install folder")));
         return;
