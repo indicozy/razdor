@@ -32,7 +32,7 @@ use super::building_view::BuildingView;
 use super::gestures::SwipeKind;
 use super::cursor::{self, BuildingHover, CellArmy, MapHover, Shape};
 use super::dialog::Dialog;
-use super::dt_art::{Atlas, DtArt, Frame, Living, Slot};
+use super::dt_art::{Atlas, DtArt, FigureShadow, Frame, Living, Slot};
 use super::living::{self, Batch};
 use super::daylight;
 use super::lights;
@@ -4173,14 +4173,12 @@ fn cast_shadows(art: &DtArt, cam: &Camera, objects: &[&Decoration], locations: &
 /// Razdor's point-light shadows on the ground, per frame, under the fog and every standing sprite (the sun's and the moon's
 /// are the baked map, `draw_sun_map`): each visible caster lays its silhouette from its foot by each lit light in reach
 /// (`lights::cast`, from dusk to dawn), but never a light's own building. Style only.
-fn draw_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, lit: &[(lights::Light, Vec2, f32)], objects: &[&Decoration], locations: &[(usize, &Location)]) {
-    let Some(art) = art else { return };
-    let (Some(texture), Some(soft)) = (art.shadow_texture(), art.shadow_soft_texture()) else { return };
+/// The darkness factor of a caster standing on `foot` in this pass, for the cast shadows (`draw_shadows`, `draw_figure_shadows`):
+/// what the fog shows on its cell (the glows' rule), nothing off the map, half on water.
+fn foot_shade<'a>(game: &'a Game, cam: &'a Camera) -> impl Fn(Vec2) -> f32 + 'a {
     let map = &game.world.map;
     let fog = &game.fog;
-    // The darkness factor of a caster standing on `foot`: what the fog shows on its cell (the glows'
-    // rule), nothing off the map, half on water.
-    let shade = |foot: Vec2| -> f32 {
+    move |foot: Vec2| -> f32 {
         // The pass's pixels back to the world: `to_screen` is world·scale − origin + view.
         let world = (foot + cam.origin - vec2(cam.view.x, cam.view.y)) / cam.scale;
         let t = cam.grid.tile_at((world.x, world.y));
@@ -4190,7 +4188,13 @@ fn draw_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, lit: &[(lights::
         let seen = if !fog.enabled || fog.w <= 0 || fog.h <= 0 { 1.0 } else { 1.0 - minimap::shown_darkness(fog, t) };
         let water = if razdor::rules::map::is_water(map.surface(t)) { 0.5 } else { 1.0 };
         seen * water
-    };
+    }
+}
+
+fn draw_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, lit: &[(lights::Light, Vec2, f32)], objects: &[&Decoration], locations: &[(usize, &Location)]) {
+    let Some(art) = art else { return };
+    let (Some(texture), Some(soft)) = (art.shadow_texture(), art.shadow_soft_texture()) else { return };
+    let shade = foot_shade(game, cam);
     // The point lights' casts of a caster standing on `foot`, but never a light's own building (`owner`).
     let casts_at = |foot: Vec2, owner: Option<usize>| -> Vec<daylight::Cast> {
         let mut out = Vec::new();
@@ -4207,6 +4211,130 @@ fn draw_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, lit: &[(lights::
     let (sharp, soft_batch) = cast_shadows(art, cam, objects, locations, &shade, &casts_at, card_layering(cam));
     sharp.draw(&texture);
     soft_batch.draw(&soft);
+}
+
+/// A map figure that may cast a shadow this frame (`figure_casts_list`): its sheet's stem, its feet at world `pos`, the
+/// heading's next point and the frame it shows (the walk or idle frame, as `draw_army` and `draw_hero` pick it).
+struct FigureCast {
+    stem: &'static str,
+    pos: (f32, f32),
+    next: Option<(f32, f32)>,
+    frame: u32,
+}
+
+/// The casts one figure lays this frame: the sun's and the moon's of `sun` (`daylight::frame_casts`), the ones with some
+/// alpha at this hour, in that order. None (the painted or the lights-off modes) lays none.
+fn figure_casts(sun: Option<daylight::Casts>) -> Vec<daylight::Cast> {
+    let Some(c) = sun else { return Vec::new() };
+    [c.sun, c.moon].into_iter().filter(|c| c.alpha > 0.0).collect()
+}
+
+/// The figures on the ground that may cast this frame: the armies out of the buildings (`draw_army`'s frame and heading),
+/// the hero on land out of his building and not in the eyes view (`draw_hero`'s). Ships cast nothing: they are not figures
+/// on the ground.
+fn figure_casts_list(game: &Game, cam: &Camera) -> Vec<FigureCast> {
+    let mut out = Vec::new();
+    for a in &game.world.armies {
+        if game.army_hidden(a) || a.sails() {
+            continue;
+        }
+        let Some(stem) = FIGURES.get(a.figure as usize).copied() else { continue };
+        let next = a.path.first().map(|&t| game.world.map.center(t));
+        let frame = idle_sprite_frame(game, a, clock_ms()).or_else(|| game.army_walk_frame(a)).unwrap_or(0);
+        out.push(FigureCast { stem, pos: game.army_display_pos(a), next, frame });
+    }
+    if !eyes_cam(cam) && !game.hero_hidden() && !game.aboard() {
+        let walking = game.display_heading();
+        out.push(FigureCast { stem: figure_stem(game.hero_figure()), pos: game.display_pos(), next: walking.or_else(|| game.standing_heading()), frame: hero_frame(walking) });
+    }
+    out
+}
+
+/// The figures' cast shadows (Sun mode, `daylight::frame_casts`): every figure on the ground in view casts its current frame's
+/// silhouette from its feet by the frame's casts (`figure_casts`), so armies and the hero move with the sun as the statics do.
+/// One picture a figure (no cards), its strength the statics' (the coverage times the layer's alpha, `bake_layer`), its
+/// penumbra the statics' split (`cast_shadows`), the fog and the water as `foot_shade`. Drawn in the ground pass with the
+/// statics' sun shadows, so the sprites stand over it. A figure in a building or in the fog casts nothing.
+fn draw_figure_shadows(game: &Game, art: Option<&DtArt>, cam: &Camera, sun: daylight::Casts) {
+    let Some(art) = art else { return };
+    let casts = figure_casts(Some(sun));
+    if casts.is_empty() {
+        return;
+    }
+    let shade = foot_shade(game, cam);
+    let view = screen_view(cam);
+    let zoom = cam.scale / PX;
+    // One batch pair a sheet: the sharp silhouettes and the soft penumbra, each drawn with its sheet's texture.
+    let mut groups: Vec<(&'static str, shadow::Batch, shadow::Batch, FigureShadow)> = Vec::new();
+    for f in figure_casts_list(game, cam) {
+        let Some(rect) = figure_rect(Some(art), f.stem, f.pos, cam, Stand::Feet) else { continue };
+        if !overlaps(rect, view, 0.0) {
+            continue;
+        }
+        let Some(fs) = art.figure_shadow(f.stem) else { continue };
+        let k = shade(cam.to_screen(f.pos));
+        if k <= 0.0 {
+            continue;
+        }
+        // The sprite's origin and feet as `figure_rect` and `draw_figure` place them: the feet at 0.8 of the frame.
+        let feet = cam.to_screen(f.pos);
+        let origin = vec2(rect.x, rect.y);
+        let foot_row = (feet.y - origin.y) / zoom;
+        let heading = cam.facing(f.next.map_or(Vec2::ZERO, |n| cam.to_screen(n) - feet));
+        let n = fs.frame;
+        let base = vec2(f.frame.min(7) as f32 * n, facing_row(heading) * n);
+        let atlas = vec2(fs.sharp.width(), fs.sharp.height());
+        let boxed = Rect::new(0.0, 0.0, n, n);
+        let at = match groups.iter().position(|g| g.0 == f.stem) {
+            Some(i) => i,
+            None => {
+                groups.push((f.stem, shadow::Batch::default(), shadow::Batch::default(), fs.clone()));
+                groups.len() - 1
+            }
+        };
+        let group = &mut groups[at];
+        for c in &casts {
+            let p = shadow::Projection { origin, zoom, foot_row, dir: vec2(c.dir[0], c.dir[1]), len: c.len };
+            // The baked layer's two factors: the coverage (the cast's alpha) and the layer's colour alpha (`draw_sun_map`).
+            if let Some((vertices, indices)) = p.picture_mesh_ramp_box(n, boxed, base, atlas, |t| shadow::strength_colour(c.alpha * c.alpha * k * (1.0 - t))) {
+                group.1.push(&vertices, &indices);
+            }
+            if let Some((vertices, indices)) = p.picture_mesh_ramp_box(n, boxed, base, atlas, |t| shadow::strength_colour(c.alpha * c.alpha * k * t)) {
+                group.2.push(&vertices, &indices);
+            }
+        }
+    }
+    for (_, sharp, soft, fs) in groups {
+        sharp.draw(&fs.sharp);
+        soft.draw(&fs.soft);
+    }
+}
+
+#[cfg(test)]
+mod figure_shadow_tests {
+    use super::*;
+
+    #[test]
+    fn a_figure_casts_the_frames_sun_and_moon_as_the_statics_do() {
+        let c = daylight::casts_stepped(12.0);
+        let casts = figure_casts(Some(c));
+        assert_eq!(casts.first(), Some(&c.sun), "the sun's cast, the statics' own numbers");
+        assert_eq!(casts.len(), 1, "no moon by day");
+        let night = daylight::casts_stepped(2.0);
+        assert_eq!(figure_casts(Some(night)), vec![night.moon], "the moon at night, no sun");
+    }
+
+    #[test]
+    fn a_figure_cast_follows_the_hour_as_the_statics_do() {
+        let dir = |h: f32| figure_casts(Some(daylight::casts_stepped(h)))[0].dir;
+        assert_eq!(dir(10.0), dir(10.9), "the statics step the geometry once an hour: so do the figures");
+        assert_ne!(dir(10.0), dir(11.0), "the next hour turns the shadow");
+    }
+
+    #[test]
+    fn no_cast_without_the_sun_shadows() {
+        assert!(figure_casts(None).is_empty(), "painted or the lights off: no figure casts");
+    }
 }
 
 #[cfg(test)]
@@ -5003,7 +5131,13 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     }
     // The sun's and the moon's shadows are the baked map (`prepare_shadow_map`): one quad each, whatever the casters.
     if let Some(c) = sun {
-        frame_probe::time(Stage::SunShadow, || ground(cam, || draw_sun_map(cam, c)));
+        // The figures' shadows lie with the statics' (Sun mode only: `figure_casts` is empty otherwise).
+        frame_probe::time(Stage::SunShadow, || {
+            ground(cam, || {
+                draw_sun_map(cam, c);
+                draw_figure_shadows(game, art, cam, c);
+            })
+        });
         if waits {
             gpu_wait(Stage::GpuSunShadow);
         }

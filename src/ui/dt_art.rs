@@ -70,6 +70,42 @@ pub struct Frame {
     pub full: Vec2,
 }
 
+/// A map figure's shadow sheet ([`DtArt::figure_shadow`]): the silhouettes of its frames (`sharp`) and their penumbra
+/// (`soft`), laid out as the figure sheet is (frame `(col, row)` at texel `(col·frame, row·frame)`), and the frame's size.
+#[derive(Clone)]
+pub struct FigureShadow {
+    pub sharp: Texture2D,
+    pub soft: Texture2D,
+    pub frame: f32,
+}
+
+/// The shadow sheets of a figure's 64 frames of `n` pixels square, in the figure sheet's layout (`sharp`, `soft`): each
+/// frame's silhouette (`shadow::silhouette`) and its blur ([`SOFT_PASSES`]), made per frame so the blur never reaches a
+/// neighbouring frame. White colour, the alpha is the shadow.
+fn figure_shadow_sheets(n: usize, frames: &[Image]) -> (Image, Image) {
+    let side = n * 8;
+    let mut sharp = [255u8, 255, 255, 0].repeat(side * side);
+    let mut soft = sharp.clone();
+    for (i, f) in frames.iter().enumerate() {
+        let mask = super::shadow::silhouette(f);
+        let mut cell = [255u8, 255, 255, 0].repeat(n * n);
+        for (p, m) in cell.chunks_exact_mut(4).zip(&mask) {
+            p[3] = *m;
+        }
+        super::shadow::blur_alpha(&mut cell, n, n, SOFT_PASSES);
+        let (ox, oy) = ((i % 8) * n, (i / 8) * n);
+        for row in 0..n {
+            for col in 0..n {
+                let at = ((oy + row) * side + ox + col) * 4 + 3;
+                sharp[at] = mask[row * n + col];
+                soft[at] = cell[(row * n + col) * 4 + 3];
+            }
+        }
+    }
+    let side = side as u32;
+    (Image { width: side, height: side, rgba: sharp }, Image { width: side, height: side, rgba: soft })
+}
+
 /// A texture [`DtArt::warm`] makes ahead, once its picture is decoded.
 #[derive(Clone, Copy)]
 enum Warm {
@@ -225,6 +261,8 @@ pub struct DtArt {
     textures: RefCell<HashMap<Key, Option<Texture2D>>>,
     /// Map figures (`Graphics/Units/*.ugs`) as 8×8 sheets of 64×64 frames, by file stem.
     figures_sheets: RefCell<HashMap<String, Option<Texture2D>>>,
+    /// The shadows of those figure sheets, in the same layout ([`FigureShadow`]), by file stem.
+    figure_shadows: RefCell<HashMap<String, Option<FigureShadow>>>,
     /// Textures [`DtArt::warm`] makes ahead, in order, with the picture each waits for.
     warm: RefCell<VecDeque<(PathBuf, Warm)>>,
     /// The depth model's workers, once they are started ([`DtArt::depth_tick`]).
@@ -376,6 +414,7 @@ impl DtArt {
             terrain_images: OnceCell::new(),
             textures: RefCell::new(HashMap::new()),
             figures_sheets: RefCell::new(HashMap::new()),
+            figure_shadows: RefCell::new(HashMap::new()),
             warm: RefCell::new(VecDeque::new()),
             depth: RefCell::new(None),
             shadows: OnceCell::new(),
@@ -661,24 +700,43 @@ impl DtArt {
         if let Some(t) = self.figures_sheets.borrow().get(stem) {
             return t.clone();
         }
-        let frames = or_log("map figures", self.install.graphic(&format!("Graphics/Units/{stem}.ugs")));
-        let n = frames.first().map_or(0, |f| f.width as usize);
-        let t = (frames.len() == 64 && n > 0 && frames.iter().all(|f| f.width as usize == n && f.height as usize == n))
-            .then(|| {
-                let side = n * 8;
-                let mut rgba = vec![0u8; side * side * 4];
-                for (i, f) in frames.iter().enumerate() {
-                    let (ox, oy) = ((i % 8) * n, (i / 8) * n);
-                    for row in 0..n {
-                        let dst = ((oy + row) * side + ox) * 4;
-                        rgba[dst..dst + n * 4].copy_from_slice(&f.rgba[row * n * 4..(row + 1) * n * 4]);
-                    }
+        let t = self.figure_frames(stem).and_then(|(n, frames)| {
+            let side = n * 8;
+            let mut rgba = vec![0u8; side * side * 4];
+            for (i, f) in frames.iter().enumerate() {
+                let (ox, oy) = ((i % 8) * n, (i / 8) * n);
+                for row in 0..n {
+                    let dst = ((oy + row) * side + ox) * 4;
+                    rgba[dst..dst + n * 4].copy_from_slice(&f.rgba[row * n * 4..(row + 1) * n * 4]);
                 }
-                sprite_texture(&Image { width: side as u32, height: side as u32, rgba })
-            })
-            .flatten();
+            }
+            sprite_texture(&Image { width: side as u32, height: side as u32, rgba })
+        });
         self.figures_sheets.borrow_mut().insert(stem.to_string(), t.clone());
         t
+    }
+
+    /// The 64 frames of a map figure (`Graphics/Units/<stem>.ugs`) and their square size, for [`DtArt::figure_sheet`] and
+    /// [`DtArt::figure_shadow`]. `None` when the file is missing or its frames are not 64 squares of one size.
+    fn figure_frames(&self, stem: &str) -> Option<(usize, Vec<Image>)> {
+        let frames = or_log("map figures", self.install.graphic(&format!("Graphics/Units/{stem}.ugs")));
+        let n = frames.first().map_or(0, |f| f.width as usize);
+        (frames.len() == 64 && n > 0 && frames.iter().all(|f| f.width as usize == n && f.height as usize == n)).then_some((n, frames))
+    }
+
+    /// The shadow of a map figure sheet (`shadow::silhouette` of each frame, its penumbra the frame's own blur, in the sheet's
+    /// layout: frame `(col, row)` at texel `(col·n, row·n)`), for the figures' cast shadows (`world_view`'s figure pass). Built
+    /// on first use, per file stem; `None` without the figure's sheet.
+    pub fn figure_shadow(&self, stem: &str) -> Option<FigureShadow> {
+        if let Some(s) = self.figure_shadows.borrow().get(stem) {
+            return s.clone();
+        }
+        let s = self.figure_frames(stem).and_then(|(n, frames)| {
+            let (sharp, soft) = figure_shadow_sheets(n, &frames);
+            Some(FigureShadow { sharp: texture(&sharp)?, soft: texture(&soft)?, frame: n as f32 })
+        });
+        self.figure_shadows.borrow_mut().insert(stem.to_string(), s.clone());
+        s
     }
 
     /// Sprite of a building by picture type and variant (`.DTm` building bytes 5 and 4).
@@ -944,5 +1002,53 @@ mod cut_tests {
         assert_eq!(at(0, 0), (255, 200), "the window: building and lit");
         assert_eq!(at(1, 0), (255, 0), "the stone: building, dark");
         assert_eq!(at(4, 0), (0, 0), "past the building's right edge: neither");
+    }
+}
+
+#[cfg(test)]
+mod figure_shadow_tests {
+    use super::*;
+
+    /// Eight frames of `n` px square; frame 0 has one opaque column on its right edge, the rest are clear.
+    fn frames(n: usize) -> Vec<Image> {
+        (0..64)
+            .map(|i| {
+                let mut rgba = vec![0u8; n * n * 4];
+                if i == 0 {
+                    for y in 2..n - 2 {
+                        rgba[(y * n + n - 1) * 4 + 3] = 255;
+                    }
+                }
+                Image { width: n as u32, height: n as u32, rgba }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_frame_shadow_stays_in_its_own_cell() {
+        let n = 8;
+        let (sharp, soft) = figure_shadow_sheets(n, &frames(n));
+        let side = n * 8;
+        assert_eq!((sharp.width as usize, sharp.height as usize), (side, side), "the figure sheet's layout");
+        // Frame 0's column is the cell's right edge: its silhouette is there, and the blur does not reach frame 1's cell.
+        let alpha = |img: &Image, x: usize, y: usize| img.rgba[(y * side + x) * 4 + 3];
+        assert!(alpha(&sharp, n - 1, n / 2) > 0, "the silhouette is in its frame");
+        assert!(alpha(&soft, n - 1, n / 2) > 0, "its penumbra too");
+        for y in 0..side {
+            for x in n..2 * n {
+                assert_eq!((alpha(&sharp, x, y), alpha(&soft, x, y)), (0, 0), "frame 1's cell at ({x}, {y}) stays clear");
+            }
+        }
+    }
+
+    #[test]
+    fn the_penumbra_is_softer_than_the_silhouette() {
+        let n = 8;
+        let (sharp, soft) = figure_shadow_sheets(n, &frames(n));
+        let side = n * 8;
+        let alpha = |img: &Image, x: usize, y: usize| img.rgba[(y * side + x) * 4 + 3];
+        // Its peak is the sharp silhouette's peak or lower, and it reaches a little further out.
+        assert!(alpha(&soft, n - 1, n / 2) <= alpha(&sharp, n - 1, n / 2).max(alpha(&sharp, n - 2, n / 2)) + 1);
+        assert!(alpha(&soft, n - 2, n / 2) > 0 || alpha(&soft, n - 1, 1) > 0, "the soft copy spreads past the silhouette's own pixels");
     }
 }
