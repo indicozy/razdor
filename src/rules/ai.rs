@@ -825,6 +825,7 @@ pub struct SimResult {
 
 /// One side of a battle between AI sides: its units (their spells in their slots) and its
 /// building defence.
+#[derive(Debug)]
 pub struct Side {
     pub units: Vec<Unit>,
     pub defence: i32,
@@ -1324,15 +1325,16 @@ impl Game {
         v.min(a.gold).max(0)
     }
 
-    /// A fresh score of army `i` against `p` from a simulated battle ([`army_score`]).
-    pub fn army_score_of(&self, i: usize, p: Party) -> i32 {
+    /// A fresh score of army `i` against `p` from a simulated battle ([`army_score`]). `side` is
+    /// army `i`'s side in battle (`army_side(i, true)`), counted by the caller: the callers
+    /// score several parties with the one side.
+    fn army_score_of(&self, i: usize, p: Party, side: &Side) -> i32 {
         let c = &self.content;
-        let (side, _) = self.army_side(i, true);
         let (theirs, speed_c) = match p {
             Party::Hero => (self.hero_side(), self.hero_speed()),
             Party::Army(j) => (self.army_side(j, false).0, self.world.armies[j].speed.max(1)),
         };
-        let s = self.sims.borrow_mut().get(c, &side, &theirs);
+        let s = self.sims.borrow_mut().get(c, side, &theirs);
         let a = &self.world.armies[i];
         let pr = Priorities::of(&c.options, a.ai.model);
         let o = &c.options;
@@ -1344,9 +1346,10 @@ impl Game {
         self.world.armies[i].mind.scores.get(&key).copied().unwrap_or(0)
     }
 
-    /// Scores army `i` against `p` afresh and marks the pair clean.
-    fn rescore_pair(&mut self, i: usize, p: Party) {
-        let v = self.army_score_of(i, p);
+    /// Scores army `i` against `p` afresh and marks the pair clean, with army `i`'s side in
+    /// battle counted by the caller ([`Game::army_score_of`]).
+    fn rescore_pair(&mut self, i: usize, p: Party, side: &Side) {
+        let v = self.army_score_of(i, p, side);
         let key = self.key_of(p);
         let m = &mut self.world.armies[i].mind;
         m.scores.insert(key, v);
@@ -1480,7 +1483,7 @@ impl Game {
             for &p in parties {
                 if self.guard(p) && self.standing_in(p) == Some(l) {
                     let key = self.key_of(p);
-                    if self.cached(i, key) < 0 || self.army_score_of(i, p) < 0 {
+                    if self.cached(i, key) < 0 || self.army_score_of(i, p, side) < 0 {
                         attack = FORBIDDEN;
                     }
                 }
@@ -1667,7 +1670,8 @@ impl Game {
                     continue;
                 }
                 if map.grid.octile(a.tile(map), b.tile(map)) <= target_range(&self.content.options, a.ai.style) {
-                    self.rescore_pair(k, Party::Army(j));
+                    let side = self.army_side(k, true).0;
+                    self.rescore_pair(k, Party::Army(j), &side);
                 }
             }
         }
@@ -2114,11 +2118,18 @@ impl Game {
         };
         let range = target_range(o, style);
         frame_probe::time(Stage::AiRescore, || {
+            // Army `i`'s side in battle, counted at its first rescore: the rescores only write
+            // the army's scores and clean pairs, so the side is the same for every pair.
+            let mut side: Option<Side> = None;
             for &(p, d) in dist {
                 let key = self.key_of(p);
                 if 0 < d && d <= range && !self.world.armies[i].mind.clean.contains(&key) {
                     frame_probe::count(Counter::Rescores);
-                    self.rescore_pair(i, p);
+                    let side = side.get_or_insert_with(|| self.army_side(i, true).0);
+                    // Checked in tests: the reused side is the one a fresh build gives.
+                    #[cfg(test)]
+                    assert_eq!(format!("{side:?}"), format!("{:?}", self.army_side(i, true).0), "army {i}: the side counted once is not the fresh one");
+                    self.rescore_pair(i, p, side);
                 }
             }
         });
