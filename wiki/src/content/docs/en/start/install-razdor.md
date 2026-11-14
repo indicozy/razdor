@@ -19,6 +19,12 @@ Razdor programs are published in the releases on [GitHub](https://github.com/ind
 If the message "WGL_ARB_pixel_format is required" appears, the machine has no OpenGL 2 driver. This happens in a Remote Desktop (RDP) session and in virtual machines. Razdor shows its own advice on what to do.
 :::
 
+### Windows 7 and 8
+
+There is a separate build for Windows 7 and 8. Download `razdor-<version>-windows7.zip` from the release, unpack it next to `DiscordTimes.exe` and run `Razdor-win7.exe`. Windows 10 and later use the normal `Razdor-<version>.exe`, as above.
+
+The Windows 7 build has no gamepad support: the mouse and keyboard work as usual. The archive holds `curl.exe` for downloads; it needs no extra Windows update.
+
 ## Linux
 
 1. Download `razdor-<version>-linux` from the release.

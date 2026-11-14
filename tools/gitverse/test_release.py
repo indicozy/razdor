@@ -73,6 +73,16 @@ class PlanTests(ReleaseCase):
         self.assertTrue(any(f"razdor-{V}.ipa" in w and "not mirrored" in w for w in p["warnings"]))
         self.assertNotIn(f"razdor-{V}.ipa", p["direct"])
 
+    def test_windows7_exe_is_skipped_and_its_zip_is_uploaded_as_it_is(self):
+        for name, data in [("Razdor-win7.exe", b"win7 program\n"), (f"razdor-{V}-windows7.zip", b"win7 zip\n")]:
+            with open(os.path.join(self.dir, name), "wb") as f:
+                f.write(data)
+            self.paths.append(os.path.join(self.dir, name))
+        p = self.full_plan()
+        self.assertIn("Razdor-win7.exe", {n for n, _ in p["skipped"]})
+        self.assertEqual(p["direct"][f"razdor-{V}-windows7.zip"], os.path.join(self.dir, f"razdor-{V}-windows7.zip"))
+        self.assertNotIn("Razdor-win7.exe", p["direct"])
+
     def test_refused_name_stops(self):
         extra = os.path.join(self.dir, "Setup.exe")
         with open(extra, "wb") as f:

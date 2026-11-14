@@ -1,0 +1,45 @@
+diff --color -ru a/src/backend/win_cid/file_dialog/com.rs b/src/backend/win_cid/file_dialog/com.rs
+--- a/src/backend/win_cid/file_dialog/com.rs	2006-07-24 07:21:28.000000000 +0600
++++ b/src/backend/win_cid/file_dialog/com.rs	2026-11-13 00:31:25.195753168 +0500
+@@ -101,7 +101,7 @@
+ 
+             let dname = dname.assume_init();
+             let fname = read_to_string(dname);
+-            windows_sys::Win32::System::Com::CoTaskMemFree(dname.cast());
++            co_task_mem_free(dname.cast());
+             fname
+         };
+ 
+@@ -109,6 +109,32 @@
+     }
+ }
+ 
++// Razdor's Windows 7 build (a local patch, not upstream): CoTaskMemFree is looked up in ole32.dll when
++// it is used. windows-sys imports it from combase.dll, which Windows 7 does not have (Windows 8 and
++// later), and a link-time name would resolve to that import.
++#[link(name = "kernel32")]
++extern "system" {
++    fn LoadLibraryA(name: *const std::ffi::c_char) -> *mut std::ffi::c_void;
++    fn GetProcAddress(module: *mut std::ffi::c_void, name: *const std::ffi::c_char) -> *mut std::ffi::c_void;
++}
++
++unsafe fn co_task_mem_free(pv: *const std::ffi::c_void) {
++    type Free = unsafe extern "system" fn(*const std::ffi::c_void);
++    static FREE: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
++    let addr = *FREE.get_or_init(|| {
++        let module = LoadLibraryA(b"ole32.dll\0".as_ptr() as *const std::ffi::c_char);
++        if module.is_null() {
++            return None;
++        }
++        let proc = GetProcAddress(module, b"CoTaskMemFree\0".as_ptr() as *const std::ffi::c_char);
++        (!proc.is_null()).then_some(proc as usize)
++    });
++    if let Some(addr) = addr {
++        let free: Free = std::mem::transmute(addr);
++        free(pv);
++    }
++}
++
+ impl Drop for IShellItem {
+     fn drop(&mut self) {
+         drop_impl(self.0.cast());

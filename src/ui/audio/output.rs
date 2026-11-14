@@ -19,9 +19,17 @@ mod imp {
     use winapi::shared::guiddef::IID;
     use winapi::shared::ntdef::LPWSTR;
     use winapi::shared::winerror::HRESULT;
-    use winapi::um::combaseapi::{CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL};
+    use winapi::um::combaseapi::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL};
     use winapi::um::mmdeviceapi::{eConsole, eRender, IMMDevice, IMMDeviceEnumerator, CLSID_MMDeviceEnumerator};
     use winapi::um::objbase::COINIT_MULTITHREADED;
+
+    // winapi imports CoTaskMemFree from combase.dll, which Windows 7 does not have (it came with
+    // Windows 8). ole32.dll exports the same function on every Windows, Windows 7 included, so it is
+    // declared here against ole32 (the other Co* functions above already come from ole32).
+    #[link(name = "ole32")]
+    unsafe extern "system" {
+        fn CoTaskMemFree(pv: *mut std::ffi::c_void);
+    }
 
     /// How often the watcher reads the default output.
     const WATCH_EVERY: Duration = Duration::from_secs(2);

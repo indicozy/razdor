@@ -238,6 +238,11 @@ fn installer_report() -> Option<Outcome> {
 /// Linux and Windows builds are x86_64 only). Android's APK is one file for every ABI, iOS's
 /// IPA is installed by AltStore or Sideloadly (`opens_page`).
 pub fn asset_name() -> Option<&'static str> {
+    // The Windows 7 build (x86_64-win7-windows-gnu, target_vendor "win7", scripts/dist-win7.sh) gets
+    // its own file: the normal Razdor.exe does not start on Windows 7. Razdor's own addition.
+    if cfg!(all(windows, target_vendor = "win7")) {
+        return Some("Razdor-win7.exe");
+    }
     asset_for(std::env::consts::OS, std::env::consts::ARCH)
 }
 
@@ -354,11 +359,25 @@ fn part_path(program: &Path, asset: &str) -> PathBuf {
     program.with_file_name(format!(".{asset}.update"))
 }
 
+/// The `curl` program: the `curl` (`curl.exe` on Windows) next to Razdor's own program when there is
+/// one, else `curl` from the PATH. Razdor's Windows 7 package ships curl beside Razdor.exe, because
+/// Windows 7 has no curl of its own (a Razdor addition, not the original's).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn curl_program() -> PathBuf {
+    let name = if cfg!(windows) { "curl.exe" } else { "curl" };
+    if let Some(beside) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join(name))) {
+        if beside.is_file() {
+            return beside;
+        }
+    }
+    PathBuf::from(name)
+}
+
 /// `curl` with its window hidden on Windows (Razdor has no console there). It does not fail on an
 /// HTTP error status by itself (see [`curl`]).
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn curl_base() -> Command {
-    let mut c = Command::new("curl");
+    let mut c = Command::new(curl_program());
     // The tests' range server is plain HTTP on 127.0.0.1; the app asks https only.
     let proto = if cfg!(test) { "=http,https" } else { "=https" };
     c.args(["-sSL", "--proto", proto, "-A", concat!("razdor/", env!("CARGO_PKG_VERSION"))]);

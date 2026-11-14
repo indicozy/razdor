@@ -14,6 +14,8 @@ What it does with the release files (the names the GitHub pipeline gives them):
     razdor-translate-macos);
   - passes the rest as they are (razdor-X.Y.Z.apk, razdor-ads-X.Y.Z.zip, ...); the iOS .ipa is GitHub-only;
   - skips the unversioned copies (Razdor.exe, razdor, razdor.apk, ...): the feed names them;
+  - skips Razdor-win7.exe (the Windows 7 program): GitVerse refuses .exe, and the Windows 7 zip
+    (razdor-X.Y.Z-windows7.zip, passed as it is) carries it;
   - writes SHA256SUMS.txt (the uploaded files, and the programs inside the zips and under their
     versioned and old names, which the updater looks up);
   - creates the release (refused when it exists, unless --replace), uploads with retries, verifies
@@ -64,6 +66,8 @@ PROGRAMS = {
 }
 # Files uploaded as they are: versioned name -> the old fixed name the feed also lists.
 DIRECT = {"razdor-{v}.apk": "razdor.apk"}
+# The Windows 7 program: a loose .exe GitVerse refuses; its zip, razdor-{v}-windows7.zip, is uploaded as it is.
+WIN7_PROGRAM = "Razdor-win7.exe"
 # GitHub-only files: GitVerse refuses .ipa (measured 2026-11-13), so they are left out with a warning.
 GITHUB_ONLY = {"razdor-{v}.ipa": "razdor.ipa"}
 
@@ -119,6 +123,8 @@ def plan(paths, v):
             warnings.append(f"{name} is not mirrored: GitVerse refuses it (the GitHub release has it)")
         elif name in SUMS_NAMES:
             skipped.append((name, "made here"))
+        elif name == WIN7_PROGRAM:
+            skipped.append((name, "GitVerse refuses .exe: the Windows 7 zip carries it"))
         elif name in dup_names:
             skipped.append((name, "an unversioned copy: the feed names it, the versioned file is uploaded"))
         else:
