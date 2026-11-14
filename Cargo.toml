@@ -98,8 +98,8 @@ opt-level = 3
 # Razdor's stack (branch razdor-stack in each fork): upstream master plus our batching fix
 # (not-fl3/macroquad#1082) and picked upstream PRs; miniquad without 413218d
 # (not-fl3/miniquad#704). See the forks' branch history for the list.
-macroquad = { git = "https://github.com/indicozy/macroquad", rev = "351b2b3e84f5dbbb3f6bb312afb8587abe6f5f7e" }
-miniquad = { git = "https://github.com/indicozy/miniquad", rev = "3c37a7bb6abb7302df41f60001066fde99806bdb" }
+macroquad = { git = "https://github.com/indicozy/macroquad", rev = "17fd325b0a68f848ae9d96406e91016a4aca1dcd" }
+miniquad = { git = "https://github.com/indicozy/miniquad", rev = "075b3dd51e55715e1284e78ab60b3c2bc0513e0e" }
 
 # The map translator (src/bin/razdor-translate): its own window, built on Razdor's ui module.
 # Its unit tests are the library's (`razdor::translate`); the ui module's run with the game.

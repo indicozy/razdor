@@ -589,7 +589,9 @@ pub fn start_run(app: &mut App, choice: Choice, map: Option<&str>, profile: bool
     keep_awake(true);
     razdor::diag::set_forced_profile(profile);
     let profiled = if profile { " profile" } else { "" };
-    log_line(&format!("RazdorBench START choice={} cells={} map={}{profiled}", if choice == Choice::Mine { "mine" } else { "all" }, cells.len(), quoted(&map)));
+    let switches = razdor::lab::current().describe();
+    let switches = if switches.is_empty() { String::new() } else { format!(" lab={switches}") };
+    log_line(&format!("RazdorBench START choice={} cells={} map={}{profiled}{switches}", if choice == Choice::Mine { "mine" } else { "all" }, cells.len(), quoted(&map)));
     let run = Run {
         choice,
         cells,
@@ -623,6 +625,8 @@ fn restore(app: &mut App, saved: Option<Saved>) {
     super::world_view::set_bench_fit(false);
     keep_awake(false);
     razdor::diag::set_forced_profile(false);
+    // The lab's switches go back to the environment's (a run's trigger file set them for this run only).
+    razdor::lab::set(razdor::lab::Flags::from_env());
     // A cell cut short (Esc, Cancel, a quit) keeps no samples: its probe cell ends here (a no-op after a whole run).
     let _ = razdor::frame_probe::cell_end();
     if let Some(s) = saved {

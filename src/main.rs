@@ -69,6 +69,8 @@ fn conf() -> Conf {
     razdor::platform::set_android_files_dir(ui::android::files_dir());
     // The log of this start (`razdor.log`, see `razdor::diag`), before anything can fail.
     razdor::diag::init();
+    // The performance lab's switches from the environment (`razdor::lab`); a bench run's trigger file sets its own.
+    razdor::lab::set(razdor::lab::Flags::from_env());
     // `RAZDOR_DT_DIR` and the other settings may come from a `.env` file.
     razdor::dt::install::load_dotenv();
     single_instance();
@@ -351,6 +353,11 @@ async fn main() {
         ui::widgets::sync_keyboard();
         // The map frame's last GPU wait (profiling, Android): the frame's draws, cursor included.
         ui::gpu_probe::gpu_wait_ui();
+        // The lab's GPU finish and swap interval (off by default; see `razdor::lab`).
+        ui::gpu_probe::finish_before_swap();
+        if let Some(interval) = razdor::lab::take_swap() {
+            macroquad::miniquad::window::set_swap_interval(interval);
+        }
         next_frame().await;
         pacer.pace(ui::frame_cap::current(), snapshot.is_none() && !ui::trailer::active());
         // The performance test's frame: its work and its whole time (`ui::bench`, a no-op when no test runs).
@@ -362,6 +369,7 @@ async fn main() {
             // The whole frame: the game's work, then drawing and the GPU (textures and font
             // atlases go up there), vsync included (~16 ms). Over the threshold is a hitch.
             let total = started.elapsed();
+            ui::gpu_probe::take_submit(razdor::frame_probe::Stage::Submit);
             razdor::frame_probe::end_frame(work, total);
             if total.as_millis() > razdor::diag::slow_frame_ms() || opened > 0 {
                 opened = opened.saturating_sub(1);

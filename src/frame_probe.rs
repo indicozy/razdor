@@ -56,7 +56,7 @@ use std::time::{Duration, Instant};
 /// tick, `world` the map with `terrain` inside it, `rebuilds` the texture rebuilds, `draws` the
 /// draw calls estimated for the frame and `verts` its vertices ([`draw`]), and the last columns the
 /// GPU time of each GPU stage (`GPU_STAGES`, empty when not timed, see `ui::gpu_probe`).
-pub const CSV_HEADER: &str = "frame,kind,work_ms,total_ms,tick,terrain,world,fog,minimap,route,look,armies,script,day,snap,autosave,session,ai_move,ai_plan,rebuilds,backdrop,battle_window,effect,gpu_backdrop,gpu_window,view,draws,verts,water,mist,light,sun_shadow,weather,ground_cache,freeze,gpu_backdrop_ms,gpu_window_ms,gpu_sky_ms,gpu_terrain_ms,gpu_marks_ms,gpu_sprites_ms,gpu_fog_ms,gpu_ui_ms,gpu_water_ms,gpu_mist_ms,gpu_light_ms,gpu_sun_shadow_ms,gpu_weather_ms,gpu_ground_cache_ms,gpu_freeze_ms,gpu_minimap_ms,ai_scan_ms,ai_rescore_ms,ai_flood_ms,ai_flood_wait_ms,ai_settle_ms,ai_rules_ms,plans,rescores,floods,fights,fight_hits";
+pub const CSV_HEADER: &str = "frame,kind,work_ms,total_ms,tick,terrain,world,fog,minimap,route,look,armies,script,day,snap,autosave,session,ai_move,ai_plan,rebuilds,backdrop,battle_window,effect,gpu_backdrop,gpu_window,view,draws,verts,water,mist,light,sun_shadow,weather,ground_cache,freeze,gpu_backdrop_ms,gpu_window_ms,gpu_sky_ms,gpu_terrain_ms,gpu_marks_ms,gpu_sprites_ms,gpu_fog_ms,gpu_ui_ms,gpu_water_ms,gpu_mist_ms,gpu_light_ms,gpu_sun_shadow_ms,gpu_weather_ms,gpu_ground_cache_ms,gpu_freeze_ms,gpu_minimap_ms,ai_scan_ms,ai_rescore_ms,ai_flood_ms,ai_flood_wait_ms,ai_settle_ms,ai_rules_ms,plans,rescores,floods,fights,fight_hits,flush_ms,submit_ms,finish_ms,replay_ms,gl_draws,gl_bytes,replayed";
 
 /// The GPU stages timed per frame, in the CSV's column order (`gpu_<name>_ms`): each is the GPU's
 /// time between the marker before it and its own marker (`ui::gpu_probe::gpu_wait`).
@@ -203,10 +203,22 @@ pub enum Stage {
     GpuGroundCache,
     GpuFreeze,
     GpuMinimap,
+    /// The batch submissions made up to the end of the world view (macroquad's `draw`: the GL calls and the
+    /// uploads of the batch so far, counted by macroquad; see `ui::gpu_probe::take_submit`). Nested in the stages
+    /// they ran in: the world's own time includes it.
+    Flush,
+    /// The batch submissions after the world view, to the frame's end (the last draws and the swap's submit).
+    Submit,
+    /// The lab's GPU finish before the swap (`RAZDOR_GPU_FINISH`, `ui::gpu_probe::finish_before_swap`): the
+    /// submit and the wait for the GL queue. Includes [`Stage::Submit`]'s share of the frame's last draws.
+    Finish,
+    /// The lab's replay floor: the saved batch of a still frame issued again instead of the sprite pass
+    /// (`ui::replay_floor`).
+    Replay,
 }
 
 impl Stage {
-    pub const COUNT: usize = 47;
+    pub const COUNT: usize = 51;
 
     /// Every stage, in the enum's order (`ALL[st as usize] == st`, a test pins it).
     pub const ALL: [Stage; Stage::COUNT] = [
@@ -257,6 +269,10 @@ impl Stage {
         Stage::GpuGroundCache,
         Stage::GpuFreeze,
         Stage::GpuMinimap,
+        Stage::Flush,
+        Stage::Submit,
+        Stage::Finish,
+        Stage::Replay,
     ];
 
     /// The stage's key in the bench's stage line: `snake_case`, the GPU stages with the `gpu_` prefix
@@ -310,6 +326,10 @@ impl Stage {
             Stage::GpuGroundCache => "gpu_ground_cache",
             Stage::GpuFreeze => "gpu_freeze",
             Stage::GpuMinimap => "gpu_minimap",
+            Stage::Flush => "flush",
+            Stage::Submit => "submit",
+            Stage::Finish => "finish",
+            Stage::Replay => "replay",
         }
     }
 
@@ -388,6 +408,11 @@ pub struct Sample {
     pub gpu_sampled: bool,
     /// The AI's counts this frame ([`count`]), in [`COUNTERS`] order.
     pub counts: [u32; COUNTERS.len()],
+    /// The GL draw calls issued and the bytes uploaded for the frame (`submitted`), and the frame was replayed
+    /// (`replayed`).
+    pub gl_draws: u32,
+    pub gl_bytes: u64,
+    pub replayed: bool,
 }
 
 struct State {
@@ -428,6 +453,10 @@ struct State {
     sample_last: Option<Instant>,
     /// The samples of the performance test's cell being measured ([`cell_begin`]), None outside a cell.
     cell: Option<Vec<Sample>>,
+    /// The GL draw calls and bytes uploaded this frame so far ([`submitted`]), and whether it was replayed.
+    gl_draws: u32,
+    gl_bytes: u64,
+    replayed: bool,
 }
 
 impl State {
@@ -455,6 +484,9 @@ impl State {
             gpu_sampling: false,
             sample_last: None,
             cell: None,
+            gl_draws: 0,
+            gl_bytes: 0,
+            replayed: false,
         }
     }
 }
@@ -514,6 +546,25 @@ pub fn sprite(w: f32, h: f32) {
 pub fn terrain(w: f32, h: f32) {
     if on() {
         STATE.with_borrow_mut(|s| s.terrain_px += w * h);
+    }
+}
+
+/// Macroquad's batch submissions since its last report (`QuadGl::take_submit_stats`): their time goes to `stage`
+/// (`Flush` or `Submit`), their draw calls and bytes uploaded count for the frame. Off with the probe, it does nothing.
+pub fn submitted(stage: Stage, draws: u64, bytes: u64, seconds: f64) {
+    if on() {
+        STATE.with_borrow_mut(|s| {
+            s.stage[stage as usize] += Duration::from_secs_f64(seconds.max(0.0));
+            s.gl_draws = s.gl_draws.saturating_add(u32::try_from(draws).unwrap_or(u32::MAX));
+            s.gl_bytes = s.gl_bytes.saturating_add(bytes);
+        });
+    }
+}
+
+/// This frame was replayed (the lab's replay floor, `ui::replay_floor`): its sprite pass was issued again, not run.
+pub fn replayed() {
+    if on() {
+        STATE.with_borrow_mut(|s| s.replayed = true);
     }
 }
 
@@ -698,6 +749,9 @@ pub fn end_frame(work: Duration, total: Duration) {
             verts: s.verts,
             gpu_sampled: s.gpu_sampling,
             counts: s.counts,
+            gl_draws: s.gl_draws,
+            gl_bytes: s.gl_bytes,
+            replayed: s.replayed,
         };
         s.frames += 1;
         if csv {
@@ -715,6 +769,9 @@ pub fn end_frame(work: Duration, total: Duration) {
         s.draws = 0;
         s.verts = 0;
         s.counts = [0; COUNTERS.len()];
+        s.gl_draws = 0;
+        s.gl_bytes = 0;
+        s.replayed = false;
         s.batch_key = None;
         s.batch_verts = 0;
         s.batch_dirty = false;
@@ -772,7 +829,8 @@ pub fn cell_end() -> Vec<Sample> {
 pub fn stages_payload(cell: &str, samples: &[Sample]) -> String {
     let cpu: Vec<&Sample> = samples.iter().filter(|s| !s.gpu_sampled).collect();
     let gpu: Vec<&Sample> = samples.iter().filter(|s| s.gpu_sampled).collect();
-    let mut out = format!("cell={cell} frames={} gpu_frames={}", cpu.len(), gpu.len());
+    let replayed = cpu.iter().filter(|s| s.replayed).count();
+    let mut out = format!("cell={cell} frames={} gpu_frames={} replayed={replayed}", cpu.len(), gpu.len());
     for st in Stage::ALL {
         let group = if st.is_gpu() { &gpu } else { &cpu };
         let mut values: Vec<f32> = group.iter().map(|s| s.stage_ms[st as usize]).collect();
@@ -781,6 +839,18 @@ pub fn stages_payload(cell: &str, samples: &[Sample]) -> String {
         }
         values.sort_by(f32::total_cmp);
         let key = st.name();
+        out.push_str(&format!(" {key}_p50={:.2} {key}_p90={:.2}", percentile(&values, 50.0), percentile(&values, 90.0)));
+    }
+    // The GL counters: calls and bytes per frame, the same percentiles (counts, not times: phone_bench titles them).
+    let counts: [(&str, Vec<f32>); 2] = [
+        ("gl_draws", cpu.iter().map(|s| s.gl_draws as f32).collect()),
+        ("gl_bytes", cpu.iter().map(|s| s.gl_bytes as f32).collect()),
+    ];
+    for (key, mut values) in counts {
+        if values.iter().all(|&v| v == 0.0) {
+            continue;
+        }
+        values.sort_by(f32::total_cmp);
         out.push_str(&format!(" {key}_p50={:.2} {key}_p90={:.2}", percentile(&values, 50.0), percentile(&values, 90.0)));
     }
     out
@@ -909,6 +979,10 @@ pub fn csv_row_gpu(frame: u64, s: &Sample, gpu: Option<&[f32; GPU_STAGES.len()]>
     for c in COUNTERS {
         row.push_str(&format!(",{}", s.counts[c as usize]));
     }
+    for st in [Stage::Flush, Stage::Submit, Stage::Finish, Stage::Replay] {
+        row.push_str(&format!(",{:.3}", stage(st)));
+    }
+    row.push_str(&format!(",{},{},{}", s.gl_draws, s.gl_bytes, u8::from(s.replayed)));
     row
 }
 
@@ -1177,7 +1251,7 @@ mod tests {
     use super::*;
 
     fn sample(kind: Kind, work_ms: f32, total_ms: f32, stage_ms: [f32; Stage::COUNT]) -> Sample {
-        Sample { kind, work_ms, total_ms, stage_ms, rebuilds: 0, sprites: 0, sprite_px: 0.0, terrain_px: 0.0, draws: 0, verts: 0, gpu_sampled: false, counts: [0; COUNTERS.len()] }
+        Sample { kind, work_ms, total_ms, stage_ms, rebuilds: 0, sprites: 0, sprite_px: 0.0, terrain_px: 0.0, draws: 0, verts: 0, gpu_sampled: false, counts: [0; COUNTERS.len()], gl_draws: 0, gl_bytes: 0, replayed: false }
     }
 
     #[test]
@@ -1308,13 +1382,15 @@ mod tests {
         let f: Vec<&str> = timed.split(',').collect();
         let n = f.len();
         // The GPU block is the 16 fields before the AI columns: terrain (index 3) and ui (index 7) timed.
-        let gpu0 = n - 11 - GPU_STAGES.len();
+        // The lab's trailing columns (flush, submit, finish, replay, the GL counts, replayed) come after the AI block.
+        let gpu0 = n - 7 - 11 - GPU_STAGES.len();
         assert_eq!((f[gpu0 + 3], f[gpu0 + 7]), ("1.500", "0.250"), "{timed}");
         // The AI sub-stages (zero here) and the AI counts come last, in their order.
-        assert_eq!(&f[n - 11..], &["0.000", "0.000", "0.000", "0.000", "0.000", "0.000", "0", "0", "0", "0", "0"], "{timed}");
+        assert_eq!(&f[n - 18..n - 7], &["0.000", "0.000", "0.000", "0.000", "0.000", "0.000", "0", "0", "0", "0", "0"], "{timed}");
+        assert_eq!(&f[n - 7..], &["0.000", "0.000", "0.000", "0.000", "0", "0", "0"], "{timed}");
         let other = sample(Kind::Other, 0.5, 1.0, [0.0; Stage::COUNT]);
         assert!(csv_row(1, &other).starts_with("1,other,0.500,1.000,0.000,"));
-        assert!(csv_row(1, &other).ends_with(",0,0,0,0,0"));
+        assert!(csv_row(1, &other).ends_with(",0.000,0.000,0.000,0.000,0,0,0"), "the lab columns close the row");
     }
 
     #[test]
@@ -1401,5 +1477,45 @@ mod tests {
         let s = sample(Kind::Walk { tilt: false }, 1.0, 1.0, [0.0; Stage::COUNT]);
         assert!(csv_row(1, &s).starts_with("1,walk,"));
         assert!(summary_lines(5.0, &[s], &[]).iter().all(|l| l.contains(" walk[flat] n=1 ")));
+    }
+}
+
+#[cfg(test)]
+mod lab_counts_tests {
+    use super::*;
+
+    #[test]
+    fn the_submissions_and_the_replay_are_counted_for_the_frame() {
+        crate::diag::set_forced_profile(true);
+        cell_begin();
+        submitted(Stage::Flush, 3, 480, 0.002);
+        submitted(Stage::Submit, 1, 120, 0.001);
+        replayed();
+        end_frame(Duration::from_millis(5), Duration::from_millis(8));
+        submitted(Stage::Submit, 2, 40, 0.0);
+        end_frame(Duration::from_millis(5), Duration::from_millis(8));
+        let samples = cell_end();
+        crate::diag::set_forced_profile(false);
+        assert_eq!(samples.len(), 2);
+        let (first, second) = (samples[0], samples[1]);
+        assert_eq!((first.gl_draws, first.gl_bytes, first.replayed), (4, 600, true));
+        assert_eq!((second.gl_draws, second.gl_bytes, second.replayed), (2, 40, false), "the next frame starts from zero");
+        assert!((first.stage_ms[Stage::Flush as usize] - 2.0).abs() < 0.01, "{}", first.stage_ms[Stage::Flush as usize]);
+        let line = stages_payload("c", &samples);
+        // The probe samples the frame after the first one as a GPU sample (the run asks for it): the first frame is the CPU group.
+        assert!(line.starts_with("cell=c frames=1 gpu_frames=1 replayed=1 "), "{line}");
+        assert!(line.contains(" flush_p50=") && line.contains(" submit_p50="), "{line}");
+        assert!(line.contains(" gl_draws_p50=") && line.contains(" gl_bytes_p90="), "{line}");
+        assert!(!line.contains(" finish_p50="), "a stage nobody timed is left out: {line}");
+    }
+
+    #[test]
+    fn the_new_stages_are_cpu_stages_with_their_own_keys() {
+        for st in [Stage::Flush, Stage::Submit, Stage::Finish, Stage::Replay] {
+            assert!(!st.is_gpu(), "{}", st.name());
+            assert_eq!(Stage::ALL.iter().filter(|s| s.name() == st.name()).count(), 1, "{}", st.name());
+        }
+        assert_eq!(Stage::ALL.len(), Stage::COUNT);
+        assert!(CSV_HEADER.ends_with(",flush_ms,submit_ms,finish_ms,replay_ms,gl_draws,gl_bytes,replayed"));
     }
 }

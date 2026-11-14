@@ -140,6 +140,18 @@ pub fn fill(rt: &RenderTarget, f: impl FnOnce()) {
     fill_space(rt, Rect::new(0.0, 0.0, screen_width(), screen_height()), f);
 }
 
+/// [`fill`] of a whole target (the picture covers all of it): with the lab's clear switch on (`lab::clear_targets`,
+/// `RAZDOR_CLEAR_TARGETS`) the target starts cleared, so a tiler does not load its old tiles at the switch. Only the
+/// fills that draw the whole target use it (partial refills keep the old pixels and do not).
+pub fn fill_cleared(rt: &RenderTarget, f: impl FnOnce()) {
+    fill(rt, || {
+        if razdor::lab::clear_targets() {
+            macroquad::prelude::clear_background(macroquad::prelude::Color::new(0.0, 0.0, 0.0, 0.0));
+        }
+        f()
+    });
+}
+
 /// [`fill`] for a picture of its own 2D space `space` (world pixels of the bent view's ground,
 /// in `rt` at whatever size it has): the 2D cameras map `space` onto the whole target.
 pub fn fill_space(rt: &RenderTarget, space: Rect, f: impl FnOnce()) {
@@ -186,7 +198,7 @@ impl Cached {
         }
         let rt = self.target.clone().expect("target made above");
         if self.key != Some(key) {
-            fill(&rt, draw);
+            fill_cleared(&rt, draw);
             self.key = Some(key);
         }
         blit_screen(&rt.texture);

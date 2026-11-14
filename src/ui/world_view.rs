@@ -3210,7 +3210,7 @@ fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool) {
                 let into_cache = wf.is_some();
                 frame_probe::time(Stage::GroundCache, || {
                     match step {
-                        terrain::GroundStep::Fill => super::render_cache::fill(&rt, || {
+                        terrain::GroundStep::Fill => super::render_cache::fill_cleared(&rt, || {
                             in_view(&sc, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Ground, flow)));
                             if into_cache {
                                 in_view(&sc, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow)));
@@ -5834,7 +5834,9 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     items.sort_by_key(|a| a.0);
     // One sharp session for the pass: its art shares the material switch (see `sharp::session`). With the
     // light on, the lit material scales the painted shadows by the frame's factor (`sharp::session_lit`).
-    super::sharp::session_pass(!tilted, lit, || {
+    // The lab's replay floor (`replay_floor`): on a still frame the pass is not run, its last batch is issued again.
+    let replay_key = super::replay_floor::view_key(&[cam.origin.x, cam.origin.y, cam.scale, cam.view.x, cam.view.y, cam.view.w, cam.view.h], tilted);
+    super::replay_floor::sprites(replay_key, !game.moving(), || super::sharp::session_pass(!tilted, lit, || {
         for d in items.iter().map(|(_, d)| d) {
             match d {
                 Drawable::Object(i, foot) => {
@@ -5911,7 +5913,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                 }
             }
         }
-    });
+    }));
     // Razdor's «Живая карта»: the smoke of the visible chimneys, one batch over the sprites.
     if living_on(cam) {
         let mut smoke = Batch::default();
@@ -7649,6 +7651,8 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
             }
         })
     });
+    // The map's submissions end here: macroquad's batch so far is the probe's flush stage (lab, `take_submit`).
+    super::gpu_probe::take_submit(Stage::Flush);
     if !trailer_clean() {
         draw_clash_marks(view, &cam, crate::ui::clock::now());
     }

@@ -134,6 +134,27 @@ mod timers {
     }
 }
 
+/// Macroquad's batch submissions since the last call, for the frame probe (`frame_probe::submitted`): the time
+/// spent in them goes to `stage` (`Flush` at the end of the world view, `Submit` at the frame's end), their GL draw
+/// calls and bytes uploaded count for the frame. With the probe off nothing is taken.
+pub fn take_submit(stage: Stage) {
+    if !razdor::frame_probe::on() {
+        return;
+    }
+    // SAFETY: called on the main thread while macroquad runs, as every draw; the counters are macroquad's own.
+    let s = unsafe { macroquad::window::get_internal_gl() }.quad_gl.take_submit_stats();
+    razdor::frame_probe::submitted(stage, s.draws, s.bytes, s.seconds);
+}
+
+/// The lab's GPU finish (`RAZDOR_GPU_FINISH`, the bench's `gpu-finish` line): the frame's draws are submitted and the
+/// GL queue waited for before the swap, timed as the `finish` stage (the frame's GPU time, plus its submission).
+/// Off, nothing runs.
+pub fn finish_before_swap() {
+    if razdor::lab::gpu_finish() {
+        finish_wait(Stage::Finish);
+    }
+}
+
 /// The map frame's last wait (`gpu-ui`), at the frame's end before the next frame: only in a
 /// map frame (see `frame_probe::map_frame_now`), so the other screens are not serialised.
 pub fn gpu_wait_ui() {
