@@ -3499,7 +3499,9 @@ fn keys_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
 fn phone_clip(clip: Option<Rect>) {
     let dpi = screen_dpi_scale();
     let gl = unsafe { get_internal_gl() }.quad_gl;
-    gl.scissor(clip.map(|r| ((r.x * dpi) as i32, (r.y * dpi) as i32, (r.w * dpi).ceil() as i32, (r.h * dpi).ceil() as i32)));
+    let clip = clip.map(|r| ((r.x * dpi) as i32, (r.y * dpi) as i32, (r.w * dpi).ceil() as i32, (r.h * dpi).ceil() as i32));
+    super::sharp::note_clip(clip);
+    gl.scissor(clip);
 }
 
 /// The words of `label` in lines of at most `max_w` px at `size` (a word never splits).

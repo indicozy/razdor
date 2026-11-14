@@ -21,6 +21,8 @@ use macroquad::prelude::*;
 
 use super::memo::Recent;
 
+mod retain;
+
 /// The probe's draw count for a draw of `verts` vertices from `tex` (`frame_probe::draw`; the texture
 /// is keyed by its id). Does nothing with the probe off.
 pub fn count_draw(tex: Option<&Texture2D>, verts: usize) {
@@ -330,6 +332,54 @@ pub fn session_lit<R>(shadow_k: Option<f32>, draw: impl FnOnce() -> R) -> R {
     session_with(m, draw)
 }
 
+/// [`session_lit`] for the map's pass. The flat view's unlit pass is retained (`retain`, `RAZDOR_SPRITE_RETAIN=1`:
+/// off by default, then this is [`session_lit`]); `flat` is the view's, not tilted.
+pub fn session_pass<R>(flat: bool, shadow_k: Option<f32>, draw: impl FnOnce() -> R) -> R {
+    if !(flat && shadow_k.is_none() && retain::enabled() && retain::begin()) {
+        return session_lit(shadow_k, draw);
+    }
+    session(|| {
+        let r = draw();
+        retain::end();
+        r
+    })
+}
+
+/// The scissor macroquad was given (`pan`, `main_menu`): a retained pass applies the scissor it was recorded in.
+pub fn note_clip(clip: Option<(i32, i32, i32, i32)>) {
+    retain::note_clip(clip);
+}
+
+/// After a raw draw of a retained pass (`retain`): the session's material is set again and the next sharp draw
+/// sets its uniforms, as after a plain draw.
+fn after_raw_draw() {
+    count_break();
+    LAST.with(|l| l.set(None));
+    if PLAIN.with(std::cell::Cell::get) {
+        gl_use_default_material();
+    } else if let Some(m) = session_base() {
+        gl_use_material(&m);
+    }
+}
+
+/// Draws a textured piece of a sharp draw: macroquad's batch, or the retained pass (`retain`), which may take it.
+/// A piece without a texture ends a retained pass's replay (`retain::event`).
+fn piece(mesh: &Mesh) {
+    match mesh.texture.as_ref() {
+        Some(tex) if retain::active() && blend_context().is_none() => {
+            if retain::piece(&mesh.vertices, &mesh.indices, tex, texels(tex)) {
+                return;
+            }
+            draw_mesh(mesh);
+        }
+        Some(_) => draw_mesh(mesh),
+        None => {
+            retain::event("white");
+            draw_mesh(mesh);
+        }
+    }
+}
+
 fn session_with<R>(m: Material, draw: impl FnOnce() -> R) -> R {
     struct End;
     impl Drop for End {
@@ -405,6 +455,7 @@ pub fn plain_draw() {
     if !in_session() || blend_context().is_some() {
         return;
     }
+    retain::event("plain");
     if !PLAIN.with(|p| p.replace(true)) {
         count_break();
         gl_use_default_material();
@@ -476,7 +527,7 @@ fn draw_sprite_mesh(tex: &Texture2D, x: f32, y: f32, color: Color, params: &Draw
     SPRITE_MESH.with(|m| {
         let mut m = m.borrow_mut();
         fill_sprite_mesh(&mut m, tex, x, y, color, params, scale);
-        draw_mesh(&m);
+        piece(&m);
         m.texture = None;
     });
 }
@@ -555,7 +606,7 @@ fn draw_scaled_mesh(mesh: &Mesh, scale: Vec2) {
         m.indices.clear();
         m.indices.extend_from_slice(&mesh.indices);
         m.texture = mesh.texture.clone();
-        draw_mesh(&m);
+        piece(&m);
         m.texture = None;
     });
 }
@@ -602,6 +653,12 @@ pub fn set_uniforms(m: &Material, tex: &Texture2D, params: &DrawTextureParams) {
 /// Runs `draw` inside a blend context set by the caller (`chrome::with_material`). With
 /// `Some(material)` (a sharp blend) a sharp draw inside it sets its uniforms on that material
 /// and keeps the blend; with `None` (a plain blend, text) it is the plain draw.
+/// Before a blend context's material is set (`chrome::with_blend`): a retained pass's segment before it is drawn
+/// first, while the session's material is still the current one.
+pub fn blend_begin() {
+    retain::event("blend");
+}
+
 pub fn in_blend<R>(material: Option<Material>, draw: impl FnOnce() -> R) -> R {
     struct Leave;
     impl Drop for Leave {
@@ -677,7 +734,7 @@ pub fn draw_mesh_sharp(mesh: &Mesh, scale: Vec2) {
                 session_material();
                 draw_scaled_mesh(mesh, scale.abs());
             }
-            Some(_) => draw_mesh(mesh),
+            Some(_) => piece(mesh),
             None => match draw_material() {
                 Some(m) if mesh.texture.is_some() => {
                     count_break();

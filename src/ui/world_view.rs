@@ -5581,7 +5581,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     items.sort_by_key(|a| a.0);
     // One sharp session for the pass: its art shares the material switch (see `sharp::session`). With the
     // light on, the lit material scales the painted shadows by the frame's factor (`sharp::session_lit`).
-    super::sharp::session_lit(lit, || {
+    super::sharp::session_pass(!tilted, lit, || {
         for d in items.iter().map(|(_, d)| d) {
             match d {
                 Drawable::Object(o, foot) => {

@@ -122,6 +122,16 @@ pub fn sync(fog: &Fog, active: bool, veil: u64, live: bool, reveal: &dyn Fn(Tile
     STATE.with_borrow_mut(|st| st.sync(fog, active, veil, live, reveal));
 }
 
+razdor::local! {
+    /// The table's uploads so far: a change of its content (a retained pass keys its fog by this).
+    static UPLOADS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// The number of the table's uploads (each one a change of its content).
+pub fn upload_count() -> u64 {
+    UPLOADS.with(std::cell::Cell::get)
+}
+
 impl State {
     fn sync(&mut self, fog: &Fog, active: bool, veil: u64, live: bool, reveal: &dyn Fn(Tile) -> f32) {
         if !active || fog.w <= 0 || fog.h <= 0 {
@@ -149,6 +159,7 @@ impl State {
     }
 
     fn upload(&mut self, table: &Table) {
+        UPLOADS.with(|u| u.set(u.get() + 1));
         let (w, h) = table.size();
         let bytes = table.texels();
         match self.tex.as_ref() {

@@ -1216,6 +1216,7 @@ fn with_material(material: Option<Material>, draw: impl FnOnce()) {
 fn with_blend(material: Option<Material>, sharp_art: bool, draw: impl FnOnce()) {
     match material {
         Some(m) => {
+            sharp::blend_begin();
             gl_use_material(&m);
             sharp::in_blend(sharp_art.then(|| m.clone()), draw);
             sharp::leave_blend();

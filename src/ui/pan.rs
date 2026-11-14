@@ -259,7 +259,9 @@ fn above_bar() -> Rect {
 fn scissor(clip: Option<Rect>) {
     let dpi = screen_dpi_scale();
     let gl = unsafe { get_internal_gl() }.quad_gl;
-    gl.scissor(clip.map(|r| ((r.x * dpi) as i32, (r.y * dpi) as i32, (r.w * dpi).ceil() as i32, (r.h * dpi).ceil() as i32)));
+    let clip = clip.map(|r| ((r.x * dpi) as i32, (r.y * dpi) as i32, (r.w * dpi).ceil() as i32, (r.h * dpi).ceil() as i32));
+    super::sharp::note_clip(clip);
+    gl.scissor(clip);
 }
 
 /// Called once the bottom bar is drawn for a window (or a dialog over the map): when the canvas
