@@ -50,6 +50,7 @@ Razdor plays the original game's scenarios using its original rules. Below is wh
 * **Lighting** in additional settings (off by default): the light changes with the time of day, the windows glow at night and the armies carry torches; "From the sun" shadows are optional. Only the view changes: [more](/razdor/wiki/en/differences/map-look/).
 * **Mist instead of black** in additional settings ("No" by default, as in the original): unexplored land is hidden by an even haze ("Simple"), by drifting clouds ("Clouds") or by a rolling mist ("Billows"). Only the view changes.
 * **Moving water** in additional settings (off by default): the water ripples, foam runs along the shores and waves roll up, glints shine on lakes and the sea, rivers flow and ships leave a wake. Only the view changes.
+* **Ground blending** in additional settings (on by default): turn it off on weak phones to draw the map faster; the edges of roads and fields become stepped. Only the view changes.
 * **Weather** in additional settings (off by default): snow over snowfields, rain over swamps, heat haze over deserts, ash over fire lands and cloud shadows. Only the view changes.
 * **Hit shake** in the additional settings on the "Battle and army" tab (off by default): the battle field shakes briefly on a hit, more on a hard hit and when a unit falls. View only.
 * **Living map** in additional settings (off by default): smoke rises from the chimneys, flags wave and birds cross the map. Only the view changes.

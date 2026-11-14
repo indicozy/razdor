@@ -119,7 +119,9 @@ impl Look {
     }
 }
 
-/// The preset the settings hold, `None` for «Своё».
+/// The preset the settings hold, `None` for «Своё». «Смешивание земли» (`Settings::map_ground_blend`) is in no
+/// preset: `Look` has no field for it, so `holds` never compares it and `set` never changes it. A player who
+/// turns it off keeps «Низкое» (or any other preset) showing.
 pub fn current(s: &Settings) -> Option<Preset> {
     ORDER.into_iter().find(|p| look(*p).holds(s))
 }
@@ -193,6 +195,19 @@ pub fn label(p: Option<Preset>) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_ground_blend_is_in_no_preset() {
+        // «Смешивание земли» is no preset's value: every preset still shows with it off, and setting a preset leaves it.
+        for p in ORDER {
+            let mut s = Settings::default();
+            set(&mut s, p);
+            s.map_ground_blend = false;
+            assert_eq!(current(&s), Some(p), "{p:?} still holds with the blend off");
+            set(&mut s, p);
+            assert!(!s.map_ground_blend, "{p:?} does not set the blend");
+        }
+    }
 
     #[test]
     fn each_preset_is_the_value_its_own_settings_show() {

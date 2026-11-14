@@ -291,8 +291,13 @@ on the water frame alone, so the cache keeps it: a fill draws the ground then th
 the overlay alone when the water frame changes (every 100 ms). A still frame between changes is a copy. Live water and the
 border's fog keep the overlay on the screen, every frame.
 
-**The cheap ground (option 5, `RAZDOR_TERRAIN_CHEAP=1`, off by default, in no preset).** The ground pass takes the nearest
-cell's code (one atlas fetch) instead of blending the four. A look change: hard cell edges. Not in «Низкое» yet (owner's call).
+**The cheap ground (option 5).** The ground pass takes the nearest cell's code (one atlas fetch) instead of blending the
+four. A look change: hard cell edges. It is on when the player's setting «Смешивание земли» is off (`Settings::map_ground_blend`,
+on by default, a file without the key reads on; the Map group's row next to «Живая вода»), or with the dev switch
+`RAZDOR_TERRAIN_CHEAP=1` (it wins over the setting). `display::follow_settings` pushes the setting every frame
+(`terrain::set_blend`); `terrain::cheap_path` picks the path (the new shader only). The ground cache keeps the choice its
+cached ground was drawn with and redraws it when the choice changes, and the water pictures with it. The setting is in no
+«Качество графики» preset (`quality_preset`): `Look` does not hold it, so the row never turns «Низкое» into «Своё».
 
 `src/ui/world_view.rs`: `draw_world` draws only the visible cells — `draw_terrain`
 (`TerrainLayer::draw` in `src/ui/terrain.rs`: one shader quad mixing the four nearest cell

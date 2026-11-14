@@ -573,6 +573,10 @@ Clouds = Облака
 Billows = Клубы
 Razdor's: none is the original's black fog of war; Simple is a plain mist; Clouds drifts soft clouds over the unexplored land; Billows is a rolling mist, heavier on weak devices. Style only. = Razdor's: «Нет»: чёрный туман войны, как в оригинале. «Простой»: ровная дымка. «Облака»: плывущие облака. «Клубы»: клубящийся туман, тяжелее для слабых устройств. Только вид.
 
+# Advanced settings: ground blending (Razdor's, on by default)
+Ground blending = Смешивание земли
+Smooth transitions between the ground's cells. Turn it off on weak phones: the map draws faster, but the edges of roads and fields become stepped. = Плавные переходы между клетками земли. Выключите на слабых телефонах: карта рисуется быстрее, но края дорог и полей станут ступенчатыми.
+
 # Advanced settings: moving water (Razdor's, off by default)
 Moving water = Живая вода
 Razdor's: the water ripples, foam runs along the shores, rivers flow and ships leave a wake. Style only. = Вода на карте рябит, у берегов бежит пена, реки текут, за кораблями остаётся след. Только вид.

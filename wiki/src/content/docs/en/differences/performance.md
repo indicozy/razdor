@@ -43,7 +43,7 @@ The **"Battery saver"** setting (the "Other" tab, off by default). When nothing 
 
 ## Map animation
 
-The **"Map animation"** setting (the "Map" tab, the row before "Mist instead of black", "On" by default). A click on the row cycles through its values:
+The **"Map animation"** setting (the "Map" tab, the row before "Ground blending", "On" by default). A click on the row cycles through its values:
 
 - **"On"** — everything on the map moves, as usual: the trees, the armies, the water, the weather, the lights.
 - **"Near only"** — the movement stops when the map is zoomed out, and comes back as you zoom in.

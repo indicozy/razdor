@@ -318,6 +318,25 @@ pub fn ab_options(v: &str) -> Option<Options> {
     Some(Options { new_shader, cache, vrs: false, mediump, cheap: false })
 }
 
+/// The «Смешивание земли» setting as the settings last pushed it (`display::follow_settings`, every frame). On by default.
+static GROUND_BLEND: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Takes the setting «Смешивание земли» in (every frame, from `display::follow_settings`).
+pub fn set_blend(on: bool) {
+    GROUND_BLEND.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether the ground blends its cells (the setting, `Settings::map_ground_blend`).
+pub fn blend_on() -> bool {
+    GROUND_BLEND.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Whether the cheap ground (option 5) draws: with the new shader, when the dev switch `RAZDOR_TERRAIN_CHEAP=1` is set
+/// (`env_cheap`) or the setting «Смешивание земли» is off (`blend` false). The dev switch wins over the setting being on.
+pub fn cheap_path(new_shader: bool, env_cheap: bool, blend: bool) -> bool {
+    new_shader && (env_cheap || !blend)
+}
+
 /// The terrain options, read once. Sets the frame probe's label and logs the set.
 pub fn options() -> Options {
     static OPTS: OnceLock<Options> = OnceLock::new();
@@ -479,6 +498,8 @@ struct GroundCache {
     last: Option<u64>,
     /// The water frame the cache's overlay was drawn for (`None`: no overlay in the cache).
     wkey: Option<usize>,
+    /// Whether the cached ground was drawn with the cheap ground (`cheap_path`): a change of «Смешивание земли» redraws it.
+    cheap: bool,
 }
 
 /// What the ground draw does this frame (`TerrainLayer::ground_target`).
@@ -843,6 +864,14 @@ impl TerrainLayer {
             g.key = None;
             g.wkey = None;
         }
+        // «Смешивание земли» changed: the cached ground (and the water pictures) hold the other look, so they are drawn again.
+        let cheap = cheap_path(self.opts.new_shader, self.opts.cheap, blend_on());
+        if g.cheap != cheap {
+            g.cheap = cheap;
+            g.key = None;
+            g.wkey = None;
+            *self.pictures.borrow_mut() = WaterPictures::default();
+        }
         let step = if g.last != Some(key) {
             g.last = Some(key);
             GroundStep::Moving
@@ -903,7 +932,8 @@ impl TerrainLayer {
         let water_on = matches!(mode, Mode::Full | Mode::Overlay);
         let edge_on = water_on && edge;
         // The variant holds the blocks this draw uses and no others (`Variant`); live water is drawn on the water's draws.
-        let variant = Variant { mediump: self.opts.mediump, live: water_on && water::live(), water: water_on, overlay: mode == Mode::Overlay, mist: edge_on, cheap: self.opts.cheap };
+        let cheap = cheap_path(self.opts.new_shader, self.opts.cheap, blend_on());
+        let variant = Variant { mediump: self.opts.mediump, live: water_on && water::live(), water: water_on, overlay: mode == Mode::Overlay, mist: edge_on, cheap };
         let Some(m) = self.material(variant) else { return };
         let new = self.opts.new_shader;
         // The trailer's stills (dev-only): the atlas is sampled nearest, so the grass is not streaked.
@@ -1161,6 +1191,15 @@ mod shading_rate {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_cheap_ground_is_picked_when_the_blend_is_off() {
+        // «Смешивание земли» off: the cheap ground, with the new shader only. The dev switch wins over the setting.
+        assert!(cheap_path(true, false, false), "blend off: the cheap ground");
+        assert!(!cheap_path(true, false, true), "blend on: the blended ground");
+        assert!(cheap_path(true, true, true), "RAZDOR_TERRAIN_CHEAP=1 wins over the setting");
+        assert!(!cheap_path(false, true, false), "the old shader has no cheap ground");
+    }
 
     #[test]
     fn the_overlay_is_skipped_only_with_no_water_in_view_and_no_mist() {

@@ -5,7 +5,7 @@ sidebar:
   order: 2
 ---
 
-The **Map** tab of the settings window has new rows that the original does not have: **Lighting**, **Mist instead of black**, **Moving water**, **Weather** and **Living map**. All of them are off by default, so a new install looks like Discord Times.
+The **Map** tab of the settings window has new rows that the original does not have: **Lighting**, **Mist instead of black**, **Moving water**, **Weather** and **Living map**. All of them are off by default, so a new install looks like Discord Times. **Ground blending** is on by default: it is the ground's usual look (see below).
 
 These settings change only how the adventure map looks. The rules, what the player can see and do, movement, battles, the AI and saves work as in the original. Battles and full-screen windows keep the original look.
 
@@ -54,6 +54,12 @@ These two rows appear when **"Lighting"** is on.
 :::tip
 To see the day and night change without waiting, choose **"Game clock"** and play, or **"Real-time cycle"** with a day length of 12 minutes.
 :::
+
+## Ground blending
+
+The **"Ground blending"** setting (the "Map" tab, the row before "Mist instead of black", "On" by default) decides how neighbouring cells of ground meet. **"On"**: the ground blends smoothly from one cell to the next, as before. **"Off"**: each cell is drawn in its own colour with a hard edge, and the map draws faster.
+
+Turn it off on weak phones if the map is slow. The cost: the edges of roads, fields and shores become stepped. Nothing else on the map changes, and the setting is in none of the "Graphics quality" presets: "Low" stays "Low" with it off.
 
 ## Mist instead of black
 

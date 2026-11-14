@@ -849,6 +849,8 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
         // `RAZDOR_MIST=1|flat|billows|off`: the unexplored land is drifting clouds, a plain mist, the billows or the black (`mist::env_mode`)
         // («Туман вместо черноты»).
         crate::ui::mist::set_pref(crate::ui::mist::env_mode().unwrap_or_default());
+        // `RAZDOR_GROUND_BLEND=0` (the snapshots' «Смешивание земли» off: the cheap ground); the setting is not read here.
+        crate::ui::terrain::set_blend(std::env::var("RAZDOR_GROUND_BLEND").map_or(true, |v| v.trim() != "0"));
         // `RAZDOR_LIVE_WATER=1` (the snapshots' moving water); the setting is not read here.
         crate::ui::water::set_prefs(false);
         // The water's rate and size: the defaults (`RAZDOR_WATER_EVERY`, `RAZDOR_WATER_SCALE` override them).
@@ -892,6 +894,7 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
     crate::ui::mist::set_pref(crate::ui::mist::env_mode().unwrap_or(settings.map_mist));
     crate::ui::map_anim::set_pref(settings.map_anim);
     crate::ui::water::set_prefs(settings.map_live_water);
+    crate::ui::terrain::set_blend(settings.map_ground_blend);
     crate::ui::water::set_levels(settings.map_water_rate, settings.map_water_quality);
     crate::ui::weather::set_pref(settings.map_weather);
     crate::ui::living::set_prefs(settings.map_living);
