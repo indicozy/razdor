@@ -359,13 +359,51 @@ def contact_sheet(path: Path, items, scale: int = 2, cols: int = 8) -> None:
 # ----------------------------------------------------------------------------------------------
 
 
+OVERRIDES = Path(__file__).resolve().parent / "lights_overrides.json"
+
+
+def apply_overrides(out: dict, path: Path) -> int:
+    """Remove the points the owner's corrections name (`lights_overrides.json`): each entry is a
+    sprite key, a kind and the exact box of the point to remove, with a short reason. A sprite left
+    with no point has no entry. An entry that names no point is an error (a stale correction).
+    Returns the number of points removed."""
+    if not path.exists():
+        return 0
+    entries = json.loads(path.read_text(encoding="utf-8"))["overrides"]
+    removed = 0
+    for e in entries:
+        entry = out.get(e["key"])
+        hits = [p for p in entry["points"] if p["kind"] == e["kind"] and list(p["box"]) == list(e["box"])] if entry else []
+        if len(hits) != 1:
+            raise SystemExit(f"override matches {len(hits)} points: {e['key']} {e['kind']} {e['box']} ({e['reason']})")
+        entry["points"].remove(hits[0])
+        removed += 1
+        if not entry["points"]:
+            del out[e["key"]]
+    print(f"overrides applied: {removed} points removed ({path})")
+    return removed
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", required=True, type=Path, help="the data file, e.g. data/lights/objects.json")
     ap.add_argument("--preview", type=Path, help="scratch dir for previews (never committed)")
-    ap.add_argument("installs", nargs="+", type=Path, help="install folders holding Graphics/Objects/Objects.ugs")
+    ap.add_argument("--overrides", type=Path, default=OVERRIDES, help="the owner's corrections (default: lights_overrides.json)")
+    ap.add_argument("--apply-overrides", action="store_true",
+                    help="no models: apply the corrections to the existing --out file and rewrite it")
+    ap.add_argument("installs", nargs="*", type=Path, help="install folders holding Graphics/Objects/Objects.ugs")
     args = ap.parse_args()
     t0 = time.time()
+
+    if args.apply_overrides:
+        raw = json.loads(args.out.read_text(encoding="utf-8"))["sprites"]
+        out = {k: {"w": v["w"], "h": v["h"], "points": v["points"]} for k, v in raw.items()}
+        apply_overrides(out, args.overrides)
+        write_json(args.out, out)
+        print(f"data file: {args.out} ({args.out.stat().st_size / 1024:.1f} KiB)")
+        return
+    if not args.installs:
+        ap.error("installs are required unless --apply-overrides")
 
     sprites, per_install = collect_sprites(args.installs)
     print(f"building sprites: {len(sprites)} unique ({', '.join(f'{n}: {c}' for n, c in per_install)})")
@@ -381,6 +419,7 @@ def main() -> None:
     for key, (w, h, _, pts) in results.items():
         if pts:
             out[key] = {"w": w, "h": h, "points": pts}
+    apply_overrides(out, args.overrides)
     write_json(args.out, out)
 
     counts = Counter(p["kind"] for v in out.values() for p in v["points"])

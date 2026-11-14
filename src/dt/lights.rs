@@ -132,7 +132,21 @@ mod tests {
         let lights = builtin();
         assert!(lights.len() > 90, "the bundled detector run is there: {}", lights.len());
         let living = lights.values().flat_map(|s| &s.points).filter(|p| matches!(p.kind, Kind::Chimney | Kind::Flag | Kind::Sails)).count();
-        assert!(living > 150, "chimneys, flags and sails are shipped: {living}");
+        // 12 chimneys on castle towers were removed by the owner's corrections (backlog 1600): 159 before.
+        assert!(living > 140, "chimneys, flags and sails are shipped: {living}");
+    }
+
+    /// Backlog 1600: a castle's round tower carries a cone roof, and the detector marked its top as a
+    /// chimney, so smoke rose from the tower. The corrections (`tools/depth/lights_overrides.json`) remove
+    /// those chimneys; these castles (the orange-roofed tower of the report, and its twin in the other
+    /// install) keep none of them. The wall-tower tops of the same castle family are pinned too.
+    #[test]
+    fn castle_towers_have_no_chimney_points() {
+        for key in ["83a0e13facd9012d", "e1b73f452d96b345", "2dd78dde7f9809d6", "780f04f891a58a92"] {
+            let key = u64::from_str_radix(key, 16).unwrap();
+            let chimneys = builtin().get(&key).map_or(0, |s| s.points.iter().filter(|p| p.kind == Kind::Chimney).count());
+            assert_eq!(chimneys, 0, "sprite {key:016x}: a tower top is not a chimney (backlog 1600)");
+        }
     }
 
     /// The player's install; skipped without `RAZDOR_DT_DIR`. Every building sprite of the install

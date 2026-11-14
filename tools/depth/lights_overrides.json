@@ -1,0 +1,14 @@
+{"version":1,"overrides":[
+{"key":"83a0e13facd9012d","kind":"chimney","box":[74,1,104,37],"reason":"backlog 1600: the round tower's cone roof top, not a chimney"},
+{"key":"83a0e13facd9012d","kind":"chimney","box":[127,47,154,70],"reason":"backlog 1600: a corner tower's top, not a chimney"},
+{"key":"e1b73f452d96b345","kind":"chimney","box":[74,1,104,36],"reason":"backlog 1600: the round tower's cone roof top, not a chimney"},
+{"key":"2dd78dde7f9809d6","kind":"chimney","box":[118,1,143,31],"reason":"backlog 1600: the round tower's cone roof top, not a chimney"},
+{"key":"780f04f891a58a92","kind":"chimney","box":[118,1,143,32],"reason":"backlog 1600: the round tower's cone roof top, not a chimney"},
+{"key":"6e2045d0c6bead87","kind":"chimney","box":[125,1,139,21],"reason":"backlog 1600: a ruined tower's top, not a chimney"},
+{"key":"6e2045d0c6bead87","kind":"chimney","box":[137,1,151,21],"reason":"backlog 1600: a ruined tower's top, not a chimney"},
+{"key":"de0aab788be0e9c4","kind":"chimney","box":[125,1,137,21],"reason":"backlog 1600: a ruined tower's top, not a chimney"},
+{"key":"de0aab788be0e9c4","kind":"chimney","box":[139,1,151,21],"reason":"backlog 1600: a ruined tower's top, not a chimney"},
+{"key":"0391827f09f851b2","kind":"chimney","box":[121,0,142,24],"reason":"backlog 1600: a tower's top, not a chimney"},
+{"key":"41c08fe1a9d9f4ae","kind":"chimney","box":[126,0,142,20],"reason":"backlog 1600: a tower's top, not a chimney"},
+{"key":"41c08fe1a9d9f4ae","kind":"chimney","box":[73,3,84,20],"reason":"backlog 1600: a wall turret's top, not a chimney"}
+]}
