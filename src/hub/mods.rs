@@ -624,7 +624,7 @@ fn build(base: &Path, layers: &[Vec<(String, PathBuf)>], tmp: &Path) -> Result<(
 }
 
 #[cfg(test)]
-thread_local! {
+crate::local! {
     /// Tests: build merged folders as on a file system without hard links.
     static NO_LINKS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }

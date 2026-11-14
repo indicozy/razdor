@@ -1468,7 +1468,7 @@ fn hero_marker_area(len: f32) -> f32 {
 /// alpha > 0 texels of its cell in the icons texture, counted once per size and cached. Falls back to the whole
 /// cell while the texture or its pixels are not there.
 fn house_visible_area(icons: Option<&Texture2D>, size: usize, zoom: f32) -> f32 {
-    thread_local! {
+    local! {
         static COUNTED: std::cell::Cell<[Option<f32>; 3]> = const { std::cell::Cell::new([None; 3]) };
     }
     let cell = symbol_rect(Symbol::Grid(0, 2), size);

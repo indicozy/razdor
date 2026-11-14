@@ -321,7 +321,7 @@ fn install_map(dir: &std::path::Path, file: &str, hash: u64) -> Result<Vec<u8>, 
     Ok(bytes)
 }
 
-thread_local! {
+crate::local! {
     /// Set while the state hash's body is serialised (`body_json` without timing).
     static HASHING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }

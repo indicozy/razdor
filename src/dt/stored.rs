@@ -480,7 +480,7 @@ fn same_dir(a: &Path, b: &Path) -> bool {
 }
 
 #[cfg(test)]
-thread_local! {
+crate::local! {
     /// A test's folder that counts as owned (the gate's copy of the install; see [`set_test_owned`]).
     static TEST_OWNED: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
 }
