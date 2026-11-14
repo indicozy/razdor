@@ -1932,9 +1932,9 @@ local! {
 /// it is known (a building's atlas picture; a figure's sheet frame comes from its draw): the tilted view records its
 /// drawn quad under that identity ([`PICKS`]); the flat view draws it as [`standing`] does.
 #[allow(clippy::too_many_arguments)]
-fn standing_picked(pick: Option<Pick>, src: Option<PickSrc>, cam: &Camera, foot: Vec2, base: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
+fn standing_picked(pick: Option<Pick>, src: Option<PickSrc>, cam: &Camera, fc: &FrameCtx, foot: Vec2, base: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
     PICK_NEXT.with_borrow_mut(|p| *p = pick.map(|pick| (pick, src)));
-    standing(cam, foot, base, vis, picture, draw);
+    standing(cam, fc, foot, base, vis, picture, draw);
 }
 
 /// The texture coordinates `(u, v)` in `[0, 1]` of the point `m` in the quad `q` (its corners in the picture's
@@ -2049,28 +2049,30 @@ fn pointed_tile(game: &Game, cam: &Camera, on_minimap: bool) -> Option<Tile> {
 /// on the CPU the sprites share their draw calls.
 /// `picture` is the sprite's drawn rectangle in the 2D space of `cam` (see [`covering_gap`]).
 /// What the pointer finds of a sprite is [`standing_picked`].
-fn standing(cam: &Camera, foot: Vec2, base: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
-    standing_at(cam, foot, base, foot, vis, picture, draw);
+fn standing(cam: &Camera, fc: &FrameCtx, foot: Vec2, base: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
+    standing_at(cam, fc, foot, base, foot, vis, picture, draw);
 }
 
 /// [`standing`] for a sprite that stands at `at`, its own ground point, and is faded and hidden as the sprite at
 /// `foot`: a layer of a building on a bent sheet ([`draw_layers_on_sheet`]) stands on its own ground foot, while the
 /// building's fade is the group's, so its layers fade together. `base` is as in [`standing`].
-fn standing_at(cam: &Camera, foot: Vec2, base: Vec2, at: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
-    standing_core(Shading::Cpu, cam, foot, base, at, vis, picture, draw);
+#[allow(clippy::too_many_arguments)]
+fn standing_at(cam: &Camera, fc: &FrameCtx, foot: Vec2, base: Vec2, at: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
+    standing_core(Shading::Cpu, cam, fc, foot, base, at, vis, picture, draw);
 }
 
 /// [`standing`] for a map sprite: its fog comes from its foot cell in the shader (`sprite_fog`), so `vis` is the
 /// sprite's own fade only (`detail`, 1 for none). A cell that hides the sprite draws nothing, as [`standing`] does.
-fn standing_map(cam: &Camera, foot: Vec2, fog: Tile, base: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
-    standing_core(Shading::Map(fog), cam, foot, base, foot, vis, picture, draw);
+#[allow(clippy::too_many_arguments)]
+fn standing_map(cam: &Camera, fc: &FrameCtx, foot: Vec2, fog: Tile, base: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
+    standing_core(Shading::Map(fog), cam, fc, foot, base, foot, vis, picture, draw);
 }
 
 /// [`standing_picked`] for a map sprite ([`standing_map`]).
 #[allow(clippy::too_many_arguments)]
-fn standing_picked_map(pick: Option<Pick>, src: Option<PickSrc>, cam: &Camera, foot: Vec2, fog: Tile, base: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
+fn standing_picked_map(pick: Option<Pick>, src: Option<PickSrc>, cam: &Camera, fc: &FrameCtx, foot: Vec2, fog: Tile, base: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
     PICK_NEXT.with_borrow_mut(|p| *p = pick.map(|pick| (pick, src)));
-    standing_map(cam, foot, fog, base, vis, picture, draw);
+    standing_map(cam, fc, foot, fog, base, vis, picture, draw);
 }
 
 /// The fog of the map sprite whose fog cell is `cell` in the table of the pass (`sprite_fog::at`).
@@ -2133,7 +2135,7 @@ fn sync_sprite_fog(game: &Game, veil: Veil) {
 
 /// The standing sprite's drawing, as [`standing_at`] does it; `shading` says where its fog comes from.
 #[allow(clippy::too_many_arguments)]
-fn standing_core(shading: Shading, cam: &Camera, foot: Vec2, base: Vec2, at: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
+fn standing_core(shading: Shading, cam: &Camera, fc: &FrameCtx, foot: Vec2, base: Vec2, at: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
     let pick = PICK_NEXT.with_borrow_mut(Option::take);
     let Some(tilt) = cam.tilt else { return draw() };
     // A map sprite's fog is the shader's, from its foot cell: a cell that hides the sprite draws nothing (as vis 0 does).
@@ -2154,7 +2156,7 @@ fn standing_core(shading: Shading, cam: &Camera, foot: Vec2, base: Vec2, at: Vec
         return;
     }
     // The sheet holds the ground: no sprite in the ground run.
-    let pass = PASS.with(std::cell::Cell::get);
+    let pass = fc.pass;
     if pass == Pass::Ground {
         return;
     }
@@ -2171,9 +2173,9 @@ fn standing_core(shading: Shading, cam: &Camera, foot: Vec2, base: Vec2, at: Vec
     // Off the window: a picture whose box lies past the window's edges, by more than the margin its sway and the
     // sharp band reach, draws no pixel, so it is not drawn. `picture_on_screen` gives window pixels (the frame's units
     // are the window's, see `view25::window_matrix`), and a corner behind the eye keeps the sprite.
-    let quad = picture_quad(&tilt, screen_view(cam), place, picture);
+    let quad = picture_quad(fc.view_proj, fc.view, place, picture);
     if let Some(q) = quad {
-        if !overlaps(quad_bounds(q), Rect::new(0.0, 0.0, super::frame_state::screen_w(), super::frame_state::screen_h()), OFF_WINDOW_MARGIN) {
+        if !overlaps(quad_bounds(q), fc.window, OFF_WINDOW_MARGIN) {
             return;
         }
     }
@@ -2186,7 +2188,7 @@ fn standing_core(shading: Shading, cam: &Camera, foot: Vec2, base: Vec2, at: Vec
     if trailer().is_some() || first_person() {
         let d = (on_ground - tilt.cam.eye()).length().max(1e-3);
         magnify = tilt.cam.pivot_scale(cam.view) * tilt.cam.distance / (d * cam.scale);
-        let limit = near_fade_limit(cam);
+        let limit = near_fade_limit(cam, fc.near_limit);
         if limit > 0.0 && NEAR_FADE.with(std::cell::Cell::get) {
             vis *= if eyes_cam(cam) {
                 // The eyes view's band is narrow (`EYE_FADE_BAND`): a tree stays translucent over the sky for
@@ -2196,7 +2198,7 @@ fn standing_core(shading: Shading, cam: &Camera, foot: Vec2, base: Vec2, at: Vec
                 near_fade(d, limit)
             } else {
                 let depth = g.dot(view25::forward(yaw));
-                first_person_fade(covering_gap(cam, &tilt, model, picture, depth), FP_NEAR_BAND * limit)
+                first_person_fade(covering_gap(fc, model, picture, depth), FP_NEAR_BAND * limit)
             };
         }
         if vis <= 0.0 {
@@ -2252,12 +2254,11 @@ fn without_near_fade(draw: impl FnOnce()) {
 /// The distance inside which a standing sprite fades (world units; 0 is off): the trailer's `near`,
 /// and in the first-person view the hero's distance from the eye (a sprite nearer than him fades only
 /// if it covers him, [`first_person_fade`]; he never fades). Never past the hero.
-fn near_fade_limit(cam: &Camera) -> f32 {
+fn near_fade_limit(cam: &Camera, hero: f32) -> f32 {
     // The eyes view: a fixed distance (the hero stands at the eye, so his distance would fade nothing).
     if eyes_cam(cam) {
         return view25::EYE_NEAR;
     }
-    let hero = NEAR_LIMIT.with(std::cell::Cell::get);
     match trailer() {
         Some(t) => t.near.min(hero),
         // Only the first-person view fades by the hero's distance: the 2.5D sprites never do.
@@ -2292,9 +2293,9 @@ const FP_HERO_MARGIN: f32 = 0.1;
 /// `model`) overlaps his widened by [`FP_HERO_MARGIN`], or has a corner behind the eye. The depth is the one
 /// the draw order sorts by ([`sprite_key`]), so a sprite that is drawn over him is one in front of him. None
 /// when he is not drawn this frame.
-fn covering_gap(cam: &Camera, tilt: &Tilt, model: Mat4, picture: Rect, depth: f32) -> Option<f32> {
-    let hero = HERO_ON_WINDOW.with(std::cell::Cell::get)?;
-    let covers = match picture_on_screen(tilt, screen_view(cam), model, picture) {
+fn covering_gap(fc: &FrameCtx, model: Mat4, picture: Rect, depth: f32) -> Option<f32> {
+    let hero = fc.hero?;
+    let covers = match picture_quad(fc.view_proj, fc.view, model, picture).map(quad_bounds) {
         Some(r) => overlaps(r, hero.rect, FP_HERO_MARGIN * hero.rect.w),
         None => true,
     };
@@ -2320,7 +2321,7 @@ fn screen_view(cam: &Camera) -> Rect {
 /// `model`: the picture's four corners projected through the window's view, and the box about them. None
 /// if a corner is behind the eye.
 fn picture_on_screen(tilt: &Tilt, view: Rect, model: Mat4, picture: Rect) -> Option<Rect> {
-    picture_quad(tilt, view, model, picture).map(quad_bounds)
+    picture_quad(view_proj_cached(tilt, view), view, model, picture).map(quad_bounds)
 }
 
 local! {
@@ -2346,10 +2347,9 @@ fn view_proj_cached(tilt: &Tilt, view: Rect) -> Mat4 {
 
 /// The four corners of a standing sprite's `picture` on the window, in the order of the picture's corners (a convex
 /// quad): the billboard `model`'s projection. None if a corner is behind the eye.
-fn picture_quad(tilt: &Tilt, view: Rect, model: Mat4, picture: Rect) -> Option<[Vec2; 4]> {
+fn picture_quad(view_proj: Mat4, view: Rect, model: Mat4, picture: Rect) -> Option<[Vec2; 4]> {
     let (x0, y0, x1, y1) = (picture.x, picture.y, picture.x + picture.w, picture.y + picture.h);
-    // The four corners share one view-projection, kept while the camera and the window stay the same (`view_proj_cached`).
-    let view_proj = view_proj_cached(tilt, view);
+    // The four corners share one view-projection (`view_proj_cached`, or the pass's own in `FrameCtx`).
     let mut quad = [Vec2::ZERO; 4];
     for (k, (x, y)) in [(x0, y0), (x1, y0), (x1, y1), (x0, y1)].into_iter().enumerate() {
         quad[k] = view25::project_with(view_proj, model.transform_point3(vec3(x, y, 0.0)), view)?;
@@ -3622,8 +3622,9 @@ local! {
     static WORLD_ITEMS: std::cell::RefCell<Vec<(i64, Drawable)>> = std::cell::RefCell::new(Vec::new());
 }
 
-/// What the sprite pass reads once for the frame, instead of once per sprite (the thread-locals and the screen's
-/// settings do not change while the world pass draws): made at the start of [`draw_world_in`].
+/// What the sprite pass reads once, instead of once per sprite: the thread-locals and the screen's settings do not
+/// change while the pass draws (the pass's own state is set before it, see [`draw_world_in`]). Built by [`FrameCtx::of`]
+/// at the start of the pass, and by the callers outside a pass when they draw a standing sprite.
 #[derive(Clone, Copy)]
 struct FrameCtx {
     /// The screen's DPI (`screen_dpi_scale`).
@@ -3634,12 +3635,75 @@ struct FrameCtx {
     anim: f32,
     /// The sun's form light of the frame's camera (`form_sun_of`).
     sun: Option<FormSun>,
+    /// The pass the sprites are drawn in (`PASS`).
+    pass: Pass,
+    /// The window's view of the tilted camera (`screen_view`).
+    view: Rect,
+    /// The window's size (`frame_state::screen_w` and `screen_h`), from its origin.
+    window: Rect,
+    /// The tilted camera's view-projection for `view` (`view_proj_cached`); the identity in the flat view, where no
+    /// sprite is projected.
+    view_proj: Mat4,
+    /// The hero's distance limit of the near fade (`NEAR_LIMIT`).
+    near_limit: f32,
+    /// The hero as drawn this frame (`HERO_ON_WINDOW`).
+    hero: Option<HeroOnWindow>,
+    /// Whether the night's light is on (`lit_whole`: the frame's lights have a night above 0).
+    night: bool,
+}
+
+#[cfg(test)]
+impl FrameCtx {
+    /// [`FrameCtx::of`] with the screen's values fixed: the tests run off the main thread, where macroquad's screen
+    /// reads (the fallback of `frame_state`) panic.
+    fn for_test(cam: &Camera) -> FrameCtx {
+        let view = screen_view(cam);
+        FrameCtx {
+            dpi: 1.0,
+            clock: 0,
+            anim: 1.0,
+            sun: None,
+            pass: PASS.with(std::cell::Cell::get),
+            view,
+            window: cam.view,
+            view_proj: cam.tilt.map_or(Mat4::IDENTITY, |t| view_proj_cached(&t, view)),
+            near_limit: NEAR_LIMIT.with(std::cell::Cell::get),
+            hero: HERO_ON_WINDOW.with(std::cell::Cell::get),
+            night: false,
+        }
+    }
+}
+
+impl FrameCtx {
+    /// The context of the sprites drawn now from `cam`: every value read as the sprite path would read it.
+    fn of(cam: &Camera) -> FrameCtx {
+        let view = screen_view(cam);
+        FrameCtx {
+            dpi: super::frame_state::dpi(),
+            clock: clock_ms(),
+            anim: super::map_anim::level(),
+            sun: form_sun_of(cam),
+            pass: PASS.with(std::cell::Cell::get),
+            view,
+            // Only a tilted sprite is tested against the window (`standing_core`), so the flat view does not read it.
+            window: if cam.tilt.is_some() { Rect::new(0.0, 0.0, super::frame_state::screen_w(), super::frame_state::screen_h()) } else { Rect::new(0.0, 0.0, 0.0, 0.0) },
+            view_proj: cam.tilt.map_or(Mat4::IDENTITY, |t| view_proj_cached(&t, view)),
+            near_limit: NEAR_LIMIT.with(std::cell::Cell::get),
+            hero: HERO_ON_WINDOW.with(std::cell::Cell::get),
+            night: lights::with_frame(|f| f.is_some_and(|f| f.night > 0.0)),
+        }
+    }
 }
 
 /// A picture drawn under the night's light is drawn whole: the lit draw samples a box's edge texels differently from the
 /// whole sprite's (measured on card1: up to 46 levels at night with the boxes, 1 level whole). By day the box is exact.
 fn lit_whole(slot: Slot) -> Slot {
-    if lights::with_frame(|f| f.is_some_and(|f| f.night > 0.0)) {
+    lit_whole_if(slot, lights::with_frame(|f| f.is_some_and(|f| f.night > 0.0)))
+}
+
+/// [`lit_whole`] with the night flag given (the sprite pass's [`FrameCtx::night`]).
+fn lit_whole_if(slot: Slot, night: bool) -> Slot {
+    if night {
         Slot { rect: Rect::new(slot.base.x, slot.base.y, slot.tex.x, slot.tex.y), off: Vec2::ZERO, size: slot.full, ..slot }
     } else {
         slot
@@ -3655,7 +3719,7 @@ fn draw_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera, ctx: &FrameCtx
         let origin = object_sprite_origin(o, r.full.x, r.full.y, cam);
         // Zoomed out, the smaller copy of the sprite is drawn in the same place and size, from the same texture.
         let r = sprite_lod_divisor(cam.scale).and_then(|d| atlas.decoration_lod(o.class, o.sprite, d)).unwrap_or(r);
-        let r = lit_whole(r);
+        let r = lit_whole_if(r, ctx.night);
         if o.class == object_class::TREES {
             // The small trees and bushes sway: the quad's top corners move by the lean of
             // their phase, the bottom stays (0x4c99d0, engine.md §7).
@@ -3967,17 +4031,17 @@ fn draw_building_ground(cam: &Camera, atlas: &Atlas, slot: &Slot, cards: &[Card]
 /// (`standing`), so the group turns as one picture, its cards in their layers. Its flags (`living`) draw with the
 /// card that holds their anchor, moved by that card's layer offset.
 #[allow(clippy::too_many_arguments)]
-fn draw_building_group(cam: &Camera, atlas: &Atlas, slot: &Slot, cards: &[Card], origin: Vec2, zoom: f32, foot: Vec2, vis: f32, living: Option<&Living>, outlined: bool, pick: Option<Pick>, shading: Shading) {
+fn draw_building_group(cam: &Camera, fc: &FrameCtx, atlas: &Atlas, slot: &Slot, cards: &[Card], origin: Vec2, zoom: f32, foot: Vec2, vis: f32, living: Option<&Living>, outlined: bool, pick: Option<Pick>, shading: Shading) {
     if cam.tilt.is_some_and(|t| t.cam.bend.is_some()) {
         // Living parts are off in a bent view (`living_on`), so the cleared copy and the flags never mix here.
         debug_assert!(living.is_none(), "a bent view's buildings have no living parts");
-        return draw_layers_on_sheet(cam, atlas, slot, cards, origin, zoom, foot, vis, outlined, pick, shading);
+        return draw_layers_on_sheet(cam, fc, atlas, slot, cards, origin, zoom, foot, vis, outlined, pick, shading);
     }
     let layers = layered_cards(cam, cards, group_y(foot, origin, zoom));
     let (at, size) = (origin + slot.off * zoom, slot.size * zoom);
     let picture = Rect::new(at.x, at.y, size.x, size.y);
     PICK_NEXT.with_borrow_mut(|p| *p = pick.map(|pick| (pick, atlas_src(atlas, slot.rect))));
-    standing_core(shading, cam, foot, foot, foot, vis, picture, || {
+    standing_core(shading, cam, fc, foot, foot, foot, vis, picture, || {
         frame_probe::sprite(size.x, size.y);
         match living.and_then(|ls| ls.body()) {
             // The cleared copy holds the box: its texels start at the box's offset.
@@ -4015,7 +4079,7 @@ fn sheet_layers(cards: &[Card], origin: Vec2, zoom: f32, group_y: f32, yaw_deg: 
 /// fade and the gold outline of the whole group are its own (the layers fade together); a layer past a down bend's
 /// horizon is not drawn.
 #[allow(clippy::too_many_arguments)]
-fn draw_layers_on_sheet(cam: &Camera, atlas: &Atlas, slot: &Slot, cards: &[Card], origin: Vec2, zoom: f32, foot: Vec2, vis: f32, outlined: bool, pick: Option<Pick>, shading: Shading) {
+fn draw_layers_on_sheet(cam: &Camera, fc: &FrameCtx, atlas: &Atlas, slot: &Slot, cards: &[Card], origin: Vec2, zoom: f32, foot: Vec2, vis: f32, outlined: bool, pick: Option<Pick>, shading: Shading) {
     let size = vec2(atlas.texture.width(), atlas.texture.height());
     let (at, box_size) = (origin + slot.off * zoom, slot.size * zoom);
     let picture = Rect::new(at.x, at.y, box_size.x, box_size.y);
@@ -4032,7 +4096,7 @@ fn draw_layers_on_sheet(cam: &Camera, atlas: &Atlas, slot: &Slot, cards: &[Card]
     if outlined {
         let d = (1.5 * zoom).max(1.0);
         for (at, card) in &layers {
-            standing_core(shading, cam, foot, *at, *at, vis, picture, || {
+            standing_core(shading, cam, fc, foot, *at, *at, vis, picture, || {
                 super::chrome::silhouette(|| {
                     for (dx, dy) in OUTLINE_STEPS {
                         super::sharp::draw_mesh_sharp(&mesh(card, origin + vec2(dx * d, dy * d), faded(BUILDING_OUTLINE)), vec2(zoom, zoom));
@@ -4044,7 +4108,7 @@ fn draw_layers_on_sheet(cam: &Camera, atlas: &Atlas, slot: &Slot, cards: &[Card]
     for (k, (at, card)) in layers.iter().enumerate() {
         // Each layer is picked as the building (the outline pass above is not).
         PICK_NEXT.with_borrow_mut(|p| *p = pick.map(|pick| (pick, atlas_src(atlas, slot.rect))));
-        standing_core(shading, cam, foot, *at, *at, vis, picture, || {
+        standing_core(shading, cam, fc, foot, *at, *at, vis, picture, || {
             if k == 0 {
                 frame_probe::sprite(box_size.x, box_size.y);
             }
@@ -5422,7 +5486,6 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     let map = &game.world.map;
     let ((c0, c1), (r0, r1)) = cam.visible(map);
     // The settings and thread-locals the sprites read, read once for the pass (see `FrameCtx`).
-    let ctx = FrameCtx { dpi: super::frame_state::dpi(), clock: clock_ms(), anim: super::map_anim::level(), sun: form_sun_of(cam) };
     // Sprites stand on their cell and reach up to ~8 cells above it. Turned, a sprite reaches any
     // way up the screen, so every side takes the larger margin.
     let (below, side) = (10, 8);
@@ -5449,6 +5512,8 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     }
     // The hero as drawn, before any sprite of the pass (the hills' too): the covering test needs him.
     HERO_ON_WINDOW.with(|h| h.set(if first_person() && bent_first_person_cam(cam) { hero_on_screen(game, art, cam) } else { None }));
+    // What the sprites read once for the pass (see `FrameCtx`): built after the two locals above, which the sprites read.
+    let ctx = FrameCtx::of(cam);
     // An object of the drawn columns and rows with a cell explored near the feather is seen, and
     // the hills are the classes 1-3 (`hill`).
     let seen = |o: &Decoration| o.tile.0 >= c0 - side && o.tile.0 < c1 + side && razdor::rules::map::object_cells(o).any(|t| fog.explored_near(t, minimap::FEATHER));
@@ -5532,7 +5597,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
             if seen_o {
                 if hill(o) {
                     if !tilted {
-                        standing_map(cam, object_foot(o, cam), object_fog(o, cam), object_foot(o, cam), 1.0, object_picture(o, art, cam), || draw_object(o, art, cam, &ctx));
+                        standing_map(cam, &ctx, object_foot(o, cam), object_fog(o, cam), object_foot(o, cam), 1.0, object_picture(o, art, cam), || draw_object(o, art, cam, &ctx));
                     }
                 } else {
                     let foot = object_foot(o, cam);
@@ -5640,7 +5705,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
         super::sharp::session(|| {
             for (o, &seen_o) in rows.iter().zip(&seen_row) {
                 if seen_o && hill(o) {
-                    standing_map(cam, object_foot(o, cam), object_fog(o, cam), object_foot(o, cam), 1.0, object_picture(o, art, cam), || draw_object(o, art, cam, &ctx));
+                    standing_map(cam, &ctx, object_foot(o, cam), object_fog(o, cam), object_foot(o, cam), 1.0, object_picture(o, art, cam), || draw_object(o, art, cam, &ctx));
                 }
             }
         });
@@ -5695,7 +5760,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                     let picture = object_picture(o, art, cam);
                     let detail = detail_visibility(picture, ctx.dpi);
                     if detail > 0.0 {
-                        standing_map(cam, foot, object_fog(o, cam), foot, detail, picture, || {
+                        standing_map(cam, &ctx, foot, object_fog(o, cam), foot, detail, picture, || {
                             if cam.tilt.is_none() && detail < 1.0 {
                                 let prev = SPRITE_VIS.with(|s| s.replace(detail));
                                 draw_object(o, art, cam, &ctx);
@@ -5714,7 +5779,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                         ground(cam, || draw_building(l, art, cam, outlined));
                     } else {
                         let src = art.and_then(|a| a.map_atlas()).and_then(|at| atlas_src(at, at.building(l.picture.0, l.picture.1)?.rect));
-                        standing_picked_map(Some(Pick::Location(*i)), src, cam, building_foot(l, cam), building_fog(l, cam), building_foot(l, cam), 1.0, building_picture(l, art, cam), || draw_building(l, art, cam, outlined));
+                        standing_picked_map(Some(Pick::Location(*i)), src, cam, &ctx, building_foot(l, cam), building_fog(l, cam), building_foot(l, cam), 1.0, building_picture(l, art, cam), || draw_building(l, art, cam, outlined));
                     }
                 }
                 Drawable::BuildingGroup(i) => {
@@ -5727,21 +5792,21 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                     // Living (flags): the cards draw the cleared copy, and each flag moves with the card whose
                     // outline holds its anchor (`owning_card`).
                     let living = living_of(cam, art, l).filter(|(_, ls)| ls.body().is_some());
-                    draw_building_group(cam, atlas, &r, cards, origin, zoom, foot, 1.0, living.map(|(_, ls)| ls), outlined, Some(Pick::Location(*i)), Shading::Map(building_fog(l, cam)));
+                    draw_building_group(cam, &ctx, atlas, &r, cards, origin, zoom, foot, 1.0, living.map(|(_, ls)| ls), outlined, Some(Pick::Location(*i)), Shading::Map(building_fog(l, cam)));
                 }
                 Drawable::Army(i) => {
                     let a = &game.world.armies[*i];
                     let f = cam.to_screen(game.army_display_pos(a));
                     // A figure inside a building is not drawn (`draw_army`), so the pointer does not find it either.
                     let pick = (!game.army_hidden(a)).then_some(Pick::Army(*i));
-                    standing_picked(pick, None, cam, f, f, shade_of(f), army_picture(game, a, art, cam), || draw_army(game, a, assets, art, cam));
+                    standing_picked(pick, None, cam, &ctx, f, f, shade_of(f), army_picture(game, a, art, cam), || draw_army(game, a, assets, art, cam));
                 }
                 Drawable::Ship => {
                     if let Some(ship) = game.ship {
                         let at = map.center(ship.tile);
                         let f = cam.to_screen(at);
                         let picture = figure_rect(art, ship_stem(razdor::rules::ships::kind::HERO), at, cam, Stand::Afloat).unwrap_or(Rect::new(f.x - 20.0, f.y - 20.0, 40.0, 40.0));
-                        standing(cam, f, f, shade_of(f), picture, || {
+                        standing(cam, &ctx, f, f, shade_of(f), picture, || {
                             if !draw_figure(art, ship_stem(razdor::rules::ships::kind::HERO), at, None, 0, cam, Stand::Afloat) {
                                 draw_ship(cam, at, HERO_SAIL);
                             }
@@ -5751,12 +5816,12 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                 Drawable::Hero => {
                     let f = cam.to_screen(game.display_pos());
                     let pick = (!game.hero_hidden()).then_some(Pick::Hero);
-                    without_near_fade(|| standing_picked(pick, None, cam, f, f, shade_of(f), hero_picture(game, art, cam), || draw_hero(game, assets, art, cam)))
+                    without_near_fade(|| standing_picked(pick, None, cam, &ctx, f, f, shade_of(f), hero_picture(game, art, cam), || draw_hero(game, assets, art, cam)))
                 }
                 Drawable::Spell(n) => {
                     if let Some(s) = spell {
                         let f = cam.to_screen(s.at);
-                        standing(cam, f, f, shade_of(f), spell_picture(s, *n, cam), || draw_spell_layer(s, *n, cam));
+                        standing(cam, &ctx, f, f, shade_of(f), spell_picture(s, *n, cam), || draw_spell_layer(s, *n, cam));
                     }
                 }
             }
@@ -7845,12 +7910,12 @@ fn draw_building_windows(game: &Game, assets: &Assets, cam: &Camera, veil: Veil)
                 }
                 if let Some((_, r, cards)) = card_building(l, Some(art)).filter(|_| c.tilt.is_some()) {
                     let origin = building_sprite_origin(l, r.full.x, r.full.y, c);
-                    draw_building_group(c, atlas, &r, cards, origin, zoom, foot, vis, None, false, None, Shading::Cpu);
+                    draw_building_group(c, &FrameCtx::of(c), atlas, &r, cards, origin, zoom, foot, vis, None, false, None, Shading::Cpu);
                 } else if let Some(r) = atlas.building(l.picture.0, l.picture.1).map(lit_whole) {
                     let at = building_sprite_origin(l, r.full.x, r.full.y, c) + r.off * zoom;
                     let size = r.size * zoom;
                     let params = DrawTextureParams { dest_size: Some(size), source: Some(r.rect), ..Default::default() };
-                    standing(c, foot, foot, vis, Rect::new(at.x, at.y, size.x, size.y), || super::sharp::draw(&atlas.texture, at.x, at.y, WHITE, params));
+                    standing(c, &FrameCtx::of(c), foot, foot, vis, Rect::new(at.x, at.y, size.x, size.y), || super::sharp::draw(&atlas.texture, at.x, at.y, WHITE, params));
                 }
             }
         });
@@ -9292,7 +9357,7 @@ mod tilt_tests {
         NEAR_LIMIT.with(|l| l.set(12.0));
         for yaw in [0.0, 90.0, 180.0, 270.0] {
             let cam = camera(&game, Some((view25::PITCH_DEFAULT, yaw)));
-            assert_eq!(near_fade_limit(&cam), 0.0, "yaw {yaw}: the 2.5D sprites do not fade by the hero's distance");
+            assert_eq!(near_fade_limit(&cam, f32::INFINITY), 0.0, "yaw {yaw}: the 2.5D sprites do not fade by the hero's distance");
         }
         NEAR_LIMIT.with(|l| l.set(f32::INFINITY));
         set_tilt_view(false);
@@ -9334,7 +9399,6 @@ mod tilt_tests {
         let m = &game.world.map;
         let (cx, cy) = (m.w / 2, m.h / 2);
         let cam = first_person_camera(&game, 0.0, FarGround::Up);
-        let tilt = cam.tilt.expect("the first-person tilt");
         let hero_at = cam.screen_at(m.grid.center((cx, cy)));
         let (fx, fy) = m.grid.center((cx + 6, cy));
         let far_at = cam.screen_at((fx, fy));
@@ -9345,10 +9409,11 @@ mod tilt_tests {
         let picture = Rect::new(-1.0, -1.0, 2.0, 2.0);
         let on_hero = Mat4::from_translation(vec3(m.grid.center((cx, cy)).0, 0.0, m.grid.center((cx, cy)).1));
         let on_far = Mat4::from_translation(vec3(fx, 0.0, fy));
-        assert_eq!(covering_gap(&cam, &tilt, on_hero, picture, 4.0), Some(6.0), "a sprite on his cell covers him, six in front of him");
-        assert_eq!(covering_gap(&cam, &tilt, on_far, picture, 4.0), None, "a sprite six cells east does not");
+        let fc = FrameCtx::for_test(&cam);
+        assert_eq!(covering_gap(&fc, on_hero, picture, 4.0), Some(6.0), "a sprite on his cell covers him, six in front of him");
+        assert_eq!(covering_gap(&fc, on_far, picture, 4.0), None, "a sprite six cells east does not");
         HERO_ON_WINDOW.with(|h| h.set(None));
-        assert_eq!(covering_gap(&cam, &tilt, on_hero, picture, 4.0), None, "nothing covers an undrawn hero");
+        assert_eq!(covering_gap(&FrameCtx::for_test(&cam), on_hero, picture, 4.0), None, "nothing covers an undrawn hero");
     }
 
     /// The first-person camera over the middle of `game`'s map, built as [`Camera::looking_in`]
@@ -9800,7 +9865,7 @@ mod tilt_tests {
         let game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
         let flat = camera(&game, None);
         let mut got = None;
-        standing(&flat, vec2(10.0, 10.0), vec2(10.0, 10.0), 0.25, Rect::new(0.0, 0.0, 1.0, 1.0), || got = Some(faded(WHITE)));
+        standing(&flat, &FrameCtx::for_test(&flat), vec2(10.0, 10.0), vec2(10.0, 10.0), 0.25, Rect::new(0.0, 0.0, 1.0, 1.0), || got = Some(faded(WHITE)));
         assert_eq!(got.map(|c| (c.r, c.g, c.b, c.a)), Some((1.0, 1.0, 1.0, 1.0)), "a flat sprite is never faded");
     }
 
@@ -9915,7 +9980,7 @@ mod pick_tests {
         let cam = Camera { origin: vec2(0.0, 0.0), view, draw: view, scale: PX, grid: game.world.map.grid, tilt: None };
         PICKS.with_borrow_mut(|q| q.clear());
         let mut drawn = false;
-        standing_picked(Some(Pick::Hero), None, &cam, vec2(100.0, 100.0), vec2(100.0, 100.0), 1.0, Rect::new(90.0, 60.0, 20.0, 40.0), || drawn = true);
+        standing_picked(Some(Pick::Hero), None, &cam, &FrameCtx::for_test(&cam), vec2(100.0, 100.0), vec2(100.0, 100.0), 1.0, Rect::new(90.0, 60.0, 20.0, 40.0), || drawn = true);
         assert!(drawn, "the flat view draws the sprite");
         assert!(PICKS.with_borrow(|q| q.is_empty()), "nothing is recorded flat");
         assert_eq!(sprite_under(vec2(100.0, 80.0)), None);
