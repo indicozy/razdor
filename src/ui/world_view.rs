@@ -1858,7 +1858,8 @@ local! {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Shading {
     Cpu,
-    Map,
+    /// The fog cell of the map sprite ([`fog_cell`], [`building_fog`], [`object_fog`]).
+    Map(Tile),
 }
 
 /// A straight-alpha sprite colour `c` faded by the visibility of the standing sprite being drawn:
@@ -2061,22 +2062,55 @@ fn standing_at(cam: &Camera, foot: Vec2, base: Vec2, at: Vec2, vis: f32, picture
 
 /// [`standing`] for a map sprite: its fog comes from its foot cell in the shader (`sprite_fog`), so `vis` is the
 /// sprite's own fade only (`detail`, 1 for none). A cell that hides the sprite draws nothing, as [`standing`] does.
-fn standing_map(cam: &Camera, foot: Vec2, base: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
-    standing_core(Shading::Map, cam, foot, base, foot, vis, picture, draw);
+fn standing_map(cam: &Camera, foot: Vec2, fog: Tile, base: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
+    standing_core(Shading::Map(fog), cam, foot, base, foot, vis, picture, draw);
 }
 
 /// [`standing_picked`] for a map sprite ([`standing_map`]).
 #[allow(clippy::too_many_arguments)]
-fn standing_picked_map(pick: Option<Pick>, src: Option<PickSrc>, cam: &Camera, foot: Vec2, base: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
+fn standing_picked_map(pick: Option<Pick>, src: Option<PickSrc>, cam: &Camera, foot: Vec2, fog: Tile, base: Vec2, vis: f32, picture: Rect, draw: impl FnOnce()) {
     PICK_NEXT.with_borrow_mut(|p| *p = pick.map(|pick| (pick, src)));
-    standing_map(cam, foot, base, vis, picture, draw);
+    standing_map(cam, foot, fog, base, vis, picture, draw);
 }
 
-/// The fog of the map sprite whose foot is at `foot` in the table of the pass (`sprite_fog::at`), on the cell the CPU's
-/// shade (`Shade::at`) reads.
-fn map_fog(cam: &Camera, foot: Vec2) -> super::sprite_fog::Cell {
-    let world = (foot + cam.origin) / cam.scale;
-    super::sprite_fog::at(cam.grid.tile_at((world.x, world.y)), extend_edge())
+/// The fog of the map sprite whose fog cell is `cell` in the table of the pass (`sprite_fog::at`).
+fn map_fog(cell: Tile) -> super::sprite_fog::Cell {
+    super::sprite_fog::at(cell, extend_edge())
+}
+
+/// The cell whose fog decides a map sprite standing on `cells` (its footprint, the cells its foot averages): the covered
+/// cell nearest the average of their centres, ties to the smallest (row, col). It reads map coordinates only, so the
+/// cell is the same at every camera; a foot on a border of two cells used to be read back from the screen, and its
+/// rounding flipped the cell as the camera moved (backlog 1612). `None` without cells.
+fn fog_cell(grid: Grid, cells: impl Iterator<Item = Tile>) -> Option<Tile> {
+    let cells: Vec<Tile> = cells.collect();
+    let n = cells.len() as f32;
+    if cells.is_empty() {
+        return None;
+    }
+    let (sx, sy) = cells.iter().fold((0.0, 0.0), |(sx, sy), &t| {
+        let (x, y) = grid.center(t);
+        (sx + x, sy + y)
+    });
+    let (mx, my) = (sx / n, sy / n);
+    cells.into_iter().min_by_key(|&t| {
+        let (x, y) = grid.center(t);
+        let d = (x - mx).powi(2) + (y - my).powi(2);
+        ((d * 1e6).round() as i64, t.1, t.0)
+    })
+}
+
+/// The fog cell of a building: its footprint's ([`fog_cell`]), its anchor without cells.
+fn building_fog(l: &Location, cam: &Camera) -> Tile {
+    fog_cell(cam.grid, l.cells()).unwrap_or(l.anchor)
+}
+
+/// The fog cell of a map object: a hill or mountain's footprint ([`fog_cell`]), its own cell otherwise.
+fn object_fog(o: &Decoration, cam: &Camera) -> Tile {
+    match o.class {
+        1..=8 => fog_cell(cam.grid, razdor::rules::map::object_cells(o)).unwrap_or(o.tile),
+        _ => o.tile,
+    }
 }
 
 /// The map sprites' fog table for the pass (`sprite_fog::sync`): the fog as drawn and the reveals of `veil`. The same
@@ -2105,7 +2139,7 @@ fn standing_core(shading: Shading, cam: &Camera, foot: Vec2, base: Vec2, at: Vec
     // A map sprite's fog is the shader's, from its foot cell: a cell that hides the sprite draws nothing (as vis 0 does).
     let fog = match shading {
         Shading::Cpu => None,
-        Shading::Map => match map_fog(cam, foot) {
+        Shading::Map(cell) => match map_fog(cell) {
             super::sprite_fog::Cell::Hidden => return,
             super::sprite_fog::Cell::Clear => None,
             super::sprite_fog::Cell::At(uv) => Some(uv),
@@ -5381,7 +5415,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
             if seen_o {
                 if hill(o) {
                     if !tilted {
-                        standing_map(cam, object_foot(o, cam), object_foot(o, cam), 1.0, object_picture(o, art, cam), || draw_object(o, art, cam, &ctx));
+                        standing_map(cam, object_foot(o, cam), object_fog(o, cam), object_foot(o, cam), 1.0, object_picture(o, art, cam), || draw_object(o, art, cam, &ctx));
                     }
                 } else {
                     let foot = object_foot(o, cam);
@@ -5489,7 +5523,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
         super::sharp::session(|| {
             for (o, &seen_o) in rows.iter().zip(&seen_row) {
                 if seen_o && hill(o) {
-                    standing_map(cam, object_foot(o, cam), object_foot(o, cam), 1.0, object_picture(o, art, cam), || draw_object(o, art, cam, &ctx));
+                    standing_map(cam, object_foot(o, cam), object_fog(o, cam), object_foot(o, cam), 1.0, object_picture(o, art, cam), || draw_object(o, art, cam, &ctx));
                 }
             }
         });
@@ -5544,7 +5578,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                     let picture = object_picture(o, art, cam);
                     let detail = detail_visibility(picture, ctx.dpi);
                     if detail > 0.0 {
-                        standing_map(cam, foot, foot, detail, picture, || {
+                        standing_map(cam, foot, object_fog(o, cam), foot, detail, picture, || {
                             if cam.tilt.is_none() && detail < 1.0 {
                                 let prev = SPRITE_VIS.with(|s| s.replace(detail));
                                 draw_object(o, art, cam, &ctx);
@@ -5563,7 +5597,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                         ground(cam, || draw_building(l, art, cam, outlined));
                     } else {
                         let src = art.and_then(|a| a.map_atlas()).and_then(|at| atlas_src(at, at.building(l.picture.0, l.picture.1)?.rect));
-                        standing_picked_map(Some(Pick::Location(*i)), src, cam, building_foot(l, cam), building_foot(l, cam), 1.0, building_picture(l, art, cam), || draw_building(l, art, cam, outlined));
+                        standing_picked_map(Some(Pick::Location(*i)), src, cam, building_foot(l, cam), building_fog(l, cam), building_foot(l, cam), 1.0, building_picture(l, art, cam), || draw_building(l, art, cam, outlined));
                     }
                 }
                 Drawable::BuildingGroup(i) => {
@@ -5576,7 +5610,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                     // Living (flags): the cards draw the cleared copy, and each flag moves with the card whose
                     // outline holds its anchor (`owning_card`).
                     let living = living_of(cam, art, l).filter(|(_, ls)| ls.body().is_some());
-                    draw_building_group(cam, atlas, &r, cards, origin, zoom, foot, 1.0, living.map(|(_, ls)| ls), outlined, Some(Pick::Location(*i)), Shading::Map);
+                    draw_building_group(cam, atlas, &r, cards, origin, zoom, foot, 1.0, living.map(|(_, ls)| ls), outlined, Some(Pick::Location(*i)), Shading::Map(building_fog(l, cam)));
                 }
                 Drawable::Army(i) => {
                     let a = &game.world.armies[*i];
@@ -8977,6 +9011,40 @@ mod tilt_tests {
             cam.tilt = Some(Tilt { cam: tilt, plan: tilt.ground_footprint(view, view), cull: tilt.ground_footprint(view, view) });
         }
         cam
+    }
+
+    /// A building's fog cell must not depend on the camera's sub-pixel origin (backlog 1612): its foot is the average of
+    /// its cells' centres, on a border or a corner of them, and the screen round trip flips it as the camera moves.
+    #[test]
+    fn a_building_fog_cell_does_not_flicker_as_the_camera_moves() {
+        let game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        let (ax, ay) = (game.world.map.w / 2, game.world.map.h / 2);
+        for zoom in [PX * 1.3, PX * 1.7, PX * 2.3] {
+            for (sx, sy) in [(2, 1), (2, 2)] {
+                let l = Location { anchor: (ax, ay), size: (sx, sy), ..game.world.locations[0].clone() };
+                let mut seen = std::collections::BTreeMap::<Tile, Vec<usize>>::new();
+                for step in 0..300 {
+                    let mut cam = camera(&game, Some((view25::PITCH_DEFAULT, 30.0)));
+                    cam.scale = zoom;
+                    cam.origin += vec2(step as f32 * 0.013, 0.0);
+                    seen.entry(building_fog(&l, &cam)).or_default().push(step);
+                }
+                assert_eq!(seen.len(), 1, "zoom {zoom} size {sx}x{sy}: the fog cell changes with the origin: {:?}", seen.iter().map(|(t, s)| (t, s.len(), s[0])).collect::<Vec<_>>());
+                let only = *seen.keys().next().unwrap();
+                assert!(l.cells().any(|t| t == only), "zoom {zoom} size {sx}x{sy}: the fog cell {only:?} is not one of the building's cells");
+            }
+        }
+    }
+
+    /// The fog cell of a footprint is one of its cells, the nearest to the average of their centres; a tie goes to the
+    /// smallest (row, col). Two cells in one row tie: the left one (smaller column) wins.
+    #[test]
+    fn the_fog_cell_is_the_covered_cell_nearest_the_footprint_centre() {
+        let grid = Grid::Square8;
+        assert_eq!(fog_cell(grid, [(5, 3), (4, 3)].into_iter()), Some((4, 3)));
+        assert_eq!(fog_cell(grid, [(5, 3), (5, 4)].into_iter()), Some((5, 3)));
+        assert_eq!(fog_cell(grid, [(5, 3), (4, 3), (5, 4), (4, 4)].into_iter()), Some((4, 3)));
+        assert_eq!(fog_cell(grid, std::iter::empty()), None);
     }
 
     /// Every cell near the middle of the map, and points a quarter cell off its centre, pick the
