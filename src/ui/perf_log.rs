@@ -49,6 +49,7 @@ pub fn startup() {
     diag::log(&format!("device: {}", device_text()));
     diag::log(&gl_line());
     diag::log(&format!("display: {}", display_text()));
+    super::sharp::sprite_retain_startup();
 }
 
 /// The display again, when the Android activity resumes: the mode and the rates may have changed while

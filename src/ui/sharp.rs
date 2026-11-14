@@ -23,6 +23,11 @@ use super::memo::Recent;
 
 mod retain;
 
+/// The sprite-retain switch's start line (`sprite retain: on|off`, see `retain::note_startup`).
+pub fn sprite_retain_startup() {
+    retain::note_startup();
+}
+
 /// The probe's draw count for a draw of `verts` vertices from `tex` (`frame_probe::draw`; the texture
 /// is keyed by its id). Does nothing with the probe off.
 pub fn count_draw(tex: Option<&Texture2D>, verts: usize) {

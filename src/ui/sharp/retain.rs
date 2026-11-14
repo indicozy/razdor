@@ -106,10 +106,27 @@ razdor::local! {
     static PIPELINE: std::cell::RefCell<Option<Pipeline>> = const { std::cell::RefCell::new(None) };
 }
 
-/// The switch: `RAZDOR_SPRITE_RETAIN=1` (read once). Off, no pass is retained and the draws are as before.
+/// The switch: `RAZDOR_SPRITE_RETAIN=1` (read once), or at compile time `RAZDOR_SPRITE_RETAIN_BUILD=1` (an A/B
+/// build: Android has no env vars, so the Samsung lab builds with it set). Off, no pass is retained and the draws
+/// are as before.
 pub fn enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var("RAZDOR_SPRITE_RETAIN").is_ok_and(|v| v.trim() == "1"))
+    *ON.get_or_init(|| built_in() || std::env::var("RAZDOR_SPRITE_RETAIN").is_ok_and(|v| v.trim() == "1"))
+}
+
+/// The compile-time switch (`RAZDOR_SPRITE_RETAIN_BUILD=1` when the binary is built).
+fn built_in() -> bool {
+    option_env!("RAZDOR_SPRITE_RETAIN_BUILD") == Some("1")
+}
+
+/// Logs the switch once at start, so a lab run can check which build it is (`sprite retain: on (A/B build)`).
+pub fn note_startup() {
+    let line = match (enabled(), built_in()) {
+        (true, true) => "sprite retain: on (A/B build)",
+        (true, false) => "sprite retain: on",
+        (false, _) => "sprite retain: off",
+    };
+    razdor::diag::log(line);
 }
 
 /// Whether a retained pass is running (its pieces go through [`piece`]).
@@ -155,12 +172,17 @@ fn vkey(v: &Vertex) -> [u32; 10] {
 }
 
 fn same(p: &Piece, rec: &Recording, verts: &[Vertex], idx: &[u16], id: TextureId, tex_size: Vec2) -> bool {
+    // Timing experiment only (`RAZDOR_RETAIN_NOCMP=1`, read once): the vertex compare is skipped, so the output is
+    // not checked. It measures what the compare costs; never a shipping setting.
+    static NOCMP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let nocmp = *NOCMP.get_or_init(|| std::env::var_os("RAZDOR_RETAIN_NOCMP").is_some());
     p.id == id
         && p.tex_size == tex_size
         && p.vert.1 == verts.len()
         && p.idx.1 == idx.len()
-        && rec.verts[p.vert.0..p.vert.0 + p.vert.1].iter().zip(verts).all(|(a, b)| vkey(a) == vkey(b))
-        && rec.idx[p.idx.0..p.idx.0 + p.idx.1] == *idx
+        && (nocmp
+            || rec.verts[p.vert.0..p.vert.0 + p.vert.1].iter().zip(verts).all(|(a, b)| vkey(a) == vkey(b)))
+        && (nocmp || rec.idx[p.idx.0..p.idx.0 + p.idx.1] == *idx)
 }
 
 fn push(rec: &mut Recording, verts: &[Vertex], idx: &[u16], tex: &Texture2D, tex_size: Vec2) {
