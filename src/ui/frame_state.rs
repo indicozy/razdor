@@ -16,6 +16,12 @@ pub fn refresh() {
     SCREEN.set((screen_width(), screen_height(), screen_dpi_scale()));
 }
 
+/// Tests: the window's size as this frame sees it, without a window (the layout code reads it).
+#[cfg(test)]
+pub fn set_for_test(w: f32, h: f32) {
+    SCREEN.set((w, h, 1.0));
+}
+
 fn current() -> (f32, f32, f32) {
     let s = SCREEN.get();
     if s.0 > 0.0 && s.1 > 0.0 {

@@ -324,7 +324,10 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
 
 - `looking_in` gives the flat camera a `Tilt`: a `TiltCamera` fitted to the view, so the cell under
   the target is as wide as a flat cell, and the ground the view shows (`plan`) and the ground the
-  drawing culls to (`cull`). The drawing runs in the flat camera's 2D space, `in_view` sets the 3D
+  drawing culls to (`cull`). The pan's clamp (`Camera::looking_in`) keeps the 2.5D view's reach on the map
+  (`ground_margins`: the bottom edge's chord for the sides, the ground to the top and bottom edges, turned by the
+  yaw), so every edge comes into view at every turn (test `panning_to_any_map_corner_shows_it_at_every_turn`); the
+  flat view keeps its box. The drawing runs in the flat camera's 2D space, `in_view` sets the 3D
   view (`View3d`: depth off, no viewport) on the cull footprint (`tilted_space`). `ground` lays that
   space on the ground for the terrain, the hills, marks, the route, bridges and the fog;
   `standing` makes each sprite a billboard through its foot (`view25::billboard_model`). A sprite's

@@ -1419,6 +1419,30 @@ fn tilt_yaw_start() -> f32 {
     std::env::var("RAZDOR_VIEW_YAW").ok().and_then(|v| v.parse().ok()).map_or(0.0, wrap_yaw)
 }
 
+/// How far the 2.5D view's ground reaches from its target, in world units: `(lo, hi)`, the reach left and up of the
+/// target and right and down of it, in the map's axes. The map's clamp keeps this reach on the map, so every edge
+/// comes into view at every turn. The reach is the view's own shape on the ground, turned by the yaw: the sides
+/// are the bottom edge's chord (the screen's narrowest row, so the map's sides reach its bottom corners), the depth
+/// the ground to the top and bottom edges. It moves with the target, so it is measured from the origin.
+fn ground_margins(scale: f32, view: Rect, pitch: f32, yaw: f32) -> (Vec2, Vec2) {
+    let cam = view25::TiltCamera::new(Vec2::ZERO, scale, view, pitch, yaw);
+    let (bottom, mid) = (view.y + view.h, view.x + view.w / 2.0);
+    let pick = |x: f32, y: f32| cam.pick(vec2(x, y), view);
+    let fwd = view25::forward(yaw);
+    let right = view25::right(yaw);
+    let (bl, br) = (pick(view.x, bottom).unwrap_or_default(), pick(view.x + view.w, bottom).unwrap_or_default());
+    let half = (br - bl).length() / 2.0;
+    let up = pick(mid, view.y).map_or(view25::FAR, |p| p.dot(fwd).max(0.0));
+    let down = pick(mid, bottom).map_or(0.0, |p| (-p.dot(fwd)).max(0.0));
+    let corners = [-half, half].into_iter().flat_map(|a| [up, -down].map(|t| right * a + fwd * t));
+    let (mut lo, mut hi) = (Vec2::ZERO, Vec2::ZERO);
+    for p in corners {
+        lo = lo.max(-p);
+        hi = hi.max(p);
+    }
+    (lo, hi)
+}
+
 /// The yaw the camera shows, in degrees (see [`ease_tilt_yaw`]).
 fn tilt_yaw() -> f32 {
     let deg = f32::from_bits(TILT_YAW_SHOWN.load(std::sync::atomic::Ordering::Relaxed));
@@ -2577,7 +2601,19 @@ impl Camera {
         let world = vec2((map.w as f32) * scale, (map.h as f32) * rh * scale);
         let pad = vec2(0.5 * scale, 0.5 * rh * scale);
         let centre = Vec2::from(at) * scale + pad;
-        let mut origin = centre - vec2(view.w, view.h) / 2.0;
+        let photo_angles = photo::angles();
+        // The margins the clamp keeps on the map, each side of the target in world pixels: the flat box of the view,
+        // or in the 2.5D view its reach on the ground (`ground_margins`), so a turned view pans to every edge as the
+        // flat one does (backlog 1613: turned 90°, a tall view could not reach the map's top end).
+        let flat_box = vec2(view.w, view.h) / 2.0;
+        let plain_25d = tilt_view() && view.w >= 1.0 && view.h >= 1.0 && photo_angles.is_none() && !eyes_view() && !first_person() && trailer().is_none();
+        let (lo, hi) = if plain_25d {
+            let (lo, hi) = ground_margins(scale, view, tilt_pitch(), tilt_yaw());
+            (lo * scale, hi * scale)
+        } else {
+            (flat_box, flat_box)
+        };
+        let mut at_px = centre;
         if super::trailer::edge_free() {
             // A trailer shot's `edge free` (dev only): no clamp, the target stays in the middle.
         } else if extend_edge() {
@@ -2585,17 +2621,17 @@ impl Camera {
             // goes (`terrain::EDGE_FULL`), and a map narrower than the view is centred, so the
             // extension shows on every side. Off, the view stays on the map as it always did.
             let over = vec2(terrain::EDGE_FULL * scale, terrain::EDGE_FULL * rh * scale);
-            origin.x = if world.x <= view.w { (world.x - view.w) / 2.0 } else { origin.x.clamp(-over.x, world.x - view.w + over.x) };
-            origin.y = if world.y <= view.h { (world.y - view.h) / 2.0 } else { origin.y.clamp(-over.y, world.y - view.h + over.y) };
+            at_px.x = if world.x <= lo.x + hi.x { world.x / 2.0 } else { at_px.x.clamp(lo.x - over.x, world.x - hi.x + over.x) };
+            at_px.y = if world.y <= lo.y + hi.y { world.y / 2.0 } else { at_px.y.clamp(lo.y - over.y, world.y - hi.y + over.y) };
         } else {
-            origin.x = origin.x.clamp(0.0, (world.x - view.w).max(0.0));
-            origin.y = origin.y.clamp(0.0, (world.y - view.h).max(0.0));
+            at_px.x = at_px.x.clamp(lo.x, (world.x - hi.x).max(lo.x));
+            at_px.y = at_px.y.clamp(lo.y, (world.y - hi.y).max(lo.y));
         }
+        let origin = at_px - flat_box;
         let draw = Rect::new(view.x, view.y, view.w, view.h + bar_h());
         let mut cam = Camera { origin: origin - pad, view, draw, scale, grid: map.grid, tilt: None };
         // A view with no height (a minimised window) has no perspective: it stays flat. Photo mode
         // is always tilted, with its own camera whatever the view setting (`ui::photo`).
-        let photo_angles = photo::angles();
         if (tilt_view() || photo_angles.is_some()) && view.w >= 1.0 && view.h >= 1.0 {
             let target = Vec2::from(cam.centre());
             if let Some((pitch, yaw)) = photo_angles {
@@ -8605,6 +8641,47 @@ mod tilt_tests {
                 }
             }
         }
+    }
+
+    /// Panning to each corner of the map shows that corner on screen at every turn, in the 2.5D view and in the flat
+    /// one (the control). The pan's clamp keeps the view on the map, so it has to keep the view on the map as it is
+    /// turned: a tall view turned 90° covers another box of the map than the flat one (backlog 1613: it could not pan
+    /// to the map's top end). A wide and a tall view, both smaller than the map.
+    #[test]
+    fn panning_to_any_map_corner_shows_it_at_every_turn() {
+        crate::ui::frame_state::set_for_test(1280.0, 800.0);
+        let game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        let m = &game.world.map;
+        let (ww, hh) = (m.w as f32 * PX, m.h as f32 * m.grid.row_height() * PX);
+        assert!(ww > 600.0 && hh > 600.0, "the map ({ww} x {hh} px) is bigger than the test views");
+        let (last_c, last_r) = (m.w - 1, m.h - 1);
+        let corners = [(0, 0), (last_c, 0), (0, last_r), (last_c, last_r)];
+        let views = [("wide", Rect::new(0.0, 0.0, 600.0, 360.0)), ("tall", Rect::new(0.0, 0.0, 360.0, 600.0))];
+        let saved_yaw = f32::from_bits(TILT_YAW_SHOWN.load(std::sync::atomic::Ordering::Relaxed));
+        set_first_person(false);
+        let mut failures = Vec::new();
+        for (name, view) in views {
+            for tilted in [false, true] {
+                set_tilt_view(tilted);
+                for yaw in [0.0f32, 90.0, 180.0, 270.0] {
+                    TILT_YAW_SHOWN.store(yaw.to_bits(), std::sync::atomic::Ordering::Relaxed);
+                    for t in corners {
+                        // A pan far past the corner: the clamp alone decides where the view stops.
+                        let far = (if t.0 == 0 { -1.0e4 } else { 1.0e4 }, if t.1 == 0 { -1.0e4 } else { 1.0e4 });
+                        let cam = Camera::looking_in(&game, 1.0, far, view);
+                        let at = cam.screen_at(m.grid.center(t));
+                        // On the view, with a pixel of slack for rounding (the reach is an exact edge).
+                        let on_view = Rect::new(view.x - 1.0, view.y - 1.0, view.w + 2.0, view.h + 2.0);
+                        if !on_view.contains(at) {
+                            failures.push(format!("{name} view, tilted {tilted}, yaw {yaw}: corner {t:?} at {at:?}"));
+                        }
+                    }
+                }
+            }
+        }
+        TILT_YAW_SHOWN.store(saved_yaw.to_bits(), std::sync::atomic::Ordering::Relaxed);
+        set_tilt_view(false);
+        assert!(failures.is_empty(), "a map corner is off the view:\n{}", failures.join("\n"));
     }
 
     /// The first-person near fade applies to the first-person camera only: the bent first-person tilt has it,
