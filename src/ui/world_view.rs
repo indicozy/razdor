@@ -2903,12 +2903,10 @@ impl Camera {
                     self.draw_mist(&tex, dest, src);
                 }
             }
-        } else if self.tilt.is_some() {
-            // The 2.5D view (a tilted camera) draws only the fog's dark box (`minimap::draw_fog_boxed`);
-            // the flat map view draws the whole quad.
-            minimap::draw_fog_boxed(&game.fog, &held, origin, settle, tl, br);
         } else {
-            minimap::draw_fog(&game.fog, &held, origin, settle, tl, br);
+            // The flat and the 2.5D view draw only the fog's dark box (`minimap::draw_fog_boxed`): the texels outside
+            // it are alpha 0, so a whole-quad blend changes no pixel and costs a full-screen pass (backlog 1618).
+            minimap::draw_fog_boxed(&game.fog, &held, origin, settle, tl, br);
         }
         let v = self.draw;
         let (l, r) = (tl.x.clamp(v.x, v.x + v.w), br.x.clamp(v.x, v.x + v.w));
@@ -5126,7 +5124,7 @@ impl Shade<'_> {
         let world = (foot + cam.origin) / cam.scale;
         let t = cam.grid.tile_at((world.x, world.y));
         let fog = self.fog;
-        // A disabled fog draws nothing (`minimap::draw_fog`), so it darkens nothing; nor does the
+        // A disabled fog draws nothing (`minimap::draw_fog_boxed`), so it darkens nothing; nor does the
         // trailer's no-fog switch.
         if !fog.enabled || fog.w <= 0 || fog.h <= 0 || trailer_nofog() {
             return 1.0;

@@ -588,7 +588,7 @@ fn alpha_box(rgba: &[u8], w: i32, h: i32) -> Option<[i32; 4]> {
 }
 
 /// The fog's texture for a material to draw (`ui::mist`), or None when the fog is off. The same
-/// texture [`draw_fog`] and [`draw_fog_extended`] draw.
+/// texture [`draw_fog_boxed`] and [`draw_fog_extended`] draw.
 pub fn fog_layer(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>) -> Option<Texture2D> {
     (fog.enabled && fog.w > 0 && fog.h > 0).then(|| fog_texture(fog, held, origin, settle))
 }
@@ -649,20 +649,11 @@ pub fn fog_layer_over(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle
     })
 }
 
-/// Draws the fog over the map. `tl` and `br` are the screen positions of world points
-/// `(-0.5, -0.5·row)` and `(w − 0.5, (h − 0.5)·row)`: the outer corners of the edge cells,
-/// so texel centres fall on cell centres.
-pub fn draw_fog(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>, tl: Vec2, br: Vec2) {
-    if !fog.enabled || fog.w <= 0 || fog.h <= 0 {
-        return;
-    }
-    let tex = fog_texture(fog, held, origin, settle);
-    draw_texture_ex(&tex, tl.x, tl.y, WHITE, DrawTextureParams { dest_size: Some(br - tl), ..Default::default() });
-}
-
-/// [`draw_fog`] over the box of the texels that are not fully transparent only (the 2.5D view's
+/// Draws the fog over the map, over the box of the texels that are not fully transparent only (the 2.5D view's
 /// fog, a player's report: the rest of the map is explored, alpha 0, and drawing it changes no
-/// pixel). The box is grown by one texel a side, so the bilinear sampling at its edge is the
+/// pixel; the flat view too since backlog 1618). `tl` and `br` are the screen positions of world points
+/// `(-0.5, -0.5·row)` and `(w − 0.5, (h − 0.5)·row)`: the outer corners of the edge cells,
+/// so texel centres fall on cell centres. The box is grown by one texel a side, so the bilinear sampling at its edge is the
 /// whole texture's; the texels at the same screen positions keep the same texture coordinates.
 /// Nothing is drawn when no texel is dark.
 pub fn draw_fog_boxed(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>, tl: Vec2, br: Vec2) {
@@ -712,7 +703,7 @@ fn outside_ground(o: Rect, r: Rect) -> [Rect; 4] {
     ]
 }
 
-/// [`draw_fog`] past a map's edges («Продолжать карту за краем»): `dest` shows the fog's texels
+/// [`draw_fog_boxed`] past a map's edges («Продолжать карту за краем»): `dest` shows the fog's texels
 /// `src` (in cells: texel `i` is cell `i`, its centre at `i + ½`). The texels past the fog's own
 /// hold the border's status ([`draw_extended`]), so the war fog runs on at the edge's own colour.
 pub fn draw_fog_extended(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>, dest: Rect, src: Rect) {

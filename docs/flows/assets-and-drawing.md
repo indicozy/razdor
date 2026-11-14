@@ -523,7 +523,7 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   ships, units by `draw_unit`) are not faded.
 - **The 2.5D fog's box**: `draw_fog_flat` on a tilted camera draws `minimap::draw_fog_boxed`, only the sub-quad over the
   texels that are not fully transparent (the box grown by one texel a side; nothing when none is dark). The same
-  pixels as the whole quad, fewer fragments. The flat map view and the minimap keep `minimap::draw_fog`.
+  pixels as the whole quad, fewer fragments. The flat map view draws the box too (backlog 1618); the minimap keeps its own box (`minimap::draw_fog_boxed`).
 - **«Анимация карты»** (the owner's decision 2026-11-11, `src/ui/map_anim.rs`, `Settings::map_anim`: `Mode` On, Near, Off;
   the row «Анимация карты» in the Map group, cycled On → «Только вблизи» → Off; env `RAZDOR_MAP_ANIM=on|near|off` overrides it).
   The map's animations are scaled by one level: 1 with On, 0 with Off, `world_view::zoom_lod` with Near (0 under 8 px a
@@ -660,7 +660,7 @@ strength (a sine of the sun's elevation, a smooth step for the brightness, a bel
 warmth, a night floor). The hour comes from the game clock (`ease_hour`: the clock's own steps are followed at once, so the light and the shadows do not trail a
 travel; a jump of 1–6 h is moved toward at 24 h a second; a load snaps), a real-time cycle, or a fixed hour; `RAZDOR_LIGHT_HOUR` overrides it
 for snapshots, and `RAZDOR_LIGHT_MODE=game|cycle` (with `RAZDOR_LIGHT_CYCLE`, minutes a day) picks the clock of a snapshot run. `world_view::draw_daylight` runs right after
-`draw_world` and before the flat `draw_fog` (after it with the mist on, see «Mist»): a multiply tint over the map area, then the point lights' pools
+`draw_world` and before the flat fog (`draw_fog_flat`, after it with the mist on, see «Mist»): a multiply tint over the map area, then the point lights' pools
 («Point lights» below) in screen space (`Camera::screen_at`). Off, it draws nothing. The frame's
 light is read once, before the world (`world_view::frame_light_of`), because the painted shadows' factor below needs it there too.
 **No relief** (this round, the owner's report: the grooves looked overcooked). The ground and the sprites take no
