@@ -2620,6 +2620,7 @@ struct Tilt {
     cull: Rect,
 }
 
+#[derive(Clone)]
 struct Camera {
     /// World pixel (at this zoom) at the top-left of the map view.
     origin: Vec2,
@@ -2709,12 +2710,22 @@ impl Camera {
                 });
             }
         }
-        // A flat camera's origin goes on whole physical pixels, so every frame's shift of the map is a whole number of
-        // pixels and the ground cache can move its content (`scroll_origin`). Tilted views keep their origin.
-        if cam.tilt.is_none() {
-            cam.origin = snap_origin(cam.origin);
-        }
         cam
+    }
+
+    /// The camera the ground cache is drawn with: a flat camera's origin on whole physical pixels (`snap_origin`), so the
+    /// cache holds the whole-pixel picture its key names. The camera itself stays fractional (sprites, overlay, input).
+    fn snapped(&self) -> Camera {
+        let mut c = self.clone();
+        if self.tilt.is_none() {
+            c.origin = snap_origin(self.origin);
+        }
+        c
+    }
+
+    /// The physical pixels this camera's origin is from `snapped`'s (the cache's composite shift, `set_cache_shift`).
+    fn origin_shift(&self, snapped: &Camera) -> Vec2 {
+        (self.origin - snapped.origin) * super::frame_state::dpi()
     }
 
     /// The world point at the middle of the view (where the camera really looks, the map's
@@ -3189,6 +3200,10 @@ fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool) {
             None => in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Full, flow))),
             Some(terrain::GroundFrame { step: terrain::GroundStep::Moving, .. }) => in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Full, flow))),
             Some(terrain::GroundFrame { target: rt, prev, step }) => {
+                // The cache is drawn for the camera's whole-pixel origin (`snapped`); the composite moves its content by the
+                // rest of the true origin (`set_cache_shift`, cleared when the arm ends), so the ground glides with the sprites.
+                let sc = cam.snapped();
+                let _shift = CacheShift::set(layer, cam.origin_shift(&sc));
                 // The cache's rebuild (when it is due) and its blit: the ground cache's own stage.
                 // The overlay goes into the cache when the cache keeps it (`wf`): on a fill, the ground and then the overlay;
                 // on a refresh, the overlay alone (the ground stays under the dry pixels).
@@ -3196,13 +3211,13 @@ fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool) {
                 frame_probe::time(Stage::GroundCache, || {
                     match step {
                         terrain::GroundStep::Fill => super::render_cache::fill(&rt, || {
-                            in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Ground, flow)));
+                            in_view(&sc, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Ground, flow)));
                             if into_cache {
-                                in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow)));
+                                in_view(&sc, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow)));
                             }
                         }),
                         terrain::GroundStep::Refresh => super::render_cache::fill(&rt, || {
-                            in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow)));
+                            in_view(&sc, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow)));
                         }),
                         terrain::GroundStep::Scroll { shift, strips, refresh } => {
                             // The cache moves by whole pixels into the other target; the strips it leaves are drawn under a
@@ -3217,9 +3232,9 @@ fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool) {
                                     unsafe { get_internal_gl() }.quad_gl.scissor(Some((x, y, w, h)));
                                     SCROLL_STRIP.with(|s| s.set(true));
                                     frame_probe::terrain(w as f32 / dpi, h as f32 / dpi);
-                                    in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Ground, flow)));
+                                    in_view(&sc, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Ground, flow)));
                                     if into_cache && !refresh {
-                                        in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow)));
+                                        in_view(&sc, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow)));
                                     }
                                     SCROLL_STRIP.with(|s| s.set(false));
                                 }
@@ -3227,11 +3242,11 @@ fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool) {
                             });
                             if refresh && into_cache {
                                 super::render_cache::fill(&rt, || {
-                                    in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow)));
+                                    in_view(&sc, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Overlay, flow)));
                                 });
                             }
                             if std::env::var_os("RAZDOR_SCROLL_CHECK").is_some() {
-                                scroll_check(game, layer, cam, flow, &rt, into_cache);
+                                scroll_check(game, layer, &sc, flow, &rt, into_cache);
                             }
                         }
                         terrain::GroundStep::Copy | terrain::GroundStep::Moving => {}
@@ -3251,7 +3266,7 @@ fn draw_ground(game: &Game, art: Option<&DtArt>, cam: &Camera, waits: bool) {
                     frame_probe::time(Stage::Water, || {
                         super::render_cache::fill(&target, || {
                             macroquad::prelude::clear_background(macroquad::prelude::Color::new(0.0, 0.0, 0.0, 0.0));
-                            in_view(cam, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Picture, flow)));
+                            in_view(&sc, |c| ground(c, || terrain_quad(game, layer, c, terrain::Mode::Picture, flow)));
                         });
                     });
                     if waits {
@@ -3308,6 +3323,22 @@ fn map_flow(game: &Game) -> Option<std::rc::Rc<Vec<(f32, f32)>>> {
     }))
 }
 
+/// Sets the ground cache's composite shift (`TerrainLayer::set_cache_shift`) for a scope; cleared when it ends.
+struct CacheShift<'a>(&'a terrain::TerrainLayer);
+
+impl<'a> CacheShift<'a> {
+    fn set(layer: &'a terrain::TerrainLayer, shift: Vec2) -> Self {
+        layer.set_cache_shift(shift);
+        Self(layer)
+    }
+}
+
+impl Drop for CacheShift<'_> {
+    fn drop(&mut self) {
+        self.0.set_cache_shift(Vec2::ZERO);
+    }
+}
+
 /// The flat view's origin on whole physical pixels (`frame_state::dpi` is the physical pixels per logical unit).
 fn snap_origin(o: Vec2) -> Vec2 {
     let k = super::frame_state::dpi();
@@ -3318,7 +3349,8 @@ fn snap_origin(o: Vec2) -> Vec2 {
     }
 }
 
-/// The origin the ground cache follows: a flat camera's origin in physical pixels (whole, after `snap_origin`); None for
+/// The origin the ground cache follows: a flat camera's origin in physical pixels, rounded (the whole-pixel origin the
+/// cache is drawn for, `Camera::snapped`; the rest is the composite's shift); None for
 /// a tilted camera, whose ground cannot be moved by a shift.
 fn scroll_origin(cam: &Camera) -> Option<(i32, i32)> {
     let k = super::frame_state::dpi();

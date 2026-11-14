@@ -157,8 +157,9 @@ precision highp float;
 varying highp vec2 uv;
 uniform sampler2D Ground;
 uniform vec2 ScreenSize;
+uniform vec2 Shift;
 void main() {
-    gl_FragColor = texture2D(Ground, gl_FragCoord.xy / ScreenSize);
+    gl_FragColor = texture2D(Ground, (gl_FragCoord.xy + Shift) / ScreenSize);
 }
 "#;
 
@@ -497,6 +498,8 @@ pub enum Mode {
 struct GroundCache {
     targets: [Option<RenderTarget>; 2],
     cur: usize,
+    /// The composite's shift (physical pixels, screen-down): the camera's origin less the whole-pixel origin the cache holds.
+    shift: Vec2,
     key: Option<u64>,
     at: (i32, i32),
     last: Option<(u64, Option<(i32, i32)>)>,
@@ -572,8 +575,9 @@ uniform sampler2D Prev;
 uniform sampler2D Cur;
 uniform vec2 ScreenSize;
 uniform float Mix;
+uniform vec2 Shift;
 void main() {
-    vec2 at = gl_FragCoord.xy / ScreenSize;
+    vec2 at = (gl_FragCoord.xy + Shift) / ScreenSize;
     gl_FragColor = mix(texture2D(Prev, at), texture2D(Cur, at), Mix);
 }
 "#;
@@ -771,11 +775,11 @@ impl TerrainLayer {
             old = Some(make_material(&FRAGMENT.replace("// @SHARP_UV@", sharp::SHARP_UV_GLSL), &UNIFORMS, &["Cells", "Atlas", "Water"]).map_err(|e| razdor::diag!("terrain shader: {e}")).ok()?);
         }
         if opts.cache {
-            composite = make_material(COMPOSITE_FRAGMENT, &[("ScreenSize", UniformType::Float2)], &["Ground"]).map_err(|e| razdor::diag!("terrain cache copy: {e}")).ok();
+            composite = make_material(COMPOSITE_FRAGMENT, &[("ScreenSize", UniformType::Float2), ("Shift", UniformType::Float2)], &["Ground"]).map_err(|e| razdor::diag!("terrain cache copy: {e}")).ok();
             opts.cache = composite.is_some();
         }
         let water_composite = if opts.new_shader {
-            make_blended_material(WATER_COMPOSITE_FRAGMENT, &[("ScreenSize", UniformType::Float2), ("Mix", UniformType::Float1)], &["Prev", "Cur"])
+            make_blended_material(WATER_COMPOSITE_FRAGMENT, &[("ScreenSize", UniformType::Float2), ("Mix", UniformType::Float1), ("Shift", UniformType::Float2)], &["Prev", "Cur"])
                 .map_err(|e| razdor::diag!("terrain water picture: {e}"))
                 .ok()
         } else {
@@ -887,7 +891,8 @@ impl TerrainLayer {
         if !sized {
             g.targets = [0, 1].map(|_| {
                 let rt = render_target(pw, ph);
-                rt.texture.set_filter(FilterMode::Nearest);
+                // Linear: the composite reads the cache at a sub-pixel shift (`set_cache_shift`).
+                rt.texture.set_filter(FilterMode::Linear);
                 Some(rt)
             });
             razdor::mem_probe::set_texture("ground cache", 2 * razdor::mem_probe::texture_bytes(pw, ph, 4));
@@ -939,6 +944,20 @@ impl TerrainLayer {
             GroundFrame { target: targets[cur].clone()?, prev: None, step: GroundStep::Fill }
         };
         Some(frame)
+    }
+
+    /// The composite's shift for the cached ground and the water picture (physical pixels, screen-down): the camera's
+    /// origin less the whole-pixel origin the cache was drawn for. Zero outside the cached frame's draws.
+    pub fn set_cache_shift(&self, shift: Vec2) {
+        self.ground.borrow_mut().shift = shift;
+    }
+
+    /// The shift as the composites' uniform, in their pixel units (`sw`×`sh` of `ScreenSize`): the window position
+    /// plus this is the cache's texel (GL's y points up, so the y shift flips).
+    fn shift_uniform(&self, (sw, sh): (f32, f32)) -> Vec2 {
+        let s = self.ground.borrow().shift;
+        let (pw, ph) = macroquad::miniquad::window::screen_size();
+        vec2(s.x * sw / pw.max(1.0), -s.y * sh / ph.max(1.0))
     }
 
     /// Copies the cached ground `from` to `to` shifted by `shift` (physical pixels, `exposed_strips`): texel for texel,
@@ -1136,6 +1155,7 @@ impl TerrainLayer {
         composite.set_texture("Cur", cur.texture.clone());
         composite.set_uniform("ScreenSize", vec2(sw, sh));
         composite.set_uniform("Mix", mix);
+        composite.set_uniform("Shift", self.shift_uniform((sw, sh)));
         draw_texture_ex(&cur.texture, dest.x, dest.y, WHITE, DrawTextureParams { dest_size: Some(dest.size()), ..Default::default() });
         gl_use_default_material();
         true
@@ -1150,6 +1170,7 @@ impl TerrainLayer {
         gl_use_material(m);
         m.set_texture("Ground", rt.texture.clone());
         m.set_uniform("ScreenSize", vec2(sw, sh));
+        m.set_uniform("Shift", self.shift_uniform((sw, sh)));
         draw_texture_ex(&rt.texture, dest.x, dest.y, WHITE, DrawTextureParams { dest_size: Some(dest.size()), ..Default::default() });
         gl_use_default_material();
     }
