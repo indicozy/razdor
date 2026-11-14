@@ -95,10 +95,10 @@ Rust: `lz4_flex::frame`. Python (build.py): `lz4.frame.compress(…, store_size=
      has as a plain hard link therefore replaces the link; with no hard links (the read-through layout) the lookup finds the
      mod's `.lz4` before the base's file.
    - Mod records in `installed.json` keep the logical names (what the mod ships), as before.
-   - Open: the merged folder holds full copies of the mod's own files (`fs::copy`, not links), so the saving on the
-     mod's pictures reaches `game/` once it is built again (the first play after the update), not before. How much
-     `game/` costs on a phone is still to be measured (the Open note at the end, and `docs/flows/app-and-ui.md`).
+   - The merged folder never copies the base: hard links where the file system allows them, else the base is read
+     through (`install::set_overlay`, b9b1f04e). On the Android emulator a played mod's `game/` held only the mod's own
+     files.
    - Not in step 3: a catalog that ships `.lz4` assets (build.py), which would save the download too; see rule 7.
 
-Open: how a hub mod's bytes sit on Android (`mods/<id>/game/` is hard links, or full copies where links fail): measure on a
-phone; if `game/` is copied there, that copy is the real cost, not the diff files.
+Decided (the owner, 2026-11-14): desktop installs downloaded before the marker existed stay as they are (plain, no
+repair button until downloaded again); phones are the priority for compression.
