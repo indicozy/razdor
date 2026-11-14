@@ -275,6 +275,17 @@ cells past each edge (`Camera::looking_in`, the scroll range included), and a ma
 the view is centred; off, the view stays on the map as before. Visual only: no rule, path, click
 or AI change. Hex maps (the built-in demo) keep black.
 
+**The ground shader's variants (backlog 1618, B1).** The neighbours shader is one source, `src/ui/terrain/neighbours.glsl`.
+`terrain::variant_text` assembles it per `Variant` from `#define`s (`LIVE_WATER`, `WATER_CODE`, `OVERLAY_PASS`, `EDGE_MIST`),
+and `TerrainLayer::material` makes each variant on its first draw and keeps it. A draw takes the variant with only its
+blocks: the ground pass holds no water code, no fog and no `discard`; the cache's overlay holds the `discard`; the live
+water and the border's mist are in the variants that draw them. The unlit shader (`LEGACY_FRAGMENT`, do-not-edit) is gone:
+with live water off it is this source with the live block out, and its relief block never ran (`Strength` was always 0).
+
+**A moving camera (backlog 1618, B2).** `TerrainLayer::ground_target` returns a `GroundStep`: `Moving` when the cache key
+differs from the last frame's (`draw_ground` then draws `Mode::Full` straight to the screen and leaves the cache alone),
+`Fill` on the first still frame (the cache is filled once), `Copy` while the key holds. A walking frame is one ground pass.
+
 `src/ui/world_view.rs`: `draw_world` draws only the visible cells — `draw_terrain`
 (`TerrainLayer::draw` in `src/ui/terrain.rs`: one shader quad mixing the four nearest cell
 textures from a 4×4 atlas, water frames multiplied in; with the ground cache, option 2, the cache's overlay pass for the
@@ -765,8 +776,7 @@ it every frame from `display::follow_settings`; `RAZDOR_LIVE_WATER=1` turns it o
   easing to 0.35 as the water widens by `bank_distance`, 0 on still water and on the wide water); alpha is the water mask (255 on the water
   cells, `map::is_water`, 0 on land). Linear filtering gives the shore its soft edge: 1 deep, 0.5 on the shore line,
   0 on land. The ground shader reads one texel at the pixel's cell centre `(p + 0.5) / MapSize`, where `p` is the
-  cell coordinate (the same one the edge fog uses). The unlit shader (`LEGACY_FRAGMENT`) gets this texture for its
-  unused live-water mask.
+  cell coordinate (the same one the edge fog uses). The unlit draws (the same source with live water off) bind it too, unused.
 - **In the shader** (`NEW_FRAGMENT`, the `LiveWater` branch; the old four-fetch shader ignores it): on the water
   pixels only, a ripple moves the water frame's uv by `0.015` of a frame (a few texels), the shore foam
   (`shore_foam`, its band mirrored by `water::foam_edge`) is laid on the final colour (after the four cells are blended, so
@@ -798,7 +808,7 @@ it every frame from `display::follow_settings`; `RAZDOR_LIVE_WATER=1` turns it o
 - **The water's noise** (`wnoise`, the ripple and the foam's lap and patches): one fetch of `Noise`, a wrapped 64×64
   texture of the hash lattice (`water::noise_texels`, uploaded by `terrain::noise_texture`, linear). A lookup at the
   lattice point's centre plus the smoothed fraction is the hash's value noise to within a byte (`water::wnoise_ref`,
-  tested). The mist and the unlit shader keep the hash `vnoise`, so the look with the water off does not move.
+  tested). The mist keeps the hash `vnoise`, so the look with the water off does not move.
 - **Rivers flow** (`rules::flow::flow_field`, a best guess, pure): a water cell flows toward its neighbour with the
   smallest distance to the large water (the interior of a lake or the sea, or water on the map's border; the
   interior stands still). A piece of water with no large water in it (landlocked) flows away from its cell nearest
