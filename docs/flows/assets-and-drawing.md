@@ -38,7 +38,16 @@ and `Stored::logical_len`. `DtInstall::file`/`read`, the picture listings in `ch
 A picture's cache key (`picture_cache::source_key`) is its logical path and length with the
 stored file's mtime, so a conversion costs at most one cache rebuild. Plain wins, and only
 `.ugs`/`.lit` are ever compressible (`stored::is_compressible`). `stored::compress_file` is
-crash-safe (`.part`, fsync, verify, rename, then delete the plain file).
+crash-safe (`.part`, fsync, verify, rename, then delete the plain file). At the start of a load
+the owned folder is converted on a thread of its own (`stored::compress_owned_in_background`): the
+game is not held, and a plain picture that is converted after it was found reads its `.lz4`
+(`Stored::read`, `logical_len`).
+
+A mod's merged folder (`hub::mods::prepare_mod`) hard-links the base's files where the file system
+allows it and never copies them: where links fail (Android's app storage) the file is left out, and
+`install::find`, `stored::find`/`list`, `install::list_maps` and `english::discover` fall back to
+the same path in the base (`install::set_overlay`/`overlay_fallback`/`read_dir_overlaid`). A folder
+of the older layout (copies) is rebuilt once (`Stamp::layout`).
 
 **Writing** (step 2): only in an owned folder, `stored::owned` (the phones' unpack folder; on the
 desktop that folder with the `.razdor-owned` marker, written by a whole-game import or unpack into

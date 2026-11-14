@@ -69,8 +69,20 @@ fn io_err(path: &Path) -> impl FnOnce(std::io::Error) -> DtError + '_ {
     move |source| DtError::Io { path: path.to_path_buf(), source }
 }
 
-/// `dir/name`, matching the name ignoring case (the game comes from Windows).
+/// `dir/name`, matching the name ignoring case (the game comes from Windows). In a mod's merged
+/// folder a name the folder lacks is looked up in the base install ([`overlay_fallback`]).
 fn find(dir: &Path, name: &str) -> Result<PathBuf, DtError> {
+    match find_here(dir, name) {
+        Err(e) => match overlay_fallback(dir) {
+            Some(base) => find(&base, name).map_err(|_| e),
+            None => Err(e),
+        },
+        found => found,
+    }
+}
+
+/// [`find`] in `dir` alone.
+fn find_here(dir: &Path, name: &str) -> Result<PathBuf, DtError> {
     let exact = dir.join(name);
     if exact.exists() {
         return Ok(exact);
@@ -83,6 +95,46 @@ fn find(dir: &Path, name: &str) -> Result<PathBuf, DtError> {
         }
     }
     Err(DtError::Io { path: exact, source: std::io::ErrorKind::NotFound.into() })
+}
+
+/// The merged folders of mods and the base installs under them (Razdor's own: a mod's merged folder
+/// holds the mod's files and, where the file system allows hard links, links to the base's files;
+/// where it does not (Android's app storage), the base's files are not copied and every lookup that
+/// misses in the merged folder falls back to the same path in the base, `hub::mods::prepare_mod`).
+static OVERLAYS: std::sync::Mutex<Vec<(PathBuf, PathBuf)>> = std::sync::Mutex::new(Vec::new());
+
+/// Records that the mod's merged folder `merged` lies over the base install `base` (see [`OVERLAYS`]).
+pub fn set_overlay(merged: &Path, base: &Path) {
+    let mut all = OVERLAYS.lock().unwrap_or_else(|e| e.into_inner());
+    all.retain(|(m, _)| m != merged);
+    all.push((merged.to_path_buf(), base.to_path_buf()));
+}
+
+/// The folder of the base install that `dir` (a folder in a mod's merged folder) lies over: the same
+/// path under the base, or None when `dir` is not in a merged folder.
+pub fn overlay_fallback(dir: &Path) -> Option<PathBuf> {
+    let all = OVERLAYS.lock().unwrap_or_else(|e| e.into_inner());
+    all.iter().find_map(|(merged, base)| dir.strip_prefix(merged).ok().map(|rel| base.join(rel)))
+}
+
+/// The entries of the folder `dir` (the merged folder's own first, then the base's under it that the
+/// merged folder lacks, names compared ignoring case): what a listing of a game folder reads.
+pub fn read_dir_overlaid(dir: &Path) -> std::io::Result<Vec<std::fs::DirEntry>> {
+    let fallback = overlay_fallback(dir);
+    let own = match std::fs::read_dir(dir) {
+        Ok(read) => read.collect::<std::io::Result<Vec<_>>>()?,
+        Err(e) if fallback.is_none() => return Err(e),
+        Err(_) => Vec::new(),
+    };
+    let Some(base) = fallback else { return Ok(own) };
+    let mut seen: std::collections::HashSet<String> = own.iter().map(|e| e.file_name().to_string_lossy().to_ascii_lowercase()).collect();
+    let mut out = own;
+    for entry in read_dir_overlaid(&base).unwrap_or_default() {
+        if seen.insert(entry.file_name().to_string_lossy().to_ascii_lowercase()) {
+            out.push(entry);
+        }
+    }
+    Ok(out)
 }
 
 /// `dir/a/b/c` from a `/`-separated relative path, matching each component ignoring case.
@@ -150,8 +202,8 @@ pub fn read_tables(build_dir: &Path, bytes_of: &dyn Fn(&str) -> Option<Vec<u8>>)
 pub fn list_maps(dir: &Path) -> Result<Vec<MapEntry>, DtError> {
     let maps_dir = find(dir, MAPS_DIR)?;
     let mut maps = Vec::new();
-    for entry in std::fs::read_dir(&maps_dir).map_err(io_err(&maps_dir))? {
-        let path = entry.map_err(io_err(&maps_dir))?.path();
+    for entry in read_dir_overlaid(&maps_dir).map_err(io_err(&maps_dir))? {
+        let path = entry.path();
         let is_map = path.extension().is_some_and(|e| e.to_string_lossy().eq_ignore_ascii_case(MAP_EXTENSION));
         if is_map && path.is_file() {
             let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
@@ -216,9 +268,10 @@ impl DtInstall {
             return Err(DtError::NoInstallDir);
         };
         *BASE.lock().unwrap_or_else(|e| e.into_inner()) = Some(base.clone());
-        // Razdor's own game folder gets its plain pictures compressed first (`dt::stored`, once; a
-        // folder that is not Razdor's is never written). Then the folder is checked before anything is read.
-        super::stored::compress_owned(&base);
+        // Razdor's own game folder gets its plain pictures compressed (`dt::stored`; a folder that is
+        // not Razdor's is never written), on a thread of its own so the first start after an update is
+        // not held (the reads stay right while it runs: plain wins, a vanished plain file reads its `.lz4`).
+        super::stored::compress_owned_in_background(&base);
         // The game's own folder is checked before anything is read: a missing file is damage the
         // screen repairs from the archive, never a crash (`dt::integrity`).
         if let Err(files) = guard_game_files(&base) {

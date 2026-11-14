@@ -83,7 +83,11 @@ impl Stored {
     /// when plain. Reads only the header of a compressed file.
     pub fn logical_len(&self) -> io::Result<u64> {
         if !self.compressed {
-            return Ok(fs::metadata(&self.path)?.len());
+            return match fs::metadata(&self.path) {
+                Ok(meta) => Ok(meta.len()),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => self.converted().ok_or(e)?.logical_len(),
+                Err(e) => Err(e),
+            };
         }
         let mut head = Vec::with_capacity(HEADER_LEN);
         File::open(&self.path)?.take(HEADER_LEN as u64).read_to_end(&mut head)?;
@@ -93,11 +97,29 @@ impl Stored {
     /// The decompressed bytes. A compressed file must have a content size, and the decoded length
     /// must match it.
     pub fn read(&self) -> io::Result<Vec<u8>> {
-        let bytes = fs::read(&self.path)?;
+        let bytes = match fs::read(&self.path) {
+            // The background conversion ([`compress_owned_in_background`]) may have turned the plain
+            // file into `<name>.lz4` since it was found: read that one.
+            Err(e) if e.kind() == io::ErrorKind::NotFound => match self.converted() {
+                Some(now) => return now.read(),
+                None => return Err(e),
+            },
+            other => other?,
+        };
         if !self.compressed {
             return Ok(bytes);
         }
         decode(&bytes).map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", self.path.display())))
+    }
+
+    /// The `<name>.lz4` a plain picture became (it is gone, the stored form is there), or None.
+    fn converted(&self) -> Option<Stored> {
+        if self.compressed || !is_compressible(&self.logical_name()) {
+            return None;
+        }
+        let name = self.path.file_name()?.to_string_lossy().into_owned();
+        let lz4 = self.path.with_file_name(format!("{name}.{LZ4_EXT}"));
+        lz4.is_file().then_some(Stored { path: lz4, compressed: true })
     }
 }
 
@@ -169,6 +191,11 @@ fn named(dir: &Path, name: &str, files_only: bool) -> Option<PathBuf> {
 /// files come from Windows): the plain file if there is one, else `<logical>.lz4`. Only
 /// [`is_compressible`] names have a `.lz4` form. A leftover `.part` is never a match.
 pub fn find(dir: &Path, logical: &str) -> Option<Stored> {
+    find_here(dir, logical).or_else(|| install::overlay_fallback(dir).and_then(|base| find(&base, logical)))
+}
+
+/// [`find`] in `dir` alone (a mod's merged folder without the base under it).
+fn find_here(dir: &Path, logical: &str) -> Option<Stored> {
     if let Some(path) = named(dir, logical, false) {
         return Some(Stored { path, compressed: false });
     }
@@ -197,6 +224,18 @@ pub fn find_file(base: &Path, rel: &str) -> Result<PathBuf, DtError> {
 /// The game files of `dir` (files only) by logical name, sorted by it: `.lz4` stripped, a name
 /// listed once, the plain file winning. Other `.lz4` files (not compressible) are not listed.
 pub fn list(dir: &Path) -> Vec<(String, Stored)> {
+    let mut out = list_here(dir);
+    // A mod's merged folder: the base's files it lacks are listed too (the merged folder's win).
+    if let Some(base) = install::overlay_fallback(dir) {
+        let seen: std::collections::HashSet<String> = out.iter().map(|(n, _)| n.to_ascii_lowercase()).collect();
+        out.extend(list(&base).into_iter().filter(|(n, _)| !seen.contains(&n.to_ascii_lowercase())));
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+    }
+    out
+}
+
+/// [`list`] of `dir` alone.
+fn list_here(dir: &Path) -> Vec<(String, Stored)> {
     let Ok(entries) = fs::read_dir(dir) else { return Vec::new() };
     // Keyed by the name ignoring case, so one file is listed once.
     let mut by_name: BTreeMap<String, (String, Stored)> = BTreeMap::new();
@@ -312,6 +351,43 @@ pub fn compress_owned(dir: &Path) {
         ),
         Ok(_) => {}
         Err(e) => crate::diag!("stored: {}: the pictures are not compressed: {e}", dir.display()),
+    }
+}
+
+/// [`compress_owned`] on a thread of its own, for the start of a load: the first start after an
+/// update converts the whole folder (about 12 s on a desktop, longer on a phone), which must not hold
+/// the game. Safe while the game reads: plain wins, a picture is first written as `<name>.lz4`, then
+/// its plain file removed, and a read of a plain file that is gone reads the `.lz4` instead
+/// ([`Stored::read`]).
+pub fn compress_owned_in_background(dir: &Path) {
+    if !owned(dir) {
+        return;
+    }
+    let dir = dir.to_path_buf();
+    let spawned = std::thread::Builder::new().name("compress-owned".into()).spawn(move || compress_owned(&dir));
+    if let Err(e) = spawned {
+        crate::diag!("stored: the pictures are not compressed (no thread: {e})");
+    }
+}
+
+#[cfg(test)]
+mod background_tests {
+    use super::*;
+
+    /// A picture found plain and converted before it is read (the background conversion at start)
+    /// is read from its `.lz4`: the same bytes and length, no error.
+    #[test]
+    fn a_plain_picture_converted_after_it_was_found_reads_its_lz4() {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("razdor-stored-race-{}-{nanos}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("a.ugs"), b"unit picture bytes").unwrap();
+        let found = find(&dir, "a.ugs").unwrap();
+        assert!(!found.compressed);
+        compress_file(&dir.join("a.ugs")).unwrap();
+        assert_eq!(found.read().unwrap(), b"unit picture bytes");
+        assert_eq!(found.logical_len().unwrap(), 18);
+        let _ = fs::remove_dir_all(&dir);
     }
 }
 

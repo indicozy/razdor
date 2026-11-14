@@ -72,9 +72,10 @@ pub struct DataLanguage {
 /// Razdor's own copies): each `<Prefix>_Units.ini` whose first line names its language
 /// ([`HEADER`]), sorted by name.
 pub fn discover(dir: &Path) -> Vec<DataLanguage> {
-    let Ok(read) = std::fs::read_dir(dir) else { return Vec::new() };
+    // A mod's merged folder lists the base's files under it too (`install::read_dir_overlaid`).
+    let Ok(read) = super::install::read_dir_overlaid(dir) else { return Vec::new() };
     let mut out: Vec<DataLanguage> = read
-        .flatten()
+        .into_iter()
         .filter_map(|e| {
             let file = e.file_name().to_string_lossy().into_owned();
             let prefix = units_prefix(&file)?;

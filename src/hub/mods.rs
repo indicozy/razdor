@@ -1,7 +1,9 @@
 //! Installed mods as layers over the base install. A mod's files live under
 //! `<hub>/mods/<id>/files/` at their paths inside the mod. [`prepare_mod`] builds the mod's
-//! merged game folder `<hub>/mods/<id>/game/`: every base file hard-linked (a copy where links
-//! fail), then each mod file laid over the base file it replaces. The game reads the active
+//! merged game folder `<hub>/mods/<id>/game/`: every base folder, every base file hard-linked
+//! where the file system allows it (never copied: where links fail, as on Android's app storage,
+//! the file is left out and every lookup that misses in the merged folder reads the base,
+//! `dt::install::overlay_fallback`), then each mod file laid over the base file it replaces. The game reads the active
 //! mod's folder ([`active_install_dir`]); the choice is `<hub>/active.json`.
 //!
 //! The base install is never written: a link is removed before a file replaces it. A folder
@@ -388,7 +390,16 @@ struct Stamp {
     /// it is being built. A file lost from the folder (an antivirus) rebuilds it.
     #[serde(default)]
     game: String,
+    /// How the folder holds the base's files ([`LAYOUT`]); an older layout is rebuilt once.
+    #[serde(default)]
+    layout: u32,
 }
+
+/// The merged folder's layout: 2 = the base's files hard-linked where the file system allows it,
+/// otherwise not there at all (read from the base through `dt::install::overlay_fallback`); 0 = older
+/// folders, whose base files were copied where links failed (a full copy of the game per mod on
+/// Android). A folder of an older layout is rebuilt once, which frees those copies.
+const LAYOUT: u32 = 2;
 
 /// One mod laid over the base: its id, its installed version and each of its files' path and
 /// SHA-256. A change in any of them rebuilds every folder that lays it.
@@ -471,8 +482,12 @@ pub fn prepare_mod(local: &Path, base: &Path, id: &str) -> Result<PathBuf, Strin
         stamps.push(LayerStamp { id: lid.clone(), version, files: digests });
         layers.push(files);
     }
-    let stamp = Stamp { base: base.display().to_string(), base_files: base_fingerprint(base)?, layers: stamps, game: String::new() };
-    let game = mod_game_dir(local, id);
+    let stamp = Stamp { base: base.display().to_string(), base_files: base_fingerprint(base)?, layers: stamps, game: String::new(), layout: LAYOUT };
+    // Every lookup that misses in the merged folder reads the base (the base's files are not
+    // copied where links fail, `build`).
+    let game_dir = mod_game_dir(local, id);
+    crate::dt::install::set_overlay(&game_dir, base);
+    let game = game_dir;
     if let Some(mut built) = read_stamp(&game) {
         let fingerprint = std::mem::take(&mut built.game);
         if built == stamp && !fingerprint.is_empty() && game_fingerprint(&game).ok().as_deref() == Some(fingerprint.as_str()) {
@@ -578,8 +593,11 @@ fn build(base: &Path, layers: &[Vec<(String, PathBuf)>], tmp: &Path) -> Result<(
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("{rel}: {e}"))?;
         }
-        if std::fs::hard_link(&path, &target).is_err() {
-            std::fs::copy(&path, &target).map_err(|e| format!("{rel}: {e}"))?;
+        // A link where the file system allows it; otherwise the base's file is left out, never
+        // copied: the game reads it from the base (`dt::install::overlay_fallback`). Android's app
+        // storage refuses links, and a copy there was a whole second game per mod.
+        if links_refused() || std::fs::hard_link(&path, &target).is_err() {
+            continue;
         }
     }
     for mod_files in layers {
@@ -603,6 +621,23 @@ fn build(base: &Path, layers: &[Vec<(String, PathBuf)>], tmp: &Path) -> Result<(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: build merged folders as on a file system without hard links.
+    static NO_LINKS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether hard links are not to be tried (tests of the no-links layout).
+#[cfg(test)]
+fn links_refused() -> bool {
+    NO_LINKS.with(std::cell::Cell::get)
+}
+
+#[cfg(not(test))]
+fn links_refused() -> bool {
+    false
 }
 
 /// Removes the `<name>.lz4` of the picture `dst` (any case) from its folder of the merged folder: a
@@ -1355,6 +1390,62 @@ mod tests {
         prepare_mod(&local, &base, "m1").unwrap();
         assert_eq!(names(&game.join("Pictures")), vec!["A.lit".to_string()]);
         assert!(base.join("Pictures/a.lit.lz4").is_file(), "the base keeps its stored file");
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    /// Where the file system refuses hard links (Android's app storage), the merged folder holds only
+    /// the mod's files and the folders: the base's files are not copied (a second game per mod), and
+    /// every lookup that misses there reads the base. The mod's files still win, and listings show both.
+    #[test]
+    fn without_hard_links_the_base_is_read_through_not_copied() {
+        NO_LINKS.with(|n| n.set(true));
+        let base = base_install("nolinks");
+        put(&base.join("Maps_Rus/Base.DTm"), "base map");
+        put(&base.join("Pictures/b.lit"), "base picture b");
+        crate::dt::stored::compress_file(&base.join("Pictures/b.lit")).unwrap();
+        let local = temp("nolinks-hub");
+        install_mod(&local, "m1", "1.0", &[("data/units.ini", "mod units"), ("Maps_Rus/Mod.DTm", "mod map")]);
+        let game = prepare_mod(&local, &base, "m1").unwrap();
+        NO_LINKS.with(|n| n.set(false));
+        // Nothing of the base is in the merged folder, only its folders and the mod's files.
+        assert!(!game.join("Pictures/a.lit").exists() && !game.join("Pictures/b.lit.lz4").exists(), "the base's files are not copied");
+        assert!(game.join("Pictures").is_dir(), "the base's folders are there");
+        // Lookups read through to the base; the mod's file wins.
+        let find = |rel: &str| crate::dt::install::find_path(&game, rel).unwrap();
+        assert_eq!(std::fs::read_to_string(find("Data/Units.ini")).unwrap(), "mod units");
+        assert_eq!(std::fs::read_to_string(find("Pictures/A.LIT")).unwrap(), "picture", "the base's plain picture, ignoring case");
+        let b = crate::dt::stored::find_path(&game, "Pictures/b.lit").unwrap();
+        assert!(b.compressed && b.path.starts_with(&base), "the base's stored picture");
+        assert_eq!(b.read().unwrap(), b"base picture b");
+        let pictures: Vec<String> = crate::dt::stored::list(&game.join("Pictures")).into_iter().map(|(n, _)| n).collect();
+        assert_eq!(pictures, vec!["a.lit".to_string(), "b.lit".to_string()], "a listing shows the base's pictures");
+        let maps: Vec<String> = crate::dt::install::list_maps(&game).unwrap().into_iter().map(|m| m.name).collect();
+        assert_eq!(maps, vec!["Base".to_string(), "Mod".to_string()], "the maps of both");
+        // A second start keeps the folder (no rebuild loop on the files it does not hold).
+        let stamp = std::fs::read(game.join(STAMP)).unwrap();
+        NO_LINKS.with(|n| n.set(true));
+        prepare_mod(&local, &base, "m1").unwrap();
+        NO_LINKS.with(|n| n.set(false));
+        assert_eq!(std::fs::read(game.join(STAMP)).unwrap(), stamp, "the folder is kept");
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    /// A merged folder built before the read-through layout (its base files copied where links
+    /// failed) is rebuilt once: its stamp has no layout.
+    #[test]
+    fn a_folder_of_the_old_layout_is_rebuilt_once() {
+        let base = base_install("layout");
+        let local = temp("layout-hub");
+        install_mod(&local, "m1", "1.0", &[("Data/Units.ini", "mod units")]);
+        let game = prepare_mod(&local, &base, "m1").unwrap();
+        let mut stamp: serde_json::Value = serde_json::from_slice(&std::fs::read(game.join(STAMP)).unwrap()).unwrap();
+        stamp.as_object_mut().unwrap().remove("layout");
+        std::fs::write(game.join(STAMP), serde_json::to_vec(&stamp).unwrap()).unwrap();
+        prepare_mod(&local, &base, "m1").unwrap();
+        let again: serde_json::Value = serde_json::from_slice(&std::fs::read(game.join(STAMP)).unwrap()).unwrap();
+        assert_eq!(again["layout"], LAYOUT, "rebuilt with the current layout");
         let _ = std::fs::remove_dir_all(&base);
         let _ = std::fs::remove_dir_all(&local);
     }

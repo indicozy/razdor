@@ -19,7 +19,8 @@
 //!   differ from the base install, never the base's own). `<hub>/installed.json` records what
 //!   went where.
 //! - **Mods play as layers** ([`mods`]): [`prepare_mod`] builds `<hub>/mods/<id>/game/`, the
-//!   base install's files hard-linked and the mod's files laid over them; [`active_install_dir`]
+//!   base install's files hard-linked (where links fail, left out and read from the base:
+//!   `dt::install::overlay_fallback`) and the mod's files laid over them; [`active_install_dir`]
 //!   is the folder the game reads (the active mod's, else the base's) and [`use_mod`] picks it.
 //! - **Remove**: refused while an installed entry still needs the mod ([`needed_by`]); a mod's
 //!   whole folder goes, its game folder with it.
