@@ -8,7 +8,11 @@ Usage (the phone is the lab's, connected through its Remote Debug Bridge on this
         [--stages] [--timeout-min 40] [--install-timeout-min 20] [--dry-run]
     python3 -I tools/perf/samsung_lab.py --out <dir> --compare-only      # rebuild compare.md from <dir>/<X>/
 
-For each build X in A, B, C, D (`razdor-ab-X.apk` in --apks, checked against SHA256SUMS there):
+For each build X in A, B, C, D (`razdor-ab-X.apk` in --apks, checked against SHA256SUMS there). `main` (or
+`--only MAIN`) is the normal app, no A/B switch: `razdor-main.apk` in the same folder, the same steps; its log
+must name no A/B build.
+
+For each build X:
 
 1. the serial must be `device` (else it says what to do: accept the USB-debugging prompt on the lab's
    screen, click Connect in the lab again, adb connect again);
@@ -58,11 +62,13 @@ import phone_bench  # noqa: E402  (the same folder: the bench lines' parser and 
 
 PACKAGE = "io.github.indicozy.razdor"
 APP_DIR = f"/sdcard/Android/data/{PACKAGE}/files/Razdor"
-VARIANTS = ["A", "B", "C", "D"]
-# The terrain option set each build fixes (ui/terrain.rs `ab_options`, the module doc's table).
-LABELS = {"A": "opt=1+2+4", "B": "opt=1+2", "C": "opt=1+4", "D": "opt=none"}
+VARIANTS = ["A", "B", "C", "D", "MAIN"]
+# The terrain option set each build fixes (ui/terrain.rs `ab_options`, the module doc's table); MAIN is the
+# normal app, whose set comes from its defaults.
+LABELS = {"A": "opt=1+2+4", "B": "opt=1+2", "C": "opt=1+4", "D": "opt=none", "MAIN": "main, no A/B switch"}
 MAP_DEFAULT = "Другой берег"
 TERRAIN_RE = re.compile(r"terrain options: (opt=\S+).*?\(A/B build (\w)\)")
+TERRAIN_LINE_RE = re.compile(r"terrain options: (opt=\S+)([^\n]*)")
 RESULT_RE = re.compile(r"^razdor-bench-.*\.txt$")
 DENIED = ("Permission denied", "Operation not permitted")
 POLL_SECS = 15
@@ -177,9 +183,13 @@ def sha256_of(path):
     return h.hexdigest()
 
 
+def apk_name(letter):
+    return "razdor-main.apk" if letter == "MAIN" else f"razdor-ab-{letter}.apk"
+
+
 def check_apk(apks, letter, dry_run):
     """The APK's path, after its SHA-256 is checked against SHA256SUMS (when that file is there)."""
-    path = os.path.join(apks, f"razdor-ab-{letter}.apk")
+    path = os.path.join(apks, apk_name(letter))
     if not os.path.isfile(path):
         if dry_run:
             say(f"  (dry run: {path} is not there; a real run stops here)")
@@ -330,7 +340,17 @@ def check_build(out_dir, letter):
     if not os.path.isfile(path):
         raise LabError("razdor.log was not pulled: cannot check which build ran", EXIT_BUILD)
     with open(path, encoding="utf-8", errors="replace") as f:
-        found = [m for m in TERRAIN_RE.finditer(f.read())]
+        text = f.read()
+    if letter == "MAIN":
+        lines = TERRAIN_LINE_RE.findall(text)
+        if not lines:
+            raise LabError("razdor.log has no `terrain options:` line (the map was not drawn?)", EXIT_BUILD)
+        label, rest = lines[-1]
+        if "A/B build" in rest or "RAZDOR_TERRAIN_AB" in rest:
+            raise LabError(f"the log names an A/B build ({label}{rest.rstrip()}): the main build has no A/B switch", EXIT_BUILD)
+        say(f"  build check: {label} (main build, no A/B switch)")
+        return
+    found = [m for m in TERRAIN_RE.finditer(text)]
     if not found:
         raise LabError("razdor.log has no `terrain options:` line (the map was not drawn?)", EXIT_BUILD)
     label, built = found[-1].group(1), found[-1].group(2)
@@ -495,9 +515,9 @@ def run_variant(lab, args, letter, out_dir):
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--serial", help="the phone's adb serial (localhost:<port> through the lab's rdb)")
-    ap.add_argument("--apks", default="/mnt/ai_models/razdor-ab-1637/v2", help="the folder with razdor-ab-{A,B,C,D}.apk")
+    ap.add_argument("--apks", default="/mnt/ai_models/razdor-ab-1637/v2", help="the folder with razdor-ab-{A,B,C,D}.apk (and razdor-main.apk for MAIN)")
     ap.add_argument("--out", required=True, help="the results folder (device.txt, <X>/, compare.md)")
-    ap.add_argument("--only", default="A,B,C,D", help="the builds to run, e.g. A,C")
+    ap.add_argument("--only", default="A,B,C,D", help="the builds to run, e.g. A,C or MAIN (the normal app)")
     ap.add_argument("--choice", default="all", choices=["all", "mine"], help="the test's choice (default: all presets)")
     ap.add_argument("--map", default=MAP_DEFAULT, help=f"the map's file name in the game (default: {MAP_DEFAULT})")
     ap.add_argument("--stages", action="store_true", help="the run profiles itself: each cell logs its stage breakdown (RazdorBenchStages)")
@@ -508,7 +528,7 @@ def main(argv):
     args = ap.parse_args(argv)
     letters = [x.strip().upper() for x in args.only.split(",") if x.strip()]
     if not letters or any(x not in VARIANTS for x in letters):
-        say("samsung_lab: --only takes letters from A, B, C, D")
+        say("samsung_lab: --only takes letters from A, B, C, D, or main")
         return EXIT_ARG
     if args.compare_only:
         say(f"compare: {compare(args.out, letters)}")
