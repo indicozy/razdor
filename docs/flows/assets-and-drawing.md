@@ -377,7 +377,10 @@ window backdrops follow the setting too, as they are the same world drawing.
   game clock and the settings' look (`map_freeze::look_of`: the whole `Settings` but the volumes and the
   speed sliders). A changed key or screen size copies once more, on the frame after the change. The copy is
   released a frame after the last frame with a window over the map (`map_freeze::begin_frame`, at the start of
-  `App::frame`), so a frame with no backdrop releases it. A screen above 8192 px a side is drawn live. Not
+  `App::frame`), so a frame with no backdrop releases it. The copy is an RGB8 texture (no alpha): GLES refuses an
+  RGBA copy from the phones' alpha-less surface and showed black (a player's report, 2026-11-15). If a copy
+  fails with a GL error, it is dropped and the map is drawn live under the windows for the rest of the run
+  (`CopyGate`, logged once). A screen above 8192 px a side is drawn live. Not
   frozen: the battle's backdrop (`battle_backdrop`, its own cache) and the watching screen. Why a copy of the
   screen and not a draw into the map's own target: `render_cache::fill` and `map_scale::draw` do not nest (the
   inner `with_base` ends by sending the camera back to the screen, and inside a fill the map's scale is dropped).

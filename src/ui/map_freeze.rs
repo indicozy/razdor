@@ -16,10 +16,16 @@
 //! Why a copy of the screen and not a draw into the map's own target: `render_cache::fill` and
 //! `map_scale::draw` do not nest (the inner one's end sends the camera back to the screen, and inside a fill
 //! the map's scale is dropped, as the battle's picture shows). A copy of the screen takes the frame as drawn.
+//!
+//! The copy is an RGB8 texture (no alpha). GLES refuses to copy an RGBA texture from a framebuffer without
+//! alpha (the phones' EGL surface has none), so an RGBA copy stayed empty and the map showed black (a player's
+//! report, 2026-11-15). An RGB copy is valid from both. If a copy still fails (a GL error), it is dropped, the
+//! map is drawn live under the windows from then on (the gate, [`CopyGate`]), and the log says why.
 
 use super::audio::Settings;
 use macroquad::camera::set_default_camera;
-use macroquad::texture::{render_target, FilterMode, RenderTarget};
+use macroquad::miniquad::{TextureFormat, TextureParams};
+use macroquad::texture::{FilterMode, Texture2D};
 use macroquad::window::get_internal_gl;
 use std::hash::{Hash, Hasher};
 
@@ -76,9 +82,58 @@ impl<T> Lease<T> {
     }
 }
 
+/// The GL error code of a call that succeeded.
+const GL_NO_ERROR: u32 = 0;
+
+/// One copy of the screen: the miniquad RGB8 texture it was copied into. macroquad's own handles cannot
+/// make an RGB8 texture, so it is freed by hand ([`ScreenCopy::free`]).
+pub struct ScreenCopy(macroquad::miniquad::TextureId);
+
+impl ScreenCopy {
+    /// The copy as a texture to draw (the handle does not own the texture: `free` does).
+    fn texture(&self) -> Texture2D {
+        Texture2D::from_miniquad_texture(self.0)
+    }
+
+    /// Deletes the texture.
+    fn free(self) {
+        unsafe { get_internal_gl() }.quad_context.delete_texture(self.0);
+    }
+}
+
+fn free_all(copy: Option<ScreenCopy>) {
+    if let Some(copy) = copy {
+        copy.free();
+    }
+}
+
+/// Whether the screen copy works in this run. A copy that failed once is never tried again: the map is drawn
+/// live under the windows from then on, as before the freeze existed.
+#[derive(Default)]
+pub struct CopyGate {
+    /// The GL error that broke the copy, once one did.
+    broken: Option<u32>,
+}
+
+impl CopyGate {
+    /// Whether a copy may be tried.
+    pub fn allowed(&self) -> bool {
+        self.broken.is_none()
+    }
+
+    /// Records a copy that failed with the GL error `error`. Returns true the first time only (the log).
+    pub fn fail(&mut self, error: u32) -> bool {
+        let first = self.broken.is_none();
+        self.broken.get_or_insert(error);
+        first
+    }
+}
+
 razdor::local! {
     /// The held copy of the map under the windows: none while no window is drawn over the map.
-    static LEASE: std::cell::RefCell<Lease<RenderTarget>> = const { std::cell::RefCell::new(Lease { held: None, used: false }) };
+    static LEASE: std::cell::RefCell<Lease<ScreenCopy>> = const { std::cell::RefCell::new(Lease { held: None, used: false }) };
+    /// Whether the screen copy has failed in this run (`CopyGate`).
+    static GATE: std::cell::RefCell<CopyGate> = const { std::cell::RefCell::new(CopyGate { broken: None }) };
     /// The settings' look key of this frame (`note_settings`), read by the freeze key.
     static LOOK: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
@@ -88,8 +143,12 @@ pub fn usable(w: f32, h: f32) -> bool {
     w >= 1.0 && h >= 1.0 && w <= MAX_SIDE && h <= MAX_SIDE
 }
 
-/// The screen's size in physical pixels, when a copy of it can be kept (`None`: the map is drawn live).
+/// The screen's size in physical pixels, when a copy of it can be kept (`None`: the map is drawn live, the
+/// size is too large or a copy failed before in this run).
 pub fn pixels() -> Option<(u32, u32)> {
+    if !GATE.with(|g| g.borrow().allowed()) {
+        return None;
+    }
     let (w, h) = macroquad::miniquad::window::screen_size();
     usable(w, h).then_some((w as u32, h as u32))
 }
@@ -97,39 +156,74 @@ pub fn pixels() -> Option<(u32, u32)> {
 /// The frame starts: releases the copy when no window over the map was drawn the frame before.
 pub fn begin_frame() {
     let released = LEASE.with(|l| l.borrow_mut().begin_frame());
-    drop(released);
+    free_all(released);
 }
 
 /// The copy for `key` at `size`, when it holds (the frame is then one with a window over the map).
-pub fn frozen(key: u64, size: (u32, u32)) -> Option<RenderTarget> {
-    LEASE.with(|l| l.borrow_mut().lookup(key, size).cloned())
+pub fn frozen(key: u64, size: (u32, u32)) -> Option<Texture2D> {
+    LEASE.with(|l| l.borrow_mut().lookup(key, size).map(ScreenCopy::texture))
 }
 
-/// Shows the copy on the screen as it was copied: the screen's own pixels, no blend.
-pub fn show(rt: &RenderTarget) {
-    super::render_cache::blit_screen(&rt.texture);
+/// Shows the copy on the screen as it was copied: the screen's own pixels, no blend (the copy has no alpha).
+pub fn show(tex: &Texture2D) {
+    super::render_cache::blit_screen(tex);
 }
 
-/// Copies the screen now, as the frame's map is drawn, into a new target kept for `key` at `size`; the
-/// copy held before is released first. The camera must be the screen's, with the frame's draws done.
+/// The first GL error since the last call, all of them cleared (0 when there was none).
+fn take_gl_error() -> u32 {
+    let mut first = GL_NO_ERROR;
+    for _ in 0..64 {
+        let e = unsafe { macroquad::miniquad::gl::glGetError() };
+        if e == GL_NO_ERROR {
+            break;
+        }
+        if first == GL_NO_ERROR {
+            first = e;
+        }
+    }
+    first
+}
+
+/// Copies the screen now, as the frame's map is drawn, into a new RGB8 texture kept for `key` at `size`; the
+/// copy held before is released first. The camera must be the screen's, with the frame's draws done. When the
+/// copy fails (a GL error), nothing is kept and the gate closes for the run: the caller has drawn the map live
+/// this frame, and the frames after draw it live too (`pixels` is `None`).
 pub fn capture(key: u64, size: (u32, u32)) {
     let released = LEASE.with(|l| l.borrow_mut().take());
-    drop(released);
-    let rt = render_target(size.0, size.1);
-    razdor::mem_probe::set_texture("map freeze copy", razdor::mem_probe::texture_bytes(size.0, size.1, 4));
-    rt.texture.set_filter(FilterMode::Nearest);
+    free_all(released);
     // The frame's pending draws reach the screen before it is read (macroquad's `get_screen_data` does this too).
-    unsafe { get_internal_gl().flush() };
+    unsafe { get_internal_gl() }.flush();
+    // Errors left by earlier calls are cleared first, so only this copy's error counts.
+    take_gl_error();
+    let id = unsafe { get_internal_gl() }.quad_context.new_render_texture(TextureParams {
+        width: size.0,
+        height: size.1,
+        format: TextureFormat::RGB8,
+        ..Default::default()
+    });
+    let copy = ScreenCopy(id);
+    let tex = copy.texture();
+    tex.set_filter(FilterMode::Nearest);
     set_default_camera();
-    rt.texture.grab_screen();
-    let replaced = LEASE.with(|l| l.borrow_mut().store(key, size, rt));
-    drop(replaced);
+    tex.grab_screen();
+    let error = take_gl_error();
+    if error != GL_NO_ERROR {
+        copy.free();
+        let first = GATE.with(|g| g.borrow_mut().fail(error));
+        if first {
+            razdor::diag!("map freeze: screen copy failed (GL error 0x{error:x}), the map is drawn live under windows");
+        }
+        return;
+    }
+    razdor::mem_probe::set_texture("map freeze copy", razdor::mem_probe::texture_bytes(size.0, size.1, 3));
+    let replaced = LEASE.with(|l| l.borrow_mut().store(key, size, copy));
+    free_all(replaced);
 }
 
 /// Releases the copy: the map is drawn live (the screen's size cannot be kept).
 pub fn release() {
     let released = LEASE.with(|l| l.borrow_mut().take());
-    drop(released);
+    free_all(released);
 }
 
 /// Keeps the settings' look of this frame for the freeze key (see [`look_of`]).
@@ -248,6 +342,17 @@ mod tests {
         assert!(!usable(8193.0, 1080.0), "past the limit: drawn live");
         assert!(!usable(0.0, 1080.0));
         assert!(!usable(f32::NAN, 1080.0));
+    }
+
+    #[test]
+    fn a_failed_copy_closes_the_gate_for_the_run() {
+        const INVALID_OPERATION: u32 = 0x502;
+        let mut gate = CopyGate::default();
+        assert!(gate.allowed(), "the copy is tried first");
+        assert!(gate.fail(INVALID_OPERATION), "the first failure is logged");
+        assert!(!gate.allowed(), "after a failure the map is drawn live");
+        assert!(!gate.fail(0x505), "later failures are not logged again");
+        assert!(!gate.allowed());
     }
 
     #[test]

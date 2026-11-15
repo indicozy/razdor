@@ -6977,6 +6977,7 @@ fn draw_map_backdrop(game: &Game, assets: &Assets) {
                 gpu_wait(Stage::GpuFreeze);
             }
             None => {
+                // The live map is drawn first: when the copy fails (`map_freeze::capture`), this frame is the live one.
                 backdrop_world(game, assets);
                 map_freeze::capture(key, size);
             }
