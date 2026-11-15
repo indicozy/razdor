@@ -33,8 +33,10 @@ pub enum Controls {
     /// «Щелчками», the original's: the first click picks a unit or an item, the second places
     /// it (0x4c346c, 0x4c653c, 0x4c6f50). Nothing is dragged, so nothing sticks to the pointer.
     Clicks,
-    /// «Перетаскиванием»: a click only selects (its sheet shows); units and items move by
-    /// dragging. Nothing is picked up by a click, so nothing sticks to the pointer.
+    /// «Перетаскиванием»: a click selects a unit (its sheet shows), and a click on an empty
+    /// cell with a unit selected places it there, as the second click does in `Clicks`;
+    /// units and items also move by dragging. Nothing is picked up by a click, so nothing
+    /// sticks to the pointer.
     Drag,
     /// «Оба», the default (also for settings files without the key, and for the old
     /// «как в оригинале» choice, which had both): the clicks and the dragging at once.
@@ -180,8 +182,8 @@ pub enum GridPress {
     /// An empty cell pressed while a unit is selected: its card slides there (0x4b0c04,
     /// `Card-Move`); the selection is cleared when the slide ends.
     Slide(usize),
-    /// An empty cell with nothing selected (with dragging only, any empty cell: the
-    /// selection is cleared).
+    /// An empty cell with nothing selected (with dragging only, a selection is cleared by
+    /// an empty cell only when one is made: see [`grid_press_in`]).
     Nothing,
 }
 
@@ -198,17 +200,18 @@ pub fn grid_press(selected: Option<usize>, pressed: Option<usize>) -> GridPress 
     }
 }
 
-/// The press as the setting `controls` has it. With [`Controls::Drag`] a press never moves a
-/// unit: a unit pressed is selected, the selected one is deselected again (the original's
+/// The press as the setting `controls` has it. With [`Controls::Drag`] a press on a unit never
+/// swaps it: a unit pressed is selected, the selected one is deselected again (the original's
 /// deselection, 0x4c346c, 0x4c653c, 0x4c6f50: the building window has no other way back to
-/// the town's menu with a full formation), and an empty cell clears the selection, where the
-/// original swaps or slides on the second press. Clicks and both act as the original.
+/// the town's menu with a full formation). An empty cell with a unit selected slides that
+/// unit there, as the second press does; with nothing selected it does nothing. Clicks and
+/// both act as the original.
 pub fn grid_press_in(controls: Controls, selected: Option<usize>, pressed: Option<usize>) -> GridPress {
     match (controls, pressed) {
         (Controls::Clicks | Controls::Both, _) => grid_press(selected, pressed),
         (Controls::Drag, Some(p)) if selected == Some(p) => GridPress::Deselect,
         (Controls::Drag, Some(p)) => GridPress::Select(p),
-        (Controls::Drag, None) => GridPress::Nothing,
+        (Controls::Drag, None) => grid_press(selected, None),
     }
 }
 
@@ -253,7 +256,7 @@ mod tests {
     }
 
     #[test]
-    fn with_dragging_only_a_press_never_moves_a_unit() {
+    fn with_dragging_a_press_on_a_unit_never_swaps_it() {
         use Controls::Drag;
         // A unit pressed is selected, whatever was selected before: no swap.
         assert_eq!(grid_press_in(Drag, None, Some(3)), GridPress::Select(3));
@@ -262,9 +265,18 @@ mod tests {
         // The selected unit pressed again is deselected (0x4c346c, 0x4c6f50), the hero included.
         assert_eq!(grid_press_in(Drag, Some(3), Some(3)), GridPress::Deselect);
         assert_eq!(grid_press_in(Drag, Some(0), Some(0)), GridPress::Deselect);
-        // An empty cell: no slide, nothing selected.
-        assert_eq!(grid_press_in(Drag, Some(4), None), GridPress::Nothing);
+        // An empty cell with nothing selected does nothing.
         assert_eq!(grid_press_in(Drag, None, None), GridPress::Nothing);
+    }
+
+    /// With «Перетаскиванием» a tap on an empty cell places the selected unit there, as the
+    /// second press does with the other choices (the owner's request, 2026-11-15).
+    #[test]
+    fn with_dragging_a_tap_on_an_empty_cell_places_the_selected_unit() {
+        use Controls::Drag;
+        assert_eq!(grid_press_in(Drag, Some(4), None), GridPress::Slide(4));
+        assert_eq!(grid_press_in(Drag, Some(0), None), GridPress::Slide(0));
+        assert_eq!(grid_press_in(Drag, Some(4), None), grid_press_in(Controls::Both, Some(4), None));
     }
 
     #[test]

@@ -1361,13 +1361,13 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
     }
     // The press, as the original's hero grid within the hero's army (0x4c653c); none while a
     // card moves (busy 0x68dc63). With «Расстановка армии: Перетаскивание» (Razdor's default,
-    // the owner's decision) it only selects and units move by dragging; the original's second
-    // press swaps or slides.
+    // the owner's decision) a press on a unit only selects (units also move by dragging), and
+    // an empty cell slides the selected one, as the original's second press does (no swap).
     if let (Some((on, slot)), None) = (pressed, anim) {
         let press = super::unit_drag::grid_press_in(super::unit_drag::controls(), selected, on);
         view.garrison_sel = match press {
             super::unit_drag::GridPress::Select(i) => Some((false, i)),
-            // Dragging only: an empty cell clears this grid's selection.
+            // Nothing selected here: an empty cell changes no selection.
             super::unit_drag::GridPress::Nothing => view.garrison_sel.filter(|_| selected.is_none()),
             _ => None,
         };

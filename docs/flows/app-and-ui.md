@@ -1057,9 +1057,11 @@ also for older files (and the old `original` value, which had both), is the orig
 to pick, press to move (interface.md §9.6) with dragging on top: a press on a card starts a
 drag (`unit_drag::press`, `unit_drag::follow`). «Щелчками» (`Controls::Clicks`) is the
 original alone: `unit_drag::press` arms no drag, so nothing sticks to the pointer. «Перетаскиванием»
-(`Controls::Drag`) makes a press on a card only select or deselect the selected unit
-(`unit_drag::grid_press_in`, `building_view::garrison_click`); units move by dragging, and the
-card hints say "click to select" (`items_view::pointed_line`). The same choice covers units in
+(`Controls::Drag`) makes a press on a card only select or deselect the selected unit, and a
+press on an empty cell with a unit selected slides it there (`unit_drag::grid_press_in`: `Slide`,
+as the second press does); the garrison tab's `building_view::garrison_click` still only clears
+on an empty cell. Units also move by dragging, and the card hints say "click to select"
+(`items_view::pointed_line`). The same choice covers units in
 the army window (`items_view::squad`), the building window's hero grid and the garrison tab,
 and items. Battle is not affected.
 

@@ -615,9 +615,10 @@ impl ArmySel {
     /// deselection, which the original jumps past: the deselected unit's promotion tree stays
     /// up (original behaviour) until a later press switches it. A swap leaves nothing
     /// selected and the pack up; a slide keeps the unit selected (and its tree up) until the
-    /// slide ends ([`ArmySel::slide_done`]). With dragging only (`controls`, Razdor's setting,
-    /// the owner's decision) a press only selects: a unit pressed is selected and its side
-    /// shown, an empty cell clears the selection and shows the pack.
+    /// slide ends ([`ArmySel::slide_done`]). With dragging (`controls`, Razdor's setting) a
+    /// press on a unit only selects: it is selected and its side shown; an empty cell slides
+    /// the selected unit there, as the second press does, and with nothing selected it shows
+    /// the pack.
     fn press(&mut self, controls: Controls, pressed: Option<usize>) -> GridPress {
         let p = grid_press_in(controls, self.selected, pressed);
         match p {
@@ -631,7 +632,7 @@ impl ArmySel {
                 self.shown = None;
             }
             GridPress::Slide(s) => self.shown = Some(s),
-            // As the original's nothing selected; with dragging only a unit may be selected.
+            // As the original's nothing selected.
             GridPress::Nothing => {
                 self.selected = None;
                 self.shown = None;
@@ -1149,9 +1150,9 @@ pub fn squad(
         chrome::hint_text(strip, &hint, ink);
     });
     // The press, as the original's (0x4c346c), ignored while a card slides (busy 0x68dc63).
-    // With «Расстановка армии: Перетаскивание» (Razdor's default, the owner's decision) it
-    // only selects (no swap or slide; units move by dragging), where the original's second
-    // press moves the unit.
+    // With «Расстановка армии: Перетаскивание» (Razdor's default, the owner's decision) a press
+    // on a unit only selects (no swap; units also move by dragging), and an empty cell places
+    // the selected one as the original's second press does.
     if let (Some((Some(to), _)), None, true) = (pressed, slide, game.held_item.is_some()) {
         // An item held, pressed on a unit's card: it is given to him (0x4c346c → 0x4979c4);
         // no selection, swap or slide.
@@ -2995,10 +2996,12 @@ mod tests {
         assert_eq!(s, sel(None, Some(2)));
     }
 
-    /// «Расстановка армии: Перетаскивание» (Razdor's default): presses only select; the
-    /// right side follows the pressed unit, an empty cell brings the pack back.
+    /// «Расстановка армии: Перетаскивание» (Razdor's default): a press on a unit selects it
+    /// (no swap); the right side follows the pressed unit. A tap on an empty cell places the
+    /// selected unit there (the slide, as with the other choices, its side kept until it
+    /// ends); with nothing selected it brings the pack back.
     #[test]
-    fn with_dragging_only_presses_only_select() {
+    fn with_dragging_presses_select_and_an_empty_cell_places() {
         let mut s = ArmySel::default();
         assert_eq!(s.press(Controls::Drag, Some(3)), GridPress::Select(3));
         assert_eq!(s, sel(Some(3), Some(3)));
@@ -3009,7 +3012,12 @@ mod tests {
         // (4c346c, §9.6; a player's report).
         assert_eq!(s.press(Controls::Drag, Some(5)), GridPress::Deselect);
         assert_eq!(s.press(Controls::Drag, Some(5)), GridPress::Select(5));
-        // An empty cell: no slide; nothing selected, the pack up.
+        // An empty cell: the selected unit slides there; the selection clears when it ends.
+        assert_eq!(s.press(Controls::Drag, None), GridPress::Slide(5));
+        assert_eq!(s, sel(Some(5), Some(5)));
+        s.slide_done();
+        assert_eq!(s, sel(None, Some(5)));
+        // An empty cell with nothing selected: nothing, the pack up.
         assert_eq!(s.press(Controls::Drag, None), GridPress::Nothing);
         assert_eq!(s, ArmySel::default());
     }
