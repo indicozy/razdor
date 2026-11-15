@@ -202,29 +202,26 @@ actor (or the unit whose action plays) `Current`; on the player's turn every own
 the hovered one `Aimed`; the AI's target while its action plays `Aimed` or `OwnTarget`. They
 are drawn over the portrait under the card's signs and pulse with the real clock.
 
-Before the first action (`BattleView::offering`: the screen offered the deployment and `is_deploying`) a row of two
-buttons sits above the quick buttons (`Layout::with_deploy`, `deploy_buttons`; the unit's panel gives up the row and
-its gaps, so the quick buttons and the grids stay where they are; upright the two sit side by side, sideways one above
-the other, 40 dp at least, 6 dp apart on a phone). On a phone (`Layout::grid`, backlog 1607, the owner's request) the
-deployment is a 2×2 grid instead: «Рестарт» | «Отступить» over «Быстрый бой (Q)» | «Смотреть (W)», four equal cells
-6 dp apart, each one phone button tall (40 dp, the minimum target; the hit area grows to 46-48 dp where there is room), the grid
-two cells and a gap tall, at the quick row's old bottom edge;
-the panel above takes the height the grid leaves (backlog 1607, the owner's call: the grid saves height; 18 dp more than with 48 dp cells), upright and sideways.
-While the row is shown, its two buttons and the quick row's
-two (or three, watching) share one label size (`BattleView::deploy_label_px`, `chrome::shared_button_label_px`:
-the largest that fits every label in its own button, 12 px at least; the quick row splits 0.56 : 0.44 then, 0.62
-otherwise, equal halves on the phone's grid), so no label is cut or wrapped. The grid's labels are at most 14 sp
-(the mobile check's capital ratio: `DEPLOY_LABEL_MAX_SP`, capped by capital height): upright they measure 13.5-14 sp (Large text); sideways
-they measure about 9-10 sp (the longest word fills the narrow cell): a known limit, not settled (`docs/OPEN_QUESTIONS.md`). «Рестарт» (`rearranging`) picks a card with a click
-(`unit_drag::grid_press_in`, the «Расстановка армии» setting) or drags it (`unit_drag::press`/`update`), and moves it
-with `Battle::move_card`; «Готово» ends it. «Отступить» (`retreat_now`) is offered when `retreat` was (`deploying`'s
-argument): the frame calls `Game::retreat_battle` and returns to the map. A click on a card, the space key, Q (quick
-battle) and W (watch) begin the battle (`begin_play`, `Battle::start_play`), and the row goes. The strip keeps the
-battle's own exit hint.
+Before the first action (`BattleView::offering`: the screen offered the deployment and `is_deploying`) the battle
+window is as it was before the deployment: no extra row, and the strip keeps the battle's exit hint. The leave-battle
+window (Esc, or the red X; below) offers «Рестарт» and, before the first action when the game allows it
+(`BattleView::retreat_offered`), «Отступить» right after it. «Рестарт» (`ExitChoice::Restart`, with its question) plays
+this battle again from its start (`restart_battle` from `restart_state`): the new `BattleView` starts with the
+arrangement on (`set_rearranging(true)`, only on this path; a first battle start does not). While the arrangement is on,
+a press on one of the player's own cards picks it and a second press swaps or moves it (`rearrange_press`, the army
+window's grid press: `unit_drag::grid_press_in`, with the «Расстановка армии» setting), and a drag moves it
+(`unit_drag::press` and `update`); each move is `Battle::move_card`. The first action ends the arrangement: a click on
+an enemy card (`deploy_step`: `DeployStep::Begin`, as a card click began it before 1607), Space, Q (quick battle), W
+(watch) or Enter (quick battle while untouched). A press on the player's own card never begins the battle while the
+arrangement is on. «Отступить» (`ExitChoice::Retreat`) closes the window and the frame calls `Game::retreat_battle`,
+returning to the map.
 
-Esc (or the red X) opens the leave-battle window (`saves::battle_exit_dialog`, laid out as
-4d3620 in the original's pixels); the battle window is not drawn while it is open, as the
-original hides it. `RAZDOR_SCENE_BATTLE_EXIT=1` snapshots it over any battle scene.
+Esc (or the red X) opens the leave-battle window (`saves::battle_exit_dialog(asking, retreat)`, laid out as
+4d3620 in the original's pixels): «Выйти в меню», «Рестарт», «Отступить» (before the first action), «Клавиши» (phones),
+«Отмена». «Выйти из игры» is the map's game menu's only. The battle window is not drawn while it is open, as the
+original hides it. `RAZDOR_SCENE_BATTLE_EXIT=1` snapshots it over any battle scene (`plain`: the fallback window
+without the install's picture); `RAZDOR_SCENE_DEPLOY=start|rearrange|pick` sets the battle before its first action
+(`rearrange`: the arrangement on, as after «Рестарт»; `pick`: a card picked in it).
 
 ## 6. End of battle and return to the map
 

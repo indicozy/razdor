@@ -513,8 +513,9 @@ pub fn stage(app: &mut App) {
             super::new_game::scene_scroll(px);
         }
     }
-    // `RAZDOR_SCENE_BATTLE_EXIT=1`: a battle scene with its leave-battle window open (Esc).
-    if std::env::var("RAZDOR_SCENE_BATTLE_EXIT").is_ok_and(|v| v == "1") {
+    // `RAZDOR_SCENE_BATTLE_EXIT=1`: a battle scene with its leave-battle window open (Esc); `plain` the
+    // fallback window without the install's picture (`saves::battle_exit_dialog`).
+    if std::env::var("RAZDOR_SCENE_BATTLE_EXIT").is_ok_and(|v| v == "1" || v == "plain") {
         if let Screen::Battle(v) | Screen::CustomBattle(v) = &mut app.screen {
             v.open_exit_window();
         }
@@ -1319,9 +1320,9 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                 hero.wage_kind = razdor::rules::content::WageKind::Leader;
                 game.squad[0] = hero;
             }
-            // `RAZDOR_SCENE_DEPLOY=start|rearrange`: the battle before its first action, with its
-            // deployment row (`rearrange`: «Рестарт» on). The hero stands where he is, so
-            // «Отступить» is offered (backlog 1607).
+            // `RAZDOR_SCENE_DEPLOY=start|rearrange|pick`: the battle before its first action (`rearrange`:
+            // the arrangement on, as after «Рестарт»; `pick`: a card picked). The hero stands where he is,
+            // so the leave window's «Отступить» is offered (backlog 1607).
             if let Some(mode) = std::env::var("RAZDOR_SCENE_DEPLOY").ok().filter(|_| !end) {
                 game.back_to = Some(game.tile());
                 let retreat = game.can_retreat();

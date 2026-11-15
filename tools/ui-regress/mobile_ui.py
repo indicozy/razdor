@@ -166,6 +166,9 @@ SCREENS = [
     # arrangement with its «Готово» (a card picked).
     ("battle-deploy", "battle:РК1-Начало пути:0", {"RAZDOR_SCENE_DEPLOY": "start"}),
     ("battle-arrange", "battle:РК1-Начало пути:0", {"RAZDOR_SCENE_DEPLOY": "pick"}),
+    # The leave-battle window before the first action (its second row: «Расставить», «Отступить») and after it.
+    ("battle-exit-deploy", "battle:РК1-Начало пути:0", {"RAZDOR_SCENE_DEPLOY": "start", "RAZDOR_SCENE_BATTLE_EXIT": "1"}),
+    ("battle-exit", "battle:РК1-Начало пути:0", {"RAZDOR_SCENE_BATTLE_EXIT": "1"}),
     ("classes", "classes:РК1-Начало пути", {}),
     # The hero window of a map with a save slot («Продолжить» left of «Начать», the date line), and
     # its «Начать» question (a map with a slot asks first).

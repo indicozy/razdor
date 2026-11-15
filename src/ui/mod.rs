@@ -803,6 +803,11 @@ impl App {
                 self.dialogs.clear();
                 self.message = None;
                 self.screen = saves::battle(&mut game, (!self.test_play).then_some(&mut self.session));
+                // «Рестарт» opens the fight ready to arrange (backlog 1607): the player's cards move until
+                // his first action (an enemy card, Space, Q, W or Enter). The first battle start does not.
+                if let Screen::Battle(view) = &mut self.screen {
+                    view.set_rearranging(true);
+                }
                 self.game = Some(game);
             }
             Err(e) => self.message = Some(razdor::trf!("Cannot load: {e}.", e)),
@@ -1718,6 +1723,8 @@ impl App {
                     photo::request();
                     Some(Screen::WorldMap)
                 }
+                // The battle's «Отступить» (backlog 1607): the game menu never offers it.
+                (Some(saves::ExitChoice::Retreat), _) => None,
                 (None, next) => next,
             },
             (Screen::Settings, Some(game)) => {
@@ -1832,6 +1839,8 @@ impl App {
                 Some(saves::ExitChoice::MainMenu) => next = Some(Screen::MainMenu),
                 // «Фото» is the game menu's only (the map's): never a battle's.
                 Some(saves::ExitChoice::Photo) => {}
+                // «Отступить» is carried out by the battle's frame (`BattleView::frame`).
+                Some(saves::ExitChoice::Retreat) => {}
                 // «Клавиши» (phones): the battle stays, the key list opens over it (Place::Battle).
                 Some(saves::ExitChoice::Keys) => {
                     self.help = true;

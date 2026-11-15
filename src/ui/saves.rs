@@ -269,8 +269,8 @@ pub fn battle(game: &mut Game, session: Option<&mut super::session::Keeper>) -> 
     game.foe = foe;
     // The moment just before it, its foe pending, kept for «Рестарт» (this battle again).
     let state = save::meta_of(game, SaveKind::Auto, &name).ok().and_then(|m| save::encode(&m, game).ok().map(|b| (m, b)));
-    // Razdor's deployment (backlog 1607): the battle waits for the player's first action, with
-    // «Рестарт» and, where the game allows it, «Отступить». Read before the start, which
+    // Razdor's deployment (backlog 1607): the battle waits for the player's first action, with the
+    // leave window's «Отступить» where the game allows it. Read before the start, which
     // may move the armies onto their cells.
     let retreat = game.can_retreat();
     let mut view = BattleView::deploying(game.start_battle(), retreat);
@@ -1619,6 +1619,9 @@ pub enum ExitChoice {
     Keys,
     /// Razdor's «Фото» (the game menu only): photo mode over the map (`ui::photo`).
     Photo,
+    /// Razdor's «Отступить» (the battle's leave window, before its first action, backlog 1607): the
+    /// battle ends with no losses. The battle view acts on it (`BattleView::frame`).
+    Retreat,
 }
 
 /// The bar's X button (and Esc on the map): "Выход из игры", the original's warning that the
@@ -1631,39 +1634,41 @@ pub fn exit_window(game: &Game, assets: &Assets, asking: &mut bool) -> (Option<E
     let _scale = super::window_layout::exit_scale();
     let title = own("ExitGame", "Title", n_("Leave the game"));
     let warning = own("ExitGame", "Warning", n_("Attention!\n\nThe game under way will end.\nTo go on with it another time, save it from the map's bar first."));
-    match exit_dialog(&title, &warning, asking, false, true) {
+    match exit_dialog(&title, &warning, asking, false, true, false) {
         (_, true) => (None, Some(Screen::WorldMap)),
         (choice, false) => (choice, None),
     }
 }
 
 /// Esc in a battle: "Варианты выхода из битвы", the original's warning that a battle cannot
-/// be left for the map, and the same choices as the exit window. Returns the choice and
-/// whether it was cancelled.
-pub fn battle_exit_dialog(asking: &mut bool) -> (Option<ExitChoice>, bool) {
+/// be left for the map, and its choices: «Выйти в меню», «Рестарт» (this battle again, and with it
+/// the arrangement, backlog 1607), «Отступить» (before the first action, when `retreat`), «Отмена».
+/// Returns the choice and whether it was cancelled.
+pub fn battle_exit_dialog(asking: &mut bool, retreat: bool) -> (Option<ExitChoice>, bool) {
     // The window's scale for this screen, both its variants (`exit_scale`).
     let _scale = super::window_layout::exit_scale();
     let title = own("ExitBattle", "Title", n_("Ways out of the battle"));
     // Razdor's «Рестарт» here plays this battle again (the user's choice; the original's
     // restarts the scenario, and says so): its own text.
     let warning = tr(n_("Attention!\n\nYou cannot go back to the map without finishing the battle!\nTo stop the game under way, leave to the main menu (the game is not saved), or start this battle again (restart)."));
-    if super::chrome::win("S_Battle").is_none() {
-        return exit_dialog(&title, warning, asking, true, false);
+    // The plain window is the fallback without the install's picture; the snapshot's
+    // `RAZDOR_SCENE_BATTLE_EXIT=plain` shows it with the picture there.
+    let plain = super::chrome::win("S_Battle").is_none() || std::env::var("RAZDOR_SCENE_BATTLE_EXIT").is_ok_and(|v| v == "plain");
+    if plain {
+        return exit_dialog(&title, warning, asking, true, false, retreat);
     }
-    super::dt_font::with_legacy_metrics(|| battle_exit_window(&title, warning, asking))
+    super::dt_font::with_legacy_metrics(|| battle_exit_window(&title, warning, asking, retreat))
 }
 
-/// The original's leave-battle window (4d3620, drawn by 4d0ccc), in its pixels times the
-/// interface scale: 634×516 in red marble centred over the map view above the bar, the
-/// `S_Battle` picture at (5, 32), a text box at (18, 264) 598×179 darkened by 0x30 with its
-/// silver lines and corners, the warning in the plain Benguiat tint (ae24a0) centred in it,
-/// and the red buttons (Btn* turned and darkened, 4dba90) 10 px from the bottom: «Выйти из
-/// игры» (Btn3) at x 10, «Выйти в меню» (Btn3) 8 px after it, «Рестарт» (Btn2) 8 px after
-/// that (4d5214), «Отмена» (Btn1) 10 px from the right (4d3620).
-fn battle_exit_window(title: &str, warning: &str, asking: &mut bool) -> (Option<ExitChoice>, bool) {
+/// The leave-battle window's height in its own pixels (634 wide, as the original's).
+const BATTLE_EXIT_H: f32 = 516.0;
+
+fn battle_exit_window(title: &str, warning: &str, asking: &mut bool, retreat: bool) -> (Option<ExitChoice>, bool) {
     use super::chrome;
     const W: f32 = 634.0;
-    const H: f32 = 516.0;
+    const H: f32 = BATTLE_EXIT_H;
+    let art = |name: &str| chrome::win(&format!("{name}Up")).map(|t| (t.width(), t.height()));
+    let (b3, b2, b1) = (art("Btn3").unwrap_or((160.0, 36.0)), art("Btn2").unwrap_or((128.0, 36.0)), art("Btn1").unwrap_or((96.0, 36.0)));
     let (sw, sh) = (screen_width(), screen_height());
     let o = (chrome::k() * 0.9375).min((sw - 12.0) / W).min((sh - chrome::bar_height() - 4.0) / H);
     // Centred between the safe area's sides and between its top and the bar (on the desktop, the
@@ -1705,27 +1710,27 @@ fn battle_exit_window(title: &str, warning: &str, asking: &mut bool) -> (Option<
         super::dt_font::with_face(face, || chrome::shadow_centered(l, tb.center().x, y, size, Color::from_rgba(255, 255, 155, 255)));
         y += line;
     }
-    let art = |name: &str| chrome::win(&format!("{name}Up")).map(|t| (t.width(), t.height()));
-    let (b3, b2, b1) = (art("Btn3").unwrap_or((160.0, 36.0)), art("Btn2").unwrap_or((128.0, 36.0)), art("Btn1").unwrap_or((96.0, 36.0)));
-    let by = 460.0 + (H - 460.0 - b1.1) / 2.0;
-    // The phone's «Клавиши» (between «Рестарт» and «Отмена») takes its own slot in the row.
+    // One row: «Выйти в меню», «Рестарт», «Отступить» (before the first action), on phones «Клавиши», «Отмена».
+    // «Выйти из игры» is the map's game menu's only.
     let phone = super::display::dp_px().is_some();
-    let row = battle_exit_row(phone, (b3.0, b2.0, b1.0));
-    // (x and width, height, art, label, choice) of each button.
-    type Button = ((f32, f32), f32, &'static str, String, Option<ExitChoice>);
-    let mut buttons: Vec<Button> = vec![
-        (row[0], b3.1, "Btn3", own("ExitGame", "Exit", n_("Quit the game")), Some(ExitChoice::Quit)),
-        (row[1], b3.1, "Btn3", own("ExitGame", "ExitToMenu", n_("To the menu")), Some(ExitChoice::MainMenu)),
-        (row[2], b2.1, "Btn2", own("ExitGame", "Restart", n_("Restart")), Some(ExitChoice::Restart)),
+    let row = battle_exit_row(phone, (b3.0, b2.0, b1.0), retreat);
+    let by = 460.0 + (H - 460.0 - b1.1) / 2.0;
+    // (art, height, label, choice) of each button, in the row's order.
+    let mut items: Vec<(&'static str, f32, String, Option<ExitChoice>)> = vec![
+        ("Btn3", b3.1, own("ExitGame", "ExitToMenu", n_("To the menu")), Some(ExitChoice::MainMenu)),
+        ("Btn2", b2.1, own("ExitGame", "Restart", n_("Restart")), Some(ExitChoice::Restart)),
     ];
-    if phone {
-        buttons.push((row[3], b2.1, "Btn2", tr(n_("Keys")).to_string(), Some(ExitChoice::Keys)));
+    if retreat {
+        items.push(("Btn2", b2.1, tr(n_("Retreat")).to_string(), Some(ExitChoice::Retreat)));
     }
-    buttons.push((row[row.len() - 1], b1.1, "Btn1", own("Buttons", "Cancel", n_("Cancel")), None));
+    if phone {
+        items.push(("Btn2", b2.1, tr(n_("Keys")).to_string(), Some(ExitChoice::Keys)));
+    }
+    items.push(("Btn1", b1.1, own("Buttons", "Cancel", n_("Cancel")), None));
     let mut choice = None;
     let mut cancel = closed;
     let was_asking = *asking;
-    for ((x, bw), bh, art, label, what) in buttons.iter() {
+    for ((art, bh, label, what), (x, bw)) in items.iter().zip(row.iter()) {
         let b = Rect::new(wx + x * o, wy + by * o, bw * o, bh * o);
         let over = !*asking && b.contains(crate::ui::widgets::pointer().into()) && !input_blocked();
         chrome::defeat_button_art(b, art, label, over && super::input::is_mouse_button_down(MouseButton::Left));
@@ -1756,22 +1761,31 @@ fn battle_exit_window(title: &str, warning: &str, asking: &mut bool) -> (Option<
 }
 
 /// The leave-battle window's button row in its own pixels (the window is `W` = 634 wide), as
-/// `(x, width)` in order: «Выйти из игры», «Выйти в меню», «Рестарт», then on phones «Клавиши»,
-/// and «Отмена» last. `art` is the widths of the `Btn3`, `Btn2` and `Btn1` pictures.
+/// `(x, width)` in order: «Выйти в меню», «Рестарт», then «Отступить» when `retreat`, then on phones
+/// «Клавиши», and «Отмена» last. `art` is the widths of the `Btn3`, `Btn2` and `Btn1` pictures.
 ///
-/// The desktop row is the original's: 10 px from the left, 8 px between the buttons, «Отмена»
-/// 10 px from the right. A phone's row takes the window less 10 px at each side, 4 px between
-/// the five buttons; their widths shrink together when they would not fit (the labels are
-/// shrunk to fit their buttons by `button_label`).
-fn battle_exit_row(phone: bool, art: (f32, f32, f32)) -> Vec<(f32, f32)> {
+/// The desktop row: 10 px from the left, 8 px between the buttons, «Отмена» 10 px from the right; the
+/// slot of the original's «Выйти из игры» gives room to «Отступить». A phone's row takes the window
+/// less 10 px at each side, 4 px between the buttons; the widths shrink together when they would not fit.
+fn battle_exit_row(phone: bool, art: (f32, f32, f32), retreat: bool) -> Vec<(f32, f32)> {
     const W: f32 = 634.0;
     let (b3, b2, b1) = art;
     if !phone {
-        let menu_x = 10.0 + b3 + 8.0;
-        let restart_x = menu_x + b3 + 8.0;
-        return vec![(10.0, b3), (menu_x, b3), (restart_x, b2), (W - 10.0 - b1, b1)];
+        let mut row = vec![(10.0, b3)];
+        let mut x = 10.0 + b3 + 8.0;
+        row.push((x, b2));
+        if retreat {
+            x += b2 + 8.0;
+            row.push((x, b2));
+        }
+        row.push((W - 10.0 - b1, b1));
+        return row;
     }
-    let widths = [150.0f32, 150.0, 110.0, 104.0, 84.0];
+    let mut widths = vec![150.0f32, 110.0];
+    if retreat {
+        widths.push(110.0);
+    }
+    widths.extend([104.0, 84.0]);
     let gap = 4.0;
     let fit = ((W - 20.0 - gap * (widths.len() as f32 - 1.0)) / widths.iter().sum::<f32>()).min(1.0);
     let mut x = 10.0;
@@ -1798,7 +1812,7 @@ fn battle_exit_row(phone: bool, art: (f32, f32, f32)) -> Vec<(f32, f32)> {
 /// `chrome::opx` (0.9375 of the interface scale) on the screen.
 const EXIT_ART: (f32, f32) = (634.0 * 0.9375, 516.0 * 0.9375);
 
-fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art: bool) -> (Option<ExitChoice>, bool) {
+fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art: bool, retreat: bool) -> (Option<ExitChoice>, bool) {
     let k = super::chrome::k();
     // The map's window is ae2520, 634×516 in the original's pixels (4d524b).
     let px = super::chrome::opx();
@@ -1850,11 +1864,15 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art:
             y += 16.0 * k;
         }
     }
-    let mut labels = vec![
-        (own("ExitGame", "Exit", n_("Quit the game")), Some(ExitChoice::Quit)),
-        (own("ExitGame", "ExitToMenu", n_("To the menu")), Some(ExitChoice::MainMenu)),
-        (own("ExitGame", "Restart", n_("Restart")), Some(ExitChoice::Restart)),
-    ];
+    // «Выйти из игры» is the map's game menu's; the battle's leave window has «Выйти в меню», «Рестарт»
+    // and, before the first action, «Отступить» (backlog 1607).
+    let mut labels = Vec::new();
+    let mut widths = Vec::new();
+    if !battle {
+        labels.push((own("ExitGame", "Exit", n_("Quit the game")), Some(ExitChoice::Quit)));
+    }
+    labels.push((own("ExitGame", "ExitToMenu", n_("To the menu")), Some(ExitChoice::MainMenu)));
+    labels.push((own("ExitGame", "Restart", n_("Restart")), Some(ExitChoice::Restart)));
     // Razdor's «Клавиши» in the game menu and in the battle's leave window: on phones only (the
     // key list over the screen; phones have no F1). The desktop windows are the original's
     // four-button rows, as before.
@@ -1869,8 +1887,15 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art:
     } else {
         (120.0, 90.0, 7.5)
     };
-    let mut widths = vec![150.0 * k, 150.0 * k, restart_w * k];
+    if !battle {
+        widths.push(150.0 * k);
+    }
+    widths.extend([150.0 * k, restart_w * k]);
     let gap = gap * k;
+    if battle && retreat {
+        labels.push((tr(n_("Retreat")).to_string(), Some(ExitChoice::Retreat)));
+        widths.push(restart_w * k);
+    }
     if phone_menu {
         labels.push((tr(n_("Keys")).to_string(), Some(ExitChoice::Keys)));
         widths.push(104.0 * k);
@@ -2029,34 +2054,6 @@ mod tests {
         for pair in row.windows(2) {
             assert!(pair[0].0 + pair[0].1 < pair[1].0, "buttons overlap");
         }
-    }
-
-    /// The leave-battle window's art (`Btn3`, `Btn2`, `Btn1` widths) in its own pixels.
-    const ART: (f32, f32, f32) = (160.0, 128.0, 96.0);
-
-    /// The desktop row is the original's: «Выйти из игры» 10 px in, 8 px between the buttons
-    /// (Btn3, Btn3, Btn2), «Отмена» 10 px from the right; four buttons, as before.
-    #[test]
-    fn the_desktop_battle_exit_row_is_the_original_s_four_buttons() {
-        let row = battle_exit_row(false, ART);
-        assert_eq!(row, vec![(10.0, 160.0), (178.0, 160.0), (346.0, 128.0), (528.0, 96.0)]);
-    }
-
-    /// On a phone the five buttons (Quit, MainMenu, Restart, Keys, Cancel) keep their order, sit
-    /// inside the window's 10 px margins with equal gaps, and never overlap.
-    #[test]
-    fn the_phone_battle_exit_row_has_five_buttons_that_fit_the_window() {
-        let row = battle_exit_row(true, ART);
-        assert_eq!(row.len(), 5, "Quit, MainMenu, Restart, Keys, Cancel");
-        assert!(row[0].0 >= 10.0, "the first button starts inside the margin");
-        let last = row[4];
-        assert!(last.0 + last.1 <= 634.0 - 10.0 + 1e-3, "the row ends inside the margin: {last:?}");
-        for pair in row.windows(2) {
-            let gap = pair[1].0 - (pair[0].0 + pair[0].1);
-            assert!((gap - 4.0).abs() < 1e-3, "gaps are 4 px: {row:?}");
-        }
-        // The art sizes do not matter on a phone: the row is the same whatever they are.
-        assert_eq!(battle_exit_row(true, (300.0, 300.0, 300.0)), row);
     }
 
     /// 0x4b6338, 0x47d71c: the picked save's lines keep their fonts with (0, 30, 90) added.
@@ -2264,4 +2261,28 @@ mod tests {
         assert!(lifted.y >= top - 0.5 && lifted.bottom() <= sh - keyboard + 0.5, "the window is above the keyboard: {lifted:?}");
         assert!(save.y + dy + save.h <= sh - keyboard + 0.5, "the save button is above the keyboard");
     }
+
+    #[test]
+    fn the_leave_battle_window_is_one_row_without_the_map_s_quit_and_with_retreat_after_restart() {
+        // Before the first action «Отступить» sits right after «Рестарт»; after it the row closes up.
+        for phone in [false, true] {
+            let without = battle_exit_row(phone, (160.0, 128.0, 96.0), false);
+            let with = battle_exit_row(phone, (160.0, 128.0, 96.0), true);
+            assert_eq!(with.len(), without.len() + 1, "one more button before the first action");
+            let (restart, retreat) = (with[1], with[2]);
+            assert!((retreat.0 - (restart.0 + restart.1 + 8.0)).abs() < 0.01 || phone, "«Отступить» right after «Рестарт» on the desktop: {with:?}");
+            if phone {
+                assert!(retreat.0 > restart.0 + restart.1 - 0.01, "a phone's row keeps its order: {with:?}");
+            }
+            // The row stays inside the window's 634 px, its buttons in order and apart.
+            for row in [&with, &without] {
+                for pair in row.windows(2) {
+                    assert!(pair[0].0 + pair[0].1 <= pair[1].0 + 0.01, "buttons do not overlap: {row:?}");
+                }
+                let last = row.last().expect("«Отмена»");
+                assert!(last.0 + last.1 <= 634.0 - 10.0 + 0.01, "«Отмена» within the window: {row:?}");
+            }
+        }
+    }
+
 }

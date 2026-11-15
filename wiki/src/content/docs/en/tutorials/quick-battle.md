@@ -11,12 +11,12 @@ sidebar:
 
 ## Restart and Retreat
 
-A Razdor addition. While nobody has moved yet, the battle window has two more buttons:
+A Razdor addition. The leave-battle window (`Esc`, "Ways out of the battle") has two buttons that a normal battle does not:
 
-* **"Restart"**: rearrange your units before the fight, by clicking or dragging, as in the army window.
-* **"Retreat"**: leave without losses: no experience and no loot, the army is unchanged, the hero goes back to the cell he came from, and the enemy army does not attack for two game hours.
+* **"Restart"**: start this battle again. It opens with the arrangement on: rearrange your units before the fight, by clicking or dragging, as in the army window. The first move comes when you click an enemy unit, press the space bar, or choose "Quick battle" or "Watch".
+* **"Retreat"**: leave without losses: no experience and no loot, the army is unchanged, the hero goes back to the cell he came from, and the enemy army does not attack for two game hours. The button sits right after "Restart" and is there only before the first move. Not offered in a battle for a building (siege or defence) or in a battle started by a scenario event.
 
-The buttons are not offered in a battle for a building (siege or defence) or in a battle started by a scenario event. On a phone the four battle-start buttons form a 2×2 grid.
+After the first move these buttons are gone, and the window is the same as always.
 
 ## Quick battle
 
