@@ -370,6 +370,9 @@ fn after_raw_draw() {
 /// Draws a textured piece of a sharp draw: macroquad's batch, or the retained pass (`retain`), which may take it.
 /// A piece without a texture ends a retained pass's replay (`retain::event`).
 fn piece(mesh: &Mesh) {
+    if CAPTURING.load(std::sync::atomic::Ordering::Relaxed) {
+        CAPTURED.with_borrow_mut(|c| c.push(Piece { vertices: mesh.vertices.clone(), indices: mesh.indices.clone(), texture: mesh.texture.as_ref().map(|t| t.raw_miniquad_id()) }));
+    }
     match mesh.texture.as_ref() {
         Some(tex) if retain::active() && blend_context().is_none() => {
             if retain::piece(&mesh.vertices, &mesh.indices, tex, texels(tex)) {
@@ -383,6 +386,70 @@ fn piece(mesh: &Mesh) {
             draw_mesh(mesh);
         }
     }
+}
+
+/// The session's material for the flat pass's quads ([`draw_quad`]): None outside a session, and inside a blend
+/// context (a quad is drawn as [`draw`] draws a plain sprite of the session).
+pub fn pass_quad_material() -> Option<Material> {
+    if blend_context().is_some() {
+        return None;
+    }
+    session_base()
+}
+
+/// Submits one textured quad of the session as [`draw`] does (`draw_sprite_mesh`, `draw_scaled_mesh`): the same
+/// counts, the texel size set for `tex_size`, the session's material, then the piece. The caller filled `mesh`'s
+/// vertices (the flat pass's fast path, `world_view::flat_fast`) with the bytes `draw` would have made.
+pub fn draw_quad(m: &Material, mesh: &Mesh, tex_size: Vec2) {
+    count_draw(mesh.texture.as_ref(), mesh.vertices.len());
+    set_tex_size(m, tex_size);
+    session_material();
+    piece(mesh);
+}
+
+/// The pass's scale factors of a sprite draw ([`draw_scale`]): the perspective and the raster factor, read once per pass.
+pub fn pass_factors() -> (f32, f32) {
+    (PERSPECTIVE.with(std::cell::Cell::get), RASTER.with(std::cell::Cell::get))
+}
+
+/// Whether the fog cell of the sharp draws is none (the flat view's sprites take none: their vertices' fog slot is zero).
+pub fn fog_cell_is_zero() -> bool {
+    FOG_CELL.with(std::cell::Cell::get) == Vec2::ZERO
+}
+
+/// A textured piece as the sharp draws hand it to macroquad (its vertices, indices and texture id), kept by the check mode.
+pub struct Piece {
+    pub vertices: Vec<Vertex>,
+    pub indices: Vec<u16>,
+    pub texture: Option<TextureId>,
+}
+
+/// Whether a captured piece is the mesh `m`, byte for byte in its vertices (the bits [`retain`] compares), its indices and
+/// its texture.
+pub fn same_piece(p: &Piece, m: &Mesh) -> bool {
+    p.texture == m.texture.as_ref().map(|t| t.raw_miniquad_id())
+        && p.indices == m.indices
+        && p.vertices.len() == m.vertices.len()
+        && p.vertices.iter().zip(&m.vertices).all(|(a, b)| retain::vkey(a) == retain::vkey(b))
+}
+
+static CAPTURING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+local! {
+    /// The pieces made while [`capture_start`] is on (the flat fast path's check mode).
+    static CAPTURED: std::cell::RefCell<Vec<Piece>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Starts keeping the textured pieces the sharp draws make (they are drawn as before). Ends with [`capture_end`].
+pub fn capture_start() {
+    CAPTURED.with_borrow_mut(Vec::clear);
+    CAPTURING.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Stops keeping the pieces and returns those made since [`capture_start`].
+pub fn capture_end() -> Vec<Piece> {
+    CAPTURING.store(false, std::sync::atomic::Ordering::Relaxed);
+    CAPTURED.with_borrow_mut(std::mem::take)
 }
 
 fn session_with<R>(m: Material, draw: impl FnOnce() -> R) -> R {

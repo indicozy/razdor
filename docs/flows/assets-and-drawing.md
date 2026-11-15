@@ -938,6 +938,18 @@ against the commit before the feature). The mill sails do not turn: the depth cu
   place of hashing the explored set. The sharp draw refills one thread-local mesh per use (`SPRITE_MESH`, `SCALED_MESH`,
   `sharp.rs`) and computes a rotation's sin and cos once per sprite.
 
+- **Flat sprite fast path** (option f, 2026-11-15; `world_view/flat_fast.rs`; `RAZDOR_FLAT_FAST`: on by default; `0` the old path,
+  `check` the old path with a byte compare of each object's piece against the fast quad (`sharp::same_piece`, the retain
+  harness's vertex bits) and a `flat fast check: N sprites, M differ` line each frame). The flat view's standing
+  objects with a picture are drawn from static records (`Rec`: the cell's corner, the corner's offset in sprite pixels,
+  the whole sprite's picture and its two copies, a tree's sway phase). They are built per map and atlas (key: the map's
+  identity, its object count and a hash of its cells and pictures, the grid, the atlas), so a camera move, a pan or a
+  zoom builds nothing. One loop per pass writes each quad with the same f32 operations, in the same order, as
+  `draw_object` → `draw_picture_form` → `sharp::draw` (`draw_leaning` for a tree), and submits it with `sharp::draw_quad`:
+  the same material, texel size, batch and draw order. The old path keeps the hills, the objects without a picture, the
+  sun's form shading (its corner colours), the tilted views and every other drawable. Records and the object list are
+  kept while the map holds; the still-frame object list (`OBJ_MEMO`) stays as it was.
+
 - **Atmosphere cost** (2026-11-12, `docs/perf/2026-11-12-atmosphere-performance.md`). Each location's fog test
   (`location_explored`: a cell of its footprint explored near the feather) is kept per location until the fog's
   change key moves. The locations' passes (the sprites, the windows of the lit buildings, the point lights) used to

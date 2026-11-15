@@ -166,7 +166,7 @@ pub fn begin() -> bool {
 }
 
 /// The bits of a vertex that reach the GPU (the position, uv, colour and normal slot).
-fn vkey(v: &Vertex) -> [u32; 10] {
+pub(super) fn vkey(v: &Vertex) -> [u32; 10] {
     let (p, t, n) = (v.position.to_array(), v.uv.to_array(), v.normal.to_array());
     [p[0].to_bits(), p[1].to_bits(), p[2].to_bits(), t[0].to_bits(), t[1].to_bits(), n[0].to_bits(), n[1].to_bits(), n[2].to_bits(), n[3].to_bits(), u32::from_le_bytes(v.color)]
 }

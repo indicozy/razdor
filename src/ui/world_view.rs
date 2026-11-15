@@ -47,6 +47,9 @@ use super::terrain;
 use super::water;
 use super::weather;
 use super::saves::{self, Back, LoadView, SaveView};
+
+/// The flat view's sprite fast path (option f, `RAZDOR_FLAT_FAST`).
+mod flat_fast;
 use super::story;
 use super::widgets::*;
 use super::view25::{self, TiltCamera};
@@ -5837,25 +5840,42 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // The lab's replay floor (`replay_floor`): on a still frame the pass is not run, its last batch is issued again.
     let replay_key = super::replay_floor::view_key(&[cam.origin.x, cam.origin.y, cam.scale, cam.view.x, cam.view.y, cam.view.w, cam.view.h], tilted);
     super::replay_floor::sprites(replay_key, !game.moving(), || super::sharp::session_pass(!tilted, lit, || {
+        // The flat view's objects on the fast path (`flat_fast`), when it is on; the old path draws the rest.
+        let mut fast = flat_fast::Pass::begin(map, art, cam, &ctx);
+        let old_object = |i: u32, foot: Vec2| {
+            // Razdor's (the owner's request, 2026-11-11): an object too small to see is not drawn, and one
+            // just above that fades out (`detail_visibility`); the flat view fades it through `SPRITE_VIS`.
+            let o = &map.objects[i as usize];
+            let picture = object_picture(o, art, cam);
+            let detail = detail_visibility(picture, ctx.dpi);
+            if detail > 0.0 {
+                standing_map(cam, &ctx, foot, object_fog(o, cam), foot, detail, picture, || {
+                    if cam.tilt.is_none() && detail < 1.0 {
+                        let prev = SPRITE_VIS.with(|s| s.replace(detail));
+                        draw_object(o, art, cam, &ctx);
+                        SPRITE_VIS.with(|s| s.set(prev));
+                    } else {
+                        draw_object(o, art, cam, &ctx);
+                    }
+                });
+            }
+        };
         for d in items.iter().map(|(_, d)| d) {
             match d {
                 Drawable::Object(i, foot) => {
-                    // Razdor's (the owner's request, 2026-11-11): an object too small to see is not drawn, and one
-                    // just above that fades out (`detail_visibility`); the flat view fades it through `SPRITE_VIS`.
-                    let o = &map.objects[*i as usize];
-                    let foot = *foot;
-                    let picture = object_picture(o, art, cam);
-                    let detail = detail_visibility(picture, ctx.dpi);
-                    if detail > 0.0 {
-                        standing_map(cam, &ctx, foot, object_fog(o, cam), foot, detail, picture, || {
-                            if cam.tilt.is_none() && detail < 1.0 {
-                                let prev = SPRITE_VIS.with(|s| s.replace(detail));
-                                draw_object(o, art, cam, &ctx);
-                                SPRITE_VIS.with(|s| s.set(prev));
-                            } else {
-                                draw_object(o, art, cam, &ctx);
-                            }
-                        });
+                    let handled = match fast.as_mut() {
+                        // The check: the old path draws it, and its pieces are compared with the fast quad.
+                        Some(fp) if fp.checking() => {
+                            super::sharp::capture_start();
+                            old_object(*i, *foot);
+                            fp.check(*i, &super::sharp::capture_end());
+                            true
+                        }
+                        Some(fp) => fp.draw(*i),
+                        None => false,
+                    };
+                    if !handled {
+                        old_object(*i, *foot);
                     }
                 }
                 Drawable::Building(i) => {
@@ -5912,6 +5932,9 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                     }
                 }
             }
+        }
+        if let Some(fp) = fast {
+            fp.finish();
         }
     }));
     // Razdor's «Живая карта»: the smoke of the visible chimneys, one batch over the sprites.
