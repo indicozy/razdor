@@ -2440,7 +2440,8 @@ mod tests {
         let rule = mark(Level::Yellow, Reason::Rule("Six equipment cells".into()));
         assert_eq!(ru(&rule), "Пройдено с экспериментальными правилами: Шесть ячеек снаряжения");
         assert_eq!(en(&rule), "Completed with experimental rules: Six equipment cells");
-        let setting = mark(Level::Grey, Reason::Setting("Unit battle participation".into()));
+        // An old run's mark names the setting «Отключение бойцов», retired on 2026-11-15 (still shown).
+        let setting = mark(Level::Grey, Reason::Setting(razdor::i18n::n_("Unit battle participation").into()));
         assert_eq!(ru(&setting), "Пройдено с настройками не как в оригинале: Отключение бойцов");
         assert_eq!(en(&setting), "Completed with settings not as in the original: Unit battle participation");
         assert_eq!(ru(&RunMark::start()), "Пройдено честно");

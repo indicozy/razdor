@@ -116,6 +116,10 @@ pub enum BattleAct {
     /// The player's first action: the deployment ends (`Battle::start_play`). A battle recorded
     /// before the deployment step had no such entry; its first action began it (`play.rs`).
     Begin,
+    /// «Не участвует в этом бою» (the owner's decision of 2026-11-15): the player's unit with
+    /// squad index `squad` sits out this fight (`out`) or fights again (`Battle::sit_out`). Only in
+    /// the deployment; the playback does not begin the battle for it.
+    SitOut { squad: u32, out: bool },
 }
 
 /// Records an action when it is the outermost one and recording is on; dropping it ends the
@@ -336,6 +340,9 @@ pub fn apply_battle(b: &mut Battle, a: &BattleAct) {
             b.own_cell();
         }
         BattleAct::Begin => b.begin(),
+        BattleAct::SitOut { squad, out } => {
+            let _ = b.sit_out(*squad as usize, *out);
+        }
     }
 }
 
@@ -439,6 +446,11 @@ fn put_battle_act(out: &mut Vec<u8>, a: &BattleAct) {
         }
         BattleAct::OwnCell => put_u(out, 10),
         BattleAct::Begin => put_u(out, 12),
+        BattleAct::SitOut { squad, out: sit } => {
+            put_u(out, 13);
+            put_u(out, *squad as u64);
+            put_flag(out, *sit);
+        }
     }
 }
 
@@ -456,6 +468,7 @@ fn get_battle_act(r: &mut Reader) -> Result<BattleAct, String> {
         9 => BattleAct::ForceEnd { enemy_wins: get_flag(r)? },
         10 => BattleAct::OwnCell,
         12 => BattleAct::Begin,
+        13 => BattleAct::SitOut { squad: r.u()? as u32, out: get_flag(r)? },
         n => return Err(format!("a battle action of {n}")),
     })
 }

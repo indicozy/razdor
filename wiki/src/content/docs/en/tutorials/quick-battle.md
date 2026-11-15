@@ -15,6 +15,7 @@ A Razdor addition. The leave-battle window (`Esc`, "Ways out of the battle") has
 
 * **"Restart"**: start this battle again. It opens with the arrangement on: rearrange your units before the fight, by clicking or dragging, as in the army window. The first move comes when you click an enemy unit, press the space bar, or choose "Quick battle" or "Watch".
 * **"Retreat"**: leave without losses: no experience and no loot, the army is unchanged, the hero goes back to the cell he came from, and the enemy army does not attack for two game hours. The button sits right after "Restart" and is there only before the first move. Not offered in a battle for a building (siege or defence) or in a battle started by a scenario event.
+* **"Sits out this fight"**: after "Restart", click on your warrior: the left panel shows the check box. A ticked warrior does not fight in this battle (no experience, no blows, no turn), and stands dimmed in its cell. Untick it to fight again. The check box is gone after the first move.
 
 After the first move these buttons are gone, and the window is the same as always.
 

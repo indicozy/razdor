@@ -131,6 +131,7 @@ impl Battle {
             // The deployment's cells: set when the battle begins, so the search (which plans from
             // begun battles) never sees them change.
             deployed: _,
+            sitting,
             god,
             max_ai: _,
             // A replay's bookkeeping, not the rules (`rules::recording`).
@@ -176,6 +177,8 @@ impl Battle {
         turn_lost.hash(h);
         max_turn_lost.hash(h);
         bench.hash(h);
+        // The units sitting out (`Battle::sit_out`): by squad index, in squad order.
+        sitting.iter().map(|f| f.squad_index).collect::<Vec<_>>().hash(h);
         god.hash(h);
         fighters.len().hash(h);
         for f in fighters {

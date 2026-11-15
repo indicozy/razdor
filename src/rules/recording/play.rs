@@ -237,7 +237,8 @@ impl Player {
     /// the deployment step has no `Begin`: its first action began it, after the enemy's turns that
     /// came before it (the old start, `run_enemy` first).
     fn battle_act(&mut self, act: &BattleAct) -> Result<(), String> {
-        let legacy = self.battle.as_ref().is_some_and(|(b, _)| b.is_deploying() && !matches!(act, BattleAct::Begin | BattleAct::MoveCard { .. }));
+        // A deployment's own acts (the arrangement, the sit-outs) do not begin it.
+        let legacy = self.battle.as_ref().is_some_and(|(b, _)| b.is_deploying() && !matches!(act, BattleAct::Begin | BattleAct::MoveCard { .. } | BattleAct::SitOut { .. }));
         if legacy {
             if let Some((b, _)) = self.battle.as_mut() {
                 b.begin();

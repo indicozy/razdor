@@ -1522,3 +1522,58 @@ fn the_sample_record_plays_to_its_end() {
         panic!("the sample record drifts at day {}: {}", d.day, d.reason);
     }
 }
+
+/// Plays a battle as the screen does, to its end: the player's turns by `auto_step` (recorded),
+/// the enemy's by the battle AI (the playback plays those itself).
+fn play_battle_to_end(g: &mut Game, b: &mut crate::rules::battle::Battle) {
+    for _ in 0..AUTO_BATTLE_STEPS {
+        g.battle_write_back(b);
+        if b.outcome() != Outcome::Ongoing {
+            break;
+        }
+        let Some(id) = b.active() else { break };
+        if b.fighters[id].team != Team::Enemy {
+            b.auto_step();
+        } else {
+            b.ai_step();
+        }
+    }
+}
+
+/// «Не участвует в этом бою» (the owner's decision of 2026-11-15) in the deployment is recorded as a
+/// battle's act: a unit sits out, fights again, sits out, the battle begins and is played out, and the
+/// replay of its recording reaches the same state. Both values of the replay-only flag
+/// (`allow_unit_benching`: an old recording made with it off fights a unit that is out, as that game did).
+/// The demo game, no install needed.
+#[test]
+fn a_sit_out_in_the_deployment_replays_to_the_same_state() {
+    use super::actions::BattleAct;
+    for benching in [true, false] {
+        let c = Arc::new(Content::builtin());
+        let mut g = Game::new(c.clone(), HeroClass::Knight);
+        g.world.armies.clear();
+        g.hire(crate::rules::world::demo_unit(&c, "spearman")).unwrap();
+        let index = g.squad.len() - 1;
+        g.squad[index].battle_disabled = !benching;
+        g.allow_unit_benching = benching;
+        g.foe = Some(Foe::Garrison(g.world.index_of("Bandit camp")));
+        let snap = Snapshot::take(&g).unwrap();
+        let shared = Shared::default();
+        hook::install_recorder(Box::new(shared.clone()));
+        let mut b = g.start_battle();
+        assert!(b.sit_out(index, true), "the unit sits out");
+        assert!(b.sit_out(index, false), "and fights again");
+        assert!(b.sit_out(index, true), "then sits out for the fight");
+        b.start_play();
+        play_battle_to_end(&mut g, &mut b);
+        g.resolve_battle(&b);
+        hook::take_recorder();
+        let live = state_hash(&g);
+        let entries = shared.0.borrow().clone();
+        let sits = entries.iter().filter(|e| matches!(e.input, Input::Player(PlayerAction::Battle(BattleAct::SitOut { .. })))).count();
+        assert_eq!(sits, 3, "the three sit-out switches are recorded (benching {benching})");
+        let start = snap.restore(c.clone(), None).unwrap();
+        let played = super::play::play(start, &entries, 1.0 / 60.0).unwrap();
+        assert_eq!(state_hash(&played), live, "the replay reaches the live state (benching {benching})");
+    }
+}

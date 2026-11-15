@@ -66,7 +66,16 @@ the armies had at the save, not from the battle's own state (there is no battle 
 `Battle::begin`; the screen's first action calls `Battle::start_play` instead, which begins it and records
 `BattleAct::Begin` (so a replay begins where the battle did). `BattleView::new` still begins at once (the custom
 battle, the replays of the watch screen, the snapshots); only `BattleView::deploying` keeps the battle waiting.
-`move_card` refuses a cell held by a unit that sits out (`set_bench`): those units do not move. `begin` first
+`move_card` refuses a cell held by a unit that sits out (`set_bench`): those units do not move.
+Sitting out this fight (Razdor's, the owner's decision of 2026-11-15): while the arrangement is on (after «Рестарт»), a
+press on a player's unit picks it, and the left panel shows its check box «Не участвует в этом бою» (never for the hero;
+`BattleView::sit_out_control`). `Battle::sit_out(squad, out)` (recorded as `BattleAct::SitOut`, which `play.rs` treats as a
+deployment act: it does not begin the battle) moves the unit out of `fighters` into `Battle::sitting`: no turn, no target,
+no XP, no damage. Its cell becomes bench (so the start fix counts it, `begin`), `deployed` keeps its cell (so
+`settle_battle` returns it there with `keep_formation`), and the screen draws it dimmed in that cell. Ticked off, it returns
+in squad order, so the battle is the one it would have been. A permanent sit-out (`Unit::battle_disabled`) is always honoured
+in a live game (`Game::allow_unit_benching` defaults to true); a replay takes the flag its recording has (an old recording
+made with the retired setting off fights those units). `begin` first
 records the fighters' cells (`Battle::deployed`, by squad index), before its start fix: `settle_battle` returns the
 army to them with `keep_formation`, so the arrangement is the army's placement after the battle.
 
@@ -220,7 +229,7 @@ Esc (or the red X) opens the leave-battle window (`saves::battle_exit_dialog(ask
 4d3620 in the original's pixels): «Выйти в меню», «Рестарт», «Отступить» (before the first action), «Клавиши» (phones),
 «Отмена». «Выйти из игры» is the map's game menu's only. The battle window is not drawn while it is open, as the
 original hides it. `RAZDOR_SCENE_BATTLE_EXIT=1` snapshots it over any battle scene (`plain`: the fallback window
-without the install's picture); `RAZDOR_SCENE_DEPLOY=start|rearrange|pick` sets the battle before its first action
+without the install's picture); `RAZDOR_SCENE_DEPLOY=start|rearrange|pick|sitout` sets the battle before its first action
 (`rearrange`: the arrangement on, as after «Рестарт»; `pick`: a card picked in it).
 
 ## 6. End of battle and return to the map

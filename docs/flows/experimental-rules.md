@@ -171,6 +171,10 @@ There is no option for it.
 
 ## Noncombatants
 
+Since 2026-11-15 this is normal play, not an experimental switch: the setting «Отключение бойцов» is gone and the army
+window's check box is always there (`Unit::battle_disabled`, honoured in a live game). The arrangement's one-battle check box
+«Не участвует в этом бою» is a deployment act (`battle.md` §2). The paragraph below is the old description.
+
 Advanced settings (the regular settings window's More button) has **Unit battle
 participation**, off by default. With it enabled, select a living non-hero in the army
 window and tick the **Exclude from battles** check box (`Не участвует в боях`) above the «Не напоминать» row, both in the block above the dismiss box (it grows upward when both do not fit). After it is ticked or unticked the unit's selection is cleared.

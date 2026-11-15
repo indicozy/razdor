@@ -82,6 +82,10 @@ experimental-army-1280 | army:РК1-Начало пути | 1280x800 | RAZDOR_SC
 battle-rk1-1280 | battle:РК1-Начало пути:0 | 1280x800 |
 battle-rk3-1280 | battle:РК3-Столица:0 | 1280x800 |
 battle-exit-1280 | battle:РК1-Начало пути:0 | 1280x800 | RAZDOR_SCENE_BATTLE_EXIT=1
+# «Не участвует в этом бою» (2026-11-15): after «Рестарт» a unit is picked (its check box unticked), then
+# ticked (it sits out this fight: dimmed in its cell)
+battle-arrange-1280 | battle:РК1-Начало пути:0 | 1280x800 | RAZDOR_SCENE_DEPLOY=pick
+battle-sitout-1280 | battle:РК1-Начало пути:0 | 1280x800 | RAZDOR_SCENE_DEPLOY=sitout
 custom-1280 | custom | 1280x800 |
 custom-battle-1280 | custom-battle | 1280x800 |
 # The main windows at 800x600 and 1920x1080
@@ -146,6 +150,9 @@ phone-exit-restart-landscape | menu:РК1-Начало пути:restart | 2160x1
 phone-battle-exit-landscape | battle:РК1-Начало пути:0 | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1;RAZDOR_SCENE_BATTLE_EXIT=1
 phone-battle-exit-portrait | battle:РК1-Начало пути:0 | 1080x2160 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1;RAZDOR_SCENE_BATTLE_EXIT=1
 phone-battle-restart-landscape | battle:РК1-Начало пути:0 | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1;RAZDOR_SCENE_BATTLE_RESTART=1
+# The sit-out check box on phones: a picked unit ticked (upright and sideways, the small profile)
+phone-battle-sitout-upright | battle:РК1-Начало пути:0 | 1080x2400 | RAZDOR_DP=2.75;RAZDOR_SCENE_DEPLOY=sitout
+phone-battle-sitout-landscape | battle:РК1-Начало пути:0 | 2400x1080 | RAZDOR_DP=2.75;RAZDOR_SCENE_DEPLOY=sitout
 phone-diary-landscape | hero:РК1-Начало пути:1 | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1;RAZDOR_SCENE_QUEST=1
 phone-diary-reader-landscape | hero:РК1-Начало пути:1 | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1;RAZDOR_SCENE_QUEST=1;RAZDOR_SCENE_READER=1
 phone-diary-reader-portrait | hero:РК1-Начало пути:1 | 1080x2160 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1;RAZDOR_SCENE_QUEST=1;RAZDOR_SCENE_READER=1

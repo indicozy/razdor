@@ -1556,6 +1556,7 @@ pub(crate) mod tests {
         assert_eq!(loaded.content.experimental, rules);
         assert_eq!(loaded.squad[0].potions_drunk, 2);
         assert!(loaded.squad[0].battle_disabled);
+        assert!(loaded.allow_unit_benching, "sitting out is honoured after a load");
         assert_eq!(install.experimental, Default::default());
     }
 

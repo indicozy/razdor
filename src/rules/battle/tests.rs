@@ -3766,3 +3766,57 @@ fn the_first_action_begins_a_deployed_battle_once() {
     assert!(!bt.is_deploying(), "a second action changes nothing");
     assert_eq!(bt.move_card(f(2), f(3)), Err(ActionError::NotDeploying));
 }
+
+// --- «Не участвует в этом бою» (the owner's decision of 2026-11-15) ----------------
+
+#[test]
+fn a_unit_sitting_out_the_deployment_is_no_fighter_and_its_cell_is_bench() {
+    let c = content_with(vec![], Formation::WIDE);
+    let mut bt = prepared(&c, &[(10, f(2)), (11, b(2)), (11, f(3))], &[(18, f(2))], Team::Player);
+    assert!(!bt.sit_out(0, true), "the hero never sits out");
+    assert!(bt.sit_out(1, true));
+    assert!(!bt.sit_out(1, true), "a unit already out is refused");
+    assert_eq!(bt.sitting().iter().map(|x| x.squad_index).collect::<Vec<_>>(), vec![Some(1)]);
+    assert!(!bt.fighters.iter().any(|x| x.squad_index == Some(1)), "not in the fight");
+    assert_eq!(bt.move_card(f(3), b(2)), Err(ActionError::InvalidTarget), "its cell holds nobody");
+    assert_eq!(bt.move_card(f(3), f(1)), Ok(()), "the others move as before");
+}
+
+#[test]
+fn sitting_out_and_fighting_again_leaves_the_battle_as_it_was() {
+    let c = content_with(vec![], Formation::WIDE);
+    let mut bt = prepared(&c, &[(10, f(2)), (11, b(2)), (11, f(3))], &[(18, f(2))], Team::Player);
+    let cells = |bt: &Battle| bt.fighters.iter().map(|x| (x.squad_index, x.slot, x.team == Team::Player)).collect::<Vec<_>>();
+    let before = cells(&bt);
+    let bench = bt.bench.clone();
+    assert!(bt.sit_out(1, true));
+    assert!(bt.sit_out(1, false), "it fights again");
+    assert_eq!(cells(&bt), before, "the same records in the same order");
+    assert_eq!(bt.bench, bench, "its cell is free again");
+    assert!(bt.sitting().is_empty());
+    assert!(!bt.sit_out(1, false), "it is not out");
+}
+
+#[test]
+fn a_unit_sitting_out_keeps_its_shown_cell_and_earns_no_xp() {
+    let c = content_with(vec![], Formation::WIDE);
+    let mut bt = prepared(&c, &[(10, f(2)), (11, b(2)), (11, b(3))], &[(18, f(2))], Team::Player);
+    assert!(bt.sit_out(2, true));
+    bt.begin();
+    assert!(bt.deployed().contains(&(2, b(3))), "the cell it was shown in: {:?}", bt.deployed());
+    assert!(bt.player_xp().iter().all(|a| bt.fighters[a.fighter].squad_index != Some(2)), "no XP for a unit out");
+}
+
+#[test]
+fn a_unit_sitting_out_counts_as_somebody_in_the_front_row_fix() {
+    let c = content_with(vec![], Formation::WIDE);
+    // The hero stands in the back row; the only front unit sits out.
+    let mut out = prepared(&c, &[(10, b(1)), (11, f(2))], &[(18, f(2))], Team::Player);
+    assert!(out.sit_out(1, true));
+    out.begin();
+    assert_eq!(out.fighters[0].slot, b(1), "its cell is bench: the back row does not come forward");
+    // Control: with nobody in the front row at all (no unit there, not even a bench cell), the back row comes forward.
+    let mut none = prepared(&c, &[(10, b(1))], &[(18, f(2))], Team::Player);
+    none.begin();
+    assert_eq!(none.fighters[0].slot, f(1), "the start fix moves the back row forward");
+}

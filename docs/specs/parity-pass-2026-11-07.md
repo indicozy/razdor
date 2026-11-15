@@ -53,6 +53,7 @@ the community map smoke test green, a changelog line, the wiki pages updated.
 - Managed armies skipping the revival (G8): no visible effect, left.
 - AI arrival order (frame noise): accepted.
 - Razdor extras: deployment phase, quick battle, battle restart, cheats, saves, «Максимум», benching, XP kept on promotion.
+- Sitting out (owner-approved default, 2026-11-15): the army window's «Не участвует в боях» is always on (the setting «Отключение бойцов» is gone), and after «Рестарт» a unit can sit out this fight («Не участвует в этом бою»). Neither touches the run's mark.
 - Battle start, on by default (backlog 1607, the owner's decision 2026-11-13, approved as a default, not a toggle): before the player's first action, «Рестарт» moves his cards between his cells (`Battle::move_card`, `ui::battle_view`), and «Отступить» ends the battle with no losses, no XP, no loot and no change to either army; the hero goes back to the cell he came from (`Game::retreat_battle`, `Game::can_retreat`). Not offered for a garrison (a siege or a defence), a fight in a building, or a battle the scenario's events start; the fled army ignores him for 120 minutes. The original has neither (its battle starts at once, 0x4daa80).
 - The editor: dropped, untouched.
 

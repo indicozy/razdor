@@ -794,7 +794,7 @@ pub fn squad(
     stats[Stat::DefenceShot] += bd;
     let hero = (sel == 0).then(|| razdor::rules::content::HeroClass::ALL.into_iter().find(|h| h.unit() == u.def)).flatten();
     let mut status = potion_status(&c, &u);
-    if !showing_type && game.allow_unit_benching && u.battle_disabled && sel > 0 {
+    if !showing_type && u.battle_disabled && sel > 0 {
         status.push((tr("Not fighting").to_string(),chrome::ORANGE_TEXT));
     }
     if !showing_type && c.experimental.two_potions {
@@ -982,7 +982,7 @@ pub fn squad(
     // «Не напоминать». It grows upward when both do not fit (`check_rows`).
     if let Some(t) = tree_of {
         let promotable = game.squad[t].promotion_ready(&c, t == 0);
-        let bench = game.allow_unit_benching && t > 0 && game.squad[t].alive();
+        let bench = t > 0 && game.squad[t].alive();
         // A phone's label is 12.5 px per dp (its capital about 12.5 sp, the check's floor of 12
         // sp; a fixed px size would shrink on a denser phone); the desktop keeps the army
         // window's own size.
@@ -1071,7 +1071,7 @@ pub fn squad(
         } else if v.unpaid {
             chrome::badge("sign-payment", sq.x + sq.w - 12.0 * k, sq.y + 12.0 * k, 20.0 * k, RED);
         }
-        if i > 0 && game.allow_unit_benching && v.battle_disabled {
+        if i > 0 && v.battle_disabled {
             draw_rectangle(sq.x,sq.y,sq.w,sq.h,Color::new(0.0,0.0,0.0,0.48));
             chrome::shadow_centered(tr("Not fighting"),sq.center().x,sq.bottom()-5.0*k,10.0*k,chrome::ORANGE_TEXT);
         }

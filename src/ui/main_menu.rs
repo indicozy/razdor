@@ -1498,7 +1498,8 @@ pub fn follow_settings(audio: &super::audio::Settings, g: &mut razdor::rules::ga
         max_guard: audio.max_guard,
         keep_xp_on_promotion: audio.keep_xp_on_promotion,
         keep_formation: audio.keep_formation,
-        allow_unit_benching: audio.allow_unit_benching,
+        // Sitting out («Не участвует в боях») is normal play (2026-11-15): always honoured.
+        allow_unit_benching: true,
         pursue: pursue(audio),
         walk_pace: walk_pace(audio),
     });
@@ -1784,7 +1785,7 @@ impl Group {
     pub fn rows(self) -> &'static [Row] {
         match self {
             Group::Map => &[Row::GraphicsQuality, Row::MapZoom, Row::ScrollSpeed, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::CurveReset, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::GroundBlend, Row::Mist, Row::LiveWater, Row::WaterRate, Row::WaterQuality, Row::Weather, Row::LivingMap, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
-            Group::Battle => &[Row::WalkSpeed, Row::AnimSpeed, Row::AiStrength, Row::UnitBattle, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience, Row::HitShake],
+            Group::Battle => &[Row::WalkSpeed, Row::AnimSpeed, Row::AiStrength, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience, Row::HitShake],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
             Group::Other => &[Row::Updates, Row::Import, Row::OldSaves, Row::SendLog, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::Bench],
@@ -1835,7 +1836,6 @@ pub enum Row {
     WalkSpeed,
     AnimSpeed,
     AiStrength,
-    UnitBattle,
     KeepFormation,
     MaxGuard,
     ArmyArrangement,
@@ -1865,7 +1865,7 @@ pub enum Row {
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 64] = [
+pub const ALL: [Row; 63] = [
         Row::GraphicsQuality,
         Row::MapZoom,
         Row::ScrollSpeed,
@@ -1906,7 +1906,6 @@ pub const ALL: [Row; 64] = [
         Row::WalkSpeed,
         Row::AnimSpeed,
         Row::AiStrength,
-        Row::UnitBattle,
         Row::KeepFormation,
         Row::MaxGuard,
         Row::ArmyArrangement,
@@ -2615,11 +2614,6 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
             };
             if labelled_row_help(c, geo, tr("Battle AI strength"), label, Row::AiStrength.help_text()).0 {
                 set_ai_strength(audio, strength.next());
-            }
-        }
-        Row::UnitBattle => {
-            if labelled_row(c, geo, tr("Unit battle participation"), yes_no(audio.allow_unit_benching)).0 {
-                audio.allow_unit_benching = !audio.allow_unit_benching;
             }
         }
         Row::KeepFormation => {

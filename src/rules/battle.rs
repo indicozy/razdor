@@ -725,6 +725,10 @@ pub struct Battle {
     /// the battle begins before the start fix ([`Battle::deployed`]): what `Game::settle_battle`
     /// returns the army to with `keep_formation`, so a rearrangement before the first action counts.
     deployed: Vec<(usize, Slot)>,
+    /// The player's units sitting out this fight («Не участвует в этом бою», the owner's decision
+    /// of 2026-11-15, [`Battle::sit_out`]): out of `fighters` (no turn, no target, no XP, no
+    /// damage) and in squad order. Each keeps its cell as bench and is drawn dimmed there.
+    sitting: Vec<Fighter>,
     /// The cheat console's `god` (`rules::cheats`): the player's units take no damage. Off
     /// in the pre-simulation.
     pub god: bool,
@@ -874,6 +878,7 @@ impl Battle {
             max_turn_lost: [0; 2],
             bench: Vec::new(),
             deployed: Vec::new(),
+            sitting: Vec::new(),
             god: false,
             max_ai: false,
             max_guard: false,
@@ -928,6 +933,44 @@ impl Battle {
     /// the unpaid of an attack). They count for the start fix in [`Battle::begin`].
     pub fn set_bench(&mut self, cells: Vec<Slot>) {
         self.bench = cells;
+    }
+
+    /// The player's units sitting out this fight (`Battle::sit_out`), in squad order. They are
+    /// not in `fighters`; the screen draws them dimmed in their cells.
+    pub fn sitting(&self) -> &[Fighter] {
+        &self.sitting
+    }
+
+    /// Deploy phase only (the owner's decision of 2026-11-15, «Не участвует в этом бою»): the
+    /// player's unit with squad index `squad` sits out this fight (`out`), or fights again. A unit
+    /// out is not a fighter: it has no turn, is no target, earns no XP and takes no damage. Its
+    /// cell becomes bench, so nobody moves onto it and the start fix counts it as somebody
+    /// (`begin`). Fighting again puts its record back in squad order, so the battle is the one
+    /// it would have been built as. The hero never sits out. Refused (false) when the battle is
+    /// begun, for the hero, or for a unit not in the state the switch asks for.
+    pub fn sit_out(&mut self, squad: usize, out: bool) -> bool {
+        let _rec = crate::rules::recording::actions::battle_scope(|| crate::rules::recording::actions::BattleAct::SitOut { squad: squad as u32, out });
+        if !self.deploying || squad == 0 {
+            return false;
+        }
+        if out {
+            let Some(i) = self.fighters.iter().position(|f| f.team == Team::Player && f.squad_index == Some(squad)) else { return false };
+            let f = self.fighters.remove(i);
+            self.bench.push(f.slot);
+            let at = self.sitting.partition_point(|s| s.squad_index < Some(squad));
+            self.sitting.insert(at, f);
+            true
+        } else {
+            let Some(i) = self.sitting.iter().position(|f| f.squad_index == Some(squad)) else { return false };
+            let f = self.sitting.remove(i);
+            if let Some(p) = self.bench.iter().position(|&s| s == f.slot) {
+                self.bench.remove(p);
+            }
+            // The player's records come first, in squad order (`Battle::new`); the enemy's follow.
+            let at = self.fighters.iter().position(|g| g.team != Team::Player || g.squad_index.is_some_and(|s| s > squad)).unwrap_or(self.fighters.len());
+            self.fighters.insert(at, f);
+            true
+        }
     }
 
     /// No pre-simulation: for battles whose XP nobody receives (the AI's target scoring),
@@ -1150,7 +1193,8 @@ impl Battle {
         }
         self.deploying = false;
         // The cells the deployment left, before the fix below moves a back row forward.
-        self.deployed = self.fighters.iter().filter(|f| f.team == Team::Player).filter_map(|f| f.squad_index.map(|i| (i, f.slot))).collect();
+        // A unit sitting out keeps the cell it was shown in (it stands there after the fight too).
+        self.deployed = self.fighters.iter().chain(self.sitting.iter()).filter(|f| f.team == Team::Player).filter_map(|f| f.squad_index.map(|i| (i, f.slot))).collect();
         // The battle window's fix of the player's formation (4d2141): with nobody in front,
         // his back row moves into the front row, same columns, and stays there after the
         // battle. The reserve does not move, and the enemy needs no fix. There is no other

@@ -29,6 +29,12 @@ fn wide_row_default() -> bool {
     true
 }
 
+/// Sitting out is normal play (the owner's decision of 2026-11-15): a live game always honours a
+/// unit's «Не участвует в боях». A replay sets the flag from its recording (`Snapshot::restore`).
+fn benching_default() -> bool {
+    true
+}
+
 fn pace_default() -> f32 {
     1.0
 }
@@ -592,8 +598,10 @@ pub struct Game {
     /// `start_battle` takes them again from the same cells.
     #[serde(skip)]
     pub(crate) formation_before_battle: Option<Vec<Slot>>,
-    /// Global UI preference: when off, saved battle-disabled marks have no effect.
-    #[serde(skip)]
+    /// Sitting out (`Unit::battle_disabled`, «Не участвует в боях») is honoured: on for a live game.
+    /// Off only in a replay of a recording made with the old gameplay setting off, which then
+    /// fought every unit (replay fidelity). Set by the interface's rule settings, not part of the save.
+    #[serde(skip, default = "benching_default")]
     pub allow_unit_benching: bool,
     /// "Automatically pursue the chosen army" (the original's `OptValue7`, world.md §1):
     /// on, the hero's route follows the army he clicked as it steps; off, he walks to the
@@ -871,7 +879,7 @@ impl Game {
             keep_formation: false,
             formation_before_battle: None,
             back_to: None,
-            allow_unit_benching: false,
+            allow_unit_benching: true,
             pursue: true,
             walk_pace: 1.0,
             battle_marks: true,
@@ -3977,6 +3985,28 @@ mod tests {
     }
 
     #[test]
+    fn a_green_run_stays_green_through_arranging_sitting_out_and_retreating() {
+        use crate::rules::marks::Level;
+        let (mut g, _from) = caught_by_army();
+        g.hire(unit(&g, "spearman")).unwrap();
+        let index = g.squad.len() - 1;
+        g.note_settings(None);
+        assert_eq!(g.run_mark().level, Level::Green);
+        let mut b = g.start_battle();
+        // Arranging: the spearman moves to a free cell of the formation.
+        let k = b.fighters.iter().position(|f| f.squad_index == Some(index)).unwrap();
+        let to = g.content.formation.slots().find(|&s| b.at(Team::Player, s).is_none()).unwrap();
+        let from = b.fighters[k].slot;
+        b.move_card(from, to).unwrap();
+        assert!(b.sit_out(index, true));
+        assert!(b.sit_out(index, false));
+        assert!(b.sit_out(index, true));
+        assert_eq!(g.run_mark().level, Level::Green, "arranging and sitting out are not cheating");
+        assert!(g.retreat_battle(&b));
+        assert_eq!(g.run_mark().level, Level::Green, "a retreat is not cheating either");
+    }
+
+    #[test]
     fn a_retreat_leaves_the_battle_as_it_was_and_puts_the_hero_back() {
         let (mut g, from) = caught_by_army();
         let squad: Vec<(i32, Slot)> = g.squad.iter().map(|u| (u.hp, u.slot)).collect();
@@ -4232,10 +4262,8 @@ mod tests {
         let original = g.squad[index].clone();
         let roster = g.player_units();
         let wages = g.daily_wages();
-        assert!(!g.set_unit_battle_disabled(index, true), "feature is off by default");
-        g.allow_unit_benching = true;
         assert!(!g.set_unit_battle_disabled(0, true), "the hero always fights");
-        assert!(g.set_unit_battle_disabled(index, true));
+        assert!(g.set_unit_battle_disabled(index, true), "sitting out is normal play: a new game honours it");
         assert_eq!(g.player_units(), roster, "quests see exactly the same living army records");
         assert_eq!(g.daily_wages(), wages);
         assert_eq!(g.squad[index].slot, original.slot);
@@ -4249,9 +4277,10 @@ mod tests {
         assert_eq!(g.squad[index].xp, original.xp);
         assert_eq!(g.squad[index].hp, original.hp);
         assert!(g.squad[index].alive());
+        // A replay of a recording made with the old gameplay setting off fights every unit, as that game did.
         g.allow_unit_benching = false;
         g.foe = None;
-        assert!(g.start_battle().fighters.iter().any(|f| f.squad_index == Some(index)), "turning off the preference restores participation");
+        assert!(g.start_battle().fighters.iter().any(|f| f.squad_index == Some(index)), "a recording without the flag fights every unit");
     }
 
     #[test]

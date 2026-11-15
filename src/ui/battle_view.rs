@@ -578,7 +578,8 @@ pub struct BattleView {
     retreat: bool,
     /// The arrangement is on (after «Рестарт», `restart_battle`): the player's cards move by clicks or drags.
     rearranging: bool,
-    /// The card picked in the arrangement (a fighter index), as the army window's selection.
+    /// The card picked in the arrangement: the player's unit's squad index (a fighter's or a unit
+    /// sitting out's), as the army window's selection. Squad indices stay put when the fighters change.
     rearr_sel: Option<usize>,
 }
 
@@ -587,6 +588,67 @@ pub struct BattleView {
 struct Signs {
     curse: bool,
     bless: bool,
+}
+
+/// The label size of the arrangement's check box «Не участвует в этом бою»: the army window's own
+/// (16 px at Normal), on a phone 12.5 sp.
+fn sit_out_size(k: f32) -> f32 {
+    match super::display::dp_px() {
+        Some(dp) => 12.5 * dp,
+        None => 16.0 * k,
+    }
+}
+
+/// Its band in the left panel: at the panel's foot. Sideways, under the sheet (which stops above it
+/// during the arrangement, `sit_out_reserve`); held upright, in the picture column's foot, where the
+/// label wraps to the column's width (`checkbox_wrapped`), as the band's text runs beside it.
+fn sit_out_row(l: &Layout, size: f32) -> Rect {
+    let h = checkbox_tap_height(size, super::display::dp_px());
+    let p = l.panel;
+    if l.is_stacked() {
+        // 8 dp above the band's foot: the quick buttons under the band are 48 dp targets, and a tap
+        // band 2 dp from theirs reads as crowded (the mobile check, 2026-11-15).
+        let lift = super::display::dp_px().map_or(8.0 * l.k, |dp| 8.0 * dp);
+        Rect::new(p.x + 10.0 * l.k, p.bottom() - h - 6.0 * l.k - lift, p.w * 0.4 - 16.0 * l.k, h)
+    } else {
+        Rect::new(p.x + 10.0 * l.k, p.bottom() - h - 4.0 * l.k, p.w - 20.0 * l.k, h)
+    }
+}
+
+/// The height the sheet gives up to the row sideways during the arrangement (the row and a gap).
+fn sit_out_reserve(l: &Layout) -> f32 {
+    checkbox_tap_height(sit_out_size(l.k), super::display::dp_px()) + 8.0 * l.k
+}
+
+/// The check box on a phone held upright: the box and the label wrapped to the picture column's
+/// width (two lines at most), its tap area the whole band. As `checkbox_row_centred` otherwise.
+fn checkbox_wrapped(r: Rect, size: f32, label: &str, value: bool) -> Option<bool> {
+    let side = checkbox_side(size);
+    let (hover, _down, pressed) = button_state(r, true);
+    let b = checkbox_centred_box(r, size);
+    draw_rectangle(b.x, b.y, b.w, b.h, FIELD_BG);
+    draw_rectangle_lines(b.x, b.y, b.w, b.h, 1.0, if hover { INK } else { DIM });
+    if value {
+        let k = side / 18.0;
+        draw_line(b.x + 4.0 * k, b.y + 11.0 * k, b.x + 8.0 * k, b.y + 16.0 * k, 2.5 * k, ACCENT);
+        draw_line(b.x + 8.0 * k, b.y + 16.0 * k, b.x + 15.0 * k, b.y + 5.0 * k, 2.5 * k, ACCENT);
+    }
+    // Two lines by words (the label is a short phrase): `wrap` measures with the font's own widths,
+    // which do not match what the picture column shows at this size.
+    let words: Vec<&str> = label.split_whitespace().collect();
+    let half = words.len().div_ceil(2);
+    let lines = [words[..half].join(" "), words[half..].join(" ")];
+    let lines: Vec<&str> = lines.iter().map(String::as_str).filter(|l| !l.is_empty()).collect();
+    let lh = size * 1.15;
+    let top = r.y + r.h / 2.0 - lines.len() as f32 * lh / 2.0 + size * 0.8;
+    for (i, line) in lines.iter().enumerate() {
+        text_exact(line, r.x + side + 8.0, top + i as f32 * lh, size, INK);
+    }
+    if pressed {
+        claim();
+        return Some(!value);
+    }
+    None
 }
 
 impl BattleView {
@@ -1303,18 +1365,32 @@ impl BattleView {
             return;
         }
         let Some(cell) = self.player_cell_under_mouse(l) else { return };
-        let pressed = self.battle.at(Team::Player, cell);
-        match unit_drag::grid_press_in(unit_drag::controls(), self.rearr_sel, pressed) {
+        let pressed = self.squad_at(cell);
+        // A unit sitting out is no card to swap with: a press on it picks it, a press on another unit
+        // picks that one, and the picked unit is let go by a press on nothing.
+        let out = |s: Option<usize>| s.is_some_and(|s| self.is_out(s));
+        let press = if out(self.rearr_sel) || out(pressed) {
+            match pressed {
+                Some(p) if Some(p) != self.rearr_sel => GridPress::Select(p),
+                _ => GridPress::Deselect,
+            }
+        } else {
+            unit_drag::grid_press_in(unit_drag::controls(), self.rearr_sel, pressed)
+        };
+        match press {
             GridPress::Swap { selected, .. } | GridPress::Slide(selected) => {
                 self.rearr_sel = None;
-                let from = self.battle.fighters[selected].slot;
-                self.deploy_move(from, cell);
+                if let Some(from) = self.squad_slot(selected) {
+                    self.deploy_move(from, cell);
+                }
             }
             GridPress::Select(p) => {
                 self.rearr_sel = Some(p);
                 if unit_drag::controls().drags() {
-                    let f = &self.battle.fighters[p];
-                    unit_drag::press(p, f.unit, (f.hp, f.stats.max_hp()), !f.alive());
+                    if let Some(i) = self.fighter_of(p) {
+                        let f = &self.battle.fighters[i];
+                        unit_drag::press(p, f.unit, (f.hp, f.stats.max_hp()), !f.alive());
+                    }
                 }
             }
             GridPress::Deselect | GridPress::Nothing => self.rearr_sel = None,
@@ -1329,18 +1405,82 @@ impl BattleView {
             (s, Rect::new(p.x, p.y, l.card.x, l.card.y))
         }).collect();
         if let Some((unit, to)) = unit_drag::update(assets, &cells, l.card) {
-            let from = self.battle.fighters[unit].slot;
-            self.deploy_move(from, to);
+            if let Some(from) = self.squad_slot(unit) {
+                self.deploy_move(from, to);
+            }
             self.rearr_sel = None;
         }
     }
 
-    /// The picked card of the arrangement is outlined in gold.
+    /// The picked card of the arrangement is outlined in gold (a unit sitting out too: its cell).
     fn rearrange_mark(&self, l: &Layout) {
-        let Some(i) = self.rearr_sel else { return };
-        let p = l.cell_pos(Team::Player, self.battle.fighters[i].slot);
+        let Some(slot) = self.rearr_sel.and_then(|s| self.squad_slot(s)) else { return };
+        let p = l.cell_pos(Team::Player, slot);
         let k = l.k;
         draw_rectangle_lines(p.x - 2.0 * k, p.y - 2.0 * k, l.card.x + 4.0 * k, l.card.y + 4.0 * k, 3.0 * k, GOLD);
+    }
+
+    /// The player's unit with squad index `squad`: a fighter, or a unit sitting out this fight.
+    fn squad_unit(&self, squad: usize) -> Option<&Fighter> {
+        self.battle.fighters.iter().chain(self.battle.sitting()).find(|f| f.team == Team::Player && f.squad_index == Some(squad))
+    }
+
+    fn squad_slot(&self, squad: usize) -> Option<Slot> {
+        self.squad_unit(squad).map(|f| f.slot)
+    }
+
+    /// The index in `fighters` of the player's fighter with squad index `squad` (not one sitting out).
+    fn fighter_of(&self, squad: usize) -> Option<usize> {
+        self.battle.fighters.iter().position(|f| f.team == Team::Player && f.squad_index == Some(squad))
+    }
+
+    fn is_out(&self, squad: usize) -> bool {
+        self.battle.sitting().iter().any(|f| f.squad_index == Some(squad))
+    }
+
+    /// The player's unit in `cell`, a fighter or one sitting out (its cell is bench).
+    fn squad_at(&self, cell: Slot) -> Option<usize> {
+        self.battle.fighters.iter().chain(self.battle.sitting()).find(|f| f.team == Team::Player && f.slot == cell && f.alive()).and_then(|f| f.squad_index)
+    }
+
+    /// The layout the left panel's sheet is drawn in: during the arrangement, sideways, it stops above
+    /// the check box row (`sit_out_reserve`), so the row never covers its text.
+    fn sheet_layout(&self, l: &Layout) -> Layout {
+        let mut sheet = *l;
+        if self.offering() && self.rearranging && !l.is_stacked() {
+            sheet.panel.h -= sit_out_reserve(l);
+        }
+        sheet
+    }
+
+    /// The unit picked in the arrangement, for the left panel.
+    fn picked_unit(&self) -> Option<&Fighter> {
+        self.squad_unit(self.rearr_sel?)
+    }
+
+    /// The check box «Не участвует в этом бою» in the left panel, for the unit picked in the
+    /// arrangement (the owner's decision of 2026-11-15, Razdor's; never for the hero). Ticked, the
+    /// unit sits out this fight (`Battle::sit_out`) and its card is dimmed in its cell; unticked, it
+    /// fights again. Drawn after the panel, so it is the panel's top layer.
+    fn sit_out_control(&mut self, l: &Layout) {
+        let Some(f) = self.picked_unit() else { return };
+        let Some(squad) = f.squad_index.filter(|_| !f.is_hero) else { return };
+        let value = self.is_out(squad);
+        let size = sit_out_size(l.k);
+        let row = sit_out_row(l, size);
+        let clicked = if l.is_stacked() { checkbox_wrapped(row, size, tr("Sits out this fight"), value) } else { checkbox_row_centred(row, size, tr("Sits out this fight"), value) };
+        if let Some(on) = clicked {
+            if self.battle.sit_out(squad, on) {
+                unit_drag::cancel();
+            }
+        }
+    }
+
+    /// The debug snapshot's sit-out (`RAZDOR_SCENE_DEPLOY=sitout`): the picked unit sits out.
+    pub fn set_sit_out_pick(&mut self) {
+        if let Some(s) = self.rearr_sel {
+            self.battle.sit_out(s, true);
+        }
     }
 
     /// The replayed battle's deployment: its moves and its `Begin` play as the recording has them,
@@ -1402,6 +1542,7 @@ impl BattleView {
                     if self.offering() && self.rearranging {
                         self.rearrange_drop(&l, assets);
                         self.rearrange_mark(&l);
+                        self.sit_out_control(&l);
                     }
                     if l.hint_after_buttons() {
                         self.hint(&l);
@@ -1693,6 +1834,14 @@ impl BattleView {
             let aimed_friend = hovered && targets.contains(&i) && Some(f.team) == acting;
             self.draw_card(l, assets, i, p, lit, aimed_friend, order, now, pulse_ms);
         }
+        // The units sitting out this fight (`Battle::sitting`, «Не участвует в этом бою»): their portrait under
+        // the army window's dark veil for «Не участвует в боях» (`items_view`), in their own cells, so the
+        // player can pick them again while arranging.
+        for f in self.battle.sitting() {
+            let sq = l.portrait(l.cell_pos(f.team, f.slot) + shake);
+            assets.draw_portrait(f.unit, f.team, sq);
+            draw_rectangle(sq.x, sq.y, sq.w, sq.h, Color::new(0.0, 0.0, 0.0, 0.48));
+        }
         // Any other cell under the mouse, a card or an empty cell, gets a thin outline
         // (Razdor's choice, a player's wish, as Razdor's first battle grid had): the original
         // frames only a target under the mouse.
@@ -1738,9 +1887,13 @@ impl BattleView {
                 }
             }
         }
-        // The left panel: the hovered unit, else the one acting.
-        if let Some(id) = self.fighter_under_mouse(l).filter(|&i| self.fighter(i).alive()).or(active).or_else(|| b.fighters.iter().position(|f| f.is_hero)) {
-            self.draw_panel(l, assets, id);
+        // The left panel: the unit picked in the arrangement (it stays while its check box is used),
+        // else the hovered unit, else the one acting.
+        let sheet = self.sheet_layout(l);
+        if let Some(f) = self.picked_unit() {
+            self.draw_panel(&sheet, assets, f, false);
+        } else if let Some(id) = self.fighter_under_mouse(l).filter(|&i| self.fighter(i).alive()).or(active).or_else(|| b.fighters.iter().position(|f| f.is_hero)) {
+            self.draw_panel(&sheet, assets, self.fighter(id), b.active() == Some(id));
         } else {
             chrome::parchment(l.column(), true);
         }
@@ -2043,13 +2196,12 @@ impl BattleView {
     }
 
     /// The unit panel on the left, as the original's.
-    fn draw_panel(&self, l: &Layout, assets: &Assets, id: usize) {
+    fn draw_panel(&self, l: &Layout, assets: &Assets, f: &Fighter, acting: bool) {
         let b = &self.battle;
-        let f = self.fighter(id);
         // What it wears, an enemy's too (an army wears its items, `ai::army_units`).
         let items: [Option<ItemId>; razdor::rules::items::MAX_SLOTS] = f.items;
         let mut status = Vec::new();
-        if b.active() == Some(id) {
+        if acting {
             status.push((razdor::trf!("Acting: {left} of {total} actions left", left = b.actions_left(), total = f.stats[Stat::Manevres].max(b.actions_left())), Color::new(0.5, 1.0, 0.5, 1.0)));
         }
         if !f.mods.is_empty() {

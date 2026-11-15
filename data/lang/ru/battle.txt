@@ -385,3 +385,5 @@ day = день
 hour = час
 Your enemy proved stronger than your army, and you lost this battle. = Враг оказался сильнее, и битва проиграна.
 You let your hero perish, and the game on this scenario cannot go on. = Герой погиб, и этот сценарий продолжить нельзя.
+# The check box of the arrangement after «Рестарт» (Razdor, 2026-11-15)
+Sits out this fight = Не участвует в этом бою

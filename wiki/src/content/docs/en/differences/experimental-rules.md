@@ -42,13 +42,13 @@ The item and potion rules apply to all armies: your troops, opponents, and garri
 
 ## Warrior Participation in Battles
 
-On the "Battle and army" tab of the settings window, there is a parameter called **"Disable fighters"**, which is off by default.
-
-When it is enabled, select a living non-hero in the army window and tick the **"Does not participate in battle"** check box above the "Don't remind" line (top right of the army window). After it is ticked or unticked the warrior is deselected. To return a warrior to battle, untick it.
+A living non-hero can be left out of a battle. In the army window, top right, above the "Don't remind" line, there is a check box **"Does not participate in battle"**. It is a normal option of the game, not a setting and not a departure from the rules: it does not turn the run's mark grey.
 
 * The marked warrior remains in the squad, occupies their cell in the formation, and receives wages.
 * They do not participate in battle, do not gain experience, and are not counted among the battle participants.
-* A hero cannot be excluded.
+* To return a warrior to battle, untick the box. A hero cannot be marked.
+
+There is also a check box for one battle only: after "Restart" (see "Quick battle"), click on your warrior and the left panel shows the check box **"Sits out this fight"**. While it is ticked, the warrior stands dimmed in its cell and does not fight in this battle. After the first move the check box is gone.
 
 ## Army Deployment and Pathfinding
 

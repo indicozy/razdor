@@ -30,7 +30,6 @@
 //! `RAZDOR_SCENE_WEAR=<id>,…` wears those items on the squad member of `army:<map>:<n>:<unit>`.
 //! `RAZDOR_SCENE_SIGN_OFF=1` switches that member's promotion sign off (`army:<map>:<n>:<unit>`).
 //! `RAZDOR_SCENE_DEAD=1` makes that member a corpse (`army:<map>:<n>`).
-//! `RAZDOR_SCENE_BENCHING=1` turns the unit battle participation setting on (the army window's switch).
 //! `RAZDOR_SCENE_SELECT=<n>` selects squad member n in the `building:` window (its card shows).
 //! `RAZDOR_SCENE_PAN=dx,dy` holds the interface's pan at that offset (windows larger than the screen).
 //! `RAZDOR_SCENE_SAVE=<file.rzsave>` takes the game of a map scene (`walk`, `map`, …) from that
@@ -833,11 +832,6 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
     if let Some(index)=std::env::var("RAZDOR_SCENE_BENCHED").ok().and_then(|s| s.parse::<usize>().ok()).filter(|&i| i>0) {
         if let Some(unit)=game.squad.get_mut(index) { unit.battle_disabled=true; }
     }
-    // `RAZDOR_SCENE_BENCHING=1`: the unit battle participation setting on (its switch shows in the army
-    // window). It is the setting, not the game's flag: the game takes the settings every frame.
-    if std::env::var("RAZDOR_SCENE_BENCHING").is_ok_and(|v| v == "1") {
-        app.audio.settings.allow_unit_benching = true;
-    }
     // `RAZDOR_SCENE_FORMATION=clicks|drag|both`: the army arrangement setting («Расстановка армии»,
     // `unit_drag::Controls`) as the player chose it; the scene ignores the saved settings, so this is
     // how a run tests the other choices. Unset, the default (both).
@@ -1320,16 +1314,20 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                 hero.wage_kind = razdor::rules::content::WageKind::Leader;
                 game.squad[0] = hero;
             }
-            // `RAZDOR_SCENE_DEPLOY=start|rearrange|pick`: the battle before its first action (`rearrange`:
-            // the arrangement on, as after «Рестарт»; `pick`: a card picked). The hero stands where he is,
+            // `RAZDOR_SCENE_DEPLOY=start|rearrange|pick|sitout`: the battle before its first action (`rearrange`:
+            // the arrangement on, as after «Рестарт»; `pick`: a card picked; `sitout`: the picked card sits out
+            // this fight, its check box ticked). The hero stands where he is,
             // so the leave window's «Отступить» is offered (backlog 1607).
             if let Some(mode) = std::env::var("RAZDOR_SCENE_DEPLOY").ok().filter(|_| !end) {
                 game.back_to = Some(game.tile());
                 let retreat = game.can_retreat();
                 let mut view = BattleView::deploying(game.start_battle(), retreat);
-                view.set_rearranging(mode == "rearrange" || mode == "pick");
-                // `pick`: the army's second card is picked (its gold outline).
-                view.set_rearr_pick((mode == "pick").then_some(1));
+                view.set_rearranging(matches!(mode.as_str(), "rearrange" | "pick" | "sitout"));
+                // `pick` and `sitout`: the army's second card is picked (its gold outline).
+                view.set_rearr_pick(matches!(mode.as_str(), "pick" | "sitout").then_some(1));
+                if mode == "sitout" {
+                    view.set_sit_out_pick();
+                }
                 Screen::Battle(Box::new(view))
             } else {
                 let mut battle = game.start_battle();

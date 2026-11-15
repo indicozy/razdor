@@ -201,8 +201,6 @@ fn ground_blend_default() -> bool {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-    /// Allows marking army members as noncombatants; off by default.
-    pub allow_unit_benching: bool,
     pub music_volume: f32,
     pub sfx_volume: f32,
     pub music_muted: bool,
@@ -470,7 +468,7 @@ pub fn must_request(asked: Option<i32>, want: i32) -> bool {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), bottom_bar_size: Default::default(), keep_xp_on_promotion: false, keep_formation: true, hit_shake: false, battle_marks: true, army_list: false, map_tilt: false, map_first_person: false, map_horizon: false, map_globe: false, map_eyes: false, map_third_tune: super::view25::THIRD_TUNE, map_first_tune: super::view25::FIRST_TUNE, map_auto_turn: false, map_light: Default::default(), map_light_cycle: 24, map_light_hour: 18, map_steady: true, map_shadows: Default::default(), map_light_quality: None, map_mist: Default::default(), map_sprite_size: super::world_view::DEFAULT_SPRITE_SIZE, map_render_scale: 1.0, frame_cap: 0, map_twist: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, map_extended: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new(), map_live_water: false, map_ground_blend: true, map_weather: false, map_living: false, chronicle_summary: true, battery_saver: false, map_anim: Default::default(), map_water_rate: default_water_rate(), map_water_quality: Default::default(), record_game: true, debug_mode: false }
+        Settings { music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), bottom_bar_size: Default::default(), keep_xp_on_promotion: false, keep_formation: true, hit_shake: false, battle_marks: true, army_list: false, map_tilt: false, map_first_person: false, map_horizon: false, map_globe: false, map_eyes: false, map_third_tune: super::view25::THIRD_TUNE, map_first_tune: super::view25::FIRST_TUNE, map_auto_turn: false, map_light: Default::default(), map_light_cycle: 24, map_light_hour: 18, map_steady: true, map_shadows: Default::default(), map_light_quality: None, map_mist: Default::default(), map_sprite_size: super::world_view::DEFAULT_SPRITE_SIZE, map_render_scale: 1.0, frame_cap: 0, map_twist: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, map_extended: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new(), map_live_water: false, map_ground_blend: true, map_weather: false, map_living: false, chronicle_summary: true, battery_saver: false, map_anim: Default::default(), map_water_rate: default_water_rate(), map_water_quality: Default::default(), record_game: true, debug_mode: false }
     }
 }
 
@@ -563,9 +561,6 @@ impl Settings {
         use razdor::i18n::n_;
         if self.max_ai || self.expert_ai.is_some_and(|on| on != original.improved_ai) {
             return Some(n_("Battle AI strength"));
-        }
-        if self.allow_unit_benching {
-            return Some(n_("Unit battle participation"));
         }
         if self.keep_xp_on_promotion {
             return Some(n_("Experience on promotion: kept"));
@@ -1335,12 +1330,11 @@ mod tests {
     }
 
     #[test]
-    fn benching_preference_defaults_off_and_survives_settings_serialization() {
-        let old: Settings = serde_json::from_str("{}").unwrap();
-        assert!(!old.allow_unit_benching);
-        let enabled = Settings { allow_unit_benching: true, ..Settings::default() };
-        let back: Settings = serde_json::from_str(&serde_json::to_string(&enabled).unwrap()).unwrap();
-        assert!(back.allow_unit_benching);
+    fn an_old_settings_file_with_the_retired_benching_key_still_loads() {
+        // «Отключение бойцов» is gone (2026-11-15: sitting out is normal play); its key is ignored.
+        let old: Settings = serde_json::from_str(r#"{"allow_unit_benching": true, "music_volume": 0.3}"#).unwrap();
+        assert!((old.music_volume - 0.3).abs() < 1e-6);
+        assert!(!serde_json::to_string(&old).unwrap().contains("allow_unit_benching"));
     }
 
     /// The option «Обход армий на пути» is gone (backlog 1530): an old settings file that still
@@ -1750,7 +1744,6 @@ mod gameplay_mark_tests {
         let cases: Vec<(Settings, &str)> = vec![
             (Settings { max_ai: true, ..clean() }, "Battle AI strength"),
             (Settings { expert_ai: Some(true), ..clean() }, "Battle AI strength"),
-            (Settings { allow_unit_benching: true, ..clean() }, "Unit battle participation"),
             (Settings { keep_xp_on_promotion: true, ..clean() }, "Experience on promotion: kept"),
             (Settings { wide_row: Some(false), ..clean() }, "Wide front row in battle (for new games)"),
             (Settings { impossible: Some(true), ..clean() }, "Impossible difficulty (needs a restart)"),
