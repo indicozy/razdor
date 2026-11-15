@@ -14,6 +14,30 @@
 
 ## 1.5.2 — 2026-11-15
 
+Коммит `e4d582b0` (тег `v1.5.2`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+3bdeb6c13479e588d2bccb1ae02d21b9700ab455c707f9b768426d979d21c19f  razdor
+a2d58da546c836ac1d71f578b40507f0e2b4bc4216199cff6aa373a6b652487b  Razdor.exe
+dba818dee9a6049bfc953cd6876408f779c375d7c078c84fcf8323d01b7455b6  razdor-macos
+86146f5fddade5f30e366a3d1592fb0d62207f5b540d3465f857ae05527f8be3  razdor-translate
+e86a03decda824d26f5359f12a0b95a3940bcfab9f091caf512382c562521e61  Razdor-translate.exe
+6f042d15c74304238ecd3f1d7fe8df023f41f193d5ee1b6f80dbd27f10a6dee1  razdor-translate-macos
+78bffcafb1386b735e88828c1e4745eaf2dfb0c7c6f2840872798b5f14035f73  razdor.apk
+1cf5fa8e499d7f3de2761c99e0407c38035445f94e6183c391be4d4167e3b105  razdor.ipa
+3bdeb6c13479e588d2bccb1ae02d21b9700ab455c707f9b768426d979d21c19f  razdor-1.5.2-linux
+a2d58da546c836ac1d71f578b40507f0e2b4bc4216199cff6aa373a6b652487b  Razdor-1.5.2.exe
+dba818dee9a6049bfc953cd6876408f779c375d7c078c84fcf8323d01b7455b6  razdor-1.5.2-macos
+78bffcafb1386b735e88828c1e4745eaf2dfb0c7c6f2840872798b5f14035f73  razdor-1.5.2.apk
+1cf5fa8e499d7f3de2761c99e0407c38035445f94e6183c391be4d4167e3b105  razdor-1.5.2.ipa
+86146f5fddade5f30e366a3d1592fb0d62207f5b540d3465f857ae05527f8be3  razdor-translate-1.5.2-linux
+e86a03decda824d26f5359f12a0b95a3940bcfab9f091caf512382c562521e61  Razdor-translate-1.5.2.exe
+6f042d15c74304238ecd3f1d7fe8df023f41f193d5ee1b6f80dbd27f10a6dee1  razdor-translate-1.5.2-macos
+8ee43b30e44cd33c0983c49456cd4941ee0607376fb491871cc526fb0bef9d7c  razdor-ads-1.5.2.zip
+```
+
 ### Добавлено
 
 - После «Рестарта» боя отряд можно оставить вне этого боя галочкой «Не участвует в этом бою».
