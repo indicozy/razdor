@@ -97,6 +97,12 @@ without an Android or iOS file gets no offer on that system.
    - then delete the scratch folder and the notes file. A GitVerse failure does not undo the GitHub
      release: report it to the owner with the error, and the owner decides whether to rerun.
    A release with an iOS file: the `.ipa` is left out of GitVerse (it refuses it), with a warning.
+6b. Update check (the owner's decision, 2026-11-15): once the pipeline is green and the release is published,
+   `python3 -I tools/release/update_check.py --from vPREV --to vX.Y.Z` (vPREV = the previous release; needs
+   `ANDROID_HOME`, see `tools/release/README.md`). Exit 0 goes on; exit 1 = the previous release does not
+   update to this one (or the APK cannot install over it): tell the owner at once with the summary; exit 2 =
+   network/tool error (or a refused `--to`, which is not the newest release): rerun, report if it persists.
+   Put its result in the step-8 report.
 7. Follow-up commit: take the SHA-256 from the **published release** (`gh release view vX.Y.Z`),
    never from a local build (the build embeds the git id). Under the version heading in
    `changelog/X.Y.Z.md` add:

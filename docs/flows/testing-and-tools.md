@@ -218,6 +218,17 @@ Other diagnostics: `razdor.log` in the data folder (`razdor::diag`, `RAZDOR_LOG=
 
 ## Releases and updates
 
+- The update check (`tools/release/update_check.py`, release step 6b): `--from vPREV --to vX.Y.Z`
+  with `vX.Y.Z` the newest published release. On Linux it runs the previous release's program
+  off-screen (a private Xvfb, its own saves and log, `updates = always`) and checks that the
+  file it puts in place matches the new release's `SHA256SUMS`, and that the updated program
+  starts and logs the new version without a panic. For Android it checks that both APKs match
+  their `SHA256SUMS`, verify with `apksigner`, are signed by the same certificate, and have the
+  same package and a versionCode that does not go down (`aapt2`; the versionName is printed,
+  not checked). It does not cover Windows, macOS or iOS, nor a player's real install (saves,
+  the Hub, the phone installer's dialog). Exit codes: 0 pass, 1 a check failed, 2 it could not run.
+  Known: the APK's versionCode is not set in `Cargo.toml`, so every release ships code 1. The check
+  allows an equal code (Android installs over the same signature with it; not tried on a device).
 - `.github/workflows/release.yml`: a pushed tag `vX.Y.Z` checks the tag against
   `Cargo.toml` and the changelog, runs the tests (macOS and Linux), builds
   `razdor` + `Razdor.exe` with `scripts/dist.sh` (pinned toolchain and llvm-mingw, paths
