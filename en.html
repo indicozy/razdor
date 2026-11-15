@@ -148,7 +148,7 @@
         <h3>What you bring</h3>
         <ul>
           <li>Your own copy of <i>Discord Times</i> with the Community Update 1.2.</li>
-          <li>Windows 10 or newer, Linux (x86_64), or macOS 11 or newer.</li>
+          <li>Windows 10 or newer (for Windows 7 and 8, a separate build in the razdor-&lt;version&gt;-windows7.zip archive), Linux (x86_64), or macOS 11 or newer.</li>
           <li>A graphics card with OpenGL 2, which almost any computer has.</li>
           <li>Android 8 or newer, or an iPhone or iPad with iOS 14 or newer (the iOS version is installed with AltStore or Sideloadly).</li>
         </ul>
@@ -164,7 +164,7 @@
     <div class="parchment">
       <ol>
         <li>Install <i>Discord Times</i> and the Community Update 1.2, if you haven't yet.</li>
-        <li>Download Razdor from the <a href="https://github.com/indicozy/razdor/releases/latest">releases page</a>: <strong>Razdor.exe</strong> for Windows, <strong>razdor</strong> for Linux or <strong>razdor-macos</strong> for macOS.</li>
+        <li>Download Razdor from the <a href="https://github.com/indicozy/razdor/releases/latest">releases page</a>: <strong>Razdor.exe</strong> for Windows (for Windows 7 and 8, the razdor-&lt;version&gt;-windows7.zip archive), <strong>razdor</strong> for Linux or <strong>razdor-macos</strong> for macOS. A mirror of the releases is on <a href="https://gitverse.ru/indicozy/razdor">GitVerse</a> for players in Russia.</li>
         <li>Put it into the game folder, next to <strong>DiscordTimes.exe</strong>.</li>
         <li>Start it. Razdor finds the game in its own folder; it keeps its saves and settings apart and leaves the game untouched.</li>
       </ol>
@@ -181,6 +181,53 @@
   <h2 id="changes-title">Changelog</h2>
   <a class="close" href="#top" aria-label="Back to the menu">×</a>
   <div class="window-body">
+    <article class="box">
+      <h3>1.5.2 <span class="date">15 November 2026</span></h3>
+      <p><b>Faster on weak phones:</b> the map, walking, the windows over the map and a map zoomed out whole now load the phone noticeably less. The black screen under windows on some Android phones (Adreno) is fixed, and a still map no longer drops frames.</p>
+      <h4>Added</h4>
+      <ul>
+        <li>Battle: "Restart" in the "Ways out of the battle" window (Esc) starts the fight over with the arrangement, so you can rearrange your warriors before the first move. There is also "Retreat" before the first move, to leave without losses.</li>
+        <li>After "Restart", a unit can sit the fight out with the "Does not take part in this battle" check box.</li>
+        <li>Army arrangement "by dragging": tap an empty cell to place the selected warrior there.</li>
+        <li>A new setting, "Ground blending": when it is off, the map draws faster on weak phones.</li>
+        <li>In the "Mist instead of black" setting, the "Clubs" look is back.</li>
+        <li>Windows 7 and 8: a separate build of Razdor.</li>
+        <li>Main menu: the language button is replaced by a "Mods" button (choose a mod; the "Download mods..." item at the end of its list opens "Maps and mods" on the "Mods" tab). The language is changed in the settings.</li>
+      </ul>
+      <h4>Changed</h4>
+      <ul>
+        <li>Downloads: the game, updates and "Maps and mods" are now fetched from the GitVerse mirror first (for players in Russia), and from GitHub if it does not answer; Razdor remembers which mirror works. The "Download the game", "Open link" and "Copy link" buttons take the game archive from GitHub, not from Google Drive.</li>
+        <li>Large files (the game, updates, mods) download in several streams, which is much faster from GitVerse. If a download stalls, the window says exactly what stalled. On Android you can see how much has downloaded and cancel the download; if the connection drops, a clear error appears after 30 seconds.</li>
+        <li>If the "Maps and mods" catalogue is unavailable, the game still downloads on the first start.</li>
+        <li>The game and mods take less space: the pictures are stored compressed. The installed game is about half the size, the picture cache about a third, and a mod's archive is no longer kept after it is installed. On Android each played mod takes about 130 MB less.</li>
+        <li>The map: the zoomed-out map and 2.5D, walking across big maps and scrolling the flat map load the processor and graphics card less; the picture is the same.</li>
+        <li>On weak phones the map draws faster where there is no water on the screen.</li>
+        <li>With "Map animation" off, the map no longer lowers the frame rate when nothing is happening; the reduction stays only in "Battery saver".</li>
+        <li>On phones, living water updates every other frame by default.</li>
+        <li>Windows over the map (settings, hero, army and others) work faster on weak phones: the map under a window is no longer redrawn every frame.</li>
+        <li>The war fog opens at once again, as in the original.</li>
+        <li>The "Does not take part in battles" check box in the army window is always there and no longer counts as retreating from the rules.</li>
+        <li>Living map: castle, fortress and town windows glow at night only when a garrison or an army is inside. Armies and the hero on the map cast a shadow that moves with the sun.</li>
+        <li>"Mist instead of black" covers the ground beyond the map's edge, not black emptiness.</li>
+        <li>Minimap: the hero's triangle is a little bigger than the building icon (smaller on phones, larger on PC).</li>
+        <li>The debug log records the phone model, screen, graphics settings, map, heating and memory, which makes slowdowns easier to track down.</li>
+      </ul>
+      <h4>Fixed</h4>
+      <ul>
+        <li>Windows over the map on some Android phones (Adreno) no longer show a black screen instead of the map.</li>
+        <li>Mist instead of black: a place shown by an event no longer turns into a black patch.</li>
+        <li>Living map: the smoke above the castles' watchtowers is gone.</li>
+        <li>Automatic leveling and the choice of upgrade now work for named heroes from events that came from the AI army (for example, "Big Billy").</li>
+        <li>Spell descriptions: a negative percentage of life now reads "Reduces life", not "Heals" (for example, "Blood Sacrifice").</li>
+        <li>Android: saves moved from the old Razdor folder show up in the game; mods and maps moved from it are at once visible in the main menu and in "New game".</li>
+        <li>Windows: when the audio output device changes in the system, Razdor switches to it at once.</li>
+        <li>Android, touchpad mode: the cursor is visible across the whole screen.</li>
+        <li>The hints on the bottom panel's buttons no longer flicker on hover; the FPS counter is no longer hidden under the debug-mode bar.</li>
+        <li>2.5D: after turning the map by 90 degrees you can scroll it to the top edge again; hills and buildings at the edge of the fog no longer flicker while scrolling.</li>
+        <li>The file recovery button no longer touches your own game folder.</li>
+        <li>Download window on phones: a tap on the lower part of the "Personal" tab no longer acts as "Clear all".</li>
+      </ul>
+    </article>
     <article class="box">
       <h3>1.5.1 <span class="date">13 November 2026</span></h3>
       <p><b>Note, Android:</b> Razdor now keeps everything in the app's internal storage. When the game asks you to pick the Razdor folder, agree and pick it: saves, maps and mods move over by themselves.</p>
@@ -1269,7 +1316,7 @@
 </main>
 
 <footer class="foot">
-  <p>Razdor 1.5.1 // for Community Update 1.2 // <a href="https://github.com/indicozy/razdor">source code on GitHub</a></p>
+  <p>Razdor 1.5.2 // for Community Update 1.2 // <a href="https://github.com/indicozy/razdor">source code on GitHub</a></p>
   <p>Made by <a href="https://github.com/indicozy">@indicozy</a>. Not affiliated with Aterdux or the rights holders of <i>Discord Times</i>; no warranty.</p>
 </footer>
 
