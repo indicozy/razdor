@@ -206,12 +206,13 @@ fn file_sha(path: &Path) -> Option<String> {
 /// file as it is named.
 fn stored_file(dir: &Path, rel: &str) -> Option<super::stored::Stored> {
     let name = rel.rsplit('/').next().unwrap_or_default();
-    let stored = if super::stored::is_compressible(name) {
-        super::stored::find_path(dir, rel).ok()?
+    // A picture the conversion turns into its `.lz4` between the find and this check is still there.
+    if super::stored::is_compressible(name) {
+        super::stored::find_path(dir, rel).ok()?.present()
     } else {
-        super::stored::Stored { path: dir.join(rel), compressed: false }
-    };
-    stored.path.is_file().then_some(stored)
+        let stored = super::stored::Stored { path: dir.join(rel), compressed: false };
+        stored.path.is_file().then_some(stored)
+    }
 }
 
 /// The length of the file `rel` as the game reads it (decompressed for a stored picture).

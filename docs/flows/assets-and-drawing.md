@@ -41,7 +41,12 @@ stored file's mtime, so a conversion costs at most one cache rebuild. Plain wins
 crash-safe (`.part`, fsync, verify, rename, then delete the plain file). At the start of a load
 the owned folder is converted on a thread of its own (`stored::compress_owned_in_background`): the
 game is not held, and a plain picture that is converted after it was found reads its `.lz4`
-(`Stored::read`, `logical_len`).
+(`Stored::read`, `logical_len`, `Stored::present` for an `is_file` check). Whole-folder readers of the base
+wait for a running conversion of it first: `stored::wait_converted` (a per-folder `Converting` guard, held from
+the calling thread), called at the start of `hub::mods::prepare_mod`; a mod build that fails is tried once more
+after the wait (`hub::mods::active_install_dir_in`, `use_mod`). Otherwise a mod build that lists the base and
+stats each file could fail on a picture the conversion moved in between (backlog: "Bonus46.lit: No such file",
+the mod dropped to the base game).
 
 A mod's merged folder (`hub::mods::prepare_mod`) hard-links the base's files where the file system
 allows it and never copies them: where links fail (Android's app storage) the file is left out, and

@@ -66,8 +66,9 @@ fn text_hash(text: &str) -> u64 {
 /// through a conversion, so a conversion costs at most one rebuild (the mtime changes). A plain
 /// file keys exactly as before.
 pub fn source_key(path: &Path) -> Option<u64> {
-    let stored = super::stored::Stored::at(path);
-    let meta = std::fs::metadata(path).ok()?;
+    // The form there now: a plain picture converted since it was found is keyed as its `.lz4`.
+    let stored = super::stored::Stored::at(path).present()?;
+    let meta = std::fs::metadata(&stored.path).ok()?;
     let mtime = meta.modified().ok()?.duration_since(UNIX_EPOCH).ok()?.as_nanos();
     if !stored.compressed {
         return Some(key_for(&path.display().to_string(), meta.len(), mtime));

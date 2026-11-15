@@ -131,7 +131,7 @@ fn matches_entry(dir: &Path, f: &ManifestFile) -> bool {
         Some((folder, name)) => (dir.join(folder), name),
         None => (dir.to_path_buf(), f.path.as_str()),
     };
-    let Some(stored) = stored::find(&folder, name).filter(|s| s.path.is_file()) else { return false };
+    let Some(stored) = stored::find(&folder, name).and_then(|s| s.present()) else { return false };
     if stored.logical_len().ok() != Some(f.size) {
         return false;
     }
@@ -237,7 +237,7 @@ pub fn layer_bytes(local: &Path, base: &Path, chain: &[String], name: &str) -> O
 /// The file `name` at the top of `dir`, matched without case, in its stored form (a plain file or
 /// `<name>.lz4`, `stored::find`); its decoded bytes are what the game reads.
 fn top_file(dir: &Path, name: &str) -> Option<Stored> {
-    stored::find(dir, name).filter(|s| s.path.is_file())
+    stored::find(dir, name).and_then(|s| s.present())
 }
 
 /// Makes `id` the mod the game plays from now on (`None`: the base game), after its folder is
@@ -249,7 +249,11 @@ pub fn use_mod(local: &Path, base: &Path, id: Option<&str>) -> Result<PathBuf, S
             Ok(base.to_path_buf())
         }
         Some(id) => {
-            let dir = prepare_mod(local, base, id)?;
+            // Tried once more after a base conversion, as `active_install_dir_in` does.
+            let dir = prepare_mod(local, base, id).or_else(|_| {
+                stored::wait_converted(base);
+                prepare_mod(local, base, id)
+            })?;
             write_active(local, Some(id))?;
             mark_played(local, id);
             Ok(dir)
@@ -294,7 +298,14 @@ fn active_install_dir_in(local: &Path, base: &Path) -> PathBuf {
         let _ = write_active(local, None);
         return base.to_path_buf();
     }
-    match prepare_mod(local, base, &id) {
+    // A build that fails is tried once more after the base's conversion (if one runs): a mod is not
+    // dropped for a file that moved meanwhile.
+    let built = prepare_mod(local, base, &id).or_else(|e| {
+        crate::diag!("hub: the active mod {id} did not build ({e}); once more after the conversion");
+        stored::wait_converted(base);
+        prepare_mod(local, base, &id)
+    });
+    match built {
         Ok(dir) => dir,
         Err(e) => {
             crate::diag!("hub: the active mod {id} does not build ({e}); the base game is played");
@@ -531,6 +542,10 @@ pub fn prepare_mod(local: &Path, base: &Path, id: &str) -> Result<PathBuf, Strin
     if !safe_id(id) {
         return Err(format!("{id}: not a mod id"));
     }
+    // The build reads the base folder as a whole (its fingerprint, its hard links): it waits for a
+    // conversion of the base's pictures that is running (the first start after an update), so it never
+    // lists a plain picture the conversion removes (backlog: "Bonus46.lit: No such file", the mod dropped).
+    stored::wait_converted(base);
     // A mod whose files are damaged is not laid: a folder built from them would lack what the
     // mod's maps name (the caller repairs it first, `Hub::repair_mod`).
     let bad = damaged_files(local, id)?;
@@ -913,6 +928,26 @@ fn game_fingerprint(game: &Path) -> Result<String, String> {
     Ok(crate::update::sha256_hex(lines.join("\n").as_bytes()))
 }
 
+#[cfg(test)]
+crate::local! {
+    /// Tests: runs before each base file of [`base_fingerprint`] is stat'ed, after the listing (a
+    /// conversion of the base can land in that window: the race of the backlog).
+    static BEFORE_STAT: std::cell::RefCell<Option<Box<dyn FnMut(&Path)>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Tests: the hook of [`BEFORE_STAT`] for the file `path`, if one is set.
+#[cfg(test)]
+fn before_stat(path: &Path) {
+    BEFORE_STAT.with(|hook| {
+        if let Some(hook) = hook.borrow_mut().as_mut() {
+            hook(path);
+        }
+    });
+}
+
+#[cfg(not(test))]
+fn before_stat(_path: &Path) {}
+
 /// A digest of the base's files: their names, sizes and modification times.
 fn base_fingerprint(base: &Path) -> Result<String, String> {
     let mut all = Vec::new();
@@ -922,6 +957,7 @@ fn base_fingerprint(base: &Path) -> Result<String, String> {
         if is_dir {
             continue;
         }
+        before_stat(&path);
         let meta = std::fs::metadata(&path).map_err(|e| format!("{rel}: {e}"))?;
         let time = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
         lines.push(format!("{rel}\t{}\t{time}", meta.len()));
@@ -1481,6 +1517,64 @@ mod tests {
         assert!(game_b.join("Data/Extra.ini").exists(), "b stays with the base chosen");
         assert!(game_c.join("Data/More.ini").exists(), "c stays with the base chosen");
         assert_eq!(std::fs::read_to_string(base.join("Data/Units.ini")).unwrap(), "base units", "the base is not touched");
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    /// The first start after an update: the owned base converts its plain pictures on a thread while the
+    /// active mod is built over it (the backlog's "Bonus46.lit: No such file", the mod dropped to the base
+    /// game). The build waits for the conversion, so it builds, every base picture reads the same bytes, and
+    /// the base holds only the `.lz4` forms afterwards.
+    #[test]
+    fn a_mod_builds_over_a_base_whose_pictures_are_being_converted() {
+        let base = temp("converting-base");
+        let mut pictures = Vec::new();
+        for i in 0..24 {
+            let rel = format!("Graphics/Windows/Bonus{i}.lit");
+            let text = format!("picture {i} {}", "x".repeat(512 * 1024));
+            put(&base.join(&rel), &text);
+            pictures.push((rel, text));
+        }
+        put(&base.join("Data/Units.ini"), "base units");
+        let local = temp("converting-hub");
+        install_mod(&local, "carry-test", "1.0", &[("Data/Extra.ini", "mod extra")]);
+        // Owned on this thread, as the test's own folder (the conversion checks ownership where it starts).
+        crate::dt::stored::set_test_owned(Some(base.clone()));
+        crate::dt::stored::compress_owned_in_background(&base);
+        crate::dt::stored::set_test_owned(None);
+        let game = prepare_mod(&local, &base, "carry-test").expect("the build waits for the conversion, then builds");
+        assert!(!crate::dt::stored::wait_converted(&base), "the conversion has ended");
+        assert_eq!(read_logical(&game, "Data/Extra.ini"), "mod extra");
+        for (rel, text) in &pictures {
+            assert_eq!(read_logical(&game, rel), *text, "{rel} reads the same bytes");
+            assert!(base.join(format!("{rel}.lz4")).is_file() && !base.join(rel).exists(), "{rel} is converted");
+        }
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    /// The race of the backlog, made deterministic: a base picture is converted between the listing of the
+    /// base and its stat (a conversion that started while the build runs, which the wait does not cover).
+    /// The first build fails on the moved file; the mod is built once more after it, so the player keeps it.
+    #[test]
+    fn a_picture_converted_during_the_build_is_built_again() {
+        let base = base_install("moved");
+        put(&base.join("Graphics/Windows/Bonus0.lit"), "bonus picture");
+        let local = temp("moved-hub");
+        install_mod(&local, "carry-test", "1.0", &[("Data/Extra.ini", "mod extra")]);
+        BEFORE_STAT.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(|path: &Path| {
+                if path.ends_with("Graphics/Windows/Bonus0.lit") {
+                    crate::dt::stored::compress_file(path).expect("the picture converts");
+                }
+            }))
+        });
+        let used = use_mod(&local, &base, Some("carry-test"));
+        BEFORE_STAT.with(|hook| *hook.borrow_mut() = None);
+        let game = used.expect("the build is tried again after the picture moved");
+        assert_eq!(read_logical(&game, "Graphics/Windows/Bonus0.lit"), "bonus picture");
+        assert_eq!(read_logical(&game, "Data/Extra.ini"), "mod extra");
+        assert_eq!(active_mod(&local).as_deref(), Some("carry-test"), "the mod stays the one played");
         let _ = std::fs::remove_dir_all(&base);
         let _ = std::fs::remove_dir_all(&local);
     }

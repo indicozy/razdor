@@ -127,6 +127,17 @@ impl Stored {
         let lz4 = self.path.with_file_name(format!("{name}.{LZ4_EXT}"));
         lz4.is_file().then_some(Stored { path: lz4, compressed: true })
     }
+
+    /// The form of this file that is there now: this one, or the `.lz4` a plain picture became in a
+    /// conversion since it was found. None when neither is. A reader that checks a found file with
+    /// `is_file` must use this: the converter may have moved the picture in between.
+    pub fn present(&self) -> Option<Stored> {
+        if self.path.is_file() {
+            Some(self.clone())
+        } else {
+            self.converted()
+        }
+    }
 }
 
 /// The content size in an LZ4 frame header, or None when the bytes are not a frame or the header
@@ -246,11 +257,18 @@ fn list_here(dir: &Path) -> Vec<(String, Stored)> {
     // Keyed by the name ignoring case, so one file is listed once.
     let mut by_name: BTreeMap<String, (String, Stored)> = BTreeMap::new();
     for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-        let name = entry.file_name().to_string_lossy().into_owned();
+        // A plain picture converted after the listing was read is listed as its `.lz4` (the `.lz4` is
+        // in place before the plain file goes, so the name is never lost).
+        let listed = entry.path();
+        let path = if listed.is_file() {
+            listed
+        } else {
+            match Stored::at(&listed).present() {
+                Some(now) if now.compressed => now.path,
+                _ => continue,
+            }
+        };
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         if name.to_ascii_lowercase().ends_with(&format!(".{LZ4_EXT}.{PART_SUFFIX}")) {
             continue;
         }
@@ -345,7 +363,12 @@ pub fn convert_owned(dir: &Path) -> io::Result<Summary> {
 /// the start of a load): the summary is logged when anything changed, and a failure is logged too.
 /// The plain files stay readable, so nothing else is needed on a failure.
 pub fn compress_owned(dir: &Path) {
-    match convert_owned(dir) {
+    let _converting = Converting::enter(dir);
+    log_conversion(dir, convert_owned(dir));
+}
+
+fn log_conversion(dir: &Path, result: io::Result<Summary>) {
+    match result {
         Ok(s) if s != Summary::default() => crate::diag!(
             "stored: {}: {} pictures compressed ({} plain bytes to {} stored), {} replaced, {} leftover parts removed",
             dir.display(),
@@ -361,19 +384,83 @@ pub fn compress_owned(dir: &Path) {
 }
 
 /// [`compress_owned`] on a thread of its own, for the start of a load: the first start after an
-/// update converts the whole folder (about 12 s on a desktop, longer on a phone), which must not hold
+/// update converts the whole folder (about 2 s on a desktop, longer on a phone), which must not hold
 /// the game. Safe while the game reads: plain wins, a picture is first written as `<name>.lz4`, then
 /// its plain file removed, and a read of a plain file that is gone reads the `.lz4` instead
-/// ([`Stored::read`]).
+/// ([`Stored::read`]). Whole-folder readers (a mod build) wait for it ([`wait_converted`]).
+///
+/// Ownership is checked and the folder marked converting on the calling thread, before the thread
+/// starts: a reader that runs right after this call waits for the conversion, and (in tests) the
+/// per-thread test ownership is seen.
 pub fn compress_owned_in_background(dir: &Path) {
     if !owned(dir) {
         return;
     }
+    let converting = Converting::enter(dir);
     let dir = dir.to_path_buf();
-    let spawned = std::thread::Builder::new().name("compress-owned".into()).spawn(move || compress_owned(&dir));
+    let spawned = std::thread::Builder::new().name("compress-owned".into()).spawn(move || {
+        // The guard is held until the conversion ends, also on a panic (it is dropped while unwinding).
+        let _converting = converting;
+        log_conversion(&dir, convert_tree(&dir));
+    });
     if let Err(e) = spawned {
+        // The closure (and with it the guard) was dropped by the failed spawn: the folder is free again.
         crate::diag!("stored: the pictures are not compressed (no thread: {e})");
     }
+}
+
+/// Folders a conversion is compressing now, with the number of conversions holding each (a
+/// synchronous and a background one may overlap). Keys are canonical folders ([`folder_key`]).
+static CONVERTING: std::sync::Mutex<BTreeMap<PathBuf, usize>> = std::sync::Mutex::new(BTreeMap::new());
+/// Signalled when a conversion ends (a folder leaves [`CONVERTING`]).
+static CONVERTED: std::sync::Condvar = std::sync::Condvar::new();
+
+/// Holds a folder as converting until it is dropped (see [`compress_owned`], [`compress_owned_in_background`]).
+struct Converting(PathBuf);
+
+impl Converting {
+    fn enter(dir: &Path) -> Converting {
+        let key = folder_key(dir);
+        let mut map = lock_converting();
+        *map.entry(key.clone()).or_insert(0) += 1;
+        Converting(key)
+    }
+}
+
+impl Drop for Converting {
+    fn drop(&mut self) {
+        let mut map = lock_converting();
+        if let Some(n) = map.get_mut(&self.0) {
+            *n -= 1;
+            if *n == 0 {
+                map.remove(&self.0);
+            }
+        }
+        CONVERTED.notify_all();
+    }
+}
+
+fn lock_converting() -> std::sync::MutexGuard<'static, BTreeMap<PathBuf, usize>> {
+    CONVERTING.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn folder_key(dir: &Path) -> PathBuf {
+    dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf())
+}
+
+/// Waits while a conversion of the game folder `dir` is running (see [`compress_owned_in_background`]),
+/// then returns. Returns whether it waited; a folder that is not converting returns at once.
+/// A reader that walks the folder's files as a whole (a mod build, its fingerprint) calls this first,
+/// so it never sees a folder that is half converted. Never call it from a conversion's own thread.
+pub fn wait_converted(dir: &Path) -> bool {
+    let key = folder_key(dir);
+    let mut map = lock_converting();
+    let mut waited = false;
+    while map.contains_key(&key) {
+        waited = true;
+        map = CONVERTED.wait(map).unwrap_or_else(|e| e.into_inner());
+    }
+    waited
 }
 
 #[cfg(test)]
@@ -408,6 +495,44 @@ mod background_tests {
         compress_file(&dir.join("a.ugs")).unwrap();
         assert_eq!(found.read().unwrap(), b"unit picture bytes");
         assert_eq!(found.logical_len().unwrap(), 18);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A found plain picture that is converted before the check ([`Stored::present`]) is present as its `.lz4`;
+    /// a file that is in neither form is not.
+    #[test]
+    fn present_follows_a_picture_converted_after_it_was_found() {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("razdor-stored-present-{}-{nanos}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("a.ugs"), b"unit picture bytes").unwrap();
+        let found = find(&dir, "a.ugs").unwrap();
+        assert!(found.present().is_some_and(|s| !s.compressed));
+        compress_file(&dir.join("a.ugs")).unwrap();
+        let now = found.present().expect("the .lz4 is there");
+        assert!(now.compressed && now.path.ends_with("a.ugs.lz4"));
+        fs::remove_file(dir.join("a.ugs.lz4")).unwrap();
+        assert!(found.present().is_none(), "neither form is present");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The conversion gate ([`wait_converted`]): a folder that is not converting returns at once; while a
+    /// conversion holds it, nothing returns; when the conversion ends, the wait returns.
+    #[test]
+    fn wait_converted_holds_while_a_conversion_runs_and_returns_when_it_ends() {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("razdor-stored-gate-{}-{nanos}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        assert!(!wait_converted(&dir), "a folder that is not converting does not wait");
+        let converting = Converting::enter(&dir);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let waiter = dir.clone();
+        std::thread::spawn(move || tx.send(wait_converted(&waiter)).unwrap());
+        // While the conversion holds the folder, the waiter cannot have returned.
+        assert!(rx.try_recv().is_err(), "the wait returned during a conversion");
+        drop(converting);
+        // Ends once the conversion is over (the waiter may also start after it: then it does not wait).
+        rx.recv_timeout(std::time::Duration::from_secs(30)).expect("the wait returns after the conversion");
         let _ = fs::remove_dir_all(&dir);
     }
 }

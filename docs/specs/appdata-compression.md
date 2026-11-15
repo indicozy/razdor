@@ -51,6 +51,15 @@ Rust: `lz4_flex::frame`. Python (build.py): `lz4.frame.compress(…, store_size=
 5. **Conversion** runs once per owned folder before the install loads, crash-safe: write `<name>.lz4.part`, fsync,
    verify by decoding and comparing the length/hash, rename to `<name>.lz4`, then delete the plain file. Leftover
    `.part` files are deleted at start. A progress notice on phones is a UI change (owner's screenshots).
+   **Readers while it runs** (the race of the carry-over check, 2026-11-15): a single file is always readable
+   (a found plain picture converted meanwhile reads its `.lz4`; `Stored::present` for a check of a found file).
+   A reader that walks the base as a whole waits first: `stored::wait_converted(base)` at the start of
+   `hub::mods::prepare_mod` (the mod build, its fingerprint and hard links), and a build that fails is tried once
+   more after the wait (`active_install_dir_in`, `use_mod`), so a mod is not dropped for a file that moved. The
+   wait is the conversion's time (measured in the carry-over run on the desktop: the conversion of 388 pictures
+   ended at 2.1 s, the install loaded at 2.1 s; phones not measured; once per folder, and only with a mod active);
+   the conversion holds its folder from the calling thread before it starts (`Converting`), so the wait sees it.
+   Nothing else waits: `find`, `list` and `Stored::read` never do.
 6. **Mods** (`hub/mods.rs`, the design of step 3): the overlay matches layers by logical name and removes the other stored
    form of a name it replaces, both ways (a base's plain link beats nothing once a mod's `.lz4` is laid; a base's
    `.lz4` goes for a mod's plain file). A mod's manifest and stamp name each file by its logical path, and its digest
