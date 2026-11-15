@@ -86,6 +86,10 @@ through `apply_max`, so a recorder sees the moves the screen played.
   (attacker, both sides' units with their squad index, the bench cells, the experience correction,
   the flags, both building defences, the patch globals). `BattleStart::rebuild` makes the same calls
   in the same order as `start_battle`.
+- Deployment in a record: a battle waits for its first action only when its record shows the deployment (a `Begin`,
+  `MoveCard`, `SitOut` or `RetreatBattle` before it ends; `hook::playback_deploys`). Any other record begins the battle at
+  its start, as the game did before the deployment step (old recordings, the difftests' battles); its checks compare that
+  state. The live side must record what it did: a battle begun without a recorded `Begin` is a begun battle to the replay.
 
 ## Holes (the spec's list) and where each is closed
 

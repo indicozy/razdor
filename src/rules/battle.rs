@@ -3647,6 +3647,9 @@ impl Battle {
     /// [`Battle::auto_play_to_end`], but the player's units play by the hero's rules
     /// ([`Battle::hero_auto_step`]).
     pub fn hero_auto_play_to_end(&mut self) -> Outcome {
+        // A quick battle of a deployment begins it first, as the screen's first action does: its
+        // `Begin` is recorded before the `HeroAutoPlay` act (the record then shows the deployment).
+        self.start_play();
         let _rec = crate::rules::recording::actions::battle_scope(|| crate::rules::recording::actions::BattleAct::HeroAutoPlay);
         self.begin();
         for _ in 0..AUTO_PLAY_STEPS {

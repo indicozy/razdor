@@ -287,10 +287,16 @@ impl Player {
         Err("the battle does not end".into())
     }
 
-    /// The battle as the playback starts it: made, not begun. Its `Begin` (or its first action)
-    /// begins it, as on the screen, after the player's deployment.
+    /// The battle as the playback starts it. A deployed battle (its record shows the deployment) is
+    /// made, not begun: its `Begin` (or its first action) begins it, as on the screen, after the
+    /// player's deployment. Any other is begun at its start, as the game began it before the
+    /// deployment step (`hook::playback_deploys`).
     fn start_battle(&mut self) -> Battle {
-        self.game.start_battle()
+        let mut b = self.game.start_battle();
+        if !hook::playback_deploys(b.ordinal) {
+            b.begin();
+        }
+        b
     }
 
     /// The events raised since the last call (the screen's windows and messages).

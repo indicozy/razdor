@@ -291,9 +291,12 @@ in `src/rules/ai.rs` (`fight`, `simulate`, cached) with `set_simulation`.
 - The battle is written back after **every** action (`battle_write_back`); a crash or a load
   mid-battle depends on it. Enemy troops are matched by `battle_troops` order.
 - A deploying battle does not move before its first action: nothing calls `begin` for it but `start_play` (the
-  screen) or an auto-play (recorded). A replay does not begin a battle at its start: the recorded `Begin` does, and a
-  recording made before the deployment step begins it at its first action, after the enemy's turns (`recording/play.rs`
-  `battle_act`). The entry-point test (`every_entry_point_that_changes_the_game_records_or_is_listed`) keeps the
+  screen) or an auto-play (recorded). A replay decides it per battle from its record (`recording/hook.rs`
+  `Playback::new`, `playback_deploys`): a battle whose record has a `Begin`, a `MoveCard`/`SitOut` or a `RetreatBattle`
+  before it ends waits for its first action (the recorded `Begin` begins it); any other is begun at its start, as the
+  game began them before the deployment step and as the difftests' battles still do (`play.rs` `start_battle`). A quick
+  battle of a deployment records its `Begin` before `HeroAutoPlay`, so it counts as deployed. A deployed battle's
+  first act without a `Begin` still begins it after the enemy's turns (`play.rs` `battle_act`, the legacy path). The entry-point test (`every_entry_point_that_changes_the_game_records_or_is_listed`) keeps the
   `Battle` and `Game` entries recorded.
 - Events decide whether a battle opens: only an event that stops on a window cancels it
   (6928d9d: a silent repeating event on РК4 swallowed every attack).

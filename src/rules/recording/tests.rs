@@ -1577,3 +1577,37 @@ fn a_sit_out_in_the_deployment_replays_to_the_same_state() {
         assert_eq!(state_hash(&played), live, "the replay reaches the live state (benching {benching})");
     }
 }
+
+/// A deployed battle's quick battle («Q», `Battle::hero_auto_play_to_end`) records its `Begin` before
+/// its act, so the record shows the deployment: a check taken while the battle waits for its first
+/// action (a keyframe, as the recorder takes one after a battle starts) replays to the live state.
+/// Without the `Begin` the playback would begin the battle at its start and the check would differ.
+/// The demo game, no install needed.
+#[test]
+fn a_quick_battle_of_a_deployment_replays_to_the_same_state() {
+    let c = Arc::new(Content::builtin());
+    let mut g = Game::new(c.clone(), HeroClass::Knight);
+    g.world.armies.clear();
+    g.hire(crate::rules::world::demo_unit(&c, "spearman")).unwrap();
+    g.foe = Some(Foe::Garrison(g.world.index_of("Bandit camp")));
+    let snap = Snapshot::take(&g).unwrap();
+    let shared = Shared::default();
+    hook::install_recorder(Box::new(shared.clone()));
+    let mut b = g.start_battle();
+    // The check while the battle waits (the playback compares it after the same snap and write-back).
+    g.finish_pause();
+    g.armies_snap();
+    g.battle_write_back(&b);
+    let waiting = state_hash(&g);
+    hook::record_input(Some(g.stamp()), Input::Engine(EngineInput::Check { hash: waiting }));
+    b.hero_auto_play_to_end();
+    g.battle_write_back(&b);
+    g.resolve_battle(&b);
+    hook::take_recorder();
+    let live = state_hash(&g);
+    let entries = shared.0.borrow().clone();
+    assert!(entries.iter().any(|e| matches!(e.input, Input::Player(PlayerAction::Battle(super::actions::BattleAct::Begin)))), "the quick battle's begin is recorded");
+    let start = snap.restore(c.clone(), None).unwrap();
+    let played = super::play::play(start, &entries, 1.0 / 60.0).unwrap();
+    assert_eq!(state_hash(&played), live, "the replay reaches the live state");
+}

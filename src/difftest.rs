@@ -554,6 +554,8 @@ impl<'a> Runner<'a> {
                 g
             }
         };
+        // The original has no sitting out (Razdor's setting is on by default).
+        game.allow_unit_benching = false;
         game.set_hero_name("");
         // The way there with the mouse (`main_menu`, `new_game`): the bell as the pointer
         // comes onto New game and its press, the scenario's row (silent), Next, the class

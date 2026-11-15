@@ -36,12 +36,21 @@ pub struct Playback {
     music: VecDeque<(Stamp, u8)>,
     max: BTreeMap<(u32, u32), MaxCode>,
     patch: BTreeMap<u32, PatchRecord>,
+    /// Per battle (its ordinal): whether its record shows the deployment (see [`Playback::new`]).
+    deploys: BTreeMap<u32, bool>,
 }
 
 impl Playback {
-    /// The records in `entries` (player actions are the driver's, not the rules').
+    /// The records in `entries` (player actions are the driver's, not the rules'). A battle is
+    /// deployed (waits for its first action, `Battle::start_play`) when its record shows that: a
+    /// `Begin`, a rearrangement or a sit-out, or a retreat, before the battle ends. A record without
+    /// any of them is a battle begun at its start, as the game began them before the deployment step
+    /// (and as the difftests' and the tests' battles still do); its checks compare that state.
     pub fn new(entries: &[Entry]) -> Playback {
+        use super::actions::{BattleAct, PlayerAction};
         let mut p = Playback::default();
+        // The battle being read: its ordinal (from its patch record) and whether it is deployed.
+        let mut open: Option<(Option<u32>, bool)> = None;
         for e in entries {
             match e.input {
                 Input::Engine(EngineInput::GameStart { seed, patch, .. }) => p.starts.push_back((seed, patch)),
@@ -51,10 +60,37 @@ impl Playback {
                 }
                 Input::Engine(EngineInput::Patch(rec)) => {
                     p.patch.insert(rec.battle, rec);
+                    if let Some((ordinal @ None, _)) = open.as_mut() {
+                        *ordinal = Some(rec.battle);
+                    }
                 }
                 Input::Engine(EngineInput::Check { .. }) => {}
+                Input::Player(PlayerAction::StartBattle) => {
+                    if let Some((Some(n), deployed)) = open.take() {
+                        p.deploys.insert(n, deployed);
+                    }
+                    open = Some((None, false));
+                }
+                Input::Player(PlayerAction::Battle(BattleAct::Begin | BattleAct::MoveCard { .. } | BattleAct::SitOut { .. })) => {
+                    if let Some((_, deployed)) = open.as_mut() {
+                        *deployed = true;
+                    }
+                }
+                Input::Player(PlayerAction::RetreatBattle) => {
+                    if let Some((Some(n), _)) = open.take() {
+                        p.deploys.insert(n, true);
+                    }
+                }
+                Input::Player(PlayerAction::ResolveBattle) => {
+                    if let Some((Some(n), deployed)) = open.take() {
+                        p.deploys.insert(n, deployed);
+                    }
+                }
                 Input::Player(_) => {}
             }
+        }
+        if let Some((Some(n), deployed)) = open {
+            p.deploys.insert(n, deployed);
         }
         p
     }
@@ -228,6 +264,12 @@ pub(crate) fn playback_max(battle: u32, decision: u32) -> Option<MaxCode> {
 /// The recorded patch globals at the start of battle `battle`, if a playback has them.
 pub(crate) fn playback_patch(battle: u32) -> Option<PatchRecord> {
     HOOK.with_borrow(|h| h.playback.as_ref().and_then(|p| p.patch.get(&battle).copied()))
+}
+
+/// Whether battle `battle` waits for its first action in the playback (its record shows the
+/// deployment, see [`Playback::new`]). True when no playback is attached or the record does not say.
+pub(crate) fn playback_deploys(battle: u32) -> bool {
+    HOOK.with_borrow(|h| h.playback.as_ref().and_then(|p| p.deploys.get(&battle).copied()).unwrap_or(true))
 }
 
 /// The stamp of the next recorded music change, if a playback has one left.
