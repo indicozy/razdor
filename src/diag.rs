@@ -91,6 +91,11 @@ pub fn debug_mode() -> bool {
 /// and writes no setting; it turns profiling and the frame probe's debug-mode GPU samples on.
 static FORCED_PROFILE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Tests that turn [`FORCED_PROFILE`] on and off hold this, so a parallel test cannot switch it off mid-way
+/// (a release's macOS run failed on that race, 2026-11-15).
+#[cfg(test)]
+pub(crate) static PROFILE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Sets the run-scoped profiling switch (see [`FORCED_PROFILE`]).
 pub fn set_forced_profile(on: bool) {
     FORCED_PROFILE.store(on, std::sync::atomic::Ordering::Relaxed);
@@ -344,6 +349,7 @@ mod tests {
 
     #[test]
     fn a_run_profiles_itself_without_the_debug_mode() {
+        let _lock = super::PROFILE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         super::set_forced_profile(true);
         assert!(super::forced_profile() && super::profiling(), "a run's switch turns profiling on");
         super::set_forced_profile(false);

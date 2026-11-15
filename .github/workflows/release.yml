@@ -101,7 +101,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Clang, lld, mingw-w64, cmake and ninja (the Windows 7 build and its curl.exe)
-        run: sudo apt-get update && sudo apt-get install -y clang lld mingw-w64 libwinpthread-dev zip cmake ninja-build
+        run: sudo apt-get update && sudo apt-get install -y clang lld mingw-w64 zip cmake ninja-build
 
       - name: Rust (rust-toolchain.toml), its source and the crt objects of the Windows 7 target
         run: |

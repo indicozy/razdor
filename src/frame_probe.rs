@@ -1459,6 +1459,7 @@ mod tests {
 
     #[test]
     fn a_cell_keeps_its_frames_samples_only_while_it_runs() {
+        let _lock = crate::diag::PROFILE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let _ = cell_end();
         crate::diag::set_forced_profile(true);
         cell_begin();
@@ -1486,6 +1487,7 @@ mod lab_counts_tests {
 
     #[test]
     fn the_submissions_and_the_replay_are_counted_for_the_frame() {
+        let _lock = crate::diag::PROFILE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         crate::diag::set_forced_profile(true);
         cell_begin();
         submitted(Stage::Flush, 3, 480, 0.002);

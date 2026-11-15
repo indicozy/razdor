@@ -787,7 +787,8 @@ mod tests {
         write_frame(&dir, "KNIGHT.UGS.LZ4", &data, true);
         let found = find(&dir, "knight.ugs").unwrap();
         assert!(found.compressed);
-        assert_eq!(found.logical_name(), "KNIGHT.UGS");
+        // The stored name, or the asked one on a case-insensitive file system (macOS): either opens the file.
+        assert!(found.logical_name().eq_ignore_ascii_case("KNIGHT.UGS"), "{}", found.logical_name());
         assert_eq!(found.logical_len().unwrap(), data.len() as u64);
         assert_eq!(found.read().unwrap(), data);
         assert!(find(&dir, "knight.dtm").is_none());
