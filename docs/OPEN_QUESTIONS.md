@@ -8,6 +8,20 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **A Hub mod can be skipped at a start that converts its game folder** (2026-11-15, the carry-over check of
+  `tools/release/update_check.py`, 1.5.1 data with the 1.5.2 build). A start with a mod active whose game folder
+  is still being converted by the background thread (`dt::stored::compress_owned_in_background`, started from
+  `dt::install` at the load) can fail the mod's build: `hub::mods::base_fingerprint` lists the game folder and then
+  stats each file, the conversion replaces a plain picture in between, and the start logs `hub: the active mod
+  carry-test does not build (Graphics/Windows/Bonus46.lit: No such file or directory (os error 2)); the base game is
+  played`. The title then says «Mod: No mod» (screenshot in the harness's folder). The next start builds the mod.
+  Seen once, on the owned copy; a phone's first start after an update with a mod installed is the case that matters.
+  The reads (`stored::File::read`) already survive a vanished plain file; the fingerprint does not. The spec's rule 5
+  (`docs/specs/appdata-compression.md`) says the conversion runs before the install loads; the code runs it on a
+  thread. Repro: the kept scratch folder of the carry-over check (`run2` under the update-check scratch root,
+  `tools/release/README.md`; its B start is `new-B.log`).
+  Not fixed: the fix is the owner's call.
+
 - **The billows' frontier banks stay out** (2026-11-14, the owner's call). The old «Туман» look of 9f0eebd9 had
   frontier banks, which the owner removed on purpose. «Клубы» (`MistMode::Billows`) has its raised sheets back in
   the tilted views, but not the banks. Whether the banks ever come back is the owner's call.

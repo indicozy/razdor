@@ -73,6 +73,17 @@ without an Android or iOS file gets no offer on that system.
    (v1.4.1: its commit is `31a85c96`). Commit it with the release that uses it.
    A missing bench (no 4060 on the machine, the owner away and the 4060 busy) does not stop the release by
    itself: say in the report that it was not run.
+3b. Carry-over check before the tag (the owner's decision, 2026-11-15: the data an older release left must
+   carry over, e.g. the picture cache, the converted game folders, the mods' compressed pictures). With the
+   release binary of step 3 (`target/release/razdor`, built with `cargo build --release`), run it against the
+   last three published releases (the newest first):
+   `$(ai-resources prefix) python3 -I tools/release/update_check.py --from vPREV1 --from vPREV2 --from vPREV3 --new-bin target/release/razdor`
+   (`RAZDOR_DT_DIR` and `RAZDOR_COMMUNITY_DIR` from `.env`/`CLAUDE.local.md`; about 6 minutes per old release, so
+   run it in the background with a done-file and poll it in the foreground). Exit 0 goes on. Exit 1 = a
+   carry-over row failed (a lost save, a mod that does not load, a changed file, a crash, a conversion that breaks
+   the install): STOP the release, keep the scratch folder, and tell the owner with the rows and the logs the
+   tool names; the fix is the owner's to decide. Exit 2 = the check could not run: rerun, report if it persists.
+   Put the table (one row per `--from`: the conversion time, the screenshots' folder, the result) in the step-8 report.
 4. Changelog (layout in `changelog/README.md`): move `changelog/unreleased.md`'s content to
    `changelog/X.Y.Z.md` under the heading `## X.Y.Z — YYYY-MM-DD`, leave `unreleased.md` empty
    (its header only), and regenerate `CHANGELOG.md` with `scripts/changelog.sh`. Sections inside
@@ -101,10 +112,11 @@ without an Android or iOS file gets no offer on that system.
    once the pipeline is green and the release is published,
    `$(ai-resources prefix) python3 -I tools/release/update_check.py --from vPREV --to vX.Y.Z` (vPREV = the previous
    release; the core pinning prefix from `CLAUDE.local.md`; see `tools/release/README.md` for the scratch folder and
-   the Android SDK). Exit 0 goes on; exit 1 = the previous release does not
-   update to this one (or the APK cannot install over it): tell the owner at once with the summary; exit 2 =
-   network/tool error (or a refused `--to`, which is not the newest release): rerun, report if it persists.
-   Put its result in the step-8 report.
+   the Android SDK). The same run then checks the data carry-over from vPREV with the published Linux binary
+   (`--from` and `--to` together do both; the README has the rows). Exit 0 goes on; exit 1 = the previous release
+   does not update to this one (or the APK cannot install over it), or its data does not carry over: tell the
+   owner at once with the summary; exit 2 = network/tool error (or a refused `--to`, which is not the newest
+   release): rerun, report if it persists. Put its result in the step-8 report.
 7. Follow-up commit: take the SHA-256 from the **published release** (`gh release view vX.Y.Z`),
    never from a local build (the build embeds the git id). Under the version heading in
    `changelog/X.Y.Z.md` add:

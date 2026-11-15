@@ -232,6 +232,16 @@ Other diagnostics: `razdor.log` in the data folder (`razdor::diag`, `RAZDOR_LOG=
   feed first, so a stale feed shows as "up to date" in its log and then as a timeout failure.
   Known: the APK's versionCode is not set in `Cargo.toml`, so every release ships code 1. The check
   allows an equal code (Android installs over the same signature with it; not tried on a device).
+- The data carry-over check (the same script, release steps 3b and 6b; `--new-bin` runs it before the tag):
+  for each `--from` the old release's own Linux program makes data on a fresh set of folders (its game folder
+  unmarked, a Hub mod laid out as the release writes it, a session saved by a started map, the picture cache
+  filled), then the new program starts on those folders. It must keep every game and mod file's logical
+  SHA-256 (a `.lz4` counts as its decoded bytes), answer the session's «Continue the game?» with Enter, write
+  the picture cache in the new format, log no new error line, leave an unmarked game folder alone, and change
+  nothing on a second start. The game folder is then marked (the harness's doing, to test the first-start
+  conversion), converted, timed, screenshotted and checked again. Its own digests come from Python's LZ4
+  frame decoder (`lz4_frame`), checked against the Rust output. It runs on a private Xvfb with ALSA's null
+  device, the screens are kept under `<scratch>/shots/`, and the owner's install and home are only read.
 - `.github/workflows/release.yml`: a pushed tag `vX.Y.Z` checks the tag against
   `Cargo.toml` and the changelog, runs the tests (macOS and Linux), builds
   `razdor` + `Razdor.exe` with `scripts/dist.sh` (pinned toolchain and llvm-mingw, paths
