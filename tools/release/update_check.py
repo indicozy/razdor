@@ -105,8 +105,18 @@ def vnum(v):
     return "%d.%d.%d" % v
 
 
+def api_headers(url):
+    """The request's headers: `GH_TOKEN` (when set) goes to GitHub's API only, which limits
+    anonymous calls to 60 an hour; release files and other hosts never get it."""
+    headers = {"User-Agent": UA}
+    token = os.environ.get("GH_TOKEN", "").strip()
+    if token and url.startswith("https://api.github.com/"):
+        headers["Authorization"] = "Bearer " + token
+    return headers
+
+
 def http_get(url, timeout=60):
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    req = urllib.request.Request(url, headers=api_headers(url))
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.read()
