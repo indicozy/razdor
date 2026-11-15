@@ -226,7 +226,10 @@ Other diagnostics: `razdor.log` in the data folder (`razdor::diag`, `RAZDOR_LOG=
   their `SHA256SUMS`, verify with `apksigner`, are signed by the same certificate, and have the
   same package and a versionCode that does not go down (`aapt2`; the versionName is printed,
   not checked). It does not cover Windows, macOS or iOS, nor a player's real install (saves,
-  the Hub, the phone installer's dialog). Exit codes: 0 pass, 1 a check failed, 2 it could not run.
+  the Hub, the phone installer's dialog). Exit codes: 0 pass, 1 a check failed, 2 it could not run
+  (a refused `--to`, a missing tool, or the old program's log saying it could not check for updates).
+  Run it after the GitVerse mirror (release step 6a): from 1.5.2 on the old program reads the GitVerse
+  feed first, so a stale feed shows as "up to date" in its log and then as a timeout failure.
   Known: the APK's versionCode is not set in `Cargo.toml`, so every release ships code 1. The check
   allows an equal code (Android installs over the same signature with it; not tried on a device).
 - `.github/workflows/release.yml`: a pushed tag `vX.Y.Z` checks the tag against

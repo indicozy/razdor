@@ -28,6 +28,7 @@ import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -138,6 +139,41 @@ def asset_url(rel, name):
 def sums_of(rel):
     url = asset_url(rel, "SHA256SUMS")
     return parse_sums(http_get(url).decode("utf-8", "replace"))
+
+
+MNT_SCRATCH = Path("/mnt/ai_models/razdor-scratch")
+ANDROID_SDK_DEFAULT = MNT_SCRATCH / "android-apk" / "sdk"
+
+
+def pick_scratch(given, frm, to):
+    """The scratch folder. It runs downloaded programs, so it must be ours: not a symlink, owned by
+    this user, not writable by others. Created 0700."""
+    if given:
+        path = Path(given).absolute()
+    elif MNT_SCRATCH.is_dir():
+        path = MNT_SCRATCH / "update-check" / f"{vtag(frm)}-{vtag(to)}"
+    else:
+        return Path(tempfile.mkdtemp(prefix="razdor-update-check-"))
+    try:
+        os.makedirs(path, mode=0o700, exist_ok=True)
+    except OSError as e:
+        raise ToolError(f"cannot create scratch {path}: {e}") from e
+    st = os.lstat(path)
+    if stat.S_ISLNK(st.st_mode):
+        raise ToolError(f"scratch {path} is a symlink; use a real folder")
+    if not stat.S_ISDIR(st.st_mode):
+        raise ToolError(f"scratch {path} is not a folder")
+    if st.st_uid != os.getuid():
+        raise ToolError(f"scratch {path} is not owned by this user")
+    if st.st_mode & 0o022:
+        raise ToolError(f"scratch {path} is writable by group or others")
+    os.chmod(path, 0o700)
+    return path
+
+
+def last_update_line(log):
+    lines = [ln for ln in Path(log).read_text(encoding="utf-8", errors="replace").splitlines() if "update:" in ln]
+    return lines[-1] if lines else "(no update line in the log)"
 
 
 def reset(path):
@@ -294,9 +330,14 @@ def check_desktop(frm, to, rel_from, rel_to, scratch, dt_dir, rows, logs):
         new_sha = sha256(prog)
         logs.append(("run 1 (update)", log1))
         if new_sha == old_sha:
+            if "update: no check:" in Path(log1).read_text(encoding="utf-8", errors="replace"):
+                raise ToolError(f"{vtag(frm)} could not check for updates (see its log): "
+                                f"{last_update_line(log1)}")
             if rc is not None:
-                raise CheckFail(f"{vtag(frm)} exited (code {rc}) before it put {vtag(to)} in place")
-            raise CheckFail(f"{vtag(frm)} did not put {vtag(to)} in place within {UPDATE_WAIT} s")
+                raise CheckFail(f"{vtag(frm)} exited (code {rc}) before it put {vtag(to)} in place; "
+                                f"last update line: {last_update_line(log1)}")
+            raise CheckFail(f"{vtag(frm)} did not put {vtag(to)} in place within {UPDATE_WAIT} s; "
+                            f"last update line: {last_update_line(log1)}")
         if new_sha != exp_new:
             raise CheckFail(f"the program after the update is not {new_name} (sha256 {new_sha[:12]}, "
                             f"SHA256SUMS {str(exp_new)[:12]})")
@@ -370,8 +411,8 @@ def badging(aapt2, apk):
 
 
 def check_android(frm, to, rel_from, rel_to, scratch, rows, logs):
-    sdk = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
-    if not sdk or not Path(sdk).is_dir():
+    sdk = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or str(ANDROID_SDK_DEFAULT)
+    if not Path(sdk).is_dir():
         raise ToolError("the Android SDK is not found: set ANDROID_HOME")
     bt = build_tools(sdk)
     apksigner, aapt2 = bt / "apksigner", bt / "aapt2"
@@ -435,7 +476,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Check that the previous release updates to the new one.")
     ap.add_argument("--from", dest="frm", required=True, help="the previous release, e.g. v1.5.0")
     ap.add_argument("--to", required=True, help="the new release, e.g. v1.5.1 (must be the newest published)")
-    ap.add_argument("--scratch", help="scratch folder (default: $RAZDOR_SCRATCH or the system temp folder)")
+    ap.add_argument("--scratch", help="scratch folder (default: $RAZDOR_SCRATCH, else "
+                    f"{MNT_SCRATCH}/update-check/<from>-<to>, else a new private temp folder)")
     ap.add_argument("--keep", action="store_true", help="keep the scratch folder (also on success)")
     a = ap.parse_args(argv)
 
@@ -452,10 +494,7 @@ def main(argv=None):
             raise ToolError(f"--from {vtag(frm)} must be older than --to {vtag(to)}")
         if frm not in pub:
             raise ToolError(f"{vtag(frm)} is not a published release")
-        scratch = Path(a.scratch or os.environ.get("RAZDOR_SCRATCH")
-                       or os.path.join(tempfile.gettempdir(), "razdor-update-check",
-                                       f"{vtag(frm)}-{vtag(to)}")).resolve()
-        scratch.mkdir(parents=True, exist_ok=True)
+        scratch = pick_scratch(a.scratch or os.environ.get("RAZDOR_SCRATCH"), frm, to)
         dt_dir = find_dt_dir()
         if not dt_dir:
             rows.append(("note: RAZDOR_DT_DIR", INFO, "not set; the program runs without the install"))
