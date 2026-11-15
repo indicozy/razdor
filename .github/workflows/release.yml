@@ -100,8 +100,22 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Clang, lld, mingw-w64, cmake and ninja (the Windows 7 build and its curl.exe)
-        run: sudo apt-get update && sudo apt-get install -y clang lld mingw-w64 zip cmake ninja-build
+      - name: mingw-w64, cmake and ninja (the Windows 7 build and its curl.exe)
+        # Ubuntu 22.04's clang and lld (14) are too old: rustc's objects carry -exclude-symbols
+        # directives that only a newer lld reads. clang and ld.lld come from llvm-mingw (next step);
+        # the mingw-w64 msvcrt sysroot, gcc's libgcc and binutils' windres still come from apt.
+        run: sudo apt-get update && sudo apt-get install -y mingw-w64 zip cmake ninja-build
+
+      - name: llvm-mingw (clang and ld.lld, the same pin as the release job's Windows build)
+        run: |
+          curl -fsSL -o /tmp/llvm-mingw.tar.xz \
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_RELEASE/$LLVM_MINGW_NAME.tar.xz"
+          tar -xf /tmp/llvm-mingw.tar.xz -C /opt
+          echo "/opt/$LLVM_MINGW_NAME/bin" >> "$GITHUB_PATH"
+          echo "WIN7_CLANG=/opt/$LLVM_MINGW_NAME/bin/clang" >> "$GITHUB_ENV"
+          echo "WINDRES=/usr/bin/x86_64-w64-mingw32-windres" >> "$GITHUB_ENV"
+          "/opt/$LLVM_MINGW_NAME/bin/ld.lld" --version | head -1
+          "/opt/$LLVM_MINGW_NAME/bin/clang" --version | head -1
 
       - name: Rust (rust-toolchain.toml), its source and the crt objects of the Windows 7 target
         run: |
