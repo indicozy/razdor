@@ -18,9 +18,10 @@ use macroquad::prelude::Rect;
 use super::gamepad::Frame;
 use super::touchpad::{self, Phase, TouchPoint};
 
-/// Gestures run on phones and tablets (`touchpad::MOBILE`), unless the touchpad mode is on.
+/// Gestures run on phones and tablets (`touchpad::MOBILE`), unless the touchpad mode is on. The
+/// debug switch `RAZDOR_FAKE_TOUCH=gestures` runs them on the desktop too (`ui::fake_touch`).
 pub fn enabled() -> bool {
-    touchpad::MOBILE && !touchpad::enabled()
+    (touchpad::MOBILE || super::fake_touch::mode() == Some(super::fake_touch::Mode::Gestures)) && !touchpad::enabled()
 }
 
 /// A tap is down and up within this many seconds and stays within [`TAP_SLOP`] pixels. Shorter

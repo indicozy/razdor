@@ -837,6 +837,17 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
     if std::env::var("RAZDOR_SCENE_BENCHING").is_ok_and(|v| v == "1") {
         app.audio.settings.allow_unit_benching = true;
     }
+    // `RAZDOR_SCENE_FORMATION=clicks|drag|both`: the army arrangement setting («Расстановка армии»,
+    // `unit_drag::Controls`) as the player chose it; the scene ignores the saved settings, so this is
+    // how a run tests the other choices. Unset, the default (both).
+    if let Some(c) = std::env::var("RAZDOR_SCENE_FORMATION").ok().and_then(|v| match v.trim() {
+        "clicks" => Some(super::unit_drag::Controls::Clicks),
+        "drag" => Some(super::unit_drag::Controls::Drag),
+        "both" => Some(super::unit_drag::Controls::Both),
+        _ => None,
+    }) {
+        app.audio.settings.formation_controls = c;
+    }
     // `RAZDOR_TOUCHPAD=1`: the touchpad mode on (a phone's, `ui::touchpad`), also off the phone: its
     // cursor is drawn at the middle of the screen until a `RAZDOR_MOUSE` says otherwise.
     if std::env::var("RAZDOR_TOUCHPAD").is_ok_and(|v| v == "1") {

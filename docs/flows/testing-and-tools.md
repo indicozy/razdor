@@ -140,6 +140,12 @@ xvfb-run -a -s "-screen 0 1280x800x24" target/release/razdor
   `RAZDOR_SCENE_POTION`, `RAZDOR_SCENE_FILTER`, `RAZDOR_SCENE_LANGUAGE` (the language list open), `RAZDOR_SCENE_CONSOLE`,
   `RAZDOR_SCENE_ITEMS=<id>,…` (items in the hero's pack). The PNG is written opaque: the
   window shows the frame without its alpha, and a PNG that kept it would look washed out.
+- Phone touch on the desktop (a debug aid, `src/ui/fake_touch.rs`): `RAZDOR_FAKE_TOUCH=gestures|touchpad`
+  runs the chosen touch mode as on a phone, and the real mouse's left button is ONE finger (a press is
+  a touch that starts at the mouse, a held button a touch that moves with it, a release its lift). Its
+  own buttons are off, so only the mappers' clicks count, as on a phone. Unset, nothing changes. The
+  scene `RAZDOR_SCENE_FORMATION=clicks|drag|both` sets the army arrangement («Расстановка армии»);
+  scenes ignore the saved settings, so this is how a run tests the other choices.
 - A map scene starts its map as a new game: later campaign maps may end at once by their
   own defeat event (nothing carried over) — not a bug.
 - Add a scene for every new window (`try_stage` in `src/ui/snapshot.rs`).

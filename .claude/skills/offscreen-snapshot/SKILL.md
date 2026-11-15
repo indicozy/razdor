@@ -49,6 +49,21 @@ Listed at the top of `src/ui/snapshot.rs` (the source of truth). Common ones: `t
 `RAZDOR_SCENE_SPELLS`, `RAZDOR_SCENE_POTION`, `RAZDOR_SCENE_DEBUG`, `RAZDOR_SCENE_SELECT=<n>` (squad member n selected in a `building:` window: its card), `RAZDOR_SCENE_LANGUAGE=1` (the language list open). A later campaign map started
 as a new game may end at once by its own defeat event; that is not a bug.
 
+### Phone touch on the desktop (`RAZDOR_FAKE_TOUCH`)
+
+Reproducing a phone-only touch bug: `RAZDOR_FAKE_TOUCH=gestures` (or `touchpad`) runs the touch mode
+as on a phone (`src/ui/fake_touch.rs`). The real mouse's left button becomes ONE finger: press =
+touch start at the mouse, held = moves or rests with it, release = lift. The touches reach the mappers
+(`ui::gestures`, `ui::touchpad`) through the same path as a phone's, and the mouse's own buttons are
+off. With the switch the touch mode is on (the setting is ignored); unset, nothing changes. Pair it
+with `RAZDOR_DP=2.0` for the phone layout. Scenes ignore the saved settings: `RAZDOR_SCENE_FORMATION=clicks|drag|both`
+sets the army arrangement («Расстановка армии») for a run.
+
+Drive it with python3 Xlib XTest (xdotool is not installed): warp, press, wait ~0.08 s (a finger tap), release.
+A gesture tap in one frame, a slide and a drag are the same press/move/release. Screenshots with
+`import -window root`. In touchpad mode a slide moves the drawn cursor and a tap clicks where it is; the
+second tap of a double tap (within 0.3 s of the first click) that slides is a drag.
+
 No scene for what you need (a hover, a tab, a selection)? Add one to `snapshot.rs` rather than
 skipping the visual check.
 

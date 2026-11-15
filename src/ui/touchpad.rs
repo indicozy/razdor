@@ -35,9 +35,14 @@ pub fn allow_offscreen(on: bool) {
     OFFSCREEN.with(|s| s.set(on));
 }
 
-/// The touchpad mode is on: on mobile, when the player turned it on (off by default).
+/// The touchpad mode is on: on mobile, when the player turned it on (off by default). The debug
+/// switch `RAZDOR_FAKE_TOUCH` overrides the setting (`ui::fake_touch`): `touchpad` on, `gestures` off.
 pub fn enabled() -> bool {
-    (MOBILE || OFFSCREEN.with(|s| s.get())) && SETTING.with(|s| s.get()) == Some(true)
+    match super::fake_touch::mode() {
+        Some(super::fake_touch::Mode::Touchpad) => true,
+        Some(super::fake_touch::Mode::Gestures) => false,
+        None => (MOBILE || OFFSCREEN.with(|s| s.get())) && SETTING.with(|s| s.get()) == Some(true),
+    }
 }
 
 /// A touch's phase, as macroquad reports it: down, then still or moved, then up once.

@@ -27,6 +27,7 @@ pub mod lights;
 pub mod editor;
 pub mod game_bar;
 pub mod gamepad;
+pub mod fake_touch;
 pub mod gestures;
 pub mod hall_ink;
 pub mod hotkeys;

@@ -22,6 +22,7 @@ use std::collections::HashSet;
 use macroquad::input as mq;
 use macroquad::prelude::{screen_height, screen_width, KeyCode, MouseButton, Rect};
 
+use super::fake_touch;
 use super::gamepad::{self, Edge, Frame, Mapper};
 use super::gestures::{self, GestureMapper, SwipeArea, SwipeKind};
 use super::touchpad::{self, Phase, TouchMapper, TouchPoint};
@@ -116,8 +117,6 @@ pub fn begin_frame() {
     // The phone's finger obstacles and windows of the frame before become last frame's (`widgets::finger_hit`).
     super::widgets::finger_frame();
     let pad = gamepad::poll();
-    let mouse = mq::mouse_position();
-    let mouse_used = [MouseButton::Left, MouseButton::Right, MouseButton::Middle].into_iter().any(mq::is_mouse_button_pressed);
     let screen = (screen_width(), screen_height());
     let phone = super::display::dp_px().is_some();
     // Out of focus the pad lets everything go: it is read even then, by its own device.
@@ -125,6 +124,11 @@ pub fn begin_frame() {
     let touchpad_on = touchpad::enabled();
     let gestures_on = gestures::enabled();
     let touches = if touchpad_on || gestures_on { touch_points() } else { Vec::new() };
+    // Under the debug switch (`ui::fake_touch`) the mouse is a finger: its place is the finger's
+    // and its own buttons are off, as a phone's are.
+    let fake = fake_touch::mode().is_some();
+    let mouse = if fake { fake_touch::at() } else { mq::mouse_position() };
+    let mouse_used = !fake && [MouseButton::Left, MouseButton::Right, MouseButton::Middle].into_iter().any(mq::is_mouse_button_pressed);
     STATE.with(|s| {
         let s = &mut *s.borrow_mut();
         s.taps.advance();
@@ -133,7 +137,7 @@ pub fn begin_frame() {
             mq::simulate_mouse_with_touch(false);
             s.sim_off = true;
         }
-        if s.mouse.is_some_and(|m| m != mouse) || mouse_used {
+        if (!fake && s.mouse.is_some_and(|m| m != mouse)) || mouse_used {
             s.active = false;
         }
         s.mouse = Some(mouse);
@@ -191,8 +195,14 @@ pub fn begin_frame() {
     });
 }
 
-/// This frame's touches, as the touchpad reads them.
+/// This frame's touches, as the touchpad reads them (under the debug switch, the mouse's: `ui::fake_touch`).
 fn touch_points() -> Vec<TouchPoint> {
+    if fake_touch::mode().is_some() {
+        let held = mq::is_mouse_button_down(MouseButton::Left);
+        let pressed = mq::is_mouse_button_pressed(MouseButton::Left);
+        let released = mq::is_mouse_button_released(MouseButton::Left);
+        return fake_touch::frame(held, pressed, released, mq::mouse_position());
+    }
     mq::touches()
         .into_iter()
         .map(|t| TouchPoint {
@@ -371,6 +381,12 @@ fn with_frame<R>(f: impl FnOnce(&Frame) -> R) -> R {
     STATE.with(|s| f(&s.borrow().frame))
 }
 
+/// The mouse's own button (macroquad's), off under the debug switch: the mouse is a finger there,
+/// and a phone's simulated mouse is off too, so only the mappers' clicks count.
+fn raw_button(b: MouseButton, pick: fn(MouseButton) -> bool) -> bool {
+    fake_touch::mode().is_none() && pick(b)
+}
+
 fn button(b: MouseButton) -> Edge {
     with_frame(|f| match b {
         MouseButton::Left => f.left,
@@ -408,11 +424,11 @@ pub fn mouse_wheel() -> (f32, f32) {
 }
 
 pub fn is_mouse_button_pressed(b: MouseButton) -> bool {
-    !held() && (mq::is_mouse_button_pressed(b) || button(b).pressed)
+    !held() && (raw_button(b, mq::is_mouse_button_pressed) || button(b).pressed)
 }
 
 pub fn is_mouse_button_down(b: MouseButton) -> bool {
-    !held() && (mq::is_mouse_button_down(b) || button(b).down || (b == MouseButton::Right && SNAPSHOT_RIGHT.with(|r| r.get())))
+    !held() && (raw_button(b, mq::is_mouse_button_down) || button(b).down || (b == MouseButton::Right && SNAPSHOT_RIGHT.with(|r| r.get())))
 }
 
 local! {
@@ -426,7 +442,7 @@ pub fn hold_right_for_snapshot(on: bool) {
 }
 
 pub fn is_mouse_button_released(b: MouseButton) -> bool {
-    !held() && (mq::is_mouse_button_released(b) || button(b).released)
+    !held() && (raw_button(b, mq::is_mouse_button_released) || button(b).released)
 }
 
 local! {
