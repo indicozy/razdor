@@ -947,8 +947,18 @@ against the commit before the feature). The mill sails do not turn: the depth cu
   zoom builds nothing. One loop per pass writes each quad with the same f32 operations, in the same order, as
   `draw_object` → `draw_picture_form` → `sharp::draw` (`draw_leaning` for a tree), and submits it with `sharp::draw_quad`:
   the same material, texel size, batch and draw order. The old path keeps the hills, the objects without a picture, the
-  sun's form shading (its corner colours), the tilted views and every other drawable. Records and the object list are
-  kept while the map holds; the still-frame object list (`OBJ_MEMO`) stays as it was.
+  sun's form shading (its corner colours), the tilted views (the 2.5D paragraph below) and every other drawable. Records and
+  the object list are kept while the map holds; the still-frame object list (`OBJ_MEMO`) stays as it was.
+- **2.5D sprite fast path** (option f, stage 2, 2026-11-15; `world_view/depth_fast.rs`; `RAZDOR_DEPTH_FAST`: on by default;
+  `0` the old path, `check` runs both and compares each object's textured piece and CPU model matrix bit for bit, with a
+  `depth fast check: N sprites, M differ, F fogged, H hidden by fog, fog table uploads U` line each frame). It reads the same
+  records (`world_view/object_records.rs`, shared with the flat view; they hold the fog cell and each copy's plain and night
+  shapes with their texture coordinates). Per object, the steps of `old_object` → `standing_core` → `draw_object`, in their
+  order: the visibility (`detail_visibility`), the fog cell from the table each frame (`map_fog`; a hidden cell draws nothing),
+  the billboard (`standing_model`, each frame: it depends on the camera), the off-window cull (`picture_quad`), then the quad
+  with the CPU model matrix (`push_cpu_model`, which macroquad applies to the vertices). Not on this path: the trailer and
+  first-person views (their near fades), the eyes view (`eye_at`), the sun's form shading, objects without a picture and the
+  hills. The quad and its submission (`sharp::draw_quad`) are the flat path's.
 
 - **Atmosphere cost** (2026-11-12, `docs/perf/2026-11-12-atmosphere-performance.md`). Each location's fog test
   (`location_explored`: a cell of its footprint explored near the feather) is kept per location until the fog's
