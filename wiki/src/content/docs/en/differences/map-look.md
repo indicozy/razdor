@@ -72,7 +72,7 @@ The **"Mist instead of black"** setting replaces the black of unexplored land an
 
 The mist hides exactly what the black hid: it opens where the black opened, and explored land stays fully visible.
 
-The mist opens gradually: when the hero walks, and when an event shows a place, the land comes out of the mist little by little, from the centre.
+The mist opens at once, as in the original: when the hero walks, and when an event shows a place, the land is clear in the same moment.
 
 In every view of the map the mist lies on the ground itself, with no layers; there is no wall at the edge of the explored land. Past the edges of the map the mist goes on too, instead of black.
 

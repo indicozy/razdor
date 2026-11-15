@@ -83,11 +83,6 @@ pub fn mode() -> Mode {
     })
 }
 
-/// Whether the map is still («Выкл»): the fog's reveal is instant and the battery saver's idle rate applies.
-pub fn off() -> bool {
-    mode() == Mode::Off
-}
-
 /// The level of the animations at a camera scale (screen px a cell) under `mode`: 1 while they all run, 0 while
 /// none does, `zoom_lod` between under `Near`.
 pub fn level_at(mode: Mode, scale: f32) -> f32 {

@@ -57,7 +57,6 @@ pub enum Exit {
 /// far (from the chronicle tab). None when the record holds no chapter. `died`: the hero fell.
 pub fn open(game: &Game, after: After, died: bool) -> Option<Screen> {
     let summary = game.chronicle.summary(from_chapter(game, after), game.clock.total_minutes() as u64, died)?;
-    minimap::snap_fog();
     let map = &game.world.map;
     let cells = explored_box(map.w, map.h, |t| game.fog.explored(t), 3);
     Some(Screen::Summary(Box::new(View { after, summary, cells })))

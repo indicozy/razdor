@@ -249,33 +249,15 @@ pub fn reveal_overlay(kept: u8, now: u8) -> u8 {
 /// edge fog (`terrain`) takes it too, so the fog past the edges is the same black.
 pub const FOG_RGB: [u8; 3] = [0, 0, 0];
 
-/// The time constant (s) of a cell's fade toward its darkness: an exponential ease, so a cell
-/// is 95% there after three of them (0.6 s). It starts at full speed and never overshoots.
-pub const FADE_TAU: f64 = 0.2;
-
-/// The delay (s) per cell between the hero and a cell an opening uncovers before its fade
-/// starts: the strip a walk opens grows outward from him like a small circle, not all at once.
-pub const WALK_DELAY: f64 = 0.05;
-
-/// `cur` eased toward `target` over `dt` seconds: an exponential approach (monotonic, never
-/// past the target), snapped onto the target once it is within half a level.
-pub fn ease_toward(cur: f32, target: f32, dt: f64) -> f32 {
-    let k = 1.0 - (-dt.max(0.0) / FADE_TAU).exp() as f32;
-    let c = cur + (target - cur) * k;
-    if (target - c).abs() < 0.5 { target } else { c }
-}
-
-/// The fog's darkness as it is drawn. Each cell's shown darkness (0..255, not rounded) eases
-/// toward its target, the darkness of the fog with its held cells dark ([`darkness_into`]). A
-/// cell that opens waits [`WALK_DELAY`] per cell from the hero before its ease starts; a cell
-/// that closes goes at once. Kept per thread: the fog texture, the 2.5D sprites' shade and the
-/// minimap read the same values.
+/// The fog's darkness as it is drawn: each cell's darkness, the fog with its held cells dark ([`darkness_into`]).
+/// A change of the fog or of the held cells shows at once, as the original's fog does (no fade, no walk delay).
+/// Kept per thread: the fog texture, the 2.5D sprites' shade and the minimap read the same values.
 struct FogShown {
     w: i32,
     h: i32,
     /// The fog and held cells the target was made from.
     key: u64,
-    /// The target darkness, and the next one being measured.
+    /// The darkness of each cell (0..255) for the current key, and the next one being measured.
     target: Vec<u8>,
     next: Vec<u8>,
     /// Scratch: the summed-area table.
@@ -287,10 +269,9 @@ struct FogShown {
     eff: Vec<u64>,
     eff_next: Vec<u64>,
     eff_ok: bool,
-    /// The shown darkness, and the clock (s) from which each cell's ease may run.
+    /// The shown darkness (0..255, the target as a float), read by the 2.5D sprites and the mist.
     cur: Vec<f32>,
-    wait: Vec<f64>,
-    /// The texture's RGBA (alpha = the rounded shown darkness) and the texture itself.
+    /// The texture's RGBA (alpha = the darkness) and the texture itself.
     rgba: Vec<u8>,
     tex: Option<Texture2D>,
     /// The texels whose alpha is above 0 (x0, y0, x1, y1, exclusive), as the texture was last
@@ -303,17 +284,10 @@ struct FogShown {
     /// only when the map's size changes).
     over_rgba: Vec<u8>,
     over_tex: Option<Texture2D>,
-    /// Cells that jump to their target now: the reveal cells of a showing, whose circle the
-    /// mask draws (so they do not fade twice).
-    settle: Vec<usize>,
-    /// The clock of the last update; whether a cell still moves; a reset asked for; a texel
-    /// changed since the texture was last uploaded.
-    last: Option<f64>,
-    moving: bool,
-    snap: bool,
+    /// A texel changed since the texture was last uploaded.
     dirty: bool,
-    /// Counts every change of a texel's alpha (and every resize): the map sprites' fog table (`sprite_fog`) is
-    /// made again only when it moves.
+    /// Counts every change of a cell's shown darkness (and every resize): the map sprites' fog table (`sprite_fog`)
+    /// is made again only when it moves.
     stamp: u64,
 }
 
@@ -330,17 +304,12 @@ impl FogShown {
         eff_next: Vec::new(),
         eff_ok: false,
         cur: Vec::new(),
-        wait: Vec::new(),
         rgba: Vec::new(),
         tex: None,
         bbox: None,
         lit: None,
         over_rgba: Vec::new(),
         over_tex: None,
-        settle: Vec::new(),
-        last: None,
-        moving: false,
-        snap: false,
         dirty: false,
         stamp: 0,
     };
@@ -358,17 +327,13 @@ impl FogShown {
         }
     }
 
-    /// Brings the shown darkness up to `fog` (its held cells dark, the hero on `origin`) at
-    /// `now`. `settle` cells jump to their target first. Returns whether a texel changed. Pure
-    /// (no texture), so the easing is tested on its own.
-    fn track(&mut self, fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>, now: f64) -> bool {
+    /// Brings the shown darkness up to `fog` (its held cells dark). A change takes effect in this call: the cells
+    /// whose darkness changed are set to their new value. Returns whether a texel changed. Pure (no texture).
+    fn track(&mut self, fog: &Fog, held: &[(i32, i32)]) -> bool {
         let (w, h) = (fog.w.max(0), fog.h.max(0));
         let n = w as usize * h as usize;
         let resized = (self.w, self.h) != (w, h) || self.cur.len() != n;
         let key = fog.change_key() ^ held_key(held);
-        let prev = self.last.replace(now);
-        self.settle.clear();
-        self.settle.extend(settle);
         if resized {
             self.stamp += 1;
             self.w = w;
@@ -379,13 +344,8 @@ impl FogShown {
             }
             self.cur.clear();
             self.cur.resize(n, 0.0);
-            self.wait.clear();
-            self.wait.resize(n, now);
         }
-        // «Анимация карты» Выкл (`map_anim`): the reveal is instant, as a snap.
-        let fresh = resized || self.snap || (key != self.key && super::map_anim::off());
-        let recompute = fresh || key != self.key;
-        if recompute {
+        if resized || key != self.key {
             let (wu, hu) = (w as usize, h as usize);
             // The held cells as bits, and the explored cells that count: the fog's bits minus the held ones.
             self.held_bits.clear();
@@ -399,10 +359,10 @@ impl FogShown {
             self.eff_next.extend(fog.bits.iter().zip(&self.held_bits).map(|(b, hb)| b & !hb));
             // A cell's darkness reads the explored cells within the feather and its neighbours, so a change of the
             // explored bits moves the darkness only near those cells: a small change measures its box again, and the
-            // rest keeps its target (the same value the whole measure gives it). A big box, a new fog or a fog that is
+            // rest keeps its value (the same value the whole measure gives it). A big box, a new fog or a fog that is
             // off takes the whole measure.
             let mut measured = false;
-            if !fresh && fog.enabled && self.eff_ok && self.eff.len() == self.eff_next.len() {
+            if !resized && fog.enabled && self.eff_ok && self.eff.len() == self.eff_next.len() {
                 match changed_box(&self.eff, &self.eff_next, wu, hu) {
                     None => measured = true,
                     Some([x0, y0, x1, y1]) if (x1 - x0) * (y1 - y0) * 4 <= n => {
@@ -410,16 +370,9 @@ impl FogShown {
                             for x in x0..x1 {
                                 let i = y * wu + x;
                                 let v = darkness_from_bits(&self.eff_next, wu, hu, x, y);
-                                let old = self.target[i];
-                                if v != old {
-                                    // An opening waits by the cell's distance from the hero; a closing goes at once.
-                                    self.wait[i] = if v < old {
-                                        let (dx, dy) = (x as f64 - origin.0 as f64, y as f64 - origin.1 as f64);
-                                        now + WALK_DELAY * (dx * dx + dy * dy).sqrt()
-                                    } else {
-                                        now
-                                    };
+                                if v != self.target[i] {
                                     self.target[i] = v;
+                                    self.put(i, v as f32);
                                 }
                             }
                         }
@@ -431,60 +384,15 @@ impl FogShown {
             if !measured {
                 let held_bits = &self.held_bits;
                 darkness_into(&mut self.next, &mut self.sum, w, h, |t| fog.explored(t) && index_of(wu, hu, t).is_none_or(|i| held_bits[i / 64] & (1u64 << (i % 64)) == 0));
-                if fresh {
-                    std::mem::swap(&mut self.target, &mut self.next);
-                    for i in 0..n {
-                        self.wait[i] = now;
-                        let t = self.target[i] as f32;
-                        self.put(i, t);
-                    }
-                    self.snap = false;
-                } else {
-                    for i in 0..n {
-                        let (old, new) = (self.target[i], self.next[i]);
-                        if new != old {
-                            // An opening waits by the cell's distance from the hero; a closing goes at once.
-                            self.wait[i] = if new < old {
-                                let (x, y) = ((i % wu) as f64 - origin.0 as f64, (i / wu) as f64 - origin.1 as f64);
-                                now + WALK_DELAY * (x * x + y * y).sqrt()
-                            } else {
-                                now
-                            };
-                        }
-                    }
-                    std::mem::swap(&mut self.target, &mut self.next);
+                std::mem::swap(&mut self.target, &mut self.next);
+                for i in 0..n {
+                    let t = self.target[i] as f32;
+                    self.put(i, t);
                 }
             }
             std::mem::swap(&mut self.eff, &mut self.eff_next);
             self.eff_ok = fog.enabled;
             self.key = key;
-        }
-        for k in 0..self.settle.len() {
-            let i = self.settle[k];
-            if i < n {
-                self.wait[i] = now;
-                let t = self.target[i] as f32;
-                self.put(i, t);
-            }
-        }
-        if recompute || self.moving {
-            let mut moving = false;
-            for i in 0..n {
-                let t = self.target[i] as f32;
-                let c = self.cur[i];
-                if c == t {
-                    continue;
-                }
-                if self.wait[i] > now {
-                    moving = true;
-                    continue;
-                }
-                let start = prev.map_or(self.wait[i], |p| p.max(self.wait[i]));
-                let v = ease_toward(c, t, now - start);
-                self.put(i, v);
-                moving |= v != t;
-            }
-            self.moving = moving;
         }
         std::mem::take(&mut self.dirty)
     }
@@ -494,17 +402,11 @@ local! {
     static SHOWN: RefCell<FogShown> = const { RefCell::new(FogShown::EMPTY) };
 }
 
-/// Brings the shown darkness up to `fog` at `now` ([`FogShown::track`]) without a texture; true
-/// when a texel changed. [`fog_texture`] does the same at the clock's now; tests drive it directly.
+/// Brings the shown darkness up to `fog` without a texture; true when a texel changed. [`fog_texture`] does the same;
+/// tests drive it directly.
 #[cfg(test)]
-pub fn track(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>, now: f64) -> bool {
-    SHOWN.with(|s| s.borrow_mut().track(fog, held, origin, settle, now))
-}
-
-/// The next fog update resets the shown darkness to the target at once (a game was loaded or
-/// started: no fade of the whole map in).
-pub fn snap_fog() {
-    SHOWN.with(|s| s.borrow_mut().snap = true);
+pub fn track(fog: &Fog, held: &[(i32, i32)]) -> bool {
+    SHOWN.with(|s| s.borrow_mut().track(fog, held))
 }
 
 /// The shown darkness of cell `t` of `fog` (0 lit … 1 black) as the last update left it; 0
@@ -538,37 +440,35 @@ pub fn with_shown_darkness<R>(fog: &Fog, f: impl FnOnce(&[f32]) -> R) -> R {
     })
 }
 
-/// The fog texture at the shown darkness, brought up to date at the clock's now ([`track`]) and
-/// uploaded only when a texel changed. `settle`: the cells that jump to their target (see
-/// [`FogShown::settle`]). The map view and the minimap draw the same one.
-pub fn fog_texture(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>) -> Texture2D {
-    fog_texture_box(fog, held, origin, settle).0
+/// The fog texture at the shown darkness, brought up to date ([`FogShown::track`]) and uploaded only when a texel
+/// changed. The map view and the minimap draw the same one.
+pub fn fog_texture(fog: &Fog, held: &[(i32, i32)]) -> Texture2D {
+    fog_texture_box(fog, held).0
 }
 
 /// [`fog_texture`] and the box of its texels that are not fully transparent (`FogShown::bbox`). The
 /// box is made when the texture is uploaded, not per frame.
-fn fog_texture_box(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>) -> (Texture2D, Option<[i32; 4]>) {
-    let (tex, bbox, _) = fog_texture_boxes(fog, held, origin, settle);
+fn fog_texture_box(fog: &Fog, held: &[(i32, i32)]) -> (Texture2D, Option<[i32; 4]>) {
+    let (tex, bbox, _) = fog_texture_boxes(fog, held);
     (tex, bbox)
 }
 
 /// The fog's texture (`fog_texture`) and the box of its texels that are not fully dark (`FogShown::lit`, the explored
 /// ground): None
 /// when the fog is off. The box is None when every texel is fully dark (nothing explored).
-pub fn fog_layer_lit(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>) -> Option<(Texture2D, Option<[i32; 4]>)> {
+pub fn fog_layer_lit(fog: &Fog, held: &[(i32, i32)]) -> Option<(Texture2D, Option<[i32; 4]>)> {
     (fog.enabled && fog.w > 0 && fog.h > 0).then(|| {
-        let (tex, _, lit) = fog_texture_boxes(fog, held, origin, settle);
+        let (tex, _, lit) = fog_texture_boxes(fog, held);
         (tex, lit)
     })
 }
 
 /// [`fog_texture`] and the boxes of its texels that are not fully transparent (`FogShown::bbox`) and not fully
 /// dark (`FogShown::lit`). The boxes are made when the texture is uploaded, not per frame.
-fn fog_texture_boxes(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>) -> (Texture2D, Option<[i32; 4]>, Option<[i32; 4]>) {
-    let now = crate::ui::clock::now();
+fn fog_texture_boxes(fog: &Fog, held: &[(i32, i32)]) -> (Texture2D, Option<[i32; 4]>, Option<[i32; 4]>) {
     SHOWN.with(|s| {
         let mut s = s.borrow_mut();
-        let changed = s.track(fog, held, origin, settle, now);
+        let changed = s.track(fog, held);
         let (w, h) = (s.w, s.h);
         if s.tex.as_ref().is_none_or(|t| t.width() != w as f32 || t.height() != h as f32) {
             let tex = Texture2D::from_rgba8(w as u16, h as u16, &s.rgba);
@@ -618,8 +518,8 @@ fn texel_box(rgba: &[u8], w: i32, h: i32, keep: impl Fn(u8) -> bool) -> Option<[
 
 /// The fog's texture (`fog_texture`) and the box of its texels that are not fully transparent (`fog_texture_box`): None
 /// when the fog is off. The box is None when no texel is dark.
-pub fn fog_layer_box(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>) -> Option<(Texture2D, Option<[i32; 4]>)> {
-    (fog.enabled && fog.w > 0 && fog.h > 0).then(|| fog_texture_box(fog, held, origin, settle))
+pub fn fog_layer_box(fog: &Fog, held: &[(i32, i32)]) -> Option<(Texture2D, Option<[i32; 4]>)> {
+    (fog.enabled && fog.w > 0 && fog.h > 0).then(|| fog_texture_box(fog, held))
 }
 
 /// The darkness of a cell that the fog shows `fog` (0..1) and a reveal keeps `reveal` (0..1) over it: the two
@@ -644,17 +544,16 @@ pub fn composed_rgba(shown: &[f32], reveal: &[f32], out: &mut Vec<u8>) {
 /// The mist draws this one while a place is being shown: the reveal's circle is the darkness the mist keeps
 /// there, so it fades from the mist to the land and never shows the black of the reveal's own mask (backlog
 /// 1628). Made at each call (only while a place opens). None when the fog is off.
-pub fn fog_layer_over(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>, reveal: &[f32]) -> Option<(Texture2D, Option<[i32; 4]>)> {
+pub fn fog_layer_over(fog: &Fog, held: &[(i32, i32)], reveal: &[f32]) -> Option<(Texture2D, Option<[i32; 4]>)> {
     if !(fog.enabled && fog.w > 0 && fog.h > 0) {
         return None;
     }
-    let now = crate::ui::clock::now();
     SHOWN.with(|s| {
         let mut s = s.borrow_mut();
         let s = &mut *s;
         // `track` reports (and clears) a changed texel; the plain texture (`fog_texture_box`) still has to upload it
         // when the mist goes back to it, so the flag is kept for that upload.
-        let changed = s.track(fog, held, origin, settle, now);
+        let changed = s.track(fog, held);
         s.dirty |= changed;
         let (w, h) = (s.w, s.h);
         composed_rgba(&s.cur, reveal, &mut s.over_rgba);
@@ -679,11 +578,11 @@ pub fn fog_layer_over(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle
 /// so texel centres fall on cell centres. The box is grown by one texel a side, so the bilinear sampling at its edge is the
 /// whole texture's; the texels at the same screen positions keep the same texture coordinates.
 /// Nothing is drawn when no texel is dark.
-pub fn draw_fog_boxed(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>, tl: Vec2, br: Vec2) {
+pub fn draw_fog_boxed(fog: &Fog, held: &[(i32, i32)], tl: Vec2, br: Vec2) {
     if !fog.enabled || fog.w <= 0 || fog.h <= 0 {
         return;
     }
-    let (tex, bbox) = fog_texture_box(fog, held, origin, settle);
+    let (tex, bbox) = fog_texture_box(fog, held);
     draw_fog_box(&tex, bbox, fog.w, fog.h, tl, br - tl);
 }
 
@@ -729,11 +628,11 @@ fn outside_ground(o: Rect, r: Rect) -> [Rect; 4] {
 /// [`draw_fog_boxed`] past a map's edges («Продолжать карту за краем»): `dest` shows the fog's texels
 /// `src` (in cells: texel `i` is cell `i`, its centre at `i + ½`). The texels past the fog's own
 /// hold the border's status ([`draw_extended`]), so the war fog runs on at the edge's own colour.
-pub fn draw_fog_extended(fog: &Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>, dest: Rect, src: Rect) {
+pub fn draw_fog_extended(fog: &Fog, held: &[(i32, i32)], dest: Rect, src: Rect) {
     if !fog.enabled || fog.w <= 0 || fog.h <= 0 {
         return;
     }
-    draw_extended(&fog_texture(fog, held, origin, settle), dest, src);
+    draw_extended(&fog_texture(fog, held), dest, src);
 }
 
 /// Draws a map's one-texel-per-cell texture `tex` (the fog, or a showing's mask) into `dest`,
@@ -1319,7 +1218,7 @@ pub fn picture(game: &Game, art: Option<&super::dt_art::DtArt>, surface_color: f
     let src = Rect::new(x0 as f32, y0 as f32, (x1 - x0).max(1) as f32, (y1 - y0).max(1) as f32);
     let tex = ground(game, art, surface_color);
     draw_texture_ex(&tex, dest.x, dest.y, WHITE, DrawTextureParams { dest_size: Some(vec2(dest.w, dest.h)), source: Some(src), ..Default::default() });
-    let dark = fog_texture(&game.fog, &game.unshown_cells(), game.tile(), std::iter::empty());
+    let dark = fog_texture(&game.fog, &game.unshown_cells());
     draw_texture_ex(&dark, dest.x, dest.y, WHITE, DrawTextureParams { dest_size: Some(vec2(dest.w, dest.h)), source: Some(src), ..Default::default() });
 }
 
@@ -1327,7 +1226,7 @@ pub fn picture(game: &Game, art: Option<&super::dt_art::DtArt>, surface_color: f
 /// first open finds them made.
 pub fn prebuild(game: &Game, art: Option<&super::dt_art::DtArt>, surface_color: fn(u8) -> Color) {
     let _ = ground(game, art, surface_color);
-    let _ = fog_texture(&game.fog, &game.unshown_cells(), game.tile(), std::iter::empty());
+    let _ = fog_texture(&game.fog, &game.unshown_cells());
 }
 
 /// What a tilted view shows on the minimap: its camera, the frame the camera maps (the view above the
@@ -1564,7 +1463,7 @@ pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_
     draw_texture_ex(&tex, r.x, r.y, WHITE, DrawTextureParams { dest_size: Some(vec2(r.w, r.h)), ..Default::default() });
     // The dark over the ground: the same fog texture the main view draws, over the minimap's rect,
     // only its dark box (the rest is alpha 0).
-    let (dark, bbox) = fog_texture_box(fog, &game.unshown_cells(), game.tile(), std::iter::empty());
+    let (dark, bbox) = fog_texture_box(fog, &game.unshown_cells());
     draw_fog_box(&dark, bbox, fog.w, fog.h, vec2(r.x, r.y), vec2(r.w, r.h));
 
     // Cells → minimap pixels (world units: rows are `row_height` apart).
@@ -1795,9 +1694,7 @@ mod incremental_fog_tests {
         let mut state = 0x9e37_79b9_7f4a_7c15u64;
         let mut hero = (30, 20);
         let mut held: Vec<(i32, i32)> = Vec::new();
-        let mut now = 0.0;
         for step in 0..600 {
-            now += 0.1;
             match lcg(&mut state) % 20 {
                 0 => held = (0..lcg(&mut state) % 6).map(|_| ((lcg(&mut state) as i32) % w, (lcg(&mut state) as i32) % h)).collect(),
                 1 => held.clear(),
@@ -1825,7 +1722,7 @@ mod incremental_fog_tests {
                     }
                 }
             }
-            s.track(&fog, &held, hero, std::iter::empty::<usize>(), now);
+            s.track(&fog, &held);
             assert!(s.target == darkness_held(&fog, &held), "step {step}: the shown targets differ from the full darkness");
         }
     }
@@ -2214,7 +2111,7 @@ mod placement_tests {
 }
 
 #[cfg(test)]
-mod fade_tests {
+mod instant_fog_tests {
     use super::*;
 
     /// A 40 × 30 fog, all dark, with the square of radius `r` round `c` explored.
@@ -2233,112 +2130,54 @@ mod fade_tests {
     }
 
     #[test]
-    fn the_ease_is_monotonic_never_overshoots_and_arrives() {
-        let (mut c, mut last) = (255.0f32, 255.0f32);
-        for _ in 0..200 {
-            c = ease_toward(c, 0.0, 1.0 / 60.0);
-            assert!(c <= last && c >= 0.0, "monotonic, not past the target: {c} after {last}");
-            last = c;
-        }
-        assert_eq!(ease_toward(255.0, 0.0, 10.0), 0.0, "a long time: arrived");
-        assert_eq!(ease_toward(100.0, 100.0, 0.0), 100.0, "at the target: no move");
-        assert_eq!(ease_toward(3.0, 0.0, 0.0), 3.0, "no time: no move");
-        assert_eq!(ease_toward(0.4, 0.0, 0.0), 0.0, "within half a level: snapped");
-        // One time constant carries 1 - 1/e of the way.
-        let one_tau = ease_toward(255.0, 0.0, FADE_TAU);
-        assert!((one_tau - 255.0 * (-1.0f32).exp()).abs() < 0.5, "one time constant: {one_tau}");
-    }
-
-    #[test]
-    fn a_steady_fog_is_not_animated() {
-        let fog = fog_revealed((20, 15), 4);
+    fn a_walk_opens_its_cells_at_once() {
+        // The cells a step explores are lit in the same update: the hero's cell and the cells four away alike, as the
+        // original's fog shows them (no fade, no delay per cell).
         let mut s = FogShown::EMPTY;
-        s.track(&fog, &[], (20, 15), std::iter::empty(), 0.0);
-        assert!(!s.moving, "fresh: at the target");
-        assert!(!s.track(&fog, &[], (20, 15), std::iter::empty(), 1.0), "no texel changed");
-        assert!(!s.moving, "nothing animates while the fog is still");
-    }
-
-    #[test]
-    fn an_opened_cell_eases_to_its_target_without_overshoot() {
-        let mut s = FogShown::EMPTY;
-        s.track(&Fog::new(40, 30), &[], (20, 15), std::iter::empty(), 0.0);
+        s.track(&Fog::new(40, 30), &[]);
         assert_eq!(at(&s, (20, 15)), 255.0, "all dark to start");
         let fog = fog_revealed((20, 15), 4);
-        s.track(&fog, &[], (20, 15), std::iter::empty(), 0.0);
-        let target = s.target[index_of(40, 30, (20, 15)).unwrap()] as f32;
-        assert_eq!(target, 0.0, "the centre is lit at the end");
-        let mut last = 255.0;
-        for k in 1..=60 {
-            let t = k as f64 * 0.05;
-            s.track(&fog, &[], (20, 15), std::iter::empty(), t);
-            let c = at(&s, (20, 15));
-            assert!(c <= last && c >= target, "monotonic and not past the target at {t}: {c}");
-            last = c;
+        assert!(s.track(&fog, &[]), "the step is a change");
+        assert_eq!(at(&s, (20, 15)), 0.0, "the hero's cell is lit at once");
+        let far = index_of(40, 30, (24, 15)).unwrap();
+        assert_eq!(s.cur[far], darkness_held(&fog, &[])[far] as f32, "a cell four away takes its darkness at once too");
+        assert!(!s.track(&fog, &[]), "a steady fog changes nothing");
+    }
+
+    #[test]
+    fn the_shown_darkness_is_the_fog_texture_darkness() {
+        // Every cell takes the value the fog texture has for it (the rim of the feather included), with and without
+        // held cells: nothing eases toward it.
+        let fog = fog_revealed((20, 15), 4);
+        let block = square((20, 15), 2);
+        let mut s = FogShown::EMPTY;
+        s.track(&Fog::new(40, 30), &[]);
+        for held in [Vec::new(), block] {
+            s.track(&fog, &held);
+            let want = darkness_held(&fog, &held);
+            assert!(s.target == want, "the targets are the full darkness of the fog");
+            for (i, &w) in want.iter().enumerate() {
+                assert_eq!(s.cur[i], w as f32, "cell {i} shows its darkness at once");
+            }
         }
-        assert_eq!(at(&s, (20, 15)), target, "arrived after 3 s");
-        assert!(!s.moving, "and nothing moves any more");
     }
 
     #[test]
-    fn a_far_cell_opens_later_than_the_hero_s_own_cell() {
-        let mut s = FogShown::EMPTY;
-        s.track(&Fog::new(40, 30), &[], (20, 15), std::iter::empty(), 0.0);
-        let fog = fog_revealed((20, 15), 4);
-        s.track(&fog, &[], (20, 15), std::iter::empty(), 0.0);
-        // Four cells from the hero: its ease starts 4 × WALK_DELAY later.
-        let (near, far) = ((20, 15), (24, 15));
-        let now = 2.0 * WALK_DELAY;
-        s.track(&fog, &[], (20, 15), std::iter::empty(), now);
-        assert!(at(&s, near) < 255.0, "the hero's cell is already opening");
-        assert_eq!(at(&s, far), 255.0, "the cell four away waits its turn");
-        let later = now + 4.0 * WALK_DELAY + 0.01;
-        s.track(&fog, &[], (20, 15), std::iter::empty(), later);
-        assert!(at(&s, far) < 255.0, "and opens after its delay");
-    }
-
-    #[test]
-    fn a_reset_snaps_the_shown_darkness_to_the_target() {
-        let mut s = FogShown::EMPTY;
-        s.track(&Fog::new(40, 30), &[], (0, 0), std::iter::empty(), 0.0);
-        let fog = fog_revealed((20, 15), 4);
-        s.snap = true;
-        assert!(s.track(&fog, &[], (20, 15), std::iter::empty(), 0.0), "the reset is a change");
-        assert_eq!(at(&s, (20, 15)), 0.0, "at once, no ease");
-        assert!(!s.moving);
-    }
-
-    #[test]
-    fn held_cells_stay_dark_and_the_release_eases_without_a_snap() {
+    fn a_held_cell_stays_dark_until_released_and_then_opens_at_once() {
         let fog = fog_revealed((20, 15), 4);
         let block = square((20, 15), 4);
         let mut s = FogShown::EMPTY;
-        s.track(&fog, &block, (20, 15), std::iter::empty(), 0.0);
+        s.track(&fog, &block);
         assert_eq!(at(&s, (20, 15)), 255.0, "held: dark although explored");
-        s.track(&fog, &[], (20, 15), std::iter::empty(), 0.0);
-        assert_eq!(at(&s, (20, 15)), 255.0, "released at this instant: not yet lit");
-        s.track(&fog, &[], (20, 15), std::iter::empty(), 0.1);
-        let c = at(&s, (20, 15));
-        assert!(c > 0.0 && c < 255.0, "eases after the release: {c}");
-    }
-
-    #[test]
-    fn settled_cells_jump_and_the_others_ease() {
-        let mut s = FogShown::EMPTY;
-        s.track(&Fog::new(40, 30), &[], (20, 15), std::iter::empty(), 0.0);
-        let fog = fog_revealed((20, 15), 4);
-        let centre = index_of(40, 30, (20, 15)).unwrap();
-        let far = index_of(40, 30, (24, 15)).unwrap();
-        s.track(&fog, &[], (20, 15), [centre], 0.0);
-        assert_eq!(s.cur[centre], 0.0, "the settled cell is at its target at once");
-        assert_eq!(s.cur[far], 255.0, "the cell four away has not moved yet");
+        s.track(&fog, &[]);
+        assert_eq!(at(&s, (20, 15)), 0.0, "released: lit at once");
     }
 
     #[test]
     fn an_empty_fog_has_no_texel_change() {
         let mut s = FogShown::EMPTY;
         let empty = Fog::new(0, 0);
-        assert!(!s.track(&empty, &[], (0, 0), std::iter::empty(), 0.0));
+        assert!(!s.track(&empty, &[]));
         assert_eq!(shown_darkness(&empty, (0, 0)), 0.0);
     }
 }
@@ -2424,7 +2263,7 @@ mod fog_box_tests {
             }
         }
         let mut s = FogShown::EMPTY;
-        s.track(&fog, &[], (0, 0), std::iter::empty(), 0.0);
+        s.track(&fog, &[]);
         let bx = alpha_box(&s.rgba, fog.w, fog.h).expect("the dark corner is not transparent");
         assert!(bx[0] <= 8 && bx[1] <= 6 && bx[2] >= 10 && bx[3] >= 8, "the box {bx:?} holds the dark corner");
         assert!(bx != [0, 0, 10, 8], "and is smaller than the map");
@@ -2442,7 +2281,7 @@ mod fog_box_tests {
             }
         }
         let mut s = FogShown::EMPTY;
-        s.track(&all, &[], (0, 0), std::iter::empty(), 0.0);
+        s.track(&all, &[]);
         assert_eq!(alpha_box(&s.rgba, all.w, all.h), None);
     }
 }

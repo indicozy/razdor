@@ -761,10 +761,10 @@ fn reveal_darkness(shows: &[&Showing], n: usize, now: f64) -> Option<Vec<f32>> {
 
 /// The mist layer's texture (`minimap::fog_layer_box`), with the reveals' darkness composed over the shown fog while
 /// a place is opening (`minimap::fog_layer_over`): the mist then fades from itself to the land. None when the fog is off.
-fn mist_layer(fog: &razdor::rules::fog::Fog, held: &[(i32, i32)], origin: (i32, i32), settle: impl IntoIterator<Item = usize>, reveal: Option<&[f32]>) -> Option<(Texture2D, Option<[i32; 4]>)> {
+fn mist_layer(fog: &razdor::rules::fog::Fog, held: &[(i32, i32)], reveal: Option<&[f32]>) -> Option<(Texture2D, Option<[i32; 4]>)> {
     match reveal {
-        Some(r) => minimap::fog_layer_over(fog, held, origin, settle, r),
-        None => minimap::fog_layer_box(fog, held, origin, settle),
+        Some(r) => minimap::fog_layer_over(fog, held, r),
+        None => minimap::fog_layer_box(fog, held),
     }
 }
 
@@ -793,8 +793,6 @@ impl MapView {
     pub fn forget_shows(&mut self) {
         IDLE.with(|m| m.borrow_mut().clear());
         weather::forget();
-        // A game was loaded or started: its fog is shown as it is, with no fade of the whole map.
-        minimap::snap_fog();
         self.shows.clear();
         self.returning = None;
         self.opening = None;
@@ -2946,12 +2944,11 @@ impl Camera {
         if n == 0 || !mist::on() || trailer_nofog() {
             return;
         }
-        let settle = shows.iter().filter(|s| s.mask.is_some()).flat_map(|s| s.reveal_cells.iter().map(|&(i, _)| i));
-        let (held, origin) = (game.unshown_cells(), game.tile());
+        let held = game.unshown_cells();
         // The same composed darkness as the ground's mist (`draw_fog_flat`), so the raised sheets fade with it.
         let cells = game.fog.w.max(0) as usize * game.fog.h.max(0) as usize;
         let reveal_now = reveal_darkness(shows, cells, now);
-        let Some((tex, dark)) = mist_layer(&game.fog, &held, origin, settle, reveal_now.as_deref()) else { return };
+        let Some((tex, dark)) = mist_layer(&game.fog, &held, reveal_now.as_deref()) else { return };
         let (dest, src) = self.mist_rects(game, dark);
         let pass = PASS.with(std::cell::Cell::get);
         for sheet in 1..=n {
@@ -2984,10 +2981,7 @@ impl Camera {
         if trailer_nofog() {
             return;
         }
-        // The reveal cells of the places being shown jump to their target: the mask draws their
-        // circle, so the fog under it does not fade a second time (`minimap::fog_texture`).
-        let settle = shows.iter().filter(|s| s.mask.is_some()).flat_map(|s| s.reveal_cells.iter().map(|&(i, _)| i));
-        let (held, origin) = (game.unshown_cells(), game.tile());
+        let held = game.unshown_cells();
         // The same texture, drawn as mist instead of black when the setting is on (the minimap's stays black).
         let mist = mist::on();
         // Under the mist the places being shown are composed into the mist itself (`mist_layer`), so the reveal
@@ -3000,17 +2994,17 @@ impl Camera {
         if extend_edge() || mist {
             let (dest, src) = self.fog_texels();
             if mist {
-                if let Some((tex, _)) = mist_layer(&game.fog, &held, origin, settle, reveal_now.as_deref()) {
+                if let Some((tex, _)) = mist_layer(&game.fog, &held, reveal_now.as_deref()) {
                     self.draw_mist(&tex, dest, Some(src));
                 }
             } else {
-                minimap::draw_fog_extended(&game.fog, &held, origin, settle, dest, src);
+                minimap::draw_fog_extended(&game.fog, &held, dest, src);
             }
             return;
         }
         let (tl, br) = self.fog_corners(game);
         if mist {
-            if let Some((tex, dark)) = mist_layer(&game.fog, &held, origin, settle, reveal_now.as_deref()) {
+            if let Some((tex, dark)) = mist_layer(&game.fog, &held, reveal_now.as_deref()) {
                 if dark.is_some() {
                     let (dest, src) = self.mist_rects(game, dark);
                     self.draw_mist(&tex, dest, src);
@@ -3019,7 +3013,7 @@ impl Camera {
         } else {
             // The flat and the 2.5D view draw only the fog's dark box (`minimap::draw_fog_boxed`): the texels outside
             // it are alpha 0, so a whole-quad blend changes no pixel and costs a full-screen pass (backlog 1618).
-            minimap::draw_fog_boxed(&game.fog, &held, origin, settle, tl, br);
+            minimap::draw_fog_boxed(&game.fog, &held, tl, br);
         }
         let v = self.draw;
         let (l, r) = (tl.x.clamp(v.x, v.x + v.w), br.x.clamp(v.x, v.x + v.w));
@@ -5837,7 +5831,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
             // A bent view's weather lies in its picture, on the sheet's ground (`draw_weather`'s projection), under
             // the sprites; the other views draw it over the world (`draw_world`).
             if cam.tilt.is_some_and(|t| t.cam.bend.is_some()) {
-                frame_probe::time(Stage::Weather, || ground(cam, || draw_weather(game, assets, cam, frame_light_of(game), veil.shows)));
+                frame_probe::time(Stage::Weather, || ground(cam, || draw_weather(game, assets, cam, frame_light_of(game))));
                 if waits {
                     gpu_wait(Stage::GpuWeather);
                 }
@@ -6938,7 +6932,7 @@ fn backdrop_world(game: &Game, assets: &Assets) {
         // The weather as over the map (`world_frame`), so it keeps falling behind the window; a bent view
         // draws it in its ground's picture (`draw_world_in`), as the map does.
         if cam.tilt.is_none_or(|t| t.cam.bend.is_none()) {
-            draw_weather(game, assets, &cam, light, &[]);
+            draw_weather(game, assets, &cam, light);
         }
         draw_rectangle(0.0, 0.0, super::frame_state::screen_w(), super::frame_state::screen_h(), Color::new(0.0, 0.0, 0.0, 0.2));
     });
@@ -7081,7 +7075,7 @@ pub fn watch_map(game: &Game, assets: &Assets, view: &mut MapView, follow: bool,
         if light.is_some() {
             draw_building_windows(game, assets, &cam, NO_VEIL);
         }
-        draw_weather(game, assets, &cam, light, &[]);
+        draw_weather(game, assets, &cam, light);
     });
 }
 
@@ -7761,7 +7755,7 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
             // light, over the explored ground only (`draw_weather`).
             // A bent view draws it in its ground's picture (in `draw_world_in`), not here.
             if cam.tilt.is_none_or(|t| t.cam.bend.is_none()) {
-                staged(Stage::Weather, Stage::GpuWeather, || draw_weather(game, assets, &cam, light, &shows));
+                staged(Stage::Weather, Stage::GpuWeather, || draw_weather(game, assets, &cam, light));
             }
         })
     });
@@ -8223,10 +8217,9 @@ fn draw_daylight(game: &Game, cam: &Camera, light: Option<daylight::Light>) {
 /// Razdor's «Погода» (`weather`, off by default): the weather of the land over the drawn map, in window
 /// space after the fog and the light. Each pixel's ground is the projection's (flat, or the ray's hit
 /// with the ground in 2.5D); the biome masks are the terrain's cached textures (`TerrainLayer::weather_masks`);
-/// the fog's shown darkness masks the weather to the explored ground. The fog texture is asked with the
-/// same arguments as the fog's draw (`draw_fog_flat`), so its fade is not moved twice. The square grid
+/// the fog's shown darkness masks the weather to the explored ground. The square grid
 /// only. Style only: nothing is computed when the weather is off.
-fn draw_weather(game: &Game, assets: &Assets, cam: &Camera, light: Option<daylight::Light>, shows: &[&Showing]) {
+fn draw_weather(game: &Game, assets: &Assets, cam: &Camera, light: Option<daylight::Light>) {
     if !weather::on() || cam.grid != Grid::Square8 {
         return;
     }
@@ -8244,9 +8237,8 @@ fn draw_weather(game: &Game, assets: &Assets, cam: &Camera, light: Option<daylig
     let Some(levels) = weather::frame_levels(&schedule, days, now) else {
         return;
     };
-    let settle = shows.iter().filter(|s| s.mask.is_some()).flat_map(|s| s.reveal_cells.iter().map(|&(i, _)| i));
-    let (held, origin) = (game.unshown_cells(), game.tile());
-    let fog = minimap::fog_layer_lit(&game.fog, &held, origin, settle);
+    let held = game.unshown_cells();
+    let fog = minimap::fog_layer_lit(&game.fog, &held);
     // The explored texels bound the pass (`weather::reach`): the whole map with no fog to cut it, nothing when no
     // texel is lit. The fog's texture is one texel per cell only when its size is the map's.
     let explored = match &fog {
@@ -10085,14 +10077,12 @@ mod tilt_tests {
         assert!(fog.explored(lit) && !fog.explored(dark), "the test fog: lit inside, dark far away");
         let foot = |t: Tile| cam.cell_centre(t);
         let shade = Shade { fog: &fog, veil: NO_VEIL };
-        minimap::snap_fog();
-        minimap::track(&fog, &[], lit, std::iter::empty(), 0.0);
+        minimap::track(&fog, &[]);
         assert_eq!(shade.at(&cam, foot(lit)), 1.0, "explored and clear");
         assert_eq!(shade.at(&cam, foot(dark)), 0.0, "unexplored");
         // A reveal's unshown block (its cells dark, the feather at its rim), taken at once.
         let block: Vec<Tile> = (17..=23).flat_map(|x| (12..=18).map(move |y| (x, y))).collect();
-        minimap::snap_fog();
-        minimap::track(&fog, &block, lit, std::iter::empty(), 0.0);
+        minimap::track(&fog, &block);
         assert_eq!(shade.at(&cam, foot(lit)), 0.0, "an unshown cell is dark even when explored");
     }
 

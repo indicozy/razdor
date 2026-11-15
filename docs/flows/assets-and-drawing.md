@@ -133,8 +133,8 @@ sounds and the exe are not stored compressed and keep using `install::find_path`
   map's atlas and figure sheets are made at first use, from the decoded picture (no decode
   then). The minimap's ground (terrain, objects, bridges) is made once per map when the game starts
   (`minimap::prebuild`, keyed by the map's identity, not the fog); the fog's dark is drawn over it
-  as `minimap::fog_texture`, the same texture the map view draws; it holds the shown darkness (see «The fog
-  fades» below), so a step of the hero only changes the dark and the texture is uploaded when a texel changed.
+  as `minimap::fog_texture`, the same texture the map view draws; it holds each cell's darkness (see «The fog
+  opens at once» below), so a step of the hero only changes the cells it uncovers and the texture is uploaded when a texel changed.
   Snapshot runs make no early textures.
 - **The persistent picture cache** (`src/dt/picture_cache.rs`): a decoded picture's frames
   (RGBA with their sizes, each frame one LZ4 block: format 2, `lz4_flex`, backlog 1609) are kept
@@ -592,24 +592,21 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   armies' idle frames (`idle_sprite_frame`), the water (`terrain.draw`'s water time, and `water::live()`, which is false
   at level 0), the living map's flags and smoke (`living_on` needs level > 0), the mist's clouds (`mist::clock`), the
   weather's motion (`draw_weather`) and the torches' flicker (`draw_daylight`: at level 0 the middle of its range, steady).
-  The wakes go with the water. The fog's reveal is instant under Off (`minimap` `track`: a fresh update when the
-  fog changes). Under Off the idle frames keep the frame cap (`frame_cap::current` paces them only with «Экономия
+  The wakes go with the water. Under Off the idle frames keep the frame cap (`frame_cap::current` paces them only with «Экономия
   батареи»). Off is not a
   rule: nothing a map or a mod sees changes.
-- **The fog fades** (the owner's request, 2026-11-10: a smooth reveal, not a pop). `minimap::FogShown` (per thread)
-  keeps each cell's shown darkness (0..255, unrounded) and eases it toward its target (`darkness_into` of the fog
-  with its held cells dark): an exponential approach with `FADE_TAU` (0.2 s), monotonic, snapped within half a
-  level (`ease_toward`). A cell that opens waits `WALK_DELAY` (0.05 s) per cell of distance from the hero before its
-  ease starts, so a walk's strip opens outward from him; a cell that closes goes at once. The reveal cells of a
-  place being shown (`Showing::reveal_cells`, passed as the `settle` cells of `draw_fog_flat`) jump to their target
-  each frame: the radial mask (`draw_showing_flat`) draws their circle, so the fog under it does not fade twice.
-  `forget_shows` (a game loaded or started, the map's opening) snaps everything (`snap_fog`). `track` does the
-  update; it runs only when the fog or held cells change or a cell still eases, so an idle map does no per-cell
-  work and uploads nothing (`fog_texture` uploads the texture when a texel changed, counted in the frame probe's
-  rebuilds). The flat map, the minimap window and the 2.5D sprites all read the same values. When the explored bits
-  change (a walk's reveal), `track` measures again only the box of the changed cells grown by the feather and one cell
-  (`changed_box`, `darkness_from_bits`), the same values the whole measure gives; a new fog, a fog that is off or a box
-  over a quarter of the map takes the whole measure (`darkness_into`). The unit test
+- **The fog opens at once** (the owner's request, 2026-11-15: the original's behaviour; the smooth reveal of 21bea34c,
+  which eased each cell and delayed it by its distance from the hero, is reverted). `minimap::FogShown` (per thread)
+  keeps each cell's darkness (0..255: the fog with its held cells dark, `darkness_into`) and sets a cell whose darkness
+  changed to its new value in the same update (`track`). A walk lights the cells its step explores in that frame, and
+  nothing eases. An event's reveal: its cells (`Showing::reveal_cells`) stay dark while the place is held
+  (`unshown_cells`), and the radial mask (`draw_showing_flat`) brings them in as its circle grows, as the original's
+  reveal does. The flat map, the minimap window and the 2.5D sprites read the same values. `track` runs only when the
+  fog or the held cells change, so an idle map does no per-cell work and uploads nothing (`fog_texture` uploads the
+  texture when a texel changed, counted in the frame probe's rebuilds). When the explored bits change (a walk's
+  reveal), `track` measures again only the box of the changed cells grown by the feather and one cell
+  (`changed_box`, `darkness_from_bits`), the same values the whole measure gives; a new fog, a fog that is off or a
+  box over a quarter of the map takes the whole measure. The unit test
   `the_shown_targets_stay_the_full_darkness_through_walks_reveals_and_held_cells` pins it.
 - **The first-person view** («Вид карты» = «От первого лица», the owner's decision, 2026-11-10). Its
   setting is `audio::Settings::map_first_person` within the tilted view (`map_tilt`), pushed by
