@@ -61,6 +61,7 @@ pub mod render_cache;
 pub mod replay_floor;
 pub mod static_draw;
 pub mod popup;
+pub mod prep_line;
 pub mod rest;
 pub mod saves;
 pub mod screens;
@@ -1289,6 +1290,29 @@ impl App {
         self.refresh_mods();
     }
 
+    /// One frame of the start's wait (`prep_line::wait`): the main menu drawn with the install's look (not
+    /// the not-found block), its picks dropped and its hover off while the conversion runs.
+    pub(super) fn draw_menu_while_waiting(&mut self) {
+        display::follow_settings(&self.audio.settings);
+        widgets::set_input_blocked(true);
+        let _ = main_menu::frame(false, &self.mods, self.active_mod.as_deref(), true);
+        widgets::set_input_blocked(false);
+    }
+
+    /// The install a start's wait read is the app's from now on: the steps of the mod switch (`apply_mod`)
+    /// and of the first install found after the start (`mobile_install_poll`); the art is replaced
+    /// (`Assets::adopt_install`, `announce_install`).
+    pub(super) fn adopt_started_install(&mut self, install: razdor::dt::install::DtInstall) {
+        razdor::dt::preload::forget_ready();
+        ads::forget();
+        self.assets.adopt_install(dt_art::DtArt::load(install));
+        self.audio.set_install(self.assets.dt.as_ref().map(|d| &d.install));
+        self.dt_content = dt_content_of(&self.assets, self.audio.settings.impossible);
+        self.scenarios = scenarios_of(self.assets.dt.as_ref().map(|d| &d.install));
+        self.session_checked = false;
+        self.refresh_mods();
+    }
+
     /// The install was not there at start. On the menus, loads it when the player asks ("Check
     /// again", or the unpacking's end on the desktop) or, on the phones, when the poll finds it
     /// listed (an install in the game folder or a search root; `mobile::install_listed`). No
@@ -2184,7 +2208,7 @@ mod tests {
         use std::task::{Context, Poll, Waker};
         let content = Arc::new(Content::builtin());
         // The assets' load awaits nothing without a window: one poll finishes it.
-        let mut load = std::pin::pin!(Assets::load(content.clone()));
+        let mut load = std::pin::pin!(Assets::load_with(content.clone(), dt_art::DtArt::from_env()));
         let Poll::Ready(assets) = load.as_mut().poll(&mut Context::from_waker(Waker::noop())) else {
             panic!("the assets load waits for something a test has no window for");
         };

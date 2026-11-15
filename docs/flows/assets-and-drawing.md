@@ -46,7 +46,10 @@ wait for a running conversion of it first: `stored::wait_converted` (a per-folde
 the calling thread), called at the start of `hub::mods::prepare_mod`; a mod build that fails is tried once more
 after the wait (`hub::mods::active_install_dir_in`, `use_mod`). Otherwise a mod build that lists the base and
 stats each file could fail on a picture the conversion moved in between (backlog: "Bonus46.lit: No such file",
-the mod dropped to the base game).
+the mod dropped to the base game). The start shows the line «Подготовка файлов игры…» while such a wait runs
+(`ui::prep_line`: the main menu from the title art under a 10% overlay, the line and a progress bar fed by
+`stored::conversion_progress`; the install is read on a thread, `dt::install::begin_load` decides); a start
+with no wait is unchanged.
 
 A mod's merged folder (`hub::mods::prepare_mod`) hard-links the base's files where the file system
 allows it and never copies them: where links fail (Android's app storage) the file is left out, and

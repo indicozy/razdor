@@ -262,16 +262,12 @@ impl DtInstall {
     /// Load the install named by `RAZDOR_DT_DIR`, or the active mod's merged folder over it
     /// (`hub::active_install_dir`; [`base_dir`] is the install itself).
     pub fn from_env() -> Result<DtInstall, DtError> {
-        let Some(base) = locate() else {
+        let Some(base) = located() else {
             let own = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf));
             set_problem(own.map(|dir| Problem::NotInstall { missing: missing(&dir), dir }));
             return Err(DtError::NoInstallDir);
         };
         *BASE.lock().unwrap_or_else(|e| e.into_inner()) = Some(base.clone());
-        // Razdor's own game folder gets its plain pictures compressed (`dt::stored`; a folder that is
-        // not Razdor's is never written), on a thread of its own so the first start after an update is
-        // not held (the reads stay right while it runs: plain wins, a vanished plain file reads its `.lz4`).
-        super::stored::compress_owned_in_background(&base);
         // The game's own folder is checked before anything is read: a missing file is damage the
         // screen repairs from the archive, never a crash (`dt::integrity`).
         if let Err(files) = guard_game_files(&base) {
@@ -339,6 +335,46 @@ static BASE: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
 /// without an install). The game may read the active mod's folder instead.
 pub fn base_dir() -> Option<PathBuf> {
     BASE.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// The folder [`begin_load`] found (`Some(None)`: none), taken once by the next [`DtInstall::from_env`],
+/// so the start locates the install once (`locate` logs and may search the folders).
+static LOCATED: std::sync::Mutex<Option<Option<PathBuf>>> = std::sync::Mutex::new(None);
+
+/// The install's folder for a load: the one [`begin_load`] found, else found now. A folder found here starts
+/// its conversion (`dt::stored`; a folder that is not Razdor's is never written), on a thread of its own so the
+/// first start after an update is not held (the reads stay right while it runs: plain wins, a vanished plain
+/// file reads its `.lz4`).
+fn located() -> Option<PathBuf> {
+    let taken = LOCATED.lock().unwrap_or_else(|e| e.into_inner()).take();
+    match taken {
+        Some(found) => found,
+        None => {
+            let found = locate();
+            if let Some(base) = &found {
+                super::stored::compress_owned_in_background(base);
+            }
+            found
+        }
+    }
+}
+
+/// The start's first step, before the art is read: finds the install and starts the conversion of its
+/// game folder (`dt::stored`). Returns whether the load will wait for that conversion: a mod is active over
+/// the folder ([`crate::hub::install_waits_for_conversion`]). The caller then reads the install on a thread
+/// and keeps the window drawing meanwhile (`ui::prep_line`); otherwise the load is as it always was.
+pub fn begin_load() -> bool {
+    let found = locate();
+    let waits = match &found {
+        Some(base) => {
+            *BASE.lock().unwrap_or_else(|e| e.into_inner()) = Some(base.clone());
+            super::stored::compress_owned_in_background(base);
+            crate::hub::local_dir().is_some_and(|local| crate::hub::install_waits_for_conversion(&local, base))
+        }
+        None => false,
+    };
+    *LOCATED.lock().unwrap_or_else(|e| e.into_inner()) = Some(found);
+    waits
 }
 
 fn set_problem(why: Option<Problem>) {

@@ -22,8 +22,11 @@ except what the screen value, the `App` fields and a few `thread_local!`s hold.
    first messages and presents a picture at once; the loading itself runs inside one frame),
    `ui::widgets::load_font` (TrueType faces bundled in `data/fonts/`),
    `ui::language::init` (the saved language, `razdor::i18n`), `Content::builtin` (the demo content),
-   `Assets::load` (`src/ui/assets.rs`) which finds the install (`DtArt::from_env` →
-   `razdor::dt::install::locate`) and, when there is one, calls
+   `ui::prep_line::start` (`dt::install::begin_load`: the install is located and its game folder's
+   conversion starts; when a mod's build waits for that conversion, the install is read on a thread instead
+   and, after `App::new`, `ui::prep_line::wait` draws the main menu from the title art under a 10% overlay with
+   the line «Подготовка файлов игры…» and the progress bar until the install arrives, `src/ui/prep_line.rs`), then
+   `Assets::load_with` (`src/ui/assets.rs`) takes the install and, when there is one, calls
    `ui::language::set_install` (the install's data translations join the language list),
    `ui::chrome::set_install` and `DtArt::preload_all` (start decoding the install's pictures ahead,
    see [assets-and-drawing.md](assets-and-drawing.md)), `razdor::rules::save::set_install` and

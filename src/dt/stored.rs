@@ -463,6 +463,18 @@ pub fn wait_converted(dir: &Path) -> bool {
     waited
 }
 
+/// Whether a conversion of the game folder `dir` runs now (see [`wait_converted`]), without waiting: the
+/// start's line is shown while it does (`ui::prep_line`). Never call it from a conversion's own thread.
+pub fn is_converting(dir: &Path) -> bool {
+    lock_converting().contains_key(&folder_key(dir))
+}
+
+/// Holds `dir` as converting for a test, as a conversion does (the guard ends it when dropped).
+#[cfg(test)]
+pub(crate) fn hold_converting_for_test(dir: &Path) -> impl Drop {
+    Converting::enter(dir)
+}
+
 #[cfg(test)]
 mod logical_name_tests {
     use super::*;
@@ -535,6 +547,20 @@ mod background_tests {
         rx.recv_timeout(std::time::Duration::from_secs(30)).expect("the wait returns after the conversion");
         let _ = fs::remove_dir_all(&dir);
     }
+
+    /// The non-blocking check ([`is_converting`]) follows the same guard as the wait does.
+    #[test]
+    fn is_converting_follows_the_conversion_guard() {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("razdor-stored-converting-{}-{nanos}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        assert!(!is_converting(&dir), "a folder that is not converting");
+        let converting = Converting::enter(&dir);
+        assert!(is_converting(&dir), "a folder a conversion holds");
+        drop(converting);
+        assert!(!is_converting(&dir), "the conversion ended");
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
 
 /// [`convert_tree`] for a folder Razdor wrote itself and owns by construction: a hub mod's files
@@ -544,8 +570,62 @@ pub fn compress_folder(dir: &Path) -> io::Result<Summary> {
     convert_tree(dir)
 }
 
+/// The conversions running now, by folder: `(converted, plain pictures found)`. Made by `convert_tree` for
+/// its run and removed when it ends; read by the start's progress bar ([`conversion_progress`]).
+static PROGRESS: std::sync::Mutex<BTreeMap<PathBuf, (usize, usize)>> = std::sync::Mutex::new(BTreeMap::new());
+
+/// How far a conversion of the game folder `dir` is, while it runs: `(converted, plain pictures found)`.
+/// Cheap and non-blocking (the start's «Подготовка файлов игры…» bar, `ui::prep_line`); `None` when no
+/// conversion of the folder runs.
+pub fn conversion_progress(dir: &Path) -> Option<(usize, usize)> {
+    PROGRESS.lock().unwrap_or_else(|e| e.into_inner()).get(&folder_key(dir)).copied()
+}
+
+/// One conversion's entry in [`PROGRESS`]: made when the conversion starts, removed when it is dropped.
+struct Progress(PathBuf);
+
+impl Progress {
+    fn start(dir: &Path, total: usize) -> Progress {
+        let key = folder_key(dir);
+        PROGRESS.lock().unwrap_or_else(|e| e.into_inner()).insert(key.clone(), (0, total));
+        Progress(key)
+    }
+
+    fn set(dir: &Path, done: usize) {
+        if let Some(entry) = PROGRESS.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&folder_key(dir)) {
+            entry.0 = done;
+        }
+    }
+}
+
+impl Drop for Progress {
+    fn drop(&mut self) {
+        PROGRESS.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.0);
+    }
+}
+
+/// The plain pictures under `dir` (the ones [`convert_tree`] compresses), counted before it runs.
+fn count_plain(dir: &Path) -> io::Result<usize> {
+    let mut total = 0;
+    let mut folders = vec![dir.to_path_buf()];
+    while let Some(folder) = folders.pop() {
+        for entry in fs::read_dir(&folder)? {
+            let entry = entry?;
+            let kind = entry.file_type()?;
+            if kind.is_dir() {
+                folders.push(entry.path());
+            } else if kind.is_file() && is_compressible(&entry.file_name().to_string_lossy()) {
+                total += 1;
+            }
+        }
+    }
+    Ok(total)
+}
+
 /// [`convert_owned`] for a folder already known to be owned (the walk, the rules of the converter).
 fn convert_tree(dir: &Path) -> io::Result<Summary> {
+    let total = count_plain(dir)?;
+    let _shown = Progress::start(dir, total);
     let mut sum = Summary::default();
     let mut folders = vec![dir.to_path_buf()];
     while let Some(folder) = folders.pop() {
@@ -584,6 +664,7 @@ fn convert_tree(dir: &Path) -> io::Result<Summary> {
             let plain_len = fs::metadata(&path)?.len();
             let target = compress_file(&path)?;
             sum.converted += 1;
+            Progress::set(dir, sum.converted);
             sum.replaced += usize::from(replaced_any);
             sum.plain_bytes += plain_len;
             sum.stored_bytes += fs::metadata(&target)?.len();
@@ -830,6 +911,25 @@ mod tests {
         assert_eq!(convert_owned(&dir).unwrap(), Summary::default());
         assert_eq!(names_in(&dir), vec!["Pic.lit", "Pic.lit.lz4.part"], "a player's own copy is never touched");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The progress entry of a conversion: the plain pictures counted (the map is not one), and no
+    /// entry once the conversion has ended.
+    #[test]
+    fn conversion_progress_counts_the_pictures_and_ends_with_the_conversion() {
+        let dir = scratch("convert-progress");
+        fs::create_dir_all(dir.join("Graphics")).unwrap();
+        let data = sample();
+        fs::write(dir.join("Graphics").join("Knight.ugs"), &data).unwrap();
+        fs::write(dir.join("Pic.lit"), &data).unwrap();
+        fs::write(dir.join("Maps.DTm"), b"map").unwrap();
+        assert_eq!(count_plain(&dir).unwrap(), 2);
+        assert_eq!(conversion_progress(&dir), None, "no conversion runs");
+        set_test_owned(Some(dir.clone()));
+        let sum = convert_owned(&dir).unwrap();
+        set_test_owned(None);
+        assert_eq!(sum.converted, 2);
+        assert_eq!(conversion_progress(&dir), None, "the entry is removed when the conversion ends");
     }
 
     #[test]

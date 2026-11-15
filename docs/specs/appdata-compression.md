@@ -60,6 +60,13 @@ Rust: `lz4_flex::frame`. Python (build.py): `lz4.frame.compress(…, store_size=
    ended at 2.1 s, the install loaded at 2.1 s; phones not measured; once per folder, and only with a mod active);
    the conversion holds its folder from the calling thread before it starts (`Converting`), so the wait sees it.
    Nothing else waits: `find`, `list` and `Stored::read` never do.
+   The start's own wait (2026-11-15): `dt::install::begin_load` starts the conversion and asks
+   `hub::install_waits_for_conversion` (a mod active and installed, the base converting). Only then
+   `ui::prep_line::start` reads the install on a thread, and the window shows the main menu drawn from the
+   bundled title art (`ui::menu_art`, as the no-install first screen does) under a 10% overlay, with the line
+   «Подготовка файлов игры…» and the conversion's progress bar (`stored::conversion_progress`: converted and
+   plain pictures found, non-blocking) meanwhile; its picks are dropped. When the install is read,
+   `App::adopt_started_install` replaces the art as usual. Any other start reads the install as before.
 6. **Mods** (`hub/mods.rs`, the design of step 3): the overlay matches layers by logical name and removes the other stored
    form of a name it replaces, both ways (a base's plain link beats nothing once a mod's `.lz4` is laid; a base's
    `.lz4` goes for a mod's plain file). A mod's manifest and stamp name each file by its logical path, and its digest

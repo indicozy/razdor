@@ -215,7 +215,10 @@ async fn main() {
     ui::language::init();
     let content = Arc::new(Content::builtin());
     razdor::diag::step("loading the art and sounds");
-    let assets = Assets::load(content.clone()).await;
+    // The install is read here, unless a mod's build waits for the first start's picture conversion: then the
+    // install is read on a thread while the menu (drawn from the title art) and the line wait (`ui::prep_line`).
+    let (install, waiting) = ui::prep_line::start();
+    let assets = Assets::load_with(content.clone(), install).await;
     // With no install, the first screen's art is Razdor's own copy (`ui::menu_art`); an install
     // replaces it when it is loaded (`ui::assets::announce_install`).
     if assets.dt.is_none() {
@@ -227,6 +230,9 @@ async fn main() {
     let mut app = App::new(assets, content);
     // The hub's catalog, read once for the launch (the promo ad and the game check; `ui::launch`).
     ui::launch::start();
+    if let Some(job) = waiting {
+        ui::prep_line::wait(&mut app, job).await;
+    }
     razdor::diag::step("started");
     // The session slot is written when the game is ended by a signal (the desktop) or when the
     // app goes to the background (iOS; Android's pause is a JNI call, `ui::android`).

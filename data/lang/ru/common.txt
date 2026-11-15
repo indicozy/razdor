@@ -222,6 +222,7 @@ The hub's damaged or missing maps were restored. = Повреждённые ил
 A hub map is damaged or missing and could not be restored: {e}. = Карта хаба повреждена или удалена и не восстановлена: {e}.
 This map needs units or items the install does not have: a mod's files may be damaged or missing. = Карте нужны юниты или предметы, которых нет в установке: возможно, файлы мода повреждены или удалены.
 Preparing the mod… = Готовлю мод…
+Preparing the game files… = Подготовка файлов игры…
 The mod does not play; the base game is played. = Мод не запускается: играется базовая игра.
 Its maps are in the new game's list. = Её карты есть в списке новой игры.
 Needed by: {names} = Нужен для: {names}

@@ -635,6 +635,21 @@ fn read_dp_once() {
     }
 }
 
+/// The phone's density before the first frame, when [`follow_settings`] has not set it yet (the start's
+/// line, `ui::prep_line`): the one [`read_dp_once`] reads on Android and iOS, else `RAZDOR_DP` (a test run's
+/// phone). Sets nothing: the first frame's own setting stays as it is.
+pub fn startup_dp_px() -> Option<f32> {
+    if let Some(dp) = dp_px() {
+        return Some(dp);
+    }
+    #[cfg(target_os = "android")]
+    return Some(super::android::read_density() / macroquad::window::screen_dpi_scale());
+    #[cfg(target_os = "ios")]
+    return Some(1.0);
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    return std::env::var("RAZDOR_DP").ok().and_then(|s| s.trim().parse::<f32>().ok()).filter(|d| d.is_finite() && *d > 0.0);
+}
+
 /// [`popup_scale`] for this screen and the current setting.
 pub fn popup_o(base: f32, min_w: f32, min_h: f32) -> f32 {
     popup_scale(

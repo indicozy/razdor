@@ -291,9 +291,21 @@ pub fn active_install_dir(base: &Path) -> PathBuf {
     }
 }
 
+/// Whether mod `id` is installed as a mod (the record `installed.json`).
+fn is_installed_mod(local: &Path, id: &str) -> bool {
+    read_installed(local).entries.get(id).is_some_and(|e| e.kind == Kind::Mod)
+}
+
+/// Whether the game folder `base` is converting now and the install's load waits for it: a mod is active
+/// and installed, so [`active_install_dir`] builds it, and `prepare_mod` waits for the conversion first.
+/// The start shows its line while this holds (`ui::prep_line`); nothing is built here.
+pub fn install_waits_for_conversion(local: &Path, base: &Path) -> bool {
+    active_mod(local).is_some_and(|id| is_installed_mod(local, &id)) && stored::is_converting(base)
+}
+
 fn active_install_dir_in(local: &Path, base: &Path) -> PathBuf {
     let Some(id) = active_mod(local) else { return base.to_path_buf() };
-    if read_installed(local).entries.get(&id).is_none_or(|e| e.kind != Kind::Mod) {
+    if !is_installed_mod(local, &id) {
         crate::diag!("hub: the active mod {id} is not installed; the base game is played");
         let _ = write_active(local, None);
         return base.to_path_buf();
@@ -1140,6 +1152,23 @@ mod tests {
         std::fs::write(local.join("installed.json"), b"{}").unwrap();
         assert_eq!(active_install_dir_in(&local, &base), base);
         assert_eq!(active_mod(&local), None);
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    /// The start's line is shown only when the load really waits: an active, installed mod over a base that converts.
+    #[test]
+    fn the_install_waits_only_for_an_active_mod_while_its_base_converts() {
+        let base = base_install("waits");
+        let local = temp("waits-hub");
+        install_mod(&local, "m1", "1.0", &[("Data/Units.ini", "mod units")]);
+        assert!(!install_waits_for_conversion(&local, &base), "no mod is active");
+        write_active(&local, Some("m1")).unwrap();
+        assert!(!install_waits_for_conversion(&local, &base), "the base is not converting");
+        let held = crate::dt::stored::hold_converting_for_test(&base);
+        assert!(install_waits_for_conversion(&local, &base), "the active mod waits for the base's conversion");
+        drop(held);
+        assert!(!install_waits_for_conversion(&local, &base), "the conversion ended");
         let _ = std::fs::remove_dir_all(&base);
         let _ = std::fs::remove_dir_all(&local);
     }

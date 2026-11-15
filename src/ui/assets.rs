@@ -185,7 +185,8 @@ impl Assets {
         self.dt.as_ref()?.item_icon(item.0)
     }
 
-    pub async fn load(content: Arc<Content>) -> Self {
+    /// The start's assets, with the install already read (`ui::prep_line::read_install`).
+    pub async fn load_with(content: Arc<Content>, dt: Option<DtArt>) -> Self {
         let mut sprites = HashMap::new();
         let mut item_sprites = HashMap::new();
         if let Ok(dir) = std::env::var("RAZDOR_ASSETS") {
@@ -200,7 +201,6 @@ impl Assets {
                 }
             }
         }
-        let dt = DtArt::from_env();
         if let Some(d) = &dt {
             announce_install(d);
         }
