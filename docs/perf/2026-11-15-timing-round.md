@@ -21,7 +21,10 @@ Earlier ledger numbers come from loaded or mixed runs and are marked in `docs/pe
   100 frames are excluded. Both on llvmpipe (Xvfb, own display and `XDG_RUNTIME_DIR`) and on the RTX 4060 (card by
   PCI `0000:05:00.0`, through VirtualGL). The 5060 Ti was not used.
 - **Time measure (frame probe).** `RAZDOR_PROFILE=1` with `RAZDOR_PROFILE_FRAMES`, 400 frames, RAZDOR_GPU_FINISH=1
-  on the 4060, so the GPU's time lands in `finish_ms`. Stage medians and p90 over frames 101-400 (299 frames).
+  on the 4060. `finish_ms` is not pure GPU time: `finish_wait` (`src/ui/gpu_probe.rs`) flushes macroquad's batch and
+  then calls `glFinish`, so it is the submission of the frame's draws plus the wait for the GL queue. In every
+  probe cell of this round `finish_ms - submit_ms` is 0.03 to 0.17 ms (checked per cell; the close-ups and the walk
+  cells with a non-zero `flush_ms` are at the top of that range). Stage medians and p90 over frames 101-400 (299 frames).
   Total frame ms is the probe's `total_ms`. The probe's `work_ms` is the CPU side of the frame.
 - **Machine state.** Before every run the one-minute load average had to be below 4 (the runs waited up to
   2 hours). The load at the start and the end of every run is in `results.csv`. Many runs started under 4 and
@@ -188,8 +191,10 @@ the same protocol as the rows above. They show what each switch is worth now.
   flat path is worth about 23 % of the instructions and 42 % of the probe work on this machine.
 - `RAZDOR_DEPTH_FAST=0` (old 2.5D path): 82.7 to 108.2 Minstr, probe work 6.97 to 8.64 ms.
 - `RAZDOR_STATIC_DRAW=1` (A′, retained decorations): instructions drop (58.2 vs 61.9 on llvmpipe) and probe work
-  drops (1.41 vs 2.54 ms), but the frame median gets worse: total 5.53 to 5.98 ms, GPU finish 1.47 to 3.04 ms,
-  gl_draws 137 to 443. The work moves to the GPU and the submit path. This confirms the A′ handoff's "no gain";
+  drops (1.41 vs 2.54 ms), but the frame median gets worse: total 5.53 to 5.98 ms, `finish_ms` 1.47 to 3.04 ms,
+  gl_draws 137 to 443. The `finish` rise is the submission of the 306 extra draw calls (`submit_ms` 1.39 to 2.97 ms;
+  `finish - submit` stays at 0.07 ms), not work moved to the GPU. The probe shows the submit path getting more
+  expensive, not the GPU getting more work. This confirms the A′ handoff's "no gain";
   on this machine it is a loss in total frame time. The switch stays off.
 - `RAZDOR_TERRAIN_CHEAP=1` (cheap ground): 2.5D whole 82.7 to 79.5 Minstr, probe work 6.97 to 6.19 ms.
 - `RAZDOR_REPLAY_FLOOR=1`: a lab measure of the replay floor (what a replay costs with nothing else), not a player
@@ -199,15 +204,87 @@ the same protocol as the rows above. They show what each switch is worth now.
   were measured instead, see above).
 - `RAZDOR_SWAP_INTERVAL`: not run (the brief did not list it for the round).
 
+## Follow-up, quiet machine (same day, CPUs 12,14)
+
+Done after the round, to settle the 2.5D close-up anomaly and to fill the 2.5D walk for M6, M7 and the old 2.5D path.
+Same scene, window, probe and instruction protocol as above. Differences: the measured process is pinned to CPUs
+12 and 14 (one thread on each of two physical cores; 12/13 and 14/15 are hyper-thread pairs, and the first pass used
+12-15), and the runs are interleaved. Binaries: M6 `967e2683`, M7 `00ba26ef` (the code of `70222bed`; the commit
+differs only in docs), and M7 with `RAZDOR_DEPTH_FAST=0`. M3 `1933b9eb` was rebuilt for the blip re-check only.
+Every run started and ended at load1 below 4 (the per-run values are in the follow-up's progress log); the
+machine ran at the default power mode during all runs. No run was retried for load. The first llvmpipe 100-frame
+read of M6 round 1 was 9.75 G instructions against 6.80 G in every other read; a re-run gave 6.80 G, so the
+first reading was discarded and the re-run is used.
+
+### 2.5D close-up, interleaved (1600x720, frames 101-400, medians per run)
+
+Order: M6, M7, M7 `RAZDOR_DEPTH_FAST=0` (called M7df0), three rounds. `work_ms` is the probe's CPU frame time;
+the probe `world` stage is the scene's objects, `finish` includes `flush` and `glFinish`.
+
+| run | llvmpipe Minstr | 4060 Minstr | work ms | total ms | world ms | flush ms | submit ms | finish ms |
+|---|---|---|---|---|---|---|---|---|
+| r1 M6 | 16.66 | 17.29 | 0.916 | 2.559 | 0.763 | 0.292 | 0.278 | 0.386 |
+| r1 M7 | 15.02 | 15.67 | 0.899 | 2.541 | 0.747 | 0.296 | 0.282 | 0.392 |
+| r1 M7df0 | 16.79 | 17.41 | 0.930 | 2.595 | 0.777 | 0.292 | 0.283 | 0.397 |
+| r2 M6 | 16.66 | 17.30 | 0.922 | 2.582 | 0.768 | 0.294 | 0.277 | 0.385 |
+| r2 M7 | 15.03 | 15.58 | 0.801 | 2.382 | 0.679 | 0.263 | 0.270 | 0.380 |
+| r2 M7df0 | 16.76 | 17.60 | 0.845 | 2.460 | 0.721 | 0.266 | 0.270 | 0.378 |
+| r3 M6 | 16.66 | 17.39 | 0.836 | 2.448 | 0.711 | 0.266 | 0.272 | 0.379 |
+| r3 M7 | 15.00 | 15.72 | 0.812 | 2.428 | 0.685 | 0.266 | 0.269 | 0.376 |
+| r3 M7df0 | 16.75 | 17.83 | 0.835 | 2.437 | 0.711 | 0.259 | 0.265 | 0.374 |
+| **median M6** | 16.66 | 17.30 | **0.916** | **2.559** | 0.763 | 0.292 | 0.277 | 0.385 |
+| **median M7** | 15.02 | 15.67 | **0.812** | **2.428** | 0.685 | 0.266 | 0.270 | 0.380 |
+| **median M7df0** | 16.76 | 17.60 | **0.845** | **2.460** | 0.721 | 0.266 | 0.270 | 0.378 |
+
+Verdict: M7 is not slower than M6 in the 2.5D close-up. Its work is 0.10 ms lower (about 11 %), its total 0.13 ms
+lower, its instructions 10 % lower on llvmpipe and 9 % lower on the 4060, and the lowest `world` stage is M7's. The
+stage that moves is `world` (0.76 to 0.69 ms); `flush`, `submit` and `finish` are the same within 0.03 ms. The
+`RAZDOR_DEPTH_FAST=0` run sits between M6 and M7 on the frame time (0.85 ms work) and matches M6 on instructions, so
+the drop from M6 to M7 comes from the new 2.5D fast path, as the instruction count says. The 2.42 ms of the first
+pass is not reproduced; the anomaly is closed. The `perf record` comparison of the first plan was not needed and was
+not run.
+
+Note on the frames: close-up frames are kind `idle` (still frames), as in the first pass.
+
+### 2.5D walk (`walk:Другой берег:0,-12`, frames 10-140 for instructions, 144 walking frames for the probe)
+
+Three rounds for each (round 1 is the first run of the pass above, rounds 2 and 3 are new). Medians of the three rounds:
+
+| variant | llvmpipe Minstr | 4060 Minstr | work ms | total ms | world ms | flush ms | submit ms | finish ms | gl_draws |
+|---|---|---|---|---|---|---|---|---|---|
+| M6 | 14.89 | 16.77 | 0.622 | 2.215 | 0.499 | 0.131 | 0.247 | 0.390 | 73 |
+| M7 | 14.09 | 15.96 | 0.648 | 2.237 | 0.525 | 0.135 | 0.252 | 0.395 | 73 |
+| M7df0 | 14.78 | 16.65 | 0.629 | 2.218 | 0.508 | 0.132 | 0.248 | 0.393 | 73 |
+
+Per round, M6 work is 0.619, 0.622, 0.623 and M7 is 0.648, 0.648, 0.649 (no overlap). The walk is a small step the
+other way from the close-up: M7 is about 4 % more probe work than M6 (+0.03 ms, all of it in `world`), with the same
+total frame time (2.24 ms), 5 % fewer instructions on llvmpipe and the same GPU stages. M7df0 is in between on work.
+On the 4060 the instruction counts vary by about 2 % between rounds, which is the noise of that backend.
+
+### Flat walk and flat close-up (blip re-check, two rounds each)
+
+| run | llvmpipe Minstr | 4060 Minstr | work ms | total ms |
+|---|---|---|---|---|
+| flat walk M6 (r1 / r2) | 12.23 / 12.36 | 13.20 / 13.36 | 0.435 / 0.436 | 2.106 / 2.103 |
+| flat walk M7 (r1 / r2) | 12.40 / 12.50 | 13.27 / 13.37 | 0.443 / 0.441 | 2.116 / 2.118 |
+| flat close-up M3 (r1 / r2) | 13.87 / 13.85 | 14.55 / 14.26 | 0.423 / 0.425 | 2.111 / 2.122 |
+| flat close-up M6 (r1 / r2) | 11.62 / 11.63 | 12.27 / 11.96 | 0.350 / 0.349 | 2.069 / 2.067 |
+| flat close-up M7 (r1 / r2) | 11.74 / 11.80 | 12.17 / 12.45 | 0.358 / 0.355 | 2.078 / 2.079 |
+
+These are the cells the coordinator asked about. Their first-pass blips are gone on a quiet machine (see anomaly 4).
+M3 has no GPU-finish columns (before M6). On the flat walk and close-up, M7 is 1 to 2 % above M6 in work
+(0.44 against 0.44 ms; 0.356 against 0.349 ms), which is within the noise of this check.
+
+Files: `/mnt/ai_models/razdor-scratch/timing-followup/results/summary.md` (the interleaved and walk tables, per run),
+`summary-recheck.md` (blip re-check) and `finish-check.py` output (finish minus submit in all probe cells of the round).
+
 ## Anomalies and what is unresolved
 
-1. **M7 2.5D close-up stage medians are higher than M6** (probe work 1.42 to 2.42 ms, total 3.44 to 5.63 ms), while
-   the instruction count is lower (16.7 to 14.9 M on llvmpipe) and the draw and vertex counts are identical
-   (74 draws, 4412 vertices). Every stage is higher, including `world` (1.21 to 1.92 ms), `terrain`, `submit`,
-   `flush`, `finish`. The M6 probe ran at load 2.5 at its start, the M7 probe at 3.4. This is not explained by
-   the instruction count and must be re-run as an interleaved M6/M7 pair on a quiet machine before it is read.
-   It is not a claim of regression yet, and it is the one row in this round that could contradict the option f
-   stage 2 ledger entry.
+1. **M7 2.5D close-up anomaly: not reproduced (resolved in the follow-up below).** The first pass showed M7 probe
+   work 1.42 to 2.42 ms with identical draws. In the quiet interleaved re-run M7 is not slower: work 0.81 ms
+   against 0.92 ms for M6 (medians of three rounds), total 2.43 against 2.56 ms. The first pass's M6 and M7 cells were
+   run at different loads (2.5 and 3.4 at their start, not quiet), which is the explanation the data support.
+   The absolute milliseconds of the first pass are not comparable with the follow-up's.
 2. **M0 to M5 have no GPU finish.** `RAZDOR_GPU_FINISH` (and `RAZDOR_REPLAY_FLOOR`, `RAZDOR_CLEAR_TARGETS`) exists
    from M6. For M0 to M5 the `finish` column is n/a, and their probe totals do not include the GPU wait. Compare
    `total_ms` between M5 and M6 with that in mind; the instruction counts are unaffected.
@@ -215,6 +292,10 @@ the same protocol as the rows above. They show what each switch is worth now.
    not 300. The instruction window is 10 to 140 (a deviation from N1 = 100).
 4. **Load during the round.** The instruction numbers held (gate: 0.05 % llvmpipe spread). Stage milliseconds of
    the cells whose `load-end` is above 4 in `results.csv` are less reliable; the M7 close-up above is one of them.
+   The follow-up re-checked the single-value blips of the first pass (M3 flat close-up 1.23 ms, M6 flat walk
+   1.35 ms, about 2 to 3 times their neighbours): with CPUs 12,14 and a quiet machine they are 0.42 ms (M3 flat
+   close-up, two rounds) and 0.44 ms (M6 flat walk, two rounds). They were load and hyper-thread contention on
+   CPUs 12-15 (two physical cores), not milestone costs. First-pass milliseconds on those cells should not be read.
 5. **Battle** (M0 vs M7): instructions 19.4 vs 18.8 M on llvmpipe, probe work 0.69 vs 0.65 ms, total 3.93 vs 3.99.
    No real change in the battle frame.
 
@@ -226,7 +307,8 @@ the same protocol as the rows above. They show what each switch is worth now.
 - **Pan.** No map-pan scene exists (see Method).
 - **1024x768** only for M0 and M7, whole map flat and 2.5D (the other milestones were not run at that window).
 - **2.5D walk for M3 (llvmpipe only, partial), M4, M5, M6 and M7:** not reached before the round's time limit (the walk's
-  machine was above load 30 for over an hour); those cells read "(not run)". Flat walk, all milestones: run. Battle: M0 and M7 only.
+  machine was above load 30 for over an hour); those cells read "(not run)". The follow-up ran the 2.5D walk for M6, M7
+  and M7 `RAZDOR_DEPTH_FAST=0` only (above); M4 and M5 are still not run, and M3's walk is not run. Flat walk, all milestones: run. Battle: M0 and M7 only.
 - **Ground blend setting off** and **RAZDOR_SWAP_INTERVAL:** not run.
 
 ## Files
