@@ -74,6 +74,8 @@ patch -p1 -s -d "mbedtls-$MBEDTLS_VERSION" < "$ROOT/scripts/win7/mbedtls-msvcrt.
 
 # The CMake toolchain: clang for the mingw target on the msvcrt sysroot, lld as the linker.
 # _WIN32_WINNT 0x0601 is Windows 7: nothing newer is named in the headers either.
+# -rtlib/-unwindlib=libgcc: llvm-mingw's clang defaults to compiler-rt and libunwind, which the
+# msvcrt sysroot does not have; gcc's libgcc (-L/-B below) is the runtime the msvcrt sysroot has.
 cd "$WORK"
 cat > "$WORK/mingw7.cmake" <<EOF
 set(CMAKE_SYSTEM_NAME Windows)
@@ -81,7 +83,7 @@ set(CMAKE_SYSTEM_PROCESSOR x86_64)
 set(CMAKE_C_COMPILER "$CLANG")
 set(CMAKE_C_COMPILER_TARGET x86_64-w64-windows-gnu)
 set(CMAKE_C_FLAGS_INIT "--sysroot=$SYSROOT $INC -D_WIN32_WINNT=0x0601 -DWINVER=0x0601 -Wno-error")
-set(CMAKE_EXE_LINKER_FLAGS_INIT "-fuse-ld=lld -static -L$LIBGCC -B$LIBGCC $EXTRA")
+set(CMAKE_EXE_LINKER_FLAGS_INIT "-fuse-ld=lld -static -rtlib=libgcc -unwindlib=libgcc -L$LIBGCC -B$LIBGCC $EXTRA")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "-fuse-ld=lld -L$LIBGCC -B$LIBGCC $EXTRA")
 set(CMAKE_AR "$AR")
 set(CMAKE_RC_COMPILER "$WINDRES")
