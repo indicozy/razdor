@@ -1059,8 +1059,9 @@ drag (`unit_drag::press`, `unit_drag::follow`). «Щелчками» (`Controls:
 original alone: `unit_drag::press` arms no drag, so nothing sticks to the pointer. «Перетаскиванием»
 (`Controls::Drag`) makes a press on a card only select or deselect the selected unit, and a
 press on an empty cell with a unit selected slides it there (`unit_drag::grid_press_in`: `Slide`,
-as the second press does); the garrison tab's `building_view::garrison_click` still only clears
-on an empty cell. Units also move by dragging, and the card hints say "click to select"
+as the second press does). The garrison tab's `building_view::garrison_click` does the same with a
+unit picked in either army (`Act`: `garrison_act`, the same moves as the other two choices, across
+armies too); with nothing picked an empty cell only clears a stale selection. Units also move by dragging, and the card hints say "click to select"
 (`items_view::pointed_line`). The same choice covers units in
 the army window (`items_view::squad`), the building window's hero grid and the garrison tab,
 and items. Battle is not affected.
