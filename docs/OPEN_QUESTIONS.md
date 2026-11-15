@@ -18,8 +18,8 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   Seen once, on the owned copy; a phone's first start after an update with a mod installed is the case that matters.
   The reads (`stored::File::read`) already survive a vanished plain file; the fingerprint does not. The spec's rule 5
   (`docs/specs/appdata-compression.md`) says the conversion runs before the install loads; the code runs it on a
-  thread. Repro: the kept scratch folder of the carry-over check (`run2` under the update-check scratch root,
-  `tools/release/README.md`; its B start is `new-B.log`).
+  thread. Repro: the kept scratch folder `run2` of the carry-over check (run with `--scratch`; the B start is its
+  `new-B.log`, the screens are under its `shots/`; `tools/release/README.md` has the layout).
   Not fixed: the fix is the owner's call.
 
 - **The billows' frontier banks stay out** (2026-11-14, the owner's call). The old «Туман» look of 9f0eebd9 had
