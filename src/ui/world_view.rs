@@ -51,6 +51,10 @@ use super::saves::{self, Back, LoadView, SaveView};
 
 /// The flat view's sprite fast path (option f, `RAZDOR_FLAT_FAST`).
 mod flat_fast;
+/// The static records of the standing objects, read by both fast paths (option f, `object_records`).
+mod object_records;
+/// The 2.5D view's sprite fast path (option f, stage 2, `RAZDOR_DEPTH_FAST`).
+mod depth_fast;
 use super::story;
 use super::widgets::*;
 use super::view25::{self, TiltCamera};
@@ -2605,6 +2609,7 @@ fn pop_model() {
 }
 
 fn push_cpu_model(m: Mat4) {
+    depth_fast::note_push(m);
     // SAFETY: called on the main thread while macroquad runs, as every draw.
     unsafe { get_internal_gl() }.quad_gl.push_cpu_model_matrix(m);
 }
@@ -5875,6 +5880,8 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     super::replay_floor::sprites(replay_key, !game.moving(), || super::sharp::session_pass(!tilted, lit, || {
         // The flat view's objects on the fast path (`flat_fast`), when it is on; the old path draws the rest.
         let mut fast = flat_fast::Pass::begin(map, art, cam, &ctx);
+        // The 2.5D view's objects on its fast path (`depth_fast`); the flat view's and the 2.5D's are never both on.
+        let mut deep = depth_fast::Pass::begin(map, art, cam, &ctx);
         let old_object = |i: u32, foot: Vec2| {
             // Razdor's (the owner's request, 2026-11-11): an object too small to see is not drawn, and one
             // just above that fades out (`detail_visibility`); the flat view fades it through `SPRITE_VIS`.
@@ -5898,16 +5905,26 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                 Drawable::Object(i, foot) => {
                     let candidate = (!(map.objects[*i as usize].class == object_class::TREES && ctx.anim != 0.0)).then_some(*i);
                     statics.object(k, candidate, || {
-                        let handled = match fast.as_mut() {
+                        let handled = match (fast.as_mut(), deep.as_mut()) {
                             // The check: the old path draws it, and its pieces are compared with the fast quad.
-                            Some(fp) if fp.checking() => {
+                            (Some(fp), _) if fp.checking() => {
                                 super::sharp::capture_start();
                                 old_object(*i, *foot);
                                 fp.check(*i, &super::sharp::capture_end());
                                 true
                             }
-                            Some(fp) => fp.draw(*i),
-                            None => false,
+                            (Some(fp), _) => fp.draw(*i),
+                            // The 2.5D check: the old path draws it, and its pieces and model matrices are compared.
+                            (None, Some(dp)) if dp.checking() => {
+                                super::sharp::capture_start();
+                                depth_fast::note_start();
+                                old_object(*i, *foot);
+                                let pieces = super::sharp::capture_end();
+                                dp.check(*i, *foot, &pieces, &depth_fast::note_end());
+                                true
+                            }
+                            (None, Some(dp)) => dp.draw(*i, *foot),
+                            (None, None) => false,
                         };
                         if !handled {
                             old_object(*i, *foot);
@@ -5971,6 +5988,9 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
         }
         if let Some(fp) = fast {
             fp.finish();
+        }
+        if let Some(dp) = deep {
+            dp.finish();
         }
         statics.finish(map.objects.len());
     }));
