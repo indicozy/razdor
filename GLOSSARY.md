@@ -30,3 +30,7 @@ _Avoid_: rotation, angle sprite, turnaround
 **View set**:
 All rotated views of one sprite, keyed by the sprite's pixel hash.
 _Avoid_: rotation sheet, view pack
+
+**Enhanced asset**:
+A new picture inspired by a DT asset that reads as the same object in DT's style, made where the original falls apart up close or rotated. It enhances DT's art; it never replaces its look.
+_Avoid_: restyle, remaster, replacement art
