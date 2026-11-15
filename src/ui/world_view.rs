@@ -3561,6 +3561,7 @@ pub(super) fn bridge_offset(picture: (u8, u8)) -> (f32, f32) {
 /// from the cell's top-left, its bottom-right corner 16 px right of and 11 px below the cell's,
 /// and that of the plants at `(32 − w, 22 − h)`, less half a pixel; the renderer 0x4c8864 then
 /// moves the plants of classes 9–11 by their jitter ([`plant_shift`]).
+/// (The flat fast path's records keep the same offsets: `flat_fast::rec_of` and `flat_fast::Pass::build`, keep them in step.)
 fn object_sprite_origin(o: &Decoration, w: f32, h: f32, cam: &Camera) -> Vec2 {
     let (x, y) = cam.grid.center(o.tile);
     let corner = cam.to_screen((x + 0.5, y + cam.grid.row_height() / 2.0));
@@ -3622,6 +3623,7 @@ fn building_foot(l: &Location, cam: &Camera) -> Vec2 {
 /// The box of `slot` (the sprite drawn at `origin`, `zoom` px a sprite pixel) of `texture`, its top edge moved `lean` px
 /// right. The lean falls off down the whole sprite (the top moves by `lean`, the foot not at all), so each corner of
 /// the box moves by its own share of it: the box is the uncut quad's own part.
+/// (The flat fast path, `flat_fast::Pass::build`, computes the same vertices: keep the two in step.)
 fn draw_leaning(texture: &Texture2D, slot: &Slot, origin: Vec2, zoom: f32, lean: f32) {
     let texel = super::sharp::texels(texture);
     let (tw, th) = (texel.x, texel.y);
@@ -3768,6 +3770,8 @@ fn lit_whole_if(slot: Slot, night: bool) -> Slot {
     }
 }
 
+/// The standing object's quad (flat and 2.5D). The flat fast path (`flat_fast::Pass::build`) computes the same quad with the
+/// same arithmetic: keep the two in step.
 fn draw_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera, ctx: &FrameCtx) {
     let c = cam.cell_centre(o.tile);
     let base = vec2(c.x, c.y + cam.cell_size().y / 2.0);

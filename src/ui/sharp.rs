@@ -607,6 +607,7 @@ fn draw_sprite_mesh(tex: &Texture2D, x: f32, y: f32, color: Color, params: &Draw
 /// The quad of a sharp draw: exactly [`draw_texture_ex`]'s vertices and indices (the same arithmetic, so the
 /// same picture), with `scale` in each vertex's normal slot for [`SHARP_VERTEX_SCALE`]. Refills `mesh`
 /// (its indices are the quad's).
+/// (The flat fast path, `world_view::flat_fast::Pass::build`, fills the same quad for a plain sprite: keep the two in step.)
 fn fill_sprite_mesh(mesh: &mut Mesh, tex: &Texture2D, x: f32, y: f32, color: Color, params: &DrawTextureParams, scale: Vec2) {
     let [width, height] = tex.size().to_array();
     let Rect { x: sx, y: sy, w: sw, h: sh } = params.source.unwrap_or(Rect { x: 0., y: 0., w: width, h: height });

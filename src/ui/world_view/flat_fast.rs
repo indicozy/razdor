@@ -13,6 +13,7 @@
 
 use std::rc::Rc;
 
+use macroquad::miniquad::TextureId;
 use macroquad::prelude::*;
 use razdor::frame_probe;
 use razdor::local;
@@ -68,7 +69,8 @@ fn rec_of(o: &Decoration, atlas: &Atlas, cam: &Camera) -> Option<Rec> {
 }
 
 /// What the records were made from: the map (its identity, its objects' count and a hash of their pictures and cells),
-/// the grid (the cell's frame) and the atlas.
+/// the grid (the cell's frame) and the atlas (its address, and its texture's id: a texture id is never reused, so an
+/// atlas made again at the same address is not taken for the old one).
 #[derive(Clone, Copy, PartialEq)]
 struct Key {
     map: usize,
@@ -76,6 +78,7 @@ struct Key {
     hash: u64,
     grid: Grid,
     atlas: usize,
+    texture: TextureId,
 }
 
 type Records = Rc<Vec<Option<Rec>>>;
@@ -94,7 +97,7 @@ fn records(map: &TileMap, atlas: &Atlas, cam: &Camera) -> Records {
             hash = (hash ^ v).wrapping_mul(0x0000_0100_0000_01b3);
         }
     }
-    let key = Key { map: std::ptr::from_ref(map) as usize, objects: map.objects.len(), hash, grid: cam.grid, atlas: std::ptr::from_ref(atlas) as usize };
+    let key = Key { map: std::ptr::from_ref(map) as usize, objects: map.objects.len(), hash, grid: cam.grid, atlas: std::ptr::from_ref(atlas) as usize, texture: atlas.texture.raw_miniquad_id() };
     RECS.with_borrow_mut(|c| {
         if let Some((k, recs)) = c.as_ref() {
             if *k == key {
@@ -208,7 +211,7 @@ impl<'a> Pass<'a> {
     /// Ends the pass; the check mode logs its counts.
     pub fn finish(self) {
         if self.mode == Mode::Check {
-            razdor::diag!("flat fast check: {} sprites, {} differ", self.checked, self.differ);
+            razdor::diag!("flat fast check: {} sprites, {} differ (zoom {:.4}, copy divisor {:?})", self.checked, self.differ, self.zoom, self.divisor);
         }
     }
 
