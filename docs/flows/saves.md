@@ -83,7 +83,8 @@ put(): save::meta_of → save::encode (serde_json + BzEncoder) → write .tmp �
   «Сохранить» and «Отмена». The quick save is enabled when `hotkeys::allowed` says F5 may fire on
   the map (`App::frame_content`'s `quick_save_ok`: a game, no foe, no endless wait); it writes the same
   quick save and shows the same message as F5, then closes the window. On a phone the click area
-  of the row's buttons is at least 44 dp tall (`saves::finger_hit`; drawing unchanged).
+  of the row's buttons is the shared finger area (`widgets::button_state`: 48 dp where the room
+  allows, never over a neighbour; drawing unchanged).
 - The map's bytes: `Game::map_bytes` (not serialised; `Game::set_map` keeps them with the origin
   when a map game starts or a campaign map starts, `Game::restart` copies them). `encode` writes
   them as the `map` field only when they hash to the origin's hash. The field is optional: an
@@ -230,6 +231,19 @@ titles are yellow, while the save time is orange in SanSerif. The manual/autosav
 size and colour immediately with selection. An idle spine is grey at 80%, a held one at 90%,
 and a selected spine is full size and drawn last across the book outline and steel line. Each
 tab's idle and selected artwork choices are defined separately in `src/ui/saves.rs`.
+
+The load window's tabs keep one margin above the bottom row on every device (the owner's request,
+2026-11-15; a player pressed «Очистить всё» by the lower half of «Личные»): the upright phone's 14 dp
+(`TAB_GAP_DP`, `tab_margin`: sideways 14 dp at that phone's scale; the desktop `TAB_MARGIN_DESKTOP`,
+21.6 units, the same proportion). The bottom row keeps its place and size on every device (no button
+changes its height). The page, the steel line and the tabs move up to make the margin (`Book::layout`,
+`Upright::line`): the window keeps its height and scale. The tab's click area is its full size, stopped
+above the row. Each area takes its own side of the margin: the tab's finger area grows to the midline,
+and the row's finger area takes the other half above it plus the window's bottom margin below, so the
+two never overlap. Sideways that leaves the row's finger area about 30 dp, and 48 dp only for a button
+with no tab above it. The list holds 8 rows sideways and on the desktop (9 before), upright 9
+(`saves::tests::the_load_list_rows_per_size_with_the_tabs`). The save window has no tabs and keeps its
+layout. Tests: `saves::tests::the_load_tabs_keep_a_gap_from_the_bottom_row`.
 
 The delete sign opens a confirmation with the captured save name in blue and Yes/No
 buttons. The book beneath turns grey and ignores input until the confirmation closes;

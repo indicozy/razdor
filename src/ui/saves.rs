@@ -464,6 +464,9 @@ struct Upright {
     dp: f32,
     /// The window's px per video unit (its scale).
     k: f32,
+    /// The load window's tabs hang from the line: the bottom row keeps `TAB_GAP_DP` under their
+    /// full size (`Book::layout`).
+    tabs: bool,
 }
 
 /// The phone book's page height, a list row's pitch and the bottom row's button height, in dp.
@@ -472,15 +475,49 @@ const ROW_DP: f32 = 36.0;
 const BUTTON_DP: f32 = 46.0;
 /// The top of the book's page in video units (the same on the desktop).
 const PAGE_TOP: f32 = 60.0;
+/// The load window's tabs (`MANUAL_TAB_POSITION`, `AUTO_TAB_POSITION`): their top on the desktop
+/// (`TABS_Y`) under the steel line of the desktop (`DESKTOP_LINE`), their art's size in video units
+/// (`TAB_W`, `TAB_H`: 165 × 45 at 0.9375, as drawn).
+const TABS_Y: f32 = 408.0;
+const DESKTOP_LINE: f32 = 426.0;
+const TAB_W: f32 = 165.0 * 0.9375;
+const TAB_H: f32 = 45.0 * 0.9375;
+/// How far the tabs' full-size area reaches under the line (their tops are `DESKTOP_LINE - TABS_Y`
+/// above it). The tab is hit at full size even when it is drawn smaller, so the bottom row must start
+/// under this, not under the tabs' drawn bottom: a player's report (2026-11-15) of the lower half of
+/// «Личные» pressing «Очистить всё».
+const TABS_BELOW_LINE: f32 = TAB_H - (DESKTOP_LINE - TABS_Y);
+/// The steel line's distance under the page on the desktop (426 under 410): `LINE_UNDER_PAGE`.
+const LINE_UNDER_PAGE: f32 = DESKTOP_LINE - PAGE_TOP - 350.0;
+/// The visible space between the tabs' full-size area and the bottom row: the upright phone's 14 dp
+/// (the owner's margin, 2026-11-15, used on every device). Half of it is the tabs' finger room below
+/// them. Upright it is 14 dp; sideways it is 14 dp at that phone's scale (`tab_margin`); the desktop
+/// has `TAB_MARGIN_DESKTOP`.
+const TAB_GAP_DP: f32 = 14.0;
+/// The desktop's margin: the upright 14 dp at the upright window's scale (2.75 px per dp, 1.78 px per
+/// video unit: 14 × 2.75 / 1.78 ≈ 21.6 units), so the same proportion of the window.
+const TAB_MARGIN_DESKTOP: f32 = 21.6;
+
+/// The margin between the tabs and the bottom row in video units: `TAB_GAP_DP` at the phone's px per dp
+/// `dp` and the window's px per unit `k`, `TAB_MARGIN_DESKTOP` on the desktop (`dp` None).
+fn tab_margin(dp: Option<f32>, k: f32) -> f32 {
+    match dp {
+        Some(dp) => TAB_GAP_DP * dp / k,
+        None => TAB_MARGIN_DESKTOP,
+    }
+}
+/// The bottom row's top on the desktop, under the line (`DESKTOP_LINE` + 17).
+const DESKTOP_ROW_Y: f32 = 443.0;
 
 impl Upright {
     /// `dp_len` dp in video units.
     fn units(self, dp_len: f32) -> f32 {
         dp_len * self.dp / self.k
     }
-    /// The page's height in video units (350 on the desktop).
+    /// The page's height in video units (350 on the desktop). With the tabs, the page gives up what
+    /// the gap under the tabs adds below the line, so the window keeps its height.
     fn page(self) -> f32 {
-        self.units(PAGE_DP)
+        self.line() - PAGE_TOP - self.units(8.0)
     }
     /// A list row's pitch in video units.
     fn pitch(self) -> f32 {
@@ -488,11 +525,12 @@ impl Upright {
     }
     /// The steel line over the buttons: a gap under the page.
     fn line(self) -> f32 {
-        PAGE_TOP + self.page() + self.units(8.0)
+        self.button_y() - if self.tabs { TABS_BELOW_LINE + self.units(TAB_GAP_DP) } else { self.units(10.0) }
     }
-    /// The bottom row's top, under the line.
+    /// The bottom row's top: the same on every book (its place and size never change, the owner's
+    /// rule of 2026-11-15). With the tabs the page and the line move up above their gap.
     fn button_y(self) -> f32 {
-        self.line() + self.units(10.0)
+        PAGE_TOP + self.units(PAGE_DP) + self.units(8.0) + self.units(10.0)
     }
     fn button_h(self) -> f32 {
         self.units(BUTTON_DP)
@@ -514,7 +552,7 @@ fn upright() -> Option<Upright> {
         return None;
     }
     let k = super::window_layout::upright_game_k((Book::W, Book::H))?;
-    Some(Upright { dp, k })
+    Some(Upright { dp, k, tabs: false })
 }
 
 /// Layout of the book window: the video's load window (18:12), 594×482 pixels of the
@@ -536,15 +574,17 @@ struct Book {
     /// The bottom row's top and height (443 and 28 grown on the desktop).
     btn_y: f32,
     btn_h: f32,
+    /// The load window's tabs moved the page and the line above their margin (`Book::layout`).
+    sideways_tabs: bool,
 }
 
 /// The book window's height in its video pixels at the text size `g` (Razdor's own, the owner's
 /// decision of 2026-10-31): 482 at Normal. The buttons' row grows with the text, and the window
 /// with it; the save window's «Быстрое сохранение» takes a row of its own under the others at Large
 /// and Largest (`quick_row`), since its wide label needs the room.
-fn book_video_h(g: f32, quick_row: bool) -> f32 {
+fn book_video_h(g: f32, quick_row: bool, tabs: bool) -> f32 {
     if let Some(u) = upright() {
-        return u.video_h();
+        return Upright { tabs, ..u }.video_h();
     }
     let b = 28.0 * g;
     if quick_row && g > 1.0 { 443.0 + b + 6.0 + b + 11.0 } else { 443.0 + b + 11.0 }
@@ -555,19 +595,28 @@ impl Book {
     const H: f32 = 482.0;
     const ROWS: usize = 12;
 
-    /// The book of window `win` with its scale `k`, growth, footer and phone metrics.
-    fn layout(win: Rect, k: f32, grow: f32, foot: f32, upright: Option<Upright>) -> Book {
+    /// The book's metrics. `tabs`: the load window's tabs hang from the line, so the bottom row keeps
+    /// their margin (`tab_margin`, `dp` the phone's px per dp or None on the desktop). The bottom row never
+    /// changes its place or size (the owner, 2026-11-15): the page, the line and the tabs move up.
+    fn layout(win: Rect, k: f32, grow: f32, foot: f32, upright: Option<Upright>, tabs: bool, dp: Option<f32>) -> Book {
+        let upright = upright.map(|u| Upright { tabs, ..u });
+        let moved = upright.is_none() && tabs;
         let (page, line, btn_y, btn_h) = match upright {
             Some(u) => (u.page(), u.line(), u.button_y(), u.button_h()),
-            None => (350.0, 426.0, 443.0, 28.0 * grow),
+            None if moved => {
+                let line = DESKTOP_ROW_Y - TABS_BELOW_LINE - tab_margin(dp, k);
+                (line - PAGE_TOP - LINE_UNDER_PAGE, line, DESKTOP_ROW_Y, 28.0 * grow)
+            }
+            None => (350.0, DESKTOP_LINE, DESKTOP_ROW_Y, 28.0 * grow),
         };
-        Book { win, k, grow, foot, upright, page, line, btn_y, btn_h }
+        Book { win, k, grow, foot, upright, page, line, btn_y, btn_h, sideways_tabs: moved }
     }
 
-    fn at(title: &str, over_map: bool, quick_row: bool) -> (Book, bool) {
+    /// The book window; `tabs` as in [`Book::layout`] (the load window's, not the save's).
+    fn at(title: &str, over_map: bool, quick_row: bool, tabs: bool) -> (Book, bool) {
         let k = super::chrome::k();
         let grow = super::display::button_grow();
-        let video_h = book_video_h(grow, quick_row);
+        let video_h = book_video_h(grow, quick_row, tabs);
         let foot = (video_h - Book::H) * k;
         let (w, h) = (Book::W * k, video_h * k);
         // Over the menu the video's window stands low (y 190 of 720), clear of the logo; over
@@ -581,22 +630,28 @@ impl Book {
         let win = super::window_layout::window_rect(over_map, (Book::W, video_h)).unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, y, w, h));
         // Above the on-screen keyboard while its name field is typed in (`window_layout::keyboard_lifted`).
         let phone = upright();
-        let win = super::window_layout::keyboard_lifted(win, Book::layout(win, k, grow, foot, phone).row_rect(0));
+        let dp = super::display::dp_px();
+        let win = super::window_layout::keyboard_lifted(win, Book::layout(win, k, grow, foot, phone, tabs, dp).row_rect(0));
         let (_, closed) = super::chrome::window(win, title, super::chrome::Skin::Marble, true);
-        let book = Book::layout(win, k, grow, foot, phone);
-        match phone {
+        let book = Book::layout(win, k, grow, foot, phone, tabs, dp);
+        if book.line_based() {
             // A phone's frames: over the page's bottom and the bottom row (the desktop's are the original's).
-            Some(_) => {
-                let px = super::chrome::opx();
-                let line = book.p(0.0, book.line).y;
-                super::chrome::steel_frame(Rect::new(win.x + 2.0 * px, line, win.w - 4.0 * px, 2.0 * px), px, 2);
-                super::chrome::steel_frame(Rect::new(win.x + 4.0 * px, win.y + 31.0 * px, win.w - 8.0 * px, line - win.y - 31.0 * px - 4.0 * px), px, 1);
-            }
+            let px = super::chrome::opx();
+            let line = book.p(0.0, book.line).y;
+            super::chrome::steel_frame(Rect::new(win.x + 2.0 * px, line, win.w - 4.0 * px, 2.0 * px), px, 2);
+            super::chrome::steel_frame(Rect::new(win.x + 4.0 * px, win.y + 31.0 * px, win.w - 8.0 * px, line - win.y - 31.0 * px - 4.0 * px), px, 1);
+        } else {
             // The 634×516 window with its inner frames (ae2520, 0x48d710 from 4dc10e); the footer's growth
             // is the window's, and the frames keep their place above the buttons.
-            None => super::chrome::window_inner_frames_footed(win, super::chrome::opx(), 0.0, foot),
+            super::chrome::window_inner_frames_footed(win, super::chrome::opx(), 0.0, foot);
         }
         (book, closed)
+    }
+
+    /// Whether the page's frames and the tab line are drawn at the book's line: on a phone held upright,
+    /// and wherever the load window's tabs moved the line (`sideways_tabs`: every device but upright).
+    fn line_based(&self) -> bool {
+        self.upright.is_some() || self.sideways_tabs
     }
 
     /// The rows the list shows: 12 at Normal; at Large and Largest the rows are taller, so the page
@@ -606,7 +661,7 @@ impl Book {
             // A phone's page: the rows that fit between its top and its bottom, two units kept free.
             return ((self.page - u.units(6.0)) / u.pitch()).floor().max(0.0) as usize;
         }
-        let fit = ((410.0 - 64.0 - 27.0 * self.grow) / (29.0 * self.grow)).floor().max(0.0) as usize + 1;
+        let fit = ((PAGE_TOP + self.page - 64.0 - 27.0 * self.grow) / (29.0 * self.grow)).floor().max(0.0) as usize + 1;
         fit.min(Book::ROWS)
     }
 
@@ -804,12 +859,18 @@ impl Book {
 
     /// A torn-parchment tab hanging under the book (`load-button-1/2.lit`: grey, and orange
     /// for the open one), on a steel line running along the window.
+    /// The tab's click area: its full size (drawn smaller when not selected), stopped above the bottom
+    /// row. On the desktop the full size reaches under the row (the row at 443, the tab to 450), and a
+    /// tap there pressed both the tab and «Clear all» (2026-11-15). Pure, see the tests.
+    fn tab_hit(&self, x: f32, y: f32) -> Rect {
+        self.rect(x, y, TAB_W, (self.btn_y - y).min(TAB_H))
+    }
+
     fn tab(&self, x: f32, y: f32, label: &str, open: bool, textures: (u8, u8)) -> bool {
         let k = self.k;
         // Convert the original 165x45 artwork to our 960x720 design coordinates.
-        let native = vec2(165.0, 45.0) * 0.9375;
-        let hit = self.rect(x, y, native.x, native.y);
-        let (_, down, pressed) = super::widgets::button_state(hit, !open);
+        let native = vec2(TAB_W, TAB_H);
+        let (_, down, pressed) = super::widgets::button_state(self.tab_hit(x, y), !open);
         // The original switches frames immediately: a held press is halfway between the
         // idle and selected size; releasing over the tab selects its full-size state.
         let scale = if open { 1.0 } else if down { 0.9 } else { 0.8 };
@@ -842,7 +903,7 @@ impl Book {
         // drawn again over the hanging tabs; the footer's growth is below it. A phone's line is at its own place.
         let px = super::chrome::opx();
         let w = self.win;
-        if self.upright.is_some() {
+        if self.line_based() {
             super::chrome::steel_frame(Rect::new(w.x + 2.0 * px, self.p(0.0, self.line).y, w.w - 4.0 * px, 2.0 * px), px, 2);
             return;
         }
@@ -857,11 +918,12 @@ impl Book {
         pressed
     }
 
-    /// A button of the save window's bottom row: drawn as [`Book::button`], but its click area is
-    /// finger-sized on a phone ([`finger_hit`]).
+    /// A button of the save window's bottom row at its own `y`: drawn as [`Book::button`]. Its click
+    /// area is the shared finger area of [`super::widgets::button_state`] (a phone's grows only into the
+    /// room the neighbours leave, so it never reaches over a tab or a row).
     fn finger_button(&self, x: f32, y: f32, w: f32, label: &str, enabled: bool) -> bool {
         let r = self.rect(x, y, w, self.btn_h);
-        let (_, down, pressed) = super::widgets::button_state(finger_hit(r, super::display::dp_px()), enabled);
+        let (_, down, pressed) = super::widgets::button_state(r, enabled);
         super::chrome::marble_button(r, label, enabled, down);
         pressed
     }
@@ -1044,15 +1106,6 @@ fn save_row(book: &Book) -> [(f32, f32, f32); 3] {
     }
 }
 
-/// A button's click area: its drawn rect, on a phone (`dp` screen px per dp) at least 44 dp tall,
-/// grown equally up and down so the row's neighbours keep their clicks at the sides; the desktop's is
-/// the button itself. A phone choice, not in the original (the owner's request: finger-sized buttons).
-fn finger_hit(r: Rect, dp: Option<f32>) -> Rect {
-    let Some(dp) = dp.filter(|d| *d > 0.0) else { return r };
-    let h = r.h.max(44.0 * dp);
-    Rect::new(r.x, r.y + r.h / 2.0 - h / 2.0, r.w, h)
-}
-
 /// The message the quick save (F5, and the save window's «Быстрое сохранение») leaves on the map.
 pub fn quick_save_message(game: &Game) -> String {
     match save::games_dir() {
@@ -1072,8 +1125,8 @@ pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, quick: boo
     world_view::backdrop(game, assets);
     // The save window at its own scale on a phone (`window_layout::over_map_scale`: upright between the
     // inset and the bar, sideways as the main menu's load window).
-    let _scale = super::window_layout::over_map_scale((Book::W, book_video_h(super::display::button_grow(), true)));
-    let (book, closed) = Book::at(&own("SaveGame", "Title", n_("Save the game")), true, true);
+    let _scale = super::window_layout::over_map_scale((Book::W, book_video_h(super::display::button_grow(), true, false)));
+    let (book, closed) = Book::at(&own("SaveGame", "Title", n_("Save the game")), true, true, false);
     book.page(&own("SaveGame", "GameName", n_("Name of the saved game")), &own("SaveGame", "ScenarioName", n_("Name of the scenario")));
     // Held Backspace repeats, as in the original's edit box (0x47a624, 0x475748); the caret,
     // the selection and the clipboard are Razdor's own (`widgets::edit_keys`).
@@ -1234,8 +1287,8 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     // The load window at its own scale on a phone: the title's (`window_layout::title_scale`) or the one
     // over the map (`window_layout::over_map_scale`, the same size as the title's when held sideways).
     let grow = super::display::button_grow();
-    let _scale = super::window_layout::window_scale(over_map, (Book::W, book_video_h(grow, false)));
-    let (book, closed) = Book::at(&own("LoadGame", "Title", n_("Load a saved game")), over_map, false);
+    let _scale = super::window_layout::window_scale(over_map, (Book::W, book_video_h(grow, false, true)));
+    let (book, closed) = Book::at(&own("LoadGame", "Title", n_("Load a saved game")), over_map, false, true);
     book.page(&own("LoadGame", "GameName", n_("Name of the saved game")), &own("LoadGame", "ScenarioName", n_("Name of the scenario")));
     fill_metas(&mut view.entries, &mut view.asked, &mut view.settled, view.scroll, Some(&mut view.selected));
     let rows: Vec<Row> = view.entries.iter().map(row_of).collect();
@@ -1273,7 +1326,7 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     }
     book.tab_line();
     // The tabs hang from the line: a phone's line is lower with its taller page (the desktop's is 426).
-    let tab_drop = book.line - 426.0;
+    let tab_drop = book.line - DESKTOP_LINE;
     let tabs = [
         (MANUAL_TAB_POSITION.0, MANUAL_TAB_POSITION.1 + tab_drop, SaveKind::Manual, own("LoadGame", "PrivateSave", n_("Private")), MANUAL_TAB_TEXTURES),
         (AUTO_TAB_POSITION.0, AUTO_TAB_POSITION.1 + tab_drop, SaveKind::Auto, own("LoadGame", "AutoSave", n_("Autosaves")), AUTO_TAB_TEXTURES),
@@ -2043,7 +2096,7 @@ mod tests {
     /// and their widths share the page's width, `gap` apart; the page's height is 360 dp.
     #[test]
     fn a_phone_book_has_one_bottom_row_of_finger_sized_buttons() {
-        let u = Upright { dp: 2.75, k: 1.75 };
+        let u = Upright { dp: 2.75, k: 1.75, tabs: false };
         assert!((u.button_h() * u.k / 2.75 - 46.0).abs() < 1e-3);
         assert!((u.page() * u.k / 2.75 - 360.0).abs() < 1e-3);
         let row = phone_row(&[0.42, 0.29, 0.29], u.units(6.0));
@@ -2218,24 +2271,90 @@ mod tests {
         }
     }
 
-    /// A phone's button of the save window is finger-sized (44 dp tall at least, centred on the drawn
-    /// button, so it reaches outside it at the bottom); the desktop's is the button itself.
+    /// A phone's button of the save window is finger-sized (48 dp where the room allows) and its area
+    /// never reaches over a neighbouring button: `widgets::finger_hit_at` with the others as obstacles.
+    /// The desktop's is the button itself.
     #[test]
     fn the_save_window_buttons_are_finger_sized_on_a_phone() {
         let (sw, sh, top) = (1080.0, 2376.0, 66.0);
         let bar = (80.0f32 * 1.125).round();
         let (k, win) = crate::ui::window_layout::portrait_game((sw, sh), Some(2.75), top, bar, 1.125, (Book::W, Book::H)).expect("held upright");
-        let book = Book::layout(win, k, 1.0, 0.0, None);
+        let book = Book::layout(win, k, 1.0, 0.0, None, false, None);
+        let screen = Rect::new(0.0, 0.0, sw, sh);
         let [(quick_x, _, quick_w), (save_x, _, save_w), (cancel_x, _, cancel_w)] = save_button_row(1.0);
-        for (x, w) in [(quick_x, quick_w), (save_x, save_w), (cancel_x, cancel_w)] {
-            let drawn = book.rect(x, 443.0, w, 28.0);
-            let hit = finger_hit(drawn, Some(2.75));
+        let drawn: Vec<Rect> = [(quick_x, quick_w), (save_x, save_w), (cancel_x, cancel_w)].iter().map(|&(x, w)| book.rect(x, 443.0, w, 28.0)).collect();
+        for (i, r) in drawn.iter().enumerate() {
+            let others: Vec<Rect> = drawn.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, o)| *o).collect();
+            let hit = crate::ui::widgets::finger_hit_at(*r, Some(2.75), screen, sh - bar, &others);
             assert!(hit.h >= 44.0 * 2.75 - 0.5, "at least 44 dp: {hit:?}");
-            assert!((hit.center().y - drawn.center().y).abs() < 0.5, "centred on the button");
-            assert!(hit.x == drawn.x && hit.w == drawn.w, "the sides stay the button's, so the neighbours keep theirs");
             assert!(hit.y >= book.p(0.0, 410.0).y, "the click area does not reach the list's rows above");
+            for o in &others {
+                assert!(!overlaps(hit, *o), "a neighbour's area: {hit:?} over {o:?}");
+            }
         }
-        assert_eq!(finger_hit(book.rect(quick_x, 443.0, quick_w, 28.0), None).h, 28.0 * k, "the desktop's click area is the button");
+        assert_eq!(crate::ui::widgets::finger_hit_at(drawn[0], None, screen, sh - bar, &[]).h, 28.0 * k, "the desktop's click area is the button");
+    }
+
+    /// Whether two rectangles share a point.
+    fn overlaps(a: Rect, b: Rect) -> bool {
+        a.x < b.right() && b.x < a.right() && a.y < b.bottom() && b.y < a.bottom()
+    }
+
+    /// The load window's tabs and its bottom row keep the same margin on every device (`tab_margin`): a
+    /// tab's full-size area and a button's finger area never overlap, the bottom row keeps its place and
+    /// size, the window keeps its height, and a tab's finger area is at least 40 dp. The owner, 2026-11-15.
+    #[test]
+    fn the_load_tabs_keep_a_gap_from_the_bottom_row() {
+        let (sw, sh, top) = (1080.0f32, 2400.0f32, 66.0f32);
+        let bar = (80.0f32 * 1.125).round();
+        let (k_up, _) = crate::ui::window_layout::portrait_game((sw, sh), Some(2.75), top, bar, 1.125, (Book::W, Book::H)).expect("held upright");
+        // (name, the phone's metrics, screen w × h, dp, the window's px per unit, the phone's px per dp)
+        let cases = [
+            ("upright", Some(Upright { dp: 2.75, k: k_up, tabs: false }), (sw, sh), 2.75f32, k_up, Some(2.75f32)),
+            ("sideways", None, (sh, sw), 2.625f32, 1.6f32, Some(2.625f32)),
+        ];
+        for (name, phone, (w, h), dp, k, phone_dp) in cases {
+            let win = Rect::new(0.0, 0.0, Book::W * k, 500.0 * k);
+            let book = Book::layout(win, k, 1.0, 0.0, phone, true, phone_dp);
+            let plain = Book::layout(win, k, 1.0, 0.0, phone, false, phone_dp);
+            assert!(plain.btn_y == book.btn_y && plain.btn_h == book.btn_h, "{name}: the bottom row moved: {} {} vs {} {}", plain.btn_y, plain.btn_h, book.btn_y, book.btn_h);
+            let want = tab_margin(phone_dp, k) * k;
+            let screen = Rect::new(0.0, 0.0, w, h);
+            let clear = book.rect(17.0, book.btn_y, 140.0, book.btn_h);
+            let row = [clear, book.rect(300.0, book.btn_y, 140.0, book.btn_h)];
+            let drop = book.line - DESKTOP_LINE;
+            if phone.is_none() {
+                assert!((book.btn_y + book.btn_h + 11.0 - 482.0).abs() < 1e-3, "sideways: the window keeps its height");
+            }
+            for x in [MANUAL_TAB_POSITION.0, AUTO_TAB_POSITION.0] {
+                let tab = book.rect(x, TABS_Y + drop, TAB_W, TAB_H);
+                let gap = row[0].y - tab.bottom();
+                assert!(gap >= want - 0.5, "{name}: the gap under the tab is {gap} px, want {want}");
+                let tab_hit = crate::ui::widgets::finger_hit_at(tab, Some(dp), screen, h, &row);
+                assert!(!overlaps(tab_hit, row[0]) && !overlaps(tab_hit, row[1]), "{name}: the tab's area {tab_hit:?} over the row");
+                assert!(tab_hit.h >= 40.0 * dp - 0.5, "{name}: the tab's area {tab_hit:?} under 40 dp");
+                let clear_hit = crate::ui::widgets::finger_hit_at(clear, Some(dp), screen, h, &[tab]);
+                assert!(!overlaps(clear_hit, tab), "{name}: the row's area {clear_hit:?} over the tab {tab:?}");
+            }
+        }
+        // The desktop: the same margin (`TAB_MARGIN_DESKTOP`), and the tab's area stops above the row.
+        let desk = Book::layout(Rect::new(0.0, 0.0, Book::W, 500.0), 1.0, 1.0, 0.0, None, true, None);
+        assert!((desk.btn_y - (desk.line + TABS_BELOW_LINE) - TAB_MARGIN_DESKTOP).abs() < 1e-3, "the desktop's margin");
+        let hit = desk.tab_hit(MANUAL_TAB_POSITION.0, TABS_Y + (desk.line - DESKTOP_LINE));
+        assert!(hit.bottom() <= desk.btn_y + 1e-3, "the desktop's tab area stops above the row: {hit:?}");
+    }
+
+    /// The list's rows per size with the load window's tabs at Large text: the margin takes the room
+    /// (sideways and on the desktop one row fewer than before; upright keeps 9).
+    #[test]
+    fn the_load_list_rows_per_size_with_the_tabs() {
+        let win = Rect::new(0.0, 0.0, Book::W, 500.0);
+        let upright = Upright { dp: 2.75, k: 1.78, tabs: false };
+        let rows = |phone: Option<Upright>, k: f32, dp: Option<f32>| Book::layout(win, k, 1.25, 0.0, phone, true, dp).shown();
+        assert_eq!(rows(None, 1.0, Some(2.0)), 8, "sideways 1600x720 at 2.0");
+        assert_eq!(rows(None, 1.5, Some(2.625)), 8, "sideways 2400x1080 at 2.625");
+        assert_eq!(rows(None, 1.0, None), 8, "the desktop");
+        assert_eq!(rows(Some(upright), 1.78, Some(2.75)), 9, "upright 1080x2400 at 2.75");
     }
 
     /// The save window over the map on a phone held upright (1080×2376 at 2.75 px per dp, the
@@ -2246,7 +2365,7 @@ mod tests {
         let (sw, sh, top) = (1080.0, 2376.0, 66.0);
         let bar = (80.0f32 * 1.125).round();
         let (k, win) = crate::ui::window_layout::portrait_game((sw, sh), Some(2.75), top, bar, 1.125, (Book::W, Book::H)).expect("held upright");
-        let book = Book::layout(win, k, 1.0, 0.0, None);
+        let book = Book::layout(win, k, 1.0, 0.0, None, false, None);
         // «Сохранить» (369, 116) and «Отмена» (492, 95), 28 design px high, as `Book::button` draws them.
         let [(_, _, _), (save_x, _, save_w), (cancel_x, _, cancel_w)] = save_button_row(1.0);
         let save = book.rect(save_x, 443.0, save_w, 28.0);
@@ -2284,5 +2403,4 @@ mod tests {
             }
         }
     }
-
 }
