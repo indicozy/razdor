@@ -37,7 +37,7 @@ pub enum Pick {
     Custom,
     /// Razdor's "Maps and mods" (`ui::hub_view`).
     Hub,
-    /// The same window on its Mods tab: the Mods tile or link with no mod installed.
+    /// The same window on its Mods tab: the last entry of the Mods link's list («Скачать моды…»).
     HubMods,
 }
 
@@ -968,7 +968,7 @@ fn corner_links(k: f32, mods: &[(String, razdor::hub::Text)], mod_choice: Option
     let w = measure(label, size).width;
     let right = screen_width() - 16.0 * k;
     let pressed = link(label, right, y, true, size);
-    if let Some(p) = mods_tap(Rect::new(right - w, y - size, w, size * 1.3), pressed, mods, mod_choice, k) {
+    if let Some(p) = mod_link_action(Rect::new(right - w, y - size, w, size * 1.3), pressed, mods, mod_choice, k) {
         pick = Some(p);
     }
     pick
@@ -1010,7 +1010,7 @@ fn chip_links(m: &PortraitMenu, k: f32, mods: &[(String, razdor::hub::Text)], mo
             1 if pressed => pick = Some(Pick::Hub),
             2 if pressed => open_link(DISCORD_INVITE),
             3 => {
-                if let Some(p) = mods_tap(r, pressed, mods, mod_choice, k) {
+                if let Some(p) = mod_link_action(r, pressed, mods, mod_choice, k) {
                     pick = Some(p);
                 }
             }
@@ -1078,29 +1078,60 @@ fn mods_label(mc: Option<&super::new_game::ModChoice>) -> &str {
     }
 }
 
-/// The chosen mod's link (the landscape corner's or the upright tile, at `r`) for this frame: a
-/// pick made in its list is asked of the app (`new_game::request_mod`: played from the next frame),
-/// and a click opens the list over `r`. A mod being built takes no choice (1441).
-fn mod_link_action(r: Rect, pressed: bool, mods: &[(String, razdor::hub::Text)], mc: &super::new_game::ModChoice, k: f32) {
-    if let Some(v) = take_pick(MOD_LIST).filter(|&v| v != mc.current) {
-        super::new_game::request_mod(super::new_game::mod_id_at(mods, v));
-    }
-    if !mc.busy && (pressed || super::snapshot::open_mod_list()) {
-        let options: Vec<(i64, String)> = mc.labels.iter().enumerate().map(|(i, l)| (i as i64, l.clone())).collect();
-        open_list(MOD_LIST, r, mc.current, &options, k);
+/// What the Mods link's list picks (see `mod_menu_entries`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModMenuPick {
+    /// A choice of the base game (index 0) or of an installed mod, as `ModChoice::labels` numbers them.
+    Mod(i64),
+    /// The last entry: «Скачать моды…», the hub on its Mods tab. It changes no mod.
+    GetMods,
+}
+
+/// The Mods link's list: the choices of `labels` (the base game first, then each installed mod;
+/// `ModChoice::labels`), then «Скачать моды…» as the last entry, numbered `labels.len()`.
+fn mod_menu_entries(labels: &[String]) -> Vec<(i64, String)> {
+    let mut options: Vec<(i64, String)> = labels.iter().enumerate().map(|(i, l)| (i as i64, l.clone())).collect();
+    options.push((labels.len() as i64, tr("Get mods…").to_string()));
+    options
+}
+
+/// What the list's entry `index` means for `labels_len` choices: the last entry is the hub, the
+/// others the mod choices; `None` for an index the list does not have.
+fn mod_menu_pick(index: i64, labels_len: usize) -> Option<ModMenuPick> {
+    if index < 0 {
+        None
+    } else if index as usize == labels_len {
+        Some(ModMenuPick::GetMods)
+    } else if (index as usize) < labels_len {
+        Some(ModMenuPick::Mod(index))
+    } else {
+        None
     }
 }
 
-/// The Mods link's tap (the corner's or the tile's, at `r`): with a mod installed, the mod list of
-/// `mod_link_action`; with none, the hub on its Mods tab (`Pick::HubMods`).
-fn mods_tap(r: Rect, pressed: bool, mods: &[(String, razdor::hub::Text)], mc: Option<&super::new_game::ModChoice>, k: f32) -> Option<Pick> {
-    match mc {
-        Some(mc) => {
-            mod_link_action(r, pressed, mods, mc, k);
-            None
+/// The Mods link (the landscape corner's or the upright tile, at `r`) for this frame. A click always
+/// opens its list over `r`, also with no mod installed (then the base game alone) and while a mod
+/// is being built. A mod entry picked is asked of the app (`new_game::request_mod`: played from the
+/// next frame); the current one and a mod being built take no choice (1441). «Скачать моды…» (the
+/// last entry) returns `Pick::HubMods` and changes no mod.
+fn mod_link_action(r: Rect, pressed: bool, mods: &[(String, razdor::hub::Text)], mc: Option<&super::new_game::ModChoice>, k: f32) -> Option<Pick> {
+    // With no mod installed the list holds the base game only (the menu builds no `ModChoice` then).
+    let (labels, current, busy) = match mc {
+        Some(mc) => (mc.labels.clone(), mc.current, mc.busy),
+        None => (super::new_game::mod_choice(&[], None, false).labels, 0, false),
+    };
+    let mut pick = None;
+    if let Some(v) = take_pick(MOD_LIST) {
+        match mod_menu_pick(v, labels.len()) {
+            Some(ModMenuPick::GetMods) => pick = Some(Pick::HubMods),
+            Some(ModMenuPick::Mod(v)) if v != current && !busy => super::new_game::request_mod(super::new_game::mod_id_at(mods, v)),
+            _ => {}
         }
-        None => pressed.then_some(Pick::HubMods),
     }
+    if pressed || super::snapshot::open_mod_list() {
+        open_list(MOD_LIST, r, current, &mod_menu_entries(&labels), k);
+    }
+    pick
 }
 
 /// A rounded rectangle of radius `rad` (at most half its sides).
@@ -4136,5 +4167,44 @@ mod tests {
         assert!(!bottom_bar_row_shown(true, true));
         assert!(!bottom_bar_row_shown(false, false));
         assert!(!bottom_bar_row_shown(false, true));
+    }
+
+    #[test]
+    fn the_mod_list_holds_the_base_game_then_the_installed_mods_then_the_hub_last() {
+        // No mod installed: the base game alone, then «Скачать моды…» as the last entry.
+        let none = super::super::new_game::mod_choice(&[], None, false);
+        let e = mod_menu_entries(&none.labels);
+        assert_eq!(e.len(), 2, "{e:?}");
+        assert_eq!(e[0].0, 0);
+        assert_eq!(e[1], (1, tr("Get mods…").to_string()));
+        // Two mods installed: the base game, the two mods, then the hub as the fourth entry.
+        let mods = vec![
+            ("evolution".to_string(), razdor::hub::Text { ru: "Эволюция".into(), en: String::new() }),
+            ("community".to_string(), razdor::hub::Text { ru: "Сообщество".into(), en: String::new() }),
+        ];
+        let two = super::super::new_game::mod_choice(&mods, Some("community"), false);
+        let e = mod_menu_entries(&two.labels);
+        assert_eq!(e.len(), 4, "{e:?}");
+        assert_eq!(e.iter().map(|(i, _)| *i).collect::<Vec<_>>(), vec![0, 1, 2, 3]);
+        assert_eq!(e[3].1, tr("Get mods…"));
+        assert_eq!(two.current, 2, "the mod played is the second mod");
+    }
+
+    #[test]
+    fn the_last_entry_is_the_hub_and_never_a_mod() {
+        // With no mod installed: index 0 is the base game, the last index (1) is the hub.
+        assert_eq!(mod_menu_pick(0, 1), Some(ModMenuPick::Mod(0)));
+        assert_eq!(mod_menu_pick(1, 1), Some(ModMenuPick::GetMods));
+        // With two mods: 0 base, 1 and 2 the mods, 3 the hub. The hub never maps to a mod id.
+        assert_eq!(mod_menu_pick(2, 3), Some(ModMenuPick::Mod(2)));
+        assert_eq!(mod_menu_pick(3, 3), Some(ModMenuPick::GetMods));
+        let mods = vec![
+            ("evolution".to_string(), razdor::hub::Text::default()),
+            ("community".to_string(), razdor::hub::Text::default()),
+        ];
+        assert_eq!(super::super::new_game::mod_id_at(&mods, 2).as_deref(), Some("community"));
+        // Nothing past the hub, nothing negative.
+        assert_eq!(mod_menu_pick(4, 3), None);
+        assert_eq!(mod_menu_pick(-1, 3), None);
     }
 }

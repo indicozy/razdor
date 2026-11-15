@@ -65,11 +65,11 @@ If an antivirus removed or damaged a mod's files, Razdor checks them when you ch
 
 The main menu has a "Mods" button: on a computer it is a link in the bottom right corner, on a phone it is a tile in the bottom row, next to "Maps and Mods" and Discord. When a mod is installed, it shows "Mod: <name>"; without mods, it says "Mods".
 
-Clicking the button with a mod installed opens the same "Mod" list as in the New Game window. Selecting a mod in the list applies immediately.
-* The list starts with the base game, followed by installed mods.
-* If a mod is currently being built, it will say "Preparing the mod…" instead of the name, and it cannot be opened.
+Clicking the button opens the "Mod" list (the same as in the New Game window), even when no mod is installed. Selecting a mod in the list applies immediately.
+* The list starts with the base game, then the installed mods, and ends with "Get mods…": it opens the "Maps and Mods" window on its "Mods" tab and does not change the mod played.
+* A mod being built says "Preparing the mod…" instead of its name, and cannot be chosen.
 
-If no mods are installed, the "Mods" button opens the "Maps and Mods" window on its "Mods" tab.
+If no mods are installed, the list holds the base game and "Get mods…".
 
 ## Partial entries
 

@@ -79,6 +79,8 @@ SCREENS = [
     ("watch", "watch:play,day=13", {"RAZDOR_WATCH": "@watch-sample"}),
     ("watch-choice", "watch:play,battle", {"RAZDOR_WATCH": "@watch-sample"}),
     ("title", "title", {}),
+    # The Mods link's list open (`main_menu::mod_link_action`): its rows and «Скачать моды…» last.
+    ("title-mod-list", "title", {"RAZDOR_SCENE_MOD_LIST": "1"}),
     # The popup of an older install's saves (Android: `ui::saves_move`), over the main menu.
     ("saves-move", "title", {"RAZDOR_SCENE_SAVES_MOVE": "1"}),
     # The window while the picked folder is copied: the bar at 40%, and while its files are counted (no bar).

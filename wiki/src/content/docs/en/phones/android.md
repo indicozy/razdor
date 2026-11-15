@@ -65,7 +65,7 @@ When the phone is held vertically, windows span the width of the screen, and tex
 * **Diary** — a window of its own with the **"Quests"**, **"Completed"**, **"Rumours"** and **"Messages"** and **"Chronicle"** tabs, the list of entries and the picked entry's text. The hero's stats and backpack are in the army window, the money on the bottom bar.
 * **Market** — Item description at the top, followed by section icons and a list of goods below.
 * **Save** — Three buttons in a single row at the bottom.
-* **Main Menu** — the **"Mods"** tile in the bottom row: with a mod installed it says **"Mod: <name>"**, and tapping it allows you to select a different mod. Without mods it opens "Maps and Mods" on its "Mods" tab.
+* **Main Menu** — the **"Mods"** tile in the bottom row: with a mod installed it says **"Mod: <name>"**, and tapping it opens the list: the base game, the installed mods, and "Get mods…" at the end (it opens "Maps and Mods" on its "Mods" tab).
 * **Spellbook** — A **"Close"** button and an enlarged filter button are located at the bottom.
 * **City** — Section buttons remain in place when switching between them.
 * **Events and Dialogues** — The image is at the top, and the text occupies the full width of the screen.

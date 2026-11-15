@@ -180,6 +180,8 @@ Needs mods: {names} = Нужны моды: {names}
 Maps = Карты
 Campaigns = Кампании
 Mods = Моды
+# The Mods link's list, its last entry: the hub on its Mods tab (ui/main_menu.rs)
+Get mods… = Скачать моды…
 Reading the hub… = Читаю хаб…
 No connection: showing the saved list. = Нет связи: показан сохранённый список
 The hub can't be read: {e} = Хаб не прочитать: {e}
