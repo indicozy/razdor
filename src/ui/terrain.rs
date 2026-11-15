@@ -29,6 +29,7 @@
 //! default), B = 1+2, C = 1+4, D = none (the 1.4.1 path). Unset, nothing changes.
 
 use std::cell::RefCell;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 use macroquad::prelude::*;
@@ -509,6 +510,17 @@ struct GroundCache {
     cheap: bool,
 }
 
+/// The ground cache's steps taken so far, by kind (`Moving`, `Fill`, `Scroll`): the performance test's pan cells read
+/// their measure's counts (`bench::Motion`). Counting costs one relaxed add a frame; nothing draws from it.
+static GROUND_MOVING: AtomicU64 = AtomicU64::new(0);
+static GROUND_FILLS: AtomicU64 = AtomicU64::new(0);
+static GROUND_SCROLLS: AtomicU64 = AtomicU64::new(0);
+
+/// The counts of the ground cache's steps so far: (moving, fills, scrolls).
+pub fn ground_steps() -> (u64, u64, u64) {
+    (GROUND_MOVING.load(Ordering::Relaxed), GROUND_FILLS.load(Ordering::Relaxed), GROUND_SCROLLS.load(Ordering::Relaxed))
+}
+
 /// What the ground draw does this frame (`TerrainLayer::ground_target`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GroundStep {
@@ -933,11 +945,14 @@ impl TerrainLayer {
             g.at = o;
             g.wkey = water;
             let step = GroundStep::Scroll { shift, strips: exposed_strips(shift, (pw as i32, ph as i32)), refresh };
+            GROUND_SCROLLS.fetch_add(1, Ordering::Relaxed);
             GroundFrame { target: targets[new].clone()?, prev: targets[cur].clone(), step }
         } else if moved {
+            GROUND_MOVING.fetch_add(1, Ordering::Relaxed);
             GroundFrame { target: targets[cur].clone()?, prev: None, step: GroundStep::Moving }
         } else {
             // The camera stopped on a view the cache does not hold: it is filled for this view.
+            GROUND_FILLS.fetch_add(1, Ordering::Relaxed);
             g.key = Some(key);
             g.at = at;
             g.wkey = water;

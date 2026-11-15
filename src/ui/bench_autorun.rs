@@ -6,6 +6,9 @@
 //! choice (`mine` or `all`, the windows' «Мои настройки» and «Все пресеты»); an optional `map=<name>`
 //! line names the map (default: `bench::MAPS`). Lines starting with `#` are notes.
 //!
+//! A `pan` line adds the lab's pan cells after the choice's (`bench::pan_cells`: «Оригинал» in 2.5D and flat, the camera
+//! panning and holding still in turn, cell ids `original-25d.pan` and `original-flat.pan`). The player's menu has none.
+//!
 //! A `profile` line (or `debug`, the same) turns profiling on for that run only: each cell then logs its
 //! stage breakdown (`RazdorBenchStages`), and the debug mode's GPU samples run (`diag::set_forced_profile`).
 //!
@@ -47,6 +50,8 @@ pub struct Trigger {
     pub profile: bool,
     /// The lab's switches the run has (the lines `replay-floor`, `gpu-finish`, `clear-targets`, `static-draw`, `swap-interval 0|1`).
     pub lab: Flags,
+    /// The run adds the lab's pan cells (a `pan` line: `bench::pan_cells`, after the choice's cells).
+    pub pan: bool,
 }
 
 /// Reads a trigger file's text: the choice on the first line, then optional `map=<name>` and `profile` lines.
@@ -63,9 +68,14 @@ pub fn parse(text: &str) -> Result<Trigger, String> {
     let mut map = None;
     let mut profile = false;
     let mut lab = Flags::default();
+    let mut pan = false;
     for line in lines {
         if line == "profile" || line == "debug" {
             profile = true;
+            continue;
+        }
+        if line == "pan" {
+            pan = true;
             continue;
         }
         match line {
@@ -92,7 +102,7 @@ pub fn parse(text: &str) -> Result<Trigger, String> {
             }
         }
     }
-    Ok(Trigger { choice, map, profile, lab })
+    Ok(Trigger { choice, map, profile, lab, pan })
 }
 
 local! {
@@ -145,11 +155,12 @@ fn start_from(app: &mut App, dir: &Path, path: &Path) {
     let choice = if trigger.choice == Choice::Mine { "mine" } else { "all" };
     let map = trigger.map.as_deref().map(|m| format!(" map={m}")).unwrap_or_default();
     let profile = if trigger.profile { " profile" } else { "" };
+    let pan = if trigger.pan { " pan" } else { "" };
     let switches = trigger.lab.describe();
     let switches = if switches.is_empty() { String::new() } else { format!(" lab={switches}") };
-    razdor::diag::log(&format!("bench autorun: {choice}{map}{profile}{switches}"));
+    razdor::diag::log(&format!("bench autorun: {choice}{map}{profile}{pan}{switches}"));
     lab::set(trigger.lab);
-    match bench::start_run(app, trigger.choice, trigger.map.as_deref(), trigger.profile) {
+    match bench::start_run(app, trigger.choice, trigger.map.as_deref(), trigger.profile, trigger.pan) {
         Ok(()) => FROM_FILE.with(|f| f.set(true)),
         Err(e) => refuse(dir, &e),
     }
@@ -198,29 +209,29 @@ mod tests {
 
     #[test]
     fn the_choice_is_the_first_line() {
-        assert_eq!(parse("all\n").unwrap(), Trigger { choice: Choice::All, map: None, profile: false, lab: Flags::default() });
-        assert_eq!(parse("mine").unwrap(), Trigger { choice: Choice::Mine, map: None, profile: false, lab: Flags::default() });
+        assert_eq!(parse("all\n").unwrap(), Trigger { choice: Choice::All, map: None, profile: false, lab: Flags::default(), pan: false });
+        assert_eq!(parse("mine").unwrap(), Trigger { choice: Choice::Mine, map: None, profile: false, lab: Flags::default(), pan: false });
     }
 
     #[test]
     fn a_map_line_names_the_map_and_crlf_is_fine() {
         let t = parse("all\r\nmap=Другой берег\r\n").unwrap();
-        assert_eq!(t, Trigger { choice: Choice::All, map: Some("Другой берег".into()), profile: false, lab: Flags::default() });
+        assert_eq!(t, Trigger { choice: Choice::All, map: Some("Другой берег".into()), profile: false, lab: Flags::default(), pan: false });
         assert_eq!(parse("mine\nmap=  \n").unwrap().map, None);
     }
 
     #[test]
     fn a_byte_order_mark_and_notes_are_skipped() {
         let t = parse("\u{feff}# the lab's run\n\nall\n# twice\nmap=РК1-Начало пути\n").unwrap();
-        assert_eq!(t, Trigger { choice: Choice::All, map: Some("РК1-Начало пути".into()), profile: false, lab: Flags::default() });
+        assert_eq!(t, Trigger { choice: Choice::All, map: Some("РК1-Начало пути".into()), profile: false, lab: Flags::default(), pan: false });
     }
 
     #[test]
     fn a_profile_line_turns_the_profiling_on_for_the_run_in_any_place() {
         let t = parse("all\nprofile\nmap=Другой берег\n").unwrap();
-        assert_eq!(t, Trigger { choice: Choice::All, map: Some("Другой берег".into()), profile: true, lab: Flags::default() });
+        assert_eq!(t, Trigger { choice: Choice::All, map: Some("Другой берег".into()), profile: true, lab: Flags::default(), pan: false });
         // `debug` is the same line; the order of the lines does not matter.
-        assert_eq!(parse("mine\ndebug").unwrap(), Trigger { choice: Choice::Mine, map: None, profile: true, lab: Flags::default() });
+        assert_eq!(parse("mine\ndebug").unwrap(), Trigger { choice: Choice::Mine, map: None, profile: true, lab: Flags::default(), pan: false });
         assert!(parse("# the lab's run, with stages\n\nall\r\nprofile \r\n").unwrap().profile, "a note, a blank line and spaces are fine");
         assert!(!parse("all\nmap=X").unwrap().profile, "no profile line: no profiling");
         assert!(parse("all\nprofile=1\n").is_err(), "the line is `profile`, with no value");
@@ -236,6 +247,15 @@ mod tests {
         assert!(parse("all\nswap-interval 2\n").is_err(), "only the two intervals the lab compares");
         assert!(parse("all\nswap-interval\n").is_err(), "the interval needs its value");
         assert!(parse("all\nreplay-floor=1\n").is_err(), "a switch line takes no value");
+    }
+
+    #[test]
+    fn a_pan_line_adds_the_pan_cells_and_takes_no_value() {
+        assert!(parse("all\npan\n").unwrap().pan, "the pan line is the switch");
+        let t = parse("mine\r\nmap=Другой берег\r\npan\r\nprofile\r\n").unwrap();
+        assert_eq!(t, Trigger { choice: Choice::Mine, map: Some("Другой берег".into()), profile: true, lab: Flags::default(), pan: true });
+        assert!(!parse("all\nmap=X").unwrap().pan, "no pan line: no pan cells");
+        assert!(parse("all\npan=1\n").is_err(), "the line is `pan`, with no value");
     }
 
     #[test]

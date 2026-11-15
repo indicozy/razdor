@@ -33,6 +33,15 @@ use super::{App, Screen};
 /// The settle before a cell's measure, and the measure, in seconds (the owner's numbers, 2026-11-12).
 pub const SETTLE_SECS: f64 = 3.0;
 pub const MEASURE_SECS: f64 = 12.0;
+/// The pan cells (`Pos::Pan`, lab only: the trigger file's `pan` line): the camera moves for [`PAN_MOVE_SECS`], holds still for
+/// [`PAN_HOLD_SECS`] (the ground's still frame, its Fill step), and moves again, from the settle's start to the measure's end.
+/// The speed is in map cells per second (the view's world units: one cell's width at the default zoom): 19.2 cells a second,
+/// one screen width per 2 s on the desktop's 1280-px window (38.4 cells across at the default zoom, `bench pan:` log line);
+/// a phone shows fewer cells across, so the same speed covers more screens there. The path is the map's middle row, from the
+/// clamp's left end to its right end and back.
+pub const PAN_MOVE_SECS: f64 = 3.0;
+pub const PAN_HOLD_SECS: f64 = 0.5;
+pub const PAN_CELLS_PER_SEC: f64 = 19.2;
 /// A frame longer than this is a slow one (a 30 fps frame, with a margin).
 pub const SLOW_MS: f32 = 33.0;
 /// The bench maps, the first the install has: the campaign's base map, then the first campaign map.
@@ -52,6 +61,8 @@ pub enum Choice {
 pub enum Pos {
     Near,
     Far,
+    /// The default zoom with the camera panning (the lab's `pan` line only: [`pan_cells`]).
+    Pan,
 }
 
 /// One configuration of the settings: a preset (None: the player's own), and the view (None: the player's own).
@@ -89,6 +100,7 @@ impl Slot {
         let pos = match self.pos {
             Pos::Near => "near",
             Pos::Far => "far",
+            Pos::Pan => "pan",
         };
         format!("{}.{pos}", self.config.key)
     }
@@ -98,6 +110,7 @@ impl Slot {
         let pos = match self.pos {
             Pos::Near => tr("near"),
             Pos::Far => tr("whole map"),
+            Pos::Pan => tr("panning"),
         };
         format!("{} · {pos}", tr(self.config.label))
     }
@@ -110,6 +123,43 @@ pub fn plan(choice: Choice) -> Vec<Slot> {
         Choice::All => &ALL,
     };
     configs.iter().flat_map(|&config| [Pos::Near, Pos::Far].map(|pos| Slot { config, pos })).collect()
+}
+
+/// The lab's pan cells (the trigger file's `pan` line, never the player's menu): «Оригинал» in 2.5D, then flat, panning.
+pub fn pan_cells() -> Vec<Slot> {
+    ALL.iter().filter(|c| c.key == "original-25d" || c.key == "original-flat").map(|&config| Slot { config, pos: Pos::Pan }).collect()
+}
+
+/// The cells of a run: the choice's cells, then the pan cells when the run asks for them.
+pub fn cells_for(choice: Choice, pan: bool) -> Vec<Slot> {
+    let mut cells = plan(choice);
+    if pan {
+        cells.extend(pan_cells());
+    }
+    cells
+}
+
+/// The pan's position in time: the seconds the camera has moved after `t` seconds from the settle's start. It moves for
+/// [`PAN_MOVE_SECS`] of each [`PAN_MOVE_SECS`] + [`PAN_HOLD_SECS`] and stands still in the hold, so the value is the same
+/// for every frame of a hold (the ground sees no motion there).
+pub fn pan_moved_secs(t: f64) -> f64 {
+    let cycle = PAN_MOVE_SECS + PAN_HOLD_SECS;
+    let k = (t / cycle).floor();
+    k * PAN_MOVE_SECS + (t - k * cycle).min(PAN_MOVE_SECS)
+}
+
+/// The pan's offset along its path of `range` cells, after `moved` seconds of motion at `speed` cells a second: a
+/// ping-pong from the left end (0) to the right end (`range`) and back. Zero for no range (the map fits the view).
+pub fn pan_offset(moved: f64, speed: f64, range: f64) -> f64 {
+    if range <= 0.0 {
+        return 0.0;
+    }
+    let u = (moved * speed).rem_euclid(2.0 * range);
+    if u <= range {
+        u
+    } else {
+        2.0 * range - u
+    }
 }
 
 /// The settings a cell runs with: its configuration on the player's settings, and the run's own
@@ -207,6 +257,16 @@ pub struct Device {
     pub vsync: String,
 }
 
+/// A pan cell's counts over its measure: the ground cache's steps (`terrain::ground_steps`: moving, Fill, Scroll) and the
+/// frames whose drawn camera moved (`world_view::drawn_look`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Motion {
+    pub fills: u64,
+    pub scrolls: u64,
+    pub moving: u64,
+    pub cam_moves: u32,
+}
+
 /// One finished cell.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CellResult {
@@ -217,6 +277,8 @@ pub struct CellResult {
     pub stats: Stats,
     /// The cell's stage breakdown (`frame_probe::stages_payload`), when the run had profiling on.
     pub stages: Option<String>,
+    /// The pan cells' counts (None for the other cells, whose line is unchanged).
+    pub motion: Option<Motion>,
 }
 
 /// A quoted text value of a log line (its quotes become apostrophes).
@@ -228,8 +290,9 @@ pub fn quoted(s: &str) -> String {
 pub fn result_line(r: &CellResult, dev: &Device) -> String {
     let s = &r.stats;
     let rss = s.rss_mb.map_or("na".to_string(), |v| format!("{v:.0}"));
+    let motion = r.motion.map_or(String::new(), |m| format!(" fills={} scrolls={} moving={} cam_moves={}", m.fills, m.scrolls, m.moving, m.cam_moves));
     format!(
-        "RazdorBench cell={} name={} view={} pos={} fps={:.1} frames={} secs={:.1} frame_ms_med={:.2} frame_ms_p90={:.2} frame_ms_p99={:.2} cpu_ms_med={:.2} slow={} load_ms={:.0} rss_mb={} vsync={} screen={}x{} gpu={} os={} version={}",
+        "RazdorBench cell={} name={} view={} pos={} fps={:.1} frames={} secs={:.1} frame_ms_med={:.2} frame_ms_p90={:.2} frame_ms_p99={:.2} cpu_ms_med={:.2} slow={} load_ms={:.0} rss_mb={}{motion} vsync={} screen={}x{} gpu={} os={} version={}",
         r.id,
         quoted(&r.name),
         r.view,
@@ -384,6 +447,23 @@ struct Run {
     fake: bool,
     /// The run profiles itself (`frame_probe`'s cells, the stage lines): the trigger file's `profile` line.
     profile: bool,
+    /// A pan cell's clock: when its settle began (the camera's motion counts from here), and its path (set on that frame).
+    pan_origin: Option<Instant>,
+    pan_path: Option<super::world_view::PanPath>,
+    /// The measure's camera: the look last measured, the frames it moved, and the ground's steps when the measure began.
+    last_look: Option<(f32, f32)>,
+    cam_moves: u32,
+    steps_at: (u64, u64, u64),
+}
+
+impl Run {
+    /// The next cell starts: its pan clock and its camera counts start over.
+    fn next_cell(&mut self) {
+        self.pan_origin = None;
+        self.pan_path = None;
+        self.last_look = None;
+        self.cam_moves = 0;
+    }
 }
 
 enum Phase {
@@ -565,12 +645,13 @@ pub fn start(app: &mut App, choice: Choice) -> Result<(), String> {
 /// [`start`] on the named map (its file name in the game: `bench_autorun`'s `map=` line), or on the
 /// default one when None.
 pub fn start_on(app: &mut App, choice: Choice, map: Option<&str>) -> Result<(), String> {
-    start_run(app, choice, map, false)
+    start_run(app, choice, map, false, false)
 }
 
-/// [`start_on`] with the run's profiling: `profile` turns profiling on for this run only (its frames' stage
-/// lines, `RazdorBenchStages`, and the debug mode's GPU samples), as the trigger file's `profile` line asks.
-pub fn start_run(app: &mut App, choice: Choice, map: Option<&str>, profile: bool) -> Result<(), String> {
+/// [`start_on`] with the run's profiling and its pan cells: `profile` turns profiling on for this run only (its frames' stage
+/// lines, `RazdorBenchStages`, and the debug mode's GPU samples), as the trigger file's `profile` line asks; `pan` adds the
+/// lab's pan cells after the choice's (`pan_cells`), as its `pan` line asks.
+pub fn start_run(app: &mut App, choice: Choice, map: Option<&str>, profile: bool, pan: bool) -> Result<(), String> {
     let Some(_) = app.dt_content.clone() else {
         return Err(tr("The test needs the game: the Discord Times folder.").to_string());
     };
@@ -578,7 +659,7 @@ pub fn start_run(app: &mut App, choice: Choice, map: Option<&str>, profile: bool
         Some(name) => app.scenarios.iter().position(|e| e.file == name).ok_or_else(|| format!("no map {name} in the game"))?,
         None => map_index(app).ok_or_else(|| tr("No map of the game was found.").to_string())?,
     };
-    let cells = plan(choice);
+    let cells = cells_for(choice, pan);
     let map = app.scenarios[map_index].file.clone();
     let saved = Saved {
         settings: app.audio.settings.clone(),
@@ -589,9 +670,10 @@ pub fn start_run(app: &mut App, choice: Choice, map: Option<&str>, profile: bool
     keep_awake(true);
     razdor::diag::set_forced_profile(profile);
     let profiled = if profile { " profile" } else { "" };
+    let panned = if pan { " pan" } else { "" };
     let switches = razdor::lab::current().describe();
     let switches = if switches.is_empty() { String::new() } else { format!(" lab={switches}") };
-    log_line(&format!("RazdorBench START choice={} cells={} map={}{profiled}{switches}", if choice == Choice::Mine { "mine" } else { "all" }, cells.len(), quoted(&map)));
+    log_line(&format!("RazdorBench START choice={} cells={} map={}{profiled}{panned}{switches}", if choice == Choice::Mine { "mine" } else { "all" }, cells.len(), quoted(&map)));
     let run = Run {
         choice,
         cells,
@@ -605,6 +687,11 @@ pub fn start_run(app: &mut App, choice: Choice, map: Option<&str>, profile: bool
         saved: Some(saved),
         fake: false,
         profile,
+        pan_origin: None,
+        pan_path: None,
+        last_look: None,
+        cam_moves: 0,
+        steps_at: (0, 0, 0),
     };
     PHASE.with_borrow_mut(|p| *p = Phase::Running(Box::new(run)));
     Ok(())
@@ -679,8 +766,37 @@ pub fn before_frame(app: &mut App) {
                 }
             }
         }
+        pan_frame(app, &mut run);
     }
     put_run(run);
+}
+
+/// Each frame of a pan cell's settle and measure: the camera is set to where the pan path has it after the time since the
+/// settle began (`pan_moved_secs`, `pan_offset`). The path's ends and the speed are logged once per cell.
+fn pan_frame(app: &mut App, run: &mut Run) {
+    let Some(cell) = run.cells.get(run.index).copied() else { return };
+    if cell.pos != Pos::Pan || !matches!(run.stage, Stage::Settle(_) | Stage::Measure { .. }) {
+        return;
+    }
+    let Some(game) = app.game.as_ref() else { return };
+    let now = Instant::now();
+    let origin = *run.pan_origin.get_or_insert(now);
+    let path = *run.pan_path.get_or_insert_with(|| {
+        let path = super::world_view::bench_pan_path(game, app.map_view.zoom);
+        razdor::diag::log(&format!(
+            "bench pan: cell={} from={:.2} to={:.2} row={:.2} view_cells={:.2} speed={PAN_CELLS_PER_SEC} cells/s move={PAN_MOVE_SECS}s hold={PAN_HOLD_SECS}s",
+            cell.id(),
+            path.from,
+            path.to,
+            path.row,
+            path.view_cells
+        ));
+        path
+    });
+    let t = now.duration_since(origin).as_secs_f64();
+    let range = f64::from(path.to - path.from);
+    let x = f64::from(path.from) + pan_offset(pan_moved_secs(t), PAN_CELLS_PER_SEC, range);
+    super::world_view::bench_pan_look(game, &mut app.map_view, (x as f32, path.row));
 }
 
 /// Each frame after the work and the total time are known: the frame is measured if the cell is
@@ -692,6 +808,13 @@ pub fn sample(app: &mut App, work: Duration, total: Duration) {
         return;
     }
     let now = Instant::now();
+    if matches!(run.stage, Stage::Measure { .. }) {
+        let look = super::world_view::drawn_look();
+        if look != run.last_look {
+            run.cam_moves += 1;
+            run.last_look = look;
+        }
+    }
     let next = match &mut run.stage {
         Stage::Setup => None,
         Stage::Loading(t0) => {
@@ -711,6 +834,11 @@ pub fn sample(app: &mut App, work: Duration, total: Duration) {
         if measuring && run.profile {
             razdor::frame_probe::cell_begin();
         }
+        if measuring {
+            run.steps_at = super::terrain::ground_steps();
+            run.cam_moves = 0;
+            run.last_look = super::world_view::drawn_look();
+        }
     }
     let measure_done = match &run.stage {
         Stage::Measure { start, .. } => now.duration_since(*start).as_secs_f64() >= MEASURE_SECS,
@@ -727,7 +855,16 @@ pub fn sample(app: &mut App, work: Duration, total: Duration) {
     // The probe's samples of the cell (empty when the run is not profiled): the stage breakdown of its frames.
     let samples = if run.profile { razdor::frame_probe::cell_end() } else { Vec::new() };
     let stages = (!samples.is_empty()).then(|| razdor::frame_probe::stages_payload(&cell.id(), &samples));
-    let result = CellResult { id: cell.id(), name: cell.name(), view: view_name(&app.audio.settings), stats: st, stages };
+    let motion = (cell.pos == Pos::Pan).then(|| {
+        let (moving, fills, scrolls) = super::terrain::ground_steps();
+        Motion {
+            fills: fills.saturating_sub(run.steps_at.1),
+            scrolls: scrolls.saturating_sub(run.steps_at.2),
+            moving: moving.saturating_sub(run.steps_at.0),
+            cam_moves: run.cam_moves,
+        }
+    });
+    let result = CellResult { id: cell.id(), name: cell.name(), view: view_name(&app.audio.settings), stats: st, stages, motion };
     let dev = run.device.get_or_insert_with(device);
     log_line(&result_line(&result, dev));
     if let Some(line) = stages_line(&result) {
@@ -735,6 +872,7 @@ pub fn sample(app: &mut App, work: Duration, total: Duration) {
     }
     run.results.push(result);
     run.index += 1;
+    run.next_cell();
     if run.index < run.cells.len() {
         put_run(run);
         return;
@@ -886,6 +1024,11 @@ pub fn snapshot_stage(which: &str) {
                 saved: None,
                 fake: true,
                 profile: false,
+                pan_origin: None,
+                pan_path: None,
+                last_look: None,
+                cam_moves: 0,
+                steps_at: (0, 0, 0),
             };
             PHASE.with_borrow_mut(|p| *p = Phase::Running(Box::new(run)));
         }
@@ -899,7 +1042,7 @@ pub fn snapshot_stage(which: &str) {
                         let t = 14.0 + ((f * 7 + i * 3) % 13) as f32 * 0.4;
                         (t * 0.4, t)
                     }).collect();
-                    CellResult { id: c.id(), name: c.name(), view: if c.config.tilt == Some(false) { "flat" } else { "25d" }, stats: stats(&frames, MEASURE_SECS, 1200.0 + i as f32 * 90.0, Some(540.0)), stages: None }
+                    CellResult { id: c.id(), name: c.name(), view: if c.config.tilt == Some(false) { "flat" } else { "25d" }, stats: stats(&frames, MEASURE_SECS, 1200.0 + i as f32 * 90.0, Some(540.0)), stages: None, motion: None }
                 })
                 .collect();
             let report = Report {
@@ -982,7 +1125,7 @@ mod tests {
     fn the_result_line_is_one_key_value_line_with_the_device() {
         let dev = Device { version: "1.5.0".into(), screen: (1920, 1080), gpu: "NVIDIA \"X\"".into(), os: "Fedora".into(), vsync: "device".into() };
         let s = stats(&[(4.0, 16.0), (4.0, 17.0)], 12.0, 900.0, None);
-        let line = result_line(&CellResult { id: "mine.far".into(), name: "Мои настройки · вся карта".into(), view: "25d", stats: s, stages: None }, &dev);
+        let line = result_line(&CellResult { id: "mine.far".into(), name: "Мои настройки · вся карта".into(), view: "25d", stats: s, stages: None, motion: None }, &dev);
         assert!(line.starts_with("RazdorBench cell=mine.far name=\"Мои настройки · вся карта\" view=25d pos=far "), "{line}");
         assert!(line.contains(" rss_mb=na "));
         assert!(line.contains(" gpu=\"NVIDIA 'X'\" "), "quotes become apostrophes: {line}");
@@ -1004,7 +1147,7 @@ mod tests {
             choice: Choice::Mine,
             device: dev,
             map: "Другой берег".into(),
-            cells: vec![CellResult { id: "mine.near".into(), name: "n".into(), view: "flat", stats: stats(&[(1.0, 16.0)], 1.0, 1.0, None), stages: None }],
+            cells: vec![CellResult { id: "mine.near".into(), name: "n".into(), view: "flat", stats: stats(&[(1.0, 16.0)], 1.0, 1.0, None), stages: None, motion: None }],
             file: None,
             copied: false,
             error: None,
@@ -1024,6 +1167,7 @@ mod tests {
             view: "flat",
             stats: stats(&[(1.0, 16.0)], 1.0, 1.0, None),
             stages: stages.map(str::to_string),
+            motion: None,
         };
         assert_eq!(stages_line(&cell("mine.near", None)), None);
         let r = Report {
@@ -1056,5 +1200,61 @@ mod tests {
         let settings = text.find("\nSettings: quality=none\n").expect("the settings line in the header");
         assert!(vsync < device && device < settings, "the setup lines follow the vertical sync line");
         assert!(text.contains("\n\nCell | FPS"), "a blank line still ends the header");
+    }
+
+    #[test]
+    fn the_pan_cells_are_the_two_originals_after_the_choice() {
+        assert_eq!(pan_cells().iter().map(Slot::id).collect::<Vec<_>>(), ["original-25d.pan", "original-flat.pan"]);
+        assert_eq!(cells_for(Choice::Mine, false), plan(Choice::Mine), "no pan line: the choice's cells alone");
+        let ids: Vec<String> = cells_for(Choice::Mine, true).iter().map(Slot::id).collect();
+        assert_eq!(ids, ["mine.near", "mine.far", "original-25d.pan", "original-flat.pan"]);
+        assert!(!plan(Choice::All).iter().any(|c| c.pos == Pos::Pan), "the player's menu has no pan cell");
+        assert_eq!(Slot { config: ALL[4], pos: Pos::Pan }.name(), format!("{} · {}", tr("Original, flat"), tr("panning")));
+    }
+
+    #[test]
+    fn the_pan_moves_three_seconds_and_holds_half_a_second() {
+        assert_eq!(pan_moved_secs(0.0), 0.0);
+        assert!((pan_moved_secs(1.5) - 1.5).abs() < 1e-12, "it moves with the time");
+        assert_eq!(pan_moved_secs(3.0), 3.0);
+        assert_eq!(pan_moved_secs(3.2), pan_moved_secs(3.4), "the hold stands still");
+        assert_eq!(pan_moved_secs(3.0), pan_moved_secs(3.5), "a hold ends where its move ended");
+        assert!((pan_moved_secs(4.0) - 3.5).abs() < 1e-12, "the next move goes on from there");
+        assert_eq!(pan_moved_secs(7.0), 6.0, "two moves done");
+        assert_eq!(pan_moved_secs(10.2), pan_moved_secs(10.4), "the third hold stands still too");
+        assert_eq!(pan_moved_secs(10.2), 9.0);
+    }
+
+    #[test]
+    fn the_pan_goes_to_the_end_and_back_at_its_speed() {
+        // A range of 10 cells at 4 cells a second: 2.5 s a leg.
+        assert_eq!(pan_offset(0.0, 4.0, 10.0), 0.0);
+        assert!((pan_offset(1.0, 4.0, 10.0) - 4.0).abs() < 1e-9);
+        assert!((pan_offset(2.5, 4.0, 10.0) - 10.0).abs() < 1e-9, "the right end after one leg");
+        assert!((pan_offset(3.75, 4.0, 10.0) - 5.0).abs() < 1e-9, "back half way");
+        assert!(pan_offset(5.0, 4.0, 10.0).abs() < 1e-9, "back at the left end");
+        assert_eq!(pan_offset(9.0, 4.0, 0.0), 0.0, "no range, no motion");
+        for i in 0..1000 {
+            let v = pan_offset(f64::from(i) * 0.037, 4.0, 10.0);
+            assert!((0.0..=10.0).contains(&v), "{v}");
+        }
+    }
+
+    #[test]
+    fn a_pan_cell_line_has_its_motion_counts_and_the_others_do_not() {
+        let dev = Device { version: "1.5.1".into(), screen: (1, 2), gpu: "g".into(), os: "o".into(), vsync: "device".into() };
+        let s = stats(&[(4.0, 16.0)], 12.0, 900.0, None);
+        let near = result_line(&CellResult { id: "mine.near".into(), name: "n".into(), view: "flat", stats: s.clone(), stages: None, motion: None }, &dev);
+        assert!(!near.contains("fills="), "{near}");
+        let pan = CellResult {
+            id: "original-flat.pan".into(),
+            name: "n".into(),
+            view: "flat",
+            stats: s,
+            stages: None,
+            motion: Some(Motion { fills: 2, scrolls: 5, moving: 40, cam_moves: 40 }),
+        };
+        let line = result_line(&pan, &dev);
+        assert!(line.contains(" pos=pan ") && line.contains(" rss_mb=na fills=2 scrolls=5 moving=40 cam_moves=40 vsync="), "{line}");
     }
 }

@@ -467,10 +467,21 @@ the work's median, the slow frames (over 33 ms), the load and the RSS (`/proc`).
   (with `RAZDOR_BENCH_END=<png>` the results are shot and the process ends; `RAZDOR_BENCH_SAVE=1` saves the file);
   `RAZDOR_SCENE=bench:choice|running|results` shows the windows with stand-in numbers.
 - A run with no one at the screen (the lab's adb runs: `tools/perf/samsung_lab.py`): a file `bench-autorun.txt` in
-  `platform::app_dir()` (its first line `all` or `mine`, an optional `map=<name>`, an optional `profile` line). `bench_autorun::tick` (in `App::frame`)
+  `platform::app_dir()` (its first line `all` or `mine`, an optional `map=<name>`, an optional `profile` line, an optional `pan` line). `bench_autorun::tick` (in `App::frame`)
   reads it once the install is loaded and the main menu is quiet, renames it `bench-autorun.done`, and starts the run
   with `bench::start_run` (`start_on` without profiling). The run is saved at its end, and `bench-autorun.finished` (the results file's name) or
   `bench-autorun.error` (why it did not start or was cancelled) is written beside it.
+- The pan cells (the lab's, the trigger file's `pan` line only: `bench::pan_cells`, never the player's menu): `original-25d.pan`
+  and `original-flat.pan`, after the choice's cells. The camera pans along the map's middle row, from the clamp's left end to
+  its right end and back (`world_view::bench_pan_path`: the scroll's own clamp, so flat and 2.5D stay inside the map), at
+  `PAN_CELLS_PER_SEC` (19.2 map cells a second, the view's world units, the same on every device: one screen width per 2 s
+  on the desktop's 1280-px window, 38.4 cells across at the default zoom; a phone shows fewer cells, so it covers more screens). It moves `PAN_MOVE_SECS` (3 s) and holds
+  still `PAN_HOLD_SECS` (0.5 s), from the settle's start to the measure's end (`pan_moved_secs`, `pan_offset`, set each frame by
+  `bench::pan_frame` through `world_view::bench_pan_look`). So the ground's still frame (the Fill step) and the `clear-targets`
+  switch are exercised every 3.5 s. The cell line also gets `fills=`, `scrolls=`, `moving=` (the ground cache's steps over the
+  measure: `terrain::ground_steps`) and `cam_moves=` (measured frames whose drawn camera moved, `world_view::drawn_look`).
+  Read `fills` and `cam_moves` together: a flat hold may give Copy, not Fill, when the cache follows a whole-pixel move.
+  `samsung_lab.py --pan` writes the line; the logs name the path once per cell (`bench pan: cell=…`).
 - Profiling a run (the `profile` line; `debug` is the same): the run turns profiling on for itself
   (`diag::set_forced_profile`, cleared by `restore` at every end, so the player's debug setting and its strip are
   untouched). The frame probe then keeps each measured frame's sample (`frame_probe::cell_begin` at the measure's start,
@@ -487,7 +498,7 @@ the work's median, the slow frames (over 33 ms), the load and the RSS (`/proc`).
 - `tools/perf/phone_bench.py` reads both tags: `RazdorBench` gives the first table, `RazdorBenchStages` a second one
   («Where the frame time goes»). `tools/perf/samsung_lab.py --stages` writes the `profile` line and adds the main
   stages' p50 per build and cell to `compare.md`. `--lab-flags replay-floor,gpu-finish,swap-interval0,clear-targets`
-  writes the switches' lines too (the table at the top of the script; each build's flags are named in `compare.md`).
+  writes the switches' lines too, and `--pan` the pan cells' line (the table at the top of the script; each build's flags are named in `compare.md`).
 
 - The stage line's GL and replay keys (added with the lab switches): `flush` (the batch submissions up to the end
   of the world view: macroquad's `draw` calls, timed in the fork, nested in the world's own stages), `submit` (the

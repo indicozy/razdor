@@ -156,6 +156,39 @@ pub fn set_bench_fit(on: bool) {
     BENCH_FIT.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// The performance test's pan (lab only, `bench::Pos::Pan`): the camera's path along the map's middle row, in cells. `from`
+/// and `to` are the two ends the clamp lets the look reach (`Camera::looking_at`, the scroll's own clamp, flat or 2.5D), `row`
+/// the row's height, `view_cells` the view's width in cells at `zoom`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PanPath {
+    pub from: f32,
+    pub to: f32,
+    pub row: f32,
+    pub view_cells: f32,
+}
+
+/// The pan path of the map at `zoom` (see [`PanPath`]), from the clamp now: the view's margins depend on the tilt.
+pub fn bench_pan_path(game: &Game, zoom: f32) -> PanPath {
+    let map = &game.world.map;
+    let mid = (map.w as f32 / 2.0, map.h as f32 * map.grid.row_height() / 2.0);
+    let row = Camera::looking_at(game, zoom, mid).centre();
+    let from = Camera::looking_at(game, zoom, (-1.0e6, row.1)).centre().0;
+    let to = Camera::looking_at(game, zoom, (1.0e6, row.1)).centre().0;
+    let cam = Camera::looking_at(game, zoom, row);
+    PanPath { from, to, row: row.1, view_cells: map_area().w / cam.scale }
+}
+
+/// The performance test's pan: the camera looks at `at` (world units), clamped as a scroll clamps it. Set each frame of
+/// a pan cell's settle and measure (`bench::before_frame`); the map's own scroll is off during a run (input is held).
+pub fn bench_pan_look(game: &Game, view: &mut MapView, at: (f32, f32)) {
+    view.look = Some(Camera::looking_at(game, view.zoom, at).centre());
+}
+
+/// The look the map was last drawn at (world units), None when it followed the hero: the camera as drawn, not as set.
+pub fn drawn_look() -> Option<(f32, f32)> {
+    LAST_CAM.with(|c| c.get()).and_then(|(_, look)| look)
+}
+
 /// The copy of a map object drawn at its cell size (`Camera::scale`, screen pixels a cell): the half-size copy (divisor 2)
 /// below `SPRITE_LOD_HALF_CELL`, the quarter one (4) below `SPRITE_LOD_QUARTER_CELL`, the full sprite above. The copies
 /// sit in the map atlas itself (`Atlas::decoration_lod`), so the choice never breaks the batch. `RAZDOR_SPRITE_LOD=0`

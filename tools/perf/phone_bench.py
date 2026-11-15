@@ -36,6 +36,8 @@ COLUMNS = [
     ("slow", "Slow frames (>33 ms)", "{}"),
     ("load_ms", "Load ms", "{}"),
     ("rss_mb", "RAM MB", "{}"),
+    ("fills", "Ground fills", "{}"),
+    ("cam_moves", "Camera moves", "{}"),
 ]
 DEVICE_KEYS = ["gpu", "screen", "os", "version", "vsync"]
 

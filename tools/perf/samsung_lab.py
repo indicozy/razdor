@@ -5,7 +5,7 @@ Usage (the phone is the lab's, connected through its Remote Debug Bridge on this
 
     python3 -I tools/perf/samsung_lab.py --serial localhost:<port> --out <dir> \\
         [--apks /mnt/ai_models/razdor-ab-1637/v2] [--only A,C] [--choice all|mine] [--map «Другой берег»] \\
-        [--stages] [--lab-flags replay-floor,gpu-finish,swap-interval0,clear-targets] \\
+        [--stages] [--lab-flags replay-floor,gpu-finish,swap-interval0,clear-targets] [--pan] \\
         [--timeout-min 40] [--install-timeout-min 20] [--dry-run]
     python3 -I tools/perf/samsung_lab.py --out <dir> --compare-only      # rebuild compare.md from <dir>/<X>/
 
@@ -31,7 +31,8 @@ For each build X:
    run's trigger file, one line each: `replay-floor`, `gpu-finish`, `swap-interval0` (`swap-interval 0`, the
    phone's frame pacing), `swap-interval1`, `clear-targets` (see docs/flows/testing-and-tools.md). The builds
    must know the lines: an APK older than the switches refuses the trigger file (exit 4, its own error file);
-   compare.md names the flags of each build;
+   compare.md names the flags of each build. `--pan` writes the `pan` line: the run adds the two pan cells
+   (`original-25d.pan`, `original-flat.pan`: the camera pans and holds still in turn, see docs/flows/testing-and-tools.md);
 6. the script waits for `RazdorBench DONE` (logcat) or the `bench-autorun.finished` file, up to --timeout-min;
 7. <out>/<X>/ gets the results file (`razdor-bench-*.txt`), razdor.log, the trigger file and the full logcat;
    razdor.log's `terrain options:` line must name build X (else the script stops with exit 5);
@@ -307,14 +308,15 @@ def wait_install(lab, minutes):
         time.sleep(POLL_SECS)
 
 
-def push_trigger(lab, out_dir, choice, map_name, stages=False, lab_flags=()):
+def push_trigger(lab, out_dir, choice, map_name, stages=False, lab_flags=(), pan=False):
     """Writes the trigger file in the variant's folder and pushes it into the app's Razdor folder. `stages` adds the
     `profile` line (the run profiles itself: the stage lines and the GPU samples); `lab_flags` (names of LAB_FLAGS)
-    add their lines."""
+    add their lines; `pan` adds the `pan` line (the pan cells)."""
     trigger = os.path.join(out_dir, "bench-autorun.txt")
     if not lab.dry_run:
         with open(trigger, "w", encoding="utf-8") as f:
-            f.write(f"{choice}\nmap={map_name}\n" + ("profile\n" if stages else "") + "".join(LAB_FLAGS[n] + "\n" for n in lab_flags))
+            f.write(f"{choice}\nmap={map_name}\n" + ("profile\n" if stages else "") + "".join(LAB_FLAGS[n] + "\n" for n in lab_flags)
+                    + ("pan\n" if pan else ""))
     lab.shell("rm", "-f", f"{APP_DIR}/bench-autorun.txt", f"{APP_DIR}/bench-autorun.done", f"{APP_DIR}/bench-autorun.finished", f"{APP_DIR}/bench-autorun.error")
     rc, out = lab.adb("push", trigger, f"{APP_DIR}/bench-autorun.txt", timeout=120)
     if rc != 0 and not lab.dry_run:
@@ -562,7 +564,7 @@ def run_variant(lab, args, letter, out_dir):
     wake_and_start(lab)
     wait_install(lab, args.install_timeout_min)
     force_stop(lab)
-    push_trigger(lab, out_dir, args.choice, args.map, args.stages, args.lab_flags)
+    push_trigger(lab, out_dir, args.choice, args.map, args.stages, args.lab_flags, args.pan)
     lab.adb("logcat", "-c")
     wake_and_start(lab)
     try:
@@ -584,6 +586,7 @@ def main(argv):
     ap.add_argument("--map", default=MAP_DEFAULT, help=f"the map's file name in the game (default: {MAP_DEFAULT})")
     ap.add_argument("--stages", action="store_true", help="the run profiles itself: each cell logs its stage breakdown (RazdorBenchStages)")
     ap.add_argument("--lab-flags", default="", help="the lab switches of the run, comma-separated: " + ", ".join(LAB_FLAGS) + " (needs --stages)")
+    ap.add_argument("--pan", action="store_true", help="the run adds the pan cells (the camera pans and holds still: original-25d.pan, original-flat.pan)")
     ap.add_argument("--timeout-min", type=float, default=40, help="the test's time limit per build, in minutes")
     ap.add_argument("--install-timeout-min", type=float, default=20, help="the game's install time limit, in minutes")
     ap.add_argument("--dry-run", action="store_true", help="print the adb commands; touch no phone")
