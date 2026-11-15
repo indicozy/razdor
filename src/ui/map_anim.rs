@@ -7,7 +7,7 @@
 //!   other clock-driven parts stop at level 0.
 //! - `Off`: the map is still. The animation time stops, so the sprites, the water, the mist and the flicker hold
 //!   one frame; the water, the living map and the wakes are off, the fog's reveal is instant, and the idle frames
-//!   are paced by the battery saver's rate (`frame_cap::battery_cap`).
+//!   keep their frame rate (the battery saver alone paces idle frames, `frame_cap::battery_cap`).
 //!
 //! The map's animation time (`now`) is the frame clock minus the time the animations were not running (`LOST`),
 //! which only grows while the level is under 1. With `On` it is the frame clock itself, to the bit.

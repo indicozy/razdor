@@ -90,12 +90,12 @@ pub fn peek() -> u32 {
     battery_cap(base, saver, IDLE.load(std::sync::atomic::Ordering::Relaxed))
 }
 
-/// The cap in use and whether the battery saver (or «Анимация карты» Выкл) paces the idle frames.
+/// The cap in use and whether the battery saver paces the idle frames.
 fn cap_inputs() -> (u32, bool) {
     let setting = SETTING.load(std::sync::atomic::Ordering::Relaxed);
     let base = in_use(if setting == u32::MAX { 0 } else { setting });
-    // «Анимация карты» Выкл (`map_anim`) paces the idle map frames as the battery saver does: a still map needs no more.
-    let saver = BATTERY.load(std::sync::atomic::Ordering::Relaxed) || super::map_anim::off();
+    // Only «Экономия батареи» paces the idle map frames. «Анимация карты» Выкл does not: a still map keeps the cap.
+    let saver = BATTERY.load(std::sync::atomic::Ordering::Relaxed);
     (base, saver)
 }
 
@@ -190,6 +190,15 @@ mod tests {
         assert_eq!(battery_cap(60, true, false), 60, "a busy frame keeps the cap");
         assert_eq!(battery_cap(0, true, false), 0, "a busy frame with no cap is not paced");
         assert_eq!(battery_cap(60, false, true), 60, "the saver off: no change");
+    }
+
+    #[test]
+    fn a_still_map_keeps_the_cap_with_the_animation_off() {
+        // «Анимация карты» Выкл no longer paces idle frames: only the saver's flag does (`cap_inputs`), so an
+        // idle frame with the saver off keeps the setting's cap (or no pacing at all).
+        assert_eq!(battery_cap(60, false, true), 60, "a still map at 60 stays at 60");
+        assert_eq!(battery_cap(30, false, true), 30, "a still map at 30 stays at 30");
+        assert_eq!(battery_cap(0, false, true), 0, "a still map with no cap is not paced");
     }
 
     #[test]

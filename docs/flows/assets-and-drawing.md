@@ -585,7 +585,8 @@ sprites' size). PageUp and PageDown tilt 5° a press within 35–75°.
   at level 0), the living map's flags and smoke (`living_on` needs level > 0), the mist's clouds (`mist::clock`), the
   weather's motion (`draw_weather`) and the torches' flicker (`draw_daylight`: at level 0 the middle of its range, steady).
   The wakes go with the water. The fog's reveal is instant under Off (`minimap` `track`: a fresh update when the
-  fog changes). Under Off the idle frames are paced as «Экономия батареи» does (`frame_cap::current`). Off is not a
+  fog changes). Under Off the idle frames keep the frame cap (`frame_cap::current` paces them only with «Экономия
+  батареи»). Off is not a
   rule: nothing a map or a mod sees changes.
 - **The fog fades** (the owner's request, 2026-11-10: a smooth reveal, not a pop). `minimap::FogShown` (per thread)
   keeps each cell's shown darkness (0..255, unrounded) and eases it toward its target (`darkness_into` of the fog
