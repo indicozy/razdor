@@ -111,11 +111,17 @@ jobs:
           curl -fsSL -o /tmp/llvm-mingw.tar.xz \
             "https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_RELEASE/$LLVM_MINGW_NAME.tar.xz"
           tar -xf /tmp/llvm-mingw.tar.xz -C /opt
-          echo "/opt/$LLVM_MINGW_NAME/bin" >> "$GITHUB_PATH"
-          echo "WIN7_CLANG=/opt/$LLVM_MINGW_NAME/bin/clang" >> "$GITHUB_ENV"
+          llvm="/opt/$LLVM_MINGW_NAME/bin"
+          # Only ld.lld goes on PATH (through a folder of its own): llvm-mingw's folder also holds a
+          # gcc and an ar that would hide apt's (dist-win7.sh asks gcc for libgcc's folder).
+          # clang finds its ld.lld beside itself, and it is the clang named here.
+          mkdir -p "$RUNNER_TEMP/win7-tools"
+          ln -sf "$llvm/ld.lld" "$RUNNER_TEMP/win7-tools/ld.lld"
+          echo "$RUNNER_TEMP/win7-tools" >> "$GITHUB_PATH"
+          echo "WIN7_CLANG=$llvm/clang" >> "$GITHUB_ENV"
           echo "WINDRES=/usr/bin/x86_64-w64-mingw32-windres" >> "$GITHUB_ENV"
-          "/opt/$LLVM_MINGW_NAME/bin/ld.lld" --version | head -1
-          "/opt/$LLVM_MINGW_NAME/bin/clang" --version | head -1
+          "$RUNNER_TEMP/win7-tools/ld.lld" --version | head -1
+          "$llvm/clang" --version | head -1
 
       - name: Rust (rust-toolchain.toml), its source and the crt objects of the Windows 7 target
         run: |
