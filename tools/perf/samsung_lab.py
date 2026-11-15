@@ -433,6 +433,7 @@ LAB_FLAGS = {
     "swap-interval0": "swap-interval 0",
     "swap-interval1": "swap-interval 1",
     "clear-targets": "clear-targets",
+    "static-draw": "static-draw",
 }
 
 # The main stages of the stage medians (the stage key, its column title); the nesting is in phone_bench's note.

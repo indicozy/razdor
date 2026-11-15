@@ -58,6 +58,7 @@ pub mod pan;
 pub mod photo;
 pub mod render_cache;
 pub mod replay_floor;
+pub mod static_draw;
 pub mod popup;
 pub mod rest;
 pub mod saves;

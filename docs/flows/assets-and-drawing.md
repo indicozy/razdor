@@ -1094,6 +1094,30 @@ owner's call: it is a look-and-feel choice, measured on the phone before any def
 is the other half of the split: `finish` is the GPU's time before the swap, `present` minus `finish` the vsync wait.
 Details and the replay floor: `docs/flows/testing-and-tools.md`, «The lab's switches».
 
+### Retained static decorations (`RAZDOR_STATIC_DRAW`, A′)
+
+The flat view's standing decorations draw the same vertices frame to frame on a still view, yet the batch
+copies and uploads them every frame (the whole map is about 55,000 vertices, 2.4 MB a frame on the 4060). The
+switch (`ui/static_draw.rs`, off by default) keeps them on the GPU: the frame whose key repeats the last frame's
+records what each decoration's draw put in the batch (`QuadGl::batch_break`, `batch_span`, `draw_state`); later
+frames with the key draw each run of consecutive recorded decorations with one `QuadGl::draw_static` (the
+macroquad fork, `StaticGeometry` for the vertices and indices). The run's first decoration is drawn as usual and
+its state is checked against the record first; the draws keep the pass's order.
+
+- Key: the object list's key (`ObjKey`: the map, the drawn rectangle, the camera, the fog generation) and the
+  frame's values the draws read (dpi, the animation level, the night, the sun, the light, the raster, the art,
+  the sprite fog's table, the fog cell), as exact bits (`static_draw_key` in `world_view`).
+- Not retained: trees while the map animates (their sway reads the clock), figures, buildings, the 2.5D view.
+  Each breaks a run, so the runs are short on a busy map: a retained draw is its own draw call, and the batch
+  of the normal items cannot join it.
+- The fork's `draw_state` zeroes the built-in uniforms (`Projection`, `Model`, `_Time`) in its copy: those are
+  written at each submission, so a snapshot of them is not the draw's state.
+- The replay floor and the sprite retain are exclusive with it (both copy the batch's draw calls).
+- It wraps each object's decision in the flat pass (the option f fast path and the old path alike: the batch
+  is what is recorded), so both feed the same records.
+- Measured on top of option f (4060): no gain. The retained draws cost more in submission than the bytes they
+  save; the numbers and the proof are in `docs/perf/ideas-ledger.md`.
+
 ## Traps
 
 - Never commit decoded output, screenshots of original art, or install files.

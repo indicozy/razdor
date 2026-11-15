@@ -846,7 +846,7 @@ checksum = "ca93e534d1142d1d0dcca6d25fe302508a5dfb40b302802904577725ea0b695b"
 [[package]]
 name = "macroquad"
 version = "0.4.16"
-source = "git+https://github.com/indicozy/macroquad?rev=17fd325b0a68f848ae9d96406e91016a4aca1dcd#17fd325b0a68f848ae9d96406e91016a4aca1dcd"
+source = "git+https://github.com/indicozy/macroquad?rev=5466461a7a62ffd1c36357062d84c0b2fdc9d701#5466461a7a62ffd1c36357062d84c0b2fdc9d701"
 dependencies = [
  "fontdue",
  "glam 0.27.0",
@@ -860,7 +860,7 @@ dependencies = [
 [[package]]
 name = "macroquad_macro"
 version = "0.1.8"
-source = "git+https://github.com/indicozy/macroquad?rev=17fd325b0a68f848ae9d96406e91016a4aca1dcd#17fd325b0a68f848ae9d96406e91016a4aca1dcd"
+source = "git+https://github.com/indicozy/macroquad?rev=5466461a7a62ffd1c36357062d84c0b2fdc9d701#5466461a7a62ffd1c36357062d84c0b2fdc9d701"
 
 [[package]]
 name = "malloc_buf"

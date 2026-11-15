@@ -45,7 +45,7 @@ pub struct Trigger {
     pub map: Option<String>,
     /// The run profiles itself (a `profile` or `debug` line).
     pub profile: bool,
-    /// The lab's switches the run has (the lines `replay-floor`, `gpu-finish`, `clear-targets`, `swap-interval 0|1`).
+    /// The lab's switches the run has (the lines `replay-floor`, `gpu-finish`, `clear-targets`, `static-draw`, `swap-interval 0|1`).
     pub lab: Flags,
 }
 
@@ -72,6 +72,7 @@ pub fn parse(text: &str) -> Result<Trigger, String> {
             "replay-floor" => lab.replay_floor = true,
             "gpu-finish" => lab.gpu_finish = true,
             "clear-targets" => lab.clear_targets = true,
+            "static-draw" => lab.static_draw = true,
             _ => {
                 if let Some(value) = line.strip_prefix("swap-interval ") {
                     lab.swap_interval = Some(match value.trim() {
@@ -228,8 +229,9 @@ mod tests {
     #[test]
     fn the_lab_lines_set_the_run_switches() {
         let t = parse("all\nreplay-floor\ngpu-finish\nclear-targets\nswap-interval 0\n").unwrap();
-        assert_eq!(t.lab, Flags { replay_floor: true, gpu_finish: true, clear_targets: true, swap_interval: Some(0) });
+        assert_eq!(t.lab, Flags { replay_floor: true, gpu_finish: true, clear_targets: true, swap_interval: Some(0), static_draw: false });
         assert_eq!(parse("mine\nswap-interval 1").unwrap().lab.swap_interval, Some(1));
+        assert!(parse("all\nstatic-draw\n").unwrap().lab.static_draw, "the static-draw line is the switch");
         assert_eq!(parse("all\nmap=X").unwrap().lab, Flags::default(), "no line: no switch");
         assert!(parse("all\nswap-interval 2\n").is_err(), "only the two intervals the lab compares");
         assert!(parse("all\nswap-interval\n").is_err(), "the interval needs its value");

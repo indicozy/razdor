@@ -23,6 +23,16 @@ use super::memo::Recent;
 
 mod retain;
 
+/// The sprite retain's switch is on (`retain::enabled`): the static draws (`static_draw`) are off then.
+pub fn sprite_retain_enabled() -> bool {
+    retain::enabled()
+}
+
+/// The fog cell the sprites drawn now carry in their normals (`with_fog_cell`; zero outside one).
+pub fn fog_cell_now() -> Vec2 {
+    FOG_CELL.with(std::cell::Cell::get)
+}
+
 /// The sprite-retain switch's start line (`sprite retain: on|off`, see `retain::note_startup`).
 pub fn sprite_retain_startup() {
     retain::note_startup();

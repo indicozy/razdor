@@ -33,6 +33,7 @@ use super::gestures::SwipeKind;
 use super::cursor::{self, BuildingHover, CellArmy, MapHover, Shape};
 use super::dialog::Dialog;
 use super::dt_art::{Atlas, DtArt, FigureShadow, Frame, Living, Slot};
+use super::static_draw;
 use super::living::{self, Batch};
 use super::daylight;
 use super::lights;
@@ -3661,6 +3662,26 @@ local! {
     static OBJ_MEMO: std::cell::RefCell<Option<ObjMemo>> = std::cell::RefCell::new(None);
 }
 
+/// The key of a flat frame's static decorations (`static_draw`): the object list's key, and the frame's values that the
+/// decorations' draws read (the DPI, the map animation's level, the night, the sun, the light, the raster, the art, the
+/// sprite fog's table and the fog cell), as exact bits. A key that repeats means the same draws.
+fn static_draw_key(key: &ObjKey, ctx: &FrameCtx, lit: Option<f32>, art: Option<&DtArt>) -> static_draw::Key {
+    let mut bits = vec![key.map as u64, key.objects as u64, key.fog.0, u64::from(key.fog.1), key.fog.2 as u64, key.fog.3 as u64];
+    bits.extend(key.range.iter().map(|&r| r as u64));
+    bits.extend(key.cam.iter().map(|&c| u64::from(c)));
+    bits.extend([u64::from(ctx.dpi.to_bits()), u64::from(ctx.anim.to_bits()), u64::from(ctx.night), u64::from(super::sharp::raster().to_bits())]);
+    bits.push(lit.map_or(u64::MAX, |k| u64::from(k.to_bits())));
+    bits.push(art.map_or(0, |a| std::ptr::from_ref(a) as u64));
+    bits.push(super::sprite_fog::upload_count());
+    match ctx.sun {
+        Some(s) => bits.extend([1, u64::from(s.k.to_bits()), u64::from(s.s.x.to_bits()), u64::from(s.s.y.to_bits())]),
+        None => bits.push(0),
+    }
+    let cell = super::sharp::fog_cell_now();
+    bits.extend([u64::from(cell.x.to_bits()), u64::from(cell.y.to_bits())]);
+    static_draw::Key { bits, grid: key.grid }
+}
+
 /// What the object list of `draw_world_in` reads besides the map's objects: the drawn rectangle, the fog (its
 /// generation renews with every newly explored cell) and the camera's window and scale (the objects' feet and sort keys).
 #[derive(PartialEq)]
@@ -5610,6 +5631,8 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
         range: [c0, c1, r0, r1, side, up, below],
         cam: [cam.origin.x.to_bits(), cam.origin.y.to_bits(), cam.scale.to_bits(), cam.view.x.to_bits(), cam.view.y.to_bits(), cam.view.w.to_bits(), cam.view.h.to_bits(), cam.draw.x.to_bits(), cam.draw.y.to_bits(), cam.draw.w.to_bits(), cam.draw.h.to_bits()],
     };
+    // The lab's static draws (`static_draw`, A′): the frame's key for them, read before `key` moves below.
+    let static_key = static_draw::enabled().then(|| static_draw_key(&key, &ctx, lit, art));
     let hit = if tilted { None } else { OBJ_MEMO.with_borrow_mut(Option::take).filter(|m| m.key == key) };
     let reused = hit.is_some();
     let ObjMemo { key, rows, seen_row, mut entries } = hit.unwrap_or_else(|| {
@@ -5843,6 +5866,12 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     // light on, the lit material scales the painted shadows by the frame's factor (`sharp::session_lit`).
     // The lab's replay floor (`replay_floor`): on a still frame the pass is not run, its last batch is issued again.
     let replay_key = super::replay_floor::view_key(&[cam.origin.x, cam.origin.y, cam.scale, cam.view.x, cam.view.y, cam.view.w, cam.view.h], tilted);
+    // The lab's static draws (`static_draw`): the candidates are the decorations the map animation does not sway (a
+    // sway reads the clock); every other item breaks a run. Off unless the switch is on and the view is flat.
+    let mut statics = static_draw::begin(static_key, items.iter().map(|(_, d)| match d {
+        Drawable::Object(i, _) if !(map.objects[*i as usize].class == object_class::TREES && ctx.anim != 0.0) => Some(*i),
+        _ => None,
+    }), tilted);
     super::replay_floor::sprites(replay_key, !game.moving(), || super::sharp::session_pass(!tilted, lit, || {
         // The flat view's objects on the fast path (`flat_fast`), when it is on; the old path draws the rest.
         let mut fast = flat_fast::Pass::begin(map, art, cam, &ctx);
@@ -5864,23 +5893,26 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                 });
             }
         };
-        for d in items.iter().map(|(_, d)| d) {
+        for (k, d) in items.iter().map(|(_, d)| d).enumerate() {
             match d {
                 Drawable::Object(i, foot) => {
-                    let handled = match fast.as_mut() {
-                        // The check: the old path draws it, and its pieces are compared with the fast quad.
-                        Some(fp) if fp.checking() => {
-                            super::sharp::capture_start();
+                    let candidate = (!(map.objects[*i as usize].class == object_class::TREES && ctx.anim != 0.0)).then_some(*i);
+                    statics.object(k, candidate, || {
+                        let handled = match fast.as_mut() {
+                            // The check: the old path draws it, and its pieces are compared with the fast quad.
+                            Some(fp) if fp.checking() => {
+                                super::sharp::capture_start();
+                                old_object(*i, *foot);
+                                fp.check(*i, &super::sharp::capture_end());
+                                true
+                            }
+                            Some(fp) => fp.draw(*i),
+                            None => false,
+                        };
+                        if !handled {
                             old_object(*i, *foot);
-                            fp.check(*i, &super::sharp::capture_end());
-                            true
                         }
-                        Some(fp) => fp.draw(*i),
-                        None => false,
-                    };
-                    if !handled {
-                        old_object(*i, *foot);
-                    }
+                    });
                 }
                 Drawable::Building(i) => {
                     let l = &game.world.locations[*i];
@@ -5940,6 +5972,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
         if let Some(fp) = fast {
             fp.finish();
         }
+        statics.finish(map.objects.len());
     }));
     // Razdor's «Живая карта»: the smoke of the visible chimneys, one batch over the sprites.
     if living_on(cam) {
