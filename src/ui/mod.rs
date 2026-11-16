@@ -1853,10 +1853,19 @@ impl App {
             // «Смотреть запись»: the page is the watching screen's back.
             Some(summary::Exit::Watch) => {
                 let back = std::mem::replace(&mut self.screen, Screen::WorldMap);
-                match self.game.as_ref().map(|g| watch::open_record(g, back)) {
-                    Some(Ok(screen)) => next = next.or(Some(screen)),
-                    Some(Err(e)) => self.message = Some(e),
-                    None => {}
+                match self.game.as_ref() {
+                    Some(g) => match watch::open_record(g, back) {
+                        Ok(screen) => next = next.or(Some(screen)),
+                        // The summary stays, and the dialog says why the record does not open.
+                        Err((e, back)) => {
+                            razdor::diag!("watch: cannot open the record: {e}");
+                            self.screen = *back;
+                            let mut d = Dialog::new(tr("Watch the record"));
+                            d.text = vec![razdor::trf!("Cannot open the record: {e}.", e = e)];
+                            self.dialogs.push_back(d);
+                        }
+                    },
+                    None => self.screen = back,
                 }
             }
             None => {}

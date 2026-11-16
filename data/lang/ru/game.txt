@@ -749,6 +749,7 @@ Artefacts got = Артефактов получено
 
 # The replays: the watching screen (ui/watch.rs) and its entry points
 Watch the record = Смотреть запись
+Cannot open the record: {e}. = Не удалось открыть запись: {e}.
 Record = Запись
 Watch the battle = Смотреть бой
 Skip the battle = Пропустить бой

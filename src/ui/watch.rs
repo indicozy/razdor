@@ -229,15 +229,26 @@ pub fn strip_layout(sw: f32, sh: f32, unit: f32, portrait: bool) -> Strip {
 
 /// The watching screen of the current game's record, back to `back` on «Выход». The file is the
 /// live one, read as far as it is written (the day in play is written first). Err with the reason
-/// when the game keeps no record (a demo, a setting turned off) or its file cannot be read.
-pub fn open_record(game: &Game, back: Screen) -> Result<Screen, String> {
+/// when the game keeps no record (a demo, a setting turned off) or its file cannot be read, and
+/// with `back`, so the caller keeps its screen.
+pub fn open_record(game: &Game, back: Screen) -> Result<Screen, (String, Box<Screen>)> {
+    match open_view(game) {
+        Ok(mut view) => {
+            view.back = Some(Box::new(back));
+            Ok(Screen::Watch(Box::new(view)))
+        }
+        Err(e) => Err((e, Box::new(back))),
+    }
+}
+
+fn open_view(game: &Game) -> Result<WatchView, String> {
     let session = game.replay.clone().ok_or("this game keeps no record")?;
     let games = razdor::rules::save::games_dir().ok_or("no saves folder")?;
     let point = session.save_point();
     let path = razdor::rules::recording::session::replays_dir(&games).join(&point.file);
     let install = razdor::rules::save::install_dir();
     // The game's own map bytes (a Hub map is not in the install): the snapshots read them.
-    WatchView::open(&path, game.content.clone(), install.as_deref(), game.map_bytes.clone(), Some(back)).map(|v| Screen::Watch(Box::new(v)))
+    WatchView::open(&path, game.content.clone(), install.as_deref(), game.map_bytes.clone(), None)
 }
 
 /// Where the playback is.
