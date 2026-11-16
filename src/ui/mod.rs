@@ -2069,8 +2069,9 @@ impl App {
         // brought is held until the step has played (`Game::tick_shown`), so it is waited for
         // too: the end comes after it, never before (events.md §11).
         let unshown = self.game.as_ref().is_some_and(Game::holds_events);
-        // (While the «Итоги» page is up the game has ended already: it is not ended again.)
-        if next.is_none() && self.dialogs.is_empty() && !unshown && !self.in_custom() && !matches!(self.screen, Screen::Summary(_)) {
+        // (While the «Итоги» page is up, or the record is watched over it, the game has ended already:
+        // it is not ended again, which would reopen the page and repeat its records. See `ends_checked_on`.)
+        if next.is_none() && self.dialogs.is_empty() && !unshown && !self.in_custom() && ends_checked_on(&self.screen) {
             let end = self.game.as_ref().and_then(Game::script_end);
             match end {
                 // A campaign map: the next map starts at once (0x4b5b64), as in the original.
@@ -2206,9 +2207,26 @@ fn last_save_path() -> Option<PathBuf> {
     latest_save(kinds.into_iter().flat_map(|kind| save::list_files(&dir, kind)).map(|e| (e.written, e.path)))
 }
 
+/// Whether the game's end is looked for on `screen`: not on the «Итоги» page nor on the watching
+/// screen. Both are shown over a game that has ended already (the record plays over its end state),
+/// so ending it again would reopen the page and repeat its records (the owner's report).
+fn ends_checked_on(screen: &Screen) -> bool {
+    !matches!(screen, Screen::Summary(_) | Screen::Watch(_))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The end is looked for on the map and the menus. The «Итоги» page and the watching screen
+    /// are excluded by `ends_checked_on`'s own arms; their values need a real page or a replay to
+    /// build, so this test builds the others only.
+    #[test]
+    fn the_game_end_is_looked_for_on_the_map_and_the_menus() {
+        assert!(ends_checked_on(&Screen::WorldMap));
+        assert!(ends_checked_on(&Screen::MainMenu));
+        assert!(ends_checked_on(&Screen::Settings));
+    }
 
     /// Opening the editor shows its notice and keeps the editor on screen; the notice's close
     /// leaves the editor on screen too (the owner's decision, 2026-11-06).
