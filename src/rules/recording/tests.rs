@@ -946,6 +946,36 @@ fn watching_a_record_does_not_write_into_the_live_record() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// With healing on, the same corrupted checkpoint does not stop the playback: it is recorded in `heals`
+/// and the playback goes on from the next checkpoint, whose state is the recorded one. The file plays to
+/// its end, to the final state the uncorrupted file reaches.
+#[test]
+fn a_corrupted_checkpoint_heals_to_the_next_checkpoint_when_healing_is_on() {
+    use super::watch::{Place, ReplayPlayer};
+    let Some(dt) = base() else { return };
+    let c = Arc::new(Content::from_dt(&dt));
+    let (path, _) = recorded_session(&dt, &c, "РК1", 25, "watch-heal");
+    let clean = super::file::read(&path).unwrap();
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    let mut file = clean.clone();
+    let seg = &mut file.segments[0];
+    let k = seg.keyframes.get(1).expect("two keyframes in 25 days").after - 1;
+    match &mut seg.entries[k].input {
+        Input::Engine(EngineInput::Check { hash }) => *hash ^= 1,
+        other => panic!("the checkpoint is a check, found {other:?}"),
+    }
+    let mut healed = ReplayPlayer::new(file, c.clone(), Some(&dt.dir), None);
+    healed.set_healing(true);
+    healed.play_to_end().unwrap_or_else(|d| panic!("healing plays the file on: {d:?}"));
+    assert!(healed.ended(), "the file is played to its end");
+    assert!(healed.drift.is_none(), "a heal is not a drift");
+    assert_eq!(healed.heals.len(), 1, "one heal: {:?}", healed.heals);
+    assert_eq!(healed.heals[0].at, Place { seg: 0, index: k }, "the heal is at the corrupted checkpoint");
+    let mut plain = ReplayPlayer::new(clean, c.clone(), Some(&dt.dir), None);
+    plain.play_to_end().unwrap_or_else(|d| panic!("the uncorrupted file: {d:?}"));
+    assert_eq!(state_hash(healed.game().unwrap()), state_hash(plain.game().unwrap()), "the healed file ends in the uncorrupted file's final state");
+}
+
 /// A replay recorded under other rules (another rules fingerprint) still plays, and is marked as
 /// not the same rules.
 #[test]

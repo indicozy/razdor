@@ -129,6 +129,10 @@ pub struct ReplayPlayer {
     /// The read-only section of the playback call (`arm` takes it, `disarm` lets it go): nothing the
     /// playback does is recorded into the live record that may be attached to this thread.
     read_only: std::cell::RefCell<Option<hook::ReadOnly>>,
+    /// Whether a mismatch heals instead of stopping the playback (see [`ReplayPlayer::set_healing`]).
+    healing: bool,
+    /// The mismatches healed so far, in file order (healing only; a healed mismatch is not a drift).
+    pub heals: Vec<Drift>,
 }
 
 impl ReplayPlayer {
@@ -157,6 +161,8 @@ impl ReplayPlayer {
             pending_battle: None,
             own_lang: std::cell::Cell::new(None),
             read_only: std::cell::RefCell::new(None),
+            healing: false,
+            heals: Vec::new(),
         };
         p.marks = p.build_marks();
         p
@@ -175,6 +181,14 @@ impl ReplayPlayer {
     /// The place of the last entry played without a mismatch (where a drift stops the game).
     pub fn last_good(&self) -> Place {
         self.last_good
+    }
+
+    /// Turns healing on or off. Off (the default), a checkpoint that does not match stops the
+    /// playback with a [`Drift`]. On, the mismatch is recorded in `heals` and the playback goes on from
+    /// the next checkpoint of the file: its state is the recorded one (see [`ReplayPlayer::heal_from`]).
+    /// A checkpoint that cannot be restored is a drift either way.
+    pub fn set_healing(&mut self, on: bool) {
+        self.healing = on;
     }
 
     /// Whether the file is played to its end.
@@ -337,7 +351,13 @@ impl ReplayPlayer {
                 self.start_at(at, &bytes)?;
                 let got = state_hash(&self.player.as_ref().expect("a started game").game);
                 if got != start_hash {
-                    return Err(self.fail(at, format!("the segment's start restores to {got:016x}, recorded {start_hash:016x}")));
+                    let reason = format!("the segment's start restores to {got:016x}, recorded {start_hash:016x}");
+                    if !self.healing {
+                        return Err(self.fail(at, reason));
+                    }
+                    // Healed: the segment plays on from its restored state.
+                    let heal = self.fail(at, reason);
+                    self.heals.push(heal);
                 }
             }
             if self.idx >= self.segments[self.seg].entries.len() {
@@ -364,7 +384,7 @@ impl ReplayPlayer {
                         Ok(Step::Battle)
                     }
                     Ok(None) => Ok(Step::Budget),
-                    Err(reason) => Err(self.stop_at(here, reason)),
+                    Err(reason) => self.heal_from(here, reason),
                 };
             }
             match player.apply_budget(&entry, left) {
@@ -374,7 +394,7 @@ impl ReplayPlayer {
                     return Ok(Step::Applied);
                 }
                 Ok(false) => return Ok(Step::Budget),
-                Err(reason) => return Err(self.stop_at(here, reason)),
+                Err(reason) => return self.heal_from(here, reason),
             }
         }
     }
@@ -384,6 +404,42 @@ impl ReplayPlayer {
         let d = self.fail(at, reason);
         self.drift = Some(d.clone());
         d
+    }
+
+    /// A mismatch at `here`. Without healing it is a drift ([`ReplayPlayer::stop_at`]). With healing it is
+    /// recorded in `heals`, and the playback goes on from the first checkpoint after `here` in its segment
+    /// (a checkpoint's state is the recorded one, so the play goes on from the true state); the place only
+    /// moves forward, so it cannot loop. Without such a checkpoint the playback goes on at the next
+    /// segment's start (a load), and without one the file ends here and the game stays. A checkpoint that
+    /// cannot be restored is a drift.
+    fn heal_from(&mut self, here: Place, reason: String) -> Result<Step, Drift> {
+        if !self.healing {
+            return Err(self.stop_at(here, reason));
+        }
+        let heal = self.fail(here, reason);
+        self.heals.push(heal);
+        let seg = here.seg;
+        let next = self.segments[seg].keyframes.iter().find(|k| k.after > here.index).map(|k| (k.after, k.snapshot.clone()));
+        if let Some((after, bytes)) = next {
+            return match self.start_at(Place { seg, index: after }, &bytes) {
+                Ok(()) => Ok(Step::Applied),
+                Err(d) => {
+                    self.drift = Some(d.clone());
+                    Err(d)
+                }
+            };
+        }
+        if seg + 1 < self.segments.len() {
+            self.player = None;
+            self.seg = seg + 1;
+            self.idx = 0;
+            hook::take_playback();
+            return Ok(Step::Applied);
+        }
+        // No later checkpoint and no next segment: the file ends here, and the game stays.
+        self.seg = self.segments.len();
+        hook::take_playback();
+        Ok(Step::End)
     }
 
     /// Plays one step with no budget: a checkpoint that does not match is a drift.
@@ -532,10 +588,10 @@ impl ReplayPlayer {
     pub fn return_battle(&mut self, b: Battle, rest: &[BattleAct]) -> Result<(), Drift> {
         let here = self.place();
         let Some((resolve, _)) = self.battle_entry().filter(|(_, e)| matches!(e.input, Input::Player(PlayerAction::ResolveBattle))) else {
-            return Err(self.stop_at(here, "the battle's resolve is not at its place".into()));
+            return self.heal_from(here, "the battle's resolve is not at its place".into()).map(|_| ());
         };
         if !rest.is_empty() && b.outcome() != Outcome::Ongoing {
-            return Err(self.stop_at(here, "the battle ended before its recorded actions".into()));
+            return self.heal_from(here, "the battle ended before its recorded actions".into()).map(|_| ());
         }
         self.arm();
         let r = match self.player.as_mut() {
@@ -543,7 +599,9 @@ impl ReplayPlayer {
             None => Err("no game to give the battle back to".into()),
         };
         self.disarm();
-        r.map_err(|reason| self.stop_at(here, reason))?;
+        if let Err(reason) = r {
+            return self.heal_from(here, reason).map(|_| ());
+        }
         self.idx = resolve + 1;
         self.last_good = self.place();
         Ok(())

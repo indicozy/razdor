@@ -308,6 +308,8 @@ pub struct WatchView {
     /// The thread is read-only for the screen's whole life: the replay's actions are not recorded
     /// into the live record (a game with its record open may be behind this screen).
     _read_only: ReadOnly,
+    /// How many of the player's heals are in the log already (see `log_heals`).
+    logged_heals: usize,
     /// The thread's patch globals when the screen opened: a restore overwrites them, and the live
     /// game gets them back when the screen closes.
     saved_globals: PatchGlobals,
@@ -331,6 +333,8 @@ impl WatchView {
         // The live game's patch globals (the player's own restores come after this).
         let saved_globals = patch_globals();
         let read_only = hook::read_only();
+        // A mismatch heals to the next checkpoint (logged, no window): a drift is left for what cannot be restored.
+        player.set_healing(true);
         // The file's first place: the first segment's start (the game as the record began).
         if let Err(d) = player.begin_seek_place(Place { seg: 0, index: 0 }) {
             set_patch_globals(saved_globals);
@@ -351,6 +355,7 @@ impl WatchView {
             drift: None,
             back: back.map(Box::new),
             _read_only: read_only,
+            logged_heals: 0,
             saved_globals,
         })
     }
@@ -388,6 +393,7 @@ impl WatchView {
     /// Advances the screen by `real_dt` seconds: the messages close, the playback runs at its
     /// speed, a seek runs at its rate, and the battle choice counts down to its default.
     pub fn tick(&mut self, real_dt: f32) {
+        self.log_heals();
         for t in &mut self.toasts {
             t.left -= real_dt;
         }
@@ -426,6 +432,15 @@ impl WatchView {
             Err(d) => self.stop_at_drift(d),
         }
         self.take_messages();
+    }
+
+    /// The heals the playback made since the last call go to the log: a heal is not a drift, so the
+    /// screen shows nothing for it.
+    fn log_heals(&mut self) {
+        for h in &self.player.heals[self.logged_heals..] {
+            razdor::diag!("replay healed at {:?}, day {}: {}", h.at, h.day, h.reason);
+        }
+        self.logged_heals = self.player.heals.len();
     }
 
     fn stop_at_drift(&mut self, d: Drift) {
@@ -1024,6 +1039,8 @@ mod tests {
         if let razdor::rules::recording::stream::Input::Engine(razdor::rules::recording::stream::EngineInput::Check { hash }) = &mut file.segments[0].entries[k].input {
             *hash ^= 1;
         }
+        // The heal goes to the checkpoint after the mismatch: with its snapshot unreadable that is a drift.
+        file.segments[0].keyframes[1].snapshot = vec![0u8; 8];
         let mut d = WatchView::with_player(ReplayPlayer::new(file, content.clone(), Some(&install.dir), None), None).unwrap();
         d.playing = true;
         for _ in 0..2_000_000 {
