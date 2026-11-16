@@ -104,6 +104,15 @@ pub const GPU_SAMPLE_EVERY: Duration = Duration::from_secs(10);
 /// line, [`crate::diag::forced_profile`]): a 12 s measured cell then has about a dozen sampled frames, not one.
 pub const GPU_SAMPLE_EVERY_RUN: Duration = Duration::from_secs(1);
 
+/// A GPU sample frame this long turns the samples off for the run *(Razdor's)*: on a slow driver the waits made each
+/// sample take ~39 s (Intel HD Graphics 4000, report 1660), so every frame was a sample and the map stood still.
+pub const GPU_SAMPLE_TOO_SLOW: Duration = Duration::from_millis(1000);
+
+/// Whether the GPU samples stay on after a frame: off for good once a sampled frame took [`GPU_SAMPLE_TOO_SLOW`].
+pub fn samples_stay_on(on: bool, was_sampled: bool, total: Duration) -> bool {
+    on && !(was_sampled && total >= GPU_SAMPLE_TOO_SLOW)
+}
+
 /// The longest batch of vertices macroquad issues as one draw call (`draw_call_vertex_capacity`).
 const MAX_BATCH_VERTS: u32 = 10000;
 
@@ -508,6 +517,8 @@ struct State {
     /// sample began.
     gpu_sampling: bool,
     sample_last: Option<Instant>,
+    /// The GPU samples are allowed (off for the run after a too slow one, [`samples_stay_on`]).
+    samples_on: bool,
     /// The samples of the performance test's cell being measured ([`cell_begin`]), None outside a cell.
     cell: Option<Vec<Sample>>,
     /// The GL draw calls and bytes uploaded this frame so far ([`submitted`]), and whether it was replayed.
@@ -543,6 +554,7 @@ impl State {
             gpu: Vec::new(),
             gpu_sampling: false,
             sample_last: None,
+            samples_on: true,
             cell: None,
             gl_draws: 0,
             gl_bytes: 0,
@@ -804,6 +816,7 @@ pub fn end_frame(work: Duration, total: Duration) {
     }
     let now = Instant::now();
     let csv = csv_path().is_some();
+    let mut samples_stopped = None;
     let (due, rows, gpu) = STATE.with_borrow_mut(|s| {
         let since = *s.since.get_or_insert(now);
         let sample = Sample {
@@ -853,7 +866,17 @@ pub fn end_frame(work: Duration, total: Duration) {
         // The next frame is a GPU sample once the period has passed (debug mode only: the flag is set on
         // every platform, the waits themselves are the GPU waits of `ui::gpu_probe`).
         let (asked, every) = if crate::diag::forced_profile() { (true, GPU_SAMPLE_EVERY_RUN) } else { (false, GPU_SAMPLE_EVERY) };
-        s.gpu_sampling = (crate::diag::debug_mode() || asked) && due(s.sample_last, now, every);
+        // The period counts from a sample's end, not its start: a sample longer than the period no longer makes
+        // the next frame a sample too. A too slow one turns them off for the run.
+        if s.gpu_sampling {
+            s.sample_last = Some(now);
+            let stays = samples_stay_on(s.samples_on, true, total);
+            if s.samples_on && !stays {
+                samples_stopped = Some(ms(total));
+            }
+            s.samples_on = stays;
+        }
+        s.gpu_sampling = s.samples_on && (crate::diag::debug_mode() || asked) && due(s.sample_last, now, every);
         if s.gpu_sampling {
             s.sample_last = Some(now);
         }
@@ -866,6 +889,9 @@ pub fn end_frame(work: Duration, total: Duration) {
         let gpu = take_gpu_frames(s, rows.last().map(|(f, _)| *f));
         (Some((elapsed.as_secs_f32(), std::mem::take(&mut s.samples), std::mem::take(&mut s.gpu))), rows, gpu)
     });
+    if let Some(ms) = samples_stopped {
+        crate::diag::log(&format!("frame probe: GPU samples off for this run (a sampled frame took {ms:.0} ms)"));
+    }
     write_csv(&rows, &gpu);
     if let Some((secs, samples, gpu)) = due {
         log_lines(secs, &samples, &gpu);
@@ -1422,6 +1448,14 @@ mod tests {
         assert!(due(None, t0, GPU_SAMPLE_EVERY), "the first sample at once");
         assert!(!due(Some(t0), t0 + Duration::from_secs(9), GPU_SAMPLE_EVERY));
         assert!(due(Some(t0), t0 + Duration::from_secs(10), GPU_SAMPLE_EVERY));
+    }
+
+    #[test]
+    fn a_too_slow_gpu_sample_turns_the_samples_off_for_the_run() {
+        assert!(!samples_stay_on(true, true, Duration::from_secs(39)), "the 39 s sample of report 1660");
+        assert!(samples_stay_on(true, true, Duration::from_millis(80)), "a normal sample");
+        assert!(samples_stay_on(true, false, Duration::from_secs(39)), "a slow frame that was no sample");
+        assert!(!samples_stay_on(false, false, Duration::from_millis(5)), "off stays off");
     }
 
     #[test]
