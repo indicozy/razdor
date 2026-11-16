@@ -18,9 +18,10 @@ use std::sync::Arc;
 use macroquad::prelude::*;
 
 use razdor::i18n::tr;
-use razdor::rules::battle::Battle;
+use razdor::rules::battle::{patch_globals, set_patch_globals, Battle, PatchGlobals};
 use razdor::rules::content::Content;
 use razdor::rules::game::{Event, Game};
+use razdor::rules::recording::hook::{self, ReadOnly};
 use razdor::rules::recording::watch::{Drift, Mark, MarkKind, Place, Pump, ReplayPlayer};
 use razdor::trf;
 
@@ -304,6 +305,18 @@ pub struct WatchView {
     drift: Option<Drift>,
     /// The screen «Выход» returns to.
     back: Option<Box<Screen>>,
+    /// The thread is read-only for the screen's whole life: the replay's actions are not recorded
+    /// into the live record (a game with its record open may be behind this screen).
+    _read_only: ReadOnly,
+    /// The thread's patch globals when the screen opened: a restore overwrites them, and the live
+    /// game gets them back when the screen closes.
+    saved_globals: PatchGlobals,
+}
+
+impl Drop for WatchView {
+    fn drop(&mut self) {
+        set_patch_globals(self.saved_globals);
+    }
 }
 
 impl WatchView {
@@ -315,8 +328,14 @@ impl WatchView {
 
     /// The screen over a player already open (the tests open their files in memory).
     pub fn with_player(mut player: ReplayPlayer, back: Option<Screen>) -> Result<WatchView, String> {
+        // The live game's patch globals (the player's own restores come after this).
+        let saved_globals = patch_globals();
+        let read_only = hook::read_only();
         // The file's first place: the first segment's start (the game as the record began).
-        player.begin_seek_place(Place { seg: 0, index: 0 }).map_err(|d| format!("{d:?}"))?;
+        if let Err(d) = player.begin_seek_place(Place { seg: 0, index: 0 }) {
+            set_patch_globals(saved_globals);
+            return Err(format!("{d:?}"));
+        }
         let mode = if player.game().is_some() { Mode::Playing } else { Mode::Ended };
         Ok(WatchView {
             player,
@@ -331,6 +350,8 @@ impl WatchView {
             battle_paused: false,
             drift: None,
             back: back.map(Box::new),
+            _read_only: read_only,
+            saved_globals,
         })
     }
 

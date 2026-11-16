@@ -110,10 +110,14 @@ struct Hook {
     keyframe: bool,
     /// The starts of the battles begun since the recorder's last pump (the cut-outs' state).
     battle_starts: Vec<BattleStart>,
+    /// How many read-only guards are alive (`read_only`): while any is, nothing is recorded.
+    paused: u32,
+    /// The `now` stamp and the keyframe flag when the first guard was taken, restored when the last one goes.
+    saved: Option<(Stamp, bool)>,
 }
 
 local! {
-    static HOOK: std::cell::RefCell<Hook> = const { std::cell::RefCell::new(Hook { recorder: None, playback: None, now: Stamp { stretch: 0, ask: 0 }, actions: 0, engine: 0, keyframe: false, battle_starts: Vec::new() }) };
+    static HOOK: std::cell::RefCell<Hook> = const { std::cell::RefCell::new(Hook { recorder: None, playback: None, now: Stamp { stretch: 0, ask: 0 }, actions: 0, engine: 0, keyframe: false, battle_starts: Vec::new(), paused: 0, saved: None }) };
 }
 
 /// Attaches a recorder to this thread (replacing one).
@@ -126,9 +130,42 @@ pub fn take_recorder() -> Option<Box<dyn Recorder>> {
     HOOK.with_borrow_mut(|h| h.recorder.take())
 }
 
-/// Whether a recorder is attached to this thread.
+/// Whether a recorder is attached to this thread and recording is not paused (see [`read_only`]).
 pub fn recording() -> bool {
-    HOOK.with_borrow(|h| h.recorder.is_some())
+    HOOK.with_borrow(|h| h.paused == 0 && h.recorder.is_some())
+}
+
+/// A read-only section: while the guard lives, whatever the rules do on this thread is not
+/// recorded (a playback's actions and restores would otherwise be written into the live record
+/// attached to the thread). Guards nest; the state the first one saved (`now` and the keyframe
+/// flag) comes back when the last one goes. The guard is not `Send`: it belongs to the thread.
+pub struct ReadOnly {
+    _thread_bound: std::marker::PhantomData<*const ()>,
+}
+
+/// Starts a read-only section on this thread (see [`ReadOnly`]).
+pub fn read_only() -> ReadOnly {
+    HOOK.with_borrow_mut(|h| {
+        if h.paused == 0 {
+            h.saved = Some((h.now, h.keyframe));
+        }
+        h.paused += 1;
+    });
+    ReadOnly { _thread_bound: std::marker::PhantomData }
+}
+
+impl Drop for ReadOnly {
+    fn drop(&mut self) {
+        HOOK.with_borrow_mut(|h| {
+            h.paused = h.paused.saturating_sub(1);
+            if h.paused == 0 {
+                if let Some((now, keyframe)) = h.saved.take() {
+                    h.now = now;
+                    h.keyframe = keyframe;
+                }
+            }
+        });
+    }
 }
 
 /// Attaches a playback of `entries` to this thread (replacing one).
@@ -160,7 +197,7 @@ pub fn now() -> Stamp {
 pub(crate) fn record_input(at: Option<Stamp>, input: Input) {
     HOOK.with_borrow_mut(|h| {
         let at = at.unwrap_or(h.now);
-        if let Some(r) = h.recorder.as_mut() {
+        if let Some(r) = h.recorder.as_mut().filter(|_| h.paused == 0) {
             r.record(Entry { at, input });
         }
     });
@@ -203,7 +240,11 @@ impl Drop for EngineScope {
 
 /// A battle began: its start state goes to the recorder at its next pump.
 pub(crate) fn record_battle_start(start: BattleStart) {
-    HOOK.with_borrow_mut(|h| h.battle_starts.push(start));
+    HOOK.with_borrow_mut(|h| {
+        if h.paused == 0 {
+            h.battle_starts.push(start);
+        }
+    });
 }
 
 /// The battles begun since the last call, oldest first.
@@ -213,7 +254,7 @@ pub fn take_battle_starts() -> Vec<BattleStart> {
 
 /// Asks the recorder for a keyframe at its next pump (a battle started).
 pub(crate) fn request_keyframe() {
-    HOOK.with_borrow_mut(|h| h.keyframe = true);
+    HOOK.with_borrow_mut(|h| h.keyframe |= h.paused == 0);
 }
 
 /// Whether a keyframe was asked for since the last call (the recorder takes it).
@@ -230,7 +271,7 @@ pub(crate) fn record(input: EngineInput) {
 pub(crate) fn record_at(at: Option<Stamp>, input: EngineInput) {
     HOOK.with_borrow_mut(|h| {
         let at = at.unwrap_or(h.now);
-        if let Some(r) = h.recorder.as_mut() {
+        if let Some(r) = h.recorder.as_mut().filter(|_| h.paused == 0) {
             r.record(Entry { at, input: Input::Engine(input) });
         }
     });

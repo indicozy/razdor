@@ -19,7 +19,7 @@ use super::hook;
 use super::play::Player;
 use super::snapshot::{state_hash, Snapshot};
 use super::stream::{Entry, EngineInput, Input, PlayerAction};
-use crate::rules::battle::{Battle, Outcome, Team};
+use crate::rules::battle::{patch_globals, set_patch_globals, Battle, Outcome, Team};
 use crate::rules::content::Content;
 use crate::rules::game::{Event, Game};
 use crate::rules::save::Install;
@@ -126,6 +126,9 @@ pub struct ReplayPlayer {
     pending_battle: Option<Battle>,
     /// The thread's language override before the playback call (`arm`), back at `disarm`.
     own_lang: std::cell::Cell<Option<Option<crate::i18n::Lang>>>,
+    /// The read-only section of the playback call (`arm` takes it, `disarm` lets it go): nothing the
+    /// playback does is recorded into the live record that may be attached to this thread.
+    read_only: std::cell::RefCell<Option<hook::ReadOnly>>,
 }
 
 impl ReplayPlayer {
@@ -153,6 +156,7 @@ impl ReplayPlayer {
             seek: None,
             pending_battle: None,
             own_lang: std::cell::Cell::new(None),
+            read_only: std::cell::RefCell::new(None),
         };
         p.marks = p.build_marks();
         p
@@ -210,12 +214,16 @@ impl ReplayPlayer {
         if let Some(lang) = crate::i18n::Lang::from_code(&self.header.language).filter(|_| self.own_lang.get().is_none()) {
             self.own_lang.set(Some(crate::i18n::set_override(Some(lang))));
         }
+        if self.read_only.borrow().is_none() {
+            *self.read_only.borrow_mut() = Some(hook::read_only());
+        }
     }
 
     /// Ends a playback call: the hook's records are taken away and the player's own language is
     /// back (see [`ReplayPlayer::arm`]).
     fn disarm(&self) {
         hook::take_playback();
+        self.read_only.take();
         if let Some(own) = self.own_lang.take() {
             crate::i18n::set_override(own);
         }
@@ -553,6 +561,9 @@ impl ReplayPlayer {
 
     /// A checkpoint's game, restored from its packed snapshot (a map from the install).
     fn restore(&self, bytes: &[u8]) -> Result<Game, String> {
+        // A restore is not a player's action, and it is not recorded either (the seeks and the marks restore
+        // outside any playback call).
+        let _read_only = hook::read_only();
         let install = self.install.as_deref().map(|dir| Install { dir, content: self.content.clone() });
         Snapshot::from_bytes(bytes.to_vec()).restore(self.content.clone(), install.as_ref(), self.map.as_deref())
     }
@@ -560,6 +571,8 @@ impl ReplayPlayer {
     /// The timeline's marks: one pass over the checkpoints, restoring each. Battles come from the
     /// file's battle blocks, the rest from the states of the keyframes.
     fn build_marks(&self) -> Vec<Mark> {
+        // The restores below overwrite the thread's patch globals: the caller's are put back.
+        let globals = patch_globals();
         let mut marks = Vec::new();
         let mut owned: BTreeSet<u16> = BTreeSet::new();
         let mut hero_down = false;
@@ -597,6 +610,7 @@ impl ReplayPlayer {
                 marks.push(Mark { day: start.day, kind: battle_mark(start, &self.content), at: Place { seg: s, index } });
             }
         }
+        set_patch_globals(globals);
         marks.sort_by_key(|m| m.at);
         marks
     }

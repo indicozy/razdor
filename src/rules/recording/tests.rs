@@ -908,6 +908,44 @@ fn a_corrupted_checkpoint_stops_the_playback_with_the_version_message() {
     assert!(p.drift.is_some(), "the player keeps the drift");
 }
 
+/// Watching a record while the live game records into it (the desktop diary opens the record of the
+/// game under way): the playback's actions, restores and battle starts are not written into the
+/// live record. The file played is the live session's own, so its bytes do not change, and the
+/// playback leaves no keyframe request or battle start for the session's next pump.
+#[test]
+fn watching_a_record_does_not_write_into_the_live_record() {
+    use super::watch::ReplayPlayer;
+    let Some(dt) = base() else { return };
+    let c = Arc::new(Content::from_dt(&dt));
+    let map = map_named(&dt, "РК1");
+    let dir = scratch("read-only");
+    let mut d = Driver::new(start(&c, &map, Some(97)), true);
+    d.checks = true;
+    d.max = true;
+    d.g.max_ai = true;
+    d.g.foe = Some(Foe::Army(0));
+    let sess = super::session::Session::start(&dir, &d.g, &header_for(&d.g, &dt)).unwrap();
+    d.g.replay = Some(sess.clone());
+    d.session = Some(sess.clone());
+    let mut f = Frames::new(DT_A, BUDGET_A);
+    session(&mut d, &mut f, 12);
+    let path = dir.join(sess.file_name());
+    // The live record is written up to here (the save's place), and the live session stays attached.
+    let _ = sess.save_point();
+    let before = std::fs::read(&path).unwrap();
+    // The live session's pending requests are not the playback's: they are cleared first.
+    hook::take_keyframe_request();
+    hook::take_battle_starts();
+    let mut p = ReplayPlayer::open(&path, c.clone(), Some(&dt.dir), None).unwrap();
+    p.play_to_end().unwrap_or_else(|e| panic!("the playback: {e:?}"));
+    assert!(!hook::take_keyframe_request(), "the playback asks for no keyframe");
+    assert!(hook::take_battle_starts().is_empty(), "the playback's battle starts are not recorded");
+    let _ = sess.save_point();
+    assert_eq!(std::fs::read(&path).unwrap(), before, "the watched record's bytes do not change");
+    sess.finish();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A replay recorded under other rules (another rules fingerprint) still plays, and is marked as
 /// not the same rules.
 #[test]
