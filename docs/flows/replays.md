@@ -69,6 +69,13 @@ had no stamp). `decode` refuses what `encode` could not write.
   `Game::music_rotate`; the draw is the rules' own, the record gives only its place).
 - `Game::replay_stop` (set by a playback driver) makes the frame stop at a given ask, so a music
   change that fell mid-step lands there. `Game::tick_within` counts the asks and wraps `tick_inner`.
+- `hook::read_only()` is a read-only section (`ReadOnly`, a guard, not `Send`): while one lives,
+  `recording()` is false, `record_input` and `record_at` write nothing, and `request_keyframe` and
+  `record_battle_start` do nothing. The thread's recorder stays attached, so this is what keeps a
+  playback out of the live record: the watched file is often the live session's own. Guards nest;
+  the `now` stamp and the keyframe flag saved by the first one come back with the last. Taken by
+  every `ReplayPlayer` call that plays (`arm`/`disarm`) and every restore (`ReplayPlayer::restore`),
+  and for the whole life of a `WatchView`.
 
 Where they sit: `Game::with_world` and `save::restore` call `hook::game_start` (`game.rs`,
 `save.rs`); `Game::music_rotate`, `Game::tick_within`, `Game::start_battle`; the battle's
@@ -182,8 +189,15 @@ game day are written when the day changes (`Session::pump`, once a frame).
 
 The session (`Session`) is attached to the game (`Game::replay`) and to the thread's hook (its
 recorder: what the rules report goes to its pending entries). `Session::save_point` writes the day's
-entries and syncs the file: the save's `ReplayRef { file, pos }` is the file and its length then.
-`Session::resume` cuts the file at `pos` and starts a segment from the loaded game's state.
+entries and syncs the file: the save's `ReplayRef { file, pos, tag }` is the file and its length
+then, and `tag` is `file::tail_tag` there (the FNV-1a of the up to 64 bytes before `pos`; a save made
+before the tag has none).
+`Session::resume(dir, &place, ..)` cuts the file at `pos` and starts a segment from the loaded game's
+state, but only when `Writer::open` accepts the cut (`check_cut`): the file is a replay, `pos` is a
+block's end (the block headers are walked from the first block; a place inside a block, or past the
+file, is refused), and with a tag the bytes before `pos` hash to it. That refuses the place of a save
+whose line of play was cut away and written over (a load of an earlier save, then play on): the
+resume starts a fresh file instead. A refused cut touches nothing.
 
 ## Saves and the replay (`rules/save.rs`)
 
@@ -261,6 +275,17 @@ and the victory from the keyframes' states, so those last three are at keyframe 
 - The events a step raises are kept (`take_events`): `apply_game_events` gives the window and
   message events of the recorded actions, the frames' events are collected by `tick_toward`.
 - The last segment's end keeps the game (`game()` after the end is the final state).
+- Healing (`set_healing(true)`, off by default, on in the watching screen): a checkpoint or entry
+  that does not match is not a stop. It goes to `heals` (a `Drift`, the place and the reason; `fail`,
+  so `drift` stays unset) and the playback goes on from the first checkpoint after the place in its
+  segment (`heal_from`: the checkpoint's state is the recorded one, so the play goes on from the true
+  state). The target is always later than the place, so it cannot loop. Without such a checkpoint the
+  playback goes on at the next segment's start, and without one the file ends and the game stays. A
+  segment start whose restored hash differs is recorded and played on from the restored state. A
+  checkpoint that cannot be restored is still a drift (`drift`, `Err`), and so is a seek's restore.
+  `return_battle` heals the same way. Tests: `a_corrupted_checkpoint_stops_the_playback_with_the_version_message`
+  (off) and `a_corrupted_checkpoint_heals_to_the_next_checkpoint_when_healing_is_on` (on: one heal at the
+  place, and the final state is the uncorrupted file's).
 
 `Player` (`play.rs`) places each recorded entry: a player action or a check at the **end of its
 stretch** (the paused step is finished there, as the action does; the arrivals taken inside the
@@ -378,8 +403,14 @@ drift window.
   screen's. «Пропустить» gives the rest of the battle to the rules at once.
 - Messages: a scenario's dialog (through `story::show`) and the events `describe` names close
   themselves after 2 s at 1×, scaled by the speed, not under 0.6 s (`toast_secs`).
-- Drift: a mismatch stops the playback (`Mode::Drifted`): the window names the version that
-  recorded the record and offers «Смотреть до этого места» (the last good place, paused) and «Выход».
+- Healing: the screen turns healing on (`with_player`), so a mismatch the playback can recover from
+  goes to the log only (`razdor::diag!` «replay healed at …», from `tick`; no window, no text). A
+  drift (`Mode::Drifted`) is what cannot be restored: the window names the version that recorded the
+  record and offers «Смотреть до этого места» (the last good place, paused) and «Выход». The snapshot
+  scene `watch:corrupt` garbles the heal target too, so it shows that window.
+- The screen's state is kept apart from the live game: `with_player` takes the thread's patch globals
+  and holds a read-only section for its whole life (see Hooks); the globals come back on drop, since a
+  restore overwrites them. `ReplayPlayer::build_marks` also puts the globals back it found.
 - Entry points: «Смотреть запись» in «Итоги» (`summary::Exit::Watch`; the page is the back screen),
   in the diary's foot on the desktop (`items_view`, left of «Закрыть») and on the phone's diary (`PhoneDiary::record`),
   and the load window's «Запись» (`saves.rs`, the chosen save's file when it is there). `watch::open_record` saves

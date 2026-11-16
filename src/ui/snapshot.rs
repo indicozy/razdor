@@ -302,13 +302,15 @@ fn stage_watch(app: &mut App, arg: Option<&str>) -> Result<(), String> {
     let path = std::env::var("RAZDOR_WATCH").map_err(|_| "RAZDOR_WATCH names no replay file")?;
     let content = app.dt_content.clone().ok_or("no install")?;
     let install = razdor::rules::save::install_dir();
-    // `corrupt`: the second day-end check changed in memory, so the playback stops at a mismatch.
+    // `corrupt`: the second day-end check changed in memory, and its checkpoint cannot be restored, so the
+    // playback stops at a drift (a mismatch alone heals to that checkpoint, see `ReplayPlayer::set_healing`).
     let player = if arg.is_some_and(|a| a.split(',').any(|s| s == "corrupt")) {
         let mut file = razdor::rules::recording::file::read(std::path::Path::new(&path))?;
         let k = file.segments[0].keyframes.get(1).ok_or("no second keyframe")?.after - 1;
         if let razdor::rules::recording::stream::Input::Engine(razdor::rules::recording::stream::EngineInput::Check { hash }) = &mut file.segments[0].entries[k].input {
             *hash ^= 1;
         }
+        file.segments[0].keyframes[1].snapshot = vec![0u8; 8];
         razdor::rules::recording::watch::ReplayPlayer::new(file, content.clone(), install.as_deref(), None)
     } else {
         razdor::rules::recording::watch::ReplayPlayer::open(std::path::Path::new(&path), content.clone(), install.as_deref(), None)?
