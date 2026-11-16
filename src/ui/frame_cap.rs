@@ -75,6 +75,15 @@ pub fn set_setting(cap: u32) {
     }
 }
 
+/// The cap the settings ask for (0 = off, also before the setting is put). Without the profiling switch, which
+/// [`peek`] applies on top.
+pub fn setting() -> u32 {
+    match SETTING.load(std::sync::atomic::Ordering::Relaxed) {
+        u32::MAX => 0,
+        cap => cap,
+    }
+}
+
 /// The cap the loop paces to now: the profiling switch or the setting (0 = off), or the idle rate after an
 /// idle map frame with «Экономия батареи» on (`battery_cap`). Called once a frame, by the pacer, which takes
 /// the idle flag the frame set.

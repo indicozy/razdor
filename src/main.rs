@@ -376,11 +376,18 @@ async fn main() {
             // atlases go up there), vsync included (~16 ms). Over the threshold is a hitch.
             let total = started.elapsed();
             ui::gpu_probe::take_submit(razdor::frame_probe::Stage::Submit);
+            // The run's frame cap and swap interval, once (`profile:`).
+            ui::perf_log::profile_once();
+            // The screen the frame drew (after its input): the other screens' lines are per screen.
+            razdor::frame_probe::set_screen(app.screen_name());
             razdor::frame_probe::end_frame(work, total);
             if total.as_millis() > razdor::diag::slow_frame_ms() || opened > 0 {
                 opened = opened.saturating_sub(1);
                 let (w, r) = (work.as_secs_f32() * 1000.0, (total - work).as_secs_f32() * 1000.0);
-                razdor::diag!("slow frame: {:.0} ms = work {w:.0} + render {r:.0} ({before} -> {})", w + r, app.screen_name());
+                // A menu-like screen's frame names its stages over 1 ms (empty for the map and battle kinds).
+                let stages = razdor::frame_probe::last_frame_stages();
+                let stages = if stages.is_empty() { String::new() } else { format!(" | stages: {stages}") };
+                razdor::diag!("slow frame: {:.0} ms = work {w:.0} + render {r:.0} ({before} -> {}){stages}", w + r, app.screen_name());
             }
         }
     }

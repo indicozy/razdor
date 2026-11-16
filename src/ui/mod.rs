@@ -1385,15 +1385,19 @@ impl App {
         mobile::refresh_safe_insets();
         #[cfg(target_os = "android")]
         mobile::refresh_keyboard_inset();
-        self.saves_tick();
-        self.mobile_install_poll();
-        // A performance test started from the trigger file, once the install is up and the menu is quiet (`bench_autorun`).
-        bench_autorun::tick(self);
-        // The hub's promo ad is kept in the app folder once the launch's catalog has come (`ui::ads::sync_tick`).
-        ads::sync_tick();
-        self.poll_mod_switch();
-        self.poll_lacking();
-        self.poll_map_repair();
+        // The polls of each frame (the frame probe's `hub_poll`): the saves, the install's look, the bench's trigger,
+        // the hub's promo ad and catalog, the mod switch, the lacking check and the map repair.
+        razdor::frame_probe::time(razdor::frame_probe::Stage::HubPoll, || {
+            self.saves_tick();
+            self.mobile_install_poll();
+            // A performance test started from the trigger file, once the install is up and the menu is quiet (`bench_autorun`).
+            bench_autorun::tick(self);
+            // The hub's promo ad is kept in the app folder once the launch's catalog has come (`ui::ads::sync_tick`).
+            ads::sync_tick();
+            self.poll_mod_switch();
+            self.poll_lacking();
+            self.poll_map_repair();
+        });
         // The screen's orientation from the settings (Android; applied at start and on each change).
         #[cfg(target_os = "android")]
         android::follow_orientation(self.audio.settings.orientation);
@@ -1515,9 +1519,9 @@ impl App {
         // The install's pictures are queued for the background decoders at start
         // (`Assets::load`). Each frame uploads the textures of those decoded so far, within one
         // 4 ms budget shared by the window art and the install's textures.
-        let used = chrome::warm(4.0);
+        let used = razdor::frame_probe::time(razdor::frame_probe::Stage::TextureWarm, || chrome::warm(4.0));
         if let Some(d) = self.assets.dt.as_ref() {
-            d.warm((4.0 - used).max(0.0));
+            razdor::frame_probe::time(razdor::frame_probe::Stage::TextureWarm, || d.warm((4.0 - used).max(0.0)));
         }
         // The minimap's picture is made once the game starts, not at its first open.
         if self.game.is_none() {
@@ -1648,7 +1652,8 @@ impl App {
         widgets::set_outside_tap(outside);
         // The «Итоги» page's exit, taken after the match (it may start the next map, which needs the app).
         let mut summary_exit = None;
-        let mut next = match (&mut self.screen, &mut self.game) {
+        // The screen's own draw and input (the frame probe's `screen_body`; the menu's stages are nested in it).
+        let mut next = razdor::frame_probe::time(razdor::frame_probe::Stage::ScreenBody, || match (&mut self.screen, &mut self.game) {
             (Screen::MainMenu, _) => match main_menu::frame(self.dt_content.is_none(), &self.mods, self.active_mod.as_deref(), self.mod_switch.is_some()) {
                 Some(main_menu::Pick::NewGame) if new_game::tutorial_map(&self.scenarios).is_some() => {
                     new_game::open_list();
@@ -1814,7 +1819,7 @@ impl App {
                 }
             }
             (_, None) => Some(Screen::MainMenu),
-        };
+        });
         // A mod picked from the title's link (`main_menu::frame`) is played from the next frame, as
         // a pick in the new-game window is.
         if let Some(id) = new_game::take_mod_request() {

@@ -42,6 +42,24 @@ razdor::local! {
     static LAST_MEM: Cell<Option<Instant>> = const { Cell::new(None) };
     /// A game's world map has been logged in this run (`map:`).
     static MAP_LOGGED: Cell<bool> = const { Cell::new(false) };
+    /// The `profile:` line has been logged in this run (the first frame with profiling on).
+    static PROFILE_LOGGED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Called each frame with profiling on (`main`): the run's `profile:` line, once. The frame cap, in the settings and
+/// in use, and the swap interval the window asked for. The GL driver and the window's size and DPI are logged at the
+/// start (`gl:`, `display:`), whatever the profiling.
+pub fn profile_once() {
+    if PROFILE_LOGGED.get() {
+        return;
+    }
+    PROFILE_LOGGED.set(true);
+    // `None`: the window's default swap interval (1, vsync), not read back from the driver.
+    let swap = match razdor::lab::current().swap_interval {
+        Some(i) => format!("{i} (set by the lab)"),
+        None => "1 (default, vsync; requested, not read back)".to_string(),
+    };
+    diag::log(&format!("profile: frame_cap setting={} in_use={} swap_interval={swap}", frame_cap::setting(), frame_cap::peek()));
 }
 
 /// The lines of the window's start, once it is open (`main`): the device, the GL driver and the display.

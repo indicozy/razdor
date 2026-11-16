@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, TryRecvError};
 
+use razdor::frame_probe::{self, Stage};
 use razdor::hub::{self, AdRef, Hub, Source};
 
 use super::launch;
@@ -161,7 +162,8 @@ local! {
 /// The promo of the current install (or of the program's and Razdor's folders), or None when no ad
 /// is found (the menu draws nothing then).
 pub fn promo() -> Option<Rc<Promo>> {
-    PROMO.with(|slot| slot.borrow_mut().get_or_load(|| find_promo().map(Rc::new)))
+    // The first call only does the load (the menu's frame probe times it as `ad_load`); later calls keep the value.
+    PROMO.with(|slot| slot.borrow_mut().get_or_load(|| frame_probe::time(Stage::AdLoad, || find_promo().map(Rc::new))))
 }
 
 /// The install was (re)loaded: the ad is looked for again on the next draw. The first draw of a run

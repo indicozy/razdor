@@ -512,15 +512,18 @@ pub fn art(rel: &str, fx: Fx) -> Option<Texture2D> {
         if let Some(t) = c.textures.get(rel).and_then(|v| v[fx as usize].as_ref()) {
             return t.clone();
         }
-        let t = find_file(&c.dir, &format!("Graphics/{rel}"))
-            .and_then(|p| preload::decode_shared(&p))
-            .map_err(|e| razdor::diag!("Discord Times art: {rel}: {e}"))
-            .ok()
-            .and_then(|frames| {
-                let mut img = frames.first()?.clone();
-                transform(&mut img, fx);
-                to_texture(&img)
-            });
+        // The decode and the texture's upload on the first use (the frame probe's `screen_textures`).
+        let t = razdor::frame_probe::time(razdor::frame_probe::Stage::ScreenTextures, || {
+            find_file(&c.dir, &format!("Graphics/{rel}"))
+                .and_then(|p| preload::decode_shared(&p))
+                .map_err(|e| razdor::diag!("Discord Times art: {rel}: {e}"))
+                .ok()
+                .and_then(|frames| {
+                    let mut img = frames.first()?.clone();
+                    transform(&mut img, fx);
+                    to_texture(&img)
+                })
+        });
         c.textures.entry(rel.to_string()).or_default()[fx as usize] = Some(t.clone());
         t
     })

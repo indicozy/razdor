@@ -44,6 +44,14 @@
 //! Battle frames have the kinds `battle` (no effect drawn) and `battle-effect` (an effect drawn,
 //! see [`mark_effect`]), each with the view it was drawn in (`flat` or `25d`), and the stages
 //! `backdrop`, `battle-window` and `effect` (inside the window).
+//!
+//! The other screens (kind `other`) get one line each, by the screen the frame drew ([`set_screen`]):
+//! `other[main menu]`, `other[hub]` (`other` alone when no screen was set). Their stages are the frame's top-level
+//! parts (the app's polls [`Stage::HubPoll`], the queued textures [`Stage::TextureWarm`], the screen's own draw
+//! [`Stage::ScreenBody`]; the rest of the work is `other-rest`), and inside the body the main menu's stages
+//! ([`Stage::MenuBackground`] … [`Stage::AdCapsule`], with their nested [`Stage::MenuFlames`] and
+//! [`Stage::AdLoad`]). [`Stage::ScreenTextures`] is the lazily decoded art, nested in those. A frame over the
+//! slow threshold also logs its stages over 1 ms ([`last_frame_stages`]).
 
 use crate::local;
 use std::cell::{Cell, RefCell};
@@ -56,7 +64,7 @@ use std::time::{Duration, Instant};
 /// tick, `world` the map with `terrain` inside it, `rebuilds` the texture rebuilds, `draws` the
 /// draw calls estimated for the frame and `verts` its vertices ([`draw`]), and the last columns the
 /// GPU time of each GPU stage (`GPU_STAGES`, empty when not timed, see `ui::gpu_probe`).
-pub const CSV_HEADER: &str = "frame,kind,work_ms,total_ms,tick,terrain,world,fog,minimap,route,look,armies,script,day,snap,autosave,session,ai_move,ai_plan,rebuilds,backdrop,battle_window,effect,gpu_backdrop,gpu_window,view,draws,verts,water,mist,light,sun_shadow,weather,ground_cache,freeze,gpu_backdrop_ms,gpu_window_ms,gpu_sky_ms,gpu_terrain_ms,gpu_marks_ms,gpu_sprites_ms,gpu_fog_ms,gpu_ui_ms,gpu_water_ms,gpu_mist_ms,gpu_light_ms,gpu_sun_shadow_ms,gpu_weather_ms,gpu_ground_cache_ms,gpu_freeze_ms,gpu_minimap_ms,ai_scan_ms,ai_rescore_ms,ai_flood_ms,ai_flood_wait_ms,ai_settle_ms,ai_rules_ms,plans,rescores,floods,fights,fight_hits,flush_ms,submit_ms,finish_ms,replay_ms,gl_draws,gl_bytes,replayed";
+pub const CSV_HEADER: &str = "frame,kind,work_ms,total_ms,tick,terrain,world,fog,minimap,route,look,armies,script,day,snap,autosave,session,ai_move,ai_plan,rebuilds,backdrop,battle_window,effect,gpu_backdrop,gpu_window,view,draws,verts,water,mist,light,sun_shadow,weather,ground_cache,freeze,gpu_backdrop_ms,gpu_window_ms,gpu_sky_ms,gpu_terrain_ms,gpu_marks_ms,gpu_sprites_ms,gpu_fog_ms,gpu_ui_ms,gpu_water_ms,gpu_mist_ms,gpu_light_ms,gpu_sun_shadow_ms,gpu_weather_ms,gpu_ground_cache_ms,gpu_freeze_ms,gpu_minimap_ms,ai_scan_ms,ai_rescore_ms,ai_flood_ms,ai_flood_wait_ms,ai_settle_ms,ai_rules_ms,plans,rescores,floods,fights,fight_hits,flush_ms,submit_ms,finish_ms,replay_ms,gl_draws,gl_bytes,replayed,screen";
 
 /// The GPU stages timed per frame, in the CSV's column order (`gpu_<name>_ms`): each is the GPU's
 /// time between the marker before it and its own marker (`ui::gpu_probe::gpu_wait`).
@@ -215,10 +223,35 @@ pub enum Stage {
     /// The lab's replay floor: the saved batch of a still frame issued again instead of the sprite pass
     /// (`ui::replay_floor`).
     Replay,
+    /// The main menu's backdrop picture (`main_menu::background`), drawn by the main menu and the screens that
+    /// use its backdrop.
+    MenuBackground,
+    /// The logo with its flames (`main_menu::logo`); the flames are inside it ([`Stage::MenuFlames`]).
+    MenuLogo,
+    /// The menu's oval buttons with their flames and words (`main_menu::oval`).
+    MenuButtons,
+    /// The menu's text and widgets: the foot line, the not-found block, the links, the version line and the update's line.
+    MenuWidgets,
+    /// The animated flames (`main_menu::draw_flame_frames`), nested in the logo and in the buttons.
+    MenuFlames,
+    /// The Thorny Times ad capsule (`main_menu::thorny_promo`), its first load nested ([`Stage::AdLoad`]).
+    AdCapsule,
+    /// The ad's first load (`ads::promo`): its folder read and its picture decoded, once per install.
+    AdLoad,
+    /// The app's polls made each frame (`App::frame`): the saves, the install's look, the hub's ad and catalog, the
+    /// mod switch, the lacking check and the map repair.
+    HubPoll,
+    /// The textures made from the queue each frame within the frame's budget (`chrome::warm`, `DtArt::warm`).
+    TextureWarm,
+    /// The screen's own draw and input: the `match` of `App::frame_content`. The menu's stages above are nested in it.
+    ScreenBody,
+    /// Art decoded (and its picture read) on a frame: the lazily loaded pictures (`chrome::art`), nested in the stages
+    /// above and in [`Stage::TextureWarm`].
+    ScreenTextures,
 }
 
 impl Stage {
-    pub const COUNT: usize = 51;
+    pub const COUNT: usize = 62;
 
     /// Every stage, in the enum's order (`ALL[st as usize] == st`, a test pins it).
     pub const ALL: [Stage; Stage::COUNT] = [
@@ -273,6 +306,17 @@ impl Stage {
         Stage::Submit,
         Stage::Finish,
         Stage::Replay,
+        Stage::MenuBackground,
+        Stage::MenuLogo,
+        Stage::MenuButtons,
+        Stage::MenuWidgets,
+        Stage::MenuFlames,
+        Stage::AdCapsule,
+        Stage::AdLoad,
+        Stage::HubPoll,
+        Stage::TextureWarm,
+        Stage::ScreenBody,
+        Stage::ScreenTextures,
     ];
 
     /// The stage's key in the bench's stage line: `snake_case`, the GPU stages with the `gpu_` prefix
@@ -330,6 +374,17 @@ impl Stage {
             Stage::Submit => "submit",
             Stage::Finish => "finish",
             Stage::Replay => "replay",
+            Stage::MenuBackground => "menu_background",
+            Stage::MenuLogo => "menu_logo",
+            Stage::MenuButtons => "menu_buttons",
+            Stage::MenuWidgets => "menu_widgets",
+            Stage::MenuFlames => "menu_flames",
+            Stage::AdCapsule => "ad_capsule",
+            Stage::AdLoad => "ad_load",
+            Stage::HubPoll => "hub_poll",
+            Stage::TextureWarm => "texture_warm",
+            Stage::ScreenBody => "screen_body",
+            Stage::ScreenTextures => "screen_textures",
         }
     }
 
@@ -413,6 +468,8 @@ pub struct Sample {
     pub gl_draws: u32,
     pub gl_bytes: u64,
     pub replayed: bool,
+    /// The screen the frame drew ([`set_screen`]); empty when none was set.
+    pub screen: &'static str,
 }
 
 struct State {
@@ -457,6 +514,9 @@ struct State {
     gl_draws: u32,
     gl_bytes: u64,
     replayed: bool,
+    /// The screen this frame drew ([`set_screen`]), and the last frame's sample ([`last_frame_stages`]).
+    screen: &'static str,
+    last: Option<Sample>,
 }
 
 impl State {
@@ -487,6 +547,8 @@ impl State {
             gl_draws: 0,
             gl_bytes: 0,
             replayed: false,
+            screen: "",
+            last: None,
         }
     }
 }
@@ -710,6 +772,14 @@ pub fn set_kind(kind: Kind) {
     }
 }
 
+/// Names the screen this frame drew (`App::screen_name`, set by the main loop before [`end_frame`]): the other
+/// screens' lines are per screen (`other[hub]`). Off with the probe, it does nothing.
+pub fn set_screen(name: &'static str) {
+    if on() {
+        STATE.with_borrow_mut(|s| s.screen = name);
+    }
+}
+
 /// An effect was drawn this frame: a battle frame becomes [`Kind::BattleEffect`].
 pub fn mark_effect() {
     if on() {
@@ -752,6 +822,7 @@ pub fn end_frame(work: Duration, total: Duration) {
             gl_draws: s.gl_draws,
             gl_bytes: s.gl_bytes,
             replayed: s.replayed,
+            screen: s.screen,
         };
         s.frames += 1;
         if csv {
@@ -761,6 +832,8 @@ pub fn end_frame(work: Duration, total: Duration) {
             cell.push(sample);
         }
         s.samples.push(sample);
+        s.last = Some(sample);
+        s.screen = "";
         s.stage = [Duration::ZERO; Stage::COUNT];
         s.rebuilds = 0;
         s.sprites = 0;
@@ -982,7 +1055,7 @@ pub fn csv_row_gpu(frame: u64, s: &Sample, gpu: Option<&[f32; GPU_STAGES.len()]>
     for st in [Stage::Flush, Stage::Submit, Stage::Finish, Stage::Replay] {
         row.push_str(&format!(",{:.3}", stage(st)));
     }
-    row.push_str(&format!(",{},{},{}", s.gl_draws, s.gl_bytes, u8::from(s.replayed)));
+    row.push_str(&format!(",{},{},{},{}", s.gl_draws, s.gl_bytes, u8::from(s.replayed), s.screen));
     row
 }
 
@@ -1026,17 +1099,74 @@ pub fn summary_lines(secs: f32, samples: &[Sample], gpu: &[(Kind, f32)]) -> Vec<
     [(false, ""), (true, "gpu-sample ")]
         .into_iter()
         .flat_map(|(sampled, group)| {
-            KINDS.into_iter().filter_map(move |kind| {
+            let mut lines = Vec::new();
+            for kind in KINDS {
                 let of: Vec<&Sample> = samples.iter().filter(|s| s.gpu_sampled == sampled && s.kind == kind).collect();
                 let times: Vec<f32> = if sampled { Vec::new() } else { gpu.iter().filter(|(k, _)| *k == kind).map(|(_, ms)| *ms).collect() };
-                (!of.is_empty()).then(|| kind_line(secs, kind, &of, &times, group))
-            })
+                // The other screens (kind Other) get a line each, by the screen they drew; the other kinds one line.
+                let groups: Vec<(&str, Vec<&Sample>)> = if kind == Kind::Other { by_screen(of) } else { vec![("", of)] };
+                for (screen, of) in groups.iter().filter(|(_, of)| !of.is_empty()) {
+                    lines.push(kind_line(secs, kind, screen, of, &times, group));
+                }
+            }
+            lines
         })
         .collect()
 }
 
-fn kind_line(secs: f32, kind: Kind, of: &[&Sample], gpu_terrain: &[f32], group: &str) -> String {
-    let name = format!("{group}{}", summary_name(kind));
+/// The other screens' frames split by the screen they drew, in the order each screen first drew (`screen` empty
+/// when none was set).
+fn by_screen(of: Vec<&Sample>) -> Vec<(&'static str, Vec<&Sample>)> {
+    let mut groups: Vec<(&'static str, Vec<&Sample>)> = Vec::new();
+    for s in of {
+        match groups.iter_mut().find(|(name, _)| *name == s.screen) {
+            Some((_, frames)) => frames.push(s),
+            None => groups.push((s.screen, vec![s])),
+        }
+    }
+    groups
+}
+
+/// A summary line's name: the other kind names its screen (`other[hub]`), the others as [`summary_name`].
+fn line_name(kind: Kind, screen: &str) -> String {
+    match kind {
+        Kind::Other if !screen.is_empty() => format!("other[{screen}]"),
+        _ => summary_name(kind),
+    }
+}
+
+/// The other screens' work outside their top-level stages ([`Stage::HubPoll`], [`Stage::TextureWarm`],
+/// [`Stage::ScreenBody`]), clamped at zero: the overlays drawn over the screen and the frame's other parts.
+fn other_rest_ms(s: &Sample) -> f32 {
+    let parts: f32 = [Stage::HubPoll, Stage::TextureWarm, Stage::ScreenBody].iter().map(|st| s.stage_ms[*st as usize]).sum();
+    (s.work_ms - parts).max(0.0)
+}
+
+/// Stages over this many ms are named in a slow frame's line ([`last_frame_stages`]).
+const SLOW_STAGE_MS: f32 = 1.0;
+
+/// The stages of an other screen's frame over [`SLOW_STAGE_MS`], as `name ms` in [`Stage::ALL`]'s order, for the
+/// slow-frame line. Empty for the map and battle kinds, and when no stage is that long. The nested stages are
+/// listed too, so their sum can exceed the frame's work.
+pub fn stage_breakdown(s: &Sample) -> String {
+    if s.kind != Kind::Other {
+        return String::new();
+    }
+    Stage::ALL
+        .iter()
+        .filter(|st| s.stage_ms[**st as usize] > SLOW_STAGE_MS)
+        .map(|st| format!("{} {:.1}", st.name(), s.stage_ms[*st as usize]))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The last frame's [`stage_breakdown`] (the frame [`end_frame`] stored last); empty when none was stored.
+pub fn last_frame_stages() -> String {
+    STATE.with_borrow(|s| s.last.as_ref().map(stage_breakdown).unwrap_or_default())
+}
+
+fn kind_line(secs: f32, kind: Kind, screen: &str, of: &[&Sample], gpu_terrain: &[f32], group: &str) -> String {
+    let name = format!("{group}{}", line_name(kind, screen));
     let rebuilds: u32 = of.iter().map(|s| s.rebuilds).sum();
     let stage = |st: Stage| dist(of.iter().map(|s| s.stage_ms[st as usize])).narrow();
     // The effects' GPU stages, to two decimals (see `Dist::narrow2`).
@@ -1101,8 +1231,34 @@ fn kind_line(secs: f32, kind: Kind, of: &[&Sample], gpu_terrain: &[f32], group: 
     } else {
         String::new()
     };
+    // The other screens split their frame: the top-level parts (the poll, the queued textures, the screen's body
+    // and the rest of the work), then the stages inside the body and the textures, and the frame's submit and GL
+    // counters (the GPU's own time is not here: a GPU-bound screen shows in present).
+    let screen_seg = if kind == Kind::Other {
+        let mean = |f: fn(&Sample) -> f32| of.iter().map(|s| f(s)).sum::<f32>() / of.len() as f32;
+        format!(
+            "poll {} | texture-warm {} | screen-body {} | other-rest {} | in the body: menu-background {} | menu-logo {} | menu-buttons {} | menu-widgets {} | ad-capsule {} | ad-load {} | menu-flames {} | textures {} | submit {} | gl-draws {:.0} gl-bytes {:.0}KB | ",
+            stage(Stage::HubPoll),
+            stage(Stage::TextureWarm),
+            stage(Stage::ScreenBody),
+            dist(of.iter().map(|s| other_rest_ms(s))).narrow(),
+            stage(Stage::MenuBackground),
+            stage(Stage::MenuLogo),
+            stage(Stage::MenuButtons),
+            stage(Stage::MenuWidgets),
+            stage(Stage::AdCapsule),
+            stage(Stage::AdLoad),
+            stage(Stage::MenuFlames),
+            stage(Stage::ScreenTextures),
+            stage(Stage::Submit),
+            mean(|s| s.gl_draws as f32),
+            mean(|s| s.gl_bytes as f32) / 1024.0,
+        )
+    } else {
+        String::new()
+    };
     // The AI's sub-stages and counts (per frame of the kind: per hero step on the walk-step kind).
-    let per = |c: Counter| of.iter().map(|s| s.counts[c as usize] as f32).sum::<f32>() / of.len() as f32;
+    let per =|c: Counter| of.iter().map(|s| s.counts[c as usize] as f32).sum::<f32>() / of.len() as f32;
     let ai = format!(
         "ai-scan {} | ai-rescore {} | ai-flood {} | ai-flood-wait {} | ai-settle {} | ai-rules {} | plans {:.2} | rescores {:.2} | floods {:.2} | fights {:.2} (cache hits {:.2}) | ",
         stage(Stage::AiScan),
@@ -1118,7 +1274,7 @@ fn kind_line(secs: f32, kind: Kind, of: &[&Sample], gpu_terrain: &[f32], group: 
         per(Counter::FightHits),
     );
     format!(
-        "frame probe {secs:.1} s {name} n={} | total {} | work {} | present {} | tick {} | route {} | look {} | armies {} | ai-move {} | ai-plan {} | {ai}script {} | day {} | snap {} | tick-rest {} | terrain {} | objects {} | fog {} | minimap {} | autosave {} | rest {} | {battle}{map}tex rebuilds {rebuilds}",
+        "frame probe {secs:.1} s {name} n={} | total {} | work {} | present {} | tick {} | route {} | look {} | armies {} | ai-move {} | ai-plan {} | {ai}script {} | day {} | snap {} | tick-rest {} | terrain {} | objects {} | fog {} | minimap {} | autosave {} | rest {} | {battle}{map}{screen_seg}tex rebuilds {rebuilds}",
         of.len(),
         dist(of.iter().map(|s| s.total_ms)).wide(),
         dist(of.iter().map(|s| s.work_ms)).wide(),
@@ -1250,8 +1406,14 @@ pub fn percentile(sorted: &[f32], p: f32) -> f32 {
 mod tests {
     use super::*;
 
-    fn sample(kind: Kind, work_ms: f32, total_ms: f32, stage_ms: [f32; Stage::COUNT]) -> Sample {
-        Sample { kind, work_ms, total_ms, stage_ms, rebuilds: 0, sprites: 0, sprite_px: 0.0, terrain_px: 0.0, draws: 0, verts: 0, gpu_sampled: false, counts: [0; COUNTERS.len()], gl_draws: 0, gl_bytes: 0, replayed: false }
+    pub(super) fn sample(kind: Kind, work_ms: f32, total_ms: f32, stage_ms: [f32; Stage::COUNT]) -> Sample {
+        Sample { kind, work_ms, total_ms, stage_ms, rebuilds: 0, sprites: 0, sprite_px: 0.0, terrain_px: 0.0, draws: 0, verts: 0, gpu_sampled: false, counts: [0; COUNTERS.len()], gl_draws: 0, gl_bytes: 0, replayed: false, screen: "" }
+    }
+
+    /// The same sample, drawn on `screen`.
+    pub(super) fn on_screen(mut s: Sample, screen: &'static str) -> Sample {
+        s.screen = screen;
+        s
     }
 
     #[test]
@@ -1305,7 +1467,7 @@ mod tests {
     }
 
     /// A stage array with the given stages' times; the others are zero.
-    fn stages(list: &[(Stage, f32)]) -> [f32; Stage::COUNT] {
+    pub(super) fn stages(list: &[(Stage, f32)]) -> [f32; Stage::COUNT] {
         let mut a = [0.0; Stage::COUNT];
         for (st, ms) in list {
             a[*st as usize] = *ms;
@@ -1380,17 +1542,18 @@ mod tests {
         let timed = csv_row_gpu(7, &step, Some(&gpu));
         assert_eq!(timed.split(',').count(), CSV_HEADER.split(',').count());
         let f: Vec<&str> = timed.split(',').collect();
-        let n = f.len();
+        // The screen is the last column (empty here): the indexes count from before it.
+        let n = f.len() - 1;
         // The GPU block is the 16 fields before the AI columns: terrain (index 3) and ui (index 7) timed.
         // The lab's trailing columns (flush, submit, finish, replay, the GL counts, replayed) come after the AI block.
         let gpu0 = n - 7 - 11 - GPU_STAGES.len();
         assert_eq!((f[gpu0 + 3], f[gpu0 + 7]), ("1.500", "0.250"), "{timed}");
         // The AI sub-stages (zero here) and the AI counts come last, in their order.
         assert_eq!(&f[n - 18..n - 7], &["0.000", "0.000", "0.000", "0.000", "0.000", "0.000", "0", "0", "0", "0", "0"], "{timed}");
-        assert_eq!(&f[n - 7..], &["0.000", "0.000", "0.000", "0.000", "0", "0", "0"], "{timed}");
+        assert_eq!(&f[n - 7..n], &["0.000", "0.000", "0.000", "0.000", "0", "0", "0"], "{timed}");
         let other = sample(Kind::Other, 0.5, 1.0, [0.0; Stage::COUNT]);
         assert!(csv_row(1, &other).starts_with("1,other,0.500,1.000,0.000,"));
-        assert!(csv_row(1, &other).ends_with(",0.000,0.000,0.000,0.000,0,0,0"), "the lab columns close the row");
+        assert!(csv_row(1, &other).ends_with(",0.000,0.000,0.000,0.000,0,0,0,"), "the lab columns close the row, the screen (empty) after them");
     }
 
     #[test]
@@ -1484,6 +1647,7 @@ mod tests {
 #[cfg(test)]
 mod lab_counts_tests {
     use super::*;
+    use super::tests::{on_screen, sample, stages};
 
     #[test]
     fn the_submissions_and_the_replay_are_counted_for_the_frame() {
@@ -1518,6 +1682,45 @@ mod lab_counts_tests {
             assert_eq!(Stage::ALL.iter().filter(|s| s.name() == st.name()).count(), 1, "{}", st.name());
         }
         assert_eq!(Stage::ALL.len(), Stage::COUNT);
-        assert!(CSV_HEADER.ends_with(",flush_ms,submit_ms,finish_ms,replay_ms,gl_draws,gl_bytes,replayed"));
+        assert!(CSV_HEADER.ends_with(",flush_ms,submit_ms,finish_ms,replay_ms,gl_draws,gl_bytes,replayed,screen"));
+        // The screen is the row's last column: a named one, and empty when none was set.
+        assert!(csv_row(1, &on_screen(sample(Kind::Other, 1.0, 2.0, [0.0; Stage::COUNT]), "hub")).ends_with(",0,0,0,hub"));
+        assert!(csv_row(1, &sample(Kind::Other, 1.0, 2.0, [0.0; Stage::COUNT])).ends_with(",0,0,0,"));
+    }
+
+    #[test]
+    fn the_other_frames_get_a_line_per_screen_in_the_order_they_drew() {
+        let menu = |body: f32| on_screen(sample(Kind::Other, body, body + 1.0, stages(&[(Stage::ScreenBody, body)])), "main menu");
+        let hub = on_screen(sample(Kind::Other, 2.0, 3.0, [0.0; Stage::COUNT]), "hub");
+        let unnamed = sample(Kind::Other, 1.0, 2.0, [0.0; Stage::COUNT]);
+        let lines = summary_lines(5.0, &[menu(4.0), hub, menu(6.0), unnamed], &[]);
+        let names: Vec<&str> = lines.iter().map(|l| l.split(" n=").next().unwrap_or_default()).collect();
+        assert_eq!(names, ["frame probe 5.0 s other[main menu]", "frame probe 5.0 s other[hub]", "frame probe 5.0 s other"], "{lines:?}");
+        assert!(lines[0].contains(" n=2 "), "{}", lines[0]);
+        assert!(lines[0].contains(" | screen-body p50 4.0 p99 6.0 max 6.0 | other-rest "), "{}", lines[0]);
+        // The map and battle lines keep their names and carry no screen segment.
+        let idle = sample(Kind::Idle { tilt: false }, 3.0, 4.0, [0.0; Stage::COUNT]);
+        let map = summary_lines(5.0, &[idle], &[]);
+        assert!(map[0].starts_with("frame probe 5.0 s idle[flat] n=1 "), "{}", map[0]);
+        assert!(!map[0].contains("screen-body"), "{}", map[0]);
+    }
+
+    #[test]
+    fn the_slow_frame_names_the_stages_of_an_other_screen_over_a_millisecond() {
+        let menu = sample(Kind::Other, 30.0, 31.0, stages(&[(Stage::MenuLogo, 12.5), (Stage::MenuFlames, 9.0), (Stage::AdLoad, 0.4), (Stage::ScreenBody, 1.5)]));
+        // The enum's order, with the floor of 1 ms (AdLoad's 0.4 ms is left out).
+        assert_eq!(stage_breakdown(&menu), "menu_logo 12.5, menu_flames 9.0, screen_body 1.5");
+        let map = sample(Kind::Idle { tilt: false }, 30.0, 31.0, stages(&[(Stage::Tick, 20.0)]));
+        assert_eq!(stage_breakdown(&map), "", "the map kinds keep their own lines");
+        assert_eq!(stage_breakdown(&sample(Kind::Other, 1.0, 2.0, [0.0; Stage::COUNT])), "");
+    }
+
+    #[test]
+    fn the_other_rest_leaves_out_the_nested_menu_stages() {
+        // The menu's stages sit inside the body, so the rest is the work less the body, the poll and the textures.
+        let s = sample(Kind::Other, 20.0, 21.0, stages(&[(Stage::ScreenBody, 12.0), (Stage::MenuLogo, 8.0), (Stage::HubPoll, 1.0), (Stage::TextureWarm, 2.0)]));
+        assert!((other_rest_ms(&s) - 5.0).abs() < 1e-4, "{}", other_rest_ms(&s));
+        let over = sample(Kind::Other, 1.0, 2.0, stages(&[(Stage::ScreenBody, 3.0)]));
+        assert_eq!(other_rest_ms(&over), 0.0);
     }
 }

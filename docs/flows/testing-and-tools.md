@@ -176,6 +176,17 @@ placeholder `0.0.0` (`update_view::shown_version`), so a version bump changes no
    terrain, objects, fog, minimap, rest), all in ms, and the texture rebuilds. Present is
    total minus work: the GL submission and the wait for vsync. The stage times are CPU time;
    GPU time is not visible there, except on Android.
+   The other screens (kind `other`, not a map or battle) get one line per screen the frame drew
+   (`other[main menu]`, `other[hub]`; `set_screen` in `main.rs`, after the frame's input). Their
+   stage line has the frame's top-level parts: `poll` (the app's polls), `texture-warm`
+   (the queued textures), `screen-body` (the screen's own draw and input, `frame_content`), and
+   `other-rest` (the work outside those). Inside the body: the main menu's stages `menu-background`,
+   `menu-logo`, `menu-buttons`, `menu-widgets`, `ad-capsule` (its first load `ad-load`), with the flames
+   `menu-flames` nested in the logo and buttons, and `textures` (lazily decoded art, nested in the body and
+   in the texture warm). The GPU and the driver are not timed: a slow screen whose work is small is
+   slow in `present`. A slow frame of such a screen adds `| stages: name ms, ...` (the stages over
+   1 ms, nested ones included). The first profiled frame writes a `profile:` line (frame cap in the
+   settings and in use, the requested swap interval). The CSV has a `screen` column last.
    Battle frames (`battle_view`) are `battle[flat]` or `battle[25d]` (the view the map is
    drawn in), and `battle-effect[…]` when an effect was drawn in the frame (`mark_effect`).
    Their lines add the stages backdrop, battle-window (effect inside it), and gpu-backdrop and

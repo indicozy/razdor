@@ -9,6 +9,7 @@
 use std::cell::Cell;
 
 use razdor::depth;
+use razdor::frame_probe;
 use razdor::local;
 use crate::ui::input::{get_keys_pressed, is_mouse_button_down};
 use macroquad::prelude::*;
@@ -123,16 +124,18 @@ fn draw_flame_frames(
     dest: Rect,
     tint: Color,
 ) {
-    let (current, next, blend) = flame_phase(t, fps, frames);
-    chrome::additive(|| {
-        let mut current_tint = tint;
-        current_tint.a *= 1.0 - blend;
-        chrome::tex_src(texture, source(current), dest, current_tint);
-        if blend > 0.0 {
-            let mut next_tint = tint;
-            next_tint.a *= blend;
-            chrome::tex_src(texture, source(next), dest, next_tint);
-        }
+    frame_probe::time(frame_probe::Stage::MenuFlames, || {
+        let (current, next, blend) = flame_phase(t, fps, frames);
+        chrome::additive(|| {
+            let mut current_tint = tint;
+            current_tint.a *= 1.0 - blend;
+            chrome::tex_src(texture, source(current), dest, current_tint);
+            if blend > 0.0 {
+                let mut next_tint = tint;
+                next_tint.a *= blend;
+                chrome::tex_src(texture, source(next), dest, next_tint);
+            }
+        });
     });
 }
 
@@ -346,9 +349,10 @@ pub fn backdrop() {
     // The ruins, the logo and the foot are the interface's own: a title window's scale (set by
     // the window's frame, `window_layout::title_scale`) does not reach them.
     let _scale = super::display::enter_window_scale(None);
-    background();
-    logo();
-    foot_lines();
+    // Timed for the other screens too (`ui::hub_view`, `new_game`, `saves`, ...): their stage lines name them.
+    frame_probe::time(frame_probe::Stage::MenuBackground, background);
+    frame_probe::time(frame_probe::Stage::MenuLogo, logo);
+    frame_probe::time(frame_probe::Stage::MenuWidgets, foot_lines);
 }
 
 /// The menu's foot (4c7774): the version line (`[SpecialTexts] VerInfo`), small and white, on the
@@ -652,16 +656,18 @@ pub fn frame(no_install: bool, mods: &[(String, razdor::hub::Text)], active: Opt
     backdrop();
     let mut pick = None;
     let hot = if input_blocked() { None } else { hot_button(crate::ui::widgets::pointer().into(), BUTTONS.len()) };
-    for (i, (p, label)) in BUTTONS.iter().enumerate() {
-        if oval(i, tr(label), hot) {
-            pick = Some(*p);
+    frame_probe::time(frame_probe::Stage::MenuButtons, || {
+        for (i, (p, label)) in BUTTONS.iter().enumerate() {
+            if oval(i, tr(label), hot) {
+                pick = Some(*p);
+            }
         }
-    }
-    super::screens::menu_not_found(no_install);
+    });
+    frame_probe::time(frame_probe::Stage::MenuWidgets, || super::screens::menu_not_found(no_install));
     let k = chrome::k();
     // The version line sits above the links: the landscape corner's, or the chips' row when
     // held upright.
-    let version_y = match upright_menu() {
+    let version_y = frame_probe::time(frame_probe::Stage::MenuWidgets, || match upright_menu() {
         Some(m) => {
             if let Some(p) = chip_links(&m, k, mods, mod_choice.as_ref()) {
                 pick = Some(p);
@@ -674,7 +680,7 @@ pub fn frame(no_install: bool, mods: &[(String, razdor::hub::Text)], active: Opt
             }
             screen_height() - 22.0 * k - 26.0 * k - sideways_foot_extra(k)
         }
-    };
+    });
     // This program's version, small in the corner above the links.
     let version = format!("v{}", super::update_view::shown_version(env!("CARGO_PKG_VERSION"), super::clock::is_snapshot()));
     // On a phone the version is 13 dp (a player's report of 1503: 12 px grey over the picture was
@@ -684,13 +690,15 @@ pub fn frame(no_install: bool, mods: &[(String, razdor::hub::Text)], active: Opt
         Some(dp) => (VERSION_PHONE_DP * dp, Color::new(0.95, 0.88, 0.72, 0.9)),
         None => (12.0 * k, Color::new(0.95, 0.88, 0.72, 0.6)),
     };
-    super::dt_font::legacy_metrics_if(phone.is_some(), || {
-        let vw = measure(&version, vsize).width;
-        chrome::shadow_text(&version, screen_width() - 16.0 * k - vw, version_y, vsize, vcolour);
+    frame_probe::time(frame_probe::Stage::MenuWidgets, || {
+        super::dt_font::legacy_metrics_if(phone.is_some(), || {
+            let vw = measure(&version, vsize).width;
+            chrome::shadow_text(&version, screen_width() - 16.0 * k - vw, version_y, vsize, vcolour);
+        });
     });
-    thorny_promo(k, version_y - vsize - 6.0 * k);
+    frame_probe::time(frame_probe::Stage::AdCapsule, || thorny_promo(k, version_y - vsize - 6.0 * k));
     // An update put in place says so (an "Always" update has no window of its own).
-    super::update_view::title_line();
+    frame_probe::time(frame_probe::Stage::MenuWidgets, super::update_view::title_line);
     // Esc quits the game at once, without a question, as in the original (0x4c8059); a
     // gamepad's Start, which is Esc elsewhere, does not (Razdor's: pressed to open a menu,
     // it would end the game).
