@@ -9,7 +9,7 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use super::file::{replay_name_ok, ReplayRef, Writer};
+use super::file::{replay_name_ok, tail_tag, ReplayRef, Writer};
 use super::header::ReplayHeader;
 use super::hook::{self, Recorder};
 use super::snapshot::capture;
@@ -74,13 +74,14 @@ impl Session {
         Session::fresh(dir, game, header)
     }
 
-    /// `file` cut at `pos` (a save's place in it), then a new segment from `game`'s state (a load).
-    /// The name is checked before any file is touched; a name the game does not make, a missing
-    /// file, or one that is not a replay starts a fresh file instead.
-    pub fn resume(dir: &Path, file: &str, pos: u64, game: &Game, header: &ReplayHeader) -> Result<Session, String> {
-        if replay_name_ok(file) {
-            if let Ok(writer) = Writer::open(&dir.join(file), header, Some(pos)) {
-                return Session::begin(writer, file.to_string(), game);
+    /// `place`'s file cut at its place (a save's place in it), then a new segment from `game`'s state
+    /// (a load). The name is checked before any file is touched; a name the game does not make, a
+    /// missing file, a place that is not a block's end of the same line of play (see [`ReplayRef`]),
+    /// or one that is not a replay starts a fresh file instead.
+    pub fn resume(dir: &Path, place: &ReplayRef, game: &Game, header: &ReplayHeader) -> Result<Session, String> {
+        if replay_name_ok(&place.file) {
+            if let Ok(writer) = Writer::open(&dir.join(&place.file), header, Some(place.pos), place.tag) {
+                return Session::begin(writer, place.file.clone(), game);
             }
         }
         Session::fresh(dir, game, header)
@@ -88,7 +89,7 @@ impl Session {
 
     fn fresh(dir: &Path, game: &Game, header: &ReplayHeader) -> Result<Session, String> {
         let name = new_name();
-        let writer = Writer::open(&dir.join(&name), header, None)?;
+        let writer = Writer::open(&dir.join(&name), header, None, None)?;
         Session::begin(writer, name, game)
     }
 
@@ -107,7 +108,8 @@ impl Session {
         let mut g = self.inner.lock().expect("the session lock");
         g.flush();
         let pos = g.writer.sync();
-        ReplayRef { file: g.name.clone(), pos }
+        let tag = tail_tag(g.writer.path(), pos).ok();
+        ReplayRef { file: g.name.clone(), pos, tag }
     }
 
     /// The name of the file this session writes.

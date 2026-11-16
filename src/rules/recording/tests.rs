@@ -717,7 +717,7 @@ fn a_load_truncates_the_replay_and_the_file_plays_back_across_it() {
     let mut loaded = save::restore(&meta2, game_loaded, c.clone(), Some(&install)).unwrap();
     assert_eq!(loaded.replay_resume.as_ref(), Some(&place), "the load resumes the save's place");
     let resume = loaded.replay_resume.take().unwrap();
-    loaded.replay = Some(super::session::Session::resume(&dir, &resume.file, resume.pos, &loaded, &header_for(&loaded, &dt)).unwrap());
+    loaded.replay = Some(super::session::Session::resume(&dir, &resume, &loaded, &header_for(&loaded, &dt)).unwrap());
     let mut back = Driver::new(loaded, false);
     back.session = back.g.replay.clone();
     back.checks = true;
@@ -1218,7 +1218,8 @@ fn replay_names_are_checked_before_any_file_is_touched() {
     }
     // A resume with each crafted name starts a fresh file in the replays folder, cutting nothing.
     for name in CRAFTED {
-        let sess = super::session::Session::resume(&dir, name, 5, &d.g, &header).unwrap();
+        let place = ReplayRef { file: name.to_string(), pos: 5, tag: None };
+        let sess = super::session::Session::resume(&dir, &place, &d.g, &header).unwrap();
         sess.finish();
         let made = sess.file_name();
         assert!(super::file::replay_name_ok(&made), "the fresh file has a game's name");
@@ -1229,7 +1230,7 @@ fn replay_names_are_checked_before_any_file_is_touched() {
     let manual = games.join("manual");
     std::fs::create_dir_all(&manual).unwrap();
     let mut bad = save::meta_of(&d.g, SaveKind::Manual, "bad").unwrap();
-    bad.replay = Some(ReplayRef { file: "../../victim.txt".into(), pos: 0 });
+    bad.replay = Some(ReplayRef { file: "../../victim.txt".into(), pos: 0, tag: None });
     let p = manual.join("bad.rzsave");
     std::fs::write(&p, save::encode(&bad, &d.g).unwrap()).unwrap();
     save::delete(&p).unwrap();
@@ -1238,10 +1239,77 @@ fn replay_names_are_checked_before_any_file_is_touched() {
     // A replay-named file that is not a replay is not cut either: a fresh file takes its place.
     let impostor = dir.join("replay-7.rzreplay");
     std::fs::write(&impostor, "hello, not a replay").unwrap();
-    let sess = super::session::Session::resume(&dir, "replay-7.rzreplay", 3, &d.g, &header).unwrap();
+    let place = ReplayRef { file: "replay-7.rzreplay".into(), pos: 3, tag: None };
+    let sess = super::session::Session::resume(&dir, &place, &d.g, &header).unwrap();
     sess.finish();
     assert_eq!(std::fs::read_to_string(&impostor).unwrap(), "hello, not a replay", "a non-replay file is not cut");
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A resume's cut (`Writer::open` at a save's place) is refused unless the place is a block's end of
+/// the same line of play: a place inside a block is refused, a place whose bytes another line of play
+/// rewrote is refused by its tag, a place without a tag (an old save) checks the block's end only, and
+/// the good place resumes. A refused cut touches nothing. No game is needed.
+#[test]
+fn a_resume_cut_must_be_a_block_end_of_the_same_line_of_play() {
+    use super::file::{tail_tag, Writer};
+    use super::header::{ReplayHeader, HEADER_FORMAT};
+    use super::snapshot::Settings;
+    let header = ReplayHeader {
+        format: HEADER_FORMAT,
+        razdor: "test".into(),
+        rules: 0,
+        install: 0,
+        map: None,
+        map_hash: None,
+        platform: "test".into(),
+        settings: Settings {
+            improved_ai: false,
+            max_ai: false,
+            max_guard: false,
+            keep_xp_on_promotion: false,
+            keep_formation: false,
+            allow_unit_benching: false,
+            pursue: false,
+            walk_pace: 1.0,
+        },
+        experimental: Default::default(),
+        language: String::new(),
+    };
+    let check = |hash| Entry { at: Stamp { stretch: 1, ask: 0 }, input: Input::Engine(EngineInput::Check { hash }) };
+    let dir = scratch("cut");
+    let path = dir.join("replay-1.rzreplay");
+    let len = || std::fs::metadata(&path).unwrap().len();
+    // The header block, then one block per entries call: p1, p2 and p3 are block ends.
+    let w = Writer::open(&path, &header, None, None).unwrap();
+    w.entries(&[check(1)]);
+    let p1 = w.sync();
+    w.entries(&[check(2)]);
+    let p2 = w.sync();
+    w.entries(&[check(3)]);
+    let p3 = w.sync();
+    drop(w);
+    let t1 = tail_tag(&path, p1).unwrap();
+    let t2 = tail_tag(&path, p2).unwrap();
+    // A place inside a block is refused, and nothing is cut.
+    assert!(Writer::open(&path, &header, Some(p2 + 3), None).is_err(), "a place inside a block is refused");
+    assert_eq!(len(), p3, "a refused cut touches nothing");
+    // Another line of play: the file is cut at p1 and a block of the same size but other content is
+    // written, so p2 is a block end again with other bytes before it.
+    let w = Writer::open(&path, &header, Some(p1), Some(t1)).unwrap();
+    w.entries(&[check(9)]);
+    let p2_new = w.sync();
+    drop(w);
+    assert_eq!(p2_new, p2, "the other line's block has the same size, so p2 is a block end again");
+    assert!(Writer::open(&path, &header, Some(p2), Some(t2)).is_err(), "a stale tag is refused");
+    assert_eq!(len(), p2_new, "a refused cut touches nothing");
+    // A place without a tag (an old save) checks the block's end only.
+    assert!(Writer::open(&path, &header, Some(p2), None).is_ok(), "an old place resumes at a block end");
+    // The good place (its own tag) resumes the same file, cut there.
+    let t2_new = tail_tag(&path, p2_new).unwrap();
+    assert!(Writer::open(&path, &header, Some(p2_new), Some(t2_new)).is_ok(), "the good place resumes");
+    assert_eq!(len(), p2_new, "the file is cut at the place");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// The screen's view of a battle handed out by a pump: the player's turns are the recorded actions

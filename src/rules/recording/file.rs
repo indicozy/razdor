@@ -59,10 +59,71 @@ pub struct Writer {
 
 /// Where a save's position in a replay file is: the file's name and its length then. The name is
 /// untrusted (a save is shared): only [`replay_name_ok`] names are ever opened, cut or removed.
+/// `tag` is [`tail_tag`] of the file at `pos`: a resume checks it, so a place in another line of
+/// play (the file rewritten past it since) is refused. A save without one (made before the tag)
+/// checks only that `pos` is a block's end.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ReplayRef {
     pub file: String,
     pub pos: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<u64>,
+}
+
+/// The bytes before a place that [`tail_tag`] hashes.
+const TAIL_BYTES: u64 = 64;
+/// The file's magic and format (before the first block).
+const HEAD_BYTES: u64 = 8;
+
+/// The hash of the last bytes before `pos` in the file (up to 64 of them): what a save's place
+/// is checked against when it resumes.
+pub fn tail_tag(path: &Path, pos: u64) -> std::io::Result<u64> {
+    let mut f = File::open(path)?;
+    tag_in(&mut f, pos)
+}
+
+fn tag_in(f: &mut File, pos: u64) -> std::io::Result<u64> {
+    let n = pos.min(TAIL_BYTES);
+    let mut buf = vec![0u8; n as usize];
+    f.seek(SeekFrom::Start(pos - n))?;
+    f.read_exact(&mut buf)?;
+    Ok(crate::rules::save::fnv1a(&buf))
+}
+
+/// Whether `pos` is a block's end in the file, and the file's bytes before it hash to `expect_tag`
+/// when one is given. The block headers are walked (the payloads are skipped), from the first block
+/// to `pos`.
+fn check_cut(path: &Path, pos: u64, expect_tag: Option<u64>) -> Result<(), String> {
+    let io = |e: std::io::Error| e.to_string();
+    let not_resumable = || "not a replay file to resume".to_string();
+    let mut f = File::open(path).map_err(|_| not_resumable())?;
+    let mut magic = [0u8; 4];
+    if f.read_exact(&mut magic).is_err() || &magic != MAGIC {
+        return Err(not_resumable());
+    }
+    let have = f.metadata().map_err(io)?.len();
+    if pos > have {
+        return Err(format!("the replay ends at {have}, not at {pos}"));
+    }
+    if pos <= HEAD_BYTES {
+        return Err(format!("{pos} is before the replay's first block"));
+    }
+    let mut at = HEAD_BYTES;
+    while at < pos {
+        let mut head = [0u8; 5];
+        f.seek(SeekFrom::Start(at)).map_err(io)?;
+        f.read_exact(&mut head).map_err(io)?;
+        at += 5 + u32::from_le_bytes([head[1], head[2], head[3], head[4]]) as u64;
+    }
+    if at != pos {
+        return Err(format!("{pos} is inside a block"));
+    }
+    if let Some(want) = expect_tag {
+        if tag_in(&mut f, pos).map_err(io)? != want {
+            return Err(format!("the replay before {pos} is another line of play"));
+        }
+    }
+    Ok(())
 }
 
 /// Whether `name` is a replay file name the game makes: `replay-<digits>.rzreplay`, a bare name.
@@ -93,16 +154,13 @@ fn put_stamp(out: &mut Vec<u8>, at: Stamp) {
 
 impl Writer {
     /// Opens (or creates) the file: `truncate_to` cuts it first (a resume at a save's length), and a
-    /// new file gets its magic and header.
-    pub fn open(path: &Path, header: &ReplayHeader, truncate_to: Option<u64>) -> Result<Writer, String> {
+    /// new file gets its magic and header. A cut is refused, with nothing touched, unless the file is
+    /// a replay and `truncate_to` is a block's end, and, when `expect_tag` is given, the bytes before
+    /// it hash to it (see [`ReplayRef`]).
+    pub fn open(path: &Path, header: &ReplayHeader, truncate_to: Option<u64>, expect_tag: Option<u64>) -> Result<Writer, String> {
         let io = |e: std::io::Error| e.to_string();
-        // A file is cut only when it is a replay (its magic): anything else is not touched.
-        if truncate_to.is_some() {
-            let mut head = [0u8; 4];
-            let is_replay = File::open(path).and_then(|mut f| f.read_exact(&mut head)).is_ok() && &head == MAGIC;
-            if !is_replay {
-                return Err("not a replay file to resume".into());
-            }
+        if let Some(pos) = truncate_to {
+            check_cut(path, pos, expect_tag)?;
         }
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(io)?;
@@ -110,10 +168,6 @@ impl Writer {
         let mut file = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path).map_err(io)?;
         let len = match truncate_to {
             Some(pos) => {
-                let have = file.metadata().map_err(io)?.len();
-                if pos > have {
-                    return Err(format!("the replay ends at {have}, not at {pos}"));
-                }
                 file.set_len(pos).map_err(io)?;
                 pos
             }

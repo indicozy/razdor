@@ -48,7 +48,7 @@ pub fn follow(game: &mut Option<Game>, settings: &Settings) {
             let dir = replays_dir(&games);
             let resume = g.replay_resume.take();
             let made = match resume {
-                Some(r) => Session::resume(&dir, &r.file, r.pos, g, &header),
+                Some(r) => Session::resume(&dir, &r, g, &header),
                 None => Session::start(&dir, g, &header),
             };
             if let Ok(s) = made {
