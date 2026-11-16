@@ -619,6 +619,15 @@ fn draw_sprite_mesh(tex: &Texture2D, x: f32, y: f32, color: Color, params: &Draw
 /// (its indices are the quad's).
 /// (The flat fast path, `world_view::flat_fast::Pass::build`, fills the same quad for a plain sprite: keep the two in step.)
 fn fill_sprite_mesh(mesh: &mut Mesh, tex: &Texture2D, x: f32, y: f32, color: Color, params: &DrawTextureParams, scale: Vec2) {
+    mesh.vertices.clear();
+    mesh.indices.clear();
+    append_sprite_quad(mesh, tex, x, y, color, params, scale);
+    mesh.texture = Some(tex.clone());
+}
+
+/// Appends the quad of [`fill_sprite_mesh`] to `mesh`, its indices offset to its own four vertices, so a run of
+/// sprites can be one mesh and one draw call.
+fn append_sprite_quad(mesh: &mut Mesh, tex: &Texture2D, x: f32, y: f32, color: Color, params: &DrawTextureParams, scale: Vec2) {
     let [width, height] = tex.size().to_array();
     let Rect { x: sx, y: sy, w: sw, h: sh } = params.source.unwrap_or(Rect { x: 0., y: 0., w: width, h: height });
     let (mut w, mut h) = match params.dest_size {
@@ -647,11 +656,78 @@ fn fill_sprite_mesh(mesh: &mut Mesh, tex: &Texture2D, x: f32, y: f32, color: Col
     let vertex = |p: Vec2, u: f32, v: f32| Vertex { position: vec3(p.x, p.y, 0.0), uv: vec2(u, v), color: c, normal };
     let (u0, v0) = (sx / width, sy / height);
     let (u1, v1) = ((sx + sw) / width, (sy + sh) / height);
-    mesh.vertices.clear();
+    let base = mesh.vertices.len() as u16;
     mesh.vertices.extend([vertex(corner(x, y), u0, v0), vertex(corner(x + w, y), u1, v0), vertex(corner(x + w, y + h), u1, v1), vertex(corner(x, y + h), u0, v1)]);
-    mesh.indices.clear();
-    mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
-    mesh.texture = Some(tex.clone());
+    mesh.indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+}
+
+/// One sprite of a run ([`draw_sprites`]): the arguments of [`draw`].
+pub struct Sprite {
+    pub x: f32,
+    pub y: f32,
+    pub color: Color,
+    pub params: DrawTextureParams,
+}
+
+/// The run of `sprites` from `tex` as [`draw`] makes them (the same quads and sharp scales, in order), issued as
+/// one mesh and so one draw call where the material allows. Text uses it: a string's glyphs are one batch, not one
+/// draw call per glyph.
+pub fn draw_sprites(tex: &Texture2D, sprites: &[Sprite]) {
+    if blend_context().is_some() {
+        for s in sprites {
+            draw(tex, s.x, s.y, s.color, s.params.clone());
+        }
+        return;
+    }
+    if sprites.is_empty() {
+        return;
+    }
+    let tex_size = texels(tex);
+    let mesh = sprite_run(tex, sprites, tex_size);
+    match session_base() {
+        Some(m) => {
+            set_tex_size(&m, tex_size);
+            session_material();
+            piece(&mesh);
+        }
+        None => match draw_material() {
+            Some(m) => {
+                count_break();
+                m.set_uniform("TexSize", tex_size);
+                bind_fog(&m);
+                gl_use_material(&m);
+                piece(&mesh);
+                gl_use_default_material();
+            }
+            None => draw_mesh(&mesh),
+        },
+    }
+}
+
+/// [`draw_sprites`] for the plain path (whole-scale text): [`plain_draw`] first, as the plain glyph draws had it.
+pub fn draw_sprites_plain(tex: &Texture2D, sprites: &[Sprite]) {
+    plain_draw();
+    if blend_context().is_some() {
+        for s in sprites {
+            draw_texture_ex(tex, s.x, s.y, s.color, s.params.clone());
+        }
+        return;
+    }
+    if sprites.is_empty() {
+        return;
+    }
+    let mesh = sprite_run(tex, sprites, texels(tex));
+    draw_mesh(&mesh);
+}
+
+/// The quads of a run as one mesh, each with its own sharp scale ([`append_sprite_quad`]).
+fn sprite_run(tex: &Texture2D, sprites: &[Sprite], tex_size: Vec2) -> Mesh {
+    let mut mesh = Mesh { vertices: Vec::with_capacity(4 * sprites.len()), indices: Vec::with_capacity(6 * sprites.len()), texture: Some(tex.clone()) };
+    for s in sprites {
+        count_draw(Some(tex), 4);
+        append_sprite_quad(&mut mesh, tex, s.x, s.y, s.color, &s.params, draw_scale(tex_size, &s.params));
+    }
+    mesh
 }
 
 local! {

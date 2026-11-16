@@ -284,11 +284,26 @@ impl BitmapFont {
         let whole = k.fract() == 0.0;
         let mut pen = x.round();
         let top = (y - self.baseline * k).round() + offset * k;
+        // The glyphs of a run of the sheet are one batch (`sharp::draw_sprites`): one draw call per run,
+        // not one per glyph. A fallback run (drawn by the caller) flushes the batch first, so the order holds.
+        let mut run: Vec<super::sharp::Sprite> = Vec::new();
+        let flush = |run: &mut Vec<super::sharp::Sprite>| {
+            if run.is_empty() {
+                return;
+            }
+            if whole {
+                super::sharp::draw_sprites_plain(&sheet.texture, run);
+            } else {
+                super::sharp::draw_sprites(&sheet.smooth, run);
+            }
+            run.clear();
+        };
         for piece in self.pieces(s) {
             let c = match piece {
                 Ok(c) => c,
-                Err(run) => {
-                    pen += fallback(run, pen, y);
+                Err(text) => {
+                    flush(&mut run);
+                    pen += fallback(text, pen, y);
                     continue;
                 }
             };
@@ -298,12 +313,7 @@ impl BitmapFont {
                         let src = Rect::new(cell.x as f32, cell.y as f32, cell.w as f32, cell.h as f32);
                         let dest = vec2(cell.w as f32 * k, cell.h as f32 * k);
                         let params = DrawTextureParams { dest_size: Some(dest), source: Some(src), ..Default::default() };
-                        if whole {
-                            super::sharp::plain_draw();
-                            draw_texture_ex(&sheet.texture, pen + offset * k, top, color, params);
-                        } else {
-                            super::sharp::draw(&sheet.smooth, pen + offset * k, top, color, params);
-                        }
+                        run.push(super::sharp::Sprite { x: pen + offset * k, y: top, color, params });
                     }
                     pen += g.w as f32 * k;
                 }
@@ -311,6 +321,7 @@ impl BitmapFont {
                 (None, _) => {}
             }
         }
+        flush(&mut run);
     }
 }
 

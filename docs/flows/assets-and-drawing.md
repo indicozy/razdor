@@ -132,7 +132,11 @@ sounds and the exe are not stored compressed and keep using `install::find_path`
   `Graphics/Windows/*.lit` (`other_lit_windows`), that the store has ready, through
   `chrome::art(rel, Fx::Plain)`; `DtArt::warm` then uploads the terrain textures and the unit
   portrait and item icon textures queued by `preload_all`, both within one 4 ms budget per frame
-  (`preload::upload_within_budget`; one upload per frame at least). Other `Fx` variants and the
+  (`preload::upload_within_budget`; one upload per frame at least). Both calls share one
+  `preload::WarmPacer` (the app's `warm_pacer`): an upload that ends over the budget leaves debt, and
+  frames start no upload until it is paid back at the budget per frame (a 100 ms upload with a 4 ms budget
+  skips the next 24 frames), so the average stays within the budget. Slow uploads (5 ms and over) are logged
+  as `slow texture warm` under `RAZDOR_PROFILE`. Other `Fx` variants and the
   map's atlas and figure sheets are made at first use, from the decoded picture (no decode
   then). The minimap's ground (terrain, objects, bridges) is made once per map when the game starts
   (`minimap::prebuild`, keyed by the map's identity, not the fog); the fog's dark is drawn over it
@@ -219,7 +223,7 @@ sounds and the exe are not stored compressed and keep using `install::find_path`
   needs the same call. Textures stay `FilterMode::Linear` (the step needs the hardware bilinear
   inside its band). Stays smooth on purpose: the minimap and the fog, `Nearest` textures
   (window lines, custom PNGs, event pictures), the editor, the hub's catalog pictures and
-  the TrueType fonts. The bitmap font draws its non-whole-scale sheet sharp (`dt_font`); a
+  the TrueType fonts. The bitmap font draws its non-whole-scale sheet sharp (`dt_font`), and a string's glyphs are one run: `sharp::draw_sprites` (or `draw_sprites_plain` at a whole scale) issues the run as one mesh, one draw call (a per-glyph draw cost one call each: the Load window had 1487 calls for its rows); a
   whole-number scale keeps the Nearest sheet. The terrain shader and the water frame sample
   sharp too (`terrain.rs`, its screen scales set in `TerrainLayer::draw`). Shaders that do
   texel math use highp (a Global Constraint: the credits scroll's 455×2840 texture breaks

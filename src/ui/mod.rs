@@ -366,6 +366,8 @@ pub struct App {
     last_screen: Option<std::mem::Discriminant<Screen>>,
     /// The minimap's picture is made ahead once per game (see [`minimap::prebuild`]).
     minimap_prebuilt: bool,
+    /// The texture uploads' pacing across frames, shared by `chrome::warm` and `DtArt::warm` ([`razdor::dt::preload::WarmPacer`]).
+    warm_pacer: razdor::dt::preload::WarmPacer,
     /// Where the last left press went down (screen pixels), for the outside tap (`frame_content`).
     tap_press: Option<(f32, f32)>,
     /// The play log's last screen and message, to write each change once.
@@ -480,6 +482,7 @@ impl App {
             map_music: MapMusic::default(),
             last_screen: None,
             minimap_prebuilt: false,
+            warm_pacer: Default::default(),
             tap_press: None,
             play_last: ("", None),
             editor: None,
@@ -1519,9 +1522,17 @@ impl App {
         // The install's pictures are queued for the background decoders at start
         // (`Assets::load`). Each frame uploads the textures of those decoded so far, within one
         // 4 ms budget shared by the window art and the install's textures.
-        let used = razdor::frame_probe::time(razdor::frame_probe::Stage::TextureWarm, || chrome::warm(4.0));
-        if let Some(d) = self.assets.dt.as_ref() {
-            razdor::frame_probe::time(razdor::frame_probe::Stage::TextureWarm, || d.warm((4.0 - used).max(0.0)));
+        // Paced (`preload::WarmPacer`): an upload over the budget leaves debt, and the frames after it make none
+        // until the debt is paid back, so one slow upload costs one slow frame, not a run of them.
+        if self.warm_pacer.may_upload() {
+            let used = razdor::frame_probe::time(razdor::frame_probe::Stage::TextureWarm, || chrome::warm(4.0));
+            let rest = match self.assets.dt.as_ref() {
+                Some(d) => razdor::frame_probe::time(razdor::frame_probe::Stage::TextureWarm, || d.warm((4.0 - used).max(0.0))),
+                None => 0.0,
+            };
+            self.warm_pacer.spent(used + rest, 4.0);
+        } else {
+            self.warm_pacer.spent(0.0, 4.0);
         }
         // The minimap's picture is made once the game starts, not at its first open.
         if self.game.is_none() {

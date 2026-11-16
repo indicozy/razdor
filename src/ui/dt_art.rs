@@ -250,9 +250,9 @@ const ATLAS_WIDTH: u32 = 2048;
 /// (logged once), so callers fall back to placeholders.
 pub struct DtArt {
     pub install: DtInstall,
-    portraits: OnceCell<Vec<Image>>,
-    figures: OnceCell<Vec<Image>>,
-    items: OnceCell<Vec<Image>>,
+    portraits: OnceCell<std::sync::Arc<Vec<Image>>>,
+    figures: OnceCell<std::sync::Arc<Vec<Image>>>,
+    items: OnceCell<std::sync::Arc<Vec<Image>>>,
     objects: OnceCell<ObjectSprites>,
     atlas: OnceCell<Option<Atlas>>,
     terrain_layer: OnceCell<Option<TerrainLayer>>,
@@ -449,11 +449,23 @@ impl DtArt {
         t
     }
 
+    /// The frames of the picture file `rel`, shared with the decode store (no copy of the sheet); empty when it
+    /// cannot be read (logged as `what`, as [`or_log`] logs it).
+    fn sheet(&self, what: &str, rel: &str) -> std::sync::Arc<Vec<Image>> {
+        match self.install.file(rel).and_then(|p| preload::decode_shared(&p)) {
+            Ok(frames) => frames,
+            Err(e) => {
+                razdor::diag!("Discord Times art: {what}: {e}");
+                std::sync::Arc::new(Vec::new())
+            }
+        }
+    }
+
     /// Colour bust (92×92) of a unit, by `GlobalIndex`, with its painted sky: the picture's
     /// alpha only masks the figure, the original draws the whole square.
     pub fn unit_portrait(&self, unit_id: u32) -> Option<Texture2D> {
         self.cached(Key::Portrait(unit_id), || {
-            let sheet = self.portraits.get_or_init(|| or_log("unit portraits", self.install.unit_portraits()));
+            let sheet = self.portraits.get_or_init(|| self.sheet("unit portraits", UNIT_PORTRAITS));
             let mut img = sheet.get(self.install.unit_picture_frame(unit_id)?)?.clone();
             img.rgba.chunks_exact_mut(4).for_each(|p| p[3] = 255);
             texture(&img)
@@ -464,7 +476,7 @@ impl DtArt {
     /// cannot be promoted ([`super::chrome::lock_portrait`]).
     pub fn unit_portrait_locked(&self, unit_id: u32) -> Option<Texture2D> {
         self.cached(Key::LockedPortrait(unit_id), || {
-            let sheet = self.portraits.get_or_init(|| or_log("unit portraits", self.install.unit_portraits()));
+            let sheet = self.portraits.get_or_init(|| self.sheet("unit portraits", UNIT_PORTRAITS));
             let mut img = sheet.get(self.install.unit_picture_frame(unit_id)?)?.clone();
             img.rgba.chunks_exact_mut(4).for_each(|p| p[3] = 255);
             super::chrome::lock_portrait(&mut img);
@@ -475,7 +487,7 @@ impl DtArt {
     /// Full-body sepia portrait of a unit, by `GlobalIndex`.
     pub fn unit_figure(&self, unit_id: u32) -> Option<Texture2D> {
         self.cached(Key::Figure(unit_id), || {
-            let sheet = self.figures.get_or_init(|| or_log("unit figures", self.install.unit_figures()));
+            let sheet = self.figures.get_or_init(|| self.sheet("unit figures", UNIT_FIGURES));
             texture(sheet.get(self.install.unit_picture_frame(unit_id)?)?)
         })
     }
@@ -483,7 +495,7 @@ impl DtArt {
     /// Icon (53×53) of an artefact, by `GlobalIndex`.
     pub fn item_icon(&self, artefact_id: u32) -> Option<Texture2D> {
         self.cached(Key::Item(artefact_id), || {
-            let sheet = self.items.get_or_init(|| or_log("item icons", self.install.item_icons()));
+            let sheet = self.items.get_or_init(|| self.sheet("item icons", ITEM_ICONS));
             texture(sheet.get(self.install.artefact_icon_frame(artefact_id)?)?)
         })
     }
@@ -547,20 +559,22 @@ impl DtArt {
 
     /// Makes the textures [`DtArt::preload_all`] queued whose pictures the decode store has ready,
     /// within `budget_ms` (see [`preload::upload_within_budget`]); a few per frame.
-    pub fn warm(&self, budget_ms: f64) {
+    /// Returns the milliseconds it took.
+    pub fn warm(&self, budget_ms: f64) -> f64 {
         // Snapshot runs make their textures on demand, as before.
         if std::env::var_os("RAZDOR_SNAPSHOT").is_some() {
-            return;
+            return 0.0;
         }
         let mut queue = std::mem::take(&mut *self.warm.borrow_mut());
         if queue.is_empty() {
-            return;
+            return 0.0;
         }
         let start = std::time::Instant::now();
         preload::upload_within_budget(
             &mut queue,
             |(path, _)| preload::is_ready(path),
             |(path, item)| {
+                let t0 = std::time::Instant::now();
                 match *item {
                     Warm::Terrain(code) => {
                         self.terrain(code);
@@ -572,6 +586,17 @@ impl DtArt {
                         self.item_icon(id);
                     }
                 }
+                if razdor::diag::profiling() {
+                    let ms = t0.elapsed().as_secs_f64() * 1000.0;
+                    if ms >= 5.0 {
+                        let kind = match *item {
+                            Warm::Terrain(_) => "terrain",
+                            Warm::Portrait(_) => "portrait",
+                            Warm::Item(_) => "item",
+                        };
+                        razdor::diag!("slow texture warm: {} ({kind}) {ms:.1} ms", path.display());
+                    }
+                }
                 // The upload is made: its hold is given back ([`preload::hold`]).
                 preload::release(path);
             },
@@ -579,6 +604,7 @@ impl DtArt {
             budget_ms,
         );
         *self.warm.borrow_mut() = queue;
+        start.elapsed().as_secs_f64() * 1000.0
     }
 
     pub fn terrain_layer(&self) -> Option<&TerrainLayer> {

@@ -360,6 +360,114 @@ fn mark_cached(path: &Path, generation: u64) {
     }
 }
 
+/// Pacing of the texture uploads on the main thread (`chrome::warm`, `DtArt::warm`). One upload can take far
+/// over a frame's budget (80 to 110 ms on a player's Intel HD 4000 under its driver), and a budget that is
+/// only checked before each upload still stalls a frame at every upload. The time spent over a frame's
+/// budget is kept as debt: a frame starts no upload while the debt stands, and each frame pays back its
+/// budget. So an upload of `c` ms over a budget of `b` ms leaves `(c - b) / b` frames with no upload, and the
+/// uploads average within `b` ms per frame.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct WarmPacer {
+    debt_ms: f64,
+}
+
+impl WarmPacer {
+    /// Whether this frame may start an upload: no debt stands.
+    pub fn may_upload(&self) -> bool {
+        self.debt_ms <= 0.0
+    }
+
+    /// Ends a frame that spent `spent_ms` on uploads against `budget_ms`: the part over the budget becomes
+    /// debt, and the budget is paid back (a frame that made no upload pays back too).
+    pub fn spent(&mut self, spent_ms: f64, budget_ms: f64) {
+        self.debt_ms = (self.debt_ms + spent_ms.max(0.0) - budget_ms.max(0.0)).max(0.0);
+    }
+
+    /// The debt still to pay back, in ms (the profile's).
+    pub fn debt_ms(&self) -> f64 {
+        self.debt_ms
+    }
+}
+
+#[cfg(test)]
+mod pacer_tests {
+    use super::WarmPacer;
+
+    /// Runs `frames` frames: each uploads when the pacer lets it, taking `cost` ms, and the frame ends.
+    /// Returns the frames that uploaded.
+    fn run(p: &mut WarmPacer, frames: usize, cost: f64, budget: f64) -> Vec<usize> {
+        let mut uploaded = Vec::new();
+        for f in 0..frames {
+            let spent = if p.may_upload() {
+                uploaded.push(f);
+                cost
+            } else {
+                0.0
+            };
+            p.spent(spent, budget);
+        }
+        uploaded
+    }
+
+    #[test]
+    fn a_fresh_pacer_may_upload() {
+        assert!(WarmPacer::default().may_upload());
+    }
+
+    #[test]
+    fn an_upload_over_the_budget_stops_the_frames_until_its_overrun_is_paid_back() {
+        // 100 ms with a 4 ms budget: 96 ms of debt, paid back 4 ms a frame, so 24 frames without an upload.
+        let mut p = WarmPacer::default();
+        p.spent(100.0, 4.0);
+        let mut frames_without = 0;
+        while !p.may_upload() {
+            frames_without += 1;
+            p.spent(0.0, 4.0);
+        }
+        assert_eq!(frames_without, 24);
+        assert!(p.may_upload());
+    }
+
+    #[test]
+    fn uploads_within_the_budget_never_wait() {
+        let mut p = WarmPacer::default();
+        let uploaded = run(&mut p, 100, 3.0, 4.0);
+        assert_eq!(uploaded.len(), 100);
+        assert_eq!(p.debt_ms(), 0.0);
+    }
+
+    #[test]
+    fn the_average_upload_time_per_frame_stays_within_the_budget() {
+        // Uploads of 100 ms against 4 ms: about one upload every 25 frames, so 100 / 25 = 4 ms a frame.
+        let mut p = WarmPacer::default();
+        let frames = 2500;
+        let uploaded = run(&mut p, frames, 100.0, 4.0);
+        let average = uploaded.len() as f64 * 100.0 / frames as f64;
+        assert!(average <= 4.0 + 1e-9, "average {average} ms a frame");
+        assert!(average > 3.5, "average {average} ms a frame");
+        // No two uploads are closer than the pacing allows.
+        assert!(uploaded.windows(2).all(|w| w[1] - w[0] >= 25));
+    }
+
+    #[test]
+    fn the_debt_never_goes_negative() {
+        let mut p = WarmPacer::default();
+        p.spent(0.0, 4.0);
+        p.spent(1.0, 4.0);
+        assert_eq!(p.debt_ms(), 0.0);
+        assert!(p.may_upload());
+    }
+
+    #[test]
+    fn a_second_overrun_adds_to_the_debt() {
+        let mut p = WarmPacer::default();
+        p.spent(10.0, 4.0);
+        p.spent(10.0, 4.0);
+        assert_eq!(p.debt_ms(), 12.0);
+        assert!(!p.may_upload());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

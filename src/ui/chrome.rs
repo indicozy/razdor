@@ -265,7 +265,14 @@ pub fn warm(budget_ms: f64) -> f64 {
             &mut queue,
             |(path, _)| preload::is_ready(path),
             |(path, rel)| {
+                let t0 = std::time::Instant::now();
                 let _ = art(rel, Fx::Plain);
+                if razdor::diag::profiling() {
+                    let ms = t0.elapsed().as_secs_f64() * 1000.0;
+                    if ms >= 5.0 {
+                        razdor::diag!("slow texture warm: Graphics/{rel} {ms:.1} ms");
+                    }
+                }
                 // The upload is made: its hold is given back ([`preload::hold`]).
                 preload::release(path);
             },
@@ -519,7 +526,12 @@ pub fn art(rel: &str, fx: Fx) -> Option<Texture2D> {
                 .map_err(|e| razdor::diag!("Discord Times art: {rel}: {e}"))
                 .ok()
                 .and_then(|frames| {
-                    let mut img = frames.first()?.clone();
+                    let first = frames.first()?;
+                    // `Fx::Plain` changes no pixel: the texture is made from the store's picture, without a copy.
+                    if fx == Fx::Plain {
+                        return to_texture(first);
+                    }
+                    let mut img = first.clone();
                     transform(&mut img, fx);
                     to_texture(&img)
                 })
