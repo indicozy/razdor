@@ -169,8 +169,22 @@ fn exit_now(app: &mut App) -> ! {
     unsafe {
         libc::_exit(0)
     }
-    #[cfg(not(unix))]
+    // Windows: `ExitProcess`, as the unix `_exit` above. `std::process::exit` runs this thread's thread-local
+    // destructors, and a `local!` value whose drop reads another `local!` panics there ("cannot access a thread
+    // local during or after destruction"); the panic hook then panics again and the process aborts at quit (the
+    // player's report 1660, Windows 10, 1.5.2). Everything is written before this point (the log's last line too).
+    #[cfg(windows)]
+    unsafe {
+        ExitProcess(0)
+    }
+    #[cfg(not(any(unix, windows)))]
     std::process::exit(0)
+}
+
+#[cfg(windows)]
+extern "system" {
+    /// Kernel32's `ExitProcess`: ends the process without the C runtime's exit or the thread-local destructors.
+    fn ExitProcess(exit_code: u32) -> !;
 }
 
 #[macroquad::main(conf)]
