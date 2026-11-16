@@ -786,8 +786,32 @@ fn event_row_h(defeat: bool, line: f32, t: f32, r: &MarkupRow) -> f32 {
 /// The footer's extra height at the scale `o` (screen px): the buttons' footer of 58 (Razdor's
 /// own, the owner's decision of 2026-10-31) grows with the text size (`button_grow`), and the
 /// window with it, so its buttons grow with their labels. Zero at Normal.
-fn footer_grow(o: f32) -> f32 {
-    58.0 * o * (super::display::button_grow() - 1.0)
+fn footer_grow(d: &Dialog, up: bool, o: f32) -> f32 {
+    footer_h(d, up, o) - 58.0 * o
+}
+
+/// The footer's height at the scale `o`: [`footer_grow`]'s growth on top of the 58 at Normal.
+fn footer_h(d: &Dialog, up: bool, o: f32) -> f32 {
+    58.0 * o * super::display::button_grow() + footer_extra(d, up, o)
+}
+
+/// On a phone (`dp_px`), a plain dialog button (any but the large portrait OK, `ok_look`) is at
+/// least [`OK_H_DP`] tall, the owner's request of 2026-11-16 (the buttons were about 18 dp). The
+/// footer grows by the same amount, so the button keeps its margin. Zero on the desktop.
+fn footer_extra(d: &Dialog, up: bool, o: f32) -> f32 {
+    match super::display::dp_px() {
+        Some(dp) if !ok_look(d, up) => (OK_H_DP * dp - 36.0 * o * super::display::button_grow()).max(0.0),
+        _ => 0.0,
+    }
+}
+
+/// A plain dialog button: [`button`] on the desktop; on a phone its label is [`OK_LABEL_DP`] dp
+/// (about 14 sp), as the large OK's.
+fn dialog_button(x: f32, y: f32, w: f32, h: f32, label: &str, enabled: bool) -> bool {
+    match super::display::dp_px() {
+        Some(dp) => button_sized(x, y, w, h, label, enabled, OK_LABEL_DP * dp),
+        None => button(x, y, w, h, label, enabled),
+    }
 }
 
 /// The event window's widest width in the original's pixels at the scale `o` on a `sw`-wide
@@ -927,7 +951,7 @@ fn event_layout(d: &Dialog, o: f32, t: f32, w: f32, fit: bool) -> EventLayout {
     // The title strip's growth (`chrome::title_grow`) is part of the window's height too.
     // A floating picture is inside the box: nothing stacks above it.
     let top_o = if float.is_some() { 0.0 } else { stacked_top(stacked, side) + if stacked { cap_h } else { 0.0 } };
-    let screen_box = (sh - chrome::bar_height() - 4.0) / o - below / o - EVENT_REST - top_o - (chrome::title_grow() + footer_grow(o)) / o;
+    let screen_box = (sh - chrome::bar_height() - 4.0) / o - below / o - EVENT_REST - top_o - (chrome::title_grow() + footer_grow(d, up, o)) / o;
     let (max_box, below_vis) = if fit {
         // A phone: the text keeps five lines and the rewards scroll (`phone_fit`).
         let avail = screen_box + below / o;
@@ -1016,7 +1040,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         } else {
             event_frame_cap(first.side, false, 0.0, first.below / plain, EVENT_MAX_BOX, min_w, first.cap_h).h
         };
-        let min_h = frame_h + (chrome::title_grow() + footer_grow(plain)) / plain;
+        let min_h = frame_h + (chrome::title_grow() + footer_grow(d, up, plain)) / plain;
         o = super::dt_font::whole_scale(super::display::popup_o(base, min_w, min_h)).min((sw - 12.0) / min_w).max(plain);
     }
     let lay = if large {
@@ -1035,7 +1059,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     let row_h = |r: &MarkupRow| event_row_h(defeat, line, t, r);
     // The title strip's growth: the window is taller by it, and its frame and content move down.
     let grow = chrome::title_grow();
-    let (w, h) = (f.w * o, f.h * o + grow + footer_grow(o));
+    let (w, h) = (f.w * o, f.h * o + grow + footer_grow(d, up, o));
     // The learnt-spell window held upright keeps a slot above its content for the spell card (the
     // owner's note of 2026-11-02, the mockup's card under the title): `pad` clear of the title strip,
     // the window's sides and the content below it. The card shown there is the tapped spell's, else
@@ -1069,7 +1093,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     }
     let edge = o.max(1.0);
     // The event window's inner frames (0x4aaa4b, 0x4aaa79), as 0x48d710's.
-    chrome::window_inner_frames_footed(outer, o, grow, footer_grow(o));
+    chrome::window_inner_frames_footed(outer, o, grow, footer_grow(d, up, o));
     let top = y + EVENT_BOX_TOP * o + grow;
     let mut cy = top;
     // The picture's left edge: beside the text (20 px in) or, stacked, centred across the window.
@@ -1149,7 +1173,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     // The original's window grows instead, so its rewards never scroll (the room is their height
     // plus 5 px there).
     let rewards_top = cy;
-    let rewards_room = (y + h - 58.0 * o * super::display::button_grow()) - rewards_top;
+    let rewards_room = (y + h - footer_h(d, up, o)) - rewards_top;
     let rewards_px = below - pic_h;
     let rew_clip = Rect::new(x, rewards_top, w, rewards_room.max(0.0));
     let scroll = rewards_px > rewards_room + 0.5;
@@ -1256,8 +1280,8 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     let g = super::display::button_grow();
     let dp = super::display::dp_px().unwrap_or(1.0);
     let up_ok = ok_look(d, up);
-    let (bw, bh) = if up_ok { (OK_W_DP * dp, OK_H_DP * dp) } else { (95.0 * o * g, 36.0 * o * g) };
-    let foot = 58.0 * o * g;
+    let (bw, bh) = if up_ok { (OK_W_DP * dp, OK_H_DP * dp) } else { (95.0 * o * g, 36.0 * o * g + footer_extra(d, up, o)) };
+    let foot = footer_h(d, up, o);
     // Centred in the window's own footer (`outer`: with the learnt-spell window's padding the footer is
     // `pad` lower than the content's foot).
     let by = outer.y + outer.h - foot + (foot - bh) / 2.0;
@@ -1309,8 +1333,8 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         // Yes at a quarter of the window, No at three quarters (the original's question,
         // measured on its «Просьба торговца»: centres at 0.24 W and 0.76 W).
         let (yes_x, no_x) = question_buttons_x(x, w, bw);
-        let yes = button(yes_x, by, bw, bh, tr("Yes"), !tip_covers(tip.map(|t| t.2), p, Rect::new(yes_x, by, bw, bh))) || answer == Some(true);
-        let no = button(no_x, by, bw, bh, tr("No"), !tip_covers(tip.map(|t| t.2), p, Rect::new(no_x, by, bw, bh))) || answer == Some(false);
+        let yes = dialog_button(yes_x, by, bw, bh, tr("Yes"), !tip_covers(tip.map(|t| t.2), p, Rect::new(yes_x, by, bw, bh))) || answer == Some(true);
+        let no = dialog_button(no_x, by, bw, bh, tr("No"), !tip_covers(tip.map(|t| t.2), p, Rect::new(no_x, by, bw, bh))) || answer == Some(false);
         draw_tip_padded(tip, game, assets, o, card_pad(pad));
         return if yes {
             Some(Close::Yes)
@@ -1354,7 +1378,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         } else if up_ok {
             ok_button_large(ok_r, &ok_label, ok_on, dp)
         } else {
-            button(ok_r.x, ok_r.y, bw, bh, &ok_label, ok_on)
+            dialog_button(ok_r.x, ok_r.y, bw, bh, &ok_label, ok_on)
         };
         (ok, false)
     };

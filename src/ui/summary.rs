@@ -117,7 +117,9 @@ pub struct Page {
 /// The page's layout in the inner box `inner` at a pad `pad`. The button row is `button_h` tall at
 /// the foot. `reserve`: the heights the highlights and the totals need (the totals' table is always
 /// the foot of the text column; upright, the highlights' need takes its room under the map).
-pub fn layout(inner: Rect, upright: bool, pad: f32, button_h: f32, reserve: (f32, f32)) -> Page {
+/// `totals_w`: the width the totals' two columns need (sideways they take it, up to 70 % of the
+/// page, so the table stays at its size and the highlights keep the rest).
+pub fn layout(inner: Rect, upright: bool, pad: f32, button_h: f32, reserve: (f32, f32), totals_w: f32) -> Page {
     let (hl_h, tot_h) = reserve;
     let button = Rect::new(inner.center().x - 80.0 * pad / 8.0, inner.bottom() - pad - button_h, 160.0 * pad / 8.0, button_h);
     let body_top = inner.y + pad;
@@ -136,7 +138,8 @@ pub fn layout(inner: Rect, upright: bool, pad: f32, button_h: f32, reserve: (f32
         let th = reserve.1;
         let ph = (avail - th - pad).max(0.0);
         let pane = Rect::new(inner.x + pad, body_top, ph, ph);
-        let totals = Rect::new(inner.x + pad, pane.bottom() + pad, pane.w.max(inner.w * 0.36), th);
+        let tw = pane.w.max(inner.w * 0.36).max(totals_w.min(inner.w * 0.7));
+        let totals = Rect::new(inner.x + pad, pane.bottom() + pad, tw, th);
         let x = totals.right() + pad;
         let col = (inner.right() - pad - x).max(0.0);
         let highlights = Rect::new(x, body_top, col, avail);
@@ -184,12 +187,30 @@ fn total_rows(s: &Summary) -> [(&'static str, u32); 8] {
 }
 
 /// Whether the totals' two columns hold their label and number at the body size `s` in width `w`
-/// (the column's gap a third of the size).
+/// (the column's gap a third of the size). Measured as drawn: `draw_totals` draws a number ending
+/// at 0.9 of its column, so a label and its number must fit within that.
 fn totals_fit(rows: &[(&str, u32)], w: f32, s: f32, face: Face) -> bool {
     let col_w = w / 2.0;
-    with_original_face(face, || {
-        rows.iter().all(|(label, value)| measure_exact(label, s).width + measure_exact(&value.to_string(), s).width + s / 3.0 <= col_w)
-    })
+    rows.iter().all(|(label, value)| drawn_width(label, s, face) + drawn_width(&value.to_string(), s, face) + s / 3.0 <= totals_number_edge(col_w))
+}
+
+/// The width the totals' table needs at the body size `s` to hold every label and number
+/// (`totals_fit` at that size): its two equal columns, each as wide as its widest row over the
+/// number edge.
+fn totals_width_need(rows: &[(&str, u32)], s: f32, face: Face) -> f32 {
+    let widest = rows.iter().map(|(label, value)| drawn_width(label, s, face) + drawn_width(&value.to_string(), s, face) + s / 3.0).fold(0.0, f32::max);
+    2.0 * widest / 0.9
+}
+
+/// The width a totals' text takes as drawn: measured in the face it is drawn in (`measure` applies
+/// the same native size `text` draws at; `measure_exact` does not).
+fn drawn_width(text: &str, s: f32, face: Face) -> f32 {
+    with_original_face(face, || measure(text, s).width)
+}
+
+/// Where a column's numbers end (their right edge, from the column's left): 0.9 of the column.
+fn totals_number_edge(col_w: f32) -> f32 {
+    col_w * 0.9
 }
 
 /// The height the totals' table needs at the body size `s`: its heading (at the title size `h`,
@@ -252,8 +273,8 @@ pub fn frame(view: &mut View, game: &Game, assets: &Assets) -> Option<Exit> {
     let rows = total_rows(&view.summary);
     // Upright, the highlights' need is reserved under the map before the map takes the rest.
     let hl_reserve = if upright { highlights_need(&highlights, inner.w - 2.0 * pad, body, heading, face) } else { 0.0 };
-    let page = layout(inner, upright, pad, button_h, (hl_reserve, totals_need(body, heading)));
-    let size = fit_size(&[body, body * 0.92, body * 0.85], |s| {
+    let page = layout(inner, upright, pad, button_h, (hl_reserve, totals_need(body, heading)), totals_width_need(&rows, body, face));
+    let size = fit_size(&[body, body * 0.92, body * 0.85, body * 0.78, body * 0.7], |s| {
         highlights_need(&highlights, page.highlights.w, s, heading, face) <= page.highlights.h && totals_need(s, heading) <= page.totals.h && totals_fit(&rows, page.totals.w, s, face)
     });
 
@@ -322,12 +343,17 @@ fn draw_totals(rows: &[(&str, u32)], x: f32, y: f32, w: f32, s: f32, face: Face)
         let cx = x + c as f32 * col_w;
         let cy = y + n as f32 * s * 1.5 + s * 0.85;
         let v = value.to_string();
-        let vw = with_original_face(face, || measure(&v, s).width);
-        let label = MarkupRow { text: label.to_string(), ink: Ink::Plain, align: Align::Justify, last: true };
+        let vw = drawn_width(&v, s, face);
+        // The number takes its width first; the label is clipped (an ellipsis) to what is left of
+        // its column, so it never runs into the number (a last resort: `fit_size` looks for a size
+        // at which the whole label fits).
+        let room = totals_number_edge(col_w) - vw - s / 3.0;
+        let label = with_original_face(face, || ellipsize(label, room, s));
+        let label = MarkupRow { text: label, ink: Ink::Plain, align: Align::Justify, last: true };
         draw_markup_row_face(&label, cx, cy, col_w, s, face, Some(DIM));
-        // The number sits a gap (a tenth of the column) short of the column's right edge.
+        // The number sits a tenth of the column short of the column's right edge.
         let number = MarkupRow { text: v, ink: Ink::Plain, align: Align::Justify, last: true };
-        draw_markup_row_face(&number, cx + col_w - vw - col_w * 0.1, cy, col_w, s, face, Some(INK));
+        draw_markup_row_face(&number, cx + totals_number_edge(col_w) - vw, cy, col_w, s, face, Some(INK));
     }
 }
 
@@ -400,7 +426,7 @@ mod tests {
             let win = window_rect(w, h, upright || w < h, k, display::SafeArea::default());
             let inner = Rect::new(win.x + 10.0 * k, win.y + 30.0 * k, win.w - 20.0 * k, win.h - 40.0 * k);
             let body = 14.0 * k;
-            let l = layout(inner, upright, 8.0 * k, 36.0 * k, (60.0 * k, totals_need(body, body * 1.3)));
+            let l = layout(inner, upright, 8.0 * k, 36.0 * k, (60.0 * k, totals_need(body, body * 1.3)), 0.0);
             for r in [l.pane, l.highlights, l.totals, l.button] {
                 assert!(r.x >= inner.x - 0.01 && r.y >= inner.y - 0.01 && r.right() <= inner.right() + 0.01 && r.bottom() <= inner.bottom() + 0.01, "{r:?} leaves {inner:?} at {w}x{h}");
             }
