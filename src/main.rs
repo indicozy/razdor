@@ -169,13 +169,15 @@ fn exit_now(app: &mut App) -> ! {
     unsafe {
         libc::_exit(0)
     }
-    // Windows: `ExitProcess`, as the unix `_exit` above. `std::process::exit` runs this thread's thread-local
+    // Windows: `TerminateProcess` on this process, as the unix `_exit` above (not `ExitProcess`: it still calls the
+    // exe's TLS callbacks with DLL_PROCESS_DETACH, where std runs the thread-local destructors). `std::process::exit` runs this thread's thread-local
     // destructors, and a `local!` value whose drop reads another `local!` panics there ("cannot access a thread
     // local during or after destruction"); the panic hook then panics again and the process aborts at quit (the
     // player's report 1660, Windows 10, 1.5.2). Everything is written before this point (the log's last line too).
     #[cfg(windows)]
     unsafe {
-        ExitProcess(0)
+        TerminateProcess(GetCurrentProcess(), 0);
+        std::process::abort()
     }
     #[cfg(not(any(unix, windows)))]
     std::process::exit(0)
@@ -183,8 +185,10 @@ fn exit_now(app: &mut App) -> ! {
 
 #[cfg(windows)]
 extern "system" {
-    /// Kernel32's `ExitProcess`: ends the process without the C runtime's exit or the thread-local destructors.
-    fn ExitProcess(exit_code: u32) -> !;
+    /// Kernel32's `TerminateProcess`: ends the process at once, with no DLL detach, TLS callbacks or C runtime exit.
+    fn TerminateProcess(process: *mut std::ffi::c_void, exit_code: u32) -> i32;
+    /// Kernel32's `GetCurrentProcess`: the pseudo handle of this process.
+    fn GetCurrentProcess() -> *mut std::ffi::c_void;
 }
 
 #[macroquad::main(conf)]
