@@ -106,6 +106,9 @@ pub struct ReplayPlayer {
     segments: Vec<Segment>,
     content: Arc<Content>,
     install: Option<PathBuf>,
+    /// The map's bytes the game carried when it was recorded (a map outside the install, e.g. a
+    /// Hub map): a snapshot of that map reads them when the install lacks the file.
+    map: Option<Arc<[u8]>>,
     /// The timeline's marks, in file order.
     pub marks: Vec<Mark>,
     /// The game being played (none before a start, or after the file's end).
@@ -127,18 +130,20 @@ pub struct ReplayPlayer {
 
 impl ReplayPlayer {
     /// Opens the replay file at `path`. `install` is the game's install folder: a map's snapshots
-    /// read the map from it (the demo needs none).
-    pub fn open(path: &Path, content: Arc<Content>, install: Option<&Path>) -> Result<ReplayPlayer, String> {
-        Ok(ReplayPlayer::new(read(path)?, content, install))
+    /// read the map from it (the demo needs none). `map` is the map's bytes the game carried (see
+    /// the field), if the caller has them.
+    pub fn open(path: &Path, content: Arc<Content>, install: Option<&Path>, map: Option<Arc<[u8]>>) -> Result<ReplayPlayer, String> {
+        Ok(ReplayPlayer::new(read(path)?, content, install, map))
     }
 
     /// The player of a file already read (the tests change a file before playing it).
-    pub fn new(file: ReplayFile, content: Arc<Content>, install: Option<&Path>) -> ReplayPlayer {
+    pub fn new(file: ReplayFile, content: Arc<Content>, install: Option<&Path>, map: Option<Arc<[u8]>>) -> ReplayPlayer {
         let mut p = ReplayPlayer {
             header: file.header,
             segments: file.segments,
             content,
             install: install.map(Path::to_path_buf),
+            map,
             marks: Vec::new(),
             player: None,
             seg: 0,
@@ -549,7 +554,7 @@ impl ReplayPlayer {
     /// A checkpoint's game, restored from its packed snapshot (a map from the install).
     fn restore(&self, bytes: &[u8]) -> Result<Game, String> {
         let install = self.install.as_deref().map(|dir| Install { dir, content: self.content.clone() });
-        Snapshot::from_bytes(bytes.to_vec()).restore(self.content.clone(), install.as_ref())
+        Snapshot::from_bytes(bytes.to_vec()).restore(self.content.clone(), install.as_ref(), self.map.as_deref())
     }
 
     /// The timeline's marks: one pass over the checkpoints, restoring each. Battles come from the

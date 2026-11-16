@@ -1389,7 +1389,7 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
         if book.button(rx, rw, tr("Record"), true) && !asking {
             // Back to this window (its own list and selection as they were).
             let back = Screen::Load(std::mem::replace(view, LoadView::new(view.back)));
-            match WatchView::open(file, assets.content().clone(), razdor::rules::save::install_dir().as_deref(), Some(back)) {
+            match WatchView::open(file, assets.content().clone(), razdor::rules::save::install_dir().as_deref(), None, Some(back)) {
                 Ok(watch) => return Some(Screen::Watch(Box::new(watch))),
                 Err(e) => *error = Some(e),
             }

@@ -1214,7 +1214,7 @@ fn every_difftest_list_plays_back_from_its_recording() {
             .iter()
             .position(|e| matches!(e.input, crate::rules::recording::stream::Input::Engine(crate::rules::recording::stream::EngineInput::Check { .. })))
             .expect("a check after the new game");
-        let game0 = start.restore(content.clone(), Some(&install)).unwrap();
+        let game0 = start.restore(content.clone(), Some(&install), None).unwrap();
         let tail = &entries[first_check + 1..];
         let mut back = match play::play(game0, tail, 1.0 / 30.0) {
             Ok(g) => g,

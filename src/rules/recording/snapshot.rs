@@ -217,8 +217,10 @@ impl Snapshot {
     /// The game the snapshot holds, rebuilt as the live one was: the content (the demo's, or the
     /// install's for a map), the world's and the event engine's statics from the scenario, and
     /// the generators, AI fields and settings as they were. Nothing is reseeded, reset or
-    /// re-drawn (unlike a load). A map must be in `install` with the hash the snapshot names.
-    pub fn restore(&self, demo: Arc<Content>, install: Option<&Install>) -> Result<Game, String> {
+    /// re-drawn (unlike a load). A map must be in `install` with the hash the snapshot names, or
+    /// be `map` (the map's bytes the game or its record carries, e.g. a Hub map outside the
+    /// install) when those hash to it.
+    pub fn restore(&self, demo: Arc<Content>, install: Option<&Install>, map: Option<&[u8]>) -> Result<Game, String> {
         let json = unpack(&self.bytes)?;
         let body: BodyIn = serde_json::from_slice(&json).map_err(|e| e.to_string())?;
         if body.version != SNAPSHOT_VERSION {
@@ -229,7 +231,15 @@ impl Snapshot {
         let (content, fresh, engine, map_bytes) = match game.origin.clone() {
             Some(ScenarioRef::Map { file, hash }) => {
                 let install = install.ok_or("a map snapshot needs the install")?;
-                let bytes = install_map(install.dir, &file, hash)?;
+                // Razdor (not the original's): a map outside the install (a Hub map) is read from
+                // the bytes the game carries, when they are the map the snapshot names.
+                let bytes = match install_map(install.dir, &file, hash) {
+                    Ok(bytes) => bytes,
+                    Err(e) => match map.filter(|b| fnv1a(b) == hash) {
+                        Some(bytes) => bytes.to_vec(),
+                        None => return Err(e),
+                    },
+                };
                 let scenario = Scenario::from_file_bytes(&bytes).map_err(|e| e.to_string())?;
                 let world = World::from_scenario(&scenario, &install.content);
                 (install.content.clone(), world, Some(EventEngine::new(&scenario)), Some(bytes))

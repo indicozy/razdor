@@ -309,9 +309,9 @@ fn stage_watch(app: &mut App, arg: Option<&str>) -> Result<(), String> {
         if let razdor::rules::recording::stream::Input::Engine(razdor::rules::recording::stream::EngineInput::Check { hash }) = &mut file.segments[0].entries[k].input {
             *hash ^= 1;
         }
-        razdor::rules::recording::watch::ReplayPlayer::new(file, content.clone(), install.as_deref())
+        razdor::rules::recording::watch::ReplayPlayer::new(file, content.clone(), install.as_deref(), None)
     } else {
-        razdor::rules::recording::watch::ReplayPlayer::open(std::path::Path::new(&path), content.clone(), install.as_deref())?
+        razdor::rules::recording::watch::ReplayPlayer::open(std::path::Path::new(&path), content.clone(), install.as_deref(), None)?
     };
     let mut view = WatchView::with_player(player, Some(Screen::WorldMap))?;
     for step in arg.unwrap_or("").split(',').filter(|s| !s.is_empty()) {

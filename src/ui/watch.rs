@@ -236,7 +236,8 @@ pub fn open_record(game: &Game, back: Screen) -> Result<Screen, String> {
     let point = session.save_point();
     let path = razdor::rules::recording::session::replays_dir(&games).join(&point.file);
     let install = razdor::rules::save::install_dir();
-    WatchView::open(&path, game.content.clone(), install.as_deref(), Some(back)).map(|v| Screen::Watch(Box::new(v)))
+    // The game's own map bytes (a Hub map is not in the install): the snapshots read them.
+    WatchView::open(&path, game.content.clone(), install.as_deref(), game.map_bytes.clone(), Some(back)).map(|v| Screen::Watch(Box::new(v)))
 }
 
 /// Where the playback is.
@@ -297,8 +298,8 @@ pub struct WatchView {
 impl WatchView {
     /// Opens the replay file at `path` on its first day, paused. `back` is the screen «Выход»
     /// returns to.
-    pub fn open(path: &Path, content: Arc<Content>, install: Option<&Path>, back: Option<Screen>) -> Result<WatchView, String> {
-        Self::with_player(ReplayPlayer::open(path, content, install)?, back)
+    pub fn open(path: &Path, content: Arc<Content>, install: Option<&Path>, map: Option<Arc<[u8]>>, back: Option<Screen>) -> Result<WatchView, String> {
+        Self::with_player(ReplayPlayer::open(path, content, install, map)?, back)
     }
 
     /// The screen over a player already open (the tests open their files in memory).
@@ -938,7 +939,7 @@ mod tests {
         let Ok(install) = razdor::dt::install::DtInstall::load(std::path::Path::new(&dir)) else { return };
         let content = Arc::new(Content::from_dt(&install));
         let record = std::path::PathBuf::from(record);
-        let open = || ReplayPlayer::open(&record, content.clone(), Some(&install.dir)).unwrap();
+        let open = || ReplayPlayer::open(&record, content.clone(), Some(&install.dir), None).unwrap();
         // Play: the time runs at the speed while playing, and stops when paused.
         let mut w = WatchView::with_player(open(), None).unwrap();
         assert_eq!(w.mode(), Mode::Playing);
@@ -991,7 +992,7 @@ mod tests {
         if let razdor::rules::recording::stream::Input::Engine(razdor::rules::recording::stream::EngineInput::Check { hash }) = &mut file.segments[0].entries[k].input {
             *hash ^= 1;
         }
-        let mut d = WatchView::with_player(ReplayPlayer::new(file, content.clone(), Some(&install.dir)), None).unwrap();
+        let mut d = WatchView::with_player(ReplayPlayer::new(file, content.clone(), Some(&install.dir), None), None).unwrap();
         d.playing = true;
         for _ in 0..2_000_000 {
             if d.mode() == Mode::Drifted || d.mode() == Mode::Ended {

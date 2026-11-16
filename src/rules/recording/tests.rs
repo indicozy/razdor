@@ -347,7 +347,7 @@ fn a_snapshot_continues_exactly_like_the_live_game() {
         live.play_days(&mut frames, 2);
         live.g.finish_pause();
         let snap = Snapshot::take(&live.g).unwrap_or_else(|e| panic!("{prefix}: {e}"));
-        let restored = snap.restore(c.clone(), Some(&install)).unwrap_or_else(|e| panic!("{prefix}: {e}"));
+        let restored = snap.restore(c.clone(), Some(&install), None).unwrap_or_else(|e| panic!("{prefix}: {e}"));
         assert_eq!(state_hash(&restored), state_hash(&live.g), "{prefix}: the restored state hashes as the live one");
         let mut copy = Driver::new(restored, false);
         let mut frames_live = Frames::new(DT_A, BUDGET_A);
@@ -359,7 +359,7 @@ fn a_snapshot_continues_exactly_like_the_live_game() {
         }
         // The snapshot's own bytes round trip too.
         let again = Snapshot::from_bytes(snap.bytes().to_vec());
-        assert_eq!(state_hash(&again.restore(c.clone(), Some(&install)).unwrap()), state_hash(&snap.restore(c.clone(), Some(&install)).unwrap()));
+        assert_eq!(state_hash(&again.restore(c.clone(), Some(&install), None).unwrap()), state_hash(&snap.restore(c.clone(), Some(&install), None).unwrap()));
     }
 }
 
@@ -631,7 +631,7 @@ fn a_recorded_game_plays_back_to_the_same_states_each_day() {
     assert!(count(|i| matches!(i, Input::Player(PlayerAction::StartBattle))) >= 1, "the battle's start is recorded");
     assert!(count(|i| matches!(i, Input::Engine(EngineInput::Max { .. }))) >= 1, "«Максимум» is recorded");
 
-    let g0 = begin.restore(c.clone(), Some(&install)).unwrap();
+    let g0 = begin.restore(c.clone(), Some(&install), None).unwrap();
     let mut back = super::play::play(g0, &entries, 1.0 / 30.0).unwrap_or_else(|e| panic!("playback: {e}"));
     back.finish_pause();
     back.armies_snap();
@@ -734,7 +734,7 @@ fn a_load_truncates_the_replay_and_the_file_plays_back_across_it() {
     let seg1 = &file.segments[0];
     let seg2 = &file.segments[1];
     // Segment one, to the save: it plays to the saved state.
-    let g1 = super::snapshot::Snapshot::from_bytes(seg1.snapshot.clone()).restore(c.clone(), Some(&install)).unwrap();
+    let g1 = super::snapshot::Snapshot::from_bytes(seg1.snapshot.clone()).restore(c.clone(), Some(&install), None).unwrap();
     let mut p1 = super::play::Player::new(g1, 1.0 / 30.0);
     for e in &seg1.entries {
         p1.apply(e).unwrap_or_else(|err| panic!("segment one: {err}"));
@@ -744,7 +744,7 @@ fn a_load_truncates_the_replay_and_the_file_plays_back_across_it() {
     p1.game.armies_snap();
     assert_eq!(state_hash(&p1.game), saved_hash, "segment one plays to the save");
     // Segment two, from the load: it plays to the live game's final state.
-    let g2 = super::snapshot::Snapshot::from_bytes(seg2.snapshot.clone()).restore(c.clone(), Some(&install)).unwrap();
+    let g2 = super::snapshot::Snapshot::from_bytes(seg2.snapshot.clone()).restore(c.clone(), Some(&install), None).unwrap();
     let mut played2 = super::play::play(g2, &seg2.entries, 1.0 / 30.0).unwrap_or_else(|e| panic!("segment two: {e}"));
     played2.finish_pause();
     played2.armies_snap();
@@ -798,8 +798,12 @@ fn a_thirty_day_replay_is_small_and_its_keyframes_do_not_block_the_frame() {
 /// replay file in a scratch folder (the caller removes it). Returns the file and the live state
 /// hashes (the day ends, the last one the final state).
 fn recorded_session(dt: &DtInstall, c: &Arc<Content>, prefix: &str, days: u64, tag: &str) -> (std::path::PathBuf, Vec<u64>) {
-    let map = map_named(dt, prefix);
-    let mut d = Driver::new(start(c, &map, Some(91)), true);
+    recorded_session_on(dt, c, &map_named(dt, prefix), days, tag)
+}
+
+/// [`recorded_session`] on the given map (a file of any name: the install's, or a copy).
+fn recorded_session_on(dt: &DtInstall, c: &Arc<Content>, map: &crate::dt::install::MapEntry, days: u64, tag: &str) -> (std::path::PathBuf, Vec<u64>) {
+    let mut d = Driver::new(start(c, map, Some(91)), true);
     d.checks = true;
     d.max = true;
     d.g.max_ai = true;
@@ -824,7 +828,7 @@ fn a_recorded_campaign_plays_to_its_end_and_seeks_to_any_day() {
     let c = Arc::new(Content::from_dt(&dt));
     for prefix in MAPS {
         let (path, hashes) = recorded_session(&dt, &c, prefix, 25, "watch-end");
-        let open = || ReplayPlayer::open(&path, c.clone(), Some(&dt.dir)).unwrap();
+        let open = || ReplayPlayer::open(&path, c.clone(), Some(&dt.dir), None).unwrap();
         let mut whole = open();
         assert!(whole.marks.iter().any(|m| matches!(m.kind, MarkKind::Battle { .. })), "{prefix}: the battle is marked");
         // A battle's mark is the place its start entry stands at: a seek there reaches the battle's choice.
@@ -855,6 +859,30 @@ fn a_recorded_campaign_plays_to_its_end_and_seeks_to_any_day() {
     }
 }
 
+/// A record of a map that is not in the install (a Hub map) plays back from the bytes the game
+/// carried: without them its snapshots cannot be restored, and the playback fails at its start.
+#[test]
+fn a_hub_maps_record_plays_with_the_games_own_map_bytes() {
+    use super::watch::{Place, ReplayPlayer};
+    let Some(dt) = base() else { return };
+    let c = Arc::new(Content::from_dt(&dt));
+    let dir = scratch("hub-map");
+    // A copy of an install map under a name the install does not have.
+    let install_map = map_named(&dt, MAPS[0]);
+    let hub_path = dir.join("HubOnly.DTm");
+    std::fs::copy(&install_map.path, &hub_path).unwrap();
+    let hub = crate::dt::install::MapEntry { name: "HubOnly".into(), path: hub_path.clone() };
+    let (path, _) = recorded_session_on(&dt, &c, &hub, 3, "hub-map-session");
+    let bytes: Arc<[u8]> = std::fs::read(&hub_path).unwrap().into();
+    let start_of_file = Place { seg: 0, index: 0 };
+    let with_bytes = ReplayPlayer::open(&path, c.clone(), Some(&dt.dir), Some(bytes)).unwrap().begin_seek_place(start_of_file);
+    assert!(with_bytes.is_ok(), "the game's own map bytes restore the record: {with_bytes:?}");
+    let without = ReplayPlayer::open(&path, c.clone(), Some(&dt.dir), None).unwrap().begin_seek_place(start_of_file);
+    assert!(without.is_err(), "without the bytes the record of a Hub map cannot restore (the test covers the bug)");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A checkpoint that does not match stops the playback at its place, with the version that recorded
 /// the replay: the message «Запись сделана в версии {v} и дальше расходится» names it.
 #[test]
@@ -871,7 +899,7 @@ fn a_corrupted_checkpoint_stops_the_playback_with_the_version_message() {
         Input::Engine(EngineInput::Check { hash }) => *hash ^= 1,
         other => panic!("the checkpoint is a check, found {other:?}"),
     }
-    let mut p = ReplayPlayer::new(file, c.clone(), Some(&dt.dir));
+    let mut p = ReplayPlayer::new(file, c.clone(), Some(&dt.dir), None);
     let drift = p.play_to_end().unwrap_err();
     assert_eq!(drift.at, Place { seg: 0, index: k }, "the corrupted checkpoint stops it");
     assert_eq!(p.last_good(), drift.at, "the playback stops at the last good place");
@@ -891,7 +919,7 @@ fn a_replay_of_other_rules_still_plays() {
     let mut file = super::file::read(&path).unwrap();
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
     file.header.rules ^= 1;
-    let mut p = ReplayPlayer::new(file, c.clone(), Some(&dt.dir));
+    let mut p = ReplayPlayer::new(file, c.clone(), Some(&dt.dir), None);
     assert!(!p.header.same_rules(), "other rules");
     p.play_to_end().unwrap_or_else(|d| panic!("the other rules still play: {d:?}"));
 }
@@ -916,7 +944,7 @@ fn a_default_off_switch_leaves_the_snapshot_and_an_on_one_survives_it() {
     on.content = Arc::new(on.content.with_experimental(on.experimental));
     let (json_on, _) = super::snapshot::capture(&on).unwrap();
     assert!(String::from_utf8_lossy(&json_on).contains("\"no_corpse_garrison\":true"), "an on switch is written");
-    let back = Snapshot::take(&on).unwrap().restore(c.clone(), Some(&install)).unwrap();
+    let back = Snapshot::take(&on).unwrap().restore(c.clone(), Some(&install), None).unwrap();
     assert!(back.experimental.no_corpse_garrison, "the switch survives a snapshot");
     assert_eq!(state_hash(&back), state_hash(&on));
 }
@@ -1002,7 +1030,7 @@ fn a_random_session_of_sixty_days_plays_back_day_by_day() {
         assert!(battles >= 1, "{prefix}: random play fought");
         let checks = file.segments.iter().flat_map(|s| s.entries.iter()).filter(|e| matches!(e.input, Input::Engine(EngineInput::Check { .. }))).count();
         assert!(checks >= hashes.len(), "{prefix}: every day's end is a checkpoint ({checks} for {})", hashes.len());
-        let mut p = ReplayPlayer::open(&path, c.clone(), Some(&dt.dir)).unwrap();
+        let mut p = ReplayPlayer::open(&path, c.clone(), Some(&dt.dir), None).unwrap();
         p.play_to_end().unwrap_or_else(|d| panic!("{prefix}: {d:?}"));
         let last = file.segments.last().unwrap().entries.iter().rev().find_map(|e| match e.input {
             Input::Engine(EngineInput::Check { hash }) => Some(hash),
@@ -1234,7 +1262,7 @@ fn a_recorded_campaign_pumps_in_budgets_hands_out_its_battle_and_seeks_by_budget
     let Some(dt) = base() else { return };
     let c = Arc::new(Content::from_dt(&dt));
     let (path, _hashes) = recorded_session(&dt, &c, "РК1", 25, "watch-pump");
-    let open = || ReplayPlayer::open(&path, c.clone(), Some(&dt.dir)).unwrap();
+    let open = || ReplayPlayer::open(&path, c.clone(), Some(&dt.dir), None).unwrap();
     let mut straight = open();
     straight.play_to_end().unwrap_or_else(|d| panic!("straight: {d:?}"));
     let want = state_hash(straight.game().unwrap());
@@ -1360,7 +1388,7 @@ fn a_scripted_market_visit_buys_sells_and_hires_and_plays_back() {
     let entries = || file.segments.iter().flat_map(|s| s.entries.iter());
     assert!(entries().any(|e| matches!(e.input, Input::Player(PlayerAction::Buy { .. }))), "a purchase is recorded");
     assert!(entries().any(|e| matches!(e.input, Input::Player(PlayerAction::Sell { .. }))), "a sale is recorded");
-    let mut p = ReplayPlayer::open(&path, c.clone(), Some(&dt.dir)).unwrap();
+    let mut p = ReplayPlayer::open(&path, c.clone(), Some(&dt.dir), None).unwrap();
     p.play_to_end().unwrap_or_else(|d| panic!("the visit plays back: {d:?}"));
     assert_eq!(state_hash(p.game().unwrap()), state_hash(&d.g), "the visit's end is the live game");
     let _ = std::fs::remove_dir_all(&dir);
@@ -1426,11 +1454,11 @@ fn write_a_sample_record_for_the_screenshots() {
     let dir = scratch("sample-record");
     let path = if std::env::var_os("RAZDOR_SAMPLE_SIMPLE").is_some() { recorded_session(&dt, &c, "РК1", 25, "sample-simple").0 } else { sample_record(&dt, &c, &dir, None).0 };
     std::fs::copy(&path, &out).unwrap();
-    let marks = super::watch::ReplayPlayer::open(&path, c.clone(), Some(&dt.dir)).unwrap().marks;
+    let marks = super::watch::ReplayPlayer::open(&path, c.clone(), Some(&dt.dir), None).unwrap().marks;
     let battles = marks.iter().filter(|m| matches!(m.kind, super::watch::MarkKind::Battle { .. })).count();
     let towns = marks.iter().filter(|m| matches!(m.kind, super::watch::MarkKind::Town { .. })).count();
     eprintln!("SAMPLE marks {} battles {battles} towns {towns}", marks.len());
-    let mut whole = super::watch::ReplayPlayer::open(&path, c.clone(), Some(&dt.dir)).unwrap();
+    let mut whole = super::watch::ReplayPlayer::open(&path, c.clone(), Some(&dt.dir), None).unwrap();
     eprintln!("SAMPLE play_to_end {:?}", whole.play_to_end().map_err(|d| format!("{d:?}")));
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -1462,7 +1490,7 @@ fn a_thirty_day_scripted_session_plays_back_to_the_same_state_every_day() {
         let found = checks[at..].iter().position(|c| c == h).unwrap_or_else(|| panic!("day end {h:016x} is not a check"));
         at += found + 1;
     }
-    let mut p = ReplayPlayer::open(&path, c.clone(), Some(&dt.dir)).unwrap();
+    let mut p = ReplayPlayer::open(&path, c.clone(), Some(&dt.dir), None).unwrap();
     p.play_to_end().unwrap_or_else(|d| panic!("the session drifts: {d:?}"));
     assert!(p.ended());
     assert_eq!(state_hash(p.game().unwrap()), *hashes.last().unwrap(), "the last day is the live final state");
@@ -1502,7 +1530,7 @@ fn a_record_made_in_russian_plays_back_with_the_interface_in_english() {
     crate::i18n::set_override(None);
     let file = super::file::read(&path).unwrap();
     assert_eq!(file.header.language, "ru", "the record names its language");
-    let mut p = ReplayPlayer::open(&path, c.clone(), Some(&dt.dir)).unwrap();
+    let mut p = ReplayPlayer::open(&path, c.clone(), Some(&dt.dir), None).unwrap();
     p.play_to_end().unwrap_or_else(|d| panic!("the Russian record drifts in English: {d:?}"));
     assert_eq!(state_hash(p.game().unwrap()), *hashes.last().unwrap(), "the last day is the live final state");
     assert_eq!(crate::i18n::lang(), before, "the playback gives the interface its language back");
@@ -1517,7 +1545,7 @@ fn the_sample_record_plays_to_its_end() {
     let Some(path) = std::env::var_os("RAZDOR_SAMPLE_REPLAY") else { return };
     let Some(dt) = base() else { return };
     let c = Arc::new(Content::from_dt(&dt));
-    let mut p = ReplayPlayer::open(Path::new(&path), c, Some(&dt.dir)).unwrap();
+    let mut p = ReplayPlayer::open(Path::new(&path), c, Some(&dt.dir), None).unwrap();
     if let Err(d) = p.play_to_end() {
         panic!("the sample record drifts at day {}: {}", d.day, d.reason);
     }
@@ -1572,7 +1600,7 @@ fn a_sit_out_in_the_deployment_replays_to_the_same_state() {
         let entries = shared.0.borrow().clone();
         let sits = entries.iter().filter(|e| matches!(e.input, Input::Player(PlayerAction::Battle(BattleAct::SitOut { .. })))).count();
         assert_eq!(sits, 3, "the three sit-out switches are recorded (benching {benching})");
-        let start = snap.restore(c.clone(), None).unwrap();
+        let start = snap.restore(c.clone(), None, None).unwrap();
         let played = super::play::play(start, &entries, 1.0 / 60.0).unwrap();
         assert_eq!(state_hash(&played), live, "the replay reaches the live state (benching {benching})");
     }
@@ -1607,7 +1635,7 @@ fn a_quick_battle_of_a_deployment_replays_to_the_same_state() {
     let live = state_hash(&g);
     let entries = shared.0.borrow().clone();
     assert!(entries.iter().any(|e| matches!(e.input, Input::Player(PlayerAction::Battle(super::actions::BattleAct::Begin)))), "the quick battle's begin is recorded");
-    let start = snap.restore(c.clone(), None).unwrap();
+    let start = snap.restore(c.clone(), None, None).unwrap();
     let played = super::play::play(start, &entries, 1.0 / 60.0).unwrap();
     assert_eq!(state_hash(&played), live, "the replay reaches the live state");
 }
