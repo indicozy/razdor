@@ -218,34 +218,99 @@ pub(super) fn chronicle_lines(rows: &[razdor::rules::journal::Row], day: impl Fn
     lines
 }
 
-/// One line of the chronicle's list as drawn: a chapter's heading, a day's heading, or one line
-/// of an entry's title wrapped to the list's width.
+/// One item of the chronicle's list as drawn: a chapter's heading, a day's heading, one line of an
+/// entry's title wrapped to the list's width (`more`: another line of the same entry follows it), or
+/// a gap of half a line between two entries and around a day's heading.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Visual {
     Heading(u32),
     Day(u64),
-    Text(String),
+    Text { line: String, more: bool },
+    Gap,
+}
+
+/// The height of a gap, in steps (a step is one line of the list).
+pub(super) const GAP_UNITS: f32 = 0.5;
+/// The height of a line that a wrapped entry runs on from (+15 % of a step); the last line of an
+/// entry and the headings take one step.
+pub(super) const WRAP_UNITS: f32 = 1.15;
+
+impl Visual {
+    /// The height of this item in steps; the list's scroll and its fit are counted in these.
+    pub(super) fn units(&self) -> f32 {
+        match self {
+            Visual::Gap => GAP_UNITS,
+            Visual::Text { more: true, .. } => WRAP_UNITS,
+            _ => 1.0,
+        }
+    }
+}
+
+/// Adds a gap unless the list is empty or already ends in one.
+fn pad(out: &mut Vec<Visual>) {
+    if out.last().is_some_and(|v| *v != Visual::Gap) {
+        out.push(Visual::Gap);
+    }
 }
 
 /// The chronicle's list as drawn (`chronicle_lines`, each entry wrapped): every heading and day
-/// is one line, and an entry takes as many lines as `wrap` cuts its title into (at least one,
-/// so an empty title keeps its place). The list scrolls by these lines.
+/// is one item, and an entry takes as many lines as `wrap` cuts its title into (at least one, so
+/// an empty title keeps its place). A gap goes before each entry, heading and day, and after each
+/// day; the list scrolls and fits by the items' `units`.
 pub(super) fn chronicle_visual(lines: &[Line], rows: &[razdor::rules::journal::Row], wrap: impl Fn(&str) -> Vec<String>) -> Vec<Visual> {
-    let mut out = Vec::with_capacity(lines.len());
+    let mut out = Vec::with_capacity(lines.len() * 2);
     for line in lines {
         match *line {
-            Line::Heading(chapter) => out.push(Visual::Heading(chapter)),
-            Line::Day(day) => out.push(Visual::Day(day)),
+            Line::Heading(chapter) => {
+                pad(&mut out);
+                out.push(Visual::Heading(chapter));
+            }
+            Line::Day(day) => {
+                pad(&mut out);
+                out.push(Visual::Day(day));
+                out.push(Visual::Gap);
+            }
             Line::Row(k) => {
+                pad(&mut out);
                 let mut cut = wrap(&rows[k].title);
                 if cut.is_empty() {
                     cut.push(String::new());
                 }
-                out.extend(cut.into_iter().map(Visual::Text));
+                let n = cut.len();
+                out.extend(cut.into_iter().enumerate().map(|(i, line)| Visual::Text { line, more: i + 1 < n }));
             }
         }
     }
     out
+}
+
+/// The first item the list shows when it is scrolled to its end: the fewest items from the foot
+/// whose heights fit in `avail` steps (all of them when they fit).
+pub(super) fn scroll_end(visual: &[Visual], avail: f32) -> usize {
+    let mut sum = 0.0;
+    let mut start = visual.len();
+    for (i, v) in visual.iter().enumerate().rev() {
+        if sum + v.units() > avail + 1e-3 {
+            break;
+        }
+        sum += v.units();
+        start = i;
+    }
+    start
+}
+
+/// How many items from `from` fit in `avail` steps.
+pub(super) fn visible_from(visual: &[Visual], from: usize, avail: f32) -> usize {
+    let mut sum = 0.0;
+    let mut n = 0;
+    for v in visual.iter().skip(from) {
+        if sum + v.units() > avail + 1e-3 {
+            break;
+        }
+        sum += v.units();
+        n += 1;
+    }
+    n
 }
 
 /// The list's lines: the rows, each run of one chapter under its heading when the rows come
@@ -340,30 +405,51 @@ mod tests {
         );
     }
 
-    /// The chronicle's list is counted in wrapped lines: a heading or a day is one line, an entry
-    /// is as many as its title wraps into, and an empty title still takes one.
+    /// The chronicle's list: a wrapped entry's lines run 15 % apart, a gap of half a step goes
+    /// between entries and around each day, and the heights add up to the list's height in steps.
     #[test]
-    fn the_chronicle_list_counts_its_wrapped_lines() {
+    fn the_chronicle_list_counts_its_wrapped_lines_and_gaps() {
         let titled = |title: &str| Row { title: title.into(), text: String::new(), date: None, elapsed: None, chapter: 0 };
         let rows = [titled("abcdefghijkl"), titled(""), titled("xy")];
         // A stand-in wrap: the title cut into pieces of at most five characters.
         let wrap = |t: &str| t.chars().collect::<Vec<_>>().chunks(5).map(|c| c.iter().collect::<String>()).collect::<Vec<_>>();
         let lines = [Line::Heading(0), Line::Day(3), Line::Row(0), Line::Row(1), Line::Row(2)];
         let visual = chronicle_visual(&lines, &rows, wrap);
+        let text = |line: &str, more: bool| Visual::Text { line: line.into(), more };
         assert_eq!(
             visual,
             [
                 Visual::Heading(0),
+                Visual::Gap,
                 Visual::Day(3),
-                Visual::Text("abcde".into()),
-                Visual::Text("fghij".into()),
-                Visual::Text("kl".into()),
-                Visual::Text(String::new()),
-                Visual::Text("xy".into()),
+                Visual::Gap,
+                text("abcde", true),
+                text("fghij", true),
+                text("kl", false),
+                Visual::Gap,
+                text("", false),
+                Visual::Gap,
+                text("xy", false),
             ]
         );
-        assert_eq!(visual.len(), 7, "the total height is this many lines of one step each");
+        let height: f32 = visual.iter().map(Visual::units).sum();
+        assert!((height - 9.3).abs() < 1e-4, "1 + .5 + 1 + .5 + 1.15 + 1.15 + 1 + .5 + 1 + .5 + 1 steps, got {height}");
         assert!(chronicle_visual(&[], &rows, wrap).is_empty());
+    }
+
+    /// Scrolled to its end, the list shows the fewest items from the foot that fit; from the top,
+    /// as many as fit.
+    #[test]
+    fn the_chronicle_list_scrolls_and_fits_by_its_heights() {
+        let text = |line: &str, more: bool| Visual::Text { line: line.into(), more };
+        let visual = [Visual::Heading(0), Visual::Gap, Visual::Day(3), Visual::Gap, text("abcde", true), text("fghij", true), text("kl", false), Visual::Gap, text("", false), Visual::Gap, text("xy", false)];
+        // From the foot: xy 1, gap .5, empty 1, gap .5 make 3; the kl line (1) would make 4.
+        assert_eq!(scroll_end(&visual, 3.0), 7);
+        assert_eq!(scroll_end(&visual, 100.0), 0, "all of them fit");
+        assert_eq!(scroll_end(&[], 3.0), 0);
+        // From the top: heading 1 and gap .5 make 1.5; the day would make 2.5, past 2.0.
+        assert_eq!(visible_from(&visual, 0, 2.0), 2);
+        assert_eq!(visible_from(&visual, 7, 3.0), 4);
     }
 }
 

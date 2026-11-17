@@ -2053,10 +2053,11 @@ fn chronicle_list(game: &Game, view: &mut HeroView, rows: &[razdor::rules::journ
     use super::dt_font::{legacy_metrics_if, with_original_face, Face};
     let ChronicleBox { text: list, frame, bar, step, size, scale, phone } = b;
     let room = list.w - 12.0 * scale;
-    let fits = ((list.h - 8.0 * scale) / step).floor().max(1.0) as usize;
+    // The list's height in steps (a gap is half a step, a wrapped line 1.15): the items fit by their heights.
+    let avail = (list.h - 8.0 * scale) / step;
     let lines = lines_for(game, view.tab, rows);
     let visual = legacy_metrics_if(phone, || chronicle_wrapped(&lines, rows, room, size));
-    let most = visual.len().saturating_sub(fits);
+    let most = super::story::scroll_end(&visual, avail);
     chrome::text_box_base(frame);
     swipe_rows(list, step);
     view.list_scroll = view.list_scroll.min(most);
@@ -2074,7 +2075,8 @@ fn chronicle_list(game: &Game, view: &mut HeroView, rows: &[razdor::rules::journ
     if key(KeyCode::Up) {
         view.list_scroll = view.list_scroll.saturating_sub(1);
     }
-    scrollbar_always(bar, &mut view.list_scroll, fits, visual.len());
+    let page = super::story::visible_from(&visual, view.list_scroll, avail).max(1);
+    scrollbar_always(bar, &mut view.list_scroll, page, visual.len());
     chrome::text_box_sides(frame);
     chrome::silver_frame(frame, chrome::k().max(1.0));
     let cx = list.x + list.w / 2.0;
@@ -2089,8 +2091,16 @@ fn chronicle_list(game: &Game, view: &mut HeroView, rows: &[razdor::rules::journ
                 }
             });
         }
-        for (n, line) in visual.iter().enumerate().skip(view.list_scroll).take(fits) {
-            let base = list.y + 4.0 * scale + (n - view.list_scroll) as f32 * step + step * 0.78;
+        // Each item takes its height (`Visual::units`) from the list's top; the first that would pass the foot stops the draw.
+        let foot = list.y + 4.0 * scale + avail * step + 1e-3;
+        let mut y = list.y + 4.0 * scale;
+        for line in visual.iter().skip(view.list_scroll) {
+            let h = line.units() * step;
+            if y + h > foot {
+                break;
+            }
+            let base = y + step * 0.78;
+            y += h;
             match line {
                 super::story::Visual::Heading(chapter) => {
                     let t = ellipsize(&heading_text(game, view.tab, *chapter), room, size);
@@ -2100,9 +2110,10 @@ fn chronicle_list(game: &Game, view: &mut HeroView, rows: &[razdor::rules::journ
                     let t = ellipsize(&day_heading(*day), room, size);
                     with_original_face(Face::Bold, || chrome::shadow_centered(&t, cx, base, size, Color::from_rgba(230, 230, 130, 255)));
                 }
-                super::story::Visual::Text(t) => {
+                super::story::Visual::Text { line: t, .. } => {
                     with_original_face(Face::Title, || chrome::shadow_centered(t, cx, base, size, ink_color(Ink::Plain)));
                 }
+                super::story::Visual::Gap => {}
             }
         }
     });
