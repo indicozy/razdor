@@ -558,6 +558,7 @@ fn button_state_in(r: Rect, hit: Rect, enabled: bool) -> (bool, bool, bool) {
     let hover = enabled && !input_swallowed() && pointer_in(hit.x, hit.y, hit.w, hit.h);
     let capture = [r.x.to_bits(), r.y.to_bits(), r.w.to_bits(), r.h.to_bits()];
     let (next, down, pressed) = capture_step(
+        input_blocked(),
         BUTTON_CAPTURE.with(|c| c.get()),
         capture,
         hover,
@@ -575,7 +576,12 @@ fn button_state_in(r: Rect, hit: Rect, enabled: bool) -> (bool, bool, bool) {
 /// captured on this button: released on it, that is a click, and the capture is used up, so
 /// a second release with no new press (a worn switch bouncing) clicks nothing; released off
 /// it, the press is cancelled. A release on another button leaves this one's capture alone.
-fn capture_step(captured: Option<[u32; 4]>, mine: [u32; 4], hover: bool, down_edge: bool, up_edge: bool, held: bool) -> (Option<[u32; 4]>, bool, bool) {
+/// A button under a blocked screen (`input_blocked`) leaves the capture alone, so a window drawn
+/// over it with a button on the same rect still gets its click; report 1666.
+fn capture_step(blocked: bool, captured: Option<[u32; 4]>, mine: [u32; 4], hover: bool, down_edge: bool, up_edge: bool, held: bool) -> (Option<[u32; 4]>, bool, bool) {
+    if blocked {
+        return (captured, false, false);
+    }
     let mut next = captured;
     if down_edge && hover {
         next = Some(mine);
@@ -2640,7 +2646,7 @@ mod tests {
         frames
             .iter()
             .map(|&(down, up, held, hover)| {
-                let (next, _, pressed) = capture_step(captured, mine, hover, down, up, held);
+                let (next, _, pressed) = capture_step(false, captured, mine, hover, down, up, held);
                 captured = next;
                 pressed
             })
@@ -2662,10 +2668,33 @@ mod tests {
     /// press: its own release still clicks it.
     #[test]
     fn a_release_on_another_button_leaves_the_capture_alone() {
-        let (next, _, pressed) = capture_step(Some([1, 2, 3, 4]), [9, 9, 9, 9], false, false, true, false);
+        let (next, _, pressed) = capture_step(false, Some([1, 2, 3, 4]), [9, 9, 9, 9], false, false, true, false);
         assert_eq!((next, pressed), (Some([1, 2, 3, 4]), false));
-        let (next, _, pressed) = capture_step(next, [1, 2, 3, 4], true, false, true, false);
+        let (next, _, pressed) = capture_step(false, next, [1, 2, 3, 4], true, false, true, false);
         assert_eq!((next, pressed), (None, true));
+    }
+
+    /// Report 1666: the army screen's cross and the tree window's cross share one rect. The
+    /// army screen's button runs first with input blocked (no hover); it must leave the press
+    /// capture alone, or the release clears it and the window's own button never clicks.
+    #[test]
+    fn a_blocked_button_on_the_same_rect_leaves_the_click_to_the_window_over_it() {
+        let rect = [1, 2, 3, 4];
+        // Frame A: press on the rect. The blocked army button sees no hover; the window's button
+        // (unblocked) sees the hover and takes the capture.
+        let (captured, _, pressed) = capture_step(true, None, rect, false, true, false, true);
+        assert_eq!((captured, pressed), (None, false));
+        let (captured, down, pressed) = capture_step(false, captured, rect, true, true, false, true);
+        assert_eq!((captured, down, pressed), (Some(rect), true, false));
+        // Frame B: release. The blocked army button runs first and leaves the capture alone.
+        let (captured, _, pressed) = capture_step(true, captured, rect, false, false, true, false);
+        assert_eq!((captured, pressed), (Some(rect), false));
+        // The window's button then clicks.
+        let (captured, _, pressed) = capture_step(false, captured, rect, true, false, true, false);
+        assert_eq!((captured, pressed), (None, true));
+        // Without the blocked flag (the bug), the army button's release clears the capture.
+        let (cleared, _, pressed) = capture_step(false, Some(rect), rect, false, false, true, false);
+        assert_eq!((cleared, pressed), (None, false));
     }
 
     /// A normal press and release clicks once, and a press and release in one frame (a tap on a
