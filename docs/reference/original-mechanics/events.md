@@ -71,7 +71,9 @@ The scan (0x4abfbc, §2) is started from these places. **code**
 2. If none: the **event point** under the hero, its listed events in list order, **whatever
    their type** (global, local, quest or rumour). The point counts by its event count (byte
    39) alone: its "active" byte (40, which only lights a lantern at load) is not tested, and
-   the loader marks every point on its cell (0x4b2504). Другой берег's event 221 sits on an
+   the loader marks every point on its cell (0x4b2504), in file order without a guard, so on a
+   cell with several points only the last one is read (Время Ковена, points 19 and 40; a player's
+   report). Другой берег's event 221 sits on an
    inactive point with no condition, so it fires and "completes" a quest never received.
 3. If neither: the **building** the hero stands in, its listed events in list order, but only
    when that building is not the one the hero was already in when his current move began

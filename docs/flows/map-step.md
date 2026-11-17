@@ -207,7 +207,8 @@ split of the budget give the same state at every day's end (`every_frame_schedul
   one opens a window. Not the building his move began on (0x4ed434, `click_buildings.1`). Armies on
   bridges block, as in the original (the Razdor option that let them pass is gone; `noclip` passes them).
   The scan checks the event point under him first, then the building (0x4abfbc, events.md §2):
-  `EventWorld::point` gives the point (none while `point_zeroed`), `candidates` lists globals, the
+  `EventWorld::point` gives the point (none while `point_zeroed`; on a cell with several points the
+  last in file order, the one the loader leaves in the cell, 0x4b2504), `candidates` lists globals, the
   point's events, then the building's local ones. `EventWorld::place` still prefers the building (or
   bridge) to the point; it serves the visit tracking and the hall. A point on a bridge cell fires
   (Другой берег's toll, a player's report); test `a_point_on_a_bridge_cell_is_checked_before_the_bridge`,
