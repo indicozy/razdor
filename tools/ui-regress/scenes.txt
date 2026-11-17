@@ -64,6 +64,12 @@ building-sanctuary-1280 | building:РК3-Столица:8:sanctuary | 1280x800 |
 # Army, hero, spells
 army-1280 | army:РК1-Начало пути | 1280x800 |
 army-unit-1280 | army:РК1-Начало пути:0 | 1280x800 |
+# The «Дерево развития персонажа» pane (a squad member n > 0 shows its tree; its lower-right tree button),
+# and the evolution tree window over it: its line, the whole tree as a web (RAZDOR_SCENE_EVO), a phone upright.
+evo-pane-1280 | army:РК1-Начало пути:1 | 1280x800 |
+evo-line-1280 | army:РК1-Начало пути:1 | 1280x800 | RAZDOR_SCENE_EVO=line
+evo-web-1920 | army:РК1-Начало пути:1 | 1920x1080 | RAZDOR_SCENE_EVO=web
+evo-web-phone-upright | army:РК1-Начало пути:1 | 1080x2400 | RAZDOR_DP=2.75;RAZDOR_LARGE_WINDOWS=1;RAZDOR_SCENE_EVO=web
 hero-quests-1280 | hero:РК1-Начало пути:0 | 1280x800 |
 hero-done-1280 | hero:РК1-Начало пути:1 | 1280x800 |
 hero-rumours-1280 | hero:РК1-Начало пути:2 | 1280x800 |
