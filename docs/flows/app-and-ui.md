@@ -405,6 +405,7 @@ desktop and sideways pixel-identical, texts drawn under `dt_font::legacy_metrics
 - the hero window on a phone (both orientations) is the diary-only window «Дневник» (`items_view::phone_diary`,
   `phone_diary_areas`): four tab buttons, the entry list, the picked entry's text centred; upright the list over the
   text and «Закрыть» at the foot, sideways the list left and the text right with «Закрыть» in the tabs row. The
+  chronicle has no text: its list takes the whole height below the tabs, both orientations. The
   desktop keeps the original hero window;
 - market (`window_layout::market_panes`, `Stack::Market`): the item description strip on top (`ItemBox::MarketStrip`),
   the section icons, the list taking the height, one row of «Инвентарь», money, «Купить», «Торговая лавка»;
@@ -524,10 +525,14 @@ owner): the quests under way (the original's diary), Razdor's history of complet
 rumours and messages over the whole campaign, with dates and a heading per campaign map
 (`items_view::HeroView`, `story::journal_lines`), and the chronicle («Летопись», Razdor's, the
 fifth; `items_view::DiaryTab::Chronicle`). The chronicle's rows are `rules::chronicle_text::rows`
-(the dry line of each entry, its full text for a text window): one line per entry under a heading
+(the dry line of each entry: a text window's first line and its answer): one line per entry under a heading
 per chapter and per day («День N», `story::chronicle_lines`), the newest at the foot; the tab opens
-scrolled to the end (`items_view::switched`). Its entry box shows a text window's whole text, else
-the entry's line. «Итоги» stands at the top of its list (`summary::open`, `After::Diary`: the whole
+scrolled to the end (`items_view::switched`). The tab is a list only (the owner's request, 2026-11-17): no
+picked entry, no entry box, a click on a row does nothing. The list takes the whole window (the desktop's
+runs down over the entry box's place; the phone's runs below the tabs in both orientations,
+`phone_diary_areas(full)`). Each title wraps to the list's width (`story::chronicle_visual`), and the list
+scrolls by those lines (wheel, swipe, bar, Up/Down; `items_view::chronicle_list`). So a text window's full
+text is not shown there. «Итоги» stands at the top of its list (`summary::open`, `After::Diary`: the whole
 story so far, the route of the map being played). The phone's diary has the same five tabs (three
 and two held upright, `phone_diary_areas`) and the same «Итоги» row.
 

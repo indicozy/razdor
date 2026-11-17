@@ -218,6 +218,36 @@ pub(super) fn chronicle_lines(rows: &[razdor::rules::journal::Row], day: impl Fn
     lines
 }
 
+/// One line of the chronicle's list as drawn: a chapter's heading, a day's heading, or one line
+/// of an entry's title wrapped to the list's width.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum Visual {
+    Heading(u32),
+    Day(u64),
+    Text(String),
+}
+
+/// The chronicle's list as drawn (`chronicle_lines`, each entry wrapped): every heading and day
+/// is one line, and an entry takes as many lines as `wrap` cuts its title into (at least one,
+/// so an empty title keeps its place). The list scrolls by these lines.
+pub(super) fn chronicle_visual(lines: &[Line], rows: &[razdor::rules::journal::Row], wrap: impl Fn(&str) -> Vec<String>) -> Vec<Visual> {
+    let mut out = Vec::with_capacity(lines.len());
+    for line in lines {
+        match *line {
+            Line::Heading(chapter) => out.push(Visual::Heading(chapter)),
+            Line::Day(day) => out.push(Visual::Day(day)),
+            Line::Row(k) => {
+                let mut cut = wrap(&rows[k].title);
+                if cut.is_empty() {
+                    cut.push(String::new());
+                }
+                out.extend(cut.into_iter().map(Visual::Text));
+            }
+        }
+    }
+    out
+}
+
 /// The list's lines: the rows, each run of one chapter under its heading when the rows come
 /// from more than one.
 pub(super) fn journal_lines(rows: &[razdor::rules::journal::Row]) -> Vec<Line> {
@@ -308,6 +338,32 @@ mod tests {
             journal_lines(&[row(2), row(2), row(0)]),
             [Line::Heading(2), Line::Row(0), Line::Row(1), Line::Heading(0), Line::Row(2)]
         );
+    }
+
+    /// The chronicle's list is counted in wrapped lines: a heading or a day is one line, an entry
+    /// is as many as its title wraps into, and an empty title still takes one.
+    #[test]
+    fn the_chronicle_list_counts_its_wrapped_lines() {
+        let titled = |title: &str| Row { title: title.into(), text: String::new(), date: None, elapsed: None, chapter: 0 };
+        let rows = [titled("abcdefghijkl"), titled(""), titled("xy")];
+        // A stand-in wrap: the title cut into pieces of at most five characters.
+        let wrap = |t: &str| t.chars().collect::<Vec<_>>().chunks(5).map(|c| c.iter().collect::<String>()).collect::<Vec<_>>();
+        let lines = [Line::Heading(0), Line::Day(3), Line::Row(0), Line::Row(1), Line::Row(2)];
+        let visual = chronicle_visual(&lines, &rows, wrap);
+        assert_eq!(
+            visual,
+            [
+                Visual::Heading(0),
+                Visual::Day(3),
+                Visual::Text("abcde".into()),
+                Visual::Text("fghij".into()),
+                Visual::Text("kl".into()),
+                Visual::Text(String::new()),
+                Visual::Text("xy".into()),
+            ]
+        );
+        assert_eq!(visual.len(), 7, "the total height is this many lines of one step each");
+        assert!(chronicle_visual(&[], &rows, wrap).is_empty());
     }
 }
 

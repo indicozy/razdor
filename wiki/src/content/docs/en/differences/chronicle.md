@@ -11,7 +11,7 @@ Razdor writes down the course of the game in the **Chronicle** and shows a **Sum
 
 The Chronicle is the fifth tab of the hero's diary. The diary opens with the flag button on the bottom bar or with the `J` key; the tab is called **"Chronicle"**.
 
-Its entries go by day, newest first, under a heading "Day N". Each entry is a short line about one event:
+Its entries go by day, newest at the bottom, under a heading "Day N". Each entry is a short line about one event:
 
 * an event window with its text, as the game showed it;
 * a battle: a win or a loss, and the losses on both sides;
@@ -28,6 +28,8 @@ The Chronicle is kept in the save, so it is the same after loading. In older sav
 ![The Chronicle in the hero's diary](../../../../assets/shots/chronicle.webp)
 
 The "Chronicle" tab: entries by day. The **"Summary"** button at the top of the list shows the whole story up to now.
+
+The Chronicle is a list only: it fills the whole window, there is no description pane below it, and an entry cannot be picked (a click on a line does nothing). Long lines wrap. The list scrolls with the mouse wheel, a finger, the scroll bar or the arrow keys. A letter's or a window's full text is not shown here, only its first line.
 
 ## Summary
 

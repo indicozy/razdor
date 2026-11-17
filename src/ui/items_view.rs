@@ -1950,7 +1950,9 @@ struct PhoneDiary {
     record: Option<Rect>,
 }
 
-fn phone_diary_areas(inner: Rect, k: f32, g: f32, upright: bool, record: bool) -> PhoneDiary {
+/// The phone's diary areas. `full` is the chronicle: its list takes the whole height below the
+/// tabs in both orientations, its head and entry empty (no entry box).
+fn phone_diary_areas(inner: Rect, k: f32, g: f32, upright: bool, record: bool, full: bool) -> PhoneDiary {
     let pad = 8.0 * k;
     let gap = 6.0 * k;
     // A tab and the close button are 44 dp tall (the owner's touch rule), grown with the text size.
@@ -1985,7 +1987,11 @@ fn phone_diary_areas(inner: Rect, k: f32, g: f32, upright: bool, record: bool) -
         let rec_btn = record.then(|| Rect::new(close.x - gap - close_w, top_y, close_w, th));
         (close, (inner.bottom() - pad).max(top), rec_btn)
     };
-    let (list, head, entry) = if upright {
+    let (list, head, entry) = if full {
+        let list = Rect::new(inner.x + pad, top, w, (bottom - top).max(0.0));
+        let none = Rect::new(list.x, list.bottom(), 0.0, 0.0);
+        (list, none, none)
+    } else if upright {
         let list = Rect::new(inner.x + pad, top, w, ((bottom - top) * 0.4).floor());
         let head = Rect::new(inner.x + pad, list.bottom() + gap, w, head_h);
         let entry = Rect::new(inner.x + pad, head.bottom(), w, (bottom - head.bottom()).max(0.0));
@@ -2015,6 +2021,93 @@ fn two_lines(title: &str, room: f32, size: f32) -> Vec<String> {
     lines
 }
 
+/// The geometry of the chronicle's list (`chronicle_list`): `text` is the box the wheel, the swipe
+/// and the scroll reach, `frame` the box drawn around it, `bar` its scroll bar; `step` is one line's
+/// height, `size` the text's size, `scale` one unit of the window's and `phone` a phone's window.
+#[derive(Clone, Copy)]
+struct ChronicleBox {
+    text: Rect,
+    frame: Rect,
+    bar: Rect,
+    step: f32,
+    size: f32,
+    scale: f32,
+    phone: bool,
+}
+
+/// The chronicle's lines as drawn at `room` and `size`: each entry's title wrapped in the Title
+/// face (`story::chronicle_visual`).
+fn chronicle_wrapped(lines: &[super::story::Line], rows: &[razdor::rules::journal::Row], room: f32, size: f32) -> Vec<super::story::Visual> {
+    use super::dt_font::{with_original_face, Face};
+    with_original_face(Face::Title, || {
+        super::story::chronicle_visual(lines, rows, |t| razdor::dt::markup::wrap(t, room, |c| measure(c.encode_utf8(&mut [0; 4]), size).width).into_iter().map(|r| r.text).collect())
+    })
+}
+
+/// The chronicle's list, on the desktop and on a phone: every line of the tab wrapped to the
+/// list's width, one line a `step` high. Nothing in it is picked or clicked (no highlight, no
+/// entry under it, no box below it). The wheel, a swipe, the bar and Up / Down scroll it by lines;
+/// the scroll is clamped to the lines before anything else reads it (`switched` opens it at the end).
+fn chronicle_list(game: &Game, view: &mut HeroView, rows: &[razdor::rules::journal::Row], b: ChronicleBox) {
+    use razdor::dt::markup::Ink;
+    use super::dt_font::{legacy_metrics_if, with_original_face, Face};
+    let ChronicleBox { text: list, frame, bar, step, size, scale, phone } = b;
+    let room = list.w - 12.0 * scale;
+    let fits = ((list.h - 8.0 * scale) / step).floor().max(1.0) as usize;
+    let lines = lines_for(game, view.tab, rows);
+    let visual = legacy_metrics_if(phone, || chronicle_wrapped(&lines, rows, room, size));
+    let most = visual.len().saturating_sub(fits);
+    chrome::text_box_base(frame);
+    swipe_rows(list, step);
+    view.list_scroll = view.list_scroll.min(most);
+    if mouse_in(list.x, list.y, list.w, list.h) {
+        let w = wheel();
+        if w < 0.0 && view.list_scroll < most {
+            view.list_scroll += 1;
+        } else if w > 0.0 {
+            view.list_scroll = view.list_scroll.saturating_sub(1);
+        }
+    }
+    if key(KeyCode::Down) && view.list_scroll < most {
+        view.list_scroll += 1;
+    }
+    if key(KeyCode::Up) {
+        view.list_scroll = view.list_scroll.saturating_sub(1);
+    }
+    scrollbar_always(bar, &mut view.list_scroll, fits, visual.len());
+    chrome::text_box_sides(frame);
+    chrome::silver_frame(frame, chrome::k().max(1.0));
+    let cx = list.x + list.w / 2.0;
+    legacy_metrics_if(phone, || {
+        if rows.is_empty() {
+            with_original_face(Face::Body, || {
+                let notes = wrap_cached(super::story::empty_note(view.tab), room, size);
+                let mut y = list.center().y - notes.len() as f32 * size * 0.65;
+                for l in &notes {
+                    chrome::shadow_centered(l, cx, y, size, DIM);
+                    y += size * 1.3;
+                }
+            });
+        }
+        for (n, line) in visual.iter().enumerate().skip(view.list_scroll).take(fits) {
+            let base = list.y + 4.0 * scale + (n - view.list_scroll) as f32 * step + step * 0.78;
+            match line {
+                super::story::Visual::Heading(chapter) => {
+                    let t = ellipsize(&heading_text(game, view.tab, *chapter), room, size);
+                    with_original_face(Face::Bold, || chrome::shadow_centered(&t, cx, base, size, Color::from_rgba(235, 165, 75, 255)));
+                }
+                super::story::Visual::Day(day) => {
+                    let t = ellipsize(&day_heading(*day), room, size);
+                    with_original_face(Face::Bold, || chrome::shadow_centered(&t, cx, base, size, Color::from_rgba(230, 230, 130, 255)));
+                }
+                super::story::Visual::Text(t) => {
+                    with_original_face(Face::Title, || chrome::shadow_centered(t, cx, base, size, ink_color(Ink::Plain)));
+                }
+            }
+        }
+    });
+}
+
 /// The hero window on a phone is the diary only (a player's report, the owner's decision of
 /// 2026-11-02): the bottom bar's diary button and J open it. One window over the screen less the
 /// safe area and the bottom bar, one unit one dp (as the hub's and the update window's). Its
@@ -2036,7 +2129,7 @@ fn phone_diary(game: &mut Game, assets: &Assets, view: &mut HeroView, message: &
     let ru = razdor::i18n::lang() == razdor::i18n::Lang::Ru;
     let (inner, closed) = chrome::window(win, tr(n_("Diary")), chrome::Skin::Marble, true);
     let text = DIARY_PHONE_TEXT * k * g;
-    let a = phone_diary_areas(inner, k, g, window_layout::portrait(), game.replay.is_some());
+    let a = phone_diary_areas(inner, k, g, window_layout::portrait(), game.replay.is_some(), view.tab == DiaryTab::Chronicle);
 
     // The tabs: a marble button each, the picked one ringed in gold.
     let mut switch = None;
@@ -2063,22 +2156,25 @@ fn phone_diary(game: &mut Game, assets: &Assets, view: &mut HeroView, message: &
         cue(Cue::Button);
         *view = switched(view, tab);
     }
+    // The chronicle's list takes the window below the tabs: a switch changes its layout.
+    let chronicle = view.tab == DiaryTab::Chronicle;
+    let a = phone_diary_areas(inner, k, g, window_layout::portrait(), game.replay.is_some(), chronicle);
 
     let rows = diary_rows(game, view.tab);
     if view.pick >= rows.len() {
         view.pick = if view.tab == DiaryTab::Chronicle { rows.len().saturating_sub(1) } else { 0 };
     }
-    if key(KeyCode::Down) && view.pick + 1 < rows.len() {
+    // The chronicle has no picked entry: Up and Down scroll its list (`chronicle_list`).
+    if !chronicle && key(KeyCode::Down) && view.pick + 1 < rows.len() {
         view.pick += 1;
         view.text_scroll = 0;
     }
-    if key(KeyCode::Up) && view.pick > 0 {
+    if !chronicle && key(KeyCode::Up) && view.pick > 0 {
         view.pick -= 1;
         view.text_scroll = 0;
     }
 
     // The entry list: the tab's chapters and entries (`journal_lines`), two lines a row at most.
-    let lines = lines_for(game, view.tab, &rows);
     let mut list = Rect::new(a.list.x, a.list.y, a.list.w - a.list_bar.w - 4.0 * k, a.list.h);
     // The chronicle's «Итоги» (the whole story so far) stands at the top of its list, a finger-sized
     // row (44 dp, grown with the text size like the tabs).
@@ -2095,119 +2191,127 @@ fn phone_diary(game: &mut Game, assets: &Assets, view: &mut HeroView, message: &
         }
     }
     let list_bar = Rect::new(a.list_bar.x, list.y, a.list_bar.w, list.h);
-    let row_h = (48.0 * k).max(text * 2.5);
-    let fits = ((list.h - 8.0 * k) / row_h).floor().max(1.0) as usize;
-    chrome::text_box_base(list);
-    swipe_rows(list, row_h);
-    if mouse_in(list.x, list.y, list.w, list.h) {
-        let w = wheel();
-        if w < 0.0 && view.list_scroll + fits < lines.len() {
-            view.list_scroll += 1;
-        } else if w > 0.0 {
-            view.list_scroll = view.list_scroll.saturating_sub(1);
+    if chronicle {
+        let step = (text * 1.5).round();
+        chronicle_list(game, view, &rows, ChronicleBox { text: list, frame: list, bar: list_bar, step, size: text, scale: k, phone: true });
+    } else {
+        let lines = lines_for(game, view.tab, &rows);
+        let row_h = (48.0 * k).max(text * 2.5);
+        let fits = ((list.h - 8.0 * k) / row_h).floor().max(1.0) as usize;
+        chrome::text_box_base(list);
+        swipe_rows(list, row_h);
+        if mouse_in(list.x, list.y, list.w, list.h) {
+            let w = wheel();
+            if w < 0.0 && view.list_scroll + fits < lines.len() {
+                view.list_scroll += 1;
+            } else if w > 0.0 {
+                view.list_scroll = view.list_scroll.saturating_sub(1);
+            }
         }
-    }
-    let picked_line = lines.iter().position(|l| *l == super::story::Line::Row(view.pick)).unwrap_or(0);
-    if key(KeyCode::Down) || key(KeyCode::Up) {
-        if picked_line < view.list_scroll {
-            view.list_scroll = picked_line;
-        } else if picked_line >= view.list_scroll + fits {
-            view.list_scroll = picked_line + 1 - fits;
+        let picked_line = lines.iter().position(|l| *l == super::story::Line::Row(view.pick)).unwrap_or(0);
+        if key(KeyCode::Down) || key(KeyCode::Up) {
+            if picked_line < view.list_scroll {
+                view.list_scroll = picked_line;
+            } else if picked_line >= view.list_scroll + fits {
+                view.list_scroll = picked_line + 1 - fits;
+            }
         }
-    }
-    view.list_scroll = view.list_scroll.min(lines.len().saturating_sub(fits));
-    scrollbar_always(list_bar, &mut view.list_scroll, fits, lines.len());
-    chrome::text_box_sides(list);
-    chrome::silver_frame(list, k.max(1.0));
-    let center = list.x + list.w / 2.0;
-    let room = list.w - 12.0 * k;
-    if rows.is_empty() {
+        view.list_scroll = view.list_scroll.min(lines.len().saturating_sub(fits));
+        scrollbar_always(list_bar, &mut view.list_scroll, fits, lines.len());
+        chrome::text_box_sides(list);
+        chrome::silver_frame(list, k.max(1.0));
+        let center = list.x + list.w / 2.0;
+        let room = list.w - 12.0 * k;
+        if rows.is_empty() {
+            legacy_metrics_if(true, || {
+                with_original_face(Face::Body, || {
+                    let note = super::story::empty_note(view.tab);
+                    let notes = wrap_cached(note, room, text);
+                    let mut y = list.center().y - notes.len() as f32 * text * 0.65;
+                    for l in &notes {
+                        chrome::shadow_centered(l, center, y, text, DIM);
+                        y += text * 1.3;
+                    }
+                })
+            });
+        }
         legacy_metrics_if(true, || {
-            with_original_face(Face::Body, || {
-                let note = super::story::empty_note(view.tab);
-                let notes = wrap_cached(note, room, text);
-                let mut y = list.center().y - notes.len() as f32 * text * 0.65;
-                for l in &notes {
-                    chrome::shadow_centered(l, center, y, text, DIM);
-                    y += text * 1.3;
-                }
-            })
-        });
-    }
-    legacy_metrics_if(true, || {
-        for (n, line) in lines.iter().enumerate().skip(view.list_scroll).take(fits) {
-            let ry = list.y + 4.0 * k + (n - view.list_scroll) as f32 * row_h;
-            let r = Rect::new(list.x + 2.0 * k, ry, list.w - 4.0 * k, row_h);
-            match *line {
-                super::story::Line::Heading(chapter) => {
-                    let heading = heading_text(game, view.tab, chapter);
-                    with_original_face(Face::Bold, || {
-                        let t = ellipsize(&heading, room, text);
-                        chrome::shadow_centered(&t, center, ry + row_h * 0.7, text, Color::from_rgba(235, 165, 75, 255));
-                    });
-                }
-                super::story::Line::Day(day) => {
-                    let t = day_heading(day);
-                    with_original_face(Face::Bold, || {
-                        let t = ellipsize(&t, room, text);
-                        chrome::shadow_centered(&t, center, ry + row_h * 0.7, text, Color::from_rgba(230, 230, 130, 255));
-                    });
-                }
-                super::story::Line::Row(idx) => {
-                    let picked = idx == view.pick;
-                    super::hub_view::row_paint(r, picked);
-                    let titles = with_original_face(Face::Title, || two_lines(&rows[idx].title, room, text));
-                    let step = text * 1.15;
-                    let first = ry + (row_h - titles.len() as f32 * step) / 2.0;
-                    with_original_face(Face::Title, || {
-                        for (i, t) in titles.iter().enumerate() {
-                            chrome::shadow_centered(t, center, first + i as f32 * step + text * 0.9, text, ink_color(Ink::Plain));
+            for (n, line) in lines.iter().enumerate().skip(view.list_scroll).take(fits) {
+                let ry = list.y + 4.0 * k + (n - view.list_scroll) as f32 * row_h;
+                let r = Rect::new(list.x + 2.0 * k, ry, list.w - 4.0 * k, row_h);
+                match *line {
+                    super::story::Line::Heading(chapter) => {
+                        let heading = heading_text(game, view.tab, chapter);
+                        with_original_face(Face::Bold, || {
+                            let t = ellipsize(&heading, room, text);
+                            chrome::shadow_centered(&t, center, ry + row_h * 0.7, text, Color::from_rgba(235, 165, 75, 255));
+                        });
+                    }
+                    super::story::Line::Day(day) => {
+                        let t = day_heading(day);
+                        with_original_face(Face::Bold, || {
+                            let t = ellipsize(&t, room, text);
+                            chrome::shadow_centered(&t, center, ry + row_h * 0.7, text, Color::from_rgba(230, 230, 130, 255));
+                        });
+                    }
+                    super::story::Line::Row(idx) => {
+                        let picked = idx == view.pick;
+                        super::hub_view::row_paint(r, picked);
+                        let titles = with_original_face(Face::Title, || two_lines(&rows[idx].title, room, text));
+                        let step = text * 1.15;
+                        let first = ry + (row_h - titles.len() as f32 * step) / 2.0;
+                        with_original_face(Face::Title, || {
+                            for (i, t) in titles.iter().enumerate() {
+                                chrome::shadow_centered(t, center, first + i as f32 * step + text * 0.9, text, ink_color(Ink::Plain));
+                            }
+                        });
+                        if mouse_in(list.x, ry, list.w, row_h) && clicked() && !picked {
+                            view.pick = idx;
+                            view.text_scroll = 0;
                         }
-                    });
-                    if mouse_in(list.x, ry, list.w, row_h) && clicked() && !picked {
-                        view.pick = idx;
-                        view.text_scroll = 0;
                     }
                 }
             }
-        }
-    });
-
-    // The picked entry under its heading (`QuestDescript`): its full text, scrolled by swipe, wheel
-    // and the bar.
-    let head_text = chrome::ui_text("Hero", "QuestDescript").filter(|_| ru).unwrap_or_else(|| tr(n_("Diary entry")).to_string());
-    if a.head.h > 0.0 {
-        with_original_face(Face::Title, || {
-            let t = ellipsize(&head_text, a.head.w, text);
-            chrome::shadow_centered(&t, a.head.center().x, a.head.bottom() - 4.0 * k, text, ACCENT);
         });
     }
-    let entry_bar = a.entry_bar;
-    let entry = Rect::new(a.entry.x, a.entry.y, a.entry.w - entry_bar.w - 4.0 * k, a.entry.h);
-    chrome::text_box_base(entry);
-    let line_h = (text * 1.15).round();
-    let body_room = entry.w - 16.0 * k;
-    let shown = ((entry.h - 12.0 * k) / line_h).floor().max(1.0) as usize;
-    swipe_rows(entry, line_h);
-    let entry_lines = legacy_metrics_if(true, || rows.get(view.pick).map_or_else(Vec::new, |row| diary_lines_of(row, view.tab, &reader_parts(view.tab, row), body_room, text, text, true)));
-    if mouse_in(entry.x, entry.y, entry.w, entry.h) {
-        let w = wheel();
-        if w < 0.0 && view.text_scroll + shown < entry_lines.len() {
-            view.text_scroll += 1;
-        } else if w > 0.0 {
-            view.text_scroll = view.text_scroll.saturating_sub(1);
+
+    if !chronicle {
+        // The picked entry under its heading (`QuestDescript`): its full text, scrolled by swipe, wheel
+        // and the bar.
+        let head_text = chrome::ui_text("Hero", "QuestDescript").filter(|_| ru).unwrap_or_else(|| tr(n_("Diary entry")).to_string());
+        if a.head.h > 0.0 {
+            with_original_face(Face::Title, || {
+                let t = ellipsize(&head_text, a.head.w, text);
+                chrome::shadow_centered(&t, a.head.center().x, a.head.bottom() - 4.0 * k, text, ACCENT);
+            });
         }
+        let entry_bar = a.entry_bar;
+        let entry = Rect::new(a.entry.x, a.entry.y, a.entry.w - entry_bar.w - 4.0 * k, a.entry.h);
+        chrome::text_box_base(entry);
+        let line_h = (text * 1.15).round();
+        let body_room = entry.w - 16.0 * k;
+        let shown = ((entry.h - 12.0 * k) / line_h).floor().max(1.0) as usize;
+        swipe_rows(entry, line_h);
+        let entry_lines = legacy_metrics_if(true, || rows.get(view.pick).map_or_else(Vec::new, |row| diary_lines_of(row, view.tab, &reader_parts(view.tab, row), body_room, text, text, true)));
+        if mouse_in(entry.x, entry.y, entry.w, entry.h) {
+            let w = wheel();
+            if w < 0.0 && view.text_scroll + shown < entry_lines.len() {
+                view.text_scroll += 1;
+            } else if w > 0.0 {
+                view.text_scroll = view.text_scroll.saturating_sub(1);
+            }
+        }
+        view.text_scroll = view.text_scroll.min(entry_lines.len().saturating_sub(shown));
+        scrollbar_always(entry_bar, &mut view.text_scroll, shown, entry_lines.len());
+        chrome::text_box_sides(entry);
+        chrome::silver_frame(entry, k.max(1.0));
+        legacy_metrics_if(true, || {
+            for (n, line) in entry_lines.iter().skip(view.text_scroll).take(shown).enumerate() {
+                let y = entry.y + 6.0 * k + n as f32 * line_h + text * 0.85;
+                draw_markup_row_face(&line.row, entry.x + 8.0 * k, y, body_room, line.size, line.face, Some(line.color));
+            }
+        });
     }
-    view.text_scroll = view.text_scroll.min(entry_lines.len().saturating_sub(shown));
-    scrollbar_always(entry_bar, &mut view.text_scroll, shown, entry_lines.len());
-    chrome::text_box_sides(entry);
-    chrome::silver_frame(entry, k.max(1.0));
-    legacy_metrics_if(true, || {
-        for (n, line) in entry_lines.iter().skip(view.text_scroll).take(shown).enumerate() {
-            let y = entry.y + 6.0 * k + n as f32 * line_h + text * 0.85;
-            draw_markup_row_face(&line.row, entry.x + 8.0 * k, y, body_room, line.size, line.face, Some(line.color));
-        }
-    });
 
     let pressed = button(a.close.x, a.close.y, a.close.w, a.close.h, tr("Close"), true);
     if let Some(r) = a.record {
@@ -2375,7 +2479,9 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     // list's title (`QuestList`) Razdor shows its tabs (asked for by the owner): the quests
     // under way (the original's diary), then the history of completed quests, rumours and
     // messages; Left / Right change them.
-    let mut list = column.list;
+    let chronicle = view.tab == DiaryTab::Chronicle;
+    // The chronicle has no entry box: its list runs down to the foot of the box (`entry0`).
+    let mut list = if chronicle { Rect::new(list0.x, list0.y, list0.w, entry0.bottom() - list0.y) } else { column.list };
     // The diary's tabs stand over the list as the original's (the summary row below them moves nothing).
     let tabs_y = column.list.y;
     // The chronicle's «Итоги» (the whole story so far) stands at the top of its list, over the
@@ -2428,128 +2534,135 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     if view.pick >= rows.len() {
         view.pick = if view.tab == DiaryTab::Chronicle { rows.len().saturating_sub(1) } else { 0 };
     }
-    if key(KeyCode::Down) && view.pick + 1 < rows.len() {
+    // The chronicle has no picked entry: Up and Down scroll its list (`chronicle_list`).
+    if !chronicle && key(KeyCode::Down) && view.pick + 1 < rows.len() {
         view.pick += 1;
         view.text_scroll = 0;
     }
-    if key(KeyCode::Up) && view.pick > 0 {
+    if !chronicle && key(KeyCode::Up) && view.pick > 0 {
         view.pick -= 1;
         view.text_scroll = 0;
     }
-    // A campaign's history runs over several maps: each map's entries under its title.
-    let lines = lines_for(game, view.tab, &rows);
-    chrome::text_box_base(list_box);
-    // The quest list's titles take the phone's text scale too (`display::text_for`); the boxes'
-    // own headings stay at the window's.
     let list_t = sheet_size(Face::Title, super::display::text_for(s, crate::ui::dialog::TEXT_REF));
-    // On a phone the list is drawn at its own size, as the entry below.
-    // A phone's row shrinks to fit the box down to the window's title size before it is cut.
     let row_floor = sheet_size(Face::Title, s).min(list_t);
     let row_h = (list_t * 1.25).round();
-    let fits = ((list.h - 8.0 * s) / row_h).floor().max(1.0) as usize;
-    swipe_rows(list, row_h);
-    if mouse_in(list.x, list.y, list.w, list.h) {
-        let w = wheel();
-        if w < 0.0 && view.list_scroll + fits < lines.len() {
-            view.list_scroll += 1;
-        } else if w > 0.0 {
-            view.list_scroll = view.list_scroll.saturating_sub(1);
-        }
-    }
-    // The picked entry kept in sight when the keys move it.
-    let picked_line = lines.iter().position(|l| *l == super::story::Line::Row(view.pick)).unwrap_or(0);
-    if key(KeyCode::Down) || key(KeyCode::Up) {
-        if picked_line < view.list_scroll {
-            view.list_scroll = picked_line;
-        } else if picked_line >= view.list_scroll + fits {
-            view.list_scroll = picked_line + 1 - fits;
-        }
-    }
-    view.list_scroll = view.list_scroll.min(lines.len().saturating_sub(fits));
-    scrollbar_always(list_bar, &mut view.list_scroll, fits, lines.len());
-    if let Some(n) = lines.iter().enumerate().skip(view.list_scroll).take(fits).find_map(|(n, line)| (*line == super::story::Line::Row(view.pick)).then_some(n)) {
-        let ry = list.y + 4.0 * s + (n - view.list_scroll) as f32 * row_h;
-        draw_rectangle(list.x + 2.0 * s, ry, list.w - 4.0 * s, row_h, Color::new(0.15, 0.15, 0.15, 0.6));
-    }
-    chrome::text_box_sides(list_box);
-    chrome::silver_frame(list_box, chrome::k().max(1.0));
-    if rows.is_empty() {
-        with_original_face(Face::Body, || chrome::shadow_centered(super::story::empty_note(view.tab), list.x + list.w / 2.0, list.y + list.h / 2.0, head * 0.9, DIM));
-    }
-    for (n, line) in lines.iter().enumerate().skip(view.list_scroll).take(fits) {
-        let ry = list.y + 4.0 * s + (n - view.list_scroll) as f32 * row_h;
-        let k = match *line {
-            super::story::Line::Day(day) => {
-                let text = day_heading(day);
-                let room = list.w - 12.0 * s;
-                let size = if phone { super::dt_font::legacy_metrics_if(true, || fit_row_size(list_t, row_floor, |z| with_original_face(Face::Bold, || measure(&text, z).width), room)) } else { list_t };
-                super::dt_font::legacy_metrics_if(phone, || with_original_face(Face::Bold, || chrome::shadow_centered(&ellipsize(&text, room, size), list.x + list.w / 2.0, ry + row_h * 0.78, size, Color::from_rgba(230, 230, 130, 255))));
-                continue;
+    if chronicle {
+        chronicle_list(game, view, &rows, ChronicleBox { text: list, frame: list_box, bar: list_bar, step: row_h, size: list_t, scale: s, phone: false });
+    } else {
+        // A campaign's history runs over several maps: each map's entries under its title.
+        let lines = lines_for(game, view.tab, &rows);
+        chrome::text_box_base(list_box);
+        // The quest list's titles take the phone's text scale too (`display::text_for`); the boxes'
+        // own headings stay at the window's.
+        // On a phone the list is drawn at its own size, as the entry below.
+        // A phone's row shrinks to fit the box down to the window's title size before it is cut.
+        let fits = ((list.h - 8.0 * s) / row_h).floor().max(1.0) as usize;
+        swipe_rows(list, row_h);
+        if mouse_in(list.x, list.y, list.w, list.h) {
+            let w = wheel();
+            if w < 0.0 && view.list_scroll + fits < lines.len() {
+                view.list_scroll += 1;
+            } else if w > 0.0 {
+                view.list_scroll = view.list_scroll.saturating_sub(1);
             }
-            super::story::Line::Heading(chapter) => {
-                let heading = heading_text(game, view.tab, chapter);
-                let room = list.w - 12.0 * s;
-                let size = if phone { super::dt_font::legacy_metrics_if(true, || fit_row_size(list_t, row_floor, |z| with_original_face(Face::Bold, || measure(&heading, z).width), room)) } else { list_t };
-                let head_text = super::dt_font::legacy_metrics_if(phone, || ellipsize(&heading, room, size));
-                super::dt_font::legacy_metrics_if(phone, || with_original_face(Face::Bold, || chrome::shadow_centered(&head_text, list.x + list.w / 2.0, ry + row_h * 0.78, size, Color::from_rgba(235, 165, 75, 255))));
-                continue;
-            }
-            super::story::Line::Row(k) => k,
-        };
-        let row = &rows[k];
-        let mut title = row.title.clone();
-        // Measured in the face it is drawn in (Benguiat's title): on a phone the row first shrinks
-        // to fit, and only then is a title that still does not fit cut.
-        let room = list.w - 12.0 * s;
-        let size = if phone { super::dt_font::legacy_metrics_if(true, || fit_row_size(list_t, row_floor, |z| with_original_face(Face::Title, || measure(&title, z).width), room)) } else { list_t };
-        while super::dt_font::legacy_metrics_if(phone, || with_original_face(Face::Title, || measure(&title, size).width)) > room && title.chars().count() > 3 {
-            title.pop();
         }
-        super::dt_font::legacy_metrics_if(phone, || with_original_face(Face::Title, || chrome::shadow_centered(&title, list.x + list.w / 2.0, ry + row_h * 0.78, size, ink_color(Ink::Plain))));
-        if mouse_in(list.x, ry, list.w, row_h) && clicked() && view.pick != k {
-            view.pick = k;
-            view.text_scroll = 0;
+        // The picked entry kept in sight when the keys move it.
+        let picked_line = lines.iter().position(|l| *l == super::story::Line::Row(view.pick)).unwrap_or(0);
+        if key(KeyCode::Down) || key(KeyCode::Up) {
+            if picked_line < view.list_scroll {
+                view.list_scroll = picked_line;
+            } else if picked_line >= view.list_scroll + fits {
+                view.list_scroll = picked_line + 1 - fits;
+            }
+        }
+        view.list_scroll = view.list_scroll.min(lines.len().saturating_sub(fits));
+        scrollbar_always(list_bar, &mut view.list_scroll, fits, lines.len());
+        if let Some(n) = lines.iter().enumerate().skip(view.list_scroll).take(fits).find_map(|(n, line)| (*line == super::story::Line::Row(view.pick)).then_some(n)) {
+            let ry = list.y + 4.0 * s + (n - view.list_scroll) as f32 * row_h;
+            draw_rectangle(list.x + 2.0 * s, ry, list.w - 4.0 * s, row_h, Color::new(0.15, 0.15, 0.15, 0.6));
+        }
+        chrome::text_box_sides(list_box);
+        chrome::silver_frame(list_box, chrome::k().max(1.0));
+        if rows.is_empty() {
+            with_original_face(Face::Body, || chrome::shadow_centered(super::story::empty_note(view.tab), list.x + list.w / 2.0, list.y + list.h / 2.0, head * 0.9, DIM));
+        }
+        for (n, line) in lines.iter().enumerate().skip(view.list_scroll).take(fits) {
+            let ry = list.y + 4.0 * s + (n - view.list_scroll) as f32 * row_h;
+            let k = match *line {
+                super::story::Line::Day(day) => {
+                    let text = day_heading(day);
+                    let room = list.w - 12.0 * s;
+                    let size = if phone { super::dt_font::legacy_metrics_if(true, || fit_row_size(list_t, row_floor, |z| with_original_face(Face::Bold, || measure(&text, z).width), room)) } else { list_t };
+                    super::dt_font::legacy_metrics_if(phone, || with_original_face(Face::Bold, || chrome::shadow_centered(&ellipsize(&text, room, size), list.x + list.w / 2.0, ry + row_h * 0.78, size, Color::from_rgba(230, 230, 130, 255))));
+                    continue;
+                }
+                super::story::Line::Heading(chapter) => {
+                    let heading = heading_text(game, view.tab, chapter);
+                    let room = list.w - 12.0 * s;
+                    let size = if phone { super::dt_font::legacy_metrics_if(true, || fit_row_size(list_t, row_floor, |z| with_original_face(Face::Bold, || measure(&heading, z).width), room)) } else { list_t };
+                    let head_text = super::dt_font::legacy_metrics_if(phone, || ellipsize(&heading, room, size));
+                    super::dt_font::legacy_metrics_if(phone, || with_original_face(Face::Bold, || chrome::shadow_centered(&head_text, list.x + list.w / 2.0, ry + row_h * 0.78, size, Color::from_rgba(235, 165, 75, 255))));
+                    continue;
+                }
+                super::story::Line::Row(k) => k,
+            };
+            let row = &rows[k];
+            let mut title = row.title.clone();
+            // Measured in the face it is drawn in (Benguiat's title): on a phone the row first shrinks
+            // to fit, and only then is a title that still does not fit cut.
+            let room = list.w - 12.0 * s;
+            let size = if phone { super::dt_font::legacy_metrics_if(true, || fit_row_size(list_t, row_floor, |z| with_original_face(Face::Title, || measure(&title, z).width), room)) } else { list_t };
+            while super::dt_font::legacy_metrics_if(phone, || with_original_face(Face::Title, || measure(&title, size).width)) > room && title.chars().count() > 3 {
+                title.pop();
+            }
+            super::dt_font::legacy_metrics_if(phone, || with_original_face(Face::Title, || chrome::shadow_centered(&title, list.x + list.w / 2.0, ry + row_h * 0.78, size, ink_color(Ink::Plain))));
+            if mouse_in(list.x, ry, list.w, row_h) && clicked() && view.pick != k {
+                view.pick = k;
+                view.text_scroll = 0;
+            }
         }
     }
-    let entry = column.entry;
-    let entry_bar = Rect::new(entry_bar0.x, entry.y, entry_bar0.w, entry.h);
-    let entry_box = Rect::new(entry.x, entry.y, entry_bar.x + entry_bar.w - entry.x, entry.h);
-    heading("QuestDescript", n_("Diary entry"), entry_box);
-    chrome::text_box_base(entry_box);
-    // Razdor's text size (the owner's request: phones' text too small): the entry's text
-    // larger, its titles with it; its box scrolls, so it takes any size.
-    // On a phone the text base is one px per dp (`display::text_for`, the 1.0.2 large-window
-    // scale), so the diary reads as large as the messages do; the desktop is unchanged.
-    // Under native metrics (the whole frame) the sheet fonts ignore the size passed, so the
-    // phone's diary (its wrap and its drawing) runs with the legacy metrics, which take it.
     let ts = super::display::text_for(s, crate::ui::dialog::TEXT_REF);
-    let body = diary_body_size(phone, ts);
-    let room = entry.w - 16.0 * s;
-    // On a phone the entry's title is as large as the quest list's titles (`list_t`).
     let entry_title = diary_title_size(phone, list_t, head, ts, s);
-    let lines = super::dt_font::legacy_metrics_if(phone, || {
-        rows.get(view.pick).map_or_else(Vec::new, |row| diary_lines(row, view.tab, phone, room, entry_title, body))
-    });
-    let line_h = (body * 1.15).round();
-    let shown = ((entry.h - 12.0 * s) / line_h).floor().max(1.0) as usize;
-    swipe_rows(entry, line_h);
-    if mouse_in(entry.x, entry.y, entry.w, entry.h) {
-        let w = wheel();
-        if w < 0.0 && view.text_scroll + shown < lines.len() {
-            view.text_scroll += 1;
-        } else if w > 0.0 {
-            view.text_scroll = view.text_scroll.saturating_sub(1);
+    if !chronicle {
+        let entry = column.entry;
+        let entry_bar = Rect::new(entry_bar0.x, entry.y, entry_bar0.w, entry.h);
+        let entry_box = Rect::new(entry.x, entry.y, entry_bar.x + entry_bar.w - entry.x, entry.h);
+        heading("QuestDescript", n_("Diary entry"), entry_box);
+        chrome::text_box_base(entry_box);
+        // Razdor's text size (the owner's request: phones' text too small): the entry's text
+        // larger, its titles with it; its box scrolls, so it takes any size.
+        // On a phone the text base is one px per dp (`display::text_for`, the 1.0.2 large-window
+        // scale), so the diary reads as large as the messages do; the desktop is unchanged.
+        // Under native metrics (the whole frame) the sheet fonts ignore the size passed, so the
+        // phone's diary (its wrap and its drawing) runs with the legacy metrics, which take it.
+        let body = diary_body_size(phone, ts);
+        let room = entry.w - 16.0 * s;
+        // On a phone the entry's title is as large as the quest list's titles (`list_t`).
+        let lines = super::dt_font::legacy_metrics_if(phone, || {
+            rows.get(view.pick).map_or_else(Vec::new, |row| diary_lines(row, view.tab, phone, room, entry_title, body))
+        });
+        let line_h = (body * 1.15).round();
+        let shown = ((entry.h - 12.0 * s) / line_h).floor().max(1.0) as usize;
+        swipe_rows(entry, line_h);
+        if mouse_in(entry.x, entry.y, entry.w, entry.h) {
+            let w = wheel();
+            if w < 0.0 && view.text_scroll + shown < lines.len() {
+                view.text_scroll += 1;
+            } else if w > 0.0 {
+                view.text_scroll = view.text_scroll.saturating_sub(1);
+            }
         }
+        scrollbar_always(entry_bar, &mut view.text_scroll, shown, lines.len());
+        chrome::text_box_sides(entry_box);
+        chrome::silver_frame(entry_box, chrome::k().max(1.0));
+        super::dt_font::legacy_metrics_if(phone, || {
+            for (n, line) in lines.iter().skip(view.text_scroll).take(shown).enumerate() {
+                let y = entry.y + 6.0 * s + n as f32 * line_h + body * 0.85;
+                draw_markup_row_face(&line.row, entry.x + 8.0 * s, y, room, line.size, line.face, Some(line.color));
+            }
+        });
     }
-    scrollbar_always(entry_bar, &mut view.text_scroll, shown, lines.len());
-    chrome::text_box_sides(entry_box);
-    chrome::silver_frame(entry_box, chrome::k().max(1.0));
-    super::dt_font::legacy_metrics_if(phone, || {
-        for (n, line) in lines.iter().skip(view.text_scroll).take(shown).enumerate() {
-            let y = entry.y + 6.0 * s + n as f32 * line_h + body * 0.85;
-            draw_markup_row_face(&line.row, entry.x + 8.0 * s, y, room, line.size, line.face, Some(line.color));
-        }
-    });
 
     // The phone's bottom buttons: «Весь список» (the whole tab in its reader) left, «Закрыть» between
     // (portrait), «Развернуть» (the picked entry in its reader) right; sideways «Весь список» stands
@@ -2763,6 +2876,24 @@ mod tests {
         let top = SafeArea { top: 80.0, ..SafeArea::default() };
         let r = super::diary_reader_rect((1080.0, 2400.0), top);
         assert_eq!(r.y, 88.0);
+    }
+
+    /// The chronicle's phone list takes the whole height below the tabs in both orientations: no
+    /// entry box, its head and entry empty, the list down to the close button (upright) or the
+    /// window's foot (sideways), and as wide as the window's inner width in both.
+    #[test]
+    fn the_chronicle_list_takes_the_window_below_the_tabs_in_both_orientations() {
+        let inner = Rect::new(0.0, 0.0, 1000.0, 2000.0);
+        for upright in [true, false] {
+            let a = super::phone_diary_areas(inner, 1.0, 1.0, upright, false, true);
+            assert_eq!((a.head.h, a.entry.h), (0.0, 0.0), "upright {upright}");
+            // The last row of tabs: upright the second of two rows (the fourth tab), sideways the one row.
+            let last_tabs_bottom = if upright { a.tabs[3].bottom() } else { a.tabs[0].bottom() };
+            assert_eq!(a.list.y, last_tabs_bottom + 6.0, "upright {upright}: the list starts under the tabs");
+            assert_eq!(a.list.w, inner.w - 16.0, "upright {upright}: the list spans the width");
+            let bottom = if upright { a.close.y - 6.0 } else { inner.bottom() - 8.0 };
+            assert_eq!(a.list.bottom(), bottom, "upright {upright}: the list runs to the foot");
+        }
     }
 
     /// The phone's bottom row: «Весь список», «Закрыть» and «Развернуть» side by side inside the
@@ -3103,11 +3234,11 @@ mod tests {
         // A phone's window at 2.75 px a dp: about 363 x 620 dp.
         let inner = Rect::new(10.0, 20.0, 1000.0, 1700.0);
         let k = 2.75;
-        let up = super::phone_diary_areas(inner, k, 1.0, true, false);
+        let up = super::phone_diary_areas(inner, k, 1.0, true, false, false);
         // The five tabs on top (three and two held upright), «Закрыть» 44 dp tall at the foot, all inside the frame.
         assert!(up.tabs[0].y == up.tabs[1].y && up.tabs[1].y == up.tabs[2].y && up.tabs[3].y == up.tabs[4].y && up.tabs[3].y > up.tabs[0].y);
         assert!(up.tabs.iter().all(|t| t.bottom() <= up.list.y));
-        let side_tabs = super::phone_diary_areas(inner, k, 1.0, false, false).tabs;
+        let side_tabs = super::phone_diary_areas(inner, k, 1.0, false, false, false).tabs;
         assert!(side_tabs.iter().all(|t| t.y == side_tabs[0].y));
         assert_eq!(up.close.h, 44.0 * k);
         assert!(up.close.bottom() <= inner.bottom() && up.close.y >= up.entry.bottom());
@@ -3117,7 +3248,7 @@ mod tests {
         let avail = up.close.y - 6.0 * k - up.list.y;
         assert!((up.list.h - 0.4 * avail).abs() <= 1.0);
         // Sideways: the list left, 40 % of the width, the entry right, both down to the window's pad.
-        let side = super::phone_diary_areas(inner, k, 1.0, false, false);
+        let side = super::phone_diary_areas(inner, k, 1.0, false, false, false);
         assert!(side.list.right() < side.entry.x);
         assert!((side.list.w - 0.4 * (inner.w - 22.0 * k)).abs() <= 1.0);
         assert_eq!(side.list.y, side.head.y);
