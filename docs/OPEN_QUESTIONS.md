@@ -13,7 +13,13 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   battle that starts at 7034 resolves with squad XP one or two lower than the keyframe (21 vs 19, and 21 vs 20 on
   three more) and the AI army's scores differ. The straight playback drifts at the same place, and disabling the
   per-frame `ReleaseUnshown` calls leaves the hash unchanged, so the cause is in the battle's resolution, not the
-  watch path. Not investigated further. (b) Seg 1 starts with a battle already pending (the restored start has
+  watch path. Narrowed (2026-11-17): battle 1 (5271–6365) replays move for move as the phone's
+  `razdor-play.log` shows it, but battle 2 starts from other HP: on the phone the Ополченец enters it at 38/50
+  (battle 1's damage, 20, less one heal of 8), in the playback at full HP, so battle 2's moves and XP shares
+  differ. The squad's HP in the playback is already full right after battle 1's `ResolveBattle` (6366) and stays
+  so to 7034: the difference is in how battle 1 is resolved and written back to the squad (a level-up's heal, an
+  after-battle medic heal, or the write-back of the hit points), not in battle 2. The phone's state right after
+  battle 1 is not in the record (no keyframe there). (b) Seg 1 starts with a battle already pending (the restored start has
   `foe` set, and its first records are the battle's `Begin`, `HeroAutoPlay` and `MoveCard` before the next
   `StartBattle` at index 874): nothing begins that battle, so the first battle act at index 138 has no battle. A
   pending battle at a segment start needs its own start record or a restore that begins it; the same record
