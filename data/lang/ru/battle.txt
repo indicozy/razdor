@@ -298,7 +298,7 @@ Take over (W) = Управлять (W)
 The AI plays both sides (W: take over) = ИИ играет за обе стороны (W — управлять самому)
 The AI moves your army... = ИИ ведёт вашу армию...
 
-# The leave-battle window (backlog 1607): «Отступить» before the first action; «Рестарт» (this battle
+# The leave-battle window (backlog 1607): «Отступить» at any moment the game allows it; «Рестарт» (this battle
 # again, and its arrangement) when the install has no text for it
 Retreat = Отступить
 Restart = Рестарт
@@ -386,4 +386,3 @@ hour = час
 Your enemy proved stronger than your army, and you lost this battle. = Враг оказался сильнее, и битва проиграна.
 You let your hero perish, and the game on this scenario cannot go on. = Герой погиб, и этот сценарий продолжить нельзя.
 # The check box of the arrangement after «Рестарт» (Razdor, 2026-11-15)
-Sits out this fight = Не участвует в этом бою

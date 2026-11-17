@@ -807,11 +807,6 @@ impl App {
                 self.dialogs.clear();
                 self.message = None;
                 self.screen = saves::battle(&mut game, (!self.test_play).then_some(&mut self.session));
-                // «Рестарт» opens the fight ready to arrange (backlog 1607): the player's cards move until
-                // his first action (an enemy card, Space, Q, W or Enter). The first battle start does not.
-                if let Screen::Battle(view) = &mut self.screen {
-                    view.set_rearranging(true);
-                }
                 self.game = Some(game);
             }
             Err(e) => self.message = Some(razdor::trf!("Cannot load: {e}.", e)),
@@ -841,7 +836,9 @@ impl App {
                     story::show(&game, &EventOutcome::Fired { event, message: true }, &mut self.dialogs);
                 }
                 self.screen = if game.foe.is_some() {
-                    Screen::Battle(Box::new(BattleView::new(game.start_battle())))
+                    // The leave window's «Отступить» where the game allows it (as `saves::battle`).
+                    let retreat = game.can_retreat();
+                    Screen::Battle(Box::new(BattleView::new(game.start_battle()).with_retreat(retreat)))
                 } else {
                     Screen::WorldMap
                 };

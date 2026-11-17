@@ -43,7 +43,7 @@ pub struct Playback {
 impl Playback {
     /// The records in `entries` (player actions are the driver's, not the rules'). A battle is
     /// deployed (waits for its first action, `Battle::start_play`) when its record shows that: a
-    /// `Begin`, a rearrangement or a sit-out, or a retreat, before the battle ends. A record without
+    /// `Begin`, a rearrangement or a sit-out before the battle ends (a retreat is no deployment by itself). A record without
     /// any of them is a battle begun at its start, as the game began them before the deployment step
     /// (and as the difftests' and the tests' battles still do); its checks compare that state.
     pub fn new(entries: &[Entry]) -> Playback {
@@ -76,9 +76,10 @@ impl Playback {
                         *deployed = true;
                     }
                 }
+                // A retreat undoes the battle: it is no deployment in itself (its recorded moves, if any, make one).
                 Input::Player(PlayerAction::RetreatBattle) => {
-                    if let Some((Some(n), _)) = open.take() {
-                        p.deploys.insert(n, true);
+                    if let Some((Some(n), deployed)) = open.take() {
+                        p.deploys.insert(n, deployed);
                     }
                 }
                 Input::Player(PlayerAction::ResolveBattle) => {

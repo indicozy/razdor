@@ -1940,3 +1940,46 @@ fn a_quick_battle_of_a_deployment_replays_to_the_same_state() {
     let played = super::play::play(start, &entries, 1.0 / 60.0).unwrap();
     assert_eq!(state_hash(&played), live, "the replay reaches the live state");
 }
+
+#[test]
+fn a_retreat_after_some_turns_replays_to_the_same_state() {
+    let c = Arc::new(Content::builtin());
+    let mut g = Game::new(c.clone(), HeroClass::Knight);
+    let here = g.tile();
+    let free = |g: &Game, t| g.world.map.passable(t) && g.world.location_at(t).is_none();
+    let from = g.world.map.grid.neighbours(here).find(|&n| free(&g, n)).unwrap();
+    let beside = g.world.map.grid.neighbours(here).find(|&n| n != from && free(&g, n)).unwrap();
+    let camp = g.world.index_of("Bandit camp");
+    g.world.spawn_gang(camp, beside);
+    g.foe = Some(Foe::Army(0));
+    g.back_to = Some(from);
+    let snap = Snapshot::take(&g).unwrap();
+    let shared = Shared::default();
+    hook::install_recorder(Box::new(shared.clone()));
+    let mut b = g.start_battle();
+    b.begin();
+    // The enemy's turns run after each of the player's steps, as the playback runs them (`run_enemy`).
+    let enemy_turns = |b: &mut crate::rules::battle::Battle, g: &mut Game| {
+        while b.outcome() == crate::rules::battle::Outcome::Ongoing && b.active().is_some_and(|id| b.fighters[id].team == crate::rules::battle::Team::Enemy) {
+            b.ai_step();
+            g.battle_write_back(b);
+        }
+    };
+    enemy_turns(&mut b, &mut g);
+    for _ in 0..3 {
+        if b.outcome() != crate::rules::battle::Outcome::Ongoing {
+            break;
+        }
+        b.hero_auto_step();
+        g.battle_write_back(&b);
+        enemy_turns(&mut b, &mut g);
+    }
+    assert!(g.retreat_battle(&b), "the retreat is offered mid-battle");
+    hook::take_recorder();
+    let live = state_hash(&g);
+    let entries = shared.0.borrow().clone();
+    assert!(entries.iter().any(|e| matches!(e.input, Input::Player(PlayerAction::RetreatBattle))), "the retreat is recorded");
+    let start = snap.restore(c.clone(), None, None).unwrap();
+    let played = super::play::play(start, &entries, 1.0 / 60.0).unwrap();
+    assert_eq!(state_hash(&played), live, "the replay reaches the live state");
+}

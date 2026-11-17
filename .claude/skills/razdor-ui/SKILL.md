@@ -95,7 +95,7 @@ from sizes) and test those; `patterns.md` lists the tests a settings row must ke
 Scenes and switches are listed at the top of `src/ui/snapshot.rs` (the source of truth). No scene
 for your state (a tab, a hover, a pop-up open, two overlays at once)? Add one: a branch in
 `try_stage`, or a `RAZDOR_SCENE_*` switch read in `stage`, and its line in the header comment.
-Examples: `RAZDOR_SCENE_DEPLOY` (the battle's deployment row), `RAZDOR_SCENE_HELP=<Row>` (a
+Examples: `RAZDOR_SCENE_BATTLE_EXIT` (the battle's leave window), `RAZDOR_SCENE_HELP=<Row>` (a
 settings row's «?» pinned), `RAZDOR_SNAPSHOT_FPS=1` with `RAZDOR_SNAPSHOT_DEBUG=1`. Then add the
 case to `tools/ui-regress/scenes.txt`, and a phone screen to `SCREENS` in
 `tools/ui-regress/mobile_ui.py`.

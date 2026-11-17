@@ -269,11 +269,10 @@ pub fn battle(game: &mut Game, session: Option<&mut super::session::Keeper>) -> 
     game.foe = foe;
     // The moment just before it, its foe pending, kept for «Рестарт» (this battle again).
     let state = save::meta_of(game, SaveKind::Auto, &name).ok().and_then(|m| save::encode(&m, game).ok().map(|b| (m, b)));
-    // Razdor's deployment (backlog 1607): the battle waits for the player's first action, with the
-    // leave window's «Отступить» where the game allows it. Read before the start, which
+    // The leave window's «Отступить» where the game allows it (backlog 1607). Read before the start, which
     // may move the armies onto their cells.
     let retreat = game.can_retreat();
-    let mut view = BattleView::deploying(game.start_battle(), retreat);
+    let mut view = BattleView::new(game.start_battle()).with_retreat(retreat);
     view.restart_state = state;
     Screen::Battle(Box::new(view))
 }
@@ -1672,8 +1671,8 @@ pub enum ExitChoice {
     Keys,
     /// Razdor's «Фото» (the game menu only): photo mode over the map (`ui::photo`).
     Photo,
-    /// Razdor's «Отступить» (the battle's leave window, before its first action, backlog 1607): the
-    /// battle ends with no losses. The battle view acts on it (`BattleView::frame`).
+    /// Razdor's «Отступить» (the battle's leave window, at any moment the game allows it, backlog 1607): the
+    /// battle is undone and the chronicle counts it lost. The battle view acts on it (`BattleView::frame`).
     Retreat,
 }
 
@@ -1694,8 +1693,8 @@ pub fn exit_window(game: &Game, assets: &Assets, asking: &mut bool) -> (Option<E
 }
 
 /// Esc in a battle: "Варианты выхода из битвы", the original's warning that a battle cannot
-/// be left for the map, and its choices: «Выйти в меню», «Рестарт» (this battle again, and with it
-/// the arrangement, backlog 1607), «Отступить» (before the first action, when `retreat`), «Отмена».
+/// be left for the map, and its choices: «Выйти в меню», «Рестарт» (this battle again), «Отступить»
+/// (when `retreat`, backlog 1607), «Отмена».
 /// Returns the choice and whether it was cancelled.
 pub fn battle_exit_dialog(asking: &mut bool, retreat: bool) -> (Option<ExitChoice>, bool) {
     // The window's scale for this screen, both its variants (`exit_scale`).
@@ -1763,7 +1762,7 @@ fn battle_exit_window(title: &str, warning: &str, asking: &mut bool, retreat: bo
         super::dt_font::with_face(face, || chrome::shadow_centered(l, tb.center().x, y, size, Color::from_rgba(255, 255, 155, 255)));
         y += line;
     }
-    // One row: «Выйти в меню», «Рестарт», «Отступить» (before the first action), on phones «Клавиши», «Отмена».
+    // One row: «Выйти в меню», «Рестарт», «Отступить» (when the game allows it), on phones «Клавиши», «Отмена».
     // «Выйти из игры» is the map's game menu's only.
     let phone = super::display::dp_px().is_some();
     let row = battle_exit_row(phone, (b3.0, b2.0, b1.0), retreat);
@@ -1918,7 +1917,7 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art:
         }
     }
     // «Выйти из игры» is the map's game menu's; the battle's leave window has «Выйти в меню», «Рестарт»
-    // and, before the first action, «Отступить» (backlog 1607).
+    // and «Отступить» where the game allows it (backlog 1607).
     let mut labels = Vec::new();
     let mut widths = Vec::new();
     if !battle {

@@ -35,7 +35,7 @@ open and the step animation has played, then calls `saves::battle` (`src/ui/save
    to the enemy, not into the battle);
 2. keeps an encoded copy with `foe` set as `BattleView::restart_state` (Razdor's «Рестарт»);
 3. calls `Game::can_retreat` (read before the start moves the armies), then `Game::start_battle`, and wraps the
-   result in `BattleView::deploying`: the battle waits for the player's first action (§2).
+   result in `BattleView::new(..).with_retreat(retreat)`: the battle begins at once (§2).
 
 Where «Отступить» comes from (Razdor's deviation, backlog 1607, on by default): `Game::back_to` is the cell the hero
 goes back to, set with the foe. A step onto an army sets it to the cell he stands on (he has not moved; `begin_walk`);
@@ -59,25 +59,17 @@ A save made while `foe` is set reopens the battle on load (`App::load` → `star
 Since the battle is written back after every action, the reopened battle starts from the HP
 the armies had at the save, not from the battle's own state (there is no battle in the save).
 
-## 2. Deploy and `begin`
+## 2. `begin`
 
-`Battle::new` leaves the battle **deploying**: the player may rearrange cards
-(`Battle::move_card`, `is_deploying`). The first action, or `auto_play_to_end`, calls
-`Battle::begin`; the screen's first action calls `Battle::start_play` instead, which begins it and records
-`BattleAct::Begin` (so a replay begins where the battle did). `BattleView::new` still begins at once (the custom
-battle, the replays of the watch screen, the snapshots); only `BattleView::deploying` keeps the battle waiting.
+`Battle::new` leaves the battle **deploying** (its cards may still be moved by `Battle::move_card`, and a
+`Battle::sit_out` takes a unit out of the fight). The screen never waits there: `BattleView::new` calls `Battle::begin` at once,
+for every battle (the campaign's, «Рестарт», the custom battle, the replays of the watch screen, the snapshots). Razdor's 1607
+deployment (the arrangement after «Рестарт», the check box «Не участвует в этом бою», the wait for a first action) was taken
+off the screen on 2026-11-17 (the owner's order). The rules keep `Battle::move_card`, `Battle::sit_out` and `Battle::start_play`
+only to play back records that have them (§8). `Battle::begin` is what the screen calls, and it records nothing (no `Begin`).
 `move_card` refuses a cell held by a unit that sits out (`set_bench`): those units do not move.
-Sitting out this fight (Razdor's, the owner's decision of 2026-11-15): while the arrangement is on (after «Рестарт»), a
-press on a player's unit picks it, and the left panel shows its check box «Не участвует в этом бою» (never for the hero;
-`BattleView::sit_out_control`). `Battle::sit_out(squad, out)` (recorded as `BattleAct::SitOut`, which `play.rs` treats as a
-deployment act: it does not begin the battle) moves the unit out of `fighters` into `Battle::sitting`: no turn, no target,
-no XP, no damage. Its cell becomes bench (so the start fix counts it, `begin`), `deployed` keeps its cell (so
-`settle_battle` returns it there with `keep_formation`), and the screen draws it dimmed in that cell. Ticked off, it returns
-in squad order, so the battle is the one it would have been. A permanent sit-out (`Unit::battle_disabled`) is always honoured
-in a live game (`Game::allow_unit_benching` defaults to true); a replay takes the flag its recording has (an old recording
-made with the retired setting off fights those units). `begin` first
-records the fighters' cells (`Battle::deployed`, by squad index), before its start fix: `settle_battle` returns the
-army to them with `keep_formation`, so the arrangement is the army's placement after the battle.
+`begin` first records the fighters' cells (`Battle::deployed`, by squad index), before its start fix: `settle_battle`
+returns the army to them with `keep_formation`, so the arrangement is the army's placement after the battle.
 
 `Battle::begin` then:
 - applies the window's formation fix: nobody in the player's front row → his back row moves
@@ -211,26 +203,17 @@ actor (or the unit whose action plays) `Current`; on the player's turn every own
 the hovered one `Aimed`; the AI's target while its action plays `Aimed` or `OwnTarget`. They
 are drawn over the portrait under the card's signs and pulse with the real clock.
 
-Before the first action (`BattleView::offering`: the screen offered the deployment and `is_deploying`) the battle
-window is as it was before the deployment: no extra row, and the strip keeps the battle's exit hint. The leave-battle
-window (Esc, or the red X; below) offers «Рестарт» and, before the first action when the game allows it
-(`BattleView::retreat_offered`), «Отступить» right after it. «Рестарт» (`ExitChoice::Restart`, with its question) plays
-this battle again from its start (`restart_battle` from `restart_state`): the new `BattleView` starts with the
-arrangement on (`set_rearranging(true)`, only on this path; a first battle start does not). While the arrangement is on,
-a press on one of the player's own cards picks it and a second press swaps or moves it (`rearrange_press`, the army
-window's grid press: `unit_drag::grid_press_in`, with the «Расстановка армии» setting), and a drag moves it
-(`unit_drag::press` and `update`); each move is `Battle::move_card`. The first action ends the arrangement: a click on
-an enemy card (`deploy_step`: `DeployStep::Begin`, as a card click began it before 1607), Space, Q (quick battle), W
-(watch) or Enter (quick battle while untouched). A press on the player's own card never begins the battle while the
-arrangement is on. «Отступить» (`ExitChoice::Retreat`) closes the window and the frame calls `Game::retreat_battle`,
-returning to the map.
+The leave-battle window (Esc, or the red X; below) offers «Рестарт» (`ExitChoice::Restart`: this battle again from its
+start, `restart_battle` from `restart_state`, as before 1607) and «Отступить» (`ExitChoice::Retreat`) where
+`BattleView::retreat_offered` says so: `with_retreat`, `Game::can_retreat` read before the start, at any moment of the battle
+(the owner's rule of 2026-11-17). «Отступить» closes the window and the frame calls `Game::retreat_battle`, which rewinds the
+battle (§6) and returns to the map. The battle view has no arrangement, no sit-out check box and no wait for a first action.
 
 Esc (or the red X) opens the leave-battle window (`saves::battle_exit_dialog(asking, retreat)`, laid out as
-4d3620 in the original's pixels): «Выйти в меню», «Рестарт», «Отступить» (before the first action), «Клавиши» (phones),
+4d3620 in the original's pixels): «Выйти в меню», «Рестарт», «Отступить» (when the game allows it), «Клавиши» (phones),
 «Отмена». «Выйти из игры» is the map's game menu's only. The battle window is not drawn while it is open, as the
 original hides it. `RAZDOR_SCENE_BATTLE_EXIT=1` snapshots it over any battle scene (`plain`: the fallback window
-without the install's picture); `RAZDOR_SCENE_DEPLOY=start|rearrange|pick|sitout` sets the battle before its first action
-(`rearrange`: the arrangement on, as after «Рестарт»; `pick`: a card picked in it).
+without the install's picture).
 
 ## 6. End of battle and return to the map
 
@@ -238,11 +221,14 @@ without the install's picture); `RAZDOR_SCENE_DEPLOY=start|rearrange|pick|sitout
 with `Surrender > 0` units gives up while both stand; its values become the winner's mana,
 `surrender_mana`) and the turn limit.
 
-«Отступить» (`Game::retreat_battle(&battle)`, only while the battle is deploying) skips all of this: no
-`resolve_battle`, no XP, no loot, no events. The foe is cleared, the army stays on the map with `ignore_until` 120
-minutes ahead (as an army that withdrew), the hero's route ends, and he goes back to `back_to` when no army or building
-holds that cell (else he stays). The units' HP and cells are untouched: the deployment is dropped with the battle, the
-write-back before it was an identity. Open: the 120 minutes (`docs/OPEN_QUESTIONS.md`).
+«Отступить» (`Game::retreat_battle(&battle)`, at any moment `Game::retreat_open` allows it, i.e. `can_retreat`) rewinds the
+battle. `Game::battle_undo`, taken by `start_battle`, holds the squad and the armies as the battle began; the retreat puts
+them back, so nobody died, no HP, cell or troop changed, and the write-back of the fight is undone with it. It skips all of
+the end of a battle: no `resolve_battle`, no XP, no loot, no events. The chronicle records one lost battle with no losses
+on either side (`chronicle_battle_retreat`: battles lost in «Итоги»), the only trace. The foe is cleared, the army stays on
+the map with `ignore_until` 120 minutes ahead (as an army that withdrew), the hero's route ends, and he goes back to
+`back_to` when no army or building holds that cell (else he stays). Open: the 120 minutes and the chronicle entry's place
+(`docs/OPEN_QUESTIONS.md`).
 
 `Game::resolve_battle` → `settle_battle` (`src/rules/game.rs`):
 - the formation is rebuilt from the battle grid (survivors keep their cells; the rest take
@@ -290,53 +276,11 @@ in `src/rules/ai.rs` (`fight`, `simulate`, cached) with `set_simulation`.
   rules.
 - The battle is written back after **every** action (`battle_write_back`); a crash or a load
   mid-battle depends on it. Enemy troops are matched by `battle_troops` order.
-- A deploying battle does not move before its first action: nothing calls `begin` for it but `start_play` (the
-  screen) or an auto-play (recorded). A replay decides it per battle from its record (`recording/hook.rs`
-  `Playback::new`, `playback_deploys`): a battle whose record has a `Begin`, a `MoveCard`/`SitOut` or a `RetreatBattle`
-  before it ends waits for its first action (the recorded `Begin` begins it); any other is begun at its start, as the
-  game began them before the deployment step and as the difftests' battles still do (`play.rs` `start_battle`). A quick
-  battle of a deployment records its `Begin` before `HeroAutoPlay`, so it counts as deployed. A deployed battle's
-  first act without a `Begin` still begins it after the enemy's turns (`play.rs` `battle_act`, the legacy path). The entry-point test (`every_entry_point_that_changes_the_game_records_or_is_listed`) keeps the
-  `Battle` and `Game` entries recorded.
-- Events decide whether a battle opens: only an event that stops on a window cancels it
-  (6928d9d: a silent repeating event on РК4 swallowed every attack).
-- `Foe::Army(i)` is an **index**; removing armies must shift it (`take_army`, `ai.rs`).
-- The pre-simulation runs on a clone with `interactive = false`, `god = false`; Community
-  globals (`PatchGlobals`, Hunger, Flock side blocks) outlive battles on purpose.
-- The original's bugs are kept unless a commit says "Razdor fixes the original's bug" in the
-  code comment (e.g. `end_check` surrender, `killable` wrong-side read, bleed sign).
-- Cards show stats against `at_start`; `shown_stats` is what the panel shows.
-- Visual: empty cells use `chrome::empty_cell` (`wb1`/`wb2` art); effects come from
-  `[BattleEffects]` (`chrome::battle_effect`, `av::battle_effect`).
-
-## 9. Parity checks
-
-- Unit tests: `src/rules/battle/tests.rs` (helpers `battle`, `with`, `in_building`,
-  `turn_of`, `to_round`, `bonus`), e.g. `auto_battles_terminate_deterministically_and_never_use_the_reserve`,
-  `hero_auto_battle_keeps_a_front_row_blesser_in_its_cell`, `real_fort_battle_pays_the_installs_xp_rate`.
-- Difftests against recordings of the original: `src/difftest/tests.rs`
-  (`rk1_battle_by_actions`, `rk1_day1_the_battle_is_written_back_after_every_action`), driven by
-  `tools/difftest/` (README there). Real-data tests need `RAZDOR_DT_DIR`.
-- The play log (`diag::play`) prints both sides and the whole battle log.
-
-## 10. Recipes
-
-**A new battle ability (Community bonus).** Add the variant to `Bonus` in `src/dt/data.rs`
-(its token in the name table and, for a Community one, in `COMMUNITY` in the exe's order);
-its player-facing name in `src/rules/items.rs` `bonus_name` and the Russian line in
-`data/lang/ru/battle.txt`; the rule where the spec puts it (`turn_bonus` for turn start,
-`option_at` for reach, `physical_damage`/`strike_damage` for damage, `on_hit`/`kill_check`
-for effects) behind `f.has(Bonus::X)`; a test with `bonus(id, Bonus::X, base)`.
-
-**A new spell effect in battle.** Battle magic is power × school: `magic_case` (hostile) and
-`friendly_case`; buffs are `Buff` via `bless_effect`/`curse_effect` (from `[GlobalOptions]`).
-World-map spells live in `src/rules/magic.rs` and reach battle only through unit stats/spell
-slots (`Fighter::spells`). Add the rule, a test, and the animation via `[BattleEffects]` if it
-needs its own effect.
-
-**A hint in the strip.** `BattleView::strip_text`; text through `tr`/`trf!` with a Russian
-line in `data/lang/ru/battle.txt`; prefer the original's own UI text (`chrome::ui_text`).
-
----
-Verify the references in this file: the script at the bottom of [battle-ai.md](battle-ai.md)
-checks both battle flow docs (`git grep` for every path, symbol and test named).
+- A battle begins at its start (`BattleView::new`). A replay decides it per battle from its record (`recording/hook.rs`
+  `Playback::new`, `playback_deploys`): a battle whose record has a `Begin`, a `MoveCard` or a `SitOut` before it ends waits
+  for its first action (the recorded `Begin` begins it); any other is begun at its start, as the game began them before 1607
+  and as the difftests' battles still do (`play.rs` `start_battle`). A retreat is no deployment by itself: a record with a
+  retreat and no moves plays from the battle's start. A quick battle of a deployment records its `Begin` before `HeroAutoPlay`,
+  so it counts as deployed. A deployed battle's first act without a `Begin` still begins it after the enemy's turns
+  (`play.rs` `battle_act`, the legacy path). The entry-point test (`every_entry_point_that_changes_the_game_records_or_is_listed`)
+  keeps the `Battle` and `Game` entries recorded.

@@ -38,7 +38,7 @@ Razdor plays the original game's scenarios using its original rules. Below is wh
 * **Backpack:** `Shift`+click equips an item or drinks a potion; `Shift`+click on an equipped item unequips it.
 * **Custom Battle:** any two armies outside of a campaign, with levels and items; the battle code can be copied to a string and pasted for another player.
 * **Quick Battle:** autobattle via `Q` or `Enter`; battle replay (`W`) with 1×, 2×, or 4× speed.
-* **Restart and Retreat** in the leave-battle window: start the battle again with the arrangement, or leave without losses, before the first move ([more](/razdor/wiki/en/tutorials/quick-battle/)).
+* **Restart and Retreat** in the leave-battle window: start the battle again, or leave it at any moment the game allows. The battle is undone, as if it had not been fought, but the chronicle counts it lost ([more](/razdor/wiki/en/tutorials/quick-battle/)).
 * **New Game:** campaigns are grouped into a single line; the list can be filtered and sorted; "Add map..." button.
 * **Experimental Scenario Rules:** sixteen toggles for new games; selections are remembered between games (see [Experimental Rules](/razdor/wiki/en/differences/experimental-rules/)).
 * **Save formation** in additional settings.

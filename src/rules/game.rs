@@ -232,6 +232,13 @@ pub enum Foe {
     Army(usize),
 }
 
+/// What a battle may change before it is settled: the squad and the armies as the battle began.
+#[derive(Debug)]
+pub(crate) struct BattleUndo {
+    squad: Vec<Unit>,
+    armies: Vec<Army>,
+}
+
 /// The whole game state. It is saved with serde (`rules::save`), except the content and the
 /// statics of the world and the event engine, which a load rebuilds from the scenario.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -463,6 +470,11 @@ pub struct Game {
     /// empty in saves made before it (the load starts it).
     #[serde(default)]
     pub chronicle: super::chronicle::Chronicle,
+    /// The battle under way's undo (`start_battle`): the squad and the armies as the battle began, so
+    /// «Отступить» puts them back (the owner's rule of 2026-11-17). Not saved: a save made in a battle
+    /// takes its undo again when the battle starts on load.
+    #[serde(skip)]
+    pub(crate) battle_undo: Option<BattleUndo>,
     /// The offer of the village the hero stands in, made on entering (`rules::economy`).
     #[serde(default)]
     pub(crate) offer: Option<(usize, VillageOffer)>,
@@ -843,6 +855,7 @@ impl Game {
             hero_name: None,
             journal: History::default(),
             chronicle: Default::default(),
+            battle_undo: None,
             offer: None,
             offer_roll: 0,
             offer_mana_due: 0,
@@ -2801,6 +2814,8 @@ impl Game {
         // A paused step (`tick_within`'s budget) finishes before the action reads the world,
         // as the screen does on a press: an action never sees a half-played step.
         self.finish_pause();
+        // The undo of «Отступить» (`retreat_battle`): the squad and the armies as the battle begins.
+        self.battle_undo = Some(BattleUndo { squad: self.squad.clone(), armies: self.world.armies.clone() });
         // The cells the army stands in now, before `Battle::begin`'s start fix moves its back
         // row forward (4d2141); `settle_battle` returns the units to them when `keep_formation`.
         self.formation_before_battle = Some(self.squad.iter().map(|u| u.slot).collect());
@@ -2945,20 +2960,27 @@ impl Game {
         self.back_to.is_some() && i < self.world.armies.len() && self.hero_building_defence() == 0 && self.army_home_defence(i) == 0
     }
 
-    /// «Отступить» (Razdor's, see [`Game::can_retreat`]): the battle ends before its first action,
-    /// with no losses, no experience, no loot and no change to either army; its victory and defeat
-    /// events do not run. The hero goes back to the cell he came from when no army or building
-    /// holds it now, else he stays where he is. The army he left stays on the map and does not
-    /// come at him for 120 minutes (the same as an army that withdrew, `resolve_battle`), and his
-    /// route ends here, so the same contact does not come again in this step. The units' cells stay
-    /// as the army had them before the battle, the deployment is dropped with the battle. Returns
-    /// false, and changes nothing, when the retreat is not offered or `battle` has begun.
+    /// «Отступить» (Razdor's, see [`Game::can_retreat`]), at any moment of the battle the game allows it
+    /// ([`Game::retreat_open`], the owner's rule of 2026-11-17). Everything rewinds to before the fight: the
+    /// squad and the armies are put back as the battle began (`battle_undo`), so nobody died, no experience,
+    /// no loot and no change to either army. The battle's only trace is a lost battle with no losses on
+    /// either side in the chronicle (battles lost). The hero goes back to the cell he came from when no army
+    /// or building holds it now, else he stays where he is. The army he left stays on the map and does not
+    /// come at him for 120 minutes (the same as an army that withdrew, `resolve_battle`), and his route ends
+    /// here, so the same contact does not come again in this step. Returns false, and changes nothing, when
+    /// the retreat is not offered.
     pub fn retreat_battle(&mut self, battle: &Battle) -> bool {
         let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::RetreatBattle);
-        if !battle.is_deploying() || !self.can_retreat() {
+        if !self.retreat_open(battle) {
             return false;
         }
         let (Some(Foe::Army(i)), Some(back)) = (self.foe, self.back_to.take()) else { return false };
+        let start = self.chronicle_battle_start();
+        self.chronicle_battle_retreat(start);
+        if let Some(undo) = self.battle_undo.take() {
+            self.squad = undo.squad;
+            self.world.armies = undo.armies;
+        }
         self.foe = None;
         self.battle_troops.clear();
         self.formation_before_battle = None;
@@ -2975,6 +2997,12 @@ impl Game {
         }
         crate::diag::play(&self.clock.label(), &format!("BATTLE retreat: the hero stands at {:?}", self.tile()));
         true
+    }
+
+    /// Whether «Отступить» may end `battle` now: the game allows the retreat (`can_retreat`) at any moment of
+    /// the battle (the owner's rule of 2026-11-17). The rule of when the button is offered is this function.
+    pub fn retreat_open(&self, _battle: &Battle) -> bool {
+        self.can_retreat()
     }
 
     /// Mana from the enemies' surrender: when every remaining enemy has `Surrender > 0`
@@ -2996,6 +3024,7 @@ impl Game {
     /// Then the scenario's events run (an army beaten); what they do waits in
     /// [`Game::drain_events`].
     pub fn resolve_battle(&mut self, battle: &Battle) -> BattleResult {
+        self.battle_undo = None;
         let _rec = crate::rules::recording::actions::scope(self, || crate::rules::recording::actions::PlayerAction::ResolveBattle);
         crate::diag::play(&self.clock.label(), &format!("BATTLE log:\n  {}\nBATTLE ends: {:?} after {} turns", battle.log.join("\n  "), battle.outcome(), battle.round));
         let start = self.chronicle_battle_start();
@@ -4026,13 +4055,15 @@ mod tests {
     }
 
     #[test]
-    fn a_retreat_is_refused_once_the_battle_has_begun() {
-        let (mut g, from) = caught_by_army();
+    fn a_retreat_is_refused_when_the_game_allows_none() {
+        // The retreat is offered mid-battle too (`retreat_open`); without a cell to go back to, it is not.
+        let (mut g, _from) = caught_by_army();
         let mut b = g.start_battle();
         b.begin();
+        g.back_to = None;
         let here = g.tile();
-        assert!(!g.retreat_battle(&b), "the first action has come");
-        assert_eq!((g.tile(), g.foe.is_some(), g.back_to), (here, true, Some(from)), "nothing changed");
+        assert!(!g.retreat_battle(&b), "no cell to go back to: no retreat");
+        assert_eq!((g.tile(), g.foe.is_some()), (here, true), "nothing changed");
     }
 
     #[test]
@@ -6236,5 +6267,31 @@ mod tests {
         g.gold = 1_000_000;
         let item = g.buy(0).unwrap();
         assert_eq!(g.chronicle.entries().filter(|e| e.kind == EntryKind::ArtefactBought { item }).count(), 1);
+    }
+
+    #[test]
+    fn a_retreat_after_some_turns_rewinds_both_armies_and_counts_one_lost_battle() {
+        use crate::rules::chronicle::EntryKind;
+        let (mut g, _from) = caught_by_army();
+        let squad_before = g.squad.clone();
+        let armies_before = g.world.armies.clone();
+        let mut b = g.start_battle();
+        b.begin();
+        for _ in 0..8 {
+            if b.outcome() != Outcome::Ongoing {
+                break;
+            }
+            b.ai_step();
+            g.battle_write_back(&b);
+        }
+        assert!(g.squad != squad_before || format!("{:?}", g.world.armies) != format!("{:?}", armies_before), "the battle changed something");
+        assert!(g.retreat_battle(&b), "the retreat is offered at any moment the game allows it");
+        assert_eq!(g.squad, squad_before, "the squad is as the battle began");
+        let mut want = armies_before;
+        want[0].ignore_until = g.world.armies[0].ignore_until;
+        assert_eq!(format!("{:?}", g.world.armies), format!("{:?}", want), "the armies are as the battle began (the army left stays off for a while)");
+        assert!(g.foe.is_none());
+        let fled = g.chronicle.entries().filter(|e| matches!(e.kind, EntryKind::Battle { won: false, own_losses: 0, foe_losses: 0, .. })).count();
+        assert_eq!(fled, 1, "a retreat is one lost battle with no losses on either side");
     }
 }

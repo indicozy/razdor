@@ -578,6 +578,14 @@ impl Game {
         (self.tile(), self.chronicle_foe(self.foe))
     }
 
+    /// A battle the player fled («Отступить», `Game::retreat_battle`): the battle is undone, so the entry
+    /// is a lost battle with no losses on either side (battles lost in «Итоги»).
+    pub(crate) fn chronicle_battle_retreat(&mut self, start: (Tile, Option<FoeRef>)) {
+        let at = self.chronicle_now();
+        let (cell, foe) = start;
+        self.chronicle.record(at, EntryKind::Battle { at: cell, foe, won: false, own_losses: 0, foe_losses: 0 });
+    }
+
     /// A battle of the player's ended (`Game::resolve_battle`): its entry, then the captures,
     /// the hero's level-ups and the loot the result reports.
     pub(crate) fn chronicle_battle(&mut self, start: (Tile, Option<FoeRef>), battle: &Battle, result: &BattleResult) {

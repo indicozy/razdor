@@ -1316,28 +1316,12 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                 hero.wage_kind = razdor::rules::content::WageKind::Leader;
                 game.squad[0] = hero;
             }
-            // `RAZDOR_SCENE_DEPLOY=start|rearrange|pick|sitout`: the battle before its first action (`rearrange`:
-            // the arrangement on, as after «Рестарт»; `pick`: a card picked; `sitout`: the picked card sits out
-            // this fight, its check box ticked). The hero stands where he is,
-            // so the leave window's «Отступить» is offered (backlog 1607).
-            if let Some(mode) = std::env::var("RAZDOR_SCENE_DEPLOY").ok().filter(|_| !end) {
-                game.back_to = Some(game.tile());
-                let retreat = game.can_retreat();
-                let mut view = BattleView::deploying(game.start_battle(), retreat);
-                view.set_rearranging(matches!(mode.as_str(), "rearrange" | "pick" | "sitout"));
-                // `pick` and `sitout`: the army's second card is picked (its gold outline).
-                view.set_rearr_pick(matches!(mode.as_str(), "pick" | "sitout").then_some(1));
-                if mode == "sitout" {
-                    view.set_sit_out_pick();
-                }
-                Screen::Battle(Box::new(view))
-            } else {
-                let mut battle = game.start_battle();
-                if end {
-                    battle.hero_auto_play_to_end();
-                }
-                Screen::Battle(Box::new(BattleView::new(battle)))
+            let retreat = game.can_retreat();
+            let mut battle = game.start_battle();
+            if end {
+                battle.hero_auto_play_to_end();
             }
+            Screen::Battle(Box::new(BattleView::new(battle).with_retreat(retreat)))
         }
         _ => return Err(format!("unknown scene {kind}")),
     };

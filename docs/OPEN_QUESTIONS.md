@@ -60,7 +60,7 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   withdrawal may not be the same rule. What would settle it: the original's `ignore_until` writers (ai.md) read against a
   recording of an army that loses sight of the hero. Until then the 120 minutes stays Razdor's.
 
-- **The deployment's labels on a phone held sideways** (2026-11-14, backlog 1607). The phone's deployment is a 2×2
+- **The deployment's labels on a phone held sideways** (2026-11-14, backlog 1607). Obsolete from 2026-11-17: the arrangement is off the battle screen (the owner's order). The phone's deployment is a 2×2
   grid (the owner's request); sideways the grid takes the column's width, about 122 dp, so each cell is 56-60 dp wide
   and 48 dp tall (one phone button high; the grid is two cells and a gap). The labels measure 5.7 sp (2400x1080, small) and 6.2 sp (3120x1440, big) at Large text, in one line
   without cutting; the upright ones 17-18 sp. To reach 12 sp on one line, «Быстрый бой (Q)» (110 dp wide at 12 sp)

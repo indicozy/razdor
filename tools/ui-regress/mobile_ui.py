@@ -164,12 +164,8 @@ SCREENS = [
     ("battle", "battle:РК1-Начало пути:0", {}),
     # The battle before its first action: «Рестарт» and «Отступить» (backlog 1607), and the
     # arrangement with its «Готово» (a card picked).
-    ("battle-deploy", "battle:РК1-Начало пути:0", {"RAZDOR_SCENE_DEPLOY": "start"}),
-    ("battle-arrange", "battle:РК1-Начало пути:0", {"RAZDOR_SCENE_DEPLOY": "pick"}),
     # «Не участвует в этом бою» (2026-11-15): the picked unit with its check box ticked (dimmed in its cell).
-    ("battle-sitout", "battle:РК1-Начало пути:0", {"RAZDOR_SCENE_DEPLOY": "sitout"}),
     # The leave-battle window before the first action (its second row: «Расставить», «Отступить») and after it.
-    ("battle-exit-deploy", "battle:РК1-Начало пути:0", {"RAZDOR_SCENE_DEPLOY": "start", "RAZDOR_SCENE_BATTLE_EXIT": "1"}),
     ("battle-exit", "battle:РК1-Начало пути:0", {"RAZDOR_SCENE_BATTLE_EXIT": "1"}),
     ("classes", "classes:РК1-Начало пути", {}),
     # The hero window of a map with a save slot («Продолжить» left of «Начать», the date line), and

@@ -29,7 +29,6 @@ use super::assets::Assets;
 use super::audio::{cue, Cue};
 use super::chrome::{self, shadow_centered, shadow_right, CellIcon, Skin, BLUE_TEXT, CREAM, GOLD, RED_TEXT};
 use super::dialog::Dialog;
-use super::unit_drag::{self, GridPress};
 use super::unit_sheet::{self, Sheet};
 use super::widgets::*;
 use super::window_layout;
@@ -78,26 +77,6 @@ struct Layout {
     formation: Formation,
     /// The stacked layout (a phone held upright).
     stacked: bool,
-}
-
-/// What a press does before the first action (backlog 1607): while the player arranges his army («Рестарт»),
-/// a press on his own card moves it and never begins the battle; any other card, the space key, Q, W and
-/// Enter begin it (`begin_play` ends the arrangement). Otherwise a card begins it, as before 1607.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DeployStep {
-    Rearrange,
-    Begin,
-    Nothing,
-}
-
-fn deploy_step(rearranging: bool, space: bool, own_card: bool, any_card: bool) -> DeployStep {
-    if rearranging && own_card {
-        DeployStep::Rearrange
-    } else if space || any_card {
-        DeployStep::Begin
-    } else {
-        DeployStep::Nothing
-    }
 }
 
 /// The stacked battle window's design width: 590 px, as the other stacked windows.
@@ -571,16 +550,8 @@ pub struct BattleView {
     pub paused: bool,
     /// A trailer shot's pace (`battle_speed`), times the game's animations; `None` outside a run.
     trailer_pace: Option<f32>,
-    /// The deployment is offered (`BattleView::deploying`): the leave window's «Отступить» (with
-    /// `retreat`, «Отступить», until the battle's first action (the owner's decision of
-    /// 2026-11-13, backlog 1607).
-    offer: bool,
+    /// The leave window offers «Отступить» (`with_retreat`, when the game allows the retreat; backlog 1607).
     retreat: bool,
-    /// The arrangement is on (after «Рестарт», `restart_battle`): the player's cards move by clicks or drags.
-    rearranging: bool,
-    /// The card picked in the arrangement: the player's unit's squad index (a fighter's or a unit
-    /// sitting out's), as the army window's selection. Squad indices stay put when the fighters change.
-    rearr_sel: Option<usize>,
 }
 
 /// A card's curse and blessing signs.
@@ -588,67 +559,6 @@ pub struct BattleView {
 struct Signs {
     curse: bool,
     bless: bool,
-}
-
-/// The label size of the arrangement's check box «Не участвует в этом бою»: the army window's own
-/// (16 px at Normal), on a phone 12.5 sp.
-fn sit_out_size(k: f32) -> f32 {
-    match super::display::dp_px() {
-        Some(dp) => 12.5 * dp,
-        None => 16.0 * k,
-    }
-}
-
-/// Its band in the left panel: at the panel's foot. Sideways, under the sheet (which stops above it
-/// during the arrangement, `sit_out_reserve`); held upright, in the picture column's foot, where the
-/// label wraps to the column's width (`checkbox_wrapped`), as the band's text runs beside it.
-fn sit_out_row(l: &Layout, size: f32) -> Rect {
-    let h = checkbox_tap_height(size, super::display::dp_px());
-    let p = l.panel;
-    if l.is_stacked() {
-        // 8 dp above the band's foot: the quick buttons under the band are 48 dp targets, and a tap
-        // band 2 dp from theirs reads as crowded (the mobile check, 2026-11-15).
-        let lift = super::display::dp_px().map_or(8.0 * l.k, |dp| 8.0 * dp);
-        Rect::new(p.x + 10.0 * l.k, p.bottom() - h - 6.0 * l.k - lift, p.w * 0.4 - 16.0 * l.k, h)
-    } else {
-        Rect::new(p.x + 10.0 * l.k, p.bottom() - h - 4.0 * l.k, p.w - 20.0 * l.k, h)
-    }
-}
-
-/// The height the sheet gives up to the row sideways during the arrangement (the row and a gap).
-fn sit_out_reserve(l: &Layout) -> f32 {
-    checkbox_tap_height(sit_out_size(l.k), super::display::dp_px()) + 8.0 * l.k
-}
-
-/// The check box on a phone held upright: the box and the label wrapped to the picture column's
-/// width (two lines at most), its tap area the whole band. As `checkbox_row_centred` otherwise.
-fn checkbox_wrapped(r: Rect, size: f32, label: &str, value: bool) -> Option<bool> {
-    let side = checkbox_side(size);
-    let (hover, _down, pressed) = button_state(r, true);
-    let b = checkbox_centred_box(r, size);
-    draw_rectangle(b.x, b.y, b.w, b.h, FIELD_BG);
-    draw_rectangle_lines(b.x, b.y, b.w, b.h, 1.0, if hover { INK } else { DIM });
-    if value {
-        let k = side / 18.0;
-        draw_line(b.x + 4.0 * k, b.y + 11.0 * k, b.x + 8.0 * k, b.y + 16.0 * k, 2.5 * k, ACCENT);
-        draw_line(b.x + 8.0 * k, b.y + 16.0 * k, b.x + 15.0 * k, b.y + 5.0 * k, 2.5 * k, ACCENT);
-    }
-    // Two lines by words (the label is a short phrase): `wrap` measures with the font's own widths,
-    // which do not match what the picture column shows at this size.
-    let words: Vec<&str> = label.split_whitespace().collect();
-    let half = words.len().div_ceil(2);
-    let lines = [words[..half].join(" "), words[half..].join(" ")];
-    let lines: Vec<&str> = lines.iter().map(String::as_str).filter(|l| !l.is_empty()).collect();
-    let lh = size * 1.15;
-    let top = r.y + r.h / 2.0 - lines.len() as f32 * lh / 2.0 + size * 0.8;
-    for (i, line) in lines.iter().enumerate() {
-        text_exact(line, r.x + side + 8.0, top + i as f32 * lh, size, INK);
-    }
-    if pressed {
-        claim();
-        return Some(!value);
-    }
-    None
 }
 
 impl BattleView {
@@ -795,22 +705,10 @@ impl BattleView {
         Self::unbegun(battle)
     }
 
-    /// The battle the player may still arrange (the owner's decision of 2026-11-13, backlog 1607):
-    /// it does not begin until his first action (`Battle::start_play`), so nothing moves before it.
-    /// The leave window offers «Отступить» until then, when `retreat`
-    /// (`Game::can_retreat`).
-    pub fn deploying(battle: Battle, retreat: bool) -> Self {
-        BattleView { offer: true, retreat, ..Self::unbegun(battle) }
-    }
-
-    /// The arrangement on or off (after «Рестарт»; the debug snapshot `RAZDOR_SCENE_DEPLOY=rearrange`).
-    pub fn set_rearranging(&mut self, on: bool) {
-        self.rearranging = on;
-    }
-
-    /// The card picked in the arrangement (the debug snapshot `RAZDOR_SCENE_DEPLOY=pick`).
-    pub fn set_rearr_pick(&mut self, fighter: Option<usize>) {
-        self.rearr_sel = fighter;
+    /// The leave window offers «Отступить» (backlog 1607): `retreat` is `Game::can_retreat` read before the start.
+    pub fn with_retreat(mut self, retreat: bool) -> Self {
+        self.retreat = retreat;
+        self
     }
 
     /// The view of a battle as it stands (begun or not): the screen's state at its start.
@@ -843,10 +741,7 @@ impl BattleView {
             feed: None,
             paused: false,
             trailer_pace: None,
-            offer: false,
             retreat: false,
-            rearranging: false,
-            rearr_sel: None,
         }
     }
 
@@ -909,8 +804,8 @@ impl BattleView {
     /// W: starts watching the AI play both sides, or stops and gives the player his side
     /// back (in a custom battle of AI against AI, the side below).
     fn toggle_watch(&mut self) {
-        // Watching is the battle's first action when it has not begun (the AI plays from there).
-        self.begin_play();
+        // A replayed battle still waiting for its recorded first action begins with it (`start_play`).
+        self.battle.start_play();
         if self.watching() {
             self.watch = false;
             if !self.control.contains(&Control::Player) {
@@ -1014,7 +909,6 @@ impl BattleView {
     fn quick_battle(&mut self) {
         self.fx = None;
         self.news = None;
-        self.end_rearrange();
         self.rest_max();
         if self.battle.max_ai() {
             let (mut b, globals) = (self.battle.clone(), patch_globals());
@@ -1211,23 +1105,9 @@ impl BattleView {
             return (false, false);
         }
         let ongoing = self.battle.outcome() == Outcome::Ongoing;
-        // The deployment (backlog 1607): the first click on a card or the space key begins the
-        // battle and plays as an action; while the player arranges, his presses move his cards.
+        // A replayed battle recorded with its deployment plays the deployment's moves first (`replay_deploy`).
         if self.feed.is_some() && self.battle.is_deploying() {
             self.replay_deploy();
-        }
-        if self.rearranging && !self.offering() {
-            self.end_rearrange();
-        }
-        if ongoing && !self.exiting && self.offering() {
-            let press = clicked();
-            let own_card = press && self.player_cell_under_mouse(l).is_some();
-            let any_card = press && self.cell_under_mouse(l).is_some();
-            match deploy_step(self.rearranging, key(KeyCode::Space), own_card, any_card) {
-                DeployStep::Rearrange => self.rearrange_press(l),
-                DeployStep::Begin => self.begin_play(),
-                DeployStep::Nothing => {}
-            }
         }
         // Esc opens the ways out, also while a strike or spell plays. The window opens on the
         // next frame, so the Esc that opened it does not also close it.
@@ -1315,172 +1195,10 @@ impl BattleView {
         }
     }
 
-    /// The deployment is offered: the screen offers it and the battle has not begun (its first
-    /// action has not come).
-    fn offering(&self) -> bool {
-        self.offer && self.battle.is_deploying()
-    }
-
-    /// «Отступить» is offered in the leave-battle window: before the first action, when the game allows
-    /// the retreat (backlog 1607). Nothing after the first action.
+    /// «Отступить» is offered in the leave-battle window at any moment of the battle, when the game allows
+    /// the retreat (`with_retreat`, backlog 1607).
     fn retreat_offered(&self) -> bool {
-        self.offering() && self.retreat
-    }
-
-    /// The player's first action of the battle: the deployment ends (`Battle::start_play`), and
-    /// the arrangement with it.
-    fn begin_play(&mut self) {
-        self.end_rearrange();
-        self.battle.start_play();
-    }
-
-    /// The arrangement is off; the grab of a card is let go.
-    fn end_rearrange(&mut self) {
-        self.rearranging = false;
-        self.rearr_sel = None;
-        unit_drag::cancel();
-    }
-
-    /// The player's formation cell under the pointer (`None` off the grid).
-    fn player_cell_under_mouse(&self, l: &Layout) -> Option<Slot> {
-        l.formation.slots().find(|&s| {
-            let p = l.cell_pos(Team::Player, s);
-            mouse_in(p.x, p.y, l.card.x, l.card.y)
-        })
-    }
-
-    /// A player's card moves in the deployment (`Battle::move_card`); a refused move changes nothing.
-    fn deploy_move(&mut self, from: Slot, to: Slot) {
-        if self.battle.move_card(from, to).is_ok() {
-            cue(Cue::CardMove);
-        }
-    }
-
-    /// A press in the arrangement (the owner's decision of 2026-11-13, backlog 1607): the army
-    /// window's grid press (`unit_drag::grid_press_in`, with the «Расстановка армии» setting). A unit
-    /// pressed is picked; a second press swaps it with the unit there, or moves it to a free cell
-    /// of the formation (a bench cell is refused). With dragging, a unit pressed may be dragged.
-    fn rearrange_press(&mut self, l: &Layout) {
-        if !clicked() {
-            return;
-        }
-        let Some(cell) = self.player_cell_under_mouse(l) else { return };
-        let pressed = self.squad_at(cell);
-        // A unit sitting out is no card to swap with: a press on it picks it, a press on another unit
-        // picks that one, and the picked unit is let go by a press on nothing.
-        let out = |s: Option<usize>| s.is_some_and(|s| self.is_out(s));
-        let press = if out(self.rearr_sel) || out(pressed) {
-            match pressed {
-                Some(p) if Some(p) != self.rearr_sel => GridPress::Select(p),
-                _ => GridPress::Deselect,
-            }
-        } else {
-            unit_drag::grid_press_in(unit_drag::controls(), self.rearr_sel, pressed)
-        };
-        match press {
-            GridPress::Swap { selected, .. } | GridPress::Slide(selected) => {
-                self.rearr_sel = None;
-                if let Some(from) = self.squad_slot(selected) {
-                    self.deploy_move(from, cell);
-                }
-            }
-            GridPress::Select(p) => {
-                self.rearr_sel = Some(p);
-                if unit_drag::controls().drags() {
-                    if let Some(i) = self.fighter_of(p) {
-                        let f = &self.battle.fighters[i];
-                        unit_drag::press(p, f.unit, (f.hp, f.stats.max_hp()), !f.alive());
-                    }
-                }
-            }
-            GridPress::Deselect | GridPress::Nothing => self.rearr_sel = None,
-        }
-    }
-
-    /// The drag of a card in the arrangement: it follows the pointer (drawn here), and a
-    /// release over a formation cell moves it there.
-    fn rearrange_drop(&mut self, l: &Layout, assets: &Assets) {
-        let cells: Vec<(Slot, Rect)> = l.formation.slots().map(|s| {
-            let p = l.cell_pos(Team::Player, s);
-            (s, Rect::new(p.x, p.y, l.card.x, l.card.y))
-        }).collect();
-        if let Some((unit, to)) = unit_drag::update(assets, &cells, l.card) {
-            if let Some(from) = self.squad_slot(unit) {
-                self.deploy_move(from, to);
-            }
-            self.rearr_sel = None;
-        }
-    }
-
-    /// The picked card of the arrangement is outlined in gold (a unit sitting out too: its cell).
-    fn rearrange_mark(&self, l: &Layout) {
-        let Some(slot) = self.rearr_sel.and_then(|s| self.squad_slot(s)) else { return };
-        let p = l.cell_pos(Team::Player, slot);
-        let k = l.k;
-        draw_rectangle_lines(p.x - 2.0 * k, p.y - 2.0 * k, l.card.x + 4.0 * k, l.card.y + 4.0 * k, 3.0 * k, GOLD);
-    }
-
-    /// The player's unit with squad index `squad`: a fighter, or a unit sitting out this fight.
-    fn squad_unit(&self, squad: usize) -> Option<&Fighter> {
-        self.battle.fighters.iter().chain(self.battle.sitting()).find(|f| f.team == Team::Player && f.squad_index == Some(squad))
-    }
-
-    fn squad_slot(&self, squad: usize) -> Option<Slot> {
-        self.squad_unit(squad).map(|f| f.slot)
-    }
-
-    /// The index in `fighters` of the player's fighter with squad index `squad` (not one sitting out).
-    fn fighter_of(&self, squad: usize) -> Option<usize> {
-        self.battle.fighters.iter().position(|f| f.team == Team::Player && f.squad_index == Some(squad))
-    }
-
-    fn is_out(&self, squad: usize) -> bool {
-        self.battle.sitting().iter().any(|f| f.squad_index == Some(squad))
-    }
-
-    /// The player's unit in `cell`, a fighter or one sitting out (its cell is bench).
-    fn squad_at(&self, cell: Slot) -> Option<usize> {
-        self.battle.fighters.iter().chain(self.battle.sitting()).find(|f| f.team == Team::Player && f.slot == cell && f.alive()).and_then(|f| f.squad_index)
-    }
-
-    /// The layout the left panel's sheet is drawn in: during the arrangement, sideways, it stops above
-    /// the check box row (`sit_out_reserve`), so the row never covers its text.
-    fn sheet_layout(&self, l: &Layout) -> Layout {
-        let mut sheet = *l;
-        if self.offering() && self.rearranging && !l.is_stacked() {
-            sheet.panel.h -= sit_out_reserve(l);
-        }
-        sheet
-    }
-
-    /// The unit picked in the arrangement, for the left panel.
-    fn picked_unit(&self) -> Option<&Fighter> {
-        self.squad_unit(self.rearr_sel?)
-    }
-
-    /// The check box «Не участвует в этом бою» in the left panel, for the unit picked in the
-    /// arrangement (the owner's decision of 2026-11-15, Razdor's; never for the hero). Ticked, the
-    /// unit sits out this fight (`Battle::sit_out`) and its card is dimmed in its cell; unticked, it
-    /// fights again. Drawn after the panel, so it is the panel's top layer.
-    fn sit_out_control(&mut self, l: &Layout) {
-        let Some(f) = self.picked_unit() else { return };
-        let Some(squad) = f.squad_index.filter(|_| !f.is_hero) else { return };
-        let value = self.is_out(squad);
-        let size = sit_out_size(l.k);
-        let row = sit_out_row(l, size);
-        let clicked = if l.is_stacked() { checkbox_wrapped(row, size, tr("Sits out this fight"), value) } else { checkbox_row_centred(row, size, tr("Sits out this fight"), value) };
-        if let Some(on) = clicked {
-            if self.battle.sit_out(squad, on) {
-                unit_drag::cancel();
-            }
-        }
-    }
-
-    /// The debug snapshot's sit-out (`RAZDOR_SCENE_DEPLOY=sitout`): the picked unit sits out.
-    pub fn set_sit_out_pick(&mut self) {
-        if let Some(s) = self.rearr_sel {
-            self.battle.sit_out(s, true);
-        }
+        self.retreat
     }
 
     /// The replayed battle's deployment: its moves and its `Begin` play as the recording has them,
@@ -1539,11 +1257,6 @@ impl BattleView {
                 super::sharp::session(|| {
                     self.close_clicked |= self.draw(&l, &battle_title(game), game.clock.total_minutes() as u64, assets);
                     self.controls(&l, over);
-                    if self.offering() && self.rearranging {
-                        self.rearrange_drop(&l, assets);
-                        self.rearrange_mark(&l);
-                        self.sit_out_control(&l);
-                    }
                     if l.hint_after_buttons() {
                         self.hint(&l);
                     }
@@ -1577,8 +1290,7 @@ impl BattleView {
                 (Some(choice), _) => {
                     self.exiting = false;
                     match choice {
-                        // «Отступить»: the battle ends before its first action and the map shows at once;
-                        // nothing of the battle is carried back (`Game::retreat_battle`).
+                        // «Отступить»: the battle is undone (`Game::retreat_battle`) and the map shows at once.
                         super::saves::ExitChoice::Retreat => {
                             if game.retreat_battle(&self.battle) {
                                 return Some(Screen::WorldMap);
@@ -1887,13 +1599,9 @@ impl BattleView {
                 }
             }
         }
-        // The left panel: the unit picked in the arrangement (it stays while its check box is used),
-        // else the hovered unit, else the one acting.
-        let sheet = self.sheet_layout(l);
-        if let Some(f) = self.picked_unit() {
-            self.draw_panel(&sheet, assets, f, false);
-        } else if let Some(id) = self.fighter_under_mouse(l).filter(|&i| self.fighter(i).alive()).or(active).or_else(|| b.fighters.iter().position(|f| f.is_hero)) {
-            self.draw_panel(&sheet, assets, self.fighter(id), b.active() == Some(id));
+        // The left panel: the unit hovered, else the one acting.
+        if let Some(id) = self.fighter_under_mouse(l).filter(|&i| self.fighter(i).alive()).or(active).or_else(|| b.fighters.iter().position(|f| f.is_hero)) {
+            self.draw_panel(l, assets, self.fighter(id), b.active() == Some(id));
         } else {
             chrome::parchment(l.column(), true);
         }
@@ -1938,12 +1646,6 @@ impl BattleView {
         let b = &self.battle;
         if self.end_shown() {
             return (tr("The battle is over").into(), GOLD);
-        }
-        if self.offering() {
-            // Before the first action the strip shows the battle's own hint for the player's turn
-            // (the exit key), as it did before the deployment (backlog 1607).
-            let own = (razdor::i18n::lang() == razdor::i18n::Lang::Ru).then(|| chrome::ui_text("Battle", "ExitHint")).flatten();
-            return (own.unwrap_or_else(|| tr("To leave the battle, press ESC").to_string()), EXIT_HINT_INK);
         }
         if let Some((line, _)) = &self.news {
             if !player_turn || self.fx.is_some() {
@@ -2532,70 +2234,11 @@ mod tests {
         assert!(view.battle.active().is_some(), "the first unit acts at once");
     }
 
-    #[test]
-    fn a_deploying_battle_is_offered_its_arrangement_and_retreat_until_its_first_action() {
-        let mut g = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
-        g.foe = Some(Foe::Garrison(g.world.index_of("Bandit camp")));
-        let mut view = BattleView::deploying(g.start_battle(), true);
-        assert!(view.battle.is_deploying() && view.offering(), "no deployment step has run yet");
-        assert!(view.battle.active().is_none(), "nothing moves before the first action");
-        // Watching is the first action too (the AI plays from there).
-        view.toggle_watch();
-        assert!(!view.battle.is_deploying() && !view.offering());
-        // A deployed view ends its arrangement with the first action.
-        let mut view = BattleView::deploying(g.start_battle(), false);
-        view.set_rearranging(true);
-        view.begin_play();
-        assert!(!view.offering() && !view.rearranging, "the arrangement ends with the battle");
-    }
-
     /// A garrison battle as the screen gets it before its first action.
     fn garrison_battle() -> Battle {
         let mut g = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
         g.foe = Some(Foe::Garrison(g.world.index_of("Bandit camp")));
         g.start_battle()
-    }
-
-    #[test]
-    fn retreat_is_offered_in_the_leave_window_only_before_the_first_action() {
-        // «Отступить» only where the game allows the retreat (`can_retreat`), and never after the first action.
-        assert!(BattleView::deploying(garrison_battle(), true).retreat_offered());
-        assert!(!BattleView::deploying(garrison_battle(), false).retreat_offered());
-        let mut view = BattleView::deploying(garrison_battle(), true);
-        view.begin_play();
-        assert!(!view.retreat_offered(), "nothing after the first action");
-        assert!(!BattleView::new(garrison_battle()).retreat_offered(), "a battle that has begun offers no retreat");
-    }
-
-    #[test]
-    fn while_arranging_only_an_own_card_moves_and_any_other_press_begins_the_battle() {
-        use super::DeployStep::*;
-        // After «Рестарт» (arranging on): a press on the player's own card moves it, never begins the battle.
-        assert_eq!(deploy_step(true, false, true, true), Rearrange);
-        // An enemy card (the first action, as before 1607), Space, Q / W / Enter (they begin it themselves).
-        assert_eq!(deploy_step(true, false, false, true), Begin);
-        assert_eq!(deploy_step(true, true, false, false), Begin);
-        // Nothing pressed: nothing happens.
-        assert_eq!(deploy_step(true, false, false, false), Nothing);
-    }
-
-    #[test]
-    fn without_arranging_a_card_begins_the_battle_as_before_1607() {
-        use super::DeployStep::*;
-        assert_eq!(deploy_step(false, false, true, true), Begin, "a click on the player's own card");
-        assert_eq!(deploy_step(false, false, false, true), Begin, "a click on an enemy card");
-        assert_eq!(deploy_step(false, true, false, false), Begin, "the space key");
-        assert_eq!(deploy_step(false, false, false, false), Nothing);
-    }
-
-    #[test]
-    fn the_arrangement_ends_with_the_battle_and_the_strip_keeps_the_exit_hint() {
-        let mut view = BattleView::deploying(garrison_battle(), true);
-        let before = view.strip_text(false, &[], &[]).0;
-        view.set_rearranging(true);
-        assert_eq!(view.strip_text(false, &[], &[]).0, before, "no arranging hint: the strip is as before 1607");
-        view.begin_play();
-        assert!(!view.rearranging, "the first action ends the arrangement");
     }
 
     #[test]
@@ -3023,5 +2666,20 @@ mod tests {
         set_hit_shake(true);
         assert_ne!(view.shake_offset(6.0), Vec2::ZERO);
         set_hit_shake(false);
+    }
+
+    #[test]
+    fn a_battle_begins_as_its_window_opens_with_no_arrangement() {
+        // Before 1607 and after: the first click, key or auto-play is an action; nothing waits for a first press.
+        let view = BattleView::new(garrison_battle());
+        assert!(!view.battle.is_deploying(), "the battle begins at once");
+        assert!(view.battle.active().is_some(), "the first unit acts at once");
+    }
+
+    #[test]
+    fn retreat_is_offered_at_any_moment_of_a_battle_the_game_allows_it() {
+        assert!(BattleView::new(garrison_battle()).with_retreat(true).retreat_offered());
+        assert!(!BattleView::new(garrison_battle()).with_retreat(false).retreat_offered());
+        assert!(!BattleView::new(garrison_battle()).retreat_offered(), "a battle the game gave no retreat");
     }
 }
