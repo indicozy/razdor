@@ -36,6 +36,7 @@ pub mod input;
 pub mod item_filter;
 pub mod item_pull;
 pub mod item_text;
+pub mod evo_tree;
 pub mod items_view;
 pub mod jukebox;
 pub mod keymap;
@@ -2165,6 +2166,10 @@ impl App {
                 if !events.is_empty() {
                     let _ = world_view::handle_events(g, events, &mut self.message, &mut self.dialogs);
                 }
+            }
+            // The development tree window (`evo_tree`) belongs to the army and the barracks: leaving them closes it.
+            if !matches!(next, Screen::Squad { .. } | Screen::Building(_)) {
+                evo_tree::close();
             }
             // The hero or army window closes (or gives way to the other): an item on the
             // pointer goes back into the pack's first empty cell (0x4b8d28 → 0x49a85c).

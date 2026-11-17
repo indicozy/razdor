@@ -196,6 +196,12 @@ Not possible. = Невозможно.
 The hero's characteristics and army = Характеристики героя и армия
 Until the next battle: {names} = До следующего боя: {names}
 Upgrade tree = Древо развития
+# The development tree window (the army pane's and the barracks' expand button; src/ui/evo_tree.rs)
+Development tree = Дерево развития
+Whole tree = Всё дерево
+Back to the line = К ветке
+selected = выбран
+can promote now = можно сейчас
 {name} drinks it: +{healed} hits. = {name} выпивает зелье: +{healed} жизни.
 {name} drinks it. The effect lasts until the next battle ends. = {name} выпивает зелье. Действие продлится до конца следующего боя.
 Dismiss = Распустить

@@ -97,7 +97,8 @@ hire offer paints its unit card (`recruit_panel`, a fresh level-1 unit of the ty
 tab column, lights its portrait green and puts `[Army]` line 8 (line 10 with none left) on the
 strip; the card stays until the pointer enters the hero's grid with nothing selected or a
 tab's place. With a unit selected, the hero's grid shows the card of the unit under the pointer.
-Recruits have no tooltip.
+Recruits have no tooltip. The card's top-left button opens that class's development tree window
+(`evo_tree`, app-and-ui.md).
 
 **Garrisons** (economy.md §2, ai.md §9.6). Only the player's castles and forts take one
 (`Location::takes_garrison`). The hero and named units are refused. A dead unit goes in and

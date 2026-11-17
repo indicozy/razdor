@@ -813,6 +813,21 @@ Input goes through `src/ui/input.rs` (mouse/keys with gamepad emulation from
 The map's F3 debug overlay (Razdor's, `world_view::draw_debug`) also tints every visible cell
 (`world_view::draw_walkable`, `walk_tint`): on foot green for passable (brighter on roads), red
 for impassable; aboard the ship blue for sailable, red otherwise, all faint so the map shows through.
+### The development tree window («Дерево развития»)
+
+A read-only window over the army screen and the barracks' hire tab, opened by the expand button
+(`evo_tree::pane_button` in the promotion pane's corner: top-right on the desktop, bottom-right on a
+phone where the portraits fill the top row; `evo_tree::hire_button`, the card's top-left corner). Both
+call `evo_tree::open` (`Host::Army` with the squad member, `Host::Barracks` with the offer's class). While
+it is open the screen below takes no input (`evo_tree::hold_input`, dropped before `evo_tree::overlay`
+draws the window last; the window's own Escape is swallowed). The graph is the install's `NextUnitN` links
+(`evo_tree::graph`, built once at open in `Model`); the layout is pure (`leaves`, `chain_to`, `line_start`,
+`line_layout`, `trunk_rows`, `line_model`, `radial`) and unit-tested on made-up graphs. The line starts at
+the highest ancestor-or-self with at most `LINE_COLS` (7) leaves; ancestors above it are crumbs; a trunk
+class (more) shows its options as rows, collapsed options as «+N» cards. «Всё дерево» opens the radial web
+at fit (zoom, pan, the focus's path gold); a tap there opens that class's line. Green «можно сейчас» is the
+army pane's own rule: `Unit::upgrade_tree`'s `ok` (level 2 or more, not the hero). The window never promotes.
+
 ### Maps and mods (the hub; a Razdor extra)
 
 A refused save (1552, `ui/lacking.rs`, `hub/save_mod.rs`): the load window's message box gets a mod button
