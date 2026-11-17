@@ -905,7 +905,9 @@ pub fn squad(
         let tu = game.squad[t].clone();
         let shown = tree_view(game, assets, t, &tu, content, promo.filter(|p| p.unit == t));
         // The pane's expand button: the tree window of this unit (`evo_tree`).
-        if super::evo_tree::pane_button(content) {
+        // Its title's centre (the title drawn above, 15 px at its baseline `head * 0.36`).
+        let title_mid = window_layout::point(win, 408.0, 40.0).y + (13.0 * k).round() * 0.36 - 15.0 * k * 0.35;
+        if super::evo_tree::pane_button(content, title_mid) {
             super::evo_tree::open(&game.content, super::evo_tree::Host::Army, Some(t), game.squad[t].def, false);
         }
         // Razdor's: the panel goes back to the unit when the pointer leaves the portrait, where

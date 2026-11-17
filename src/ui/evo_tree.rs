@@ -33,6 +33,7 @@ use super::display;
 use super::dt_font;
 use super::gestures::SwipeKind;
 use super::input;
+use super::window_layout;
 use super::items_view::class_wage;
 use super::unit_sheet;
 use super::widgets;
@@ -714,15 +715,18 @@ fn icon_button(r: Rect) -> bool {
     pressed
 }
 
-/// The army pane's expand button (`content` is the pane's rect; drawn after the pane). It sits in the
-/// top-right corner on the desktop. On a phone the pane's top row holds the portraits right to its edge,
-/// so the button goes to the bottom-right, where no portrait is (a press on a portrait still promotes).
-/// True when pressed.
-pub fn pane_button(content: Rect) -> bool {
-    let s = btn_size();
+/// The army pane's expand button. Drawn after the pane. Desktop and sideways: a 24 px icon at the right end
+/// of the pane's title row, centred on the title (`title_mid`, y in px), above the portraits. Upright phone:
+/// its 44 dp button in the pane's bottom-right corner, where no portrait is (the top row holds the portraits
+/// to the edge). A press on a portrait still promotes. True when pressed.
+pub fn pane_button(content: Rect, title_mid: f32) -> bool {
     let k = chrome::k();
-    let y = if display::dp_px().is_some() { content.y + content.h - s - 4.0 * k } else { content.y + 4.0 * k };
-    icon_button(Rect::new(content.x + content.w - s - 4.0 * k, y, s, s))
+    if window_layout::portrait() {
+        let s = btn_size();
+        return icon_button(Rect::new(content.x + content.w - s - 4.0 * k, content.y + content.h - s - 4.0 * k, s, s));
+    }
+    let s = 24.0 * k;
+    icon_button(Rect::new(content.x + content.w - s, title_mid - s / 2.0, s, s))
 }
 
 /// The hire card's button: the same tree icon in the card's top-left corner, the parchment beside the
@@ -1310,8 +1314,10 @@ fn line_view(c: &Content, model: &Model, assets: &Assets, a: Rect, focus: u32, r
     let pointer = Vec2::from(widgets::pointer());
     let inside = point_in(a, pointer);
     if !SCROLL_INIT.with(|s| s.get()) {
-        let at_focus = nodes.iter().find(|n| n.id == focus && !n.crumb).map(|n| n.top + n.size / 2.0);
-        SCROLL.with(|s| s.set(at_focus.map_or(0.0, |y| (y - vp.h / 2.0).clamp(0.0, range))));
+        // Open at the top (no scroll) and scroll only as far as the focus's card and name need to show:
+        // a tree that fits shows unscrolled, a taller one keeps the selected unit in view.
+        let focus_bottom = nodes.iter().find(|n| n.id == focus && !n.crumb).map(|n| n.top + n.hit_h);
+        SCROLL.with(|s| s.set(focus_bottom.map_or(0.0, |b| (b - vp.h).max(0.0)).clamp(0.0, range)));
         SCROLL_INIT.with(|s| s.set(true));
     }
     let mut scroll = SCROLL.with(|s| s.get()).clamp(0.0, range);
