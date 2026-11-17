@@ -16,7 +16,7 @@ use super::battle_start::BattleStart;
 use super::file::{read, ReplayFile, Segment};
 use super::header::ReplayHeader;
 use super::hook;
-use super::play::Player;
+use super::play::{needs_next_act, next_battle_act, Player};
 use super::snapshot::{recorded_state_hash, state_hash, Snapshot};
 use super::stream::{Entry, EngineInput, Input, PlayerAction};
 use crate::rules::battle::{patch_globals, set_patch_globals, Battle, Outcome, Team};
@@ -431,6 +431,8 @@ impl ReplayPlayer {
             }
             let here = self.place();
             let entry = self.segments[self.seg].entries[self.idx].clone();
+            // The battle act after this entry (a battle's start or act runs the computer's turns to it).
+            let next = if needs_next_act(&entry) { next_battle_act(&self.segments[self.seg].entries[self.idx + 1..]).cloned() } else { None };
             let player = self.player.as_mut().expect("a started game");
             if watch && matches!(entry.input, Input::Player(PlayerAction::StartBattle)) {
                 return match player.start_battle_for_view(&entry, left) {
@@ -444,6 +446,7 @@ impl ReplayPlayer {
                     Err(reason) => self.heal_from(here, reason),
                 };
             }
+            player.set_next_battle_act(next.as_ref());
             match player.apply_budget(&entry, left) {
                 Ok(true) => {
                     self.idx += 1;

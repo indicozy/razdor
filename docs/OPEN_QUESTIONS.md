@@ -8,18 +8,17 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
-- **Phone records of 1.5.2 still heal after the watch fixes** (2026-11-17, backlog 1662: 100 heals over the 19
-  records before the fix, 44 after; the newest `replay-1794859112996` has 9 before, 2 after). Three causes are left. (a) Seg 0, check 7241: the
-  battle that starts at 7034 resolves with squad XP one or two lower than the keyframe (21 vs 19, and 21 vs 20 on
-  three more) and the AI army's scores differ. The straight playback drifts at the same place, and disabling the
-  per-frame `ReleaseUnshown` calls leaves the hash unchanged, so the cause is in the battle's resolution, not the
-  watch path. Narrowed (2026-11-17): battle 1 (5271–6365) replays move for move as the phone's
-  `razdor-play.log` shows it, but battle 2 starts from other HP: on the phone the Ополченец enters it at 38/50
-  (battle 1's damage, 20, less one heal of 8), in the playback at full HP, so battle 2's moves and XP shares
-  differ. The squad's HP in the playback is already full right after battle 1's `ResolveBattle` (6366) and stays
-  so to 7034: the difference is in how battle 1 is resolved and written back to the squad (a level-up's heal, an
-  after-battle medic heal, or the write-back of the hit points), not in battle 2. The phone's state right after
-  battle 1 is not in the record (no keyframe there). (b) Seg 1 starts with a battle already pending (the restored start has
+- **Phone records of 1.5.2 still heal after the watch fixes** (2026-11-17, backlog 1662). Over the 19 records
+  the watching pass that skips every battle heals 43 times on `main` and 36 now (the straight pass heals fewer
+  on five files and more on none); `replay-1794859112996` has 1 heal left, cause (b). (a) is fixed: the screen
+  records each computer turn it plays itself as `hero_auto_step`, and the playback and the watching view played
+  that turn a second time with the AI, so the battle's squad ended with other HP (Рыцарь 79, Ополченец 50 where
+  the phone has 80 and 38). The rule is in `docs/flows/replays.md` ("The computer's turns"); seg 0 of
+  `replay-1794859112996` has no heal in the straight, skipped or fully watched pass, and check 7241 passes.
+  The note that blamed the battle's resolution was wrong. (d) The fully watched pass of `replay-1794749859526`
+  stops at battle 5 with an empty feed on a player's turn (`view_battle` in the tests: the view has a turn the
+  record has no act for). Not investigated; the straight and skipped passes of that file still heal 8 times.
+  (b) Seg 1 starts with a battle already pending (the restored start has
   `foe` set, and its first records are the battle's `Begin`, `HeroAutoPlay` and `MoveCard` before the next
   `StartBattle` at index 874): nothing begins that battle, so the first battle act at index 138 has no battle. A
   pending battle at a segment start needs its own start record or a restore that begins it; the same record

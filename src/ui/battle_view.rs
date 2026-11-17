@@ -22,6 +22,7 @@ use razdor::av::Echo;
 use razdor::rules::content::{HeroClass, ItemId, Stat};
 use razdor::rules::custom::{Control, Session};
 use razdor::rules::recording::actions::{apply_battle, BattleAct};
+use razdor::rules::recording::play::{plays_turn, recorded_max_move};
 use razdor::rules::formation::{Formation, Row, Slot};
 use razdor::rules::game::{BattleResult, Foe, Game};
 
@@ -951,9 +952,31 @@ impl BattleView {
     /// is chosen, else the quick battle's step ([`Battle::hero_auto_step`]), so a watched
     /// battle plays exactly as the instant one.
     fn ai_move(&mut self) -> Option<Step> {
-        let step = if self.max_plays() { self.max_move()? } else { self.battle.hero_auto_step() };
+        // A replayed battle's computer turn that the record plays itself (`plays_turn`) is the
+        // recorded act, not the AI's: the same rule as the playback's `run_enemy`. A recorded
+        // «Максимум» move of this turn comes first.
+        let step = if self.feed_plays_turn() {
+            match self.feed.as_mut().and_then(VecDeque::pop_front) {
+                Some(BattleAct::HeroAutoStep) => self.battle.hero_auto_step(),
+                Some(act) => {
+                    apply_battle(&mut self.battle, &act);
+                    None
+                }
+                None => None,
+            }
+        } else if self.max_plays() {
+            self.max_move()?
+        } else {
+            self.battle.hero_auto_step()
+        };
         self.note_log();
         step
+    }
+
+    /// Whether the replayed battle's next recorded act plays the computer's turn (`plays_turn`), and no
+    /// «Максимум» move is recorded for it.
+    fn feed_plays_turn(&self) -> bool {
+        self.feed.as_ref().and_then(VecDeque::front).is_some_and(plays_turn) && !(self.battle.max_ai() && recorded_max_move(&self.battle))
     }
 
     /// Razdor's «Максимум» plays the unit to act: chosen, and the computer plays its side

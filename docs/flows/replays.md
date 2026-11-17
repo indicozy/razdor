@@ -233,8 +233,37 @@ with its place. A music change is drawn where its record is (`Player::apply`'s `
 A file plays segment by segment: each starts from its own snapshot (`Snapshot::from_bytes(..).restore`)
 and plays its entries; a load's segment starts from the state the load gave.
 
+### The computer's turns in a recorded battle
+
+The screen plays a computer turn of a battle that is not «Максимум» with `Battle::hero_auto_step`
+(`BattleView::ai_move`), and that call records a `BattleAct::HeroAutoStep`; a «Максимум» move the
+screen could not get (`MaxPoll::Failed`) is played the same way. So a recorded battle holds the
+computer's turns as acts. Such an act IS the turn: the playback (`Player::run_enemy`) and the
+watching view apply it at the turn and run no AI for it. Playing the AI as well played every such
+turn twice (the 1662 phone records: the squad ended with other HP and XP).
+
+The rule, at a computer's turn (an enemy unit is active, or in the watching view the side its AI
+would play): if the next recorded battle act is `HeroAutoStep`, `HeroAutoPlay`, `MaxPlay` or
+`ForceEnd` (`play::plays_turn`), that act is the turn. The next act skips the checks, the «Максимум»
+moves and the other records, and stops at the battle's span end (`next_battle_act`). In a «Максимум»
+battle a recorded move for the turn (`play::recorded_max_move`) comes first: the thinker takes it,
+and a turn with no record is not searched, since a search there would start a real one. Otherwise
+the AI plays the turn as before: a battle recorded with the enemy unrecorded (the tests' drivers)
+keeps its AI turns. The AI path plans an enemy as `hero_auto_step` does (`plan(hero)` changes only
+the player's units), so the same turn results either way.
+
+The hint reaches the playback by `Player::set_next_battle_act`, which `play::play` and `watch.rs`
+`step` set for a battle's start and each battle act. The watching view's `ai_move` reads the feed's
+front. A bulk act (`HeroAutoPlay`, `MaxPlay`, `ForceEnd`) on a computer turn has no animation, as on
+the player's turn.
+
 ## What the tests pin
 
+- `a_battle_whose_computer_turns_the_screen_recorded_replays_each_turn_once`: a battle whose computer
+  turns are recorded as `hero_auto_step` (the screen's record) plays straight, skipped (budget 0) and
+  fully watched (`view_battle` with `usize::MAX`, every act played by the view) to the live final
+  state with no heals; the record holds one such act per computer turn. Without the rule the full view
+  ends with acts left over. The demo game, no install needed.
 - `recording_leaves_the_states_and_the_game_alone`: a session with recording on gives the states of
   the same session with it off, and the same game bytes (the save's meta differs only by its place).
 - `a_recorded_game_plays_back_to_the_same_states_each_day`: a 3-day session with «Максимум» and a

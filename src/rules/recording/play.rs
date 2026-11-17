@@ -22,6 +22,42 @@ const MAX_FRAMES: u64 = 4_000_000;
 /// Battle steps a playback may take to reach the player's next turn.
 const MAX_BATTLE_STEPS: usize = 20_000;
 
+/// Whether a recorded battle act plays a computer turn itself: the hero's auto-step (`hero_auto_step`),
+/// the rest of the battle by the hero's rules or by «Максимум», or the forced end. The screen records
+/// these for the computer's turns it plays itself (`BattleView::ai_move`, a «Максимум» move it failed
+/// to get), so such a record IS the computer's turn: the playback applies it and runs no AI for that
+/// turn (`run_enemy`). A battle recorded without them (the tests' drivers play the enemy unrecorded)
+/// keeps the AI's turns.
+pub fn plays_turn(act: &BattleAct) -> bool {
+    matches!(act, BattleAct::HeroAutoStep | BattleAct::HeroAutoPlay | BattleAct::MaxPlay | BattleAct::ForceEnd { .. })
+}
+
+/// The next recorded battle act after the entry before `entries`: the first `Battle` act, skipping the
+/// other records (the checks, the «Максимум» moves, the music draws), and none when the battle's span
+/// ends first (its `StartBattle`, `ResolveBattle` or `RetreatBattle`).
+pub fn next_battle_act(entries: &[Entry]) -> Option<&BattleAct> {
+    for e in entries {
+        match &e.input {
+            Input::Player(PlayerAction::StartBattle | PlayerAction::ResolveBattle | PlayerAction::RetreatBattle) => return None,
+            Input::Player(PlayerAction::Battle(act)) => return Some(act),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Whether the entry takes the battle's next act as its hint (`Player::set_next_battle_act`): only a
+/// battle's start and its acts run the computer's turns.
+pub fn needs_next_act(e: &Entry) -> bool {
+    matches!(e.input, Input::Player(PlayerAction::StartBattle | PlayerAction::Battle(_)))
+}
+
+/// Whether the playback holds a recorded «Максимум» move for the battle's decision now: the thinker
+/// takes it (`MaxThinker::poll`) instead of searching, which a turn with no record would start.
+pub fn recorded_max_move(b: &Battle) -> bool {
+    hook::playback_max(b.ordinal, b.decisions).is_some()
+}
+
 /// How a battle the view played ends in the stream: its resolve, or its retreat.
 #[derive(Clone, Copy)]
 enum Ending {
@@ -40,11 +76,21 @@ pub struct Player {
     frames: u64,
     /// The events the frames and the recorded actions raised, taken by the screen (`take_events`).
     events: Vec<Event>,
+    /// The battle act the record has after the entry about to be applied (`next_battle_act`, set by the
+    /// caller with `set_next_battle_act`): a computer turn that act plays itself is that act's (`plays_turn`).
+    next: Option<BattleAct>,
 }
 
 impl Player {
     pub fn new(game: Game, dt: f32) -> Player {
-        Player { game, battle: None, music_pick: WORLD_THEME, dt, frames: 0, events: Vec::new() }
+        Player { game, battle: None, music_pick: WORLD_THEME, dt, frames: 0, events: Vec::new(), next: None }
+    }
+
+    /// The battle act the record has after the entry the next `apply` / `apply_budget` applies (`None`
+    /// when none). The caller sets it for a battle's start and its acts (`needs_next_act`); a retry of
+    /// a budgeted entry sets it again, the same.
+    pub fn set_next_battle_act(&mut self, next: Option<&BattleAct>) {
+        self.next = next.cloned();
     }
 
     /// The game at its recorded place: time runs (frames of `dt`) until the game stands at the end
@@ -178,7 +224,8 @@ impl Player {
                 }
                 let b = self.start_battle();
                 self.battle = Some((b, MaxThinker::new(Team::Enemy)));
-                self.run_enemy()?;
+                let next = self.next.clone();
+                self.run_enemy(next.as_ref())?;
                 Ok(true)
             }
             Input::Player(PlayerAction::ResolveBattle) => {
@@ -190,7 +237,8 @@ impl Player {
                 Ok(true)
             }
             Input::Player(PlayerAction::Battle(act)) => {
-                self.battle_act(act)?;
+                let next = self.next.clone();
+                self.battle_act(act, next.as_ref())?;
                 Ok(true)
             }
             Input::Player(PlayerAction::RetreatBattle) => {
@@ -238,9 +286,9 @@ impl Player {
 
     fn give_back(&mut self, b: Battle, rest: &[BattleAct], ending: Ending) -> Result<(), String> {
         self.battle = Some((b, MaxThinker::new(Team::Enemy)));
-        self.run_enemy()?;
-        for act in rest {
-            self.battle_act(act)?;
+        self.run_enemy(rest.first())?;
+        for (i, act) in rest.iter().enumerate() {
+            self.battle_act(act, rest.get(i + 1))?;
         }
         let (b, _) = self.battle.take().ok_or("a battle to end, none under way")?;
         match ending {
@@ -265,27 +313,35 @@ impl Player {
         self.music_pick = pick;
     }
 
-    /// One recorded action of the player's battle, then the enemy's turns. A battle recorded before
-    /// the deployment step has no `Begin`: its first action began it, after the enemy's turns that
-    /// came before it (the old start, `run_enemy` first).
-    fn battle_act(&mut self, act: &BattleAct) -> Result<(), String> {
+    /// One recorded action of the player's battle, then the enemy's turns up to the next recorded
+    /// act (`next`). A battle recorded before the deployment step has no `Begin`: its first action
+    /// began it, after the enemy's turns that came before it (the old start, `run_enemy` first).
+    fn battle_act(&mut self, act: &BattleAct, next: Option<&BattleAct>) -> Result<(), String> {
         // A deployment's own acts (the arrangement, the sit-outs) do not begin it.
         let legacy = self.battle.as_ref().is_some_and(|(b, _)| b.is_deploying() && !matches!(act, BattleAct::Begin | BattleAct::MoveCard { .. } | BattleAct::SitOut { .. }));
         if legacy {
             if let Some((b, _)) = self.battle.as_mut() {
                 b.begin();
             }
-            self.run_enemy()?;
+            self.run_enemy(Some(act))?;
         }
         let (b, _) = self.battle.as_mut().ok_or("a battle's action, none under way")?;
         apply_battle(b, act);
-        self.run_enemy()
+        self.run_enemy(next)
     }
 
     /// The enemy's turns, as the screen plays them between the player's actions: «Максимум»'s
     /// recorded moves where the battle is set to it, the battle AI elsewhere. Stops at the
     /// player's turn or at the end.
-    fn run_enemy(&mut self) -> Result<(), String> {
+    ///
+    /// `next` is the battle act the record has after the one being applied. When it plays a computer
+    /// turn itself (`plays_turn`: the screen's `hero_auto_step` for an enemy turn, a failed «Максимум»
+    /// move, the quick battle), this turn is that act's: the function stops and the caller applies it,
+    /// with no AI here, so the turn is not played twice. A «Максимум» move recorded for this turn comes
+    /// first (`recorded_max_move`), as the screen plays it. Without such an act the AI plays as before
+    /// (the drivers of the tests play the enemy unrecorded).
+    fn run_enemy(&mut self, next: Option<&BattleAct>) -> Result<(), String> {
+        let claimed = next.is_some_and(plays_turn);
         let Some((b, thinker)) = self.battle.as_mut() else { return Ok(()) };
         // Every action is written back into the armies (the screen does so each frame, the
         // interface after each action: `Game::battle_write_back`).
@@ -302,6 +358,10 @@ impl Player {
             if b.fighters[id].team != Team::Enemy {
                 return Ok(());
             }
+            // Checked before any «Максимум» poll: a turn with no recorded move would start a search.
+            if claimed && !(b.max_ai() && recorded_max_move(b)) {
+                return Ok(());
+            }
             if b.max_ai() {
                 match thinker.poll(b) {
                     MaxPoll::Ready(r) => {
@@ -313,6 +373,8 @@ impl Player {
                     }
                 }
             } else {
+                // The battle AI's step of the enemy: the same plan as `hero_auto_step` gives an enemy
+                // (`plan(hero)` only changes the player's units), which the screen records for it.
                 b.ai_step();
             }
         }
@@ -354,6 +416,9 @@ pub fn play(game: Game, entries: &[Entry], dt: f32) -> Result<Game, String> {
     let mut p = Player::new(game, dt);
     let mut result = Ok(());
     for (i, e) in entries.iter().enumerate() {
+        if needs_next_act(e) {
+            p.set_next_battle_act(next_battle_act(&entries[i + 1..]));
+        }
         if let Err(err) = p.apply(e) {
             result = Err(format!("entry {i} ({:?}, {:?}): {err}", e.at, e.input));
             break;

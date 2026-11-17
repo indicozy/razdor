@@ -736,7 +736,10 @@ fn a_load_truncates_the_replay_and_the_file_plays_back_across_it() {
     // Segment one, to the save: it plays to the saved state.
     let g1 = super::snapshot::Snapshot::from_bytes(seg1.snapshot.clone()).restore(c.clone(), Some(&install), None).unwrap();
     let mut p1 = super::play::Player::new(g1, 1.0 / 30.0);
-    for e in &seg1.entries {
+    for (i, e) in seg1.entries.iter().enumerate() {
+        if super::play::needs_next_act(e) {
+            p1.set_next_battle_act(super::play::next_battle_act(&seg1.entries[i + 1..]));
+        }
         p1.apply(e).unwrap_or_else(|err| panic!("segment one: {err}"));
     }
     p1.advance_to(save_stamp).unwrap_or_else(|err| panic!("segment one to the save: {err}"));
@@ -1342,13 +1345,28 @@ fn a_resume_cut_must_be_a_block_end_of_the_same_line_of_play() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// The screen's view of a battle handed out by a pump: the player's turns are the recorded actions
-/// (the queue `actions`, in order, at most `budget` of them), the enemy's turns are the battle AI's
-/// or the recorded «Максимум» moves, as the battle view plays them. Returns the battle at its stop
-/// and the actions it did not play.
+/// The screen's view of a battle handed out by a pump, as `BattleView` plays it: the deployment's
+/// moves and `Begin` first (`replay_deploy`); then the player's turns are the recorded actions (the
+/// queue `actions`, in order, at most `budget` of them); the computer's turns are the recorded act
+/// when it plays the turn itself (`plays_turn`, a «Максимум» move recorded for the turn comes first),
+/// else the «Максимум» move or the battle AI. Returns the battle at its stop and the actions it did
+/// not play.
 fn view_battle(p: &mut super::watch::ReplayPlayer, mut b: crate::rules::battle::Battle, mut actions: std::collections::VecDeque<super::actions::BattleAct>, budget: usize) -> (crate::rules::battle::Battle, Vec<super::actions::BattleAct>) {
+    use super::actions::BattleAct;
     use crate::rules::battle::{MaxPoll, MaxThinker, Outcome, Team};
     let mut thinker = MaxThinker::new(Team::Enemy);
+    while b.is_deploying() {
+        match actions.front() {
+            Some(BattleAct::MoveCard { .. } | BattleAct::Begin) => {
+                let act = actions.pop_front().expect("a deployment act");
+                super::actions::apply_battle(&mut b, &act);
+            }
+            _ => {
+                b.begin();
+                break;
+            }
+        }
+    }
     let mut done = 0;
     loop {
         let over = p.in_playback(|g| {
@@ -1366,7 +1384,15 @@ fn view_battle(p: &mut super::watch::ReplayPlayer, mut b: crate::rules::battle::
         } else {
             p.in_playback(|g| {
                 g.battle_write_back(&b);
-                if b.max_ai() {
+                let recorded = actions.front().is_some_and(super::play::plays_turn) && !(b.max_ai() && super::play::recorded_max_move(&b));
+                if recorded {
+                    match actions.pop_front().expect("a recorded act") {
+                        BattleAct::HeroAutoStep => {
+                            b.hero_auto_step();
+                        }
+                        other => super::actions::apply_battle(&mut b, &other),
+                    }
+                } else if b.max_ai() {
                     loop {
                         match thinker.poll(&b) {
                             MaxPoll::Ready(r) => {
@@ -1958,10 +1984,11 @@ fn a_retreat_after_some_turns_replays_to_the_same_state() {
     hook::install_recorder(Box::new(shared.clone()));
     let mut b = g.start_battle();
     b.begin();
-    // The enemy's turns run after each of the player's steps, as the playback runs them (`run_enemy`).
+    // The enemy's turns run after each of the player's steps, as the screen plays them: by the
+    // recorded `hero_auto_step` (the playback applies the record for them, `run_enemy`).
     let enemy_turns = |b: &mut crate::rules::battle::Battle, g: &mut Game| {
         while b.outcome() == crate::rules::battle::Outcome::Ongoing && b.active().is_some_and(|id| b.fighters[id].team == crate::rules::battle::Team::Enemy) {
-            b.ai_step();
+            b.hero_auto_step();
             g.battle_write_back(b);
         }
     };
@@ -1982,4 +2009,88 @@ fn a_retreat_after_some_turns_replays_to_the_same_state() {
     let start = snap.restore(c.clone(), None, None).unwrap();
     let played = super::play::play(start, &entries, 1.0 / 60.0).unwrap();
     assert_eq!(state_hash(&played), live, "the replay reaches the live state");
+}
+
+/// A battle the screen plays on a recording: the computer's turns by the recorded `hero_auto_step`
+/// (as `BattleView::ai_move` plays them), the player's by `auto_step`. The record holds those acts at
+/// the enemy's turns, and the battle is not «Максимум». The straight playback, the skip (the view gives
+/// the battle back at once) and the full view (the view plays every turn) each reach the live state
+/// with no heals: a computer turn is played once, by its record. The demo game, no install needed.
+#[test]
+fn a_battle_whose_computer_turns_the_screen_recorded_replays_each_turn_once() {
+    use super::actions::BattleAct;
+    use super::watch::{Pump, ReplayPlayer};
+    let c = Arc::new(Content::builtin());
+    let mut g = Game::new(c.clone(), HeroClass::Knight);
+    g.world.armies.clear();
+    g.hire(crate::rules::world::demo_unit(&c, "spearman")).unwrap();
+    g.hire(crate::rules::world::demo_unit(&c, "spearman")).unwrap();
+    g.foe = Some(Foe::Garrison(g.world.index_of("Bandit camp")));
+    g.max_ai = false;
+    let dir = scratch("computer-turns");
+    let sess = super::session::Session::start(&dir, &g, &super::header::ReplayHeader::of(&g, 0)).unwrap();
+    let mut b = g.start_battle();
+    assert!(!b.max_ai(), "the battle is not «Максимум»");
+    b.start_play();
+    let mut enemy_turns = 0;
+    for _ in 0..AUTO_BATTLE_STEPS {
+        g.battle_write_back(&b);
+        if b.outcome() != Outcome::Ongoing {
+            break;
+        }
+        let Some(id) = b.active() else { break };
+        if b.fighters[id].team == Team::Enemy {
+            b.hero_auto_step();
+            enemy_turns += 1;
+        } else {
+            b.auto_step();
+        }
+    }
+    assert!(b.outcome() != Outcome::Ongoing, "the battle is played out");
+    g.battle_write_back(&b);
+    g.resolve_battle(&b);
+    let live = state_hash(&g);
+    sess.finish();
+    let file_path = dir.join(sess.file_name());
+    let file = super::file::read(&file_path).unwrap();
+    let recorded_turns = file.segments.iter().flat_map(|s| &s.entries).filter(|e| matches!(e.input, Input::Player(PlayerAction::Battle(BattleAct::HeroAutoStep)))).count();
+    assert_eq!(recorded_turns, enemy_turns, "every computer turn is recorded as the screen's hero_auto_step");
+    assert!(recorded_turns > 0, "the battle has computer turns");
+
+    let open = || {
+        let mut p = ReplayPlayer::open(&file_path, c.clone(), None, None).unwrap();
+        p.set_healing(true);
+        p
+    };
+    let mut straight = open();
+    straight.play_to_end().unwrap_or_else(|d| panic!("straight: {d:?}"));
+    assert!(straight.heals.is_empty(), "straight: no heals");
+    assert_eq!(state_hash(straight.game().unwrap()), live, "straight: the live final state");
+
+    // The screen's pump with the view: budget 0 is the skip, usize::MAX the full view.
+    for budget in [0usize, usize::MAX] {
+        let mut p = open();
+        let mut battles = 0;
+        loop {
+            match p.pump(1.0 / 30.0 * 16.0, true) {
+                Err(d) => panic!("budget {budget}: drift {d:?}"),
+                Ok(Pump::Ended) => break,
+                Ok(Pump::Playing) => {}
+                Ok(Pump::Battle) => {
+                    battles += 1;
+                    let b = p.take_battle().expect("the handed battle");
+                    let queue = p.take_battle_actions().into();
+                    let (b, rest) = view_battle(&mut p, b, queue, budget);
+                    if budget == usize::MAX {
+                        assert!(rest.is_empty(), "the full view plays every recorded act");
+                    }
+                    p.return_battle(b, &rest).unwrap_or_else(|d| panic!("budget {budget}: give back {d:?}"));
+                }
+            }
+        }
+        assert_eq!(battles, 1, "budget {budget}: one battle");
+        assert!(p.heals.is_empty(), "budget {budget}: no heals");
+        assert_eq!(state_hash(p.game().unwrap()), live, "budget {budget}: the live final state");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }
