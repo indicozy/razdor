@@ -1,6 +1,5 @@
 //! The «Дерево развития» window (the owner's approved design, 2026-11-17): a
-//! read-only window over the army screen (the promotion pane's expand button) and the barracks' hire
-//! card. It opens on the unit's line: a vertical tree with its root at the bottom. The line starts at the
+//! read-only window over the army screen (the promotion pane's expand button). It opens on the unit's line: a vertical tree with its root at the bottom. The line starts at the
 //! highest ancestor-or-self whose subtree has at most `LINE_COLS` leaves; the ancestors above it are a row
 //! of small cards under it. A class wider than that (a trunk class) shows its options as rows of cards,
 //! each collapsed option a card with a «+N» of the classes under it. «Всё дерево» opens the whole tree as
@@ -555,20 +554,10 @@ fn cut_to(s: &str, w: f32, size: f32) -> String {
 
 // ---- The window's state -------------------------------------------------------------------------
 
-/// Where the window was opened: the army screen (a promotion pane's «expand») or the barracks (a hire
-/// card's button). Each screen draws and takes input for its own window only.
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum Host {
-    Army,
-    Barracks,
-}
-
 #[derive(Clone, Copy)]
 struct Open {
-    host: Host,
-    /// The squad member whose tree it is (index 0 is the hero, who never promotes); None for a hire
-    /// card, a fresh level-1 unit of the class.
-    member: Option<usize>,
+    /// The squad member whose tree it is (index 0 is the hero, who never promotes).
+    member: usize,
 }
 
 /// The install's graph of the open window, built once at open (a window is open within one game).
@@ -627,11 +616,11 @@ pub struct InputHold {
     held: bool,
 }
 
-/// Holds the screen's input while the window is open on `host`. Take it at the top of the screen's frame
-/// and drop it before [`overlay`], so the window itself takes the input.
-pub fn hold_input(host: Host) -> InputHold {
+/// Holds the army screen's input while the window is open. Take it at the top of the screen's frame and
+/// drop it before [`overlay`], so the window itself takes the input.
+pub fn hold_input() -> InputHold {
     let was = widgets::input_blocked();
-    let held = OPEN.with(|o| o.get()).is_some_and(|o| o.host == host);
+    let held = OPEN.with(|o| o.get()).is_some();
     if held {
         widgets::set_input_blocked(true);
     }
@@ -646,14 +635,14 @@ impl Drop for InputHold {
     }
 }
 
-/// Opens the window for `class` (`member`: the squad member whose tree it is, None for a hire card) over
-/// `host`, on its line (`web`: the whole tree at fit, as «Всё дерево» opens it).
-pub fn open(c: &Content, host: Host, member: Option<usize>, class: UnitId, web: bool) {
+/// Opens the window for `class`, the tree of squad member `member`, on its line (`web`: the whole tree at
+/// fit, as «Всё дерево» opens it).
+pub fn open(c: &Content, member: usize, class: UnitId, web: bool) {
     let g = graph(c);
     let lv = leaves(&g);
     let rad = radial(&g);
     MODEL.with(|m| *m.borrow_mut() = Some(Rc::new(Model { g, lv, radial: rad })));
-    OPEN.with(|o| o.set(Some(Open { host, member })));
+    OPEN.with(|o| o.set(Some(Open { member })));
     FOCUS.with(|f| f.set(class.0));
     MODE.with(|m| m.set(if web { Mode::Web } else { Mode::Line }));
     WEB_FIT.with(|w| w.set(web));
@@ -715,26 +704,14 @@ fn icon_button(r: Rect) -> bool {
     pressed
 }
 
-/// The army pane's expand button. Drawn after the pane. Desktop and sideways: a 24 px icon at the right end
-/// of the pane's title row, centred on the title (`title_mid`, y in px), above the portraits. Upright phone:
-/// its 44 dp button in the pane's bottom-right corner, where no portrait is (the top row holds the portraits
-/// to the edge). A press on a portrait still promotes. True when pressed.
-pub fn pane_button(content: Rect, title_mid: f32) -> bool {
+/// The army pane's expand button, drawn after the pane in the pane's bottom-right corner, inside it and
+/// clear of the portraits (the unit's own portrait is centred at the bottom, the top row holds the others):
+/// 36 px on the desktop and sideways, 44 dp on a phone held upright. A press on a portrait still promotes.
+/// True when pressed.
+pub fn pane_button(content: Rect) -> bool {
     let k = chrome::k();
-    if window_layout::portrait() {
-        let s = btn_size();
-        return icon_button(Rect::new(content.x + content.w - s - 4.0 * k, content.y + content.h - s - 4.0 * k, s, s));
-    }
-    let s = 24.0 * k;
-    icon_button(Rect::new(content.x + content.w - s, title_mid - s / 2.0, s, s))
-}
-
-/// The hire card's button: the same tree icon in the card's top-left corner, the parchment beside the
-/// figure (a phone's stat band keeps its name and stats clear). True when pressed.
-pub fn hire_button(card: Rect) -> bool {
-    let k = chrome::k();
-    let s = btn_size();
-    icon_button(Rect::new(card.x + 4.0 * k, card.y + 4.0 * k, s, s))
+    let s = if window_layout::portrait() { btn_size() } else { 36.0 * k };
+    icon_button(Rect::new(content.x + content.w - s - 4.0 * k, content.y + content.h - s - 4.0 * k, s, s))
 }
 
 // ---- Drawing ------------------------------------------------------------------------------------
@@ -1512,28 +1489,21 @@ fn class_card(c: &Content, assets: &Assets, r: Rect, def: u32, band: bool) {
     }
 }
 
-/// Draws the open window over `win` (the screen's whole window), last of the screen. Called by the army
-/// screen and by the barracks' hire tab, each for its own host; closes on its own close button or Escape.
-pub fn overlay(game: &Game, assets: &Assets, win: Rect, host: Host) {
+/// Draws the open window over `win` (the army screen's whole window), last of the screen; closes on its own
+/// close button or Escape.
+pub fn overlay(game: &Game, assets: &Assets, win: Rect) {
     let Some(open) = OPEN.with(|o| o.get()) else { return };
-    if open.host != host {
-        // Opened on the other screen: that screen was left (only one screen draws a frame).
-        close();
-        return;
-    }
     let Some(model) = MODEL.with(|m| m.borrow().clone()) else { return };
     let c = &game.content;
     // The squad member's own promotion options (`upgrade_tree`, the rule of the pane): green where it can
-    // promote now (level 2 or more, not the hero, free). A hire card has none.
-    let ready: Vec<u32> = match open.member {
-        Some(i) => match game.squad.get(i) {
-            Some(u) => u.upgrade_tree(c, i == 0).into_iter().filter(|t| t.2).map(|t| t.0 .0).collect(),
-            None => {
-                close();
-                return;
-            }
-        },
-        None => Vec::new(),
+    // promote now (level 2 or more, not the hero, free).
+    let i = open.member;
+    let ready: Vec<u32> = match game.squad.get(i) {
+        Some(u) => u.upgrade_tree(c, i == 0).into_iter().filter(|t| t.2).map(|t| t.0 .0).collect(),
+        None => {
+            close();
+            return;
+        }
     };
     let focus = FOCUS.with(|f| f.get());
     let (inner, close_clicked) = chrome::window(win, tr("Development tree"), chrome::Skin::Marble, true);

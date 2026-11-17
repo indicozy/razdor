@@ -701,7 +701,7 @@ pub fn squad(
     message: &mut Option<String>,
 ) -> Option<Screen> {
     // The tree window (`evo_tree`) holds the whole screen's input while it is open.
-    let evo_hold = super::evo_tree::hold_input(super::evo_tree::Host::Army);
+    let evo_hold = super::evo_tree::hold_input();
     let bar = super::world_view::window_backdrop(game, assets, Some(super::game_bar::BarButton::Squad));
     selected.clamp(game.squad.len());
     // A slide that has ended clears the selection (0x4b0c04).
@@ -905,10 +905,8 @@ pub fn squad(
         let tu = game.squad[t].clone();
         let shown = tree_view(game, assets, t, &tu, content, promo.filter(|p| p.unit == t));
         // The pane's expand button: the tree window of this unit (`evo_tree`).
-        // Its title's centre (the title drawn above, 15 px at its baseline `head * 0.36`).
-        let title_mid = window_layout::point(win, 408.0, 40.0).y + (13.0 * k).round() * 0.36 - 15.0 * k * 0.35;
-        if super::evo_tree::pane_button(content, title_mid) {
-            super::evo_tree::open(&game.content, super::evo_tree::Host::Army, Some(t), game.squad[t].def, false);
+        if super::evo_tree::pane_button(content) {
+            super::evo_tree::open(&game.content, t, game.squad[t].def, false);
         }
         // Razdor's: the panel goes back to the unit when the pointer leaves the portrait, where
         // the original's keeps the class (0x4c3cf4; a player's request, 2026-10-12).
@@ -1218,7 +1216,7 @@ pub fn squad(
     }
     // The tree window over the whole screen (it takes the input the screen above held back).
     drop(evo_hold);
-    super::evo_tree::overlay(game, assets, win, super::evo_tree::Host::Army);
+    super::evo_tree::overlay(game, assets, win);
     // The group button's name, queued by the row (drawn after the frame, as the item's text).
     draw_later();
     // The item held is the pointer; closing the window puts it back in the pack (the

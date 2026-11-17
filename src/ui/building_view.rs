@@ -978,16 +978,6 @@ fn recruit_panel(game: &Game, assets: &Assets, f: &Frame, kind: UnitId) {
     };
     let mut hover = None;
     draw_card(assets, c, f, &sheet, &mut hover);
-    // The card's tree button (`evo_tree`): the class's tree window, over this barracks.
-    if super::evo_tree::hire_button(unit_card_rect(f)) {
-        super::evo_tree::open(c, super::evo_tree::Host::Barracks, None, kind, false);
-    }
-}
-
-/// Scene switch (`RAZDOR_SCENE_HIRE`, debug snapshots only): the hire tab's left panel shows that offer's
-/// card, as the pointer on the offer shows it.
-pub fn show_hire_offer(view: &mut BuildingView, kind: UnitId) {
-    view.hire_panel = Some(HirePanel::Recruit(kind));
 }
 
 /// The window's stacking for a tab (a phone held upright): the barracks and the garrison take the
@@ -1025,23 +1015,13 @@ fn picture_pane(game: &Game, f: &Frame) {
 /// tall window (barracks and garrison), else the upper pane (the picture and text in its 586 × 271;
 /// the tabs and Exit stay tappable under it).
 fn draw_card(assets: &Assets, c: &razdor::rules::content::Content, f: &Frame, sheet: &unit_sheet::Sheet, hover: &mut Option<razdor::rules::content::ItemId>) {
-    if window_layout::tall() || window_layout::portrait() {
-        unit_sheet::draw_band(assets, c, unit_card_rect(f), sheet, false, hover);
-    } else {
-        unit_sheet::draw(assets, c, unit_card_rect(f), sheet, false, hover);
-    }
-}
-
-/// The rect of the left panel's unit card: the picture pane when stacked (a phone held upright), else
-/// the left column.
-fn unit_card_rect(f: &Frame) -> Rect {
     let win = Rect::new(f.x, f.y, f.w, f.h);
     if window_layout::tall() {
-        window_layout::building_picture(win)
+        unit_sheet::draw_band(assets, c, window_layout::building_picture(win), sheet, false, hover);
     } else if window_layout::portrait() {
-        window_layout::upper(win)
+        unit_sheet::draw_band(assets, c, window_layout::upper(win), sheet, false, hover);
     } else {
-        window_layout::left(win)
+        unit_sheet::draw(assets, c, window_layout::left(win), sheet, false, hover);
     }
 }
 
@@ -2945,8 +2925,6 @@ fn ship_window(game: &mut Game) -> Option<Screen> {
 
 /// The building window. `Exit` (or Escape) returns to the map.
 pub fn frame(game: &mut Game, assets: &Assets, view: &mut BuildingView, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Option<Screen> {
-    // The tree window (`evo_tree`, opened from the barracks) holds the whole screen's input while open.
-    let evo_hold = super::evo_tree::hold_input(super::evo_tree::Host::Barracks);
     // The village window is modal, the bar's buttons greyed under it, as the original's
     // (the audit's capture of «Деревня Замковая»); the building window keeps the bar live.
     let bar = if game.tabs_here().contains(&Tab::Tribute) {
@@ -3047,9 +3025,6 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut BuildingView, message:
     window_layout::panel_frame(window_layout::upper(Rect::new(f.x, f.y, f.w, f.h)));
     selected_unit_panel(game, assets, &f, view);
     window_layout::frame(Rect::new(f.x, f.y, f.w, f.h));
-    // The tree window over the building window (it takes the input the window above held back).
-    drop(evo_hold);
-    super::evo_tree::overlay(game, assets, win, super::evo_tree::Host::Barracks);
     // The hint boxes the tabs asked for, over the frame lines (queued by `tooltip_later`).
     draw_later();
     if let Some(m) = message {

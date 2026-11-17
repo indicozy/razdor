@@ -31,9 +31,8 @@
 //! `RAZDOR_SCENE_SIGN_OFF=1` switches that member's promotion sign off (`army:<map>:<n>:<unit>`).
 //! `RAZDOR_SCENE_DEAD=1` makes that member a corpse (`army:<map>:<n>`).
 //! `RAZDOR_SCENE_SELECT=<n>` selects squad member n in the `building:` window (its card shows).
-//! `RAZDOR_SCENE_EVO=line|web` opens the «Дерево развития» window over the `army:` scene's member n, or over
-//! the barracks' first offer with `RAZDOR_SCENE_HIRE=1` (`building:<map>:<n>:barracks`), on its line or at the
-//! whole tree. `RAZDOR_SCENE_HIRE=1` alone shows that offer's card on the barracks' hire tab.
+//! `RAZDOR_SCENE_EVO=line|web` opens the «Дерево развития» window over the `army:` scene's member n, on its
+//! line or at the whole tree.
 //! `RAZDOR_SCENE_PAN=dx,dy` holds the interface's pan at that offset (windows larger than the screen).
 //! `RAZDOR_SCENE_SAVE=<file.rzsave>` takes the game of a map scene (`walk`, `map`, …) from that
 //! save, loaded as the Load screen loads one, instead of a fresh scenario; the scene's map name is
@@ -1063,16 +1062,6 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                     view.garrison_sel = Some((false, i));
                 }
             }
-            // `RAZDOR_SCENE_HIRE=1`: the first offer's card on the hire tab's left panel; with
-            // `RAZDOR_SCENE_EVO=line|web` its «Дерево развития» window open too.
-            if std::env::var_os("RAZDOR_SCENE_HIRE").is_some() {
-                if let Some(kind) = game.world.locations[l].recruits.first().map(|r| r.unit) {
-                    super::building_view::show_hire_offer(&mut view, kind);
-                    if let Ok(v) = std::env::var("RAZDOR_SCENE_EVO") {
-                        super::evo_tree::open(&game.content, super::evo_tree::Host::Barracks, None, kind, v.trim() == "web");
-                    }
-                }
-            }
             Screen::Building(view)
         }
         "army" => {
@@ -1119,7 +1108,7 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                 // `RAZDOR_SCENE_EVO=line|web`: the «Дерево развития» window of that member open (on its
                 // line, or at the whole tree).
                 if let Ok(v) = std::env::var("RAZDOR_SCENE_EVO") {
-                    super::evo_tree::open(&game.content, super::evo_tree::Host::Army, Some(i), game.squad[i].def, v.trim() == "web");
+                    super::evo_tree::open(&game.content, i, game.squad[i].def, v.trim() == "web");
                 }
             }
             Screen::Squad { selected, scroll: 0, back: None }

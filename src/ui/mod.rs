@@ -2167,8 +2167,8 @@ impl App {
                     let _ = world_view::handle_events(g, events, &mut self.message, &mut self.dialogs);
                 }
             }
-            // The development tree window (`evo_tree`) belongs to the army and the barracks: leaving them closes it.
-            if !matches!(next, Screen::Squad { .. } | Screen::Building(_)) {
+            // The development tree window (`evo_tree`) belongs to the army screen: leaving it closes the window.
+            if !matches!(next, Screen::Squad { .. }) {
                 evo_tree::close();
             }
             // The hero or army window closes (or gives way to the other): an item on the
