@@ -1545,7 +1545,10 @@ pub fn overlay(game: &Game, assets: &Assets, win: Rect) {
         });
     }
     class_card(c, assets, card, focus, upright);
-    draw_rectangle(tree.x - 2.0, tree.y - 2.0, tree.w + 4.0, tree.h + 4.0, Color::new(0.05, 0.04, 0.03, 0.9));
+    // The tree area keeps the window's green marble (as the army window's pane), only a faint shade and
+    // a thin dark frame mark it off (a player's request, 2026-11-17: not black).
+    draw_rectangle(tree.x - 2.0, tree.y - 2.0, tree.w + 4.0, tree.h + 4.0, Color::new(0.0, 0.05, 0.02, 0.22));
+    draw_rectangle_lines(tree.x - 2.0, tree.y - 2.0, tree.w + 4.0, tree.h + 4.0, 1.5 * k, Color::new(0.02, 0.06, 0.03, 0.9));
     // The top strip holds the state switch («Всё дерево» in the line, «К ветке» in the web).
     let bh = if phone { 44.0 * u } else { 28.0 * k };
     let strip = Rect::new(tree.x, tree.y, tree.w, (bh + 4.0 * u).min(tree.h));
