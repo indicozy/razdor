@@ -17,11 +17,12 @@ use super::file::{read, ReplayFile, Segment};
 use super::header::ReplayHeader;
 use super::hook;
 use super::play::Player;
-use super::snapshot::{state_hash, Snapshot};
+use super::snapshot::{recorded_state_hash, state_hash, Snapshot};
 use super::stream::{Entry, EngineInput, Input, PlayerAction};
 use crate::rules::battle::{patch_globals, set_patch_globals, Battle, Outcome, Team};
 use crate::rules::content::Content;
 use crate::rules::game::{Event, Game};
+use crate::rules::music::WORLD_THEME;
 use crate::rules::save::Install;
 
 /// The game time of one playback frame (the states do not depend on it, see `play`).
@@ -133,6 +134,32 @@ pub struct ReplayPlayer {
     healing: bool,
     /// The mismatches healed so far, in file order (healing only; a healed mismatch is not a drift).
     pub heals: Vec<Drift>,
+    /// Per segment, its battle spans (`battle_spans`): the keyframes inside one are no restart points.
+    spans: Vec<Vec<(usize, usize)>>,
+    /// The records a battle's span holds besides its actions (the screen's own calls, the music
+    /// draws), taken with the battle's actions (`take_battle_actions`) and played when it is given back.
+    battle_extras: Vec<Entry>,
+}
+
+/// The battle spans of a segment's entries: each `StartBattle` at `start` with the index of its
+/// stop, the battle's `ResolveBattle` or `RetreatBattle`, or the next `StartBattle` or the entries'
+/// end when it has none. A keyframe with `after` in `(start, stop]` is inside the battle (its state
+/// has the battle under way, and a restored game has no battle object); `after == start` and
+/// `after == stop + 1` are outside.
+fn battle_spans(entries: &[Entry]) -> Vec<(usize, usize)> {
+    let is_stop = |e: &Entry| matches!(e.input, Input::Player(PlayerAction::StartBattle | PlayerAction::ResolveBattle | PlayerAction::RetreatBattle));
+    let mut spans = Vec::new();
+    let mut i = 0;
+    while i < entries.len() {
+        if matches!(entries[i].input, Input::Player(PlayerAction::StartBattle)) {
+            let stop = (i + 1..entries.len()).find(|&j| is_stop(&entries[j])).unwrap_or(entries.len());
+            spans.push((i, stop));
+            i = stop;
+        } else {
+            i += 1;
+        }
+    }
+    spans
 }
 
 impl ReplayPlayer {
@@ -145,9 +172,12 @@ impl ReplayPlayer {
 
     /// The player of a file already read (the tests change a file before playing it).
     pub fn new(file: ReplayFile, content: Arc<Content>, install: Option<&Path>, map: Option<Arc<[u8]>>) -> ReplayPlayer {
+        let spans = file.segments.iter().map(|s| battle_spans(&s.entries)).collect();
         let mut p = ReplayPlayer {
             header: file.header,
             segments: file.segments,
+            spans,
+            battle_extras: Vec::new(),
             content,
             install: install.map(Path::to_path_buf),
             map,
@@ -290,6 +320,12 @@ impl ReplayPlayer {
         Ok(())
     }
 
+    /// Whether a keyframe of segment `seg` taken after its entry `after` is a restart point: not
+    /// inside a battle's span (see [`battle_spans`]).
+    fn restartable(&self, seg: usize, after: usize) -> bool {
+        !self.spans[seg].iter().any(|&(start, stop)| start < after && after <= stop)
+    }
+
     /// The last checkpoint (a segment's start or a keyframe) whose day is `day` or earlier.
     fn checkpoint_before_day(&self, day: u64) -> Option<(Place, Vec<u8>)> {
         let mut best = None;
@@ -297,7 +333,7 @@ impl ReplayPlayer {
             if seg.start_day <= day {
                 best = Some((Place { seg: s, index: 0 }, seg.snapshot.clone()));
             }
-            for k in seg.keyframes.iter().filter(|k| k.day <= day) {
+            for k in seg.keyframes.iter().filter(|k| k.day <= day && self.restartable(s, k.after)) {
                 best = Some((Place { seg: s, index: k.after }, k.snapshot.clone()));
             }
         }
@@ -314,7 +350,7 @@ impl ReplayPlayer {
             }
             for k in &seg.keyframes {
                 let at = Place { seg: s, index: k.after };
-                if at <= target {
+                if at <= target && self.restartable(s, k.after) {
                     best = Some((at, k.snapshot.clone()));
                 }
             }
@@ -322,15 +358,34 @@ impl ReplayPlayer {
         best
     }
 
+    /// The music track the playback is at when it starts at `at`: the last track change the record
+    /// made before that place in its segment (the world theme when there is none).
+    fn music_pick_before(&self, at: Place) -> usize {
+        let entries = &self.segments[at.seg].entries;
+        let before = &entries[..at.index.min(entries.len())];
+        before
+            .iter()
+            .rev()
+            .find_map(|e| match e.input {
+                Input::Engine(EngineInput::Music { pick }) => Some(pick as usize),
+                _ => None,
+            })
+            .unwrap_or(WORLD_THEME)
+    }
+
     /// Restores the game of a checkpoint at `at` and starts playing from there.
     fn start_at(&mut self, at: Place, bytes: &[u8]) -> Result<(), Drift> {
         let game = self.restore(bytes).map_err(|e| self.fail(at, e))?;
         hook::install_playback(&self.segments[at.seg].entries);
-        self.player = Some(Player::new(game, FRAME_DT));
+        let mut player = Player::new(game, FRAME_DT);
+        player.set_music_pick(self.music_pick_before(at));
+        self.player = Some(player);
         self.seg = at.seg;
         self.idx = at.index;
         self.last_good = at;
         self.drift = None;
+        // A battle the view had is not under way at a new place.
+        self.battle_extras.clear();
         Ok(())
     }
 
@@ -349,8 +404,10 @@ impl ReplayPlayer {
                 let bytes = self.segments[self.seg].snapshot.clone();
                 let start_hash = self.segments[self.seg].start_hash;
                 self.start_at(at, &bytes)?;
-                let got = state_hash(&self.player.as_ref().expect("a started game").game);
-                if got != start_hash {
+                let game = &self.player.as_ref().expect("a started game").game;
+                let got = state_hash(game);
+                // A record made before the screen's fields left the hash carries the old definition.
+                if got != start_hash && recorded_state_hash(game) != start_hash {
                     let reason = format!("the segment's start restores to {got:016x}, recorded {start_hash:016x}");
                     if !self.healing {
                         return Err(self.fail(at, reason));
@@ -394,8 +451,33 @@ impl ReplayPlayer {
                     return Ok(Step::Applied);
                 }
                 Ok(false) => return Ok(Step::Budget),
-                Err(reason) => return self.heal_from(here, reason),
+                Err(reason) => {
+                    if self.check_by_keyframe(here, &entry) {
+                        self.idx += 1;
+                        self.last_good = self.place();
+                        return Ok(Step::Applied);
+                    }
+                    return self.heal_from(here, reason);
+                }
             }
+        }
+    }
+
+    /// Whether a check that does not match is a record's check made with the definition before the
+    /// screen's fields left the hash: its hash is the keyframe's state under that definition, and the
+    /// playback's game (which writes those fields its own way) has the keyframe's state under the
+    /// current one. The check is a keyframe's, so the keyframe's state is restored for both. False when
+    /// the entry is no keyframe's check, its hash is not the old one of the state, or the states differ.
+    fn check_by_keyframe(&self, here: Place, entry: &Entry) -> bool {
+        let Input::Engine(EngineInput::Check { hash }) = entry.input else { return false };
+        let Some(k) = self.segments[here.seg].keyframes.iter().find(|k| k.after == here.index + 1) else { return false };
+        // The restore sets the patch globals: the playback's are put back after it.
+        let globals = patch_globals();
+        let restored = self.restore(&k.snapshot);
+        set_patch_globals(globals);
+        match (restored, self.player.as_ref()) {
+            (Ok(restored), Some(player)) => recorded_state_hash(&restored) == hash && state_hash(&restored) == state_hash(&player.game),
+            _ => false,
         }
     }
 
@@ -419,7 +501,7 @@ impl ReplayPlayer {
         let heal = self.fail(here, reason);
         self.heals.push(heal);
         let seg = here.seg;
-        let next = self.segments[seg].keyframes.iter().find(|k| k.after > here.index).map(|k| (k.after, k.snapshot.clone()));
+        let next = self.segments[seg].keyframes.iter().find(|k| k.after > here.index && self.restartable(seg, k.after)).map(|k| (k.after, k.snapshot.clone()));
         if let Some((after, bytes)) = next {
             return match self.start_at(Place { seg, index: after }, &bytes) {
                 Ok(()) => Ok(Step::Applied),
@@ -548,61 +630,78 @@ impl ReplayPlayer {
         self.pending_battle.take()
     }
 
-    /// The next recorded action of the battle under way, when the entry at the place is one (the
-    /// view applies it on the player's turn). None at the battle's resolve or the file's end.
+    /// The recorded actions of the battle under way, from the place to its stop (`battle_stop`): the
+    /// view applies them on the player's turns. Inside the span the «Максимум» moves and the patch
+    /// globals (found by their key) and the checks (a look, not an action) are not in the list;
+    /// every other record of the span (the screen's own calls, the music draws) is kept and played
+    /// when the battle is given back. The place is left at the stop, which `return_battle` consumes.
     pub fn take_battle_actions(&mut self) -> Vec<BattleAct> {
+        self.battle_extras.clear();
+        let stop = self.battle_stop();
         let mut out = Vec::new();
-        while let Some((i, e)) = self.battle_entry() {
-            let act = match &e.input {
-                Input::Player(PlayerAction::Battle(act)) => act.clone(),
-                _ => break,
-            };
-            out.push(act);
-            self.idx = i + 1;
+        if let Some(seg) = self.segments.get(self.seg) {
+            for e in &seg.entries[self.idx.min(seg.entries.len())..stop] {
+                match &e.input {
+                    Input::Player(PlayerAction::Battle(act)) => out.push(act.clone()),
+                    Input::Engine(EngineInput::Max { .. } | EngineInput::Patch(_) | EngineInput::Check { .. }) => {}
+                    _ => self.battle_extras.push(e.clone()),
+                }
+            }
         }
-        // The place is the battle's resolve, which the view's return consumes.
-        if let Some((i, _)) = self.battle_entry() {
-            self.idx = i;
-        }
+        self.idx = stop;
         out
     }
 
-    /// The first entry at or after the place that is not one of the battle's own engine records
-    /// (the «Максимум» moves and the patch globals: the playback finds those by their key): its
-    /// index and the entry.
-    fn battle_entry(&self) -> Option<(usize, &Entry)> {
-        let entries = &self.segments.get(self.seg)?.entries;
-        let i = (self.idx..entries.len()).find(|&i| !matches!(entries[i].input, Input::Engine(EngineInput::Max { .. } | EngineInput::Patch(_))))?;
-        Some((i, &entries[i]))
+    /// The index of the battle under way's stop at or after the place: its resolve or its retreat,
+    /// or the next battle's start, or the segment's end when the record does not end the battle.
+    fn battle_stop(&self) -> usize {
+        let Some(seg) = self.segments.get(self.seg) else { return 0 };
+        (self.idx..seg.entries.len())
+            .find(|&i| matches!(seg.entries[i].input, Input::Player(PlayerAction::StartBattle | PlayerAction::ResolveBattle | PlayerAction::RetreatBattle)))
+            .unwrap_or(seg.entries.len())
     }
 
-    /// Whether the battle under way has no more actions: its resolve is the next entry.
+    /// Whether the battle under way has no more actions: its resolve (or retreat) is the next entry.
     pub fn battle_resolves_next(&self) -> bool {
-        self.battle_entry().is_some_and(|(_, e)| matches!(e.input, Input::Player(PlayerAction::ResolveBattle)))
+        let Some(seg) = self.segments.get(self.seg) else { return false };
+        let stop = self.battle_stop();
+        stop < seg.entries.len()
+            && matches!(seg.entries[stop].input, Input::Player(PlayerAction::ResolveBattle | PlayerAction::RetreatBattle))
+            && !(self.idx..stop).any(|i| matches!(seg.entries[i].input, Input::Player(PlayerAction::Battle(_))))
     }
 
     /// Gives a battle back: `b` is the view's battle, to the end of its actions or stopped
-    /// (skipped) at any point. At the battle's resolve it is resolved here; otherwise the rest of
-    /// the battle is played from its state at once, as the stream plays it. A battle that ended
-    /// before its recorded actions did is a drift.
+    /// (skipped) at any point. At the battle's stop it is ended here: resolved, or dropped by the
+    /// retreat the record made. Otherwise the rest of the battle is played from its state at once,
+    /// as the stream plays it. The records the span held besides its actions are played first. A
+    /// battle that ended before its recorded actions did is a drift.
     pub fn return_battle(&mut self, b: Battle, rest: &[BattleAct]) -> Result<(), Drift> {
         let here = self.place();
-        let Some((resolve, _)) = self.battle_entry().filter(|(_, e)| matches!(e.input, Input::Player(PlayerAction::ResolveBattle))) else {
-            return self.heal_from(here, "the battle's resolve is not at its place".into()).map(|_| ());
+        let retreat = match self.segments.get(self.seg).and_then(|s| s.entries.get(self.idx)).map(|e| &e.input) {
+            Some(Input::Player(PlayerAction::ResolveBattle)) => false,
+            Some(Input::Player(PlayerAction::RetreatBattle)) => true,
+            _ => return self.heal_from(here, "the battle's resolve is not at its place".into()).map(|_| ()),
         };
+        let extras = std::mem::take(&mut self.battle_extras);
         if !rest.is_empty() && b.outcome() != Outcome::Ongoing {
             return self.heal_from(here, "the battle ended before its recorded actions".into()).map(|_| ());
         }
         self.arm();
         let r = match self.player.as_mut() {
-            Some(p) => p.return_battle(b, rest),
+            Some(p) => extras.iter().try_for_each(|e| p.apply(e)).and_then(|()| {
+                if retreat {
+                    p.return_retreat(b, rest)
+                } else {
+                    p.return_battle(b, rest)
+                }
+            }),
             None => Err("no game to give the battle back to".into()),
         };
         self.disarm();
         if let Err(reason) = r {
             return self.heal_from(here, reason).map(|_| ());
         }
-        self.idx = resolve + 1;
+        self.idx += 1;
         self.last_good = self.place();
         Ok(())
     }

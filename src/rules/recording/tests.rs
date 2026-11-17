@@ -1462,6 +1462,171 @@ fn a_recorded_campaign_pumps_in_budgets_hands_out_its_battle_and_seeks_by_budget
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
+/// The first segment of a record that has a battle, and the index of that battle's start.
+fn first_battle(file: &super::file::ReplayFile) -> (usize, usize) {
+    use super::stream::{Input, PlayerAction};
+    file.segments
+        .iter()
+        .enumerate()
+        .find_map(|(s, seg)| seg.entries.iter().position(|e| matches!(e.input, Input::Player(PlayerAction::StartBattle))).map(|i| (s, i)))
+        .expect("the record has a battle")
+}
+
+/// A watched battle whose span holds the screen's own records and a check (the calls the screen
+/// makes in a fight: `ReleaseUnshown` and `SetFormation`, and a check the live game asked for) plays
+/// back with no heal, to the straight playback's end. Inside a battle the two calls change nothing (no
+/// window is held, and a battle's formation is not set), so the file's straight end is the one to reach.
+#[test]
+fn a_watched_battle_with_the_screens_own_records_in_its_span_plays_back_without_heals() {
+    use super::file::read;
+    use super::stream::{Entry, EngineInput, Input, PlayerAction};
+    use super::watch::{Pump, ReplayPlayer};
+    let Some(dt) = base() else { return };
+    let c = Arc::new(Content::from_dt(&dt));
+    let (path, _) = recorded_session(&dt, &c, "РК1", 25, "span-records");
+    let clean = read(&path).unwrap();
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    let mut straight = ReplayPlayer::new(clean.clone(), c.clone(), Some(&dt.dir), None);
+    straight.play_to_end().unwrap_or_else(|d| panic!("straight: {d:?}"));
+    let want = state_hash(straight.game().unwrap());
+    let mut file = clean;
+    let (s_index, start) = first_battle(&file);
+    let seg = &mut file.segments[s_index];
+    let at = seg.entries[start].at;
+    let extras = [
+        Entry { at, input: Input::Player(PlayerAction::ReleaseUnshown { shown: false }) },
+        Entry { at, input: Input::Player(PlayerAction::SetFormation { cols: 3, reserve: false }) },
+        Entry { at, input: Input::Engine(EngineInput::Check { hash: 0 }) },
+    ];
+    let n = extras.len();
+    for (i, e) in extras.into_iter().enumerate() {
+        seg.entries.insert(start + 1 + i, e);
+    }
+    for k in seg.keyframes.iter_mut() {
+        if k.after > start {
+            k.after += n;
+        }
+    }
+    for (after, _) in seg.battles.iter_mut() {
+        if *after > start {
+            *after += n;
+        }
+    }
+    let mut watched = ReplayPlayer::new(file, c.clone(), Some(&dt.dir), None);
+    watched.set_healing(true);
+    let mut handed = 0;
+    loop {
+        match watched.pump(1.0 / 30.0, true).unwrap_or_else(|d| panic!("watched: {d:?}")) {
+            Pump::Ended => break,
+            Pump::Playing => {}
+            Pump::Battle => {
+                handed += 1;
+                let b = watched.take_battle().expect("the battle is handed out");
+                let queue = watched.take_battle_actions().into();
+                let (b, rest) = view_battle(&mut watched, b, queue, usize::MAX);
+                watched.return_battle(b, &rest).unwrap_or_else(|d| panic!("return: {d:?}"));
+            }
+        }
+    }
+    assert!(handed >= 1, "the battle is handed out to the view");
+    assert!(watched.heals.is_empty(), "no heal: {:?}", watched.heals);
+    assert_eq!(state_hash(watched.game().unwrap()), want, "as the straight playback");
+}
+
+/// A keyframe inside a battle is no restart point: its state has the battle under way, and a restored
+/// game has no battle object. A seek to the battle's stop restores the checkpoint before the battle, not
+/// the keyframe planted inside it (its snapshot is no valid state, so choosing it would be a drift).
+#[test]
+fn a_keyframe_inside_a_battle_is_no_restart_point() {
+    use super::file::Keyframe;
+    use super::stream::{Input, PlayerAction};
+    use super::watch::{Place, ReplayPlayer};
+    let Some(dt) = base() else { return };
+    let c = Arc::new(Content::from_dt(&dt));
+    let (path, _) = recorded_session(&dt, &c, "РК1", 25, "span-keyframe");
+    let mut file = super::file::read(&path).unwrap();
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    let (s_index, start) = first_battle(&file);
+    let seg = &mut file.segments[s_index];
+    let stop = (start + 1..seg.entries.len())
+        .find(|&i| matches!(seg.entries[i].input, Input::Player(PlayerAction::ResolveBattle | PlayerAction::RetreatBattle)))
+        .expect("the battle ends in the record");
+    seg.keyframes.push(Keyframe { at: seg.entries[start].at, day: 0, hash: 0, after: start + 1, snapshot: vec![0; 16] });
+    let target = Place { seg: s_index, index: stop };
+    let mut p = ReplayPlayer::new(file, c.clone(), Some(&dt.dir), None);
+    p.seek_place(target).unwrap_or_else(|d| panic!("the seek to the battle's stop: {d:?}"));
+    assert!(p.place() >= target, "the seek reaches its place: {:?}", p.place());
+}
+
+/// The state hash leaves out what the screen writes outside the recorded inputs (the run's mark, the
+/// music's wait and the armies' idle offsets), and a snapshot keeps all three.
+#[test]
+fn the_state_hash_leaves_out_the_screens_fields_and_a_snapshot_keeps_them() {
+    use super::snapshot::Snapshot;
+    use crate::rules::marks::{Level, Reason, RunMark};
+    let Some(dt) = base() else { return };
+    let c = Arc::new(Content::from_dt(&dt));
+    let map = map_named(&dt, "РК1");
+    let install = crate::rules::save::Install { dir: &dt.dir, content: c.clone() };
+    let mut g = start(&c, &map, Some(5));
+    let before = state_hash(&g);
+    g.run_mark = Some(RunMark { level: Level::Red, reason: Reason::Cheat("god".into()) });
+    g.music_wait = Some(12_345);
+    g.world.armies.first_mut().expect("the map has an army").mind.idle_offset = 777;
+    assert_eq!(state_hash(&g), before, "the screen's fields are not in the hash");
+    let back = Snapshot::take(&g).unwrap().restore(c.clone(), Some(&install), None).unwrap();
+    assert_eq!(back.run_mark().level, Level::Red, "a snapshot keeps the run's mark");
+    assert_eq!(back.music_wait, Some(12_345), "a snapshot keeps the music's wait");
+    assert_eq!(back.world.armies[0].mind.idle_offset, 777, "a snapshot keeps the idle offset");
+}
+
+/// A record whose starts and checks carry the definition from before the screen's fields left the
+/// hash still plays, straight and watched, with no heal: the checks that do not match under the
+/// current definition are that record's own when the keyframe's state under the old one says so.
+#[test]
+fn a_record_checked_with_the_definition_before_the_screens_fields_plays_back() {
+    use super::snapshot::{recorded_state_hash, Snapshot};
+    use super::stream::{EngineInput, Input};
+    use super::watch::{Pump, ReplayPlayer};
+    let Some(dt) = base() else { return };
+    let c = Arc::new(Content::from_dt(&dt));
+    let (path, _) = recorded_session(&dt, &c, "РК1", 25, "old-definition");
+    let mut file = super::file::read(&path).unwrap();
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    let install = crate::rules::save::Install { dir: &dt.dir, content: c.clone() };
+    for seg in file.segments.iter_mut() {
+        let start = Snapshot::from_bytes(seg.snapshot.clone()).restore(c.clone(), Some(&install), None).unwrap();
+        seg.start_hash = recorded_state_hash(&start);
+        for k in seg.keyframes.iter_mut() {
+            let g = Snapshot::from_bytes(k.snapshot.clone()).restore(c.clone(), Some(&install), None).unwrap();
+            let h = recorded_state_hash(&g);
+            k.hash = h;
+            if let Input::Engine(EngineInput::Check { hash }) = &mut seg.entries[k.after - 1].input {
+                *hash = h;
+            }
+        }
+    }
+    let mut straight = ReplayPlayer::new(file.clone(), c.clone(), Some(&dt.dir), None);
+    straight.play_to_end().unwrap_or_else(|d| panic!("straight: {d:?}"));
+    let want = state_hash(straight.game().unwrap());
+    let mut watched = ReplayPlayer::new(file, c.clone(), Some(&dt.dir), None);
+    watched.set_healing(true);
+    loop {
+        match watched.pump(1.0 / 30.0, true).unwrap_or_else(|d| panic!("watched: {d:?}")) {
+            Pump::Ended => break,
+            Pump::Playing => {}
+            Pump::Battle => {
+                let b = watched.take_battle().expect("the battle is handed out");
+                let queue = watched.take_battle_actions().into();
+                let (b, rest) = view_battle(&mut watched, b, queue, usize::MAX);
+                watched.return_battle(b, &rest).unwrap_or_else(|d| panic!("return: {d:?}"));
+            }
+        }
+    }
+    assert!(watched.heals.is_empty(), "no heal: {:?}", watched.heals);
+    assert_eq!(state_hash(watched.game().unwrap()), want, "as the straight playback");
+}
+
 /// A scripted visit to a market: the hero walks into the nearest town with goods, buys, sells what
 /// he bought and hires where a barracks offers a unit (the purchase path the random session never
 /// reached). Recorded with a check after each act, it plays back to the live final state.

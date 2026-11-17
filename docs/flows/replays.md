@@ -34,7 +34,17 @@ no draw. Timings (`step_elapsed`, `since_step`, `stretch_minutes`, `snap_due`, `
 `state_hash` (`recording/snapshot.rs`) is FNV-1a over the JSON body without the timings and
 without `asks` (a frame's budget changes how many arrivals it asks, not the rules) and without
 `Game::back_to` (Razdor's «Отступить» cell, backlog 1607: a record made before it existed must hash
-the same; `snapshot::skip_back_to` leaves it out while the hash body is built). Callers hash
+the same; `snapshot::skip_back_to` leaves it out while the hash body is built). It also leaves out
+three fields the screen writes outside the recorded inputs, not the rules: `Game::run_mark` (the
+mark the screen writes from the player's settings, `note_settings`; `skip_run_mark`),
+`rules.music_wait` (taken by the screen on its first frame, `take_music_wait`) and every army's
+`idle_offset` (the snap before or after an event chord, as the camera's flight allows; only the
+sprite's timing reads it). A keyframe (`capture`, `Snapshot::take`) keeps all of them.
+`recorded_state_hash` is the definition before those three were left out: records made before
+carry it for their segment starts and checks. The watching playback accepts a segment start or a
+check that does not match the current hash when it is that old hash of the keyframe's state and
+the state under the current hash agrees (`watch.rs`, `check_by_keyframe`); a changed hash bit still
+drifts. Callers hash
 at a day's end with the step finished and any stop's snap done (`finish_pause`, then
 `armies_snap`): the snap's idle draws come at the next moving tick, so a hash taken before them
 compares states at different points.
@@ -268,7 +278,25 @@ and the victory from the keyframes' states, so those last three are at keyframe 
   its view in order (the «Максимум» moves and patch globals are looked up by key, not played), and
   `return_battle(battle, rest)` takes the view's battle back: the actions it did not play are played
   from its state, then the battle is resolved (a battle that is not over at its resolve is a drift).
-  The engine's records in a battle are skipped by position (`battle_entry`).
+  **The battle span** is the entries from a `StartBattle` to its stop: the battle's `ResolveBattle`
+  or `RetreatBattle`, or the next `StartBattle` or the segment's end (`battle_stop`). Inside it, the
+  view gets the `Battle(act)` entries; the «Максимум» moves (`Engine(Max)`), the patch globals and the
+  checks are not played there (a check is a look). Every other record of the span (the screen's own
+  calls, such as `ReleaseUnshown` once per frame, and the music draws) is kept and played before the
+  battle is given back, so its order against the battle's actions is not the stream's. A check inside
+  a span is skipped, and with it the side effects a check has in the straight playback (`finish_pause`,
+  `armies_snap`, the battle's write-back): a keyframe taken during a battle (the 30 s timer does not
+  wait for one) can leave the watched playback one draw behind (`replay-1794529572609`, backlog 1662:
+  one heal at segment 2's in-battle check, none in the straight playback; see `docs/OPEN_QUESTIONS.md`). The place is
+  left at the stop: `return_battle` takes the battle as ended by a resolve, or by a retreat (the
+  retreat is `Game::retreat_battle`, no outcome needed). A battle whose record shows no end is a drift
+  at its stop.
+- A keyframe inside a battle span is no restart point: its state has the battle under way, and a
+  restored game has no battle object. `heal_from`, `checkpoint_before` and `checkpoint_before_day`
+  skip it (`restartable`; a keyframe with `after` in `(start, stop]` is inside, `start` and
+  `stop + 1` are not). The day marks keep it. A playback that starts at a checkpoint takes the
+  music track from the last `Engine(Music)` before that place in its segment (`music_pick_before`;
+  the world theme when there is none), so the next change is checked against the right rotation.
 - Seeks are states: `begin_seek_day` / `begin_seek_place` restore the checkpoint before the target
   (a seek its checkpoint already reaches is none), and the pumps play on until the target. The
   marks of battles are their `StartBattle` entries, so a seek to one stops at its choice.
@@ -285,7 +313,10 @@ and the victory from the keyframes' states, so those last three are at keyframe 
   checkpoint that cannot be restored is still a drift (`drift`, `Err`), and so is a seek's restore.
   `return_battle` heals the same way. Tests: `a_corrupted_checkpoint_stops_the_playback_with_the_version_message`
   (off) and `a_corrupted_checkpoint_heals_to_the_next_checkpoint_when_healing_is_on` (on: one heal at the
-  place, and the final state is the uncorrupted file's).
+  place, and the final state is the uncorrupted file's). The battle span, the keyframe inside a span,
+  the hash's left-out fields and the old-definition record have their own tests in `tests.rs`
+  (`a_watched_battle_with_the_screens_own_records_in_its_span...`, `a_keyframe_inside_a_battle...`,
+  `the_state_hash_leaves_out_the_screens_fields...`, `a_record_checked_with_the_definition_before...`).
 
 `Player` (`play.rs`) places each recorded entry: a player action or a check at the **end of its
 stretch** (the paused step is finished there, as the action does; the arrivals taken inside the

@@ -639,7 +639,7 @@ pub struct Game {
     /// The run's mark (`rules::marks`): the worst it has used, sticky and saved with the run.
     /// None in a save from before the mark: its history is unknown, so it reads grey at most
     /// ([`Game::run_mark`]).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "crate::rules::recording::snapshot::skip_run_mark")]
     pub run_mark: Option<super::marks::RunMark>,
 }
 

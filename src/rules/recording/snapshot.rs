@@ -22,6 +22,7 @@ use crate::rules::formation::{Formation, Slot};
 use crate::rules::game::{Event, Game};
 use crate::rules::map::Tile;
 use crate::rules::magic::Reading;
+use crate::rules::marks::RunMark;
 use crate::rules::rng::{EventRng, Rng};
 use crate::rules::save::{fnv1a, Install, ScenarioRef};
 use crate::rules::world::World;
@@ -200,7 +201,7 @@ impl Snapshot {
     /// The snapshot of `g` now. Refused while the game is not at rest.
     pub fn take(g: &Game) -> Result<Snapshot, String> {
         at_rest(g)?;
-        let json = body_json(g, true)?;
+        let json = body_json(g, Body::Keyframe)?;
         Ok(Snapshot { bytes: crate::rules::save::pack(&json).map_err(|e| e.to_string())? })
     }
 
@@ -331,19 +332,39 @@ fn install_map(dir: &std::path::Path, file: &str, hash: u64) -> Result<Vec<u8>, 
     Ok(bytes)
 }
 
+/// Which body a serialisation makes: a keyframe (timings and everything the game holds), or a
+/// state hash, of one of its two definitions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Body {
+    Keyframe,
+    /// The state hash now ([`state_hash`]).
+    Hash,
+    /// The state hash before the screen's fields were left out of it ([`recorded_state_hash`]):
+    /// the definition the replays recorded before carry.
+    HashBefore,
+}
+
 crate::local! {
-    /// Set while the state hash's body is serialised (`body_json` without timing).
-    static HASHING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The hash body being serialised (`body_json`), none for a keyframe.
+    static HASHING: std::cell::Cell<Option<Body>> = const { std::cell::Cell::new(None) };
 }
 
 /// Whether `Game::back_to` (Razdor's «Отступить», backlog 1607) is left out of a serialised game:
 /// always in the state hash, so a record made before the field existed hashes as it did (its
 /// keyframes keep it, with `serde(default)` for the old ones).
 pub(crate) fn skip_back_to(back: &Option<Tile>) -> bool {
-    back.is_none() || HASHING.with(|h| h.get())
+    back.is_none() || HASHING.with(|h| h.get().is_some())
 }
 
-fn body_json(g: &Game, with_timing: bool) -> Result<Vec<u8>, String> {
+/// Whether `Game::run_mark` is left out of the state hash. The screen writes the mark from the
+/// player's settings (`Game::note_settings`), outside the recorded inputs, so it is not the rules'
+/// state: the keyframes keep it, and the hash does not read it.
+pub(crate) fn skip_run_mark(_mark: &Option<RunMark>) -> bool {
+    HASHING.with(|h| h.get() == Some(Body::Hash))
+}
+
+fn body_json(g: &Game, body: Body) -> Result<Vec<u8>, String> {
+    let with_timing = body == Body::Keyframe;
     let mut rules = rules_of(g);
     if !with_timing {
         // How many arrivals a frame asked for depends on the frames' budgets, not on the rules.
@@ -353,14 +374,24 @@ fn body_json(g: &Game, with_timing: bool) -> Result<Vec<u8>, String> {
         // carry the stretch they were made in, so they are the same entries.
         rules.held.append(&mut rules.finished_events);
     }
-    let timing = timing_of(g);
-    let body = BodyOut { version: SNAPSHOT_VERSION, game: g, rules: &rules, timing: with_timing.then_some(&timing) };
-    if with_timing {
-        return serde_json::to_vec(&body).map_err(|e| e.to_string());
+    if body == Body::Hash {
+        // Written by the screen outside the recorded inputs, not by the rules: the music's wait
+        // is taken on the screen's first frame (`take_music_wait`), and the idle offset is set by
+        // the snap that runs before or after an event chord, as the camera's flight allows (only
+        // the sprite's timing reads it; the rng state stays hashed). A keyframe keeps both.
+        rules.music_wait = None;
+        for a in &mut rules.armies {
+            a.idle_offset = 0;
+        }
     }
-    HASHING.with(|h| h.set(true));
-    let out = serde_json::to_vec(&body).map_err(|e| e.to_string());
-    HASHING.with(|h| h.set(false));
+    let timing = timing_of(g);
+    let out_body = BodyOut { version: SNAPSHOT_VERSION, game: g, rules: &rules, timing: with_timing.then_some(&timing) };
+    if with_timing {
+        return serde_json::to_vec(&out_body).map_err(|e| e.to_string());
+    }
+    HASHING.with(|h| h.set(Some(body)));
+    let out = serde_json::to_vec(&out_body).map_err(|e| e.to_string());
+    HASHING.with(|h| h.set(None));
     out
 }
 
@@ -375,14 +406,22 @@ fn unpack(bytes: &[u8]) -> Result<Vec<u8>, String> {
 /// hash is [`state_hash`]'s.
 pub fn capture(g: &Game) -> Result<(Vec<u8>, u64), String> {
     at_rest(g)?;
-    let json = body_json(g, true)?;
-    let hash = fnv1a(&body_json(g, false)?);
+    let json = body_json(g, Body::Keyframe)?;
+    let hash = fnv1a(&body_json(g, Body::Hash)?);
     Ok((json, hash))
 }
 
 /// A stable hash of the game's rules state: the serialised game, the generators, the AI's
-/// fields, the settings, and the in-flight parts of a step; no timings, no UI. Two processes
-/// that play the same inputs get the same value.
+/// fields, the settings, and the in-flight parts of a step; no timings and no screen-made fields
+/// (`run_mark`, `music_wait`, the armies' idle offsets). Two processes that play the same inputs
+/// get the same value.
 pub fn state_hash(g: &Game) -> u64 {
-    fnv1a(&body_json(g, false).expect("a game serialises"))
+    fnv1a(&body_json(g, Body::Hash).expect("a game serialises"))
+}
+
+/// The state hash of the definition replays recorded before the screen's fields were left out of
+/// [`state_hash`] carry (`run_mark`, `music_wait` and the idle offsets are in it). A segment's
+/// start hash and the checks of such a record are this value; a restored snapshot still hashes to it.
+pub fn recorded_state_hash(g: &Game) -> u64 {
+    fnv1a(&body_json(g, Body::HashBefore).expect("a game serialises"))
 }

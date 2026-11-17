@@ -8,6 +8,22 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **Phone records of 1.5.2 still heal after the watch fixes** (2026-11-17, backlog 1662: 100 heals over the 19
+  records before the fix, 44 after; the newest `replay-1794859112996` has 9 before, 2 after). Three causes are left. (a) Seg 0, check 7241: the
+  battle that starts at 7034 resolves with squad XP one or two lower than the keyframe (21 vs 19, and 21 vs 20 on
+  three more) and the AI army's scores differ. The straight playback drifts at the same place, and disabling the
+  per-frame `ReleaseUnshown` calls leaves the hash unchanged, so the cause is in the battle's resolution, not the
+  watch path. Not investigated further. (b) Seg 1 starts with a battle already pending (the restored start has
+  `foe` set, and its first records are the battle's `Begin`, `HeroAutoPlay` and `MoveCard` before the next
+  `StartBattle` at index 874): nothing begins that battle, so the first battle act at index 138 has no battle. A
+  pending battle at a segment start needs its own start record or a restore that begins it; the same record
+  drifts in the straight playback too. (c) The watching playback skips a check inside a battle's span
+  (`take_battle_actions`), with its side effects; the straight playback runs it. `replay-1794529572609` (1.5.2)
+  has one such check in segment 2 and heals once there in the watch pass only ("the battle is not over at its
+  recorded end"); its straight playback is clean. Applying the check's side effects at the battle's give-back
+  (`finish_pause`, `armies_snap`, no hash compare: the battle's state is not the game's there) is the likely fix,
+  not made.
+
 - **A Hub mod can be skipped at a start that converts its game folder** (2026-11-15, the carry-over check of
   `tools/release/update_check.py`, 1.5.1 data with the 1.5.2 build). A start with a mod active whose game folder
   is still being converted by the background thread (`dt::stored::compress_owned_in_background`, started from

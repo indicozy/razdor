@@ -22,6 +22,13 @@ const MAX_FRAMES: u64 = 4_000_000;
 /// Battle steps a playback may take to reach the player's next turn.
 const MAX_BATTLE_STEPS: usize = 20_000;
 
+/// How a battle the view played ends in the stream: its resolve, or its retreat.
+#[derive(Clone, Copy)]
+enum Ending {
+    Resolve,
+    Retreat,
+}
+
 /// The playback's state: the game, the battle under way, and the map music's track.
 pub struct Player {
     pub game: Game,
@@ -220,17 +227,42 @@ impl Player {
     /// view's state: the actions it did not play (`rest`, when the battle was skipped) are played
     /// from there as the stream plays them, then the battle is resolved.
     pub fn return_battle(&mut self, b: Battle, rest: &[BattleAct]) -> Result<(), String> {
+        self.give_back(b, rest, Ending::Resolve)
+    }
+
+    /// As [`Player::return_battle`], for a battle the recording ends by a retreat («Отступить»):
+    /// the battle is dropped and the hero goes back, as the stream's retreat does.
+    pub fn return_retreat(&mut self, b: Battle, rest: &[BattleAct]) -> Result<(), String> {
+        self.give_back(b, rest, Ending::Retreat)
+    }
+
+    fn give_back(&mut self, b: Battle, rest: &[BattleAct], ending: Ending) -> Result<(), String> {
         self.battle = Some((b, MaxThinker::new(Team::Enemy)));
         self.run_enemy()?;
         for act in rest {
             self.battle_act(act)?;
         }
-        let (b, _) = self.battle.take().ok_or("a battle to resolve, none under way")?;
-        if b.outcome() == Outcome::Ongoing {
-            return Err("the battle is not over at its recorded end".into());
+        let (b, _) = self.battle.take().ok_or("a battle to end, none under way")?;
+        match ending {
+            Ending::Resolve => {
+                if b.outcome() == Outcome::Ongoing {
+                    return Err("the battle is not over at its recorded end".into());
+                }
+                self.game.resolve_battle(&b);
+            }
+            Ending::Retreat => {
+                if !self.game.retreat_battle(&b) {
+                    return Err("the retreat the recording made is not offered".into());
+                }
+            }
         }
-        self.game.resolve_battle(&b);
         Ok(())
+    }
+
+    /// The music track the map's rotation is at (the last change the record made before the
+    /// playback's place: `set_music_pick`, see `ReplayPlayer::start_at`).
+    pub fn set_music_pick(&mut self, pick: usize) {
+        self.music_pick = pick;
     }
 
     /// One recorded action of the player's battle, then the enemy's turns. A battle recorded before
