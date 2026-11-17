@@ -24,6 +24,7 @@ Razdor plays the original game's scenarios using its original rules. Below is wh
 ## Convenience
 
 * **Armies:** reorder warriors by dragging; pursue a selected army until an encounter occurs; the path is shown on click, and a second click sends the hero on the journey.
+* **Development tree:** a button in the warrior's pane opens the selected warrior's branch as a vertical tree, and "Whole tree" shows the whole mod tree as a circle ([more](/razdor/wiki/en/differences/evo-tree/)).
 * **Clicking on the map** while walking stops the hero; **waiting** can be interrupted by a click or a keypress.
 * **Hero Speed:** the "Hero Movement Speed" slider goes up to 2× faster than the fastest speed in the original (the middle of the slider is the original maximum).
 * **Hero Log:** five tabs — "Quests", "Completed", "Rumors", "Messages", "Chronicle", with entries marked by in-game date.
