@@ -561,14 +561,16 @@ impl EventWorld for Game {
         self.point()
     }
 
-    /// The event point under him (the one the scan reads first, 0x4abfbc), none while the
-    /// scan reads no point (`point_zeroed`).
+    /// The event point under him (the one the scan reads, 0x4abfbc), none while the scan reads
+    /// no point (`point_zeroed`). A cell holds one point id: the last point on it in file order
+    /// wins, as Map_Load (0x4b2504) writes index+1 into the cell for each point in turn with no
+    /// guard, so the earlier points on that cell are never read (as in the original).
     fn point(&self) -> Option<Place> {
         if self.point_zeroed {
             return None;
         }
         let t = self.tile();
-        self.world.points.iter().find(|p| p.tile == t).map(|p| Place::Point(p.id))
+        self.world.points.iter().rev().find(|p| p.tile == t).map(|p| Place::Point(p.id))
     }
 
     /// Event XP goes to the hero alone, as it is: no modifier, no cap; a negative amount
@@ -2371,6 +2373,36 @@ mod tests {
         assert_eq!(fired(&events), vec![1]);
         assert_eq!(g.tile(), (6, 2), "stopped on the point");
         assert!(!g.moving());
+    }
+
+    #[test]
+    fn stacked_points_the_last_one_on_the_cell_is_read() {
+        // Map_Load (0x4b2504) writes index+1 into the cell's +6 field for each point in file
+        // order, unconditionally: with two points on one cell the later one in file order is
+        // the id the step notes (0x4aed35) and the event scan reads (0x4abfbc). Coven Time
+        // (a community map): points 19 then 40 on (34, 25); point 40 is read.
+        let mut s = scenario(40, 30);
+        s.header.heroes[0] = hero(2, 2, 100, &[troop(4, 0, 1)]);
+        s.points = vec![point(19, 34, 25, 0), point(40, 34, 25, 0)];
+        let mut g = start(&s);
+        g.pos = g.world.map.center((34, 25));
+        assert_eq!(g.point(), Some(Place::Point(40)));
+    }
+
+    /// Coven Time (a community map, never in git): the map file and the install come from
+    /// `RAZDOR_COVEN_MAP` and `RAZDOR_DT_DIR`; skipped without them. Points 19 and 40 share
+    /// cell (34, 25) and the hero there reads point 40 (the last in file order, 0x4b2504).
+    #[test]
+    fn coven_time_stacked_points_read_point_40() {
+        let (Some(map), Some(dir)) = (std::env::var_os("RAZDOR_COVEN_MAP"), std::env::var_os(crate::dt::install::ENV_VAR)) else { return };
+        let s = crate::dt::dtm::Scenario::load(std::path::Path::new(&map)).expect("map loads");
+        let stacked: Vec<u8> = s.points.iter().filter(|p| (p.x, p.y) == (34, 25)).map(|p| p.id).collect();
+        assert_eq!(stacked, vec![19, 40], "file order of the points on (34, 25)");
+        let install = crate::dt::install::DtInstall::load(std::path::Path::new(&dir)).expect("install loads");
+        let content = Arc::new(crate::rules::content::Content::from_dt(&install));
+        let mut g = Game::from_scenario(content, &s, HeroClass::Knight);
+        g.pos = g.world.map.center((34, 25));
+        assert_eq!(g.point(), Some(Place::Point(40)));
     }
 
     #[test]
